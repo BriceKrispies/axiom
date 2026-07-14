@@ -11,9 +11,9 @@
 /// non-alphabet byte or has an impossible length (`len % 4 == 1`).
 pub(crate) fn decode(input: &[u8]) -> Option<Vec<u8>> {
     let length_ok = input.len() % 4 != 1;
-    let decoded = input
-        .iter()
-        .fold(Accumulator::default(), |state, &byte| state.push(decode_byte(byte)));
+    let decoded = input.iter().fold(Accumulator::default(), |state, &byte| {
+        state.push(decode_byte(byte))
+    });
     (length_ok & !decoded.bad).then_some(decoded.out)
 }
 
@@ -69,7 +69,8 @@ mod tests {
 
     // A branchy, test-only encoder used to mint inputs whose decode we then check.
     fn encode(input: &[u8]) -> Vec<u8> {
-        const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         let mut out = Vec::new();
         let mut acc = 0u32;
         let mut bits = 0u32;
@@ -92,7 +93,11 @@ mod tests {
         for len in 0..40usize {
             let raw: Vec<u8> = (0..len).map(|i| (i * 37 + 11) as u8).collect();
             let encoded = encode(&raw);
-            assert_eq!(decode(&encoded).as_deref(), Some(raw.as_slice()), "len {len}");
+            assert_eq!(
+                decode(&encoded).as_deref(),
+                Some(raw.as_slice()),
+                "len {len}"
+            );
         }
     }
 

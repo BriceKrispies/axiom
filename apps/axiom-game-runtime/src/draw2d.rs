@@ -170,8 +170,11 @@ impl GameBridge {
     /// Spawn a burst from emitter `id` at `at_point` flying along `direction`
     /// (`draw2dEmit`); an unknown id is a no-op.
     pub fn draw2d_emit(&mut self, id: u64, at_point: &[f64], direction: &[f64]) {
-        self.draw2d
-            .emit(EmitterId::from_raw(id as u32), vec2(at_point), vec2(direction));
+        self.draw2d.emit(
+            EmitterId::from_raw(id as u32),
+            vec2(at_point),
+            vec2(direction),
+        );
     }
 
     /// Step the live particles by the presentation delta `dt` seconds and append
@@ -188,7 +191,8 @@ impl GameBridge {
 
     /// Route subsequent draws into `target` (`draw2dBeginTarget`).
     pub fn draw2d_begin_target(&mut self, target: u64) {
-        self.draw2d.begin_target(RenderTargetId::from_raw(target as u32));
+        self.draw2d
+            .begin_target(RenderTargetId::from_raw(target as u32));
     }
 
     /// Stop routing into a render target (`draw2dEndTarget`).
@@ -198,7 +202,9 @@ impl GameBridge {
 
     /// The texture handle naming `target`'s off-screen surface (`draw2dTargetTexture`).
     pub fn draw2d_target_texture(&self, target: u64) -> u64 {
-        self.draw2d.target_texture(RenderTargetId::from_raw(target as u32)).raw()
+        self.draw2d
+            .target_texture(RenderTargetId::from_raw(target as u32))
+            .raw()
     }
 
     /// Set the 2D camera (`draw2dCamera2d`); `center = [x, y]`, `zoom` a positive
@@ -209,17 +215,37 @@ impl GameBridge {
     }
 
     /// Draw a filled / stroked rectangle (`draw2dRect`); `bounds = [x, y, w, h]`.
-    pub fn draw2d_rect(&mut self, bounds: &[f64], fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
+    pub fn draw2d_rect(
+        &mut self,
+        bounds: &[f64],
+        fill: u32,
+        stroke: u32,
+        stroke_width: f64,
+        layer: i32,
+        alpha: f64,
+    ) {
         let rect = Rect::new(
             Vec2::new(at(bounds, 0) as f32, at(bounds, 1) as f32),
             Vec2::new(at(bounds, 2) as f32, at(bounds, 3) as f32),
         );
-        self.draw2d
-            .rect(rect, styled_fill(fill, stroke, stroke_width), common(layer, alpha));
+        self.draw2d.rect(
+            rect,
+            styled_fill(fill, stroke, stroke_width),
+            common(layer, alpha),
+        );
     }
 
     /// Draw a filled / stroked circle (`draw2dCircle`); `center = [x, y]`.
-    pub fn draw2d_circle(&mut self, center: &[f64], radius: f64, fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
+    pub fn draw2d_circle(
+        &mut self,
+        center: &[f64],
+        radius: f64,
+        fill: u32,
+        stroke: u32,
+        stroke_width: f64,
+        layer: i32,
+        alpha: f64,
+    ) {
         self.draw2d.circle(
             vec2(center),
             meters(radius),
@@ -230,7 +256,15 @@ impl GameBridge {
 
     /// Draw a filled / stroked (optionally rotated) ellipse (`draw2dEllipse`);
     /// `geom = [centerX, centerY, rx, ry, rotation]` (rotation in radians).
-    pub fn draw2d_ellipse(&mut self, geom: &[f64], fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
+    pub fn draw2d_ellipse(
+        &mut self,
+        geom: &[f64],
+        fill: u32,
+        stroke: u32,
+        stroke_width: f64,
+        layer: i32,
+        alpha: f64,
+    ) {
         self.draw2d.ellipse(
             Vec2::new(at(geom, 0) as f32, at(geom, 1) as f32),
             meters(at(geom, 2)),
@@ -243,16 +277,38 @@ impl GameBridge {
 
     /// Draw a straight line segment (`draw2dLine`) of its own `color` and `width`;
     /// `a = [x, y]`, `b = [x, y]`.
-    pub fn draw2d_line(&mut self, a: &[f64], b: &[f64], color: u32, width: f64, layer: i32, alpha: f64) {
-        self.draw2d
-            .line(vec2(a), vec2(b), rgba(color), meters(width), common(layer, alpha));
+    pub fn draw2d_line(
+        &mut self,
+        a: &[f64],
+        b: &[f64],
+        color: u32,
+        width: f64,
+        layer: i32,
+        alpha: f64,
+    ) {
+        self.draw2d.line(
+            vec2(a),
+            vec2(b),
+            rgba(color),
+            meters(width),
+            common(layer, alpha),
+        );
     }
 
     /// Draw a filled / stroked polyline / polygon (`draw2dPath`); `points` is the
     /// flat `[x0, y0, x1, y1, …]` vertex slice and `closed` joins the last vertex
     /// back to the first (a polygon). The fill / stroke / layer / alpha columns
     /// mirror [`Self::draw2d_rect`] exactly.
-    pub fn draw2d_path(&mut self, points: &[f64], fill: u32, stroke: u32, stroke_width: f64, closed: bool, layer: i32, alpha: f64) {
+    pub fn draw2d_path(
+        &mut self,
+        points: &[f64],
+        fill: u32,
+        stroke: u32,
+        stroke_width: f64,
+        closed: bool,
+        layer: i32,
+        alpha: f64,
+    ) {
         self.draw2d.path(
             &path_points(points),
             styled_fill(fill, stroke, stroke_width),
@@ -290,12 +346,26 @@ impl GameBridge {
     /// sub-rect as `[x, y, w, h]`. Pure: the native [`Draw2dApi::sample_animation`]
     /// owns the index math, so the boundary never recomputes it (one source of
     /// truth); a trailing partial chunk (length not a multiple of 4) is dropped.
-    pub fn draw2d_sample_animation(&self, frames: &[f64], fps: f64, elapsed: f64, looping: bool) -> Vec<f64> {
+    pub fn draw2d_sample_animation(
+        &self,
+        frames: &[f64],
+        fps: f64,
+        elapsed: f64,
+        looping: bool,
+    ) -> Vec<f64> {
         let rects: Vec<Rect> = frames
             .chunks_exact(4)
-            .map(|f| Rect::new(Vec2::new(f[0] as f32, f[1] as f32), Vec2::new(f[2] as f32, f[3] as f32)))
+            .map(|f| {
+                Rect::new(
+                    Vec2::new(f[0] as f32, f[1] as f32),
+                    Vec2::new(f[2] as f32, f[3] as f32),
+                )
+            })
             .collect();
-        let anim = SpriteAnimation { frames: rects, fps: fps as u32 };
+        let anim = SpriteAnimation {
+            frames: rects,
+            fps: fps as u32,
+        };
         let sampled = Draw2dApi::sample_animation(&anim, seconds(elapsed), looping);
         vec![
             f64::from(sampled.min.x),
@@ -332,8 +402,11 @@ impl GameBridge {
             .multiply(Mat3::rotation(radians(at(opts, 2))))
             .multiply(Mat3::scale(scale));
         let depth = self.draw2d.push_transform(placement);
-        self.draw2d
-            .sprite(TextureId::from_raw(texture), style, common(at(opts, 14) as i32, at(opts, 15)));
+        self.draw2d.sprite(
+            TextureId::from_raw(texture),
+            style,
+            common(at(opts, 14) as i32, at(opts, 15)),
+        );
         self.draw2d.pop_transform(depth);
     }
 
@@ -422,7 +495,9 @@ impl GameBridge {
                     ]
                 }
                 Draw2dCommand::KIND_CIRCLE => {
-                    let (center, radius) = cmd.as_circle().expect("a CIRCLE command carries circle geometry");
+                    let (center, radius) = cmd
+                        .as_circle()
+                        .expect("a CIRCLE command carries circle geometry");
                     vec![
                         f64::from(center.x),
                         f64::from(center.y),
@@ -434,7 +509,9 @@ impl GameBridge {
                     ]
                 }
                 Draw2dCommand::KIND_ELLIPSE => {
-                    let (center, rx, ry, rotation) = cmd.as_ellipse().expect("an ELLIPSE command carries ellipse geometry");
+                    let (center, rx, ry, rotation) = cmd
+                        .as_ellipse()
+                        .expect("an ELLIPSE command carries ellipse geometry");
                     vec![
                         f64::from(center.x),
                         f64::from(center.y),
@@ -448,7 +525,8 @@ impl GameBridge {
                     ]
                 }
                 Draw2dCommand::KIND_LINE => {
-                    let (a, b, color, width) = cmd.as_line().expect("a LINE command carries line geometry");
+                    let (a, b, color, width) =
+                        cmd.as_line().expect("a LINE command carries line geometry");
                     vec![
                         f64::from(a.x),
                         f64::from(a.y),
@@ -460,7 +538,9 @@ impl GameBridge {
                     ]
                 }
                 Draw2dCommand::KIND_PARTICLE_QUAD => {
-                    let (center, size, color) = cmd.as_particle().expect("a PARTICLE_QUAD command carries particle geometry");
+                    let (center, size, color) = cmd
+                        .as_particle()
+                        .expect("a PARTICLE_QUAD command carries particle geometry");
                     vec![
                         f64::from(center.x),
                         f64::from(center.y),
@@ -470,11 +550,18 @@ impl GameBridge {
                     ]
                 }
                 Draw2dCommand::KIND_SPRITE => {
-                    let (texture, opts) = cmd.as_sprite().expect("a SPRITE command carries sprite geometry");
+                    let (texture, opts) = cmd
+                        .as_sprite()
+                        .expect("a SPRITE command carries sprite geometry");
                     let [a, b, c, d, tx, ty] = affine_columns(cmd.transform());
                     vec![
                         texture.raw() as f64,
-                        a, b, c, d, tx, ty,
+                        a,
+                        b,
+                        c,
+                        d,
+                        tx,
+                        ty,
                         f64::from(opts.source.min.x),
                         f64::from(opts.source.min.y),
                         f64::from(opts.source.size.x),
@@ -488,11 +575,18 @@ impl GameBridge {
                     ]
                 }
                 Draw2dCommand::KIND_TEXT_GLYPHS => {
-                    let (run, opts) = cmd.as_text().expect("a TEXT_GLYPHS command carries a glyph run");
+                    let (run, opts) = cmd
+                        .as_text()
+                        .expect("a TEXT_GLYPHS command carries a glyph run");
                     let [a, b, c, d, tx, ty] = affine_columns(cmd.transform());
                     let mut payload = vec![
                         font::FONT_ATLAS_TEXTURE.raw() as f64,
-                        a, b, c, d, tx, ty,
+                        a,
+                        b,
+                        c,
+                        d,
+                        tx,
+                        ty,
                         pack_rgba(opts.color),
                         f64::from(opts.align.raw()),
                         f64::from(run.line_height.get()),
@@ -511,7 +605,8 @@ impl GameBridge {
                     payload
                 }
                 Draw2dCommand::KIND_PATH => {
-                    let (points, closed) = cmd.as_path().expect("a PATH command carries path geometry");
+                    let (points, closed) =
+                        cmd.as_path().expect("a PATH command carries path geometry");
                     let mut payload = vec![
                         style[0],
                         style[1],
@@ -595,8 +690,17 @@ mod wasm_exports {
 
         /// Draw a filled / stroked rectangle (`draw2dRect`).
         #[wasm_bindgen(js_name = draw2dRect)]
-        pub fn draw2d_rect(&mut self, bounds: &[f64], fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
-            self.bridge.draw2d_rect(bounds, fill, stroke, stroke_width, layer, alpha);
+        pub fn draw2d_rect(
+            &mut self,
+            bounds: &[f64],
+            fill: u32,
+            stroke: u32,
+            stroke_width: f64,
+            layer: i32,
+            alpha: f64,
+        ) {
+            self.bridge
+                .draw2d_rect(bounds, fill, stroke, stroke_width, layer, alpha);
         }
 
         /// Draw a filled / stroked circle (`draw2dCircle`).
@@ -611,25 +715,53 @@ mod wasm_exports {
             layer: i32,
             alpha: f64,
         ) {
-            self.bridge.draw2d_circle(center, radius, fill, stroke, stroke_width, layer, alpha);
+            self.bridge
+                .draw2d_circle(center, radius, fill, stroke, stroke_width, layer, alpha);
         }
 
         /// Draw a filled / stroked ellipse (`draw2dEllipse`).
         #[wasm_bindgen(js_name = draw2dEllipse)]
-        pub fn draw2d_ellipse(&mut self, geom: &[f64], fill: u32, stroke: u32, stroke_width: f64, layer: i32, alpha: f64) {
-            self.bridge.draw2d_ellipse(geom, fill, stroke, stroke_width, layer, alpha);
+        pub fn draw2d_ellipse(
+            &mut self,
+            geom: &[f64],
+            fill: u32,
+            stroke: u32,
+            stroke_width: f64,
+            layer: i32,
+            alpha: f64,
+        ) {
+            self.bridge
+                .draw2d_ellipse(geom, fill, stroke, stroke_width, layer, alpha);
         }
 
         /// Draw a straight line segment (`draw2dLine`).
         #[wasm_bindgen(js_name = draw2dLine)]
-        pub fn draw2d_line(&mut self, a: &[f64], b: &[f64], color: u32, width: f64, layer: i32, alpha: f64) {
+        pub fn draw2d_line(
+            &mut self,
+            a: &[f64],
+            b: &[f64],
+            color: u32,
+            width: f64,
+            layer: i32,
+            alpha: f64,
+        ) {
             self.bridge.draw2d_line(a, b, color, width, layer, alpha);
         }
 
         /// Draw a filled / stroked polyline / polygon (`draw2dPath`).
         #[wasm_bindgen(js_name = draw2dPath)]
-        pub fn draw2d_path(&mut self, points: &[f64], fill: u32, stroke: u32, stroke_width: f64, closed: bool, layer: i32, alpha: f64) {
-            self.bridge.draw2d_path(points, fill, stroke, stroke_width, closed, layer, alpha);
+        pub fn draw2d_path(
+            &mut self,
+            points: &[f64],
+            fill: u32,
+            stroke: u32,
+            stroke_width: f64,
+            closed: bool,
+            layer: i32,
+            alpha: f64,
+        ) {
+            self.bridge
+                .draw2d_path(points, fill, stroke, stroke_width, closed, layer, alpha);
         }
 
         /// Register a linear gradient paint (`draw2dLinearGradient`).
@@ -640,14 +772,26 @@ mod wasm_exports {
 
         /// Register a radial gradient paint (`draw2dRadialGradient`).
         #[wasm_bindgen(js_name = draw2dRadialGradient)]
-        pub fn draw2d_radial_gradient(&mut self, center: &[f64], radius: f64, stops: &[f64]) -> f64 {
+        pub fn draw2d_radial_gradient(
+            &mut self,
+            center: &[f64],
+            radius: f64,
+            stops: &[f64],
+        ) -> f64 {
             self.bridge.draw2d_radial_gradient(center, radius, stops) as f64
         }
 
         /// Sample a flip-book animation (`draw2dSampleAnimation`, §10.2).
         #[wasm_bindgen(js_name = draw2dSampleAnimation)]
-        pub fn draw2d_sample_animation(&self, frames: &[f64], fps: f64, elapsed: f64, looping: bool) -> Vec<f64> {
-            self.bridge.draw2d_sample_animation(frames, fps, elapsed, looping)
+        pub fn draw2d_sample_animation(
+            &self,
+            frames: &[f64],
+            fps: f64,
+            elapsed: f64,
+            looping: bool,
+        ) -> Vec<f64> {
+            self.bridge
+                .draw2d_sample_animation(frames, fps, elapsed, looping)
         }
 
         /// Draw a textured sprite (`draw2dSprite`).
@@ -693,19 +837,19 @@ mod tests {
     /// (SPEC-04 §10.1); here each is a degenerate fixed `[v, v]` range.
     fn emitter() -> [f64; 13] {
         [
-            3.0,                  // count
-            2.0,                  // lifetimeMin
-            2.0,                  // lifetimeMax
-            10.0,                 // speedMin
-            10.0,                 // speedMax
-            0.25,                 // spread
-            0.0,                  // gravityX
-            -4.0,                 // gravityY
-            0.5,                  // sizeMin
-            0.5,                  // sizeMax
-            f64::from(u32::MAX),  // colorStart 0xffffffff
-            0.0,                  // colorEnd   0x00000000
-            5.0,                  // layer
+            3.0,                 // count
+            2.0,                 // lifetimeMin
+            2.0,                 // lifetimeMax
+            10.0,                // speedMin
+            10.0,                // speedMax
+            0.25,                // spread
+            0.0,                 // gravityX
+            -4.0,                // gravityY
+            0.5,                 // sizeMin
+            0.5,                 // sizeMax
+            f64::from(u32::MAX), // colorStart 0xffffffff
+            0.0,                 // colorEnd   0x00000000
+            5.0,                 // layer
         ]
     }
 
@@ -714,11 +858,15 @@ mod tests {
     fn ranged_emitter() -> [f64; 13] {
         [
             4.0, // count
-            2.0, 2.0, // lifetime [min, max]
-            10.0, 10.0, // speed [min, max]
-            0.0, // spread (clean jet, so size is the only varying field)
-            0.0, 0.0, // gravity
-            0.2, 0.8, // size [min, max]
+            2.0,
+            2.0, // lifetime [min, max]
+            10.0,
+            10.0, // speed [min, max]
+            0.0,  // spread (clean jet, so size is the only varying field)
+            0.0,
+            0.0, // gravity
+            0.2,
+            0.8, // size [min, max]
             f64::from(u32::MAX),
             f64::from(u32::MAX),
             5.0,
@@ -732,7 +880,14 @@ mod tests {
         b.draw2d_camera2d(&[0.0, 0.0], 1.0);
         let target = b.draw2d_create_render_target(64, 32);
         b.draw2d_begin_target(target);
-        b.draw2d_rect(&[0.0, 0.0, 10.0, 10.0], 0xff00_00ff, 0x0000_00ff, 1.0, 0, 1.0);
+        b.draw2d_rect(
+            &[0.0, 0.0, 10.0, 10.0],
+            0xff00_00ff,
+            0x0000_00ff,
+            1.0,
+            0,
+            1.0,
+        );
         b.draw2d_end_target();
         b.draw2d_circle(&[1.0, 1.0], 2.0, 0x00ff_00ff, 0, 0.0, 1, 1.0);
         let e = b.draw2d_create_emitter(&emitter());
@@ -787,8 +942,14 @@ mod tests {
         // Each record is a particle quad `[cx, cy, size, colorRGBA, alpha]`.
         let sizes: Vec<f64> = recs.iter().map(|(_, _, p)| p[2]).collect();
         assert_eq!(sizes.len(), 4);
-        assert!(sizes.iter().all(|&s| (0.2..0.8).contains(&s)), "in range: {sizes:?}");
-        assert!(sizes.iter().any(|&s| s != sizes[0]), "sizes vary: {sizes:?}");
+        assert!(
+            sizes.iter().all(|&s| (0.2..0.8).contains(&s)),
+            "in range: {sizes:?}"
+        );
+        assert!(
+            sizes.iter().any(|&s| s != sizes[0]),
+            "sizes vary: {sizes:?}"
+        );
         // §6 determinism-as-function: the same emit reproduces the byte-identical
         // flattened particle stream.
         assert_eq!(burst(), recs);
@@ -799,7 +960,14 @@ mod tests {
         let mut b = bridge();
         // An ellipse on layer 0 and a line on layer 2, submitted line-first.
         b.draw2d_line(&[0.0, 0.0], &[10.0, 0.0], 0xffff_00ff, 2.0, 2, 1.0);
-        b.draw2d_ellipse(&[5.0, 5.0, 4.0, 2.0, 0.5], 0x00ff_00ff, 0xff00_00ff, 1.0, 0, 1.0);
+        b.draw2d_ellipse(
+            &[5.0, 5.0, 4.0, 2.0, 0.5],
+            0x00ff_00ff,
+            0xff00_00ff,
+            1.0,
+            0,
+            1.0,
+        );
         let recs = records(&b.draw2d_finish());
         // Layer-sorted so the layer-0 ellipse (KIND 3, 9 geometry columns)
         // precedes the layer-2 line (KIND 4, 7 geometry columns).
@@ -813,19 +981,44 @@ mod tests {
     fn shape_geometry_and_colors_flatten_into_the_payload() {
         let mut b = bridge();
         // A red-filled, blue-stroked rect; a green circle; a yellow line.
-        b.draw2d_rect(&[1.0, 2.0, 30.0, 40.0], 0xff00_00ff, 0x0000_ffff, 3.0, 0, 1.0);
+        b.draw2d_rect(
+            &[1.0, 2.0, 30.0, 40.0],
+            0xff00_00ff,
+            0x0000_ffff,
+            3.0,
+            0,
+            1.0,
+        );
         b.draw2d_circle(&[5.0, 6.0], 7.0, 0x00ff_00ff, 0, 0.0, 0, 0.5);
         b.draw2d_line(&[0.0, 0.0], &[8.0, 9.0], 0xffff_00ff, 2.0, 0, 1.0);
         let recs = records(&b.draw2d_finish());
         // RECT: [minX, minY, w, h, fillRGBA, strokeRGBA, strokeWidth, alpha].
         assert_eq!(recs[0].0, Draw2dCommand::KIND_RECT);
-        assert_eq!(recs[0].2, vec![1.0, 2.0, 30.0, 40.0, f64::from(0xff00_00ffu32), f64::from(0x0000_ffffu32), 3.0, 1.0]);
+        assert_eq!(
+            recs[0].2,
+            vec![
+                1.0,
+                2.0,
+                30.0,
+                40.0,
+                f64::from(0xff00_00ffu32),
+                f64::from(0x0000_ffffu32),
+                3.0,
+                1.0
+            ]
+        );
         // CIRCLE: [cx, cy, r, fillRGBA, strokeRGBA, strokeWidth, alpha]; alpha 0.5.
         assert_eq!(recs[1].0, Draw2dCommand::KIND_CIRCLE);
-        assert_eq!(recs[1].2, vec![5.0, 6.0, 7.0, f64::from(0x00ff_00ffu32), 0.0, 0.0, 0.5]);
+        assert_eq!(
+            recs[1].2,
+            vec![5.0, 6.0, 7.0, f64::from(0x00ff_00ffu32), 0.0, 0.0, 0.5]
+        );
         // LINE: [aX, aY, bX, bY, colorRGBA, width, alpha]; a line carries no fill.
         assert_eq!(recs[2].0, Draw2dCommand::KIND_LINE);
-        assert_eq!(recs[2].2, vec![0.0, 0.0, 8.0, 9.0, f64::from(0xffff_00ffu32), 2.0, 1.0]);
+        assert_eq!(
+            recs[2].2,
+            vec![0.0, 0.0, 8.0, 9.0, f64::from(0xffff_00ffu32), 2.0, 1.0]
+        );
     }
 
     #[test]
@@ -835,7 +1028,24 @@ mod tests {
         // white tint, no flips, layer 0, opaque.
         b.draw2d_sprite(
             0x1000_0000,
-            &[10.0, 20.0, 0.0, 2.0, 3.0, 0.5, 0.5, 0.0, 0.0, 16.0, 16.0, f64::from(u32::MAX), 0.0, 0.0, 0.0, 1.0],
+            &[
+                10.0,
+                20.0,
+                0.0,
+                2.0,
+                3.0,
+                0.5,
+                0.5,
+                0.0,
+                0.0,
+                16.0,
+                16.0,
+                f64::from(u32::MAX),
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+            ],
         );
         let recs = records(&b.draw2d_finish());
         assert_eq!(recs.len(), 1);
@@ -857,14 +1067,20 @@ mod tests {
     fn text_flattens_a_glyph_run_against_the_baked_atlas() {
         let mut b = bridge();
         // "Hi" at (5, 6), size 16, red, left-aligned, layer 1, opaque.
-        b.draw2d_text("Hi", &[5.0, 6.0, 16.0, f64::from(0xff00_00ffu32), 0.0, 1.0, 1.0]);
+        b.draw2d_text(
+            "Hi",
+            &[5.0, 6.0, 16.0, f64::from(0xff00_00ffu32), 0.0, 1.0, 1.0],
+        );
         let recs = records(&b.draw2d_finish());
         let (kind, layer, p) = &recs[0];
         assert_eq!(*kind, Draw2dCommand::KIND_TEXT_GLYPHS);
         assert_eq!(*layer, 1);
         // Header: atlas texId, translation affine (5,6), red, align 0, line height
         // 16, opaque, then a glyph count of 2.
-        assert_eq!(p[0], f64::from(crate::font::FONT_ATLAS_TEXTURE.raw() as u32));
+        assert_eq!(
+            p[0],
+            f64::from(crate::font::FONT_ATLAS_TEXTURE.raw() as u32)
+        );
         assert_eq!(&p[1..7], &[1.0, 0.0, 0.0, 1.0, 5.0, 6.0]);
         assert_eq!(p[7], f64::from(0xff00_00ffu32));
         assert_eq!(&p[8..12], &[0.0, 16.0, 1.0, 2.0]); // align, lineHeight, alpha, glyphCount
@@ -879,12 +1095,24 @@ mod tests {
         let mut b = bridge();
         // Two gradients register into the per-frame paint table, minting distinct,
         // zero-based paint ids (the handle a shape fills with).
-        let lin = b.draw2d_linear_gradient(&[0.0, 0.0], &[10.0, 0.0], &[0.0, f64::from(u32::MAX), 1.0, 0.0]);
+        let lin = b.draw2d_linear_gradient(
+            &[0.0, 0.0],
+            &[10.0, 0.0],
+            &[0.0, f64::from(u32::MAX), 1.0, 0.0],
+        );
         let rad = b.draw2d_radial_gradient(&[5.0, 5.0], 4.0, &[0.0, f64::from(u32::MAX)]);
         assert_eq!(lin, 0);
         assert_eq!(rad, 1);
         // A closed, red-filled, blue-stroked triangle path on layer 2.
-        b.draw2d_path(&[0.0, 0.0, 4.0, 0.0, 2.0, 3.0], 0xff00_00ff, 0x0000_ffff, 1.5, true, 2, 1.0);
+        b.draw2d_path(
+            &[0.0, 0.0, 4.0, 0.0, 2.0, 3.0],
+            0xff00_00ff,
+            0x0000_ffff,
+            1.5,
+            true,
+            2,
+            1.0,
+        );
         let recs = records(&b.draw2d_finish());
         // A gradient is not a draw command (it only registers a paint), so the main
         // list holds exactly the one path command.
@@ -926,7 +1154,24 @@ mod tests {
             let mut b = bridge();
             b.draw2d_sprite(
                 0x1000_0000,
-                &[1.0, 2.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, f64::from(u32::MAX), 0.0, 0.0, 0.0, 1.0],
+                &[
+                    1.0,
+                    2.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    f64::from(u32::MAX),
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ],
             );
             b.draw2d_text("HUD", &[0.0, 0.0, 12.0, f64::from(u32::MAX), 1.0, 5.0, 1.0]);
             b.draw2d_finish()
@@ -948,17 +1193,25 @@ mod tests {
     fn sample_animation_marshals_frames_and_selects_by_loop() {
         let b = bridge();
         // Three distinct sub-rects, flattened [x, y, w, h, …], at 2 fps.
-        let frames = [
-            0.0, 0.0, 1.0, 1.0,
-            10.0, 0.0, 1.0, 1.0,
-            20.0, 0.0, 1.0, 1.0,
-        ];
+        let frames = [0.0, 0.0, 1.0, 1.0, 10.0, 0.0, 1.0, 1.0, 20.0, 0.0, 1.0, 1.0];
         // elapsed 1.0s ⇒ index floor(2.0) = 2 ⇒ the third frame.
-        assert_eq!(b.draw2d_sample_animation(&frames, 2.0, 1.0, true), vec![20.0, 0.0, 1.0, 1.0]);
+        assert_eq!(
+            b.draw2d_sample_animation(&frames, 2.0, 1.0, true),
+            vec![20.0, 0.0, 1.0, 1.0]
+        );
         // elapsed 2.0s ⇒ index 4: non-looping clamps to the last, looping wraps to 1.
-        assert_eq!(b.draw2d_sample_animation(&frames, 2.0, 2.0, false), vec![20.0, 0.0, 1.0, 1.0]);
-        assert_eq!(b.draw2d_sample_animation(&frames, 2.0, 2.0, true), vec![10.0, 0.0, 1.0, 1.0]);
+        assert_eq!(
+            b.draw2d_sample_animation(&frames, 2.0, 2.0, false),
+            vec![20.0, 0.0, 1.0, 1.0]
+        );
+        assert_eq!(
+            b.draw2d_sample_animation(&frames, 2.0, 2.0, true),
+            vec![10.0, 0.0, 1.0, 1.0]
+        );
         // An empty book marshals to the inert zero-rect.
-        assert_eq!(b.draw2d_sample_animation(&[], 2.0, 1.0, true), vec![0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(
+            b.draw2d_sample_animation(&[], 2.0, 1.0, true),
+            vec![0.0, 0.0, 0.0, 0.0]
+        );
     }
 }

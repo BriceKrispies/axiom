@@ -136,8 +136,7 @@ pub struct Sprite {
 }
 
 impl Reflect for Sprite {
-    const SCHEMA: TypeSchema =
-        TypeSchema::new("Sprite", &[FieldSchema::new("texture", "String")]);
+    const SCHEMA: TypeSchema = TypeSchema::new("Sprite", &[FieldSchema::new("texture", "String")]);
 
     fn reflect_write(&self, writer: &mut BinaryWriter) {
         write_string(writer, &self.texture);

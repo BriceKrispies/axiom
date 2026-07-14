@@ -32,7 +32,8 @@
 //! is a wasm-arm choice).
 
 use axiom_audio::{
-    AudioApi, AudioInput, AudioSeconds, Hertz, MusicOpts, PlayOpts, SoundId, ToneSpec, VoiceId, Wave,
+    AudioApi, AudioInput, AudioSeconds, Hertz, MusicOpts, PlayOpts, SoundId, ToneSpec, VoiceId,
+    Wave,
 };
 use axiom_kernel::Ratio;
 
@@ -83,7 +84,11 @@ impl AudioState {
         self.api
             .play_sound(
                 SoundId::from_raw(sound),
-                PlayOpts { volume: ratio(volume), pitch: ratio(pitch), looping },
+                PlayOpts {
+                    volume: ratio(volume),
+                    pitch: ratio(pitch),
+                    looping,
+                },
             )
             .raw()
     }
@@ -114,7 +119,10 @@ impl AudioState {
         self.api
             .play_music(
                 &refs,
-                MusicOpts { looping, crossfade: AudioSeconds::from_seconds(crossfade as f32) },
+                MusicOpts {
+                    looping,
+                    crossfade: AudioSeconds::from_seconds(crossfade as f32),
+                },
             )
             .raw()
     }
@@ -174,9 +182,9 @@ impl AudioState {
     /// audio output, so this is a no-op there.
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn realize(&mut self) {
-        let ctx = self
-            .ctx
-            .get_or_insert_with(|| web_sys::AudioContext::new().expect("AudioContext is available"));
+        let ctx = self.ctx.get_or_insert_with(|| {
+            web_sys::AudioContext::new().expect("AudioContext is available")
+        });
         let _ = self.api.realize_into(ctx);
     }
 
@@ -349,7 +357,10 @@ mod tests {
         assert_ne!(voice, other);
         // The remaining play verbs also mint real voices and never panic.
         assert_ne!(b.play_tone(0, 440.0, 0.5, 0.9), 0);
-        assert_ne!(b.play_music(&[String::from("a.ogg"), String::from("b.ogg")], true, 1.5), 0);
+        assert_ne!(
+            b.play_music(&[String::from("a.ogg"), String::from("b.ogg")], true, 1.5),
+            0
+        );
         assert_ne!(b.schedule_sound(sound, 2.0, 0.7), 0);
         // The control verbs are clean no-ops over the boundary.
         b.stop_voice(voice);

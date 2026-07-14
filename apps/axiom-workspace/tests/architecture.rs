@@ -110,7 +110,10 @@ fn assert_absent_in_rs(forbidden: &[&str], why: &str) {
 #[test]
 fn app_toml_lists_only_consumed_layers_and_no_modules() {
     let text = fs::read_to_string(app_root().join("app.toml")).expect("app.toml exists");
-    assert!(text.contains("\"kernel\""), "app.toml lists the kernel layer");
+    assert!(
+        text.contains("\"kernel\""),
+        "app.toml lists the kernel layer"
+    );
     assert!(
         text.contains("\"runtime\""),
         "app.toml lists the runtime layer"
@@ -207,7 +210,12 @@ fn no_junk_drawer_folders_or_modules() {
     for path in all {
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         for banned in ["utils", "helpers", "common", "misc"] {
-            assert_ne!(stem, banned, "no `{banned}` junk-drawer at {}", path.display());
+            assert_ne!(
+                stem,
+                banned,
+                "no `{banned}` junk-drawer at {}",
+                path.display()
+            );
         }
     }
 }
@@ -309,7 +317,8 @@ fn no_junk_drawer_directories() {
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         for banned in ["utils", "helpers", "common", "misc"] {
             assert_ne!(
-                name, banned,
+                name,
+                banned,
                 "no `{banned}` junk-drawer directory at {}",
                 path.display()
             );
@@ -361,7 +370,11 @@ fn browser_shell_has_a_file_for_every_panel() {
         "package_export",
     ] {
         let file = panels_dir.join(format!("{name}_panel.ts"));
-        assert!(file.is_file(), "missing panel shell file {}", file.display());
+        assert!(
+            file.is_file(),
+            "missing panel shell file {}",
+            file.display()
+        );
     }
     for rel in [
         "index.html",
@@ -374,7 +387,11 @@ fn browser_shell_has_a_file_for_every_panel() {
         "styles/workspace.css",
     ] {
         let file = app_web().join(rel);
-        assert!(file.is_file(), "missing shell scaffold file {}", file.display());
+        assert!(
+            file.is_file(),
+            "missing shell scaffold file {}",
+            file.display()
+        );
     }
 }
 

@@ -14,7 +14,7 @@
 //! *pixels* are baked browser-side, and pixels are presentation-only — they never
 //! re-enter sim.
 
-use axiom_host::{FontHandle, GlyphRun, Glyph2d, Rect, TextureId};
+use axiom_host::{FontHandle, Glyph2d, GlyphRun, Rect, TextureId};
 use axiom_kernel::Meters;
 use axiom_math::Vec2;
 
@@ -110,7 +110,10 @@ mod tests {
     #[test]
     fn cell_source_walks_the_grid_left_to_right_then_down() {
         // Cell 0 is the top-left; cell 16 wraps to the second row.
-        assert_eq!(cell_source(0), Rect::new(Vec2::ZERO, Vec2::new(CELL_W, CELL_H)));
+        assert_eq!(
+            cell_source(0),
+            Rect::new(Vec2::ZERO, Vec2::new(CELL_W, CELL_H))
+        );
         assert_eq!(
             cell_source(ATLAS_COLS),
             Rect::new(Vec2::new(0.0, CELL_H), Vec2::new(CELL_W, CELL_H)),

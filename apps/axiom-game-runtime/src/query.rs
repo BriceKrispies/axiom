@@ -105,7 +105,12 @@ mod wasm_exports {
 
         /// The nearest bounded ray hit (`raycast`): `[]` or `[entity, x, y, z]`.
         #[wasm_bindgen(js_name = raycast)]
-        pub fn raycast(&mut self, origin: &[f64], direction: &[f64], max_distance: f64) -> Vec<f64> {
+        pub fn raycast(
+            &mut self,
+            origin: &[f64],
+            direction: &[f64],
+            max_distance: f64,
+        ) -> Vec<f64> {
             self.bridge.raycast(origin, direction, max_distance)
         }
     }
@@ -153,7 +158,10 @@ mod tests {
         assert_eq!(ray[0], hits[0]);
         // The entry point sits on the node's near (-Z) face, ~2.5 out.
         assert!((ray[3] + 2.5).abs() < 1.0e-4);
-        assert_eq!(hits, bridge().overlap_box(&[0.0, 0.0, -3.0], &[0.2, 0.2, 0.2]));
+        assert_eq!(
+            hits,
+            bridge().overlap_box(&[0.0, 0.0, -3.0], &[0.2, 0.2, 0.2])
+        );
     }
 
     #[test]
@@ -161,7 +169,9 @@ mod tests {
         let mut b = bridge();
         assert!(b.overlap_box(&[0.0, 0.0, 0.0], &[0.2, 0.2, 0.2]).is_empty());
         assert!(b.overlap_circle(&[0.0, 0.0, 0.0], 0.5).is_empty());
-        assert!(b.raycast(&[0.0, 0.0, 0.0], &[0.0, 1.0, 0.0], 100.0).is_empty());
+        assert!(b
+            .raycast(&[0.0, 0.0, 0.0], &[0.0, 1.0, 0.0], 100.0)
+            .is_empty());
         // A non-finite reach degrades to a zero-reach query (an inert miss).
         assert!(b
             .raycast(&[0.0, 0.0, 0.0], &[0.0, 0.0, -1.0], f64::INFINITY)

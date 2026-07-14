@@ -226,7 +226,9 @@ impl<S: ColumnSet> World<S> {
                     })
             })
             .and_then(|()| reader.read_bool())
-            .and_then(|started| EntityRegistry::deserialize(reader).map(|entities| (started, entities)))
+            .and_then(|started| {
+                EntityRegistry::deserialize(reader).map(|entities| (started, entities))
+            })
             .and_then(|(started, entities)| {
                 self.entities = entities;
                 reader.read_u32().map(|count| (started, count as usize))
@@ -701,7 +703,11 @@ mod tests {
         restored
             .read_snapshot(&mut BinaryReader::new(&bytes))
             .unwrap();
-        assert_eq!(restored.storage().doubled.get(e), Some(&73), "restored state");
+        assert_eq!(
+            restored.storage().doubled.get(e),
+            Some(&73),
+            "restored state"
+        );
 
         // Post-startup restore runs update only (73 -> 733); a re-run of startup
         // would instead give 73*10 + 7 = 737.

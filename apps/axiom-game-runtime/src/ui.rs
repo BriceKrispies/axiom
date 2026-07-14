@@ -251,7 +251,14 @@ impl UiState {
 
     /// Draw an immediate-mode button, returning whether it was activated this
     /// frame (the engine's pure `(bounds, pointer)` truth table).
-    fn button(&mut self, bounds: &[f64], label: &str, fill: u32, stroke: u32, stroke_w: f64) -> bool {
+    fn button(
+        &mut self,
+        bounds: &[f64],
+        label: &str,
+        fill: u32,
+        stroke: u32,
+        stroke_w: f64,
+    ) -> bool {
         let style = UiFill {
             fill: UiColor::new(fill),
             stroke: UiColor::new(stroke),
@@ -309,7 +316,14 @@ impl GameBridge {
     }
 
     /// Draw an immediate-mode button (`uiButton`); returns activation this frame.
-    pub fn ui_button(&mut self, bounds: &[f64], label: &str, fill: u32, stroke: u32, sw: f64) -> bool {
+    pub fn ui_button(
+        &mut self,
+        bounds: &[f64],
+        label: &str,
+        fill: u32,
+        stroke: u32,
+        sw: f64,
+    ) -> bool {
         self.ui.button(bounds, label, fill, stroke, sw)
     }
 
@@ -452,12 +466,32 @@ mod tests {
         b.ui_begin_frame(&[320.0, 240.0], &[110.0, 60.0], pointer_pressed);
         b.ui_rect(&[0.0, 0.0, 320.0, 240.0], 0x1020_30ff, 0x0000_00ff, 1.0);
         // SPEC-04 `TextOpts`: pos (8,8), size 12, white, left-aligned, layer 0, opaque.
-        b.ui_text("hp", &[8.0, 8.0, 12.0, f64::from(0xffff_ffffu32), 0.0, 0.0, 1.0]);
+        b.ui_text(
+            "hp",
+            &[8.0, 8.0, 12.0, f64::from(0xffff_ffffu32), 0.0, 0.0, 1.0],
+        );
         // SPEC-04 `SpriteOpts`: pos (10,10), no rotation, unit scale, top-left anchor,
         // 16×16 source, white tint, no flips, layer 0, opaque.
         b.ui_sprite(
             7,
-            &[10.0, 10.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 16.0, 16.0, f64::from(u32::MAX), 0.0, 0.0, 0.0, 1.0],
+            &[
+                10.0,
+                10.0,
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                16.0,
+                16.0,
+                f64::from(u32::MAX),
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+            ],
         );
         // The button sits under the pointer (110,60), so it activates on a press edge.
         let activated = b.ui_button(&[100.0, 50.0, 40.0, 20.0], "ok", 0x00ff_00ff, 0x0, 2.0);
@@ -488,7 +522,18 @@ mod tests {
         let text_log = |align: f64, layer: f64, alpha: f64| {
             let mut b = bridge();
             b.ui_begin_frame(&[320.0, 240.0], &[0.0, 0.0], false);
-            b.ui_text("hp", &[8.0, 8.0, 12.0, f64::from(0xffff_ffffu32), align, layer, alpha]);
+            b.ui_text(
+                "hp",
+                &[
+                    8.0,
+                    8.0,
+                    12.0,
+                    f64::from(0xffff_ffffu32),
+                    align,
+                    layer,
+                    alpha,
+                ],
+            );
             b.ui_draw_list()
         };
         let text_baseline = text_log(0.0, 0.0, 1.0);
@@ -503,7 +548,24 @@ mod tests {
             b.ui_draw_list()
         };
         // [posX, posY, rotation, scaleX, scaleY, anchorX, anchorY, srcX, srcY, srcW, srcH, tint, flipX, flipY, layer, alpha]
-        let base = [10.0, 10.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 16.0, 16.0, f64::from(u32::MAX), 0.0, 0.0, 0.0, 1.0];
+        let base = [
+            10.0,
+            10.0,
+            0.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            16.0,
+            16.0,
+            f64::from(u32::MAX),
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ];
         let sprite_baseline = sprite_log(&base);
         let varied = |idx: usize, value: f64| {
             let mut o = base;
@@ -513,7 +575,11 @@ mod tests {
         assert_ne!(varied(2, 1.5), sprite_baseline, "rotation carried");
         assert_ne!(varied(5, 0.5), sprite_baseline, "anchorX carried");
         assert_ne!(varied(7, 4.0), sprite_baseline, "source carried");
-        assert_ne!(varied(11, f64::from(0x00ff_00ffu32)), sprite_baseline, "tint carried");
+        assert_ne!(
+            varied(11, f64::from(0x00ff_00ffu32)),
+            sprite_baseline,
+            "tint carried"
+        );
         assert_ne!(varied(12, 1.0), sprite_baseline, "flipX carried");
         assert_ne!(varied(14, 2.0), sprite_baseline, "layer carried");
     }

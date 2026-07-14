@@ -49,8 +49,18 @@ impl FramePostProcess {
     /// Assemble grade parameters. Crate-internal: the public constructor is
     /// [`FramePostProcess::cinematic`] (a preset), so no naked tuning scalar crosses the
     /// module facade.
-    pub(crate) const fn new(exposure: f32, white_balance: [f32; 3], contrast: f32, saturation: f32) -> Self {
-        FramePostProcess { exposure, white_balance, contrast, saturation }
+    pub(crate) const fn new(
+        exposure: f32,
+        white_balance: [f32; 3],
+        contrast: f32,
+        saturation: f32,
+    ) -> Self {
+        FramePostProcess {
+            exposure,
+            white_balance,
+            contrast,
+            saturation,
+        }
     }
 
     /// The public constructor: a tuned filmic preset that counters a washed-out,
@@ -99,7 +109,12 @@ fn grade_pixel(px: &mut [u8], pp: &FramePostProcess) {
 /// **Every backend calls this on its output**, so the graded look renders identically on
 /// Canvas 2D, WebGPU, and WebGL — the effect is neutral frame data, not a
 /// backend-specific feature.
-pub fn apply_frame_postprocess(rgba: &mut [u8], width: u32, height: u32, packet: &FramePacket) -> u64 {
+pub fn apply_frame_postprocess(
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    packet: &FramePacket,
+) -> u64 {
     packet
         .postprocess()
         .map(|pp| {
@@ -152,7 +167,9 @@ mod tests {
 
     #[test]
     fn no_postprocess_is_a_no_op() {
-        let mut rgba = vec![10u8, 20, 30, 255, 40, 50, 60, 128, 70, 80, 90, 200, 100, 110, 120, 64];
+        let mut rgba = vec![
+            10u8, 20, 30, 255, 40, 50, 60, 128, 70, 80, 90, 200, 100, 110, 120, 64,
+        ];
         let before = rgba.clone();
         assert_eq!(apply_frame_postprocess(&mut rgba, 2, 2, &packet(None)), 0);
         assert_eq!(rgba, before);
@@ -214,7 +231,9 @@ mod tests {
         // A warm pixel gets more saturated (R up, B toward 0); a neutral-grey pixel is
         // unchanged because every channel already equals the luma.
         let warm = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 1.0, 2.0);
-        let mut rgba = vec![200u8, 100, 50, 255, 128, 128, 128, 255, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut rgba = vec![
+            200u8, 100, 50, 255, 128, 128, 128, 255, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
         apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(warm)));
         assert_eq!(rgba[0], 255); // pushed above 1.0 → clamp
         assert_eq!(rgba[1], 82); // toward-luma distance doubled

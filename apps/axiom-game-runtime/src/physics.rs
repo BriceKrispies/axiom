@@ -86,9 +86,7 @@ impl PhysicsState {
         let angular = Ratio::new((angular_damping as f32).clamp(0.0, 1.0)).ok();
         linear
             .zip(angular)
-            .and_then(|(l, a)| {
-                PhysicsApi::with_config(gravity, 8, 4096, 4096, 1, true, l, a).ok()
-            })
+            .and_then(|(l, a)| PhysicsApi::with_config(gravity, 8, 4096, 4096, 1, true, l, a).ok())
             .into_iter()
             .for_each(|api| {
                 self.api = api;
@@ -353,7 +351,8 @@ mod wasm_exports {
         /// Set `body`'s angular velocity (`physicsSetAngularVelocity`).
         #[wasm_bindgen(js_name = physicsSetAngularVelocity)]
         pub fn physics_set_angular_velocity(&mut self, body: f64, x: f64, y: f64, z: f64) {
-            self.bridge.physics_set_angular_velocity(body as u64, x, y, z);
+            self.bridge
+                .physics_set_angular_velocity(body as u64, x, y, z);
         }
     }
 }

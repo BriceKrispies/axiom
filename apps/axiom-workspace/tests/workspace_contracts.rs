@@ -8,9 +8,7 @@
 //! `TESTING.md`).
 
 use axiom_kernel::{EntityId, SchemaVersion, Tick};
-use axiom_workspace::{
-    PlaySessionStatus, RecordedSnapshot, WorkspaceApi, WorkspaceError,
-};
+use axiom_workspace::{PlaySessionStatus, RecordedSnapshot, WorkspaceApi, WorkspaceError};
 
 fn api() -> WorkspaceApi {
     WorkspaceApi::new()
@@ -48,7 +46,9 @@ fn workspace_manifest_validates_required_fields() {
 fn game_project_rejects_empty_ids_names_and_entrypoints() {
     assert_eq!(
         api().load_project("", "Demo", "1.0.0", "main"),
-        Err(WorkspaceError::MissingField { field: "project.id" })
+        Err(WorkspaceError::MissingField {
+            field: "project.id"
+        })
     );
     assert_eq!(
         api().load_project("proj.demo", "  ", "1.0.0", "main"),
@@ -101,7 +101,12 @@ fn drop_in_is_additive_and_preserves_unrelated_launch_fields() {
     let base_identity = base.identity();
     assert!(base.drop_in().is_none());
 
-    let drop = api().drop_in("level.01", [1.0, 2.0, 3.0], 0.5, Some(EntityId::from_raw(7)));
+    let drop = api().drop_in(
+        "level.01",
+        [1.0, 2.0, 3.0],
+        0.5,
+        Some(EntityId::from_raw(7)),
+    );
     let dropped = base.clone().with_drop_in(drop);
 
     // Identity and every launch-identity field are unchanged by attaching drop-in.
@@ -160,7 +165,10 @@ fn replay_request_references_the_session_record_identity() {
     let replay = api().replay_request(&record);
     assert_eq!(replay.record_id(), record.record_id());
     assert_eq!(replay.expected_digest(), record.digest());
-    assert_eq!(replay.launch_spec().identity(), record.launch_spec().identity());
+    assert_eq!(
+        replay.launch_spec().identity(),
+        record.launch_spec().identity()
+    );
 }
 
 #[test]

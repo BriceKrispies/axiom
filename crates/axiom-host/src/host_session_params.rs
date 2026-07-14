@@ -58,8 +58,14 @@ mod tests {
 
     fn sample() -> HostSessionParams {
         HostSessionParams::new()
-            .with(String::from("mode"), HostParamValue::Text(String::from("ranked")))
-            .with(String::from("threshold"), HostParamValue::Number(Score::new(9.0)))
+            .with(
+                String::from("mode"),
+                HostParamValue::Text(String::from("ranked")),
+            )
+            .with(
+                String::from("threshold"),
+                HostParamValue::Number(Score::new(9.0)),
+            )
     }
 
     #[test]
@@ -79,8 +85,14 @@ mod tests {
         assert_eq!(
             params.entries(),
             &[
-                (String::from("mode"), HostParamValue::Text(String::from("ranked"))),
-                (String::from("threshold"), HostParamValue::Number(Score::new(9.0))),
+                (
+                    String::from("mode"),
+                    HostParamValue::Text(String::from("ranked"))
+                ),
+                (
+                    String::from("threshold"),
+                    HostParamValue::Number(Score::new(9.0))
+                ),
             ]
         );
     }
@@ -99,8 +111,14 @@ mod tests {
     fn equal_inputs_build_equal_maps_and_order_matters() {
         assert_eq!(sample(), sample());
         let reversed = HostSessionParams::new()
-            .with(String::from("threshold"), HostParamValue::Number(Score::new(9.0)))
-            .with(String::from("mode"), HostParamValue::Text(String::from("ranked")));
+            .with(
+                String::from("threshold"),
+                HostParamValue::Number(Score::new(9.0)),
+            )
+            .with(
+                String::from("mode"),
+                HostParamValue::Text(String::from("ranked")),
+            );
         assert_ne!(sample(), reversed);
     }
 }

@@ -520,8 +520,10 @@ mod tests {
 
     #[test]
     fn facade_mints_a_session_config_from_seed_and_params() {
-        let params = HostSessionParams::new()
-            .with(String::from("mode"), HostParamValue::Text(String::from("ranked")));
+        let params = HostSessionParams::new().with(
+            String::from("mode"),
+            HostParamValue::Text(String::from("ranked")),
+        );
         let config = api().session_config(7, params.clone());
         assert_eq!(config.seed(), 7);
         assert_eq!(config.params(), &params);
@@ -552,7 +554,10 @@ mod tests {
         ];
         let set = api().outcome_set(entries.clone());
         assert_eq!(set, HostOutcomeSet::new(entries));
-        assert_eq!(set.get(PlayerId::new(0)), Some(&api().outcome(true, Score::new(10.0))));
+        assert_eq!(
+            set.get(PlayerId::new(0)),
+            Some(&api().outcome(true, Score::new(10.0)))
+        );
     }
 
     #[test]

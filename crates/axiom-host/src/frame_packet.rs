@@ -326,7 +326,10 @@ impl FramePacket {
     /// shafts render identically regardless of renderer. A packet without it (the
     /// default) has no shafts.
     #[must_use]
-    pub fn with_volumetrics(mut self, volumetrics: crate::frame_volumetrics::FrameVolumetrics) -> Self {
+    pub fn with_volumetrics(
+        mut self,
+        volumetrics: crate::frame_volumetrics::FrameVolumetrics,
+    ) -> Self {
         self.volumetrics = Some(volumetrics);
         self
     }
@@ -357,7 +360,10 @@ impl FramePacket {
     /// look reads identically regardless of renderer. A packet without one (the
     /// default) is presented untonemapped.
     #[must_use]
-    pub fn with_postprocess(mut self, postprocess: crate::frame_postprocess::FramePostProcess) -> Self {
+    pub fn with_postprocess(
+        mut self,
+        postprocess: crate::frame_postprocess::FramePostProcess,
+    ) -> Self {
         self.postprocess = Some(postprocess);
         self
     }
@@ -375,7 +381,10 @@ impl FramePacket {
     /// retro 32-bit console look reads consistently regardless of renderer. A packet
     /// without one (the default) is presented at full fidelity.
     #[must_use]
-    pub fn with_retro_32bit_profile(mut self, retro_32bit: crate::frame_retro_32bit::FrameRetro32BitProfile) -> Self {
+    pub fn with_retro_32bit_profile(
+        mut self,
+        retro_32bit: crate::frame_retro_32bit::FrameRetro32BitProfile,
+    ) -> Self {
         self.retro_32bit = Some(retro_32bit);
         self
     }

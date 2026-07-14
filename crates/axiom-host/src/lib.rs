@@ -42,8 +42,8 @@ mod frame_ambient;
 mod frame_capability;
 mod frame_packet;
 mod frame_postprocess;
-mod frame_retro_32bit;
 mod frame_raster_stats;
+mod frame_retro_32bit;
 mod frame_submission_report;
 mod frame_volumetrics;
 mod handles;
@@ -149,15 +149,15 @@ pub use frame_packet::FramePacket;
 pub use frame_packet::FrameViewport;
 pub use frame_postprocess::apply_frame_postprocess;
 pub use frame_postprocess::FramePostProcess;
-pub use frame_retro_32bit::apply_frame_retro_32bit;
-pub use frame_retro_32bit::FrameRetro32BitProfile;
-pub use frame_volumetrics::apply_frame_volumetrics;
-pub use frame_volumetrics::FrameVolumetrics;
 pub use frame_raster_stats::FrameDepthCueStats;
 pub use frame_raster_stats::FrameRasterStats;
+pub use frame_retro_32bit::apply_frame_retro_32bit;
+pub use frame_retro_32bit::FrameRetro32BitProfile;
 pub use frame_submission_report::BackendKind;
 pub use frame_submission_report::FrameFeature;
 pub use frame_submission_report::FrameSubmissionReport;
+pub use frame_volumetrics::apply_frame_volumetrics;
+pub use frame_volumetrics::FrameVolumetrics;
 
 // The raymarch peer of FramePacket's triangle draws, carried as an optional
 // FramePacket arm.

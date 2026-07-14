@@ -56,7 +56,9 @@ impl LabScene {
 
     /// Build the scene from figure + clip bytes — any portable figure/clip pair.
     pub fn from_bytes(figure_bytes: &[u8], clip_bytes: &[u8]) -> Self {
-        let figure = FigureApi::new().deserialize(figure_bytes).expect("valid figure bytes");
+        let figure = FigureApi::new()
+            .deserialize(figure_bytes)
+            .expect("valid figure bytes");
         let mut api = AnimationApi::new();
         let skeleton = api.create_skeleton();
         figure.parts().iter().for_each(|part| {
@@ -69,7 +71,12 @@ impl LabScene {
             .expect("figure parts are parent-before-child");
         });
         let clip = api.deserialize_clip(clip_bytes).expect("valid clip bytes");
-        Self { figure, api, skeleton, clip }
+        Self {
+            figure,
+            api,
+            skeleton,
+            clip,
+        }
     }
 
     /// Total frames in the motion clip.
@@ -84,23 +91,38 @@ impl LabScene {
 
     /// The phase code covering `frame`, if any (cheap: no pose evaluation).
     pub fn phase_of(&self, frame: u32) -> Option<u32> {
-        self.api.phase_at(self.clip, Tick::new(u64::from(frame))).ok().flatten()
+        self.api
+            .phase_at(self.clip, Tick::new(u64::from(frame)))
+            .ok()
+            .flatten()
     }
 
     /// Each part's world transform at `frame` (sampled + resolved).
     fn world_transforms(&self, frame: u32) -> Vec<Transform> {
         let tick = Tick::new(u64::from(frame));
-        let pose = self.api.sample(self.skeleton, self.clip, tick).expect("sample");
-        let model = self.api.resolve_model(self.skeleton, &pose).expect("resolve");
+        let pose = self
+            .api
+            .sample(self.skeleton, self.clip, tick)
+            .expect("sample");
+        let model = self
+            .api
+            .resolve_model(self.skeleton, &pose)
+            .expect("resolve");
         (0..self.figure.part_count() as u64)
-            .map(|i| model.transform(BoneId::from_raw(i)).unwrap_or(Transform::IDENTITY))
+            .map(|i| {
+                model
+                    .transform(BoneId::from_raw(i))
+                    .unwrap_or(Transform::IDENTITY)
+            })
             .collect()
     }
 
     /// Assemble the full [`FrameView`] for `frame`.
     pub fn view(&self, frame: u32) -> FrameView {
         let world = self.world_transforms(frame);
-        let parts = FigureApi::new().posed_parts(&self.figure, &world).expect("posed parts");
+        let parts = FigureApi::new()
+            .posed_parts(&self.figure, &world)
+            .expect("posed parts");
         let tick = Tick::new(u64::from(frame));
         let is_event_frame = self
             .api
@@ -145,7 +167,10 @@ mod tests {
         // The swing joint is well behind at windup and well forward at the event.
         let back = scene.view(24).swing_joint.z;
         let peak = scene.view(authoring::EVENT_FRAME).swing_joint.z;
-        assert!(peak - back > 0.4, "joint should sweep forward: back={back}, peak={peak}");
+        assert!(
+            peak - back > 0.4,
+            "joint should sweep forward: back={back}, peak={peak}"
+        );
     }
 
     #[test]

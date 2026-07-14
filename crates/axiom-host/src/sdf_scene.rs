@@ -44,7 +44,12 @@ impl SdfPrimitive {
     /// A primitive with its `kind`, column-major world→local `inv_transform`,
     /// `params` (local dimensions in `[0..3]`, uniform scale in `[3]`), and
     /// linear RGBA `color`.
-    pub const fn new(kind: u32, inv_transform: [f32; 16], params: [f32; 4], color: [f32; 4]) -> Self {
+    pub const fn new(
+        kind: u32,
+        inv_transform: [f32; 16],
+        params: [f32; 4],
+        color: [f32; 4],
+    ) -> Self {
         SdfPrimitive {
             kind,
             inv_transform,
@@ -178,15 +183,32 @@ mod tests {
     fn primitive_derives_are_exercised() {
         let p = SdfPrimitive::new(SdfPrimitive::SPHERE, mat(1.0), [1.0; 4], [1.0; 4]);
         assert_eq!(p, p);
-        assert_eq!(p, SdfPrimitive::new(SdfPrimitive::SPHERE, mat(1.0), [1.0; 4], [1.0; 4]));
-        assert_ne!(p, SdfPrimitive::new(SdfPrimitive::BOX, mat(1.0), [1.0; 4], [1.0; 4]));
+        assert_eq!(
+            p,
+            SdfPrimitive::new(SdfPrimitive::SPHERE, mat(1.0), [1.0; 4], [1.0; 4])
+        );
+        assert_ne!(
+            p,
+            SdfPrimitive::new(SdfPrimitive::BOX, mat(1.0), [1.0; 4], [1.0; 4])
+        );
         assert!(format!("{p:?}").contains("SdfPrimitive"));
     }
 
     #[test]
     fn scene_accessors_round_trip() {
-        let p = SdfPrimitive::new(SdfPrimitive::SPHERE, mat(1.0), [0.75, 0.0, 0.0, 1.0], [1.0; 4]);
-        let scene = SdfScene::new(vec![p], mat(2.0), mat(3.0), [4.0, 5.0, 6.0], [100.0, 0.001, 0.0, 0.0]);
+        let p = SdfPrimitive::new(
+            SdfPrimitive::SPHERE,
+            mat(1.0),
+            [0.75, 0.0, 0.0, 1.0],
+            [1.0; 4],
+        );
+        let scene = SdfScene::new(
+            vec![p],
+            mat(2.0),
+            mat(3.0),
+            [4.0, 5.0, 6.0],
+            [100.0, 0.001, 0.0, 0.0],
+        );
         assert_eq!(scene.primitives(), &[p]);
         assert_eq!(scene.view_proj(), mat(2.0));
         assert_eq!(scene.inv_view_proj(), mat(3.0));

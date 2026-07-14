@@ -280,9 +280,7 @@ fn ecs_only_imports_declared_dependencies() {
                 continue;
             }
             for chunk in trimmed.split(|c: char| !c.is_alphanumeric() && c != '_') {
-                if chunk.starts_with("axiom_")
-                    && chunk != "axiom_kernel"
-                    && chunk != "axiom_frame"
+                if chunk.starts_with("axiom_") && chunk != "axiom_kernel" && chunk != "axiom_frame"
                 {
                     illegal.push(format!("{}: {}", path.display(), trimmed));
                 }

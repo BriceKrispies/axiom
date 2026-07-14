@@ -256,7 +256,6 @@ impl GameBridge {
         self.outcome.reported()
     }
 
-
     /// Spawn a bare entity carrying no components, returning its raw id
     /// (`worldSpawn`'s root, which the TS edge then dresses with `world_set`s).
     pub fn world_spawn(&mut self) -> u64 {
@@ -281,7 +280,12 @@ impl GameBridge {
     /// (`worldSet`). An unknown kind, a stale entity, or undecodable bytes are all
     /// a clean `false`.
     pub fn world_set(&mut self, entity: u64, kind: &str, bytes: &[u8]) -> bool {
-        world::world_set(self.runtime.app_mut(), Entity::from_raw(entity), kind, bytes)
+        world::world_set(
+            self.runtime.app_mut(),
+            Entity::from_raw(entity),
+            kind,
+            bytes,
+        )
     }
 
     /// Read `entity`'s component of `kind` as field bytes (`worldGet`) — an empty
@@ -316,7 +320,6 @@ impl GameBridge {
             .map(Entity::raw)
             .collect()
     }
-
 
     /// Whether `entity` names a live node (`worldAlive`); a stale handle is `false`.
     pub fn world_alive(&self, entity: u64) -> bool {
@@ -454,11 +457,19 @@ mod tests {
         let before = b.snapshot_sim();
         let outcome = b.render_frame();
         assert_eq!(outcome.draws().len(), 1, "the demo cube renders one draw");
-        assert_eq!(outcome.lights().len(), 1, "the demo directional light resolves");
+        assert_eq!(
+            outcome.lights().len(),
+            1,
+            "the demo directional light resolves"
+        );
         // The upload sets the presenter binds are non-empty for the demo scene.
         assert_eq!(b.mesh_set().len(), 1);
         assert_eq!(b.material_set().len(), 1);
-        assert_eq!(b.render_frame(), outcome, "render is idempotent at a fixed tick");
+        assert_eq!(
+            b.render_frame(),
+            outcome,
+            "render is idempotent at a fixed tick"
+        );
         assert_eq!(before, b.snapshot_sim(), "render steps no simulation");
     }
 
@@ -472,9 +483,20 @@ mod tests {
         let checkpoint = b.snapshot_sim();
         b.advance(STEP);
         b.advance(STEP);
-        assert_ne!(checkpoint, b.snapshot_sim(), "advancing moved the sim off the checkpoint");
-        assert!(b.restore(&checkpoint), "a well-formed snapshot restores cleanly");
-        assert_eq!(checkpoint, b.snapshot_sim(), "restore forked the sim back to the checkpoint");
+        assert_ne!(
+            checkpoint,
+            b.snapshot_sim(),
+            "advancing moved the sim off the checkpoint"
+        );
+        assert!(
+            b.restore(&checkpoint),
+            "a well-formed snapshot restores cleanly"
+        );
+        assert_eq!(
+            checkpoint,
+            b.snapshot_sim(),
+            "restore forked the sim back to the checkpoint"
+        );
     }
 
     #[test]
@@ -522,8 +544,8 @@ mod tests {
         assert_eq!(perm.len(), 8);
     }
 
-    use axiom::prelude::{BinaryReader, Reflect};
     use crate::world::{Transform2D, Velocity2D};
+    use axiom::prelude::{BinaryReader, Reflect};
 
     /// A `Transform` component's bytes with the given position (defaults for the
     /// rest), for driving `world_set` over the byte boundary.
@@ -607,7 +629,11 @@ mod tests {
         assert!(b.world_set(c, "Transform", &transform_bytes(1.0, 1.0)));
         assert_eq!(b.world_query(&["Transform"]), vec![a, c]);
         // Only `a` carries Velocity ⇒ the two-kind intersection is just `a`.
-        assert!(b.world_set(a, "Velocity", &world::encode(&Velocity2D { x: 1.0, y: 2.0 })));
+        assert!(b.world_set(
+            a,
+            "Velocity",
+            &world::encode(&Velocity2D { x: 1.0, y: 2.0 })
+        ));
         assert_eq!(b.world_query(&["Transform", "Velocity"]), vec![a]);
         // An unknown kind in the query makes it empty (closed vocabulary).
         assert!(b.world_query(&["Transform", "ghost"]).is_empty());
@@ -638,7 +664,7 @@ mod tests {
         assert!(!b.world_has(child, "Transform"));
         assert!(!b.world_remove(child, "Transform")); // already gone ⇒ false
         assert!(!b.world_remove(child, "ghost")); // unknown kind ⇒ false
-        // Parent linking: none initially, then `child` under `parent`.
+                                                  // Parent linking: none initially, then `child` under `parent`.
         assert!(b.world_parent_of(child).is_empty());
         assert!(b.world_set_parent(child, Some(parent)));
         assert_eq!(b.world_parent_of(child), vec![parent as f64]);

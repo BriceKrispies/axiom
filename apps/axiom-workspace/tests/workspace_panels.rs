@@ -51,8 +51,14 @@ fn panel_ids_are_stable_kebab_strings() {
         "game-manifest-editor"
     );
     assert_eq!(WorkspacePanelId::LevelBrowser.as_str(), "level-browser");
-    assert_eq!(WorkspacePanelId::RuntimeViewport.as_str(), "runtime-viewport");
-    assert_eq!(WorkspacePanelId::ObjectInspector.as_str(), "object-inspector");
+    assert_eq!(
+        WorkspacePanelId::RuntimeViewport.as_str(),
+        "runtime-viewport"
+    );
+    assert_eq!(
+        WorkspacePanelId::ObjectInspector.as_str(),
+        "object-inspector"
+    );
     assert_eq!(WorkspacePanelId::AssetBrowser.as_str(), "asset-browser");
     assert_eq!(
         WorkspacePanelId::ConsoleLogViewer.as_str(),
@@ -119,7 +125,10 @@ fn panel_metadata_is_stable_and_matches_the_facade() {
         assert_eq!(via_facade, via_for_id);
         assert_eq!(via_facade.id, id);
         assert_eq!(via_facade.region, region);
-        assert!(!via_facade.title.is_empty(), "every panel has a display title");
+        assert!(
+            !via_facade.title.is_empty(),
+            "every panel has a display title"
+        );
     }
 }
 

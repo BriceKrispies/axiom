@@ -81,7 +81,9 @@ impl FrameHistory {
         HISTORY_SCHEMA.write_to(&mut writer);
         writer.write_u32(self.capacity as u32);
         writer.write_u32(self.frames.len() as u32);
-        self.frames.iter().for_each(|frame| frame.write_to(&mut writer));
+        self.frames
+            .iter()
+            .for_each(|frame| frame.write_to(&mut writer));
         writer.into_bytes()
     }
 

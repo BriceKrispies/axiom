@@ -171,7 +171,8 @@ impl InputBridge {
         let pointers: Vec<(Vec2, bool)> = self.pointer.into_iter().collect();
         let frame = DeviceFrame::new(self.surface, &tokens, &pointers);
         (0..steps).for_each(|step| {
-            self.state.sample(Tick::new(start + u64::from(step)), &frame);
+            self.state
+                .sample(Tick::new(start + u64::from(step)), &frame);
         });
     }
 
@@ -665,7 +666,7 @@ mod tests {
         assert_eq!(b.input_pointer_sample(), vec![200.0, 300.0, 1.0]);
         assert_eq!(b.input_pointer_pressed(), vec![200.0, 300.0]);
         assert_eq!(b.input_swipe(), ""); // mid-gesture
-        // Tick 1: drag +200 in x, still down (a hold is not a fresh press).
+                                         // Tick 1: drag +200 in x, still down (a hold is not a fresh press).
         b.input_pointer(400.0, 300.0, true);
         b.advance(STEP);
         assert!(b.input_pointer_pressed().is_empty());

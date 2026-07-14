@@ -65,7 +65,10 @@ impl RenderCapability {
     /// shadow); every other capability degrades to an explicit, reported drop.
     pub const fn degradation(self) -> CapabilityDegradation {
         let is_substitutable = (self as u32) == (RenderCapability::Shadows as u32);
-        [CapabilityDegradation::Drop, CapabilityDegradation::Substitute][is_substitutable as usize]
+        [
+            CapabilityDegradation::Drop,
+            CapabilityDegradation::Substitute,
+        ][is_substitutable as usize]
     }
 }
 
@@ -93,7 +96,9 @@ impl BackendCapabilityProfile {
     /// everything: textures, cutout, normal maps, PCF shadows, SDF, volumetrics,
     /// post-process, retro).
     pub const fn all() -> Self {
-        BackendCapabilityProfile { bits: ALL_CAPABILITY_BITS }
+        BackendCapabilityProfile {
+            bits: ALL_CAPABILITY_BITS,
+        }
     }
 
     /// No optional capabilities — a base-only backend.
@@ -131,13 +136,17 @@ impl BackendCapabilityProfile {
 
     /// This profile with `cap` turned on.
     pub const fn with(self, cap: RenderCapability) -> Self {
-        BackendCapabilityProfile { bits: self.bits | (cap as u32) }
+        BackendCapabilityProfile {
+            bits: self.bits | (cap as u32),
+        }
     }
 
     /// This profile with `cap` turned off — the config lever for restricting a backend
     /// (e.g. `BackendCapabilityProfile::all().without(RenderCapability::Volumetrics)`).
     pub const fn without(self, cap: RenderCapability) -> Self {
-        BackendCapabilityProfile { bits: self.bits & !(cap as u32) }
+        BackendCapabilityProfile {
+            bits: self.bits & !(cap as u32),
+        }
     }
 }
 
@@ -179,7 +188,10 @@ mod tests {
         assert!(p.contains(RenderCapability::Sdf));
         assert!(p.contains(RenderCapability::Textures));
         // `with` restores it, back to the full set.
-        assert_eq!(p.with(RenderCapability::Volumetrics), BackendCapabilityProfile::all());
+        assert_eq!(
+            p.with(RenderCapability::Volumetrics),
+            BackendCapabilityProfile::all()
+        );
         // Bits are distinct per capability (no two share a bit).
         let one = BackendCapabilityProfile::none().with(RenderCapability::AlphaMask);
         assert!(one.contains(RenderCapability::AlphaMask));
@@ -216,7 +228,10 @@ mod tests {
         CAPS.iter()
             .filter(|&&c| (c as u32) != (RenderCapability::Shadows as u32))
             .for_each(|&c| assert_eq!(c.degradation(), CapabilityDegradation::Drop));
-        assert_ne!(CapabilityDegradation::Substitute, CapabilityDegradation::Drop);
+        assert_ne!(
+            CapabilityDegradation::Substitute,
+            CapabilityDegradation::Drop
+        );
         assert!(format!("{:?}", CapabilityDegradation::Drop).contains("Drop"));
     }
 

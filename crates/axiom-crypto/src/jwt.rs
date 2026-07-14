@@ -158,7 +158,8 @@ mod tests {
 
     // A branchy, test-only base64url encoder used to mint tokens.
     fn b64(bytes: &[u8]) -> Vec<u8> {
-        const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         let mut out = Vec::new();
         let mut acc = 0u32;
         let mut bits = 0u32;
@@ -210,7 +211,10 @@ mod tests {
     #[test]
     fn rejects_an_expired_token() {
         let token = mint(HEADER, br#"{"exp":1000}"#, SECRET);
-        assert_eq!(verify_jwt_hs256(&token, SECRET, 1001), Err(JwtError::Expired));
+        assert_eq!(
+            verify_jwt_hs256(&token, SECRET, 1001),
+            Err(JwtError::Expired)
+        );
     }
 
     #[test]
@@ -230,9 +234,18 @@ mod tests {
 
     #[test]
     fn rejects_wrong_segment_counts() {
-        assert_eq!(verify_jwt_hs256(b"no-dots", SECRET, 0), Err(JwtError::Malformed));
-        assert_eq!(verify_jwt_hs256(b"only.two", SECRET, 0), Err(JwtError::Malformed));
-        assert_eq!(verify_jwt_hs256(b"a.b.c.d", SECRET, 0), Err(JwtError::Malformed));
+        assert_eq!(
+            verify_jwt_hs256(b"no-dots", SECRET, 0),
+            Err(JwtError::Malformed)
+        );
+        assert_eq!(
+            verify_jwt_hs256(b"only.two", SECRET, 0),
+            Err(JwtError::Malformed)
+        );
+        assert_eq!(
+            verify_jwt_hs256(b"a.b.c.d", SECRET, 0),
+            Err(JwtError::Malformed)
+        );
     }
 
     #[test]
@@ -241,7 +254,10 @@ mod tests {
         token.push(b'.');
         token.extend_from_slice(&b64(br#"{"exp":2000}"#));
         token.extend_from_slice(b".not+base64");
-        assert_eq!(verify_jwt_hs256(&token, SECRET, 0), Err(JwtError::Malformed));
+        assert_eq!(
+            verify_jwt_hs256(&token, SECRET, 0),
+            Err(JwtError::Malformed)
+        );
     }
 
     #[test]
@@ -254,15 +270,24 @@ mod tests {
         let mut token = signing_input;
         token.push(b'.');
         token.extend_from_slice(&b64(&signature));
-        assert_eq!(verify_jwt_hs256(&token, SECRET, 0), Err(JwtError::Malformed));
+        assert_eq!(
+            verify_jwt_hs256(&token, SECRET, 0),
+            Err(JwtError::Malformed)
+        );
     }
 
     #[test]
     fn rejects_non_json_and_exp_less_claims() {
         let not_json = mint(HEADER, b"not json at all", SECRET);
-        assert_eq!(verify_jwt_hs256(&not_json, SECRET, 0), Err(JwtError::Malformed));
+        assert_eq!(
+            verify_jwt_hs256(&not_json, SECRET, 0),
+            Err(JwtError::Malformed)
+        );
         let no_exp = mint(HEADER, br#"{"sub":"x"}"#, SECRET);
-        assert_eq!(verify_jwt_hs256(&no_exp, SECRET, 0), Err(JwtError::Malformed));
+        assert_eq!(
+            verify_jwt_hs256(&no_exp, SECRET, 0),
+            Err(JwtError::Malformed)
+        );
     }
 
     #[test]
@@ -270,7 +295,10 @@ mod tests {
         assert_eq!(JwtError::Expired, JwtError::Expired);
         assert_ne!(JwtError::Expired, JwtError::Malformed);
         assert!(format!("{:?}", JwtError::BadSignature).contains("BadSignature"));
-        let claims = JwtClaims { exp: 1, subject: None };
+        let claims = JwtClaims {
+            exp: 1,
+            subject: None,
+        };
         assert!(format!("{claims:?}").contains("JwtClaims"));
         assert_eq!(claims.clone(), claims);
     }

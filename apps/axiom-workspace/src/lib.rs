@@ -54,9 +54,7 @@ pub use workspace_manifest::WorkspaceManifest;
 
 // The workspace-shell panel vocabulary: panel identity/metadata and the typed,
 // placeholder state each panel carries. These are the nouns the facade returns.
-pub use workspace_panel::{
-    WorkspacePanel, WorkspacePanelId, WorkspacePanelState, WorkspaceRegion,
-};
+pub use workspace_panel::{WorkspacePanel, WorkspacePanelId, WorkspacePanelState, WorkspaceRegion};
 
 pub use asset_browser::{AssetBrowserState, AssetEntry};
 pub use console_log_viewer::{ConsoleLevel, ConsoleLogViewerState, ConsoleRecord};

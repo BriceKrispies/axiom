@@ -88,10 +88,15 @@ impl GameBridge {
             .iter()
             .position(|name| *name == kind)
             .unwrap_or(0);
-        let mesh = [Mesh::cube(), Mesh::sphere(), Mesh::plane(), Mesh::cylinder()]
-            .into_iter()
-            .nth(index)
-            .unwrap_or_else(Mesh::cube);
+        let mesh = [
+            Mesh::cube(),
+            Mesh::sphere(),
+            Mesh::plane(),
+            Mesh::cylinder(),
+        ]
+        .into_iter()
+        .nth(index)
+        .unwrap_or_else(Mesh::cube);
         let id = self.runtime.app_mut().add_mesh(mesh).id();
         // The mesh set changed → bump the generation so the wasm present loop
         // re-uploads it to the live backend (else this new mesh is never on the GPU).
@@ -114,8 +119,17 @@ impl GameBridge {
         uvs: &[f64],
         indices: &[u32],
     ) -> u64 {
-        let data = MeshData::new(v3_list(positions), v3_list(normals), v2_list(uvs), indices.to_vec());
-        let id = self.runtime.app_mut().add_mesh_data(data).map_or(0, |handle| handle.id());
+        let data = MeshData::new(
+            v3_list(positions),
+            v3_list(normals),
+            v2_list(uvs),
+            indices.to_vec(),
+        );
+        let id = self
+            .runtime
+            .app_mut()
+            .add_mesh_data(data)
+            .map_or(0, |handle| handle.id());
         // The mesh set changed (even a rejected mesh is a cheap harmless re-upload).
         self.mesh_generation = self.mesh_generation.wrapping_add(1);
         id
@@ -128,7 +142,13 @@ impl GameBridge {
     /// alpha). The slice/scalar boundary mirrors `set_camera_3d`: one slice per
     /// colour vector, the catalog ratios as trailing scalars. Each scalar is
     /// sanitized to a finite [`Ratio`] (non-finite ⇒ zero) without a branch.
-    pub fn create_material(&mut self, rgb: &[f64], emissive: &[f64], roughness: f64, opacity: f64) -> u64 {
+    pub fn create_material(
+        &mut self,
+        rgb: &[f64],
+        emissive: &[f64],
+        roughness: f64,
+        opacity: f64,
+    ) -> u64 {
         let material = Material::lit(color(rgb))
             .with_emissive(color(emissive))
             .with_roughness(channel(roughness))
@@ -141,7 +161,14 @@ impl GameBridge {
     /// in metres. The camera looks from `position` toward `target` with world
     /// up = +Y; a degenerate aim (eye coincident with `target`, or the look
     /// direction parallel to up) falls back to translation-only — never panics.
-    pub fn set_camera_3d(&mut self, position: &[f64], target: &[f64], fov_deg: f64, near: f64, far: f64) {
+    pub fn set_camera_3d(
+        &mut self,
+        position: &[f64],
+        target: &[f64],
+        fov_deg: f64,
+        near: f64,
+        far: f64,
+    ) {
         let projection = PerspectiveProjection {
             fov_y: Angle::degrees(fov_deg as f32),
             near: meters(near),
@@ -162,8 +189,7 @@ impl GameBridge {
     /// Canvas2D backend's depth fog fades toward — i.e. a 3D game's horizon/sky
     /// tone. Forwards to the engine's existing `RunningApp::set_clear_color`.
     pub fn set_clear_color(&mut self, rgba: &[f64]) {
-        let c: [f32; 4] =
-            core::array::from_fn(|i| channel(*rgba.get(i).unwrap_or(&0.0)).get());
+        let c: [f32; 4] = core::array::from_fn(|i| channel(*rgba.get(i).unwrap_or(&0.0)).get());
         self.runtime.app_mut().set_clear_color(c);
     }
 
@@ -229,7 +255,9 @@ impl GameBridge {
     /// the runtime's default demo content does not bleed through. After it,
     /// [`Self::create_mesh`] / [`Self::create_material`] mint 1-based handles again.
     pub fn clear_scene(&mut self) {
-        self.runtime.app_mut().reauthor(|_scene, _meshes, _materials| {});
+        self.runtime
+            .app_mut()
+            .reauthor(|_scene, _meshes, _materials| {});
         // The mesh store was reset → bump the generation so the live backend drops
         // the demo geometry and picks up whatever the game authors next.
         self.mesh_generation = self.mesh_generation.wrapping_add(1);
@@ -240,7 +268,14 @@ impl GameBridge {
     /// (`createController`). Returns the controller node's entity id. Unlike
     /// [`Self::set_camera_3d`], its orientation is not a look-at target — the engine
     /// drives it from per-frame [`Self::control_first_person`] inputs.
-    pub fn spawn_controller(&mut self, position: &[f64], fov_deg: f64, near: f64, far: f64, index: u32) -> u64 {
+    pub fn spawn_controller(
+        &mut self,
+        position: &[f64],
+        fov_deg: f64,
+        near: f64,
+        far: f64,
+        index: u32,
+    ) -> u64 {
         let projection = PerspectiveProjection {
             fov_y: Angle::degrees(fov_deg as f32),
             near: meters(near),
@@ -305,8 +340,15 @@ mod wasm_exports {
         /// colour `[r, g, b]`, linear `emissive` `[r, g, b]`, `roughness`, and
         /// `opacity` (`1` opaque).
         #[wasm_bindgen(js_name = createMaterial)]
-        pub fn create_material(&mut self, rgb: &[f64], emissive: &[f64], roughness: f64, opacity: f64) -> f64 {
-            self.bridge.create_material(rgb, emissive, roughness, opacity) as f64
+        pub fn create_material(
+            &mut self,
+            rgb: &[f64],
+            emissive: &[f64],
+            roughness: f64,
+            opacity: f64,
+        ) -> f64 {
+            self.bridge
+                .create_material(rgb, emissive, roughness, opacity) as f64
         }
 
         /// Set the active perspective camera, aimed from `position` at `target`
@@ -320,7 +362,8 @@ mod wasm_exports {
             near: f64,
             far: f64,
         ) {
-            self.bridge.set_camera_3d(position, target, fov_deg, near, far);
+            self.bridge
+                .set_camera_3d(position, target, fov_deg, near, far);
         }
 
         /// Set the frame clear (background / horizon) colour (`setClearColor`):
@@ -339,7 +382,12 @@ mod wasm_exports {
         /// Spawn a renderable node from a `(mesh, material)` handle pair at the
         /// flat 10-tuple `transform`, returning its entity id (`spawnRenderable`).
         #[wasm_bindgen(js_name = spawnRenderable)]
-        pub fn spawn_renderable(&mut self, mesh_id: f64, material_id: f64, transform: &[f64]) -> f64 {
+        pub fn spawn_renderable(
+            &mut self,
+            mesh_id: f64,
+            material_id: f64,
+            transform: &[f64],
+        ) -> f64 {
             self.bridge
                 .spawn_renderable(mesh_id as u64, material_id as u64, transform) as f64
         }
@@ -382,8 +430,15 @@ mod wasm_exports {
         /// Apply one first-person input to a controller immediately
         /// (`controlFirstPerson`): `move_local` plus yaw/pitch radian deltas.
         #[wasm_bindgen(js_name = controlFirstPerson)]
-        pub fn control_first_person(&mut self, index: u32, move_local: &[f64], yaw: f64, pitch: f64) {
-            self.bridge.control_first_person(index, move_local, yaw, pitch);
+        pub fn control_first_person(
+            &mut self,
+            index: u32,
+            move_local: &[f64],
+            yaw: f64,
+            pitch: f64,
+        ) {
+            self.bridge
+                .control_first_person(index, move_local, yaw, pitch);
         }
     }
 }
@@ -444,7 +499,11 @@ mod tests {
         let white = b.create_material(&[1.0, 1.0, 1.0], &[0.0, 0.0, 0.0], 1.0, 1.0);
         let node = b.spawn_renderable(mesh, white, &pose(0.0, 0.0, 0.0, 1.0));
         assert!(b.world_alive(node));
-        assert_eq!(b.runtime.app_mut().tick(0).draws().len(), 1, "the custom mesh renders");
+        assert_eq!(
+            b.runtime.app_mut().tick(0).draws().len(),
+            1,
+            "the custom mesh renders"
+        );
     }
 
     #[test]
@@ -487,7 +546,10 @@ mod tests {
         b.set_camera_3d(&[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0], 60.0, 0.1, 100.0);
         let view = b.runtime.app_mut().tick(0).camera_view_proj();
         let no_camera = bridge().runtime.app_mut().tick(0).camera_view_proj();
-        assert_ne!(view, no_camera, "a camera is installed despite the degenerate aim");
+        assert_ne!(
+            view, no_camera,
+            "a camera is installed despite the degenerate aim"
+        );
     }
 
     #[test]
@@ -503,11 +565,17 @@ mod tests {
         let before = b.runtime.app_mut().tick(0).clear_color();
         b.set_clear_color(&[0.5, 0.6, 0.9, 1.0]);
         let after = b.runtime.app_mut().tick(1).clear_color();
-        assert_ne!(before, after, "the authored clear colour replaced the default");
+        assert_ne!(
+            before, after,
+            "the authored clear colour replaced the default"
+        );
         assert_eq!(after, [0.5, 0.6, 0.9, 1.0]);
         // Boundary sanitation: short + non-finite input clamps to zeroed channels.
         b.set_clear_color(&[f64::NAN]);
-        assert_eq!(b.runtime.app_mut().tick(2).clear_color(), [0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(
+            b.runtime.app_mut().tick(2).clear_color(),
+            [0.0, 0.0, 0.0, 0.0]
+        );
     }
 
     /// The identity-rotation flat 10-tuple for a node at `(x, y, z)` with uniform
@@ -570,8 +638,15 @@ mod tests {
         let solid = o.create_material(&[0.1, 0.2, 0.9], &[0.0, 0.0, 0.0], 1.0, 1.0);
         o.spawn_renderable(mesh, solid, &pose(0.0, 0.0, 0.0, 1.0));
         let opaque = o.runtime.app_mut().tick(0).draws()[0].color();
-        assert_eq!(opaque, [0.1, 0.2, 0.9, 1.0], "an opaque material keeps full alpha");
-        assert_ne!(translucent[3], opaque[3], "the authored opacity changed the rendered alpha");
+        assert_eq!(
+            opaque,
+            [0.1, 0.2, 0.9, 1.0],
+            "an opaque material keeps full alpha"
+        );
+        assert_ne!(
+            translucent[3], opaque[3],
+            "the authored opacity changed the rendered alpha"
+        );
     }
 
     #[test]

@@ -229,7 +229,10 @@ mod tests {
         assert_eq!(a, PaintId::from_raw(0));
         assert_eq!(b, PaintId::from_raw(1));
         assert_eq!(table.len(), 2);
-        assert_eq!(table.get(a).and_then(Paint2d::as_linear), Some((Vec2::ZERO, Vec2::ONE)));
+        assert_eq!(
+            table.get(a).and_then(Paint2d::as_linear),
+            Some((Vec2::ZERO, Vec2::ONE))
+        );
         assert_eq!(
             table.get(b).and_then(Paint2d::as_radial),
             Some((Vec2::ZERO, meters(1.0)))

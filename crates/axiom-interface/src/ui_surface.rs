@@ -174,17 +174,36 @@ mod tests {
         let mut s = UiSurface::new();
         s.begin_frame(viewport(), pointer(0.0, 0.0, false));
         let r_bounds = UiRect::new(u(1.0), u(2.0), u(3.0), u(4.0));
-        let t_opts = UiTextOpts { x: u(5.0), y: u(6.0), color: UiColor::new(0xffff_ffff), size: u(12.0) };
-        let sp_opts = UiSpriteOpts { x: u(8.0), y: u(9.0), w: u(10.0), h: u(11.0) };
+        let t_opts = UiTextOpts {
+            x: u(5.0),
+            y: u(6.0),
+            color: UiColor::new(0xffff_ffff),
+            size: u(12.0),
+        };
+        let sp_opts = UiSpriteOpts {
+            x: u(8.0),
+            y: u(9.0),
+            w: u(10.0),
+            h: u(11.0),
+        };
         s.rect(r_bounds, fill());
         s.text("hp", t_opts);
         s.sprite(HandleId::from_raw(7), sp_opts);
         assert_eq!(
             s.draw_list().items(),
             &[
-                UiDrawItem::Rect { bounds: r_bounds, style: fill() },
-                UiDrawItem::Text { value: "hp".to_string(), opts: t_opts },
-                UiDrawItem::Sprite { texture: HandleId::from_raw(7), opts: sp_opts },
+                UiDrawItem::Rect {
+                    bounds: r_bounds,
+                    style: fill()
+                },
+                UiDrawItem::Text {
+                    value: "hp".to_string(),
+                    opts: t_opts
+                },
+                UiDrawItem::Sprite {
+                    texture: HandleId::from_raw(7),
+                    opts: sp_opts
+                },
             ]
         );
     }
@@ -198,7 +217,12 @@ mod tests {
         assert!(s.button(bounds, "ok", f));
         assert_eq!(
             s.draw_list().items(),
-            &[UiDrawItem::Button { bounds, label: "ok".to_string(), style: f, activated: true }]
+            &[UiDrawItem::Button {
+                bounds,
+                label: "ok".to_string(),
+                style: f,
+                activated: true
+            }]
         );
         s.begin_frame(viewport(), pointer(15.0, 15.0, false));
         assert!(!s.button(bounds, "ok", f));

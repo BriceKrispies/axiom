@@ -233,13 +233,7 @@ mod tests {
 
     struct Noop;
     impl axiom_ecs::WorldSystem<Storage> for Noop {
-        fn run(
-            &self,
-            _: &axiom_ecs::WorldStep,
-            _: &axiom_ecs::EntityRegistry,
-            _: &mut Storage,
-        ) {
-        }
+        fn run(&self, _: &axiom_ecs::WorldStep, _: &axiom_ecs::EntityRegistry, _: &mut Storage) {}
     }
 
     #[test]
@@ -298,7 +292,10 @@ mod tests {
         for frame in &frames {
             api.observe(frame);
         }
-        let (a, b) = (frames[0].engine_frame_index(), frames[1].engine_frame_index());
+        let (a, b) = (
+            frames[0].engine_frame_index(),
+            frames[1].engine_frame_index(),
+        );
         let diff = api.diff(a, b).expect("both frames retained");
         assert_eq!(diff.from_index(), a);
         assert_eq!(diff.to_index(), b);

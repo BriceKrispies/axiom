@@ -43,7 +43,15 @@ impl FrameVolumetrics {
         threshold: f32,
         color: [f32; 3],
     ) -> Self {
-        FrameVolumetrics { samples, density, decay, weight, exposure, threshold, color }
+        FrameVolumetrics {
+            samples,
+            density,
+            decay,
+            weight,
+            exposure,
+            threshold,
+            color,
+        }
     }
 
     /// The public constructor: a warm low-poly god-ray preset. Presets keep the raw
@@ -74,7 +82,15 @@ fn sample_lum(lum: &[f32], w: u32, h: u32, fx: f32, fy: f32) -> f32 {
 }
 
 /// Accumulated shaft brightness added at pixel `(x, y)`.
-fn shaft_at(lum: &[f32], w: u32, h: u32, x: u32, y: u32, sun: [f32; 2], v: &FrameVolumetrics) -> f32 {
+fn shaft_at(
+    lum: &[f32],
+    w: u32,
+    h: u32,
+    x: u32,
+    y: u32,
+    sun: [f32; 2],
+    v: &FrameVolumetrics,
+) -> f32 {
     let px = x as f32 + 0.5;
     let py = y as f32 + 0.5;
     let steps = v.samples.max(1) as f32;
@@ -109,7 +125,10 @@ pub(crate) fn project_sun_screen(
     let cy = m[1] * dx + m[5] * dy + m[9] * dz;
     let cw = m[3] * dx + m[7] * dy + m[11] * dz;
     (cw > 0.0).then(|| {
-        [(cx / cw * 0.5 + 0.5) * w as f32, (1.0 - (cy / cw * 0.5 + 0.5)) * h as f32]
+        [
+            (cx / cw * 0.5 + 0.5) * w as f32,
+            (1.0 - (cy / cw * 0.5 + 0.5)) * h as f32,
+        ]
     })
 }
 
@@ -157,13 +176,18 @@ pub fn apply_frame_volumetrics(rgba: &mut [u8], w: u32, h: u32, packet: &FramePa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frame_packet::{FrameCamera, FrameLight, FrameViewport, FrameFeatureSet};
+    use crate::frame_packet::{FrameCamera, FrameFeatureSet, FrameLight, FrameViewport};
 
     /// `m[11] = 1` toy view_proj: a `+z` to-light projects in front at screen centre.
-    const FRONT_VP: [f32; 16] =
-        [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+    const FRONT_VP: [f32; 16] = [
+        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+    ];
 
-    fn packet(vol: Option<FrameVolumetrics>, lights: Vec<FrameLight>, cam: Option<FrameCamera>) -> FramePacket {
+    fn packet(
+        vol: Option<FrameVolumetrics>,
+        lights: Vec<FrameLight>,
+        cam: Option<FrameCamera>,
+    ) -> FramePacket {
         let mut p = FramePacket::new(
             0,
             0,
@@ -187,7 +211,10 @@ mod tests {
     fn params_and_luminance() {
         let v = FrameVolumetrics::low_poly();
         assert_eq!(v.color, [1.0, 0.9, 0.68]);
-        assert_eq!(FrameVolumetrics::new(1, 0.0, 0.0, 0.0, 0.0, 1.0, [0.0; 3]).samples, 1);
+        assert_eq!(
+            FrameVolumetrics::new(1, 0.0, 0.0, 0.0, 0.0, 1.0, [0.0; 3]).samples,
+            1
+        );
         assert!(luminance(&[0, 0, 0, 255]).abs() < 1e-6);
         assert!((luminance(&[255, 255, 255, 255]) - 1.0).abs() < 1e-4);
     }
@@ -204,15 +231,27 @@ mod tests {
         let cam = Some(FrameCamera::new([0.0; 16], [0.0; 16], FRONT_VP));
         let mut rgba = vec![0u8; 16 * 16 * 4];
         // No volumetrics on the packet → 0.
-        assert_eq!(apply_frame_volumetrics(&mut rgba, 16, 16, &packet(None, dir_light(), cam)), 0);
+        assert_eq!(
+            apply_frame_volumetrics(&mut rgba, 16, 16, &packet(None, dir_light(), cam)),
+            0
+        );
         // Volumetrics but no directional light → 0.
         let v = Some(FrameVolumetrics::low_poly());
-        assert_eq!(apply_frame_volumetrics(&mut rgba, 16, 16, &packet(v, Vec::new(), cam)), 0);
+        assert_eq!(
+            apply_frame_volumetrics(&mut rgba, 16, 16, &packet(v, Vec::new(), cam)),
+            0
+        );
         // Volumetrics but no camera → 0.
-        assert_eq!(apply_frame_volumetrics(&mut rgba, 16, 16, &packet(v, dir_light(), None)), 0);
+        assert_eq!(
+            apply_frame_volumetrics(&mut rgba, 16, 16, &packet(v, dir_light(), None)),
+            0
+        );
         // Volumetrics + light but sun behind the camera → 0.
         let behind = vec![FrameLight::new(0, [0.0, 0.0, -1.0], [1.0; 4])];
-        assert_eq!(apply_frame_volumetrics(&mut rgba, 16, 16, &packet(v, behind, cam)), 0);
+        assert_eq!(
+            apply_frame_volumetrics(&mut rgba, 16, 16, &packet(v, behind, cam)),
+            0
+        );
     }
 
     #[test]
@@ -222,14 +261,18 @@ mod tests {
         let cam = Some(FrameCamera::new([0.0; 16], [0.0; 16], FRONT_VP));
         let mut rgba = vec![0u8; 16 * 16 * 4];
         rgba[3] = 255; // pixel (0,0) alpha
-        // bright pixel at (6,6): index (6*16+6)*4
+                       // bright pixel at (6,6): index (6*16+6)*4
         let bi = (6 * 16 + 6) * 4;
         rgba[bi] = 255;
         rgba[bi + 1] = 255;
         rgba[bi + 2] = 255;
         let before = rgba.clone();
-        let touched =
-            apply_frame_volumetrics(&mut rgba, 16, 16, &packet(Some(FrameVolumetrics::low_poly()), dir_light(), cam));
+        let touched = apply_frame_volumetrics(
+            &mut rgba,
+            16,
+            16,
+            &packet(Some(FrameVolumetrics::low_poly()), dir_light(), cam),
+        );
         assert!(touched > 0);
         // Pixel (3,3) is on the far side of the bright spot (6,6) from the sun (8,8),
         // so its ray to the sun passes through the bright spot and it brightens.
@@ -247,10 +290,16 @@ mod tests {
         rgba[bi + 1] = 128;
         rgba[bi + 2] = 128;
         let high = FrameVolumetrics::new(48, 0.9, 0.94, 0.055, 0.75, 0.9, [1.0, 1.0, 1.0]);
-        assert_eq!(apply_frame_volumetrics(&mut rgba, 16, 16, &packet(Some(high), dir_light(), cam)), 0);
+        assert_eq!(
+            apply_frame_volumetrics(&mut rgba, 16, 16, &packet(Some(high), dir_light(), cam)),
+            0
+        );
         // Zero samples → no march (also exercises off-screen clamp via the corner sun).
         let zero = FrameVolumetrics::new(0, 0.9, 0.94, 0.055, 0.75, 0.0, [1.0, 1.0, 1.0]);
         let mut full = vec![200u8; 16 * 16 * 4];
-        assert_eq!(apply_frame_volumetrics(&mut full, 16, 16, &packet(Some(zero), dir_light(), cam)), 0);
+        assert_eq!(
+            apply_frame_volumetrics(&mut full, 16, 16, &packet(Some(zero), dir_light(), cam)),
+            0
+        );
     }
 }

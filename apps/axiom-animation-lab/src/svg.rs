@@ -88,10 +88,12 @@ fn push_phase_strip(s: &mut String, scene: &LabScene, frame: u32) {
 }
 
 fn phase_color(code: u32) -> &'static str {
-    ["#3a4a5a", "#3f5a6a", "#3f6a5a", "#5a6a3f", "#6a5a3f", "#8a3f3f", "#6a3f5a", "#4a4a4a"]
-        .get(code as usize)
-        .copied()
-        .unwrap_or("#222222")
+    [
+        "#3a4a5a", "#3f5a6a", "#3f6a5a", "#5a6a3f", "#6a5a3f", "#8a3f3f", "#6a3f5a", "#4a4a4a",
+    ]
+    .get(code as usize)
+    .copied()
+    .unwrap_or("#222222")
 }
 
 fn push_ground(s: &mut String) {

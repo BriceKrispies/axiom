@@ -117,9 +117,7 @@ impl WorkspacePanel {
     pub fn for_id(id: WorkspacePanelId) -> WorkspacePanel {
         let (title, region) = match id {
             WorkspacePanelId::ProjectBrowser => ("Project Browser", WorkspaceRegion::Left),
-            WorkspacePanelId::GameManifestEditor => {
-                ("Game Manifest Editor", WorkspaceRegion::Left)
-            }
+            WorkspacePanelId::GameManifestEditor => ("Game Manifest Editor", WorkspaceRegion::Left),
             WorkspacePanelId::LevelBrowser => ("Level Browser", WorkspaceRegion::Left),
             WorkspacePanelId::RuntimeViewport => ("Runtime Viewport", WorkspaceRegion::Center),
             WorkspacePanelId::ObjectInspector => ("Object Inspector", WorkspaceRegion::Right),

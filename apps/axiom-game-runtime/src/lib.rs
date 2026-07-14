@@ -147,17 +147,18 @@ pub(crate) fn demo_app() -> App {
         .add_plugins(DefaultPlugins)
         .setup(|world, meshes, materials| {
             let cube = meshes.add(Mesh::cube());
-            let material =
-                materials.add(Material::lit(Color::linear_rgb(ch(0.85), ch(0.30), ch(0.30))));
-            world
-                .spawn(Transform::IDENTITY)
-                .with_child((
-                    Renderable {
-                        mesh: cube,
-                        material,
-                    },
-                    Spin::around(Vec3::UNIT_Y).period(120),
-                ));
+            let material = materials.add(Material::lit(Color::linear_rgb(
+                ch(0.85),
+                ch(0.30),
+                ch(0.30),
+            )));
+            world.spawn(Transform::IDENTITY).with_child((
+                Renderable {
+                    mesh: cube,
+                    material,
+                },
+                Spin::around(Vec3::UNIT_Y).period(120),
+            ));
             world.spawn((
                 Transform::from_translation(Vec3::new(0.0, 0.0, 6.0)),
                 Camera::perspective(PerspectiveProjection {
@@ -233,6 +234,9 @@ mod tests {
         assert!(latch.report(outcome.clone()));
         assert!(!latch.report(host.outcome(false, Score::new(0.0))));
         assert_eq!(latch.reported(), Some(&outcome));
-        assert_eq!(latch.reported().map(HostOutcome::score), Some(Score::new(5.0)));
+        assert_eq!(
+            latch.reported().map(HostOutcome::score),
+            Some(Score::new(5.0))
+        );
     }
 }

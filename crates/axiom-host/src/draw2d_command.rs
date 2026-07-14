@@ -366,15 +366,13 @@ mod tests {
 
     #[test]
     fn particle_quad_command_round_trips_and_carries_its_own_color() {
-        let c = Draw2dCommand::particle_quad(
-            header(8),
-            Vec2::new(7.0, 8.0),
-            meters(0.5),
-            color(),
-        );
+        let c = Draw2dCommand::particle_quad(header(8), Vec2::new(7.0, 8.0), meters(0.5), color());
         assert_eq!(c.kind_code(), Draw2dCommand::KIND_PARTICLE_QUAD);
         assert_eq!(c.submission_index(), 8);
-        assert_eq!(c.as_particle(), Some((Vec2::new(7.0, 8.0), meters(0.5), color())));
+        assert_eq!(
+            c.as_particle(),
+            Some((Vec2::new(7.0, 8.0), meters(0.5), color()))
+        );
         assert_eq!(c.fill(), None);
         assert_eq!(c.as_rect(), None);
         assert_eq!(c.as_text(), None);
@@ -447,10 +445,7 @@ mod tests {
 
     #[test]
     fn text_command_round_trips() {
-        let run = GlyphRun::new(
-            vec![Glyph2d::new(rect_geom(), meters(6.0))],
-            meters(12.0),
-        );
+        let run = GlyphRun::new(vec![Glyph2d::new(rect_geom(), meters(6.0))], meters(12.0));
         let opts = TextDraw2d::new(FontHandle::from_raw(1), color(), TextAlign::LEFT);
         let c = Draw2dCommand::text(header(6), run.clone(), opts);
         assert_eq!(c.kind_code(), Draw2dCommand::KIND_TEXT_GLYPHS);

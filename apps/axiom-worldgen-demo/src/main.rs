@@ -34,7 +34,11 @@ fn ground(x: Meters, z: Meters) -> Meters {
 fn chunk_aabb(c: ChunkCoord) -> Aabb {
     let x = c.x as f32 * CHUNK_M;
     let z = c.z as f32 * CHUNK_M;
-    Aabb::new(Vec3::new(x, -6.0, z), Vec3::new(x + CHUNK_M, 8.0, z + CHUNK_M)).unwrap()
+    Aabb::new(
+        Vec3::new(x, -6.0, z),
+        Vec3::new(x + CHUNK_M, 8.0, z + CHUNK_M),
+    )
+    .unwrap()
 }
 
 fn world() -> WorldApi {
@@ -42,7 +46,10 @@ fn world() -> WorldApi {
         chunk_size: Meters::finite_or_zero(CHUNK_M),
         load_radius: LOAD_RADIUS,
         margin: MARGIN,
-        lod_bands: [50.0, 100.0, 170.0].iter().map(|b| Meters::finite_or_zero(*b)).collect(),
+        lod_bands: [50.0, 100.0, 170.0]
+            .iter()
+            .map(|b| Meters::finite_or_zero(*b))
+            .collect(),
     })
 }
 
@@ -90,7 +97,11 @@ fn walk(seed: u64) -> Vec<Step> {
         for c in &plan.unload {
             trees.remove(c);
         }
-        let drawn: usize = plan.visible.iter().map(|v| trees.get(&v.coord).copied().unwrap_or(0)).sum();
+        let drawn: usize = plan
+            .visible
+            .iter()
+            .map(|v| trees.get(&v.coord).copied().unwrap_or(0))
+            .sum();
         let resident_trees: usize = trees.values().sum();
         let mut lod = [0usize; 4];
         for v in &plan.visible {
@@ -106,7 +117,10 @@ fn main() {
     let report = walk(seed);
 
     println!("Axiom worldgen streaming proof — {CHUNK_M} m chunks, load radius {LOAD_RADIUS}, walking -Z\n");
-    println!("{:>4}  {:>8}  {:>7}  {:>20}  {:>15}", "step", "resident", "visible", "trees drawn/resident", "lod 0/1/2/3");
+    println!(
+        "{:>4}  {:>8}  {:>7}  {:>20}  {:>15}",
+        "step", "resident", "visible", "trees drawn/resident", "lod 0/1/2/3"
+    );
     for (s, (res, vis, drawn, tot, lod)) in report.iter().enumerate() {
         println!(
             "{s:>4}  {res:>8}  {vis:>7}  {:>20}  {:>15}",
@@ -119,14 +133,24 @@ fn main() {
     // walk — a bounded working set, not the whole (unbounded) world.
     let keep = 2 * (LOAD_RADIUS + MARGIN) + 1;
     let max_resident = report.iter().map(|r| r.0).max().unwrap();
-    assert!(max_resident as i32 <= keep * keep, "resident set must stay within the keep ring");
+    assert!(
+        max_resident as i32 <= keep * keep,
+        "resident set must stay within the keep ring"
+    );
 
     // Culling: some steps draw strictly fewer trees than are resident (the ones
     // outside the frustum are never touched).
-    assert!(report.iter().any(|r| r.2 < r.3), "frustum culling must hide some resident trees");
+    assert!(
+        report.iter().any(|r| r.2 < r.3),
+        "frustum culling must hide some resident trees"
+    );
 
     // Determinism: replaying the identical walk yields the identical report.
-    assert_eq!(walk(seed), report, "the streamed world must replay identically");
+    assert_eq!(
+        walk(seed),
+        report,
+        "the streamed world must replay identically"
+    );
 
     println!(
         "\nOK: streamed (resident stays <= {} of an endless world), culled (drawn < resident), deterministic (identical replay).",

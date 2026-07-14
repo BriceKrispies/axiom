@@ -85,11 +85,15 @@ fn quat_in(q: &[f64]) -> Quat {
 
 /// A `Quat`'s 4 components as boundary scalars `[x, y, z, w]`.
 fn quat_out(q: Quat) -> Vec<f64> {
-    vec![f64::from(q.x), f64::from(q.y), f64::from(q.z), f64::from(q.w)]
+    vec![
+        f64::from(q.x),
+        f64::from(q.y),
+        f64::from(q.z),
+        f64::from(q.w),
+    ]
 }
 
 impl GameBridge {
-
     /// `lhs + rhs` (`v2Add`).
     pub fn v2_add(&self, lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
         v2_out(v2_in(lhs).add(v2_in(rhs)))
@@ -136,7 +140,6 @@ impl GameBridge {
         let blend = |from: f32, to: f32| f64::from(m.lerp(from, to, t as f32).unwrap_or(from));
         vec![blend(a.x, b.x), blend(a.y, b.y)]
     }
-
 
     /// `lhs + rhs` (`v3Add`).
     pub fn v3_add(&self, lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
@@ -190,7 +193,6 @@ impl GameBridge {
         vec![blend(a.x, b.x), blend(a.y, b.y), blend(a.z, b.z)]
     }
 
-
     /// The 4×4 identity (`mat4Identity`).
     pub fn mat4_identity(&self) -> Vec<f64> {
         mat_out(MathApi::new().mat4_identity())
@@ -224,16 +226,23 @@ impl GameBridge {
     /// A TRS (translate · rotate · scale) composition matrix (`mat4FromTRS`),
     /// through the math layer's `Transform::to_matrix`.
     pub fn mat4_from_trs(&self, t: &[f64], r: &[f64], s: &[f64]) -> Vec<f64> {
-        mat_out(MathApi::new().transform(v3_in(t), quat_in(r), v3_in(s)).to_matrix())
+        mat_out(
+            MathApi::new()
+                .transform(v3_in(t), quat_in(r), v3_in(s))
+                .to_matrix(),
+        )
     }
 
     /// The inverse of a 4×4 matrix (`mat4Invert`), through the math layer's
     /// general inverse; a singular / non-finite matrix (which the facade rejects)
     /// falls back to the identity (the inert boundary value).
     pub fn mat4_invert(&self, m: &[f64]) -> Vec<f64> {
-        mat_out(MathApi::new().mat4_invert(mat_in(m)).unwrap_or(Mat4::IDENTITY))
+        mat_out(
+            MathApi::new()
+                .mat4_invert(mat_in(m))
+                .unwrap_or(Mat4::IDENTITY),
+        )
     }
-
 
     /// The identity quaternion (`quatIdentity`).
     pub fn quat_identity(&self) -> Vec<f64> {
@@ -245,8 +254,10 @@ impl GameBridge {
     /// axes are always finite, so the identity fallback is unreachable in practice).
     pub fn quat_from_euler(&self, pitch: f64, yaw: f64, roll: f64) -> Vec<f64> {
         let m = MathApi::new();
-        let axis =
-            |a: Vec3, angle: f64| m.quat_from_axis_angle(a, angle as f32).unwrap_or(Quat::IDENTITY);
+        let axis = |a: Vec3, angle: f64| {
+            m.quat_from_axis_angle(a, angle as f32)
+                .unwrap_or(Quat::IDENTITY)
+        };
         let qx = axis(Vec3::UNIT_X, pitch);
         let qy = axis(Vec3::UNIT_Y, yaw);
         let qz = axis(Vec3::UNIT_Z, roll);
@@ -269,11 +280,14 @@ impl GameBridge {
         mat_out(MathApi::new().mat4_from_quaternion(quat_in(q)))
     }
 
-
     /// Constrain `v` to `[lo, hi]` (`clamp`); an inverted/non-finite range (which
     /// the facade rejects) returns `v` unchanged (the inert identity behaviour).
     pub fn clamp_scalar(&self, v: f64, lo: f64, hi: f64) -> f64 {
-        f64::from(MathApi::new().clamp(v as f32, lo as f32, hi as f32).unwrap_or(v as f32))
+        f64::from(
+            MathApi::new()
+                .clamp(v as f32, lo as f32, hi as f32)
+                .unwrap_or(v as f32),
+        )
     }
 
     /// Wrap `angle` to `(-π, π]` (`normalizeAngle`); a non-finite angle returns `0`.
@@ -286,9 +300,12 @@ impl GameBridge {
     /// — the single `lerp` source of truth (SPEC-03 §3.4); a non-finite argument
     /// (which the facade rejects) returns `a` unchanged (the inert start value).
     pub fn lerp(&self, a: f64, b: f64, t: f64) -> f64 {
-        f64::from(MathApi::new().lerp(a as f32, b as f32, t as f32).unwrap_or(a as f32))
+        f64::from(
+            MathApi::new()
+                .lerp(a as f32, b as f32, t as f32)
+                .unwrap_or(a as f32),
+        )
     }
-
 
     /// Whether rects `a` and `b` (each `[x, y, w, h]`) share any point
     /// (`aabbOverlap`), via the math layer's z=0 [`Aabb::overlaps`]; an invalid
@@ -567,7 +584,10 @@ mod tests {
         // The zero vector is the un-normalizable case: it returns the zero vector.
         assert_eq!(b.v3_normalize(&[0.0, 0.0, 0.0]), vec![0.0, 0.0, 0.0]);
         assert_eq!(b.v3_dist(&[0.0, 0.0, 0.0], &[3.0, 4.0, 0.0]), 5.0);
-        assert_eq!(b.v3_lerp(&[0.0, 0.0, 0.0], &[2.0, 4.0, 8.0], 0.5), vec![1.0, 2.0, 4.0]);
+        assert_eq!(
+            b.v3_lerp(&[0.0, 0.0, 0.0], &[2.0, 4.0, 8.0], 0.5),
+            vec![1.0, 2.0, 4.0]
+        );
     }
 
     /// Mirrors the `v3` cross-check for the 2D vector surface: each `v2` projection
@@ -599,8 +619,14 @@ mod tests {
     fn scalar_lerp_matches_axiom_math() {
         let b = bridge();
         let m = MathApi::new();
-        assert_eq!(b.lerp(0.0, 10.0, 0.5), f64::from(m.lerp(0.0, 10.0, 0.5).unwrap()));
-        assert_eq!(b.lerp(-4.0, 4.0, 0.25), f64::from(m.lerp(-4.0, 4.0, 0.25).unwrap()));
+        assert_eq!(
+            b.lerp(0.0, 10.0, 0.5),
+            f64::from(m.lerp(0.0, 10.0, 0.5).unwrap())
+        );
+        assert_eq!(
+            b.lerp(-4.0, 4.0, 0.25),
+            f64::from(m.lerp(-4.0, 4.0, 0.25).unwrap())
+        );
         assert_eq!(b.lerp(0.0, 10.0, 0.0), 0.0);
         assert_eq!(b.lerp(0.0, 10.0, 1.0), 10.0);
         // A non-finite arg is the facade's reject path: lerp returns `a` unchanged.
@@ -616,8 +642,14 @@ mod tests {
         let base = Aabb::new(Vec3::ZERO, Vec3::new(2.0, 2.0, 0.0)).unwrap();
         let hit = Aabb::new(Vec3::new(1.0, 1.0, 0.0), Vec3::new(3.0, 3.0, 0.0)).unwrap();
         let miss = Aabb::new(Vec3::new(5.0, 5.0, 0.0), Vec3::new(6.0, 6.0, 0.0)).unwrap();
-        assert_eq!(b.aabb_overlap(&[0.0, 0.0, 2.0, 2.0], &[1.0, 1.0, 2.0, 2.0]), base.overlaps(&hit));
-        assert_eq!(b.aabb_overlap(&[0.0, 0.0, 2.0, 2.0], &[5.0, 5.0, 1.0, 1.0]), base.overlaps(&miss));
+        assert_eq!(
+            b.aabb_overlap(&[0.0, 0.0, 2.0, 2.0], &[1.0, 1.0, 2.0, 2.0]),
+            base.overlaps(&hit)
+        );
+        assert_eq!(
+            b.aabb_overlap(&[0.0, 0.0, 2.0, 2.0], &[5.0, 5.0, 1.0, 1.0]),
+            base.overlaps(&miss)
+        );
         assert!(b.aabb_overlap(&[0.0, 0.0, 2.0, 2.0], &[1.0, 1.0, 2.0, 2.0]));
         assert!(!b.aabb_overlap(&[0.0, 0.0, 2.0, 2.0], &[5.0, 5.0, 1.0, 1.0]));
         // An inverted rect (negative width) is the reject path -> false.
@@ -638,8 +670,14 @@ mod tests {
         let s1 = Sphere::new(Vec3::ZERO, 2.0).unwrap();
         let near = Sphere::new(Vec3::new(3.0, 0.0, 0.0), 2.0).unwrap();
         let far = Sphere::new(Vec3::new(10.0, 0.0, 0.0), 1.0).unwrap();
-        assert_eq!(b.circle_overlap(&[0.0, 0.0, 2.0], &[3.0, 0.0, 2.0]), s1.overlaps(&near));
-        assert_eq!(b.circle_overlap(&[0.0, 0.0, 2.0], &[10.0, 0.0, 1.0]), s1.overlaps(&far));
+        assert_eq!(
+            b.circle_overlap(&[0.0, 0.0, 2.0], &[3.0, 0.0, 2.0]),
+            s1.overlaps(&near)
+        );
+        assert_eq!(
+            b.circle_overlap(&[0.0, 0.0, 2.0], &[10.0, 0.0, 1.0]),
+            s1.overlaps(&far)
+        );
         assert!(b.circle_overlap(&[0.0, 0.0, 2.0], &[3.0, 0.0, 2.0]));
         assert!(!b.circle_overlap(&[0.0, 0.0, 2.0], &[10.0, 0.0, 1.0]));
         // A negative radius is the reject path -> false.
@@ -650,8 +688,13 @@ mod tests {
     fn mat4_ops_match_axiom_math_for_sample_inputs() {
         let b = bridge();
         let m = MathApi::new();
-        let promote =
-            |mat: Mat4| mat.as_cols_array().iter().copied().map(f64::from).collect::<Vec<f64>>();
+        let promote = |mat: Mat4| {
+            mat.as_cols_array()
+                .iter()
+                .copied()
+                .map(f64::from)
+                .collect::<Vec<f64>>()
+        };
         assert_eq!(b.mat4_identity(), promote(Mat4::IDENTITY));
         // identity · identity == identity.
         assert_eq!(
@@ -664,10 +707,17 @@ mod tests {
         );
         assert_eq!(
             b.mat4_look_at(&[0.0, 0.0, 5.0], &[0.0, 0.0, 0.0], &[0.0, 1.0, 0.0]),
-            promote(m.mat4_look_at(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO, Vec3::UNIT_Y).unwrap())
+            promote(
+                m.mat4_look_at(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO, Vec3::UNIT_Y)
+                    .unwrap()
+            )
         );
         let trs = m
-            .transform(Vec3::new(1.0, 2.0, 3.0), Quat::IDENTITY, Vec3::new(2.0, 2.0, 2.0))
+            .transform(
+                Vec3::new(1.0, 2.0, 3.0),
+                Quat::IDENTITY,
+                Vec3::new(2.0, 2.0, 2.0),
+            )
             .to_matrix();
         assert_eq!(
             b.mat4_from_trs(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0, 1.0], &[2.0, 2.0, 2.0]),
@@ -679,8 +729,13 @@ mod tests {
     fn mat4_invert_matches_axiom_math_and_falls_back_on_singular() {
         let b = bridge();
         let m = MathApi::new();
-        let promote =
-            |mat: Mat4| mat.as_cols_array().iter().copied().map(f64::from).collect::<Vec<f64>>();
+        let promote = |mat: Mat4| {
+            mat.as_cols_array()
+                .iter()
+                .copied()
+                .map(f64::from)
+                .collect::<Vec<f64>>()
+        };
         // A translation matrix inverts to its negation — the same value the facade
         // (the single source of truth) produces; no inverse is re-derived here.
         let translate = Mat4::translation(Vec3::new(3.0, -4.0, 5.0));
@@ -696,10 +751,21 @@ mod tests {
     fn quat_ops_match_axiom_math_for_sample_inputs() {
         let b = bridge();
         let m = MathApi::new();
-        let promote_q =
-            |q: Quat| vec![f64::from(q.x), f64::from(q.y), f64::from(q.z), f64::from(q.w)];
-        let promote_m =
-            |mat: Mat4| mat.as_cols_array().iter().copied().map(f64::from).collect::<Vec<f64>>();
+        let promote_q = |q: Quat| {
+            vec![
+                f64::from(q.x),
+                f64::from(q.y),
+                f64::from(q.z),
+                f64::from(q.w),
+            ]
+        };
+        let promote_m = |mat: Mat4| {
+            mat.as_cols_array()
+                .iter()
+                .copied()
+                .map(f64::from)
+                .collect::<Vec<f64>>()
+        };
         assert_eq!(b.quat_identity(), promote_q(Quat::IDENTITY));
         // The Euler composition matches the same axis-angle product the bridge uses.
         let qx = m.quat_from_axis_angle(Vec3::UNIT_X, 0.5).unwrap();
@@ -715,10 +781,19 @@ mod tests {
             b.quat_multiply(&[0.1, 0.2, 0.3, 0.4], &[0.5, 0.6, 0.7, 0.8]),
             promote_q(a.multiply(c))
         );
-        assert_eq!(b.quat_normalize(&[0.1, 0.2, 0.3, 0.4]), promote_q(a.normalize().unwrap()));
+        assert_eq!(
+            b.quat_normalize(&[0.1, 0.2, 0.3, 0.4]),
+            promote_q(a.normalize().unwrap())
+        );
         // The zero quaternion is the un-normalizable case: it returns the identity.
-        assert_eq!(b.quat_normalize(&[0.0, 0.0, 0.0, 0.0]), promote_q(Quat::IDENTITY));
-        assert_eq!(b.quat_to_mat4(&[0.1, 0.2, 0.3, 0.4]), promote_m(Mat4::from_quaternion(a)));
+        assert_eq!(
+            b.quat_normalize(&[0.0, 0.0, 0.0, 0.0]),
+            promote_q(Quat::IDENTITY)
+        );
+        assert_eq!(
+            b.quat_to_mat4(&[0.1, 0.2, 0.3, 0.4]),
+            promote_m(Mat4::from_quaternion(a))
+        );
     }
 
     #[test]
@@ -729,8 +804,10 @@ mod tests {
         assert_eq!(b.clamp_scalar(-1.0, 0.0, 3.0), 0.0);
         // An inverted range is the facade's reject path: clamp returns v unchanged.
         assert_eq!(b.clamp_scalar(5.0, 3.0, 0.0), 5.0);
-        let wrapped =
-            f64::from(m.normalize_angle(axiom_kernel::Radians::new(7.0).unwrap()).get());
+        let wrapped = f64::from(
+            m.normalize_angle(axiom_kernel::Radians::new(7.0).unwrap())
+                .get(),
+        );
         assert_eq!(b.normalize_angle(7.0), wrapped);
         // A non-finite angle is the reject path: normalize returns 0.
         assert_eq!(b.normalize_angle(f64::INFINITY), 0.0);
@@ -740,7 +817,13 @@ mod tests {
     #[test]
     fn math_projections_are_deterministic() {
         let b = bridge();
-        assert_eq!(b.v3_cross(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0]), b.v3_cross(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0]));
-        assert_eq!(b.quat_from_euler(0.3, 0.6, 0.9), b.quat_from_euler(0.3, 0.6, 0.9));
+        assert_eq!(
+            b.v3_cross(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0]),
+            b.v3_cross(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0])
+        );
+        assert_eq!(
+            b.quat_from_euler(0.3, 0.6, 0.9),
+            b.quat_from_euler(0.3, 0.6, 0.9)
+        );
     }
 }

@@ -191,14 +191,8 @@ mod tests {
     fn mismatched_steps_executed_is_rejected_as_invalid_timing() {
         let input = HostFrameInput::new(1, STEP_NANOS, vp());
         let plan = HostStepPlan::build(&input, &cfg(), &visible(), 0);
-        let mismatched = HostFrameReport::new(
-            input.sequence(),
-            plan,
-            0,
-            Vec::new(),
-            vp(),
-            visible(),
-        );
+        let mismatched =
+            HostFrameReport::new(input.sequence(), plan, 0, Vec::new(), vp(), visible());
         let err = FrameTiming::from_host_report(&mismatched, STEP_NANOS).unwrap_err();
         assert_eq!(err.code(), FrameErrorCode::InvalidFrameTiming);
     }

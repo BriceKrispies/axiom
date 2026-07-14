@@ -10,8 +10,8 @@ use std::fmt;
 use std::time::Instant;
 
 use axiom::prelude::{
-    App, Angle, Camera, Color, DirectionalLight, Material, Meters, MeshData, PerspectiveProjection, Ratio, RunningApp,
-    Spawn, Transform, Vec3,
+    Angle, App, Camera, Color, DirectionalLight, Material, MeshData, Meters, PerspectiveProjection,
+    Ratio, RunningApp, Spawn, Transform, Vec3,
 };
 use axiom_math::Quat;
 use axiom_proc_mesh::{MeshBuffer, ProcMeshApi};
@@ -64,21 +64,36 @@ impl fmt::Display for RoomReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Axiom Proc v0 — demo room size report")?;
         writeln!(f, "  recipe bytes (shipped) : {}", self.recipe_bytes)?;
-        writeln!(f, "  texture RAM (generated): {} bytes", self.texture_memory_bytes)?;
+        writeln!(
+            f,
+            "  texture RAM (generated): {} bytes",
+            self.texture_memory_bytes
+        )?;
         writeln!(f, "  mesh vertices          : {}", self.mesh_vertices)?;
         writeln!(f, "  mesh indices           : {}", self.mesh_indices)?;
         writeln!(f, "  expansion time         : {} us", self.expansion_micros)?;
-        writeln!(f, "  resources: {} textures, {} meshes, {} materials, {} renderables",
-            self.texture_count, self.mesh_count, self.material_count, self.renderable_count)?;
+        writeln!(
+            f,
+            "  resources: {} textures, {} meshes, {} materials, {} renderables",
+            self.texture_count, self.mesh_count, self.material_count, self.renderable_count
+        )?;
         let ratio = self.texture_memory_bytes.max(1) as f64 / self.recipe_bytes.max(1) as f64;
-        write!(f, "  expansion ratio        : {ratio:.1}x (generated RAM / recipe bytes)")
+        write!(
+            f,
+            "  expansion ratio        : {ratio:.1}x (generated RAM / recipe bytes)"
+        )
     }
 }
 
 /// Convert a neutral mesh buffer into the engine's `MeshData` — the same math
 /// vector types on both sides, so this is a plain move of the streams.
 fn to_mesh_data(mb: &MeshBuffer) -> MeshData {
-    MeshData::new(mb.positions().to_vec(), mb.normals().to_vec(), mb.uvs().to_vec(), mb.indices().to_vec())
+    MeshData::new(
+        mb.positions().to_vec(),
+        mb.normals().to_vec(),
+        mb.uvs().to_vec(),
+        mb.indices().to_vec(),
+    )
 }
 
 /// A unit `Ratio`.
@@ -116,21 +131,54 @@ pub fn expand(recipes: &DemoRecipes, seed: u64) -> (RunningApp, RoomReport) {
     let crate_mat = app.add_material(Material::lit(Color::WHITE).with_custom_texture(crate_tex));
 
     // Meshes → registered as runtime mesh resources.
-    let floor_mb = meshes.bake(&recipes.floor_mesh, seed).expect("floor mesh recipe is valid");
-    let wall_mb = meshes.bake(&recipes.wall_mesh, seed).expect("wall mesh recipe is valid");
-    let crate_mb = meshes.bake(&recipes.crate_mesh, seed).expect("crate mesh recipe is valid");
+    let floor_mb = meshes
+        .bake(&recipes.floor_mesh, seed)
+        .expect("floor mesh recipe is valid");
+    let wall_mb = meshes
+        .bake(&recipes.wall_mesh, seed)
+        .expect("wall mesh recipe is valid");
+    let crate_mb = meshes
+        .bake(&recipes.crate_mesh, seed)
+        .expect("crate mesh recipe is valid");
     let mesh_vertices = floor_mb.vertex_count() + wall_mb.vertex_count() + crate_mb.vertex_count();
-    let mesh_indices = floor_mb.indices().len() + wall_mb.indices().len() + crate_mb.indices().len();
-    let floor = app.add_mesh_data(to_mesh_data(&floor_mb)).expect("floor mesh is well-formed");
-    let wall = app.add_mesh_data(to_mesh_data(&wall_mb)).expect("wall mesh is well-formed");
-    let crate_h = app.add_mesh_data(to_mesh_data(&crate_mb)).expect("crate mesh is well-formed");
+    let mesh_indices =
+        floor_mb.indices().len() + wall_mb.indices().len() + crate_mb.indices().len();
+    let floor = app
+        .add_mesh_data(to_mesh_data(&floor_mb))
+        .expect("floor mesh is well-formed");
+    let wall = app
+        .add_mesh_data(to_mesh_data(&wall_mb))
+        .expect("wall mesh is well-formed");
+    let crate_h = app
+        .add_mesh_data(to_mesh_data(&crate_mb))
+        .expect("crate mesh is well-formed");
 
     // Scene: floor flat, a thin wall at the back, a crate resting on the floor.
     // Each spawn adds a renderable node to the scene graph.
     let spawns = [
-        Spawn::new(Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)), floor, floor_mat),
-        Spawn::new(Transform::new(Vec3::new(0.0, 1.5, -5.0), Quat::IDENTITY, Vec3::new(6.0, 3.0, 0.3)), wall, wall_mat),
-        Spawn::new(Transform::new(Vec3::new(1.5, 0.5, -1.0), Quat::IDENTITY, Vec3::new(1.0, 1.0, 1.0)), crate_h, crate_mat),
+        Spawn::new(
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            floor,
+            floor_mat,
+        ),
+        Spawn::new(
+            Transform::new(
+                Vec3::new(0.0, 1.5, -5.0),
+                Quat::IDENTITY,
+                Vec3::new(6.0, 3.0, 0.3),
+            ),
+            wall,
+            wall_mat,
+        ),
+        Spawn::new(
+            Transform::new(
+                Vec3::new(1.5, 0.5, -1.0),
+                Quat::IDENTITY,
+                Vec3::new(1.0, 1.0, 1.0),
+            ),
+            crate_h,
+            crate_mat,
+        ),
     ];
     let renderable_count = spawns
         .into_iter()
@@ -150,7 +198,11 @@ pub fn expand(recipes: &DemoRecipes, seed: u64) -> (RunningApp, RoomReport) {
         .expect("camera has a valid orientation");
     app.set_camera(Camera::perspective(projection), eye);
     app.add_light(
-        DirectionalLight { direction: Vec3::new(-0.3, -1.0, -0.2), color: Color::WHITE, intensity: unit(1.0) },
+        DirectionalLight {
+            direction: Vec3::new(-0.3, -1.0, -0.2),
+            color: Color::WHITE,
+            intensity: unit(1.0),
+        },
         Transform::IDENTITY,
     );
 
@@ -170,7 +222,8 @@ pub fn expand(recipes: &DemoRecipes, seed: u64) -> (RunningApp, RoomReport) {
 
 /// Bake one texture recipe (panicking only on an authored-invalid recipe).
 fn bake_texture(api: &ProcTextureApi, recipe: &RecipeGraph, seed: u64) -> TextureBuffer {
-    api.bake(recipe, seed).expect("authored texture recipe is valid")
+    api.bake(recipe, seed)
+        .expect("authored texture recipe is valid")
 }
 
 /// The RAM footprint of a generated texture.
@@ -181,5 +234,7 @@ fn px_bytes(t: &TextureBuffer) -> usize {
 /// Register a generated texture as a runtime resource, returning its handle id.
 fn register_texture(app: &mut RunningApp, t: TextureBuffer) -> u64 {
     let (w, h) = (t.width(), t.height());
-    app.add_texture_data(w, h, t.into_pixels()).expect("generated texture is well-formed").id()
+    app.add_texture_data(w, h, t.into_pixels())
+        .expect("generated texture is well-formed")
+        .id()
 }

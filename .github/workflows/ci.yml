@@ -110,7 +110,12 @@ jobs:
           key: ${{ runner.os }}-dylint-${{ hashFiles('**/Cargo.lock', 'tools/lints/**/Cargo.toml') }}
 
       - name: Install cargo-dylint (pinned to the rulebook's dylint_linting version)
-        run: cargo install cargo-dylint@6.0.1 dylint-link@6.0.1 --locked
+        # The cargo cache restores ~/.cargo/bin, and a plain `cargo install`
+        # refuses to overwrite an existing binary — so skip when the pinned
+        # version is already present and force-reinstall otherwise.
+        run: |
+          cargo dylint --version 2>/dev/null | grep -q '^cargo-dylint 6\.0\.1$' \
+            || cargo install cargo-dylint@6.0.1 dylint-link@6.0.1 --locked --force
 
       - name: Dylint rulebook gate (engine lint ratchet)
         run: bash scripts/dylint-gate.sh

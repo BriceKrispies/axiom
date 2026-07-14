@@ -445,7 +445,10 @@ mod tests {
         assert!(fresh.restore_session(&blob));
         let original: Vec<u64> = (0..8).map(|_| s.rng.next_u64()).collect();
         let replayed: Vec<u64> = (0..8).map(|_| fresh.rng.next_u64()).collect();
-        assert_eq!(original, replayed, "the session blob carries and resumes the rng");
+        assert_eq!(
+            original, replayed,
+            "the session blob carries and resumes the rng"
+        );
 
         assert!(!fresh.restore_session(&[1, 2, 3]));
     }

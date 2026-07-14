@@ -54,7 +54,8 @@ impl EntropyStream {
     /// a `u64` draw over `2^24`, so it is always finite and strictly below `1`.
     pub fn unit(&mut self) -> Ratio {
         let bits = self.rng.next_u64() >> 40;
-        Ratio::new(bits as f32 / 16_777_216.0).expect("a 24-bit fraction over 2^24 is finite in [0, 1)")
+        Ratio::new(bits as f32 / 16_777_216.0)
+            .expect("a 24-bit fraction over 2^24 is finite in [0, 1)")
     }
 
     /// A uniform integer in `[0, max_exclusive)` (yields `0` when

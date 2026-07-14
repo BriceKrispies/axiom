@@ -59,19 +59,33 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 /// Write the figure + clip as portable binary assets.
 fn emit_assets(dir: &str) {
     std::fs::create_dir_all(dir).ok();
-    write_bytes(&Path::new(dir).join("sample.figure").to_string_lossy(), &authoring::figure_bytes());
-    write_bytes(&Path::new(dir).join("sample.clip").to_string_lossy(), &authoring::clip_bytes());
+    write_bytes(
+        &Path::new(dir).join("sample.figure").to_string_lossy(),
+        &authoring::figure_bytes(),
+    );
+    write_bytes(
+        &Path::new(dir).join("sample.clip").to_string_lossy(),
+        &authoring::clip_bytes(),
+    );
 }
 
 /// A text table of frames: every frame with `full`, else a handful of key ones.
 fn table(scene: &LabScene, full: bool) -> String {
     let key = [0_u32, 12, 18, 24, 33, 42, 47];
-    let frames: Vec<u32> = if full { (0..scene.frame_count()).collect() } else { key.to_vec() };
+    let frames: Vec<u32> = if full {
+        (0..scene.frame_count()).collect()
+    } else {
+        key.to_vec()
+    };
     let mut out = String::from("frame  phase           event    swing(z,y)       anchor(z,y)\n");
     for f in frames {
         let view = scene.view(f);
         let phase = view.phase.map_or("-", phase_name);
-        let event = if view.is_event_frame { "  *  " } else { "     " };
+        let event = if view.is_event_frame {
+            "  *  "
+        } else {
+            "     "
+        };
         out.push_str(&format!(
             "{f:>3}    {phase:<14}  {event}   ({:+.2}, {:+.2})   ({:+.2}, {:+.2})\n",
             view.swing_joint.z, view.swing_joint.y, view.anchor_joint.z, view.anchor_joint.y

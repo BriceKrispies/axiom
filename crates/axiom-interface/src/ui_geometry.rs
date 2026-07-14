@@ -140,7 +140,12 @@ mod tests {
 
     #[test]
     fn contains_is_half_open_on_both_axes() {
-        let r = UiRect::new(UiUnit::new(10.0), UiUnit::new(20.0), UiUnit::new(30.0), UiUnit::new(40.0));
+        let r = UiRect::new(
+            UiUnit::new(10.0),
+            UiUnit::new(20.0),
+            UiUnit::new(30.0),
+            UiUnit::new(40.0),
+        );
         assert!(r.contains(UiUnit::new(15.0), UiUnit::new(25.0)));
         assert!(r.contains(UiUnit::new(10.0), UiUnit::new(20.0)));
         assert!(!r.contains(UiUnit::new(40.0), UiUnit::new(25.0)));

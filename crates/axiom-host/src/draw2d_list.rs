@@ -261,7 +261,10 @@ mod tests {
         assert_eq!(lin, PaintId::from_raw(0));
         assert_eq!(rad, PaintId::from_raw(1));
         assert_eq!(list.paint_count(), 2);
-        assert_eq!(list.paint_linear(lin), Some((Vec2::ZERO, Vec2::new(1.0, 0.0))));
+        assert_eq!(
+            list.paint_linear(lin),
+            Some((Vec2::ZERO, Vec2::new(1.0, 0.0)))
+        );
         assert_eq!(list.paint_radial(rad), Some((Vec2::ONE, meters(4.0))));
         assert_eq!(list.paint_stops(lin).map(|s| s.len()), Some(2));
     }
@@ -275,8 +278,14 @@ mod tests {
         ];
         let lin = list.register_linear(Vec2::ZERO, Vec2::new(1.0, 0.0), stops.clone());
         let rad = list.register_radial(Vec2::ONE, meters(4.0), stops);
-        assert_eq!(list.paint_texture(lin, 8).map(|(w, h, _)| (w, h)), Some((8, 1)));
-        assert_eq!(list.paint_texture(rad, 8).map(|(w, h, _)| (w, h)), Some((8, 8)));
+        assert_eq!(
+            list.paint_texture(lin, 8).map(|(w, h, _)| (w, h)),
+            Some((8, 1))
+        );
+        assert_eq!(
+            list.paint_texture(rad, 8).map(|(w, h, _)| (w, h)),
+            Some((8, 8))
+        );
         assert_eq!(list.paint_texture(PaintId::from_raw(9), 8), None);
     }
 

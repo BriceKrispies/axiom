@@ -146,10 +146,7 @@ mod tests {
         assert_eq!(session_params_json("?seed=1"), "{}");
         assert_eq!(session_params_json(""), "{}");
         // A value carrying a quote/backslash is escaped, never breaking the object.
-        assert_eq!(
-            session_params_json("tag=a\"b\\c"),
-            r#"{"tag":"a\"b\\c"}"#
-        );
+        assert_eq!(session_params_json("tag=a\"b\\c"), r#"{"tag":"a\"b\\c"}"#);
     }
 
     #[test]

@@ -130,9 +130,18 @@ mod tests {
     #[test]
     fn font_atlas_texture_reserves_a_high_per_font_slot() {
         // Handle 0 (none) and handle 1 both map to the reserved base (saturating sub).
-        assert_eq!(FontHandle::from_raw(1).atlas_texture(), TextureId::from_raw(0x00F0_0000));
-        assert_eq!(FontHandle::from_raw(0).atlas_texture(), TextureId::from_raw(0x00F0_0000));
-        assert_eq!(FontHandle::from_raw(2).atlas_texture(), TextureId::from_raw(0x00F0_0001));
+        assert_eq!(
+            FontHandle::from_raw(1).atlas_texture(),
+            TextureId::from_raw(0x00F0_0000)
+        );
+        assert_eq!(
+            FontHandle::from_raw(0).atlas_texture(),
+            TextureId::from_raw(0x00F0_0000)
+        );
+        assert_eq!(
+            FontHandle::from_raw(2).atlas_texture(),
+            TextureId::from_raw(0x00F0_0001)
+        );
     }
 
     #[test]

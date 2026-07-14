@@ -21,8 +21,15 @@ pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; HMAC_SHA256_LEN] {
     let block = key_block(key);
     let inner_pad: Vec<u8> = block.iter().map(|&b| b ^ IPAD).collect();
     let outer_pad: Vec<u8> = block.iter().map(|&b| b ^ OPAD).collect();
-    let inner = Sha256::new().chain_update(&inner_pad).chain_update(message).finalize();
-    Sha256::new().chain_update(&outer_pad).chain_update(inner).finalize().into()
+    let inner = Sha256::new()
+        .chain_update(&inner_pad)
+        .chain_update(message)
+        .finalize();
+    Sha256::new()
+        .chain_update(&outer_pad)
+        .chain_update(inner)
+        .finalize()
+        .into()
 }
 
 /// The block-sized key `K0`: the raw key (right-zero-padded) when it fits in a
@@ -72,6 +79,9 @@ mod tests {
         // hash produce the same MAC (the defining property of the long-key branch).
         let long_key = vec![0xaau8; BLOCK_LEN + 1];
         let hashed: [u8; 32] = Sha256::digest(&long_key).into();
-        assert_eq!(hmac_sha256(&long_key, b"data"), hmac_sha256(&hashed, b"data"));
+        assert_eq!(
+            hmac_sha256(&long_key, b"data"),
+            hmac_sha256(&hashed, b"data")
+        );
     }
 }

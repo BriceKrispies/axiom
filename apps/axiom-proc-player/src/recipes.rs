@@ -96,7 +96,15 @@ fn brick_texture() -> RecipeGraph {
     let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
     let b = g.add(
         TextureOp::Bricks as u16,
-        vec![i(128), i(128), i(6), i(3), i(4), col(0xB0, 0x50, 0x40), col(0x2E, 0x2E, 0x2E)],
+        vec![
+            i(128),
+            i(128),
+            i(6),
+            i(3),
+            i(4),
+            col(0xB0, 0x50, 0x40),
+            col(0x2E, 0x2E, 0x2E),
+        ],
         vec![],
     );
     g.add(TextureOp::Blur as u16, vec![i(1)], vec![b]);
@@ -108,10 +116,20 @@ fn floor_texture() -> RecipeGraph {
     let mut g = RecipeGraph::new(RecipeId::from_raw(2), 1);
     let n = g.add(
         TextureOp::Noise as u16,
-        vec![i(128), i(128), i(8), col(0x00, 0x00, 0x00), col(0xFF, 0xFF, 0xFF)],
+        vec![
+            i(128),
+            i(128),
+            i(8),
+            col(0x00, 0x00, 0x00),
+            col(0xFF, 0xFF, 0xFF),
+        ],
         vec![],
     );
-    g.add(TextureOp::ColorRamp as u16, vec![col(0x2C, 0x24, 0x1C), col(0x6E, 0x5E, 0x4C)], vec![n]);
+    g.add(
+        TextureOp::ColorRamp as u16,
+        vec![col(0x2C, 0x24, 0x1C), col(0x6E, 0x5E, 0x4C)],
+        vec![n],
+    );
     g
 }
 

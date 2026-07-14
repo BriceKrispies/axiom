@@ -162,8 +162,11 @@ impl RenderCommandArtifact {
     /// Extract this command's `DrawIndexed` `(index_count, world, object_tag)`,
     /// or `None`.
     pub fn as_draw_indexed(&self) -> Option<(u32, Mat4, u32)> {
-        (self.kind == Self::KIND_DRAW_INDEXED)
-            .then_some((self.index_count, self.world, self.object_tag))
+        (self.kind == Self::KIND_DRAW_INDEXED).then_some((
+            self.index_count,
+            self.world,
+            self.object_tag,
+        ))
     }
 }
 

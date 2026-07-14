@@ -38,7 +38,10 @@ mod tests {
     use crate::host_param_value::HostParamValue;
 
     fn params() -> HostSessionParams {
-        HostSessionParams::new().with(String::from("uid"), HostParamValue::Text(String::from("p7")))
+        HostSessionParams::new().with(
+            String::from("uid"),
+            HostParamValue::Text(String::from("p7")),
+        )
     }
 
     #[test]

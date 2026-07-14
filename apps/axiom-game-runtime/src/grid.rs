@@ -57,7 +57,14 @@ impl GameBridge {
     /// (`gridPath`), flattened to `[x0, y0, x1, y1, …]`; an unreachable goal is the
     /// empty list (the edge's empty `Result`). Endpoints cross as 2-element
     /// `[x, y]` slices.
-    pub fn grid_path(&self, cols: u32, rows: u32, mask: &[u8], start: &[i32], goal: &[i32]) -> Vec<f64> {
+    pub fn grid_path(
+        &self,
+        cols: u32,
+        rows: u32,
+        mask: &[u8],
+        start: &[i32],
+        goal: &[i32],
+    ) -> Vec<f64> {
         let grid = build_grid(cols, rows, mask);
         self.grid
             .path(&grid, cell_in(start), cell_in(goal), passable)
@@ -72,14 +79,28 @@ impl GameBridge {
 
     /// Whether `goal` is reachable from `start` over passable cells
     /// (`gridReachable`).
-    pub fn grid_reachable(&self, cols: u32, rows: u32, mask: &[u8], start: &[i32], goal: &[i32]) -> bool {
+    pub fn grid_reachable(
+        &self,
+        cols: u32,
+        rows: u32,
+        mask: &[u8],
+        start: &[i32],
+        goal: &[i32],
+    ) -> bool {
         let grid = build_grid(cols, rows, mask);
-        self.grid.reachable(&grid, cell_in(start), cell_in(goal), passable)
+        self.grid
+            .reachable(&grid, cell_in(start), cell_in(goal), passable)
     }
 
     /// The row-major BFS distance field from `start` (`gridDistanceField`), with
     /// `f64::INFINITY` at every unreachable cell.
-    pub fn grid_distance_field(&self, cols: u32, rows: u32, mask: &[u8], start: &[i32]) -> Vec<f64> {
+    pub fn grid_distance_field(
+        &self,
+        cols: u32,
+        rows: u32,
+        mask: &[u8],
+        start: &[i32],
+    ) -> Vec<f64> {
         let grid = build_grid(cols, rows, mask);
         let field = self.grid.distance_field(&grid, cell_in(start), passable);
         let cols = cols as usize;
@@ -95,9 +116,18 @@ impl GameBridge {
     /// The single best next cell stepping `from` toward `target`
     /// (`gridStepToward`), as `[x, y]` (stays put — `from` — with no passable
     /// neighbour).
-    pub fn grid_step_toward(&self, cols: u32, rows: u32, mask: &[u8], from: &[i32], target: &[i32]) -> Vec<f64> {
+    pub fn grid_step_toward(
+        &self,
+        cols: u32,
+        rows: u32,
+        mask: &[u8],
+        from: &[i32],
+        target: &[i32],
+    ) -> Vec<f64> {
         let grid = build_grid(cols, rows, mask);
-        let step = self.grid.step_toward(&grid, cell_in(from), cell_in(target), passable);
+        let step = self
+            .grid
+            .step_toward(&grid, cell_in(from), cell_in(target), passable);
         vec![f64::from(step.x), f64::from(step.y)]
     }
 }
@@ -113,25 +143,52 @@ mod wasm_exports {
         /// The canonical shortest path, flat `[x0, y0, …]` (`gridPath`); empty =
         /// unreachable. Endpoints cross as 2-element `[x, y]` slices.
         #[wasm_bindgen(js_name = gridPath)]
-        pub fn grid_path(&self, cols: u32, rows: u32, mask: &[u8], start: &[i32], goal: &[i32]) -> Vec<f64> {
+        pub fn grid_path(
+            &self,
+            cols: u32,
+            rows: u32,
+            mask: &[u8],
+            start: &[i32],
+            goal: &[i32],
+        ) -> Vec<f64> {
             self.bridge.grid_path(cols, rows, mask, start, goal)
         }
 
         /// Whether the goal is reachable from the start (`gridReachable`).
         #[wasm_bindgen(js_name = gridReachable)]
-        pub fn grid_reachable(&self, cols: u32, rows: u32, mask: &[u8], start: &[i32], goal: &[i32]) -> bool {
+        pub fn grid_reachable(
+            &self,
+            cols: u32,
+            rows: u32,
+            mask: &[u8],
+            start: &[i32],
+            goal: &[i32],
+        ) -> bool {
             self.bridge.grid_reachable(cols, rows, mask, start, goal)
         }
 
         /// The row-major BFS distance field (`gridDistanceField`).
         #[wasm_bindgen(js_name = gridDistanceField)]
-        pub fn grid_distance_field(&self, cols: u32, rows: u32, mask: &[u8], start: &[i32]) -> Vec<f64> {
+        pub fn grid_distance_field(
+            &self,
+            cols: u32,
+            rows: u32,
+            mask: &[u8],
+            start: &[i32],
+        ) -> Vec<f64> {
             self.bridge.grid_distance_field(cols, rows, mask, start)
         }
 
         /// The best next cell `[x, y]` stepping toward a target (`gridStepToward`).
         #[wasm_bindgen(js_name = gridStepToward)]
-        pub fn grid_step_toward(&self, cols: u32, rows: u32, mask: &[u8], from: &[i32], target: &[i32]) -> Vec<f64> {
+        pub fn grid_step_toward(
+            &self,
+            cols: u32,
+            rows: u32,
+            mask: &[u8],
+            from: &[i32],
+            target: &[i32],
+        ) -> Vec<f64> {
             self.bridge.grid_step_toward(cols, rows, mask, from, target)
         }
     }
@@ -175,7 +232,10 @@ mod tests {
             vec![0.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.0, 2.0, 2.0, 2.0, 2.0, 1.0, 2.0, 0.0]
         );
         // Same board + endpoints reproduce byte-identically (the BFS is pure).
-        assert_eq!(path, bridge().grid_path(COLS, ROWS, &walled_mask(), &[0, 0], &[2, 0]));
+        assert_eq!(
+            path,
+            bridge().grid_path(COLS, ROWS, &walled_mask(), &[0, 0], &[2, 0])
+        );
     }
 
     #[test]
@@ -208,16 +268,24 @@ mod tests {
     fn step_toward_takes_the_first_canonical_step_and_stays_put_when_blocked() {
         let b = bridge();
         // From (0,0) toward (0,2): the greedy step is straight down to (0,1).
-        assert_eq!(b.grid_step_toward(COLS, ROWS, &walled_mask(), &[0, 0], &[0, 2]), vec![0.0, 1.0]);
+        assert_eq!(
+            b.grid_step_toward(COLS, ROWS, &walled_mask(), &[0, 0], &[0, 2]),
+            vec![0.0, 1.0]
+        );
         // A cell whose only neighbours are all blocked stays put. A 1×1 all-blocked
         // board: the single cell has no passable neighbour, so it returns itself.
-        assert_eq!(b.grid_step_toward(1, 1, &[0], &[0, 0], &[0, 0]), vec![0.0, 0.0]);
+        assert_eq!(
+            b.grid_step_toward(1, 1, &[0], &[0, 0], &[0, 0]),
+            vec![0.0, 0.0]
+        );
     }
 
     #[test]
     fn an_unreachable_goal_is_the_empty_path() {
         let b = bridge();
         // Goal sits on a wall cell: no path exists, so the flat list is empty.
-        assert!(b.grid_path(COLS, ROWS, &walled_mask(), &[0, 0], &[1, 0]).is_empty());
+        assert!(b
+            .grid_path(COLS, ROWS, &walled_mask(), &[0, 0], &[1, 0])
+            .is_empty());
     }
 }

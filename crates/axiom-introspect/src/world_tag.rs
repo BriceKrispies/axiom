@@ -155,7 +155,14 @@ mod tests {
 
     fn sample() -> Vec<WorldTag> {
         vec![
-            WorldTag::new(1, "mountaintop".to_string(), 7, 1_000_000, 8_840_000_000, -2_000_000),
+            WorldTag::new(
+                1,
+                "mountaintop".to_string(),
+                7,
+                1_000_000,
+                8_840_000_000,
+                -2_000_000,
+            ),
             WorldTag::new(2, "ground".to_string(), 3, 0, 0, 0),
         ]
     }
@@ -184,7 +191,10 @@ mod tests {
 
     #[test]
     fn encoding_is_deterministic() {
-        assert_eq!(WorldTag::encode_set(&sample()), WorldTag::encode_set(&sample()));
+        assert_eq!(
+            WorldTag::encode_set(&sample()),
+            WorldTag::encode_set(&sample())
+        );
     }
 
     #[test]

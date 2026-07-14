@@ -245,7 +245,12 @@ fn retro_32bit_pixel(px: &mut [u8], profile: &FrameRetro32BitProfile, threshold:
 /// are geometry/target-stage effects the backends realize from the profile's
 /// fields. This is the whole-frame post shared by the CPU-readback backends
 /// (Canvas 2D, offscreen GPU); the GPU-live path mirrors it in WGSL.
-pub fn apply_frame_retro_32bit(rgba: &mut [u8], width: u32, height: u32, packet: &FramePacket) -> u64 {
+pub fn apply_frame_retro_32bit(
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    packet: &FramePacket,
+) -> u64 {
     packet
         .retro_32bit()
         .map(|profile| {
@@ -315,9 +320,14 @@ mod tests {
 
     #[test]
     fn no_profile_is_a_no_op() {
-        let mut rgba = vec![10u8, 20, 30, 255, 40, 50, 60, 128, 70, 80, 90, 200, 100, 110, 120, 64];
+        let mut rgba = vec![
+            10u8, 20, 30, 255, 40, 50, 60, 128, 70, 80, 90, 200, 100, 110, 120, 64,
+        ];
         let before = rgba.clone();
-        assert_eq!(apply_frame_retro_32bit(&mut rgba, 2, 2, &packet(2, 2, None)), 0);
+        assert_eq!(
+            apply_frame_retro_32bit(&mut rgba, 2, 2, &packet(2, 2, None)),
+            0
+        );
         assert_eq!(rgba, before);
     }
 
@@ -325,9 +335,22 @@ mod tests {
     fn full_color_no_dither_is_near_identity_and_counts() {
         // 256 levels, zero dither → quantize maps each byte back to itself.
         let p = FrameRetro32BitProfile::new(
-            ratio(0.0), ratio(1.0), ratio(0.0), [0.0; 3], [256, 256, 256], ratio(0.0), 1, 0, 0, 0, 0, 0,
+            ratio(0.0),
+            ratio(1.0),
+            ratio(0.0),
+            [0.0; 3],
+            [256, 256, 256],
+            ratio(0.0),
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
         );
-        let mut rgba = vec![80u8, 160, 240, 200, 0, 0, 0, 255, 255, 255, 255, 0, 17, 33, 199, 5];
+        let mut rgba = vec![
+            80u8, 160, 240, 200, 0, 0, 0, 255, 255, 255, 255, 0, 17, 33, 199, 5,
+        ];
         let count = apply_frame_retro_32bit(&mut rgba, 2, 2, &packet(2, 2, Some(p)));
         assert_eq!(count, 4);
         assert_eq!(&rgba[0..4], &[80, 160, 240, 200]); // preserved, alpha untouched
@@ -338,9 +361,22 @@ mod tests {
     fn two_level_quantize_snaps_to_black_or_white() {
         // 2 levels, no dither: below mid → 0, above mid → 255.
         let p = FrameRetro32BitProfile::new(
-            ratio(0.0), ratio(1.0), ratio(0.0), [0.0; 3], [2, 2, 2], ratio(0.0), 0, 0, 0, 0, 0, 0,
+            ratio(0.0),
+            ratio(1.0),
+            ratio(0.0),
+            [0.0; 3],
+            [2, 2, 2],
+            ratio(0.0),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         );
-        let mut rgba = vec![100u8, 200, 128, 255, 10, 250, 130, 255, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut rgba = vec![
+            100u8, 200, 128, 255, 10, 250, 130, 255, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
         apply_frame_retro_32bit(&mut rgba, 2, 2, &packet(2, 2, Some(p)));
         assert_eq!(rgba[0], 0); // 100/255=0.39 → 0
         assert_eq!(rgba[1], 255); // 200/255=0.78 → 255
@@ -352,7 +388,18 @@ mod tests {
         // A flat mid-grey through a 2-level quantize + full dither: the ordered
         // matrix pushes some pixels to white and others to black (not all equal).
         let p = FrameRetro32BitProfile::new(
-            ratio(0.0), ratio(1.0), ratio(0.0), [0.0; 3], [2, 2, 2], ratio(1.0), 0, 0, 0, 0, 0, 0,
+            ratio(0.0),
+            ratio(1.0),
+            ratio(0.0),
+            [0.0; 3],
+            [2, 2, 2],
+            ratio(1.0),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         );
         let mut rgba = vec![128u8; 16]; // 2x2 mid-grey
         apply_frame_retro_32bit(&mut rgba, 2, 2, &packet(2, 2, Some(p)));

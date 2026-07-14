@@ -35,7 +35,10 @@ fn runtime_viewport_toggles_between_placeholder_and_backend_triptych() {
 
     let triptych = viewport.with_view(RuntimeViewportView::BackendTriptych);
     assert_eq!(triptych.view(), RuntimeViewportView::BackendTriptych);
-    assert!(!triptych.attached(), "toggling the view attaches no runtime");
+    assert!(
+        !triptych.attached(),
+        "toggling the view attaches no runtime"
+    );
 
     let back = triptych.with_view(RuntimeViewportView::Placeholder);
     assert_eq!(back.view(), RuntimeViewportView::Placeholder);
@@ -79,7 +82,12 @@ fn play_controls_hold_launch_and_drop_in_as_data() {
     // Drop-In state is only launch + drop-in data attached to the panel. Staging
     // them stores readable values and produces no side effect (mode stays put).
     let launch = api().launch_spec(&sample_project());
-    let drop = api().drop_in("level.aa", [1.0, 2.0, 3.0], 0.25, Some(EntityId::from_raw(9)));
+    let drop = api().drop_in(
+        "level.aa",
+        [1.0, 2.0, 3.0],
+        0.25,
+        Some(EntityId::from_raw(9)),
+    );
 
     let staged = api()
         .play_controls_state()
@@ -104,10 +112,21 @@ fn timeline_replay_preserves_tick_order_and_holds_a_replay_request() {
 
     // Ticks are stored in exactly the order they are marked — not sorted.
     timeline.mark_tick(TimelineTick::new(Tick::new(5), None));
-    timeline.mark_tick(TimelineTick::new(Tick::new(2), Some(StableHash::of_bytes(b"snap"))));
+    timeline.mark_tick(TimelineTick::new(
+        Tick::new(2),
+        Some(StableHash::of_bytes(b"snap")),
+    ));
     timeline.mark_tick(TimelineTick::new(Tick::new(9), None));
-    let order: Vec<u64> = timeline.ticks().iter().map(|entry| entry.tick.raw()).collect();
-    assert_eq!(order, [5, 2, 9], "tick entries keep insertion order exactly");
+    let order: Vec<u64> = timeline
+        .ticks()
+        .iter()
+        .map(|entry| entry.tick.raw())
+        .collect();
+    assert_eq!(
+        order,
+        [5, 2, 9],
+        "tick entries keep insertion order exactly"
+    );
     assert!(timeline.ticks()[1].snapshot.is_some());
 
     // Replay-mode state references a ReplayRequest purely as data.
@@ -127,10 +146,22 @@ fn timeline_replay_preserves_tick_order_and_holds_a_replay_request() {
 fn console_log_viewer_preserves_insertion_order() {
     let mut console = api().console_log_viewer_state();
     console.record(ConsoleRecord::new(ConsoleLevel::Info, "boot", Tick::new(0)));
-    console.record(ConsoleRecord::new(ConsoleLevel::Warn, "slow frame", Tick::new(1)));
-    console.record(ConsoleRecord::new(ConsoleLevel::Error, "panic", Tick::new(2)));
+    console.record(ConsoleRecord::new(
+        ConsoleLevel::Warn,
+        "slow frame",
+        Tick::new(1),
+    ));
+    console.record(ConsoleRecord::new(
+        ConsoleLevel::Error,
+        "panic",
+        Tick::new(2),
+    ));
 
-    let messages: Vec<&str> = console.records().iter().map(|r| r.message.as_str()).collect();
+    let messages: Vec<&str> = console
+        .records()
+        .iter()
+        .map(|r| r.message.as_str())
+        .collect();
     assert_eq!(messages, ["boot", "slow frame", "panic"]);
     let levels: Vec<ConsoleLevel> = console.records().iter().map(|r| r.level).collect();
     assert_eq!(
@@ -146,7 +177,11 @@ fn profiler_preserves_sample_order() {
     profiler.record_sample(ProfilerSample::new("render", 900, Tick::new(0)));
     profiler.record_sample(ProfilerSample::new("submit", 120, Tick::new(0)));
 
-    let labels: Vec<&str> = profiler.samples().iter().map(|s| s.label.as_str()).collect();
+    let labels: Vec<&str> = profiler
+        .samples()
+        .iter()
+        .map(|s| s.label.as_str())
+        .collect();
     assert_eq!(labels, ["frame", "render", "submit"]);
     let micros: Vec<u64> = profiler.samples().iter().map(|s| s.micros).collect();
     assert_eq!(micros, [1_600, 900, 120]);
@@ -209,7 +244,11 @@ fn object_inspector_preserves_field_order_and_selection() {
     assert_eq!(inspector.selected(), Some(EntityId::from_raw(3)));
     let names: Vec<&str> = inspector.fields().iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["hp", "name", "pos"]);
-    let values: Vec<&str> = inspector.fields().iter().map(|f| f.value.as_str()).collect();
+    let values: Vec<&str> = inspector
+        .fields()
+        .iter()
+        .map(|f| f.value.as_str())
+        .collect();
     assert_eq!(values, ["100", "hero", "0,0,0"]);
 }
 
