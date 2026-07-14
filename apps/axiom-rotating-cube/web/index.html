@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Axiom — Rotating Cube</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0e12; color: #d8f6ec;
+                 font-family: ui-monospace, Menlo, Consolas, monospace; }
+    main { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px; }
+    canvas { width: min(92vw, 960px); aspect-ratio: 16 / 9; background: #000;
+             border: 1px solid #223; touch-action: none; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Rotating Cube</h1>
+  <canvas id="axiom-cube-canvas"></canvas>
+</main>
+<script type="module">
+  import init, { rotating_cube_start, overlay_start } from "./pkg/axiom_rotating_cube.js";
+  await init();
+  rotating_cube_start();
+  overlay_start();
+</script>
+</body>
+</html>

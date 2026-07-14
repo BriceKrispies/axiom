@@ -1,0 +1,110 @@
+# Mirrors the scene authored imperatively in src/lib.rs `rotating_cubes_app()`;
+# tests/scene_manifest_matches_runtime.rs asserts equivalence. Colors are linear
+# RGB; angles in degrees; lengths in metres.
+
+schema = "axiom.scene"
+schema_version = 1
+name = "main"
+
+[surface]
+clear_color = [0.05, 0.06, 0.08]
+
+[[mesh]]
+id = "cube"
+primitive = "cube"
+[[mesh]]
+id = "plane"
+primitive = "plane"
+[[mesh]]
+id = "sphere"
+primitive = "sphere"
+
+[[material]]
+id = "cube-red"
+kind = "lit"
+base_color = [0.85, 0.25, 0.25]
+texture = "checker"
+[[material]]
+id = "cube-green"
+kind = "lit"
+base_color = [0.30, 0.80, 0.35]
+texture = "checker"
+[[material]]
+id = "cube-blue"
+kind = "lit"
+base_color = [0.30, 0.50, 0.95]
+texture = "checker"
+[[material]]
+id = "ground"
+kind = "lit"
+base_color = [0.18, 0.20, 0.24]
+texture = "uv-grid"
+[[material]]
+id = "sphere"
+kind = "lit"
+base_color = [0.90, 0.78, 0.30]
+texture = "checker"
+
+[[entity]]
+id = "cube-parent-0"
+translation = [-2.6, 0.0, 0.0]
+[[entity.child]]
+spin = { axis = [0.0, 1.0, 0.0], period = 360 }
+renderable = { mesh = "cube", material = "cube-red" }
+
+[[entity]]
+id = "cube-parent-1"
+translation = [0.0, 0.0, 0.0]
+[[entity.child]]
+spin = { axis = [1.0, 0.0, 0.0], period = 360 }
+renderable = { mesh = "cube", material = "cube-green" }
+
+[[entity]]
+id = "cube-parent-2"
+translation = [2.6, 0.0, 0.0]
+[[entity.child]]
+spin = { axis = [1.0, 1.0, 0.0], period = 360 }
+renderable = { mesh = "cube", material = "cube-blue" }
+
+[[entity]]
+id = "ground"
+translation = [0.0, -2.0, 0.0]
+scale = [30.0, 1.0, 30.0]
+renderable = { mesh = "plane", material = "ground" }
+
+[[entity]]
+id = "sphere"
+translation = [0.0, 2.6, 0.0]
+scale = [1.6, 1.6, 1.6]
+renderable = { mesh = "sphere", material = "sphere" }
+
+[[entity]]
+id = "camera"
+translation = [0.0, 0.0, 8.0]
+camera = { fov_y_degrees = 60.0, near = 0.1, far = 100.0 }
+
+[[entity]]
+id = "sun"
+light = { kind = "directional", direction = [0.3, -1.0, 0.4], color = [1.0, 1.0, 1.0], intensity = 1.0 }
+
+# Each light orbits via a spinning parent with a translated child (spin + offset).
+[[entity]]
+id = "orbit-light-0"
+spin = { axis = [0.0, 1.0, 0.0], period = 200 }
+[[entity.child]]
+translation = [4.5, 1.2, 0.0]
+light = { kind = "point", color = [0.95, 0.25, 0.25], intensity = 9.0 }
+
+[[entity]]
+id = "orbit-light-1"
+spin = { axis = [0.0, 1.0, 0.0], period = 320 }
+[[entity.child]]
+translation = [4.5, 1.2, 0.0]
+light = { kind = "point", color = [0.25, 0.95, 0.35], intensity = 9.0 }
+
+[[entity]]
+id = "orbit-light-2"
+spin = { axis = [0.0, 1.0, 0.0], period = 260 }
+[[entity.child]]
+translation = [4.5, 1.2, 0.0]
+light = { kind = "point", color = [0.30, 0.45, 0.98], intensity = 9.0 }

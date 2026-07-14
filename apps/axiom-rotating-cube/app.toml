@@ -4,4 +4,8 @@ crate_name = "axiom-rotating-cube"
 
 allowed_layers = []
 
-allowed_modules = []
+allowed_modules = [
+    "engine",
+    "windowing",
+    "debug-overlay",
+]

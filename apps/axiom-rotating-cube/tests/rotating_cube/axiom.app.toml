@@ -1,0 +1,20 @@
+# This package describes, as data, the same scene authored in Rust in
+# src/lib.rs; tests/scene_manifest_matches_runtime.rs asserts the two agree, so
+# this file is a checked mirror of the runtime, not (yet) consumed by the engine.
+
+[package]
+name = "rotating-cube-browser-demo"
+schema_version = 1
+entry_scene = "package/scenes/main.toml"
+
+load_order = [
+    "meshes",
+    "materials",
+    "scenes",
+]
+
+[surface]
+kind = "scene-3d"
+width = 800
+height = 600
+surface_id = "axiom-cube-canvas"
