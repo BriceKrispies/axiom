@@ -3,6 +3,7 @@
 //! plain data interpreted by the generic simulation systems; changing a play
 //! or an archetype never means changing AI code.
 
+pub mod emblem;
 pub mod formation;
 pub mod play;
 pub mod player;

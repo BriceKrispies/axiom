@@ -219,27 +219,32 @@ impl JuiceStack {
                     release, velocity, ..
                 } => {
                     self.trail.clear();
-                    self.spawn(
-                        EffectKind::ThrowPulse,
-                        release,
-                        velocity,
-                        0.6,
-                        tick,
-                        seed,
-                        self.tuning.flash_life_ticks,
-                    );
+                    // Flash-intensity accessibility gate: `0` spawns nothing.
+                    if self.tuning.flash_scale > 0.0 {
+                        self.spawn(
+                            EffectKind::ThrowPulse,
+                            release,
+                            velocity,
+                            0.6 * self.tuning.flash_scale,
+                            tick,
+                            seed,
+                            self.tuning.flash_life_ticks,
+                        );
+                    }
                 }
                 SimEvent::CatchCompleted { player } => {
-                    let at = snapshot.player(player).pos.add(Vec3::new(0.0, 1.4, 0.0));
-                    self.spawn(
-                        EffectKind::CatchFlash,
-                        at,
-                        Vec3::UNIT_Y,
-                        0.8,
-                        tick,
-                        seed,
-                        self.tuning.flash_life_ticks,
-                    );
+                    if self.tuning.flash_scale > 0.0 {
+                        let at = snapshot.player(player).pos.add(Vec3::new(0.0, 1.4, 0.0));
+                        self.spawn(
+                            EffectKind::CatchFlash,
+                            at,
+                            Vec3::UNIT_Y,
+                            0.8 * self.tuning.flash_scale,
+                            tick,
+                            seed,
+                            self.tuning.flash_life_ticks,
+                        );
+                    }
                 }
                 SimEvent::PlayStarted { .. } | SimEvent::PlayReset => {
                     self.effects.clear();

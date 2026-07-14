@@ -4,8 +4,9 @@
 reusable engine framework for an original arcade-football game, proven by a
 deterministic systems showcase (one data-driven play: formation → snap →
 drop-back → routes → blocking → pass → catch → pursuit → tackle → ground
-impact → reset). It is not the finished game — no menus, scoring, downs,
-playbook, or gameplay controls.
+impact → reset), now fronted by a complete production menu shell (title,
+menus, team selection, settings, pause — see `FRONTEND.md`). Still not the
+finished game: no scoring, downs, or playbook.
 
 ## App-local boundaries and the one-way flow
 
@@ -40,8 +41,25 @@ Four boundaries:
    mutate the simulation; removing it changes nothing authoritative (proven in
    `tests/camera.rs::presentation_effects_do_not_mutate_simulation_state`).
 4. **Composition** (`src/app.rs`, `src/scene.rs`, `src/scene_sync.rs`,
-   `src/showcase.rs`, `src/web.rs`) — wires the headless `ShowcaseRun` to the
-   engine `RunningApp`, retained entities, and the browser edge.
+   `src/showcase.rs`, `src/shell.rs`, `src/web/`) — wires the headless
+   `ShowcaseRun` to the engine `RunningApp`, retained entities, and the
+   browser edge.
+
+Two shell boundaries sit on top (details in `FRONTEND.md`):
+
+5. **Frontend** (`src/frontend/*`) — the pure, browser-free menu machine:
+   explicit screen states, device-independent actions, deterministic focus,
+   typed settings + versioned persistence codec, theme, transitions, and the
+   typed `SceneView` view model. It communicates ONLY through drained
+   `FrontendCommand`s and the immutable `MatchLaunchConfig` boundary
+   (`src/launch.rs`); it never mutates a running simulation.
+6. **Platform edge** (`src/web/`, wasm32-only) — the sanctioned
+   nondeterministic directory: DOM presenter for the view model, the
+   `web_sys::Storage` adapter behind the app-local `ProfileStore` trait,
+   gamepad polling, menu tone synthesis, and the in-match touch controls.
+   `src/shell.rs` composes frontend over game: it applies launch / restart /
+   return / pause commands and steps the sim per the frontend's
+   `SimDirective` (menu-ambient, live, frozen).
 
 ## User control (touch + keyboard)
 

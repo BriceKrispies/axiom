@@ -93,6 +93,9 @@ pub struct CameraTuning {
     pub flight_framing_radius: f32,
     /// Impact impulse scale (world yards per unit strength).
     pub impact_impulse_scale: f32,
+    /// Global multiplier on EVERY camera impulse amplitude + FOV kick — the
+    /// screen-shake accessibility control (`0` = no shake, exactly).
+    pub shake_scale: f32,
     /// Ticks an impact emphasis lasts before auto-return.
     pub impact_recovery_ticks: u32,
     /// Formation camera: distance behind the offense and height.
@@ -114,6 +117,7 @@ impl Default for CameraTuning {
             max_yaw_lag: 0.6,
             flight_framing_radius: 10.0,
             impact_impulse_scale: 0.55,
+            shake_scale: 1.0,
             impact_recovery_ticks: 42,
             formation_distance: 17.0,
             formation_height: 9.0,
@@ -149,6 +153,9 @@ pub struct JuiceTuning {
     /// Player squash: max pose compression `0..=1` + life.
     pub squash_amplitude: f32,
     pub squash_life_ticks: u32,
+    /// Multiplier on flash effects (catch flash, throw pulse) — the flash
+    /// accessibility control; `0` spawns no flash effects at all.
+    pub flash_scale: f32,
 }
 
 impl Default for JuiceTuning {
@@ -169,6 +176,7 @@ impl Default for JuiceTuning {
             field_wobble_life_ticks: 30,
             squash_amplitude: 0.35,
             squash_life_ticks: 18,
+            flash_scale: 1.0,
         }
     }
 }

@@ -7,6 +7,8 @@ allowed_layers = [
     "math",
     "host",
     "runtime",
+    "interface",
+    "layout",
 ]
 
 allowed_modules = [

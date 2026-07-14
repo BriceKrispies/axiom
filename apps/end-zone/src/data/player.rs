@@ -156,16 +156,55 @@ fn roster(
     RosterDefinition { team, players }
 }
 
-/// The two fictional showcase rosters. Roster slot order is meaningful: play
-/// formations and assignments address players by roster slot `0..=6`.
+/// Which side of the ball a roster is built for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RosterSide {
+    Offense,
+    Defense,
+}
+
+/// The rating→multiplier curve: rating 5 is neutral (`1.0`), 1 is `0.88`,
+/// 10 is `1.15`. Bounded by construction.
+fn rating_scale(rating: u8) -> f32 {
+    0.85 + 0.03 * f32::from(rating.clamp(1, super::team::MAX_RATING))
+}
+
+/// Apply a team's bounded ratings to one archetype — pure data scaling, the
+/// ONLY place team strength touches numbers (no team branches anywhere).
+fn rated(mut a: PlayerArchetype, team: &TeamDefinition, side: RosterSide) -> PlayerArchetype {
+    let speed = rating_scale(team.ratings.speed);
+    let power = rating_scale(team.ratings.power);
+    a.max_speed *= speed;
+    a.acceleration *= speed;
+    a.mass *= power;
+    a.block_strength = (a.block_strength * power).min(1.0);
+    match side {
+        RosterSide::Offense => {
+            let pass = rating_scale(team.ratings.pass);
+            a.catch_radius *= pass;
+            a.catch_tolerance_ticks =
+                ((a.catch_tolerance_ticks as f32 * pass).round() as u32).max(1);
+        }
+        RosterSide::Defense => {
+            let defense = rating_scale(team.ratings.defense);
+            a.tackle_strength = (a.tackle_strength * defense).min(1.0);
+            a.pursuit_aggressiveness = (a.pursuit_aggressiveness * defense).min(1.0);
+            a.reaction_delay_ticks =
+                ((a.reaction_delay_ticks as f32 / defense).round() as u32).max(1);
+        }
+    }
+    a
+}
+
+/// Build a league team's seven-player roster for one side of the ball, its
+/// archetypes scaled by the team's ratings. Roster slot order is meaningful:
+/// play formations and assignments address players by roster slot `0..=6`.
 ///
-/// Offense slots: 0 QB, 1 snapper, 2/3 linemen, 4/5 receivers, 6 back.
-/// Defense slots: 0/1 rushers, 2/3 linemen-backers, 4/5 corners, 6 safety.
-pub fn showcase_rosters() -> (RosterDefinition, RosterDefinition) {
-    let home = roster(
-        magma(),
-        0,
-        [
+/// Offense slots: 0 QB, 1 snapper, 2/3 linemen, 4/5 receivers, 6 slot.
+/// Defense slots: 0/3 rushers, 1/2 line, 4/5 corners, 6 safety.
+pub fn roster_for(team: TeamDefinition, base_id: u8, side: RosterSide) -> RosterDefinition {
+    let archetypes = match side {
+        RosterSide::Offense => [
             quarterback(),
             lineman(),
             lineman(),
@@ -174,11 +213,7 @@ pub fn showcase_rosters() -> (RosterDefinition, RosterDefinition) {
             receiver(),
             receiver(),
         ],
-    );
-    let away = roster(
-        frostbite(),
-        PLAYERS_PER_TEAM as u8,
-        [
+        RosterSide::Defense => [
             defender(),
             lineman(),
             lineman(),
@@ -187,6 +222,14 @@ pub fn showcase_rosters() -> (RosterDefinition, RosterDefinition) {
             defender(),
             safety(),
         ],
-    );
-    (home, away)
+    };
+    roster(team, base_id, archetypes.map(|a| rated(a, &team, side)))
+}
+
+/// The two fictional showcase rosters (league slots 0 and 1).
+pub fn showcase_rosters() -> (RosterDefinition, RosterDefinition) {
+    (
+        roster_for(magma(), 0, RosterSide::Offense),
+        roster_for(frostbite(), PLAYERS_PER_TEAM as u8, RosterSide::Defense),
+    )
 }

@@ -131,6 +131,10 @@ impl CameraDirector {
 
     fn observe(&mut self, snapshot: &PresentationSnapshot, stamped: &StampedEvent) {
         let impulse_seed = self.seed ^ stamped.id.0;
+        // The screen-shake accessibility scale applies to EVERY impulse
+        // amplitude and FOV kick (`* 1.0` exact at the Full default; `0`
+        // yields exactly-zero-amplitude impulses).
+        let shake = self.tuning.shake_scale;
         match stamped.event {
             SimEvent::PlayStarted { .. } | SimEvent::PlayReset => {
                 self.impulses.clear();
@@ -145,8 +149,8 @@ impl CameraDirector {
                 self.impulses.push(CameraImpulse::seeded(
                     impulse_seed,
                     Vec3::new(0.0, 0.4, -snapshot.drive_sign),
-                    0.12,
-                    1.5,
+                    0.12 * shake,
+                    1.5 * shake,
                     14,
                 ));
                 self.transition(stamped.tick, CameraMode::PassFlight);
@@ -159,8 +163,8 @@ impl CameraDirector {
                 self.impulses.push(CameraImpulse::seeded(
                     impulse_seed,
                     Vec3::new(0.3, 0.5, 0.0),
-                    0.10,
-                    1.0,
+                    0.10 * shake,
+                    1.0 * shake,
                     12,
                 ));
                 if self.mode != CameraMode::CatchResolve {
@@ -188,8 +192,8 @@ impl CameraDirector {
                 self.impulses.push(CameraImpulse::seeded(
                     impulse_seed,
                     contact_direction.add(Vec3::new(0.0, 0.8, 0.0)),
-                    self.tuning.impact_impulse_scale * strength,
-                    5.0 * strength,
+                    self.tuning.impact_impulse_scale * strength * shake,
+                    5.0 * strength * shake,
                     26,
                 ));
                 self.begin_impact(snapshot.tick, contact_point, strength);
@@ -201,8 +205,8 @@ impl CameraDirector {
                 self.impulses.push(CameraImpulse::seeded(
                     impulse_seed,
                     Vec3::new(0.2, 1.0, 0.1),
-                    self.tuning.impact_impulse_scale * (0.5 + 0.5 * strength),
-                    7.0 * strength,
+                    self.tuning.impact_impulse_scale * (0.5 + 0.5 * strength) * shake,
+                    7.0 * strength * shake,
                     self.tuning.impact_recovery_ticks,
                 ));
                 self.begin_impact(snapshot.tick, position, strength);

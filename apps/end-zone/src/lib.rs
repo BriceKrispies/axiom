@@ -29,14 +29,18 @@ pub mod debug;
 pub mod events;
 pub mod field;
 pub mod football;
+pub mod frontend;
 pub mod identity;
+pub mod launch;
 pub mod physics_rig;
 pub mod player;
 pub mod presentation;
 pub mod scene;
 pub mod scene_sync;
+pub mod shell;
 pub mod showcase;
 pub mod state;
+pub mod trace;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web;

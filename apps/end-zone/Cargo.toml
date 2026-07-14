@@ -15,6 +15,8 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-math = { path = "../../crates/axiom-math" }
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
+axiom-interface = { path = "../../crates/axiom-interface" }
+axiom-layout = { path = "../../crates/axiom-layout" }
 axiom-physics = { path = "../../modules/axiom-physics" }
 axiom-figure = { path = "../../modules/axiom-figure" }
 axiom-input = { path = "../../modules/axiom-input" }
@@ -40,6 +42,18 @@ web-sys = { version = "0.3", features = [
     "PointerEvent",
     "DomRect",
     "console",
+    # Frontend edge: sanctioned storage adapter, gamepad polling, menu tones.
+    "Storage",
+    "Gamepad",
+    "GamepadButton",
+    "AudioContext",
+    "AudioDestinationNode",
+    "AudioParam",
+    "OscillatorNode",
+    "OscillatorType",
+    "GainNode",
+    "CssStyleDeclaration",
+    "HtmlHeadElement",
 ] }
 
 [lints.rust]

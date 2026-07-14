@@ -163,6 +163,33 @@ impl ShowcaseRun {
         }
     }
 
+    /// A match run from one immutable launch configuration: rosters from the
+    /// selected league teams, the difficulty profile applied to the opponent,
+    /// the named camera/effects profiles applied to presentation. Restarting
+    /// with the same config reproduces the same initial authoritative state.
+    pub fn new_match(launch: &crate::launch::MatchLaunchConfig) -> Self {
+        let setup = crate::launch::resolve_launch(launch);
+        ShowcaseRun {
+            sim: SimState::new_match(&setup),
+            controller: ShowcaseController::new(),
+            director: CameraDirector::new(
+                launch.seed,
+                crate::launch::camera_profile(
+                    launch.camera_style,
+                    launch.presentation.screen_shake,
+                ),
+            ),
+            juice: JuiceStack::new(
+                launch.seed,
+                crate::launch::juice_profile(
+                    launch.presentation.effects,
+                    launch.presentation.flash,
+                ),
+            ),
+            debug_enabled: false,
+        }
+    }
+
     /// Advance one fixed tick under the diagnostic commands.
     pub fn step(&mut self, diagnostics: &[DiagnosticCommand]) -> StepOutput {
         let tick = self.sim.tick;
@@ -230,60 +257,6 @@ impl ShowcaseRun {
     }
 }
 
-/// Deterministic artifacts of one showcase run — what the replay tests
-/// compare bit-for-bit.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ShowcaseTrace {
-    pub events: Vec<StampedEvent>,
-    /// Ball position each tick.
-    pub ball_samples: Vec<axiom::prelude::Vec3>,
-    /// Possession transitions `(tick, holder)`.
-    pub possession: Vec<(u64, Option<crate::identity::PlayerId>)>,
-    /// Every player's intent, every tick.
-    pub intents: Vec<Vec<crate::ai::PlayerIntent>>,
-    /// Camera mode transitions `(tick, mode)`.
-    pub camera_modes: Vec<(u64, CameraMode)>,
-    /// The final camera pose each tick.
-    pub camera_poses: Vec<CameraPose>,
-    pub final_digest: Vec<u32>,
-}
-
-/// Run the whole showcase for `ticks` fixed steps with ONE scripted input —
-/// the throw press at [`TRACE_THROW_TICK`] (the quarterback never throws on
-/// his own) — and collect the deterministic artifacts.
-pub fn run_trace(config: EndZoneConfig, ticks: u64) -> ShowcaseTrace {
-    let mut run = ShowcaseRun::new(config);
-    let mut trace = ShowcaseTrace {
-        events: Vec::new(),
-        ball_samples: Vec::new(),
-        possession: Vec::new(),
-        intents: Vec::new(),
-        camera_modes: Vec::new(),
-        camera_poses: Vec::new(),
-        final_digest: Vec::new(),
-    };
-    let mut last_possession = None;
-    for tick in 0..ticks {
-        let scripted: &[DiagnosticCommand] = if tick == TRACE_THROW_TICK {
-            &[DiagnosticCommand::PrimaryAction]
-        } else {
-            &[]
-        };
-        let output = run.step(scripted);
-        trace.events.extend_from_slice(&output.events);
-        trace.ball_samples.push(output.snapshot.ball.pos);
-        if output.snapshot.possession != last_possession {
-            last_possession = output.snapshot.possession;
-            trace
-                .possession
-                .push((output.snapshot.tick, last_possession));
-        }
-        trace
-            .intents
-            .push(output.snapshot.players.iter().map(|p| p.intent).collect());
-        trace.camera_poses.push(output.camera);
-    }
-    trace.camera_modes = run.director.history().to_vec();
-    trace.final_digest = run.sim.digest();
-    trace
-}
+// The replay artifacts (`ShowcaseTrace`, `run_trace`, the state digest) live
+// in `crate::trace`; re-exported here so harnesses keep one import path.
+pub use crate::trace::{run_trace, ShowcaseTrace};

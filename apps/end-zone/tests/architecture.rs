@@ -79,11 +79,17 @@ fn strip_comments_and_strings(text: &str) -> String {
     out
 }
 
-/// Deterministic-core sources: everything except the sanctioned wasm edge.
+/// Deterministic-core sources: everything except the sanctioned wasm edge
+/// (the `src/web/` directory — DOM presenter, storage adapter, gamepad,
+/// tones; all `cfg(target_arch = "wasm32")`).
 fn core_sources() -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_rs(&app_src(), &mut files);
-    files.retain(|p| p.file_name().and_then(|n| n.to_str()) != Some("web.rs"));
+    files.retain(|p| {
+        let is_edge = p.components().any(|c| c.as_os_str() == "web")
+            || p.file_name().and_then(|n| n.to_str()) == Some("web.rs");
+        !is_edge
+    });
     assert!(files.len() > 30, "the app has its full module tree");
     files.sort();
     files
@@ -114,6 +120,8 @@ fn app_toml_lists_only_consumed_layers_and_modules() {
         "\"math\"",
         "\"host\"",
         "\"runtime\"",
+        "\"interface\"",
+        "\"layout\"",
         "\"engine\"",
         "\"physics\"",
         "\"figure\"",
@@ -237,6 +245,8 @@ fn only_declared_engine_crates_are_imported() {
         "axiom_math",
         "axiom_host",
         "axiom_runtime",
+        "axiom_interface",
+        "axiom_layout",
         "axiom_physics",
         "axiom_figure",
         "axiom_input",

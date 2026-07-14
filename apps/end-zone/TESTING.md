@@ -61,10 +61,50 @@ replay comparisons are exact.
   finished play.
 - `tests/architecture.rs` — app hygiene: `app.toml` lists exactly the consumed
   layers/modules; the deterministic core is browser-free, wall-clock-free, and
-  ambient-randomness-free (only `web.rs` touches the DOM); no placeholder or
-  console macros; no `unwrap()`/`expect(` in production paths; no junk-drawer
-  modules; no engine layer/module depends on this app; every source file stays
-  under the repo's 300-line app-placement heuristic.
+  ambient-randomness-free (only the `src/web/` edge touches the DOM); no
+  placeholder or console macros; no `unwrap()`/`expect(` in production paths;
+  no junk-drawer modules; no engine layer/module depends on this app; every
+  core source file stays under the repo's 300-line app-placement heuristic.
+
+## Frontend shell tests
+
+The menu shell is pure and native-testable (see `FRONTEND.md`); its suites
+drive `FrontendApp`/`EndZoneShell` with synthetic input frames:
+
+- `tests/frontend_flow.rs` — the explicit screen machine: happy path to a
+  launched match, consistent backward cancel, pause/resume, the
+  return-to-menu dialog, settings returning to its exact origin with focus
+  restored, credits, attract entry/exit (and never deep in the menus), and
+  identical-input replay determinism.
+- `tests/frontend_focus.rs` — deterministic focus (first-enabled default,
+  grid movement, disabled skipping, memory restore), hover/pointer
+  activation, the navigation repeat delay + cadence, edge-triggered confirm,
+  gamepad token translation, stable device hints, and modal focus
+  confinement.
+- `tests/frontend_teams.rs` — six complete original teams (unique identity,
+  bounded ratings, valid emblems, distinct strength profiles), rating→roster
+  scaling as pure data, total league lookup, the opponent cursor never
+  reaching the locked player team, and selection persistence.
+- `tests/frontend_settings.rs` — all five categories carry real fields;
+  bounded stepping/cycling; the working-vs-committed editor (APPLY commits +
+  requests persistence, RESET DEFAULTS resets the working copy, dirty BACK
+  raises the discard dialog with the safe option focused); live preview via
+  the theme fingerprint; reduced-motion transition swaps; rebind capture
+  (rebinds, times out, leaves committed bindings untouched) and conflict
+  reporting.
+- `tests/frontend_persistence.rs` — versioned encode/decode round-trips,
+  per-field fallback on corrupt values, hostile-input safety, the
+  distinct-teams invariant, binding-token validation, the
+  `MemoryStore` load/save/clear cycle, and legacy salvage.
+- `tests/frontend_launch.rs` — `MatchLaunchConfig` validation, difficulty /
+  camera / effects profiles as pure data (including the accessibility
+  scales), deterministic game-speed pacing, seed-exact match reproduction,
+  and roster shaping from the selected teams.
+- `tests/frontend_shell.rs` — the composed shell: menus run the ambient
+  showcase, launch swaps in the real match, pause freezes the authoritative
+  digest exactly, restart replays the frozen config byte-for-byte,
+  return-to-menu restores the ambient loop, attract runs the live sim, and
+  menu input never reaches the background simulation.
 
 ## Engine regression added with this app
 

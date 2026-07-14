@@ -13,7 +13,8 @@ use crate::camera::CameraMode;
 use crate::config::EndZoneConfig;
 use crate::debug::{self, DebugInstance};
 use crate::scene::EndZoneScene;
-use crate::showcase::{DiagnosticCommand, ShowcaseRun};
+use crate::showcase::{DiagnosticCommand, ShowcaseRun, StepOutput};
+use crate::state::SimState;
 
 /// The canvas id the browser page binds the surface to.
 pub const CANVAS_ID: &str = "axiom-end-zone-canvas";
@@ -59,8 +60,24 @@ pub struct EndZoneApp {
     routes: Vec<Vec<axiom::prelude::Vec3>>,
     debug_markers: Vec<DebugInstance>,
     frame_n: u64,
+    /// Sim sample counter (distinct from `frame_n`: fast/turbo game speeds
+    /// advance the sim more than once per rendered frame).
+    sample_n: u64,
     last_camera_mode: CameraMode,
     last_forced: bool,
+    /// The most recent step's outputs — what `present` renders (and what a
+    /// frozen/paused frame re-renders without advancing the sim).
+    last_output: Option<StepOutput>,
+}
+
+fn routes_of(sim: &SimState) -> Vec<Vec<axiom::prelude::Vec3>> {
+    sim.assignments
+        .iter()
+        .map(|assignment| match assignment.kind {
+            AssignmentKind::Route { .. } => assignment.route.clone(),
+            _ => Vec::new(),
+        })
+        .collect()
 }
 
 impl EndZoneApp {
@@ -84,15 +101,7 @@ impl EndZoneApp {
             .build();
         let scene = EndZoneScene::install(&mut running);
         let run = ShowcaseRun::new(config);
-        let routes = run
-            .sim
-            .assignments
-            .iter()
-            .map(|assignment| match assignment.kind {
-                AssignmentKind::Route { .. } => assignment.route.clone(),
-                _ => Vec::new(),
-            })
-            .collect();
+        let routes = routes_of(&run.sim);
 
         let mut input = InputState::new();
         input.bind_action(ACTION_START, &[KeyToken::new("Space")]);
@@ -129,16 +138,34 @@ impl EndZoneApp {
             routes,
             debug_markers: Vec::new(),
             frame_n: 0,
+            sample_n: 0,
             last_camera_mode: CameraMode::FormationWide,
             last_forced: false,
+            last_output: None,
         }
+    }
+
+    /// Swap in a different showcase run (a launched/restarted match, or the
+    /// ambient menu showcase) without touching the engine scene.
+    pub fn replace_run(&mut self, run: ShowcaseRun) {
+        self.routes = routes_of(&run.sim);
+        self.run = run;
+        self.last_output = None;
     }
 
     /// One frame: sample input (keyboard + touch) → commands + stick → fixed
     /// sim step → snapshot → camera + juice → scene sync → engine tick.
     pub fn frame(&mut self, keys_down: &[KeyToken], touch: TouchInput) -> FrameOutcome {
+        self.advance(keys_down, touch);
+        self.present()
+    }
+
+    /// Advance the simulation one fixed step under this input (no engine
+    /// tick — callable more than once per frame for fast game speeds).
+    pub fn advance(&mut self, keys_down: &[KeyToken], touch: TouchInput) {
         let frame = DeviceFrame::new(Vec2::new(WIDTH as f32, HEIGHT as f32), keys_down, &[]);
-        self.input.sample(Tick::new(self.frame_n), &frame);
+        self.input.sample(Tick::new(self.sample_n), &frame);
+        self.sample_n += 1;
 
         let mut commands: Vec<DiagnosticCommand> = Vec::new();
         let pressed: [(ActionId, DiagnosticCommand); 9] = [
@@ -178,7 +205,23 @@ impl EndZoneApp {
         let output = self.run.step(&commands);
         self.last_camera_mode = output.camera_mode;
         self.last_forced = output.camera_mode != self.run.director.mode();
+        self.last_output = Some(output);
+    }
 
+    /// Render the most recent step (advancing once first if none exists yet):
+    /// debug markers → scene sync → engine tick. A paused frame calls only
+    /// this, so the frozen sim/camera/juice state re-presents unchanged.
+    pub fn present(&mut self) -> FrameOutcome {
+        if self.last_output.is_none() {
+            self.advance(&[], TouchInput::default());
+        }
+        let Some(output) = self.last_output.clone() else {
+            // `advance` always stores an output; this arm only keeps the
+            // engine ticking if that invariant ever breaks.
+            let outcome = self.running.tick(self.frame_n);
+            self.frame_n += 1;
+            return outcome;
+        };
         if self.run.debug_enabled {
             debug::build_markers(
                 &output.snapshot,

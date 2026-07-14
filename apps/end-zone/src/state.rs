@@ -80,10 +80,22 @@ pub struct SimState {
 }
 
 impl SimState {
-    /// A fresh showcase simulation in formation, pre-snap.
+    /// A fresh showcase simulation in formation, pre-snap (the default
+    /// showcase matchup: league slots 0 and 1, Pro tuning).
     pub fn new(config: EndZoneConfig) -> Self {
+        SimState::new_match(&crate::launch::MatchSetup {
+            rosters: showcase_rosters(),
+            tuning: BehaviorTuning::default(),
+            seed: config.seed,
+        })
+    }
+
+    /// A fresh simulation for a resolved match setup: rosters already in sim
+    /// slots (player = possession slot 0), tuning already profiled — the ONE
+    /// bootstrap the launch boundary feeds.
+    pub fn new_match(setup: &crate::launch::MatchSetup) -> Self {
         let play = showcase_play();
-        let tuning = BehaviorTuning::default();
+        let tuning = setup.tuning;
         let frame = OffenseFrame::at_yard_line(play.line_of_scrimmage, play.drive_direction);
         let assignments = compile_assignments(&play, &frame);
         let quarterback = assignments
@@ -92,13 +104,13 @@ impl SimState {
             .find(|(_, a)| matches!(a.kind, AssignmentKind::Quarterback { .. }))
             .map(|(i, _)| PlayerId(i as u8))
             .unwrap_or(PlayerId(0));
-        let rosters = showcase_rosters();
+        let rosters = setup.rosters.clone();
         let players = formation_players(&play, &frame, &rosters);
         let ball_spawn = frame.to_world(OffensePoint::new(0.0, 0.0)).add(ball_rest());
         let mut rig = PhysicsRig::new(tuning.gravity, ball_spawn);
         rig.park_ball();
         let mut sim = SimState {
-            seed: config.seed,
+            seed: setup.seed,
             tuning,
             tick: 0,
             phase: PlayPhase::PreSnap,
@@ -163,37 +175,8 @@ impl SimState {
         self.rig.fault
     }
 
-    /// A deterministic digest of the authoritative state (bit-exact floats).
-    pub fn digest(&self) -> Vec<u32> {
-        let mut out = Vec::with_capacity(PLAYER_COUNT * 8 + 16);
-        out.push(self.tick as u32);
-        out.push(self.possession.map(|p| u32::from(p.0) + 1).unwrap_or(0));
-        for player in &self.players {
-            for v in [
-                player.pos.x,
-                player.pos.y,
-                player.pos.z,
-                player.vel.x,
-                player.vel.z,
-                player.facing,
-                player.balance,
-            ] {
-                out.push(v.to_bits());
-            }
-        }
-        for v in [
-            self.ball.pos.x,
-            self.ball.pos.y,
-            self.ball.pos.z,
-            self.ball.vel.x,
-            self.ball.vel.y,
-            self.ball.vel.z,
-            self.ball.spin_angle,
-        ] {
-            out.push(v.to_bits());
-        }
-        out
-    }
+    // The deterministic state digest lives with the other replay artifacts
+    // in `crate::trace` (`SimState::digest`).
 
     fn apply_command(&mut self, command: SimCommand) {
         match command {
