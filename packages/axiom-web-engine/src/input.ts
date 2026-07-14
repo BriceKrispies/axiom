@@ -13,13 +13,7 @@
  * `Number(...)`-coerced key states.
  */
 
-import type { TickInput } from "./api.ts";
-
-/** The latest canvas pointer sample (CSS px, top-left origin). */
-interface PointerSample {
-  readonly pos: { readonly x: number; readonly y: number };
-  readonly down: boolean;
-}
+import type { InputFrame, PointerSample, TickInput } from "./api.ts";
 
 /** A `.map` callback returns this to iterate for side effect only. */
 const SIDE_EFFECT = 0;
@@ -149,3 +143,17 @@ export class InputState implements TickInput {
       .some((entry): boolean => entry.some((code): boolean => codes.has(code)));
   }
 }
+
+/**
+ * Snapshot a (freshly `beginTick`-ed) `InputState` into the flat immutable
+ * `InputFrame` a pure `update` reads: for each bound action name, resolve its
+ * current down / press-edge / release-edge state and its look + pointer sample.
+ * Branchless — each set is a `.filter` over the action names — so the shell can
+ * hand `update` plain data instead of the stateful input object. */
+export const sampleInput = (input: InputState, actions: readonly string[]): InputFrame => ({
+  down: new Set(actions.filter((action): boolean => input.isDown(action))),
+  look: input.look(),
+  pointer: input.pointer(),
+  pressed: new Set(actions.filter((action): boolean => input.pressed(action))),
+  released: new Set(actions.filter((action): boolean => input.released(action))),
+});

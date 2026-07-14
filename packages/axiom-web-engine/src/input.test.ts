@@ -10,7 +10,7 @@
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { InputState } from "./input.ts";
+import { InputState, sampleInput } from "./input.ts";
 
 // ---------------------------------------------------------------------------
 // InputState — key edges
@@ -171,4 +171,38 @@ test("InputState: pointer() returns the latest sample and undefined after clear"
   input.pointerClear();
   input.beginTick();
   assert.equal(input.pointer(), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// sampleInput — the immutable InputFrame snapshot a pure update reads
+// ---------------------------------------------------------------------------
+
+test("sampleInput resolves down/pressed/released action sets plus look and pointer", () => {
+  const input = new InputState();
+  input.bindAction("jump", ["Space"]);
+  input.bindAction("left", ["ArrowLeft", "KeyA"]);
+  input.bindAction("idle", ["KeyZ"]);
+  const actions = ["jump", "left", "idle"];
+
+  // First press of Space + A: both are edges this tick, both down, none released.
+  input.keyEvent("Space", true);
+  input.keyEvent("KeyA", true);
+  input.lookEvent(3, -4);
+  input.pointerEvent(7, 8, true);
+  input.beginTick();
+  const first = sampleInput(input, actions);
+  assert.deepEqual([...first.down].toSorted(), ["jump", "left"]);
+  assert.deepEqual([...first.pressed].toSorted(), ["jump", "left"]);
+  assert.equal(first.released.size, 0);
+  assert.deepEqual(first.look, { x: 3, y: -4 });
+  assert.deepEqual(first.pointer, { down: true, pos: { x: 7, y: 8 } });
+
+  // Hold Space, release A: nothing pressed (held ≠ edge), left released, look drained.
+  input.keyEvent("KeyA", false);
+  input.beginTick();
+  const second = sampleInput(input, actions);
+  assert.deepEqual([...second.down], ["jump"]);
+  assert.equal(second.pressed.size, 0);
+  assert.deepEqual([...second.released], ["left"]);
+  assert.deepEqual(second.look, { x: 0, y: 0 });
 });

@@ -18,15 +18,38 @@ export type {
   EngineVec3,
   Entity,
   Handle,
+  InputFrame,
   Light,
   MaterialSpec,
   MeshData,
   MeshKind,
+  PointerSample,
   Rgba,
   TickInput,
   ToneSpec,
   Transform,
 } from "./api.ts";
+
+// ── pure-functional game authoring ──────────────────────────────────────────────
+// Declare resources + write init/update/view (/sound) as pure functions; `runGame`
+// is the imperative shell that drives them. `reconcile`/`emptyMemory` are exposed
+// for tests and advanced hosts. See game.ts / run-game.ts.
+export type {
+  Game,
+  GameResources,
+  MeshRef,
+  ReconcilePlan,
+  ReposeOp,
+  Scene,
+  SceneInstance,
+  SceneLight,
+  SceneMemory,
+  TickContext,
+  ViewContext,
+} from "./game.ts";
+export { emptyMemory, reconcile } from "./game.ts";
+export type { RunGameOptions, RunningGame } from "./run-game.ts";
+export { runGame } from "./run-game.ts";
 
 // ── retained-scene store ────────────────────────────────────────────────────────
 export {

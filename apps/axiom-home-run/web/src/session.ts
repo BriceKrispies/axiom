@@ -4,9 +4,11 @@
  * `advance(intent)`, and folds the pure modules (`swing.ts`, `pitch.ts`,
  * `fielders.ts`, `ball.ts`) into the round state machine
  * (`ready → windup → pitch → flight → result → … → over`). It imports NOTHING
- * from `@axiom/game`, so the whole game is constructible and replayable in a bare
- * `node --test`; `scene.ts` reads its `view()` snapshot and `game.ts` its HUD
- * accessors. All variation derives from the constructor seed via `hash01`.
+ * from the engine, so the whole game is constructible and replayable in a bare
+ * `node --test`; the pure `view.ts` reads its `view()` snapshot and `game.ts` its
+ * HUD accessors. A session is the immutable STATE the pure `game.update` advances:
+ * `update` calls `clone()` and advances the clone, never the original. All variation
+ * derives from the constructor seed via `hash01`.
  */
 
 import { type Vec3, add, clamp, clamp01, lerp, scale, vec3 } from "./vec.ts";
@@ -81,6 +83,9 @@ export class HomeRunSession {
   #resultDuration = C.RESULT_TICKS;
 
   #events: Feedback[] = [];
+  /** Only the feedback emitted during the CURRENT `advance` — reset each tick, so a
+   * pure caller can read exactly this tick's cues (audio + HUD) without draining. */
+  #tickEvents: Feedback[] = [];
   #lastMph = 0;
   #lastPitchName = "";
 
@@ -92,6 +97,7 @@ export class HomeRunSession {
   /** Advance exactly one fixed tick. */
   public advance(intent: Intent): void {
     this.#tick += 1;
+    this.#tickEvents = [];
     this.#decayFeel();
 
     // Hit-stop: the impact freeze — ball, bat and fielders hold for a few ticks.
@@ -438,9 +444,64 @@ export class HomeRunSession {
 
   #emit(event: Feedback): void {
     this.#events.push(event);
+    this.#tickEvents.push(event);
     if (this.#events.length > 8) {
       this.#events.shift();
     }
+  }
+
+  /** The feedback emitted during the most recent `advance` (this tick's cues). */
+  public get tickEvents(): readonly Feedback[] {
+    return this.#tickEvents;
+  }
+
+  /**
+   * A deep-enough copy for pure stepping: a fresh session that shares nothing
+   * MUTABLE with this one, so `clone().advance(intent)` never disturbs the
+   * original. Only the in-place-mutated containers (results, trail, events,
+   * fielders, the live flight) need fresh copies; every other field is either a
+   * primitive or an immutable value the sim REPLACES rather than mutates, so a
+   * shared reference is safe. This is what lets the game's `update` be a pure
+   * function over an immutable `HomeRunSession` state.
+   */
+  public clone(): HomeRunSession {
+    const c = new HomeRunSession(this.#seed);
+    c.#phase = this.#phase;
+    c.#tick = this.#tick;
+    c.#phaseTicks = this.#phaseTicks;
+    c.#pitchIndex = this.#pitchIndex;
+    c.#results = [...this.#results];
+    c.#score = this.#score;
+    c.#homers = this.#homers;
+    c.#streak = this.#streak;
+    c.#bestDist = this.#bestDist;
+    c.#batterX = this.#batterX;
+    c.#swing = this.#swing;
+    c.#swungThisPitch = this.#swungThisPitch;
+    c.#spec = this.#spec;
+    c.#gap = this.#gap;
+    c.#ballPos = this.#ballPos;
+    c.#ballVel = this.#ballVel;
+    c.#pitchGravity = this.#pitchGravity;
+    c.#ballLive = this.#ballLive;
+    c.#plateCross = this.#plateCross;
+    c.#flight = this.#flight === undefined ? undefined : { ...this.#flight };
+    c.#trail = [...this.#trail];
+    c.#fielders = this.#fielders.map((f) => ({ ...f }));
+    c.#hitStop = this.#hitStop;
+    c.#muzzleFlash = this.#muzzleFlash;
+    c.#punchTicks = this.#punchTicks;
+    c.#shakeTicks = this.#shakeTicks;
+    c.#shakeTotal = this.#shakeTotal;
+    c.#shakeMag = this.#shakeMag;
+    c.#followBlend = this.#followBlend;
+    c.#impactFlash = this.#impactFlash;
+    c.#resultDuration = this.#resultDuration;
+    c.#events = [...this.#events];
+    c.#tickEvents = [...this.#tickEvents];
+    c.#lastMph = this.#lastMph;
+    c.#lastPitchName = this.#lastPitchName;
+    return c;
   }
 
   // HUD accessors (read each frame by game.ts → the DOM overlay).

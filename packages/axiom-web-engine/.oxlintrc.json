@@ -139,7 +139,8 @@
         "src/audio.ts",
         "src/raf-loop.ts",
         "src/dom-input.ts",
-        "src/renderer.ts"
+        "src/renderer.ts",
+        "src/run-game.ts"
       ],
       "rules": {
         "eslint-js/no-restricted-syntax": "off",

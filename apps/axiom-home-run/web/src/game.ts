@@ -1,25 +1,26 @@
 /*
- * game.ts — THE game, wired to the engine. Registering an `onFixedUpdate` as an
- * import side effect, it builds the scene on the first tick, folds this tick's
- * keyboard (+ optional touch pad) into a plain `Intent`, advances the deterministic
- * SDK-free `HomeRunSession`, mirrors the result into the 3D scene, and plays the
- * synthesized audio hooks for contact / home runs / misses. It exports `readHud()`
- * for the harness's DOM overlay and `configure()` for the harness's URL-driven
- * dev/screenshot affordances (seed, freeze-at-tick, scripted autoplay).
+ * game.ts — Home Run! as a PURE `@axiom/web-engine` game. Everything here is a pure
+ * function or plain data: the declared `resources` (named meshes + materials), the
+ * key bindings, and `init` / `update` / `view` / `sound`. None of them touches the
+ * engine, holds a handle, or mutates anything — the `runGame` shell (wired up in
+ * `harness.ts`) owns the loop, the GPU, input and audio, and drives these.
  *
- * Controls: A/D (or ←/→) shift the batter · SPACE swings (always full power; the
- * batter re-winds on his own between swings) · SPACE or ENTER restarts once the
- * round is over.
+ * `update` folds one tick of input into the next `HomeRunSession` by cloning it and
+ * advancing the clone (so the input state is never mutated — a pure step over an
+ * immutable state). `view` hands the session's read-only snapshot to `sceneOf`,
+ * which returns the whole stadium as a `Scene` value. `sound` reads exactly this
+ * tick's feedback and returns the tones to play. `readHud` is the pure projection
+ * the DOM overlay renders.
  */
 
-import type { TickInput } from "@axiom/web-engine";
-import type { InputState } from "@axiom/web-engine";
-import { playTone } from "@axiom/web-engine";
-import { SUN_NOON_MS, SUN_START_MS, type SceneHandles, applyFrame, applySun, buildScene } from "./scene.ts";
-import type { Feedback, Intent, Outcome, Phase, PitchResult } from "./types.ts";
+import type { Game, InputFrame, MaterialSpec, Rgba, ToneSpec } from "@axiom/web-engine";
 import { HomeRunSession } from "./session.ts";
+import { sceneOf } from "./view.ts";
+import type { Feedback, Intent, Outcome, Phase, PitchResult } from "./types.ts";
 
-/** The HUD snapshot the harness renders each frame. */
+export const PITCH_COUNT = 10;
+
+/** The HUD snapshot the harness renders (pure projection of the session). */
 export interface Hud {
   readonly phase: Phase;
   readonly score: number;
@@ -31,191 +32,149 @@ export interface Hud {
   readonly bestDistance: number;
   readonly lastMph: number;
   readonly lastPitchName: string;
-  /** Rewind progress 0…1 — the ready meter (1 = wound and ready to swing). */
   readonly readiness: number;
   readonly ready: boolean;
   readonly results: readonly PitchResult[];
-  /** Feedback events to present this frame (center text, flashes, audio). */
-  readonly events: readonly Feedback[];
 }
 
-const PITCH_COUNT = 10;
+// ── declared materials (the old scene.ts palette, as data) ───────────────────────
 
-let handles: SceneHandles | undefined;
-let session = new HomeRunSession(1);
+const flat = (baseColor: Rgba): MaterialSpec => ({ baseColor });
+const glow = (baseColor: Rgba, emissive: Rgba): MaterialSpec => ({ baseColor, emissive });
 
-// Harness-provided configuration (URL params), applied before the first tick.
-let pendingSeed = 1;
-let freezeAtTick = Number.POSITIVE_INFINITY;
-let autoStart = false;
-let autoSwingAt = -1;
-let ticks = 0;
-
-// The optional on-screen touch pad pushes its state here (see harness.ts). A tap
-// on the swing button queues one press edge, consumed by the next fixed tick.
-let padMoveX = 0;
-let padSwingQueued = false;
-
-let prevReady = true;
-let hudEvents: Feedback[] = [];
-
-/** Bind the game's actions, build the scene, and start a fresh session. Called
- * once by the harness (and again on hot-reload) before the first `updateGame`. */
-export const initGame = (input: InputState): void => {
-  input.bindAction("left", ["ArrowLeft", "KeyA"]);
-  input.bindAction("right", ["ArrowRight", "KeyD"]);
-  input.bindAction("swing", ["Space"]);
-  input.bindAction("restart", ["Enter"]);
-  handles = buildScene();
-  session = new HomeRunSession(pendingSeed);
-  ticks = 0;
-  prevReady = true;
-  padMoveX = 0;
-  padSwingQueued = false;
-  hudEvents = [];
+const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
+  BallWhite: flat([1, 1, 0.98, 1]),
+  // Painted markings glow faintly so they read white at grazing angles.
+  BaseWhite: glow([1, 1, 0.98, 1], [0.3, 0.3, 0.28, 1]),
+  BatKnob: flat([0.55, 0.4, 0.16, 1]),
+  BatterBlue: flat([0.22, 0.46, 1, 1]),
+  BatterHelmet: flat([0.14, 0.3, 0.85, 1]),
+  BatterPuck: flat([0.55, 0.85, 1, 1]),
+  CornerBlue: flat([0.24, 0.3, 0.8, 1]),
+  DeckBrown: flat([0.72, 0.5, 0.3, 1]),
+  Dirt: flat([0.82, 0.58, 0.34, 1]),
+  DirtLight: flat([0.95, 0.72, 0.44, 1]),
+  DotBlue: flat([0.2, 0.35, 0.95, 1]),
+  DotRed: flat([0.9, 0.15, 0.12, 1]),
+  DotYellow: flat([0.95, 0.8, 0.15, 1]),
+  FielderBase: flat([1, 0.6, 0.3, 1]),
+  FielderCap: flat([1, 0.22, 0.18, 1]),
+  FielderWhite: flat([1, 0.98, 0.95, 1]),
+  GrassDark: flat([0.4, 0.82, 0.24, 1]),
+  GrassLight: flat([0.55, 1, 0.34, 1]),
+  GroundGreen: flat([0.38, 0.7, 0.24, 1]),
+  Line: glow([1, 1, 0.96, 1], [0.3, 0.3, 0.28, 1]),
+  MachineDark: flat([0.3, 0.3, 0.36, 1]),
+  MachineOrange: flat([1, 0.6, 0.34, 1]),
+  PanelNavy: flat([0.1, 0.13, 0.38, 1]),
+  PatrolDirt: flat([0.68, 0.46, 0.26, 1]),
+  PatrolGreen: flat([0.36, 0.72, 0.22, 1]),
+  SeatBlue: flat([0.42, 0.54, 1, 1]),
+  SeatBlueDark: flat([0.3, 0.39, 0.92, 1]),
+  // The backdrop bowl reads as SKY — self-lit so the moving sun never darkens it.
+  SkyBowl: glow([0.72, 0.76, 1, 1], [0.5, 0.56, 0.8, 1]),
+  WallBlue: flat([0.32, 0.44, 1, 1]),
+  WallTrim: flat([1, 0.68, 0.16, 1]),
+  // Dynamic-actor materials.
+  bat: glow([1, 0.88, 0.25, 1], [0.45, 0.36, 0.08, 1]),
+  digit: glow([1, 0.3, 0.15, 1], [0.9, 0.2, 0.08, 1]),
+  flash: glow([1, 0.95, 0.6, 1], [1, 0.85, 0.4, 1]),
+  impact: { baseColor: [1, 0.9, 0.5, 1], emissive: [1, 0.8, 0.35, 1], opacity: 0.55 },
+  shadow: { baseColor: [0.05, 0.12, 0.05, 1], opacity: 0.35 },
+  trail: glow([1, 0.9, 0.6, 1], [1, 0.75, 0.35, 1]),
 };
 
-/** Harness affordances: seed + deterministic screenshot/autoplay hooks. */
-export const configure = (opts: {
-  readonly seed?: number;
-  readonly freezeAt?: number;
-  readonly autoStart?: boolean;
-  readonly swingAt?: number;
-}): void => {
-  pendingSeed = opts.seed ?? pendingSeed;
-  freezeAtTick = opts.freezeAt ?? freezeAtTick;
-  autoStart = opts.autoStart ?? autoStart;
-  autoSwingAt = opts.swingAt ?? autoSwingAt;
-};
-
-/** The harness's touch pad feeds its state here (screen-sign moveX; tap queues a swing). */
-export const setPad = (moveX: number, swingTap: boolean): void => {
-  padMoveX = moveX;
-  padSwingQueued = padSwingQueued || swingTap;
-};
+// ── input → intent (pure) ────────────────────────────────────────────────────────
 
 /**
- * Fold this tick's keyboard + pad into the session `Intent`. The camera looks
- * downfield so world +X renders to screen-LEFT; we negate the keyboard axis so
+ * Fold this tick's resolved input into the session `Intent`. The camera looks
+ * downfield so world +X renders to screen-LEFT; the keyboard axis is negated so
  * pressing D/→ moves the batter right ON SCREEN.
  */
-const readIntent = (input: TickInput): Intent => {
-  // `axis(neg, pos)` shim: the engine's InputState exposes only isDown/pressed.
-  const kbAxis = (input.isDown("right") ? 1 : 0) - (input.isDown("left") ? 1 : 0);
-  const moveX = padMoveX !== 0 ? -padMoveX : -kbAxis;
-  let swing = input.pressed("swing") || padSwingQueued;
-  padSwingQueued = false;
-  let start = input.pressed("swing") || input.pressed("restart");
-  // Scripted autoplay for deterministic screenshots (?swingAt=N presses once).
-  if (autoSwingAt >= 0 && ticks === autoSwingAt) {
-    swing = true;
-  }
-  if (autoStart && ticks === 2) {
-    start = true;
-  }
-  return { moveX, start, swing };
+const intentOf = (input: InputFrame): Intent => {
+  const kbAxis = (input.down.has("right") ? 1 : 0) - (input.down.has("left") ? 1 : 0);
+  return {
+    moveX: -kbAxis,
+    start: input.pressed.has("swing") || input.pressed.has("restart"),
+    swing: input.pressed.has("swing"),
+  };
 };
 
-// ── audio hooks (synthesized; no assets) ──────────────────────────────────────
+// ── audio (pure: events → tones) ─────────────────────────────────────────────────
 
-const toneFor = (kind: Feedback["kind"], big: boolean): void => {
+const toneFor = (kind: Feedback["kind"], big: boolean): readonly ToneSpec[] => {
   switch (kind) {
     case "release":
-      playTone({ duration: 0.05, freq: 660, volume: 0.12, wave: "square" });
-      return;
+      return [{ duration: 0.05, freq: 660, volume: 0.12, wave: "square" }];
     case "contact":
-      playTone({ duration: 0.07, freq: big ? 220 : 180, volume: 0.5, wave: "square" });
-      playTone({ duration: 0.05, freq: big ? 1400 : 900, volume: 0.25, wave: "triangle" });
-      return;
-    case "homer": {
-      // A rising major arpeggio (C–E–G–C), staggered via the engine's tone
-      // `delay` so one event plays the whole triumphant flourish.
-      const notes = [523, 659, 784, 1047];
-      notes.forEach((f, i) => playTone({ delay: i * 0.05, duration: 0.16, freq: f, volume: 0.3, wave: "triangle" }));
-      return;
-    }
+      return [
+        { duration: 0.07, freq: big ? 220 : 180, volume: 0.5, wave: "square" },
+        { duration: 0.05, freq: big ? 1400 : 900, volume: 0.25, wave: "triangle" },
+      ];
+    case "homer":
+      // A rising major arpeggio (C–E–G–C), staggered by the tone `delay`.
+      return [523, 659, 784, 1047].map((freq, i) => ({ delay: i * 0.05, duration: 0.16, freq, volume: 0.3, wave: "triangle" }));
     case "clean":
-      playTone({ duration: 0.12, freq: 587, volume: 0.22, wave: "triangle" });
-      return;
+      return [{ duration: 0.12, freq: 587, volume: 0.22, wave: "triangle" }];
     case "miss":
-      playTone({ duration: 0.12, freq: 110, volume: 0.18, wave: "sawtooth" });
-      return;
+      return [{ duration: 0.12, freq: 110, volume: 0.18, wave: "sawtooth" }];
     case "ball":
-      playTone({ duration: 0.1, freq: 300, volume: 0.12, wave: "sine" });
-      return;
+      return [{ duration: 0.1, freq: 300, volume: 0.12, wave: "sine" }];
     case "foul":
-      playTone({ duration: 0.08, freq: 240, volume: 0.18, wave: "square" });
-      return;
+      return [{ duration: 0.08, freq: 240, volume: 0.18, wave: "square" }];
     case "caught":
     case "fielded":
     case "weak":
     case "grounder":
     case "popup":
-      playTone({ duration: 0.08, freq: 160, volume: 0.2, wave: "sine" });
-      return;
+      return [{ duration: 0.08, freq: 160, volume: 0.2, wave: "sine" }];
     default:
-      return;
+      return [];
   }
 };
 
-/** One fixed-step tick: fold input → intent, advance the session, drain audio
- * cues, and mirror the result into the scene. The harness calls this each step
- * after `input.beginTick()`. */
-export const updateGame = (input: TickInput): void => {
-  if (handles === undefined) {
-    return;
-  }
-  ticks += 1;
-  const intent = readIntent(input);
-  if (ticks <= freezeAtTick) {
-    session.advance(intent);
-    for (const event of session.drainEvents()) {
-      hudEvents.push(event);
-      toneFor(event.kind, event.big);
-    }
+/** The pure Home Run! game the `runGame` shell drives. */
+export const game: Game<HomeRunSession> = {
+  actions: {
+    left: ["ArrowLeft", "KeyA"],
+    restart: ["Enter"],
+    right: ["ArrowRight", "KeyD"],
+    swing: ["Space"],
+  },
+  init: (seed: number): HomeRunSession => new HomeRunSession(seed),
+  resources: {
+    materials: MATERIALS,
+    meshes: { box: { kind: "box" }, cylinder: { kind: "cylinder" }, sphere: { kind: "sphere" } },
+  },
+  sound: (previous: HomeRunSession, next: HomeRunSession): readonly ToneSpec[] => {
+    const cues = next.tickEvents.flatMap((event) => toneFor(event.kind, event.big));
     // A soft click the instant the batter finishes re-winding (ready to swing).
-    const ready = session.swing.state === "ready";
-    if (ready && !prevReady) {
-      playTone({ duration: 0.05, freq: 880, volume: 0.14, wave: "sine" });
-    }
-    prevReady = ready;
-  }
-  applyFrame(handles, session.view());
+    const becameReady = next.swing.state === "ready" && previous.swing.state !== "ready";
+    return becameReady ? [...cues, { duration: 0.05, freq: 880, volume: 0.14, wave: "sine" }] : cues;
+  },
+  update: (state: HomeRunSession, input: InputFrame): HomeRunSession => {
+    const next = state.clone();
+    next.advance(intentOf(input));
+    return next;
+  },
+  view: (state: HomeRunSession, ctx): ReturnType<typeof sceneOf> => sceneOf(state.view(), ctx.nowMs),
 };
 
-/** Once per RENDERED frame (not per fixed tick): wall-clock presentation work,
- * independent of the game loop — the sun's slow crawl across the sky. Starts at
- * mid-morning and pins to high noon under a ?shot freeze so screenshots stay
- * deterministic. */
-export const frameGame = (nowMs: number): void => {
-  if (handles === undefined) {
-    return;
-  }
-  const pinned = freezeAtTick !== Number.POSITIVE_INFINITY;
-  applySun(handles, pinned ? SUN_NOON_MS : SUN_START_MS + nowMs);
-};
+/** The pure HUD projection the DOM overlay renders each frame. */
+export const readHud = (state: HomeRunSession): Hud => ({
+  bestDistance: state.bestDistance,
+  homers: state.homers,
+  lastMph: state.lastMph,
+  lastPitchName: state.lastPitchName,
+  multiplier: state.streakMultiplier,
+  phase: state.phase,
+  pitchCount: PITCH_COUNT,
+  pitchNumber: state.pitchNumber,
+  ready: state.swing.state === "ready",
+  readiness: state.swing.readiness,
+  results: state.results,
+  score: state.score,
+  streak: state.streak,
+});
 
-/** The HUD the harness reads each frame (draining buffered feedback events). */
-export const readHud = (): Hud => {
-  const events = hudEvents;
-  hudEvents = [];
-  return {
-    bestDistance: session.bestDistance,
-    events,
-    homers: session.homers,
-    lastMph: session.lastMph,
-    lastPitchName: session.lastPitchName,
-    multiplier: session.streakMultiplier,
-    readiness: session.swing.readiness,
-    ready: session.swing.state === "ready",
-    phase: session.phase,
-    pitchCount: PITCH_COUNT,
-    pitchNumber: session.pitchNumber,
-    results: session.results,
-    score: session.score,
-    streak: session.streak,
-  };
-};
-
-/** Re-exported for the harness's outcome styling. */
 export type { Outcome };

@@ -9,7 +9,9 @@ import {
   createMaterial,
   createMesh,
   createMeshData,
+  despawnRenderable,
   initStore,
+  removeLight,
   rendererBackendName,
   rendererNodeCount,
   renderScene,
@@ -251,4 +253,42 @@ test("resizeRenderer clamps and forwards the viewport to the backend", () => {
   resizeRenderer(640.7, 0);
   assert.deepEqual([canvas.width, canvas.height], [640, 1]);
   assert.deepEqual(rec.resizes[0], { height: 1, width: 640 });
+});
+
+test("despawnRenderable drops a node from the next frame and rejects an unknown entity", () => {
+  const rec = setup("WebGL2", "high");
+  const material = createMaterial({ baseColor: [1, 1, 1, 1] });
+  const box = createMesh("box");
+  const kept = spawnRenderable(box, material, IDENTITY_TRANSFORM);
+  const gone = spawnRenderable(box, material, IDENTITY_TRANSFORM);
+  assert.equal(rendererNodeCount(), 2);
+  despawnRenderable(gone);
+  assert.equal(rendererNodeCount(), 1);
+  renderScene();
+  const nodes = [...rec.frames[0]!.nodes];
+  assert.equal(nodes.length, 1);
+  // The surviving node is the one that was kept (the other's slot is gone).
+  assert.ok(kept > 0);
+  assert.throws(
+    () => {
+      despawnRenderable(9999);
+    },
+    /unknown entity 9999/u,
+  );
+});
+
+test("removeLight drops a light from the next frame and rejects an unknown entity", () => {
+  const rec = setup("WebGL2", "high");
+  const sun = addLight({ color: [1, 1, 1, 1], direction: { x: 0, y: -1, z: 0 }, intensity: 1, kind: "directional" });
+  addLight({ color: [0, 1, 0, 1], intensity: 1, kind: "point", position: { x: 0, y: 0, z: 0 } });
+  removeLight(sun);
+  renderScene();
+  assert.equal(rec.frames[0]!.dirLights.length, 0);
+  assert.equal(rec.frames[0]!.pointLights.length, 1);
+  assert.throws(
+    () => {
+      removeLight(9999);
+    },
+    /unknown light entity 9999/u,
+  );
 });

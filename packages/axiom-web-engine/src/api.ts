@@ -73,6 +73,12 @@ export interface Camera3D {
   readonly far: number;
 }
 
+/** The latest canvas pointer sample (CSS px, top-left origin). */
+export interface PointerSample {
+  readonly pos: { readonly x: number; readonly y: number };
+  readonly down: boolean;
+}
+
 /** One tick's worth of input, read by a consumer during a fixed update. The DOM
  * edge accumulates events; `beginTick()` snapshots them so `pressed`/`released`
  * are exact one-tick edges and `look()` is the delta since the previous tick. */
@@ -83,7 +89,22 @@ export interface TickInput {
   /** This tick's pointer-locked mouse delta (raw px, +x right / +y down). */
   readonly look: () => { readonly x: number; readonly y: number };
   /** The latest canvas pointer sample (CSS px, top-left origin), if any. */
-  readonly pointer: () => { readonly pos: { readonly x: number; readonly y: number }; readonly down: boolean } | undefined;
+  readonly pointer: () => PointerSample | undefined;
+}
+
+/**
+ * One fixed tick's input as a FLAT IMMUTABLE VALUE — the snapshot a pure `update`
+ * reads instead of the stateful `TickInput`/`InputState`. Action names are already
+ * resolved against the game's bindings: `down` is every action held this tick,
+ * `pressed`/`released` the exact one-tick edges, `look` the mouse-look delta, and
+ * `pointer` the latest canvas sample. Because it is plain data, `update(state,
+ * input, ctx)` is referentially transparent and testable without a DOM or mocks. */
+export interface InputFrame {
+  readonly down: ReadonlySet<string>;
+  readonly pressed: ReadonlySet<string>;
+  readonly released: ReadonlySet<string>;
+  readonly look: { readonly x: number; readonly y: number };
+  readonly pointer: PointerSample | undefined;
 }
 
 /** A procedural tone (WebAudio oscillator + envelope). */

@@ -18,12 +18,11 @@
  * gallery build — keep them verbatim.
  */
 
-import { type BackendChoice, initRenderer, renderScene } from "@axiom/web-engine";
-import { startLoop } from "@axiom/web-engine";
-import { InputState, attachDomInput } from "@axiom/web-engine";
+import { type BackendChoice, type Game, type RunningGame, runGame } from "@axiom/web-engine";
+import type { Hud } from "./game.ts";
+import { SUN_NOON_MS, SUN_START_MS } from "./view.ts";
+import type { HomeRunSession } from "./session.ts";
 
-const FIXED_HZ = 60;
-const MAX_STEPS_PER_FRAME = 8;
 const CANVAS_ID = "axiom-canvas";
 
 interface Feedback {
@@ -32,44 +31,11 @@ interface Feedback {
   readonly big: boolean;
 }
 
-interface PitchResult {
-  readonly outcome: string;
-  readonly points: number;
-  readonly distance: number;
-  readonly mph: number;
-  readonly caught: boolean;
-}
-
-/** The HUD snapshot the game module exposes each frame. */
-interface Hud {
-  readonly phase: "ready" | "windup" | "pitch" | "flight" | "result" | "over";
-  readonly score: number;
-  readonly pitchNumber: number;
-  readonly pitchCount: number;
-  readonly homers: number;
-  readonly streak: number;
-  readonly multiplier: number;
-  readonly bestDistance: number;
-  readonly lastMph: number;
-  readonly lastPitchName: string;
-  readonly readiness: number;
-  readonly ready: boolean;
-  readonly results: readonly PitchResult[];
-  readonly events: readonly Feedback[];
-}
-
+/** The dynamically-imported pure game module (kept as a `/dist/game.js` import so
+ * the single-file packager's hot-reload anchor stays verbatim). */
 interface GameModule {
-  readonly initGame: (input: InputState) => void;
-  readonly updateGame: (input: InputState) => void;
-  readonly frameGame: (nowMs: number) => void;
-  readonly readHud: () => Hud;
-  readonly setPad: (moveX: number, swingTap: boolean) => void;
-  readonly configure: (opts: {
-    seed?: number;
-    freezeAt?: number;
-    autoStart?: boolean;
-    swingAt?: number;
-  }) => void;
+  readonly game: Game<HomeRunSession>;
+  readonly readHud: (state: HomeRunSession) => Hud;
 }
 
 const el = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
@@ -136,7 +102,7 @@ const boot_ = async (): Promise<void> => {
     }
   };
 
-  const updateHud = (hud: Hud): void => {
+  const updateHud = (hud: Hud, events: readonly Feedback[]): void => {
     fields.score.textContent = String(hud.score);
     fields.pitch.textContent = `${hud.pitchNumber}/${hud.pitchCount}`;
     fields.homers.textContent = String(hud.homers);
@@ -161,7 +127,7 @@ const boot_ = async (): Promise<void> => {
       fields.overBest.textContent = hud.bestDistance > 0 ? `${hud.bestDistance}m` : "—";
     }
 
-    for (const fb of hud.events) {
+    for (const fb of events) {
       if (fb.text.length > 0 && fb.kind !== "release") {
         showMessage(fb);
       }
@@ -171,38 +137,41 @@ const boot_ = async (): Promise<void> => {
     }
   };
 
-  // Touch pad: left/right hold zones + a tap-to-swing button (mobile parity).
-  const wirePad = (mod: GameModule): void => {
-    let moveX = 0;
-    const hold = (id: string, down: () => void, up: () => void): void => {
+  // Touch pad: left/right hold zones + a tap-to-swing button (mobile parity). Each
+  // synthesizes the SAME key events the keyboard feeds, so no game-specific plumbing
+  // is needed — the pure `update` sees identical input from touch and from keys.
+  const wirePad = (running: RunningGame<HomeRunSession>): void => {
+    const key = (code: string, down: boolean): void => {
+      running.input.keyEvent(code, down);
+    };
+    const hold = (id: string, code: string): void => {
       const node = el(id);
       node.addEventListener("pointerdown", (e: PointerEvent): void => {
         node.setPointerCapture?.(e.pointerId);
-        down();
+        key(code, true);
       });
-      node.addEventListener("pointerup", up);
-      node.addEventListener("pointercancel", up);
+      node.addEventListener("pointerup", (): void => key(code, false));
+      node.addEventListener("pointercancel", (): void => key(code, false));
     };
-    // Buttons are labeled in SCREEN direction; setPad expects screen sign (game.ts negates).
-    hold("pad-left", () => { moveX = -1; mod.setPad(moveX, false); }, () => { moveX = 0; mod.setPad(moveX, false); });
-    hold("pad-right", () => { moveX = 1; mod.setPad(moveX, false); }, () => { moveX = 0; mod.setPad(moveX, false); });
-    // The swing button queues one press edge per tap.
-    el("pad-swing").addEventListener("pointerdown", (): void => mod.setPad(moveX, true));
+    // Buttons are labeled in SCREEN direction; ArrowLeft/Right map through the same
+    // negation the keyboard does, so pad-left moves the batter screen-left.
+    hold("pad-left", "ArrowLeft");
+    hold("pad-right", "ArrowRight");
+    // The swing button taps Space: a press edge this tick, released just after.
+    el("pad-swing").addEventListener("pointerdown", (): void => {
+      key("Space", true);
+      globalThis.setTimeout((): void => key("Space", false), 40);
+    });
   };
 
   // Backend selection: WebGL2 with an automatic Canvas2D software fallback;
   // `?backend=canvas2d` (or `?backend=webgl2`) forces one, the repo convention.
   const requested = new URLSearchParams(location.search).get("backend");
   const choice: BackendChoice = requested === "canvas2d" || requested === "webgl2" ? requested : "auto";
-  initRenderer(canvas, choice);
 
-  let stopLoop: (() => void) | undefined;
-  let detachInput: (() => void) | undefined;
+  let running: RunningGame<HomeRunSession> | undefined;
   const load = async (version: number): Promise<void> => {
-    stopLoop?.();
-    detachInput?.();
-    const input = new InputState();
-    detachInput = attachDomInput(input, canvas);
+    running?.stop();
     const mod = (await import(`/dist/game.js?v=${version}`)) as GameModule;
 
     // URL-driven dev/screenshot affordances (all deterministic).
@@ -211,28 +180,45 @@ const boot_ = async (): Promise<void> => {
       const raw = params.get(key);
       return raw === null ? undefined : Number(raw);
     };
-    mod.configure({
-      autoStart: params.get("auto") === "1",
-      freezeAt: num("shot"),
-      seed: num("seed"),
-      swingAt: num("swingAt"),
-    });
-    wirePad(mod);
+    const autoStart = params.get("auto") === "1";
+    const swingAt = num("swingAt") ?? -1;
+    const pinned = params.has("shot");
+    // The sun's wall-clock timeMs: pinned to high noon under a ?shot freeze so
+    // screenshots stay deterministic, otherwise a slow crawl from mid-morning.
+    const nowMs = (): number => (pinned ? SUN_NOON_MS : SUN_START_MS + performance.now());
 
-    mod.initGame(input);
-    stopLoop = startLoop({
-      fixedHz: FIXED_HZ,
-      maxCatchUpSteps: MAX_STEPS_PER_FRAME,
-      render: (): void => {
-        mod.frameGame(performance.now());
-        renderScene();
-        updateHud(mod.readHud());
+    // Buffer this-tick feedback across the frame's ticks, flush to the DOM HUD once.
+    let events: Feedback[] = [];
+
+    running = runGame(canvas, mod.game, {
+      backend: choice,
+      freezeAtTick: num("shot"),
+      now: nowMs,
+      onFrame: (state): void => {
+        updateHud(mod.readHud(state), events);
+        events = [];
       },
-      update: (): void => {
-        input.beginTick();
-        mod.updateGame(input);
+      onTick: (state): void => {
+        events = [...events, ...state.tickEvents];
+      },
+      seed: num("seed"),
+      // Scripted deterministic input for screenshots: start the round, swing once.
+      script: (tick, input): void => {
+        if (autoStart && tick === 2) {
+          input.keyEvent("Enter", true);
+        }
+        if (autoStart && tick === 3) {
+          input.keyEvent("Enter", false);
+        }
+        if (swingAt >= 0 && tick === swingAt) {
+          input.keyEvent("Space", true);
+        }
+        if (swingAt >= 0 && tick === swingAt + 1) {
+          input.keyEvent("Space", false);
+        }
       },
     });
+    wirePad(running);
   };
 
   await load(0);

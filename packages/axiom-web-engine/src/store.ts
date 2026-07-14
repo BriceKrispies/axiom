@@ -19,6 +19,7 @@ import {
   type ResolvedMaterial,
 } from "./backend.ts";
 import type { Camera3D, Entity, Handle, Light, MaterialSpec, MeshData, MeshKind, Rgba, Transform } from "./api.ts";
+import { absentProbe, assert, demand, orCompute, orElse, select } from "./branchless.ts";
 import { unitBox, unitCylinderY, unitSphere } from "./meshes.ts";
 
 /** Color · intensity, resolved to a plain RGB triple for the frame. */
@@ -66,51 +67,10 @@ const DEFAULT_CAMERA: Camera3D = {
   target: { x: 0, y: 0, z: 0 },
 };
 
-// The absent sentinel avoids the banned `undefined` identifier via a 0-arg call to an optional-parameter identity; presence is tested with `!==`.
-const absentProbe = <Value>(slot?: Value): Value | undefined => slot;
-const ABSENT = absentProbe();
-
 let state = absentProbe<RendererState>();
 let nextEntity: Entity = 1;
 let nextHandle: Handle = 1;
 
-// Branchless primitives (see docs/unbranching.md): assert/fail throw via a value transform; pick selects a table slot; presentOf/demand/orElse/orCompute model Option flow; pushCapped is a capacity-guarded push.
-const fail = (message: string): never => {
-  throw new Error(message);
-};
-const assert: (condition: boolean, message: string) => asserts condition = (condition, message): void => {
-  // True -> slice(1) -> [] (nothing runs); false -> slice(0) -> [message] (map fails).
-  [message].slice(Number(condition)).map((reason): never => fail(reason));
-};
-const assertInRange: <Value>(value: Value | undefined, inRange: boolean) => asserts value is Value = (
-  _value,
-  inRange,
-): void => {
-  assert(inRange, "store: branchless selection index out of range");
-};
-const pick = <Value>(options: readonly Value[], index: number): Value => {
-  const chosen = options[index];
-  assertInRange(chosen, index < options.length);
-  return chosen;
-};
-const select = <Value>(condition: boolean, whenTrue: Value, whenFalse: Value): Value =>
-  pick([whenFalse, whenTrue], Number(condition));
-const presentOf = <Value>(value: Value | undefined): Value[] =>
-  [value].filter((candidate): candidate is Value => candidate !== ABSENT);
-const demand = <Value>(value: Value | undefined, message: string): Value => {
-  const found = presentOf(value);
-  assert(found.length > 0, message);
-  return pick(found, 0);
-};
-const orElse = <Value>(value: Value | undefined, fallback: Value): Value => {
-  const found = presentOf(value);
-  return pick([fallback, ...found], found.length);
-};
-const orCompute = <Value>(value: Value | undefined, compute: () => Value): Value => {
-  const found = presentOf(value);
-  const thunks: (() => Value)[] = [compute, ...found.map((candidate): (() => Value) => (): Value => candidate)];
-  return pick(thunks, found.length)();
-};
 const requireState = (): RendererState =>
   demand(state, "store: initStore(backend, canvas) must be called before any other store function");
 
@@ -212,6 +172,15 @@ export const setNodeTransform = (entity: Entity, transform: Transform): void => 
   node.transform = transform;
 };
 
+/** Remove a node from the retained scene (its geometry/material handles live on;
+ * only this drawable is dropped). The reconciler uses this so an immediate-mode
+ * `view` that stops emitting a node makes it disappear. */
+export const despawnRenderable = (entity: Entity): void => {
+  const st = requireState();
+  assert(st.nodes.has(entity), `store: despawnRenderable got unknown entity ${entity}`);
+  st.nodes.delete(entity);
+};
+
 /** Set the look-at perspective camera used by the next `renderScene`. */
 export const setCamera3D = (cam: Camera3D): void => {
   requireState().camera = cam;
@@ -263,6 +232,14 @@ export const setLight = (entity: Entity, light: Light): void => {
   const st = requireState();
   assert(st.lights.has(entity), `store: setLight got unknown light entity ${entity}`);
   st.lights.set(entity, light);
+};
+
+/** Remove a light from the retained scene (the reconciler drops a light whose
+ * key a later `view` stops emitting). */
+export const removeLight = (entity: Entity): void => {
+  const st = requireState();
+  assert(st.lights.has(entity), `store: removeLight got unknown light entity ${entity}`);
+  st.lights.delete(entity);
 };
 
 /** Drop every node, light, mesh, and material (backend resources included). */

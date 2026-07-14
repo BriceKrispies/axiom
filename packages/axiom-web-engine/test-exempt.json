@@ -4,5 +4,6 @@
   "audio.ts",
   "raf-loop.ts",
   "dom-input.ts",
-  "renderer.ts"
+  "renderer.ts",
+  "run-game.ts"
 ]

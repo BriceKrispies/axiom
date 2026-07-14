@@ -3,7 +3,7 @@
  * and the scene's read-only view all share. No behavior lives here; these are the
  * plain shapes that flow between the pure logic (`swing.ts` / `pitch.ts` /
  * `fielders.ts` / `ball.ts` / `session.ts`) and the one engine-facing file
- * (`scene.ts`). Imports only `vec.ts`.
+ * (`view.ts`). Imports only `vec.ts`.
  */
 
 import type { Vec3 } from "./vec.ts";
@@ -107,8 +107,8 @@ export interface PitchResult {
 }
 
 /**
- * The read-only snapshot the session hands `scene.ts` each frame — everything the
- * 3D presentation needs, and nothing the presentation could use to mutate gameplay.
+ * The read-only snapshot the session hands the pure `view.ts` each frame — everything
+ * the 3D presentation needs, and nothing the presentation could use to mutate gameplay.
  */
 export interface SceneView {
   readonly phase: Phase;
