@@ -1,0 +1,24 @@
+axis = "lighting_directionality"
+failed_attempts = []
+inexpressible = true
+
+# NOTE ON FRAMING: the directional-light shadow *map* capability already exists in the GPU
+# backend (modules/axiom-gpu-backend/src/scene_renderer.rs: a depth-only SHADOW_WGSL pass
+# from the sun's light_view_proj into a shadow depth texture, sampled per-fragment via
+# shadow_factor() with PCF + slope-scaled/fixed bias, applied to terrain/trunks/foliage).
+# So this iteration is NOT a new abstraction/primitive — it is a bounded tuning of the
+# EXISTING shadow response. It is recorded here because it is a (small) renderer/shader
+# change on the lighting_directionality axis, and because the gap is genuinely
+# inexpressible through the manifest: the sun colour/intensity and hemisphere ambient are
+# manifest-tunable global brightnesses, but the *per-fragment contrast between shadowed and
+# lit ground* is a shading behaviour, not a config value. The cast shadows currently read
+# washed-out because shadowed ground still receives FULL hemisphere ambient
+# (`var lit = base.rgb * hemi`), so shade only removes the sun's diffuse term, not the sky
+# fill — the reference's floor has crisp dappled light, ours is a gentle gradient.
+
+smallest_api = "One WGSL const SHADOW_AMBIENT (the ambient floor a fully-shadowed fragment keeps) + modulating the hemisphere ambient by the already-computed shadow factor in fs(): `let ambient_shade = mix(SHADOW_AMBIENT, 1.0, shade); lit = base.rgb * hemi * ambient_shade;`. No new bind group, no new pass, no new engine surface, no new manifest field — it reuses the existing shadow map. A single explicit contrast control."
+
+screenshot_command = "cargo run --features visual-target --bin visual-target -- render apps/axiom-gallery/visual_targets/prologue_postcard_001/manifest.toml --backend gpu --out apps/axiom-gallery/visual_targets/prologue_postcard_001/candidate.gpu.png"
+
+# Determinism proof filled in after the candidate is rendered twice (see ledger iter43).
+screenshot_proof = "rendered twice, byte-identical GPU output: md5 1c868b8212f789c879a7ad4751b5e507 == 1c868b8212f789c879a7ad4751b5e507 (determinism mean=0, max=0; well within GPU tolerance mean<=2/max<=40)"

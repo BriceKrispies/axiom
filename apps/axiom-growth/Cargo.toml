@@ -1,15 +1,147 @@
 [package]
 name = "axiom-growth"
-description = "Axiom app: standalone browser demo (extracted from the merged apps/axiom-gallery crate). Composition leaf: its own wasm bundle + web page."
+description = "Axiom app: Growth — a deterministic procedural-planet survival demo (standalone home of the gallery's demo of the same name). Seed → genome → planet atlas → streamed first-person terrain in the browser, plus the native agent driver and the Visual Target 001 runner as feature-gated binaries."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+# The two native binaries below are declared explicitly (they live in `src/bin/`
+# behind features), so cargo must not auto-discover anything.
+autobins = false
 
-# `cdylib` for the app's own wasm bundle; `rlib` so native tests and tooling
-# (e.g. the axiom-shot capture harness) can compose the pure core.
+# `cdylib` for the app's own wasm bundle (the `generate`/`is_land`/`descend`/
+# `set_terrain_config` viewer exports); `rlib` so the native test suites, the
+# examples, and the agent/visual-target binaries can compose the pure core.
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+# Growth's native agent driver: walks the headless GroundSim through the reusable
+# agent harness to the summit. Native-only deps, behind `agent`. (Was the
+# gallery's `growth-agent` bin/feature; the bin NAME is unchanged.)
+[[bin]]
+name = "growth-agent"
+path = "src/bin/agent.rs"
+required-features = ["agent"]
+
+# The Visual Target 001 runner + convergence comparator. Native-only (offscreen
+# render backends + png), so it never enters the wasm bundle or the default gates.
+[[bin]]
+name = "visual-target"
+path = "src/bin/visual_target.rs"
+required-features = ["visual-target"]
+
+[features]
+# The Visual Target 001 diorama runner + convergence comparator. Reuses the growth
+# capture backends (offscreen GPU + software Canvas 2D) and the png codec; all
+# native-only optional deps, so the browser bundle never sees them.
+visual-target = [
+    "dep:axiom-gpu-backend",
+    "dep:axiom-canvas2d-backend",
+    "dep:png",
+]
+
+# Growth headless agent driver. Native-only optional deps. toml/serde/host are
+# always-on normal deps, so they are not listed as `dep:` here.
+agent = [
+    "dep:axiom-agent-harness",
+    "dep:axiom-perception",
+    "dep:axiom-introspect",
+    "dep:tiny_http",
+    "dep:serde_json",
+    "dep:tungstenite",
+    "dep:axiom-gpu-backend",
+    "dep:png",
+    "dep:axiom-canvas2d-backend",
+]
+
+# Native + wasm dependencies. Everything here builds on native (so `cargo test`
+# exercises the deterministic worldgen core) and on wasm (the live browser arm).
+[dependencies]
+# The engine umbrella (module `engine`): App/scene/camera/render authoring + the
+# live wgpu backend (wasm32) — the shared first-person viewer scene.
+axiom = { path = "../../modules/axiom" }
+# Layers the pure game core builds on (deterministic primitives, math, the
+# neutral frame contract the headless capture path feeds).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-host = { path = "../../crates/axiom-host" }
+# Deterministic, address-keyed entropy streams — the growth worldgen RNG.
+axiom-entropy = { path = "../../crates/axiom-entropy" }
+# Coherent noise (gradient/Perlin + FBM + domain warp) for the local terrain.
+axiom-noise = { path = "../../crates/axiom-noise" }
+# Spherical topology (geodesic icosphere + dual region-adjacency graph + ring
+# validation) for the planet worldgen.
+axiom-geosphere = { path = "../../crates/axiom-geosphere" }
+# Deterministic spatial addresses (the seed/scatter address vocabulary).
+axiom-space = { path = "../../crates/axiom-space" }
+# Generic bounded rejection-sampling harness (sample_until_valid): the growth
+# preset genome sampler draws candidates through it until one satisfies the band.
+axiom-proc-validate = { path = "../../crates/axiom-proc-validate" }
+# Deterministic biome classification (growth's climate lens).
+axiom-biome = { path = "../../modules/axiom-biome" }
+# The graduated planet-generation pipeline (feature module): PlanetGenApi::generate
+# composes the geosphere topology + the branchless worldgen stages into a durable
+# PlanetSurfaceAtlas, and answers deterministic sample/locate queries.
+axiom-planetgen = { path = "../../modules/axiom-planetgen" }
+# The residency-ring module (growth's chunk streamer): owns which chunk coords
+# are resident + the deterministic load/unload delta as the player moves.
+axiom-streaming = { path = "../../modules/axiom-streaming" }
+# The domain-neutral heightfield mesher (growth's far/snapshot terrain geometry):
+# grid config + a height callback in, positions/normals/indices out.
+axiom-terrain-mesh = { path = "../../modules/axiom-terrain-mesh" }
+# Hand-editable data format for the visual-target manifests/scorecards and the
+# agent's tag/directive TOML.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Native-only optional deps for the agent + visual-target binaries. Confined to
+# non-wasm so the browser bundle never sees them; pulled in only by the features
+# above.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The reusable harness (composes axiom-agent), the game-agnostic perception
+# model, and the introspection surface holding world tags.
+axiom-agent-harness = { path = "../../modules/axiom-agent-harness", optional = true }
+axiom-perception = { path = "../../modules/axiom-perception", optional = true }
+axiom-introspect = { path = "../../crates/axiom-introspect", optional = true }
+# The two native screenshot backends (offscreen GPU + software Canvas 2D).
+axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend", features = ["offscreen"], optional = true }
+axiom-canvas2d-backend = { path = "../../modules/axiom-canvas2d-backend", optional = true }
+# Native server/codec deps for the agent driver.
+tiny_http = { version = "0.12", optional = true }
+serde_json = { version = "1", optional = true }
+tungstenite = { version = "0.24", optional = true }
+# Offscreen PNG capture for the visual-target runner and the agent screenshots.
+png = { version = "0.17", optional = true }
+
+# Browser/live arm only: the wasm-bindgen glue, panic hook, the live windowing
+# presentation loop, the debug overlay, the interface-layer keymap the viewer's
+# key routing uses, and the web-sys surface the viewer actually touches.
+# Confined to wasm32, so native `cargo test` compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+axiom-interface = { path = "../../crates/axiom-interface" }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "ImageData",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "MouseEvent",
+    "MessageEvent",
+    "WebSocket",
+    "Location",
+    "console",
+] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -2,6 +2,29 @@
 name = "growth"
 crate_name = "axiom-growth"
 
-allowed_layers = []
+allowed_layers = [
+    "kernel",
+    "math",
+    "host",
+    "entropy",
+    "noise",
+    "geosphere",
+    "space",
+    "proc-validate",
+    "introspect",
+    "interface",
+]
 
-allowed_modules = []
+allowed_modules = [
+    "engine",
+    "biome",
+    "planetgen",
+    "streaming",
+    "terrain-mesh",
+    "agent-harness",
+    "perception",
+    "gpu-backend",
+    "canvas2d-backend",
+    "windowing",
+    "debug-overlay",
+]
