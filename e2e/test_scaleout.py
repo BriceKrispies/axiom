@@ -65,7 +65,7 @@ def scaleout_director_url():
     """Build the worker + server, then launch a director and two game nodes."""
     if shutil.which("dotnet") is None:
         pytest.skip("the .NET 10 SDK (`dotnet`) is required for the scaleout e2e test")
-    if not (WEB_ROOT / "netplay" / "pkg" / "axiom_netplay_bg.wasm").exists():
+    if not (WEB_ROOT / "netplay" / "axiom_netplay_bg.wasm").exists():
         pytest.skip("prebuilt wasm bundle missing — run `make netplay-build` first")
 
     subprocess.run(["cargo", "build", "-p", "axiom-netplay-ffi", "--release"], cwd=REPO_ROOT, check=True)

@@ -85,7 +85,7 @@ def netplay_base_url():
 
     if shutil.which("dotnet") is None:
         pytest.skip("the .NET 10 SDK (`dotnet`) is required for the netplay e2e test")
-    if not (WEB_ROOT / "netplay" / "pkg" / "axiom_netplay_bg.wasm").exists():
+    if not (WEB_ROOT / "netplay" / "axiom_netplay_bg.wasm").exists():
         pytest.skip("prebuilt wasm bundle missing — run `make netplay-build` first")
 
     # The native cdylib the server P/Invokes. Build it fresh so the test exercises

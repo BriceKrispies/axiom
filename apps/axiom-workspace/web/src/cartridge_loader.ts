@@ -2,10 +2,10 @@
 // you're working on into a live runtime viewport.
 //
 // It reads a console manifest (the apps the workspace hosts — the `games/`
-// cartridges AND the gallery's showcase apps, all built into the one gallery
-// bundle) and renders an app-selector. On selection it either:
-//   * boots an **inline** app straight into a canvas by importing the bundle and
-//     calling its entry (e.g. `retro_fps_start`) — no embedded document, no Rust
+// cartridges AND the gallery's showcase apps, each shipped as its OWN standalone
+// bundle under /gallery/<id>/) and renders an app-selector. On selection it either:
+//   * boots an **inline** app straight into a canvas by importing that app's bundle
+//     and calling its entry (e.g. `retro_fps_start`) — no embedded document, no Rust
 //     runtime dependency: the workspace crate stays `kernel` + `runtime`
 //     portable, each app bringing its own engine through its bundle; or
 //   * opens a **page** app (a self-hosted multi-screen demo — growth, zanzoban,
@@ -34,8 +34,12 @@ interface Cartridge {
   // Present for `kind: "page"`: the self-hosted page to open.
   readonly page?: string;
   // When true, the app is an engine-`App` 3D demo that can be rendered through
-  // all three backends at once (the no-frame backend-compare tool).
+  // all three backends at once (the no-frame backend-compare tool), and
+  // `compareEntry` names the app's own per-crate export (e.g.
+  // `rotating_cube_compare_start(canvasA, canvasB, canvasC)`) — every extracted
+  // app ships its own bundle, so there is no shared `compare_start(demoId, …)`.
   readonly compare?: boolean;
+  readonly compareEntry?: string;
 }
 
 // Mark this document as a developer console so the engine's dev overlays (the
@@ -45,11 +49,11 @@ function enableDevTools(): void {
   (globalThis as unknown as { __axiom_dev_tools?: boolean }).__axiom_dev_tools = true;
 }
 
-// The gallery bundle is ONE wasm-bindgen module: importing it and calling its
-// `default()` init more than once re-runs the init and clobbers the shared `wasm`
-// binding, hijacking any already-running app onto a second instance (the exact
-// hazard gallery.js documents). So import + init each bundle EXACTLY ONCE per
-// page and hand the same module to every caller (inline boot AND backend compare).
+// Each app's bundle is ONE wasm-bindgen module: importing it and calling its
+// `default()` init more than once re-runs the init and clobbers that module's
+// shared `wasm` binding, hijacking an already-running app onto a second instance.
+// So import + init each bundle URL EXACTLY ONCE per page and hand the same module
+// to every caller (inline boot AND backend compare).
 type EngineModule = {
   default: () => Promise<unknown>;
   [entry: string]: unknown;
@@ -224,13 +228,15 @@ async function bootCompare(
   stage.append(grid);
   try {
     const mod = await loadEngine(cartridge.bundle ?? "");
-    const compare = mod["compare_start"] as (
-      demoId: string,
+    // Every comparable app exports its OWN three-canvas compare entry (named by
+    // the manifest's `compareEntry`) from its own bundle — the old shared
+    // `compare_start(demoId, …)` died with the merged gallery crate.
+    const compare = mod[cartridge.compareEntry ?? ""] as (
       a: string,
       b: string,
       c: string,
     ) => void;
-    compare(cartridge.id, COMPARE_PANES[0].id, COMPARE_PANES[1].id, COMPARE_PANES[2].id);
+    compare(COMPARE_PANES[0].id, COMPARE_PANES[1].id, COMPARE_PANES[2].id);
     status.textContent = `comparing ${cartridge.title} — WebGPU · WebGL2 · Canvas2D`;
   } catch (error) {
     status.textContent = `failed to compare ${cartridge.title}: ${String(error)}`;

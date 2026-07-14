@@ -140,12 +140,13 @@ the single reducer (event `viewport.tab.set`):
 
 - `Placeholder` — the plain "Runtime Viewport Placeholder" surface.
 - `BackendTriptych` — a placeholder that names the same three render backends
-  the demo gallery compares side by side: WebGPU, WebGL2, and Canvas2D
-  (`ComparisonBackend`, canonical fixed data in the engine's own backend
-  preference order). The **live** comparison — one deterministic demo (e.g. the
-  retro_fps demo) rendered through all three backends at once — lives in the demo
-  gallery (`apps/axiom-gallery/web/triptych.html`), which owns the real render
-  surfaces and pins each pane to a backend via `?backend=`. The workspace only
+  the workspace's compare cartridges run side by side: WebGPU, WebGL2, and
+  Canvas2D (`ComparisonBackend`, canonical fixed data in the engine's own
+  backend preference order). The **live** comparison — one deterministic demo
+  rendered through all three backends at once — is the console's own compare
+  flow: a `compare: true` cartridge boots its demo app's bundle
+  (`/gallery/<id>/axiom-loader.js`) and calls that crate's
+  `<demo>_compare_start` export over three canvases. The workspace only
   mirrors that comparison as labeled placeholder data; it embeds no live
   surface and no nested browsing context, so the app's no-embedded-frame rule
   is preserved. Attaching the real surfaces is the same future

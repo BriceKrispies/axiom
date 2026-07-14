@@ -4,7 +4,7 @@
 Repo tooling (alongside ``package_gallery.py`` and ``package_app.py``), NOT part of
 the engine dependency graph. The workspace is a developer *console*: it hosts the
 apps you're working on (the gallery's showcase apps AND the ``games/`` cartridges)
-by loading the ONE gallery bundle and calling each app's entry.
+by loading each extracted app's OWN bundle and calling that app's entry.
 
 It does four things:
 
@@ -13,12 +13,14 @@ It does four things:
 2. **Lay the static site** into ``dist-workspace/``: ``index.html`` (rewritten to load
    the compiled entry ``dist/main.js``), ``styles/``, ``games-manifest.json``, and the
    compiled ``dist/``.
-3. **Build the ONE gallery bundle** into ``dist-workspace/gallery/`` via
-   ``package_app.build_bundle`` — the same bundle the gallery showcases (its
-   ``<demo>_start`` entries + the re-exported ``retro_fps_start`` + the ``compare_start``
-   backend-compare entry) — and copies the gallery's static per-app pages there too,
-   so the console can inline-boot the single-canvas apps and open the multi-screen
-   ones (growth / zanzoban / harness).
+3. **Build the gallery site** into ``dist-workspace/gallery/`` exactly as
+   ``package_gallery.py`` lays its own ``dist/``: the gallery's static shell (the
+   landing grid + the pure-TS single-file pages), then one self-contained bundle
+   per extracted demo app under ``gallery/<id>/`` (``axiom-loader.js`` + wasm +
+   the app's page, its ``<demo>_start`` / per-crate ``*_compare_start`` entries) —
+   so the console can inline-boot the single-canvas apps from
+   ``/gallery/<id>/axiom-loader.js`` and open the multi-screen ones
+   (growth / zanzoban / dev-harness) as pages.
 4. With ``--serve``, serves ``dist-workspace/`` over HTTP, resolving extensionless
    ES-module imports (``./foo`` -> ``./foo.js``) so the shell runs from a plain
    static server.
@@ -42,12 +44,10 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import package_app  # noqa: E402  (local repo tooling, not an installed package)
+import package_gallery  # noqa: E402  (local repo tooling, not an installed package)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE_WEB = REPO_ROOT / "apps" / "axiom-workspace" / "web"
-GALLERY_DIR = REPO_ROOT / "apps" / "axiom-gallery"
-GALLERY_WEB = GALLERY_DIR / "web"
 DIST = REPO_ROOT / "dist-workspace"
 
 # The tsgo binary (TypeScript 7 native), vendored under the @axiom/game package —
@@ -93,19 +93,16 @@ def assemble(fast: bool) -> None:
     shutil.copytree(WORKSPACE_WEB / "styles", DIST / "styles")
     shutil.copy2(WORKSPACE_WEB / "games-manifest.json", DIST / "games-manifest.json")
 
-    # 3. The gallery site + bundle under gallery/. Copy the static pages first (so the
-    #    multi-screen "page" apps resolve), then build the shared bundle into the same
-    #    dir (axiom-loader.js + wasm), exactly as package_gallery lays its own dist.
+    # 3. The gallery site under gallery/, exactly as package_gallery lays its own
+    #    dist/: the static shell first (so the pure-TS single-file pages resolve),
+    #    then one self-contained bundle per extracted demo app under gallery/<id>/
+    #    (axiom-loader.js + wasm + the app's page, glue import rewritten).
     gallery_out = DIST / "gallery"
     gallery_out.mkdir(parents=True, exist_ok=True)
-    for item in GALLERY_WEB.iterdir():
-        if item.name == "pkg":
-            continue
-        dest = gallery_out / item.name
-        (shutil.copytree if item.is_dir() else shutil.copy2)(item, dest)
-    print(f"Building the gallery bundle into {gallery_out}{' (fast)' if fast else ''}\n")
+    package_gallery.copy_gallery_static(gallery_out)
+    print(f"Building the per-app demo bundles into {gallery_out}{' (fast)' if fast else ''}\n")
     target_dir = (REPO_ROOT / "target") if fast else (REPO_ROOT / "target" / "package-mvp")
-    package_app.build_bundle(GALLERY_DIR, gallery_out, fast=fast, target_dir=target_dir)
+    package_gallery.build_demo_apps(gallery_out, fast=fast, target_dir=target_dir)
 
 
 class _ExtResolvingHandler(SimpleHTTPRequestHandler):

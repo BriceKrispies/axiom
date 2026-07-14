@@ -3,34 +3,37 @@
     "id": "rotating-cube",
     "title": "Rotating Cube",
     "kind": "inline",
-    "bundle": "/gallery/axiom-loader.js",
+    "bundle": "/gallery/rotating-cube/axiom-loader.js",
     "entry": "rotating_cube_start",
     "canvas": "axiom-cube-canvas",
-    "compare": true
+    "compare": true,
+    "compareEntry": "rotating_cube_compare_start"
   },
   {
     "id": "stress-cubes",
     "title": "Stress (N cubes)",
     "kind": "inline",
-    "bundle": "/gallery/axiom-loader.js",
+    "bundle": "/gallery/stress-cubes/axiom-loader.js",
     "entry": "stress_start",
     "canvas": "axiom-stress-canvas",
-    "compare": true
+    "compare": true,
+    "compareEntry": "stress_cubes_compare_start"
   },
   {
     "id": "physics-crucible",
     "title": "Physics Crucible",
     "kind": "inline",
-    "bundle": "/gallery/axiom-loader.js",
+    "bundle": "/gallery/physics-crucible/axiom-loader.js",
     "entry": "physics_start",
     "canvas": "axiom-physics-crucible-canvas",
-    "compare": true
+    "compare": true,
+    "compareEntry": "physics_crucible_compare_start"
   },
   {
     "id": "quintet",
     "title": "Quintet",
     "kind": "inline",
-    "bundle": "/gallery/axiom-loader.js",
+    "bundle": "/gallery/quintet/axiom-loader.js",
     "entry": "quintet_start",
     "canvas": "axiom-quintet-canvas"
   },
@@ -38,7 +41,7 @@
     "id": "netplay",
     "title": "Lockstep Multiplayer",
     "kind": "inline",
-    "bundle": "/gallery/axiom-loader.js",
+    "bundle": "/gallery/netplay/axiom-loader.js",
     "entry": "netplay_start",
     "canvas": "axiom-netplay-canvas"
   },
@@ -46,7 +49,7 @@
     "id": "retro-fps",
     "title": "retro FPS (first-person)",
     "kind": "inline",
-    "bundle": "/gallery/axiom-loader.js",
+    "bundle": "/gallery/retro-fps/axiom-loader.js",
     "entry": "retro_fps_start",
     "canvas": "axiom-retro-fps-canvas"
   },
@@ -66,6 +69,6 @@
     "id": "harness",
     "title": "Debug Overlay",
     "kind": "page",
-    "page": "/gallery/harness/index.html"
+    "page": "/gallery/dev-harness/index.html"
   }
 ]
