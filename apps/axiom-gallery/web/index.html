@@ -21,12 +21,10 @@
       for (const demo of DEMOS) {
         const card = document.createElement("a");
         card.className = "card";
-        // Self-hosted demos (demo.page) link to their own bespoke page; the rest
-        // open in the shared single-canvas shell. A specific backend can still be
-        // forced for debugging via demo.html?id=<demo>&backend=webgpu|webgl2|canvas2d.
-        card.href = demo.page
-          ? `./${demo.page}`
-          : `./demo.html?id=${encodeURIComponent(demo.id)}`;
+        // Every demo is a standalone app that owns its page; the card just
+        // links out. A specific backend can still be forced for debugging via
+        // <id>/index.html?backend=webgpu|webgl2|canvas2d on demos that read it.
+        card.href = `./${demo.page}`;
 
         const h2 = document.createElement("h2");
         h2.textContent = demo.title;

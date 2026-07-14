@@ -1,2 +1,0 @@
-attacked_axis = "lighting_directionality"
-note = "One nudge: [sun] intensity 1.25->1.6. Directly-lit surfaces (floor pools, lit trunk edges) brighten while shadowed areas stay at the unchanged ambient, so the sunlit/shadow contrast widens and the long cast trunk shadows read. Config-only (existing directional sun). lighting_directionality 2->3 (directionally stronger; still short of the reference crisp-shadow drama). More contrast, not more washed; nothing worse."

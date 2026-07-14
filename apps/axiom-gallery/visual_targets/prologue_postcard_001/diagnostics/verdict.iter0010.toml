@@ -1,2 +1,0 @@
-attacked_axis = "contrast_and_exposure"
-note = "lighting_directionality is walled (god-rays need volumetric light the renderer lacks); redirect to the expressible floor axis. The brighter warm sun + slightly lifted fog belong to contrast/exposure, not lighting."

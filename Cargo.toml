@@ -77,13 +77,10 @@ members = [
     "modules/axiom",
     "apps/axiom-animation-lab",
     "apps/axiom-demo-rotating-cube",
-    # The demo gallery: every browser/WASM demo (rotating-cube, netplay, retro_fps,
-    # stress-cubes, growth, zanzoban, quintet, physics-crucible, debug-overlay
-    # harness) merged into ONE composition-leaf app crate (apps/axiom-gallery).
-    "apps/axiom-gallery",
-    # The standalone browser demo apps (the gallery de-merge): each former
-    # gallery demo is its own composition-leaf app with its own wasm bundle and
-    # page; the gallery is reduced to a static showcase that links out to them.
+    # The standalone browser demo apps (the gallery de-merge): every browser
+    # demo is its own composition-leaf app with its own wasm bundle and page.
+    # apps/axiom-gallery is no longer a crate — only its static web/ showcase
+    # (the landing grid that links out to each app's page) remains.
     "apps/axiom-rotating-cube",
     "apps/axiom-netplay",
     "apps/axiom-retro-fps",

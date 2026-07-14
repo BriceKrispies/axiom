@@ -31,10 +31,14 @@ axiom-math = { path = "../../crates/axiom-math" }
 # directly at the render-API level (the umbrella `Material`→asset boundary
 # drops `opacity`).
 axiom-render = { path = "../../modules/axiom-render" }
-# Every browser demo lives here as a module (`axiom_gallery::rotating_cube`,
-# `axiom_gallery::retro_fps`, …); the harness renders the registered ones through
-# this one crate.
-axiom-gallery = { path = "../../apps/axiom-gallery" }
+# Each browser demo is its own standalone app crate; the harness depends on
+# exactly the ones its registry renders.
+axiom-gravix = { path = "../../apps/axiom-gravix" }
+axiom-physics-crucible = { path = "../../apps/axiom-physics-crucible" }
+axiom-retro-fps = { path = "../../apps/axiom-retro-fps" }
+axiom-rotating-cube = { path = "../../apps/axiom-rotating-cube" }
+axiom-sports-physics-lab = { path = "../../apps/axiom-sports-physics-lab" }
+axiom-stress-cubes = { path = "../../apps/axiom-stress-cubes" }
 # The animation lab's posed-figure scene — captured as real pixels (L3), not SVG.
 axiom-animation-lab = { path = "../../apps/axiom-animation-lab" }
 png = "0.17"

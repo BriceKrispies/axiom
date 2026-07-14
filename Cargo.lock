@@ -321,60 +321,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-gallery"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-agent",
- "axiom-agent-harness",
- "axiom-biome",
- "axiom-canvas2d-backend",
- "axiom-debug-overlay",
- "axiom-entropy",
- "axiom-figure",
- "axiom-fp-controller",
- "axiom-geosphere",
- "axiom-gpu-backend",
- "axiom-host",
- "axiom-hydrology",
- "axiom-input",
- "axiom-interface",
- "axiom-introspect",
- "axiom-kernel",
- "axiom-layout",
- "axiom-math",
- "axiom-noise",
- "axiom-perception",
- "axiom-physics",
- "axiom-planetgen",
- "axiom-proc",
- "axiom-proc-texture",
- "axiom-proc-validate",
- "axiom-recipe",
- "axiom-recording",
- "axiom-runtime",
- "axiom-scatter",
- "axiom-space",
- "axiom-streaming",
- "axiom-terrain-mesh",
- "axiom-windowing",
- "axiom-world",
- "bytemuck",
- "console_error_panic_hook",
- "js-sys",
- "png",
- "pollster",
- "serde",
- "serde_json",
- "tiny_http",
- "toml",
- "tungstenite",
- "wasm-bindgen",
- "web-sys",
- "wgpu",
-]
-
-[[package]]
 name = "axiom-game-runtime"
 version = "0.1.0"
 dependencies = [
@@ -1003,12 +949,17 @@ dependencies = [
  "axiom",
  "axiom-animation-lab",
  "axiom-canvas2d-backend",
- "axiom-gallery",
  "axiom-gpu-backend",
+ "axiom-gravix",
  "axiom-host",
  "axiom-kernel",
  "axiom-math",
+ "axiom-physics-crucible",
  "axiom-render",
+ "axiom-retro-fps",
+ "axiom-rotating-cube",
+ "axiom-sports-physics-lab",
+ "axiom-stress-cubes",
  "png",
 ]
 

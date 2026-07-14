@@ -1,6 +1,0 @@
-axis = "artifact_level"
-failed_attempts = []
-inexpressible = true
-smallest_api = "build.rs canopy geometry: raise CANOPY_RINGS 4->8 / CANOPY_SECTORS 8->14 for rounded crowns, and seat the canopy centre on the trunk top (canopy_y = ground + trunk_height) so the lower hemisphere wraps the stem (no floating gap)."
-screenshot_command = "cargo run --features visual-target --bin visual-target -- render manifest.candidate.toml --backend canvas2d --out candidate.png"
-screenshot_proof = "rendered twice byte-identical: cn_a.png == cn_b.png == md5 059264b3740b54f7f0e9fe213dfc322a"

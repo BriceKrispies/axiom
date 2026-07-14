@@ -1,6 +1,0 @@
-axis = "lighting_directionality"
-failed_attempts = []
-inexpressible = true
-smallest_api = "axiom-canvas2d-backend: a canvas_light_scatter post-pass (LightScatterParams + apply_light_scatter radial crepuscular-ray gather + project_sun_screen), an enable flag on LowPolyRasterOptions, and Canvas2dBackendApi::set_light_scatter(bool). Spine module, branchless + 100% covered."
-screenshot_command = "cargo run --features visual-target --bin visual-target -- render manifest.candidate.toml --backend canvas2d --out candidate.png"
-screenshot_proof = "rendered twice byte-identical: gr_a.png == gr_b.png == md5 5632a549e88cce26bff8e195508cfcc9"

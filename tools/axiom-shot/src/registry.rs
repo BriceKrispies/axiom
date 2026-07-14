@@ -7,7 +7,7 @@
 //! against this table). The registered names are string literals so the checker
 //! can confirm a declared `harness` is present here.
 //!
-//! Not every gallery demo can be registered: `generia` and `forest_walk` are
+//! Not every demo app can be registered: `generia` and `forest_walk` are
 //! `#![cfg(target_arch = "wasm32")]` bespoke `run_web_multi` renderers with no
 //! native `App`/`RunningApp` core, so they have no native pixel path to capture.
 
@@ -55,24 +55,24 @@ pub fn registry() -> Vec<SliceEntry> {
         SliceEntry { name: "nova-roll", build: |_| nova_roll_app().build() },
         SliceEntry {
             name: "rotating-cube",
-            build: |_| axiom_gallery::rotating_cube_core(),
+            build: |_| axiom_rotating_cube::rotating_cube_core(),
         },
         SliceEntry {
             name: "stress-cubes",
-            build: |p| axiom_gallery::stress_cubes_core(p.stress_count.max(1)),
+            build: |p| axiom_stress_cubes::stress_cubes_core(p.stress_count.max(1)),
         },
         SliceEntry {
             name: "physics-crucible",
-            build: |_| axiom_gallery::physics_crucible::build_physics_crucible(),
+            build: |_| axiom_physics_crucible::build_physics_crucible(),
         },
         SliceEntry { name: "retro-fps", build: build_retro_fps },
         SliceEntry { name: "animation-lab", build: build_posed_figure },
-        SliceEntry { name: "gravix", build: |_| axiom_gallery::gravix::build_gravix() },
+        SliceEntry { name: "gravix", build: |_| axiom_gravix::build_gravix() },
         SliceEntry {
             name: "sports-physics-lab",
             // `--frame 1` photographs the third-person view (the player's body).
             build: |p| {
-                axiom_gallery::sports_physics_lab::build_sports_physics_lab_posed(p.frame > 0)
+                axiom_sports_physics_lab::build_sports_physics_lab_posed(p.frame > 0)
             },
         },
     ]
@@ -92,7 +92,7 @@ pub fn names() -> Vec<&'static str> {
 }
 
 fn build_retro_fps(p: &BuildParams) -> RunningApp {
-    axiom_gallery::retro_fps::build_retro_fps_app(&retro_fps_doc(p.level.as_deref())).0
+    axiom_retro_fps::build_retro_fps_app(&retro_fps_doc(p.level.as_deref())).0
 }
 
 /// L3: the animation-lab posed-figure scene captured as REAL pixels (not SVG).
@@ -150,12 +150,12 @@ fn build_posed_figure(p: &BuildParams) -> RunningApp {
 
 /// The retro FPS level document for `--level PATH` (else the built-in default).
 /// Shared by the registry build and the binary's `--pose` teleport path.
-pub fn retro_fps_doc(level: Option<&str>) -> axiom_gallery::retro_fps::level::LevelDoc {
+pub fn retro_fps_doc(level: Option<&str>) -> axiom_retro_fps::level::LevelDoc {
     match level {
-        Some(path) => axiom_gallery::retro_fps::level::LevelDoc::parse(
+        Some(path) => axiom_retro_fps::level::LevelDoc::parse(
             &std::fs::read_to_string(path).expect("read --level file"),
         ),
-        None => axiom_gallery::retro_fps::level::LevelDoc::default(),
+        None => axiom_retro_fps::level::LevelDoc::default(),
     }
 }
 

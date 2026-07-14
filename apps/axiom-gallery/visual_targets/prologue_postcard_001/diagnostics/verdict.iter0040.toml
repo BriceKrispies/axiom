@@ -1,2 +1,0 @@
-attacked_axis = "fog_and_haze"
-note = "HONEST RE-SCORE (the prior all-5s was an over-claim; not at reference parity). One nudge: de-warm the [fog] colour to a cool-neutral blue-gray [0.60,0.63,0.67] so the misty distance recedes as cool mist while the near foliage stays warm, restoring the reference warm-fg/cool-bg tonal range. Keeps the fog primitive; no new mesh/material/pass. fog_and_haze 3->4, depth_separation 3->4, dark trunks read better against the light mist; nothing worse, not noisier, less washed."
