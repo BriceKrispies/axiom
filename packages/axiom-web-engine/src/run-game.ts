@@ -44,6 +44,10 @@ import {
 export interface RunGameOptions<State> {
   /** Which drawing backend to use (default "auto": WebGL2, else Canvas2D). */
   readonly backend?: BackendChoice;
+  /** Whether clicking the canvas captures the pointer for mouse look (default
+   * true). A cursor-driven game (clickable objects, menus) sets this false so
+   * the cursor stays visible and clicks stay clicks. */
+  readonly pointerLock?: boolean;
   /** Fixed simulation rate (default 60). `update` runs this many times per second. */
   readonly fixedHz?: number;
   /** Cap on catch-up steps a single slow frame may run (default 8). */
@@ -105,7 +109,7 @@ export const runGame = <State>(canvas: HTMLCanvasElement, game: Game<State>, opt
   );
 
   const input = new InputState();
-  const detachInput = attachDomInput(input, canvas);
+  const detachInput = attachDomInput(input, canvas, { pointerLock: opts.pointerLock ?? true });
   const actionNames = Object.keys(game.actions);
   for (const [action, codes] of Object.entries(game.actions)) {
     input.bindAction(action, codes);

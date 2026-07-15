@@ -1,0 +1,63 @@
+/*
+ * treasure-chest-pick.test.ts — the chest game's own invariants: the reveal
+ * cadence puts the LATCH strictly before the LID; idle dances draw only from
+ * the ambient stream (so they can never hint at contents); and the pick only
+ * ever reveals the object's preassigned slot (no substitution).
+ */
+
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { planChoicePopulation } from "../../chance-engine/probability/choice-population.ts";
+import { dancePose, revealTimeline } from "./game.ts";
+import { TREASURE_CHEST_PICK } from "./definition.ts";
+
+test("the reveal cadence puts the latch strictly before the lid", () => {
+  for (const speed of [0.5, 1, 2]) {
+    for (const reduced of [false, true]) {
+      const t = revealTimeline(speed, reduced);
+      assert.ok(t.latchStart < t.latchEnd, "latch has a duration");
+      assert.ok(t.latchEnd <= t.pauseEnd, "the latch lands before the settle pause");
+      assert.ok(t.pauseEnd < t.lidEnd, "the lid opens only after the pause");
+      assert.ok(t.latchEnd <= t.pauseEnd && t.pauseEnd <= t.lidEnd, "latch fully precedes lid");
+      assert.ok(t.lidEnd < t.riseEnd, "the reward rises after the lid opens");
+    }
+  }
+});
+
+test("idle dances draw only from the ambient stream", () => {
+  // dancePose is a pure function of (index, count, tick, seed, liveliness) —
+  // it takes NO presentation/gameplay seed, so it cannot correlate with which
+  // chest wins. Same inputs → identical pose; different tick → free to differ.
+  for (let tick = 0; tick < 400; tick += 7) {
+    const a = dancePose(3, 9, tick, 12345, 0.7);
+    const b = dancePose(3, 9, tick, 12345, 0.7);
+    assert.deepEqual(a, b);
+  }
+  // The dance is real motion (not a dead stub) somewhere in the window.
+  const moved = Array.from({ length: 200 }, (_, tick) => dancePose(4, 9, tick, 999, 0.7)).some(
+    (pose) => Math.abs(pose.scootX) + Math.abs(pose.twist) + Math.abs(pose.squash) > 1e-4,
+  );
+  assert.ok(moved, "the dance must actually move");
+  // Zero liveliness freezes the dance.
+  assert.deepEqual(dancePose(4, 9, 50, 999, 0), { scootX: 0, squash: 0, twist: 0 });
+});
+
+test("the chest population is fixed before the pick and higher win rate means more prize chests", () => {
+  const config = TREASURE_CHEST_PICK.defaultConfig();
+  // Assigned before any pick; the selection only looks up its slot.
+  const population = planChoicePopulation(config, 9, 4242, 1);
+  const winners = population.winnersByIndex.filter((tier) => tier !== null).length;
+  assert.equal(winners, population.winnerCount);
+
+  // Averaged over seeds, more of the nine chests hold prizes as the target rises.
+  const meanWinners = (p: number): number => {
+    let total = 0;
+    for (let seed = 1; seed <= 600; seed += 1) {
+      total += planChoicePopulation({ ...config, targetWinRate: p }, 9, seed, 1).winnerCount;
+    }
+    return total / 600;
+  };
+  assert.ok(meanWinners(0.7) > meanWinners(0.3), "more prize chests at a higher win rate");
+  assert.ok(Math.abs(meanWinners(0.5) - 4.5) < 0.2, "≈ 9·0.5 chests hold prizes");
+});

@@ -40,10 +40,6 @@ const pointerLockRegistrations = (
       input.lookEvent(event.movementX, event.movementY);
     }
   };
-  const onBlur = (): void => {
-    input.releaseAllKeys();
-    input.pointerClear();
-  };
   const onLockChange = (): void => {
     if (document.pointerLockElement !== canvas) {
       input.releaseAllKeys();
@@ -52,18 +48,26 @@ const pointerLockRegistrations = (
   return [
     [canvas, "click", onClick as EventListener],
     [globalThis, "mousemove", onMouseMove as EventListener],
-    [globalThis, "blur", onBlur as EventListener],
     [document, "pointerlockchange", onLockChange as EventListener],
   ];
 };
+
+/** Whether `attachDomInput` captures the pointer. A mouse-look game wants the
+ * default (click the canvas → pointer lock → relative look); a cursor-driven
+ * game (pickers, menus, clickable objects) sets `pointerLock: false` so the
+ * cursor stays visible and clicks stay clicks. */
+export interface DomInputOptions {
+  readonly pointerLock?: boolean;
+}
 
 /**
  * The browser edge: wire window/canvas listeners into `input` and return a detach
  * function that removes every listener it added. Keyboard events feed `keyEvent`;
  * canvas pointer events feed `pointerEvent`/`pointerClear`; the pointer-lock arm
- * (mouse look, focus/lock-loss release) is added from `pointerLockRegistrations`.
+ * (mouse look + lock-loss release) is added from `pointerLockRegistrations`
+ * unless `opts.pointerLock` is `false`. Focus loss always releases held keys.
  */
-export const attachDomInput = (input: InputState, canvas: HTMLCanvasElement): (() => void) => {
+export const attachDomInput = (input: InputState, canvas: HTMLCanvasElement, opts: DomInputOptions = {}): (() => void) => {
   const onKeyDown = (event: KeyboardEvent): void => {
     input.keyEvent(event.code, true);
   };
@@ -76,8 +80,12 @@ export const attachDomInput = (input: InputState, canvas: HTMLCanvasElement): ((
   const onPointerLeave = (): void => {
     input.pointerClear();
   };
-  /* Each listener is a [node, type, handler] registration (key + pointer set, then
-     the pointer-lock arm), added and removed by one loop each. */
+  const onBlur = (): void => {
+    input.releaseAllKeys();
+    input.pointerClear();
+  };
+  /* Each listener is a [node, type, handler] registration (key + pointer + focus
+     set, then the optional pointer-lock arm), added and removed by one loop each. */
   const registrations: readonly [EventTarget, string, EventListener][] = [
     [globalThis, "keydown", onKeyDown as EventListener],
     [globalThis, "keyup", onKeyUp as EventListener],
@@ -85,7 +93,8 @@ export const attachDomInput = (input: InputState, canvas: HTMLCanvasElement): ((
     [canvas, "pointermove", onPointer as EventListener],
     [canvas, "pointerup", onPointer as EventListener],
     [canvas, "pointerleave", onPointerLeave as EventListener],
-    ...pointerLockRegistrations(input, canvas),
+    [globalThis, "blur", onBlur as EventListener],
+    ...(opts.pointerLock === false ? [] : pointerLockRegistrations(input, canvas)),
   ];
   for (const [node, type, handler] of registrations) {
     node.addEventListener(type, handler);

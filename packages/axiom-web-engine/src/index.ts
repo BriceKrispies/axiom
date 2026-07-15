@@ -80,6 +80,7 @@ export { FixedStepper } from "./stepper.ts";
 
 // ── input ───────────────────────────────────────────────────────────────────────
 export { InputState } from "./input.ts";
+export type { DomInputOptions } from "./dom-input.ts";
 export { attachDomInput } from "./dom-input.ts";
 
 // ── audio ───────────────────────────────────────────────────────────────────────

@@ -1,0 +1,9 @@
+{
+  "name": "@axiom/casino-games-app",
+  "private": true,
+  "type": "module",
+  "description": "Casino Games browser app. This manifest exists so bare `node --test` can resolve the `@axiom/web-engine` specifier (a file: link into packages/axiom-web-engine) when running the app's co-located tests — the browser build resolves the same specifier via the axiom-serve import map instead.",
+  "dependencies": {
+    "@axiom/web-engine": "file:../../../packages/axiom-web-engine"
+  }
+}
