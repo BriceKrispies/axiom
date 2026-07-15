@@ -1,0 +1,206 @@
+/*
+ * catalog.css — the arcade floor: a scrollable row of authored machine
+ * cabinets (not a card grid). The focused machine steps forward and lights
+ * up; neighbors dim and shrink but stay partly visible. A filter strip reads
+ * as a row of labeled toggle switches, not a modern chip bar.
+ */
+
+.cab-floor {
+  width: min(1180px, 100%);
+  padding: 14px max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
+}
+
+.cab-floor-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 4px 6px 12px;
+}
+
+.cab-floor-heading h2 {
+  font-size: 1.1rem;
+}
+
+.cab-floor-heading span {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+/* ── filter switch strip ─────────────────────────────────────────── */
+
+#filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 6px 16px;
+  padding: 8px 10px;
+  background: var(--metal-plate);
+  border: 3px solid var(--metal-plate-dark);
+  border-radius: 6px;
+  box-shadow: 3px 3px 0 var(--shadow-hard);
+}
+
+#filters button {
+  appearance: none;
+  border: 2px solid var(--ink);
+  background: #26313f;
+  color: #b9c6d6;
+  font-weight: 800;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 3px;
+}
+
+#filters button[aria-pressed="true"] {
+  background: var(--action-primary);
+  color: #3a2200;
+  box-shadow: inset 0 0 0 2px #fff2c4;
+}
+
+/* ── the machine row ─────────────────────────────────────────────── */
+
+.cab-row-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#cards {
+  display: flex;
+  gap: 22px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding: 30px 8vw 26px;
+  scrollbar-width: thin;
+  flex: 1;
+}
+
+.cab-machine {
+  flex: none;
+  width: min(300px, 62vw);
+  scroll-snap-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  transform: scale(0.84);
+  filter: brightness(0.6) saturate(0.75);
+  transition: transform 0.16s ease-out, filter 0.16s ease-out;
+  cursor: pointer;
+}
+
+.cab-machine[data-focused="true"] {
+  transform: scale(1.05) translateY(-4px);
+  filter: none;
+  z-index: 4;
+}
+
+.cab-machine-marquee {
+  position: relative;
+  background: var(--marquee-red);
+  border: 3px solid var(--ink);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  padding: 8px 10px 16px;
+  text-align: center;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 92% 82%, 8% 82%, 0 100%);
+}
+
+.cab-machine-marquee h3 {
+  font-size: 0.98rem;
+  color: #fff6de;
+}
+
+.cab-machine-glyph {
+  display: block;
+  width: 38px;
+  height: 38px;
+  margin: 0 auto 4px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--paper);
+}
+
+.cab-machine-screen {
+  position: relative;
+  border: 4px solid var(--metal-plate-dark);
+  background: var(--metal-plate);
+  padding: 8px;
+  box-shadow: inset 0 0 0 2px #0d1620;
+}
+
+.cab-machine-screen canvas {
+  width: 100%;
+  height: 128px;
+  display: block;
+  border: 2px solid #0d1620;
+}
+
+.cab-machine-scanband {
+  position: absolute;
+  inset: 8px;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.12) 0 2px, transparent 2px 4px);
+  mix-blend-mode: multiply;
+}
+
+.cab-machine-plate {
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.cab-machine-plate p {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+  min-height: 2.4em;
+}
+
+.cab-machine-badges {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.cab-machine-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.cab-machine[data-focused="false"] .cab-machine-actions {
+  visibility: hidden;
+}
+
+/* ── side nudge arrows ───────────────────────────────────────────── */
+
+.cab-arrow--left,
+.cab-arrow--right {
+  align-self: center;
+}
+
+@media (max-width: 640px) {
+  #cards {
+    padding: 22px 12vw 18px;
+    gap: 14px;
+  }
+  .cab-machine {
+    width: min(240px, 74vw);
+  }
+  .cab-arrow {
+    width: 36px;
+    height: 36px;
+    font-size: 1rem;
+  }
+}

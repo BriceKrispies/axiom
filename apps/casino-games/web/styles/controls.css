@@ -1,0 +1,256 @@
+/*
+ * controls.css — physical cabinet controls: illuminated buttons, the large
+ * convex start button, stamped/service buttons, and native form elements
+ * reskinned as switch-bank hardware (flip toggles, calibration sliders,
+ * recessed selector plates). Hard shadows, visible press travel, no pills,
+ * no ghost buttons.
+ */
+
+/* ── buttons ─────────────────────────────────────────────────────── */
+
+.cab-btn {
+  appearance: none;
+  border: 3px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 9px 16px;
+  box-shadow: 3px 3px 0 var(--shadow-hard);
+  transform: translate(0, 0);
+  transition: transform 0.06s ease-out, box-shadow 0.06s ease-out;
+  white-space: nowrap;
+}
+
+.cab-btn:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--shadow-hard);
+}
+
+.cab-btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+  box-shadow: 1px 1px 0 var(--shadow-hard);
+}
+
+.cab-btn--primary,
+.cab-btn--start {
+  background: linear-gradient(180deg, #ffe27a 0%, var(--action-primary) 55%, var(--action-primary-dark) 100%);
+  border-color: var(--action-primary-dark);
+  color: #4a2e00;
+  font-size: 0.95rem;
+  padding: 14px 22px;
+  border-radius: 10px;
+  clip-path: polygon(6% 0, 94% 0, 100% 30%, 100% 100%, 0 100%, 0 30%);
+  box-shadow: 0 5px 0 var(--action-primary-dark), 3px 6px 0 var(--shadow-hard);
+}
+
+.cab-btn--primary:active:not(:disabled),
+.cab-btn--start:active:not(:disabled) {
+  transform: translate(0, 4px);
+  box-shadow: 0 1px 0 var(--action-primary-dark), 2px 3px 0 var(--shadow-hard);
+}
+
+.cab-btn--wide {
+  width: 100%;
+}
+
+.cab-btn--secondary {
+  background: linear-gradient(180deg, #7ee9dd 0%, var(--action-secondary) 60%, var(--action-secondary-dark) 100%);
+  border-color: var(--action-secondary-dark);
+  color: #063831;
+}
+
+.cab-btn--stamp {
+  background: var(--marquee-red);
+  border-color: var(--marquee-red-dark);
+  color: #fff3e6;
+  border-radius: 3px;
+  transform: rotate(-1.5deg);
+}
+
+.cab-btn--stamp:active:not(:disabled) {
+  transform: rotate(-1.5deg) translate(2px, 2px);
+}
+
+.cab-btn--service {
+  background: var(--metal-plate);
+  border-color: var(--metal-plate-dark);
+  color: var(--paper);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 0.7rem;
+}
+
+.cab-btn--arrow {
+  background: var(--metal-plate);
+  border-color: var(--metal-plate-dark);
+  color: var(--paper);
+  border-radius: 4px 999px 999px 4px;
+  padding: 8px 14px 8px 10px;
+}
+
+.cab-btn--toggle {
+  background: var(--metal-plate);
+  border-color: var(--metal-plate-dark);
+  color: var(--paper);
+  border-radius: 50%;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.cab-btn--toggle[aria-pressed="false"] {
+  background: linear-gradient(180deg, #9ee6ff, var(--action-secondary-dark));
+}
+
+.cab-btn--danger {
+  background: var(--warning);
+  border-color: #7e1c10;
+  color: #fff3e6;
+}
+
+/* ── the arcade nav arrows on the catalog floor ─────────────────── */
+
+.cab-arrow {
+  appearance: none;
+  border: 3px solid var(--ink);
+  background: var(--metal-plate);
+  color: var(--cab-trim);
+  font-size: 1.3rem;
+  font-weight: 900;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  box-shadow: 3px 3px 0 var(--shadow-hard);
+  flex: none;
+}
+
+.cab-arrow:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--shadow-hard);
+}
+
+/* ── switch-bank rows (settings / workbench) ─────────────────────── */
+
+.cab-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 4px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.18);
+}
+
+.cab-switch-row:last-child {
+  border-bottom: none;
+}
+
+.cab-switch-row > label {
+  font-weight: 800;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  min-width: 168px;
+  color: var(--paper);
+}
+
+/* Recessed number/text readout window. */
+.cab-panel input[type="number"],
+.cab-panel input[type="text"],
+.cab-panel select {
+  font: 700 0.8rem/1 var(--font-mono);
+  padding: 7px 9px;
+  border: 2px solid var(--metal-plate-dark);
+  border-radius: 3px;
+  background: #0d1620;
+  color: #9be8ff;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.5);
+  width: 108px;
+}
+
+.cab-panel input[type="text"].wide {
+  width: 220px;
+}
+
+.cab-panel select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #9be8ff 50%), linear-gradient(135deg, #9be8ff 50%, transparent 50%);
+  background-position: calc(100% - 14px) center, calc(100% - 9px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 26px;
+}
+
+/* Calibration slider: a thick recessed track, a chunky notched thumb. */
+.cab-panel input[type="range"] {
+  appearance: none;
+  flex: 1;
+  min-width: 130px;
+  height: 10px;
+  background: #0d1620;
+  border: 2px solid var(--metal-plate-dark);
+  border-radius: 2px;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.cab-panel input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 22px;
+  margin-top: -8px;
+  background: linear-gradient(180deg, #ffe27a, var(--action-primary));
+  border: 2px solid var(--ink);
+  border-radius: 3px;
+  box-shadow: 2px 2px 0 var(--shadow-hard);
+}
+
+.cab-panel input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 22px;
+  background: linear-gradient(180deg, #ffe27a, var(--action-primary));
+  border: 2px solid var(--ink);
+  border-radius: 3px;
+  box-shadow: 2px 2px 0 var(--shadow-hard);
+}
+
+/* Flip-switch toggle (checkbox), not a rounded pill: a rectangular plate
+ * with a lit indicator that jumps position when armed. */
+.cab-panel input[type="checkbox"] {
+  appearance: none;
+  width: 46px;
+  height: 26px;
+  border: 2px solid var(--metal-plate-dark);
+  border-radius: 3px;
+  background: #0d1620;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.5);
+  position: relative;
+  flex: none;
+  cursor: pointer;
+}
+
+.cab-panel input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #8a97a8, #4a5568);
+  transition: left 0.08s ease-out, background 0.08s ease-out;
+}
+
+.cab-panel input[type="checkbox"]:checked::after {
+  left: 23px;
+  background: linear-gradient(180deg, #ffe27a, var(--action-primary));
+  box-shadow: 0 0 6px var(--action-primary);
+}

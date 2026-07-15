@@ -22,6 +22,7 @@ import type { PlayerSettings } from "./settings.ts";
 import { loadSettings, resolveSettings, saveSettings } from "./settings.ts";
 import { buildWorkbench } from "../workbench/workbench.ts";
 import { buildCatalog } from "../catalog/catalog.ts";
+import { paintGlyphBadge } from "../catalog/thumbnails.ts";
 
 interface UrlBoot {
   readonly game: string | null;
@@ -101,7 +102,7 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
     const pressed = String(settings.muted);
     el<HTMLElement>("btn-mute").setAttribute("aria-pressed", pressed);
     el<HTMLElement>("btn-game-mute").setAttribute("aria-pressed", pressed);
-    el<HTMLElement>("btn-mute").textContent = settings.muted ? "🔇 Muted" : "🔊 Sound";
+    el<HTMLElement>("btn-mute").textContent = settings.muted ? "🔇" : "🔊";
     el<HTMLElement>("btn-game-mute").textContent = settings.muted ? "🔇" : "🔊";
   };
 
@@ -161,6 +162,7 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
     detachPointer = null;
     activeGameId = null;
     lastHudKey = "";
+    delete document.body.dataset["activeGame"];
   };
 
   const showScreen = (screen: "catalog" | "game"): void => {
@@ -177,6 +179,8 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
     const config = configOverride ?? storedConfigOf(definition);
     const seed = (seedOverride ?? rootSeed) >>> 0;
     title.textContent = definition.displayName;
+    document.body.dataset["activeGame"] = gameId;
+    paintGlyphBadge(el<HTMLCanvasElement>("game-marquee-glyph"), definition.thumbnail);
     showScreen("game");
     const script =
       url.presses.length === 0
@@ -220,8 +224,17 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
   const renderSettings = (): void => {
     settingsHost.replaceChildren();
     const heading = document.createElement("h2");
-    heading.textContent = "Settings";
+    heading.textContent = "Operator Panel";
     settingsHost.append(heading);
+
+    const plate = (legendText: string): HTMLFieldSetElement => {
+      const fieldset = document.createElement("fieldset");
+      const legend = document.createElement("legend");
+      legend.textContent = legendText;
+      fieldset.append(legend);
+      settingsHost.append(fieldset);
+      return fieldset;
+    };
 
     const patch = (changes: Partial<PlayerSettings>): void => {
       settings = { ...settings, ...changes };
@@ -278,21 +291,29 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
       return row;
     };
 
-    settingsHost.append(
+    plate("Audio — speaker grille").append(
       slider("Master volume", settings.masterVolume, (v) => patch({ masterVolume: v })),
       slider("Sound effects volume", settings.sfxVolume, (v) => patch({ sfxVolume: v })),
       toggle("Mute all sound", settings.muted, (v) => patch({ muted: v })),
+    );
+    plate("Motion & display").append(
       select("Reduced motion", settings.reducedMotion, ["system", "on", "off"], (v) => patch({ reducedMotion: v })),
       select("Particle density", settings.particleDensity, ["full", "low"], (v) => patch({ particleDensity: v })),
       toggle("Camera shake", settings.cameraShake, (v) => patch({ cameraShake: v })),
+    );
+    plate("Accessibility calibration").append(
       toggle("High-contrast UI", settings.highContrast, (v) => patch({ highContrast: v })),
       select("Text scale", settings.textScale, ["normal", "large"], (v) => patch({ textScale: v })),
     );
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
     const close = document.createElement("button");
-    close.textContent = "Close";
-    close.className = "chip-btn";
+    close.textContent = "Close panel";
+    close.className = "close";
     close.addEventListener("click", () => settingsHost.classList.remove("active"));
-    settingsHost.append(close);
+    actions.append(close);
+    settingsHost.append(actions);
   };
   renderSettings();
 

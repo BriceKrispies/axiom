@@ -1,0 +1,202 @@
+/*
+ * operator-panel.css — settings and the configuration workbench, styled as
+ * a machine operator's service screen: bolted metal plates, labeled switch
+ * banks, recessed readouts, a stamped danger action. Reused by both panels
+ * via the shared `.cab-panel` class already on `#workbench` / `#settings`.
+ */
+
+.cab-panel {
+  display: none;
+  width: min(1000px, 100%);
+  margin-top: 14px;
+  background: var(--metal-plate);
+  border: 4px solid var(--metal-plate-dark);
+  border-radius: 10px;
+  padding: 18px 20px 20px;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+  box-shadow: 0 8px 0 var(--shadow-hard);
+}
+
+.cab-panel.active {
+  display: flex;
+}
+
+/* corner bolts */
+.cab-panel::before,
+.cab-panel::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #cfd8e2, #6b7684 60%, #3a4350);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.cab-panel::before {
+  left: 10px;
+}
+
+.cab-panel::after {
+  right: 10px;
+}
+
+.cab-panel h2 {
+  margin: 0 0 2px;
+  font-size: 1rem;
+  color: var(--paper);
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cab-panel fieldset {
+  border: 2px solid var(--metal-plate-dark);
+  border-radius: 6px;
+  padding: 10px 14px 14px;
+  margin: 0;
+  background: #26313f;
+}
+
+.cab-panel legend {
+  font-weight: 800;
+  font-size: 0.68rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--cab-trim);
+  padding: 0 8px;
+  background: var(--metal-plate);
+}
+
+.cab-panel .row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.cab-panel label {
+  font-weight: 700;
+  font-size: 0.78rem;
+  min-width: 160px;
+  color: var(--paper);
+}
+
+.cab-panel textarea {
+  width: 100%;
+  min-height: 140px;
+  font: 11.5px/1.5 var(--font-mono);
+  border: 2px solid var(--metal-plate-dark);
+  border-radius: 4px;
+  padding: 10px;
+  color: #9be8ff;
+  background: #0d1620;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* Every plain <button> anywhere in a service screen gets the same stamped
+ * hardware treatment by default — the tier table's ✕ remove button, the
+ * "+ Add tier" / "Apply JSON" buttons, and the .actions row all resolve to
+ * this one rule unless a modifier class overrides it. Nothing falls back to
+ * a native unstyled button. */
+.cab-panel button {
+  appearance: none;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 8px 14px;
+  border-radius: 4px;
+  box-shadow: 2px 2px 0 var(--shadow-hard);
+  cursor: pointer;
+}
+
+.cab-panel button:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--shadow-hard);
+}
+
+.cab-panel .actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cab-panel .actions button.primary {
+  background: linear-gradient(180deg, #ffe27a, var(--action-primary));
+}
+
+.cab-panel .actions button.danger {
+  background: var(--warning);
+  color: #fff3e6;
+  border-color: #7e1c10;
+}
+
+/* The tier table's per-row remove button: small, square, stamped red. */
+.cab-tier-table button {
+  padding: 4px 8px;
+  background: var(--warning);
+  color: #fff3e6;
+  border-color: #7e1c10;
+  font-size: 0.68rem;
+}
+
+.cab-panel .actions button.close {
+  margin-left: auto;
+}
+
+#wb-errors {
+  color: #ffb199;
+  font-size: 0.8rem;
+  white-space: pre-line;
+  font-weight: 700;
+  background: #3a1712;
+  border: 2px solid #7e1c10;
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+#wb-errors:empty {
+  display: none;
+}
+
+.cab-tier-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.cab-tier-table th {
+  text-align: left;
+  color: var(--cab-trim);
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 5px;
+  border-bottom: 2px solid var(--metal-plate-dark);
+}
+
+.cab-tier-table td {
+  padding: 4px 5px;
+}
+
+.cab-tier-table input,
+.cab-tier-table select {
+  width: 100% !important;
+  min-width: 58px;
+}
+
+@media (max-width: 640px) {
+  .cab-panel label {
+    min-width: 0;
+    width: 100%;
+  }
+}

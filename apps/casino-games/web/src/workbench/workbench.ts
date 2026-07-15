@@ -53,7 +53,7 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
     host.replaceChildren();
 
     const heading = document.createElement("h2");
-    heading.textContent = `Workbench — ${def.displayName}`;
+    heading.textContent = `Service Bay — ${def.displayName}`;
     host.append(heading);
 
     const errors = document.createElement("div");
@@ -66,7 +66,12 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
       render();
     };
 
-    // ── target win rate ─────────────────────────────────────────
+    // ── payout calibration plate: win rate + reward tiers ─────────
+    const tiersBox = document.createElement("fieldset");
+    const tiersLegend = document.createElement("legend");
+    tiersLegend.textContent = "Payout calibration plate";
+    tiersBox.append(tiersLegend);
+
     const rateRow = document.createElement("div");
     rateRow.className = "row";
     const rateLabel = document.createElement("label");
@@ -86,15 +91,9 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
     rateSlider.addEventListener("input", () => patch({ targetWinRate: Number(rateSlider.value) }));
     rateNumber.addEventListener("change", () => patch({ targetWinRate: Number(rateNumber.value) }));
     rateRow.append(rateLabel, rateSlider, rateNumber);
-    host.append(rateRow);
-
-    // ── reward tiers ────────────────────────────────────────────
-    const tiersBox = document.createElement("fieldset");
-    const tiersLegend = document.createElement("legend");
-    tiersLegend.textContent = "Reward tiers (weights are conditional on a win)";
-    tiersBox.append(tiersLegend);
+    tiersBox.append(rateRow);
     const table = document.createElement("table");
-    table.className = "tier-table";
+    table.className = "cab-tier-table";
     const head = document.createElement("tr");
     for (const text of ["Tier id", "Label", "Rarity", "Weight", "Win?", "Reward kind", "Reward label", "Amount", ""]) {
       const th = document.createElement("th");
@@ -193,7 +192,7 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
     // ── presentation knobs ──────────────────────────────────────
     const knobs = document.createElement("fieldset");
     const knobsLegend = document.createElement("legend");
-    knobsLegend.textContent = "Presentation";
+    knobsLegend.textContent = "Motor & lighting control section";
     knobs.append(knobsLegend);
     const sliderRow = (label: string, min: number, max: number, step: number, value: number, apply: (v: number) => void): HTMLElement => {
       const row = document.createElement("div");
@@ -227,7 +226,7 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
     const themeRow = document.createElement("div");
     themeRow.className = "row";
     const themeLabel = document.createElement("label");
-    themeLabel.textContent = "Theme accent";
+    themeLabel.textContent = "Cabinet paint";
     const themeSelect = document.createElement("select");
     THEME_PRESETS.forEach((preset, i) => {
       const option = document.createElement("option");
@@ -261,7 +260,7 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
     // ── game-specific block ─────────────────────────────────────
     const specBox = document.createElement("fieldset");
     const specLegend = document.createElement("legend");
-    specLegend.textContent = "Game-specific configuration (JSON)";
+    specLegend.textContent = "Mechanism configuration (JSON)";
     specBox.append(specLegend);
     const specArea = document.createElement("textarea");
     specArea.value = JSON.stringify(config.gameSpecific, null, 2);
@@ -278,6 +277,10 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
     host.append(specBox);
 
     // ── seed + preview ──────────────────────────────────────────
+    const diagBox = document.createElement("fieldset");
+    const diagLegend = document.createElement("legend");
+    diagLegend.textContent = "Operator diagnostic readout";
+    diagBox.append(diagLegend);
     const seedRow = document.createElement("div");
     seedRow.className = "row";
     const seedLabel = document.createElement("label");
@@ -287,12 +290,13 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
     seedInput.placeholder = "e.g. 12345";
     seedInput.id = "wb-seed";
     seedRow.append(seedLabel, seedInput);
-    host.append(seedRow);
+    diagBox.append(seedRow);
+    host.append(diagBox);
 
     // ── import / export ─────────────────────────────────────────
     const jsonBox = document.createElement("fieldset");
     const jsonLegend = document.createElement("legend");
-    jsonLegend.textContent = "Configuration JSON (export / import)";
+    jsonLegend.textContent = "Service port (export / import)";
     jsonBox.append(jsonLegend);
     const jsonArea = document.createElement("textarea");
     jsonArea.id = "wb-json";

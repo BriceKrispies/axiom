@@ -4,215 +4,69 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Axiom — Casino Games</title>
-    <style>
-      :root {
-        color-scheme: light;
-        --ink: #23324a;
-        --ink-soft: #5a6a85;
-        --paper: #eaf4fd;
-        --card: #ffffff;
-        --sky: #8fd0ff;
-        --turquoise: #2fc6b7;
-        --coral: #ff8a66;
-        --gold: #ffcc4d;
-        --lavender: #b9a7f5;
-        --mint: #7fe8b0;
-        --radius: 14px;
-        --shadow: 0 6px 20px rgba(35, 50, 74, 0.14);
-        font-size: 16px;
-      }
-      :root[data-text-scale="large"] { font-size: 19px; }
-      :root[data-contrast="high"] {
-        --ink: #10203a;
-        --ink-soft: #2c3c58;
-        --paper: #f4f9ff;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0; min-height: 100vh;
-        font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
-        background:
-          radial-gradient(1100px 500px at 20% -10%, #fdf3d8 0%, rgba(253, 243, 216, 0) 60%),
-          linear-gradient(180deg, #bfe3ff 0%, var(--paper) 55%, #fdf6ea 100%);
-        color: var(--ink);
-        display: flex; flex-direction: column; align-items: center;
-        padding: 10px max(12px, env(safe-area-inset-right)) 26px max(12px, env(safe-area-inset-left));
-      }
-      button { font: inherit; cursor: pointer; border: 0; border-radius: 10px; }
-      button:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--turquoise); outline-offset: 2px; }
-
-      header {
-        width: min(1180px, 100%); display: flex; align-items: center; gap: 12px;
-        padding: 8px 4px;
-      }
-      header h1 { font-size: 1.15rem; margin: 0; letter-spacing: 1.6px; font-weight: 800; }
-      header h1 em { font-style: normal; color: #d97a2f; }
-      header .spacer { flex: 1; }
-      .chip-btn {
-        background: var(--card); color: var(--ink); box-shadow: var(--shadow);
-        padding: 7px 14px; font-weight: 700; font-size: 0.85rem;
-      }
-      .chip-btn[aria-pressed="true"] { background: var(--turquoise); color: #fff; }
-
-      /* ── catalog ─────────────────────────────────────────────── */
-      #catalog { width: min(1180px, 100%); }
-      #filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px; }
-      #filters button {
-        background: var(--card); color: var(--ink-soft); font-weight: 700;
-        padding: 7px 14px; font-size: 0.82rem; box-shadow: var(--shadow);
-      }
-      #filters button[aria-pressed="true"] { background: var(--coral); color: #fff; }
-      #cards {
-        display: grid; gap: 16px;
-        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-      }
-      .game-card {
-        background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
-        overflow: hidden; display: flex; flex-direction: column;
-        transition: transform 0.12s ease-out;
-      }
-      .game-card:hover { transform: translateY(-3px); }
-      .game-card canvas { width: 100%; height: 116px; display: block; }
-      .game-card .body { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
-      .game-card h3 { margin: 0; font-size: 1rem; }
-      .game-card p { margin: 0; color: var(--ink-soft); font-size: 0.82rem; flex: 1; }
-      .badges { display: flex; gap: 6px; flex-wrap: wrap; }
-      .badge {
-        font-size: 0.68rem; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase;
-        padding: 2px 8px; border-radius: 999px; background: #eef3fb; color: var(--ink-soft);
-      }
-      .badge.mode { background: var(--lavender); color: #fff; }
-      .badge.machine { background: var(--gold); color: #7a5200; }
-      .card-actions { display: flex; gap: 8px; margin-top: 4px; }
-      .card-actions .play {
-        flex: 1; background: linear-gradient(180deg, var(--turquoise), #1fae9f);
-        color: #fff; font-weight: 800; padding: 9px 0; letter-spacing: 0.5px;
-      }
-      .card-actions .configure { background: #eef3fb; color: var(--ink); font-weight: 700; padding: 9px 14px; }
-
-      /* ── game screen ─────────────────────────────────────────── */
-      #game-screen { display: none; width: min(1020px, 100%); flex-direction: column; gap: 10px; }
-      #game-screen.active { display: flex; }
-      #game-chrome { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-      #game-chrome h2 { margin: 0; font-size: 1.05rem; flex: 1; min-width: 140px; }
-      #game-chrome .seed { color: var(--ink-soft); font-size: 0.75rem; font-family: ui-monospace, monospace; }
-      #stage {
-        position: relative; line-height: 0; border-radius: var(--radius); overflow: hidden;
-        box-shadow: var(--shadow); background: #05060a;
-      }
-      #axiom-canvas { width: 100%; height: auto; aspect-ratio: 960 / 600; display: block; touch-action: none; }
-      #instruction {
-        position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
-        background: rgba(20, 32, 52, 0.72); color: #fff; border-radius: 999px;
-        padding: 7px 18px; font-size: 0.9rem; font-weight: 600; line-height: 1.3;
-        max-width: 92%; text-align: center; pointer-events: none;
-        transition: opacity 0.25s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      }
-      #instruction:empty { opacity: 0; }
-      #result-banner {
-        position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(0.9);
-        font-size: 2rem; font-weight: 900; letter-spacing: 1px; line-height: 1.2;
-        color: #fff; text-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 26px rgba(0, 0, 0, 0.55);
-        opacity: 0; pointer-events: none; transition: opacity 0.18s, transform 0.18s;
-        text-align: center; padding: 0 20px;
-      }
-      #result-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-      #result-banner.win-common { color: #bfe9ff; }
-      #result-banner.win-uncommon { color: #9dffc8; }
-      #result-banner.win-rare { color: #e3b8ff; }
-      #result-banner.win-jackpot { color: #ffd964; font-size: 2.6rem; }
-      #result-banner.loss { color: #ffd1c4; font-size: 1.5rem; }
-      #game-controls { display: flex; gap: 8px; flex-wrap: wrap; }
-      #game-controls button {
-        background: var(--card); box-shadow: var(--shadow); font-weight: 700;
-        padding: 9px 16px; font-size: 0.85rem; color: var(--ink);
-      }
-      #game-controls button.primary { background: linear-gradient(180deg, var(--gold), #f0b428); color: #6b4d00; }
-      #game-controls button:disabled { opacity: 0.45; cursor: default; }
-
-      /* ── panels (workbench / settings) ───────────────────────── */
-      .panel {
-        display: none; width: min(1020px, 100%); background: var(--card);
-        border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 20px;
-        flex-direction: column; gap: 14px; margin-top: 10px;
-      }
-      .panel.active { display: flex; }
-      .panel h2 { margin: 0; font-size: 1.05rem; }
-      .panel .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-      .panel label { font-weight: 700; font-size: 0.85rem; min-width: 170px; }
-      .panel input[type="range"] { flex: 1; min-width: 130px; accent-color: var(--turquoise); }
-      .panel input[type="number"], .panel input[type="text"], .panel select {
-        font: inherit; padding: 6px 10px; border: 1.5px solid #d5e0ef; border-radius: 8px; width: 110px;
-        background: #fff; color: var(--ink);
-      }
-      .panel input[type="text"].wide { width: 220px; }
-      .panel textarea {
-        width: 100%; min-height: 150px; font: 12px/1.5 ui-monospace, monospace;
-        border: 1.5px solid #d5e0ef; border-radius: 8px; padding: 10px; color: var(--ink);
-      }
-      .panel .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-      .panel .actions button { background: #eef3fb; font-weight: 700; padding: 8px 14px; }
-      .panel .actions button.primary { background: var(--turquoise); color: #fff; }
-      .panel .actions button.danger { background: #ffe3da; color: #a33d1f; }
-      #wb-errors { color: #b3341c; font-size: 0.85rem; white-space: pre-line; font-weight: 600; }
-      #wb-errors:empty { display: none; }
-      .tier-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
-      .tier-table th { text-align: left; color: var(--ink-soft); font-size: 0.72rem; letter-spacing: 0.6px; text-transform: uppercase; padding: 4px 6px; }
-      .tier-table td { padding: 4px 6px; }
-      .tier-table input, .tier-table select { width: 100% !important; min-width: 60px; }
-      fieldset { border: 1.5px solid #e3ebf6; border-radius: 10px; padding: 10px 14px 14px; margin: 0; }
-      legend { font-weight: 800; font-size: 0.8rem; letter-spacing: 0.6px; color: var(--ink-soft); padding: 0 6px; }
-
-      /* ── diagnostics drawer ──────────────────────────────────── */
-      #diagnostics {
-        display: none; width: min(1020px, 100%); margin-top: 10px;
-        background: #1b2437; color: #cfe3ff; border-radius: var(--radius);
-        font: 11.5px/1.6 ui-monospace, monospace; padding: 14px 16px;
-        white-space: pre-wrap; word-break: break-all;
-      }
-      #diagnostics.active { display: block; }
-
-      @media (max-width: 640px) {
-        header h1 { font-size: 1rem; }
-        #result-banner { font-size: 1.4rem; }
-      }
-    </style>
+    <link rel="stylesheet" href="/styles/tokens.css" />
+    <link rel="stylesheet" href="/styles/marquee.css" />
+    <link rel="stylesheet" href="/styles/controls.css" />
+    <link rel="stylesheet" href="/styles/catalog.css" />
+    <link rel="stylesheet" href="/styles/cabinet-hud.css" />
+    <link rel="stylesheet" href="/styles/operator-panel.css" />
   </head>
   <body>
-    <header>
-      <h1>AXIOM · <em>CASINO GAMES</em></h1>
-      <div class="spacer"></div>
-      <button id="btn-mute" class="chip-btn" aria-pressed="false" title="Mute all sound">🔊 Sound</button>
-      <button id="btn-settings" class="chip-btn">Settings</button>
+    <header class="cab-header">
+      <h1 class="cab-bitmap cab-header-title">AXIOM <span class="cab-accent">ARCADE</span></h1>
+      <div class="cab-bulb-row is-lit" aria-hidden="true">
+        <span class="cab-bulb"></span><span class="cab-bulb"></span><span class="cab-bulb"></span>
+        <span class="cab-bulb"></span><span class="cab-bulb"></span>
+      </div>
+      <div class="cab-spacer"></div>
+      <button id="btn-mute" class="cab-btn cab-btn--toggle" aria-pressed="false" title="Mute all sound">🔊</button>
+      <button id="btn-settings" class="cab-btn cab-btn--service">SET</button>
     </header>
 
-    <section id="catalog" aria-label="Game catalog">
+    <section id="catalog" class="cab-floor" aria-label="Game catalog">
+      <div class="cab-floor-heading">
+        <h2 class="cab-bitmap">Prize Floor</h2>
+        <span>walk up &amp; play — pick your machine</span>
+      </div>
       <div id="filters" role="group" aria-label="Filter games"></div>
-      <div id="cards"></div>
+      <div class="cab-row-wrap">
+        <button class="cab-arrow cab-arrow--left" id="floor-prev" aria-label="Previous machine">◀</button>
+        <div id="cards" role="listbox" aria-label="Arcade machines" tabindex="0"></div>
+        <button class="cab-arrow cab-arrow--right" id="floor-next" aria-label="Next machine">▶</button>
+      </div>
     </section>
 
     <section id="game-screen" aria-label="Game">
-      <div id="game-chrome">
-        <button id="btn-back" class="chip-btn">← Catalog</button>
-        <h2 id="game-title">—</h2>
-        <span class="seed" id="seed-label"></span>
-      </div>
-      <div id="stage">
-        <canvas id="axiom-canvas" width="960" height="600"></canvas>
-        <div id="instruction" aria-live="polite"></div>
-        <div id="result-banner" aria-live="polite"></div>
-      </div>
-      <div id="game-controls">
-        <button id="btn-new-round" class="primary">New Round (N)</button>
-        <button id="btn-replay">Replay Same Seed (R)</button>
-        <button id="btn-configure">Configure</button>
-        <button id="btn-game-settings">Settings</button>
-        <button id="btn-game-mute" aria-pressed="false">🔊</button>
+      <div class="cab-cabinet">
+        <div class="cab-cabinet-marquee">
+          <button id="btn-back" class="cab-btn cab-btn--arrow">◀ FLOOR</button>
+          <canvas id="game-marquee-glyph" class="cab-machine-glyph" width="56" height="56" aria-hidden="true"></canvas>
+          <h2 id="game-title" class="cab-bitmap cab-cabinet-title">—</h2>
+          <button id="btn-game-settings" class="cab-btn cab-btn--service" title="Settings">SET</button>
+        </div>
+        <div class="cab-screen-wrap">
+          <div class="cab-rail cab-rail--left">
+            <button id="btn-game-mute" class="cab-btn cab-btn--toggle" aria-pressed="false">🔊</button>
+            <span class="cab-readout" id="seed-label"></span>
+          </div>
+          <div class="cab-rail cab-rail--right">
+            <button id="btn-replay" class="cab-btn cab-btn--stamp">REPLAY</button>
+            <button id="btn-configure" class="cab-btn cab-btn--service" title="Configure">SET&nbsp;UP</button>
+          </div>
+          <div id="instruction" class="cab-signboard" aria-live="polite"></div>
+          <div id="stage">
+            <canvas id="axiom-canvas" width="960" height="600"></canvas>
+            <div id="result-banner" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="cab-footer">
+          <button id="btn-new-round" class="cab-btn cab-btn--start">NEW ROUND</button>
+        </div>
       </div>
     </section>
 
-    <section id="workbench" class="panel" aria-label="Configuration workbench"></section>
-    <section id="settings" class="panel" aria-label="Settings"></section>
+    <section id="workbench" class="cab-panel" aria-label="Configuration workbench"></section>
+    <section id="settings" class="cab-panel" aria-label="Settings"></section>
     <div id="diagnostics" aria-label="Diagnostics"></div>
 
     <script type="module" src="/dist/main.js"></script>

@@ -1,0 +1,124 @@
+/*
+ * tokens.css — the arcade cabinet palette, typography, and base reset. Every
+ * other stylesheet in this system reads its colors and type scale from here.
+ * No gradients-as-decoration, no translucent surfaces: solid fields, hard
+ * transitions, bitmap-style display type.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ── cabinet palette ─────────────────────────────────────────── */
+  --cab-body: #1c3a52;
+  --cab-body-dark: #122536;
+  --cab-trim: #ffcf3d;
+  --cab-trim-dark: #c9950f;
+  --marquee-red: #e6402c;
+  --marquee-red-dark: #a02616;
+  --action-primary: #ffb300;
+  --action-primary-dark: #b97900;
+  --action-secondary: #2fc6b7;
+  --action-secondary-dark: #16897d;
+  --warning: #e6402c;
+  --prize-common: #8cd9ff;
+  --prize-uncommon: #73ffb3;
+  --prize-rare: #d98cff;
+  --prize-jackpot: #ffc740;
+  --ink: #142238;
+  --ink-soft: #3c4f6b;
+  --paper: #fbf3df;
+  --paper-dark: #efe2c0;
+  --scenery-sky: #ff9d4d;
+  --scenery-floor: #2a7f78;
+  --metal-plate: #3a4656;
+  --metal-plate-dark: #262e39;
+  --shadow-hard: rgba(8, 12, 20, 0.55);
+
+  /* ── type scale ──────────────────────────────────────────────── */
+  --font-display: "Arial Black", "Haettenschweiler", Impact, "Segoe UI Black", sans-serif;
+  --font-ui: "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  font-size: 16px;
+}
+
+:root[data-text-scale="large"] {
+  font-size: 19px;
+}
+
+:root[data-contrast="high"] {
+  --ink: #050b16;
+  --paper: #ffffff;
+  --metal-plate: #23303f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font: 14px/1.45 var(--font-ui);
+  color: var(--paper);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      var(--scenery-sky) 0 22px,
+      #ff8f38 22px 44px
+    );
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 max(0px, env(safe-area-inset-right)) 28px max(0px, env(safe-area-inset-left));
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+}
+
+button:focus-visible,
+[tabindex]:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid var(--action-secondary);
+  outline-offset: 2px;
+}
+
+/* ── bitmap display heading ──────────────────────────────────────
+ * A stepped, hard-edged text-shadow fakes a chunky bitmap/arcade
+ * marquee font from ordinary system type — no external font assets. */
+.cab-bitmap {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--paper);
+  -webkit-text-stroke: 1.5px var(--ink);
+  text-shadow:
+    2px 0 0 var(--ink),
+    -2px 0 0 var(--ink),
+    0 2px 0 var(--ink),
+    0 -2px 0 var(--ink),
+    3px 3px 0 var(--shadow-hard);
+  line-height: 1;
+}
+
+.cab-readout {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: #bdf0ff;
+}
+
+.cab-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

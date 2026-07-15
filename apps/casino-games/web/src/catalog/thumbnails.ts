@@ -6,7 +6,7 @@
 
 import type { ThumbnailSpec } from "../chance-engine/registry/definition.ts";
 
-const glyphPath = (ctx: CanvasRenderingContext2D, glyph: ThumbnailSpec["glyph"], w: number, h: number): void => {
+export const glyphPath = (ctx: CanvasRenderingContext2D, glyph: ThumbnailSpec["glyph"], w: number, h: number): void => {
   const cx = w / 2;
   const cy = h * 0.56;
   const s = h * 0.3;
@@ -154,6 +154,28 @@ export const paintThumbnail = (canvas: HTMLCanvasElement, spec: ThumbnailSpec): 
   ctx.lineWidth = 4;
   ctx.fillStyle = spec.accent;
   glyphPath(ctx, spec.glyph, w, h);
+  ctx.fill();
+  ctx.stroke();
+};
+
+/** Paint a small round marquee badge: just the glyph on a cream disc, no
+ * sky/ground. Reused wherever a game's arcade identity needs a compact icon
+ * (the catalog machine's marquee, the in-game cabinet marquee). */
+export const paintGlyphBadge = (canvas: HTMLCanvasElement, spec: ThumbnailSpec): void => {
+  const size = (canvas.width = canvas.height = 56);
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) {
+    return;
+  }
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "#fbf3df";
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(20,34,56,0.85)";
+  ctx.lineWidth = 2.5;
+  ctx.fillStyle = spec.accent;
+  glyphPath(ctx, spec.glyph, size, size * 0.72);
   ctx.fill();
   ctx.stroke();
 };

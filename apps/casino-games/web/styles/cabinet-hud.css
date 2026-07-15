@@ -1,0 +1,208 @@
+/*
+ * cabinet-hud.css — the game screen: a compact cabinet frame wrapped around
+ * the canvas. Marquee on top, physical rails overlapping the screen edges,
+ * one oversized primary action below. The canvas stays the dominant area.
+ */
+
+#game-screen {
+  display: none;
+  width: min(1000px, 100%);
+  padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+}
+
+#game-screen.active {
+  display: flex;
+}
+
+.cab-cabinet {
+  width: 100%;
+  background: var(--cab-body);
+  border: 4px solid var(--cab-body-dark);
+  border-radius: 14px;
+  padding: 0 14px 16px;
+  box-shadow: 0 10px 0 var(--shadow-hard);
+  position: relative;
+}
+
+.cab-cabinet-marquee {
+  --game-accent: var(--cab-trim);
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 -14px;
+  padding: 10px 16px;
+  background: var(--marquee-red);
+  border-bottom: 5px solid var(--game-accent);
+  border-radius: 10px 10px 0 0;
+  overflow: hidden;
+}
+
+.cab-cabinet-marquee::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 46px 46px 0;
+  border-color: transparent var(--game-accent) transparent transparent;
+  opacity: 0.9;
+}
+
+.cab-cabinet-marquee .cab-machine-glyph {
+  flex: none;
+  width: 34px;
+  height: 34px;
+}
+
+/* Per-game accent flash — driven by each active game's own thumbnail
+ * palette (the same data the catalog machine's marquee/glyph uses), so
+ * every active game reads as visually distinct without bespoke CSS art. */
+body[data-active-game="treasure-chest-pick"] .cab-cabinet-marquee { --game-accent: #ffcc4d; }
+body[data-active-game="prize-wheel"] .cab-cabinet-marquee { --game-accent: #ff8a66; }
+body[data-active-game="dice-vault"] .cab-cabinet-marquee { --game-accent: #b9a7f5; }
+body[data-active-game="scratch-reveal"] .cab-cabinet-marquee { --game-accent: #7fe8b0; }
+body[data-active-game="present-pop"] .cab-cabinet-marquee { --game-accent: #ffd24d; }
+body[data-active-game="fishing-cast"] .cab-cabinet-marquee { --game-accent: #6fe0d6; }
+body[data-active-game="gem-mine"] .cab-cabinet-marquee { --game-accent: #8be9c8; }
+
+.cab-cabinet-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.05rem;
+  color: #fff6de;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cab-screen-wrap {
+  position: relative;
+  margin-top: 34px;
+}
+
+#stage {
+  position: relative;
+  line-height: 0;
+  background: #05060a;
+  border: 6px solid var(--metal-plate-dark);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 3px #0d1620, 0 4px 0 var(--shadow-hard);
+  overflow: hidden;
+}
+
+#axiom-canvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 960 / 600;
+  display: block;
+  touch-action: none;
+}
+
+/* rails overlap the screen's side edges */
+.cab-rail {
+  position: absolute;
+  top: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 8;
+}
+
+.cab-rail--left {
+  left: -6px;
+}
+
+.cab-rail--right {
+  right: -6px;
+  align-items: flex-end;
+}
+
+.cab-rail .cab-readout {
+  background: #0d1620;
+  border: 2px solid var(--metal-plate-dark);
+  border-radius: 3px;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.cab-footer {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cab-footer .cab-btn--start {
+  flex: 1;
+  font-size: 1.05rem;
+}
+
+@media (max-width: 640px) {
+  .cab-cabinet-title {
+    font-size: 0.85rem;
+  }
+  /* Rails drop out of the screen overlay and into the normal flow, above
+   * the stage, so they can never collide with the hanging signboard. */
+  .cab-screen-wrap {
+    display: flex;
+    flex-direction: column;
+    margin-top: 8px;
+  }
+  .cab-signboard {
+    position: static;
+    order: 1;
+    transform: none;
+    margin: 0 auto 8px;
+    max-width: 100%;
+    clip-path: none;
+    border-radius: 6px;
+  }
+  .cab-rail {
+    position: static;
+    flex-direction: row;
+    justify-content: center;
+    order: 2;
+    margin-bottom: 8px;
+  }
+  .cab-rail--right {
+    align-items: center;
+  }
+  #stage {
+    order: 3;
+  }
+  .cab-footer {
+    flex-wrap: wrap;
+  }
+  #result-banner {
+    font-size: 1.2rem;
+    padding: 8px 14px;
+  }
+  #result-banner.win-jackpot,
+  #result-banner.win-rare {
+    font-size: 1.5rem;
+  }
+}
+
+/* ── diagnostics service readout ─────────────────────────────────── */
+
+#diagnostics {
+  display: none;
+  width: min(1000px, 100%);
+  margin-top: 12px;
+  background: #0d1620;
+  color: #9be8ff;
+  border: 3px solid var(--metal-plate-dark);
+  border-radius: 6px;
+  font: 11px/1.6 var(--font-mono);
+  padding: 12px 14px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+#diagnostics.active {
+  display: block;
+}

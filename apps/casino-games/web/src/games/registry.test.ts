@@ -1,10 +1,16 @@
 /*
- * registry.test.ts — the registry contract over the REAL game definitions:
- * all 20 required ids registered exactly once, no duplicate stable ids,
- * every default configuration valid (register() enforces it — this suite
- * re-checks explicitly), every definition's pure controller pieces usable
- * (a session can be created and advanced for each game), and machine games
- * declare the machine-interior camera.
+ * registry.test.ts — the registry contract over the REAL, ACTIVE game
+ * definitions: exactly the active ids registered exactly once, no duplicate
+ * stable ids, every default configuration valid (register() enforces it —
+ * this suite re-checks explicitly), every definition's pure controller
+ * pieces usable (a session can be created and advanced for each game), and
+ * machine games declare the machine-interior camera.
+ *
+ * `games/index.ts` registers only the seven currently active games — the
+ * rest of the original twenty-game catalog was removed from the repository
+ * rather than merely disabled. This suite is a regression guardrail on the
+ * active set: it must change only when a game is deliberately added back or
+ * retired from `games/index.ts`.
  */
 
 import assert from "node:assert/strict";
@@ -16,30 +22,20 @@ import { createSession, transition } from "../chance-engine/sessions/session.ts"
 import { CasinoGameRegistry } from "../chance-engine/registry/registry.ts";
 import { ALL_GAMES, buildRegistry, mechanicInitFor } from "./index.ts";
 
+/** The currently ACTIVE catalog, registered in `games/index.ts`. The other
+ * thirteen games from the original catalog have been removed from the
+ * repository — see `active-catalog.test.ts`. */
 const REQUIRED_IDS = [
-  "prize-drop",
   "treasure-chest-pick",
-  "card-flip",
   "prize-wheel",
   "dice-vault",
-  "mystery-doors",
-  "ball-machine",
-  "safe-cracker",
   "scratch-reveal",
   "present-pop",
-  "rocket-launch",
   "fishing-cast",
-  "claw-grab",
-  "prize-elevator",
-  "coin-fountain",
-  "treasure-map",
-  "mystery-portal",
-  "capsule-conveyor",
-  "lucky-lanterns",
   "gem-mine",
 ] as const;
 
-test("all 20 required game ids are registered exactly once", () => {
+test("exactly the active game ids are registered, each exactly once", () => {
   const registry = buildRegistry();
   const ids = registry.all().map((definition) => definition.id);
   assert.equal(ids.length, REQUIRED_IDS.length);
