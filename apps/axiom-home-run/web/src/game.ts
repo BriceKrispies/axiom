@@ -16,9 +16,21 @@
 import type { Game, InputFrame, MaterialSpec, Rgba, ToneSpec } from "@axiom/web-engine";
 import { HomeRunSession } from "./session.ts";
 import { sceneOf } from "./view.ts";
-import type { Feedback, Intent, Outcome, Phase, PitchResult } from "./types.ts";
+import type { CinematicPhase, Feedback, Intent, Outcome, Phase, PitchResult } from "./types.ts";
+import { HOME_RUN_CINEMATIC_TUNING } from "./cinematic-constants.ts";
 
 export const PITCH_COUNT = 10;
+
+/** Dev-only bounded counters, surfaced for inspection (not gameplay UI). Every
+ * pool here has a hard cap declared in `HOME_RUN_CINEMATIC_TUNING`; there is no
+ * pre-contact replay buffer to count — predictive evaluation (`swing-outcome.ts`)
+ * makes it unnecessary, so that counter is intentionally absent rather than faked. */
+export interface CinematicDebugCounters {
+  readonly trailSegments: number;
+  readonly impactParticles: number;
+  readonly confettiMaxCount: number;
+  readonly audioCuesThisTick: number;
+}
 
 /** The HUD snapshot the harness renders (pure projection of the session). */
 export interface Hud {
@@ -35,6 +47,10 @@ export interface Hud {
   readonly readiness: number;
   readonly ready: boolean;
   readonly results: readonly PitchResult[];
+  readonly cinematicPhase: CinematicPhase;
+  readonly letterboxProgress: number;
+  readonly hudVisible: boolean;
+  readonly debugCounters: CinematicDebugCounters;
 }
 
 // ── declared materials (the old scene.ts palette, as data) ───────────────────────
@@ -128,6 +144,18 @@ const toneFor = (kind: Feedback["kind"], big: boolean): readonly ToneSpec[] => {
     case "grounder":
     case "popup":
       return [{ duration: 0.08, freq: 160, volume: 0.2, wave: "sine" }];
+    // Cinematic activation cue — a quiet rising sweep the instant anticipation begins.
+    case "cinematicAnticipation":
+      return [
+        { duration: 0.1, freq: 200, volume: 0.14, wave: "sine" },
+        { delay: 0.06, duration: 0.14, freq: 320, volume: 0.16, wave: "sine" },
+      ];
+    // Rising crowd reaction as the ball separates from the bat and heads for the wall.
+    case "crowdErupt":
+      return [
+        { duration: 0.22, freq: 140, volume: 0.2, wave: "sawtooth" },
+        { delay: 0.05, duration: 0.18, freq: 210, volume: 0.16, wave: "triangle" },
+      ];
     default:
       return [];
   }
@@ -161,20 +189,32 @@ export const game: Game<HomeRunSession> = {
 };
 
 /** The pure HUD projection the DOM overlay renders each frame. */
-export const readHud = (state: HomeRunSession): Hud => ({
-  bestDistance: state.bestDistance,
-  homers: state.homers,
-  lastMph: state.lastMph,
-  lastPitchName: state.lastPitchName,
-  multiplier: state.streakMultiplier,
-  phase: state.phase,
-  pitchCount: PITCH_COUNT,
-  pitchNumber: state.pitchNumber,
-  ready: state.swing.state === "ready",
-  readiness: state.swing.readiness,
-  results: state.results,
-  score: state.score,
-  streak: state.streak,
-});
+export const readHud = (state: HomeRunSession): Hud => {
+  const view = state.view();
+  return {
+    bestDistance: state.bestDistance,
+    cinematicPhase: view.cinematicPhase,
+    debugCounters: {
+      audioCuesThisTick: state.tickEvents.flatMap((event) => toneFor(event.kind, event.big)).length,
+      confettiMaxCount: HOME_RUN_CINEMATIC_TUNING.confettiMaxCount,
+      impactParticles: view.debugCounters.impactParticles,
+      trailSegments: view.debugCounters.trailSegments,
+    },
+    homers: state.homers,
+    hudVisible: view.hudVisible,
+    lastMph: state.lastMph,
+    lastPitchName: state.lastPitchName,
+    letterboxProgress: view.letterboxProgress,
+    multiplier: state.streakMultiplier,
+    phase: state.phase,
+    pitchCount: PITCH_COUNT,
+    pitchNumber: state.pitchNumber,
+    ready: state.swing.state === "ready",
+    readiness: state.swing.readiness,
+    results: state.results,
+    score: state.score,
+    streak: state.streak,
+  };
+};
 
 export type { Outcome };

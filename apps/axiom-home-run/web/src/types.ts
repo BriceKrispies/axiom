@@ -92,9 +92,94 @@ export interface Feedback {
     | "contact"
     | "caught"
     | "fielded"
+    | "cinematicAnticipation"
+    | "crowdErupt"
     | Outcome;
   readonly text: string;
   readonly big: boolean;
+}
+
+/** A pitch's live flight state (position, velocity, and its own gravity-per-tick) —
+ * the input `evaluateSwingOutcome` forward-simulates against. Structurally what
+ * `session.ts` already tracks each tick (`#ballPos`/`#ballVel`/`#pitchGravity`). */
+export interface PitchFlightState {
+  readonly pos: Vec3;
+  readonly vel: Vec3;
+  readonly gravityPerTick: number;
+}
+
+/** The batter's lateral position at the instant a swing commits — frozen for the
+ * duration of the swing so prediction and the real resolved contact agree exactly. */
+export interface BatterPosition {
+  readonly x: number;
+  readonly z: number;
+}
+
+/** Why a swing's contact is (or isn't) ruled a home run. */
+export type HomeRunReason = "no-contact" | "not-fair" | "below-wall-height" | "does-not-clear-wall" | "clears-wall-fair";
+
+/**
+ * The full deterministic prediction of one swing against one pitch — the single
+ * source of truth `evaluateSwingOutcome` returns. Both the REAL launched ball and
+ * the home-run cinematic consume this exact record; nothing recomputes it
+ * separately. Always a total, fully-populated value — when `contactOccurs` is
+ * false every contact/flight field is a zeroed placeholder.
+ */
+export interface SwingOutcome {
+  readonly contactOccurs: boolean;
+  /** Ticks from swing-commit until contact (or until the pitch passes uncontacted). */
+  readonly contactTick: number;
+  readonly contactPoint: Vec3;
+  readonly contactNormal: Vec3;
+  readonly batVelocityAtContact: Vec3;
+  readonly pitchVelocityAtContact: Vec3;
+  readonly exitVelocity: Vec3;
+  /** `length(exitVelocity)` in u/s — carried alongside the vector because `ball.ts`'s
+   * outcome classification (weak/grounder/popup/clean thresholds) is speed-keyed. */
+  readonly exitSpeed: number;
+  /** The contact's horizontal spray angle (see `Contact.spray`) — feeds the SAME
+   * fair/foul + outcome classification the real hit already used. */
+  readonly spray: number;
+  /** The contact's blended quality 0…1 (see `Contact.quality`) — drives hit-stop/
+   * shake/"big" feedback exactly as an ordinary contact already does. */
+  readonly contactQuality: number;
+  readonly launchDirection: Vec3;
+  readonly launchAngle: number;
+  readonly projectedApex: Vec3;
+  readonly projectedLanding: Vec3;
+  readonly projectedDistance: number;
+  readonly isFair: boolean;
+  readonly isHomeRun: boolean;
+  readonly homeRunReason: HomeRunReason;
+}
+
+/** The home-run cinematic's sub-phase. Live only while `phase === "flight"` (and,
+ * for `"anticipation"`, the tail of `phase === "pitch"` right after a home-run
+ * swing commits) — orthogonal to the round's `Phase`, which is never renamed. */
+export type CinematicPhase = "none" | "anticipation" | "contact" | "ballFollow" | "landing" | "celebration";
+
+/** The cinematic director's own live state (owned by the session, stepped once per
+ * `advance()` alongside `#swing`/`#flight`). All fields are plain numbers/enums so
+ * the whole thing resets by assignment (see `session.ts#reset`). */
+export interface CinematicState {
+  readonly phase: CinematicPhase;
+  /** Ticks spent in the current cinematic phase. */
+  readonly phaseTicks: number;
+  /** Ticks since the cinematic began (anticipation start) — drives the global
+   * slow-motion/letterbox schedule independent of phase transitions. */
+  readonly elapsedTicks: number;
+  /** Letterbox bar coverage, 0 (none) … 1 (max scrunch). */
+  readonly letterbox: number;
+  /** Current simulation time multiplier: 1 = full speed. Gameplay ticks (ball/bat/
+   * fielders integration) are gated by this via the session's fractional accumulator —
+   * gravity and other physics constants never change. */
+  readonly timeScale: number;
+  /** Camera zoom blend, 0 (normal FOV) … 1 (max cinematic zoom). */
+  readonly zoom: number;
+  /** Blend from the gameplay camera to the cinematic director's pose, 0…1. */
+  readonly camBlend: number;
+  /** A bounded, decaying count of the current impact-particle burst (contact flash). */
+  readonly impactParticles: number;
 }
 
 /** The per-pitch log entry (drives the results HUD and the replay tests). */
@@ -112,6 +197,9 @@ export interface PitchResult {
  */
 export interface SceneView {
   readonly phase: Phase;
+  /** The GATED gameplay tick (not the real one) — every tick-driven presentation
+   * oscillation `view.ts` builds from this genuinely slows during a cinematic,
+   * instead of ticking at the normal rate while everything else eases down. */
   readonly tick: number;
   /** Batter lateral position and the bat pose. */
   readonly batterX: number;
@@ -134,4 +222,14 @@ export interface SceneView {
   readonly impactFlash: number;
   /** True during frozen hit-stop ticks (scene may pop the ball slightly). */
   readonly hitStop: boolean;
+  /** The home-run cinematic's sub-phase (`"none"` for every ordinary pitch/swing). */
+  readonly cinematicPhase: CinematicPhase;
+  /** Letterbox bar coverage 0…1 — `view.ts`/the DOM edge read this directly. */
+  readonly letterboxProgress: number;
+  /** The camera's vertical FOV for this frame (cinematic zoom narrows it). */
+  readonly cameraFovY: number;
+  /** False while the HUD should hide/dim for the cinematic's wide framing. */
+  readonly hudVisible: boolean;
+  /** Dev-only bounded counters (trail segments, impact particles this frame). */
+  readonly debugCounters: { readonly trailSegments: number; readonly impactParticles: number };
 }

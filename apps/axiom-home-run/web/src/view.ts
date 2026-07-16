@@ -294,19 +294,34 @@ const buildMachine = (out: SceneInstance[], sun: SunState, view: SceneView): voi
   }
 };
 
+/** The ball's squash/stretch pulse — a brief, bounded visual flourish for the
+ * home-run cinematic's contact beat (view.impactFlash already decays every real
+ * tick regardless of slow motion, so this fades on its own without new state). */
+const ballSquashScale = (view: SceneView): Vec3 => {
+  const radius = C.BALL_RADIUS * 1.15;
+  const squash = view.cinematicPhase === "contact" ? view.impactFlash : 0;
+  return vec3(radius * 2 * (1 + 0.5 * squash), radius * 2 * (1 - 0.35 * squash), radius * 2 * (1 + 0.5 * squash));
+};
+
 const buildBall = (out: SceneInstance[], view: SceneView): void => {
   if (view.ballVisible) {
-    out.push(orb("ball", "BallWhite", view.ball, C.BALL_RADIUS * 1.15));
+    out.push(mk("ball", "sphere", "BallWhite", view.ball, ballSquashScale(view), IDENTITY_QUAT));
     const gy = groundYAt(view.ball.x, view.ball.z);
     const s = 0.36 * (1 - clamp01(view.ball.y / 14) * 0.6);
     out.push(cyl("ball/shadow", "shadow", vec3(view.ball.x, gy + 0.006, view.ball.z), vec3(s, 0.01, s)));
   }
+  // A restrained "speed line" treatment: the existing bounded trail widens
+  // during the cinematic's high-velocity beats (contact → ball-follow), then
+  // returns to its ordinary width — no new geometry, just a wider read on the
+  // SAME fixed-size trail array every other hit already uses.
+  const cinematicTrail = view.cinematicPhase === "contact" || view.cinematicPhase === "ballFollow";
+  const trailWidth = cinematicTrail ? 1.5 : 1;
   const n = view.trail.length;
   for (let i = 0; i < 14; i += 1) {
     const idx = n - 14 + i;
     const p = idx >= 0 ? view.trail[idx] : undefined;
     if (view.ballInPlay && p !== undefined) {
-      out.push(orb(`trail/${i}`, "trail", p, 0.04 + 0.09 * ((i + 1) / 14)));
+      out.push(orb(`trail/${i}`, "trail", p, (0.04 + 0.09 * ((i + 1) / 14)) * trailWidth));
     }
   }
   const f = view.impactFlash;
@@ -317,8 +332,12 @@ const buildBall = (out: SceneInstance[], view: SceneView): void => {
 };
 
 const buildFielders = (out: SceneInstance[], sun: SunState, view: SceneView): void => {
+  // A cheap, bounded "crowd energy" cue: the SAME per-fielder bob animation
+  // every fielder already runs, briefly amplified during the celebration —
+  // no new entities, no per-spectator AI.
+  const celebrationBoost = view.cinematicPhase === "celebration" ? 1.8 : 1;
   view.fielders.forEach((f, i) => {
-    const bob = Math.abs(Math.sin(view.tick * (f.chasing ? 0.24 : 0.11) + i * 1.7)) * (f.chasing ? 0.07 : 0.035);
+    const bob = Math.abs(Math.sin(view.tick * (f.chasing ? 0.24 : 0.11) + i * 1.7)) * (f.chasing ? 0.07 : 0.035) * celebrationBoost;
     const lean = f.chasing ? 0.18 : 0;
     const rot = quatFromEulerXyz(lean, 0, 0);
     const { x, z } = f;
@@ -349,7 +368,7 @@ export const sceneOf = (view: SceneView, nowMs: number): Scene => {
   buildBall(instances, view);
   buildFielders(instances, sun, view);
   return {
-    camera: { far: C.CAMERA_FAR, fovY: C.CAMERA_FOV_Y, near: C.CAMERA_NEAR, position: view.cameraPos, target: view.cameraTarget },
+    camera: { far: C.CAMERA_FAR, fovY: view.cameraFovY, near: C.CAMERA_NEAR, position: view.cameraPos, target: view.cameraTarget },
     clearColor: [0.62, 0.72, 0.95, 1],
     instances,
     lights: [sun.light, FILL_LIGHT],

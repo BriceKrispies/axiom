@@ -22,6 +22,7 @@ import { type BackendChoice, type Game, type RunningGame, runGame } from "@axiom
 import type { Hud } from "./game.ts";
 import { SUN_NOON_MS, SUN_START_MS } from "./view.ts";
 import type { HomeRunSession } from "./session.ts";
+import { HOME_RUN_CINEMATIC_TUNING } from "./cinematic-constants.ts";
 
 const CANVAS_ID = "axiom-canvas";
 
@@ -48,6 +49,9 @@ const boot_ = async (): Promise<void> => {
   const over = el("over");
   const loadMeter = el("load-meter");
   const loadFill = el("load-fill");
+  const hudEl = el("hud");
+  const letterboxTop = el("letterbox-top");
+  const letterboxBottom = el("letterbox-bottom");
   const fields = {
     best: el("best"),
     homers: el("homers"),
@@ -126,6 +130,14 @@ const boot_ = async (): Promise<void> => {
       fields.overHomers.textContent = String(hud.homers);
       fields.overBest.textContent = hud.bestDistance > 0 ? `${hud.bestDistance}m` : "—";
     }
+
+    // Home-run cinematic: letterbox bars (height alone animates — the canvas
+    // itself never resizes) and the HUD dimming while the cinematic owns the
+    // wide framing.
+    const barPct = hud.letterboxProgress * HOME_RUN_CINEMATIC_TUNING.letterboxScreenFraction * 100;
+    letterboxTop.style.height = `${barPct}%`;
+    letterboxBottom.style.height = `${barPct}%`;
+    hudEl.classList.toggle("cinematic-hidden", !hud.hudVisible);
 
     for (const fb of events) {
       if (fb.text.length > 0 && fb.kind !== "release") {

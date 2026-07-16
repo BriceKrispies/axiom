@@ -51,6 +51,19 @@
         100% { transform: translateY(620px) rotate(540deg); opacity: 0.6; }
       }
 
+      /* Home-run cinematic letterbox bars — height alone is animated per frame from
+         the session's own `letterboxProgress`; the canvas itself is never resized. */
+      #letterbox-top, #letterbox-bottom {
+        position: absolute; left: 0; right: 0; height: 0; background: #000;
+        pointer-events: none; z-index: 3;
+      }
+      #letterbox-top { top: 0; border-radius: 10px 10px 0 0; }
+      #letterbox-bottom { bottom: 0; border-radius: 0 0 10px 10px; }
+
+      /* The ordinary HUD dims/hides while the cinematic owns the wide framing. */
+      #hud { transition: opacity 0.2s; }
+      #hud.cinematic-hidden { opacity: 0.15; }
+
       /* Ready meter, under the batter: fills while he re-winds, fades once ready. */
       #load-meter {
         position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
@@ -111,6 +124,8 @@
       <canvas id="axiom-canvas" width="800" height="560"></canvas>
       <div id="confetti"></div>
       <div id="message"></div>
+      <div id="letterbox-top"></div>
+      <div id="letterbox-bottom"></div>
       <div id="load-meter"><div id="load-fill"></div></div>
       <div id="ready" class="overlay show">
         <div id="ready-title">HOME RUN!</div>
