@@ -7,9 +7,9 @@
 //! against this table). The registered names are string literals so the checker
 //! can confirm a declared `harness` is present here.
 //!
-//! Not every demo app can be registered: `generia` and `forest_walk` are
-//! `#![cfg(target_arch = "wasm32")]` bespoke `run_web_multi` renderers with no
-//! native `App`/`RunningApp` core, so they have no native pixel path to capture.
+//! Not every demo app can be registered: a `#![cfg(target_arch = "wasm32")]`
+//! bespoke `run_web_multi` / `run_web_streaming` renderer with no native
+//! `App`/`RunningApp` core has no native pixel path to capture.
 
 use axiom::prelude::*;
 use axiom_animation_lab::scene::LabScene;

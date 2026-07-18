@@ -1,8 +1,8 @@
 # The pure first-person walk+look controller: it folds a frame of held movement
 # keys + mouse-look deltas into a deterministic ground Pose, and builds the
 # perspective camera view-projection that pose implies. Browser event capture
-# lives at the platform edge (the app / windowing); this module is the replayable
-# math both first-person gallery demos (forest_walk, generia) consume.
+# lives at the platform edge (the app / windowing); this module is the reusable,
+# replayable math a first-person walkable app composes for its camera.
 
 [module]
 name = "fp-controller"

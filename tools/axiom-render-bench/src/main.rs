@@ -1,14 +1,14 @@
 //! `axiom-render-bench` — a render benchmark harness.
 //!
-//! It builds + serves the gallery, drives a demo (default `generia`) headlessly
+//! It builds + serves the gallery, drives a demo (default `growth`) headlessly
 //! through the Playwright controller with the autonomous agent walk (`?agent=1`),
 //! runs it for a fixed duration, and reduces the Canvas2D backend's per-frame
 //! console telemetry to an FPS + phase-breakdown report. `--debug` builds a debug
 //! wasm bundle so the `convert` deep project/shade split is present too.
 //!
 //! ```text
-//! cargo run -p axiom-render-bench -- --demo generia --backend canvas2d --duration 10
-//! cargo run -p axiom-render-bench -- --demo generia --backend canvas2d --debug --json
+//! cargo run -p axiom-render-bench -- --demo growth --backend canvas2d --duration 10
+//! cargo run -p axiom-render-bench -- --demo growth --backend canvas2d --debug --json
 //! ```
 //!
 //! It is repo tooling — outside the engine dependency graph and the coverage gate.
@@ -37,7 +37,7 @@ struct Args {
 impl Default for Args {
     fn default() -> Self {
         Args {
-            demo: "generia".to_string(),
+            demo: "growth".to_string(),
             backend: "canvas2d".to_string(),
             duration_s: 10,
             warmup_s: 2,
@@ -74,7 +74,7 @@ fn parse_args() -> Result<Args, String> {
 fn help() -> String {
     "axiom-render-bench — build+serve the gallery, walk a demo, report FPS + phases\n\
      \n\
-     --demo <name>        demo to benchmark (default: generia)\n\
+     --demo <name>        demo to benchmark (default: growth)\n\
      --backend <b>        canvas2d | webgl2 | webgpu (default: canvas2d; only\n\
      \x20                    canvas2d logs per-frame telemetry today)\n\
      --duration <secs>    measurement window (default: 10)\n\

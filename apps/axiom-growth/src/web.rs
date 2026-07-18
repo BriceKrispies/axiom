@@ -672,6 +672,21 @@ fn gen_chunk(
         indices.extend_from_slice(&[s0, s1, d0, d0, s1, d1]);
     });
 
+    // Sparse trees — the forest-walk / generia tree ported onto Growth's world. Only
+    // the full-detail LOD-0 near ring grows them: a LOD-0 chunk is one 16 m world cell,
+    // so its trees never double with a coarse ring over the same ground, and the count
+    // stays bounded to the ring around the player. Their world-space geometry (seated on
+    // this same anchor-recentred surface, gated by biome/slope/treeline) is appended
+    // after the terrain verts, its local indices offset by the chunk's vertex count.
+    vista.filter(|_| lod == 0).into_iter().for_each(|plan| {
+        let base = (vertices.len() / VERT_FLOATS) as u32;
+        let (tree_v, tree_i) = crate::trees::build_cell_trees(
+            atlas, localmap, seed, plan, anchor_h, chunk_x, chunk_z, size_m,
+        );
+        vertices.extend_from_slice(&tree_v);
+        indices.extend(tree_i.iter().map(|i| i + base));
+    });
+
     ChunkMesh { vertices, indices }
 }
 
@@ -690,19 +705,26 @@ fn assemble_chunks(loaded: &HashMap<ChunkKey, ChunkMesh>) -> (Vec<f32>, Vec<u32>
     let mut vertices: Vec<f32> = Vec::with_capacity(keys.len() * VERTS_PER_CHUNK * VERT_FLOATS);
     let mut indices: Vec<u32> = Vec::new();
 
-    for (k, key) in keys.iter().enumerate() {
+    // Each chunk contributes its terrain verts PLUS any baked trees, so chunks are no
+    // longer a fixed stride: offset every chunk's local indices by the running vertex
+    // total, not `k * VERTS_PER_CHUNK`.
+    for key in &keys {
         let chunk = &loaded[key];
+        let base = (vertices.len() / VERT_FLOATS) as u32;
         vertices.extend_from_slice(&chunk.vertices);
-        let base = (k * VERTS_PER_CHUNK) as u32;
         indices.extend(chunk.indices.iter().map(|i| i + base));
     }
 
     (vertices, indices)
 }
 
-/// Total surface + skirt vertices across the loaded set (for telemetry).
+/// Total vertices across the loaded set (terrain surface + skirt + baked trees), for
+/// telemetry — summed from the actual per-chunk buffers since a chunk's length varies.
 fn total_vertices(loaded: &HashMap<ChunkKey, ChunkMesh>) -> usize {
-    loaded.len() * VERTS_PER_CHUNK
+    loaded
+        .values()
+        .map(|c| c.vertices.len() / VERT_FLOATS)
+        .sum()
 }
 
 // The far scenic mesh — the distant Everest-scale massif + atmospheric far ground —

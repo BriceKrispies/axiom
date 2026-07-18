@@ -51,10 +51,8 @@ DEMO_APPS: list[str] = [
     "gravix",
     "sports-physics-lab",
     "growth",
-    "generia",
     "zanzoban",
     "quintet",
-    "forest-walk",
     "end-zone",
 ]
 

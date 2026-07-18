@@ -1,6 +1,6 @@
 [package]
 name = "axiom-fp-controller"
-description = "Axiom engine module: the first-person walk+look controller. Integrates a frame of held movement/turn keys plus mouse-look deltas into a deterministic ground Pose (yaw about +Y, pitch clamped about local +X, movement rotated by yaw only), and builds the perspective camera view-projection that pose implies — seated an eye-height above the terrain. The reusable capability behind the gallery's first-person demos (forest_walk, generia); the browser event capture stays app-side, this is the pure, replayable math."
+description = "Axiom engine module: the first-person walk+look controller. Integrates a frame of held movement/turn keys plus mouse-look deltas into a deterministic ground Pose (yaw about +Y, pitch clamped about local +X, movement rotated by yaw only), and builds the perspective camera view-projection that pose implies — seated an eye-height above the terrain. The reusable capability a first-person walkable app composes for its camera; the browser event capture stays app-side, this is the pure, replayable math."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true

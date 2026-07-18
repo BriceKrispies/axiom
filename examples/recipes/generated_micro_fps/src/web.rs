@@ -5,7 +5,7 @@
 //! the generated content). Force the software renderer with `?backend=canvas2d`
 //! (the sandbox has no browser WebGPU).
 //!
-//! Controls are cloned from the gallery's first-person `forest_walk` demo:
+//! Controls follow the gallery's first-person walkable demos:
 //! **WASD** move (arrow up/down also move), **mouse** looks once you click the
 //! canvas to capture the pointer (classic FPS pointer-lock), and arrow-left/right
 //! turn. Held keys are polled each frame; mouse deltas accumulate between frames

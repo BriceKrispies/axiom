@@ -150,7 +150,7 @@ impl WalkTuning {
 
     /// The shared first-person walk tuning: a human-paced stroll seated 1.7 m
     /// above the floor, with a near-vertical pitch clamp and a classic FPS
-    /// mouse-look sensitivity. Both `forest_walk` and `generia` use this, so the
+    /// mouse-look sensitivity. A first-person walkable app uses this, so the
     /// rates live here once rather than duplicated as app constants.
     pub const fn walk() -> Self {
         Self {

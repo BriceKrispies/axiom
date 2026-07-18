@@ -50,6 +50,12 @@ pub mod vista;
 // viewer and the headless screenshot capture ---
 pub mod terrain_mesh;
 
+// --- deterministic tree scatter baked into the streamed walkable terrain (the
+// forest-walk / generia trunk+canopy tree, ported onto Growth's world): per-cell
+// seeded placement gated by biome/slope/treeline, seated on the composited surface,
+// emitted as world-space geometry appended to LOD-0 chunks by the wasm viewer ---
+pub mod trees;
+
 // --- Axiom Visual Target 001: a deterministic static forest diorama renderer,
 // built on top of growth's headless render-to-PNG machinery (NOT its worldgen). A
 // self-contained, versioned scene-manifest + one-frame screenshot + reference

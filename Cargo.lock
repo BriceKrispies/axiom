@@ -307,26 +307,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-forest-walk"
-version = "0.1.0"
-dependencies = [
- "axiom-debug-overlay",
- "axiom-entropy",
- "axiom-fp-controller",
- "axiom-host",
- "axiom-kernel",
- "axiom-math",
- "axiom-space",
- "axiom-terrain-mesh",
- "axiom-windowing",
- "console_error_panic_hook",
- "serde",
- "toml",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "axiom-fp-controller"
 version = "0.1.0"
 dependencies = [
@@ -366,31 +346,6 @@ dependencies = [
  "axiom-tween",
  "axiom-windowing",
  "console_error_panic_hook",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "axiom-generia"
-version = "0.1.0"
-dependencies = [
- "axiom-agent-harness",
- "axiom-debug-overlay",
- "axiom-entropy",
- "axiom-fp-controller",
- "axiom-host",
- "axiom-kernel",
- "axiom-math",
- "axiom-noise",
- "axiom-scatter",
- "axiom-space",
- "axiom-streaming",
- "axiom-terrain-mesh",
- "axiom-windowing",
- "axiom-world",
- "console_error_panic_hook",
- "serde",
- "toml",
  "wasm-bindgen",
  "web-sys",
 ]

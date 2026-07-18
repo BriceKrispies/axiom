@@ -94,36 +94,14 @@ export const DEMOS = [
   {
     id: "growth",
     title: "Growth (walkable terrain)",
-    blurb: "Generate a planet, pick a spot on its map, and walk the procedural terrain in first person.",
+    blurb: "Generate a planet, pick a spot on its map, and walk its procedural, forested terrain in first person.",
     desc:
       "A procedural-terrain world viewer on the engine: configure and generate a " +
       "planet, descend onto a land spot from the overworld map, then walk its " +
-      "streamed LOD terrain. Desktop: click the canvas to capture the mouse, WASD/" +
-      "arrows to move, mouse to look, Esc to release. (WebGPU; desktop-oriented.)",
+      "streamed LOD terrain. Forested biomes grow sparse trees on the ground you " +
+      "walk. Desktop: click the canvas to capture the mouse, WASD/arrows to move, " +
+      "mouse to look, Esc to release. (WebGPU; desktop-oriented.)",
     page: "growth/index.html",
-  },
-  {
-    id: "generia",
-    title: "Generia (forest)",
-    blurb: "Walk an Axiom-rendered procedural forest in first person — the fall-forest game, ported onto the engine.",
-    desc:
-      "A first-person walk through a procedural forest rendered with the engine's " +
-      "GPU forest pipeline (terrain, trees, foliage, ground clutter, fog). Click the " +
-      "canvas to capture the mouse, WASD/arrows to move, mouse to look, Esc to release. " +
-      "The port foundation for the fall-forest game (streaming, props, discoveries, " +
-      "and world modes land in later phases).",
-    page: "generia/index.html",
-  },
-  {
-    id: "forest-walk",
-    title: "Forest Walk",
-    blurb: "Walk the visual-target forest diorama in first person — generia's predecessor, kept walkable.",
-    desc:
-      "A first-person walk through the Visual Target 001 forest diorama (the " +
-      "postcard scene the visual-convergence loop scores against), built on the " +
-      "engine's terrain mesher and first-person controller. Click the canvas to " +
-      "capture the mouse, WASD/arrows to move, mouse to look, Esc to release.",
-    page: "forest-walk/index.html",
   },
   {
     id: "zanzoban",

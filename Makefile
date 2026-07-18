@@ -312,7 +312,7 @@ gallery-debug-build:
 	npm --prefix scripts/packaging install --no-audit --no-fund
 	uv run --no-project python scripts/package_gallery.py --debug
 
-# RENDER BENCHMARK: build+serve the gallery, auto-walk a demo (default generia) with
+# RENDER BENCHMARK: build+serve the gallery, auto-walk a demo (default growth) with
 # the agent, and report FPS + phase breakdown from the Canvas2D telemetry. Pass extra
 # flags via ARGS, e.g. `make render-bench ARGS="--backend canvas2d --duration 10 --debug"`.
 render-bench:
