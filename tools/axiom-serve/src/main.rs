@@ -8,7 +8,7 @@
 //! ```text
 //! cargo run -p axiom-serve -- <app> [--port N] [--no-open] [--debug]
 //! cargo run -p axiom-serve -- home-run
-//! cargo run -p axiom-serve -- retro-fps --port 9000 --no-open
+//! cargo run -p axiom-serve -- gravix --port 9000 --no-open
 //! ```
 //!
 //! ## What it does

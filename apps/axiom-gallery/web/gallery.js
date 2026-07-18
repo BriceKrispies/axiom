@@ -25,92 +25,6 @@ export const DEMOS = [
     page: "rotating-cube/index.html",
   },
   {
-    id: "netplay",
-    title: "Lockstep Multiplayer",
-    blurb: "Move your cube with the D-pad; only signed inputs cross the wire.",
-    desc:
-      "Deterministic-lockstep netplay. Open this in two browsers pointed at " +
-      "the same relay — each controls its own cube and the two stay identical " +
-      "by determinism. Red = player 1, blue = player 2.",
-    page: "netplay/index.html",
-  },
-  {
-    id: "retro-fps",
-    title: "retro FPS (first-person)",
-    blurb: "Stalk a cube-walled level and shoot the cubes — built on just the engine.",
-    desc:
-      "A retro FPS-style first-person shooter on nothing but the engine: the level " +
-      "is scaled cube instances, the camera is the engine's first-person " +
-      "controller, and enemies are chasing cube players. Desktop: click to look " +
-      "(mouse), WASD to move, click to fire. Touch: ◀ ▶ turn, ▲ ▼ move, FIRE.",
-    page: "retro-fps/index.html",
-  },
-  {
-    id: "soccer-penalty-kick",
-    title: "Soccer Penalty",
-    blurb: "Take penalty kicks against a diving keeper — aim, charge power, and shoot across five rounds.",
-    desc:
-      "A retro 32-bit penalty shootout on the engine: a fixed-camera stadium diorama " +
-      "with a run-up-and-strike kicker, a diving goalie with real save volumes, " +
-      "physics-arc ball flight, and goal / save / miss / post scoring over a five-round " +
-      "session. Aim with ←/→ or A/D, set height with ↑/↓ or W/S, hold Space/K to charge " +
-      "power and release to shoot, Enter to continue between rounds, R to reset.",
-    // Pure-TS game: a COMMITTED single-file page (its own @axiom/game SDK +
-    // axiom-game-runtime wasm inlined) under web/soccer-penalty-kick/, copied
-    // verbatim into dist/ — regenerate with `make gallery-soccer`.
-    page: "soccer-penalty-kick/index.html",
-  },
-  {
-    id: "signal-runner",
-    title: "Signal Runner",
-    blurb: "A downhill signal courier: steer a hover-sled down a mountain ruin, grab shards, beat the storm.",
-    desc:
-      "A third-person downhill traversal game authored purely in TypeScript on the engine's " +
-      "2D draw2d surface: a hooded courier rides a hover-sled down a procedurally generated, " +
-      "winding mountain-ruin path in a flat-shaded low-poly world. Steer with A/D or ←/→, hold " +
-      "SHIFT to brake into turns, collect 20 cyan signal shards, trip 3 pressure plates, and dodge " +
-      "rocks, fallen columns, and drone hazards. Spend charge on BOOST (Space/1), SHIELD (2), " +
-      "PULSE (3), and a helper DRONE (4). Restore the final beacon with ENTER before the purple " +
-      "storm wall — a 2:30 countdown — overruns the relay. Fully deterministic from its seed.",
-    // Pure-TS game: committed single-file page — regenerate with `make gallery-signal-runner`.
-    page: "signal-runner/index.html",
-  },
-  {
-    id: "swipe-basketball",
-    title: "Swipe Basketball",
-    blurb: "An arcade basketball machine: drag a ball, swipe up, and release to arc it into the hoop.",
-    desc:
-      "A first-person arcade basketball cabinet authored purely in TypeScript on the engine's " +
-      "3D scene surface: a fixed camera facing a procedurally-built machine — sloped return ramp, " +
-      "side rails, backboard, a real torus rim, hanging net, and a seven-segment scoreboard, with " +
-      "orange seam-lined basketballs racked in the foreground. Drag a ball with mouse or touch, " +
-      "swipe upward, and release: the swipe becomes a 3D throw and the ball is then fully physics-" +
-      "simulated — bouncing off the rim, backboard, rails and ramp with real restitution. A clean " +
-      "downward pass through the hoop scores once; misses rattle out or roll back down the ramp. " +
-      "Press R to reset. Deterministic under fixed-step replay.",
-    // Pure-TS game: committed single-file page — regenerate with `make gallery-swipe-basketball`.
-    page: "swipe-basketball/index.html",
-  },
-  {
-    id: "heat-check",
-    title: "Heat Check",
-    blurb: "A stylized basketball scoring game about getting hot: create space, rise up, release in rhythm, swish.",
-    desc:
-      "A stylized 3D basketball SCORING game authored purely in TypeScript on the engine's " +
-      "3D scene surface — not literal drag-into-hoop, but the emotion of getting hot. A fixed, " +
-      "slightly-elevated camera looks down a procedurally-built half-court (key, arc, hoop with a " +
-      "real torus rim + net, abstract crowd silhouettes) at a symbolic player who auto-dribbles " +
-      "while a red defender mirrors them with a reaction delay. Drag left/right (or A/D · ←/→) to " +
-      "create separation and beat the defender off balance, then release (or SPACE) to rise up and " +
-      "shoot: the shot's success is decided by its QUALITY — separation, release timing against the " +
-      "rhythm meter under your feet, body stability, heat, and defender pressure — never by aiming. " +
-      "Makes build heat (the player glows, the trail brightens, the crowd pulses on a swish) and the " +
-      "defender gets hungrier; misses cool you down. Every-3-makes multiplier to 4×, final-10-second " +
-      "double points, 60-second score attack. Press R to run it back. Deterministic under fixed-step replay.",
-    // Pure-TS game: committed single-file page — regenerate with `make gallery-heat-check`.
-    page: "heat-check/index.html",
-  },
-  {
     id: "home-run",
     title: "Home Run!",
     blurb: "An arcade batting contest on a toy diamond: load the bat, read the pitch, clear the blue wall.",
@@ -130,23 +44,6 @@ export const DEMOS = [
       "on reachable landing points and rob weak hits. Deterministic under fixed-step replay.",
     // Pure-TS game: committed single-file page — regenerate with `make gallery-home-run`.
     page: "home-run/index.html",
-  },
-  {
-    id: "minimal-3v3",
-    title: "Minimal 3v3 Basketball",
-    blurb: "A deliberately minimal 3-on-3 half-court game: move, pass, rise, and release at the apex.",
-    desc:
-      "A minimally-legible 3D half-court basketball game authored purely in TypeScript on the " +
-      "engine's 3D scene surface: a procedural court (key, arc, backboard, real torus rim + net) and " +
-      "six box-and-sphere players. You control the blue ball handler — a third-person camera follows " +
-      "behind, aimed at the hoop. WASD moves, Q/E pass to the left/right wing (control transfers with " +
-      "the ball), and SPACE gathers into a jump: release at the apex for the best odds. Shot success " +
-      "is deterministic — timing, distance, and defender contest all matter, and PERFECT never " +
-      "guarantees. Three red defenders shade the handler, protect the lane, and rise for contest " +
-      "jumps; a steal, interception, make, or miss freezes play, shows the result, and resets with " +
-      "you in possession. Press R to reset. Deterministic under fixed-step replay.",
-    // Pure-TS game: committed single-file page — regenerate with `make gallery-minimal-3v3`.
-    page: "minimal-3v3/index.html",
   },
   {
     id: "three-point",
@@ -193,18 +90,6 @@ export const DEMOS = [
       "On touch: a virtual joystick plus SNAP·THROW and PAUSE buttons. Every visual is " +
       "procedural — no image assets. Deterministic under fixed-step replay.",
     page: "end-zone/index.html",
-  },
-  {
-    id: "stress-cubes",
-    title: "Stress (N cubes)",
-    blurb: "A field of N spinning cubes — a live load test you can watch.",
-    desc:
-      "The browser-visible counterpart to the engine's CPU pipeline benchmark: " +
-      "a grid of N independently-spinning cube renderables on the same " +
-      "scene → render → WebGPU path. Pick a cube count on the page and watch the " +
-      "FPS fall as N climbs — the frame-rate collapse is the deterministic " +
-      "pipeline cost made visible. Purely visual — no input.",
-    page: "stress-cubes/index.html",
   },
   {
     id: "growth",
@@ -269,24 +154,6 @@ export const DEMOS = [
     page: "quintet/index.html",
   },
   {
-    id: "physics-crucible",
-    title: "Physics Crucible",
-    blurb: "A live six-station physics proving room: watch bodies fall, bounce, and pile — then kick them and watch it re-settle.",
-    desc:
-      "A hostile test chamber for the engine's deterministic rigid-body physics, " +
-      "driven entirely through its public PhysicsApi and simulated live. Six stations " +
-      "sit in a grid: Body Bay (static / dynamic / kinematic / disabled bodies), " +
-      "Contact Bay (sphere/plane, sphere/sphere, sphere/box, box/plane contacts), " +
-      "Material Bay (a restitution bounce ladder), Query Bay (raycast + overlap-" +
-      "sphere), Stress Bay (a deterministic sphere pile), and Replay Bay (a second " +
-      "hidden world kept byte-identical to prove same-input determinism). The camera " +
-      "orbits while the physics plays out; colour encodes each body's role and " +
-      "markers show contacts. ▲ / Space / K kick every dynamic body upward so the " +
-      "pile scatters and re-settles; ▼ / R reset and re-drop. The room loops on its " +
-      "own. (WebGPU, with a WebGL2 / Canvas2D fallback.)",
-    page: "physics-crucible/index.html",
-  },
-  {
     id: "gravix",
     title: "Gravix",
     blurb: "Roll a physics marble across procedurally-generated floating platform courses — over ramps, across jump gaps — collecting coins to the finish pad.",
@@ -317,19 +184,6 @@ export const DEMOS = [
       "procedural body; R resets the lineup. Everything visible is generated at " +
       "runtime — no imported assets. (WebGPU, with a WebGL2 / Canvas2D fallback.)",
     page: "sports-physics-lab/index.html",
-  },
-  {
-    id: "harness",
-    title: "Debug Overlay",
-    blurb: "A backquote-toggled developer debug overlay + command console for the engine's browser surface.",
-    desc:
-      "Developer tooling on the engine surface: a debug overlay with live frame / " +
-      "fps / backend read-outs and a tiny command console (help, overlay.*, " +
-      "diagnostics.snapshot, backend.report, …). Press the backquote key (`) to " +
-      "toggle it; Shift / Ctrl / Alt + backquote cycle density, pin, or focus the " +
-      "console. The same overlay also ships inside every demo in this gallery — " +
-      "open any of them and press backquote.",
-    page: "dev-harness/index.html",
   },
 ];
 

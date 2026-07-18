@@ -5,12 +5,11 @@
 // cartridges AND the gallery's showcase apps, each shipped as its OWN standalone
 // bundle under /gallery/<id>/) and renders an app-selector. On selection it either:
 //   * boots an **inline** app straight into a canvas by importing that app's bundle
-//     and calling its entry (e.g. `retro_fps_start`) — no embedded document, no Rust
-//     runtime dependency: the workspace crate stays `kernel` + `runtime`
+//     and calling its entry (e.g. `rotating_cube_start`) — no embedded document, no
+//     Rust runtime dependency: the workspace crate stays `kernel` + `runtime`
 //     portable, each app bringing its own engine through its bundle; or
-//   * opens a **page** app (a self-hosted multi-screen demo — growth, zanzoban,
-//     the debug-overlay harness — whose own DOM does not fit a bare canvas) in a
-//     new tab. The workspace shell embeds no nested browsing contexts (see
+//   * opens a **page** app (a self-hosted multi-screen demo — growth, zanzoban —
+//     whose own DOM does not fit a bare canvas) in a new tab. The workspace shell embeds no nested browsing contexts (see
 //     tests/architecture.rs); a multi-screen app is launched, not embedded.
 //
 // Because this is the developer console (not the public showcase), it opts every

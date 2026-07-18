@@ -82,13 +82,8 @@ members = [
     # apps/axiom-gallery is no longer a crate — only its static web/ showcase
     # (the landing grid that links out to each app's page) remains.
     "apps/axiom-rotating-cube",
-    "apps/axiom-netplay",
-    "apps/axiom-retro-fps",
-    "apps/axiom-stress-cubes",
-    "apps/axiom-physics-crucible",
     "apps/axiom-gravix",
     "apps/axiom-sports-physics-lab",
-    "apps/axiom-dev-harness",
     "apps/axiom-growth",
     "apps/axiom-generia",
     "apps/axiom-zanzoban",

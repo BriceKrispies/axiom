@@ -74,14 +74,10 @@ jobs:
 
       # Package every demo app into dist/<id>/ behind its loader (scripts/package_gallery.py,
       # the same driver `make gallery` uses). `--fast` keeps this on stable with no
-      # wasm2js fallback; it also builds + vendors the @axiom/client SDK netplay needs
-      # (into apps/axiom-netplay/web/vendor/axiom-client).
+      # wasm2js fallback.
       - name: Package the gallery (dist/)
         run: |
           npm --prefix scripts/packaging install --no-audit --no-fund
-          npm --prefix packages/axiom-client install --no-audit --no-fund
-          npm --prefix packages/axiom-client run build
-          python3 -c "import shutil, pathlib; d=pathlib.Path('apps/axiom-netplay/web/vendor/axiom-client'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
           python3 scripts/package_gallery.py --fast
 
       - name: Upload Pages artifact

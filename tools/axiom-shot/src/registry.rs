@@ -26,12 +26,8 @@ fn ch(v: f32) -> Ratio {
 /// Per-slice build inputs (each builder reads only what it needs).
 #[derive(Debug, Clone, Default)]
 pub struct BuildParams {
-    /// `--level PATH` for the retro FPS slice (else its built-in default level).
-    pub level: Option<String>,
     /// `--frame N` for the animation-lab posed-figure slice.
     pub frame: u32,
-    /// `--cubes N` for the stress-cubes slice.
-    pub stress_count: u32,
 }
 
 /// One registered renderable slice: a stable `name` and a builder for its
@@ -66,18 +62,6 @@ pub fn registry() -> Vec<SliceEntry> {
             build: |_| axiom_rotating_cube::rotating_cube_core(),
         },
         SliceEntry {
-            name: "stress-cubes",
-            build: |p| axiom_stress_cubes::stress_cubes_core(p.stress_count.max(1)),
-        },
-        SliceEntry {
-            name: "physics-crucible",
-            build: |_| axiom_physics_crucible::build_physics_crucible(),
-        },
-        SliceEntry {
-            name: "retro-fps",
-            build: build_retro_fps,
-        },
-        SliceEntry {
             name: "animation-lab",
             build: build_posed_figure,
         },
@@ -104,10 +88,6 @@ pub fn build(name: &str, params: &BuildParams) -> Option<RunningApp> {
 /// The names of every registered slice (for `--list` and error messages).
 pub fn names() -> Vec<&'static str> {
     registry().into_iter().map(|e| e.name).collect()
-}
-
-fn build_retro_fps(p: &BuildParams) -> RunningApp {
-    axiom_retro_fps::build_retro_fps_app(&retro_fps_doc(p.level.as_deref())).0
 }
 
 /// L3: the animation-lab posed-figure scene captured as REAL pixels (not SVG).
@@ -166,17 +146,6 @@ fn build_posed_figure(p: &BuildParams) -> RunningApp {
             ));
         })
         .build()
-}
-
-/// The retro FPS level document for `--level PATH` (else the built-in default).
-/// Shared by the registry build and the binary's `--pose` teleport path.
-pub fn retro_fps_doc(level: Option<&str>) -> axiom_retro_fps::level::LevelDoc {
-    match level {
-        Some(path) => axiom_retro_fps::level::LevelDoc::parse(
-            &std::fs::read_to_string(path).expect("read --level file"),
-        ),
-        None => axiom_retro_fps::level::LevelDoc::default(),
-    }
 }
 
 /// Author the Stage-2/3 textured + lit showcase: three spinning checker cubes, a

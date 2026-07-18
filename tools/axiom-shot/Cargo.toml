@@ -34,11 +34,8 @@ axiom-render = { path = "../../modules/axiom-render" }
 # Each browser demo is its own standalone app crate; the harness depends on
 # exactly the ones its registry renders.
 axiom-gravix = { path = "../../apps/axiom-gravix" }
-axiom-physics-crucible = { path = "../../apps/axiom-physics-crucible" }
-axiom-retro-fps = { path = "../../apps/axiom-retro-fps" }
 axiom-rotating-cube = { path = "../../apps/axiom-rotating-cube" }
 axiom-sports-physics-lab = { path = "../../apps/axiom-sports-physics-lab" }
-axiom-stress-cubes = { path = "../../apps/axiom-stress-cubes" }
 # The animation lab's posed-figure scene — captured as real pixels (L3), not SVG.
 axiom-animation-lab = { path = "../../apps/axiom-animation-lab" }
 png = "0.17"

@@ -6,9 +6,9 @@
 //! > identically and LLVM never fuses, so native and wasm32 produce bit-identical
 //! > results."
 //!
-//! This module replays a fixed, fully deterministic physics scenario — the
-//! `axiom-physics-crucible` *Replay Bay* scenario, reconstructed here from the
-//! public [`PhysicsApi`] surface alone — for a fixed number of steps, and folds
+//! This module replays a fixed, fully deterministic physics scenario — a
+//! rigid-body settling scenario built here from the public [`PhysicsApi`] surface
+//! alone — for a fixed number of steps, and folds
 //! each tick's world state through the kernel's canonical-byte [`StableHash`] into
 //! a `Vec<u64>` digest sequence. The scenario deliberately exercises every float
 //! path the step uses: gravity integration, an `O(n²)` broad/narrow phase, the

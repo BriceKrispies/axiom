@@ -20,7 +20,7 @@ It does four things:
    the app's page, its ``<demo>_start`` / per-crate ``*_compare_start`` entries) —
    so the console can inline-boot the single-canvas apps from
    ``/gallery/<id>/axiom-loader.js`` and open the multi-screen ones
-   (growth / zanzoban / dev-harness) as pages.
+   (growth / zanzoban / generia) as pages.
 4. With ``--serve``, serves ``dist-workspace/`` over HTTP, resolving extensionless
    ES-module imports (``./foo`` -> ``./foo.js``) so the shell runs from a plain
    static server.

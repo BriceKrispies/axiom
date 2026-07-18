@@ -12,7 +12,6 @@ demo proves it loaded, its canvas, and whether that canvas paints on entry.
                    ?backend=canvas2d is a harmless no-op (still loaded to prove it).
   * growth       — multi-screen; only its entry screen is smoke-tested (status text).
                    Its canvas is hidden until "Generate", so it gets no canvas check.
-  * harness      — the debug-overlay dev page; signals via #boot text.
 """
 
 # id -> demo spec. `path` is relative to the gallery root (dist/). Every demo is a
@@ -20,15 +19,11 @@ demo proves it loaded, its canvas, and whether that canvas paints on entry.
 # (there is no shared demo.html shell anymore).
 DEMOS = [
     {"id": "rotating-cube", "kind": "windowing3d", "path": "rotating-cube/index.html", "canvas": "#axiom-cube-canvas"},
-    {"id": "netplay", "skip": "multiplayer — needs a relay (needsRelay)"},
-    {"id": "retro-fps", "kind": "windowing3d", "path": "retro-fps/index.html", "canvas": "#axiom-retro-fps-canvas"},
-    {"id": "stress-cubes", "kind": "windowing3d", "path": "stress-cubes/index.html", "canvas": "#axiom-stress-canvas"},
     {"id": "growth", "kind": "growth", "path": "growth/index.html", "check_canvas": False},
     {"id": "zanzoban", "kind": "canvas2d_app", "path": "zanzoban/index.html",
      "canvas": "#axiom-puzzle-canvas", "ready_log": "[zanzoban] ready"},
     {"id": "quintet", "kind": "canvas2d_app", "path": "quintet/index.html",
      "canvas": "#axiom-quintet-canvas", "ready_log": "[quintet] ready"},
-    {"id": "harness", "kind": "harness", "path": "dev-harness/index.html", "canvas": "#axiom-harness-canvas"},
 ]
 
 

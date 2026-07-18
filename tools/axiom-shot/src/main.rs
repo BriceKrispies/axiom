@@ -22,14 +22,12 @@
 //!
 //!   * `--script "ticks:held-inputs;..."` applies `FirstPersonInput` to
 //!     controller 0 per tick, so an app can be walked to a vantage point.
-//!   * `--pose "x,z,yaw,pitch"` (retro FPS only) teleports controller 0 to an
-//!     absolute pose at tick 0.
 //!
 //! Usage:
 //!   cargo run -p axiom-shot [--features offscreen] -- \
 //!     [--app <name>|list] [--backend gpu|canvas2d] [--tick N] [--out PATH] \
-//!     [--quality 0..3] [--frame N] [--cubes N] [--level PATH] \
-//!     [--script "ticks:key=val,...;..."] [--pose "x,z,yaw,pitch"]
+//!     [--quality 0..3] [--frame N] \
+//!     [--script "ticks:key=val,...;..."]
 
 use axiom::prelude::*;
 use axiom_shot::capture;
@@ -58,28 +56,9 @@ fn main() {
         .unwrap_or_else(|| controls.len().saturating_sub(1) as u64);
 
     let params = BuildParams {
-        level: flag(&args, "--level"),
         frame: flag(&args, "--frame")
             .and_then(|f| f.parse().ok())
             .unwrap_or(0),
-        stress_count: flag(&args, "--cubes")
-            .and_then(|c| c.parse().ok())
-            .unwrap_or(2000),
-    };
-
-    // `--pose "x,z,yaw,pitch"` (retro FPS only): snap controller 0 to an absolute
-    // pose at tick 0 via the game's one corrective teleport control.
-    let teleport = match (
-        app.as_str(),
-        flag(&args, "--pose").as_deref().and_then(parse_pose),
-    ) {
-        ("retro-fps", Some((x, z, yaw, pitch))) => {
-            let mut game = axiom_retro_fps::RetroFpsGame::from_level(&registry::retro_fps_doc(
-                params.level.as_deref(),
-            ));
-            Some(game.teleport(x, z, yaw, pitch))
-        }
-        _ => None,
     };
 
     let mut running = registry::build(&app, &params).unwrap_or_else(|| {
@@ -95,12 +74,9 @@ fn main() {
     let materials = running.material_textures();
     let mut outcome = None;
     for t in 0..=render_tick {
-        let frame = match (t, teleport) {
-            (0, Some(c)) => running.tick_with_controls(0, &[], std::slice::from_ref(&c)),
-            _ => match controls.get(t as usize).copied() {
-                Some(c) => running.tick_with_controls(t, &[], std::slice::from_ref(&c)),
-                None => running.tick(t),
-            },
+        let frame = match controls.get(t as usize).copied() {
+            Some(c) => running.tick_with_controls(t, &[], std::slice::from_ref(&c)),
+            None => running.tick(t),
         };
         outcome = Some(frame);
     }
@@ -174,15 +150,6 @@ fn render(
         );
     });
     capture::render_canvas2d(meshes, skinned_meshes, outcome, quality, WIDTH, HEIGHT)
-}
-
-/// Parse a `--pose "x,z,yaw,pitch"` argument into its four floats, or `None`.
-fn parse_pose(s: &str) -> Option<(f32, f32, f32, f32)> {
-    let v: Vec<f32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-    match v.as_slice() {
-        [x, z, yaw, pitch] => Some((*x, *z, *yaw, *pitch)),
-        _ => None,
-    }
 }
 
 /// One phase's held first-person inputs (per-tick deltas).
