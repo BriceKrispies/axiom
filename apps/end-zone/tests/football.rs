@@ -51,6 +51,44 @@ fn held_football_follows_its_possession_socket() {
 }
 
 #[test]
+fn the_cradled_ball_pins_its_rear_tip_to_the_forearm_crook() {
+    use axiom_end_zone::football::model::cradled_ball_transform;
+    use axiom_end_zone::football::state::BALL_VISUAL_SCALE;
+    use axiom_math::{Quat, Transform};
+
+    // An arbitrarily tilted forearm so the assertion is not axis-trivial.
+    let forearm = Transform::new(
+        Vec3::new(1.0, 2.0, -0.5),
+        Quat::from_euler_xyz(0.3, -0.4, 0.2),
+        Vec3::ONE,
+    );
+    let ball = cradled_ball_transform(&forearm);
+
+    // The crook: the top face of the forearm box, nudged a touch off the arm.
+    let up = forearm.rotation.rotate(Vec3::new(0.0, 1.0, 0.0));
+    let toward_hand = forearm.rotation.rotate(Vec3::new(0.0, -1.0, 0.0));
+    let crook = forearm
+        .translation
+        .add(up.mul_scalar(0.17))
+        .add(toward_hand.mul_scalar(0.04));
+
+    // The rear (-Y) tip is pinned to the crook — the lever point, not the hip.
+    let rear_tip = ball
+        .translation
+        .add(ball.rotation.rotate(Vec3::new(0.0, -BALL_VISUAL_SCALE.y, 0.0)));
+    assert!(
+        rear_tip.subtract(crook).length() < 1.0e-4,
+        "the ball's rear tip sits in the crook"
+    );
+    // And the ball lies down the forearm toward the hand.
+    let axis = ball.rotation.rotate(Vec3::new(0.0, 1.0, 0.0));
+    assert!(
+        axis.dot(toward_hand) > 0.999,
+        "the ball's long axis follows the forearm toward the hand"
+    );
+}
+
+#[test]
 fn release_produces_the_expected_deterministic_initial_state() {
     let run = || {
         let mut sim = SimState::new(EndZoneConfig::default());
@@ -278,4 +316,48 @@ fn ground_contact_transitions_the_ball_correctly() {
         "an uncaught pass ends the play as incomplete"
     );
     assert!(matches!(sim.ball.state, BallState::Grounded));
+}
+
+#[test]
+fn the_ball_hold_depends_on_role_and_field_position() {
+    use axiom_end_zone::player::animation::{ball_hold, BallHold};
+    use axiom_end_zone::player::AnimState;
+
+    // A quarterback holding the ball behind the line is throw-ready — standing in
+    // the pocket or dropping back.
+    assert_eq!(
+        ball_hold(true, true, false, AnimState::Idle),
+        BallHold::ThrowReady
+    );
+    assert_eq!(
+        ball_hold(true, true, false, AnimState::DropBack),
+        BallHold::ThrowReady
+    );
+    // Once past the line he scrambles with a cradle.
+    assert_eq!(
+        ball_hold(true, true, true, AnimState::Sprint),
+        BallHold::Cradle
+    );
+    // Any non-quarterback carrier cradles, wherever they are.
+    assert_eq!(
+        ball_hold(true, false, true, AnimState::Sprint),
+        BallHold::Cradle
+    );
+    assert_eq!(
+        ball_hold(true, false, false, AnimState::Jog),
+        BallHold::Cradle
+    );
+    // Not carrying, or in a self-posing anim (throw / catch / down), gets no hold.
+    assert_eq!(
+        ball_hold(false, true, false, AnimState::Idle),
+        BallHold::None
+    );
+    assert_eq!(
+        ball_hold(true, true, false, AnimState::Throw),
+        BallHold::None
+    );
+    assert_eq!(
+        ball_hold(true, false, true, AnimState::AirborneFall),
+        BallHold::None
+    );
 }

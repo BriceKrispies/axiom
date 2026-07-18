@@ -29,6 +29,10 @@ pub enum AnimState {
     Catch,
     Block,
     Tackle,
+    /// A committed diving tackle: the defender has left their feet in a
+    /// forward lunge (ballistic arc). It can land a tackle from extended reach;
+    /// a miss lands the diver prone.
+    Dive,
     HitReaction,
     Stumble,
     AirborneFall,
@@ -38,14 +42,35 @@ pub enum AnimState {
 
 impl AnimState {
     /// Whether the player can act (run routes, catch, tackle) in this state.
+    /// A committed diver is ballistic — the controller does not steer them and
+    /// they are not overlap-resolved; their tackle is landed by the contact
+    /// framework's dedicated dive path, not the standard tackle gate.
     pub fn can_act(self) -> bool {
         !matches!(
             self,
-            AnimState::HitReaction
+            AnimState::Dive
+                | AnimState::HitReaction
                 | AnimState::Stumble
                 | AnimState::AirborneFall
                 | AnimState::GroundImpact
                 | AnimState::Recovery
+        )
+    }
+
+    /// Whether a ball carrier in this state is holding the ball in hand —
+    /// running, standing, or dropping back — as opposed to throwing it, catching
+    /// it, or being down (states that pose their own arms). *How* the held ball
+    /// is carried (throw-ready by the ear vs cradled in the crook) is decided by
+    /// `animation::ball_hold` from the carrier's role and field position, not
+    /// here.
+    pub fn holds_ball(self) -> bool {
+        matches!(
+            self,
+            AnimState::ReadyStance
+                | AnimState::Idle
+                | AnimState::Jog
+                | AnimState::Sprint
+                | AnimState::DropBack
         )
     }
 
@@ -77,8 +102,6 @@ pub struct PlayerSim {
     /// Animation state + ticks spent in it.
     pub anim: AnimState,
     pub anim_ticks: u32,
-    /// Accumulated stride distance (drives leg cycles, no foot slide).
-    pub stride: f32,
     /// Balance `0..=1`; depleted by contact, restored over time.
     pub balance: f32,
     /// The strength of the hit that put this player down (drives the ground
@@ -107,7 +130,6 @@ impl PlayerSim {
             facing,
             anim: AnimState::ReadyStance,
             anim_ticks: 0,
-            stride: 0.0,
             balance: 1.0,
             impact_strength: 0.0,
         }

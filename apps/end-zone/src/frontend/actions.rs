@@ -1,9 +1,7 @@
 //! The device-independent frontend action model. Every input device —
 //! keyboard, gamepad, pointer, touch — translates into these actions at the
-//! input layer; screens never inspect raw key codes. The frontend answers
-//! with typed commands, audio intents, and haptic intents.
-
-use crate::launch::MatchLaunchConfig;
+//! input layer; screens never inspect raw key codes. The frontend answers with
+//! typed lifecycle commands and audio intents.
 
 /// A navigation direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,15 +55,17 @@ impl DeviceAction {
 }
 
 /// Typed lifecycle commands the frontend hands the composition layer. The
-/// frontend never touches the simulation itself.
-#[derive(Debug, Clone, PartialEq)]
+/// frontend never touches the simulation itself; it only names what should
+/// happen to the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrontendCommand {
-    /// Freeze selections and boot the real showcase with this configuration.
-    LaunchMatch(MatchLaunchConfig),
-    /// Rebuild the current match from its original launch config + seed.
-    RestartMatch,
-    /// Dispose of the active match and return to the menu background sim.
-    ReturnToMenu,
+    /// Boot a fresh run with this explicit deterministic seed (title START and
+    /// game-over PLAY AGAIN). The shell resolves the seed into a `RunConfig`.
+    LaunchRun { seed: u64 },
+    /// Rebuild the active run from its original `RunConfig` (pause RESTART RUN).
+    RestartRun,
+    /// Dispose of the active run and return to the ambient title showcase.
+    ReturnToTitle,
     /// Suspend / resume authoritative simulation advancement.
     SetPaused(bool),
 }
@@ -76,21 +76,9 @@ pub enum AudioIntent {
     Navigate,
     Confirm,
     Cancel,
-    /// A rejected input (disabled item, duplicate team).
+    /// A rejected input (disabled item).
     Denied,
-    TeamLock,
-    VsImpact,
     Transition,
     PauseHit,
     ResumeRise,
-}
-
-/// Typed haptic intents. No Axiom host abstraction for vibration exists yet,
-/// so these are recorded at the boundary and documented as unsupported — the
-/// app never calls browser vibration APIs directly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HapticIntent {
-    Tick,
-    Confirm,
-    Impact,
 }

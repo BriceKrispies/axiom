@@ -248,6 +248,7 @@ fn only_declared_engine_crates_are_imported() {
         "axiom_interface",
         "axiom_layout",
         "axiom_physics",
+        "axiom_physical_animation",
         "axiom_figure",
         "axiom_input",
         "axiom_windowing",

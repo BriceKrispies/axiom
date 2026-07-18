@@ -1,15 +1,20 @@
-//! Procedural animation: one pure function from explicit state — animation
-//! state, ticks in state, accumulated stride distance, speed — to a joint
-//! pose. Stride distance (not time) drives the leg cycle, so feet do not
-//! slide; everything else keys off fixed ticks. No wall clock anywhere.
+//! Procedural OVERRIDE animation: the pure, per-tick body poses for the states
+//! that pose their own body — throw, catch, block, tackle, dive, hit reaction,
+//! stumble, airborne fall, ground impact, recovery — plus the ball-carry arm
+//! overlay. Everything keys off fixed ticks; no wall clock anywhere.
+//!
+//! Normal on-feet locomotion (idle / jog / sprint / backpedal) is NOT here — it
+//! is owned by the app-local, distance-driven, planted-foot locomotion animator
+//! ([`crate::presentation::locomotion`]). This module is stages 3-5 of the
+//! pose-composition order (carry overlay + action / fall / recovery overrides);
+//! the locomotion animator owns stages 1-2 and composes this on top by state.
 
 use axiom_math::Quat;
 
 use super::model::{
-    HELMET, L_FOOT, L_SHIN, L_THIGH, L_UPPER_ARM, PART_COUNT, R_FOREARM, R_SHIN, R_THIGH,
-    R_UPPER_ARM, TORSO,
+    L_FOOT, L_FOREARM, L_SHIN, L_THIGH, L_UPPER_ARM, PART_COUNT, R_FOOT, R_FOREARM, R_HAND, R_SHIN,
+    R_THIGH, R_UPPER_ARM, TORSO,
 };
-use super::model::{L_FOREARM, PELVIS, R_FOOT};
 use super::AnimState;
 
 /// A resolved pose: per-joint local rotations plus the root adjustments the
@@ -26,7 +31,9 @@ pub struct JointPose {
 }
 
 impl JointPose {
-    fn neutral() -> Self {
+    /// A rest pose: identity joints, no root adjustment. The base the
+    /// locomotion animator and the override poses both build on.
+    pub fn neutral() -> Self {
         JointPose {
             joints: [Quat::IDENTITY; PART_COUNT],
             root_lift: 0.0,
@@ -46,34 +53,53 @@ fn qz(a: f32) -> Quat {
     Quat::from_euler_xyz(0.0, 0.0, a)
 }
 
-/// Leg-cycle radians per yard of stride (one full cycle ≈ 1.9 yd).
-const STRIDE_RATE: f32 = core::f32::consts::TAU / 1.9;
+/// How a carrier holds the ball this tick — chosen from the carrier's role and
+/// field position, then applied to both the arm pose here and the ball's world
+/// transform in `scene_sync`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BallHold {
+    /// Not carrying, or in a throw / catch / down anim that poses its own arms.
+    None,
+    /// Quarterback in the pocket: ball up by the ear, ready to throw.
+    ThrowReady,
+    /// Cradled in the crook of the arm: a scrambling quarterback past the line,
+    /// or any ball-carrier running after a catch or handoff.
+    Cradle,
+}
 
-/// Resolve the pose for one player this tick.
-pub fn pose(anim: AnimState, ticks: u32, stride: f32, speed: f32) -> JointPose {
+/// Decide the hold from the carrier's situation: a quarterback still behind the
+/// line of scrimmage keeps the ball throw-ready; once past the line — or for any
+/// non-quarterback carrier — it is cradled. A player not holding the ball in
+/// hand (throwing, catching, down, or simply not the carrier) gets no override.
+pub fn ball_hold(
+    carrying: bool,
+    is_quarterback: bool,
+    past_line: bool,
+    anim: AnimState,
+) -> BallHold {
+    if !(carrying && anim.holds_ball()) {
+        BallHold::None
+    } else if is_quarterback && !past_line {
+        BallHold::ThrowReady
+    } else {
+        BallHold::Cradle
+    }
+}
+
+/// Resolve the OVERRIDE pose for one player this tick — the action / fall /
+/// recovery states that pose their own body. Normal locomotion states (idle,
+/// jog, sprint, backpedal, ready stance) are handled by the locomotion animator
+/// and never routed here; if one arrives (defensively), it yields the neutral
+/// base so the caller's own locomotion pose stands.
+pub fn override_pose(anim: AnimState, ticks: u32) -> JointPose {
     let mut out = JointPose::neutral();
     let t = ticks as f32;
     match anim {
-        AnimState::ReadyStance => {
-            crouch(&mut out, 0.5);
-            arms_down(&mut out, 0.25);
-        }
-        AnimState::Idle => {
-            crouch(&mut out, 0.18);
-            arms_down(&mut out, 0.12);
-            out.root_lift = (t * 0.045).sin() * 0.012;
-        }
-        AnimState::Jog => run_cycle(&mut out, stride, speed, 0.55),
-        AnimState::Sprint => run_cycle(&mut out, stride, speed, 1.0),
-        AnimState::DropBack => {
-            // Backpedal: shorter inverted cycle, torso upright, ball high.
-            run_cycle(&mut out, stride, speed, 0.45);
-            out.root_pitch = -0.08;
-            out.joints[R_UPPER_ARM] = qx(-0.9);
-            out.joints[R_FOREARM] = qx(-1.2);
-            out.joints[L_UPPER_ARM] = qx(-0.5);
-            out.joints[L_FOREARM] = qx(-1.0);
-        }
+        AnimState::ReadyStance
+        | AnimState::Idle
+        | AnimState::Jog
+        | AnimState::Sprint
+        | AnimState::DropBack => {}
         AnimState::Throw => throw_pose(&mut out, t),
         AnimState::Catch => {
             // Both arms reach up and forward for the ball.
@@ -100,6 +126,20 @@ pub fn pose(anim: AnimState, ticks: u32, stride: f32, speed: f32) -> JointPose {
             out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(-1.2, 0.0, 0.5);
             out.joints[L_FOREARM] = qx(-0.9);
             out.joints[R_FOREARM] = qx(-0.9);
+        }
+        AnimState::Dive => {
+            // Left the feet: body pitched flat-forward, both arms thrown out to
+            // wrap, legs trailing straight back. Ramps in over the first ticks.
+            let k = (t / 6.0).min(1.0);
+            out.root_pitch = 0.5 + 0.85 * k;
+            out.joints[L_UPPER_ARM] = Quat::from_euler_xyz(-2.3, 0.0, -0.45);
+            out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(-2.3, 0.0, 0.45);
+            out.joints[L_FOREARM] = qx(-0.35);
+            out.joints[R_FOREARM] = qx(-0.35);
+            out.joints[L_THIGH] = qx(0.45 * k);
+            out.joints[R_THIGH] = qx(0.55 * k);
+            out.joints[L_SHIN] = qx(0.25 * k);
+            out.joints[R_SHIN] = qx(0.35 * k);
         }
         AnimState::HitReaction => {
             let k = (1.0 - t / 10.0).max(0.0);
@@ -149,6 +189,38 @@ pub fn pose(anim: AnimState, ticks: u32, stride: f32, speed: f32) -> JointPose {
     out
 }
 
+/// Overlay the ball-carry arms onto a resolved pose (stage 3 of composition):
+/// cradled in the crook, or cocked throw-ready by the ear. A `None` hold leaves
+/// the pose untouched. The render side pins the ball to the matching arm.
+pub fn apply_hold(out: &mut JointPose, hold: BallHold) {
+    match hold {
+        BallHold::Cradle => carry_tuck(out),
+        BallHold::ThrowReady => throw_ready_arms(out),
+        BallHold::None => {}
+    }
+}
+
+/// The throw-ready hold: the throwing (right) arm cocks the ball up beside the
+/// helmet, the off hand braces across it — a quarterback ready to fire in the
+/// pocket. The render side pins the ball to the raised right hand.
+fn throw_ready_arms(out: &mut JointPose) {
+    out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(-1.5, 0.0, 0.35);
+    out.joints[R_FOREARM] = qx(-1.9);
+    out.joints[R_HAND] = qx(-0.2);
+    out.joints[L_UPPER_ARM] = Quat::from_euler_xyz(-1.2, 0.0, -0.6);
+    out.joints[L_FOREARM] = qx(-1.5);
+}
+
+/// The ball-carry tuck: right upper arm pinned in against the ribs, forearm
+/// folded up across the torso so the elbow makes a shelf, hand capping over the
+/// top. This replaces the free right-arm swing so the ball nestles in the crook
+/// (the render side pins the ball's rear tip to this forearm).
+fn carry_tuck(out: &mut JointPose) {
+    out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(-0.35, 0.0, 0.28);
+    out.joints[R_FOREARM] = qx(-1.85);
+    out.joints[R_HAND] = qx(-0.5);
+}
+
 /// Smoothstep.
 fn smooth(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
@@ -165,40 +237,6 @@ fn crouch(out: &mut JointPose, k: f32) {
     out.joints[R_FOOT] = qx(-0.35 * k);
     out.root_pitch = 0.22 * k;
     out.root_lift = -0.16 * k;
-}
-
-/// Relaxed hanging arms with a slight elbow bend.
-fn arms_down(out: &mut JointPose, bend: f32) {
-    out.joints[L_UPPER_ARM] = qz(-0.18);
-    out.joints[R_UPPER_ARM] = qz(0.18);
-    out.joints[L_FOREARM] = qx(-bend);
-    out.joints[R_FOREARM] = qx(-bend);
-}
-
-/// The locomotion cycle: legs swing with STRIDE (distance), arms counter-swing,
-/// torso leans with intensity. `k` scales amplitude (jog vs sprint).
-fn run_cycle(out: &mut JointPose, stride: f32, speed: f32, k: f32) {
-    let phase = stride * STRIDE_RATE;
-    let swing = phase.sin();
-    let counter = -swing;
-    let amp = 0.5 + 0.55 * k;
-    out.joints[L_THIGH] = qx(swing * amp);
-    out.joints[R_THIGH] = qx(counter * amp);
-    // Shins fold on the back-swing (offset the cycle a quarter phase).
-    let fold = (phase - core::f32::consts::FRAC_PI_2).sin().max(0.0);
-    let counter_fold = (phase + core::f32::consts::FRAC_PI_2).sin().max(0.0);
-    out.joints[L_SHIN] = qx(0.35 + fold * 0.9 * k);
-    out.joints[R_SHIN] = qx(0.35 + counter_fold * 0.9 * k);
-    out.joints[L_UPPER_ARM] = qx(counter * amp * 0.8);
-    out.joints[R_UPPER_ARM] = qx(swing * amp * 0.8);
-    out.joints[L_FOREARM] = qx(-0.9 * k);
-    out.joints[R_FOREARM] = qx(-0.9 * k);
-    out.root_pitch = 0.10 + 0.16 * k * (speed / 9.0).min(1.0);
-    out.root_lift = phase.cos().abs() * 0.05 * k;
-    // A hint of shoulder roll and head steadiness.
-    out.joints[TORSO] = Quat::from_euler_xyz(0.0, swing * 0.08 * k, 0.0);
-    out.joints[HELMET] = Quat::from_euler_xyz(-out.root_pitch * 0.6, 0.0, 0.0);
-    out.joints[PELVIS] = Quat::IDENTITY;
 }
 
 /// The throw: wind up (ball back beside the helmet), then whip through.

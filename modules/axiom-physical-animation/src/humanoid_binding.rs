@@ -20,6 +20,11 @@ use crate::physical_result::{auth, phys, PhysicalResult};
 const LIMB_MASS: f32 = 1.0;
 /// The uniform collider half-extents (metres) for a humanoid body.
 const HALF: f32 = 0.09;
+/// The pelvis collision-sphere radius (metres) for a *colliding* humanoid — a
+/// torso-width sphere so two crowd members meet body-to-body, not point-to-point.
+/// A sphere (not the default box) because `axiom-physics` resolves sphere/sphere
+/// contacts today but not box/box.
+const PELVIS_RADIUS: f32 = 0.2;
 
 /// The bound joints: `(joint name, is_dynamic)`. Only the pelvis is dynamic.
 const BODY_SPECS: [(&str, bool); 13] = [
@@ -84,6 +89,51 @@ fn surface_material(
     .and_then(|material| {
         phys(physics.attach_box_collider(body, half, material, trigger)).map(|_| body)
     })
+}
+
+/// A collider maker: attach a body's collider and return the body.
+type ColliderMaker = fn(&mut PhysicsApi, PhysicsBodyHandle) -> PhysicalResult<PhysicsBodyHandle>;
+
+/// The default collider: a trigger box that never solver-collides (the kick
+/// path, and every kinematic limb of a colliding humanoid).
+fn trigger_box(physics: &mut PhysicsApi, body: PhysicsBodyHandle) -> PhysicalResult<PhysicsBodyHandle> {
+    surface_material(physics, body, Vec3::new(HALF, HALF, HALF), true)
+}
+
+/// Attach a solid (non-trigger) collision sphere of `radius` metres, so this body
+/// resolves against the other crowd members' spheres in the shared world.
+fn collision_sphere_of(
+    physics: &mut PhysicsApi,
+    body: PhysicsBodyHandle,
+    radius: f32,
+) -> PhysicalResult<PhysicsBodyHandle> {
+    phys(PhysicsApi::material(
+        Ratio::finite_or_zero(0.5),
+        Ratio::finite_or_zero(0.0),
+        Ratio::finite_or_zero(1.0),
+    ))
+    .and_then(|material| {
+        phys(Meters::new(radius)).and_then(|r| {
+            phys(physics.attach_sphere_collider(body, r, material, false)).map(|_| body)
+        })
+    })
+}
+
+/// A colliding humanoid's dynamic pelvis: the default torso-width collision sphere.
+fn collision_sphere(
+    physics: &mut PhysicsApi,
+    body: PhysicsBodyHandle,
+) -> PhysicalResult<PhysicsBodyHandle> {
+    collision_sphere_of(physics, body, PELVIS_RADIUS)
+}
+
+/// Collider makers indexed by `(colliding & dynamic) as usize` — a table lookup,
+/// not a branch: `[trigger box (default), collision sphere (a colliding pelvis)]`.
+const COLLIDER_MAKERS: [ColliderMaker; 2] = [trigger_box, collision_sphere];
+
+/// Translate a body's authored world transform by the humanoid's spawn origin.
+fn offset_transform(world: Transform, origin: Vec3) -> Transform {
+    Transform::new(world.translation.add(origin), world.rotation, world.scale)
 }
 
 /// One bound humanoid body.
@@ -157,13 +207,70 @@ impl HumanoidPhysicsBinding {
             .map(BoundFoot::body)
     }
 
-    /// Build the standard humanoid binding: create a physics body per bound joint
-    /// at its authored world transform (sampled at tick 0), then map the foot
-    /// effectors. Deterministic for identical inputs.
+    /// The dynamic (pelvis) body handle, if any — the body a crowd drive forces
+    /// and a crowd readback reports.
+    pub(crate) fn dynamic_body(&self) -> Option<PhysicsBodyHandle> {
+        self.bodies
+            .iter()
+            .find(|b| b.dynamic())
+            .map(BoundBody::body)
+    }
+
+    /// Build the standard humanoid binding: a physics body per bound joint at its
+    /// authored world transform (sampled at tick 0), then the foot effectors. The
+    /// kick path — triggered colliders at the plan origin, no solver collision.
     pub(crate) fn build_standard(
         physics: &mut PhysicsApi,
         authoring: &AnimationAuthoringApi,
         plan: PlanId,
+    ) -> PhysicalResult<Self> {
+        Self::build(physics, authoring, plan, Vec3::ZERO, false)
+    }
+
+    /// Build a *colliding* humanoid at `origin`: identical rig, but its dynamic
+    /// pelvis carries a solid collision sphere so it resolves against the other
+    /// crowd members' pelvises in the shared world.
+    pub(crate) fn build_colliding(
+        physics: &mut PhysicsApi,
+        authoring: &AnimationAuthoringApi,
+        plan: PlanId,
+        origin: Vec3,
+    ) -> PhysicalResult<Self> {
+        Self::build(physics, authoring, plan, origin, true)
+    }
+
+    /// Build a *bare* colliding body: one dynamic collision sphere of `radius` at
+    /// `origin`, no authored rig or feet. The right-sized crowd member for an app
+    /// (e.g. a field of game agents) that only needs body-to-body collision, not a
+    /// full humanoid. Driven and read back through the same crowd path.
+    pub(crate) fn build_bare(
+        physics: &mut PhysicsApi,
+        origin: Vec3,
+        radius: f32,
+    ) -> PhysicalResult<Self> {
+        let at = Transform::from_translation(origin);
+        make_dynamic(physics, at, Ratio::finite_or_zero(LIMB_MASS))
+            .and_then(|body| collision_sphere_of(physics, body, radius))
+            .map(|body| HumanoidPhysicsBinding {
+                bodies: vec![BoundBody {
+                    name: "body",
+                    joint: JointId::from_raw(0),
+                    body,
+                    dynamic: true,
+                }],
+                feet: Vec::new(),
+            })
+    }
+
+    /// The shared builder: `origin` offsets every body; `colliding` gives the
+    /// dynamic pelvis a solid sphere (else the default trigger box). Deterministic
+    /// for identical inputs.
+    fn build(
+        physics: &mut PhysicsApi,
+        authoring: &AnimationAuthoringApi,
+        plan: PlanId,
+        origin: Vec3,
+        colliding: bool,
     ) -> PhysicalResult<Self> {
         auth(authoring.sample(plan, Tick::new(0))).and_then(|frame| {
             BODY_SPECS
@@ -176,11 +283,11 @@ impl HumanoidPhysicsBinding {
                         .and_then(|joint| {
                             authoring
                                 .frame_joint_world(&frame, joint)
-                                .map(|world| (name, dynamic, joint, world))
+                                .map(|world| (name, dynamic, joint, offset_transform(world, origin)))
                         })
                 })
                 .map(|(name, dynamic, joint, world)| {
-                    create_humanoid_body(physics, world, dynamic).map(|body| BoundBody {
+                    create_humanoid_body(physics, world, dynamic, colliding).map(|body| BoundBody {
                         name,
                         joint,
                         body,
@@ -196,16 +303,18 @@ impl HumanoidPhysicsBinding {
     }
 }
 
-/// Create one humanoid body (dynamic or kinematic) at `world` with a trigger box
-/// collider, so it never solver-collides with the dynamic ball.
+/// Create one humanoid body (dynamic or kinematic) at `world`. Its collider is a
+/// trigger box by default; a *colliding* humanoid's dynamic pelvis
+/// (`colliding & dynamic`) instead gets a solid collision sphere.
 fn create_humanoid_body(
     physics: &mut PhysicsApi,
     world: Transform,
     dynamic: bool,
+    colliding: bool,
 ) -> PhysicalResult<PhysicsBodyHandle> {
     let mass = Ratio::finite_or_zero(LIMB_MASS);
     BODY_MAKERS[dynamic as usize](physics, world, mass)
-        .and_then(|body| surface_material(physics, body, Vec3::new(HALF, HALF, HALF), true))
+        .and_then(|body| COLLIDER_MAKERS[(colliding & dynamic) as usize](physics, body))
 }
 
 /// Resolve the foot effectors to `(effector, foot body)` pairs.

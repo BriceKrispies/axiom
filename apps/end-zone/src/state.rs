@@ -10,6 +10,7 @@
 use crate::ai::{
     compile_assignments, AssignmentKind, Perception, PlayerIntent, ResolvedAssignment, RoleState,
 };
+use crate::collision_rig::CollisionRig;
 use crate::config::{EndZoneConfig, DT, PLAYER_COUNT};
 use crate::data::{
     showcase_play, showcase_rosters, BehaviorTuning, PlayDefinition, RosterDefinition,
@@ -74,6 +75,9 @@ pub struct SimState {
     pub(crate) perception: Perception,
     pub(crate) events: EventSink,
     pub(crate) rig: PhysicsRig,
+    /// Player-vs-player contact solver (real rigid-body de-penetration +
+    /// momentum exchange) — replaces the old positional `resolve_overlaps`.
+    pub(crate) collision: CollisionRig,
     pub(crate) throw_commanded: bool,
     pub(crate) catch_attempted: bool,
     pub(crate) engaged_blocks: Vec<(PlayerId, PlayerId)>,
@@ -83,7 +87,7 @@ impl SimState {
     /// A fresh showcase simulation in formation, pre-snap (the default
     /// showcase matchup: league slots 0 and 1, Pro tuning).
     pub fn new(config: EndZoneConfig) -> Self {
-        SimState::new_match(&crate::launch::MatchSetup {
+        SimState::new_match(&crate::launch::RunSetup {
             rosters: showcase_rosters(),
             tuning: BehaviorTuning::default(),
             seed: config.seed,
@@ -93,7 +97,7 @@ impl SimState {
     /// A fresh simulation for a resolved match setup: rosters already in sim
     /// slots (player = possession slot 0), tuning already profiled — the ONE
     /// bootstrap the launch boundary feeds.
-    pub fn new_match(setup: &crate::launch::MatchSetup) -> Self {
+    pub fn new_match(setup: &crate::launch::RunSetup) -> Self {
         let play = showcase_play();
         let tuning = setup.tuning;
         let frame = OffenseFrame::at_yard_line(play.line_of_scrimmage, play.drive_direction);
@@ -109,6 +113,7 @@ impl SimState {
         let ball_spawn = frame.to_world(OffensePoint::new(0.0, 0.0)).add(ball_rest());
         let mut rig = PhysicsRig::new(tuning.gravity, ball_spawn);
         rig.park_ball();
+        let collision = CollisionRig::new(&players);
         let mut sim = SimState {
             seed: setup.seed,
             tuning,
@@ -129,6 +134,7 @@ impl SimState {
             perception: Perception::new(),
             events: EventSink::default(),
             rig,
+            collision,
             throw_commanded: false,
             catch_attempted: false,
             engaged_blocks: Vec::new(),
@@ -147,7 +153,7 @@ impl SimState {
         self.decide_intents();
         let live = self.phase == PlayPhase::Live;
         controller::integrate_movement(&mut self.players, &self.intents, live, &self.tuning, DT);
-        controller::resolve_overlaps(&mut self.players);
+        self.collision.resolve(&mut self.players, self.tick);
         self.resolve_contacts();
 
         self.ball_pre_physics();
@@ -170,9 +176,10 @@ impl SimState {
         self.events.events()
     }
 
-    /// First recorded physics fault, if any (debug overlay row).
+    /// First recorded physics fault, if any (debug overlay row) — from either
+    /// the ball rig or the player-collision rig.
     pub fn fault(&self) -> Option<&'static str> {
-        self.rig.fault
+        self.rig.fault.or(self.collision.fault)
     }
 
     // The deterministic state digest lives with the other replay artifacts
@@ -228,23 +235,31 @@ impl SimState {
         }
 
         let carrier = self.ball.carrier();
-        if let Some(outcome) =
-            contact::resolve_tackle(&mut self.players, &self.intents, carrier, &self.tuning)
-        {
-            self.events.emit(SimEvent::TackleContact {
-                tackler: outcome.tackler,
-                target: outcome.target,
-                contact_point: outcome.contact_point,
-                contact_direction: outcome.contact_direction,
-                relative_speed: outcome.relative_speed,
-                strength: outcome.strength,
-                target_airborne: outcome.target_airborne,
-            });
-            if outcome.target_airborne {
-                self.events.emit(SimEvent::PlayerAirborne {
-                    player: outcome.target,
+        match contact::resolve_tackle(
+            &mut self.players,
+            &self.intents,
+            carrier,
+            &self.tuning,
+            &self.collision,
+        ) {
+            Some(outcome) => {
+                self.events.emit(SimEvent::TackleContact {
+                    tackler: outcome.tackler,
+                    target: outcome.target,
+                    contact_point: outcome.contact_point,
+                    contact_direction: outcome.contact_direction,
+                    relative_speed: outcome.relative_speed,
+                    strength: outcome.strength,
+                    target_airborne: outcome.target_airborne,
                 });
+                if outcome.target_airborne {
+                    self.events.emit(SimEvent::PlayerAirborne {
+                        player: outcome.target,
+                    });
+                }
             }
+            // No tackle landed — let close, fast chasers leave their feet.
+            None => contact::commit_dives(&mut self.players, &self.intents, carrier, &self.tuning),
         }
 
         for (player, strength) in contact::advance_falls(&mut self.players, &self.tuning, DT) {

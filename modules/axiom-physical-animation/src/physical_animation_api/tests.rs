@@ -385,3 +385,220 @@ fn named_transform_finds_bodies_and_defaults_when_absent() {
     );
     assert_eq!(named_transform(&bodies, "left_foot"), Transform::IDENTITY);
 }
+
+// --- multi-humanoid crowd (Phase 2.1) --------------------------------------
+
+/// The X gap between two crowd members' pelvises.
+fn pelvis_gap(sim: &PhysicalAnimationApi, a: HumanoidHandle, b: HumanoidHandle) -> f32 {
+    let pa = sim.crowd_pelvis_transform(a).unwrap().translation;
+    let pb = sim.crowd_pelvis_transform(b).unwrap().translation;
+    pb.x - pa.x
+}
+
+#[test]
+fn a_colliding_crowd_resolves_pelvis_overlap_instead_of_sliding_through() {
+    let (authoring, plan) = penalty(0.7);
+    let mut sim = PhysicalAnimationApi::new();
+    // Two members whose pelvis spheres (radius 0.2 → 0.4 sum) start 0.3 apart,
+    // so they begin overlapping.
+    let a = sim
+        .bind_colliding_humanoid(&authoring, plan, Vec3::ZERO)
+        .unwrap();
+    let b = sim
+        .bind_colliding_humanoid(&authoring, plan, Vec3::new(0.3, 0.0, 0.0))
+        .unwrap();
+    let start = pelvis_gap(&sim, a, b);
+    let drives = [(a, Vec3::ZERO), (b, Vec3::ZERO)];
+
+    // First step: the overlap is resolved, so the world reports a real contact.
+    sim.advance_crowd(&drives, Tick::new(0)).unwrap();
+    assert!(
+        sim.crowd_contact_count() >= 1,
+        "the pelvis overlap generated a solver contact"
+    );
+
+    // Over more steps the anti-gravity-held pelvises push apart (they do NOT
+    // slide through each other) toward the sum of their radii.
+    (1..24).for_each(|t| sim.advance_crowd(&drives, Tick::new(t)).unwrap());
+    let end = pelvis_gap(&sim, a, b);
+    assert!(
+        end > start + 0.03,
+        "overlapping pelvises pushed apart: {start} -> {end}"
+    );
+}
+
+#[test]
+fn a_crowd_member_is_driven_toward_its_target_velocity_and_reads_back() {
+    let (authoring, plan) = penalty(0.7);
+    let mut sim = PhysicalAnimationApi::new();
+    let h = sim
+        .bind_colliding_humanoid(&authoring, plan, Vec3::ZERO)
+        .unwrap();
+    assert_eq!(h, HumanoidHandle::new(0));
+    assert!(format!("{h:?}").contains("HumanoidHandle"));
+    let start = sim.crowd_pelvis_transform(h).unwrap().translation.x;
+    let drives = [(h, Vec3::new(2.0, 0.0, 0.0))];
+    (0..24).for_each(|t| sim.advance_crowd(&drives, Tick::new(t)).unwrap());
+    let end = sim.crowd_pelvis_transform(h).unwrap().translation.x;
+    assert!(
+        end > start + 0.01,
+        "the approach drive moved the pelvis toward +X: {start} -> {end}"
+    );
+}
+
+#[test]
+fn crowd_advance_and_readback_reject_unknown_handles() {
+    let (authoring, plan) = penalty(0.7);
+    let mut sim = PhysicalAnimationApi::new();
+    sim.bind_colliding_humanoid(&authoring, plan, Vec3::ZERO)
+        .unwrap();
+    let bogus = HumanoidHandle::new(9);
+    assert_eq!(
+        sim.advance_crowd(&[(bogus, Vec3::ZERO)], Tick::new(0))
+            .unwrap_err()
+            .code(),
+        PhysicalErrorCode::NotBound
+    );
+    assert_eq!(
+        sim.crowd_pelvis_transform(bogus).unwrap_err().code(),
+        PhysicalErrorCode::NotBound
+    );
+}
+
+#[test]
+fn two_identical_crowd_runs_are_deterministic() {
+    let (authoring, plan) = penalty(0.7);
+    let run = || {
+        let mut sim = PhysicalAnimationApi::new();
+        let a = sim
+            .bind_colliding_humanoid(&authoring, plan, Vec3::ZERO)
+            .unwrap();
+        let b = sim
+            .bind_colliding_humanoid(&authoring, plan, Vec3::new(0.25, 0.0, 0.0))
+            .unwrap();
+        let drives = [(a, Vec3::new(1.0, 0.0, 0.0)), (b, Vec3::new(-1.0, 0.0, 0.0))];
+        (0..12).for_each(|t| sim.advance_crowd(&drives, Tick::new(t)).unwrap());
+        (
+            sim.crowd_pelvis_transform(a).unwrap(),
+            sim.crowd_pelvis_transform(b).unwrap(),
+        )
+    };
+    assert_eq!(format!("{:?}", run()), format!("{:?}", run()));
+}
+
+#[test]
+fn bare_colliding_bodies_resolve_against_each_other() {
+    let mut sim = PhysicalAnimationApi::new();
+    // Two bare spheres (radius 0.3 → 0.6 sum) start 0.4 apart, so they overlap —
+    // no rig, no plan, just body-to-body collision.
+    let a = sim.bind_colliding_body(Vec3::ZERO, Meters::finite_or_zero(0.3)).unwrap();
+    let b = sim.bind_colliding_body(Vec3::new(0.4, 0.0, 0.0), Meters::finite_or_zero(0.3)).unwrap();
+    let start = pelvis_gap(&sim, a, b);
+    let drives = [(a, Vec3::ZERO), (b, Vec3::ZERO)];
+    sim.advance_crowd(&drives, Tick::new(0)).unwrap();
+    assert!(
+        sim.crowd_contact_count() >= 1,
+        "the bare bodies collided in the shared world"
+    );
+    (1..24).for_each(|t| sim.advance_crowd(&drives, Tick::new(t)).unwrap());
+    let end = pelvis_gap(&sim, a, b);
+    assert!(
+        end > start + 0.03,
+        "bare colliding bodies pushed apart: {start} -> {end}"
+    );
+}
+
+#[test]
+fn resolve_crowd_depenetrates_snapped_positions_and_checks_closing_momentum() {
+    let mut sim = PhysicalAnimationApi::new();
+    let a = sim.bind_colliding_body(Vec3::ZERO, Meters::finite_or_zero(0.3)).unwrap();
+    let b = sim.bind_colliding_body(Vec3::ZERO, Meters::finite_or_zero(0.3)).unwrap();
+    // Snap the pair to an overlap (0.35 apart, radii sum 0.6), closing head-on.
+    let start_gap = 0.35;
+    let placements = [
+        (a, Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)),
+        (b, Vec3::new(start_gap, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0)),
+    ];
+    sim.resolve_crowd(&placements, Tick::new(0)).unwrap();
+    assert!(
+        sim.crowd_contact_count() >= 1,
+        "the snapped overlap was resolved"
+    );
+    let gap = pelvis_gap(&sim, a, b);
+    assert!(
+        gap > start_gap,
+        "de-penetration pushed them apart: {start_gap} -> {gap}"
+    );
+    // The head-on closing velocities were checked (not preserved as a slide).
+    let va = sim.crowd_pelvis_velocity(a).unwrap();
+    let vb = sim.crowd_pelvis_velocity(b).unwrap();
+    assert!(
+        va.x < 1.0 && vb.x > -1.0,
+        "closing momentum was exchanged: {va:?} {vb:?}"
+    );
+}
+
+#[test]
+fn resolve_crowd_and_velocity_readback_reject_unknown_handles() {
+    let mut sim = PhysicalAnimationApi::new();
+    sim.bind_colliding_body(Vec3::ZERO, Meters::finite_or_zero(0.3)).unwrap();
+    let bogus = HumanoidHandle::new(5);
+    assert_eq!(
+        sim.resolve_crowd(&[(bogus, Vec3::ZERO, Vec3::ZERO)], Tick::new(0))
+            .unwrap_err()
+            .code(),
+        PhysicalErrorCode::NotBound
+    );
+    assert_eq!(
+        sim.crowd_pelvis_velocity(bogus).unwrap_err().code(),
+        PhysicalErrorCode::NotBound
+    );
+}
+
+#[test]
+fn crowd_bodies_in_contact_reads_solver_touches_and_is_symmetric() {
+    let mut sim = PhysicalAnimationApi::new();
+    let a = sim
+        .bind_colliding_body(Vec3::ZERO, Meters::finite_or_zero(0.3))
+        .unwrap();
+    let b = sim
+        .bind_colliding_body(Vec3::ZERO, Meters::finite_or_zero(0.3))
+        .unwrap();
+    // Snap them into an overlap (0.3 apart, radii sum 0.6) and step: the solver
+    // records the pair as a contact.
+    sim.resolve_crowd(
+        &[
+            (a, Vec3::ZERO, Vec3::ZERO),
+            (b, Vec3::new(0.3, 0.0, 0.0), Vec3::ZERO),
+        ],
+        Tick::new(0),
+    )
+    .unwrap();
+    assert!(sim.crowd_bodies_in_contact(a, b), "overlapping bodies touch");
+    assert!(sim.crowd_bodies_in_contact(b, a), "the query is symmetric");
+    // An unknown handle is never in contact (no panic, just false).
+    assert!(!sim.crowd_bodies_in_contact(a, HumanoidHandle::new(9)));
+}
+
+#[test]
+fn crowd_bodies_far_apart_are_not_in_contact() {
+    let mut sim = PhysicalAnimationApi::new();
+    let a = sim
+        .bind_colliding_body(Vec3::ZERO, Meters::finite_or_zero(0.3))
+        .unwrap();
+    let b = sim
+        .bind_colliding_body(Vec3::new(5.0, 0.0, 0.0), Meters::finite_or_zero(0.3))
+        .unwrap();
+    sim.resolve_crowd(
+        &[
+            (a, Vec3::ZERO, Vec3::ZERO),
+            (b, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO),
+        ],
+        Tick::new(0),
+    )
+    .unwrap();
+    assert!(
+        !sim.crowd_bodies_in_contact(a, b),
+        "bodies five metres apart never touched"
+    );
+}

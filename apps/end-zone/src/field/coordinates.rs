@@ -66,6 +66,13 @@ pub fn yard_line_to_z(yards_from_own_goal: f32, direction: DriveDirection) -> f3
     (yards_from_own_goal - GOAL_LINE_Z) * direction.sign()
 }
 
+/// The inverse of [`yard_line_to_z`]: how far a world `Z` sits from the
+/// offense's own goal line, in yards (`0` own goal, `50` midfield, `100`
+/// opponent goal, `>100` inside the attacked end zone).
+pub fn z_to_yards_from_own_goal(world_z: f32, direction: DriveDirection) -> f32 {
+    world_z * direction.sign() + GOAL_LINE_Z
+}
+
 /// Map normalized field coordinates to world: `u ∈ [0,1]` spans sideline to
 /// sideline (`-X` to `+X`), `v ∈ [0,1]` spans end line to end line
 /// (`-Z` to `+Z`). Returns a point on the surface (`Y = 0`).

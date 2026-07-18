@@ -32,19 +32,6 @@ impl FrontendInputFrame {
         }
         None
     }
-
-    /// Every token newly present vs `previous` (for rebind capture).
-    pub fn newly_pressed(&self, previous: &FrontendInputFrame) -> Vec<String> {
-        let mut fresh = Vec::new();
-        for token in self.keys_down.iter().chain(self.pad_down.iter()) {
-            let was = previous.keys_down.iter().any(|t| t == token)
-                || previous.pad_down.iter().any(|t| t == token);
-            if !was && !fresh.contains(token) {
-                fresh.push(token.clone());
-            }
-        }
-        fresh
-    }
 }
 
 /// Ticks a held direction waits before repeating, then between repeats.
@@ -177,11 +164,6 @@ impl InputTranslator {
         actions
     }
 
-    /// Tokens newly pressed this frame (rebind capture channel).
-    pub fn captured_tokens(&self, frame: &FrontendInputFrame) -> Vec<String> {
-        frame.newly_pressed(&self.previous)
-    }
-
     fn action_device(
         &self,
         frame: &FrontendInputFrame,
@@ -191,6 +173,7 @@ impl InputTranslator {
         bindings
             .tokens(action)
             .iter()
+            .copied()
             .find_map(|token| frame.token_down(token))
             .or_else(|| emergency_tokens(action).find_map(|token| frame.token_down(token)))
     }
@@ -205,6 +188,7 @@ impl InputTranslator {
         let before = bindings
             .tokens(action)
             .iter()
+            .copied()
             .any(|token| self.previous.token_down(token).is_some())
             || emergency_tokens(action).any(|token| self.previous.token_down(token).is_some());
         now.filter(|_| !before)

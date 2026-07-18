@@ -3,12 +3,13 @@
 //! physics-backed animation one deterministic tick at a time.
 
 use axiom_animation_authoring::{AnimationAuthoringApi, EffectorId, PlanId};
-use axiom_kernel::{FrameIndex, Ratio, Tick};
+use axiom_kernel::{FrameIndex, Meters, Ratio, Tick};
 use axiom_math::{Transform, Vec3};
 use axiom_physics::{PhysicsApi, PhysicsBodyHandle};
 use axiom_runtime::RuntimeStep;
 
 use crate::humanoid_binding::{create_ball, BoundBody, HumanoidPhysicsBinding};
+use crate::ids::HumanoidHandle;
 use crate::muscle_group::{MuscleGroup, MuscleGroupParams, MUSCLE_GROUP_COUNT};
 use crate::muscle_profile::{MusclePhaseProfile, MuscleStyle, SupportMode, VirtualMuscleProfile};
 use crate::physical_error::PhysicalError;
@@ -47,6 +48,10 @@ pub struct PhysicalAnimationApi {
     ball: Option<PhysicsBodyHandle>,
     muscle_profile: VirtualMuscleProfile,
     muscle_style: MuscleStyle,
+    /// The colliding-humanoid crowd sharing the same world — the multi-humanoid
+    /// surface, indexed by [`HumanoidHandle`]. Orthogonal to the single kick
+    /// `binding`/`ball` above; both live in the one `physics` world.
+    crowd: Vec<HumanoidPhysicsBinding>,
 }
 
 impl PhysicalAnimationApi {
@@ -59,6 +64,7 @@ impl PhysicalAnimationApi {
             ball: None,
             muscle_profile: VirtualMuscleProfile::default_profile(),
             muscle_style: MuscleStyle::default_style(),
+            crowd: Vec::new(),
         }
     }
 
@@ -72,6 +78,162 @@ impl PhysicalAnimationApi {
         HumanoidPhysicsBinding::build_standard(&mut self.physics, authoring, plan).map(|binding| {
             self.binding = Some(binding);
         })
+    }
+
+    /// Bind a *colliding* humanoid into the shared world at `origin` and return its
+    /// [`HumanoidHandle`]. Unlike the single kick humanoid, its dynamic pelvis
+    /// carries a solid collision sphere, so multiple crowd members resolve against
+    /// one another when [`Self::advance_crowd`] steps the world.
+    pub fn bind_colliding_humanoid(
+        &mut self,
+        authoring: &AnimationAuthoringApi,
+        plan: PlanId,
+        origin: Vec3,
+    ) -> PhysicalResult<HumanoidHandle> {
+        HumanoidPhysicsBinding::build_colliding(&mut self.physics, authoring, plan, origin).map(
+            |binding| {
+                let handle = HumanoidHandle::new(self.crowd.len());
+                self.crowd.push(binding);
+                handle
+            },
+        )
+    }
+
+    /// Bind a *bare* colliding body — a single dynamic collision sphere of `radius`
+    /// at `origin`, no rig and no authored plan — into the shared world, returning
+    /// its [`HumanoidHandle`]. The right-sized crowd member when an app only needs
+    /// body-to-body collision for many agents (drive with [`Self::advance_crowd`],
+    /// read back with [`Self::crowd_pelvis_transform`]).
+    pub fn bind_colliding_body(
+        &mut self,
+        origin: Vec3,
+        radius: Meters,
+    ) -> PhysicalResult<HumanoidHandle> {
+        HumanoidPhysicsBinding::build_bare(&mut self.physics, origin, radius.get()).map(|binding| {
+            let handle = HumanoidHandle::new(self.crowd.len());
+            self.crowd.push(binding);
+            handle
+        })
+    }
+
+    /// Advance the crowd one deterministic tick: force each listed humanoid's
+    /// dynamic pelvis toward its desired ground velocity (an anti-gravity hold plus
+    /// the approach drive), then step the shared world once so their pelvis spheres
+    /// collide and resolve. An unknown handle fails with `NotBound` before the step.
+    pub fn advance_crowd(
+        &mut self,
+        drives: &[(HumanoidHandle, Vec3)],
+        tick: Tick,
+    ) -> PhysicalResult<()> {
+        let PhysicalAnimationApi { physics, crowd, .. } = self;
+        drives
+            .iter()
+            .try_for_each(|&(handle, velocity)| {
+                crowd
+                    .get(handle.index())
+                    .ok_or_else(|| PhysicalError::not_bound("unknown crowd humanoid handle"))
+                    .and_then(|binding| {
+                        binding
+                            .bodies()
+                            .iter()
+                            .filter(|b| b.dynamic())
+                            .try_for_each(|b| drive_dynamic(physics, b, Some(velocity), Vec3::ZERO))
+                    })
+            })
+            .and_then(|()| phys(physics.step(runtime_step(tick.raw()))))
+    }
+
+    /// The world transform of crowd member `handle`'s pelvis after the last step —
+    /// the resolved position an app reads back. `NotBound` for an unknown handle.
+    pub fn crowd_pelvis_transform(&self, handle: HumanoidHandle) -> PhysicalResult<Transform> {
+        let snapshot = self.physics.snapshot();
+        self.crowd
+            .get(handle.index())
+            .and_then(HumanoidPhysicsBinding::dynamic_body)
+            .and_then(|body| {
+                snapshot
+                    .bodies()
+                    .iter()
+                    .find(|sb| sb.handle() == body)
+                    .map(|sb| sb.transform())
+            })
+            .ok_or_else(|| PhysicalError::not_bound("unknown crowd humanoid handle"))
+    }
+
+    /// How many contacts the shared world resolved on the last step — non-zero
+    /// when crowd pelvises are colliding.
+    pub fn crowd_contact_count(&self) -> usize {
+        self.physics.latest_contacts().len()
+    }
+
+    /// Whether crowd members `a` and `b` had their bodies in solver contact on
+    /// the last step — the authoritative "these two bodies are actually
+    /// touching" query. Unlike a caller-side distance test, this reads the real
+    /// contact manifolds the de-penetration step already produced, so no extra
+    /// simulation is paid for the answer. `false` for an unknown handle or when
+    /// the pair never met.
+    pub fn crowd_bodies_in_contact(&self, a: HumanoidHandle, b: HumanoidHandle) -> bool {
+        let body = |handle: HumanoidHandle| {
+            self.crowd
+                .get(handle.index())
+                .and_then(HumanoidPhysicsBinding::dynamic_body)
+        };
+        body(a)
+            .zip(body(b))
+            .map(|(ba, bb)| {
+                self.physics.latest_contacts().iter().any(|contact| {
+                    ((contact.body_a() == ba) & (contact.body_b() == bb))
+                        | ((contact.body_a() == bb) & (contact.body_b() == ba))
+                })
+            })
+            .unwrap_or(false)
+    }
+
+    /// Resolve the crowd one deterministic tick as a *de-penetration* pass: snap
+    /// each listed body to the caller's authoritative position and velocity, then
+    /// step the shared world once so overlapping bodies push apart and exchange
+    /// momentum. The caller reads the resolved position/velocity back as the new
+    /// authoritative state. This is the sim-authoritative counterpart to
+    /// [`Self::advance_crowd`] (which force-drives instead of snapping). An unknown
+    /// handle fails `NotBound` before the step.
+    pub fn resolve_crowd(
+        &mut self,
+        placements: &[(HumanoidHandle, Vec3, Vec3)],
+        tick: Tick,
+    ) -> PhysicalResult<()> {
+        let PhysicalAnimationApi { physics, crowd, .. } = self;
+        placements
+            .iter()
+            .try_for_each(|&(handle, position, velocity)| {
+                crowd
+                    .get(handle.index())
+                    .and_then(HumanoidPhysicsBinding::dynamic_body)
+                    .ok_or_else(|| PhysicalError::not_bound("unknown crowd humanoid handle"))
+                    .and_then(|body| {
+                        phys(physics
+                            .set_body_transform(body, Transform::from_translation(position)))
+                        .and_then(|()| phys(physics.set_body_velocity(body, velocity, Vec3::ZERO)))
+                    })
+            })
+            .and_then(|()| phys(physics.step(runtime_step(tick.raw()))))
+    }
+
+    /// The linear velocity of crowd member `handle`'s body after the last step —
+    /// the resolved velocity (post-collision) an app reads back alongside
+    /// [`Self::crowd_pelvis_transform`]. `NotBound` for an unknown handle.
+    pub fn crowd_pelvis_velocity(&self, handle: HumanoidHandle) -> PhysicalResult<Vec3> {
+        let snapshot = self.physics.snapshot();
+        self.crowd
+            .get(handle.index())
+            .and_then(HumanoidPhysicsBinding::dynamic_body)
+            .and_then(|body| {
+                snapshot
+                    .bodies()
+                    .iter()
+                    .find(|sb| sb.handle() == body)
+                    .map(|sb| sb.linear_velocity())
+            })
+            .ok_or_else(|| PhysicalError::not_bound("unknown crowd humanoid handle"))
     }
 
     /// Attach the dynamic soccer ball at `plan`'s `"ball"` target, so a strike
@@ -169,6 +331,7 @@ impl PhysicalAnimationApi {
             ball,
             muscle_profile,
             muscle_style,
+            crowd: _,
         } = self;
         let phase = MusclePhaseProfile::new(
             SupportMode::from_code(support_mode),

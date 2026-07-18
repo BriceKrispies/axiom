@@ -1,9 +1,11 @@
-//! Fictional team definitions: the six-team END ZONE league. Every team is
-//! original — fictional city, original name, procedural emblem — with bounded
-//! ratings and a palette consumed by the player-model construction and the
-//! end-zone paint. No real-world league, team, or player branding appears
-//! anywhere, and gameplay code contains zero team branches: everything a team
-//! IS lives in this data.
+//! Fictional team definitions: the two fixed END ZONE teams — CRATER CITY
+//! MAGMA on offense, GLACIER FALLS FROSTBITE on defense. Both are original —
+//! fictional city, original name, procedural emblem — with bounded ratings and
+//! a palette consumed by the player-model construction and the end-zone paint.
+//! No real-world league, team, or player branding appears anywhere, and
+//! gameplay code contains zero team branches: everything a team IS lives in
+//! this data. The score-attack game fixes the matchup (see `RunConfig`); there
+//! is no team selection.
 
 use crate::identity::TeamId;
 
@@ -11,8 +13,8 @@ use crate::identity::TeamId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LeagueTeamId(pub u8);
 
-/// How many teams the league carries.
-pub const LEAGUE_SIZE: usize = 6;
+/// How many teams the league carries (the fixed offense/defense pair).
+pub const LEAGUE_SIZE: usize = 2;
 
 /// Rating ceiling (ratings are `1..=MAX_RATING`).
 pub const MAX_RATING: u8 = 10;
@@ -131,10 +133,15 @@ fn team(
     }
 }
 
-/// The six-team league, indexed by [`LeagueTeamId`].
+/// The fixed offense id: CRATER CITY MAGMA (the player's team).
+pub const OFFENSE_TEAM: LeagueTeamId = LeagueTeamId(0);
+/// The fixed defense id: GLACIER FALLS FROSTBITE (the opponent).
+pub const DEFENSE_TEAM: LeagueTeamId = LeagueTeamId(1);
+
+/// The two fixed teams, indexed by [`LeagueTeamId`].
 pub fn league() -> [TeamDefinition; LEAGUE_SIZE] {
     [
-        // 0 — the original home showcase team.
+        // 0 — the fixed offensive team the player always controls.
         team(
             0,
             "CRATER CITY",
@@ -156,7 +163,7 @@ pub fn league() -> [TeamDefinition; LEAGUE_SIZE] {
             },
             (8, 6, 7, 6),
         ),
-        // 1 — the original away showcase team.
+        // 1 — the fixed defensive team that always opposes the player.
         team(
             1,
             "GLACIER FALLS",
@@ -178,94 +185,6 @@ pub fn league() -> [TeamDefinition; LEAGUE_SIZE] {
             },
             (6, 6, 6, 9),
         ),
-        // 2 — the heaviest line in the league.
-        team(
-            2,
-            "IRONPORT",
-            "ANVILS",
-            "ANV",
-            TeamPalette {
-                helmet: [0.16, 0.17, 0.19],
-                facemask: [0.90, 0.48, 0.10],
-                jersey: [0.24, 0.25, 0.28],
-                pants: [0.62, 0.63, 0.66],
-                skin: [0.74, 0.54, 0.38],
-                shoes: [0.10, 0.10, 0.11],
-                trim: [0.90, 0.48, 0.10],
-            },
-            EmblemDefinition {
-                base: EmblemBase::Pennant,
-                motif: EmblemMotif::Chevrons,
-                initial: Some('A'),
-            },
-            (10, 4, 5, 7),
-        ),
-        // 3 — pure track speed.
-        team(
-            3,
-            "NEON VALLEY",
-            "VOLTAGE",
-            "VLT",
-            TeamPalette {
-                helmet: [0.05, 0.07, 0.06],
-                facemask: [0.35, 0.95, 0.25],
-                jersey: [0.24, 0.82, 0.20],
-                pants: [0.07, 0.09, 0.08],
-                skin: [0.58, 0.42, 0.30],
-                shoes: [0.85, 0.95, 0.30],
-                trim: [0.35, 0.95, 0.25],
-            },
-            EmblemDefinition {
-                base: EmblemBase::Disc,
-                motif: EmblemMotif::Bolt,
-                initial: Some('V'),
-            },
-            (4, 10, 6, 5),
-        ),
-        // 4 — an air-raid passing attack.
-        team(
-            4,
-            "STORM HARBOR",
-            "TEMPEST",
-            "TMP",
-            TeamPalette {
-                helmet: [0.34, 0.16, 0.55],
-                facemask: [0.95, 0.82, 0.25],
-                jersey: [0.42, 0.20, 0.68],
-                pants: [0.93, 0.85, 0.42],
-                skin: [0.80, 0.60, 0.42],
-                shoes: [0.20, 0.12, 0.30],
-                trim: [0.95, 0.82, 0.25],
-            },
-            EmblemDefinition {
-                base: EmblemBase::Shield,
-                motif: EmblemMotif::Wing,
-                initial: Some('T'),
-            },
-            (5, 7, 10, 4),
-        ),
-        // 5 — a snarling geometric-animal defense.
-        team(
-            5,
-            "BLACKRIDGE",
-            "HOWLERS",
-            "HWL",
-            TeamPalette {
-                helmet: [0.55, 0.56, 0.60],
-                facemask: [0.10, 0.10, 0.11],
-                jersey: [0.66, 0.10, 0.16],
-                pants: [0.55, 0.56, 0.60],
-                skin: [0.70, 0.50, 0.36],
-                shoes: [0.12, 0.12, 0.13],
-                trim: [0.86, 0.88, 0.92],
-            },
-            EmblemDefinition {
-                base: EmblemBase::Hex,
-                motif: EmblemMotif::Fang,
-                initial: None,
-            },
-            (7, 8, 4, 8),
-        ),
     ]
 }
 
@@ -276,12 +195,12 @@ pub fn league_team(id: LeagueTeamId) -> TeamDefinition {
     teams[usize::from(id.0) % LEAGUE_SIZE]
 }
 
-/// Home showcase team (league slot 0, sim slot 0).
+/// The fixed offensive team (league slot 0, sim slot 0).
 pub fn magma() -> TeamDefinition {
     league()[0]
 }
 
-/// Away showcase team (league slot 1, sim slot 1).
+/// The fixed defensive team (league slot 1, sim slot 1).
 pub fn frostbite() -> TeamDefinition {
     league()[1].with_sim_slot(TeamId(1))
 }

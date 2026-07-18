@@ -18,6 +18,7 @@ axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-interface = { path = "../../crates/axiom-interface" }
 axiom-layout = { path = "../../crates/axiom-layout" }
 axiom-physics = { path = "../../modules/axiom-physics" }
+axiom-physical-animation = { path = "../../modules/axiom-physical-animation" }
 axiom-figure = { path = "../../modules/axiom-figure" }
 axiom-input = { path = "../../modules/axiom-input" }
 
@@ -55,6 +56,9 @@ web-sys = { version = "0.3", features = [
     "CssStyleDeclaration",
     "HtmlHeadElement",
 ] }
+
+[dev-dependencies]
+dhat = "0.3"
 
 [lints.rust]
 unsafe_code = "forbid"

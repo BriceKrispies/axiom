@@ -1,8 +1,9 @@
 //! The player controller: the ONLY code that moves standing players. It
 //! executes typed AI intents under acceleration/turn-rate limits, applies
-//! teammate separation and boundary clamping, resolves positional overlap,
-//! and derives the locomotion animation state. Contact outcomes (blocks,
-//! tackles, falls) live in [`super::contact`].
+//! teammate separation and boundary clamping, and derives the locomotion
+//! animation state. Player-vs-player de-penetration lives in
+//! [`crate::collision_rig`] (real rigid-body contact); other contact outcomes
+//! (blocks, tackles, falls) live in [`super::contact`].
 
 use axiom::prelude::Vec3;
 
@@ -44,7 +45,13 @@ pub fn integrate_movement(
                 } else {
                     player.archetype.max_speed * 0.62
                 };
-                let mut v = steering::arrive(player.pos, point, top, tuning.arrival_radius);
+                // A committed chaser (pursuit / tackle) runs flat out into
+                // contact; everyone else eases into their target.
+                let mut v = if intent.closes_hard() {
+                    steering::seek(player.pos, point, top)
+                } else {
+                    steering::arrive(player.pos, point, top, tuning.arrival_radius)
+                };
                 // Separation applies to TEAMMATES only — closing on an
                 // opponent (pursuit, tackling, blocking) must never be
                 // steered away; opponent overlap is contact, not spacing.
@@ -75,7 +82,6 @@ pub fn integrate_movement(
             tuning.bounds_margin * 0.5,
         );
         let speed = player.speed();
-        player.stride += speed * dt;
 
         // Facing: explicit request, else movement direction.
         let face = match *intent {
@@ -116,34 +122,5 @@ fn set_locomotion_anim(player: &mut PlayerSim, intent: &PlayerIntent, live: bool
         player.set_anim(AnimState::DropBack);
     } else {
         player.set_anim(anim);
-    }
-}
-
-/// Positional separation between overlapping standing players (mass-weighted,
-/// id order, deterministic). Opposing players do overlap-resolve here — this
-/// is contact, not spacing.
-pub fn resolve_overlaps(players: &mut [PlayerSim]) {
-    let count = players.len();
-    for a in 0..count {
-        for b in (a + 1)..count {
-            let (pa, pb) = (players[a].pos, players[b].pos);
-            let (ra, rb) = (
-                players[a].archetype.body_radius,
-                players[b].archetype.body_radius,
-            );
-            if !players[a].anim.can_act() || !players[b].anim.can_act() {
-                continue;
-            }
-            let away = Vec3::new(pa.x - pb.x, 0.0, pa.z - pb.z);
-            let distance = away.length();
-            let overlap = (ra + rb) - distance;
-            if overlap > 0.0 && distance > 1.0e-4 {
-                let dir = away.mul_scalar(1.0 / distance);
-                let (ma, mb) = (players[a].archetype.mass, players[b].archetype.mass);
-                let total = ma + mb;
-                players[a].pos = pa.add(dir.mul_scalar(overlap * (mb / total)));
-                players[b].pos = pb.subtract(dir.mul_scalar(overlap * (ma / total)));
-            }
-        }
     }
 }

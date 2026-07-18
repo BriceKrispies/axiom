@@ -24,7 +24,7 @@ pub const LIVE_CAPACITY: u32 = 2048;
 
 /// Pool sizes (hard bounds on juice/debug instances).
 const JUICE_POOL: usize = 168;
-const DEBUG_POOL: usize = 320;
+const DEBUG_POOL: usize = 512;
 
 fn ratio(v: f32) -> Ratio {
     Ratio::finite_or_zero(v)
@@ -53,6 +53,9 @@ pub struct EndZoneScene {
     pub(crate) player_parts: Vec<[Entity; PART_COUNT]>,
     pub(crate) ball: Entity,
     pub(crate) lace: Entity,
+    /// The bright procedural line-to-gain marker (repositioned per tick; parked
+    /// hidden when no drive is active).
+    pub(crate) line_to_gain: Entity,
     pub(crate) juice_pool: Vec<(Entity, EffectMaterial)>,
     pub(crate) debug_pool: Vec<(Entity, DebugMaterial)>,
     pub(crate) juice_scratch: Vec<EffectInstance>,
@@ -164,6 +167,12 @@ impl EndZoneScene {
         let ball = app.spawn(Spawn::new(hidden(), sphere, leather).casts_contact_shadow());
         let lace = app.spawn(Spawn::new(hidden(), cube, lace_mat));
 
+        // The line-to-gain marker: a bright volt bar spanning the field,
+        // distinct from every white yard line. Parked hidden until a drive
+        // repositions it each tick.
+        let to_gain_mat = app.add_material(Material::lit(color3([0.72, 0.96, 0.24])));
+        let line_to_gain = app.spawn(Spawn::new(hidden(), cube, to_gain_mat));
+
         // Juice pools (bounded; parked hidden).
         let dust_mat = app.add_material(Material::lit(color3([0.62, 0.54, 0.38])));
         let ring_mat = app.add_material(Material::lit(color3([0.95, 0.94, 0.86])));
@@ -191,14 +200,22 @@ impl EndZoneScene {
         let catch_mat = app.add_material(Material::lit(color3([0.98, 0.62, 0.15])));
         let trajectory_mat = app.add_material(Material::lit(color3([0.98, 0.92, 0.20])));
         let camera_mat = app.add_material(Material::lit(color3([0.95, 0.15, 0.15])));
+        let foot_lock_mat = app.add_material(Material::lit(color3([1.0, 0.35, 0.15])));
+        let foot_now_mat = app.add_material(Material::lit(color3([0.20, 0.60, 1.0])));
+        let foot_land_mat = app.add_material(Material::lit(color3([0.55, 1.0, 0.30])));
+        let move_vec_mat = app.add_material(Material::lit(color3([1.0, 1.0, 1.0])));
         let mut debug_pool = Vec::with_capacity(DEBUG_POOL);
-        let debug_plan: [(DebugMaterial, usize, Handle<Material>); 6] = [
+        let debug_plan: [(DebugMaterial, usize, Handle<Material>); 10] = [
             (DebugMaterial::Route, 100, route_mat),
             (DebugMaterial::Target, 24, target_mat),
             (DebugMaterial::Collision, 128, collision_mat),
             (DebugMaterial::CatchVolume, 16, catch_mat),
             (DebugMaterial::Trajectory, 40, trajectory_mat),
             (DebugMaterial::CameraAim, 12, camera_mat),
+            (DebugMaterial::FootLock, 14, foot_lock_mat),
+            (DebugMaterial::FootNow, 28, foot_now_mat),
+            (DebugMaterial::FootLanding, 14, foot_land_mat),
+            (DebugMaterial::MoveVector, 56, move_vec_mat),
         ];
         for (material, count, handle) in debug_plan {
             for _ in 0..count {
@@ -212,6 +229,7 @@ impl EndZoneScene {
             player_parts,
             ball,
             lace,
+            line_to_gain,
             juice_pool,
             debug_pool,
             juice_scratch: Vec::with_capacity(JUICE_POOL),

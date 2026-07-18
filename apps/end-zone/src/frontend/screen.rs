@@ -1,37 +1,29 @@
-//! The explicit screen vocabulary: eleven named states, never booleans.
+//! The explicit screen vocabulary: six named states, never booleans. There is
+//! no attract mode, main menu, team select, match setup, or credits — the
+//! title leads straight into gameplay.
 
 /// The explicit screen states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
-    Attract,
     Title,
-    MainMenu,
-    TeamSelect,
-    MatchSetup,
-    Settings,
-    Credits,
-    TransitionToGame,
     InGame,
     Paused,
-    TransitionToMenu,
+    Settings,
+    Controls,
+    GameOver,
 }
 
-pub const SCREEN_COUNT: usize = 11;
+pub const SCREEN_COUNT: usize = 6;
 
 impl Screen {
     pub fn index(self) -> usize {
         match self {
-            Screen::Attract => 0,
-            Screen::Title => 1,
-            Screen::MainMenu => 2,
-            Screen::TeamSelect => 3,
-            Screen::MatchSetup => 4,
-            Screen::Settings => 5,
-            Screen::Credits => 6,
-            Screen::TransitionToGame => 7,
-            Screen::InGame => 8,
-            Screen::Paused => 9,
-            Screen::TransitionToMenu => 10,
+            Screen::Title => 0,
+            Screen::InGame => 1,
+            Screen::Paused => 2,
+            Screen::Settings => 3,
+            Screen::Controls => 4,
+            Screen::GameOver => 5,
         }
     }
 }

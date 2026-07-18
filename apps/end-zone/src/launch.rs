@@ -1,65 +1,20 @@
-//! The frontend → simulation launch boundary: one immutable
-//! [`MatchLaunchConfig`] produced by the frontend when a match is confirmed,
-//! validated here, and resolved into the sim-facing [`MatchSetup`] bundle the
-//! existing showcase bootstrap consumes. The simulation never reads frontend
-//! state; the frontend never mutates a running simulation.
+//! The run boundary: one immutable [`RunConfig`] the frontend freezes when the
+//! player presses START, resolved here into the sim-facing [`RunSetup`] the
+//! drive bootstrap consumes — once at launch and again at every heat step. The
+//! simulation never reads frontend state; the frontend never mutates a running
+//! run. There is no team selection, difficulty menu, or match setup: the
+//! matchup is fixed (see [`crate::data::team`]) and the only escalating dial is
+//! the automatic defensive heat.
 
 use crate::config::PLAYERS_PER_TEAM;
 use crate::data::player::{roster_for, RosterDefinition, RosterSide};
-use crate::data::team::{league_team, LeagueTeamId, LEAGUE_SIZE};
+use crate::data::team::{league_team, LeagueTeamId, DEFENSE_TEAM, OFFENSE_TEAM};
 use crate::data::{BehaviorTuning, CameraTuning, JuiceTuning};
 use crate::identity::TeamId;
 
-/// Opponent strength profile (named AI tuning profiles).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Difficulty {
-    Rookie,
-    #[default]
-    Pro,
-    AllStar,
-}
-
-/// Deterministic simulation pacing: whole sim steps per animation frame in a
-/// fixed repeating pattern — the fixed-step duration itself never changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum GameSpeed {
-    #[default]
-    Normal,
-    Fast,
-    Turbo,
-}
-
-impl GameSpeed {
-    /// Sim steps to run on `frame` (Normal `1`, Fast alternates `2,1` for
-    /// 1.5×, Turbo `2`). Pure function of the frame index — replayable.
-    pub fn steps_for_frame(self, frame: u64) -> u32 {
-        match self {
-            GameSpeed::Normal => 1,
-            GameSpeed::Fast => 1 + u32::from(frame % 2 == 0),
-            GameSpeed::Turbo => 2,
-        }
-    }
-}
-
-/// Named camera tuning profiles (one implementation, three tunings).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CameraStyle {
-    #[default]
-    Arcade,
-    Wide,
-    Close,
-}
-
-/// Presentation-effect intensity (particles, trails, rings, wobble, squash).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum EffectsIntensity {
-    Low,
-    #[default]
-    Medium,
-    High,
-}
-
-/// Camera impulse (shake) scaling.
+/// Camera-impulse (screen-shake) scaling — the one presentation preference
+/// gameplay reads directly: it scales the actual gameplay camera impulses
+/// (`Off` is exactly zero shake).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScreenShake {
     Off,
@@ -78,193 +33,114 @@ impl ScreenShake {
     }
 }
 
-/// Flash / bright-transition intensity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FlashIntensity {
-    Off,
-    Low,
-    #[default]
-    Full,
-}
+/// The highest defensive heat level the run escalates to.
+pub const MAX_HEAT: u8 = 6;
 
-impl FlashIntensity {
-    pub fn scale(self) -> f32 {
-        match self {
-            FlashIntensity::Off => 0.0,
-            FlashIntensity::Low => 0.5,
-            FlashIntensity::Full => 1.0,
-        }
-    }
-}
-
-/// The presentation slice of a launch (never touches authoritative state).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct PresentationProfile {
-    pub effects: EffectsIntensity,
-    pub screen_shake: ScreenShake,
-    pub flash: FlashIntensity,
-}
-
-/// The arena/field presentation identifier (one arena exists today; the
-/// identifier is the boundary future arenas plug into).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FieldPresentation {
-    #[default]
-    Standard,
-}
-
-/// A control profile identity (profile 0 is the built-in default).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ControlProfileId(pub u8);
-
-/// How many control profiles exist.
-pub const CONTROL_PROFILE_COUNT: u8 = 1;
-
-/// The immutable match launch configuration — frozen by the frontend at
-/// `START MATCH`, consumed once by the bootstrap.
+/// The immutable run configuration — everything a deterministic score-attack
+/// run needs, and nothing else. Frozen by the frontend at START, consumed once
+/// by the drive bootstrap; restarting a run rebuilds from the same value.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MatchLaunchConfig {
-    pub player_team: LeagueTeamId,
-    pub opponent_team: LeagueTeamId,
-    pub player_is_home: bool,
-    pub field: FieldPresentation,
-    pub difficulty: Difficulty,
-    pub game_speed: GameSpeed,
-    pub camera_style: CameraStyle,
+pub struct RunConfig {
+    /// The explicit deterministic seed for this run.
     pub seed: u64,
-    pub presentation: PresentationProfile,
-    pub control_profile: ControlProfileId,
+    /// The fixed offensive team (always [`OFFENSE_TEAM`]).
+    pub offense: LeagueTeamId,
+    /// The fixed defensive team (always [`DEFENSE_TEAM`]).
+    pub defense: LeagueTeamId,
+    /// The heat the run begins at (`1..=MAX_HEAT`).
+    pub initial_heat: u8,
+    /// Screen-shake preference (scales gameplay camera impulses).
+    pub screen_shake: ScreenShake,
+    /// Reduced-motion preference (suppresses nonessential presentation motion).
+    pub reduced_motion: bool,
 }
 
-/// Why a launch configuration was rejected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LaunchError {
-    SameTeams,
-    UnknownPlayerTeam,
-    UnknownOpponentTeam,
-    UnknownControlProfile,
-}
+impl RunConfig {
+    /// The canonical run from `seed`: the two fixed teams, heat 1, full shake.
+    pub fn new(seed: u64) -> Self {
+        RunConfig {
+            seed,
+            offense: OFFENSE_TEAM,
+            defense: DEFENSE_TEAM,
+            initial_heat: 1,
+            screen_shake: ScreenShake::Full,
+            reduced_motion: false,
+        }
+    }
 
-impl MatchLaunchConfig {
-    /// Validate every cross-field rule the frontend must have enforced.
-    pub fn validate(&self) -> Result<(), LaunchError> {
-        if usize::from(self.player_team.0) >= LEAGUE_SIZE {
-            return Err(LaunchError::UnknownPlayerTeam);
-        }
-        if usize::from(self.opponent_team.0) >= LEAGUE_SIZE {
-            return Err(LaunchError::UnknownOpponentTeam);
-        }
-        if self.player_team == self.opponent_team {
-            return Err(LaunchError::SameTeams);
-        }
-        if self.control_profile.0 >= CONTROL_PROFILE_COUNT {
-            return Err(LaunchError::UnknownControlProfile);
-        }
-        Ok(())
+    /// The same run with the platform's presentation preferences applied.
+    pub fn with_presentation(mut self, screen_shake: ScreenShake, reduced_motion: bool) -> Self {
+        self.screen_shake = screen_shake;
+        self.reduced_motion = reduced_motion;
+        self
     }
 }
 
-/// The named difficulty profiles: pure scaling of the opponent's defensive
-/// data + the shared contact tuning. `Pro` is exactly the showcase default.
+impl Default for RunConfig {
+    fn default() -> Self {
+        RunConfig::new(crate::config::DEFAULT_SEED)
+    }
+}
+
+/// The defensive tuning a heat level selects: a pure scaling of the opponent's
+/// reaction/pursuit/tackle-range. Heat 1 is a beatable defense; each level up
+/// tightens reactions and pursuit toward a swarming top level.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DifficultyProfile {
+pub struct DefenseProfile {
     pub reaction_delay_scale: f32,
     pub pursuit_scale: f32,
     pub tackle_range_scale: f32,
 }
 
-pub fn difficulty_profile(difficulty: Difficulty) -> DifficultyProfile {
-    match difficulty {
-        Difficulty::Rookie => DifficultyProfile {
-            reaction_delay_scale: 1.6,
-            pursuit_scale: 0.8,
-            tackle_range_scale: 0.9,
-        },
-        Difficulty::Pro => DifficultyProfile {
-            reaction_delay_scale: 1.0,
-            pursuit_scale: 1.0,
-            tackle_range_scale: 1.0,
-        },
-        Difficulty::AllStar => DifficultyProfile {
-            reaction_delay_scale: 0.7,
-            pursuit_scale: 1.15,
-            tackle_range_scale: 1.1,
-        },
+/// The defensive profile for `heat` (clamped to `1..=MAX_HEAT`). Linear across
+/// the heat band — heat 1 is generous, [`MAX_HEAT`] is relentless.
+pub fn heat_profile(heat: u8) -> DefenseProfile {
+    let clamped = heat.clamp(1, MAX_HEAT);
+    let span = f32::from(MAX_HEAT - 1).max(1.0);
+    let t = f32::from(clamped - 1) / span;
+    DefenseProfile {
+        reaction_delay_scale: 1.5 - 0.9 * t,
+        pursuit_scale: 0.82 + 0.4 * t,
+        tackle_range_scale: 0.88 + 0.4 * t,
     }
 }
 
-/// The named camera profiles. `Arcade` is exactly the showcase default.
-pub fn camera_profile(style: CameraStyle, shake: ScreenShake) -> CameraTuning {
+/// The camera tuning for the run: the default rig with the screen-shake and
+/// reduced-motion preferences applied to the impulse scale.
+pub fn camera_tuning(config: &RunConfig) -> CameraTuning {
     let mut tuning = CameraTuning::default();
-    match style {
-        CameraStyle::Arcade => {}
-        CameraStyle::Wide => {
-            tuning.follow_distance = 13.0;
-            tuning.follow_height = 6.8;
-            tuning.base_fov_degrees = 66.0;
-            tuning.formation_distance = 22.0;
-            tuning.formation_height = 12.0;
-        }
-        CameraStyle::Close => {
-            tuning.follow_distance = 6.2;
-            tuning.follow_height = 3.0;
-            tuning.base_fov_degrees = 52.0;
-            tuning.formation_distance = 13.0;
-            tuning.formation_height = 6.5;
-        }
-    }
-    tuning.shake_scale = shake.scale();
+    let reduced = if config.reduced_motion { 0.6 } else { 1.0 };
+    tuning.shake_scale = config.screen_shake.scale() * reduced;
     tuning
 }
 
-/// The named presentation-effect profiles. `Medium`/`Full` is exactly the
-/// showcase default.
-pub fn juice_profile(effects: EffectsIntensity, flash: FlashIntensity) -> JuiceTuning {
+/// The juice tuning for the run: reduced motion damps the nonessential flash
+/// and field wobble while keeping gameplay-legible dust and rings.
+pub fn juice_tuning(config: &RunConfig) -> JuiceTuning {
     let mut tuning = JuiceTuning::default();
-    match effects {
-        EffectsIntensity::Low => {
-            tuning.dust_particles = 5;
-            tuning.streak_count = 3;
-            tuning.trail_points = 8;
-            tuning.dust_radius *= 0.7;
-            tuning.ring_radius *= 0.7;
-            tuning.squash_amplitude *= 0.7;
-            tuning.field_wobble_amplitude *= 0.6;
-        }
-        EffectsIntensity::Medium => {}
-        EffectsIntensity::High => {
-            tuning.dust_particles = 14;
-            tuning.streak_count = 8;
-            tuning.trail_points = 18;
-            tuning.dust_radius *= 1.25;
-            tuning.ring_radius *= 1.25;
-            tuning.squash_amplitude *= 1.15;
-            tuning.field_wobble_amplitude *= 1.2;
-        }
+    if config.reduced_motion {
+        tuning.flash_scale = 0.0;
+        tuning.field_wobble_amplitude *= 0.4;
     }
-    tuning.flash_scale = flash.scale();
     tuning
 }
 
-/// The sim-facing resolved bundle: rosters in sim slots (player = possession
-/// slot 0, opponent = slot 1), contact tuning, and the deterministic seed.
+/// The sim-facing resolved bundle for one heat level: rosters in sim slots
+/// (offense = slot 0, defense = slot 1), the shared contact tuning, and the
+/// deterministic seed.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MatchSetup {
+pub struct RunSetup {
     pub rosters: (RosterDefinition, RosterDefinition),
     pub tuning: BehaviorTuning,
     pub seed: u64,
 }
 
-/// Resolve a validated launch into the sim bundle: build both rosters from
-/// the league data and apply the difficulty profile to the OPPONENT's
-/// defensive archetypes and the shared tackle range.
-pub fn resolve_launch(launch: &MatchLaunchConfig) -> MatchSetup {
-    let player = league_team(launch.player_team).with_sim_slot(TeamId(0));
-    let opponent = league_team(launch.opponent_team).with_sim_slot(TeamId(1));
-    let offense = roster_for(player, 0, RosterSide::Offense);
+/// Build the defense roster + shared tuning at `heat`: the opponent's defensive
+/// archetypes and the shared tackle range scale up with heat.
+pub fn resolve_defense(config: &RunConfig, heat: u8) -> (RosterDefinition, BehaviorTuning) {
+    let opponent = league_team(config.defense).with_sim_slot(TeamId(1));
     let mut defense = roster_for(opponent, PLAYERS_PER_TEAM as u8, RosterSide::Defense);
-
-    let profile = difficulty_profile(launch.difficulty);
+    let profile = heat_profile(heat);
     for player in defense.players.iter_mut() {
         let a = &mut player.archetype;
         a.reaction_delay_ticks =
@@ -273,10 +149,18 @@ pub fn resolve_launch(launch: &MatchLaunchConfig) -> MatchSetup {
     }
     let mut tuning = BehaviorTuning::default();
     tuning.tackle_range *= profile.tackle_range_scale;
+    (defense, tuning)
+}
 
-    MatchSetup {
+/// Resolve a run at `heat` into the sim bundle: the fixed offense, the
+/// heat-scaled defense, and the shared contact tuning.
+pub fn resolve_run(config: &RunConfig, heat: u8) -> RunSetup {
+    let player = league_team(config.offense).with_sim_slot(TeamId(0));
+    let offense = roster_for(player, 0, RosterSide::Offense);
+    let (defense, tuning) = resolve_defense(config, heat);
+    RunSetup {
         rosters: (offense, defense),
         tuning,
-        seed: launch.seed,
+        seed: config.seed,
     }
 }

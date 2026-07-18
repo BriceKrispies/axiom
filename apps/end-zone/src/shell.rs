@@ -1,8 +1,9 @@
 //! The production shell: the [`FrontendApp`] menu layer composed over the
-//! [`EndZoneApp`] game. One `frame` per animation tick: the frontend
-//! translates input and emits typed commands; this shell applies them
-//! (launch / restart / return / pause) and drives the simulation according
-//! to the frontend's [`SimDirective`] — the sim never queries the frontend.
+//! [`EndZoneApp`] game. One `frame` per animation tick: the frontend translates
+//! input and emits typed commands; this shell applies them (launch / restart /
+//! return / pause), drives the run according to the frontend's [`SimDirective`],
+//! and reports a finished run back to the frontend as the game-over screen. The
+//! run never queries frontend state.
 
 use axiom::prelude::FrameOutcome;
 use axiom_input::KeyToken;
@@ -15,16 +16,15 @@ use crate::frontend::input::FrontendInputFrame;
 use crate::frontend::persistence::FrontendProfile;
 use crate::frontend::state::Screen;
 use crate::frontend::{FrontendApp, FrontendFrame, SimDirective};
+use crate::launch::RunConfig;
 use crate::showcase::ShowcaseRun;
 
-/// Diagnostic keyboard tokens passed straight through to the game
-/// (camera forcing, debug overlays, start/reset).
-const DIAGNOSTIC_KEYS: [&str; 8] = [
-    "Space", "KeyR", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "F1",
-];
+/// Diagnostic keyboard tokens passed straight through to the game (camera
+/// forcing, debug overlay) — never surfaced in any menu.
+const DIAGNOSTIC_KEYS: [&str; 6] = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "F1"];
 
 /// The bound gameplay actions and the canonical key each maps onto in the
-/// game's fixed input map (rebinding stays real without the sim knowing).
+/// game's fixed input map.
 const GAME_ACTIONS: [(BindableAction, &str); 5] = [
     (BindableAction::GamePrimary, "Enter"),
     (BindableAction::NavUp, "KeyW"),
@@ -46,9 +46,10 @@ pub struct EndZoneShell {
     pub frontend: FrontendApp,
     pub app: EndZoneApp,
     paused: bool,
-    frame_n: u64,
-    /// The menu-confirm press that launched/restarted a match stays latched
-    /// until released, so it can never double as the first SNAP.
+    /// The active run's frozen config (for RESTART RUN).
+    run_config: Option<RunConfig>,
+    /// The menu-confirm press that launched/restarted a run stays latched until
+    /// released, so it can never double as the first SNAP.
     primary_latched: bool,
 }
 
@@ -58,12 +59,12 @@ impl EndZoneShell {
             frontend: FrontendApp::new(seed, profile),
             app: EndZoneApp::new(EndZoneConfig::default()),
             paused: false,
-            frame_n: 0,
+            run_config: None,
             primary_latched: false,
         }
     }
 
-    /// Whether the game simulation is currently suspended.
+    /// Whether the run simulation is currently suspended.
     pub fn paused(&self) -> bool {
         self.paused
     }
@@ -80,7 +81,7 @@ impl EndZoneShell {
         let launched = view.commands.iter().any(|c| {
             matches!(
                 c,
-                FrontendCommand::LaunchMatch(_) | FrontendCommand::RestartMatch
+                FrontendCommand::LaunchRun { .. } | FrontendCommand::RestartRun
             )
         });
         for command in &view.commands {
@@ -90,8 +91,7 @@ impl EndZoneShell {
         // Latch the primary key across a launch/restart until it is released.
         let primary_held = self
             .frontend
-            .profile()
-            .bindings
+            .bindings()
             .tokens(BindableAction::GamePrimary)
             .iter()
             .any(|t| held_in(input, t));
@@ -104,50 +104,56 @@ impl EndZoneShell {
 
         let outcome = match self.frontend.sim_directive() {
             SimDirective::Live if !self.paused => {
-                let steps = self
-                    .frontend
-                    .state()
-                    .launch
-                    .map(|l| l.game_speed.steps_for_frame(self.frame_n))
-                    .unwrap_or(1);
-                // Keys reach gameplay only once the frontend is actually
-                // in-game (never during the transition-in) — and never on
-                // the frame that launched.
-                let keys = if self.frontend.state().screen == Screen::InGame && !launched {
+                // Keys reach gameplay only once in-game and never on the frame
+                // that launched.
+                let keys = if self.frontend.screen() == Screen::InGame && !launched {
                     self.game_keys(input)
                 } else {
                     Vec::new()
                 };
-                for _ in 0..steps.max(1) {
-                    self.app.advance(&keys, touch);
+                self.app.advance(&keys, touch);
+                // A failed fourth-down conversion ends the run.
+                if let Some(summary) = self
+                    .app
+                    .run
+                    .drive_state()
+                    .filter(|d| d.over)
+                    .map(|d| d.summary())
+                {
+                    self.frontend.enter_game_over(summary);
                 }
                 self.app.present()
             }
             SimDirective::Menu => {
-                // The ambient showcase loop runs behind menus and attract
-                // mode; user input never reaches it.
+                // The ambient title showcase loops behind the title; user input
+                // never reaches it.
                 self.app.advance(&[], TouchInput::default());
                 self.app.present()
             }
-            // Frozen (paused / pause-settings): re-present without stepping.
+            // Frozen (paused / settings / controls / game over): re-present.
             _ => self.app.present(),
         };
-        self.frame_n += 1;
         ShellOutput { outcome, view }
     }
 
     fn apply(&mut self, command: &FrontendCommand) {
         match command {
-            FrontendCommand::LaunchMatch(config) => {
-                self.app.replace_run(ShowcaseRun::new_match(config));
+            FrontendCommand::LaunchRun { seed } => {
+                let s = &self.frontend.profile().settings;
+                let config =
+                    RunConfig::new(*seed).with_presentation(s.screen_shake, s.reduced_motion);
+                self.run_config = Some(config);
+                self.app.replace_run(ShowcaseRun::new_run(&config));
                 self.paused = false;
             }
-            FrontendCommand::RestartMatch => {
-                if let Some(config) = self.frontend.state().launch {
-                    self.app.replace_run(ShowcaseRun::new_match(&config));
+            FrontendCommand::RestartRun => {
+                if let Some(config) = self.run_config {
+                    self.app.replace_run(ShowcaseRun::new_run(&config));
                 }
+                self.paused = false;
             }
-            FrontendCommand::ReturnToMenu => {
+            FrontendCommand::ReturnToTitle => {
+                self.run_config = None;
                 self.app
                     .replace_run(ShowcaseRun::new(EndZoneConfig::default()));
             }
@@ -158,7 +164,7 @@ impl EndZoneShell {
     /// The game-facing key list: bound gameplay actions map onto the game's
     /// canonical keys; diagnostic keys pass straight through.
     fn game_keys(&self, input: &FrontendInputFrame) -> Vec<KeyToken> {
-        let bindings = &self.frontend.profile().bindings;
+        let bindings = self.frontend.bindings();
         let mut keys: Vec<KeyToken> = Vec::new();
         for (action, canonical) in GAME_ACTIONS {
             let suppressed = action == BindableAction::GamePrimary && self.primary_latched;
@@ -166,7 +172,6 @@ impl EndZoneShell {
                 keys.push(KeyToken::new(canonical));
             }
         }
-        // (The diagnostic set is disjoint from the canonical game keys.)
         for diagnostic in DIAGNOSTIC_KEYS {
             if held_in(input, diagnostic) {
                 keys.push(KeyToken::new(diagnostic));

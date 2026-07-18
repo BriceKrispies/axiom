@@ -57,20 +57,6 @@ pub fn recipe(intent: AudioIntent) -> ToneRecipe {
             volume: 0.5,
             second: None,
         },
-        AudioIntent::TeamLock => ToneRecipe {
-            wave: ToneWave::Square,
-            freq: 520.0,
-            duration: 0.12,
-            volume: 0.6,
-            second: Some((780.0, 0.14)),
-        },
-        AudioIntent::VsImpact => ToneRecipe {
-            wave: ToneWave::Sawtooth,
-            freq: 110.0,
-            duration: 0.28,
-            volume: 0.7,
-            second: Some((165.0, 0.2)),
-        },
         AudioIntent::Transition => ToneRecipe {
             wave: ToneWave::Triangle,
             freq: 240.0,

@@ -6,7 +6,7 @@ pub mod generator;
 pub mod markings;
 
 pub use coordinates::{
-    normalized_to_world, world_to_yard_line, yard_line_to_z, DriveDirection, OffenseFrame,
-    OffensePoint, FIELD_HALF_LENGTH, FIELD_HALF_WIDTH, GOAL_LINE_Z,
+    normalized_to_world, world_to_yard_line, yard_line_to_z, z_to_yards_from_own_goal,
+    DriveDirection, OffenseFrame, OffensePoint, FIELD_HALF_LENGTH, FIELD_HALF_WIDTH, GOAL_LINE_Z,
 };
 pub use generator::{generate_field, FieldGeometry, FieldMaterial, FieldMesh, FieldPiece};

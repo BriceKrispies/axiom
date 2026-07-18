@@ -140,7 +140,7 @@ fn after_the_whistle_the_carrier_stays_put_and_the_showcase_auto_resets() {
     let pause = restarted_at - ended_at;
     assert!(
         (RESET_DELAY..RESET_DELAY + 5).contains(&pause),
-        "the post-whistle beat is ~5 seconds (was {pause} ticks)"
+        "the post-whistle beat lasts RESET_DELAY ticks (was {pause} ticks)"
     );
 }
 

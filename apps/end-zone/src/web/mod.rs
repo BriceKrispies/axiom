@@ -5,7 +5,6 @@
 //! browser and the app's typed boundaries. Everything nondeterministic
 //! lives in this directory.
 
-pub mod emblem;
 pub mod gamepad;
 pub mod markup;
 pub mod presenter;
@@ -27,7 +26,9 @@ use crate::app::{TouchInput, CANVAS_ID, HEIGHT, WIDTH};
 use crate::frontend::audio::recipe;
 use crate::frontend::input::FrontendInputFrame;
 use crate::frontend::persistence::FrontendProfile;
+use crate::frontend::state::Screen;
 use crate::frontend::SimDirective;
+use crate::presentation::HudView;
 use crate::scene::LIVE_CAPACITY;
 use crate::shell::EndZoneShell;
 
@@ -127,10 +128,13 @@ pub fn end_zone_start() {
         // 2. Advance the shell (frontend + game) one tick.
         let out = shell.frame(&input, touch_input, css_w, css_h);
 
-        // 3. Present the menus, tones, persistence, and touch controls.
+        // 3. Present the menus, HUD, tones, persistence, and touch controls.
         menu.render(&out.view, css_w, css_h);
-        let muted = shell.frontend.profile().settings.mute_when_unfocused && document_hidden();
-        if !muted {
+        let hud = (shell.frontend.screen() == Screen::InGame)
+            .then(|| shell.app.run.drive_state().map(|d| HudView::from_drive(&d)))
+            .flatten();
+        menu.render_hud(hud);
+        if !document_hidden() {
             let gain = shell.frontend.menu_tone_gain();
             let player = frame_audio.borrow();
             for intent in &out.view.sounds {

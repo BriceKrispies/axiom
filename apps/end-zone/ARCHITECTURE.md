@@ -1,22 +1,29 @@
 # End Zone — architecture
 
-`apps/end-zone` (`axiom-end-zone`) is a **composition-leaf Axiom app**: the
-reusable engine framework for an original arcade-football game, proven by a
-deterministic systems showcase (one data-driven play: formation → snap →
-drop-back → routes → blocking → pass → catch → pursuit → tackle → ground
-impact → reset), now fronted by a complete production menu shell (title,
-menus, team selection, settings, pause — see `FRONTEND.md`). Still not the
-finished game: no scoring, downs, or playbook.
+`apps/end-zone` (`axiom-end-zone`) is a **composition-leaf Axiom app**: an
+original arcade **score-attack survival game** built on the reusable
+football-systems framework. The player controls one fixed offensive team
+against one fixed defensive team, gets four downs to advance ten yards, and
+runs a single escalating drive until a failed fourth-down conversion ends it
+(a five-to-ten-minute run). There is no team selection, match setup, or main
+menu — the title leads straight into gameplay (see `FRONTEND.md`). The
+football simulation underneath is the same deterministic, data-driven play
+engine (formation → snap → drop-back → routes → blocking → pass → catch →
+pursuit → tackle → ground impact); the **score-attack drive layer**
+(`src/drive.rs`) sits on top of it and turns looping plays into downs, first
+downs, touchdowns, heat, and game over.
 
 ## App-local boundaries and the one-way flow
 
 ```text
-input commands (diagnostic keys → DeviceFrame → InputState)
+input commands (keys → DeviceFrame → InputState)
   → fixed-step deterministic simulation      src/state.rs (+ subsystem stages)
+  → score-attack drive loop                  src/drive.rs (downs/score/heat/game over)
   → ordered simulation events                src/events.rs
-  → immutable presentation snapshot          src/presentation/snapshot.rs
+  → immutable presentation snapshot          src/presentation/snapshot.rs (+ drive/to-gain)
   → camera director + presentation effects   src/camera/*, src/presentation/*
-  → Axiom scene/render submission            src/scene.rs, src/scene_sync.rs, src/web.rs
+  → HUD view model                           src/presentation/hud.rs
+  → Axiom scene/render submission            src/scene.rs, src/scene_sync.rs, src/web/
 ```
 
 Four boundaries:
@@ -35,7 +42,8 @@ Four boundaries:
    seed exists for presentation variation only. No wall clock, no ambient
    randomness, no scene/render types. Subsystem stages are `impl SimState`
    blocks owned by their subsystem (`ai::stage`, `football::sim`).
-3. **Presentation** (`src/presentation/*`, `src/player/{model,rig,animation}.rs`,
+3. **Presentation** (`src/presentation/*` — including the `locomotion/*`
+   animator, `src/player/{model,rig,animation}.rs`,
    `src/football/model.rs`, `src/camera/*`, `src/debug.rs`) — consumes the
    immutable `PresentationSnapshot` plus the ordered `SimEvent`s. It cannot
    mutate the simulation; removing it changes nothing authoritative (proven in
@@ -47,19 +55,25 @@ Four boundaries:
 
 Two shell boundaries sit on top (details in `FRONTEND.md`):
 
-5. **Frontend** (`src/frontend/*`) — the pure, browser-free menu machine:
-   explicit screen states, device-independent actions, deterministic focus,
-   typed settings + versioned persistence codec, theme, transitions, and the
-   typed `SceneView` view model. It communicates ONLY through drained
-   `FrontendCommand`s and the immutable `MatchLaunchConfig` boundary
-   (`src/launch.rs`); it never mutates a running simulation.
+5. **Frontend** (`src/frontend/*`) — the pure, browser-free **six-state**
+   screen machine (`Title`, `InGame`, `Paused`, `Settings`, `Controls`,
+   `GameOver`): device-independent actions, deterministic focus, three typed
+   settings + a compact versioned persistence codec, theme, snap transitions,
+   and the typed `SceneView` view model. It communicates ONLY through drained
+   `FrontendCommand`s (`LaunchRun{seed}` / `RestartRun` / `ReturnToTitle` /
+   `SetPaused`); the shell resolves a launch seed into the immutable
+   `RunConfig` (`src/launch.rs`). The frontend never mutates a running run and
+   never queries it (the shell pushes the run-over summary in via
+   `enter_game_over`).
 6. **Platform edge** (`src/web/`, wasm32-only) — the sanctioned
-   nondeterministic directory: DOM presenter for the view model, the
+   nondeterministic directory: DOM presenter for the view model, a separate
+   **HUD DOM layer** rendered from the authoritative `HudView`, the
    `web_sys::Storage` adapter behind the app-local `ProfileStore` trait,
-   gamepad polling, menu tone synthesis, and the in-match touch controls.
+   gamepad polling, menu tone synthesis, and the in-game touch controls.
    `src/shell.rs` composes frontend over game: it applies launch / restart /
-   return / pause commands and steps the sim per the frontend's
-   `SimDirective` (menu-ambient, live, frozen).
+   return / pause commands, steps the run per the frontend's `SimDirective`
+   (menu-ambient, live, frozen), and reports a finished run back as the
+   game-over screen.
 
 ## User control (touch + keyboard)
 
@@ -113,10 +127,15 @@ fonts, sprites, or motion data:
   rig — oversized helmet + facemask bar, shoulder-pad slab, sturdy torso,
   arms/hands, legs/feet — with exaggerated arcade proportions. Part tags map
   to `TeamPalette` slots; construction has zero team branches.
-- **Animation** (`src/player/animation.rs`): procedural poses from explicit
-  state (ready stance, idle, jog, sprint, drop-back, throw, catch, block,
-  tackle, hit reaction, stumble, airborne fall, ground impact, recovery). The
-  leg cycle is keyed to accumulated stride DISTANCE, so feet do not slide.
+- **Animation** (`src/player/animation.rs` + `src/presentation/locomotion/*`):
+  procedural poses from explicit state. Normal on-feet locomotion (idle / jog /
+  sprint / start / stop / turn / backpedal) is owned by the app-local
+  **locomotion animator** (`presentation::locomotion`): a distance-driven,
+  planted-foot system detailed under "Locomotion" below. The remaining
+  self-posing states (throw, catch, block, tackle, dive, hit reaction, stumble,
+  airborne fall, ground impact, recovery) are the OVERRIDE poses in
+  `animation::override_pose`; the carry / throw-ready arm overlay is
+  `animation::apply_hold`.
 - **Football** (`src/football/model.rs`): the engine's unit sphere scaled into
   a prolate silhouette plus a procedural lace-ridge box; tucked when carried,
   spiraling about the flight axis in the air.
@@ -131,6 +150,39 @@ deterministic release velocity (`flight.rs`) and hands it to the physics body:
 flight and bounce are REAL integration through `axiom-physics`, never a
 teleport. Catch evaluation is deterministic: catch volume radius + arrival
 timing tolerance (archetype data) + the receiver's action state.
+
+## Score-attack drive
+
+`src/drive.rs` is the app-local gameplay layer that turns the looping play
+simulation into a survival run. It is **not** a football rules engine — it adds
+no rule the sim does not already produce; it only measures play outcomes and
+keeps the authoritative score-attack bookkeeping:
+
+- **`DriveState`** — the authoritative counters: `down` (1–4), `los_yard`,
+  `first_down_yard` (the line to gain, capped at the goal), `score`,
+  `touchdowns`, `first_downs`, `longest_play`, `heat` (1–`MAX_HEAT`), and
+  `over`. `resolve(ball_yard)` is the whole rule set: a spot past the goal is a
+  touchdown (new drive from own 25, +heat), a spot past the line to gain is a
+  first down (chains reset), a spot short on fourth down ends the run, else the
+  next down begins. Heat re-derives from progress each resolution.
+- **`DriveController`** — owns the inter-play loop (kickoff → armed → running →
+  whistle) and a dead-ball **play clock** (`MAX_PLAY_TICKS`): a held ball that
+  never resolves is blown dead as a sack, so the drive always advances and a
+  hands-off run stays bounded. Between plays it re-spots the offense
+  (`SimState::respot`) and reloads the heat-scaled defense
+  (`SimState::reload_defense` + `launch::resolve_defense`).
+- **Heat** selects a `DefenseProfile` (`launch::heat_profile`) — a pure scaling
+  of the opponent's reaction/pursuit/tackle-range applied through the existing
+  AI configuration boundary. It never touches input responsiveness.
+- **HUD** (`src/presentation/hud.rs`): `HudView::from_drive` formats the five
+  arcade read-outs (`SCORE 012500`, `2ND & 6`, the line-to-gain indicator,
+  `HEAT 3`) purely from `DriveState`. The **line-to-gain field marker** is a
+  bright bar repositioned each tick from `snapshot.to_gain_z`
+  (`src/scene.rs` / `src/scene_sync.rs`).
+
+A run is deterministic in `RunConfig` (seed + fixed teams + initial heat +
+presentation prefs); restarting rebuilds the identical initial state, and PLAY
+AGAIN rolls a fresh explicit seed through the frontend's seed boundary.
 
 ## AI model
 
@@ -153,6 +205,85 @@ procedural fall (stumble or airborne arc → ground impact → recovery) — no
 ragdoll. A strong tackle emits `TackleContact` (tackler, target, point,
 direction, relative speed, strength, airborne) and later `GroundImpact`; both
 drive the presentation juice.
+
+## Locomotion (distance-driven, planted-foot)
+
+`src/presentation/locomotion/*` is the **single owner** of normal running
+animation. It is a presentation system — it reads the immutable snapshot and
+this tick's events and produces poses; it can never touch authoritative state.
+
+**Authoritative movement owns world position; animation only explains it.** The
+one-way flow is:
+
+```text
+authoritative movement (state.rs: AI → controller → collision → bounds)
+  → resolved planar displacement + velocity   (PlayerView in the snapshot)
+  → LocomotionInput                            (per player, per tick)
+  → distance-driven GaitState                  (gait.rs)
+  → planted-foot targets                       (foot.rs)
+  → two-bone leg IK + whole-body pose          (leg.rs, pose.rs)
+  → final PlayerPose                           (mod.rs)
+```
+
+- **Distance-driven gait phase.** The gait cycle advances by *actual resolved
+  displacement*, `phase += planar_length(pos − prev_pos) / effective_stride`,
+  measured from the snapshot's world positions AFTER collision de-penetration and
+  boundary clamping. It is **not** driven by requested/AI velocity or a wall
+  clock. Blocked movement (zero real displacement) does not advance the legs; a
+  stop settles the phase to a foot-down; a teleport/reset (a discontinuity beyond
+  `teleport_distance`, or a `PlayReset`/`PlayStarted` event) re-anchors the feet
+  and does not advance the cycle. This is the root fix for the old skating: the
+  legacy `player.stride += speed·dt` accumulated *intended* velocity in the
+  simulation, so blocked/clamped players kept cycling. `stride` no longer exists
+  on `PlayerSim`.
+- **Planted-foot locking (`foot.rs`).** Each foot cycles Swing → Landing →
+  Planted → PushOff. At foot-strike its world ground contact is latched and held
+  fixed while the body travels over it — so a stance foot has ~zero world
+  velocity (proven in `tests/locomotion.rs`). Feet plant a small,
+  reach-bounded `stance_reach` ahead of the hip, and the planted fraction shrinks
+  with stride (`2·stance_reach / stride`) so a world-locked foot is released into
+  swing *before* the (short, arcade) leg over-extends — brief ground contact at a
+  sprint, never a slide. The correction is visual only; it never moves the sim
+  body.
+- **Two-bone leg IK (`leg.rs`).** A small, explicit thigh+shin solver (law of
+  cosines, knee bent toward facing so it never inverts) reaches each foot's world
+  target; unreachable targets clamp instead of stretching; all outputs are
+  finite. It is NOT a general IK engine.
+- **Stride / cadence (`gait.rs`, tuning in `data/locomotion_tuning.rs`).** Stride
+  blends short→long from speed and is bounded; cadence is capped
+  (`max_cadence`) by *lengthening* the stride, never by blurring the legs.
+  Startup ramps stride up from a stand; stopping shortens and settles; turns
+  shorten and widen the stance and bank the torso.
+- **Locomotion modes.** Explicit `Idle / Starting / Jogging / Sprinting /
+  Stopping / Turning`, chosen from the ramps and resolved speed — not raw speed
+  thresholds alone.
+- **Whole-body motion (`pose.rs`).** Pelvis bob + yaw toward the leading leg,
+  torso counter-rotation, forward lean from resolved acceleration, lateral bank
+  from turning, shoulder counter-rotation, opposite arm swing, and a landing dip
+  — all bounded by tuning.
+- **Pose composition order (one explicit boundary, keyed on `AnimState`):**
+  1. base rig pose (neutral)
+  2. locomotion pose (legs by IK + pelvis/torso/arms) — for the holdable states
+     `{Idle, ReadyStance, Jog, Sprint, DropBack}`; **or** an action / fall /
+     recovery override (`animation::override_pose`) for every other state
+  3. football carry / quarterback throw-ready arm overlay (`apply_hold`)
+  4. presentation-only impact compression (juice squash) — applied at render in
+     `rig::body_transform`.
+  `AnimState` IS the animation-priority discriminant: a player is either running
+  (locomotion owns the body) or in a self-posing action/fall (the override owns
+  it); they never fight over a joint. On leaving an override the gait re-anchors,
+  so no stale planted-foot target survives.
+- **Determinism.** The gait bank is persistent presentation state advanced once
+  per sim tick inside `ShowcaseRun::step` (never per render frame, so a paused
+  frame re-presents the same poses). It is a pure function of the snapshot
+  history, so the whole pose/gait history replays bit-for-bit
+  (`tests/locomotion.rs::locomotion_replays_bit_for_bit_over_a_full_scripted_sequence`).
+- **Diagnostics.** With the overlay on (F1), the selected player shows
+  authoritative vs requested speed, actual distance moved, mode, gait phase,
+  stride, cadence, planted foot, both foot states, both foot-lock errors, and any
+  override reason; debug markers draw each planted-foot lock, each solved foot,
+  the next intended landing, and the resolved movement vector. Debug rendering
+  cannot affect the sim or the pose.
 
 ## Camera director
 

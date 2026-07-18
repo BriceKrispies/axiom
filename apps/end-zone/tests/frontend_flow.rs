@@ -1,11 +1,12 @@
-//! Screen state-machine flow: the full menu path into a match, consistent
-//! backward cancel, pause/resume, settings origin restoration, attract-mode
-//! entry/exit, and replayed-input determinism.
+//! The six-state screen flow: title straight into gameplay, pause/resume,
+//! restart, settings/controls returning to pause, return-to-title, game over,
+//! and play again — plus replayed-input determinism.
 
+use axiom_end_zone::drive::RunSummary;
 use axiom_end_zone::frontend::actions::FrontendCommand;
 use axiom_end_zone::frontend::input::FrontendInputFrame;
 use axiom_end_zone::frontend::persistence::FrontendProfile;
-use axiom_end_zone::frontend::state::{Screen, ATTRACT_TIMEOUT};
+use axiom_end_zone::frontend::state::Screen;
 use axiom_end_zone::frontend::{FrontendApp, FrontendFrame};
 
 fn app() -> FrontendApp {
@@ -27,213 +28,165 @@ fn tap(app: &mut FrontendApp, token: &str) -> FrontendFrame {
     frame
 }
 
-fn settle(app: &mut FrontendApp, frames: usize) {
-    for _ in 0..frames {
-        step_with(app, &[]);
+fn has(frame: &FrontendFrame, want: FrontendCommand) -> bool {
+    frame.commands.iter().any(|c| *c == want)
+}
+
+fn to_ingame(fe: &mut FrontendApp) -> FrontendFrame {
+    tap(fe, "Enter")
+}
+
+/// Enter game over the way the shell does, then let one frame rebuild focus.
+fn to_game_over(fe: &mut FrontendApp) {
+    fe.enter_game_over(summary());
+    step_with(fe, &[]);
+}
+
+fn summary() -> RunSummary {
+    RunSummary {
+        score: 12500,
+        touchdowns: 2,
+        first_downs: 5,
+        longest_play: 38,
     }
 }
 
 #[test]
-fn the_happy_path_reaches_a_launched_match_with_enter_alone() {
+fn title_confirm_starts_gameplay_immediately() {
     let mut fe = app();
     assert_eq!(fe.state().screen, Screen::Title);
-    tap(&mut fe, "Enter"); // PRESS START
-    assert_eq!(fe.state().screen, Screen::MainMenu);
-    tap(&mut fe, "Enter"); // START GAME
-    assert_eq!(fe.state().screen, Screen::TeamSelect);
-    tap(&mut fe, "Enter"); // lock player team
-    assert!(fe.state().team_select.locked_player.is_some());
-    assert_eq!(fe.state().screen, Screen::TeamSelect);
-    tap(&mut fe, "Enter"); // lock opponent
-    assert_eq!(fe.state().screen, Screen::MatchSetup);
-    let frame = tap(&mut fe, "Enter"); // START MATCH
-    assert_eq!(fe.state().screen, Screen::TransitionToGame);
+    let frame = to_ingame(&mut fe);
+    assert_eq!(fe.state().screen, Screen::InGame);
     assert!(frame
         .commands
         .iter()
-        .any(|c| matches!(c, FrontendCommand::LaunchMatch(_))));
-    settle(&mut fe, 40);
+        .any(|c| matches!(c, FrontendCommand::LaunchRun { .. })));
+    assert!(has(&frame, FrontendCommand::SetPaused(false)));
+}
+
+#[test]
+fn there_is_no_main_menu_between_title_and_game() {
+    // A single confirm goes title -> gameplay with no intermediate screen.
+    let mut fe = app();
+    to_ingame(&mut fe);
     assert_eq!(fe.state().screen, Screen::InGame);
 }
 
 #[test]
-fn cancel_walks_backward_consistently() {
+fn pause_enters_the_pause_menu_and_resume_preserves_the_run() {
     let mut fe = app();
-    tap(&mut fe, "Enter");
-    tap(&mut fe, "Enter");
-    tap(&mut fe, "Enter"); // player locked, stage 2
-    tap(&mut fe, "Escape"); // unlock, back to stage 1
-    assert_eq!(fe.state().screen, Screen::TeamSelect);
-    assert!(fe.state().team_select.locked_player.is_none());
-    tap(&mut fe, "Escape");
-    assert_eq!(fe.state().screen, Screen::MainMenu);
-    tap(&mut fe, "Escape");
-    assert_eq!(fe.state().screen, Screen::Title);
-}
-
-#[test]
-fn match_setup_cancel_returns_to_team_select() {
-    let mut fe = app();
-    for _ in 0..4 {
-        tap(&mut fe, "Enter");
-    }
-    assert_eq!(fe.state().screen, Screen::MatchSetup);
-    tap(&mut fe, "Escape");
-    assert_eq!(fe.state().screen, Screen::TeamSelect);
-}
-
-#[test]
-fn pause_resume_and_return_to_menu_flow() {
-    let mut fe = app();
-    for _ in 0..5 {
-        tap(&mut fe, "Enter");
-    }
-    settle(&mut fe, 40);
-    assert_eq!(fe.state().screen, Screen::InGame);
-
+    to_ingame(&mut fe);
     let frame = tap(&mut fe, "KeyP");
     assert_eq!(fe.state().screen, Screen::Paused);
-    assert!(frame
-        .commands
-        .iter()
-        .any(|c| matches!(c, FrontendCommand::SetPaused(true))));
+    assert!(has(&frame, FrontendCommand::SetPaused(true)));
 
-    // Cancel resumes.
     let frame = tap(&mut fe, "Escape");
     assert_eq!(fe.state().screen, Screen::InGame);
-    assert!(frame
+    assert!(has(&frame, FrontendCommand::SetPaused(false)));
+    // Resume never re-launches — the same run continues.
+    assert!(!frame
         .commands
         .iter()
-        .any(|c| matches!(c, FrontendCommand::SetPaused(false))));
+        .any(|c| matches!(c, FrontendCommand::LaunchRun { .. })));
+}
 
-    // Pause again, walk to RETURN TO MAIN MENU, confirm through the modal.
+#[test]
+fn restart_run_launches_a_fresh_run() {
+    let mut fe = app();
+    to_ingame(&mut fe);
     tap(&mut fe, "KeyP");
-    for _ in 0..3 {
-        tap(&mut fe, "ArrowDown");
-    }
-    tap(&mut fe, "Enter"); // opens the modal (safe option focused)
-    assert!(fe.state().modal.is_some());
-    tap(&mut fe, "ArrowRight"); // move to RETURN TO MENU
+    tap(&mut fe, "ArrowDown"); // RESTART RUN
     let frame = tap(&mut fe, "Enter");
-    assert_eq!(fe.state().screen, Screen::TransitionToMenu);
-    assert!(frame
-        .commands
-        .iter()
-        .any(|c| matches!(c, FrontendCommand::ReturnToMenu)));
-    settle(&mut fe, 32);
-    assert_eq!(fe.state().screen, Screen::MainMenu);
-    assert!(fe.state().launch.is_none());
+    assert_eq!(fe.state().screen, Screen::InGame);
+    assert!(has(&frame, FrontendCommand::RestartRun));
 }
 
 #[test]
-fn modal_cancel_keeps_the_match() {
+fn settings_and_controls_return_to_pause() {
     let mut fe = app();
-    for _ in 0..5 {
-        tap(&mut fe, "Enter");
-    }
-    settle(&mut fe, 40);
-    tap(&mut fe, "KeyP");
-    for _ in 0..3 {
-        tap(&mut fe, "ArrowDown");
-    }
-    tap(&mut fe, "Enter");
-    assert!(fe.state().modal.is_some());
-    tap(&mut fe, "Escape"); // dismiss dialog
-    assert!(fe.state().modal.is_none());
-    assert_eq!(fe.state().screen, Screen::Paused);
-    assert!(fe.state().launch.is_some());
-}
-
-#[test]
-fn settings_returns_to_its_exact_origin_with_focus_restored() {
-    let mut fe = app();
-    tap(&mut fe, "Enter"); // MainMenu
-    tap(&mut fe, "ArrowDown"); // focus SETTINGS
-    let focused_before = fe.state().focus.focused();
-    tap(&mut fe, "Enter");
-    assert_eq!(fe.state().screen, Screen::Settings);
-    tap(&mut fe, "Escape"); // no changes → straight back
-    assert_eq!(fe.state().screen, Screen::MainMenu);
-    // A frame passes so focus is rebuilt from memory.
-    step_with(&mut fe, &[]);
-    assert_eq!(fe.state().focus.focused(), focused_before);
-}
-
-#[test]
-fn settings_from_pause_returns_to_pause() {
-    let mut fe = app();
-    for _ in 0..5 {
-        tap(&mut fe, "Enter");
-    }
-    settle(&mut fe, 40);
+    to_ingame(&mut fe);
     tap(&mut fe, "KeyP");
     tap(&mut fe, "ArrowDown");
-    tap(&mut fe, "ArrowDown"); // SETTINGS
+    tap(&mut fe, "ArrowDown"); // RESUME -> RESTART -> SETTINGS
     tap(&mut fe, "Enter");
     assert_eq!(fe.state().screen, Screen::Settings);
     tap(&mut fe, "Escape");
     assert_eq!(fe.state().screen, Screen::Paused);
-    // The match is still resident.
-    assert!(fe.state().launch.is_some());
+
+    // Focus is restored to SETTINGS on return; one step down reaches CONTROLS.
+    tap(&mut fe, "ArrowDown"); // SETTINGS -> CONTROLS
+    tap(&mut fe, "Enter");
+    assert_eq!(fe.state().screen, Screen::Controls);
+    tap(&mut fe, "Escape");
+    assert_eq!(fe.state().screen, Screen::Paused);
 }
 
 #[test]
-fn credits_opens_and_any_confirm_returns() {
+fn return_to_title_disposes_the_run() {
     let mut fe = app();
-    tap(&mut fe, "Enter");
-    tap(&mut fe, "ArrowDown");
-    tap(&mut fe, "ArrowDown"); // CREDITS
-    tap(&mut fe, "Enter");
-    assert_eq!(fe.state().screen, Screen::Credits);
-    tap(&mut fe, "Enter");
-    assert_eq!(fe.state().screen, Screen::MainMenu);
-}
-
-#[test]
-fn attract_mode_enters_on_inactivity_and_exits_on_input() {
-    let mut fe = app();
-    for _ in 0..=ATTRACT_TIMEOUT as usize {
-        step_with(&mut fe, &[]);
+    to_ingame(&mut fe);
+    tap(&mut fe, "KeyP");
+    for _ in 0..4 {
+        tap(&mut fe, "ArrowDown"); // RETURN TO TITLE
     }
-    assert_eq!(fe.state().screen, Screen::Attract);
-    tap(&mut fe, "Enter");
+    let frame = tap(&mut fe, "Enter");
     assert_eq!(fe.state().screen, Screen::Title);
+    assert!(has(&frame, FrontendCommand::ReturnToTitle));
 }
 
 #[test]
-fn attract_never_triggers_deep_in_the_menus() {
+fn game_over_offers_play_again_and_return_to_title() {
     let mut fe = app();
-    for _ in 0..3 {
-        tap(&mut fe, "Enter");
-    }
-    assert_eq!(fe.state().screen, Screen::TeamSelect);
-    for _ in 0..=ATTRACT_TIMEOUT as usize {
-        step_with(&mut fe, &[]);
-    }
-    assert_eq!(fe.state().screen, Screen::TeamSelect);
+    to_ingame(&mut fe);
+    to_game_over(&mut fe);
+    assert_eq!(fe.state().screen, Screen::GameOver);
+    assert_eq!(fe.state().summary, Some(summary()));
+
+    // PLAY AGAIN (first item) launches a fresh run.
+    let frame = tap(&mut fe, "Enter");
+    assert_eq!(fe.state().screen, Screen::InGame);
+    assert!(frame
+        .commands
+        .iter()
+        .any(|c| matches!(c, FrontendCommand::LaunchRun { .. })));
+    assert_eq!(fe.state().summary, None);
+}
+
+#[test]
+fn game_over_can_return_to_title() {
+    let mut fe = app();
+    to_ingame(&mut fe);
+    to_game_over(&mut fe);
+    tap(&mut fe, "ArrowDown"); // RETURN TO TITLE
+    let frame = tap(&mut fe, "Enter");
+    assert_eq!(fe.state().screen, Screen::Title);
+    assert!(has(&frame, FrontendCommand::ReturnToTitle));
+}
+
+#[test]
+fn play_again_uses_a_fresh_seed_each_time() {
+    let mut fe = app();
+    let seed_of = |frame: &FrontendFrame| -> Option<u64> {
+        frame.commands.iter().find_map(|c| match c {
+            FrontendCommand::LaunchRun { seed } => Some(*seed),
+            _ => None,
+        })
+    };
+    let first = seed_of(&to_ingame(&mut fe)).expect("first launch seed");
+    to_game_over(&mut fe);
+    let second = seed_of(&tap(&mut fe, "Enter")).expect("play-again seed");
+    assert_ne!(first, second, "each run uses a fresh explicit seed");
 }
 
 #[test]
 fn identical_input_scripts_replay_identically() {
     let run = |seed: u64| -> (Vec<(u64, Screen)>, String) {
         let mut fe = FrontendApp::new(seed, FrontendProfile::default());
-        let mut last_scene = String::new();
-        let script: [&str; 9] = [
-            "Enter",
-            "Enter",
-            "ArrowRight",
-            "Enter",
-            "ArrowLeft",
-            "Enter",
-            "Enter",
-            "Escape",
-            "Enter",
-        ];
-        for token in script {
-            let frame = tap(&mut fe, token);
-            last_scene = format!("{:?}", frame.scene);
+        let mut last = String::new();
+        for token in ["Enter", "KeyP", "ArrowDown", "ArrowDown", "Enter", "Escape"] {
+            last = format!("{:?}", tap(&mut fe, token).scene);
         }
-        (fe.state().history.clone(), last_scene)
+        (fe.state().history.clone(), last)
     };
     let (history_a, scene_a) = run(42);
     let (history_b, scene_b) = run(42);

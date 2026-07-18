@@ -1,32 +1,29 @@
-//! Versioned frontend persistence behind an app-local store abstraction:
-//! `load / save / clear / migrate`. The profile is a line-oriented
-//! `key=value` text (version-stamped; codec in [`super::profile_codec`]);
-//! every loaded value is validated and anything invalid or unknown falls
-//! back to defaults without panicking. A persistence failure never blocks
-//! the frontend — it logs through the kernel's structured logging and
-//! continues with defaults.
+//! Compact, versioned frontend persistence behind an app-local store
+//! abstraction. The profile is exactly the three retained settings, encoded as
+//! a small `key=value` text stamped with a version. Every loaded value is
+//! validated and anything invalid or unknown falls back to its default without
+//! panicking; a persistence failure never blocks the title or gameplay — it
+//! logs through the kernel's structured logging and continues with defaults.
 
 use axiom_kernel::{LogLevel, LogRecord, LogSink};
 
-use crate::data::team::LeagueTeamId;
-use crate::launch::ControlProfileId;
+use crate::launch::ScreenShake;
 
-use super::bindings::ControlBindings;
-use super::settings::{EndZoneSettings, SettingsCategory};
+use super::settings::{EndZoneSettings, Volume};
 
 /// The current persisted profile version.
 pub const PROFILE_VERSION: u32 = 1;
 
 /// The storage abstraction: the wasm edge adapts it onto the browser's
-/// sanctioned storage; tests use [`MemoryStore`]. String-in/string-out only.
+/// sanctioned storage; tests use [`MemoryStore`]. String-in / string-out only.
 pub trait ProfileStore {
     fn load(&self) -> Option<String>;
     fn save(&mut self, profile: &str) -> bool;
     fn clear(&mut self);
 }
 
-/// The deterministic in-memory store used by tests (and as the native
-/// fallback when no browser storage exists).
+/// The deterministic in-memory store used by tests (and as the native fallback
+/// when no browser storage exists).
 #[derive(Debug, Default, Clone)]
 pub struct MemoryStore {
     slot: Option<String>,
@@ -47,35 +44,19 @@ impl ProfileStore for MemoryStore {
     }
 }
 
-/// Everything the frontend persists.
-#[derive(Debug, Clone, PartialEq)]
+/// Everything the frontend persists: only the three retained settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FrontendProfile {
     pub settings: EndZoneSettings,
-    pub bindings: ControlBindings,
-    pub last_player_team: LeagueTeamId,
-    pub last_opponent_team: LeagueTeamId,
-    pub last_category: SettingsCategory,
-    pub control_profile: ControlProfileId,
-}
-
-impl Default for FrontendProfile {
-    fn default() -> Self {
-        FrontendProfile {
-            settings: EndZoneSettings::default(),
-            bindings: ControlBindings::default(),
-            last_player_team: LeagueTeamId(0),
-            last_opponent_team: LeagueTeamId(1),
-            last_category: SettingsCategory::Gameplay,
-            control_profile: ControlProfileId(0),
-        }
-    }
 }
 
 impl FrontendProfile {
     /// Load through the store; any failure logs and yields defaults.
     pub fn load_from(store: &dyn ProfileStore, sink: &mut dyn LogSink) -> FrontendProfile {
         match store.load() {
-            Some(text) => FrontendProfile::decode(&text),
+            Some(text) => FrontendProfile {
+                settings: decode(&text),
+            },
             None => {
                 sink.record(LogRecord::new(
                     LogLevel::Info,
@@ -90,7 +71,7 @@ impl FrontendProfile {
 
     /// Save through the store; failure logs and continues.
     pub fn save_to(&self, store: &mut dyn ProfileStore, sink: &mut dyn LogSink) {
-        if !store.save(&self.encode()) {
+        if !store.save(&encode(&self.settings)) {
             sink.record(LogRecord::new(
                 LogLevel::Warn,
                 "frontend.persistence",
@@ -98,5 +79,61 @@ impl FrontendProfile {
                 "profile save failed; continuing without persistence",
             ));
         }
+    }
+}
+
+/// Encode the three settings as a compact versioned text.
+pub fn encode(settings: &EndZoneSettings) -> String {
+    format!(
+        "endzone.v={PROFILE_VERSION}\nmaster_volume={}\nscreen_shake={}\nreduced_motion={}\n",
+        settings.master_volume.0,
+        shake_key(settings.screen_shake),
+        u8::from(settings.reduced_motion),
+    )
+}
+
+/// Decode a persisted text into validated settings, falling back per field.
+pub fn decode(text: &str) -> EndZoneSettings {
+    let mut settings = EndZoneSettings::default();
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "master_volume" => {
+                if let Ok(v) = value.trim().parse::<u8>() {
+                    settings.master_volume = Volume::clamped(v);
+                }
+            }
+            "screen_shake" => {
+                if let Some(shake) = parse_shake(value.trim()) {
+                    settings.screen_shake = shake;
+                }
+            }
+            "reduced_motion" => {
+                if let Ok(v) = value.trim().parse::<u8>() {
+                    settings.reduced_motion = v != 0;
+                }
+            }
+            _ => {}
+        }
+    }
+    settings.sanitized()
+}
+
+fn shake_key(shake: ScreenShake) -> &'static str {
+    match shake {
+        ScreenShake::Off => "off",
+        ScreenShake::Low => "low",
+        ScreenShake::Full => "full",
+    }
+}
+
+fn parse_shake(value: &str) -> Option<ScreenShake> {
+    match value {
+        "off" => Some(ScreenShake::Off),
+        "low" => Some(ScreenShake::Low),
+        "full" => Some(ScreenShake::Full),
+        _ => None,
     }
 }

@@ -1,127 +1,89 @@
-# End Zone — the front-end shell
+# End Zone — frontend
 
-The production menu layer over the deterministic showcase: an original
-early-2000s arcade-sports interface, built app-locally on the engine's
-`interface` + `layout` layers. The gameplay systems (field, players,
-football, AI, camera, contact, juice) are untouched — the frontend is a
-separate, pure, native-testable machine that talks to them across one typed
-boundary.
+The End Zone frontend (`src/frontend/*`) is a small, pure, browser-free shell
+over the deterministic run. The platform edge feeds one neutral input frame per
+tick and renders the returned `SceneView` (plus the gameplay HUD, which the edge
+builds from authoritative run state). Everything else — the screen state
+machine, focus, settings, persistence, theme — lives here with zero browser
+types, so the whole frontend is native-testable.
 
-## Architecture: pure core, dumb edge
+There is no attract mode, main menu, team selection, match setup, or credits.
+The title leads **straight into gameplay**.
 
-```text
-DOM listeners / gamepad poll / touch      (src/web/ — wasm32 only)
-  → FrontendInputFrame                    neutral tokens + pointer
-    → InputTranslator                     device-independent actions
-      → FrontendState + screens           the explicit state machine
-        → SceneView                       typed, positioned view model
-  ← MenuPresenter                         renders SceneView as DOM
-  ← FrontendCommand                       launch / restart / return / pause
-      → EndZoneShell                      applies commands to the game
+## The six-state machine
+
+`src/frontend/screen.rs` — exactly six states, never booleans:
+
+```
+Title  →(confirm)→  InGame  →(pause)→  Paused
+                                        ├─(resume)→       InGame
+                                        ├─(settings)→     Settings →(back)→ Paused
+                                        ├─(controls)→     Controls →(back)→ Paused
+                                        ├─(restart run)→  InGame (fresh)
+                                        └─(return)→       Title
+InGame →(failed 4th-down conversion)→ GameOver
+                                        ├─(play again)→   InGame (fresh, new seed)
+                                        └─(return)→       Title
 ```
 
-* **`src/frontend/`** is browser-free and fully native-testable. It owns the
-  screen state machine, focus, settings, persistence encoding, theme,
-  transitions, widgets, and audio recipes. It never touches the simulation.
-* **`src/shell.rs`** composes `FrontendApp` over `EndZoneApp`. It drains the
-  frontend's typed `FrontendCommand`s and drives the sim per the frontend's
-  `SimDirective` (`Menu` = ambient showcase, `Live` = the match, `Frozen` =
-  paused). The sim never queries the frontend.
-* **`src/web/`** is the sanctioned nondeterministic edge: the DOM presenter
-  (`presenter.rs`/`markup.rs`/`style.rs`/`emblem.rs`), the storage adapter
-  (`storage.rs`, the ONLY place browser storage is touched), gamepad polling
-  (`gamepad.rs`), menu tones (`tones.rs`), and the in-match touch controls
-  (`touch.rs`).
+Transitions are explicit, recorded methods on `FrontendState`; the frontend
+answers the composition layer only through drained `FrontendCommand`s
+(`LaunchRun{seed}` / `RestartRun` / `ReturnToTitle` / `SetPaused`). Game over is
+pushed **in** by the shell (`FrontendApp::enter_game_over`) when the run's drive
+reports `over`; the frontend never queries the simulation.
 
-## The screen state machine
+## Title
 
-Eleven explicit states (`frontend/screen.rs`) — never booleans:
+Only the procedural `END ZONE` mark and a blinking `PRESS START` prompt, over
+the live ambient field showcase. Any confirm rolls a fresh explicit run seed and
+starts the run immediately (a `LaunchRun{seed}` command + a wipe transition). No
+team names, cards, ratings, difficulty, settings, credits, or menu entries.
 
-`Attract, Title, MainMenu, TeamSelect, MatchSetup, Settings, Credits,
-TransitionToGame, InGame, Paused, TransitionToMenu`
+## Pause
 
-Every transition is a recorded `FrontendState::go` (bounded history, replay
-compared in tests). Cancel walks backward consistently: MatchSetup →
-TeamSelect (stage 2 → stage 1 → MainMenu) → Title. Settings is reachable
-from MainMenu AND Paused; it records its origin and returns to it with the
-originating menu's focused item restored (per-screen focus memory).
+Exactly five actions over the frozen run: `RESUME`, `RESTART RUN`, `SETTINGS`,
+`CONTROLS`, `RETURN TO TITLE`. No confirmation dialogs — restart and return act
+immediately. Pausing emits `SetPaused(true)`; the shell stops advancing the
+simulation, so no delta accumulates and menu animation stays responsive.
 
-Attract mode enters after ~30 s of inactivity on Title/MainMenu only, runs
-the REAL deterministic showcase behind the mark (no video, no recording),
-and exits to Title on any input. The inactivity clock lives entirely in the
-frontend.
+## Game over
 
-## The action model
+`RUN OVER`, the run summary (final score, touchdowns, first downs, longest
+play), and exactly `PLAY AGAIN` / `RETURN TO TITLE`. Play again rolls a fresh
+explicit seed (tests can pin the base seed); return disposes of the run.
 
-Screens never see key codes. All devices translate into
-`FrontendAction::{Navigate, Confirm, Cancel, Pause, PointerMove,
-PointerActivate}` stamped with an `InputDevice` (keyboard / gamepad /
-pointer / touch):
+## Minimal HUD
 
-* keyboard codes and `Pad*` gamepad tokens flow through the rebindable
-  `ControlBindings` (with a permanent emergency path: Enter / Escape /
-  arrows always work in menus);
-* navigation repeats with an explicit delay (18 ticks) and cadence (7);
-* pointer hover focuses, pointer press activates; a touch pointer flips the
-  hints to touch labels;
-* the navigation-hint device is a stable last-active-device policy — one
-  stray pointer event never flickers the hints.
+The in-game HUD (`src/presentation/hud.rs`, rendered by the edge in a separate
+DOM layer) shows only: score (`SCORE 012500`), down + distance (`2ND & 6`,
+`1ST & GOAL`), the line-to-gain indicator (`TO GAIN 6` / `GOAL LINE`), and heat
+(`HEAT 3`). Every value is derived from authoritative `DriveState` — the HUD
+keeps no counters of its own. There are no team ratings, player stats,
+possession, clock, quarter, opponent score, minimap, or dashboards. The
+line-to-gain is also drawn on the field as a bright marker (`src/scene.rs`).
 
-Focus is a deterministic per-screen grid (`FocusList`): nearest enabled
-entry strictly in the pressed direction, primary-axis first, declaration
-order as the final tie-break. Modals confine focus to their options.
+## Fixed teams
 
-## The launch boundary
+Two fixed fictional teams (`src/data/team.rs`): CRATER CITY **MAGMA** on offense
+(the player), GLACIER FALLS **FROSTBITE** on defense. They are pure data
+(ratings + palette) the generic systems scale — there are zero team branches in
+code, and no user-facing team selection. `RunConfig` always carries these two
+ids; there is no way to pick, lock, or swap teams.
 
-`MatchLaunchConfig` (`src/launch.rs`) is frozen at START MATCH: both teams,
-home/away, field id, difficulty, game speed, camera style, deterministic
-seed, presentation profile (effects / shake / flash), control profile. It is
-validated (`SameTeams`, unknown ids, unknown profile), then resolved ONCE by
-`resolve_launch` into the sim-facing `MatchSetup` (rosters scaled by team
-ratings, difficulty applied to the opponent's defensive DATA — zero team or
-difficulty branches in gameplay code). Restarting re-resolves the same
-config: byte-identical initial state, proven by test.
+## Compact persistence
 
-Game speed never changes the fixed step: it is a pure per-frame step count
-(`Normal` 1, `Fast` 2/1 alternating, `Turbo` 2).
+`src/frontend/persistence.rs` persists only the three settings (see
+`SETTINGS.md`) as a small versioned `key=value` text behind the app-local
+`ProfileStore` trait. Loaded values are validated and fall back per field to
+defaults; a persistence failure logs through the kernel logger and never blocks
+the title or gameplay. No team selections, difficulty, camera, focus, or run
+state are persisted.
 
-## Determinism
+## Input
 
-The frontend is synchronous and seeded: per-match seeds derive from a fixed
-base seed + a match counter through a splitmix64 finalizer (shown on the
-match-setup screen). Identical input scripts replay to identical screen
-histories and scenes; menu input never reaches the ambient showcase (both
-proven by test).
-
-## Visual identity
-
-All procedural: beveled steel plates, chrome-gradient END ZONE mark, angled
-clip-path silhouettes, glows, a light sweep, scanline + vignette overlays,
-squash-and-snap press animation, team-color card tints, and procedural SVG
-emblems built from the typed `EmblemDefinition` vocabulary. No image files
-anywhere. Reduced motion swaps sweeps/zooms for short fades and stills the
-decorative motion; high contrast switches the computed palette; enhanced
-color distinction adds non-color team cues.
-
-## Tests
-
-| File | Proves |
-|---|---|
-| `tests/frontend_flow.rs` | screen flow, cancel path, pause, settings origin, attract, replay determinism |
-| `tests/frontend_focus.rs` | focus grid, memory, hover, repeat delay/cadence, modal confinement, device hints |
-| `tests/frontend_teams.rs` | six valid unique teams, data-driven strengths, no duplicate selection |
-| `tests/frontend_settings.rs` | working-vs-committed, apply/reset/discard, live preview, rebind capture |
-| `tests/frontend_persistence.rs` | versioned round-trip, per-field fallback, store abstraction |
-| `tests/frontend_launch.rs` | validation, profiles-as-data, pacing, byte-identical reproduction |
-| `tests/frontend_shell.rs` | pause freeze, restart, return-to-menu, ambient-sim input isolation |
-
-## Known limitations
-
-* Music / match-effect / crowd volumes are typed and persisted but have no
-  audible path yet — the engine's sample/music playback arm is a stub (see
-  `SETTINGS.md`).
-* Haptic intents are typed and recorded at the boundary but unsupported: no
-  Axiom host abstraction for vibration exists, and the app does not call
-  browser vibration APIs directly.
-* One control profile exists (`ControlProfileId(0)`); the launch config and
-  persistence already carry the identity for future profiles.
+`src/frontend/input.rs` translates each neutral device frame into
+device-independent actions (navigate, confirm, cancel, pause, pointer
+move/activate). Every screen has deterministic initial focus, visible focus, and
+consistent confirm / cancel across keyboard, gamepad, pointer, and touch. The
+control map (`src/frontend/bindings.rs`) is fixed — the Controls screen renders
+it read-only; there is no rebinding.

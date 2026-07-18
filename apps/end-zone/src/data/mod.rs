@@ -5,12 +5,14 @@
 
 pub mod emblem;
 pub mod formation;
+pub mod locomotion_tuning;
 pub mod play;
 pub mod player;
 pub mod team;
 pub mod tuning;
 
 pub use formation::{FormationDefinition, FormationSlot};
+pub use locomotion_tuning::LocomotionTuning;
 pub use play::{
     showcase_play, DefenseAssignment, OffenseAssignment, PlayDefinition, RouteDefinition,
     RouteShape,

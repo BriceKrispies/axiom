@@ -1,22 +1,16 @@
 //! The frontend view model: typed, styled widget descriptions the screens
 //! produce and the platform presenter renders. These are app-local styled
 //! components over the interface layer's value vocabulary (`UiRect` rects,
-//! packed colors) — placement, focus, and content are all decided HERE, so
-//! the presenter is a dumb renderer and the whole view is native-testable.
+//! packed colors) — placement, focus, and content are all decided HERE, so the
+//! presenter is a dumb renderer and the whole view is native-testable.
 
 pub mod arcade_button;
 pub mod arcade_panel;
 pub mod navigation_hint;
-pub mod setting_row;
-pub mod team_card;
-pub mod value_selector;
 
 pub use arcade_button::{ArcadeButton, ButtonStyle};
 pub use arcade_panel::ArcadePanel;
 pub use navigation_hint::{hints_for, Hint, HintSet};
-pub use setting_row::{CategoryTabs, RowControl, SettingRow};
-pub use team_card::{EmblemView, RatingBars, Side, TeamCard};
-pub use value_selector::ValueSelector;
 
 use axiom_interface::UiRect;
 
@@ -38,10 +32,21 @@ pub enum LabelSize {
 pub struct Label {
     pub text: String,
     pub size: LabelSize,
-    /// Optional CSS accent color (team tints, warnings).
+    /// Optional CSS accent color.
     pub accent: Option<String>,
     /// Italicized display where supported (the arcade slant).
     pub italic: bool,
+}
+
+impl Label {
+    pub fn new(text: &str, size: LabelSize) -> Self {
+        Label {
+            text: text.to_string(),
+            size,
+            accent: None,
+            italic: false,
+        }
+    }
 }
 
 /// The oversized END ZONE title mark (procedural).
@@ -52,19 +57,24 @@ pub struct TitleLogo {
     pub press_start: bool,
 }
 
+/// One settings row: a label and its current value string, optionally a value
+/// the player adjusts left/right (a slider or a cycled enum).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SettingRow {
+    pub label: String,
+    pub value: String,
+    /// A `0.0..=1.0` fill for slider-style rows (volume); `None` for toggles.
+    pub fill: Option<f32>,
+}
+
 /// One typed widget.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Widget {
     Panel(ArcadePanel),
     Button(ArcadeButton),
-    TeamCard(TeamCard),
-    SettingRow(SettingRow),
-    Selector(ValueSelector),
-    Tabs(CategoryTabs),
     Label(Label),
-    Emblem(EmblemView),
-    Ratings(RatingBars),
     Logo(TitleLogo),
+    Setting(SettingRow),
 }
 
 /// A widget placed on the logical viewport.
@@ -87,36 +97,20 @@ impl Placed {
             widget,
         }
     }
-}
 
-/// A modal dialog option.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ModalOption {
-    pub id: WidgetId,
-    pub label: String,
-    pub focused: bool,
-    pub danger: bool,
-}
-
-/// An app-styled modal dialog (focus-confined; never a browser dialog).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ModalView {
-    pub title: String,
-    pub body: String,
-    pub options: Vec<ModalOption>,
+    pub fn focused(mut self, focused: bool) -> Self {
+        self.focused = focused;
+        self
+    }
 }
 
 /// What sits behind the interface: the live procedural field presentation,
-/// dimmed for readability, optionally team-tinted at its edges.
-#[derive(Debug, Clone, PartialEq)]
+/// dimmed for readability.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BackgroundView {
     pub show_field: bool,
     /// 0 = fully visible field, 1 = fully covered.
     pub dim: f32,
-    /// CSS team tints applied to the left/right screen regions.
-    pub tint: Option<(String, String)>,
-    /// Whether continuous decorative motion is allowed (reduced motion off).
-    pub animated: bool,
 }
 
 /// The complete per-tick frontend view.
@@ -124,10 +118,7 @@ pub struct BackgroundView {
 pub struct SceneView {
     pub screen: Screen,
     pub widgets: Vec<Placed>,
-    pub modal: Option<ModalView>,
     pub hints: Vec<Hint>,
     pub background: BackgroundView,
     pub transition: Option<TransitionView>,
-    /// Attract-mode feature phrase currently displayed, if any.
-    pub ticker: Option<String>,
 }

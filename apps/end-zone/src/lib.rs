@@ -23,9 +23,11 @@
 pub mod ai;
 pub mod app;
 pub mod camera;
+pub mod collision_rig;
 pub mod config;
 pub mod data;
 pub mod debug;
+pub mod drive;
 pub mod events;
 pub mod field;
 pub mod football;
@@ -39,6 +41,7 @@ pub mod scene;
 pub mod scene_sync;
 pub mod shell;
 pub mod showcase;
+pub mod showcase_controller;
 pub mod state;
 pub mod trace;
 

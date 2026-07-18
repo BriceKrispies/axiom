@@ -12,6 +12,20 @@ fn flat(v: Vec3) -> Vec3 {
     Vec3::new(v.x, 0.0, v.z)
 }
 
+/// The desired ground velocity to run FLAT OUT at `target` — full speed all the
+/// way in, no arrival easing. This is what a committing chaser uses: a defender
+/// closing on the ball carrier (or a diver's launch aim) must keep sprinting
+/// into contact, never glide in at half leg-speed the way `arrive` would.
+pub fn seek(pos: Vec3, target: Vec3, max_speed: f32) -> Vec3 {
+    let to = flat(target.subtract(pos));
+    let distance = to.length();
+    if distance < 1.0e-4 {
+        Vec3::ZERO
+    } else {
+        to.mul_scalar(max_speed / distance)
+    }
+}
+
 /// The desired ground velocity to reach `target` from `pos`: full speed
 /// outside the arrival radius, proportionally slower inside it.
 pub fn arrive(pos: Vec3, target: Vec3, max_speed: f32, arrival_radius: f32) -> Vec3 {

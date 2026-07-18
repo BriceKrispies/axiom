@@ -200,16 +200,25 @@ impl CameraDirector {
             }
             SimEvent::PlayerAirborne { .. } => {}
             SimEvent::GroundImpact {
-                position, strength, ..
+                player,
+                position,
+                strength,
             } => {
-                self.impulses.push(CameraImpulse::seeded(
-                    impulse_seed,
-                    Vec3::new(0.2, 1.0, 0.1),
-                    self.tuning.impact_impulse_scale * (0.5 + 0.5 * strength) * shake,
-                    7.0 * strength * shake,
-                    self.tuning.impact_recovery_ticks,
-                ));
-                self.begin_impact(snapshot.tick, position, strength);
+                // Only a ball-carrier's landing (an offense player going down)
+                // earns camera emphasis. A defender whiffing a dive at the player
+                // character and eating turf must NOT shake the frame or cut focus
+                // onto itself.
+                let offense = snapshot.player(snapshot.quarterback).team;
+                if snapshot.player(player).team == offense {
+                    self.impulses.push(CameraImpulse::seeded(
+                        impulse_seed,
+                        Vec3::new(0.2, 1.0, 0.1),
+                        self.tuning.impact_impulse_scale * (0.5 + 0.5 * strength) * shake,
+                        7.0 * strength * shake,
+                        self.tuning.impact_recovery_ticks,
+                    ));
+                    self.begin_impact(snapshot.tick, position, strength);
+                }
             }
             SimEvent::PlayEnded { .. } => {
                 // Once any impact emphasis finishes, settle back on the wide

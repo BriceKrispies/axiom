@@ -28,6 +28,22 @@ pub struct BehaviorTuning {
     pub pursuit_cushion: f32,
     /// Impact strength above which the target goes airborne.
     pub airborne_threshold: f32,
+    /// Diving-tackle commit window, as a multiple of `tackle_range`: a chaser
+    /// leaves their feet when the carrier is beyond standing range but within
+    /// `tackle_range * dive_window`.
+    pub dive_window: f32,
+    /// Minimum closing speed (yd/s) required to commit a dive.
+    pub dive_min_closing_speed: f32,
+    /// The carrier must be moving at least this fast (yd/s) to be worth diving
+    /// at — you don't dive at a stationary target you can just run down.
+    pub dive_carrier_min_speed: f32,
+    /// Forward launch speed of a dive (yd/s).
+    pub dive_launch_forward: f32,
+    /// Upward launch speed of a dive (yd/s) — the arc height.
+    pub dive_launch_up: f32,
+    /// Impact strength recorded for a whiffed dive's own landing (drives the
+    /// dust puff when a diver hits the turf without a tackle).
+    pub dive_whiff_impact: f32,
     /// Upward launch speed for an airborne knockdown, yd/s.
     pub launch_up_speed: f32,
     /// Ticks a grounded fall lasts before recovery starts.
@@ -61,6 +77,12 @@ impl Default for BehaviorTuning {
             tackle_full_strength_speed: 14.0,
             pursuit_cushion: 6.0,
             airborne_threshold: 0.55,
+            dive_window: 2.4,
+            dive_min_closing_speed: 6.0,
+            dive_carrier_min_speed: 4.0,
+            dive_launch_forward: 9.5,
+            dive_launch_up: 3.2,
+            dive_whiff_impact: 0.25,
             launch_up_speed: 4.6,
             fall_ticks: 26,
             recovery_ticks: 40,

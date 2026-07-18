@@ -1,8 +1,9 @@
-//! The End Zone frontend: a pure, native-testable menu shell over the
-//! deterministic showcase. The platform edge feeds one neutral input frame
-//! per tick and renders the returned [`widgets::SceneView`]; everything else
-//! — the screen state machine, focus, settings, persistence encoding, theme
-//! — lives here with zero browser types.
+//! The End Zone frontend: a pure, native-testable six-screen shell over the
+//! deterministic run. The platform edge feeds one neutral input frame per tick
+//! and renders the returned [`widgets::SceneView`] (plus the game HUD, which the
+//! edge builds from authoritative run state). Everything else — the screen
+//! state machine, focus, settings, persistence encoding, theme — lives here
+//! with zero browser types.
 
 pub mod actions;
 pub mod audio;
@@ -11,7 +12,6 @@ pub mod input;
 pub mod layout;
 pub mod navigation;
 pub mod persistence;
-pub mod profile_codec;
 pub mod screen;
 pub mod screens;
 pub mod settings;
@@ -20,23 +20,27 @@ pub mod theme;
 pub mod transitions;
 pub mod widgets;
 
-use actions::{AudioIntent, FrontendCommand, HapticIntent, InputDevice};
+use crate::drive::RunSummary;
+
+use actions::{AudioIntent, FrontendCommand, InputDevice};
+use bindings::ControlBindings;
 use input::{FrontendInputFrame, InputTranslator};
 use layout::LayoutContext;
 use navigation::FocusList;
 use persistence::FrontendProfile;
 use state::{FrontendState, Screen};
 use theme::Theme;
+use transitions::TransitionKind;
 use widgets::SceneView;
 
 /// What the simulation behind the interface should be doing this tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimDirective {
-    /// The ambient menu/attract showcase loop runs.
+    /// The ambient title showcase loop runs (no real run active).
     Menu,
-    /// The live match advances (input reaches gameplay).
+    /// The live run advances (input reaches gameplay).
     Live,
-    /// The live match exists but is frozen (paused / pause-settings).
+    /// The run exists but is frozen (paused / settings / controls / game over).
     Frozen,
 }
 
@@ -47,9 +51,7 @@ pub struct FrontendFrame {
     pub theme: Theme,
     pub commands: Vec<FrontendCommand>,
     pub sounds: Vec<AudioIntent>,
-    pub haptics: Vec<HapticIntent>,
-    /// The committed profile changed; the edge should persist
-    /// [`FrontendApp::profile`] through its store.
+    /// The committed profile changed; the edge should persist through its store.
     pub persist: bool,
 }
 
@@ -58,8 +60,8 @@ pub struct FrontendFrame {
 pub struct FrontendApp {
     state: FrontendState,
     translator: InputTranslator,
-    /// The screen the current focus list was built for (guards remembered
-    /// focus ids from leaking across screens that reuse ids).
+    bindings: ControlBindings,
+    /// The screen the current focus list was built for.
     focus_screen: Screen,
 }
 
@@ -68,6 +70,7 @@ impl FrontendApp {
         FrontendApp {
             state: FrontendState::new(seed, profile),
             translator: InputTranslator::new(),
+            bindings: ControlBindings::default(),
             focus_screen: Screen::Title,
         }
     }
@@ -85,75 +88,63 @@ impl FrontendApp {
         &self.state.profile
     }
 
+    pub fn bindings(&self) -> &ControlBindings {
+        &self.bindings
+    }
+
     pub fn hint_device(&self) -> InputDevice {
         self.translator.hint_device()
     }
 
-    /// The gain menu tones should play at (master × menu volume).
+    /// The gain menu tones should play at (the master volume).
     pub fn menu_tone_gain(&self) -> f32 {
-        let s = &self.state.profile.settings;
-        s.master_volume.ratio() * s.menu_volume.ratio()
+        self.state.profile.settings.master_volume.ratio()
     }
 
     /// What the simulation should do behind the current screen.
     pub fn sim_directive(&self) -> SimDirective {
         match self.state.screen {
-            Screen::InGame | Screen::TransitionToGame => SimDirective::Live,
-            Screen::Paused => SimDirective::Frozen,
-            // Settings opened from pause keeps the frozen match behind it.
-            Screen::Settings if self.state.launch.is_some() => SimDirective::Frozen,
-            _ => SimDirective::Menu,
+            Screen::InGame => SimDirective::Live,
+            Screen::Paused | Screen::Settings | Screen::Controls | Screen::GameOver => {
+                SimDirective::Frozen
+            }
+            Screen::Title => SimDirective::Menu,
         }
     }
 
-    /// Advance the frontend one tick: translate input, run the state
-    /// machine, rebuild focus, and emit the scene + drained intents.
-    /// `css_width`/`css_height` are the presenter's CSS-pixel size; pointer
-    /// coordinates in `raw` are CSS pixels too — the UI scale is applied
-    /// here so screens and hit tests always work in logical pixels.
+    /// The active screen.
+    pub fn screen(&self) -> Screen {
+        self.state.screen
+    }
+
+    /// The shell reports the run ended: show the game-over summary.
+    pub fn enter_game_over(&mut self, summary: RunSummary) {
+        if self.state.screen != Screen::GameOver {
+            self.state.summary = Some(summary);
+            self.state.go(Screen::GameOver, TransitionKind::Fade);
+        }
+    }
+
+    /// Advance the frontend one tick: translate input, run the state machine,
+    /// rebuild focus, and emit the scene + drained intents.
     pub fn frame(
         &mut self,
         raw: &FrontendInputFrame,
         css_width: f32,
         css_height: f32,
     ) -> FrontendFrame {
-        let ui_scale = Theme::from_settings(self.state.effective_settings())
-            .ui_scale
-            .max(0.1);
-        let mut input = raw.clone();
-        if let Some((x, y)) = input.pointer {
-            input.pointer = Some((x / ui_scale, y / ui_scale));
-        }
-
-        // While a rebind capture is armed, raw tokens go to the capture —
-        // never to navigation (pressing ENTER must bind, not activate).
-        let capturing = self
-            .state
-            .settings_edit
-            .as_ref()
-            .map(|e| e.capture.is_some())
-            .unwrap_or(false);
-        if capturing {
-            let tokens = self.translator.captured_tokens(&input);
-            let _ = self.translator.tick(&input, &self.state.profile.bindings);
-            if let Some(token) = tokens.first() {
-                self.state.inactivity = 0;
-                screens::settings::captured_token(&mut self.state, token);
-            }
-        } else {
-            let actions = self.translator.tick(&input, &self.state.profile.bindings);
-            for action in actions {
-                screens::handle(&mut self.state, action);
-            }
+        let actions = self.translator.tick(raw, &self.bindings);
+        for action in actions {
+            screens::handle(&mut self.state, action);
         }
         self.state.advance_clocks();
 
         let theme = Theme::from_settings(self.state.effective_settings());
-        let ctx = LayoutContext::new(css_width / ui_scale, css_height / ui_scale);
+        let ctx = LayoutContext::new(css_width, css_height);
         let device = self.translator.hint_device();
 
-        // Rebuild focus from this tick's entries: keep the current focus on
-        // the same screen, restore the remembered focus when returning.
+        // Rebuild focus from this tick's entries: keep the current focus on the
+        // same screen, restore the remembered focus when returning.
         let (_, entries) = screens::build(&self.state, &ctx, &theme, device);
         let remembered = if self.focus_screen == self.state.screen {
             self.state.focus.focused()
@@ -171,7 +162,6 @@ impl FrontendApp {
             theme,
             commands: std::mem::take(&mut self.state.commands),
             sounds: std::mem::take(&mut self.state.sounds),
-            haptics: std::mem::take(&mut self.state.haptics),
             persist,
         }
     }

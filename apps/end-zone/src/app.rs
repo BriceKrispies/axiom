@@ -225,6 +225,7 @@ impl EndZoneApp {
         if self.run.debug_enabled {
             debug::build_markers(
                 &output.snapshot,
+                &output.poses,
                 &self.routes,
                 &output.camera,
                 &mut self.debug_markers,
@@ -235,6 +236,7 @@ impl EndZoneApp {
         self.scene.update(
             &mut self.running,
             &output.snapshot,
+            &output.poses,
             &self.run.juice,
             &output.camera,
             &self.debug_markers,
@@ -248,8 +250,10 @@ impl EndZoneApp {
     /// The overlay rows for this frame's state.
     pub fn overlay_rows(&self) -> Vec<(String, String)> {
         let snapshot = crate::presentation::snapshot::capture(&self.run.sim);
+        let selected = snapshot.quarterback.index();
         debug::overlay_rows(
             &snapshot,
+            self.run.locomotion.sample(selected),
             self.last_camera_mode,
             self.last_forced,
             self.run.director.active_impulses(),

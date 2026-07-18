@@ -1,126 +1,95 @@
 # End Zone — testing
 
-All app tests are native (`rlib`) and deterministic; nothing here needs a
-browser or GPU.
+Run the app's tests with `cargo test -p axiom-end-zone`. The frontend is pure
+and native-testable; the simulation and score-attack drive are deterministic and
+driven headlessly.
 
-```sh
-cargo test -p axiom-end-zone      # the app's own suites
-cargo test --workspace            # everything (CI parity)
-cargo xtask check-architecture    # Layer/Module/App laws
-cargo fmt -p axiom-end-zone -- --check
-```
+## Simulation & framework (unchanged deterministic core)
 
-## Deterministic replay expectations
+- `tests/determinism.rs` — the full showcase replays bit-for-bit (state digest,
+  events, trajectory, possession, intents, camera modes/poses); a second seed
+  changes only seeded presentation variation.
+- `tests/football.rs`, `tests/ai.rs`, `tests/camera.rs`, `tests/field.rs` —
+  the ball state machine, the three AI stages, the camera director, and the
+  field coordinate system.
+- `tests/controls.rs` — a zero stick reproduces the scripted showcase
+  bit-for-bit; user steering only overrides the ball holder's AI intent.
 
-`tests/determinism.rs` runs the complete showcase twice with the same seed and
-fixed-step count and compares, **bit-for-bit**:
+## Locomotion (distance-driven, planted-foot)
 
-- the final authoritative state digest (`SimState::digest`, f32 bit patterns);
-- the ordered simulation event stream;
-- per-tick football trajectory samples;
-- the possession history;
-- every player's per-tick AI intent history;
-- the camera mode history and per-tick final camera poses.
+- `tests/locomotion.rs` — direct tests for `presentation::locomotion`:
+  - **Leg IK** — the two-bone solver reaches reachable ankle targets (FK
+    round-trips the solve), bends the knee forward (never inverts), and clamps
+    unreachable targets without stretching; all outputs finite.
+  - **Distance-driven phase** — identical displacement advances the phase
+    identically; zero displacement does not advance it; **blocked movement**
+    (requested velocity but zero actual displacement) does not cycle the legs;
+    faster actual movement advances faster; teleport/reset does not advance the
+    gait; replaying the same displacement history is bit-identical.
+  - **Stride / cadence** — both stay within configured bounds; sprint stride >
+    jog stride; startup expands stride over time; stopping converges to a stable
+    idle settled on a foot; sharp turns shorten the stride.
+  - **Foot locking** — a planted foot holds its world position (zero slide) while
+    the body advances; the lock error (foot reaches its target) stays small and
+    planting alternates deterministically; airborne / teleport invalidate both
+    locks; every generated joint and foot position is finite.
+  - **Pose composition** — the carry hold does not remove lower-body locomotion;
+    fall/action overrides suppress locomotion; composition is deterministic for
+    the same input and gait; a locomotion state routed to `override_pose`
+    defensively yields the neutral base.
+  - **Determinism** — a full scripted showcase sequence (acceleration, sprint,
+    contact, turning, stopping, reset, carrying, tackle) replays the whole
+    per-player pose + gait history bit-for-bit through the real `ShowcaseRun`.
 
-A second-seed run proves the split: the authoritative simulation and event
-stream are seed-independent, while the explicitly seeded presentation
-variation (camera impulse phases) changes. Approximate equality is used only
-where a test checks a derived quantity (an epsilon of `1e-4` on conversions);
-replay comparisons are exact.
+  The authoritative-movement-vs-animation split (animation never mutates the
+  sim) is still guarded by `tests/camera.rs`, which the locomotion animator
+  obeys by construction (it reads only the snapshot).
 
-## Direct subsystem tests
+## Score-attack drive
 
-- `tests/field.rs` — dimensions (120 × 53⅓ yd), midfield `Z = 0`, end-zone
-  boundaries, reversible yard↔world conversion in both drive directions,
-  offense-relative mirroring, and **finite-geometry validation** of every
-  generated field piece and merged marking/number mesh (finite values,
-  in-range triangle indices).
-- `tests/football.rs` — held ball follows the sim carry socket exactly;
-  bit-exact deterministic release; identical trajectories across runs; flight
-  advances every fixed tick with no teleport; deterministic spin; catch
-  evaluation success/failure cases (volume, timing, action state); possession
-  event ordering; the loose → grounded → incomplete path (driven by a
-  data-only roster change).
-- `tests/ai.rs` — identical intents per seed/inputs; deterministic route
-  progress; route mirroring across drive direction; configured reaction delay
-  obeyed (and shortened via data); acceleration/turn-rate limits on the
-  steering update; behavior changed through roster data with unchanged code;
-  stable id ordering.
-- `tests/camera.rs` — fixed-step camera proofs: throw → PassFlight,
-  catch attempt → CatchResolve, transfer → BallCarrierFollow, ground impact →
-  Impact + impulse; impulses decay EXACTLY to zero (the final sample is the
-  zero envelope); after expiry the final pose equals the impulse-free base
-  bit-for-bit (shake never drifts the rig); replay-identical poses. Plus the
-  seeded-effect proofs: bounded pools, clamped amplitudes, identical effects
-  for identical events, full expiry, and sim-inertness of all presentation
-  input (forced cameras + debug toggles leave the digest unchanged).
-- `tests/controls.rs` — user-control proofs: a zero stick reproduces the
-  autonomous showcase exactly (digest + events); the stick steers only the
-  offensive ball holder and respects the archetype's speed limit; the
-  contextual primary action snaps early, orders the throw, and restarts a
-  finished play.
-- `tests/architecture.rs` — app hygiene: `app.toml` lists exactly the consumed
-  layers/modules; the deterministic core is browser-free, wall-clock-free, and
-  ambient-randomness-free (only the `src/web/` edge touches the DOM); no
-  placeholder or console macros; no `unwrap()`/`expect(` in production paths;
-  no junk-drawer modules; no engine layer/module depends on this app; every
-  core source file stays under the repo's 300-line app-placement heuristic.
+- `tests/drive.rs` — over the real simulation: a fresh run starts 1st & 10 with
+  zeroed stats; an unassisted run turns the ball over on downs and ends (the
+  dead-ball play clock bounds every play); the run summary matches the final
+  drive state; a fresh run resets all statistics; a run replays identically from
+  the same config; and `DriveState::resolve` awards the expected
+  first-down / touchdown / run-over events.
+- `tests/frontend_hud.rs` — `HudView` from authoritative `DriveState`: down
+  display, yards-to-go derived from state, first-down reset, line-to-gain
+  movement, touchdown scoring, bounded heat, `GOAL` near the end zone, and the
+  HUD shape carrying only the five required read-outs.
 
-## Frontend shell tests
+## Frontend
 
-The menu shell is pure and native-testable (see `FRONTEND.md`); its suites
-drive `FrontendApp`/`EndZoneShell` with synthetic input frames:
+- `tests/frontend_flow.rs` — the six-state flow: title confirm starts gameplay
+  immediately, pause/resume preserves the run, restart launches fresh,
+  settings/controls return to pause, return-to-title disposes the run, game over
+  offers play again / return to title, play again uses a fresh seed, and
+  identical input scripts replay identically.
+- `tests/frontend_pause.rs` — over the composed shell: the simulation does not
+  advance while paused, resume produces no time jump, restart rebuilds a fresh
+  simulation, and return-to-title disposes the run.
+- `tests/frontend_settings.rs` — valid defaults, bounded volume, screen-shake
+  driving real camera amplitude (`OFF` = 0, `LOW` scales), reduced motion
+  suppressing nonessential movement, a persistence round-trip, safe fallback on
+  malformed input, and no removed setting in the persisted shape.
+- `tests/frontend_teams.rs` — exactly two fixed teams, distinct and valid,
+  always used by the run bootstrap, with no user-facing selection.
 
-- `tests/frontend_flow.rs` — the explicit screen machine: happy path to a
-  launched match, consistent backward cancel, pause/resume, the
-  return-to-menu dialog, settings returning to its exact origin with focus
-  restored, credits, attract entry/exit (and never deep in the menus), and
-  identical-input replay determinism.
-- `tests/frontend_focus.rs` — deterministic focus (first-enabled default,
-  grid movement, disabled skipping, memory restore), hover/pointer
-  activation, the navigation repeat delay + cadence, edge-triggered confirm,
-  gamepad token translation, stable device hints, and modal focus
-  confinement.
-- `tests/frontend_teams.rs` — six complete original teams (unique identity,
-  bounded ratings, valid emblems, distinct strength profiles), rating→roster
-  scaling as pure data, total league lookup, the opponent cursor never
-  reaching the locked player team, and selection persistence.
-- `tests/frontend_settings.rs` — all five categories carry real fields;
-  bounded stepping/cycling; the working-vs-committed editor (APPLY commits +
-  requests persistence, RESET DEFAULTS resets the working copy, dirty BACK
-  raises the discard dialog with the safe option focused); live preview via
-  the theme fingerprint; reduced-motion transition swaps; rebind capture
-  (rebinds, times out, leaves committed bindings untouched) and conflict
-  reporting.
-- `tests/frontend_persistence.rs` — versioned encode/decode round-trips,
-  per-field fallback on corrupt values, hostile-input safety, the
-  distinct-teams invariant, binding-token validation, the
-  `MemoryStore` load/save/clear cycle, and legacy salvage.
-- `tests/frontend_launch.rs` — `MatchLaunchConfig` validation, difficulty /
-  camera / effects profiles as pure data (including the accessibility
-  scales), deterministic game-speed pacing, seed-exact match reproduction,
-  and roster shaping from the selected teams.
-- `tests/frontend_shell.rs` — the composed shell: menus run the ambient
-  showcase, launch swaps in the real match, pause freezes the authoritative
-  digest exactly, restart replays the frozen config byte-for-byte,
-  return-to-menu restores the ambient loop, attract runs the live sim, and
-  menu input never reaches the background simulation.
+## Architecture & reduction guards
 
-## Engine regression added with this app
-
-The showcase exposed a generic `axiom-physics` defect (an immovable-immovable
-contact NaN'd the solver and permanently wedged the world via step rollback).
-The fix lives in the engine with direct tests:
-
-- `modules/axiom-physics/src/contact_solver.rs` — unit test
-  `immovable_pair_contact_is_a_finite_no_op`;
-- `modules/axiom-physics/tests/determinism_poison.rs` —
-  `overlapping_kinematic_bodies_never_wedge_the_world`.
+- `tests/architecture.rs` — the deterministic core is browser-free and
+  wall-clock-free, no placeholder/console macros or junk-drawer modules, no
+  `unwrap`/`expect` in production, every core source file stays under 300 lines,
+  and no engine layer/module depends on this app.
+- `tests/frontend_reduction.rs` — precise, comment-stripped source checks that
+  the removed concepts do not return (`MainMenu`, `TeamSelect`, `MatchSetup`,
+  `Credits`, `TeamCard`, `MatchLaunchConfig`, difficulty/camera/game-speed
+  settings, control rebind, attract), that the deleted screen files are gone,
+  and that exactly the six screen states exist.
 
 ## Browser verification
 
-The wasm arm is verified by serving the app (`make end-zone-build`,
-`make end-zone`) and driving it with the repo's Playwright controller
-(`uv run scripts/playwright_controller.py goto/console/screenshot`), checking
-for console errors and capturing the formation, pass-flight, post-catch, and
-ground-impact moments.
+The `wasm32` presentation arm (the live `wgpu`/`web-sys` render) is verified in
+a real browser: build with `make end-zone-build`, serve `apps/end-zone/web`, and
+drive it with `scripts/playwright_controller.py`. Headless browsers need
+`?backend=canvas2d` (the WebGL2 path lacks `VERTEX_STORAGE` there).

@@ -42,11 +42,13 @@
 //! mechanism. Everything is same-binary deterministic.
 //!
 //! ## Public surface
-//! `lib.rs` exposes **exactly one** behavioral facade, [`PhysicalAnimationApi`].
-//! Every other type (the binding, objectives, frame, errors) is reached only
-//! through it.
+//! `lib.rs` exposes **exactly one** behavioral facade, [`PhysicalAnimationApi`],
+//! plus its identity vocabulary — the [`HumanoidHandle`] the crowd surface hands
+//! out and accepts. Every other type (the binding, objectives, frame, errors) is
+//! reached only through the facade.
 
 mod humanoid_binding;
+mod ids;
 mod muscle_group;
 mod muscle_profile;
 mod physical_animation_api;
@@ -56,4 +58,5 @@ mod physical_frame;
 mod physical_result;
 mod virtual_muscle;
 
+pub use ids::HumanoidHandle;
 pub use physical_animation_api::PhysicalAnimationApi;

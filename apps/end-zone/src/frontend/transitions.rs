@@ -10,21 +10,18 @@ use crate::frontend::state::Screen;
 pub enum TransitionKind {
     /// Full-screen fade.
     Fade,
-    /// Horizontal panel wipe (the arcade slab sweep).
+    /// Horizontal panel wipe (the arcade slab sweep, title → game).
     Wipe,
-    /// Angled panel slide (menu-to-menu).
-    AngledSlide,
-    /// Scale impact (into gameplay).
+    /// Scale impact (restart / play again).
     ScaleImpact,
 }
 
 /// Full-motion durations, in frontend ticks.
 fn full_duration(kind: TransitionKind) -> u32 {
     match kind {
-        TransitionKind::Fade => 18,
-        TransitionKind::Wipe => 26,
-        TransitionKind::AngledSlide => 22,
-        TransitionKind::ScaleImpact => 30,
+        TransitionKind::Fade => 14,
+        TransitionKind::Wipe => 22,
+        TransitionKind::ScaleImpact => 26,
     }
 }
 

@@ -7,11 +7,16 @@ use axiom_kernel::Meters;
 
 use crate::camera::CameraPose;
 use crate::debug::DebugInstance;
-use crate::football::model::{ball_transform, lace_transform};
-use crate::player::{animation, rig};
+use crate::football::model::{
+    ball_transform, cradled_ball_transform, lace_transform, throw_ready_ball_transform,
+};
+use crate::player::animation::BallHold;
+use crate::player::model::{R_FOREARM, R_HAND};
+use crate::player::rig;
 use crate::presentation::juice::JuiceStack;
 use crate::presentation::particles::{effect_instances, trail_instances};
 use crate::presentation::snapshot::PresentationSnapshot;
+use crate::presentation::PlayerPose;
 use crate::scene::{hidden_transform, EndZoneScene};
 
 fn meters(v: f32) -> Meters {
@@ -24,6 +29,7 @@ impl EndZoneScene {
         &mut self,
         app: &mut RunningApp,
         snapshot: &PresentationSnapshot,
+        poses: &[PlayerPose],
         juice: &JuiceStack,
         camera: &CameraPose,
         debug_markers: &[DebugInstance],
@@ -50,15 +56,27 @@ impl EndZoneScene {
             app.set(*entity, t);
         }
 
-        // Players: state-driven procedural pose → figure boxes.
+        // Players: state-driven procedural pose → figure boxes. The ball carrier
+        // holds the ball throw-ready by the ear (quarterback in the pocket) or
+        // cradled in the crook (scrambling QB / any runner); capture the joint
+        // the ball pins to so it can be placed against that arm/hand below.
+        let mut ball_anchor: Option<(BallHold, Transform, f32)> = None;
         for (index, view) in snapshot.players.iter().enumerate() {
-            let pose = animation::pose(view.anim, view.anim_ticks, view.stride, view.speed);
+            let player_pose = &poses[index];
+            let hold = player_pose.hold;
+            let pose = &player_pose.pose;
             let squash = juice.squash_for(view.id, snapshot.tick);
-            let body = rig::body_transform(view.pos, view.facing, &pose, squash);
-            for (part_index, part) in rig::world_parts(&self.figure, body, &pose)
-                .iter()
-                .enumerate()
-            {
+            let body = rig::body_transform(view.pos, view.facing, pose, squash);
+            let parts = rig::world_parts(&self.figure, body, pose);
+            let anchor = match hold {
+                BallHold::Cradle => parts.get(R_FOREARM).map(|p| p.transform),
+                BallHold::ThrowReady => parts.get(R_HAND).map(|p| p.transform),
+                BallHold::None => None,
+            };
+            if let Some(transform) = anchor {
+                ball_anchor = Some((hold, transform, view.facing));
+            }
+            for (part_index, part) in parts.iter().enumerate() {
                 let scale = Vec3::new(
                     part.box_size.x * part.transform.scale.x,
                     part.box_size.y * part.transform.scale.y,
@@ -71,11 +89,31 @@ impl EndZoneScene {
             }
         }
 
-        // The football + lace ridge.
-        let carrier_facing = snapshot.carrier().map(|c| c.facing);
-        let ball_world = ball_transform(&snapshot.ball, carrier_facing);
+        // The football + lace ridge. A throw-ready hold pins the ball to the
+        // raised throwing hand; a cradle pins it to the forearm crook; otherwise
+        // (in flight, loose, or carried in a self-posing anim) it follows its
+        // sim transform.
+        let ball_world = match ball_anchor {
+            Some((BallHold::ThrowReady, hand, facing)) => throw_ready_ball_transform(&hand, facing),
+            Some((_, forearm, _)) => cradled_ball_transform(&forearm),
+            None => ball_transform(&snapshot.ball, snapshot.carrier().map(|c| c.facing)),
+        };
         app.set(self.ball, ball_world);
         app.set(self.lace, lace_transform(&ball_world));
+
+        // The line-to-gain marker: a thin bright bar spanning the field at the
+        // to-gain yard line (hidden when no drive is active).
+        let to_gain = snapshot
+            .to_gain_z
+            .map(|z| {
+                Transform::new(
+                    Vec3::new(0.0, 0.06, z),
+                    axiom_math::Quat::IDENTITY,
+                    Vec3::new(crate::field::FIELD_HALF_WIDTH * 2.0, 0.12, 0.5),
+                )
+            })
+            .unwrap_or_else(hidden_transform);
+        app.set(self.line_to_gain, to_gain);
 
         // Juice instances into the pools.
         self.juice_scratch.clear();

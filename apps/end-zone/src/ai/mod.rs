@@ -67,6 +67,16 @@ impl PlayerIntent {
         }
     }
 
+    /// Whether this intent is a committed chase on an opponent — pursuit or a
+    /// tackle close-in. Such movement runs FLAT OUT (`seek`, no arrival easing)
+    /// so the chaser keeps sprinting into contact instead of gliding in.
+    pub fn closes_hard(&self) -> bool {
+        matches!(
+            self,
+            PlayerIntent::Pursue { .. } | PlayerIntent::Tackle { .. }
+        )
+    }
+
     /// The opponent this intent acts on, if any (drives contact evaluation
     /// and the debug overlay).
     pub fn action_target(&self) -> Option<PlayerId> {

@@ -6,6 +6,7 @@
 use axiom::prelude::Vec3;
 
 use crate::ai::{PlayerIntent, RoleState};
+use crate::drive::DriveState;
 use crate::events::PlayEndReason;
 use crate::football::{BallSim, BallState, FlightInfo};
 use crate::identity::{PlayerId, TeamId};
@@ -23,7 +24,6 @@ pub struct PlayerView {
     pub facing: f32,
     pub anim: AnimState,
     pub anim_ticks: u32,
-    pub stride: f32,
     pub speed: f32,
     pub body_radius: f32,
     pub catch_radius: f32,
@@ -49,6 +49,11 @@ pub struct PresentationSnapshot {
     pub drive_sign: f32,
     pub gravity: f32,
     pub fault: Option<&'static str>,
+    /// The authoritative drive state, when this is a real score-attack run
+    /// (the ambient menu showcase leaves it `None`).
+    pub drive: Option<DriveState>,
+    /// World `Z` of the line to gain, when a drive is active (the field marker).
+    pub to_gain_z: Option<f32>,
 }
 
 impl PresentationSnapshot {
@@ -78,7 +83,6 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
             facing: p.facing,
             anim: p.anim,
             anim_ticks: p.anim_ticks,
-            stride: p.stride,
             speed: p.speed(),
             body_radius: p.archetype.body_radius,
             catch_radius: p.archetype.catch_radius,
@@ -103,5 +107,9 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
         drive_sign: sim.frame.direction.sign(),
         gravity: sim.tuning.gravity,
         fault: sim.fault(),
+        // The run layer fills these in for a real drive; the raw sim capture
+        // is drive-agnostic.
+        drive: None,
+        to_gain_z: None,
     }
 }
