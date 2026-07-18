@@ -5,7 +5,9 @@
 # A Swing is {state, theta, omega, readiness, stateTicks}.
 # A Contact is {r, u, sweetQ, timingQ, vertQ, quality, exitVel, exitSpeed, spray,
 #               loft, point}; an empty Dictionary means "no contact".
-class_name HRSwing
+
+const HRC = preload("res://scripts/constants.gd")
+const HRMath = preload("res://scripts/math_util.gd")
 
 static func new_swing() -> Dictionary:
 	return {"omega": 0.0, "readiness": 1.0, "state": "ready", "stateTicks": 0, "theta": HRC.THETA_READY}

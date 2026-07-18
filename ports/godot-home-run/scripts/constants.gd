@@ -5,7 +5,6 @@
 # World frame: home plate at the origin, +Z toward the pitcher and center field,
 # +Y up. The camera sits behind home plate at -Z, so world +X projects to
 # screen-LEFT.
-class_name HRC
 
 # ── fixed-step clock ──
 const FIXED_HZ := 60

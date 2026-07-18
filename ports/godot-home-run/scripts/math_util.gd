@@ -4,7 +4,6 @@
 # as the TypeScript original), the intrinsic-XYZ Euler→quaternion the scene builder
 # poses everything with, and a couple of scalar helpers. Vectors are Godot Vector3
 # (structurally the original's `{x,y,z}`); quaternions are Godot Quaternion.
-class_name HRMath
 
 const U32 := 0xFFFFFFFF
 

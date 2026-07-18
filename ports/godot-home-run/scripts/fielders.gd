@@ -2,7 +2,9 @@
 # patrol region and wanders inside it on a seeded two-frequency drift; when a ball
 # is hit, nearby fielders chase the projected landing (clamped to their region) and
 # can catch/field a reachable ball. A FielderState is {x, z, chasing}.
-class_name HRFielders
+
+const HRC = preload("res://scripts/constants.gd")
+const HRMath = preload("res://scripts/math_util.gd")
 
 static func _hyp(a: float, b: float) -> float:
 	return sqrt(a * a + b * b)

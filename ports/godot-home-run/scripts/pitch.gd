@@ -2,7 +2,9 @@
 # is a pure function of (seed, pitchIndex): difficulty-ramped profile selection then
 # a small seeded jitter around the profile's aim. A PitchSpec is
 # {profileId, name, speed, gravity, targetX, targetY, mph}.
-class_name HRPitch
+
+const HRC = preload("res://scripts/constants.gd")
+const HRMath = preload("res://scripts/math_util.gd")
 
 static func pitch_pool(pitch_index: int) -> Array:
 	if pitch_index < HRC.EASY_ONLY_BEFORE:

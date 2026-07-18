@@ -2,7 +2,6 @@
 # Each is a StandardMaterial3D tuned for the original's flat, Lambert-ish toy look:
 # unshaded-adjacent (roughness 1, zero specular/metallic), emissive "glow" markings
 # self-lit so they read at grazing angles, and a couple of translucent effect mats.
-class_name HRMaterials
 
 static func _base(color: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()

@@ -4,7 +4,10 @@
 # bat, the same pitch integration, the real swept contact), then projects the post-
 # contact flight with the REAL ball physics so home-run classification can never diverge.
 # Returns a fully-populated SwingOutcome Dictionary.
-class_name HRSwingOutcome
+
+const HRC = preload("res://scripts/constants.gd")
+const HRBall = preload("res://scripts/ball.gd")
+const HRSwing = preload("res://scripts/swing.gd")
 
 static func _normalize(v: Vector3) -> Vector3:
 	var len := v.length()

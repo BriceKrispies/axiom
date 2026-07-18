@@ -6,7 +6,10 @@
 # Each instance is {key, mesh, material, position, rotation, scale}. Mesh conventions:
 # `box` is a UNIT CUBE (scale = full extents); `sphere` is UNIT DIAMETER (scale = 2r);
 # `cylinder` is UNIT (radius 0.5, height 1, Y axis — scale = (diameter, height, diameter)).
-class_name HRView
+
+const HRC = preload("res://scripts/constants.gd")
+const HRMath = preload("res://scripts/math_util.gd")
+const HRSwing = preload("res://scripts/swing.gd")
 
 const MIN_EXTENT := 0.01
 

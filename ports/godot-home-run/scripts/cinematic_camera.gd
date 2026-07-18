@@ -1,7 +1,9 @@
 # cinematic_camera.gd — the home-run cinematic's camera director, ported from
 # cinematic-camera.ts. Pure functions from (batter | ball) + tuning to a camera pose
 # {position, target}. session.gd owns blending between these and the gameplay camera.
-class_name HRCineCam
+
+const HRC = preload("res://scripts/constants.gd")
+const HRMath = preload("res://scripts/math_util.gd")
 
 static func contact_camera_pose(batter: Dictionary, tuning: Dictionary) -> Dictionary:
 	return {

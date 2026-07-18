@@ -2,7 +2,8 @@
 # rules (foul wedge, wall line, home-run volume), outcome classification, and the
 # scoring table. Ported from ball.ts. A BallFlight is a Dictionary mutated in place:
 # {pos, vel, bounces, firstLandDist, homer, foul, exitSpeed, loft, spray, ticks}.
-class_name HRBall
+
+const HRC = preload("res://scripts/constants.gd")
 
 const SQRT1_2 := 0.7071067811865476
 

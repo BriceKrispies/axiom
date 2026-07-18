@@ -7,6 +7,12 @@
 # and this tick's feedback events are synthesized into WebAudio-style tones.
 extends Node3D
 
+const HRC = preload("res://scripts/constants.gd")
+const HRView = preload("res://scripts/view.gd")
+const HRCine = preload("res://scripts/cinematic_constants.gd")
+const HRMaterials = preload("res://scripts/materials.gd")
+const HomeRunSession = preload("res://scripts/session.gd")
+
 const TICK := 1.0 / 60.0
 const MAX_TICKS_PER_FRAME := 6
 

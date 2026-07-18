@@ -5,8 +5,18 @@
 #
 # "undefined" values from the original are represented as empty Dictionaries ({}) and
 # tested with is_empty(). Records are Dictionaries; vectors are Vector3.
-class_name HomeRunSession
 extends RefCounted
+
+const HRC = preload("res://scripts/constants.gd")
+const HRMath = preload("res://scripts/math_util.gd")
+const HRSwing = preload("res://scripts/swing.gd")
+const HRPitch = preload("res://scripts/pitch.gd")
+const HRFielders = preload("res://scripts/fielders.gd")
+const HRBall = preload("res://scripts/ball.gd")
+const HRSwingOutcome = preload("res://scripts/swing_outcome.gd")
+const HRCine = preload("res://scripts/cinematic_constants.gd")
+const HRCinematic = preload("res://scripts/cinematic.gd")
+const HRCineCam = preload("res://scripts/cinematic_camera.gd")
 
 const TRAIL_MAX := 14
 const HIDDEN_BALL := Vector3(0, -100, 0)

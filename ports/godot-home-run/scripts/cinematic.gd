@@ -3,7 +3,8 @@
 # every real tick the cinematic is live; presentation values (letterbox, zoom, camera
 # blend, time scale) ease continuously across phase boundaries. A CinematicState is
 # {camBlend, elapsedTicks, impactParticles, letterbox, phase, phaseTicks, timeScale, zoom}.
-class_name HRCinematic
+
+const HRMath = preload("res://scripts/math_util.gd")
 
 const LETTERBOX_UP := ["anticipation", "contact"]
 const CAMERA_OWNED := ["anticipation", "contact", "ballFollow", "landing"]
