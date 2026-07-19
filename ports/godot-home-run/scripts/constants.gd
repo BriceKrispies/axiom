@@ -81,15 +81,15 @@ const CONTACT_SUBSTEPS := 8
 const FOUL_ANGLE := PI / 4.0
 
 # ── pitch profiles ──
-# Each: {id, name, speed, gravity, targetX, targetY, tier}.
+# Each: {id, name, speed, gravity, target_x, target_y, tier}.
 const PITCH_PROFILES := [
-	{"id": "slow-straight", "name": "SLOW BALL", "speed": 12.5, "gravity": 8.0, "targetX": 0.0, "targetY": 0.95, "tier": "easy"},
-	{"id": "medium-straight", "name": "FASTBALL", "speed": 17.0, "gravity": 8.0, "targetX": 0.0, "targetY": 0.95, "tier": "easy"},
-	{"id": "fast-straight", "name": "HEATER", "speed": 23.0, "gravity": 8.0, "targetX": 0.0, "targetY": 1.0, "tier": "hard"},
-	{"id": "slow-drop", "name": "SINKER", "speed": 12.0, "gravity": 16.0, "targetX": 0.0, "targetY": 0.72, "tier": "medium"},
-	{"id": "fast-flat", "name": "RISER", "speed": 24.0, "gravity": 3.5, "targetX": 0.0, "targetY": 1.1, "tier": "hard"},
-	{"id": "inside", "name": "INSIDE", "speed": 16.5, "gravity": 8.0, "targetX": 0.34, "targetY": 0.9, "tier": "medium"},
-	{"id": "outside", "name": "OUTSIDE", "speed": 16.5, "gravity": 8.0, "targetX": -0.34, "targetY": 0.9, "tier": "medium"},
+	{"id": "slow-straight", "name": "SLOW BALL", "speed": 12.5, "gravity": 8.0, "target_x": 0.0, "target_y": 0.95, "tier": "easy"},
+	{"id": "medium-straight", "name": "FASTBALL", "speed": 17.0, "gravity": 8.0, "target_x": 0.0, "target_y": 0.95, "tier": "easy"},
+	{"id": "fast-straight", "name": "HEATER", "speed": 23.0, "gravity": 8.0, "target_x": 0.0, "target_y": 1.0, "tier": "hard"},
+	{"id": "slow-drop", "name": "SINKER", "speed": 12.0, "gravity": 16.0, "target_x": 0.0, "target_y": 0.72, "tier": "medium"},
+	{"id": "fast-flat", "name": "RISER", "speed": 24.0, "gravity": 3.5, "target_x": 0.0, "target_y": 1.1, "tier": "hard"},
+	{"id": "inside", "name": "INSIDE", "speed": 16.5, "gravity": 8.0, "target_x": 0.34, "target_y": 0.9, "tier": "medium"},
+	{"id": "outside", "name": "OUTSIDE", "speed": 16.5, "gravity": 8.0, "target_x": -0.34, "target_y": 0.9, "tier": "medium"},
 ]
 const EASY_ONLY_BEFORE := 2
 const HARD_ALLOWED_FROM := 5

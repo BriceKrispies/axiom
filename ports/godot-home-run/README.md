@@ -1,60 +1,71 @@
-# Home Run! — GDScript / Godot 4 port
+# Home Run! — GDScript / Godot 4
 
-A faithful port of Axiom's pure-TypeScript **Home Run!** app
-(`apps/axiom-home-run`) to **GDScript on Godot 4.6**. Same toy-tabletop diamond,
-same always-armed swing, same deterministic seeded pitch sequence, same home-run
-cinematic — rebuilt on Godot's node/renderer instead of `@axiom/web-engine`.
+An idiomatic **Godot 4.6 / GDScript** version of Axiom's pure-TypeScript
+**Home Run!** app (`apps/axiom-home-run`). Same toy-tabletop diamond, same
+always-armed swing, same deterministic seeded pitch sequence, same home-run
+cinematic — built the way a Godot project wants to be built.
 
 This is an experiment in retargeting an Axiom app onto a different engine. It is
 **not** part of the Axiom engine graph (not a layer/module/app/tool, not a Cargo
 package) — it lives under `ports/` and is ignored by the architecture checker and
 the coverage gate.
 
-![the port rendering the seed-1 opening frame](docs/screenshot.png)
+![the opening frame](docs/screenshot.png)
 
-## Why the port is clean
+## Idiomatic Godot, not an engine-on-Godot
 
-The original is already structured as **pure logic + declarative rendering**, so
-almost nothing had to be reinvented:
+The port started as a faithful reconciler (rebuild a flat instance list every
+frame, diff it into nodes — the web engine's shape). This version is rebuilt to
+Godot conventions:
 
-- The whole gameplay core (`vec`/`hash`, `constants`, `pitch`, `swing`,
-  `swing-outcome`, `ball`, `fielders`, `cinematic`, and the `session` state
-  machine) is engine-free arithmetic driven by a deterministic integer hash. It
-  ports to GDScript almost line-for-line.
-- `view.ts` describes the entire stadium every frame as a flat list of keyed
-  `box`/`sphere`/`cylinder` instances with named materials — which maps **1:1**
-  onto Godot `MeshInstance3D` + `StandardMaterial3D`. `game.gd` reconciles that
-  list into nodes (spawn / re-pose / despawn), exactly as the web engine's
-  reconciler did.
+- **Authored scene tree** (`main.tscn`): `Camera3D`, two `DirectionalLight3D`s,
+  a `WorldEnvironment` (+ an `Environment` sub-resource carrying the grade), the
+  `Field` roots, and the `HUD` `CanvasLayer` — real nodes, not code-spawned.
+- **Static geometry as `MultiMeshInstance3D`**: the whole grandstand + field is
+  baked once into one MultiMesh per mesh×material group and never touched again.
+- **Persistent, pooled actor nodes**: the batter, machine, ball (+ trail), and
+  ten fielders are reusable actor views built once and re-posed each tick — no
+  per-frame spawn/despawn, no per-frame allocation.
+- **InputMap actions** (`move_left`/`move_right`/`swing`/`restart`) with
+  `Input.is_action_just_pressed`, not polled keycodes.
+- **Fixed-step sim in `_physics_process`** (the engine's 60 Hz tick), not a
+  hand-rolled accumulator.
+- **Typed GDScript throughout**: every sim record is a class (`Swing`, `Contact`,
+  `PitchSpec`, `BallFlight`, `Fielder`, `SwingOutcome`, `Cinematic`, `SceneView`,
+  …) with typed fields and methods — no `Dictionary` records.
+- **Signals**: gameplay events are re-emitted as a `feedback` signal the HUD and
+  audio connect to (event-driven), separate from the polled per-frame state.
 
-`hash01` is reproduced bit-for-bit (JS `Math.imul` + unsigned shifts emulated
-with 32-bit masking), so **a given seed produces the same round as the
-TypeScript original**.
+Cross-script references use `preload()` consts (also used as types) rather than
+`class_name`, so the project compiles and runs on the **very first launch** with
+no prior editor/import pass. `hash01` is reproduced bit-for-bit, so **a given seed
+produces the same round as the TypeScript original** (seed 1 opens with a
+44 MPH slow ball).
 
 ## Structure
 
 ```
-project.godot          # Godot 4.6 project (gl_compatibility renderer)
-main.tscn              # a single Node3D running scripts/game.gd
+project.godot            # Godot 4.6 project (gl_compatibility / WebGL2)
+main.tscn                # authored scene: camera, lights, environment, field, HUD
 scripts/
-  math_util.gd   (HRMath)         # hash01, euler->quaternion, scalar helpers
-  constants.gd   (HRC)            # every tuning number
-  cinematic_constants.gd (HRCine) # the home-run cinematic tuning object
-  pitch.gd       (HRPitch)        # seeded pitch selection + solve
-  swing.gd       (HRSwing)        # swing state machine + swept contact
-  swing_outcome.gd (HRSwingOutcome) # authoritative deterministic hit prediction
-  ball.gd        (HRBall)         # in-play flight, boundaries, scoring
-  fielders.gd    (HRFielders)     # seeded wander + chase/catch
-  cinematic.gd / cinematic_camera.gd  # the home-run cinematic director
-  session.gd     (HomeRunSession) # the round state machine (the heart)
-  view.gd        (HRView)         # pure scene-of-instances builder (was view.ts)
-  materials.gd   (HRMaterials)    # the material palette
-  game.gd        # the Godot host: loop, input, reconciler, camera, lights, HUD, audio
+  constants.gd           # every tuning number
+  math_util.gd           # hash01, euler->quaternion, scalar helpers
+  cinematic_constants.gd # the home-run cinematic tuning
+  # --- typed sim (engine-agnostic) ---
+  swing.gd  contact.gd  pitch.gd  ball.gd  fielders.gd
+  swing_outcome.gd  cinematic.gd  cinematic_camera.gd
+  feedback.gd  pitch_result.gd  scene_view.gd
+  session.gd             # HomeRunSession — the round state machine
+  # --- presentation (Godot) ---
+  materials.gd           # the StandardMaterial3D palette
+  sun.gd                 # wall-clock sun (light + shadow projection)
+  stadium.gd             # static geometry -> MultiMeshInstance3D
+  parts.gd               # shared part-creation / posing helpers
+  batter_view.gd  machine_view.gd  ball_view.gd  fielder_view.gd
+  hud.gd                 # the on-screen overlay
+  audio.gd               # runtime tone-synth cue player
+  game.gd                # Main: loop, input, camera, lights, signals
 ```
-
-Records that were TypeScript object literals are GDScript `Dictionary` values
-(a lightweight, source-faithful choice for this data-transform-heavy port);
-vectors are `Vector3`, rotations are `Quaternion`.
 
 ## Controls
 
@@ -67,8 +78,22 @@ vectors are `Vector3`, rotations are `Quaternion`.
 Open `project.godot` in Godot 4.6+, or from the CLI:
 
 ```sh
-godot --path .                      # play
+godot --path .
 ```
+
+### Web / WebAssembly build
+
+Export needs the **standard (non-mono) Godot 4.6** build + its web export
+templates (the `.NET`/mono build does not ship web templates). Then:
+
+```sh
+godot --headless --path . --export-release "Web" dist/index.html
+python serve_web.py 8060 dist          # COOP/COEP headers for threaded wasm
+# open http://localhost:8060/
+```
+
+`serve_web.py` sends the cross-origin-isolation headers Godot's threaded web
+build needs (a plain `python -m http.server` won't).
 
 ### Deterministic screenshot
 
@@ -82,10 +107,9 @@ godot --path . --rendering-driver opengl3 --resolution 1024x700 \
 
 ## Fidelity notes
 
-- The renderer is set to `gl_compatibility` for portability. Lighting is the
-  data-driven moving sun + a fill light (the same values the original computed);
-  the game bakes its own translucent ground-shadow ellipses, so Godot's real-time
-  shadows are left off, exactly as in the original.
-- Godot gamma-brightens midtones relative to the original's flatter Lambert, so a
-  small ambient reduction + brightness/contrast trim in the `WorldEnvironment`
-  brings the toy palette back toward the original's dusk mood.
+- Renderer is `gl_compatibility` (WebGL2 on the web). Lighting is the data-driven
+  moving sun + a fill light; the game bakes its own translucent ground-shadow
+  ellipses, so Godot's real-time shadows stay off, exactly as in the original.
+- Godot gamma-brightens midtones vs the original's flatter Lambert, so a small
+  ambient reduction + brightness/contrast trim in the `Environment` brings the
+  toy palette back toward the original's dusk mood.

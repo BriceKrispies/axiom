@@ -1,18 +1,38 @@
-# ball.gd — ball flight for a ball in play (post-contact), the toy stadium boundary
-# rules (foul wedge, wall line, home-run volume), outcome classification, and the
-# scoring table. Ported from ball.ts. A BallFlight is a Dictionary mutated in place:
-# {pos, vel, bounces, firstLandDist, homer, foul, exitSpeed, loft, spray, ticks}.
+# BallFlight — a ball in play (post-contact): flight integration, the toy stadium's
+# boundary rules (foul wedge, wall line, home-run volume), outcome classification,
+# and the scoring table. `step()` advances one tick in place and returns true once
+# the ball rests or dies.
+extends RefCounted
 
+const BallFlight = preload("res://scripts/ball.gd")
 const HRC = preload("res://scripts/constants.gd")
 
 const SQRT1_2 := 0.7071067811865476
 
-static func new_flight(pos: Vector3, vel: Vector3, exit_speed: float, loft: float, spray: float) -> Dictionary:
-	return {
-		"bounces": 0, "exitSpeed": exit_speed, "firstLandDist": 0.0,
-		"foul": absf(spray) > HRC.FOUL_ANGLE, "homer": false, "loft": loft,
-		"pos": pos, "spray": spray, "ticks": 0, "vel": vel,
-	}
+var pos: Vector3
+var vel: Vector3
+var bounces: int
+var first_land_dist: float   # horizontal distance of the FIRST ground touch (0 until it lands)
+var homer: bool
+var foul: bool
+var exit_speed: float         # launch params frozen at contact
+var loft: float
+var spray: float
+var ticks: int
+
+static func new_flight(pos: Vector3, vel: Vector3, exit_speed: float, loft: float, spray: float) -> BallFlight:
+	var b := BallFlight.new()
+	b.pos = pos
+	b.vel = vel
+	b.bounces = 0
+	b.first_land_dist = 0.0
+	b.homer = false
+	b.foul = absf(spray) > HRC.FOUL_ANGLE
+	b.exit_speed = exit_speed
+	b.loft = loft
+	b.spray = spray
+	b.ticks = 0
+	return b
 
 static func is_fair(x: float, z: float) -> bool:
 	return z >= 0.0 and absf(x) <= z
@@ -23,81 +43,77 @@ static func beyond_wall(x: float, z: float) -> bool:
 static func _hyp(a: float, b: float) -> float:
 	return sqrt(a * a + b * b)
 
-# Advance the flight one tick (mutates b). Returns true once the ball rests/dies.
-static func step_flight(b: Dictionary) -> bool:
-	b.ticks += 1
+func step() -> bool:
+	ticks += 1
 	var g: float = HRC.GRAVITY / (HRC.FIXED_HZ * HRC.FIXED_HZ)
-	b.vel = Vector3(b.vel.x, b.vel.y - g, b.vel.z)
-	var next := Vector3(b.pos.x + b.vel.x, b.pos.y + b.vel.y, b.pos.z + b.vel.z)
+	vel = Vector3(vel.x, vel.y - g, vel.z)
+	var next := Vector3(pos.x + vel.x, pos.y + vel.y, pos.z + vel.z)
 
-	if not b.homer and not beyond_wall(b.pos.x, b.pos.z) and beyond_wall(next.x, next.z):
-		if b.foul:
+	if not homer and not beyond_wall(pos.x, pos.z) and beyond_wall(next.x, next.z):
+		if foul:
 			return true
 		if next.y >= HRC.WALL_HEIGHT:
-			b.homer = true
+			homer = true
 		else:
-			var sx := 1.0 if b.pos.x >= 0.0 else -1.0
-			var inv := SQRT1_2
-			var nx := -sx * inv
-			var nz := -inv
-			var vn: float = b.vel.x * nx + b.vel.z * nz
-			b.vel = Vector3(
-				(b.vel.x - 2.0 * vn * nx) * HRC.WALL_RESTITUTION,
-				b.vel.y * HRC.WALL_RESTITUTION,
-				(b.vel.z - 2.0 * vn * nz) * HRC.WALL_RESTITUTION,
+			var sx := 1.0 if pos.x >= 0.0 else -1.0
+			var nx := -sx * SQRT1_2
+			var nz := -SQRT1_2
+			var vn: float = vel.x * nx + vel.z * nz
+			vel = Vector3(
+				(vel.x - 2.0 * vn * nx) * HRC.WALL_RESTITUTION,
+				vel.y * HRC.WALL_RESTITUTION,
+				(vel.z - 2.0 * vn * nz) * HRC.WALL_RESTITUTION,
 			)
-			next = Vector3(b.pos.x + b.vel.x, b.pos.y + b.vel.y, b.pos.z + b.vel.z)
+			next = Vector3(pos.x + vel.x, pos.y + vel.y, pos.z + vel.z)
 
-	if next.y <= HRC.BALL_RADIUS and b.vel.y < 0.0:
-		if b.firstLandDist == 0.0:
-			b.firstLandDist = _hyp(next.x, next.z)
-			if not is_fair(next.x, next.z) and not b.homer:
-				b.foul = true
-		b.bounces += 1
+	if next.y <= HRC.BALL_RADIUS and vel.y < 0.0:
+		if first_land_dist == 0.0:
+			first_land_dist = _hyp(next.x, next.z)
+			if not is_fair(next.x, next.z) and not homer:
+				foul = true
+		bounces += 1
 		next = Vector3(next.x, HRC.BALL_RADIUS, next.z)
-		b.vel = Vector3(b.vel.x * HRC.BOUNCE_FRICTION, -b.vel.y * HRC.BOUNCE_RESTITUTION, b.vel.z * HRC.BOUNCE_FRICTION)
-		if b.bounces > 3 or absf(b.vel.y) * HRC.FIXED_HZ < 1.2:
-			b.vel = Vector3(b.vel.x, 0.0, b.vel.z)
+		vel = Vector3(vel.x * HRC.BOUNCE_FRICTION, -vel.y * HRC.BOUNCE_RESTITUTION, vel.z * HRC.BOUNCE_FRICTION)
+		if bounces > 3 or absf(vel.y) * HRC.FIXED_HZ < 1.2:
+			vel = Vector3(vel.x, 0.0, vel.z)
 
-	if next.y <= HRC.BALL_RADIUS + 1e-6 and b.vel.y == 0.0:
-		b.vel = Vector3(b.vel.x * HRC.ROLL_DECAY, 0.0, b.vel.z * HRC.ROLL_DECAY)
-		var speed := _hyp(b.vel.x, b.vel.z) * HRC.FIXED_HZ
-		if speed < HRC.REST_SPEED:
-			b.pos = next
+	if next.y <= HRC.BALL_RADIUS + 1e-6 and vel.y == 0.0:
+		vel = Vector3(vel.x * HRC.ROLL_DECAY, 0.0, vel.z * HRC.ROLL_DECAY)
+		if _hyp(vel.x, vel.z) * HRC.FIXED_HZ < HRC.REST_SPEED:
+			pos = next
 			return true
 
 	if next.z <= HRC.CATCHER_Z:
-		b.pos = next
+		pos = next
 		return true
-	b.pos = next
-	return b.ticks >= HRC.FLIGHT_TIMEOUT_TICKS
+	pos = next
+	return ticks >= HRC.FLIGHT_TIMEOUT_TICKS
 
-static func classify_flight(b: Dictionary) -> String:
-	if b.homer:
+func classify_flight() -> String:
+	if homer:
 		return "homer"
-	if b.foul:
+	if foul:
 		return "foul"
-	if b.exitSpeed < HRC.WEAK_EXIT_SPEED:
+	if exit_speed < HRC.WEAK_EXIT_SPEED:
 		return "weak"
-	if b.loft < HRC.GROUNDER_LOFT:
+	if loft < HRC.GROUNDER_LOFT:
 		return "grounder"
-	var dist: float = b.firstLandDist if b.firstLandDist > 0.0 else _hyp(b.pos.x, b.pos.z)
-	if b.loft > HRC.POPUP_LOFT and dist < HRC.POPUP_MAX_DIST:
+	var dist: float = first_land_dist if first_land_dist > 0.0 else _hyp(pos.x, pos.z)
+	if loft > HRC.POPUP_LOFT and dist < HRC.POPUP_MAX_DIST:
 		return "popup"
 	return "clean"
 
-static func classify_caught(b: Dictionary) -> String:
-	if b.foul:
+func classify_caught() -> String:
+	if foul:
 		return "foul"
-	if b.bounces == 0:
-		return "popup" if b.loft > HRC.POPUP_LOFT else "weak"
-	return "grounder" if b.loft < HRC.GROUNDER_LOFT else "weak"
+	if bounces == 0:
+		return "popup" if loft > HRC.POPUP_LOFT else "weak"
+	return "grounder" if loft < HRC.GROUNDER_LOFT else "weak"
 
 static func score_for(outcome: String, distance: float, homer_streak: int) -> int:
 	var base: int = HRC.SCORE_TABLE[outcome]
 	if outcome == "clean":
 		return base + roundi(distance * HRC.CLEAN_DIST_BONUS)
 	if outcome == "homer":
-		var mult: int = clampi(homer_streak, 1, HRC.STREAK_MULT_CAP)
-		return (base + roundi(distance * HRC.HOMER_DIST_BONUS)) * mult
+		return (base + roundi(distance * HRC.HOMER_DIST_BONUS)) * clampi(homer_streak, 1, HRC.STREAK_MULT_CAP)
 	return base
