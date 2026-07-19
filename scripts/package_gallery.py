@@ -32,8 +32,10 @@ tight iteration, and ``--only <id> [...]`` rebuilds a subset of demos.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -99,24 +101,35 @@ def build_demo_apps(
     for demo_id, app_dir in app_dirs:
         if not (app_dir / "web" / "index.html").is_file():
             sys.exit(f"error: {app_dir}/web/index.html not found — the {demo_id} app is missing.")
-    # fast: compile every demo's wasm in ONE cargo invocation up front, so the shared
-    # engine deps build once (no fat LTO, so they LINK into each app rather than being
-    # re-optimized whole-program per app) and the leaf codegens parallelize. The slow
-    # MVP build-std path builds per-app below. Then finish each bundle (wasm-bindgen,
-    # wasm-opt, loader) — for the fast path from the prebuilt artifacts.
     prebuilt = fast
-    if prebuilt:
-        package_app.prebuild_wasm_crates([app_dir for _, app_dir in app_dirs], target_dir=target_dir, debug=debug)
-    for demo_id, app_dir in app_dirs:
+
+    def finish(demo_id: str, app_dir: Path) -> None:
+        """Turn one prebuilt (or, on the MVP path, to-be-built) crate into its
+        dist/<id>/ bundle: wasm-bindgen glue, wasm-opt, loader, then the app's web/
+        shell with its glue import rewritten to ./axiom-loader.js."""
         out = dist / demo_id
-        print(f"\n[{demo_id}] building bundle into {out}{' (fast: wasm-only)' if fast else ''}")
+        print(f"[{demo_id}] finishing bundle into {out}{' (fast: wasm-only)' if fast else ''}", flush=True)
         snake = package_app.build_bundle(
             app_dir, out, fast=fast, target_dir=target_dir, debug=debug, prebuilt=prebuilt
         )
-        # Copy the app's web/ assets (minus pkg/) beside the bundle and rewrite the
-        # page's ./pkg/<snake>.js glue import to ./axiom-loader.js. Any app-local
-        # web/vendor/ dir rides along here.
         package_app.emit_index_html(app_dir, out, snake, sdk_hosted=False)
+
+    # fast: compile every demo's wasm in ONE cargo invocation up front (engine deps
+    # build once, no fat LTO so they LINK into each app), THEN finish each bundle
+    # CONCURRENTLY. The per-app `wasm-opt -Oz` over the whole engine (~50s each) is the
+    # dominant cost and the runs are fully independent (separate temp + out dirs), so a
+    # thread pool over the external tools turns a serial ~N×50s into ~one wave. The slow
+    # MVP build-std path stays serial: each app runs its own cargo build there, which
+    # would contend on the shared target dir's build lock if parallelized.
+    if prebuilt:
+        package_app.prebuild_wasm_crates([app_dir for _, app_dir in app_dirs], target_dir=target_dir, debug=debug)
+        workers = min(len(app_dirs), os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            # list() forces completion and re-raises the first worker exception.
+            list(pool.map(lambda pair: finish(*pair), app_dirs))
+    else:
+        for demo_id, app_dir in app_dirs:
+            finish(demo_id, app_dir)
 
 
 def _dir_size_mb(path: Path) -> float:
