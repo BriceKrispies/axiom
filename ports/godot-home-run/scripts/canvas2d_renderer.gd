@@ -1,23 +1,31 @@
-# Canvas2DRenderer — a hand-rolled software "3D attempt", the direct analogue of
-# Axiom's canvas2d backend. It reads the SAME scene the 3D pipeline draws (every
-# MeshInstance3D / MultiMeshInstance3D under Field), projects each box/cylinder/
-# sphere to screen space itself (view+projection math in GDScript, with near-plane
-# clipping), painter-sorts the faces by depth, and fills them as flat-shaded 2D
-# polygons/circles via Godot's CanvasItem API. The 3D *math* is software; only the
-# final 2D fills are accelerated — exactly like the original's canvas2d path, which
-# bypasses WebGL rather than routing through it.
+# Canvas2DRenderer — a hand-rolled software "3D attempt", the analogue of Axiom's
+# canvas2d backend. It reads the same 3D scene the GPU pipeline draws, projects each
+# box/cylinder/sphere to screen itself (view+projection in GDScript, Sutherland-
+# Hodgman near-plane clip), and fills flat-shaded polygons on Godot's 2D canvas.
 #
-# The host blanks the real 3D (Camera3D.cull_mask = 0) and shows this instead.
+# Performance (this is CPU rasterization in GDScript, on phones too), three levers:
+#   * BACKFACE CULLING — only front faces of each convex box/cylinder are emitted,
+#     halving the work and removing intra-object overlap (so no per-face sort needed).
+#   * STATIC CACHE — the stadium is fixed geometry; its projected triangles are built
+#     once and reused until the camera actually moves.
+#   * BATCHING — every face is triangulated into ONE big triangle array drawn in a
+#     single canvas_item_add_triangle_array call, instead of thousands of draw calls.
+# Instances are painter-sorted by their FARTHEST vertex so the huge ground/backdrop
+# polys draw behind everything.
 extends Node2D
 
+const HRC = preload("res://scripts/constants.gd")
+
 var camera: Camera3D
-var field: Node3D
+var static_root: Node3D
+var actors_root: Node3D
 var enabled := false
 var sky := Color(0.62, 0.72, 0.95)
 
 const W_EPS := 0.05
 const AMBIENT := 0.42
-const CYL_SEG := 8
+const CYL_SEG := 7
+const SPH_SEG := 9
 
 const BOX_CORNERS: Array[Vector3] = [
 	Vector3(-0.5, -0.5, -0.5), Vector3(0.5, -0.5, -0.5), Vector3(0.5, 0.5, -0.5), Vector3(-0.5, 0.5, -0.5),
@@ -32,12 +40,21 @@ var _proj: Projection
 var _view: Transform3D
 var _vp: Vector2
 var _light := Vector3(0, 1, 0)
-var _cam_right := Vector3(1, 0, 0)
 var _energy := 0.8
+var _cam_pos := Vector3.ZERO
+var _cam_right := Vector3(1, 0, 0)
 
-func setup(cam: Camera3D, field_node: Node3D) -> void:
+# static cache (rebuilt only when the camera moves)
+var _static_pts := PackedVector2Array()
+var _static_cols := PackedColorArray()
+var _have_static := false
+var _last_view: Transform3D
+var _last_proj: Projection
+
+func setup(cam: Camera3D, static_node: Node3D, actors_node: Node3D) -> void:
 	camera = cam
-	field = field_node
+	static_root = static_node
+	actors_root = actors_node
 
 func set_frame(sun_dir: Vector3, energy: float) -> void:
 	_light = (-sun_dir).normalized()
@@ -47,33 +64,70 @@ func _draw() -> void:
 	if not enabled or camera == null:
 		return
 	_vp = get_viewport_rect().size
-	draw_rect(Rect2(Vector2.ZERO, _vp), sky)
 	_proj = camera.get_camera_projection()
 	_view = camera.get_camera_transform().affine_inverse()
+	_cam_pos = camera.global_position
 	_cam_right = camera.global_transform.basis.x.normalized()
-	var prims: Array = []
-	_gather(field, prims)
-	prims.sort_custom(func(a, b): return a[0] > b[0])
-	for p in prims:
-		if p[1] == 0:
-			draw_colored_polygon(p[2], p[3])
-		else:
-			draw_circle(p[2], p[3], p[4])
+	draw_rect(Rect2(Vector2.ZERO, _vp), sky)
 
-func _gather(node: Node, prims: Array) -> void:
+	if not _have_static or _view != _last_view or _proj != _last_proj:
+		_last_view = _view
+		_last_proj = _proj
+		var s_insts: Array = []
+		_collect(static_root, s_insts)
+		var packed := _pack(s_insts)
+		_static_pts = packed[0]
+		_static_cols = packed[1]
+		_have_static = true
+	_blit(_static_pts, _static_cols)
+
+	var d_insts: Array = []
+	_collect(actors_root, d_insts)
+	var dp := _pack(d_insts)
+	_blit(dp[0], dp[1])
+
+func _blit(pts: PackedVector2Array, cols: PackedColorArray) -> void:
+	var n := pts.size()
+	if n < 3:
+		return
+	var idx := PackedInt32Array()
+	idx.resize(n)
+	for i in range(n):
+		idx[i] = i
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), idx, pts, cols)
+
+# Sort instances back-to-front and fan-triangulate every face into one soup.
+func _pack(insts: Array) -> Array:
+	insts.sort_custom(func(a, b): return a[0] > b[0])
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	for inst in insts:
+		for face in inst[1]:
+			var poly: PackedVector2Array = face[0]
+			var col: Color = face[1]
+			for i in range(1, poly.size() - 1):
+				pts.append(poly[0])
+				pts.append(poly[i])
+				pts.append(poly[i + 1])
+				cols.append(col)
+				cols.append(col)
+				cols.append(col)
+	return [pts, cols]
+
+func _collect(node: Node, out: Array) -> void:
 	for child in node.get_children():
 		if child is MeshInstance3D:
 			if child.visible:
-				_emit(child.mesh, child.global_transform, child.material_override, prims)
+				_emit(child.mesh, child.global_transform, child.material_override, out)
 		elif child is MultiMeshInstance3D and child.visible:
 			var mm: MultiMesh = child.multimesh
 			var base: Transform3D = child.global_transform
 			for i in range(mm.instance_count):
-				_emit(mm.mesh, base * mm.get_instance_transform(i), child.material_override, prims)
+				_emit(mm.mesh, base * mm.get_instance_transform(i), child.material_override, out)
 		if child.get_child_count() > 0:
-			_gather(child, prims)
+			_collect(child, out)
 
-func _emit(mesh: Mesh, xform: Transform3D, mat: Material, prims: Array) -> void:
+func _emit(mesh: Mesh, xform: Transform3D, mat: Material, out: Array) -> void:
 	var albedo := Color(1, 0, 1)
 	var emission := Color(0, 0, 0)
 	if mat is StandardMaterial3D:
@@ -81,14 +135,12 @@ func _emit(mesh: Mesh, xform: Transform3D, mat: Material, prims: Array) -> void:
 		if mat.emission_enabled:
 			emission = mat.emission * mat.emission_energy_multiplier
 	if mesh is BoxMesh:
-		_box(xform, albedo, emission, prims)
+		_box(xform, albedo, emission, out)
 	elif mesh is CylinderMesh:
-		_cyl(xform, albedo, emission, prims)
+		_cyl(xform, albedo, emission, out)
 	elif mesh is SphereMesh:
-		_sphere(xform, albedo, emission, prims)
+		_sphere(xform, albedo, emission, out)
 
-# Flat Lambert with emission as a per-channel FLOOR (glow materials never go dark,
-# but don't blow out to white the way additive emission would in this LDR fill).
 func _shade(albedo: Color, emission: Color, shade: float) -> Color:
 	return Color(
 		clampf(maxf(albedo.r * shade, emission.r), 0.0, 1.0),
@@ -103,8 +155,6 @@ func _clip4(world: Vector3) -> Vector4:
 func _screen(v: Vector4) -> Vector2:
 	return Vector2((v.x / v.w * 0.5 + 0.5) * _vp.x, (0.5 - v.y / v.w * 0.5) * _vp.y)
 
-# Sutherland-Hodgman clip of a Vector4 polygon against the w >= W_EPS half-space
-# (drops geometry behind the camera without the near-plane coordinate blow-up).
 func _clip_w(poly: Array) -> Array:
 	var out: Array = []
 	var n := poly.size()
@@ -118,66 +168,89 @@ func _clip_w(poly: Array) -> Array:
 			out.append(a.lerp(b, (W_EPS - a.w) / (b.w - a.w)))
 	return out
 
-func _emit_poly(poly4: Array, col: Color, prims: Array) -> void:
+# Clip a clip-space polygon, project to screen, drop degenerate (edge-on) polys.
+func _project_face(poly4: Array) -> PackedVector2Array:
 	var clipped := _clip_w(poly4)
 	if clipped.size() < 3:
-		return
+		return PackedVector2Array()
 	var pts := PackedVector2Array()
-	# Sort by the FARTHEST vertex (max clip-w), not the average: the huge ground/
-	# deck/sky polygons span from right in front of the camera to the far outfield,
-	# and an average depth makes them sort "near" and paint over the stands + actors.
-	# The farthest-point key draws those big floor/backdrop polys first (behind).
-	var depth := 0.0
 	for v: Vector4 in clipped:
 		pts.append(_screen(v))
-		depth = maxf(depth, v.w)
-	# Skip degenerate polygons (thin edges seen edge-on) so draw_colored_polygon's
-	# triangulator never chokes on a zero-area shape.
 	var area := 0.0
 	var m := pts.size()
 	for i in range(m):
 		area += pts[i].x * pts[(i + 1) % m].y - pts[(i + 1) % m].x * pts[i].y
 	if absf(area) < 1.0:
-		return
-	prims.append([depth, 0, pts, col, null])
+		return PackedVector2Array()
+	return pts
 
-func _box(xform: Transform3D, albedo: Color, emission: Color, prims: Array) -> void:
-	var wc: Array[Vector4] = []
+func _box(xform: Transform3D, albedo: Color, emission: Color, out: Array) -> void:
+	var cc: Array[Vector4] = []
 	for c in BOX_CORNERS:
-		wc.append(_clip4(xform * c))
+		cc.append(_clip4(xform * c))
+	var faces: Array = []
+	var maxw := 0.0
 	for fi in range(6):
-		var nrm := (xform.basis * BOX_NORMALS[fi]).normalized()
-		var shade := AMBIENT + _energy * maxf(0.0, nrm.dot(_light))
+		var wn := (xform.basis * BOX_NORMALS[fi]).normalized()
+		var fc := xform * (BOX_NORMALS[fi] * 0.5)
+		if wn.dot(fc - _cam_pos) >= 0.0:  # backface: skip
+			continue
 		var face: Array = BOX_FACES[fi]
-		_emit_poly([wc[face[0]], wc[face[1]], wc[face[2]], wc[face[3]]], _shade(albedo, emission, shade), prims)
+		var poly4 := [cc[face[0]], cc[face[1]], cc[face[2]], cc[face[3]]]
+		var scr := _project_face(poly4)
+		if scr.size() < 3:
+			continue
+		var shade := AMBIENT + _energy * maxf(0.0, wn.dot(_light))
+		faces.append([scr, _shade(albedo, emission, shade)])
+		for v: Vector4 in poly4:
+			maxw = maxf(maxw, v.w)
+	if faces.size() > 0:
+		out.append([maxw, faces])
 
-func _cyl(xform: Transform3D, albedo: Color, emission: Color, prims: Array) -> void:
-	var top: Array[Vector3] = []
-	var bot: Array[Vector3] = []
+func _cyl(xform: Transform3D, albedo: Color, emission: Color, out: Array) -> void:
+	var top: Array[Vector4] = []
+	var bot: Array[Vector4] = []
 	for s in range(CYL_SEG):
 		var ang := TAU * s / CYL_SEG
 		var lx := 0.5 * cos(ang)
 		var lz := 0.5 * sin(ang)
-		top.append(xform * Vector3(lx, 0.5, lz))
-		bot.append(xform * Vector3(lx, -0.5, lz))
+		top.append(_clip4(xform * Vector3(lx, 0.5, lz)))
+		bot.append(_clip4(xform * Vector3(lx, -0.5, lz)))
+	var faces: Array = []
+	var maxw := 0.0
 	for s in range(CYL_SEG):
 		var s2 := (s + 1) % CYL_SEG
 		var ang := TAU * (s + 0.5) / CYL_SEG
-		var nrm := (xform.basis * Vector3(cos(ang), 0, sin(ang))).normalized()
-		var shade := AMBIENT + _energy * maxf(0.0, nrm.dot(_light))
-		_emit_poly([_clip4(top[s]), _clip4(top[s2]), _clip4(bot[s2]), _clip4(bot[s])], _shade(albedo, emission, shade), prims)
-	var ntop := (xform.basis * Vector3(0, 1, 0)).normalized()
-	var top_poly: Array = []
-	for s in range(CYL_SEG):
-		top_poly.append(_clip4(top[s]))
-	_emit_poly(top_poly, _shade(albedo, emission, AMBIENT + _energy * maxf(0.0, ntop.dot(_light))), prims)
-	var nbot := (xform.basis * Vector3(0, -1, 0)).normalized()
-	var bot_poly: Array = []
-	for s in range(CYL_SEG - 1, -1, -1):
-		bot_poly.append(_clip4(bot[s]))
-	_emit_poly(bot_poly, _shade(albedo, emission, AMBIENT + _energy * maxf(0.0, nbot.dot(_light))), prims)
+		var wn := (xform.basis * Vector3(cos(ang), 0, sin(ang))).normalized()
+		var fc := xform * Vector3(cos(ang) * 0.5, 0, sin(ang) * 0.5)
+		if wn.dot(fc - _cam_pos) >= 0.0:
+			continue
+		var scr := _project_face([top[s], top[s2], bot[s2], bot[s]])
+		if scr.size() < 3:
+			continue
+		faces.append([scr, _shade(albedo, emission, AMBIENT + _energy * maxf(0.0, wn.dot(_light)))])
+		maxw = maxf(maxw, maxf(top[s].w, bot[s].w))
+	_cap(xform, Vector3(0, 1, 0), top, albedo, emission, faces)
+	_cap(xform, Vector3(0, -1, 0), bot, albedo, emission, faces)
+	for v: Vector4 in top:
+		maxw = maxf(maxw, v.w)
+	if faces.size() > 0:
+		out.append([maxw, faces])
 
-func _sphere(xform: Transform3D, albedo: Color, emission: Color, prims: Array) -> void:
+func _cap(xform: Transform3D, local_n: Vector3, ring: Array, albedo: Color, emission: Color, faces: Array) -> void:
+	var wn := (xform.basis * local_n).normalized()
+	var fc := xform * (local_n * 0.5)
+	if wn.dot(fc - _cam_pos) >= 0.0:
+		return
+	var poly4: Array = []
+	var order := range(ring.size()) if local_n.y > 0.0 else range(ring.size() - 1, -1, -1)
+	for i in order:
+		poly4.append(ring[i])
+	var scr := _project_face(poly4)
+	if scr.size() >= 3:
+		faces.append([scr, _shade(albedo, emission, AMBIENT + _energy * maxf(0.0, wn.dot(_light)))])
+
+func _sphere(xform: Transform3D, albedo: Color, emission: Color, out: Array) -> void:
 	var c4 := _clip4(xform.origin)
 	if c4.w < W_EPS:
 		return
@@ -186,4 +259,11 @@ func _sphere(xform: Transform3D, albedo: Color, emission: Color, prims: Array) -
 	if e4.w < W_EPS:
 		return
 	var center := _screen(c4)
-	prims.append([c4.w, 1, center, center.distance_to(_screen(e4)), _shade(albedo, emission, AMBIENT + _energy * 0.55)])
+	var rad := center.distance_to(_screen(e4))
+	if rad < 0.5:
+		return
+	var poly := PackedVector2Array()
+	for s in range(SPH_SEG):
+		var ang := TAU * s / SPH_SEG
+		poly.append(center + Vector2(cos(ang), sin(ang)) * rad)
+	out.append([c4.w, [[poly, _shade(albedo, emission, AMBIENT + _energy * 0.55)]]])

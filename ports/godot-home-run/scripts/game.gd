@@ -39,6 +39,9 @@ var _fielders: Array[FielderView] = []
 var _audio: AudioScript
 var _canvas: Canvas2DRenderer
 var _canvas_mode := false
+var _touch_left := false
+var _touch_right := false
+var _touch_swing := false
 
 # Screenshot affordance: run with `-- shot <frame> [out.png] [seed] [swingAt]`.
 var _shot_at := -1
@@ -86,7 +89,7 @@ func _ready() -> void:
 	canvas_layer.layer = 0
 	add_child(canvas_layer)
 	_canvas = Canvas2DRenderer.new()
-	_canvas.setup(_camera, $Field)
+	_canvas.setup(_camera, $Field/Static, $Field/Actors)
 	canvas_layer.add_child(_canvas)
 
 	_camera.near = HRC.CAMERA_NEAR
@@ -98,8 +101,45 @@ func _ready() -> void:
 	_sun_light.shadow_enabled = false
 
 	feedback.connect(_hud.on_feedback)
+	_build_touch_ui()
 
 	_session = HomeRunSession.new(_shot_seed if _shot_seed >= 0 else randi())
+
+# On-screen controls for touch/web (hidden on desktop): move left/right + a big
+# SWING button (which also starts the round and restarts once it's over).
+func _build_touch_ui() -> void:
+	if not (DisplayServer.is_touchscreen_available() or OS.has_feature("web")):
+		return
+	var layer := CanvasLayer.new()
+	layer.layer = 2
+	add_child(layer)
+	var left := _touch_button("<", 0.0, 24, 40, 104, 104)
+	left.button_down.connect(func() -> void: _touch_left = true)
+	left.button_up.connect(func() -> void: _touch_left = false)
+	layer.add_child(left)
+	var right := _touch_button(">", 0.0, 140, 40, 104, 104)
+	right.button_down.connect(func() -> void: _touch_right = true)
+	right.button_up.connect(func() -> void: _touch_right = false)
+	layer.add_child(right)
+	var swing := _touch_button("SWING", 1.0, -236, 48, 212, 128)
+	swing.button_down.connect(func() -> void: _touch_swing = true)
+	layer.add_child(swing)
+
+func _touch_button(label: String, anchor_x: float, left_off: float, bottom_off: float, w: float, h: float) -> Button:
+	var b := Button.new()
+	b.text = label
+	b.focus_mode = Control.FOCUS_NONE
+	b.anchor_left = anchor_x
+	b.anchor_right = anchor_x
+	b.anchor_top = 1.0
+	b.anchor_bottom = 1.0
+	b.offset_left = left_off
+	b.offset_right = left_off + w
+	b.offset_top = -bottom_off - h
+	b.offset_bottom = -bottom_off
+	b.modulate = Color(1, 1, 1, 0.7)
+	b.add_theme_font_size_override("font_size", 30)
+	return b
 
 func _build_meshes() -> void:
 	var box := BoxMesh.new()
@@ -142,9 +182,11 @@ func _physics_process(_delta: float) -> void:
 	_frame += 1
 	if Input.is_action_just_pressed("toggle_backend"):
 		_canvas_mode = not _canvas_mode
-	var swing_edge := Input.is_action_just_pressed("swing")
+	var swing_edge := Input.is_action_just_pressed("swing") or _touch_swing
+	_touch_swing = false
 	var restart_edge := Input.is_action_just_pressed("restart")
-	var move_x := -Input.get_axis("move_left", "move_right")
+	var axis := Input.get_axis("move_left", "move_right") + (1.0 if _touch_right else 0.0) - (1.0 if _touch_left else 0.0)
+	var move_x := -clampf(axis, -1.0, 1.0)
 	if _shot_at >= 0:
 		swing_edge = _frame == _shot_swing_at
 		restart_edge = _frame == 2

@@ -21,6 +21,7 @@ var _meter_bg: ColorRect
 var _meter_fill: ColorRect
 var _lb_top: ColorRect
 var _lb_bottom: ColorRect
+var _fps: Label
 
 func _label(size: int, color: Color) -> Label:
 	var l := Label.new()
@@ -88,12 +89,17 @@ func _ready() -> void:
 	_meter_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_meter_bg.add_child(_meter_fill)
 
+	_fps = _label(16, Color(0.7, 0.82, 0.95))
+	_fps.position = Vector2(10, 6)
+	add_child(_fps)
+
 func on_feedback(kind: String, text: String, _big: bool) -> void:
 	if text.length() > 0 and kind != "release":
 		_message.text = text
 		_message.modulate.a = 1.0
 
 func update(session: HomeRunSession, view: SceneView) -> void:
+	_fps.text = "%d fps" % Engine.get_frames_per_second()
 	_score.text = "SCORE %d" % session.score()
 	_pitch.text = "PITCH %d/%d" % [session.pitch_number(), 10]
 	_hr.text = "HR %d" % session.homers()
