@@ -18,6 +18,7 @@ const BallView = preload("res://scripts/ball_view.gd")
 const FielderView = preload("res://scripts/fielder_view.gd")
 const AudioScript = preload("res://scripts/audio.gd")
 const HudScript = preload("res://scripts/hud.gd")
+const Canvas2DRenderer = preload("res://scripts/canvas2d_renderer.gd")
 
 signal feedback(kind: String, text: String, big: bool)
 
@@ -36,6 +37,8 @@ var _machine: MachineView
 var _ball: BallView
 var _fielders: Array[FielderView] = []
 var _audio: AudioScript
+var _canvas: Canvas2DRenderer
+var _canvas_mode := false
 
 # Screenshot affordance: run with `-- shot <frame> [out.png] [seed] [swingAt]`.
 var _shot_at := -1
@@ -47,6 +50,7 @@ var _frame := 0
 func _ready() -> void:
 	randomize()
 	_parse_shot_args()
+	_canvas_mode = OS.get_cmdline_user_args().has("canvas2d")
 	_register_input()
 	_build_meshes()
 	_materials = HRMaterials.build()
@@ -70,6 +74,15 @@ func _ready() -> void:
 
 	_audio = AudioScript.new()
 	add_child(_audio)
+
+	# The software "3D attempt" backend: a Node2D on a CanvasLayer below the HUD,
+	# reading the same 3D nodes and rasterizing them to 2D (toggle with B).
+	var canvas_layer := CanvasLayer.new()
+	canvas_layer.layer = 0
+	add_child(canvas_layer)
+	_canvas = Canvas2DRenderer.new()
+	_canvas.setup(_camera, $Field)
+	canvas_layer.add_child(_canvas)
 
 	_camera.near = HRC.CAMERA_NEAR
 	_camera.far = HRC.CAMERA_FAR
@@ -103,6 +116,7 @@ func _register_input() -> void:
 	_add_action("move_right", [KEY_D, KEY_RIGHT])
 	_add_action("swing", [KEY_SPACE])
 	_add_action("restart", [KEY_ENTER])
+	_add_action("toggle_backend", [KEY_B])
 
 func _add_action(action: String, keys: Array) -> void:
 	if InputMap.has_action(action):
@@ -121,6 +135,8 @@ func _orient_light(light: DirectionalLight3D, direction: Vector3) -> void:
 # ── fixed-step loop (60 Hz physics tick) ──
 func _physics_process(_delta: float) -> void:
 	_frame += 1
+	if Input.is_action_just_pressed("toggle_backend"):
+		_canvas_mode = not _canvas_mode
 	var swing_edge := Input.is_action_just_pressed("swing")
 	var restart_edge := Input.is_action_just_pressed("restart")
 	var move_x := -Input.get_axis("move_left", "move_right")
@@ -163,6 +179,13 @@ func _render() -> void:
 		_fielders[i].pose(view.fielders[i], i, view.tick, celebration, sun)
 
 	_hud.update(_session, view)
+
+	# Backend switch: real 3D (Camera3D renders) vs the software canvas rasterizer.
+	_camera.cull_mask = 0 if _canvas_mode else 0xFFFFF
+	_canvas.enabled = _canvas_mode
+	if _canvas_mode:
+		_canvas.set_frame(sun.direction, sun.energy)
+	_canvas.queue_redraw()
 
 # ── screenshot affordance ──
 func _parse_shot_args() -> void:

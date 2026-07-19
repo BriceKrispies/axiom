@@ -64,7 +64,11 @@ scripts/
   batter_view.gd  machine_view.gd  ball_view.gd  fielder_view.gd
   hud.gd                 # the on-screen overlay
   audio.gd               # runtime tone-synth cue player
-  game.gd                # Main: loop, input, camera, lights, signals
+  canvas2d_renderer.gd   # software "3D attempt" backend (toggle with B)
+  game.gd                # Main: loop, input, camera, lights, signals, backend switch
+serve_web.py             # static server with COOP/COEP headers
+dev_web.py               # hot-reload dev server (watch -> re-export -> SSE reload)
+export_presets.cfg       # Web export preset
 ```
 
 ## Controls
@@ -72,6 +76,21 @@ scripts/
 - **A / D** (or **←/→**) — shift the batter in the box
 - **SPACE** — swing (also starts the round); the bat re-winds on its own (cooldown)
 - **ENTER** — restart once the round is over
+- **B** — toggle the software **canvas2d "3D attempt"** renderer (see below)
+
+## Two render backends
+
+Besides Godot's real GPU render (WebGL2 on the web), the port ships a hand-rolled
+**software rasterizer** — `scripts/canvas2d_renderer.gd`, the direct analogue of
+Axiom's `canvas2d` backend. It reads the *same* 3D scene nodes, projects every
+box/cylinder/sphere to screen itself (view+projection math in GDScript, with
+near-plane clipping), painter-sorts the faces, and fills them as flat-shaded 2D
+polygons/circles via Godot's `CanvasItem` API. The 3D *math* is software; only the
+final 2D fills are accelerated — exactly like the original's canvas2d path, which
+bypasses WebGL rather than routing through it. Toggle it live with **B** (or export
+arg `-- canvas2d`); the host blanks the real 3D (`Camera3D.cull_mask = 0`) and shows
+the `Node2D` overlay instead. Godot has no built-in software-3D backend, so this is
+a parallel renderer, not a flag on Godot's pipeline.
 
 ## Run
 
@@ -94,6 +113,16 @@ python serve_web.py 8060 dist          # COOP/COEP headers for threaded wasm
 
 `serve_web.py` sends the cross-origin-isolation headers Godot's threaded web
 build needs (a plain `python -m http.server` won't).
+
+**Hot reload:** `dev_web.py` is the `axiom-serve` loop for this port — it watches
+`scripts/*.gd` + the scene/config, re-exports the Web build on save (standard
+Godot), and live-reloads the browser over SSE. The mono Godot can't export web, so
+point it at a standard binary:
+
+```sh
+GODOT_WEB_BIN=/path/to/standard/godot python dev_web.py 8060 dist
+# edit any script under scripts/ -> the page reloads itself
+```
 
 ### Deterministic screenshot
 
