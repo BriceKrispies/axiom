@@ -51,6 +51,11 @@ func _ready() -> void:
 	randomize()
 	_parse_shot_args()
 	_canvas_mode = OS.get_cmdline_user_args().has("canvas2d")
+	# On the web, also honor ?backend=canvas2d in the URL (Axiom's convention).
+	if OS.has_feature("web"):
+		var q = JavaScriptBridge.eval("location.search || ''", true)
+		if typeof(q) == TYPE_STRING and "canvas2d" in q:
+			_canvas_mode = true
 	_register_input()
 	_build_meshes()
 	_materials = HRMaterials.build()

@@ -21,6 +21,7 @@ import time
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8060
 DIST = sys.argv[2] if len(sys.argv) > 2 else "dist"
+HOST = os.environ.get("HOST", "0.0.0.0")  # 0.0.0.0 = reachable from phones on the LAN
 GODOT = os.environ.get("GODOT_WEB_BIN") or (sys.argv[3] if len(sys.argv) > 3 else "godot")
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WATCH = ["scripts/*.gd", "main.tscn", "project.godot", "export_presets.cfg"]
@@ -124,8 +125,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 def main() -> None:
     threading.Thread(target=_watch, daemon=True).start()
     http.server.ThreadingHTTPServer.allow_reuse_address = True
-    with http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler) as httpd:
-        print(f"[dev] hot-reload server at http://localhost:{PORT}/  (edit scripts/*.gd to reload)", flush=True)
+    with http.server.ThreadingHTTPServer((HOST, PORT), Handler) as httpd:
+        print(f"[dev] hot-reload server on {HOST}:{PORT} (edit scripts/*.gd to reload; open from a LAN device at http://<this-machine-ip>:{PORT}/)", flush=True)
         httpd.serve_forever()
 
 

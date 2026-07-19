@@ -10,8 +10,11 @@ import http.server
 import socketserver
 import sys
 
+import os
+
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8060
 DIRECTORY = sys.argv[2] if len(sys.argv) > 2 else "dist"
+HOST = os.environ.get("HOST", "0.0.0.0")  # 0.0.0.0 = reachable from phones on the LAN
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -34,6 +37,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 
 socketserver.TCPServer.allow_reuse_address = True
-with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as httpd:
-    print(f"serving {DIRECTORY} at http://localhost:{PORT}/ (COOP/COEP enabled)")
+with socketserver.TCPServer((HOST, PORT), Handler) as httpd:
+    print(f"serving {DIRECTORY} on {HOST}:{PORT} (COOP/COEP enabled; LAN devices use http://<this-machine-ip>:{PORT}/)")
     httpd.serve_forever()
