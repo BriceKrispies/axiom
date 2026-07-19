@@ -5,3 +5,5 @@
 /export/
 /dist/
 *.tmp
+# Self-signed dev TLS certs (generate locally; never commit).
+/.certs/

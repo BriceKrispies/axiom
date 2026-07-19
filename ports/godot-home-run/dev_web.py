@@ -125,8 +125,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 def main() -> None:
     threading.Thread(target=_watch, daemon=True).start()
     http.server.ThreadingHTTPServer.allow_reuse_address = True
+    # Godot's Web build requires a secure context, which browsers grant only on
+    # localhost or HTTPS -- so serving to a phone on the LAN needs HTTPS. If a
+    # self-signed cert is present (.certs/cert.pem + key.pem), serve over TLS.
+    cert = os.path.join(ROOT, ".certs", "cert.pem")
+    key = os.path.join(ROOT, ".certs", "key.pem")
+    https = os.path.exists(cert) and os.path.exists(key)
     with http.server.ThreadingHTTPServer((HOST, PORT), Handler) as httpd:
-        print(f"[dev] hot-reload server on {HOST}:{PORT} (edit scripts/*.gd to reload; open from a LAN device at http://<this-machine-ip>:{PORT}/)", flush=True)
+        if https:
+            import ssl
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(cert, key)
+            httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+        scheme = "https" if https else "http"
+        print(f"[dev] hot-reload server on {HOST}:{PORT} ({scheme}); LAN devices open {scheme}://<this-machine-ip>:{PORT}/", flush=True)
         httpd.serve_forever()
 
 
