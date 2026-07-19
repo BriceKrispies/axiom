@@ -30,6 +30,8 @@ import {
 import { newSwing, stepSwing } from "./swing.ts";
 import { isStrike, pitchGapTicks, selectPitch, solvePitch } from "./pitch.ts";
 import { catchingFielder, newFielders, projectLanding, stepFielders } from "./fielders.ts";
+import { type Runner, advanceRunner, basesForHit, newRunner, runnerFacing, runnerMoving, runnerWorld } from "./bases.ts";
+import { resolveForcePlay } from "./fielding.ts";
 import { type BallFlight, beyondWall, classifyCaught, classifyFlight, newFlight, scoreFor, stepFlight } from "./ball.ts";
 import { evaluateSwingOutcome } from "./swing-outcome.ts";
 import { HOME_RUN_CINEMATIC_TUNING } from "./cinematic-constants.ts";
@@ -39,6 +41,9 @@ import * as C from "./constants.ts";
 
 const TRAIL_MAX = 14;
 const HIDDEN_BALL: Vec3 = vec3(0, -100, 0);
+
+/** The center-screen label for a hit that earns bases (index = bases 1…4). */
+const BASE_LABEL: Record<number, string> = { 1: "SINGLE", 2: "DOUBLE", 3: "TRIPLE", 4: "HOME RUN!" };
 
 const OUTCOME_TEXT: Record<Outcome, string> = {
   ball: "BALL",
@@ -89,6 +94,21 @@ export class HomeRunSession {
   // Fielders.
   #fielders: FielderState[];
 
+  // Base runners (persistent across pitches within a round) + their tallies.
+  #runners: Runner[] = [];
+  #runnerSeq = 0;
+  #basesGained = 0;
+  #runnersHome = 0;
+  #outs = 0;
+  /** Bases the most recent hit earned (0 for an out / take) — for the HUD flash. */
+  #lastBases = 0;
+
+  // A thrown ball during a defensive play (the fielder relays it to the bags); the
+  // covering fielders' `cover` targets are set alongside it. Stepped in `result`.
+  #throwActive = false;
+  #throwPos: Vec3 = vec3(0, 0, 0);
+  #throwBases: number[] = [];
+
   // Feel + camera animation state (all deterministic).
   #hitStop = 0;
   #muzzleFlash = 0;
@@ -128,7 +148,7 @@ export class HomeRunSession {
 
   public constructor(seed = 1) {
     this.#seed = seed | 0;
-    this.#fielders = newFielders(this.#seed);
+    this.#fielders = newFielders();
   }
 
   /** Advance exactly one fixed tick. */
@@ -196,35 +216,39 @@ export class HomeRunSession {
 
     switch (this.#phase) {
       case "ready":
-        stepFielders(this.#fielders, this.#seed, this.#simTick, null);
+        stepFielders(this.#fielders, null);
         if (intent.start || intent.swing) {
           this.#beginPitch();
         }
         break;
       case "windup":
-        stepFielders(this.#fielders, this.#seed, this.#simTick, null);
+        stepFielders(this.#fielders, null);
         if (this.#phaseTicks >= this.#gap + C.WINDUP_TICKS) {
           this.#releasePitch();
         }
         break;
       case "pitch":
-        stepFielders(this.#fielders, this.#seed, this.#simTick, null);
+        stepFielders(this.#fielders, null);
         this.#stepPitch();
         break;
       case "flight":
         this.#stepFlight();
         break;
       case "result":
-        stepFielders(this.#fielders, this.#seed, this.#simTick, null);
+        stepFielders(this.#fielders, null);
+        this.#stepRunners();
+        this.#stepThrow();
         if (this.#cinematic.phase === "landing" && this.#cinematic.phaseTicks >= HOME_RUN_CINEMATIC_TUNING.landingCameraDurationTicks) {
           this.#cinematic = enterCinematicPhase(this.#cinematic, "celebration");
         }
-        if (this.#phaseTicks >= this.#resultDuration) {
+        // Hold the result until the base runners have settled (so a hit's runners
+        // finish their trot before the next pitch), but never past the safety cap.
+        if (this.#phaseTicks >= this.#resultDuration && (!this.#runnersMoving() || this.#phaseTicks >= C.RUN_MAX_TICKS)) {
           this.#nextPitchOrOver();
         }
         break;
       case "over":
-        stepFielders(this.#fielders, this.#seed, this.#simTick, null);
+        stepFielders(this.#fielders, null);
         if (intent.start) {
           this.reset();
         }
@@ -270,7 +294,16 @@ export class HomeRunSession {
     this.#plateCross = undefined;
     this.#flight = undefined;
     this.#trail = [];
-    this.#fielders = newFielders(this.#seed);
+    this.#fielders = newFielders();
+    this.#runners = [];
+    this.#runnerSeq = 0;
+    this.#basesGained = 0;
+    this.#runnersHome = 0;
+    this.#outs = 0;
+    this.#lastBases = 0;
+    this.#throwActive = false;
+    this.#throwBases = [];
+    this.#throwPos = vec3(0, 0, 0);
     this.#hitStop = 0;
     this.#muzzleFlash = 0;
     this.#punchTicks = 0;
@@ -299,6 +332,7 @@ export class HomeRunSession {
     this.#phase = "windup";
     this.#phaseTicks = 0;
     this.#swungThisPitch = false;
+    this.#clearDefense(); // fielders return to their spots for the next pitch
     this.#spec = selectPitch(this.#seed, this.#pitchIndex);
     this.#gap = pitchGapTicks(this.#seed, this.#pitchIndex);
     this.#ballPos = HIDDEN_BALL;
@@ -397,8 +431,12 @@ export class HomeRunSession {
   #stepFlight(): void {
     const b = this.#flight!;
     const wasHomer = b.homer;
-    const landing = projectLanding(b.pos, b.vel, C.GRAVITY / (C.FIXED_HZ * C.FIXED_HZ));
-    stepFielders(this.#fielders, this.#seed, this.#simTick, b.foul ? null : landing);
+    // Fielders converge on where the ball is going: a fly ball's projected landing,
+    // but a grounder's CURRENT rolling position (so infielders intercept it in the
+    // infield instead of chasing a landing point near home while it rolls past).
+    const grounder = b.pos.y <= C.GROUND_BALL_HEIGHT;
+    const chase = grounder ? { x: b.pos.x, z: b.pos.z } : projectLanding(b.pos, b.vel, C.GRAVITY / (C.FIXED_HZ * C.FIXED_HZ));
+    stepFielders(this.#fielders, b.foul ? null : chase);
 
     const done = stepFlight(b);
     this.#ballPos = b.pos;
@@ -433,7 +471,7 @@ export class HomeRunSession {
         const outcome = classifyCaught(b);
         const dist = Math.hypot(b.pos.x, b.pos.z);
         const caughtAir = b.bounces === 0 && !b.foul;
-        this.#resolve(caughtAir ? "CAUGHT!" : "FIELDED", outcome, dist, true);
+        this.#resolve(caughtAir ? "CAUGHT!" : "FIELDED", outcome, dist, true, caughtAir);
         return;
       }
     }
@@ -452,7 +490,7 @@ export class HomeRunSession {
     }
   }
 
-  #resolve(text: string, outcome: Outcome, distance: number, caught: boolean): void {
+  #resolve(text: string, outcome: Outcome, distance: number, caught: boolean, caughtOnFly = false): void {
     const dist = Math.round(distance);
     this.#streak = outcome === "homer" ? this.#streak + 1 : 0;
     const points = scoreFor(outcome, dist, this.#streak);
@@ -469,10 +507,151 @@ export class HomeRunSession {
     const streakTag = outcome === "homer" && this.#streak > 1 ? ` ×${Math.min(this.#streak, C.STREAK_MULT_CAP)}` : "";
     this.#emit({ big: outcome === "homer", kind: outcome, text: `${text}${suffix}${streakTag}` });
 
+    // Base running: a fair ball not caught on the fly puts the batter on base and
+    // advances everyone already aboard (a homer clears the yard).
+    this.#startBaseRunning(outcome, dist, caughtOnFly);
+
     this.#flight = undefined;
     this.#resultDuration = outcome === "homer" ? C.HOMER_RESULT_TICKS : C.RESULT_TICKS;
     this.#phase = "result";
     this.#phaseTicks = 0;
+  }
+
+  // ── base running ────────────────────────────────────────────────────────────
+
+  /** Turn a resolved batted ball into base running AND defense. A homer clears the
+   * yard; a fly caught on the fly is a batter out; anything else fair is fielded and
+   * the defense tries to force the batter (and lead runners) out at the bags — the
+   * ball-vs-runner race in `fielding.ts`. Runners the defense beats are out; the
+   * rest (and a safe batter) advance by the hit's base value. */
+  #startBaseRunning(outcome: Outcome, dist: number, caughtOnFly: boolean): void {
+    // Not in play.
+    if (outcome === "foul" || outcome === "ball" || outcome === "miss") {
+      this.#lastBases = 0;
+      return;
+    }
+    // Home run: the batter and everyone aboard score, no defensive play.
+    if (outcome === "homer") {
+      this.#advanceAll(4);
+      const batter = newRunner(4, this.#nextLane());
+      this.#basesGained += batter.target;
+      this.#runners.push(batter);
+      this.#lastBases = 4;
+      this.#emit({ big: true, kind: "baseHit", text: BASE_LABEL[4]! });
+      return;
+    }
+    // Caught on the fly: the batter is out; runners hold (tag up), nobody advances.
+    if (caughtOnFly) {
+      this.#lastBases = 0;
+      this.#outs += 1;
+      this.#emit({ big: false, kind: "out", text: "OUT!" });
+      return;
+    }
+
+    // Fielded in fair territory: the defense's force play (may be a double play).
+    // A ground ball (grounder / weak roller) fielded in the infield is a force out.
+    const bases = basesForHit(outcome, dist, false);
+    const groundBall = outcome === "grounder" || outcome === "weak";
+    const play = resolveForcePlay(this.#ballPos, groundBall, this.#runners);
+    // Retire the runners the defense threw out.
+    this.#runners = this.#runners.filter((r) => !play.outRunners.includes(r));
+    // The survivors (and, if safe, the batter) take the hit's bases.
+    this.#advanceAll(bases);
+    if (!play.batterOut) {
+      const batter = newRunner(bases, this.#nextLane());
+      this.#basesGained += batter.target;
+      this.#runners.push(batter);
+    }
+    this.#outs += play.outs;
+    this.#lastBases = play.batterOut ? 0 : bases;
+    this.#setupDefense(play.throwBases);
+    this.#emit(
+      play.doublePlay
+        ? { big: true, kind: "doublePlay", text: "DOUBLE PLAY!" }
+        : play.batterOut
+          ? { big: false, kind: "out", text: "OUT!" }
+          : { big: bases >= 3, kind: "baseHit", text: BASE_LABEL[bases] ?? "" },
+    );
+  }
+
+  /** Advance every runner already on base by `bases`, tallying the bases gained. */
+  #advanceAll(bases: number): void {
+    for (const r of this.#runners) {
+      const start = Math.round(r.pos);
+      r.target = Math.min(4, start + bases);
+      this.#basesGained += r.target - start;
+    }
+  }
+
+  /** The next runner's small inward lane offset (so stacked runners don't overlap). */
+  #nextLane(): number {
+    return (((this.#runnerSeq += 1) % 3) - 1) * C.RUNNER_LANE;
+  }
+
+  /** Arm the defensive play: the ball is thrown from where it was fielded through
+   * the bag sequence, and each bag's covering fielder steps onto it. */
+  #setupDefense(throwBases: readonly number[]): void {
+    if (throwBases.length === 0) {
+      return;
+    }
+    this.#throwActive = true;
+    this.#throwPos = vec3(this.#ballPos.x, C.THROW_HEIGHT, this.#ballPos.z);
+    this.#throwBases = [...throwBases];
+    for (const base of throwBases) {
+      const idx = C.BASE_COVER[base];
+      const bp = idx === undefined ? undefined : C.BASE_POINTS[base % 4];
+      if (idx !== undefined && bp !== undefined) {
+        this.#fielders[idx]!.cover = { x: bp.x, z: bp.z };
+      }
+    }
+  }
+
+  /** Fly the thrown ball toward the next bag; hand off to the relay bag on arrival. */
+  #stepThrow(): void {
+    const nextBase = this.#throwBases[0];
+    if (!this.#throwActive || nextBase === undefined) {
+      this.#throwActive = false;
+      return;
+    }
+    const bp = C.BASE_POINTS[nextBase % 4]!;
+    const target = vec3(bp.x, C.THROW_HEIGHT, bp.z);
+    const step = C.THROW_SPEED / C.FIXED_HZ;
+    const dx = target.x - this.#throwPos.x;
+    const dy = target.y - this.#throwPos.y;
+    const dz = target.z - this.#throwPos.z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d <= step) {
+      this.#throwPos = target;
+      this.#throwBases.shift();
+      this.#throwActive = this.#throwBases.length > 0;
+    } else {
+      this.#throwPos = vec3(this.#throwPos.x + (dx / d) * step, this.#throwPos.y + (dy / d) * step, this.#throwPos.z + (dz / d) * step);
+    }
+  }
+
+  /** Stand the defense back down for the next pitch (clear throws + base covers). */
+  #clearDefense(): void {
+    this.#throwActive = false;
+    this.#throwBases = [];
+    for (const f of this.#fielders) {
+      f.cover = undefined;
+    }
+  }
+
+  /** Advance every runner one tick; tally + retire any who reach home. */
+  #stepRunners(): void {
+    for (const r of this.#runners) {
+      const { justScored } = advanceRunner(r);
+      if (justScored) {
+        this.#runnersHome += 1;
+        this.#emit({ big: true, kind: "runScored", text: "RUN!" });
+      }
+    }
+    this.#runners = this.#runners.filter((r) => !r.scored);
+  }
+
+  #runnersMoving(): boolean {
+    return this.#runners.some(runnerMoving);
   }
 
   #nextPitchOrOver(): void {
@@ -599,7 +778,15 @@ export class HomeRunSession {
       cameraTarget,
       cinematicPhase: this.#cinematic.phase,
       debugCounters: { impactParticles: this.#cinematic.impactParticles, trailSegments: this.#trail.length },
-      fielders: this.#fielders.map((f) => ({ chasing: f.chasing, x: f.x, z: f.z })),
+      fielders: this.#fielders.map((f) => ({ chasing: f.chasing, facing: f.facing, speed: f.speed, traveled: f.traveled, x: f.x, z: f.z })),
+      runners: this.#runners.map((r) => {
+        const w = runnerWorld(r);
+        return { facing: runnerFacing(r), moving: runnerMoving(r), traveled: r.traveled, x: w.x, z: w.z };
+      }),
+      // The batter has become a runner exactly when this play's hit earned bases —
+      // hide the plate figure so the lead runner reads as the batter taking off.
+      batterRunning: this.#phase === "result" && this.#lastBases > 0,
+      throwBall: { pos: this.#throwPos, visible: this.#throwActive },
       hitStop: this.#hitStop > 0,
       hudVisible: this.#cinematic.letterbox < 0.5,
       impactFlash: clamp01(this.#impactFlash / 12),
@@ -669,6 +856,15 @@ export class HomeRunSession {
     c.#flight = this.#flight === undefined ? undefined : { ...this.#flight };
     c.#trail = [...this.#trail];
     c.#fielders = this.#fielders.map((f) => ({ ...f }));
+    c.#runners = this.#runners.map((r) => ({ ...r }));
+    c.#runnerSeq = this.#runnerSeq;
+    c.#basesGained = this.#basesGained;
+    c.#runnersHome = this.#runnersHome;
+    c.#outs = this.#outs;
+    c.#lastBases = this.#lastBases;
+    c.#throwActive = this.#throwActive;
+    c.#throwPos = this.#throwPos;
+    c.#throwBases = [...this.#throwBases];
     c.#hitStop = this.#hitStop;
     c.#muzzleFlash = this.#muzzleFlash;
     c.#punchTicks = this.#punchTicks;
@@ -734,6 +930,26 @@ export class HomeRunSession {
   public get results(): readonly PitchResult[] {
     return this.#results;
   }
+  /** Cumulative bases advanced by all runners this round (HUD). */
+  public get basesGained(): number {
+    return this.#basesGained;
+  }
+  /** Runs scored — runners who made it all the way home this round (HUD). */
+  public get runnersHome(): number {
+    return this.#runnersHome;
+  }
+  /** Outs the defense has recorded this round (force plays + caught flies). */
+  public get outs(): number {
+    return this.#outs;
+  }
+  /** How many runners are currently on base. */
+  public get runnersOnBase(): number {
+    return this.#runners.length;
+  }
+  /** Bases the most recent hit earned (0 for an out / take). */
+  public get lastBases(): number {
+    return this.#lastBases;
+  }
 
   /** A cheap bounded digest of the observable state (replay-equality tests). */
   public hash(): number {
@@ -750,6 +966,11 @@ export class HomeRunSession {
       this.#streak,
       this.#pitchIndex,
       phaseIndex,
+      this.#basesGained,
+      this.#runnersHome,
+      this.#outs,
+      this.#runners.length,
+      ...this.#runners.map((r) => Math.round(r.pos * 1000)),
     ];
     return fields.reduce((h, f) => (Math.imul(h, 1_000_003) + (f | 0)) % 2_147_483_647, 2_166_136_261);
   }

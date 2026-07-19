@@ -86,5 +86,6 @@ mutants-out*/
 
 # Playwright controller daemon state (browser logs, screenshots, command log)
 scripts/.playwright-controller/
+scripts/.localhost-servers/
 
 /screenshots

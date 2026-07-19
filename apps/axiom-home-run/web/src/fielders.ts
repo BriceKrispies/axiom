@@ -1,43 +1,31 @@
 /*
- * fielders.ts — the toy defenders. Each fielder owns a visible circular patrol
- * region and wanders inside it on a smooth two-frequency drift whose phases and
- * frequencies are seeded per fielder — independent, unsynchronized, replayable.
- * When a ball is hit, fielders whose region is near the projected landing point
- * chase it (clamped to a slightly expanded radius) and can catch or field a
- * reachable ball. No pathfinding, no base running — animated interception
- * hazards only. SDK-free and deterministic.
+ * fielders.ts — the toy defenders. Each fielder holds a fixed position (its
+ * `FIELDER_SPOTS` spot) and stands watching; the ONLY time it moves is to chase a
+ * hit ball whose projected landing falls near its region — it runs to intercept
+ * (clamped to a slightly expanded radius), can catch/field what it reaches, then
+ * walks back to its spot. No wander, no pathfinding, no base running. The walk/run
+ * gait is driven by the fielder's actual displacement (`traveled`/`facing`/`speed`),
+ * so it is procedural and deterministic. SDK-free.
  */
 
-import { type Vec3, hash01, mix } from "./vec.ts";
+import { type Vec3 } from "./vec.ts";
 import type { FielderState } from "./types.ts";
 import * as C from "./constants.ts";
 
-/** The seeded wander target for fielder `i` at `tick` — always inside its circle. */
-export const wanderPos = (seed: number, i: number, tick: number): { readonly x: number; readonly z: number } => {
-  const spot = C.FIELDER_SPOTS[i]!;
-  const f1 = mix(C.WANDER_FREQ_LO, C.WANDER_FREQ_HI, hash01(seed, i, 11));
-  const f2 = mix(C.WANDER_FREQ_LO, C.WANDER_FREQ_HI, hash01(seed, i, 12));
-  const p1 = hash01(seed, i, 13) * Math.PI * 2;
-  const p2 = hash01(seed, i, 14) * Math.PI * 2;
-  const p3 = hash01(seed, i, 15) * Math.PI * 2;
-  const amp = spot.radius * C.WANDER_AMPLITUDE;
-  let dx = amp * (Math.sin(tick * f1 + p1) * 0.62 + Math.sin(tick * f2 * 1.7 + p3) * 0.38);
-  let dz = amp * (Math.sin(tick * f2 + p2) * 0.62 + Math.sin(tick * f1 * 1.7 + p1) * 0.38);
-  // Clamp the combined offset inside the patrol circle (margin already in amp).
-  const d = Math.hypot(dx, dz);
-  const limit = spot.radius * 0.95;
-  if (d > limit) {
-    dx = (dx / d) * limit;
-    dz = (dz / d) * limit;
-  }
-  return { x: spot.x + dx, z: spot.z + dz };
-};
+export const newFielders = (): FielderState[] =>
+  C.FIELDER_SPOTS.map((spot) => ({
+    // Standing on the spot, facing home plate (toward the batter).
+    chasing: false,
+    facing: Math.atan2(-spot.x, -spot.z),
+    speed: 0,
+    traveled: 0,
+    x: spot.x,
+    z: spot.z,
+  }));
 
-export const newFielders = (seed: number): FielderState[] =>
-  C.FIELDER_SPOTS.map((_, i) => {
-    const w = wanderPos(seed, i, 0);
-    return { chasing: false, x: w.x, z: w.z };
-  });
+/** Below this per-tick step the fielder is treated as standing (facing held, no
+ * gait advance) — the view then points it at the batter/ball it is watching. */
+const WALK_EPS = 0.004;
 
 /** Project where a ball in flight will next reach ground level (closed form). */
 export const projectLanding = (
@@ -52,16 +40,13 @@ export const projectLanding = (
 };
 
 /**
- * Advance every fielder one tick. While no ball is in play they track their
- * seeded wander; while one is, nearby fielders converge on the projected landing
- * point, clamped so they never abandon their own region.
+ * Advance every fielder one tick. A fielder whose region is near a reachable
+ * `landing` runs to intercept it (clamped so it never abandons its region);
+ * otherwise it holds — walking back to its fixed spot if a chase displaced it,
+ * then standing still. Movement bookkeeping (`traveled`/`speed`/`facing`) feeds
+ * the procedural walk gait.
  */
-export const stepFielders = (
-  fielders: FielderState[],
-  seed: number,
-  tick: number,
-  landing: { readonly x: number; readonly z: number } | null,
-): void => {
+export const stepFielders = (fielders: FielderState[], landing: { readonly x: number; readonly z: number } | null): void => {
   for (let i = 0; i < fielders.length; i += 1) {
     const f = fielders[i]!;
     const spot = C.FIELDER_SPOTS[i]!;
@@ -69,7 +54,12 @@ export const stepFielders = (
     let tz: number;
     const reachable =
       landing !== null && Math.hypot(landing.x - spot.x, landing.z - spot.z) <= spot.radius * C.FIELDER_REACH_MULT;
-    if (reachable) {
+    if (f.cover !== undefined) {
+      // Covering a base for a force play — walk onto the bag (top priority).
+      tx = f.cover.x;
+      tz = f.cover.z;
+      f.chasing = true;
+    } else if (reachable) {
       // Chase the landing point, clamped to a slightly expanded radius.
       let cx = landing.x - spot.x;
       let cz = landing.z - spot.z;
@@ -83,9 +73,9 @@ export const stepFielders = (
       tz = spot.z + cz;
       f.chasing = true;
     } else {
-      const w = wanderPos(seed, i, tick);
-      tx = w.x;
-      tz = w.z;
+      // Hold the fixed spot (walk back to it if a prior chase moved us off).
+      tx = spot.x;
+      tz = spot.z;
       f.chasing = false;
     }
     const dx = tx - f.x;
@@ -96,17 +86,23 @@ export const stepFielders = (
       f.x += (dx / d) * step;
       f.z += (dz / d) * step;
     }
+    const moved = step > 0 && d > 1e-6 ? step : 0;
+    f.traveled += moved;
+    f.speed = moved * C.FIXED_HZ;
+    f.facing = moved > WALK_EPS ? Math.atan2(dx, dz) : f.facing;
   }
 };
 
-/** The index of a fielder able to catch/field the ball right now, or -1. */
+/** The index of a fielder able to catch/field the ball right now, or -1. A ball on
+ * the ground is scooped from a wider reach than a pinpoint air catch. */
 export const catchingFielder = (fielders: readonly FielderState[], ball: Vec3): number => {
   if (ball.y > C.CATCH_HEIGHT) {
     return -1;
   }
+  const reach = ball.y <= C.GROUND_BALL_HEIGHT ? C.GROUND_FIELD_RADIUS : C.CATCH_RADIUS;
   for (let i = 0; i < fielders.length; i += 1) {
     const f = fielders[i]!;
-    if (Math.hypot(ball.x - f.x, ball.z - f.z) <= C.CATCH_RADIUS) {
+    if (Math.hypot(ball.x - f.x, ball.z - f.z) <= reach) {
       return i;
     }
   }

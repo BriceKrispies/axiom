@@ -42,6 +42,14 @@ export interface Hud {
   readonly streak: number;
   readonly multiplier: number;
   readonly bestDistance: number;
+  /** Cumulative bases advanced by all runners this round. */
+  readonly basesGained: number;
+  /** Runs scored — runners who made it back home. */
+  readonly runnersHome: number;
+  /** Runners currently standing on base. */
+  readonly runnersOnBase: number;
+  /** Outs the defense recorded this round. */
+  readonly outs: number;
   readonly lastMph: number;
   readonly lastPitchName: string;
   readonly readiness: number;
@@ -76,6 +84,20 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   FielderBase: flat([1, 0.6, 0.3, 1]),
   FielderCap: flat([1, 0.22, 0.18, 1]),
   FielderWhite: flat([1, 0.98, 0.95, 1]),
+  // Rigged-figure parts, shared skin/shoes/facemask + a home (blue) and an away
+  // (red/white) team palette. The batter and its base runners wear the home kit;
+  // the fielders wear the away kit.
+  FigSkin: flat([0.86, 0.66, 0.52, 1]),
+  FigShoe: flat([0.12, 0.12, 0.15, 1]),
+  FigMask: flat([0.22, 0.22, 0.26, 1]),
+  HomeJersey: flat([0.22, 0.46, 1, 1]),
+  HomeHelmet: flat([0.14, 0.3, 0.85, 1]),
+  HomePants: flat([0.9, 0.92, 0.98, 1]),
+  HomeTrim: flat([1, 0.82, 0.2, 1]),
+  AwayJersey: flat([1, 0.98, 0.95, 1]),
+  AwayHelmet: flat([0.9, 0.22, 0.18, 1]),
+  AwayPants: flat([0.82, 0.84, 0.9, 1]),
+  AwayTrim: flat([0.85, 0.2, 0.16, 1]),
   GrassDark: flat([0.4, 0.82, 0.24, 1]),
   GrassLight: flat([0.55, 1, 0.34, 1]),
   GroundGreen: flat([0.38, 0.7, 0.24, 1]),
@@ -156,6 +178,26 @@ const toneFor = (kind: Feedback["kind"], big: boolean): readonly ToneSpec[] => {
         { duration: 0.22, freq: 140, volume: 0.2, wave: "sawtooth" },
         { delay: 0.05, duration: 0.18, freq: 210, volume: 0.16, wave: "triangle" },
       ];
+    // A short "safe!" flourish when a hit puts the batter on base (louder deep hits).
+    case "baseHit":
+      return [
+        { duration: 0.09, freq: big ? 520 : 440, volume: 0.2, wave: "triangle" },
+        { delay: 0.06, duration: 0.1, freq: big ? 700 : 560, volume: 0.16, wave: "triangle" },
+      ];
+    // A bright bell the instant a runner crosses home to score.
+    case "runScored":
+      return [
+        { duration: 0.14, freq: 784, volume: 0.28, wave: "triangle" },
+        { delay: 0.07, duration: 0.16, freq: 1047, volume: 0.24, wave: "triangle" },
+      ];
+    // A flat "he's out" thunk; the double play adds a second, lower beat.
+    case "out":
+      return [{ duration: 0.12, freq: 180, volume: 0.22, wave: "square" }];
+    case "doublePlay":
+      return [
+        { duration: 0.1, freq: 200, volume: 0.24, wave: "square" },
+        { delay: 0.12, duration: 0.14, freq: 130, volume: 0.24, wave: "square" },
+      ];
     default:
       return [];
   }
@@ -192,6 +234,7 @@ export const game: Game<HomeRunSession> = {
 export const readHud = (state: HomeRunSession): Hud => {
   const view = state.view();
   return {
+    basesGained: state.basesGained,
     bestDistance: state.bestDistance,
     cinematicPhase: view.cinematicPhase,
     debugCounters: {
@@ -209,9 +252,12 @@ export const readHud = (state: HomeRunSession): Hud => {
     phase: state.phase,
     pitchCount: PITCH_COUNT,
     pitchNumber: state.pitchNumber,
+    outs: state.outs,
     ready: state.swing.state === "ready",
     readiness: state.swing.readiness,
     results: state.results,
+    runnersHome: state.runnersHome,
+    runnersOnBase: state.runnersOnBase,
     score: state.score,
     streak: state.streak,
   };

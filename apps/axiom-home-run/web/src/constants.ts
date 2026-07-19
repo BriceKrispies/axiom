@@ -67,6 +67,8 @@ export const BATTER_START_X = 0.95;
 export const BATTER_STEP_SPEED = 0.055;
 /** The batter's feet (and the bat pivot) stand slightly behind the plate center. */
 export const BATTER_Z = -0.15;
+/** The batter stands side-on to the camera, facing across the plate (−X). */
+export const BATTER_FACING = -Math.PI / 2;
 
 // ── the always-armed swing ────────────────────────────────────────────────────
 /**
@@ -207,33 +209,57 @@ export interface FielderSpot {
 }
 
 export const FIELDER_SPOTS: readonly FielderSpot[] = [
-  { name: "1B", radius: 1.7, x: -6.9, z: 7.9 },
-  { name: "2B", radius: 1.7, x: -3.4, z: 11.8 },
-  { name: "SS", radius: 1.7, x: 3.4, z: 11.8 },
-  { name: "3B", radius: 1.7, x: 6.9, z: 7.9 },
-  { name: "LF", radius: 2.4, x: 12.5, z: 17.5 },
-  { name: "LC", radius: 2.4, x: 6.8, z: 22.5 },
-  { name: "CF", radius: 2.4, x: 0, z: 24.5 },
-  { name: "RC", radius: 2.4, x: -6.8, z: 22.5 },
-  { name: "RF", radius: 2.4, x: -12.5, z: 17.5 },
+  // Infielders flank their bags so each base has a nearby cover (see BASE_COVER).
+  { name: "1B", radius: 2.4, x: -6.6, z: 8.1 },
+  { name: "2B", radius: 2.6, x: -2.6, z: 13.4 },
+  { name: "SS", radius: 2.6, x: 2.6, z: 13.4 },
+  { name: "3B", radius: 2.4, x: 6.6, z: 8.1 },
+  { name: "LF", radius: 2.6, x: 12.5, z: 17.5 },
+  { name: "LC", radius: 2.6, x: 6.8, z: 22.5 },
+  { name: "CF", radius: 2.6, x: 0, z: 24.5 },
+  { name: "RC", radius: 2.6, x: -6.8, z: 22.5 },
+  { name: "RF", radius: 2.6, x: -12.5, z: 17.5 },
   // The machine operator, feeding balls beside the mound (mostly stands there).
   { name: "OP", radius: 0.7, x: 2.2, z: 10 },
+  // The catcher, crouched behind home — covers a force at the plate.
+  { name: "C", radius: 1.2, x: 0, z: -1.6 },
 ] as const;
 
-/** Wander amplitude as a share of the patrol radius (leaves margin at the rim). */
-export const WANDER_AMPLITUDE = 0.72;
-/** Wander base angular frequencies (rad/tick); per-fielder values are seeded near these. */
-export const WANDER_FREQ_LO = 0.011;
-export const WANDER_FREQ_HI = 0.031;
-/** Chase speed toward an interception point (u/tick). */
+/** Which fielder (index into FIELDER_SPOTS) covers each base for a force play,
+ * keyed by base index (1 = first, 2 = second, 3 = third, 4 = home). The covering
+ * fielder steps onto the bag to receive the throw. */
+export const BASE_COVER: Readonly<Record<number, number>> = { 1: 0, 2: 1, 3: 3, 4: 10 };
+
+// ── fielding: throws + force-out reach ────────────────────────────────────────
+/** Throw speed of a fielded ball to a base (u/s) — fast, arcade. */
+export const THROW_SPEED = 52;
+/** Height the thrown ball flies at (chest/glove height), world units. */
+export const THROW_HEIGHT = 1.0;
+/**
+ * A ground ball fielded within this distance of home is IN THE INFIELD — the
+ * defense makes the routine play and forces the batter out at first. A ground ball
+ * that gets past this (into the outfield) is a hit (safe, bases by distance). This
+ * is the fielding difficulty knob.
+ */
+export const INFIELD_FORCE_RADIUS = 15.5;
+/** A ground ball fielded this shallow can be turned into a DOUBLE PLAY (the defense
+ * has time to get the lead force AND relay to first). */
+export const DOUBLE_PLAY_RADIUS = 13;
+
+/** Chase/return speed toward an interception point or back to the spot (u/tick). */
 export const FIELDER_SPEED = 0.075;
 /** A fielder reacts when the projected landing is within radius·REACH_MULT of home spot… */
 export const FIELDER_REACH_MULT = 2.0;
 /** …but may leave its circle only up to radius·CHASE_CLAMP while chasing. */
 export const FIELDER_CHASE_CLAMP = 1.45;
-/** Catch/field the ball inside this horizontal distance, below CATCH_HEIGHT. */
+/** Catch a ball IN THE AIR inside this horizontal distance, below CATCH_HEIGHT. */
 export const CATCH_RADIUS = 0.6;
 export const CATCH_HEIGHT = 1.6;
+/** Field a ball ON THE GROUND (a grounder rolling by) inside this wider distance —
+ * an infielder scoops it as it passes rather than needing a pinpoint glove catch. */
+export const GROUND_FIELD_RADIUS = 1.5;
+/** A ball at/below this height is treated as a ground ball for fielding. */
+export const GROUND_BALL_HEIGHT = 0.45;
 
 // ── outcome thresholds ───────────────────────────────────────────────────────
 /** Exit speeds (u/s) below this are weak contact no matter the arc. */
@@ -270,6 +296,35 @@ export const SHAKE_CONTACT = 0.09;
 export const SHAKE_HOMER = 0.2;
 export const SHAKE_TICKS = 14;
 export const SHAKE_TICKS_HOMER = 24;
+
+// ── base running ────────────────────────────────────────────────────────────
+/**
+ * After a fair ball that ISN'T caught on the fly, the batter becomes a runner and
+ * everyone already on base advances. Bases earned scale with how far the ball got:
+ * a homer clears the yard (4), a deep drive is a triple, a gapper a double, and any
+ * other fair ball that drops or is fielded on the ground is a single (the runner
+ * beats it out — only an air catch is an out). Distances are the same world units
+ * the outcome `dist` is measured in.
+ */
+export const DOUBLE_DIST = 20;
+export const TRIPLE_DIST = 30;
+/** Runner foot speed along the base paths (u/s) — brisk, arcade. */
+export const RUNNER_SPEED = 15.2;
+/** The four diamond corners a runner rounds, indexed 0=home,1=1B,2=2B,3=3B — the
+ * same base positions the painted bases sit on (see `BASE_CORNER`). */
+export const BASE_POINTS: readonly Vec3[] = [
+  vec3(0, 0, 0),
+  vec3(-BASE_CORNER, 0, BASE_CORNER),
+  vec3(0, 0, 2 * BASE_CORNER),
+  vec3(BASE_CORNER, 0, BASE_CORNER),
+];
+/** Length of one base path leg (home→1B), world units — all four legs are equal. */
+export const BASE_LEG = Math.hypot(BASE_CORNER, BASE_CORNER);
+/** A small inward lane offset so stacked runners never perfectly overlap (u). */
+export const RUNNER_LANE = 0.6;
+/** The result phase holds until the runners settle, but never longer than this
+ * (a safety cap — a full home-run trot around four bases is ~335 ticks). */
+export const RUN_MAX_TICKS = 400;
 
 // ── camera (fixed, elevated, behind home plate) ──────────────────────────────
 export const CAMERA_POS: Vec3 = vec3(0, 6.1, -6.4);

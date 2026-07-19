@@ -15,7 +15,7 @@ import { hash01, vec3 } from "./vec.ts";
 import type { Intent, Outcome } from "./types.ts";
 import { newSwing, resolveContact, stepSwing } from "./swing.ts";
 import { isStrike, pitchPool, selectPitch, solvePitch } from "./pitch.ts";
-import { catchingFielder, projectLanding, stepFielders, wanderPos } from "./fielders.ts";
+import { catchingFielder, projectLanding, stepFielders } from "./fielders.ts";
 import { beyondWall, classifyFlight, isFair, newFlight, scoreFor, stepFlight } from "./ball.ts";
 import { HomeRunSession } from "./session.ts";
 import * as C from "./constants.ts";
@@ -268,47 +268,46 @@ test("a solved pitch arrives at its aim point over the plate", () => {
 
 // ── fielders ─────────────────────────────────────────────────────────────────
 
-test("every fielder's wander stays inside its patrol circle", () => {
-  for (let i = 0; i < C.FIELDER_SPOTS.length; i += 1) {
+const mkFielders = () => C.FIELDER_SPOTS.map((s) => ({ chasing: false, facing: 0, speed: 0, traveled: 0, x: s.x, z: s.z }));
+
+test("fielders hold their spot when there is no ball to chase", () => {
+  const fielders = mkFielders();
+  for (let t = 0; t < 300; t += 1) {
+    stepFielders(fielders, null);
+  }
+  for (let i = 0; i < fielders.length; i += 1) {
     const spot = C.FIELDER_SPOTS[i]!;
-    for (let t = 0; t < 3000; t += 7) {
-      const p = wanderPos(5, i, t);
-      const d = Math.hypot(p.x - spot.x, p.z - spot.z);
-      assert.ok(d <= spot.radius + 1e-9, `${spot.name} at t=${t}: ${d}`);
-    }
+    assert.ok(Math.hypot(fielders[i]!.x - spot.x, fielders[i]!.z - spot.z) < 1e-6, `${spot.name} stays put`);
+    assert.equal(fielders[i]!.chasing, false);
+    assert.equal(fielders[i]!.speed, 0, "a held fielder is not moving");
   }
 });
 
-test("fielder wander reproduces from the seed and differs across fielders", () => {
-  assert.deepEqual(wanderPos(3, 4, 500), wanderPos(3, 4, 500));
-  assert.notDeepEqual(wanderPos(3, 4, 500), wanderPos(4, 4, 500));
-  // Unsynchronized: two outfielders are not in phase.
-  const a = wanderPos(3, 4, 500);
-  const sa = C.FIELDER_SPOTS[4]!;
-  const b = wanderPos(3, 6, 500);
-  const sb = C.FIELDER_SPOTS[6]!;
-  assert.notDeepEqual({ x: a.x - sa.x, z: a.z - sa.z }, { x: b.x - sb.x, z: b.z - sb.z });
-});
-
-test("a reachable landing point pulls nearby fielders into a clamped chase", () => {
-  const fielders = C.FIELDER_SPOTS.map((s) => ({ chasing: false, x: s.x, z: s.z }));
+test("a reachable landing point pulls nearby fielders into a clamped chase, then they return", () => {
+  const fielders = mkFielders();
   const cf = C.FIELDER_SPOTS.findIndex((s) => s.name === "CF");
   const landing = { x: C.FIELDER_SPOTS[cf]!.x + 1.5, z: C.FIELDER_SPOTS[cf]!.z + 1.5 };
   for (let t = 0; t < 200; t += 1) {
-    stepFielders(fielders, 1, t, landing);
+    stepFielders(fielders, landing);
   }
   const f = fielders[cf]!;
   assert.ok(f.chasing, "CF reacts");
   assert.ok(Math.hypot(f.x - landing.x, f.z - landing.z) < 0.2, "CF converges on the landing point");
   const spot = C.FIELDER_SPOTS[cf]!;
   assert.ok(Math.hypot(f.x - spot.x, f.z - spot.z) <= spot.radius * C.FIELDER_CHASE_CLAMP + 1e-9, "never leaves the clamp");
-  // A fielder across the field ignores it.
+  // A fielder across the field ignores it and holds its spot.
   const rf = C.FIELDER_SPOTS.findIndex((s) => s.name === "1B");
   assert.equal(fielders[rf]!.chasing, false);
+  assert.ok(Math.hypot(fielders[rf]!.x - C.FIELDER_SPOTS[rf]!.x, fielders[rf]!.z - C.FIELDER_SPOTS[rf]!.z) < 1e-6);
+  // Ball gone: CF walks back to its spot.
+  for (let t = 0; t < 400; t += 1) {
+    stepFielders(fielders, null);
+  }
+  assert.ok(Math.hypot(f.x - spot.x, f.z - spot.z) < 1e-6, "CF returns to its spot");
 });
 
 test("catchingFielder requires closeness AND a catchable height", () => {
-  const fielders = C.FIELDER_SPOTS.map((s) => ({ chasing: false, x: s.x, z: s.z }));
+  const fielders = C.FIELDER_SPOTS.map((s) => ({ chasing: false, facing: 0, speed: 0, traveled: 0, x: s.x, z: s.z }));
   const cf = C.FIELDER_SPOTS.findIndex((s) => s.name === "CF")!;
   const spot = C.FIELDER_SPOTS[cf]!;
   assert.equal(catchingFielder(fielders, vec3(spot.x, 0.5, spot.z)), cf);

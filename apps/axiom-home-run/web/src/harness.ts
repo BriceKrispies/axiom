@@ -53,13 +53,18 @@ const boot_ = async (): Promise<void> => {
   const letterboxTop = el("letterbox-top");
   const letterboxBottom = el("letterbox-bottom");
   const fields = {
+    bases: el("bases"),
     best: el("best"),
     homers: el("homers"),
+    outs: el("outs"),
     mph: el("mph"),
+    overBases: el("over-bases"),
     overBest: el("over-best"),
     overHomers: el("over-homers"),
+    overRuns: el("over-runs"),
     overScore: el("over-score"),
     pitch: el("pitch"),
+    runs: el("runs"),
     score: el("score"),
     streak: el("streak"),
   };
@@ -114,6 +119,12 @@ const boot_ = async (): Promise<void> => {
     fields.streak.classList.toggle("up", hud.streak > 1);
     fields.mph.textContent = hud.lastMph > 0 ? `${hud.lastMph} MPH ${hud.lastPitchName}` : "—";
     fields.best.textContent = hud.bestDistance > 0 ? `${hud.bestDistance}m` : "—";
+    // Base running: total bases advanced and runs driven home this round. `runs`
+    // reads how many runners "made it back home"; `bases` the cumulative advance.
+    fields.bases.textContent = String(hud.basesGained);
+    fields.runs.textContent = String(hud.runnersHome);
+    fields.runs.classList.toggle("up", hud.runnersOnBase > 0);
+    fields.outs.textContent = String(hud.outs);
 
     // The ready meter: visible while the batter re-winds (the swing cooldown),
     // fading away once he's wound and ready. Hidden on the ready/over screens.
@@ -127,6 +138,8 @@ const boot_ = async (): Promise<void> => {
     over.classList.toggle("show", done);
     if (done) {
       fields.overScore.textContent = String(hud.score);
+      fields.overRuns.textContent = String(hud.runnersHome);
+      fields.overBases.textContent = String(hud.basesGained);
       fields.overHomers.textContent = String(hud.homers);
       fields.overBest.textContent = hud.bestDistance > 0 ? `${hud.bestDistance}m` : "—";
     }

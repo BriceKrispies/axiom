@@ -40,19 +40,43 @@ fastball, heater, sinker, riser, inside, outside) with seeded aim/speed jitter;
 the first pitches are easy, hard profiles appear only late. Every pitch is
 telegraphed by the machine's compression wind-up and muzzle flash.
 
+## Base running
+
+A fair ball that ISN'T caught on the fly puts the batter on base and advances
+everyone already aboard. Only a ball caught in the air is an out (leave the
+batter, re-bat as normal). Bases earned scale with how far the ball got: a homer
+clears the yard (4), a deep drive is a **triple**, a gapper a **double**, and any
+other fair ball that drops or is fielded off a bounce is a **single** — the runner
+beats it out. Runners are **persistent** across pitches within a round, all
+advancing by the same base count on each hit (so nobody passes anyone), and a
+runner who reaches home scores a **run**. The HUD tracks **BASES** (cumulative
+advance) and **RUNS HOME** (runs driven in); the round-over card totals both.
+
+The runners — and the batter and fielders — are the **rigged player figure**
+ported from the sibling `apps/end-zone` (`axiom-figure` skeleton): a 17-box jointed
+body driven by a `JointPose`. Runners use the end-zone **distance-driven,
+planted-foot running gait** (two-bone leg IK, world-locked stance feet — no
+skating). Because a base runner travels a KNOWN deterministic path, that gait is
+ported **stateless** here (the anti-skate lock is reconstructed closed-form from
+distance travelled), so `view.ts` stays a pure function. The batter uses a batting
+stance (the bat still swings from the hands); fielders an idle athletic stance.
+
 ## Structure
 
 This is a **pure-TypeScript leaf app** over the shared engine (the heat-check
 shape). There is no `Cargo.toml` / `app.toml` / `package.json`; everything lives
 under `web/`:
 
-- `web/src/{vec,constants,types,pitch,swing,fielders,ball,session}.ts` — the
+- `web/src/{vec,constants,types,pitch,swing,fielders,ball,bases,session}.ts` — the
   **SDK-free** core. All variation derives from the session seed via a pure
   integer hash (no stateful RNG, no wall-clock), so the whole game is
-  constructible and replayable under bare `node --test`.
-  `web/src/home-run.test.ts` covers it.
-- `web/src/scene.ts` — the ONE file that touches `@axiom/game`, building the 3D
-  stadium procedurally and mirroring the session's `view()` into scene nodes.
+  constructible and replayable under bare `node --test`. `bases.ts` is the
+  base-running model. `web/src/{home-run,base-running,figure}.test.ts` cover it.
+- `web/src/{figure-math,figure,figure-pose}.ts` — the rigged player figure ported
+  from `apps/end-zone`: quat/TRS math, the 17-box skeleton + rig + two-bone leg IK,
+  and the pose builders (stateless running gait, batting stance, fielder idle).
+- `web/src/view.ts` — the ONE pure presentation file, building the 3D stadium and
+  the rigged batter / fielders / runners from the session's `view()` snapshot.
 - `web/src/game.ts` — registers the fixed-update loop, folds input into an
   `Intent`, advances the session, exposes `readHud()` for the DOM overlay, and
   plays the synthesized audio hooks (`playTone`).

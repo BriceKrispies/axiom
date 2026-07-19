@@ -18,9 +18,11 @@
  */
 
 import type { Scene, SceneInstance, SceneLight } from "@axiom/web-engine";
-import { type Quat, type Vec3, IDENTITY_QUAT, clamp01, mix, quatFromEulerXyz, vec3 } from "./vec.ts";
+import { type Quat, type Vec3, IDENTITY_QUAT, clamp, clamp01, hash01, mix, quatFromEulerXyz, vec3 } from "./vec.ts";
 import { batDir, batPlaneY } from "./swing.ts";
-import type { SceneView, SwingState } from "./types.ts";
+import type { RunnerView, SceneView, SwingState } from "./types.ts";
+import { TAG_FACEMASK, TAG_HELMET, TAG_JERSEY, TAG_PANTS, TAG_SHOES, TAG_SKIN, TAG_TRIM, bodyTransform, posedParts } from "./figure.ts";
+import { type JointPose, battingPose, idlePose, reachArmsTo, runningPose } from "./figure-pose.ts";
 import * as C from "./constants.ts";
 
 // ── instance builders (pure data, no engine) ────────────────────────────────────
@@ -41,6 +43,42 @@ const cyl = (key: string, mat: string, pos: Vec3, scale: Vec3, rot: Quat = IDENT
   mk(key, "cylinder", mat, pos, scale, rot);
 const orb = (key: string, mat: string, pos: Vec3, radius: number): SceneInstance =>
   mk(key, "sphere", mat, pos, sphereScale(radius), IDENTITY_QUAT);
+
+// ── rigged player figure (ported end-zone skeleton) ─────────────────────────────
+
+/** A team kit: which material renders each figure part tag. */
+type Palette = Readonly<Record<number, string>>;
+
+/** The home (blue) kit — the batter and its base runners. */
+const HOME_PALETTE: Palette = {
+  [TAG_FACEMASK]: "FigMask",
+  [TAG_HELMET]: "HomeHelmet",
+  [TAG_JERSEY]: "HomeJersey",
+  [TAG_PANTS]: "HomePants",
+  [TAG_SHOES]: "FigShoe",
+  [TAG_SKIN]: "FigSkin",
+  [TAG_TRIM]: "HomeTrim",
+};
+
+/** The away (red/white) kit — the fielders. */
+const AWAY_PALETTE: Palette = {
+  [TAG_FACEMASK]: "FigMask",
+  [TAG_HELMET]: "AwayHelmet",
+  [TAG_JERSEY]: "AwayJersey",
+  [TAG_PANTS]: "AwayPants",
+  [TAG_SHOES]: "FigShoe",
+  [TAG_SKIN]: "FigSkin",
+  [TAG_TRIM]: "AwayTrim",
+};
+
+/** Emit one rigged figure as 17 keyed boxes: resolve the pose to world part boxes
+ * under a body transform at `ground`/`facing`, styled by the team `palette`. */
+const emitFigure = (out: SceneInstance[], keyPrefix: string, pose: JointPose, ground: Vec3, facing: number, palette: Palette): void => {
+  const body = bodyTransform(ground, facing, pose, 0);
+  for (const [i, part] of posedParts(pose, body).entries()) {
+    out.push({ key: `${keyPrefix}/${i}`, material: palette[part.tag] ?? "FigSkin", mesh: part.mesh, transform: part.transform });
+  }
+};
 
 const YAW_POS = quatFromEulerXyz(0, Math.PI / 4, 0);
 const YAW_NEG = quatFromEulerXyz(0, -Math.PI / 4, 0);
@@ -229,47 +267,56 @@ const batTilt = (state: SwingState, readiness: number): number => {
   return mix(0.1, 0.68, readiness);
 };
 
+/** The bat lying on the ground by home once the batter has dropped it and run. */
+const buildDroppedBat = (out: SceneInstance[]): void => {
+  const px = C.BATTER_START_X - 0.25;
+  const pz = C.BATTER_Z - 0.55;
+  const py = 0.13;
+  const theta = 0.5; // a fixed sprawl angle; the bat lies flat on the dirt
+  const d = batDir(theta);
+  const rot = quatFromEulerXyz(0, theta + Math.PI / 2, 0);
+  BAT_SEGMENTS.forEach(([r0, r1, w], i) => {
+    const rc = (r0 + r1) / 2;
+    out.push(box(`dropbat/${i}`, "bat", vec3(px + d.x * rc, py, pz + d.z * rc), vec3(r1 - r0 + 0.02, w, w), rot));
+  });
+  out.push(box("dropbat/knob", "BatKnob", vec3(px + d.x * C.BAT_GRIP_R, py, pz + d.z * C.BAT_GRIP_R), vec3(0.15, 0.15, 0.15), rot));
+};
+
 const buildBatter = (out: SceneInstance[], sun: SunState, view: SceneView): void => {
+  // Once the batter has put the ball in play he IS the lead runner — hide the
+  // plate figure and its held bat, and leave the bat lying by home (he let go).
+  if (view.batterRunning) {
+    buildDroppedBat(out);
+    return;
+  }
   const bx = view.batterX;
   const bz = C.BATTER_Z;
   const s = view.swing;
+  // Coil while wound (readiness), unwind through the swing (twist toward square).
   const coil = s.state === "swing" || s.state === "follow" ? 0 : s.readiness;
   const twist = clamp01(1 - Math.abs(s.theta - C.THETA_SWEET) / 2.4);
-  const yawAngle = mix(-0.55, 0.5, twist) + coil * -0.35;
-  const crouch = coil * 0.07;
-  const yaw = quatFromEulerXyz(0, yawAngle, coil * 0.12);
 
-  out.push(castShadow("batter/shadow", sun, bx, bz, 1.5 - crouch, 0.95, 0.004));
-  out.push(cyl("batter/puck", "BatterPuck", vec3(bx, 0.16, bz), vec3(1.05, 0.12, 0.78)));
-  out.push(box("batter/legL", "BatterBlue", vec3(bx, 0.42 - crouch * 0.5, bz - 0.16), vec3(0.17, 0.42 - crouch, 0.17)));
-  out.push(box("batter/legR", "BatterBlue", vec3(bx, 0.42 - crouch * 0.5, bz + 0.16), vec3(0.17, 0.42 - crouch, 0.17)));
-  out.push(box("batter/hips", "BatterBlue", vec3(bx, 0.68 - crouch, bz), vec3(0.3, 0.18, 0.42), yaw));
-  out.push(box("batter/torso", "BatterBlue", vec3(bx, 0.98 - crouch, bz), vec3(0.32, 0.46, 0.4), yaw));
-  out.push(orb("batter/head", "BatterHelmet", vec3(bx, 1.4 - crouch, bz), 0.14));
-  out.push(orb("batter/cap", "BatterHelmet", vec3(bx, 1.47 - crouch, bz), 0.15));
+  out.push(castShadow("batter/shadow", sun, bx, bz, 1.2, 0.8, 0.004));
 
+  // The bat: same oversized toy geometry as before, swung from the batter's hands.
   const tilt = batTilt(s.state, s.readiness);
   const d = batDir(s.theta);
   const pivotY = batPlaneY(s.theta) + 0.05;
   const reach = Math.cos(tilt);
   const rot = quatFromEulerXyz(0, s.theta + Math.PI / 2, tilt);
+
+  // The batter grips the bat: solve both hands to a point just up the handle so
+  // the arms hold — and swing — the bat (they track it as θ sweeps).
+  const gripR = C.BAT_GRIP_R + 0.08;
+  const grip = vec3(bx + d.x * gripR * reach, pivotY + Math.sin(tilt) * gripR, bz + d.z * gripR * reach);
+  const pose = reachArmsTo(battingPose(coil, twist), vec3(bx, 0, bz), C.BATTER_FACING, grip);
+  emitFigure(out, "batter", pose, vec3(bx, 0, bz), C.BATTER_FACING, HOME_PALETTE);
   BAT_SEGMENTS.forEach(([r0, r1, w], i) => {
     const rc = (r0 + r1) / 2;
     const center = vec3(bx + d.x * rc * reach, pivotY + Math.sin(tilt) * rc, bz + d.z * rc * reach);
     out.push(box(`bat/${i}`, "bat", center, vec3(r1 - r0 + 0.02, w, w), rot));
   });
   out.push(box("bat/knob", "BatKnob", vec3(bx + d.x * C.BAT_GRIP_R, pivotY, bz + d.z * C.BAT_GRIP_R), vec3(0.15, 0.15, 0.15), rot));
-
-  const handX = bx + d.x * (C.BAT_GRIP_R + 0.12) * reach;
-  const handZ = bz + d.z * (C.BAT_GRIP_R + 0.12) * reach;
-  ([
-    ["armL", -0.2],
-    ["armR", 0.2],
-  ] as const).forEach(([name, sideX]) => {
-    const ax = mix(bx + sideX, handX, 0.55);
-    const az = mix(bz, handZ, 0.55);
-    out.push(box(`batter/${name}`, "BatterBlue", vec3(ax, 1.02 - crouch, az), vec3(0.11, 0.3, 0.11), yaw));
-  });
 };
 
 const buildMachine = (out: SceneInstance[], sun: SunState, view: SceneView): void => {
@@ -331,26 +378,65 @@ const buildBall = (out: SceneInstance[], view: SceneView): void => {
   }
 };
 
+/** A fielder is walking (not standing) above this speed (u/s). */
+const FIELDER_WALK_SPEED = 0.6;
+/** How far a standing fielder's head may twist to watch (rad) — a human neck, not
+ * an owl; a target further round leaves the head at this cap. */
+const HEAD_YAW_MAX = 1.4;
+
+/** A cheap, per-player-desynced idle "breath" (−1…1): one sine whose frequency and
+ * phase are seeded off `slot`, so no two standing players idle in lockstep. Runs on
+ * the gated gameplay `tick` (so it eases with the rest of the scene in slow-mo). */
+const idleBreath = (tick: number, slot: number): number =>
+  Math.sin(tick * mix(0.045, 0.08, hash01(slot, 1)) + hash01(slot, 2) * Math.PI * 2);
+
 const buildFielders = (out: SceneInstance[], sun: SunState, view: SceneView): void => {
-  // A cheap, bounded "crowd energy" cue: the SAME per-fielder bob animation
-  // every fielder already runs, briefly amplified during the celebration —
-  // no new entities, no per-spectator AI.
-  const celebrationBoost = view.cinematicPhase === "celebration" ? 1.8 : 1;
+  const batter = vec3(view.batterX, 0, C.BATTER_Z);
   view.fielders.forEach((f, i) => {
-    const bob = Math.abs(Math.sin(view.tick * (f.chasing ? 0.24 : 0.11) + i * 1.7)) * (f.chasing ? 0.07 : 0.035) * celebrationBoost;
-    const lean = f.chasing ? 0.18 : 0;
-    const rot = quatFromEulerXyz(lean, 0, 0);
-    const { x, z } = f;
-    out.push(castShadow(`fielder/${i}/shadow`, sun, x, z, 1.15, 0.7, 0.006 + i * 0.002));
-    out.push(cyl(`fielder/${i}/puck`, "FielderBase", vec3(x, 0.07, z), vec3(0.95, 0.12, 0.68)));
-    out.push(box(`fielder/${i}/legL`, "FielderWhite", vec3(x - 0.09, 0.3, z), vec3(0.13, 0.34, 0.15)));
-    out.push(box(`fielder/${i}/legR`, "FielderWhite", vec3(x + 0.09, 0.3, z), vec3(0.13, 0.34, 0.15)));
-    out.push(box(`fielder/${i}/hips`, "FielderWhite", vec3(x, 0.52 + bob, z), vec3(0.28, 0.14, 0.19), rot));
-    out.push(box(`fielder/${i}/torso`, "FielderWhite", vec3(x, 0.74 + bob, z), vec3(0.3, 0.32, 0.2), rot));
-    out.push(box(`fielder/${i}/armL`, "FielderCap", vec3(x - 0.2, 0.74 + bob, z), vec3(0.09, 0.28, 0.09), rot));
-    out.push(box(`fielder/${i}/armR`, "FielderCap", vec3(x + 0.2, 0.74 + bob, z), vec3(0.09, 0.28, 0.09), rot));
-    out.push(orb(`fielder/${i}/head`, "FielderWhite", vec3(x, 1.02 + bob, z + lean * 0.1), 0.11));
-    out.push(orb(`fielder/${i}/cap`, "FielderCap", vec3(x, 1.08 + bob, z + lean * 0.1), 0.12));
+    const ground = vec3(f.x, 0, f.z);
+    const walking = f.speed > FIELDER_WALK_SPEED;
+    let facing: number;
+    let pose;
+    if (walking) {
+      // Running to chase (or jogging back) — the procedural IK gait, no floating.
+      facing = f.facing;
+      pose = runningPose(ground, f.facing, f.speed, f.traveled);
+    } else {
+      // Standing squared up to home; ONLY the head twists to watch the batter or
+      // the ball — whichever is closer — so the body never pivots to look.
+      const dBatter = Math.hypot(batter.x - f.x, batter.z - f.z);
+      const dBall = view.ballVisible ? Math.hypot(view.ball.x - f.x, view.ball.z - f.z) : Infinity;
+      const watch = dBall < dBatter ? view.ball : batter;
+      facing = Math.atan2(-f.x, -f.z); // body faces home plate
+      const toWatch = Math.atan2(watch.x - f.x, watch.z - f.z);
+      const rel = Math.atan2(Math.sin(toWatch - facing), Math.cos(toWatch - facing));
+      pose = idlePose(0, clamp(rel, -HEAD_YAW_MAX, HEAD_YAW_MAX), idleBreath(view.tick, i));
+    }
+    out.push(castShadow(`fielder/${i}/shadow`, sun, f.x, f.z, 1.15, 0.66, 0.006 + i * 0.002));
+    emitFigure(out, `fielder/${i}`, pose, ground, facing, AWAY_PALETTE);
+  });
+};
+
+/** The ball a fielder has thrown to a bag during a defensive play — a bright
+ * sphere with a ground shadow, so the relay to the base reads clearly. */
+const buildThrow = (out: SceneInstance[], sun: SunState, view: SceneView): void => {
+  if (!view.throwBall.visible) {
+    return;
+  }
+  const p = view.throwBall.pos;
+  out.push(orb("throwball", "BallWhite", p, C.BALL_RADIUS * 1.15));
+  out.push(castShadow("throwball/shadow", sun, p.x, p.z, 0.3, 0.3, 0.02));
+};
+
+/** Draw each base runner as the rigged figure: the running gait while advancing,
+ * a standing (gently breathing) idle while resting on a base. */
+const buildRunners = (out: SceneInstance[], sun: SunState, runners: readonly RunnerView[], tick: number): void => {
+  runners.forEach((r, i) => {
+    const ground = vec3(r.x, 0, r.z);
+    // Offset the breath slot so a resting runner never idles in sync with a fielder.
+    const pose = r.moving ? runningPose(ground, r.facing, C.RUNNER_SPEED, r.traveled) : idlePose(0, 0, idleBreath(tick, i + 50));
+    out.push(castShadow(`runner/${i}/shadow`, sun, r.x, r.z, 1.15, 0.66, 0.008 + i * 0.002));
+    emitFigure(out, `runner/${i}`, pose, ground, r.facing, HOME_PALETTE);
   });
 };
 
@@ -367,6 +453,8 @@ export const sceneOf = (view: SceneView, nowMs: number): Scene => {
   buildMachine(instances, sun, view);
   buildBall(instances, view);
   buildFielders(instances, sun, view);
+  buildRunners(instances, sun, view.runners, view.tick);
+  buildThrow(instances, sun, view);
   return {
     camera: { far: C.CAMERA_FAR, fovY: view.cameraFovY, near: C.CAMERA_NEAR, position: view.cameraPos, target: view.cameraTarget },
     clearColor: [0.62, 0.72, 0.95, 1],

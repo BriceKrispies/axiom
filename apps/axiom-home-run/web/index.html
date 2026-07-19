@@ -38,7 +38,10 @@
       #message.miss, #message.foul { color: #ff8a7a; }
       #message.ball { color: #7fc4ff; }
       #message.weak, #message.grounder, #message.popup { color: #ffd08a; }
-      #message.clean { color: #7fffa8; }
+      #message.clean, #message.baseHit { color: #7fffa8; }
+      #message.runScored { color: #ffe25a; text-shadow: 0 3px 0 rgba(0,0,0,0.7), 0 0 20px #ffb23d; }
+      #message.out { color: #ff8a7a; }
+      #message.doublePlay { color: #ff6a5e; text-shadow: 0 3px 0 rgba(0,0,0,0.7), 0 0 20px #ff5a4a; }
 
       /* Home-run confetti (DOM, presentation only). */
       #confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: 10px; }
@@ -135,6 +138,8 @@
       <div id="over" class="overlay">
         <div id="over-title">ROUND OVER</div>
         <div class="row">SCORE <b id="over-score">0</b></div>
+        <div class="row">RUNS HOME <b id="over-runs">0</b></div>
+        <div class="row">BASES GAINED <b id="over-bases">0</b></div>
         <div class="row">HOME RUNS <b id="over-homers">0</b></div>
         <div class="row">BEST DISTANCE <b id="over-best">—</b></div>
         <div id="over-restart">Press SPACE or ENTER to play again</div>
@@ -147,6 +152,9 @@
       <span><span class="k">STREAK</span> <b id="streak">1&times;</b></span>
       <span><span class="k">PITCH SPEED</span> <b id="mph">—</b></span>
       <span><span class="k">BEST</span> <b id="best">—</b></span>
+      <span><span class="k">BASES</span> <b id="bases">0</b></span>
+      <span><span class="k">RUNS HOME</span> <b id="runs">0</b></span>
+      <span><span class="k">OUTS</span> <b id="outs">0</b></span>
     </div>
     <div id="pad">
       <div id="pad-left">◀ STEP</div>

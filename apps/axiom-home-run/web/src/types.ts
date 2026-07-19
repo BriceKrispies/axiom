@@ -82,6 +82,15 @@ export interface FielderState {
   z: number;
   /** True while reacting toward a projected landing point. */
   chasing: boolean;
+  /** Cumulative planar distance walked — drives the procedural walk gait's phase. */
+  traveled: number;
+  /** Heading (yaw) the fielder is walking, held while nearly stopped. */
+  facing: number;
+  /** This tick's planar speed (u/s), from actual displacement. */
+  speed: number;
+  /** When set (during a force play), the base the fielder covers — it walks onto
+   * this point to take the throw, overriding its normal spot/chase target. */
+  cover?: { readonly x: number; readonly z: number };
 }
 
 /** One buffered feedback event, drained each tick by `game.ts` (HUD text + audio). */
@@ -94,9 +103,24 @@ export interface Feedback {
     | "fielded"
     | "cinematicAnticipation"
     | "crowdErupt"
+    | "baseHit"
+    | "runScored"
+    | "out"
+    | "doublePlay"
     | Outcome;
   readonly text: string;
   readonly big: boolean;
+}
+
+/** A base runner as the scene sees it: where the figure stands/runs, which way it
+ * faces, how far it has run (drives the running gait), and whether it is moving
+ * (a standing runner on base uses an idle pose, not the run cycle). */
+export interface RunnerView {
+  readonly x: number;
+  readonly z: number;
+  readonly facing: number;
+  readonly traveled: number;
+  readonly moving: boolean;
 }
 
 /** A pitch's live flight state (position, velocity, and its own gravity-per-tick) —
@@ -213,8 +237,23 @@ export interface SceneView {
   /** Machine wind-up compression 0…1 and muzzle flash 0…1. */
   readonly windup: number;
   readonly muzzleFlash: number;
-  /** Fielders in FIELDER_SPOTS order. */
-  readonly fielders: readonly { readonly x: number; readonly z: number; readonly chasing: boolean }[];
+  /** Fielders in FIELDER_SPOTS order (with the data their walk gait needs). */
+  readonly fielders: readonly {
+    readonly x: number;
+    readonly z: number;
+    readonly chasing: boolean;
+    readonly facing: number;
+    readonly traveled: number;
+    readonly speed: number;
+  }[];
+  /** Base runners currently on the diamond (empty between hits with nobody on). */
+  readonly runners: readonly RunnerView[];
+  /** The thrown ball in flight during a defensive play (fielder → bag). */
+  readonly throwBall: { readonly pos: Vec3; readonly visible: boolean };
+  /** True once the batter has put a ball in play and become a base runner: the
+   * plate figure + held bat are hidden (he let go of the bat and took off; the
+   * lead runner IS him), and a dropped bat rests by home. */
+  readonly batterRunning: boolean;
   /** The animated camera (already composed: base + dolly + punch + follow + shake). */
   readonly cameraPos: Vec3;
   readonly cameraTarget: Vec3;
