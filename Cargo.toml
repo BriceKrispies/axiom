@@ -166,18 +166,21 @@ codegen-units = 1
 panic = "abort"
 
 # Fast PREVIEW profile for the browser-demo gallery / GitHub Pages deploy — repo
-# tooling ONLY (scripts/package_app.py --fast). It inherits `release` but turns fat
-# LTO OFF and splits codegen: with fat LTO every one of the ~9 demo apps re-runs
-# whole-program optimization over the ENTIRE engine's bitcode at its own final link
-# (single codegen unit, serial), which is what made the Pages build ~10 minutes. With
-# LTO off, each engine crate codegens its object code ONCE (cached in the shared target
-# dir) and is merely LINKED into each demo — "compile the engine once." wasm-opt -Oz in
-# the packager recovers most of the size afterward. The real shipping bundles
-# (`make package`) still go through `[profile.release]` with fat LTO — this profile
-# never touches them.
+# tooling ONLY (scripts/package_app.py --fast). The shipping `[profile.release]` uses
+# fat LTO (`lto = true`, `codegen-units = 1`): every demo app re-runs whole-program
+# optimization over the ENTIRE engine's bitcode at its own final link, serially —
+# which is what made the Pages build ~10 minutes. THIN LTO instead does cross-module
+# optimization via cheap, parallel per-module summaries (no serial whole-program
+# merge), so the engine's shared crates are compiled once and each app's thin link is
+# fast and runs across cores — avoiding the fat-LTO per-app blowup while keeping
+# cross-crate inlining (better codegen than `lto = false`, which drops it entirely).
+# Note: final bundle SIZE is set by the packager's `wasm-opt -Oz`, so it is ~the same
+# as `lto = false`; thin is chosen for the better codegen at equal build cost, not to
+# shrink the deploy. The real shipping bundles (`make package`) still go through
+# `[profile.release]` with fat LTO — this profile never touches them.
 [profile.release-preview]
 inherits = "release"
-lto = false
+lto = "thin"
 codegen-units = 16
 
 # Optimize the cryptography dependencies even in debug/test builds. ed25519/
