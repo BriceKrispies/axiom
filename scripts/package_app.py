@@ -64,6 +64,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BINARYEN_BIN = REPO_ROOT / "scripts" / "packaging" / "node_modules" / "binaryen" / "bin"
 WASM_TARGET = "wasm32-unknown-unknown"
 
+# The fast/preview cargo profile for browser-demo bundles (defined in the root
+# Cargo.toml). It inherits `release` but turns fat LTO OFF, so the engine's object code
+# is codegen'd ONCE (cached in the shared target dir) and merely LINKED into each demo
+# app, instead of re-running whole-program LTO over the whole engine per app — the fix
+# for the ~10-min 9-app Pages build. wasm-opt -Oz (below) recovers most of the size.
+# `make package` still ships via `[profile.release]` (fat LTO).
+PREVIEW_PROFILE = "release-preview"
+
 # An "SDK-hosted" browser app (axiom-game-runtime, axiom-retro-fps-ts-browser) is authored
 # in TypeScript over the `@axiom/game` SDK. Its index.html does NOT wire the wasm glue
 # itself: a compiled harness (web/dist/harness.js) imports the glue from the
@@ -376,6 +384,7 @@ def _compile_wasm_bundle(
     has_fallback: bool,
     target_dir: Path | None,
     debug: bool = False,
+    prebuilt: bool = False,
 ) -> tuple[str, str, Path, Path | None]:
     """Build the crate's wasm and produce the bundle artifacts in ``tmp``.
 
@@ -383,31 +392,39 @@ def _compile_wasm_bundle(
     ``build_bundle`` (the multi-page gallery): cargo build (fast incremental or MVP
     ``-Z build-std``), wasm-bindgen *bundler* glue, ``wasm-opt -Oz`` fast wasm, and
     the optional wasm2js fallback. Returns ``(snake, glue_js, fast_wasm_path,
-    wasm2js_path_or_None)``."""
+    wasm2js_path_or_None)``.
+
+    ``prebuilt=True`` means this crate's wasm has already been produced in
+    ``target_dir`` (e.g. by ``prebuild_wasm_crates`` in one shared cargo invocation),
+    so step 1's cargo build is skipped and the existing artifact is read."""
     name = crate_name(app_dir)
     snake = name.replace("-", "_")
-    # 1. Build the wasm. fast = normal incremental release build (shares the main
-    # target dir). Otherwise an MVP build with std rebuilt and reference-types off
-    # (what wasm2js requires), paths anonymized, into the shared package-mvp dir.
+    # 1. Build the wasm (unless already prebuilt into target_dir). fast = normal
+    # incremental build in the no-LTO PREVIEW profile (shares the main target dir, so
+    # the engine compiles once and links into each app). Otherwise an MVP build with
+    # std rebuilt and reference-types off (what wasm2js requires), paths anonymized,
+    # into the shared package-mvp dir.
     env = os.environ.copy()
     if fast:
         target_dir = target_dir or (REPO_ROOT / "target")
         env["CARGO_TARGET_DIR"] = str(target_dir)
         # A --debug bundle keeps `debug_assertions` on (for the Canvas2D deep
-        # profiler); the render benchmark uses it. Otherwise a normal release build.
-        profile = [] if debug else ["--release"]
-        run(["cargo", "build", "-p", name, "--target", WASM_TARGET, *profile], env=env)
+        # profiler); the render benchmark uses it. Otherwise the no-LTO preview profile.
+        profile = [] if debug else ["--profile", PREVIEW_PROFILE]
+        if not prebuilt:
+            run(["cargo", "build", "-p", name, "--target", WASM_TARGET, *profile], env=env)
     else:
         target_dir = target_dir or (REPO_ROOT / "target" / "package-mvp")
         env["CARGO_TARGET_DIR"] = str(target_dir)
         home = str(Path.home())
         env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join([MVP_TARGET_FEATURES, f"--remap-path-prefix={home}=~"])
-        run(
-            ["cargo", "+nightly", "build", "-p", name, "--target", WASM_TARGET, "--release",
-             "-Z", "build-std=std,panic_abort"],
-            env=env,
-        )
-    profile_subdir = "debug" if (fast and debug) else "release"
+        if not prebuilt:
+            run(
+                ["cargo", "+nightly", "build", "-p", name, "--target", WASM_TARGET, "--release",
+                 "-Z", "build-std=std,panic_abort"],
+                env=env,
+            )
+    profile_subdir = "debug" if (fast and debug) else (PREVIEW_PROFILE if fast else "release")
     built = target_dir / WASM_TARGET / profile_subdir / f"{snake}.wasm"
     if not built.is_file():
         sys.exit(f"error: expected wasm not produced at {built}")
@@ -437,6 +454,26 @@ def _compile_wasm_bundle(
     return snake, glue_js, fast_wasm, wasm2js_path
 
 
+def prebuild_wasm_crates(app_dirs: list[Path], *, target_dir: Path, debug: bool = False) -> None:
+    """Compile several apps' wasm cdylibs in ONE ``cargo build`` invocation (the
+    fast/preview path only), so the shared engine dependency graph builds once and the
+    per-app leaf codegens run together across cores — instead of N serial cargo
+    processes that each finish before the next starts. Artifacts land in ``target_dir``;
+    each app's bundle is then finished per-app via ``build_bundle(..., prebuilt=True)``.
+    The slow MVP ``build-std`` path is not batched here (it stays single-crate)."""
+    names = [crate_name(d) for d in app_dirs]
+    env = os.environ.copy()
+    env["CARGO_TARGET_DIR"] = str(target_dir)
+    profile = [] if debug else ["--profile", PREVIEW_PROFILE]
+    pkg_flags = [flag for name in names for flag in ("-p", name)]
+    print(
+        f"  pre-building {len(names)} demo wasm crate(s) in one cargo invocation "
+        f"({'debug' if debug else PREVIEW_PROFILE})",
+        flush=True,
+    )
+    run(["cargo", "build", *pkg_flags, "--target", WASM_TARGET, *profile], env=env)
+
+
 def build_bundle(
     app_dir: Path,
     out: Path,
@@ -446,6 +483,7 @@ def build_bundle(
     target_dir: Path | None = None,
     keep_temp: bool = False,
     debug: bool = False,
+    prebuilt: bool = False,
 ) -> str:
     """Build ONE crate's wasm bundle and drop the loader + companions into ``out/``
     (native root layout: ``axiom-loader.js`` + ``<snake>_bg.{wasm,js[,wasm2js.js]}``).
@@ -461,7 +499,7 @@ def build_bundle(
     tmp = Path(tempfile.mkdtemp(prefix=f"axiom-bundle-{crate_name(app_dir).removeprefix('axiom-')}-"))
     try:
         snake, glue_js, fast_wasm, wasm2js_path = _compile_wasm_bundle(
-            app_dir, tmp, fast=fast, has_fallback=has_fallback, target_dir=target_dir, debug=debug
+            app_dir, tmp, fast=fast, has_fallback=has_fallback, target_dir=target_dir, debug=debug, prebuilt=prebuilt
         )
         shutil.copy2(fast_wasm, out / f"{snake}_bg.wasm")
         if wasm2js_path is not None:
@@ -489,9 +527,10 @@ def package(
     """Package one app crate into ``out``. Reusable from package_gallery.py too.
 
     ``fast=True`` skips the wasm2js fallback and the slow MVP/``build-std`` rebuild:
-    it does a normal incremental release build (reference-types and all), so the
-    bundle is wasm-only but builds in seconds — for tight gallery iteration. The
-    output still goes through the same loader, so the page boot path is identical.
+    it does a no-LTO ``release-preview`` build (reference-types and all), so the engine
+    compiles once and links into the app — wasm-only but quick, for tight gallery
+    iteration. The output still goes through the same loader, so the page boot path is
+    identical.
 
     The default (``fast=False``) path needs the genuinely-MVP module for wasm2js, so
     it rebuilds std MVP via nightly ``-Z build-std`` into ``target_dir`` (default
@@ -564,7 +603,7 @@ def main() -> int:
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="quick wasm-only build: normal incremental release build, no MVP/build-std, no wasm2js",
+        help="quick wasm-only build: no-LTO release-preview profile, no MVP/build-std, no wasm2js",
     )
     parser.add_argument(
         "--target-dir",

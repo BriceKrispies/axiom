@@ -95,13 +95,24 @@ def build_demo_apps(
     unknown = [i for i in ids if i not in DEMO_APPS]
     if unknown:
         sys.exit(f"error: unknown demo id(s) {', '.join(unknown)} — known: {', '.join(DEMO_APPS)}")
-    for demo_id in ids:
-        app_dir = demo_app_dir(demo_id)
+    app_dirs = [(demo_id, demo_app_dir(demo_id)) for demo_id in ids]
+    for demo_id, app_dir in app_dirs:
         if not (app_dir / "web" / "index.html").is_file():
             sys.exit(f"error: {app_dir}/web/index.html not found — the {demo_id} app is missing.")
+    # fast: compile every demo's wasm in ONE cargo invocation up front, so the shared
+    # engine deps build once (no fat LTO, so they LINK into each app rather than being
+    # re-optimized whole-program per app) and the leaf codegens parallelize. The slow
+    # MVP build-std path builds per-app below. Then finish each bundle (wasm-bindgen,
+    # wasm-opt, loader) — for the fast path from the prebuilt artifacts.
+    prebuilt = fast
+    if prebuilt:
+        package_app.prebuild_wasm_crates([app_dir for _, app_dir in app_dirs], target_dir=target_dir, debug=debug)
+    for demo_id, app_dir in app_dirs:
         out = dist / demo_id
         print(f"\n[{demo_id}] building bundle into {out}{' (fast: wasm-only)' if fast else ''}")
-        snake = package_app.build_bundle(app_dir, out, fast=fast, target_dir=target_dir, debug=debug)
+        snake = package_app.build_bundle(
+            app_dir, out, fast=fast, target_dir=target_dir, debug=debug, prebuilt=prebuilt
+        )
         # Copy the app's web/ assets (minus pkg/) beside the bundle and rewrite the
         # page's ./pkg/<snake>.js glue import to ./axiom-loader.js. Any app-local
         # web/vendor/ dir rides along here.
@@ -117,7 +128,7 @@ def main() -> int:
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="quick wasm-only bundles (normal incremental build, no wasm2js fallback) for iteration",
+        help="quick wasm-only bundles (no-LTO release-preview profile, no wasm2js fallback) for iteration",
     )
     parser.add_argument(
         "--debug",

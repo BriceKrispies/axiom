@@ -34,7 +34,7 @@ static func _glow_trans(r: float, g: float, b: float, er: float, eg: float, eb: 
 	return m
 
 static func build() -> Dictionary:
-	return {
+	var mats := {
 		"BallWhite": _flat(1, 1, 0.98),
 		"BaseWhite": _glow(1, 1, 0.98, 0.3, 0.3, 0.28),
 		"BatKnob": _flat(0.55, 0.4, 0.16),
@@ -72,3 +72,10 @@ static func build() -> Dictionary:
 		"shadow": _trans(0.05, 0.12, 0.05, 0.35),
 		"trail": _glow(1, 0.9, 0.6, 1, 0.75, 0.35),
 	}
+	# Flat field markings sit just above the grass/dirt; tag them so the software
+	# canvas renderer can draw them as a top layer (its per-object painter's sort
+	# can't otherwise keep coplanar surfaces from covering them). Harmless on the
+	# GPU path, which uses a real depth buffer.
+	mats["Line"].resource_name = "mark"
+	mats["BaseWhite"].resource_name = "mark"
+	return mats

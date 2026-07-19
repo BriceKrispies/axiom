@@ -44,9 +44,12 @@ var _energy := 0.8
 var _cam_pos := Vector3.ZERO
 var _cam_right := Vector3(1, 0, 0)
 
-# static cache (rebuilt only when the camera moves)
-var _static_pts := PackedVector2Array()
-var _static_cols := PackedColorArray()
+# static cache (rebuilt only when the camera moves): the field/backdrop, then the
+# flat markings (foul lines, bases) as a top layer so they aren't covered.
+var _sg_pts := PackedVector2Array()
+var _sg_cols := PackedColorArray()
+var _sm_pts := PackedVector2Array()
+var _sm_cols := PackedColorArray()
 var _have_static := false
 var _last_view: Transform3D
 var _last_proj: Projection
@@ -73,17 +76,23 @@ func _draw() -> void:
 	if not _have_static or _view != _last_view or _proj != _last_proj:
 		_last_view = _view
 		_last_proj = _proj
-		var s_insts: Array = []
-		_collect(static_root, s_insts)
-		var packed := _pack(s_insts)
-		_static_pts = packed[0]
-		_static_cols = packed[1]
+		var ground: Array = []
+		var marks: Array = []
+		_collect(static_root, ground, marks)
+		var pg := _pack(ground)
+		var pm := _pack(marks)
+		_sg_pts = pg[0]
+		_sg_cols = pg[1]
+		_sm_pts = pm[0]
+		_sm_cols = pm[1]
 		_have_static = true
-	_blit(_static_pts, _static_cols)
+	_blit(_sg_pts, _sg_cols)
+	_blit(_sm_pts, _sm_cols)
 
-	var d_insts: Array = []
-	_collect(actors_root, d_insts)
-	var dp := _pack(d_insts)
+	var d_ground: Array = []
+	var d_marks: Array = []
+	_collect(actors_root, d_ground, d_marks)
+	var dp := _pack(d_ground)
 	_blit(dp[0], dp[1])
 
 func _blit(pts: PackedVector2Array, cols: PackedColorArray) -> void:
@@ -114,18 +123,24 @@ func _pack(insts: Array) -> Array:
 				cols.append(col)
 	return [pts, cols]
 
-func _collect(node: Node, out: Array) -> void:
+func _collect(node: Node, ground: Array, marks: Array) -> void:
 	for child in node.get_children():
 		if child is MeshInstance3D:
 			if child.visible:
-				_emit(child.mesh, child.global_transform, child.material_override, out)
+				_emit(child.mesh, child.global_transform, child.material_override, _route(child.material_override, ground, marks))
 		elif child is MultiMeshInstance3D and child.visible:
 			var mm: MultiMesh = child.multimesh
 			var base: Transform3D = child.global_transform
+			var out := _route(child.material_override, ground, marks)
 			for i in range(mm.instance_count):
 				_emit(mm.mesh, base * mm.get_instance_transform(i), child.material_override, out)
 		if child.get_child_count() > 0:
-			_collect(child, out)
+			_collect(child, ground, marks)
+
+func _route(mat: Material, ground: Array, marks: Array) -> Array:
+	if mat is StandardMaterial3D and mat.resource_name == "mark":
+		return marks
+	return ground
 
 func _emit(mesh: Mesh, xform: Transform3D, mat: Material, out: Array) -> void:
 	var albedo := Color(1, 0, 1)

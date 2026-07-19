@@ -165,6 +165,21 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
+# Fast PREVIEW profile for the browser-demo gallery / GitHub Pages deploy — repo
+# tooling ONLY (scripts/package_app.py --fast). It inherits `release` but turns fat
+# LTO OFF and splits codegen: with fat LTO every one of the ~9 demo apps re-runs
+# whole-program optimization over the ENTIRE engine's bitcode at its own final link
+# (single codegen unit, serial), which is what made the Pages build ~10 minutes. With
+# LTO off, each engine crate codegens its object code ONCE (cached in the shared target
+# dir) and is merely LINKED into each demo — "compile the engine once." wasm-opt -Oz in
+# the packager recovers most of the size afterward. The real shipping bundles
+# (`make package`) still go through `[profile.release]` with fat LTO — this profile
+# never touches them.
+[profile.release-preview]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 # Optimize the cryptography dependencies even in debug/test builds. ed25519/
 # curve25519 field arithmetic is ~100x slower unoptimized, which would make the
 # signed-lockstep tests (and the coverage gate) crawl. These are third-party
