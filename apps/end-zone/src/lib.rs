@@ -33,6 +33,7 @@ pub mod field;
 pub mod football;
 pub mod frontend;
 pub mod identity;
+pub mod lab;
 pub mod launch;
 pub mod physics_rig;
 pub mod player;
@@ -49,5 +50,7 @@ pub mod trace;
 pub mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::end_zone_start;
+#[cfg(target_arch = "wasm32")]
+pub use lab::end_zone_lab_start;
 
 pub use app::{build_end_zone, EndZoneApp};

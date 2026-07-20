@@ -221,6 +221,7 @@ pub fn advance(
         input.facing,
         stride,
         gait.turn_intensity,
+        gait.norm_speed,
         tuning,
     );
     gait.planted = if left_planted {

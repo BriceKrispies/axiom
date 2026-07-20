@@ -12,8 +12,8 @@ use axiom_math::{Quat, Transform};
 use crate::data::LocomotionTuning;
 use crate::player::animation::JointPose;
 use crate::player::model::{
-    HELMET, L_FOOT, L_SHIN, L_THIGH, L_UPPER_ARM, PARTS, PELVIS, R_FOOT, R_SHIN, R_THIGH,
-    R_UPPER_ARM, TORSO,
+    HELMET, L_FOOT, L_FOREARM, L_SHIN, L_THIGH, L_UPPER_ARM, PARTS, PELVIS, R_FOOT, R_FOREARM,
+    R_SHIN, R_THIGH, R_UPPER_ARM, TORSO,
 };
 use crate::player::rig;
 use crate::player::AnimState;
@@ -22,6 +22,11 @@ use super::gait::GaitState;
 use super::leg::{self, LegDims};
 
 const TAU: f32 = core::f32::consts::TAU;
+
+/// Rotation about X (limb pitch) — elbow/knee-style flexion.
+fn qx(a: f32) -> Quat {
+    Quat::from_euler_xyz(a, 0.0, 0.0)
+}
 
 /// Build the locomotion pose for one player and fill each foot's solved ankle +
 /// lock error into the gait state. `anim` distinguishes the standing stances
@@ -37,6 +42,7 @@ pub fn locomotion_pose(
     let phase_ang = gait.phase * TAU;
     let swing = phase_ang.sin();
     let amp = 0.45 + 0.55 * gait.norm_speed;
+    let speed = gait.norm_speed.clamp(0.0, 1.0);
     let backpedal = matches!(anim, AnimState::DropBack);
     let ready = matches!(anim, AnimState::ReadyStance);
 
@@ -45,6 +51,9 @@ pub fn locomotion_pose(
     let forward = Vec3::new(facing.sin(), 0.0, facing.cos());
     let accel_fwd = gait.accel.dot(forward);
     let lean_sign = if backpedal { -1.0 } else { 1.0 };
+    // Forward carriage from the waist while running (a backpedal leans back; a
+    // set ready stance stays upright), layered on the whole-body `root_pitch`.
+    let waist = tuning.waist_lean * speed * lean_sign * f32::from(!ready);
     out.root_pitch = (lean_sign * 0.08 * gait.norm_speed
         + (accel_fwd * tuning.torso_lean_per_accel))
         .clamp(-0.18, tuning.torso_lean_max)
@@ -57,10 +66,20 @@ pub fn locomotion_pose(
     out.root_lift = bob - landing_dip(gait.phase, tuning) + ready_crouch_lift(ready);
 
     out.joints[PELVIS] = Quat::from_euler_xyz(0.0, tuning.pelvis_yaw * swing, 0.0);
-    out.joints[TORSO] = Quat::from_euler_xyz(0.0, -tuning.shoulder_counter * swing, 0.0);
-    out.joints[HELMET] = Quat::from_euler_xyz(-out.root_pitch * 0.6, 0.0, 0.0);
+    out.joints[TORSO] = Quat::from_euler_xyz(waist, -tuning.shoulder_counter * swing, 0.0);
+    // Keep the head up: counter the whole-body root lean and most of the waist
+    // lean the head inherits from the torso, so eyes stay forward at speed.
+    out.joints[HELMET] = Quat::from_euler_xyz(-out.root_pitch * 0.6 - waist * 0.75, 0.0, 0.0);
     out.joints[L_UPPER_ARM] = Quat::from_euler_xyz(-swing * tuning.arm_swing * amp, 0.0, 0.0);
     out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(swing * tuning.arm_swing * amp, 0.0, 0.0);
+    // Bent elbows: hold a base flex that deepens toward a full run, and let each
+    // elbow pump — closing on the arm that drives forward this half-cycle. The
+    // left arm leads while `swing > 0` (its shoulder pitches back), the right
+    // while `swing < 0`, mirroring the upper-arm swing above. (`apply_hold`
+    // overrides these for a ball carrier's tucked/throwing arm.)
+    let elbow = tuning.elbow_flex_idle + (tuning.elbow_flex_run - tuning.elbow_flex_idle) * speed;
+    out.joints[L_FOREARM] = qx(-(elbow + tuning.elbow_pump * swing.max(0.0)));
+    out.joints[R_FOREARM] = qx(-(elbow + tuning.elbow_pump * (-swing).max(0.0)));
 
     // Legs (stage 2a): solve each to its world ankle target.
     solve_legs(gait, facing, ground, &mut out);

@@ -40,9 +40,15 @@ impl EndZoneScene {
             .looking_at(camera.target, Vec3::UNIT_Y)
             .unwrap_or(Transform::from_translation(camera.eye));
         app.set_camera(
+            // The camera never sits closer than ~6 yd to any subject (the
+            // tightest follow is 9 yd), so a 0.1 yd near plane only burned
+            // depth precision and let the near-coplanar field paint (turf at
+            // y=0, yard lines at y≈0.03) z-fight and flicker at distance. A
+            // 0.5 yd near plane recovers ~5× the depth resolution with margin
+            // to spare, which is what keeps the far lines steady.
             Camera::perspective(PerspectiveProjection {
                 fov_y: Angle::degrees(camera.fov_degrees.clamp(20.0, 110.0)),
-                near: meters(0.1),
+                near: meters(0.5),
                 far: meters(400.0),
             }),
             pose,

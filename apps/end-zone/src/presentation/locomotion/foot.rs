@@ -86,6 +86,7 @@ pub fn resolve(
     facing: f32,
     stride: f32,
     turn_intensity: f32,
+    norm_speed: f32,
     tuning: &LocomotionTuning,
 ) -> bool {
     let (right_dir, forward) = dirs(facing);
@@ -97,8 +98,8 @@ pub fn resolve(
     let lat_l = right_dir.mul_scalar(-widen);
     let lat_r = right_dir.mul_scalar(widen);
 
-    step_foot(left, left_lp, ground, forward, lat_l, pf, tuning);
-    step_foot(right, right_lp, ground, forward, lat_r, pf, tuning);
+    step_foot(left, left_lp, ground, forward, lat_l, pf, norm_speed, tuning);
+    step_foot(right, right_lp, ground, forward, lat_r, pf, norm_speed, tuning);
 
     // Primary planted foot = whichever is in stance (earlier local phase wins a
     // brief double-support overlap).
@@ -117,6 +118,7 @@ fn step_foot(
     forward: Vec3,
     lat: Vec3,
     pf: f32,
+    norm_speed: f32,
     tuning: &LocomotionTuning,
 ) {
     let ground_y = ground.y + ANKLE_GROUND_OFFSET;
@@ -147,9 +149,22 @@ fn step_foot(
         foot.pending = landing;
         foot.phase = FootPhase::Swing;
         let s = ((lp - pf) / (1.0 - pf)).clamp(0.0, 1.0);
-        let flat_x = lerp(foot.swing_from.x, foot.pending.x, s);
-        let flat_z = lerp(foot.swing_from.z, foot.pending.z, s);
-        let lift = (s * core::f32::consts::PI).sin() * tuning.foot_lift;
-        foot.target = Vec3::new(flat_x, ground_y + lift, flat_z);
+        let arc = (s * core::f32::consts::PI).sin();
+        // Flat glide from lift-off to the next landing — a walk's low swing.
+        let glide_x = lerp(foot.swing_from.x, foot.pending.x, s);
+        let glide_z = lerp(foot.swing_from.z, foot.pending.z, s);
+        // Knee drive: at speed, aim the mid-swing foot at a point FORWARD of and
+        // HIGH above the hip, so the thigh lifts the knee up in front (a high
+        // knee) rather than the foot skimming forward low or tucking straight
+        // under. Bell-shaped over the swing (0 at strike/landing) and blended by
+        // speed, so a walk still glides and a plant still lands cleanly.
+        let intensity = arc * norm_speed;
+        let blend = (intensity * tuning.knee_drive).clamp(0.0, 1.0);
+        let apex_x = ground.x + lat.x + forward.x * tuning.knee_forward;
+        let apex_z = ground.z + lat.z + forward.z * tuning.knee_forward;
+        let px = lerp(glide_x, apex_x, blend);
+        let pz = lerp(glide_z, apex_z, blend);
+        let lift = arc * tuning.foot_lift + intensity * tuning.knee_height;
+        foot.target = Vec3::new(px, ground_y + lift, pz);
     }
 }

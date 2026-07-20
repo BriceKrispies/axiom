@@ -7,8 +7,10 @@ use axiom::prelude::{Vec2, Vec3};
 
 use super::coordinates::{FIELD_HALF_LENGTH, FIELD_HALF_WIDTH, GOAL_LINE_Z, HASH_X};
 
-/// Marking quads float this far above the turf to avoid z-fighting.
-pub const MARKING_Y: f32 = 0.02;
+/// Marking quads float this far above the turf to avoid z-fighting. Paired
+/// with the camera's pulled-out near plane (see `scene_sync`), this keeps the
+/// far yard lines steady instead of shimmering against the turf.
+pub const MARKING_Y: f32 = 0.03;
 
 /// A batch of flat quads (double-sided so either winding convention renders).
 #[derive(Debug, Default, Clone)]

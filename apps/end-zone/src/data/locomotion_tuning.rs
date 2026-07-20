@@ -23,8 +23,21 @@ pub struct LocomotionTuning {
     /// Cadence ceiling, cycles/s — stride is lengthened before cadence exceeds
     /// this, so the legs never blur to compensate for too-short a stride.
     pub max_cadence: f32,
-    /// Peak foot lift height mid-swing, yd.
+    /// Base mid-swing foot lift at a walk, yd — the always-on arc height.
     pub foot_lift: f32,
+    /// Peak EXTRA foot height at a full-speed knee lift, yd — the swing foot is
+    /// driven this much higher on top of `foot_lift`, blended by speed, which is
+    /// what gives a sprint a high, snappy knee instead of a low shuffle.
+    pub knee_height: f32,
+    /// How far FORWARD of the hip the driven knee reaches at mid-swing, yd — the
+    /// mid-swing foot aims at a point this far ahead of (and `knee_height` above)
+    /// the hip, so the thigh lifts the knee up in FRONT rather than the foot
+    /// tucking straight under the body.
+    pub knee_forward: f32,
+    /// Strength of the knee drive: how strongly (0..1) the mid-swing foot is
+    /// pulled from its flat glide toward the forward-and-high knee apex, blended
+    /// by speed. `0` restores a flat skimming swing.
+    pub knee_drive: f32,
     /// How far ahead of the hip a foot plants, yd — bounded by the (stubby
     /// arcade) leg's reach so the stance foot is always solvable.
     pub stance_reach: f32,
@@ -57,10 +70,24 @@ pub struct LocomotionTuning {
     pub torso_lean_max: f32,
     /// Lateral torso bank at full turn intensity, rad.
     pub torso_bank: f32,
+    /// Forward lean from the waist (torso-joint pitch) at a full sprint, rad,
+    /// blended in by normalized speed — the runner's forward carriage over the
+    /// hips, on top of the whole-body `root_pitch` lean. The head is counter-
+    /// pitched so it stays up.
+    pub waist_lean: f32,
     /// Shoulder counter-rotation amplitude, rad.
     pub shoulder_counter: f32,
     /// Arm-swing amplitude (upper arm pitch), rad.
     pub arm_swing: f32,
+    /// Elbow flex held while standing / walking slowly (forearm pitch), rad.
+    pub elbow_flex_idle: f32,
+    /// Elbow flex held at a full run (forearm pitch), rad — runners keep the
+    /// elbows bent ~90°, so this is deeper than `elbow_flex_idle` and the two
+    /// are blended by normalized speed.
+    pub elbow_flex_run: f32,
+    /// Extra elbow flex on the arm that is driving forward this half-cycle, rad
+    /// — the pump that opens the trailing elbow and closes the leading one.
+    pub elbow_pump: f32,
     /// Turn rate (rad/s) that maps to full turn intensity.
     pub turn_full_rate: f32,
     /// A per-tick planar jump beyond this (yd) is treated as a teleport: the
@@ -79,6 +106,9 @@ impl Default for LocomotionTuning {
             sprint_speed: 8.4,
             max_cadence: 3.1,
             foot_lift: 0.34,
+            knee_height: 0.4,
+            knee_forward: 0.2,
+            knee_drive: 0.72,
             stance_reach: 0.22,
             planted_fraction: 0.62,
             startup_stride_scale: 0.55,
@@ -93,8 +123,12 @@ impl Default for LocomotionTuning {
             torso_lean_per_accel: 0.02,
             torso_lean_max: 0.34,
             torso_bank: 0.22,
+            waist_lean: 0.22,
             shoulder_counter: 0.16,
             arm_swing: 0.7,
+            elbow_flex_idle: 0.35,
+            elbow_flex_run: 1.2,
+            elbow_pump: 0.35,
             turn_full_rate: 3.0,
             teleport_distance: 3.0,
             landing_dip: 0.05,
