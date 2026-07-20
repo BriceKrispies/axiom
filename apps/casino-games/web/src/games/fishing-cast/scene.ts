@@ -55,6 +55,8 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   RegionRing: { baseColor: [0.95, 0.95, 0.85, 1], opacity: 0.35 },
   RegionRingLit: { baseColor: [1, 0.92, 0.55, 1], emissive: [0.5, 0.42, 0.15, 1], opacity: 0.6 },
   Reed: { baseColor: [0.42, 0.66, 0.34, 1] },
+  RockGrey: { baseColor: [0.62, 0.62, 0.66, 1] },
+  RockGreyDark: { baseColor: [0.44, 0.45, 0.5, 1] },
   Reticle: { baseColor: [1, 0.85, 0.4, 1], emissive: [0.65, 0.5, 0.15, 1], opacity: 0.8 },
   Ripple: { baseColor: [0.85, 0.95, 0.98, 1], opacity: 0.4 },
   RodWood: { baseColor: [0.55, 0.36, 0.22, 1] },
@@ -90,6 +92,29 @@ const segment = (key: string, material: string, a: EngineVec3, b: EngineVec3, th
       scale: v3(thickness, len, thickness),
     },
   };
+};
+
+/** An angular low-poly shore boulder: a rotated box body with a tilted facet cap. */
+const rock = (key: string, at: EngineVec3, size: EngineVec3, yaw: number): readonly SceneInstance[] => {
+  const tilt = 1 / Math.hypot(0.4, 1, 0.25);
+  return [
+    {
+      key: `${key}:body`,
+      material: "RockGrey",
+      mesh: "box",
+      transform: { position: at, rotation: quatYaw(yaw), scale: size },
+    },
+    {
+      key: `${key}:facet`,
+      material: "RockGreyDark",
+      mesh: "box",
+      transform: {
+        position: addV3(at, v3(0, size.y * 0.28, 0)),
+        rotation: quatAxisAngle(v3(0.4 * tilt, tilt, 0.25 * tilt), yaw + 0.9),
+        scale: v3(size.x * 0.68, size.y * 0.72, size.z * 0.68),
+      },
+    },
+  ];
 };
 
 const flatRing = (key: string, material: string, at: EngineVec3, radius: number, height = 0.02): SceneInstance => ({
@@ -300,6 +325,15 @@ export const fishingScene = (runtime: GameRuntime<FishingSpec>, state: FishingSt
     }),
   ];
 
+  // Grey angular boulders around the grass shore (a far-left cluster + accents).
+  const shore: SceneInstance[] = [
+    ...rock("rock0", v3(-2.55, 0.5, -2.7), v3(1.5, 1.1, 1.3), 0.6),
+    ...rock("rock1", v3(-1.6, 0.32, -2.95), v3(0.8, 0.7, 0.85), 2.1),
+    ...rock("rock2", v3(-3.5, 0.36, 0.1), v3(0.95, 0.8, 1.05), 1.2),
+    ...rock("rock3", v3(2.7, 0.42, -2.5), v3(1.05, 0.9, 1.0), 3.0),
+    ...rock("rock4", v3(3.5, 0.32, 0.65), v3(0.85, 0.7, 0.9), 0.3),
+  ];
+
   // Region ring buoys, highlighted while the reticle rests inside.
   const hot = session.phase === "ready" ? spec.regions.findIndex((r) => Math.hypot(aim.x - r.x, aim.z - r.z) <= r.radius) : -1;
   const regions: SceneInstance[] = spec.regions.flatMap((region, i) => {
@@ -451,7 +485,7 @@ export const fishingScene = (runtime: GameRuntime<FishingSpec>, state: FishingSt
   return {
     camera: showcaseCamera(v3(0, 0.35, 0.45), 7.4, 2.7, 0.86),
     clearColor: SKY_CLEAR,
-    instances: [...stageRoom(19), ...pond, ...regions, ...dock, ...tackle, ...reticle, ...water, ...rewardInstances, ...celebration],
+    instances: [...stageRoom(19), ...pond, ...shore, ...regions, ...dock, ...tackle, ...reticle, ...water, ...rewardInstances, ...celebration],
     lights,
   };
 };
