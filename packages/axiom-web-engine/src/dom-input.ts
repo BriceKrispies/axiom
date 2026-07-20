@@ -77,8 +77,16 @@ export const attachDomInput = (input: InputState, canvas: HTMLCanvasElement, opt
   const onPointer = (event: PointerEvent): void => {
     input.pointerEvent(event.offsetX, event.offsetY, event.buttons !== 0);
   };
-  const onPointerLeave = (): void => {
-    input.pointerClear();
+  const onPointerLeave = (event: PointerEvent): void => {
+    /* A MOUSE leaving the canvas ends hovering, so clear the sample. But a TOUCH
+       pointerleave fires as part of the finger lift — synchronously with pointerup,
+       before the next tick — so clearing here would erase the just-recorded release
+       position that cursor-driven games (pickers, menus, tap-to-select) need to
+       resolve WHICH target was tapped. The preceding pointerup already recorded
+       {pos, down:false}; leaving it intact is exactly the release the game reads. */
+    if (event.pointerType !== "touch") {
+      input.pointerClear();
+    }
   };
   const onBlur = (): void => {
     input.releaseAllKeys();
