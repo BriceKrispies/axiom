@@ -1,0 +1,9 @@
+# Test-fixture Axiom app for tools/axiom-sound's own suite. Its only job is to
+# be a valid `--app` target: it carries an app.toml (the manifest the tool
+# requires) and a sounds/ directory of authored `.strudel` fixtures. It is not a
+# workspace member and is never built by the engine.
+[app]
+name = "sound-fixture"
+crate_name = "axiom-sound-fixture"
+allowed_layers = ["kernel"]
+allowed_modules = []

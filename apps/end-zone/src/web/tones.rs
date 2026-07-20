@@ -1,7 +1,7 @@
-//! Menu tone synthesis: the frontend's typed [`ToneRecipe`]s played through
-//! a lazily created `AudioContext` (browser autoplay policy requires a user
-//! gesture before audio starts). All volume shaping comes from the typed
-//! settings via the gain the shell computes.
+//! Menu tone synthesis: the frontend's typed [`ToneRecipe`]s played through the
+//! shared `AudioContext` owned by the [`super::music::AudioEdge`] (browser
+//! autoplay policy requires a user gesture before that context exists). All
+//! volume shaping comes from the typed settings via the gain the shell computes.
 
 use web_sys::{AudioContext, OscillatorType};
 
@@ -16,33 +16,13 @@ fn osc_type(wave: ToneWave) -> OscillatorType {
     }
 }
 
-/// The lazily initialized tone player.
-#[derive(Debug, Default)]
-pub struct MenuTones {
-    context: Option<AudioContext>,
-}
+/// Stateless menu-tone synthesis over a shared, already-unlocked context.
+#[derive(Debug)]
+pub struct MenuTones;
 
 impl MenuTones {
-    pub fn new() -> Self {
-        MenuTones::default()
-    }
-
-    /// Create/resume the audio context (call on a user gesture).
-    pub fn unlock(&mut self) {
-        if self.context.is_none() {
-            self.context = AudioContext::new().ok();
-        }
-        if let Some(context) = &self.context {
-            let _ = context.resume();
-        }
-    }
-
-    /// Play one recipe at `gain` (master × menu volume). Silently does
-    /// nothing until the context is unlocked.
-    pub fn play(&self, recipe: ToneRecipe, gain: f32) {
-        let Some(context) = &self.context else {
-            return;
-        };
+    /// Play one recipe at `gain` (master × menu volume) through `context`.
+    pub fn play(context: &AudioContext, recipe: ToneRecipe, gain: f32) {
         if gain <= 0.0 {
             return;
         }

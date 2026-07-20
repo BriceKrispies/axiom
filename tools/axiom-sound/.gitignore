@@ -1,0 +1,6 @@
+# Tool-local mutable cache: rendered WAV intermediates and render metadata.
+# Regenerated on demand by `axiom-sound build`; never committed.
+.axiom-cache/
+
+# npm install output (also covered by the root .gitignore).
+node_modules/

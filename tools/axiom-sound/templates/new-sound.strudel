@@ -1,0 +1,18 @@
++++
+id = "__ID__"
+duration_ms = 700
+tail_ms = 200
+channels = 1
+bitrate_kbps = 128
++++
+
+// A tiny synthesized placeholder tone. Edit freely, then `check` and `build`.
+// The body below is ordinary Strudel: paste it into the Strudel REPL
+// (strudel.cc) unchanged to hear it.
+note("c5 e5")
+  .s("triangle")
+  .attack(0.005)
+  .decay(0.12)
+  .sustain(0)
+  .release(0.18)
+  .gain(0.7)

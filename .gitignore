@@ -23,6 +23,11 @@
 **/web/vendor/
 **/web/**/vendor/
 
+# axiom-sound tool staging output (`<app>/assets/audio/<id>.mp3` + manifest.json).
+# The shipped copy lives in the app's own `web/`; this staging dir is regenerable
+# (and, for realtime-rendered sounds, non-deterministic).
+**/assets/audio/
+
 # .NET build output (scoped to examples/ so it never matches Rust `src/bin/`)
 examples/**/bin/
 examples/**/obj/
@@ -87,5 +92,8 @@ mutants-out*/
 # Playwright controller daemon state (browser logs, screenshots, command log)
 scripts/.playwright-controller/
 scripts/.localhost-servers/
+
+# tools/axiom-sound cache: gitignored lossless WAV render intermediates
+tools/axiom-sound/.axiom-cache/
 
 /screenshots

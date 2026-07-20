@@ -7,6 +7,7 @@
 
 pub mod gamepad;
 pub mod markup;
+pub mod music;
 pub mod presenter;
 pub mod storage;
 pub mod style;
@@ -32,9 +33,9 @@ use crate::presentation::HudView;
 use crate::scene::LIVE_CAPACITY;
 use crate::shell::EndZoneShell;
 
+use music::AudioEdge;
 use presenter::MenuPresenter;
 use storage::{ConsoleSink, LocalStorageStore};
-use tones::MenuTones;
 use touch::{mount_touch_controls, set_controls_visible, TouchHeld};
 
 /// The fixed frontend base seed: per-match seeds derive deterministically
@@ -67,7 +68,7 @@ pub fn end_zone_start() {
     let keys: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
     let pointer: Rc<RefCell<PointerShared>> = Rc::new(RefCell::new(PointerShared::default()));
     let touch: Rc<RefCell<TouchHeld>> = Rc::new(RefCell::new(TouchHeld::default()));
-    let audio: Rc<RefCell<MenuTones>> = Rc::new(RefCell::new(MenuTones::new()));
+    let audio: Rc<RefCell<AudioEdge>> = Rc::new(RefCell::new(AudioEdge::new()));
 
     install_key_listeners(&keys, &audio);
     install_pointer_listeners(&pointer, &audio);
@@ -135,11 +136,13 @@ pub fn end_zone_start() {
             .flatten();
         menu.render_hud(hud);
         if !document_hidden() {
-            let gain = shell.frontend.menu_tone_gain();
-            let player = frame_audio.borrow();
+            let mut edge = frame_audio.borrow_mut();
+            let sfx_gain = shell.frontend.menu_tone_gain();
             for intent in &out.view.sounds {
-                player.play(recipe(*intent), gain);
+                edge.play_tone(recipe(*intent), sfx_gain);
             }
+            let on_menu = shell.frontend.screen() == Screen::Title;
+            edge.update_music(on_menu, shell.frontend.menu_music_gain());
         }
         if out.view.persist {
             shell.frontend.profile().save_to(&mut store, &mut sink);
@@ -214,7 +217,7 @@ fn is_touch_device() -> bool {
 
 /// Track every held `KeyboardEvent.code` (menus, bindings, and rebind
 /// capture all consume the same neutral token stream).
-fn install_key_listeners(keys: &Rc<RefCell<Vec<String>>>, audio: &Rc<RefCell<MenuTones>>) {
+fn install_key_listeners(keys: &Rc<RefCell<Vec<String>>>, audio: &Rc<RefCell<AudioEdge>>) {
     let down = keys.clone();
     let down_audio = audio.clone();
     let on_down = Closure::<dyn FnMut(KeyboardEvent)>::new(move |e: KeyboardEvent| {
@@ -243,7 +246,7 @@ fn install_key_listeners(keys: &Rc<RefCell<Vec<String>>>, audio: &Rc<RefCell<Men
 }
 
 /// Track pointer position + press edges for the menu hit model.
-fn install_pointer_listeners(pointer: &Rc<RefCell<PointerShared>>, audio: &Rc<RefCell<MenuTones>>) {
+fn install_pointer_listeners(pointer: &Rc<RefCell<PointerShared>>, audio: &Rc<RefCell<AudioEdge>>) {
     let move_pointer = pointer.clone();
     let on_move = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
         let mut p = move_pointer.borrow_mut();

@@ -1,0 +1,9 @@
++++
+id = "silent"
+duration_ms = 500
+tail_ms = 100
+channels = 1
+bitrate_kbps = 128
++++
+
+note("c5 e5").s("triangle").gain(0)

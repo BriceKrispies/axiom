@@ -1,0 +1,15 @@
++++
+id = "tone-two"
+duration_ms = 600
+tail_ms = 200
+channels = 2
+bitrate_kbps = 128
++++
+
+note("g4 c5")
+  .s("sawtooth")
+  .attack(0.005)
+  .decay(0.1)
+  .sustain(0)
+  .release(0.2)
+  .gain(0.5)

@@ -1,0 +1,9 @@
++++
+id = "unknown-fn"
+duration_ms = 500
+tail_ms = 100
+channels = 1
+bitrate_kbps = 128
++++
+
+notez("c5 e5").s("triangle").gain(0.5)

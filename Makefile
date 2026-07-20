@@ -68,7 +68,8 @@ ENDZONE_PORT     ?= 8000
 	asset-stream asset-stream-build asset-stream-pack \
 	end-zone end-zone-build \
 	package loader-test e2e e2e-netplay e2e-matchmaking e2e-scaleout \
-	netplay-cluster netplay-load serve ts-gate help
+	netplay-cluster netplay-load serve ts-gate help \
+	sound sound-check sound-build sound-list sound-clean sound-test
 
 help:
 	@echo "Axiom tooling targets:"
@@ -422,6 +423,31 @@ asset-stream:
 serve:
 	cargo run -p axiom-serve -- $(APP) $(ARGS)
 
+# --- tools/axiom-sound: Strudel game-sound asset pipeline ---
+# A Tool (npm package, off the engine graph and the coverage/branchless gates).
+# Authors, checks, renders, and builds Strudel sound sources into an app's
+# assets/audio/. Select the target app with APP=<app-path>, e.g.
+# `make sound-build APP=apps/my-app`; extra flags via ARGS (e.g. --name id).
+SOUND_DIR := tools/axiom-sound
+
+sound:
+	npm --prefix $(SOUND_DIR) install --no-audit --no-fund
+
+sound-check:
+	npm --prefix $(SOUND_DIR) run check -- --app $(APP) $(ARGS)
+
+sound-build:
+	npm --prefix $(SOUND_DIR) run build -- --app $(APP) $(ARGS)
+
+sound-list:
+	npm --prefix $(SOUND_DIR) run list -- --app $(APP) $(ARGS)
+
+sound-clean:
+	npm --prefix $(SOUND_DIR) run clean -- --app $(APP) $(ARGS)
+
+sound-test:
+	npm --prefix $(SOUND_DIR) test
+
 # --- End Zone (apps/end-zone) ---
 
 # Rebuild the End Zone wasm bundle (raw cargo + wasm-bindgen flow).
@@ -429,6 +455,12 @@ serve:
 end-zone-build:
 	cargo build -p $(ENDZONE_CRATE) --target $(WASM_TARGET) --release
 	wasm-bindgen --target web --out-dir $(ENDZONE_PKG) $(ENDZONE_ARTIFACT)
+	@# Keep the served menu-music copy in sync with a fresh axiom-sound render
+	@# (its staging dir is git-ignored; web/audio/menu.mp3 is the shipped asset).
+	@if [ -f $(ENDZONE_DIR)/assets/audio/menu.mp3 ]; then \
+		mkdir -p $(ENDZONE_WEB)/audio && \
+		cp $(ENDZONE_DIR)/assets/audio/menu.mp3 $(ENDZONE_WEB)/audio/menu.mp3; \
+	fi
 
 # Serve the End Zone showcase. Run `make end-zone-build` first.
 end-zone:

@@ -1,0 +1,10 @@
++++
+id = "remote-sample"
+duration_ms = 500
+tail_ms = 100
+channels = 1
+bitrate_kbps = 128
++++
+
+samples('github:tidalcycles/dirt-samples');
+s("bd hh sd hh")

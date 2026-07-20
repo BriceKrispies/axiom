@@ -1,0 +1,98 @@
++++
+id = "menu"
+duration_ms = 54000
+tail_ms = 3000
+channels = 2
+bitrate_kbps = 192
+render = "realtime"
++++
+
+stack(
+// Synthesized kick
+note("c1 ~ c1 ~ [c1 c1] ~ c1 ~")
+.s("sine")
+.penv(32)
+.pdecay(.07)
+.decay(.18)
+.sustain(0)
+.distort("3:.45")
+.gain(.9)
+.mask("<0 1!13 0 1!12>"),
+// Synthesized snare
+s("~ white ~ white")
+.hpf(700)
+.lpf(5000)
+.decay(.13)
+.sustain(0)
+.distort("2:.4")
+.gain(.55)
+.mask("<0!2 1!12 0 1!12>"),
+// Metallic hats
+s("white*8")
+.hpf(6500)
+.decay(.025)
+.sustain(0)
+.gain("[.10 .16 .12 .20]*2")
+.mask("<0!3 1!12 0 1!11>"),
+// Bass riff
+note(`<
+[d1 d1 ~ d1 [f1 e1] d1 ~ c1]!7
+>`)
+.s("sawtooth")
+.lpf("<420!7 560!8 340!4 680!8>")
+.lpq(8)
+.decay(.12)
+.sustain(.25)
+.release(.06)
+.distort("6:.28")
+.gain(.75)
+.mask("<1!14 0 1!12>"),
+// Power chords
+note(`<
+[
+[d2,a2,d3] ~
+[d2,a2,d3] ~
+[f2,c3,f3] ~
+[c2,g2,c3] ~
+]!7
+>`)
+.s("sawtooth")
+.lpf("<1200!7 1700!8 950!4 2200!8>")
+.attack(.005)
+.decay(.18)
+.sustain(.18)
+.release(.12)
+.distort("4:.22")
+.room(.18)
+.orbit(2)
+.gain(.48)
+.mask("<0!2 1!12 0 1!12>"),
+// High-note responses
+note(`<
+~!2
+[d5 ~ f5 ~]
+>`)
+.s("square")
+.lpf(2400)
+.attack(.005)
+.decay(.12)
+.sustain(.08)
+.release(.12)
+.distort("3:.2")
+.delay(.18)
+.delaytime(.16)
+.delayfeedback(.25)
+.room(.3)
+.orbit(3)
+.gain(.3),
+// Low synthesized impacts at section changes
+note("d1")
+.s("sine")
+.penv(20)
+.pdecay(.3)
+.decay(.5)
+.sustain(0)
+.distort("5:.3")
+.gain(.7)
+.mask("<0!6 1 0!7 1 0!3 1 0!7 1>")
+)

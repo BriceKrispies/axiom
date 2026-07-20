@@ -242,6 +242,7 @@ pub fn content_type_for(path: &Path) -> &'static str {
         Some("png") => "image/png",
         Some("svg") => "image/svg+xml",
         Some("ts") => "text/typescript; charset=utf-8",
+        Some("mp3") => "audio/mpeg",
         _ => "application/octet-stream",
     }
 }

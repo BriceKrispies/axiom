@@ -1,4 +1,4 @@
-//! The three settings and their compact persistence: valid defaults, a bounded
+//! The four settings and their compact persistence: valid defaults, a bounded
 //! volume, screen-shake driving real camera amplitude, reduced motion
 //! suppressing nonessential movement, a persistence round-trip, safe fallback
 //! on malformed input, and the absence of every removed setting from the shape.
@@ -50,10 +50,29 @@ fn reduced_motion_suppresses_nonessential_movement() {
 fn settings_round_trip_through_compact_persistence() {
     let settings = EndZoneSettings {
         master_volume: Volume(3),
+        music_volume: Volume(6),
         screen_shake: ScreenShake::Off,
         reduced_motion: true,
     };
     assert_eq!(decode(&encode(&settings)), settings);
+}
+
+#[test]
+fn music_volume_is_bounded_and_defaults_reasonably() {
+    let d = EndZoneSettings::default();
+    assert!(d.music_volume.0 <= Volume::MAX);
+    assert!((0.0..=1.0).contains(&d.music_volume.ratio()));
+    assert_eq!(Volume(Volume::MAX).step(true).0, Volume::MAX);
+}
+
+#[test]
+fn an_old_profile_without_music_volume_loads_the_default() {
+    // A profile persisted before MUSIC VOLUME existed: it must load with the
+    // default music volume rather than failing or zeroing it.
+    let legacy = "endzone.v=1\nmaster_volume=4\nscreen_shake=low\nreduced_motion=0\n";
+    let decoded = decode(legacy);
+    assert_eq!(decoded.music_volume, EndZoneSettings::default().music_volume);
+    assert_eq!(decoded.master_volume, Volume(4));
 }
 
 #[test]
@@ -67,14 +86,13 @@ fn malformed_persisted_settings_fall_back_safely() {
 #[test]
 fn no_removed_setting_appears_in_the_persisted_shape() {
     let text = encode(&EndZoneSettings::default());
-    for key in &["master_volume", "screen_shake", "reduced_motion"] {
+    for key in &["master_volume", "music_volume", "screen_shake", "reduced_motion"] {
         assert!(text.contains(key), "keeps {key}");
     }
     for removed in &[
         "difficulty",
         "camera",
         "game_speed",
-        "music",
         "crowd",
         "quality",
         "contrast",

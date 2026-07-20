@@ -1,6 +1,7 @@
-//! The settings screen: exactly MASTER VOLUME, SCREEN SHAKE, REDUCED MOTION,
-//! and BACK. Changes apply immediately (no working/committed copy, no apply or
-//! discard). Each setting drives real behavior; see `SETTINGS.md`.
+//! The settings screen: exactly MASTER VOLUME, MUSIC VOLUME, SCREEN SHAKE,
+//! REDUCED MOTION, and BACK. Changes apply immediately (no working/committed
+//! copy, no apply or discard). Each setting drives real behavior; see
+//! `SETTINGS.md`.
 
 use crate::frontend::actions::AudioIntent;
 use crate::frontend::layout::{centered_rows, LayoutContext, ShellRegions};
@@ -19,6 +20,7 @@ const VOLUME: WidgetId = WidgetId(1);
 const SHAKE: WidgetId = WidgetId(2);
 const MOTION: WidgetId = WidgetId(3);
 const BACK: WidgetId = WidgetId(4);
+const MUSIC: WidgetId = WidgetId(5);
 
 /// Adjust the focused setting by a horizontal step (`dx` sign). Returns whether
 /// a setting was adjusted (BACK ignores horizontal input).
@@ -27,6 +29,10 @@ pub fn adjust(fe: &mut FrontendState, dx: i32) -> bool {
     match fe.focus.focused() {
         Some(VOLUME) => {
             fe.edit_settings(|s| s.master_volume = s.master_volume.step(up));
+            true
+        }
+        Some(MUSIC) => {
+            fe.edit_settings(|s| s.music_volume = s.music_volume.step(up));
             true
         }
         Some(SHAKE) => {
@@ -84,12 +90,17 @@ pub fn build(
     let mut entries = Vec::new();
 
     let width = (ctx.width * 0.7).clamp(320.0, 560.0);
-    let rows = centered_rows(shell.content, width, 62.0, 18.0, 4);
+    let rows = centered_rows(shell.content, width, 54.0, 15.0, 5);
 
     let volume = SettingRow {
         label: "MASTER VOLUME".to_string(),
         value: format!("{}/{}", s.master_volume.0, Volume::MAX),
         fill: Some(s.master_volume.ratio()),
+    };
+    let music = SettingRow {
+        label: "MUSIC VOLUME".to_string(),
+        value: format!("{}/{}", s.music_volume.0, Volume::MAX),
+        fill: Some(s.music_volume.ratio()),
     };
     let shake = SettingRow {
         label: "SCREEN SHAKE".to_string(),
@@ -102,7 +113,7 @@ pub fn build(
         fill: None,
     };
 
-    for (index, (id, row)) in [(VOLUME, volume), (SHAKE, shake), (MOTION, motion)]
+    for (index, (id, row)) in [(VOLUME, volume), (MUSIC, music), (SHAKE, shake), (MOTION, motion)]
         .into_iter()
         .enumerate()
     {
@@ -111,12 +122,12 @@ pub fn build(
         entries.push(FocusEntry::new(id, rect, index as i16, 0));
     }
 
-    let back_rect = rows[3];
+    let back_rect = rows[4];
     widgets.push(
         Placed::new(BACK, back_rect, Widget::Button(ArcadeButton::flat("BACK")))
             .focused(focused == Some(BACK)),
     );
-    entries.push(FocusEntry::new(BACK, back_rect, 3, 0));
+    entries.push(FocusEntry::new(BACK, back_rect, 4, 0));
 
     (
         widgets,

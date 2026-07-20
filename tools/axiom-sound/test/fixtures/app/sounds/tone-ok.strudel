@@ -1,0 +1,15 @@
++++
+id = "tone-ok"
+duration_ms = 900
+tail_ms = 200
+channels = 1
+bitrate_kbps = 128
++++
+
+note("c5 e5 g5")
+  .s("triangle")
+  .attack(0.005)
+  .decay(0.12)
+  .sustain(0)
+  .release(0.18)
+  .gain(0.7)

@@ -101,6 +101,13 @@ impl FrontendApp {
         self.state.profile.settings.master_volume.ratio()
     }
 
+    /// The gain the menu music should play at: the music volume beneath the
+    /// master gain, so master still scales everything and music trims below it.
+    pub fn menu_music_gain(&self) -> f32 {
+        let settings = &self.state.profile.settings;
+        settings.master_volume.ratio() * settings.music_volume.ratio()
+    }
+
     /// What the simulation should do behind the current screen.
     pub fn sim_directive(&self) -> SimDirective {
         match self.state.screen {

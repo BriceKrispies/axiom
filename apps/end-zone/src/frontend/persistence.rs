@@ -1,5 +1,5 @@
 //! Compact, versioned frontend persistence behind an app-local store
-//! abstraction. The profile is exactly the three retained settings, encoded as
+//! abstraction. The profile is exactly the four retained settings, encoded as
 //! a small `key=value` text stamped with a version. Every loaded value is
 //! validated and anything invalid or unknown falls back to its default without
 //! panicking; a persistence failure never blocks the title or gameplay — it
@@ -44,7 +44,7 @@ impl ProfileStore for MemoryStore {
     }
 }
 
-/// Everything the frontend persists: only the three retained settings.
+/// Everything the frontend persists: only the four retained settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FrontendProfile {
     pub settings: EndZoneSettings,
@@ -82,11 +82,12 @@ impl FrontendProfile {
     }
 }
 
-/// Encode the three settings as a compact versioned text.
+/// Encode the four settings as a compact versioned text.
 pub fn encode(settings: &EndZoneSettings) -> String {
     format!(
-        "endzone.v={PROFILE_VERSION}\nmaster_volume={}\nscreen_shake={}\nreduced_motion={}\n",
+        "endzone.v={PROFILE_VERSION}\nmaster_volume={}\nmusic_volume={}\nscreen_shake={}\nreduced_motion={}\n",
         settings.master_volume.0,
+        settings.music_volume.0,
         shake_key(settings.screen_shake),
         u8::from(settings.reduced_motion),
     )
@@ -103,6 +104,11 @@ pub fn decode(text: &str) -> EndZoneSettings {
             "master_volume" => {
                 if let Ok(v) = value.trim().parse::<u8>() {
                     settings.master_volume = Volume::clamped(v);
+                }
+            }
+            "music_volume" => {
+                if let Ok(v) = value.trim().parse::<u8>() {
+                    settings.music_volume = Volume::clamped(v);
                 }
             }
             "screen_shake" => {
