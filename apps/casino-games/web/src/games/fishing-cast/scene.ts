@@ -36,6 +36,14 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   ...STAGE_MATERIALS,
   ...REWARD_MATERIALS,
   ...CONFETTI_MATERIALS,
+  // Night regrade of the shared pavilion backdrop for THIS game only: the pastel
+  // sky-blue wall and cream floor slab were painting a daytime frame over the deep
+  // navy clear. Re-seat them into the dusk palette (dark navy sky, slate night
+  // ground, dimmed teal accent) so the shore reads as moody night. Local overrides
+  // of the shared keys — the other 19 games keep the bright pavilion untouched.
+  StageBackdrop: { baseColor: [0.09, 0.13, 0.24, 1], emissive: [0.05, 0.08, 0.16, 1] },
+  StageFloor: { baseColor: [0.11, 0.16, 0.22, 1] },
+  StageFloorAccent: { baseColor: [0.16, 0.32, 0.34, 1] },
   BobberRed: { baseColor: [0.95, 0.28, 0.24, 1], emissive: [0.28, 0.06, 0.05, 1] },
   BobberWhite: { baseColor: [0.98, 0.96, 0.9, 1] },
   CrabCoral: { baseColor: [0.96, 0.45, 0.35, 1] },
