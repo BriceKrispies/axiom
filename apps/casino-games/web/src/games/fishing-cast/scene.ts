@@ -6,7 +6,7 @@
  * region-family prize on a win, a warm little joke on a loss. Pure view.
  */
 
-import type { EngineQuat, EngineVec3, GameResources, MaterialSpec, Scene, SceneInstance, SceneLight } from "@axiom/web-engine";
+import type { EngineQuat, EngineVec3, GameResources, MaterialSpec, Rgba, Scene, SceneInstance, SceneLight } from "@axiom/web-engine";
 import { sample01 } from "../../chance-engine/randomness/streams.ts";
 import type { GameRuntime } from "../../chance-engine/registry/definition.ts";
 import { phaseAge } from "../../chance-engine/sessions/session.ts";
@@ -14,7 +14,7 @@ import { showcaseCamera } from "../../presentation/cameras/presets.ts";
 import { confettiBurst, CONFETTI_MATERIALS, sparkleRing } from "../../presentation/celebrations/confetti.ts";
 import { rewardBeam, REWARD_MATERIALS, rewardMaterialOf } from "../../presentation/rewards/tiers.ts";
 import { clamp01, easeOutBack, pulse } from "../../presentation/stage/easing.ts";
-import { SKY_CLEAR, STAGE_MATERIALS, stageLights, stageRoom } from "../../presentation/stage/props.ts";
+import { STAGE_MATERIALS, stageRoom } from "../../presentation/stage/props.ts";
 import { addV3, QUAT_IDENTITY, quatAxisAngle, quatPitch, quatRoll, quatYaw, v3 } from "../../presentation/stage/vectors.ts";
 import { celebrationFor, outcomeRarity } from "../round-state.ts";
 import type { FishingSpec, FishingState } from "./game.ts";
@@ -39,22 +39,22 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   BobberRed: { baseColor: [0.95, 0.28, 0.24, 1], emissive: [0.28, 0.06, 0.05, 1] },
   BobberWhite: { baseColor: [0.98, 0.96, 0.9, 1] },
   CrabCoral: { baseColor: [0.96, 0.45, 0.35, 1] },
-  DockWood: { baseColor: [0.62, 0.44, 0.28, 1] },
-  DockWoodDark: { baseColor: [0.46, 0.32, 0.2, 1] },
+  DockWood: { baseColor: [0.52, 0.35, 0.2, 1] },
+  DockWoodDark: { baseColor: [0.38, 0.26, 0.15, 1] },
   Droplet: { baseColor: [0.7, 0.88, 0.96, 1], emissive: [0.2, 0.3, 0.35, 1], opacity: 0.85 },
   DuckBeak: { baseColor: [1, 0.62, 0.2, 1] },
   DuckYellow: { baseColor: [1, 0.87, 0.3, 1], emissive: [0.2, 0.16, 0.03, 1] },
   FishBody: { baseColor: [0.72, 0.82, 0.9, 1], emissive: [0.1, 0.13, 0.16, 1] },
   FishEye: { baseColor: [0.12, 0.14, 0.18, 1] },
-  Grass: { baseColor: [0.6, 0.85, 0.5, 1] },
-  LeafGreen: { baseColor: [0.5, 0.62, 0.32, 1] },
-  LilyPad: { baseColor: [0.35, 0.72, 0.42, 1] },
+  Grass: { baseColor: [0.4, 0.66, 0.3, 1] },
+  LeafGreen: { baseColor: [0.42, 0.54, 0.26, 1] },
+  LilyPad: { baseColor: [0.26, 0.56, 0.32, 1] },
   LineSilk: { baseColor: [0.28, 0.3, 0.34, 1] },
-  PondBed: { baseColor: [0.78, 0.7, 0.52, 1] },
-  PondWater: { baseColor: [0.3, 0.66, 0.66, 1], emissive: [0.05, 0.14, 0.14, 1], opacity: 0.85 },
+  PondBed: { baseColor: [0.72, 0.58, 0.38, 1] },
+  PondWater: { baseColor: [0.14, 0.44, 0.52, 1], emissive: [0.03, 0.1, 0.12, 1], opacity: 0.85 },
   RegionRing: { baseColor: [0.95, 0.95, 0.85, 1], opacity: 0.35 },
   RegionRingLit: { baseColor: [1, 0.92, 0.55, 1], emissive: [0.5, 0.42, 0.15, 1], opacity: 0.6 },
-  Reed: { baseColor: [0.42, 0.66, 0.34, 1] },
+  Reed: { baseColor: [0.34, 0.56, 0.28, 1] },
   RockGrey: { baseColor: [0.62, 0.62, 0.66, 1] },
   RockGreyDark: { baseColor: [0.44, 0.45, 0.5, 1] },
   Reticle: { baseColor: [1, 0.85, 0.4, 1], emissive: [0.65, 0.5, 0.15, 1], opacity: 0.8 },
@@ -62,6 +62,14 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   RodWood: { baseColor: [0.55, 0.36, 0.22, 1] },
   SmallChest: { baseColor: [0.58, 0.37, 0.2, 1] },
 };
+
+/**
+ * Fishing Cast's own dusk sky: a deep navy that seats the moody pond, in place
+ * of the shared pavilion's pastel daylight clear. Atmosphere is expressed
+ * entirely through the clear color here (this TS engine has no post/tonemap
+ * node), so a dark backdrop is what pushes the frame off high-key pastel.
+ */
+const NIGHT_SKY: Rgba = [0.09, 0.14, 0.26, 1];
 
 export const FISHING_RESOURCES: GameResources = {
   materials: MATERIALS,
@@ -480,11 +488,19 @@ export const fishingScene = (runtime: GameRuntime<FishingSpec>, state: FishingSt
     );
   }
 
-  const lights: SceneLight[] = [...stageLights(v3(CATCH_POINT.x, 0.4, CATCH_POINT.z), 0.55)];
+  // Fishing Cast is a moody dusk pond, not the bright pavilion: a strong warm
+  // key dropped to a low, side-raking elevation models the water and shore, and
+  // the cool fill is cut hard so the darks stay deep and saturated instead of
+  // washing flat. The warm focus point stays on the reveal at the dock.
+  const lights: SceneLight[] = [
+    { key: "light:key", light: { color: [1, 0.9, 0.72, 1], direction: v3(-0.5, -0.5, -0.34), intensity: 1.05, kind: "directional" } },
+    { key: "light:fill", light: { color: [0.6, 0.74, 0.95, 1], direction: v3(0.5, -0.35, 0.75), intensity: 0.12, kind: "directional" } },
+    { key: "light:focus", light: { color: [1, 0.9, 0.66, 1], intensity: 0.7, kind: "point", position: v3(CATCH_POINT.x, 2, CATCH_POINT.z + 0.6) } },
+  ];
 
   return {
-    camera: showcaseCamera(v3(0, 0.35, 0.45), 7.4, 2.7, 0.86),
-    clearColor: SKY_CLEAR,
+    camera: showcaseCamera(v3(0, -0.1, 0.2), 5.2, 3.1, 0.86),
+    clearColor: NIGHT_SKY,
     instances: [...stageRoom(19), ...pond, ...shore, ...regions, ...dock, ...tackle, ...reticle, ...water, ...rewardInstances, ...celebration],
     lights,
   };
