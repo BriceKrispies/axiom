@@ -73,9 +73,9 @@ const segment = (key: string, material: string, a: EngineVec3, b: EngineVec3, th
   const d = v3(b.x - a.x, b.y - a.y, b.z - a.z);
   const len = Math.max(1e-4, Math.hypot(d.x, d.y, d.z));
   const unit = v3(d.x / len, d.y / len, d.z / len);
-  // Rotate +Y onto the segment direction.
-  const axisX = -unit.z;
-  const axisZ = unit.x;
+  // Rotate +Y onto the segment direction, about the axis Y × unit = (uz, 0, -ux).
+  const axisX = unit.z;
+  const axisZ = -unit.x;
   const axisLen = Math.hypot(axisX, axisZ);
   const angle = Math.acos(Math.min(1, Math.max(-1, unit.y)));
   const rotation: EngineQuat =

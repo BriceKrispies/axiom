@@ -95,6 +95,53 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
   let activeGameId: string | null = null;
   let detachPointer: (() => void) | null = null;
   let lastHudKey = "";
+  /** Whether the result banner is currently presented (so its arcade impact and
+   * count-up fire once on reveal, not on every later HUD tick). */
+  let resultShown = false;
+  /** The in-flight numeric count-up frame, so it can be cancelled on reset. */
+  let countRaf = 0;
+
+  /** Present the result banner with a quick arcade impact and, for a numeric
+   * prize, count the number upward instead of snapping straight to the total. */
+  const presentResult = (hud: CasinoHud): void => {
+    const text = hud.resultText ?? "";
+    banner.className = `show impact ${hud.win === true ? `win-${hud.rarity ?? "common"}` : "loss"}`;
+    if (hud.rarity !== null) {
+      banner.style.color = RARITY_CSS[hud.rarity];
+    } else {
+      banner.style.removeProperty("color");
+    }
+    cancelAnimationFrame(countRaf);
+    const match = /^(.*?)(\d[\d,]*)(.*)$/.exec(text);
+    if (match === null) {
+      banner.textContent = text;
+      return;
+    }
+    const pre = match[1] ?? "";
+    const post = match[3] ?? "";
+    const target = Number((match[2] ?? "0").replace(/,/g, ""));
+    const start = performance.now();
+    const durationMs = 640;
+    banner.textContent = `${pre}0${post}`;
+    const step = (now: number): void => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const value = Math.round(target * (1 - (1 - t) ** 3));
+      banner.textContent = `${pre}${value.toLocaleString()}${post}`;
+      if (t < 1) {
+        countRaf = requestAnimationFrame(step);
+      }
+    };
+    countRaf = requestAnimationFrame(step);
+  };
+
+  /** Clear the result banner and any running count-up back to a clean baseline. */
+  const clearResult = (): void => {
+    resultShown = false;
+    cancelAnimationFrame(countRaf);
+    banner.className = "";
+    banner.textContent = "";
+    banner.style.removeProperty("color");
+  };
 
   const applyRootSettings = (): void => {
     document.documentElement.dataset["contrast"] = settings.highContrast ? "high" : "normal";
@@ -132,15 +179,12 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
     lastHudKey = key;
     instruction.textContent = hud.instruction;
     if (hud.resultText !== null) {
-      banner.textContent = hud.resultText;
-      banner.className = `show ${hud.win === true ? `win-${hud.rarity ?? "common"}` : "loss"}`;
-      if (hud.rarity !== null) {
-        banner.style.color = RARITY_CSS[hud.rarity];
-      } else {
-        banner.style.removeProperty("color");
+      if (!resultShown) {
+        resultShown = true;
+        presentResult(hud);
       }
-    } else {
-      banner.className = "";
+    } else if (resultShown) {
+      clearResult();
     }
     for (const id of ["btn-new-round", "btn-replay"]) {
       el<HTMLButtonElement>(id).disabled = hud.inputLocked;
@@ -162,6 +206,7 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
     detachPointer = null;
     activeGameId = null;
     lastHudKey = "";
+    clearResult();
     delete document.body.dataset["activeGame"];
   };
 

@@ -17,6 +17,7 @@ import { sample01, sampleInt } from "../../chance-engine/randomness/streams.ts";
 import type { GameRuntime } from "../../chance-engine/registry/definition.ts";
 import { phaseAge, transition } from "../../chance-engine/sessions/session.ts";
 import type { SessionState } from "../../chance-engine/sessions/session.ts";
+import { shimmerCue, thumpCue, tickCue } from "../../presentation/audio/cues.ts";
 import { tabletopCamera } from "../../presentation/cameras/presets.ts";
 import type { PickTarget } from "../../presentation/cameras/picking.ts";
 import { v3 } from "../../presentation/stage/vectors.ts";
@@ -60,14 +61,60 @@ export const chestTargets = (count: number): readonly PickTarget[] =>
     radiusPx: 78,
   }));
 
+// ── presentation timing (ONE central config — no scattered magic numbers) ──────
+
+/**
+ * Every duration, easing magnitude, and staging constant of the chest's
+ * presentation ritual, gathered here so the sequence is tuned in one place
+ * rather than sprinkled through the view. Durations are in ticks (speed-scaled
+ * where used); magnitudes are world-space unless noted. All of it is purely
+ * cosmetic — nothing here can reach the outcome.
+ */
+export const CHEST_TIMING = {
+  // Idle — a gentle, per-chest-desynced breathing plus an occasional gold gleam.
+  idleBobPeriod: 150, // ticks per idle bob cycle
+  idleBobAmp: 0.014, // world-units of vertical idle bob
+  idleTwistAmp: 0.035, // radians of idle sway
+  gleamPeriod: 300, // ticks between gold-trim gleam sweeps
+  gleamDuty: 0.14, // fraction of the period a chest's trim gleams
+  // Selection staging — the chosen chest lifts, tilts, and the others recede.
+  liftInTicks: 12, // ease-up time when a chest is committed
+  lift: 0.17, // world-units the chosen chest rises (~10 px at this camera)
+  tilt: 0.15, // radians tilted toward the camera
+  selectScale: 1.07, // slight enlarge of the chosen chest
+  othersDim: 0.78, // brightness multiplier for the eight others (~22% dim)
+  pushIn: 0.72, // reveal camera closeness (0..1) — the chosen chest fills the frame
+  // Reveal ritual durations (ticks, speed-scaled at build time).
+  brace: 22,
+  latch: 16,
+  pause: 12,
+  lid: 14,
+  rise: 34,
+  hold: 12,
+  burst: 10, // the light-burst flash window, right after the lid opens
+  // Reveal magnitudes.
+  shakeMag: 0.05, // anticipation shake amplitude
+  latchDrop: 1.55, // radians the latch swings open
+  latchRecoil: 0.22, // extra kick on the latch's release snap
+  lidOpen: 1.9, // radians the lid swings open
+  burstParticles: 12, // bounded upward light-burst motes
+  riseHeight: 1.2, // world-units the prize climbs to hover clear above the chest
+} as const;
+
 // ── the reveal timeline (ticks from entering "revealing", speed-scaled) ────────
 
 export interface RevealTimeline {
   readonly braceEnd: number;
   readonly latchStart: number;
   readonly latchEnd: number;
+  /** Warm seam light begins leaking here (as the latch lands). */
+  readonly seamStart: number;
   readonly pauseEnd: number;
+  /** The lid begins to swing (= pauseEnd). */
+  readonly lidStart: number;
   readonly lidEnd: number;
+  /** The upward light burst peaks here (= lidEnd). */
+  readonly burstAt: number;
   readonly riseEnd: number;
   readonly total: number;
 }
@@ -75,13 +122,95 @@ export interface RevealTimeline {
 export const revealTimeline = (presentationSpeed: number, reducedMotion: boolean): RevealTimeline => {
   const scale = reducedMotion ? 0.6 : 1;
   const t = (n: number): number => speedTicks(Math.round(n * scale), presentationSpeed);
-  const braceEnd = t(22);
+  const braceEnd = t(CHEST_TIMING.brace);
   const latchStart = braceEnd;
-  const latchEnd = latchStart + t(16);
-  const pauseEnd = latchEnd + t(12);
-  const lidEnd = pauseEnd + t(14);
-  const riseEnd = lidEnd + t(34);
-  return { braceEnd, latchEnd, latchStart, lidEnd, pauseEnd, riseEnd, total: riseEnd + t(8) };
+  const latchEnd = latchStart + t(CHEST_TIMING.latch);
+  const seamStart = latchEnd;
+  const pauseEnd = latchEnd + t(CHEST_TIMING.pause);
+  const lidStart = pauseEnd;
+  const lidEnd = pauseEnd + t(CHEST_TIMING.lid);
+  const burstAt = lidEnd;
+  const riseEnd = lidEnd + t(CHEST_TIMING.rise);
+  return {
+    braceEnd,
+    burstAt,
+    latchEnd,
+    latchStart,
+    lidEnd,
+    lidStart,
+    pauseEnd,
+    riseEnd,
+    seamStart,
+    total: riseEnd + t(CHEST_TIMING.hold),
+  };
+};
+
+// ── formalized presentation phases (readable names for the reveal ritual) ──────
+
+/** The named visual phases the chest presentation moves through. The legal
+ * ordering is guaranteed upstream by the session phase machine (which also
+ * hard-locks input during the protected phases), so this is a pure read of
+ * where the ritual is — never a place a stray click can jump. */
+export type ChestPresentation =
+  | "idle"
+  | "committed"
+  | "anticipation"
+  | "latch"
+  | "seam"
+  | "lid"
+  | "burst"
+  | "prize"
+  | "result"
+  | "reset";
+
+export const presentationPhase = (session: SessionState, timeline: RevealTimeline): ChestPresentation => {
+  const phase = session.phase;
+  if (phase === "intro" || phase === "ready") {
+    return "idle";
+  }
+  if (phase === "committing") {
+    return "committed";
+  }
+  if (phase === "resetting") {
+    return "reset";
+  }
+  if (phase === "celebrating" || phase === "complete") {
+    return "result";
+  }
+  const age = phaseAge(session);
+  if (age < timeline.braceEnd) {
+    return "anticipation";
+  }
+  if (age < timeline.latchEnd) {
+    return "latch";
+  }
+  if (age < timeline.pauseEnd) {
+    return "seam";
+  }
+  if (age < timeline.lidEnd) {
+    return "lid";
+  }
+  if (age < timeline.burstAt + timeline.lidEnd - timeline.lidStart) {
+    return "burst";
+  }
+  return "prize";
+};
+
+// ── idle cosmetics (deterministic, per-chest, outcome-independent) ─────────────
+
+/** A per-chest idle phase (radians), spaced by the golden angle so the nine
+ * chests never bob in unison. Pure in the slot index — no seed — so it cannot
+ * correlate with which chest wins. */
+export const idlePhase = (index: number): number => (index * 2.399963 + 0.4) % (Math.PI * 2);
+
+/** Gold-trim gleam strength in [0,1] for chest `index` at `tick`: a brief sweep
+ * on a slow, per-chest-offset cycle so at most a couple of chests gleam at once.
+ * Cosmetic and deterministic; never a function of the outcome or a live clock. */
+export const goldGleam = (index: number, tick: number): number => {
+  const period = CHEST_TIMING.gleamPeriod;
+  const local = ((((tick + index * 71) % period) + period) % period) / period;
+  const duty = CHEST_TIMING.gleamDuty;
+  return local < duty ? Math.sin((local / duty) * Math.PI) : 0;
 };
 
 /**
@@ -131,7 +260,9 @@ export const stepChest = (
   const count = session.config.choiceCount ?? 9;
 
   if (session.phase === "ready") {
-    const result = stepChoice(state.extra.choice, input, chestCamera(count), chestTargets(count), CHEST_COLUMNS);
+    // Tap-to-confirm: on touch the first tap highlights a chest and the second
+    // opens it; a desktop click still opens in one action (hover pre-arms it).
+    const result = stepChoice(state.extra.choice, input, chestCamera(count), chestTargets(count), CHEST_COLUMNS, true);
     if (result.selectedNow !== null) {
       return {
         ...state,
@@ -157,25 +288,34 @@ export const stepChest = (
   return state;
 };
 
-/** Reveal-mechanism cues: latch thump when the latch lands, pop when the lid
- * flies (the win/loss fanfare itself is played centrally by the harness). */
-export const chestCues = (
-  prev: ChestState,
-  next: ChestState,
-  thump: (seed: number, key: number) => readonly ToneSpec[],
-  shimmer: (seed: number, key: number) => readonly ToneSpec[],
-): readonly ToneSpec[] => {
+/**
+ * The chest's own reveal-ritual cues, phrased as marks crossed on the reveal
+ * timeline: a light latch click, the weighty latch-land thump, the rising seam
+ * shimmer, the heavy lid-open thump, and the burst shimmer as the lid settles —
+ * plus soft count-up ticks over the first stretch of a winning celebration. The
+ * win/loss fanfare itself is played centrally by the mount harness.
+ */
+export const chestCues = (prev: ChestState, next: ChestState): readonly ToneSpec[] => {
   const session = next.session;
-  if (session.phase !== "revealing" || prev.session.phase !== "revealing") {
-    return [];
-  }
-  const timeline = revealTimeline(session.config.presentationSpeed, false);
+  const seed = session.committed?.presentationSeed ?? session.seed;
   const before = phaseAge(prev.session);
   const after = phaseAge(session);
-  const seed = session.committed?.presentationSeed ?? session.seed;
   const crossed = (mark: number): boolean => before < mark && after >= mark;
-  return [
-    ...(crossed(timeline.latchEnd) ? thump(seed, 1) : []),
-    ...(crossed(timeline.lidEnd) ? shimmer(seed, 2) : []),
-  ];
+
+  if (session.phase === "revealing" && prev.session.phase === "revealing") {
+    const tl = revealTimeline(session.config.presentationSpeed, false);
+    return [
+      ...(crossed(tl.latchStart) ? tickCue(seed, 1) : []), // latch click as it releases
+      ...(crossed(tl.latchEnd) ? thumpCue(seed, 2) : []), // latch lands / recoil snap
+      ...(crossed(tl.seamStart) ? shimmerCue(seed, 3) : []), // warm seam light rising
+      ...(crossed(tl.lidStart) ? thumpCue(seed, 4) : []), // weighty lid heave
+      ...(crossed(tl.lidEnd) ? shimmerCue(seed, 5) : []), // light burst as the lid settles
+    ];
+  }
+
+  // Count-up ticks accompanying the number climbing during a winning result.
+  if (session.phase === "celebrating" && prev.session.phase === "celebrating" && (session.committed?.win ?? false)) {
+    return [4, 8, 12, 16, 20, 24].filter((mark) => crossed(mark)).flatMap((_, i) => tickCue(seed, 30 + i));
+  }
+  return [];
 };

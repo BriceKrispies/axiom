@@ -18,9 +18,20 @@ export interface ChoiceCore {
   readonly selected: number | null;
   /** True while the pointer button was down over a target (pressed state). */
   readonly pressing: boolean;
+  /** Tap-to-confirm only: the target a first tap (or desktop hover) has
+   * highlighted, awaiting a confirming second tap. null when nothing is armed
+   * or the mode is off. Drawn as the highlight so the player sees the pending
+   * pick before it opens. */
+  readonly armed: number | null;
 }
 
-export const initialChoice = (focused = 0): ChoiceCore => ({ focused, hovered: null, pressing: false, selected: null });
+export const initialChoice = (focused = 0): ChoiceCore => ({
+  armed: null,
+  focused,
+  hovered: null,
+  pressing: false,
+  selected: null,
+});
 
 export interface ChoiceStepResult {
   readonly core: ChoiceCore;
@@ -33,6 +44,13 @@ export interface ChoiceStepResult {
  * focus through a `columns`-wide grid, primary selects the focused target.
  * Pointer: hover tracks the target under the cursor; a press-release on a
  * hovered target selects it.
+ *
+ * `tapToConfirm` (opt-in) turns the pointer path into a two-step interaction: a
+ * release only selects the target that was ALREADY armed; any other release just
+ * arms (highlights) it. Because a desktop mouse hovers the target — arming it —
+ * before the click, a click there still opens in one action; a touch has no hover
+ * before the tap, so it takes the deliberate two taps (first highlights, second
+ * opens). Keyboard is unchanged: arrows already arm via focus, primary confirms.
  */
 export const stepChoice = (
   core: ChoiceCore,
@@ -40,6 +58,7 @@ export const stepChoice = (
   camera: Camera3D,
   targets: readonly PickTarget[],
   columns: number,
+  tapToConfirm = false,
 ): ChoiceStepResult => {
   if (core.selected !== null || targets.length === 0) {
     return { core, selectedNow: null };
@@ -57,12 +76,28 @@ export const stepChoice = (
 
   const hovered = pickAt(camera, targets, input.pointer);
   const pointerDown = input.pointer?.down ?? false;
-  const clicked = core.pressing && !pointerDown && hovered !== null;
+  const released = core.pressing && !pointerDown && hovered !== null;
   const keyed = input.pressed.has("primary");
 
-  const selectedNow = clicked ? hovered : keyed ? focused : null;
+  // A pointer release selects when: plain mode → any hovered target; tap-to-confirm
+  // → only the target that was already armed on entry to this tick.
+  const pointerSelects = tapToConfirm ? released && hovered === core.armed : released;
+  const selectedNow = pointerSelects ? hovered : keyed ? focused : null;
+
+  // Arm the target the pointer rests on with the button up — a desktop hover, or
+  // the just-released touch target (its sample survives the release tick before
+  // pointerleave clears it). Sticky otherwise; cleared once a selection commits.
+  const armed = !tapToConfirm
+    ? null
+    : selectedNow !== null
+      ? null
+      : hovered !== null && !pointerDown
+        ? hovered
+        : core.armed;
+
   return {
     core: {
+      armed,
       focused: hovered ?? focused,
       hovered,
       pressing: pointerDown && hovered !== null,

@@ -9,7 +9,6 @@ import type { CasinoGameConfig } from "../../chance-engine/configuration/schema.
 import { baseConfig } from "../../chance-engine/configuration/schema.ts";
 import type { ConfigIssue } from "../../chance-engine/configuration/validation.ts";
 import type { CasinoGameDefinition, GameRuntime, RunningCasinoGame } from "../../chance-engine/registry/definition.ts";
-import { shimmerCue, thumpCue } from "../../presentation/audio/cues.ts";
 import { mountCasinoGame } from "../casino-mount.ts";
 import type { ChestSpec } from "./game.ts";
 import { chestCues, initialChestExtra, stepChest } from "./game.ts";
@@ -30,7 +29,7 @@ const mount = (canvas: HTMLCanvasElement, runtime: GameRuntime<ChestSpec>): Runn
       state.session.phase === "ready" ? "Pick a chest — arrows + Enter, or click one" : null,
     mechanic: { choiceCount: runtime.config.choiceCount ?? 9, kind: "choice" },
     resources: CHEST_RESOURCES,
-    sound: (prev, next) => chestCues(prev, next, thumpCue, shimmerCue),
+    sound: (prev, next) => chestCues(prev, next),
     step: (state, input, ctx) => stepChest(runtime, state, input, ctx),
     viewScene: (state) => chestScene(runtime, state),
   });

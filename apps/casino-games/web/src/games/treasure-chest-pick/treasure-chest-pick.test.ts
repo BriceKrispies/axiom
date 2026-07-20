@@ -9,7 +9,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { planChoicePopulation } from "../../chance-engine/probability/choice-population.ts";
-import { dancePose, revealTimeline } from "./game.ts";
+import { SeededChanceResultSource } from "../../chance-engine/outcomes/result-source.ts";
+import { createSession } from "../../chance-engine/sessions/session.ts";
+import type { SessionState } from "../../chance-engine/sessions/session.ts";
+import { dancePose, goldGleam, idlePhase, presentationPhase, revealTimeline } from "./game.ts";
 import { TREASURE_CHEST_PICK } from "./definition.ts";
 
 test("the reveal cadence puts the latch strictly before the lid", () => {
@@ -22,6 +25,41 @@ test("the reveal cadence puts the latch strictly before the lid", () => {
       assert.ok(t.latchEnd <= t.pauseEnd && t.pauseEnd <= t.lidEnd, "latch fully precedes lid");
       assert.ok(t.lidEnd < t.riseEnd, "the reward rises after the lid opens");
     }
+  }
+});
+
+test("the presentation phases name the reveal ritual in its legal order", () => {
+  const tl = revealTimeline(1, false);
+  const base = createSession(TREASURE_CHEST_PICK.defaultConfig(), 1, 1, new SeededChanceResultSource(1), { choiceCount: 9, kind: "choice" });
+  const at = (phase: SessionState["phase"], age: number): SessionState => ({ ...base, phase, phaseStartTick: 0, tick: age });
+
+  assert.equal(presentationPhase(at("intro", 3), tl), "idle");
+  assert.equal(presentationPhase(at("ready", 3), tl), "idle");
+  assert.equal(presentationPhase(at("committing", 3), tl), "committed");
+  assert.equal(presentationPhase(at("resetting", 3), tl), "reset");
+  assert.equal(presentationPhase(at("celebrating", 3), tl), "result");
+  assert.equal(presentationPhase(at("complete", 3), tl), "result");
+
+  // Inside the reveal, the named sub-phases advance monotonically along the ritual.
+  const ritual = [0, tl.braceEnd, tl.latchEnd, tl.pauseEnd, tl.lidEnd, tl.riseEnd].map((age) => presentationPhase(at("revealing", age), tl));
+  assert.deepEqual(ritual, ["anticipation", "latch", "seam", "lid", "burst", "prize"]);
+});
+
+test("idle cosmetics are deterministic, desynced, and outcome-independent", () => {
+  // Each chest gets its own idle phase in [0, 2π) — so the nine never move in unison.
+  const phases = Array.from({ length: 9 }, (_, i) => idlePhase(i));
+  phases.forEach((p) => assert.ok(p >= 0 && p < Math.PI * 2, "idle phase in range"));
+  assert.equal(new Set(phases.map((p) => p.toFixed(5))).size, 9, "nine distinct idle phases");
+
+  // goldGleam is a pure function of (index, tick) with NO seed, so it cannot
+  // encode which chest wins; it is bounded, replayable, and never lights all nine.
+  for (let tick = 0; tick < 900; tick += 11) {
+    const gleams = Array.from({ length: 9 }, (_, i) => goldGleam(i, tick));
+    gleams.forEach((g, i) => {
+      assert.ok(g >= 0 && g <= 1, "gleam bounded");
+      assert.equal(goldGleam(i, tick), g, "gleam is deterministic");
+    });
+    assert.ok(gleams.filter((g) => g > 0.5).length <= 3, "at most a few chests gleam at once");
   }
 });
 

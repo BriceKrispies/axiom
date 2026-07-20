@@ -124,6 +124,10 @@
   font-weight: 900;
   text-transform: uppercase;
   font-size: 1.7rem;
+  /* Own line-height: the banner sits inside #stage (line-height: 0, to kill the
+   * canvas inline gap) and must NOT inherit that, or a wrapped result string
+   * (common on narrow phones) collapses its lines on top of each other. */
+  line-height: 1.15;
   letter-spacing: 0.03em;
   padding: 10px 22px;
   background: var(--marquee-red);
@@ -136,6 +140,33 @@
 #result-banner.show {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1) rotate(-1.2deg);
+}
+
+/* Arcade impact: a fast overshoot-and-settle punch when the result lands, in
+ * place of a gentle fade. Runs once (JS adds `.impact` only on reveal). The
+ * animation drives transform while it plays; the `.show` transform takes over
+ * after, so the small resting tilt is preserved. */
+@keyframes result-impact {
+  0% {
+    transform: translate(-50%, -50%) scale(0.4);
+  }
+  60% {
+    transform: translate(-50%, -50%) scale(1.16);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+#result-banner.impact {
+  animation: result-impact 0.32s cubic-bezier(0.2, 1.5, 0.5, 1);
+}
+
+/* Treasure Chest reveals its prize in the upper-centre of the stage, so its
+ * banner sits in the lower third — the open chest and rising prize own the
+ * frame. Scoped to the game via the shell's body[data-active-game]. */
+body[data-active-game="treasure-chest-pick"] #result-banner {
+  top: 74%;
 }
 
 #result-banner::before {
