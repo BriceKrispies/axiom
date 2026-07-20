@@ -1,0 +1,80 @@
+# scorecard.champion.toml — fishing-cast ("Lucky Cast")
+# BASELINE, first convergence pass. Champion = the seed baseline render
+# (apps/casino-games/visual_targets/fishing-cast/champion.png) scored against
+# reference.png. Scored HARSHLY, calibrated to identity/parity (0..5):
+#   0 absent/plainly-wrong  1 present-but-crude-proxy  2 stylized/simplified
+#   3 clearly-on-model      4 near-parity              5 indistinguishable
+# The reference's "LUCKY CAST" title lettering is UI text and is NOT scored.
+# Axis list + order are FIXED for the campaign; order is the tie-break for
+# "lowest axis = next flaw to attack".
+
+[meta]
+target = "fishing-cast"
+app = "casino-games"
+champion_screenshot = "champion.png"
+reference_screenshot = "reference.png"
+pass = "baseline"
+scored_by = "convergence-critic"
+
+[axes]
+# Camera is an elevated distant view of the whole floating island with a
+# sky-filled top half; reference is a low, dock-anchored hero shot with the
+# pond filling the frame and the rod entering from the right. Reads as "a pond
+# with a dock" — same intent, plainly wrong framing => crude proxy.
+composition_and_framing = 1
+
+# PLAINLY WRONG. Bright daylight: pale sky-blue backdrop, cream/tan ground,
+# saturated teal water. Reference is a dark moody NIGHT palette — navy backdrop,
+# deep blue-green water, muted grass. The single most jarring identity break.
+color_palette = 0
+
+# The axis subject is essentially ABSENT. Champion is flat/ambient-shaded with
+# no directional key, no shadows, and none of the reference's emissive glow
+# (ripple rings, golden target, bobber highlight).
+lighting_and_shadow = 0
+
+# ABSENT. Reference is night-moody with vignette/haze and floating glow motes
+# near the golden ring. Champion has a bright empty sky gradient and no mood.
+atmosphere = 0
+
+# All elements present but as crude stand-ins: pond, a flat-slab "dock", a bare
+# black stick for the banded rod (no bobber, no hook, no reel guides), and plain
+# red dots where the reference has glowing cyan diamond rings + one golden ring.
+subject_fidelity = 1
+
+# Blobby flat shapes. The dock is a featureless slab (not planks with end caps),
+# the rod is a 1px line, bank/rock/reed silhouettes are missing. Crude proxy.
+silhouette_readability = 1
+
+# Flat vertex colors only, no texture/material variation — reference has wood
+# grain planks, a banded metal rod, faceted rocks, grassy banks. Crude proxy.
+material_and_texture_detail = 1
+
+# Foreground dock / mid pond / far bank layering is present but flattened by the
+# uniform daylight and lack of shadow/haze; little real separation.
+depth_and_separation = 1
+
+# Near-barren. Reference adds rocks, reed clumps, grass tufts, five ripple rings,
+# a bobber, and the RESULT/chest — champion has red dots and a couple of discs.
+detail_density = 1
+
+# Pond / dock / bank proportions land in a plausible ballpark, though the dock
+# slab is oversized and flat. The least-wrong axis.
+scale_and_proportion = 2
+
+# Notable artifacts: a cyan halo/z-fight rim around the whole island, harsh
+# aliased black edges, and a jagged black rod line. Reference is clean.
+artifact_level = 1
+
+# final_score = lowest_axis * 0.7 + average_axis * 0.3
+# lowest = 0 (color_palette, tie -> lighting_and_shadow, atmosphere; order breaks the tie)
+# average = 9/11 = 0.818
+# final  = 0*0.7 + 0.818*0.3 = 0.245  (out of 5)
+[result]
+lowest_axis = "color_palette"
+lowest_axis_value = 0
+average_axis = 0.818
+final_score = 0.245
+next_attack_axis = "color_palette"
+next_attack_reason = "Lowest axis (0) and, by fixed order, the tie-break winner over the other 0s. Highest-leverage single move: shift the whole render from bright daylight to the reference's dark night-blue mood (backdrop/clear + water + ambient), which is config-reachable and moves identity more than any other single change. Lighting_and_shadow and atmosphere (also 0) are the structural moves queued next."
+parity = false  # never claim parity; this is a crude first proxy
