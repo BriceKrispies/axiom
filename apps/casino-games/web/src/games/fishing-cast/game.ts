@@ -46,7 +46,7 @@ export const POND_RADIUS = 3;
 /** The reticle (and therefore every cast) is clamped inside the water. */
 export const AIM_LIMIT = POND_RADIUS * 0.92;
 export const WATER_Y = 0.06;
-export const ROD_TIP: EngineVec3 = { x: 0.55, y: 1.55, z: 2.85 };
+export const ROD_TIP: EngineVec3 = { x: 0.5, y: 2.1, z: 2.95 };
 /** Where the reel-in ends and the catch surfaces, just off the dock. */
 export const CATCH_POINT: EngineVec3 = { x: 0, y: WATER_Y, z: 2.3 };
 
