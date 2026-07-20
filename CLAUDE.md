@@ -952,6 +952,40 @@ the Playwright controller above to verify rendering
 (`axiom-game-runtime`, `axiom-retro-fps-ts-browser`) the Vite HMR flow
 (`packages/axiom-vite`) remains the richer alternative.
 
+## Managing localhost servers (localhost_servers — the default)
+
+**`scripts/localhost_servers.py` is the default way to run and manage anything
+on localhost in this repo.** Prefer it over launching `axiom-serve` (or any
+server) directly in the foreground: a bare `cargo run -p axiom-serve -- <app>`
+ties the server to the invoking shell and blocks it, while this manager starts
+servers as **fully detached background daemons** that keep running across
+terminals and sessions until explicitly stopped. It is repo tooling (stdlib
+only, run via `uv`), outside the engine dependency graph — not a layer, module,
+app, or Cargo package.
+
+It wraps `axiom-serve` for Axiom apps (injecting the correct import map and
+hot reload) and can run any command as a named server. State lives in the
+git-ignored `scripts/.localhost-servers/` (a JSON registry + per-server logs).
+
+```sh
+uv run scripts/localhost_servers.py start-app casino-games          # serve an app (hot reload) on :8080
+uv run scripts/localhost_servers.py start-app heat-check --port 8081
+uv run scripts/localhost_servers.py up                              # start the default set (home-run)
+uv run scripts/localhost_servers.py status                          # table of every server (default cmd)
+uv run scripts/localhost_servers.py logs casino-games -n 40         # last N log lines
+uv run scripts/localhost_servers.py url casino-games                # print its http://localhost:PORT
+uv run scripts/localhost_servers.py restart casino-games
+uv run scripts/localhost_servers.py stop casino-games
+uv run scripts/localhost_servers.py stop-all
+# any command as a named server:
+uv run scripts/localhost_servers.py start docs --port 9000 --cwd site -- python -m http.server 9000
+```
+
+The port auto-bumps to the next free one if the preferred port is taken. Note
+that `up`/`DEFAULT_APPS` reserves `home-run` on `8080`; if you want a different
+app on `8080`, start it explicitly with `start-app` rather than relying on a
+bare port. Pair it with the Playwright controller above to verify rendering.
+
 ## Logging and Telemetry Rules
 
 Logging and telemetry are part of the architecture, not decoration.
