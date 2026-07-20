@@ -7,24 +7,30 @@ builds from authoritative run state). Everything else — the screen state
 machine, focus, settings, persistence, theme — lives here with zero browser
 types, so the whole frontend is native-testable.
 
-There is no attract mode, main menu, team selection, match setup, or credits.
-The title leads **straight into gameplay**.
+There is no attract mode, team selection, match setup, or credits. The title is
+a start plate; a first press opens a small **Menu** (`PLAY` / `SETTINGS`). That
+first press doubles as the browser gesture that starts the menu music (the music
+plays on the `Menu`, not the bare title — see `web/music.rs`).
 
-## The six-state machine
+## The seven-state machine
 
-`src/frontend/screen.rs` — exactly six states, never booleans:
+`src/frontend/screen.rs` — exactly seven states, never booleans:
 
 ```
-Title  →(confirm)→  InGame  →(pause)→  Paused
-                                        ├─(resume)→       InGame
-                                        ├─(settings)→     Settings →(back)→ Paused
-                                        ├─(controls)→     Controls →(back)→ Paused
-                                        ├─(restart run)→  InGame (fresh)
-                                        └─(return)→       Title
+Title  →(confirm)→  Menu  →(play)→      InGame  →(pause)→  Paused
+                     ├─(settings)→ Settings →(back)→ Menu    ├─(resume)→       InGame
+                     └─(back)→     Title                     ├─(settings)→     Settings →(back)→ Paused
+                                                             ├─(controls)→     Controls →(back)→ Paused
+                                                             ├─(restart run)→  InGame (fresh)
+                                                             └─(return)→       Title
 InGame →(failed 4th-down conversion)→ GameOver
                                         ├─(play again)→   InGame (fresh, new seed)
                                         └─(return)→       Title
 ```
+
+Settings/Controls are shared between the pre-game `Menu` and the in-game
+`Paused` menu; `FrontendState::sub_return` records which opened them so `back`
+returns to the right one (`screens::back_from_sub`).
 
 Transitions are explicit, recorded methods on `FrontendState`; the frontend
 answers the composition layer only through drained `FrontendCommand`s
@@ -35,9 +41,16 @@ reports `over`; the frontend never queries the simulation.
 ## Title
 
 Only the procedural `END ZONE` mark and a blinking `PRESS START` prompt, over
-the live ambient field showcase. Any confirm rolls a fresh explicit run seed and
-starts the run immediately (a `LaunchRun{seed}` command + a wipe transition). No
-team names, cards, ratings, difficulty, settings, credits, or menu entries.
+the live ambient field showcase. Any confirm opens the `Menu` (a fade). No team
+names, cards, ratings, difficulty, credits, or match setup.
+
+## Menu
+
+The small pre-game menu behind the title: exactly `PLAY` and `SETTINGS` over the
+attract field. `PLAY` rolls a fresh explicit run seed and starts the run
+(`LaunchRun{seed}` + a wipe); `SETTINGS` opens the shared settings screen
+(returning here on `back`); `back` returns to the title. This is the screen the
+menu music plays on.
 
 ## Pause
 

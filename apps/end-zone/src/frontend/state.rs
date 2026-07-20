@@ -27,6 +27,9 @@ pub struct FrontendState {
     pub transition: Option<ActiveTransition>,
     /// The final run summary, set when the shell reports the run is over.
     pub summary: Option<RunSummary>,
+    /// Where a Settings/Controls sub-screen returns on BACK — the pre-game
+    /// `Menu` or the in-game `Paused` menu, whichever opened it.
+    pub sub_return: Screen,
     /// Monotonic run counter (drives the deterministic per-run launch seed).
     run_counter: u64,
     base_seed: u64,
@@ -49,6 +52,7 @@ impl FrontendState {
             focus: FocusList::default(),
             transition: None,
             summary: None,
+            sub_return: Screen::Paused,
             run_counter: 0,
             base_seed,
             commands: Vec::new(),

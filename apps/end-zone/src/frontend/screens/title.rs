@@ -1,9 +1,12 @@
 //! The title screen: the oversized END ZONE mark over the live field, a
-//! blinking PRESS START plate, and nothing else. Any confirm starts the run.
+//! blinking PRESS START plate, and nothing else. Any confirm opens the menu
+//! (PLAY / SETTINGS) — this first press is also the gesture that starts the
+//! menu music.
 
+use crate::frontend::actions::AudioIntent;
 use crate::frontend::layout::{centered_rows, rect, LayoutContext, ShellRegions};
 use crate::frontend::navigation::{FocusEntry, WidgetId};
-use crate::frontend::state::FrontendState;
+use crate::frontend::state::{FrontendState, Screen};
 use crate::frontend::theme::Theme;
 use crate::frontend::transitions::TransitionKind;
 use crate::frontend::widgets::{ArcadeButton, BackgroundView, HintSet, Placed, TitleLogo, Widget};
@@ -13,7 +16,8 @@ use super::ScreenBuild;
 const START: WidgetId = WidgetId(1);
 
 pub fn confirm(fe: &mut FrontendState) {
-    super::launch_fresh_run(fe, TransitionKind::Wipe);
+    fe.sound(AudioIntent::Confirm);
+    fe.go(Screen::Menu, TransitionKind::Fade);
 }
 
 pub fn build(

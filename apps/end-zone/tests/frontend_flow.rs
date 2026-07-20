@@ -1,6 +1,6 @@
-//! The six-state screen flow: title straight into gameplay, pause/resume,
-//! restart, settings/controls returning to pause, return-to-title, game over,
-//! and play again — plus replayed-input determinism.
+//! The screen flow: title opens the menu, PLAY into gameplay, pause/resume,
+//! restart, settings/controls returning to whoever opened them, return-to-title,
+//! game over, and play again — plus replayed-input determinism.
 
 use axiom_end_zone::drive::RunSummary;
 use axiom_end_zone::frontend::actions::FrontendCommand;
@@ -32,8 +32,10 @@ fn has(frame: &FrontendFrame, want: FrontendCommand) -> bool {
     frame.commands.iter().any(|c| *c == want)
 }
 
+/// Title -> Menu -> (PLAY) -> InGame; returns the launch frame.
 fn to_ingame(fe: &mut FrontendApp) -> FrontendFrame {
-    tap(fe, "Enter")
+    tap(fe, "Enter"); // Title -> Menu
+    tap(fe, "Enter") // Menu PLAY -> InGame
 }
 
 /// Enter game over the way the shell does, then let one frame rebuild focus.
@@ -52,10 +54,12 @@ fn summary() -> RunSummary {
 }
 
 #[test]
-fn title_confirm_starts_gameplay_immediately() {
+fn title_opens_the_menu_then_play_starts_the_game() {
     let mut fe = app();
     assert_eq!(fe.state().screen, Screen::Title);
-    let frame = to_ingame(&mut fe);
+    tap(&mut fe, "Enter"); // Title -> Menu (the gesture that also starts the music)
+    assert_eq!(fe.state().screen, Screen::Menu);
+    let frame = tap(&mut fe, "Enter"); // Menu PLAY -> InGame
     assert_eq!(fe.state().screen, Screen::InGame);
     assert!(frame
         .commands
@@ -65,11 +69,21 @@ fn title_confirm_starts_gameplay_immediately() {
 }
 
 #[test]
-fn there_is_no_main_menu_between_title_and_game() {
-    // A single confirm goes title -> gameplay with no intermediate screen.
+fn the_menu_offers_play_and_settings_and_backs_out_to_title() {
     let mut fe = app();
-    to_ingame(&mut fe);
-    assert_eq!(fe.state().screen, Screen::InGame);
+    tap(&mut fe, "Enter"); // Title -> Menu
+    assert_eq!(fe.state().screen, Screen::Menu);
+
+    // SETTINGS (second item) opens settings, which returns to the MENU on BACK.
+    tap(&mut fe, "ArrowDown"); // PLAY -> SETTINGS
+    tap(&mut fe, "Enter");
+    assert_eq!(fe.state().screen, Screen::Settings);
+    tap(&mut fe, "Escape");
+    assert_eq!(fe.state().screen, Screen::Menu);
+
+    // BACK from the menu returns to the title start plate.
+    tap(&mut fe, "Escape");
+    assert_eq!(fe.state().screen, Screen::Title);
 }
 
 #[test]

@@ -4,6 +4,7 @@
 
 pub mod controls;
 pub mod gameover;
+pub mod menu;
 pub mod pause;
 pub mod settings;
 pub mod title;
@@ -69,12 +70,21 @@ fn navigate(fe: &mut FrontendState, direction: NavDirection) {
 fn confirm(fe: &mut FrontendState, id: WidgetId) {
     match fe.screen {
         Screen::Title => title::confirm(fe),
+        Screen::Menu => menu::confirm(fe, id),
         Screen::Paused => pause::confirm(fe, id),
         Screen::Settings => settings::confirm(fe, id),
         Screen::Controls => controls::confirm(fe, id),
         Screen::GameOver => gameover::confirm(fe, id),
         Screen::InGame => {}
     }
+}
+
+/// Return from a Settings/Controls sub-screen to whichever menu opened it
+/// (the pre-game `Menu` or the in-game `Paused` menu).
+pub(crate) fn back_from_sub(fe: &mut FrontendState) {
+    let to = fe.sub_return;
+    fe.sound(AudioIntent::Cancel);
+    fe.go(to, TransitionKind::Fade);
 }
 
 fn confirm_screen_default(fe: &mut FrontendState) {
@@ -88,7 +98,8 @@ fn cancel(fe: &mut FrontendState) {
     match fe.screen {
         Screen::InGame => pause::open(fe),
         Screen::Paused => pause::resume(fe),
-        Screen::Settings | Screen::Controls => pause::back_to_pause(fe),
+        Screen::Menu => menu::back_to_title(fe),
+        Screen::Settings | Screen::Controls => back_from_sub(fe),
         Screen::Title | Screen::GameOver => {}
     }
 }
@@ -113,6 +124,7 @@ pub fn build(
     let shell = ctx.shell();
     let (widgets, entries, hint_set, background) = match fe.screen {
         Screen::Title => title::build(fe, ctx, &shell, theme),
+        Screen::Menu => menu::build(fe, ctx, &shell, theme),
         Screen::Paused => pause::build(fe, ctx, &shell, theme),
         Screen::Settings => settings::build(fe, ctx, &shell, theme),
         Screen::Controls => controls::build(fe, ctx, &shell, theme),

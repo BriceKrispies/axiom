@@ -26,7 +26,8 @@ fn tap(s: &mut EndZoneShell, token: &str) {
 }
 
 fn start_run(s: &mut EndZoneShell) {
-    tap(s, "Enter"); // Title -> InGame
+    tap(s, "Enter"); // Title -> Menu
+    tap(s, "Enter"); // Menu PLAY -> InGame
     assert_eq!(s.frontend.screen(), Screen::InGame);
 }
 

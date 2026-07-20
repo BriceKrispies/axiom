@@ -34,12 +34,6 @@ pub fn resume(fe: &mut FrontendState) {
     fe.go(Screen::InGame, TransitionKind::Fade);
 }
 
-/// Return to the pause menu from a settings/controls sub-screen.
-pub fn back_to_pause(fe: &mut FrontendState) {
-    fe.sound(AudioIntent::Cancel);
-    fe.go(Screen::Paused, TransitionKind::Fade);
-}
-
 pub fn confirm(fe: &mut FrontendState, id: WidgetId) {
     match id {
         RESUME => resume(fe),
@@ -51,10 +45,12 @@ pub fn confirm(fe: &mut FrontendState, id: WidgetId) {
             fe.go(Screen::InGame, TransitionKind::ScaleImpact);
         }
         SETTINGS => {
+            fe.sub_return = Screen::Paused;
             fe.sound(AudioIntent::Confirm);
             fe.go(Screen::Settings, TransitionKind::Fade);
         }
         CONTROLS => {
+            fe.sub_return = Screen::Paused;
             fe.sound(AudioIntent::Confirm);
             fe.go(Screen::Controls, TransitionKind::Fade);
         }

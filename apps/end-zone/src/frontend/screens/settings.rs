@@ -49,7 +49,7 @@ pub fn adjust(fe: &mut FrontendState, dx: i32) -> bool {
 
 pub fn confirm(fe: &mut FrontendState, id: WidgetId) {
     if id == BACK {
-        super::pause::back_to_pause(fe);
+        super::back_from_sub(fe);
     } else if adjust(fe, 1) {
         // Confirm on a setting advances it (same as a right press).
         fe.sound(AudioIntent::Navigate);

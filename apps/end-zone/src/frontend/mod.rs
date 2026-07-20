@@ -108,6 +108,17 @@ impl FrontendApp {
         settings.master_volume.ratio() * settings.music_volume.ratio()
     }
 
+    /// Whether the menu music should be audible now: on the pre-game `Menu`, and
+    /// on a Settings/Controls sub-screen that the `Menu` (not the in-game pause)
+    /// opened. Off on the title, in gameplay, and in the paused-game menus.
+    pub fn menu_music_active(&self) -> bool {
+        match self.state.screen {
+            Screen::Menu => true,
+            Screen::Settings | Screen::Controls => self.state.sub_return == Screen::Menu,
+            _ => false,
+        }
+    }
+
     /// What the simulation should do behind the current screen.
     pub fn sim_directive(&self) -> SimDirective {
         match self.state.screen {
@@ -115,7 +126,7 @@ impl FrontendApp {
             Screen::Paused | Screen::Settings | Screen::Controls | Screen::GameOver => {
                 SimDirective::Frozen
             }
-            Screen::Title => SimDirective::Menu,
+            Screen::Title | Screen::Menu => SimDirective::Menu,
         }
     }
 

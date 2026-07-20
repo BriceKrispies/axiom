@@ -68,8 +68,9 @@ input (keys → DeviceFrame → InputState)
   shake in `impulse.rs`). Driven only by events + snapshot.
 - **Screen for a visible thing (dust, ring, flash, streak)** → juice, spawned
   only by events: `src/presentation/{juice,particles}.rs`.
-- **Menus / focus / a new screen state** → `src/frontend/*` (six states in
-  `screen.rs`; the frontend talks to the shell ONLY via `FrontendCommand`).
+- **Menus / focus / a new screen state** → `src/frontend/*` (seven states in
+  `screen.rs`: Title → Menu (PLAY/SETTINGS) → InGame, plus Paused/Settings/
+  Controls/GameOver; the frontend talks to the shell ONLY via `FrontendCommand`).
 - **Field geometry / markings / numbers** → `src/field/{generator,markings}.rs`
   (all procedural; no imported assets).
 - **Anything touching the DOM, storage, gamepad, audio, touch** → `src/web/`

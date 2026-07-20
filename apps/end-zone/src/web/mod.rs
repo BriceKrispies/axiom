@@ -74,6 +74,11 @@ pub fn end_zone_start() {
     install_pointer_listeners(&pointer, &audio);
     mount_touch_controls(&touch);
 
+    // Try to start the menu music immediately so it fades in on the title screen.
+    // Browsers that block autoplay keep it silent until the first gesture, which
+    // the key/pointer listeners route through the same `unlock`.
+    audio.borrow_mut().unlock();
+
     let mut overlay = DebugOverlayApi::new();
     overlay.mount_to_body();
 
@@ -141,8 +146,7 @@ pub fn end_zone_start() {
             for intent in &out.view.sounds {
                 edge.play_tone(recipe(*intent), sfx_gain);
             }
-            let on_menu = shell.frontend.screen() == Screen::Title;
-            edge.update_music(on_menu, shell.frontend.menu_music_gain());
+            edge.update_music(shell.frontend.menu_music_active(), shell.frontend.menu_music_gain());
         }
         if out.view.persist {
             shell.frontend.profile().save_to(&mut store, &mut sink);

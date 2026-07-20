@@ -17,7 +17,7 @@ const BACK: WidgetId = WidgetId(1);
 
 pub fn confirm(fe: &mut FrontendState, id: WidgetId) {
     if id == BACK {
-        super::pause::back_to_pause(fe);
+        super::back_from_sub(fe);
     }
 }
 

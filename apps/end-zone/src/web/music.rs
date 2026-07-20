@@ -4,6 +4,8 @@
 //! `AudioContext` also feeds the procedural [`MenuTones`], so both are unlocked
 //! by the same user gesture (browser autoplay policy requires one).
 
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsValue;
 use web_sys::{AudioContext, GainNode, HtmlAudioElement, MediaElementAudioSourceNode};
 
 use crate::frontend::audio::ToneRecipe;
@@ -19,7 +21,7 @@ const FADE_SECS: f64 = 0.8;
 /// only to keep the graph alive.
 #[derive(Debug)]
 struct MusicNodes {
-    _element: HtmlAudioElement,
+    element: HtmlAudioElement,
     _source: MediaElementAudioSourceNode,
     /// Ramped 0 <-> 1 on a title enter/leave transition (the fade).
     fade: GainNode,
@@ -35,11 +37,25 @@ pub struct MenuMusic {
 }
 
 impl MenuMusic {
-    /// Build the audio element + graph and start playback. Must run from a user
-    /// gesture (autoplay policy), so the edge calls it during `unlock`.
+    /// Build the audio element + graph on first use.
     fn ensure_started(&mut self, context: &AudioContext) {
         if self.nodes.is_none() {
             self.nodes = build(context);
+        }
+    }
+
+    /// (Re)start playback if the element is paused. Idempotent, and it swallows
+    /// the autoplay-policy rejection so a blocked attempt at startup stays silent
+    /// (no console noise) until a later gesture makes play() succeed.
+    fn kick(&self) {
+        if let Some(nodes) = &self.nodes {
+            if nodes.element.paused() {
+                if let Ok(promise) = nodes.element.play() {
+                    let ignore = Closure::<dyn FnMut(JsValue)>::new(|_| {});
+                    let _ = promise.catch(&ignore);
+                    ignore.forget();
+                }
+            }
         }
     }
 
@@ -73,9 +89,8 @@ fn build(context: &AudioContext) -> Option<MusicNodes> {
     source.connect_with_audio_node(&fade).ok()?;
     fade.connect_with_audio_node(&master).ok()?;
     master.connect_with_audio_node(&context.destination()).ok()?;
-    let _ = element.play();
     Some(MusicNodes {
-        _element: element,
+        element,
         _source: source,
         fade,
         master,
@@ -104,6 +119,7 @@ impl AudioEdge {
         if let Some(context) = &self.context {
             let _ = context.resume();
             self.music.ensure_started(context);
+            self.music.kick();
         }
     }
 
