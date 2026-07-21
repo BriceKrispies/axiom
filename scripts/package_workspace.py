@@ -94,15 +94,16 @@ def assemble(fast: bool) -> None:
     shutil.copy2(WORKSPACE_WEB / "games-manifest.json", DIST / "games-manifest.json")
 
     # 3. The gallery site under gallery/, exactly as package_gallery lays its own
-    #    dist/: the static shell first (so the pure-TS single-file pages resolve),
-    #    then one self-contained bundle per extracted demo app under gallery/<id>/
-    #    (axiom-loader.js + wasm + the app's page, glue import rewritten).
+    #    dist/: the static shell, the shared pure-TS engine under
+    #    gallery/engine/web-engine/<version>/, one directory per registered app
+    #    (every app carrying an app.json), and the manifest the grid reads.
     gallery_out = DIST / "gallery"
     gallery_out.mkdir(parents=True, exist_ok=True)
     package_gallery.copy_gallery_static(gallery_out)
-    print(f"Building the per-app demo bundles into {gallery_out}{' (fast)' if fast else ''}\n")
+    print(f"Building the registered app bundles into {gallery_out}{' (fast)' if fast else ''}\n")
     target_dir = (REPO_ROOT / "target") if fast else (REPO_ROOT / "target" / "package-mvp")
-    package_gallery.build_demo_apps(gallery_out, fast=fast, target_dir=target_dir)
+    package_gallery.build_apps(gallery_out, fast=fast, target_dir=target_dir)
+    package_gallery.emit_manifest(gallery_out, package_gallery.discover_apps())
 
 
 class _ExtResolvingHandler(SimpleHTTPRequestHandler):

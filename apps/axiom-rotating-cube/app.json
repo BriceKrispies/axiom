@@ -1,0 +1,10 @@
+{
+  "title": "Rotating Cube",
+  "blurb": "Three deterministic shaded cubes spinning on different axes.",
+  "description": "The engine's browser-visible vertical slice: pure scene description on App::new()…run(), rendered through WebGPU. Purely visual — no input.",
+  "kind": "rust-wasm",
+  "tags": [
+    "demo",
+    "rendering"
+  ]
+}

@@ -34,6 +34,7 @@
 
 mod app;
 mod build;
+mod register;
 mod server;
 mod watch;
 
@@ -53,17 +54,27 @@ struct Args {
     port: u16,
     open: bool,
     debug: bool,
+    /// `init` mode: write the app's `app.json` (its gallery registration) and exit,
+    /// instead of building and serving it.
+    init: bool,
+    /// `init` only: overwrite an existing `app.json`.
+    force: bool,
 }
 
 fn help() -> String {
     "axiom-serve — build + serve one apps/ browser app locally with hot reload\n\
      \n\
      usage: cargo run -p axiom-serve -- <app> [--port N] [--no-open] [--debug]\n\
+     \x20      cargo run -p axiom-serve -- init <app> [--force]\n\
      \n\
      <app>        app name or path: home-run | axiom-home-run | apps/axiom-home-run\n\
      --port N     listen port (default: 8080)\n\
      --no-open    do not open the browser after the initial build\n\
      --debug      Rust wasm apps: build the debug profile instead of release\n\
+     \n\
+     init <app>   write the app's app.json — its GALLERY REGISTRATION — and exit.\n\
+     \x20            An app appears in the gallery iff it has one; the kind is\n\
+     \x20            detected, the copy is yours to edit. --force overwrites.\n\
      \n\
      app shapes (auto-detected):\n\
      \x20 web/tsconfig.json mentioning @axiom/game        TypeScript over the @axiom/game SDK\n\
@@ -79,9 +90,14 @@ fn parse_args(argv: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut port = DEFAULT_PORT;
     let mut open = true;
     let mut debug = false;
+    let mut init = false;
+    let mut force = false;
     let mut it = argv;
     while let Some(arg) = it.next() {
         match arg.as_str() {
+            // A leading `init` selects registration mode; the app name follows it.
+            "init" if app.is_none() && !init => init = true,
+            "--force" => force = true,
             "--port" => {
                 let value = it.next().ok_or("--port needs a value")?;
                 port = value
@@ -111,6 +127,8 @@ fn parse_args(argv: impl Iterator<Item = String>) -> Result<Args, String> {
         port,
         open,
         debug,
+        init,
+        force,
     })
 }
 
@@ -154,6 +172,11 @@ fn run() -> Result<(), String> {
     let kind = app::detect_kind(&app_dir)?;
     println!("axiom-serve: app  {}", app_dir.display());
     println!("axiom-serve: kind {}", kind.label());
+
+    // Registration mode writes one file and stops — it never builds or serves.
+    if args.init {
+        return register::init(&app_dir, &kind, args.force);
+    }
 
     let plan = build::BuildPlan {
         root: root.clone(),

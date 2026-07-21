@@ -301,3 +301,79 @@ main.demo {
     font-size: 22px;
   }
 }
+
+/* --- Filter bar, card tags, and footer -------------------------------------
+   The gallery renders from the generated manifest.json rather than a hardcoded
+   list, so it can offer real filtering: free-text search across title/blurb/
+   description/tags, plus one-click tag toggles. */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.filters input[type="search"] {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.filters input[type="search"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tags button {
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tags button:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+.tags button[aria-pressed="true"] {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.card-tags {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.empty {
+  padding: 24px 4px;
+  color: var(--muted);
+}
+
+.site-footer {
+  padding: 8px 16px 28px;
+  color: var(--muted);
+  font-size: 12px;
+}

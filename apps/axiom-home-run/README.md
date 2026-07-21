@@ -94,11 +94,14 @@ node --test apps/axiom-home-run/web/src/home-run.test.ts
 # Typecheck + compile the app:
 npm --prefix packages/axiom-game exec -- tsgo -p apps/axiom-home-run/web/tsconfig.json
 
-# Build + package the self-hosted gallery page, then browse it:
-make gallery-home-run
-make gallery            # serves dist/ at http://localhost:8000
+# Package the gallery and browse it (this app registers via its app.json):
+make gallery            # builds every registered app, serves dist/ at http://localhost:8000
 # open http://localhost:8000/home-run/index.html
 ```
+
+The packaged page is bundled against the SHARED `@axiom/web-engine` build at
+`dist/engine/web-engine/<version>/` rather than carrying its own copy, so there is
+no per-app packaging step and nothing generated to commit.
 
 The 3D present path needs a GPU; in a headless browser append
 `?backend=canvas2d` to use the software backend (the same one the visual

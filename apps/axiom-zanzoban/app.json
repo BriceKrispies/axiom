@@ -1,0 +1,10 @@
+{
+  "title": "Zanzoban",
+  "blurb": "Leave ghosts of your past runs on the buttons, then walk the live block through the doors they open.",
+  "description": "A deterministic top-down grid puzzle on the engine. Walk a block one cell at a time (WASD / arrows); press Q to freeze the current run into a ghost that replays your exact path on a fixed 0.5s step, and R to restart. Ghosts are solid and hold buttons open — so the way through a locked door is to leave a ghost on the button and walk the live block through. Includes an in-browser level editor + playtest with TOML import/export.",
+  "kind": "rust-wasm",
+  "tags": [
+    "game",
+    "puzzle"
+  ]
+}

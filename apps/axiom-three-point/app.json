@@ -1,0 +1,11 @@
+{
+  "title": "Three-Point Shootout",
+  "blurb": "A first-person three-point rack contest: ride the rise and release at the top — or swipe the ball up on touch.",
+  "description": "A first-person 3D three-point contest in the spirit of Wii Sports rack shooting — a FULLY SELF-CONTAINED pure-TypeScript app that ships its own engine (WebGL2 forward renderer, fixed-step loop, pointer-lock/touch input, WebAudio synth) with no SDK and no wasm; the whole game is one 70 KB page. Fifteen shots from three spots around a procedurally-built arc — left wing, top of the key, right wing — five balls per rack with a golden fifth ball. Every shot is ONE continuous motion that never waits: the moment you release, the next ball is dealt off its rack slot into your hands while the last shots are still in the air (several fly at once, scored in shot order). Holding SPACE rises into the shot and releasing launches at that exact instant — the shot meter tracks the rise and its ideal window. Early is short, the ideal window swishes, late clangs off the glass. On touch, drag to look and swipe up from the held ball to shoot — flick strength is your release, sideways flick steers, with the same smoothed-gesture model as Swipe Basketball. The camera is exclusively player-driven (the game never touches your view), so skill is your aim plus release timing. The ball is a genuinely simulated projectile (deterministic fixed-step integrator — gravity, backspin, restitution) against a rim whose colliders match the visible torus exactly; baskets are confirmed by a two-plane downward-crossing detector; streaks compound (3, 6, 9, 12…) and a miss resets them. After ball 15 the buzzer shows your line; R runs it back. Deterministic under fixed-step replay, with a headless agent driver that plays full games in Node.",
+  "kind": "ts-web-engine",
+  "tags": [
+    "game",
+    "sports",
+    "first-person"
+  ]
+}

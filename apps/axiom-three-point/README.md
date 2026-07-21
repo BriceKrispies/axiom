@@ -93,10 +93,12 @@ node --test apps/axiom-three-point/web/src/three-point.test.ts       # game-core
 node --test apps/axiom-three-point/web/src/engine/platform.test.ts   # loop + input tests
 node --test apps/axiom-three-point/web/src/engine/render.test.ts     # mat4 + mesh tests
 node apps/axiom-three-point/web/src/agent.ts                         # headless full-game driver
-make gallery-three-point                                             # rebuild the self-hosted gallery page
+make gallery                                                         # build + serve every registered app
 ```
 
-The gallery page (`apps/axiom-gallery/web/three-point/index.html`) is one small
-self-contained HTML file (the esbuild-inlined app — no SDK, no wasm) and runs
-from `file://`. A `DEBUG_TRAJECTORY` constant in `constants.ts` renders the real
-predicted trajectory (same integrator) while holding a shot, for tuning.
+This app registers in the gallery through its `app.json`; `make gallery` packages
+it into `dist/three-point/` as one bundled `app.js` resolved against the SHARED
+`@axiom/web-engine` build at `dist/engine/web-engine/<version>/`, so it no longer
+carries its own copy of the engine or a committed page. A `DEBUG_TRAJECTORY`
+constant in `constants.ts` renders the real predicted trajectory (same
+integrator) while holding a shot, for tuning.

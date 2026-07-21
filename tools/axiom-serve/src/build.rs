@@ -8,7 +8,7 @@
 //! - **TS kinds** — `tsgo -p <app>/web/tsconfig.json`, the same compiler the
 //!   Makefile and `scripts/axiom_dev_server.mjs` use, borrowed from
 //!   `packages/axiom-game`'s node_modules (a build-time toolchain, exactly as
-//!   the `gallery-home-run` Makefile target borrows it). One-time
+//!   `scripts/package_gallery.py` borrows it). One-time
 //!   prerequisites run only when their outputs are missing: the `@axiom/game`
 //!   dist (TsSdkHosted), the shared `axiom-game-runtime` wasm pkg
 //!   (TsSdkHosted), and the `@axiom/web-engine` dist (TsWebEngine).

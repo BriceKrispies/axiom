@@ -1,9 +1,13 @@
 """The gallery demos the smoke suite drives — its single source of truth.
 
 Repo tooling (alongside e2e/conftest.py + test_smoke.py), NOT part of the engine
-dependency graph. Mirrors apps/axiom-gallery/web/gallery.js's DEMOS, plus the
-per-demo signals a browser test needs (which the manifest does not carry): how the
-demo proves it loaded, its canvas, and whether that canvas paints on entry.
+dependency graph. A SUBSET of the gallery's registered apps (each app's own
+apps/<app>/app.json, collected into dist/manifest.json at package time), plus the
+per-demo signals a browser test needs and the manifest deliberately does not
+carry: how the demo proves it loaded, its canvas, and whether that canvas paints
+on entry. Kept as its own list because those signals are test concerns, not
+gallery metadata — adding an app to the gallery does not oblige it to be smoke-
+tested here.
 
 `kind` selects the ready-signal + render-proof strategy in test_smoke.py:
   * windowing3d  — boots the engine run-loop; logs `axiom: render backend = …`.

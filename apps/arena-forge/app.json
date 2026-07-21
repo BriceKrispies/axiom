@@ -1,0 +1,7 @@
+{
+  "title": "Arena Forge",
+  "blurb": "A mobile-first auto-battler: draft magical constructs, forge duplicates into stronger versions, and outlast seven bots.",
+  "description": "An original single-canvas auto-battler built as a pure-TypeScript Axiom app. Assemble a warband of magical constructs in a travelling forge arena, then alternate shop and combat rounds against seven deterministic bots — buying, positioning, and forging duplicate units into stronger versions — until one competitor is left standing. Units and abilities are data: thirty-six cards drive a small effect DSL the combat interpreter executes, so the roster is authored rather than coded. The simulation is DOM-free and renderer-free, which means the identical rules run in the browser, under the Node test runner, in the replay tool, or on a future authoritative server; matches are deterministic end to end and replayable from a seed. Designed for a phone in landscape first, and playable with a mouse on desktop.",
+  "kind": "ts-web-engine",
+  "tags": ["game", "strategy", "mobile"]
+}

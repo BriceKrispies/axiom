@@ -72,9 +72,12 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-pages-${{ hashFiles('**/Cargo.lock') }}
 
-      # Package every demo app into dist/<id>/ behind its loader (scripts/package_gallery.py,
-      # the same driver `make gallery` uses). `--fast` keeps this on stable with no
-      # wasm2js fallback.
+      # Package every REGISTERED app (every app carrying an app.json) into dist/<id>/
+      # via scripts/package_gallery.py, the same driver `make gallery` uses: Rust apps
+      # behind their loader, TypeScript apps bundled against the ONE shared
+      # @axiom/web-engine build under dist/engine/. `--fast` keeps this on stable with
+      # no wasm2js fallback. The packager installs whatever node_modules it needs on
+      # demand, so this step does not have to mirror them.
       - name: Package the gallery (dist/)
         run: |
           npm --prefix scripts/packaging install --no-audit --no-fund

@@ -1,0 +1,11 @@
+{
+  "title": "Growth (walkable terrain)",
+  "blurb": "Generate a planet, pick a spot on its map, and walk its procedural, forested terrain in first person.",
+  "description": "A procedural-terrain world viewer on the engine: configure and generate a planet, descend onto a land spot from the overworld map, then walk its streamed LOD terrain. Forested biomes grow sparse trees on the ground you walk. Desktop: click the canvas to capture the mouse, WASD/arrows to move, mouse to look, Esc to release. (WebGPU; desktop-oriented.)",
+  "kind": "rust-wasm",
+  "tags": [
+    "demo",
+    "procgen",
+    "first-person"
+  ]
+}

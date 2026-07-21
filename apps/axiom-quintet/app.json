@@ -1,0 +1,10 @@
+{
+  "title": "Quintet",
+  "blurb": "Press the board to place 5-cell blocks on a 10×10 grid and fill rows and columns to clear them for score.",
+  "description": "A deterministic block-breaking placement game on the engine. Press the board to summon the generated quintet (a 5-cell polyomino) under your cursor — or drag it from the side panel — and release to place it on the 10×10 board; fill any whole row or column to clear it, and clear several lines at once for bonus points. Every offered piece is a real orthogonally-connected pentomino guaranteed to fit somewhere — generation is seeded from the board, score, and move count, so a given state always yields the same next piece. When nothing fits, the board reports a stuck state and you press Reset.",
+  "kind": "rust-wasm",
+  "tags": [
+    "game",
+    "puzzle"
+  ]
+}

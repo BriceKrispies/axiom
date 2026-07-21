@@ -3,41 +3,108 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Axiom — Demo Gallery</title>
+    <title>Axiom — App Gallery</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <header class="site">
-      <h1>Axiom Demos</h1>
-      <p>WebAssembly demos of the Axiom engine. Prefers WebGPU (recent Chrome/Edge, Android Chrome, or iOS Safari 18.2+) and falls back to WebGL2 elsewhere.</p>
+      <h1>Axiom Apps</h1>
+      <p>
+        Browser apps built on the Axiom engine. Prefers WebGPU (recent Chrome/Edge, Android Chrome, or iOS Safari
+        18.2+) and falls back to WebGL2 elsewhere.
+      </p>
+      <div class="filters">
+        <input id="search" type="search" placeholder="Search apps…" aria-label="Search apps" autocomplete="off" />
+        <div id="tags" class="tags" role="group" aria-label="Filter by tag"></div>
+      </div>
     </header>
 
-    <main class="grid" id="grid"></main>
+    <main class="grid" id="grid" aria-live="polite"></main>
+    <footer class="site-footer" id="footer"></footer>
 
     <script type="module">
-      import { DEMOS } from "./gallery.js";
+      import { loadManifest, tagsOf, filterApps } from "./gallery.js";
 
       const grid = document.getElementById("grid");
-      for (const demo of DEMOS) {
-        const card = document.createElement("a");
-        card.className = "card";
-        // Every demo is a standalone app that owns its page; the card just
-        // links out. A specific backend can still be forced for debugging via
-        // <id>/index.html?backend=webgpu|webgl2|canvas2d on demos that read it.
-        card.href = `./${demo.page}`;
+      const tagBar = document.getElementById("tags");
+      const search = document.getElementById("search");
+      const footer = document.getElementById("footer");
+
+      const state = { apps: [], query: "", tag: null };
+
+      const card = (app) => {
+        // Every app owns its page; the card is only a link. A specific backend can
+        // still be forced for debugging via <id>/index.html?backend=webgpu|webgl2|canvas2d
+        // on the apps that read it.
+        const link = document.createElement("a");
+        link.className = "card";
+        link.href = `./${app.page}`;
 
         const h2 = document.createElement("h2");
-        h2.textContent = demo.title;
+        h2.textContent = app.title;
 
         const p = document.createElement("p");
-        p.textContent = demo.blurb;
+        p.textContent = app.blurb;
+
+        const tags = document.createElement("span");
+        tags.className = "card-tags";
+        tags.textContent = (app.tags ?? []).join(" · ");
 
         const open = document.createElement("span");
         open.className = "open";
-        open.textContent = "Open demo →";
+        open.textContent = "Open app →";
 
-        card.append(h2, p, open);
-        grid.appendChild(card);
+        link.append(h2, p, tags, open);
+        return link;
+      };
+
+      const render = () => {
+        const shown = filterApps(state.apps, { query: state.query, tag: state.tag });
+        grid.replaceChildren(...shown.map(card));
+        if (shown.length === 0) {
+          const empty = document.createElement("p");
+          empty.className = "empty";
+          empty.textContent = "No apps match that filter.";
+          grid.replaceChildren(empty);
+        }
+        for (const button of tagBar.querySelectorAll("button")) {
+          button.setAttribute("aria-pressed", String(button.dataset.tag === state.tag));
+        }
+      };
+
+      const buildTagBar = () => {
+        tagBar.replaceChildren(
+          ...tagsOf(state.apps).map((tag) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = tag;
+            button.dataset.tag = tag;
+            button.setAttribute("aria-pressed", "false");
+            button.addEventListener("click", () => {
+              state.tag = state.tag === tag ? null : tag;
+              render();
+            });
+            return button;
+          }),
+        );
+      };
+
+      search.addEventListener("input", () => {
+        state.query = search.value;
+        render();
+      });
+
+      try {
+        const manifest = await loadManifest();
+        state.apps = manifest.apps ?? [];
+        buildTagBar();
+        render();
+        const built = new Date(manifest.generated).toLocaleString();
+        footer.textContent = `${state.apps.length} apps · web-engine ${manifest.engine.webEngine} · built ${built}`;
+      } catch (error) {
+        grid.replaceChildren(
+          Object.assign(document.createElement("p"), { className: "empty", textContent: String(error.message) }),
+        );
       }
     </script>
   </body>

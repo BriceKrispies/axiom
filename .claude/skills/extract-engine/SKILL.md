@@ -110,17 +110,22 @@ bind / frameLocked first-frame scene build" gotcha is GONE.
 - **`web/index.html`** — remove the `@axiom/game` import map block.
 - **`web/tsconfig.json`** — remove the `paths` mapping (every import is now
   relative); update the header note.
-- **Packager** — copy `scripts/package_three_point_singlefile.mjs` →
-  `scripts/package_<app>_singlefile.mjs`, changing only `APP_DIR` and the
-  default `OUT_FILE`. (It is already SDK/wasm-free: esbuild-inline the compiled
-  app + two harness transforms. Expect the packaged page to drop to tens of KB.)
-- **Makefile** — the app's `gallery-<app>` target loses the SDK build, `cargo
-  build`, and `wasm-bindgen` steps; it becomes tsgo (borrowed from
-  `packages/axiom-game`'s toolchain — a build-time tool, not a runtime import)
-  + the packager. Update the target's comment.
+- **Packaging** — nothing to write. `scripts/package_gallery.py` compiles,
+  bundles, and lays out every registered app; there are no per-app packagers or
+  Makefile targets any more. Confirm the app's `web/index.html` has a
+  `<script type="module" src="/dist/<entry>.js">` — that is what the packager
+  bundles from.
+- **Registration** — `cargo run -p axiom-serve -- init <app>` writes
+  `apps/<app>/app.json`; edit its `title`, `blurb`, `description`, and `tags`.
+  That single file is the gallery card.
 - Sweep stale comments: `grep -rn "@axiom" apps/<app>` should end up matching
-  nothing but honest history notes; update README and the gallery card `desc`
-  in `apps/axiom-gallery/web/gallery.js` to say the app is fully self-contained.
+  nothing but honest history notes; update the README and the app's `app.json`
+  description to say the app is fully self-contained.
+
+  NOTE: a fully self-contained app that keeps its own in-app engine does NOT
+  share the gallery's `@axiom/web-engine` build. Extraction and engine-sharing
+  pull in opposite directions — extract only when an app genuinely needs to
+  diverge from the shared engine, not by default.
 
 ## Step 4 — Verify (all of it, not just typecheck)
 
