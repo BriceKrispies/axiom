@@ -209,6 +209,14 @@ pub const PARTS: [PartSpec; PART_COUNT] = [
     ),
 ];
 
+/// Half the distance between the two hip pivots, yd — the model's own answer to
+/// "how far off the centerline does a leg hang from". Foot placement is anchored
+/// to this rather than to a duplicated tuning constant, so a leg can never be
+/// asked to reach sideways for a target the hip does not sit above.
+pub fn hip_half_width() -> f32 {
+    PARTS[R_THIGH].offset.x.abs()
+}
+
 /// Build the player figure definition (rest rotations are identity — every
 /// joint is driven per tick by the animation through the rig).
 pub fn player_figure() -> FigureDefinition {

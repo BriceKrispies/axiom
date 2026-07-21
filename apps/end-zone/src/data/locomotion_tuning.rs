@@ -56,9 +56,14 @@ pub struct LocomotionTuning {
     pub startup_ticks: f32,
     /// Ticks the stopping settle takes.
     pub stopping_ticks: f32,
-    /// Half the lateral stance width (foot offset from centerline), yd.
+    /// Half the lateral PLANT width (foot offset from centerline), yd. Kept
+    /// INSIDE the model's hip half-width so the legs converge toward the midline
+    /// the way a runner's do; a plant wider than the hips reads bow-legged from
+    /// behind. Only the plant is laterally free — the tucked mid-swing foot is
+    /// always held on its own hip's line (see `locomotion::foot`).
     pub stance_half_width: f32,
-    /// Extra stance widening at full turn intensity, yd.
+    /// Extra PLANT widening at full turn intensity, yd — a wider base through a
+    /// cut. Does not widen the swing.
     pub turn_widen: f32,
     /// Pelvis vertical bob amplitude, yd.
     pub pelvis_bob: f32,
@@ -95,6 +100,13 @@ pub struct LocomotionTuning {
     pub teleport_distance: f32,
     /// Landing-compression dip at foot strike, yd.
     pub landing_dip: f32,
+    /// How far below standing height the hips ride at a full run, yd, blended in
+    /// by normalized speed. The (stubby, arcade) leg's reach is barely longer
+    /// than the standing hip height, so at full height the stance leg solves to
+    /// a LOCKED-STRAIGHT pole at every foot-strike — a stiff, stilted gait with
+    /// no landing flex. Riding the hips lower is what buys the stance knee room
+    /// to bend, so the runner absorbs each strike instead of pogo-sticking.
+    pub run_crouch: f32,
 }
 
 impl Default for LocomotionTuning {
@@ -106,7 +118,7 @@ impl Default for LocomotionTuning {
             sprint_speed: 8.4,
             max_cadence: 3.1,
             foot_lift: 0.34,
-            knee_height: 0.4,
+            knee_height: 0.26,
             knee_forward: 0.2,
             knee_drive: 0.72,
             stance_reach: 0.22,
@@ -116,8 +128,8 @@ impl Default for LocomotionTuning {
             turning_stride_scale: 0.72,
             startup_ticks: 16.0,
             stopping_ticks: 12.0,
-            stance_half_width: 0.14,
-            turn_widen: 0.12,
+            stance_half_width: 0.09,
+            turn_widen: 0.09,
             pelvis_bob: 0.05,
             pelvis_yaw: 0.12,
             torso_lean_per_accel: 0.02,
@@ -132,6 +144,7 @@ impl Default for LocomotionTuning {
             turn_full_rate: 3.0,
             teleport_distance: 3.0,
             landing_dip: 0.05,
+            run_crouch: 0.07,
         }
     }
 }

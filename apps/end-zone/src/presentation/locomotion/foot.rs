@@ -6,6 +6,7 @@
 use axiom::prelude::Vec3;
 
 use crate::data::LocomotionTuning;
+use crate::player::model::hip_half_width;
 
 /// Ankle rest height above the field when a foot is planted (from the model's
 /// foot box: sole on the ground puts the ankle pivot this far up), yd.
@@ -90,37 +91,62 @@ pub fn resolve(
     tuning: &LocomotionTuning,
 ) -> bool {
     let (right_dir, forward) = dirs(facing);
+    // The PLANT is laterally free: it converges inside the hips at a normal
+    // stride and widens through a turn. The SWING is not — see `step_foot`.
     let widen = tuning.stance_half_width + tuning.turn_widen * turn_intensity;
+    let hip = hip_half_width();
     let pf = planted_fraction(stride, tuning);
 
     let left_lp = phase;
     let right_lp = (phase + 0.5).rem_euclid(1.0);
     let lat_l = right_dir.mul_scalar(-widen);
     let lat_r = right_dir.mul_scalar(widen);
+    let hip_l = right_dir.mul_scalar(-hip);
+    let hip_r = right_dir.mul_scalar(hip);
 
-    step_foot(left, left_lp, ground, forward, lat_l, pf, norm_speed, tuning);
-    step_foot(right, right_lp, ground, forward, lat_r, pf, norm_speed, tuning);
+    let l = FootStep {
+        lp: left_lp,
+        lat: lat_l,
+        hip_lat: hip_l,
+    };
+    let r = FootStep {
+        lp: right_lp,
+        lat: lat_r,
+        hip_lat: hip_r,
+    };
+    step_foot(left, l, ground, forward, pf, norm_speed, tuning);
+    step_foot(right, r, ground, forward, pf, norm_speed, tuning);
 
     // Primary planted foot = whichever is in stance (earlier local phase wins a
     // brief double-support overlap).
     (left_lp < pf) && (right_lp >= pf || left_lp <= right_lp)
 }
 
+/// One foot's per-tick placement geometry: its local phase and the two lateral
+/// anchors the step is built from — the free `lat` the foot PLANTS at, and the
+/// `hip_lat` its own hip actually sits above, which the tucked mid-swing foot is
+/// held on (see `step_foot`).
+#[derive(Debug, Clone, Copy)]
+struct FootStep {
+    lp: f32,
+    lat: Vec3,
+    hip_lat: Vec3,
+}
+
 /// Advance one foot: latch its world contact at strike, hold it while the body
 /// travels over it, and arc it forward through swing to the next reach-bounded
 /// landing. `forward`/`lat` place the landing a small, always-solvable distance
 /// from the hip so the planted foot never has to slide.
-#[allow(clippy::too_many_arguments)]
 fn step_foot(
     foot: &mut Foot,
-    lp: f32,
+    step: FootStep,
     ground: Vec3,
     forward: Vec3,
-    lat: Vec3,
     pf: f32,
     norm_speed: f32,
     tuning: &LocomotionTuning,
 ) {
+    let FootStep { lp, lat, hip_lat } = step;
     let ground_y = ground.y + ANKLE_GROUND_OFFSET;
     // The reach-bounded landing point: a short step ahead of the hip.
     let landing = ground.add(forward.mul_scalar(tuning.stance_reach)).add(lat);
@@ -158,10 +184,18 @@ fn step_foot(
         // knee) rather than the foot skimming forward low or tucking straight
         // under. Bell-shaped over the swing (0 at strike/landing) and blended by
         // speed, so a walk still glides and a plant still lands cleanly.
+        //
+        // The apex is anchored on `hip_lat` — the lateral line this leg's own
+        // hip sits above — NOT on the (possibly widened) plant line. A tucked
+        // swing foot is close to its hip, so the hip→ankle vector is short; any
+        // lateral offset in it is then amplified by thigh_length/|hip→ankle|
+        // (~4× at mid-swing) into a knee that bows out sideways. Aiming the tuck
+        // straight under the hip keeps that lateral at zero, which is what keeps
+        // the knee driving forward instead of splaying.
         let intensity = arc * norm_speed;
         let blend = (intensity * tuning.knee_drive).clamp(0.0, 1.0);
-        let apex_x = ground.x + lat.x + forward.x * tuning.knee_forward;
-        let apex_z = ground.z + lat.z + forward.z * tuning.knee_forward;
+        let apex_x = ground.x + hip_lat.x + forward.x * tuning.knee_forward;
+        let apex_z = ground.z + hip_lat.z + forward.z * tuning.knee_forward;
         let px = lerp(glide_x, apex_x, blend);
         let pz = lerp(glide_z, apex_z, blend);
         let lift = arc * tuning.foot_lift + intensity * tuning.knee_height;

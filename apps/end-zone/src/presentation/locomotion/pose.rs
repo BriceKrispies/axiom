@@ -61,9 +61,12 @@ pub fn locomotion_pose(
         + ready_crouch_pitch(ready);
     out.root_roll =
         (tuning.torso_bank * gait.turn_bank).clamp(-tuning.torso_bank, tuning.torso_bank);
-    // Two vertical dips per cycle (one per foot strike) plus a landing dip.
+    // Two vertical dips per cycle (one per foot strike) plus a landing dip, over
+    // hips that ride lower the faster the runner goes — the crouch that leaves
+    // the stance knee room to flex instead of solving to a locked-straight leg.
     let bob = (phase_ang * 2.0).sin().abs() * tuning.pelvis_bob;
-    out.root_lift = bob - landing_dip(gait.phase, tuning) + ready_crouch_lift(ready);
+    out.root_lift = bob - landing_dip(gait.phase, tuning) + ready_crouch_lift(ready)
+        - tuning.run_crouch * speed * f32::from(!ready);
 
     out.joints[PELVIS] = Quat::from_euler_xyz(0.0, tuning.pelvis_yaw * swing, 0.0);
     out.joints[TORSO] = Quat::from_euler_xyz(waist, -tuning.shoulder_counter * swing, 0.0);
