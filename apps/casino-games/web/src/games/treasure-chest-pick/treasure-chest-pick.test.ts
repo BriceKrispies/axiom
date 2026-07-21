@@ -8,12 +8,66 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { Camera3D, EngineVec3 } from "@axiom/web-engine";
 import { planChoicePopulation } from "../../chance-engine/probability/choice-population.ts";
 import { SeededChanceResultSource } from "../../chance-engine/outcomes/result-source.ts";
 import { createSession } from "../../chance-engine/sessions/session.ts";
 import type { SessionState } from "../../chance-engine/sessions/session.ts";
-import { dancePose, goldGleam, idlePhase, presentationPhase, revealTimeline } from "./game.ts";
+import { addV3, crossV3, dotV3, hingedTransform, normalizeV3, quatMul, quatPitch, quatYaw, rotateByQuat, scaleV3, subV3, v3 } from "../../presentation/stage/vectors.ts";
+import { easeOutBack } from "../../presentation/stage/easing.ts";
+import {
+  CHEST_BODY,
+  CHEST_BODY_TOP,
+  CHEST_HEIGHT,
+  CHEST_LID,
+  CHEST_TIMING,
+  chestCamera,
+  chestPosition,
+  dancePose,
+  flightProgress,
+  heroFraming,
+  idlePhase,
+  presentationPhase,
+  revealTimeline,
+  spiralFlight,
+} from "./game.ts";
 import { TREASURE_CHEST_PICK } from "./definition.ts";
+
+/**
+ * Project a world point into normalized screen coordinates for `camera`, where
+ * ±1 is the frame edge on each axis. `aspect` is width/height; the framing
+ * tests below run it at 1.0 (a SQUARE window) — the narrowest shape this
+ * scene's camera is built for, so passing there means passing on anything
+ * wider. Nothing in the app ships this; it exists to let a test assert what
+ * "stays in the frame" actually means.
+ */
+const project = (camera: Camera3D, point: EngineVec3, aspect: number): { readonly x: number; readonly y: number; readonly depth: number } => {
+  const forward = normalizeV3(subV3(camera.target, camera.position));
+  const right = normalizeV3(crossV3(forward, v3(0, 1, 0)));
+  const up = crossV3(right, forward);
+  const d = subV3(point, camera.position);
+  const depth = dotV3(d, forward);
+  const halfHeight = depth * Math.tan(camera.fovY / 2);
+  return { depth, x: dotV3(d, right) / (halfHeight * aspect), y: dotV3(d, up) / halfHeight };
+};
+
+/** The eight corners of a posed chest, in world space. */
+const chestCorners = (base: EngineVec3, scale: number, yaw: number, pitch: number): readonly EngineVec3[] => {
+  const q = quatMul(quatYaw(yaw), quatPitch(pitch));
+  const hx = (CHEST_LID.x / 2) * scale;
+  const hz = (CHEST_LID.z / 2) * scale;
+  const h = CHEST_HEIGHT * scale;
+  return [-1, 1].flatMap((sx) =>
+    [0, 1].flatMap((sy) =>
+      [-1, 1].map((sz) => {
+        // Corners are taken about the chest's CENTER, which is where it spins.
+        const local = v3(sx * hx, sy * h - h / 2, sz * hz);
+        const r = rotateByQuat(local, q);
+        return v3(base.x + r.x, base.y + h / 2 + r.y, base.z + r.z);
+      }),
+    ),
+  );
+};
 
 test("the reveal cadence puts the latch strictly before the lid", () => {
   for (const speed of [0.5, 1, 2]) {
@@ -50,17 +104,6 @@ test("idle cosmetics are deterministic, desynced, and outcome-independent", () =
   const phases = Array.from({ length: 9 }, (_, i) => idlePhase(i));
   phases.forEach((p) => assert.ok(p >= 0 && p < Math.PI * 2, "idle phase in range"));
   assert.equal(new Set(phases.map((p) => p.toFixed(5))).size, 9, "nine distinct idle phases");
-
-  // goldGleam is a pure function of (index, tick) with NO seed, so it cannot
-  // encode which chest wins; it is bounded, replayable, and never lights all nine.
-  for (let tick = 0; tick < 900; tick += 11) {
-    const gleams = Array.from({ length: 9 }, (_, i) => goldGleam(i, tick));
-    gleams.forEach((g, i) => {
-      assert.ok(g >= 0 && g <= 1, "gleam bounded");
-      assert.equal(goldGleam(i, tick), g, "gleam is deterministic");
-    });
-    assert.ok(gleams.filter((g) => g > 0.5).length <= 3, "at most a few chests gleam at once");
-  }
 });
 
 test("idle dances draw only from the ambient stream", () => {
@@ -79,6 +122,207 @@ test("idle dances draw only from the ambient stream", () => {
   assert.ok(moved, "the dance must actually move");
   // Zero liveliness freezes the dance.
   assert.deepEqual(dancePose(4, 9, 50, 999, 0), { scootX: 0, squash: 0, twist: 0 });
+});
+
+test("the spiral leaves the grid slot, converges on the hero anchor, and lands facing front", () => {
+  const camera = chestCamera(9);
+  const basis = heroFraming(camera);
+  const from = chestPosition(0, 9);
+  const to = v3(0, 3.2, 2);
+  /** Distance from the hero anchor measured IN THE SCREEN PLANE — the plane the
+   * spiral is actually described in. */
+  const screenRadius = (p: EngineVec3): number => {
+    const d = subV3(p, to);
+    return Math.hypot(dotV3(d, basis.right), dotV3(d, basis.up));
+  };
+
+  // The endpoints are exact: it starts ON its slot and finishes ON the anchor,
+  // so the flight neither pops at the start nor drifts at the end.
+  const start = spiralFlight(from, to, 0, basis);
+  (["x", "y", "z"] as const).forEach((axis) => {
+    assert.ok(Math.abs(start.position[axis] - from[axis]) < 1e-9, `starts exactly on its slot (${axis})`);
+  });
+  assert.equal(start.spin, 0);
+  assert.equal(start.grow, 0);
+
+  const end = spiralFlight(from, to, 1, basis);
+  ["x", "y", "z"].forEach((axis) => {
+    assert.ok(Math.abs(end.position[axis as "x"] - to[axis as "x"]) < 1e-9, `arrives exactly on the anchor (${axis})`);
+  });
+  assert.equal(end.grow, 1);
+  assert.ok(Math.abs(end.tumble) < 1e-9, "the tumble unwinds to level");
+
+  // A WHOLE number of turns is what leaves the latch, lock plate, and lid
+  // facing the camera when the reveal starts.
+  const turns = end.spin / (Math.PI * 2);
+  assert.equal(turns, CHEST_TIMING.spiralTurns);
+  assert.equal(turns, Math.round(turns), "the spiral ends front-facing");
+
+  // The orbit converges INWARD: it never swings wider on screen than the slot
+  // it started from, and it closes all the way to the middle. That bound is the
+  // whole reason a screen-plane spiral stays framed — every slot begins on
+  // screen, so a path that never exceeds its start can never leave.
+  const radii = Array.from({ length: 41 }, (_, i) => screenRadius(spiralFlight(from, to, i / 40, basis).position));
+  const startRadius = radii[0] ?? 0;
+  radii.forEach((r, i) => assert.ok(r <= startRadius + 1e-9, `never swings wider than its slot (step ${i})`));
+  assert.ok((radii.at(-1) ?? 1) < 1e-9, "closes onto the anchor");
+  assert.ok((radii[20] ?? 0) < startRadius * 0.5, "and is well inside by the midpoint");
+
+  // It really winds rather than sliding straight in: the angle of its on-screen
+  // offset must sweep right around, not hold steady on the line to the anchor.
+  const angles = Array.from({ length: 40 }, (_, i) => {
+    const d = subV3(spiralFlight(from, to, (i + 1) / 41, basis).position, to);
+    return Math.atan2(dotV3(d, basis.up), dotV3(d, basis.right));
+  });
+  const swept = angles.slice(1).reduce((total, a, i) => {
+    const prev = angles[i] ?? 0;
+    const step = ((a - prev + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    return total + Math.abs(step);
+  }, 0);
+  assert.ok(swept > Math.PI * 2, `the path winds around the anchor (swept ${(swept / Math.PI).toFixed(1)}π)`);
+});
+
+test("the flight is pure — no seed, no clock, no outcome", () => {
+  const basis = heroFraming(chestCamera(9));
+  const from = chestPosition(7, 9);
+  const to = v3(0, 3, 2);
+  for (let i = 0; i <= 20; i += 1) {
+    assert.deepEqual(spiralFlight(from, to, i / 20, basis), spiralFlight(from, to, i / 20, basis));
+  }
+});
+
+test("the commit beat is long enough to finish the spiral before the lid is touched", () => {
+  const config = TREASURE_CHEST_PICK.defaultConfig();
+  const base = createSession(config, 1, 1, new SeededChanceResultSource(1), { choiceCount: 9, kind: "choice" });
+  const at = (phase: SessionState["phase"], age: number): SessionState => ({ ...base, phase, phaseStartTick: 0, tick: age });
+
+  // The flight completes exactly as the commit beat ends — the chest is fully
+  // parked in its hero framing before "revealing" opens the latch.
+  assert.equal(flightProgress(at("committing", 0), 1), 0);
+  assert.ok(flightProgress(at("committing", CHEST_TIMING.spiralTicks - 1), 1) < 1, "still flying mid-beat");
+  assert.equal(flightProgress(at("committing", CHEST_TIMING.spiralTicks), 1), 1);
+
+  // …and it HOLDS there for the whole reveal and result, so the chest does not
+  // slide back to the board while it is opening.
+  (["revealing", "celebrating", "complete"] as const).forEach((phase) => {
+    assert.equal(flightProgress(at(phase, 40), 1), 1, `${phase} holds the hero framing`);
+  });
+  // Only the reset releases it.
+  assert.ok(flightProgress(at("resetting", 0), 1) === 1 && flightProgress(at("resetting", 99), 1) === 0, "reset eases back out");
+  assert.equal(flightProgress(at("ready", 5), 1), 0, "an unpicked board is never in flight");
+});
+
+test("the chosen chest stays fully inside the frame for the whole flight and reveal", () => {
+  const count = 9;
+  const camera = chestCamera(count);
+  const framing = heroFraming(camera);
+  const square = 1; // the narrowest viewport this scene's camera is built for
+
+  // The BOARD's own framing is the baseline. On a square window the outer chests
+  // already sit a little past the edge at rest — a pre-existing property of this
+  // camera and grid, not something the flight introduces — so the flight is held
+  // to "never frames worse than the board already does". On any window at least
+  // as wide as the board itself needs, that is exactly "always fully on screen".
+  const resting = Array.from({ length: count }, (_, i) => chestCorners(chestPosition(i, count), 1, 0, 0))
+    .flat()
+    .map((corner) => project(camera, corner, square));
+  const budgetX = Math.max(1, ...resting.map((p) => Math.abs(p.x)));
+  const budgetY = Math.max(1, ...resting.map((p) => Math.abs(p.y)));
+
+  // Every grid slot, flown to the hero anchor, stays within that budget at every
+  // step — including the corner chests, which swing the widest.
+  const heroBase = v3(framing.anchor.x, framing.anchor.y - (CHEST_HEIGHT / 2) * framing.scale, framing.anchor.z);
+  for (let index = 0; index < count; index += 1) {
+    const from = chestPosition(index, count);
+    for (let step = 0; step <= 60; step += 1) {
+      const t = step / 60;
+      const pose = spiralFlight(from, heroBase, t, framing);
+      const scale = 1 + (framing.scale - 1) * pose.grow;
+      chestCorners(pose.position, scale, pose.spin, pose.tumble).forEach((corner) => {
+        const p = project(camera, corner, square);
+        assert.ok(p.depth > camera.near, `chest ${index} stays in front of the camera at t=${t.toFixed(2)}`);
+        assert.ok(Math.abs(p.x) <= budgetX, `chest ${index} stays in frame horizontally at t=${t.toFixed(2)} (x=${p.x.toFixed(3)})`);
+        assert.ok(Math.abs(p.y) <= budgetY, `chest ${index} stays in frame vertically at t=${t.toFixed(2)} (y=${p.y.toFixed(3)})`);
+      });
+    }
+  }
+
+  // The flight must also END better framed than it began: once parked, the chest
+  // is comfortably inside even a square window, with margin on every side.
+  const parked = chestCorners(heroBase, framing.scale, 0, 0).map((corner) => project(camera, corner, square));
+  parked.forEach((p) => {
+    assert.ok(Math.abs(p.x) <= 1, `the parked chest fits horizontally (x=${p.x.toFixed(3)})`);
+    assert.ok(Math.abs(p.y) <= 1, `the parked chest fits vertically (y=${p.y.toFixed(3)})`);
+  });
+
+  // The OPEN LID is the tallest thing the reveal ever puts on screen — it
+  // swings up and back well past the closed silhouette — so it is what really
+  // bounds how big the hero chest may be. Posed through the same
+  // `hingedTransform` the scene builds it with, so the two cannot drift apart.
+  for (let step = 0; step <= 40; step += 1) {
+    const lidT = step / 40;
+    const grow = framing.scale;
+    const q = quatMul(quatYaw(0), quatPitch(-CHEST_TIMING.tilt));
+    const lidQ = quatMul(q, quatPitch(-easeOutBack(lidT) * CHEST_TIMING.lidOpen));
+    const hinge = addV3(heroBase, rotateByQuat(scaleV3(v3(0, CHEST_BODY.y, -CHEST_BODY.z / 2), grow), q));
+    const lid = hingedTransform(hinge, scaleV3(v3(0, CHEST_LID.y / 2, CHEST_LID.z / 2), grow), lidQ, scaleV3(CHEST_LID, grow));
+    [-1, 1].forEach((sx) =>
+      [-1, 1].forEach((sy) =>
+        [-1, 1].forEach((sz) => {
+          const corner = addV3(lid.position, rotateByQuat(scaleV3(v3((sx * CHEST_LID.x) / 2, (sy * CHEST_LID.y) / 2, (sz * CHEST_LID.z) / 2), grow), lidQ));
+          const p = project(camera, corner, square);
+          assert.ok(Math.abs(p.y) <= 1, `the open lid stays in frame at lidT=${lidT.toFixed(2)} (y=${p.y.toFixed(3)})`);
+          assert.ok(Math.abs(p.x) <= 1, `the open lid stays in frame horizontally at lidT=${lidT.toFixed(2)} (x=${p.x.toFixed(3)})`);
+        }),
+      ),
+    );
+  }
+
+  // The prize that climbs out of the parked chest also stays framed, across the
+  // whole rise INCLUDING the overshoot of its ease.
+  const top = v3(heroBase.x, heroBase.y + CHEST_BODY_TOP * framing.scale, heroBase.z);
+  const gem = framing.scale * CHEST_TIMING.prizeDamp;
+  for (let step = 0; step <= 40; step += 1) {
+    const riseT = step / 40;
+    // The largest prize the game can yield (a jackpot gem) is the binding case.
+    const size = (0.54 + 0.18) * (0.5 + 0.5 * riseT) * 1.04 * gem;
+    const climb = CHEST_TIMING.riseHeight * easeOutBack(riseT) * framing.scale * CHEST_TIMING.riseDamp;
+    const apex = project(camera, v3(top.x, top.y + climb + size, top.z), square);
+    assert.ok(apex.y <= 1, `the prize apex stays in frame at riseT=${riseT.toFixed(2)} (y=${apex.y.toFixed(3)})`);
+  }
+});
+
+test("the hero framing fills the frame without overflowing it", () => {
+  const camera = chestCamera(9);
+  const framing = heroFraming(camera);
+
+  // It is genuinely a CLOSE-UP: the chest ends up far larger than it is on the
+  // board, and much nearer to the camera than the board is.
+  assert.ok(framing.scale > 1.5, `the hero chest is a real enlargement (${framing.scale.toFixed(2)}×)`);
+  assert.ok(framing.distance < Math.hypot(camera.position.y, camera.position.z) * 0.7, "the hero plane is well in front of the board");
+
+  // It commands the frame — but the width guard keeps it inside even on a
+  // square window, which is the whole point of sizing from the frustum.
+  const heroBase = v3(framing.anchor.x, framing.anchor.y - (CHEST_HEIGHT / 2) * framing.scale, framing.anchor.z);
+  // Measured on the projected corners, so the chest's NEAR face — which the
+  // perspective enlarges past the flat width budget — is what gets checked.
+  const xs = chestCorners(heroBase, framing.scale, 0, 0).map((c) => project(camera, c, 1).x);
+  const span = Math.max(...xs) - Math.min(...xs);
+  assert.ok(span > 0.6, `the chest dominates the frame (spans ${(span * 50).toFixed(0)}% of width)`);
+  assert.ok(Math.max(...xs.map(Math.abs)) <= 1, `and still fits a square window (max |x| = ${Math.max(...xs.map(Math.abs)).toFixed(3)})`);
+
+  // The veil hangs between the hero chest and the board: behind everything the
+  // chest occupies, in front of the nearest chest still sitting on the grid.
+  const veilDepth = framing.distance + CHEST_TIMING.veilGap;
+  const chestBack = Math.max(...chestCorners(heroBase, framing.scale, 0, 0).map((c) => project(camera, c, 1).depth));
+  const nearestOnBoard = Math.min(
+    ...Array.from({ length: 9 }, (_, i) => {
+      const slot = chestPosition(i, 9);
+      return Math.min(...chestCorners(slot, 1, 0, 0).map((c) => project(camera, c, 1).depth));
+    }),
+  );
+  assert.ok(veilDepth > chestBack, `the veil is behind the hero chest (${veilDepth.toFixed(2)} > ${chestBack.toFixed(2)})`);
+  assert.ok(veilDepth < nearestOnBoard, `the veil is in front of the board (${veilDepth.toFixed(2)} < ${nearestOnBoard.toFixed(2)})`);
 });
 
 test("the chest population is fixed before the pick and higher win rate means more prize chests", () => {

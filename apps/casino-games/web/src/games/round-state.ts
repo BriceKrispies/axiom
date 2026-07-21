@@ -53,6 +53,14 @@ export interface CasinoMountSpec<TExtra> {
   /** After commitment resolves: go straight to the reveal, or hand control
    * back to the player with the outcome already sealed (scratch cards). */
   readonly afterCommit?: "reveal" | "interact";
+  /** How long the sealed-but-not-yet-revealed pause lasts, in ticks (before
+   * speed scaling). Defaults to `COMMIT_PAUSE_TICKS` — the beat most games
+   * want. A game whose commit beat carries a real staging animation (the
+   * chest's spiral to the hero framing) declares the length that animation
+   * needs here, rather than racing the shared default. The outcome is already
+   * committed either way, so this is purely how long the presentation holds
+   * before the reveal; it can never change what was drawn. */
+  readonly commitPauseTicks?: number;
   readonly initExtra: (session: SessionState) => TExtra;
   readonly step: (state: CasinoState<TExtra>, input: InputFrame, ctx: TickContext) => CasinoState<TExtra>;
   readonly viewScene: (state: CasinoState<TExtra>, ctx: ViewContext) => Scene;
@@ -145,7 +153,7 @@ const harnessStep = <TExtra>(env: RoundEnvironment, spec: CasinoMountSpec<TExtra
     if (session.committed === null && s.pendingContext !== null) {
       return { ...s, session: commitOutcome(session, env.source, s.pendingContext) };
     }
-    if (session.committed !== null && age >= speedTicks(COMMIT_PAUSE_TICKS, speed)) {
+    if (session.committed !== null && age >= speedTicks(spec.commitPauseTicks ?? COMMIT_PAUSE_TICKS, speed)) {
       const next = spec.afterCommit === "interact" ? "interacting" : "revealing";
       return { ...s, session: transition(session, next) };
     }

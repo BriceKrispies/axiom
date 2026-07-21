@@ -11,7 +11,21 @@ export const v3 = (x: number, y: number, z: number): EngineVec3 => ({ x, y, z })
 
 export const addV3 = (a: EngineVec3, b: EngineVec3): EngineVec3 => v3(a.x + b.x, a.y + b.y, a.z + b.z);
 
+export const subV3 = (a: EngineVec3, b: EngineVec3): EngineVec3 => v3(a.x - b.x, a.y - b.y, a.z - b.z);
+
 export const scaleV3 = (a: EngineVec3, s: number): EngineVec3 => v3(a.x * s, a.y * s, a.z * s);
+
+export const dotV3 = (a: EngineVec3, b: EngineVec3): number => a.x * b.x + a.y * b.y + a.z * b.z;
+
+export const crossV3 = (a: EngineVec3, b: EngineVec3): EngineVec3 =>
+  v3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+
+/** Unit vector along `a`; a zero-length vector normalizes to +Z rather than to
+ * NaN, so a degenerate camera basis degrades to a usable one. */
+export const normalizeV3 = (a: EngineVec3): EngineVec3 => {
+  const length = Math.hypot(a.x, a.y, a.z);
+  return length > 1e-9 ? scaleV3(a, 1 / length) : v3(0, 0, 1);
+};
 
 export const lerpV3 = (a: EngineVec3, b: EngineVec3, t: number): EngineVec3 =>
   v3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);

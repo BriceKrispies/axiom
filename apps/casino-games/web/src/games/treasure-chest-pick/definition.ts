@@ -11,7 +11,7 @@ import type { ConfigIssue } from "../../chance-engine/configuration/validation.t
 import type { CasinoGameDefinition, GameRuntime, RunningCasinoGame } from "../../chance-engine/registry/definition.ts";
 import { mountCasinoGame } from "../casino-mount.ts";
 import type { ChestSpec } from "./game.ts";
-import { chestCues, initialChestExtra, stepChest } from "./game.ts";
+import { CHEST_TIMING, chestCues, initialChestExtra, stepChest } from "./game.ts";
 import { CHEST_RESOURCES, chestScene } from "./scene.ts";
 
 const defaultConfig = (): CasinoGameConfig<ChestSpec> =>
@@ -24,6 +24,9 @@ const validateSpec = (spec: ChestSpec): readonly ConfigIssue[] =>
 
 const mount = (canvas: HTMLCanvasElement, runtime: GameRuntime<ChestSpec>): RunningCasinoGame =>
   mountCasinoGame(canvas, runtime, {
+    // The commit beat carries the chest's spiral into its hero framing, so it
+    // runs for the length of that flight rather than the shared default pause.
+    commitPauseTicks: CHEST_TIMING.spiralTicks,
     initExtra: initialChestExtra,
     instructionOf: (state) =>
       state.session.phase === "ready" ? "Pick a chest — arrows + Enter, or click one" : null,

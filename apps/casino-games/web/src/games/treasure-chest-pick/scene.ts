@@ -1,7 +1,7 @@
 /*
  * scene.ts — Treasure Chest Pick presentation: nine carved-wood, gold-gilded
- * chests staged as a small arcade ritual. Idle chests breathe out of unison and
- * flash an occasional gold gleam; a chosen chest lifts, tilts toward the camera,
+ * chests staged as a small arcade ritual. Idle chests breathe out of unison;
+ * a chosen chest lifts, tilts toward the camera,
  * and pools warm light beneath it while the other eight dim and go still; the
  * reveal is a readable sequence — anticipation shake, latch drop with a recoil
  * snap, warm light through the seam, a weighty overshooting lid, a compact light
@@ -10,19 +10,18 @@
  * returns a Scene value; every animated quantity is a pure function of the tick.
  *
  * Nothing here reads the population or the winning slot for cosmetics: the idle
- * dance draws only from the ambient stream, and the gleam/breathe are pure in
+ * dance draws only from the ambient stream, and the breathe is pure in
  * (index, tick) — so no wobble can hint at which chest holds a prize.
  */
 
-import type { MaterialSpec, Scene, SceneInstance, SceneLight } from "@axiom/web-engine";
-import type { EngineVec3, GameResources } from "@axiom/web-engine";
+import type { Camera3D, MaterialSpec, Scene, SceneInstance, SceneLight } from "@axiom/web-engine";
+import type { EngineQuat, EngineVec3, GameResources } from "@axiom/web-engine";
 import type { GameRuntime } from "../../chance-engine/registry/definition.ts";
 import { phaseAge } from "../../chance-engine/sessions/session.ts";
 import { confettiBurst, CONFETTI_MATERIALS, sparkleRing } from "../../presentation/celebrations/confetti.ts";
-import { revealFocusCamera } from "../../presentation/cameras/presets.ts";
 import { REWARD_MATERIALS, rewardMaterialOf } from "../../presentation/rewards/tiers.ts";
 import { celebrationFor, outcomeRarity, speedTicks } from "../round-state.ts";
-import { clamp01, easeOutBack, easeOutCubic, lerp, pulse, smoothstep } from "../../presentation/stage/easing.ts";
+import { clamp01, easeOutBack, easeOutCubic, lerp, pulse } from "../../presentation/stage/easing.ts";
 import { SKY_CLEAR, STAGE_MATERIALS, stageLights, stageRoom } from "../../presentation/stage/props.ts";
 import {
   addV3,
@@ -35,10 +34,52 @@ import {
   scaleV3,
   v3,
 } from "../../presentation/stage/vectors.ts";
-import type { ChestSpec, ChestState } from "./game.ts";
-import { CHEST_TIMING, chestCamera, chestPosition, dancePose, goldGleam, idlePhase, revealTimeline } from "./game.ts";
+import type { ChestSpec, ChestState, HeroFraming } from "./game.ts";
+import {
+  CHEST_BODY as BODY,
+  CHEST_BODY_TOP as BODY_TOP,
+  CHEST_HEIGHT,
+  CHEST_LATCH as LATCH,
+  CHEST_LID as LID,
+  CHEST_LID_ARCH,
+  CHEST_TIMING,
+  chestCamera,
+  chestPosition,
+  dancePose,
+  flightProgress,
+  heroFraming,
+  idlePhase,
+  revealTimeline,
+  spiralFlight,
+} from "./game.ts";
 
 // ── declared resources ──────────────────────────────────────────────────────────
+
+/**
+ * The background veil, as a graded ladder of fixed-opacity materials.
+ * A material's opacity is registered once at bind time and cannot be animated
+ * per-instance, so the ramp is quantized into `dimSteps` rungs and the veil
+ * instance simply picks the rung matching its current darkness. With enough
+ * rungs the ramp is smooth at the speed it plays (a step lands every few
+ * ticks), which is why the count is generous rather than minimal.
+ *
+ * Dimming the LIGHTS instead — or as well — would be the obvious alternative
+ * and is wrong here: the hero chest is lit by the same rig as the stage it is
+ * leaving, so darkening the rig darkens the very thing the shot exists to show.
+ * The veil dims strictly what sits behind the chest, and leaves it untouched.
+ */
+const VEIL_MATERIALS: Readonly<Record<string, MaterialSpec>> = Object.fromEntries(
+  Array.from({ length: CHEST_TIMING.dimSteps }, (_, i): readonly [string, MaterialSpec] => [
+    `Veil${i}`,
+    { baseColor: [0.02, 0.03, 0.06, 1], opacity: ((i + 1) / CHEST_TIMING.dimSteps) * CHEST_TIMING.dimVeil },
+  ]),
+);
+
+/** The veil rung for a darkness level in [0, 1], or null when fully clear. */
+const veilMaterialOf = (level: number): string | null => {
+  const rung = Math.ceil(clamp01(level) * CHEST_TIMING.dimSteps);
+  return rung <= 0 ? null : `Veil${Math.min(CHEST_TIMING.dimSteps, rung) - 1}`;
+};
 
 const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   ...STAGE_MATERIALS,
@@ -61,7 +102,6 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   GildFront: { baseColor: [0.98, 0.76, 0.28, 1], emissive: [0.12, 0.09, 0.02, 1] },
   GildSide: { baseColor: [0.7, 0.5, 0.18, 1] },
   GildDim: { baseColor: [0.5, 0.38, 0.16, 1] },
-  GildGleam: { baseColor: [1, 0.97, 0.72, 1], emissive: [0.7, 0.62, 0.32, 1] },
   GildBright: { baseColor: [1, 0.9, 0.46, 1], emissive: [0.5, 0.4, 0.12, 1] },
   // Warm reveal light: a layered pool under the chosen chest, seam leak, inner
   // glow, and the burst — all additive-emissive translucent discs/slabs.
@@ -79,23 +119,18 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   CenterGlow: { baseColor: [1, 0.88, 0.6, 1], emissive: [0.14, 0.1, 0.04, 1], opacity: 0.1 },
   EdgeVignette: { baseColor: [0.05, 0.16, 0.2, 1], opacity: 0.3 },
   BoardRivet: { baseColor: [1, 0.82, 0.34, 1], emissive: [0.3, 0.22, 0.05, 1] },
-  // Selection lift shadow (compressed + darker) and the empty-chest dust puff.
-  ShadowSoft: { baseColor: [0.1, 0.14, 0.18, 1], opacity: 0.26 },
-  ShadowLift: { baseColor: [0.06, 0.09, 0.12, 1], opacity: 0.44 },
-  DustPuff: { baseColor: [0.66, 0.6, 0.52, 1], opacity: 0.55 },
+  // Like every other translucent overlay here, the puff carries a little
+  // emissive: a purely Lambert translucent grey reads as a dark blob against
+  // the warm, brightly-lit chest mouth it coughs out of, which is the opposite
+  // of the light, playful "nothing here this time" it is meant to be.
+  DustPuff: { baseColor: [0.8, 0.75, 0.68, 1], emissive: [0.34, 0.31, 0.27, 1], opacity: 0.5 },
+  ...VEIL_MATERIALS,
 };
 
 export const CHEST_RESOURCES: GameResources = {
   materials: MATERIALS,
   meshes: { box: { kind: "box" }, cylinder: { kind: "cylinder" }, sphere: { kind: "sphere" } },
 };
-
-// ── chest proportions ───────────────────────────────────────────────────────────
-
-const BODY = v3(1.3, 0.6, 0.92);
-const LID = v3(1.34, 0.26, 0.96);
-const LATCH = v3(0.2, 0.24, 0.05);
-const BODY_TOP = 0.62;
 
 // ── small builders ──────────────────────────────────────────────────────────────
 
@@ -107,12 +142,85 @@ const disc = (key: string, material: string, at: EngineVec3, radius: number, hei
   transform: { position: at, rotation: QUAT_IDENTITY, scale: v3(radius * 2, height, radius * 2) },
 });
 
+/**
+ * The barrel top is faceted into this many box slats. The engine's mesh
+ * vocabulary is box / sphere / cylinder — there is no half-cylinder, and a full
+ * cylinder sunk to show only its top half would expose its round underside the
+ * moment the lid swings open. So the dome is an honest arc of flat slats, which
+ * also sits right with the chunky faceted look of everything else here: each
+ * slat catches the key light at its own angle, so the curve reads from shading
+ * rather than from silhouette alone.
+ */
+const LID_ARC_SLATS = 5;
+const LID_ARC_THICKNESS = 0.11;
+/** How far the gold bands stand proud of the wood arc they wrap. */
+const LID_BAND_SWELL = 0.025;
+
+/**
+ * One arc of slats sweeping the lid's full depth, from its back edge up over
+ * the crown and down to its front edge.
+ *
+ * Every slat is placed by its OWN chord: the two arc points bounding it give
+ * the slat's center, its length, and its tilt directly, so the facets meet edge
+ * to edge at any slat count and any `swell` without a seam to tune.
+ *
+ * The offset is rotated by the LID's quaternion while the slat carries the lid
+ * rotation composed with its own tilt — so the whole arc is welded to the lid
+ * board beneath it. It swings on the hinge when the lid opens, and it rides the
+ * chest's yaw/pitch/spiral when the chest moves, exactly like every other part.
+ */
+const lidArc = (
+  keyPrefix: string,
+  hinge: EngineVec3,
+  lidQ: EngineQuat,
+  grow: number,
+  material: string,
+  width: number,
+  swell: number,
+  atX = 0,
+): readonly SceneInstance[] => {
+  const depthRadius = LID.z / 2 + swell;
+  const riseRadius = CHEST_LID_ARCH - LID_ARC_THICKNESS / 2 + swell;
+  // The arc's mid-thickness surface, swept as a half-ellipse over the lid board.
+  const arcAt = (t: number): { readonly y: number; readonly z: number } => {
+    const angle = -Math.PI / 2 + t * Math.PI;
+    return { y: LID.y + riseRadius * Math.cos(angle), z: LID.z / 2 + depthRadius * Math.sin(angle) };
+  };
+  return Array.from({ length: LID_ARC_SLATS }, (_, i): SceneInstance => {
+    const from = arcAt(i / LID_ARC_SLATS);
+    const to = arcAt((i + 1) / LID_ARC_SLATS);
+    const dy = to.y - from.y;
+    const dz = to.z - from.z;
+    // A slat's local +Z runs along its chord. quatPitch(a) sends +Z to
+    // (0, −sin a, cos a), so the tilt that aligns it with (dz, dy) is this.
+    const tilt = Math.atan2(-dy, dz);
+    return {
+      key: `${keyPrefix}${i}`,
+      material,
+      mesh: "box",
+      transform: {
+        position: addV3(hinge, rotateByQuat(scaleV3(v3(atX, (from.y + to.y) / 2, (from.z + to.z) / 2), grow), lidQ)),
+        rotation: quatMul(lidQ, quatPitch(tilt)),
+        scale: scaleV3(v3(width, LID_ARC_THICKNESS, Math.hypot(dy, dz)), grow),
+      },
+    };
+  });
+};
+
 interface ChestPose {
+  /** The chest's GRID slot on the board — where its ground decor (warm pool,
+   * focus ring) stays. Fixed for the whole round. */
   readonly origin: EngineVec3;
+  /** Where the chest BODY actually is. Equal to `origin` (plus lift) while the
+   * chest sits on the board, and somewhere along the spiral once it flies. */
+  readonly at: EngineVec3;
+  /** Flight progress in [0, 1]. Ground decor belongs to a chest that is ON the
+   * board, so it fades out as this rises — an airborne chest pools no light on
+   * a board it has left. */
+  readonly flight: number;
   readonly yaw: number;
   readonly pitch: number;
   readonly squash: number;
-  readonly lift: number;
   readonly scale: number;
   readonly lidAngle: number;
   readonly latchAngle: number;
@@ -120,29 +228,31 @@ interface ChestPose {
   readonly selected: boolean;
   readonly focusRing: boolean;
   readonly hoverRing: boolean;
-  readonly gleam: number;
   readonly seam: number;
   readonly glow: number;
 }
 
-/** All instances of one posed chest (body, planks, gilding, latch, lid, shadow,
+/** All instances of one posed chest (body, planks, gilding, latch, lid,
  * selection pool, seam light). Materials are chosen by facing (front/side/top)
- * and by pose state (dim / selected / gleaming) rather than by texture. */
+ * and by pose state (dim / selected) rather than by texture. */
 const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] => {
   // Tilt toward the camera (a small back-pitch) when chosen; yaw carries idle sway.
   const q = quatMul(quatYaw(pose.yaw), quatPitch(-pose.pitch));
   const squashY = 1 - pose.squash;
   const squashXZ = 1 + pose.squash * 0.55;
   const grow = pose.scale;
-  const origin = v3(pose.origin.x, pose.origin.y + pose.lift, pose.origin.z);
+  const origin = pose.at;
+  // How much of the chest is still "on the board" — gates every ground-anchored
+  // decoration below.
+  const grounded = 1 - clamp01(pose.flight);
 
   const wood = pose.dim ? "WoodDim" : "WoodBrown";
   const woodSide = pose.dim ? "WoodDimSide" : "WoodSide";
   const woodLid = pose.dim ? "WoodDim" : "WoodLid";
-  // Front trim brightens on hover/selection; the sweep gleam overrides the top trim.
+  // Front trim brightens on hover/selection.
   const trimFront = pose.dim ? "GildDim" : pose.selected || pose.hoverRing ? "GildBright" : "GildFront";
   const trimSide = pose.dim ? "GildDim" : "GildSide";
-  const trimTop = pose.gleam > 0.35 ? "GildGleam" : pose.dim ? "GildDim" : "GildTop";
+  const trimTop = pose.dim ? "GildDim" : "GildTop";
 
   const part = (suffix: string, local: EngineVec3, scale: EngineVec3, material: string, extraQ = QUAT_IDENTITY): SceneInstance => ({
     key: `${key}:${suffix}`,
@@ -171,6 +281,15 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     mesh: "box",
     transform: hingedTransform(lidHinge, scaleV3(v3(0, LID.y / 2, LID.z - 0.02), grow), lidQ, scaleV3(v3(LID.x + 0.02, LID.y + 0.03, 0.05), grow)),
   };
+  // The barrel top, and the two gold bands that wrap over it — continuations of
+  // the body straps below, so the gilding runs unbroken from board to crown.
+  const dome = lidArc(`${key}:dome`, lidHinge, lidQ, grow, woodLid, LID.x, 0);
+  const bands = [-1, 1]
+    .map((side) =>
+      lidArc(`${key}:band${side < 0 ? "L" : "R"}`, lidHinge, lidQ, grow, trimSide, 0.075, LID_BAND_SWELL, side * BODY.x * 0.28),
+    )
+    .flat();
+
   const latchQ = quatMul(lidQ, quatPitch(pose.latchAngle));
   const latchHinge = addV3(lidHinge, rotateByQuat(scaleV3(v3(0, 0.02, LID.z - 0.01), grow), lidQ));
   const latch: SceneInstance = {
@@ -189,11 +308,11 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   // Warm light pool under a chosen chest: three layered translucent discs read
   // as a soft radial gradient rather than a flat marker.
   const pool: SceneInstance[] =
-    pose.glow > 0 || pose.selected
+    (pose.glow > 0 || pose.selected) && grounded > 0.02
       ? [
-          disc(`${key}:pool2`, "PoolOuter", v3(pose.origin.x, 0.02, pose.origin.z), BODY.x * (1.05 + pose.glow * 0.3), 0.012),
-          disc(`${key}:pool1`, "PoolMid", v3(pose.origin.x, 0.028, pose.origin.z), BODY.x * (0.78 + pose.glow * 0.22), 0.012),
-          disc(`${key}:pool0`, "PoolCore", v3(pose.origin.x, 0.036, pose.origin.z), BODY.x * (0.5 + pose.glow * 0.18), 0.012),
+          disc(`${key}:pool2`, "PoolOuter", v3(pose.origin.x, 0.02, pose.origin.z), BODY.x * (1.05 + pose.glow * 0.3) * grounded, 0.012),
+          disc(`${key}:pool1`, "PoolMid", v3(pose.origin.x, 0.028, pose.origin.z), BODY.x * (0.78 + pose.glow * 0.22) * grounded, 0.012),
+          disc(`${key}:pool0`, "PoolCore", v3(pose.origin.x, 0.036, pose.origin.z), BODY.x * (0.5 + pose.glow * 0.18) * grounded, 0.012),
         ]
       : [];
 
@@ -214,11 +333,6 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
         ]
       : [];
 
-  // Shadow: compressed + darker when lifted, softer when grounded.
-  const lifted = pose.lift > 0.001;
-  const shadowRadius = BODY.x * 0.72 * grow * (lifted ? 0.82 : 1);
-  const shadow: SceneInstance = disc(`${key}:shadow`, lifted ? "ShadowLift" : "ShadowSoft", v3(pose.origin.x, 0.014, pose.origin.z), shadowRadius, 0.01);
-
   // Hover/focus feedback is a soft warm pool, not a flat gold marker: an active
   // pointer/tap hover reads a touch brighter than a resting keyboard cursor.
   const ringBase = v3(pose.origin.x, 0.024, pose.origin.z);
@@ -230,7 +344,6 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
 
   return [
     ...pool,
-    shadow,
     part("body", v3(0, BODY.y / 2, 0), BODY, wood),
     // Board gap lines (darkest) read as separate planks without a texture.
     part("gap1", v3(0, BODY.y * 0.36, 0), v3(BODY.x + 0.014, 0.03, BODY.z + 0.014), "WoodGap"),
@@ -248,6 +361,8 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     ...glow,
     ...seam,
     lid,
+    ...dome,
+    ...bands,
     lidRim,
     latch,
     ...rings,
@@ -256,38 +371,39 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
 
 // ── the light burst (bounded: soft glow + a few rays + a few motes) ─────────────
 
-const lightBurst = (at: EngineVec3, tick: number, t: number): readonly SceneInstance[] => {
+const lightBurst = (at: EngineVec3, tick: number, t: number, s: number): readonly SceneInstance[] => {
   // t is burst progress 0→1 over the burst window; intensity peaks early, fades.
+  // `s` scales the whole figure with the hero chest it erupts from.
   const strength = pulse(t);
   if (strength <= 0.001) {
     return [];
   }
-  const rise = 0.2 + t * 0.9;
-  const glow: SceneInstance = disc("burst:glow", "BurstGlow", v3(at.x, at.y + 0.05, at.z), 0.35 + strength * 0.9, 0.02);
+  const rise = (0.2 + t * 0.9) * s;
+  const glow: SceneInstance = disc("burst:glow", "BurstGlow", v3(at.x, at.y + 0.05 * s, at.z), (0.35 + strength * 0.9) * s, 0.02);
   const rays = [0, 1, 2, 3, 4].map((i) => {
     const a = (i / 5) * Math.PI * 2 + tick * 0.02;
-    const spread = 0.28 * strength;
+    const spread = 0.28 * strength * s;
     return {
       key: `burst:ray${i}`,
       material: "BurstRay",
       mesh: "box",
       transform: {
-        position: v3(at.x + Math.cos(a) * spread, at.y + 0.3 + rise * 0.5, at.z + Math.sin(a) * spread),
+        position: v3(at.x + Math.cos(a) * spread, at.y + (0.3 * s + rise * 0.5), at.z + Math.sin(a) * spread),
         rotation: quatYaw(a),
-        scale: v3(0.05 + strength * 0.05, 0.5 + strength * 1.3, 0.05 + strength * 0.05),
+        scale: scaleV3(v3(0.05 + strength * 0.05, 0.5 + strength * 1.3, 0.05 + strength * 0.05), s),
       },
     } satisfies SceneInstance;
   });
   const motes = Array.from({ length: CHEST_TIMING.burstParticles }, (_, i) => {
     const a = (i / CHEST_TIMING.burstParticles) * Math.PI * 2 + i * 1.3;
-    const r = (0.15 + (i % 3) * 0.12) * (0.4 + t);
+    const r = (0.15 + (i % 3) * 0.12) * (0.4 + t) * s;
     const climb = rise * (0.6 + (i % 4) * 0.18);
-    const size = (0.05 + (i % 2) * 0.02) * strength;
+    const size = (0.05 + (i % 2) * 0.02) * strength * s;
     return {
       key: `burst:mote${i}`,
       material: "Mote",
       mesh: "sphere",
-      transform: { position: v3(at.x + Math.cos(a) * r, at.y + 0.25 + climb, at.z + Math.sin(a) * r), rotation: QUAT_IDENTITY, scale: v3(size, size, size) },
+      transform: { position: v3(at.x + Math.cos(a) * r, at.y + 0.25 * s + climb, at.z + Math.sin(a) * r), rotation: QUAT_IDENTITY, scale: v3(size, size, size) },
     } satisfies SceneInstance;
   });
   return [glow, ...rays, ...motes];
@@ -301,14 +417,18 @@ const lightBurst = (at: EngineVec3, tick: number, t: number): readonly SceneInst
  * pulse, and a pulsing halo behind it. `at` is the chest's open mouth; `riseT`
  * the climb progress; `settle` ramps in the idle bob/pulse once it has arrived.
  */
-const heroPrize = (rarity: Parameters<typeof rewardMaterialOf>[0], at: EngineVec3, riseT: number, tick: number, settle: number): readonly SceneInstance[] => {
+const heroPrize = (rarity: Parameters<typeof rewardMaterialOf>[0], at: EngineVec3, riseT: number, tick: number, settle: number, s: number): readonly SceneInstance[] => {
   const material = rewardMaterialOf(rarity);
-  const climb = CHEST_TIMING.riseHeight * easeOutBack(riseT);
-  const bob = Math.sin(tick * 0.12) * 0.035 * settle;
+  // The climb and the gem both scale with the hero chest, but DAMPED: at full
+  // hero scale an undamped rise would carry the prize straight out of frame.
+  const rise = s * CHEST_TIMING.riseDamp;
+  const gem = s * CHEST_TIMING.prizeDamp;
+  const climb = CHEST_TIMING.riseHeight * easeOutBack(riseT) * rise;
+  const bob = Math.sin(tick * 0.12) * 0.035 * settle * gem;
   const center = v3(at.x, at.y + climb + bob, at.z);
   const rarityBonus = rarity === "jackpot" ? 0.18 : rarity === "rare" ? 0.1 : 0;
-  const size = (0.54 + rarityBonus) * (0.5 + 0.5 * riseT) * (1 + Math.sin(tick * 0.16) * 0.04 * settle);
-  const halo = 0.82 * (0.5 + 0.5 * riseT) * (0.9 + Math.sin(tick * 0.14) * 0.12 * settle);
+  const size = (0.54 + rarityBonus) * (0.5 + 0.5 * riseT) * (1 + Math.sin(tick * 0.16) * 0.04 * settle) * gem;
+  const halo = 0.82 * (0.5 + 0.5 * riseT) * (0.9 + Math.sin(tick * 0.14) * 0.12 * settle) * gem;
   const spin = quatYaw(tick * 0.04);
   return [
     disc("reward:halo", "BurstGlow", v3(center.x, center.y, center.z + 0.001), halo, 0.02),
@@ -335,6 +455,45 @@ const platform = (): readonly SceneInstance[] => [
     transform: { position: v3((sx ?? 0) * 6.7, -0.02, (sz ?? 0) * 6.7), rotation: QUAT_IDENTITY, scale: v3(0.34, 0.05, 0.34) },
   })),
 ];
+
+// ── the background veil ─────────────────────────────────────────────────────────
+
+/**
+ * A dark sheet hung across the frustum BETWEEN the hero chest and everything
+ * else — the board, the eight other chests, the platform, the backdrop. As the
+ * chosen chest spirals forward the veil rises behind it, so the stage falls
+ * away into near-darkness and the chest is left owning a quiet frame.
+ *
+ * A veil is the honest tool here rather than dimming the lights: the pavilion
+ * backdrop is EMISSIVE, so it ignores lighting entirely and would stay bright
+ * while everything around it fell dark. Occluding it works on every material.
+ * The renderer draws translucent geometry after opaque, depth-tested but
+ * without depth writes, so the hero chest — nearer than the veil — punches
+ * through it for free, with no sorting work here.
+ */
+const backgroundVeil = (camera: Camera3D, framing: HeroFraming, level: number): readonly SceneInstance[] => {
+  const material = veilMaterialOf(level);
+  if (material === null) {
+    return [];
+  }
+  const depth = framing.distance + CHEST_TIMING.veilGap;
+  const half = depth * Math.tan(camera.fovY / 2);
+  // Turn the sheet's +Z face back down the view axis so it squarely faces the
+  // camera, and oversize it well past the frustum so no aspect ratio can
+  // uncover an edge.
+  return [
+    {
+      key: "veil",
+      material,
+      mesh: "box",
+      transform: {
+        position: addV3(camera.position, scaleV3(framing.forward, depth)),
+        rotation: quatPitch(Math.atan2(framing.forward.y, -framing.forward.z)),
+        scale: v3(half * 9, half * 5, 0.02),
+      },
+    },
+  ];
+};
 
 // ── the scene ───────────────────────────────────────────────────────────────────
 
@@ -372,6 +531,31 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // Burst progress (0→1 over the burst window, right after the lid opens).
   const burstT = revealAge >= timeline.burstAt ? clamp01((revealAge - timeline.burstAt) / Math.max(1, timeline.lidEnd - timeline.lidStart)) : 0;
 
+  // ── the hero flight ───────────────────────────────────────────────────────────
+  // The camera does NOT move in this game. Instead the chosen chest leaves the
+  // board and spirals into a close hero framing derived from that fixed camera
+  // — which is why the other eight stay exactly where the player left them.
+  //
+  // The flown transform is computed ONCE here and is the single anchor every
+  // downstream element hangs off (prize, burst, reveal lights, celebration).
+  // Before this, six call sites each independently re-derived "where the chosen
+  // chest is" from its grid slot; now the chest moves and they all follow it.
+  const camera = chestCamera(count);
+  const framing = heroFraming(camera);
+  const flight = selected === null ? 0 : flightProgress(session, speed);
+  const liftAmount = CHEST_TIMING.lift * selectEase;
+  // `framing.anchor` frames the chest's CENTER; a chest is posed from its base.
+  const heroBase = addV3(framing.anchor, v3(0, (-CHEST_HEIGHT / 2) * framing.scale, 0));
+  const flown = spiralFlight(
+    addV3(selected === null ? v3(0, 0, 0) : chestPosition(selected, count), v3(0, liftAmount, 0)),
+    heroBase,
+    flight,
+    framing,
+  );
+  const heroScale = lerp(lerp(1, CHEST_TIMING.selectScale, selectEase), framing.scale, flown.grow);
+  /** The chosen chest's open mouth, wherever the flight has carried it. */
+  const heroTop = addV3(flown.position, v3(0, BODY_TOP * heroScale, 0));
+
   const chests = Array.from({ length: count }, (_, index) => {
     const origin = chestPosition(index, count);
     const dance = dancePose(index, count, tick, seed, liveliness);
@@ -399,22 +583,27 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
 
     const dimmed = selected !== null && !isSelected;
 
+    // A chosen chest rides the spiral; every other chest stays in its slot,
+    // breathing on the idle bob.
+    const lift = isSelected ? liftAmount : idleBob;
+    const at = isSelected ? flown.position : v3(origin.x, origin.y + lift, origin.z);
+
     return chestInstances(`chest${index}`, {
+      at,
       dim: dimmed,
+      flight: isSelected ? flight : 0,
       focusRing: session.phase === "ready" && choice.focused === index && choice.hovered !== index && choice.armed !== index,
       glow: isSelected ? easeOutCubic(lidT) * (winReveal ? 1 : 0.32) : 0,
-      gleam: idleActive && !dimmed ? goldGleam(index, tick) : 0,
       hoverRing: session.phase === "ready" && (choice.hovered === index || choice.armed === index),
       latchAngle: easeOutCubic(latchT) * CHEST_TIMING.latchDrop + latchRecoil,
       lidAngle: -easeOutBack(lidT) * CHEST_TIMING.lidOpen,
-      lift: isSelected ? CHEST_TIMING.lift * selectEase : 0,
       origin,
-      pitch: isSelected ? CHEST_TIMING.tilt * selectEase : 0,
-      scale: isSelected ? lerp(1, CHEST_TIMING.selectScale, selectEase) : 1,
+      pitch: isSelected ? CHEST_TIMING.tilt * selectEase + flown.tumble : 0,
+      scale: isSelected ? heroScale : 1,
       seam,
       selected: isSelected,
       squash: dance.squash + (bracing ? pulse(braceT) * 0.05 : 0),
-      yaw: dance.twist + idleTwist + shiver,
+      yaw: dance.twist + idleTwist + shiver + (isSelected ? flown.spin : 0),
     });
   }).flat();
 
@@ -422,8 +611,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   const rewardInstances: SceneInstance[] = [];
   const burst: SceneInstance[] = [];
   if (selected !== null && plan !== null && revealAge >= timeline.lidEnd) {
-    const lift = CHEST_TIMING.lift * selectEase;
-    const chestTop = addV3(chestPosition(selected, count), v3(0, BODY_TOP + lift, 0));
+    const chestTop = heroTop;
     const riseT = clamp01((revealAge - timeline.lidEnd) / Math.max(1, timeline.riseEnd - timeline.lidEnd));
     const settle = clamp01((revealAge - timeline.riseEnd) / 20);
     const rarity = outcomeRarity(session);
@@ -431,8 +619,8 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     if (rarity !== "loss") {
       // A win: the warm light burst fires and the prize climbs fully clear of
       // the chest to hover as the frame's focal point.
-      burst.push(...lightBurst(chestTop, tick, burstT));
-      rewardInstances.push(...heroPrize(rarity, chestTop, riseT, tick, settle));
+      burst.push(...lightBurst(chestTop, tick, burstT, heroScale));
+      rewardInstances.push(...heroPrize(rarity, chestTop, riseT, tick, settle, heroScale));
     } else {
       // An empty chest: a playful grey dust puff coughs up and out (no burst,
       // no prize) — a clear, warm "nothing here this time".
@@ -444,14 +632,21 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
         }
         const pt = local / life;
         const a = (i / 6) * Math.PI * 2 + i;
-        const spread = 0.16 + pt * 0.5;
-        const size = (0.16 + pt * 0.3) * (1 - pt * 0.35);
+        // The puff belongs to the chest, so it grows and climbs with it — damped
+        // on the climb for the same reason the prize is: to stay in frame.
+        const puff = heroScale * CHEST_TIMING.prizeDamp;
+        const spread = (0.16 + pt * 0.5) * puff;
+        const size = (0.16 + pt * 0.3) * (1 - pt * 0.35) * puff;
         return {
           key: `dust:${i}`,
           material: "DustPuff",
           mesh: "sphere",
           transform: {
-            position: v3(chestTop.x + Math.cos(a) * spread, chestTop.y + 0.05 + pt * 0.75, chestTop.z + Math.sin(a) * spread),
+            position: v3(
+              chestTop.x + Math.cos(a) * spread,
+              chestTop.y + (0.05 + pt * 0.75) * heroScale * CHEST_TIMING.riseDamp,
+              chestTop.z + Math.sin(a) * spread,
+            ),
             rotation: QUAT_IDENTITY,
             scale: v3(size, size * 0.82, size),
           },
@@ -465,7 +660,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   const celebration: SceneInstance[] = [];
   if (session.phase === "celebrating" && plan !== null && selected !== null) {
     const profile = celebrationFor(runtime.settings, session);
-    const at = addV3(chestPosition(selected, count), v3(0, BODY_TOP + 0.4, 0));
+    const at = addV3(heroTop, v3(0, 0.4 * heroScale, 0));
     celebration.push(
       ...(plan.win
         ? confettiBurst("confetti", at, profile.particles, plan.presentationSeed, phaseAge(session))
@@ -473,38 +668,39 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     );
   }
 
-  // Camera: table framing that pushes in toward the selected chest through the
-  // whole selection→reveal, eased and restrained.
-  const base = chestCamera(count);
-  // Raise the focus above the chest so the framing centers between the open
-  // chest and the prize hovering over it — the pair own the frame during reveal.
-  const camera =
-    selected !== null
-      ? revealFocusCamera(base, addV3(chestPosition(selected, count), v3(0, 1.05, 0)), smoothstep(selectT), runtime.settings.reducedMotion ? 0.3 : CHEST_TIMING.pushIn)
-      : base;
-
   // Lights: standard rig, a warm escape light once the lid parts, and a brief
-  // burst light that flashes the stage and chest faces at the pop.
-  const focus = selected !== null ? chestPosition(selected, count) : v3(0, 0, 0);
+  // burst light that flashes the chest faces at the pop. All three follow the
+  // FLOWN chest, so the reveal stays lit as it travels off the board.
+  const focus = selected === null ? v3(0, 0, 0) : flown.position;
   const lights: SceneLight[] = [...stageLights(focus, 0.5 + 0.4 * selectEase)];
   if (selected !== null && revealAge >= timeline.pauseEnd) {
     const warm = clamp01((revealAge - timeline.pauseEnd) / 12);
     lights.push({
       key: "light:chest",
-      light: { color: [1, 0.82, 0.45, 1], intensity: 1.3 * warm * (winReveal ? 1 : 0.4), kind: "point", position: addV3(chestPosition(selected, count), v3(0, 1.1, 0.3)) },
+      light: { color: [1, 0.82, 0.45, 1], intensity: 1.3 * warm * (winReveal ? 1 : 0.4), kind: "point", position: addV3(flown.position, scaleV3(v3(0, 1.1, 0.3), heroScale)) },
     });
   }
   if (winReveal && selected !== null && burstT > 0 && burstT < 1) {
     lights.push({
       key: "light:burst",
-      light: { color: [1, 0.9, 0.6, 1], intensity: 1.8 * pulse(burstT), kind: "point", position: addV3(chestPosition(selected, count), v3(0, 1.5, 0.2)) },
+      light: { color: [1, 0.9, 0.6, 1], intensity: 1.8 * pulse(burstT), kind: "point", position: addV3(flown.position, scaleV3(v3(0, 1.5, 0.2), heroScale)) },
     });
   }
 
   return {
     camera,
     clearColor: SKY_CLEAR,
-    instances: [...stageRoom(16), ...platform(), ...chests, ...burst, ...rewardInstances, ...celebration],
+    // The veil sits between the board and the hero chest: everything before it
+    // in this list is what gets dimmed, everything after it stays clear.
+    instances: [
+      ...stageRoom(16),
+      ...platform(),
+      ...chests,
+      ...backgroundVeil(camera, framing, flight),
+      ...burst,
+      ...rewardInstances,
+      ...celebration,
+    ],
     lights,
   };
 };
