@@ -915,7 +915,8 @@ last navigation), and `stop` (shut the browser down). Env knobs:
 `AXIOM_PW_HEADLESS=0` for a visible window, `AXIOM_PW_PORT` to change the daemon
 port. First run also downloads the Chromium binary.
 
-Typical wasm smoke test (serve the built app separately, then):
+Typical wasm smoke test (serve the app first with `localhost_servers.py
+start-app <app>` — see the section below — then):
 
 ```sh
 uv run scripts/playwright_controller.py goto http://localhost:8080/
@@ -927,49 +928,36 @@ uv run scripts/playwright_controller.py screenshot cubes
 This is verification tooling, outside the engine dependency graph — not a layer,
 module, app, or Cargo package.
 
-## Local app serving with hot reload (axiom-serve)
+## Building and running an app locally (localhost_servers — always start here)
 
-To work on any single app under `apps/` in a real browser, use **axiom-serve**
-(`tools/axiom-serve` — a Tool by its location, outside the engine graph and the
-coverage gate). It builds the app, serves its `web/` locally, watches the
-sources, rebuilds on save, and pushes a reload to the open page over SSE:
+> **`scripts/localhost_servers.py`, run via `uv`, is THE way to build and run any
+> app in this repo locally. It is not one option among several — it is the
+> preferred entry point, and you should reach for it before anything else.**
+> Do not invoke `axiom-serve`, `make serve`, `python -m http.server`, or any
+> other server directly in the foreground.
 
-```sh
-cargo run -p axiom-serve -- gravix                      # Rust wasm app: cargo + wasm-bindgen, auto-reload
-cargo run -p axiom-serve -- heat-check                  # SDK-hosted TS app: tsgo recompile on save
-cargo run -p axiom-serve -- three-point --port 9000 --no-open
-make serve APP=growth                                   # the same, via make
-```
+Why this is the rule and not a preference: a foreground server
+(`cargo run -p axiom-serve -- <app>`) is bound to the shell that launched it. It
+blocks that shell for as long as the app runs, dies when the command is
+interrupted or the session ends, and leaves you with no way to ask *what is
+running right now* or *what did it print*. That is a bad fit for how this repo is
+actually worked on — long-lived apps, many of them at once, across sessions and
+terminals.
 
-It detects the app's shape on its own — Rust wasm cdylib (`cargo build
---target wasm32-unknown-unknown` + `wasm-bindgen` into `web/pkg/`, page reload
-injected), pure-TS `@axiom/web-engine` app (tsgo + an injected import map), or
-SDK-hosted `@axiom/game` app (tsgo + the shared runtime wasm routes) — and
-builds missing prerequisites (SDK dist, runtime wasm) once. `--debug` skips the
-slow LTO release profile for Rust apps; the default port is 8080. Pair it with
-the Playwright controller above to verify rendering
-(`goto http://localhost:8080/`). For the two Vite dev apps
-(`axiom-game-runtime`, `axiom-retro-fps-ts-browser`) the Vite HMR flow
-(`packages/axiom-vite`) remains the richer alternative.
+`localhost_servers.py` starts every server as a **fully detached background
+daemon** that survives the shell, plus a named registry on top of it: you can
+list, tail, restart, and stop any server by name, from any terminal, later. It is
+repo tooling (stdlib only, run via `uv`), outside the engine dependency graph —
+not a layer, module, app, or Cargo package.
 
-## Managing localhost servers (localhost_servers — the default)
-
-**`scripts/localhost_servers.py` is the default way to run and manage anything
-on localhost in this repo.** Prefer it over launching `axiom-serve` (or any
-server) directly in the foreground: a bare `cargo run -p axiom-serve -- <app>`
-ties the server to the invoking shell and blocks it, while this manager starts
-servers as **fully detached background daemons** that keep running across
-terminals and sessions until explicitly stopped. It is repo tooling (stdlib
-only, run via `uv`), outside the engine dependency graph — not a layer, module,
-app, or Cargo package.
-
-It wraps `axiom-serve` for Axiom apps (injecting the correct import map and
-hot reload) and can run any command as a named server. State lives in the
-git-ignored `scripts/.localhost-servers/` (a JSON registry + per-server logs).
+For Axiom apps it wraps **axiom-serve** (see below), so you get the full build +
+hot-reload pipeline — correct import map, rebuild on save, page reload — with
+none of the foreground cost. It can also run any arbitrary command as a named
+server.
 
 ```sh
 uv run scripts/localhost_servers.py start-app casino-games          # serve an app (hot reload) on :8080
-uv run scripts/localhost_servers.py start-app heat-check --port 8081
+uv run scripts/localhost_servers.py start-app arena-forge --port 8083
 uv run scripts/localhost_servers.py up                              # start the default set (home-run)
 uv run scripts/localhost_servers.py status                          # table of every server (default cmd)
 uv run scripts/localhost_servers.py logs casino-games -n 40         # last N log lines
@@ -981,10 +969,66 @@ uv run scripts/localhost_servers.py stop-all
 uv run scripts/localhost_servers.py start docs --port 9000 --cwd site -- python -m http.server 9000
 ```
 
-The port auto-bumps to the next free one if the preferred port is taken. Note
-that `up`/`DEFAULT_APPS` reserves `home-run` on `8080`; if you want a different
-app on `8080`, start it explicitly with `start-app` rather than relying on a
-bare port. Pair it with the Playwright controller above to verify rendering.
+State lives in the git-ignored `scripts/.localhost-servers/` (a JSON registry +
+per-server logs).
+
+### The standard loop: run an app and confirm it renders
+
+Pair it with the Playwright controller above. This is the full, verified path
+from "an app exists" to "I have seen it render":
+
+```sh
+uv run scripts/localhost_servers.py start-app arena-forge --port 8083
+uv run scripts/localhost_servers.py logs arena-forge -n 20     # confirm the build compiled
+uv run scripts/playwright_controller.py goto http://localhost:8083/
+uv run scripts/playwright_controller.py wait 2000
+uv run scripts/playwright_controller.py console                # must be error-free
+uv run scripts/playwright_controller.py screenshot arena-forge # then Read the returned PNG
+```
+
+Never claim an app "works" on the strength of a green build alone — the build
+compiling and the page painting are different facts. Read the screenshot.
+
+Two gotchas worth knowing before you debug a phantom problem:
+
+- The port auto-bumps to the next free one if the preferred port is taken — so
+  the port you asked for is not necessarily the port you got. Use `status` or
+  `url <name>` to get the real one rather than assuming.
+- `up`/`DEFAULT_APPS` reserves `home-run` on `8080`. If you want a different app
+  on `8080`, start it explicitly with `start-app`; relying on a bare port is the
+  classic cause of "I started my app but the browser shows a different one / it
+  won't refresh."
+
+## The builder underneath: axiom-serve
+
+**axiom-serve** (`tools/axiom-serve` — a Tool by its location, outside the engine
+graph and the coverage gate) is the build-and-serve engine that
+`localhost_servers.py` drives for you. Prefer starting it through the manager
+above; reach for it directly only when you specifically need a foreground,
+attached process (e.g. watching build output live while debugging the build
+itself).
+
+It builds the app, serves its `web/`, watches the sources, rebuilds on save, and
+pushes a reload to the open page over SSE. It detects the app's shape on its
+own — Rust wasm cdylib (`cargo build --target wasm32-unknown-unknown` +
+`wasm-bindgen` into `web/pkg/`, page reload injected), pure-TS
+`@axiom/web-engine` app (tsgo + an injected import map), or SDK-hosted
+`@axiom/game` app (tsgo + the shared runtime wasm routes) — and builds missing
+prerequisites (SDK dist, runtime wasm) once.
+
+```sh
+# Preferred — detached, named, managed:
+uv run scripts/localhost_servers.py start-app gravix
+uv run scripts/localhost_servers.py start-app three-point --port 9000
+
+# Direct/foreground — only when you need an attached process:
+cargo run -p axiom-serve -- gravix --debug               # --debug skips the slow LTO release profile
+make serve APP=growth                                    # the same, via make
+```
+
+The default port is 8080. For the two Vite dev apps (`axiom-game-runtime`,
+`axiom-retro-fps-ts-browser`) the Vite HMR flow (`packages/axiom-vite`) remains
+the richer alternative.
 
 ## Logging and Telemetry Rules
 
