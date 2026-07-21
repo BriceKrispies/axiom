@@ -161,8 +161,8 @@ impl SimState {
         }
 
         self.decide_intents();
-        let live = self.phase == PlayPhase::Live;
-        controller::integrate_movement(&mut self.players, &self.intents, live, &self.tuning, DT);
+        let phase = self.phase;
+        controller::integrate_movement(&mut self.players, &self.intents, phase, &self.tuning, DT);
         self.collision.resolve(&mut self.players, self.tick);
         self.resolve_contacts();
 

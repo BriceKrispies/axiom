@@ -57,7 +57,6 @@ pub fn locomotion_pose(
     bio: &BiomechTuning,
 ) -> (JointPose, Carriage) {
     let mut out = JointPose::neutral();
-    let ready = matches!(anim, AnimState::ReadyStance);
     let carry = match anim {
         AnimState::ReadyStance => Carry::Ready,
         AnimState::DropBack => Carry::Backpedal,
@@ -77,30 +76,39 @@ pub fn locomotion_pose(
     let (ak, ad) = (bio.arm_stiffness, bio.arm_damping);
     let (hk, hd) = (bio.head_stiffness, bio.head_damping);
 
-    // The gait-driven weight transfer rides on top of a posture offset: the
-    // hips sit lower the faster the runner goes (`run_crouch`), which is what
-    // leaves the stance knee room to flex instead of solving to a locked-
-    // straight leg. That is a stance, not an oscillation, so it is applied
-    // outside the spring alongside the ready crouch.
-    let crouch = ready_crouch_lift(ready)
-        - loco.run_crouch * gait.norm_speed.clamp(0.0, 1.0) * f32::from(!ready);
-    out.root_lift = springs.root_lift.step(target.root_lift, pk, pd, pos_step) + crouch;
+    // The gait-driven weight transfer rides on top of the carriage's posture
+    // offset (how low and how far forward the body is *held* for this stance).
+    // Both go through the spring together: a posture is where the body is
+    // heading, not something stamped onto the solved pose, so changing stance
+    // settles over a few ticks instead of popping the root in one frame.
+    out.root_lift =
+        springs
+            .root_lift
+            .step(target.root_lift + target.posture_lift, pk, pd, pos_step);
     out.root_lateral = springs
         .root_lateral
         .step(target.root_lateral, pk, pd, pos_step);
     out.root_pitch =
-        springs.root_pitch.step(target.root_pitch, sk, sd, ang_step) + ready_crouch_pitch(ready);
+        springs
+            .root_pitch
+            .step(target.root_pitch + target.posture_pitch, sk, sd, ang_step);
     out.root_roll = springs.root_roll.step(target.root_roll, sk, sd, ang_step);
 
     let pelvis_yaw = springs.pelvis_yaw.step(target.pelvis_yaw, pk, pd, ang_step);
-    let pelvis_roll = springs.pelvis_roll.step(target.pelvis_roll, pk, pd, ang_step);
+    let pelvis_roll = springs
+        .pelvis_roll
+        .step(target.pelvis_roll, pk, pd, ang_step);
     let pelvis_pitch = springs
         .pelvis_pitch
         .step(target.pelvis_pitch, pk, pd, ang_step);
     let spine_yaw = springs.spine_yaw.step(target.spine_yaw, sk, sd, ang_step);
     let spine_roll = springs.spine_roll.step(target.spine_roll, sk, sd, ang_step);
-    let spine_pitch = springs.spine_pitch.step(target.spine_pitch, sk, sd, ang_step);
-    let ribcage_yaw = springs.ribcage_yaw.step(target.ribcage_yaw, sk, sd, ang_step);
+    let spine_pitch = springs
+        .spine_pitch
+        .step(target.spine_pitch, sk, sd, ang_step);
+    let ribcage_yaw = springs
+        .ribcage_yaw
+        .step(target.ribcage_yaw, sk, sd, ang_step);
     let ribcage_pitch = springs
         .ribcage_pitch
         .step(target.ribcage_pitch, sk, sd, ang_step);
@@ -132,14 +140,6 @@ pub fn locomotion_pose(
     // Stage 3: legs solved to their world ankle targets.
     solve_legs(gait, facing, ground, &mut out);
     (out, target)
-}
-
-/// A deeper knee bend and lower hips for the pre-snap ready stance.
-fn ready_crouch_pitch(ready: bool) -> f32 {
-    f32::from(ready) * 0.2
-}
-fn ready_crouch_lift(ready: bool) -> f32 {
-    f32::from(ready) * -0.14
 }
 
 /// Solve both legs to their gait foot targets and record the solved ankle +

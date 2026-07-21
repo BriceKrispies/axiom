@@ -68,6 +68,14 @@ pub struct Carriage {
     // Head.
     pub head_pitch: f32,
     pub head_yaw: f32,
+    // Posture: the sustained stance offset the gait cycle rides on top of.
+    // Separate from `root_lift` / `root_pitch` because it is not gait-driven and
+    // is not bounded by the oscillation limits — but it IS a spring target, so
+    // the body eases into and out of a stance instead of popping.
+    /// How low the hips are *held*, yd (negative = lower).
+    pub posture_lift: f32,
+    /// How far forward the body is *held*, rad.
+    pub posture_pitch: f32,
     // Diagnostics (debug view + tests).
     /// Which foot bears weight this half-cycle.
     pub stance: PlantedFoot,
@@ -97,6 +105,8 @@ impl Carriage {
             ribcage_pitch: 0.0,
             head_pitch: 0.0,
             head_yaw: 0.0,
+            posture_lift: 0.0,
+            posture_pitch: 0.0,
             stance: PlantedFoot::Left,
             stance_progress: 0.0,
             in_flight: false,
@@ -122,6 +132,8 @@ impl Carriage {
             self.ribcage_pitch,
             self.head_pitch,
             self.head_yaw,
+            self.posture_lift,
+            self.posture_pitch,
             self.stance_progress,
             self.activity,
         ]
@@ -211,8 +223,7 @@ pub fn solve(
     let support = (stride.stance_progress * PI).sin() * (1.0 - stride.flight_progress);
     let pelvis_roll = stride.stance_sign * bio.pelvis_drop * support * activity;
     // Anterior tilt from speed and acceleration — not from the stride phase.
-    let pelvis_pitch = (bio.pelvis_tilt_speed * speed
-        + bio.pelvis_tilt_per_accel * forward_accel)
+    let pelvis_pitch = (bio.pelvis_tilt_speed * speed + bio.pelvis_tilt_per_accel * forward_accel)
         .clamp(-bio.pelvis_tilt_max, bio.pelvis_tilt_max);
 
     // --- torso coupling -----------------------------------------------------
@@ -224,6 +235,15 @@ pub fn solve(
     let spine_roll = -bio.spine_roll_compensation * pelvis_roll;
     let spine_pitch = waist * bio.lean_spine_share;
     let ribcage_pitch = waist * (1.0 - bio.lean_spine_share);
+
+    // --- posture: the sustained stance the gait rides on top of -------------
+    // Neither term oscillates: this is how the body is *held*. The set pre-snap
+    // stance is a deliberate crouch; a runner instead sinks with speed, which is
+    // what leaves the stance knee room to flex. Both are returned as targets, so
+    // crossing a stance boundary eases over rather than snapping.
+    let set = f32::from(carry == Carry::Ready);
+    let posture_lift = -(set * loco.ready_crouch + (1.0 - set) * loco.run_crouch * speed);
+    let posture_pitch = set * loco.ready_pitch;
 
     // --- head: follows the body, but damps most of the pelvis oscillation ---
     // The helmet hangs off the ribcage, so it inherits everything above it.
@@ -247,6 +267,8 @@ pub fn solve(
         ribcage_pitch,
         head_pitch,
         head_yaw,
+        posture_lift,
+        posture_pitch,
         stance: stride.stance,
         stance_progress: stride.stance_progress,
         in_flight: stride.in_flight,

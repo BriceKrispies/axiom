@@ -19,6 +19,7 @@ use axiom_end_zone::presentation::locomotion::{
     GaitState, LocomotionMode, OverrideReason, PlantedFoot,
 };
 use axiom_end_zone::showcase::{DiagnosticCommand, ShowcaseRun};
+use axiom_end_zone::state::{PlayPhase, SimCommand, SimState};
 use axiom_math::Quat;
 
 const DT: f32 = 16_666_667.0 / 1_000_000_000.0;
@@ -417,7 +418,16 @@ fn straight_run_feet(ticks: usize) -> Vec<FootTick> {
     for _ in 0..ticks {
         p = p.add(Vec3::new(0.0, 0.0, 6.0 * DT));
         gait::advance(&mut g, run_input(p, Vec3::new(0.0, 0.0, 6.0), 0.0), &tuning);
-        pose::locomotion_pose(&mut g, &mut springs, 0.0, p, AnimState::Sprint, &tuning, &bio).0;
+        pose::locomotion_pose(
+            &mut g,
+            &mut springs,
+            0.0,
+            p,
+            AnimState::Sprint,
+            &tuning,
+            &bio,
+        )
+        .0;
         out.push(FootTick {
             left: (g.left.phase, g.left.lock, g.left.target, g.left.lock_error),
             right: (
@@ -529,7 +539,8 @@ fn every_generated_joint_and_foot_position_is_finite() {
         let vel = Vec3::new(5.0 * a.sin(), 0.0, 5.0 * a.cos());
         p = p.add(vel.mul_scalar(DT));
         gait::advance(&mut g, run_input(p, vel, a), &tuning);
-        let jp = pose::locomotion_pose(&mut g, &mut springs, a, p, AnimState::Sprint, &tuning, &bio).0;
+        let jp =
+            pose::locomotion_pose(&mut g, &mut springs, a, p, AnimState::Sprint, &tuning, &bio).0;
         for q in jp.joints {
             assert!(q.x.is_finite() && q.y.is_finite() && q.z.is_finite() && q.w.is_finite());
         }
@@ -560,7 +571,16 @@ fn the_carry_hold_does_not_remove_lower_body_locomotion() {
         p = p.add(Vec3::new(0.0, 0.0, 6.0 * DT));
         gait::advance(&mut g, run_input(p, Vec3::new(0.0, 0.0, 6.0), 0.0), &tuning);
     }
-    let mut composed = pose::locomotion_pose(&mut g, &mut springs, 0.0, p, AnimState::Sprint, &tuning, &bio).0;
+    let mut composed = pose::locomotion_pose(
+        &mut g,
+        &mut springs,
+        0.0,
+        p,
+        AnimState::Sprint,
+        &tuning,
+        &bio,
+    )
+    .0;
     // The legs are posed by locomotion before any hold overlay.
     assert!(
         joint_nonidentity(composed.joints[L_THIGH]) || joint_nonidentity(composed.joints[R_THIGH]),
@@ -606,7 +626,16 @@ fn pose_composition_is_deterministic_for_the_same_input_and_gait() {
         for _ in 0..30 {
             p = p.add(Vec3::new(0.0, 0.0, 5.0 * DT));
             gait::advance(&mut g, run_input(p, Vec3::new(0.0, 0.0, 5.0), 0.0), &tuning);
-            last = pose::locomotion_pose(&mut g, &mut springs, 0.0, p, AnimState::Sprint, &tuning, &bio).0;
+            last = pose::locomotion_pose(
+                &mut g,
+                &mut springs,
+                0.0,
+                p,
+                AnimState::Sprint,
+                &tuning,
+                &bio,
+            )
+            .0;
         }
         last
     };
@@ -672,5 +701,108 @@ fn locomotion_replays_bit_for_bit_over_a_full_scripted_sequence() {
     assert!(
         a.iter().flatten().any(|&b| b != 0),
         "the run produced motion"
+    );
+}
+
+// ----- The ready stance is the pre-snap set, and it is eased into ----------
+
+/// Settle a standing player in `anim` for `ticks`, returning the final root
+/// lift and the largest single-tick change in it.
+fn settle_standing(
+    gait: &mut GaitState,
+    springs: &mut BodySprings,
+    anim: AnimState,
+    ticks: u32,
+    loco: &LocomotionTuning,
+    bio: &BiomechTuning,
+) -> (f32, f32) {
+    let mut last = pose::locomotion_pose(gait, springs, 0.0, Vec3::ZERO, anim, loco, bio)
+        .0
+        .root_lift;
+    let mut worst = 0.0f32;
+    for _ in 0..ticks {
+        gait::advance(gait, run_input(Vec3::ZERO, Vec3::ZERO, 0.0), loco);
+        let lift = pose::locomotion_pose(gait, springs, 0.0, Vec3::ZERO, anim, loco, bio)
+            .0
+            .root_lift;
+        worst = worst.max((lift - last).abs());
+        last = lift;
+    }
+    (last, worst)
+}
+
+#[test]
+fn the_ready_crouch_is_a_held_stance_that_the_body_eases_into_and_out_of() {
+    let loco = LocomotionTuning::default();
+    let bio = BiomechTuning::default();
+    let mut gait = GaitState::new();
+    let mut springs = BodySprings::new();
+
+    // Settling INTO the set: the hips arrive at the authored crouch depth, and
+    // no single tick jumps the whole way there.
+    let (crouched, entry_pop) = settle_standing(
+        &mut gait,
+        &mut springs,
+        AnimState::ReadyStance,
+        120,
+        &loco,
+        &bio,
+    );
+    assert!(
+        (crouched + loco.ready_crouch).abs() < 0.01,
+        "the set stance settles at the authored crouch depth: {crouched} vs {}",
+        -loco.ready_crouch
+    );
+    assert!(
+        entry_pop < loco.ready_crouch * 0.5,
+        "entering the set must ease, not pop: worst tick moved {entry_pop} yd"
+    );
+
+    // Standing up out of it — the whistle case — must also ease. Before the
+    // posture became a spring target this was a one-tick snap of the full
+    // crouch depth.
+    let (standing, exit_pop) =
+        settle_standing(&mut gait, &mut springs, AnimState::Idle, 120, &loco, &bio);
+    assert!(
+        standing.abs() < 0.01,
+        "a stopped idle player stands up straight, no residual crouch: {standing}"
+    );
+    assert!(
+        exit_pop < loco.ready_crouch * 0.5,
+        "leaving the set must ease, not pop: worst tick moved {exit_pop} yd"
+    );
+}
+
+#[test]
+fn only_the_pre_snap_phase_puts_a_stopped_player_in_the_ready_stance() {
+    let mut sim = SimState::new(EndZoneConfig::default());
+    sim.step(&[SimCommand::BeginPlay]);
+    assert_eq!(sim.phase, PlayPhase::PreSnap);
+    assert!(
+        sim.players.iter().any(|p| p.anim == AnimState::ReadyStance),
+        "players are set in the ready stance before the snap"
+    );
+
+    // Run the play out to the whistle, then let everyone come to a stop.
+    sim.step(&[SimCommand::Snap]);
+    let mut ticks = 0;
+    while sim.phase != PlayPhase::Ended && ticks < 1200 {
+        sim.step(&[]);
+        ticks += 1;
+    }
+    assert_eq!(sim.phase, PlayPhase::Ended, "the play reached the whistle");
+    for _ in 0..180 {
+        sim.step(&[]);
+    }
+
+    // After the whistle nobody is crouched in the pre-snap set — the players
+    // who have come to a stop are standing idle instead.
+    assert!(
+        sim.players.iter().all(|p| p.anim != AnimState::ReadyStance),
+        "the ready crouch is pre-snap only; it must not return on a dead ball"
+    );
+    assert!(
+        sim.players.iter().any(|p| p.anim == AnimState::Idle),
+        "stopped players stand idle after the whistle"
     );
 }

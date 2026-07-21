@@ -11,6 +11,7 @@ use crate::ai::{steering, PlayerIntent};
 use crate::data::BehaviorTuning;
 use crate::field::OffenseFrame;
 use crate::identity::TeamId;
+use crate::state::PlayPhase;
 
 use super::{AnimState, PlayerSim};
 
@@ -22,7 +23,7 @@ const SPRINT_SPEED: f32 = 5.4;
 pub fn integrate_movement(
     players: &mut [PlayerSim],
     intents: &[PlayerIntent],
-    live: bool,
+    phase: PlayPhase,
     tuning: &BehaviorTuning,
     dt: f32,
 ) {
@@ -98,7 +99,7 @@ pub fn integrate_movement(
             player.facing = steering::yaw_of(direction, player.facing);
         }
 
-        set_locomotion_anim(player, intent, live, speed);
+        set_locomotion_anim(player, intent, phase, speed);
         player.balance = (player.balance + 0.15 * dt).min(1.0);
     }
 }
@@ -106,19 +107,18 @@ pub fn integrate_movement(
 /// Locomotion animation from intent + speed (special states are set by the
 /// simulation at their events: Catch on completion, falls by the contact
 /// framework).
-fn set_locomotion_anim(player: &mut PlayerSim, intent: &PlayerIntent, live: bool, speed: f32) {
+fn set_locomotion_anim(
+    player: &mut PlayerSim,
+    intent: &PlayerIntent,
+    phase: PlayPhase,
+    speed: f32,
+) {
     let anim = match *intent {
         PlayerIntent::Throw => AnimState::Throw,
         PlayerIntent::Block { .. } if speed < 2.0 => AnimState::Block,
         PlayerIntent::Tackle { .. } => AnimState::Tackle,
         PlayerIntent::PrepareCatch { .. } if speed < 2.0 => AnimState::Catch,
-        _ if speed <= IDLE_SPEED => {
-            if live {
-                AnimState::Idle
-            } else {
-                AnimState::ReadyStance
-            }
-        }
+        _ if speed <= IDLE_SPEED => stance_at_rest(phase),
         _ if speed < SPRINT_SPEED => AnimState::Jog,
         _ => AnimState::Sprint,
     };
@@ -128,5 +128,20 @@ fn set_locomotion_anim(player: &mut PlayerSim, intent: &PlayerIntent, live: bool
         player.set_anim(AnimState::DropBack);
     } else {
         player.set_anim(anim);
+    }
+}
+
+/// What a stopped player is doing, by phase.
+///
+/// The ready stance is the *set* — the deliberate pre-snap crouch a player
+/// holds waiting for the ball. It is not a general "standing still" pose, and a
+/// player who is standing for any other reason must not be in it: once the ball
+/// is live a stopped player stands ready-but-upright, and once the whistle has
+/// blown they stand idle. Matching exhaustively so a new phase has to answer
+/// this question rather than silently inheriting the crouch.
+fn stance_at_rest(phase: PlayPhase) -> AnimState {
+    match phase {
+        PlayPhase::PreSnap => AnimState::ReadyStance,
+        PlayPhase::Live | PlayPhase::Ended => AnimState::Idle,
     }
 }

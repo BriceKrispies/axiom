@@ -101,6 +101,13 @@ pub struct LocomotionTuning {
     /// no landing flex. Riding the hips lower is what buys the stance knee room
     /// to bend, so the runner absorbs each strike instead of pogo-sticking.
     pub run_crouch: f32,
+    /// How far below standing height the hips ride in the *set* pre-snap
+    /// stance, yd. This is the deliberate crouch of a player waiting for the
+    /// snap — it is held only in [`crate::player::AnimState::ReadyStance`],
+    /// never by a player standing around after the whistle.
+    pub ready_crouch: f32,
+    /// Forward pitch of the visual body root in the set pre-snap stance, rad.
+    pub ready_pitch: f32,
 }
 
 impl Default for LocomotionTuning {
@@ -136,6 +143,8 @@ impl Default for LocomotionTuning {
             turn_full_rate: 3.0,
             teleport_distance: 3.0,
             run_crouch: 0.07,
+            ready_crouch: 0.14,
+            ready_pitch: 0.2,
         }
     }
 }
