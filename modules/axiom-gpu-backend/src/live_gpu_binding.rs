@@ -135,6 +135,13 @@ impl LiveGpuBinding {
             ..Default::default()
         });
         // Skip the WebGPU probe entirely when WebGL2 was explicitly requested.
+        //
+        // Every way this probe can fail is REPORTED. Silently discarding the reason
+        // is what made a dead WebGPU device indistinguishable from a machine with no
+        // WebGPU at all: the console showed only `render backend = Gl`, and the real
+        // cause (e.g. Chrome failing to load `dxil.dll`, so `requestDevice` fails
+        // even though an adapter is granted) was invisible without probing the page
+        // by hand. The downgrade is legitimate; being unable to see WHY is not.
         let webgpu_ready = match webgl2_only {
             true => None,
             false => match webgpu
@@ -145,11 +152,24 @@ impl LiveGpuBinding {
                 })
                 .await
             {
-                Ok(adapter) => request_render_device(&adapter)
-                    .await
-                    .ok()
-                    .map(|(device, queue)| (adapter, device, queue)),
-                Err(_) => None,
+                Ok(adapter) => match request_render_device(&adapter).await {
+                    Ok((device, queue)) => Some((adapter, device, queue)),
+                    Err(e) => {
+                        web_sys::console::warn_1(&JsValue::from_str(&format!(
+                            "axiom: WebGPU adapter found but device creation failed \
+                             ({e}) — falling back to WebGL2. Note the WebGL2 path has \
+                             no vertex-stage storage buffers, so skinned geometry is \
+                             not drawn there."
+                        )));
+                        None
+                    }
+                },
+                Err(e) => {
+                    web_sys::console::warn_1(&JsValue::from_str(&format!(
+                        "axiom: no WebGPU adapter ({e}) — falling back to WebGL2."
+                    )));
+                    None
+                }
             },
         };
 

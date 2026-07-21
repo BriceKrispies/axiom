@@ -541,18 +541,125 @@ pub(crate) struct SceneRenderer {
     sdf_bind_group: wgpu::BindGroup,
     /// The frame's hemisphere ambient, packed into the lights uniform each draw.
     ambient: axiom_host::FrameAmbient,
-    /// The skinned (linear-blend-skinning) main-pass pipeline: same lighting/
-    /// texturing/shadow as `pipeline`, but a 20-float vertex layout (with joints +
-    /// weights) and a joint-matrix palette bound at group 3.
-    skinned_pipeline: wgpu::RenderPipeline,
+    /// The linear-blend-skinning resources, when the device can support them.
+    /// [`None`] on a device without vertex-stage storage buffers — see [`Skinning`].
+    skinning: Option<Skinning>,
+}
+
+/// Everything the skinned pass needs, grouped so it can be **absent**.
+///
+/// The joint palette is a storage buffer read from the VERTEX stage, which is a
+/// WebGPU-class capability: WebGL2 has no storage buffers at all. Creating this
+/// bind group layout on a device that cannot support it is not a soft failure —
+/// wgpu rejects it as a validation error and the whole renderer panics at
+/// construction.
+///
+/// So it is built only where it can work, and the skinned pass is skipped
+/// otherwise. This is deliberately gated on the DEVICE rather than the backend:
+/// the live browser arm requests `downlevel_webgl2_defaults` limits (0 storage
+/// buffers per stage) on *both* its WebGPU and WebGL2 paths, so a backend check
+/// would still build a layout the device had been told to refuse.
+///
+/// Previously these five resources were built unconditionally in
+/// [`SceneRenderer::new`], which meant every browser 3D app died on the WebGL2
+/// fallback — including apps with no skinned geometry whatsoever — for a feature
+/// that arm does not even use (it passes no skinned meshes).
+#[derive(Debug)]
+struct Skinning {
+    /// Same lighting/texturing/shadow as the main pipeline, but a 20-float vertex
+    /// layout (with joints + weights) and a joint-matrix palette bound at group 3.
+    pipeline: wgpu::RenderPipeline,
     /// Skinned meshes (20-float streams), uploaded once at bind like `meshes`.
-    skinned_meshes: HashMap<u64, MeshBuffers>,
+    meshes: HashMap<u64, MeshBuffers>,
     /// Per-skinned-draw instance data (mvp + world + colour + joint_base).
-    skinned_instance_buffer: wgpu::Buffer,
+    instance_buffer: wgpu::Buffer,
     /// The concatenated joint-matrix palette for every skinned draw this frame.
     palette_buffer: wgpu::Buffer,
     /// Group 3 of the skinned pass: the joint palette storage buffer.
     palette_bind_group: wgpu::BindGroup,
+}
+
+impl Skinning {
+    /// Build the skinned pass, or [`None`] when this device cannot run it.
+    ///
+    /// The gate is `max_storage_buffers_per_shader_stage`, read from the DEVICE.
+    /// That single number is the honest test for all three of the ways this can
+    /// be unavailable:
+    ///
+    /// - WebGL2 (wgpu's GL backend) has no storage buffers, and its devices are
+    ///   created with `downlevel_webgl2_defaults` limits, which pin it to 0;
+    /// - the live browser arm requests those same limits on its **WebGPU** path
+    ///   too (so the two backends render identically), so a "is this WebGPU?"
+    ///   check would wrongly allow a device that had been told to refuse;
+    /// - native/offscreen devices ask for `Limits::default()` and get the real
+    ///   ceiling, so skinning stays fully enabled there.
+    ///
+    /// A device that cannot host the palette simply does not get a skinned pass;
+    /// rigid geometry is unaffected. That is a real capability reduction, not a
+    /// papered-over failure — and it is confined to backends that never had the
+    /// capability to begin with.
+    fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        material_layout: &wgpu::BindGroupLayout,
+        lights_layout: &wgpu::BindGroupLayout,
+        shadow_sample_layout: &wgpu::BindGroupLayout,
+        skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
+        max_instances: u32,
+    ) -> Option<Skinning> {
+        (device.limits().max_storage_buffers_per_shader_stage >= 1).then(|| {
+            let palette_layout =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("axiom-palette-layout"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                });
+            let palette_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("axiom-joint-palette"),
+                size: (PALETTE_CAP as u64) * 64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let palette_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("axiom-palette-bind-group"),
+                layout: &palette_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: palette_buffer.as_entire_binding(),
+                }],
+            });
+            Skinning {
+                pipeline: build_skinned_pipeline(
+                    device,
+                    format,
+                    material_layout,
+                    lights_layout,
+                    shadow_sample_layout,
+                    &palette_layout,
+                ),
+                meshes: skinned_mesh_set
+                    .iter()
+                    .map(|(id, vertices, indices)| (*id, upload_mesh(device, vertices, indices)))
+                    .collect(),
+                instance_buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("axiom-skinned-instances"),
+                    size: SKINNED_INSTANCE_STRIDE * max_instances as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                palette_buffer,
+                palette_bind_group,
+            }
+        })
+    }
 }
 
 /// One skinned draw handed to [`SceneRenderer::record`]: the mesh + material to
@@ -794,52 +901,17 @@ impl SceneRenderer {
 
         // Skinning: the joint-palette storage buffer (group 3), the skinned
         // pipeline, the skinned meshes (20-float streams), and the per-skinned-draw
-        // instance buffer.
-        let palette_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("axiom-palette-layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-        let palette_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("axiom-joint-palette"),
-            size: (PALETTE_CAP as u64) * 64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let palette_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("axiom-palette-bind-group"),
-            layout: &palette_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: palette_buffer.as_entire_binding(),
-            }],
-        });
-        let skinned_pipeline = build_skinned_pipeline(
+        // instance buffer — built ONLY where the device allows a storage buffer in
+        // the vertex stage. See [`Skinning`] for why this is conditional.
+        let skinning = Skinning::new(
             device,
             format,
             &material_layout,
             &lights_layout,
             &shadow_sample_layout,
-            &palette_layout,
+            skinned_mesh_set,
+            max_instances,
         );
-        let skinned_meshes: HashMap<u64, MeshBuffers> = skinned_mesh_set
-            .iter()
-            .map(|(id, vertices, indices)| (*id, upload_mesh(device, vertices, indices)))
-            .collect();
-        let skinned_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("axiom-skinned-instances"),
-            size: SKINNED_INSTANCE_STRIDE * max_instances as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
 
         // SDF uniform (group 0 of the raymarch pass): primitives + camera matrices
         // + march tunables, rewritten each frame carrying an SdfScene.
@@ -882,11 +954,7 @@ impl SceneRenderer {
             sdf_uniform_buffer,
             sdf_bind_group,
             ambient,
-            skinned_pipeline,
-            skinned_meshes,
-            skinned_instance_buffer,
-            palette_buffer,
-            palette_bind_group,
+            skinning,
         }
     }
 
@@ -949,35 +1017,38 @@ impl SceneRenderer {
 
         // Pack every skinned draw's palette back-to-back (recording each draw's base
         // matrix index) and its instance (mvp + world + colour + joint_base), bounded
-        // by the palette capacity.
-        let mut palette_floats: Vec<f32> = Vec::new();
-        let mut skinned_instances: Vec<f32> = Vec::new();
+        // by the palette capacity. Skipped entirely on a device with no skinned pass,
+        // which leaves `skinned_draws` empty and the draw loop below a no-op.
         let mut skinned_draws: Vec<(u64, u64, u64)> = Vec::new();
-        for d in skinned {
-            let base = palette_floats.len() / 16;
-            if base + d.palette.len() > PALETTE_CAP {
-                break;
+        if let Some(skinning) = &self.skinning {
+            let mut palette_floats: Vec<f32> = Vec::new();
+            let mut skinned_instances: Vec<f32> = Vec::new();
+            for d in skinned {
+                let base = palette_floats.len() / 16;
+                if base + d.palette.len() > PALETTE_CAP {
+                    break;
+                }
+                for m in &d.palette {
+                    palette_floats.extend_from_slice(m);
+                }
+                let byte_offset = (skinned_draws.len() as u64) * SKINNED_INSTANCE_STRIDE;
+                skinned_instances.extend_from_slice(&d.mvp);
+                skinned_instances.extend_from_slice(&d.world);
+                skinned_instances.extend_from_slice(&d.color);
+                skinned_instances.extend_from_slice(&[base as f32, 0.0, 0.0, 0.0]);
+                skinned_draws.push((d.mesh_id, d.material_id, byte_offset));
             }
-            for m in &d.palette {
-                palette_floats.extend_from_slice(m);
-            }
-            let byte_offset = (skinned_draws.len() as u64) * SKINNED_INSTANCE_STRIDE;
-            skinned_instances.extend_from_slice(&d.mvp);
-            skinned_instances.extend_from_slice(&d.world);
-            skinned_instances.extend_from_slice(&d.color);
-            skinned_instances.extend_from_slice(&[base as f32, 0.0, 0.0, 0.0]);
-            skinned_draws.push((d.mesh_id, d.material_id, byte_offset));
+            queue.write_buffer(
+                &skinning.palette_buffer,
+                0,
+                bytemuck::cast_slice(&palette_floats),
+            );
+            queue.write_buffer(
+                &skinning.instance_buffer,
+                0,
+                bytemuck::cast_slice(&skinned_instances),
+            );
         }
-        queue.write_buffer(
-            &self.palette_buffer,
-            0,
-            bytemuck::cast_slice(&palette_floats),
-        );
-        queue.write_buffer(
-            &self.skinned_instance_buffer,
-            0,
-            bytemuck::cast_slice(&skinned_instances),
-        );
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("axiom-frame-encoder"),
@@ -1057,20 +1128,26 @@ impl SceneRenderer {
             // Skinned draws: the same lit/textured/shadowed fragment stage, via the
             // skinning pipeline with the joint palette bound at group 3. One draw per
             // skinned body (each carries its own palette; they cannot be instanced).
-            pass.set_pipeline(&self.skinned_pipeline);
-            pass.set_bind_group(1, &self.lights_bind_group, &[]);
-            pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-            pass.set_bind_group(3, &self.palette_bind_group, &[]);
-            for (mesh_id, material_id, inst_offset) in &skinned_draws {
-                if let (Some(mesh), Some(material)) = (
-                    self.skinned_meshes.get(mesh_id),
-                    self.materials.get(material_id),
-                ) {
-                    pass.set_bind_group(0, material, &[]);
-                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, self.skinned_instance_buffer.slice(*inst_offset..));
-                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            // Absent on a device without vertex-stage storage buffers, where the pass
+            // cannot exist at all — rigid geometry above is unaffected.
+            if let Some(skinning) = &self.skinning {
+                pass.set_pipeline(&skinning.pipeline);
+                pass.set_bind_group(1, &self.lights_bind_group, &[]);
+                pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                pass.set_bind_group(3, &skinning.palette_bind_group, &[]);
+                for (mesh_id, material_id, inst_offset) in &skinned_draws {
+                    if let (Some(mesh), Some(material)) =
+                        (skinning.meshes.get(mesh_id), self.materials.get(material_id))
+                    {
+                        pass.set_bind_group(0, material, &[]);
+                        pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                        pass.set_vertex_buffer(1, skinning.instance_buffer.slice(*inst_offset..));
+                        pass.set_index_buffer(
+                            mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                    }
                 }
             }
         }
