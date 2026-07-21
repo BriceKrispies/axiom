@@ -73,9 +73,11 @@ fn the_cradled_ball_pins_its_rear_tip_to_the_forearm_crook() {
         .add(toward_hand.mul_scalar(0.04));
 
     // The rear (-Y) tip is pinned to the crook — the lever point, not the hip.
+    // `BALL_VISUAL_SCALE.y` is the FULL length (sphere radius 0.5), so the tip is
+    // half of it from the center.
     let rear_tip = ball
         .translation
-        .add(ball.rotation.rotate(Vec3::new(0.0, -BALL_VISUAL_SCALE.y, 0.0)));
+        .add(ball.rotation.rotate(Vec3::new(0.0, -BALL_VISUAL_SCALE.y * 0.5, 0.0)));
     assert!(
         rear_tip.subtract(crook).length() < 1.0e-4,
         "the ball's rear tip sits in the crook"

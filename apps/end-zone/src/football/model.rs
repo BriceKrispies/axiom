@@ -68,9 +68,11 @@ pub fn cradled_ball_transform(forearm: &Transform) -> Transform {
         .add(up.mul_scalar(FOREARM_HALF))
         .add(toward_hand.mul_scalar(0.04));
     let rotation = align_long_axis(toward_hand);
-    // Pin the rear (-Y) tip at the crook: the center is half a ball-length down
-    // the arm from it.
-    let center = crook.add(toward_hand.mul_scalar(BALL_VISUAL_SCALE.y));
+    // Pin the rear (-Y) tip in the crook. `BALL_VISUAL_SCALE.y` is the ball's
+    // FULL length (the sphere mesh is radius 0.5), so the center sits HALF a
+    // ball-length down the arm — the ball then rests hand-to-elbow instead of
+    // jutting a whole length out past the hand.
+    let center = crook.add(toward_hand.mul_scalar(BALL_VISUAL_SCALE.y * 0.5));
     Transform::new(center, rotation, BALL_VISUAL_SCALE)
 }
 
