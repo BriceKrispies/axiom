@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Arena Forge</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body {
+        margin: 0; padding: 0; height: 100%; width: 100%;
+        background: #0c0a09; overflow: hidden; overscroll-behavior: none;
+        -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+        touch-action: none; position: fixed; inset: 0;
+        font-family: ui-monospace, monospace;
+      }
+      /* Two stacked canvases share the safe-area box: the base draws the 3D forge
+         scene (engine), the overlay draws the 2D card frames / HUD (app). */
+      #arena-scene, #arena-canvas {
+        position: absolute;
+        top: env(safe-area-inset-top); left: env(safe-area-inset-left);
+        right: env(safe-area-inset-right); bottom: env(safe-area-inset-bottom);
+        width: calc(100% - env(safe-area-inset-left) - env(safe-area-inset-right));
+        height: calc(100% - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        display: block; touch-action: none;
+      }
+      #arena-scene { z-index: 0; background: #0c0a09; }
+      #arena-canvas { z-index: 1; background: transparent; }
+    </style>
+  </head>
+  <body>
+    <canvas id="arena-scene"></canvas>
+    <canvas id="arena-canvas"></canvas>
+    <script type="module" src="/dist/harness.js"></script>
+  </body>
+</html>

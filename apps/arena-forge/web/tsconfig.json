@@ -1,0 +1,24 @@
+{
+  "// note": "Compiles Arena Forge (web/src/*.ts) to web/dist/*.js via tsgo. The pure-TS engine services (fixed-step loop, input, audio) come from the shared spine package @axiom/web-engine (no wasm); it resolves to that package's source for typecheck, and the emitted JS keeps the bare specifier, resolved by the import map in index.html (dev) or inlined by the packager. Tests (*.test.ts) are excluded — they run under `node --test` with native TS type-stripping (no DOM) and never import @axiom/web-engine, so they need no compile here.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmitOnError": false,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "@axiom/web-engine": ["../../../packages/axiom-web-engine/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

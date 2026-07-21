@@ -1,0 +1,53 @@
+/*
+ * arena-scene.ts — the ONE shared 3D scene the figures stand in: a forge floor, a
+ * light rig, the look-at camera, and the world layout of the seven warband slots
+ * (and the shop shelf behind them). It is rendered once per frame under the 2D UI
+ * overlay. Everything here is presentation-only; the layout maps authoritative slot
+ * indices to fixed world positions so figures are grounded and stable.
+ */
+
+import { addLight, createMaterial, createMesh, setCamera3D, setClearColor, spawnRenderable } from "@axiom/web-engine";
+import type { Camera3D } from "@axiom/web-engine";
+import { type Vec3, vec3 } from "../vec3.ts";
+import type { ArenaStage } from "../../sim/model.ts";
+
+const SLOT_SPACING = 1.18;
+const WARBAND_Z = 0.35;
+const SHOP_Z = -2.6;
+
+export const warbandSlotPos = (i: number): Vec3 => vec3((i - 3) * SLOT_SPACING, 0, WARBAND_Z);
+export const enemySlotPos = (i: number): Vec3 => vec3((i - 3) * SLOT_SPACING, 0, SHOP_Z + 0.4);
+export const shopSlotPos = (i: number, count: number): Vec3 => vec3((i - (count - 1) / 2) * 1.0, 0.55, SHOP_Z);
+
+const STAGE_FLOOR: Readonly<Record<ArenaStage, [number, number, number]>> = {
+  workshop: [0.09, 0.075, 0.06],
+  kindled: [0.11, 0.08, 0.055],
+  tempered: [0.13, 0.085, 0.05],
+  masterwork: [0.16, 0.095, 0.05],
+};
+
+const STAGE_GLOW: Readonly<Record<ArenaStage, number>> = { workshop: 0.5, kindled: 0.8, tempered: 1.2, masterwork: 1.8 };
+
+/** The default combat-arena camera, framing the warband row. */
+export const arenaCamera = (): Camera3D => ({ position: vec3(0, 2.7, 4.8), target: vec3(0, 0.85, 0), fovY: 0.72, near: 0.1, far: 80 });
+
+/** Build the static arena (floor + lights + camera + clear color). Idempotent per
+ * `clearScene`; call once after `initRenderer`. */
+export const buildArena = (stage: ArenaStage): void => {
+  setClearColor([0.05, 0.045, 0.05, 1]);
+  setCamera3D(arenaCamera());
+
+  const box = createMesh("box");
+  const floorMat = createMaterial({ baseColor: [...STAGE_FLOOR[stage], 1] as [number, number, number, number] });
+  spawnRenderable(box, floorMat, { position: vec3(0, -0.09, -1), rotation: [0, 0, 0, 1], scale: vec3(16, 0.18, 9) });
+  // A raised, lighter ledge under the warband row for figure contrast.
+  const ledgeMat = createMaterial({ baseColor: [0.26, 0.22, 0.19, 1] });
+  spawnRenderable(box, ledgeMat, { position: vec3(0, -0.02, WARBAND_Z), rotation: [0, 0, 0, 1], scale: vec3(9.5, 0.14, 1.5) });
+  spawnRenderable(box, ledgeMat, { position: vec3(0, 0.35, SHOP_Z), rotation: [0, 0, 0, 1], scale: vec3(8, 0.1, 1.1) });
+
+  // Strong key + cool fill + a warm forge rim, so even dark-metal figures read.
+  addLight({ kind: "directional", direction: vec3(-0.35, -0.9, -0.5), color: [1, 0.95, 0.86, 1], intensity: 1.9 });
+  addLight({ kind: "directional", direction: vec3(0.6, -0.35, 0.55), color: [0.62, 0.74, 0.98, 1], intensity: 0.85 });
+  addLight({ kind: "directional", direction: vec3(0, 0.2, 1), color: [1, 0.6, 0.35, 1], intensity: 0.7 });
+  addLight({ kind: "point", position: vec3(0, 1, 2.4), color: [1, 0.62, 0.3, 1], intensity: 0.6 + STAGE_GLOW[stage] * 0.5 });
+};
