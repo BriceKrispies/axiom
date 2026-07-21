@@ -17,13 +17,21 @@ use super::model::{
 };
 use super::AnimState;
 
-/// A resolved pose: per-joint local rotations plus the root adjustments the
-/// rig applies to the whole body.
+/// A resolved pose: per-joint local rotations plus the **visual body root** —
+/// the cosmetic frame the rig derives from the authoritative gameplay root.
+///
+/// The `root_*` fields are presentation-only by construction: they are read by
+/// [`crate::player::rig::body_transform`] and by nothing else. The simulation's
+/// position, facing, collision shape and tackle geometry all use the gameplay
+/// root directly and never see these offsets.
 #[derive(Debug, Clone, Copy)]
 pub struct JointPose {
     pub joints: [Quat; PART_COUNT],
-    /// Root vertical offset (bob, falls), yards.
+    /// Visual body root vertical offset (weight transfer, bob, falls), yards.
     pub root_lift: f32,
+    /// Visual body root lateral offset along the facing-right axis — the weight
+    /// shift toward the stance leg, yards.
+    pub root_lateral: f32,
     /// Root pitch (forward lean +, backward -), radians.
     pub root_pitch: f32,
     /// Root roll, radians.
@@ -37,6 +45,7 @@ impl JointPose {
         JointPose {
             joints: [Quat::IDENTITY; PART_COUNT],
             root_lift: 0.0,
+            root_lateral: 0.0,
             root_pitch: 0.0,
             root_roll: 0.0,
         }

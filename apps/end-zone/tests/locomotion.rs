@@ -6,7 +6,7 @@
 
 use axiom::prelude::Vec3;
 use axiom_end_zone::config::EndZoneConfig;
-use axiom_end_zone::data::LocomotionTuning;
+use axiom_end_zone::data::{BiomechTuning, LocomotionTuning};
 use axiom_end_zone::player::animation::{apply_hold, override_pose, BallHold, JointPose};
 use axiom_end_zone::player::model::{L_THIGH, R_THIGH};
 use axiom_end_zone::player::AnimState;
@@ -14,6 +14,7 @@ use axiom_end_zone::presentation::locomotion::foot::FootPhase;
 use axiom_end_zone::presentation::locomotion::gait::{self, LocomotionInput};
 use axiom_end_zone::presentation::locomotion::leg::{self, LegDims};
 use axiom_end_zone::presentation::locomotion::pose;
+use axiom_end_zone::presentation::locomotion::spring::BodySprings;
 use axiom_end_zone::presentation::locomotion::{
     GaitState, LocomotionMode, OverrideReason, PlantedFoot,
 };
@@ -408,13 +409,15 @@ struct FootTick {
 /// `lock_error` is filled).
 fn straight_run_feet(ticks: usize) -> Vec<FootTick> {
     let tuning = LocomotionTuning::default();
+    let bio = BiomechTuning::default();
+    let mut springs = BodySprings::new();
     let mut g = GaitState::new();
     let mut p = Vec3::ZERO;
     let mut out = Vec::new();
     for _ in 0..ticks {
         p = p.add(Vec3::new(0.0, 0.0, 6.0 * DT));
         gait::advance(&mut g, run_input(p, Vec3::new(0.0, 0.0, 6.0), 0.0), &tuning);
-        pose::locomotion_pose(&mut g, 0.0, p, AnimState::Sprint, &tuning);
+        pose::locomotion_pose(&mut g, &mut springs, 0.0, p, AnimState::Sprint, &tuning, &bio).0;
         out.push(FootTick {
             left: (g.left.phase, g.left.lock, g.left.target, g.left.lock_error),
             right: (
@@ -517,6 +520,8 @@ fn airborne_and_teleport_invalidate_both_foot_locks() {
 #[test]
 fn every_generated_joint_and_foot_position_is_finite() {
     let tuning = LocomotionTuning::default();
+    let bio = BiomechTuning::default();
+    let mut springs = BodySprings::new();
     let mut g = GaitState::new();
     let mut p = Vec3::ZERO;
     for i in 0..80 {
@@ -524,7 +529,7 @@ fn every_generated_joint_and_foot_position_is_finite() {
         let vel = Vec3::new(5.0 * a.sin(), 0.0, 5.0 * a.cos());
         p = p.add(vel.mul_scalar(DT));
         gait::advance(&mut g, run_input(p, vel, a), &tuning);
-        let jp = pose::locomotion_pose(&mut g, a, p, AnimState::Sprint, &tuning);
+        let jp = pose::locomotion_pose(&mut g, &mut springs, a, p, AnimState::Sprint, &tuning, &bio).0;
         for q in jp.joints {
             assert!(q.x.is_finite() && q.y.is_finite() && q.z.is_finite() && q.w.is_finite());
         }
@@ -547,13 +552,15 @@ fn joint_nonidentity(q: Quat) -> bool {
 #[test]
 fn the_carry_hold_does_not_remove_lower_body_locomotion() {
     let tuning = LocomotionTuning::default();
+    let bio = BiomechTuning::default();
+    let mut springs = BodySprings::new();
     let mut g = GaitState::new();
     let mut p = Vec3::ZERO;
     for _ in 0..20 {
         p = p.add(Vec3::new(0.0, 0.0, 6.0 * DT));
         gait::advance(&mut g, run_input(p, Vec3::new(0.0, 0.0, 6.0), 0.0), &tuning);
     }
-    let mut composed = pose::locomotion_pose(&mut g, 0.0, p, AnimState::Sprint, &tuning);
+    let mut composed = pose::locomotion_pose(&mut g, &mut springs, 0.0, p, AnimState::Sprint, &tuning, &bio).0;
     // The legs are posed by locomotion before any hold overlay.
     assert!(
         joint_nonidentity(composed.joints[L_THIGH]) || joint_nonidentity(composed.joints[R_THIGH]),
@@ -590,14 +597,16 @@ fn fall_and_action_overrides_suppress_normal_locomotion() {
 #[test]
 fn pose_composition_is_deterministic_for_the_same_input_and_gait() {
     let tuning = LocomotionTuning::default();
+    let bio = BiomechTuning::default();
     let build = || {
+        let mut springs = BodySprings::new();
         let mut g = GaitState::new();
         let mut p = Vec3::ZERO;
         let mut last = JointPose::neutral();
         for _ in 0..30 {
             p = p.add(Vec3::new(0.0, 0.0, 5.0 * DT));
             gait::advance(&mut g, run_input(p, Vec3::new(0.0, 0.0, 5.0), 0.0), &tuning);
-            last = pose::locomotion_pose(&mut g, 0.0, p, AnimState::Sprint, &tuning);
+            last = pose::locomotion_pose(&mut g, &mut springs, 0.0, p, AnimState::Sprint, &tuning, &bio).0;
         }
         last
     };

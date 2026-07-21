@@ -3,6 +3,7 @@
 //! plain data interpreted by the generic simulation systems; changing a play
 //! or an archetype never means changing AI code.
 
+pub mod biomech_tuning;
 pub mod emblem;
 pub mod formation;
 pub mod locomotion_tuning;
@@ -11,6 +12,7 @@ pub mod player;
 pub mod team;
 pub mod tuning;
 
+pub use biomech_tuning::BiomechTuning;
 pub use formation::{FormationDefinition, FormationSlot};
 pub use locomotion_tuning::LocomotionTuning;
 pub use play::{

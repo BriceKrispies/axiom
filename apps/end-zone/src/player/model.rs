@@ -103,10 +103,11 @@ pub const PARTS: [PartSpec; PART_COUNT] = [
         Vec3::ZERO,
         TAG_TRIM,
     ),
-    // 3 helmet (oversized)
+    // 3 helmet (oversized) — hangs off the pad girdle, so the head inherits the
+    // ribcage counter-rotation (offset compensates: pads sit +0.30 over torso).
     p(
-        Some(1),
-        Vec3::new(0.0, 0.42, 0.0),
+        Some(2),
+        Vec3::new(0.0, 0.12, 0.0),
         Vec3::new(0.34, 0.32, 0.36),
         Vec3::new(0.0, 0.12, 0.0),
         TAG_HELMET,
@@ -163,10 +164,11 @@ pub const PARTS: [PartSpec; PART_COUNT] = [
         Vec3::new(0.0, -0.02, 0.08),
         TAG_SHOES,
     ),
-    // 11/12/13 left upper arm, forearm, hand
+    // 11/12/13 left upper arm, forearm, hand — the shoulders hang off the pad
+    // girdle (index 2), not the lower torso, so they carry its counter-rotation.
     p(
-        Some(1),
-        Vec3::new(-0.42, 0.20, 0.0),
+        Some(2),
+        Vec3::new(-0.42, -0.10, 0.0),
         Vec3::new(0.16, 0.40, 0.16),
         Vec3::new(0.0, -0.20, 0.0),
         TAG_JERSEY,
@@ -185,10 +187,10 @@ pub const PARTS: [PartSpec; PART_COUNT] = [
         Vec3::new(0.0, -0.07, 0.0),
         TAG_SKIN,
     ),
-    // 14/15/16 right upper arm, forearm, hand
+    // 14/15/16 right upper arm, forearm, hand — see the left arm above.
     p(
-        Some(1),
-        Vec3::new(0.42, 0.20, 0.0),
+        Some(2),
+        Vec3::new(0.42, -0.10, 0.0),
         Vec3::new(0.16, 0.40, 0.16),
         Vec3::new(0.0, -0.20, 0.0),
         TAG_JERSEY,

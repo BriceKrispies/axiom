@@ -8,6 +8,7 @@ pub mod hud;
 pub mod juice;
 pub mod locomotion;
 pub mod particles;
+pub mod receiver_ring;
 pub mod snapshot;
 
 pub use hud::HudView;

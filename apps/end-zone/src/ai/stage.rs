@@ -96,10 +96,32 @@ impl SimState {
         let point = player
             .pos
             .add(direction.mul_scalar(REACH * clamped / length));
-        self.intents[id.index()] = super::PlayerIntent::MoveToward {
-            point: Vec3::new(point.x, 0.0, point.z),
-            sprint: clamped > 0.55,
+        let point = Vec3::new(point.x, 0.0, point.z);
+        let sprint = clamped > 0.55;
+        // The passer is steered differently from a ball carrier: he STRAFES.
+        // A carrier turns to run where he is going, but a quarterback keeps his
+        // eyes downfield — the stick slides him around the pocket and only
+        // swings his aim within a bounded forward arc, so he never spins away
+        // from the play (and the throwing cone stays usable).
+        self.intents[id.index()] = match id == self.quarterback {
+            true => super::PlayerIntent::DropBack {
+                point,
+                face: self.passer_aim(stick.x),
+                sprint,
+            },
+            false => super::PlayerIntent::MoveToward { point, sprint },
         };
+    }
+
+    /// The direction a steered quarterback faces for a given lateral stick.
+    /// Straight downfield at centre, swinging to at most `qb_aim_max_yaw` off
+    /// it at full deflection — the forward arc his facing is clamped to.
+    fn passer_aim(&self, lateral: f32) -> Vec3 {
+        let yaw = lateral.clamp(-1.0, 1.0) * self.tuning.qb_aim_max_yaw;
+        self.frame
+            .forward()
+            .mul_scalar(yaw.cos())
+            .add(self.frame.right().mul_scalar(yaw.sin()))
     }
 
     /// Record this tick's true world state into the perception ring the

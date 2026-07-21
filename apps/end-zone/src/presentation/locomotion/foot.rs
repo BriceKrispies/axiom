@@ -78,6 +78,14 @@ pub fn planted_fraction(stride: f32, tuning: &LocomotionTuning) -> f32 {
 /// Resolve both feet: local phases (offset by ½ a cycle), world ankle targets,
 /// and the primary planted foot. Returns `true` when the LEFT foot is the
 /// primary planted one. (Cohesive per-tick foot-placement inputs — not a bag.)
+///
+/// `travel` is the unit direction the body is ACTUALLY moving, which is what a
+/// step is aimed along. It is deliberately separate from `facing`: a
+/// backpedalling or strafing player steps toward where he is going while his
+/// body stays square to the field, and placing his feet ahead of his *facing*
+/// instead would slide the world-locked foot out from under him. The lateral
+/// anchors still come from `facing`, because stance width and hip line are
+/// properties of the body, not of the direction of travel.
 #[allow(clippy::too_many_arguments)]
 pub fn resolve(
     phase: f32,
@@ -85,12 +93,14 @@ pub fn resolve(
     right: &mut Foot,
     ground: Vec3,
     facing: f32,
+    travel: Vec3,
     stride: f32,
     turn_intensity: f32,
     norm_speed: f32,
     tuning: &LocomotionTuning,
 ) -> bool {
-    let (right_dir, forward) = dirs(facing);
+    let (right_dir, facing_forward) = dirs(facing);
+    let step_dir = travel.normalize().unwrap_or(facing_forward);
     // The PLANT is laterally free: it converges inside the hips at a normal
     // stride and widens through a turn. The SWING is not — see `step_foot`.
     let widen = tuning.stance_half_width + tuning.turn_widen * turn_intensity;
@@ -114,8 +124,8 @@ pub fn resolve(
         lat: lat_r,
         hip_lat: hip_r,
     };
-    step_foot(left, l, ground, forward, pf, norm_speed, tuning);
-    step_foot(right, r, ground, forward, pf, norm_speed, tuning);
+    step_foot(left, l, ground, step_dir, pf, norm_speed, tuning);
+    step_foot(right, r, ground, step_dir, pf, norm_speed, tuning);
 
     // Primary planted foot = whichever is in stance (earlier local phase wins a
     // brief double-support overlap).

@@ -60,8 +60,12 @@ fn quarterback(
             let far = Vec3::new(to_drop.x, 0.0, to_drop.z).length() > 0.5;
             if far && holds_ball {
                 *role = RoleState::QbDrop;
-                PlayerIntent::MoveToward {
+                // Retreat to the drop point but keep the eyes downfield: the
+                // throwing cone is measured off this facing, so a quarterback
+                // who turned to face his own end zone could never pass.
+                PlayerIntent::DropBack {
                     point: drop_to,
+                    face: ctx.end_zone_target.subtract(player.pos),
                     sprint: false,
                 }
             } else if holds_ball {

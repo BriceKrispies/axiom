@@ -58,6 +58,21 @@ pub struct BehaviorTuning {
     pub min_flight_ticks: u32,
     /// Ticks of quarterback throw wind-up before release.
     pub throw_windup_ticks: u32,
+    /// Half-angle of the quarterback's throwing cone, radians. A receiver must
+    /// be within this much of the quarterback's facing to be throwable — this
+    /// is what makes the stick aim the pass.
+    pub throw_cone_half_angle: f32,
+    /// How far off straight-downfield a STEERED quarterback may turn, radians.
+    /// His facing is clamped to this forward arc, so pushing the stick sideways
+    /// strafes him instead of spinning him: he keeps his eyes downfield and can
+    /// never end up facing his own end zone. It also bounds how far he can swing
+    /// the throwing cone, which is how the stick aims the pass.
+    pub qb_aim_max_yaw: f32,
+    /// Nearest a receiver may be and still be throwable, yd (a man standing on
+    /// top of the quarterback is not a pass).
+    pub throw_min_range: f32,
+    /// Furthest a receiver may be and still be throwable, yd.
+    pub throw_max_range: f32,
     /// Gravity, yd/s² (9.8 m/s² in yards).
     pub gravity: f32,
     /// Boundary clamp margin, yd.
@@ -90,6 +105,10 @@ impl Default for BehaviorTuning {
             pass_speed: 22.0,
             min_flight_ticks: 24,
             throw_windup_ticks: 12,
+            throw_cone_half_angle: 0.95,
+            qb_aim_max_yaw: 1.05,
+            throw_min_range: 2.0,
+            throw_max_range: 34.0,
             gravity: 10.72,
             bounds_margin: 0.6,
         }

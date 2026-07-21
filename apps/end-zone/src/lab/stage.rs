@@ -8,41 +8,15 @@ use axiom::prelude::Vec3;
 
 use crate::ai::{PlayerIntent, RoleState};
 use crate::camera::CameraPose;
-use crate::config::DT;
 use crate::data::{JuiceTuning, LocomotionTuning};
 use crate::events::{EventId, SimEvent, StampedEvent};
 use crate::football::BallSim;
 use crate::identity::{PlayerId, TeamId};
-use crate::lab::catalog::{catalog, LabClip, Path};
-use crate::player::AnimState;
+use crate::lab::catalog::{catalog, LabClip};
+use crate::lab::drive::{self, Actor};
 use crate::presentation::snapshot::{PlayerView, PresentationSnapshot};
 use crate::presentation::{JuiceStack, LocomotionAnimator, LocomotionSample, PlayerPose};
 use crate::state::PlayPhase;
-
-/// The isolated kinematic body the drive scripts move.
-#[derive(Debug, Clone, Copy)]
-struct Actor {
-    pos: Vec3,
-    vel: Vec3,
-    facing: f32,
-    anim: AnimState,
-    anim_ticks: u32,
-    /// Circle-path angle (rad) or backpedal travel (yd), by path kind.
-    path_t: f32,
-}
-
-impl Actor {
-    fn rest(anim: AnimState) -> Self {
-        Actor {
-            pos: Vec3::ZERO,
-            vel: Vec3::ZERO,
-            facing: 0.0,
-            anim,
-            anim_ticks: 0,
-            path_t: 0.0,
-        }
-    }
-}
 
 /// One stepped lab frame: the single-player snapshot, its composed pose, and
 /// the trailing camera — everything the scene sync needs to draw the player.
@@ -148,7 +122,7 @@ impl AnimLab {
     /// animator, and frame the trailing camera.
     pub fn step(&mut self) -> LabFrame {
         let clip = self.clips[self.selected];
-        self.drive(clip);
+        self.reanchor |= drive::advance(&mut self.actor, clip);
         let events = self.take_events();
         let snapshot = self.snapshot();
         let poses = self.locomotion.step(&snapshot, &events);
@@ -182,37 +156,6 @@ impl AnimLab {
             rows.push(("override".to_string(), format!("{:?}", s.reason)));
         }
         rows
-    }
-
-    /// Move the actor for this clip's path this tick.
-    fn drive(&mut self, clip: LabClip) {
-        self.actor.anim = clip.anim;
-        self.actor.anim_ticks += 1;
-        match clip.path {
-            Path::Still => {
-                self.actor.vel = Vec3::ZERO;
-                let wrap = clip.loop_ticks > 0 && self.actor.anim_ticks >= clip.loop_ticks;
-                self.actor.anim_ticks = if wrap { 0 } else { self.actor.anim_ticks };
-            }
-            Path::Circle { speed, radius } => {
-                self.actor.path_t += speed * DT / radius;
-                let th = self.actor.path_t;
-                let dir = Vec3::new(th.cos(), 0.0, -th.sin());
-                self.actor.pos = Vec3::new(radius * th.sin(), 0.0, radius * th.cos());
-                self.actor.vel = dir.mul_scalar(speed);
-                self.actor.facing = dir.x.atan2(dir.z);
-            }
-            Path::Backpedal { speed, reach } => {
-                self.actor.facing = 0.0;
-                self.actor.path_t += speed * DT;
-                if self.actor.path_t >= reach {
-                    self.actor.path_t = 0.0;
-                    self.reanchor = true;
-                }
-                self.actor.pos = Vec3::new(0.0, 0.0, -self.actor.path_t);
-                self.actor.vel = Vec3::new(0.0, 0.0, -speed);
-            }
-        }
     }
 
     /// This tick's synthetic events: a `PlayReset` on a switch/wrap so the
@@ -265,6 +208,7 @@ impl AnimLab {
             gravity: 0.0,
             fault: None,
             drive: None,
+            throwable: Vec::new(),
             to_gain_z: None,
         }
     }

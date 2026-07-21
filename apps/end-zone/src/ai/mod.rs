@@ -34,6 +34,17 @@ pub enum PlayerIntent {
     Face { direction: Vec3 },
     /// Move toward a point (`sprint` selects the speed tier).
     MoveToward { point: Vec3, sprint: bool },
+    /// Move to a point while HOLDING a facing — the quarterback's drop-back and
+    /// his steered pocket movement. Distinct from `MoveToward` because the whole
+    /// point of a backpedal or a strafe is that the mover does NOT turn to face
+    /// where he is going: he keeps his eyes downfield, which is what makes him
+    /// able to throw (and what makes the controller play the backpedal
+    /// animation).
+    DropBack {
+        point: Vec3,
+        face: Vec3,
+        sprint: bool,
+    },
     /// Block a specific opponent at a working point.
     Block { target: PlayerId, point: Vec3 },
     /// Chase an opponent via a predicted interception point.
@@ -55,6 +66,7 @@ impl PlayerIntent {
     pub fn movement(&self) -> Option<(Vec3, bool)> {
         match *self {
             PlayerIntent::MoveToward { point, sprint } => Some((point, sprint)),
+            PlayerIntent::DropBack { point, sprint, .. } => Some((point, sprint)),
             PlayerIntent::Block { point, .. } => Some((point, false)),
             PlayerIntent::Pursue { point, .. } => Some((point, true)),
             PlayerIntent::PrepareCatch { point } => Some((point, true)),

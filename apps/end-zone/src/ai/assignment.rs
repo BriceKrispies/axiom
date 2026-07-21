@@ -21,7 +21,7 @@ pub struct ResolvedAssignment {
 /// The resolved assignment vocabulary the brains interpret.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AssignmentKind {
-    Quarterback { drop_to: Vec3, throw_to: PlayerId },
+    Quarterback { drop_to: Vec3 },
     Snapper,
     Route { decoy: bool },
     PassBlock,
@@ -64,16 +64,12 @@ pub fn compile_assignments(play: &PlayDefinition, frame: &OffenseFrame) -> Vec<R
         let id = offense_player(play, slot);
         let start = play.offense_formation.slots[slot].position;
         let (kind, route) = match assignment {
-            OffenseAssignment::Quarterback {
-                drop_depth,
-                throw_to,
-            } => (
+            OffenseAssignment::Quarterback { drop_depth } => (
                 AssignmentKind::Quarterback {
                     drop_to: frame.to_world(crate::field::OffensePoint::new(
                         start.lateral,
                         start.downfield - drop_depth,
                     )),
-                    throw_to: offense_player(play, *throw_to),
                 },
                 Vec::new(),
             ),

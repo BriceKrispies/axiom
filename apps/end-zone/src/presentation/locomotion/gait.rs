@@ -213,12 +213,20 @@ pub fn advance(
     }
 
     gait.mode = classify(gait, moving);
+    // Steps are aimed along ACTUAL travel, not along facing — a strafing or
+    // backpedalling player plants where he is going. Falls back to facing when
+    // he is too slow for the velocity direction to mean anything.
+    let facing_forward = Vec3::new(input.facing.sin(), 0.0, input.facing.cos());
+    let travel = Vec3::new(input.vel.x, 0.0, input.vel.z)
+        .normalize()
+        .unwrap_or(facing_forward);
     let left_planted = foot::resolve(
         gait.phase,
         &mut gait.left,
         &mut gait.right,
         input.pos,
         input.facing,
+        travel,
         stride,
         gait.turn_intensity,
         gait.norm_speed,

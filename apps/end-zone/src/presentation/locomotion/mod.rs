@@ -15,18 +15,25 @@
 //!
 //! Presentation-only impact compression (squash) is applied later, at render.
 
+pub mod carriage;
 pub mod foot;
 pub mod gait;
 pub mod leg;
 pub mod pose;
+pub mod spring;
+pub mod stride;
 
+pub use carriage::{Carriage, Carry};
 pub use foot::FootPhase;
 pub use gait::{GaitState, LocomotionInput, LocomotionMode, OverrideReason, PlantedFoot};
+pub use spring::{BodySprings, Spring};
 
 use axiom::prelude::Vec3;
 
 use crate::config::PLAYER_COUNT;
-use crate::data::LocomotionTuning;
+use crate::data::{BiomechTuning, LocomotionTuning};
+use crate::player::model::{PARTS, PELVIS};
+use crate::player::rig;
 use crate::events::{SimEvent, StampedEvent};
 use crate::player::animation::{self, BallHold, JointPose};
 use crate::player::AnimState;
@@ -69,6 +76,28 @@ pub struct LocomotionSample {
     pub speed: f32,
     pub distance_moved: f32,
     pub move_vector: Vec3,
+    /// The authoritative gameplay root this tick (position the sim owns).
+    pub gameplay_root: Vec3,
+    /// The derived visual body root — gameplay root plus the bounded cosmetic
+    /// weight-transfer offsets. Never feeds back into the sim.
+    pub visual_root: Vec3,
+    /// World position of the pelvis joint under the visual body root.
+    pub pelvis: Vec3,
+    /// The weight-shift point: the pelvis dropped to the turf, so the debug
+    /// view shows directly whether weight is stacked over the stance foot.
+    pub weight_point: Vec3,
+    /// The resolved whole-body carriage targets for this tick.
+    pub carriage: Carriage,
+}
+
+/// The body-frame read-out the sample records alongside the gait: where the
+/// three roots ended up this tick, and the carriage that put them there.
+#[derive(Debug, Clone, Copy)]
+struct BodyFrame {
+    gameplay_root: Vec3,
+    visual_root: Vec3,
+    pelvis: Vec3,
+    carriage: Carriage,
 }
 
 impl LocomotionSample {
@@ -78,6 +107,7 @@ impl LocomotionSample {
         speed: f32,
         distance: f32,
         move_vec: Vec3,
+        body: BodyFrame,
     ) -> Self {
         let planted_target = match g.planted {
             PlantedFoot::Left => g.left.lock,
@@ -109,6 +139,11 @@ impl LocomotionSample {
             speed,
             distance_moved: distance,
             move_vector: move_vec,
+            gameplay_root: body.gameplay_root,
+            visual_root: body.visual_root,
+            pelvis: body.pelvis,
+            weight_point: Vec3::new(body.pelvis.x, 0.02, body.pelvis.z),
+            carriage: body.carriage,
         }
     }
 }
@@ -117,15 +152,26 @@ impl LocomotionSample {
 #[derive(Debug)]
 pub struct LocomotionAnimator {
     tuning: LocomotionTuning,
+    biomech: BiomechTuning,
     bank: Vec<GaitState>,
+    /// One persistent virtual-muscle bank per player slot, alongside the gait.
+    springs: Vec<BodySprings>,
     last: Vec<LocomotionSample>,
 }
 
 impl LocomotionAnimator {
+    /// An animator with the default whole-body biomechanics.
     pub fn new(tuning: LocomotionTuning) -> Self {
+        LocomotionAnimator::with_biomech(tuning, BiomechTuning::default())
+    }
+
+    /// An animator with explicit leg-cycle and whole-body biomechanics tuning.
+    pub fn with_biomech(tuning: LocomotionTuning, biomech: BiomechTuning) -> Self {
         LocomotionAnimator {
             tuning,
+            biomech,
             bank: vec![GaitState::new(); PLAYER_COUNT],
+            springs: vec![BodySprings::new(); PLAYER_COUNT],
             last: Vec::new(),
         }
     }
@@ -160,6 +206,14 @@ impl LocomotionAnimator {
                 teleported: teleport,
             };
             let ov = gait::advance(gait, input, &self.tuning);
+            let springs = &mut self.springs[index];
+            // Any discontinuity that re-anchored the gait must also drop the
+            // virtual muscle's momentum, so the body never springs across a
+            // teleport, a play reset, or the hand-off to an override pose.
+            let discontinuous = ov != OverrideReason::None || teleport;
+            if discontinuous {
+                springs.reset();
+            }
 
             let carrying = carrier == Some(view.id);
             let is_qb = view.id == snapshot.quarterback;
@@ -167,14 +221,37 @@ impl LocomotionAnimator {
                 (view.pos.z - snapshot.line_of_scrimmage_z) * snapshot.drive_sign > POCKET_MARGIN;
             let hold = animation::ball_hold(carrying, is_qb, past_line, view.anim);
 
-            let mut jp = if allowed {
-                pose::locomotion_pose(gait, view.facing, view.pos, view.anim, &self.tuning)
+            let (mut jp, carriage) = if allowed {
+                pose::locomotion_pose(
+                    gait,
+                    springs,
+                    view.facing,
+                    view.pos,
+                    view.anim,
+                    &self.tuning,
+                    &self.biomech,
+                )
             } else {
-                animation::override_pose(view.anim, view.anim_ticks)
+                (
+                    animation::override_pose(view.anim, view.anim_ticks),
+                    Carriage::neutral(),
+                )
             };
             animation::apply_hold(&mut jp, hold);
 
-            let sample = LocomotionSample::from_gait(gait, ov, view.speed, distance, move_vec);
+            // Read back the three roots for the biomechanical debug view. The
+            // gameplay root is the sim's own position, untouched; the visual
+            // body root is what the rig derived from it; the pelvis is the
+            // joint riding under that.
+            let body = rig::body_transform(view.pos, view.facing, &jp, 0.0);
+            let frame = BodyFrame {
+                gameplay_root: view.pos,
+                visual_root: body.translation,
+                pelvis: body.transform_point(PARTS[PELVIS].offset),
+                carriage,
+            };
+            let sample =
+                LocomotionSample::from_gait(gait, ov, view.speed, distance, move_vec, frame);
             self.last.push(sample);
             out.push(PlayerPose {
                 pose: jp,

@@ -1,25 +1,37 @@
 //! Building the procedural whole-body pose for a running player from the
-//! advanced gait state: the two legs are solved by inverse kinematics to their
-//! planted / swinging world foot targets (so the stance foot stays fixed on the
-//! turf while the body travels over it — the anti-skate), and the pelvis, torso,
-//! shoulders, and arms move with the gait phase and resolved motion. This is
-//! stage 2 of the pose-composition order; overrides and the carry overlay are
-//! applied by the module facade.
+//! advanced gait state. Stage 2 of the pose-composition order (overrides and
+//! the carry overlay are applied by the module facade).
+//!
+//! Three passes, in order:
+//!
+//! 1. **carriage** ([`super::carriage`]) — resolve the whole-body weight
+//!    transfer *targets*: where the visual body root and pelvis want to be this
+//!    tick, and how the spine counter-rotates against them.
+//! 2. **virtual muscle** ([`super::spring`]) — chase those targets with
+//!    per-region damped springs at the fixed simulation step, so the body
+//!    settles into the pose instead of snapping onto it. The pelvis is stiff,
+//!    the arms are loose, which is what makes the body read as connected.
+//! 3. **legs** — two-bone IK to the world-locked foot targets. Because the
+//!    pelvis has already moved, this *is* the stance-leg compression and
+//!    push-off: the planted foot holds its world position while the leg folds
+//!    and extends under the travelling body.
 
 use axiom::prelude::Vec3;
 use axiom_math::{Quat, Transform};
 
-use crate::data::LocomotionTuning;
+use crate::data::{BiomechTuning, LocomotionTuning};
 use crate::player::animation::JointPose;
 use crate::player::model::{
-    HELMET, L_FOOT, L_FOREARM, L_SHIN, L_THIGH, L_UPPER_ARM, PARTS, PELVIS, R_FOOT, R_FOREARM,
-    R_SHIN, R_THIGH, R_UPPER_ARM, TORSO,
+    HELMET, L_FOOT, L_FOREARM, L_SHIN, L_THIGH, L_UPPER_ARM, PADS, PARTS, PELVIS, R_FOOT,
+    R_FOREARM, R_SHIN, R_THIGH, R_UPPER_ARM, TORSO,
 };
 use crate::player::rig;
 use crate::player::AnimState;
 
+use super::carriage::{self, Carriage, Carry};
 use super::gait::GaitState;
 use super::leg::{self, LegDims};
+use super::spring::BodySprings;
 
 const TAU: f32 = core::f32::consts::TAU;
 
@@ -31,62 +43,95 @@ fn qx(a: f32) -> Quat {
 /// Build the locomotion pose for one player and fill each foot's solved ankle +
 /// lock error into the gait state. `anim` distinguishes the standing stances
 /// (a ready crouch, an upright backpedal) that share the distance-driven cycle.
+///
+/// `springs` is the player's persistent virtual-muscle bank; it is advanced one
+/// fixed tick here. The returned [`Carriage`] is the resolved target set, kept
+/// for the diagnostic overlay and the biomechanical debug view.
 pub fn locomotion_pose(
     gait: &mut GaitState,
+    springs: &mut BodySprings,
     facing: f32,
     ground: Vec3,
     anim: AnimState,
-    tuning: &LocomotionTuning,
-) -> JointPose {
+    loco: &LocomotionTuning,
+    bio: &BiomechTuning,
+) -> (JointPose, Carriage) {
     let mut out = JointPose::neutral();
-    let phase_ang = gait.phase * TAU;
-    let swing = phase_ang.sin();
-    let amp = 0.45 + 0.55 * gait.norm_speed;
-    let speed = gait.norm_speed.clamp(0.0, 1.0);
-    let backpedal = matches!(anim, AnimState::DropBack);
     let ready = matches!(anim, AnimState::ReadyStance);
+    let carry = match anim {
+        AnimState::ReadyStance => Carry::Ready,
+        AnimState::DropBack => Carry::Backpedal,
+        _ => Carry::Running,
+    };
 
-    // Whole-body motion (stage 2b): pelvis bob + yaw, torso counter-rotation and
-    // lean/bank, shoulder counter-rotation, arm swing. Bounded by the tuning.
-    let forward = Vec3::new(facing.sin(), 0.0, facing.cos());
-    let accel_fwd = gait.accel.dot(forward);
-    let lean_sign = if backpedal { -1.0 } else { 1.0 };
-    // Forward carriage from the waist while running (a backpedal leans back; a
-    // set ready stance stays upright), layered on the whole-body `root_pitch`.
-    let waist = tuning.waist_lean * speed * lean_sign * f32::from(!ready);
-    out.root_pitch = (lean_sign * 0.08 * gait.norm_speed
-        + (accel_fwd * tuning.torso_lean_per_accel))
-        .clamp(-0.18, tuning.torso_lean_max)
-        * f32::from(!ready)
-        + ready_crouch_pitch(ready);
-    out.root_roll =
-        (tuning.torso_bank * gait.turn_bank).clamp(-tuning.torso_bank, tuning.torso_bank);
-    // Two vertical dips per cycle (one per foot strike) plus a landing dip, over
-    // hips that ride lower the faster the runner goes — the crouch that leaves
-    // the stance knee room to flex instead of solving to a locked-straight leg.
-    let bob = (phase_ang * 2.0).sin().abs() * tuning.pelvis_bob;
-    out.root_lift = bob - landing_dip(gait.phase, tuning) + ready_crouch_lift(ready)
-        - tuning.run_crouch * speed * f32::from(!ready);
+    // Stage 1: the whole-body carriage targets.
+    let target = carriage::solve(gait, facing, carry, loco, bio);
 
-    out.joints[PELVIS] = Quat::from_euler_xyz(0.0, tuning.pelvis_yaw * swing, 0.0);
-    out.joints[TORSO] = Quat::from_euler_xyz(waist, -tuning.shoulder_counter * swing, 0.0);
-    // Keep the head up: counter the whole-body root lean and most of the waist
-    // lean the head inherits from the torso, so eyes stay forward at speed.
-    out.joints[HELMET] = Quat::from_euler_xyz(-out.root_pitch * 0.6 - waist * 0.75, 0.0, 0.0);
-    out.joints[L_UPPER_ARM] = Quat::from_euler_xyz(-swing * tuning.arm_swing * amp, 0.0, 0.0);
-    out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(swing * tuning.arm_swing * amp, 0.0, 0.0);
-    // Bent elbows: hold a base flex that deepens toward a full run, and let each
-    // elbow pump — closing on the arm that drives forward this half-cycle. The
-    // left arm leads while `swing > 0` (its shoulder pitches back), the right
-    // while `swing < 0`, mirroring the upper-arm swing above. (`apply_hold`
-    // overrides these for a ball carrier's tucked/throwing arm.)
-    let elbow = tuning.elbow_flex_idle + (tuning.elbow_flex_run - tuning.elbow_flex_idle) * speed;
-    out.joints[L_FOREARM] = qx(-(elbow + tuning.elbow_pump * swing.max(0.0)));
-    out.joints[R_FOREARM] = qx(-(elbow + tuning.elbow_pump * (-swing).max(0.0)));
+    // Stage 2: chase them with the per-region springs. Pelvis and the visual
+    // body root are stiffest (weight must look controlled); the spine sits in
+    // the middle; the arms are loosest and are allowed to trail.
+    let pos_step = bio.max_position_step;
+    let ang_step = bio.max_angular_step;
+    let (pk, pd) = (bio.pelvis_stiffness, bio.pelvis_damping);
+    let (sk, sd) = (bio.spine_stiffness, bio.spine_damping);
+    let (ak, ad) = (bio.arm_stiffness, bio.arm_damping);
+    let (hk, hd) = (bio.head_stiffness, bio.head_damping);
 
-    // Legs (stage 2a): solve each to its world ankle target.
+    // The gait-driven weight transfer rides on top of a posture offset: the
+    // hips sit lower the faster the runner goes (`run_crouch`), which is what
+    // leaves the stance knee room to flex instead of solving to a locked-
+    // straight leg. That is a stance, not an oscillation, so it is applied
+    // outside the spring alongside the ready crouch.
+    let crouch = ready_crouch_lift(ready)
+        - loco.run_crouch * gait.norm_speed.clamp(0.0, 1.0) * f32::from(!ready);
+    out.root_lift = springs.root_lift.step(target.root_lift, pk, pd, pos_step) + crouch;
+    out.root_lateral = springs
+        .root_lateral
+        .step(target.root_lateral, pk, pd, pos_step);
+    out.root_pitch =
+        springs.root_pitch.step(target.root_pitch, sk, sd, ang_step) + ready_crouch_pitch(ready);
+    out.root_roll = springs.root_roll.step(target.root_roll, sk, sd, ang_step);
+
+    let pelvis_yaw = springs.pelvis_yaw.step(target.pelvis_yaw, pk, pd, ang_step);
+    let pelvis_roll = springs.pelvis_roll.step(target.pelvis_roll, pk, pd, ang_step);
+    let pelvis_pitch = springs
+        .pelvis_pitch
+        .step(target.pelvis_pitch, pk, pd, ang_step);
+    let spine_yaw = springs.spine_yaw.step(target.spine_yaw, sk, sd, ang_step);
+    let spine_roll = springs.spine_roll.step(target.spine_roll, sk, sd, ang_step);
+    let spine_pitch = springs.spine_pitch.step(target.spine_pitch, sk, sd, ang_step);
+    let ribcage_yaw = springs.ribcage_yaw.step(target.ribcage_yaw, sk, sd, ang_step);
+    let ribcage_pitch = springs
+        .ribcage_pitch
+        .step(target.ribcage_pitch, sk, sd, ang_step);
+    let head_pitch = springs.head_pitch.step(target.head_pitch, hk, hd, ang_step);
+    let head_yaw = springs.head_yaw.step(target.head_yaw, hk, hd, ang_step);
+
+    out.joints[PELVIS] = Quat::from_euler_xyz(pelvis_pitch, pelvis_yaw, pelvis_roll);
+    out.joints[TORSO] = Quat::from_euler_xyz(spine_pitch, spine_yaw, spine_roll);
+    out.joints[PADS] = Quat::from_euler_xyz(ribcage_pitch, ribcage_yaw, 0.0);
+    out.joints[HELMET] = Quat::from_euler_xyz(head_pitch, head_yaw, 0.0);
+
+    // Arms: swung opposite the legs, through their own (loosest) spring so they
+    // trail the torso slightly. They hang off the pad girdle, so they already
+    // carry its counter-rotation.
+    let speed = gait.norm_speed.clamp(0.0, 1.0);
+    let amp = 0.45 + 0.55 * speed;
+    let swing_target = (gait.phase * TAU).sin() * loco.arm_swing * amp;
+    let swing = springs.arm_swing.step(swing_target, ak, ad, ang_step);
+    out.joints[L_UPPER_ARM] = qx(-swing);
+    out.joints[R_UPPER_ARM] = qx(swing);
+    // Bent elbows: a base flex that deepens toward a full run, plus a pump that
+    // closes the elbow of whichever arm drives forward this half-cycle.
+    // (`apply_hold` overrides these for a carrier's tucked/throwing arm.)
+    let elbow = loco.elbow_flex_idle + (loco.elbow_flex_run - loco.elbow_flex_idle) * speed;
+    let pump = loco.elbow_pump * (swing / loco.arm_swing.max(1.0e-3)).clamp(-1.0, 1.0);
+    out.joints[L_FOREARM] = qx(-(elbow + pump.max(0.0)));
+    out.joints[R_FOREARM] = qx(-(elbow + (-pump).max(0.0)));
+
+    // Stage 3: legs solved to their world ankle targets.
     solve_legs(gait, facing, ground, &mut out);
-    out
+    (out, target)
 }
 
 /// A deeper knee bend and lower hips for the pre-snap ready stance.
@@ -95,13 +140,6 @@ fn ready_crouch_pitch(ready: bool) -> f32 {
 }
 fn ready_crouch_lift(ready: bool) -> f32 {
     f32::from(ready) * -0.14
-}
-
-/// The compression dip near each foot strike (phase 0 and ½), yd.
-fn landing_dip(phase: f32, tuning: &LocomotionTuning) -> f32 {
-    let d0 = (phase * TAU).cos().max(0.0);
-    let d1 = ((phase - 0.5) * TAU).cos().max(0.0);
-    d0.max(d1) * tuning.landing_dip
 }
 
 /// Solve both legs to their gait foot targets and record the solved ankle +

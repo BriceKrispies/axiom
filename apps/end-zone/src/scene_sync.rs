@@ -15,6 +15,7 @@ use crate::player::model::{R_FOREARM, R_HAND};
 use crate::player::rig;
 use crate::presentation::juice::JuiceStack;
 use crate::presentation::particles::{effect_instances, trail_instances};
+use crate::presentation::receiver_ring::{self, RECEIVER_RING_POOL};
 use crate::presentation::snapshot::PresentationSnapshot;
 use crate::presentation::PlayerPose;
 use crate::scene::{hidden_transform, EndZoneScene};
@@ -120,6 +121,11 @@ impl EndZoneScene {
             })
             .unwrap_or_else(hidden_transform);
         app.set(self.line_to_gain, to_gain);
+
+        // Receiver rings: red on the current read, white on the rest of the cone.
+        let mut rings = Vec::with_capacity(RECEIVER_RING_POOL);
+        receiver_ring::ring_instances(snapshot, &mut rings);
+        assign_pool(app, &self.receiver_ring_pool, &rings, |r| (r.transform, r.kind));
 
         // Juice instances into the pools.
         self.juice_scratch.clear();

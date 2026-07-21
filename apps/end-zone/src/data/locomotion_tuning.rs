@@ -65,8 +65,6 @@ pub struct LocomotionTuning {
     /// Extra PLANT widening at full turn intensity, yd — a wider base through a
     /// cut. Does not widen the swing.
     pub turn_widen: f32,
-    /// Pelvis vertical bob amplitude, yd.
-    pub pelvis_bob: f32,
     /// Pelvis yaw amplitude toward the leading leg, rad.
     pub pelvis_yaw: f32,
     /// Forward torso lean per unit planar acceleration, rad per yd/s².
@@ -80,8 +78,6 @@ pub struct LocomotionTuning {
     /// hips, on top of the whole-body `root_pitch` lean. The head is counter-
     /// pitched so it stays up.
     pub waist_lean: f32,
-    /// Shoulder counter-rotation amplitude, rad.
-    pub shoulder_counter: f32,
     /// Arm-swing amplitude (upper arm pitch), rad.
     pub arm_swing: f32,
     /// Elbow flex held while standing / walking slowly (forearm pitch), rad.
@@ -98,8 +94,6 @@ pub struct LocomotionTuning {
     /// A per-tick planar jump beyond this (yd) is treated as a teleport: the
     /// gait does not advance and the foot locks reset.
     pub teleport_distance: f32,
-    /// Landing-compression dip at foot strike, yd.
-    pub landing_dip: f32,
     /// How far below standing height the hips ride at a full run, yd, blended in
     /// by normalized speed. The (stubby, arcade) leg's reach is barely longer
     /// than the standing hip height, so at full height the stance leg solves to
@@ -119,7 +113,7 @@ impl Default for LocomotionTuning {
             max_cadence: 3.1,
             foot_lift: 0.34,
             knee_height: 0.26,
-            knee_forward: 0.2,
+            knee_forward: 0.28,
             knee_drive: 0.72,
             stance_reach: 0.22,
             planted_fraction: 0.62,
@@ -130,20 +124,17 @@ impl Default for LocomotionTuning {
             stopping_ticks: 12.0,
             stance_half_width: 0.09,
             turn_widen: 0.09,
-            pelvis_bob: 0.05,
             pelvis_yaw: 0.12,
             torso_lean_per_accel: 0.02,
-            torso_lean_max: 0.34,
-            torso_bank: 0.22,
-            waist_lean: 0.22,
-            shoulder_counter: 0.16,
-            arm_swing: 0.7,
+            torso_lean_max: 0.44,
+            torso_bank: 0.28,
+            waist_lean: 0.30,
+            arm_swing: 0.95,
             elbow_flex_idle: 0.35,
-            elbow_flex_run: 1.2,
-            elbow_pump: 0.35,
+            elbow_flex_run: 1.35,
+            elbow_pump: 0.52,
             turn_full_rate: 3.0,
             teleport_distance: 3.0,
-            landing_dip: 0.05,
             run_crouch: 0.07,
         }
     }

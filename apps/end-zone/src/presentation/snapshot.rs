@@ -54,6 +54,10 @@ pub struct PresentationSnapshot {
     pub drive: Option<DriveState>,
     /// World `Z` of the line to gain, when a drive is active (the field marker).
     pub to_gain_z: Option<f32>,
+    /// The receivers the quarterback can throw to right now — everyone inside
+    /// his throwing cone, nearest his centre line first. The scene draws a ring
+    /// at each one's feet; the pass would go to the first.
+    pub throwable: Vec<PlayerId>,
 }
 
 impl PresentationSnapshot {
@@ -110,6 +114,7 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
         // The run layer fills these in for a real drive; the raw sim capture
         // is drive-agnostic.
         drive: None,
+        throwable: sim.throwable.clone(),
         to_gain_z: None,
     }
 }

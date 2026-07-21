@@ -15,6 +15,9 @@ use axiom_kernel::Ratio;
 use crate::config::PLAYER_COUNT;
 use crate::data::team::{frostbite, magma};
 use crate::debug::DebugMaterial;
+use crate::presentation::receiver_ring::{
+    RingKind, ELIGIBLE_RING_POOL, RECEIVER_RING_POOL, TARGET_RING_POOL,
+};
 use crate::field::{generate_field, FieldMaterial, FieldMesh};
 use crate::player::model::{player_figure, PART_COUNT, TAG_COUNT};
 use crate::presentation::particles::{EffectInstance, EffectMaterial};
@@ -56,6 +59,8 @@ pub struct EndZoneScene {
     /// The bright procedural line-to-gain marker (repositioned per tick; parked
     /// hidden when no drive is active).
     pub(crate) line_to_gain: Entity,
+    /// White rings at the feet of every receiver the quarterback can throw to.
+    pub(crate) receiver_ring_pool: Vec<(Entity, RingKind)>,
     pub(crate) juice_pool: Vec<(Entity, EffectMaterial)>,
     pub(crate) debug_pool: Vec<(Entity, DebugMaterial)>,
     pub(crate) juice_scratch: Vec<EffectInstance>,
@@ -193,6 +198,21 @@ impl EndZoneScene {
             }
         }
 
+        // Receiver rings: RED on the current read (where the pass would go),
+        // white on the other receivers the quarterback could legally reach.
+        let target_ring_mat = app.add_material(Material::lit(color3([0.96, 0.16, 0.14])));
+        let eligible_ring_mat = app.add_material(Material::lit(color3([0.97, 0.98, 0.97])));
+        let mut receiver_ring_pool = Vec::with_capacity(RECEIVER_RING_POOL);
+        let ring_plan: [(RingKind, usize, Handle<Material>); 2] = [
+            (RingKind::Target, TARGET_RING_POOL, target_ring_mat),
+            (RingKind::Eligible, ELIGIBLE_RING_POOL, eligible_ring_mat),
+        ];
+        for (kind, count, handle) in ring_plan {
+            for _ in 0..count {
+                receiver_ring_pool.push((app.spawn(Spawn::new(hidden(), cube, handle)), kind));
+            }
+        }
+
         // Debug pools.
         let route_mat = app.add_material(Material::lit(color3([0.15, 0.85, 0.95])));
         let target_mat = app.add_material(Material::lit(color3([0.95, 0.25, 0.85])));
@@ -204,8 +224,15 @@ impl EndZoneScene {
         let foot_now_mat = app.add_material(Material::lit(color3([0.20, 0.60, 1.0])));
         let foot_land_mat = app.add_material(Material::lit(color3([0.55, 1.0, 0.30])));
         let move_vec_mat = app.add_material(Material::lit(color3([1.0, 1.0, 1.0])));
+        // Biomechanical debug view: the three roots, the weight point, the
+        // stance foot.
+        let gameplay_root_mat = app.add_material(Material::lit(color3([0.10, 0.10, 0.10])));
+        let visual_root_mat = app.add_material(Material::lit(color3([0.95, 0.95, 0.30])));
+        let pelvis_mat = app.add_material(Material::lit(color3([1.0, 0.30, 0.75])));
+        let weight_mat = app.add_material(Material::lit(color3([0.45, 0.20, 0.95])));
+        let stance_foot_mat = app.add_material(Material::lit(color3([1.0, 0.55, 0.05])));
         let mut debug_pool = Vec::with_capacity(DEBUG_POOL);
-        let debug_plan: [(DebugMaterial, usize, Handle<Material>); 10] = [
+        let debug_plan: [(DebugMaterial, usize, Handle<Material>); 15] = [
             (DebugMaterial::Route, 100, route_mat),
             (DebugMaterial::Target, 24, target_mat),
             (DebugMaterial::Collision, 128, collision_mat),
@@ -216,6 +243,11 @@ impl EndZoneScene {
             (DebugMaterial::FootNow, 28, foot_now_mat),
             (DebugMaterial::FootLanding, 14, foot_land_mat),
             (DebugMaterial::MoveVector, 56, move_vec_mat),
+            (DebugMaterial::GameplayRoot, 14, gameplay_root_mat),
+            (DebugMaterial::VisualRoot, 14, visual_root_mat),
+            (DebugMaterial::Pelvis, 14, pelvis_mat),
+            (DebugMaterial::WeightPoint, 14, weight_mat),
+            (DebugMaterial::StanceFoot, 14, stance_foot_mat),
         ];
         for (material, count, handle) in debug_plan {
             for _ in 0..count {
@@ -225,6 +257,7 @@ impl EndZoneScene {
 
         EndZoneScene {
             figure,
+            receiver_ring_pool,
             turf,
             player_parts,
             ball,

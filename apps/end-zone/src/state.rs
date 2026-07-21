@@ -78,6 +78,14 @@ pub struct SimState {
     /// Player-vs-player contact solver (real rigid-body de-penetration +
     /// momentum exchange) — replaces the old positional `resolve_overlaps`.
     pub(crate) collision: CollisionRig,
+    /// The receiver the in-flight wind-up committed to, locked when the
+    /// wind-up begins and cleared at release. `None` outside a wind-up.
+    pub(crate) throw_target: Option<PlayerId>,
+    /// This tick's eligible receivers — everyone inside the quarterback's
+    /// throwing cone, nearest the centre line first. Empty unless the
+    /// quarterback is holding a live ball. Presentation draws a ring at each
+    /// one's feet; the sim throws to the first.
+    pub throwable: Vec<PlayerId>,
     pub(crate) throw_commanded: bool,
     pub(crate) catch_attempted: bool,
     pub(crate) engaged_blocks: Vec<(PlayerId, PlayerId)>,
@@ -135,6 +143,8 @@ impl SimState {
             events: EventSink::default(),
             rig,
             collision,
+            throw_target: None,
+            throwable: Vec::new(),
             throw_commanded: false,
             catch_attempted: false,
             engaged_blocks: Vec::new(),
@@ -166,6 +176,7 @@ impl SimState {
             player.anim_ticks = player.anim_ticks.saturating_add(1);
         }
         self.push_perception();
+        self.update_throwable();
         self.throw_commanded = false;
         self.tick += 1;
         self.events.events()
@@ -210,6 +221,8 @@ impl SimState {
         self.phase = PlayPhase::PreSnap;
         self.end_reason = None;
         self.throw_commanded = false;
+        self.throw_target = None;
+        self.throwable.clear();
         self.catch_attempted = false;
         self.engaged_blocks.clear();
         if announce {

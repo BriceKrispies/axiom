@@ -86,6 +86,12 @@ pub fn integrate_movement(
         // Facing: explicit request, else movement direction.
         let face = match *intent {
             PlayerIntent::Face { direction } => Some(direction),
+            PlayerIntent::DropBack { face, .. } => Some(face),
+            // A quarterback in his throwing motion is planted and aiming — he
+            // holds whatever he was facing. Without this his aim (and so the
+            // throwing cone) snaps to whatever residual drift he had, which
+            // pointed a dropping-back passer at his own end zone.
+            PlayerIntent::Throw => None,
             _ => (speed > IDLE_SPEED).then_some(player.vel),
         };
         if let Some(direction) = face {

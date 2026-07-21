@@ -10,9 +10,15 @@ use axiom_math::{Quat, Transform, Vec3};
 use super::animation::JointPose;
 use super::model::{FIGURE_CENTER_Y, PARTS, PART_COUNT};
 
-/// The world body transform for a player: ground position raised to the
-/// figure center, yaw from facing, pitch/roll from the pose, squash from the
-/// presentation (0 = none, 1 = fully squashed).
+/// The **visual body root** for a player: the cosmetic frame derived from the
+/// authoritative gameplay root (`ground_pos` + `facing`, straight from the
+/// simulation) by applying the pose's bounded visual offsets — vertical weight
+/// transfer, lateral shift toward the stance leg, lean/bank — plus the
+/// presentation squash (0 = none, 1 = fully squashed).
+///
+/// This derivation is strictly one-way. `ground_pos`/`facing` are taken by
+/// value and never written back; nothing downstream of here can reach the
+/// simulation. Movement, collision and tackling keep using the gameplay root.
 pub fn body_transform(ground_pos: Vec3, facing: f32, pose: &JointPose, squash: f32) -> Transform {
     let squash = squash.clamp(0.0, 1.0);
     let scale = Vec3::new(
@@ -25,11 +31,14 @@ pub fn body_transform(ground_pos: Vec3, facing: f32, pose: &JointPose, squash: f
         0.0,
         pose.root_roll,
     ));
+    // Lateral weight shift runs along the facing-right axis, so it stays a
+    // sideways sway of the body regardless of which way the player is running.
+    let right = Vec3::new(facing.cos(), 0.0, -facing.sin());
     Transform::new(
         Vec3::new(
-            ground_pos.x,
+            ground_pos.x + right.x * pose.root_lateral,
             ground_pos.y + FIGURE_CENTER_Y + pose.root_lift,
-            ground_pos.z,
+            ground_pos.z + right.z * pose.root_lateral,
         ),
         rotation,
         scale,

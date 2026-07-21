@@ -147,6 +147,7 @@ fn intent_tag(intent: &PlayerIntent) -> String {
         PlayerIntent::MoveToward { sprint, .. } => {
             format!("move{}", if *sprint { "!" } else { "" })
         }
+        PlayerIntent::DropBack { .. } => "dropback".into(),
         PlayerIntent::Block { target, .. } => format!("block→#{}", target.0),
         PlayerIntent::Pursue { target, .. } => format!("pursue→#{}", target.0),
         PlayerIntent::PrepareCatch { .. } => "catch-prep".into(),

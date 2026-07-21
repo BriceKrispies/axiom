@@ -92,9 +92,11 @@ impl RouteDefinition {
 /// One offensive slot's job for the play.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OffenseAssignment {
-    /// Take the snap, drop back `drop_depth` yards, throw to the roster slot
-    /// running `throw_to` when the showcase controller says so.
-    Quarterback { drop_depth: f32, throw_to: usize },
+    /// Take the snap and drop back `drop_depth` yards. The pass TARGET is not
+    /// authored here: it is resolved at throw time from the quarterback's
+    /// throwing cone (`crate::football::targeting`), so who the ball goes to
+    /// depends on where he is facing, not on the play sheet.
+    Quarterback { drop_depth: f32 },
     /// Snap the ball, then pass-block.
     Snapper,
     /// Run a pass route (the primary or a real option).
@@ -142,7 +144,7 @@ pub struct PlayDefinition {
     pub line_of_scrimmage: f32,
 }
 
-/// The showcase play: spread formation, quick post to the slot receiver, edge
+/// The showcase play: spread formation, three live route runners, edge
 /// rush, man coverage outside, free safety pursuing the catch.
 pub fn showcase_play() -> PlayDefinition {
     PlayDefinition {
@@ -151,11 +153,8 @@ pub fn showcase_play() -> PlayDefinition {
         offense_formation: spread_offense(),
         defense_formation: base_defense(),
         offense_assignments: [
-            // 0: QB throws to the slot receiver (roster slot 6).
-            OffenseAssignment::Quarterback {
-                drop_depth: 3.0,
-                throw_to: 6,
-            },
+            // 0: QB drops and reads the cone — the target is whoever he faces.
+            OffenseAssignment::Quarterback { drop_depth: 3.0 },
             OffenseAssignment::Snapper,
             OffenseAssignment::PassBlock,
             OffenseAssignment::PassBlock,

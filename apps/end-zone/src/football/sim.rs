@@ -19,6 +19,7 @@ pub(crate) fn ball_rest() -> Vec3 {
 }
 
 use super::possession::{catch_point, evaluate_catch, CatchVerdict};
+use super::targeting;
 use super::state::{BallState, BALL_RADIUS};
 use super::{carry_socket, solve_throw, FlightInfo};
 
@@ -103,11 +104,27 @@ impl SimState {
         let RoleState::QbWindup { since } = self.roles[carrier.index()] else {
             return;
         };
+        // Lock the target on the first tick of the wind-up: the pass commits to
+        // whoever the quarterback was aiming at when the player pressed throw,
+        // so a defender crossing the cone mid-wind-up cannot steal the read.
+        if self.throw_target.is_none() {
+            let picks = {
+                let qb = &self.players[carrier.index()];
+                targeting::candidates(qb, &self.players, &self.assignments, &self.tuning)
+            };
+            let Some(target) = targeting::best(&picks) else {
+                // Nobody in the cone — there is no pass to make. Drop out of the
+                // wind-up so the quarterback keeps scanning (and stays sackable)
+                // instead of freezing mid-throw with no receiver.
+                self.roles[carrier.index()] = RoleState::QbScan;
+                return;
+            };
+            self.throw_target = Some(target);
+        }
         if self.tick.saturating_sub(since) < u64::from(self.tuning.throw_windup_ticks) {
             return;
         }
-        let AssignmentKind::Quarterback { throw_to, .. } = self.assignments[carrier.index()].kind
-        else {
+        let Some(throw_to) = self.throw_target else {
             return;
         };
         let qb = &self.players[carrier.index()];
@@ -130,6 +147,7 @@ impl SimState {
             eta_ticks,
         };
         let axis = velocity.normalize().unwrap_or(Vec3::UNIT_Z);
+        self.throw_target = None;
         self.ball.state = BallState::Airborne { flight };
         self.ball.pos = release;
         self.ball.vel = velocity;
@@ -151,6 +169,27 @@ impl SimState {
             from: Some(carrier),
             to: None,
         });
+    }
+
+    /// Recompute this tick's eligible receivers: everyone inside the
+    /// quarterback's throwing cone while he holds a live ball. This is the
+    /// single owner of the eligibility rule — presentation only reads the
+    /// resulting list, so the rings a player sees can never disagree with who
+    /// the ball would actually go to.
+    pub(crate) fn update_throwable(&mut self) {
+        self.throwable.clear();
+        let Some(carrier) = self.ball.carrier() else {
+            return;
+        };
+        let scanning = !matches!(self.roles[carrier.index()], RoleState::QbDone);
+        if carrier != self.quarterback || !scanning {
+            return;
+        }
+        let picks = {
+            let qb = &self.players[carrier.index()];
+            targeting::candidates(qb, &self.players, &self.assignments, &self.tuning)
+        };
+        self.throwable = picks.iter().map(|c| c.id).collect();
     }
 
     /// Post-physics ball update: read the integrated flight, resolve the

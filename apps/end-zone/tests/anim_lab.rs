@@ -14,9 +14,26 @@ fn index_of(lab: &AnimLab, label: &str) -> usize {
 
 #[test]
 fn catalog_covers_every_anim_state() {
-    // Fifteen AnimState variants → fifteen selectable clips.
+    // Every one of the fifteen AnimState variants is reachable from the lab.
+    // (Clip count exceeds state count: the locomotion states carry extra
+    // speed variants — walk / sprint / accel-decel — because speed, not the
+    // state, is what drives the gait and the whole-body carriage.)
+    let clips = axiom_end_zone::lab::catalog::catalog();
+    let mut states: Vec<String> = clips.iter().map(|c| format!("{:?}", c.anim)).collect();
+    states.sort();
+    states.dedup();
+    assert_eq!(states.len(), 15, "every AnimState has at least one clip");
+    assert!(clips.len() >= states.len());
+}
+
+#[test]
+fn the_catalog_offers_the_speed_range_the_biomechanics_pass_needs() {
+    // Judging weight transfer needs a standstill, a low-speed gait, a full
+    // sprint, and a clip that ramps between them in both directions.
     let lab = AnimLab::new();
-    assert_eq!(lab.labels().len(), 15);
+    for required in ["Idle", "Walk", "Jog", "Sprint", "Accel / Decel"] {
+        index_of(&lab, required);
+    }
 }
 
 #[test]

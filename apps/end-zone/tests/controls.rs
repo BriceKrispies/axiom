@@ -161,7 +161,12 @@ fn the_primary_action_snaps_then_throws_then_restarts() {
     let mut threw_at = None;
     let mut pressed_throw = false;
     for _ in 0..200u64 {
-        let holder_is_qb = run.sim.possession == Some(run.sim.quarterback);
+        // Press once the quarterback both holds the ball AND has someone in his
+        // throwing cone. Straight off the snap the receivers are still lined up
+        // beside him, outside the cone — there is no pass to make yet, and the
+        // press is correctly a no-op.
+        let holder_is_qb = run.sim.possession == Some(run.sim.quarterback)
+            && !run.sim.throwable.is_empty();
         let commands: &[DiagnosticCommand] = if holder_is_qb && !pressed_throw {
             pressed_throw = true;
             &[DiagnosticCommand::PrimaryAction]

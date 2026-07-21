@@ -24,6 +24,7 @@
 //! reloads the page; the framed clip is restored from the URL hash).
 
 pub mod catalog;
+pub mod drive;
 pub mod stage;
 
 pub use stage::{AnimLab, LabFrame};

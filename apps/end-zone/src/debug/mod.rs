@@ -7,10 +7,11 @@
 use axiom::prelude::Vec3;
 use axiom_math::{Quat, Transform};
 
+pub mod locomotion;
+
 use crate::ai::PlayerIntent;
 use crate::camera::{CameraMode, CameraPose};
 use crate::football::{predict_position, BallState};
-use crate::presentation::locomotion::{OverrideReason, PlantedFoot};
 use crate::presentation::snapshot::PresentationSnapshot;
 use crate::presentation::{LocomotionSample, PlayerPose};
 use crate::state::PlayPhase;
@@ -32,6 +33,16 @@ pub enum DebugMaterial {
     FootLanding,
     /// A player's resolved movement vector.
     MoveVector,
+    /// The authoritative gameplay root (simulated position).
+    GameplayRoot,
+    /// The derived visual body root (cosmetic weight-transfer frame).
+    VisualRoot,
+    /// The pelvis joint riding under the visual body root.
+    Pelvis,
+    /// The weight-shift point: the pelvis dropped to the turf.
+    WeightPoint,
+    /// The foot currently bearing weight.
+    StanceFoot,
 }
 
 /// One debug marker.
@@ -44,7 +55,7 @@ pub struct DebugInstance {
 /// Hard cap on debug markers (the scene pool size).
 pub const DEBUG_CAP: usize = 512;
 
-fn push(out: &mut Vec<DebugInstance>, transform: Transform, material: DebugMaterial) {
+pub(super) fn push(out: &mut Vec<DebugInstance>, transform: Transform, material: DebugMaterial) {
     if out.len() < DEBUG_CAP {
         out.push(DebugInstance {
             transform,
@@ -53,7 +64,7 @@ fn push(out: &mut Vec<DebugInstance>, transform: Transform, material: DebugMater
     }
 }
 
-fn cube(center: Vec3, size: f32) -> Transform {
+pub(super) fn cube(center: Vec3, size: f32) -> Transform {
     Transform::new(center, Quat::IDENTITY, Vec3::new(size, size, size))
 }
 
@@ -71,7 +82,8 @@ pub fn build_markers(
     // Locomotion foot markers: each planted-foot lock, each solved foot, the
     // next intended landing, and the resolved movement vector. Debug-only.
     for (view, player_pose) in snapshot.players.iter().zip(poses.iter()) {
-        foot_markers(&player_pose.sample, view.pos, out);
+        locomotion::foot_markers(&player_pose.sample, view.pos, out);
+        locomotion::markers(&player_pose.sample, out);
     }
 
     // Route paths: waypoint markers plus interpolated dots between them.
@@ -141,35 +153,6 @@ pub fn build_markers(
     push(out, cube(camera.target, 0.2), DebugMaterial::CameraAim);
 }
 
-/// Small markers for one player's locomotion: planted-foot lock targets, the
-/// current solved foot positions, the swing foot's next landing, and the
-/// resolved movement vector. Purely diagnostic — never affects the sim or pose.
-fn foot_markers(sample: &LocomotionSample, pos: Vec3, out: &mut Vec<DebugInstance>) {
-    push(out, cube(sample.left_ankle, 0.1), DebugMaterial::FootNow);
-    push(out, cube(sample.right_ankle, 0.1), DebugMaterial::FootNow);
-    push(
-        out,
-        cube(sample.planted_target, 0.16),
-        DebugMaterial::FootLock,
-    );
-    push(
-        out,
-        cube(sample.next_landing, 0.13),
-        DebugMaterial::FootLanding,
-    );
-    // The resolved movement vector: a few dots from the player along the actual
-    // displacement this tick (scaled up so a slow drift is still visible).
-    for step in 1..=4 {
-        let t = step as f32 / 4.0;
-        let tip = Vec3::new(
-            pos.x + sample.move_vector.x * t * 8.0,
-            0.2,
-            pos.z + sample.move_vector.z * t * 8.0,
-        );
-        push(out, cube(tip, 0.08), DebugMaterial::MoveVector);
-    }
-}
-
 /// The always-on overlay rows (tick, phase, ball, possession, camera, seed,
 /// impulses, selected player, its locomotion read-out) — text only.
 pub fn overlay_rows(
@@ -224,52 +207,9 @@ pub fn overlay_rows(
         rows.push(("fault".to_string(), fault.to_string()));
     }
     if let Some(loco) = locomotion {
-        push_locomotion_rows(&mut rows, snapshot.player(snapshot.quarterback).speed, loco);
+        locomotion::push_locomotion_rows(&mut rows, snapshot.player(snapshot.quarterback).speed, loco);
     }
     rows
-}
-
-/// The locomotion read-out for the selected player: authoritative vs requested
-/// speed, actual distance moved, mode, gait phase, stride, cadence, planted
-/// foot, both foot states, both lock errors, and any override.
-fn push_locomotion_rows(rows: &mut Vec<(String, String)>, requested: f32, loco: &LocomotionSample) {
-    let planted = match loco.planted {
-        PlantedFoot::Left => "L",
-        PlantedFoot::Right => "R",
-    };
-    rows.push(("loco.speed".to_string(), format!("{:.2} yd/s", loco.speed)));
-    rows.push(("loco.requested".to_string(), format!("{requested:.2} yd/s")));
-    rows.push((
-        "loco.moved".to_string(),
-        format!("{:.4} yd", loco.distance_moved),
-    ));
-    rows.push(("loco.mode".to_string(), format!("{:?}", loco.mode)));
-    rows.push(("loco.phase".to_string(), format!("{:.3}", loco.gait_phase)));
-    rows.push((
-        "loco.stride".to_string(),
-        format!("{:.2} yd", loco.stride_length),
-    ));
-    rows.push((
-        "loco.cadence".to_string(),
-        format!("{:.2} /s", loco.cadence),
-    ));
-    rows.push(("loco.planted".to_string(), planted.to_string()));
-    rows.push((
-        "loco.feet".to_string(),
-        format!("L {:?} / R {:?}", loco.left_phase, loco.right_phase),
-    ));
-    rows.push((
-        "loco.lockErr".to_string(),
-        format!(
-            "L {:.3} / R {:.3}",
-            loco.left_lock_error, loco.right_lock_error
-        ),
-    ));
-    let over = match loco.reason {
-        OverrideReason::None => "no".to_string(),
-        other => format!("yes ({other:?})"),
-    };
-    rows.push(("loco.override".to_string(), over));
 }
 
 fn intent_name(intent: &PlayerIntent) -> &'static str {
@@ -277,6 +217,7 @@ fn intent_name(intent: &PlayerIntent) -> &'static str {
         PlayerIntent::Hold => "hold",
         PlayerIntent::Face { .. } => "face",
         PlayerIntent::MoveToward { .. } => "move",
+        PlayerIntent::DropBack { .. } => "dropback",
         PlayerIntent::Block { .. } => "block",
         PlayerIntent::Pursue { .. } => "pursue",
         PlayerIntent::PrepareCatch { .. } => "prepare-catch",

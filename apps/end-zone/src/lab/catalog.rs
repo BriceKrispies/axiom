@@ -22,6 +22,16 @@ pub enum Path {
     /// gait advances on real displacement — the honest way to see foot-plant
     /// (or foot-skate) against the moving turf.
     Circle { speed: f32, radius: f32 },
+    /// The same circle, but sweeping the speed smoothly between `low` and
+    /// `high` and back every `period_ticks` — one clip that shows acceleration
+    /// into a sprint and deceleration out of it, which is where the whole-body
+    /// carriage (lean, stride growth, weight transfer) is easiest to judge.
+    SpeedRamp {
+        low: f32,
+        high: f32,
+        radius: f32,
+        period_ticks: u32,
+    },
     /// Straight backpedal at `speed` yd/s for `reach` yд, then re-anchors the
     /// feet and repeats — the quarterback drop-back.
     Backpedal { speed: f32, reach: f32 },
@@ -58,6 +68,15 @@ pub fn catalog() -> Vec<LabClip> {
         clip(AnimState::ReadyStance, "Ready Stance", Path::Still, 0),
         clip(
             AnimState::Jog,
+            "Walk",
+            Path::Circle {
+                speed: 1.9,
+                radius: 9.0,
+            },
+            0,
+        ),
+        clip(
+            AnimState::Jog,
             "Jog",
             Path::Circle {
                 speed: 4.6,
@@ -71,6 +90,17 @@ pub fn catalog() -> Vec<LabClip> {
             Path::Circle {
                 speed: 8.4,
                 radius: 26.0,
+            },
+            0,
+        ),
+        clip(
+            AnimState::Sprint,
+            "Accel / Decel",
+            Path::SpeedRamp {
+                low: 0.6,
+                high: 8.4,
+                radius: 26.0,
+                period_ticks: 300,
             },
             0,
         ),
