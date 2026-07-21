@@ -1,0 +1,7 @@
+{
+  "title": "Axiom Arcade",
+  "blurb": "A prize floor of twenty chance games — pick a machine, pull the handle, and watch the reveal ritual play out.",
+  "description": "An arcade cabinet of twenty short games of chance, each built on one shared fairness contract: the outcome is committed before you can influence it, the presentation is a pure function of the tick, and every round is replayable from its seed. Walk the prize floor and pick a machine — treasure chests, a prize wheel, a gem mine, scratch cards, dice, a claw of sorts — then watch a reveal that is all ceremony and no lying: the chest spirals into close-up before the latch ever drops, the wheel eases into its detent, the card scratches away under your cursor. Idle animations draw from an ambient random stream that never touches the outcome, so no wobble, gleam, or dance can hint at what a machine holds. A settings panel exposes presentation speed, reduced motion, particle density, and volume; a diagnostics drawer shows the audit record — commit phase, commit tick, seed, and stream seeds — for any round.",
+  "kind": "ts-web-engine",
+  "tags": ["game", "arcade", "chance"]
+}
