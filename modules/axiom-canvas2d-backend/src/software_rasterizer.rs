@@ -19,6 +19,17 @@
 //!   (`[old, new][pass as usize]`) rather than a branch, so a covered or rejected
 //!   fragment costs the same and there is no temporary per pixel.
 //!
+//! ## Coverage convention
+//! A pixel is covered when its **centre** lies inside the triangle — with one
+//! exception. A triangle thinner than one pixel would otherwise be sampled only
+//! where it happens to straddle a centre, and *which* thin triangles straddle
+//! one shifts as the camera moves, so sub-pixel geometry (painted field lines,
+//! wires, distant railings) crawls and blinks rather than holding still. Such a
+//! triangle is therefore tested against each pixel's **square** instead, by
+//! relaxing every edge by half its per-pixel change. The relaxation is scaled by
+//! how sub-pixel the triangle is, so geometry a pixel thick or more is sampled
+//! exactly as before and renders bit-identically; see `rasterize_triangle`.
+//!
 //! ## Depth convention
 //! Depth is barycentric-interpolated NDC z; **smaller = nearer**; the buffer
 //! clears to `+∞`. A fragment writes iff it is strictly nearer than the stored
@@ -359,7 +370,8 @@ fn rasterize_triangle(
         base[2] as f32 * a,
         255.0 * a,
     ];
-    let inv_area = 1.0 / edge(x0, y0, x1, y1, x2, y2);
+    let area2 = edge(x0, y0, x1, y1, x2, y2);
+    let inv_area = 1.0 / area2;
     // Per-pixel (x) and per-row (y) steps of each barycentric l_i = e_i·inv_area.
     let a0 = (y1 - y2) * inv_area;
     let a1 = (y2 - y0) * inv_area;
@@ -368,6 +380,12 @@ fn rasterize_triangle(
     let b1 = (x0 - x2) * inv_area;
     let b2 = (x1 - x0) * inv_area;
     let dz_dx = a0 * z0 + a1 * z1 + a2 * z2;
+    let (bias0, bias1, bias2) = conservative_bias(
+        [x0, y0, x1, y1, x2, y2],
+        area2,
+        (a0, a1, a2),
+        (b0, b1, b2),
+    );
     let (minx, maxx, miny, maxy) = screen_bbox(tri, ctx.width, ctx.height);
     let minxf = minx as f32 + 0.5;
     let w = ctx.width as usize;
@@ -386,7 +404,13 @@ fn rasterize_triangle(
 
     (miny..maxy + 1).for_each(|py| {
         // The x-span this row actually covers, not the whole bounding box.
-        let (sx, ex) = row_span((r0, r1, r2), (a0, a1, a2), minx, maxx);
+        let (sx, ex) = row_span(
+            (r0, r1, r2),
+            (a0, a1, a2),
+            (bias0, bias1, bias2),
+            minx,
+            maxx,
+        );
 
         let row = py as usize * w;
         let step = (sx - minx) as f32;
@@ -396,7 +420,7 @@ fn rasterize_triangle(
         let mut dep = l0 * z0 + l1 * z1 + l2 * z2;
 
         (sx..ex).for_each(|px| {
-            let inside = (l0 >= 0.0) & (l1 >= 0.0) & (l2 >= 0.0);
+            let inside = (l0 >= -bias0) & (l1 >= -bias1) & (l2 >= -bias2);
             let idx = row + px as usize;
             let cur = depth[idx];
             let pass = inside & (dep < cur);
@@ -447,20 +471,32 @@ fn rasterize_triangle(
 /// negative one from the right, a zero one (horizontal edge) makes the whole row
 /// empty when it is on the outside. The span is widened by one pixel and clamped
 /// to the bounding box; the inner loop's exact inside-test handles the boundary.
-fn row_span(l: (f32, f32, f32), a: (f32, f32, f32), minx: u32, maxx: u32) -> (u32, u32) {
+fn row_span(
+    l: (f32, f32, f32),
+    a: (f32, f32, f32),
+    bias: (f32, f32, f32),
+    minx: u32,
+    maxx: u32,
+) -> (u32, u32) {
     let mf = minx as f32;
-    // x where each l_i crosses 0: mf - l_i0/a_i (one divide per edge; the value
-    // is garbage when a_i == 0 but is then never selected).
-    let xz0 = mf - l.0 / a.0;
-    let xz1 = mf - l.1 / a.1;
-    let xz2 = mf - l.2 / a.2;
+    // The span must match the coverage test the pixel loop applies, which admits
+    // `l_i >= -bias_i` (see the conservative-coverage note in
+    // `rasterize_triangle`). Solving `l_i0 + a_i·Δ = -bias_i` shifts each
+    // crossing by the edge's bias; for exact (non-thin) triangles every bias is
+    // `0` and this is the plain `l_i = 0` crossing as before.
+    let (l0, l1, l2) = (l.0 + bias.0, l.1 + bias.1, l.2 + bias.2);
+    // x where each l_i crosses its threshold: mf - l_i0/a_i (one divide per edge;
+    // the value is garbage when a_i == 0 but is then never selected).
+    let xz0 = mf - l0 / a.0;
+    let xz1 = mf - l1 / a.1;
+    let xz2 = mf - l2 / a.2;
     let left = |xz: f32, ai: f32| [f32::NEG_INFINITY, xz][(ai > 0.0) as usize];
     let right = |xz: f32, ai: f32| [f32::INFINITY, xz][(ai < 0.0) as usize];
     let xl = left(xz0, a.0).max(left(xz1, a.1)).max(left(xz2, a.2));
     let xr = right(xz0, a.0).min(right(xz1, a.1)).min(right(xz2, a.2));
     // A horizontal edge on the outside (a==0, l<0) empties the whole row.
     let h_empty =
-        ((a.0 == 0.0) & (l.0 < 0.0)) | ((a.1 == 0.0) & (l.1 < 0.0)) | ((a.2 == 0.0) & (l.2 < 0.0));
+        ((a.0 == 0.0) & (l0 < 0.0)) | ((a.1 == 0.0) & (l1 < 0.0)) | ((a.2 == 0.0) & (l2 < 0.0));
     let lo = minx as i64;
     let hi = maxx as i64;
     let s = ((xl.floor() as i64) - 1).clamp(lo, hi) as u32;
@@ -468,6 +504,45 @@ fn row_span(l: (f32, f32, f32), a: (f32, f32, f32), minx: u32, maxx: u32) -> (u3
     // Exclusive end; an empty row (horizontal-outside or no overlap) → s..s.
     let empty = h_empty | (s > e);
     (s, [e + 1, s][empty as usize])
+}
+
+/// How far each edge test is relaxed so a **sub-pixel-thin** triangle is covered
+/// by every pixel it touches, rather than only those whose centre it happens to
+/// contain.
+///
+/// Point-sampling pixel centres drops any triangle thinner than one pixel
+/// whenever it falls between the sample points — and *which* thin triangles fall
+/// between them shifts as the camera moves, so sub-pixel geometry (painted field
+/// lines at the low framebuffer resolution) crawls and blinks instead of holding
+/// still. The geometry is present and depth-correct throughout; it is simply
+/// never sampled.
+///
+/// A thin triangle is therefore tested against each pixel's **square**: edge `i`
+/// is relaxed by half its maximum change across one pixel, `0.5·(|a_i| + |b_i|)`,
+/// which admits any pixel the triangle actually touches. That relaxation is
+/// scaled by `thinness`, derived from the triangle's minimum height in pixels
+/// (`2·area / longest edge`) — so geometry a pixel thick or more relaxes by
+/// **zero**, is tested exactly as before, and renders bit-identically. Only
+/// sub-pixel slivers widen, and only up to a single pixel: enough to paint a
+/// continuous line, never enough to fatten a silhouette.
+///
+/// `verts` is `[x0, y0, x1, y1, x2, y2]`; `area2` is twice the triangle's signed
+/// area; `a`/`b` are the per-pixel and per-row barycentric steps.
+fn conservative_bias(
+    verts: [f32; 6],
+    area2: f32,
+    a: (f32, f32, f32),
+    b: (f32, f32, f32),
+) -> (f32, f32, f32) {
+    let [x0, y0, x1, y1, x2, y2] = verts;
+    let e0 = (x1 - x0).hypot(y1 - y0);
+    let e1 = (x2 - x1).hypot(y2 - y1);
+    let e2 = (x0 - x2).hypot(y0 - y2);
+    // Callers guarantee a non-degenerate triangle, so the longest edge is > 0.
+    let height = area2.abs() / e0.max(e1).max(e2);
+    let thinness = (1.0 - height).clamp(0.0, 1.0);
+    let relax = |ai: f32, bi: f32| thinness * 0.5 * (ai.abs() + bi.abs());
+    (relax(a.0, b.0), relax(a.1, b.1), relax(a.2, b.2))
 }
 
 /// The edge function: twice the signed area of triangle `(a, b, p)`.

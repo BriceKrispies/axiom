@@ -745,3 +745,168 @@ fn all_cues_change_the_image_but_preserve_draw_and_object_counts() {
     // changed even where (near) fog does not reach.
     assert_eq!(on.horizon_silhouette_drawn(), 0);
 }
+
+// ---------------------------------------------------------------------------
+// Sub-pixel field-line coverage (the Canvas 2D field-line flicker regression).
+// ---------------------------------------------------------------------------
+
+/// A column-major `projection * view` for a football-broadcast-style camera:
+/// 60° vertical FOV, 16:9, the shipping 0.5..400 yd depth range, eye above and
+/// behind the origin looking down +Z toward the far end of a 120 yd field.
+/// `dolly` slides the eye along +Z, standing in for camera motion.
+fn field_view_proj(dolly: f32) -> [f32; 16] {
+    use axiom_math::{Mat4, Vec3};
+    let proj =
+        Mat4::perspective(60.0_f32.to_radians(), 16.0 / 9.0, 0.5, 400.0).expect("valid perspective");
+    let view = Mat4::look_at(
+        Vec3::new(0.0, 8.0, -20.0 + dolly),
+        Vec3::new(0.0, 0.0, 40.0 + dolly),
+        Vec3::new(0.0, 1.0, 0.0),
+    )
+    .expect("valid view");
+    proj.multiply(view).as_cols_array()
+}
+
+/// Project a world-space quad `[a, b, c, d]` into two screen triangles.
+fn world_quad(
+    mvp: &[f32; 16],
+    q: [[f32; 3]; 4],
+    w: u32,
+    h: u32,
+    c: [f32; 4],
+    oid: u64,
+) -> Vec<RasterTriangle> {
+    let v = q.map(|p| {
+        let s =
+            crate::projection::project_vertex(mvp, p, w, h).expect("in front of the near plane");
+        RasterVertex::new(s[0], s[1], s[2], c, oid)
+    });
+    vec![
+        RasterTriangle::shaded([v[0], v[1], v[2]], c),
+        RasterTriangle::shaded([v[0], v[2], v[3]], c),
+    ]
+}
+
+/// Render turf + one yard line `line_z` yards downrange at the shipping
+/// framebuffer size, and count the pixels the line actually paints white.
+fn yard_line_pixels(dolly: f32, line_z: f32) -> u32 {
+    let (w, h) = (240_u32, 135_u32);
+    let mvp = field_view_proj(dolly);
+    let c = ctx(w, h);
+    let mut fb = SoftwareFramebuffer::new(w, h);
+    let mut depth = DepthBuffer::new(w, h);
+    fb.clear([0.0, 0.0, 0.0, 1.0]);
+    depth.clear_far();
+    let mut s = PixelStats::default();
+    {
+        let rgba = fb.rgba_mut();
+        let dep = depth.slice_mut();
+        // The turf: one large plane spanning the whole field, as `axiom-scene`
+        // submits it — the line sits 0.03 yd above this.
+        world_quad(
+            &mvp,
+            [
+                [-30.0, 0.0, -10.0],
+                [30.0, 0.0, -10.0],
+                [30.0, 0.0, 120.0],
+                [-30.0, 0.0, 120.0],
+            ],
+            w,
+            h,
+            [0.0, 0.4, 0.0, 1.0],
+            1,
+        )
+        .iter()
+        .for_each(|t| rasterize_triangle(rgba, dep, &c, t, &mut s));
+        // A yard line at the app's real 0.17 yd width and 0.03 yd lift.
+        world_quad(
+            &mvp,
+            [
+                [-25.0, 0.03, line_z - 0.085],
+                [25.0, 0.03, line_z - 0.085],
+                [25.0, 0.03, line_z + 0.085],
+                [-25.0, 0.03, line_z + 0.085],
+            ],
+            w,
+            h,
+            [1.0, 1.0, 1.0, 1.0],
+            2,
+        )
+        .iter()
+        .for_each(|t| rasterize_triangle(rgba, dep, &c, t, &mut s));
+    }
+    let bytes = fb.into_rgba_bytes();
+    (0..w * h).fold(0, |acc, i| {
+        let p = px(&bytes, w, i % w, i / w);
+        acc + u32::from((p[0] > 200) & (p[1] > 200) & (p[2] > 200))
+    })
+}
+
+/// A painted field line is far thinner than one pixel at the low framebuffer
+/// resolution, and must still paint — at **every** distance and from every
+/// camera position.
+///
+/// Point-sampling pixel centres drops such a line whenever it falls between the
+/// sample points, and which lines fall between them shifts continuously as the
+/// camera moves; on the Canvas 2D football field that read as yard lines
+/// crawling and flickering in and out. The line is present and depth-correct
+/// throughout — it was simply never sampled. Conservative coverage for
+/// sub-pixel triangles (see `rasterize_triangle`) is what holds it steady.
+#[test]
+fn a_sub_pixel_field_line_paints_at_every_distance() {
+    (4..=22).for_each(|k| {
+        let z = k as f32 * 5.0;
+        let painted = yard_line_pixels(0.0, z);
+        assert!(
+            painted > 0,
+            "the yard line {z} yd downrange painted no pixels at 240x135 — a \
+             sub-pixel line fell between pixel centres and vanished"
+        );
+    });
+}
+
+/// The same line must not blink as the camera moves. Dollying the eye forward
+/// in tenth-of-a-yard steps — far finer than one pixel of motion — must never
+/// drop the line to nothing, which is precisely the flicker.
+#[test]
+fn a_sub_pixel_field_line_survives_sub_pixel_camera_motion() {
+    let counts: Vec<u32> = (0..40).map(|i| yard_line_pixels(i as f32 * 0.1, 60.0)).collect();
+    assert!(
+        counts.iter().all(|&c| c > 0),
+        "the yard line vanished at some camera offsets — it must hold steady \
+         across sub-pixel camera motion, got {counts:?}"
+    );
+    // It should also stay roughly the same width, not pulse between 1 and many.
+    let lo = counts.iter().copied().min().expect("non-empty");
+    let hi = counts.iter().copied().max().expect("non-empty");
+    assert!(
+        hi <= lo * 3,
+        "the line's painted width swung from {lo} to {hi} px across sub-pixel \
+         camera motion — that pulsing is the flicker"
+    );
+}
+
+/// Conservative coverage applies **only** to sub-pixel geometry: a triangle a
+/// pixel thick or more is tested exactly as before, so ordinary meshes are
+/// untouched. Guards the `thinness` gate against widening into a silhouette
+/// fattener.
+#[test]
+fn coverage_of_ordinary_geometry_is_unchanged_by_the_thin_triangle_rule() {
+    // A chunky triangle: minimum height far above one pixel.
+    let fat = tri(
+        [[2.0, 2.0], [30.0, 2.0], [2.0, 30.0]],
+        0.5,
+        [1.0, 0.0, 0.0, 1.0],
+        1,
+    );
+    let (bytes, stats) = rasterize_one(&fat, &ctx(32, 32));
+    // Exactly the classic point-sampled result: the pixel just outside the
+    // hypotenuse stays background, no half-pixel dilation.
+    assert_eq!(px(&bytes, 32, 2, 2), [255, 0, 0, 255], "inside is filled");
+    assert_eq!(
+        px(&bytes, 32, 29, 29),
+        [0, 0, 0, 255],
+        "outside the hypotenuse stays background — no dilation"
+    );
+    assert_eq!(stats.depth_tested_pixels, stats.depth_written_pixels);
+}
