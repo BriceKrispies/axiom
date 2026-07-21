@@ -15,7 +15,17 @@ import { confettiBurst, CONFETTI_MATERIALS, sparkleRing } from "../../presentati
 import { rewardBeam, REWARD_MATERIALS, rewardMaterialOf } from "../../presentation/rewards/tiers.ts";
 import { clamp01, easeOutBack, pulse } from "../../presentation/stage/easing.ts";
 import { STAGE_MATERIALS, stageRoom } from "../../presentation/stage/props.ts";
-import { addV3, QUAT_IDENTITY, quatAxisAngle, quatPitch, quatRoll, quatYaw, v3 } from "../../presentation/stage/vectors.ts";
+import {
+  addV3,
+  QUAT_IDENTITY,
+  quatAxisAngle,
+  quatMul,
+  quatPitch,
+  quatRoll,
+  quatYaw,
+  rotateByQuat,
+  v3,
+} from "../../presentation/stage/vectors.ts";
 import { celebrationFor, outcomeRarity } from "../round-state.ts";
 import type { FishingSpec, FishingState } from "./game.ts";
 import {
@@ -63,12 +73,27 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   RegionRing: { baseColor: [0.95, 0.95, 0.85, 1], opacity: 0.35 },
   RegionRingLit: { baseColor: [1, 0.92, 0.55, 1], emissive: [0.5, 0.42, 0.15, 1], opacity: 0.6 },
   Reed: { baseColor: [0.34, 0.56, 0.28, 1] },
-  RockGrey: { baseColor: [0.62, 0.62, 0.66, 1] },
-  RockGreyDark: { baseColor: [0.44, 0.45, 0.5, 1] },
   Reticle: { baseColor: [1, 0.85, 0.4, 1], emissive: [0.65, 0.5, 0.15, 1], opacity: 0.8 },
   Ripple: { baseColor: [0.85, 0.95, 0.98, 1], opacity: 0.4 },
   RodWood: { baseColor: [0.55, 0.36, 0.22, 1] },
   SmallChest: { baseColor: [0.58, 0.37, 0.2, 1] },
+  // ── the waterfall at the back of the pond ──
+  // Wet dusk stone for the bank the fall spills over, a mossy lip cap, the
+  // translucent falling sheet, and three foam tints. This engine has no
+  // per-instance alpha, so a fading ring is expressed as a *stepped* handoff
+  // between FoamNear → FoamMid → FoamFar as the ring expands.
+  CliffMoss: { baseColor: [0.26, 0.42, 0.27, 1] },
+  CliffStone: { baseColor: [0.44, 0.45, 0.5, 1], emissive: [0.06, 0.07, 0.09, 1] },
+  CliffStoneDark: { baseColor: [0.3, 0.31, 0.36, 1] },
+  FallWater: { baseColor: [0.68, 0.88, 0.95, 1], emissive: [0.22, 0.34, 0.4, 1], opacity: 0.88 },
+  FallWaterDeep: { baseColor: [0.36, 0.6, 0.72, 1], emissive: [0.1, 0.19, 0.25, 1], opacity: 1 },
+  FallWhite: { baseColor: [0.93, 0.98, 1, 1], emissive: [0.3, 0.4, 0.46, 1], opacity: 0.9 },
+  FoamFar: { baseColor: [0.8, 0.9, 0.97, 1], opacity: 0.14 },
+  FoamMid: { baseColor: [0.85, 0.94, 0.99, 1], opacity: 0.3 },
+  FoamNear: { baseColor: [0.9, 0.97, 1, 1], opacity: 0.55 },
+  // Spray must be lit from within: an unlit low-alpha white reads as grey soot
+  // against the dusk water, so the mist carries a strong emissive term.
+  Mist: { baseColor: [0.94, 0.98, 1, 1], emissive: [0.38, 0.45, 0.5, 1], opacity: 0.5 },
 };
 
 /**
@@ -108,29 +133,6 @@ const segment = (key: string, material: string, a: EngineVec3, b: EngineVec3, th
       scale: v3(thickness, len, thickness),
     },
   };
-};
-
-/** An angular low-poly shore boulder: a rotated box body with a tilted facet cap. */
-const rock = (key: string, at: EngineVec3, size: EngineVec3, yaw: number): readonly SceneInstance[] => {
-  const tilt = 1 / Math.hypot(0.4, 1, 0.25);
-  return [
-    {
-      key: `${key}:body`,
-      material: "RockGrey",
-      mesh: "box",
-      transform: { position: at, rotation: quatYaw(yaw), scale: size },
-    },
-    {
-      key: `${key}:facet`,
-      material: "RockGreyDark",
-      mesh: "box",
-      transform: {
-        position: addV3(at, v3(0, size.y * 0.28, 0)),
-        rotation: quatAxisAngle(v3(0.4 * tilt, tilt, 0.25 * tilt), yaw + 0.9),
-        scale: v3(size.x * 0.68, size.y * 0.72, size.z * 0.68),
-      },
-    },
-  ];
 };
 
 const flatRing = (key: string, material: string, at: EngineVec3, radius: number, height = 0.02): SceneInstance => ({
@@ -180,6 +182,220 @@ const splashDroplets = (at: EngineVec3, seed: number, age: number, life: number)
   }).filter((d): d is SceneInstance => d !== null);
 };
 
+// ── the waterfall ───────────────────────────────────────────────────────────────
+
+/*
+ * The fall is built on the pond's own arc, not on a straight line: the pond is
+ * a disc of radius POND_RADIUS centred on the origin, so every piece of the
+ * bank, the sheet and the churn is placed at a polar (radius, angle) and yawed
+ * to stay tangent. That makes the whole structure convex — it curves around the
+ * shore instead of cutting a flat chord across it.
+ *
+ * Placement convention: a piece at angle `t` sits at (r·sin t, y, −r·cos t), so
+ * t = 0 is back-centre and t grows toward +X. Its outward radial is
+ * (sin t, 0, −cos t) and its tangent is (cos t, 0, sin t); since quatYaw(a)
+ * sends local +X to (cos a, 0, −sin a), a piece is made tangent by yawing by
+ * −t — which is why every arc piece below carries `quatYaw(-t)`.
+ */
+
+/** Where the fall spills: a notch in the bank at the back-left of the pond. */
+const FALL_ANGLE = -0.33;
+/** The sheet stands just inside the water's edge; the bank sits outside it. */
+const FALL_R = 2.66;
+/** Angular width of the chute — its arc length is FALL_R × FALL_SPAN. */
+const FALL_SPAN = 0.66;
+const FALL_LIP_Y = 1.3;
+/** The impact pool sits a little inside the sheet, out in open water. */
+const FALL_POOL_R = FALL_R - 0.34;
+
+/** A point on the pond's arc: `r` out from the centre at angle `t`, at height `y`. */
+const onArc = (r: number, t: number, y: number): EngineVec3 => v3(r * Math.sin(t), y, -r * Math.cos(t));
+
+/** Stepped opacity handoff standing in for a per-ring alpha fade. */
+const foamTint = (t: number): string => (t < 0.34 ? "FoamNear" : t < 0.67 ? "FoamMid" : "FoamFar");
+
+/**
+ * The waterfall: a curved stone bank notched by a chute, a translucent sheet of
+ * falling water broken into shimmering strands that follow the shoreline, and
+ * the churn where it lands — impact foam, looping rings, and drifting spray.
+ * Everything is driven from `tick` alone, so the fall is a pure function of the
+ * frame and replays identically.
+ */
+const waterfall = (tick: number): readonly SceneInstance[] => {
+  const drop = FALL_LIP_Y - WATER_Y;
+  /** One tangent-aligned block on the arc (see the placement note above). */
+  const arcBox = (key: string, material: string, r: number, t: number, y: number, scale: EngineVec3): SceneInstance => ({
+    key: `fall:${key}`,
+    material,
+    mesh: "box",
+    transform: { position: onArc(r, t, y), rotation: quatYaw(-t), scale },
+  });
+
+  /** The angle of segment `i` of `n` spread evenly across the chute. */
+  const spanAngle = (i: number, n: number): number => FALL_ANGLE + ((i - (n - 1) / 2) / (n - 1)) * FALL_SPAN;
+  /** Tangential width of one of `n` segments covering the chute, times `overlap`. */
+  const segWidth = (n: number, overlap: number): number => ((FALL_R * FALL_SPAN) / (n - 1)) * overlap;
+
+  const chuteEdge = FALL_SPAN / 2;
+
+  // The bank: a curved back wall of blocks at differing heights so the skyline
+  // is broken rather than flat, the dark recess the water pours out of, and the
+  // buttresses framing the notch — all riding the same arc as the shore.
+  const bank: SceneInstance[] = [
+    // Two side masses flanking the notch, and a dark mass behind that only ever
+    // shows as the silhouette above them.
+    ...[-1, 1].map((s) => {
+      const height = s > 0 ? 1.0 : 1.15;
+      return arcBox(`bankside${s > 0 ? "R" : "L"}`, "CliffStone", 3.36, FALL_ANGLE + s * 0.72, height / 2, v3(1.5, height, 1.4));
+    }),
+    ...[-1, 1].map((s) => {
+      const height = s > 0 ? 1.0 : 1.15;
+      return arcBox(`banksidemoss${s > 0 ? "R" : "L"}`, "CliffMoss", 3.36, FALL_ANGLE + s * 0.72, height + 0.02, v3(1.52, 0.09, 1.42));
+    }),
+    // Spread 1.6× wider than the chute — note the offset is scaled, not the
+    // angle itself, so the mass stays centred on FALL_ANGLE.
+    ...[0, 1, 2].map((i) =>
+      arcBox(`bankback${i}`, "CliffStoneDark", 3.9, FALL_ANGLE + (spanAngle(i, 3) - FALL_ANGLE) * 1.6, 0.46, v3(1.6, 0.92, 0.8)),
+    ),
+    ...[0, 1, 2].map((i) =>
+      arcBox(`chute${i}`, "CliffStoneDark", 2.98, spanAngle(i, 3), 0.58, v3(segWidth(3, 1.35), 1.28, 0.62)),
+    ),
+    ...[-1, 1].map((s) =>
+      arcBox(
+        `buttress${s > 0 ? "R" : "L"}`,
+        "CliffStone",
+        3.0,
+        FALL_ANGLE + s * (chuteEdge + 0.19),
+        s > 0 ? 0.4 : 0.46,
+        v3(0.95, s > 0 ? 1.0 : 1.12, 0.88),
+      ),
+    ),
+    ...[-1, 1].map((s) =>
+      arcBox(
+        `moss${s > 0 ? "R" : "L"}`,
+        "CliffMoss",
+        3.0,
+        FALL_ANGLE + s * (chuteEdge + 0.19),
+        s > 0 ? 0.92 : 1.04,
+        v3(1.0, 0.1, 0.92),
+      ),
+    ),
+  ];
+
+  // The sheet: a solid backing arc so the chute never shows through, faced by
+  // brighter strands whose widths breathe out of phase — the falling water
+  // shimmers instead of reading as one flat slab, and curves with the shore.
+  const strands: SceneInstance[] = [
+    ...[0, 1, 2, 3, 4].map((i) =>
+      arcBox(
+        `sheet${i}`,
+        "FallWaterDeep",
+        FALL_R - 0.09,
+        spanAngle(i, 5),
+        WATER_Y + drop / 2,
+        v3(segWidth(5, 1.5), drop, 0.14),
+      ),
+    ),
+    ...[0, 1, 2, 3, 4].map((i) =>
+      arcBox(
+        `strand${i}`,
+        "FallWater",
+        FALL_R,
+        spanAngle(i, 5),
+        WATER_Y + drop / 2,
+        v3(segWidth(5, 1.04 + Math.sin(tick * 0.07 + i * 1.9) * 0.24), drop, 0.16),
+      ),
+    ),
+  ];
+
+  // Whitewater curling over the lip, following the same arc.
+  const lip: SceneInstance[] = [
+    ...[0, 1, 2, 3, 4].map((i) =>
+      arcBox(`lip${i}`, "FallWhite", FALL_R + 0.03, spanAngle(i, 5), FALL_LIP_Y - 0.03, v3(segWidth(5, 1.45), 0.1, 0.26)),
+    ),
+    ...[0, 1, 2].map((i) =>
+      arcBox(`lipback${i}`, "FallWater", FALL_R - 0.26, spanAngle(i, 3), FALL_LIP_Y - 0.05, v3(segWidth(3, 1.3), 0.1, 0.5)),
+    ),
+  ];
+
+  // Bright streaks riding the sheet down, stretching as they accelerate — the
+  // motion cue that makes the fall read as falling rather than as a static pane.
+  const streaks: SceneInstance[] = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+    const phase = (((tick * 0.021 + i / 8) % 1) + 1) % 1;
+    const lane = (((i * 3) % 5) - 2) / 2;
+    return arcBox(
+      `streak${i}`,
+      "FallWhite",
+      FALL_R + 0.1,
+      FALL_ANGLE + lane * (chuteEdge - 0.05),
+      FALL_LIP_Y - phase * drop,
+      v3(0.09, 0.22 + phase * 0.3, 0.06),
+    );
+  });
+
+  // The churn where it lands: a curved crest of foam along the impact line,
+  // bright patches on the water, looping expansion rings, and flanking spray.
+  const impact: SceneInstance[] = [
+    ...[0, 1, 2].map((i) => {
+      const t = spanAngle(i, 3);
+      return {
+        key: `fall:churn${i}`,
+        material: "FallWhite",
+        mesh: "sphere",
+        transform: {
+          position: onArc(FALL_POOL_R + 0.26, t, WATER_Y - 0.06),
+          rotation: quatYaw(-t),
+          scale: v3(segWidth(3, 0.72), 0.26 + Math.sin(tick * 0.11 + i) * 0.03, 0.54),
+        },
+      } satisfies SceneInstance;
+    }),
+    ...[0, 1, 2].map((i) =>
+      flatRing(
+        `fall:impact${i}`,
+        "FoamMid",
+        onArc(FALL_POOL_R + 0.1, spanAngle(i, 3), WATER_Y + 0.022),
+        0.3 + Math.sin(tick * 0.09 + i) * 0.03,
+        0.014,
+      ),
+    ),
+    ...[0, 1, 2].map((i) => {
+      const t = (((tick * 0.011 + i / 3) % 1) + 1) % 1;
+      return flatRing(
+        `fall:ring${i}`,
+        foamTint(t),
+        onArc(FALL_POOL_R - 0.16, FALL_ANGLE, WATER_Y + 0.016 + i * 0.003),
+        0.5 + t * 1.5,
+        0.012,
+      );
+    }),
+    // Spray is only legible against a dark background, so it drifts out to the
+    // FLANKS of the sheet (over water and shadowed stone) rather than in front
+    // of the brightest object in the frame, where it would read as a smudge.
+    ...[0, 1, 2, 3, 4, 5].map((i) => {
+      const side = i % 2 === 0 ? -1 : 1;
+      const rank = Math.floor(i / 2);
+      const size = 0.07 + (rank % 3) * 0.025;
+      return {
+        key: `fall:mist${i}`,
+        material: "Mist",
+        mesh: "sphere",
+        transform: {
+          position: onArc(
+            FALL_R - 0.2 + Math.sin(i * 2.4) * 0.14,
+            FALL_ANGLE + side * (chuteEdge + 0.13 + rank * 0.07),
+            WATER_Y + 0.08 + Math.abs(Math.sin(tick * 0.035 + i * 0.9)) * 0.24,
+          ),
+          rotation: QUAT_IDENTITY,
+          scale: v3(size, size, size),
+        },
+      } satisfies SceneInstance;
+    }),
+  ];
+
+  return [...bank, ...strands, ...lip, ...streaks, ...impact];
+};
+
+
 // ── the catch props ─────────────────────────────────────────────────────────────
 
 const winCatch = (
@@ -188,55 +404,46 @@ const winCatch = (
   at: EngineVec3,
   spin: EngineQuat,
 ): readonly SceneInstance[] => {
-  const prop = (suffix: string, material: string, offset: EngineVec3, scale: EngineVec3, rotation = spin): SceneInstance => ({
+  // Every piece of a catch is a CHILD of the catch body: `offset` and
+  // `localRotation` are authored in the catch's own frame and composed with the
+  // parent `spin` here. Adding a world-space offset instead would leave the
+  // parts pinned in world space while the body turned — the tail, fin and eye
+  // would drift off a spinning fish, and the chest lid off a turning chest.
+  const part = (
+    suffix: string,
+    material: string,
+    mesh: string,
+    offset: EngineVec3,
+    scale: EngineVec3,
+    localRotation: EngineQuat = QUAT_IDENTITY,
+  ): SceneInstance => ({
     key: `catch:${suffix}`,
     material,
-    mesh: "box",
-    transform: { position: addV3(at, offset), rotation, scale },
+    mesh,
+    transform: {
+      position: addV3(at, rotateByQuat(offset, spin)),
+      rotation: quatMul(spin, localRotation),
+      scale,
+    },
   });
   if (family === "fish") {
     return [
-      {
-        key: "catch:body",
-        material: "FishBody",
-        mesh: "sphere",
-        transform: { position: at, rotation: spin, scale: v3(0.56, 0.3, 0.22) },
-      },
-      prop("tail", tierMaterial, v3(-0.32, 0, 0), v3(0.16, 0.2, 0.05)),
-      prop("fin", tierMaterial, v3(0.02, 0.18, 0), v3(0.2, 0.12, 0.04)),
-      {
-        key: "catch:eye",
-        material: "FishEye",
-        mesh: "sphere",
-        transform: { position: addV3(at, v3(0.2, 0.05, 0.1)), rotation: QUAT_IDENTITY, scale: v3(0.05, 0.05, 0.05) },
-      },
+      part("body", "FishBody", "sphere", v3(0, 0, 0), v3(0.56, 0.3, 0.22)),
+      part("tail", tierMaterial, "box", v3(-0.32, 0, 0), v3(0.16, 0.2, 0.05)),
+      part("fin", tierMaterial, "box", v3(0.02, 0.18, 0), v3(0.2, 0.12, 0.04)),
+      part("eye", "FishEye", "sphere", v3(0.2, 0.05, 0.1), v3(0.05, 0.05, 0.05)),
     ];
   }
   if (family === "treasure") {
     return [
-      prop("body", "SmallChest", v3(0, -0.05, 0), v3(0.44, 0.26, 0.3)),
-      prop("lid", "SmallChest", v3(0, 0.14, -0.12), v3(0.46, 0.1, 0.3), quatPitch(-0.9)),
-      {
-        key: "catch:gem",
-        material: tierMaterial,
-        mesh: "sphere",
-        transform: { position: addV3(at, v3(0, 0.22, 0)), rotation: spin, scale: v3(0.18, 0.18, 0.18) },
-      },
+      part("body", "SmallChest", "box", v3(0, -0.05, 0), v3(0.44, 0.26, 0.3)),
+      part("lid", "SmallChest", "box", v3(0, 0.14, -0.12), v3(0.46, 0.1, 0.3), quatPitch(-0.9)),
+      part("gem", tierMaterial, "sphere", v3(0, 0.22, 0), v3(0.18, 0.18, 0.18)),
     ];
   }
   return [
-    {
-      key: "catch:shell",
-      material: tierMaterial,
-      mesh: "cylinder",
-      transform: { position: at, rotation: spin, scale: v3(0.3, 0.34, 0.3) },
-    },
-    {
-      key: "catch:cap",
-      material: "BobberWhite",
-      mesh: "sphere",
-      transform: { position: addV3(at, v3(0, 0.2, 0)), rotation: spin, scale: v3(0.3, 0.18, 0.3) },
-    },
+    part("shell", tierMaterial, "cylinder", v3(0, 0, 0), v3(0.3, 0.34, 0.3)),
+    part("cap", "BobberWhite", "sphere", v3(0, 0.2, 0), v3(0.3, 0.18, 0.3)),
   ];
 };
 
@@ -341,14 +548,8 @@ export const fishingScene = (runtime: GameRuntime<FishingSpec>, state: FishingSt
     }),
   ];
 
-  // Grey angular boulders around the grass shore (a far-left cluster + accents).
-  const shore: SceneInstance[] = [
-    ...rock("rock0", v3(-2.55, 0.5, -2.7), v3(1.5, 1.1, 1.3), 0.6),
-    ...rock("rock1", v3(-1.6, 0.32, -2.95), v3(0.8, 0.7, 0.85), 2.1),
-    ...rock("rock2", v3(-3.5, 0.36, 0.1), v3(0.95, 0.8, 1.05), 1.2),
-    ...rock("rock3", v3(2.7, 0.42, -2.5), v3(1.05, 0.9, 1.0), 3.0),
-    ...rock("rock4", v3(3.5, 0.32, 0.65), v3(0.85, 0.7, 0.9), 0.3),
-  ];
+  // The waterfall spilling into the back of the pond.
+  const shore: SceneInstance[] = [...waterfall(tick)];
 
   // Region ring buoys, highlighted while the reticle rests inside.
   const hot = session.phase === "ready" ? spec.regions.findIndex((r) => Math.hypot(aim.x - r.x, aim.z - r.z) <= r.radius) : -1;
