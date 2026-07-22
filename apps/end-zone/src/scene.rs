@@ -131,16 +131,19 @@ impl EndZoneScene {
             }
         }
 
-        // Lighting: one sun + hemisphere ambient.
+        // Lighting: one sun + hemisphere ambient. The key carries the form and
+        // the ground contact shadow; the ambient only lifts the darks enough to
+        // keep them readable. Too much sky fill floods the shaded sides and the
+        // player boxes go flat — so the fill sits well below the key.
         app.add_light(
             DirectionalLight {
                 direction: Vec3::new(0.32, -1.0, 0.20),
                 color: Color::WHITE,
-                intensity: ratio(1.05),
+                intensity: ratio(1.32),
             },
             Transform::IDENTITY,
         );
-        app.set_ambient(FrameAmbient::new([0.48, 0.62, 0.82], [0.24, 0.30, 0.22]));
+        app.set_ambient(FrameAmbient::new([0.30, 0.39, 0.52], [0.15, 0.19, 0.14]));
 
         // Team part materials, indexed by part tag.
         let palette_mats =
