@@ -93,7 +93,12 @@ export class FigureLabScreen implements Screen {
   private sheetClose: Rect = { x: 0, y: 0, w: 0, h: 0 };
 
   public constructor(private readonly content: LoadedContent, private readonly nav: ScreenNav) {
-    this.quality = rendererBackendName() === "WebGL2" ? "med" : "low";
+    // The Lab gallery is an INSPECTION surface — the whole point is to read each
+    // figure's detail. On WebGL2 it renders at the HIGH quality tier (not the
+    // gameplay-mobile "med"), so the segmented plate / bevels / cape drape don't
+    // collapse at small icon size (segment counts and LOD-gated parts drop out at
+    // lower tiers). Canvas2D stays "low" as the cheap deterministic baseline.
+    this.quality = rendererBackendName() === "WebGL2" ? "high" : "low";
     this.catalog = buildCatalog(content);
   }
 
