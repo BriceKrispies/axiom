@@ -6,6 +6,7 @@
 
 pub mod animation;
 pub mod contact;
+pub mod contact_stage;
 pub mod controller;
 pub mod lineup;
 pub mod model;

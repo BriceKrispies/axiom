@@ -7,8 +7,10 @@
 //! AI stage in [`crate::ai::stage`], the ball state machine in
 //! [`crate::football::sim`], contact resolution in [`crate::player::contact`].
 
+use crate::ai::engagement::EngagementLink;
 use crate::ai::{
-    compile_assignments, AssignmentKind, Perception, PlayerIntent, ResolvedAssignment, RoleState,
+    compile_assignments, AiMemory, AssignmentKind, Perception, PlayerIntent, ResolvedAssignment,
+    RoleState,
 };
 use crate::collision_rig::CollisionRig;
 use crate::config::{EndZoneConfig, DT, PLAYER_COUNT};
@@ -22,7 +24,7 @@ use crate::football::BallSim;
 use crate::identity::PlayerId;
 use crate::physics_rig::PhysicsRig;
 use crate::player::lineup::formation_players;
-use crate::player::{contact, controller, PlayerSim};
+use crate::player::{controller, PlayerSim};
 
 /// The play lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +67,16 @@ pub struct SimState {
     pub intents: Vec<PlayerIntent>,
     pub ball: BallSim,
     pub possession: Option<PlayerId>,
+    /// The tick the current carrier gained possession (drives the catch-secure
+    /// window before he can be tackled).
+    pub(crate) possession_since: u64,
     pub quarterback: PlayerId,
+    /// Persistent AI memory: per-player commitments, the scramble counter, the
+    /// derived situation, and this tick's coordinated responsibilities.
+    pub(crate) ai_memory: AiMemory,
+    /// Per-blocker line engagements (indexed by blocker id): written by the
+    /// contact stage, read by the AI the next tick.
+    pub(crate) engagements: Vec<EngagementLink>,
     pub end_reason: Option<PlayEndReason>,
     /// The user's movement stick for this tick, offense-relative
     /// (`x` = offense right, `y` = downfield), each in `-1..=1`. Part of the
@@ -136,7 +147,10 @@ impl SimState {
             intents: vec![PlayerIntent::Hold; PLAYER_COUNT],
             ball: BallSim::dead_at(ball_spawn),
             possession: None,
+            possession_since: 0,
             quarterback,
+            ai_memory: AiMemory::new(),
+            engagements: vec![None; PLAYER_COUNT],
             end_reason: None,
             user_stick: axiom::prelude::Vec2::ZERO,
             perception: Perception::new(),
@@ -159,6 +173,7 @@ impl SimState {
         for command in commands {
             self.apply_command(*command);
         }
+        let prev_possession = self.possession;
 
         self.decide_intents();
         let phase = self.phase;
@@ -171,6 +186,9 @@ impl SimState {
         self.rig.step(self.tick);
         self.ball_post_physics();
         self.check_carrier_bounds();
+        if self.possession.is_some() && self.possession != prev_possession {
+            self.possession_since = self.tick;
+        }
 
         for player in &mut self.players {
             player.anim_ticks = player.anim_ticks.saturating_add(1);
@@ -211,6 +229,8 @@ impl SimState {
         self.players = formation_players(&self.play, &self.frame, &self.rosters);
         self.roles = vec![RoleState::Waiting; PLAYER_COUNT];
         self.intents = vec![PlayerIntent::Hold; PLAYER_COUNT];
+        self.ai_memory.reset();
+        self.engagements = vec![None; PLAYER_COUNT];
         let spawn = self
             .frame
             .to_world(OffensePoint::new(0.0, 0.0))
@@ -230,61 +250,6 @@ impl SimState {
                 .emit(SimEvent::PlayStarted { play: self.play.id });
         } else {
             self.events.emit(SimEvent::PlayReset);
-        }
-    }
-
-    /// Contact resolution: blocks (announced once per pairing per play),
-    /// the tackle, and completed falls → ordered events + play end.
-    fn resolve_contacts(&mut self) {
-        let blocks = contact::resolve_blocks(&mut self.players, &self.intents, &self.tuning);
-        for pair in &blocks {
-            if !self.engaged_blocks.contains(pair) {
-                self.engaged_blocks.push(*pair);
-                self.events.emit(SimEvent::BlockEngaged {
-                    blocker: pair.0,
-                    defender: pair.1,
-                });
-            }
-        }
-
-        let carrier = self.ball.carrier();
-        match contact::resolve_tackle(
-            &mut self.players,
-            &self.intents,
-            carrier,
-            &self.tuning,
-            &self.collision,
-        ) {
-            Some(outcome) => {
-                self.events.emit(SimEvent::TackleContact {
-                    tackler: outcome.tackler,
-                    target: outcome.target,
-                    contact_point: outcome.contact_point,
-                    contact_direction: outcome.contact_direction,
-                    relative_speed: outcome.relative_speed,
-                    strength: outcome.strength,
-                    target_airborne: outcome.target_airborne,
-                });
-                if outcome.target_airborne {
-                    self.events.emit(SimEvent::PlayerAirborne {
-                        player: outcome.target,
-                    });
-                }
-            }
-            // No tackle landed — let close, fast chasers leave their feet.
-            None => contact::commit_dives(&mut self.players, &self.intents, carrier, &self.tuning),
-        }
-
-        for (player, strength) in contact::advance_falls(&mut self.players, &self.tuning, DT) {
-            let position = self.players[player.index()].pos;
-            self.events.emit(SimEvent::GroundImpact {
-                player,
-                position,
-                strength,
-            });
-            if self.ball.carrier() == Some(player) {
-                self.end_play(PlayEndReason::Tackled);
-            }
         }
     }
 

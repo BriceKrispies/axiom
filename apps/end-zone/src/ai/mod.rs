@@ -11,15 +11,24 @@
 //! another subsystem's state. Defenders read *perceived* (delayed) state per
 //! their archetype's reaction delay rather than mirroring targets instantly.
 
+pub mod action;
 pub mod assignment;
 pub mod brain;
+pub mod commitment;
+pub mod coordination;
 pub mod defense;
+pub mod engagement;
 pub mod offense;
+pub mod perception;
+pub mod protection;
 pub mod stage;
 pub mod steering;
 
+pub use action::{Priority, ScoredAction};
 pub use assignment::{compile_assignments, AssignmentKind, ResolvedAssignment};
 pub use brain::{decide, BrainCtx, Perception, PerceptionFrame, RoleState};
+pub use commitment::{AiMemory, Commitment};
+pub use perception::{PlayPerception, PocketRegion, Responsibility};
 
 use axiom::prelude::Vec3;
 
@@ -45,8 +54,14 @@ pub enum PlayerIntent {
         face: Vec3,
         sprint: bool,
     },
-    /// Block a specific opponent at a working point.
-    Block { target: PlayerId, point: Vec3 },
+    /// Block a specific opponent: move to a leverage `point` (pocket-side of the
+    /// rusher) while squaring the body to `face` him. The explicit facing is
+    /// what lets a blocker wall and anchor instead of chasing/circling.
+    Block {
+        target: PlayerId,
+        point: Vec3,
+        face: Vec3,
+    },
     /// Chase an opponent via a predicted interception point.
     Pursue { target: PlayerId, point: Vec3 },
     /// Settle under a pass at its predicted arrival point.
@@ -97,6 +112,26 @@ impl PlayerIntent {
             | PlayerIntent::Pursue { target, .. }
             | PlayerIntent::Tackle { target, .. } => Some(target),
             _ => None,
+        }
+    }
+
+    /// Whether two intents are the *same committed action* — same kind, and same
+    /// opponent for the targeted kinds — ignoring the working point (which is
+    /// refreshed while the commitment holds). This is what lets the arbiter keep
+    /// tracking a moving target without re-committing every tick.
+    pub fn same_action(&self, other: &PlayerIntent) -> bool {
+        use PlayerIntent::*;
+        match (self, other) {
+            (Hold, Hold) | (Throw, Throw) | (Recover, Recover) => true,
+            (Face { .. }, Face { .. }) => true,
+            (MoveToward { .. }, MoveToward { .. }) => true,
+            (DropBack { .. }, DropBack { .. }) => true,
+            (PrepareCatch { .. }, PrepareCatch { .. }) => true,
+            (Carry { .. }, Carry { .. }) => true,
+            (Block { target: a, .. }, Block { target: b, .. }) => a == b,
+            (Pursue { target: a, .. }, Pursue { target: b, .. }) => a == b,
+            (Tackle { target: a, .. }, Tackle { target: b, .. }) => a == b,
+            _ => false,
         }
     }
 }

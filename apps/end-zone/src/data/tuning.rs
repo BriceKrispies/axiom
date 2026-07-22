@@ -77,6 +77,39 @@ pub struct BehaviorTuning {
     pub gravity: f32,
     /// Boundary clamp margin, yd.
     pub bounds_margin: f32,
+    /// Half-width of the protected pocket box, yd.
+    pub pocket_half_width: f32,
+    /// How far behind the line of scrimmage the pocket extends, yd.
+    pub pocket_depth: f32,
+    /// How far past the line of scrimmage still counts as in the pocket, yd.
+    pub pocket_lip: f32,
+    /// Downfield speed (yd/s) a ball-holding quarterback must show outside the
+    /// pocket to register as running.
+    pub scramble_speed: f32,
+    /// Consecutive run-showing ticks before the quarterback is deemed committed
+    /// to running (the scramble becomes a defensive event).
+    pub scramble_commit_ticks: u32,
+    /// A defender within this range of a live pass's catch point makes it a
+    /// contested ball, yd.
+    pub contest_radius: f32,
+    /// Slack (ticks) a defender may arrive after the ball and still be counted
+    /// able to contest an interception.
+    pub contest_window_ticks: u32,
+    /// Per-tick rate the engagement advantage moves, scaled by the strength edge.
+    pub engage_advantage_rate: f32,
+    /// The base advantage gain per tick at strength parity, so a held block
+    /// eventually yields (the pass rush wins if the quarterback holds forever).
+    pub engage_base_gain: f32,
+    /// Advantage at which the rusher sheds the block and breaks free, `0..=1`.
+    pub shed_threshold: f32,
+    /// Displacement speed a winning blocker drives the rusher off his lane, yd/s.
+    pub block_drive: f32,
+    /// Ticks a blocker spends squaring up before the contest counts as set.
+    pub engage_square_ticks: u32,
+    /// Ticks a fresh ball carrier is securing the ball and cannot be tackled —
+    /// a caught pass gets a beat before the hit, so a contested catch is a
+    /// catch-and-step, not an instant swarm.
+    pub catch_secure_ticks: u32,
 }
 
 impl Default for BehaviorTuning {
@@ -111,6 +144,19 @@ impl Default for BehaviorTuning {
             throw_max_range: 34.0,
             gravity: 10.72,
             bounds_margin: 0.6,
+            pocket_half_width: 5.0,
+            pocket_depth: 9.0,
+            pocket_lip: 1.5,
+            scramble_speed: 2.2,
+            scramble_commit_ticks: 12,
+            contest_radius: 3.0,
+            contest_window_ticks: 10,
+            engage_advantage_rate: 0.05,
+            engage_base_gain: 0.75,
+            shed_threshold: 0.85,
+            block_drive: 2.5,
+            engage_square_ticks: 8,
+            catch_secure_ticks: 22,
         }
     }
 }

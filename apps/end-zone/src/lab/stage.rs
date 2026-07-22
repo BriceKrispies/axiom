@@ -190,6 +190,12 @@ impl AnimLab {
             catch_radius: 1.0,
             role: RoleState::Waiting,
             intent: PlayerIntent::Hold,
+            responsibility: crate::ai::Responsibility::None,
+            action_reason: None,
+            commit_ticks: 0,
+            engagement_state: None,
+            engagement_advantage: 0.0,
+            rush_lane: None,
         };
         PresentationSnapshot {
             tick: self.tick,
@@ -207,6 +213,7 @@ impl AnimLab {
             drive_sign: 1.0,
             gravity: 0.0,
             fault: None,
+            ball_situation: crate::football::BallSituation::PreSnap,
             drive: None,
             throwable: Vec::new(),
             to_gain_z: None,

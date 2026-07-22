@@ -5,10 +5,11 @@
 
 use axiom::prelude::Vec3;
 
-use crate::ai::{PlayerIntent, RoleState};
+use crate::ai::engagement::{EngagementState, RushLane};
+use crate::ai::{PlayerIntent, Responsibility, RoleState};
 use crate::drive::DriveState;
 use crate::events::PlayEndReason;
-use crate::football::{BallSim, BallState, FlightInfo};
+use crate::football::{BallSim, BallState, BallSituation, FlightInfo};
 use crate::identity::{PlayerId, TeamId};
 use crate::player::AnimState;
 use crate::state::{PlayPhase, SimState};
@@ -29,6 +30,17 @@ pub struct PlayerView {
     pub catch_radius: f32,
     pub role: RoleState,
     pub intent: PlayerIntent,
+    /// The coordinated pursuit responsibility this tick (AI debug view).
+    pub responsibility: Responsibility,
+    /// The committed-action debug reason, if committed.
+    pub action_reason: Option<&'static str>,
+    /// Ticks of committed action left before a free switch.
+    pub commit_ticks: u32,
+    /// The line-engagement state + advantage + rush lane, if engaged as a
+    /// blocker (AI debug view).
+    pub engagement_state: Option<EngagementState>,
+    pub engagement_advantage: f32,
+    pub rush_lane: Option<RushLane>,
 }
 
 /// The immutable snapshot. Same snapshot + same effect state → same scene
@@ -49,6 +61,8 @@ pub struct PresentationSnapshot {
     pub drive_sign: f32,
     pub gravity: f32,
     pub fault: Option<&'static str>,
+    /// The football situation the AI derived this tick (AI debug view).
+    pub ball_situation: BallSituation,
     /// The authoritative drive state, when this is a real score-attack run
     /// (the ambient menu showcase leaves it `None`).
     pub drive: Option<DriveState>,
@@ -92,6 +106,12 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
             catch_radius: p.archetype.catch_radius,
             role: sim.roles[index],
             intent: sim.intents[index],
+            responsibility: sim.responsibility(p.id),
+            action_reason: sim.commitment_reason(p.id),
+            commit_ticks: sim.commitment_ticks_left(p.id),
+            engagement_state: sim.engagement(p.id).map(|e| e.state),
+            engagement_advantage: sim.engagement(p.id).map(|e| e.advantage).unwrap_or(0.0),
+            rush_lane: sim.engagement(p.id).map(|e| e.lane),
         })
         .collect();
     PresentationSnapshot {
@@ -111,6 +131,7 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
         drive_sign: sim.frame.direction.sign(),
         gravity: sim.tuning.gravity,
         fault: sim.fault(),
+        ball_situation: sim.ball_situation(),
         // The run layer fills these in for a real drive; the raw sim capture
         // is drive-agnostic.
         drive: None,

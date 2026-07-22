@@ -29,46 +29,6 @@ pub struct TackleOutcome {
     pub target_airborne: bool,
 }
 
-/// Blocking contact: every blocker in engage range walls their target — the
-/// defender's velocity is resisted by the strength contest. Returns the pairs
-/// in contact (the sim announces NEW pairs as `BlockEngaged`).
-pub fn resolve_blocks(
-    players: &mut [PlayerSim],
-    intents: &[PlayerIntent],
-    tuning: &BehaviorTuning,
-) -> Vec<(PlayerId, PlayerId)> {
-    let mut pairs = Vec::new();
-    for index in 0..players.len() {
-        let PlayerIntent::Block { target, .. } = intents[index] else {
-            continue;
-        };
-        if !players[index].anim.can_act() || !players[target.index()].anim.can_act() {
-            continue;
-        }
-        let blocker_pos = players[index].pos;
-        let defender = &players[target.index()];
-        let away = Vec3::new(
-            defender.pos.x - blocker_pos.x,
-            0.0,
-            defender.pos.z - blocker_pos.z,
-        );
-        if away.length() <= tuning.block_engage_range {
-            let win = (0.5
-                + 0.5
-                    * (players[index].archetype.block_strength
-                        - defender.archetype.block_strength))
-                .clamp(0.0, 1.0);
-            let resist = 1.0 - tuning.block_resist * win;
-            let id = players[index].id;
-            let defender = &mut players[target.index()];
-            defender.vel = defender.vel.mul_scalar(resist);
-            defender.balance = (defender.balance - 0.02).max(0.2);
-            pairs.push((id, target));
-        }
-    }
-    pairs
-}
-
 /// Tackle evaluation: the first (in tackler id order) in-range, closing-fast
 /// tackle on the carrier lands. The hit is authoritative and deterministic:
 /// impulse to the carrier, controlled stumble or airborne fall — no ragdoll.

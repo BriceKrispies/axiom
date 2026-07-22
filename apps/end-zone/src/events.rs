@@ -63,6 +63,9 @@ pub enum SimEvent {
         from: Option<PlayerId>,
         to: Option<PlayerId>,
     },
+    /// A defender broke up the pass at the catch point (a contested incompletion
+    /// — break-up only, no possession change).
+    PassBrokenUp { defender: PlayerId, position: Vec3 },
     /// The ball is live on the ground with no possessor.
     BallLoose { position: Vec3 },
     /// The ball settled on the turf.

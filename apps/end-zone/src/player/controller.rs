@@ -88,6 +88,9 @@ pub fn integrate_movement(
         let face = match *intent {
             PlayerIntent::Face { direction } => Some(direction),
             PlayerIntent::DropBack { face, .. } => Some(face),
+            // A blocker squares his body to the rusher he is walling, not to the
+            // direction he is stepping — this is what makes him anchor, not chase.
+            PlayerIntent::Block { face, .. } => Some(face),
             // A quarterback in his throwing motion is planted and aiming — he
             // holds whatever he was facing. Without this his aim (and so the
             // throwing cone) snaps to whatever residual drift he had, which

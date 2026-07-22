@@ -52,8 +52,12 @@ input (keys → DeviceFrame → InputState)
   rule the sim doesn't already produce.
 - **Player/defender behavior** → data first (`src/data/tuning.rs`, archetypes),
   then the AI stage that owns it: `src/ai/assignment.rs` (route→waypoints),
-  `src/ai/{brain,offense,defense}.rs` (intent), `src/player/controller.rs`
-  (execution — the *only* writer of player movement).
+  `src/ai/perception.rs` + `src/football/situation.rs` (the shared play model +
+  `BallSituation`), `src/ai/coordination.rs` (pursuit responsibilities),
+  `src/ai/{brain,offense,protection,defense}.rs` (scored candidates),
+  `src/ai/{action,commitment}.rs` (arbitration + commitment locking),
+  `src/ai/engagement.rs` (line contest), `src/player/controller.rs` (execution —
+  the *only* writer of player movement). See `ARCHITECTURE.md` § AI model.
 - **Ball flight / catch / tackle / fall** → `src/football/*` (state machine +
   flight through real physics), `src/player/contact.rs` (tackle/block/fall).
 - **Running / walking / foot-plant animation (skating)** →

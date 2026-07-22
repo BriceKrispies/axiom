@@ -12,12 +12,19 @@ use crate::state::{PlayPhase, SimState};
 use super::brain::{decide, BrainCtx, PerceptionFrame};
 
 impl SimState {
-    /// Stage 2 of the AI pipeline: one typed intent per player, id order.
+    /// Stage 2 of the AI pipeline: derive the shared situation, build the shared
+    /// play perception (which coordinates defensive responsibilities), then emit
+    /// one arbitrated intent per player in ascending id order, and finally let a
+    /// live user stick overwrite the ball-holder's intent.
     pub(crate) fn decide_intents(&mut self) {
+        let situation = self.update_ai_situation();
+        let perception = self.build_play_perception(situation);
+        self.ai_memory.responsibilities = perception.responsibilities;
         let end_zone_target = self
             .frame
             .to_world(OffensePoint::new(0.0, 0.0))
             .add(self.frame.forward().mul_scalar(80.0));
+        let controlled = self.controlled_player();
         let ctx = BrainCtx {
             tick: self.tick,
             live: self.phase == PlayPhase::Live,
@@ -26,6 +33,8 @@ impl SimState {
             possession: self.possession,
             players: &self.players,
             perception: &self.perception,
+            per: &perception,
+            engagements: &self.engagements,
             quarterback: self.quarterback,
             end_zone_target: Vec3::new(
                 end_zone_target
@@ -38,17 +47,22 @@ impl SimState {
         };
         let mut intents = Vec::with_capacity(PLAYER_COUNT);
         let mut roles = self.roles.clone();
+        let mut commitments = self.ai_memory.commitments;
         for index in 0..PLAYER_COUNT {
+            let user_controlled = controlled == Some(self.players[index].id);
             let intent = decide(
                 &self.players[index],
                 &self.assignments[index],
                 &mut roles[index],
+                &mut commitments[index],
                 &ctx,
+                user_controlled,
             );
             intents.push(intent);
         }
         drop(ctx);
         self.roles = roles;
+        self.ai_memory.commitments = commitments;
         self.intents = intents;
         self.apply_user_stick();
     }

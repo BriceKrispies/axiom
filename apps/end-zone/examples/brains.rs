@@ -332,6 +332,9 @@ fn event_line(ev: &SimEvent, snap: &PresentationSnapshot) -> Option<String> {
             from.map(|i| i.0),
             to.map(|i| i.0)
         ),
+        SimEvent::PassBrokenUp { defender, .. } => {
+            format!("PASS BROKEN UP by {}", who(snap, *defender))
+        }
         SimEvent::BallLoose { .. } => "ball loose".into(),
         SimEvent::BallGrounded { .. } => "ball grounded".into(),
         SimEvent::BlockEngaged { blocker, defender } => {

@@ -10,7 +10,11 @@ use crate::football::BallSim;
 use crate::identity::PlayerId;
 use crate::player::PlayerSim;
 
+use super::action::{Priority, ScoredAction};
 use super::assignment::{AssignmentKind, ResolvedAssignment};
+use super::commitment::{self, Commitment};
+use super::engagement::EngagementLink;
+use super::perception::PlayPerception;
 use super::{defense, offense, PlayerIntent};
 
 /// How many ticks of history perception keeps (bounds every reaction delay).
@@ -110,8 +114,10 @@ pub enum RoleState {
     Down,
 }
 
-/// Everything a brain may read. True player state is available (offense reads
-/// it); defenders read the delayed [`Perception`] view.
+/// Everything a brain may read. The *shared* play facts come from
+/// [`PlayPerception`] (so the team reacts to one play); the *delayed* opponent
+/// geometry a defender chases comes from the [`Perception`] ring at his own
+/// reaction delay; offense reads true [`players`](Self::players) state.
 #[derive(Debug)]
 pub struct BrainCtx<'a> {
     pub tick: u64,
@@ -122,6 +128,11 @@ pub struct BrainCtx<'a> {
     pub possession: Option<PlayerId>,
     pub players: &'a [PlayerSim],
     pub perception: &'a Perception,
+    /// The shared, read-only play model every brain keys off this tick.
+    pub per: &'a PlayPerception,
+    /// Last tick's line engagements (read-only) — the rush side checks whether
+    /// it has shed its block.
+    pub engagements: &'a [EngagementLink],
     /// The play's quarterback (so coverage can tell a passer from a runner).
     pub quarterback: PlayerId,
     /// Where a carrier should run (center of the opponent end zone).
@@ -130,44 +141,67 @@ pub struct BrainCtx<'a> {
     pub throw_commanded: bool,
 }
 
-/// Decide one player's intent for this tick, updating their role state.
-/// Downed players always emit [`PlayerIntent::Recover`].
+/// Decide one player's intent for this tick: gather this player's scored
+/// candidate actions (role-specific, but scored on one shared priority scale),
+/// then arbitrate under commitment locking. Downed players recover and drop any
+/// commitment. A user-controlled ball-holder takes the top action but holds no
+/// AI commitment (the stick overwrites it in the stage afterward).
 pub fn decide(
     player: &PlayerSim,
     assignment: &ResolvedAssignment,
     role: &mut RoleState,
+    commitment: &mut Option<Commitment>,
     ctx: &BrainCtx<'_>,
+    user_controlled: bool,
 ) -> PlayerIntent {
     if !player.anim.can_act() {
         *role = RoleState::Down;
+        *commitment = None;
         return PlayerIntent::Recover;
     }
     if *role == RoleState::Down {
         // Back on our feet: resume the assignment.
         *role = RoleState::Waiting;
     }
+
+    let mut candidates: Vec<ScoredAction> = Vec::with_capacity(6);
     // A player who holds the ball in a LIVE play carries it, whatever their
     // assignment says (the catch promotes a receiver to carrier without new
-    // data). After the whistle the holder just stands with the ball — a
-    // recovered carrier must never take off for the end zone on a dead play.
+    // data). After the whistle the holder just stands with the ball.
     if ctx.live && ctx.possession == Some(player.id) && !is_quarterback(assignment) {
         *role = RoleState::Carrying;
-        return offense::carry(player, ctx);
+        offense::carry_candidates(player, ctx, &mut candidates);
+    } else {
+        match assignment.kind {
+            AssignmentKind::Quarterback { .. }
+            | AssignmentKind::Snapper
+            | AssignmentKind::Route { .. }
+            | AssignmentKind::PassBlock
+            | AssignmentKind::LeadBlock
+            | AssignmentKind::BallCarry => {
+                offense::candidates(player, assignment, role, ctx, &mut candidates)
+            }
+            AssignmentKind::ManCover { .. }
+            | AssignmentKind::ZoneCover { .. }
+            | AssignmentKind::QuarterbackRush { .. }
+            | AssignmentKind::EdgeContain { .. }
+            | AssignmentKind::Pursuit
+            | AssignmentKind::TackleTarget => {
+                defense::candidates(player, assignment, role, ctx, &mut candidates)
+            }
+        }
     }
-    match assignment.kind {
-        AssignmentKind::Quarterback { .. }
-        | AssignmentKind::Snapper
-        | AssignmentKind::Route { .. }
-        | AssignmentKind::PassBlock
-        | AssignmentKind::LeadBlock
-        | AssignmentKind::BallCarry => offense::decide(player, assignment, role, ctx),
-        AssignmentKind::ManCover { .. }
-        | AssignmentKind::ZoneCover { .. }
-        | AssignmentKind::QuarterbackRush { .. }
-        | AssignmentKind::EdgeContain { .. }
-        | AssignmentKind::Pursuit
-        | AssignmentKind::TackleTarget => defense::decide(player, assignment, role, ctx),
+
+    if candidates.is_empty() {
+        candidates.push(ScoredAction::new(
+            PlayerIntent::Hold,
+            Priority::Leverage,
+            0.0,
+            "idle",
+            1,
+        ));
     }
+    commitment::arbitrate(&candidates, commitment, ctx.tick, user_controlled)
 }
 
 fn is_quarterback(assignment: &ResolvedAssignment) -> bool {

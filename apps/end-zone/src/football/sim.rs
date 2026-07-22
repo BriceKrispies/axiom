@@ -18,7 +18,7 @@ pub(crate) fn ball_rest() -> Vec3 {
     Vec3::new(0.0, BALL_RADIUS, 0.0)
 }
 
-use super::possession::{catch_point, evaluate_catch, CatchVerdict};
+use super::possession::catch_point;
 use super::targeting;
 use super::state::{BallState, BALL_RADIUS};
 use super::{carry_socket, solve_throw, FlightInfo};
@@ -245,40 +245,4 @@ impl SimState {
         }
     }
 
-    /// Deterministic catch resolution against the intended receiver's catch
-    /// volume, timing tolerance, and action state.
-    fn resolve_catch(&mut self, flight: FlightInfo) {
-        let receiver = &self.players[flight.intended.index()];
-        let verdict = evaluate_catch(
-            self.ball.pos,
-            receiver.pos,
-            &receiver.archetype,
-            self.tick,
-            flight.arrival_tick(),
-            receiver.anim.can_act(),
-        );
-        if verdict != CatchVerdict::OutOfReach && !self.catch_attempted {
-            self.catch_attempted = true;
-            self.events.emit(SimEvent::CatchAttempt {
-                player: flight.intended,
-            });
-        }
-        if verdict == CatchVerdict::Caught {
-            let receiver = &mut self.players[flight.intended.index()];
-            receiver.set_anim(AnimState::Catch);
-            self.ball.state = BallState::Held {
-                carrier: flight.intended,
-            };
-            self.ball.spin_rate = 0.0;
-            self.possession = Some(flight.intended);
-            self.rig.park_ball();
-            self.events.emit(SimEvent::CatchCompleted {
-                player: flight.intended,
-            });
-            self.events.emit(SimEvent::PossessionChanged {
-                from: None,
-                to: Some(flight.intended),
-            });
-        }
-    }
 }

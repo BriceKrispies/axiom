@@ -1,5 +1,8 @@
-//! Offensive role machines: quarterback, route runner, blocker, ball carrier.
-//! Generic over the data — no player- or team-special cases.
+//! Offensive candidate generators: quarterback, route runner, pass/lead
+//! blocker, ball carrier. Each pushes a few [`ScoredAction`]s onto the shared
+//! candidate buffer; the arbiter picks one. Generic over the data — no player-
+//! or team-special cases. Positional identity lives in *which* actions a role
+//! offers and their weights (spec §9); the machinery is one scored contest.
 
 use axiom::prelude::Vec3;
 
@@ -7,107 +10,185 @@ use crate::field::OffenseFrame;
 use crate::football::BallState;
 use crate::player::PlayerSim;
 
+use super::action::{Priority, ScoredAction};
 use super::assignment::{AssignmentKind, ResolvedAssignment};
 use super::brain::{BrainCtx, RoleState};
 use super::PlayerIntent;
 
 /// A route waypoint is "reached" inside this range, yards.
 const WAYPOINT_RANGE: f32 = 0.9;
+/// A loose ball inside this range is worth chasing, yards.
+const LOOSE_ALERT: f32 = 14.0;
 
-/// Decide an offensive player's intent.
-pub fn decide(
+/// Push an offensive player's candidate actions.
+pub fn candidates(
     player: &PlayerSim,
     assignment: &ResolvedAssignment,
     role: &mut RoleState,
     ctx: &BrainCtx<'_>,
-) -> PlayerIntent {
+    out: &mut Vec<ScoredAction>,
+) {
     if !ctx.live {
         *role = RoleState::Waiting;
-        return PlayerIntent::Hold;
+        out.push(ScoredAction::new(
+            PlayerIntent::Hold,
+            Priority::Assignment,
+            0.0,
+            "set",
+            1,
+        ));
+        return;
     }
+    loose_ball_candidate(player, ctx, out);
     match assignment.kind {
-        AssignmentKind::Quarterback { drop_to, .. } => quarterback(player, drop_to, role, ctx),
-        AssignmentKind::Snapper | AssignmentKind::PassBlock => pass_block(player, role, ctx),
-        AssignmentKind::LeadBlock => lead_block(player, role, ctx),
-        AssignmentKind::Route { .. } => route_runner(player, assignment, role, ctx),
+        AssignmentKind::Quarterback { drop_to } => quarterback(player, drop_to, role, ctx, out),
+        AssignmentKind::Snapper | AssignmentKind::PassBlock => {
+            super::protection::pass_block(player, role, ctx, out)
+        }
+        AssignmentKind::LeadBlock => super::protection::lead_block(player, role, ctx, out),
+        AssignmentKind::Route { .. } => route_runner(player, assignment, role, ctx, out),
         AssignmentKind::BallCarry => {
             *role = RoleState::Carrying;
-            carry(player, ctx)
+            carry_candidates(player, ctx, out);
         }
-        // Defensive kinds never reach here (dispatched in `brain`).
-        _ => PlayerIntent::Hold,
+        _ => {}
     }
 }
 
-/// The quarterback: drop back, scan, wind up on command. The simulation owns
-/// the actual release.
+/// The quarterback: drop back, scan, wind up on command, or take off if he has
+/// committed to running. The simulation owns the actual release.
 fn quarterback(
     player: &PlayerSim,
     drop_to: Vec3,
     role: &mut RoleState,
     ctx: &BrainCtx<'_>,
-) -> PlayerIntent {
+    out: &mut Vec<ScoredAction>,
+) {
     let holds_ball = ctx.possession == Some(player.id);
     match *role {
-        RoleState::QbWindup { .. } => PlayerIntent::Throw,
-        RoleState::QbDone => PlayerIntent::Hold,
+        RoleState::QbWindup { .. } => {
+            out.push(ScoredAction::new(
+                PlayerIntent::Throw,
+                Priority::BallThreat,
+                1.0,
+                "throw",
+                6,
+            ));
+        }
+        RoleState::QbDone => out.push(ScoredAction::new(
+            PlayerIntent::Hold,
+            Priority::Assignment,
+            0.0,
+            "thrown",
+            1,
+        )),
         _ => {
             if holds_ball && ctx.throw_commanded {
                 *role = RoleState::QbWindup { since: ctx.tick };
-                return PlayerIntent::Throw;
+                out.push(ScoredAction::new(
+                    PlayerIntent::Throw,
+                    Priority::BallThreat,
+                    1.0,
+                    "windup",
+                    6,
+                ));
+                return;
+            }
+            if ctx.per.qb_committed_to_run && holds_ball {
+                out.push(ScoredAction::new(
+                    PlayerIntent::Carry {
+                        point: OffenseFrame::clamp_in_bounds(ctx.end_zone_target, ctx.tuning.bounds_margin),
+                    },
+                    Priority::BallThreat,
+                    0.9,
+                    "scramble",
+                    8,
+                ));
             }
             let to_drop = drop_to.subtract(player.pos);
             let far = Vec3::new(to_drop.x, 0.0, to_drop.z).length() > 0.5;
             if far && holds_ball {
                 *role = RoleState::QbDrop;
-                // Retreat to the drop point but keep the eyes downfield: the
-                // throwing cone is measured off this facing, so a quarterback
-                // who turned to face his own end zone could never pass.
-                PlayerIntent::DropBack {
-                    point: drop_to,
-                    face: ctx.end_zone_target.subtract(player.pos),
-                    sprint: false,
-                }
+                out.push(ScoredAction::new(
+                    PlayerIntent::DropBack {
+                        point: drop_to,
+                        face: ctx.end_zone_target.subtract(player.pos),
+                        sprint: false,
+                    },
+                    Priority::Assignment,
+                    0.6,
+                    "drop",
+                    4,
+                ));
             } else if holds_ball {
                 *role = RoleState::QbScan;
-                PlayerIntent::Face {
-                    direction: ctx.end_zone_target.subtract(player.pos),
-                }
+                out.push(ScoredAction::new(
+                    PlayerIntent::Face {
+                        direction: ctx.end_zone_target.subtract(player.pos),
+                    },
+                    Priority::Assignment,
+                    0.4,
+                    "scan",
+                    2,
+                ));
             } else {
-                // Waiting on the snap flight.
-                PlayerIntent::Hold
+                out.push(ScoredAction::new(
+                    PlayerIntent::Hold,
+                    Priority::Assignment,
+                    0.0,
+                    "await-snap",
+                    1,
+                ));
             }
         }
     }
 }
 
-/// Route runner: chase waypoints; break to the ball when it is thrown to us;
-/// (the carry promotion happens in `brain::decide`).
+/// Route runner: break to a live pass thrown to us, otherwise run the route.
 fn route_runner(
     player: &PlayerSim,
     assignment: &ResolvedAssignment,
     role: &mut RoleState,
     ctx: &BrainCtx<'_>,
-) -> PlayerIntent {
-    // A live pass intended for us overrides the route.
+    out: &mut Vec<ScoredAction>,
+) {
+    // A live pass intended for us is the priority — adjust to the catch point.
     if let BallState::Airborne { flight } = ctx.ball.state {
         if flight.intended == player.id {
             *role = RoleState::CatchWork;
-            return PlayerIntent::PrepareCatch {
-                point: flight.target,
-            };
+            out.push(ScoredAction::new(
+                PlayerIntent::PrepareCatch { point: flight.target },
+                Priority::BallThreat,
+                1.0,
+                "adjust-catch",
+                4,
+            ));
+            return;
         }
     }
     let index = match *role {
         RoleState::Route { index } => index,
         RoleState::CatchWork => {
-            // The pass is gone (caught elsewhere or dead): hold position.
-            return PlayerIntent::Hold;
+            out.push(ScoredAction::new(
+                PlayerIntent::Hold,
+                Priority::Leverage,
+                0.1,
+                "pass-gone",
+                2,
+            ));
+            return;
         }
         RoleState::RouteDone => {
-            return PlayerIntent::Face {
-                direction: ctx.end_zone_target.subtract(player.pos).mul_scalar(-1.0),
-            };
+            out.push(ScoredAction::new(
+                PlayerIntent::Face {
+                    direction: ctx.end_zone_target.subtract(player.pos).mul_scalar(-1.0),
+                },
+                Priority::Leverage,
+                0.2,
+                "work-back",
+                2,
+            ));
+            return;
         }
         _ => {
             *role = RoleState::Route { index: 0 };
@@ -117,88 +198,66 @@ fn route_runner(
     match assignment.route.get(index) {
         None => {
             *role = RoleState::RouteDone;
-            PlayerIntent::Hold
+            out.push(ScoredAction::new(
+                PlayerIntent::Hold,
+                Priority::Leverage,
+                0.1,
+                "route-done",
+                2,
+            ));
         }
         Some(&waypoint) => {
             let flat = Vec3::new(waypoint.x - player.pos.x, 0.0, waypoint.z - player.pos.z);
             if flat.length() < WAYPOINT_RANGE {
                 *role = RoleState::Route { index: index + 1 };
             }
-            PlayerIntent::MoveToward {
-                point: waypoint,
-                sprint: true,
-            }
+            out.push(ScoredAction::new(
+                PlayerIntent::MoveToward { point: waypoint, sprint: true },
+                Priority::Assignment,
+                0.6,
+                "route",
+                3,
+            ));
         }
-    }
-}
-
-/// Pass protection: pick the nearest threat closing on the passer (or the
-/// carrier) and wall them off at the midpoint.
-fn pass_block(player: &PlayerSim, role: &mut RoleState, ctx: &BrainCtx<'_>) -> PlayerIntent {
-    *role = RoleState::Blocking;
-    let protect = ctx
-        .possession
-        .map(|id| ctx.players[id.index()].pos)
-        .unwrap_or(player.pos);
-    match nearest_opponent(player, ctx) {
-        Some((threat, threat_pos)) => {
-            let point = Vec3::new(
-                (threat_pos.x + protect.x) * 0.5,
-                0.0,
-                (threat_pos.z + protect.z) * 0.5,
-            );
-            PlayerIntent::Block {
-                target: threat,
-                point,
-            }
-        }
-        None => PlayerIntent::Hold,
-    }
-}
-
-/// Lead blocking: work downfield of the carrier and wall the nearest threat.
-fn lead_block(player: &PlayerSim, role: &mut RoleState, ctx: &BrainCtx<'_>) -> PlayerIntent {
-    *role = RoleState::Blocking;
-    match nearest_opponent(player, ctx) {
-        Some((threat, threat_pos)) => PlayerIntent::Block {
-            target: threat,
-            point: threat_pos,
-        },
-        None => PlayerIntent::MoveToward {
-            point: ctx.end_zone_target,
-            sprint: false,
-        },
     }
 }
 
 /// Carry the ball: run for the end zone, drifting toward the middle third.
-pub fn carry(player: &PlayerSim, ctx: &BrainCtx<'_>) -> PlayerIntent {
+pub fn carry_candidates(player: &PlayerSim, ctx: &BrainCtx<'_>, out: &mut Vec<ScoredAction>) {
     let target = Vec3::new(
         player.pos.x * 0.6 + ctx.end_zone_target.x * 0.4,
         0.0,
         ctx.end_zone_target.z,
     );
-    PlayerIntent::Carry {
-        point: OffenseFrame::clamp_in_bounds(target, ctx.tuning.bounds_margin),
+    out.push(ScoredAction::new(
+        PlayerIntent::Carry {
+            point: OffenseFrame::clamp_in_bounds(target, ctx.tuning.bounds_margin),
+        },
+        Priority::BallThreat,
+        0.9,
+        "carry",
+        6,
+    ));
+}
+
+/// Every player scrambles for a loose ball they are close to.
+fn loose_ball_candidate(player: &PlayerSim, ctx: &BrainCtx<'_>, out: &mut Vec<ScoredAction>) {
+    if !ctx.per.situation.is_loose() {
+        return;
+    }
+    let distance = flat(ctx.per.ball_pos.subtract(player.pos)).length();
+    if distance < LOOSE_ALERT {
+        let urgency = (1.0 - distance / LOOSE_ALERT).clamp(0.2, 1.0);
+        out.push(ScoredAction::new(
+            PlayerIntent::MoveToward { point: ctx.per.ball_pos, sprint: true },
+            Priority::BallThreat,
+            urgency,
+            "loose-ball",
+            4,
+        ));
     }
 }
 
-/// The nearest standing opponent (true positions — offense reads the field
-/// honestly; only defenders are perception-delayed).
-fn nearest_opponent(
-    player: &PlayerSim,
-    ctx: &BrainCtx<'_>,
-) -> Option<(crate::identity::PlayerId, Vec3)> {
-    let mut best: Option<(crate::identity::PlayerId, Vec3, f32)> = None;
-    for other in ctx.players {
-        if other.team == player.team || !other.anim.can_act() {
-            continue;
-        }
-        let d = Vec3::new(other.pos.x - player.pos.x, 0.0, other.pos.z - player.pos.z).length();
-        let closer = best.map(|(_, _, bd)| d < bd).unwrap_or(true);
-        if closer {
-            best = Some((other.id, other.pos, d));
-        }
-    }
-    best.map(|(id, pos, _)| (id, pos))
+fn flat(v: Vec3) -> Vec3 {
+    Vec3::new(v.x, 0.0, v.z)
 }

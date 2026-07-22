@@ -3,14 +3,17 @@
 //! catch evaluation. The visual model lives in [`model`]; everything else here
 //! is authoritative simulation.
 
+pub mod catch;
 pub mod flight;
 pub mod model;
 pub mod possession;
 pub mod sim;
+pub mod situation;
 pub mod state;
 pub mod targeting;
 
 pub use flight::{predict_position, solve_throw, FlightInfo};
+pub use situation::BallSituation;
 pub use targeting::{best, candidates, ThrowCandidate};
 pub use possession::{carry_socket, evaluate_catch, CatchVerdict};
 pub use state::{BallSim, BallState};

@@ -10,8 +10,16 @@ driven headlessly.
   events, trajectory, possession, intents, camera modes/poses); a second seed
   changes only seeded presentation variation.
 - `tests/football.rs`, `tests/ai.rs`, `tests/camera.rs`, `tests/field.rs` —
-  the ball state machine, the three AI stages, the camera director, and the
+  the ball state machine, the AI pipeline, the camera director, and the
   field coordinate system.
+- `tests/ai_situation.rs`, `tests/ai_coverage.rs`, `tests/ai_engagement.rs` —
+  the foundational player-AI pass: the derived `BallSituation` + scramble
+  detection, decision determinism and commitment locking; a scrambling
+  quarterback becoming the priority, non-duplicated pursuit responsibilities,
+  deep leverage, predictive catch-point / intercept / tackle-angle reactions and
+  the shared loose-ball response; and the line engagement — an offensive lineman
+  squaring and anchoring, a block that doesn't oscillate, the rush advantage
+  building, the eventual shed/sack, and a strong blocker delaying it.
 - `tests/controls.rs` — a zero stick reproduces the scripted showcase
   bit-for-bit; user steering only overrides the ball holder's AI intent.
 

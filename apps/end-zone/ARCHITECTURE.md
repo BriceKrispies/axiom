@@ -186,15 +186,45 @@ AGAIN rolls a fresh explicit seed through the frontend's seed boundary.
 
 ## AI model
 
-Three stages (`src/ai/`): **assignment evaluation** (`assignment.rs` resolves
-the play's per-slot data — routes compiled to world waypoints through the
-offense frame), **intent** (`brain.rs` dispatch + `offense.rs`/`defense.rs`
-role machines emit typed `PlayerIntent`s), **execution**
-(`player/controller.rs`, the only writer of player movement, under
-acceleration/turn-rate limits with teammate-only separation and boundary
-clamping). Defenders read a DELAYED perception ring (per-archetype reaction
-delay) and pursue with bounded, aggressiveness-scaled prediction — no perfect
-mirroring. All tuning lives in `data/tuning.rs` and the archetypes.
+The AI is a football-specific decision layer over a single shared play model, in
+one direction (`src/ai/`):
+
+1. **Assignment** (`assignment.rs`) resolves the play's per-slot data — routes
+   compiled to world waypoints through the offense frame.
+2. **Situation + perception** (`football/situation.rs`, `ai/perception.rs`): each
+   tick derives a `BallSituation` (an AI-facing *view* over the authoritative
+   `BallState` — adding a *committed-to-run* quarterback and a *contested* catch
+   window; never a second state machine) and builds one read-only
+   `PlayPerception` — the shared, delay-invariant play facts (situation, ball /
+   catch geometry, pocket, run commitment, and the coordinated responsibilities).
+   `ai/coordination.rs` is a stateless geometric pass that hands each defender one
+   pursuit responsibility (primary / contain / cutback / deep, or intercept /
+   contest / tackle-angle on a thrown ball) so the team keeps shape without
+   duplicating an angle.
+3. **Candidate generation + arbitration** (`brain.rs`, `offense.rs`,
+   `protection.rs`, `defense.rs`, `action.rs`, `commitment.rs`): every role emits
+   a few scored `ScoredAction`s on one shared priority scale (ball threat →
+   prevent score → assignment → leverage → recover); the arbiter picks one under
+   **commitment locking** (hysteresis) so players don't thrash. Positional
+   identity lives in *which* actions a role offers; the machinery is one scored
+   contest, not per-role conditionals.
+4. **Execution** (`player/controller.rs`, the only writer of player movement,
+   under acceleration/turn-rate limits with teammate-only separation and boundary
+   clamping).
+
+Defenders still read a DELAYED perception ring (per-archetype reaction delay) for
+the opponent geometry they chase, so the *shared situation* makes the team
+coherent while individual reaction latency is preserved. **Line engagements**
+(`ai/engagement.rs`) model each block as a deterministic contest whose *advantage*
+builds over time (a strong blocker delays, but the rush eventually sheds and gets
+home — never a global speed boost); the contact stage (`player/contact_stage.rs`)
+advances it and applies the physical resist + pocket-compressing displacement. A
+fresh catch has a brief **catch-secure** window before it can be tackled, so a
+contested catch is a catch-and-step, not an instant swarm. Interceptions are
+**break-up only** this pass (a defender at the catch point knocks the pass
+incomplete — no possession change). The persistent AI state is two parallel
+fields on `SimState` (`ai_memory`, `engagements`); everything else is a per-tick
+local. All tuning lives in `data/tuning.rs` and the archetypes.
 
 ## Contact framework
 

@@ -203,6 +203,20 @@ pub fn overlay_rows(
         ),
         ("debug (F1)".to_string(), debug_enabled.to_string()),
     ];
+    if debug_enabled {
+        let selected = snapshot.player(snapshot.quarterback);
+        rows.push(("situation".to_string(), snapshot.ball_situation.label().to_string()));
+        rows.push((
+            "action".to_string(),
+            format!(
+                "{} · {}t",
+                selected.action_reason.unwrap_or("-"),
+                selected.commit_ticks
+            ),
+        ));
+        rows.push(("coverage".to_string(), ai_coverage_summary(snapshot)));
+        rows.push(("line".to_string(), ai_line_summary(snapshot)));
+    }
     if let Some(fault) = snapshot.fault {
         rows.push(("fault".to_string(), fault.to_string()));
     }
@@ -210,6 +224,39 @@ pub fn overlay_rows(
         locomotion::push_locomotion_rows(&mut rows, snapshot.player(snapshot.quarterback).speed, loco);
     }
     rows
+}
+
+/// A compact summary of every defender's coordinated responsibility this tick.
+fn ai_coverage_summary(snapshot: &PresentationSnapshot) -> String {
+    let parts: Vec<String> = snapshot
+        .players
+        .iter()
+        .filter(|p| p.responsibility != crate::ai::Responsibility::None)
+        .map(|p| format!("#{}:{}", p.jersey, p.responsibility.label()))
+        .collect();
+    if parts.is_empty() {
+        "-".to_string()
+    } else {
+        parts.join("  ")
+    }
+}
+
+/// A compact summary of every live line engagement (blocker → advantage/state).
+fn ai_line_summary(snapshot: &PresentationSnapshot) -> String {
+    let parts: Vec<String> = snapshot
+        .players
+        .iter()
+        .filter_map(|p| {
+            p.engagement_state.map(|state| {
+                format!("#{}:{}{:+.1}", p.jersey, state.label(), p.engagement_advantage)
+            })
+        })
+        .collect();
+    if parts.is_empty() {
+        "-".to_string()
+    } else {
+        parts.join("  ")
+    }
 }
 
 fn intent_name(intent: &PlayerIntent) -> &'static str {

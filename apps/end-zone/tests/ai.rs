@@ -175,12 +175,11 @@ fn team_data_changes_behavior_without_changing_ai_code() {
         }
         sim.end_reason
     };
-    // The completed-pass outcome is `BrokeFree` since the quarterback's
-    // drop-back was fixed to hold its facing downfield: he now backpedals
-    // instead of running away from the play, which moves the release point and
-    // so where the catch happens. The point of this test is unchanged — one
-    // archetype number, flipped, changes how the play resolves.
-    assert_eq!(run(false), Some(PlayEndReason::BrokeFree));
+    // With the coordinated defense, the completed pass is now run down and
+    // `Tackled` rather than breaking free. The point of this test is unchanged —
+    // one archetype number, flipped (a zero catch volume), turns the completion
+    // into an `Incomplete`.
+    assert_eq!(run(false), Some(PlayEndReason::Tackled));
     assert_eq!(run(true), Some(PlayEndReason::Incomplete));
 }
 
