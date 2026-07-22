@@ -76,8 +76,16 @@ const ironbound = (seed: number, tier: Tier): FigurePartDefinition[] => {
     // Overlapping pauldrons: a big beveled cap dome with a lower lame layered under it.
     P("shoulder", "torso", "shoulder", "plate", "accent", vec3(w * 0.62, 0.28, 0), vec3(0.26, 0.2, 0.34), { mirror: { axis: "x", idSuffix: "_r" } }),
     P("pauldron_cap", "torso", "shoulder", "rounded_box", "metal", vec3(w * 0.66, 0.36, 0), vec3(0.36, 0.22, 0.42), { rot: vec3(0, 0, -0.16), mirror: { axis: "x", idSuffix: "_r" } }),
-    P("arm", "torso", "upper_arm", "box", "primary", vec3(w * 0.66, -0.02, 0), vec3(0.17, 0.5, 0.18), { mirror: { axis: "x", idSuffix: "_r" } }),
-    P("leg", "base", "thigh", "box", "primary", vec3(w * 0.36, 0.34, 0), vec3(0.19, 0.5, 0.2), { mirror: { axis: "x", idSuffix: "_r" } }),
+    // Articulated arm on BOTH sides: an upper arm, a beveled forearm couter, and a
+    // chunky gauntlet fist at the wrist — so each limb terminates in a fist (a
+    // defining knight silhouette) instead of a stub. All mirrored across x.
+    P("arm", "torso", "upper_arm", "box", "primary", vec3(w * 0.66, 0.1, 0), vec3(0.17, 0.3, 0.18), { mirror: { axis: "x", idSuffix: "_r" } }),
+    P("forearm", "torso", "fore_arm", "rounded_box", "metal", vec3(w * 0.66, -0.3, 0.02), vec3(0.155, 0.24, 0.165), { mirror: { axis: "x", idSuffix: "_r" } }),
+    P("fist", "torso", "hand", "rounded_box", "metal", vec3(w * 0.66, -0.58, 0.05), vec3(0.18, 0.16, 0.2), { mirror: { axis: "x", idSuffix: "_r" } }),
+    // Braced heavy-warrior stance: the legs plant SHOULDER-WIDE so the two thighs
+    // read as a distinct, grounded pair (at w*0.36 their inner edges crossed the
+    // centreline and fused into one limp central pillar — a mannequin, not a bruiser).
+    P("leg", "base", "thigh", "box", "primary", vec3(w * 0.58, 0.34, 0), vec3(0.19, 0.5, 0.2), { mirror: { axis: "x", idSuffix: "_r" } }),
   ];
   // Weapon in the right hand (a fixed hero hand, not mirrored).
   parts.push(P("hand", "torso", "hand", "box", "metal", vec3(w * 0.72, -0.32, 0.08), vec3(0.16, 0.16, 0.16), { attach: "right_hand" }));
@@ -92,7 +100,7 @@ const ironbound = (seed: number, tier: Tier): FigurePartDefinition[] => {
   // Off hand shield for durable silhouettes.
   parts.push(P("shield", "torso", "shield", "plate", "accent", vec3(-w * 0.78, -0.05, 0.12), vec3(0.36, 0.56, 0.1), { rot: vec3(0, 0.2, 0) }));
   // Segmented tassets guarding the hips (a second waist layer under the fauld).
-  parts.push(P("tasset", "base", "thigh", "plate", "metal", vec3(w * 0.36, 0.5, 0.12), vec3(0.24, 0.32, 0.14), { tierMin: 2, rot: vec3(0.12, 0, 0), mirror: { axis: "x", idSuffix: "_r" } }));
+  parts.push(P("tasset", "base", "thigh", "plate", "metal", vec3(w * 0.52, 0.5, 0.12), vec3(0.24, 0.32, 0.14), { tierMin: 2, rot: vec3(0.12, 0, 0), mirror: { axis: "x", idSuffix: "_r" } }));
   // A lower pauldron lame that overlaps the cap, added as the figure gets fancier.
   parts.push(P("pauldron_lame", "torso", "shoulder", "plate", "metal", vec3(w * 0.66, 0.15, 0.02), vec3(0.32, 0.13, 0.38), { tierMin: 3, lodMin: "med", rot: vec3(0.22, 0, -0.1), mirror: { axis: "x", idSuffix: "_r" } }));
   // Tier embellishments.

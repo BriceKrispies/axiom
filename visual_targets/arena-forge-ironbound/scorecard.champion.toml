@@ -1,22 +1,40 @@
-# Champion scorecard — arena-forge-ironbound  (ROUND 4, critic re-score of the
-# PROMOTED pass-3 render)
+# Champion scorecard — arena-forge-ironbound  (ROUND 5, critic re-score of the
+# RE-SEEDED champion — new build: specular/Fresnel + highlight tonemap + per-vertex
+# AO + enriched geometry)
 #
 # Substrate: pure-TypeScript arena-forge "Figure Lab / Ironbound gallery" on
 # @axiom/web-engine (NOT the Rust engine).
 #
-# What changed since round 3: the champion.png at base 4f7586c6 is NO LONGER the
-# pass-2 render — it is the promoted "pass-3 (7 lenses stacked, no drops)" render.
-# The visible pass-3 movement over pass-2 is: a circular copper GEAR EMBLEM now
-# sits on the chest of EVERY figure (not just the selected Vanguard), box ARMS are
-# now hung at the figures' sides (completing the humanoid part inventory), the
-# background is a WARMER near-black (a faint warm-brown cast rather than pure
-# black), and the overall CONTRAST is deeper (the bright light-grey plinth/base
-# reads harder against the dark torso). As in rounds 2 and 3, the prior scorecard
-# scored (and described) the PASS-2 render, so the record no longer matched the
-# image it claims to score; this round-4 pass re-scores the PROMOTED pass-3 render
-# against the same identity bar so the record matches the image again. All twelve
-# values are UNCHANGED from round 3 — the pass-3 movement is real but sub-threshold
-# (below).
+# What changed since round 4: the champion.png at base 6eb42738 ("champion: re-seed
+# with current build (specular/tonemap/AO + enriched geometry)") is NO LONGER the
+# pass-3 flat-Lambert box render. Since round 4 the @axiom/web-engine spine itself
+# gained REAL specular/Fresnel highlights, a highlight tonemap, and per-vertex AO,
+# and the figures gained beveled plates, layered armor, roughness authoring, and
+# contact shadows — and champion.png was RE-SEEDED onto that new build. The re-seed
+# commit swapped ONLY the PNG (a binary swap; it touched no scorecard, no ledger, no
+# app source), so — exactly as in rounds 2/3/4 — the prior scorecard scored (and
+# described) the OLD image and no longer matched the image it claims to score. This
+# round-5 pass re-scores the RE-SEEDED render FROM SCRATCH against the same identity
+# bar (the prior 1.12 was NOT assumed) so the record matches the image again.
+#
+# The visible movement over the pass-3 render is a MATERIAL/SHADING upgrade: the box
+# faces now carry directional specular pops on their top edges, AO darkening in the
+# crevices and leg-gaps, a tonemapped highlight roll-off, and a soft contact shadow
+# under the base — a genuine step up from the pass-3 flat-Lambert wash. The figure
+# geometry reads marginally richer (a faint beveled/layered plate hint). This is
+# REAL convergence, NOT number-gaming.
+#
+# BUT — re-scored FROM SCRATCH, harshly, against IDENTITY — none of it crosses a
+# full identity point. The render still unmistakably reads as a STACK OF SHADED
+# BOXES on a dark field: no great-helm form, no segmented/riveted plate, no glowing
+# eyes, no draped torn cloth, no warm directional RIM light, no dramatic painted
+# chiaroscuro, mustard-not-olive capes. Every DEFINING per-axis reference feature is
+# still absent; the new engine work is surface polish ON the boxes, not an identity
+# crossing. I explicitly considered a 1->2 bump on the three material-adjacent axes
+# the engine work most touches — lighting_and_shadow, contrast_and_exposure and
+# armor_plating_detail — and HELD all three per take-the-lower (reasoned per axis
+# below). All twelve values are therefore UNCHANGED from round 4 — the re-seed
+# movement is real but SUB-THRESHOLD. FIFTH-round plateau at 1.12.
 #
 # The reference is a polished low-poly art gallery: eight distinct armored knights
 # in dark iron PLATE — great-helms with visor slits and glowing eyes, beveled
@@ -25,30 +43,38 @@
 # drill arm, gear banners), each on a stone plinth, warm rim-lit against black,
 # with name + tier labels and a warm-glowing selected tile.
 #
-# The champion is STILL a crude BOX-FIGURE proxy: each unit is a stack of flat
-# boxes (single-box head with a faint visor band, box torso now bearing a copper
-# ring/gear emblem, box arms at the sides, box legs on a lighter plinth/base
-# block), flat mustard-olive rectangular slabs standing in for capes, burnt-copper
-# box shoulders, and — on some — a single spike for a plume/banner or a drill. The
-# pass-3 changes added the chest emblem, side arms, a warmer near-black backdrop
-# and deeper contrast, but there is still no helm FORM, no plate segmentation, no
-# rivets, no bevels, no shields, no articulated limbs, no plinth stonework.
+# The champion is STILL a crude BOX-FIGURE proxy — now with better materials: each
+# unit is a stack of boxes (single-box head with a faint visor band, box torso
+# bearing a copper ring/gear emblem, box arms at the sides, box legs on a lighter
+# plinth/base block), flat mustard-olive rectangular slabs standing in for capes,
+# burnt-copper box shoulders, and — on some — a single spike for a plume/banner or a
+# drill. The re-seed added directional specular highlights, per-vertex AO, a
+# tonemapped highlight roll-off, a soft contact shadow, and a faint beveled/layered
+# plate hint, but there is still no helm FORM, no plate segmentation, no rivets, no
+# clearly-read plate layers, no shields, no articulated limbs, no plinth stonework.
 #
 # Scored HARSHLY against IDENTITY: the bar is "indistinguishable from
 # reference.png", NOT "reads as an armored figure". When unsure between two scores,
-# the LOWER was taken. The pass-3 render shows GENUINE but SUB-THRESHOLD movement
-# on subject/armor/palette/contrast/lighting — real convergence that does NOT yet
-# cross a full identity point. Per the take-the-lower rule those axes HOLD; they
-# are not bumped to manufacture visible "progress" (that would be number-gaming).
+# the LOWER was taken. The re-seeded render shows GENUINE but SUB-THRESHOLD movement
+# on the material/shading axes (lighting, contrast, armor material read) — real
+# convergence that does NOT yet cross a full identity point. Per the take-the-lower
+# rule those axes HOLD; they are not bumped to manufacture visible "progress" (that
+# would be number-gaming — exactly what this lens exists to prevent).
 #
-# PLATEAU: final_score has held at 1.12 for FOUR straight rounds (seed, pass-1,
-# pass-2, pass-3). subject_fidelity has now absorbed its THIRD bounded box-geometry
-# attempt (round-1 helm brow, round-2 legs+boots, round-3 chest-emblem+side-arms)
-# and STILL reads 1. Three failed bounded attempts on one axis is exactly the
-# abstraction-gate threshold — the gate is now OPEN; see the round-4 ledger entry
-# for the verdict (a real plate/mesh geometry abstraction is now justified, and the
-# pass that actually builds it will owe an abstractions/NNNN.toml). No abstraction
-# has been built yet, so none is owed THIS round.
+# PLATEAU: final_score has now held at 1.12 for FIVE straight rounds (seed, pass-1,
+# pass-2, pass-3, re-seed). subject_fidelity has absorbed THREE bounded box-geometry
+# attempts (round-1 helm brow, round-2 legs+boots, round-3 chest-emblem+side-arms)
+# plus this re-seed's beveled/layered geometry enrichment, and STILL reads 1. The
+# abstraction gate for subject_fidelity is OPEN (>=3 failed bounded attempts + the
+# box vocabulary is genuinely inexpressive of plate-knight form); the re-seed did
+# NOT build the real figure-mesh/plate primitive that would break the plateau — its
+# geometry enrichment is still box-composition riding NEW ENGINE-LEVEL material
+# features (specular/Fresnel/tonemap/AO). Those engine features are general
+# @axiom/web-engine spine capabilities that landed independently and are governed by
+# the engine's OWN gates (ts-gate, coverage, branchless) — they are NOT
+# convergence-introduced app primitives, so no abstractions/NNNN.toml is owed HERE.
+# A record IS owed by the future pass that finally builds a genuine new FIGURE-mesh/
+# plate primitive to move subject_fidelity off 1.
 #
 # final_score = lowest_axis * 0.7 + average_axis * 0.3
 # Lowest axis (ties broken by the fixed order below) = the next flaw to attack.
@@ -84,11 +110,13 @@ subject_fidelity = 1
 # still flattened away.
 silhouette_readability = 1
 
-# 1 (HOLD, real sub-threshold gain) — a circular copper RING/GEAR emblem now sits
-# on every chest, which is the single closest nod yet to the reference's riveted
-# gear-emblem torso plates. But it is one flat ring on a flat box: no segmented or
-# beveled plates, no rivets, no layered pauldrons, no articulated plate limbs.
-# Sub-threshold; take-the-lower holds it at 1.
+# 1 (HOLD, real sub-threshold gain) — the re-seed's roughness authoring + specular
+# now make the plates read as METAL rather than flat matte, and a faint beveled/
+# layered plate hint has appeared. That is a real MATERIAL gain. But the geometric
+# plating IDENTITY is still absent: the torso is still essentially one box with a
+# copper ring, no clearly-read segmented/riveted plates, no distinct layered
+# pauldrons, no articulated plate limbs. A metal-looking box is not modeled plate.
+# Borderline 1/2; take-the-lower holds it at 1.
 armor_plating_detail = 1
 
 # 1 (HOLD) — the head is still a plain grey box with at most a faint horizontal
@@ -116,18 +144,23 @@ cape_and_cloth = 1
 # not inflated to 3.
 color_palette = 2
 
-# 1 (HOLD, real sub-threshold gain) — the copper chest emblem now catches a small
-# radial highlight and the warmer near-black backdrop reads more like a lit stage
-# than pass-2's flat black. That is real. But there is still no warm directional
-# RIM light separating figure from ground, no glowing eyes, and no per-tile
-# vignette (only the selected tile carries a warm glow). Borderline 1/2;
-# take-the-lower holds it at 1.
+# 1 (HOLD, real sub-threshold gain — considered 1->2, held) — the re-seed's REAL
+# specular/Fresnel highlights, per-vertex AO and a soft contact shadow under the
+# base are a genuine step up from the pass-3 flat wash: surfaces now catch a
+# directional key and settle onto the tile. I explicitly weighed a bump to 2. Held
+# at 1 because the reference's DEFINING lighting identity — a warm directional RIM
+# separating figure from black, glowing visor eyes, a per-tile stage vignette — is
+# still entirely absent; a neutral key + specular on a box is a MATERIAL property,
+# not the reference's lit-stage identity. Take-the-lower holds it at 1.
 lighting_and_shadow = 1
 
-# 1 (HOLD, real sub-threshold gain) — pass-3's deeper contrast gives a punchier
-# light-to-dark range (bright plinth/base block hard against the dark torso) than
-# pass-2's flatter ramp. But the bright WARM highlights the reference shows across
-# the plate are still absent. Borderline 1/2; take-the-lower holds it at 1.
+# 1 (HOLD, real sub-threshold gain — considered 1->2, held) — the re-seed's
+# tonemapped highlight roll-off + AO-darkened crevices widen the tonal range beyond
+# pass-3's flatter ramp: real bright speculars now sit against real dark recesses. I
+# explicitly weighed a bump to 2. Held at 1 because the overall frame still reads
+# dark and modestly-shaded, NOT the reference's dramatic painted chiaroscuro with
+# bright WARM highlights raked across every plate; the range widened but the punchy
+# painted exposure identity is not there. Take-the-lower holds it at 1.
 contrast_and_exposure = 1
 
 # 2 (HOLD) — arms + legs + base read marginally more like a full figure, but
@@ -136,9 +169,10 @@ contrast_and_exposure = 1
 scale_and_proportion = 2
 
 # 3 (HOLD) — the render is still clean: no stray/broken geometry, no z-fighting, no
-# glitch pixels. Held below 4 because the detached floating slab capes and head/
-# banner spikes still read as slightly un-anchored, but there are no true artifacts,
-# and the chest-emblem/arms/warm-backdrop/contrast pass introduced none.
+# glitch pixels, and the re-seed's specular/tonemap/AO introduced no blown
+# highlights or banding. Held below 4 because the detached floating slab capes and
+# head/banner spikes still read as slightly un-anchored (the new contact shadow
+# helps the base sit, but the capes still float), but there are no true artifacts.
 artifact_level = 3
 
 # lowest_axis = 1 — an eight-way tie (subject_fidelity, silhouette_readability,
@@ -146,9 +180,9 @@ artifact_level = 3
 #   lighting_and_shadow, contrast_and_exposure). The fixed order breaks the tie ->
 #   subject_fidelity is the next flaw.
 # average = (2+1+1+1+1+1+1+2+1+1+2+3)/12 = 1.417
-# final_score = 1*0.7 + 1.417*0.3 = 1.12  (UNCHANGED from rounds 1, 2 & 3 — the
-#   pass-3 movement was real but sub-threshold; no axis crossed a full identity
-#   point. FOUR-round plateau at 1.12.)
+# final_score = 1*0.7 + 1.417*0.3 = 1.12  (UNCHANGED from rounds 1-4 — the re-seed's
+#   material/geometry movement was real but sub-threshold; no axis crossed a full
+#   identity point. FIVE-round plateau at 1.12.)
 [summary]
 lowest_axis = "subject_fidelity"
 average = 1.42

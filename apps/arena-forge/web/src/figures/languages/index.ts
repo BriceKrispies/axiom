@@ -19,10 +19,10 @@ export const hexToRgba = (hex: string, alpha = 1): Rgba => {
 const IRONBOUND: GroupVisualLanguage = {
   id: "ironbound",
   palette: {
-    primary: hexToRgba("#6b7280"),
+    primary: hexToRgba("#828b98"),
     secondary: hexToRgba("#3a4149"),
-    accent: hexToRgba("#c8933f"),
-    metal: hexToRgba("#8a94a6"),
+    accent: hexToRgba("#bf7d2a"),
+    metal: hexToRgba("#a7b1c2"),
     emissive_core: hexToRgba("#7a4a1a"),
     glow: hexToRgba("#f0a850"),
     eye: hexToRgba("#ffcf7a"),
@@ -31,7 +31,7 @@ const IRONBOUND: GroupVisualLanguage = {
   emissiveRoles: { emissive_core: hexToRgba("#c8681a"), glow: hexToRgba("#ff9a3d"), eye: hexToRgba("#ffcf7a") },
   // Forged-metal knights: bare metal + plate roles are glossy; the brass accent trim,
   // cape/banner, and painted secondary read matte.
-  roughnessRoles: { metal: 0.22, primary: 0.34, secondary: 0.6, accent: 0.68 },
+  roughnessRoles: { metal: 0.16, primary: 0.28, secondary: 0.6, accent: 0.68 },
   preferredPrimitives: ["box", "rounded_box", "cylinder", "wedge", "plate"],
   jointStyle: "rigid",
   defaultAnimation: "ironbound_default",

@@ -37,8 +37,12 @@ const PX_PER_UNIT = 96;
 const FOV_Y = 0.5;
 /** Radians per tick of the slow turntable spin (~14°/s at 60Hz). */
 const SPIN_PER_TICK = 0.004;
-/** Fraction of an icon cell the figure's bounding height fills. */
-const FIT = 0.86;
+/** Fraction of an icon cell the figure's bounding height fills. Held well under 1
+ * so the full head-to-pedestal silhouette (and any raised banner/spike) reads
+ * inside the cell with a clear margin band — the reference frames each miniature
+ * as a roomy portrait rather than packing it edge-to-edge and cropping the
+ * feet/banner against the cell rim. */
+const FIT = 0.7;
 const Y_AXIS: Vec3 = vec3(0, 1, 0);
 
 export class FigureLabScreen implements Screen {

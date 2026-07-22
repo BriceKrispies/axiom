@@ -342,3 +342,120 @@ lighting_and_shadow = 1
 contrast_and_exposure = 1
 scale_and_proportion = 2
 artifact_level = 3
+
+[[iteration]]
+iteration = 4
+attacked_axis = "subject_fidelity"
+changed_files = [
+  "visual_targets/arena-forge-ironbound/scorecard.champion.toml",
+  "visual_targets/arena-forge-ironbound/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic lens ROUND-5 re-score of the RE-SEEDED champion. Since round 4 the
+champion.png was replaced at base 6eb42738 ("champion: re-seed with current build
+(specular/tonemap/AO + enriched geometry)"). Unlike rounds 1-4 (which promoted an
+app-lens render), this swap rides ENGINE evolution: the @axiom/web-engine spine
+itself gained REAL specular/Fresnel highlights, a highlight tonemap, and
+per-vertex AO, and the figures gained beveled plates, layered armor, roughness
+authoring, and contact shadows. The re-seed commit swapped ONLY the PNG (a binary
+swap; git show --stat shows one file, champion.png, changed - no scorecard, no
+ledger, no app source), so the round-4 scorecard still scored (and described) the
+OLD pass-3 flat-Lambert render and no longer matched the image it claims to score
+- the same record-accuracy problem rounds 2/3/4 each corrected for their swap.
+This entry re-scores the re-seeded render FROM SCRATCH (the prior 1.12 was NOT
+assumed) so the record matches the image again.
+
+Substrate: arena-forge "Figure Lab / Ironbound gallery" is a PURE-TYPESCRIPT app
+on @axiom/web-engine, not the Rust engine.
+
+Re-scored the re-seeded render harshly against IDENTITY (bar = "indistinguishable
+from reference.png"). Direct pass3-vs-re-seed comparison shows GENUINE, real
+movement - a MATERIAL/SHADING upgrade: the box faces now catch directional
+specular pops on their top edges, AO darkens the crevices and leg-gaps, a
+tonemapped highlight roll-off gives real bright-to-dark range, a soft contact
+shadow settles the figures onto their tiles, and the geometry reads marginally
+richer (a faint beveled/layered plate hint). This is real convergence, NOT
+number-gaming.
+
+BUT none of it crosses a full identity point. The render still unmistakably reads
+as a STACK OF SHADED BOXES on a dark field: no great-helm form, no
+segmented/riveted plate, no clearly-read plate layers, no glowing eyes, no draped
+torn cloth, no warm directional RIM light, no dramatic painted chiaroscuro,
+mustard-not-olive capes. The new engine work is surface polish ON the boxes, not
+an identity crossing.
+
+Calibration verdict: scores are HONEST at the round-4 values. I EXPLICITLY weighed
+a 1->2 bump on the three material-adjacent axes the engine work most touches and
+HELD all three per take-the-lower:
+ - lighting_and_shadow: real specular/Fresnel + AO + contact shadow, but the
+   reference's DEFINING lighting identity (warm directional rim separating figure
+   from black, glowing visor eyes, per-tile stage vignette) is still entirely
+   absent - a neutral key + specular on a box is a material property, not the
+   lit-stage identity. Held at 1.
+ - contrast_and_exposure: tonemapped highlights + AO widen the tonal range, but
+   the frame still reads dark/modestly-shaded, not the reference's punchy painted
+   chiaroscuro with warm highlights raked across every plate. Held at 1.
+ - armor_plating_detail: roughness + specular make the plates read as METAL, but
+   the geometric plating identity (segmented/riveted/layered plates, articulated
+   limbs) is still absent - a metal-looking box is not modeled plate. Held at 1.
+No inflation found; the twelve numbers are unchanged. Only the scorecard's
+descriptive prose/header were updated from "pass-3 / ROUND 4" to "re-seed /
+ROUND 5" so the record matches the image it now scores. No non-attacked axis
+regressed >=2 (the specular/tonemap could have blown highlights or darkened
+figures into black; it did neither - figures stay readable, no reject owed).
+
+Right-axis check: lowest_axis = 1 (eight-way tie: subject_fidelity,
+silhouette_readability, armor_plating_detail, helmet_and_head,
+weapons_and_attachments, cape_and_cloth, lighting_and_shadow,
+contrast_and_exposure). The fixed axis order breaks the tie to subject_fidelity
+- still the correct next attack.
+
+PLATEAU: final_score has now held at 1.12 for FIVE straight rounds (seed, pass-1,
+pass-2, pass-3, re-seed). The material/geometry engine work raised render QUALITY
+but not IDENTITY across any axis threshold.
+
+Abstraction gate: HONORED; NO record owed HERE, and I considered this carefully.
+The re-seed's new capabilities split two ways: (a) the specular/Fresnel BRDF,
+highlight tonemap, and per-vertex AO are ENGINE-LEVEL, general-purpose
+@axiom/web-engine spine features that landed independently (the re-seed commit
+touched no app source - it only swapped the PNG onto the new build) and are
+governed by the engine's OWN gates (ts-gate, coverage, branchless); they are NOT
+convergence-introduced app primitives fabricated to move THIS render's score, so
+they do not owe a convergence abstractions/NNNN.toml. (b) the figures' beveled/
+layered geometry + roughness authoring is still box-COMPOSITION using existing
+primitives + a material field the engine now exposes - a bounded geometry/material
+edit, not a genuinely new figure primitive. So abstraction_introduced = false and
+no NNNN.toml is owed this round. The subject_fidelity gate remains OPEN (>=3 failed
+bounded box attempts + genuine box-vocabulary inexpressibility of plate-knight
+form); the re-seed did NOT build the real figure-MESH/plate primitive that would
+break the plateau. A record IS owed by the FUTURE pass that finally builds a
+genuine new figure-mesh/plate primitive to move subject_fidelity off 1
+(inexpressible = true, failed_attempts = the box-geometry subject_fidelity
+attempts, plus the smallest-API note). Backfilling one now, for a primitive that
+still does not exist, would be a ceremonial/fabricated record - exactly the
+dishonesty this lens guards against.
+
+Parity: none claimed. Commit messages and records are clean of
+"done/matched/parity" language. final_score holds at 1.12; the road off the
+plateau is still explicitly structural - a real figure-mesh/plate geometry
+abstraction on subject_fidelity, not another material-polish re-seed.
+"""
+next_attacked_axis = "subject_fidelity"
+abstraction_introduced = false
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+armor_plating_detail = 1
+helmet_and_head = 1
+weapons_and_attachments = 1
+cape_and_cloth = 1
+color_palette = 2
+lighting_and_shadow = 1
+contrast_and_exposure = 1
+scale_and_proportion = 2
+artifact_level = 3
