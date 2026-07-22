@@ -19,10 +19,10 @@ export const hexToRgba = (hex: string, alpha = 1): Rgba => {
 const IRONBOUND: GroupVisualLanguage = {
   id: "ironbound",
   palette: {
-    primary: hexToRgba("#6b7280"),
-    secondary: hexToRgba("#3a4149"),
-    accent: hexToRgba("#c8933f"),
-    metal: hexToRgba("#8a94a6"),
+    primary: hexToRgba("#484f58"),
+    secondary: hexToRgba("#2a2f36"),
+    accent: hexToRgba("#8f8850"),
+    metal: hexToRgba("#797f87"),
     emissive_core: hexToRgba("#7a4a1a"),
     glow: hexToRgba("#f0a850"),
     eye: hexToRgba("#ffcf7a"),

@@ -1,0 +1,156 @@
+# Champion scorecard — arena-forge-ironbound  (ROUND 4, critic re-score of the
+# PROMOTED pass-3 render)
+#
+# Substrate: pure-TypeScript arena-forge "Figure Lab / Ironbound gallery" on
+# @axiom/web-engine (NOT the Rust engine).
+#
+# What changed since round 3: the champion.png at base 4f7586c6 is NO LONGER the
+# pass-2 render — it is the promoted "pass-3 (7 lenses stacked, no drops)" render.
+# The visible pass-3 movement over pass-2 is: a circular copper GEAR EMBLEM now
+# sits on the chest of EVERY figure (not just the selected Vanguard), box ARMS are
+# now hung at the figures' sides (completing the humanoid part inventory), the
+# background is a WARMER near-black (a faint warm-brown cast rather than pure
+# black), and the overall CONTRAST is deeper (the bright light-grey plinth/base
+# reads harder against the dark torso). As in rounds 2 and 3, the prior scorecard
+# scored (and described) the PASS-2 render, so the record no longer matched the
+# image it claims to score; this round-4 pass re-scores the PROMOTED pass-3 render
+# against the same identity bar so the record matches the image again. All twelve
+# values are UNCHANGED from round 3 — the pass-3 movement is real but sub-threshold
+# (below).
+#
+# The reference is a polished low-poly art gallery: eight distinct armored knights
+# in dark iron PLATE — great-helms with visor slits and glowing eyes, beveled
+# bronze pauldrons, segmented riveted torso plates with gear emblems, articulated
+# plate limbs, flowing torn olive capes/tabards, per-unit weapons (cross shield,
+# drill arm, gear banners), each on a stone plinth, warm rim-lit against black,
+# with name + tier labels and a warm-glowing selected tile.
+#
+# The champion is STILL a crude BOX-FIGURE proxy: each unit is a stack of flat
+# boxes (single-box head with a faint visor band, box torso now bearing a copper
+# ring/gear emblem, box arms at the sides, box legs on a lighter plinth/base
+# block), flat mustard-olive rectangular slabs standing in for capes, burnt-copper
+# box shoulders, and — on some — a single spike for a plume/banner or a drill. The
+# pass-3 changes added the chest emblem, side arms, a warmer near-black backdrop
+# and deeper contrast, but there is still no helm FORM, no plate segmentation, no
+# rivets, no bevels, no shields, no articulated limbs, no plinth stonework.
+#
+# Scored HARSHLY against IDENTITY: the bar is "indistinguishable from
+# reference.png", NOT "reads as an armored figure". When unsure between two scores,
+# the LOWER was taken. The pass-3 render shows GENUINE but SUB-THRESHOLD movement
+# on subject/armor/palette/contrast/lighting — real convergence that does NOT yet
+# cross a full identity point. Per the take-the-lower rule those axes HOLD; they
+# are not bumped to manufacture visible "progress" (that would be number-gaming).
+#
+# PLATEAU: final_score has held at 1.12 for FOUR straight rounds (seed, pass-1,
+# pass-2, pass-3). subject_fidelity has now absorbed its THIRD bounded box-geometry
+# attempt (round-1 helm brow, round-2 legs+boots, round-3 chest-emblem+side-arms)
+# and STILL reads 1. Three failed bounded attempts on one axis is exactly the
+# abstraction-gate threshold — the gate is now OPEN; see the round-4 ledger entry
+# for the verdict (a real plate/mesh geometry abstraction is now justified, and the
+# pass that actually builds it will owe an abstractions/NNNN.toml). No abstraction
+# has been built yet, so none is owed THIS round.
+#
+# final_score = lowest_axis * 0.7 + average_axis * 0.3
+# Lowest axis (ties broken by the fixed order below) = the next flaw to attack.
+
+[scores]
+# 2 (HOLD) — the GALLERY SHELL is still the strongest match: a 4x2 tile grid, an
+# "IRONBOUND" header with the "8" count, per-tile name + tier ("T4 - 5/6") labels,
+# and the orange-bordered selected "Iron Vanguard" tile. The pass-3 side-arms fill
+# a little more of each cell than pass-2's shrunken figurines, but the reference
+# figures still FILL their tiles (~75-85% of cell height) while the champion units
+# sit smaller (~60-70%) with more black margin and no plinth. The round-3
+# missed-direction flag (art-director FIT shrink) is NOT yet re-attacked, but grid/
+# header/labels/selected-tile all still match strongly, so composition HOLDS at 2.
+# Not yet 3.
+composition_and_framing = 2
+
+# 1 (HOLD, real sub-threshold gain) — pass-3 hung box ARMS at the figures' sides,
+# so the body part inventory (head, pauldrons, arms, torso, chest emblem, legs,
+# base, cape) now fully mirrors the reference knight's — a genuine structural
+# completion over the pass-2 armless legs+boots figure. BUT the FORM is still flat
+# boxes: no plate, no bevel, no rivets, no articulation — a viewer's first read is
+# still "blocky robot", not "modeled plate knight". Borderline 1/2; take-the-lower
+# holds it at 1. This is the umbrella subject axis and, by the fixed order below,
+# remains the next flaw to attack. The subject_fidelity attack (3rd bounded
+# attempt: chest emblem + side arms) did NOT move it off 1 — the abstraction gate
+# is now open (see ledger round 4).
+subject_fidelity = 1
+
+# 1 (HOLD, real sub-threshold gain) — side arms broaden the silhouette into a
+# fuller humanoid outline (closer to the reference than the pass-2 armless stance),
+# but it still reads as a generic blocky humanoid; the per-unit differentiators
+# (shield outline, drill barrel, banner pole, helm crest, layered pauldrons) are
+# still flattened away.
+silhouette_readability = 1
+
+# 1 (HOLD, real sub-threshold gain) — a circular copper RING/GEAR emblem now sits
+# on every chest, which is the single closest nod yet to the reference's riveted
+# gear-emblem torso plates. But it is one flat ring on a flat box: no segmented or
+# beveled plates, no rivets, no layered pauldrons, no articulated plate limbs.
+# Sub-threshold; take-the-lower holds it at 1.
+armor_plating_detail = 1
+
+# 1 (HOLD) — the head is still a plain grey box with at most a faint horizontal
+# visor/brow band. There is still no great-helm form, no visor slit depth, no
+# glowing eyes, no crest. Unchanged in substance this round; holds at 1.
+helmet_and_head = 1
+
+# 1 (borderline 0, HOLD) — per-unit weapons/attachments (cross shield, drill arm,
+# gear banners, standards) are almost all ABSENT and UNCHANGED this round. Only
+# crude spike proxies exist (a grey drill-spike, a thin banner/plume pole on a
+# unit or two). Shields still gone.
+weapons_and_attachments = 1
+
+# 1 (HOLD) — capes are still flat rigid mustard-olive rectangular slabs jutting
+# from the shoulders, detached and floating, versus the reference's flowing, torn,
+# draped olive capes/tabards. Unchanged this round.
+cape_and_cloth = 1
+
+# 2 (HOLD, real sub-threshold gain) — the burnt-copper accent (chest emblem +
+# shoulders) is genuinely close to the reference's copper/bronze pauldrons and gear
+# emblems, and the pass-3 warmer near-black backdrop nudges the whole frame toward
+# the reference's warm-black stage. But the cloth is STILL a saturated mustard slab
+# versus the reference's muted OLIVE-GREEN cape — a notable off-hue mismatch. Closer
+# on the accent + backdrop, still off on the cloth — holds at 2 per take-the-lower;
+# not inflated to 3.
+color_palette = 2
+
+# 1 (HOLD, real sub-threshold gain) — the copper chest emblem now catches a small
+# radial highlight and the warmer near-black backdrop reads more like a lit stage
+# than pass-2's flat black. That is real. But there is still no warm directional
+# RIM light separating figure from ground, no glowing eyes, and no per-tile
+# vignette (only the selected tile carries a warm glow). Borderline 1/2;
+# take-the-lower holds it at 1.
+lighting_and_shadow = 1
+
+# 1 (HOLD, real sub-threshold gain) — pass-3's deeper contrast gives a punchier
+# light-to-dark range (bright plinth/base block hard against the dark torso) than
+# pass-2's flatter ramp. But the bright WARM highlights the reference shows across
+# the plate are still absent. Borderline 1/2; take-the-lower holds it at 1.
+contrast_and_exposure = 1
+
+# 2 (HOLD) — arms + legs + base read marginally more like a full figure, but
+# proportions are still stumpy/blocky and the tier-to-tier bulk progression (a
+# visibly heavier Colossus / Bastion Prime) still barely reads unit-to-unit.
+scale_and_proportion = 2
+
+# 3 (HOLD) — the render is still clean: no stray/broken geometry, no z-fighting, no
+# glitch pixels. Held below 4 because the detached floating slab capes and head/
+# banner spikes still read as slightly un-anchored, but there are no true artifacts,
+# and the chest-emblem/arms/warm-backdrop/contrast pass introduced none.
+artifact_level = 3
+
+# lowest_axis = 1 — an eight-way tie (subject_fidelity, silhouette_readability,
+#   armor_plating_detail, helmet_and_head, weapons_and_attachments, cape_and_cloth,
+#   lighting_and_shadow, contrast_and_exposure). The fixed order breaks the tie ->
+#   subject_fidelity is the next flaw.
+# average = (2+1+1+1+1+1+1+2+1+1+2+3)/12 = 1.417
+# final_score = 1*0.7 + 1.417*0.3 = 1.12  (UNCHANGED from rounds 1, 2 & 3 — the
+#   pass-3 movement was real but sub-threshold; no axis crossed a full identity
+#   point. FOUR-round plateau at 1.12.)
+[summary]
+lowest_axis = "subject_fidelity"
+average = 1.42
+final_score = 1.12
+next_attacked_axis = "subject_fidelity"

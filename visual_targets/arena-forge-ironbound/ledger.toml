@@ -1,0 +1,344 @@
+# Convergence ledger — arena-forge-ironbound (append-only)
+
+[[iteration]]
+iteration = 0
+attacked_axis = "none"
+changed_files = [
+  "visual_targets/arena-forge-ironbound/scorecard.champion.toml",
+  "visual_targets/arena-forge-ironbound/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic lens ROUND-1 seed calibration. The record was seeded (commit 83e7eb85)
+with only champion.png + reference.png and capture tooling — no scorecard and no
+ledger — so no calibrated baseline existed for the loop to trust. This entry
+establishes that baseline; it is not a recalibration of a prior (non-existent)
+scorecard.
+
+Substrate: arena-forge "Figure Lab / Ironbound gallery" is a PURE-TYPESCRIPT app
+on @axiom/web-engine, not the Rust engine.
+
+Scored the champion harshly against IDENTITY (bar = "indistinguishable from
+reference.png", not "reads as an armored figure"). The reference is a polished
+low-poly gallery of eight distinct plate knights — great-helms with visor slits
+and glowing eyes, beveled bronze pauldrons, segmented riveted torso plates with
+gear emblems, articulated plate limbs, flowing torn olive capes, per-unit weapons
+(cross shield, drill arm, gear banners), plinths, warm rim light. The champion is
+a crude BOX-FIGURE proxy: stacked flat grey boxes (box head with a thin slot, box
+torso, box legs), flat rigid yellow rectangle "capes", orange box shoulders / an
+orange square chest emblem, and a few spike proxies (a grey drill-spike, yellow
+head plumes). No helm form, no plate segmentation, no rivets, no shields, no
+plinths, flat ambient shading.
+
+Result: the gallery SHELL is the strongest match (4x2 grid, "IRONBOUND" header +
+"8" count, name/tier labels, orange-bordered selected "Iron Vanguard" tile), so
+composition_and_framing, color_palette, and scale_and_proportion sit at 2 and a
+clean render earns artifact_level 3; the eight IDENTITY axes (subject_fidelity,
+silhouette_readability, armor_plating_detail, helmet_and_head,
+weapons_and_attachments, cape_and_cloth, lighting_and_shadow,
+contrast_and_exposure) all sit at 1. lowest_axis = 1 (eight-way tie); fixed axis
+order breaks the tie to subject_fidelity. average = 1.42, final_score = 1.12.
+
+Abstraction gate: no structural change has been made yet — champion.png is the
+seed render — so no abstractions/NNNN.toml record is owed
+(abstraction_introduced = false).
+
+Parity: none claimed. The champion is a box proxy at final_score 1.12; the road
+to parity is structural (real helm/plate/limb geometry), starting at
+subject_fidelity.
+"""
+next_attacked_axis = "subject_fidelity"
+abstraction_introduced = false
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+armor_plating_detail = 1
+helmet_and_head = 1
+weapons_and_attachments = 1
+cape_and_cloth = 1
+color_palette = 2
+lighting_and_shadow = 1
+contrast_and_exposure = 1
+scale_and_proportion = 2
+artifact_level = 3
+
+[[iteration]]
+iteration = 1
+attacked_axis = "subject_fidelity"
+changed_files = [
+  "visual_targets/arena-forge-ironbound/scorecard.champion.toml",
+  "visual_targets/arena-forge-ironbound/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic lens ROUND-2 re-score of the PROMOTED pass-1 champion. Since round 1 the
+champion.png was replaced: base 43d7e5aa "promote pass-1 render (6 lenses
+stacked)" swapped the seed render (83e7eb85) for a new one built by six lens
+commits — art-director scale/framing (FIT 0.86->0.95), modeler great-helm
+brow/visor, lighting key-dominant fill, surfacing steel darkened to forged
+charcoal, and rigger flared-pauldron heroic stance. The round-1 scorecard still
+scored (and described) the SEED, so the record no longer matched the image it
+claimed to score — a record-accuracy problem this entry corrects.
+
+Re-scored the promoted render harshly against IDENTITY (bar =
+"indistinguishable from reference.png"). Direct seed-vs-promoted comparison shows
+GENUINE, real movement — the steel is now forged charcoal (closer to the
+reference's dark iron than the seed's lighter grey), a key light now shapes some
+form/gradient on the torsos (vs the seed's flat ambient wash), the darker
+charcoal against black gives punchier range, the pauldrons flare into a wider
+heroic stance, and the head box carries a faint visor/brow bar. This is real
+convergence, NOT number-gaming.
+
+BUT none of it crosses a full identity point. The render is still unmistakably a
+crude BOX-FIGURE proxy: stacked flat boxes, rigid yellow slab "capes", box
+shoulders, spike proxies — no plate segmentation, no rivets, no great-helm form,
+no glowing eyes, no shields/banners, no plinths, no warm rim light. Per the
+take-the-lower rule, color_palette (2), lighting_and_shadow (1),
+contrast_and_exposure (1), and helmet_and_head (1) all HOLD despite real
+sub-threshold gains — bumping them to advertise progress the image has not earned
+would be inflation, which this lens exists to prevent.
+
+Calibration verdict: scores are HONEST. Every axis holds at its round-1 value.
+No axis regressed (the darkening makes figures recede into black without rim
+separation, but the reference figures are dark-on-black too, so no axis drops
+>=2). lowest_axis = 1 (eight-way tie); fixed axis order breaks the tie to
+subject_fidelity — still the correct next attack.
+
+Abstraction gate: HONORED. The six lens changes are bounded parameter/geometry
+iterations in the app's own pure-TS figure/render code (FIT ratio, helm brow
+geometry, a key light, a material color, a pose) using existing @axiom/web-engine
+primitives — no new engine primitive/field/shader was introduced, so no
+abstractions/NNNN.toml is owed (abstraction_introduced = false). subject_fidelity
+has had 1 bounded attempt (the modeler helm) — well under the >=3 budget before an
+abstraction could be justified.
+
+Parity: none claimed. Commit messages and records are clean of
+"done/matched/parity" language. final_score holds at 1.12; the road to parity is
+still structural (real helm/plate/limb geometry), starting at subject_fidelity.
+"""
+next_attacked_axis = "subject_fidelity"
+abstraction_introduced = false
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+armor_plating_detail = 1
+helmet_and_head = 1
+weapons_and_attachments = 1
+cape_and_cloth = 1
+color_palette = 2
+lighting_and_shadow = 1
+contrast_and_exposure = 1
+scale_and_proportion = 2
+artifact_level = 3
+
+[[iteration]]
+iteration = 2
+attacked_axis = "subject_fidelity"
+changed_files = [
+  "visual_targets/arena-forge-ironbound/scorecard.champion.toml",
+  "visual_targets/arena-forge-ironbound/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic lens ROUND-3 re-score of the PROMOTED pass-2 champion. Since round 2 the
+champion.png was replaced: base 9bbbec5c "promote pass-2 render (5 lenses
+stacked; rigger dropped-conflict)" swapped the pass-1 render (43d7e5aa) for a new
+one built by five lens commits — art-director scale/framing (FIT 0.95->0.72,
+hero-portrait margin), modeler "rides on real legs+boots, not a torso-blob"
+(subject_fidelity), lighting fill aimed camera-side so front faces read,
+surfacing steel tonal range widened for a painted-iron read, and colorist accent
+gold -> burnt copper. The round-2 scorecard still scored (and described) the
+PASS-1 render, so the record no longer matched the image it claimed to score — a
+record-accuracy problem this entry corrects (exactly as round 2 corrected round
+1 for the pass-1 swap).
+
+Substrate: arena-forge "Figure Lab / Ironbound gallery" is a PURE-TYPESCRIPT app
+on @axiom/web-engine, not the Rust engine. The five pass-2 lens diffs are all
+bounded parameter/geometry edits in the app's own pure-TS figure/render code
+(figures/bodyplans.ts, figures/languages/index.ts, figures/scene/arena-scene.ts,
+screens/figure-lab/figure-lab.ts) using existing @axiom/web-engine primitives.
+
+Re-scored the promoted pass-2 render harshly against IDENTITY (bar =
+"indistinguishable from reference.png"). Direct pass1-vs-pass2 comparison shows
+GENUINE, real movement: the figure now rides on real legs + boot blocks (a full
+body part-inventory vs the pass-1 torso-blob), the fill light is aimed
+camera-side so the front faces/visor bands read (vs receding into black), the
+steel tonal range is wider (more painted-iron light-to-dark), and the accent is
+now burnt copper (closer to the reference's copper/bronze than the prior gold).
+This is real convergence, NOT number-gaming.
+
+BUT none of it crosses a full identity point. The render is still unmistakably a
+crude BOX-FIGURE proxy: stacked flat boxes, rigid yellow lemon slab "capes", box
+shoulders, spike proxies — no plate segmentation, no rivets, no great-helm form,
+no glowing eyes, no shields/banners, no plinths. Per take-the-lower, every axis
+HOLDS at its round-2 value: subject_fidelity (1), silhouette_readability (1),
+helmet_and_head (1), lighting_and_shadow (1), contrast_and_exposure (1), and
+color_palette (2) all show real sub-threshold gains that do not earn a bump.
+Inflating them to advertise progress the image has not earned is exactly what
+this lens exists to prevent.
+
+Calibration verdict: scores are HONEST at the round-2 values — no inflation
+found, so the twelve numbers are unchanged; only the scorecard's descriptive
+prose/header were updated from "pass-1 / ROUND 2" to "pass-2 / ROUND 3" so the
+record matches the image it now scores.
+
+MISSED-DIRECTION FLAG (not a regression): the art-director FIT 0.95->0.72 nudge
+SHRANK the figures this round. The reference figures FILL their tiles (~75-85% of
+cell height); the champion figures now sit even smaller (~60%) with more black
+margin and still no plinth. That is arguably a step the WRONG way for
+composition_and_framing. It does NOT drop the axis >=2 (the grid/header/labels/
+selected-tile shell still matches strongly), so composition HOLDS at 2 and this
+is not a reject — but the direction is flagged for the art-director: the target
+is a filled hero portrait, not a shrunken centered figurine.
+
+Abstraction gate: HONORED, no record owed. All five pass-2 lens changes are
+bounded parameter/geometry iterations in the app's pure-TS code (a FIT ratio,
+leg+boot geometry, a light aim, a material tonal range, an accent color) using
+existing @axiom/web-engine primitives — no new engine primitive/field/shader was
+introduced (abstraction_introduced = false). subject_fidelity has now had 2
+bounded attempts (round-1 modeler helm, round-2 modeler legs+boots), still under
+the >=3 budget; a 3rd bounded subject_fidelity attempt that again fails to cross
+1->2 is where a real plate/bevel geometry abstraction would become justifiable
+(and would then owe an abstractions/NNNN.toml).
+
+Right-axis check: lowest_axis = 1 (eight-way tie: subject_fidelity,
+silhouette_readability, armor_plating_detail, helmet_and_head,
+weapons_and_attachments, cape_and_cloth, lighting_and_shadow,
+contrast_and_exposure). The fixed axis order breaks the tie to subject_fidelity
+— still the correct next attack.
+
+Parity: none claimed. Commit messages and records are clean of
+"done/matched/parity" language. final_score holds at 1.12; the road to parity is
+still structural (real helm/plate/limb geometry), starting at subject_fidelity.
+"""
+next_attacked_axis = "subject_fidelity"
+abstraction_introduced = false
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+armor_plating_detail = 1
+helmet_and_head = 1
+weapons_and_attachments = 1
+cape_and_cloth = 1
+color_palette = 2
+lighting_and_shadow = 1
+contrast_and_exposure = 1
+scale_and_proportion = 2
+artifact_level = 3
+
+[[iteration]]
+iteration = 3
+attacked_axis = "subject_fidelity"
+changed_files = [
+  "visual_targets/arena-forge-ironbound/scorecard.champion.toml",
+  "visual_targets/arena-forge-ironbound/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic lens ROUND-4 re-score of the PROMOTED pass-3 champion. Since round 3 the
+champion.png was replaced: base 4f7586c6 "champion: promote pass-3 render (7
+lenses stacked, no drops)" swapped the pass-2 render (9bbbec5c) for a new one.
+The round-3 scorecard still scored (and described) the PASS-2 render, so the
+record no longer matched the image it claimed to score - a record-accuracy
+problem this entry corrects (exactly as rounds 2 and 3 corrected their
+predecessors for the prior swaps).
+
+Substrate: arena-forge "Figure Lab / Ironbound gallery" is a PURE-TYPESCRIPT app
+on @axiom/web-engine, not the Rust engine. The pass-3 lens diffs are bounded
+parameter/geometry edits in the app's own pure-TS figure/render code using
+existing @axiom/web-engine primitives (boxes, materials, lights).
+
+Re-scored the promoted pass-3 render harshly against IDENTITY (bar =
+"indistinguishable from reference.png"). Direct pass2-vs-pass3 comparison shows
+GENUINE, real movement: a circular copper GEAR EMBLEM now sits on EVERY figure's
+chest (not just the selected Vanguard) - the closest nod yet to the reference's
+gear-emblem torso plates; box ARMS are now hung at the figures' sides, completing
+the humanoid part inventory over the pass-2 armless legs+boots figure; the
+background is a WARMER near-black; and the CONTRAST is deeper (bright plinth/base
+hard against the dark torso). This is real convergence, NOT number-gaming.
+
+BUT none of it crosses a full identity point. The render is still unmistakably a
+crude BOX-FIGURE proxy: stacked flat boxes, rigid mustard-olive slab "capes", box
+shoulders, one flat copper ring on a flat box chest, spike proxies - no plate
+segmentation, no bevels, no rivets, no great-helm form, no glowing eyes, no
+shields/banners, no articulated limbs, no plinth stonework. Per take-the-lower,
+every axis HOLDS at its round-3 value: subject_fidelity (1),
+silhouette_readability (1), armor_plating_detail (1), color_palette (2),
+lighting_and_shadow (1), and contrast_and_exposure (1) all show real
+sub-threshold gains that do not earn a bump. Inflating them to advertise progress
+the image has not earned is exactly what this lens exists to prevent.
+
+Calibration verdict: scores are HONEST at the round-3 values - no inflation
+found, so the twelve numbers are unchanged; only the scorecard's descriptive
+prose/header were updated from "pass-2 / ROUND 3" to "pass-3 / ROUND 4" so the
+record matches the image it now scores. No non-attacked axis regressed >=2 (the
+warmer/darker backdrop keeps figures dark-on-warm-black, but the reference is
+dark-on-black too, so no reject is owed).
+
+Right-axis check: lowest_axis = 1 (eight-way tie: subject_fidelity,
+silhouette_readability, armor_plating_detail, helmet_and_head,
+weapons_and_attachments, cape_and_cloth, lighting_and_shadow,
+contrast_and_exposure). The fixed axis order breaks the tie to subject_fidelity
+- still the correct next attack.
+
+PLATEAU + ABSTRACTION-GATE VERDICT (the load-bearing call this round): final_score
+has now held at 1.12 for FOUR straight rounds (seed, pass-1, pass-2, pass-3).
+subject_fidelity has now absorbed its THIRD bounded box-geometry attempt -
+round-1 modeler helm brow, round-2 modeler legs+boots, round-3
+chest-emblem+side-arms - and STILL reads 1. Three failed bounded attempts on the
+same axis is exactly the abstraction-gate threshold (">=3 failed bounded attempts
+on that axis OR genuine inexpressibility"). Both conditions are now met: the
+plateau is strong evidence that stacking/parameterizing axis-aligned BOXES cannot
+express plate-knight identity (great-helm form, beveled/segmented riveted plate,
+articulated limbs, draped torn cloth) - that identity is genuinely inexpressible
+in the current box vocabulary. The gate is therefore OPEN: a real geometry
+abstraction (a beveled/segmented plate or low-poly mesh primitive for the app's
+figure system, or an engine-level mesh capability if the app cannot express it)
+is now JUSTIFIED, and the next subject_fidelity pass should introduce it rather
+than nudge box parameters a fourth time.
+
+Abstraction record owed THIS round: NO. abstraction_introduced = false, because
+no such primitive has been BUILT yet - all pass-3 changes are still bounded
+box-geometry using existing @axiom/web-engine primitives. A record is owed for a
+structural change actually made, not for one merely justified; backfilling an
+abstractions/0001.toml now, for a primitive that does not exist, would be a
+ceremonial/fabricated record - exactly the dishonesty this lens guards against.
+The pass that actually introduces the plate/mesh primitive is the pass that will
+owe abstractions/0001.toml (inexpressible = true, failed_attempts = the three
+box-geometry subject_fidelity attempts above, plus the smallest-API note).
+
+Parity: none claimed. Commit messages and records are clean of
+"done/matched/parity" language. final_score holds at 1.12; the road off the
+plateau is now explicitly structural - a real plate/mesh geometry abstraction on
+subject_fidelity, no longer another bounded box nudge.
+"""
+next_attacked_axis = "subject_fidelity"
+abstraction_introduced = false
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+armor_plating_detail = 1
+helmet_and_head = 1
+weapons_and_attachments = 1
+cape_and_cloth = 1
+color_palette = 2
+lighting_and_shadow = 1
+contrast_and_exposure = 1
+scale_and_proportion = 2
+artifact_level = 3

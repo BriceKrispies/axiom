@@ -137,4 +137,20 @@ export class ArenaForgeGame {
   public debugLabSort(sort: SortMode): void {
     this.lab()?.debugSort(sort);
   }
+
+  public debugLabSetIcon(px: number): void {
+    this.lab()?.debugSetIcon(px);
+  }
+
+  public debugLabSpin(on: boolean): void {
+    this.lab()?.debugSpin(on);
+  }
+
+  public debugLabCardIds(): string[] {
+    return this.lab()?.debugCardIds() ?? [];
+  }
+
+  public debugLabGalleryRect(): { x: number; y: number; w: number; h: number } | null {
+    return this.lab()?.debugGalleryRect() ?? null;
+  }
 }

@@ -37,7 +37,15 @@ const PX_PER_UNIT = 96;
 const FOV_Y = 0.5;
 /** Radians per tick of the slow turntable spin (~14°/s at 60Hz). */
 const SPIN_PER_TICK = 0.004;
-/** Fraction of an icon cell the figure's bounding height fills. */
+/** Fraction of an icon cell the figure's bounding height fills. The reference
+ * frames each miniature as a HERO PORTRAIT that commands its cell — helmet close
+ * to the top edge, pedestal close to the bottom, shoulders reaching toward the
+ * side walls — with only a thin margin of breathing room, NOT floating small in a
+ * sea of dead space. Two extremes were tried: 0.95 crammed the silhouette
+ * edge-to-edge and clipped the pedestal/footroom, while 0.72 shrank the figure so
+ * far it read as a small token adrift in the cell (the champion's flaw). 0.86
+ * splits the difference: the full silhouette (helmet to base) reads at the
+ * reference's imposing scale with just enough margin to keep it clean. */
 const FIT = 0.86;
 const Y_AXIS: Vec3 = vec3(0, 1, 0);
 
@@ -592,6 +600,19 @@ export class FigureLabScreen implements Screen {
     this.setIcon(this.icon * factor);
   }
 
+  /** Set the icon size directly in px (clamped). Deterministic capture control —
+   * more reliable than accumulating `debugZoom` factors to a target. */
+  public debugSetIcon(px: number): void {
+    this.setIcon(px);
+    this.scrollToSelected();
+  }
+
+  /** Toggle the turntable spin. Paused holds every figure at yaw 0 (front-facing),
+   * which is what a deterministic screenshot wants. */
+  public debugSpin(on: boolean): void {
+    this.spinning = on;
+  }
+
   public debugSearch(term: string): void {
     this.search = term;
     this.requery();
@@ -600,6 +621,19 @@ export class FigureLabScreen implements Screen {
   public debugSort(sort: SortMode): void {
     this.sort = sort;
     this.requery();
+  }
+
+  /** The ordered card ids currently in the gallery (post filter/search/sort) — so
+   * a capture agent can pick a real card without hard-coding the content. */
+  public debugCardIds(): string[] {
+    return this.entries.map((e) => e.card.id);
+  }
+
+  /** The gallery grid's screen rect (the figures + captions region, excluding the
+   * top bar / chips / tool strip / inspector) — lets a capture tool clip to just
+   * the grid for a chrome-free frame. */
+  public debugGalleryRect(): Rect {
+    return this.galleryRect;
   }
 
   public debugInfo(): { group: string; card: string; forged: boolean; parts: number; count: number; zoom: number; sort: string; search: string; live: number; columns: number } {
