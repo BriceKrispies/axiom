@@ -8,7 +8,7 @@ use crate::config::PLAYERS_PER_TEAM;
 use crate::field::{DriveDirection, OffensePoint};
 use crate::identity::{PlayId, TeamId};
 
-use super::formation::{base_defense, spread_offense, FormationDefinition};
+use super::formation::FormationDefinition;
 
 /// A named route shape. Depths/widths are yards in the offense frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -128,7 +128,66 @@ pub enum DefenseAssignment {
     TackleTarget,
 }
 
-/// A complete play definition.
+/// What an offensive play is trying to do. The defensive selector reads this
+/// tag to pick a sensible answer — it is the play's intent, not its mechanics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffenseTag {
+    /// Timing/rhythm throws that beat pressure — slants, hitches, quick outs.
+    QuickPass,
+    /// Intermediate-to-deep route concepts that need protection to develop.
+    DeepPass,
+    /// A concept that floods one side of the field to outnumber the coverage.
+    Flood,
+}
+
+/// A named offensive play: a formation plus each slot's job. This is the unit
+/// the player selects in the huddle each down.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OffensivePlay {
+    pub id: PlayId,
+    pub name: &'static str,
+    pub tag: OffenseTag,
+    pub formation: FormationDefinition,
+    pub assignments: [OffenseAssignment; PLAYERS_PER_TEAM],
+}
+
+/// The defensive front a call presents at the line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefenseFront {
+    /// A four-man front: a standard rush with balanced coverage behind it.
+    Base,
+    /// A lighter front trading a rusher for an extra defensive back.
+    Nickel,
+    /// A minimal rush dropping everyone into coverage — a prevent shell.
+    Dime,
+}
+
+/// How a call defends the pass behind its front.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Coverage {
+    /// Man coverage: defenders travel with assigned receivers.
+    Man,
+    /// Zone coverage: defenders guard areas and rally to the ball.
+    Zone,
+    /// An extra rusher, single coverage behind — high risk, high reward.
+    Blitz,
+}
+
+/// A named defensive call: a formation plus each slot's job, tagged with the
+/// front and coverage it presents. The game — never the player — selects one
+/// deterministically in response to the offense (see [`crate::ai::playcall`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DefensiveCall {
+    pub name: &'static str,
+    pub front: DefenseFront,
+    pub coverage: Coverage,
+    pub formation: FormationDefinition,
+    pub assignments: [DefenseAssignment; PLAYERS_PER_TEAM],
+}
+
+/// A complete play definition: the composed offense-and-defense the simulation
+/// lines up and runs for one down. Built by [`PlayDefinition::compose`] from a
+/// selected [`OffensivePlay`] and a chosen [`DefensiveCall`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayDefinition {
     pub id: PlayId,
@@ -144,44 +203,27 @@ pub struct PlayDefinition {
     pub line_of_scrimmage: f32,
 }
 
-/// The showcase play: spread formation, three live route runners, edge
-/// rush, man coverage outside, free safety pursuing the catch.
-pub fn showcase_play() -> PlayDefinition {
-    PlayDefinition {
-        id: PlayId(1),
-        name: "SLOT POST",
-        offense_formation: spread_offense(),
-        defense_formation: base_defense(),
-        offense_assignments: [
-            // 0: QB drops and reads the cone — the target is whoever he faces.
-            OffenseAssignment::Quarterback { drop_depth: 3.0 },
-            OffenseAssignment::Snapper,
-            OffenseAssignment::PassBlock,
-            OffenseAssignment::PassBlock,
-            OffenseAssignment::DecoyRoute(RouteDefinition::Shape(RouteShape::Straight {
-                depth: 16.0,
-            })),
-            OffenseAssignment::Route(RouteDefinition::Shape(RouteShape::Out {
-                stem: 8.0,
-                cut: 5.0,
-            })),
-            // 6: the primary — slot post.
-            OffenseAssignment::Route(RouteDefinition::Shape(RouteShape::Post {
-                stem: 7.0,
-                cut: 6.0,
-            })),
-        ],
-        defense_assignments: [
-            DefenseAssignment::QuarterbackRush,
-            DefenseAssignment::EdgeContain { lateral: -4.5 },
-            DefenseAssignment::EdgeContain { lateral: 4.5 },
-            DefenseAssignment::QuarterbackRush,
-            DefenseAssignment::ManCover { target_slot: 4 },
-            DefenseAssignment::ManCover { target_slot: 5 },
-            DefenseAssignment::Pursuit,
-        ],
-        possession: TeamId(0),
-        drive_direction: DriveDirection::PlusZ,
-        line_of_scrimmage: 35.0,
+impl PlayDefinition {
+    /// Fuse a selected offensive play and a chosen defensive call into the
+    /// runtime play the sim lines up. The play carries the offense's identity
+    /// (id + name); the defensive call rides only in its formation/assignments.
+    pub fn compose(
+        offense: &OffensivePlay,
+        defense: &DefensiveCall,
+        possession: TeamId,
+        drive_direction: DriveDirection,
+        line_of_scrimmage: f32,
+    ) -> Self {
+        PlayDefinition {
+            id: offense.id,
+            name: offense.name,
+            offense_formation: offense.formation.clone(),
+            defense_formation: defense.formation.clone(),
+            offense_assignments: offense.assignments.clone(),
+            defense_assignments: defense.assignments,
+            possession,
+            drive_direction,
+            line_of_scrimmage,
+        }
     }
 }

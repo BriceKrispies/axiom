@@ -6,7 +6,7 @@
 use crate::camera::{CameraDirector, CameraMode, CameraPose};
 use crate::config::EndZoneConfig;
 use crate::data::{CameraTuning, JuiceTuning};
-use crate::drive::{DriveController, DriveState, DRIVE_START_YARD};
+use crate::drive::{DriveController, DriveState, HuddleView, DRIVE_START_YARD};
 use crate::events::StampedEvent;
 use crate::launch::{camera_tuning, juice_tuning, resolve_run, RunConfig};
 use crate::presentation::snapshot::{capture, PresentationSnapshot};
@@ -112,6 +112,30 @@ impl ShowcaseRun {
     pub fn drive_state(&self) -> Option<DriveState> {
         match &self.run_loop {
             RunLoop::Drive(controller, _) => Some(controller.state),
+            RunLoop::Ambient(_) => None,
+        }
+    }
+
+    /// The open pre-snap huddle, when a real run is waiting for a play call.
+    pub fn huddle(&self) -> Option<HuddleView> {
+        match &self.run_loop {
+            RunLoop::Drive(controller, _) => controller.huddle(),
+            RunLoop::Ambient(_) => None,
+        }
+    }
+
+    /// Call offensive play `index` for the open huddle (no-op otherwise).
+    pub fn call_play(&mut self, index: usize) {
+        if let RunLoop::Drive(controller, _) = &mut self.run_loop {
+            controller.call_play(index);
+        }
+    }
+
+    /// The defensive playbook index the last snap lined up in, when this is a
+    /// real run.
+    pub fn last_defense_index(&self) -> Option<usize> {
+        match &self.run_loop {
+            RunLoop::Drive(controller, _) => Some(controller.last_defense_index),
             RunLoop::Ambient(_) => None,
         }
     }

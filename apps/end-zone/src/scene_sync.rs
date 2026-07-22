@@ -127,6 +127,12 @@ impl EndZoneScene {
         receiver_ring::ring_instances(snapshot, &mut rings);
         assign_pool(app, &self.receiver_ring_pool, &rings, |r| (r.transform, r.kind));
 
+        // Pre-snap route chalk: the called play's routes dotted on the turf
+        // (empty except while the offense is set, so the pool hides itself).
+        let mut chalk = Vec::new();
+        crate::presentation::chalk::chalk_instances(snapshot, &mut chalk);
+        assign_pool(app, &self.chalk_pool, &chalk, |c| (c.transform, c.material));
+
         // Juice instances into the pools.
         self.juice_scratch.clear();
         for effect in juice.effects() {

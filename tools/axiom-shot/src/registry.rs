@@ -74,6 +74,10 @@ pub fn registry() -> Vec<SliceEntry> {
             build: |_| axiom_end_zone::build_end_zone_after_snap(),
         },
         SliceEntry {
+            name: "end-zone-pre-snap",
+            build: |_| axiom_end_zone::build_end_zone_pre_snap(),
+        },
+        SliceEntry {
             name: "sports-physics-lab",
             // `--frame 1` photographs the third-person view (the player's body).
             build: |p| axiom_sports_physics_lab::build_sports_physics_lab_posed(p.frame > 0),

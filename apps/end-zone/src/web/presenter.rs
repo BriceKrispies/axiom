@@ -151,6 +151,7 @@ fn widget_html(placed: &Placed, press: bool) -> String {
         Widget::Label(label) => markup::label_html(label),
         Widget::Logo(logo) => markup::logo_html(logo),
         Widget::Setting(row) => markup::setting_row_html(row, placed.focused),
+        Widget::Diagram(view) => markup::play_diagram_html(view, placed.focused),
     };
     let press_class = if placed.focused && press {
         "ez-pressanim"

@@ -113,4 +113,29 @@ pub const MENU_CSS: &str = r#"
   margin-top:2px;}
 .ez-hud-heat{font-weight:900;font-size:28px;letter-spacing:.14em;
   color:var(--ez-hot);text-shadow:0 0 14px rgba(227,62,48,.6),0 2px 3px #000;}
+
+/* --- huddle play cards (a clickable chalkboard per play) ----------------- */
+.ez-diagram{position:relative;border:3px solid #06090e;border-radius:10px;overflow:hidden;
+  cursor:pointer;background:#0d241a;
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.14),0 8px 20px rgba(0,0,0,.55);
+  transition:transform .08s ease,box-shadow .12s ease,border-color .12s ease;}
+.ez-anim .ez-diagram:hover{transform:translateY(-3px);}
+.ez-diagram.ez-focused{border-color:var(--ez-focus);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.2),0 0 0 3px var(--ez-focus),
+  0 0 26px rgba(57,192,255,.55),0 10px 22px rgba(0,0,0,.6);}
+.ez-diagram-name{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:7px 6px;
+  text-align:center;font-weight:900;font-size:15px;letter-spacing:.16em;color:var(--ez-text);
+  background:linear-gradient(180deg,rgba(6,12,10,0),rgba(6,12,10,.92));
+  text-shadow:0 2px 4px #000;pointer-events:none;}
+.ez-diagram.ez-focused .ez-diagram-name{color:var(--ez-focus);}
+.ez-chalk{position:absolute;inset:0;width:100%;height:100%;display:block;}
+.ez-chalk .ez-board{fill:#123023;}
+.ez-chalk .ez-los{stroke:rgba(255,255,255,.5);stroke-width:.9;stroke-dasharray:2.4 2;}
+.ez-chalk .ez-route{fill:none;stroke:rgba(233,241,245,.9);stroke-width:1.8;
+  stroke-linejoin:round;stroke-linecap:round;}
+.ez-chalk .ez-route.ez-decoy{stroke:rgba(233,241,245,.42);stroke-dasharray:3.4 2.4;}
+.ez-chalk .ez-route.ez-primary{stroke:var(--ez-volt);stroke-width:2.6;}
+.ez-chalk .ez-mark{fill:#e9f1f5;stroke:#06090e;stroke-width:.7;}
+.ez-chalk .ez-mark.ez-primary{fill:var(--ez-volt);}
+.ez-chalk .ez-qbdot{fill:#123023;}
 "#;

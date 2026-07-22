@@ -15,19 +15,19 @@ use axiom_kernel::Ratio;
 use crate::config::PLAYER_COUNT;
 use crate::data::team::{frostbite, magma};
 use crate::debug::DebugMaterial;
-use crate::presentation::receiver_ring::{
-    RingKind, ELIGIBLE_RING_POOL, RECEIVER_RING_POOL, TARGET_RING_POOL,
-};
+use crate::presentation::chalk::ChalkMaterial;
+use crate::presentation::receiver_ring::RingKind;
 use crate::field::{generate_field, FieldMaterial, FieldMesh};
 use crate::player::model::{player_figure, PART_COUNT, TAG_COUNT};
 use crate::presentation::particles::{EffectInstance, EffectMaterial};
 
+mod pools;
+
 /// The live per-instance capacity the browser loop is bound with.
 pub const LIVE_CAPACITY: u32 = 2048;
 
-/// Pool sizes (hard bounds on juice/debug instances).
+/// Pool size (hard bound on juice instances; the debug bound lives in `pools`).
 const JUICE_POOL: usize = 168;
-const DEBUG_POOL: usize = 512;
 
 fn ratio(v: f32) -> Ratio {
     Ratio::finite_or_zero(v)
@@ -61,6 +61,8 @@ pub struct EndZoneScene {
     pub(crate) line_to_gain: Entity,
     /// White rings at the feet of every receiver the quarterback can throw to.
     pub(crate) receiver_ring_pool: Vec<(Entity, RingKind)>,
+    /// Pre-snap route chalk dots (the called play drawn on the turf).
+    pub(crate) chalk_pool: Vec<(Entity, ChalkMaterial)>,
     pub(crate) juice_pool: Vec<(Entity, EffectMaterial)>,
     pub(crate) debug_pool: Vec<(Entity, DebugMaterial)>,
     pub(crate) juice_scratch: Vec<EffectInstance>,
@@ -201,86 +203,17 @@ impl EndZoneScene {
         let to_gain_mat = app.add_material(Material::lit(color3([0.72, 0.96, 0.24])));
         let line_to_gain = app.spawn(Spawn::new(hidden(), cube, to_gain_mat));
 
-        // Juice pools (bounded; parked hidden).
-        let dust_mat = app.add_material(Material::lit(color3([0.62, 0.54, 0.38])));
-        let ring_mat = app.add_material(Material::lit(color3([0.95, 0.94, 0.86])));
-        let streak_mat = app.add_material(Material::lit(color3([0.98, 0.98, 0.99])));
-        let flash_mat = app.add_material(Material::lit(color3([1.0, 0.92, 0.45])));
-        let trail_mat = app.add_material(Material::lit(color3([0.85, 0.62, 0.30])));
-        let mut juice_pool = Vec::with_capacity(JUICE_POOL);
-        let juice_plan: [(EffectMaterial, usize, Handle<Material>); 5] = [
-            (EffectMaterial::Dust, 96, dust_mat),
-            (EffectMaterial::Ring, 24, ring_mat),
-            (EffectMaterial::Streak, 24, streak_mat),
-            (EffectMaterial::Flash, 8, flash_mat),
-            (EffectMaterial::Trail, 16, trail_mat),
-        ];
-        for (material, count, handle) in juice_plan {
-            for _ in 0..count {
-                juice_pool.push((app.spawn(Spawn::new(hidden(), cube, handle)), material));
-            }
-        }
-
-        // Receiver rings: RED on the current read (where the pass would go),
-        // white on the other receivers the quarterback could legally reach.
-        let target_ring_mat = app.add_material(Material::lit(color3([0.96, 0.16, 0.14])));
-        let eligible_ring_mat = app.add_material(Material::lit(color3([0.97, 0.98, 0.97])));
-        let mut receiver_ring_pool = Vec::with_capacity(RECEIVER_RING_POOL);
-        let ring_plan: [(RingKind, usize, Handle<Material>); 2] = [
-            (RingKind::Target, TARGET_RING_POOL, target_ring_mat),
-            (RingKind::Eligible, ELIGIBLE_RING_POOL, eligible_ring_mat),
-        ];
-        for (kind, count, handle) in ring_plan {
-            for _ in 0..count {
-                receiver_ring_pool.push((app.spawn(Spawn::new(hidden(), cube, handle)), kind));
-            }
-        }
-
-        // Debug pools.
-        let route_mat = app.add_material(Material::lit(color3([0.15, 0.85, 0.95])));
-        let target_mat = app.add_material(Material::lit(color3([0.95, 0.25, 0.85])));
-        let collision_mat = app.add_material(Material::lit(color3([0.25, 0.95, 0.35])));
-        let catch_mat = app.add_material(Material::lit(color3([0.98, 0.62, 0.15])));
-        let trajectory_mat = app.add_material(Material::lit(color3([0.98, 0.92, 0.20])));
-        let camera_mat = app.add_material(Material::lit(color3([0.95, 0.15, 0.15])));
-        let foot_lock_mat = app.add_material(Material::lit(color3([1.0, 0.35, 0.15])));
-        let foot_now_mat = app.add_material(Material::lit(color3([0.20, 0.60, 1.0])));
-        let foot_land_mat = app.add_material(Material::lit(color3([0.55, 1.0, 0.30])));
-        let move_vec_mat = app.add_material(Material::lit(color3([1.0, 1.0, 1.0])));
-        // Biomechanical debug view: the three roots, the weight point, the
-        // stance foot.
-        let gameplay_root_mat = app.add_material(Material::lit(color3([0.10, 0.10, 0.10])));
-        let visual_root_mat = app.add_material(Material::lit(color3([0.95, 0.95, 0.30])));
-        let pelvis_mat = app.add_material(Material::lit(color3([1.0, 0.30, 0.75])));
-        let weight_mat = app.add_material(Material::lit(color3([0.45, 0.20, 0.95])));
-        let stance_foot_mat = app.add_material(Material::lit(color3([1.0, 0.55, 0.05])));
-        let mut debug_pool = Vec::with_capacity(DEBUG_POOL);
-        let debug_plan: [(DebugMaterial, usize, Handle<Material>); 15] = [
-            (DebugMaterial::Route, 100, route_mat),
-            (DebugMaterial::Target, 24, target_mat),
-            (DebugMaterial::Collision, 128, collision_mat),
-            (DebugMaterial::CatchVolume, 16, catch_mat),
-            (DebugMaterial::Trajectory, 40, trajectory_mat),
-            (DebugMaterial::CameraAim, 12, camera_mat),
-            (DebugMaterial::FootLock, 14, foot_lock_mat),
-            (DebugMaterial::FootNow, 28, foot_now_mat),
-            (DebugMaterial::FootLanding, 14, foot_land_mat),
-            (DebugMaterial::MoveVector, 56, move_vec_mat),
-            (DebugMaterial::GameplayRoot, 14, gameplay_root_mat),
-            (DebugMaterial::VisualRoot, 14, visual_root_mat),
-            (DebugMaterial::Pelvis, 14, pelvis_mat),
-            (DebugMaterial::WeightPoint, 14, weight_mat),
-            (DebugMaterial::StanceFoot, 14, stance_foot_mat),
-        ];
-        for (material, count, handle) in debug_plan {
-            for _ in 0..count {
-                debug_pool.push((app.spawn(Spawn::new(hidden(), cube, handle)), material));
-            }
-        }
+        // Bounded instance pools (each parked hidden; built once). Their
+        // material/count plans live in `pools` so this install stays readable.
+        let chalk_pool = pools::chalk(app, cube);
+        let juice_pool = pools::juice(app, cube);
+        let receiver_ring_pool = pools::receiver_rings(app, cube);
+        let debug_pool = pools::debug(app, cube);
 
         EndZoneScene {
             figure,
             receiver_ring_pool,
+            chalk_pool,
             turf,
             player_parts,
             ball,

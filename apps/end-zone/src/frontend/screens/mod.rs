@@ -4,6 +4,7 @@
 
 pub mod controls;
 pub mod gameover;
+pub mod huddle;
 pub mod menu;
 pub mod pause;
 pub mod settings;
@@ -75,6 +76,7 @@ fn confirm(fe: &mut FrontendState, id: WidgetId) {
         Screen::Settings => settings::confirm(fe, id),
         Screen::Controls => controls::confirm(fe, id),
         Screen::GameOver => gameover::confirm(fe, id),
+        Screen::Huddle => huddle::confirm(fe, id),
         Screen::InGame => {}
     }
 }
@@ -100,13 +102,16 @@ fn cancel(fe: &mut FrontendState) {
         Screen::Paused => pause::resume(fe),
         Screen::Menu => menu::back_to_title(fe),
         Screen::Settings | Screen::Controls => back_from_sub(fe),
-        Screen::Title | Screen::GameOver => {}
+        // The huddle has no cancel — a play must be called (or auto-breaks).
+        Screen::Title | Screen::GameOver | Screen::Huddle => {}
     }
 }
 
 fn pause(fe: &mut FrontendState) {
     match fe.screen {
-        Screen::InGame => pause::open(fe),
+        // The huddle is pausable too; resuming drops back to the field, and the
+        // shell re-opens the huddle if the drive is still waiting on a call.
+        Screen::InGame | Screen::Huddle => pause::open(fe),
         Screen::Paused => pause::resume(fe),
         _ => {}
     }
@@ -129,6 +134,7 @@ pub fn build(
         Screen::Settings => settings::build(fe, ctx, &shell, theme),
         Screen::Controls => controls::build(fe, ctx, &shell, theme),
         Screen::GameOver => gameover::build(fe, ctx, &shell, theme),
+        Screen::Huddle => huddle::build(fe, ctx, &shell, theme),
         Screen::InGame => (
             Vec::new(),
             Vec::new(),

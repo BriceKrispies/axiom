@@ -104,13 +104,15 @@ impl EndZoneShell {
 
         let outcome = match self.frontend.sim_directive() {
             SimDirective::Live if !self.paused => {
-                // Keys reach gameplay only once in-game and never on the frame
-                // that launched.
-                let keys = if self.frontend.screen() == Screen::InGame && !launched {
+                // Gameplay input reaches the run only on the field itself — never
+                // during the pre-snap huddle, and never on the launch frame.
+                let in_game = self.frontend.screen() == Screen::InGame;
+                let keys = if in_game && !launched {
                     self.game_keys(input)
                 } else {
                     Vec::new()
                 };
+                let touch = if in_game { touch } else { TouchInput::default() };
                 self.app.advance(&keys, touch);
                 // A failed fourth-down conversion ends the run.
                 if let Some(summary) = self
@@ -121,6 +123,12 @@ impl EndZoneShell {
                     .map(|d| d.summary())
                 {
                     self.frontend.enter_game_over(summary);
+                }
+                // Mirror the drive's pre-snap huddle into the screen machine: it
+                // opens the play-call screen and closes it when the huddle breaks.
+                match self.app.run.huddle() {
+                    Some(view) => self.frontend.enter_huddle(view),
+                    None => self.frontend.exit_huddle(),
                 }
                 self.app.present()
             }
@@ -158,6 +166,7 @@ impl EndZoneShell {
                     .replace_run(ShowcaseRun::new(EndZoneConfig::default()));
             }
             FrontendCommand::SetPaused(paused) => self.paused = *paused,
+            FrontendCommand::CallPlay { index } => self.app.run.call_play(*index),
         }
     }
 

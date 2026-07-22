@@ -25,6 +25,7 @@ pub mod offense;
 pub mod overseer;
 pub mod perception;
 pub mod personnel;
+pub mod playcall;
 pub mod protection;
 pub mod stage;
 pub mod steering;
@@ -37,6 +38,7 @@ pub use commitment::{AiMemory, Commitment};
 pub use directive::{AssignmentOverride, DefensiveDirective, TacticalMode};
 pub use overseer::DefensiveOverseer;
 pub use perception::{PlayPerception, PocketRegion, Responsibility};
+pub use playcall::{select_defense, variation_key, DefenseSelection};
 
 use axiom::prelude::Vec3;
 

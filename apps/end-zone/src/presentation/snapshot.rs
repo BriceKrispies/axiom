@@ -7,7 +7,8 @@ use axiom::prelude::Vec3;
 
 use crate::ai::engagement::{EngagementState, RushLane};
 use crate::ai::{
-    AssignmentOverride, DefensiveDirective, PlayerIntent, Responsibility, RoleState, TacticalMode,
+    AssignmentKind, AssignmentOverride, DefensiveDirective, PlayerIntent, Responsibility, RoleState,
+    TacticalMode,
 };
 use crate::drive::DriveState;
 use crate::events::PlayEndReason;
@@ -47,6 +48,15 @@ pub struct PlayerView {
     pub def_override: AssignmentOverride,
 }
 
+/// One offensive route drawn as pre-snap chalk on the field: the path in world
+/// space from the receiver's alignment through his waypoints. The primary read
+/// is highlighted; the field renderer dots the line like a chalkboard.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChalkRoute {
+    pub points: Vec<Vec3>,
+    pub primary: bool,
+}
+
 /// The immutable snapshot. Same snapshot + same effect state → same scene
 /// submission.
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +93,9 @@ pub struct PresentationSnapshot {
     /// his throwing cone, nearest his centre line first. The scene draws a ring
     /// at each one's feet; the pass would go to the first.
     pub throwable: Vec<PlayerId>,
+    /// The selected play's offensive routes drawn as pre-snap field chalk. Empty
+    /// except before the snap, so the chalk shows only while the offense is set.
+    pub pre_snap_routes: Vec<ChalkRoute>,
 }
 
 impl PresentationSnapshot {
@@ -95,6 +108,42 @@ impl PresentationSnapshot {
     pub fn carrier(&self) -> Option<&PlayerView> {
         self.ball.carrier().map(|id| self.player(id))
     }
+}
+
+/// The selected play's offensive routes as pre-snap chalk: each route runner's
+/// path from his alignment through his world waypoints, the primary read (the
+/// highest-slot live route) flagged. Empty unless the offense is set pre-snap.
+fn pre_snap_chalk(sim: &SimState) -> Vec<ChalkRoute> {
+    if sim.phase != PlayPhase::PreSnap {
+        return Vec::new();
+    }
+    let offense = sim.play.possession;
+    let is_live_route = |a: &AssignmentKind| matches!(a, AssignmentKind::Route { decoy: false });
+    let primary = sim
+        .assignments
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| sim.players[*i].team == offense && is_live_route(&a.kind))
+        .map(|(i, _)| i)
+        .max();
+    sim.assignments
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| {
+            sim.players[*i].team == offense
+                && matches!(a.kind, AssignmentKind::Route { .. })
+                && !a.route.is_empty()
+        })
+        .map(|(i, a)| {
+            let mut points = Vec::with_capacity(a.route.len() + 1);
+            points.push(sim.players[i].pos);
+            points.extend(a.route.iter().copied());
+            ChalkRoute {
+                points,
+                primary: Some(i) == primary,
+            }
+        })
+        .collect()
 }
 
 /// Capture this tick's snapshot from the simulation (read-only).
@@ -154,5 +203,6 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
         drive: None,
         throwable: sim.throwable.clone(),
         to_gain_z: None,
+        pre_snap_routes: pre_snap_chalk(sim),
     }
 }

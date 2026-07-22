@@ -117,15 +117,16 @@ fn the_deleted_screen_files_are_gone() {
 }
 
 #[test]
-fn exactly_the_seven_screen_states_exist() {
+fn exactly_the_eight_screen_states_exist() {
     let code =
         strip(&fs::read_to_string(src().join("frontend").join("screen.rs")).expect("screen.rs"));
     for state in [
-        "Title", "Menu", "InGame", "Paused", "Settings", "Controls", "GameOver",
+        "Title", "Menu", "InGame", "Huddle", "Paused", "Settings", "Controls", "GameOver",
     ] {
         assert!(code.contains(state), "keeps {state}");
     }
-    // The screen count constant is fixed at seven (Title + the PLAY/SETTINGS Menu
-    // + the five in/around-game states). "MainMenu" (the removed shell) stays gone.
-    assert!(code.contains("SCREEN_COUNT: usize = 7"));
+    // The screen count constant is fixed at eight (Title + the PLAY/SETTINGS Menu
+    // + the pre-snap play-call Huddle + the five in/around-game states).
+    // "MainMenu" (the removed shell) stays gone.
+    assert!(code.contains("SCREEN_COUNT: usize = 8"));
 }

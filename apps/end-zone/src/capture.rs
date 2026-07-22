@@ -26,6 +26,24 @@ const CAPTURE_HEIGHT: u32 = 600;
 /// `TRACE_THROW_TICK` = 258).
 const POST_SNAP_TICK: u32 = 210;
 
+/// A tick inside the pre-snap window (play started at 100, snap at 180): the
+/// offense is set in formation and the route chalk is drawn on the field.
+const PRE_SNAP_TICK: u32 = 165;
+
+/// Build End Zone frozen pre-snap, with the offense set and the selected play's
+/// routes chalked on the turf — the deterministic `end-zone-pre-snap` slice.
+pub fn build_end_zone_pre_snap() -> RunningApp {
+    let mut app = EndZoneApp::new_sized(EndZoneConfig::default(), CAPTURE_WIDTH, CAPTURE_HEIGHT);
+    let force_formation = [KeyToken::new("Digit1")];
+    app.advance(&force_formation, TouchInput::default());
+    let idle: [KeyToken; 0] = [];
+    for _ in 1..PRE_SNAP_TICK {
+        app.advance(&idle, TouchInput::default());
+    }
+    app.pose_scene();
+    app.into_running()
+}
+
 /// Build End Zone frozen just after the snap, framed by the wide behind-the-
 /// offense broadcast camera — the deterministic `end-zone-after-snap` slice.
 pub fn build_end_zone_after_snap() -> RunningApp {

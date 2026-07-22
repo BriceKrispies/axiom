@@ -67,6 +67,41 @@ pub struct SettingRow {
     pub fill: Option<f32>,
 }
 
+/// The glyph a diagrammed player draws as — a coarsening of the play's roles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagramGlyph {
+    Quarterback,
+    Blocker,
+    Receiver,
+}
+
+/// One player's mark on the chalkboard, projected to the diagram's local box:
+/// position and route points are normalized `0..1` (x left→right, y top→bottom),
+/// so the presenter scales them to the widget rect without any football math.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiagramMarkView {
+    pub x: f32,
+    pub y: f32,
+    pub glyph: DiagramGlyph,
+    /// The primary read — drawn highlighted.
+    pub primary: bool,
+    /// A decoy/clear-out route — drawn dashed.
+    pub decoy: bool,
+    /// Normalized route polyline (empty for no route), starting at `(x, y)`.
+    pub route: Vec<(f32, f32)>,
+}
+
+/// A chalkboard diagram of the selected offensive play, ready to render. Built
+/// by the huddle screen from a [`crate::data::PlayDiagram`]; the presenter is a
+/// dumb SVG renderer of these normalized points.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayDiagramView {
+    pub name: String,
+    pub marks: Vec<DiagramMarkView>,
+    /// Normalized y of the line of scrimmage (the chalk LOS line).
+    pub los_y: f32,
+}
+
 /// One typed widget.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Widget {
@@ -75,6 +110,7 @@ pub enum Widget {
     Label(Label),
     Logo(TitleLogo),
     Setting(SettingRow),
+    Diagram(PlayDiagramView),
 }
 
 /// A widget placed on the logical viewport.

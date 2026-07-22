@@ -222,6 +222,7 @@ impl AnimLab {
             drive: None,
             throwable: Vec::new(),
             to_gain_z: None,
+            pre_snap_routes: Vec::new(),
         }
     }
 
