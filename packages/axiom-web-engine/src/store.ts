@@ -19,7 +19,7 @@ import {
   type ResolvedMaterial,
 } from "./backend.ts";
 import type { Camera3D, Entity, Handle, Light, MaterialSpec, MeshData, MeshKind, Rgba, Transform } from "./api.ts";
-import { absentProbe, assert, demand, orCompute, orElse, select } from "./branchless.ts";
+import { absentProbe, assert, demand, orCompute, orElse, presentOf, select } from "./branchless.ts";
 import { unitBox, unitCylinderY, unitSphere } from "./meshes.ts";
 
 /** Color · intensity, resolved to a plain RGB triple for the frame. */
@@ -54,6 +54,9 @@ const DEFAULT_FAR_PLANE = 200;
 const DIRECTION_EPSILON = 1e-9;
 const DEFAULT_EMISSIVE: Rgba = [0, 0, 0, 1];
 const DEFAULT_OPACITY = 1;
+// Absent roughness is fully MATTE: glossiness 0 -> zero specular, so a material
+// that never sets roughness renders byte-identically to the old Lambert-only path.
+const DEFAULT_ROUGHNESS = 1;
 // The software rasterizer pays per triangle, so its primitives are lower-poly.
 const LOW_CYLINDER_SEGMENTS = 12;
 const LOW_SPHERE_LAT_SEGMENTS = 8;
@@ -111,6 +114,16 @@ export const createMeshData = (data: MeshData): Handle => {
     data.positions.length === data.normals.length,
     `store: createMeshData positions (${data.positions.length}) and normals (${data.normals.length}) differ`,
   );
+  // An `ao` array, when present, must carry one scalar per vertex; absent -> the
+  // backends default it to 1.0, so this only fires on a genuine length mismatch.
+  const aoLength = orElse(
+    presentOf(data.ao).map((ao): number => ao.length)[0],
+    data.positions.length,
+  );
+  assert(
+    aoLength === data.positions.length,
+    `store: createMeshData ao (${aoLength}) must match positions (${data.positions.length})`,
+  );
   const handle = nextHandle;
   nextHandle += 1;
   st.backend.uploadMesh(handle, data);
@@ -152,6 +165,7 @@ export const createMaterial = (spec: MaterialSpec): Handle => {
     baseColor: [br, bg, bb, ba],
     emissive: [er, eg, eb],
     opacity: orElse(spec.opacity, DEFAULT_OPACITY),
+    roughness: orElse(spec.roughness, DEFAULT_ROUGHNESS),
   });
   return handle;
 };

@@ -15,20 +15,29 @@ import { type Mat4, fromTrs, lookAt, multiply, perspective } from "./mat4.ts";
 const VERT_SRC = `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
+layout(location = 2) in float aAo;
 uniform mat4 uModel;
 uniform mat4 uViewProj;
 out vec3 vNormal;
 out vec3 vWorldPos;
+out float vAo;
 void main() {
   vec4 world = uModel * vec4(aPosition, 1.0);
   vWorldPos = world.xyz;
   // Upper-3x3 of the model matrix; renormalized per-fragment (uniform enough
   // visually even under non-uniform scale).
   vNormal = mat3(uModel) * aNormal;
+  vAo = aAo;
   gl_Position = uViewProj * world;
 }
 `;
 
+// The GLSL twin of shading.ts: the diffuse Lambert term, a WHITE Blinn-Phong
+// specular lobe + Schlick Fresnel rim (both driven by uRoughness and the eye
+// vector), per-vertex AO on the diffuse+ambient term, and the highlight-rolloff
+// tonemap on the final composite. Kept byte-matched to shadeSurface/tonemap; the
+// constants (8.0/128.0 shininess, 0.04 F0, 0.5 gain, 5.0 power, 0.9 knee, 0.08
+// falloff) mirror shading.ts and shading.test.ts pins the parity.
 const FRAG_SRC = `#version 300 es
 precision highp float;
 const int MAX_DIR = ${MAX_DIR_LIGHTS};
@@ -42,26 +51,50 @@ uniform vec3 uPointColor[MAX_POINT]; // color * intensity
 uniform vec4 uBaseColor;
 uniform vec3 uEmissive;
 uniform float uOpacity;
+uniform float uRoughness;
+uniform vec3 uEye;
 in vec3 vNormal;
 in vec3 vWorldPos;
+in float vAo;
 out vec4 outColor;
+float tonemap1(float c) {
+  float knee = 0.9;
+  float low = min(c, knee);
+  float excess = max(c - knee, 0.0) / (1.0 - knee);
+  return low + (1.0 - knee) * (excess / (1.0 + excess));
+}
 void main() {
   vec3 n = normalize(vNormal);
   // Culling is off; make back faces shade like front faces for thin meshes.
   n = gl_FrontFacing ? n : -n;
-  vec3 lit = vec3(${AMBIENT});
+  float gloss = clamp(1.0 - uRoughness, 0.0, 1.0);
+  float shininess = 8.0 + gloss * (128.0 - 8.0);
+  vec3 toEye = normalize(uEye - vWorldPos);
+  vec3 diffuse = vec3(${AMBIENT});
+  float ndv = max(dot(n, toEye), 0.0);
+  float rim = (1.0 - 0.04) * pow(1.0 - ndv, 5.0) * gloss * 0.5;
+  vec3 specular = vec3(rim);
   for (int i = 0; i < MAX_DIR; i++) {
     if (i >= uDirCount) { break; }
-    lit += max(dot(n, -uDirDir[i]), 0.0) * uDirColor[i];
+    vec3 toLight = -uDirDir[i];
+    float ndl = dot(n, toLight);
+    diffuse += max(ndl, 0.0) * uDirColor[i];
+    float spec = pow(max(dot(n, normalize(toLight + toEye)), 0.0), shininess) * gloss * max(sign(ndl), 0.0);
+    specular += spec * uDirColor[i];
   }
   for (int i = 0; i < MAX_POINT; i++) {
     if (i >= uPointCount) { break; }
-    vec3 toLight = uPointPos[i] - vWorldPos;
-    float d = length(toLight);
-    vec3 l = toLight / max(d, 1e-5);
-    lit += (max(dot(n, l), 0.0) / (1.0 + 0.08 * d * d)) * uPointColor[i];
+    vec3 offset = uPointPos[i] - vWorldPos;
+    float d = length(offset);
+    float atten = 1.0 / (1.0 + 0.08 * d * d);
+    vec3 l = offset / max(d, 1e-5);
+    float ndl = dot(n, l);
+    diffuse += (max(ndl, 0.0) / (1.0 + 0.08 * d * d)) * uPointColor[i];
+    float spec = pow(max(dot(n, normalize(l + toEye)), 0.0), shininess) * gloss * max(sign(ndl), 0.0) * atten;
+    specular += spec * uPointColor[i];
   }
-  outColor = vec4(uBaseColor.rgb * lit + uEmissive, uOpacity);
+  vec3 lit = diffuse * vAo * uBaseColor.rgb + specular + uEmissive;
+  outColor = vec4(tonemap1(lit.r), tonemap1(lit.g), tonemap1(lit.b), uOpacity);
 }
 `;
 
@@ -77,6 +110,8 @@ interface Uniforms {
   readonly baseColor: WebGLUniformLocation;
   readonly emissive: WebGLUniformLocation;
   readonly opacity: WebGLUniformLocation;
+  readonly roughness: WebGLUniformLocation;
+  readonly eye: WebGLUniformLocation;
   readonly dirCount: WebGLUniformLocation;
   readonly dirDir: WebGLUniformLocation;
   readonly dirColor: WebGLUniformLocation;
@@ -149,6 +184,8 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
     baseColor: uniform(gl, program, "uBaseColor"),
     emissive: uniform(gl, program, "uEmissive"),
     opacity: uniform(gl, program, "uOpacity"),
+    roughness: uniform(gl, program, "uRoughness"),
+    eye: uniform(gl, program, "uEye"),
     dirCount: uniform(gl, program, "uDirCount"),
     dirDir: uniform(gl, program, "uDirDir"),
     dirColor: uniform(gl, program, "uDirColor"),
@@ -174,6 +211,7 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
     gl.uniform4f(uniforms.baseColor, material.baseColor[0], material.baseColor[1], material.baseColor[2], material.baseColor[3]);
     gl.uniform3f(uniforms.emissive, material.emissive[0], material.emissive[1], material.emissive[2]);
     gl.uniform1f(uniforms.opacity, material.opacity);
+    gl.uniform1f(uniforms.roughness, material.roughness);
     gl.bindVertexArray(mesh.vao);
     gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_INT, 0);
   };
@@ -200,6 +238,7 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
       const proj = perspective(frame.camera.fovY, aspect, frame.camera.near, frame.camera.far);
       const view = lookAt(frame.camera.position, frame.camera.target, { x: 0, y: 1, z: 0 });
       gl.uniformMatrix4fv(uniforms.viewProj, false, multiply(proj, view));
+      gl.uniform3f(uniforms.eye, frame.camera.position.x, frame.camera.position.y, frame.camera.position.z);
 
       gl.uniform1i(uniforms.dirCount, frame.dirLights.length);
       if (frame.dirLights.length > 0) {
@@ -264,6 +303,14 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
         normals[i * 3 + 2] = n.z;
       }
       const indices = new Uint32Array(data.indices);
+      // Per-vertex ambient occlusion: absent -> 1.0 everywhere (a no-op multiply).
+      const ao = new Float32Array(count).fill(1);
+      const aoSrc = data.ao;
+      if (aoSrc !== undefined) {
+        for (let i = 0; i < count; i += 1) {
+          ao[i] = aoSrc[i] ?? 1;
+        }
+      }
 
       const vao = gl.createVertexArray();
       if (vao === null) {
@@ -286,10 +333,13 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
       const nrmBuf = makeBuffer(gl.ARRAY_BUFFER, normals);
       gl.enableVertexAttribArray(1);
       gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+      const aoBuf = makeBuffer(gl.ARRAY_BUFFER, ao);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
       const idxBuf = makeBuffer(gl.ELEMENT_ARRAY_BUFFER, indices);
       gl.bindVertexArray(null);
 
-      meshes.set(handle, { vao, buffers: [posBuf, nrmBuf, idxBuf], indexCount: indices.length });
+      meshes.set(handle, { vao, buffers: [posBuf, nrmBuf, aoBuf, idxBuf], indexCount: indices.length });
     },
   };
 };

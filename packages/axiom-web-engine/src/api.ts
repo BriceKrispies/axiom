@@ -41,18 +41,25 @@ export interface Transform {
   readonly scale: EngineVec3;
 }
 
-/** Custom triangle-list geometry passed to `createMeshData`. */
+/** Custom triangle-list geometry passed to `createMeshData`. `ao`, when given, is
+ * one baked ambient-occlusion scalar per vertex (0 = fully occluded, 1 = open);
+ * both backends multiply the diffuse + ambient term by it (interpolated per
+ * fragment on the GPU, per-triangle averaged in the software path). Omitting it is
+ * fully backward compatible — an absent `ao` is treated as 1.0 everywhere. */
 export interface MeshData {
   readonly positions: readonly EngineVec3[];
   readonly normals: readonly EngineVec3[];
   readonly indices: readonly number[];
+  readonly ao?: readonly number[] | Float32Array;
 }
 
 export type MeshKind = "box" | "sphere" | "cylinder";
 
-/** Lambert material: `baseColor` diffuse + additive `emissive`; `opacity` < 1
- * alpha-blends. `roughness` is accepted for vocabulary compatibility and has no
- * effect in this diffuse-only renderer. */
+/** Lambert-plus-specular material: `baseColor` diffuse + additive `emissive`;
+ * `opacity` < 1 alpha-blends. `roughness ∈ [0, 1]` now drives a white Blinn-Phong
+ * specular highlight and a Schlick Fresnel rim: 1 (the default when omitted) is
+ * fully matte — no specular, byte-identical to the old diffuse-only render —
+ * while lower values sharpen and strengthen the highlight toward a mirror. */
 export interface MaterialSpec {
   readonly baseColor: Rgba;
   readonly emissive?: Rgba;

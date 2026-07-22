@@ -129,14 +129,68 @@ test("createMeshData rejects mismatched positions/normals", () => {
   );
 });
 
-test("createMaterial applies emissive and opacity, and their defaults", () => {
+test("createMeshData accepts a per-vertex ao array and forwards it to the backend", () => {
+  const rec = setup("WebGL2", "high");
+  const data = {
+    ao: [0.5, 0.75],
+    indices: [0, 1, 0],
+    normals: [
+      { x: 0, y: 1, z: 0 },
+      { x: 0, y: 1, z: 0 },
+    ],
+    positions: [
+      { x: 0, y: 0, z: 0 },
+      { x: 1, y: 0, z: 0 },
+    ],
+  };
+  createMeshData(data);
+  assert.deepEqual(rec.uploads[0]!.data.ao, [0.5, 0.75]);
+});
+
+test("createMeshData rejects an ao array whose length differs from the vertices", () => {
+  setup("WebGL2", "high");
+  assert.throws(
+    () =>
+      createMeshData({
+        ao: [1],
+        indices: [],
+        normals: [
+          { x: 0, y: 1, z: 0 },
+          { x: 0, y: 1, z: 0 },
+        ],
+        positions: [
+          { x: 0, y: 0, z: 0 },
+          { x: 1, y: 0, z: 0 },
+        ],
+      }),
+    /ao \(1\) must match positions \(2\)/u,
+  );
+});
+
+test("createMaterial applies emissive, opacity, roughness, and their defaults", () => {
   const rec = setup("WebGL2", "high");
   const withDefaults = createMaterial({ baseColor: [0.2, 0.4, 0.6, 1] });
-  const explicit = createMaterial({ baseColor: [1, 0, 0, 1], emissive: [0.5, 0.5, 0.5, 1], opacity: 0.25 });
+  const explicit = createMaterial({
+    baseColor: [1, 0, 0, 1],
+    emissive: [0.5, 0.5, 0.5, 1],
+    opacity: 0.25,
+    roughness: 0.2,
+  });
   renderScene();
   const { materials } = rec.frames[0]!;
-  assert.deepEqual(materials.get(withDefaults), { baseColor: [0.2, 0.4, 0.6, 1], emissive: [0, 0, 0], opacity: 1 });
-  assert.deepEqual(materials.get(explicit), { baseColor: [1, 0, 0, 1], emissive: [0.5, 0.5, 0.5], opacity: 0.25 });
+  // An omitted roughness resolves to the fully-matte default (1) — specular off.
+  assert.deepEqual(materials.get(withDefaults), {
+    baseColor: [0.2, 0.4, 0.6, 1],
+    emissive: [0, 0, 0],
+    opacity: 1,
+    roughness: 1,
+  });
+  assert.deepEqual(materials.get(explicit), {
+    baseColor: [1, 0, 0, 1],
+    emissive: [0.5, 0.5, 0.5],
+    opacity: 0.25,
+    roughness: 0.2,
+  });
 });
 
 test("spawnRenderable rejects an unknown material handle", () => {

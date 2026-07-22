@@ -9,11 +9,13 @@
 
 import type { Camera3D, Handle, MeshData, Transform } from "./api.ts";
 
-/** A material resolved to plain arrays (defaults applied by the store). */
+/** A material resolved to plain arrays (defaults applied by the store).
+ * `roughness ∈ [0, 1]` drives the specular highlight (1 = matte, no specular). */
 export interface ResolvedMaterial {
   readonly baseColor: readonly [number, number, number, number];
   readonly emissive: readonly [number, number, number];
   readonly opacity: number;
+  readonly roughness: number;
 }
 
 /** One drawable node (the store mutates `transform` in place on re-pose). */

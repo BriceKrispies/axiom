@@ -21,6 +21,7 @@ test("contract shapes construct and read back", () => {
     positions: [{ x: 0, y: 0, z: 0 }],
     normals: [{ x: 0, y: 1, z: 0 }],
     indices: [0],
+    ao: [0.5],
   };
   const material: MaterialSpec = { baseColor: color, emissive: color, roughness: 0.5, opacity: 1 };
   const light: Light = { kind: "directional", direction: { x: 0, y: -1, z: 0 }, color, intensity: 1 };
@@ -35,6 +36,7 @@ test("contract shapes construct and read back", () => {
 
   assert.equal(transform.position.x, 1);
   assert.equal(mesh.indices[0], 0);
+  assert.deepEqual(mesh.ao, [0.5]);
   assert.equal(material.baseColor[3], 1);
   assert.equal(light.kind, "directional");
   assert.equal(camera.far, 100);

@@ -24,12 +24,15 @@
 import type { Handle, MeshData } from "./api.ts";
 import type { RenderBackend, SceneFrame } from "./backend.ts";
 import { type Mat4, fromTrs, lookAt, multiply, perspective } from "./mat4.ts";
-import { lambertLight } from "./shading.ts";
+import { shadeSurface, tonemap } from "./shading.ts";
 
 interface CpuMesh {
   /** xyz-interleaved model-space positions. */
   readonly positions: Float32Array;
   readonly indices: Uint32Array;
+  /** One ambient-occlusion scalar per vertex (defaults to 1.0 when the mesh
+   * carries no `ao`), averaged over a triangle's 3 verts at shade time. */
+  readonly ao: Float32Array;
   /** Model-space bounding-sphere radius (for whole-node culling). */
   readonly radius: number;
 }
@@ -232,11 +235,19 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
         const base = material.baseColor;
         const emissive = material.emissive;
         const opacity = material.opacity;
+        const roughness = material.roughness;
+        const meshAo = mesh.ao;
         const indices = mesh.indices;
         for (let i = 0; i < indices.length; i += 3) {
-          const a = indices[i]! * 3;
-          const b = indices[i + 1]! * 3;
-          const c = indices[i + 2]! * 3;
+          const ia = indices[i]!;
+          const ib = indices[i + 1]!;
+          const ic = indices[i + 2]!;
+          const a = ia * 3;
+          const b = ib * 3;
+          const c = ic * 3;
+          // Flat AO for the triangle: the mean of its three vertices' occlusion,
+          // the per-triangle analogue of the GPU's per-fragment interpolation.
+          const aoTri = (meshAo[ia]! + meshAo[ib]! + meshAo[ic]!) / 3;
           const sa = planeSide(world[a]!, world[a + 1]!, world[a + 2]!);
           const sb = planeSide(world[b]!, world[b + 1]!, world[b + 2]!);
           const sc = planeSide(world[c]!, world[c + 1]!, world[c + 2]!);
@@ -269,10 +280,14 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
             nz = -nz;
           }
 
-          const lit = lambertLight(nx, ny, nz, mx, my, mz, frame);
-          const r = channel(base[0] * lit[0] + emissive[0]);
-          const g = channel(base[1] * lit[1] + emissive[1]);
-          const bl = channel(base[2] * lit[2] + emissive[2]);
+          // Same shading truth as the WebGL2 shader: albedo-tinted, AO-attenuated
+          // diffuse + neutral white specular/Fresnel, then the highlight tonemap.
+          const shaded = shadeSurface(nx, ny, nz, mx, my, mz, eye.x, eye.y, eye.z, roughness, frame);
+          const dif = shaded.diffuse;
+          const spc = shaded.specular;
+          const r = channel(tonemap(dif[0] * aoTri * base[0] + spc[0] + emissive[0]));
+          const g = channel(tonemap(dif[1] * aoTri * base[1] + spc[1] + emissive[1]));
+          const bl = channel(tonemap(dif[2] * aoTri * base[2] + spc[2] + emissive[2]));
 
           // Clip against the near plane (Sutherland–Hodgman) into 0–2 triangles.
           const src: readonly (readonly [number, number, number])[] = [
@@ -344,15 +359,19 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
     uploadMesh: (handle: Handle, data: MeshData): void => {
       const count = data.positions.length;
       const positions = new Float32Array(count * 3);
+      // Per-vertex AO: absent -> 1.0 everywhere (a no-op multiply at shade time).
+      const ao = new Float32Array(count).fill(1);
+      const aoSrc = data.ao;
       let radius = 0;
       for (let i = 0; i < count; i += 1) {
         const p = data.positions[i]!;
         positions[i * 3] = p.x;
         positions[i * 3 + 1] = p.y;
         positions[i * 3 + 2] = p.z;
+        ao[i] = aoSrc?.[i] ?? 1;
         radius = Math.max(radius, Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z));
       }
-      meshes.set(handle, { indices: new Uint32Array(data.indices), positions, radius });
+      meshes.set(handle, { ao, indices: new Uint32Array(data.indices), positions, radius });
     },
   };
 };
