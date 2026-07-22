@@ -25,10 +25,30 @@ fn tap(s: &mut EndZoneShell, token: &str) {
     frame(s, &[]);
 }
 
+/// Title -> Menu -> PLAY opens the huddle immediately; calling a play drops onto
+/// the field. A run always begins at the play-call, never a bare live field.
 fn start_run(s: &mut EndZoneShell) {
     tap(s, "Enter"); // Title -> Menu
-    tap(s, "Enter"); // Menu PLAY -> InGame
+    tap(s, "Enter"); // Menu PLAY -> Huddle (play-call opens right away)
+    assert_eq!(s.frontend.screen(), Screen::Huddle);
+    tap(s, "Enter"); // Huddle: call the focused play -> InGame
     assert_eq!(s.frontend.screen(), Screen::InGame);
+}
+
+#[test]
+fn play_opens_the_huddle_immediately_not_a_live_field() {
+    let mut s = shell();
+    tap(&mut s, "Enter"); // Title -> Menu
+    tap(&mut s, "Enter"); // Menu PLAY
+    // The play-call huddle is up the instant the run begins — there is no live,
+    // snappable field flashing before it (the old 100-tick kickoff window).
+    assert_eq!(s.frontend.screen(), Screen::Huddle);
+    // The ball is still pre-snap while the huddle owns the pre-snap beat.
+    assert_eq!(
+        s.app.run.sim.phase,
+        axiom_end_zone::state::PlayPhase::PreSnap,
+        "the ball has not snapped behind the huddle"
+    );
 }
 
 #[test]
@@ -81,7 +101,8 @@ fn restart_uses_a_fresh_simulation() {
     tap(&mut s, "KeyP");
     tap(&mut s, "ArrowDown"); // RESTART RUN
     tap(&mut s, "Enter");
-    assert_eq!(s.frontend.screen(), Screen::InGame);
+    // A fresh run re-opens the huddle (call the first play) from tick zero.
+    assert_eq!(s.frontend.screen(), Screen::Huddle);
     assert!(
         s.app.run.sim.tick < 10,
         "restart rebuilds the simulation from tick zero"

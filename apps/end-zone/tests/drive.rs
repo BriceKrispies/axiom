@@ -4,7 +4,8 @@
 
 use axiom_end_zone::drive::{DriveEvent, DriveState, YARDS_TO_GAIN};
 use axiom_end_zone::launch::RunConfig;
-use axiom_end_zone::showcase::ShowcaseRun;
+use axiom_end_zone::showcase::{DiagnosticCommand, ShowcaseRun};
+use axiom_end_zone::state::PlayPhase;
 
 fn config() -> RunConfig {
     RunConfig::new(0x51A7_0E2D)
@@ -20,6 +21,35 @@ fn play_out(run: &mut ShowcaseRun) -> DriveState {
         }
     }
     panic!("an unassisted run must end within the cap");
+}
+
+#[test]
+fn a_snap_press_is_ignored_until_a_play_is_called() {
+    let mut run = ShowcaseRun::new_run(&config());
+    // The run opens at the huddle (kickoff -> huddle on the first step); the sim
+    // is set pre-snap. Hammering the snap does nothing until a play is called —
+    // gameplay can never start behind the huddle.
+    for _ in 0..40 {
+        run.step(&[DiagnosticCommand::PrimaryAction]);
+        assert_eq!(
+            run.sim.phase,
+            PlayPhase::PreSnap,
+            "no snap is honored before a play is called"
+        );
+    }
+    assert!(run.huddle().is_some(), "still waiting on a play call");
+
+    // Call a play; once it arms, the snap goes through.
+    run.call_play(0);
+    let mut snapped = false;
+    for _ in 0..200 {
+        run.step(&[DiagnosticCommand::PrimaryAction]);
+        if run.sim.phase != PlayPhase::PreSnap {
+            snapped = true;
+            break;
+        }
+    }
+    assert!(snapped, "once armed, a snap press starts the play");
 }
 
 #[test]

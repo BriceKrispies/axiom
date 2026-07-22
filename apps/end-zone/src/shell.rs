@@ -78,10 +78,15 @@ impl EndZoneShell {
         css_height: f32,
     ) -> ShellOutput {
         let view = self.frontend.frame(input, css_width, css_height);
+        // A launch/restart/play-call confirm press must not carry through into
+        // gameplay on the same or next frame (it would double as the first SNAP),
+        // so it suppresses gameplay keys this frame and latches until released.
         let launched = view.commands.iter().any(|c| {
             matches!(
                 c,
-                FrontendCommand::LaunchRun { .. } | FrontendCommand::RestartRun
+                FrontendCommand::LaunchRun { .. }
+                    | FrontendCommand::RestartRun
+                    | FrontendCommand::CallPlay { .. }
             )
         });
         for command in &view.commands {

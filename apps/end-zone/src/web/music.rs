@@ -132,8 +132,19 @@ impl AudioEdge {
 
     /// Advance the menu-music fade (target 1.0 on the title menu, else 0.0) and
     /// track its master×music gain. No-op until unlocked.
+    ///
+    /// While the menu is up this also self-heals the autoplay race: it re-resumes
+    /// the (gesture-unlocked) context and re-`kick`s the loop every frame until
+    /// it actually plays. A single gesture's `play()`/`resume()` can be dropped
+    /// if the context or the MP3 wasn't ready yet — retrying each frame is why
+    /// the music no longer needs a second click to start.
     pub fn update_music(&mut self, on_menu: bool, gain: f32) {
         if let Some(context) = &self.context {
+            if on_menu {
+                let _ = context.resume();
+                self.music.ensure_started(context);
+                self.music.kick();
+            }
             self.music.update(context, on_menu, gain);
         }
     }

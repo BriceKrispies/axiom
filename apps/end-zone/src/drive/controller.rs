@@ -6,7 +6,7 @@ use crate::ai::{select_defense, variation_key};
 use crate::data::{offensive_playbook, PlayDefinition};
 use crate::identity::TeamId;
 use crate::launch::{resolve_defense, RunConfig};
-use crate::showcase::{AUTO_START_DELAY, RESET_DELAY, SNAP_DELAY};
+use crate::showcase::{RESET_DELAY, SNAP_DELAY};
 use crate::state::{PlayPhase, SimCommand, SimState};
 
 use super::{DriveEvent, DriveState, HUDDLE_AUTO_DELAY, MAX_PLAY_TICKS};
@@ -62,18 +62,25 @@ pub struct DriveController {
 }
 
 impl DriveController {
-    /// A controller for a run beginning at `initial_heat`.
+    /// A controller for a run beginning at `initial_heat`. The huddle opens on
+    /// the very first step (`start_at: 0`): a run begins at the play-call, never
+    /// with a live, snappable field the player never asked for.
     pub fn new(initial_heat: u8) -> Self {
         DriveController {
-            stage: Stage::Kickoff {
-                start_at: AUTO_START_DELAY,
-            },
+            stage: Stage::Kickoff { start_at: 0 },
             state: DriveState::new(initial_heat),
             last_event: None,
             pending_call: None,
             snap_index: 0,
             last_defense_index: 0,
         }
+    }
+
+    /// Whether the ball may be snapped: only once a play has been called and the
+    /// offense is armed at the line. Before that (kickoff or an open huddle) a
+    /// snap press is ignored, so gameplay can never start behind the huddle.
+    pub fn armed(&self) -> bool {
+        matches!(self.stage, Stage::Armed { .. })
     }
 
     /// The player snapped the ball themselves — cancel the scheduled snap and

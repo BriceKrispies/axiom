@@ -145,6 +145,12 @@ impl ShowcaseRun {
         let tick = self.sim.tick;
         let mut user_commands: Vec<SimCommand> = Vec::new();
         let mut user_snapped = false;
+        // A manual snap is only honored once a play has been called: in a real
+        // run the drive must be armed; the ambient showcase snaps on its own beat.
+        let snap_allowed = match &self.run_loop {
+            RunLoop::Ambient(_) => true,
+            RunLoop::Drive(controller, _) => controller.armed(),
+        };
         for command in diagnostics {
             match command {
                 DiagnosticCommand::ToggleDebug => self.debug_enabled = !self.debug_enabled,
@@ -161,10 +167,11 @@ impl ShowcaseRun {
                 DiagnosticCommand::PrimaryAction => {
                     // Contextual on the PRE-step state: snap → throw → restart.
                     match self.sim.phase {
-                        crate::state::PlayPhase::PreSnap => {
+                        crate::state::PlayPhase::PreSnap if snap_allowed => {
                             user_commands.push(SimCommand::Snap);
                             user_snapped = true;
                         }
+                        crate::state::PlayPhase::PreSnap => {}
                         crate::state::PlayPhase::Live => {
                             if self.sim.possession == Some(self.sim.quarterback) {
                                 user_commands.push(SimCommand::ThrowNow);
