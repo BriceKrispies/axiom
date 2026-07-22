@@ -875,6 +875,7 @@ dependencies = [
  "axiom",
  "axiom-animation-lab",
  "axiom-canvas2d-backend",
+ "axiom-end-zone",
  "axiom-gpu-backend",
  "axiom-gravix",
  "axiom-host",
