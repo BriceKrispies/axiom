@@ -87,16 +87,14 @@ impl EndZoneApp {
         Self::new_sized(config, WIDTH, HEIGHT)
     }
 
-    /// Build the app at an explicit render size. The native capture harness
+    /// Build the app at an explicit render size — the native capture harness
     /// ([`crate::capture`]) uses this so the baked camera projection aspect
     /// matches the screenshot framebuffer instead of being distorted by it.
     pub fn new_sized(config: EndZoneConfig, width: u32, height: u32) -> Self {
-        // Sky clear color — it is also what the renderer's distance cue fogs
-        // toward, so it must be daylight, never black. Graded from the earlier
-        // pale wash (0.50, 0.67, 0.88, ~sRGB 0.74/0.84/0.95 — a milky grey-blue)
-        // toward the reference's vivid saturated cerulean: red/green dropped and
-        // blue held so the sky reads as a punchy daylight blue and the distance
-        // fog deepens the far field instead of bleaching it to a flat pastel.
+        // Sky clear color — also the renderer's distance-fog target, so it must
+        // be daylight, never black. A saturated cerulean (red/green dropped, blue
+        // held) reads as punchy daylight and deepens the far field instead of
+        // bleaching it to a flat pastel.
         let sky = Color::linear_rgb(
             Ratio::finite_or_zero(0.18),
             Ratio::finite_or_zero(0.45),

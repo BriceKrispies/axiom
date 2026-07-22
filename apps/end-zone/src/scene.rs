@@ -146,10 +146,9 @@ impl EndZoneScene {
             }
         }
 
-        // Lighting: one sun + hemisphere ambient. The key carries the form and
-        // the ground contact shadow; the ambient only lifts the darks enough to
-        // keep them readable. Too much sky fill floods the shaded sides and the
-        // player boxes go flat — so the fill sits well below the key.
+        // Lighting: one sun (the key carries form + ground contact shadow) plus
+        // a low hemisphere fill kept well below the key, so the shaded box sides
+        // deepen instead of flooding flat.
         app.add_light(
             DirectionalLight {
                 direction: Vec3::new(0.32, -1.0, 0.20),
@@ -159,11 +158,8 @@ impl EndZoneScene {
             Transform::IDENTITY,
         );
         app.set_ambient(FrameAmbient::new([0.21, 0.28, 0.39], [0.10, 0.13, 0.10]));
-        // Author the frame's filmic grade so every backend — the live present arm
-        // and the offscreen capture — presents the sunlit, saturated daylight look
-        // rather than a flat, washed-out raster. The engine's `cinematic()` preset
-        // (a near-neutral exposure, a cool daylight white balance, gentle contrast,
-        // and a saturation lift) rides onto the FrameOutcome and grades on present.
+        // Author the frame's filmic grade (the engine's `cinematic()` preset) so
+        // the capture and the live arm grade identically, not a flat raster.
         app.set_postprocess(FramePostProcess::cinematic());
 
         // Team part materials, indexed by part tag.
