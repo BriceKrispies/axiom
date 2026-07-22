@@ -65,44 +65,22 @@ const ironbound = (seed: number, tier: Tier): FigurePartDefinition[] => {
   const heavyWeapon = pickInt(seed, "weapon", 0, 2); // 0 hammer, 1 blade, 2 fist
   const parts: FigurePartDefinition[] = [
     P("base", null, "base", "plate", "metal", vec3(0, 0.08, 0), vec3(w + 0.3, 0.14, 0.5)),
-    // Lower body FIRST: the trunk rides high on two separated armored legs + boots so
-    // the figure reads as a standing knight, not a floor-to-neck torso block. Legs are
-    // base-parented (independent of the trunk) and the trunk bottom (~0.56) sits above
-    // the thigh tops (~0.80) as a hip joint, leaving the legs visible below it.
-    P("boot", "base", "foot", "rounded_box", "metal", vec3(w * 0.5, 0.16, 0.1), vec3(0.2, 0.16, 0.26), { mirror: { axis: "x", idSuffix: "_r" } }),
-    P("leg", "base", "thigh", "box", "primary", vec3(w * 0.5, 0.5, 0.02), vec3(0.19, 0.3, 0.2), { mirror: { axis: "x", idSuffix: "_r" } }),
-    P("torso", "base", "torso", "rounded_box", "primary", vec3(0, 0.9 * bulk, 0), vec3(w, 0.34 * bulk, 0.38)),
-    P("chest", "torso", "shell", "plate", "metal", vec3(0, 0.0, 0.16), vec3(w * 0.8, 0.32, 0.12), { attach: "chest" }),
-    // Chest heraldic device: every forged knight bears a raised central emblem —
-    // the reference's signature gear/boss on the breastplate (the Vanguard's cog).
-    // A gold gear ring around a short hub boss, standing proud of the chest plate
-    // (rotated to face +Z). The tier4+ furnace glow reads through the open rim.
-    P("emblem_ring", "torso", "shell", "ring", "accent", vec3(0, 0.02, 0.24), vec3(0.36, 0.12, 0.36), { rot: vec3(Math.PI / 2, 0, 0) }),
-    P("emblem_hub", "torso", "shell", "cylinder", "accent", vec3(0, 0.02, 0.25), vec3(0.18, 0.14, 0.18), { rot: vec3(Math.PI / 2, 0, 0) }),
-    // Waist faulds: a bronze belt band seating a skirt of overlapping steel tassets
-    // that hang from the waist over the thigh-tops — the reference knights' layered
-    // hip armor, closing the bare gap between breastplate and bare thighs so the
-    // figure reads as fully plated, not a torso block perched on two legs.
-    P("belt", "torso", "shell", "plate", "accent", vec3(0, -0.14 * bulk, 0.02), vec3(w * 1.04, 0.12, 0.42)),
-    P("tasset_f", "torso", "hip", "plate", "metal", vec3(0, -0.34 * bulk, 0.16), vec3(0.24, 0.3, 0.08), { rot: vec3(0.25, 0, 0) }),
-    P("tasset_s", "torso", "hip", "plate", "metal", vec3(w * 0.62, -0.3 * bulk, 0.04), vec3(0.2, 0.28, 0.08), { rot: vec3(0.1, 0, -0.2), mirror: { axis: "x", idSuffix: "_r" } }),
-    // Neck gorget: a dark collar seating the helm on the shoulders so the head
-    // reads as an armored great-helm rather than a bare cube on the torso.
-    P("gorget", "torso", "shell", "cylinder", "secondary", vec3(0, 0.32 * bulk, 0.02), vec3(0.3, 0.14, 0.28)),
-    P("head", "torso", "head", "box", "metal", vec3(0, 0.52 * bulk, 0.02), vec3(0.3, 0.3, 0.32), { attach: "crown" }),
-    // Visor brow: a raised dark band across the helm front, recessing the eye slit
-    // into a knight visor — the reference's defining face silhouette.
-    P("visor", "head", "face", "box", "secondary", vec3(0, 0.1, 0.15), vec3(0.34, 0.1, 0.06)),
+    P("torso", "base", "torso", "rounded_box", "primary", vec3(0, 0.72 * bulk, 0), vec3(w, 0.7 * bulk, 0.4)),
+    P("chest", "torso", "shell", "rounded_box", "metal", vec3(0, 0.1, 0.16), vec3(w * 0.8, 0.4, 0.14), { attach: "chest" }),
+    // A layered breastplate: a beveled gorget collar over the chest and a hanging
+    // fauld skirt at the waist, so the front reads as stacked plate, not one slab.
+    P("gorget", "torso", "shell", "rounded_box", "metal", vec3(0, 0.34 * bulk, 0.14), vec3(w * 0.66, 0.12, 0.26)),
+    P("fauld", "torso", "back", "plate", "secondary", vec3(0, -0.3, 0.1), vec3(w * 1.02, 0.24, 0.24), { rot: vec3(0.16, 0, 0) }),
+    P("head", "torso", "head", "box", "metal", vec3(0, 0.55 * bulk, 0.02), vec3(0.3, 0.3, 0.32), { attach: "crown" }),
     P("eye", "head", "eye", "box", "eye", vec3(0, 0.02, 0.17), vec3(0.16, 0.05, 0.04)),
-    P("shoulder", "torso", "shoulder", "plate", "accent", vec3(w * 0.82, 0.26, 0), vec3(0.26, 0.2, 0.34), { mirror: { axis: "x", idSuffix: "_r" } }),
-    // Arms hang straight down, flush against the torso (a knight at attention),
-    // not splayed out — the reference silhouette is a tight vertical column under
-    // wide pauldrons, so the upper arm carries no outward roll.
-    P("arm", "torso", "upper_arm", "box", "primary", vec3(w * 0.84, 0.02, 0), vec3(0.17, 0.44, 0.18), { rot: vec3(0, 0, 0), mirror: { axis: "x", idSuffix: "_r" } }),
+    // Overlapping pauldrons: a big beveled cap dome with a lower lame layered under it.
+    P("shoulder", "torso", "shoulder", "plate", "accent", vec3(w * 0.62, 0.28, 0), vec3(0.26, 0.2, 0.34), { mirror: { axis: "x", idSuffix: "_r" } }),
+    P("pauldron_cap", "torso", "shoulder", "rounded_box", "metal", vec3(w * 0.66, 0.36, 0), vec3(0.36, 0.22, 0.42), { rot: vec3(0, 0, -0.16), mirror: { axis: "x", idSuffix: "_r" } }),
+    P("arm", "torso", "upper_arm", "box", "primary", vec3(w * 0.66, -0.02, 0), vec3(0.17, 0.5, 0.18), { mirror: { axis: "x", idSuffix: "_r" } }),
+    P("leg", "base", "thigh", "box", "primary", vec3(w * 0.36, 0.34, 0), vec3(0.19, 0.5, 0.2), { mirror: { axis: "x", idSuffix: "_r" } }),
   ];
-  // Weapon in the right hand (a fixed hero hand, not mirrored) — the gauntlet sits
-  // in line beneath the upper arm at the hip, not jutting outboard past it.
-  parts.push(P("hand", "torso", "hand", "box", "metal", vec3(w * 0.84, -0.34, 0.08), vec3(0.16, 0.16, 0.16), { attach: "right_hand" }));
+  // Weapon in the right hand (a fixed hero hand, not mirrored).
+  parts.push(P("hand", "torso", "hand", "box", "metal", vec3(w * 0.72, -0.32, 0.08), vec3(0.16, 0.16, 0.16), { attach: "right_hand" }));
   if (heavyWeapon === 0) {
     parts.push(P("haft", "hand", "weapon", "cylinder", "metal", vec3(0, 0.28, 0), vec3(0.08, 0.6, 0.08)));
     parts.push(P("head_w", "haft", "weapon", "box", "accent", vec3(0, 0.34, 0), vec3(0.34, 0.24, 0.24), { attach: "weapon_tip" }));
@@ -112,11 +90,15 @@ const ironbound = (seed: number, tier: Tier): FigurePartDefinition[] => {
     parts.push(P("gauntlet", "hand", "weapon", "rounded_box", "accent", vec3(0, -0.02, 0.06), vec3(0.28, 0.26, 0.3), { attach: "weapon_tip" }));
   }
   // Off hand shield for durable silhouettes.
-  parts.push(P("shield", "torso", "shield", "plate", "accent", vec3(-w * 0.78, -0.18, 0.12), vec3(0.36, 0.56, 0.1), { rot: vec3(0, 0.2, 0) }));
+  parts.push(P("shield", "torso", "shield", "plate", "accent", vec3(-w * 0.78, -0.05, 0.12), vec3(0.36, 0.56, 0.1), { rot: vec3(0, 0.2, 0) }));
+  // Segmented tassets guarding the hips (a second waist layer under the fauld).
+  parts.push(P("tasset", "base", "thigh", "plate", "metal", vec3(w * 0.36, 0.5, 0.12), vec3(0.24, 0.32, 0.14), { tierMin: 2, rot: vec3(0.12, 0, 0), mirror: { axis: "x", idSuffix: "_r" } }));
+  // A lower pauldron lame that overlaps the cap, added as the figure gets fancier.
+  parts.push(P("pauldron_lame", "torso", "shoulder", "plate", "metal", vec3(w * 0.66, 0.15, 0.02), vec3(0.32, 0.13, 0.38), { tierMin: 3, lodMin: "med", rot: vec3(0.22, 0, -0.1), mirror: { axis: "x", idSuffix: "_r" } }));
   // Tier embellishments.
   parts.push(P("crest", "head", "crest", "wedge", "accent", vec3(0, 0.2, -0.02), vec3(0.2, 0.24, 0.14), { tierMin: 3, rot: vec3(-0.3, 0, 0) }));
   parts.push(P("furnace", "chest", "ember_seam", "box", "emissive_core", vec3(0, 0, 0.06), vec3(0.14, 0.18, 0.05), { tierMin: 4 }));
-  parts.push(P("banner", "torso", "banner", "plate", "accent", vec3(-w * 0.3, 0.72, -0.2), vec3(0.24, 0.7, 0.03), { tierMin: 5, rot: vec3(0.1, 0, 0) }));
+  parts.push(P("banner", "torso", "banner", "plate", "accent", vec3(-w * 0.3, 0.9, -0.2), vec3(0.24, 0.7, 0.03), { tierMin: 5, rot: vec3(0.1, 0, 0) }));
   return parts;
 };
 
@@ -193,11 +175,15 @@ const neutral = (seed: number, tier: Tier): FigurePartDefinition[] => {
   const parts: FigurePartDefinition[] = [
     P("base", null, "base", "cylinder", "metal", vec3(0, 0.1, 0), vec3(0.5, 0.2, 0.5)),
     P("torso", "base", "torso", "box", "primary", vec3(0, 0.68, 0), vec3(wide, 0.66, 0.4)),
-    P("pack", "torso", "back", "box", "secondary", vec3(0, 0.05, -0.26), vec3(wide * 0.7, 0.5, 0.16), { attach: "chest" }),
+    // A cheap beveled chest plate + shin greave keep the utility construct reading as
+    // worked metal, coherent with the Ironbound plate dialect without new machinery.
+    P("chestplate", "torso", "shell", "rounded_box", "metal", vec3(0, 0.12, 0.18), vec3(wide * 0.82, 0.34, 0.12), { attach: "chest" }),
+    P("pack", "torso", "back", "box", "secondary", vec3(0, 0.05, -0.26), vec3(wide * 0.7, 0.5, 0.16)),
     P("head", "torso", "head", "cylinder", "metal", vec3(0, 0.5, 0.02), vec3(0.26, 0.28, 0.26), { attach: "crown" }),
     P("eye", "head", "eye", "box", "eye", vec3(0, 0.02, 0.14), vec3(0.14, 0.05, 0.03)),
     P("arm", "torso", "upper_arm", "cylinder", "secondary", vec3(wide * 0.7, 0, 0), vec3(0.15, 0.5, 0.15), { mirror: { axis: "x", idSuffix: "_r" } }),
     P("leg", "base", "thigh", "cylinder", "secondary", vec3(wide * 0.4, 0.3, 0), vec3(0.15, 0.42, 0.15), { mirror: { axis: "x", idSuffix: "_r" } }),
+    P("greave", "base", "shin", "rounded_box", "metal", vec3(wide * 0.4, 0.24, 0.08), vec3(0.17, 0.24, 0.16), { tierMin: 2, mirror: { axis: "x", idSuffix: "_r" } }),
     P("tool", "torso", "weapon", "plate", "accent", vec3(wide * 0.9, -0.2, 0.12), vec3(0.14, 0.5, 0.1), { attach: "right_hand", rot: vec3(0.2, 0, 0) }),
     P("lamp", "head", "crest", "sphere", "glow", vec3(0, 0.2, 0.05), vec3(0.14, 0.14, 0.14), { tierMin: 4, lodMin: "med" }),
   ];

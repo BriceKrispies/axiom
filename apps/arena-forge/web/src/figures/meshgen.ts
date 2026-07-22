@@ -12,13 +12,33 @@
  * (NOT unit-normalized), and normals are outward unit vectors.
  */
 
-import { type Vec3, normalize, vec3 } from "./vec3.ts";
+import { type Vec3, clamp, normalize, vec3 } from "./vec3.ts";
 
 export interface Geometry {
   readonly positions: readonly Vec3[];
   readonly normals: readonly Vec3[];
   readonly indices: readonly number[];
+  /**
+   * OPTIONAL per-vertex ambient occlusion in 0..1 (1 = fully lit, lower = more
+   * occluded). The engine's `MeshData.ao` consumes this: builders populate it (via
+   * `verticalOcclusion`) and `primitives.ts` forwards it to `createMeshData`, so
+   * the backends darken the diffuse+ambient term in occluded regions. Absent ⇒ the
+   * engine treats every vertex as 1.0 (no occlusion), so it stays optional.
+   */
+  readonly ao?: readonly number[];
 }
+
+/** Floor so a fully-occluded (downward) vertex is darkened, never black. */
+const AO_FLOOR = 0.35;
+
+/**
+ * A cheap, honest per-vertex occlusion proxy from the surface normal: upward-facing
+ * vertices read fully lit, undersides / inner faces darken toward `AO_FLOOR`. It is
+ * a pure function of the normals so it stays deterministic and unit-testable, and it
+ * gives the AO hook (`Geometry.ao`) real data the moment the engine can consume it.
+ */
+export const verticalOcclusion = (normals: readonly Vec3[]): number[] =>
+  normals.map((n) => clamp(AO_FLOOR + (1 - AO_FLOOR) * (0.5 + 0.5 * n.y), 0, 1));
 
 interface Mutable {
   positions: Vec3[];
@@ -149,6 +169,75 @@ export const taperedPrism = (bx: number, bz: number, tx: number, tz: number, h: 
   quad(m, b2, b3, t3, t2, faceNormal(b2, b3, t3)); // +Z
   quad(m, b3, b0, t0, t3, faceNormal(b3, b0, t0)); // -X
   return m;
+};
+
+const tri = (m: Mutable, a: Vec3, b: Vec3, c: Vec3, n: Vec3): void => {
+  const base = m.positions.length;
+  m.positions.push(a, b, c);
+  m.normals.push(n, n, n);
+  m.indices.push(base, base + 1, base + 2);
+};
+
+/**
+ * A genuine chamfered/beveled hard-surface box (unit ±0.5, sized `w×h×d`): the six
+ * faces are inset by a bevel `b`, the twelve edges become flat chamfer quads, and the
+ * eight corners become chamfer triangles — so every armor-plate edge catches a
+ * highlight instead of reading as a razor-sharp box. The segment count is FIXED
+ * (44 tris), so it stays a cheap hard-surface bevel, not a subdivided round. `bevel`
+ * is a fraction of the smallest half-extent (clamped so a thin plate never
+ * self-intersects). Normals are per-face/per-chamfer outward units; carries the
+ * dormant AO hook (undersides darkened). Centered at the origin like the built-ins.
+ */
+export const roundedBox = (w = 1, h = 1, d = 1, bevel = 0.16): Geometry => {
+  const hx = w / 2;
+  const hy = h / 2;
+  const hz = d / 2;
+  const b = clamp(bevel, 0, 0.49) * Math.min(hx, hy, hz);
+  const ix = hx - b;
+  const iy = hy - b;
+  const iz = hz - b;
+  const m = emptyMesh();
+
+  // Six inset face rectangles.
+  quad(m, vec3(hx, -iy, -iz), vec3(hx, -iy, iz), vec3(hx, iy, iz), vec3(hx, iy, -iz), vec3(1, 0, 0));
+  quad(m, vec3(-hx, -iy, -iz), vec3(-hx, iy, -iz), vec3(-hx, iy, iz), vec3(-hx, -iy, iz), vec3(-1, 0, 0));
+  quad(m, vec3(-ix, hy, -iz), vec3(ix, hy, -iz), vec3(ix, hy, iz), vec3(-ix, hy, iz), vec3(0, 1, 0));
+  quad(m, vec3(-ix, -hy, -iz), vec3(-ix, -hy, iz), vec3(ix, -hy, iz), vec3(ix, -hy, -iz), vec3(0, -1, 0));
+  quad(m, vec3(-ix, -iy, hz), vec3(ix, -iy, hz), vec3(ix, iy, hz), vec3(-ix, iy, hz), vec3(0, 0, 1));
+  quad(m, vec3(-ix, -iy, -hz), vec3(-ix, iy, -hz), vec3(ix, iy, -hz), vec3(ix, -iy, -hz), vec3(0, 0, -1));
+
+  const signs = [-1, 1];
+  // Twelve edge chamfer quads: one per (axis-pair, sign, sign). Each connects the
+  // two adjacent faces' shared inset edge with a flat chamfer plane.
+  for (const sy of signs) {
+    for (const sx of signs) {
+      // edges parallel to Z, between ±X and ±Y faces.
+      quad(m, vec3(sx * hx, sy * iy, -iz), vec3(sx * hx, sy * iy, iz), vec3(sx * ix, sy * hy, iz), vec3(sx * ix, sy * hy, -iz), normalize(vec3(sx, sy, 0)));
+    }
+  }
+  for (const sz of signs) {
+    for (const sy of signs) {
+      // edges parallel to X, between ±Y and ±Z faces.
+      quad(m, vec3(-ix, sy * hy, sz * iz), vec3(ix, sy * hy, sz * iz), vec3(ix, sy * iy, sz * hz), vec3(-ix, sy * iy, sz * hz), normalize(vec3(0, sy, sz)));
+    }
+  }
+  for (const sz of signs) {
+    for (const sx of signs) {
+      // edges parallel to Y, between ±X and ±Z faces.
+      quad(m, vec3(sx * hx, -iy, sz * iz), vec3(sx * hx, iy, sz * iz), vec3(sx * ix, iy, sz * hz), vec3(sx * ix, -iy, sz * hz), normalize(vec3(sx, 0, sz)));
+    }
+  }
+
+  // Eight corner chamfer triangles.
+  for (const sz of signs) {
+    for (const sy of signs) {
+      for (const sx of signs) {
+        tri(m, vec3(sx * hx, sy * iy, sz * iz), vec3(sx * ix, sy * hy, sz * iz), vec3(sx * ix, sy * iy, sz * hz), normalize(vec3(sx, sy, sz)));
+      }
+    }
+  }
+
+  return { positions: m.positions, normals: m.normals, indices: m.indices, ao: verticalOcclusion(m.normals) };
 };
 
 /** A wedge (thin-topped tapered prism) — shields, blades, crests, petals. */

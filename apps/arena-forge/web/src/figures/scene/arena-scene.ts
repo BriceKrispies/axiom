@@ -38,25 +38,13 @@ export const arenaCamera = (): Camera3D => ({ position: vec3(0, 2.7, 4.8), targe
  * caller (it derives it from the gallery's screen rect), not set here.
  */
 export const buildGalleryStage = (): void => {
-  setClearColor([0.028, 0.023, 0.018, 1]);
-  // Key from the upper left. The gallery camera looks down −Z, so the faces the
-  // camera actually sees carry +Z normals — and a fill/rim that travels toward +Z
-  // lights the tops and backs but never the camera-facing front, leaving it a flat
-  // dark slab lit only by the grazing key. So the cool fill is aimed camera-side
-  // (−Z travel, from the right) to lift and model the front planes, while the warm
-  // rim and underlight stay well below the key so the shadow side still falls dark.
-  // Exposure matters as much as direction here: at intensity 2.5 the key drove the
-  // camera-facing +Z fronts and the +Y tops past 1.0, where they clipped flat to
-  // white — erasing both the plate colours and the form gradient, the exact washed,
-  // even look the champion reads. Pulling the key back to ~1.2 (and trimming the
-  // camera-side fill) seats the lit planes just under clip, so the top plates still
-  // catch a near-white highlight while the fronts hold their steel/bronze/olive and
-  // the shadow-side plates and plate-to-plate recesses fall dark — the punchy
-  // chiaroscuro the reference reads, not a blown, uniform wash.
-  addLight({ kind: "directional", direction: vec3(-0.4, -0.75, -0.52), color: [1, 0.96, 0.88, 1], intensity: 1.2 });
-  addLight({ kind: "directional", direction: vec3(0.5, -0.28, -0.72), color: [0.6, 0.72, 0.98, 1], intensity: 0.4 });
-  addLight({ kind: "directional", direction: vec3(0, 0.55, 1), color: [1, 0.62, 0.34, 1], intensity: 0.38 });
-  addLight({ kind: "directional", direction: vec3(0, -1, 0.15), color: [0.75, 0.7, 0.8, 1], intensity: 0.1 });
+  setClearColor([0.035, 0.032, 0.037, 1]);
+  // Key from the upper left, cool fill from the right, warm rim from the front so
+  // a tumbling figure keeps reading from every angle it rotates through.
+  addLight({ kind: "directional", direction: vec3(-0.4, -0.75, -0.52), color: [1, 0.96, 0.88, 1], intensity: 1.85 });
+  addLight({ kind: "directional", direction: vec3(0.65, -0.3, 0.5), color: [0.6, 0.72, 0.98, 1], intensity: 0.95 });
+  addLight({ kind: "directional", direction: vec3(0, 0.55, 1), color: [1, 0.62, 0.34, 1], intensity: 0.8 });
+  addLight({ kind: "directional", direction: vec3(0, -1, 0.15), color: [0.75, 0.7, 0.8, 1], intensity: 0.45 });
 };
 
 /** Build the static arena (floor + lights + camera + clear color). Idempotent per

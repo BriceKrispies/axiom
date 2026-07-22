@@ -103,6 +103,11 @@ export interface GroupVisualLanguage {
   readonly palette: Readonly<Record<MaterialRole, Rgba>>;
   readonly emissiveRoles?: Partial<Readonly<Record<MaterialRole, Rgba>>>;
   readonly opacityRoles?: Partial<Readonly<Record<MaterialRole, number>>>;
+  /** Per-role surface roughness in 0..1 (0 = glossy/metal, 1 = matte/cloth). Inert
+   * in the diffuse-only engine today; authored so metal/plate roles read glossy and
+   * cloth/accent/organic roles read matte the moment an engine specular term lands.
+   * Unset ⇒ the material leaves `roughness` undefined (engine treats it as matte). */
+  readonly roughnessRoles?: Partial<Readonly<Record<MaterialRole, number>>>;
   readonly preferredPrimitives: readonly PrimitiveType[];
   readonly jointStyle: "rigid" | "beveled" | "organic";
   readonly defaultAnimation: string;

@@ -108,6 +108,9 @@ export class FigureDirector {
         it.inst.park();
         continue;
       }
+      // Shared deterministic idle (breathing / weapon-ready) — the same animator the
+      // gallery uses — layered under the slot/lunge root frame.
+      it.inst.animateIdle(tick);
       it.inst.pose(this.frameFor(it, tick, combat));
     }
   }

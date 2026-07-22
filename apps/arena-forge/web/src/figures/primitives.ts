@@ -13,7 +13,7 @@
 import { createMesh, createMeshData } from "@axiom/web-engine";
 import type { Handle } from "@axiom/web-engine";
 import type { PrimitiveType, QualityTier } from "./parts.ts";
-import { billboard, capsule, cone, plate, ringTorus, segmentedAppendage, wedge } from "./meshgen.ts";
+import { billboard, capsule, cone, plate, ringTorus, roundedBox, segmentedAppendage, wedge } from "./meshgen.ts";
 
 interface SegBudget {
   readonly radial: number;
@@ -32,6 +32,12 @@ const cache = new Map<string, Handle>();
 
 const generate = (primitive: PrimitiveType, s: SegBudget): Handle => {
   switch (primitive) {
+    case "rounded_box":
+      // A real chamfered box now (was a sharp-box fallback); softens every plate /
+      // armor / torso edge tribe-wide. `roundedBox` also carries a per-vertex `ao`
+      // array, which flows through to the engine's `MeshData.ao` here so crevices /
+      // undersides darken.
+      return createMeshData(roundedBox(1, 1, 1, 0.18));
     case "capsule":
       return createMeshData(capsule(0.26, 0.48, s.radial, s.cap));
     case "cone":
@@ -47,7 +53,8 @@ const generate = (primitive: PrimitiveType, s: SegBudget): Handle => {
     case "billboard":
       return createMeshData(billboard(1, 1));
     default:
-      // rounded_box falls back to the built-in box (engine has no rounded box).
+      // Unreachable for the generated set; the built-ins (box/sphere/cylinder) take
+      // the fast path in `meshFor` and never call `generate`.
       return createMesh("box");
   }
 };

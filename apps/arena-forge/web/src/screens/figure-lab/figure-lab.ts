@@ -37,15 +37,7 @@ const PX_PER_UNIT = 96;
 const FOV_Y = 0.5;
 /** Radians per tick of the slow turntable spin (~14°/s at 60Hz). */
 const SPIN_PER_TICK = 0.004;
-/** Fraction of an icon cell the figure's bounding height fills. The reference
- * frames each miniature as a HERO PORTRAIT that commands its cell — helmet close
- * to the top edge, pedestal close to the bottom, shoulders reaching toward the
- * side walls — with only a thin margin of breathing room, NOT floating small in a
- * sea of dead space. Two extremes were tried: 0.95 crammed the silhouette
- * edge-to-edge and clipped the pedestal/footroom, while 0.72 shrank the figure so
- * far it read as a small token adrift in the cell (the champion's flaw). 0.86
- * splits the difference: the full silhouette (helmet to base) reads at the
- * reference's imposing scale with just enough margin to keep it clean. */
+/** Fraction of an icon cell the figure's bounding height fills. */
 const FIT = 0.86;
 const Y_AXIS: Vec3 = vec3(0, 1, 0);
 
@@ -116,7 +108,9 @@ export class FigureLabScreen implements Screen {
     buildGalleryStage();
     this.figures.clear();
     for (const entry of this.catalog) {
-      this.figures.set(entry.card.id, new FigureInstance(this.content, entry.card.id, this.forged, this.quality));
+      // `true`: give each gallery miniature a grounding contact-shadow blob (the
+      // gallery stage has no floor, so figures would otherwise read as floating).
+      this.figures.set(entry.card.id, new FigureInstance(this.content, entry.card.id, this.forged, this.quality, true));
     }
   }
 
@@ -176,6 +170,9 @@ export class FigureLabScreen implements Screen {
       const s = (cell.size * k * FIT) / fig.height;
       const centre = this.toWorld(area.x + cell.x + cell.size / 2, top + cell.size / 2);
       const root: RootFrame = { position: sub(centre, rotateVec(spin, vec3(0, fig.midY * s, 0))), rotation: spin, scale: s };
+      // The shared subtle idle (breathing / weapon-ready stance) plays under the
+      // turntable spin — the same animator the gameplay arena drives.
+      fig.animateIdle(this.tick);
       fig.pose(root);
     }
     renderScene();
@@ -600,6 +597,16 @@ export class FigureLabScreen implements Screen {
     this.setIcon(this.icon * factor);
   }
 
+  public debugSearch(term: string): void {
+    this.search = term;
+    this.requery();
+  }
+
+  public debugSort(sort: SortMode): void {
+    this.sort = sort;
+    this.requery();
+  }
+
   /** Set the icon size directly in px (clamped). Deterministic capture control —
    * more reliable than accumulating `debugZoom` factors to a target. */
   public debugSetIcon(px: number): void {
@@ -613,25 +620,14 @@ export class FigureLabScreen implements Screen {
     this.spinning = on;
   }
 
-  public debugSearch(term: string): void {
-    this.search = term;
-    this.requery();
-  }
-
-  public debugSort(sort: SortMode): void {
-    this.sort = sort;
-    this.requery();
-  }
-
   /** The ordered card ids currently in the gallery (post filter/search/sort) — so
    * a capture agent can pick a real card without hard-coding the content. */
   public debugCardIds(): string[] {
     return this.entries.map((e) => e.card.id);
   }
 
-  /** The gallery grid's screen rect (the figures + captions region, excluding the
-   * top bar / chips / tool strip / inspector) — lets a capture tool clip to just
-   * the grid for a chrome-free frame. */
+  /** The gallery grid's screen rect (figures + captions region) — lets a capture
+   * tool clip to just the grid for a chrome-free frame. */
   public debugGalleryRect(): Rect {
     return this.galleryRect;
   }

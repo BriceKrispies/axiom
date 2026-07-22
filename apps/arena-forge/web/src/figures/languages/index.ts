@@ -19,16 +19,19 @@ export const hexToRgba = (hex: string, alpha = 1): Rgba => {
 const IRONBOUND: GroupVisualLanguage = {
   id: "ironbound",
   palette: {
-    primary: hexToRgba("#484f58"),
-    secondary: hexToRgba("#2a2f36"),
-    accent: hexToRgba("#8f8850"),
-    metal: hexToRgba("#797f87"),
+    primary: hexToRgba("#6b7280"),
+    secondary: hexToRgba("#3a4149"),
+    accent: hexToRgba("#c8933f"),
+    metal: hexToRgba("#8a94a6"),
     emissive_core: hexToRgba("#7a4a1a"),
     glow: hexToRgba("#f0a850"),
     eye: hexToRgba("#ffcf7a"),
     shadow_base: hexToRgba("#1a1c20"),
   },
   emissiveRoles: { emissive_core: hexToRgba("#c8681a"), glow: hexToRgba("#ff9a3d"), eye: hexToRgba("#ffcf7a") },
+  // Forged-metal knights: bare metal + plate roles are glossy; the brass accent trim,
+  // cape/banner, and painted secondary read matte.
+  roughnessRoles: { metal: 0.22, primary: 0.34, secondary: 0.6, accent: 0.68 },
   preferredPrimitives: ["box", "rounded_box", "cylinder", "wedge", "plate"],
   jointStyle: "rigid",
   defaultAnimation: "ironbound_default",
@@ -49,6 +52,8 @@ const EMBERKIN: GroupVisualLanguage = {
     shadow_base: hexToRgba("#140d0a"),
   },
   emissiveRoles: { emissive_core: hexToRgba("#ff6a1a"), glow: hexToRgba("#ff4d1a"), accent: hexToRgba("#e2572b"), eye: hexToRgba("#ffd23d") },
+  // Charred, sooty bodies read matte; the metal remnants keep a dull semi-gloss.
+  roughnessRoles: { metal: 0.42, primary: 0.72, secondary: 0.64, accent: 0.5 },
   preferredPrimitives: ["cone", "wedge", "capsule", "sphere", "box"],
   jointStyle: "beveled",
   defaultAnimation: "emberkin_default",
@@ -70,6 +75,8 @@ const BLOOMTIDE: GroupVisualLanguage = {
   },
   emissiveRoles: { emissive_core: hexToRgba("#4adf9a"), glow: hexToRgba("#6affb0"), eye: hexToRgba("#ff9ac0") },
   opacityRoles: { glow: 0.5 },
+  // Living plant matter is fully matte; only the mineral base keeps a little sheen.
+  roughnessRoles: { primary: 0.85, secondary: 0.8, accent: 0.72, metal: 0.5 },
   preferredPrimitives: ["capsule", "cone", "sphere", "segmented", "plate"],
   jointStyle: "organic",
   defaultAnimation: "bloomtide_default",
@@ -91,6 +98,8 @@ const ECHOWISP: GroupVisualLanguage = {
   },
   emissiveRoles: { emissive_core: hexToRgba("#d8c8ff"), glow: hexToRgba("#a87aff"), eye: hexToRgba("#a8f0ff") },
   opacityRoles: { primary: 0.9, glow: 0.45, accent: 0.8 },
+  // Polished arcane crystal — glossy across the board.
+  roughnessRoles: { primary: 0.3, secondary: 0.4, accent: 0.34, metal: 0.28 },
   preferredPrimitives: ["sphere", "ring", "billboard", "cone", "capsule"],
   jointStyle: "organic",
   defaultAnimation: "echowisp_default",
@@ -111,6 +120,8 @@ const NEUTRAL: GroupVisualLanguage = {
     shadow_base: hexToRgba("#1a1712"),
   },
   emissiveRoles: { glow: hexToRgba("#d8b060") },
+  // Utility constructs: worked metal with a semi-gloss, muted painted bodies.
+  roughnessRoles: { metal: 0.36, primary: 0.6, secondary: 0.55, accent: 0.5 },
   preferredPrimitives: ["box", "cylinder", "plate", "rounded_box"],
   jointStyle: "rigid",
   defaultAnimation: "neutral_default",
