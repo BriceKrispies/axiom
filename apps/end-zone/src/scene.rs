@@ -143,11 +143,11 @@ impl EndZoneScene {
             DirectionalLight {
                 direction: Vec3::new(0.32, -1.0, 0.20),
                 color: Color::WHITE,
-                intensity: ratio(1.32),
+                intensity: ratio(1.66),
             },
             Transform::IDENTITY,
         );
-        app.set_ambient(FrameAmbient::new([0.30, 0.39, 0.52], [0.15, 0.19, 0.14]));
+        app.set_ambient(FrameAmbient::new([0.21, 0.28, 0.39], [0.10, 0.13, 0.10]));
 
         // Team part materials, indexed by part tag.
         let palette_mats =
