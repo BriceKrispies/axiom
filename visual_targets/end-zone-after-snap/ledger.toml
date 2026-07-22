@@ -34,3 +34,73 @@ contrast_and_exposure = 1
 depth_and_separation = 1
 scale_and_proportion = 1
 artifact_level = 1
+
+[[iteration]]
+iteration = 1
+attacked_axis = "none"
+changed_files = ["visual_targets/end-zone-after-snap/scorecard.champion.toml"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic recalibration against the CURRENT champion. Between iteration 0 and now,
+pass-1 lens work (colorist sky, surfacing turf, lighting sun, modeler stadium
+bowl) was folded into a single "promote pass-1 render" commit (40b713a6) that
+replaced champion.png (29578 -> 62556 bytes) but did NOT append any attack
+iterations, write a candidate scorecard, or update scorecard.champion.toml. So
+the scorecard was scoring a picture that no longer exists on disk: it described a
+high tilted overhead of a washed near-empty field (composition=0, stadium=0),
+while the promoted champion is an eye-level broadcast cam behind the backfield
+with a grey raked stadium bowl and graded turf/sky. A stale scorecard picks the
+wrong next flaw: it named composition_and_framing, but the camera repose already
+took composition 0 -> 2, so composition is no longer the lowest axis.
+
+Re-scored harshly against identity, honestly reflecting the render on disk (a flaw
+that was genuinely addressed cannot keep a 0): composition 0->2, subject_fidelity
+1->2, silhouette 1->2, stadium 0->1 (bowl now present but a bare proxy: no crowd/
+lights/scoreboard/trees/pylons), color_palette 1->2, contrast 1->2, depth 1->2,
+scale 1->2, artifact 1->2 (a broken red segmented ring sits on the field at
+right). field_markings, material_and_texture_detail, and lighting_and_shadow stay
+at 1. New lowest axis = 1, four-way tie (stadium_environment, field_markings,
+material, lighting); fixed order breaks it to stadium_environment.
+final_score 0.25 -> 1.20; next_attacked_axis composition_and_framing ->
+stadium_environment.
+
+Process note (not blocking): pass-1 batched four lens changes into one promotion
+with zero per-iteration ledger entries and no candidate scorecard — the champion
+advanced but the record showed no attacks. This entry restores the record's
+honesty. Abstraction gate: the stadium bowl was added in the app's own scene
+generator (apps/end-zone/src/field/generator.rs) using existing scene/mesh
+primitives — the generation/data rung, not a new engine primitive/shader/field —
+so no abstractions/NNNN.toml record is owed.
+"""
+next_attacked_axis = "stadium_environment"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing = 0
+subject_fidelity = 1
+silhouette_readability = 1
+stadium_environment = 0
+field_markings = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 1
+scale_and_proportion = 1
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+silhouette_readability = 2
+stadium_environment = 1
+field_markings = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+artifact_level = 2

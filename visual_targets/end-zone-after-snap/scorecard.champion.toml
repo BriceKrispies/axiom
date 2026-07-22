@@ -1,70 +1,81 @@
 # Champion scorecard — end-zone-after-snap
-# Critic lens, seed calibration. Scored HARSHLY against identity: the bar is
-# "indistinguishable from reference.png", not "reads as football". The champion
-# is a high tilted overhead of a washed, near-empty field; the reference is an
-# eye-level ground cam behind the offensive backfield in a vivid, populated
-# low-poly stadium. The two frame different moments AND different worlds, so
-# almost every axis sits at 0-1. When unsure between two scores, the lower.
+# Critic lens, RECALIBRATED against the CURRENT champion.png.
+#
+# Why recalibrated: the pass-1 "promote" commit (40b713a6) replaced champion.png
+# (low broadcast cam + stadium bowl + graded turf/sky/lighting) but never updated
+# this scorecard or the ledger. The prior scores described the PRE-promotion image
+# (a high tilted overhead of a washed, near-empty field) and no longer matched the
+# render on disk — composition=0 / stadium=0 were scoring a picture that is gone.
+# Honesty cuts both ways: a flaw that has genuinely been addressed (the camera
+# repose) must not keep a 0. Re-scored HARSHLY against identity — the bar is
+# "indistinguishable from reference.png", not "reads as football" — against the
+# actual current champion. When unsure between two scores, the lower.
 #
 # final_score = lowest_axis * 0.7 + average_axis * 0.3
 # Lowest axis (ties broken by the fixed order below) = the next flaw to attack.
 
 [scores]
-# 0 — camera is a high tilted bird's-eye of midfield; reference is an eye-level
-# ground camera behind the backfield looking downfield at the goalposts. Wrong
-# pose AND wrong "after-snap" moment. Scoring the other axes is comparing
-# different framings until this is fixed.
-composition_and_framing = 0
+# 2 (was 0) — the camera pose is now ON-MODEL: eye-level, behind the offensive
+# backfield, looking downfield toward the goalposts, matching the reference
+# framing. Not a 3+: the reference's tight LARGE foreground huddle filling the
+# lower third is absent — the champion's foreground is a lone ballcarrier with a
+# looser, higher, smaller scatter of players.
+composition_and_framing = 2
 
-# 1 — crude tiny blocky player proxies are present, but there is no foreground
-# huddle and no cradled football; reference players read as helmeted figures.
-subject_fidelity = 1
+# 2 (was 1) — blocky helmeted, team-colored players and a red ballcarrier are
+# present and read as figures. Still simplified/smaller than the reference and no
+# clearly cradled football; a crude-but-emerging subject, not on-model.
+subject_fidelity = 2
 
-# 1 — figures are barely-readable specks near midfield vs the crisp, large
-# foreground silhouettes in the reference.
-silhouette_readability = 1
+# 2 (was 1) — figures are readable as distinct silhouettes, but smaller and softer
+# than the reference's large, crisp foreground bodies.
+silhouette_readability = 2
 
-# 0 — no stands, no crowd, no stadium lights, no scoreboard, no trees; only a
-# faint thin goalpost outline. The entire stadium context is absent.
-stadium_environment = 0
+# 1 (was 0) — a grey raked stadium bowl now RINGS the field, so the context is no
+# longer absent — but it is a bare proxy: no crowd, no stadium lights, no
+# scoreboard/jumbotron, no trees, no sideline pylons/down markers. Crude stand-in
+# for the reference's populated, lit stadium.
+stadium_environment = 1
 
-# 1 — faint yard lines only; no painted yard numbers, no hash detail, no mow
-# stripes. Reference field is richly marked.
+# 1 — mow stripes + faint dashed hash marks only; no yard lines, no painted yard
+# numbers, no end-zone paint/lettering. Reference field is richly marked.
 field_markings = 1
 
-# 1 — flat, untextured surfaces; reference has textured striped grass and
-# shaded blocky uniforms.
+# 1 — flat, untextured surfaces; reference has shaded striped grass and shaded
+# blocky uniforms.
 material_and_texture_detail = 1
 
-# 1 — flat ambient wash with tiny hard shadow nubs vs the reference's bright
-# directional sun and grounded ambient occlusion.
+# 1 — flat ambient wash with a single soft contact shadow under the ballcarrier;
+# no reference-grade bright directional sun modeling form across the scene.
 lighting_and_shadow = 1
 
-# 1 — pale, desaturated palette vs the reference's vivid, saturated greens,
-# reds, blues and sky.
-color_palette = 1
+# 2 (was 1) — hues are now roughly right (green turf, blue sky, red/blue teams) but
+# clearly MUTED next to the reference's vivid, saturated palette.
+color_palette = 2
 
-# 1 — washed, low-contrast exposure vs the reference's punchy contrast.
-contrast_and_exposure = 1
+# 2 (was 1) — flatter, lower-contrast than the reference's punch, but no longer a
+# blown/washed exposure.
+contrast_and_exposure = 2
 
-# 1 — perspective gives some depth, but the near-empty field reads flat with no
-# layered midground/background separation.
-depth_and_separation = 1
+# 2 (was 1) — genuine depth recession now reads: foreground ballcarrier -> midfield
+# players -> distant goalpost -> bowl walls. Still less layered than the reference.
+depth_and_separation = 2
 
-# 1 — players are tiny relative to the field; reference foreground players fill
-# a large share of the frame. Proportions of the blocky figures are crude.
-scale_and_proportion = 1
+# 2 (was 1) — players sit smallish relative to the frame vs the reference foreground
+# fill; blocky proportions are otherwise plausible.
+scale_and_proportion = 2
 
-# 1 — sparse, incomplete render; the thin floating goalpost and blank field
-# read as broken/unfinished next to the reference.
-artifact_level = 1
+# 2 (was 1) — a distinct broken-looking red segmented RING artifact sits on the
+# field at right, plus a faint floating goalpost; otherwise the frame is clean.
+artifact_level = 2
 
-# lowest_axis = 0 (composition_and_framing and stadium_environment tie at 0;
-#   fixed order breaks the tie -> composition_and_framing is the next flaw).
-# average = (0+1+1+0+1+1+1+1+1+1+1+1)/12 = 0.833
-# final_score = 0*0.7 + 0.833*0.3 = 0.25
+# lowest_axis = 1 (stadium_environment, field_markings, material_and_texture_detail,
+#   and lighting_and_shadow tie at 1; fixed order breaks the tie ->
+#   stadium_environment is the next flaw).
+# average = (2+2+2+1+1+1+1+2+2+2+2+2)/12 = 1.667
+# final_score = 1*0.7 + 1.667*0.3 = 1.20
 [summary]
-lowest_axis = "composition_and_framing"
-average = 0.83
-final_score = 0.25
-next_attacked_axis = "composition_and_framing"
+lowest_axis = "stadium_environment"
+average = 1.67
+final_score = 1.20
+next_attacked_axis = "stadium_environment"
