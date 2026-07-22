@@ -16,7 +16,7 @@ import { ScreenRouter } from "./screens/router.ts";
 import { MainMenuScreen } from "./screens/main-menu.ts";
 import { GameplayScreen } from "./screens/gameplay.ts";
 import { FigureLabScreen } from "./screens/figure-lab/figure-lab.ts";
-import type { LabGroup } from "./screens/figure-lab/catalog.ts";
+import type { LabGroup, SortMode } from "./screens/figure-lab/catalog.ts";
 
 export class ArenaForgeGame {
   private readonly content: LoadedContent;
@@ -73,6 +73,10 @@ export class ArenaForgeGame {
     this.router.onPinch(factor);
   }
 
+  public onKey(key: string): void {
+    this.router.onKey(key);
+  }
+
   // ── navigation + dev/test hooks (the `window.__arena` surface) ────────────────
   public debugScreen(): ScreenState {
     return this.router.state;
@@ -118,11 +122,19 @@ export class ArenaForgeGame {
     this.lab()?.debugSetForged(forged);
   }
 
-  public debugLabInfo(): { group: string; card: string; forged: boolean; parts: number; count: number; zoom: number } | null {
+  public debugLabInfo(): ReturnType<FigureLabScreen["debugInfo"]> | null {
     return this.lab()?.debugInfo() ?? null;
   }
 
   public debugLabZoom(factor: number): void {
     this.lab()?.debugZoom(factor);
+  }
+
+  public debugLabSearch(term: string): void {
+    this.lab()?.debugSearch(term);
+  }
+
+  public debugLabSort(sort: SortMode): void {
+    this.lab()?.debugSort(sort);
   }
 }

@@ -36,7 +36,7 @@ enforces it) — never import the DOM, the engine, or `ui/` from `sim/`.
 | Headless harness | `src/harness/` | `headless.ts` (100-match runner + invariants), `serialize.ts`/`replay.ts` (versioned replay). |
 | Combat playback | `src/presentation/combat-playback.ts` | Pure REPLAY of the `SimEvent` stream → `CombatFrame`/`PlayUnit`. Decides nothing. |
 | **Procedural 3D figures** | `src/figures/` | `grammar.ts` (data types), `meshgen.ts` (SDK-free geometry), `generator.ts` (`expandFigure`), `compose.ts` (flat hierarchy → WORLD transforms + `PoseDelta`), `variation.ts` (seeded), `bodyplans.ts` (per-group grammar), `registry.ts` (`figureForCard`, memoized), `languages/` (5 `GroupVisualLanguage`s), `scene/` (materials, `FigureInstance`, arena scene), `runtime/figure-director.ts`. |
-| **App screens** | `src/screens/` | `screen.ts` (Screen contract + `resetEngineScene`), `router.ts` (`ScreenRouter`), `main-menu.ts`, `gameplay.ts` (the match orchestration), `figure-lab/` (`figure-lab.ts`, `catalog.ts`). |
+| **App screens** | `src/screens/` | `screen.ts` (Screen contract + `resetEngineScene`), `router.ts` (`ScreenRouter`), `main-menu.ts`, `gameplay.ts` (the match orchestration), `figure-lab/` (`figure-lab.ts` = the all-figures gallery screen, `catalog.ts` = the pure filter/search/sort query, `gallery-layout.ts` = the pure grid geometry). |
 | App shell + boot | `src/game.ts`, `src/harness.ts`, `index.html` | `game.ts` = `ArenaForgeGame` (the screen router, `window.__arena`). `harness.ts` = browser edge (two canvases, `startLoop`, pointer). |
 | 2D overlay UI | `src/ui/` | `draw.ts` (primitives: `panel/button/text/rivet/inRect/Rect`), `layout.ts`, `interaction.ts` (gameplay pointer→commands), `render.ts` (`renderFrame`), `theme.ts` (`PALETTE`, `STAGE_TREATMENT`). |
 | Audio | `src/audio/cues.ts` | `SimEvent` → `playTone`, throttled. |
@@ -69,7 +69,15 @@ enforces it) — never import the DOM, the engine, or `ui/` from `sim/`.
   `clearScene()`), NO transform parenting, NO viewport/offscreen/render-target, one
   full-canvas pass. Consequences: switching screens or changing a figure ⇒ `clearScene()` +
   `resetMeshCache()` + `resetMaterialCache()` + rebuild (use `resetEngineScene()`). You cannot
-  render N independent mini-scenes — the Lab gallery must use cached 2D previews, not N 3D renders.
+  render N independent mini-scenes — so the Lab gallery renders every figure at once in ONE
+  scene under ONE camera: a fixed near-orthographic camera looking down −Z at the z = 0 plane,
+  with `PX_PER_UNIT` making the screen→world mapping exact, so each grid cell's screen rect
+  places its miniature and the 2D captions land on the right icons. Off-screen figures are
+  `park()`ed (never despawned); only the FORGED toggle respawns.
+- **Spin the gallery figures about Y, never X.** Every miniature shares one spin phase, so an
+  X (tumble) rotation makes the WHOLE grid go edge-on and read as blank at the same moment.
+  A Y turntable keeps every silhouette readable at every angle. (This looked like a
+  "figures don't render on phone" bug; it was the edge-on phase.)
 - **Materials**: `baseColor` + `emissive` + `opacity` only. No metallic; `roughness` is
   ignored. Transparency via `opacity < 1` (works on both backends).
 - **A figure's ROOT part must not carry a rest rotation** — it rotates the whole body
@@ -101,7 +109,8 @@ uv run apps/arena-forge/web/browser/interaction_test.py
 **Dev/test hooks** live on `window.__arena` (set in `harness.ts`): `debugGoto(screen)`,
 `debugScreen()`, `debugAdvancePhase()` (expire the shop timer deterministically),
 `debugLayout()`, `debugShowcaseForge()`, `debugSummary()`, `debugFigures()`,
-`debugLabSelect(group, cardId)`, `debugLabForged(bool)`, `debugLabInfo()`. Pin
+`debugLabSelect(group, cardId)`, `debugLabForged(bool)`, `debugLabSearch(term)`,
+`debugLabSort(mode)`, `debugLabZoom(factor)`, `debugLabInfo()`. Pin
 `?backend=canvas2d` for byte-stable captures. Browser tests drive these — don't wait on
 wall-clock.
 
@@ -110,9 +119,11 @@ wall-clock.
 **Working + tested + browser-verified:** the full deterministic sim (38-card content, effect
 DSL, 100-match harness, replay); 2D-UI gameplay; procedural 3D figures for every card
 (rendering in shop/warband/combat); the screen-state shell; the main menu (real forge scene +
-group reps); and the **Figure Lab core** (gallery of all cards with real filtering/tier order,
-3D stage with drag-rotate, inspector with real procedural inputs + group-language summary,
-forged toggle). ~75 `node --test` tests pass; tsgo clean.
+group reps); and the **Figure Lab** — a live gallery that renders EVERY card's real figure at once in one
+scene, sectioned by tribe, each on a slow Y turntable, with search (`/` focuses; keyboard runs
+through `Screen.onKey`), five sort modes, the group chips, resizeable icons (slider / wheel /
+pinch / +-), a spin pause, and the inspector (real procedural inputs + group-language summary,
+forged toggle). ~91 `node --test` tests pass; tsgo clean.
 
 **Not yet built (`figures/anim/` and `figures/modifiers/` are EMPTY dirs):**
 - A shared **animation state machine** (spawn/idle/attack/damage/death/victory/forge). Today

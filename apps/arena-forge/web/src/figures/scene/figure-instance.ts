@@ -22,11 +22,17 @@ import { figureForCard } from "../registry.ts";
 import { materialFor } from "./materials.ts";
 
 const PARKED: WorldTransform = { position: vec3(0, -1000, 0), rotation: [0, 0, 0, 1], scale: vec3(1e-4, 1e-4, 1e-4) };
+const REST_ROOT: RootFrame = { position: vec3(0, 0, 0), rotation: [0, 0, 0, 1], scale: 1 };
 
 export class FigureInstance {
   public readonly cardId: CardId;
   public readonly forged: boolean;
   public readonly partCount: number;
+  /** Rest-pose bounding height in world units at root scale 1 (framing/fitting). */
+  public readonly height: number;
+  /** Rest-pose bounding-box centre height — the pivot to spin a figure about so it
+   * tumbles in place instead of swinging around its feet. */
+  public readonly midY: number;
   private readonly entities: Entity[];
   private readonly composeParts: ComposePart[];
   private readonly parts: readonly ExpandedPart[];
@@ -45,6 +51,16 @@ export class FigureInstance {
     this.buf = composeBuffers(this.partCount);
     this.poses = fig.parts.map(() => undefined);
     this.entities = fig.parts.map((p) => spawnRenderable(meshFor(p.primitive, quality), materialFor(def.language, p.material), PARKED));
+
+    // Measure the rest pose ONCE (CPU-only; the nodes stay parked). Composing at
+    // the identity root gives the figure's own bounding height + centre, which is
+    // what any caller needs to FIT a miniature into a slot — the gallery grid
+    // sizes and spins every figure by these.
+    composeWorld(this.composeParts, REST_ROOT, this.poses, this.buf.frames, this.buf.out);
+    const lo = this.buf.out.reduce((m, t) => Math.min(m, t.position.y - t.scale.y / 2), Infinity);
+    const hi = this.buf.out.reduce((m, t) => Math.max(m, t.position.y + t.scale.y / 2), -Infinity);
+    this.height = Math.max(1e-3, hi - lo);
+    this.midY = (lo + hi) / 2;
   }
 
   /** Set a per-part animation offset (index by part order); undefined clears it. */

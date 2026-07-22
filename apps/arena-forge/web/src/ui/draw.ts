@@ -43,13 +43,26 @@ export const text = (
   str: string,
   x: number,
   y: number,
-  opts: { size?: number; color?: string; align?: TextAlign; weight?: number; family?: string } = {},
+  opts: { size?: number; color?: string; align?: TextAlign; weight?: number; family?: string; max?: number } = {},
 ): void => {
   ctx.fillStyle = opts.color ?? "#e8e0d4";
   ctx.font = `${opts.weight ?? 700} ${opts.size ?? 12}px ${opts.family ?? "ui-monospace, monospace"}`;
   ctx.textAlign = opts.align ?? "left";
   ctx.textBaseline = "middle";
-  ctx.fillText(str, x, y);
+  ctx.fillText(opts.max === undefined ? str : ellipsize(ctx, str, opts.max), x, y);
+};
+
+/** Shorten `str` with a trailing ellipsis until it fits `max` px in the CURRENT
+ * font. Callers set the font via `text`, so this is only correct from there. */
+const ellipsize = (ctx: CanvasRenderingContext2D, str: string, max: number): string => {
+  if (ctx.measureText(str).width <= max) {
+    return str;
+  }
+  let cut = str.length - 1;
+  while (cut > 0 && ctx.measureText(`${str.slice(0, cut)}…`).width > max) {
+    cut -= 1;
+  }
+  return `${str.slice(0, cut)}…`;
 };
 
 /** A rivet/bolt accent, part of the forge-plate look. */

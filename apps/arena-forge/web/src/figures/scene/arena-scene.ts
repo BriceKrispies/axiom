@@ -31,6 +31,22 @@ const STAGE_GLOW: Readonly<Record<ArenaStage, number>> = { workshop: 0.5, kindle
 /** The default combat-arena camera, framing the warband row. */
 export const arenaCamera = (): Camera3D => ({ position: vec3(0, 2.7, 4.8), target: vec3(0, 0.85, 0), fovY: 0.72, near: 0.1, far: 80 });
 
+/**
+ * Build the GALLERY stage: the same light rig, but no floor and no ledge — the
+ * Figure Lab gallery lays many miniatures out on a flat plane facing the camera,
+ * so any ground geometry would slice through the grid. The camera is owned by the
+ * caller (it derives it from the gallery's screen rect), not set here.
+ */
+export const buildGalleryStage = (): void => {
+  setClearColor([0.035, 0.032, 0.037, 1]);
+  // Key from the upper left, cool fill from the right, warm rim from the front so
+  // a tumbling figure keeps reading from every angle it rotates through.
+  addLight({ kind: "directional", direction: vec3(-0.4, -0.75, -0.52), color: [1, 0.96, 0.88, 1], intensity: 1.85 });
+  addLight({ kind: "directional", direction: vec3(0.65, -0.3, 0.5), color: [0.6, 0.72, 0.98, 1], intensity: 0.95 });
+  addLight({ kind: "directional", direction: vec3(0, 0.55, 1), color: [1, 0.62, 0.34, 1], intensity: 0.8 });
+  addLight({ kind: "directional", direction: vec3(0, -1, 0.15), color: [0.75, 0.7, 0.8, 1], intensity: 0.45 });
+};
+
 /** Build the static arena (floor + lights + camera + clear color). Idempotent per
  * `clearScene`; call once after `initRenderer`. */
 export const buildArena = (stage: ArenaStage): void => {

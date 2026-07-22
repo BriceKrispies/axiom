@@ -1,24 +1,27 @@
 /*
  * figure-lab.ts — the Figure Lab: the internal art-direction / procedural /
- * inspection workspace over the REAL Arena Forge figure systems. It renders the
- * selected card's real generated figure on a standardized forge stage (drag to
- * rotate), a scrollable catalog of every collectible + token (grouped, filtered
- * by the real group data), a top bar, and an inspector showing the card's
- * procedural inputs + its group's real visual-language summary. Nothing here is
- * mocked or gallery-only: it uses `figureForCard`, `FigureInstance`, the arena
- * scene, and `languageFor`. It never starts or advances a gameplay match.
+ * inspection workspace over the REAL Arena Forge figure systems. It is a GALLERY:
+ * every card's real generated figure is spawned once and rendered AT ONCE as a
+ * wrapping grid of live 3D miniatures — grouped by tribe by default — each
+ * turning slowly about the Y axis (a turntable spin). The grid is searchable, sortable, filterable,
+ * and its icons are resizeable; selecting one opens the inspector with that card's
+ * procedural inputs and its group's real visual-language summary. Nothing here is
+ * mocked or gallery-only: it uses `figureForCard`, `FigureInstance`, and
+ * `languageFor`. It never starts or advances a gameplay match.
  *
- * This is the Lab core; animation playback, the full modifier controls, comparison
- * / silhouette / game-context views, and validation diagnostics build on top of it.
+ * The engine scene is FLAT and SINGLE-CAMERA (no viewports, no render targets), so
+ * "many icons" is one scene with one camera: the grid's screen rects are mapped
+ * exactly into the camera's world plane, which is why the 2D captions land on the
+ * 3D miniatures. Off-screen figures are parked, never despawned.
  */
 
 import { rendererBackendName, renderScene, setCamera3D } from "@axiom/web-engine";
 import type { LoadedContent } from "../../sim/content/load.ts";
 import type { QualityTier } from "../../figures/parts.ts";
 import type { RootFrame } from "../../figures/compose.ts";
-import { add, normalize, quatFromEulerXyz, scale, vec3 } from "../../figures/vec3.ts";
+import { type Vec3, quatFromAxisAngle, rotateVec, sub, vec3 } from "../../figures/vec3.ts";
 import { FigureInstance } from "../../figures/scene/figure-instance.ts";
-import { buildArena } from "../../figures/scene/arena-scene.ts";
+import { buildGalleryStage } from "../../figures/scene/arena-scene.ts";
 import { figureForCard } from "../../figures/registry.ts";
 import { figureSeed } from "../../figures/variation.ts";
 import { languageFor } from "../../figures/languages/index.ts";
@@ -26,44 +29,58 @@ import { type Rect, button, inRect, panel, text } from "../../ui/draw.ts";
 import { hexToRgba } from "../../figures/languages/index.ts";
 import { PALETTE } from "../../ui/theme.ts";
 import { type Screen, type ScreenNav, resetEngineScene } from "../screen.ts";
-import { type CatalogEntry, type LabGroup, GROUP_LABEL, LAB_GROUPS, buildCatalog, filterCatalog, groupOfCard } from "./catalog.ts";
+import { type CatalogEntry, type LabGroup, type SortMode, GROUP_LABEL, LAB_GROUPS, SORT_LABEL, SORT_MODES, buildCatalog, groupOfCard, queryCatalog } from "./catalog.ts";
+import { type GalleryLayout, CAPTION_H, HEADER_H, clampIcon, layoutGallery } from "./gallery-layout.ts";
+
+/** Screen pixels per world unit at the gallery plane (fixes the camera scale). */
+const PX_PER_UNIT = 96;
+const FOV_Y = 0.5;
+/** Radians per tick of the slow turntable spin (~14°/s at 60Hz). */
+const SPIN_PER_TICK = 0.004;
+/** Fraction of an icon cell the figure's bounding height fills. */
+const FIT = 0.86;
+const Y_AXIS: Vec3 = vec3(0, 1, 0);
 
 export class FigureLabScreen implements Screen {
   private readonly quality: QualityTier;
   private readonly catalog: CatalogEntry[];
-  private group: LabGroup = "ironbound";
-  private filtered: CatalogEntry[] = [];
-  private selected = 0;
+  private readonly figures = new Map<string, FigureInstance>();
+  private group: LabGroup = "all";
+  private sort: SortMode = "tribe";
+  private search = "";
+  private searchFocused = false;
+  private entries: CatalogEntry[] = [];
+  private layout: GalleryLayout = { columns: 1, cells: [], headers: [], contentHeight: 0 };
+  private icon = 108;
+  private selected: string | null = null;
   private forged = false;
-  private figure: FigureInstance | null = null;
+  private spinning = true;
   private tick = 0;
-  private yaw = 0.5;
-  private zoom = 1.5; // camera distance multiplier; larger = zoomed out
-  private panX = 0;
-  private panY = 0.35; // default lift so the base/feet are in frame
-  private dragMode: "move" | "spin" = "move";
-  private dragging = false;
-  private lastX = 0;
-  private lastY = 0;
   private scroll = 0;
-  private galleryScrolling = false;
-  private galleryMoved = false;
+  private viewW = 0;
+  private viewH = 0;
+  private portrait = false;
+  private sheet = false;
+
+  // Drag state: gallery flick-scroll vs. slider drag vs. a tap that selects.
+  private scrolling = false;
+  private slidingSize = false;
+  private moved = false;
+  private lastY = 0;
 
   // Hit rects (recomputed each render).
   private back: Rect = { x: 0, y: 0, w: 0, h: 0 };
+  private searchBox: Rect = { x: 0, y: 0, w: 0, h: 0 };
+  private sortBtn: Rect = { x: 0, y: 0, w: 0, h: 0 };
   private forgedBtn: Rect = { x: 0, y: 0, w: 0, h: 0 };
+  private spinBtn: Rect = { x: 0, y: 0, w: 0, h: 0 };
   private resetBtn: Rect = { x: 0, y: 0, w: 0, h: 0 };
+  private sizeTrack: Rect = { x: 0, y: 0, w: 0, h: 0 };
+  private smaller: Rect = { x: 0, y: 0, w: 0, h: 0 };
+  private bigger: Rect = { x: 0, y: 0, w: 0, h: 0 };
   private chips: Rect[] = [];
-  private items: Rect[] = [];
   private galleryRect: Rect = { x: 0, y: 0, w: 0, h: 0 };
-  private stageRect: Rect = { x: 0, y: 0, w: 0, h: 0 };
-  private stageTool: Rect = { x: 0, y: 0, w: 0, h: 0 };
-  // Portrait / narrow reflow: the catalog + inspector collapse into a bottom
-  // tabbed tray while the stage keeps the top; landscape keeps the three columns.
-  private portrait = false;
-  private tab: "gallery" | "info" = "gallery";
-  private tabGallery: Rect = { x: 0, y: 0, w: 0, h: 0 };
-  private tabInfo: Rect = { x: 0, y: 0, w: 0, h: 0 };
+  private sheetClose: Rect = { x: 0, y: 0, w: 0, h: 0 };
 
   public constructor(private readonly content: LoadedContent, private readonly nav: ScreenNav) {
     this.quality = rendererBackendName() === "WebGL2" ? "med" : "low";
@@ -71,226 +88,279 @@ export class FigureLabScreen implements Screen {
   }
 
   public enter(): void {
-    this.filtered = filterCatalog(this.catalog, this.group);
-    this.selected = 0;
-    this.forged = false;
-    this.rebuild();
+    this.rebuildFigures();
+    this.requery();
   }
 
   public exit(): void {
     resetEngineScene();
-    this.figure = null;
+    this.figures.clear();
   }
 
-  private current(): CatalogEntry | undefined {
-    return this.filtered[this.selected];
-  }
-
-  private rebuild(): void {
+  /**
+   * Spawn EVERY catalog figure once into the one shared scene. This is the whole
+   * point of the gallery — all of them are live at the same time — and it is the
+   * only expensive operation here, so it runs on enter and on the forged toggle,
+   * never on a filter/sort/search change (those only re-place existing figures).
+   */
+  private rebuildFigures(): void {
     resetEngineScene();
-    buildArena("workshop");
-    const entry = this.current();
-    this.figure = entry ? new FigureInstance(this.content, entry.card.id, this.forged, this.quality) : null;
-    this.tick = 0;
+    buildGalleryStage();
+    this.figures.clear();
+    for (const entry of this.catalog) {
+      this.figures.set(entry.card.id, new FigureInstance(this.content, entry.card.id, this.forged, this.quality));
+    }
   }
 
-  private selectGroup(group: LabGroup): void {
-    if (group === this.group) {
-      return;
-    }
-    this.group = group;
-    this.filtered = filterCatalog(this.catalog, group);
-    this.selected = 0;
+  private requery(): void {
+    this.entries = queryCatalog(this.catalog, { group: this.group, search: this.search, sort: this.sort });
     this.scroll = 0;
-    this.rebuild();
   }
 
-  private select(index: number): void {
-    if (index < 0 || index >= this.filtered.length || index === this.selected) {
-      return;
-    }
-    this.selected = index;
-    this.rebuild();
+  private selectedEntry(): CatalogEntry | undefined {
+    return this.entries.find((e) => e.card.id === this.selected);
   }
 
   public update(): void {
     this.tick += 1;
   }
 
+  // ── the 3D gallery ───────────────────────────────────────────────────────────
+
+  /** World units per screen pixel — the exact inverse of the camera's projection
+   * at the z = 0 gallery plane, so a cell rect maps 1:1 onto its miniature. */
+  private worldPerPixel(): number {
+    return 1 / PX_PER_UNIT;
+  }
+
+  /** Screen point (CSS px) → world point on the gallery plane. */
+  private toWorld(sx: number, sy: number): Vec3 {
+    const k = this.worldPerPixel();
+    return vec3((sx - this.viewW / 2) * k, (this.viewH / 2 - sy) * k, 0);
+  }
+
   public renderScene3D(): void {
-    // A stable three-quarter inspection camera whose DISTANCE is the zoom control
-    // (wheel + pinch). Camera-only — it never touches figure generation. The figure
-    // is panned in X/Y (drag) around a slightly low look-at so the base stays framed.
-    const target = vec3(0, 0.8, 0);
-    const dir = normalize(vec3(0, 0.32, 1));
-    const dist = Math.max(1.6, 4.4 * this.zoom);
-    setCamera3D({ position: add(target, scale(dir, dist)), target, fovY: 0.72, near: 0.1, far: 140 });
-    if (this.figure !== null) {
-      const bob = Math.sin(this.tick * 0.045) * 0.02;
-      const root: RootFrame = { position: vec3(this.panX, bob + this.panY, 0), rotation: quatFromEulerXyz(0, this.yaw, 0), scale: 1.0 };
-      this.figure.pose(root);
+    // A near-orthographic long lens: every miniature sits on z = 0, so a single
+    // fixed camera gives every cell the same scale with negligible perspective
+    // skew across the grid.
+    const k = this.worldPerPixel();
+    const dist = (this.viewH * k) / (2 * Math.tan(FOV_Y / 2));
+    setCamera3D({ position: vec3(0, 0, dist), target: vec3(0, 0, 0), fovY: FOV_Y, near: 0.1, far: dist * 4 });
+
+    for (const fig of this.figures.values()) {
+      fig.park();
+    }
+    const spin = quatFromAxisAngle(Y_AXIS, this.spinning ? this.tick * SPIN_PER_TICK : 0);
+    const area = this.galleryRect;
+    for (const cell of this.layout.cells) {
+      const top = area.y + cell.y - this.scroll;
+      if (top + cell.size < area.y - cell.size || top > area.y + area.h) {
+        continue; // culled: parked above, and stays parked
+      }
+      const entry = this.entries[cell.index];
+      const fig = entry ? this.figures.get(entry.card.id) : undefined;
+      if (fig === undefined) {
+        continue;
+      }
+      // Fit the figure's own bounding height into the cell, then turn it about the
+      // vertical axis through its bounding-box CENTRE, so it spins in place and
+      // stays centred in the icon at every angle.
+      const s = (cell.size * k * FIT) / fig.height;
+      const centre = this.toWorld(area.x + cell.x + cell.size / 2, top + cell.size / 2);
+      const root: RootFrame = { position: sub(centre, rotateVec(spin, vec3(0, fig.midY * s, 0))), rotation: spin, scale: s };
+      fig.pose(root);
     }
     renderScene();
   }
 
-  /** The MOVE/SPIN toggle drawn at the stage's top-left corner (single control so
-   * one-finger drag either pans X/Y or rotates). */
-  private drawStageTool(ctx: CanvasRenderingContext2D): void {
-    this.stageTool = { x: this.stageRect.x + 6, y: this.stageRect.y + 6, w: 74, h: 26 };
-    const move = this.dragMode === "move";
-    button(ctx, this.stageTool, move ? "✥ MOVE" : "⟳ SPIN", { fill: "#1a1f26", edge: move ? PALETTE.brass : PALETTE.steel, text: PALETTE.ink });
-  }
-
-  private applyZoom(factor: number): void {
-    this.zoom = Math.max(0.7, Math.min(3.6, this.zoom * factor));
-  }
-
-  /** Desktop wheel zoom (positive delta = zoom out). */
-  public onWheel(delta: number): void {
-    this.applyZoom(delta > 0 ? 1.12 : 0.89);
-  }
-
-  /** Mobile pinch zoom: `factor` = current/previous finger distance (spread > 1). */
-  public onPinch(factor: number): void {
-    if (factor > 0) {
-      this.applyZoom(1 / factor);
-    }
-  }
+  // ── 2D overlay ───────────────────────────────────────────────────────────────
 
   public render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     ctx.clearRect(0, 0, w, h);
-    // Reflow, don't just shrink: below ~640px wide (phone portrait / narrow) the
-    // catalog + inspector collapse into a bottom tab tray so nothing overlaps.
+    this.viewW = w;
+    this.viewH = h;
     this.portrait = w < 640;
-    if (this.portrait) {
-      this.renderPortrait(ctx, w, h);
-    } else {
-      this.renderLandscape(ctx, w, h);
-    }
-  }
 
-  private renderLandscape(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-    const barH = 40;
-    const galleryW = Math.min(200, w * 0.26);
-    const inspectorW = Math.min(230, w * 0.28);
-    this.stageRect = { x: galleryW, y: barH, w: w - galleryW - inspectorW, h: h - barH };
-    this.tabGallery = { x: 0, y: 0, w: 0, h: 0 };
-    this.tabInfo = { x: 0, y: 0, w: 0, h: 0 };
-
-    this.drawTopBar(ctx, w, barH, false);
-    this.drawGroupNav(ctx, barH, w, false);
-    this.drawGallery(ctx, { x: 0, y: barH + 30, w: galleryW, h: h - barH - 30 });
-    this.drawInspector(ctx, { x: w - inspectorW, y: barH + 30, w: inspectorW, h: h - barH - 30 });
-    this.drawStageTool(ctx);
-  }
-
-  private renderPortrait(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-    const barH = 36;
+    const barH = this.portrait ? 36 : 40;
     const navH = 26;
-    this.drawTopBar(ctx, w, barH, true);
-    this.drawGroupNav(ctx, barH, w, true);
+    const toolH = 26;
+    const inspectorW = this.portrait ? 0 : Math.min(240, w * 0.28);
+    const top = barH + navH + toolH;
+    this.galleryRect = { x: 0, y: top, w: w - inspectorW, h: h - top };
+    this.layout = layoutGallery(this.entries, this.galleryRect.w, this.icon, this.sort);
+    this.clampScroll();
 
-    const trayH = Math.max(240, Math.round(h * 0.46));
-    const trayTop = h - trayH;
-    // The stage occupies the full-width upper region; the 3D figure renders behind
-    // the transparent overlay, so this is just the drag-to-rotate hit region.
-    this.stageRect = { x: 0, y: barH + navH, w, h: trayTop - (barH + navH) };
-
-    // Tray: a card-name header, a Gallery/Info tab bar, then the active panel.
-    const headerH = 20;
-    const tabH = 28;
-    panel(ctx, { x: 0, y: trayTop, w, h: trayH }, PALETTE.bg1, PALETTE.panelEdge, 0);
-    const entry = this.current();
-    const label = entry ? `${entry.card.name}${this.forged ? "  ✦ FORGED" : ""}   ·   T${entry.card.tier} ${entry.card.baseAttack}/${entry.card.baseHealth}` : "—";
-    text(ctx, label, 10, trayTop + headerH / 2 + 2, { size: 11, weight: 800, color: PALETTE.brassLight });
-    text(ctx, `Q:${this.quality}`, w - 10, trayTop + headerH / 2 + 2, { size: 10, weight: 700, align: "right", color: PALETTE.steel });
-
-    const tabY = trayTop + headerH;
-    this.tabGallery = { x: 4, y: tabY, w: w / 2 - 6, h: tabH };
-    this.tabInfo = { x: w / 2 + 2, y: tabY, w: w / 2 - 6, h: tabH };
-    button(ctx, this.tabGallery, `GALLERY (${this.filtered.length})`, { fill: this.tab === "gallery" ? "#2a2118" : "#161310", edge: this.tab === "gallery" ? PALETTE.brassLight : PALETTE.panelEdge, text: this.tab === "gallery" ? PALETTE.brassLight : PALETTE.inkDim });
-    button(ctx, this.tabInfo, "INFO", { fill: this.tab === "info" ? "#2a2118" : "#161310", edge: this.tab === "info" ? PALETTE.brassLight : PALETTE.panelEdge, text: this.tab === "info" ? PALETTE.brassLight : PALETTE.inkDim });
-
-    const panelArea: Rect = { x: 0, y: tabY + tabH + 4, w, h: h - (tabY + tabH + 4) };
-    if (this.tab === "gallery") {
-      this.drawGallery(ctx, panelArea);
+    // Gallery decorations FIRST (the miniatures show through the transparent
+    // overlay), then the opaque chrome on top so nothing bleeds under it.
+    this.drawGallery(ctx);
+    this.drawTopBar(ctx, w, barH);
+    this.drawGroupNav(ctx, w, barH, navH);
+    this.drawToolStrip(ctx, w, barH + navH, toolH);
+    if (this.portrait) {
+      this.drawSheet(ctx, w, h);
     } else {
-      this.galleryRect = { x: 0, y: 0, w: 0, h: 0 };
-      this.drawInspector(ctx, panelArea);
+      this.drawInspector(ctx, { x: w - inspectorW, y: top, w: inspectorW, h: h - top });
     }
-    this.drawStageTool(ctx);
   }
 
-  private drawTopBar(ctx: CanvasRenderingContext2D, w: number, barH: number, compact: boolean): void {
-    panel(ctx, { x: 0, y: 0, w, h: barH }, PALETTE.bg1, PALETTE.panelEdge, 0);
-    this.back = { x: 6, y: 5, w: compact ? 50 : 60, h: barH - 10 };
-    button(ctx, this.back, "◂", { fill: "#241d16", edge: PALETTE.brass, text: PALETTE.brassLight });
-    text(ctx, "FIGURE LAB", this.back.x + this.back.w + 10, barH / 2, { size: compact ? 12 : 14, weight: 800, color: PALETTE.brassLight });
-    // The full "group · card" label lives in the top bar only when there's room
-    // (landscape); in portrait it moves to the tray header (no overlap).
-    if (!compact) {
-      const entry = this.current();
-      const label = entry ? `${GROUP_LABEL[this.group]} · ${entry.card.name}${this.forged ? " ✦" : ""}` : GROUP_LABEL[this.group];
-      text(ctx, label, 176, barH / 2, { size: 11, weight: 700, color: PALETTE.ink });
-      text(ctx, `Q:${this.quality}`, w - 190, barH / 2, { size: 10, weight: 700, color: PALETTE.steel });
-    }
-    const btnW = compact ? 62 : 72;
-    this.forgedBtn = { x: w - btnW * 2 - 10, y: 5, w: btnW, h: barH - 10 };
-    button(ctx, this.forgedBtn, this.forged ? "FORGED" : "NORMAL", { fill: this.forged ? "#2a1d12" : "#1a1f26", edge: this.forged ? PALETTE.ember : PALETTE.steel, text: this.forged ? PALETTE.brassLight : PALETTE.ink });
-    this.resetBtn = { x: w - btnW - 6, y: 5, w: btnW, h: barH - 10 };
-    button(ctx, this.resetBtn, "RESET", { fill: "#241d16", edge: PALETTE.panelEdge, text: PALETTE.ink });
+  private clampScroll(): void {
+    const max = Math.max(0, this.layout.contentHeight - this.galleryRect.h);
+    this.scroll = Math.max(0, Math.min(max, this.scroll));
   }
 
-  private drawGroupNav(ctx: CanvasRenderingContext2D, barH: number, w: number, abbrev: boolean): void {
-    const cw = w / LAB_GROUPS.length;
-    this.chips = LAB_GROUPS.map((g, i) => {
-      const r: Rect = { x: i * cw, y: barH, w: cw - 2, h: abbrev ? 26 : 28 };
-      const active = g === this.group;
-      panel(ctx, r, active ? "#2a2118" : "#161310", active ? PALETTE.brassLight : PALETTE.panelEdge, 4);
-      const name = abbrev ? GROUP_LABEL[g].slice(0, 5).toUpperCase() : GROUP_LABEL[g].toUpperCase();
-      text(ctx, name, r.x + r.w / 2, r.y + r.h / 2, { size: abbrev ? 8 : 9, weight: 800, align: "center", color: active ? PALETTE.brassLight : PALETTE.inkDim });
-      return r;
-    });
-  }
-
-  private drawGallery(ctx: CanvasRenderingContext2D, area: Rect): void {
-    this.galleryRect = area;
-    panel(ctx, area, "rgba(10,9,8,0.82)", PALETTE.panelEdge, 0);
-    const itemH = 34;
-    const maxScroll = Math.max(0, this.filtered.length * itemH - area.h + 6);
-    this.scroll = Math.max(0, Math.min(maxScroll, this.scroll));
-    this.items = [];
+  private drawGallery(ctx: CanvasRenderingContext2D): void {
+    const area = this.galleryRect;
     ctx.save();
     ctx.beginPath();
     ctx.rect(area.x, area.y, area.w, area.h);
     ctx.clip();
-    this.filtered.forEach((entry, i) => {
-      const r: Rect = { x: area.x + 4, y: area.y + 4 + i * itemH - this.scroll, w: area.w - 8, h: itemH - 4 };
-      this.items.push(r);
-      if (r.y + r.h < area.y || r.y > area.y + area.h) {
-        return; // culled (offscreen) — not drawn
+
+    for (const header of this.layout.headers) {
+      const y = area.y + header.y - this.scroll;
+      if (y + HEADER_H < area.y || y > area.y + area.h) {
+        continue;
       }
-      const active = i === this.selected;
+      ctx.fillStyle = "rgba(18,15,12,0.9)";
+      ctx.fillRect(area.x, y, area.w, HEADER_H);
+      ctx.fillStyle = PALETTE.brass;
+      ctx.fillRect(area.x + 8, y + HEADER_H - 2, area.w - 16, 1);
+      text(ctx, header.label.toUpperCase(), area.x + 10, y + HEADER_H / 2, { size: 10, weight: 800, color: PALETTE.brassLight });
+      text(ctx, `${header.count}`, area.x + area.w - 10, y + HEADER_H / 2, { size: 10, weight: 700, align: "right", color: PALETTE.inkDim });
+    }
+
+    const small = this.icon < 68;
+    for (const cell of this.layout.cells) {
+      const y = area.y + cell.y - this.scroll;
+      if (y + cell.size + CAPTION_H < area.y || y > area.y + area.h) {
+        continue;
+      }
+      const entry = this.entries[cell.index];
+      if (entry === undefined) {
+        continue;
+      }
+      const x = area.x + cell.x;
+      const active = entry.card.id === this.selected;
       const accent = entry.group === "neutral" ? hexToRgba("#b8934a") : hexToRgba(this.content.group(entry.group).accent);
-      panel(ctx, r, active ? "#2a2118" : "#17130f", active ? PALETTE.brassLight : PALETTE.panelEdge, 4);
-      // Group accent tab on the left edge.
-      ctx.fillStyle = `rgba(${Math.round(accent[0] * 255)},${Math.round(accent[1] * 255)},${Math.round(accent[2] * 255)},1)`;
-      ctx.fillRect(r.x, r.y, 3, r.h);
-      text(ctx, entry.card.name, r.x + 8, r.y + 11, { size: 10, weight: 700, color: active ? PALETTE.brassLight : PALETTE.ink });
-      text(ctx, `T${entry.card.tier} · ${entry.card.baseAttack}/${entry.card.baseHealth}${entry.token ? " · token" : ""}`, r.x + 8, r.y + 22, { size: 9, weight: 600, color: PALETTE.inkDim });
-    });
+      const rgb = `${Math.round(accent[0] * 255)},${Math.round(accent[1] * 255)},${Math.round(accent[2] * 255)}`;
+
+      // A translucent well so a dark miniature reads, plus a group-accent frame —
+      // never a filled panel, or it would hide the 3D behind it.
+      ctx.fillStyle = active ? "rgba(58,44,24,0.45)" : "rgba(12,11,10,0.35)";
+      ctx.fillRect(x, y, cell.size, cell.size);
+      ctx.strokeStyle = active ? PALETTE.brassLight : `rgba(${rgb},0.55)`;
+      ctx.lineWidth = active ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, cell.size - 1, cell.size - 1);
+      ctx.fillStyle = `rgba(${rgb},1)`;
+      ctx.fillRect(x, y, cell.size, 2);
+
+      if (!small) {
+        text(ctx, entry.card.name, x + cell.size / 2, y + cell.size + 9, { size: 9, weight: 700, align: "center", max: cell.size, color: active ? PALETTE.brassLight : PALETTE.ink });
+        text(ctx, `T${entry.card.tier} · ${entry.card.baseAttack}/${entry.card.baseHealth}${entry.token ? " · token" : ""}`, x + cell.size / 2, y + cell.size + 20, { size: 8, weight: 600, align: "center", max: cell.size, color: PALETTE.inkDim });
+      }
+    }
     ctx.restore();
+
+    if (this.entries.length === 0) {
+      text(ctx, `no figures match “${this.search}”`, area.x + area.w / 2, area.y + 40, { size: 12, weight: 700, align: "center", color: PALETTE.inkDim });
+    }
+  }
+
+  private drawTopBar(ctx: CanvasRenderingContext2D, w: number, barH: number): void {
+    panel(ctx, { x: 0, y: 0, w, h: barH }, PALETTE.bg1, PALETTE.panelEdge, 0);
+    this.back = { x: 6, y: 5, w: this.portrait ? 42 : 56, h: barH - 10 };
+    button(ctx, this.back, "<", { fill: "#241d16", edge: PALETTE.brass, text: PALETTE.brassLight });
+
+    const btnW = this.portrait ? 58 : 70;
+    this.forgedBtn = { x: w - btnW - 6, y: 5, w: btnW, h: barH - 10 };
+    button(ctx, this.forgedBtn, this.forged ? "FORGED" : "NORMAL", { fill: this.forged ? "#2a1d12" : "#1a1f26", edge: this.forged ? PALETTE.ember : PALETTE.steel, text: this.forged ? PALETTE.brassLight : PALETTE.ink });
+    this.sortBtn = { x: w - btnW * 2 - 12, y: 5, w: btnW, h: barH - 10 };
+    button(ctx, this.sortBtn, SORT_LABEL[this.sort], { fill: "#1a1f26", edge: PALETTE.steel, text: PALETTE.ink, ...(this.portrait ? {} : { sub: "SORT" }) });
+
+    // The search field: a real focusable text input drawn on the canvas.
+    const sx = this.back.x + this.back.w + 8;
+    this.searchBox = { x: sx, y: 5, w: Math.max(80, this.sortBtn.x - sx - 10), h: barH - 10 };
+    panel(ctx, this.searchBox, "#100e0c", this.searchFocused ? PALETTE.brassLight : PALETTE.panelEdge, 4);
+    const shown = this.search.length > 0 ? this.search : this.searchFocused ? "" : "search name · tribe · keyword";
+    const caret = this.searchFocused && Math.floor(this.tick / 20) % 2 === 0 ? "|" : "";
+    text(ctx, "SEARCH", this.searchBox.x + 8, this.searchBox.y + this.searchBox.h / 2, { size: 8, weight: 800, color: PALETTE.steel });
+    text(ctx, `${shown}${caret}`, this.searchBox.x + 52, this.searchBox.y + this.searchBox.h / 2, {
+      size: 11,
+      weight: 700,
+      max: this.searchBox.w - 60,
+      color: this.search.length > 0 ? PALETTE.ink : PALETTE.inkDim,
+    });
+  }
+
+  private drawGroupNav(ctx: CanvasRenderingContext2D, w: number, y: number, navH: number): void {
+    const cw = w / LAB_GROUPS.length;
+    this.chips = LAB_GROUPS.map((g, i) => {
+      const r: Rect = { x: i * cw, y, w: cw - 2, h: navH };
+      const active = g === this.group;
+      panel(ctx, r, active ? "#2a2118" : "#161310", active ? PALETTE.brassLight : PALETTE.panelEdge, 4);
+      const name = this.portrait ? GROUP_LABEL[g].slice(0, 5).toUpperCase() : GROUP_LABEL[g].toUpperCase();
+      text(ctx, name, r.x + r.w / 2, r.y + r.h / 2, { size: this.portrait ? 8 : 9, weight: 800, align: "center", color: active ? PALETTE.brassLight : PALETTE.inkDim });
+      return r;
+    });
+  }
+
+  /** The strip under the group chips: result count, spin toggle, reset, and the
+   * icon-SIZE slider (the gallery's zoom). */
+  private drawToolStrip(ctx: CanvasRenderingContext2D, w: number, y: number, toolH: number): void {
+    panel(ctx, { x: 0, y, w, h: toolH }, "#131110", PALETTE.panelEdge, 0);
+    const cy = y + toolH / 2;
+    text(ctx, `${this.entries.length} FIGURES`, 8, cy, { size: 9, weight: 800, color: PALETTE.brassLight });
+
+    const bw = this.portrait ? 42 : 54;
+    this.spinBtn = { x: this.portrait ? 84 : 110, y: y + 3, w: bw, h: toolH - 6 };
+    button(ctx, this.spinBtn, this.spinning ? "SPIN" : "HOLD", { fill: "#1a1f26", edge: this.spinning ? PALETTE.brass : PALETTE.steel, text: PALETTE.ink });
+    this.resetBtn = { x: this.spinBtn.x + bw + 6, y: y + 3, w: bw, h: toolH - 6 };
+    button(ctx, this.resetBtn, "RESET", { fill: "#241d16", edge: PALETTE.panelEdge, text: PALETTE.ink });
+
+    // Size control: [−] [track] [+]. Dragging the track resizes the icons live.
+    const sq = toolH - 6;
+    this.bigger = { x: w - sq - 6, y: y + 3, w: sq, h: sq };
+    const trackW = Math.min(140, Math.max(56, w * 0.22));
+    this.sizeTrack = { x: this.bigger.x - trackW - 4, y: y + 8, w: trackW, h: toolH - 16 };
+    this.smaller = { x: this.sizeTrack.x - sq - 4, y: y + 3, w: sq, h: sq };
+    button(ctx, this.smaller, "-", { fill: "#1a1f26", edge: PALETTE.steel, text: PALETTE.ink });
+    button(ctx, this.bigger, "+", { fill: "#1a1f26", edge: PALETTE.steel, text: PALETTE.ink });
+    panel(ctx, this.sizeTrack, "#0d0c0b", PALETTE.panelEdge, 3);
+    const t = this.sizeFraction();
+    ctx.fillStyle = PALETTE.brass;
+    ctx.fillRect(this.sizeTrack.x + 2, this.sizeTrack.y + 2, Math.max(2, (this.sizeTrack.w - 4) * t), this.sizeTrack.h - 4);
+    text(ctx, `${Math.round(this.icon)}px`, this.smaller.x - 8, cy, { size: 9, weight: 700, align: "right", color: PALETTE.inkDim });
   }
 
   private drawInspector(ctx: CanvasRenderingContext2D, area: Rect): void {
-    panel(ctx, area, "rgba(10,9,8,0.82)", PALETTE.panelEdge, 0);
-    const entry = this.current();
+    panel(ctx, area, "#0d0b0a", PALETTE.panelEdge, 0);
+    const entry = this.selectedEntry();
     if (entry === undefined) {
+      text(ctx, "TAP A FIGURE", area.x + 10, area.y + 20, { size: 10, weight: 800, color: PALETTE.inkDim });
+      text(ctx, "drag to scroll · wheel to resize", area.x + 10, area.y + 38, { size: 9, weight: 600, color: PALETTE.inkDim });
       return;
     }
+    this.drawDetails(ctx, entry, area);
+  }
+
+  /** Portrait: the inspector is a bottom sheet over the full-width gallery. */
+  private drawSheet(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const entry = this.selectedEntry();
+    if (!this.sheet || entry === undefined) {
+      this.sheetClose = { x: 0, y: 0, w: 0, h: 0 };
+      return;
+    }
+    const area: Rect = { x: 0, y: h * 0.42, w, h: h * 0.58 };
+    panel(ctx, area, "#0d0b0a", PALETTE.brass, 0);
+    this.sheetClose = { x: w - 34, y: area.y + 6, w: 28, h: 24 };
+    this.drawDetails(ctx, entry, area);
+    button(ctx, this.sheetClose, "X", { fill: "#241d16", edge: PALETTE.panelEdge, text: PALETTE.ink });
+  }
+
+  private drawDetails(ctx: CanvasRenderingContext2D, entry: CatalogEntry, area: Rect): void {
     const def = figureForCard(this.content, entry.card.id);
     const lang = languageFor(def.language);
     const seed = figureSeed(entry.card.id, def.seedSalt);
+    const fig = this.figures.get(entry.card.id);
     let y = area.y + 16;
     const line = (label: string, value: string, color: string = PALETTE.ink): void => {
       text(ctx, label, area.x + 8, y, { size: 9, weight: 700, color: PALETTE.inkDim });
@@ -306,7 +376,7 @@ export class FigureLabScreen implements Screen {
     line("tier", `${entry.card.tier}`);
     line("attack / health", `${entry.card.baseAttack} / ${entry.card.baseHealth}`);
     line("canonical seed", `0x${seed.toString(16)}`);
-    line("part count", `${this.figure?.partCount ?? 0}`, (this.figure?.partCount ?? 0) <= 28 ? PALETTE.good : PALETTE.bad);
+    line("part count", `${fig?.partCount ?? 0}`, (fig?.partCount ?? 0) <= 28 ? PALETTE.good : PALETTE.bad);
     line("forged", this.forged ? "yes" : "no");
     y += 6;
     text(ctx, "GROUP VISUAL LANGUAGE", area.x + 8, y, { size: 9, weight: 800, color: PALETTE.ember });
@@ -315,8 +385,72 @@ export class FigureLabScreen implements Screen {
     line("primitives", lang.preferredPrimitives.slice(0, 3).join(","));
     line("default anim", lang.defaultAnimation);
     line("accent", lang.groupColorHex || "—");
-    y += 6;
-    text(ctx, "drag stage to rotate", area.x + 8, area.y + area.h - 10, { size: 9, weight: 600, color: PALETTE.inkDim });
+  }
+
+  // ── controls ─────────────────────────────────────────────────────────────────
+
+  private sizeFraction(): number {
+    return (this.icon - 44) / (260 - 44);
+  }
+
+  private setIcon(px: number): void {
+    this.icon = clampIcon(px);
+  }
+
+  private cycleSort(): void {
+    const i = SORT_MODES.indexOf(this.sort);
+    this.sort = SORT_MODES[(i + 1) % SORT_MODES.length] as SortMode;
+    this.requery();
+  }
+
+  private selectGroup(group: LabGroup): void {
+    if (group !== this.group) {
+      this.group = group;
+      this.requery();
+    }
+  }
+
+  /** Wheel resizes the icons (the gallery's zoom); it never moves a camera. */
+  public onWheel(delta: number): void {
+    this.setIcon(this.icon * (delta > 0 ? 0.9 : 1.11));
+  }
+
+  public onPinch(factor: number): void {
+    if (factor > 0) {
+      this.setIcon(this.icon * factor);
+    }
+  }
+
+  /** Typed text goes to the search field while it is focused. */
+  public onKey(key: string): void {
+    if (key === "/" && !this.searchFocused) {
+      this.searchFocused = true;
+      return;
+    }
+    if (!this.searchFocused) {
+      return;
+    }
+    if (key === "Escape") {
+      this.searchFocused = false;
+      if (this.search.length > 0) {
+        this.search = "";
+        this.requery();
+      }
+      return;
+    }
+    if (key === "Enter") {
+      this.searchFocused = false;
+      return;
+    }
+    if (key === "Backspace") {
+      this.search = this.search.slice(0, -1);
+      this.requery();
+      return;
+    }
+    if (key.length === 1) {
+      this.search += key;
+      this.requery();
+    }
   }
 
   public onPointerDown(x: number, y: number): void {
@@ -324,23 +458,49 @@ export class FigureLabScreen implements Screen {
       this.nav.goto("main_menu");
       return;
     }
+    if (inRect(this.searchBox, x, y)) {
+      this.searchFocused = true;
+      return;
+    }
+    this.searchFocused = false;
+    if (inRect(this.sheetClose, x, y)) {
+      this.sheet = false;
+      return;
+    }
+    if (inRect(this.sortBtn, x, y)) {
+      this.cycleSort();
+      return;
+    }
     if (inRect(this.forgedBtn, x, y)) {
       this.forged = !this.forged;
-      this.rebuild();
+      this.rebuildFigures();
+      return;
+    }
+    if (inRect(this.spinBtn, x, y)) {
+      this.spinning = !this.spinning;
       return;
     }
     if (inRect(this.resetBtn, x, y)) {
-      this.forged = false;
-      this.yaw = 0.5;
-      this.zoom = 1.5;
-      this.panX = 0;
-      this.panY = 0.35;
-      this.dragMode = "move";
-      this.rebuild();
+      this.icon = 108;
+      this.scroll = 0;
+      this.search = "";
+      this.sort = "tribe";
+      this.group = "all";
+      this.spinning = true;
+      this.requery();
       return;
     }
-    if (inRect(this.stageTool, x, y)) {
-      this.dragMode = this.dragMode === "move" ? "spin" : "move";
+    if (inRect(this.smaller, x, y)) {
+      this.setIcon(this.icon - 16);
+      return;
+    }
+    if (inRect(this.bigger, x, y)) {
+      this.setIcon(this.icon + 16);
+      return;
+    }
+    if (inRect(this.sizeTrack, x, y)) {
+      this.slidingSize = true;
+      this.dragSize(x);
       return;
     }
     const chip = this.chips.findIndex((r) => inRect(r, x, y));
@@ -348,91 +508,113 @@ export class FigureLabScreen implements Screen {
       this.selectGroup(LAB_GROUPS[chip] as LabGroup);
       return;
     }
-    // Portrait tray tabs (zero-sized in landscape, so these never match there).
-    if (inRect(this.tabGallery, x, y)) {
-      this.tab = "gallery";
-      return;
-    }
-    if (inRect(this.tabInfo, x, y)) {
-      this.tab = "info";
-      return;
-    }
     if (inRect(this.galleryRect, x, y)) {
-      this.galleryScrolling = true;
-      this.galleryMoved = false;
-      this.lastX = y;
-      return;
-    }
-    if (inRect(this.stageRect, x, y)) {
-      this.dragging = true;
-      this.lastX = x;
+      this.scrolling = true;
+      this.moved = false;
       this.lastY = y;
     }
   }
 
+  private dragSize(x: number): void {
+    const t = Math.max(0, Math.min(1, (x - this.sizeTrack.x) / Math.max(1, this.sizeTrack.w)));
+    this.setIcon(44 + t * (260 - 44));
+  }
+
   public onPointerMove(x: number, y: number): void {
-    if (this.galleryScrolling) {
-      const dy = y - this.lastX;
-      if (Math.abs(dy) > 4) {
-        this.galleryMoved = true;
-      }
-      this.scroll -= dy;
-      this.lastX = y;
+    if (this.slidingSize) {
+      this.dragSize(x);
       return;
     }
-    if (this.dragging) {
-      const dx = x - this.lastX;
+    if (this.scrolling) {
       const dy = y - this.lastY;
-      if (this.dragMode === "spin") {
-        this.yaw += dx * 0.012;
-      } else {
-        // Pan the figure in X/Y; scale by zoom so it feels consistent at any distance.
-        const k = 0.006 * this.zoom;
-        this.panX = Math.max(-3, Math.min(3, this.panX + dx * k));
-        this.panY = Math.max(-1.5, Math.min(3, this.panY - dy * k));
+      if (Math.abs(dy) > 4) {
+        this.moved = true;
       }
-      this.lastX = x;
+      this.scroll -= dy;
+      this.clampScroll();
       this.lastY = y;
     }
   }
 
   public onPointerUp(x: number, y: number): void {
-    if (this.galleryScrolling) {
-      // A tap (not a scroll drag) selects the item under the pointer.
-      if (!this.galleryMoved) {
-        const idx = this.items.findIndex((r) => inRect(r, x, y));
-        if (idx >= 0) {
-          this.select(idx);
-        }
+    this.slidingSize = false;
+    if (this.scrolling) {
+      this.scrolling = false;
+      if (!this.moved) {
+        this.selectAt(x, y);
       }
-      this.galleryScrolling = false;
+    }
+  }
+
+  /** Hit-test the grid. The target is the icon PLUS its caption band — at small
+   * icon sizes the icon alone is under the 44px touch minimum. */
+  private selectAt(x: number, y: number): void {
+    const area = this.galleryRect;
+    const cell = this.layout.cells.find((c) => {
+      const cy = area.y + c.y - this.scroll;
+      const cx = area.x + c.x;
+      return x >= cx && x <= cx + c.size && y >= cy && y <= cy + c.size + CAPTION_H;
+    });
+    const entry = cell ? this.entries[cell.index] : undefined;
+    if (entry === undefined) {
       return;
     }
-    this.dragging = false;
+    this.selected = this.selected === entry.card.id ? null : entry.card.id;
+    this.sheet = this.selected !== null;
   }
 
   // ── dev/test hooks (for the app shell + capture harness) ─────────────────────
   public debugSelect(group: LabGroup, cardId: string): void {
     this.selectGroup(group);
-    const idx = this.filtered.findIndex((e) => e.card.id === cardId);
-    if (idx >= 0) {
-      this.select(idx);
+    this.selected = this.entries.some((e) => e.card.id === cardId) ? cardId : this.selected;
+    this.sheet = this.selected !== null;
+    this.scrollToSelected();
+  }
+
+  /** Bring the selection into view (a programmatic select can land off-screen). */
+  private scrollToSelected(): void {
+    const index = this.entries.findIndex((e) => e.card.id === this.selected);
+    const cell = this.layout.cells.find((c) => c.index === index);
+    if (cell !== undefined) {
+      this.scroll = cell.y - this.galleryRect.h / 2 + cell.size / 2;
+      this.clampScroll();
     }
   }
 
   public debugSetForged(forged: boolean): void {
     if (forged !== this.forged) {
       this.forged = forged;
-      this.rebuild();
+      this.rebuildFigures();
     }
   }
 
   public debugZoom(factor: number): void {
-    this.applyZoom(factor);
+    this.setIcon(this.icon * factor);
   }
 
-  public debugInfo(): { group: string; card: string; forged: boolean; parts: number; count: number; zoom: number } {
-    const entry = this.current();
-    return { group: this.group, card: entry?.card.id ?? "", forged: this.forged, parts: this.figure?.partCount ?? 0, count: this.filtered.length, zoom: Math.round(this.zoom * 100) / 100 };
+  public debugSearch(term: string): void {
+    this.search = term;
+    this.requery();
+  }
+
+  public debugSort(sort: SortMode): void {
+    this.sort = sort;
+    this.requery();
+  }
+
+  public debugInfo(): { group: string; card: string; forged: boolean; parts: number; count: number; zoom: number; sort: string; search: string; live: number; columns: number } {
+    const entry = this.selectedEntry();
+    return {
+      group: this.group,
+      card: entry?.card.id ?? "",
+      forged: this.forged,
+      parts: entry ? (this.figures.get(entry.card.id)?.partCount ?? 0) : 0,
+      count: this.entries.length,
+      zoom: Math.round(this.icon),
+      sort: this.sort,
+      search: this.search,
+      live: this.figures.size,
+      columns: this.layout.columns,
+    };
   }
 }

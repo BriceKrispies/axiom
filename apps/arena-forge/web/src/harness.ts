@@ -110,6 +110,21 @@ const boot = (): void => {
   };
   globalThis.addEventListener("pointerup", endPointer);
   globalThis.addEventListener("pointercancel", endPointer);
+  // Keyboard: printable characters + the few named keys a canvas text field needs.
+  // Modifier chords are left to the browser (never swallow Ctrl/Cmd shortcuts).
+  globalThis.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      return;
+    }
+    const named = e.key === "Backspace" || e.key === "Escape" || e.key === "Enter";
+    if (named || e.key.length === 1) {
+      if (named) {
+        e.preventDefault();
+      }
+      game.onKey(e.key);
+    }
+  });
+
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     game.onWheel(e.deltaY);

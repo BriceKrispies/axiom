@@ -38,6 +38,9 @@ export interface Screen {
   onWheel?(deltaY: number): void;
   /** Mobile pinch zoom (optional; `factor` = current/previous finger distance). */
   onPinch?(factor: number): void;
+  /** A keyboard key (optional; a printable character, or a named key such as
+   * `Backspace`/`Escape`/`Enter`). The platform edge filters modifiers out. */
+  onKey?(key: string): void;
   /** Release per-screen engine resources (nodes/materials/meshes). */
   exit(): void;
 }

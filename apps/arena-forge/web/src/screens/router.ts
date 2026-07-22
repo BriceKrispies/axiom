@@ -71,4 +71,8 @@ export class ScreenRouter implements ScreenNav {
   public onPinch(factor: number): void {
     this.currentScreen.onPinch?.(factor);
   }
+
+  public onKey(key: string): void {
+    this.currentScreen.onKey?.(key);
+  }
 }
