@@ -76,7 +76,7 @@ const fn p(
     }
 }
 
-/// Feet on y≈0, helmet top ≈ 2.14. Pelvis root pivot sits at absolute y 1.08
+/// Feet on y≈0, helmet top ≈ 2.22. Pelvis root pivot sits at absolute y 1.08
 /// (0.08 above the figure center).
 pub const PARTS: [PartSpec; PART_COUNT] = [
     // 0 pelvis (root)
@@ -95,28 +95,32 @@ pub const PARTS: [PartSpec; PART_COUNT] = [
         Vec3::new(0.0, 0.05, 0.0),
         TAG_JERSEY,
     ),
-    // 2 shoulder-pad slab
+    // 2 shoulder-pad slab — a broad, thick voxel girdle. The reference linemen
+    // read as top-heavy blocks: the pads are the widest thing on the figure and
+    // define the football silhouette, so this slab is wider/thicker/deeper than a
+    // human shoulder would be.
     p(
         Some(1),
         Vec3::new(0.0, 0.30, 0.0),
-        Vec3::new(0.88, 0.18, 0.46),
+        Vec3::new(1.08, 0.24, 0.54),
         Vec3::ZERO,
         TAG_TRIM,
     ),
     // 3 helmet (oversized) — hangs off the pad girdle, so the head inherits the
     // ribcage counter-rotation (offset compensates: pads sit +0.30 over torso).
+    // A big, boxy voxel helmet is the other silhouette anchor.
     p(
         Some(2),
-        Vec3::new(0.0, 0.12, 0.0),
-        Vec3::new(0.34, 0.32, 0.36),
-        Vec3::new(0.0, 0.12, 0.0),
+        Vec3::new(0.0, 0.14, 0.0),
+        Vec3::new(0.42, 0.40, 0.44),
+        Vec3::new(0.0, 0.14, 0.0),
         TAG_HELMET,
     ),
-    // 4 facemask bar (the face opening)
+    // 4 facemask bar (the face opening) — sized to the wider helmet front face.
     p(
         Some(3),
-        Vec3::new(0.0, 0.08, 0.20),
-        Vec3::new(0.28, 0.12, 0.08),
+        Vec3::new(0.0, 0.08, 0.24),
+        Vec3::new(0.34, 0.16, 0.08),
         Vec3::ZERO,
         TAG_FACEMASK,
     ),
@@ -168,7 +172,7 @@ pub const PARTS: [PartSpec; PART_COUNT] = [
     // girdle (index 2), not the lower torso, so they carry its counter-rotation.
     p(
         Some(2),
-        Vec3::new(-0.42, -0.10, 0.0),
+        Vec3::new(-0.52, -0.10, 0.0),
         Vec3::new(0.16, 0.40, 0.16),
         Vec3::new(0.0, -0.20, 0.0),
         TAG_JERSEY,
@@ -190,7 +194,7 @@ pub const PARTS: [PartSpec; PART_COUNT] = [
     // 14/15/16 right upper arm, forearm, hand — see the left arm above.
     p(
         Some(2),
-        Vec3::new(0.42, -0.10, 0.0),
+        Vec3::new(0.52, -0.10, 0.0),
         Vec3::new(0.16, 0.40, 0.16),
         Vec3::new(0.0, -0.20, 0.0),
         TAG_JERSEY,
