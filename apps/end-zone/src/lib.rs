@@ -23,6 +23,7 @@
 pub mod ai;
 pub mod app;
 pub mod camera;
+pub mod capture;
 pub mod collision_rig;
 pub mod config;
 pub mod data;
@@ -54,3 +55,4 @@ pub use web::end_zone_start;
 pub use lab::end_zone_lab_start;
 
 pub use app::{build_end_zone, EndZoneApp};
+pub use capture::build_end_zone_after_snap;

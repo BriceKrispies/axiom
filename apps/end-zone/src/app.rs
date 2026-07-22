@@ -81,8 +81,16 @@ fn routes_of(sim: &SimState) -> Vec<Vec<axiom::prelude::Vec3>> {
 }
 
 impl EndZoneApp {
-    /// Build the app: engine scene installed, input bound, showcase armed.
+    /// Build the app at the default render size: engine scene installed, input
+    /// bound, showcase armed.
     pub fn new(config: EndZoneConfig) -> Self {
+        Self::new_sized(config, WIDTH, HEIGHT)
+    }
+
+    /// Build the app at an explicit render size. The native capture harness
+    /// ([`crate::capture`]) uses this so the baked camera projection aspect
+    /// matches the screenshot framebuffer instead of being distorted by it.
+    pub fn new_sized(config: EndZoneConfig, width: u32, height: u32) -> Self {
         // Sky clear color — it is also what the renderer's distance cue fogs
         // toward, so it must be daylight, never black.
         let sky = Color::linear_rgb(
@@ -92,7 +100,7 @@ impl EndZoneApp {
         );
         let mut running = App::new()
             .window(
-                Window::new(WIDTH, HEIGHT)
+                Window::new(width, height)
                     .with_surface_id(CANVAS_ID)
                     .with_clear_color(sky),
             )
@@ -209,18 +217,24 @@ impl EndZoneApp {
     }
 
     /// Render the most recent step (advancing once first if none exists yet):
-    /// debug markers → scene sync → engine tick. A paused frame calls only
-    /// this, so the frozen sim/camera/juice state re-presents unchanged.
+    /// pose the scene → engine tick. A paused frame calls only this, so the
+    /// frozen sim/camera/juice state re-presents unchanged.
     pub fn present(&mut self) -> FrameOutcome {
+        self.pose_scene();
+        let outcome = self.running.tick(self.frame_n);
+        self.frame_n += 1;
+        outcome
+    }
+
+    /// Pose the most recent step into the engine scene (debug markers → scene
+    /// sync) **without** ticking the engine — the native capture harness
+    /// ([`crate::capture`]) poses here and lets the renderer drive the tick.
+    pub fn pose_scene(&mut self) {
         if self.last_output.is_none() {
             self.advance(&[], TouchInput::default());
         }
         let Some(output) = self.last_output.clone() else {
-            // `advance` always stores an output; this arm only keeps the
-            // engine ticking if that invariant ever breaks.
-            let outcome = self.running.tick(self.frame_n);
-            self.frame_n += 1;
-            return outcome;
+            return;
         };
         if self.run.debug_enabled {
             debug::build_markers(
@@ -241,10 +255,6 @@ impl EndZoneApp {
             &output.camera,
             &self.debug_markers,
         );
-
-        let outcome = self.running.tick(self.frame_n);
-        self.frame_n += 1;
-        outcome
     }
 
     /// The overlay rows for this frame's state.

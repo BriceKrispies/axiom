@@ -33,6 +33,7 @@ axiom-math = { path = "../../crates/axiom-math" }
 axiom-render = { path = "../../modules/axiom-render" }
 # Each browser demo is its own standalone app crate; the harness depends on
 # exactly the ones its registry renders.
+axiom-end-zone = { path = "../../apps/end-zone" }
 axiom-gravix = { path = "../../apps/axiom-gravix" }
 axiom-rotating-cube = { path = "../../apps/axiom-rotating-cube" }
 axiom-sports-physics-lab = { path = "../../apps/axiom-sports-physics-lab" }
