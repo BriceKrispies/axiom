@@ -76,8 +76,11 @@ impl EndZoneScene {
 
         // Field materials.
         let apron = app.add_material(Material::lit(color3([0.10, 0.20, 0.10])));
-        let turf_light = app.add_material(Material::lit(color3([0.18, 0.42, 0.16])));
-        let turf_dark = app.add_material(Material::lit(color3([0.15, 0.36, 0.14])));
+        // Mowing bands: a saturated grass green with a wide light/dark delta so
+        // the field's dominant macro-texture — the alternating mow stripes —
+        // reads under flat Lambert, instead of washing to a near-uniform sage.
+        let turf_light = app.add_material(Material::lit(color3([0.13, 0.40, 0.09])));
+        let turf_dark = app.add_material(Material::lit(color3([0.07, 0.25, 0.06])));
         let white = app.add_material(Material::lit(color3([0.92, 0.93, 0.92])));
         let goalpost = app.add_material(Material::lit(color3([0.95, 0.82, 0.20])));
         let home = magma().palette.slots();
