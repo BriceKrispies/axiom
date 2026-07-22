@@ -2,7 +2,7 @@
 //! ball over on downs and ends, the run summary matches the drive counters, and
 //! a fresh run resets every statistic.
 
-use axiom_end_zone::drive::{DriveEvent, DriveState};
+use axiom_end_zone::drive::{DriveEvent, DriveState, YARDS_TO_GAIN};
 use axiom_end_zone::launch::RunConfig;
 use axiom_end_zone::showcase::ShowcaseRun;
 
@@ -93,4 +93,22 @@ fn drive_resolution_awards_the_expected_events() {
     let mut fourth = DriveState::new(1);
     fourth.down = 4;
     assert_eq!(fourth.resolve(26.0), DriveEvent::RunOver);
+}
+
+#[test]
+fn an_incompletion_advances_the_down_without_moving_the_ball() {
+    // An incomplete pass is spotted back at the previous line of scrimmage, so
+    // the drive resolves at the line — the down advances and the offense keeps
+    // its spot (real-football rule).
+    let mut d = DriveState::new(1);
+    let los = d.los_yard;
+    assert_eq!(d.resolve(los), DriveEvent::NextDown, "the down is over");
+    assert_eq!(d.down, 2, "the next down begins");
+    assert_eq!(d.los_yard, los, "the line of scrimmage does not move");
+    assert_eq!(d.yards_to_go(), YARDS_TO_GAIN, "still the full distance to gain");
+
+    // On fourth down an incompletion turns the ball over on downs.
+    let mut fourth = DriveState::new(1);
+    fourth.down = 4;
+    assert_eq!(fourth.resolve(fourth.los_yard), DriveEvent::RunOver);
 }

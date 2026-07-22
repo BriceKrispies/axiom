@@ -289,22 +289,22 @@ fn possession_transitions_are_ordered_correctly() {
 }
 
 #[test]
-fn ground_contact_transitions_the_ball_correctly() {
+fn ground_contact_ends_the_down_as_an_incompletion() {
     // Data-only change: a receiver who cannot catch (zero catch volume) turns
-    // the same play into an incompletion — loose ball, grounded ball, play over.
+    // the same play into an incompletion. Real-football rule — the down is dead
+    // the instant the ball touches the turf, and the ball returns to the
+    // previous line of scrimmage (the offense keeps its spot).
     let mut sim = SimState::new(EndZoneConfig::default());
     // Roster slot 6 of the possession (home) roster is the intended receiver.
     sim.rosters.0.players[6].archetype.catch_radius = 0.0;
+    let los = sim.frame.line_of_scrimmage_z;
     let events = scripted(&mut sim, 700);
     assert!(
         find(&events, |e| matches!(e, SimEvent::CatchCompleted { .. })).is_none(),
         "no catch with a zero catch volume"
     );
-    let loose = find(&events, |e| matches!(e, SimEvent::BallLoose { .. }));
     let grounded = find(&events, |e| matches!(e, SimEvent::BallGrounded { .. }));
-    assert!(loose.is_some(), "the miss goes through the loose state");
-    assert!(grounded.is_some(), "the loose ball settles");
-    assert!(loose.unwrap().tick <= grounded.unwrap().tick);
+    assert!(grounded.is_some(), "the uncaught pass hits the turf");
     let ended = find(&events, |e| {
         matches!(
             e,
@@ -318,6 +318,11 @@ fn ground_contact_transitions_the_ball_correctly() {
         "an uncaught pass ends the play as incomplete"
     );
     assert!(matches!(sim.ball.state, BallState::Grounded));
+    // The ball is spotted back at the line of scrimmage, not where it landed.
+    assert!(
+        (sim.ball.pos.z - los).abs() < 0.01,
+        "an incompletion returns the ball to the previous line of scrimmage"
+    );
 }
 
 #[test]

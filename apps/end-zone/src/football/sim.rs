@@ -192,8 +192,9 @@ impl SimState {
         self.throwable = picks.iter().map(|c| c.id).collect();
     }
 
-    /// Post-physics ball update: read the integrated flight, resolve the
-    /// catch, and run the loose → grounded transitions.
+    /// Post-physics ball update: read the integrated flight, resolve the catch,
+    /// and — the instant an uncaught forward pass touches the turf — blow the
+    /// play dead as an incompletion.
     pub(crate) fn ball_post_physics(&mut self) {
         match self.ball.state {
             BallState::Airborne { flight } => {
@@ -207,28 +208,36 @@ impl SimState {
                     && self.ball.pos.y <= BALL_RADIUS * 1.1
                     && self.tick > flight.release_tick + 2
                 {
-                    self.ball.state = BallState::Loose;
-                    self.events.emit(SimEvent::BallLoose {
-                        position: self.ball.pos,
-                    });
+                    self.ground_incomplete();
                 }
             }
+            // A deflected (broken-up) pass falls and is dead on ground contact.
             BallState::Loose => {
                 if let Some((pos, vel)) = self.rig.ball_state() {
                     self.ball.pos = pos;
                     self.ball.vel = vel;
                 }
-                if self.ball.vel.length() < 0.7 && self.ball.pos.y <= BALL_RADIUS * 1.25 {
-                    self.ball.state = BallState::Grounded;
-                    self.rig.park_ball();
-                    self.events.emit(SimEvent::BallGrounded {
-                        position: self.ball.pos,
-                    });
-                    self.end_play(PlayEndReason::Incomplete);
+                if self.ball.pos.y <= BALL_RADIUS * 1.25 {
+                    self.ground_incomplete();
                 }
             }
             _ => {}
         }
+    }
+
+    /// A forward pass hit the ground uncaught: the down is over. Real-football
+    /// rule — the play is dead the moment the ball touches the turf, and the
+    /// ball returns to the previous line of scrimmage (so the offense keeps its
+    /// spot; `ball_yard_line` reports the LOS, not where the ball landed).
+    fn ground_incomplete(&mut self) {
+        self.ball.state = BallState::Grounded;
+        self.ball.vel = Vec3::ZERO;
+        self.ball.pos = Vec3::new(0.0, BALL_RADIUS, self.frame.line_of_scrimmage_z);
+        self.rig.park_ball();
+        self.events.emit(SimEvent::BallGrounded {
+            position: self.ball.pos,
+        });
+        self.end_play(PlayEndReason::Incomplete);
     }
 
     /// End the play when the carrier leaves the field of play: a sideline
