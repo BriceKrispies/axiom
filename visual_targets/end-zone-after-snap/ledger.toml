@@ -1,0 +1,36 @@
+# Convergence ledger — end-zone-after-snap (append-only)
+
+[[iteration]]
+iteration = 0
+attacked_axis = "none"
+changed_files = ["visual_targets/end-zone-after-snap/scorecard.champion.toml"]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic lens seed calibration. The record was seeded with champion.png +
+reference.png and no scorecard, so no calibrated baseline existed for the loop
+to trust. Scored the champion harshly against identity: the champion is a high
+tilted overhead of a washed, near-empty field; the reference is an eye-level
+ground cam behind the offensive backfield in a vivid, populated low-poly
+stadium. The two frame different moments and different worlds, so 10 of 12 axes
+sit at 1 and two sit at 0 (composition_and_framing, stadium_environment).
+final_score = 0.25. No structural change has been made yet, so no abstraction
+record is owed.
+"""
+next_attacked_axis = "composition_and_framing"
+abstraction_introduced = false
+
+[iteration.scorecard_after]
+composition_and_framing = 0
+subject_fidelity = 1
+silhouette_readability = 1
+stadium_environment = 0
+field_markings = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 1
+scale_and_proportion = 1
+artifact_level = 1

@@ -1,0 +1,70 @@
+# Champion scorecard — end-zone-after-snap
+# Critic lens, seed calibration. Scored HARSHLY against identity: the bar is
+# "indistinguishable from reference.png", not "reads as football". The champion
+# is a high tilted overhead of a washed, near-empty field; the reference is an
+# eye-level ground cam behind the offensive backfield in a vivid, populated
+# low-poly stadium. The two frame different moments AND different worlds, so
+# almost every axis sits at 0-1. When unsure between two scores, the lower.
+#
+# final_score = lowest_axis * 0.7 + average_axis * 0.3
+# Lowest axis (ties broken by the fixed order below) = the next flaw to attack.
+
+[scores]
+# 0 — camera is a high tilted bird's-eye of midfield; reference is an eye-level
+# ground camera behind the backfield looking downfield at the goalposts. Wrong
+# pose AND wrong "after-snap" moment. Scoring the other axes is comparing
+# different framings until this is fixed.
+composition_and_framing = 0
+
+# 1 — crude tiny blocky player proxies are present, but there is no foreground
+# huddle and no cradled football; reference players read as helmeted figures.
+subject_fidelity = 1
+
+# 1 — figures are barely-readable specks near midfield vs the crisp, large
+# foreground silhouettes in the reference.
+silhouette_readability = 1
+
+# 0 — no stands, no crowd, no stadium lights, no scoreboard, no trees; only a
+# faint thin goalpost outline. The entire stadium context is absent.
+stadium_environment = 0
+
+# 1 — faint yard lines only; no painted yard numbers, no hash detail, no mow
+# stripes. Reference field is richly marked.
+field_markings = 1
+
+# 1 — flat, untextured surfaces; reference has textured striped grass and
+# shaded blocky uniforms.
+material_and_texture_detail = 1
+
+# 1 — flat ambient wash with tiny hard shadow nubs vs the reference's bright
+# directional sun and grounded ambient occlusion.
+lighting_and_shadow = 1
+
+# 1 — pale, desaturated palette vs the reference's vivid, saturated greens,
+# reds, blues and sky.
+color_palette = 1
+
+# 1 — washed, low-contrast exposure vs the reference's punchy contrast.
+contrast_and_exposure = 1
+
+# 1 — perspective gives some depth, but the near-empty field reads flat with no
+# layered midground/background separation.
+depth_and_separation = 1
+
+# 1 — players are tiny relative to the field; reference foreground players fill
+# a large share of the frame. Proportions of the blocky figures are crude.
+scale_and_proportion = 1
+
+# 1 — sparse, incomplete render; the thin floating goalpost and blank field
+# read as broken/unfinished next to the reference.
+artifact_level = 1
+
+# lowest_axis = 0 (composition_and_framing and stadium_environment tie at 0;
+#   fixed order breaks the tie -> composition_and_framing is the next flaw).
+# average = (0+1+1+0+1+1+1+1+1+1+1+1)/12 = 0.833
+# final_score = 0*0.7 + 0.833*0.3 = 0.25
+[summary]
+lowest_axis = "composition_and_framing"
+average = 0.83
+final_score = 0.25
+next_attacked_axis = "composition_and_framing"
