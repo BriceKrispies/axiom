@@ -4,7 +4,7 @@
 //! they live together here (a child module of `app`, so they reach `RunningApp`'s
 //! private render fields) to keep `app.rs` focused on lifecycle + stepping.
 
-use axiom_host::FrameAmbient;
+use axiom_host::{FrameAmbient, FramePostProcess};
 
 use crate::app::RunningApp;
 
@@ -26,5 +26,19 @@ impl RunningApp {
     /// The frame's hemisphere ambient (the app's authored sky/ground fill).
     pub const fn ambient(&self) -> FrameAmbient {
         self.ambient
+    }
+
+    /// Set the frame's tonemap/colour grade (exposure/white-balance/contrast/
+    /// saturation). The authored grade flows onto every `FrameOutcome` and is
+    /// consumed by both the offscreen capture and the live present arm, so an app
+    /// can present a graded, filmic look instead of a flat, washed-out raster.
+    pub fn set_postprocess(&mut self, postprocess: FramePostProcess) {
+        self.postprocess = Some(postprocess);
+    }
+
+    /// The frame's tonemap/colour grade (the app's authored render-look grade), or
+    /// `None` when the app authored none.
+    pub const fn postprocess(&self) -> Option<FramePostProcess> {
+        self.postprocess
     }
 }

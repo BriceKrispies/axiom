@@ -9,7 +9,7 @@ use axiom::prelude::{
     Transform, Vec3,
 };
 use axiom_figure::FigureDefinition;
-use axiom_host::FrameAmbient;
+use axiom_host::{FrameAmbient, FramePostProcess};
 use axiom_kernel::Ratio;
 
 use crate::config::PLAYER_COUNT;
@@ -159,6 +159,12 @@ impl EndZoneScene {
             Transform::IDENTITY,
         );
         app.set_ambient(FrameAmbient::new([0.21, 0.28, 0.39], [0.10, 0.13, 0.10]));
+        // Author the frame's filmic grade so every backend — the live present arm
+        // and the offscreen capture — presents the sunlit, saturated daylight look
+        // rather than a flat, washed-out raster. The engine's `cinematic()` preset
+        // (a near-neutral exposure, a cool daylight white balance, gentle contrast,
+        // and a saturation lift) rides onto the FrameOutcome and grades on present.
+        app.set_postprocess(FramePostProcess::cinematic());
 
         // Team part materials, indexed by part tag.
         let palette_mats =

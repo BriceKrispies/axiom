@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use axiom_host::{FrameAmbient, SdfScene};
+use axiom_host::{FrameAmbient, FramePostProcess, SdfScene};
 
 /// One drawn object: its wgpu-ready model-view-projection matrix and its
 /// world (model) matrix (both column-major, 16 floats), its linear RGBA colour,
@@ -202,6 +202,12 @@ pub struct FrameOutcome {
     /// so the offscreen capture and the live present arm light identically from
     /// the app's authored value, instead of each hardcoding a dim default.
     ambient: FrameAmbient,
+    /// The frame's tonemap/colour grade — the exposure/white-balance/contrast/
+    /// saturation post-process every backend applies to its presented pixels.
+    /// Carried on the frame like the ambient (the app's authored render-look) so
+    /// the offscreen capture and the live present arm grade identically from the
+    /// app's authored value; `None` presents untonemapped, exactly as before.
+    postprocess: Option<FramePostProcess>,
     presented: bool,
     recorded: bool,
 }
@@ -234,6 +240,9 @@ impl FrameOutcome {
             // the app's authored value. A frame that never sets ambient renders
             // exactly as before.
             ambient: FrameAmbient::default_hemisphere(),
+            // No grade by default; `with_postprocess` overrides it with the app's
+            // authored grade. A frame that never sets one presents untonemapped.
+            postprocess: None,
             presented,
             recorded,
         }
@@ -255,6 +264,21 @@ impl FrameOutcome {
     /// The frame's hemisphere ambient — the sky/ground fill lighting unlit faces.
     pub const fn ambient(&self) -> FrameAmbient {
         self.ambient
+    }
+
+    /// Set the frame's tonemap/colour grade (the app's authored render-look post
+    /// process). Carried as an `Option` so an ungraded frame threads `None`
+    /// through unchanged.
+    pub(crate) fn with_postprocess(mut self, postprocess: Option<FramePostProcess>) -> Self {
+        self.postprocess = postprocess;
+        self
+    }
+
+    /// The frame's tonemap/colour grade, or `None` when the app authored none (the
+    /// backend then presents untonemapped). Every backend — the offscreen capture
+    /// and the live present arm — applies this to its presented pixels.
+    pub const fn postprocess(&self) -> Option<FramePostProcess> {
+        self.postprocess
     }
 
     /// The frame's skinned draws, in submission order.
@@ -468,6 +492,30 @@ mod tests {
         let lit = base.with_ambient(daylight);
         assert_eq!(lit.ambient(), daylight);
         assert_ne!(lit.ambient(), FrameAmbient::default_hemisphere());
+    }
+
+    #[test]
+    fn postprocess_defaults_to_none_and_with_postprocess_overrides() {
+        let base = FrameOutcome::new(
+            0,
+            0,
+            [0.0; 4],
+            Vec::new(),
+            Vec::new(),
+            [0.0; 16],
+            [0.0; 16],
+            None,
+            false,
+            false,
+        );
+        // A frame that never sets a grade presents untonemapped, so existing apps
+        // render byte-identically.
+        assert_eq!(base.postprocess(), None);
+        // `with_postprocess` overrides it with the app's authored grade, and
+        // threading `None` back through leaves the frame ungraded.
+        let graded = base.clone().with_postprocess(Some(FramePostProcess::cinematic()));
+        assert_eq!(graded.postprocess(), Some(FramePostProcess::cinematic()));
+        assert_eq!(base.with_postprocess(None).postprocess(), None);
     }
 
     #[test]

@@ -105,6 +105,10 @@ impl RunningApp {
         // backends light unlit faces from it (captured before the render closure
         // borrows `self`).
         let ambient = self.ambient;
+        // The app's authored colour grade rides onto the outcome the same way, so
+        // both backends present the same filmic look (captured before the closure
+        // borrows `self`).
+        let postprocess = self.postprocess;
         let rendered = self.render.then(|| {
             let mut frame =
                 self.pipeline
@@ -209,6 +213,7 @@ impl RunningApp {
             )
             .with_skinned_draws(skinned_draws)
             .with_ambient(ambient)
+            .with_postprocess(postprocess)
         });
         rendered.unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))
     }

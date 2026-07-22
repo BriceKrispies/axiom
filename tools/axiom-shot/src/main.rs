@@ -82,9 +82,13 @@ fn main() {
     }
     let outcome = outcome.expect("at least one frame is ticked");
 
-    // No registered slice carries a retro/cinematic post profile today.
+    // No registered slice carries a retro post profile today.
     let retro_32bit: Option<axiom_host::FrameRetro32BitProfile> = None;
-    let postprocess: Option<axiom_host::FramePostProcess> = None;
+    // Honour the app's authored colour grade, exactly as the live present arm
+    // does: an app that authors a `FramePostProcess` (via `set_postprocess`) has
+    // it ride onto the `FrameOutcome`, and the capture grades from it instead of
+    // presenting the flat, washed-out raster. `None` presents untonemapped.
+    let postprocess = outcome.postprocess();
 
     let (pixels, w, h) = render(
         &backend,

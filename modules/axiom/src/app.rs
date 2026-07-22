@@ -9,7 +9,9 @@
 //! platform surface or a wall clock — the platform loop lives in `axiom-windowing`.
 
 use axiom_frame::{FrameApi, FrameBuilder};
-use axiom_host::{FrameAmbient, HostApi, HostLifecycleSignal, HostStepDriver, HostViewport};
+use axiom_host::{
+    FrameAmbient, FramePostProcess, HostApi, HostLifecycleSignal, HostStepDriver, HostViewport,
+};
 use axiom_kernel::{
     BinaryReader, BinaryWriter, DeterministicRng, KernelError, KernelErrorCode, KernelErrorScope,
     KernelResult, Ratio, Reflect, SchemaVersion,
@@ -256,6 +258,11 @@ pub struct RunningApp {
     // carried onto every `FrameOutcome`. Defaults to the engine hemisphere so an
     // app that never sets it renders exactly as before.
     ambient: FrameAmbient,
+    // The frame's tonemap/colour grade (exposure/white-balance/contrast/
+    // saturation), authored by the app and carried onto every `FrameOutcome` so
+    // both the offscreen capture and the live present arm grade identically.
+    // `None` presents untonemapped, so an app that never sets one is unchanged.
+    postprocess: Option<FramePostProcess>,
     light_direction: Vec3,
     // Held in full (not just an id) so base colour, albedo texture, and catalog
     // surface (emissive/roughness/opacity) all reach the render path.
@@ -331,6 +338,7 @@ impl RunningApp {
             render: app.render,
             clear_color: surface.clear_color().to_array(),
             ambient: FrameAmbient::default_hemisphere(),
+            postprocess: None,
             light_direction: authored.light_direction,
             meshes: authored.meshes,
             materials: authored.materials,
@@ -972,6 +980,20 @@ mod tests {
         app.set_ambient(daylight);
         assert_eq!(app.ambient(), daylight);
         assert_eq!(app.tick(1).ambient(), daylight);
+    }
+
+    #[test]
+    fn set_postprocess_flows_onto_the_frame_outcome() {
+        let mut app = three_cube_app().build();
+        // A fresh app authors no grade, so the rendered frame presents untonemapped.
+        assert_eq!(app.postprocess(), None);
+        assert_eq!(app.tick(0).postprocess(), None);
+        // Authoring a grade is reflected on both the app and the rendered frame, so
+        // the offscreen capture and the live present arm grade identically.
+        let grade = FramePostProcess::cinematic();
+        app.set_postprocess(grade);
+        assert_eq!(app.postprocess(), Some(grade));
+        assert_eq!(app.tick(1).postprocess(), Some(grade));
     }
 
     #[test]
