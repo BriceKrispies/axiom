@@ -83,6 +83,8 @@ impl EndZoneScene {
         let turf_dark = app.add_material(Material::lit(color3([0.07, 0.25, 0.06])));
         let white = app.add_material(Material::lit(color3([0.92, 0.93, 0.92])));
         let goalpost = app.add_material(Material::lit(color3([0.95, 0.82, 0.20])));
+        let stands = app.add_material(Material::lit(color3([0.60, 0.61, 0.64])));
+        let crowd = app.add_material(Material::lit(color3([0.56, 0.44, 0.52])));
         let home = magma().palette.slots();
         let away = frostbite().palette.slots();
         let home_zone = app.add_material(Material::lit(color3(home[6])));
@@ -96,6 +98,8 @@ impl EndZoneScene {
             FieldMaterial::AwayEndZone => away_zone,
             FieldMaterial::White => white,
             FieldMaterial::Goalpost => goalpost,
+            FieldMaterial::Stands => stands,
+            FieldMaterial::Crowd => crowd,
         };
 
         // Static field pieces (built once by the generator).

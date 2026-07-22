@@ -29,6 +29,8 @@ pub enum FieldMaterial {
     AwayEndZone,
     White,
     Goalpost,
+    Stands,
+    Crowd,
 }
 
 /// One static piece: a transform over a unit primitive.
@@ -53,6 +55,14 @@ fn plane(x: f32, y: f32, z: f32, sx: f32, sz: f32, material: FieldMaterial) -> F
     FieldPiece {
         transform: Transform::new(Vec3::new(x, y, z), Quat::IDENTITY, Vec3::new(sx, 1.0, sz)),
         mesh: FieldMesh::Plane,
+        material,
+    }
+}
+
+fn slab(center: Vec3, size: Vec3, material: FieldMaterial) -> FieldPiece {
+    FieldPiece {
+        transform: Transform::new(center, Quat::IDENTITY, size),
+        mesh: FieldMesh::Cube,
         material,
     }
 }
@@ -99,6 +109,49 @@ fn goalpost(end_sign: f32, pieces: &mut Vec<FieldPiece>) {
             Vec3::new(0.18, upright_h, 0.18),
             Quat::IDENTITY,
         ));
+    }
+}
+
+/// Number of raked grandstand tiers on each of the four sides.
+const STAND_TIERS: usize = 5;
+
+/// Stadium bowl: five raked grandstand tiers ringing all four sides of the
+/// field, each concrete tier capped by a darker crowd band. Pure boxes — the
+/// honest proxy, within the engine's cube vocabulary, for the packed stadium
+/// the reference shows filling the horizon (a true speckled crowd of thousands
+/// of figures is beyond a static field piece; that ceiling is the architect's).
+fn grandstand(pieces: &mut Vec<FieldPiece>) {
+    for sign in [-1.0f32, 1.0] {
+        let mut tier = 0;
+        while tier < STAND_TIERS {
+            let t = tier as f32;
+            let h = 3.0 + t * 2.2;
+            // Sideline stand (runs along Z at X = ±), stepping up and outward.
+            let x = sign * (38.0 + t * 3.5);
+            pieces.push(slab(
+                Vec3::new(x, h * 0.5, 0.0),
+                Vec3::new(3.5, h, 150.0),
+                FieldMaterial::Stands,
+            ));
+            pieces.push(slab(
+                Vec3::new(x, h + 0.6, 0.0),
+                Vec3::new(3.5, 1.2, 150.0),
+                FieldMaterial::Crowd,
+            ));
+            // End stand (runs along X at Z = ±), closing the bowl.
+            let z = sign * (72.0 + t * 3.5);
+            pieces.push(slab(
+                Vec3::new(0.0, h * 0.5, z),
+                Vec3::new(150.0, h, 3.5),
+                FieldMaterial::Stands,
+            ));
+            pieces.push(slab(
+                Vec3::new(0.0, h + 0.6, z),
+                Vec3::new(150.0, 1.2, 3.5),
+                FieldMaterial::Crowd,
+            ));
+            tier += 1;
+        }
     }
 }
 
@@ -158,6 +211,8 @@ pub fn generate_field() -> FieldGeometry {
 
     goalpost(-1.0, &mut pieces);
     goalpost(1.0, &mut pieces);
+
+    grandstand(&mut pieces);
 
     FieldGeometry {
         pieces,
