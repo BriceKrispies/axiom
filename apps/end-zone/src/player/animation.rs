@@ -120,9 +120,11 @@ pub fn override_pose(anim: AnimState, ticks: u32) -> JointPose {
         }
         AnimState::Block => {
             crouch(&mut out, 0.6);
-            // Arms punched forward at pad height.
-            out.joints[L_UPPER_ARM] = qx(-1.5);
-            out.joints[R_UPPER_ARM] = qx(-1.5);
+            // Arms punched forward at pad height AND spread wide to the sides:
+            // an engaged lineman hand-fights with his hands apart, controlling
+            // the defender — a broad wingspan wall, not two poles poking ahead.
+            out.joints[L_UPPER_ARM] = Quat::from_euler_xyz(-1.4, 0.0, -0.6);
+            out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(-1.4, 0.0, 0.6);
             out.joints[L_FOREARM] = qx(-0.35);
             out.joints[R_FOREARM] = qx(-0.35);
             out.root_pitch = 0.16;
