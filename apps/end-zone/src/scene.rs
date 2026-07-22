@@ -83,8 +83,15 @@ impl EndZoneScene {
         let turf_dark = app.add_material(Material::lit(color3([0.07, 0.25, 0.06])));
         let white = app.add_material(Material::lit(color3([0.92, 0.93, 0.92])));
         let goalpost = app.add_material(Material::lit(color3([0.95, 0.82, 0.20])));
-        let stands = app.add_material(Material::lit(color3([0.60, 0.61, 0.64])));
-        let crowd = app.add_material(Material::lit(color3([0.56, 0.44, 0.52])));
+        // The bowl in the reference is PACKED with fans, not bare concrete: its
+        // dominant surface is a busy team-color speckle, not gray structure. A
+        // flat Lambert band can't speckle, but the honest per-band proxy is a
+        // mid-value CROWD average, not concrete. The two alternating tier bands
+        // carry different warm/cool crowd tones (home reds/skin vs away blues +
+        // shaded upper rows), so the bowl reads as rows of seated fans stepping
+        // up rather than a slab of gray — matching the reference's filled stands.
+        let stands = app.add_material(Material::lit(color3([0.34, 0.24, 0.22])));
+        let crowd = app.add_material(Material::lit(color3([0.24, 0.26, 0.33])));
         let home = magma().palette.slots();
         let away = frostbite().palette.slots();
         let home_zone = app.add_material(Material::lit(color3(home[6])));
