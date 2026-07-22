@@ -9,8 +9,8 @@
 
 use crate::ai::engagement::EngagementLink;
 use crate::ai::{
-    compile_assignments, AiMemory, AssignmentKind, Perception, PlayerIntent, ResolvedAssignment,
-    RoleState,
+    compile_assignments, AiMemory, AssignmentKind, DefensiveOverseer, Perception, PlayerIntent,
+    ResolvedAssignment, RoleState,
 };
 use crate::collision_rig::CollisionRig;
 use crate::config::{EndZoneConfig, DT, PLAYER_COUNT};
@@ -77,6 +77,8 @@ pub struct SimState {
     /// Per-blocker line engagements (indexed by blocker id): written by the
     /// contact stage, read by the AI the next tick.
     pub(crate) engagements: Vec<EngagementLink>,
+    /// The opponent defense's adaptive coordinator (team-level directives).
+    pub(crate) overseer: DefensiveOverseer,
     pub end_reason: Option<PlayEndReason>,
     /// The user's movement stick for this tick, offense-relative
     /// (`x` = offense right, `y` = downfield), each in `-1..=1`. Part of the
@@ -151,6 +153,7 @@ impl SimState {
             quarterback,
             ai_memory: AiMemory::new(),
             engagements: vec![None; PLAYER_COUNT],
+            overseer: DefensiveOverseer::new(),
             end_reason: None,
             user_stick: axiom::prelude::Vec2::ZERO,
             perception: Perception::new(),
@@ -231,6 +234,7 @@ impl SimState {
         self.intents = vec![PlayerIntent::Hold; PLAYER_COUNT];
         self.ai_memory.reset();
         self.engagements = vec![None; PLAYER_COUNT];
+        self.overseer.reset_play(self.tick);
         let spawn = self
             .frame
             .to_world(OffensePoint::new(0.0, 0.0))
@@ -259,6 +263,9 @@ impl SimState {
         }
         self.phase = PlayPhase::Ended;
         self.end_reason = Some(reason);
+        // Crossing the goal is a score — the possession boundary at which the
+        // overseer's tendency memory resets.
+        (reason == PlayEndReason::BrokeFree).then(|| self.overseer.reset_possession());
         self.events.emit(SimEvent::PlayEnded { reason });
     }
 }

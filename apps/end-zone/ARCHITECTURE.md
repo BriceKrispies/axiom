@@ -212,6 +212,33 @@ one direction (`src/ai/`):
    under acceleration/turn-rate limits with teammate-only separation and boundary
    clamping).
 
+### Defensive overseer
+
+Above the individual defenders sits a **`DefensiveOverseer`** (`ai/overseer.rs`) —
+an adaptive coordinator for the opponent team. It watches the whole play through
+the shared perception + an aggregated **`DefensiveRead`** (`ai/field_read.rs`:
+pocket integrity, pressure, rollout, most-dangerous receiver by observable
+separation, deep/crossing/sideline threats, scoring danger), runs at a
+deterministic **cadence** (every 6 ticks, or immediately on a ball-state change /
+touchdown emergency — never per player), scores candidate **`TacticalMode`s**
+(`ai/tactics.rs`: base / pressure / contain-qb / qb-run / protect deep-middle-
+outside / bracket / catch-point / swarm / emergency), and — under **commitment
+locking** (a mode holds for its window unless the ball state forces a change or a
+touchdown emergency appears) — issues ONE compact **`DefensiveDirective`**
+(`ai/directive.rs`): a mode, coverage/rush emphasis, per-defender assignment
+**overrides** (spy / blitz / bracket / contain, chosen by `ai/personnel.rs`), a
+risk tolerance, a confidence, and the **exposed region** the adjustment gives up.
+
+The overseer **never** sets a position, velocity, or steering vector. The
+directive rides in `PlayPerception`; the geometric responsibilities come from
+`coordination` as before; each defender's own arbitration reads its override +
+the emphasis (`ai/directed.rs`) and converts them to movement — so every
+adjustment is a real, exploitable tradeoff (pressure gives up the underneath
+middle; a bracket single-covers a backside receiver; contain slows the rush).
+Lightweight **possession memory** (scramble/hold/deep-drop/targeting tendencies)
+nudges confidence and resets at the possession boundary (a touchdown). The one
+persistent field is `overseer` on `SimState`.
+
 Defenders still read a DELAYED perception ring (per-archetype reaction delay) for
 the opponent geometry they chase, so the *shared situation* makes the team
 coherent while individual reaction latency is preserved. **Line engagements**

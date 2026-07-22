@@ -18,7 +18,11 @@ impl SimState {
     /// live user stick overwrite the ball-holder's intent.
     pub(crate) fn decide_intents(&mut self) {
         let situation = self.update_ai_situation();
-        let perception = self.build_play_perception(situation);
+        let mut perception = self.build_play_perception(situation);
+        // The overseer watches the whole play and issues one team-level directive
+        // the individual defenders execute; it never steers a player.
+        let directive = self.overseer.update(self.tick, &perception, &self.players);
+        perception.directive = directive;
         self.ai_memory.responsibilities = perception.responsibilities;
         let end_zone_target = self
             .frame

@@ -6,7 +6,9 @@
 use axiom::prelude::Vec3;
 
 use crate::ai::engagement::{EngagementState, RushLane};
-use crate::ai::{PlayerIntent, Responsibility, RoleState};
+use crate::ai::{
+    AssignmentOverride, DefensiveDirective, PlayerIntent, Responsibility, RoleState, TacticalMode,
+};
 use crate::drive::DriveState;
 use crate::events::PlayEndReason;
 use crate::football::{BallSim, BallState, BallSituation, FlightInfo};
@@ -41,6 +43,8 @@ pub struct PlayerView {
     pub engagement_state: Option<EngagementState>,
     pub engagement_advantage: f32,
     pub rush_lane: Option<RushLane>,
+    /// The overseer's assignment override on this defender (AI debug view).
+    pub def_override: AssignmentOverride,
 }
 
 /// The immutable snapshot. Same snapshot + same effect state → same scene
@@ -63,6 +67,13 @@ pub struct PresentationSnapshot {
     pub fault: Option<&'static str>,
     /// The football situation the AI derived this tick (AI debug view).
     pub ball_situation: BallSituation,
+    /// The overseer's active directive (AI debug view).
+    pub directive: DefensiveDirective,
+    /// The overseer's previous mode + last transition reason (AI debug view).
+    pub overseer_prev_mode: TacticalMode,
+    pub overseer_transition_reason: &'static str,
+    /// The top rejected tactical alternative + its score (AI debug view).
+    pub overseer_rejected: (TacticalMode, f32),
     /// The authoritative drive state, when this is a real score-attack run
     /// (the ambient menu showcase leaves it `None`).
     pub drive: Option<DriveState>,
@@ -112,8 +123,10 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
             engagement_state: sim.engagement(p.id).map(|e| e.state),
             engagement_advantage: sim.engagement(p.id).map(|e| e.advantage).unwrap_or(0.0),
             rush_lane: sim.engagement(p.id).map(|e| e.lane),
+            def_override: sim.directive().override_for(p.id),
         })
         .collect();
+    let (overseer_prev_mode, overseer_transition_reason) = sim.overseer_transition();
     PresentationSnapshot {
         tick: sim.tick,
         seed: sim.seed,
@@ -132,6 +145,10 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
         gravity: sim.tuning.gravity,
         fault: sim.fault(),
         ball_situation: sim.ball_situation(),
+        directive: sim.directive(),
+        overseer_prev_mode,
+        overseer_transition_reason,
+        overseer_rejected: sim.overseer_rejected(),
         // The run layer fills these in for a real drive; the raw sim capture
         // is drive-agnostic.
         drive: None,

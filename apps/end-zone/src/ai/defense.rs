@@ -49,6 +49,9 @@ pub fn candidates(
         airborne(resp, ctx, seen, out);
     }
     runner(player, resp, ctx, seen, out);
+    // The overseer's per-player override (spy / blitz / bracket / contain) is a
+    // coverage-band candidate the arbiter weighs alongside the base assignment.
+    super::directed::override_candidates(player, ctx.per.directive.override_for(player.id), ctx, seen, out);
     base(player, assignment, seen, ctx, out);
 }
 
@@ -171,14 +174,24 @@ fn base(
             ));
         }
         AssignmentKind::ZoneCover { center, .. } => {
-            out.push(move_to(center, Priority::Assignment, 0.4, "zone"));
+            // The overseer's coverage emphasis shades and deepens the zone.
+            let d = ctx.per.directive;
+            let biased = Vec3::new(
+                center.x + d.shade_side * 3.0,
+                0.0,
+                center.z + d.coverage_depth * ctx.per.drive_sign,
+            );
+            out.push(move_to(biased, Priority::Assignment, 0.4, "zone"));
         }
         AssignmentKind::QuarterbackRush { quarterback } => {
             let qbp = seen.positions[quarterback.index()];
             let qbv = seen.velocities[quarterback.index()];
             let lead = steering::pursuit_lead_seconds(flat_dist(player.pos, qbp), &player.archetype);
             let free = engagement::rusher_is_free(ctx.engagements, player.id);
-            let urgency = if free { 0.8 } else { 0.55 };
+            // The overseer's rush emphasis raises (pressure) or lowers (contain)
+            // how hard the base rushers come — but never changes their speed.
+            let base_urgency = if free { 0.8 } else { 0.55 };
+            let urgency = (base_urgency + ctx.per.directive.rush_emphasis * 0.25).clamp(0.2, 0.95);
             let reason = if free { "pressure" } else { "rush" };
             pursue_or_tackle(
                 player,
@@ -226,7 +239,7 @@ fn loose_ball(player: &PlayerSim, ctx: &BrainCtx<'_>, out: &mut Vec<ScoredAction
 
 /// Close on a carrier: tackle when inside range of him, else pursue toward the
 /// given (leverage-biased) point.
-fn pursue_or_tackle(
+pub(crate) fn pursue_or_tackle(
     player: &PlayerSim,
     target: PlayerId,
     runner_pos: Vec3,
@@ -279,6 +292,6 @@ fn flat(v: Vec3) -> Vec3 {
     Vec3::new(v.x, 0.0, v.z)
 }
 
-fn flat_dist(a: Vec3, b: Vec3) -> f32 {
+pub(crate) fn flat_dist(a: Vec3, b: Vec3) -> f32 {
     flat(a.subtract(b)).length()
 }

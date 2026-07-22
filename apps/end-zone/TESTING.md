@@ -20,6 +20,15 @@ driven headlessly.
   the shared loose-ball response; and the line engagement — an offensive lineman
   squaring and anchoring, a block that doesn't oscillate, the rush advantage
   building, the eventual shed/sack, and a strong blocker delaying it.
+- `tests/ai_overseer.rs`, `tests/ai_overseer_sim.rs` — the defensive overseer:
+  the tactical scoring reads football evidence (base when nothing's clear,
+  pressure on a held stable pocket, suppressed pressure into a deep-TD danger,
+  deep/middle/outside/contain/bracket cues, the bracket's personnel cost), the
+  directive carries no movement command (defenders never teleport), decisions
+  replay identically, possession memory resets at the boundary; and through the
+  real sim — throw→catch-point→swarm, rollout→contain→run-response, the run
+  response's distinct pursuit roles, the emergency override at the goal, mode
+  hysteresis, the readable exposed-region tradeoff, and a stable bracket target.
 - `tests/controls.rs` — a zero stick reproduces the scripted showcase
   bit-for-bit; user steering only overrides the ball holder's AI intent.
 

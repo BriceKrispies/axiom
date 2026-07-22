@@ -17,17 +17,25 @@ pub mod brain;
 pub mod commitment;
 pub mod coordination;
 pub mod defense;
+pub mod directed;
+pub mod directive;
 pub mod engagement;
+pub mod field_read;
 pub mod offense;
+pub mod overseer;
 pub mod perception;
+pub mod personnel;
 pub mod protection;
 pub mod stage;
 pub mod steering;
+pub mod tactics;
 
 pub use action::{Priority, ScoredAction};
 pub use assignment::{compile_assignments, AssignmentKind, ResolvedAssignment};
 pub use brain::{decide, BrainCtx, Perception, PerceptionFrame, RoleState};
 pub use commitment::{AiMemory, Commitment};
+pub use directive::{AssignmentOverride, DefensiveDirective, TacticalMode};
+pub use overseer::DefensiveOverseer;
 pub use perception::{PlayPerception, PocketRegion, Responsibility};
 
 use axiom::prelude::Vec3;

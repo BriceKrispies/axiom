@@ -19,7 +19,9 @@ use crate::state::SimState;
 
 use super::brain::RoleState;
 use super::coordination;
+use super::directive::{DefensiveDirective, TacticalMode};
 use super::engagement::Engagement;
+use super::overseer::PossessionMemory;
 
 /// The protected pocket: the region behind the line of scrimmage the blockers
 /// keep the rush out of, and the box the quarterback is "in" until he commits to
@@ -125,6 +127,9 @@ pub struct PlayPerception {
     pub offense_team: TeamId,
     /// Per-player coordinated responsibility, indexed by [`PlayerId`].
     pub responsibilities: [Responsibility; PLAYER_COUNT],
+    /// The overseer's team-level directive for this tick (set by the AI stage
+    /// after the base perception is built).
+    pub directive: DefensiveDirective,
 }
 
 impl PlayPerception {
@@ -226,6 +231,7 @@ impl SimState {
             drive_sign: self.frame.direction.sign(),
             offense_team: self.play.possession,
             responsibilities: [Responsibility::None; PLAYER_COUNT],
+            directive: DefensiveDirective::base(self.tick),
         };
         coordination::assign_responsibilities(&mut per, &self.players, &self.tuning);
         per
@@ -255,6 +261,32 @@ impl SimState {
     /// A blocker's current line engagement, if he is engaged.
     pub fn engagement(&self, blocker: PlayerId) -> Option<Engagement> {
         self.engagements[blocker.index()]
+    }
+
+    /// The overseer's active defensive directive (debug overlay + tests).
+    pub fn directive(&self) -> DefensiveDirective {
+        self.overseer.directive
+    }
+
+    /// The overseer's possession-level tendency memory (debug + tests).
+    pub fn overseer_memory(&self) -> PossessionMemory {
+        self.overseer.memory
+    }
+
+    /// The overseer's previous mode and the reason it last transitioned.
+    pub fn overseer_transition(&self) -> (TacticalMode, &'static str) {
+        (self.overseer.prev_mode(), self.overseer.transition_reason())
+    }
+
+    /// The top rejected tactical alternative and its score (debug).
+    pub fn overseer_rejected(&self) -> (TacticalMode, f32) {
+        self.overseer.rejected()
+    }
+
+    /// Reset possession-level overseer memory at a possession boundary (called
+    /// by the drive layer on a touchdown / change of possession).
+    pub fn note_new_possession(&mut self) {
+        self.overseer.reset_possession();
     }
 }
 

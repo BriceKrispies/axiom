@@ -196,6 +196,7 @@ impl AnimLab {
             engagement_state: None,
             engagement_advantage: 0.0,
             rush_lane: None,
+            def_override: crate::ai::AssignmentOverride::None,
         };
         PresentationSnapshot {
             tick: self.tick,
@@ -214,6 +215,10 @@ impl AnimLab {
             gravity: 0.0,
             fault: None,
             ball_situation: crate::football::BallSituation::PreSnap,
+            directive: crate::ai::DefensiveDirective::base(0),
+            overseer_prev_mode: crate::ai::TacticalMode::Base,
+            overseer_transition_reason: "lab",
+            overseer_rejected: (crate::ai::TacticalMode::Base, 0.0),
             drive: None,
             throwable: Vec::new(),
             to_gain_z: None,

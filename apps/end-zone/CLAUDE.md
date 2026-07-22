@@ -58,6 +58,13 @@ input (keys → DeviceFrame → InputState)
   `src/ai/{action,commitment}.rs` (arbitration + commitment locking),
   `src/ai/engagement.rs` (line contest), `src/player/controller.rs` (execution —
   the *only* writer of player movement). See `ARCHITECTURE.md` § AI model.
+- **Team-level defensive strategy** (the adaptive coordinator) →
+  `src/ai/overseer.rs` (the `DefensiveOverseer`: cadence + hysteresis),
+  `src/ai/field_read.rs` (the whole-play read), `src/ai/tactics.rs` (mode
+  scoring + plans), `src/ai/directive.rs` (the `DefensiveDirective` vocabulary),
+  `src/ai/personnel.rs` (which defender fills each override), `src/ai/directed.rs`
+  (how a defender executes a spy/blitz/bracket/contain override). The overseer
+  issues intents, never movement. See `ARCHITECTURE.md` § Defensive overseer.
 - **Ball flight / catch / tackle / fall** → `src/football/*` (state machine +
   flight through real physics), `src/player/contact.rs` (tackle/block/fall).
 - **Running / walking / foot-plant animation (skating)** →
