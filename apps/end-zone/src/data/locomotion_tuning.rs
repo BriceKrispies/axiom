@@ -56,11 +56,13 @@ pub struct LocomotionTuning {
     pub startup_ticks: f32,
     /// Ticks the stopping settle takes.
     pub stopping_ticks: f32,
-    /// Half the lateral PLANT width (foot offset from centerline), yd. Kept
-    /// INSIDE the model's hip half-width so the legs converge toward the midline
-    /// the way a runner's do; a plant wider than the hips reads bow-legged from
-    /// behind. Only the plant is laterally free — the tucked mid-swing foot is
-    /// always held on its own hip's line (see `locomotion::foot`).
+    /// Half the lateral PLANT width (foot offset from centerline), yd. Set to
+    /// the model's hip half-width so each foot plants directly UNDER its own hip:
+    /// the planar two-bone knee tracks straight down its hip line instead of
+    /// tilting inward. Converging the plant INSIDE the hips (a smaller value)
+    /// tips the stance knee visibly inward (knock-kneed); a plant WIDER than the
+    /// hips reads bow-legged. Only the plant is laterally free — the tucked
+    /// mid-swing foot is always held on its own hip's line (see `locomotion::foot`).
     pub stance_half_width: f32,
     /// Extra PLANT widening at full turn intensity, yd — a wider base through a
     /// cut. Does not widen the swing.
@@ -129,7 +131,7 @@ impl Default for LocomotionTuning {
             turning_stride_scale: 0.72,
             startup_ticks: 16.0,
             stopping_ticks: 12.0,
-            stance_half_width: 0.09,
+            stance_half_width: 0.14,
             turn_widen: 0.09,
             pelvis_yaw: 0.12,
             torso_lean_per_accel: 0.02,
