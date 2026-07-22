@@ -160,8 +160,8 @@ impl Default for CameraTuning {
             impact_impulse_scale: 0.55,
             shake_scale: 1.0,
             impact_recovery_ticks: 42,
-            formation_distance: 11.0,
-            formation_height: 4.0,
+            formation_distance: 7.0,
+            formation_height: 2.8,
             catch_blend_ticks: 18,
         }
     }
