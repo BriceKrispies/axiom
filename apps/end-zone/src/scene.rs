@@ -79,8 +79,12 @@ impl EndZoneScene {
         // Mowing bands: a saturated grass green with a wide light/dark delta so
         // the field's dominant macro-texture — the alternating mow stripes —
         // reads under flat Lambert, instead of washing to a near-uniform sage.
-        let turf_light = app.add_material(Material::lit(color3([0.13, 0.40, 0.09])));
-        let turf_dark = app.add_material(Material::lit(color3([0.07, 0.25, 0.06])));
+        // Re-graded toward the reference's deep, vivid grass: red and blue pulled
+        // down and green lifted (a pure saturation push away from luma, luma held
+        // so the field is richer, not darker) — the earlier [0.13,0.40,0.09] band
+        // carried too much red/blue and read pale sage under the 1.32 sun + fill.
+        let turf_light = app.add_material(Material::lit(color3([0.09, 0.45, 0.06])));
+        let turf_dark = app.add_material(Material::lit(color3([0.045, 0.27, 0.04])));
         let white = app.add_material(Material::lit(color3([0.92, 0.93, 0.92])));
         let goalpost = app.add_material(Material::lit(color3([0.95, 0.82, 0.20])));
         // The bowl in the reference is PACKED with fans, not bare concrete: its
