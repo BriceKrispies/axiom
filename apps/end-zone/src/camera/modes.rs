@@ -63,18 +63,18 @@ pub fn desired_pose(
     match mode {
         CameraMode::FormationWide => {
             let anchor = flat(snapshot.ball.pos);
+            // A low, head-on broadcast shot directly behind the offense: the eye
+            // sits on the field's long axis (no side offset), so the goalpost
+            // stays dead-centred, and low enough that the huddle reads large in
+            // the foreground while the aim looks straight downfield.
             CameraPose {
                 eye: anchor
                     .add(back.mul_scalar(tuning.formation_distance))
-                    .add(Vec3::new(
-                        tuning.formation_distance * 0.55,
-                        tuning.formation_height,
-                        0.0,
-                    )),
+                    .add(Vec3::new(0.0, tuning.formation_height, 0.0)),
                 target: anchor
-                    .add(back.mul_scalar(-4.0))
-                    .add(Vec3::new(0.0, 1.2, 0.0)),
-                fov_degrees: tuning.base_fov_degrees + 6.0,
+                    .add(back.mul_scalar(-6.0))
+                    .add(Vec3::new(0.0, 1.6, 0.0)),
+                fov_degrees: tuning.base_fov_degrees + 2.0,
             }
         }
         CameraMode::QuarterbackFollow => {
