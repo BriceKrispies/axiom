@@ -99,6 +99,12 @@ const ironbound = (seed: number, tier: Tier): FigurePartDefinition[] => {
   }
   // Off hand shield for durable silhouettes.
   parts.push(P("shield", "torso", "shield", "plate", "accent", vec3(-w * 0.78, -0.05, 0.12), vec3(0.36, 0.56, 0.1), { rot: vec3(0, 0.2, 0) }));
+  // A draped cloth cape/tabard hanging from the left shoulder down the back — the
+  // single most universal element of the reference Ironbound knights (every tier
+  // wears one). Modeled as a broad, slightly-flared plate behind the shoulder so it
+  // reads as a hanging cloak, distinct from the pole `banner` some figures carry. It
+  // sits BEHIND the front shield (z < 0) so the two large silhouette masses don't fuse.
+  parts.push(P("cape", "torso", "banner", "plate", "accent", vec3(-w * 0.34, 0.2, -0.16), vec3(0.5, 1.06, 0.04), { rot: vec3(0.13, 0, 0.05) }));
   // Segmented tassets guarding the hips (a second waist layer under the fauld).
   parts.push(P("tasset", "base", "thigh", "plate", "metal", vec3(w * 0.52, 0.5, 0.12), vec3(0.24, 0.32, 0.14), { tierMin: 2, rot: vec3(0.12, 0, 0), mirror: { axis: "x", idSuffix: "_r" } }));
   // A lower pauldron lame that overlaps the cap, added as the figure gets fancier.

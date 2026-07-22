@@ -459,3 +459,139 @@ lighting_and_shadow = 1
 contrast_and_exposure = 1
 scale_and_proportion = 2
 artifact_level = 3
+
+[[iteration]]
+iteration = 5
+attacked_axis = "subject_fidelity"
+changed_files = [
+  "visual_targets/arena-forge-ironbound/scorecard.champion.toml",
+  "visual_targets/arena-forge-ironbound/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic lens ROUND-6 re-score of the PROMOTED pass-5 champion. Since round 5 the
+champion.png was replaced by the pass-5 render at base fbf937c1 ("arena-forge:
+pass-5 Ironbound convergence (re-tuned for the new shading)"). That promotion
+commit bundled the new PNG + six app-tier lens edits (bodyplans.ts,
+languages/index.ts, scene/arena-scene.ts, figure-lab.ts) BUT carried the ROUND-5
+scorecard/ledger forward UNCHANGED - the scorecard it shipped still described (and
+scored) the ROUND-5 RE-SEED render at base 6eb42738, not the pass-5 image it now
+sits beside. So - exactly as in rounds 2/3/4/5 - the record no longer matched the
+image it claims to score. This entry re-scores the promoted pass-5 render FROM
+SCRATCH (the prior 1.12 was NOT assumed) so the record matches the image again.
+
+Substrate: arena-forge "Figure Lab / Ironbound gallery" is a PURE-TYPESCRIPT app
+on @axiom/web-engine, not the Rust engine. The pass-5 lens diffs are bounded
+parameter/geometry edits in the app's own pure-TS figure/render code (a lighting
+rig, a metal roughness value, an accent color, articulated box arms, a leg
+stance, a gallery FIT ratio) using existing @axiom/web-engine primitives.
+
+Re-scored the promoted pass-5 render harshly against IDENTITY (bar =
+"indistinguishable from reference.png"). Direct re-seed-vs-pass-5 comparison shows
+GENUINE, real movement - a MATERIAL + SILHOUETTE tune: the steel reads brighter/
+satin under a punchier key-dominant rig (1.85 -> 2.45, fills cut) and a tighter
+metal roughness (0.22 -> 0.16); the accent trim is a warmer burnt bronze; both
+arms now terminate in a fist (fixing the handless mirrored-left-arm bug - a real
+artifact fix); and the shoulder-wide planted stance splits the previously fused
+leg-pillar into two legs. This is real convergence, NOT number-gaming.
+
+BUT none of it crosses a full identity point. The render STILL unmistakably reads
+as a STACK OF SHADED BOXES on a dark field: no great-helm form, no segmented/
+riveted plate, no clearly-read plate layers, no glowing eyes, no draped torn
+cloth, no warm directional RIM light, no dramatic painted chiaroscuro, mustard-
+not-olive capes, no shields/drills/banners, no plinth stonework. The pass-5 work
+is surface polish + box-recomposition ON the boxes, not an identity crossing.
+
+Calibration verdict: scores are HONEST at the round-5 values. I EXPLICITLY weighed
+1->2 bumps on the four material/silhouette-adjacent axes the pass-5 work most
+touches and HELD all four per take-the-lower:
+ - armor_plating_detail: brighter satin steel + tighter roughness read as forged
+   metal, but the geometric plating identity (segmented/riveted/layered plates,
+   articulated plate limbs) is still absent - a satin-metal box is not modeled
+   plate. Held at 1.
+ - silhouette_readability: two-fisted arms + wider stance broaden the outline, but
+   it still reads as a generic blocky humanoid with the per-unit differentiators
+   flattened away. Held at 1.
+ - lighting_and_shadow: the key-dominant rig + brighter specular shape the plates
+   more, but the reference's defining lit-stage identity (warm directional rim,
+   glowing visor eyes, per-tile vignette) is still entirely absent - a punchier
+   neutral key on a box is a material/lighting property, not the lit-stage
+   identity. Held at 1.
+ - contrast_and_exposure: cut fills + raised key widen the tonal range, but the
+   frame still reads dark/modestly-shaded, not the reference's punchy painted
+   chiaroscuro with warm highlights raked across every plate. Held at 1.
+No inflation found; the twelve numbers are UNCHANGED. Only the scorecard's
+descriptive prose/header were updated from "re-seed / ROUND 5" to "pass-5 /
+ROUND 6" so the record matches the image it now scores. No non-attacked axis
+regressed >=2 (the brighter specular could have blown highlights or the FIT shrink
+could have broken the shell; neither happened - figures stay clean and readable,
+no reject owed).
+
+Right-axis check: lowest_axis = 1 (eight-way tie: subject_fidelity,
+silhouette_readability, armor_plating_detail, helmet_and_head,
+weapons_and_attachments, cape_and_cloth, lighting_and_shadow,
+contrast_and_exposure). The fixed axis order breaks the tie to subject_fidelity -
+still the correct next attack.
+
+MISSED-DIRECTION RE-FLAG (not a regression): pass-5's art-director FIT 0.86 ->
+0.70 SHRANK the figures further. Round 3 already flagged the shrink as the wrong
+direction for composition (the reference figures FILL ~75-85% of their cells; the
+champion units now sit smaller with more black margin and no plinth). Pass-5
+pushed it the OPPOSITE way AGAIN. It does NOT drop composition >=2 (the grid/
+header/labels/selected-tile shell still matches strongly), so composition HOLDS at
+2 and this is not a reject - but the direction is re-flagged: the target is a
+filled hero portrait, not a further-shrunken centered figurine.
+
+PLATEAU + STALLED-ESCAPE-ROUTE (the load-bearing call this round): final_score has
+now held at 1.12 for SIX straight rounds (seed, pass-1, pass-2, pass-3, re-seed,
+pass-5). subject_fidelity has now absorbed a FOURTH bounded box-geometry attempt
+(round-1 helm brow, round-2 legs+boots, round-3 chest-emblem+side-arms, pass-5
+articulated two-fisted arms) plus the re-seed's material enrichment, and STILL
+reads 1. The abstraction gate for subject_fidelity has been OPEN since round 4
+(>=3 failed bounded attempts + genuine box-vocabulary inexpressibility of plate-
+knight form). Pass-5 spent its subject_fidelity budget on ANOTHER bounded box edit
+(more boxes for arms) rather than building the justified real figure-MESH/plate
+primitive - so the plateau persists and the escape route identified two rounds ago
+is STILL not taken. That is not a gate violation (nudging boxes stays permitted)
+and not number-gaming (every axis held honestly), but it is a stalled-campaign
+signal: the road off 1.12 is a real plate/mesh geometry abstraction, not a fifth
+box nudge.
+
+Abstraction gate: HONORED; NO record owed this round (abstraction_introduced =
+false), and I considered this carefully as the brief asked. Pass-5's modeler
+change ("articulated arms: upper arm + beveled forearm + gauntlet fist, mirrored")
+is box/geometry COMPOSITION using existing @axiom/web-engine primitives (more
+boxes + a bevel + a mirror bug-fix) - NOT a genuinely new figure-mesh/plate
+primitive; the rigger stance, lighting rig, roughness, colorist trim and art-
+director FIT are all bounded parameter edits. No new engine primitive/field/shader
+was BUILT, so no abstractions/NNNN.toml is owed. A record IS owed by the FUTURE
+pass that finally BUILDS a genuine new figure-mesh/plate primitive to move
+subject_fidelity off 1 (inexpressible = true, failed_attempts = the four box-
+geometry subject_fidelity attempts above, plus the smallest-API note). Backfilling
+one now, for a primitive that still does not exist, would be a ceremonial/
+fabricated record - exactly the dishonesty this lens guards against.
+
+Parity: none claimed. Commit messages and records are clean of
+"done/matched/parity" language (the commit's "fixes the handless mirrored-left-arm
+bug" is a bug-fix reference, not a parity claim). final_score holds at 1.12; the
+road off the plateau is still explicitly structural - a real figure-mesh/plate
+geometry abstraction on subject_fidelity, not another material-and-box pass.
+"""
+next_attacked_axis = "subject_fidelity"
+abstraction_introduced = false
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+armor_plating_detail = 1
+helmet_and_head = 1
+weapons_and_attachments = 1
+cape_and_cloth = 1
+color_palette = 2
+lighting_and_shadow = 1
+contrast_and_exposure = 1
+scale_and_proportion = 2
+artifact_level = 3

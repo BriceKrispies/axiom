@@ -45,10 +45,10 @@ export const buildGalleryStage = (): void => {
   // an even mid-grey. Cool fill from the right + warm forge rim from the front still
   // keep a tumbling figure readable from every angle — they just no longer out-sum
   // the key.
-  addLight({ kind: "directional", direction: vec3(-0.4, -0.75, -0.52), color: [1, 0.96, 0.88, 1], intensity: 2.45 });
-  addLight({ kind: "directional", direction: vec3(0.65, -0.3, 0.5), color: [0.6, 0.72, 0.98, 1], intensity: 0.5 });
-  addLight({ kind: "directional", direction: vec3(0, 0.55, 1), color: [1, 0.62, 0.34, 1], intensity: 0.42 });
-  addLight({ kind: "directional", direction: vec3(0, -1, 0.15), color: [0.75, 0.7, 0.8, 1], intensity: 0.22 });
+  addLight({ kind: "directional", direction: vec3(-0.4, -0.75, -0.52), color: [1, 0.96, 0.88, 1], intensity: 2.55 });
+  addLight({ kind: "directional", direction: vec3(0.65, -0.3, 0.5), color: [0.6, 0.72, 0.98, 1], intensity: 0.26 });
+  addLight({ kind: "directional", direction: vec3(0, 0.55, 1), color: [1, 0.62, 0.34, 1], intensity: 0.22 });
+  addLight({ kind: "directional", direction: vec3(0, -1, 0.15), color: [0.75, 0.7, 0.8, 1], intensity: 0.1 });
 };
 
 /** Build the static arena (floor + lights + camera + clear color). Idempotent per

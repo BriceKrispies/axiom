@@ -43,6 +43,12 @@ const SPIN_PER_TICK = 0.004;
  * as a roomy portrait rather than packing it edge-to-edge and cropping the
  * feet/banner against the cell rim. */
 const FIT = 0.7;
+/** Fraction of a cell left as floor below a figure's feet. The reference stands
+ * every miniature ON the cell floor (a "figures on a shelf" read), spending the
+ * spare room as headroom above the helmet — rather than bbox-centring the figure
+ * so it floats mid-cell with a dead band beneath the feet. Grounding to a shared
+ * baseline also lines the whole row's feet up, however tall each figure is. */
+const GROUND_MARGIN = 0.08;
 const Y_AXIS: Vec3 = vec3(0, 1, 0);
 
 export class FigureLabScreen implements Screen {
@@ -172,7 +178,13 @@ export class FigureLabScreen implements Screen {
       // vertical axis through its bounding-box CENTRE, so it spins in place and
       // stays centred in the icon at every angle.
       const s = (cell.size * k * FIT) / fig.height;
-      const centre = this.toWorld(area.x + cell.x + cell.size / 2, top + cell.size / 2);
+      // Ground the feet to a shared baseline near the cell floor (the reference
+      // stands each miniature on the cell floor with the spare room as headroom),
+      // then place the bbox centre s·height/2 above it. Y-spin preserves the
+      // vertical axis, so this pivots in place without lifting the figure off the
+      // baseline at any angle.
+      const feet = this.toWorld(area.x + cell.x + cell.size / 2, top + cell.size * (1 - GROUND_MARGIN));
+      const centre = vec3(feet.x, feet.y + (fig.height * s) / 2, feet.z);
       const root: RootFrame = { position: sub(centre, rotateVec(spin, vec3(0, fig.midY * s, 0))), rotation: spin, scale: s };
       // The shared subtle idle (breathing / weapon-ready stance) plays under the
       // turntable spin — the same animator the gameplay arena drives.
