@@ -335,6 +335,9 @@ fn event_line(ev: &SimEvent, snap: &PresentationSnapshot) -> Option<String> {
         SimEvent::PassBrokenUp { defender, .. } => {
             format!("PASS BROKEN UP by {}", who(snap, *defender))
         }
+        SimEvent::Intercepted { defender, .. } => {
+            format!("INTERCEPTED by {}", who(snap, *defender))
+        }
         SimEvent::BallLoose { .. } => "ball loose".into(),
         SimEvent::BallGrounded { .. } => "ball grounded".into(),
         SimEvent::BlockEngaged { blocker, defender } => {
@@ -360,6 +363,7 @@ fn end_reason(reason: PlayEndReason) -> &'static str {
         PlayEndReason::Incomplete => "incomplete",
         PlayEndReason::OutOfBounds => "out of bounds",
         PlayEndReason::BrokeFree => "broke free",
+        PlayEndReason::Intercepted => "intercepted",
     }
 }
 

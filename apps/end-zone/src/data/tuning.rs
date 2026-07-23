@@ -110,6 +110,11 @@ pub struct BehaviorTuning {
     /// a caught pass gets a beat before the hit, so a contested catch is a
     /// catch-and-step, not an instant swarm.
     pub catch_secure_ticks: u32,
+    /// Interception difficulty: as the ball arrives, a defender must be within
+    /// this fraction of his catch radius of it to pick it off. Further out — but
+    /// still in the catch volume — he can only get a hand on it and swat it down.
+    /// Tighter than a reception, so an interception is a genuine play on the ball.
+    pub interception_radius_scale: f32,
 }
 
 impl Default for BehaviorTuning {
@@ -157,6 +162,7 @@ impl Default for BehaviorTuning {
             block_drive: 2.5,
             engage_square_ticks: 8,
             catch_secure_ticks: 22,
+            interception_radius_scale: 0.62,
         }
     }
 }

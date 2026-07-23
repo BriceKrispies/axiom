@@ -63,6 +63,10 @@ pub enum DriveEvent {
     NextDown,
     /// Fourth-down conversion failed; the run is over.
     RunOver,
+    /// The defense intercepted the pass — a turnover. The run ends on it for now
+    /// (the possession-flip alternative would continue with the defense on
+    /// offense from the interception spot).
+    Intercepted,
 }
 
 /// The final summary shown on the game-over screen.
@@ -99,6 +103,13 @@ impl DriveState {
     /// Whether the line to gain is the goal line (1st/2nd… & GOAL).
     pub fn goal_to_go(&self) -> bool {
         self.first_down_yard >= GOAL_YARD - 0.001
+    }
+
+    /// End the run on a turnover (an interception). Counters freeze where they
+    /// stand. This is the seam for changing possession later: instead of ending,
+    /// the drive would re-spot for the intercepting team on offense.
+    pub fn end_on_turnover(&mut self) {
+        self.over = true;
     }
 
     /// The run summary snapshot.

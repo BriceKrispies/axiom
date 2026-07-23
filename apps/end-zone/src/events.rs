@@ -31,6 +31,9 @@ pub enum PlayEndReason {
     /// The carrier crossed the goal line untouched (no scoring rules yet —
     /// the play simply ends).
     BrokeFree,
+    /// A defender intercepted the pass — a turnover. (For now the run ends here;
+    /// the possession-flip hook lives in the drive layer.)
+    Intercepted,
 }
 
 /// One typed simulation event. Payload floats are exact sim values, so replays
@@ -64,8 +67,11 @@ pub enum SimEvent {
         to: Option<PlayerId>,
     },
     /// A defender broke up the pass at the catch point (a contested incompletion
-    /// — break-up only, no possession change).
+    /// — the defender got a hand on it but could not secure it).
     PassBrokenUp { defender: PlayerId, position: Vec3 },
+    /// A defender intercepted the pass — a clean play on the ball. Possession
+    /// passes to the defender (the run ends on it for now).
+    Intercepted { defender: PlayerId, position: Vec3 },
     /// The ball is live on the ground with no possessor.
     BallLoose { position: Vec3 },
     /// The ball settled on the turf.

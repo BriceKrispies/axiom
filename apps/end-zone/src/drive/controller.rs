@@ -4,6 +4,7 @@
 
 use crate::ai::{select_defense, variation_key};
 use crate::data::{offensive_playbook, PlayDefinition};
+use crate::events::PlayEndReason;
 use crate::identity::TeamId;
 use crate::launch::{resolve_defense, RunConfig};
 use crate::showcase::{RESET_DELAY, SNAP_DELAY};
@@ -180,7 +181,15 @@ impl DriveController {
                     if timed_out && sim.phase != PlayPhase::Ended {
                         sim.blow_dead();
                     }
-                    let event = self.state.resolve(sim.ball_yard_line());
+                    // A turnover ends the run for now. The possession-flip
+                    // alternative lands HERE: instead of ending, re-spot the
+                    // drive with the intercepting team on offense.
+                    let event = if sim.end_reason == Some(PlayEndReason::Intercepted) {
+                        self.state.end_on_turnover();
+                        DriveEvent::Intercepted
+                    } else {
+                        self.state.resolve(sim.ball_yard_line())
+                    };
                     self.last_event = Some(event);
                     if self.state.over {
                         Stage::Over
