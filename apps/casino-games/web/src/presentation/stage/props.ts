@@ -24,8 +24,14 @@ export const STAGE_MATERIALS: Readonly<Record<string, MaterialSpec>> = {
 /** The default clear color: pastel sky blue. */
 export const SKY_CLEAR: Rgba = [0.71, 0.87, 0.99, 1];
 
-/** Backdrop sheet + floor slab centered under the playfield. */
-export const stageRoom = (span = 20): readonly SceneInstance[] => [
+/**
+ * Backdrop sheet + floor slab centered under the playfield. `accentRadius`
+ * governs the turquoise floor-ring; it defaults to `span * 0.5` (unchanged for
+ * every caller that only passes a span), but a game whose playfield sits on a
+ * small inset pool can shrink it so the surrounding floor slab reads as a wide
+ * beach margin rather than a full-frame turquoise flood.
+ */
+export const stageRoom = (span = 20, accentRadius = span * 0.5): readonly SceneInstance[] => [
   {
     key: "stage:floor",
     material: "StageFloor",
@@ -36,7 +42,7 @@ export const stageRoom = (span = 20): readonly SceneInstance[] => [
     key: "stage:floor-ring",
     material: "StageFloorAccent",
     mesh: "cylinder",
-    transform: { position: v3(0, -0.049, 0), rotation: QUAT_IDENTITY, scale: v3(span * 0.5, 0.02, span * 0.5) },
+    transform: { position: v3(0, -0.049, 0), rotation: QUAT_IDENTITY, scale: v3(accentRadius * 2, 0.02, accentRadius * 2) },
   },
   {
     key: "stage:backdrop",
@@ -81,7 +87,16 @@ export const contactShadow = (key: string, at: EngineVec3, radius: number): Scen
 export const stageLights = (focus: EngineVec3, focusIntensity = 0.9): readonly SceneLight[] => [
   {
     key: "light:key",
-    light: { color: [1, 0.96, 0.88, 1], direction: v3(-0.45, -0.78, -0.42), intensity: 0.95, kind: "directional" },
+    // A lower, raking sun from the upper right — the horizontal throw now leads
+    // the vertical drop, so the key crosses each chest at an angle: the lid and
+    // one side board catch a clear warm highlight while the opposite side/front
+    // boards fall into shadow. A near-straight-down key (the prior version) lit
+    // only the top and left the two visible vertical faces at near-equal value,
+    // reading flat; raking it — and lifting intensity to widen the lit-vs-shadow
+    // spread — gives the chunky faceted chests the sculpted sun modeling the
+    // reference shows. Neutral-warm, paired below with the unchanged cool fill,
+    // so this deepens light-driven contrast without shifting the palette's hue.
+    light: { color: [1, 0.96, 0.88, 1], direction: v3(-0.6, -0.58, -0.5), intensity: 1.35, kind: "directional" },
   },
   {
     key: "light:fill",

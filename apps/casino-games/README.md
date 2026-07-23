@@ -25,6 +25,31 @@ run `npm install` inside `apps/casino-games/web/` once if `node_modules` is
 missing. In the browser the same specifier is resolved by the import map
 axiom-serve injects.
 
+## Capture agent (screenshots of the real running app)
+
+`web/browser/agent_capture.py` drives the served app in a headless browser the
+way a player would — open a machine, wait for a phase, move the cursor, press an
+action — and captures the frame. Control goes through the app's own affordances:
+the boot URL below and `window.__casino` (the shell's capture/dev handle:
+`games()`, `play(id, seed?)`, `back()`, `hud()`, `press(code)`,
+`pointer(x, y, down)` in logical 960×600 canvas space). It is the browser-side
+analogue of a native agent driver — this app is invisible to the Rust
+`axiom-agent`.
+
+```sh
+uv run scripts/localhost_servers.py start-app casino-games --port 8087
+uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready
+uv run apps/casino-games/web/browser/agent_capture.py \
+    --do play:treasure-chest-pick phase:ready move:480,300 shot
+```
+
+Verbs: `play:<gameId>[@seed]`, `back`, `phase:<name>`, `wait:<ms>`, `key:<code>`,
+`move:<x,y>`, `click:<x,y>`, `shot[:name]`. Prefer `phase:` over `wait:` so a
+capture never races the fixed-step loop. Pair `--shot N` (freeze) with `--seed N`
+for a byte-stable frame; `--clip native` writes the canvas backing store exactly
+(960×600). The visual-convergence champions under `visual_targets/` are captured
+this way — see `visual_targets/treasure-chest-pick/capture.md`.
+
 URL affordances: `?game=<id>` boots straight into a game, `?seed=N` pins the
 session seed, `?shot=N` freezes the simulation at tick N (deterministic
 screenshots; also pins the wall clock), `?press=Code@tick,...` scripts key

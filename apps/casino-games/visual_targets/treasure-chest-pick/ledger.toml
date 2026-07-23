@@ -1,0 +1,280 @@
+# Convergence ledger — treasure-chest-pick
+# Append-only. Iteration 0 is the CRITIC's baseline calibration: it fixes the
+# axis list + order for the campaign and records the harsh baseline scores.
+
+[[iteration]]
+iteration = 0
+attacked_axis = "none"           # baseline calibration, no render change
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/scorecard.champion.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_baseline"
+abstraction_introduced = false
+next_attacked_axis = "scene_props_completeness"
+reason = """
+CRITIC baseline calibration (first pass). Scored the champion against
+reference.png at the parity bar, harshly. final_score = 0.5; lowest axis =
+scene_props_completeness = 0, so it is the next axis to attack.
+
+Root-cause finding (verified in apps/casino-games/web/src/games/
+treasure-chest-pick/scene.ts): the app renders ONLY nine chests on a turquoise
+platform disc plus a stage-room backdrop and reveal lights. The reference's
+entire beach diorama — warm sand ground, palm tree (with a long soft shadow),
+red crab, sand castle + flag, starfish, seashells, scattered gold nuggets — does
+NOT exist in the game. scene_props_completeness = 0 is therefore 'not built',
+not merely 'cropped off-frame'. This is the dominant identity gap.
+
+COUPLING NOTE for whoever attacks scene_props_completeness: it is entangled with
+composition_and_framing = 1. The champion is captured at 960x600 (capture.md),
+which frames only the pool; the reference (1568x968) frames the pool as ~60% of
+a wide beach with sand margins holding the props. Building the beach diorama will
+not read unless the camera framing also widens to include those margins.
+Whoever takes this axis must (a) add the beach ground + props as real geometry
+AND (b) widen the framing so they are on-screen — otherwise props will be built
+but stay outside the captured frame, moving no number honestly.
+
+ABSTRACTION-GATE NOTE: adding a palm tree / crab / castle / starfish / shells is
+new geometry that the config/manifest layer genuinely CANNOT express (there is
+no beach-prop manifest surface today). Per the skill, that is the 'inexpressible'
+branch of the gate — the structural fix is legitimate on the FIRST attempt (do
+NOT burn three ceremonial config nudges first), but it MUST ship with an
+abstractions/NNNN.toml recording inexpressible = true, failed_attempts = [], and
+the smallest new surface at the lowest correct layer.
+
+No abstraction record is owed at iteration 0: the baseline champion is the app's
+pre-existing render, not a convergence structural change.
+"""
+
+[iteration.scorecard_before]
+composition_and_framing = 1
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 1
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4
+
+[[iteration]]
+iteration = 1
+attacked_axis = "none"           # critic re-score of the pass-1 promoted champion
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/scorecard.champion.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+abstraction_introduced = false
+next_attacked_axis = "scene_props_completeness"
+reason = """
+CRITIC pass-2 re-score. Commit 0837038a promoted the pass-1 render (it changed
+ONLY champion.png, 106545 -> 91398 bytes) with NO re-score and NO ledger entry.
+This iteration re-verifies the scorecard against the actual pass-1 champion and
+records the finding. NO number changed (no inflation was found; nothing was
+lowered): pass-1 moved no axis TOWARD identity, so the honest re-score equals the
+baseline. This entry exists so the record stops silently carrying a swapped image
+under unre-scored numbers, and to refresh the scorecard prose (which still
+described the pre-pass-1 render).
+
+WHAT PASS-1 ACTUALLY DID (pre-pass-1 champion @0d21679a vs pass-1 champion
+@0837038a, both vs reference.png):
+- Camera dollied BACK: chests smaller, more lagoon rings + a thin sky strip
+  visible. A hair less "tight crop", but the surround is still WATER, not the
+  reference's sand-and-props margins -> composition_and_framing stays 1.
+- Lagoon saturated toward the reference's cyan (colorist a6949233) -> good for
+  the water hue.
+- Chest wood drifted PALER with faded gold bands (surfacing b2e77bc8 wood ladder
+  + lighting a40138de key) -> AWAY from the reference's saturated brown+brass.
+  The water gain and the chest loss roughly cancel, so color_palette stays 2 and
+  subject_fidelity holds at 2 (near the 1/2 line on color; held on form). Logged
+  as a WATCH-ITEM: if a later pass pushes the wood paler again, both drop.
+
+PROCESS FINDINGS (the honesty flags this pass owes):
+1. RIGHT-AXIS: the next axis is correctly scene_props_completeness = 0 — it is
+   still the lowest and still absent. But pass-1 spent its effort on higher axes
+   (color/material/lighting/framing) and left the lowest axis untouched. Because
+   final_score = lowest*0.7 + avg*0.3, an untouched 0 pins final_score at 0.5 no
+   matter how much the secondary axes move — so pass-1 could not, and did not,
+   improve final_score. Attacking anything but scene_props_completeness next is
+   churning secondary numbers while the dominant identity gap stays at 0.
+2. PROMOTION: per the skill's decision table, when the attacked axis does not
+   improve the outcome is start_new_candidate_branch (keep old champion), not a
+   promotion. Pass-1 was promoted anyway. It is not a regression (no non-attacked
+   axis dropped >= 2), so the pass-1 image is left standing as champion — but the
+   record now states plainly that it did NOT advance convergence.
+
+ABSTRACTION-GATE: honored. Pass-1 made no structural change (no new primitive /
+manifest field / shader) — only camera + color/material config feeding the same
+render — so no abstractions/NNNN.toml is owed this pass. The beach-prop geometry
+that scene_props_completeness needs is still un-built; the iteration-0 note
+already records that its abstraction record comes due WHEN it is built.
+
+PARITY-CLAIM: clean. No "done / matched / parity" language in the commit,
+scorecard, or ledger.
+"""
+
+[iteration.scorecard_before]
+composition_and_framing = 1
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 1
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4
+
+[[iteration]]
+iteration = 2
+attacked_axis = "none"           # critic re-score of the pass-2 promoted champion
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/scorecard.champion.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+abstraction_introduced = false
+next_attacked_axis = "scene_props_completeness"
+reason = """
+CRITIC pass-3 re-score of the PASS-2 champion. Commit b18b6d4a promoted the
+pass-2 render (image-only swap, 91398 -> 91567 bytes). The underlying source is
+the pass-2 line: modeler be85ddfa (shrink turquoise disc to an inset pool),
+art-director 29e34b79 (tighten span to 2.5) which foreman a919ab7a REVERTED back
+to the wide span 5.0 to keep the beach reveal on-screen, surfacing 44de0bdb
+(deepen wood to saddle-brown), lighting c593eb0b (rake sun lower). This iteration
+re-verifies the scorecard against the actual pass-2 champion.
+
+ONE number moved, honestly and driven by real geometry (not a nudge):
+- composition_and_framing 1 -> 2. The water-shrink added NO new geometry; it
+  reparameterized the EXISTING stageRoom floor slab (a new default-valued
+  `accentRadius` arg on stageRoom + a `WATER_RADIUS = 5.0` const) so the pre-
+  existing sandy StageFloor now reads as a wide beach MARGIN around a central
+  inset pool. That central-pool-in-sand skeleton is the reference's core
+  composition, which pass-1's all-water flood entirely lacked -> off the floor.
+  Held at 2 (not 3) by two real deviations: a pastel blue sky/ocean band now
+  intrudes at the top + side wedges (the reference's sand fills to the frame
+  edge, no horizon), and the margins are empty + symmetric vs the reference's
+  asymmetric staged props. WATCH-ITEM: the art-director crop that would have
+  removed the sky band was reverted to preserve the beach reveal; a pass that
+  keeps the beach AND crops the band earns composition -> 3.
+
+WHAT ELSE PASS-2 DID, and why no other number moved:
+- Deepened the chest wood to saturated saddle-brown (surfacing 44de0bdb). This
+  REVERSES the pass-1 watch-item (wood drifting paler toward plain pine); the
+  threatened subject_fidelity / color_palette drop therefore did NOT happen.
+  Both HOLD at 2 — the wood read is back toward reference, but the chests are
+  still flat canvas2d (no texture/AO), so no rise to 3 either.
+- The revealed sandy apron finally supplies the reference's dominant WARM-SAND
+  mass that color_palette flagged as "wholly absent" — a genuine palette gain.
+  color_palette HELD at 2 anyway (take the lower): the apron is a pale cream,
+  not the reference's saturated golden tan, and the added blue sky/ocean band is
+  an off-reference element. Balance closer; hues still off.
+- Raked the sun lower (lighting c593eb0b): a key-direction tweak with no cast /
+  grounding shadow produced -> lighting_and_shadow HOLDS at 1.
+
+scene_props_completeness STAYS 0. Re-verified this pass: grep of scene.ts finds
+no palm / crab / castle / starfish / shell. The pass-2 "beach" is the revealed
+StageFloor slab, NOT built props; the four gold coins are the pre-existing
+scatter. The dominant identity gap is untouched.
+
+final_score: 0.50 -> 0.53 (avg 1.667 -> 1.75; lowest axis still 0, so 0*0.7 +
+1.75*0.3 = 0.525 ~= 0.53). The bar barely moved because the pinning 0 is
+untouched.
+
+PROCESS FINDINGS (honesty flags this pass owes):
+1. RIGHT-AXIS: next axis is still correctly scene_props_completeness = 0 — still
+   the lowest, still absent. Pass-2, like pass-1, spent its effort on secondary
+   axes (composition/color via the water-shrink, subject via wood, lighting via
+   sun) and left the pinning 0 untouched -> final_score is still ~floored. BUT
+   this pass is NOT pure secondary churn: iteration-0's coupling note said the
+   props axis will not read unless the stage first widens to expose margins.
+   Pass-2 delivered exactly that STAGE-widening half (the beach apron). The PROPS
+   half must now actually be built next — do not spend a third pass polishing
+   secondaries while props stays 0.
+2. PROMOTION: defensible this time. Unlike pass-1 (which moved no axis toward
+   identity), pass-2 moved composition 1 -> 2 on a real geometry change and no
+   non-attacked axis regressed >= 2 — so promoting the pass-2 image is honest.
+   The intruding sky/ocean band is a minor off-reference deviation, not a >= 2
+   regression.
+
+ABSTRACTION-GATE: HONORED. The inset-pool / beach-margin was achieved by
+reparameterizing an EXISTING presentation helper (stageRoom's `accentRadius`
+default arg + a `WATER_RADIUS` const), reusing the existing StageFloor slab and
+floor-ring meshes/materials — no new primitive / mesh / material / shader / field.
+That is config-level, not a structural abstraction, so NO abstractions/NNNN.toml
+is owed this pass. The beach PROPS (palm / crab / castle / starfish / shells)
+remain un-built; per iteration 0, their abstraction record (inexpressible = true,
+failed_attempts = [], smallest new prop-manifest surface) comes due WHEN they are
+built, on the first attempt — do not burn ceremonial config nudges first.
+
+PARITY-CLAIM: clean. No "done / matched / parity" language in the pass-2 commits,
+scorecard, or ledger.
+"""
+
+[iteration.scorecard_before]
+composition_and_framing = 1
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4

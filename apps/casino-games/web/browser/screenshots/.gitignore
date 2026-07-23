@@ -1,0 +1,3 @@
+# Capture-agent output: generated frames, never source. The champion/candidate
+# frames that DO belong in git live under apps/casino-games/visual_targets/.
+*.png

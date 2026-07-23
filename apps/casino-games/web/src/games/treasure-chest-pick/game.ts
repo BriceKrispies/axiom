@@ -83,8 +83,17 @@ export const chestPosition = (index: number, count: number): EngineVec3 => {
   return v3((col - (columns - 1) / 2) * CHEST_SPACING, 0, (row - (rows - 1) / 2) * CHEST_SPACING * 0.92);
 };
 
+// A tighter span than a card-table default: the reference frames the chest grid
+// large — it claims ~55% of the frame width, and the sandy lagoon fills the top
+// of the frame with no horizon showing. At the looser span the grid projected at
+// ~36% and the camera's top edge cleared the floor rim to expose the pastel
+// backdrop sheet as an intruding sky band. Pulling the span in (~0.66x) both
+// scales the grid up to reference size and drops the top frame-edge ray onto the
+// lagoon floor, cropping that backdrop band out of frame. The pitch angle is
+// preset-fixed and unchanged; only the zoom tightens. The hero-flight close-up is
+// derived from a fixed heroDistance + fovY, so its on-screen scale is untouched.
 export const chestCamera = (count: number): ReturnType<typeof tabletopCamera> =>
-  tabletopCamera(v3(0, 0.42, -0.1), 3.6 + Math.ceil(count / CHEST_COLUMNS) * 0.55);
+  tabletopCamera(v3(0, 0.42, -0.1), 5.0 + Math.ceil(count / CHEST_COLUMNS) * 0.78);
 
 export const chestTargets = (count: number): readonly PickTarget[] =>
   Array.from({ length: count }, (_, index) => ({

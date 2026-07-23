@@ -1,0 +1,123 @@
+# Champion scorecard — treasure-chest-pick
+#
+# BASELINE authored by the convergence CRITIC lens against reference.png, then
+# re-scored each pass. Calibrated to IDENTITY/PARITY, harshly. Bar =
+# "indistinguishable from the reference." A render that merely reads as the same
+# subject is a 1, not a 3. Axis list + ORDER are fixed for the whole campaign
+# (order breaks "lowest axis" ties). final_score = lowest_axis * 0.7 + average * 0.3.
+#
+# What the reference is: a wide storybook beach diorama — warm tan sand, a
+# rounded teal water pool with a darker rim, and staged ON the pool a 3x3 grid of
+# nine gilded wooden chests; the margins hold a palm tree (with a long soft
+# shadow), a red crab, a sand castle with a flag, a starfish, seashells, and
+# scattered gold nuggets, plus HUD chrome (seed readout, REPLAY / SET UP, mute).
+#
+# What the champion NOW renders: the PASS-2 promoted render (commit b18b6d4a
+# swapped champion.png; the source changes are the pass-2 line — modeler
+# be85ddfa shrank the turquoise disc to an inset pool, art-director 29e34b79
+# tightened then foreman a919ab7a RESTORED the wide span 5.0 to keep the beach
+# reveal, surfacing 44de0bdb deepened the wood, lighting c593eb0b raked the sun
+# lower). The frame now shows a central teal octagonal pool inset in a broad
+# CREAM/SAND beach apron, with a pastel blue sky/ocean band intruding at the top
+# and the side wedges, nine chests on the pool, four scattered gold coins, and a
+# soft central glow. The beach PROPS the reference stages in its margins — palm
+# tree, red crab, sand castle + flag, starfish, seashells — still do NOT exist
+# (verified: grep of scene.ts finds none).
+#
+# CRITIC RE-SCORE (pass-3 audit of the pass-2 champion). ONE number moved this
+# pass, honestly and driven by real geometry, not a nudge:
+#   composition_and_framing 1 -> 2. The pass-2 water-shrink did not add new
+#   geometry; it reparameterized the EXISTING stageRoom floor slab (new
+#   default-valued `accentRadius` arg + `WATER_RADIUS` const) so the pre-existing
+#   sandy StageFloor now reads as a wide beach MARGIN around a central inset pool.
+#   That is the reference's core compositional skeleton (pool centered in a sand
+#   surround), which pass-1's all-water flood entirely lacked -> off the floor to
+#   2. It is held DOWN at 2, not 3, by two real deviations: (a) a pastel blue
+#   sky/ocean band now intrudes at the top + side wedges that the reference does
+#   NOT have (its sand fills to the frame edge); (b) the margins are empty and
+#   symmetric vs the reference's asymmetric staged props. WATCH-ITEM: the
+#   art-director's crop (span 2.5) that would have removed the intruding sky band
+#   was reverted to keep the beach visible; a later pass that both keeps the beach
+#   AND crops the band would earn composition -> 3.
+# Everything else holds. The pass-1 watch-item (wood drifting paler) was REVERSED
+# this pass — surfacing deepened the wood to saturated saddle-brown, back TOWARD
+# the reference — so subject_fidelity/color_palette did NOT drop. NOTE: the warm-
+# sand mass that color_palette flagged as "wholly absent" is now PRESENT (the
+# revealed floor apron), a genuine palette gain; color stays 2 only because the
+# apron hue is a pale cream, not the reference's saturated golden tan, and the
+# blue sky/ocean band is an added off-reference element (take the lower).
+
+final_score = 0.53   # 0 * 0.7 + 1.75 * 0.3  (still pinned by scene_props_completeness = 0)
+next_attack_axis = "scene_props_completeness"
+
+[axes]
+# Pass-2's water-shrink revealed the existing sandy floor slab as a beach MARGIN
+# around a central inset pool — the reference's central-pool-in-sand skeleton now
+# reads, where pass-1's all-water flood had none. Off the floor -> 2. Held at 2
+# (not 3) by the intruding pastel sky/ocean band the reference lacks and by the
+# empty, symmetric margins vs the reference's asymmetric staged beach. Still
+# coupled to scene_props_completeness: this pass built the STAGE half of the
+# coupling (widened sand surround); the PROPS half is still un-built.
+composition_and_framing = 2
+
+# The chests are genuinely modeled — barrel-arc lid, bands crown-to-base, side
+# straps, corner edges, front lock plate, base gold, plank gap lines. A notch
+# above a proxy box, so not 1. Pass-2 REVERSED the pass-1 paling: surfacing
+# deepened the wood to saturated saddle-brown, back toward the reference's
+# brown+brass "gilded treasure" read (this is why the threatened drop did NOT
+# happen). Still flatter than the reference (canvas2d flat-shade, no texture/AO)
+# -> holds at 2.
+subject_fidelity = 2
+
+# palm tree, red crab, sand castle + flag, starfish, seashells: NONE exist in the
+# app (verified again this pass — grep of scene.ts finds none). The pass-2 "beach"
+# is the revealed StageFloor slab, NOT built props; the four gold coins are the
+# pre-existing scatter, not the staged diorama. Absent -> 0. Still the largest
+# single identity gap and the correct next axis to attack.
+scene_props_completeness = 0
+
+# Chest silhouettes read cleanly, but the scene's other silhouettes (palm, crab,
+# castle) are entirely absent, so overall readability vs the reference is low.
+silhouette_readability = 2
+
+# Value-stepped flat materials, no texture / normal / AO. The reference shows
+# voxel-grain wood, grainy sand, brass sheen. canvas2d is flat by design, so this
+# stays a legible flat proxy -> 1. (The deeper wood ladder is still flat.)
+material_and_texture_detail = 1
+
+# The reference grounds every object with soft cast shadows (a long palm shadow,
+# chest shadows, crab shadow, ambient occlusion). Pass-2 raked the sun lower for
+# plane-to-plane chest modeling, but the chests still float on the disc with NO
+# cast/grounding shadow; only a faint central glow. -> 1.
+lighting_and_shadow = 1
+
+# The teal-water and chest-brown families are right, and pass-2 finally brings in
+# the reference's dominant WARM-SAND mass (the revealed floor apron) — the exact
+# deficiency that pinned this at 2 before. Held at 2 anyway (take the lower): the
+# apron is a pale cream, not the reference's saturated golden tan, and pass-2 also
+# introduced a pastel blue sky/ocean band the reference does not have, so the
+# overall balance is closer but the hues are still off.
+color_palette = 2
+
+# Reference is punchy (bright sand, saturated water, dark chest shadows); the
+# champion is flatter and more muted. -> 2.
+contrast_and_exposure = 2
+
+# The 3x3 isometric arrangement gives some depth, but with no grounding shadows
+# the chests read as floating; the reference separates sand/water/props by depth
+# and shadow. -> 2.
+depth_and_separation = 2
+
+# Chest proportions and grid spacing match well. The art-director's grid-enlarge
+# was reverted to the wide span by the foreman, so on-screen chest scale is ~as
+# before; relative scale within the frame still differs from the reference. -> 2.
+scale_and_proportion = 2
+
+# The champion is sparse (chests + pool + empty sand apron). The reference is
+# dense: props, textured surfaces, scattered nuggets, shells, sand detail. -> 1.
+detail_density = 1
+
+# The flat render is clean — no z-fighting, tearing, or aliasing artifacts. Not 5
+# (mild facet stepping on the lid arc / disc glow, not pixel-identical). Artifact
+# level scores cleanliness, not identity, so this is honestly high. -> 4.
+artifact_level = 4

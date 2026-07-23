@@ -68,6 +68,30 @@ const boundarySeed = (): number => {
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
+/**
+ * The capture/dev handle published on `window.__casino` — the surface an
+ * external capture agent (`web/browser/agent_capture.py`) drives. It is
+ * deliberately a thin re-expression of what a PLAYER can already do (open a
+ * game from the floor, press an action, move the cursor) plus a read of the
+ * HUD the shell already publishes. No game rule, outcome, or phase decision
+ * lives here — an agent can no more see or change a committed outcome through
+ * this than a player can through the keyboard.
+ */
+export interface CasinoDebugHandle {
+  /** Registered game ids, in registration order. */
+  readonly games: () => readonly string[];
+  /** Open a game (optionally pinning its seed) — the catalog's Play action. */
+  readonly play: (gameId: string, seed?: number) => void;
+  /** Leave the game screen for the prize floor. */
+  readonly back: () => void;
+  /** The live HUD projection, or null when no game is mounted. */
+  readonly hud: () => CasinoHud | null;
+  /** Feed a key code (e.g. "ArrowRight", "Enter", "Synthetic:NewRound"). */
+  readonly press: (code: string) => void;
+  /** Move/click the cursor in LOGICAL 960×600 canvas coordinates. */
+  readonly pointer: (x: number, y: number, down: boolean) => void;
+}
+
 /** Press a synthetic key code into a running game's input (held ~3 ticks so
  * the fixed-step snapshot reliably sees the edge — see the end-zone lesson). */
 const pressSynthetic = (input: InputState, code: string): void => {
@@ -408,6 +432,26 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
     diagnosticsHost.classList.add("active");
   }
   applyRootSettings();
+
+  // ── capture/dev handle ──────────────────────────────────────────
+  const handle: CasinoDebugHandle = {
+    back: (): void => {
+      stopGame();
+      showScreen("catalog");
+    },
+    games: (): readonly string[] => registry.all().map((definition) => definition.id),
+    hud: (): CasinoHud | null => running?.readHud() ?? null,
+    play: (gameId: string, seed?: number): void => playGame(gameId, undefined, seed ?? null),
+    pointer: (x: number, y: number, down: boolean): void => {
+      running?.input.pointerEvent(x, y, down);
+    },
+    press: (code: string): void => {
+      if (running !== null) {
+        pressSynthetic(running.input, code);
+      }
+    },
+  };
+  (window as unknown as { __casino: CasinoDebugHandle }).__casino = handle;
 
   // ── boot route ──────────────────────────────────────────────────
   if (url.game !== null && registry.has(url.game)) {

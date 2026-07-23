@@ -29,6 +29,7 @@ import {
   QUAT_IDENTITY,
   quatMul,
   quatPitch,
+  quatRoll,
   quatYaw,
   rotateByQuat,
   scaleV3,
@@ -85,16 +86,36 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   ...STAGE_MATERIALS,
   ...REWARD_MATERIALS,
   ...CONFETTI_MATERIALS,
+  // The beach margin around the inset lagoon. The shared StageFloor is a pale,
+  // near-white cream ([0.94, 0.9, 0.82]) that under the bright warm key lifts to
+  // milky bone — the reference sand is a rich, saturated golden tan. Override it
+  // for THIS game only (the shared material stays neutral for the other casino
+  // stages): pull the blue channel well down and widen the red→blue spread so the
+  // warm rig lands the beach at golden sand rather than bleached cream. This is a
+  // pure palette warm/saturation move — no grade/tonemap stage exists here.
+  StageFloor: { baseColor: [0.9, 0.75, 0.47, 1] },
   // Wood, value-stepped so the chest reads solid without a texture: the lid
   // catches the key light (lightest), the front boards sit mid, side boards go
-  // darker, and the gaps between planks are the darkest brown.
-  WoodLid: { baseColor: [0.64, 0.42, 0.24, 1] },
-  WoodBrown: { baseColor: [0.56, 0.36, 0.2, 1] },
-  WoodSide: { baseColor: [0.44, 0.28, 0.15, 1] },
-  WoodGap: { baseColor: [0.3, 0.19, 0.1, 1] },
-  WoodDim: { baseColor: [0.34, 0.24, 0.16, 1] },
-  WoodDimSide: { baseColor: [0.27, 0.19, 0.12, 1] },
-  ChestInterior: { baseColor: [0.14, 0.09, 0.05, 1] },
+  // darker, and the gaps between planks are the darkest brown. The ladder is
+  // deliberately WIDE and pulled toward warm tan (rather than a uniform
+  // saturated orange), because with no albedo texture the only thing carving
+  // the chest into stacked planks is this value spread: a distinctly lighter
+  // lid catching the key light, and near-black seams reading as the gaps
+  // between boards — the carved-wood look of the reference lives in the step,
+  // not the hue.
+  // The champion ladder rendered as bleached pale pine under the bright warm
+  // rig; the reference chests are saturated saddle-brown oak. The whole ramp is
+  // pulled DARKER and WARMER (higher red-to-blue ratio) so that after the key
+  // light lifts it, the lit faces land at rich caramel rather than milky tan —
+  // the value spread that carves the planks is preserved, just seated on a
+  // deeper, more saturated wood.
+  WoodLid: { baseColor: [0.64, 0.44, 0.25, 1] },
+  WoodBrown: { baseColor: [0.52, 0.34, 0.18, 1] },
+  WoodSide: { baseColor: [0.38, 0.25, 0.13, 1] },
+  WoodGap: { baseColor: [0.18, 0.1, 0.045, 1] },
+  WoodDim: { baseColor: [0.28, 0.19, 0.11, 1] },
+  WoodDimSide: { baseColor: [0.22, 0.15, 0.09, 1] },
+  ChestInterior: { baseColor: [0.11, 0.07, 0.035, 1] },
   // Gold, likewise stepped: a pale highlight on upward edges/latch, the main
   // yellow on front trim, a darker ochre on side-facing straps — not uniformly
   // emissive, so it reads as metal catching light rather than glowing.
@@ -115,15 +136,40 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   Mote: { baseColor: [1, 0.95, 0.72, 1], emissive: [1, 0.9, 0.6, 1] },
   // The arcade stage: a turquoise platform with a rim, a warm central glow, and
   // a darker edge falloff — an intentional board, not a flat marker.
-  PlatformSide: { baseColor: [0.2, 0.56, 0.56, 1] },
+  // The lagoon reads as vivid turquoise in reference, not a grey-green wash: the
+  // main pool sits at a deeper, more saturated teal (low red, wide green/blue) so
+  // the warm key light lifts it toward turquoise instead of desaturating it to
+  // grey, and the outer band is a richer deep teal so the ring falloff still
+  // reads as water rather than a muddy edge.
+  PlatformSide: { baseColor: [0.11, 0.55, 0.57, 1] },
   CenterGlow: { baseColor: [1, 0.88, 0.6, 1], emissive: [0.14, 0.1, 0.04, 1], opacity: 0.1 },
-  EdgeVignette: { baseColor: [0.05, 0.16, 0.2, 1], opacity: 0.3 },
+  EdgeVignette: { baseColor: [0.03, 0.2, 0.26, 1], opacity: 0.34 },
   BoardRivet: { baseColor: [1, 0.82, 0.34, 1], emissive: [0.3, 0.22, 0.05, 1] },
   // Like every other translucent overlay here, the puff carries a little
   // emissive: a purely Lambert translucent grey reads as a dark blob against
   // the warm, brightly-lit chest mouth it coughs out of, which is the opposite
   // of the light, playful "nothing here this time" it is meant to be.
   DustPuff: { baseColor: [0.8, 0.75, 0.68, 1], emissive: [0.34, 0.31, 0.27, 1], opacity: 0.5 },
+  // Beach set-dressing (palm, sandcastle, crab, shells) — value-stepped so each
+  // prop reads as a chunky faceted assembly under the raking key, matching the
+  // reference's toy-diorama shore. No emissive on the solid props (they are lit
+  // by the same rig as the chests); the sand tones are pulled a touch lighter and
+  // warmer than the floor slab so the castle and shore reads as dry sculpted sand.
+  PalmBark: { baseColor: [0.46, 0.32, 0.19, 1] },
+  PalmBarkDark: { baseColor: [0.33, 0.22, 0.12, 1] },
+  PalmLeaf: { baseColor: [0.29, 0.53, 0.22, 1] },
+  PalmLeafDark: { baseColor: [0.19, 0.4, 0.16, 1] },
+  Coconut: { baseColor: [0.36, 0.26, 0.15, 1] },
+  CastleSand: { baseColor: [0.93, 0.85, 0.63, 1] },
+  CastleSandDark: { baseColor: [0.82, 0.72, 0.5, 1] },
+  CastleDoor: { baseColor: [0.4, 0.32, 0.2, 1] },
+  CastleFlag: { baseColor: [0.85, 0.22, 0.16, 1] },
+  CastlePole: { baseColor: [0.32, 0.22, 0.12, 1] },
+  CrabShell: { baseColor: [0.83, 0.26, 0.19, 1] },
+  CrabShellDark: { baseColor: [0.62, 0.17, 0.12, 1] },
+  CrabEye: { baseColor: [0.06, 0.05, 0.05, 1] },
+  Shell: { baseColor: [0.96, 0.86, 0.8, 1] },
+  Starfish: { baseColor: [0.92, 0.5, 0.29, 1] },
   ...VEIL_MATERIALS,
 };
 
@@ -149,9 +195,11 @@ const disc = (key: string, material: string, at: EngineVec3, radius: number, hei
  * moment the lid swings open. So the dome is an honest arc of flat slats, which
  * also sits right with the chunky faceted look of everything else here: each
  * slat catches the key light at its own angle, so the curve reads from shading
- * rather than from silhouette alone.
+ * as well as silhouette. Eight slats span the 180° arc (~22.5° a facet) so the
+ * crown reads as a smooth rounded barrel top rather than a peaked five-slat
+ * ridge — the reference chests carry a full, round hump, not a tent.
  */
-const LID_ARC_SLATS = 5;
+const LID_ARC_SLATS = 8;
 const LID_ARC_THICKNESS = 0.11;
 /** How far the gold bands stand proud of the wood arc they wrap. */
 const LID_BAND_SWELL = 0.025;
@@ -345,9 +393,15 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   return [
     ...pool,
     part("body", v3(0, BODY.y / 2, 0), BODY, wood),
-    // Board gap lines (darkest) read as separate planks without a texture.
-    part("gap1", v3(0, BODY.y * 0.36, 0), v3(BODY.x + 0.014, 0.03, BODY.z + 0.014), "WoodGap"),
-    part("gap2", v3(0, BODY.y * 0.68, 0), v3(BODY.x + 0.014, 0.03, BODY.z + 0.014), "WoodGap"),
+    // Board gap lines (darkest) read as separate planks without a texture. The
+    // reference chest bodies are carved into a stack of four distinct boards, so
+    // three evenly-spaced grooves divide the face rather than two — and each
+    // groove stands a touch prouder and thicker than a hairline so the near-black
+    // seam actually reads as the gap between planks under the bright rig, which is
+    // the only thing carving the untextured wood into stacked boards.
+    part("gap1", v3(0, BODY.y * 0.26, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
+    part("gap2", v3(0, BODY.y * 0.5, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
+    part("gap3", v3(0, BODY.y * 0.74, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
     // Side-facing wood on the end caps for a value step.
     part("endL", v3(-BODY.x / 2 + 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
     part("endR", v3(BODY.x / 2 - 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
@@ -439,10 +493,21 @@ const heroPrize = (rarity: Parameters<typeof rewardMaterialOf>[0], at: EngineVec
 
 // ── the arcade platform (rim, central glow, edge falloff, corner rivets) ────────
 
+/**
+ * Radius of the turquoise lagoon the chests sit on. In the reference the water
+ * is a small rounded pool with a wide golden-sand beach all around it, not a
+ * full-frame flood — so the disc is sized only a little larger than the nine
+ * chests it holds (whose grid reaches ~3.6 world-units from center), leaving a
+ * broad ring of the sandy `stageRoom` floor showing around the pool. The other
+ * discs (edge vignette, center glow) and the rim rivets keep their original
+ * proportions relative to this radius.
+ */
+export const WATER_RADIUS = 5.0;
+
 const platform = (): readonly SceneInstance[] => [
-  disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), 9, 0.006),
-  disc("plat:side", "PlatformSide", v3(0, -0.062, 0), 8.4, 0.06),
-  disc("plat:glow", "CenterGlow", v3(0, -0.03, 0), 4.4, 0.006),
+  disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006),
+  disc("plat:side", "PlatformSide", v3(0, -0.062, 0), WATER_RADIUS, 0.06),
+  disc("plat:glow", "CenterGlow", v3(0, -0.03, 0), WATER_RADIUS * (4.4 / 8.4), 0.006),
   ...[
     [-1, -1],
     [1, -1],
@@ -452,8 +517,151 @@ const platform = (): readonly SceneInstance[] => [
     key: `plat:rivet${i}`,
     material: "BoardRivet",
     mesh: "cylinder" as const,
-    transform: { position: v3((sx ?? 0) * 6.7, -0.02, (sz ?? 0) * 6.7), rotation: QUAT_IDENTITY, scale: v3(0.34, 0.05, 0.34) },
+    transform: { position: v3((sx ?? 0) * WATER_RADIUS * (6.7 / 8.4), -0.02, (sz ?? 0) * WATER_RADIUS * (6.7 / 8.4)), rotation: QUAT_IDENTITY, scale: v3(0.34, 0.05, 0.34) },
   })),
+];
+
+// ── the beach set-dressing (palm, sandcastle, crab, shells) ─────────────────────
+
+/*
+ * The reference stages the lagoon inside a lived-in cartoon beach: a leaning palm
+ * at the far left, a turreted sandcastle flying a red flag at the far right, a
+ * little red crab on the near sand, and shells/starfish dotted around the shore.
+ * The champion left that sand bare, so the frame read as a lone pool of chests.
+ *
+ * None of it needs a new primitive — every prop is an assembly of the same box /
+ * cylinder / sphere vocabulary the chests are built from, placed ONCE on the sand
+ * ring OUTSIDE the water disc (radius > the vignette so nothing floats on the
+ * lagoon) so the decor frames the pool the way the reference does. It is purely
+ * static cosmetic dressing: it reads neither the outcome nor the tick, and sits
+ * behind the veil so a hero reveal still dims it away with the rest of the stage.
+ */
+
+/** A single decor box/cylinder/sphere at a world position. */
+const decorPart = (
+  key: string,
+  material: string,
+  mesh: "box" | "cylinder" | "sphere",
+  position: EngineVec3,
+  scale: EngineVec3,
+  rotation: EngineQuat = QUAT_IDENTITY,
+): SceneInstance => ({ key, material, mesh, transform: { position, rotation, scale } });
+
+/** A leaning palm: a curved stack of tapering bark cylinders, a coconut cluster,
+ * and a fan of drooping frond boards radiating from the crown. */
+const palmTree = (origin: EngineVec3): readonly SceneInstance[] => {
+  const segs = [
+    { y: 0.4, x: 0.0, r: 0.34, tilt: 0.04, mat: "PalmBarkDark" },
+    { y: 1.08, x: 0.12, r: 0.3, tilt: 0.12, mat: "PalmBark" },
+    { y: 1.74, x: 0.3, r: 0.26, tilt: 0.22, mat: "PalmBarkDark" },
+    { y: 2.34, x: 0.56, r: 0.22, tilt: 0.34, mat: "PalmBark" },
+  ];
+  const trunk = segs.map((s, i) =>
+    decorPart(`palm:trunk${i}`, s.mat, "cylinder", addV3(origin, v3(s.x, s.y, 0)), v3(s.r * 2, 0.72, s.r * 2), quatRoll(-s.tilt)),
+  );
+  const crown = addV3(origin, v3(0.74, 2.66, 0));
+  const coconuts = [v3(-0.14, -0.04, 0.12), v3(0.12, -0.02, -0.14), v3(-0.02, -0.16, -0.02)].map((d, i) =>
+    decorPart(`palm:coco${i}`, "Coconut", "sphere", addV3(crown, d), v3(0.2, 0.2, 0.2)),
+  );
+  const fronds = Array.from({ length: 7 }, (_, i): SceneInstance => {
+    const a = (i / 7) * Math.PI * 2;
+    const droop = 0.55 + (i % 2) * 0.12;
+    const q = quatMul(quatYaw(a), quatPitch(droop));
+    const len = 1.5 + (i % 3) * 0.14;
+    return decorPart(
+      `palm:frond${i}`,
+      i % 2 === 0 ? "PalmLeaf" : "PalmLeafDark",
+      "box",
+      addV3(crown, rotateByQuat(v3(0, 0.05, len / 2), q)),
+      v3(0.34, 0.09, len),
+      q,
+    );
+  });
+  return [...trunk, ...coconuts, ...fronds];
+};
+
+/** A turreted sandcastle: a broad base, a central keep with two flanking turrets,
+ * crenellations, an arched door, and a red pennant on a pole. */
+const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
+  const base = decorPart("castle:base", "CastleSandDark", "box", addV3(origin, v3(0, 0.28, 0)), v3(2.4, 0.56, 2.0));
+  const towers = [
+    { key: "keep", x: 0, r: 0.52, h: 1.7, mat: "CastleSand" },
+    { key: "turnL", x: -0.92, r: 0.34, h: 1.15, mat: "CastleSandDark" },
+    { key: "turnR", x: 0.92, r: 0.34, h: 1.15, mat: "CastleSandDark" },
+  ];
+  const towerParts = towers
+    .map((t): readonly SceneInstance[] => {
+      const top = 0.56 + t.h;
+      const shaft = decorPart(`castle:${t.key}`, t.mat, "cylinder", addV3(origin, v3(t.x, 0.56 + t.h / 2, 0)), v3(t.r * 2, t.h, t.r * 2));
+      const crenels = Array.from({ length: 6 }, (_, i): SceneInstance => {
+        const a = (i / 6) * Math.PI * 2;
+        return decorPart(
+          `castle:${t.key}cren${i}`,
+          "CastleSand",
+          "box",
+          addV3(origin, v3(t.x + Math.cos(a) * t.r * 0.82, top + 0.11, Math.sin(a) * t.r * 0.82)),
+          v3(0.16, 0.22, 0.16),
+        );
+      });
+      return [shaft, ...crenels];
+    })
+    .flat();
+  const door = decorPart("castle:door", "CastleDoor", "box", addV3(origin, v3(0, 0.5, 1.0)), v3(0.42, 0.62, 0.08));
+  const poleTop = 0.56 + 1.7;
+  const pole = decorPart("castle:pole", "CastlePole", "cylinder", addV3(origin, v3(0, poleTop + 0.42, 0)), v3(0.05, 0.84, 0.05));
+  const flag = decorPart("castle:flag", "CastleFlag", "box", addV3(origin, v3(0.24, poleTop + 0.66, 0)), v3(0.44, 0.28, 0.03));
+  return [base, ...towerParts, door, pole, flag];
+};
+
+/** A stubby cartoon crab: a domed shell, two eyestalks, two front claws, and a
+ * row of little legs down each side. */
+const crab = (origin: EngineVec3): readonly SceneInstance[] => {
+  const body = decorPart("crab:body", "CrabShell", "sphere", addV3(origin, v3(0, 0.2, 0)), v3(0.62, 0.4, 0.5));
+  const eyes = [-1, 1]
+    .map((s): readonly SceneInstance[] => [
+      decorPart(`crab:stalk${s}`, "CrabShell", "box", addV3(origin, v3(s * 0.14, 0.44, 0.16)), v3(0.06, 0.18, 0.06)),
+      decorPart(`crab:eye${s}`, "CrabEye", "sphere", addV3(origin, v3(s * 0.14, 0.55, 0.16)), v3(0.1, 0.1, 0.1)),
+    ])
+    .flat();
+  const claws = [-1, 1]
+    .map((s): readonly SceneInstance[] => [
+      decorPart(`crab:arm${s}`, "CrabShellDark", "box", addV3(origin, v3(s * 0.42, 0.18, 0.24)), v3(0.1, 0.09, 0.28)),
+      decorPart(`crab:claw${s}`, "CrabShell", "sphere", addV3(origin, v3(s * 0.5, 0.18, 0.42)), v3(0.22, 0.18, 0.2)),
+    ])
+    .flat();
+  const legs = [-1, 1]
+    .map((s): readonly SceneInstance[] =>
+      [-0.16, 0.02, 0.2].map((z, i) =>
+        decorPart(`crab:leg${s}_${i}`, "CrabShellDark", "box", addV3(origin, v3(s * 0.38, 0.08, z)), v3(0.24, 0.06, 0.07), quatYaw(s * 0.5)),
+      ),
+    )
+    .flat();
+  return [body, ...eyes, ...claws, ...legs];
+};
+
+/** Shells and a couple of starfish scattered on the shore. Positions are on the
+ * sand ring (radius clear of the water vignette). */
+const beachLitter = (): readonly SceneInstance[] => {
+  const shells = [v3(5.2, 0, 1.9), v3(-3.7, 0, -4.7), v3(2.6, 0, 5.2), v3(6.0, 0, -0.9), v3(-6.0, 0, -1.7)].map((at, i) =>
+    decorPart(`shell${i}`, "Shell", "sphere", v3(at.x, 0.09, at.z), v3(0.28, 0.16, 0.24)),
+  );
+  const starfish = [v3(4.5, 0, 3.9), v3(-3.0, 0, 5.2)]
+    .map((at, i): readonly SceneInstance[] => {
+      const arms = Array.from({ length: 5 }, (_, k): SceneInstance =>
+        decorPart(`star${i}:arm${k}`, "Starfish", "box", v3(at.x, 0.05, at.z), v3(0.12, 0.05, 0.44), quatYaw((k / 5) * Math.PI * 2)),
+      );
+      return arms;
+    })
+    .flat();
+  return [...shells, ...starfish];
+};
+
+/** The whole shore of set-dressing, placed once around the lagoon. */
+const beachDecor = (): readonly SceneInstance[] => [
+  ...palmTree(v3(-5.3, 0, -2.8)),
+  ...sandcastle(v3(5.0, 0, -3.3)),
+  ...crab(v3(-5.4, 0, 1.0)),
+  ...beachLitter(),
 ];
 
 // ── the background veil ─────────────────────────────────────────────────────────
@@ -672,7 +880,17 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // burst light that flashes the chest faces at the pop. All three follow the
   // FLOWN chest, so the reveal stays lit as it travels off the board.
   const focus = selected === null ? v3(0, 0, 0) : flown.position;
-  const lights: SceneLight[] = [...stageLights(focus, 0.5 + 0.4 * selectEase)];
+  // Beach sun, not casino sky. The shared rig pairs the warm key with a cool
+  // sky fill tuned at 0.35 — right indoors, but here it lifts and cools every
+  // shadow face, milkifying the chests and washing the warm seams to grey. This
+  // scene's reference is a single warm raked sun: lit lids blazing, side/front
+  // boards falling to deep warm brown. So we knock the cool fill down hard for
+  // THIS scene only, letting the shadow faces settle onto the warm key plus the
+  // neutral ambient floor — widening the light-driven lit-vs-shadow spread that
+  // sculpts each faceted chest and keeping the darks warm rather than blue.
+  const lights: SceneLight[] = stageLights(focus, 0.5 + 0.4 * selectEase).map((entry) =>
+    entry.key === "light:fill" ? { key: entry.key, light: { ...entry.light, intensity: 0.12 } } : entry,
+  );
   if (selected !== null && revealAge >= timeline.pauseEnd) {
     const warm = clamp01((revealAge - timeline.pauseEnd) / 12);
     lights.push({
@@ -693,8 +911,24 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     // The veil sits between the board and the hero chest: everything before it
     // in this list is what gets dimmed, everything after it stays clear.
     instances: [
-      ...stageRoom(16),
+      // The floor-ring is pulled in to the water radius so the sandy floor slab
+      // reads as a wide beach around the inset lagoon rather than one more
+      // turquoise disc flooding the frame out to the old ring radius.
+      //
+      // The slab itself is sized MUCH larger than the water so the sandy beach
+      // fills the frame all the way to the top edge. At the tabletop pitch the
+      // top-of-frame frustum ray strikes the ground well past the old radius-8
+      // slab, so its far edge fell short and the emissive pastel backdrop/sky
+      // leaked in as a light-blue horizon band across the top — a horizon the
+      // reference does not have (there the sandy beach, with palm and sandcastle,
+      // runs unbroken to the top edge with no sky showing). Extending the slab
+      // past the furthest in-frame ground point drops that whole band onto beach,
+      // cropping the horizon out and matching the reference's full-bleed sand.
+      // The turquoise ring (accentRadius = WATER_RADIUS) is unchanged, so the
+      // inset lagoon and its beach margin keep exactly the held framing.
+      ...stageRoom(48, WATER_RADIUS),
       ...platform(),
+      ...beachDecor(),
       ...chests,
       ...backgroundVeil(camera, framing, flight),
       ...burst,
