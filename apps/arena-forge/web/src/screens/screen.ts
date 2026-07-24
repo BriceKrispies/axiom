@@ -1,6 +1,6 @@
 /*
- * screen.ts — the application screen contract. Arena Forge has exactly three
- * top-level screens — `main_menu`, `gameplay`, `figure_lab` — and the app shell
+ * screen.ts — the application screen contract. Arena Forge has four top-level
+ * screens — `main_menu`, `gameplay`, `figure_lab`, `battle_sim` — and the app shell
  * (`../game.ts`) owns which one is active, routing the harness's per-frame
  * update/render/pointer callbacks to it. Screens never navigate directly; they
  * ask the shell via `ScreenNav.goto`, so transitions stay centralized (no
@@ -14,7 +14,7 @@ import { clearScene } from "@axiom/web-engine";
 import { resetMeshCache } from "../figures/primitives.ts";
 import { resetMaterialCache } from "../figures/scene/materials.ts";
 
-export type ScreenState = "main_menu" | "gameplay" | "figure_lab";
+export type ScreenState = "main_menu" | "gameplay" | "figure_lab" | "battle_sim";
 
 /** How a screen requests navigation from the shell. */
 export interface ScreenNav {

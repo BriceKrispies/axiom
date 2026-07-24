@@ -13,6 +13,7 @@ import { renderScene } from "@axiom/web-engine";
 import type { LoadedContent } from "../sim/content/load.ts";
 import type { Command } from "../sim/commands.ts";
 import { FigureDirector } from "../figures/runtime/figure-director.ts";
+import type { FigurePlacement } from "../figures/runtime/figure-director.ts";
 import type { MatchState, PlayerState, WarbandSnapshot } from "../sim/model.ts";
 import { DEFAULT_RULES, FIXED_HZ } from "../sim/tuning.ts";
 import { LocalMatchHost } from "../api/local-host.ts";
@@ -72,10 +73,29 @@ export class GameplayScreen implements Screen {
   public renderScene3D(): void {
     const view = this.view();
     this.frameCombat = view.phase.startsWith("combat") ? this.combatFrame() : null;
-    this.figures.sync(view, this.frameCombat);
+    const stage = (view.players[HUMAN] as PlayerState).presentationStage;
+    this.figures.syncScene(this.placements(view, this.frameCombat), stage);
     this.frameTick += 1;
     this.figures.render(this.frameTick, this.frameCombat);
     renderScene();
+  }
+
+  /** Translate the current match state (or combat frame) into neutral figure
+   * placements for the shared director. In combat, figures follow the event-derived
+   * unit set (including summons); out of combat, the human's own warband. */
+  private placements(view: MatchState, combat: CombatFrame | null): FigurePlacement[] {
+    if (combat !== null) {
+      const mySide = this.humanSide(view, combat);
+      return combat.units.map((u) => ({ instanceId: u.instanceId, cardId: u.cardId, forged: false, slot: u.slot, enemy: u.side !== mySide }));
+    }
+    const p = view.players[HUMAN] as PlayerState;
+    return p.warband.flatMap((u, slot) => (u === null ? [] : [{ instanceId: u.instanceId, cardId: u.cardId, forged: u.forged, slot, enemy: false }]));
+  }
+
+  private humanSide(view: MatchState, combat: CombatFrame): "a" | "b" {
+    const human = view.players[HUMAN] as PlayerState;
+    const aIsHuman = combat.units.some((u) => u.side === "a" && human.warband.some((w) => w?.instanceId === u.instanceId));
+    return aIsHuman ? "a" : "b";
   }
 
   private submit(command: Command): void {

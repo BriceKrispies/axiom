@@ -16,6 +16,7 @@ import { ScreenRouter } from "./screens/router.ts";
 import { MainMenuScreen } from "./screens/main-menu.ts";
 import { GameplayScreen } from "./screens/gameplay.ts";
 import { FigureLabScreen } from "./screens/figure-lab/figure-lab.ts";
+import { BattleSimScreen } from "./screens/battle-sim/battle-sim.ts";
 import type { LabGroup, SortMode } from "./screens/figure-lab/catalog.ts";
 
 export class ArenaForgeGame {
@@ -36,6 +37,9 @@ export class ArenaForgeGame {
     }
     if (state === "figure_lab") {
       return new FigureLabScreen(this.content, nav);
+    }
+    if (state === "battle_sim") {
+      return new BattleSimScreen(this.content, nav);
     }
     return new MainMenuScreen(this.content, nav);
   }
@@ -92,6 +96,10 @@ export class ArenaForgeGame {
 
   private lab(): FigureLabScreen | null {
     return this.router.screen instanceof FigureLabScreen ? this.router.screen : null;
+  }
+
+  private battleSim(): BattleSimScreen | null {
+    return this.router.screen instanceof BattleSimScreen ? this.router.screen : null;
   }
 
   public debugAdvancePhase(): void {
@@ -152,5 +160,22 @@ export class ArenaForgeGame {
 
   public debugLabGalleryRect(): { x: number; y: number; w: number; h: number } | null {
     return this.lab()?.debugGalleryRect() ?? null;
+  }
+
+  // ── battle simulator hooks ────────────────────────────────────────────────────
+  public debugBattleStage(): ReturnType<BattleSimScreen["debugStage"]> | null {
+    return this.battleSim()?.debugStage() ?? null;
+  }
+
+  public debugBattleStart(index: number): void {
+    this.battleSim()?.debugStartBattle(index);
+  }
+
+  public debugBattleFinish(): void {
+    this.battleSim()?.debugFinish();
+  }
+
+  public debugBattleResult(): ReturnType<BattleSimScreen["debugResult"]> {
+    return this.battleSim()?.debugResult() ?? null;
   }
 }

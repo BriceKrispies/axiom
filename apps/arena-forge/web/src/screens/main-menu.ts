@@ -41,6 +41,7 @@ export class MainMenuScreen implements Screen {
   private embers: Ember[] = [];
   private tick = 0;
   private play: Rect = { x: 0, y: 0, w: 0, h: 0 };
+  private sim: Rect = { x: 0, y: 0, w: 0, h: 0 };
   private lab: Rect = { x: 0, y: 0, w: 0, h: 0 };
 
   public constructor(private readonly content: LoadedContent, private readonly nav: ScreenNav) {
@@ -109,20 +110,29 @@ export class MainMenuScreen implements Screen {
     text(ctx, "ARENA FORGE", w / 2, plaque.y + ph * 0.42, { size: Math.min(46, pw / 9), weight: 800, align: "center", color: PALETTE.brassLight });
     text(ctx, "ARCANE INDUSTRIAL TOURNAMENT", w / 2, plaque.y + ph * 0.74, { size: Math.min(13, pw / 34), weight: 700, align: "center", color: PALETTE.ember });
 
-    // ── Forge-control buttons (large, ≥44px) ──
-    const bw = Math.min(w * 0.34, 260);
-    const bh = Math.max(52, h * 0.14);
-    const gap = 16;
+    // ── Forge-control buttons (large, ≥44px). Three across on wide screens,
+    //    stacked on narrow ones. ──
+    const bh = Math.max(50, h * 0.12);
+    const gap = 12;
     const cx = w / 2;
-    const by = h - bh - Math.max(18, h * 0.08);
-    this.play = { x: cx - bw - gap / 2, y: by, w: bw, h: bh };
-    this.lab = { x: cx + gap / 2, y: by, w: bw, h: bh };
-    // On very narrow screens, stack vertically.
-    if (w < 620) {
-      this.play = { x: cx - bw / 2, y: by - bh - 12, w: bw, h: bh };
-      this.lab = { x: cx - bw / 2, y: by, w: bw, h: bh };
+    if (w >= 700) {
+      const bw = Math.min(w * 0.27, 240);
+      const total = bw * 3 + gap * 2;
+      const x0 = cx - total / 2;
+      const by = h - bh - Math.max(18, h * 0.07);
+      this.play = { x: x0, y: by, w: bw, h: bh };
+      this.sim = { x: x0 + (bw + gap), y: by, w: bw, h: bh };
+      this.lab = { x: x0 + 2 * (bw + gap), y: by, w: bw, h: bh };
+    } else {
+      const bw = Math.min(w * 0.82, 320);
+      const x0 = cx - bw / 2;
+      const by = h - Math.max(14, h * 0.05) - bh;
+      this.lab = { x: x0, y: by, w: bw, h: bh };
+      this.sim = { x: x0, y: by - bh - 10, w: bw, h: bh };
+      this.play = { x: x0, y: by - 2 * (bh + 10), w: bw, h: bh };
     }
     button(ctx, this.play, "PLAY", { fill: "#2a1a10", edge: PALETTE.ember, text: PALETTE.brassLight, sub: "ENTER THE ARENA" });
+    button(ctx, this.sim, "BATTLE SIM", { fill: "#26170f", edge: PALETTE.emberHot, text: PALETTE.brassLight, sub: "PICK · WATCH · FIGHT" });
     button(ctx, this.lab, "FIGURE LAB", { fill: "#1a1f26", edge: PALETTE.steel, text: PALETTE.ink, sub: "INSPECT · ANIMATE" });
 
     text(ctx, "build v0.2 · 38 figures · canvas2d/webgl2", 10, h - 12, { size: 10, weight: 700, color: PALETTE.inkDim });
@@ -131,6 +141,10 @@ export class MainMenuScreen implements Screen {
   public onPointerDown(x: number, y: number): void {
     if (inRect(this.play, x, y)) {
       this.nav.goto("gameplay");
+      return;
+    }
+    if (inRect(this.sim, x, y)) {
+      this.nav.goto("battle_sim");
       return;
     }
     if (inRect(this.lab, x, y)) {

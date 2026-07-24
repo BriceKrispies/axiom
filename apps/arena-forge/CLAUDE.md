@@ -36,7 +36,7 @@ enforces it) — never import the DOM, the engine, or `ui/` from `sim/`.
 | Headless harness | `src/harness/` | `headless.ts` (100-match runner + invariants), `serialize.ts`/`replay.ts` (versioned replay). |
 | Combat playback | `src/presentation/combat-playback.ts` | Pure REPLAY of the `SimEvent` stream → `CombatFrame`/`PlayUnit`. Decides nothing. |
 | **Procedural 3D figures** | `src/figures/` | `grammar.ts` (data types), `meshgen.ts` (SDK-free geometry), `generator.ts` (`expandFigure`), `compose.ts` (flat hierarchy → WORLD transforms + `PoseDelta`), `variation.ts` (seeded), `bodyplans.ts` (per-group grammar), `registry.ts` (`figureForCard`, memoized), `languages/` (5 `GroupVisualLanguage`s), `scene/` (materials, `FigureInstance`, arena scene), `runtime/figure-director.ts`. |
-| **App screens** | `src/screens/` | `screen.ts` (Screen contract + `resetEngineScene`), `router.ts` (`ScreenRouter`), `main-menu.ts`, `gameplay.ts` (the match orchestration), `figure-lab/` (`figure-lab.ts` = the all-figures gallery screen, `catalog.ts` = the pure filter/search/sort query, `gallery-layout.ts` = the pure grid geometry). |
+| **App screens** | `src/screens/` | `screen.ts` (Screen contract + `resetEngineScene`), `router.ts` (`ScreenRouter`), `main-menu.ts` (three entrances: PLAY / BATTLE SIM / FIGURE LAB), `gameplay.ts` (the match orchestration), `figure-lab/` (`figure-lab.ts` = the all-figures gallery screen, `catalog.ts` = the pure filter/search/sort query, `gallery-layout.ts` = the pure grid geometry), `battle-sim/` (the Battle Simulator: `presets.ts` = the DATA-DRIVEN team catalog — the one file to edit teams; `power.ts` = deterministic power model + equal-power enemy builder; `battle.ts` = headless runner over the real `runCombat`; `battle-sim.ts` = the screen). |
 | App shell + boot | `src/game.ts`, `src/harness.ts`, `index.html` | `game.ts` = `ArenaForgeGame` (the screen router, `window.__arena`). `harness.ts` = browser edge (two canvases, `startLoop`, pointer). |
 | 2D overlay UI | `src/ui/` | `draw.ts` (primitives: `panel/button/text/rivet/inRect/Rect`), `layout.ts`, `interaction.ts` (gameplay pointer→commands), `render.ts` (`renderFrame`), `theme.ts` (`PALETTE`, `STAGE_TREATMENT`). |
 | Audio | `src/audio/cues.ts` | `SimEvent` → `playTone`, throttled. |
@@ -48,9 +48,17 @@ enforces it) — never import the DOM, the engine, or `ui/` from `sim/`.
   then `render(ctx)` (2D overlay). **Canvas2D backend is the deterministic baseline**;
   `?backend=webgl2` is an optional enhancement. When 3D is active the 2D overlay
   `clearRect`s over the arena so the scene shows through.
-- **Screen state is centralized** in `ScreenRouter` (`main_menu` / `gameplay` / `figure_lab`).
-  Screens never navigate directly — they call `ScreenNav.goto`. Each `enter()` rebuilds the
-  scene; `exit()` releases it. The app boots on `main_menu`.
+- **Screen state is centralized** in `ScreenRouter` (`main_menu` / `gameplay` / `figure_lab` /
+  `battle_sim`). Screens never navigate directly — they call `ScreenNav.goto`. Each `enter()`
+  rebuilds the scene; `exit()` releases it. The app boots on `main_menu`.
+- **`FigureDirector` is Match-state-free.** It takes neutral `FigurePlacement[]` + a combat
+  frame, so BOTH `gameplay.ts` (translating `MatchState`) and `battle-sim.ts` (translating a
+  battle's combat frame) drive the one director — no per-screen figure system. Placements match
+  their combat unit by `instanceId`.
+- **Battle Simulator = the real engine, watched.** It never re-implements combat: a preset team
+  + an equal-power generated enemy become two `WarbandSnapshot`s fed to `runCombat`, then the
+  event stream is replayed via `reconstructFrame` exactly as gameplay replays a round. Same
+  seed ⇒ identical fight. Edit `battle-sim/presets.ts` to change the selectable teams.
 - **Figure grammar.** A figure is a flat, parent-before-child part list; `composeWorld`
   flattens it to WORLD transforms on the CPU (the engine has **no parenting**). Animation =
   per-part `PoseDelta`s fed to `composeWorld`. Group coherence comes from `languages/` +

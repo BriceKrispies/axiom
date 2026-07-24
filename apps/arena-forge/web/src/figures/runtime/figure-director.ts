@@ -1,17 +1,19 @@
 /*
  * figure-director.ts — the single presentation orchestrator the game owns. It
- * builds the 3D scene (floor + lights + one figure per live unit) and re-poses it
- * every tick from immutable simulation state + the combat playback frame. Because
- * the engine exposes no per-node despawn (only `clearScene`), it rebuilds the whole
- * scene only when the SET of figures changes (a buy/sell/forge/summon — discrete,
- * rare events), and otherwise just re-poses existing nodes each frame (cheap, no
+ * builds the 3D scene (floor + lights + one figure per placement) and re-poses it
+ * every tick from a neutral list of FIGURE PLACEMENTS plus an optional combat
+ * playback frame. It is deliberately MATCH-STATE-FREE: callers (the gameplay
+ * screen, the battle simulator) translate their own state into `FigurePlacement`s,
+ * so one director serves every screen that shows figures. Because the engine
+ * exposes no per-node despawn (only `clearScene`), it rebuilds the whole scene only
+ * when the SET of placements changes (a buy/sell/forge/summon/move — discrete, rare
+ * events), and otherwise just re-poses existing nodes each frame (cheap, no
  * spawning). It never decides anything: attack/damage/death come from the event-
  * derived combat frame; figures only visualize them.
  */
 
 import { clearScene, rendererBackendName } from "@axiom/web-engine";
 import type { LoadedContent } from "../../sim/content/load.ts";
-import type { MatchState, PlayerState } from "../../sim/model.ts";
 import type { CombatFrame } from "../../presentation/combat-playback.ts";
 import { type Vec3, add, quatFromEulerXyz, vec3 } from "../vec3.ts";
 import type { QualityTier } from "../parts.ts";
@@ -21,23 +23,41 @@ import { buildArena, enemySlotPos, warbandSlotPos } from "../scene/arena-scene.t
 import { resetMeshCache } from "../primitives.ts";
 import { resetMaterialCache } from "../scene/materials.ts";
 
-const HUMAN = 0;
 const FACE_CAMERA = quatFromEulerXyz(0, 0, 0);
 const FACE_AWAY = quatFromEulerXyz(0, Math.PI, 0);
 
+type ArenaStageLite = "workshop" | "kindled" | "tempered" | "masterwork";
+
+/**
+ * A neutral request to place one figure on the arena. The caller derives these
+ * from its own state (gameplay from `MatchState`, the battle sim from the combat
+ * frame + its team snapshots), so the director depends on nothing above it. `enemy`
+ * selects the far row + facing; `instanceId` matches the placement to its combat
+ * unit for attack/defend/death visualization.
+ */
+export interface FigurePlacement {
+  readonly instanceId: number;
+  readonly cardId: string;
+  readonly forged: boolean;
+  readonly slot: number;
+  readonly enemy: boolean;
+}
+
 interface Placed {
   readonly inst: FigureInstance;
+  readonly instanceId: number;
   readonly slot: number;
   readonly enemy: boolean;
 }
 
 export class FigureDirector {
+  private readonly content: LoadedContent;
   private readonly quality: QualityTier;
   private placed: Placed[] = [];
   private signature = "";
-  private stage: ArenaStageLite = "workshop";
 
-  public constructor(private readonly content: LoadedContent) {
+  public constructor(content: LoadedContent) {
+    this.content = content;
     this.quality = rendererBackendName() === "WebGL2" ? "med" : "low";
   }
 
@@ -49,62 +69,34 @@ export class FigureDirector {
     return this.placed.length;
   }
 
-  /** Rebuild the scene iff the figure set changed; called each tick before pose. */
-  public sync(view: MatchState, combat: CombatFrame | null): void {
-    const inCombat = view.phase.startsWith("combat") && combat !== null;
-    const sig = inCombat ? this.combatSignature(view, combat) : this.warbandSignature(view);
-    const stage = (view.players[HUMAN] as PlayerState).presentationStage as ArenaStageLite;
-    if (sig === this.signature && stage === this.stage) {
+  /** Rebuild the scene iff the placement set (or stage) changed; called each tick
+   * before pose. Cheap when nothing structural changed (a pure signature compare). */
+  public syncScene(placements: readonly FigurePlacement[], stage: ArenaStageLite): void {
+    const sig = `${stage}|${placements
+      .map((p) => `${p.enemy ? "e" : "a"}:${p.instanceId}:${p.cardId}:${p.forged ? 1 : 0}:${p.slot}`)
+      .join(",")}`;
+    if (sig === this.signature) {
       return;
     }
     this.signature = sig;
-    this.stage = stage;
-    this.rebuild(view, combat, inCombat);
-  }
-
-  private warbandSignature(view: MatchState): string {
-    const p = view.players[HUMAN] as PlayerState;
-    return `w|${view.phase}|${p.warband.map((u) => (u === null ? "-" : `${u.cardId}:${u.forged ? 1 : 0}`)).join(",")}`;
-  }
-
-  private combatSignature(view: MatchState, combat: CombatFrame): string {
-    return `c|${combat.units.map((u) => `${u.side}:${u.instanceId}:${u.cardId}`).sort().join(",")}`;
-  }
-
-  private rebuild(view: MatchState, combat: CombatFrame | null, inCombat: boolean): void {
     clearScene();
     resetMeshCache();
     resetMaterialCache();
-    buildArena(this.stage);
-    this.placed = [];
-    if (inCombat && combat !== null) {
-      const mySide = this.humanSide(view, combat);
-      for (const u of combat.units) {
-        const enemy = u.side !== mySide;
-        this.placed.push({ inst: new FigureInstance(this.content, u.cardId, false, this.quality), slot: u.slot, enemy });
-      }
-      return;
-    }
-    const p = view.players[HUMAN] as PlayerState;
-    p.warband.forEach((u, slot) => {
-      if (u !== null) {
-        this.placed.push({ inst: new FigureInstance(this.content, u.cardId, u.forged, this.quality), slot, enemy: false });
-      }
-    });
+    buildArena(stage);
+    this.placed = placements.map((p) => ({
+      inst: new FigureInstance(this.content, p.cardId, p.forged, this.quality),
+      instanceId: p.instanceId,
+      slot: p.slot,
+      enemy: p.enemy,
+    }));
   }
 
-  private humanSide(view: MatchState, combat: CombatFrame): "a" | "b" {
-    const human = view.players[HUMAN] as PlayerState;
-    const aIsHuman = combat.units.some((u) => u.side === "a" && human.warband.some((w) => w?.instanceId === u.instanceId));
-    return aIsHuman ? "a" : "b";
-  }
-
-  /** Re-pose every figure for this tick (idle sway; combat attacker/defender/dead). */
+  /** Re-pose every figure for this tick (idle sway; combat attacker/defender/dead).
+   * `combat === null` is the static warband / VS-tableau idle. */
   public render(tick: number, combat: CombatFrame | null): void {
-    for (let i = 0; i < this.placed.length; i += 1) {
-      const it = this.placed[i] as Placed;
-      const unit = combat?.units.find((u) => u.instanceId === this.combatUnitId(it, combat));
-      if (combat !== null && unit !== undefined && !unit.alive) {
+    for (const it of this.placed) {
+      const unit = combat?.units.find((u) => u.instanceId === it.instanceId);
+      if (combat !== null && (unit === undefined || !unit.alive)) {
         it.inst.park();
         continue;
       }
@@ -115,31 +107,21 @@ export class FigureDirector {
     }
   }
 
-  private combatUnitId(it: Placed, combat: CombatFrame): number {
-    // Match by slot+side during combat (placed order mirrors combat.units order).
-    const idx = this.placed.indexOf(it);
-    return combat.units[idx]?.instanceId ?? -1;
-  }
-
   private frameFor(it: Placed, tick: number, combat: CombatFrame | null): RootFrame {
     const bob = Math.sin(tick * 0.06 + it.slot * 1.3) * 0.02;
-    if (combat === null) {
-      return { position: add(warbandSlotPos(it.slot), vec3(0, bob, 0)), rotation: FACE_CAMERA, scale: 1 };
-    }
     const base: Vec3 = it.enemy ? enemySlotPos(it.slot) : warbandSlotPos(it.slot);
-    const unit = combat.units[this.placed.indexOf(it)];
-    const attacking = unit !== undefined && combat.attacker === unit.instanceId;
-    const defending = unit !== undefined && combat.defender === unit.instanceId;
+    const facing = it.enemy ? FACE_AWAY : FACE_CAMERA;
+    if (combat === null) {
+      return { position: add(base, vec3(0, bob, 0)), rotation: facing, scale: 1 };
+    }
+    const attacking = combat.attacker === it.instanceId;
+    const defending = combat.defender === it.instanceId;
     const forward = it.enemy ? -1 : 1;
     const lunge = attacking ? 0.22 : defending ? -0.08 : 0;
-    return {
-      position: add(base, vec3(0, bob, forward * lunge)),
-      rotation: it.enemy ? FACE_AWAY : FACE_CAMERA,
-      scale: 1,
-    };
+    return { position: add(base, vec3(0, bob, forward * lunge)), rotation: facing, scale: 1 };
   }
 
-  /** Drop the whole scene (restart). */
+  /** Drop the whole scene (screen exit / restart). */
   public dispose(): void {
     clearScene();
     resetMeshCache();
@@ -148,5 +130,3 @@ export class FigureDirector {
     this.signature = "";
   }
 }
-
-type ArenaStageLite = "workshop" | "kindled" | "tempered" | "masterwork";
