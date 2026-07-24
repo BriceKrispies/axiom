@@ -5,7 +5,7 @@
  * the player chooses.
  */
 
-import type { CasinoGameConfig } from "../../chance-engine/configuration/schema.ts";
+import type { CasinoGameConfig, RewardTier } from "../../chance-engine/configuration/schema.ts";
 import { baseConfig } from "../../chance-engine/configuration/schema.ts";
 import type { ConfigIssue } from "../../chance-engine/configuration/validation.ts";
 import type { CasinoGameDefinition, GameRuntime, RunningCasinoGame } from "../../chance-engine/registry/definition.ts";
@@ -14,8 +14,25 @@ import type { ChestSpec } from "./game.ts";
 import { CHEST_TIMING, chestCues, initialChestExtra, stepChest } from "./game.ts";
 import { CHEST_RESOURCES, chestScene } from "./scene.ts";
 
+/** A single small consolation prize — every win grants 5 points. */
+const CONSOLATION_TIER: RewardTier = {
+  countsAsWin: true,
+  id: "consolation",
+  label: "5 points",
+  rarity: "common",
+  reward: { amount: 5, kind: "points", label: "5 points" },
+  weight: 1,
+};
+
+// Win every time, for a small consolation prize. `targetWinRate: 1` makes all
+// nine chests winners (9·1 = 9), so any pick wins; the single reward tier means
+// that win is always the same modest 5 points. Tune either in the Set Up panel.
 const defaultConfig = (): CasinoGameConfig<ChestSpec> =>
-  baseConfig("treasure-chest-pick", "Treasure Chest Pick", "tabletop", { danceLiveliness: 0.7 }, { choiceCount: 9, targetWinRate: 0.42 });
+  baseConfig("treasure-chest-pick", "Treasure Chest Pick", "tabletop", { danceLiveliness: 0.7 }, {
+    choiceCount: 9,
+    rewardTiers: [CONSOLATION_TIER],
+    targetWinRate: 1,
+  });
 
 const validateSpec = (spec: ChestSpec): readonly ConfigIssue[] =>
   typeof spec.danceLiveliness === "number" && Number.isFinite(spec.danceLiveliness) && spec.danceLiveliness >= 0 && spec.danceLiveliness <= 1

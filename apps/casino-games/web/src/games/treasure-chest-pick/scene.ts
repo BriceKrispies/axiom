@@ -35,7 +35,7 @@ import {
   scaleV3,
   v3,
 } from "../../presentation/stage/vectors.ts";
-import type { ChestSpec, ChestState, HeroFraming } from "./game.ts";
+import type { ChestSpec, ChestState, DecorDrag, HeroFraming } from "./game.ts";
 import {
   CHEST_BODY as BODY,
   CHEST_BODY_TOP as BODY_TOP,
@@ -598,10 +598,21 @@ const palmTree = (origin: EngineVec3, tick: number): readonly SceneInstance[] =>
   return [...trunk, ...coconuts, ...fronds];
 };
 
+/** Yaw of the whole sandcastle so its square base runs parallel to the diagonal
+ * shore line it sits behind (rather than square to the world axes). Clockwise
+ * from the top-down view. */
+const CASTLE_YAW = -1.05;
+
 /** A turreted sandcastle: a broad base, a central keep with two flanking turrets,
- * crenellations, an arched door, and a red pennant on a pole. */
+ * crenellations, an arched door, and a red pennant on a pole. The whole assembly
+ * is yawed by `CASTLE_YAW` about its origin so it lines up with the shore. */
 const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
-  const base = decorPart("castle:base", "CastleSandDark", "box", addV3(origin, v3(0, 0.28, 0)), v3(2.4, 0.56, 2.0));
+  const q = quatYaw(CASTLE_YAW);
+  // Place a part given in castle-local space: rotate its offset into the yawed
+  // frame and compose the yaw into its own rotation, so the castle turns as one.
+  const place = (key: string, material: string, mesh: "box" | "cylinder", local: EngineVec3, scale: EngineVec3): SceneInstance =>
+    decorPart(key, material, mesh, addV3(origin, rotateByQuat(local, q)), scale, q);
+  const base = place("castle:base", "CastleSandDark", "box", v3(0, 0.28, 0), v3(2.4, 0.56, 2.0));
   const towers = [
     { key: "keep", x: 0, r: 0.52, h: 1.7, mat: "CastleSand" },
     { key: "turnL", x: -0.92, r: 0.34, h: 1.15, mat: "CastleSandDark" },
@@ -610,24 +621,24 @@ const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
   const towerParts = towers
     .map((t): readonly SceneInstance[] => {
       const top = 0.56 + t.h;
-      const shaft = decorPart(`castle:${t.key}`, t.mat, "cylinder", addV3(origin, v3(t.x, 0.56 + t.h / 2, 0)), v3(t.r * 2, t.h, t.r * 2));
+      const shaft = place(`castle:${t.key}`, t.mat, "cylinder", v3(t.x, 0.56 + t.h / 2, 0), v3(t.r * 2, t.h, t.r * 2));
       const crenels = Array.from({ length: 6 }, (_, i): SceneInstance => {
         const a = (i / 6) * Math.PI * 2;
-        return decorPart(
+        return place(
           `castle:${t.key}cren${i}`,
           "CastleSand",
           "box",
-          addV3(origin, v3(t.x + Math.cos(a) * t.r * 0.82, top + 0.11, Math.sin(a) * t.r * 0.82)),
+          v3(t.x + Math.cos(a) * t.r * 0.82, top + 0.11, Math.sin(a) * t.r * 0.82),
           v3(0.16, 0.22, 0.16),
         );
       });
       return [shaft, ...crenels];
     })
     .flat();
-  const door = decorPart("castle:door", "CastleDoor", "box", addV3(origin, v3(0, 0.5, 1.0)), v3(0.42, 0.62, 0.08));
+  const door = place("castle:door", "CastleDoor", "box", v3(0, 0.5, 1.0), v3(0.42, 0.62, 0.08));
   const poleTop = 0.56 + 1.7;
-  const pole = decorPart("castle:pole", "CastlePole", "cylinder", addV3(origin, v3(0, poleTop + 0.42, 0)), v3(0.05, 0.84, 0.05));
-  const flag = decorPart("castle:flag", "CastleFlag", "box", addV3(origin, v3(0.24, poleTop + 0.66, 0)), v3(0.44, 0.28, 0.03));
+  const pole = place("castle:pole", "CastlePole", "cylinder", v3(0, poleTop + 0.42, 0), v3(0.05, 0.84, 0.05));
+  const flag = place("castle:flag", "CastleFlag", "box", v3(0.24, poleTop + 0.66, 0), v3(0.44, 0.28, 0.03));
   return [base, ...towerParts, door, pole, flag];
 };
 
@@ -691,16 +702,17 @@ const beachLitter = (): readonly SceneInstance[] => {
   return [...shells, ...starfish];
 };
 
-/** The whole shore of set-dressing, placed once around the lagoon. The palm and
- * crab are alive (wind sway / idle animations); the sandcastle and litter are
- * still. `tick`/`seed` drive only the animated props, via pure ambient-keyed
- * poses — nothing here reads the outcome. */
-const beachDecor = (tick: number, seed: number): readonly SceneInstance[] => [
-  ...palmTree(v3(-5.3, 0, -2.8), tick),
-  ...sandcastle(v3(5.0, 0, -3.3)),
-  ...crab(v3(-5.4, 0, 1.0), tick, seed),
-  ...beachLitter(),
-];
+/** The whole shore of set-dressing. The palm/castle/crab are placed at the
+ * player-controlled positions in `decor` (they can be picked up and moved); the
+ * one currently held is lifted so it reads as "in hand". The palm and crab are
+ * alive (wind sway / idle animations); `tick`/`seed` drive only those poses, via
+ * pure ambient-keyed values — nothing here reads the outcome. The litter is
+ * fixed. */
+const HELD_LIFT = v3(0, 0.5, 0);
+const beachDecor = (tick: number, seed: number, decor: DecorDrag): readonly SceneInstance[] => {
+  const at = (key: keyof DecorDrag["props"]): EngineVec3 => addV3(decor.props[key], decor.held === key ? HELD_LIFT : v3(0, 0, 0));
+  return [...palmTree(at("palm"), tick), ...sandcastle(at("castle")), ...crab(at("crab"), tick, seed), ...beachLitter()];
+};
 
 // ── the background veil ─────────────────────────────────────────────────────────
 
@@ -966,7 +978,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // inset lagoon and its beach margin keep exactly the held framing.
       ...stageRoom(48, WATER_RADIUS),
       ...platform(),
-      ...beachDecor(tick, seed),
+      ...beachDecor(tick, seed, state.extra.decor),
       ...chests,
       ...backgroundVeil(camera, framing, flight),
       ...burst,

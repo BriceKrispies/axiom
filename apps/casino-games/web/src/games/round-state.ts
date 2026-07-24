@@ -61,7 +61,11 @@ export interface CasinoMountSpec<TExtra> {
    * committed either way, so this is purely how long the presentation holds
    * before the reveal; it can never change what was drawn. */
   readonly commitPauseTicks?: number;
-  readonly initExtra: (session: SessionState) => TExtra;
+  /** Build the game's per-round animation state. `previous` is the prior round's
+   * extra on a New Round / Replay reset (null on the first round of a page load),
+   * so a game can carry forward anything that should outlive a single round
+   * (e.g. player-placed decor positions) while resetting the rest. */
+  readonly initExtra: (session: SessionState, previous: TExtra | null) => TExtra;
   readonly step: (state: CasinoState<TExtra>, input: InputFrame, ctx: TickContext) => CasinoState<TExtra>;
   readonly viewScene: (state: CasinoState<TExtra>, ctx: ViewContext) => Scene;
   readonly instructionOf?: (state: CasinoState<TExtra>) => string | null;
@@ -134,9 +138,10 @@ export const freshRoundState = <TExtra>(
   spec: CasinoMountSpec<TExtra>,
   round: number,
   replay: boolean,
+  previous: TExtra | null = null,
 ): CasinoState<TExtra> => {
   const session = createSession(env.config, env.seed, round, env.source, spec.mechanic, replay);
-  return { extra: spec.initExtra(session), pendingContext: null, pendingReset: null, session };
+  return { extra: spec.initExtra(session, previous), pendingContext: null, pendingReset: null, session };
 };
 
 /** The harness's own phase mechanics, run before the game's step. */
@@ -163,7 +168,9 @@ const harnessStep = <TExtra>(env: RoundEnvironment, spec: CasinoMountSpec<TExtra
     return { ...s, session: transition(session, "complete") };
   }
   if (session.phase === "resetting" && age >= speedTicks(RESET_TICKS, speed) && s.pendingReset !== null) {
-    return freshRoundState(env, spec, s.pendingReset.round, s.pendingReset.replay);
+    // Carry the prior extra into the fresh round so a game can persist anything
+    // that should outlive the round (the chest game keeps its moved decor here).
+    return freshRoundState(env, spec, s.pendingReset.round, s.pendingReset.replay, s.extra);
   }
   return s;
 };

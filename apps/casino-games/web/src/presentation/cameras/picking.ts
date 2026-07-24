@@ -46,6 +46,40 @@ export const worldToCanvas = (camera: Camera3D, point: EngineVec3): { readonly x
   return { x: (ndcX * 0.5 + 0.5) * CANVAS_WIDTH, y: (0.5 - ndcY * 0.5) * CANVAS_HEIGHT };
 };
 
+/** Un-project a pointer sample onto the ground plane (y = 0), or null when the
+ * cursor is undefined or its ray does not meet the plane in front of the camera.
+ * The exact inverse of `worldToCanvas` for the y = 0 plane — it answers "where on
+ * the ground is the cursor", which is what placing a dragged object needs. */
+export const canvasToGround = (camera: Camera3D, pointer: PointerSample | undefined): EngineVec3 | null => {
+  if (pointer === undefined) {
+    return null;
+  }
+  const forward = normalize(sub(camera.target, camera.position));
+  const right = normalize(cross(forward, { x: 0, y: 1, z: 0 }));
+  const up = cross(right, forward);
+  const halfTan = Math.tan(camera.fovY / 2);
+  const aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+  const ndcX = (pointer.pos.x / CANVAS_WIDTH) * 2 - 1;
+  const ndcY = 1 - (pointer.pos.y / CANVAS_HEIGHT) * 2;
+  // Camera-space ray direction (xCam:yCam:zCam ∝ this), lifted into world space
+  // through the same basis worldToCanvas projects with.
+  const cx = ndcX * halfTan * aspect;
+  const cy = ndcY * halfTan;
+  const dir = {
+    x: right.x * cx + up.x * cy + forward.x,
+    y: right.y * cx + up.y * cy + forward.y,
+    z: right.z * cx + up.z * cy + forward.z,
+  };
+  if (Math.abs(dir.y) < 1e-6) {
+    return null;
+  }
+  const t = -camera.position.y / dir.y;
+  if (t <= 0) {
+    return null;
+  }
+  return { x: camera.position.x + t * dir.x, y: 0, z: camera.position.z + t * dir.z };
+};
+
 /** One selectable target: a world anchor and its clickable screen radius. */
 export interface PickTarget {
   readonly index: number;

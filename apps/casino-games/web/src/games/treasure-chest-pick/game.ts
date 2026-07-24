@@ -20,6 +20,7 @@ import type { SessionState } from "../../chance-engine/sessions/session.ts";
 import { shimmerCue, thumpCue, tickCue } from "../../presentation/audio/cues.ts";
 import { tabletopCamera } from "../../presentation/cameras/presets.ts";
 import type { PickTarget } from "../../presentation/cameras/picking.ts";
+import { canvasToGround, pickAt } from "../../presentation/cameras/picking.ts";
 import { clamp01, smoothstep } from "../../presentation/stage/easing.ts";
 import { addV3, crossV3, dotV3, normalizeV3, scaleV3, subV3, v3 } from "../../presentation/stage/vectors.ts";
 import type { CasinoState } from "../round-state.ts";
@@ -36,7 +37,94 @@ export interface ChestExtra {
   readonly choice: ChoiceCore;
   /** Tick at which the reveal began (session tick space), for cue edges. */
   readonly revealStartTick: number | null;
+  /** Where the three draggable beach props sit, and any current drag. */
+  readonly decor: DecorDrag;
 }
+
+// ── draggable beach props ──────────────────────────────────────────────────────
+// The palm, castle, and crab are pieces the player can pick up and move. Their
+// positions therefore live in game STATE (not hardcoded in the view), driven by
+// pointer input through the pure fold below — so a drag is as deterministic and
+// replayable as any other input, and the view is a pure function of where the
+// props ended up.
+
+/** The three movable beach props and their world origins (base on the sand). */
+export interface DecorProps {
+  readonly palm: EngineVec3;
+  readonly castle: EngineVec3;
+  readonly crab: EngineVec3;
+}
+
+/** Drag state: where each prop sits, which one (if any) is currently held, the
+ * grab offset (so a grabbed prop doesn't snap its centre to the cursor), and the
+ * previous pointer-down state for press-edge detection. */
+export interface DecorDrag {
+  readonly props: DecorProps;
+  readonly held: keyof DecorProps | null;
+  readonly grabOffset: EngineVec3;
+  readonly pointerDown: boolean;
+}
+
+export const DECOR_KEYS: readonly (keyof DecorProps)[] = ["palm", "castle", "crab"];
+
+/** The props' home positions — where the beach was authored. */
+export const DEFAULT_DECOR: DecorDrag = {
+  grabOffset: v3(0, 0, 0),
+  held: null,
+  pointerDown: false,
+  props: { castle: v3(5.0, 0, -3.3), crab: v3(-5.4, 0, 1.0), palm: v3(-5.3, 0, -2.8) },
+};
+
+/** Per-prop grab anchor height (up its visible mass) and screen pick radius —
+ * these are big friendly objects, so the radii are generous. */
+const DECOR_PICK: Readonly<Record<keyof DecorProps, { readonly h: number; readonly r: number }>> = {
+  castle: { h: 1.0, r: 95 },
+  crab: { h: 0.3, r: 70 },
+  palm: { h: 1.7, r: 90 },
+};
+
+/** Screen hit-targets for the three props, anchored a little up their mass so a
+ * click on the visible prop grabs it. */
+export const decorTargets = (props: DecorProps): readonly PickTarget[] =>
+  DECOR_KEYS.map((key, index) => ({ at: addV3(props[key], v3(0, DECOR_PICK[key].h, 0)), index, radiusPx: DECOR_PICK[key].r }));
+
+/** The result of one drag tick: the new drag state, and whether the drag OWNS
+ * the pointer this tick (so chest-picking is suppressed while placing a prop). */
+export interface DecorStep {
+  readonly decor: DecorDrag;
+  readonly active: boolean;
+}
+
+/**
+ * One tick of the pick-up-and-move interaction, pure in (decor, input, camera):
+ * - holding a prop → it follows the cursor's ground point (offset preserved),
+ *   and releasing (or losing the cursor) drops it;
+ * - otherwise, a fresh press whose cursor is over a prop grabs the nearest one.
+ * Props sit on the sand away from the chests, so this only competes with a chest
+ * pick when the cursor is actually over a prop.
+ */
+export const stepDecorDrag = (decor: DecorDrag, input: InputFrame, camera: Camera3D): DecorStep => {
+  const pointer = input.pointer;
+  const down = pointer?.down ?? false;
+  const ground = canvasToGround(camera, pointer);
+  const wasDown = decor.pointerDown;
+
+  if (decor.held !== null) {
+    if (!down || ground === null) {
+      return { active: true, decor: { ...decor, held: null, pointerDown: down } };
+    }
+    const to = addV3(ground, decor.grabOffset);
+    return { active: true, decor: { ...decor, pointerDown: down, props: { ...decor.props, [decor.held]: v3(to.x, 0, to.z) } } };
+  }
+
+  const freshPress = down && !wasDown && ground !== null;
+  const hit = freshPress ? pickAt(camera, decorTargets(decor.props), pointer) : null;
+  if (hit !== null && ground !== null) {
+    const key = DECOR_KEYS[hit] as keyof DecorProps;
+    return { active: true, decor: { ...decor, grabOffset: subV3(decor.props[key], ground), held: key, pointerDown: down } };
+  }
+  return { active: false, decor: { ...decor, pointerDown: down } };
+};
 
 export type ChestState = CasinoState<ChestExtra>;
 
@@ -490,8 +578,8 @@ export interface PalmSway {
 }
 
 export const palmSway = (tick: number): PalmSway => ({
-  bend: Math.sin(tick * 0.03) * 0.055 + Math.sin(tick * 0.011 + 1.3) * 0.03,
-  flutter: (frond: number): number => Math.sin(tick * 0.09 + frond * 1.7) * 0.06,
+  bend: Math.sin(tick * 0.017) * 0.016 + Math.sin(tick * 0.006 + 1.3) * 0.009,
+  flutter: (frond: number): number => Math.sin(tick * 0.045 + frond * 1.7) * 0.016,
 });
 
 /** The crab's idle repertoire. `rest` is the between-animation default (just a
@@ -566,8 +654,12 @@ export const crabIdle = (tick: number, seed: number): CrabPose => {
   return active ? poses[kind] : resting;
 };
 
-export const initialChestExtra = (_session: SessionState): ChestExtra => ({
+export const initialChestExtra = (_session: SessionState, previous: ChestExtra | null): ChestExtra => ({
   choice: initialChoice(4),
+  // The player's placed props persist across rounds (a New Round / Replay keeps
+  // them where they were left); only a page reload starts a session from null
+  // and returns them home. The transient drag fields always start clean.
+  decor: previous === null ? DEFAULT_DECOR : { ...DEFAULT_DECOR, props: previous.decor.props },
   revealStartTick: null,
 });
 
@@ -581,34 +673,45 @@ export const stepChest = (
 ): ChestState => {
   const session = state.session;
   const count = session.config.choiceCount ?? 9;
+  const camera = chestCamera(count);
+
+  // The player can pick up and move the beach props. The drag runs every tick
+  // and takes the pointer first; when it owns the pointer, a chest pick is
+  // suppressed for that tick (input is stripped while the session is locked, so
+  // dragging only happens in ready/celebrating/complete).
+  const drag = stepDecorDrag(state.extra.decor, input, camera);
+  const withDecor: ChestState = { ...state, extra: { ...state.extra, decor: drag.decor } };
 
   if (session.phase === "ready") {
+    if (drag.active) {
+      return withDecor;
+    }
     // Tap-to-confirm: on touch the first tap highlights a chest and the second
     // opens it; a desktop click still opens in one action (hover pre-arms it).
-    const result = stepChoice(state.extra.choice, input, chestCamera(count), chestTargets(count), CHEST_COLUMNS, true);
+    const result = stepChoice(withDecor.extra.choice, input, camera, chestTargets(count), CHEST_COLUMNS, true);
     if (result.selectedNow !== null) {
       return {
-        ...state,
-        extra: { ...state.extra, choice: result.core },
+        ...withDecor,
+        extra: { ...withDecor.extra, choice: result.core },
         pendingContext: { selectedIndex: result.selectedNow },
         session: transition(session, "committing"),
       };
     }
-    return { ...state, extra: { ...state.extra, choice: result.core } };
+    return { ...withDecor, extra: { ...withDecor.extra, choice: result.core } };
   }
 
   if (session.phase === "revealing") {
-    const start = state.extra.revealStartTick ?? session.phaseStartTick;
+    const start = withDecor.extra.revealStartTick ?? session.phaseStartTick;
     const timeline = revealTimeline(session.config.presentationSpeed, runtime.settings.reducedMotion);
     const withStart: ChestState =
-      state.extra.revealStartTick === null ? { ...state, extra: { ...state.extra, revealStartTick: start } } : state;
+      withDecor.extra.revealStartTick === null ? { ...withDecor, extra: { ...withDecor.extra, revealStartTick: start } } : withDecor;
     if (phaseAge(session) >= timeline.total) {
       return { ...withStart, session: transition(session, "celebrating") };
     }
     return withStart;
   }
 
-  return state;
+  return withDecor;
 };
 
 /**

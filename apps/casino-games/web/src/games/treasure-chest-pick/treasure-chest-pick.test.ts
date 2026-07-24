@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Camera3D, EngineVec3 } from "@axiom/web-engine";
+import type { Camera3D, EngineVec3, InputFrame, PointerSample } from "@axiom/web-engine";
 import { planChoicePopulation } from "../../chance-engine/probability/choice-population.ts";
 import { SeededChanceResultSource } from "../../chance-engine/outcomes/result-source.ts";
 import { createSession } from "../../chance-engine/sessions/session.ts";
@@ -26,15 +26,22 @@ import {
   CRAB_WINDOW,
   crabIdle,
   dancePose,
+  DECOR_KEYS,
+  decorTargets,
+  DEFAULT_DECOR,
   flightProgress,
   heroFraming,
   idlePhase,
+  initialChestExtra,
   palmSway,
   presentationPhase,
   revealTimeline,
   spiralFlight,
+  stepDecorDrag,
 } from "./game.ts";
+import type { ChestExtra, DecorDrag } from "./game.ts";
 import { TREASURE_CHEST_PICK } from "./definition.ts";
+import { canvasToGround, worldToCanvas } from "../../presentation/cameras/picking.ts";
 
 /**
  * Project a world point into normalized screen coordinates for `camera`, where
@@ -135,12 +142,14 @@ test("the palm sways in the wind — pure in the tick, bounded, and moving", () 
     const b = palmSway(tick);
     assert.equal(a.bend, b.bend);
     assert.equal(a.flutter(3), b.flutter(3));
-    assert.ok(Math.abs(a.bend) < 0.12, "sway stays a gentle lean");
-    assert.ok(Math.abs(a.flutter(5)) < 0.08, "frond flutter stays small");
+    // The sway is deliberately gentle — a barely-there lean and a small flutter.
+    assert.ok(Math.abs(a.bend) < 0.04, "sway stays a barely-there lean");
+    assert.ok(Math.abs(a.flutter(5)) < 0.025, "frond flutter stays small");
   }
-  // The bend is real motion across a cycle, and different fronds flutter apart.
-  const bends = Array.from({ length: 400 }, (_, tick) => palmSway(tick).bend);
-  assert.ok(Math.max(...bends) - Math.min(...bends) > 0.05, "the palm must actually sway");
+  // The bend is real motion across a full slow cycle, and different fronds
+  // flutter apart. Sampled over 1200 ticks so both slow frequencies peak.
+  const bends = Array.from({ length: 1200 }, (_, tick) => palmSway(tick).bend);
+  assert.ok(Math.max(...bends) - Math.min(...bends) > 0.02, "the palm must actually sway");
   const sway = palmSway(37);
   assert.notEqual(sway.flutter(0), sway.flutter(1), "fronds flutter out of unison");
 });
@@ -387,4 +396,110 @@ test("the chest population is fixed before the pick and higher win rate means mo
   };
   assert.ok(meanWinners(0.7) > meanWinners(0.3), "more prize chests at a higher win rate");
   assert.ok(Math.abs(meanWinners(0.5) - 4.5) < 0.2, "≈ 9·0.5 chests hold prizes");
+});
+
+// ── pick-up-and-move the beach props ───────────────────────────────────────────
+
+/** An input frame carrying a pointer sample (or none). */
+const inputFrame = (pointer: PointerSample | undefined): InputFrame => ({
+  down: new Set(),
+  look: { x: 0, y: 0 },
+  pointer,
+  pressed: new Set(),
+  released: new Set(),
+});
+const at = (x: number, y: number, down: boolean): PointerSample => ({ down, pos: { x, y } });
+
+test("canvasToGround is the inverse of worldToCanvas on the ground plane", () => {
+  const camera = chestCamera(9);
+  // Round-trip a spread of ground points through project → un-project.
+  for (const p of [v3(0, 0, 0), v3(2, 0, -1.5), v3(-3.4, 0, 1.1), v3(5, 0, -3.3)]) {
+    const screen = worldToCanvas(camera, p);
+    assert.ok(screen !== null, "ground point projects in front of the camera");
+    const back = canvasToGround(camera, at(screen.x, screen.y, true));
+    assert.ok(back !== null, "the cursor ray meets the ground");
+    assert.ok(Math.hypot(back.x - p.x, back.z - p.z) < 1e-6, "round-trips to the same ground point");
+    assert.equal(back.y, 0, "lands exactly on the ground plane");
+  }
+  assert.equal(canvasToGround(camera, undefined), null, "no cursor → no ground point");
+});
+
+test("a prop can be grabbed, dragged, and dropped — pure in (decor, input, camera)", () => {
+  const camera = chestCamera(9);
+  const screenOfProp = (key: "palm" | "castle" | "crab"): { x: number; y: number } => {
+    const t = decorTargets(DEFAULT_DECOR.props).find((_, i) => DECOR_KEYS[i] === key);
+    const s = worldToCanvas(camera, (t as { at: EngineVec3 }).at);
+    return s as { x: number; y: number };
+  };
+
+  // A press whose cursor is over the palm grabs it (and owns the pointer).
+  const palmPx = screenOfProp("palm");
+  const grab = stepDecorDrag(DEFAULT_DECOR, inputFrame(at(palmPx.x, palmPx.y, true)), camera);
+  assert.equal(grab.decor.held, "palm", "the palm is picked up");
+  assert.ok(grab.active, "the drag owns the pointer");
+
+  // Pure: same inputs → identical result.
+  const grab2 = stepDecorDrag(DEFAULT_DECOR, inputFrame(at(palmPx.x, palmPx.y, true)), camera);
+  assert.deepEqual(grab, grab2);
+
+  // Dragging moves the palm by the SAME ground-delta the cursor travelled (the
+  // grab offset is preserved, so the prop doesn't snap its base to the cursor).
+  const grabGround = canvasToGround(camera, at(palmPx.x, palmPx.y, true)) as EngineVec3;
+  const destGround = v3(0.5, 0, 2.5);
+  const dest = worldToCanvas(camera, destGround) as { x: number; y: number };
+  const dragged = stepDecorDrag(grab.decor, inputFrame(at(dest.x, dest.y, true)), camera);
+  assert.equal(dragged.decor.held, "palm", "still held while the button is down");
+  const dx = dragged.decor.props.palm.x - DEFAULT_DECOR.props.palm.x;
+  const dz = dragged.decor.props.palm.z - DEFAULT_DECOR.props.palm.z;
+  assert.ok(Math.hypot(dx - (destGround.x - grabGround.x), dz - (destGround.z - grabGround.z)) < 0.05, "palm follows the cursor's ground delta");
+  assert.equal(dragged.decor.props.palm.y, 0, "the prop stays on the ground");
+  assert.deepEqual(dragged.decor.props.castle, DEFAULT_DECOR.props.castle, "other props are untouched");
+
+  // Releasing drops it (keeps the moved position).
+  const dropped = stepDecorDrag(dragged.decor, inputFrame(at(dest.x, dest.y, false)), camera);
+  assert.equal(dropped.decor.held, null, "released → nothing held");
+  assert.deepEqual(dropped.decor.props.palm, dragged.decor.props.palm, "the palm stays where it was dropped");
+});
+
+test("a press away from every prop grabs nothing and yields the pointer to chest-picking", () => {
+  const camera = chestCamera(9);
+  // The centre of the board (over the middle chest) is far from any prop.
+  const centre = worldToCanvas(camera, chestPosition(4, 9)) as { x: number; y: number };
+  const step = stepDecorDrag(DEFAULT_DECOR, inputFrame(at(centre.x, centre.y, true)), camera);
+  assert.equal(step.decor.held, null, "nothing grabbed away from the props");
+  assert.equal(step.active, false, "the drag does not own the pointer, so a chest can be picked");
+});
+
+test("a prop is only grabbed on the press EDGE, not while a drag sweeps over it", () => {
+  const camera = chestCamera(9);
+  const crabPx = worldToCanvas(camera, (decorTargets(DEFAULT_DECOR.props)[2] as { at: EngineVec3 }).at) as { x: number; y: number };
+  // Pointer already down on the previous tick (pointerDown true) → passing over
+  // the crab must NOT hijack it mid-drag.
+  const alreadyDown: DecorDrag = { ...DEFAULT_DECOR, pointerDown: true };
+  const sweep = stepDecorDrag(alreadyDown, inputFrame(at(crabPx.x, crabPx.y, true)), camera);
+  assert.equal(sweep.decor.held, null, "no grab without a fresh press edge");
+});
+
+test("moved props persist across a round reset, but reset on a fresh (page-load) session", () => {
+  const session = createSession(TREASURE_CHEST_PICK.defaultConfig(), 1, 1, new SeededChanceResultSource(1), { choiceCount: 9, kind: "choice" });
+
+  // First round of a page load (previous = null) → props at home, drag clean.
+  const first = initialChestExtra(session, null);
+  assert.deepEqual(first.decor, DEFAULT_DECOR, "a fresh session starts the props at home");
+
+  // A prior round that had props moved (and mid-drag transient state set).
+  const moved: ChestExtra = {
+    ...first,
+    decor: { grabOffset: v3(1, 1, 1), held: "palm", pointerDown: true, props: { castle: v3(-2, 0, 1), crab: v3(3, 0, -1), palm: v3(1, 0, 2) } },
+    revealStartTick: 42,
+  };
+
+  // New Round / Replay carries the prior extra in: the PLACED positions persist,
+  // the transient drag fields reset, and the per-round bits start clean.
+  const next = initialChestExtra(session, moved);
+  assert.deepEqual(next.decor.props, moved.decor.props, "placed prop positions persist across the reset");
+  assert.equal(next.decor.held, null, "nothing is held in the new round");
+  assert.equal(next.decor.pointerDown, false, "the drag press-state resets");
+  assert.deepEqual(next.decor.grabOffset, v3(0, 0, 0), "the grab offset resets");
+  assert.equal(next.revealStartTick, null, "the per-round reveal clock resets");
 });
