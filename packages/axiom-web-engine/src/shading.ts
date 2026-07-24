@@ -176,6 +176,47 @@ export const shadeSurface = (
 };
 
 /**
+ * The DIFFUSE-only shade (ambient floor + Σ directional N·L + Σ point N·L with
+ * the soft falloff) — the COMPLETE shade for a matte material, whose specular and
+ * Fresnel are identically zero. Byte-identical to `shadeSurface(...).diffuse` (the
+ * diffuse bucket doesn't depend on roughness). The software backend calls this for
+ * matte materials so a per-triangle flat shade skips the wasted specular math
+ * (no eye vector, no Blinn-Phong lobe, no Fresnel rim). Branchless like the rest.
+ */
+export const diffuseOnly = (
+  nx: number,
+  ny: number,
+  nz: number,
+  px: number,
+  py: number,
+  pz: number,
+  frame: Pick<SceneFrame, "dirLights" | "pointLights">,
+): Rgb => {
+  const normal: Vec3 = [nx, ny, nz];
+  const surface: Vec3 = [px, py, pz];
+  let diffR = AMBIENT;
+  let diffG = AMBIENT;
+  let diffB = AMBIENT;
+  const accumulate = ([pr, pg, pb]: Rgb): number => {
+    diffR += pr;
+    diffG += pg;
+    diffB += pb;
+    return ITERATE;
+  };
+  frame.dirLights.map((light): number =>
+    accumulate(scale(light.color, Math.max(0, dot(normal, sub([0, 0, 0], light.direction))))),
+  );
+  frame.pointLights.map((light): number => {
+    const offset = sub(light.position, surface);
+    const dist = Math.sqrt(lengthSquared(offset));
+    const attenuation = 1 / (1 + FALLOFF * dist * dist);
+    const ndl = dot(normal, offset) / Math.max(dist, MIN_DISTANCE);
+    return accumulate(scale(light.color, Math.max(0, ndl) * attenuation));
+  });
+  return [diffR, diffG, diffB];
+};
+
+/**
  * Highlight-rolloff tone curve for one linear channel. Exact identity on
  * [0, KNEE]; above the knee a Reinhard shoulder `x/(1+x)` maps the excess into the
  * remaining (KNEE, 1) headroom, C¹-continuous at the knee and bounded below 1 so

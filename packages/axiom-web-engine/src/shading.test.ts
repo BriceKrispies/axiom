@@ -19,7 +19,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { AMBIENT } from "./backend.ts";
-import { shadeSurface, tonemap } from "./shading.ts";
+import { diffuseOnly, shadeSurface, tonemap } from "./shading.ts";
 
 const EPS = 1e-5;
 const assertClose = (actual: number, expected: number, msg: string): void => {
@@ -140,6 +140,20 @@ test("a Fresnel rim brightens grazing edges, scaled by glossiness", () => {
   assertRgbClose(grazing.specular, [fresnel(0, 1), fresnel(0, 1), fresnel(0, 1)], "grazing rim");
   const matte = shadeSurface(0, 1, 0, 0, 0, 0, 1, 0, 0, 1, NO_LIGHTS);
   assertRgbClose(matte.specular, [0, 0, 0], "no rim when matte");
+});
+
+// `diffuseOnly` is the matte fast path: byte-identical to `shadeSurface(...).diffuse`
+// (the diffuse bucket is roughness- and eye-independent), so the software backend
+// may skip the whole specular half for a matte material. Folds BOTH light lists.
+test("diffuseOnly matches shadeSurface's diffuse bucket exactly", () => {
+  const lights = {
+    dirLights: [{ color: [0.2, 0.4, 0.6] as const, direction: [0, -1, 0] as const }],
+    pointLights: [{ color: [1, 1, 1] as const, position: [0, 2, 0] as const }],
+  };
+  const full = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 0, lights);
+  assertRgbClose(diffuseOnly(0, 1, 0, 0, 0, 0, lights), full.diffuse, "diffuseOnly parity");
+  // A back-facing surface with no lights collapses to the pure ambient floor.
+  assertRgbClose(diffuseOnly(0, -1, 0, 0, 0, 0, NO_LIGHTS), [AMBIENT, AMBIENT, AMBIENT], "ambient floor");
 });
 
 // tonemap is EXACT identity on [0, knee=0.9] — content that stays in range is

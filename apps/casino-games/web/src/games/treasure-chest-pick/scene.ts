@@ -21,6 +21,7 @@ import { phaseAge } from "../../chance-engine/sessions/session.ts";
 import type { BrandSpec } from "../../presentation/branding/brand.ts";
 import { brandMaterials } from "../../presentation/branding/brand.ts";
 import { stampText } from "../../presentation/branding/label.ts";
+import { lowDetail } from "../../presentation/detail.ts";
 import { confettiBurst, CONFETTI_MATERIALS, sparkleRing } from "../../presentation/celebrations/confetti.ts";
 import { REWARD_MATERIALS, rewardMaterialOf } from "../../presentation/rewards/tiers.ts";
 import { celebrationFor, outcomeRarity, speedTicks } from "../round-state.ts";
@@ -209,6 +210,10 @@ const disc = (key: string, material: string, at: EngineVec3, radius: number, hei
  * ridge — the reference chests carry a full, round hump, not a tent.
  */
 const LID_ARC_SLATS = 8;
+/** Slats per lid arc on the software backend: half the facets still read as a
+ * smooth barrel from the tabletop camera but cost half the geometry, across the
+ * dome and both gold bands of every chest. */
+const LID_ARC_SLATS_LOW = 4;
 const LID_ARC_THICKNESS = 0.11;
 /** How far the gold bands stand proud of the wood arc they wrap. */
 const LID_BAND_SWELL = 0.025;
@@ -238,14 +243,15 @@ const lidArc = (
 ): readonly SceneInstance[] => {
   const depthRadius = LID.z / 2 + swell;
   const riseRadius = CHEST_LID_ARCH - LID_ARC_THICKNESS / 2 + swell;
+  const slats = lowDetail() ? LID_ARC_SLATS_LOW : LID_ARC_SLATS;
   // The arc's mid-thickness surface, swept as a half-ellipse over the lid board.
   const arcAt = (t: number): { readonly y: number; readonly z: number } => {
     const angle = -Math.PI / 2 + t * Math.PI;
     return { y: LID.y + riseRadius * Math.cos(angle), z: LID.z / 2 + depthRadius * Math.sin(angle) };
   };
-  return Array.from({ length: LID_ARC_SLATS }, (_, i): SceneInstance => {
-    const from = arcAt(i / LID_ARC_SLATS);
-    const to = arcAt((i + 1) / LID_ARC_SLATS);
+  return Array.from({ length: slats }, (_, i): SceneInstance => {
+    const from = arcAt(i / slats);
+    const to = arcAt((i + 1) / slats);
     const dy = to.y - from.y;
     const dz = to.z - from.z;
     // A slat's local +Z runs along its chord. quatPitch(a) sends +Z to
@@ -289,6 +295,10 @@ interface ChestPose {
   readonly glow: number;
   /** The brand name stamped across the chest front, welded to this pose. */
   readonly brandName: string;
+  /** Whether this chest wears the raised brand NAMEPLATE (gold frame + colored
+   * plate + lettering). Only the center chest does; the rest stay bare so the one
+   * plaque reads as the hero marker instead of nine competing labels. */
+  readonly nameplate: boolean;
 }
 
 /** All instances of one posed chest (body, planks, gilding, latch, lid,
@@ -301,6 +311,10 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   const squashXZ = 1 + pose.squash * 0.55;
   const grow = pose.scale;
   const origin = pose.at;
+  // On the software backend, shed the finest chest detail — the three groove
+  // lines and half the lid-arc slats (see `lidArc`). The nameplate is governed by
+  // `pose.nameplate`, not by the backend.
+  const low = lowDetail();
   // How much of the chest is still "on the board" — gates every ground-anchored
   // decoration below.
   const grounded = 1 - clamp01(pose.flight);
@@ -436,16 +450,24 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   });
   const plateW = BODY.x * 0.82;
   const plateH = 0.5;
-  const plaque = [
-    platePart("plaqueframe", v3(plateW + 0.1, plateH + 0.1, 0.05), v3(0, 0, 0.0), pose.dim ? "GildDim" : "GildFront"),
-    platePart("plaque", v3(plateW, plateH, 0.06), v3(0, 0, 0.035), pose.dim ? "BrandPrimaryDim" : "BrandPrimary"),
-  ];
-  const label = stampText(
-    `${key}:brand`,
-    pose.brandName,
-    { basis: plateBasis, center: v3(0, 0, 0), orient: plateOrient, origin: crownAnchor },
-    { depth: 0.02, height: 0.3, lift: 0.08, material: pose.dim ? "BrandLetterDim" : "BrandLetterOnPrimary", maxWidth: BODY.x * 0.72 },
-  );
+  // Only the center (hero) chest wears the nameplate — frame, plate, and lettering.
+  // The rest stay bare. The label is stamped on BOTH backends here (it is no longer
+  // shed by the Canvas2D `low` LOD): a single plaque is cheap, and it is the one
+  // piece of lettering the player is meant to read on the board.
+  const plaque = pose.nameplate
+    ? [
+        platePart("plaqueframe", v3(plateW + 0.1, plateH + 0.1, 0.05), v3(0, 0, 0.0), pose.dim ? "GildDim" : "GildFront"),
+        platePart("plaque", v3(plateW, plateH, 0.06), v3(0, 0, 0.035), pose.dim ? "BrandPrimaryDim" : "BrandPrimary"),
+      ]
+    : [];
+  const label = pose.nameplate
+    ? stampText(
+        `${key}:brand`,
+        pose.brandName,
+        { basis: plateBasis, center: v3(0, 0, 0), orient: plateOrient, origin: crownAnchor },
+        { depth: 0.02, height: 0.3, lift: 0.08, material: pose.dim ? "BrandLetterDim" : "BrandLetterOnPrimary", maxWidth: BODY.x * 0.72 },
+      )
+    : [];
 
   return [
     ...pool,
@@ -456,9 +478,13 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     // groove stands a touch prouder and thicker than a hairline so the near-black
     // seam actually reads as the gap between planks under the bright rig, which is
     // the only thing carving the untextured wood into stacked boards.
-    part("gap1", v3(0, BODY.y * 0.26, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
-    part("gap2", v3(0, BODY.y * 0.5, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
-    part("gap3", v3(0, BODY.y * 0.74, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
+    ...(low
+      ? []
+      : [
+          part("gap1", v3(0, BODY.y * 0.26, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
+          part("gap2", v3(0, BODY.y * 0.5, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
+          part("gap3", v3(0, BODY.y * 0.74, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
+        ]),
     // Side-facing wood on the end caps for a value step.
     part("endL", v3(-BODY.x / 2 + 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
     part("endR", v3(BODY.x / 2 - 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
@@ -986,6 +1012,14 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   /** The chosen chest's open mouth, wherever the flight has carried it. */
   const heroTop = addV3(flown.position, v3(0, BODY_TOP * heroScale, 0));
 
+  // The one chest that wears the brand nameplate: the slot nearest the board
+  // origin (index 4 on the standard 3×3), so the plaque marks the visual center.
+  const centerIndex = Array.from({ length: count }, (_, i) => i).reduce((best, i) => {
+    const p = chestPosition(i, count);
+    const b = chestPosition(best, count);
+    return p.x * p.x + p.z * p.z < b.x * b.x + b.z * b.z ? i : best;
+  }, 0);
+
   const chests = Array.from({ length: count }, (_, index) => {
     const origin = chestPosition(index, count);
     const dance = dancePose(index, count, tick, seed, liveliness);
@@ -1028,6 +1062,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       hoverRing: session.phase === "ready" && (choice.hovered === index || choice.armed === index),
       latchAngle: easeOutCubic(latchT) * CHEST_TIMING.latchDrop + latchRecoil,
       lidAngle: -easeOutBack(lidT) * CHEST_TIMING.lidOpen,
+      nameplate: index === centerIndex,
       origin,
       pitch: isSelected ? CHEST_TIMING.tilt * selectEase + flown.tumble : 0,
       scale: isSelected ? heroScale : 1,

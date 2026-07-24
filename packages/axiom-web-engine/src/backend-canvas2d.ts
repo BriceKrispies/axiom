@@ -24,7 +24,7 @@
 import type { Handle, MeshData } from "./api.ts";
 import type { RenderBackend, SceneFrame } from "./backend.ts";
 import { type Mat4, fromTrs, lookAt, multiply, perspective } from "./mat4.ts";
-import { shadeSurface, tonemap } from "./shading.ts";
+import { diffuseOnly, shadeSurface, tonemap } from "./shading.ts";
 
 interface CpuMesh {
   /** xyz-interleaved model-space positions. */
@@ -39,6 +39,10 @@ interface CpuMesh {
 
 /** Internal framebuffer scale (the software fallback renders at half res). */
 const INTERNAL_SCALE = 0.5;
+
+/** The specular bucket for a matte material — identically zero, so the diffuse-only
+ * fast path can reuse one frozen triple instead of allocating per triangle. */
+const ZERO_SPECULAR: readonly [number, number, number] = [0, 0, 0];
 
 const channel = (v: number): number => Math.max(0, Math.min(255, Math.round(v * 255)));
 
@@ -236,6 +240,11 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
         const emissive = material.emissive;
         const opacity = material.opacity;
         const roughness = material.roughness;
+        // Matte materials (the default, roughness >= 1) have identically-zero
+        // specular + Fresnel, so every triangle takes the diffuse-only fast path:
+        // byte-identical, but skips the eye vector, per-light Blinn-Phong lobe, and
+        // Fresnel rim — the bulk of the per-triangle shading cost in software.
+        const matte = roughness >= 1;
         const meshAo = mesh.ao;
         const indices = mesh.indices;
         for (let i = 0; i < indices.length; i += 3) {
@@ -282,7 +291,10 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
 
           // Same shading truth as the WebGL2 shader: albedo-tinted, AO-attenuated
           // diffuse + neutral white specular/Fresnel, then the highlight tonemap.
-          const shaded = shadeSurface(nx, ny, nz, mx, my, mz, eye.x, eye.y, eye.z, roughness, frame);
+          // Matte nodes skip the specular half entirely (see `matte` above).
+          const shaded = matte
+            ? { diffuse: diffuseOnly(nx, ny, nz, mx, my, mz, frame), specular: ZERO_SPECULAR }
+            : shadeSurface(nx, ny, nz, mx, my, mz, eye.x, eye.y, eye.z, roughness, frame);
           const dif = shaded.diffuse;
           const spc = shaded.specular;
           const r = channel(tonemap(dif[0] * aoTri * base[0] + spc[0] + emissive[0]));
