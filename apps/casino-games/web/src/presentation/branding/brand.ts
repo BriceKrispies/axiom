@@ -29,12 +29,29 @@ export interface BrandSpec {
   readonly ink: Rgb;
 }
 
-/** The ex-works default: the "ACME" red house brand shown in the reference. */
+/**
+ * The ex-works default: the "ACME" house brand. Its three colors are the whole
+ * brand palette the treasure-chest scene is art-directed around, so they are
+ * tuned as one intentional set rather than a harsh primary/black:
+ *
+ * - `primary` is a WARM, controlled ACME red — pulled off the old fire-engine
+ *   [0.82, 0.16, 0.13] toward a deeper brick/terracotta (a touch less bright, a
+ *   little more orange in the green channel) so it reads as a considered brand
+ *   accent on the chest plates and banner instead of a saturated alarm;
+ * - `ink` is a very dark WARM charcoal (red channel highest), replacing the old
+ *   faintly-cool near-black [0.09, 0.1, 0.12] so any dark branding surface sits
+ *   in the same warm family as the sand, wood, and gold rather than punching a
+ *   cold hole in the beach;
+ * - `onPrimary` is the warm cream lettering that reads on the red.
+ *
+ * The gold chest trim (the scene's own `Gild*` palette) is the third leg of the
+ * branding — the accent that ties the red and charcoal into the beach.
+ */
 export const DEFAULT_BRAND: BrandSpec = {
-  ink: [0.09, 0.1, 0.12],
+  ink: [0.16, 0.13, 0.1],
   name: "ACME",
   onPrimary: [0.97, 0.95, 0.9],
-  primary: [0.82, 0.16, 0.13],
+  primary: [0.73, 0.22, 0.15],
 };
 
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x));

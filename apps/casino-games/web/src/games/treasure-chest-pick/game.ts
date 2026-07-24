@@ -184,8 +184,19 @@ export const chestPosition = (index: number, count: number): EngineVec3 => {
 // lagoon floor, cropping that backdrop band out of frame. The pitch angle is
 // preset-fixed and unchanged; only the zoom tightens. The hero-flight close-up is
 // derived from a fixed heroDistance + fovY, so its on-screen scale is untouched.
-export const chestCamera = (count: number): ReturnType<typeof tabletopCamera> =>
-  tabletopCamera(v3(0, 0.42, -0.1), 5.0 + Math.ceil(count / CHEST_COLUMNS) * 0.78);
+export const chestCamera = (count: number): ReturnType<typeof tabletopCamera> => {
+  const span = 5.0 + Math.ceil(count / CHEST_COLUMNS) * 0.78;
+  const center = v3(0, 0.42, -0.1);
+  // Start from the shared tabletop framing (which the other card-table games
+  // keep), then LOWER the pitch for THIS game only: drop the camera height and
+  // pull it back so the view is a more oblique 3/4 look at the chests — their
+  // gold-latched fronts and lids both read, rather than an almost top-down plan.
+  // The shared preset sits at height span·1.15 / depth span·0.85 (~54° down);
+  // this reseats it at span·0.95 / span·1.02 (~43° down). The hero close-up is
+  // derived from this camera via `heroFraming`, so it re-centers automatically.
+  const base = tabletopCamera(center, span);
+  return { ...base, position: v3(center.x, center.y + span * 0.95, center.z + span * 1.02) };
+};
 
 export const chestTargets = (count: number): readonly PickTarget[] =>
   Array.from({ length: count }, (_, index) => ({

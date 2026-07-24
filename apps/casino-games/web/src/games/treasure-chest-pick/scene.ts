@@ -161,21 +161,52 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // reference's toy-diorama shore. No emissive on the solid props (they are lit
   // by the same rig as the chests); the sand tones are pulled a touch lighter and
   // warmer than the floor slab so the castle and shore reads as dry sculpted sand.
-  PalmBark: { baseColor: [0.46, 0.32, 0.19, 1] },
-  PalmBarkDark: { baseColor: [0.33, 0.22, 0.12, 1] },
+  PalmBark: { baseColor: [0.48, 0.34, 0.2, 1] },
+  PalmBarkDark: { baseColor: [0.37, 0.26, 0.15, 1] },
   PalmLeaf: { baseColor: [0.29, 0.53, 0.22, 1] },
   PalmLeafDark: { baseColor: [0.19, 0.4, 0.16, 1] },
   Coconut: { baseColor: [0.36, 0.26, 0.15, 1] },
-  CastleSand: { baseColor: [0.93, 0.85, 0.63, 1] },
-  CastleSandDark: { baseColor: [0.82, 0.72, 0.5, 1] },
-  CastleDoor: { baseColor: [0.4, 0.32, 0.2, 1] },
-  CastleFlag: { baseColor: [0.85, 0.22, 0.16, 1] },
-  CastlePole: { baseColor: [0.32, 0.22, 0.12, 1] },
-  CrabShell: { baseColor: [0.83, 0.26, 0.19, 1] },
-  CrabShellDark: { baseColor: [0.62, 0.17, 0.12, 1] },
+  // Sand pulled a shade lighter and warmer than before: the raking key light
+  // rakes the tower cylinders' side walls into deep shadow, and the old darker
+  // ladder let those shadow faces sink to a muddy charcoal that read as a heavy
+  // dark mass competing with the chests. A lighter, warmer sand keeps the
+  // shadow side reading as dry sculpted sand — subordinate, not dominant.
+  // A whisper of warm emissive keeps the tower cylinders' shadow-side walls —
+  // which the low fill would otherwise crush to near-black under the raking key —
+  // settled on a dim SAND rather than charcoal, so the castle reads as sand from
+  // every face and stays a light, secondary prop instead of a dark mass.
+  CastleSand: { baseColor: [0.95, 0.87, 0.66, 1], emissive: [0.16, 0.13, 0.08, 1] },
+  CastleSandDark: { baseColor: [0.87, 0.78, 0.57, 1], emissive: [0.13, 0.1, 0.06, 1] },
+  CastleDoor: { baseColor: [0.42, 0.34, 0.22, 1] },
+  CastlePole: { baseColor: [0.34, 0.24, 0.14, 1] },
+  // A warm-gold trim stripe on the decorative castle pennant, tying it to the
+  // chests' gilding.
+  CastleFlagTrim: { baseColor: [1, 0.82, 0.34, 1], emissive: [0.24, 0.18, 0.05, 1] },
+  // The crab reads as a coral beach creature, not a second brand accent: pulled
+  // off the saturated brand red toward warm coral so the only true reds in frame
+  // are the intentional branding surfaces.
+  CrabShell: { baseColor: [0.85, 0.34, 0.24, 1] },
+  CrabShellDark: { baseColor: [0.66, 0.24, 0.16, 1] },
   CrabEye: { baseColor: [0.06, 0.05, 0.05, 1] },
-  Shell: { baseColor: [0.96, 0.86, 0.8, 1] },
-  Starfish: { baseColor: [0.92, 0.5, 0.29, 1] },
+  // Shells/starfish carry the same whisper of warm emissive as the castle sand,
+  // so these little shore pieces read as pale shells catching the light rather
+  // than dark pebbles when the low fill leaves their sides unlit.
+  Shell: { baseColor: [0.96, 0.86, 0.8, 1], emissive: [0.24, 0.2, 0.17, 1] },
+  Starfish: { baseColor: [0.92, 0.5, 0.29, 1], emissive: [0.2, 0.1, 0.05, 1] },
+  // ── one consistent contact-shadow family ──────────────────────────────────
+  // Every prop anchors to the ground with the same two translucent discs: a
+  // wide SOFT rim and a smaller, darker CORE where the object actually meets the
+  // ground. Warm-neutral and low-opacity so they read as soft grounding, never
+  // as separate black cut-outs. A whisper of nothing else — no emissive — so
+  // they only ever darken what is beneath them.
+  ContactShadowSoft: { baseColor: [0.12, 0.1, 0.07, 1], opacity: 0.14 },
+  ContactShadowCore: { baseColor: [0.1, 0.08, 0.06, 1], opacity: 0.26 },
+  // The clean, lighter pad that frames the CENTER featured chest — a soft warm
+  // disc that lifts the water right under the hero slot so the eye lands there
+  // first. Additive-emissive translucent, like the reveal pools, so it brightens
+  // rather than paints.
+  FocusPad: { baseColor: [1, 0.93, 0.72, 1], emissive: [0.5, 0.42, 0.28, 1], opacity: 0.26 },
+  FocusPadRim: { baseColor: [1, 0.9, 0.66, 1], emissive: [0.34, 0.27, 0.16, 1], opacity: 0.14 },
   ...VEIL_MATERIALS,
 };
 
@@ -197,6 +228,42 @@ const disc = (key: string, material: string, at: EngineVec3, radius: number, hei
   mesh: "cylinder",
   transform: { position: at, rotation: QUAT_IDENTITY, scale: v3(radius * 2, height, radius * 2) },
 });
+
+// ── one directional light, one contact-shadow rule ──────────────────────────────
+
+/**
+ * The whole scene is lit by a single directional key (the `light:key` in
+ * `stageLights`). Its ground-plane throw is the ONE direction every contact
+ * shadow falls, so nothing looks lit from conflicting suns. Kept in lock-step
+ * with the key light's `direction` below — change one, change the other.
+ */
+const KEY_LIGHT_DIR = v3(-0.6, -0.58, -0.5);
+const SHADOW_DIR = ((): { readonly x: number; readonly z: number } => {
+  const len = Math.hypot(KEY_LIGHT_DIR.x, KEY_LIGHT_DIR.z);
+  return { x: KEY_LIGHT_DIR.x / len, z: KEY_LIGHT_DIR.z / len };
+})();
+/** How far the shadow slides down-light, as a fraction of its radius. */
+const SHADOW_SLIDE = 0.26;
+/** Just above the ground so the discs never z-fight the water/sand slab. */
+const SHADOW_Y = 0.01;
+
+/**
+ * A soft directional contact shadow: a wide translucent rim slid a little
+ * down-light, plus a smaller, darker CORE held at the object's actual footprint
+ * so the point where it meets the ground reads darker than the outer falloff.
+ * `radius` is the object's ground footprint; `spread` scales the whole shadow
+ * (a ground-fade for a chest leaving the board, or a clarity boost for the hero
+ * slot). Returns nothing once the object has lifted clear.
+ */
+const contactShadow = (keyPrefix: string, at: EngineVec3, radius: number, spread = 1, coreScale = 1): readonly SceneInstance[] => {
+  const r = radius * spread;
+  return r < 0.04
+    ? []
+    : [
+        disc(`${keyPrefix}:soft`, "ContactShadowSoft", v3(at.x + SHADOW_DIR.x * r * SHADOW_SLIDE, SHADOW_Y, at.z + SHADOW_DIR.z * r * SHADOW_SLIDE), r, 0.008),
+        disc(`${keyPrefix}:core`, "ContactShadowCore", v3(at.x + SHADOW_DIR.x * r * SHADOW_SLIDE * 0.5, SHADOW_Y + 0.002, at.z + SHADOW_DIR.z * r * SHADOW_SLIDE * 0.5), r * 0.6 * coreScale, 0.008),
+      ];
+};
 
 /**
  * The barrel top is faceted into this many box slats. The engine's mesh
@@ -293,11 +360,15 @@ interface ChestPose {
   readonly hoverRing: boolean;
   readonly seam: number;
   readonly glow: number;
+  /** The center featured chest, while it sits on the board: earns a clean warm
+   * focus pad and a slightly clearer contact shadow so it reads as the frame's
+   * primary focal point. False once a pick is made (the hero owns the frame). */
+  readonly centerFocus: boolean;
   /** The brand name stamped across the chest front, welded to this pose. */
   readonly brandName: string;
   /** Whether this chest wears the raised brand NAMEPLATE (gold frame + colored
-   * plate + lettering). Only the center chest does; the rest stay bare so the one
-   * plaque reads as the hero marker instead of nine competing labels. */
+   * plate + lettering). Only the center featured chest does; the rest stay bare
+   * so the one plaque reads as the hero marker instead of nine competing labels. */
   readonly nameplate: boolean;
 }
 
@@ -389,6 +460,23 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
         ]
       : [];
 
+  // Directional contact shadow anchoring the chest to the board — the same
+  // down-light rule every prop obeys. It shrinks with the chest as it lifts off
+  // on the hero flight (`grounded`), and the center featured chest earns a
+  // slightly clearer core than its eight subordinate neighbours.
+  const shadow: readonly SceneInstance[] =
+    grounded > 0.02 ? contactShadow(`${key}:shadow`, pose.origin, BODY.x * 0.52, grounded, pose.centerFocus ? 1.18 : 1) : [];
+
+  // The clean, lighter pad that frames ONLY the center featured chest, so the
+  // eye lands on it first while the eight around it stay subordinate.
+  const focusPad: readonly SceneInstance[] =
+    pose.centerFocus && grounded > 0.02
+      ? [
+          disc(`${key}:focuspad1`, "FocusPadRim", v3(pose.origin.x, 0.014, pose.origin.z), BODY.x * 1.12 * grounded, 0.01),
+          disc(`${key}:focuspad0`, "FocusPad", v3(pose.origin.x, 0.018, pose.origin.z), BODY.x * 0.84 * grounded, 0.01),
+        ]
+      : [];
+
   // Warm seam light leaking from the lid/body join before it fully opens.
   const seam: SceneInstance[] =
     pose.seam > 0
@@ -450,13 +538,16 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   });
   const plateW = BODY.x * 0.82;
   const plateH = 0.5;
-  // Only the center (hero) chest wears the nameplate — frame, plate, and lettering.
-  // The rest stay bare. The label is stamped on BOTH backends here (it is no longer
-  // shed by the Canvas2D `low` LOD): a single plaque is cheap, and it is the one
-  // piece of lettering the player is meant to read on the board.
+  // Only the center featured chest wears the nameplate — frame, plate, and
+  // lettering; the eight around it stay bare carved-wood chests, so the one
+  // plaque reads as the hero marker rather than nine competing labels. Its frame
+  // catches the BRIGHTER gild so the branded chest reads a touch crisper without
+  // being enlarged. The label is stamped on BOTH backends here (no longer shed by
+  // the Canvas2D `low` LOD): a single plaque is cheap, and it is the one piece of
+  // lettering the player is meant to read on the board.
   const plaque = pose.nameplate
     ? [
-        platePart("plaqueframe", v3(plateW + 0.1, plateH + 0.1, 0.05), v3(0, 0, 0.0), pose.dim ? "GildDim" : "GildFront"),
+        platePart("plaqueframe", v3(plateW + 0.1, plateH + 0.1, 0.05), v3(0, 0, 0.0), pose.dim ? "GildDim" : "GildBright"),
         platePart("plaque", v3(plateW, plateH, 0.06), v3(0, 0, 0.035), pose.dim ? "BrandPrimaryDim" : "BrandPrimary"),
       ]
     : [];
@@ -470,6 +561,8 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     : [];
 
   return [
+    ...shadow,
+    ...focusPad,
     ...pool,
     part("body", v3(0, BODY.y / 2, 0), BODY, wood),
     // Board gap lines (darkest) read as separate planks without a texture. The
@@ -592,7 +685,10 @@ export const WATER_RADIUS = 5.0;
 const platform = (): readonly SceneInstance[] => [
   disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006),
   disc("plat:side", "PlatformSide", v3(0, -0.062, 0), WATER_RADIUS, 0.06),
-  disc("plat:glow", "CenterGlow", v3(0, -0.03, 0), WATER_RADIUS * (4.4 / 8.4), 0.006),
+  // Tightened from the old broad wash so it no longer floods the whole grid: it
+  // now pools warmth over the center column, leaving the per-slot FocusPad under
+  // the featured chest to do the clean framing.
+  disc("plat:glow", "CenterGlow", v3(0, -0.03, 0), WATER_RADIUS * (3.0 / 8.4), 0.006),
   ...[
     [-1, -1],
     [1, -1],
@@ -678,7 +774,7 @@ const palmTree = (origin: EngineVec3, tick: number): readonly SceneInstance[] =>
       q,
     );
   });
-  return [...trunk, ...coconuts, ...fronds];
+  return [...contactShadow("palm:shadow", origin, 0.62), ...trunk, ...coconuts, ...fronds];
 };
 
 /** Yaw of the whole sandcastle so its square base runs parallel to the diagonal
@@ -686,16 +782,25 @@ const palmTree = (origin: EngineVec3, tick: number): readonly SceneInstance[] =>
  * from the top-down view. */
 const CASTLE_YAW = -1.05;
 
+/** The castle is scaled down from its authored size so it reads as a secondary
+ * beach prop framing the pool rather than a heavy mass competing with the chest
+ * grid — the same "peripheral props stay subordinate" rule the whole pass obeys.
+ * Applied uniformly to every local offset AND scale, so the assembly shrinks
+ * about its origin without changing its proportions. */
+const CASTLE_SCALE = 0.82;
+
 /** A turreted sandcastle: a broad base, a central keep with two flanking turrets,
- * crenellations, an arched door, and a brand pennant on a pole. The whole assembly
- * is yawed by `CASTLE_YAW` about its origin so it lines up with the shore. The
- * pennant flies the brand color and carries its name. */
-const sandcastle = (origin: EngineVec3, brandName: string): readonly SceneInstance[] => {
+ * crenellations, an arched door, and a simple decorative pennant (brand colors,
+ * no logo). The whole assembly is yawed by `CASTLE_YAW` and scaled by
+ * `CASTLE_SCALE` about its origin so it lines up with the shore and stays
+ * secondary to the chests. */
+const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
   const q = quatYaw(CASTLE_YAW);
-  // Place a part given in castle-local space: rotate its offset into the yawed
-  // frame and compose the yaw into its own rotation, so the castle turns as one.
+  // Place a part given in castle-local space: scale it down about the origin,
+  // rotate its offset into the yawed frame, and compose the yaw into its own
+  // rotation, so the castle turns and shrinks as one.
   const place = (key: string, material: string, mesh: "box" | "cylinder", local: EngineVec3, scale: EngineVec3): SceneInstance =>
-    decorPart(key, material, mesh, addV3(origin, rotateByQuat(local, q)), scale, q);
+    decorPart(key, material, mesh, addV3(origin, rotateByQuat(scaleV3(local, CASTLE_SCALE), q)), scaleV3(scale, CASTLE_SCALE), q);
   const base = place("castle:base", "CastleSandDark", "box", v3(0, 0.28, 0), v3(2.4, 0.56, 2.0));
   const towers = [
     { key: "keep", x: 0, r: 0.52, h: 1.7, mat: "CastleSand" },
@@ -722,16 +827,12 @@ const sandcastle = (origin: EngineVec3, brandName: string): readonly SceneInstan
   const door = place("castle:door", "CastleDoor", "box", v3(0, 0.5, 1.0), v3(0.42, 0.62, 0.08));
   const poleTop = 0.56 + 1.7;
   const pole = place("castle:pole", "CastlePole", "cylinder", v3(0, poleTop + 0.42, 0), v3(0.05, 0.84, 0.05));
-  const flagLocal = v3(0.24, poleTop + 0.66, 0);
-  const flag = place("castle:flag", "BrandPrimary", "box", flagLocal, v3(0.5, 0.3, 0.03));
-  // The brand name on the pennant, welded to the yawed castle frame.
-  const flagText = stampText(
-    "castle:flagtext",
-    brandName,
-    { basis: v3(1, 1, 1), center: v3(0, 0, 0.02), orient: q, origin: addV3(origin, rotateByQuat(flagLocal, q)) },
-    { depth: 0.01, height: 0.2, lift: 0.01, material: "BrandLetterOnPrimary", maxWidth: 0.44 },
-  );
-  return [base, ...towerParts, door, pole, flag, ...flagText];
+  // A simple decorative pennant flying the brand colors — a warm-red flag with a
+  // gold trim stripe along the pole, and NO logo or lettering. It reads as
+  // festive beach dressing that shares the branding palette, not a second sign.
+  const flag = place("castle:flag", "BrandPrimary", "box", v3(0.24, poleTop + 0.72, 0), v3(0.5, 0.24, 0.03));
+  const flagTrim = place("castle:flagtrim", "CastleFlagTrim", "box", v3(0.24, poleTop + 0.56, 0), v3(0.5, 0.08, 0.035));
+  return [...contactShadow("castle:shadow", origin, 1.28 * CASTLE_SCALE), base, ...towerParts, door, pole, flag, flagTrim];
 };
 
 /** A stubby cartoon crab with a small set of idle animations: a domed shell, two
@@ -778,7 +879,10 @@ const crab = (origin: EngineVec3, tick: number, seed: number): readonly SceneIns
   // the body frame, so it scoots and turns with the crab.
   const flagPole = place("crab:flagpole", "BrandPost", "box", v3(0.58, 0.5, 0.34), v3(0.04, 0.7, 0.04));
   const flag = place("crab:flag", "BrandPrimary", "box", v3(0.74, 0.66, 0.34), v3(0.3, 0.2, 0.03));
-  return [body, ...eyes, ...claws, ...legs, flagPole, flag];
+  // The shadow follows the crab's side-scuttle (the horizontal scoot) but not its
+  // vertical bob, so it stays planted on the sand as the little creature hops.
+  const shadow = contactShadow("crab:shadow", addV3(origin, v3(pose.scootX, 0, 0)), 0.5);
+  return [...shadow, body, ...eyes, ...claws, ...legs, flagPole, flag];
 };
 
 /** Shells and a couple of starfish scattered on the shore. Positions are on the
@@ -809,7 +913,7 @@ const beachDecor = (tick: number, seed: number, decor: DecorDrag, brandName: str
   const at = (key: keyof DecorDrag["props"]): EngineVec3 => addV3(decor.props[key], decor.held === key ? HELD_LIFT : v3(0, 0, 0));
   return [
     ...palmTree(at("palm"), tick),
-    ...sandcastle(at("castle"), brandName),
+    ...sandcastle(at("castle")),
     ...crab(at("crab"), tick, seed),
     ...beachLitter(),
     ...brandedProps(brandName),
@@ -839,6 +943,9 @@ interface BillboardSpec {
   readonly panelH: number;
   readonly bodyMat: string;
   readonly borderMat: string;
+  /** An optional thin pinstripe between the border and the panel — used to run
+   * the connective GOLD accent around the sign, tying it to the chest gilding. */
+  readonly trimMat?: string;
   readonly letterMat: string;
   readonly textHeight: number;
   readonly textMaxW: number;
@@ -849,11 +956,20 @@ const billboard = (keyPrefix: string, brandName: string, o: BillboardSpec): read
   const orient = quatMul(quatYaw(o.yaw), quatPitch(o.tilt));
   const normal = rotateByQuat(v3(0, 0, 1), orient);
   const border = decorPart(`${keyPrefix}:border`, o.borderMat, "box", addV3(o.center, scaleV3(normal, -0.03)), v3(o.panelW + 0.18, o.panelH + 0.18, 0.05), orient);
+  const trim = o.trimMat === undefined
+    ? []
+    : [decorPart(`${keyPrefix}:trim`, o.trimMat, "box", addV3(o.center, scaleV3(normal, -0.015)), v3(o.panelW + 0.09, o.panelH + 0.09, 0.06), orient)];
   const panel = decorPart(`${keyPrefix}:panel`, o.bodyMat, "box", o.center, v3(o.panelW, o.panelH, 0.07), orient);
   const posts = (o.posts === 1 ? [0] : o.posts === 2 ? [-1, 1] : []).map((sx, i): SceneInstance => {
     const foot = addV3(o.center, rotateByQuat(v3(sx * o.panelW * 0.36, -o.panelH / 2, 0), orient));
     const height = Math.max(0.1, foot.y);
     return decorPart(`${keyPrefix}:post${i}`, "BrandPost", "cylinder", v3(foot.x, height / 2, foot.z), v3(0.08, height, 0.08));
+  });
+  // A contact shadow under each post foot, anchoring the sign to the sand with
+  // the same down-light rule every other prop obeys.
+  const shadows = (o.posts === 1 ? [0] : o.posts === 2 ? [-1, 1] : []).flatMap((sx, i): readonly SceneInstance[] => {
+    const foot = addV3(o.center, rotateByQuat(v3(sx * o.panelW * 0.36, -o.panelH / 2, 0), orient));
+    return contactShadow(`${keyPrefix}:postshadow${i}`, v3(foot.x, 0, foot.z), 0.24);
   });
   const text = stampText(
     `${keyPrefix}:text`,
@@ -861,54 +977,33 @@ const billboard = (keyPrefix: string, brandName: string, o: BillboardSpec): read
     { basis: v3(1, 1, 1), center: v3(0, 0, 0), orient, origin: o.center },
     { depth: 0.03, height: o.textHeight, lift: 0.05, material: o.letterMat, maxWidth: o.textMaxW },
   );
-  return [border, panel, ...posts, ...text];
+  return [...shadows, border, ...trim, panel, ...posts, ...text];
 };
 
-/** Every standalone branded prop, placed on the sand ring around the lagoon. */
+/**
+ * The one freestanding branded prop: a single top-center ribbon banner across
+ * the back of the beach. The reference's left pennant and right signboard have
+ * been removed — the CENTER branded chest is the primary branding focal point,
+ * and this banner is the only secondary environmental logo placement, so the
+ * frame reads as art-directed rather than plastered with signs. It carries all
+ * three brand-palette colors intentionally: a warm-CHARCOAL frame (the brand
+ * ink), a GOLD pinstripe echoing the chest gilding that ties the branding into
+ * the beach, the warm-RED panel, and warm cream lettering — on warm dark posts.
+ */
 const brandedProps = (brandName: string): readonly SceneInstance[] => [
-  // Top ribbon banner — brand primary, white lettering, on two posts at the back.
   ...billboard("brand:banner", brandName, {
     bodyMat: "BrandPrimary",
-    borderMat: "BrandPrimaryDim",
+    borderMat: "BrandInk",
     center: v3(0, 1.25, -5.6),
     letterMat: "BrandLetterOnPrimary",
     panelH: 1.0,
     panelW: 2.9,
     posts: 2,
     textHeight: 0.62,
+    trimMat: "StageGold",
     textMaxW: 2.5,
     tilt: -0.5,
     yaw: 0,
-  }),
-  // Right signboard — dark ink body, brand-colored border + lettering.
-  ...billboard("brand:sign", brandName, {
-    bodyMat: "BrandInk",
-    borderMat: "BrandPrimary",
-    center: v3(6.1, 0.98, 1.9),
-    letterMat: "BrandLetter",
-    panelH: 0.98,
-    panelW: 1.95,
-    posts: 2,
-    textHeight: 0.52,
-    textMaxW: 1.62,
-    tilt: -0.12,
-    yaw: -0.6,
-  }),
-  // Left hanging pennant — brand primary, white lettering, on one pole.
-  ...billboard("brand:pennant", brandName, {
-    bodyMat: "BrandPrimary",
-    borderMat: "BrandPrimaryDim",
-    // Set back on the left sand (clear of the crab's own flag) and pulled in from
-    // the frame edge, so the whole pennant stays on-screen at the tabletop framing.
-    center: v3(-6.0, 1.35, -0.7),
-    letterMat: "BrandLetterOnPrimary",
-    panelH: 0.9,
-    panelW: 1.5,
-    posts: 1,
-    textHeight: 0.5,
-    textMaxW: 1.28,
-    tilt: -0.12,
-    yaw: 0.5,
   }),
 ];
 
@@ -1012,8 +1107,10 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   /** The chosen chest's open mouth, wherever the flight has carried it. */
   const heroTop = addV3(flown.position, v3(0, BODY_TOP * heroScale, 0));
 
-  // The one chest that wears the brand nameplate: the slot nearest the board
-  // origin (index 4 on the standard 3×3), so the plaque marks the visual center.
+  // The center featured chest: the slot nearest the board origin (index 4 on the
+  // standard 3×3). It wears the brand nameplate AND carries the frame's focal
+  // treatment — the warm pad and clearer contact shadow — so the plaque and the
+  // focal framing both mark the visual center.
   const centerIndex = Array.from({ length: count }, (_, i) => i).reduce((best, i) => {
     const p = chestPosition(i, count);
     const b = chestPosition(best, count);
@@ -1055,6 +1152,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     return chestInstances(`chest${index}`, {
       at,
       brandName: spec.brand.name,
+      centerFocus: index === centerIndex && selected === null,
       dim: dimmed,
       flight: isSelected ? flight : 0,
       focusRing: session.phase === "ready" && choice.focused === index && choice.hovered !== index && choice.armed !== index,
