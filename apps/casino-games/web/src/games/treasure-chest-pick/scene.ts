@@ -401,21 +401,29 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
       ? [disc(`${key}:ring`, "PoolOuter", ringBase, BODY.x * 1.0, 0.012)]
       : [];
 
-  // A brand NAMEPLATE mounted on the TOP of the closed chest, facing up so it
-  // reads clearly from the tabletop camera (which looks down on the lid, not the
-  // foreshortened front). It is a raised plaque — a gold frame under a brand-
-  // colored plate — carrying the brand name in the on-primary color, NOT letters
-  // laid straight on the wood. Everything is placed through the same (origin, q,
-  // squash·grow) frame the chest parts use, so the whole plaque squashes, grows,
-  // tilts and spirals welded to the chest, as part of it. `plateOrient` lays it
-  // flat (normal up the chest's Y, reading direction across the chest's X, its
-  // "up" toward the chest's −Z so it reads top-away from the camera). Long names
-  // shrink to fit the plate (label.ts).
-  const plateOrient = quatMul(q, quatPitch(-Math.PI / 2));
-  const plateBasis = v3(squashXZ * grow, squashXZ * grow, squashY * grow);
-  const crownAnchor = addV3(origin, rotateByQuat(v3(0, CHEST_HEIGHT * squashY * grow, 0.03 * squashXZ * grow), q));
+  // A brand NAMEPLATE mounted on the chest LID crown, facing up so it reads
+  // clearly from the tabletop camera (which looks down on the lid). It is a raised
+  // plaque — a gold frame under a brand-colored plate — carrying the brand name in
+  // the on-primary color, NOT letters laid straight on the wood.
+  //
+  // CRUCIAL: it is welded to the LID frame (lidHinge + lidQ), exactly like the
+  // dome, gold bands, rim and latch above — NOT to the body (origin, q). The
+  // plaque sits ON the lid, so it must ride the lid: when the lid swings open on
+  // its hinge the whole nameplate lifts and tilts back WITH it, instead of hanging
+  // in place over the opening. (Parenting it to the body was the bug — the plaque
+  // is lid furniture, so it belongs in the lid's frame.) It scales by `grow`, the
+  // lid's own convention. `plateOrient` lays it flat on the crown: its normal is
+  // the lid's local +Y, its reading direction the lid's +X, its "up" toward the
+  // lid's −Z so it reads top-away from the camera. Long names shrink (label.ts).
+  const plateOrient = quatMul(lidQ, quatPitch(-Math.PI / 2));
+  const plateBasis = v3(grow, grow, grow);
+  // The dome's outer crown in LID-LOCAL space (relative to the hinge): the highest
+  // point of the arch (y = lid board + arch height) at mid-depth (z = LID.z/2),
+  // lifted a hair so the plaque rests ON the crown rather than sinking into it.
+  const crownLid = v3(0, LID.y + CHEST_LID_ARCH + 0.015, LID.z / 2);
+  const crownAnchor = addV3(lidHinge, rotateByQuat(scaleV3(crownLid, grow), lidQ));
   // A flat box on the plaque frame: `size`/`offset` are in oriented-local units
-  // (x across, y along the chest depth, z up off the lid), scaled by `plateBasis`.
+  // (x across, y along the lid depth, z up off the lid), scaled by `plateBasis`.
   const platePart = (suffix: string, size: EngineVec3, offset: EngineVec3, material: string): SceneInstance => ({
     key: `${key}:${suffix}`,
     material,
