@@ -1,0 +1,22 @@
+[package]
+name = "axiom-font-import"
+description = "Axiom repo tool: the offline font compiler. Converts external font containers (TTF/OTF/WOFF; WOFF2 requires pre-decompression) into a versioned, deterministic `.axfont` runtime asset the engine's `axiom-text` module consumes. It parses/rasterizes glyphs (the only place font-container and rasterization dependencies live), packs a deterministic atlas via axiom-text's builder, verifies the result by decoding it back, and writes it atomically. Not part of the runtime engine graph."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "axiom-font-import"
+path = "src/main.rs"
+
+[dependencies]
+# Runtime format assembly + validation is reused from the engine module (a tool
+# may depend on runtime code). The font-container and rasterization dependencies
+# are restricted to THIS tool — they never enter a layer, module, or app.
+axiom-text = { path = "../../modules/axiom-text" }
+fontdue = "0.9"
+flate2 = "1"
+
+[lints.rust]
+unsafe_code = "forbid"

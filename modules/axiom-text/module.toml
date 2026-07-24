@@ -1,0 +1,43 @@
+# Axiom module manifest — axiom-text.
+#
+# The deterministic runtime text and typography capability. `Text` is one unified
+# primitive: plain and rich text, screen- and world-space placement, and
+# per-character effects are all configurations of the same thing, never separate
+# `Label`/`Text2D`/`RichText` systems. It owns everything from text content down
+# to a backend-neutral ordered glyph batch, and consumes only the compiled
+# `.axfont` runtime font format — external font containers (TTF/OTF/WOFF/WOFF2)
+# are compiled offline by the `axiom-font-import` tool, never at runtime.
+#
+# It is an *isolated* engine module: it composes no other module
+# (`allowed_modules = []`) and knows nothing of scene, render, GPU, or any game.
+# It exposes neutral placement + glyph-batch data; an app (or a legal feature
+# module) translates that into a renderer contract, per the app-owned translation
+# rule.
+#
+# The behavioral facade is `TextApi`; alongside it `lib.rs` re-exports the pure
+# value vocabulary (handles, content, style, layout, placement, effects, batches,
+# the compiled font, errors) via `pub use ids::{…}`, per Module Law #8.
+
+[module]
+name = "text"
+crate_name = "axiom-text"
+kind = "engine-module"
+
+allowed_layers = [
+    "kernel",
+    "math",
+    "host",
+]
+
+allowed_modules = []
+
+introduced_capabilities = [
+    "compiled-font-asset",
+    "text-content-and-spans",
+    "text-style-resolution",
+    "text-layout-and-measurement",
+    "text-hit-testing",
+    "text-placement-data",
+    "deterministic-text-effects",
+    "neutral-glyph-batch",
+]

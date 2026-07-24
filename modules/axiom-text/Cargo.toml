@@ -1,0 +1,26 @@
+[package]
+name = "axiom-text"
+description = "Axiom engine module: the deterministic, backend-neutral text and typography capability. Owns text content and rich spans, the compiled `.axfont` runtime font format (decode + validation), font identity and fallback resolution, glyph metrics and kerning, reusable text styles and style resolution, layout (wrapping, alignment, overflow, fitting), measurement and hit testing, screen- and world-space placement data, deterministic per-character effects driven by an explicit tick, retained text state with fine-grained dirty tracking, and backend-neutral ordered glyph batches. It parses no font container and touches no filesystem, browser, GPU, wall-clock, or randomness — offline font compilation lives in the `axiom-font-import` tool, and an app translates the neutral glyph batch into a renderer contract. Depends only on kernel + math. Branchless and 100% covered."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# Text is expressed purely in kernel serialization/identity/error primitives and
+# math vectors/transforms (placement + bounds). It parses no font container and
+# rasterizes nothing — that is the `axiom-font-import` tool's job — so this stays
+# an isolated engine module (`allowed_modules = []`).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+# `Pixels` (pixel-valued public API) lives in the host layer — the same
+# dimensioned-scalar convention `axiom-layout` follows; `Ratio`/`Radians` come
+# from the kernel. Text's public surface carries these, never a naked `f32`.
+axiom-host = { path = "../../crates/axiom-host" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
