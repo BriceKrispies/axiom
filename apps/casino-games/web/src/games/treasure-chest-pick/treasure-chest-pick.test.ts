@@ -23,10 +23,13 @@ import {
   CHEST_TIMING,
   chestCamera,
   chestPosition,
+  CRAB_WINDOW,
+  crabIdle,
   dancePose,
   flightProgress,
   heroFraming,
   idlePhase,
+  palmSway,
   presentationPhase,
   revealTimeline,
   spiralFlight,
@@ -122,6 +125,48 @@ test("idle dances draw only from the ambient stream", () => {
   assert.ok(moved, "the dance must actually move");
   // Zero liveliness freezes the dance.
   assert.deepEqual(dancePose(4, 9, 50, 999, 0), { scootX: 0, squash: 0, twist: 0 });
+});
+
+test("the palm sways in the wind — pure in the tick, bounded, and moving", () => {
+  // palmSway takes NO seed: wind is the same every session and cannot correlate
+  // with any outcome. Same tick → identical sway; and it stays gentle.
+  for (let tick = 0; tick < 600; tick += 11) {
+    const a = palmSway(tick);
+    const b = palmSway(tick);
+    assert.equal(a.bend, b.bend);
+    assert.equal(a.flutter(3), b.flutter(3));
+    assert.ok(Math.abs(a.bend) < 0.12, "sway stays a gentle lean");
+    assert.ok(Math.abs(a.flutter(5)) < 0.08, "frond flutter stays small");
+  }
+  // The bend is real motion across a cycle, and different fronds flutter apart.
+  const bends = Array.from({ length: 400 }, (_, tick) => palmSway(tick).bend);
+  assert.ok(Math.max(...bends) - Math.min(...bends) > 0.05, "the palm must actually sway");
+  const sway = palmSway(37);
+  assert.notEqual(sway.flutter(0), sway.flutter(1), "fronds flutter out of unison");
+});
+
+test("the crab's idle animations fire on a random interval from the ambient stream", () => {
+  // Pure in (tick, seed): same inputs → identical pose.
+  for (let tick = 0; tick < 1200; tick += 13) {
+    assert.deepEqual(crabIdle(tick, 4242), crabIdle(tick, 4242));
+  }
+  // Across many windows the crab performs every idle in its repertoire AND rests
+  // — i.e. the animations come on an interval, not every window and not never.
+  const kinds = new Set(Array.from({ length: 60 }, (_, w) => crabIdle(w * CRAB_WINDOW + CRAB_WINDOW / 2, 7).kind));
+  assert.ok(kinds.has("rest"), "the crab rests between bits of business");
+  assert.ok(kinds.has("scuttle") && kinds.has("wave") && kinds.has("bob") && kinds.has("turn"), "every idle in the repertoire plays");
+  // A performed idle is real motion somewhere in its run (each figure passes
+  // through zero-crossings, so check the PEAK across many ticks, not one instant);
+  // a rest is still but for the breathe.
+  const motion = (p: ReturnType<typeof crabIdle>): number =>
+    Math.abs(p.scootX) + Math.abs(p.bob) + Math.abs(p.yaw) + Math.abs(p.clawLift) + Math.abs(p.legWiggle);
+  const poses = Array.from({ length: 2000 }, (_, tick) => crabIdle(tick, 7));
+  const peakActive = Math.max(...poses.filter((p) => p.kind !== "rest").map(motion));
+  assert.ok(peakActive > 0.1, "an active idle really moves the crab");
+  // A rest contributes no gross motion (only the tiny breathe/eye drift, which
+  // are not part of `motion`).
+  const rested = poses.find((p) => p.kind === "rest");
+  assert.ok(rested !== undefined && motion(rested) === 0, "a resting crab is still");
 });
 
 test("the spiral leaves the grid slot, converges on the hero anchor, and lands facing front", () => {

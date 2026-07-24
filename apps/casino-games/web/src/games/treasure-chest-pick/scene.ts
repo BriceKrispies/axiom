@@ -46,10 +46,12 @@ import {
   CHEST_TIMING,
   chestCamera,
   chestPosition,
+  crabIdle,
   dancePose,
   flightProgress,
   heroFraming,
   idlePhase,
+  palmSway,
   revealTimeline,
   spiralFlight,
 } from "./game.ts";
@@ -547,26 +549,42 @@ const decorPart = (
   rotation: EngineQuat = QUAT_IDENTITY,
 ): SceneInstance => ({ key, material, mesh, transform: { position, rotation, scale } });
 
-/** A leaning palm: a curved stack of tapering bark cylinders, a coconut cluster,
- * and a fan of drooping frond boards radiating from the crown. */
-const palmTree = (origin: EngineVec3): readonly SceneInstance[] => {
+/** A leaning palm swaying in the wind: a curved stack of tapering bark cylinders,
+ * a coconut cluster, and a fan of drooping frond boards radiating from the crown.
+ * `tick` drives a gentle whole-crown sway (bend grows with height, so the trunk
+ * arcs and the crown leads) plus a faster per-frond flutter — a pure function of
+ * the tick via `palmSway`, so it can never correlate with the outcome. */
+const PALM_CROWN_Y = 2.66;
+const palmTree = (origin: EngineVec3, tick: number): readonly SceneInstance[] => {
+  const sway = palmSway(tick);
   const segs = [
     { y: 0.4, x: 0.0, r: 0.34, tilt: 0.04, mat: "PalmBarkDark" },
     { y: 1.08, x: 0.12, r: 0.3, tilt: 0.12, mat: "PalmBark" },
     { y: 1.74, x: 0.3, r: 0.26, tilt: 0.22, mat: "PalmBarkDark" },
     { y: 2.34, x: 0.56, r: 0.22, tilt: 0.34, mat: "PalmBark" },
   ];
+  // Bend scales with height so the base stays planted and the crown travels most.
+  const bendAt = (y: number): number => sway.bend * (y / PALM_CROWN_Y) ** 1.6;
   const trunk = segs.map((s, i) =>
-    decorPart(`palm:trunk${i}`, s.mat, "cylinder", addV3(origin, v3(s.x, s.y, 0)), v3(s.r * 2, 0.72, s.r * 2), quatRoll(-s.tilt)),
+    decorPart(
+      `palm:trunk${i}`,
+      s.mat,
+      "cylinder",
+      addV3(origin, v3(s.x + bendAt(s.y) * 1.4, s.y, 0)),
+      v3(s.r * 2, 0.72, s.r * 2),
+      quatRoll(-s.tilt - bendAt(s.y)),
+    ),
   );
-  const crown = addV3(origin, v3(0.74, 2.66, 0));
+  const crown = addV3(origin, v3(0.74 + sway.bend * 1.4, PALM_CROWN_Y, 0));
+  // The whole crown rolls with the wind, carrying the coconuts and frond bases.
+  const crownRoll = quatRoll(-sway.bend);
   const coconuts = [v3(-0.14, -0.04, 0.12), v3(0.12, -0.02, -0.14), v3(-0.02, -0.16, -0.02)].map((d, i) =>
-    decorPart(`palm:coco${i}`, "Coconut", "sphere", addV3(crown, d), v3(0.2, 0.2, 0.2)),
+    decorPart(`palm:coco${i}`, "Coconut", "sphere", addV3(crown, rotateByQuat(d, crownRoll)), v3(0.2, 0.2, 0.2)),
   );
   const fronds = Array.from({ length: 7 }, (_, i): SceneInstance => {
     const a = (i / 7) * Math.PI * 2;
-    const droop = 0.55 + (i % 2) * 0.12;
-    const q = quatMul(quatYaw(a), quatPitch(droop));
+    const droop = 0.55 + (i % 2) * 0.12 + sway.flutter(i);
+    const q = quatMul(crownRoll, quatMul(quatYaw(a), quatPitch(droop)));
     const len = 1.5 + (i % 3) * 0.14;
     return decorPart(
       `palm:frond${i}`,
@@ -613,27 +631,44 @@ const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
   return [base, ...towerParts, door, pole, flag];
 };
 
-/** A stubby cartoon crab: a domed shell, two eyestalks, two front claws, and a
- * row of little legs down each side. */
-const crab = (origin: EngineVec3): readonly SceneInstance[] => {
-  const body = decorPart("crab:body", "CrabShell", "sphere", addV3(origin, v3(0, 0.2, 0)), v3(0.62, 0.4, 0.5));
+/** A stubby cartoon crab with a small set of idle animations: a domed shell, two
+ * eyestalks, two front claws, and a row of little legs down each side. `crabIdle`
+ * elects one bit of business (scuttle / claw wave / bob / turn) or a rest on a
+ * random interval from the ambient stream; here every part is placed through the
+ * resulting body frame so the crab scoots, bobs, turns, waves, and breathes as
+ * one creature. Pure in (tick, seed) — outcome-independent. */
+const crab = (origin: EngineVec3, tick: number, seed: number): readonly SceneInstance[] => {
+  const pose = crabIdle(tick, seed);
+  const bodyQ = quatYaw(pose.yaw);
+  const bodyShift = v3(pose.scootX, pose.bob, 0);
+  // Place a part given in body-local space: rotate its offset into the (turned)
+  // body frame, add the whole-body scoot/bob, and compose the body yaw into its
+  // own rotation, so one pose moves the crab as a single creature.
+  const place = (key: string, material: string, mesh: "box" | "sphere", local: EngineVec3, scale: EngineVec3, localRot: EngineQuat = QUAT_IDENTITY): SceneInstance =>
+    decorPart(key, material, mesh, addV3(origin, addV3(bodyShift, rotateByQuat(local, bodyQ))), scale, quatMul(bodyQ, localRot));
+  const body = place("crab:body", "CrabShell", "sphere", v3(0, 0.2, 0), v3(0.62, 0.4 * (1 + pose.breath), 0.5));
   const eyes = [-1, 1]
     .map((s): readonly SceneInstance[] => [
-      decorPart(`crab:stalk${s}`, "CrabShell", "box", addV3(origin, v3(s * 0.14, 0.44, 0.16)), v3(0.06, 0.18, 0.06)),
-      decorPart(`crab:eye${s}`, "CrabEye", "sphere", addV3(origin, v3(s * 0.14, 0.55, 0.16)), v3(0.1, 0.1, 0.1)),
+      place(`crab:stalk${s}`, "CrabShell", "box", v3(s * 0.14, 0.44, 0.16), v3(0.06, 0.18, 0.06), quatRoll(-s * pose.eye)),
+      place(`crab:eye${s}`, "CrabEye", "sphere", v3(s * 0.14 + s * pose.eye * 0.12, 0.55, 0.16), v3(0.1, 0.1, 0.1)),
     ])
     .flat();
   const claws = [-1, 1]
-    .map((s): readonly SceneInstance[] => [
-      decorPart(`crab:arm${s}`, "CrabShellDark", "box", addV3(origin, v3(s * 0.42, 0.18, 0.24)), v3(0.1, 0.09, 0.28)),
-      decorPart(`crab:claw${s}`, "CrabShell", "sphere", addV3(origin, v3(s * 0.5, 0.18, 0.42)), v3(0.22, 0.18, 0.2)),
-    ])
+    .map((s): readonly SceneInstance[] => {
+      // Each claw lifts and snaps on its own phase, so a wave alternates sides.
+      const lift = pose.clawLift * (0.7 + 0.3 * Math.sin(tick * 0.5 + (s > 0 ? 0 : Math.PI)));
+      return [
+        place(`crab:arm${s}`, "CrabShellDark", "box", v3(s * 0.42, 0.18 + lift * 0.12, 0.24), v3(0.1, 0.09, 0.28), quatRoll(s * lift)),
+        place(`crab:claw${s}`, "CrabShell", "sphere", v3(s * 0.5, 0.18 + lift * 0.3, 0.42), v3(0.22, 0.18, 0.2), quatRoll(s * lift)),
+      ];
+    })
     .flat();
   const legs = [-1, 1]
     .map((s): readonly SceneInstance[] =>
-      [-0.16, 0.02, 0.2].map((z, i) =>
-        decorPart(`crab:leg${s}_${i}`, "CrabShellDark", "box", addV3(origin, v3(s * 0.38, 0.08, z)), v3(0.24, 0.06, 0.07), quatYaw(s * 0.5)),
-      ),
+      [-0.16, 0.02, 0.2].map((z, i) => {
+        const wiggle = pose.legWiggle * Math.sin(tick * 0.7 + i * 1.2);
+        return place(`crab:leg${s}_${i}`, "CrabShellDark", "box", v3(s * 0.38, 0.08, z), v3(0.24, 0.06, 0.07), quatYaw(s * 0.5 + s * wiggle));
+      }),
     )
     .flat();
   return [body, ...eyes, ...claws, ...legs];
@@ -656,11 +691,14 @@ const beachLitter = (): readonly SceneInstance[] => {
   return [...shells, ...starfish];
 };
 
-/** The whole shore of set-dressing, placed once around the lagoon. */
-const beachDecor = (): readonly SceneInstance[] => [
-  ...palmTree(v3(-5.3, 0, -2.8)),
+/** The whole shore of set-dressing, placed once around the lagoon. The palm and
+ * crab are alive (wind sway / idle animations); the sandcastle and litter are
+ * still. `tick`/`seed` drive only the animated props, via pure ambient-keyed
+ * poses — nothing here reads the outcome. */
+const beachDecor = (tick: number, seed: number): readonly SceneInstance[] => [
+  ...palmTree(v3(-5.3, 0, -2.8), tick),
   ...sandcastle(v3(5.0, 0, -3.3)),
-  ...crab(v3(-5.4, 0, 1.0)),
+  ...crab(v3(-5.4, 0, 1.0), tick, seed),
   ...beachLitter(),
 ];
 
@@ -928,7 +966,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // inset lagoon and its beach margin keep exactly the held framing.
       ...stageRoom(48, WATER_RADIUS),
       ...platform(),
-      ...beachDecor(),
+      ...beachDecor(tick, seed),
       ...chests,
       ...backgroundVeil(camera, framing, flight),
       ...burst,

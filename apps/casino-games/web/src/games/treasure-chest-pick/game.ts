@@ -472,6 +472,100 @@ export const dancePose = (index: number, count: number, tick: number, seed: numb
   };
 };
 
+// ── beach set-dressing life (deterministic, outcome-independent) ───────────────
+// The shore props breathe so the frame is not a still life. Like the chest dance,
+// every animated quantity here is a PURE function of the tick (and, for the crab's
+// randomly-timed idles, the AMBIENT stream only) — never the population, the
+// committed plan, or the wall clock — so no wobble on the beach can hint at which
+// chest holds a prize. scene.ts applies these poses to the palm and crab parts.
+
+/** The palm's wind sway at `tick`. A gentle compound lean (two slow frequencies
+ * so it never reads as a clean metronome) plus a faster flutter phase the fronds
+ * ride. No seed: wind is the same every session and cannot correlate with any
+ * outcome. `bend` is the crown's downwind lean in radians; `flutter(i)` is one
+ * frond's extra droop. */
+export interface PalmSway {
+  readonly bend: number;
+  readonly flutter: (frond: number) => number;
+}
+
+export const palmSway = (tick: number): PalmSway => ({
+  bend: Math.sin(tick * 0.03) * 0.055 + Math.sin(tick * 0.011 + 1.3) * 0.03,
+  flutter: (frond: number): number => Math.sin(tick * 0.09 + frond * 1.7) * 0.06,
+});
+
+/** The crab's idle repertoire. `rest` is the between-animation default (just a
+ * faint breathe + eyestalk drift); the other four are the little bits of
+ * business it performs. */
+export type CrabIdleKind = "rest" | "scuttle" | "wave" | "bob" | "turn";
+
+/** One tick of the crab's idle pose. Whole-body `scootX`/`bob`/`yaw`, plus the
+ * per-limb `clawLift`/`legWiggle`/`eye` amounts and an always-on `breath`. */
+export interface CrabPose {
+  readonly kind: CrabIdleKind;
+  readonly scootX: number;
+  readonly bob: number;
+  readonly yaw: number;
+  readonly clawLift: number;
+  readonly legWiggle: number;
+  readonly eye: number;
+  readonly breath: number;
+}
+
+/** Ticks per idle slot (~2.5 s at 60 Hz). Each slot the crab either performs one
+ * elected idle or rests, decided from the ambient stream — so the animations
+ * fire on a random interval rather than every window. */
+export const CRAB_WINDOW = 150;
+const CRAB_KINDS: readonly CrabIdleKind[] = ["scuttle", "wave", "bob", "turn"];
+
+/**
+ * The crab's idle pose at `tick`, drawn ONLY from the AMBIENT stream (the same
+ * independence invariant the chest dance obeys). Each `CRAB_WINDOW` slot elects
+ * one idle and whether it plays at all; the chosen figure eases in and out over
+ * the slot on a `sin(pi·local)` envelope. Pure in (tick, seed).
+ */
+export const crabIdle = (tick: number, seed: number): CrabPose => {
+  const window = Math.floor(tick / CRAB_WINDOW);
+  const local = (tick % CRAB_WINDOW) / CRAB_WINDOW;
+  const env = Math.sin(Math.PI * local);
+  const breath = Math.sin(tick * 0.08) * 0.02;
+  const eyeDrift = Math.sin(tick * 0.05) * 0.05;
+  const active = sample01(seed, "ambient", window, 40) < 0.55;
+  const kind = CRAB_KINDS[sampleInt(CRAB_KINDS.length, seed, "ambient", window, 41)] as CrabIdleKind;
+  const jitter = sample01(seed, "ambient", window, 42);
+  const resting: CrabPose = { bob: 0, breath, clawLift: 0, eye: eyeDrift, kind: "rest", legWiggle: 0, scootX: 0, yaw: 0 };
+  const poses: Record<CrabIdleKind, CrabPose> = {
+    // A little side scuttle with the legs paddling and the body leaning into it.
+    scuttle: {
+      bob: Math.abs(Math.sin(local * Math.PI * 4)) * 0.03 * env,
+      breath,
+      clawLift: 0,
+      eye: eyeDrift,
+      kind: "scuttle",
+      legWiggle: Math.sin(tick * 0.6) * 0.4 * env,
+      scootX: Math.sin(local * Math.PI * 3 + jitter * 6) * 0.45 * env,
+      yaw: Math.sin(local * Math.PI * 3 + jitter * 6) * 0.12 * env,
+    },
+    // Raising and snapping the claws.
+    wave: { bob: 0, breath, clawLift: (0.5 + jitter * 0.35) * env, eye: eyeDrift, kind: "wave", legWiggle: 0, scootX: 0, yaw: 0 },
+    // Bobbing up and down with the eyestalks wagging.
+    bob: {
+      bob: Math.abs(Math.sin(local * Math.PI * 4)) * 0.16 * env,
+      breath,
+      clawLift: 0,
+      eye: eyeDrift + Math.sin(tick * 0.22) * 0.12 * env,
+      kind: "bob",
+      legWiggle: 0,
+      scootX: 0,
+      yaw: 0,
+    },
+    // Turning to look around.
+    turn: { bob: 0, breath, clawLift: 0, eye: eyeDrift, kind: "turn", legWiggle: Math.sin(tick * 0.5) * 0.12 * env, scootX: 0, yaw: Math.sin(local * Math.PI * 2 + jitter * 3) * 0.5 * env },
+    rest: resting,
+  };
+  return active ? poses[kind] : resting;
+};
+
 export const initialChestExtra = (_session: SessionState): ChestExtra => ({
   choice: initialChoice(4),
   revealStartTick: null,
