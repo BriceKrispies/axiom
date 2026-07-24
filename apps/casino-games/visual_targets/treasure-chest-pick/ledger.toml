@@ -278,3 +278,95 @@ depth_and_separation = 2
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 4
+
+[[iteration]]
+iteration = 3
+attacked_axis = "none"           # reference RESET + branding capability build (not a scored pass)
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/reference.png",
+  "apps/casino-games/visual_targets/treasure-chest-pick/champion.png",
+  "apps/casino-games/visual_targets/treasure-chest-pick/capture.md",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+  "apps/casino-games/web/src/presentation/branding/*",
+  "apps/casino-games/web/src/games/treasure-chest-pick/*",
+  "apps/casino-games/web/src/workbench/workbench.ts",
+  "apps/casino-games/web/browser/agent_capture.py",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "reference_reset"
+abstraction_introduced = true
+next_attacked_axis = "recalibrate"
+reason = """
+REFERENCE RESET. The campaign's reference.png was replaced: the old reference was
+the UNBRANDED beach diorama; the new reference (1546x1017) is the same diorama
+dressed in one white-label BRAND — "ACME" red across a top ribbon banner, a left
+pennant, a right signboard, the sandcastle pennant, the crab's flag, and a label
+on every chest. This is a NEW visual target, so every scorecard number below is
+now STALE — the numbers are copied forward unchanged only to keep the append-only
+record valid; they are NOT a re-score of the new reference. The next
+/visual-convergence-propose CRITIC pass owes a fresh harsh calibration against
+the branded reference (that is why next_attacked_axis = "recalibrate").
+
+WHAT WAS BUILT (the champion now wears the ACME livery to match the new reference):
+- A configurable BRAND (name + primary/onPrimary/ink colors) in the game's
+  gameSpecific config: presentation/branding/brand.ts (DEFAULT_BRAND = ACME),
+  validated in definition.ts, editable in the SET UP panel ("Brand livery").
+- Brand lettering as real welded GEOMETRY — @axiom/web-engine has no textures, so
+  a 5x7 box-run font (presentation/branding/glyphs.ts) is stamped onto surfaces by
+  presentation/branding/label.ts THROUGH each surface's own transform frame. A
+  chest's label therefore squashes, grows, tilts and spirals welded to the chest
+  (it is part of the chest, not an overlay), and long names shrink uniformly to fit.
+- Branded props: top ribbon banner, left pennant, right signboard, plus the
+  recolored sandcastle pennant and a flag in the crab's claw — all brand-colored
+  and carrying the brand name, placed on the sand OUTSIDE the lagoon and BEFORE the
+  veil so a hero reveal dims them with the rest of the stage.
+- Chest labels moved onto the LID TOP (not the foreshortened front): the tabletop
+  camera looks down on the lids, so the top is where the name reads.
+
+CAPTURE DETERMINISM: the chests-ready preset now runs phase:ready -> frozen -> shot.
+The new `frozen` verb (agent_capture.py) blocks until the canvas backing store stops
+changing (the sim reaching the shot=90 freeze), because shooting at phase:ready
+(~tick 24) caught the still-animating idle dance / palm sway and made consecutive
+captures differ by ~1% of pixels. With `frozen`, two consecutive captures are
+byte-identical.
+
+ABSTRACTION-GATE: abstraction_introduced = true. The branding capability
+(brand value + geometry font + surface-weld label builder) is a genuinely NEW,
+reusable presentation surface that did not exist — the engine cannot express text
+at all (no textures), so lettering-as-geometry is the honest lowest-layer fix, and
+the brand is plain serializable config traveling the existing import/export/validate
+path. Built on the FIRST attempt (no ceremonial config nudges), at the app's
+presentation tier where scene dressing belongs.
+
+PARITY-CLAIM: clean. No "done / matched / parity" language — this entry only resets
+the target and records the build; scoring is deferred to the next critic pass.
+"""
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4

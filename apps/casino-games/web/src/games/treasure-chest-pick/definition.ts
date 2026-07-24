@@ -9,10 +9,11 @@ import type { CasinoGameConfig, RewardTier } from "../../chance-engine/configura
 import { baseConfig } from "../../chance-engine/configuration/schema.ts";
 import type { ConfigIssue } from "../../chance-engine/configuration/validation.ts";
 import type { CasinoGameDefinition, GameRuntime, RunningCasinoGame } from "../../chance-engine/registry/definition.ts";
+import { brandIssues, DEFAULT_BRAND } from "../../presentation/branding/brand.ts";
 import { mountCasinoGame } from "../casino-mount.ts";
 import type { ChestSpec } from "./game.ts";
 import { CHEST_TIMING, chestCues, initialChestExtra, stepChest } from "./game.ts";
-import { CHEST_RESOURCES, chestScene } from "./scene.ts";
+import { chestResources, chestScene } from "./scene.ts";
 
 /** A single small consolation prize — every win grants 5 points. */
 const CONSOLATION_TIER: RewardTier = {
@@ -28,16 +29,19 @@ const CONSOLATION_TIER: RewardTier = {
 // nine chests winners (9·1 = 9), so any pick wins; the single reward tier means
 // that win is always the same modest 5 points. Tune either in the Set Up panel.
 const defaultConfig = (): CasinoGameConfig<ChestSpec> =>
-  baseConfig("treasure-chest-pick", "Treasure Chest Pick", "tabletop", { danceLiveliness: 0.7 }, {
+  baseConfig("treasure-chest-pick", "Treasure Chest Pick", "tabletop", { brand: DEFAULT_BRAND, danceLiveliness: 0.7 }, {
     choiceCount: 9,
     rewardTiers: [CONSOLATION_TIER],
     targetWinRate: 1,
   });
 
-const validateSpec = (spec: ChestSpec): readonly ConfigIssue[] =>
-  typeof spec.danceLiveliness === "number" && Number.isFinite(spec.danceLiveliness) && spec.danceLiveliness >= 0 && spec.danceLiveliness <= 1
-    ? []
-    : [{ message: "danceLiveliness must be a finite number in [0, 1]", path: "gameSpecific.danceLiveliness" }];
+const validateSpec = (spec: ChestSpec): readonly ConfigIssue[] => {
+  const liveliness =
+    typeof spec.danceLiveliness === "number" && Number.isFinite(spec.danceLiveliness) && spec.danceLiveliness >= 0 && spec.danceLiveliness <= 1
+      ? []
+      : [{ message: "danceLiveliness must be a finite number in [0, 1]", path: "gameSpecific.danceLiveliness" }];
+  return [...liveliness, ...brandIssues(spec.brand, "gameSpecific.brand")];
+};
 
 const mount = (canvas: HTMLCanvasElement, runtime: GameRuntime<ChestSpec>): RunningCasinoGame =>
   mountCasinoGame(canvas, runtime, {
@@ -48,7 +52,7 @@ const mount = (canvas: HTMLCanvasElement, runtime: GameRuntime<ChestSpec>): Runn
     instructionOf: (state) =>
       state.session.phase === "ready" ? "Pick a chest — arrows + Enter, or click one" : null,
     mechanic: { choiceCount: runtime.config.choiceCount ?? 9, kind: "choice" },
-    resources: CHEST_RESOURCES,
+    resources: chestResources(runtime.config.gameSpecific.brand),
     sound: (prev, next) => chestCues(prev, next),
     step: (state, input, ctx) => stepChest(runtime, state, input, ctx),
     viewScene: (state) => chestScene(runtime, state),

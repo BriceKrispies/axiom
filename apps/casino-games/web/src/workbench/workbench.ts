@@ -12,6 +12,8 @@ import { exportConfigJson, importConfigJson } from "../chance-engine/configurati
 import type { ConfigIssue } from "../chance-engine/configuration/validation.ts";
 import { validateConfig } from "../chance-engine/configuration/validation.ts";
 import type { CasinoGameDefinition } from "../chance-engine/registry/definition.ts";
+import type { BrandSpec, Rgb } from "../presentation/branding/brand.ts";
+import { hexToRgb, readBrand, rgbToHex } from "../presentation/branding/brand.ts";
 import { clearStoredConfig, storeConfig, storedConfigOf } from "../application/config-store.ts";
 
 const RARITY_OPTIONS: readonly Rarity[] = ["common", "uncommon", "rare", "jackpot"];
@@ -256,6 +258,55 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
     themeRow.append(themeLabel, themeSelect, motionLabel, motionSelect);
     knobs.append(themeRow);
     host.append(knobs);
+
+    // ── brand controls (only for games whose gameSpecific carries a brand) ──
+    const brand = readBrand(config.gameSpecific);
+    if (brand !== null) {
+      const brandConfig = config.gameSpecific as Record<string, unknown>;
+      const patchBrand = (next: Partial<BrandSpec>): void => {
+        patch({ gameSpecific: { ...brandConfig, brand: { ...brand, ...next } } } as Partial<AnyConfig>);
+      };
+      const brandBox = document.createElement("fieldset");
+      const brandLegend = document.createElement("legend");
+      brandLegend.textContent = "Brand livery";
+      brandBox.append(brandLegend);
+
+      const nameRow = document.createElement("div");
+      nameRow.className = "row";
+      const nameLabel = document.createElement("label");
+      nameLabel.textContent = "Brand name";
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.id = "wb-brand-name";
+      nameInput.value = brand.name;
+      nameInput.addEventListener("change", () => patchBrand({ name: nameInput.value }));
+      nameRow.append(nameLabel, nameInput);
+      brandBox.append(nameRow);
+
+      const colorRow = (label: string, value: Rgb, apply: (next: Rgb) => void): HTMLElement => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const swatchLabel = document.createElement("label");
+        swatchLabel.textContent = label;
+        const picker = document.createElement("input");
+        picker.type = "color";
+        picker.value = rgbToHex(value);
+        picker.addEventListener("input", () => {
+          const rgb = hexToRgb(picker.value);
+          if (rgb !== null) {
+            apply(rgb);
+          }
+        });
+        row.append(swatchLabel, picker);
+        return row;
+      };
+      brandBox.append(
+        colorRow("Primary (banners, lettering)", brand.primary, (c) => patchBrand({ primary: c })),
+        colorRow("Lettering on primary", brand.onPrimary, (c) => patchBrand({ onPrimary: c })),
+        colorRow("Signboard ink", brand.ink, (c) => patchBrand({ ink: c })),
+      );
+      host.append(brandBox);
+    }
 
     // ── game-specific block ─────────────────────────────────────
     const specBox = document.createElement("fieldset");

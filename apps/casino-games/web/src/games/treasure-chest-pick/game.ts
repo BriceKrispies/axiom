@@ -13,6 +13,7 @@
 
 import type { InputFrame, TickContext, ToneSpec } from "@axiom/web-engine";
 import type { Camera3D, EngineVec3 } from "@axiom/web-engine";
+import type { BrandSpec } from "../../presentation/branding/brand.ts";
 import { sample01, sampleInt } from "../../chance-engine/randomness/streams.ts";
 import type { GameRuntime } from "../../chance-engine/registry/definition.ts";
 import { phaseAge, transition } from "../../chance-engine/sessions/session.ts";
@@ -31,6 +32,9 @@ import { initialChoice, stepChoice } from "../choice-input.ts";
 export interface ChestSpec {
   /** Idle dance liveliness in [0, 1]. */
   readonly danceLiveliness: number;
+  /** The white-label brand stamped across the scene (chest fronts, banners,
+   * flags, signs, mat). Configurable name + color scheme; see `brand.ts`. */
+  readonly brand: BrandSpec;
 }
 
 export interface ChestExtra {

@@ -31,8 +31,10 @@ capture needs a new scenario, not new code:
         --game fishing-cast --seed 1234 --shot 120 --backend canvas2d \
         --out /tmp/cast.png
 
-Verbs: play:<gameId>[@seed], back, phase:<name>, wait:<ms>, key:<code>,
-       move:<x,y>, click:<x,y>, shot[:name].
+Verbs: play:<gameId>[@seed], back, phase:<name>, wait:<ms>, frozen, key:<code>,
+       move:<x,y>, click:<x,y>, shot[:name]. `frozen` blocks until the rendered
+       frame stops changing (the sim reached the ?shot freeze tick) — the
+       deterministic gate before a champion capture.
 Coordinates are LOGICAL canvas space (960x600), not screen pixels.
 
 Determinism: the preferred path is the boot URL — `?shot=N` freezes the
@@ -150,6 +152,27 @@ class CasinoAgent:
         # next observation/capture.
         self.page.wait_for_timeout(frames * 16)
 
+    def await_frozen(self, max_polls: int = 60, interval_ms: int = 50):
+        # Block until the rendered frame stops changing — the real condition a
+        # `?shot=N` capture needs, not a wall-clock guess. With the sim frozen at
+        # tick N the canvas backing store becomes CONSTANT, so once two
+        # consecutive reads match (after any change) the frame is settled and the
+        # capture is a pure function of (seed, config, N). Until the sim reaches
+        # N the idle dance / palm sway keep the pixels moving, so `phase:ready`
+        # alone (reached ~tick 24, well before the freeze) is not yet frozen.
+        prev = None
+        stable = 0
+        for _ in range(max_polls):
+            data = self.page.evaluate("() => document.getElementById('axiom-canvas').toDataURL('image/png')")
+            if data == prev:
+                stable += 1
+                if stable >= 2:
+                    return
+            else:
+                stable = 0
+                prev = data
+            self.page.wait_for_timeout(interval_ms)
+
 
 # Named presets. `chests-ready` is the treasure-chest convergence champion: the
 # nine chests showing on the lagoon, canvas2d (the deterministic baseline
@@ -161,7 +184,7 @@ SCENES: dict[str, dict] = {
         "seed": 470573198,
         "shot": 90,
         "backend": "canvas2d",
-        "steps": ["phase:ready", "shot"],
+        "steps": ["phase:ready", "frozen", "shot"],
     },
     "chests-hover": {
         "game": "treasure-chest-pick",
@@ -189,6 +212,8 @@ def run_step(agent: CasinoAgent, step: str, out: pathlib.Path, shots: list[pathl
         agent.await_phase(arg)
     elif verb == "wait":
         agent.page.wait_for_timeout(int(arg))
+    elif verb == "frozen":
+        agent.await_frozen()
     elif verb == "key":
         agent.key(arg)
     elif verb in ("move", "click"):

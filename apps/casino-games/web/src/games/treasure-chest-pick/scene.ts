@@ -18,6 +18,9 @@ import type { Camera3D, MaterialSpec, Scene, SceneInstance, SceneLight } from "@
 import type { EngineQuat, EngineVec3, GameResources } from "@axiom/web-engine";
 import type { GameRuntime } from "../../chance-engine/registry/definition.ts";
 import { phaseAge } from "../../chance-engine/sessions/session.ts";
+import type { BrandSpec } from "../../presentation/branding/brand.ts";
+import { brandMaterials } from "../../presentation/branding/brand.ts";
+import { stampText } from "../../presentation/branding/label.ts";
 import { confettiBurst, CONFETTI_MATERIALS, sparkleRing } from "../../presentation/celebrations/confetti.ts";
 import { REWARD_MATERIALS, rewardMaterialOf } from "../../presentation/rewards/tiers.ts";
 import { celebrationFor, outcomeRarity, speedTicks } from "../round-state.ts";
@@ -175,10 +178,14 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   ...VEIL_MATERIALS,
 };
 
-export const CHEST_RESOURCES: GameResources = {
-  materials: MATERIALS,
+/** The scene's resources for a given brand: the fixed chest/beach palette plus
+ * the brand-derived banner/letter materials (whose colors follow the configured
+ * brand). Built once at mount from the game's brand config — a brand color
+ * change takes effect on the next mount, exactly like any other material. */
+export const chestResources = (brand: BrandSpec): GameResources => ({
+  materials: { ...MATERIALS, ...brandMaterials(brand) },
   meshes: { box: { kind: "box" }, cylinder: { kind: "cylinder" }, sphere: { kind: "sphere" } },
-};
+});
 
 // ── small builders ──────────────────────────────────────────────────────────────
 
@@ -280,6 +287,8 @@ interface ChestPose {
   readonly hoverRing: boolean;
   readonly seam: number;
   readonly glow: number;
+  /** The brand name stamped across the chest front, welded to this pose. */
+  readonly brandName: string;
 }
 
 /** All instances of one posed chest (body, planks, gilding, latch, lid,
@@ -392,6 +401,28 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
       ? [disc(`${key}:ring`, "PoolOuter", ringBase, BODY.x * 1.0, 0.012)]
       : [];
 
+  // The brand name laid across the TOP of the closed chest, facing up so it reads
+  // clearly from the tabletop camera (which looks down on the lid, not the
+  // foreshortened front). The anchor is a chest-local point just above the dome
+  // crown, carried through the same (origin, q, squash·grow) frame the chest
+  // parts use — so the lettering squashes, grows, tilts and spirals welded to the
+  // chest, as part of it. `orient` lays the text flat (its normal up the chest's
+  // Y, its reading direction across the chest's X) and its "up" toward the chest's
+  // −Z so it reads top-away from the camera. Long names shrink to fit (label.ts).
+  const crownLocal = v3(0, CHEST_HEIGHT * 1.02, 0.04);
+  const crownAnchor = addV3(origin, rotateByQuat(v3(crownLocal.x * squashXZ * grow, crownLocal.y * squashY * grow, crownLocal.z * squashXZ * grow), q));
+  const label = stampText(
+    `${key}:brand`,
+    pose.brandName,
+    {
+      basis: v3(squashXZ * grow, squashXZ * grow, squashY * grow),
+      center: v3(0, 0, 0),
+      orient: quatMul(q, quatPitch(-Math.PI / 2)),
+      origin: crownAnchor,
+    },
+    { depth: 0.02, height: 0.34, lift: 0.0, material: pose.dim ? "BrandLetterDim" : "BrandLetter", maxWidth: BODY.x * 0.74 },
+  );
+
   return [
     ...pool,
     part("body", v3(0, BODY.y / 2, 0), BODY, wood),
@@ -413,6 +444,7 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     part("edgeL", v3(-BODY.x / 2, BODY.y / 2, BODY.z / 2), v3(0.05, BODY.y + 0.02, 0.05), trimSide),
     part("edgeR", v3(BODY.x / 2, BODY.y / 2, BODY.z / 2), v3(0.05, BODY.y + 0.02, 0.05), trimSide),
     part("plate", v3(0, BODY.y * 0.5, BODY.z / 2 + 0.005), v3(0.26, 0.2, 0.04), trimFront),
+    ...label,
     interior,
     ...glow,
     ...seam,
@@ -604,9 +636,10 @@ const palmTree = (origin: EngineVec3, tick: number): readonly SceneInstance[] =>
 const CASTLE_YAW = -1.05;
 
 /** A turreted sandcastle: a broad base, a central keep with two flanking turrets,
- * crenellations, an arched door, and a red pennant on a pole. The whole assembly
- * is yawed by `CASTLE_YAW` about its origin so it lines up with the shore. */
-const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
+ * crenellations, an arched door, and a brand pennant on a pole. The whole assembly
+ * is yawed by `CASTLE_YAW` about its origin so it lines up with the shore. The
+ * pennant flies the brand color and carries its name. */
+const sandcastle = (origin: EngineVec3, brandName: string): readonly SceneInstance[] => {
   const q = quatYaw(CASTLE_YAW);
   // Place a part given in castle-local space: rotate its offset into the yawed
   // frame and compose the yaw into its own rotation, so the castle turns as one.
@@ -638,8 +671,16 @@ const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
   const door = place("castle:door", "CastleDoor", "box", v3(0, 0.5, 1.0), v3(0.42, 0.62, 0.08));
   const poleTop = 0.56 + 1.7;
   const pole = place("castle:pole", "CastlePole", "cylinder", v3(0, poleTop + 0.42, 0), v3(0.05, 0.84, 0.05));
-  const flag = place("castle:flag", "CastleFlag", "box", v3(0.24, poleTop + 0.66, 0), v3(0.44, 0.28, 0.03));
-  return [base, ...towerParts, door, pole, flag];
+  const flagLocal = v3(0.24, poleTop + 0.66, 0);
+  const flag = place("castle:flag", "BrandPrimary", "box", flagLocal, v3(0.5, 0.3, 0.03));
+  // The brand name on the pennant, welded to the yawed castle frame.
+  const flagText = stampText(
+    "castle:flagtext",
+    brandName,
+    { basis: v3(1, 1, 1), center: v3(0, 0, 0.02), orient: q, origin: addV3(origin, rotateByQuat(flagLocal, q)) },
+    { depth: 0.01, height: 0.2, lift: 0.01, material: "BrandLetterOnPrimary", maxWidth: 0.44 },
+  );
+  return [base, ...towerParts, door, pole, flag, ...flagText];
 };
 
 /** A stubby cartoon crab with a small set of idle animations: a domed shell, two
@@ -682,7 +723,11 @@ const crab = (origin: EngineVec3, tick: number, seed: number): readonly SceneIns
       }),
     )
     .flat();
-  return [body, ...eyes, ...claws, ...legs];
+  // A little brand pennant on a pole, raised in the crab's right claw — welded to
+  // the body frame, so it scoots and turns with the crab.
+  const flagPole = place("crab:flagpole", "BrandPost", "box", v3(0.58, 0.5, 0.34), v3(0.04, 0.7, 0.04));
+  const flag = place("crab:flag", "BrandPrimary", "box", v3(0.74, 0.66, 0.34), v3(0.3, 0.2, 0.03));
+  return [body, ...eyes, ...claws, ...legs, flagPole, flag];
 };
 
 /** Shells and a couple of starfish scattered on the shore. Positions are on the
@@ -709,10 +754,112 @@ const beachLitter = (): readonly SceneInstance[] => {
  * pure ambient-keyed values — nothing here reads the outcome. The litter is
  * fixed. */
 const HELD_LIFT = v3(0, 0.5, 0);
-const beachDecor = (tick: number, seed: number, decor: DecorDrag): readonly SceneInstance[] => {
+const beachDecor = (tick: number, seed: number, decor: DecorDrag, brandName: string): readonly SceneInstance[] => {
   const at = (key: keyof DecorDrag["props"]): EngineVec3 => addV3(decor.props[key], decor.held === key ? HELD_LIFT : v3(0, 0, 0));
-  return [...palmTree(at("palm"), tick), ...sandcastle(at("castle")), ...crab(at("crab"), tick, seed), ...beachLitter()];
+  return [
+    ...palmTree(at("palm"), tick),
+    ...sandcastle(at("castle"), brandName),
+    ...crab(at("crab"), tick, seed),
+    ...beachLitter(),
+    ...brandedProps(brandName),
+  ];
 };
+
+// ── the branded set-dressing (banner, signboard, pennant, floor mat) ────────────
+
+/*
+ * The reference dresses the beach in one brand: a ribbon banner across the top, a
+ * standing signboard on the right, a hanging pennant on the left, and a logo mat
+ * on the near sand — plus the pennant on the castle and the little flag the crab
+ * holds (both above). None of it is a new primitive: each is boxes + welded
+ * lettering (label.ts), colored from the brand materials (brand.ts). Placed on
+ * the sand ring OUTSIDE the lagoon and BEFORE the veil, so a hero reveal dims the
+ * branding away with the rest of the stage.
+ */
+
+/** A standing brand sign: a colored panel with a border and welded lettering,
+ * optionally on one or two posts to the sand. `yaw`/`tilt` aim the panel face
+ * toward the tabletop camera. */
+interface BillboardSpec {
+  readonly center: EngineVec3;
+  readonly yaw: number;
+  readonly tilt: number;
+  readonly panelW: number;
+  readonly panelH: number;
+  readonly bodyMat: string;
+  readonly borderMat: string;
+  readonly letterMat: string;
+  readonly textHeight: number;
+  readonly textMaxW: number;
+  readonly posts: number;
+}
+
+const billboard = (keyPrefix: string, brandName: string, o: BillboardSpec): readonly SceneInstance[] => {
+  const orient = quatMul(quatYaw(o.yaw), quatPitch(o.tilt));
+  const normal = rotateByQuat(v3(0, 0, 1), orient);
+  const border = decorPart(`${keyPrefix}:border`, o.borderMat, "box", addV3(o.center, scaleV3(normal, -0.03)), v3(o.panelW + 0.18, o.panelH + 0.18, 0.05), orient);
+  const panel = decorPart(`${keyPrefix}:panel`, o.bodyMat, "box", o.center, v3(o.panelW, o.panelH, 0.07), orient);
+  const posts = (o.posts === 1 ? [0] : o.posts === 2 ? [-1, 1] : []).map((sx, i): SceneInstance => {
+    const foot = addV3(o.center, rotateByQuat(v3(sx * o.panelW * 0.36, -o.panelH / 2, 0), orient));
+    const height = Math.max(0.1, foot.y);
+    return decorPart(`${keyPrefix}:post${i}`, "BrandPost", "cylinder", v3(foot.x, height / 2, foot.z), v3(0.08, height, 0.08));
+  });
+  const text = stampText(
+    `${keyPrefix}:text`,
+    brandName,
+    { basis: v3(1, 1, 1), center: v3(0, 0, 0), orient, origin: o.center },
+    { depth: 0.03, height: o.textHeight, lift: 0.05, material: o.letterMat, maxWidth: o.textMaxW },
+  );
+  return [border, panel, ...posts, ...text];
+};
+
+/** Every standalone branded prop, placed on the sand ring around the lagoon. */
+const brandedProps = (brandName: string): readonly SceneInstance[] => [
+  // Top ribbon banner — brand primary, white lettering, on two posts at the back.
+  ...billboard("brand:banner", brandName, {
+    bodyMat: "BrandPrimary",
+    borderMat: "BrandPrimaryDim",
+    center: v3(0, 1.25, -5.6),
+    letterMat: "BrandLetterOnPrimary",
+    panelH: 1.0,
+    panelW: 2.9,
+    posts: 2,
+    textHeight: 0.62,
+    textMaxW: 2.5,
+    tilt: -0.5,
+    yaw: 0,
+  }),
+  // Right signboard — dark ink body, brand-colored border + lettering.
+  ...billboard("brand:sign", brandName, {
+    bodyMat: "BrandInk",
+    borderMat: "BrandPrimary",
+    center: v3(6.1, 0.98, 1.9),
+    letterMat: "BrandLetter",
+    panelH: 0.98,
+    panelW: 1.95,
+    posts: 2,
+    textHeight: 0.52,
+    textMaxW: 1.62,
+    tilt: -0.12,
+    yaw: -0.6,
+  }),
+  // Left hanging pennant — brand primary, white lettering, on one pole.
+  ...billboard("brand:pennant", brandName, {
+    bodyMat: "BrandPrimary",
+    borderMat: "BrandPrimaryDim",
+    // Set back on the left sand (clear of the crab's own flag) and pulled in from
+    // the frame edge, so the whole pennant stays on-screen at the tabletop framing.
+    center: v3(-6.0, 1.35, -0.7),
+    letterMat: "BrandLetterOnPrimary",
+    panelH: 0.9,
+    panelW: 1.5,
+    posts: 1,
+    textHeight: 0.5,
+    textMaxW: 1.28,
+    tilt: -0.12,
+    yaw: 0.5,
+  }),
+];
 
 // ── the background veil ─────────────────────────────────────────────────────────
 
@@ -848,6 +995,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
 
     return chestInstances(`chest${index}`, {
       at,
+      brandName: spec.brand.name,
       dim: dimmed,
       flight: isSelected ? flight : 0,
       focusRing: session.phase === "ready" && choice.focused === index && choice.hovered !== index && choice.armed !== index,
@@ -978,7 +1126,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // inset lagoon and its beach margin keep exactly the held framing.
       ...stageRoom(48, WATER_RADIUS),
       ...platform(),
-      ...beachDecor(tick, seed, state.extra.decor),
+      ...beachDecor(tick, seed, state.extra.decor, spec.brand.name),
       ...chests,
       ...backgroundVeil(camera, framing, flight),
       ...burst,
