@@ -401,26 +401,42 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
       ? [disc(`${key}:ring`, "PoolOuter", ringBase, BODY.x * 1.0, 0.012)]
       : [];
 
-  // The brand name laid across the TOP of the closed chest, facing up so it reads
-  // clearly from the tabletop camera (which looks down on the lid, not the
-  // foreshortened front). The anchor is a chest-local point just above the dome
-  // crown, carried through the same (origin, q, squash·grow) frame the chest
-  // parts use — so the lettering squashes, grows, tilts and spirals welded to the
-  // chest, as part of it. `orient` lays the text flat (its normal up the chest's
-  // Y, its reading direction across the chest's X) and its "up" toward the chest's
-  // −Z so it reads top-away from the camera. Long names shrink to fit (label.ts).
-  const crownLocal = v3(0, CHEST_HEIGHT * 1.02, 0.04);
-  const crownAnchor = addV3(origin, rotateByQuat(v3(crownLocal.x * squashXZ * grow, crownLocal.y * squashY * grow, crownLocal.z * squashXZ * grow), q));
+  // A brand NAMEPLATE mounted on the TOP of the closed chest, facing up so it
+  // reads clearly from the tabletop camera (which looks down on the lid, not the
+  // foreshortened front). It is a raised plaque — a gold frame under a brand-
+  // colored plate — carrying the brand name in the on-primary color, NOT letters
+  // laid straight on the wood. Everything is placed through the same (origin, q,
+  // squash·grow) frame the chest parts use, so the whole plaque squashes, grows,
+  // tilts and spirals welded to the chest, as part of it. `plateOrient` lays it
+  // flat (normal up the chest's Y, reading direction across the chest's X, its
+  // "up" toward the chest's −Z so it reads top-away from the camera). Long names
+  // shrink to fit the plate (label.ts).
+  const plateOrient = quatMul(q, quatPitch(-Math.PI / 2));
+  const plateBasis = v3(squashXZ * grow, squashXZ * grow, squashY * grow);
+  const crownAnchor = addV3(origin, rotateByQuat(v3(0, CHEST_HEIGHT * squashY * grow, 0.03 * squashXZ * grow), q));
+  // A flat box on the plaque frame: `size`/`offset` are in oriented-local units
+  // (x across, y along the chest depth, z up off the lid), scaled by `plateBasis`.
+  const platePart = (suffix: string, size: EngineVec3, offset: EngineVec3, material: string): SceneInstance => ({
+    key: `${key}:${suffix}`,
+    material,
+    mesh: "box",
+    transform: {
+      position: addV3(crownAnchor, rotateByQuat(v3(offset.x * plateBasis.x, offset.y * plateBasis.y, offset.z * plateBasis.z), plateOrient)),
+      rotation: plateOrient,
+      scale: v3(size.x * plateBasis.x, size.y * plateBasis.y, size.z * plateBasis.z),
+    },
+  });
+  const plateW = BODY.x * 0.82;
+  const plateH = 0.5;
+  const plaque = [
+    platePart("plaqueframe", v3(plateW + 0.1, plateH + 0.1, 0.05), v3(0, 0, 0.0), pose.dim ? "GildDim" : "GildFront"),
+    platePart("plaque", v3(plateW, plateH, 0.06), v3(0, 0, 0.035), pose.dim ? "BrandPrimaryDim" : "BrandPrimary"),
+  ];
   const label = stampText(
     `${key}:brand`,
     pose.brandName,
-    {
-      basis: v3(squashXZ * grow, squashXZ * grow, squashY * grow),
-      center: v3(0, 0, 0),
-      orient: quatMul(q, quatPitch(-Math.PI / 2)),
-      origin: crownAnchor,
-    },
-    { depth: 0.02, height: 0.34, lift: 0.0, material: pose.dim ? "BrandLetterDim" : "BrandLetter", maxWidth: BODY.x * 0.74 },
+    { basis: plateBasis, center: v3(0, 0, 0), orient: plateOrient, origin: crownAnchor },
+    { depth: 0.02, height: 0.3, lift: 0.08, material: pose.dim ? "BrandLetterDim" : "BrandLetterOnPrimary", maxWidth: BODY.x * 0.72 },
   );
 
   return [
@@ -444,6 +460,7 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     part("edgeL", v3(-BODY.x / 2, BODY.y / 2, BODY.z / 2), v3(0.05, BODY.y + 0.02, 0.05), trimSide),
     part("edgeR", v3(BODY.x / 2, BODY.y / 2, BODY.z / 2), v3(0.05, BODY.y + 0.02, 0.05), trimSide),
     part("plate", v3(0, BODY.y * 0.5, BODY.z / 2 + 0.005), v3(0.26, 0.2, 0.04), trimFront),
+    ...plaque,
     ...label,
     interior,
     ...glow,
