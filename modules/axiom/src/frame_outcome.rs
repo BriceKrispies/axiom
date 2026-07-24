@@ -513,7 +513,9 @@ mod tests {
         assert_eq!(base.postprocess(), None);
         // `with_postprocess` overrides it with the app's authored grade, and
         // threading `None` back through leaves the frame ungraded.
-        let graded = base.clone().with_postprocess(Some(FramePostProcess::cinematic()));
+        let graded = base
+            .clone()
+            .with_postprocess(Some(FramePostProcess::cinematic()));
         assert_eq!(graded.postprocess(), Some(FramePostProcess::cinematic()));
         assert_eq!(base.with_postprocess(None).postprocess(), None);
     }
