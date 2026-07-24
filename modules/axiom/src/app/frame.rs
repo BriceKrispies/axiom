@@ -84,7 +84,9 @@ impl RunningApp {
             .build(&host_report, commands)
             .expect("host report sequence is monotone");
         let frame_ctx = self.frame_api.frame_context(&engine_frame);
-        self.scene.advance(tick, &frame_ctx);
+        // Step the systems only; the snapshot is taken lazily at render time into
+        // a retained buffer, so a stepped frame never allocates + discards one.
+        self.scene.advance_systems(tick, &frame_ctx);
     }
 
     /// Render the current scene state at `tick` **without stepping the
@@ -144,7 +146,7 @@ impl RunningApp {
                     texture_id,
                 )
             });
-            let report = pipeline.submit(&frame, &self.scene, &self.webgpu);
+            let report = pipeline.submit(&frame, &mut self.scene, &mut self.webgpu);
 
             let view_projection = pipeline.report_view_projection(&report);
             // One DrawData per drawn object (submission order): mvp, world,

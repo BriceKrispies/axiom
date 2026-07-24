@@ -16,6 +16,7 @@ use crate::render_input::RenderInput;
 /// A resolved, ready-to-emit draw: the mesh/material/object identities and world
 /// the command builder needs, plus its translucency class and the view-space
 /// depth key [`ordered_draws`] sorts by.
+#[derive(Debug, Clone)]
 pub(crate) struct OrderedDraw {
     pub(crate) mesh_id: u64,
     pub(crate) material_id: u64,
@@ -32,71 +33,76 @@ pub(crate) struct OrderedDraw {
 /// Resolve and order a frame's drawable objects (see the module docs). Each
 /// `Option`-combinator carries one gate: a failed gate drops the object.
 pub(crate) fn ordered_draws(input: &RenderInput) -> Vec<OrderedDraw> {
+    let mut out = Vec::new();
+    ordered_draws_into(input, &mut out);
+    out
+}
+
+/// Resolve and order a frame's drawable objects INTO `out`, reusing its
+/// allocated capacity (clear + refill + sort) instead of allocating a fresh
+/// `Vec` each frame — the per-frame reuse path. [`ordered_draws`] delegates.
+pub(crate) fn ordered_draws_into(input: &RenderInput, out: &mut Vec<OrderedDraw>) {
     // The camera view orders translucent draws by view-space depth; absent a
     // camera every depth is `0`, so the stable sort leaves submission order.
     let view = input.camera().map(|c| c.view());
 
-    let mut ordered: Vec<OrderedDraw> = input
-        .objects()
-        .iter()
-        .filter_map(|object| {
-            object
-                .visible()
-                .then_some(object)
-                .and_then(|object| {
-                    input
-                        .meshes()
-                        .get(object.mesh_idx() as usize)
-                        .map(|mesh| (object, mesh))
-                })
-                .and_then(|(object, mesh)| {
-                    input
-                        .materials()
-                        .get(object.material_idx() as usize)
-                        .map(|material| (object, mesh, material))
-                })
-                .map(|(object, mesh, material)| {
-                    // Effective per-draw alpha = base-colour alpha × opacity;
-                    // a value `< 1` makes the draw translucent.
-                    let alpha = material.base_color().w * material.opacity().get();
-                    let translucent = alpha < 1.0;
-                    // View-space z of the object's origin: column 3 of `view *
-                    // world` is `view` applied to the world translation (w = 1),
-                    // so its z is the camera-space depth.
-                    let depth = view
-                        .map(|v| v.multiply(object.world()).as_cols_array()[14])
-                        .unwrap_or(0.0);
-                    OrderedDraw {
-                        mesh_id: mesh.id(),
-                        material_id: material.id(),
-                        // Per-object albedo override wins when set (`!= 0`); else
-                        // the material's own texture — a branchless table select.
-                        texture_id: [material.texture_id(), object.texture_id()]
-                            [usize::from(object.texture_id() != 0)],
-                        pipeline: object.pipeline(),
-                        object_id: object.id(),
-                        object_tag: object.tag(),
-                        index_count: mesh.indices().len() as u32,
-                        world: object.world(),
-                        translucent,
-                        // Opaque draws carry depth key `0` so the stable sort
-                        // keeps them in submission order; translucent draws carry
-                        // their camera depth so they sort far→near.
-                        depth_key: [0.0, depth][usize::from(translucent)],
-                    }
-                })
-        })
-        .collect();
+    out.clear();
+    out.extend(input.objects().iter().filter_map(|object| {
+        object
+            .visible()
+            .then_some(object)
+            .and_then(|object| {
+                input
+                    .meshes()
+                    .get(object.mesh_idx() as usize)
+                    .map(|mesh| (object, mesh))
+            })
+            .and_then(|(object, mesh)| {
+                input
+                    .materials()
+                    .get(object.material_idx() as usize)
+                    .map(|material| (object, mesh, material))
+            })
+            .map(|(object, mesh, material)| {
+                // Effective per-draw alpha = base-colour alpha × opacity;
+                // a value `< 1` makes the draw translucent.
+                let alpha = material.base_color().w * material.opacity().get();
+                let translucent = alpha < 1.0;
+                // View-space z of the object's origin: column 3 of `view *
+                // world` is `view` applied to the world translation (w = 1),
+                // so its z is the camera-space depth.
+                let depth = view
+                    .map(|v| v.multiply(object.world()).as_cols_array()[14])
+                    .unwrap_or(0.0);
+                OrderedDraw {
+                    mesh_id: mesh.id(),
+                    material_id: material.id(),
+                    // Per-object albedo override wins when set (`!= 0`); else
+                    // the material's own texture — a branchless table select.
+                    texture_id: [material.texture_id(), object.texture_id()]
+                        [usize::from(object.texture_id() != 0)],
+                    pipeline: object.pipeline(),
+                    object_id: object.id(),
+                    object_tag: object.tag(),
+                    index_count: mesh.indices().len() as u32,
+                    world: object.world(),
+                    translucent,
+                    // Opaque draws carry depth key `0` so the stable sort
+                    // keeps them in submission order; translucent draws carry
+                    // their camera depth so they sort far→near.
+                    depth_key: [0.0, depth][usize::from(translucent)],
+                }
+            })
+    }));
 
     // Class key (opaque `0` < translucent `1`) groups opaque first; within a
     // class the depth key orders translucent far→near and leaves opaque untouched
     // (all `0`). A stable sort ties-breaks by submission index.
-    ordered.sort_by(|a, b| {
+    out.sort_by(|a, b| {
         (a.translucent as u8)
             .cmp(&(b.translucent as u8))
             .then_with(|| a.depth_key.total_cmp(&b.depth_key))
     });
-    ordered
 }
 
 #[cfg(test)]

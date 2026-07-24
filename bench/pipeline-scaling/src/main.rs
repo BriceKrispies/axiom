@@ -80,7 +80,9 @@ fn build_scene(n: usize) -> SceneApi {
         )));
         scene.set_parent(child, root).unwrap();
         scene.add_renderable(child, mesh, material).unwrap();
-        scene.add_spin(child, Vec3::UNIT_Y, 120 + (i as u32 % 240)).unwrap();
+        scene
+            .add_spin(child, Vec3::UNIT_Y, 120 + (i as u32 % 240))
+            .unwrap();
     }
     scene.update_world_transforms();
     scene
@@ -95,7 +97,14 @@ fn active_frame() -> EngineFrame {
     let visible = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
     let input = HostFrameInput::new(1, elapsed, vp);
     let plan = HostStepPlan::build(&input, &cfg, &visible, 0);
-    let report = HostFrameReport::new(input.sequence(), plan, plan.steps(), Vec::new(), vp, visible);
+    let report = HostFrameReport::new(
+        input.sequence(),
+        plan,
+        plan.steps(),
+        Vec::new(),
+        vp,
+        visible,
+    );
     FrameApi::new()
         .engine_frame_from_host_report(&report, elapsed, Vec::new())
         .unwrap()
@@ -107,16 +116,20 @@ fn min_of(trials: impl Iterator<Item = Duration>) -> Duration {
 
 /// Measure (advance_per_frame, submit_per_frame) for a scene of `n` renderables.
 fn measure(n: usize) -> (Duration, Duration) {
-    let pipeline = RenderPipelineApi::new();
+    let mut pipeline = RenderPipelineApi::new();
     let frame = active_frame();
-    let webgpu = WebGpuApi::new_recording();
+    let mut webgpu = WebGpuApi::new_recording();
 
     // Per-frame render assets: one unit cube + one material, shared by every
     // renderable, constant across the sweep so it doesn't contaminate the
     // scaling signal. The frame value's type is un-nameable outside this
     // module, so it lives only as this inferred local.
-    let mut render_frame =
-        pipeline.new_frame(1920, 1080, [0.05, 0.06, 0.08, 1.0], Vec3::new(0.3, -1.0, 0.4));
+    let mut render_frame = pipeline.new_frame(
+        1920,
+        1080,
+        [0.05, 0.06, 0.08, 1.0],
+        Vec3::new(0.3, -1.0, 0.4),
+    );
     pipeline.frame_add_mesh(
         &mut render_frame,
         MESH_ID,
@@ -144,7 +157,7 @@ fn measure(n: usize) -> (Duration, Duration) {
 
         let t1 = Instant::now();
         for _ in 0..FRAMES {
-            let report = pipeline.submit(&render_frame, &scene, &webgpu);
+            let report = pipeline.submit(&render_frame, &mut scene, &mut webgpu);
             black_box(&report);
         }
         submit_times.push(t1.elapsed());
@@ -164,7 +177,12 @@ fn main() {
 
     println!(
         "{:>10} | {:>14} | {:>14} | {:>14} | {:>12} | {:>12}",
-        "renderables", "advance us/fr", "submit us/fr", "total us/fr", "submit ns/obj", "fps @ total"
+        "renderables",
+        "advance us/fr",
+        "submit us/fr",
+        "total us/fr",
+        "submit ns/obj",
+        "fps @ total"
     );
     println!("{}", "-".repeat(92));
 

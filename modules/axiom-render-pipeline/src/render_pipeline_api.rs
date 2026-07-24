@@ -154,15 +154,21 @@ pub struct RenderReport {
 
 /// The only public export of `axiom-render-pipeline`: the per-frame render
 /// pipeline that composes scene + render + webgpu.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct RenderPipelineApi {
-    _sealed: (),
+    /// A retained [`RenderApi`] (its render input + command-list scratch) so the
+    /// pipeline reuses those buffers across frames instead of allocating fresh
+    /// each frame — the per-frame wasm-memory-churn fix. (This is why the facade
+    /// is no longer `Copy`.)
+    render: RenderApi,
 }
 
 impl RenderPipelineApi {
     /// Construct the facade.
     pub const fn new() -> Self {
-        RenderPipelineApi { _sealed: () }
+        RenderPipelineApi {
+            render: RenderApi::new(),
+        }
     }
 
     /// Begin a frame with its viewport, clear colour, and world-space light
@@ -257,17 +263,23 @@ impl RenderPipelineApi {
     /// deterministic report. `scene` is expected to have been advanced for the
     /// frame already.
     pub fn submit(
-        &self,
+        &mut self,
         frame: &RenderFrame,
-        scene: &SceneApi,
-        webgpu: &WebGpuApi,
+        scene: &mut SceneApi,
+        webgpu: &mut WebGpuApi,
     ) -> RenderReport {
         let math = MathApi::new();
-        let render = RenderApi::new();
-        let snapshot = scene.snapshot();
+        // Refresh the retained snapshot in place (reusing its buffers, no fresh
+        // allocation) then read it by reference — self-contained, so a frame that
+        // steps then renders builds exactly one snapshot with zero churn.
+        scene.refresh_snapshot();
+        let snapshot = scene.snapshot_ref();
 
-        let mut input = render.new_input(frame.width, frame.height);
-        render.set_input_clear_color(&mut input, frame.clear_color);
+        // Fill the RETAINED render input (reset + refill, no fresh alloc) via its
+        // public primitive builders on the `&mut` handle — this module never names
+        // the opaque RenderInput/mesh/material/object types.
+        let input = self.render.reset_input(frame.width, frame.height);
+        input.set_clear_color(frame.clear_color);
 
         // Camera: the first camera, if any. view = inverse(node world);
         // projection from validated intrinsics. The GpuSubmission camera command
@@ -298,9 +310,9 @@ impl RenderPipelineApi {
         });
         // Set the input camera and read the wgpu-ready view-projection (0-or-1
         // over the Option — no branch; absent yields identity, no camera command).
-        camera.iter().for_each(|&(view, projection, _, _)| {
-            render.set_input_camera(&mut input, view, projection)
-        });
+        camera
+            .iter()
+            .for_each(|&(view, projection, _, _)| input.push_camera(view, projection));
         let view_projection = camera.map_or(Mat4::IDENTITY, |(_, _, vp, _)| vp);
 
         // Lights are resolved into the report below (a frame-uniform set), not
@@ -318,8 +330,7 @@ impl RenderPipelineApi {
             .meshes
             .iter()
             .map(|mesh| {
-                let idx = render.add_input_mesh(
-                    &mut input,
+                let idx = input.push_mesh(
                     mesh.id,
                     mesh.positions.clone(),
                     mesh.normals.clone(),
@@ -337,8 +348,7 @@ impl RenderPipelineApi {
             .map(|material| {
                 let c = material.color;
                 let e = material.emissive;
-                let idx = render.add_input_lit_material(
-                    &mut input,
+                let idx = input.push_lit_material(
                     material.id,
                     Vec4::new(c[0], c[1], c[2], c[3]),
                     Vec3::new(e[0], e[1], e[2]),
@@ -372,8 +382,7 @@ impl RenderPipelineApi {
                 .get(&renderable.material().raw())
                 .copied()
                 .expect("frame supplies a material asset for every renderable");
-            render.add_input_object(
-                &mut input,
+            input.push_object(
                 renderable.node().raw(),
                 world,
                 mesh_idx,
@@ -382,47 +391,48 @@ impl RenderPipelineApi {
             );
         });
 
-        let commands = render.build_command_list(&input);
-        let count = render.command_count(&commands);
-        let mut submission = webgpu.new_submission(frame.width, frame.height);
-        // Per-kind accessors return `Some` only for their command, so each arm
-        // is exercised across a real command list — no unreachable catch-all.
-        // `for_each` over the index range plus `Option::map` on each accessor
-        // replaces the index `for` and the six `if let` guards branchlessly:
-        // a `None` accessor maps to nothing, a `Some` applies its submission.
+        // `input`'s borrow of `self.render` ends above; build the RETAINED command
+        // list from it and read it by reference — no fresh command-list alloc.
+        self.render.build_commands();
+        let commands = self.render.commands_ref();
+        let count = commands.len();
+        // Fill webgpu's RETAINED submission (reset + refill, no fresh alloc). The
+        // `sub` handle borrows `webgpu` mutably only for this fill; its per-kind
+        // helpers are called via inference so this module never names the (opaque)
+        // GpuSubmission. `for_each` + `Option::map` keeps every arm branchless.
+        let sub = webgpu.submission_reset(frame.width, frame.height);
         (0..count).for_each(|i| {
-            render
-                .command_clear_color_at(&commands, i)
+            self.render
+                .command_clear_color_at(commands, i)
                 .into_iter()
-                .for_each(|c| webgpu.submission_clear_frame(&mut submission, c));
-            render
-                .command_camera_at(&commands, i)
+                .for_each(|c| sub.clear_frame(c));
+            self.render
+                .command_camera_at(commands, i)
                 .into_iter()
-                .for_each(|(v, p)| webgpu.submission_set_camera(&mut submission, v, p));
-            render
-                .command_pipeline_at(&commands, i)
+                .for_each(|(v, p)| sub.set_camera(v, p));
+            self.render
+                .command_pipeline_at(commands, i)
                 .into_iter()
-                .for_each(|id| webgpu.submission_set_pipeline(&mut submission, id));
-            render
-                .command_mesh_id_at(&commands, i)
+                .for_each(|id| sub.set_pipeline(id));
+            self.render
+                .command_mesh_id_at(commands, i)
                 .into_iter()
-                .for_each(|id| webgpu.submission_set_mesh(&mut submission, id));
-            render
-                .command_material_id_at(&commands, i)
-                .zip(render.command_material_texture_id_at(&commands, i))
+                .for_each(|id| sub.set_mesh(id));
+            self.render
+                .command_material_id_at(commands, i)
+                .zip(self.render.command_material_texture_id_at(commands, i))
                 .into_iter()
-                .for_each(|(id, tex)| webgpu.submission_set_material(&mut submission, id, tex));
-            render
-                .command_draw_indexed_at(&commands, i)
+                .for_each(|(id, tex)| sub.set_material(id, tex));
+            self.render
+                .command_draw_indexed_at(commands, i)
                 .into_iter()
-                .for_each(|(index_count, world)| {
-                    webgpu.submission_draw_indexed(&mut submission, index_count, world)
-                });
+                .for_each(|(index_count, world)| sub.draw_indexed(index_count, world));
         });
-        webgpu.submission_present(&mut submission);
+        sub.present();
 
-        let clear_color = render
-            .command_clear_color_at(&commands, 0)
+        let clear_color = self
+            .render
+            .command_clear_color_at(commands, 0)
             .unwrap_or([0.0; 4]);
 
         // Per-draw data: one entry per *visible* renderable, in snapshot order —
@@ -510,20 +520,23 @@ impl RenderPipelineApi {
                     )
                 })
                 .collect();
-            render.build_sdf_scene(view_proj, camera_world_pos, &shapes)
+            self.render
+                .build_sdf_scene(view_proj, camera_world_pos, &shapes)
         });
 
-        let gpu_report = webgpu.submit(submission);
+        // Summarise the retained submission clone-free — the report only needs
+        // the command count + flags, never the commands themselves.
+        let (command_count, presented, recorded) = webgpu.submit_summary();
         RenderReport {
-            command_count: gpu_report.submitted_command_count(),
+            command_count,
             clear_color,
             view_projection,
             draws,
             lights,
             light_view_proj,
             sdf,
-            presented: gpu_report.presented(),
-            recorded: gpu_report.is_recorded(),
+            presented,
+            recorded,
         }
     }
 
@@ -682,12 +695,12 @@ mod tests {
 
     #[test]
     fn new_and_default_are_equivalent() {
-        let scene = cube_scene();
-        let webgpu = WebGpuApi::new_recording();
-        let n = RenderPipelineApi::new();
-        let d = RenderPipelineApi::default();
-        let rn = n.submit(&frame_with_assets(&n), &scene, &webgpu);
-        let rd = d.submit(&frame_with_assets(&d), &scene, &webgpu);
+        let mut scene = cube_scene();
+        let mut webgpu = WebGpuApi::new_recording();
+        let mut n = RenderPipelineApi::new();
+        let mut d = RenderPipelineApi::default();
+        let rn = n.submit(&frame_with_assets(&n), &mut scene, &mut webgpu);
+        let rd = d.submit(&frame_with_assets(&d), &mut scene, &mut webgpu);
         assert_eq!(n.report_command_count(&rn), d.report_command_count(&rd));
         assert!(n.report_sdf_scene(&rn).is_none());
     }
@@ -695,7 +708,7 @@ mod tests {
     #[test]
     fn report_carries_an_sdf_scene_for_a_scene_with_an_sdf_shape() {
         use axiom_math::Transform;
-        let api = RenderPipelineApi::new();
+        let mut api = RenderPipelineApi::new();
         let mut scene = SceneApi::new();
         // An SDF sphere placed by a translation-only world transform (scale 1),
         // plus a camera (required for the SDF scene's rays). No renderables, so
@@ -724,9 +737,9 @@ mod tests {
             .unwrap();
         scene.update_world_transforms();
 
-        let webgpu = WebGpuApi::new_recording();
+        let mut webgpu = WebGpuApi::new_recording();
         let frame = api.new_frame(800, 600, [0.0, 0.0, 0.0, 1.0], Vec3::new(0.0, -1.0, 0.0));
-        let report = api.submit(&frame, &scene, &webgpu);
+        let report = api.submit(&frame, &mut scene, &mut webgpu);
         let sdf = api
             .report_sdf_scene(&report)
             .expect("the scene's SDF shape yields a scene");
@@ -742,7 +755,7 @@ mod tests {
     #[test]
     fn caster_mark_is_reported_and_invisible_renderables_are_filtered() {
         use axiom_math::Transform;
-        let api = RenderPipelineApi::new();
+        let mut api = RenderPipelineApi::new();
         let mut scene = SceneApi::new();
         let mesh = scene.mesh_ref(1);
         let material = scene.material_ref(2);
@@ -774,8 +787,8 @@ mod tests {
 
         let report = api.submit(
             &frame_with_assets(&api),
-            &scene,
-            &WebGpuApi::new_recording(),
+            &mut scene,
+            &mut WebGpuApi::new_recording(),
         );
         assert_eq!(api.report_draw_count(&report), 1);
         assert_eq!(api.report_draw_casts_shadow(&report, 0), Some(true));
@@ -783,12 +796,12 @@ mod tests {
 
     #[test]
     fn renders_a_scene_to_a_recording_submission() {
-        let api = RenderPipelineApi::new();
-        let scene = cube_scene();
+        let mut api = RenderPipelineApi::new();
+        let mut scene = cube_scene();
         let frame = frame_with_assets(&api);
-        let webgpu = WebGpuApi::new_recording();
+        let mut webgpu = WebGpuApi::new_recording();
 
-        let report = api.submit(&frame, &scene, &webgpu);
+        let report = api.submit(&frame, &mut scene, &mut webgpu);
 
         // Clear + SetCamera + SetPipeline + SetMesh + SetMaterial + DrawIndexed
         // + Present = 7 commands for one cube.
@@ -841,7 +854,7 @@ mod tests {
     fn point_light_resolves_to_its_node_world_position() {
         // A point light on a translated node resolves to kind 1 with that node's
         // world position as its geometry vector (not the sun direction).
-        let api = RenderPipelineApi::new();
+        let mut api = RenderPipelineApi::new();
         let mut scene = SceneApi::new();
         let n = scene.create_node();
         let mesh = scene.mesh_ref(1);
@@ -861,8 +874,8 @@ mod tests {
         scene.update_world_transforms();
 
         let frame = frame_with_assets(&api);
-        let webgpu = WebGpuApi::new_recording();
-        let report = api.submit(&frame, &scene, &webgpu);
+        let mut webgpu = WebGpuApi::new_recording();
+        let report = api.submit(&frame, &mut scene, &mut webgpu);
 
         assert_eq!(api.report_light_count(&report), 1);
         let (kind, vec, color, intensity) = api.report_light_at(&report, 0).unwrap();
@@ -878,9 +891,9 @@ mod tests {
         // opacity) authored through `frame_add_lit_material` reaches the report's
         // per-draw colour with its opacity folded into the alpha — the boundary the
         // umbrella `Material → asset` path now threads instead of dropping.
-        let api = RenderPipelineApi::new();
-        let scene = cube_scene();
-        let webgpu = WebGpuApi::new_recording();
+        let mut api = RenderPipelineApi::new();
+        let mut scene = cube_scene();
+        let mut webgpu = WebGpuApi::new_recording();
         let mut frame = api.new_frame(800, 600, [0.0, 0.0, 0.0, 1.0], Vec3::new(0.3, -1.0, 0.4));
         api.frame_add_mesh(
             &mut frame,
@@ -901,7 +914,7 @@ mod tests {
             Ratio::finite_or_zero(0.5),
             0,
         );
-        let report = api.submit(&frame, &scene, &webgpu);
+        let report = api.submit(&frame, &mut scene, &mut webgpu);
         assert_eq!(
             api.report_draw_color(&report, 0),
             Some([0.2, 0.4, 0.8, 0.5])
@@ -910,10 +923,10 @@ mod tests {
 
     #[test]
     fn deterministic_for_identical_input() {
-        let api = RenderPipelineApi::new();
-        let webgpu = WebGpuApi::new_recording();
-        let a = api.submit(&frame_with_assets(&api), &cube_scene(), &webgpu);
-        let b = api.submit(&frame_with_assets(&api), &cube_scene(), &webgpu);
+        let mut api = RenderPipelineApi::new();
+        let mut webgpu = WebGpuApi::new_recording();
+        let a = api.submit(&frame_with_assets(&api), &mut cube_scene(), &mut webgpu);
+        let b = api.submit(&frame_with_assets(&api), &mut cube_scene(), &mut webgpu);
         assert_eq!(a, b);
     }
 
@@ -921,7 +934,7 @@ mod tests {
     fn a_scene_with_no_camera_leaves_view_projection_identity() {
         // Covers the camera-absent branch: no camera command, identity VP, but
         // the renderable still draws.
-        let api = RenderPipelineApi::new();
+        let mut api = RenderPipelineApi::new();
         let mut scene = SceneApi::new();
         let n = scene.create_node();
         let mesh = scene.mesh_ref(1);
@@ -933,8 +946,8 @@ mod tests {
         scene.update_world_transforms();
 
         let frame = frame_with_assets(&api);
-        let webgpu = WebGpuApi::new_recording();
-        let report = api.submit(&frame, &scene, &webgpu);
+        let mut webgpu = WebGpuApi::new_recording();
+        let report = api.submit(&frame, &mut scene, &mut webgpu);
 
         assert_eq!(api.report_view_projection(&report), Mat4::IDENTITY);
         assert_eq!(api.report_draw_count(&report), 1);

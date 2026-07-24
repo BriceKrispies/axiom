@@ -28,14 +28,25 @@ use crate::render_sdf::RenderSdf;
 ///    translate commands into the WebGPU backend's input without
 ///    naming any render-internal enum.
 /// `RenderApi` never imports scene or resources; the app pre-translates.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct RenderApi {
-    _sealed: (),
+    /// Render input + command-list scratch retained across frames: a composing
+    /// pipeline resets them ([`Self::reset_input`]/[`Self::build_commands`]) and
+    /// refills them each frame instead of allocating fresh, which keeps the
+    /// render pipeline from churning wasm linear memory. (This is why the facade
+    /// is no longer `Copy`.)
+    input: RenderInput,
+    commands: RenderCommandList,
+    draws_scratch: Vec<crate::draw_order::OrderedDraw>,
 }
 
 impl RenderApi {
     pub const fn new() -> Self {
-        RenderApi { _sealed: () }
+        RenderApi {
+            input: RenderInput::new(0, 0),
+            commands: RenderCommandList::new(),
+            draws_scratch: Vec::new(),
+        }
     }
 
     /// Pipeline marker for the default basic-lit forward pipeline.
@@ -274,6 +285,53 @@ impl RenderApi {
         idx: usize,
     ) -> Option<(u32, Mat4)> {
         list.at(idx).and_then(RenderCommand::as_draw_indexed)
+    }
+}
+
+/// Per-frame REUSE (the wasm-churn fix): fill the facade's RETAINED render input
+/// + command-list scratch instead of allocating fresh each frame. A separate
+/// `impl` block so neither block exceeds the engine's impl-size budget.
+impl RenderApi {
+    /// Reset the retained input (clear + retarget viewport, reusing capacity) and
+    /// hand back a mutable handle a composing pipeline refills each frame via the
+    /// input's public builders — no fresh `RenderInput` allocation.
+    pub fn reset_input(&mut self, viewport_width: u32, viewport_height: u32) -> &mut RenderInput {
+        self.input.reset(viewport_width, viewport_height);
+        &mut self.input
+    }
+
+    /// Build the retained command list from the retained input, reusing both
+    /// buffers plus the draw-order scratch — the reuse counterpart of
+    /// [`Self::build_command_list`]. Read the result via [`Self::commands_ref`].
+    pub fn build_commands(&mut self) {
+        crate::draw_order::ordered_draws_into(&self.input, &mut self.draws_scratch);
+        let clear = self.input.clear_color();
+        let camera = self.input.camera();
+        let commands = &mut self.commands;
+        let draws = &self.draws_scratch;
+        commands.clear();
+        commands.push(RenderCommand::clear_frame(clear));
+        camera.into_iter().for_each(|c| {
+            commands.push(RenderCommand::set_camera(c.view(), c.projection()));
+        });
+        draws.iter().fold(None::<u32>, |prev_pipeline, d| {
+            (prev_pipeline != Some(d.pipeline))
+                .then(|| commands.push(RenderCommand::set_pipeline(d.pipeline)));
+            commands.push(RenderCommand::set_mesh(d.mesh_id));
+            commands.push(RenderCommand::set_material(d.material_id, d.texture_id));
+            commands.push(RenderCommand::draw_indexed(
+                d.object_id,
+                d.object_tag,
+                d.index_count,
+                d.world,
+            ));
+            Some(d.pipeline)
+        });
+    }
+
+    /// The retained command list, as of the last [`Self::build_commands`].
+    pub fn commands_ref(&self) -> &RenderCommandList {
+        &self.commands
     }
 }
 
@@ -651,6 +709,51 @@ mod tests {
             api().command_kind_at(&list, 5),
             Some(RenderApi::KIND_DRAW_INDEXED)
         );
+    }
+
+    #[test]
+    fn reuse_path_build_commands_reuses_the_retained_buffers() {
+        let mut r = api();
+        // Fill the RETAINED input via the public primitive builders on the handle.
+        let input = r.reset_input(800, 600);
+        input.set_clear_color([0.1, 0.2, 0.3, 1.0]);
+        input.push_camera(Mat4::IDENTITY, Mat4::IDENTITY);
+        let mesh = input.push_mesh(
+            42,
+            vec![Vec3::ZERO; 24],
+            vec![Vec3::UNIT_Y; 24],
+            vec![Vec2::ZERO; 24],
+            (0..36).collect(),
+        );
+        let mat = input.push_lit_material(
+            99,
+            Vec4::new(0.5, 0.5, 0.5, 1.0),
+            Vec3::ZERO,
+            Ratio::new(0.5).unwrap(),
+            Ratio::new(1.0).unwrap(),
+            0,
+        );
+        // Two objects sharing a pipeline: the 2nd draw must NOT re-emit SetPipeline
+        // (covers the run-length SKIP arm of the command builder).
+        input.push_object(1, Mat4::IDENTITY, mesh, mat, true);
+        input.push_object(2, Mat4::IDENTITY, mesh, mat, true);
+        r.build_commands();
+        // ClearFrame + SetCamera + SetPipeline + (SetMesh+SetMaterial+DrawIndexed)×2.
+        assert_eq!(r.commands_ref().len(), 9);
+        let set_pipeline = (0..r.commands_ref().len())
+            .filter(|&i| {
+                r.command_kind_at(r.commands_ref(), i) == Some(RenderApi::KIND_SET_PIPELINE)
+            })
+            .count();
+        assert_eq!(
+            set_pipeline, 1,
+            "two same-pipeline draws emit one SetPipeline"
+        );
+        // Second frame: reset reuses the SAME buffers — an empty input yields just
+        // ClearFrame, proving `clear()` ran (not a stale 9-command list).
+        r.reset_input(320, 240);
+        r.build_commands();
+        assert_eq!(r.commands_ref().len(), 1);
     }
 
     #[test]

@@ -13,7 +13,7 @@ pub struct RenderCommandList {
 }
 
 impl RenderCommandList {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         RenderCommandList {
             commands: Vec::new(),
         }
@@ -23,6 +23,13 @@ impl RenderCommandList {
         RenderCommandList {
             commands: Vec::with_capacity(capacity),
         }
+    }
+
+    /// Empty the list, reusing its allocated capacity — the per-frame reuse
+    /// entry point for a retained command list (`clear` then refill instead of
+    /// allocating a fresh one each frame).
+    pub fn clear(&mut self) {
+        self.commands.clear();
     }
 
     pub(crate) fn push(&mut self, command: RenderCommand) {

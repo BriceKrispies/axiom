@@ -54,6 +54,11 @@ mod sdf;
 #[derive(Debug, Default)]
 pub struct SceneApi {
     scene: Scene,
+    /// A snapshot buffer retained across frames: the render pipeline refreshes it
+    /// in place ([`Self::refresh_snapshot`]) and reads it by reference
+    /// ([`Self::snapshot_ref`]), so a steady-state frame allocates no fresh
+    /// snapshot — the fix for the per-frame wasm-memory churn.
+    snapshot: SceneSnapshot,
 }
 
 impl SceneApi {
@@ -61,6 +66,7 @@ impl SceneApi {
     pub fn new() -> Self {
         SceneApi {
             scene: Scene::new(),
+            snapshot: SceneSnapshot::default(),
         }
     }
 
@@ -242,6 +248,26 @@ impl SceneApi {
     /// Build a deterministic snapshot of the scene's current state.
     pub fn snapshot(&self) -> SceneSnapshot {
         self.scene.snapshot()
+    }
+
+    /// Advance one engine frame's SYSTEMS only, building no snapshot — the frame
+    /// loop steps with this and refreshes the retained snapshot lazily at render
+    /// time ([`Self::refresh_snapshot`]), so a stepped frame allocates nothing.
+    #[axiom_zones::sim]
+    pub fn advance_systems(&mut self, tick: u64, frame: &FrameContext<'_>) {
+        self.scene.advance_systems(tick, frame);
+    }
+
+    /// Refresh the RETAINED snapshot in place from the scene's current state,
+    /// reusing its buffers instead of allocating a fresh snapshot each frame.
+    pub fn refresh_snapshot(&mut self) {
+        self.snapshot.refresh_from_scene(&self.scene);
+    }
+
+    /// The retained snapshot, as of the last [`Self::refresh_snapshot`] — the
+    /// render pipeline reads this by reference so a frame allocates none.
+    pub fn snapshot_ref(&self) -> &SceneSnapshot {
+        &self.snapshot
     }
 
     /// The reflected schemas of the standard component types a scene is built
@@ -971,5 +997,59 @@ mod tests {
         // translation carried through.
         assert_ne!(child0.rotation, child2.rotation);
         assert_eq!(child2.translation.x, 2.0);
+    }
+
+    #[test]
+    fn advance_systems_then_refresh_reuses_one_snapshot_buffer() {
+        use axiom_frame::FrameApi;
+        use axiom_host::{
+            HostBoundaryConfig, HostFrameInput, HostFrameReport, HostLifecycleSignal,
+            HostLifecycleState, HostStepPlan, HostViewport,
+        };
+        let mut a = api();
+        let parent =
+            a.create_node_with_transform(Transform::from_translation(Vec3::new(2.0, 0.0, 0.0)));
+        let child = a.create_node();
+        a.set_parent(child, parent).unwrap();
+        a.add_spin(child, Vec3::UNIT_Y, 8).unwrap();
+        let frame = |elapsed: u64| {
+            let vp = HostViewport::new(100, 100, Ratio::new(1.0).unwrap()).unwrap();
+            let cfg = HostBoundaryConfig::new(1_000, 5).unwrap();
+            let visible = HostLifecycleState::initial().apply(HostLifecycleSignal::Started);
+            let input = HostFrameInput::new(1, elapsed, vp);
+            let plan = HostStepPlan::build(&input, &cfg, &visible, 0);
+            let report = HostFrameReport::new(
+                input.sequence(),
+                plan,
+                plan.steps(),
+                Vec::new(),
+                vp,
+                visible,
+            );
+            FrameApi::new()
+                .engine_frame_from_host_report(&report, elapsed, Vec::new())
+                .unwrap()
+        };
+        let world_rot = |a: &SceneApi| {
+            a.snapshot_ref()
+                .nodes()
+                .iter()
+                .find(|n| n.parent().is_some())
+                .unwrap()
+                .world()
+                .rotation
+        };
+        // Step the systems, refresh the RETAINED snapshot: it matches a freshly
+        // built one from the same state (reuse is behaviour-identical).
+        a.advance_systems(3, &FrameContext::new(&frame(1_000)));
+        a.refresh_snapshot();
+        assert_eq!(a.snapshot_ref(), &a.snapshot());
+        let rot_a = world_rot(&a);
+        // Step later and refresh the SAME buffer — it updates in place to the new
+        // state (the spun child rotated further).
+        a.advance_systems(9, &FrameContext::new(&frame(1_000)));
+        a.refresh_snapshot();
+        assert_eq!(a.snapshot_ref(), &a.snapshot());
+        assert_ne!(rot_a, world_rot(&a));
     }
 }

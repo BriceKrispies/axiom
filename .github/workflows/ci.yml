@@ -60,6 +60,14 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # The render pipeline reuses retained buffers so a steady-state frame
+      # allocates almost nothing. This gate fails if per-frame heap churn climbs
+      # back over budget — the recurring "gets laggy after ~1h" wasm-memory
+      # fragmentation regression, kept from silently returning. Budget is a
+      # ratchet: lower it as churn is driven down further.
+      - name: Render-churn budget gate
+        run: cargo run --release -p axiom-end-zone --example leakcheck -- --frames 2000 --max-mb-per-frame 3.0
+
       - name: Architecture check (Axiom Layer Law)
         run: cargo xtask check-architecture
 

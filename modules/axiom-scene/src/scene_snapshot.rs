@@ -19,7 +19,7 @@ use crate::tag_snapshot::TagSnapshot;
 /// asset payloads, file paths, editor state, or gameplay state. The app reads
 /// it through [`crate::SceneApi`] accessors to translate into a renderer's
 /// input.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SceneSnapshot {
     nodes: Vec<NodeSnapshot>,
     cameras: Vec<CameraSnapshot>,
@@ -34,15 +34,26 @@ impl SceneSnapshot {
     /// Build a snapshot from a scene. Every node (and its camera/light/
     /// renderable, if any) is read in ascending entity-id order.
     pub fn from_scene(scene: &Scene) -> Self {
+        let mut snapshot = SceneSnapshot::default();
+        snapshot.refresh_from_scene(scene);
+        snapshot
+    }
+
+    /// Refresh this snapshot IN PLACE from `scene`: clear the retained lists and
+    /// refill them, reusing their allocated capacity instead of allocating seven
+    /// fresh `Vec`s every frame. This is the per-frame reuse path that keeps the
+    /// render pipeline from churning wasm linear memory; [`from_scene`] delegates
+    /// to it for the one-shot case.
+    pub fn refresh_from_scene(&mut self, scene: &Scene) {
         let world = scene.world();
         let storage = world.storage();
-        let mut nodes = Vec::new();
-        let mut cameras = Vec::new();
-        let mut lights = Vec::new();
-        let mut renderables = Vec::new();
-        let mut sdf_shapes = Vec::new();
-        let mut tags = Vec::new();
-        let mut bounds = Vec::new();
+        self.nodes.clear();
+        self.cameras.clear();
+        self.lights.clear();
+        self.renderables.clear();
+        self.sdf_shapes.clear();
+        self.tags.clear();
+        self.bounds.clear();
 
         storage.locals.iter().for_each(|(id, &local)| {
             let node = SceneNodeId::from_raw(id.raw());
@@ -51,10 +62,11 @@ impl SceneSnapshot {
                 .get(id)
                 .map(|p| SceneNodeId::from_raw(p.raw()));
             let world_t = storage.worlds.get(id).copied().unwrap_or(local);
-            nodes.push(NodeSnapshot::new(node, parent, local, world_t));
+            self.nodes
+                .push(NodeSnapshot::new(node, parent, local, world_t));
 
             storage.cameras.get(id).into_iter().for_each(|c| {
-                cameras.push(CameraSnapshot::new(
+                self.cameras.push(CameraSnapshot::new(
                     node,
                     c.fovy_radians(),
                     c.aspect(),
@@ -63,10 +75,11 @@ impl SceneSnapshot {
                 ));
             });
             storage.lights.get(id).into_iter().for_each(|l| {
-                lights.push(LightSnapshot::new(node, l.kind(), l.color(), l.intensity()));
+                self.lights
+                    .push(LightSnapshot::new(node, l.kind(), l.color(), l.intensity()));
             });
             storage.renderables.get(id).into_iter().for_each(|r| {
-                renderables.push(RenderableSnapshot::new(
+                self.renderables.push(RenderableSnapshot::new(
                     node,
                     r.mesh(),
                     r.material(),
@@ -77,7 +90,7 @@ impl SceneSnapshot {
                 ));
             });
             storage.sdf_shapes.get(id).into_iter().for_each(|shape| {
-                sdf_shapes.push(SdfShapeSnapshot::new(
+                self.sdf_shapes.push(SdfShapeSnapshot::new(
                     node,
                     shape.kind(),
                     shape.dims(),
@@ -85,22 +98,13 @@ impl SceneSnapshot {
                 ));
             });
             storage.tags.get(id).into_iter().for_each(|tag| {
-                tags.push(TagSnapshot::new(node, tag.kind_code()));
+                self.tags.push(TagSnapshot::new(node, tag.kind_code()));
             });
             storage.bounds.get(id).into_iter().for_each(|b| {
-                bounds.push(BoundsSnapshot::new(node, b.half_extents()));
+                self.bounds
+                    .push(BoundsSnapshot::new(node, b.half_extents()));
             });
         });
-
-        SceneSnapshot {
-            nodes,
-            cameras,
-            lights,
-            renderables,
-            sdf_shapes,
-            tags,
-            bounds,
-        }
     }
 
     pub fn nodes(&self) -> &[NodeSnapshot] {

@@ -277,6 +277,16 @@ impl Scene {
     /// frame is active (not skipped, ran at least one runtime step), then
     /// return the deterministic snapshot taken after whatever update happened.
     pub(crate) fn advance(&mut self, tick: u64, frame: &FrameContext<'_>) -> SceneSnapshot {
+        self.advance_systems(tick, frame);
+        self.snapshot()
+    }
+
+    /// Advance one engine frame's SYSTEMS only (spin + transform propagation),
+    /// building no snapshot. The frame loop steps with this and takes the
+    /// snapshot lazily at render time (into a retained buffer), so a stepped
+    /// frame never allocates and discards a snapshot. [`advance`] adds the
+    /// snapshot for the one-shot callers.
+    pub(crate) fn advance_systems(&mut self, tick: u64, frame: &FrameContext<'_>) {
         let moves: Vec<(u32, Vec3)> = frame.commands().iter().filter_map(decode_move).collect();
         let controls: Vec<(u32, Vec3, f32, f32, Option<Meters>)> = frame
             .commands()
@@ -286,7 +296,6 @@ impl Scene {
         self.world.storage_mut().pending_moves = moves;
         self.world.storage_mut().pending_controls = controls;
         self.world.advance(tick, frame);
-        self.snapshot()
     }
 
     /// A deterministic value snapshot of the scene's current state.

@@ -8,6 +8,7 @@ use crate::backend_kind::BackendKind;
 use crate::gpu_command::GpuCommand;
 use crate::gpu_submission::GpuSubmission;
 use crate::gpu_submission_report::GpuSubmissionReport;
+use crate::gpu_submission_status::GpuSubmissionStatus;
 use crate::webgpu_backend_state::WebGpuBackendState;
 
 /// The only public export of `axiom-webgpu`.
@@ -29,9 +30,14 @@ use crate::webgpu_backend_state::WebGpuBackendState;
 /// what every higher-layer test asserts on, so the future live backend that
 /// actually presents changes only the *body* of `submit()`, never the
 /// surface of the module.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct WebGpuApi {
     state: WebGpuBackendState,
+    /// A submission buffer retained across frames: a composing pipeline resets it
+    /// ([`Self::submission_reset`]) and refills it each frame, then reads its
+    /// summary clone-free ([`Self::submit_summary`]) — so a steady-state frame
+    /// allocates no fresh submission. (This is why the facade is no longer `Copy`.)
+    submission: GpuSubmission,
 }
 
 impl WebGpuApi {
@@ -47,6 +53,7 @@ impl WebGpuApi {
     pub const fn new_recording() -> Self {
         WebGpuApi {
             state: WebGpuBackendState::recording(),
+            submission: GpuSubmission::new(0, 0),
         }
     }
 
@@ -56,6 +63,7 @@ impl WebGpuApi {
     pub const fn new_live_unbound() -> Self {
         WebGpuApi {
             state: WebGpuBackendState::live_unbound(),
+            submission: GpuSubmission::new(0, 0),
         }
     }
 
@@ -77,6 +85,7 @@ impl WebGpuApi {
             .require_presentation_surface()
             .then_some(WebGpuApi {
                 state: WebGpuBackendState::live_presentation_requested(*request),
+                submission: GpuSubmission::new(0, 0),
             })
             .ok_or_else(|| {
                 KernelError::new(
@@ -248,6 +257,35 @@ impl WebGpuApi {
     }
 }
 
+/// Per-frame submission REUSE (the wasm-churn fix). Kept in a second `impl`
+/// block so the facade's main block stays within the engine impl-size budget.
+impl WebGpuApi {
+    /// Reset the RETAINED submission (clear + retarget, reusing its capacity) and
+    /// hand back a mutable handle a composing pipeline refills each frame — no
+    /// fresh `GpuSubmission` allocation.
+    pub fn submission_reset(
+        &mut self,
+        target_width: u32,
+        target_height: u32,
+    ) -> &mut GpuSubmission {
+        self.submission.reset(target_width, target_height);
+        &mut self.submission
+    }
+
+    /// Submit the RETAINED submission and report its summary WITHOUT cloning its
+    /// commands: `(command_count, presented, recorded)`. The recording report
+    /// only ever needs the count and flags, so the per-frame `to_vec` clone that
+    /// [`Self::submit`] pays is skipped entirely.
+    pub fn submit_summary(&self) -> (usize, bool, bool) {
+        let status = self.state.submission_status();
+        (
+            self.submission.len(),
+            status.presented(),
+            (status as u8) == (GpuSubmissionStatus::Recorded as u8),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +300,24 @@ mod tests {
             WebGpuApi::new().backend_kind(),
             WebGpuApi::default().backend_kind(),
         );
+    }
+
+    #[test]
+    fn submission_reset_refills_one_retained_buffer_and_summary_is_clone_free() {
+        let mut w = api();
+        // First frame: reset the retained submission and fill it via the handle.
+        let sub = w.submission_reset(800, 600);
+        sub.clear_frame([0.0, 0.0, 0.0, 1.0]);
+        sub.draw_indexed(3, Mat4::IDENTITY);
+        sub.present();
+        let (count, presented, recorded) = w.submit_summary();
+        assert_eq!(count, 3);
+        assert!(!presented);
+        assert!(recorded, "the recording backend tags its summary Recorded");
+        // Second frame: reset clears the SAME buffer (no leftover commands).
+        let sub2 = w.submission_reset(320, 240);
+        sub2.present();
+        assert_eq!(w.submit_summary().0, 1);
     }
 
     #[test]
