@@ -204,20 +204,28 @@ impl RunningApp {
     /// current viewport aspect.
     pub fn set_camera(&mut self, camera: Camera, transform: Transform) -> Entity {
         let math = MathApi::new();
-        let existing: Vec<Entity> = self
-            .scene
-            .snapshot()
-            .cameras()
-            .iter()
-            .map(|cam| cam.node())
-            .collect();
-        existing.into_iter().for_each(|node| {
-            let _ = self.scene.remove_camera(node);
-        });
-
         let aspect = self.viewport.physical_width() as f32 / self.viewport.physical_height() as f32;
         let projection = camera.projection();
-        let node = self.scene.create_node_with_transform(transform);
+        // Reuse the sole active camera node in place — reposition it and (below)
+        // replace its intrinsics — creating a node only when the scene has no
+        // camera yet. A moving camera is re-authored every frame; spawning a fresh
+        // node each time (and only *removing the camera component* from the old
+        // ones, never the node) leaked a scene node per frame, growing the scene
+        // — and every buffer sized to it — without bound until a long-running
+        // session became unplayably slow. Reuse makes the common case allocate
+        // nothing; `despawn_cameras_except` then drops any stray extra cameras
+        // (a no-op, churn-free, in the steady one-camera state).
+        let node = self
+            .scene
+            .first_camera_node()
+            .map(|existing| {
+                self.scene
+                    .set_local_transform(existing, transform)
+                    .expect("an existing camera node is a live node");
+                existing
+            })
+            .unwrap_or_else(|| self.scene.create_node_with_transform(transform));
+        self.scene.despawn_cameras_except(node);
         self.scene
             .add_perspective_camera(
                 &math,
@@ -601,6 +609,38 @@ mod tests {
         let far = app.tick(2).camera_view_proj();
         assert_ne!(far, near, "set_camera replaces the active camera");
         assert_eq!(app.tick(3).camera_view_proj(), far);
+    }
+
+    #[test]
+    fn set_camera_reuses_one_node_instead_of_leaking_a_node_per_call() {
+        // A moving camera is re-authored every frame. `set_camera` must reuse ONE
+        // scene node — reposition it — rather than spawn a fresh node each call,
+        // the leak that grew the scene (and every buffer sized to it) without
+        // bound until a long-running session became unplayably slow.
+        let mut app = empty_render_app();
+        let first = app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+        );
+        let nodes_after_first = app.query::<Transform>().len();
+        let second = app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 9.0)),
+        );
+        let third = app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 10.0)),
+        );
+        // The same node handle every time…
+        assert_eq!(first, second);
+        assert_eq!(second, third);
+        // …so the scene node count never grows.
+        assert_eq!(app.query::<Transform>().len(), nodes_after_first);
+        // …and it carries the latest authored transform.
+        assert_eq!(
+            app.get::<Transform>(third).map(|t| t.translation),
+            Some(Vec3::new(0.0, 0.0, 10.0))
+        );
     }
 
     #[test]

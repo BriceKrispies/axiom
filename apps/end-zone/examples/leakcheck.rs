@@ -39,25 +39,47 @@ fn main() {
         .unwrap_or(6000);
     let max_mb_per_frame: Option<f64> =
         arg_value(&args, "--max-mb-per-frame").and_then(|s| s.parse().ok());
+    // Retained-growth gate: the number of live heap blocks must not grow between
+    // the first and second half of the run. A per-frame retained leak (e.g. a
+    // scene node spawned every frame and never despawned) shows here as a large
+    // second-half block delta, even when the *bytes* look small — it is the gate
+    // that pins the "gets unplayably laggy after an hour" class of bug.
+    let max_block_growth: Option<i64> =
+        arg_value(&args, "--max-block-growth").and_then(|s| s.parse().ok());
 
-    let profiler = dhat::Profiler::builder().testing().build();
+    let json = args.iter().any(|a| a == "--json");
+    let profiler = if json {
+        dhat::Profiler::builder().build()
+    } else {
+        dhat::Profiler::builder().testing().build()
+    };
 
     let mut app = EndZoneApp::new(EndZoneConfig::default());
-    for _ in 0..frames {
+    let mut mid_blocks: usize = 0;
+    for i in 0..frames {
         if !no_advance {
             app.advance(&[], TouchInput::default());
         }
         if !no_present {
             let _ = app.present();
         }
+        if !json && i == frames / 2 {
+            mid_blocks = dhat::HeapStats::get().curr_blocks;
+        }
     }
 
+    if json {
+        drop(profiler);
+        println!("drove {frames} frames — wrote dhat-heap.json");
+        return;
+    }
     let stats = dhat::HeapStats::get();
+    let block_growth = stats.curr_blocks as i64 - mid_blocks as i64;
     drop(profiler);
     let mb_per_frame = stats.total_bytes as f64 / frames.max(1) as f64 / 1.0e6;
     println!(
         "drove {frames} frames (advance={} present={}): churn {mb_per_frame:.2} MB/frame, \
-         t-end {} bytes in {} blocks",
+         t-end {} bytes in {} blocks (2nd-half block growth {block_growth})",
         !no_advance, !no_present, stats.curr_bytes, stats.curr_blocks
     );
     if let Some(budget) = max_mb_per_frame {
@@ -67,6 +89,16 @@ fn main() {
              — the render pipeline is allocating per frame again (a Vec::new/with_capacity/clone \
              back in the hot path). Reuse a retained buffer instead. See \
              docs (endzone-render-churn-not-leak) for the reuse pattern."
+        );
+    }
+    if let Some(budget) = max_block_growth {
+        assert!(
+            block_growth <= budget,
+            "RETAINED-GROWTH REGRESSION: live heap blocks grew by {block_growth} over the run's \
+             second half (budget {budget}) — something is retained every frame and never freed \
+             (e.g. a scene node spawned per frame without a despawn, like the camera-node leak in \
+             set_camera). Find it with `--json` and the dhat 'at t-end' breakdown; fix it at the \
+             engine level (reuse the node), not by widening this budget."
         );
     }
 }

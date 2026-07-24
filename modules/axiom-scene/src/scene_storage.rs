@@ -7,7 +7,7 @@
 //! world transforms — the engine embodiment of "a transform hierarchy is just a
 //! system over the world."
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use axiom_ecs::{
     ColumnSet, ComponentColumn, DynamicComponents, EntityRegistry, ErasedColumn, WorldStep,
@@ -85,6 +85,16 @@ pub struct SceneStorage {
     /// moving N nodes then reading once costs ONE whole-scene propagation instead of N
     /// (the difference between O(N·nodes) and O(nodes) per frame). Transient, never serialized.
     pub world_dirty: bool,
+    /// Retained accumulator for [`propagate`]: each whole-scene propagation
+    /// clears + refills this map instead of allocating a fresh `BTreeMap` (one
+    /// heap node per entity) every frame. Reusing its buckets across frames is
+    /// what stops transform propagation from being the engine's largest per-frame
+    /// *allocation-count* source — the churn that fragments wasm linear memory and
+    /// slowly degrades a long-running session. Presence in the map means "world
+    /// already computed this pass" (a child reads its parent's fresh world from
+    /// here); iteration order never escapes, so the `HashMap` is deterministic at
+    /// the boundary. Transient, never serialized.
+    pub(crate) world_scratch: HashMap<EntityId, Transform>,
 }
 
 /// A first-person controller node's persistent orientation: the index it answers
@@ -355,26 +365,33 @@ pub(crate) fn apply_controller(
 /// shared by [`TransformPropagation`] (per-frame, via the ECS world) and
 /// [`crate::scene::Scene::update_world_transforms`] (on demand).
 pub(crate) fn propagate(ids: impl Iterator<Item = EntityId>, storage: &mut SceneStorage) {
-    let mut worlds: BTreeMap<EntityId, Transform> = BTreeMap::new();
+    // Disjoint field borrows so the retained `world_scratch` accumulator can be
+    // read (parent lookups) and written while `locals`/`parents` are read and the
+    // final `worlds` column is written — all in one scope, no fresh allocation.
+    let SceneStorage {
+        locals,
+        parents,
+        worlds,
+        world_scratch,
+        ..
+    } = storage;
+    // Clear (retaining buckets) rather than allocate a fresh map each frame; an
+    // entity present in `world_scratch` has had its world computed this pass, so a
+    // child reads its parent's fresh world from here.
+    world_scratch.clear();
     ids.for_each(|id| {
-        storage
-            .locals
-            .get(id)
-            .copied()
-            .into_iter()
-            .for_each(|local| {
-                let world = storage
-                    .parents
-                    .get(id)
-                    .and_then(|p| worlds.get(p).copied())
-                    .map_or(local, |parent_world| {
-                        Transform::combine(parent_world, local)
-                    });
-                worlds.insert(id, world);
-            });
+        locals.get(id).copied().into_iter().for_each(|local| {
+            let world = parents
+                .get(id)
+                .and_then(|p| world_scratch.get(p).copied())
+                .map_or(local, |parent_world| {
+                    Transform::combine(parent_world, local)
+                });
+            world_scratch.insert(id, world);
+        });
     });
-    worlds.into_iter().for_each(|(id, world)| {
-        storage.worlds.insert(id, world);
+    world_scratch.iter().for_each(|(&id, &world)| {
+        worlds.insert(id, world);
     });
 }
 

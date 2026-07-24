@@ -60,13 +60,18 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-      # The render pipeline reuses retained buffers so a steady-state frame
-      # allocates almost nothing. This gate fails if per-frame heap churn climbs
-      # back over budget — the recurring "gets laggy after ~1h" wasm-memory
-      # fragmentation regression, kept from silently returning. Budget is a
-      # ratchet: lower it as churn is driven down further.
-      - name: Render-churn budget gate
-        run: cargo run --release -p axiom-end-zone --example leakcheck -- --frames 2000 --max-mb-per-frame 3.0
+      # The engine reuses retained buffers and reuses (never re-spawns) the sole
+      # camera node, so a steady-state frame allocates almost nothing and retains
+      # nothing new. This gate pins the recurring "gets unplayably laggy after
+      # ~1h" regression from two angles: (1) per-frame heap churn must stay under
+      # budget, and (2) live heap BLOCKS must not grow across the run's second
+      # half — a per-frame retained leak (e.g. a scene node spawned every frame
+      # and never despawned, the original set_camera bug) trips the growth gate
+      # even when the bytes look small. Both budgets are ratchets: lower them as
+      # the numbers are driven down further, never raise them to make a change
+      # pass — fix the leak at the engine level instead.
+      - name: Render-churn + retained-growth gate
+        run: cargo run --release -p axiom-end-zone --example leakcheck -- --frames 6000 --max-mb-per-frame 1.8 --max-block-growth 30
 
       - name: Architecture check (Axiom Layer Law)
         run: cargo xtask check-architecture

@@ -161,13 +161,22 @@ pub struct RenderPipelineApi {
     /// each frame — the per-frame wasm-memory-churn fix. (This is why the facade
     /// is no longer `Copy`.)
     render: RenderApi,
+    /// The frame's mesh-id → render-index, material-id → render-index, and
+    /// material-id → per-draw colour maps, RETAINED and cleared+refilled each
+    /// frame (not rebuilt), so a steady-state frame allocates no fresh hashmaps.
+    mesh_index: HashMap<u64, u32>,
+    material_index: HashMap<u64, u32>,
+    material_color: HashMap<u64, [f32; 4]>,
 }
 
 impl RenderPipelineApi {
     /// Construct the facade.
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         RenderPipelineApi {
             render: RenderApi::new(),
+            mesh_index: HashMap::new(),
+            material_index: HashMap::new(),
+            material_color: HashMap::new(),
         }
     }
 
@@ -275,10 +284,19 @@ impl RenderPipelineApi {
         scene.refresh_snapshot();
         let snapshot = scene.snapshot_ref();
 
+        // Destructure the retained buffers into disjoint field borrows so the
+        // render input and the id-index maps can be reset + refilled together in
+        // one scope (all reused across frames — the churn fix).
+        let Self {
+            render,
+            mesh_index,
+            material_index,
+            material_color,
+        } = self;
         // Fill the RETAINED render input (reset + refill, no fresh alloc) via its
         // public primitive builders on the `&mut` handle — this module never names
         // the opaque RenderInput/mesh/material/object types.
-        let input = self.render.reset_input(frame.width, frame.height);
+        let input = render.reset_input(frame.width, frame.height);
         input.set_clear_color(frame.clear_color);
 
         // Camera: the first camera, if any. view = inverse(node world);
@@ -323,47 +341,41 @@ impl RenderPipelineApi {
         // per-directional directions are a later scene-model extension.)
 
         // Meshes / materials: registration order defines the render-side index.
-        // The id->index maps resolve each renderable's mesh/material in O(1)
-        // (the lists carry no duplicate ids), and `material_color` lets the
-        // per-draw pass below recover a command's colour without a scan.
-        let mesh_index: HashMap<u64, u32> = frame
-            .meshes
-            .iter()
-            .map(|mesh| {
-                let idx = input.push_mesh(
-                    mesh.id,
-                    mesh.positions.clone(),
-                    mesh.normals.clone(),
-                    mesh.uvs.clone(),
-                    mesh.indices.clone(),
-                );
-                (mesh.id, idx)
-            })
-            .collect();
-        let mut material_color: HashMap<u64, [f32; 4]> =
-            HashMap::with_capacity(frame.materials.len());
-        let material_index: HashMap<u64, u32> = frame
-            .materials
-            .iter()
-            .map(|material| {
-                let c = material.color;
-                let e = material.emissive;
-                let idx = input.push_lit_material(
-                    material.id,
-                    Vec4::new(c[0], c[1], c[2], c[3]),
-                    Vec3::new(e[0], e[1], e[2]),
-                    Ratio::finite_or_zero(material.roughness),
-                    Ratio::finite_or_zero(material.opacity),
-                    material.texture_id,
-                );
-                // Fold opacity into the per-draw alpha (`alpha = base.a × opacity`),
-                // exactly as the render layer's neutral packet does, so the report's
-                // per-draw colour — and the live/canvas instance colour built from it
-                // — carries the translucency a `createMaterial`-authored material set.
-                material_color.insert(material.id, [c[0], c[1], c[2], c[3] * material.opacity]);
-                (material.id, idx)
-            })
-            .collect();
+        // The RETAINED id->index maps resolve each renderable's mesh/material in
+        // O(1) (the lists carry no duplicate ids), and `material_color` lets the
+        // per-draw pass below recover a command's colour without a scan. Cleared +
+        // refilled each frame (not rebuilt) so no fresh hashmap is allocated.
+        mesh_index.clear();
+        frame.meshes.iter().for_each(|mesh| {
+            let idx = input.push_mesh(
+                mesh.id,
+                mesh.positions.clone(),
+                mesh.normals.clone(),
+                mesh.uvs.clone(),
+                mesh.indices.clone(),
+            );
+            mesh_index.insert(mesh.id, idx);
+        });
+        material_index.clear();
+        material_color.clear();
+        frame.materials.iter().for_each(|material| {
+            let c = material.color;
+            let e = material.emissive;
+            let idx = input.push_lit_material(
+                material.id,
+                Vec4::new(c[0], c[1], c[2], c[3]),
+                Vec3::new(e[0], e[1], e[2]),
+                Ratio::finite_or_zero(material.roughness),
+                Ratio::finite_or_zero(material.opacity),
+                material.texture_id,
+            );
+            // Fold opacity into the per-draw alpha (`alpha = base.a × opacity`),
+            // exactly as the render layer's neutral packet does, so the report's
+            // per-draw colour — and the live/canvas instance colour built from it
+            // — carries the translucency a `createMaterial`-authored material set.
+            material_color.insert(material.id, [c[0], c[1], c[2], c[3] * material.opacity]);
+            material_index.insert(material.id, idx);
+        });
 
         // Objects: one per renderable, resolving its mesh/material ids to the
         // render-side indices. The frame must supply an asset for every id the
@@ -391,10 +403,10 @@ impl RenderPipelineApi {
             );
         });
 
-        // `input`'s borrow of `self.render` ends above; build the RETAINED command
+        // `input`'s borrow of `render` ends above; build the RETAINED command
         // list from it and read it by reference — no fresh command-list alloc.
-        self.render.build_commands();
-        let commands = self.render.commands_ref();
+        render.build_commands();
+        let commands = render.commands_ref();
         let count = commands.len();
         // Fill webgpu's RETAINED submission (reset + refill, no fresh alloc). The
         // `sub` handle borrows `webgpu` mutably only for this fill; its per-kind
@@ -402,36 +414,35 @@ impl RenderPipelineApi {
         // GpuSubmission. `for_each` + `Option::map` keeps every arm branchless.
         let sub = webgpu.submission_reset(frame.width, frame.height);
         (0..count).for_each(|i| {
-            self.render
+            render
                 .command_clear_color_at(commands, i)
                 .into_iter()
                 .for_each(|c| sub.clear_frame(c));
-            self.render
+            render
                 .command_camera_at(commands, i)
                 .into_iter()
                 .for_each(|(v, p)| sub.set_camera(v, p));
-            self.render
+            render
                 .command_pipeline_at(commands, i)
                 .into_iter()
                 .for_each(|id| sub.set_pipeline(id));
-            self.render
+            render
                 .command_mesh_id_at(commands, i)
                 .into_iter()
                 .for_each(|id| sub.set_mesh(id));
-            self.render
+            render
                 .command_material_id_at(commands, i)
-                .zip(self.render.command_material_texture_id_at(commands, i))
+                .zip(render.command_material_texture_id_at(commands, i))
                 .into_iter()
                 .for_each(|(id, tex)| sub.set_material(id, tex));
-            self.render
+            render
                 .command_draw_indexed_at(commands, i)
                 .into_iter()
                 .for_each(|(index_count, world)| sub.draw_indexed(index_count, world));
         });
         sub.present();
 
-        let clear_color = self
-            .render
+        let clear_color = render
             .command_clear_color_at(commands, 0)
             .unwrap_or([0.0; 4]);
 
@@ -520,7 +531,7 @@ impl RenderPipelineApi {
                     )
                 })
                 .collect();
-            self.render
+            render
                 .build_sdf_scene(view_proj, camera_world_pos, &shapes)
         });
 

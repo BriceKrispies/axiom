@@ -34,6 +34,21 @@ impl Scene {
         self.world.storage().cameras.get(Self::entity(node))
     }
 
+    /// The first active camera node in ascending id order, if any — the sole
+    /// camera the render path draws through. A lazy read of the camera column (no
+    /// allocation), so the app can *reuse* this node every frame — reposition it
+    /// and replace its intrinsics — instead of spawning a fresh camera node per
+    /// frame. That per-frame node churn is what previously leaked a scene node
+    /// each time a moving camera was re-authored, growing the scene without bound.
+    pub(crate) fn first_camera_node(&self) -> Option<SceneNodeId> {
+        self.world
+            .storage()
+            .cameras
+            .iter()
+            .next()
+            .map(|(entity, _)| SceneNodeId::from_raw(entity.raw()))
+    }
+
     pub(crate) fn remove_camera(&mut self, node: SceneNodeId) -> SceneResult<()> {
         self.world
             .storage_mut()

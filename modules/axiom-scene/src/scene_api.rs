@@ -40,6 +40,11 @@ mod dynamic;
 /// this file nor the main `impl SceneApi` block exceeds the engine's size budgets.
 mod sdf;
 
+/// The active-camera arm of the facade (`first_camera_node`/
+/// `despawn_cameras_except`) — reuse the sole camera node instead of leaking one
+/// per frame. A child module so neither this file nor the main impl block grows.
+mod cameras;
+
 /// The only public export of `axiom-scene`: a **stateful scene handle**.
 /// `SceneApi` *owns* the scene — an ECS world (the ecs layer) where nodes are
 /// entities and every node fact is a component column. A consumer builds it

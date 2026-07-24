@@ -63,6 +63,26 @@ impl Scene {
         self.despawn_node(node)
     }
 
+    /// Despawn every camera node except `keep` — the drop-the-others half of
+    /// "set the sole active camera". In the steady state (exactly one camera, the
+    /// one being kept) the filter yields nothing and `collect` allocates nothing,
+    /// so repositioning the camera every frame stays churn-free; only the rare
+    /// case of a stray extra camera pays for a despawn.
+    pub(crate) fn despawn_cameras_except(&mut self, keep: SceneNodeId) {
+        let keep_entity = Self::entity(keep);
+        let extras: Vec<SceneNodeId> = self
+            .world
+            .storage()
+            .cameras
+            .iter()
+            .filter(|(entity, _)| *entity != keep_entity)
+            .map(|(entity, _)| SceneNodeId::from_raw(entity.raw()))
+            .collect();
+        extras.into_iter().for_each(|node| {
+            self.despawn_node(node);
+        });
+    }
+
     /// Remove `entity` from the world (every component column, via the ECS) and
     /// from the two non-column marker maps the scene keeps alongside (`players`,
     /// `controllers`).
