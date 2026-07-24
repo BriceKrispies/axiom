@@ -85,3 +85,22 @@ export { attachDomInput } from "./dom-input.ts";
 
 // ── audio ───────────────────────────────────────────────────────────────────────
 export { playTone, setAmbienceLevel, startAmbience, stopAmbience } from "./audio.ts";
+
+// ── text authoring ────────────────────────────────────────────────────────────────
+// `text("Hello, world")` (or `axiom.text(...)`) builds an immutable Text value —
+// plain/rich spans, style cascade, layout box, placement — and lays it out into
+// backend-neutral glyph quads. The pure-TS counterpart of the Rust `axiom-text`.
+export { axiom, text } from "./text.ts";
+export type {
+  Text,
+  TextAlign,
+  TextBounds,
+  TextContent,
+  TextGlyph,
+  TextLayoutInput,
+  TextOptions,
+  TextSpace,
+  TextSpanInput,
+  TextStyleInput,
+  TextWrap,
+} from "./text.ts";

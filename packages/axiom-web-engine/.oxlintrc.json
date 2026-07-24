@@ -203,6 +203,29 @@
         "unicorn/prefer-modern-math-apis": "off",
         "unicorn/no-array-for-each": "off"
       }
+    },
+    {
+      // text.ts — the pure-functional text authoring layer (the @axiom/web-engine
+      // counterpart of the Rust axiom-text module). It stays fully BRANCHLESS + 100%
+      // covered; only the rules a pure IMMUTABLE-FOLD style inherently fights are
+      // scoped off, each the direct analogue of a Rust axiom-text pattern:
+      //   - no-array-reduce / no-accumulating-spread: layout is an ordered FOLD
+      //     (split lines → pack words → place glyphs), the same deliberate fold the
+      //     mat4/shading math spine uses, building collections rather than a scalar.
+      //   - no-rest-spread-properties: every `set*` returns a NEW value via
+      //     `{ ...state, patch }` — the immutable-update idiom this file is built on.
+      //   - sort-keys: object literals mirror positional/struct field order (glyph
+      //     x/y/w/h, the style cascade), not alphabetical.
+      // The branch ban (`no-restricted-syntax`) stays ON — this file is branchless.
+      "files": ["src/text.ts"],
+      "rules": {
+        "unicorn/no-array-reduce": "off",
+        "oxc/no-accumulating-spread": "off",
+        "oxc/no-rest-spread-properties": "off",
+        "eslint/sort-keys": "off",
+        "eslint/max-lines": "off",
+        "unicorn/prefer-spread": "off"
+      }
     }
   ]
 }
