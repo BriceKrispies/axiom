@@ -17,8 +17,9 @@
  * horizontal-only) so letters stay in proportion and legible, just smaller.
  */
 
-import { GLYPH_H, textColumns, textRuns, type EngineQuat, type EngineVec3, type SceneInstance } from "@axiom/web-engine";
-import { addV3, rotateByQuat, v3 } from "../stage/vectors.ts";
+import type { EngineQuat, EngineVec3, SceneInstance } from "@axiom/web-engine";
+import { addV3, quatMul, quatRoll, rotateByQuat, v3 } from "../stage/vectors.ts";
+import { GLYPH_H, STROKE_THICK, textColumns, textStrokes } from "./glyphs.ts";
 
 /** Where a text block sits and how it is stretched. Local axes (before `basis`):
  * `+x` runs along the reading direction, `+y` up the surface, `+z` out of it. */
@@ -51,14 +52,15 @@ const UNIT_BASIS: EngineVec3 = v3(1, 1, 1);
 
 /**
  * The lettering of `text` as welded relief boxes. `text` is uppercased for the
- * font; empty / whitespace-only text yields nothing. One box per horizontal cell
- * run (see `glyphs.ts`), so an unbroken stroke is one box, not a row of cubes.
+ * font; empty / whitespace-only text yields nothing. One thin ROTATED box per
+ * stroke centerline (see `glyphs.ts`), so a diagonal or a bowl is a real slanted
+ * bar rather than a staircase of cubes — the Helvetica-idiom look.
  */
 export const stampText = (keyPrefix: string, text: string, frame: SurfaceFrame, style: LabelStyle): readonly SceneInstance[] => {
   const upper = text.toUpperCase();
   const columns = textColumns(upper);
-  const runs = textRuns(upper);
-  if (columns === 0 || runs.length === 0) {
+  const strokes = textStrokes(upper);
+  if (columns === 0 || strokes.length === 0) {
     return [];
   }
   // Square cell from the target height, shrunk uniformly to honor maxWidth.
@@ -69,21 +71,26 @@ export const stampText = (keyPrefix: string, text: string, frame: SurfaceFrame, 
   const basis = frame.basis ?? UNIT_BASIS;
   const halfCols = columns / 2;
 
-  return runs.map((run, index): SceneInstance => {
-    // Run center in cell space: columns from the left edge, rows from the top.
-    const cx = (run.col + run.len / 2 - halfCols) * cell;
-    const cy = (GLYPH_H / 2 - (run.row + 0.5)) * cell;
-    // Local offset of this box (block center + letter offset, lifted off surface).
+  return strokes.map((stroke, index): SceneInstance => {
+    // Stroke center in cell space: `cx` across from the left edge (block-centered),
+    // `cy` up from the baseline (block-centered on the cap-height midline).
+    const cx = (stroke.cx - halfCols) * cell;
+    const cy = (stroke.cy - GLYPH_H / 2) * cell;
+    // Local offset of this box (block center + stroke offset, lifted off surface).
     const local = v3(frame.center.x + cx, frame.center.y + cy, frame.center.z + style.lift + depth / 2);
     const scaled = v3(local.x * basis.x, local.y * basis.y, local.z * basis.z);
+    // The stroke runs along its own local +x, rotated by its angle IN the surface
+    // plane (about the surface normal, local +z) then welded into the frame — so a
+    // slanted stroke is a slanted box, welded to whatever the frame rides.
+    const rotation = quatMul(frame.orient, quatRoll(stroke.angle));
     return {
       key: `${keyPrefix}:${index}`,
       material: style.material,
       mesh: "box",
       transform: {
         position: addV3(frame.origin, rotateByQuat(scaled, frame.orient)),
-        rotation: frame.orient,
-        scale: v3(run.len * cell * basis.x, cell * basis.y, depth * basis.z),
+        rotation,
+        scale: v3(stroke.len * cell * basis.x, STROKE_THICK * cell * basis.y, depth * basis.z),
       },
     };
   });
