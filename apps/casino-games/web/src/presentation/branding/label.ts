@@ -17,9 +17,8 @@
  * horizontal-only) so letters stay in proportion and legible, just smaller.
  */
 
-import type { EngineQuat, EngineVec3, SceneInstance } from "@axiom/web-engine";
+import { GLYPH_H, textColumns, textRuns, type EngineQuat, type EngineVec3, type SceneInstance } from "@axiom/web-engine";
 import { addV3, rotateByQuat, v3 } from "../stage/vectors.ts";
-import { GLYPH_H, textColumns, textRuns } from "./glyphs.ts";
 
 /** Where a text block sits and how it is stretched. Local axes (before `basis`):
  * `+x` runs along the reading direction, `+y` up the surface, `+z` out of it. */

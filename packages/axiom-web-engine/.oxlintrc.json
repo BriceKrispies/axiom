@@ -217,7 +217,7 @@
       //   - sort-keys: object literals mirror positional/struct field order (glyph
       //     x/y/w/h, the style cascade), not alphabetical.
       // The branch ban (`no-restricted-syntax`) stays ON — this file is branchless.
-      "files": ["src/text.ts"],
+      "files": ["src/text.ts", "src/glyph-font.ts"],
       "rules": {
         "unicorn/no-array-reduce": "off",
         "oxc/no-accumulating-spread": "off",

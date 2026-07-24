@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { QUAT_IDENTITY, v3 } from "../stage/vectors.ts";
-import { GLYPH_GAP, GLYPH_H, GLYPH_W, glyphRuns, textColumns, textRuns } from "./glyphs.ts";
+import { GLYPH_GAP, GLYPH_H, GLYPH_W, glyphRuns, textColumns, textRuns } from "@axiom/web-engine";
 import { brandIssues, brandMaterials, DEFAULT_BRAND, hexToRgb, readBrand, rgbToHex } from "./brand.ts";
 import { stampText } from "./label.ts";
 

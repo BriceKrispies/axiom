@@ -91,6 +91,10 @@ export { playTone, setAmbienceLevel, startAmbience, stopAmbience } from "./audio
 // plain/rich spans, style cascade, layout box, placement — and lays it out into
 // backend-neutral glyph quads. The pure-TS counterpart of the Rust `axiom-text`.
 export { axiom, text } from "./text.ts";
+// The engine's built-in 5×7 bitmap font as renderable cell-run geometry — for
+// apps that BUILD lettering out of meshes (no texture/text-quad primitive).
+export { GLYPH_GAP, GLYPH_H, GLYPH_W, glyphRuns, textColumns, textRuns } from "./glyph-font.ts";
+export type { CellRun } from "./glyph-font.ts";
 export type {
   Text,
   TextAlign,
