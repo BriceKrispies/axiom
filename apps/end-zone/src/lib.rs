@@ -22,6 +22,7 @@
 
 pub mod ai;
 pub mod app;
+pub mod autopilot;
 pub mod camera;
 pub mod capture;
 pub mod collision_rig;
