@@ -885,103 +885,14 @@ const beachLitter = (): readonly SceneInstance[] => {
  * pure ambient-keyed values — nothing here reads the outcome. The litter is
  * fixed. */
 const HELD_LIFT = v3(0, 0.5, 0);
-const beachDecor = (tick: number, seed: number, decor: DecorDrag, brandName: string): readonly SceneInstance[] => {
+const beachDecor = (tick: number, seed: number, decor: DecorDrag): readonly SceneInstance[] => {
   const at = (key: keyof DecorDrag["props"]): EngineVec3 => addV3(decor.props[key], decor.held === key ? HELD_LIFT : v3(0, 0, 0));
-  return [
-    ...palmTree(at("palm"), tick),
-    ...sandcastle(at("castle")),
-    ...crab(at("crab"), tick, seed),
-    ...beachLitter(),
-    ...brandedProps(brandName),
-  ];
+  return [...palmTree(at("palm"), tick), ...sandcastle(at("castle")), ...crab(at("crab"), tick, seed), ...beachLitter()];
 };
 
-// ── the branded set-dressing (banner, signboard, pennant, floor mat) ────────────
-
-/*
- * The reference dresses the beach in one brand: a ribbon banner across the top, a
- * standing signboard on the right, a hanging pennant on the left, and a logo mat
- * on the near sand — plus the pennant on the castle and the little flag the crab
- * holds (both above). None of it is a new primitive: each is boxes + welded
- * lettering (label.ts), colored from the brand materials (brand.ts). Placed on
- * the sand ring OUTSIDE the lagoon and BEFORE the veil, so a hero reveal dims the
- * branding away with the rest of the stage.
- */
-
-/** A standing brand sign: a colored panel with a border and welded lettering,
- * optionally on one or two posts to the sand. `yaw`/`tilt` aim the panel face
- * toward the tabletop camera. */
-interface BillboardSpec {
-  readonly center: EngineVec3;
-  readonly yaw: number;
-  readonly tilt: number;
-  readonly panelW: number;
-  readonly panelH: number;
-  readonly bodyMat: string;
-  readonly borderMat: string;
-  /** An optional thin pinstripe between the border and the panel — used to run
-   * the connective GOLD accent around the sign, tying it to the chest gilding. */
-  readonly trimMat?: string;
-  readonly letterMat: string;
-  readonly textHeight: number;
-  readonly textMaxW: number;
-  readonly posts: number;
-}
-
-const billboard = (keyPrefix: string, brandName: string, o: BillboardSpec): readonly SceneInstance[] => {
-  const orient = quatMul(quatYaw(o.yaw), quatPitch(o.tilt));
-  const normal = rotateByQuat(v3(0, 0, 1), orient);
-  const border = decorPart(`${keyPrefix}:border`, o.borderMat, "box", addV3(o.center, scaleV3(normal, -0.03)), v3(o.panelW + 0.18, o.panelH + 0.18, 0.05), orient);
-  const trim = o.trimMat === undefined
-    ? []
-    : [decorPart(`${keyPrefix}:trim`, o.trimMat, "box", addV3(o.center, scaleV3(normal, -0.015)), v3(o.panelW + 0.09, o.panelH + 0.09, 0.06), orient)];
-  const panel = decorPart(`${keyPrefix}:panel`, o.bodyMat, "box", o.center, v3(o.panelW, o.panelH, 0.07), orient);
-  const posts = (o.posts === 1 ? [0] : o.posts === 2 ? [-1, 1] : []).map((sx, i): SceneInstance => {
-    const foot = addV3(o.center, rotateByQuat(v3(sx * o.panelW * 0.36, -o.panelH / 2, 0), orient));
-    const height = Math.max(0.1, foot.y);
-    return decorPart(`${keyPrefix}:post${i}`, "BrandPost", "cylinder", v3(foot.x, height / 2, foot.z), v3(0.08, height, 0.08));
-  });
-  // A contact shadow under each post foot, anchoring the sign to the sand with
-  // the same down-light rule every other prop obeys.
-  const shadows = (o.posts === 1 ? [0] : o.posts === 2 ? [-1, 1] : []).flatMap((sx, i): readonly SceneInstance[] => {
-    const foot = addV3(o.center, rotateByQuat(v3(sx * o.panelW * 0.36, -o.panelH / 2, 0), orient));
-    return contactShadow(`${keyPrefix}:postshadow${i}`, v3(foot.x, 0, foot.z), 0.24);
-  });
-  const text = stampText(
-    `${keyPrefix}:text`,
-    brandName,
-    { basis: v3(1, 1, 1), center: v3(0, 0, 0), orient, origin: o.center },
-    { depth: 0.03, height: o.textHeight, lift: 0.05, material: o.letterMat, maxWidth: o.textMaxW },
-  );
-  return [...shadows, border, ...trim, panel, ...posts, ...text];
-};
-
-/**
- * The one freestanding branded prop: a single top-center ribbon banner across
- * the back of the beach. The reference's left pennant and right signboard have
- * been removed — the CENTER branded chest is the primary branding focal point,
- * and this banner is the only secondary environmental logo placement, so the
- * frame reads as art-directed rather than plastered with signs. It carries all
- * three brand-palette colors intentionally: a warm-CHARCOAL frame (the brand
- * ink), a GOLD pinstripe echoing the chest gilding that ties the branding into
- * the beach, the warm-RED panel, and warm cream lettering — on warm dark posts.
- */
-const brandedProps = (brandName: string): readonly SceneInstance[] => [
-  ...billboard("brand:banner", brandName, {
-    bodyMat: "BrandPrimary",
-    borderMat: "BrandInk",
-    center: v3(0, 1.25, -5.6),
-    letterMat: "BrandLetterOnPrimary",
-    panelH: 1.0,
-    panelW: 2.9,
-    posts: 2,
-    textHeight: 0.62,
-    trimMat: "StageGold",
-    textMaxW: 2.5,
-    tilt: -0.5,
-    yaw: 0,
-  }),
-];
+// The freestanding brand billboard that used to stand across the back of the beach
+// has been removed: the CENTER branded chest (its ACME nameplate) is the only
+// logo placement now, so the frame reads clean instead of signed.
 
 // ── the background veil ─────────────────────────────────────────────────────────
 
@@ -1259,7 +1170,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // inset lagoon and its beach margin keep exactly the held framing.
       ...stageRoom(48, WATER_RADIUS),
       ...platform(),
-      ...beachDecor(tick, seed, state.extra.decor, spec.brand.name),
+      ...beachDecor(tick, seed, state.extra.decor),
       ...chests,
       ...backgroundVeil(camera, framing, flight),
       ...burst,
