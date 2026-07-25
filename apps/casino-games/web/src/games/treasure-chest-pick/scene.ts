@@ -1196,22 +1196,23 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
 
 /** Points traced around the pool rim to approximate its screen silhouette. */
 const WATER_RIM_POINTS = 48;
-/** Screen radius (px) of the hole punched around each chest so the net stays off
- * the chests, and the height up each chest the hole is centered on. */
-const CHEST_HOLE_RADIUS = 62;
-const CHEST_HOLE_LIFT = 0.24;
+/** The height up each chest the punched hole is centered on, the world half-width
+ * whose projection sets each hole's radius (so far/smaller chests get smaller
+ * holes and are not ringed by raw pool), and a small screen margin. */
+const CHEST_HOLE_LIFT = 0.3;
+const CHEST_HALF_WIDTH = 0.82;
+const CHEST_HOLE_MARGIN = 6;
 /** The lagoon's water palette. The EDGE color matches the rendered pool so the
- * shoreline cover is invisible except that it hides the net; DEPTH is a deeper
- * teal painted as a radial tint for volume; the LINE/TROUGH pair reads as a ripple
- * crest and trough; SPARKLE catches the light on some peaks; SHALLOW is the lighter
- * band where the water meets the sand. GLINT is the soft sun sheen, offset toward
- * the scene's warm key light (upper-back of the pool). */
+ * shoreline cover is invisible except that it hides the net; the LINE/TROUGH pair
+ * reads as a ripple crest and trough; SPARKLE catches the light on some peaks;
+ * SHALLOW is the lighter band where the water meets the sand. (No sun glint: in a
+ * pool this packed with chests a sheen has nowhere to sit without ringing the
+ * holed chests in bright water.) */
 const POOL_EDGE_COLOR = "rgb(36, 138, 138)";
 const WATER_LINE_COLOR = "rgba(210, 244, 252, 0.95)";
 const WATER_TROUGH_COLOR = "rgba(14, 92, 98, 0.6)";
 const WATER_SPARKLE_COLOR = "rgba(234, 251, 255, 0.9)";
 const WATER_SHALLOW_COLOR = "rgba(150, 226, 228, 0.4)";
-const WATER_GLINT_COLOR = "rgba(212, 248, 255, 0.5)";
 
 /** Draw the stylized water into the overlay layer for one frame. Fades out as the
  * chosen chest flies off and the veil dims the board (the pool is no longer the
@@ -1239,24 +1240,30 @@ export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext
   if (rim.length < 3) {
     return;
   }
-  const holes = Array.from({ length: count }, (_, i) => worldToCanvas(camera, addV3(chestPosition(i, count), v3(0, CHEST_HOLE_LIFT, 0)))).filter(
-    (p): p is { readonly x: number; readonly y: number } => p !== null,
-  );
+  // Each hole is sized to its OWN chest: project the chest center and a point one
+  // half-width to the side, and use the on-screen distance as the radius — so a
+  // far, smaller chest gets a smaller hole and is not haloed by an oversized one.
+  const holes = Array.from({ length: count }, (_, i): { readonly x: number; readonly y: number; readonly r: number } | null => {
+    const base = chestPosition(i, count);
+    const center = worldToCanvas(camera, addV3(base, v3(0, CHEST_HOLE_LIFT, 0)));
+    const side = worldToCanvas(camera, addV3(base, v3(CHEST_HALF_WIDTH, CHEST_HOLE_LIFT, 0)));
+    return center === null || side === null ? null : { r: Math.hypot(side.x - center.x, side.y - center.y) + CHEST_HOLE_MARGIN, x: center.x, y: center.y };
+  }).filter((p): p is { readonly x: number; readonly y: number; readonly r: number } => p !== null);
   const xs = rim.map((p) => p.x);
   const ys = rim.map((p) => p.y);
   const minX = Math.min(...xs);
   const minY = Math.min(...ys);
 
   drawStylizedWaterSurface(ctx, {
-    // No `depthColor` here: a radial darken plus the chest holes would ring each
-    // chest with lighter un-tinted water. The depth read instead comes from the
-    // lighter SHALLOW rim (shallows) and the sun GLINT, which leave no hole seams.
+    // No `depthColor` and no `glint` here: over a pool packed with chests, any
+    // broad tint or sheen brightens/darkens the water AROUND the punched chest
+    // holes, ringing the chests in "orbs". The water read comes from the lighter
+    // SHALLOW rim, the ripple net, and sparkles, which leave no hole seams.
     bounds: { height: Math.max(...ys) - minY, width: Math.max(...xs) - minX, x: minX, y: minY },
     cellSize: 58,
     driftAmount: 2.4,
     edgeColor: POOL_EDGE_COLOR,
     edgeFadePx: 36,
-    glint: { color: WATER_GLINT_COLOR, dirX: 0.32, dirY: -0.5, strength: strength },
     lineColor: WATER_LINE_COLOR,
     lineWidth: 2.2,
     opacity: 0.32 * strength,
@@ -1267,8 +1274,8 @@ export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext
     troughColor: WATER_TROUGH_COLOR,
     traceHoles: (c) => {
       for (const p of holes) {
-        c.moveTo(p.x + CHEST_HOLE_RADIUS, p.y);
-        c.arc(p.x, p.y, CHEST_HOLE_RADIUS, 0, Math.PI * 2);
+        c.moveTo(p.x + p.r, p.y);
+        c.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       }
     },
     tracePool: (c) => {
