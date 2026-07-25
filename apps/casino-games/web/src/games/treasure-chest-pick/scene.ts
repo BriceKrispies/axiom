@@ -246,14 +246,17 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // sky rather than dark pebbles, without making them self-luminous.
   Shell: { baseColor: [0.96, 0.86, 0.8, 1] },
   Starfish: { baseColor: [0.92, 0.5, 0.29, 1] },
-  // ── one consistent contact-shadow family ──────────────────────────────────
-  // Every prop anchors to the ground with the same two translucent discs: a
-  // wide SOFT rim and a smaller, darker CORE where the object actually meets the
-  // ground. Warm-neutral and low-opacity so they read as soft grounding, never
-  // as separate black cut-outs. A whisper of nothing else — no emissive — so
-  // they only ever darken what is beneath them.
-  ContactShadowSoft: { baseColor: [0.12, 0.1, 0.07, 1], opacity: 0.14 },
-  ContactShadowCore: { baseColor: [0.1, 0.08, 0.06, 1], opacity: 0.26 },
+  // ── one consistent cast-shadow family ─────────────────────────────────────
+  // Every prop anchors to the ground with the same two translucent pieces: a
+  // SOFT tail raking down-light (length set by how tall the caster is) and a
+  // smaller, darker CORE where the object actually meets the ground. Warm-neutral
+  // so they read as soft sunlit grounding, never as separate black cut-outs —
+  // but no longer so faint they vanish: at 0.14 the tail was invisible against
+  // dry sand, which left every prop sitting ON the frame instead of IN it. A
+  // whisper of nothing else — no emissive — so they only ever darken what is
+  // beneath them.
+  ContactShadowSoft: { baseColor: [0.12, 0.1, 0.07, 1], opacity: 0.18 },
+  ContactShadowCore: { baseColor: [0.1, 0.08, 0.06, 1], opacity: 0.3 },
   ...VEIL_MATERIALS,
 };
 
@@ -304,11 +307,11 @@ const disc = (key: string, material: string, at: EngineVec3, radius: number, hei
   transform: { position: at, rotation: QUAT_IDENTITY, scale: v3(radius * 2, height, radius * 2) },
 });
 
-// ── one directional light, one contact-shadow rule ──────────────────────────────
+// ── one directional light, one cast-shadow rule ─────────────────────────────────
 
 /**
  * The whole scene is lit by a single directional key (the `light:key` in
- * `stageLights`). Its ground-plane throw is the ONE direction every contact
+ * `stageLights`). Its ground-plane throw is the ONE direction every cast
  * shadow falls, so nothing looks lit from conflicting suns. Kept in lock-step
  * with the key light's `direction` below — change one, change the other.
  */
@@ -317,26 +320,65 @@ const SHADOW_DIR = ((): { readonly x: number; readonly z: number } => {
   const len = Math.hypot(KEY_LIGHT_DIR.x, KEY_LIGHT_DIR.z);
   return { x: KEY_LIGHT_DIR.x / len, z: KEY_LIGHT_DIR.z / len };
 })();
-/** How far the shadow slides down-light, as a fraction of its radius. */
-const SHADOW_SLIDE = 0.26;
+
+/** The yaw that turns local +Z onto the key's ground throw, so a shadow can be
+ * stretched along the light in local space and then swung to point down-light. */
+const SHADOW_YAW = Math.atan2(SHADOW_DIR.x, SHADOW_DIR.z);
+
+/**
+ * How far a shadow reaches down-light, per world unit of the CASTER'S HEIGHT.
+ *
+ * This is the whole grounding rule in one number, and it is derived from the key
+ * rather than hand-picked so a tall prop and a squat one can never disagree
+ * about where the sun is: the palm rakes ~1.8 units across the sand, a chest
+ * only ~0.6, from the same constant.
+ *
+ * Geometrically this key throws `hypot(x, z) / |y|` ≈ 1.35 lengths per unit of
+ * height. A SOFT shadow does not read that far — the penumbra widens with
+ * distance from the contact point and washes into the ambient well before the
+ * hard-shadow tip — so half of the geometric length is the part a viewer
+ * actually sees, and the part worth drawing. There is no second sun here, only
+ * one sun with a soft edge.
+ */
+const SHADOW_THROW = (0.5 * Math.hypot(KEY_LIGHT_DIR.x, KEY_LIGHT_DIR.z)) / Math.abs(KEY_LIGHT_DIR.y);
+
 /** Just above the ground so the discs never z-fight the water/sand slab. */
 const SHADOW_Y = 0.01;
 
+/** A shadow ellipse: a thin disc `width` across and `length` along the key's
+ * ground throw, yawed onto it. (A cylinder under T·R·S — the non-uniform scale
+ * is applied in local space, so the ellipse elongates along the light.) */
+const shadowEllipse = (key: string, material: string, at: EngineVec3, width: number, length: number): SceneInstance => ({
+  key,
+  material,
+  mesh: "cylinder",
+  transform: { position: at, rotation: quatYaw(SHADOW_YAW), scale: v3(width, 0.008, length) },
+});
+
 /**
- * A soft directional contact shadow: a wide translucent rim slid a little
- * down-light, plus a smaller, darker CORE held at the object's actual footprint
- * so the point where it meets the ground reads darker than the outer falloff.
- * `radius` is the object's ground footprint; `spread` scales the whole shadow
- * (a ground-fade for a chest leaving the board, or a clarity boost for the hero
- * slot). Returns nothing once the object has lifted clear.
+ * A soft directional CAST shadow: an ellipse stretched down-light by the
+ * caster's height and swung onto the key's throw, plus a smaller, darker CORE
+ * held at the object's actual footprint so the point where it meets the ground
+ * reads darker than the tail raking away from it. `radius` is the object's
+ * ground footprint and `height` how tall it stands — together they set the
+ * shadow's shape. `spread` scales the whole shadow (a ground-fade for a chest
+ * leaving the board, or a clarity boost for the hero slot). Returns nothing once
+ * the object has lifted clear.
  */
-const contactShadow = (keyPrefix: string, at: EngineVec3, radius: number, spread = 1, coreScale = 1): readonly SceneInstance[] => {
+const contactShadow = (keyPrefix: string, at: EngineVec3, radius: number, height: number, spread = 1, coreScale = 1): readonly SceneInstance[] => {
   const r = radius * spread;
+  const reach = height * spread * SHADOW_THROW;
   return r < 0.04
     ? []
     : [
-        disc(`${keyPrefix}:soft`, "ContactShadowSoft", v3(at.x + SHADOW_DIR.x * r * SHADOW_SLIDE, SHADOW_Y, at.z + SHADOW_DIR.z * r * SHADOW_SLIDE), r, 0.008),
-        disc(`${keyPrefix}:core`, "ContactShadowCore", v3(at.x + SHADOW_DIR.x * r * SHADOW_SLIDE * 0.5, SHADOW_Y + 0.002, at.z + SHADOW_DIR.z * r * SHADOW_SLIDE * 0.5), r * 0.6 * coreScale, 0.008),
+        shadowEllipse(
+          `${keyPrefix}:soft`,
+          "ContactShadowSoft",
+          v3(at.x + SHADOW_DIR.x * reach * 0.5, SHADOW_Y, at.z + SHADOW_DIR.z * reach * 0.5),
+          r * 2.2,
+          r * 2 + reach,
+        ),
+        disc(`${keyPrefix}:core`, "ContactShadowCore", v3(at.x + SHADOW_DIR.x * r * 0.22, SHADOW_Y + 0.002, at.z + SHADOW_DIR.z * r * 0.22), r * 0.6 * coreScale, 0.008),
       ];
 };
 
@@ -580,7 +622,7 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   // Directional contact shadow anchoring the chest to the board — the same
   // down-light rule every prop obeys. It shrinks with the chest as it lifts off
   // on the hero flight (`grounded`).
-  const shadow: readonly SceneInstance[] = grounded > 0.02 ? contactShadow(`${key}:shadow`, pose.origin, BODY.x * 0.52, grounded, 1) : [];
+  const shadow: readonly SceneInstance[] = grounded > 0.02 ? contactShadow(`${key}:shadow`, pose.origin, BODY.x * 0.52, CHEST_HEIGHT, grounded, 1) : [];
 
   // Warm seam light leaking from the lid/body join before it fully opens. It
   // hangs just BELOW and IN FRONT OF the gold rail: the rail is now a deep band
@@ -905,7 +947,7 @@ const palmTree = (origin: EngineVec3, tick: number): readonly SceneInstance[] =>
       q,
     );
   });
-  return [...contactShadow("palm:shadow", origin, 0.62), ...trunk, ...coconuts, ...fronds];
+  return [...contactShadow("palm:shadow", origin, 0.62, PALM_CROWN_Y), ...trunk, ...coconuts, ...fronds];
 };
 
 /** Yaw of the whole sandcastle so its square base runs parallel to the diagonal
@@ -963,7 +1005,7 @@ const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
   // festive beach dressing that shares the branding palette, not a second sign.
   const flag = place("castle:flag", "BrandPrimary", "box", v3(0.24, poleTop + 0.72, 0), v3(0.5, 0.24, 0.03));
   const flagTrim = place("castle:flagtrim", "CastleFlagTrim", "box", v3(0.24, poleTop + 0.56, 0), v3(0.5, 0.08, 0.035));
-  return [...contactShadow("castle:shadow", origin, 1.28 * CASTLE_SCALE), base, ...towerParts, door, pole, flag, flagTrim];
+  return [...contactShadow("castle:shadow", origin, 1.28 * CASTLE_SCALE, poleTop * CASTLE_SCALE), base, ...towerParts, door, pole, flag, flagTrim];
 };
 
 /** A stubby cartoon crab with a small set of idle animations: a domed shell, two
@@ -1012,7 +1054,7 @@ const crab = (origin: EngineVec3, tick: number, seed: number): readonly SceneIns
   const flag = place("crab:flag", "BrandPrimary", "box", v3(0.74, 0.66, 0.34), v3(0.3, 0.2, 0.03));
   // The shadow follows the crab's side-scuttle (the horizontal scoot) but not its
   // vertical bob, so it stays planted on the sand as the little creature hops.
-  const shadow = contactShadow("crab:shadow", addV3(origin, v3(pose.scootX, 0, 0)), 0.5);
+  const shadow = contactShadow("crab:shadow", addV3(origin, v3(pose.scootX, 0, 0)), 0.5, 0.6);
   return [...shadow, body, ...eyes, ...claws, ...legs, flagPole, flag];
 };
 
