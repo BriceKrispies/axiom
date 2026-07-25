@@ -102,6 +102,17 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // warm rig lands the beach at golden sand rather than bleached cream. This is a
   // pure palette warm/saturation move — no grade/tonemap stage exists here.
   StageFloor: { baseColor: [0.9, 0.75, 0.47, 1] },
+  // The lagoon surface itself. The shared pavilion turquoise
+  // ([0.32, 0.78, 0.76]) is authored GREEN-leaning (G above B), and the warm key
+  // ([1, 0.96, 0.88]) then multiplies blue down another ~12% relative to red —
+  // so the champion pool lands on a flat sea-GREEN, while the reference lagoon
+  // is a vivid CYAN-blue. With no grade/white-balance stage to correct hue after
+  // the fact, the compensation has to be pre-baked into the base color: push
+  // blue decisively ABOVE green and pull red down, so that after the warm rig
+  // eats the blue the lit surface settles on the reference's caribbean cyan
+  // rather than on pond green. Overridden for THIS game only — the other casino
+  // stages keep the neutral pavilion turquoise.
+  StageFloorAccent: { baseColor: [0.24, 0.7, 0.88, 1] },
   // Wood, value-stepped so the chest reads solid without a texture: the lid
   // catches the key light (lightest), the front boards sit mid, side boards go
   // darker, and the gaps between planks are the darkest brown. The ladder is
@@ -170,12 +181,12 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   Mote: { baseColor: [1, 0.95, 0.72, 1], emissive: [1, 0.9, 0.6, 1] },
   // The arcade stage: a turquoise platform with a rim, a warm central glow, and
   // a darker edge falloff — an intentional board, not a flat marker.
-  // The lagoon reads as vivid turquoise in reference, not a grey-green wash: the
-  // main pool sits at a deeper, more saturated teal (low red, wide green/blue) so
-  // the warm key light lifts it toward turquoise instead of desaturating it to
-  // grey, and the outer band is a richer deep teal so the ring falloff still
-  // reads as water rather than a muddy edge.
-  PlatformSide: { baseColor: [0.11, 0.55, 0.57, 1] },
+  // The pool's depth wall, carrying the same blue-over-green bias as the lagoon
+  // surface above it: it is the SAME body of water seen edge-on, so if the
+  // surface reads cyan and the wall reads sea-green the pool splits into two
+  // different liquids at the rim. Darker and lower-red than the surface (it is
+  // the shaded depth under the waterline), but the hue matches.
+  PlatformSide: { baseColor: [0.07, 0.42, 0.58, 1] },
   EdgeVignette: { baseColor: [0.03, 0.2, 0.26, 1], opacity: 0.34 },
   // A gold accent, so it obeys the same amber ratio and the same
   // seated-below-the-clamp rule as the chest gilding above — a lemon-white rivet
@@ -1331,12 +1342,19 @@ const CHEST_HOLE_MARGIN = 6;
  * reads as a ripple crest and trough; SPARKLE catches the light on some peaks;
  * SHALLOW is the lighter band where the water meets the sand. (No sun glint: in a
  * pool this packed with chests a sheen has nowhere to sit without ringing the
- * holed chests in bright water.) */
-const POOL_EDGE_COLOR = "rgb(36, 138, 138)";
+ * holed chests in bright water.)
+ *
+ * Every tint here is CYAN-biased (blue above green), for the same reason the
+ * `StageFloorAccent` base color is: this overlay is blended over the rendered
+ * pool at ~32%, so a green-neutral (G == B) edge tint does not merely sit on
+ * the water, it actively pulls the whole lit surface back toward sea-green and
+ * undoes the warm-rig compensation baked into the 3D material. The 2D and 3D
+ * authorities have to agree on the hue or the pool averages out between them. */
+const POOL_EDGE_COLOR = "rgb(34, 142, 168)";
 const WATER_LINE_COLOR = "rgba(210, 244, 252, 0.95)";
-const WATER_TROUGH_COLOR = "rgba(14, 92, 98, 0.6)";
+const WATER_TROUGH_COLOR = "rgba(10, 84, 116, 0.6)";
 const WATER_SPARKLE_COLOR = "rgba(234, 251, 255, 0.9)";
-const WATER_SHALLOW_COLOR = "rgba(150, 226, 228, 0.4)";
+const WATER_SHALLOW_COLOR = "rgba(148, 224, 240, 0.44)";
 
 /** Draw the stylized water into the overlay layer for one frame. Fades out as the
  * chosen chest flies off and the veil dims the board (the pool is no longer the
