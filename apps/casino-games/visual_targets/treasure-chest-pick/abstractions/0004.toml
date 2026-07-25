@@ -1,0 +1,77 @@
+# BACKFILLED BY THE CRITIC LENS (pass 6). A NEW ENGINE-SPINE API surface was
+# added to packages/axiom-web-engine to serve this convergence target (commit
+# afd7b3d8), with no ledger iteration and no abstraction record — the SECOND
+# time this campaign has shipped a spine change that way (see 0003), and the
+# first time since ledger iteration 5 wrote down the commitment that "every
+# future structural change on this target ships with its NNNN.toml and a scored
+# ledger entry in the SAME commit". That commitment was broken by the very next
+# pass. Backfilling records what was done; it does not retroactively bless it.
+
+axis = "artifact_level"   # the lagoon read as a hard dodecagon, not a circle
+failed_attempts = []
+inexpressible = true
+# The app's entire mesh vocabulary was `{ kind: "cylinder" }`, and `createMesh`
+# cached exactly ONE handle per MeshKind at a single backend-chosen facet count
+# (LOW_CYLINDER_SEGMENTS = 12 on Canvas2D). A 10-unit lagoon and a 0.05-unit
+# flagpole were forced to share one silhouette, so NO app-tier config value could
+# make the lagoon round without dragging every small primitive up with it. The
+# only app-tier alternative was hand-rolling a high-segment disc as raw MeshData
+# inside apps/casino-games — duplicating unitCylinderY into app code outside the
+# branchless and coverage gates. That is the banned "push spine logic into an app"
+# shortcut, so the "cannot express" branch of the gate genuinely applies and going
+# structural on the first attempt was correct.
+smallest_api = """
+packages/axiom-web-engine:
+  - game.ts   — `MeshRef` gains one optional field: `segments`, the radial facet
+                budget at full detail. Omitted, behavior is byte-identical to the
+                previous fixed count.
+  - store.ts  — `createMesh(kind, segments?)` caches per (kind, resolved facets);
+                backend LOD becomes a SCALE ({high: 1, low: 0.5}) applied to the
+                requested budget instead of a second table of fixed counts, so a
+                caller cannot silently defeat the software path's halving. The
+                scale reproduces the old constants exactly (24->12, 16x24->8x12).
+  - meshes.ts — segment counts become REQUIRED parameters; store.ts owns the
+                resolution policy, so there is no duplicated "24".
+App tier consumes it in scene.ts / presentation/stage/props.ts: the three
+lagoon-scale discs (pool, vignette, floor-ring) request 96 segments — twice
+WATER_RIM_POINTS, so after the software halving the 3D shoreline and the 2D water
+overlay's clip path are the same polygon.
+
+CRITIC ASSESSMENT OF THE PLACEMENT: this is the best-argued structural change the
+campaign has made. The diagnosis names a genuine wrong shape in the spine
+(tessellation is a property of on-screen size, not of kind), the new surface is
+ONE optional field plus a cache key, the default path is unchanged, and the
+commit ships engine tests (store.test.ts, meshes.test.ts). Nothing here is
+too-early or ceremonial. What was missing was only the paperwork and the score.
+"""
+commits = [
+  "afd7b3d8 convergence(architect): axiom-web-engine — tessellation is a per-mesh budget, not a per-kind constant",
+]
+screenshot_command = """
+npm --prefix packages/axiom-web-engine run build
+uv run scripts/localhost_servers.py start-app casino-games --port 8087
+uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready \
+  --url http://localhost:8087/ \
+  --out apps/casino-games/visual_targets/treasure-chest-pick/candidate.png
+"""
+screenshot_proof = """
+NOT re-verified by this backfill — the critic lens does not build or render.
+Whoever next touches this surface owes a fresh two-capture identity check
+through the `chests-ready` preset's `frozen` gate (see capture.md).
+"""
+critic_note = """
+SCORED OUTCOME, measured on the champion this abstraction produced: it WORKED on
+its own terms. Marching rays from the pool centre at 10-degree steps, the
+boundary radius over the unclipped upper half runs 272..329 px monotonically with
+no facet stepping — the dodecagon is gone and the shoreline is smooth. That is a
+real, verifiable convergence gain and the first one this campaign can point at.
+
+It did NOT move artifact_level off 3, because the axis was carrying two cited
+artifacts and only this one is fixed; the hard-edged glow disc under the centre
+chest remains. That is an honest partial result, and it is recorded as such
+rather than cashed in as a point.
+
+The gate finding stands regardless of merit: three of the four abstraction
+records this campaign owes (0001, 0003, 0004) were written by the critic AFTER
+the fact. A gate that is only ever satisfied retroactively is not a gate.
+"""

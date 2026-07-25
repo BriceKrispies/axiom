@@ -589,3 +589,139 @@ depth_and_separation = 2
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 3
+
+[[iteration]]
+iteration = 6
+attacked_axis = "none"           # CRITIC scoring recalibration of the 09d9f6ec champion
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/scorecard.champion.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/abstractions/0004.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+abstraction_introduced = false   # this entry BACKFILLS a record; it introduces nothing
+next_attacked_axis = "scene_props_completeness"
+reason = """
+CRITIC pass 6. Commit 09d9f6ec promoted a new champion.png (114832 -> 115016
+bytes, image-only) with NO re-score, NO candidate scorecard and NO ledger entry.
+The six render commits behind that image also landed with no ledger iterations
+at all: afd7b3d8 (architect, engine-spine tessellation budget), 2f1a346e
+(art-director, camera pitch 43 -> 50.5 deg), 6c71ac10 (modeler, chest hardware),
+725f896b (surfacing, gild ladder), c6c4c261 (colorist, lagoon hue), e6de7319
+(lighting, fill lift). The scorecard on disk therefore described AN IMAGE THAT
+WAS NO LONGER THE CHAMPION. This entry pays that debt.
+
+THE SCORECARD'S CLAIMS WERE NOT MERELY STALE, THEY WERE FALSE:
+  "pool boundary is a hard DECAGON"  -> fixed; measured, the boundary radius runs
+      272..329 px monotonically at 10-deg steps across the unclipped upper half,
+      with no facet stepping.
+  "sand 222,180,106"                 -> now 239,197,116.
+  "water 31,150,143"                 -> now 21,120,153.
+  "luminance median 184"             -> now 147.
+
+ONE NUMBER MOVED, and it moved DOWN on measurement:
+  color_palette 2 -> 1. The pass that produced this champion ATTACKED
+  color_palette (c6c4c261 "swing the lagoon from sea-green to reference cyan")
+  and moved it AWAY from the reference in three of the frame's four dominant
+  colour masses:
+    water  31,150,143 (dist 24.8 from the reference's 49,158,158) -> 21,120,153
+           (dist 47.4 from 42,158,158). The error nearly DOUBLED, and the hue
+           crossed from green-of-cyan to blue: the reference has G = B
+           (158/158); the champion has G 33 BELOW B (120/153). The promoting
+           commit message concedes it — "water overshot to navy".
+    sand   222,180,106 (dist 19.5) -> 239,197,116 (dist 42.0). Washed paler,
+           away from the reference's saturated tan, and still a single flat
+           value at all four corners where the reference has a gradient.
+    gold   the chest brass receded from a bright yellow base band to a thin
+           dark-amber rail, further from the reference's broad bright brass.
+  "Right palette, visibly detuned" (2) no longer holds. This is 1.
+
+Everything else was RE-DERIVED, not carried: composition, subject_fidelity,
+material, contrast and artifact_level each had prose citing a measurement or an
+artifact that this champion changed, and each is rewritten. Their numbers stand.
+artifact_level was deliberately HELD at 3 rather than raised: the decagon it was
+lowered for is genuinely gone, but the hard-edged glow disc under the centre
+chest remains and is visible at a glance, which is exactly what a 4 excludes.
+Recalibration cuts both ways, and it also declines to hand back a point for
+fixing half a problem.
+
+final_score 1.20 -> 1.18 (lowest still 1; average 1.667 -> 1.583).
+
+PROCESS FINDINGS (the honesty flags this pass owes):
+1. WRONG DECISION AT PROMOTION. Per the skill's decision table, when the attacked
+   axis does not improve the outcome is `start_new_candidate_branch` — keep the
+   champion, abandon the line. c6c4c261 attacked color_palette and made it
+   measurably worse; the render was promoted anyway, by a commit whose own
+   message names the regression ("water overshot to navy"). This is not a
+   borderline call: the attacked axis regressed and the image still became
+   champion. The image is left standing (re-shooting is not this lens's job and a
+   revert would discard afd7b3d8's genuine round-shoreline gain), but the record
+   now states plainly that this pass NET-REGRESSED the axis it attacked.
+2. RIGHT-AXIS: unchanged and still correct — scene_props_completeness (1) is the
+   lowest and earliest in the fixed axis order among the SIX axes now tied at 1
+   (props, silhouette, material, lighting, color_palette, detail_density). It has
+   been named `next_attacked_axis` in iterations 0, 1, 2, 5 and now 6 and has
+   never once been the axis actually attacked. Meanwhile this pass spent six
+   lenses on framing, chest hardware, gold, lagoon hue and fill light. Because
+   final_score = lowest*0.7 + avg*0.3, a props axis pinned at 1 caps the campaign
+   no matter how much the secondary axes move — which is why five passes of
+   secondary work have moved final_score from 0.50 to 1.18.
+3. THE FOURTH UNSCORED IMAGE SWAP. Iterations 1, 2 and 4 each recorded a
+   champion.png changed without a score; iteration 5 wrote the commitment that
+   every future structural change ships with its record and a scored ledger entry
+   in the same commit. The very next pass broke it. The pattern is now the
+   campaign's most reliable behaviour, and no further backfill should be treated
+   as routine.
+
+ABSTRACTION-GATE: MISSING RECORD, backfilled as abstractions/0004.toml.
+afd7b3d8 added a NEW ENGINE-SPINE API surface (`MeshRef.segments`,
+`createMesh(kind, segments?)` cached per (kind, resolved facets), backend LOD
+re-expressed as a scale) to packages/axiom-web-engine to serve this target, with
+no record and no ledger entry. ON THE MERITS it is the campaign's best-argued
+structural change: the app's vocabulary was `{ kind: "cylinder" }` with one
+cached handle per kind, so no config value could round the lagoon without
+dragging every small primitive up — a genuine "cannot express" case where going
+structural on the first attempt is sanctioned; the new surface is one optional
+field plus a cache key; the default path is byte-identical; and it ships engine
+tests. Not too-early, not ceremonial. The five app-tier commits in the same pass
+(pitch, chest hardware, gild, lagoon hue, fill) are config/geometry inside the
+game's own presentation tier and owe no record. Standing finding: three of the
+four abstraction records this campaign owes (0001, 0003, 0004) were written by
+the critic after the fact — a gate satisfied only retroactively is not a gate.
+
+PARITY-CLAIM: clean. No "done / matched / parity" language in the scorecard, the
+ledger, the abstraction records or the campaign's commits. The champion is at
+final_score 1.18 out of 5: a legible flat proxy of the reference with a
+correctly-round lagoon and the wrong water colour. Nothing in this record says
+otherwise.
+"""
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 2
+scene_props_completeness = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 3
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+scene_props_completeness = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 3

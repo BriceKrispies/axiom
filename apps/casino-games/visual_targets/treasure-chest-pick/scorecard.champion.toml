@@ -1,10 +1,27 @@
 # Champion scorecard — treasure-chest-pick
 #
-# FRESH CRITIC CALIBRATION against the CURRENT reference.png (the clean beach
-# diorama installed 2026-07-24, ledger iteration 4) and the CURRENT champion.png
-# (re-shot at f233fe43 from the app at dc16f3b2). This replaces the stale
-# scorecard, which scored the RETIRED branded reference and carried
-# next_attack_axis = "recalibrate". The recalibration is now paid.
+# CRITIC PASS 6 re-calibration against the CURRENT champion.png (the image
+# promoted by 09d9f6ec) and the unchanged reference.png (the clean beach
+# diorama, 1614x974).
+#
+# WHY THIS REWRITE WAS OWED. Commit 09d9f6ec swapped champion.png (114832 ->
+# 115016 bytes) with NO re-score, NO candidate scorecard and NO ledger entry —
+# and the six render commits behind that image (afd7b3d8 architect tessellation,
+# 2f1a346e art-director pitch, 6c71ac10 modeler chest hardware, 725f896b
+# surfacing gild, c6c4c261 colorist lagoon, e6de7319 lighting fill) also landed
+# with no ledger iterations. The scorecard this file replaces therefore
+# described an IMAGE THAT IS NO LONGER THE CHAMPION, and every measured claim in
+# it is now factually false:
+#   "pool boundary is a hard DECAGON"   -> FIXED, the boundary is now smooth
+#                                          (radii per 10deg over the unclipped
+#                                          upper half run 272..329 monotonically;
+#                                          no facet stepping).
+#   "sand 222,180,106"                  -> now 239,197,116.
+#   "water 31,150,143"                  -> now 21,120,153.
+#   "luminance median 184"              -> now 147.
+# A stale scorecard under a swapped image is the exact corruption this lens
+# exists to stop, and it is the FOURTH image-only promotion in this campaign
+# (ledger iterations 1, 2, 4, and now this one).
 #
 # Calibrated to IDENTITY/PARITY, harshly. Bar = "indistinguishable from the
 # reference." A render that merely reads as the same subject is a 1, not a 3; a
@@ -13,139 +30,171 @@
 # "lowest axis" ties). final_score = lowest_axis * 0.7 + average * 0.3.
 #
 # THE REFERENCE (1614x974): a wide storybook beach diorama. Warm golden-tan sand
-# fills the frame edge-to-edge with soft gradient and grain; a ROUND turquoise
-# pool with a hex-honeycomb surface and a paler shallow rim sits centre-frame;
-# nine gilded wooden chests are staged 3x3 ON the water — barrel-arc lids, thick
-# gold trim with corner brackets, a gold lock plate with a square keyhole, soft
-# modelled shading. Margin props: a tall segmented palm with six drooping tapered
-# fronds, coconuts, a grass tuft and a LONG soft cast shadow; a red crab; a
-# crenellated sand castle with corner turrets, an arched doorway and a red
-# pennant; an orange starfish, a yellow starfish, white seashells, pebbles.
-# Everything is grounded by soft cast shadows. The brand appears EXACTLY ONCE: a
-# red rounded nameplate above the CENTRE CHEST.
+# fills the frame edge-to-edge with a soft gradient and grain (224,168,89 at the
+# top-left corner drifting to 231,177,97 at the bottom-right); a ROUND turquoise
+# pool with a hex-honeycomb surface and a paler shallow rim sits centre-frame
+# (42..61,158..168,157..167 — green and blue essentially EQUAL, a true cyan);
+# nine gilded wooden chests are staged 3x3 ON the water — barrel-arc lids, a
+# thick BRIGHT gold band at the lid/body seam running the full width, gold
+# corner brackets, a large gold lock plate with a square keyhole, soft modelled
+# shading. Margin props: a tall segmented palm with six drooping tapered fronds,
+# coconuts, a grass tuft and a LONG soft cast shadow; a red crab; a crenellated
+# sand castle with corner turrets, an arched doorway and a red pennant; an orange
+# starfish, a yellow starfish, white seashells, pebbles. Everything is grounded by
+# soft cast shadows. The brand appears EXACTLY ONCE: a red rounded nameplate above
+# the CENTRE CHEST.
 #
-# THE CHAMPION (960x600, canvas2d, seed 470573198, shot=90): the same staging
-# skeleton, executed as flat proxies. A single-value tan sand field (sampled
-# 222,180,106 identically at both corners — no gradient, no grain), a POLYGONAL
-# (decagonal) teal-green pool (31,150,143 — greener/darker than the reference's
-# 49,158,158) with a soft off-reference glow disc under the centre chest, nine
-# flat-front chests with two gold straps, a bright yellow base band and a small
-# tab in place of the lock plate (no barrel arc, no corner brackets, no keyhole),
-# a stumpy palm with six flat rectangular plank fronds and a small blob shadow,
-# a pillar-cluster castle, a red blob crab, and dot-sized shells/starfish.
+# THE CHAMPION (960x600, canvas2d, chests-ready preset, seed 470573198, shot=90):
+# the same staging skeleton, executed as flat proxies. A single-value pale sand
+# field (sampled 239,197,116 IDENTICALLY at all four corners — still no gradient,
+# no grain, and now noticeably PALER and less saturated than the reference); a
+# now-ROUND pool whose water reads NAVY-BLUE rather than turquoise (21,120,153 —
+# green is 38 BELOW the reference and 33 below its own blue channel, so the hue
+# itself is wrong, not just the value); nine chests with a chamfered lid, end
+# ribs, corner posts and a THIN DARK-AMBER rail with a small hasp at the base
+# where the reference carries a broad bright gold seam band; a soft off-reference
+# glow disc under the centre chest; a stumpy palm with six flat rectangular plank
+# fronds and a blob shadow; a pillar-cluster castle; a red blob crab; dot-sized
+# shells and starfish.
 #
-# WHAT THIS PASS CHANGED, AND WHY (recalibration moves in BOTH directions):
-#   scene_props_completeness  0 -> 1  RAISED. The old 0 ("not built") is a
-#       factual error against today's app: the palm, crab, castle, shells and
-#       pebbles were built on the pass-3 line and are visible in the champion.
-#       They are crude proxies, so 1 — but scoring absent geometry that exists is
-#       as dishonest as inflation.
-#   silhouette_readability    2 -> 1  LOWERED. The old 2 was written when the
-#       props did not exist and only the chest outlines were being judged. Now
-#       that they render, the frame's silhouettes are actively WRONG, not merely
-#       missing: the palm reads as a stump with planks, the castle as a bundle of
-#       pale fingers, the crab as a blob. A wrong silhouette scores below an
-#       absent one being generously graded on the chests alone.
-#   artifact_level            4 -> 3  LOWERED. "Clean" no longer holds: the pool
-#       boundary is visibly faceted (a decagon where the reference is round) and
-#       the centre-chest glow disc is a hard-edged off-reference halo. Both are
-#       conspicuous at 100%, so 4 ("look closely to tell them apart") is too high.
-#   Everything else is re-derived from scratch against the NEW reference and
-#       happens to land on the same number; the prose below is new, the numbers
-#       are not carried over.
+# WHAT THIS PASS CHANGED, AND WHY:
+#   color_palette  2 -> 1  LOWERED, on measurement, not impression. The pass that
+#       produced this champion ATTACKED color_palette (c6c4c261 "swing the lagoon
+#       from sea-green to reference cyan") and moved it AWAY from the reference in
+#       both dominant masses:
+#         water   prev champ 31,150,143 (dist 24.8 from ref) -> now 21,120,153
+#                 (dist 47.4). The error nearly DOUBLED and the hue crossed from
+#                 green-of-cyan to blue: reference G=B (158/158), champion G<<B
+#                 (120/153). The promoting commit message says so itself —
+#                 "water overshot to navy".
+#         sand    prev champ 222,180,106 (dist 19.5) -> now 239,197,116 (dist
+#                 42.0). Washed paler, away from the reference's saturated tan.
+#         gold    the chest brass went from a bright yellow base band to a thin
+#                 dark-amber rail, further from the reference's broad bright brass.
+#       Three of the frame's four colour masses regressed at once. "Right palette,
+#       visibly detuned" (2) no longer holds; this is "present but crude/proxy,
+#       nobody would mistake it" (1).
+#   Prose corrected on composition_and_framing, subject_fidelity,
+#       material_and_texture_detail, contrast_and_exposure and artifact_level —
+#       each cited a measurement or an artifact that the new champion changed.
+#       Their NUMBERS are unchanged, and each is re-derived below rather than
+#       carried over.
+#   artifact_level HELD at 3, deliberately, in BOTH directions. The decagon it
+#       was lowered for is genuinely gone (a real win for afd7b3d8) — but the
+#       hard-edged glow disc under the centre chest is still there and is visible
+#       at a glance, which is exactly what disqualifies a 4 ("you have to look
+#       closely"). Fixing one of two cited artifacts does not buy the point back.
 
-final_score = 1.2   # lowest 1 * 0.7 + average 1.667 * 0.3
+final_score = 1.18   # lowest 1 * 0.7 + average 1.583 * 0.3
 next_attack_axis = "scene_props_completeness"   # lowest (1), earliest in fixed axis order
 
 [axes]
-# The compositional skeleton is right: centred pool in a sand surround, 3x3 grid
-# on the water, palm upper-left / castle upper-right / crab left / shells along
-# the bottom, aspect 1.60 vs the reference's 1.66, pool ~72% of frame width in
-# both. It is held at 2 by real deviations you cannot miss side-by-side: the pool
-# is a hard decagon where the reference's is round; the props are undersized
-# relative to their reference counterparts (the reference palm is ~1/3 frame
-# height, the champion's ~1/4 and much narrower); and the margins carry far less
-# staged incident. Right structure, obviously simplified -> 2.
+# The compositional skeleton is right and got slightly better this pass: the
+# camera pitch went 43 -> 50.5 deg (2f1a346e) so the 3x3 grid now carries
+# reference-like depth, and the pool boundary is round instead of faceted. Still
+# held at 2 by deviations you cannot miss side-by-side: the props are
+# systematically undersized against their reference counterparts (the reference
+# palm is ~1/3 of frame height, the champion's ~1/4 and far narrower), the
+# margins carry far less staged incident, and the frame is 1.60 against the
+# reference's 1.657. Right structure, obviously simplified -> 2.
 composition_and_framing = 2
 
-# The chests are modelled, not boxes: flat-front body, two vertical gold straps,
-# a lid/body split, a bright gold base band with a lock TAB, a dark plinth. That
-# is "the right structure emerging" -> 2. It is nowhere near 3: the reference lid
-# is a barrel ARC (the champion's is a flat slab), the reference carries gold
-# CORNER BRACKETS and a real lock PLATE with a square keyhole (the champion has a
-# featureless tab), the reference wood is soft-shaded saddle brown and the
-# champion's is a paler flat tan with hard value steps. Borderline 1/2; kept at 2
-# only because the strap+trim+lock vocabulary is genuinely present.
+# Re-derived after the hardware remodel (6c71ac10). The chest now has a chamfered
+# lid with raised end ribs, corner posts, a base rail and a hasp — the right
+# vocabulary, emerging -> 2. It is not 3, and it is close to the 1/2 line: the
+# reference chest's single most identifying feature is a BROAD BRIGHT GOLD BAND at
+# the lid/body seam with corner brackets and a large square-keyhole lock plate.
+# The champion has bare wood at that seam and pushes its gold down to a thin dark
+# rail with a featureless hasp, so the gold now reads LESS than the previous
+# champion's bright base band did. Held at 2 on form; flagged as a WATCH-ITEM —
+# one more step of gold recession and this is a 1.
 subject_fidelity = 2
 
-# CORRECTED FROM 0. The props exist: palm, crab, sand castle with a pennant,
-# white shells, yellow/orange scatter, pebbles. But every one is a crude proxy
-# nobody would mistake for the reference — the palm is a stumpy trunk with six
-# flat rectangular planks (no tapered drooping fronds, no coconuts, no grass
-# tuft, no long cast shadow), the castle is a cluster of pale prisms with no
-# walls, no arched doorway and no readable turret ring, the crab is a red blob
-# with a dark stalk, and the starfish are round dots with no arms. That is the
-# textbook "1": present but proxy. Still the dominant identity gap and the
-# correct next axis.
+# Unchanged and untouched for six passes. The props exist — palm, crab, sand
+# castle with a pennant, white shells, yellow/orange scatter, pebbles — but every
+# one is a crude proxy nobody would mistake for the reference: the palm is a
+# stumpy trunk with six flat rectangular planks (no tapered drooping fronds, no
+# coconuts, no grass tuft, no long cast shadow), the castle is a cluster of pale
+# prisms with no walls, no arched doorway and no readable turret ring, the crab is
+# a red blob, the starfish are dots with no arms. Textbook "1": present but proxy.
+# Still the dominant identity gap and STILL the correct next axis — see the ledger
+# for how long it has been named next without being attacked.
 scene_props_completeness = 1
 
-# LOWERED FROM 2. Chest outlines read. Nothing else does: the palm silhouette
-# reads as a stump with sticks, the castle as a bundle of fingers, the crab as a
-# smear. The reference's whole appeal is crisp, instantly-nameable low-poly
-# silhouettes. Wrong-shaped silhouettes are worse than missing ones -> 1.
+# Chest outlines read, and read a little better with the new lid ribs. Nothing
+# else does: the palm silhouette is a stump with sticks, the castle a bundle of
+# pale fingers, the crab a smear. The reference's whole appeal is crisp,
+# instantly-nameable low-poly silhouettes; wrong-shaped silhouettes score below
+# missing ones -> 1.
 silhouette_readability = 1
 
 # Canvas2D flat-shade: hard value steps, no texture, no normal map, no AO, no
-# gradient. Sampled proof: the sand field is the SAME RGB at both frame corners
-# (222,180,106) while the reference's varies (224,169,90 -> 232,177,98) and
-# carries grain. The reference shows voxel-grain wood, brass sheen, grainy sand
-# and soft shading falloff. A legible flat proxy -> 1.
+# gradient. Sampled proof, re-taken this pass: the sand field is the SAME RGB at
+# all FOUR frame corners (239,197,116) while the reference varies corner to corner
+# (224,168,89 -> 231,177,97) and carries grain. The reference shows voxel-grain
+# wood, brass sheen, grainy sand and soft shading falloff. The stylized-water
+# primitive (abstractions/0003) still has not moved this axis: the honeycomb is
+# barely legible at capture resolution and the paler shallow RIM ring is absent.
+# A legible flat proxy -> 1.
 material_and_texture_detail = 1
 
-# The reference grounds everything with soft, consistent, directional shadows —
-# most conspicuously a LONG palm shadow raking across the sand, plus contact
-# shadows under every chest, the crab and the castle, and ambient occlusion in
-# the crevices. The champion has a small blob under the palm, faint smudges under
-# the chests, and an off-reference glow disc under the centre chest. No coherent
-# key direction reads across the frame -> 1.
+# e6de7319 lifted the crushed fill into a neutral counter-light and trimmed the
+# key. That is a real improvement in how the flat facets separate, and it is not
+# enough to move this axis, because the axis is about GROUNDING: the reference
+# grounds everything with soft directional cast shadows — most conspicuously a
+# LONG palm shadow raking across the sand, plus contact shadows under every chest,
+# the crab and the castle, and occlusion in the crevices. The champion still has
+# only a blob under the palm, faint smudges under the chests, and an off-reference
+# glow disc under the centre chest. No coherent key direction reads across the
+# frame -> 1.
 lighting_and_shadow = 1
 
-# The families are right and the sand is close (222,180,106 vs 224,169,90). Held
-# at 2 by two measured shifts: the water is greener and darker (31,150,143 vs
-# 49,158,158) and misses the reference's paler shallow RIM ring entirely, and the
-# chest wood is a paler tan against the reference's saturated saddle brown. Right
-# palette, visibly detuned -> 2.
-color_palette = 2
+# LOWERED FROM 2, on measurement. See the header: water 21,120,153 vs 42,158,158
+# (error nearly doubled versus the previous champion, and the HUE is now blue
+# rather than cyan — reference G=B, champion G 33 below B); sand 239,197,116 vs
+# 224,168,89 (washed paler, error more than doubled); chest brass receded from a
+# bright band to a dark rail. Three of the four dominant colour masses moved away
+# from the reference in a single pass, one of them by the lens that was attacking
+# this very axis. The palette families are still nameable, which is why this is a
+# 1 and not a 0 -> 1.
+color_palette = 1
 
-# Global range is comparable (p2/median/p98 = 79/184/210 champion vs 80/163/199
-# reference), so this is not an exposure blowout. But the champion's contrast is
-# manufactured by hard flat steps between adjacent facets, where the reference's
-# comes from soft modelling plus genuinely dark contact shadows. Same range,
-# wrong mechanism -> 2.
+# Re-measured: luminance p2/median/p98 = 80/147/200 (champion) vs 80/163/199
+# (reference), mean 149.7 vs 156.2. The range still matches, so this is not an
+# exposure blowout; the median swung from 21 ABOVE the reference (the previous
+# champion's 184) to 16 below, driven by the navy water. Absolute error is
+# marginally smaller, the mechanism is unchanged and still wrong: the champion's
+# contrast comes from hard flat steps between adjacent facets where the
+# reference's comes from soft modelling plus genuinely dark contact shadows.
+# Same range, wrong mechanism -> 2 (unchanged).
 contrast_and_exposure = 2
 
-# The 3x3 stagger plus faint chest smudges give some grounding, and the pool rim
-# separates water from sand. But with no real cast shadows and a flat sand field
-# the props sit ON the image rather than IN the scene; the reference separates
-# sand / shallows / water / props by value and shadow -> 2.
+# The darker water does buy some sand/water value separation, and the round pool
+# rim now reads as a real shoreline. But with no cast shadows and a flat,
+# gradient-free sand field the props still sit ON the image rather than IN the
+# scene; the reference separates sand / shallows / water / props by value and
+# shadow together -> 2 (unchanged).
 depth_and_separation = 2
 
-# Chest proportion and grid spacing are close. The PROPS are not: the champion's
-# palm is short and narrow-canopied, the castle has a tiny footprint and is too
-# tall/thin for it, the crab and starfish are dots where the reference stages
-# them as substantial silhouettes. Mixed, with an obvious systematic prop
-# under-scaling -> 2.
+# Chest proportion and grid spacing are close, and the deeper pitch improved the
+# grid's read. The PROPS are not close: the palm is short with a narrow canopy,
+# the castle has a tiny footprint and is too tall/thin for it, the crab and
+# starfish are dots where the reference stages them as substantial silhouettes.
+# Mixed, with an obvious systematic prop under-scaling -> 2 (unchanged).
 scale_and_proportion = 2
 
 # The champion is sparse: no grass tuft, no coconuts, no castle doorway or wall
 # detail, no starfish arms, few pebbles, no sand grain, and the honeycomb reads
-# only faintly. The reference is dense at every scale -> 1.
+# only faintly. The reference is dense at every scale -> 1 (unchanged).
 detail_density = 1
 
-# LOWERED FROM 4. Two conspicuous rendering artifacts: the pool boundary is a
-# hard DECAGON where the reference's is a smooth circle (a tessellation artifact
-# on a shape meant to read round), and a hard-edged soft-glow disc sits under the
-# centre chest with no reference counterpart. Otherwise clean — no z-fighting, no
-# tearing, no stray aliasing. Artifact level scores cleanliness, not identity, so
-# it stays the highest axis, but not at 4 -> 3.
+# HELD AT 3 (not raised). The decagon is genuinely FIXED — measured, the pool
+# boundary's radius varies smoothly (272..329 px monotonically across the
+# unclipped upper half at 10-deg steps, no facet stepping), which is a real win
+# for the per-mesh tessellation budget (abstractions/0004). But the second cited
+# artifact stands: a hard-edged soft-glow disc still sits under the centre chest
+# with no reference counterpart, and it is visible at a glance rather than on
+# close inspection, which is precisely what a 4 excludes. Otherwise clean — no
+# z-fighting, no tearing, no stray aliasing. Artifact level scores cleanliness,
+# not identity, so it stays the highest axis -> 3.
 artifact_level = 3
