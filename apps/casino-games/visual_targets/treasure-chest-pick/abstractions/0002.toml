@@ -1,0 +1,66 @@
+# BACKFILLED BY THE CRITIC LENS (pass 5). Ledger iteration 3 declared
+# `abstraction_introduced = true` for the branding capability and then shipped
+# WITHOUT the abstractions/NNNN.toml the gate requires. This is that file.
+
+axis = "subject_fidelity"     # the brand nameplate rides the chest (the hero subject)
+failed_attempts = []
+inexpressible = true
+# @axiom/web-engine has no textures and, at the time, no text primitive at all —
+# there was literally no way to put lettering on a surface by moving a config
+# value. Genuine inexpressibility, not an early reach.
+smallest_api = """
+Two tiers, and the second one is the part that needed this record most:
+
+APP TIER (iteration 3, commit 2e70a614) — a plain serializable brand value
+(name + primary/onPrimary/ink) in the game's gameSpecific config
+(apps/casino-games/web/src/presentation/branding/brand.ts, validated in
+definition.ts, editable in the SET UP panel) plus a surface-weld label builder
+(presentation/branding/label.ts) that stamps a glyph run through the host
+surface's own transform frame, so the lettering is part of the chest rather than
+an overlay. Config travels the existing import/export/validate path; no new
+engine surface.
+
+ENGINE TIER (later, unlogged by the campaign) — the lettering was then PROMOTED
+into the spine package:
+  packages/axiom-web-engine/src/glyph-font.ts  (0f0b18d4) — the bitmap glyph
+      font, exported as GLYPH_GAP/GLYPH_H/GLYPH_W/glyphRuns/textColumns/textRuns
+      + CellRun, for apps that build lettering out of meshes.
+  packages/axiom-web-engine/src/text.ts        (a0a292e3) — axiom.text(), the
+      backend-neutral Text value / glyph-quad SDK.
+  apps/casino-games/.../branding/glyphs.ts was DELETED in favour of the engine
+      copy (0f0b18d4).
+Promoting a font into the shared engine is a strictly larger commitment than the
+app-tier value it started as, and it happened with no ledger iteration and no
+record. It is defensible on the merits (text-as-geometry is engine-wide missing
+capability, and it shipped with tests), but the campaign owed the paperwork.
+"""
+commits = [
+  "2e70a614 casino-games(treasure-chest-pick): configurable brand livery on the chests + beach",
+  "ec137bd9 / 4c7284cb  nameplate plaque, then welded to the LID",
+  "a0a292e3 axiom-web-engine: axiom.text() TypeScript SDK",
+  "0f0b18d4 axiom-web-engine: own the bitmap glyph font; casino consumes it",
+  "42e3463d casino-games: Helvetica-idiom stroke font for brand lettering",
+  "64b33ab6 / b364ddd5  brand surfaces reduced to the centre-chest nameplate only",
+]
+screenshot_command = """
+npm --prefix packages/axiom-web-engine run build
+uv run scripts/localhost_servers.py start-app casino-games --port 8087
+uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready \
+  --url http://localhost:8087/ \
+  --out apps/casino-games/visual_targets/treasure-chest-pick/candidate.png
+"""
+screenshot_proof = """
+NOT re-verified by this backfill (the critic lens does not build or render).
+capture.md's `frozen` gate is the standing determinism proof for this preset.
+"""
+critic_note = """
+The brand direction INVERTED at ledger iteration 4: the retired reference wanted
+brand surfaces everywhere, the current one wants the brand exactly once, above
+the centre chest. The app had already moved that way on main (64b33ab6,
+b364ddd5), so most of this abstraction's visible output has since been removed
+from the frame. What survives in the champion is one nameplate — and it is a
+flat red rectangle with blocky bitmap letters against the reference's
+rounded-corner plate with a clean rounded typeface. The capability is real and
+correctly placed; it is not yet at identity, and it did not earn subject_fidelity
+above 2.
+"""

@@ -1,0 +1,57 @@
+# BACKFILLED BY THE CRITIC LENS (pass 5). This is the record the campaign owed
+# most and came closest to never writing: a NEW ENGINE-SPINE PRIMITIVE was added
+# to packages/axiom-web-engine to serve this convergence target, with no ledger
+# iteration and no abstraction record of any kind.
+
+axis = "material_and_texture_detail"   # the reference's hex-honeycomb water surface
+failed_attempts = []
+inexpressible = true
+# @axiom/web-engine renders flat-shaded Canvas2D geometry and has no textures.
+# The reference's water is a patterned SURFACE (hex honeycomb + shallow rim +
+# glint), which no combination of existing mesh/material config can express.
+# The "cannot express" branch applies. What the gate still required, and did not
+# get, was this file plus a ledger iteration scoring the result.
+smallest_api = """
+packages/axiom-web-engine/src/canvas-water.ts — one exported draw call,
+`drawStylizedWaterSurface(...)` with `StylizedWaterOptions` / `WaterBounds`
+(index.ts:117), a deterministic Canvas2D effect (base fill, hex markings, soft
+shoreline fade). It replaced an earlier scene-graph-side water-surface.ts
+(9ebf3ba3, hex-ified in a8d65030, superseded by 2b3dd5b3), which is the right
+direction of travel: a backend-module draw effect is a smaller surface than new
+scene primitives.
+
+CRITIC ASSESSMENT OF THE PLACEMENT: acceptable but not free. This is generic
+Canvas2D water, not casino geometry, so it does belong in the Canvas2D module
+rather than in the game — but it was added to the SHARED SPINE to make ONE
+target's water look right, and it went in over three commits of iteration
+(9ebf3ba3 -> a8d65030 -> 2b3dd5b3 -> e433bd47 "richer water") with none of them
+scored against the reference. Three unscored reshapes of a brand-new engine
+export is exactly the churn the gate exists to surface.
+"""
+commits = [
+  "9ebf3ba3 axiom-web-engine: reusable stylized water-surface primitive",
+  "a8d65030 axiom-web-engine: make the water net an actual hexagon honeycomb",
+  "2b3dd5b3 axiom-web-engine: Canvas2D stylized-water effect; casino uses it",
+  "e433bd47 casino-games: richer stylized water (depth/glint/shallow/sparkle) + fixes",
+  "dc16f3b2 casino-games: fix the \"orb\" rings around the back chests",
+]
+screenshot_command = """
+npm --prefix packages/axiom-web-engine run build
+uv run scripts/localhost_servers.py start-app casino-games --port 8087
+uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready \
+  --url http://localhost:8087/ \
+  --out apps/casino-games/visual_targets/treasure-chest-pick/candidate.png
+"""
+screenshot_proof = """
+NOT re-verified by this backfill (the critic lens does not build or render).
+"""
+critic_note = """
+Scored outcome as of pass 5: material_and_texture_detail is still 1. In
+champion.png the honeycomb is barely legible at capture resolution, the water
+samples greener and darker than the reference (31,150,143 vs 49,158,158), the
+reference's paler SHALLOW RIM ring is absent, and the pool boundary is a hard
+decagon where the reference is round (this is why artifact_level dropped 4 -> 3).
+A new engine export that has not yet moved its own axis off 1 is the strongest
+possible argument for writing the record BEFORE shipping the primitive, not
+after.
+"""

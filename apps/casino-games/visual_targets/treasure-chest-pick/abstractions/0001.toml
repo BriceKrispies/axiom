@@ -1,0 +1,50 @@
+# BACKFILLED BY THE CRITIC LENS (pass 5). This record was OWED when the beach
+# props were built and was never written; the abstractions/ directory did not
+# exist at all. Backfilling it does not retroactively bless the change — it
+# records what was actually done, so the gate can be audited from here on.
+
+axis = "scene_props_completeness"
+failed_attempts = []          # none: the gap was inexpressible at config level
+inexpressible = true
+# Ledger iteration 0 already stated the finding: the palm / crab / sand castle /
+# starfish / seashells / pebbles did not exist in the app in ANY form, and there
+# is no beach-prop manifest surface for a config nudge to move. Per the skill's
+# "cannot express" branch this is the norm for a parity target, and the
+# structural fix was legitimate on the first attempt — but it still owed this
+# file, on the first attempt.
+smallest_api = """
+New prop geometry inside the game's own presentation tier — no new engine
+primitive, no new manifest field, no new material or shader. The props are
+composed from the meshes the scene already builds with, in
+apps/casino-games/web/src/games/treasure-chest-pick/scene.ts (with the shared
+low/high tier switch in apps/casino-games/web/src/presentation/detail.ts).
+That is the lowest correct layer: scene dressing for one game belongs to that
+game's scene builder, not to @axiom/web-engine.
+"""
+commits = [
+  "4921ba29 casino-games(treasure-chest-pick): visual-convergence result + reusable capture harness",
+  "0685b30c casino-games(treasure-chest-pick): animate the beach — palm sways, crab idles",
+  "4f9ea3e3 casino-games(treasure-chest-pick): draggable beach props, shore-aligned castle",
+  "24f535ef casino-games: art-direct the treasure-chest beach scene",
+]
+screenshot_command = """
+npm --prefix packages/axiom-web-engine run build
+uv run scripts/localhost_servers.py start-app casino-games --port 8087
+uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready \
+  --url http://localhost:8087/ \
+  --out apps/casino-games/visual_targets/treasure-chest-pick/candidate.png
+"""
+screenshot_proof = """
+NOT re-verified by this backfill — the critic lens does not build or render.
+capture.md records that the `chests-ready` preset's `frozen` gate makes two
+consecutive captures byte-identical, and champion.png at f233fe43 was shot
+through exactly that preset. Whoever next attacks this axis owes a fresh
+two-capture identity check in their own record.
+"""
+critic_note = """
+Scored outcome of this abstraction, as of pass 5: scene_props_completeness
+0 -> 1, NOT higher. The geometry landed but every prop is a proxy (plank-frond
+palm, pillar-cluster castle, blob crab, dot starfish). The abstraction is
+justified and correctly placed; the execution has not yet approached identity,
+and the axis remains the campaign's lowest.
+"""

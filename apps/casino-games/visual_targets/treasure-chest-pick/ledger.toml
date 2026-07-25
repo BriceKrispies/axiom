@@ -462,3 +462,130 @@ depth_and_separation = 2
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 4
+
+[[iteration]]
+iteration = 5
+attacked_axis = "none"           # CRITIC scoring recalibration — the one owed since iteration 3
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/scorecard.champion.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/abstractions/0001.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/abstractions/0002.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/abstractions/0003.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+abstraction_introduced = false   # this entry BACKFILLS records; it introduces nothing
+next_attacked_axis = "scene_props_completeness"
+reason = """
+CRITIC pass 5. Iterations 3 and 4 each reset reference.png and each deferred
+scoring with next_attacked_axis = "recalibrate"; the scorecard has carried a
+"STALE — DO NOT TRUST THE NUMBERS BELOW" banner for two passes. That debt is paid
+here: all twelve axes are re-derived from scratch against the CURRENT reference
+(the clean beach diorama, 1614x974) and the CURRENT champion (960x600, re-shot at
+f233fe43 from the app at dc16f3b2). No number was carried over unexamined.
+
+RESULT: final_score 1.2 (lowest 1 * 0.7 + average 1.667 * 0.3). Next axis =
+scene_props_completeness (1) — lowest, and earliest in the fixed axis order among
+the five axes tied at 1 (props, silhouette, material, lighting, detail_density).
+
+THREE NUMBERS MOVED, in both directions — recalibration is not a synonym for
+"score lower":
+1. scene_props_completeness 0 -> 1 (RAISED). The standing 0 was a factual error
+   against today's app. The palm, crab, castle, shells and pebbles were built on
+   the pass-3 line, are on main, and are plainly visible in champion.png. They
+   are crude proxies (plank-frond palm, pillar-cluster castle, blob crab, dot
+   starfish) so this is a 1, not a 2 — but recording built geometry as absent
+   corrupts the loop exactly as badly as inflation does.
+2. silhouette_readability 2 -> 1 (LOWERED). The old 2 was written when the props
+   did not exist and only the chest outlines were being graded. Now that they
+   render, the frame's silhouettes are actively WRONG rather than merely missing.
+   A wrong silhouette scores below a generous grade on the chests alone.
+3. artifact_level 4 -> 3 (LOWERED). "Clean" no longer holds: the pool boundary is
+   a hard DECAGON where the reference is a smooth circle (tessellation artifact on
+   a shape meant to read round), and a hard-edged glow disc sits under the centre
+   chest with no reference counterpart.
+
+MEASURED, not eyeballed, where it mattered: sand 222,180,106 (champion, IDENTICAL
+at both frame corners — no gradient, no grain) vs 224,169,90 -> 232,177,98
+(reference); water 31,150,143 vs 49,158,158 (champion greener and darker, and
+missing the reference's paler shallow rim ring entirely); luminance p2/median/p98
+79/184/210 vs 80/163/199 (comparable RANGE, so contrast_and_exposure is not an
+exposure blowout — it stays 2 because the champion's contrast comes from hard flat
+steps rather than modelling plus real contact shadows).
+
+ABSTRACTION-GATE: BROKEN, and now backfilled. The abstractions/ directory did not
+exist. Three records were owed and none had been written:
+ - 0001 beach-prop geometry (the scene_props_completeness attack). Ledger
+   iteration 0 explicitly warned this record would come due when the props were
+   built. They were built (4921ba29, 0685b30c, 4f9ea3e3, 24f535ef); the record
+   was not.
+ - 0002 the branding capability. Iteration 3 DECLARED abstraction_introduced =
+   true and shipped with no NNNN.toml — the gate's one hard requirement, skipped
+   in the same entry that invoked it. The record also has to cover what happened
+   after: the lettering was PROMOTED into the shared spine
+   (packages/axiom-web-engine/src/glyph-font.ts, text.ts) with no ledger entry at
+   all.
+ - 0003 the stylized water primitive. A NEW ENGINE-SPINE EXPORT
+   (packages/axiom-web-engine/src/canvas-water.ts, drawStylizedWaterSurface) was
+   added to serve this target across four commits (9ebf3ba3, a8d65030, 2b3dd5b3,
+   e433bd47) with no ledger iteration and no record. It is the largest surface
+   this campaign has added and it had the least paperwork.
+On the MERITS all three are defensible: @axiom/web-engine has no textures and had
+no text, and there is no beach-prop config surface, so all three are genuine
+"cannot express" cases where the skill sanctions going structural on the first
+attempt. None is too-early and none is ceremonial. What failed is the record, not
+the judgement — so the backfills state plainly that they are backfills and do not
+retroactively bless anything.
+
+PROGRESS HONESTY:
+ - No number-gaming found in this pass, and no silent >= 2 regression on a
+   non-attacked axis.
+ - But note what the numbers now show: three engine/app structural abstractions
+   have landed, and the two axes they exist to serve are STILL 1
+   (material_and_texture_detail, and scene_props_completeness). Going structural
+   is correct against a parity target; going structural three times without
+   scoring the result is how a campaign convinces itself it is converging. Every
+   future structural change on this target ships with its NNNN.toml and a scored
+   ledger entry in the SAME commit.
+ - The standing procedural finding from iterations 1 and 2 still holds and is
+   re-stated: passes keep spending on secondary axes while the lowest axis is
+   left where it is. The next pass must attack scene_props_completeness — remodel
+   the palm (tapered drooping fronds, coconuts, grass tuft, long cast shadow), the
+   castle (crenellated walls, corner turrets, arched doorway) and the crab, and
+   give the starfish actual arms. Nothing else.
+
+PARITY-CLAIM: clean. No "done / matched / parity" language anywhere in the
+scorecard, the ledger, the backfilled abstraction records, or the campaign
+commits. The champion is at final_score 1.2 out of 5; it is a legible flat proxy
+of the reference, and nothing in this record says otherwise.
+"""
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+scene_props_completeness = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 3
