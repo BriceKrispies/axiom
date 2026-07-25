@@ -350,9 +350,11 @@ test("the hero framing fills the frame without overflowing it", () => {
   const camera = chestCamera(9);
   const framing = heroFraming(camera);
 
-  // It is genuinely a CLOSE-UP: the chest ends up far larger than it is on the
-  // board, and much nearer to the camera than the board is.
-  assert.ok(framing.scale > 1.5, `the hero chest is a real enlargement (${framing.scale.toFixed(2)}×)`);
+  // It is genuinely a CLOSE-UP: the chest ends up far bigger ON SCREEN than any
+  // chest still on the board, and much nearer to the camera than the board is.
+  // Measured on the PROJECTION, not on `framing.scale` — a longer lens buys the
+  // same shot with less world scale at more distance, so world scale alone says
+  // nothing about how large the chest reads.
   assert.ok(framing.distance < Math.hypot(camera.position.y, camera.position.z) * 0.7, "the hero plane is well in front of the board");
 
   // It commands the frame — but the width guard keeps it inside even on a
@@ -362,6 +364,13 @@ test("the hero framing fills the frame without overflowing it", () => {
   // perspective enlarges past the flat width budget — is what gets checked.
   const xs = chestCorners(heroBase, framing.scale, 0, 0).map((c) => project(camera, c, 1).x);
   const span = Math.max(...xs) - Math.min(...xs);
+  const boardSpan = Math.max(
+    ...Array.from({ length: 9 }, (_, i) => {
+      const slot = chestCorners(chestPosition(i, 9), 1, 0, 0).map((c) => project(camera, c, 1).x);
+      return Math.max(...slot) - Math.min(...slot);
+    }),
+  );
+  assert.ok(span > boardSpan * 3, `the hero chest is a real enlargement (${(span / boardSpan).toFixed(2)}× the widest chest on the board)`);
   assert.ok(span > 0.6, `the chest dominates the frame (spans ${(span * 50).toFixed(0)}% of width)`);
   assert.ok(Math.max(...xs.map(Math.abs)) <= 1, `and still fits a square window (max |x| = ${Math.max(...xs.map(Math.abs)).toFixed(3)})`);
 

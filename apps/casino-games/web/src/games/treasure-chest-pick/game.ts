@@ -175,6 +175,43 @@ export const chestPosition = (index: number, count: number): EngineVec3 => {
   return v3((col - (columns - 1) / 2) * CHEST_SPACING, 0, (row - (rows - 1) / 2) * CHEST_SPACING * 0.92);
 };
 
+/*
+ * How much LONGER the lens is than the tabletop preset's. The reference is shot
+ * on a long lens; the tabletop preset is a wide one, and that mismatch — not the
+ * seat — is the largest remaining framing error. Two scale-invariant quantities
+ * pin it. Both are ratios of on-screen sizes between the grid's BACK row and its
+ * FRONT row, so neither depends on image size, zoom, or where the rows sit in
+ * frame, and both were measured the same way on reference.png and champion.png:
+ *
+ *                                          reference   champion
+ *   column spacing, front row / back row      1.130       1.276
+ *   row bounding width,      back / front     0.882       0.775
+ *
+ * They agree: the champion's near row is roughly twice as much bigger than its
+ * far row as the reference's is — 13% divergence against 28%. That is a lens
+ * fact, not a pose fact. Everything else is already at parity (lagoon width
+ * 0.687 vs 0.700 of frame width, its far rim at 0.220 vs 0.226 of frame height,
+ * mid-row grid width 0.143 vs 0.148), so nothing about the seat is wrong except
+ * how close the camera stands. Solving the perspective model
+ * `divergence = rowSpacing·cos(pitch)/distance` against each measurement gives
+ * 1.98x and 2.02x; 2 is the shared answer.
+ *
+ * So the camera DOLLIES BACK to twice the distance along the same view ray and
+ * takes half the lens angle. That holds `tan(fovY/2)·distance` — the projected
+ * size at the board's center plane — exactly constant, so the pitch, the target,
+ * the board's on-screen size, and the lagoon framing are all untouched. What
+ * changes is only how the three rows stack: the far row grows ~6%, the near row
+ * shrinks ~6%, and the predicted row widths then land on the reference's at BOTH
+ * depths (back 0.365 vs 0.367, front 0.412 vs 0.416 of frame width). The lagoon
+ * disc stops bulging toward the bottom of frame for the same reason.
+ *
+ * `heroFraming` sizes the hero close-up as a FRACTION of the frustum at a fixed
+ * heroDistance, so it re-solves against the new lens and the close-up's
+ * on-screen size is unchanged; only its world scale (and so the length of the
+ * spiral flight) follows the lens.
+ */
+const LENS_PULL = 2;
+
 // A tighter span than a card-table default: the reference frames the chest grid
 // large — it claims ~55% of the frame width, and the sandy lagoon fills the top
 // of the frame with no horizon showing. At the looser span the grid projected at
@@ -206,15 +243,19 @@ export const chestCamera = (count: number): ReturnType<typeof tabletopCamera> =>
   // reseats the camera at span·1.076 / span·0.887 (~50.5° down), which is the
   // joint least-squares fit over grid depth/width, grid top/bottom, grid width,
   // row-to-row perspective divergence, and lagoon rim + width: it cuts the
-  // weighted framing error against the reference by ~4x. Camera DISTANCE from
-  // the target and fovY are deliberately unchanged, so the on-screen size of the
-  // board is held and only the angle moves. Pitching UP also strictly helps the
+  // weighted framing error against the reference by ~4x. Only the angle moves
+  // there; the on-screen size of the board is held by `LENS_PULL` above, which
+  // scales distance and lens angle together. Pitching UP also strictly helps the
   // old backdrop worry below: a steeper look drops the top frame-edge ray onto
   // the lagoon floor even closer in, so the pastel sheet stays out of frame. The
   // hero close-up is derived from this camera via `heroFraming` off a fixed
   // heroDistance + fovY, so its on-screen scale is untouched and it re-centers.
   const base = tabletopCamera(center, span);
-  return { ...base, position: v3(center.x, center.y + span * 1.076, center.z + span * 0.887) };
+  return {
+    ...base,
+    fovY: 2 * Math.atan(Math.tan(base.fovY / 2) / LENS_PULL),
+    position: v3(center.x, center.y + span * 1.076 * LENS_PULL, center.z + span * 0.887 * LENS_PULL),
+  };
 };
 
 export const chestTargets = (count: number): readonly PickTarget[] =>
