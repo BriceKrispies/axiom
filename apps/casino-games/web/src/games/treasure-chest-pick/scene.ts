@@ -124,14 +124,40 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   WoodDim: { baseColor: [0.28, 0.19, 0.11, 1] },
   WoodDimSide: { baseColor: [0.22, 0.15, 0.09, 1] },
   ChestInterior: { baseColor: [0.11, 0.07, 0.035, 1] },
-  // Gold, likewise stepped: a pale highlight on upward edges/latch, the main
-  // yellow on front trim, a darker ochre on side-facing straps — not uniformly
-  // emissive, so it reads as metal catching light rather than glowing.
-  GildTop: { baseColor: [1, 0.9, 0.5, 1], emissive: [0.28, 0.22, 0.06, 1] },
-  GildFront: { baseColor: [0.98, 0.76, 0.28, 1], emissive: [0.12, 0.09, 0.02, 1] },
-  GildSide: { baseColor: [0.7, 0.5, 0.18, 1] },
-  GildDim: { baseColor: [0.5, 0.38, 0.16, 1] },
-  GildBright: { baseColor: [1, 0.9, 0.46, 1], emissive: [0.5, 0.4, 0.12, 1] },
+  // Gold, likewise stepped: a bright highlight on upward edges/latch, the main
+  // amber on front trim, a darker ochre on side-facing straps — so it reads as
+  // metal catching light rather than glowing.
+  //
+  // The champion's gilding rendered as blown LEMON-WHITE, not gold: the widest
+  // band on every chest measured (251, 248, 133) — green sitting at 0.99 of red,
+  // i.e. essentially no chroma left — where the reference's brightest gold is a
+  // saturated amber (246, 191, 54), green at 0.78 of red and blue at 0.22. Two
+  // things caused it, and both are fixed here.
+  //
+  // First, the ladder was authored at the TOP of the range (red 0.98–1.0). With
+  // no tonemap or grade stage in this engine, the bright warm key multiplies
+  // straight into the clamp, so red pinned at 255 while green — starting at 0.9,
+  // barely below red — pinned there too. Once two channels clamp together the
+  // hue is gone by construction: the surface can only be white-ish. The ladder is
+  // therefore seated LOWER (red ~0.8 at the top rung), leaving the key light room
+  // to lift the gold to near-clip without flattening it.
+  //
+  // Second, the additive emissive on the top two rungs was doing the clamping,
+  // not the lighting. It is removed: gold is not a light source, and a Lambert
+  // amber under a warm key already reads as metal. (`GildBright` — the hover /
+  // selected accent — keeps a small emissive: that rung is meant to read hotter
+  // than lit gold, and it is now amber-biased so it goes hot-gold, not white.)
+  //
+  // Every rung's HUE is also corrected to the reference's amber ratio
+  // (green ≈ 0.78 × red, blue ≈ 0.27 × red) instead of the old drift toward
+  // 0.90/0.50, which was pale brass even before the clamp. The value STEP between
+  // rungs (top > front > side > dim) is preserved — that step is what carves the
+  // gilding into lit and shadowed metal without a texture.
+  GildTop: { baseColor: [0.8, 0.62, 0.21, 1] },
+  GildFront: { baseColor: [0.68, 0.53, 0.18, 1] },
+  GildSide: { baseColor: [0.52, 0.4, 0.135, 1] },
+  GildDim: { baseColor: [0.36, 0.28, 0.095, 1] },
+  GildBright: { baseColor: [0.92, 0.71, 0.25, 1], emissive: [0.1, 0.07, 0, 1] },
   // Warm reveal light: a layered pool under the chosen chest, seam leak, inner
   // glow, and the burst — all additive-emissive translucent discs/slabs.
   PoolCore: { baseColor: [1, 0.86, 0.5, 1], emissive: [1, 0.78, 0.4, 1], opacity: 0.5 },
@@ -151,7 +177,10 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // reads as water rather than a muddy edge.
   PlatformSide: { baseColor: [0.11, 0.55, 0.57, 1] },
   EdgeVignette: { baseColor: [0.03, 0.2, 0.26, 1], opacity: 0.34 },
-  BoardRivet: { baseColor: [1, 0.82, 0.34, 1], emissive: [0.3, 0.22, 0.05, 1] },
+  // A gold accent, so it obeys the same amber ratio and the same
+  // seated-below-the-clamp rule as the chest gilding above — a lemon-white rivet
+  // ring around an amber-gilded chest grid would break the one metal the frame has.
+  BoardRivet: { baseColor: [0.78, 0.6, 0.2, 1], emissive: [0.08, 0.055, 0, 1] },
   // Like every other translucent overlay here, the puff carries a little
   // emissive: a purely Lambert translucent grey reads as a dark blob against
   // the warm, brightly-lit chest mouth it coughs out of, which is the opposite
@@ -181,8 +210,9 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   CastleDoor: { baseColor: [0.42, 0.34, 0.22, 1] },
   CastlePole: { baseColor: [0.34, 0.24, 0.14, 1] },
   // A warm-gold trim stripe on the decorative castle pennant, tying it to the
-  // chests' gilding.
-  CastleFlagTrim: { baseColor: [1, 0.82, 0.34, 1], emissive: [0.24, 0.18, 0.05, 1] },
+  // chests' gilding — so it carries the same amber ratio and the same headroom
+  // below the clamp, or the "tie" is to a gold the chests no longer wear.
+  CastleFlagTrim: { baseColor: [0.78, 0.6, 0.2, 1], emissive: [0.06, 0.045, 0, 1] },
   // The crab reads as a coral beach creature, not a second brand accent: pulled
   // off the saturated brand red toward warm coral so the only true reds in frame
   // are the intentional branding surfaces.
