@@ -121,6 +121,49 @@ test("createMesh builds lower-poly primitives on the software backend", () => {
   assert.ok(lowSphereVerts < high.uploads[0]!.data.positions.length);
 });
 
+test("createMesh reproduces the historical fixed counts when no budget is given", () => {
+  const high = setup("WebGL2", "high");
+  createMesh("cylinder");
+  createMesh("sphere");
+  // 24-segment cylinder: 2·(24+1) wall verts + 2·(24+2) cap verts. 16×24 sphere.
+  assert.equal(high.uploads[0]!.data.positions.length, 2 * 25 + 2 * 26);
+  assert.equal(high.uploads[1]!.data.positions.length, 17 * 25);
+  const low = setup("Canvas2D", "low");
+  createMesh("cylinder");
+  createMesh("sphere");
+  // Halved by the software detail scale: 12 segments, and an 8×12 sphere.
+  assert.equal(low.uploads[0]!.data.positions.length, 2 * 13 + 2 * 14);
+  assert.equal(low.uploads[1]!.data.positions.length, 9 * 13);
+});
+
+test("createMesh caches per (kind, budget) so a big primitive can be smooth alone", () => {
+  const rec = setup("WebGL2", "high");
+  const rivet = createMesh("cylinder");
+  const lagoon = createMesh("cylinder", 72);
+  assert.notEqual(rivet, lagoon, "a distinct budget is distinct geometry, not a replacement");
+  assert.equal(rec.uploads.length, 2);
+  assert.ok(rec.uploads[1]!.data.positions.length > rec.uploads[0]!.data.positions.length);
+  assert.equal(createMesh("cylinder", 72), lagoon, "the same budget reuses the upload");
+  assert.equal(createMesh("cylinder"), rivet, "the default budget is untouched by the big one");
+  assert.equal(rec.uploads.length, 2);
+});
+
+test("createMesh applies the software detail scale to a requested budget", () => {
+  const low = setup("Canvas2D", "low");
+  createMesh("cylinder", 72);
+  // The backend LOD still halves it: 36 segments, not the requested 72.
+  assert.equal(low.uploads[0]!.data.positions.length, 2 * 37 + 2 * 38);
+});
+
+test("createMesh floors a degenerate budget at a closable ring", () => {
+  const rec = setup("WebGL2", "high");
+  createMesh("cylinder", 0);
+  assert.equal(rec.uploads[0]!.data.positions.length, 2 * 4 + 2 * 5, "clamped to 3 segments");
+  // A sphere's latitude rings derive from the radial budget, and floor too.
+  createMesh("sphere", 1);
+  assert.equal(rec.uploads[1]!.data.positions.length, 4 * 4, "3 lat × 3 lon");
+});
+
 test("createMeshData rejects mismatched positions/normals", () => {
   setup("WebGL2", "high");
   assert.throws(

@@ -22,9 +22,6 @@ const HALF = 0.5;
 const TWO = 2;
 const THREE = 3;
 const TAU = Math.PI * TWO;
-const DEFAULT_LAT_SEGMENTS = 16;
-const DEFAULT_LON_SEGMENTS = 24;
-const DEFAULT_SEGMENTS = 24;
 
 /** `[0, 1, …, count - 1]`, a branchless counting-index list that replaces a loop. */
 const range = (count: number): number[] => Array.from({ length: count }, (value, index) => index);
@@ -101,8 +98,10 @@ export const unitBox = (): MeshData => {
 };
 
 /** A unit-diameter sphere (radius 0.5) centered at the origin, latitude/
- * longitude grid with smooth normals (normal = normalized position). */
-export const unitSphere = (latSegments = DEFAULT_LAT_SEGMENTS, lonSegments = DEFAULT_LON_SEGMENTS): MeshData => {
+ * longitude grid with smooth normals (normal = normalized position). The two
+ * ring counts are REQUIRED: resolution is a policy the caller owns (see
+ * `store.ts`), not a default this generator quietly re-declares. */
+export const unitSphere = (latSegments: number, lonSegments: number): MeshData => {
   const normals = range(latSegments + 1).flatMap((lat) => {
     const phi = (lat / latSegments) * Math.PI;
     const y = Math.cos(phi);
@@ -128,8 +127,9 @@ export const unitSphere = (latSegments = DEFAULT_LAT_SEGMENTS, lonSegments = DEF
 
 /** A unit-diameter, unit-height capped cylinder around +Y, centered at the
  * origin (radius 0.5, y ∈ [-0.5, 0.5]); smooth radial side normals, flat ±Y
- * cap normals. */
-export const unitCylinderY = (segments = DEFAULT_SEGMENTS): MeshData => {
+ * cap normals. `segments` is REQUIRED: resolution is a policy the caller owns
+ * (see `store.ts`), not a default this generator quietly re-declares. */
+export const unitCylinderY = (segments: number): MeshData => {
   const rim = range(segments + 1);
   // Side wall: (top, bottom) vertex pairs sharing a smooth radial normal.
   const sideNormals = rim.flatMap((seg) => {

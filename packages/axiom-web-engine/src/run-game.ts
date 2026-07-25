@@ -85,7 +85,7 @@ const DEFAULT_SEED = 1;
 
 /** Resolve one declared mesh resource to a store handle (primitive kind or custom
  * geometry). */
-const uploadMeshRef = (ref: MeshRef): Handle => ("kind" in ref ? createMesh(ref.kind) : createMeshData(ref.data));
+const uploadMeshRef = (ref: MeshRef): Handle => ("kind" in ref ? createMesh(ref.kind, ref.segments) : createMeshData(ref.data));
 
 /**
  * Run a pure `Game` on `canvas`. Resolves a backend, binds input, creates the

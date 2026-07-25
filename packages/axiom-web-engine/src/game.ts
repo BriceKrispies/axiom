@@ -24,9 +24,19 @@ import { isPresent, presentOf } from "./branchless.ts";
 
 // ── the declarative scene value ─────────────────────────────────────────────────
 
-/** A mesh a game declares in `resources`: either a named primitive kind, or its
- * own custom triangle-list geometry. Resolved to a store handle ONCE by the shell. */
-export type MeshRef = { readonly kind: MeshKind } | { readonly data: MeshData };
+/**
+ * A mesh a game declares in `resources`: either a named primitive kind, or its
+ * own custom triangle-list geometry. Resolved to a store handle ONCE by the shell.
+ *
+ * `segments` is the primitive's RADIAL facet budget at full detail (the backend
+ * scales it — see `createMesh`). It exists because tessellation is a property of
+ * how large a primitive is on screen, not of its kind: a game that puts a
+ * frame-filling disc and a thumbnail-sized rivet in the same scene must be able
+ * to ask for a smooth silhouette on the first without paying for it on the
+ * second. Declare the big one as its own named mesh with its own budget.
+ * Omitted, it is the engine default — byte-identical to the previous fixed count.
+ */
+export type MeshRef = { readonly kind: MeshKind; readonly segments?: number } | { readonly data: MeshData };
 
 /** The static, declared-once resource table. Meshes and materials are named; a
  * `SceneInstance` references them by name, so `view` never creates a resource or

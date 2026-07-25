@@ -30,8 +30,14 @@ export const SKY_CLEAR: Rgba = [0.71, 0.87, 0.99, 1];
  * every caller that only passes a span), but a game whose playfield sits on a
  * small inset pool can shrink it so the surrounding floor slab reads as a wide
  * beach margin rather than a full-frame turquoise flood.
+ *
+ * `ringMesh` names the mesh resource the floor-ring draws. It defaults to the
+ * shared `cylinder` primitive, but a game whose ring is LARGE on screen should
+ * declare its own higher-tessellation cylinder (`{ kind: "cylinder", segments }`)
+ * and name it here — otherwise the ring's silhouette is the default facet budget,
+ * which reads as an obvious polygon once the ring spans a third of the frame.
  */
-export const stageRoom = (span = 20, accentRadius = span * 0.5): readonly SceneInstance[] => [
+export const stageRoom = (span = 20, accentRadius = span * 0.5, ringMesh = "cylinder"): readonly SceneInstance[] => [
   {
     key: "stage:floor",
     material: "StageFloor",
@@ -41,7 +47,7 @@ export const stageRoom = (span = 20, accentRadius = span * 0.5): readonly SceneI
   {
     key: "stage:floor-ring",
     material: "StageFloorAccent",
-    mesh: "cylinder",
+    mesh: ringMesh,
     transform: { position: v3(0, -0.049, 0), rotation: QUAT_IDENTITY, scale: v3(accentRadius * 2, 0.02, accentRadius * 2) },
   },
   {

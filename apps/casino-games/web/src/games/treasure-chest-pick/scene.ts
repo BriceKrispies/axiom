@@ -209,18 +209,46 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
  * the brand-derived banner/letter materials (whose colors follow the configured
  * brand). Built once at mount from the game's brand config — a brand color
  * change takes effect on the next mount, exactly like any other material. */
+/**
+ * The lagoon's radial facet budget, at full detail.
+ *
+ * The shared `cylinder` primitive is tessellated for a rivet, a coconut palm
+ * trunk, a castle turret — the small round props this scene is mostly made of.
+ * The lagoon is not one of those: it is a five-world-unit disc spanning a third
+ * of the frame, and at the shared budget its shoreline reads as a hard polygon
+ * where the reference has a smooth circle. So the pool declares its OWN mesh at
+ * its own budget (see `MeshRef.segments`) — the big disc gets a round silhouette
+ * without dragging every rivet and trunk in the scene up with it.
+ *
+ * It is twice `WATER_RIM_POINTS` deliberately: the software backend halves the
+ * budget, so on Canvas2D the 3D shoreline lands on exactly the same facet count
+ * as the 2D water overlay's projected clip path. The two boundaries are the same
+ * circle, so the stylized net can never spill past the shore it is clipped to.
+ */
+const LAGOON_SEGMENTS = 96;
+
+/** The mesh name the lagoon-scale discs draw with (see `LAGOON_SEGMENTS`). */
+const LAGOON_MESH = "lagoon";
+
 export const chestResources = (brand: BrandSpec): GameResources => ({
   materials: { ...MATERIALS, ...brandMaterials(brand) },
-  meshes: { box: { kind: "box" }, cylinder: { kind: "cylinder" }, sphere: { kind: "sphere" } },
+  meshes: {
+    box: { kind: "box" },
+    cylinder: { kind: "cylinder" },
+    [LAGOON_MESH]: { kind: "cylinder", segments: LAGOON_SEGMENTS },
+    sphere: { kind: "sphere" },
+  },
 });
 
 // ── small builders ──────────────────────────────────────────────────────────────
 
-/** A flat disc (thin cylinder) — pools, glows, platform layers. */
-const disc = (key: string, material: string, at: EngineVec3, radius: number, height = 0.02): SceneInstance => ({
+/** A flat disc (thin cylinder) — pools, glows, platform layers. `mesh` selects
+ * the tessellation: the default shared `cylinder` for the small light pools and
+ * contact shadows, `LAGOON_MESH` for the frame-spanning water discs. */
+const disc = (key: string, material: string, at: EngineVec3, radius: number, height = 0.02, mesh = "cylinder"): SceneInstance => ({
   key,
   material,
-  mesh: "cylinder",
+  mesh,
   transform: { position: at, rotation: QUAT_IDENTITY, scale: v3(radius * 2, height, radius * 2) },
 });
 
@@ -661,8 +689,11 @@ const heroPrize = (rarity: Parameters<typeof rewardMaterialOf>[0], at: EngineVec
 export const WATER_RADIUS = 5.0;
 
 const platform = (): readonly SceneInstance[] => [
-  disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006),
-  disc("plat:side", "PlatformSide", v3(0, -0.062, 0), WATER_RADIUS, 0.06),
+  // Both water discs are lagoon-scale, so both draw the high-tessellation mesh:
+  // the vignette is the OUTER of the two, and a faceted vignette under a round
+  // pool would just move the polygon out to the sand line.
+  disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006, LAGOON_MESH),
+  disc("plat:side", "PlatformSide", v3(0, -0.062, 0), WATER_RADIUS, 0.06, LAGOON_MESH),
   // No central warm glow: pooling warmth at the middle brightened the center chest
   // and made it read as permanently highlighted. The lagoon stays evenly lit.
   ...[
@@ -1168,7 +1199,10 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // cropping the horizon out and matching the reference's full-bleed sand.
       // The turquoise ring (accentRadius = WATER_RADIUS) is unchanged, so the
       // inset lagoon and its beach margin keep exactly the held framing.
-      ...stageRoom(48, WATER_RADIUS),
+      // The turquoise floor-ring is concentric with the pool at the same radius,
+      // so it takes the same high-tessellation mesh — otherwise the ring's
+      // polygon corners would stick out past the round pool onto the sand.
+      ...stageRoom(48, WATER_RADIUS, LAGOON_MESH),
       ...platform(),
       ...beachDecor(tick, seed, state.extra.decor),
       ...chests,
@@ -1194,7 +1228,10 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
  * pattern is a coordinate hash and the drift comes from the explicit `nowMs`.
  */
 
-/** Points traced around the pool rim to approximate its screen silhouette. */
+/** Points traced around the pool rim to approximate its screen silhouette. Held
+ * in lock-step with `LAGOON_SEGMENTS` (which is twice this, because the software
+ * backend halves a mesh's facet budget): the 2D clip path and the 3D shoreline it
+ * is clipped to are then literally the same polygon on Canvas2D. */
 const WATER_RIM_POINTS = 48;
 /** The height up each chest the punched hole is centered on, the world half-width
  * whose projection sets each hole's radius (so far/smaller chests get smaller

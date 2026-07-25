@@ -35,7 +35,10 @@ interface EngineCanvas {
 interface RendererState {
   readonly canvas: EngineCanvas;
   readonly backend: RenderBackend;
-  readonly meshKindCache: Map<MeshKind, Handle>;
+  /** Built primitives, keyed by `kind:facets` — NOT by kind alone. Tessellation
+   * is a property of how big a primitive is ON SCREEN, so two nodes of the same
+   * kind at different sizes are legitimately different geometry. */
+  readonly primitiveCache: Map<string, Handle>;
   readonly materials: Map<Handle, ResolvedMaterial>;
   readonly nodes: Map<Entity, FrameNode>;
   /** Lights are retained as their authored specs (keyed by entity, so they can
@@ -57,10 +60,27 @@ const DEFAULT_OPACITY = 1;
 // Absent roughness is fully MATTE: glossiness 0 -> zero specular, so a material
 // that never sets roughness renders byte-identically to the old Lambert-only path.
 const DEFAULT_ROUGHNESS = 1;
-// The software rasterizer pays per triangle, so its primitives are lower-poly.
-const LOW_CYLINDER_SEGMENTS = 12;
-const LOW_SPHERE_LAT_SEGMENTS = 8;
-const LOW_SPHERE_LON_SEGMENTS = 12;
+/**
+ * The default RADIAL facet budget of a round primitive, at full detail — what a
+ * caller gets when it does not say how big the thing is. A caller that knows its
+ * primitive is large on screen (a lagoon that spans a third of the frame, not a
+ * rivet) passes its own budget to `createMesh`; the geometry is then cached
+ * per-budget, so the big one is smooth WITHOUT dragging every small cylinder in
+ * the scene up with it.
+ */
+const DEFAULT_RADIAL_SEGMENTS = 24;
+/** A sphere's latitude rings are two thirds of its longitude rings — the 16:24
+ * proportion the unit sphere is authored at — so one radial budget scales both. */
+const SPHERE_LAT_RATIO = 2 / 3;
+/** The software rasterizer pays per triangle, so it draws every primitive at
+ * HALF the facet budget of the GPU path. Expressed as a scale rather than a
+ * second table of constants: it is the same halving the old fixed low-detail
+ * counts encoded (24→12 cylinder, 16/24→8/12 sphere), now applied to whatever
+ * budget the caller asked for — so the backend LOD survives a caller's request
+ * instead of being silently defeated by it. */
+const DETAIL_SCALE: Readonly<Record<"high" | "low", number>> = { high: 1, low: 0.5 };
+/** No ring closes with fewer facets than a triangle. */
+const MIN_SEGMENTS = 3;
 
 const DEFAULT_CAMERA: Camera3D = {
   far: DEFAULT_FAR_PLANE,
@@ -88,8 +108,8 @@ export const initStore = (backend: RenderBackend, canvas: EngineCanvas): void =>
     clearColor: [cr, cg, cb],
     lights: new Map(),
     materials: new Map(),
-    meshKindCache: new Map(),
     nodes: new Map(),
+    primitiveCache: new Map(),
   };
 };
 
@@ -130,26 +150,33 @@ export const createMeshData = (data: MeshData): Handle => {
   return handle;
 };
 
-/** Primitive builders per backend detail level. */
-const KIND_BUILDERS: Record<"high" | "low", Record<MeshKind, () => MeshData>> = {
-  high: {
-    box: unitBox,
-    cylinder: (): MeshData => unitCylinderY(),
-    sphere: (): MeshData => unitSphere(),
-  },
-  low: {
-    box: unitBox,
-    cylinder: (): MeshData => unitCylinderY(LOW_CYLINDER_SEGMENTS),
-    sphere: (): MeshData => unitSphere(LOW_SPHERE_LAT_SEGMENTS, LOW_SPHERE_LON_SEGMENTS),
-  },
+/** Primitive builders, each taking the resolved radial facet count. `box` is
+ * flat-faceted by definition and ignores it. */
+const KIND_BUILDERS: Readonly<Record<MeshKind, (facets: number) => MeshData>> = {
+  box: unitBox,
+  cylinder: (facets): MeshData => unitCylinderY(facets),
+  sphere: (facets): MeshData => unitSphere(Math.max(MIN_SEGMENTS, Math.round(facets * SPHERE_LAT_RATIO)), facets),
 };
 
-/** Get (or lazily build + cache) the shared geometry for a primitive kind. */
-export const createMesh = (kind: MeshKind): Handle => {
+/**
+ * Get (or lazily build + cache) the shared geometry for a primitive kind at a
+ * radial facet budget.
+ *
+ * `segments` is the budget at FULL detail; the active backend's `meshDetail`
+ * then scales it (the software path halves it), and the result keys the cache —
+ * so asking for the same budget twice reuses one upload, and asking for a bigger
+ * one adds geometry beside the default rather than replacing it. Omitting
+ * `segments` reproduces the previous fixed counts exactly (24/12 cylinder,
+ * 16×24 / 8×12 sphere).
+ */
+export const createMesh = (kind: MeshKind, segments?: number): Handle => {
   const st = requireState();
-  return orCompute(st.meshKindCache.get(kind), (): Handle => {
-    const handle = createMeshData(KIND_BUILDERS[st.backend.meshDetail][kind]());
-    st.meshKindCache.set(kind, handle);
+  const requested = Math.max(MIN_SEGMENTS, Math.round(orElse(segments, DEFAULT_RADIAL_SEGMENTS)));
+  const facets = Math.max(MIN_SEGMENTS, Math.round(requested * DETAIL_SCALE[st.backend.meshDetail]));
+  const cacheKey = `${kind}:${facets}`;
+  return orCompute(st.primitiveCache.get(cacheKey), (): Handle => {
+    const handle = createMeshData(KIND_BUILDERS[kind](facets));
+    st.primitiveCache.set(cacheKey, handle);
     return handle;
   });
 };
@@ -260,7 +287,7 @@ export const removeLight = (entity: Entity): void => {
 export const clearScene = (): void => {
   const st = requireState();
   st.backend.dropMeshes();
-  st.meshKindCache.clear();
+  st.primitiveCache.clear();
   st.materials.clear();
   st.nodes.clear();
   st.lights.clear();

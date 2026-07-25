@@ -73,10 +73,10 @@ test("unitSphere has radius 0.5 with smooth unit normals", () => {
   }
 });
 
-test("unitSphere honors its default segment counts", () => {
-  const sphere = unitSphere();
-  checkMeshInvariants(sphere, "default sphere");
-  assert.equal(sphere.positions.length, (16 + 1) * (24 + 1), "default 16×24 grid");
+test("unitSphere builds whatever ring counts the caller asks for", () => {
+  const sphere = unitSphere(6, 9);
+  checkMeshInvariants(sphere, "coarse sphere");
+  assert.equal(sphere.positions.length, (6 + 1) * (9 + 1), "6×9 grid");
 });
 
 test("unitCylinderY spans radius 0.5 and height 1 around +Y", () => {
@@ -102,8 +102,15 @@ test("unitCylinderY spans radius 0.5 and height 1 around +Y", () => {
   }
 });
 
-test("unitCylinderY honors its default segment count", () => {
-  const cyl = unitCylinderY();
-  checkMeshInvariants(cyl, "default cylinder");
-  assert.equal(cyl.positions.length, 2 * (24 + 1) + 2 * (24 + 2), "default 24 segments");
+test("unitCylinderY scales its ring with the requested segment count", () => {
+  const fine = unitCylinderY(72);
+  checkMeshInvariants(fine, "fine cylinder");
+  assert.equal(fine.positions.length, 2 * (72 + 1) + 2 * (72 + 2), "72 segments");
+  // The whole point of the knob: more facets means a silhouette closer to a true
+  // circle. The largest gap between neighbouring rim points shrinks with count.
+  const rimGap = (segments: number): number => {
+    const ring = unitCylinderY(segments).positions.filter((p) => Math.abs(p.y - 0.5) < 1e-6);
+    return Math.max(...ring.slice(1).map((p, i) => Math.hypot(p.x - ring[i]!.x, p.z - ring[i]!.z)));
+  };
+  assert.ok(rimGap(72) < rimGap(12), "a finer ring has shorter chords");
 });
