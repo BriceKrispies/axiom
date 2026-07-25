@@ -993,21 +993,125 @@ const crab = (origin: EngineVec3, tick: number, seed: number): readonly SceneIns
   return [...shadow, body, ...eyes, ...claws, ...legs, flagPole, flag];
 };
 
-/** Shells and a couple of starfish scattered on the shore. Positions are on the
- * sand ring (radius clear of the water vignette). */
+/*
+ * The shore litter. The reference does NOT leave the sand ring bare: it is the
+ * single most heavily-dressed surface in the frame, speckled all the way round
+ * the lagoon with small pale pebbles, a handful of ridged clam shells, and a few
+ * starfish — roughly twenty pieces, densest along the wide right-hand band and
+ * in the two near corners. The champion carried five squashed spheres and two
+ * flat starfish, so ~40% of the frame (everything outside the pool) read as an
+ * empty tan field and the whole diorama looked under-dressed next to the
+ * reference's lived-in beach.
+ *
+ * This is pure detail density, and it needs no primitive the scene does not
+ * already use. Three authored forms cover everything the reference draws:
+ *
+ *   * `pebble` — a small faceted chip. A yawed, rolled BOX rather than a squashed
+ *     sphere: the reference's pebbles are angular low-poly stones that catch the
+ *     key light on one face, and a sphere at this size reads as a soft dot.
+ *   * `clam`  — a scallop: a short fan of thin ribs splayed about a common hinge
+ *     and tipped up, so the shell shows its ridges in silhouette. This is the one
+ *     form the champion had no geometry for at all (it drew clams as plain
+ *     spheres), and the engine has no fan/sector primitive, so a rib fan IS the
+ *     primitive-honest reading — the same argument the lid dome makes.
+ *   * `star`  — the existing five-arm cross, kept as-is, at more positions.
+ *
+ * Positions are authored, not scattered by hash: they are placed to match where
+ * the reference actually puts its litter (a dense right band, two near corners, a
+ * thin scatter across the far shore), all at radius > the water vignette so
+ * nothing floats on the lagoon, and all clear of the three draggable props' home
+ * footprints. Fixed and outcome-independent, exactly as before.
+ */
+
+/** Litter radii live in [5.7, 8.0] — outside the vignette (WATER_RADIUS · 9/8.4
+ * ≈ 5.36) and inside the frame edge on every band. */
+type LitterKind = "pebble" | "clam" | "star";
+interface LitterPiece {
+  readonly x: number;
+  readonly z: number;
+  readonly kind: LitterKind;
+  /** Size multiplier — the reference's pieces are not uniform. */
+  readonly s: number;
+  /** Ground yaw, so no two neighbours present the same face. */
+  readonly a: number;
+}
+
+/** Ribs per clam fan; halved on the software backend with the rest of the LOD. */
+const CLAM_RIBS = 4;
+const CLAM_RIBS_LOW = 2;
+/** How far the fan splays, end rib to end rib. */
+const CLAM_SPREAD = 1.15;
+
+/** One ridged clam shell: a fan of thin ribs hinged at a common point and tipped
+ * up out of the sand, so the shell reads as a scalloped fan from the tabletop
+ * camera instead of a blob. */
+const clamShell = (key: string, at: EngineVec3, s: number, yaw: number, ribs: number): readonly SceneInstance[] =>
+  Array.from({ length: ribs }, (_, i): SceneInstance => {
+    // Ribs share a hinge behind the shell and splay forward, each rolled a little
+    // so the fan domes rather than lying flat.
+    const spread = ribs === 1 ? 0 : (i / (ribs - 1) - 0.5) * CLAM_SPREAD;
+    const q = quatMul(quatYaw(yaw + spread), quatMul(quatPitch(-0.28), quatRoll(spread * 0.5)));
+    const len = 0.5 * s * (1 - Math.abs(spread) * 0.18);
+    return decorPart(key + i, i % 2 === 0 ? "Shell" : "CastleSand", "box", addV3(at, rotateByQuat(v3(0, 0.05 * s, len / 2), q)), v3(0.17 * s, 0.07 * s, len), q);
+  });
+
+/** The authored shore scatter, read off the reference's own distribution. */
+const LITTER: readonly LitterPiece[] = [
+  // Far shore, above the lagoon rim: a thin sprinkle, the reference's sparsest band.
+  { a: 0.4, kind: "pebble", s: 0.9, x: -1.7, z: -6.1 },
+  { a: 1.9, kind: "clam", s: 1.0, x: -0.4, z: -6.5 },
+  { a: 2.7, kind: "pebble", s: 0.75, x: 2.3, z: -6.2 },
+  { a: 0.9, kind: "pebble", s: 1.05, x: -3.5, z: -5.3 },
+  // Left band, behind and around the crab.
+  { a: 2.2, kind: "pebble", s: 0.85, x: -6.7, z: -0.7 },
+  { a: 0.6, kind: "pebble", s: 1.15, x: -7.0, z: 1.9 },
+  { a: 3.3, kind: "clam", s: 1.35, x: -6.2, z: 3.5 },
+  { a: 0.35, kind: "star", s: 1.0, x: -4.6, z: 5.2 },
+  // Right band — the widest stretch of sand in frame, and the reference's densest.
+  { a: 1.4, kind: "star", s: 1.1, x: 6.7, z: -2.6 },
+  { a: 4.1, kind: "clam", s: 1.2, x: 6.9, z: -1.0 },
+  { a: 0.2, kind: "pebble", s: 0.8, x: 7.3, z: 0.4 },
+  { a: 2.5, kind: "pebble", s: 1.0, x: 6.9, z: 1.7 },
+  { a: 1.1, kind: "pebble", s: 0.7, x: 7.4, z: 3.0 },
+  { a: 5.0, kind: "pebble", s: 1.1, x: 6.4, z: 4.3 },
+  { a: 0.8, kind: "star", s: 0.9, x: 5.9, z: 5.5 },
+  // Near shore, between the two corners.
+  { a: 1.7, kind: "pebble", s: 0.95, x: 2.4, z: 5.6 },
+  { a: 3.9, kind: "pebble", s: 0.8, x: -1.9, z: 6.0 },
+];
+
 const beachLitter = (): readonly SceneInstance[] => {
-  const shells = [v3(5.2, 0, 1.9), v3(-3.7, 0, -4.7), v3(2.6, 0, 5.2), v3(6.0, 0, -0.9), v3(-6.0, 0, -1.7)].map((at, i) =>
-    decorPart(`shell${i}`, "Shell", "sphere", v3(at.x, 0.09, at.z), v3(0.28, 0.16, 0.24)),
-  );
-  const starfish = [v3(4.5, 0, 3.9), v3(-3.0, 0, 5.2)]
-    .map((at, i): readonly SceneInstance[] => {
-      const arms = Array.from({ length: 5 }, (_, k): SceneInstance =>
-        decorPart(`star${i}:arm${k}`, "Starfish", "box", v3(at.x, 0.05, at.z), v3(0.12, 0.05, 0.44), quatYaw((k / 5) * Math.PI * 2)),
-      );
-      return arms;
+  const low = lowDetail();
+  const ribs = low ? CLAM_RIBS_LOW : CLAM_RIBS;
+  return LITTER
+    // The software backend keeps every clam and starfish (they are the pieces
+    // that read as objects) but sheds half the pebbles, which are the cheapest
+    // detail to lose and the least missed at that resolution.
+    .filter((p, i) => !low || p.kind !== "pebble" || i % 2 === 0)
+    .map((p, i): readonly SceneInstance[] => {
+      const at = v3(p.x, 0, p.z);
+      if (p.kind === "clam") {
+        return clamShell(`clam${i}:`, v3(p.x, 0.04, p.z), p.s, p.a, ribs);
+      }
+      if (p.kind === "star") {
+        return Array.from({ length: 5 }, (_, k): SceneInstance =>
+          decorPart(`star${i}:arm${k}`, "Starfish", "box", v3(at.x, 0.05, at.z), v3(0.12 * p.s, 0.05, 0.44 * p.s), quatYaw(p.a + (k / 5) * Math.PI * 2)),
+        );
+      }
+      // A pebble is a single faceted chip: yawed on the ground and rolled a
+      // little off flat so one face catches the key light.
+      return [
+        decorPart(
+          `pebble${i}`,
+          "Shell",
+          "box",
+          v3(at.x, 0.07 * p.s, at.z),
+          v3(0.3 * p.s, 0.17 * p.s, 0.24 * p.s),
+          quatMul(quatYaw(p.a), quatRoll(0.22 + (i % 3) * 0.13)),
+        ),
+      ];
     })
     .flat();
-  return [...shells, ...starfish];
 };
 
 /** The whole shore of set-dressing. The palm/castle/crab are placed at the
