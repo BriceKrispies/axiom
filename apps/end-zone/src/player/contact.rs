@@ -169,7 +169,25 @@ pub fn commit_dives(
         let relative = players[index].vel.subtract(carrier_sim.vel);
         let closing = relative.length() + players[index].speed() * 0.25;
         let escaping = carrier_sim.speed() >= tuning.dive_carrier_min_speed;
-        if in_window && closing >= tuning.dive_min_closing_speed && escaping && distance > 1.0e-4 {
+        // A flat-out runner matched for speed is WRAPPED standing, not dived at.
+        // A committed dive is ballistic: it whiffs against a juke and, having left
+        // its feet, the diver is spent and removed from the play. So when the
+        // carrier is at a full sprint (>= 85% of its own top speed) AND this
+        // tackler is fast enough to stay stride-for-stride (its top speed meets
+        // the carrier's current speed), the tackler keeps its feet and lets the
+        // standing tracking-tackle in `resolve_tackle` finish the play — a
+        // juke-proof run-down. The gate keys on the carrier being FLAT-OUT so a
+        // slower carrier (a scrambling QB) is still dived at, and the fast-chaser-
+        // on-slow-carrier dive path stays intact.
+        let carrier_flat_out = carrier_sim.speed() >= 0.85 * carrier_sim.archetype.max_speed;
+        let can_stay_with = players[index].archetype.max_speed >= carrier_sim.speed();
+        let wrap_instead = carrier_flat_out && can_stay_with;
+        if in_window
+            && closing >= tuning.dive_min_closing_speed
+            && escaping
+            && !wrap_instead
+            && distance > 1.0e-4
+        {
             let dir = to.mul_scalar(1.0 / distance);
             let diver = &mut players[index];
             diver.facing = dir.x.atan2(dir.z);

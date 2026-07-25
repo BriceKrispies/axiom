@@ -104,6 +104,20 @@ pub const fn defender() -> PlayerArchetype {
     }
 }
 
+/// The cover corner (defense slots 4/5). Split off the shared `defender()` so
+/// the man/zone corners can actually STAY WITH a receiver: their top speed
+/// (8.8) edges the receiver's (8.6), where the edge-rushing `defender()` sits
+/// slower (8.2) on purpose. Splitting the archetype — rather than speeding up
+/// `defender()` — keeps the pass rush's timing untouched (the rushers on slots
+/// 0/3 still share `defender()`), which is what the sack test depends on.
+pub const fn cornerback() -> PlayerArchetype {
+    PlayerArchetype {
+        name: "cornerback",
+        max_speed: 8.8,
+        ..defender()
+    }
+}
+
 pub const fn safety() -> PlayerArchetype {
     PlayerArchetype {
         name: "safety",
@@ -117,7 +131,13 @@ pub const fn safety() -> PlayerArchetype {
         catch_radius: 1.3,
         catch_tolerance_ticks: 9,
         pursuit_aggressiveness: 0.9,
-        reaction_delay_ticks: 16,
+        // Reaction delay is a perception FLOOR when chasing: a defender pursuing
+        // a change of direction can close no nearer than `delay * carrier_speed`.
+        // At 16 ticks that floor (~2.4 yd at full carrier speed) sat OUTSIDE
+        // `tackle_range` (1.3), so the last line of defense could never run down
+        // a full-speed breakaway runner. 7 ticks (~1 yd) drops the floor inside
+        // range, so the safety can actually turn and make the tackle.
+        reaction_delay_ticks: 7,
     }
 }
 
@@ -218,8 +238,8 @@ pub fn roster_for(team: TeamDefinition, base_id: u8, side: RosterSide) -> Roster
             lineman(),
             lineman(),
             defender(),
-            defender(),
-            defender(),
+            cornerback(),
+            cornerback(),
             safety(),
         ],
     };
