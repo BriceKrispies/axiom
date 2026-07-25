@@ -12,15 +12,16 @@ import { waterSurface } from "./water-surface.ts";
 const EPS = 1e-9;
 const OPAQUE_FALLBACK = 1;
 
-test("the net is a two-layer cellular pattern clipped inside the disc", () => {
+test("the net is a two-layer honeycomb clipped around the disc", () => {
   const radius = 5;
-  const surface = waterSurface({ radius });
+  const cellSize = 1.6;
+  const surface = waterSurface({ cellSize, radius });
 
   // A sparse net, not empty and not a dense grid.
   assert.ok(surface.instances.length > 6, "the net has lines");
-  assert.ok(surface.instances.length < 200, "the net stays sparse");
+  assert.ok(surface.instances.length < 500, "the net stays sparse");
 
-  // Two feathering layers per line: the halo and core materials both exist and
+  // Two feathering layers per edge: the halo and core materials both exist and
   // both appear among the instances, so every line reads as a softened stroke.
   assert.ok("waterCore" in surface.materials, "core material exists");
   assert.ok("waterHalo" in surface.materials, "halo material exists");
@@ -31,13 +32,26 @@ test("the net is a two-layer cellular pattern clipped inside the disc", () => {
   const haloAlpha = surface.materials.waterHalo.opacity ?? OPAQUE_FALLBACK;
   assert.ok(haloAlpha < coreAlpha, "the halo is fainter than the core");
 
-  // Every strip's center sits inside the disc (chords past the rim are dropped),
-  // and lies flat on the plane as a box.
+  // Hexagon CENTERS are clipped to the disc, so an edge midpoint stays within a
+  // hex size of the rim — the net never sprawls far past the water.
   for (const instance of surface.instances) {
     const { x, z } = instance.transform.position;
-    assert.ok(Math.hypot(x, z) <= radius + EPS, "the strip center is within the disc");
+    assert.ok(Math.hypot(x, z) <= radius + cellSize + EPS, "the strip center hugs the disc");
     assert.equal(instance.mesh, "box", "strips are boxes");
   }
+});
+
+test("shared hexagon edges are deduplicated — no double-weight seams", () => {
+  // Every interior edge is shared by two hexagons; the net must draw it once, so
+  // no two core strips land on the same midpoint+angle.
+  const surface = waterSurface({ cellSize: 1.5, radius: 6 });
+  const cores = surface.instances.filter((i) => i.material === "waterCore");
+  const signatures = cores.map((i) => {
+    const { x, z } = i.transform.position;
+    const [, ry] = i.transform.rotation;
+    return `${Math.round(x * 100)},${Math.round(z * 100)},${Math.round(ry * 100)}`;
+  });
+  assert.equal(new Set(signatures).size, signatures.length, "no duplicate edge strips");
 });
 
 test("it is fully deterministic — no clock, no randomness", () => {
@@ -52,6 +66,7 @@ test("options override the defaults (color, spacing, prefix, center)", () => {
 
   const custom = waterSurface({
     radius: 3,
+    cellSize: 1.2,
     center: { x: 10, z: -4 },
     keyPrefix: "pool",
     lineColor: [1, 0, 0, 1],
@@ -63,9 +78,9 @@ test("options override the defaults (color, spacing, prefix, center)", () => {
   assert.ok("poolCore" in custom.materials && "poolHalo" in custom.materials, "the prefix renames the materials");
   assert.deepEqual(custom.materials.poolCore.baseColor, [1, 0, 0, 1], "the line color is applied");
   assert.equal(custom.materials.poolCore.opacity, 0.4, "the opacity is applied");
-  // Centered off-origin: every strip sits within radius of the given center.
+  // Centered off-origin: every strip follows the given center (within a cell).
   for (const instance of custom.instances) {
-    assert.ok(Math.hypot(instance.transform.position.x - 10, instance.transform.position.z + 4) <= 3 + EPS, "strips follow the center");
+    assert.ok(Math.hypot(instance.transform.position.x - 10, instance.transform.position.z + 4) <= 3 + 1.2 + EPS, "strips follow the center");
     assert.equal(instance.transform.position.y, 0.5, "strips sit at the given height");
   }
 });

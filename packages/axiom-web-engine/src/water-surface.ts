@@ -1,6 +1,6 @@
 /*
  * water-surface.ts — a tiny reusable "stylized water surface" primitive: it turns
- * a circular region into a SPARSE cellular line net that makes a flat blue area
+ * a circular region into a SPARSE honeycomb line net that makes a flat blue area
  * read as water, without a shader, a texture, or a VFX system.
  *
  * It is pure DATA, not a drawing effect: `waterSurface(options)` returns a small
@@ -10,13 +10,14 @@
  * the water (the strips are ordinary depth-tested translucent geometry), and it is
  * fully deterministic — no clock, no randomness.
  *
- * The pattern is three families of parallel chords at 0deg/60deg/120deg, clipped
- * to the circle: their union is a large-celled triangular/honeycomb net. Each line
- * is TWO stacked translucent strips — a wide faint HALO and a narrower CORE — so
- * its edges blend softly (alpha layering) instead of reading as a razor-sharp wire.
- * Low opacity and a light-cyan tint keep the whole thing a subtle, low-contrast
- * surface pattern. Everything is expressed as array transforms (no control flow),
- * so it stays inside the branchless spine.
+ * The pattern is a HEXAGON grid: hexagons are laid on a hex lattice across the
+ * disc and their edges are drawn as short segments, DEDUPLICATED so each shared
+ * edge is one line (not a double-weight seam). The result is a large-celled
+ * honeycomb. Each edge is TWO stacked translucent strips — a wide faint HALO and a
+ * narrower CORE — so its edges blend softly (alpha layering) instead of reading as
+ * a razor-sharp wire. Low opacity and a light-cyan tint keep the whole thing a
+ * subtle, low-contrast surface pattern. Everything is expressed as array
+ * transforms (no control flow), so it stays inside the branchless spine.
  */
 
 import type { EngineQuat, MaterialSpec, Rgba, Transform } from "./api.ts";
@@ -33,7 +34,7 @@ export interface WaterSurfaceOptions {
   readonly center?: { readonly x: number; readonly z: number };
   /** Height of the strips — just above the water surface, below anything on it. */
   readonly y?: number;
-  /** Spacing between parallel lines (larger = fewer, bigger cells). */
+  /** Hexagon size (center-to-vertex). Larger = fewer, bigger cells. */
   readonly cellSize?: number;
   /** Core strip width (world units). */
   readonly lineWidth?: number;
@@ -43,8 +44,8 @@ export interface WaterSurfaceOptions {
   readonly lineColor?: Rgba;
   /** Core strip opacity (the halo is a fraction of this). */
   readonly opacity?: number;
-  /** Perpendicular shift of the whole net; 0 is static. A game may drift this
-   * slowly for a barely-there motion (at the cost of re-posing the strips). */
+  /** Shift of the whole lattice; 0 is static. A game may drift this slowly for a
+   * barely-there motion (at the cost of re-posing the strips). */
   readonly drift?: number;
   /** An optional solid base disc drawn under the net (its own blue fill). Omit it
    * to lay the net over a blue region the scene already draws. */
@@ -61,7 +62,7 @@ export interface WaterSurface {
 }
 
 // ── defaults + tuning (hoisted so no value is a bare magic number) ────────────────
-const DEFAULT_CELL_SIZE = 1.9;
+const DEFAULT_CELL_SIZE = 2.1;
 const DEFAULT_LINE_WIDTH = 0.05;
 const DEFAULT_SOFTNESS = 6;
 const DEFAULT_OPACITY = 0.08;
@@ -86,12 +87,31 @@ const OPAQUE = 1;
 const DEFAULT_COLOR: Rgba = [COLOR_R, COLOR_G, COLOR_B, OPAQUE];
 const ORIGIN = { x: 0, z: 0 } as const;
 const IDENTITY_QUAT: EngineQuat = [0, 0, 0, 1];
-/** Three line directions 0deg/60deg/120deg; their union is the cellular net. */
-const FAMILY_DIVISOR = 3;
-const SIXTY = Math.PI / FAMILY_DIVISOR;
-const FAMILIES: readonly number[] = [0, SIXTY, SIXTY + SIXTY];
+// Hex-lattice geometry.
+const HEX_SIDES = 6;
+const THREE = 3;
+const SQRT3 = Math.sqrt(THREE);
+const TAU = Math.PI + Math.PI;
+/** Flat-top column spacing: a hexagon center steps 1.5·size in x per column. */
+const COLUMN_SPACING = 1.5;
+/** Snap endpoints to this many units when deduplicating shared edges. */
+const SNAP = 100;
+/** The six edge starts 0..5 (each edge joins vertex i to vertex i+1). */
+const EDGE_STARTS: readonly number[] = Array.from({ length: HEX_SIDES }, (_slot, index): number => index);
 
 // ── internal shapes ──────────────────────────────────────────────────────────────
+interface Point {
+  readonly x: number;
+  readonly z: number;
+}
+interface Cell {
+  readonly col: number;
+  readonly row: number;
+}
+interface Edge {
+  readonly from: Point;
+  readonly to: Point;
+}
 interface ResolvedWater {
   readonly radius: number;
   readonly center: { readonly x: number; readonly z: number };
@@ -111,15 +131,6 @@ interface LineLayer {
 interface BuildContext {
   readonly config: ResolvedWater;
   readonly layers: readonly LineLayer[];
-  readonly offsets: readonly number[];
-}
-interface Chord {
-  readonly angle: number;
-  readonly familyIndex: number;
-  readonly offset: number;
-  readonly offsetIndex: number;
-  readonly perpX: number;
-  readonly perpZ: number;
 }
 interface StripSpec {
   readonly x: number;
@@ -137,7 +148,7 @@ const emissiveOf = (color: Rgba, factor: number): Rgba => {
 };
 
 /** A flat strip's transform: a thin box lying on the ground plane, its long axis
- * (`length`) rotated to run along the family direction `angle`. */
+ * (`length`) rotated to run along the edge direction `angle`. */
 const stripTransform = (spec: StripSpec): Transform => {
   const { x, z, y, angle, length, width } = spec;
   const half = angle * HALF;
@@ -166,35 +177,61 @@ const layersOf = (config: ResolvedWater): readonly LineLayer[] => [
   { name: `${config.prefix}Core`, width: config.lineWidth },
 ];
 
-/** Perpendicular offsets from the center, one line per `cellSize` step to the rim
- * (out-of-disc chords are filtered later). */
-const offsetsOf = (config: ResolvedWater): readonly number[] => {
-  const steps = Math.max(OPAQUE, Math.ceil(config.radius / config.cellSize));
-  return Array.from({ length: steps + steps + OPAQUE }, (_slot, index): number => (index - steps) * config.cellSize + config.drift);
+/** A symmetric integer range −span..span. */
+const axialRange = (span: number): readonly number[] => Array.from({ length: span + span + 1 }, (_slot, index): number => index - span);
+
+/** The world center of the flat-top hexagon at axial cell (col, row). */
+const hexCenter = (config: ResolvedWater, cell: Cell): Point => {
+  const size = config.cellSize;
+  return {
+    x: config.center.x + size * COLUMN_SPACING * cell.col + config.drift,
+    z: config.center.z + size * SQRT3 * (cell.row + cell.col * HALF) + config.drift,
+  };
 };
 
-/** The two strips (halo + core) of one chord, both boxes flat on the plane. */
-const chordStrips = (config: ResolvedWater, layers: readonly LineLayer[], chord: Chord): readonly SceneInstance[] => {
-  const halfLen = Math.sqrt(config.radius * config.radius - chord.offset * chord.offset);
-  const cx = config.center.x + chord.perpX * chord.offset;
-  const cz = config.center.z + chord.perpZ * chord.offset;
-  return layers.map((layer, layerIndex): SceneInstance => ({
-    key: `${config.prefix}:${chord.familyIndex}:${chord.offsetIndex}:${layerIndex}`,
+/** Every hexagon center whose middle falls inside the disc. */
+const hexCenters = (config: ResolvedWater): readonly Point[] => {
+  const size = config.cellSize;
+  const cols = axialRange(Math.ceil(config.radius / (size * COLUMN_SPACING)) + 1);
+  const rows = axialRange(Math.ceil(config.radius / (size * SQRT3)) + 1);
+  return cols
+    .flatMap((col): readonly Point[] => rows.map((row): Point => hexCenter(config, { col, row })))
+    .filter((point): boolean => Math.hypot(point.x - config.center.x, point.z - config.center.z) < config.radius);
+};
+
+/** One vertex of a flat-top hexagon (vertex `index` at 60°·index). */
+const vertexOf = (center: Point, size: number, index: number): Point => {
+  const angle = (index * TAU) / HEX_SIDES;
+  return { x: center.x + size * Math.cos(angle), z: center.z + size * Math.sin(angle) };
+};
+
+/** Every hexagon edge across the disc, with shared edges still duplicated. */
+const rawEdges = (config: ResolvedWater): readonly Edge[] =>
+  hexCenters(config).flatMap((center): readonly Edge[] =>
+    EDGE_STARTS.map((index): Edge => ({ from: vertexOf(center, config.cellSize, index), to: vertexOf(center, config.cellSize, index + 1) })));
+
+/** A canonical key for an edge, so the two hexagons sharing it collapse to one. */
+const edgeKey = (edge: Edge): string => {
+  const snap = (value: number): number => Math.round(value * SNAP);
+  const ends = [`${snap(edge.from.x)},${snap(edge.from.z)}`, `${snap(edge.to.x)},${snap(edge.to.z)}`];
+  return ends.toSorted((left, right): number => left.localeCompare(right)).join("|");
+};
+
+/** The two strips (halo + core) welded along one edge, both boxes flat on the plane. */
+const edgeStrips = (context: BuildContext, edge: Edge, edgeIndex: number): readonly SceneInstance[] => {
+  const { from, to } = edge;
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const angle = Math.atan2(dz, dx);
+  const length = Math.hypot(dx, dz) + context.config.lineWidth;
+  const midX = (from.x + to.x) * HALF;
+  const midZ = (from.z + to.z) * HALF;
+  return context.layers.map((layer, layerIndex): SceneInstance => ({
+    key: `${context.config.prefix}:${edgeIndex}:${layerIndex}`,
     material: layer.name,
     mesh: "box",
-    transform: stripTransform({ angle: chord.angle, length: halfLen + halfLen, width: layer.width, x: cx, y: config.y, z: cz }),
+    transform: stripTransform({ angle, length, width: layer.width, x: midX, y: context.config.y, z: midZ }),
   }));
-};
-
-/** Every chord of one line family, clipped to the disc. */
-const familyLines = (context: BuildContext, angle: number, familyIndex: number): readonly SceneInstance[] => {
-  const { config, layers, offsets } = context;
-  const dirX = Math.cos(angle);
-  const dirZ = Math.sin(angle);
-  return offsets
-    .filter((offset): boolean => Math.abs(offset) < config.radius)
-    .flatMap((offset, offsetIndex): readonly SceneInstance[] =>
-      chordStrips(config, layers, { angle, familyIndex, offset, offsetIndex, perpX: -dirZ, perpZ: dirX }));
 };
 
 /** An optional solid base disc under the net (its own blue fill). */
@@ -224,8 +261,9 @@ const materialsOf = (config: ResolvedWater, baseColor: Rgba | undefined): Readon
 /** Build the stylized water-surface bundle for a circular region. */
 export const waterSurface = (options: WaterSurfaceOptions): WaterSurface => {
   const config = resolveOptions(options);
-  const context: BuildContext = { config, layers: layersOf(config), offsets: offsetsOf(config) };
-  const lineInstances = FAMILIES.flatMap((angle, familyIndex): readonly SceneInstance[] => familyLines(context, angle, familyIndex));
+  const context: BuildContext = { config, layers: layersOf(config) };
+  const uniqueEdges = [...new Map(rawEdges(config).map((edge): readonly [string, Edge] => [edgeKey(edge), edge])).values()];
+  const lineInstances = uniqueEdges.flatMap((edge, edgeIndex): readonly SceneInstance[] => edgeStrips(context, edge, edgeIndex));
   const instances = [...baseOf(config, options.baseColor), ...lineInstances];
   return { instances, materials: materialsOf(config, options.baseColor) };
 };

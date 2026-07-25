@@ -693,7 +693,7 @@ export const WATER_RADIUS = 5.0;
  * water rather than bleeding onto the sandy shore. Static (no drift) — the calmest
  * read, and no per-frame churn.
  */
-const LAGOON_WATER = waterSurface({ radius: WATER_RADIUS * 0.86, y: -0.02 });
+const LAGOON_WATER = waterSurface({ cellSize: 1.25, radius: WATER_RADIUS * 0.9, y: -0.02 });
 
 const platform = (): readonly SceneInstance[] => [
   disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006),
