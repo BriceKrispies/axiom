@@ -108,3 +108,10 @@ export type {
   TextStyleInput,
   TextWrap,
 } from "./text.ts";
+
+// ── stylized water surface ──────────────────────────────────────────────────────────
+// `waterSurface({ radius })` turns a circular blue region into a sparse, softly
+// feathered cellular line net — a subtle "this is water" pattern as plain scene
+// geometry (both backends, occlusion-correct, no shader). See `water-surface.ts`.
+export { waterSurface } from "./water-surface.ts";
+export type { WaterSurface, WaterSurfaceOptions } from "./water-surface.ts";

@@ -16,6 +16,7 @@
 
 import type { Camera3D, MaterialSpec, Scene, SceneInstance, SceneLight } from "@axiom/web-engine";
 import type { EngineQuat, EngineVec3, GameResources } from "@axiom/web-engine";
+import { waterSurface } from "@axiom/web-engine";
 import type { GameRuntime } from "../../chance-engine/registry/definition.ts";
 import { phaseAge } from "../../chance-engine/sessions/session.ts";
 import type { BrandSpec } from "../../presentation/branding/brand.ts";
@@ -215,7 +216,7 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
  * brand). Built once at mount from the game's brand config — a brand color
  * change takes effect on the next mount, exactly like any other material. */
 export const chestResources = (brand: BrandSpec): GameResources => ({
-  materials: { ...MATERIALS, ...brandMaterials(brand) },
+  materials: { ...MATERIALS, ...brandMaterials(brand), ...LAGOON_WATER.materials },
   meshes: { box: { kind: "box" }, cylinder: { kind: "cylinder" }, sphere: { kind: "sphere" } },
 });
 
@@ -681,6 +682,18 @@ const heroPrize = (rarity: Parameters<typeof rewardMaterialOf>[0], at: EngineVec
  * proportions relative to this radius.
  */
 export const WATER_RADIUS = 5.0;
+
+/**
+ * The stylized water pattern on the lagoon — a sparse, softly-feathered cellular
+ * line net that makes the flat turquoise disc read as a water surface. Built ONCE
+ * from the engine's reusable `waterSurface` primitive (it is pure, deterministic
+ * scene geometry, so it renders on both backends and is occluded by the chests
+ * that sit on it) and kept deliberately subtle: large cells, a light-cyan tint,
+ * very low opacity. Inset a little inside the rim so the net sits clearly ON the
+ * water rather than bleeding onto the sandy shore. Static (no drift) — the calmest
+ * read, and no per-frame churn.
+ */
+const LAGOON_WATER = waterSurface({ radius: WATER_RADIUS * 0.86, y: -0.02 });
 
 const platform = (): readonly SceneInstance[] => [
   disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006),
@@ -1284,6 +1297,10 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // inset lagoon and its beach margin keep exactly the held framing.
       ...stageRoom(48, WATER_RADIUS),
       ...platform(),
+      // The stylized water pattern sits just above the lagoon disc; it is
+      // translucent and depth-tested, so the chests, palm and castle that stand
+      // on the pool correctly occlude the net beneath them.
+      ...LAGOON_WATER.instances,
       ...beachDecor(tick, seed, state.extra.decor, spec.brand.name),
       ...chests,
       ...backgroundVeil(camera, framing, flight),
