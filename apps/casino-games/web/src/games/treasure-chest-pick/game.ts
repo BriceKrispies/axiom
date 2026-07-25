@@ -324,7 +324,11 @@ export const CHEST_TIMING = {
   shakeMag: 0.05, // anticipation shake amplitude
   latchDrop: 1.55, // radians the latch swings open
   latchRecoil: 0.22, // extra kick on the latch's release snap
-  lidOpen: 1.9, // radians the lid swings open
+  lidOpen: 1.7, // radians the lid swings open — stands the open lid nearer upright
+  // (~97° vs the old ~109°), matching the reference silhouette: the lid presents
+  // its inner face rather than reclining so far back that the interior floor
+  // reads as a large flat top-down plane. Kept short of vertical so the tall open
+  // lid still clears the top of the hero frame.
   burstParticles: 12, // bounded upward light-burst motes
   riseHeight: 1.2, // world-units the prize climbs to hover clear above the chest
 } as const;

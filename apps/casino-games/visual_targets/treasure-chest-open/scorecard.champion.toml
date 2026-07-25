@@ -1,0 +1,62 @@
+# Baseline champion scorecard — treasure-chest-open (reveal close-up)
+# Authored by the convergence critic lens as the campaign's FIRST calibration.
+# Bar = "indistinguishable from reference.png". Scored harshly against identity:
+# a render that merely reads as "a chest with a gem" is a 1, not a 3.
+#
+# Axis ORDER below is fixed for the whole campaign and is the tie-break for
+# "lowest axis". It is deliberately arranged so the tie-break points at the
+# ROOT-CAUSE flaw first: the entire upper chest + interior is blown out to
+# near-white yellow because the gem glow is uncontained/unclamped. That single
+# overexposure is what destroys material, color, lighting, depth and gem
+# fidelity simultaneously — so contrast_and_exposure is the honest first attack,
+# and it is ordered ahead of the axes it corrupts.
+
+# final_score = lowest_axis * 0.7 + average_axis * 0.3
+# lowest_axis = 1 (contrast_and_exposure, by fixed order among the 1s)
+# average = 20/12 = 1.667  ->  final = 0.7*1 + 0.3*1.667 = 1.20
+
+composition_and_framing   = 3  # centered chest, lid-open upper half, matching dark vignette
+                               # + faint corner beach props; but chest fills LESS of the
+                               # frame than the reference. On-model, gap still obvious.
+
+scale_and_proportion      = 2  # chest reads flatter/wider; lid is a short near-vertical
+                               # panel vs the reference's tall trapezoid hinged fully back;
+                               # gem small relative to the mouth. Structure right, proportions off.
+
+silhouette_readability    = 2  # legibly an open chest, but the lid geometry differs enough
+                               # (short upright panel vs tall hinged-back lid) that the
+                               # outline is not the reference's outline.
+
+contrast_and_exposure     = 1  # ROOT FLAW / FIRST ATTACK. Whole upper chest + interior clipped
+                               # to near-white yellow; all midtone detail lost. Reference holds
+                               # deep shadow with a contained bright gem. Plainly wrong exposure.
+
+lighting_and_shadow       = 1  # no controlled falloff or interior AO gradient; the emissive
+                               # glow floods the model instead of pooling. Uncontrolled lighting.
+
+color_palette             = 1  # reference = dark navy / rich brown wood / warm saturated gold /
+                               # icy blue gem / cream glow. Champion collapses wood+gold+glow
+                               # into one bright yellow. Palette wrong (too yellow, no brown).
+
+material_and_texture_detail = 1  # wood-vs-gold material separation destroyed across the whole
+                                 # blown top half; only the lower body still shows brown+gold.
+                                 # No distinct matte-wood / warm-gold read.
+
+depth_and_separation      = 1  # blowout flattens the scene — gem barely separates from the
+                               # bright interior behind it; lid back plane and interior merge.
+
+subject_fidelity          = 2  # it IS an open treasure chest with straps, latch and a gem
+                               # (right structure emerging) but ruined by exposure; obviously
+                               # simplified/wrong next to the reference. Not a 3.
+
+gem_fidelity              = 1  # hero subject. Reference gem is a crisply faceted icy-blue cut
+                               # stone with a highlight; champion gem is a small pale bluish-white
+                               # blob, barely faceted, half-lost in the glow. Proxy, not on-model.
+
+glow_and_atmosphere       = 2  # the dark vignette + faint corner props read correctly, but the
+                               # glow itself is uncontained (floods the chest) rather than the
+                               # reference's soft, bounded radial halo.
+
+artifact_level            = 3  # low-poly edges are fairly clean; the main "artifact" is highlight
+                               # clipping, which is scored under contrast_and_exposure. Still short
+                               # of the reference's clean smooth gradients.

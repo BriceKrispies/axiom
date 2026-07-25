@@ -1,0 +1,40 @@
+# Append-only convergence ledger — treasure-chest-open (reveal close-up).
+# Iteration 0 is the critic-authored baseline calibration (no render change).
+
+[[iteration]]
+iteration = 0
+attacked_axis = "none"                      # baseline calibration only — no render change
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-open/scorecard.champion.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"                 # establishes the baseline champion
+reason = """
+Critic baseline for a NEW campaign (no prior scorecard). Scored the seeded champion
+harshly against identity. final_score = 1.20 (lowest 1 * 0.7 + avg 1.667 * 0.3).
+The dominant, root-cause flaw is the overexposure blowout: the gem glow is uncontained,
+clipping the whole upper chest and interior to near-white yellow and collapsing wood/gold/
+glow into one bright color. That single defect is what pins contrast_and_exposure,
+lighting_and_shadow, color_palette, material_and_texture_detail, depth_and_separation and
+gem_fidelity all to 1. Axis order is fixed so the lowest-axis tie-break selects
+contrast_and_exposure as the next attack — fixing the glow clamp / falloff first is what
+lets the other five recover, rather than chasing material or color while the blowout stands.
+No structural change was made, so no abstractions/NNNN.toml is owed yet.
+"""
+next_attacked_axis = "contrast_and_exposure"
+abstraction_introduced = false
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+scale_and_proportion = 2
+silhouette_readability = 2
+contrast_and_exposure = 1
+lighting_and_shadow = 1
+color_palette = 1
+material_and_texture_detail = 1
+depth_and_separation = 1
+subject_fidelity = 2
+gem_fidelity = 1
+glow_and_atmosphere = 2
+artifact_level = 3

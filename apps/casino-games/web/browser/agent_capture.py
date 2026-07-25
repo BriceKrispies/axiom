@@ -198,6 +198,22 @@ SCENES: dict[str, dict] = {
         "backend": "canvas2d",
         "steps": ["phase:ready", f"click:{LOGICAL_W // 2},{LOGICAL_H // 2}", "phase:celebrating", "wait:400", "shot"],
     },
+    # The open-chest reveal close-up: the centre chest OPENED, lid up and treasure
+    # showing, but BEFORE the points banner. Scripts the pick as a boot-time key
+    # press (`?press=Space@30` selects the default-focused centre chest) and freezes
+    # deterministically at tick 180 — mid-`revealing`, after the lid opens (age 64,
+    # tick ~160) and before `celebrating` draws the "5 points" banner (age 110, tick
+    # ~206). `frozen` blocks until the sim reaches the freeze tick, so the capture is
+    # a pure function of (seed, tick). This is the champion for the treasure-chest-open
+    # convergence campaign.
+    "chests-opened": {
+        "game": "treasure-chest-pick",
+        "seed": 470573198,
+        "shot": 180,
+        "backend": "canvas2d",
+        "press": "Space@30",
+        "steps": ["frozen", "shot"],
+    },
 }
 
 
@@ -236,6 +252,7 @@ def main() -> int:
     ap.add_argument("--game", help="boot straight into this game id (?game=)")
     ap.add_argument("--seed", type=int, help="pin the session seed (?seed=)")
     ap.add_argument("--shot", type=int, help="freeze the simulation at this tick (?shot=)")
+    ap.add_argument("--press", help="boot-time scripted key press(es), e.g. 'Space@30' (?press=)")
     ap.add_argument("--backend", default="canvas2d", choices=["auto", "canvas2d", "webgl2"])
     ap.add_argument("--size", default="1440x900", help="viewport WxH")
     ap.add_argument("--scale", type=float, default=1.0, help="device pixel ratio for clip captures")
@@ -257,6 +274,9 @@ def main() -> int:
         "seed": args.seed if args.seed is not None else scene.get("seed"),
         "shot": args.shot if args.shot is not None else scene.get("shot"),
         "backend": None if (args.backend == "auto") else (args.backend or scene.get("backend")),
+        # Boot-time scripted key press(es), e.g. "Space@30" — the shell's `?press`
+        # affordance, so a `?shot` freeze can be reached with a selection already made.
+        "press": args.press or scene.get("press"),
     }
     params = "&".join(f"{k}={v}" for k, v in query.items() if v is not None)
     url = f"{args.url.rstrip('/')}/{f'?{params}' if params else ''}"

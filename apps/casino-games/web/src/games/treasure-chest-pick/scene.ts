@@ -172,13 +172,31 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   GildBright: { baseColor: [0.92, 0.71, 0.25, 1], emissive: [0.1, 0.07, 0, 1] },
   // Warm reveal light: a layered pool under the chosen chest, seam leak, inner
   // glow, and the burst — all additive-emissive translucent discs/slabs.
-  PoolCore: { baseColor: [1, 0.86, 0.5, 1], emissive: [1, 0.78, 0.4, 1], opacity: 0.5 },
-  PoolMid: { baseColor: [1, 0.84, 0.48, 1], emissive: [0.9, 0.66, 0.3, 1], opacity: 0.28 },
-  PoolOuter: { baseColor: [1, 0.82, 0.46, 1], emissive: [0.8, 0.58, 0.24, 1], opacity: 0.14 },
-  SeamGlow: { baseColor: [1, 0.9, 0.55, 1], emissive: [1, 0.82, 0.4, 1], opacity: 0.7 },
-  InnerGlow: { baseColor: [1, 0.85, 0.5, 1], emissive: [0.72, 0.54, 0.26, 1], opacity: 0.7 },
-  BurstGlow: { baseColor: [1, 0.92, 0.62, 1], emissive: [1, 0.85, 0.5, 1], opacity: 0.42 },
-  BurstRay: { baseColor: [1, 0.9, 0.58, 1], emissive: [1, 0.82, 0.44, 1], opacity: 0.22 },
+  // These warm overlays are additive-emissive translucent slabs, and there is no
+  // tonemap/grade stage here: each one adds straight on top of the already-bright
+  // Lambert wood and clips it. Stacked (inner glow + three pool discs + seam +
+  // burst) they flood the whole open chest to a flat yellow fog that erases the
+  // carved-wood value-stepping and washes the gem to a formless white blob — the
+  // champion's blowout. The reference keeps a TIGHT hot core with a fast falloff
+  // to readable brown, so the fix is a halo shape, not a brighter light: hold the
+  // hot PoolCore (it matches the reference's bright center right under the gem)
+  // but pull the WIDE overlays (inner glow + mid/outer pool + seam) and the whole
+  // burst bloom well down, so the warmth stays a contained pool and the brown wood
+  // and blue gem read through it the way they do in the reference.
+  // Foreman merge of two lenses that both attacked this glow family: surfacing
+  // set the MAGNITUDE (dim the wide overlays, cut opacity, hold the hot core) and
+  // colorist set the HUE (desaturate toward warm-WHITE — lift green/blue so the
+  // additive stack no longer clips to saturated gold). Each emissive keeps
+  // surfacing's red-anchor and opacity, with green/blue raised by colorist's
+  // warm-white ratios, so the pool stays a tight, dim halo that reads as warm
+  // light — not a nuclear-yellow flood — and the brown wood + blue gem show through.
+  PoolCore: { baseColor: [1, 0.86, 0.5, 1], emissive: [0.92, 0.78, 0.63, 1], opacity: 0.5 },
+  PoolMid: { baseColor: [1, 0.84, 0.48, 1], emissive: [0.52, 0.42, 0.32, 1], opacity: 0.24 },
+  PoolOuter: { baseColor: [1, 0.82, 0.46, 1], emissive: [0.4, 0.32, 0.24, 1], opacity: 0.12 },
+  SeamGlow: { baseColor: [1, 0.9, 0.55, 1], emissive: [0.72, 0.63, 0.5, 1], opacity: 0.6 },
+  InnerGlow: { baseColor: [1, 0.85, 0.5, 1], emissive: [0.36, 0.3, 0.24, 1], opacity: 0.5 },
+  BurstGlow: { baseColor: [1, 0.92, 0.62, 1], emissive: [0.66, 0.59, 0.5, 1], opacity: 0.36 },
+  BurstRay: { baseColor: [1, 0.9, 0.58, 1], emissive: [0.6, 0.53, 0.43, 1], opacity: 0.18 },
   Mote: { baseColor: [1, 0.95, 0.72, 1], emissive: [1, 0.9, 0.6, 1] },
   // The arcade stage: a turquoise platform with a rim, a warm central glow, and
   // a darker edge falloff — an intentional board, not a flat marker.
@@ -828,10 +846,37 @@ const heroPrize = (rarity: Parameters<typeof rewardMaterialOf>[0], at: EngineVec
   const size = (0.54 + rarityBonus) * (0.5 + 0.5 * riseT) * (1 + Math.sin(tick * 0.16) * 0.04 * settle) * gem;
   const halo = 0.82 * (0.5 + 0.5 * riseT) * (0.9 + Math.sin(tick * 0.14) * 0.12 * settle) * gem;
   const spin = quatYaw(tick * 0.04);
+  // The prize is a CUT crystal, not a smooth ball. The reference gem is a rounded
+  // stone whose whole surface is broken into triangular/kite facets that each
+  // catch the light at their own angle — the champion's lone sphere + single box
+  // read as a featureless bead. The engine's mesh vocabulary is box/sphere/
+  // cylinder with no faceted-gem primitive, so — exactly as the barrel-lid dome
+  // is an honest arc of flat slats rather than a half-cylinder — the gem is a
+  // rounded core wrapped in a crown of flat box facets, a bright table facet on
+  // top, and a pointed pavilion box below, so the stone reads as cut and
+  // sparkling. Every facet is welded to the gem's spin so the whole cluster turns
+  // as one stone.
+  const gemFacet = (suffix: string, offset: EngineVec3, scale: EngineVec3, localRot: EngineQuat): SceneInstance => ({
+    key: `reward:${suffix}`,
+    material,
+    mesh: "box",
+    transform: { position: addV3(center, rotateByQuat(offset, spin)), rotation: quatMul(spin, localRot), scale },
+  });
+  // Crown: six kite facets fanning around the upper girdle, each tilted up-and-out
+  // so its flat face angles toward the light like a cut gemstone's crown.
+  const crown = Array.from({ length: 6 }, (_, i): SceneInstance => {
+    const ringQ = quatMul(quatYaw((i / 6) * Math.PI * 2), quatPitch(-0.95));
+    return gemFacet(`crown${i}`, rotateByQuat(v3(0, 0, size * 0.38), ringQ), v3(size * 0.3, size * 0.09, size * 0.42), ringQ);
+  });
   return [
     disc("reward:halo", "BurstGlow", v3(center.x, center.y, center.z + 0.001), halo, 0.02),
     { key: "reward:core", material, mesh: "sphere", transform: { position: center, rotation: spin, scale: v3(size, size, size) } },
-    { key: "reward:facet", material, mesh: "box", transform: { position: center, rotation: quatYaw(tick * 0.04 + 0.7), scale: v3(size * 0.72, size * 0.72, size * 0.72) } },
+    ...crown,
+    // The flat top table, faceted octagonally by a 22.5° yaw.
+    gemFacet("table", v3(0, size * 0.42, 0), v3(size * 0.5, size * 0.12, size * 0.5), quatYaw(Math.PI / 8)),
+    // The pavilion: a box tipped 45° on two axes so a single vertex points down,
+    // giving the stone a cut point beneath the girdle instead of a round bottom.
+    gemFacet("pavilion", v3(0, -size * 0.3, 0), v3(size * 0.46, size * 0.46, size * 0.46), quatMul(quatPitch(Math.PI / 4), quatRoll(Math.PI / 4))),
   ];
 };
 
@@ -1465,7 +1510,15 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     const warm = clamp01((revealAge - timeline.pauseEnd) / 12);
     lights.push({
       key: "light:chest",
-      light: { color: [1, 0.82, 0.45, 1], intensity: 1.3 * warm * (winReveal ? 1 : 0.4), kind: "point", position: addV3(flown.position, scaleV3(v3(0, 1.1, 0.3), heroScale)) },
+      // A warm reveal KISS, not a flood. At 1.3 this point light — stacked on the
+      // shared key (1.35) and the focus point (~0.9) at close range on the scaled-up
+      // hero chest — drove every face to a uniform yellow-white, crushing the wood's
+      // value modeling and erasing the darks the reference keeps deep. The reference
+      // reveal is a moody near-black shot where the wood stays saddle-brown and the
+      // GEM is the true key; a lower warm kiss lifts the seam/interior without blowing
+      // the whole chest, so the value spread that carves the planks (and the gem's own
+      // glow) survives instead of washing out.
+      light: { color: [1, 0.82, 0.45, 1], intensity: 0.5 * warm * (winReveal ? 1 : 0.4), kind: "point", position: addV3(flown.position, scaleV3(v3(0, 1.1, 0.3), heroScale)) },
     });
   }
   if (winReveal && selected !== null && burstT > 0 && burstT < 1) {
