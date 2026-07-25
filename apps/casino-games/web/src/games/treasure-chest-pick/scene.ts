@@ -102,17 +102,18 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // warm rig lands the beach at golden sand rather than bleached cream. This is a
   // pure palette warm/saturation move — no grade/tonemap stage exists here.
   StageFloor: { baseColor: [0.9, 0.75, 0.47, 1] },
-  // The lagoon surface itself. The shared pavilion turquoise
-  // ([0.32, 0.78, 0.76]) is authored GREEN-leaning (G above B), and the warm key
-  // ([1, 0.96, 0.88]) then multiplies blue down another ~12% relative to red —
-  // so the champion pool lands on a flat sea-GREEN, while the reference lagoon
-  // is a vivid CYAN-blue. With no grade/white-balance stage to correct hue after
-  // the fact, the compensation has to be pre-baked into the base color: push
-  // blue decisively ABOVE green and pull red down, so that after the warm rig
-  // eats the blue the lit surface settles on the reference's caribbean cyan
-  // rather than on pond green. Overridden for THIS game only — the other casino
-  // stages keep the neutral pavilion turquoise.
-  StageFloorAccent: { baseColor: [0.24, 0.7, 0.88, 1] },
+  // The lagoon's SHALLOW SHELF — the full-radius water disc (the shared
+  // `stage:floor-ring`), which the inset open-water body sits inside, so a
+  // lighter band of water rings the whole shore. The reference lagoon is not one
+  // flat blue: it is a vivid cyan body with a distinctly PALER ring where the
+  // pool shallows out onto the sand, and that two-tone step is most of what
+  // reads as "water" rather than "blue disc" in a frame with no textures and no
+  // specular. Same cyan hue and same pre-baked warm-rig compensation as the
+  // deeper `LagoonWater` below (blue decisively ABOVE green, red pulled down, so
+  // the warm key cannot drag it to pond green) — just seated much higher up the
+  // value ladder. Overridden for THIS game only; the other casino stages keep
+  // the neutral pavilion turquoise.
+  StageFloorAccent: { baseColor: [0.44, 0.86, 0.94, 1] },
   // Wood, value-stepped so the chest reads solid without a texture: the lid
   // catches the key light (lightest), the front boards sit mid, side boards go
   // darker, and the gaps between planks are the darkest brown. The ladder is
@@ -181,12 +182,19 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   Mote: { baseColor: [1, 0.95, 0.72, 1], emissive: [1, 0.9, 0.6, 1] },
   // The arcade stage: a turquoise platform with a rim, a warm central glow, and
   // a darker edge falloff — an intentional board, not a flat marker.
-  // The pool's depth wall, carrying the same blue-over-green bias as the lagoon
-  // surface above it: it is the SAME body of water seen edge-on, so if the
-  // surface reads cyan and the wall reads sea-green the pool splits into two
-  // different liquids at the rim. Darker and lower-red than the surface (it is
-  // the shaded depth under the waterline), but the hue matches.
-  PlatformSide: { baseColor: [0.07, 0.42, 0.58, 1] },
+  // The lagoon's OPEN WATER: the deeper cyan body inside the shallow shelf, and
+  // the single largest surface in the frame.
+  //
+  // This material used to be `PlatformSide`, the pool's shaded *depth wall*
+  // ([0.07, 0.42, 0.58]) — and the champion rendered the ENTIRE lagoon with it.
+  // The wall disc sat at the same radius as the cyan surface ring but 0.007
+  // HIGHER, so it occluded the water it was supposed to sit under and the camera
+  // only ever saw the wall tone: a flat, dark navy where the reference has vivid
+  // caribbean cyan. The disc is now the water body proper (see `platform`), so
+  // the color is authored for a LIT top face rather than a shaded edge — the
+  // cyan the surface ring was always meant to be, one step below the shallow
+  // shelf that now rings it.
+  LagoonWater: { baseColor: [0.24, 0.7, 0.88, 1] },
   EdgeVignette: { baseColor: [0.03, 0.2, 0.26, 1], opacity: 0.34 },
   // A gold accent, so it obeys the same amber ratio and the same
   // seated-below-the-clamp rule as the chest gilding above — a lemon-white rivet
@@ -789,12 +797,27 @@ const heroPrize = (rarity: Parameters<typeof rewardMaterialOf>[0], at: EngineVec
  */
 export const WATER_RADIUS = 5.0;
 
+/**
+ * How far in from the shore the deeper open water starts, as a fraction of
+ * `WATER_RADIUS`. The remainder is the paler shallow shelf (the shared
+ * `stage:floor-ring`, `StageFloorAccent`) showing as a ring all the way round —
+ * measured off the reference, where the light band at the shore is roughly a
+ * tenth of the pool's radius.
+ */
+const LAGOON_SHELF_INSET = 0.9;
+
 const platform = (): readonly SceneInstance[] => [
-  // Both water discs are lagoon-scale, so both draw the high-tessellation mesh:
-  // the vignette is the OUTER of the two, and a faceted vignette under a round
+  // Every water disc is lagoon-scale, so all of them draw the high-tessellation
+  // mesh: the vignette is the OUTERMOST, and a faceted vignette under a round
   // pool would just move the polygon out to the sand line.
   disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006, LAGOON_MESH),
-  disc("plat:side", "PlatformSide", v3(0, -0.062, 0), WATER_RADIUS, 0.06, LAGOON_MESH),
+  // The open water, inset so the shallow shelf rings it. It is deliberately
+  // stacked ABOVE the shelf ring (whose top face is at -0.039) with clear air
+  // between the two faces: co-planar water discs would z-fight across a third of
+  // the frame, and the previous full-radius disc — 0.007 above the ring at the
+  // SAME radius — hid the shelf entirely and painted the whole lagoon in the
+  // depth-wall tone (see `LagoonWater`).
+  disc("plat:water", "LagoonWater", v3(0, -0.032, 0), WATER_RADIUS * LAGOON_SHELF_INSET, 0.02, LAGOON_MESH),
   // No central warm glow: pooling warmth at the middle brightened the center chest
   // and made it read as permanently highlighted. The lagoon stays evenly lit.
   ...[
@@ -1471,8 +1494,11 @@ const WATER_RIM_POINTS = 48;
 const CHEST_HOLE_LIFT = 0.3;
 const CHEST_HALF_WIDTH = 0.82;
 const CHEST_HOLE_MARGIN = 6;
-/** The lagoon's water palette. The EDGE color matches the rendered pool so the
- * shoreline cover is invisible except that it hides the net; the LINE/TROUGH pair
+/** The lagoon's water palette. The EDGE color matches the rendered pool AT THE
+ * SHORE — which is now the paler shallow shelf, not the deeper open water — so
+ * the shoreline cover is invisible except that it hides the net. (Left at the
+ * deep-water tint it would re-darken the shelf band at 32% and quietly undo the
+ * two-tone step the 3D discs draw.) The LINE/TROUGH pair
  * reads as a ripple crest and trough; SPARKLE catches the light on some peaks;
  * SHALLOW is the lighter band where the water meets the sand. (No sun glint: in a
  * pool this packed with chests a sheen has nowhere to sit without ringing the
@@ -1484,7 +1510,7 @@ const CHEST_HOLE_MARGIN = 6;
  * the water, it actively pulls the whole lit surface back toward sea-green and
  * undoes the warm-rig compensation baked into the 3D material. The 2D and 3D
  * authorities have to agree on the hue or the pool averages out between them. */
-const POOL_EDGE_COLOR = "rgb(34, 142, 168)";
+const POOL_EDGE_COLOR = "rgb(102, 196, 206)";
 const WATER_LINE_COLOR = "rgba(210, 244, 252, 0.95)";
 const WATER_TROUGH_COLOR = "rgba(10, 84, 116, 0.6)";
 const WATER_SPARKLE_COLOR = "rgba(234, 251, 255, 0.9)";
