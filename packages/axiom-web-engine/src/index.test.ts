@@ -21,6 +21,7 @@ test("the retained-scene store + facade are exported as functions", () => {
     "setNodeTransform",
     "setCamera3D",
     "setClearColor",
+    "setAmbient",
     "addLight",
     "setLight",
     "clearScene",

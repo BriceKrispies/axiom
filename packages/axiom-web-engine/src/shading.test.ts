@@ -34,7 +34,10 @@ const assertRgbClose = (actual: readonly [number, number, number], expected: rea
 // Constants mirrored from shading.ts (and the GLSL twin) for the reference math.
 const pointFalloff = (d: number): number => 1 / (1 + 0.08 * d * d);
 const fresnel = (ndv: number, gloss: number): number => (1 - 0.04) * (1 - ndv) ** 5 * gloss * 0.5;
-const NO_LIGHTS = { dirLights: [], pointLights: [] } as const;
+/** The engine-default ambient floor, as the frame triple every case below uses
+ * unless it is specifically exercising a custom ambient. */
+const GREY: readonly [number, number, number] = [AMBIENT, AMBIENT, AMBIENT];
+const NO_LIGHTS = { ambient: GREY, dirLights: [], pointLights: [] } as const;
 
 // No lights + default (matte) roughness: a pure ambient diffuse and zero specular
 // — byte-identical to the historical Lambert term's ambient floor.
@@ -44,10 +47,30 @@ test("no lights leaves a matte ambient diffuse and zero specular", () => {
   assertRgbClose(dark.specular, [0, 0, 0], "no specular");
 });
 
+// The ambient floor is PER-FRAME, PER-CHANNEL scene data (`SceneFrame.ambient`),
+// not a monochrome constant: an unlit surface reads back exactly the authored
+// triple, and both entry points (the full shade and the matte fast path) agree.
+// A warm ambient is how a scene lifts away-facing faces without a fake fill light
+// or fake material emissive; a directional light's own term is added on top of it
+// unchanged, so authoring ambient never disturbs the lit side's math.
+test("the frame's ambient is the per-channel diffuse floor", () => {
+  const warm: readonly [number, number, number] = [0.28, 0.25, 0.21];
+  const unlit = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 1, { ambient: warm, dirLights: [], pointLights: [] });
+  assertRgbClose(unlit.diffuse, warm, "warm ambient floor");
+  assertRgbClose(diffuseOnly(0, 1, 0, 0, 0, 0, { ambient: warm, dirLights: [], pointLights: [] }), warm, "matte path floor");
+  const lit = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 1, {
+    ambient: warm,
+    dirLights: [{ color: [0.5, 0.5, 0.5], direction: [0, -1, 0] }],
+    pointLights: [],
+  });
+  assertRgbClose(lit.diffuse, [warm[0] + 0.5, warm[1] + 0.5, warm[2] + 0.5], "ambient adds under the key");
+});
+
 // A directional light traveling straight down fully lights an up-facing surface:
 // ambient + color·intensity, per channel. Matte roughness ⇒ no specular.
 test("a directional light fully lights a facing surface, per channel", () => {
   const sun = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 1, {
+    ambient: GREY,
     dirLights: [{ color: [1, 0.5, 0.25], direction: [0, -1, 0] }],
     pointLights: [],
   });
@@ -59,6 +82,7 @@ test("a directional light fully lights a facing surface, per channel", () => {
 // no specular (the facing gate), even for a mirror-smooth material.
 test("a back-facing directional light contributes neither diffuse nor specular", () => {
   const back = shadeSurface(0, -1, 0, 0, 0, 0, 0, -5, 0, 0, {
+    ambient: GREY,
     dirLights: [{ color: [1, 1, 1], direction: [0, -1, 0] }],
     pointLights: [],
   });
@@ -69,6 +93,7 @@ test("a back-facing directional light contributes neither diffuse nor specular",
 // A point light 2 m overhead: lambert 1, falloff 1/(1 + 0.08·4) on the diffuse.
 test("a point light applies the soft distance falloff to diffuse", () => {
   const point = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 1, {
+    ambient: GREY,
     dirLights: [],
     pointLights: [{ color: [1, 1, 1], position: [0, 2, 0] }],
   });
@@ -79,6 +104,7 @@ test("a point light applies the soft distance falloff to diffuse", () => {
 // at d = 0 the N·L term is zero, so it adds no directional diffuse.
 test("a coincident point light stays finite", () => {
   const here = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 1, {
+    ambient: GREY,
     dirLights: [],
     pointLights: [{ color: [1, 1, 1], position: [0, 0, 0] }],
   });
@@ -89,6 +115,7 @@ test("a coincident point light stays finite", () => {
 // Both light lists fold into the same running diffuse sums, in order.
 test("directional and point contributions accumulate together", () => {
   const both = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 1, {
+    ambient: GREY,
     dirLights: [{ color: [0.2, 0.2, 0.2], direction: [0, -1, 0] }],
     pointLights: [{ color: [1, 1, 1], position: [0, 2, 0] }],
   });
@@ -100,6 +127,7 @@ test("directional and point contributions accumulate together", () => {
 // downstream in the backend), added on top of the diffuse.
 test("a glossy material adds a full white specular highlight", () => {
   const shine = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 0, {
+    ambient: GREY,
     dirLights: [{ color: [1, 1, 1], direction: [0, -1, 0] }],
     pointLights: [],
   });
@@ -111,6 +139,7 @@ test("a glossy material adds a full white specular highlight", () => {
 // diffuse (N·H = 1 with the light overhead and the eye above).
 test("a point light's specular is attenuated by its falloff", () => {
   const shine = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 0, {
+    ambient: GREY,
     dirLights: [],
     pointLights: [{ color: [1, 1, 1], position: [0, 2, 0] }],
   });
@@ -122,10 +151,12 @@ test("a point light's specular is attenuated by its falloff", () => {
 // changed, proving an unset roughness is a pure no-op.
 test("a fully-rough material zeroes specular but leaves diffuse untouched", () => {
   const rough = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 1, {
+    ambient: GREY,
     dirLights: [{ color: [1, 1, 1], direction: [0, -1, 0] }],
     pointLights: [],
   });
   const glossy = shadeSurface(0, 1, 0, 0, 0, 0, 0, 5, 0, 0, {
+    ambient: GREY,
     dirLights: [{ color: [1, 1, 1], direction: [0, -1, 0] }],
     pointLights: [],
   });
@@ -147,6 +178,7 @@ test("a Fresnel rim brightens grazing edges, scaled by glossiness", () => {
 // may skip the whole specular half for a matte material. Folds BOTH light lists.
 test("diffuseOnly matches shadeSurface's diffuse bucket exactly", () => {
   const lights = {
+    ambient: GREY,
     dirLights: [{ color: [0.2, 0.4, 0.6] as const, direction: [0, -1, 0] as const }],
     pointLights: [{ color: [1, 1, 1] as const, position: [0, 2, 0] as const }],
   };
@@ -178,6 +210,7 @@ test("tonemap rolls off highlights above the knee", () => {
 // Deterministic: identical inputs, identical output.
 test("identical inputs give identical output", () => {
   const seed = {
+    ambient: GREY,
     dirLights: [{ color: [1, 1, 1] as const, direction: [0, -1, 0] as const }],
     pointLights: [{ color: [1, 1, 1] as const, position: [0, 2, 0] as const }],
   };

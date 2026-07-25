@@ -63,12 +63,18 @@ export interface SceneLight {
   readonly light: Light;
 }
 
-/** The whole frame as a pure value: the camera, an optional clear color, the
- * lights, and the drawable instances. `view(state)` returns one of these; nothing
- * about it references the engine. */
+/** The whole frame as a pure value: the camera, an optional clear color and
+ * ambient, the lights, and the drawable instances. `view(state)` returns one of
+ * these; nothing about it references the engine. */
 export interface Scene {
   readonly camera: Camera3D;
   readonly clearColor?: Rgba;
+  /** The scene's AMBIENT (sky/bounce) light — the omni-directional diffuse floor
+   * every surface receives regardless of orientation. Omitted, the engine default
+   * (a neutral 0.12 grey) applies, so an existing scene is unchanged. Author it
+   * to describe the ENVIRONMENT: a warm value for a sunlit beach where sand
+   * bounces light back up, near-zero for a hard key-only void. See `setAmbient`. */
+  readonly ambient?: Rgba;
   readonly lights: readonly SceneLight[];
   readonly instances: readonly SceneInstance[];
 }

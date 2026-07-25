@@ -212,12 +212,15 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // ladder let those shadow faces sink to a muddy charcoal that read as a heavy
   // dark mass competing with the chests. A lighter, warmer sand keeps the
   // shadow side reading as dry sculpted sand — subordinate, not dominant.
-  // A whisper of warm emissive keeps the tower cylinders' shadow-side walls —
-  // which the low fill would otherwise crush to near-black under the raking key —
-  // settled on a dim SAND rather than charcoal, so the castle reads as sand from
-  // every face and stays a light, secondary prop instead of a dark mass.
-  CastleSand: { baseColor: [0.95, 0.87, 0.66, 1], emissive: [0.16, 0.13, 0.08, 1] },
-  CastleSandDark: { baseColor: [0.87, 0.78, 0.57, 1], emissive: [0.13, 0.1, 0.06, 1] },
+  // The tower cylinders' shadow-side walls no longer carry a fake warm emissive
+  // to stop them crushing to charcoal under the raking key: that was paint
+  // compensating for light, and it glowed the castle uniformly (emissive is added
+  // AFTER the albedo multiply, so it ignored the sand's own color and lifted the
+  // door and dark base by the same absolute amount). The scene now authors a real
+  // WARM AMBIENT (`ambient`, below), which lifts those faces through the albedo —
+  // so a sand wall settles on dim sand and a dark base stays dark.
+  CastleSand: { baseColor: [0.95, 0.87, 0.66, 1] },
+  CastleSandDark: { baseColor: [0.87, 0.78, 0.57, 1] },
   CastleDoor: { baseColor: [0.42, 0.34, 0.22, 1] },
   CastlePole: { baseColor: [0.34, 0.24, 0.14, 1] },
   // A warm-gold trim stripe on the decorative castle pennant, tying it to the
@@ -230,11 +233,11 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   CrabShell: { baseColor: [0.85, 0.34, 0.24, 1] },
   CrabShellDark: { baseColor: [0.66, 0.24, 0.16, 1] },
   CrabEye: { baseColor: [0.06, 0.05, 0.05, 1] },
-  // Shells/starfish carry the same whisper of warm emissive as the castle sand,
-  // so these little shore pieces read as pale shells catching the light rather
-  // than dark pebbles when the low fill leaves their sides unlit.
-  Shell: { baseColor: [0.96, 0.86, 0.8, 1], emissive: [0.24, 0.2, 0.17, 1] },
-  Starfish: { baseColor: [0.92, 0.5, 0.29, 1], emissive: [0.2, 0.1, 0.05, 1] },
+  // Shells/starfish shed the same emissive fakery for the same reason: the warm
+  // ambient keeps these little shore pieces reading as pale shells catching the
+  // sky rather than dark pebbles, without making them self-luminous.
+  Shell: { baseColor: [0.96, 0.86, 0.8, 1] },
+  Starfish: { baseColor: [0.92, 0.5, 0.29, 1] },
   // ── one consistent contact-shadow family ──────────────────────────────────
   // Every prop anchors to the ground with the same two translucent discs: a
   // wide SOFT rim and a smaller, darker CORE where the object actually meets the
@@ -1254,26 +1257,30 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // Beach sun under a big bright sky — NOT a bare raked sun. The reference is a
   // soft, high-key diorama: the palm's cast shadow is barely darker than the
   // sand, the castle's away-facing towers stay pale sand, and a chest's shadow
-  // side sits maybe 3:1 under its lid. The previous rig chased the opposite
-  // reading — it knocked the shared cool fill to 0.12, so with the engine's
-  // fixed 0.12 ambient floor EVERY away-facing surface collapsed to ~0.17 while
-  // lit faces sat near 1.0: a 6:1 hard-sun ratio that crushed the darks. (The
-  // tell is upstream in the palette: CastleSand, Shell and Starfish all carry a
-  // "whisper of warm emissive" whose only job is to stop faces the fill no
-  // longer reaches going charcoal — paint compensating for light.)
+  // side sits maybe 3:1 under its lid.
   //
-  // So rebalance the rig instead of the paint, for THIS scene only: bring the
-  // fill back to a real level as a near-NEUTRAL counter-light (the honest
-  // objection to the shared fill was its blue, not its existence — at [0.94,
-  // 0.95, 0.96] the lifted darks land on warm sand/wood rather than sky-grey),
-  // and trim the key by the matching amount so total top-face exposure is held
-  // where it was and nothing clips. Net: the lit faces and the whole frame's
-  // brightness are unchanged, the shadow faces roughly double, and the
-  // lit-to-shadow spread drops ~6:1 -> ~3:1, the reference's soft modeling.
-  // The key DIRECTION is untouched, so every contact shadow stays in lock-step.
+  // What was actually missing is ENVIRONMENT, not another lamp. A beach at midday
+  // is lit twice: once by the sun, and once by a whole hemisphere of sky and hot
+  // sand bouncing warm light back onto every surface from every direction. The
+  // engine's ambient was a fixed monochrome 0.12, so this scene could only fake
+  // that hemisphere two illegal ways — a near-white DIRECTIONAL "fill" (still
+  // directional: it lights the faces it happens to point at and leaves the faces
+  // pointing away from BOTH lamps crushed at 0.12) and fake material `emissive`
+  // on the sand props. Both are now gone; the scene authors the hemisphere
+  // directly as `ambient` (see the returned Scene below), which is the engine
+  // field that actually models it.
+  //
+  // With a real ambient the rig collapses back to what a beach rig should be: a
+  // warm sun key plus the shared cool sky fill at its normal weight. The key and
+  // fill are trimmed by exactly the exposure the ambient now supplies, so the LIT
+  // faces and the overall frame brightness are held where the champion had them
+  // (top-face ≈ 1.06 R, unchanged) while the darkest faces rise from 0.12·albedo
+  // to 0.28·albedo — a ~4:1 lit-to-shadow spread instead of ~9:1, landing on warm
+  // sand rather than charcoal. The key DIRECTION is untouched, so every contact
+  // shadow stays in lock-step.
   const lights: SceneLight[] = stageLights(focus, 0.5 + 0.4 * selectEase).map((entry) => {
-    const fill = { key: entry.key, light: { ...entry.light, color: [0.94, 0.95, 0.96, 1] as Rgba, intensity: 0.45 } };
-    const key = { key: entry.key, light: { ...entry.light, intensity: 1.28 } };
+    const fill = { key: entry.key, light: { ...entry.light, color: [0.9, 0.94, 1, 1] as Rgba, intensity: 0.3 } };
+    const key = { key: entry.key, light: { ...entry.light, intensity: 1.15 } };
     return entry.key === "light:fill" ? fill : entry.key === "light:key" ? key : entry;
   });
   if (selected !== null && revealAge >= timeline.pauseEnd) {
@@ -1291,6 +1298,15 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   }
 
   return {
+    // The hemisphere of warm bounce a beach sits in — sky above, hot sand all
+    // around — as one honest engine value instead of a fake fill lamp plus fake
+    // emissive. Warm and red-leading (R > G > B) because the dominant bounce
+    // source in frame IS the sand: an away-facing wooden chest board or a
+    // shadow-side castle tower now settles onto a dim version of its OWN color
+    // (ambient multiplies the albedo) rather than a grey or a self-lit glow.
+    // Weighted to keep the chests' shadow boards clearly readable while staying
+    // well under the key, so the sun still models the forms.
+    ambient: [0.28, 0.25, 0.21, 1],
     camera,
     clearColor: SKY_CLEAR,
     // The veil sits between the board and the hero chest: everything before it

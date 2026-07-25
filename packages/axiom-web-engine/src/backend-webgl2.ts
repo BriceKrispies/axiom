@@ -9,7 +9,7 @@
  */
 
 import type { Handle, MeshData } from "./api.ts";
-import { type FrameNode, type RenderBackend, type SceneFrame, AMBIENT, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS } from "./backend.ts";
+import { type FrameNode, type RenderBackend, type SceneFrame, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS } from "./backend.ts";
 import { type Mat4, fromTrs, lookAt, multiply, perspective } from "./mat4.ts";
 
 const VERT_SRC = `#version 300 es
@@ -48,6 +48,7 @@ uniform vec3 uDirColor[MAX_DIR];    // color * intensity
 uniform int uPointCount;
 uniform vec3 uPointPos[MAX_POINT];
 uniform vec3 uPointColor[MAX_POINT]; // color * intensity
+uniform vec3 uAmbient;               // the frame's ambient floor (SceneFrame.ambient)
 uniform vec4 uBaseColor;
 uniform vec3 uEmissive;
 uniform float uOpacity;
@@ -70,7 +71,7 @@ void main() {
   float gloss = clamp(1.0 - uRoughness, 0.0, 1.0);
   float shininess = 8.0 + gloss * (128.0 - 8.0);
   vec3 toEye = normalize(uEye - vWorldPos);
-  vec3 diffuse = vec3(${AMBIENT});
+  vec3 diffuse = uAmbient;
   float ndv = max(dot(n, toEye), 0.0);
   float rim = (1.0 - 0.04) * pow(1.0 - ndv, 5.0) * gloss * 0.5;
   vec3 specular = vec3(rim);
@@ -107,6 +108,7 @@ interface GpuMesh {
 interface Uniforms {
   readonly model: WebGLUniformLocation;
   readonly viewProj: WebGLUniformLocation;
+  readonly ambient: WebGLUniformLocation;
   readonly baseColor: WebGLUniformLocation;
   readonly emissive: WebGLUniformLocation;
   readonly opacity: WebGLUniformLocation;
@@ -181,6 +183,7 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
   const uniforms: Uniforms = {
     model: uniform(gl, program, "uModel"),
     viewProj: uniform(gl, program, "uViewProj"),
+    ambient: uniform(gl, program, "uAmbient"),
     baseColor: uniform(gl, program, "uBaseColor"),
     emissive: uniform(gl, program, "uEmissive"),
     opacity: uniform(gl, program, "uOpacity"),
@@ -239,6 +242,7 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
       const view = lookAt(frame.camera.position, frame.camera.target, { x: 0, y: 1, z: 0 });
       gl.uniformMatrix4fv(uniforms.viewProj, false, multiply(proj, view));
       gl.uniform3f(uniforms.eye, frame.camera.position.x, frame.camera.position.y, frame.camera.position.z);
+      gl.uniform3f(uniforms.ambient, frame.ambient[0], frame.ambient[1], frame.ambient[2]);
 
       gl.uniform1i(uniforms.dirCount, frame.dirLights.length);
       if (frame.dirLights.length > 0) {

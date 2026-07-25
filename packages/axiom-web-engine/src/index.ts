@@ -2,7 +2,7 @@
  * index.ts — the public surface of @axiom/web-engine. A consumer imports
  * everything it needs from this one entry point: the value contract types, the
  * retained-scene store (create meshes/materials, spawn + pose nodes, lights,
- * camera, clear color, render), the backend-selecting `initRenderer` facade, the
+ * camera, clear color, ambient, render), the backend-selecting `initRenderer` facade, the
  * fixed-step loop, input, and the tone/ambience audio.
  *
  * The internal spine (matrix math, mesh + shading generators, the backend
@@ -62,6 +62,7 @@ export {
   rendererNodeCount,
   renderScene,
   resizeRenderer,
+  setAmbient,
   setCamera3D,
   setClearColor,
   setLight,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Handle, MeshData } from "./api.ts";
-import { CLEAR_COLOR, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS, type RenderBackend, type SceneFrame } from "./backend.ts";
+import { CLEAR_COLOR, DEFAULT_AMBIENT, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS, type RenderBackend, type SceneFrame } from "./backend.ts";
 import {
   addLight,
   clearScene,
@@ -16,6 +16,7 @@ import {
   rendererNodeCount,
   renderScene,
   resizeRenderer,
+  setAmbient,
   setCamera3D,
   setClearColor,
   setLight,
@@ -89,13 +90,14 @@ test("store functions reject before initStore", () => {
   );
 });
 
-test("initStore seeds the default camera and clear color", () => {
+test("initStore seeds the default camera, clear color, and ambient", () => {
   const rec = setup("WebGL2", "high");
   assert.equal(rendererBackendName(), "WebGL2");
   assert.equal(rendererNodeCount(), 0);
   renderScene();
   const frame = rec.frames[0]!;
   assert.deepEqual([...frame.clearColor], [...CLEAR_COLOR]);
+  assert.deepEqual([...frame.ambient], [...DEFAULT_AMBIENT]);
   assert.deepEqual(frame.camera, EXPECTED_CAMERA);
 });
 
@@ -256,6 +258,17 @@ test("setNodeTransform re-poses a node and rejects an unknown entity", () => {
     },
     /unknown entity 9999/u,
   );
+});
+
+// setAmbient is the authorable replacement for the old hard-coded 0.12 floor: the
+// authored triple reaches the backend on the very next frame (alpha ignored), so a
+// scene can describe a warm sky/bounce environment instead of faking one with a
+// near-white directional fill or material emissive.
+test("setAmbient flows into the next frame, alpha ignored", () => {
+  const rec = setup("WebGL2", "high");
+  setAmbient([0.28, 0.25, 0.21, 1]);
+  renderScene();
+  assert.deepEqual([...rec.frames[0]!.ambient], [0.28, 0.25, 0.21]);
 });
 
 test("setCamera3D and setClearColor flow into the next frame", () => {

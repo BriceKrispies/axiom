@@ -10,6 +10,7 @@
 
 import {
   CLEAR_COLOR,
+  DEFAULT_AMBIENT,
   type FrameDirLight,
   type FrameNode,
   type FramePointLight,
@@ -46,6 +47,8 @@ interface RendererState {
   readonly lights: Map<Entity, Light>;
   camera: Camera3D;
   clearColor: [number, number, number];
+  /** The scene's ambient (sky/bounce) floor, linear RGB — see `SceneFrame.ambient`. */
+  ambient: [number, number, number];
 }
 
 const DEFAULT_CAMERA_HEIGHT = 2;
@@ -98,10 +101,12 @@ const requireState = (): RendererState =>
   demand(state, "store: initStore(backend, canvas) must be called before any other store function");
 
 /** Initialize the singleton store with an already-resolved backend and the
- * canvas it draws into. Sets the default camera and clear color. */
+ * canvas it draws into. Sets the default camera, clear color, and ambient. */
 export const initStore = (backend: RenderBackend, canvas: EngineCanvas): void => {
   const [cr, cg, cb] = CLEAR_COLOR;
+  const [ar, ag, ab] = DEFAULT_AMBIENT;
   state = {
+    ambient: [ar, ag, ab],
     backend,
     camera: DEFAULT_CAMERA,
     canvas,
@@ -233,6 +238,26 @@ export const setClearColor = (color: Rgba): void => {
   requireState().clearColor = [cr, cg, cb];
 };
 
+/**
+ * Set the scene's AMBIENT (sky/bounce) light — the omni-directional diffuse floor
+ * every surface receives regardless of orientation, before the albedo multiply
+ * (the alpha channel is ignored). Both backends read it per frame.
+ *
+ * This is the honest knob for "how bright and what color is the environment
+ * around the subject." A warm value keeps away-facing faces in the family of the
+ * lit ones (a sunlit beach, where sand bounces light back up); near-zero gives a
+ * hard-vacuum key-only look. It is NOT a substitute for a light: it has no
+ * direction and casts nothing. Use it instead of the two workarounds it replaces
+ * — a near-white directional "fill" (still directional, so it leaves a third set
+ * of faces crushed) and fake material `emissive` (paint compensating for light).
+ *
+ * Defaults to `DEFAULT_AMBIENT`; a scene that never calls this is unchanged.
+ */
+export const setAmbient = (color: Rgba): void => {
+  const [ar, ag, ab] = color;
+  requireState().ambient = [ar, ag, ab];
+};
+
 const isDirectional = (light: Light): light is Extract<Light, { kind: "directional" }> =>
   light.kind === "directional";
 const isPoint = (light: Light): light is Extract<Light, { kind: "point" }> => light.kind === "point";
@@ -300,6 +325,7 @@ export const renderScene = (): void => {
   const st = requireState();
   const lights = [...st.lights.values()];
   st.backend.render({
+    ambient: st.ambient,
     camera: st.camera,
     clearColor: st.clearColor,
     dirLights: lights

@@ -33,6 +33,7 @@ import {
   despawnRenderable,
   removeLight,
   renderScene,
+  setAmbient,
   setCamera3D,
   setClearColor,
   setLight,
@@ -173,6 +174,9 @@ export const runGame = <State>(canvas: HTMLCanvasElement, game: Game<State>, opt
       setCamera3D(scene.camera);
       if (scene.clearColor !== undefined) {
         setClearColor(scene.clearColor);
+      }
+      if (scene.ambient !== undefined) {
+        setAmbient(scene.ambient);
       }
       renderScene();
       opts.onFrame?.(state, ctx);

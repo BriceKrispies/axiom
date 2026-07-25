@@ -5,9 +5,10 @@
  * against (backend-webgl2.ts, enforced by shading.test.ts).
  *
  * `shadeSurface` returns TWO neutral buckets for one lit point:
- *   - `diffuse` = ambient floor + Σ directional (N·L, clamped) + Σ point (N·L with
- *     the soft 1/(1 + 0.08·d²) falloff). This bucket is tinted by the material
- *     albedo and attenuated by ambient occlusion in the backend.
+ *   - `diffuse` = the frame's AMBIENT floor (`SceneFrame.ambient`, a per-scene
+ *     linear-RGB sky/bounce term — not a constant) + Σ directional (N·L, clamped)
+ *     + Σ point (N·L with the soft 1/(1 + 0.08·d²) falloff). This bucket is tinted
+ *     by the material albedo and attenuated by ambient occlusion in the backend.
  *   - `specular` = a WHITE (albedo-independent) Blinn-Phong lobe per light, driven
  *     by the material roughness (glossiness = 1 − roughness) and the eye vector,
  *     plus a subtle Schlick Fresnel rim that brightens grazing edges. Both scale
@@ -23,13 +24,18 @@
  * `if`/`?:`.
  */
 
-import { AMBIENT, type FrameDirLight, type FramePointLight, type SceneFrame } from "./backend.ts";
+import type { FrameDirLight, FramePointLight, SceneFrame } from "./backend.ts";
 
 /** A plain 3-vector: a normal, a direction, a position, or a per-channel color. */
 type Vec3 = readonly [number, number, number];
 
 /** A linear RGB triple; each channel is an unbounded (0..∞) accumulated value. */
 type Rgb = readonly [number, number, number];
+
+/** Exactly the slice of the frame the shading term reads: the scene's ambient
+ * floor and the two light lists. Naming it keeps the two entry points honest
+ * about the fact that ambient is now frame DATA, not a module constant. */
+export type ShadingFrame = Pick<SceneFrame, "ambient" | "dirLights" | "pointLights">;
 
 /** The two neutral shading buckets for one surface point. `diffuse` is
  * albedo-tinted + AO-attenuated downstream; `specular` is added neutrally. */
@@ -141,19 +147,20 @@ export const shadeSurface = (
   ey: number,
   ez: number,
   roughness: number,
-  frame: Pick<SceneFrame, "dirLights" | "pointLights">,
+  frame: ShadingFrame,
 ): SurfaceShading => {
   const normal: Vec3 = [nx, ny, nz];
   const surface: Vec3 = [px, py, pz];
+  const [ambR, ambG, ambB] = frame.ambient;
   const gloss = Math.min(Math.max(1 - roughness, 0), 1);
   const shininess = SHINE_MIN + gloss * (SHINE_MAX - SHINE_MIN);
   const toEye = normalize(sub([ex, ey, ez], surface));
   const ndv = Math.max(dot(normal, toEye), 0);
   // Schlick Fresnel rim (neutral): brightens grazing edges, scaled by gloss.
   const rim = (1 - FRESNEL_F0) * (1 - ndv) ** FRESNEL_POWER * gloss * FRESNEL_GAIN;
-  let diffR = AMBIENT;
-  let diffG = AMBIENT;
-  let diffB = AMBIENT;
+  let diffR = ambR;
+  let diffG = ambG;
+  let diffB = ambB;
   let specR = rim;
   let specG = rim;
   let specB = rim;
@@ -176,7 +183,7 @@ export const shadeSurface = (
 };
 
 /**
- * The DIFFUSE-only shade (ambient floor + Σ directional N·L + Σ point N·L with
+ * The DIFFUSE-only shade (the frame's ambient + Σ directional N·L + Σ point N·L with
  * the soft falloff) — the COMPLETE shade for a matte material, whose specular and
  * Fresnel are identically zero. Byte-identical to `shadeSurface(...).diffuse` (the
  * diffuse bucket doesn't depend on roughness). The software backend calls this for
@@ -190,13 +197,14 @@ export const diffuseOnly = (
   px: number,
   py: number,
   pz: number,
-  frame: Pick<SceneFrame, "dirLights" | "pointLights">,
+  frame: ShadingFrame,
 ): Rgb => {
   const normal: Vec3 = [nx, ny, nz];
   const surface: Vec3 = [px, py, pz];
-  let diffR = AMBIENT;
-  let diffG = AMBIENT;
-  let diffB = AMBIENT;
+  const [ambR, ambG, ambB] = frame.ambient;
+  let diffR = ambR;
+  let diffG = ambG;
+  let diffB = ambB;
   const accumulate = ([pr, pg, pb]: Rgb): number => {
     diffR += pr;
     diffG += pg;
