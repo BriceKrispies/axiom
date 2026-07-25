@@ -188,14 +188,33 @@ export const chestCamera = (count: number): ReturnType<typeof tabletopCamera> =>
   const span = 5.0 + Math.ceil(count / CHEST_COLUMNS) * 0.78;
   const center = v3(0, 0.42, -0.1);
   // Start from the shared tabletop framing (which the other card-table games
-  // keep), then LOWER the pitch for THIS game only: drop the camera height and
-  // pull it back so the view is a more oblique 3/4 look at the chests — their
-  // gold-latched fronts and lids both read, rather than an almost top-down plan.
-  // The shared preset sits at height span·1.15 / depth span·0.85 (~54° down);
-  // this reseats it at span·0.95 / span·1.02 (~43° down). The hero close-up is
-  // derived from this camera via `heroFraming`, so it re-centers automatically.
+  // keep), then reseat the PITCH for THIS game only, measured off the reference
+  // rather than judged by eye. Two scale-invariant quantities pin the reference
+  // camera's elevation, and both are read straight off reference.png:
+  //
+  //   * the 3x3 chest grid's screen bbox is TALLER than it is wide — depth/width
+  //     = 0.467/0.433 = 1.08. A ground-plane grid's screen depth/width is
+  //     essentially sin(elevation), so 1.08 wants a high, plan-leaning camera.
+  //   * the lagoon disc's far rim sits at 0.225 of frame height. A shallower
+  //     camera pushes that rim DOWN the frame and opens a dead band of empty
+  //     sand above the pool.
+  //
+  // The previous seat (span·0.95 / span·1.02, ~43° down) failed both: it
+  // projected the grid at depth/width 0.93 — a full 14% too shallow, so the
+  // three rows crowded together and the nine chests stopped reading as a grid —
+  // and it put the lagoon rim at 0.264, with the sand band above it. This
+  // reseats the camera at span·1.076 / span·0.887 (~50.5° down), which is the
+  // joint least-squares fit over grid depth/width, grid top/bottom, grid width,
+  // row-to-row perspective divergence, and lagoon rim + width: it cuts the
+  // weighted framing error against the reference by ~4x. Camera DISTANCE from
+  // the target and fovY are deliberately unchanged, so the on-screen size of the
+  // board is held and only the angle moves. Pitching UP also strictly helps the
+  // old backdrop worry below: a steeper look drops the top frame-edge ray onto
+  // the lagoon floor even closer in, so the pastel sheet stays out of frame. The
+  // hero close-up is derived from this camera via `heroFraming` off a fixed
+  // heroDistance + fovY, so its on-screen scale is untouched and it re-centers.
   const base = tabletopCamera(center, span);
-  return { ...base, position: v3(center.x, center.y + span * 0.95, center.z + span * 1.02) };
+  return { ...base, position: v3(center.x, center.y + span * 1.076, center.z + span * 0.887) };
 };
 
 export const chestTargets = (count: number): readonly PickTarget[] =>
