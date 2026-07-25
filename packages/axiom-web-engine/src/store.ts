@@ -20,11 +20,9 @@ import {
   type ResolvedMaterial,
 } from "./backend.ts";
 import type { Camera3D, Entity, Handle, Light, MaterialSpec, MeshData, MeshKind, Rgba, Transform } from "./api.ts";
-import { absentProbe, assert, demand, orCompute, orElse, presentOf, select } from "./branchless.ts";
-import { unitBox, unitCylinderY, unitSphere } from "./meshes.ts";
-
-/** Color · intensity, resolved to a plain RGB triple for the frame. */
-type Rgb = readonly [number, number, number];
+import { absentProbe, assert, demand, orCompute, orElse, presentOf } from "./branchless.ts";
+import { buildPrimitive, primitiveCacheKey, resolveFacets } from "./tessellation.ts";
+import { isDirectional, isPoint, resolveDirLight, resolvePointLight } from "./light-resolve.ts";
 
 /** The canvas backing store the renderer resizes (a real `HTMLCanvasElement`
  * structurally satisfies this; a fake `{ width, height }` does too). */
@@ -56,34 +54,11 @@ const DEFAULT_CAMERA_DISTANCE = 6;
 const DEFAULT_FOV_DIVISOR = 3;
 const DEFAULT_NEAR_PLANE = 0.1;
 const DEFAULT_FAR_PLANE = 200;
-// A zero-magnitude direction is treated as straight down.
-const DIRECTION_EPSILON = 1e-9;
 const DEFAULT_EMISSIVE: Rgba = [0, 0, 0, 1];
 const DEFAULT_OPACITY = 1;
 // Absent roughness is fully MATTE: glossiness 0 -> zero specular, so a material
 // that never sets roughness renders byte-identically to the old Lambert-only path.
 const DEFAULT_ROUGHNESS = 1;
-/**
- * The default RADIAL facet budget of a round primitive, at full detail — what a
- * caller gets when it does not say how big the thing is. A caller that knows its
- * primitive is large on screen (a lagoon that spans a third of the frame, not a
- * rivet) passes its own budget to `createMesh`; the geometry is then cached
- * per-budget, so the big one is smooth WITHOUT dragging every small cylinder in
- * the scene up with it.
- */
-const DEFAULT_RADIAL_SEGMENTS = 24;
-/** A sphere's latitude rings are two thirds of its longitude rings — the 16:24
- * proportion the unit sphere is authored at — so one radial budget scales both. */
-const SPHERE_LAT_RATIO = 2 / 3;
-/** The software rasterizer pays per triangle, so it draws every primitive at
- * HALF the facet budget of the GPU path. Expressed as a scale rather than a
- * second table of constants: it is the same halving the old fixed low-detail
- * counts encoded (24→12 cylinder, 16/24→8/12 sphere), now applied to whatever
- * budget the caller asked for — so the backend LOD survives a caller's request
- * instead of being silently defeated by it. */
-const DETAIL_SCALE: Readonly<Record<"high" | "low", number>> = { high: 1, low: 0.5 };
-/** No ring closes with fewer facets than a triangle. */
-const MIN_SEGMENTS = 3;
 
 const DEFAULT_CAMERA: Camera3D = {
   far: DEFAULT_FAR_PLANE,
@@ -155,32 +130,23 @@ export const createMeshData = (data: MeshData): Handle => {
   return handle;
 };
 
-/** Primitive builders, each taking the resolved radial facet count. `box` is
- * flat-faceted by definition and ignores it. */
-const KIND_BUILDERS: Readonly<Record<MeshKind, (facets: number) => MeshData>> = {
-  box: unitBox,
-  cylinder: (facets): MeshData => unitCylinderY(facets),
-  sphere: (facets): MeshData => unitSphere(Math.max(MIN_SEGMENTS, Math.round(facets * SPHERE_LAT_RATIO)), facets),
-};
-
 /**
  * Get (or lazily build + cache) the shared geometry for a primitive kind at a
  * radial facet budget.
  *
- * `segments` is the budget at FULL detail; the active backend's `meshDetail`
- * then scales it (the software path halves it), and the result keys the cache —
- * so asking for the same budget twice reuses one upload, and asking for a bigger
- * one adds geometry beside the default rather than replacing it. Omitting
- * `segments` reproduces the previous fixed counts exactly (24/12 cylinder,
- * 16×24 / 8×12 sphere).
+ * `segments` is the budget at FULL detail; `tessellation.ts` resolves it against
+ * the active backend's `meshDetail` (the software path halves it), and the
+ * result keys the cache — so asking for the same budget twice reuses one upload,
+ * and asking for a bigger one adds geometry beside the default rather than
+ * replacing it. Omitting `segments` reproduces the previous fixed counts exactly
+ * (24/12 cylinder, 16×24 / 8×12 sphere).
  */
 export const createMesh = (kind: MeshKind, segments?: number): Handle => {
   const st = requireState();
-  const requested = Math.max(MIN_SEGMENTS, Math.round(orElse(segments, DEFAULT_RADIAL_SEGMENTS)));
-  const facets = Math.max(MIN_SEGMENTS, Math.round(requested * DETAIL_SCALE[st.backend.meshDetail]));
-  const cacheKey = `${kind}:${facets}`;
+  const facets = resolveFacets(segments, st.backend.meshDetail);
+  const cacheKey = primitiveCacheKey(kind, facets);
   return orCompute(st.primitiveCache.get(cacheKey), (): Handle => {
-    const handle = createMeshData(KIND_BUILDERS[kind](facets));
+    const handle = createMeshData(buildPrimitive(kind, facets));
     st.primitiveCache.set(cacheKey, handle);
     return handle;
   });
@@ -256,29 +222,6 @@ export const setClearColor = (color: Rgba): void => {
 export const setAmbient = (color: Rgba): void => {
   const [ar, ag, ab] = color;
   requireState().ambient = [ar, ag, ab];
-};
-
-const isDirectional = (light: Light): light is Extract<Light, { kind: "directional" }> =>
-  light.kind === "directional";
-const isPoint = (light: Light): light is Extract<Light, { kind: "point" }> => light.kind === "point";
-
-/** Color · intensity, resolved to the plain RGB triple a frame light carries. */
-const litColor = (light: Light): Rgb => {
-  const [cr, cg, cb] = light.color;
-  return [cr * light.intensity, cg * light.intensity, cb * light.intensity];
-};
-
-const resolveDirLight = (light: Extract<Light, { kind: "directional" }>): FrameDirLight => {
-  const dir = light.direction;
-  const len = Math.hypot(dir.x, dir.y, dir.z);
-  const tiny = len < DIRECTION_EPSILON;
-  const inv = select(tiny, 0, 1 / len);
-  return { color: litColor(light), direction: [dir.x * inv, select(tiny, -1, dir.y * inv), dir.z * inv] };
-};
-
-const resolvePointLight = (light: Extract<Light, { kind: "point" }>): FramePointLight => {
-  const pos = light.position;
-  return { color: litColor(light), position: [pos.x, pos.y, pos.z] };
 };
 
 /** Add a directional or point light and return its entity (re-posable via

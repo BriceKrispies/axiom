@@ -27,6 +27,24 @@ const assertVecClose = (
   assertClose(actual.z, expected.z, `${msg} (z)`, eps);
 };
 
+/**
+ * The largest chord between ANGULARLY ADJACENT points on a cylinder's top rim —
+ * the measurable stand-in for "how faceted does the silhouette look".
+ *
+ * Both filters matter. `y` alone also catches the top cap's CENTRE vertex (and
+ * the cap ring duplicated behind the wall ring), so a naive scan measures a
+ * centre-to-rim spoke of 0.5 at every segment count and reports a constant. The
+ * radius filter drops the centre; sorting by angle then puts genuine neighbours
+ * beside each other regardless of the order the builder emitted them in.
+ */
+const rimGap = (segments: number): number => {
+  const rim = unitCylinderY(segments)
+    .positions.filter((p) => Math.abs(p.y - 0.5) < 1e-6 && Math.abs(Math.hypot(p.x, p.z) - 0.5) < 1e-6)
+    .map((p) => Math.atan2(p.z, p.x))
+    .toSorted((a, b) => a - b);
+  return Math.max(...rim.slice(1).map((theta, i) => 2 * 0.5 * Math.abs(Math.sin((theta - rim[i]!) / 2))));
+};
+
 const checkMeshInvariants = (mesh: MeshData, name: string): void => {
   assert.equal(mesh.positions.length, mesh.normals.length, `${name}: one normal per position`);
   assert.ok(mesh.indices.length > 0, `${name}: has triangles`);
@@ -108,9 +126,5 @@ test("unitCylinderY scales its ring with the requested segment count", () => {
   assert.equal(fine.positions.length, 2 * (72 + 1) + 2 * (72 + 2), "72 segments");
   // The whole point of the knob: more facets means a silhouette closer to a true
   // circle. The largest gap between neighbouring rim points shrinks with count.
-  const rimGap = (segments: number): number => {
-    const ring = unitCylinderY(segments).positions.filter((p) => Math.abs(p.y - 0.5) < 1e-6);
-    return Math.max(...ring.slice(1).map((p, i) => Math.hypot(p.x - ring[i]!.x, p.z - ring[i]!.z)));
-  };
   assert.ok(rimGap(72) < rimGap(12), "a finer ring has shorter chords");
 });
