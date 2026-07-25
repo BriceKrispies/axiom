@@ -305,8 +305,20 @@ const LID_ARC_SLATS = 8;
  * dome and both gold bands of every chest. */
 const LID_ARC_SLATS_LOW = 4;
 const LID_ARC_THICKNESS = 0.11;
-/** How far the gold bands stand proud of the wood arc they wrap. */
-const LID_BAND_SWELL = 0.025;
+/**
+ * The reference chest's lid is NOT a plain barrel crossed by two thin gold
+ * straps. It is a barrel whose two ENDS are raised WOOD ribs — chunky carved end
+ * caps standing proud of a recessed centre panel, in a LIGHTER tan than the
+ * panel they flank. That rib/panel step is the single strongest thing carving
+ * the lid, and it is what the champion's inboard gold straps were standing in
+ * for. So the arc pair moves to the lid's outer ends, widens ~3x, and swaps to
+ * wood: the ribs get the light `woodLid`, the centre dome steps down to the
+ * mid-tone body wood, and the value break lands exactly where the reference
+ * puts it.
+ */
+const LID_RIB_WIDTH = 0.24;
+/** How far the raised end ribs stand proud of the dome panel they flank. */
+const LID_RIB_SWELL = 0.03;
 
 /**
  * One arc of slats sweeping the lid's full depth, from its back edge up over
@@ -438,29 +450,63 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     mesh: "box",
     transform: hingedTransform(lidHinge, scaleV3(v3(0, LID.y / 2, LID.z / 2), grow), lidQ, scaleV3(LID, grow)),
   };
+  // The chest's ONE piece of heavy gilding: a thick gold RAIL along the lid's
+  // front lip. In the reference this is the chest's defining metal — a deep
+  // plinth-like band that straddles the lid/body seam and stands well proud of
+  // the body front, with the hasp ring hanging off it. The champion's rim was a
+  // 0.13-tall, 0.05-deep hairline that read as a thin yellow sliver; this is
+  // ~1.6x taller and 2x deeper, and it is dropped so its lower half covers the
+  // top of the body front, which is exactly where the reference's gold sits.
   const lidRim: SceneInstance = {
     key: `${key}:lidrim`,
     material: trimTop,
     mesh: "box",
-    transform: hingedTransform(lidHinge, scaleV3(v3(0, LID.y / 2, LID.z - 0.02), grow), lidQ, scaleV3(v3(LID.x + 0.02, LID.y + 0.03, 0.05), grow)),
+    transform: hingedTransform(lidHinge, scaleV3(v3(0, LID.y / 2 - 0.03, LID.z - 0.03), grow), lidQ, scaleV3(v3(LID.x + 0.05, 0.21, 0.1), grow)),
   };
-  // The barrel top, and the two gold bands that wrap over it — continuations of
-  // the body straps below, so the gilding runs unbroken from board to crown.
-  const dome = lidArc(`${key}:dome`, lidHinge, lidQ, grow, woodLid, LID.x, 0);
-  const bands = [-1, 1]
+  // The barrel top: a mid-tone centre panel flanked by two raised, lighter WOOD
+  // end ribs at the lid's outer ends (see `LID_RIB_WIDTH`). The ribs are placed
+  // so their outer face is flush with the lid end, and they swell above the
+  // panel so the step reads in silhouette as well as in value.
+  const dome = lidArc(`${key}:dome`, lidHinge, lidQ, grow, wood, LID.x, 0);
+  const ribs = [-1, 1]
     .map((side) =>
-      lidArc(`${key}:band${side < 0 ? "L" : "R"}`, lidHinge, lidQ, grow, trimSide, 0.075, LID_BAND_SWELL, side * BODY.x * 0.28),
+      lidArc(`${key}:rib${side < 0 ? "L" : "R"}`, lidHinge, lidQ, grow, woodLid, LID_RIB_WIDTH, LID_RIB_SWELL, (side * (LID.x - LID_RIB_WIDTH)) / 2),
     )
     .flat();
 
+  // The hasp: in the reference this is a big HOLLOW square ring hanging off the
+  // gold rail onto the dark body front — a buckle you can see daylight through,
+  // and after the rail it is the chest's most recognisable piece of hardware.
+  // The champion had it as one small solid tab, which read as a nub. Four bars
+  // make the ring (the engine has no torus and no CSG, so a square ring IS the
+  // primitive-honest form — and it is the shape the reference actually draws).
+  // It wears `trimFront` rather than `trimTop`: it faces the camera, and it is
+  // now the front-metal that brightens on hover, which is the job the deleted
+  // `plate` used to do — with far more surface to read it on.
   const latchQ = quatMul(lidQ, quatPitch(pose.latchAngle));
   const latchHinge = addV3(lidHinge, rotateByQuat(scaleV3(v3(0, 0.02, LID.z - 0.01), grow), lidQ));
-  const latch: SceneInstance = {
-    key: `${key}:latch`,
-    material: trimTop,
+  // Measured off the reference: the ring is 0.27 of the chest's width across and
+  // ~0.82 as tall as it is wide, with bars ~0.21 of its width. `haspDrop` hangs
+  // it below the hinge so its top bar tucks BEHIND the rail's lower edge and the
+  // rest of the ring reads clear against the dark body front, and the bars sit a
+  // full `LATCH.z` forward so they bite into the rail's front face and stand
+  // proud of it instead of landing coplanar with it.
+  const haspW = LID.x * 0.27;
+  const haspH = haspW * 0.82;
+  const haspBar = haspW * 0.21;
+  const haspDrop = 0.06;
+  const haspPart = (suffix: string, x: number, y: number, w: number, h: number): SceneInstance => ({
+    key: `${key}:${suffix}`,
+    material: trimFront,
     mesh: "box",
-    transform: hingedTransform(latchHinge, scaleV3(v3(0, -LATCH.y / 2, LATCH.z / 2), grow), latchQ, scaleV3(LATCH, grow)),
-  };
+    transform: hingedTransform(latchHinge, scaleV3(v3(x, y - haspDrop, LATCH.z), grow), latchQ, scaleV3(v3(w, h, LATCH.z), grow)),
+  });
+  const hasp: readonly SceneInstance[] = [
+    haspPart("latch", 0, -haspBar / 2, haspW, haspBar),
+    haspPart("latchL", -(haspW - haspBar) / 2, -haspH / 2, haspBar, haspH),
+    haspPart("latchR", (haspW - haspBar) / 2, -haspH / 2, haspBar, haspH),
+    haspPart("latchB", 0, -haspH + haspBar / 2, haspW, haspBar),
+  ];
 
   const interior: SceneInstance = part("interior", v3(0, BODY.y - 0.03, 0), v3(BODY.x - 0.1, 0.05, BODY.z - 0.1), "ChestInterior");
   const glow: SceneInstance[] =
@@ -484,7 +530,12 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   // on the hero flight (`grounded`).
   const shadow: readonly SceneInstance[] = grounded > 0.02 ? contactShadow(`${key}:shadow`, pose.origin, BODY.x * 0.52, grounded, 1) : [];
 
-  // Warm seam light leaking from the lid/body join before it fully opens.
+  // Warm seam light leaking from the lid/body join before it fully opens. It
+  // hangs just BELOW and IN FRONT OF the gold rail: the rail is now a deep band
+  // straddling the seam, so a glow sitting on the old seam line would be buried
+  // behind it for the whole "seam" beat (which plays with the lid still shut).
+  // Leaking out from under the rail's lower lip is both visible and the honest
+  // reading of where light escapes a lipped chest.
   const seam: SceneInstance[] =
     pose.seam > 0
       ? [
@@ -493,7 +544,7 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
             material: "SeamGlow",
             mesh: "box",
             transform: {
-              position: addV3(origin, rotateByQuat(v3(0, BODY.y * grow, (BODY.z / 2 - 0.02) * grow), q)),
+              position: addV3(origin, rotateByQuat(v3(0, (BODY.y - 0.1) * grow, (BODY.z / 2 + 0.075) * grow), q)),
               rotation: q,
               scale: v3((LID.x - 0.06) * grow, (0.02 + pose.seam * 0.14) * grow, 0.05 * grow),
             },
@@ -587,12 +638,18 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     // Side-facing wood on the end caps for a value step.
     part("endL", v3(-BODY.x / 2 + 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
     part("endR", v3(BODY.x / 2 - 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
-    // Gilding: side straps (darker ochre), corner edges (side), front lock plate (bright).
-    part("strapL", v3(-BODY.x * 0.28, BODY.y / 2, 0), v3(0.07, BODY.y + 0.02, BODY.z + 0.03), trimSide),
-    part("strapR", v3(BODY.x * 0.28, BODY.y / 2, 0), v3(0.07, BODY.y + 0.02, BODY.z + 0.03), trimSide),
-    part("edgeL", v3(-BODY.x / 2, BODY.y / 2, BODY.z / 2), v3(0.05, BODY.y + 0.02, 0.05), trimSide),
-    part("edgeR", v3(BODY.x / 2, BODY.y / 2, BODY.z / 2), v3(0.05, BODY.y + 0.02, 0.05), trimSide),
-    part("plate", v3(0, BODY.y * 0.5, BODY.z / 2 + 0.005), v3(0.26, 0.2, 0.04), trimFront),
+    // Gilding: corner brackets only. The reference body carries NO inboard
+    // vertical straps and NO small separate lock plate — its front is a plain
+    // dark panel, framed by two corner brackets, capped by the gold rail above,
+    // with the big hasp ring hanging over it. The champion's two thin ochre
+    // straps and its 0.26-wide plate were both inventions that broke that read
+    // (the straps in particular sliced the front into strips the reference does
+    // not have), so both are gone and the corner brackets are thickened to the
+    // chunky posts the reference draws. Net instance cost of this whole
+    // re-model is zero: three parts removed here pay for the three extra hasp
+    // bars above.
+    part("edgeL", v3(-BODY.x / 2 + 0.01, BODY.y / 2, BODY.z / 2), v3(0.09, BODY.y + 0.02, 0.09), trimSide),
+    part("edgeR", v3(BODY.x / 2 - 0.01, BODY.y / 2, BODY.z / 2), v3(0.09, BODY.y + 0.02, 0.09), trimSide),
     ...plaque,
     ...label,
     interior,
@@ -600,9 +657,9 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     ...seam,
     lid,
     ...dome,
-    ...bands,
+    ...ribs,
     lidRim,
-    latch,
+    ...hasp,
     ...rings,
   ];
 };
