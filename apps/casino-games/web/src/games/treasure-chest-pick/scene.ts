@@ -150,7 +150,6 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // grey, and the outer band is a richer deep teal so the ring falloff still
   // reads as water rather than a muddy edge.
   PlatformSide: { baseColor: [0.11, 0.55, 0.57, 1] },
-  CenterGlow: { baseColor: [1, 0.88, 0.6, 1], emissive: [0.14, 0.1, 0.04, 1], opacity: 0.1 },
   EdgeVignette: { baseColor: [0.03, 0.2, 0.26, 1], opacity: 0.34 },
   BoardRivet: { baseColor: [1, 0.82, 0.34, 1], emissive: [0.3, 0.22, 0.05, 1] },
   // Like every other translucent overlay here, the puff carries a little
@@ -203,12 +202,6 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // they only ever darken what is beneath them.
   ContactShadowSoft: { baseColor: [0.12, 0.1, 0.07, 1], opacity: 0.14 },
   ContactShadowCore: { baseColor: [0.1, 0.08, 0.06, 1], opacity: 0.26 },
-  // The clean, lighter pad that frames the CENTER featured chest — a soft warm
-  // disc that lifts the water right under the hero slot so the eye lands there
-  // first. Additive-emissive translucent, like the reveal pools, so it brightens
-  // rather than paints.
-  FocusPad: { baseColor: [1, 0.93, 0.72, 1], emissive: [0.5, 0.42, 0.28, 1], opacity: 0.26 },
-  FocusPadRim: { baseColor: [1, 0.9, 0.66, 1], emissive: [0.34, 0.27, 0.16, 1], opacity: 0.14 },
   ...VEIL_MATERIALS,
 };
 
@@ -362,10 +355,6 @@ interface ChestPose {
   readonly hoverRing: boolean;
   readonly seam: number;
   readonly glow: number;
-  /** The center featured chest, while it sits on the board: earns a clean warm
-   * focus pad and a slightly clearer contact shadow so it reads as the frame's
-   * primary focal point. False once a pick is made (the hero owns the frame). */
-  readonly centerFocus: boolean;
   /** The brand name stamped across the chest front, welded to this pose. */
   readonly brandName: string;
   /** Whether this chest wears the raised brand NAMEPLATE (gold frame + colored
@@ -464,20 +453,8 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
 
   // Directional contact shadow anchoring the chest to the board — the same
   // down-light rule every prop obeys. It shrinks with the chest as it lifts off
-  // on the hero flight (`grounded`), and the center featured chest earns a
-  // slightly clearer core than its eight subordinate neighbours.
-  const shadow: readonly SceneInstance[] =
-    grounded > 0.02 ? contactShadow(`${key}:shadow`, pose.origin, BODY.x * 0.52, grounded, pose.centerFocus ? 1.18 : 1) : [];
-
-  // The clean, lighter pad that frames ONLY the center featured chest, so the
-  // eye lands on it first while the eight around it stay subordinate.
-  const focusPad: readonly SceneInstance[] =
-    pose.centerFocus && grounded > 0.02
-      ? [
-          disc(`${key}:focuspad1`, "FocusPadRim", v3(pose.origin.x, 0.014, pose.origin.z), BODY.x * 1.12 * grounded, 0.01),
-          disc(`${key}:focuspad0`, "FocusPad", v3(pose.origin.x, 0.018, pose.origin.z), BODY.x * 0.84 * grounded, 0.01),
-        ]
-      : [];
+  // on the hero flight (`grounded`).
+  const shadow: readonly SceneInstance[] = grounded > 0.02 ? contactShadow(`${key}:shadow`, pose.origin, BODY.x * 0.52, grounded, 1) : [];
 
   // Warm seam light leaking from the lid/body join before it fully opens.
   const seam: SceneInstance[] =
@@ -542,14 +519,14 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   const plateH = 0.5;
   // Only the center featured chest wears the nameplate — frame, plate, and
   // lettering; the eight around it stay bare carved-wood chests, so the one
-  // plaque reads as the hero marker rather than nine competing labels. Its frame
-  // catches the BRIGHTER gild so the branded chest reads a touch crisper without
-  // being enlarged. The label is stamped on BOTH backends here (no longer shed by
-  // the Canvas2D `low` LOD): a single plaque is cheap, and it is the one piece of
-  // lettering the player is meant to read on the board.
+  // plaque reads as the hero marker rather than nine competing labels. It uses the
+  // same front gild as every other chest — the plate IS the distinction, not a
+  // brighter highlight, so the center never reads as "always selected". The label
+  // is stamped on BOTH backends here (no longer shed by the Canvas2D `low` LOD): a
+  // single plaque is cheap, and it is the one piece of lettering the player reads.
   const plaque = pose.nameplate
     ? [
-        platePart("plaqueframe", v3(plateW + 0.1, plateH + 0.1, 0.05), v3(0, 0, 0.0), pose.dim ? "GildDim" : "GildBright"),
+        platePart("plaqueframe", v3(plateW + 0.1, plateH + 0.1, 0.05), v3(0, 0, 0.0), pose.dim ? "GildDim" : "GildFront"),
         platePart("plaque", v3(plateW, plateH, 0.06), v3(0, 0, 0.035), pose.dim ? "BrandPrimaryDim" : "BrandPrimary"),
       ]
     : [];
@@ -564,7 +541,6 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
 
   return [
     ...shadow,
-    ...focusPad,
     ...pool,
     part("body", v3(0, BODY.y / 2, 0), BODY, wood),
     // Board gap lines (darkest) read as separate planks without a texture. The
@@ -687,10 +663,8 @@ export const WATER_RADIUS = 5.0;
 const platform = (): readonly SceneInstance[] => [
   disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006),
   disc("plat:side", "PlatformSide", v3(0, -0.062, 0), WATER_RADIUS, 0.06),
-  // Tightened from the old broad wash so it no longer floods the whole grid: it
-  // now pools warmth over the center column, leaving the per-slot FocusPad under
-  // the featured chest to do the clean framing.
-  disc("plat:glow", "CenterGlow", v3(0, -0.03, 0), WATER_RADIUS * (3.0 / 8.4), 0.006),
+  // No central warm glow: pooling warmth at the middle brightened the center chest
+  // and made it read as permanently highlighted. The lagoon stays evenly lit.
   ...[
     [-1, -1],
     [1, -1],
@@ -1110,9 +1084,9 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   const heroTop = addV3(flown.position, v3(0, BODY_TOP * heroScale, 0));
 
   // The center featured chest: the slot nearest the board origin (index 4 on the
-  // standard 3×3). It wears the brand nameplate AND carries the frame's focal
-  // treatment — the warm pad and clearer contact shadow — so the plaque and the
-  // focal framing both mark the visual center.
+  // standard 3×3). It wears the brand nameplate — the plaque IS its only mark, so
+  // the center never reads as permanently highlighted; it looks like every other
+  // chest apart from carrying the ACME plate.
   const centerIndex = Array.from({ length: count }, (_, i) => i).reduce((best, i) => {
     const p = chestPosition(i, count);
     const b = chestPosition(best, count);
@@ -1154,7 +1128,6 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     return chestInstances(`chest${index}`, {
       at,
       brandName: spec.brand.name,
-      centerFocus: index === centerIndex && selected === null,
       dim: dimmed,
       flight: isSelected ? flight : 0,
       focusRing: session.phase === "ready" && choice.focused === index && choice.hovered !== index && choice.armed !== index,
