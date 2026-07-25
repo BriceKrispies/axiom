@@ -14,9 +14,10 @@
  * (index, tick) — so no wobble can hint at which chest holds a prize.
  */
 
-import type { Camera3D, MaterialSpec, Scene, SceneInstance, SceneLight } from "@axiom/web-engine";
+import type { Camera3D, MaterialSpec, Scene, SceneInstance, SceneLight, ViewContext } from "@axiom/web-engine";
 import type { EngineQuat, EngineVec3, GameResources } from "@axiom/web-engine";
-import { waterSurface } from "@axiom/web-engine";
+import { drawStylizedWaterSurface } from "@axiom/web-engine";
+import { worldToCanvas } from "../../presentation/cameras/picking.ts";
 import type { GameRuntime } from "../../chance-engine/registry/definition.ts";
 import { phaseAge } from "../../chance-engine/sessions/session.ts";
 import type { BrandSpec } from "../../presentation/branding/brand.ts";
@@ -216,7 +217,7 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
  * brand). Built once at mount from the game's brand config — a brand color
  * change takes effect on the next mount, exactly like any other material. */
 export const chestResources = (brand: BrandSpec): GameResources => ({
-  materials: { ...MATERIALS, ...brandMaterials(brand), ...LAGOON_WATER.materials },
+  materials: { ...MATERIALS, ...brandMaterials(brand) },
   meshes: { box: { kind: "box" }, cylinder: { kind: "cylinder" }, sphere: { kind: "sphere" } },
 });
 
@@ -682,18 +683,6 @@ const heroPrize = (rarity: Parameters<typeof rewardMaterialOf>[0], at: EngineVec
  * proportions relative to this radius.
  */
 export const WATER_RADIUS = 5.0;
-
-/**
- * The stylized water pattern on the lagoon — a sparse, softly-feathered cellular
- * line net that makes the flat turquoise disc read as a water surface. Built ONCE
- * from the engine's reusable `waterSurface` primitive (it is pure, deterministic
- * scene geometry, so it renders on both backends and is occluded by the chests
- * that sit on it) and kept deliberately subtle: large cells, a light-cyan tint,
- * very low opacity. Inset a little inside the rim so the net sits clearly ON the
- * water rather than bleeding onto the sandy shore. Static (no drift) — the calmest
- * read, and no per-frame churn.
- */
-const LAGOON_WATER = waterSurface({ cellSize: 1.25, radius: WATER_RADIUS * 0.9, y: -0.02 });
 
 const platform = (): readonly SceneInstance[] => [
   disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006),
@@ -1297,10 +1286,6 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // inset lagoon and its beach margin keep exactly the held framing.
       ...stageRoom(48, WATER_RADIUS),
       ...platform(),
-      // The stylized water pattern sits just above the lagoon disc; it is
-      // translucent and depth-tested, so the chests, palm and castle that stand
-      // on the pool correctly occlude the net beneath them.
-      ...LAGOON_WATER.instances,
       ...beachDecor(tick, seed, state.extra.decor, spec.brand.name),
       ...chests,
       ...backgroundVeil(camera, framing, flight),
@@ -1310,4 +1295,80 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     ],
     lights,
   };
+};
+
+// ── the Canvas2D water overlay ────────────────────────────────────────────────────
+
+/*
+ * The lagoon's water treatment is a flat 2D touch the 3D scene graph cannot
+ * express well (soft blur, a shoreline fade), so it is drawn by the engine's
+ * reusable Canvas2D primitive `drawStylizedWaterSurface` onto the overlay layer
+ * the casino harness mounts over the render canvas. This app owns only the
+ * BOUNDARY: it projects the pool rim (the clip path) and the chest footprints
+ * (holes, so the net is not painted over the chests) into the shared 960×600
+ * canvas space, then hands the rendering to the engine. Deterministic — the
+ * pattern is a coordinate hash and the drift comes from the explicit `nowMs`.
+ */
+
+/** Points traced around the pool rim to approximate its screen silhouette. */
+const WATER_RIM_POINTS = 48;
+/** Screen radius (px) of the hole punched around each chest so the net stays off
+ * the chests, and the height up each chest the hole is centered on. */
+const CHEST_HOLE_RADIUS = 62;
+const CHEST_HOLE_LIFT = 0.24;
+/** The pool's rendered turquoise (used to fade the pattern out at the shore) and
+ * the pale highlight color of the net. */
+const POOL_EDGE_COLOR = "rgb(36, 138, 138)";
+const WATER_LINE_COLOR = "rgb(206, 240, 250)";
+
+/** Draw the stylized water into the overlay layer for one frame. Fades out as the
+ * chosen chest flies off and the veil dims the board (the pool is no longer the
+ * subject then). */
+export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext2D, view: ViewContext): void => {
+  const session = state.session;
+  const count = session.config.choiceCount ?? 9;
+  const camera = chestCamera(count);
+  const strength = 1 - flightProgress(session, session.config.presentationSpeed);
+  if (strength <= 0.01) {
+    return;
+  }
+
+  // Project the pool rim (the boundary) and the chest footprints (the holes).
+  const rim = Array.from({ length: WATER_RIM_POINTS }, (_, i): { readonly x: number; readonly y: number } | null => {
+    const a = (i / WATER_RIM_POINTS) * Math.PI * 2;
+    return worldToCanvas(camera, v3(Math.cos(a) * WATER_RADIUS, -0.04, Math.sin(a) * WATER_RADIUS));
+  }).filter((p): p is { readonly x: number; readonly y: number } => p !== null);
+  if (rim.length < 3) {
+    return;
+  }
+  const holes = Array.from({ length: count }, (_, i) => worldToCanvas(camera, addV3(chestPosition(i, count), v3(0, CHEST_HOLE_LIFT, 0)))).filter(
+    (p): p is { readonly x: number; readonly y: number } => p !== null,
+  );
+  const xs = rim.map((p) => p.x);
+  const ys = rim.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+
+  drawStylizedWaterSurface(ctx, {
+    bounds: { height: Math.max(...ys) - minY, width: Math.max(...xs) - minX, x: minX, y: minY },
+    cellSize: 58,
+    driftAmount: 2,
+    edgeColor: POOL_EDGE_COLOR,
+    edgeFadePx: 34,
+    lineColor: WATER_LINE_COLOR,
+    lineWidth: 2.2,
+    opacity: 0.3 * strength,
+    softnessPx: 1.4,
+    timeSeconds: view.nowMs / 1000,
+    traceHoles: (c) => {
+      for (const p of holes) {
+        c.moveTo(p.x + CHEST_HOLE_RADIUS, p.y);
+        c.arc(p.x, p.y, CHEST_HOLE_RADIUS, 0, Math.PI * 2);
+      }
+    },
+    tracePool: (c) => {
+      rim.forEach((p, i) => (i === 0 ? c.moveTo(p.x, p.y) : c.lineTo(p.x, p.y)));
+      c.closePath();
+    },
+  });
 };

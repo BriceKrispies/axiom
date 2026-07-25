@@ -70,6 +70,13 @@ export interface CasinoMountSpec<TExtra> {
   readonly viewScene: (state: CasinoState<TExtra>, ctx: ViewContext) => Scene;
   readonly instructionOf?: (state: CasinoState<TExtra>) => string | null;
   readonly sound?: (prev: CasinoState<TExtra>, next: CasinoState<TExtra>) => readonly ToneSpec[];
+  /** Optional per-frame Canvas2D overlay drawn ON TOP of the 3D render, into a
+   * transparent canvas that covers the game canvas (logical 960×600 space). A
+   * game uses this for flat 2D touches the scene graph cannot express — e.g. the
+   * stylized water surface. The harness clears the overlay each frame before this
+   * runs; the game draws with the explicit `nowMs` from the `ViewContext`, so the
+   * overlay stays as deterministic as the rest of the presentation. */
+  readonly overlay?: (state: CasinoState<TExtra>, ctx: CanvasRenderingContext2D, view: ViewContext) => void;
 }
 
 /** Everything the pure fold needs from the mount (a subset of GameRuntime). */

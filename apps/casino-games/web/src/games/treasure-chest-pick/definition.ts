@@ -13,7 +13,7 @@ import { brandIssues, DEFAULT_BRAND } from "../../presentation/branding/brand.ts
 import { mountCasinoGame } from "../casino-mount.ts";
 import type { ChestSpec } from "./game.ts";
 import { CHEST_TIMING, chestCues, initialChestExtra, stepChest } from "./game.ts";
-import { chestResources, chestScene } from "./scene.ts";
+import { chestResources, chestScene, chestWaterOverlay } from "./scene.ts";
 
 /** A single small consolation prize — every win grants 5 points. */
 const CONSOLATION_TIER: RewardTier = {
@@ -52,6 +52,7 @@ const mount = (canvas: HTMLCanvasElement, runtime: GameRuntime<ChestSpec>): Runn
     instructionOf: (state) =>
       state.session.phase === "ready" ? "Pick a chest — arrows + Enter, or click one" : null,
     mechanic: { choiceCount: runtime.config.choiceCount ?? 9, kind: "choice" },
+    overlay: (state, ctx, view) => chestWaterOverlay(state, ctx, view),
     resources: chestResources(runtime.config.gameSpecific.brand),
     sound: (prev, next) => chestCues(prev, next),
     step: (state, input, ctx) => stepChest(runtime, state, input, ctx),

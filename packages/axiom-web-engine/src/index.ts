@@ -109,9 +109,10 @@ export type {
   TextWrap,
 } from "./text.ts";
 
-// ── stylized water surface ──────────────────────────────────────────────────────────
-// `waterSurface({ radius })` turns a circular blue region into a sparse, softly
-// feathered cellular line net — a subtle "this is water" pattern as plain scene
-// geometry (both backends, occlusion-correct, no shader). See `water-surface.ts`.
-export { waterSurface } from "./water-surface.ts";
-export type { WaterSurface, WaterSurfaceOptions } from "./water-surface.ts";
+// ── stylized water surface (Canvas2D) ─────────────────────────────────────────────────
+// `drawStylizedWaterSurface(ctx, options)` paints a subtle, broken cellular
+// highlight net inside a caller-supplied boundary so a flat blue region reads as
+// water — a small, deterministic Canvas2D effect (base fill, hex markings, soft
+// shoreline fade). Part of the Canvas2D module. See `canvas-water.ts`.
+export { drawStylizedWaterSurface } from "./canvas-water.ts";
+export type { StylizedWaterOptions, WaterBounds } from "./canvas-water.ts";

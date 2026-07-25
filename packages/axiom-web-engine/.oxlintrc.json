@@ -136,6 +136,7 @@
       "files": [
         "src/backend-webgl2.ts",
         "src/backend-canvas2d.ts",
+        "src/canvas-water.ts",
         "src/audio.ts",
         "src/raf-loop.ts",
         "src/dom-input.ts",

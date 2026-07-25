@@ -1,6 +1,7 @@
 [
   "backend-webgl2.ts",
   "backend-canvas2d.ts",
+  "canvas-water.ts",
   "audio.ts",
   "raf-loop.ts",
   "dom-input.ts",

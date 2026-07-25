@@ -11,9 +11,30 @@ import type { Scene, ToneSpec, ViewContext } from "@axiom/web-engine";
 import { runGame } from "@axiom/web-engine";
 import type { CasinoHud, GameRuntime, RunningCasinoGame } from "../chance-engine/registry/definition.ts";
 import { cameraShakeOffset } from "../presentation/cameras/presets.ts";
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from "../presentation/cameras/picking.ts";
 import { commitCue, tryAgainCue, winCue } from "../presentation/audio/cues.ts";
 import type { CasinoMountSpec, CasinoState } from "./round-state.ts";
 import { celebrationFor, COMMON_ACTIONS, foldRoundTick, freshRoundState, hudOf, outcomeRarity } from "./round-state.ts";
+
+/** A transparent Canvas2D layer that exactly covers the game canvas, for a game's
+ * optional flat 2D overlay (the stylized water surface). Its backing store is the
+ * shared logical 960×600 space, so a game draws in the SAME coordinates its
+ * `worldToCanvas` projection returns; CSS stretches it over the 3D canvas. Absent
+ * unless the game provides an `overlay`. */
+const attachOverlay = (canvas: HTMLCanvasElement): { readonly ctx: CanvasRenderingContext2D; readonly remove: () => void } | null => {
+  const layer = document.createElement("canvas");
+  layer.width = CANVAS_WIDTH;
+  layer.height = CANVAS_HEIGHT;
+  layer.setAttribute("aria-hidden", "true");
+  layer.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;display:block;";
+  const ctx = layer.getContext("2d");
+  const parent = canvas.parentElement;
+  if (ctx === null || parent === null) {
+    return null;
+  }
+  parent.append(layer);
+  return { ctx, remove: (): void => layer.remove() };
+};
 
 export type { CasinoMountSpec, CasinoState } from "./round-state.ts";
 export { celebrationFor, COMMON_ACTIONS, outcomeRarity, speedTicks } from "./round-state.ts";
@@ -66,6 +87,10 @@ export const mountCasinoGame = <TSpec, TExtra>(
     return scaled(cues);
   };
 
+  // The optional per-frame 2D overlay layer (only games that declare `overlay`).
+  const overlay = spec.overlay === undefined ? null : attachOverlay(canvas);
+  const drawOverlay = spec.overlay;
+
   const running = runGame<CasinoState<TExtra>>(
     canvas,
     {
@@ -81,7 +106,13 @@ export const mountCasinoGame = <TSpec, TExtra>(
       fixedHz: 60,
       freezeAtTick: runtime.freezeAtTick,
       now: runtime.pinnedNowMs === undefined ? undefined : (): number => runtime.pinnedNowMs as number,
-      onFrame: (state): void => runtime.onHud(hudOf(spec, runtime.source.kind, state)),
+      onFrame: (state, viewCtx): void => {
+        runtime.onHud(hudOf(spec, runtime.source.kind, state));
+        if (overlay !== null && drawOverlay !== undefined) {
+          overlay.ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+          drawOverlay(state, overlay.ctx, viewCtx);
+        }
+      },
       pointerLock: false,
       script: runtime.script,
       seed: runtime.seed,
@@ -91,6 +122,9 @@ export const mountCasinoGame = <TSpec, TExtra>(
   return {
     input: running.input,
     readHud: (): CasinoHud => hudOf(spec, runtime.source.kind, running.getState()),
-    stop: running.stop,
+    stop: (): void => {
+      running.stop();
+      overlay?.remove();
+    },
   };
 };
