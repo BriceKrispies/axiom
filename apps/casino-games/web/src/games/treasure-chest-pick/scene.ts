@@ -15,7 +15,7 @@
  */
 
 import type { Camera3D, MaterialSpec, Scene, SceneInstance, SceneLight, ViewContext } from "@axiom/web-engine";
-import type { EngineQuat, EngineVec3, GameResources } from "@axiom/web-engine";
+import type { EngineQuat, EngineVec3, GameResources, Rgba } from "@axiom/web-engine";
 import { drawStylizedWaterSurface } from "@axiom/web-engine";
 import { worldToCanvas } from "../../presentation/cameras/picking.ts";
 import type { GameRuntime } from "../../chance-engine/registry/definition.ts";
@@ -1251,17 +1251,31 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // burst light that flashes the chest faces at the pop. All three follow the
   // FLOWN chest, so the reveal stays lit as it travels off the board.
   const focus = selected === null ? v3(0, 0, 0) : flown.position;
-  // Beach sun, not casino sky. The shared rig pairs the warm key with a cool
-  // sky fill tuned at 0.35 — right indoors, but here it lifts and cools every
-  // shadow face, milkifying the chests and washing the warm seams to grey. This
-  // scene's reference is a single warm raked sun: lit lids blazing, side/front
-  // boards falling to deep warm brown. So we knock the cool fill down hard for
-  // THIS scene only, letting the shadow faces settle onto the warm key plus the
-  // neutral ambient floor — widening the light-driven lit-vs-shadow spread that
-  // sculpts each faceted chest and keeping the darks warm rather than blue.
-  const lights: SceneLight[] = stageLights(focus, 0.5 + 0.4 * selectEase).map((entry) =>
-    entry.key === "light:fill" ? { key: entry.key, light: { ...entry.light, intensity: 0.12 } } : entry,
-  );
+  // Beach sun under a big bright sky — NOT a bare raked sun. The reference is a
+  // soft, high-key diorama: the palm's cast shadow is barely darker than the
+  // sand, the castle's away-facing towers stay pale sand, and a chest's shadow
+  // side sits maybe 3:1 under its lid. The previous rig chased the opposite
+  // reading — it knocked the shared cool fill to 0.12, so with the engine's
+  // fixed 0.12 ambient floor EVERY away-facing surface collapsed to ~0.17 while
+  // lit faces sat near 1.0: a 6:1 hard-sun ratio that crushed the darks. (The
+  // tell is upstream in the palette: CastleSand, Shell and Starfish all carry a
+  // "whisper of warm emissive" whose only job is to stop faces the fill no
+  // longer reaches going charcoal — paint compensating for light.)
+  //
+  // So rebalance the rig instead of the paint, for THIS scene only: bring the
+  // fill back to a real level as a near-NEUTRAL counter-light (the honest
+  // objection to the shared fill was its blue, not its existence — at [0.94,
+  // 0.95, 0.96] the lifted darks land on warm sand/wood rather than sky-grey),
+  // and trim the key by the matching amount so total top-face exposure is held
+  // where it was and nothing clips. Net: the lit faces and the whole frame's
+  // brightness are unchanged, the shadow faces roughly double, and the
+  // lit-to-shadow spread drops ~6:1 -> ~3:1, the reference's soft modeling.
+  // The key DIRECTION is untouched, so every contact shadow stays in lock-step.
+  const lights: SceneLight[] = stageLights(focus, 0.5 + 0.4 * selectEase).map((entry) => {
+    const fill = { key: entry.key, light: { ...entry.light, color: [0.94, 0.95, 0.96, 1] as Rgba, intensity: 0.45 } };
+    const key = { key: entry.key, light: { ...entry.light, intensity: 1.28 } };
+    return entry.key === "light:fill" ? fill : entry.key === "light:key" ? key : entry;
+  });
   if (selected !== null && revealAge >= timeline.pauseEnd) {
     const warm = clamp01((revealAge - timeline.pauseEnd) / 12);
     lights.push({
