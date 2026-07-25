@@ -194,7 +194,16 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // the color is authored for a LIT top face rather than a shaded edge — the
   // cyan the surface ring was always meant to be, one step below the shallow
   // shelf that now rings it.
-  LagoonWater: { baseColor: [0.24, 0.7, 0.88, 1] },
+  //
+  // The TRIPLE is the colorist lens's empirically-calibrated one, kept when the
+  // two lenses that independently found this occlusion were merged. It is solved
+  // backwards from the reference rather than picked: dividing the reference's
+  // measured open-water median (51, 160, 159) by this rig's Lambert multiplier
+  // on a water-facing normal ((1.177, 1.139, 1.055)) yields exactly this base
+  // color. The distinguishing property is GREEN ~= BLUE — the reference lagoon
+  // is caribbean TEAL, and every azure-leaning value tried here (blue well above
+  // green) measured further from the reference, not closer.
+  LagoonWater: { baseColor: [0.17, 0.55, 0.59, 1] },
   EdgeVignette: { baseColor: [0.03, 0.2, 0.26, 1], opacity: 0.34 },
   // A gold accent, so it obeys the same amber ratio and the same
   // seated-below-the-clamp rule as the chest gilding above — a lemon-white rivet
@@ -1554,7 +1563,7 @@ const CHEST_HOLE_MARGIN = 6;
  * authorities have to agree on the hue or the pool averages out between them. */
 const POOL_EDGE_COLOR = "rgb(102, 196, 206)";
 const WATER_LINE_COLOR = "rgba(210, 244, 252, 0.95)";
-const WATER_TROUGH_COLOR = "rgba(10, 84, 116, 0.6)";
+const WATER_TROUGH_COLOR = "rgba(16, 92, 92, 0.6)";
 const WATER_SPARKLE_COLOR = "rgba(234, 251, 255, 0.9)";
 const WATER_SHALLOW_COLOR = "rgba(148, 224, 240, 0.44)";
 
