@@ -1,5 +1,28 @@
 # Champion scorecard — treasure-chest-pick
 #
+# ############################################################################
+# ## STALE — DO NOT TRUST THE NUMBERS BELOW. RE-SCORE FROM SCRATCH.         ##
+# ############################################################################
+# reference.png was REPLACED on 2026-07-24 (ledger iteration 4, "reference
+# reset #2") and champion.png was RE-SHOT from the current app. Every number and
+# every prose block below describes the RETIRED branded reference scored against
+# the pass-3 champion. They are kept only so the append-only ledger's
+# scorecard_before/after copies stay meaningful.
+#
+# The new reference is the CLEAN diorama: warm tan sand to the frame edge, a
+# rounded turquoise pool with a hex-honeycomb surface, nine chests 3x3 on the
+# water, margin props (palm + long soft shadow, red crab, sand castle with a red
+# pennant, starfish, seashells, pebbles), and the brand appearing EXACTLY ONCE as
+# a red rounded nameplate above the CENTRE CHEST — no banner, no pennants, no
+# signboard, no per-chest labels.
+#
+# Known-wrong on its face: scene_props_completeness = 0 (the beach props were
+# built and have landed on main) and the whole branding read (the new target
+# wants brand RESTRAINT, the retired one wanted more brand surfaces). The next
+# CRITIC pass owes a fresh harsh calibration of all twelve axes; until it lands,
+# next_attack_axis is "recalibrate".
+# ############################################################################
+#
 # BASELINE authored by the convergence CRITIC lens against reference.png, then
 # re-scored each pass. Calibrated to IDENTITY/PARITY, harshly. Bar =
 # "indistinguishable from the reference." A render that merely reads as the same
@@ -47,8 +70,8 @@
 # apron hue is a pale cream, not the reference's saturated golden tan, and the
 # blue sky/ocean band is an added off-reference element (take the lower).
 
-final_score = 0.53   # 0 * 0.7 + 1.75 * 0.3  (still pinned by scene_props_completeness = 0)
-next_attack_axis = "scene_props_completeness"
+final_score = 0.53   # STALE — scored against the RETIRED reference (see banner above)
+next_attack_axis = "recalibrate"
 
 [axes]
 # Pass-2's water-shrink revealed the existing sandy floor slab as a beach MARGIN

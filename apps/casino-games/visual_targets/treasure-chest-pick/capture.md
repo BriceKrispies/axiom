@@ -5,21 +5,30 @@ app's own capture agent (`apps/casino-games/web/browser/agent_capture.py`, a Pla
 driver over the shell's `window.__casino` handle). There is no `axiom-shot` path — Casino
 Games is a pure-TypeScript app on `@axiom/web-engine`.
 
-**Reference:** the branded beach diorama (`reference.png`) — the treasure hunt dressed in
-one white-label brand: "ACME" red across a top ribbon banner, a left pennant, a right
-signboard, the sandcastle pennant, the crab's little flag, and a label on every chest. The
-brand (name + color scheme) is **configurable** — it lives in the game's `gameSpecific.brand`
-config (`presentation/branding/brand.ts`, `DEFAULT_BRAND` = the ACME livery) and is editable
-in the SET UP panel ("Brand livery"). The lettering is real welded geometry (there are no
-textures on `@axiom/web-engine`): `presentation/branding/glyphs.ts` is a 5×7 box-run font and
-`label.ts` stamps it onto a surface through the same transform frame the surface rides — so a
-chest's label squashes, grows, tilts and spirals **welded to the chest**, and long names
-shrink uniformly to fit. The champion is captured with the default ACME brand, so it wears the
-same livery as the reference.
+**Reference:** the clean beach diorama (`reference.png`, 1614×974, installed 2026-07-24) — a
+warm tan sand ground filling the frame edge-to-edge, a rounded turquoise pool with a
+hex-honeycomb water surface and a paler shallow rim, nine gilded wooden chests staged 3×3 on
+the water, and staged in the margins a low-poly palm tree (with a long soft shadow), a red
+crab, a sand castle with a red pennant, a starfish, seashells and a few small pebbles. The
+brand appears **exactly once**: a red rounded nameplate reading "ACME" hovering just above the
+**centre chest only** — no ribbon banner, no pennants, no signboard, no per-chest labels.
+
+This replaced the earlier *fully branded* reference (banner + pennants + signboard + a label on
+every chest); see `ledger.toml` iteration 4. The brand (name + color scheme) is still
+**configurable** — it lives in the game's `gameSpecific.brand` config
+(`presentation/branding/brand.ts`, `DEFAULT_BRAND` = the ACME livery) and is editable in the
+SET UP panel ("Brand livery"). The lettering is real welded geometry (there are no textures on
+`@axiom/web-engine`): `presentation/branding/glyphs.ts` is a box-run font and `label.ts` stamps
+it onto a surface through the same transform frame the surface rides. The champion is captured
+with the default ACME brand, so it wears the same livery as the reference.
 
 ## Reproduce the champion
 
 ```sh
+# 0. once per fresh checkout/worktree: the app imports @axiom/web-engine's BUILT dist,
+#    so a stale dist fails the tsgo build ("has no exported member ...").
+npm --prefix packages/axiom-web-engine run build
+
 # 1. serve the app (the champion worktree, when re-rendering a convergence round)
 uv run scripts/localhost_servers.py start-app casino-games --port 8087
 
@@ -29,6 +38,9 @@ uv run apps/casino-games/web/browser/agent_capture.py \
     --url http://localhost:8087/ \
     --out apps/casino-games/visual_targets/treasure-chest-pick/candidate.png
 ```
+
+`--url` must point at whatever port the manager actually gave you (`localhost_servers.py url
+casino-games`) — it auto-bumps past a taken port.
 
 The preset expands to the boot URL
 `?game=treasure-chest-pick&seed=470573198&shot=90&backend=canvas2d`, waits for the

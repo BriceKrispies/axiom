@@ -370,3 +370,95 @@ depth_and_separation = 2
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 4
+
+[[iteration]]
+iteration = 4
+attacked_axis = "none"           # reference RESET #2 + champion recapture (not a scored pass)
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/reference.png",
+  "apps/casino-games/visual_targets/treasure-chest-pick/champion.png",
+  "apps/casino-games/visual_targets/treasure-chest-pick/capture.md",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "reference_reset"
+abstraction_introduced = false
+next_attacked_axis = "recalibrate"
+reason = """
+REFERENCE RESET #2 (human-supplied, 2026-07-24). The campaign target was replaced
+again. The retired reference was the FULLY BRANDED diorama (ACME on a top ribbon
+banner, a left pennant, a right signboard, the sandcastle pennant, the crab's
+flag, and a label on EVERY chest). The new reference (1614x974) is the CLEAN
+diorama: warm tan sand filling the frame edge-to-edge, a rounded turquoise pool
+with a hex-honeycomb surface and a paler shallow rim, nine chests staged 3x3 on
+the water, and margin props (palm with a long soft shadow, red crab, sand castle
+with a red pennant, starfish, seashells, pebbles) — with the brand appearing
+EXACTLY ONCE, as a red rounded nameplate hovering above the CENTRE CHEST ONLY.
+
+The direction of travel therefore inverted on the branding axis: the previous
+target wanted MORE brand surfaces, the new one wants brand restraint. The app has
+already moved that way independently on main (64b33ab6 center-only nameplate,
+b364ddd5 removed the freestanding brand billboard), so the new champion is much
+closer to the new target than the pass-3 champion was to the old one.
+
+EVERY SCORECARD NUMBER BELOW IS STALE. They are copied forward unchanged only to
+keep the append-only record valid; they are NOT a re-score against the new
+reference. The next /visual-convergence-propose CRITIC pass owes a fresh harsh
+calibration (next_attacked_axis = "recalibrate"). In particular the old
+scene_props_completeness = 0 is certainly wrong now — the beach props were built
+on the pass-3 line and have since landed on main.
+
+CHAMPION RECAPTURED, not carried over. The prior champion.png was rendered from
+commit 64b33ab6; main has since advanced to dc16f3b2 with four further
+casino-games changes the old image does not show (9ebf3ba3 + 2b3dd5b3 + a8d65030
+stylized hex-honeycomb water, e433bd47 richer water, 19b404d3 centre chest no
+longer reads as permanently highlighted, b364ddd5 billboard removed, dc16f3b2
+"orb" ring fix). Scoring a stale image against a new reference would have made
+every number a fiction, so the champion was re-shot from the CURRENT app through
+the unchanged `chests-ready` preset (same seed 470573198, same shot=90, same
+canvas2d, same frozen gate), keeping the capture recipe — and therefore the
+before/after comparability from here on — intact.
+
+CAPTURE-RECIPE NOTE (cost a real debugging detour, now recorded in capture.md):
+the app imports @axiom/web-engine's BUILT `dist/`, not its sources. A worktree
+synced past a new engine export builds RED ("Module '@axiom/web-engine' has no
+exported member 'drawStylizedWaterSurface'") until
+`npm --prefix packages/axiom-web-engine run build` is run. That is a checkout
+prerequisite, not an app bug.
+
+ABSTRACTION-GATE: abstraction_introduced = false. This iteration changed no
+render code whatsoever — only the target image, the recaptured champion, and the
+bookkeeping. No new primitive / manifest field / shader is owed.
+
+PARITY-CLAIM: clean. No "done / matched / parity" language; this entry only
+resets the target and re-shoots the champion, and defers all scoring.
+"""
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+scene_props_completeness = 0
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 4
