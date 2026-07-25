@@ -1316,10 +1316,18 @@ const WATER_RIM_POINTS = 48;
  * the chests, and the height up each chest the hole is centered on. */
 const CHEST_HOLE_RADIUS = 62;
 const CHEST_HOLE_LIFT = 0.24;
-/** The pool's rendered turquoise (used to fade the pattern out at the shore) and
- * the pale highlight color of the net. */
+/** The lagoon's water palette. The EDGE color matches the rendered pool so the
+ * shoreline cover is invisible except that it hides the net; DEPTH is a deeper
+ * teal painted as a radial tint for volume; the LINE/TROUGH pair reads as a ripple
+ * crest and trough; SPARKLE catches the light on some peaks; SHALLOW is the lighter
+ * band where the water meets the sand. GLINT is the soft sun sheen, offset toward
+ * the scene's warm key light (upper-back of the pool). */
 const POOL_EDGE_COLOR = "rgb(36, 138, 138)";
-const WATER_LINE_COLOR = "rgb(206, 240, 250)";
+const WATER_LINE_COLOR = "rgba(210, 244, 252, 0.95)";
+const WATER_TROUGH_COLOR = "rgba(14, 92, 98, 0.6)";
+const WATER_SPARKLE_COLOR = "rgba(234, 251, 255, 0.9)";
+const WATER_SHALLOW_COLOR = "rgba(150, 226, 228, 0.4)";
+const WATER_GLINT_COLOR = "rgba(212, 248, 255, 0.5)";
 
 /** Draw the stylized water into the overlay layer for one frame. Fades out as the
  * chosen chest flies off and the veil dims the board (the pool is no longer the
@@ -1328,7 +1336,13 @@ export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext
   const session = state.session;
   const count = session.config.choiceCount ?? 9;
   const camera = chestCamera(count);
-  const strength = 1 - flightProgress(session, session.config.presentationSpeed);
+  // Fade the whole overlay OUT fast the moment a chest is picked. The overlay is
+  // a 2D layer on TOP of the render, so it is NOT darkened by the 3D reveal veil;
+  // if it lingered, its lit water (with chest holes punched) would float over the
+  // darkening scene and ring each chest in an "orb". Fading it to nothing well
+  // before the veil is noticeable (gone by ~20% of the flight) avoids that.
+  const flight = flightProgress(session, session.config.presentationSpeed);
+  const strength = Math.max(0, 1 - flight * 5);
   if (strength <= 0.01) {
     return;
   }
@@ -1350,16 +1364,23 @@ export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext
   const minY = Math.min(...ys);
 
   drawStylizedWaterSurface(ctx, {
+    // No `depthColor` here: a radial darken plus the chest holes would ring each
+    // chest with lighter un-tinted water. The depth read instead comes from the
+    // lighter SHALLOW rim (shallows) and the sun GLINT, which leave no hole seams.
     bounds: { height: Math.max(...ys) - minY, width: Math.max(...xs) - minX, x: minX, y: minY },
     cellSize: 58,
-    driftAmount: 2,
+    driftAmount: 2.4,
     edgeColor: POOL_EDGE_COLOR,
-    edgeFadePx: 34,
+    edgeFadePx: 36,
+    glint: { color: WATER_GLINT_COLOR, dirX: 0.32, dirY: -0.5, strength: strength },
     lineColor: WATER_LINE_COLOR,
     lineWidth: 2.2,
-    opacity: 0.3 * strength,
+    opacity: 0.32 * strength,
+    shallowColor: WATER_SHALLOW_COLOR,
     softnessPx: 1.4,
+    sparkleColor: WATER_SPARKLE_COLOR,
     timeSeconds: view.nowMs / 1000,
+    troughColor: WATER_TROUGH_COLOR,
     traceHoles: (c) => {
       for (const p of holes) {
         c.moveTo(p.x + CHEST_HOLE_RADIUS, p.y);
