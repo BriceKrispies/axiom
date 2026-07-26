@@ -190,10 +190,48 @@ fn transform(ctx: &ServeCtx, file_path: &Path, bytes: Vec<u8>) -> Vec<u8> {
     bytes
 }
 
-/// Append `?v=<version>` to every quoted **relative** `.js` specifier
-/// (`"./x.js"`, `'../a/b.js'`) so a hot reload re-fetches the whole compiled
-/// module graph. Absolute and bare specifiers are untouched; a quoted region
-/// never spans a newline. Std string scan — no regex crate.
+/// Whether the text immediately before a quote puts that string in MODULE
+/// SPECIFIER position — i.e. it follows `from`, `import`, or `import(`.
+///
+/// This distinction is load-bearing, not pedantry. A relative `.js` string can
+/// also appear as plain *data*, and stamping those corrupts them. The case that
+/// motivated it: wasm-bindgen's glue builds its import object keyed by the
+/// wasm's own import module name —
+///
+/// ```text
+///     return { "./axiom_end_zone_bg.js": import0 };
+/// ```
+///
+/// — which must byte-match the name baked into the `.wasm`. Appending `?v=` to
+/// it made every import unresolvable and the module failed to instantiate with
+/// `Import #0 "./axiom_end_zone_bg.js": module is not an object or function`.
+fn in_specifier_position(before: &str) -> bool {
+    let head = before.trim_end();
+    // `import("./x.js")` — a dynamic import's open paren.
+    if head.ends_with("import(") {
+        return true;
+    }
+    ["from", "import"]
+        .iter()
+        .any(|keyword| ends_with_word(head, keyword))
+}
+
+/// `head` ends with `keyword` as a whole word (not the tail of an identifier,
+/// so `transform` never counts as `from`).
+fn ends_with_word(head: &str, keyword: &str) -> bool {
+    let Some(stem) = head.strip_suffix(keyword) else {
+        return false;
+    };
+    stem.chars()
+        .next_back()
+        .is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '$')
+}
+
+/// Append `?v=<version>` to every quoted **relative** `.js` module specifier
+/// (`from "./x.js"`, `import('../a/b.js')`) so a hot reload re-fetches the whole
+/// compiled module graph. Absolute and bare specifiers are untouched, relative
+/// `.js` strings in non-specifier position are left exactly alone, and a quoted
+/// region never spans a newline. Std string scan — no regex crate.
 pub fn stamp_relative_imports(src: &str, version: u64) -> String {
     let mut out = String::with_capacity(src.len() + 64);
     let mut rest = src;
@@ -206,8 +244,14 @@ pub fn stamp_relative_imports(src: &str, version: u64) -> String {
         match after.find([quote, '\n']) {
             Some(end) if after.as_bytes()[end] as char == quote => {
                 let spec = &after[..end];
+                // `out` currently ends with the opening quote; everything before
+                // it is the context that decides whether this is a specifier.
+                let specifier = in_specifier_position(&out[..out.len() - 1]);
                 out.push_str(spec);
-                if (spec.starts_with("./") || spec.starts_with("../")) && spec.ends_with(".js") {
+                if specifier
+                    && (spec.starts_with("./") || spec.starts_with("../"))
+                    && spec.ends_with(".js")
+                {
                     out.push_str("?v=");
                     out.push_str(&version.to_string());
                 }
@@ -395,6 +439,47 @@ mod tests {
         assert!(out.contains("\"@axiom/web-engine\""));
         assert!(out.contains("\"/dist/game.js\""));
         assert!(out.contains("\"./readme.md\""));
+    }
+
+    #[test]
+    fn a_relative_js_string_in_data_position_is_never_stamped() {
+        // The regression this guards: wasm-bindgen's glue keys its import object
+        // by the wasm's own import module name, which must byte-match the name
+        // baked into the `.wasm`. Stamping it made every import unresolvable —
+        // `Import #0 "./x_bg.js": module is not an object or function`.
+        let src = concat!(
+            "import { init } from \"./app.js\";\n",
+            "function imports() {\n",
+            "    return { \"./app_bg.js\": glue };\n",
+            "}\n",
+            "const dynamic = await import('./late.js');\n",
+            "const label = \"./not-a-module.js\";\n",
+        );
+        let out = stamp_relative_imports(src, 7);
+        assert!(out.contains("\"./app.js?v=7\""), "real specifiers still stamp");
+        assert!(out.contains("'./late.js?v=7'"), "dynamic imports still stamp");
+        assert!(
+            out.contains("\"./app_bg.js\": glue"),
+            "an import-map KEY is data, not a specifier: {out}"
+        );
+        assert!(
+            out.contains("const label = \"./not-a-module.js\""),
+            "a plain string is data: {out}"
+        );
+    }
+
+    #[test]
+    fn export_from_is_a_specifier_position() {
+        let out = stamp_relative_imports("export { a } from \"./a.js\";", 3);
+        assert!(out.contains("\"./a.js?v=3\""), "{out}");
+    }
+
+    #[test]
+    fn a_keyword_suffix_does_not_count_as_the_keyword() {
+        // `transform` ends with `from` but is an identifier, not the keyword.
+        let out = stamp_relative_imports("const transform = \"./a.js\";", 5);
+        assert!(out.contains("\"./a.js\""), "{out}");
+        assert!(!out.contains("?v=5"), "{out}");
     }
 
     #[test]
