@@ -2,7 +2,7 @@
 //! restart, settings/controls returning to whoever opened them, return-to-title,
 //! game over, and play again — plus replayed-input determinism.
 
-use axiom_end_zone::drive::RunSummary;
+use axiom_end_zone::attempt::SessionSummary;
 use axiom_end_zone::frontend::actions::FrontendCommand;
 use axiom_end_zone::frontend::input::FrontendInputFrame;
 use axiom_end_zone::frontend::persistence::FrontendProfile;
@@ -44,12 +44,15 @@ fn to_game_over(fe: &mut FrontendApp) {
     step_with(fe, &[]);
 }
 
-fn summary() -> RunSummary {
-    RunSummary {
-        score: 12500,
+fn summary() -> SessionSummary {
+    SessionSummary {
+        attempts: 12,
+        completions: 5,
         touchdowns: 2,
-        first_downs: 5,
-        longest_play: 38,
+        interceptions: 1,
+        sacks: 3,
+        best_yards: 38,
+        yards_per_attempt: 7.5,
     }
 }
 
@@ -120,8 +123,10 @@ fn settings_and_controls_return_to_pause() {
     let mut fe = app();
     to_ingame(&mut fe);
     tap(&mut fe, "KeyP");
-    tap(&mut fe, "ArrowDown");
-    tap(&mut fe, "ArrowDown"); // RESUME -> RESTART -> SETTINGS
+    // RESUME -> RESTART RUN -> END SESSION -> SETTINGS
+    for _ in 0..3 {
+        tap(&mut fe, "ArrowDown");
+    }
     tap(&mut fe, "Enter");
     assert_eq!(fe.state().screen, Screen::Settings);
     tap(&mut fe, "Escape");
@@ -140,8 +145,8 @@ fn return_to_title_disposes_the_run() {
     let mut fe = app();
     to_ingame(&mut fe);
     tap(&mut fe, "KeyP");
-    for _ in 0..4 {
-        tap(&mut fe, "ArrowDown"); // RETURN TO TITLE
+    for _ in 0..5 {
+        tap(&mut fe, "ArrowDown"); // walk to RETURN TO TITLE
     }
     let frame = tap(&mut fe, "Enter");
     assert_eq!(fe.state().screen, Screen::Title);

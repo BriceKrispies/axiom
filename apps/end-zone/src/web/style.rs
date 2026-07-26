@@ -111,8 +111,42 @@ pub const MENU_CSS: &str = r#"
   color:var(--ez-text);text-shadow:0 2px 4px #000;line-height:1;}
 .ez-hud-togain{font-weight:700;font-size:14px;letter-spacing:.22em;color:var(--ez-chrome);
   margin-top:2px;}
-.ez-hud-heat{font-weight:900;font-size:28px;letter-spacing:.14em;
-  color:var(--ez-hot);text-shadow:0 0 14px rgba(227,62,48,.6),0 2px 3px #000;}
+.ez-hud-heat{font-weight:700;font-size:16px;letter-spacing:.16em;
+  color:var(--ez-chrome);text-shadow:0 2px 3px #000;}
+
+/* --- decision window ----------------------------------------------------- */
+/* The reads are colour-coded to their on-field rings (cyan/amber/magenta) so
+   the key maps to a receiver at a glance. Nothing here reports how OPEN a read
+   is — reading the coverage is the game. */
+.ez-decision{position:absolute;left:50%;bottom:5%;transform:translateX(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 26px;
+  background:linear-gradient(180deg,rgba(14,19,27,.94),rgba(7,10,15,.94));
+  border:3px solid #06090e;border-radius:10px;
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.18),0 10px 26px rgba(0,0,0,.7);}
+.ez-decision-head{font-weight:900;font-size:20px;letter-spacing:.3em;color:var(--ez-hot);
+  text-shadow:0 0 16px rgba(227,62,48,.6),0 2px 3px #000;}
+.ez-reads{display:flex;gap:14px;}
+.ez-read{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:104px;
+  padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.05);
+  border:2px solid rgba(255,255,255,.12);}
+.ez-read b{font-weight:900;font-size:26px;line-height:1;}
+.ez-read span{font-weight:700;font-size:12px;letter-spacing:.16em;color:var(--ez-text);}
+.ez-read1 b{color:#2edcfa;text-shadow:0 0 12px rgba(46,220,250,.6);}
+.ez-read2 b{color:#ffb31f;text-shadow:0 0 12px rgba(255,179,31,.6);}
+.ez-read3 b{color:#f03cdc;text-shadow:0 0 12px rgba(240,60,220,.6);}
+.ez-scramble{font-weight:700;font-size:13px;letter-spacing:.22em;color:var(--ez-chrome);}
+.ez-timer{width:100%;height:6px;border-radius:3px;background:rgba(255,255,255,.12);
+  overflow:hidden;}
+.ez-timer i{display:block;height:100%;background:var(--ez-hot);
+  box-shadow:0 0 10px rgba(227,62,48,.8);}
+
+/* --- attempt result card ------------------------------------------------- */
+.ez-result{position:absolute;left:50%;top:22%;transform:translateX(-50%);
+  font-weight:900;font-size:40px;letter-spacing:.14em;white-space:nowrap;
+  color:var(--ez-text);text-shadow:0 0 22px rgba(0,0,0,.9),0 4px 6px #000;
+  padding:10px 28px;border-radius:8px;
+  background:linear-gradient(180deg,rgba(14,19,27,.86),rgba(7,10,15,.86));
+  border:3px solid #06090e;}
 
 /* --- huddle play cards (a clickable chalkboard per play) ----------------- */
 .ez-diagram{position:relative;border:3px solid #06090e;border-radius:10px;overflow:hidden;

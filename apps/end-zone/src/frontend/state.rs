@@ -4,7 +4,7 @@
 //! active transition, the game-over summary) and communicates with the
 //! composition layer exclusively through drained [`FrontendCommand`]s.
 
-use crate::drive::{HuddleView, RunSummary};
+use crate::attempt::SessionSummary;
 use crate::frontend::actions::{AudioIntent, FrontendCommand};
 use crate::frontend::navigation::{FocusList, WidgetId};
 use crate::frontend::persistence::FrontendProfile;
@@ -25,11 +25,8 @@ pub struct FrontendState {
     pub focus_memory: [Option<WidgetId>; SCREEN_COUNT],
     pub focus: FocusList,
     pub transition: Option<ActiveTransition>,
-    /// The final run summary, set when the shell reports the run is over.
-    pub summary: Option<RunSummary>,
-    /// The open pre-snap huddle, set when the shell reports the drive is waiting
-    /// for a play call. Cleared when the huddle breaks.
-    pub huddle: Option<HuddleView>,
+    /// The session summary, set when the shell reports the session ended.
+    pub summary: Option<SessionSummary>,
     /// Where a Settings/Controls sub-screen returns on BACK — the pre-game
     /// `Menu` or the in-game `Paused` menu, whichever opened it.
     pub sub_return: Screen,
@@ -55,7 +52,6 @@ impl FrontendState {
             focus: FocusList::default(),
             transition: None,
             summary: None,
-            huddle: None,
             sub_return: Screen::Paused,
             run_counter: 0,
             base_seed,

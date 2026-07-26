@@ -24,8 +24,7 @@ use super::engagement::Engagement;
 use super::overseer::PossessionMemory;
 
 /// The protected pocket: the region behind the line of scrimmage the blockers
-/// keep the rush out of, and the box the quarterback is "in" until he commits to
-/// a scramble.
+/// keep the rush out of, and the box the quarterback is "in" until he runs.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PocketRegion {
     pub center: Vec3,
@@ -60,9 +59,9 @@ impl PocketRegion {
     }
 }
 
-/// The coordinated pursuit responsibility a defender has been handed this tick
-/// (spec §4, §8). Exactly one defender is the primary; the rest fill the
-/// supporting lanes so nobody duplicates the same angle.
+/// The coordinated pursuit responsibility a defender has been handed this tick.
+/// Exactly one defender is the primary; the rest fill the supporting lanes so
+/// nobody duplicates the same angle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Responsibility {
     #[default]
@@ -159,7 +158,13 @@ impl SimState {
         } else {
             0
         };
-        let qb_run = holds && self.ai_memory.qb_downfield_ticks >= self.tuning.scramble_commit_ticks;
+        // Two ways to be a running quarterback: the observational detector (he
+        // built up downfield speed outside the pocket), or an explicit
+        // DECLARATION from the player. The declaration matters because the
+        // scramble option only carries its risk if the defense reacts at once.
+        let qb_run = holds
+            && (self.qb_scrambling
+                || self.ai_memory.qb_downfield_ticks >= self.tuning.scramble_commit_ticks);
         let qb_windup = matches!(
             self.roles[self.quarterback.index()],
             RoleState::QbWindup { .. }
@@ -283,8 +288,7 @@ impl SimState {
         self.overseer.rejected()
     }
 
-    /// Reset possession-level overseer memory at a possession boundary (called
-    /// by the drive layer on a touchdown / change of possession).
+    /// Reset possession-level overseer memory at a possession boundary.
     pub fn note_new_possession(&mut self) {
         self.overseer.reset_possession();
     }

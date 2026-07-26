@@ -113,7 +113,11 @@ fn parse_jukes(spec: &str) -> Vec<(u64, f32, f32)> {
         .filter_map(|entry| {
             let (t, xy) = entry.split_once(':')?;
             let (x, y) = xy.split_once(',')?;
-            Some((t.trim().parse().ok()?, x.trim().parse().ok()?, y.trim().parse().ok()?))
+            Some((
+                t.trim().parse().ok()?,
+                x.trim().parse().ok()?,
+                y.trim().parse().ok()?,
+            ))
         })
         .collect()
 }
@@ -236,12 +240,19 @@ fn run(opts: &Opts, verbose: bool) -> usize {
                     println!("[t{tick:>3}] {line}");
                 }
             }
-            if let SimEvent::TackleContact { tackler, target, .. } = ev.event {
+            if let SimEvent::TackleContact {
+                tackler, target, ..
+            } = ev.event
+            {
                 if let (Some(prev_snap), Some(peak)) = (prev.as_ref(), peaks.get(&tackler.0)) {
                     let t = prev_snap.player(tackler);
                     let c = prev_snap.player(target);
                     let verdict = judge_dive(*peak, t, c);
-                    let tag = if verdict.phantom { "PHANTOM DIVE TACKLE" } else { "dive tackle (ok)" };
+                    let tag = if verdict.phantom {
+                        "PHANTOM DIVE TACKLE"
+                    } else {
+                        "dive tackle (ok)"
+                    };
                     if verbose || verdict.phantom {
                         println!(
                             "[t{tick:>3}] {tag}: {} tackled {} — {}",
@@ -259,7 +270,9 @@ fn run(opts: &Opts, verbose: bool) -> usize {
         let carrier_pos = snap.carrier().map(|c| c.pos);
         for p in &snap.players {
             if p.anim == AnimState::Dive {
-                let dist = carrier_pos.map(|cp| xz_distance(p.pos, cp)).unwrap_or(f32::MAX);
+                let dist = carrier_pos
+                    .map(|cp| xz_distance(p.pos, cp))
+                    .unwrap_or(f32::MAX);
                 let entry = peaks.entry(p.id.0).or_insert(DivePeak {
                     max_y: 0.0,
                     min_xz_to_carrier: f32::MAX,
@@ -278,7 +291,10 @@ fn run(opts: &Opts, verbose: bool) -> usize {
         }
 
         // Full brain table, only inside the requested window.
-        let in_window = opts.window.map(|(a, b)| tick >= a && tick <= b).unwrap_or(false);
+        let in_window = opts
+            .window
+            .map(|(a, b)| tick >= a && tick <= b)
+            .unwrap_or(false);
         if verbose && in_window {
             println!(
                 "── t{tick} phase={:?} ball={:?} possession={:?}",
@@ -322,16 +338,19 @@ fn event_line(ev: &SimEvent, snap: &PresentationSnapshot) -> Option<String> {
         SimEvent::PlayStarted { .. } => "PLAY STARTED".into(),
         SimEvent::Snap { quarterback, .. } => format!("SNAP → QB {}", who(snap, *quarterback)),
         SimEvent::DropBack { .. } => "QB DROP-BACK".into(),
-        SimEvent::Throw { target, eta_ticks, .. } => {
-            format!("THROW → target=({:.1},{:.1}) eta={eta_ticks}", target.x, target.z)
+        SimEvent::Throw {
+            target, eta_ticks, ..
+        } => {
+            format!(
+                "THROW → target=({:.1},{:.1}) eta={eta_ticks}",
+                target.x, target.z
+            )
         }
         SimEvent::CatchAttempt { player } => format!("catch attempt by {}", who(snap, *player)),
         SimEvent::CatchCompleted { player } => format!("CATCH by {}", who(snap, *player)),
-        SimEvent::PossessionChanged { from, to } => format!(
-            "possession {:?} → {:?}",
-            from.map(|i| i.0),
-            to.map(|i| i.0)
-        ),
+        SimEvent::PossessionChanged { from, to } => {
+            format!("possession {:?} → {:?}", from.map(|i| i.0), to.map(|i| i.0))
+        }
         SimEvent::PassBrokenUp { defender, .. } => {
             format!("PASS BROKEN UP by {}", who(snap, *defender))
         }
@@ -343,14 +362,25 @@ fn event_line(ev: &SimEvent, snap: &PresentationSnapshot) -> Option<String> {
         SimEvent::BlockEngaged { blocker, defender } => {
             format!("block {} vs {}", who(snap, *blocker), who(snap, *defender))
         }
-        SimEvent::TackleContact { tackler, target, strength, target_airborne, .. } => format!(
+        SimEvent::TackleContact {
+            tackler,
+            target,
+            strength,
+            target_airborne,
+            ..
+        } => format!(
             "TACKLE CONTACT {} → {} strength={strength:.2} airborne={target_airborne}",
             who(snap, *tackler),
             who(snap, *target),
         ),
         SimEvent::PlayerAirborne { player } => format!("{} airborne", who(snap, *player)),
-        SimEvent::GroundImpact { player, strength, .. } => {
-            format!("{} ground impact strength={strength:.2}", who(snap, *player))
+        SimEvent::GroundImpact {
+            player, strength, ..
+        } => {
+            format!(
+                "{} ground impact strength={strength:.2}",
+                who(snap, *player)
+            )
         }
         SimEvent::PlayEnded { reason } => format!("PLAY ENDED: {}", end_reason(*reason)),
         SimEvent::PlayReset => "play reset".into(),
@@ -377,13 +407,8 @@ fn run_drive(opts: &Opts) {
         ..RunConfig::default()
     };
     let mut run = ShowcaseRun::new_run(&config);
-    let mut prev_drive = run.drive_state();
-    if let Some(d) = prev_drive {
-        println!(
-            "start: down={} los={:.0} first_down={:.0} heat={}",
-            d.down, d.los_yard, d.first_down_yard, d.heat
-        );
-    }
+    let mut prev_attempt = run.ledger().and_then(|l| l.last).map(|r| r.index);
+    println!("start: the attempt loop is armed at the prototype line");
     let mut throw_at: Option<u64> = None;
     for tick in 0..opts.ticks {
         // Steer a RECEIVER (post-catch carrier) straight at the end zone; leave
@@ -422,15 +447,15 @@ fn run_drive(opts: &Opts) {
             }
         }
 
-        let drive = run.drive_state();
-        if drive != prev_drive {
-            if let Some(d) = drive {
+        let resolved = run.ledger().and_then(|l| l.last);
+        if resolved.map(|r| r.index) != prev_attempt {
+            if let Some(r) = resolved {
                 println!(
-                    "[t{tick}] DRIVE down={} los={:.0} first_down={:.0} td={} first_downs={} over={} phase={:?}",
-                    d.down, d.los_yard, d.first_down_yard, d.touchdowns, d.first_downs, d.over, out.snapshot.phase
+                    "[t{tick}] ATTEMPT {} {:?} {:+.1} yd read={:?} windows={} phase={:?}",
+                    r.index, r.outcome, r.yards, r.read, r.windows, out.snapshot.phase
                 );
             }
-            prev_drive = drive;
+            prev_attempt = resolved.map(|r| r.index);
         }
 
         if tick % 60 == 0 {
@@ -446,10 +471,14 @@ fn run_drive(opts: &Opts) {
             );
         }
     }
-    if let Some(d) = run.drive_state() {
+    if let Some(l) = run.ledger() {
         println!(
-            "\nfinal: down={} los={:.0} td={} first_downs={} over={}",
-            d.down, d.los_yard, d.touchdowns, d.first_downs, d.over
+            "\nfinal: {} attempts, {} complete, {} INT, {} sack, {:.2} yds/att",
+            l.attempts,
+            l.completions,
+            l.interceptions,
+            l.sacks,
+            l.yards_per_attempt()
         );
     }
 }
@@ -467,7 +496,10 @@ fn main() {
         let mut total = 0usize;
         let mut hit_seeds = Vec::new();
         for seed in 0..n {
-            let scan_opts = Opts { seed, ..copy_opts(&opts) };
+            let scan_opts = Opts {
+                seed,
+                ..copy_opts(&opts)
+            };
             let count = run(&scan_opts, false);
             if count > 0 {
                 hit_seeds.push((seed, count));
@@ -497,7 +529,9 @@ fn main() {
         opts.start,
         opts.snap,
         opts.throw,
-        opts.window.map(|(a, b)| format!(" window={a}:{b}")).unwrap_or_default(),
+        opts.window
+            .map(|(a, b)| format!(" window={a}:{b}"))
+            .unwrap_or_default(),
     );
     let phantoms = run(&opts, true);
     println!("\n{phantoms} phantom dive tackle(s) this run.");

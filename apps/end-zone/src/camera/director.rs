@@ -92,9 +92,36 @@ impl CameraDirector {
         }
     }
 
-    /// Return to automatic direction (key 5).
+    /// Return to automatic direction.
     pub fn automatic(&mut self) {
         self.forced = None;
+    }
+
+    /// Pull the camera up and back for an open decision window, and drop it
+    /// back where it was when the window closes.
+    ///
+    /// This is a snapshot-driven mode, not an event-driven one, because the
+    /// window's whole job is to persist for a beat — an edge-triggered impulse
+    /// would fire once and leave the framing behind. The spring rig does the
+    /// rest: the move OUT to the read shot and back IN to the pocket is the
+    /// most legible signal the player gets that the game is asking them
+    /// something, which is exactly what the transition needs to be.
+    fn follow_decision_window(&mut self, snapshot: &PresentationSnapshot) {
+        let asking = snapshot.attempt.is_some_and(|step| step.phase.in_window());
+        match (asking, self.mode == CameraMode::DecisionRead) {
+            (true, false) => {
+                self.return_mode = self.mode;
+                self.transition(snapshot.tick, CameraMode::DecisionRead);
+            }
+            (false, true) => {
+                let restore = match snapshot.possession == Some(snapshot.quarterback) {
+                    true => CameraMode::QuarterbackFollow,
+                    false => self.return_mode,
+                };
+                self.transition(snapshot.tick, restore);
+            }
+            _ => {}
+        }
     }
 
     /// React to this tick's events, then produce the final pose.
@@ -102,6 +129,7 @@ impl CameraDirector {
         for stamped in events {
             self.observe(snapshot, stamped);
         }
+        self.follow_decision_window(snapshot);
         if self.mode == CameraMode::CatchResolve {
             self.catch_ticks = self.catch_ticks.saturating_add(1);
             if self.catch_ticks >= self.tuning.catch_blend_ticks && snapshot.possession.is_some() {

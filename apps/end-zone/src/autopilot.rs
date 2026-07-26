@@ -6,13 +6,20 @@
 //!
 //! It is a pure function of the simulation: no I/O, no wall clock, no
 //! randomness, so an autopiloted run replays bit-for-bit like any other run.
-//! Calling a play at the huddle and letting the snap fire are trivial
-//! [`crate::showcase::ShowcaseRun`] orchestration the caller does directly; the
-//! autopilot owns only the two decisions that need to read the field: WHERE to
-//! run ([`steer`]) and WHEN to throw ([`should_throw`]).
+//! The autopilot owns the three decisions that need to read the field: WHICH
+//! read to take in a decision window ([`decide`]), WHERE to run ([`steer`]),
+//! and — for the ambient cone-aimed throw — WHEN to release ([`should_throw`]).
+//!
+//! [`decide`] is also the prototype's **tuning instrument**: running the same
+//! attempt loop under an impatient, a balanced and a greedy [`Patience`] is how
+//! we check that waiting for the deep read really is a trade rather than a free
+//! upgrade. If every patience profile posts the same numbers, the prototype has
+//! failed its own design question.
 
 use axiom::prelude::Vec2;
 
+use crate::attempt::{AttemptStep, PlayerChoice, MAX_WINDOWS};
+use crate::data::prototype::{READ_COUNT, READ_REWARD};
 use crate::field::OffensePoint;
 use crate::player::PlayerSim;
 use crate::state::SimState;
@@ -30,6 +37,68 @@ const OPEN_ENOUGH: f32 = 4.0;
 /// A receiver must be at least this far downfield of the passer to be worth a
 /// throw, yards (throwing flat or behind never advances the ball).
 const THROW_LEAD: f32 = 3.0;
+
+/// How patient a simulated quarterback is — the knob the balance harness
+/// sweeps. A patient policy holds out for a deeper read and eats the sacks that
+/// come with waiting; an impatient one takes the checkdown every time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Patience {
+    /// The shallowest read this policy will settle for (`0` = the quick out).
+    pub floor: usize,
+    /// How open a read must look before this policy takes it, `0..1`.
+    pub demand: f32,
+    /// Pocket pressure above which it abandons the read and runs, `0..1`.
+    pub bail: f32,
+}
+
+impl Patience {
+    /// Takes the first thing available.
+    pub const IMPATIENT: Patience = Patience {
+        floor: 0,
+        demand: 0.20,
+        bail: 0.92,
+    };
+    /// Waits for a real look but does not chase the deep shot.
+    pub const BALANCED: Patience = Patience {
+        floor: 0,
+        demand: 0.48,
+        bail: 0.80,
+    };
+    /// Refuses the checkdown and holds out for the intermediate or the post.
+    pub const GREEDY: Patience = Patience {
+        floor: 1,
+        demand: 0.42,
+        bail: 0.74,
+    };
+}
+
+/// The choice this policy makes in an open decision window, or `None` to let the
+/// window close and wait for a better look. `None` is a real decision with a
+/// real cost — the rush is closer when the next window opens, and the window
+/// after that is shorter.
+pub fn decide(step: &AttemptStep, patience: Patience) -> Option<PlayerChoice> {
+    if !step.phase.in_window() {
+        return None;
+    }
+    let read = &step.read;
+    let max_reward = READ_REWARD[READ_COUNT - 1].max(1.0);
+    let value = |r: usize| read.read(r).openness * READ_REWARD[r] / max_reward;
+    let pick = (patience.floor.min(READ_COUNT - 1)..READ_COUNT)
+        .filter(|r| read.read(*r).live)
+        .max_by(|a, b| value(*a).total_cmp(&value(*b)))?;
+    // The last window is the last chance: after it closes, nobody is asking
+    // again and the rush finishes the job.
+    let last_chance = step.windows >= MAX_WINDOWS;
+    let panicking = read.pressure >= patience.bail;
+    if read.read(pick).openness >= patience.demand {
+        return Some(PlayerChoice::Throw(pick));
+    }
+    match (panicking, last_chance) {
+        (true, _) => Some(PlayerChoice::Scramble),
+        (false, true) => Some(PlayerChoice::Throw(pick)),
+        (false, false) => None,
+    }
+}
 
 /// This tick's movement stick for the autopilot, offense-relative (`x` = right,
 /// `y` = downfield), each in `-1..=1`. Returns [`Vec2::ZERO`] whenever the
@@ -96,7 +165,9 @@ pub fn should_throw(sim: &SimState) -> bool {
     let Some(&target) = sim.throwable.first() else {
         return false;
     };
-    let here = sim.frame.from_world(sim.players[sim.quarterback.index()].pos);
+    let here = sim
+        .frame
+        .from_world(sim.players[sim.quarterback.index()].pos);
     let receiver = sim.players[target.index()];
     let spot = sim.frame.from_world(receiver.pos);
     holding

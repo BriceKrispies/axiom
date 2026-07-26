@@ -68,9 +68,10 @@ pub enum FrontendCommand {
     ReturnToTitle,
     /// Suspend / resume authoritative simulation advancement.
     SetPaused(bool),
-    /// Call offensive play `index` from the open huddle. The shell forwards it
-    /// to the run, which composes the play against its chosen defensive answer.
-    CallPlay { index: usize },
+    /// Stop the endless attempt loop and show what the session added up to.
+    /// The shell answers by pushing the summary back in — the frontend never
+    /// queries the run.
+    EndSession,
 }
 
 /// Typed audio intents (mapped to procedural tones at the platform edge).

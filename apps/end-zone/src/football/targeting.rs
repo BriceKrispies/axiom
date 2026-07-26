@@ -71,8 +71,12 @@ pub fn candidates(
         })
         .filter_map(|(_, p)| {
             let angle = angle_off_facing(quarterback.pos, quarterback.facing, p.pos)?;
-            let distance = Vec3::new(p.pos.x - quarterback.pos.x, 0.0, p.pos.z - quarterback.pos.z)
-                .length();
+            let distance = Vec3::new(
+                p.pos.x - quarterback.pos.x,
+                0.0,
+                p.pos.z - quarterback.pos.z,
+            )
+            .length();
             let in_cone = angle <= tuning.throw_cone_half_angle;
             let in_range = distance >= tuning.throw_min_range && distance <= tuning.throw_max_range;
             (in_cone && in_range).then_some(ThrowCandidate {
@@ -90,4 +94,29 @@ pub fn candidates(
 /// `None` when nobody is open, in which case the quarterback must not throw.
 pub fn best(candidates: &[ThrowCandidate]) -> Option<PlayerId> {
     candidates.first().map(|c| c.id)
+}
+
+/// Whether `target` is a legal receiver for `quarterback` — a live route runner
+/// on his own team who is still on his feet.
+///
+/// This is the check for a **named** throw (the decision window's read), so it
+/// deliberately omits the cone and the range: the player picked that receiver
+/// by number, and the quarterback turns and throws it. Eligibility is still the
+/// real rule — a blocker, a defender, or a downed receiver can never be named.
+pub fn is_legal_target(
+    quarterback: PlayerId,
+    target: PlayerId,
+    players: &[PlayerSim],
+    assignments: &[ResolvedAssignment],
+) -> bool {
+    let (Some(passer), Some(receiver)) = (
+        players.get(quarterback.index()),
+        players.get(target.index()),
+    ) else {
+        return false;
+    };
+    target != quarterback
+        && receiver.team == passer.team
+        && !receiver.anim.is_down()
+        && assignments.get(target.index()).is_some_and(is_receiver)
 }

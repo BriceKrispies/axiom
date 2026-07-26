@@ -1,7 +1,12 @@
-//! The game-over screen: RUN OVER, the run summary (final score, touchdowns,
-//! first downs, longest play), and exactly PLAY AGAIN / RETURN TO TITLE.
+//! The session summary: what the prototype's attempts added up to (how many,
+//! how many were completed, the best gain, how many were given away), and
+//! exactly PLAY AGAIN / RETURN TO TITLE.
+//!
+//! These are *statistics*, not progression — nothing here feeds back into the
+//! next session's difficulty. The prototype is answering a design question, and
+//! the numbers exist so the answer can be argued about.
 
-use crate::drive::RunSummary;
+use crate::attempt::SessionSummary;
 use crate::frontend::actions::{AudioIntent, FrontendCommand};
 use crate::frontend::layout::{centered_rows, LayoutContext, ShellRegions};
 use crate::frontend::navigation::{FocusEntry, WidgetId};
@@ -37,11 +42,14 @@ pub fn build(
     _theme: &Theme,
 ) -> ScreenBuild {
     let focused = fe.focus.focused();
-    let summary = fe.summary.unwrap_or(RunSummary {
-        score: 0,
+    let summary = fe.summary.unwrap_or(SessionSummary {
+        attempts: 0,
+        completions: 0,
         touchdowns: 0,
-        first_downs: 0,
-        longest_play: 0,
+        interceptions: 0,
+        sacks: 0,
+        best_yards: 0,
+        yards_per_attempt: 0.0,
     });
 
     let mut widgets = vec![Placed::new(
@@ -49,16 +57,23 @@ pub fn build(
         shell.header,
         Widget::Label(Label {
             italic: true,
-            accent: Some("#e33e30".to_string()),
-            ..Label::new("RUN OVER", LabelSize::Huge)
+            accent: Some("#39c0ff".to_string()),
+            ..Label::new("SESSION", LabelSize::Huge)
         }),
     )];
 
     let stats = [
-        ("FINAL SCORE", format!("{:06}", summary.score)),
-        ("TOUCHDOWNS", summary.touchdowns.to_string()),
-        ("FIRST DOWNS", summary.first_downs.to_string()),
-        ("LONGEST PLAY", format!("{} YD", summary.longest_play)),
+        ("ATTEMPTS", summary.attempts.to_string()),
+        (
+            "COMPLETIONS",
+            format!("{} / {}", summary.completions, summary.attempts),
+        ),
+        ("YARDS PER TRY", format!("{:.1}", summary.yards_per_attempt)),
+        ("BEST GAIN", format!("{} YD", summary.best_yards)),
+        (
+            "GIVEN AWAY",
+            format!("{} INT   {} SACK", summary.interceptions, summary.sacks),
+        ),
     ];
     let stat_count = stats.len();
     let width = (ctx.width * 0.62).clamp(320.0, 520.0);

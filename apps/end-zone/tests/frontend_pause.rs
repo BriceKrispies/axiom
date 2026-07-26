@@ -25,29 +25,26 @@ fn tap(s: &mut EndZoneShell, token: &str) {
     frame(s, &[]);
 }
 
-/// Title -> Menu -> PLAY opens the huddle immediately; calling a play drops onto
-/// the field. A run always begins at the play-call, never a bare live field.
+/// Title -> Menu -> PLAY drops straight onto the field. There is no play-call
+/// screen: the prototype runs one concept and asks its only question on the
+/// field, inside the decision window.
 fn start_run(s: &mut EndZoneShell) {
     tap(s, "Enter"); // Title -> Menu
-    tap(s, "Enter"); // Menu PLAY -> Huddle (play-call opens right away)
-    assert_eq!(s.frontend.screen(), Screen::Huddle);
-    tap(s, "Enter"); // Huddle: call the focused play -> InGame
+    tap(s, "Enter"); // Menu PLAY -> InGame
     assert_eq!(s.frontend.screen(), Screen::InGame);
 }
 
 #[test]
-fn play_opens_the_huddle_immediately_not_a_live_field() {
+fn play_drops_straight_onto_the_field_with_the_offense_set() {
     let mut s = shell();
     tap(&mut s, "Enter"); // Title -> Menu
     tap(&mut s, "Enter"); // Menu PLAY
-    // The play-call huddle is up the instant the run begins — there is no live,
-    // snappable field flashing before it (the old 100-tick kickoff window).
-    assert_eq!(s.frontend.screen(), Screen::Huddle);
-    // The ball is still pre-snap while the huddle owns the pre-snap beat.
+    assert_eq!(s.frontend.screen(), Screen::InGame);
+    // The offense is lining up; the automatic snap has not fired yet.
     assert_eq!(
         s.app.run.sim.phase,
         axiom_end_zone::state::PlayPhase::PreSnap,
-        "the ball has not snapped behind the huddle"
+        "the attempt begins with the offense set, not mid-play"
     );
 }
 
@@ -101,8 +98,8 @@ fn restart_uses_a_fresh_simulation() {
     tap(&mut s, "KeyP");
     tap(&mut s, "ArrowDown"); // RESTART RUN
     tap(&mut s, "Enter");
-    // A fresh run re-opens the huddle (call the first play) from tick zero.
-    assert_eq!(s.frontend.screen(), Screen::Huddle);
+    // A fresh run drops back onto the field at tick zero.
+    assert_eq!(s.frontend.screen(), Screen::InGame);
     assert!(
         s.app.run.sim.tick < 10,
         "restart rebuilds the simulation from tick zero"
@@ -117,13 +114,13 @@ fn return_to_title_disposes_the_run() {
         frame(&mut s, &[]);
     }
     tap(&mut s, "KeyP");
-    for _ in 0..4 {
+    for _ in 0..5 {
         tap(&mut s, "ArrowDown"); // walk to RETURN TO TITLE
     }
     tap(&mut s, "Enter");
     assert_eq!(s.frontend.screen(), Screen::Title);
     assert!(
-        s.app.run.drive_state().is_none(),
-        "the score-attack run is gone; only the ambient showcase remains"
+        s.app.run.attempt().is_none(),
+        "the attempt session is gone; only the ambient showcase remains"
     );
 }

@@ -141,7 +141,12 @@ impl AnimLab {
         let clip = self.clips[self.selected];
         let mut rows = vec![(
             "clip".to_string(),
-            format!("{} ({}/{})", clip.label, self.selected + 1, self.clips.len()),
+            format!(
+                "{} ({}/{})",
+                clip.label,
+                self.selected + 1,
+                self.clips.len()
+            ),
         )];
         if let Some(s) = self.sample() {
             rows.push(("mode".to_string(), format!("{:?}", s.mode)));
@@ -219,9 +224,9 @@ impl AnimLab {
             overseer_prev_mode: crate::ai::TacticalMode::Base,
             overseer_transition_reason: "lab",
             overseer_rejected: (crate::ai::TacticalMode::Base, 0.0),
-            drive: None,
+            attempt: None,
             throwable: Vec::new(),
-            to_gain_z: None,
+            spot_marker_z: None,
             pre_snap_routes: Vec::new(),
         }
     }
@@ -233,8 +238,12 @@ impl AnimLab {
     fn camera(&self) -> CameraPose {
         let azimuth = self.actor.facing + core::f32::consts::PI + self.orbit_yaw;
         let cp = self.orbit_pitch.cos();
-        let offset = Vec3::new(azimuth.sin() * cp, self.orbit_pitch.sin(), azimuth.cos() * cp)
-            .mul_scalar(self.orbit_distance);
+        let offset = Vec3::new(
+            azimuth.sin() * cp,
+            self.orbit_pitch.sin(),
+            azimuth.cos() * cp,
+        )
+        .mul_scalar(self.orbit_distance);
         let focus = self.actor.pos.add(Vec3::new(0.0, 1.0, 0.0));
         CameraPose {
             eye: focus.add(offset),

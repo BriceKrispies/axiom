@@ -1,8 +1,8 @@
-//! The drive-support mutators the controller drives the simulation with: moving
-//! the line of scrimmage, installing a freshly-composed play, reloading the
-//! heat-scaled defense, blowing a stuck play dead, and reading the ball's spot.
-//! These are `SimState` methods (the drive owns *when* they run; the sim owns
-//! *what* they do).
+//! The simulation mutators the attempt loop drives the play with: moving the
+//! line of scrimmage, installing a freshly-composed play, swapping the
+//! defensive roster, blowing a stuck play dead, and reading the ball's spot.
+//! These are `SimState` methods — the loop owns *when* they run; the simulation
+//! owns *what* they do.
 
 use crate::ai::{compile_assignments, AssignmentKind};
 use crate::data::player::RosterDefinition;
@@ -41,14 +41,14 @@ impl SimState {
             .unwrap_or(PlayerId(0))
     }
 
-    /// Replace the defense roster and shared contact tuning (heat escalation).
+    /// Replace the defense roster and shared contact tuning.
     pub fn reload_defense(&mut self, defense: RosterDefinition, tuning: BehaviorTuning) {
         self.rosters.1 = defense;
         self.tuning = tuning;
     }
 
-    /// Blow the play dead where the ball currently is (the sack / dead-ball
-    /// path the play clock uses when a held ball never resolves).
+    /// Blow the play dead where the ball currently is (the dead-ball path the
+    /// attempt clock uses when a play somehow never resolves).
     pub fn blow_dead(&mut self) {
         self.end_play(crate::events::PlayEndReason::Tackled);
     }

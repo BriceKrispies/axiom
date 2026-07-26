@@ -20,7 +20,7 @@ pub mod theme;
 pub mod transitions;
 pub mod widgets;
 
-use crate::drive::{HuddleView, RunSummary};
+use crate::attempt::SessionSummary;
 
 use actions::{AudioIntent, FrontendCommand, InputDevice};
 use bindings::ControlBindings;
@@ -119,13 +119,10 @@ impl FrontendApp {
         }
     }
 
-    /// What the simulation should do behind the current screen. The `Huddle`
-    /// keeps the run advancing (the field stays live behind the play-call panel
-    /// and the auto-break clock keeps ticking); gameplay input is gated off by
-    /// the shell because the screen is not `InGame`.
+    /// What the simulation should do behind the current screen.
     pub fn sim_directive(&self) -> SimDirective {
         match self.state.screen {
-            Screen::InGame | Screen::Huddle => SimDirective::Live,
+            Screen::InGame => SimDirective::Live,
             Screen::Paused | Screen::Settings | Screen::Controls | Screen::GameOver => {
                 SimDirective::Frozen
             }
@@ -138,29 +135,11 @@ impl FrontendApp {
         self.state.screen
     }
 
-    /// The shell reports the run ended: show the game-over summary.
-    pub fn enter_game_over(&mut self, summary: RunSummary) {
+    /// The shell reports the session ended: show the summary.
+    pub fn enter_game_over(&mut self, summary: SessionSummary) {
         if self.state.screen != Screen::GameOver {
             self.state.summary = Some(summary);
             self.state.go(Screen::GameOver, TransitionKind::Fade);
-        }
-    }
-
-    /// The shell reports the drive opened a huddle: open the play-call screen.
-    /// Only interrupts live gameplay — never a menu, pause, or game-over.
-    pub fn enter_huddle(&mut self, view: HuddleView) {
-        if self.state.screen == Screen::InGame {
-            self.state.huddle = Some(view);
-            self.state.go(Screen::Huddle, TransitionKind::Fade);
-        }
-    }
-
-    /// The shell reports the huddle broke without a player call (the drive's
-    /// auto-break): return to the field.
-    pub fn exit_huddle(&mut self) {
-        if self.state.screen == Screen::Huddle {
-            self.state.huddle = None;
-            self.state.go(Screen::InGame, TransitionKind::Wipe);
         }
     }
 

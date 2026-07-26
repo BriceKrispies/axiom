@@ -1,11 +1,17 @@
 # End Zone — agent routing
 
 This is the routing file for `apps/end-zone` (`axiom-end-zone`), a
-composition-leaf Axiom app: an arcade **score-attack football** game built on a
-reusable, deterministic play-simulation framework that lives entirely inside
-this app. Read the repo-root `CLAUDE.md` first — the Layer/Module/Branchless/
-Coverage laws still apply. This file tells you **where** things live so you fix
-them at the right boundary instead of guessing.
+composition-leaf Axiom app: an arcade football game built on a reusable,
+deterministic play-simulation framework that lives entirely inside this app.
+
+The game layer on top is currently the **decision-window prototype**
+(`src/attempt/`): the play simulates itself and the player intervenes once, in
+slow motion, to pick one of three receivers or to run. It replaced the old
+score-attack drive loop (downs / heat / game over), which is gone.
+
+Read the repo-root `CLAUDE.md` first — the Layer/Module/Branchless/Coverage laws
+still apply. This file tells you **where** things live so you fix them at the
+right boundary instead of guessing.
 
 ## Start here — pick your doc
 
@@ -26,7 +32,7 @@ in the wrong one is debt.
 ```text
 input (keys → DeviceFrame → InputState)
   → fixed-step 60 Hz simulation          src/state.rs, src/ai/*, src/football/*, src/player/*
-  → score-attack drive loop              src/drive.rs        (downs / score / heat / game over)
+  → decision-window attempt loop         src/attempt/*       (window / choice / result / reset)
   → ordered SimEvents                    src/events.rs
   → immutable PresentationSnapshot       src/presentation/snapshot.rs
   → camera director + juice              src/camera/*, src/presentation/*
@@ -47,9 +53,15 @@ input (keys → DeviceFrame → InputState)
 
 ## Where does my change go? (quick router)
 
-- **New gameplay rule / down logic / heat / game-over** → `src/drive.rs`. It
-  measures play outcomes and keeps score-attack bookkeeping; it adds no football
-  rule the sim doesn't already produce.
+- **Attempt pacing / when the window opens / what a choice does / how a result
+  is measured** → `src/attempt/`: `phase.rs` (the explicit state), `read.rs`
+  (the read + the window trigger), `controller.rs` (the loop), `ledger.rs`
+  (what happened), `setup.rs` (building one attempt), `view.rs` (what
+  presentation may see). Timing constants are all in `attempt/mod.rs`.
+- **What the three reads ARE** → `src/data/prototype.rs` (one formation, three
+  routes, and the read→slot mapping the keys `1`/`2`/`3` follow).
+- **What a key does in game** → `src/controls.rs` (the fixed in-game input map
+  and the press latch the slow-motion window needs).
 - **Player/defender behavior** → data first (`src/data/tuning.rs`, archetypes),
   then the AI stage that owns it: `src/ai/assignment.rs` (route→waypoints),
   `src/ai/perception.rs` + `src/football/situation.rs` (the shared play model +
@@ -116,7 +128,9 @@ input (keys → DeviceFrame → InputState)
 ## Build / test / run
 
 ```sh
-cargo test -p axiom-end-zone          # native tests (sim, drive, frontend, guards)
+cargo test -p axiom-end-zone          # native tests (sim, attempt loop, frontend, guards)
+# the prototype's balance instrument (waiting must pay more AND cost more):
+cargo test -p axiom-end-zone --test autopilot patience_sweep -- --ignored --nocapture
 make end-zone-build                    # wasm build for the browser
 cargo run -p axiom-serve -- end-zone   # local hot-reload dev server
 ```

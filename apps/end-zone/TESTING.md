@@ -62,18 +62,33 @@ driven headlessly.
   sim) is still guarded by `tests/camera.rs`, which the locomotion animator
   obeys by construction (it reads only the snapshot).
 
-## Score-attack drive
+## The decision-window attempt loop
 
-- `tests/drive.rs` — over the real simulation: a fresh run starts 1st & 10 with
-  zeroed stats; an unassisted run turns the ball over on downs and ends (the
-  dead-ball play clock bounds every play); the run summary matches the final
-  drive state; a fresh run resets all statistics; a run replays identically from
-  the same config; and `DriveState::resolve` awards the expected
-  first-down / touchdown / run-over events.
-- `tests/frontend_hud.rs` — `HudView` from authoritative `DriveState`: down
-  display, yards-to-go derived from state, first-down reset, line-to-gain
-  movement, touchdown scoring, bounded heat, `GOAL` near the end zone, and the
-  HUD shape carrying only the five required read-outs.
+- `tests/attempt_loop.rs` — the prototype's load-bearing guarantees, over the
+  real simulation: the attempt opens pre-snap and snaps itself; the play
+  develops for ~1 s before anything is asked; a window opens within the deadline
+  on **every** seed; the window dilates time without pausing; a declined window
+  closes back to full speed with the play still live; later windows are shorter;
+  the window budget is respected; a press outside a window (or a second press)
+  is rejected as stale; each of the three keys throws to the receiver it names;
+  a moving receiver is thrown a lead; scrambling hands over the quarterback and
+  the defense sees a runner immediately; the stick is ignored while the play
+  develops; **declining every window usually ends in a sack**; ten consecutive
+  attempts resolve with no skipped or repeated index; and a reset leaves no
+  stale marker, throwable, possession, duplicated entity or time dilation.
+- `tests/autopilot.rs` — the headless driver AND the balance instrument. Ten
+  attempts with no human; every attempt offers a window; a session replays
+  bit-for-bit; **no read is a trap or a gimme** (each completes between 15% and
+  95% of the time — this is the check that caught the original 22-yard post at
+  4%); and the reads come open in order (short before deep).
+  `patience_sweep -- --ignored --nocapture` prints yards/attempt, disaster rate
+  and per-read hit rate for an impatient, a balanced and a greedy quarterback:
+  the numbers that say whether waiting is a real trade.
+- `tests/frontend_hud.rs` — `HudView` from the live attempt loop: the attempt
+  counter, the session line, the three numbered read prompts and the scramble
+  caption, a draining window timer, the result card with signed yards, and the
+  guarantee (by exhaustive destructuring) that **the prompt never reports how
+  open a read is**.
 
 ## Frontend
 

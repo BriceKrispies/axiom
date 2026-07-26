@@ -15,10 +15,10 @@
 //!
 //! Run: cargo test -p axiom-end-zone --test defense_balance <name> -- --ignored --nocapture
 
-use axiom_end_zone::autopilot;
+use axiom_end_zone::autopilot::{self, Patience};
 use axiom_end_zone::config::EndZoneConfig;
 use axiom_end_zone::launch::RunConfig;
-use axiom_end_zone::showcase::{DiagnosticCommand, ShowcaseRun};
+use axiom_end_zone::showcase::ShowcaseRun;
 use axiom_end_zone::state::{SimCommand, SimState};
 
 /// Planar distance between two players, yards.
@@ -101,7 +101,10 @@ fn sack_probe() {
             (f32::INFINITY, false),
             |(d, dv), p| {
                 let gap = ((p.pos.x - qbpos.x).powi(2) + (p.pos.z - qbpos.z).powi(2)).sqrt();
-                (d.min(gap), dv || p.anim == axiom_end_zone::player::AnimState::Dive)
+                (
+                    d.min(gap),
+                    dv || p.anim == axiom_end_zone::player::AnimState::Dive,
+                )
             },
         );
         dives += u32::from(diving);
@@ -131,51 +134,49 @@ fn sack_probe() {
 #[test]
 #[ignore = "diagnostic; run with --ignored --nocapture"]
 fn defense_report() {
-    let seeds: Vec<u64> = (0..24).map(|i| 0x51A7_0000 + i * 0x1_0001).collect();
-    let mut tds = 0u32;
-    let mut stops = 0u32;
-    let mut total_plays = 0u32;
-    let mut scored_plays = 0u32;
+    let seeds: Vec<u64> = (0..12).map(|i| 0x51A7_0000 + i * 0x1_0001).collect();
+    let mut attempts = 0u32;
+    let mut completions = 0u32;
+    let mut interceptions = 0u32;
+    let mut sacks = 0u32;
+    let mut yards = 0.0f32;
     for &seed in &seeds {
         let mut run = ShowcaseRun::new_run(&RunConfig::new(seed));
-        let mut prev = run.drive_state().expect("drive");
-        let mut plays = 0u32;
-        for _ in 0..30_000 {
-            if run.huddle().is_some() {
-                run.call_play(0);
+        for _ in 0..8_000 {
+            if let Some(step) = run.attempt() {
+                if let Some(choice) = autopilot::decide(&step, Patience::BALANCED) {
+                    run.choose(choice);
+                }
             }
-            run.sim.user_stick = autopilot::steer(&run.sim);
-            let cmds: &[DiagnosticCommand] = if autopilot::should_throw(&run.sim) {
-                &[DiagnosticCommand::PrimaryAction]
-            } else {
-                &[]
-            };
-            run.step(cmds);
-            let d = run.drive_state().expect("drive");
-            let ended = d.down != prev.down
-                || (d.los_yard - prev.los_yard).abs() > 0.01
-                || d.touchdowns != prev.touchdowns
-                || d.over != prev.over;
-            plays += u32::from(ended);
-            prev = d;
-            if d.touchdowns > 0 || d.over {
+            run.set_user_stick(autopilot::steer(&run.sim));
+            run.step(&[]);
+            if run.ledger().map(|l| l.attempts).unwrap_or(0) >= 8 {
                 break;
             }
         }
-        let d = run.drive_state().expect("drive");
-        total_plays += plays;
-        tds += u32::from(d.touchdowns > 0);
-        stops += u32::from(d.touchdowns == 0);
-        if d.touchdowns > 0 {
-            scored_plays += plays;
+        if let Some(l) = run.ledger() {
+            attempts += l.attempts;
+            completions += l.completions;
+            interceptions += l.interceptions;
+            sacks += l.sacks;
+            yards += l.total_yards;
         }
     }
-    let n = seeds.len() as u32;
-    let avg_to_score = if tds > 0 { scored_plays as f32 / tds as f32 } else { 0.0 };
-    println!("\n=== DEFENSE REPORT (autopilot = perfect player) ===");
-    println!("  seeds:            {n}");
-    println!("  touchdowns:       {tds}/{n}  ({:.0}%)", 100.0 * tds as f32 / n as f32);
-    println!("  stops (no TD):    {stops}/{n}");
-    println!("  avg plays/run:    {:.1}", total_plays as f32 / n as f32);
-    println!("  avg plays/score:  {avg_to_score:.1}");
+    let n = attempts.max(1) as f32;
+    println!("\n=== DEFENSE REPORT (balanced autopilot over the attempt loop) ===");
+    println!("  seeds:            {}", seeds.len());
+    println!("  attempts:         {attempts}");
+    println!(
+        "  completions:      {completions}  ({:.0}%)",
+        100.0 * completions as f32 / n
+    );
+    println!(
+        "  interceptions:    {interceptions}  ({:.0}%)",
+        100.0 * interceptions as f32 / n
+    );
+    println!(
+        "  sacks:            {sacks}  ({:.0}%)",
+        100.0 * sacks as f32 / n
+    );
+    println!("  yards / attempt:  {:.2}", yards / n);
 }

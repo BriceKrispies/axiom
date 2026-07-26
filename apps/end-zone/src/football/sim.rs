@@ -19,8 +19,8 @@ pub(crate) fn ball_rest() -> Vec3 {
 }
 
 use super::possession::catch_point;
-use super::targeting;
 use super::state::{BallState, BALL_RADIUS};
+use super::targeting;
 use super::{carry_socket, solve_throw, FlightInfo};
 
 impl SimState {
@@ -107,16 +107,28 @@ impl SimState {
         // Lock the target on the first tick of the wind-up: the pass commits to
         // whoever the quarterback was aiming at when the player pressed throw,
         // so a defender crossing the cone mid-wind-up cannot steal the read.
+        //
+        // A NAMED target (the decision window's read) wins over the cone: the
+        // player chose that receiver by number, and silently redirecting the
+        // ball to whoever drifted in front of the passer would make the read
+        // meaningless. The cone still decides when nobody was named.
         if self.throw_target.is_none() {
-            let picks = {
+            let declared = self.declared_target;
+            let named = declared.filter(|id| {
+                targeting::is_legal_target(carrier, *id, &self.players, &self.assignments)
+            });
+            let target = named.or_else(|| {
                 let qb = &self.players[carrier.index()];
-                targeting::candidates(qb, &self.players, &self.assignments, &self.tuning)
-            };
-            let Some(target) = targeting::best(&picks) else {
-                // Nobody in the cone — there is no pass to make. Drop out of the
-                // wind-up so the quarterback keeps scanning (and stays sackable)
-                // instead of freezing mid-throw with no receiver.
+                let picks =
+                    targeting::candidates(qb, &self.players, &self.assignments, &self.tuning);
+                targeting::best(&picks)
+            });
+            let Some(target) = target else {
+                // Nobody to throw to. Drop out of the wind-up so the quarterback
+                // keeps scanning (and stays sackable) instead of freezing
+                // mid-throw with no receiver.
                 self.roles[carrier.index()] = RoleState::QbScan;
+                self.declared_target = None;
                 return;
             };
             self.throw_target = Some(target);
@@ -147,7 +159,12 @@ impl SimState {
             eta_ticks,
         };
         let axis = velocity.normalize().unwrap_or(Vec3::UNIT_Z);
+        // Turn the passer onto the ball he is actually throwing. A named read
+        // can sit outside the throwing cone, and a quarterback releasing a pass
+        // over his own shoulder reads as a bug even when the flight is right.
+        self.players[carrier.index()].facing = velocity.x.atan2(velocity.z);
         self.throw_target = None;
+        self.declared_target = None;
         self.ball.state = BallState::Airborne { flight };
         self.ball.pos = release;
         self.ball.vel = velocity;
@@ -253,5 +270,4 @@ impl SimState {
             }
         }
     }
-
 }

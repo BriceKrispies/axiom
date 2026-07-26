@@ -4,6 +4,7 @@
 //! receiver still gets first claim, so an open target completes normally.
 
 use axiom::prelude::Vec3;
+use axiom_end_zone::attempt::AttemptOutcome;
 use axiom_end_zone::config::EndZoneConfig;
 use axiom_end_zone::events::{PlayEndReason, SimEvent};
 use axiom_end_zone::football::BallState;
@@ -60,7 +61,11 @@ fn a_defender_on_the_ball_intercepts_and_ends_the_run() {
         if !sim.ball.is_airborne() {
             break;
         }
-        park(&mut sim, receiver, Vec3::new(target.x + 50.0, 0.0, target.z));
+        park(
+            &mut sim,
+            receiver,
+            Vec3::new(target.x + 50.0, 0.0, target.z),
+        );
         let ball = sim.ball.pos;
         park(&mut sim, defender, Vec3::new(ball.x, 0.0, ball.z));
         let events = sim.step(&[]).to_vec();
@@ -91,7 +96,11 @@ fn a_defender_who_cannot_secure_it_swats_the_pass_down() {
         if !sim.ball.is_airborne() {
             break;
         }
-        park(&mut sim, receiver, Vec3::new(target.x + 50.0, 0.0, target.z));
+        park(
+            &mut sim,
+            receiver,
+            Vec3::new(target.x + 50.0, 0.0, target.z),
+        );
         let ball = sim.ball.pos;
         park(&mut sim, defender, Vec3::new(ball.x + 0.95, 0.0, ball.z));
         let events = sim.step(&[]).to_vec();
@@ -120,16 +129,15 @@ fn a_defender_who_cannot_secure_it_swats_the_pass_down() {
 }
 
 #[test]
-fn an_interception_ends_the_run() {
+fn an_interception_resolves_the_attempt_as_a_turnover() {
     let mut run = ShowcaseRun::new_run(&RunConfig::new(0x1_2345));
-    // Reach the huddle and call a play.
-    for _ in 0..2000 {
+    // Let the attempt loop line up and snap on its own.
+    for _ in 0..200 {
         run.step(&[]);
-        if run.huddle().is_some() {
+        if run.sim.ball.carrier() == Some(run.sim.quarterback) {
             break;
         }
     }
-    run.call_play(0);
 
     // Freeze the pass rush so the quarterback gets a clean pocket, and order the
     // throw once he holds a live ball.
@@ -175,14 +183,27 @@ fn an_interception_ends_the_run() {
         p.vel = Vec3::ZERO;
         run.step(&[]);
     }
-    // The drive reads the ended play on the following tick — let it resolve.
-    for _ in 0..5 {
-        run.step(&[]);
-    }
-
     assert_eq!(run.sim.end_reason, Some(PlayEndReason::Intercepted));
-    assert!(
-        run.drive_state().map(|d| d.over).unwrap_or(false),
-        "the interception ends the run"
+
+    // The attempt loop reads the ended play on a following tick and records it.
+    // A turnover is one attempt's worst outcome, not the end of the session —
+    // the loop resets straight into the next attempt.
+    let mut recorded = None;
+    for _ in 0..30 {
+        run.step(&[]);
+        recorded = run.ledger().and_then(|l| l.last).map(|r| r.outcome);
+        if recorded.is_some() {
+            break;
+        }
+    }
+    assert_eq!(
+        recorded,
+        Some(AttemptOutcome::Intercepted),
+        "the interception is recorded as the attempt's outcome"
+    );
+    assert_eq!(
+        run.ledger().map(|l| l.interceptions),
+        Some(1),
+        "the session counts the giveaway"
     );
 }

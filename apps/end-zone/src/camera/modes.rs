@@ -6,7 +6,7 @@ use axiom::prelude::Vec3;
 use crate::data::CameraTuning;
 use crate::presentation::snapshot::PresentationSnapshot;
 
-/// The six directed camera modes.
+/// The seven directed camera modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CameraMode {
     FormationWide,
@@ -15,6 +15,12 @@ pub enum CameraMode {
     PassFlight,
     CatchResolve,
     Impact,
+    /// The decision window's read framing: high and pulled back so the pocket,
+    /// all three routes and the coverage between them are on screen at once.
+    /// Without it the window asks the player to judge a picture they cannot
+    /// see — the follow shot behind the quarterback frames the pocket beautifully
+    /// and crops every receiver out of frame.
+    DecisionRead,
 }
 
 /// A camera pose: eye, look-at target, vertical field of view in degrees.
@@ -135,8 +141,61 @@ pub fn desired_pose(
             target: impact_focus.add(Vec3::new(0.0, 0.9, 0.0)),
             fov_degrees: tuning.base_fov_degrees - 8.0,
         },
+        CameraMode::DecisionRead => decision_read(snapshot, tuning),
     }
 }
+
+/// The read framing: high behind the offense, aimed at the middle of the route
+/// distribution, wide enough to hold every eligible target.
+///
+/// The look point is derived from where the receivers ACTUALLY are, not from a
+/// fixed offset, so the shot opens up as the routes get deeper — which is what
+/// makes the later windows feel bigger as well as more dangerous.
+fn decision_read(snapshot: &PresentationSnapshot, tuning: &CameraTuning) -> CameraPose {
+    let back = Vec3::new(0.0, 0.0, -snapshot.drive_sign);
+    let qb = flat(snapshot.player(snapshot.quarterback).pos);
+    let targets: Vec<Vec3> = snapshot
+        .attempt
+        .map(|step| {
+            (0..crate::data::prototype::READ_COUNT)
+                .map(|read| flat(step.read.read(read).pos))
+                .collect()
+        })
+        .unwrap_or_default();
+    // How far downfield the deepest route has run, and how wide the spread is.
+    let depth = targets
+        .iter()
+        .map(|p| (p.z - qb.z) * snapshot.drive_sign)
+        .fold(8.0f32, f32::max);
+    let centre = match targets.is_empty() {
+        true => qb,
+        false => {
+            let sum = targets
+                .iter()
+                .fold(Vec3::ZERO, |acc, p| acc.add(*p))
+                .mul_scalar(1.0 / targets.len() as f32);
+            // Bias the look point back toward the pocket: the rush is half the
+            // read, and a shot centred on the receivers hides who is closing.
+            flat(sum).mul_scalar(0.6).add(qb.mul_scalar(0.4))
+        }
+    };
+    CameraPose {
+        eye: qb.add(back.mul_scalar(DECISION_PULL_BACK)).add(Vec3::new(
+            0.0,
+            DECISION_HEIGHT + depth * 0.22,
+            0.0,
+        )),
+        target: centre.add(Vec3::new(0.0, 1.2, 0.0)),
+        fov_degrees: tuning.base_fov_degrees + DECISION_FOV_WIDEN,
+    }
+}
+
+/// How far behind the quarterback the read shot sits, yards.
+const DECISION_PULL_BACK: f32 = 17.0;
+/// Base height of the read shot, yards (it rises with route depth).
+const DECISION_HEIGHT: f32 = 11.5;
+/// Extra field of view the read shot opens up, degrees.
+const DECISION_FOV_WIDEN: f32 = 12.0;
 
 /// Behind-and-above follow of the current carrier (falls back to the ball
 /// when possession is empty) with velocity look-ahead and a yaw-lag clamp so

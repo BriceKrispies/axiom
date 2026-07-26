@@ -1,26 +1,35 @@
 # End Zone — architecture
 
 `apps/end-zone` (`axiom-end-zone`) is a **composition-leaf Axiom app**: an
-original arcade **score-attack survival game** built on the reusable
-football-systems framework. The player controls one fixed offensive team
-against one fixed defensive team, gets four downs to advance ten yards, and
-runs a single escalating drive until a failed fourth-down conversion ends it
-(a five-to-ten-minute run). There is no team selection, match setup, or main
-menu — the title leads straight into gameplay (see `FRONTEND.md`). The
-football simulation underneath is the same deterministic, data-driven play
-engine (formation → snap → drop-back → routes → blocking → pass → catch →
-pursuit → tackle → ground impact); the **score-attack drive layer**
-(`src/drive.rs`) sits on top of it and turns looping plays into downs, first
-downs, touchdowns, heat, and game over.
+original arcade football game built on a reusable football-systems framework.
+
+The game layer on top is the **decision-window prototype**. It exists to answer
+one design question — *is observing a simulated play and intervening at a
+dramatic decision window more enjoyable than continuously controlling a
+conventional football play?* — so it is deliberately small: one formation, three
+receivers, no playbook, no downs, no progression. The play snaps itself, drops
+back, runs its routes and collapses its pocket while the player watches; at the
+moment the read is worth making, time dilates and the player picks one of four
+things (throw read 1, 2, or 3, or scramble) inside a couple of real seconds.
+Then the attempt resolves and the next one begins, ~8–12 seconds a cycle.
+
+The football simulation underneath is unchanged: the same deterministic,
+data-driven play engine (formation → snap → drop-back → routes → blocking →
+pass → catch → pursuit → tackle → ground impact). The **attempt layer**
+(`src/attempt/`) sits on top of it and owns pacing, the decision window, and the
+result. It replaced the previous score-attack drive layer (`src/drive.rs`:
+downs, line to gain, heat, game over) and its pre-snap play-call huddle, both of
+which fought the prototype's premise — a play-selection menu is exactly the kind
+of decision this design is trying to move onto the field.
 
 ## App-local boundaries and the one-way flow
 
 ```text
 input commands (keys → DeviceFrame → InputState)
   → fixed-step deterministic simulation      src/state.rs (+ subsystem stages)
-  → score-attack drive loop                  src/drive.rs (downs/score/heat/game over)
+  → decision-window attempt loop             src/attempt/* (window/choice/result/reset)
   → ordered simulation events                src/events.rs
-  → immutable presentation snapshot          src/presentation/snapshot.rs (+ drive/to-gain)
+  → immutable presentation snapshot          src/presentation/snapshot.rs (+ attempt view)
   → camera director + presentation effects   src/camera/*, src/presentation/*
   → HUD view model                           src/presentation/hud.rs
   → Axiom scene/render submission            src/scene.rs, src/scene_sync.rs, src/web/
@@ -151,38 +160,75 @@ flight and bounce are REAL integration through `axiom-physics`, never a
 teleport. Catch evaluation is deterministic: catch volume radius + arrival
 timing tolerance (archetype data) + the receiver's action state.
 
-## Score-attack drive
+## The decision-window attempt loop
 
-`src/drive.rs` is the app-local gameplay layer that turns the looping play
-simulation into a survival run. It is **not** a football rules engine — it adds
-no rule the sim does not already produce; it only measures play outcomes and
-keeps the authoritative score-attack bookkeeping:
+`src/attempt/` is the app-local gameplay layer. It adds no football rule the
+simulation does not already produce; it owns *pacing*, *when the player is
+asked*, and *how the answer is measured*.
 
-- **`DriveState`** — the authoritative counters: `down` (1–4), `los_yard`,
-  `first_down_yard` (the line to gain, capped at the goal), `score`,
-  `touchdowns`, `first_downs`, `longest_play`, `heat` (1–`MAX_HEAT`), and
-  `over`. `resolve(ball_yard)` is the whole rule set: a spot past the goal is a
-  touchdown (new drive from own 25, +heat), a spot past the line to gain is a
-  first down (chains reset), a spot short on fourth down ends the run, else the
-  next down begins. Heat re-derives from progress each resolution.
-- **`DriveController`** — owns the inter-play loop (kickoff → armed → running →
-  whistle) and a dead-ball **play clock** (`MAX_PLAY_TICKS`): a held ball that
-  never resolves is blown dead as a sack, so the drive always advances and a
-  hands-off run stays bounded. Between plays it re-spots the offense
-  (`SimState::respot`) and reloads the heat-scaled defense
-  (`SimState::reload_defense` + `launch::resolve_defense`).
-- **Heat** selects a `DefenseProfile` (`launch::heat_profile`) — a pure scaling
-  of the opponent's reaction/pursuit/tackle-range applied through the existing
-  AI configuration boundary. It never touches input responsiveness.
-- **HUD** (`src/presentation/hud.rs`): `HudView::from_drive` formats the five
-  arcade read-outs (`SCORE 012500`, `2ND & 6`, the line-to-gain indicator,
-  `HEAT 3`) purely from `DriveState`. The **line-to-gain field marker** is a
-  bright bar repositioned each tick from `snapshot.to_gain_z`
-  (`src/scene.rs` / `src/scene_sync.rs`).
+```text
+PreSnap ──auto snap──▶ Developing ──trigger──▶ DecisionWindow
+                           ▲                        │
+                           └──── no choice ─────────┤ (slow motion closes,
+                      ┌── throw 1|2|3 ──────────────┤  the rush keeps coming)
+                      ▼                             └── scramble ──┐
+                 PassInFlight ──┐                            Scrambling
+                                ├─▶ Resolving ─▶ Result ─▶ Resetting ─▶ PreSnap
+                                └──────────────────────────────────┘
+```
 
-A run is deterministic in `RunConfig` (seed + fixed teams + initial heat +
-presentation prefs); restarting rebuilds the identical initial state, and PLAY
-AGAIN rolls a fresh explicit seed through the frontend's seed boundary.
+- **`AttemptPhase`** (`phase.rs`) is the whole state — never a pile of booleans,
+  and every field a state needs is carried *in* the state (a `DecisionWindow`
+  cannot exist without knowing when it closes). It also owns `time_scale()`,
+  `accepts_choice()` and `steerable()`.
+- **`PlayRead`** (`read.rs`) is what the player is being asked to judge: per
+  read, how far the route has developed, how much separation it has and whether
+  it has broken; plus how close the rush is. A pure function of simulation
+  state. `window_trigger` decides whether *this tick* is the dramatic moment —
+  a collapsing pocket forces the question before a pretty read does, and a
+  **develop deadline** guarantees a window opens at least once per attempt, so
+  the prototype can never silently fail to ask.
+- **`AttemptController`** (`controller.rs`) steps the machine, issues
+  `SimCommand`s, and latches the player's choice (input arrives per render
+  frame; in 0.16× slow motion several frames share one simulation tick). A press
+  outside an open window — or a second press after one is committed — is stale
+  and dropped.
+- **Re-arming.** Declining a window is a real decision, not a dismissal: full
+  speed resumes for `WINDOW_COOLDOWN_TICKS`, then a shorter window opens
+  (`WINDOW_TICKS` decays by `WINDOW_DECAY_TICKS` each time, floor
+  `WINDOW_MIN_TICKS`), up to `MAX_WINDOWS`. After the last one nobody asks
+  again — the rush gets home and it is a sack. That is the "I can wait a little
+  longer, but I may lose everything" tension, expressed as timing.
+- **`AttemptLedger`** (`ledger.rs`) is bookkeeping ONLY: attempts, completions,
+  interceptions, sacks, yards. It never scales the defense or unlocks anything.
+- **`setup.rs`** builds each attempt: always the same offensive concept
+  (`data::prototype::triple_read`), spotted at `PROTOTYPE_LINE`, against a
+  defensive call drawn from the existing deterministic selector keyed on
+  `(seed, attempt index)`. Fixed `PROTOTYPE_HEAT` — the coverage varies, the
+  aggression never escalates.
+- **`view.rs`** is the one-way window presentation reads the loop through: a
+  plain `Copy` `AttemptStep` hung on the immutable snapshot, so the
+  "presentation cannot mutate simulation" boundary survives having a gameplay
+  layer worth looking at.
+
+**Time dilation lives in composition, not simulation.** `ShowcaseRun::time_scale`
+reports the phase's scale and `EndZoneApp::advance` buys simulation ticks with
+fractional *credit* — at 1.0× that is exactly one tick per frame as before; at
+0.16× the sim advances once every ~6 rendered frames. The simulation itself
+never learns about wall-clock time and stays a pure fixed-step function of its
+command stream.
+
+**Presentation.** The HUD (`presentation/hud.rs`) formats the attempt counter,
+the session line, the state caption, the decision prompt and the result card —
+and deliberately never reports how open a read is, because judging that is the
+game. In-world, each read wears a coloured ring plus a stack of cubes whose
+COUNT is its number (`presentation/receiver_ring.rs`). The camera's
+`DecisionRead` mode pulls high and back for the window and springs back
+afterwards, which is the most legible signal that the game is asking something.
+
+A session is deterministic in `RunConfig`; restarting rebuilds the identical
+initial state. There is no game over — the loop is endless, and END SESSION in
+the pause menu is what produces the summary.
 
 ## AI model
 
@@ -344,7 +390,9 @@ authoritative movement (state.rs: AI → controller → collision → bounds)
 
 ## Camera director
 
-`src/camera/`: six modes (`FormationWide`, `QuarterbackFollow`,
+`src/camera/`: seven modes — `DecisionRead` (high and pulled back, framing the
+pocket and all three routes for an open decision window), plus
+(`FormationWide`, `QuarterbackFollow`,
 `BallCarrierFollow` with velocity look-ahead + yaw-lag clamp, `PassFlight`
 framing ball + arrival, `CatchResolve` blending to the catcher, `Impact` with
 automatic return), driven ONLY by typed events + the snapshot. Critically

@@ -20,8 +20,13 @@ use crate::launch::RunConfig;
 use crate::showcase::ShowcaseRun;
 
 /// Diagnostic keyboard tokens passed straight through to the game (camera
-/// forcing, debug overlay) — never surfaced in any menu.
-const DIAGNOSTIC_KEYS: [&str; 6] = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "F1"];
+/// forcing on F2–F6, debug overlay on F1) — never surfaced in any menu.
+const DIAGNOSTIC_KEYS: [&str; 6] = ["F1", "F2", "F3", "F4", "F5", "F6"];
+
+/// Gameplay keyboard tokens passed straight through: the three read keys and
+/// the scramble key. They are fixed, not bindable — the decision window's whole
+/// value is that `1`/`2`/`3` always mean the same three receivers.
+const DECISION_KEYS: [&str; 4] = ["Digit1", "Digit2", "Digit3", "Space"];
 
 /// The bound gameplay actions and the canonical key each maps onto in the
 /// game's fixed input map.
@@ -84,9 +89,7 @@ impl EndZoneShell {
         let launched = view.commands.iter().any(|c| {
             matches!(
                 c,
-                FrontendCommand::LaunchRun { .. }
-                    | FrontendCommand::RestartRun
-                    | FrontendCommand::CallPlay { .. }
+                FrontendCommand::LaunchRun { .. } | FrontendCommand::RestartRun
             )
         });
         for command in &view.commands {
@@ -117,24 +120,14 @@ impl EndZoneShell {
                 } else {
                     Vec::new()
                 };
-                let touch = if in_game { touch } else { TouchInput::default() };
+                let touch = if in_game {
+                    touch
+                } else {
+                    TouchInput::default()
+                };
                 self.app.advance(&keys, touch);
-                // A failed fourth-down conversion ends the run.
-                if let Some(summary) = self
-                    .app
-                    .run
-                    .drive_state()
-                    .filter(|d| d.over)
-                    .map(|d| d.summary())
-                {
-                    self.frontend.enter_game_over(summary);
-                }
-                // Mirror the drive's pre-snap huddle into the screen machine: it
-                // opens the play-call screen and closes it when the huddle breaks.
-                match self.app.run.huddle() {
-                    Some(view) => self.frontend.enter_huddle(view),
-                    None => self.frontend.exit_huddle(),
-                }
+                // The attempt loop is endless — a session ends only when the
+                // player asks it to, from the pause menu.
                 self.app.present()
             }
             SimDirective::Menu => {
@@ -171,7 +164,15 @@ impl EndZoneShell {
                     .replace_run(ShowcaseRun::new(EndZoneConfig::default()));
             }
             FrontendCommand::SetPaused(paused) => self.paused = *paused,
-            FrontendCommand::CallPlay { index } => self.app.run.call_play(*index),
+            FrontendCommand::EndSession => {
+                let summary = self
+                    .app
+                    .run
+                    .ledger()
+                    .map(|ledger| ledger.summary())
+                    .unwrap_or(crate::attempt::AttemptLedger::new().summary());
+                self.frontend.enter_game_over(summary);
+            }
         }
     }
 
@@ -186,9 +187,9 @@ impl EndZoneShell {
                 keys.push(KeyToken::new(canonical));
             }
         }
-        for diagnostic in DIAGNOSTIC_KEYS {
-            if held_in(input, diagnostic) {
-                keys.push(KeyToken::new(diagnostic));
+        for token in DIAGNOSTIC_KEYS.iter().chain(DECISION_KEYS.iter()) {
+            if held_in(input, token) {
+                keys.push(KeyToken::new(token));
             }
         }
         keys

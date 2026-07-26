@@ -22,14 +22,15 @@
 
 pub mod ai;
 pub mod app;
+pub mod attempt;
 pub mod autopilot;
 pub mod camera;
 pub mod capture;
 pub mod collision_rig;
 pub mod config;
+pub mod controls;
 pub mod data;
 pub mod debug;
-pub mod drive;
 pub mod events;
 pub mod field;
 pub mod football;
@@ -51,9 +52,9 @@ pub mod trace;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 #[cfg(target_arch = "wasm32")]
-pub use web::end_zone_start;
-#[cfg(target_arch = "wasm32")]
 pub use lab::end_zone_lab_start;
+#[cfg(target_arch = "wasm32")]
+pub use web::end_zone_start;
 
 pub use app::{build_end_zone, EndZoneApp};
 pub use capture::{build_end_zone_after_snap, build_end_zone_pre_snap};

@@ -2,11 +2,14 @@
 //! play start, the snap, and the scripted throw at fixed tick offsets — every
 //! other behavior emerges from the real systems — plus the headless
 //! [`ShowcaseRun`] harness the app, tests, and replay proofs all share.
+//!
+//! A run is either the AMBIENT loop (one play cycling behind the title screen)
+//! or a real [`AttemptController`] session: the decision-window prototype.
 
+use crate::attempt::{AttemptController, AttemptStep, PlayerChoice};
 use crate::camera::{CameraDirector, CameraMode, CameraPose};
 use crate::config::EndZoneConfig;
 use crate::data::{CameraTuning, JuiceTuning};
-use crate::drive::{DriveController, DriveState, HuddleView, DRIVE_START_YARD};
 use crate::events::StampedEvent;
 use crate::launch::{camera_tuning, juice_tuning, resolve_run, RunConfig};
 use crate::presentation::snapshot::{capture, PresentationSnapshot};
@@ -24,18 +27,23 @@ pub const RESET_DELAY: u64 = 120;
 /// harness's stand-in for the user's SNAP·THROW — the QB never throws alone).
 pub const TRACE_THROW_TICK: u64 = 258;
 
-/// Diagnostic + touch input commands.
+/// Diagnostic + gameplay input commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticCommand {
-    /// Space: start the play, or restart it after completion.
+    /// Space: start the play, or restart it after completion (ambient only).
     StartPlay,
     /// R: reset all showcase state to formation (idle until started).
     ResetAll,
-    /// The contextual action button (touch A / Enter): snap the ball
-    /// pre-snap, order the throw while the quarterback holds it, restart
-    /// after the play ends.
+    /// The contextual action button (touch A / Enter): snaps the ambient play,
+    /// orders the cone-aimed throw while the quarterback holds it, and — during
+    /// a decision window — commits the highlighted read (the one-button twin of
+    /// the numbered keys, for touch).
     PrimaryAction,
-    /// 1–4: force a camera mode; 5: return to automatic direction.
+    /// `1`/`2`/`3` during a decision window: throw to that read.
+    ThrowRead(usize),
+    /// The scramble input: take the quarterback out of the pocket.
+    Scramble,
+    /// F2–F6: force a camera mode; F6 returns to automatic.
     ForceFormationCamera,
     ForceQuarterbackCamera,
     ForceFlightCamera,
@@ -56,17 +64,17 @@ pub struct StepOutput {
     pub poses: Vec<PlayerPose>,
 }
 
-/// The ambient menu showcase or a real score-attack drive.
+/// The ambient menu showcase or a real decision-window session.
 #[derive(Debug)]
 enum RunLoop {
     Ambient(ShowcaseController),
-    Drive(DriveController, RunConfig),
+    Attempt(Box<AttemptController>, RunConfig),
 }
 
 /// The headless run: simulation + run loop + camera director + juice +
 /// locomotion, no engine scene attached. The browser app wraps this same
-/// harness; the tests drive it directly. In [`RunLoop::Drive`] mode it also owns
-/// the authoritative score-attack state.
+/// harness; the tests drive it directly. In [`RunLoop::Attempt`] mode it also
+/// owns the authoritative attempt state.
 #[derive(Debug)]
 pub struct ShowcaseRun {
     pub sim: SimState,
@@ -90,17 +98,18 @@ impl ShowcaseRun {
         }
     }
 
-    /// A real score-attack run from one immutable [`RunConfig`]. Restarting
-    /// with the same config reproduces the same initial authoritative state.
+    /// A real decision-window session from one immutable [`RunConfig`].
+    /// Restarting with the same config reproduces the same initial state.
     pub fn new_run(config: &RunConfig) -> Self {
-        let setup = resolve_run(config, config.initial_heat);
+        let setup = resolve_run(config, crate::attempt::PROTOTYPE_HEAT);
         let mut sim = SimState::new_match(&setup);
-        // Start the first drive at the offense's own 25 and form up there.
-        sim.respot(DRIVE_START_YARD);
-        sim.reset_to_formation(false);
+        sim.install_play(crate::data::prototype::prototype_play());
+        let mut controller = AttemptController::new();
+        controller.arm(&mut sim, config);
+        sim.reset_to_formation(true);
         ShowcaseRun {
             sim,
-            run_loop: RunLoop::Drive(DriveController::new(config.initial_heat), *config),
+            run_loop: RunLoop::Attempt(Box::new(controller), *config),
             director: CameraDirector::new(config.seed, camera_tuning(config)),
             juice: JuiceStack::new(config.seed, juice_tuning(config)),
             locomotion: LocomotionAnimator::new(crate::data::LocomotionTuning::default()),
@@ -108,35 +117,64 @@ impl ShowcaseRun {
         }
     }
 
-    /// The authoritative drive state, when this is a real run.
-    pub fn drive_state(&self) -> Option<DriveState> {
+    /// The attempt loop's view for this tick, when this is a real session.
+    pub fn attempt(&self) -> Option<AttemptStep> {
         match &self.run_loop {
-            RunLoop::Drive(controller, _) => Some(controller.state),
+            RunLoop::Attempt(controller, _) => controller.view(self.sim.tick),
             RunLoop::Ambient(_) => None,
         }
     }
 
-    /// The open pre-snap huddle, when a real run is waiting for a play call.
-    pub fn huddle(&self) -> Option<HuddleView> {
+    /// The running session totals, when this is a real session.
+    pub fn ledger(&self) -> Option<crate::attempt::AttemptLedger> {
         match &self.run_loop {
-            RunLoop::Drive(controller, _) => controller.huddle(),
+            RunLoop::Attempt(controller, _) => Some(*controller.ledger()),
             RunLoop::Ambient(_) => None,
         }
     }
 
-    /// Call offensive play `index` for the open huddle (no-op otherwise).
-    pub fn call_play(&mut self, index: usize) {
-        if let RunLoop::Drive(controller, _) = &mut self.run_loop {
-            controller.call_play(index);
+    /// How fast the simulation should advance relative to real time. The shell
+    /// steps the run fractionally by this, which is what produces the decision
+    /// window's slow motion WITHOUT the simulation itself knowing about time.
+    pub fn time_scale(&self) -> f32 {
+        match &self.run_loop {
+            RunLoop::Attempt(controller, _) => controller.time_scale(),
+            RunLoop::Ambient(_) => 1.0,
         }
     }
 
-    /// The defensive playbook index the last snap lined up in, when this is a
-    /// real run.
+    /// The defensive playbook index the current attempt lined up in.
     pub fn last_defense_index(&self) -> Option<usize> {
         match &self.run_loop {
-            RunLoop::Drive(controller, _) => Some(controller.last_defense_index),
+            RunLoop::Attempt(controller, _) => Some(controller.last_defense_index),
             RunLoop::Ambient(_) => None,
+        }
+    }
+
+    /// Feed the movement stick for this tick.
+    ///
+    /// The prototype only hands the player a body once the decision has been
+    /// made: the quarterback after he commits to running, or the receiver after
+    /// the catch. While the play develops, the simulation owns every player —
+    /// that is precisely the premise under test, so the stick is dropped rather
+    /// than quietly letting the player nudge the pocket.
+    pub fn set_user_stick(&mut self, stick: axiom::prelude::Vec2) {
+        let allowed = match &self.run_loop {
+            RunLoop::Ambient(_) => true,
+            RunLoop::Attempt(controller, _) => controller.phase().steerable(),
+        };
+        self.sim.user_stick = match allowed {
+            true => stick,
+            false => axiom::prelude::Vec2::ZERO,
+        };
+    }
+
+    /// Offer a decision to the attempt loop. Returns whether it was accepted —
+    /// a press outside an open window is stale input and is dropped.
+    pub fn choose(&mut self, choice: PlayerChoice) -> bool {
+        match &mut self.run_loop {
+            RunLoop::Attempt(controller, _) => controller.choose(choice),
+            RunLoop::Ambient(_) => false,
         }
     }
 
@@ -144,13 +182,6 @@ impl ShowcaseRun {
     pub fn step(&mut self, diagnostics: &[DiagnosticCommand]) -> StepOutput {
         let tick = self.sim.tick;
         let mut user_commands: Vec<SimCommand> = Vec::new();
-        let mut user_snapped = false;
-        // A manual snap is only honored once a play has been called: in a real
-        // run the drive must be armed; the ambient showcase snaps on its own beat.
-        let snap_allowed = match &self.run_loop {
-            RunLoop::Ambient(_) => true,
-            RunLoop::Drive(controller, _) => controller.armed(),
-        };
         for command in diagnostics {
             match command {
                 DiagnosticCommand::ToggleDebug => self.debug_enabled = !self.debug_enabled,
@@ -164,37 +195,19 @@ impl ShowcaseRun {
                         controller.request_reset();
                     }
                 }
-                DiagnosticCommand::PrimaryAction => {
-                    // Contextual on the PRE-step state: snap → throw → restart.
-                    match self.sim.phase {
-                        crate::state::PlayPhase::PreSnap if snap_allowed => {
-                            user_commands.push(SimCommand::Snap);
-                            user_snapped = true;
-                        }
-                        crate::state::PlayPhase::PreSnap => {}
-                        crate::state::PlayPhase::Live => {
-                            if self.sim.possession == Some(self.sim.quarterback) {
-                                user_commands.push(SimCommand::ThrowNow);
-                            }
-                        }
-                        crate::state::PlayPhase::Ended => {
-                            if let RunLoop::Ambient(controller) = &mut self.run_loop {
-                                controller.request_start(tick);
-                            }
-                        }
-                    }
+                DiagnosticCommand::ThrowRead(read) => {
+                    self.choose(PlayerChoice::Throw(*read));
                 }
+                DiagnosticCommand::Scramble => {
+                    self.choose(PlayerChoice::Scramble);
+                }
+                DiagnosticCommand::PrimaryAction => self.primary_action(tick, &mut user_commands),
                 _ => {}
             }
         }
         let mut sim_commands = match &mut self.run_loop {
             RunLoop::Ambient(controller) => controller.step(tick, self.sim.phase),
-            RunLoop::Drive(controller, config) => {
-                if user_snapped {
-                    controller.notify_user_snap(self.sim.tick);
-                }
-                controller.step(&mut self.sim, config)
-            }
+            RunLoop::Attempt(controller, config) => controller.step(&mut self.sim, config),
         };
         sim_commands.extend(user_commands);
         // R additionally puts the sim itself back in formation right away.
@@ -203,38 +216,12 @@ impl ShowcaseRun {
         }
         let events: Vec<StampedEvent> = self.sim.step(&sim_commands).to_vec();
         let mut snapshot = capture(&self.sim);
-        if let RunLoop::Drive(controller, _) = &self.run_loop {
-            snapshot.drive = Some(controller.state);
-            snapshot.to_gain_z = Some(crate::field::yard_line_to_z(
-                controller.state.first_down_yard,
-                self.sim.frame.direction,
-            ));
-        }
+        snapshot.attempt = self.attempt();
         self.juice.step(&snapshot, &events);
         // Advance locomotion once per tick (never per render frame) so a paused
         // frame re-presents the same poses; feeds off the resolved snapshot.
         let poses = self.locomotion.step(&snapshot, &events);
-        for command in diagnostics {
-            match command {
-                DiagnosticCommand::ForceFormationCamera => {
-                    self.director
-                        .force_mode(CameraMode::FormationWide, &snapshot);
-                }
-                DiagnosticCommand::ForceQuarterbackCamera => {
-                    self.director
-                        .force_mode(CameraMode::QuarterbackFollow, &snapshot);
-                }
-                DiagnosticCommand::ForceFlightCamera => {
-                    self.director.force_mode(CameraMode::PassFlight, &snapshot);
-                }
-                DiagnosticCommand::ForceCarrierCamera => {
-                    self.director
-                        .force_mode(CameraMode::BallCarrierFollow, &snapshot);
-                }
-                DiagnosticCommand::AutomaticCamera => self.director.automatic(),
-                _ => {}
-            }
-        }
+        self.apply_camera_overrides(diagnostics, &snapshot);
         let camera = self.director.step(&snapshot, &events);
         StepOutput {
             camera_mode: self.director.effective_mode(),
@@ -242,6 +229,63 @@ impl ShowcaseRun {
             camera,
             events,
             poses,
+        }
+    }
+
+    /// The contextual action button, resolved against the PRE-step state.
+    fn primary_action(&mut self, tick: u64, user_commands: &mut Vec<SimCommand>) {
+        // In a real session the button is the touch twin of the numbered keys:
+        // it commits whichever read the window is already highlighting.
+        if let Some(step) = self.attempt() {
+            if step.phase.accepts_choice() {
+                self.choose(PlayerChoice::Throw(step.read.best));
+                return;
+            }
+        }
+        match self.sim.phase {
+            crate::state::PlayPhase::PreSnap => {
+                if matches!(self.run_loop, RunLoop::Ambient(_)) {
+                    user_commands.push(SimCommand::Snap);
+                }
+            }
+            crate::state::PlayPhase::Live => {
+                if self.sim.possession == Some(self.sim.quarterback) {
+                    user_commands.push(SimCommand::ThrowNow);
+                }
+            }
+            crate::state::PlayPhase::Ended => {
+                if let RunLoop::Ambient(controller) = &mut self.run_loop {
+                    controller.request_start(tick);
+                }
+            }
+        }
+    }
+
+    fn apply_camera_overrides(
+        &mut self,
+        diagnostics: &[DiagnosticCommand],
+        snapshot: &PresentationSnapshot,
+    ) {
+        for command in diagnostics {
+            match command {
+                DiagnosticCommand::ForceFormationCamera => {
+                    self.director
+                        .force_mode(CameraMode::FormationWide, snapshot);
+                }
+                DiagnosticCommand::ForceQuarterbackCamera => {
+                    self.director
+                        .force_mode(CameraMode::QuarterbackFollow, snapshot);
+                }
+                DiagnosticCommand::ForceFlightCamera => {
+                    self.director.force_mode(CameraMode::PassFlight, snapshot);
+                }
+                DiagnosticCommand::ForceCarrierCamera => {
+                    self.director
+                        .force_mode(CameraMode::BallCarrierFollow, snapshot);
+                }
+                DiagnosticCommand::AutomaticCamera => self.director.automatic(),
+                _ => {}
+            }
         }
     }
 }

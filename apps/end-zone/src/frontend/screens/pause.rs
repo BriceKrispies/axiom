@@ -1,6 +1,10 @@
-//! The pause menu: exactly RESUME / RESTART RUN / SETTINGS / CONTROLS / RETURN
-//! TO TITLE over the frozen run. No confirmation dialogs — restart and return
-//! act immediately.
+//! The pause menu: exactly RESUME / RESTART RUN / END SESSION / SETTINGS /
+//! CONTROLS / RETURN TO TITLE over the frozen run. No confirmation dialogs —
+//! every item acts immediately.
+//!
+//! END SESSION is how a prototype session ends. The attempt loop is endless by
+//! design (there is no fourth down to fail), so stopping is the player's call,
+//! and stopping is what produces the session summary.
 
 use crate::frontend::actions::{AudioIntent, FrontendCommand};
 use crate::frontend::layout::{centered_rows, LayoutContext, ShellRegions};
@@ -19,6 +23,7 @@ const RESTART: WidgetId = WidgetId(2);
 const SETTINGS: WidgetId = WidgetId(3);
 const CONTROLS: WidgetId = WidgetId(4);
 const RETURN: WidgetId = WidgetId(5);
+const END_SESSION: WidgetId = WidgetId(6);
 
 /// Enter the pause menu, freezing the run.
 pub fn open(fe: &mut FrontendState) {
@@ -54,6 +59,12 @@ pub fn confirm(fe: &mut FrontendState, id: WidgetId) {
             fe.sound(AudioIntent::Confirm);
             fe.go(Screen::Controls, TransitionKind::Fade);
         }
+        // The shell answers with the session summary and moves the screen on;
+        // the frontend never reads run state itself.
+        END_SESSION => {
+            fe.command(FrontendCommand::EndSession);
+            fe.sound(AudioIntent::Confirm);
+        }
         RETURN => {
             fe.command(FrontendCommand::ReturnToTitle);
             fe.summary = None;
@@ -85,6 +96,7 @@ pub fn build(
     let items = [
         (RESUME, "RESUME", true),
         (RESTART, "RESTART RUN", false),
+        (END_SESSION, "END SESSION", false),
         (SETTINGS, "SETTINGS", false),
         (CONTROLS, "CONTROLS", false),
         (RETURN, "RETURN TO TITLE", false),

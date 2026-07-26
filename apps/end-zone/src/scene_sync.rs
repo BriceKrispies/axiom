@@ -108,10 +108,10 @@ impl EndZoneScene {
         app.set(self.ball, ball_world);
         app.set(self.lace, lace_transform(&ball_world));
 
-        // The line-to-gain marker: a thin bright bar spanning the field at the
-        // to-gain yard line (hidden when no drive is active).
+        // The spot marker: a thin bright bar spanning the field at the line the
+        // current attempt snapped from, so a gain or a loss reads at a glance.
         let to_gain = snapshot
-            .to_gain_z
+            .spot_marker_z
             .map(|z| {
                 Transform::new(
                     Vec3::new(0.0, 0.06, z),
@@ -125,7 +125,9 @@ impl EndZoneScene {
         // Receiver rings: red on the current read, white on the rest of the cone.
         let mut rings = Vec::with_capacity(RECEIVER_RING_POOL);
         receiver_ring::ring_instances(snapshot, &mut rings);
-        assign_pool(app, &self.receiver_ring_pool, &rings, |r| (r.transform, r.kind));
+        assign_pool(app, &self.receiver_ring_pool, &rings, |r| {
+            (r.transform, r.kind)
+        });
 
         // Pre-snap route chalk: the called play's routes dotted on the turf
         // (empty except while the offense is set, so the pool hides itself).

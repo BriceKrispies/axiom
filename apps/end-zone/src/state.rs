@@ -34,16 +34,27 @@ pub enum PlayPhase {
     Ended,
 }
 
-/// Commands the simulation accepts (issued by the showcase controller and the
-/// diagnostic input; there are no gameplay controls yet).
+/// Commands the simulation accepts (issued by the run loop and the diagnostic
+/// input). The quarterback never throws or runs on his own — every one of
+/// these originates in a player decision or a scripted harness standing in for
+/// one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimCommand {
     /// (Re)set the play to formation and mark it started.
     BeginPlay,
     /// Snap the ball.
     Snap,
-    /// Order the quarterback to throw the scripted pass.
+    /// Order the quarterback to throw, letting the throwing cone pick the
+    /// receiver (the stick aims the pass).
     ThrowNow,
+    /// Order the quarterback to throw to a NAMED receiver. This is how the
+    /// decision window commits a read: the player chose a target by number, so
+    /// the cone's nearest-the-centre-line pick must not override them.
+    ThrowTo(PlayerId),
+    /// The quarterback abandons the pocket and runs. Distinct from simply
+    /// steering him: it tells the defense he is a runner immediately, instead
+    /// of waiting for the scramble detector to notice.
+    Scramble,
     /// Reset to formation without starting (diagnostic R).
     ResetPlay,
 }
@@ -100,6 +111,13 @@ pub struct SimState {
     /// one's feet; the sim throws to the first.
     pub throwable: Vec<PlayerId>,
     pub(crate) throw_commanded: bool,
+    /// The receiver the player named this throw, if the throw came from an
+    /// explicit read rather than the throwing cone. Cleared at release.
+    pub(crate) declared_target: Option<PlayerId>,
+    /// The quarterback has been ordered out of the pocket. Latched for the rest
+    /// of the play so the defense treats him as a runner from the instant the
+    /// decision is made, not once he happens to build up downfield speed.
+    pub(crate) qb_scrambling: bool,
     pub(crate) catch_attempted: bool,
     pub(crate) engaged_blocks: Vec<(PlayerId, PlayerId)>,
 }
@@ -163,6 +181,8 @@ impl SimState {
             throw_target: None,
             throwable: Vec::new(),
             throw_commanded: false,
+            declared_target: None,
+            qb_scrambling: false,
             catch_attempted: false,
             engaged_blocks: Vec::new(),
         };
@@ -222,6 +242,11 @@ impl SimState {
             SimCommand::BeginPlay => self.reset_to_formation(true),
             SimCommand::Snap => self.snap(),
             SimCommand::ThrowNow => self.throw_commanded = true,
+            SimCommand::ThrowTo(target) => {
+                self.throw_commanded = true;
+                self.declared_target = Some(target);
+            }
+            SimCommand::Scramble => self.qb_scrambling = true,
             SimCommand::ResetPlay => self.reset_to_formation(false),
         }
     }
@@ -246,6 +271,8 @@ impl SimState {
         self.end_reason = None;
         self.throw_commanded = false;
         self.throw_target = None;
+        self.declared_target = None;
+        self.qb_scrambling = false;
         self.throwable.clear();
         self.catch_attempted = false;
         self.engaged_blocks.clear();

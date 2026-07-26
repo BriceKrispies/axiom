@@ -7,12 +7,12 @@ use axiom::prelude::Vec3;
 
 use crate::ai::engagement::{EngagementState, RushLane};
 use crate::ai::{
-    AssignmentKind, AssignmentOverride, DefensiveDirective, PlayerIntent, Responsibility, RoleState,
-    TacticalMode,
+    AssignmentKind, AssignmentOverride, DefensiveDirective, PlayerIntent, Responsibility,
+    RoleState, TacticalMode,
 };
-use crate::drive::DriveState;
+use crate::attempt::AttemptStep;
 use crate::events::PlayEndReason;
-use crate::football::{BallSim, BallState, BallSituation, FlightInfo};
+use crate::football::{BallSim, BallSituation, BallState, FlightInfo};
 use crate::identity::{PlayerId, TeamId};
 use crate::player::AnimState;
 use crate::state::{PlayPhase, SimState};
@@ -84,11 +84,13 @@ pub struct PresentationSnapshot {
     pub overseer_transition_reason: &'static str,
     /// The top rejected tactical alternative + its score (AI debug view).
     pub overseer_rejected: (TacticalMode, f32),
-    /// The authoritative drive state, when this is a real score-attack run
-    /// (the ambient menu showcase leaves it `None`).
-    pub drive: Option<DriveState>,
-    /// World `Z` of the line to gain, when a drive is active (the field marker).
-    pub to_gain_z: Option<f32>,
+    /// The attempt loop's state, when this is a real session (the ambient menu
+    /// showcase leaves it `None`). Presentation reads the decision phase, the
+    /// live read, and the last result from here — never from the loop itself.
+    pub attempt: Option<AttemptStep>,
+    /// World `Z` of the bright field marker: the line the current attempt
+    /// snapped from, so a gain or a loss is legible against it at a glance.
+    pub spot_marker_z: Option<f32>,
     /// The receivers the quarterback can throw to right now — everyone inside
     /// his throwing cone, nearest his centre line first. The scene draws a ring
     /// at each one's feet; the pass would go to the first.
@@ -198,11 +200,12 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
         overseer_prev_mode,
         overseer_transition_reason,
         overseer_rejected: sim.overseer_rejected(),
-        // The run layer fills these in for a real drive; the raw sim capture
-        // is drive-agnostic.
-        drive: None,
+        // The run layer fills the attempt view in; the raw sim capture is
+        // loop-agnostic. The spot marker always tracks the live line of
+        // scrimmage, which is the attempt's own start line.
+        attempt: None,
         throwable: sim.throwable.clone(),
-        to_gain_z: None,
+        spot_marker_z: Some(sim.frame.line_of_scrimmage_z),
         pre_snap_routes: pre_snap_chalk(sim),
     }
 }

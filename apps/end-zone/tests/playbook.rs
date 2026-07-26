@@ -64,45 +64,17 @@ fn call_weights_make_football_sense() {
 }
 
 #[test]
-fn a_called_play_lines_the_offense_up_in_that_play() {
+fn a_session_always_lines_up_in_the_one_prototype_concept() {
     let mut run = ShowcaseRun::new_run(&RunConfig::new(0x0FFE_0001));
-    // Advance to the first open huddle.
-    let mut opened = false;
-    for _ in 0..2000 {
+    // No play call exists: the offense runs TRIPLE READ every attempt, and the
+    // only thing that varies between attempts is the defensive answer.
+    for _ in 0..400 {
         run.step(&[]);
-        if run.huddle().is_some() {
-            opened = true;
-            break;
-        }
+        assert_eq!(
+            run.sim.play.name, "TRIPLE READ",
+            "the prototype never changes offensive concept"
+        );
     }
-    assert!(opened, "the run opens a huddle before the first snap");
-
-    // Call QUICK SLANTS (index 2) and let the huddle break.
-    let want = offensive_playbook()[2].name;
-    run.call_play(2);
-    for _ in 0..1000 {
-        run.step(&[]);
-        if run.huddle().is_none() {
-            break;
-        }
-    }
-    assert_eq!(run.sim.play.name, want, "the offense runs the called play");
-}
-
-#[test]
-fn a_hands_off_run_breaks_the_huddle_with_the_default_play() {
-    let mut run = ShowcaseRun::new_run(&RunConfig::new(0x0FFE_0002));
-    // With no call, the huddle auto-breaks and the default play lines up.
-    let default_name = offensive_playbook()[0].name;
-    let mut ran_a_play = false;
-    for _ in 0..3000 {
-        run.step(&[]);
-        if run.huddle().is_none() && run.sim.play.name == default_name {
-            ran_a_play = true;
-            break;
-        }
-    }
-    assert!(ran_a_play, "the huddle breaks on its own with the default play");
 }
 
 #[test]

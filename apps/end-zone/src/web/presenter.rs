@@ -127,20 +127,50 @@ impl MenuPresenter {
     }
 }
 
+/// The decision prompt: the three read keys, the scramble key, and a draining
+/// timer bar. It never says which read is open — that is the game.
+fn decision_html(prompt: &crate::presentation::DecisionPrompt) -> String {
+    let reads: String = prompt
+        .reads
+        .iter()
+        .map(|read| {
+            format!(
+                "<div class='ez-read ez-read{}'><b>{}</b><span>{}</span></div>",
+                markup::esc(&read.key),
+                markup::esc(&read.key),
+                markup::esc(&read.name)
+            )
+        })
+        .collect();
+    format!(
+        "<div class='ez-decision'>\
+         <div class='ez-decision-head'>{}</div>\
+         <div class='ez-reads'>{reads}</div>\
+         <div class='ez-scramble'>{}</div>\
+         <div class='ez-timer'><i style='width:{:.1}%'></i></div>\
+         </div>",
+        markup::esc(&prompt.headline),
+        markup::esc(&prompt.scramble),
+        prompt.remaining.clamp(0.0, 1.0) * 100.0,
+    )
+}
+
 fn hud_html(hud: HudView) -> String {
+    let decision = hud.decision.as_ref().map(decision_html).unwrap_or_default();
+    let result = hud
+        .result
+        .as_ref()
+        .map(|text| format!("<div class='ez-result'>{}</div>", markup::esc(text)))
+        .unwrap_or_default();
     format!(
         "<div class='ez-hud'>\
          <div class='ez-hud-score'>{}</div>\
-         <div class='ez-hud-center'>\
-           <div class='ez-hud-down'>{}</div>\
-           <div class='ez-hud-togain'>{}</div>\
-         </div>\
+         <div class='ez-hud-center'><div class='ez-hud-down'>{}</div></div>\
          <div class='ez-hud-heat'>{}</div>\
-         </div>",
-        markup::esc(&hud.score),
-        markup::esc(&hud.down_distance),
-        markup::esc(&hud.to_gain),
-        markup::esc(&hud.heat),
+         </div>{decision}{result}",
+        markup::esc(&hud.attempt),
+        markup::esc(&hud.state),
+        markup::esc(&hud.session),
     )
 }
 

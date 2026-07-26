@@ -42,14 +42,21 @@ use touch::{mount_touch_controls, set_controls_visible, TouchHeld};
 /// from it and the match counter (shown on the match-setup screen).
 const BASE_SEED: u64 = 0x00E2_D02E_F007_BA11;
 
-/// Keys whose browser default (scrolling, help) is suppressed.
-const PREVENTED: [&str; 7] = [
+/// Keys whose browser default (scrolling, help, dev tools) is suppressed. The
+/// camera diagnostics moved onto F2–F6 when the number row became the reads, so
+/// the whole function block is claimed here.
+const PREVENTED: [&str; 12] = [
     "Space",
     "ArrowUp",
     "ArrowDown",
     "ArrowLeft",
     "ArrowRight",
     "F1",
+    "F2",
+    "F3",
+    "F4",
+    "F5",
+    "F6",
     "Tab",
 ];
 
@@ -137,7 +144,12 @@ pub fn end_zone_start() {
         // 3. Present the menus, HUD, tones, persistence, and touch controls.
         menu.render(&out.view, css_w, css_h);
         let hud = (shell.frontend.screen() == Screen::InGame)
-            .then(|| shell.app.run.drive_state().map(|d| HudView::from_drive(&d)))
+            .then(|| {
+                let run = &shell.app.run;
+                run.attempt()
+                    .zip(run.ledger())
+                    .map(|(step, ledger)| HudView::from_attempt(&step, &ledger))
+            })
             .flatten();
         menu.render_hud(hud);
         if !document_hidden() {
@@ -146,7 +158,10 @@ pub fn end_zone_start() {
             for intent in &out.view.sounds {
                 edge.play_tone(recipe(*intent), sfx_gain);
             }
-            edge.update_music(shell.frontend.menu_music_active(), shell.frontend.menu_music_gain());
+            edge.update_music(
+                shell.frontend.menu_music_active(),
+                shell.frontend.menu_music_gain(),
+            );
         }
         if out.view.persist {
             shell.frontend.profile().save_to(&mut store, &mut sink);

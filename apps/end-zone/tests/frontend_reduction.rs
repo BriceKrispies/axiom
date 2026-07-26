@@ -108,6 +108,9 @@ fn the_deleted_screen_files_are_gone() {
         "team_select.rs",
         "settings_rows.rs",
         "settings_values.rs",
+        // The play-call screen went with the drive loop: the prototype runs one
+        // concept and asks its only question on the field, never in a menu.
+        "huddle.rs",
     ] {
         assert!(
             !screens.join(removed).exists(),
@@ -117,16 +120,17 @@ fn the_deleted_screen_files_are_gone() {
 }
 
 #[test]
-fn exactly_the_eight_screen_states_exist() {
+fn exactly_the_seven_screen_states_exist() {
     let code =
         strip(&fs::read_to_string(src().join("frontend").join("screen.rs")).expect("screen.rs"));
     for state in [
-        "Title", "Menu", "InGame", "Huddle", "Paused", "Settings", "Controls", "GameOver",
+        "Title", "Menu", "InGame", "Paused", "Settings", "Controls", "GameOver",
     ] {
         assert!(code.contains(state), "keeps {state}");
     }
-    // The screen count constant is fixed at eight (Title + the PLAY/SETTINGS Menu
-    // + the pre-snap play-call Huddle + the five in/around-game states).
-    // "MainMenu" (the removed shell) stays gone.
-    assert!(code.contains("SCREEN_COUNT: usize = 8"));
+    // Seven: Title + the PLAY/SETTINGS Menu + the five in/around-game states.
+    // The play-call `Huddle` is gone with the drive loop — the prototype's only
+    // choice is made on the field. "MainMenu" stays gone too.
+    assert!(!code.contains("Huddle"), "the play-call screen stays gone");
+    assert!(code.contains("SCREEN_COUNT: usize = 7"));
 }

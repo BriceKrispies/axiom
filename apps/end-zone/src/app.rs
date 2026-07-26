@@ -1,20 +1,26 @@
-//! The composition root: wires the headless [`ShowcaseRun`] (simulation +
-//! controller + camera director + juice) to the engine's `RunningApp` scene
-//! and the deterministic input sampler. `build_end_zone` is the repo-standard
-//! capture builder.
+//! The composition root: wires the headless [`ShowcaseRun`] (simulation + run
+//! loop + camera director + juice) to the engine's `RunningApp` scene and the
+//! game's input map. `build_end_zone` is the repo-standard capture builder.
+//!
+//! One rendered frame is NOT one simulation tick any more. Input is sampled
+//! every frame; simulation ticks are spent according to
+//! [`ShowcaseRun::time_scale`], which is how the decision window's slow motion
+//! happens without the simulation ever learning about wall-clock time.
 
 use axiom::prelude::{App, Color, DefaultPlugins, FrameOutcome, RunningApp, Vec2, Window};
-use axiom_input::{ActionId, DeviceFrame, InputState, KeyToken};
+use axiom_input::KeyToken;
 use axiom_kernel::Ratio;
-use axiom_kernel::Tick;
 
 use crate::ai::AssignmentKind;
 use crate::camera::CameraMode;
 use crate::config::EndZoneConfig;
+use crate::controls::GameInput;
 use crate::debug::{self, DebugInstance};
 use crate::scene::EndZoneScene;
-use crate::showcase::{DiagnosticCommand, ShowcaseRun, StepOutput};
+use crate::showcase::{ShowcaseRun, StepOutput};
 use crate::state::SimState;
+
+pub use crate::controls::TouchInput;
 
 /// The canvas id the browser page binds the surface to.
 pub const CANVAS_ID: &str = "axiom-end-zone-canvas";
@@ -22,32 +28,10 @@ pub const CANVAS_ID: &str = "axiom-end-zone-canvas";
 pub const WIDTH: u32 = 1280;
 pub const HEIGHT: u32 = 720;
 
-// Diagnostic input actions.
-const ACTION_START: ActionId = ActionId::new(1);
-const ACTION_RESET: ActionId = ActionId::new(2);
-const ACTION_CAM_FORMATION: ActionId = ActionId::new(3);
-const ACTION_CAM_QB: ActionId = ActionId::new(4);
-const ACTION_CAM_FLIGHT: ActionId = ActionId::new(5);
-const ACTION_CAM_CARRIER: ActionId = ActionId::new(6);
-const ACTION_CAM_AUTO: ActionId = ActionId::new(7);
-const ACTION_DEBUG: ActionId = ActionId::new(8);
-// Player-control actions (the keyboard twin of the touch stick + A button).
-const ACTION_PRIMARY: ActionId = ActionId::new(9);
-const ACTION_UP: ActionId = ActionId::new(10);
-const ACTION_DOWN: ActionId = ActionId::new(11);
-const ACTION_LEFT: ActionId = ActionId::new(12);
-const ACTION_RIGHT: ActionId = ActionId::new(13);
-
-/// One frame of touch input from the platform edge: the virtual joystick
-/// vector (`x` right, `y` up/downfield, each `-1..=1`) plus the button edges
-/// (already debounced to a single frame by the edge).
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct TouchInput {
-    pub stick_x: f32,
-    pub stick_y: f32,
-    pub primary: bool,
-    pub reset: bool,
-}
+/// Bounds on the run's requested time scale, so a bad value can neither freeze
+/// the simulation forever nor spin the step loop.
+const MIN_TIME_SCALE: f32 = 0.02;
+const MAX_TIME_SCALE: f32 = 4.0;
 
 /// The complete End Zone app.
 #[derive(Debug)]
@@ -55,14 +39,14 @@ pub struct EndZoneApp {
     pub run: ShowcaseRun,
     running: RunningApp,
     scene: EndZoneScene,
-    input: InputState,
+    input: GameInput,
     /// Static per-player world route waypoints (cloned once for debug draw).
     routes: Vec<Vec<axiom::prelude::Vec3>>,
     debug_markers: Vec<DebugInstance>,
     frame_n: u64,
-    /// Sim sample counter (distinct from `frame_n`: fast/turbo game speeds
-    /// advance the sim more than once per rendered frame).
-    sample_n: u64,
+    /// Fractional simulation ticks owed. One whole credit buys one tick, so a
+    /// 0.16x decision window advances the sim once every ~6 rendered frames.
+    sim_credit: f32,
     last_camera_mode: CameraMode,
     last_forced: bool,
     /// The most recent step's outputs — what `present` renders (and what a
@@ -113,42 +97,15 @@ impl EndZoneApp {
         let run = ShowcaseRun::new(config);
         let routes = routes_of(&run.sim);
 
-        let mut input = InputState::new();
-        input.bind_action(ACTION_START, &[KeyToken::new("Space")]);
-        input.bind_action(ACTION_RESET, &[KeyToken::new("KeyR")]);
-        input.bind_action(ACTION_CAM_FORMATION, &[KeyToken::new("Digit1")]);
-        input.bind_action(ACTION_CAM_QB, &[KeyToken::new("Digit2")]);
-        input.bind_action(ACTION_CAM_FLIGHT, &[KeyToken::new("Digit3")]);
-        input.bind_action(ACTION_CAM_CARRIER, &[KeyToken::new("Digit4")]);
-        input.bind_action(ACTION_CAM_AUTO, &[KeyToken::new("Digit5")]);
-        input.bind_action(ACTION_DEBUG, &[KeyToken::new("F1")]);
-        input.bind_action(ACTION_PRIMARY, &[KeyToken::new("Enter")]);
-        input.bind_action(
-            ACTION_UP,
-            &[KeyToken::new("KeyW"), KeyToken::new("ArrowUp")],
-        );
-        input.bind_action(
-            ACTION_DOWN,
-            &[KeyToken::new("KeyS"), KeyToken::new("ArrowDown")],
-        );
-        input.bind_action(
-            ACTION_LEFT,
-            &[KeyToken::new("KeyA"), KeyToken::new("ArrowLeft")],
-        );
-        input.bind_action(
-            ACTION_RIGHT,
-            &[KeyToken::new("KeyD"), KeyToken::new("ArrowRight")],
-        );
-
         EndZoneApp {
             run,
             running,
             scene,
-            input,
+            input: GameInput::new(),
             routes,
             debug_markers: Vec::new(),
             frame_n: 0,
-            sample_n: 0,
+            sim_credit: 0.0,
             last_camera_mode: CameraMode::FormationWide,
             last_forced: false,
             last_output: None,
@@ -161,6 +118,10 @@ impl EndZoneApp {
         self.routes = routes_of(&run.sim);
         self.run = run;
         self.last_output = None;
+        // A swapped run starts from a clean input/time state: no latched press
+        // and no fractional tick may survive into the new session.
+        self.sim_credit = 0.0;
+        self.input.clear();
     }
 
     /// One frame: sample input (keyboard + touch) → commands + stick → fixed
@@ -170,52 +131,27 @@ impl EndZoneApp {
         self.present()
     }
 
-    /// Advance the simulation one fixed step under this input (no engine
-    /// tick — callable more than once per frame for fast game speeds).
+    /// Sample this frame's input and advance the simulation by the run's
+    /// current time scale (no engine tick).
+    ///
+    /// Simulation ticks are bought with fractional *credit*, so a 0.16× decision
+    /// window advances the sim once every ~6 rendered frames while the input map
+    /// keeps sampling every one of them. At the normal 1.0× scale this is
+    /// exactly one tick per frame, unchanged from before.
     pub fn advance(&mut self, keys_down: &[KeyToken], touch: TouchInput) {
-        let frame = DeviceFrame::new(Vec2::new(WIDTH as f32, HEIGHT as f32), keys_down, &[]);
-        self.input.sample(Tick::new(self.sample_n), &frame);
-        self.sample_n += 1;
+        let size = Vec2::new(WIDTH as f32, HEIGHT as f32);
+        let stick = self.input.sample(size, keys_down, touch);
 
-        let mut commands: Vec<DiagnosticCommand> = Vec::new();
-        let pressed: [(ActionId, DiagnosticCommand); 9] = [
-            (ACTION_START, DiagnosticCommand::StartPlay),
-            (ACTION_RESET, DiagnosticCommand::ResetAll),
-            (
-                ACTION_CAM_FORMATION,
-                DiagnosticCommand::ForceFormationCamera,
-            ),
-            (ACTION_CAM_QB, DiagnosticCommand::ForceQuarterbackCamera),
-            (ACTION_CAM_FLIGHT, DiagnosticCommand::ForceFlightCamera),
-            (ACTION_CAM_CARRIER, DiagnosticCommand::ForceCarrierCamera),
-            (ACTION_CAM_AUTO, DiagnosticCommand::AutomaticCamera),
-            (ACTION_DEBUG, DiagnosticCommand::ToggleDebug),
-            (ACTION_PRIMARY, DiagnosticCommand::PrimaryAction),
-        ];
-        for (action, command) in pressed {
-            if self.input.pressed(action) {
-                commands.push(command);
-            }
+        self.sim_credit += self.run.time_scale().clamp(MIN_TIME_SCALE, MAX_TIME_SCALE);
+        while self.sim_credit >= 1.0 {
+            self.sim_credit -= 1.0;
+            self.run.set_user_stick(stick);
+            let commands = self.input.drain();
+            let output = self.run.step(&commands);
+            self.last_camera_mode = output.camera_mode;
+            self.last_forced = output.camera_mode != self.run.director.mode();
+            self.last_output = Some(output);
         }
-        if touch.primary {
-            commands.push(DiagnosticCommand::PrimaryAction);
-        }
-        if touch.reset {
-            commands.push(DiagnosticCommand::ResetAll);
-        }
-
-        // The movement stick: touch joystick + the keyboard axes, clamped.
-        let axis = |negative: ActionId, positive: ActionId| -> f32 {
-            f32::from(self.input.is_down(positive)) - f32::from(self.input.is_down(negative))
-        };
-        let stick_x = (touch.stick_x + axis(ACTION_LEFT, ACTION_RIGHT)).clamp(-1.0, 1.0);
-        let stick_y = (touch.stick_y + axis(ACTION_DOWN, ACTION_UP)).clamp(-1.0, 1.0);
-        self.run.sim.user_stick = Vec2::new(stick_x, stick_y);
-
-        let output = self.run.step(&commands);
-        self.last_camera_mode = output.camera_mode;
-        self.last_forced = output.camera_mode != self.run.director.mode();
-        self.last_output = Some(output);
     }
 
     /// Render the most recent step (advancing once first if none exists yet):

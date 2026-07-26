@@ -34,9 +34,15 @@ returns to the right one (`screens::back_from_sub`).
 
 Transitions are explicit, recorded methods on `FrontendState`; the frontend
 answers the composition layer only through drained `FrontendCommand`s
-(`LaunchRun{seed}` / `RestartRun` / `ReturnToTitle` / `SetPaused`). Game over is
-pushed **in** by the shell (`FrontendApp::enter_game_over`) when the run's drive
-reports `over`; the frontend never queries the simulation.
+(`LaunchRun{seed}` / `RestartRun` / `ReturnToTitle` / `SetPaused` /
+`EndSession`). The attempt loop is endless, so there is no automatic game over:
+the pause menu's END SESSION emits `EndSession`, and the shell answers by
+pushing the session summary **in** (`FrontendApp::enter_game_over`). The
+frontend never queries the simulation.
+
+There is no play-call screen. The old pre-snap `Huddle` went with the drive
+loop — the prototype runs one concept and asks its only question on the field,
+inside the decision window (`tests/frontend_reduction.rs` keeps it gone).
 
 ## Title
 

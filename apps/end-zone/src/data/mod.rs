@@ -11,6 +11,7 @@ pub mod play;
 pub mod play_diagram;
 pub mod playbook;
 pub mod player;
+pub mod prototype;
 pub mod team;
 pub mod tuning;
 
