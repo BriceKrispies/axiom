@@ -12,10 +12,11 @@ use axiom_input::KeyToken;
 use axiom_kernel::Ratio;
 
 use crate::ai::AssignmentKind;
-use crate::camera::CameraMode;
+use crate::camera::{CameraMode, CameraPose};
 use crate::config::EndZoneConfig;
 use crate::controls::GameInput;
 use crate::debug::{self, DebugInstance};
+use crate::presentation::interpolate;
 use crate::scene::EndZoneScene;
 use crate::showcase::{ShowcaseRun, StepOutput};
 use crate::state::SimState;
@@ -52,6 +53,9 @@ pub struct EndZoneApp {
     /// The most recent step's outputs — what `present` renders (and what a
     /// frozen/paused frame re-renders without advancing the sim).
     last_output: Option<StepOutput>,
+    /// The step before it. Dilated frames are drawn between the two, so slow
+    /// motion is smooth instead of a held-and-jump slideshow.
+    prev_output: Option<StepOutput>,
 }
 
 fn routes_of(sim: &SimState) -> Vec<Vec<axiom::prelude::Vec3>> {
@@ -109,6 +113,7 @@ impl EndZoneApp {
             last_camera_mode: CameraMode::FormationWide,
             last_forced: false,
             last_output: None,
+            prev_output: None,
         }
     }
 
@@ -118,6 +123,7 @@ impl EndZoneApp {
         self.routes = routes_of(&run.sim);
         self.run = run;
         self.last_output = None;
+        self.prev_output = None;
         // A swapped run starts from a clean input/time state: no latched press
         // and no fractional tick may survive into the new session.
         self.sim_credit = 0.0;
@@ -134,10 +140,14 @@ impl EndZoneApp {
     /// Sample this frame's input and advance the simulation by the run's
     /// current time scale (no engine tick).
     ///
-    /// Simulation ticks are bought with fractional *credit*, so a 0.16× decision
-    /// window advances the sim once every ~6 rendered frames while the input map
-    /// keeps sampling every one of them. At the normal 1.0× scale this is
-    /// exactly one tick per frame, unchanged from before.
+    /// Simulation ticks are bought with fractional *credit*, so a 0.13× decision
+    /// window advances the sim once every ~7.7 rendered frames while the input
+    /// map keeps sampling every one of them. At the normal 1.0× scale this is
+    /// exactly one tick per frame, unchanged.
+    ///
+    /// The leftover credit is the render **alpha**: how far this frame sits
+    /// between the last two ticks. `present` draws there, which is what stops
+    /// the dilated frames from being a held-and-jump slideshow.
     pub fn advance(&mut self, keys_down: &[KeyToken], touch: TouchInput) {
         let size = Vec2::new(WIDTH as f32, HEIGHT as f32);
         let stick = self.input.sample(size, keys_down, touch);
@@ -150,8 +160,32 @@ impl EndZoneApp {
             let output = self.run.step(&commands);
             self.last_camera_mode = output.camera_mode;
             self.last_forced = output.camera_mode != self.run.director.mode();
+            self.prev_output = self.last_output.take();
             self.last_output = Some(output);
         }
+    }
+
+    /// What this frame should actually draw.
+    ///
+    /// At full speed there is one tick per frame, so the newest step is drawn
+    /// directly and gameplay keeps zero added latency. Only while time is
+    /// dilated — where several frames share a tick and each would otherwise be
+    /// a duplicate — is the frame blended between the previous and current
+    /// ticks at the leftover credit.
+    fn presented(&self) -> Option<StepOutput> {
+        let output = self.last_output.as_ref()?;
+        let dilated = self.run.time_scale() < 1.0;
+        let Some(prev) = self.prev_output.as_ref().filter(|_| dilated) else {
+            return Some(output.clone());
+        };
+        let alpha = self.sim_credit.clamp(0.0, 1.0);
+        Some(StepOutput {
+            snapshot: interpolate::snapshot(&prev.snapshot, &output.snapshot, alpha),
+            camera: CameraPose::lerp(prev.camera, output.camera, alpha),
+            poses: interpolate::poses(&prev.poses, &output.poses, alpha),
+            camera_mode: output.camera_mode,
+            events: output.events.clone(),
+        })
     }
 
     /// Render the most recent step (advancing once first if none exists yet):
@@ -171,7 +205,7 @@ impl EndZoneApp {
         if self.last_output.is_none() {
             self.advance(&[], TouchInput::default());
         }
-        let Some(output) = self.last_output.clone() else {
+        let Some(output) = self.presented() else {
             return;
         };
         if self.run.debug_enabled {

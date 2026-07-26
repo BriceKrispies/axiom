@@ -6,6 +6,7 @@
 
 pub mod chalk;
 pub mod hud;
+pub mod interpolate;
 pub mod juice;
 pub mod locomotion;
 pub mod particles;
