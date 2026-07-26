@@ -127,13 +127,12 @@ fn push_numeral(feet: Vec3, read: usize, kind: RingKind, out: &mut Vec<RingSegme
 /// Build this tick's target markers.
 pub fn ring_instances(snapshot: &PresentationSnapshot, out: &mut Vec<RingSegment>) {
     out.clear();
-    // In a real session the numbered reads own the markers — pre-snap, so the
-    // player learns which receiver each key belongs to before it matters, and
-    // during the window, when it does. Everywhere else the field is left clean
-    // so the play reads as a play rather than a UI.
+    // In a real session the numbered reads own the markers for the whole live
+    // play — from the line, so the player learns which receiver each key
+    // belongs to, right through to the throw. Once the ball is gone the field
+    // is left clean so the play reads as a play rather than a UI.
     if let Some(step) = snapshot.attempt {
-        let showing = step.phase.in_window() || matches!(step.phase, AttemptPhase::PreSnap { .. });
-        if !showing {
+        if !step.phase.shows_reads() {
             return;
         }
         for read in 0..READ_COUNT {

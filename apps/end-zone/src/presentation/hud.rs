@@ -19,16 +19,25 @@ pub struct ReadPrompt {
     pub name: String,
 }
 
-/// The decision window's on-screen prompt.
+/// The on-screen read prompt. Present for the whole live play, because the
+/// reads are selectable for the whole live play — a control you can use is a
+/// control you should be able to see.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DecisionPrompt {
-    /// Why the window opened (`READ IT` / `PRESSURE` / `THROW IT`).
+    /// Why the window opened (`READ IT` / `PRESSURE` / `THROW IT`), or the
+    /// standing caption while the play is merely developing.
     pub headline: String,
     pub reads: Vec<ReadPrompt>,
     /// The scramble control's caption.
     pub scramble: String,
-    /// `0..1` of the window still available — the timer bar's fill.
+    /// `0..1` of the window still available — the timer bar's fill. Full while
+    /// no window is open, since nothing is running out yet.
     pub remaining: f32,
+    /// Whether a decision window is open: the game has slowed down and the
+    /// clock is running. Drives the prompt's emphasis, so the moment the
+    /// player is being *asked* is unmistakable from the moment they merely
+    /// *may* act.
+    pub urgent: bool,
 }
 
 /// The formatted read-out for one tick of a live session.
@@ -89,17 +98,27 @@ impl HudView {
 
 /// The prompt for an open window (`None` otherwise).
 fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
-    let AttemptPhase::DecisionWindow {
-        opened_at,
-        closes_at,
-        trigger,
-    } = step.phase
-    else {
+    if !step.phase.accepts_choice() {
         return None;
+    }
+    // In a window the headline says why it opened and the bar drains. Outside
+    // one the same three chips stand, unhurried, with the bar full: the player
+    // may throw at any time, they are simply not being pressed to.
+    let window = match step.phase {
+        AttemptPhase::DecisionWindow {
+            opened_at,
+            closes_at,
+            trigger,
+        } => {
+            let span = closes_at.saturating_sub(opened_at).max(1) as f32;
+            let left = (step.window_left as f32 / span).clamp(0.0, 1.0);
+            Some((trigger.label(), left))
+        }
+        _ => None,
     };
-    let span = closes_at.saturating_sub(opened_at).max(1) as f32;
+    let (headline, remaining) = window.unwrap_or(("YOUR CALL", 1.0));
     Some(DecisionPrompt {
-        headline: trigger.label().to_string(),
+        headline: headline.to_string(),
         reads: (0..READ_COUNT)
             .map(|read| ReadPrompt {
                 key: format!("{}", read + 1),
@@ -109,7 +128,8 @@ fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
         // Action first, key second: the same string is a keyboard hint and a
         // tappable button caption, and on a phone the key half is just noise.
         scramble: "SCRAMBLE  ·  SPACE".to_string(),
-        remaining: (step.window_left as f32 / span).clamp(0.0, 1.0),
+        remaining,
+        urgent: window.is_some(),
     })
 }
 

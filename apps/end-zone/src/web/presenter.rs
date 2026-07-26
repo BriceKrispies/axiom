@@ -147,8 +147,11 @@ fn decision_html(prompt: &crate::presentation::DecisionPrompt) -> String {
             )
         })
         .collect();
+    // The chips are up for the whole live play; `ez-urgent` is what marks the
+    // beat where the game has actually slowed down and is asking.
+    let urgent = if prompt.urgent { "ez-urgent" } else { "" };
     format!(
-        "<div class='ez-decision'>\
+        "<div class='ez-decision {urgent}'>\
          <div class='ez-decision-head'>{}</div>\
          <div class='ez-reads'>{reads}</div>\
          <div class='ez-scramble' data-scramble='1'>{}</div>\

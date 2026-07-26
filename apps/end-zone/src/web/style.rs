@@ -123,8 +123,20 @@ pub const MENU_CSS: &str = r#"
   background:linear-gradient(180deg,rgba(14,19,27,.94),rgba(7,10,15,.94));
   border:3px solid #06090e;border-radius:10px;
   box-shadow:inset 0 2px 0 rgba(255,255,255,.18),0 10px 26px rgba(0,0,0,.7);}
-.ez-decision-head{font-weight:900;font-size:20px;letter-spacing:.3em;color:var(--ez-hot);
+/* Standing state: the reads are live from the snap, so they are always legible
+   but visually quiet. `.ez-urgent` is the window — the game has slowed down and
+   the clock is running — and it is what should catch the eye. */
+.ez-decision{opacity:.82;transition:opacity .12s ease,transform .12s ease,box-shadow .12s ease;}
+.ez-decision.ez-urgent{opacity:1;transform:translateX(-50%) scale(1.04);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.18),0 10px 26px rgba(0,0,0,.7),
+  0 0 0 2px rgba(227,62,48,.55),0 0 34px rgba(227,62,48,.35);}
+.ez-decision-head{font-weight:900;font-size:20px;letter-spacing:.3em;
+  color:var(--ez-chrome);text-shadow:0 2px 3px #000;}
+.ez-decision.ez-urgent .ez-decision-head{color:var(--ez-hot);
   text-shadow:0 0 16px rgba(227,62,48,.6),0 2px 3px #000;}
+/* The timer only reads as a clock while one is actually running. */
+.ez-timer{opacity:0;}
+.ez-decision.ez-urgent .ez-timer{opacity:1;}
 .ez-reads{display:flex;gap:14px;}
 /* The chips are the touch buttons (see web/touch.rs), so they must take
    pointer events even though the HUD root does not, and they must be big
@@ -156,6 +168,8 @@ pub const MENU_CSS: &str = r#"
 @media (pointer:coarse){
   .ez-decision{left:0;right:0;transform:none;bottom:0;border-radius:12px 12px 0 0;
     padding:14px 12px calc(14px + env(safe-area-inset-bottom));}
+  /* The full-width bar is already anchored; scaling it would only clip it. */
+  .ez-decision.ez-urgent{transform:none;}
   .ez-reads{width:100%;gap:10px;}
   .ez-read{flex:1;min-width:0;min-height:88px;}
   .ez-read b{font-size:32px;}

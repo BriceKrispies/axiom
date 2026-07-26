@@ -88,11 +88,33 @@ impl AttemptPhase {
         }
     }
 
-    /// Whether the player may choose a read right now. A press at any other
-    /// moment is stale input and is dropped — the loop never queues a decision
-    /// for a window that has not opened.
+    /// Whether the player may choose a read right now.
+    ///
+    /// True from the snap onward, NOT just inside a window. The quarterback can
+    /// throw whenever he likes once he has the ball, so an anticipatory throw —
+    /// releasing before the receiver breaks, at full speed — is a real option
+    /// and a rewarded one. The decision window is not permission to act; it is
+    /// the game slowing down to make sure the player does not miss the moment.
+    ///
+    /// A press before the snap is still stale and is dropped: there is no ball.
     pub fn accepts_choice(self) -> bool {
-        matches!(self, AttemptPhase::DecisionWindow { .. })
+        matches!(
+            self,
+            AttemptPhase::Developing | AttemptPhase::DecisionWindow { .. }
+        )
+    }
+
+    /// Whether the three numbered reads should be on screen — their field
+    /// markers and their prompt. They appear at the line so the player learns
+    /// the mapping, and stay up through the whole live play, because a control
+    /// you can use is a control you should be able to see.
+    pub fn shows_reads(self) -> bool {
+        matches!(
+            self,
+            AttemptPhase::PreSnap { .. }
+                | AttemptPhase::Developing
+                | AttemptPhase::DecisionWindow { .. }
+        )
     }
 
     /// Whether the player's stick steers the quarterback. Only during a

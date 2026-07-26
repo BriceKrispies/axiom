@@ -182,26 +182,57 @@ fn the_loop_stops_asking_after_its_window_budget() {
 // --- choices ------------------------------------------------------------------
 
 #[test]
-fn a_press_outside_a_window_is_rejected_as_stale() {
+fn a_press_before_the_snap_is_rejected_but_the_reads_are_live_after_it() {
     let mut r = run(0xA77E_0007);
-    // Pre-snap: nothing is being asked, so nothing may be answered.
+    // Pre-snap there is no ball, so there is nothing to answer with.
     assert!(
         !r.choose(PlayerChoice::Throw(2)),
         "a pre-snap press is stale input"
     );
-    until(&mut r, 500, |r| {
-        matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
+    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    until(&mut r, 60, |r| {
+        matches!(phase(r), Some(AttemptPhase::Developing))
     })
-    .expect("a window opens");
+    .expect("the play develops");
+
+    // The reads are selectable from the snap onward, NOT only inside a window:
+    // throwing early, at full speed, is the anticipatory read.
     assert!(
-        r.choose(PlayerChoice::Throw(0)),
-        "the window accepts a read"
+        phase(&r).map(|p| p.accepts_choice()).unwrap_or(false),
+        "the reads are live while the play develops"
     );
-    // Having committed, further presses this attempt are stale too.
+    assert_eq!(
+        r.time_scale(),
+        1.0,
+        "and the game has not slowed down for it"
+    );
+    assert!(r.choose(PlayerChoice::Throw(0)), "an early read is accepted");
+    // Having committed, further presses this attempt are stale.
     assert!(
         !r.choose(PlayerChoice::Throw(2)),
         "the attempt cannot be re-decided once committed"
     );
+    until(&mut r, 40, |r| {
+        matches!(phase(r), Some(AttemptPhase::PassInFlight { .. }))
+    })
+    .expect("the early throw goes up without waiting for a window");
+}
+
+#[test]
+fn the_window_is_the_slowdown_not_the_permission() {
+    let mut r = run(0xA77E_0107);
+    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    // Developing: choosable, full speed.
+    assert!(phase(&r).map(|p| p.accepts_choice()).unwrap_or(false));
+    assert_eq!(r.time_scale(), 1.0);
+    // Window: still choosable, now dilated. The window adds urgency and time to
+    // read — it never adds the ability to act.
+    until(&mut r, 500, |r| {
+        matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
+    })
+    .expect("a window opens");
+    assert!(phase(&r).map(|p| p.accepts_choice()).unwrap_or(false));
+    assert_eq!(r.time_scale(), DECISION_TIME_SCALE);
 }
 
 #[test]

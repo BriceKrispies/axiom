@@ -142,7 +142,12 @@ impl AttemptController {
                 AttemptPhase::Developing
             }
             AttemptPhase::PreSnap { snap_at } => AttemptPhase::PreSnap { snap_at },
-            AttemptPhase::Developing => self.maybe_open_window(&read, tick),
+            // A choice can land here as well as in a window: throwing early, at
+            // full speed, is the anticipatory read.
+            AttemptPhase::Developing => match self.pending.take() {
+                Some(choice) => self.commit(&read, choice, &mut commands),
+                None => self.maybe_open_window(&read, tick),
+            },
             AttemptPhase::DecisionWindow {
                 opened_at,
                 closes_at,
