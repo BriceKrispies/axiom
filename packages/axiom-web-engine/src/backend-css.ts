@@ -26,12 +26,26 @@
  * match the other backends exactly. Depth order is the browser's `preserve-3d`
  * sorting; alpha is native CSS `rgba`.
  *
- * KNOWN LIMIT, deliberately not hidden: CSS compositing costs scale with total
- * element count, and moving any node invalidates the whole `preserve-3d` sorting
- * context. Scenes stay smooth to roughly 300-500 elements and degrade from there;
- * this backend reports `meshDetail: "low"` and renders dense spherical meshes as
- * shaded impostor discs to stay inside that budget. A scene authored for WebGL2's
- * polygon budget will render CORRECTLY here but not necessarily at 60fps.
+ * THE BUDGET, and why there is a LOD. CSS compositing cost scales with the total
+ * PAINTED element count, and re-posing any node invalidates the whole
+ * `preserve-3d` sorting context — so cost tracks the whole scene, not the moving
+ * part of it. Measured on a real GPU browser: ~300 elements holds 60fps, ~900
+ * gives ~14fps, and ~2400 sits at ~5fps even when nothing moves at all.
+ *
+ * A scene authored for WebGL2 blows straight past that (the casino chest scene
+ * is 359 nodes / ~3.6k faces), so this backend does what a renderer facing a hard
+ * budget must: it drops what cannot be seen, then what cannot be read. Backface
+ * + screen-space culling (see NODE_MIN_PX / FACE_MIN_PX2) takes that scene from
+ * ~3600 elements at ~2fps to ~390 at a locked 60.
+ *
+ * The LOD is CONTINUOUS, not a fixed decimation, and that matters: thresholds are
+ * evaluated per frame against each node's real projected size. The chest
+ * nameplate's welded letter strokes measure ~8px on the board and are dropped, so
+ * the plaque reads blank — but when the chosen chest flies to its hero framing the
+ * same strokes measure ten times that and come back, spelling the brand exactly
+ * when the shot is about it. Detail below the threshold is gone, not shrunk; that
+ * is the honest cost of the budget, and it is the same trade `backend-canvas2d.ts`
+ * already makes with its sub-pixel node cull.
  *
  * As a browser-DOM boundary this file is coverage-exempt (test-exempt.json) and
  * outside the Branchless Law, exactly like the other two backends.
@@ -71,7 +85,42 @@ const RECT_EPSILON = 1e-3;
  * grid is capped so a big slab costs tens of elements, not hundreds.
  */
 const MAX_FACE_SPAN = 3;
-const MAX_FACE_GRID = 8;
+const MAX_FACE_GRID = 4;
+
+/**
+ * Subdivision cells are grown by this many CSS px so neighbours OVERLAP instead
+ * of butting edge to edge. Two abutting quads share an exact edge in theory, but
+ * after the perspective divide and sub-pixel rounding the seam does not close,
+ * and on a 48-unit floor slab it shows as a hairline of background straight
+ * across the frame. The cells differ only slightly in shade, so a fraction of a
+ * pixel of overlap is invisible — where the seam is not.
+ */
+const CELL_OVERLAP_PX = 1;
+
+/**
+ * SCREEN-SPACE LEVEL OF DETAIL — the reason this backend is usable at all.
+ *
+ * `backend-canvas2d.ts` already culls whole nodes whose bounding sphere projects
+ * under half a pixel, because a software rasterizer pays per pixel. A DOM
+ * renderer pays per ELEMENT — a 3-pixel gold strap costs exactly as much to
+ * composite and depth-sort as the chest behind it — so the same idea has to bite
+ * far, far earlier. These are the thresholds, in CSS pixels of the real viewport:
+ *
+ *   - a NODE whose bounding sphere projects smaller than `NODE_MIN_PX` across is
+ *     dropped whole (the chest's plank grooves, band slats, letter strokes);
+ *   - a FACE whose projected area — foreshortening included, so grazing faces go
+ *     first — is under `FACE_MIN_PX2` is dropped;
+ *   - a BACK-FACING face is dropped outright. This one is free: it is exact, not
+ *     an approximation, and it removes ~half of every box in the scene. CSS
+ *     `backface-visibility` hides such faces at paint time but they still cost
+ *     layout and depth sorting, so hiding them via `display` is the real win.
+ *
+ * Culling is folded into the existing per-face loop, which already computes each
+ * face's world normal and centroid to shade it — so LOD costs no extra pass, and
+ * a culled face additionally skips the (much more expensive) shading call.
+ */
+const NODE_MIN_PX = 26;
+const FACE_MIN_PX2 = 110;
 
 /** Meshes with at least this many vertices AND a constant radius about their
  * centroid render as a single shaded impostor disc instead of one element per
@@ -115,6 +164,8 @@ interface CssMesh {
   readonly faces: readonly CssFace[];
   /** Set when the mesh is a ball: local-space centre and radius. */
   readonly impostor: { readonly cx: number; readonly cy: number; readonly cz: number; readonly r: number } | null;
+  /** Mesh-local bounding-sphere radius about the origin, for node-level LOD. */
+  readonly radius: number;
 }
 
 /** The live DOM for one scene node. */
@@ -123,6 +174,8 @@ interface NodeDom {
   /** This node's faces AFTER scale-aware subdivision — parallel to `faceEls`. */
   readonly faces: readonly CssFace[];
   readonly faceEls: readonly HTMLElement[];
+  /** True while the node is LOD-culled, so becoming visible forces a re-shade. */
+  hidden: boolean;
   /** Last applied values, so an unchanged node costs zero style writes. */
   lastTransform: unknown;
   lastMaterial: Handle;
@@ -383,7 +436,7 @@ const subdivideForScale = (faces: readonly CssFace[], scale: { x: number; y: num
           cx: ox + f.ux * (stepU / 2) + f.vx * (stepV / 2),
           cy: oy + f.uy * (stepU / 2) + f.vy * (stepV / 2),
           cz: oz + f.uz * (stepU / 2) + f.vz * (stepV / 2),
-          height: f.height / rows,
+          height: f.height / rows + CELL_OVERLAP_PX,
           nx: f.nx,
           ny: f.ny,
           nz: f.nz,
@@ -396,7 +449,7 @@ const subdivideForScale = (faces: readonly CssFace[], scale: { x: number; y: num
           vx: f.vx,
           vy: f.vy,
           vz: f.vz,
-          width: f.width / cols,
+          width: f.width / cols + CELL_OVERLAP_PX,
         });
       }
     }
@@ -453,11 +506,17 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
   let lightEpoch = 0;
   let lastLightKey = "";
 
-  const buildNodeDom = (mesh: CssMesh, scale: { x: number; y: number; z: number }): NodeDom => {
+  const buildNodeDom = (mesh: CssMesh, scale: { x: number; y: number; z: number }, opaque: boolean): NodeDom => {
     const el = document.createElement("div");
     el.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;transform-style:preserve-3d";
     const faceEls: HTMLElement[] = [];
-    const faces = mesh.impostor === null ? subdivideForScale(mesh.faces, scale) : [];
+    // Only OPAQUE faces subdivide. The cells overlap by a hair to close seams
+    // (CELL_OVERLAP_PX), and on a translucent surface that overlap double-blends
+    // into a visible dark band — which is exactly what the reveal veil showed.
+    // A translucent wash (veil, shadow disc, glow pool) is also the case that
+    // needs per-cell shading variation least, so it stays one whole face.
+    const subdivided = opaque ? subdivideForScale(mesh.faces, scale) : [...mesh.faces];
+    const faces = mesh.impostor === null ? subdivided : [];
     if (mesh.impostor === null) {
       for (const f of faces) {
         const fe = document.createElement("i");
@@ -482,7 +541,7 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
       el.append(fe);
       faceEls.push(fe);
     }
-    return { faceEls, faces, lastLightEpoch: -1, lastMaterial: -1, lastMesh: -1, lastTransform: null, root: el };
+    return { faceEls, faces, hidden: false, lastLightEpoch: -1, lastMaterial: -1, lastMesh: -1, lastTransform: null, root: el };
   };
 
   return {
@@ -521,6 +580,19 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
         lightEpoch += 1;
       }
 
+      // LOD basis: pixels per world unit at unit distance, and the camera's
+      // forward axis (distances are measured ALONG it, not radially, so a node
+      // off to the side is not spuriously treated as far away).
+      const eye = frame.camera.position;
+      const pxPerUnit = viewH / (2 * Math.tan(frame.camera.fovY / 2));
+      let fwdX = frame.camera.target.x - eye.x;
+      let fwdY = frame.camera.target.y - eye.y;
+      let fwdZ = frame.camera.target.z - eye.z;
+      const fwdLen = Math.hypot(fwdX, fwdY, fwdZ) || 1;
+      fwdX /= fwdLen;
+      fwdY /= fwdLen;
+      fwdZ /= fwdLen;
+
       const seen = new Set<object>();
       for (const node of frame.nodes) {
         const mesh = meshes.get(node.mesh);
@@ -532,11 +604,34 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
         let dom = nodeDom.get(node);
         if (dom === undefined || dom.lastMesh !== node.mesh) {
           if (dom !== undefined) disposeNode(dom);
-          dom = buildNodeDom(mesh, t.scale);
+          dom = buildNodeDom(mesh, t.scale, material.opacity >= 1);
           dom.lastMesh = node.mesh;
           nodeDom.set(node, dom);
           world.append(dom.root);
         }
+
+        // ── node-level LOD: drop anything behind the camera or too small to read
+        const maxScale = Math.max(Math.abs(t.scale.x), Math.abs(t.scale.y), Math.abs(t.scale.z));
+        const boundRadius = mesh.radius * maxScale;
+        const along =
+          (t.position.x - eye.x) * fwdX + (t.position.y - eye.y) * fwdY + (t.position.z - eye.z) * fwdZ;
+        const projectedPx = (2 * boundRadius * pxPerUnit) / Math.max(along, frame.camera.near);
+        const cull = along + boundRadius < frame.camera.near || projectedPx < NODE_MIN_PX;
+        if (cull) {
+          if (!dom.hidden) {
+            dom.hidden = true;
+            dom.root.style.display = "none";
+          }
+          continue;
+        }
+        if (dom.hidden) {
+          dom.hidden = false;
+          dom.root.style.display = "";
+          // It was culled, so its faces hold stale colors — force a re-shade.
+          dom.lastLightEpoch = -1;
+        }
+        // Screen-space scale factor for this node, reused by the per-face area cull.
+        const nodePxPerUnit = pxPerUnit / Math.max(along, frame.camera.near);
 
         const posed = dom.lastTransform !== t;
         if (posed) {
@@ -567,6 +662,7 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
 
         if (mesh.impostor === null) {
           dom.faces.forEach((f, i) => {
+            const el = dom.faceEls[i]!;
             // Exact world normal under any linear transform: normalize(Mu x Mv).
             const mu = lx(f.ux, f.uy, f.uz);
             const mv = lx(f.vx, f.vy, f.vz);
@@ -578,7 +674,25 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
             ny /= nl;
             nz /= nl;
             const c = wp(f.cx, f.cy, f.cz);
-            dom.faceEls[i]!.style.background = shadeFace({ ao: f.ao, frame, material, n: [nx, ny, nz], p: c });
+
+            // ── face-level LOD, using the normal + centroid shading needs anyway.
+            // Back-facing: the outward normal points away from the eye. Exact for
+            // opaque solids. Translucent faces are kept two-sided, because a
+            // shadow disc or a glass pane is authored to be seen from both sides.
+            const towardEye = (eye.x - c[0]) * nx + (eye.y - c[1]) * ny + (eye.z - c[2]) * nz;
+            const backFacing = material.opacity >= 1 && towardEye <= 0;
+            // Projected area, foreshortening included: world area scaled by the
+            // node's px-per-unit, times |cos| between the normal and the view ray.
+            const worldW = (f.width / WORLD_PX) * Math.hypot(mu[0], mu[1], mu[2]);
+            const worldH = (f.height / WORLD_PX) * Math.hypot(mv[0], mv[1], mv[2]);
+            const viewLen = Math.hypot(eye.x - c[0], eye.y - c[1], eye.z - c[2]) || 1;
+            const facing = Math.abs(towardEye) / viewLen;
+            const areaPx = worldW * worldH * nodePxPerUnit * nodePxPerUnit * facing;
+            const drop = backFacing || areaPx < FACE_MIN_PX2;
+            el.style.display = drop ? "none" : "";
+            // A dropped face also skips the much more expensive shading call.
+            if (drop) return;
+            el.style.background = shadeFace({ ao: f.ao, frame, material, n: [nx, ny, nz], p: c });
           });
         } else {
           // A ball drawn as ONE camera-facing disc. A low-detail unit sphere is 96
@@ -628,7 +742,12 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
     },
     uploadMesh: (handle: Handle, data: MeshData): void => {
       const impostor = detectImpostor(data);
-      meshes.set(handle, { faces: impostor === null ? buildFaces(data) : [], impostor });
+      // Bounding-sphere radius about the mesh origin, for the node-level LOD.
+      let radius = 0;
+      for (const p of data.positions) {
+        radius = Math.max(radius, Math.hypot(p.x, p.y, p.z));
+      }
+      meshes.set(handle, { faces: impostor === null ? buildFaces(data) : [], impostor, radius });
     },
   };
 };

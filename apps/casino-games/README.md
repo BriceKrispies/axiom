@@ -76,10 +76,13 @@ uv run scripts/localhost_servers.py start-app casino-games --port 8087
 # then open http://localhost:8087/?game=treasure-chest-pick&backend=css
 ```
 
-Honest limit: CSS compositing scales with total element count, and moving any
-node invalidates the whole `preserve-3d` sorting context. The chest scene is
-authored for a GPU (482 nodes → ~3.9k elements) and renders **correctly but at
-~2fps**. Measured budget for a smooth DOM scene is ~300 elements.
+It holds **60fps** on the chest scene, via a screen-space LOD: back-facing faces
+are dropped outright (exact, and ~half of every box), and nodes/faces below a
+projected-size threshold are culled. That takes a scene authored for a GPU (359
+nodes / ~3.6k faces, which composites at ~2fps) down to ~390 painted elements.
+The LOD is continuous, so detail returns as things get closer — the chest's
+nameplate lettering is below threshold on the board and reappears, spelling the
+brand, once that chest flies to its hero reveal.
 
 **2. `/css3d.html` — a build authored FOR the DOM.** The same game at 60fps, by
 spending the element budget deliberately: 13 elements per chest instead of 246,
