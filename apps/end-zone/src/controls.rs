@@ -18,7 +18,38 @@ use axiom::prelude::Vec2;
 use axiom_input::{ActionId, DeviceFrame, InputState, KeyToken};
 use axiom_kernel::Tick;
 
-use crate::showcase::DiagnosticCommand;
+
+/// Diagnostic + gameplay input commands — the vocabulary this map emits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticCommand {
+    /// Space: start the play, or restart it after completion (ambient only).
+    StartPlay,
+    /// R: reset all showcase state to formation (idle until started).
+    ResetAll,
+    /// The contextual action button (touch A / Enter): snaps the ambient play,
+    /// orders the cone-aimed throw while the quarterback holds it, and — during
+    /// a decision window — commits the highlighted read (the one-button twin of
+    /// the numbered keys, for touch).
+    PrimaryAction,
+    /// `1`/`2`/`3` tapped: throw to that read at full power (the harness and
+    /// the autopilot use this; a human's hold/release goes through the pair
+    /// below).
+    ThrowRead(usize),
+    /// `1`/`2`/`3` HELD: wind the throw up on that read, one tick per issue.
+    ChargeRead(usize),
+    /// The held read was let go: throw it at whatever charge was reached.
+    ReleaseRead,
+    /// The scramble input: take the quarterback out of the pocket.
+    Scramble,
+    /// F2–F6: force a camera mode; F6 returns to automatic.
+    ForceFormationCamera,
+    ForceQuarterbackCamera,
+    ForceFlightCamera,
+    ForceCarrierCamera,
+    AutomaticCamera,
+    /// F1: toggle the diagnostic overlays.
+    ToggleDebug,
+}
 
 /// Gameplay actions.
 const ACTION_SCRAMBLE: ActionId = ActionId::new(1);
@@ -54,7 +85,8 @@ pub struct TouchInput {
     pub stick_y: f32,
     pub primary: bool,
     pub reset: bool,
-    /// A tapped decision read, `0..3`.
+    /// A decision read currently HELD down, `0..3` (the touch chip under the
+    /// finger). This is a wind-up, not a tap.
     pub read: Option<usize>,
     /// The scramble control was tapped.
     pub scramble: bool,
@@ -68,6 +100,8 @@ pub struct GameInput {
     /// engine frame index and the simulation tick.
     sample_n: u64,
     pending: Vec<DiagnosticCommand>,
+    /// The read currently being wound up, so the RELEASE edge can be detected.
+    charging: Option<usize>,
 }
 
 impl Default for GameInput {
@@ -112,6 +146,7 @@ impl GameInput {
             state,
             sample_n: 0,
             pending: Vec::new(),
+            charging: None,
         }
     }
 
@@ -122,12 +157,32 @@ impl GameInput {
         self.state.sample(Tick::new(self.sample_n), &frame);
         self.sample_n += 1;
 
-        let pressed: [(ActionId, DiagnosticCommand); 12] = [
+        // The reads are HELD, not tapped: holding winds the throw up, releasing
+        // lets it go at whatever power was charged. The release edge is what
+        // actually throws, so it has to be detected here — `InputState` reports
+        // held state and press edges, not releases.
+        let reads = [ACTION_READ_ONE, ACTION_READ_TWO, ACTION_READ_THREE];
+        let held = reads
+            .iter()
+            .position(|action| self.state.is_down(*action))
+            .or_else(|| (touch.read.is_some()).then(|| touch.read.unwrap_or(0).min(2)));
+        match (held, self.charging) {
+            // Still holding (or just started): keep winding up.
+            (Some(read), _) => {
+                self.charging = Some(read);
+                self.latch(DiagnosticCommand::ChargeRead(read));
+            }
+            // Let go of a wind-up: throw it.
+            (None, Some(_)) => {
+                self.charging = None;
+                self.latch(DiagnosticCommand::ReleaseRead);
+            }
+            (None, None) => {}
+        }
+
+        let pressed: [(ActionId, DiagnosticCommand); 9] = [
             (ACTION_SCRAMBLE, DiagnosticCommand::Scramble),
             (ACTION_RESET, DiagnosticCommand::ResetAll),
-            (ACTION_READ_ONE, DiagnosticCommand::ThrowRead(0)),
-            (ACTION_READ_TWO, DiagnosticCommand::ThrowRead(1)),
-            (ACTION_READ_THREE, DiagnosticCommand::ThrowRead(2)),
             (
                 ACTION_CAM_FORMATION,
                 DiagnosticCommand::ForceFormationCamera,
@@ -150,11 +205,6 @@ impl GameInput {
         if touch.reset {
             self.latch(DiagnosticCommand::ResetAll);
         }
-        // A tapped read is the exact same command the number keys emit, so the
-        // decision path has one implementation regardless of device.
-        if let Some(read) = touch.read {
-            self.latch(DiagnosticCommand::ThrowRead(read.min(2)));
-        }
         if touch.scramble {
             self.latch(DiagnosticCommand::Scramble);
         }
@@ -176,6 +226,7 @@ impl GameInput {
     /// Drop every latched command (a run swap must not inherit a press).
     pub fn clear(&mut self) {
         self.pending.clear();
+        self.charging = None;
     }
 
     /// Queue one command for the next simulation tick (deduplicated, bounded).

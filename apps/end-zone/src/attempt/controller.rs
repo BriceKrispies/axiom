@@ -223,6 +223,9 @@ impl AttemptController {
                 commands.push(SimCommand::ThrowTo(read.target(target)));
                 AttemptPhase::PassInFlight { read: target }
             }
+            // The wind-up already queued its own release; issuing a throw here
+            // too would overwrite the player's charge with full power.
+            PlayerChoice::ThrowCharged(target) => AttemptPhase::PassInFlight { read: target },
             PlayerChoice::Scramble => {
                 commands.push(SimCommand::Scramble);
                 AttemptPhase::Scrambling

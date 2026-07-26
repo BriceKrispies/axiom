@@ -34,8 +34,14 @@ impl WindowTrigger {
 /// close, which the loop models as its own outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerChoice {
-    /// Throw to read `0..3` (read 0 is the short one).
+    /// Throw to read `0..3` (read 0 is the short one) at full power. The loop
+    /// issues the throw itself.
     Throw(usize),
+    /// A held wind-up was released on read `0..3`. Identical as a *decision* —
+    /// the loop records the same read and leaves the window the same way — but
+    /// the throw command is already on its way from the wind-up, so the loop
+    /// must NOT also issue a full-power one on top of it.
+    ThrowCharged(usize),
     /// Abandon the pocket — the player takes direct control of the quarterback.
     Scramble,
 }
@@ -44,7 +50,7 @@ impl PlayerChoice {
     /// The read this choice throws to, if it is a throw.
     pub fn read(self) -> Option<usize> {
         match self {
-            PlayerChoice::Throw(read) => Some(read),
+            PlayerChoice::Throw(read) | PlayerChoice::ThrowCharged(read) => Some(read),
             PlayerChoice::Scramble => None,
         }
     }

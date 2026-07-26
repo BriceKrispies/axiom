@@ -27,8 +27,10 @@ use super::mount_div;
 /// Shared touch-control state the DOM listeners write and the frame reads.
 #[derive(Debug, Default)]
 pub struct TouchHeld {
-    /// The read `0..3` tapped since the last frame, if any.
-    read_edge: Option<usize>,
+    /// The read `0..3` currently HELD under a finger, if any. Held rather than
+    /// edge-triggered because a read is a wind-up: pressing starts charging and
+    /// lifting throws.
+    read_held: Option<usize>,
     scramble_edge: bool,
     pause_edge: bool,
 }
@@ -44,7 +46,9 @@ pub struct TouchFrame {
 impl TouchHeld {
     pub fn take(&mut self) -> TouchFrame {
         TouchFrame {
-            read: core::mem::take(&mut self.read_edge),
+            // The held read is NOT consumed — it persists until the finger
+            // lifts, which is what makes the wind-up chargeable.
+            read: self.read_held,
             scramble: core::mem::take(&mut self.scramble_edge),
             pause: core::mem::take(&mut self.pause_edge),
         }
@@ -125,13 +129,25 @@ fn install_decision_taps(touch: &Rc<RefCell<TouchHeld>>) {
         }
         e.prevent_default();
         e.stop_propagation();
-        let mut held = held.borrow_mut();
-        held.read_edge = read.or(held.read_edge);
-        held.scramble_edge |= scramble;
+        let mut state = held.borrow_mut();
+        state.read_held = read.or(state.read_held);
+        state.scramble_edge |= scramble;
     });
     let _ =
         window.add_event_listener_with_callback("pointerdown", on_down.as_ref().unchecked_ref());
     on_down.forget();
+
+    // Lifting (or losing) the finger is the RELEASE that throws the ball, so
+    // `pointercancel` is wired as well: a gesture the browser takes away from
+    // us must let the wind-up go rather than leave it stuck charging.
+    let up_held = touch.clone();
+    let on_up = Closure::<dyn FnMut(PointerEvent)>::new(move |_e: PointerEvent| {
+        up_held.borrow_mut().read_held = None;
+    });
+    let _ = window.add_event_listener_with_callback("pointerup", on_up.as_ref().unchecked_ref());
+    let _ =
+        window.add_event_listener_with_callback("pointercancel", on_up.as_ref().unchecked_ref());
+    on_up.forget();
 }
 
 /// Wire the pause button: a pointer-down is one debounced edge.

@@ -11,12 +11,15 @@ use crate::attempt::{AttemptLedger, AttemptPhase, AttemptStep};
 use crate::data::prototype::{READ_COUNT, READ_NAMES};
 
 /// One selectable read in the decision prompt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReadPrompt {
     /// The key that throws it (`1`, `2`, `3`).
     pub key: String,
-    /// The route's name (`QUICK OUT`).
+    /// The route's name (`SLANT`).
     pub name: String,
+    /// How far this read's wind-up has charged, `0..=1`. Zero unless this is
+    /// the read currently being held — the chip's fill IS the power meter.
+    pub charge: f32,
 }
 
 /// The on-screen read prompt. Present for the whole live play, because the
@@ -123,6 +126,10 @@ fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
             .map(|read| ReadPrompt {
                 key: format!("{}", read + 1),
                 name: READ_NAMES[read].to_string(),
+                charge: match step.charging == Some(read) {
+                    true => step.charge,
+                    false => 0.0,
+                },
             })
             .collect(),
         // Action first, key second: the same string is a keyboard hint and a

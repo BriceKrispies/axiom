@@ -1,10 +1,8 @@
-//! The deterministic systems showcase: a controller that (only) triggers the
-//! play start, the snap, and the scripted throw at fixed tick offsets — every
-//! other behavior emerges from the real systems — plus the headless
-//! [`ShowcaseRun`] harness the app, tests, and replay proofs all share.
-//!
-//! A run is either the AMBIENT loop (one play cycling behind the title screen)
-//! or a real [`AttemptController`] session: the decision-window prototype.
+//! The headless [`ShowcaseRun`] harness the app, tests, and replay proofs all
+//! share. A run is either the AMBIENT loop (one play cycling behind the title,
+//! triggered at fixed tick offsets, every other behavior emerging from the real
+//! systems) or a real [`AttemptController`] session: the decision-window
+//! prototype.
 
 use crate::attempt::{AttemptController, AttemptStep, PlayerChoice};
 use crate::camera::{CameraDirector, CameraMode, CameraPose};
@@ -17,41 +15,16 @@ use crate::presentation::{JuiceStack, LocomotionAnimator, PlayerPose};
 use crate::showcase_controller::ShowcaseController;
 use crate::state::{SimCommand, SimState};
 
-/// Ticks after boot before the showcase play starts by itself.
+/// Ambient-showcase beats: boot to play start, play start to snap, and the
+/// post-whistle pause before it resets (~2 s at 60 Hz).
 pub const AUTO_START_DELAY: u64 = 100;
-/// Ticks between the play start (formation) and the snap.
 pub const SNAP_DELAY: u64 = 80;
-/// Post-whistle pause before the play resets to formation (~2 s at 60 Hz).
 pub const RESET_DELAY: u64 = 120;
-/// The tick [`run_trace`] injects its scripted throw press at (the replay
-/// harness's stand-in for the user's SNAP·THROW — the QB never throws alone).
+/// The tick [`run_trace`] injects its scripted throw at — the replay harness's
+/// stand-in for the user (the QB never throws alone).
 pub const TRACE_THROW_TICK: u64 = 258;
 
-/// Diagnostic + gameplay input commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiagnosticCommand {
-    /// Space: start the play, or restart it after completion (ambient only).
-    StartPlay,
-    /// R: reset all showcase state to formation (idle until started).
-    ResetAll,
-    /// The contextual action button (touch A / Enter): snaps the ambient play,
-    /// orders the cone-aimed throw while the quarterback holds it, and — during
-    /// a decision window — commits the highlighted read (the one-button twin of
-    /// the numbered keys, for touch).
-    PrimaryAction,
-    /// `1`/`2`/`3` during a decision window: throw to that read.
-    ThrowRead(usize),
-    /// The scramble input: take the quarterback out of the pocket.
-    Scramble,
-    /// F2–F6: force a camera mode; F6 returns to automatic.
-    ForceFormationCamera,
-    ForceQuarterbackCamera,
-    ForceFlightCamera,
-    ForceCarrierCamera,
-    AutomaticCamera,
-    /// F1: toggle the diagnostic overlays.
-    ToggleDebug,
-}
+pub use crate::controls::DiagnosticCommand;
 
 /// One stepped frame's outputs.
 #[derive(Debug, Clone)]
@@ -73,8 +46,8 @@ enum RunLoop {
 
 /// The headless run: simulation + run loop + camera director + juice +
 /// locomotion, no engine scene attached. The browser app wraps this same
-/// harness; the tests drive it directly. In [`RunLoop::Attempt`] mode it also
-/// owns the authoritative attempt state.
+/// harness; the tests drive it directly, and in attempt mode it owns the
+/// authoritative attempt state.
 #[derive(Debug)]
 pub struct ShowcaseRun {
     pub sim: SimState,
@@ -119,10 +92,15 @@ impl ShowcaseRun {
 
     /// The attempt loop's view for this tick, when this is a real session.
     pub fn attempt(&self) -> Option<AttemptStep> {
-        match &self.run_loop {
-            RunLoop::Attempt(controller, _) => controller.view(self.sim.tick),
-            RunLoop::Ambient(_) => None,
-        }
+        let RunLoop::Attempt(controller, _) = &self.run_loop else {
+            return None;
+        };
+        // The wind-up lives in the sim; the view carries it to the HUD.
+        let step = controller.view(self.sim.tick)?;
+        let charging = self.sim.charge_target().and_then(|target| {
+            (0..crate::data::prototype::READ_COUNT).find(|r| step.read.target(*r) == target)
+        });
+        controller.view_charging(self.sim.tick, charging, self.sim.charge_ratio())
     }
 
     /// The running session totals, when this is a real session.
@@ -133,9 +111,8 @@ impl ShowcaseRun {
         }
     }
 
-    /// How fast the simulation should advance relative to real time. The shell
-    /// steps the run fractionally by this, which is what produces the decision
-    /// window's slow motion WITHOUT the simulation itself knowing about time.
+    /// How fast the simulation should advance relative to real time — the
+    /// decision window's slow motion, without the simulation knowing about it.
     pub fn time_scale(&self) -> f32 {
         match &self.run_loop {
             RunLoop::Attempt(controller, _) => controller.time_scale(),
@@ -151,13 +128,8 @@ impl ShowcaseRun {
         }
     }
 
-    /// Feed the movement stick for this tick.
-    ///
-    /// The prototype only hands the player a body once the decision has been
-    /// made: the quarterback after he commits to running, or the receiver after
-    /// the catch. While the play develops, the simulation owns every player —
-    /// that is precisely the premise under test, so the stick is dropped rather
-    /// than quietly letting the player nudge the pocket.
+    /// Feed the movement stick. Only a committed decision hands the player a
+    /// body; while the play develops the simulation owns everyone.
     pub fn set_user_stick(&mut self, stick: axiom::prelude::Vec2) {
         let allowed = match &self.run_loop {
             RunLoop::Ambient(_) => true,
@@ -169,8 +141,7 @@ impl ShowcaseRun {
         };
     }
 
-    /// Offer a decision to the attempt loop. Returns whether it was accepted —
-    /// a press outside an open window is stale input and is dropped.
+    /// Offer a decision to the loop; false if it was stale and dropped.
     pub fn choose(&mut self, choice: PlayerChoice) -> bool {
         match &mut self.run_loop {
             RunLoop::Attempt(controller, _) => controller.choose(choice),
@@ -198,6 +169,20 @@ impl ShowcaseRun {
                 DiagnosticCommand::ThrowRead(read) => {
                     self.choose(PlayerChoice::Throw(*read));
                 }
+                // A wind-up only reaches the simulation while the reads are
+                // actually live, so a held key before the snap charges nothing.
+                DiagnosticCommand::ChargeRead(read) => {
+                    if let Some(target) = self.charge_target(*read) {
+                        let gain = self.charge_gain();
+                        user_commands.push(SimCommand::ChargeThrow { target, gain });
+                    }
+                }
+                DiagnosticCommand::ReleaseRead => {
+                    if self.sim.charge_target().is_some() {
+                        self.note_charged_choice();
+                        user_commands.push(SimCommand::ReleaseThrow);
+                    }
+                }
                 DiagnosticCommand::Scramble => {
                     self.choose(PlayerChoice::Scramble);
                 }
@@ -218,8 +203,7 @@ impl ShowcaseRun {
         let mut snapshot = capture(&self.sim);
         snapshot.attempt = self.attempt();
         self.juice.step(&snapshot, &events);
-        // Advance locomotion once per tick (never per render frame) so a paused
-        // frame re-presents the same poses; feeds off the resolved snapshot.
+        // Locomotion advances once per TICK, never per render frame.
         let poses = self.locomotion.step(&snapshot, &events);
         self.apply_camera_overrides(diagnostics, &snapshot);
         let camera = self.director.step(&snapshot, &events);
@@ -234,8 +218,7 @@ impl ShowcaseRun {
 
     /// The contextual action button, resolved against the PRE-step state.
     fn primary_action(&mut self, tick: u64, user_commands: &mut Vec<SimCommand>) {
-        // In a real session the button is the touch twin of the numbered keys:
-        // it commits whichever read the window is already highlighting.
+        // In a real session this is the touch twin of the numbered keys.
         if let Some(step) = self.attempt() {
             if step.phase.accepts_choice() {
                 self.choose(PlayerChoice::Throw(step.read.best));

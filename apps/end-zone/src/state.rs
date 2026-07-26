@@ -13,6 +13,7 @@ use crate::ai::{
     ResolvedAssignment, RoleState,
 };
 use crate::collision_rig::CollisionRig;
+pub use crate::command::SimCommand;
 use crate::config::{EndZoneConfig, DT, PLAYER_COUNT};
 use crate::data::{
     showcase_play, showcase_rosters, BehaviorTuning, PlayDefinition, RosterDefinition,
@@ -26,37 +27,21 @@ use crate::physics_rig::PhysicsRig;
 use crate::player::lineup::formation_players;
 use crate::player::{controller, PlayerSim};
 
+/// Charge units for a full wind-up. The run loop scales its per-tick gain by
+/// the inverse time scale, so this is effectively a REAL-TIME budget — roughly
+/// 60 units a second whether the game is dilated or not, making a full wind-up
+/// about 0.9 s either way.
+///
+/// Sized by feel. At 20 it filled in a third of a second, which is a flicker
+/// rather than a wind-up: there was no span in which to release it deliberately.
+pub const CHARGE_MAX_TICKS: u32 = 54;
+
 /// The play lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayPhase {
     PreSnap,
     Live,
     Ended,
-}
-
-/// Commands the simulation accepts (issued by the run loop and the diagnostic
-/// input). The quarterback never throws or runs on his own — every one of
-/// these originates in a player decision or a scripted harness standing in for
-/// one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SimCommand {
-    /// (Re)set the play to formation and mark it started.
-    BeginPlay,
-    /// Snap the ball.
-    Snap,
-    /// Order the quarterback to throw, letting the throwing cone pick the
-    /// receiver (the stick aims the pass).
-    ThrowNow,
-    /// Order the quarterback to throw to a NAMED receiver. This is how the
-    /// decision window commits a read: the player chose a target by number, so
-    /// the cone's nearest-the-centre-line pick must not override them.
-    ThrowTo(PlayerId),
-    /// The quarterback abandons the pocket and runs. Distinct from simply
-    /// steering him: it tells the defense he is a runner immediately, instead
-    /// of waiting for the scramble detector to notice.
-    Scramble,
-    /// Reset to formation without starting (diagnostic R).
-    ResetPlay,
 }
 
 /// The authoritative simulation state.
@@ -114,6 +99,14 @@ pub struct SimState {
     /// The receiver the player named this throw, if the throw came from an
     /// explicit read rather than the throwing cone. Cleared at release.
     pub(crate) declared_target: Option<PlayerId>,
+    /// The read the player is currently winding up on, and how many ticks they
+    /// have held it. Charge is measured in SIMULATION ticks, not frames, so the
+    /// wind-up is deterministic — and so that holding through a decision window
+    /// costs game time (the rush keeps closing) rather than free real seconds.
+    pub(crate) charge_target: Option<PlayerId>,
+    pub(crate) charge_ticks: u32,
+    /// The charge the released throw committed at, `0..=1`.
+    pub(crate) throw_power: f32,
     /// The quarterback has been ordered out of the pocket. Latched for the rest
     /// of the play so the defense treats him as a runner from the instant the
     /// decision is made, not once he happens to build up downfield speed.
@@ -182,6 +175,9 @@ impl SimState {
             throwable: Vec::new(),
             throw_commanded: false,
             declared_target: None,
+            charge_target: None,
+            charge_ticks: 0,
+            throw_power: 0.0,
             qb_scrambling: false,
             catch_attempted: false,
             engaged_blocks: Vec::new(),
@@ -234,22 +230,18 @@ impl SimState {
         self.rig.fault.or(self.collision.fault)
     }
 
+    /// How far the current wind-up has charged, `0..=1`.
+    pub fn charge_ratio(&self) -> f32 {
+        self.charge_ticks as f32 / CHARGE_MAX_TICKS as f32
+    }
+
+    /// The read being wound up on, if any.
+    pub fn charge_target(&self) -> Option<PlayerId> {
+        self.charge_target
+    }
+
     // The deterministic state digest lives with the other replay artifacts
     // in `crate::trace` (`SimState::digest`).
-
-    fn apply_command(&mut self, command: SimCommand) {
-        match command {
-            SimCommand::BeginPlay => self.reset_to_formation(true),
-            SimCommand::Snap => self.snap(),
-            SimCommand::ThrowNow => self.throw_commanded = true,
-            SimCommand::ThrowTo(target) => {
-                self.throw_commanded = true;
-                self.declared_target = Some(target);
-            }
-            SimCommand::Scramble => self.qb_scrambling = true,
-            SimCommand::ResetPlay => self.reset_to_formation(false),
-        }
-    }
 
     /// Put everything back in formation. `announce` emits `PlayStarted`
     /// (a bare reset emits `PlayReset`).

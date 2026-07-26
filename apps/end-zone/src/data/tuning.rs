@@ -52,10 +52,14 @@ pub struct BehaviorTuning {
     pub recovery_ticks: u32,
     /// Ticks the snap takes to reach the quarterback.
     pub snap_ticks: u32,
-    /// Horizontal pass speed, yd/s (flight time = distance / this). A hard NFL
+    /// Launch speed of a FULLY charged throw, yd/s.  A hard NFL
     /// throw covers ~30–35 yd/s; the original 22 floated every pass long enough
     /// for the coverage to close on it.
     pub pass_speed: f32,
+    /// Launch speed of an UNCHARGED throw, yd/s. This is a floor, not a
+    /// punishment: a tap is a short pass that still gets there, never a dropped
+    /// ball. Charge buys range beyond it.
+    pub pass_speed_min: f32,
     /// Minimum pass flight time, ticks. This is a floor on the CATCH pipeline —
     /// the ball needs a few ticks airborne to be contested and resolved — and
     /// NOT a stylistic hang time. At 24 it forced a five-yard slant that should
@@ -146,7 +150,8 @@ impl Default for BehaviorTuning {
             fall_ticks: 26,
             recovery_ticks: 40,
             snap_ticks: 7,
-            pass_speed: 25.0,
+            pass_speed: 34.0,
+            pass_speed_min: 17.0,
             min_flight_ticks: 16,
             throw_windup_ticks: 9,
             throw_cone_half_angle: 0.95,

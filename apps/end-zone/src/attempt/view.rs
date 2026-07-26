@@ -28,13 +28,30 @@ pub struct AttemptStep {
     pub window_left: u64,
     /// The most recently resolved attempt (drives the result card).
     pub last: Option<AttemptRecord>,
+    /// The read whose wind-up is being held, and how far it has charged. The
+    /// wind-up lives in the simulation (it is measured in ticks and it decides
+    /// the throw), so the loop carries it through rather than owning it.
+    pub charging: Option<usize>,
+    pub charge: f32,
 }
 
 impl AttemptController {
     /// This tick's presentation view. `None` before the loop has read the field
     /// even once — there is genuinely nothing to draw yet.
     pub fn view(&self, tick: u64) -> Option<AttemptStep> {
+        self.view_charging(tick, None, 0.0)
+    }
+
+    /// The same view, told which read the simulation is winding up on.
+    pub fn view_charging(
+        &self,
+        tick: u64,
+        charging: Option<usize>,
+        charge: f32,
+    ) -> Option<AttemptStep> {
         self.read.map(|read| AttemptStep {
+            charging,
+            charge,
             phase: self.phase,
             read,
             attempt: self.attempt_index.max(1),

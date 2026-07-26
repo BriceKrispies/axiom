@@ -150,6 +150,13 @@ pub const MENU_CSS: &str = r#"
   transition:transform .06s ease,background .1s ease,border-color .1s ease;}
 .ez-read:active{transform:scale(.94);background:rgba(255,255,255,.16);
   border-color:rgba(255,255,255,.5);}
+.ez-read{position:relative;overflow:hidden;}
+/* The wind-up meter: fills from the bottom of the chip being held. */
+.ez-fill{position:absolute;left:0;right:0;bottom:0;display:block;
+  background:linear-gradient(180deg,rgba(255,255,255,.34),rgba(255,255,255,.12));
+  pointer-events:none;transition:height .05s linear;}
+.ez-read.ez-charging{border-color:rgba(255,255,255,.75);transform:scale(1.04);}
+.ez-read b,.ez-read span{position:relative;z-index:1;}
 .ez-read b{font-weight:900;font-size:26px;line-height:1;}
 .ez-read span{font-weight:700;font-size:12px;letter-spacing:.16em;color:var(--ez-text);}
 .ez-read1 b{color:#2edcfa;text-shadow:0 0 12px rgba(46,220,250,.6);}

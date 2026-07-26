@@ -27,6 +27,7 @@ pub mod autopilot;
 pub mod camera;
 pub mod capture;
 pub mod collision_rig;
+pub mod command;
 pub mod config;
 pub mod controls;
 pub mod data;
@@ -47,6 +48,7 @@ pub mod shell;
 pub mod showcase;
 pub mod showcase_controller;
 pub mod state;
+pub mod wind_up;
 pub mod trace;
 
 #[cfg(target_arch = "wasm32")]

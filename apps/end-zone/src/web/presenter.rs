@@ -138,10 +138,16 @@ fn decision_html(prompt: &crate::presentation::DecisionPrompt) -> String {
         .iter()
         .enumerate()
         .map(|(index, read)| {
+            // `ez-fill` is the wind-up meter: it grows out of the bottom of the
+            // chip you are holding, so the power you are about to throw with is
+            // read off the same control you are pressing.
             format!(
-                "<div class='ez-read ez-read{}' data-read='{index}'>\
+                "<div class='ez-read ez-read{} {}' data-read='{index}'>\
+                 <i class='ez-fill' style='height:{:.1}%'></i>\
                  <b>{}</b><span>{}</span></div>",
                 markup::esc(&read.key),
+                if read.charge > 0.0 { "ez-charging" } else { "" },
+                read.charge.clamp(0.0, 1.0) * 100.0,
                 markup::esc(&read.key),
                 markup::esc(&read.name)
             )

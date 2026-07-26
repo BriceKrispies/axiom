@@ -83,8 +83,11 @@ fn the_prompt_never_reports_how_open_a_read_is() {
     assert!(result.is_none());
     let prompt = decision.expect("the window prompts");
     for read in &prompt.reads {
-        let axiom_end_zone::presentation::ReadPrompt { key, name } = read;
+        let axiom_end_zone::presentation::ReadPrompt { key, name, charge } = read;
         assert!(!key.is_empty() && !name.is_empty());
+        // The wind-up meter is power, not openness — it says nothing about
+        // whether the read is a good one.
+        assert!((0.0..=1.0).contains(charge));
     }
 }
 

@@ -57,6 +57,20 @@ pub struct ChalkRoute {
     pub primary: bool,
 }
 
+/// The wind-up preview: where the ball would go if released right now.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThrowPreview {
+    /// Sampled arc through the air, release → landing.
+    pub arc: Vec<Vec3>,
+    /// Where the ball comes down.
+    pub landing: Vec3,
+    /// How far the wind-up has charged, `0..=1`.
+    pub charge: f32,
+}
+
+/// How many points the previewed arc is sampled at.
+pub const ARC_SAMPLES: usize = 18;
+
 /// The immutable snapshot. Same snapshot + same effect state → same scene
 /// submission.
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +105,11 @@ pub struct PresentationSnapshot {
     /// World `Z` of the bright field marker: the line the current attempt
     /// snapped from, so a gain or a loss is legible against it at a glance.
     pub spot_marker_z: Option<f32>,
+    /// The live wind-up preview: the arc the ball would fly on if the throw
+    /// were released THIS tick, and where it would come down. Present only
+    /// while a read is held. This is the whole feedback loop for a charged
+    /// pass — without it "throw harder" is a guess.
+    pub throw_preview: Option<ThrowPreview>,
     /// The receivers the quarterback can throw to right now — everyone inside
     /// his throwing cone, nearest his centre line first. The scene draws a ring
     /// at each one's feet; the pass would go to the first.
@@ -146,6 +165,43 @@ fn pre_snap_chalk(sim: &SimState) -> Vec<ChalkRoute> {
             }
         })
         .collect()
+}
+
+/// The live wind-up preview, if a read is being held.
+///
+/// Solved with exactly the functions the release itself uses, so what the
+/// player is shown is not an approximation of the throw — it IS the throw,
+/// evaluated one tick early.
+fn throw_preview(sim: &SimState) -> Option<ThrowPreview> {
+    let target = sim.charge_target()?;
+    let qb = sim.players.get(sim.quarterback.index())?;
+    let receiver = sim.players.get(target.index())?;
+    let charge = sim.charge_ratio();
+    let release = crate::football::carry_socket(qb.pos, qb.facing, AnimState::Throw);
+    // The SAME solve the release runs, one tick early — so the arc the player
+    // is shown is not a model of the throw, it is the throw.
+    let (_, velocity) = crate::football::flight::aim_and_velocity(
+        release,
+        receiver.pos,
+        receiver.vel,
+        charge,
+        sim.tuning.gravity,
+        &sim.tuning,
+    );
+    let ground = crate::football::catch_point(Vec3::ZERO).y;
+    let (landing, _) =
+        crate::football::flight::predict_landing(release, velocity, sim.tuning.gravity, ground);
+    Some(ThrowPreview {
+        arc: crate::football::flight::arc_samples(
+            release,
+            velocity,
+            sim.tuning.gravity,
+            ground,
+            ARC_SAMPLES,
+        ),
+        landing,
+        charge,
+    })
 }
 
 /// Capture this tick's snapshot from the simulation (read-only).
@@ -206,6 +262,7 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
         attempt: None,
         throwable: sim.throwable.clone(),
         spot_marker_z: Some(sim.frame.line_of_scrimmage_z),
+        throw_preview: throw_preview(sim),
         pre_snap_routes: pre_snap_chalk(sim),
     }
 }
