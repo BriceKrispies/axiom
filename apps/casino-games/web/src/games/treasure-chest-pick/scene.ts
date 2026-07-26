@@ -23,7 +23,7 @@ import { phaseAge } from "../../chance-engine/sessions/session.ts";
 import type { BrandSpec } from "../../presentation/branding/brand.ts";
 import { brandMaterials } from "../../presentation/branding/brand.ts";
 import { stampText } from "../../presentation/branding/label.ts";
-import { lowDetail } from "../../presentation/detail.ts";
+import { lowDetail, weldedLetteringReads } from "../../presentation/detail.ts";
 import { confettiBurst, CONFETTI_MATERIALS, sparkleRing } from "../../presentation/celebrations/confetti.ts";
 import { REWARD_MATERIALS, rewardMaterialOf } from "../../presentation/rewards/tiers.ts";
 import { celebrationFor, outcomeRarity, speedTicks } from "../round-state.ts";
@@ -730,7 +730,14 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
         platePart("plaque", v3(plateW, plateH, 0.06), v3(0, 0, 0.035), pose.dim ? "BrandPrimaryDim" : "BrandPrimary"),
       ]
     : [];
-  const label = pose.nameplate
+  // The plaque itself always stamps; only the welded LETTERING is conditional.
+  // On a backend that cannot draw hairline strokes (the DOM renderer — see
+  // `weldedLetteringReads`) the board-scale plaque reads as a blank brand plate
+  // rather than a half-drawn word. The SELECTED chest still gets its lettering:
+  // it flies to hero framing at `heroScale`, where the same strokes are an order
+  // of magnitude larger and render exactly as they should. The word appears
+  // precisely when the shot is about it.
+  const label = pose.nameplate && (weldedLetteringReads() || pose.selected)
     ? stampText(
         `${key}:brand`,
         pose.brandName,

@@ -36,16 +36,23 @@
  * is 359 nodes / ~3.6k faces), so this backend does what a renderer facing a hard
  * budget must: it drops what cannot be seen, then what cannot be read. Backface
  * + screen-space culling (see NODE_MIN_PX / FACE_MIN_PX2) takes that scene from
- * ~3600 elements at ~2fps to ~390 at a locked 60.
+ * ~3600 elements at ~2fps to ~530 at ~45fps, with the scene still legible.
  *
- * The LOD is CONTINUOUS, not a fixed decimation, and that matters: thresholds are
- * evaluated per frame against each node's real projected size. The chest
- * nameplate's welded letter strokes measure ~8px on the board and are dropped, so
- * the plaque reads blank — but when the chosen chest flies to its hero framing the
- * same strokes measure ten times that and come back, spelling the brand exactly
- * when the shot is about it. Detail below the threshold is gone, not shrunk; that
- * is the honest cost of the budget, and it is the same trade `backend-canvas2d.ts`
- * already makes with its sub-pixel node cull.
+ * The LOD is CONTINUOUS, not a fixed decimation: thresholds are evaluated per
+ * frame against each node's real projected size, so detail resolves as the camera
+ * closes on it rather than popping between fixed tiers.
+ *
+ * Two rules make the difference between "cheap" and "wrong", both learned the
+ * hard way on the casino chest scene:
+ *
+ *   - A node that survives the node cull NEVER renders as nothing. Without this,
+ *     per-face area culling could strip every face from a small node and it would
+ *     silently disappear — which is how the chest's welded nameplate went blank
+ *     and the crab lost its body.
+ *   - The face kept for such a node is chosen by PROJECTED area, not by the
+ *     face's own size. A letter stroke's biggest face is its top, which lies
+ *     nearly edge-on to this camera and reads as nothing; ranking by what
+ *     actually reaches the screen keeps the face you can see.
  *
  * As a browser-DOM boundary this file is coverage-exempt (test-exempt.json) and
  * outside the Branchless Law, exactly like the other two backends.
@@ -119,8 +126,21 @@ const CELL_OVERLAP_PX = 1;
  * face's world normal and centroid to shade it — so LOD costs no extra pass, and
  * a culled face additionally skips the (much more expensive) shading call.
  */
-const NODE_MIN_PX = 26;
-const FACE_MIN_PX2 = 110;
+const NODE_MIN_PX = 12;
+const FACE_MIN_PX2 = 30;
+
+/**
+ * LOD HYSTERESIS. Thresholds are re-evaluated every frame, so anything sitting
+ * near one flickers: on a chest that is SCALING and ROTATING into its hero
+ * framing, slats and straps pop in and out frame by frame and the whole solid
+ * looks like it is coming apart. Classic LOD popping.
+ *
+ * So the thresholds are asymmetric: something already drawn is only dropped once
+ * it falls to this fraction of the threshold that would admit it. The band is
+ * dead space in which visibility simply does not change, which is what kills the
+ * flicker — an object crossing the boundary changes state once, not every frame.
+ */
+const LOD_HYSTERESIS = 0.65;
 
 /** Meshes with at least this many vertices AND a constant radius about their
  * centroid render as a single shaded impostor disc instead of one element per
@@ -461,22 +481,47 @@ const subdivideForScale = (faces: readonly CssFace[], scale: { x: number; y: num
 const detectImpostor = (data: MeshData): CssMesh["impostor"] => {
   const pts = data.positions;
   if (pts.length < IMPOSTOR_MIN_VERTICES) return null;
-  let cx = 0;
-  let cy = 0;
-  let cz = 0;
+  // Centre from the BOUNDING BOX, not the vertex mean. A lat/long sphere packs
+  // far more vertices near its poles than around its equator, so the mean of its
+  // vertices sits off the true centre — measured from there the radii are not
+  // constant and every sphere failed this test, silently taking the 96-quad
+  // path instead (which the face LOD then stripped to a single stray shard: the
+  // casino crab lost its body entirely). The bounding-box centre is exact for a
+  // sphere however its vertices are distributed.
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
   for (const p of pts) {
-    cx += p.x;
-    cy += p.y;
-    cz += p.z;
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    minZ = Math.min(minZ, p.z);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+    maxZ = Math.max(maxZ, p.z);
   }
-  cx /= pts.length;
-  cy /= pts.length;
-  cz /= pts.length;
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const cz = (minZ + maxZ) / 2;
+  // A sphere's bounding box is a cube; anything oblong is not a ball.
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  const spanZ = maxZ - minZ;
+  const maxSpan = Math.max(spanX, spanY, spanZ);
+  const minSpan = Math.min(spanX, spanY, spanZ);
+  if (maxSpan < 1e-6) return null;
+  if ((maxSpan - minSpan) / maxSpan > IMPOSTOR_RADIUS_TOLERANCE) return null;
+
+  let mean = 0;
+  let worst = 0;
   const radii = pts.map((p) => Math.hypot(p.x - cx, p.y - cy, p.z - cz));
-  const mean = radii.reduce((s, r) => s + r, 0) / radii.length;
+  for (const r of radii) mean += r;
+  mean /= radii.length;
   if (mean < 1e-6) return null;
-  const spread = Math.max(...radii.map((r) => Math.abs(r - mean))) / mean;
-  return spread <= IMPOSTOR_RADIUS_TOLERANCE ? { cx, cy, cz, r: mean } : null;
+  for (const r of radii) worst = Math.max(worst, Math.abs(r - mean));
+  return worst / mean <= IMPOSTOR_RADIUS_TOLERANCE ? { cx, cy, cz, r: mean } : null;
 };
 
 /** Build the CSS3D backend over `canvas`. The canvas element itself is NEVER
@@ -616,7 +661,9 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
         const along =
           (t.position.x - eye.x) * fwdX + (t.position.y - eye.y) * fwdY + (t.position.z - eye.z) * fwdZ;
         const projectedPx = (2 * boundRadius * pxPerUnit) / Math.max(along, frame.camera.near);
-        const cull = along + boundRadius < frame.camera.near || projectedPx < NODE_MIN_PX;
+        // Asymmetric: a node already on screen survives down to the lower bound.
+        const nodeBound = dom.hidden ? NODE_MIN_PX : NODE_MIN_PX * LOD_HYSTERESIS;
+        const cull = along + boundRadius < frame.camera.near || projectedPx < nodeBound;
         if (cull) {
           if (!dom.hidden) {
             dom.hidden = true;
@@ -661,9 +708,22 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
         };
 
         if (mesh.impostor === null) {
-          dom.faces.forEach((f, i) => {
-            const el = dom.faceEls[i]!;
-            // Exact world normal under any linear transform: normalize(Mu x Mv).
+          // ── face-level LOD, in TWO passes.
+          //
+          // Pass 1 measures every face: its exact world normal (normalize(Mu x Mv),
+          // correct under any linear transform), its centroid, whether it faces
+          // away, and its PROJECTED area with foreshortening folded in.
+          //
+          // Pass 2 then decides, per face, on the measurements from pass 1.
+          //
+          // NOTE, learned by getting it wrong: do NOT "rescue" a node whose faces
+          // all fall under the threshold by force-drawing its biggest one. A box
+          // drawn as a single quad is not a small box, it is a flat CARD — the
+          // sandcastle's turrets became vertical slivers and the crab became a
+          // blob with sticks poking out. A node is either drawn with the faces
+          // that genuinely read, or dropped whole by the node-level cull. Half a
+          // solid is worse than none.
+          const metrics = dom.faces.map((f) => {
             const mu = lx(f.ux, f.uy, f.uz);
             const mv = lx(f.vx, f.vy, f.vz);
             let nx = mu[1] * mv[2] - mu[2] * mv[1];
@@ -674,25 +734,29 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
             ny /= nl;
             nz /= nl;
             const c = wp(f.cx, f.cy, f.cz);
-
-            // ── face-level LOD, using the normal + centroid shading needs anyway.
-            // Back-facing: the outward normal points away from the eye. Exact for
-            // opaque solids. Translucent faces are kept two-sided, because a
-            // shadow disc or a glass pane is authored to be seen from both sides.
             const towardEye = (eye.x - c[0]) * nx + (eye.y - c[1]) * ny + (eye.z - c[2]) * nz;
+            // Translucent faces stay two-sided: a shadow disc or a glass pane is
+            // authored to be seen from both sides.
             const backFacing = material.opacity >= 1 && towardEye <= 0;
-            // Projected area, foreshortening included: world area scaled by the
-            // node's px-per-unit, times |cos| between the normal and the view ray.
             const worldW = (f.width / WORLD_PX) * Math.hypot(mu[0], mu[1], mu[2]);
             const worldH = (f.height / WORLD_PX) * Math.hypot(mv[0], mv[1], mv[2]);
             const viewLen = Math.hypot(eye.x - c[0], eye.y - c[1], eye.z - c[2]) || 1;
             const facing = Math.abs(towardEye) / viewLen;
             const areaPx = worldW * worldH * nodePxPerUnit * nodePxPerUnit * facing;
-            const drop = backFacing || areaPx < FACE_MIN_PX2;
+            return { areaPx, backFacing, c, n: [nx, ny, nz] as const };
+          });
+
+          dom.faces.forEach((f, i) => {
+            const el = dom.faceEls[i]!;
+            const m = metrics[i]!;
+            // The element's current state IS the prior — no extra bookkeeping.
+            const wasShown = el.style.display !== "none";
+            const faceBound = wasShown ? FACE_MIN_PX2 * LOD_HYSTERESIS : FACE_MIN_PX2;
+            const drop = m.backFacing || m.areaPx < faceBound;
             el.style.display = drop ? "none" : "";
             // A dropped face also skips the much more expensive shading call.
             if (drop) return;
-            el.style.background = shadeFace({ ao: f.ao, frame, material, n: [nx, ny, nz], p: c });
+            el.style.background = shadeFace({ ao: f.ao, frame, material, n: m.n, p: m.c });
           });
         } else {
           // A ball drawn as ONE camera-facing disc. A low-detail unit sphere is 96

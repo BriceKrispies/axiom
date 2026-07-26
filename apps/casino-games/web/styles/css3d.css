@@ -75,10 +75,26 @@
 /* ── LAYER 0: the camera ─────────────────────────────────────────────────────
    `perspective` here is the lens. Nothing else on the page has one, so the
    whole scene shares a single vanishing point. */
+/* The fit box: reserves the SCALED height so the scaled stage does not leave a
+   gap (a CSS transform does not affect layout size). Height is set from script. */
+.css3d-fit {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+/* A FIXED logical viewport. The whole 3D scene is authored in world pixels
+   against 960x600, so the stage must not resize with the screen — resizing it
+   would crop the board rather than zoom it (on a ~380px phone the bottom row of
+   chests fell straight off the bottom). Instead it stays 960x600 and is scaled
+   as a whole by `--fit`, which script keeps in step with the viewport. */
 .css3d-stage {
   position: relative;
-  width: min(960px, 96vw);
-  aspect-ratio: 16 / 10;
+  width: 960px;
+  height: 600px;
+  flex: none;
+  transform-origin: top center;
+  transform: scale(var(--fit, 1));
   overflow: hidden;
   border-radius: 14px;
   border: 5px solid #123047;

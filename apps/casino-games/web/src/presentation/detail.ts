@@ -34,3 +34,37 @@ export const lowDetail = (): boolean => {
     return false;
   }
 };
+
+/** The DOM renderer, which pays per ELEMENT rather than per pixel. */
+const DOM_BACKEND = "CSS3D";
+
+/**
+ * False when the live backend cannot render HAIRLINE WELDED GEOMETRY — lettering
+ * built from many sub-pixel stroke boxes, as `stampText` produces.
+ *
+ * The pixel backends rasterize such a stroke for free: it costs a few fragments
+ * and sub-pixel coverage makes it read. The CSS3D backend spends one composited
+ * DOM element per stroke, and "ACME" alone is 23 of them (its `C` is a 12-segment
+ * arc). Drawn at board scale each stroke projects to well under a pixel of area,
+ * so the renderer's size LOD drops most of them — and a PARTIAL word ("A ME") is
+ * far worse than none. Keeping them all means disabling the LOD outright, which
+ * measured ~3900 elements at ~2fps.
+ *
+ * So the app declines to stamp welded lettering on that backend rather than
+ * asking it to draw something it cannot. This is a scene-authoring decision and
+ * belongs here with the rest of the detail policy; the backend's job is HOW to
+ * draw, not WHAT is worth drawing.
+ *
+ * This is a statement about the BACKEND, not about a given piece of lettering —
+ * it says nothing about how big the text is on screen. Callers combine it with
+ * scale: the chest scene still stamps the brand on the SELECTED chest, which
+ * flies to hero framing where the strokes are an order of magnitude larger and
+ * render correctly.
+ */
+export const weldedLetteringReads = (): boolean => {
+  try {
+    return rendererBackendName() !== DOM_BACKEND;
+  } catch {
+    return true;
+  }
+};

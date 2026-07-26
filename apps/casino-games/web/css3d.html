@@ -16,6 +16,12 @@
       </p>
     </header>
 
+    <!-- The fit box. The stage below is a FIXED 960x600 logical viewport (the
+         3D scene is authored in world px against it); this wrapper scales it to
+         whatever the real screen is, so a phone sees the whole board instead of
+         a crop. Same idea as the canvas build's 960x600 backing store stretched
+         by CSS. -->
+    <div class="css3d-fit">
     <!-- LAYER 0: the perspective viewport. Establishes the camera; everything
          below is inside one 3D rendering context. -->
     <div id="stage" class="css3d-stage">
@@ -31,6 +37,7 @@
         <span id="hud-result">—</span>
         <span id="hud-fps">—</span>
       </div>
+    </div>
     </div>
 
     <div class="css3d-controls">

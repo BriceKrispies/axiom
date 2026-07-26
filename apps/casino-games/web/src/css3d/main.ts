@@ -28,6 +28,13 @@ const SPACING_Y = 136;
 /** Ticks (at 60Hz) the lid takes to finish opening before the prize shows. */
 const REVEAL_DELAY_MS = 260;
 
+/** The stage's FIXED logical size, in the world pixels the scene is authored in.
+ * The real screen is fitted to this by scaling, never by resizing it. */
+const STAGE_W = 960;
+const STAGE_H = 600;
+/** Breathing room either side of the stage on a narrow screen. */
+const STAGE_MARGIN_PX = 16;
+
 const el = <T extends HTMLElement>(id: string): T => {
   const found = document.getElementById(id);
   if (found === null) throw new Error(`css3d: missing #${id}`);
@@ -209,6 +216,27 @@ const boot = (): void => {
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+
+  // ── fit the fixed 960x600 logical stage to whatever screen this is
+  //
+  // The 3D scene is authored in world pixels against a 960x600 viewport, so the
+  // stage cannot simply shrink with the screen — that CROPS the board instead of
+  // zooming it (on a ~380px phone the bottom row of chests fell off the bottom
+  // entirely, which reads exactly like a stale build). The stage keeps its
+  // logical size and the whole thing is scaled by `--fit`; because a CSS
+  // transform does not affect layout, the wrapper's height is set to match so
+  // the scaled stage leaves no gap beneath it.
+  const stage = el("stage");
+  const fitBox = stage.parentElement;
+  const fitStage = (): void => {
+    const available = Math.min(window.innerWidth - STAGE_MARGIN_PX, STAGE_W);
+    const fit = Math.min(1, Math.max(0.1, available / STAGE_W));
+    document.documentElement.style.setProperty("--fit", String(fit));
+    if (fitBox !== null) fitBox.style.height = `${(STAGE_H * fit).toFixed(1)}px`;
+  };
+  window.addEventListener("resize", fitStage);
+  window.addEventListener("orientationchange", fitStage);
+  fitStage();
 
   // Keep the board centred on the chest grid regardless of chest depth.
   board.style.transform = `translate3d(0px,${(CHEST.d * 0.1).toFixed(1)}px,2px)`;
