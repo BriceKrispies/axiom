@@ -68,8 +68,15 @@ pub struct ServeCtx {
 /// The full-page reload script injected into RustWasm pages.
 const RELOAD_SCRIPT: &str = "<script>new EventSource(\"/events\").addEventListener(\"reload\",()=>location.reload());</script>";
 
-/// The import map injected into TsWebEngine pages that lack one.
-const WEB_ENGINE_IMPORT_MAP: &str = "<script type=\"importmap\">{\"imports\":{\"@axiom/web-engine\":\"/vendor/axiom-web-engine/index.js\"}}</script>";
+/// The import map injected into TsWebEngine pages that lack one. The target
+/// carries the cache-bust version like every other asset URL — it is the entry
+/// to the whole vendored engine graph, so a stable URL here would let a cached
+/// copy pin the engine no matter how many times it is rebuilt.
+fn web_engine_import_map(version: u64) -> String {
+    format!(
+        "<script type=\"importmap\">{{\"imports\":{{\"@axiom/web-engine\":\"/vendor/axiom-web-engine/index.js?v={version}\"}}}}</script>"
+    )
+}
 
 /// Send `version` to every connected SSE client, pruning hung-up ones.
 pub fn broadcast(clients: &Clients, version: u64) {
@@ -160,16 +167,19 @@ fn transform(ctx: &ServeCtx, file_path: &Path, bytes: Vec<u8>) -> Vec<u8> {
             // listener (see the module docs).
             Ok(text) => {
                 let mapped = match ctx.kind {
-                    AppKind::TsWebEngine => inject_import_map(&text),
+                    AppKind::TsWebEngine => inject_import_map(&text, ctx.version.load(Ordering::SeqCst)),
                     _ => text,
                 };
-                inject_reload_script(&mapped).into_bytes()
+                let stamped = stamp_page_assets(&mapped, ctx.version.load(Ordering::SeqCst));
+                inject_reload_script(&stamped).into_bytes()
             }
             Err(err) => err.into_bytes(),
         };
     }
-    let dist = ctx.app_dir.join("web").join("dist");
-    if ext == "js" && file_path.starts_with(&dist) {
+    // Every served .js, not just the app's own `web/dist`: the vendored
+    // `/vendor/axiom-web-engine/*` graph is served by this same process and goes
+    // stale in a browser cache exactly like the app's does.
+    if ext == "js" {
         return match String::from_utf8(bytes) {
             Ok(text) => {
                 stamp_relative_imports(&text, ctx.version.load(Ordering::SeqCst)).into_bytes()
@@ -214,6 +224,60 @@ pub fn stamp_relative_imports(src: &str, version: u64) -> String {
     out
 }
 
+/// True for a page asset URL that should carry a cache-busting version: LOCAL
+/// (root- or dot-relative, never protocol-relative `//host` or absolute
+/// `https://`) and a script or stylesheet. An already-stamped URL ends in
+/// `?v=<n>` rather than the extension, so it fails this test — which is what
+/// makes stamping idempotent.
+fn is_stampable_asset(url: &str) -> bool {
+    let local =
+        (url.starts_with('/') && !url.starts_with("//")) || url.starts_with("./") || url.starts_with("../");
+    let asset = url.ends_with(".js") || url.ends_with(".mjs") || url.ends_with(".css");
+    local && asset
+}
+
+/// Append `?v=<version>` to every local `src=`/`href=` URL in a served page.
+///
+/// `stamp_relative_imports` already versions the *relative* specifiers INSIDE a
+/// served `web/dist/*.js`, but nothing versioned the page's own entry
+/// references — the `<script src>` and `<link href>` a browser caches hardest.
+/// Those URLs were therefore byte-identical forever, so a phone (or any proxy)
+/// that held a copy kept serving it no matter how many times the file changed on
+/// disk. `Cache-Control: no-store` is advisory and mobile browsers routinely
+/// reuse resources across tab restores anyway; a URL that actually CHANGES is
+/// the only reliable bust. The version is epoch-ms, re-stamped on every rebuild
+/// and reseeded on every server start, so it can never collide with a held copy.
+pub fn stamp_page_assets(html: &str, version: u64) -> String {
+    let mut out = String::with_capacity(html.len() + 96);
+    let mut rest = html;
+    loop {
+        // Whichever attribute comes first in the remaining text.
+        let next = ["src=\"", "href=\""]
+            .iter()
+            .filter_map(|prefix| rest.find(prefix).map(|at| (at, *prefix)))
+            .min_by_key(|(at, _)| *at);
+        let Some((at, prefix)) = next else { break };
+        let value_start = at + prefix.len();
+        out.push_str(&rest[..value_start]);
+        let after = &rest[value_start..];
+        let Some(end) = after.find('"') else {
+            // Unterminated attribute: copy the remainder verbatim.
+            rest = after;
+            break;
+        };
+        let url = &after[..end];
+        out.push_str(url);
+        if is_stampable_asset(url) {
+            out.push_str("?v=");
+            out.push_str(&version.to_string());
+        }
+        out.push('"');
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Inject the SSE full-page reload script before `</body>` (or append if the
 /// page has no closing body tag). Applied to every served page, and IDEMPOTENT:
 /// a page that already carries the script is returned unchanged, so it can never
@@ -231,7 +295,7 @@ pub fn inject_reload_script(html: &str) -> String {
 /// Inject the `@axiom/web-engine` import map into `<head>` — but only when
 /// the page declares no import map of its own (a page that ships one already
 /// controls its specifier resolution). TsWebEngine pages only.
-pub fn inject_import_map(html: &str) -> String {
+pub fn inject_import_map(html: &str, version: u64) -> String {
     if html.contains("type=\"importmap\"") {
         return html.to_string();
     }
@@ -241,9 +305,10 @@ pub fn inject_import_map(html: &str) -> String {
         html.find("<head ")
             .and_then(|i| html[i..].find('>').map(|close| i + close + 1))
     });
+    let map = web_engine_import_map(version);
     match insert_at {
-        Some(idx) => format!("{}\n{WEB_ENGINE_IMPORT_MAP}{}", &html[..idx], &html[idx..]),
-        None => format!("{WEB_ENGINE_IMPORT_MAP}\n{html}"),
+        Some(idx) => format!("{}\n{map}{}", &html[..idx], &html[idx..]),
+        None => format!("{map}\n{html}"),
     }
 }
 
@@ -345,6 +410,29 @@ mod tests {
     }
 
     #[test]
+    fn page_assets_are_stamped_and_stamping_is_idempotent() {
+        let html = concat!(
+            "<link rel=\"stylesheet\" href=\"/styles/a.css\">",
+            "<script type=\"module\" src=\"/dist/main.js\"></script>",
+            "<script src=\"./rel.mjs\"></script>",
+            "<script src=\"https://cdn.example/x.js\"></script>",
+            "<script src=\"//cdn.example/y.js\"></script>",
+            "<a href=\"/docs/readme.md\">d</a>",
+        );
+        let out = stamp_page_assets(html, 42);
+        // Local scripts and stylesheets get the version.
+        assert!(out.contains("href=\"/styles/a.css?v=42\""));
+        assert!(out.contains("src=\"/dist/main.js?v=42\""));
+        assert!(out.contains("src=\"./rel.mjs?v=42\""));
+        // Absolute and protocol-relative hosts are left alone, as is a non-asset.
+        assert!(out.contains("src=\"https://cdn.example/x.js\""));
+        assert!(out.contains("src=\"//cdn.example/y.js\""));
+        assert!(out.contains("href=\"/docs/readme.md\""));
+        // Re-stamping is a no-op: an already-stamped URL ends in ?v=N, not .js.
+        assert_eq!(stamp_page_assets(&out, 43), out);
+    }
+
+    #[test]
     fn reload_injection_is_idempotent() {
         // The script is now injected into EVERY page, so a page that already
         // carries it (re-transformed, or one that hand-rolled the same snippet)
@@ -367,22 +455,23 @@ mod tests {
     #[test]
     fn import_map_injected_into_head_only_when_absent() {
         let html = "<html><head><title>t</title></head><body></body></html>";
-        let out = inject_import_map(html);
+        let out = inject_import_map(html, 7);
         let map = out.find("type=\"importmap\"").unwrap();
         assert!(map > out.find("<head>").unwrap());
         assert!(map < out.find("<title>").unwrap());
-        assert!(out.contains("\"@axiom/web-engine\":\"/vendor/axiom-web-engine/index.js\""));
+        // The engine entry carries the cache-bust version like every other asset.
+        assert!(out.contains("\"@axiom/web-engine\":\"/vendor/axiom-web-engine/index.js?v=7\""));
 
         // A page that ships its own import map is untouched.
         let own = "<html><head><script type=\"importmap\">{}</script></head></html>";
-        assert_eq!(inject_import_map(own), own);
+        assert_eq!(inject_import_map(own, 7), own);
 
         // A <head> with attributes still gets the map after its tag; and a
         // page with no <head> gets it prepended, never inside "<header>".
         let attrs = "<html><head lang=\"en\"><title>t</title></head></html>";
-        assert!(inject_import_map(attrs).find("importmap").unwrap() > attrs.find('>').unwrap());
+        assert!(inject_import_map(attrs, 7).find("importmap").unwrap() > attrs.find('>').unwrap());
         let headless = "<header>x</header>";
-        assert!(inject_import_map(headless).starts_with(WEB_ENGINE_IMPORT_MAP));
+        assert!(inject_import_map(headless, 7).starts_with(&web_engine_import_map(7)));
     }
 
     #[test]
