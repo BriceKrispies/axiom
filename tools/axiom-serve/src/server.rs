@@ -20,12 +20,19 @@
 //!   re-fetches the whole compiled module graph, not just the entry the
 //!   harness re-imports. Absolute (`/dist`, `/vendor`, `/pkg`) and bare
 //!   (`@axiom/…`) specifiers are left alone.
-//! - **HTML injection** — RustWasm pages get a full-page SSE reload `<script>`
-//!   before `</body>` (their pages know nothing of `/events`); TsWebEngine
-//!   pages lacking an import map get one injected into `<head>` so the bare
-//!   `@axiom/web-engine` specifier resolves to the vendored dist. TS pages get
-//!   NO reload script — their harnesses already listen to `/events` and
-//!   hot-swap in place.
+//! - **HTML injection** — EVERY served page gets the full-page SSE reload
+//!   `<script>` before `</body>`, and TsWebEngine pages lacking an import map
+//!   additionally get one injected into `<head>` so the bare
+//!   `@axiom/web-engine` specifier resolves to the vendored dist. The two
+//!   compose; neither replaces the other.
+//!
+//!   This used to read "TS pages get NO reload script — their harnesses already
+//!   listen to `/events` and hot-swap in place." That was never true: no such
+//!   listener exists in `@axiom/web-engine` or `@axiom/game`, so the server
+//!   rebuilt on save and broadcast a reload that nothing consumed, and every
+//!   pure-TS app silently had no hot reload at all. Injection is now
+//!   unconditional and idempotent, so a page that DOES grow its own `/events`
+//!   listener still only reloads once.
 //!
 //! ## SSE over tiny_http
 //!
@@ -148,11 +155,16 @@ fn transform(ctx: &ServeCtx, file_path: &Path, bytes: Vec<u8>) -> Vec<u8> {
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if ext == "html" {
         return match String::from_utf8(bytes) {
-            Ok(text) => match ctx.kind {
-                AppKind::RustWasm { .. } => inject_reload_script(&text).into_bytes(),
-                AppKind::TsWebEngine => inject_import_map(&text).into_bytes(),
-                _ => text.into_bytes(),
-            },
+            // The two injections COMPOSE. The import map is kind-specific; the
+            // reload script is not, because no app kind ships its own `/events`
+            // listener (see the module docs).
+            Ok(text) => {
+                let mapped = match ctx.kind {
+                    AppKind::TsWebEngine => inject_import_map(&text),
+                    _ => text,
+                };
+                inject_reload_script(&mapped).into_bytes()
+            }
             Err(err) => err.into_bytes(),
         };
     }
@@ -203,8 +215,13 @@ pub fn stamp_relative_imports(src: &str, version: u64) -> String {
 }
 
 /// Inject the SSE full-page reload script before `</body>` (or append if the
-/// page has no closing body tag). RustWasm pages only.
+/// page has no closing body tag). Applied to every served page, and IDEMPOTENT:
+/// a page that already carries the script is returned unchanged, so it can never
+/// be double-injected into reloading twice.
 pub fn inject_reload_script(html: &str) -> String {
+    if html.contains(RELOAD_SCRIPT) {
+        return html.to_owned();
+    }
     match html.rfind("</body>") {
         Some(idx) => format!("{}{RELOAD_SCRIPT}\n{}", &html[..idx], &html[idx..]),
         None => format!("{html}\n{RELOAD_SCRIPT}"),
@@ -325,6 +342,16 @@ mod tests {
         assert!(stamp_relative_imports(tricky, 7).contains("\"./y.js?v=7\""));
         // No quotes at all: unchanged.
         assert_eq!(stamp_relative_imports("const x = 1;", 3), "const x = 1;");
+    }
+
+    #[test]
+    fn reload_injection_is_idempotent() {
+        // The script is now injected into EVERY page, so a page that already
+        // carries it (re-transformed, or one that hand-rolled the same snippet)
+        // must not gain a second copy and reload twice per save.
+        let once = inject_reload_script("<html><body><p>hi</p></body></html>");
+        assert_eq!(once.matches("EventSource").count(), 1);
+        assert_eq!(inject_reload_script(&once), once);
     }
 
     #[test]

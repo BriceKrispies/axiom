@@ -6,13 +6,17 @@
 //!
 //! - **TsSdkHosted** — TypeScript over the `@axiom/game` SDK. Served with
 //!   `/vendor/axiom-game/*` (the SDK dist) and `/pkg/*` (the shared
-//!   `axiom-game-runtime` wasm). Its harness already listens to `/events`.
+//!   `axiom-game-runtime` wasm).
 //! - **TsWebEngine** — TypeScript over `@axiom/web-engine`. Served with
 //!   `/vendor/axiom-web-engine/*`; an import map is injected into pages that
-//!   lack one so the bare specifier resolves. Its harness listens to `/events`.
+//!   lack one so the bare specifier resolves.
 //! - **TsPlain** — any other TypeScript app (has `web/tsconfig.json`).
 //! - **RustWasm** — a `cdylib` crate built with cargo + `wasm-bindgen` into
-//!   `web/pkg/`. Pages get a full-page SSE reload script injected.
+//!   `web/pkg/`.
+//!
+//! EVERY kind's pages get the full-page SSE reload script injected — none of
+//! them ships a `/events` listener of its own, contrary to what these notes
+//! used to claim.
 //!
 //! Detection order matters: the tsconfig is checked **first** because an app
 //! like `apps/axiom-game-runtime` has BOTH a `web/tsconfig.json` and a cdylib
@@ -152,9 +156,16 @@ pub fn watch_spec(app_dir: &Path, kind: &AppKind) -> WatchSpec {
             roots: vec![app_dir.join("src"), app_dir.join("Cargo.toml"), web.clone()],
             exclude: vec![web.join("pkg")],
         },
+        // Watch the whole `web/` tree, exactly as the RustWasm arm does. This
+        // used to be just `web/src` + `web/index.html`, which silently meant a
+        // stylesheet edit, or an edit to ANY page other than index.html, never
+        // triggered a rebuild — the file was served but nothing told the browser
+        // to come back for it. `dist` is the build output (its own writes must
+        // not re-trigger the watcher) and `node_modules` is excluded because
+        // walking it every poll is enormous and it never sources a page.
         _ => WatchSpec {
-            roots: vec![web.join("src"), web.join("index.html")],
-            exclude: vec![web.join("dist")],
+            roots: vec![web.clone()],
+            exclude: vec![web.join("dist"), web.join("node_modules")],
         },
     }
 }
@@ -309,9 +320,16 @@ mod tests {
         assert!(rust.roots.contains(&app.join("web")));
         assert_eq!(rust.exclude, vec![app.join("web").join("pkg")]);
 
+        // A TS app watches its whole `web/` tree — not just `src` + index.html,
+        // or a stylesheet edit and every page but index.html go unnoticed.
         let ts = watch_spec(&app, &AppKind::TsWebEngine);
-        assert!(ts.roots.contains(&app.join("web").join("src")));
-        assert!(ts.roots.contains(&app.join("web").join("index.html")));
-        assert_eq!(ts.exclude, vec![app.join("web").join("dist")]);
+        assert!(ts.roots.contains(&app.join("web")));
+        assert_eq!(
+            ts.exclude,
+            vec![
+                app.join("web").join("dist"),
+                app.join("web").join("node_modules")
+            ]
+        );
     }
 }

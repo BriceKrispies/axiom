@@ -19,6 +19,17 @@
  */
 
 :root {
+  /* The camera tilt, and the ONE place it is defined. The world root rotates by
+     it; anything that must face the viewer (the prize orb) counter-rotates by
+     its negative. Two hard-coded copies of this angle had already drifted apart
+     once, so it lives here.
+
+     It also sets how the board reads. Depth separation on screen scales with
+     cos(tilt) and object height with sin(tilt): at 58deg a 118px row gap
+     projected to ~62px while a chest is ~52px tall, leaving 10px between rows,
+     so the three rows piled into one another. Tilting toward top-down widens
+     that gap fast. */
+  --world-tilt: 50deg;
   --sand: #d3a063;
   --deep: #17787a;
   --ink: #123047;
@@ -73,8 +84,13 @@
   border: 5px solid #123047;
   box-shadow: 0 14px 0 #0d2334, 0 20px 44px rgba(0, 0, 0, 0.34);
   background: linear-gradient(180deg, #b5def8 0%, #cfe6ef 22%, #e0bd83 34%, var(--sand) 100%);
-  perspective: 900px;
-  perspective-origin: 50% 46%;
+  /* A LONG perspective distance. At 900px the lens was so wide that the near
+     row of chests bloated and overlapped the row behind it; pushing the eye back
+     flattens the frame toward the near-isometric read the reference has, without
+     shrinking anything (the scale factor P/(P-Z) tends to 1 as P grows — what
+     shrinks is the DIFFERENCE between near and far). */
+  perspective: 1750px;
+  perspective-origin: 50% 47%;
   touch-action: manipulation;
 }
 
@@ -88,7 +104,9 @@
   width: 0;
   height: 0;
   transform-style: preserve-3d;
-  transform: rotateX(58deg) scale(1.06) translateZ(-30px);
+  /* scale3d, not scale(): a 2D scale leaves z untouched, so it zooms the layout
+     but not the depth, subtly flattening solids. This is a true uniform zoom. */
+  transform: rotateX(var(--world-tilt)) scale3d(0.86, 0.86, 0.86) translateZ(-30px);
 }
 
 /* Any grouping node in the 3D tree. Zero-sized so its transform-origin is its
@@ -172,7 +190,7 @@
   opacity: 1;
 }
 .prize.is-win.is-shown {
-  transform: translate3d(-22px, 0, 104px) rotateX(-58deg);
+  transform: translate3d(-22px, 0, 104px) rotateX(calc(-1 * var(--world-tilt)));
   filter: drop-shadow(0 0 12px rgba(255, 214, 92, 0.9));
 }
 

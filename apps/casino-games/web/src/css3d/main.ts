@@ -24,7 +24,7 @@ import { CHEST_COUNT, type PickResult, type Round, startRound } from "./game/rou
 
 const COLS = 3;
 const SPACING_X = 146;
-const SPACING_Y = 118;
+const SPACING_Y = 136;
 /** Ticks (at 60Hz) the lid takes to finish opening before the prize shows. */
 const REVEAL_DELAY_MS = 260;
 

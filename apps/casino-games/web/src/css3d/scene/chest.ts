@@ -156,7 +156,10 @@ export const buildChest = (slotX: number, slotY: number, brand: string | null): 
   prize.className = "f prize";
   prize.style.width = "44px";
   prize.style.height = "44px";
-  prize.style.transform = `translate3d(-22px,0,${bodyH + 6}px) rotateX(-58deg)`;
+  // Counter-rotate by the world tilt so the orb always faces the viewer. The
+  // angle comes from the `--world-tilt` custom property, so it can never drift
+  // out of sync with the camera the way a hard-coded copy did.
+  prize.style.transform = `translate3d(-22px,0,${bodyH + 6}px) rotateX(calc(-1 * var(--world-tilt)))`;
   root.append(prize);
 
   let openAmount = 0;
