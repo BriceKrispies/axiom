@@ -106,7 +106,9 @@ fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
                 name: READ_NAMES[read].to_string(),
             })
             .collect(),
-        scramble: "SPACE  SCRAMBLE".to_string(),
+        // Action first, key second: the same string is a keyboard hint and a
+        // tappable button caption, and on a phone the key half is just noise.
+        scramble: "SCRAMBLE  ·  SPACE".to_string(),
         remaining: (step.window_left as f32 / span).clamp(0.0, 1.0),
     })
 }

@@ -42,15 +42,22 @@ const ACTION_DEBUG: ActionId = ActionId::new(8);
 /// How many commands may wait for the next simulation tick.
 const COMMAND_CAP: usize = 8;
 
-/// One frame of touch input from the platform edge: the virtual joystick vector
-/// (`x` right, `y` up/downfield, each `-1..=1`) plus the button edges (already
-/// debounced to a single frame by the edge).
+/// One frame of pointer/gamepad input from the platform edge, already debounced
+/// to single-frame edges.
+///
+/// `stick_x` / `stick_y` are fed by a **gamepad** only — there is no on-screen
+/// joystick, because the prototype does not ask the player to steer (see
+/// `web/touch.rs`). The four answers arrive as `read` / `scramble`.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct TouchInput {
     pub stick_x: f32,
     pub stick_y: f32,
     pub primary: bool,
     pub reset: bool,
+    /// A tapped decision read, `0..3`.
+    pub read: Option<usize>,
+    /// The scramble control was tapped.
+    pub scramble: bool,
 }
 
 /// The deterministic input sampler plus the latch of commands awaiting a tick.
@@ -142,6 +149,14 @@ impl GameInput {
         }
         if touch.reset {
             self.latch(DiagnosticCommand::ResetAll);
+        }
+        // A tapped read is the exact same command the number keys emit, so the
+        // decision path has one implementation regardless of device.
+        if let Some(read) = touch.read {
+            self.latch(DiagnosticCommand::ThrowRead(read.min(2)));
+        }
+        if touch.scramble {
+            self.latch(DiagnosticCommand::Scramble);
         }
 
         let axis = |negative: ActionId, positive: ActionId| -> f32 {

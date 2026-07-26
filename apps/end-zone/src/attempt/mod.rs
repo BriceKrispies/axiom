@@ -61,15 +61,20 @@ pub const DEVELOP_MIN_TICKS: u64 = 66;
 pub const DEVELOP_MAX_TICKS: u64 = 156;
 
 /// How long a window stays open, in simulation ticks. At
-/// [`DECISION_TIME_SCALE`] this is ~2.1 real seconds for the first window.
-pub const WINDOW_TICKS: u64 = 20;
+/// [`DECISION_TIME_SCALE`] this is ~3.6 real seconds for the first window —
+/// enough to actually look at the coverage, pick a receiver and press a key,
+/// including on a touch screen where the "key" is a thumb travelling across
+/// the display. The first pass at 20 ticks / 0.16× (~2.1 s) read as a reflex
+/// test rather than a decision.
+pub const WINDOW_TICKS: u64 = 28;
 
 /// Every window after the first is this many ticks shorter — declining a read
 /// costs time as well as field position, so the third look is a snap judgement.
-pub const WINDOW_DECAY_TICKS: u64 = 7;
+pub const WINDOW_DECAY_TICKS: u64 = 6;
 
-/// The fewest ticks any window stays open, however late it is.
-pub const WINDOW_MIN_TICKS: u64 = 6;
+/// The fewest ticks any window stays open, however late it is (~2.0 s). The
+/// last look is meant to be rushed, not impossible.
+pub const WINDOW_MIN_TICKS: u64 = 16;
 
 /// Windows one attempt may offer before the quarterback is on his own. After
 /// the last one closes the play still runs — the rush simply gets home.
@@ -86,7 +91,13 @@ pub const REARM_DEADLINE_TICKS: u64 = 48;
 /// Time dilation while a decision window is open. Not a pause: the rush keeps
 /// closing, the routes keep running and the coverage keeps rotating — just
 /// slowly enough to read.
-pub const DECISION_TIME_SCALE: f32 = 0.16;
+///
+/// This buys reading time far more cheaply than a longer window does: dilation
+/// costs the player only real seconds, while extra `WINDOW_TICKS` also let the
+/// rush get closer. The two are tuned together — the window durations quoted
+/// above are `ticks / (60 * DECISION_TIME_SCALE)` seconds:
+/// **3.6 s → 2.8 s → 2.1 s** across the three looks.
+pub const DECISION_TIME_SCALE: f32 = 0.13;
 
 /// How long the result card holds before the next attempt (~0.9 s).
 pub const RESULT_TICKS: u64 = 54;

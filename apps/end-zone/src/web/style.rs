@@ -126,15 +126,42 @@ pub const MENU_CSS: &str = r#"
 .ez-decision-head{font-weight:900;font-size:20px;letter-spacing:.3em;color:var(--ez-hot);
   text-shadow:0 0 16px rgba(227,62,48,.6),0 2px 3px #000;}
 .ez-reads{display:flex;gap:14px;}
-.ez-read{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:104px;
-  padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.05);
-  border:2px solid rgba(255,255,255,.12);}
+/* The chips are the touch buttons (see web/touch.rs), so they must take
+   pointer events even though the HUD root does not, and they must be big
+   enough for a thumb. `touch-action:manipulation` kills the 300 ms tap delay
+   and the double-tap zoom that would otherwise eat a decision. */
+.ez-read,.ez-scramble{pointer-events:auto;cursor:pointer;touch-action:manipulation;
+  user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}
+.ez-read{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  min-width:104px;min-height:64px;padding:8px 10px;border-radius:8px;
+  background:rgba(255,255,255,.05);border:2px solid rgba(255,255,255,.12);
+  transition:transform .06s ease,background .1s ease,border-color .1s ease;}
+.ez-read:active{transform:scale(.94);background:rgba(255,255,255,.16);
+  border-color:rgba(255,255,255,.5);}
 .ez-read b{font-weight:900;font-size:26px;line-height:1;}
 .ez-read span{font-weight:700;font-size:12px;letter-spacing:.16em;color:var(--ez-text);}
 .ez-read1 b{color:#2edcfa;text-shadow:0 0 12px rgba(46,220,250,.6);}
+.ez-read1{border-color:rgba(46,220,250,.35);}
 .ez-read2 b{color:#ffb31f;text-shadow:0 0 12px rgba(255,179,31,.6);}
+.ez-read2{border-color:rgba(255,179,31,.35);}
 .ez-read3 b{color:#f03cdc;text-shadow:0 0 12px rgba(240,60,220,.6);}
-.ez-scramble{font-weight:700;font-size:13px;letter-spacing:.22em;color:var(--ez-chrome);}
+.ez-read3{border-color:rgba(240,60,220,.35);}
+.ez-scramble{font-weight:700;font-size:13px;letter-spacing:.22em;color:var(--ez-chrome);
+  padding:10px 22px;border-radius:8px;border:2px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.04);transition:transform .06s ease,background .1s ease;}
+.ez-scramble:active{transform:scale(.96);background:rgba(255,255,255,.16);}
+
+/* Coarse pointers (phones/tablets): bigger targets, and the prompt sits low
+   and full-width so both thumbs reach every answer. */
+@media (pointer:coarse){
+  .ez-decision{left:0;right:0;transform:none;bottom:0;border-radius:12px 12px 0 0;
+    padding:14px 12px calc(14px + env(safe-area-inset-bottom));}
+  .ez-reads{width:100%;gap:10px;}
+  .ez-read{flex:1;min-width:0;min-height:88px;}
+  .ez-read b{font-size:32px;}
+  .ez-scramble{width:100%;text-align:center;min-height:56px;
+    display:flex;align-items:center;justify-content:center;}
+}
 .ez-timer{width:100%;height:6px;border-radius:3px;background:rgba(255,255,255,.12);
   overflow:hidden;}
 .ez-timer i{display:block;height:100%;background:var(--ez-hot);

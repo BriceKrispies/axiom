@@ -130,11 +130,14 @@ pub fn end_zone_start() {
             pointer_pressed: pressed,
             pointer_is_touch: is_touch,
         };
+        // The stick is gamepad-only now: there is no on-screen joystick.
         let touch_input = TouchInput {
-            stick_x: (touch_frame.stick_x + pad.stick.0).clamp(-1.0, 1.0),
-            stick_y: (touch_frame.stick_y + pad.stick.1).clamp(-1.0, 1.0),
-            primary: touch_frame.primary,
+            stick_x: pad.stick.0.clamp(-1.0, 1.0),
+            stick_y: pad.stick.1.clamp(-1.0, 1.0),
+            primary: false,
             reset: false,
+            read: touch_frame.read,
+            scramble: touch_frame.scramble,
         };
         let (css_w, css_h) = viewport_size();
 

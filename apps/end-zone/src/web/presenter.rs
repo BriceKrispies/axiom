@@ -130,12 +130,17 @@ impl MenuPresenter {
 /// The decision prompt: the three read keys, the scramble key, and a draining
 /// timer bar. It never says which read is open — that is the game.
 fn decision_html(prompt: &crate::presentation::DecisionPrompt) -> String {
+    // `data-read` / `data-scramble` are what makes the prompt the TOUCH input
+    // too: `web/touch.rs` delegates taps on the HUD root and reads them back.
+    // One piece of UI for both devices, so they can never disagree.
     let reads: String = prompt
         .reads
         .iter()
-        .map(|read| {
+        .enumerate()
+        .map(|(index, read)| {
             format!(
-                "<div class='ez-read ez-read{}'><b>{}</b><span>{}</span></div>",
+                "<div class='ez-read ez-read{}' data-read='{index}'>\
+                 <b>{}</b><span>{}</span></div>",
                 markup::esc(&read.key),
                 markup::esc(&read.key),
                 markup::esc(&read.name)
@@ -146,7 +151,7 @@ fn decision_html(prompt: &crate::presentation::DecisionPrompt) -> String {
         "<div class='ez-decision'>\
          <div class='ez-decision-head'>{}</div>\
          <div class='ez-reads'>{reads}</div>\
-         <div class='ez-scramble'>{}</div>\
+         <div class='ez-scramble' data-scramble='1'>{}</div>\
          <div class='ez-timer'><i style='width:{:.1}%'></i></div>\
          </div>",
         markup::esc(&prompt.headline),
