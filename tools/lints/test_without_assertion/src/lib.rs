@@ -114,6 +114,21 @@ impl<'tcx> LateLintPass<'tcx> for TestWithoutAssertion {
         if is_should_panic(cx.tcx, hir_id) {
             return;
         }
+        // `#[ignore]` is exempt for the same reason the whole lint exists. This
+        // lint's target is COVERAGE THEATRE: a test that runs code and asserts
+        // nothing, moving the coverage number without proving anything. An
+        // ignored test never runs under `cargo test` or `cargo-llvm-cov`, so it
+        // contributes exactly zero coverage and cannot be theatre by
+        // construction. What it usually IS, is an instrumentation probe kept in
+        // the tree to be run by hand (`--ignored --nocapture`) to print a
+        // diagnostic — asserting nothing is the POINT of it.
+        //
+        // This is not a loophole: `#[ignore]` buys silence only by also
+        // guaranteeing the test never executes, so hiding a real test behind it
+        // costs the test entirely. The escape is self-punishing.
+        if is_ignored(cx.tcx, hir_id) {
+            return;
+        }
 
         let mut finder = AssertionFinder {
             cx,
@@ -141,6 +156,14 @@ fn is_should_panic(tcx: TyCtxt<'_>, hir_id: rustc_hir::HirId) -> bool {
     tcx.hir_attrs(hir_id)
         .iter()
         .any(|attr| matches!(attr, Attribute::Parsed(AttributeKind::ShouldPanic { .. })))
+}
+
+/// Is `hir_id` an `#[ignore]`d test? Like `#[should_panic]`, the attribute is
+/// lowered to a parsed `AttributeKind`, so match the kind rather than the path.
+fn is_ignored(tcx: TyCtxt<'_>, hir_id: rustc_hir::HirId) -> bool {
+    tcx.hir_attrs(hir_id)
+        .iter()
+        .any(|attr| matches!(attr, Attribute::Parsed(AttributeKind::Ignore { .. })))
 }
 
 /// Walks a test body — including nested closure bodies — looking for the first

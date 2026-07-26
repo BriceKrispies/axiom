@@ -20,6 +20,20 @@ A test is considered to assert if it has any of:
 A bare `.unwrap()` / `.expect()` or `?` does **not** count: it proves the value
 wasn't the error variant, not that the behavior under test is correct.
 
+### What is exempt
+
+`#[ignore]`d tests are not flagged. The lint's target is coverage *theatre* — a
+test that runs code and asserts nothing, moving the coverage number while
+proving nothing. An ignored test never executes under `cargo test` or
+`cargo-llvm-cov`, so it contributes zero coverage and cannot be theatre by
+construction. What it usually is instead is an instrumentation probe kept in the
+tree to be run by hand (`cargo test -- --ignored --nocapture`) to print a
+diagnostic; asserting nothing is the point of it.
+
+This is not a loophole. `#[ignore]` buys silence only by also guaranteeing the
+test never runs, so hiding a real test behind it costs you the test entirely —
+the escape is self-punishing.
+
 ### Running it
 
 From the repo root (the workspace declares this lint in

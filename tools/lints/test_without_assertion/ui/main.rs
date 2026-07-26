@@ -119,3 +119,14 @@ fn test_with_inner_impl_method_is_left_alone() {
 fn not_a_test_function() {
     let _ = 5;
 }
+
+// An `#[ignore]`d probe asserts nothing on purpose: it exists to be run by hand
+// (`--ignored --nocapture`) and print a diagnostic. It never executes under
+// `cargo test` or coverage, so it cannot be the coverage theatre this lint
+// targets — and it must NOT be flagged.
+#[test]
+#[ignore = "diagnostic probe; run with --ignored --nocapture"]
+fn ignored_probe_is_exempt() {
+    let value = 2 + 2;
+    println!("probe: {value}");
+}
