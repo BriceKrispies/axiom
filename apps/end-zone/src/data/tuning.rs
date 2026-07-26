@@ -52,9 +52,15 @@ pub struct BehaviorTuning {
     pub recovery_ticks: u32,
     /// Ticks the snap takes to reach the quarterback.
     pub snap_ticks: u32,
-    /// Horizontal pass speed, yd/s (flight time = distance / this).
+    /// Horizontal pass speed, yd/s (flight time = distance / this). A hard NFL
+    /// throw covers ~30–35 yd/s; the original 22 floated every pass long enough
+    /// for the coverage to close on it.
     pub pass_speed: f32,
-    /// Minimum pass flight time, ticks.
+    /// Minimum pass flight time, ticks. This is a floor on the CATCH pipeline —
+    /// the ball needs a few ticks airborne to be contested and resolved — and
+    /// NOT a stylistic hang time. At 24 it forced a five-yard slant that should
+    /// travel for 0.15 s to hang for 0.40 s, which is most of why short throws
+    /// felt weak and kept getting jumped.
     pub min_flight_ticks: u32,
     /// Ticks of quarterback throw wind-up before release.
     pub throw_windup_ticks: u32,
@@ -140,9 +146,9 @@ impl Default for BehaviorTuning {
             fall_ticks: 26,
             recovery_ticks: 40,
             snap_ticks: 7,
-            pass_speed: 22.0,
-            min_flight_ticks: 24,
-            throw_windup_ticks: 12,
+            pass_speed: 25.0,
+            min_flight_ticks: 16,
+            throw_windup_ticks: 9,
             throw_cone_half_angle: 0.95,
             qb_aim_max_yaw: 1.05,
             throw_min_range: 2.0,

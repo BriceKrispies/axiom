@@ -133,9 +133,16 @@ fn after_the_whistle_the_carrier_stays_put_and_the_showcase_auto_resets() {
     }
     let ended_at = ended_at.expect("the play ends");
     let restarted_at = restarted_at.expect("the showcase resets itself");
+    // The bound allows a COAST but not a run. On the whistle every brain drops
+    // to `Hold` (`ctx.live` is false once the phase is `Ended`), so the carrier
+    // decelerates under the normal controller limits rather than stopping dead.
+    // The showcase now ends in a break-free at full sprint instead of a tackle,
+    // and braking from ~8.6 yd/s legitimately covers a few yards; the failure
+    // this guards against — a recovered carrier taking off for the end zone —
+    // is tens of yards, nowhere near this.
     assert!(
-        max_drift < 2.5,
-        "the downed carrier stayed put after the whistle (drifted {max_drift} yd)"
+        max_drift < 5.0,
+        "the carrier coasted to a stop after the whistle (drifted {max_drift} yd)"
     );
     let pause = restarted_at - ended_at;
     assert!(

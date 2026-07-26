@@ -8,7 +8,7 @@ use axiom::prelude::Vec3;
 use crate::ai::{AssignmentKind, RoleState};
 use crate::config::DT;
 use crate::events::{PlayEndReason, SimEvent};
-use crate::field::{FIELD_HALF_WIDTH, GOAL_LINE_Z};
+use crate::field::{OffenseFrame, FIELD_HALF_WIDTH, GOAL_LINE_Z};
 use crate::identity::PlayerId;
 use crate::player::AnimState;
 use crate::state::{PlayPhase, SimState};
@@ -141,14 +141,17 @@ impl SimState {
         };
         let qb = &self.players[carrier.index()];
         let release = carry_socket(qb.pos, qb.facing, AnimState::Throw);
-        // Predict the receiver twice (eta depends on distance; two passes fix it).
+        // Throw to where the receiver WILL be: a closed-form intercept solve
+        // (see `flight::lead_point`), then keep the aim inbounds so leading a
+        // receiver down the sideline never throws the ball away.
         let receiver = &self.players[throw_to.index()];
-        let mut target = catch_point(receiver.pos);
-        for _ in 0..2 {
-            let (_, eta) = solve_throw(release, target, &self.tuning);
-            let lead = receiver.vel.mul_scalar(eta as f32 / 60.0);
-            target = catch_point(receiver.pos.add(lead));
-        }
+        let aim = super::flight::lead_point(
+            release,
+            receiver.pos,
+            receiver.vel,
+            self.tuning.pass_speed,
+        );
+        let target = catch_point(OffenseFrame::clamp_in_bounds(aim, self.tuning.bounds_margin));
         let (velocity, eta_ticks) = solve_throw(release, target, &self.tuning);
         let flight = FlightInfo {
             intended: throw_to,

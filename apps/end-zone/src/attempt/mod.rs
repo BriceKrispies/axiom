@@ -108,4 +108,11 @@ pub const MAX_LIVE_TICKS: u64 = 540;
 
 /// The fixed defensive aggression the prototype runs at. It never escalates —
 /// this prototype tests a decision, not a difficulty curve.
-pub const PROTOTYPE_HEAT: u8 = 2;
+///
+/// It is 4 rather than a middling 2 because `launch::heat_profile` is a
+/// *difficulty* curve, not a linear one: at heat 2 the reaction-delay scale is
+/// **1.32**, i.e. the coverage reacts a third SLOWER than the archetype
+/// baseline, which is why receivers used to be run down by nobody. Heat 4 puts
+/// reaction at ~0.96 and pursuit at ~1.06 — a defense that plays at its listed
+/// ability rather than one handicapped by the dial's midpoint.
+pub const PROTOTYPE_HEAT: u8 = 4;

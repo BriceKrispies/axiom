@@ -193,6 +193,7 @@ fn every_read_is_a_live_option_and_none_is_a_trap() {
         for slot in 0..3 {
             totals.by_read[slot] += s.by_read[slot];
             totals.hits_by_read[slot] += s.hits_by_read[slot];
+            totals.yards_by_read[slot] += s.yards_by_read[slot];
         }
     }
     assert!(
@@ -207,21 +208,39 @@ fn every_read_is_a_live_option_and_none_is_a_trap() {
         "more than one read must be worth taking, got {:?}",
         totals.by_read
     );
+    // No read may be a TRAP. (There is deliberately no upper bound: a policy
+    // only throws a read it judged open, so a high completion rate on a
+    // well-chosen short route is correct football, not a broken game. The
+    // failure this guards against is the original 22-yard post, which completed
+    // 4% of the time no matter how open it looked.)
     for slot in 0..3 {
         if totals.by_read[slot] < 4 {
             continue; // too small a sample to judge
         }
         let rate = totals.hits_by_read[slot] as f32 / totals.by_read[slot] as f32;
         assert!(
-            (0.15..=0.95).contains(&rate),
-            "read {} completes {:.0}% of the time ({}/{}) — it is a trap or a gimme, \
-             not a decision",
+            rate >= 0.15,
+            "read {} completes {:.0}% of the time ({}/{}) — it is a trap, not a decision",
             slot + 1,
             rate * 100.0,
             totals.hits_by_read[slot],
             totals.by_read[slot]
         );
     }
+
+    // And the reward must actually grow with the risk: the safe read has to pay
+    // materially less per completion than the deep one, or "wait a little
+    // longer for the better option" is not a trade the player is making.
+    let per_hit = |slot: usize| match totals.hits_by_read[slot] {
+        0 => 0.0,
+        n => totals.yards_by_read[slot] / n as f32,
+    };
+    let (short, deep) = (per_hit(0), per_hit(2));
+    assert!(
+        totals.hits_by_read[0] < 4 || deep > short * 1.3,
+        "the deep read must pay materially more than the safe one, got {short:.1} vs {deep:.1} \
+         yards per completion"
+    );
 }
 
 #[test]

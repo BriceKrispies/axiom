@@ -175,10 +175,12 @@ fn team_data_changes_behavior_without_changing_ai_code() {
         }
         sim.end_reason
     };
-    // With the coordinated defense, the completed pass is now run down and
-    // `Tackled` rather than breaking free. The point of this test is unchanged —
-    // one archetype number, flipped (a zero catch volume), turns the completion
-    // into an `Incomplete`.
+    // The point of this test is the DELTA, not the baseline: one archetype
+    // number, flipped (a zero catch volume), turns a completion into an
+    // `Incomplete`. The baseline is `Tackled` — the coordinated pursuit runs
+    // the completion down. (It flips to `BrokeFree` if the pass gets much
+    // harder than the current tuning: a receiver who catches in stride outruns
+    // the coverage, which is the balance edge this play sits on.)
     assert_eq!(run(false), Some(PlayEndReason::Tackled));
     assert_eq!(run(true), Some(PlayEndReason::Incomplete));
 }
