@@ -12,6 +12,10 @@
  *     Canvas2D (`backend-canvas2d.ts`) when the context is unavailable.
  *   - "webgl2" forces the hardware path and throws if it is unavailable.
  *   - "canvas2d" forces the software rasterizer.
+ *   - "css" forces the canvas-free DOM renderer (`backend-css.ts`), which draws
+ *     the scene as HTML elements under CSS 3D transforms and never acquires a
+ *     drawing context at all — the canvas stays a transparent input anchor.
+ *     Never chosen by "auto": it is a deliberate, explicitly-requested mode.
  *
  * As a browser-API boundary this file is coverage-exempt (test-exempt.json) and
  * outside the Branchless Law — it keeps ordinary control flow.
@@ -19,13 +23,17 @@
 
 import type { RenderBackend } from "./backend.ts";
 import { createCanvas2dBackend } from "./backend-canvas2d.ts";
+import { createCssBackend } from "./backend-css.ts";
 import { createWebGl2Backend } from "./backend-webgl2.ts";
 import { initStore } from "./store.ts";
 
 /** Which drawing backend to use; "auto" tries WebGL2 and falls back to Canvas2D. */
-export type BackendChoice = "auto" | "webgl2" | "canvas2d";
+export type BackendChoice = "auto" | "webgl2" | "canvas2d" | "css";
 
 const resolveBackend = (canvas: HTMLCanvasElement, choice: BackendChoice): RenderBackend => {
+  if (choice === "css") {
+    return createCssBackend(canvas);
+  }
   let backend: RenderBackend | null = null;
   if (choice !== "canvas2d") {
     backend = createWebGl2Backend(canvas);

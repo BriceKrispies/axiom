@@ -1,10 +1,12 @@
 /*
  * backend.ts — the INTERNAL contract between the retained-scene store
- * (`renderer.ts`) and the two drawing backends: `backend-webgl2.ts` (the
- * default, hardware path) and `backend-canvas2d.ts` (the software fallback,
- * auto-selected when WebGL2 is unavailable or forced with `?backend=canvas2d`).
- * The store owns meshes/materials/nodes/lights/camera as plain data; a backend
- * only knows how to ingest mesh geometry and draw one frame of it.
+ * (`renderer.ts`) and the three drawing backends: `backend-webgl2.ts` (the
+ * default, hardware path), `backend-canvas2d.ts` (the software fallback,
+ * auto-selected when WebGL2 is unavailable or forced with `?backend=canvas2d`),
+ * and `backend-css.ts` (a canvas-free DOM renderer built on CSS 3D transforms,
+ * forced with `?backend=css`). The store owns meshes/materials/nodes/lights/
+ * camera as plain data; a backend only knows how to ingest mesh geometry and
+ * draw one frame of it — it need not draw into the canvas at all.
  */
 
 import type { Camera3D, Handle, MeshData, Transform } from "./api.ts";
@@ -71,7 +73,7 @@ export interface SceneFrame {
 
 /** The drawing backend the store delegates to. */
 export interface RenderBackend {
-  readonly name: "WebGL2" | "Canvas2D";
+  readonly name: "WebGL2" | "Canvas2D" | "CSS3D";
   /** Softer geometry suits the software rasterizer: the store builds primitive
    * meshes at this detail level. */
   readonly meshDetail: "high" | "low";

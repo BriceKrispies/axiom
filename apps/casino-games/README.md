@@ -57,6 +57,55 @@ presses (e.g. `?press=Enter@140`), `?backend=canvas2d|webgl2` forces a render
 backend, `?debug=1` opens the diagnostics drawer, `?workbench=1` opens the
 workbench for `?game`.
 
+## The canvas-free CSS 3D build
+
+There are two ways to see Treasure Chest Pick rendered without a canvas, both
+driven by the SAME chance engine — they differ only in how pixels are produced.
+
+**1. `?backend=css` — the engine's DOM backend.** `@axiom/web-engine` has a
+third `RenderBackend` (`backend-css.ts`) alongside WebGL2 and Canvas2D. It never
+acquires a drawing context: it merges each mesh's coplanar triangles into convex
+polygon faces (a box's 12 triangles become 6 quads), emits one absolutely-
+positioned element per face mapped into 3D by `matrix3d`, and shades each face
+with the shared `shading.ts` truth so colors match the other backends. The
+`<canvas>` stays in the page as a transparent layout/pointer anchor and is never
+drawn into. It works for ANY game in the catalog:
+
+```sh
+uv run scripts/localhost_servers.py start-app casino-games --port 8087
+# then open http://localhost:8087/?game=treasure-chest-pick&backend=css
+```
+
+Honest limit: CSS compositing scales with total element count, and moving any
+node invalidates the whole `preserve-3d` sorting context. The chest scene is
+authored for a GPU (482 nodes → ~3.9k elements) and renders **correctly but at
+~2fps**. Measured budget for a smooth DOM scene is ~300 elements.
+
+**2. `/css3d.html` — a build authored FOR the DOM.** The same game at 60fps, by
+spending the element budget deliberately: 13 elements per chest instead of 246,
+gradients instead of geometry for plank seams and lid curvature, and a lagoon
+rebuilt from CSS gradients instead of the Canvas2D water overlay. ~230 elements
+total, of which only the nine chest wrappers move per frame.
+
+```sh
+# http://localhost:8087/css3d.html   (?seed=N pins the round)
+```
+
+It is **not** a reimplementation. `src/css3d/game/round.ts` imports the real
+`planChoicePopulation`, the real config schema and validation gate, and the real
+seeded streams, so a click resolves through exactly the code the engine build
+runs. Layers:
+
+```text
+web/css3d.html            the 3D layer stack (see styles/css3d.css)
+web/src/css3d/
+  render/solid.ts         primitives: a solid as up to 4 CSS 3D planes
+  scene/chest.ts          one chest (nested transform tree, hinged lid)
+  scene/diorama.ts        sand, CSS lagoon, palm, sandcastle, crab
+  game/round.ts           the REAL chance engine, wired
+  main.ts                 shell: seed, DOM events, idle loop
+```
+
 ## Architecture
 
 ```text

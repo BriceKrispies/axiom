@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Treasure Chest Pick (pure CSS 3D)</title>
+    <link rel="stylesheet" href="/styles/tokens.css" />
+    <link rel="stylesheet" href="/styles/css3d.css" />
+  </head>
+  <body class="css3d-body">
+    <header class="css3d-header">
+      <h1>TREASURE CHEST PICK</h1>
+      <p class="css3d-sub">
+        pure HTML/CSS/JS &middot; no canvas &middot; every surface is a DOM element in a CSS
+        <code>preserve-3d</code> tree &middot; outcomes decided by the app's real chance engine
+      </p>
+    </header>
+
+    <!-- LAYER 0: the perspective viewport. Establishes the camera; everything
+         below is inside one 3D rendering context. -->
+    <div id="stage" class="css3d-stage">
+      <!-- LAYER 1: the world root. Carries the 3/4 camera tilt (rotateX) so the
+           XY ground plane reads as a floor. Children are the scene layers. -->
+      <div id="world" class="css3d-world"><!-- diorama + board injected here --></div>
+
+      <div id="banner"></div>
+
+      <div class="css3d-hud">
+        <span id="hud-seed">—</span>
+        <span id="hud-pop">—</span>
+        <span id="hud-result">—</span>
+        <span id="hud-fps">—</span>
+      </div>
+    </div>
+
+    <div class="css3d-controls">
+      <button id="btn-new" class="css3d-btn css3d-btn--start">NEW ROUND</button>
+      <button id="btn-replay" class="css3d-btn">REPLAY SEED</button>
+      <label class="css3d-rate">
+        target win rate
+        <input id="rate" type="range" min="0" max="100" step="1" value="44" />
+        <output id="rate-out">44%</output>
+      </label>
+      <span class="css3d-hint">click a chest, or arrows + Enter</span>
+    </div>
+
+    <script type="module" src="/dist/css3d/main.js"></script>
+  </body>
+</html>

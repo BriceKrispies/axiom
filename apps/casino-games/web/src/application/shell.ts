@@ -48,7 +48,8 @@ const parseUrl = (): UrlBoot => {
       return { at: Number(at), code: code as string };
     });
   return {
-    backend: backendText === "canvas2d" || backendText === "webgl2" ? backendText : undefined,
+    backend:
+      backendText === "canvas2d" || backendText === "webgl2" || backendText === "css" ? backendText : undefined,
     debug: params.get("debug") === "1",
     game: params.get("game"),
     presses,

@@ -31,9 +31,25 @@ test("no gameplay file calls Math.random()", () => {
   assert.deepEqual(offenders, []);
 });
 
-test("boundary entropy is read only at the shell boundary", () => {
+/**
+ * The app's SHELL BOUNDARIES — the outermost entry points, and the only places
+ * allowed to draw boundary entropy. Everything below a shell must be a pure
+ * function of the seed the shell drew and recorded.
+ *
+ * There are two, because there are two front ends over the one chance engine:
+ * `application/shell.ts` drives the engine-rendered canvas app, and
+ * `css3d/main.ts` is the entry point of the canvas-free CSS 3D build. Both draw
+ * one seed at startup and record it; neither is reachable from the other. This
+ * list is the invariant, not an exemption — adding an entry means declaring a
+ * new app entry point, and every other file in the tree is still forbidden.
+ */
+const SHELL_BOUNDARIES: readonly string[] = [join("application", "shell.ts"), join("css3d", "main.ts")];
+
+test("boundary entropy is read only at a shell boundary", () => {
   const offenders = tsFilesUnder(SRC_ROOT).filter(
-    (file) => readFileSync(file, "utf8").includes("crypto.getRandomValues") && !file.endsWith(join("application", "shell.ts")),
+    (file) =>
+      readFileSync(file, "utf8").includes("crypto.getRandomValues") &&
+      !SHELL_BOUNDARIES.some((shell) => file.endsWith(shell)),
   );
   assert.deepEqual(offenders, []);
 });
