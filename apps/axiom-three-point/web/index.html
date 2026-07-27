@@ -186,6 +186,20 @@
       #results .reveal { opacity: 0; transform: translateY(6px); transition: opacity 0.3s, transform 0.3s; }
       #results .reveal.in { opacity: 1; transform: translateY(0); }
 
+      /* Touch pad (mobile parity): a hold-to-shoot button under the court. It
+         mirrors SPACE — press to rise into the shot, lift to release. */
+      #pad {
+        display: flex; gap: 10px; width: 960px; max-width: 100%; height: 84px;
+        user-select: none; touch-action: none;
+      }
+      #pad > div {
+        flex: 1; border: 1px solid #2a2e3c; border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        font: 700 15px/1 ui-monospace, monospace; color: #ff8a3d; letter-spacing: 2px;
+        background: #12141d; cursor: pointer;
+      }
+      #pad > div:active { background: #1c2030; color: #ffd23d; }
+
       #instructions { color: #ff8a3d; font-weight: 700; font-size: 13px; }
 
       /* Device-appropriate hints: touch devices see the swipe controls. */
@@ -226,7 +240,7 @@
         <div id="power-track"><div id="power-zone"></div><div id="power-fill"></div></div>
       </div>
       <div id="moving"></div>
-      <div id="lock-cue"><span class="desktop-only">CLICK THE COURT TO AIM</span><span class="touch-only">DRAG TO AIM &middot; SWIPE UP FROM THE BALL TO SHOOT</span></div>
+      <div id="lock-cue"><span class="desktop-only">CLICK THE COURT TO AIM</span><span class="touch-only">DRAG TO AIM &middot; HOLD THE SHOOT BUTTON BELOW</span></div>
       <div id="results">
         <div id="res-title">BUZZER</div>
         <div class="row reveal" id="row-score">FINAL <b id="res-score">0</b></div>
@@ -236,7 +250,10 @@
         <div class="reveal" id="res-restart">Press R to shoot again</div>
       </div>
     </div>
-    <div id="instructions"><span class="desktop-only">Click to aim · mouse steers left/right · hold SPACE to rise into the shot · release at the top · R restarts</span><span class="touch-only">Drag to aim · swipe up from the ball to shoot — flick harder for more power, flick sideways to steer</span></div>
+    <div id="pad">
+      <div id="pad-shoot">HOLD TO SHOOT</div>
+    </div>
+    <div id="instructions"><span class="desktop-only">Click to aim · mouse steers left/right · hold SPACE (or the button) to rise into the shot · release at the top · R restarts</span><span class="touch-only">Drag to aim · hold the button below to rise into the shot and lift off at the top · or swipe up from the ball to flick it</span></div>
 
     <script type="module" src="/dist/harness.js"></script>
   </body>

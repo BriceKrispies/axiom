@@ -22,6 +22,9 @@ import { BALLS_PER_RACK, FIXED_HZ, RACK_COUNT, SHOT_TUNING } from "./constants.t
 
 const MAX_STEPS_PER_FRAME = 8;
 const CANVAS_ID = "axiom-canvas";
+/** Floor on a pad press, in ms: long enough that the fixed update always sees
+ * the press edge, so a quick tap is a weak shot rather than nothing at all. */
+const MIN_PAD_HOLD_MS = 50;
 
 interface Feedback {
   readonly kind: string;
@@ -87,6 +90,7 @@ const boot_ = async (): Promise<void> => {
   const resultsEl = el("results");
   const glowEl = el("glow");
   const award = el("award");
+  const padShoot = el("pad-shoot");
   const pips = Array.from({ length: BALLS_PER_RACK }, (_, i) => el(`pip-${i}`));
   const revealRows = ["row-score", "row-makes", "row-streak", "row-label", "res-restart"].map(el);
   const fields = {
@@ -119,10 +123,13 @@ const boot_ = async (): Promise<void> => {
   let lastScore = 0;
 
   // Desktop: the cue asks for pointer lock. Touch (no pointer lock exists): the
-  // cue is a one-time instruction splash, dismissed by the first touch.
+  // cue is a one-time instruction splash, dismissed by the first touch. Using the
+  // shoot pad also dismisses it — the player has demonstrably found the controls,
+  // so leaving the splash sitting over the court would be pure obstruction.
   const coarsePointer = globalThis.matchMedia?.("(pointer: coarse)").matches ?? false;
   let pointerLocked = false;
   let touched = false;
+  let cueDismissed = false;
   document.addEventListener("pointerlockchange", (): void => {
     pointerLocked = document.pointerLockElement === canvas;
   });
@@ -137,6 +144,7 @@ const boot_ = async (): Promise<void> => {
   let lastAwardSeq = 0;
   let resultsStart = 0;
   let resultsScore = 0;
+  let padRestarts = false;
 
   const retrigger = (element: HTMLElement, klass: string): void => {
     element.classList.remove(klass);
@@ -242,12 +250,51 @@ const boot_ = async (): Promise<void> => {
       for (const row of revealRows) row.classList.remove("in");
     }
 
-    lockCue.classList.toggle("on", !over && (coarsePointer ? !touched : !pointerLocked));
+    // The pad button doubles as the restart after the buzzer — touch has no R key.
+    padRestarts = over;
+    padShoot.textContent = over ? "SHOOT AGAIN" : "HOLD TO SHOOT";
+
+    lockCue.classList.toggle("on", !over && !cueDismissed && (coarsePointer ? !touched : !pointerLocked));
 
     for (const fb of hud.events) {
       spawnFloater(fb);
     }
   };
+
+  // Touch pad (mobile parity): one hold-to-shoot button under the court. It
+  // synthesizes the SAME key events the keyboard feeds, so the pure game sees
+  // identical input from touch and from keys — no game-side plumbing at all.
+  // After the buzzer the same button taps R, the only restart touch can reach.
+  let input: InputState | undefined;
+  let padPressedAt = 0;
+  const key = (code: string, down: boolean): void => {
+    input?.keyEvent(code, down);
+  };
+  const releasePad = (): void => {
+    if (padPressedAt === 0) return;
+    // A tap shorter than a tick would add and remove the key inside one frame,
+    // so the fixed update would never see the press. Hold it for a few ticks:
+    // a tap becomes a weak shot, exactly as tapping SPACE does on desktop.
+    const held = performance.now() - padPressedAt;
+    padPressedAt = 0;
+    globalThis.setTimeout((): void => key("Space", false), Math.max(0, MIN_PAD_HOLD_MS - held));
+  };
+  padShoot.addEventListener("pointerdown", (event: PointerEvent): void => {
+    event.preventDefault();
+    cueDismissed = true;
+    touched = true;
+    if (padRestarts) {
+      key("KeyR", true);
+      globalThis.setTimeout((): void => key("KeyR", false), MIN_PAD_HOLD_MS);
+      return;
+    }
+    padPressedAt = performance.now();
+    key("Space", true);
+  });
+  // The release listens on the WINDOW, not the button: a finger that slides off
+  // the button mid-rise still resolves its shot, so no pointer capture is needed.
+  globalThis.addEventListener("pointerup", releasePad);
+  globalThis.addEventListener("pointercancel", releasePad);
 
   // Backend selection: WebGL2 with an automatic Canvas2D software fallback;
   // `?backend=canvas2d` (or `?backend=webgl2`) forces one, the repo convention.
@@ -264,8 +311,11 @@ const boot_ = async (): Promise<void> => {
     stopLoop?.();
     detachInput?.();
     stopAmbience();
-    const input = new InputState();
-    detachInput = attachDomInput(input, canvas);
+    // This reload's input state; also published to `input` so the touch pad
+    // feeds whichever generation is live.
+    const live = new InputState();
+    input = live;
+    detachInput = attachDomInput(live, canvas);
     const mod = (await import(`/dist/game.js?v=${version}`)) as GameModule;
 
     // Touch gestures project against the DISPLAYED canvas size (CSS px), which
@@ -273,7 +323,7 @@ const boot_ = async (): Promise<void> => {
     applyViewport = (): void => mod.configureViewport(canvas.clientWidth || canvas.width, canvas.clientHeight || canvas.height);
     applyViewport();
 
-    mod.initGame(input);
+    mod.initGame(live);
     stopLoop = startLoop({
       fixedHz: FIXED_HZ,
       maxCatchUpSteps: MAX_STEPS_PER_FRAME,
@@ -282,8 +332,8 @@ const boot_ = async (): Promise<void> => {
         updateHud(mod.readHud());
       },
       update: (tick: number): void => {
-        input.beginTick();
-        mod.updateGame(input, tick);
+        live.beginTick();
+        mod.updateGame(live, tick);
       },
     });
   };
