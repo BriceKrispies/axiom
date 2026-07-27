@@ -2,7 +2,9 @@
 //! juice effects, camera pose, and debug markers into the retained entities.
 //! The same snapshot + same effect state always produces the same submission.
 
-use axiom::prelude::{Angle, Camera, Entity, PerspectiveProjection, RunningApp, Transform, Vec3};
+use axiom::prelude::{
+    Angle, Camera, Entity, PerspectiveProjection, RunningApp, Transform, Vec3, Visible,
+};
 use axiom_kernel::Meters;
 
 use crate::camera::CameraPose;
@@ -21,7 +23,7 @@ use crate::presentation::particles::{effect_instances, trail_instances};
 use crate::presentation::receiver_ring::{self, RECEIVER_RING_POOL};
 use crate::presentation::snapshot::PresentationSnapshot;
 use crate::presentation::PlayerPose;
-use crate::scene::{hidden_transform, EndZoneScene};
+use crate::scene::EndZoneScene;
 
 fn meters(v: f32) -> Meters {
     Meters::finite_or_zero(v)
@@ -186,8 +188,9 @@ fn category_starts() -> [usize; PAINT_CATEGORY_COUNT] {
 /// Quads past a category's bound are dropped rather than growing the scene —
 /// the bound is a property of the geometry (there are only so many ten-yard
 /// lines) so hitting it means the emission is wrong, not that the pool is
-/// small. Every slot a category does not use is parked hidden, so the pool can
-/// never show stale paint from an earlier camera.
+/// small. Every slot a category does not use is retired with `Visible(false)`,
+/// so the pool can never show stale paint from an earlier camera *and* an
+/// unused slot costs the renderer nothing at all.
 fn assign_paint(app: &mut RunningApp, pool: &[Entity], quads: &[PaintQuad]) {
     let starts = category_starts();
     let mut cursor = starts;
@@ -197,6 +200,7 @@ fn assign_paint(app: &mut RunningApp, pool: &[Entity], quads: &[PaintQuad]) {
         if cursor[index] < limit {
             if let Some(entity) = pool.get(cursor[index]) {
                 app.set(*entity, quad.transform());
+                app.set(*entity, Visible(true));
             }
             cursor[index] += 1;
         }
@@ -205,7 +209,7 @@ fn assign_paint(app: &mut RunningApp, pool: &[Entity], quads: &[PaintQuad]) {
         let index = category.index();
         for slot in cursor[index]..starts[index] + category.pool_size() {
             if let Some(entity) = pool.get(slot) {
-                app.set(*entity, hidden_transform());
+                app.set(*entity, Visible(false));
             }
         }
     }
@@ -213,7 +217,15 @@ fn assign_paint(app: &mut RunningApp, pool: &[Entity], quads: &[PaintQuad]) {
 
 /// Fill a typed pool from an instance list: each instance takes the next
 /// free pool slot of its material; instances beyond a material's pool size
-/// are dropped (bounded by construction); unused slots hide.
+/// are dropped (bounded by construction); unused slots are retired with
+/// `Visible(false)`.
+///
+/// Retiring by visibility rather than by parking the entity off-screen is what
+/// makes a big pool affordable: an invisible renderable is dropped at
+/// submission, so it costs no projection and no draw, whereas a parked one is
+/// still fully projected before being culled. These pools are mostly idle most
+/// frames, so that is the difference between paying for ~1,100 objects a frame
+/// and paying for the handful that are actually on screen.
 fn assign_pool<I, M: PartialEq + Copy>(
     app: &mut RunningApp,
     pool: &[(Entity, M)],
@@ -230,11 +242,12 @@ fn assign_pool<I, M: PartialEq + Copy>(
         if let Some(index) = slot {
             used[index] = true;
             app.set(pool[index].0, transform);
+            app.set(pool[index].0, Visible(true));
         }
     }
     for (index, (entity, _)) in pool.iter().enumerate() {
         if !used[index] {
-            app.set(*entity, hidden_transform());
+            app.set(*entity, Visible(false));
         }
     }
 }

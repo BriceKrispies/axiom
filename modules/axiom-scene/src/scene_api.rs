@@ -217,15 +217,6 @@ impl SceneApi {
         self.scene.remove_renderable(node)
     }
 
-    /// Toggle the visibility of the renderable on `node`.
-    pub fn set_renderable_visibility(
-        &mut self,
-        node: SceneNodeId,
-        visible: bool,
-    ) -> SceneResult<()> {
-        self.scene.set_renderable_visible(node, visible)
-    }
-
     /// Mark whether the renderable on `node` is a discrete dynamic object that
     /// grounds itself with a contact shadow (level geometry stays `false`).
     pub fn set_renderable_casts_contact_shadow(
@@ -426,6 +417,37 @@ impl SceneApi {
     /// parts never outlive their owner.
     pub fn despawn_subtree(&mut self, node: SceneNodeId) -> bool {
         self.scene.despawn_subtree(node)
+    }
+}
+
+/// Renderable **visibility**: read, enumerate, and toggle whether a node's
+/// renderable is drawn. Kept in its own `impl` block so neither block exceeds
+/// the engine's impl-block size budget.
+///
+/// Visibility is a submission-time gate, not a transform trick: an invisible
+/// renderable is filtered out before projection, so it costs no draw and no
+/// per-triangle work at all. That is what makes a large object pool affordable
+/// — retired slots are genuinely free rather than merely off-screen.
+impl SceneApi {
+    /// Whether the renderable on `node` is visible, or `None` when `node` has no
+    /// renderable — the read behind a consumer's `get::<Visible>()`.
+    pub fn renderable_visible(&self, node: SceneNodeId) -> Option<bool> {
+        self.scene.renderable_visible(node)
+    }
+
+    /// Every renderable node's `(id, visible)`, in ascending node-id order — the
+    /// enumeration behind a consumer's `query::<Visible>()`.
+    pub fn renderable_visibilities(&self) -> Vec<(SceneNodeId, bool)> {
+        self.scene.renderable_visibilities()
+    }
+
+    /// Toggle the visibility of the renderable on `node`.
+    pub fn set_renderable_visibility(
+        &mut self,
+        node: SceneNodeId,
+        visible: bool,
+    ) -> SceneResult<()> {
+        self.scene.set_renderable_visible(node, visible)
     }
 }
 

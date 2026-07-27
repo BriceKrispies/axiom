@@ -218,8 +218,3 @@ impl EndZoneScene {
         }
     }
 }
-
-/// Where hidden pool entities park (far under the field, near-zero scale).
-pub(crate) fn hidden_transform() -> Transform {
-    hidden()
-}

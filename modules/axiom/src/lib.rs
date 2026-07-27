@@ -38,6 +38,7 @@ mod sdf_shape;
 mod spawn;
 mod spin;
 mod texture;
+mod visible;
 mod window;
 
 pub mod prelude;

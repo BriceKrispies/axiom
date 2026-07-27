@@ -4,7 +4,7 @@
 //! the per-tick sync assigns them by. Split out of [`super`] so the scene
 //! install stays a readable list of what the scene contains.
 
-use axiom::prelude::{Entity, Handle, Material, Mesh, RunningApp, Spawn};
+use axiom::prelude::{Entity, Handle, Material, Mesh, RunningApp, Spawn, Visible};
 
 use crate::debug::DebugMaterial;
 use crate::field::{paint_pool_capacity, PaintCategory, PALETTE};
@@ -20,7 +20,15 @@ use super::{color3, hidden, JUICE_POOL};
 /// Hard bound on debug marker instances.
 const DEBUG_POOL: usize = 512;
 
-/// Spawn `count` hidden cubes of `handle`, each tagged with `tag`.
+/// Spawn one retired pool slot: parked at the hidden pose AND `Visible(false)`,
+/// so it costs the renderer nothing until the per-tick sync claims it.
+fn slot(app: &mut RunningApp, mesh: Handle<Mesh>, material: Handle<Material>) -> Entity {
+    let entity = app.spawn(Spawn::new(hidden(), mesh, material));
+    app.set(entity, Visible(false));
+    entity
+}
+
+/// Spawn `count` retired cubes of `handle`, each tagged with `tag`.
 fn fill<T: Copy>(
     app: &mut RunningApp,
     cube: Handle<Mesh>,
@@ -30,7 +38,7 @@ fn fill<T: Copy>(
     let mut pool = Vec::with_capacity(capacity);
     for &(tag, count, handle) in plan {
         for _ in 0..count {
-            pool.push((app.spawn(Spawn::new(hidden(), cube, handle)), tag));
+            pool.push((slot(app, cube, handle), tag));
         }
     }
     pool
@@ -50,7 +58,7 @@ pub(super) fn paint(app: &mut RunningApp, plane: Handle<Mesh>) -> Vec<Entity> {
     for category in PaintCategory::ALL {
         let material = app.add_material(Material::lit(color3(category.color(&PALETTE))));
         for _ in 0..category.pool_size() {
-            pool.push(app.spawn(Spawn::new(hidden(), plane, material)));
+            pool.push(slot(app, plane, material));
         }
     }
     pool

@@ -127,6 +127,27 @@ impl Scene {
             .ok_or_else(|| SceneError::missing_sdf_shape("remove_sdf_shape: node has no sdf shape"))
     }
 
+    /// Whether `node`'s renderable is visible, or `None` when it has none.
+    pub(crate) fn renderable_visible(&self, node: SceneNodeId) -> Option<bool> {
+        self.world
+            .storage()
+            .renderables
+            .get(Self::entity(node))
+            .map(Renderable::visible)
+    }
+
+    /// Every renderable node's `(id, visible)`, in ascending node-id order.
+    pub(crate) fn renderable_visibilities(&self) -> Vec<(SceneNodeId, bool)> {
+        self.world
+            .storage()
+            .renderables
+            .iter()
+            .map(|(entity, renderable)| {
+                (SceneNodeId::from_raw(entity.raw()), renderable.visible())
+            })
+            .collect()
+    }
+
     pub(crate) fn set_renderable_visible(
         &mut self,
         node: SceneNodeId,
@@ -368,9 +389,16 @@ mod tests {
                 .code(),
             SceneErrorCode::MissingNode
         );
+        // Visibility is readable and enumerable, and defaults to visible.
+        assert_eq!(s.renderable_visible(n), Some(true));
+        assert_eq!(s.renderable_visibilities(), vec![(n, true)]);
         // The caster value flowing through to a snapshot is asserted in the
         // render-pipeline tests.
         s.set_renderable_visible(n, false).unwrap();
+        assert_eq!(s.renderable_visible(n), Some(false), "the write is readable");
+        assert_eq!(s.renderable_visibilities(), vec![(n, false)]);
+        // A node with no renderable reads `None` rather than a default.
+        assert_eq!(s.renderable_visible(SceneNodeId::from_raw(99)), None);
         s.set_renderable_casts_contact_shadow(n, true).unwrap();
         s.set_renderable_texture(n, TextureRef::from_raw(5))
             .unwrap();

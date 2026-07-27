@@ -41,6 +41,7 @@ mod tests {
     use crate::mesh::Mesh;
     use crate::player::Player;
     use crate::renderable::Renderable;
+    use crate::visible::Visible;
     use crate::window::Window;
     use axiom_math::{Transform, Vec3};
 
@@ -118,5 +119,38 @@ mod tests {
             bounded,
             vec![(enemy, Bounds::new(Vec3::new(0.5, 0.5, 0.5)))]
         );
+        let visible = app.query::<Visible>();
+        assert!(visible.iter().any(|&(e, v)| e == enemy && v == Visible(true)));
+    }
+
+    /// Retiring a pooled object for a frame: the entity, its handle and its other
+    /// components all survive — only the drawing stops. This is the whole
+    /// contract that makes `Visible` cheaper than despawn/respawn.
+    #[test]
+    fn visible_toggles_without_disturbing_the_entity() {
+        let mut app = app_with_enemy();
+        let enemy = app.player_entity(0).expect("enemy is player 0");
+        assert_eq!(app.get::<Visible>(enemy), Some(Visible(true)), "spawns visible");
+
+        assert!(app.set::<Visible>(enemy, Visible(false)));
+        assert_eq!(app.get::<Visible>(enemy), Some(Visible(false)));
+        // Retired, not removed: the handle still resolves and every other
+        // component reads exactly as before.
+        assert_eq!(
+            app.get::<Transform>(enemy).map(|t| t.translation),
+            Some(Vec3::new(0.0, 0.0, -3.0))
+        );
+        assert_eq!(
+            app.get::<Bounds>(enemy),
+            Some(Bounds::new(Vec3::new(0.5, 0.5, 0.5)))
+        );
+
+        assert!(app.set::<Visible>(enemy, Visible(true)));
+        assert_eq!(app.get::<Visible>(enemy), Some(Visible(true)));
+
+        // A dead entity neither reads nor accepts a visibility.
+        assert!(app.despawn(enemy));
+        assert_eq!(app.get::<Visible>(enemy), None);
+        assert!(!app.set::<Visible>(enemy, Visible(false)));
     }
 }

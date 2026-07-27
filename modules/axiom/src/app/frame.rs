@@ -270,6 +270,65 @@ mod tests {
         );
     }
 
+    /// The whole point of `Visible`: an invisible renderable is not a small
+    /// draw, it is *no* draw. It never reaches the frame's draw list, so it
+    /// costs no projection, no shading, and no instance in a mesh batch.
+    ///
+    /// This is what lets a pooled scene retire its unused slots for free
+    /// instead of parking them off-screen and paying full per-triangle cost to
+    /// have them culled.
+    #[test]
+    fn an_invisible_renderable_produces_no_draw_at_all() {
+        use crate::color::Color;
+        use crate::material::Material;
+        use crate::mesh::Mesh;
+        use crate::spawn::Spawn;
+        use crate::visible::Visible;
+
+        let mut app = render_app();
+        app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+        );
+        let mesh = app.add_mesh(Mesh::cube());
+        let material = app.add_material(Material::lit(Color::WHITE));
+        let entity = app.spawn(Spawn::new(
+            Transform::from_translation(Vec3::new(0.0, 0.0, -3.0)),
+            mesh,
+            material,
+        ));
+
+        let shown = app.render(0);
+        let shown_draws = shown.draws().len();
+        let shown_instances: u32 = shown.mesh_batches().iter().map(|(_, _, _, n)| n).sum();
+        assert_eq!(shown_draws, 1, "a visible cube is one draw");
+        assert_eq!(shown_instances, 1);
+
+        assert!(app.set::<Visible>(entity, Visible(false)));
+        let hidden = app.render(1);
+        assert!(
+            hidden.draws().is_empty(),
+            "an invisible renderable emits no draw"
+        );
+        assert!(
+            hidden.mesh_batches().is_empty(),
+            "and therefore no mesh batch instance"
+        );
+        assert!(
+            hidden.mesh_batch_casters().is_empty(),
+            "the caster flags stay aligned with the batches"
+        );
+
+        // And it comes back, unchanged, when shown again.
+        assert!(app.set::<Visible>(entity, Visible(true)));
+        let again = app.render(2);
+        assert_eq!(again.draws().len(), shown_draws);
+        assert_eq!(
+            again.mesh_batches().iter().map(|(_, _, _, n)| n).sum::<u32>(),
+            shown_instances
+        );
+    }
+
     #[test]
     fn render_only_does_not_advance_the_simulation_and_is_idempotent() {
         let mut app = render_app();

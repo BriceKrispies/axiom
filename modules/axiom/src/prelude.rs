@@ -56,4 +56,5 @@ pub use crate::sdf_shape::SdfShape;
 pub use crate::spawn::Spawn;
 pub use crate::spin::Spin;
 pub use crate::texture::Texture;
+pub use crate::visible::Visible;
 pub use crate::window::Window;
