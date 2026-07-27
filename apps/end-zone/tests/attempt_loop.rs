@@ -455,3 +455,93 @@ fn a_window_headline_says_why_it_opened() {
     ));
     assert!(!trigger.label().is_empty());
 }
+
+// --- play selection -----------------------------------------------------------
+
+/// The receiver world positions after `ticks` of a snapped play, rounded so the
+/// comparison is about ROUTE SHAPE rather than float noise.
+fn route_shape(seed: u64, concept: usize, ticks: usize) -> Vec<(i32, i32)> {
+    let mut r = run(seed);
+    assert!(r.select_concept(concept), "the picker is open pre-snap");
+    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    for _ in 0..ticks {
+        r.step(&[]);
+    }
+    let step = r.attempt().expect("an attempt view");
+    (0..3)
+        .map(|read| {
+            let p = r.sim.players[step.read.target(read).index()].pos;
+            (p.x.round() as i32, p.z.round() as i32)
+        })
+        .collect()
+}
+
+#[test]
+fn picking_a_concept_actually_changes_the_routes_the_receivers_run() {
+    // The failure this guards: a picker that relabels the reads while the
+    // receivers keep running whatever was installed at reset. Selection has to
+    // RE-INSTALL the play so the route waypoints recompile.
+    let a = route_shape(0xC0A11_001, 0, 90);
+    let b = route_shape(0xC0A11_001, 1, 90);
+    let c = route_shape(0xC0A11_001, 2, 90);
+    assert_ne!(a, b, "TRIPLE READ and FLOOD must run different routes");
+    assert_ne!(b, c, "FLOOD and MIRROR must run different routes");
+    assert_ne!(a, c, "TRIPLE READ and MIRROR must run different routes");
+}
+
+#[test]
+fn every_concept_keeps_the_read_order_contract() {
+    // Read 1 is always the earliest/shallowest and read 3 the deepest, in every
+    // concept — that contract is what lets one mental model survive the picker.
+    for concept in 0..3usize {
+        let mut r = run(0xC0A11_100 + concept as u64);
+        assert!(r.select_concept(concept));
+        until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+        for _ in 0..120 {
+            r.step(&[]);
+        }
+        let step = r.attempt().expect("an attempt view");
+        let depth = |read: usize| step.read.read(read).depth;
+        assert!(
+            depth(0) < depth(2),
+            "concept {concept}: read 1 ({:.1} yd) must be shallower than read 3 ({:.1} yd)",
+            depth(0),
+            depth(2)
+        );
+    }
+}
+
+#[test]
+fn a_concept_pick_is_rejected_once_the_ball_is_live() {
+    let mut r = run(0xC0A11_200);
+    assert!(r.select_concept(2), "pre-snap the picker is open");
+    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    assert!(
+        !r.select_concept(0),
+        "once the ball is live the number keys are reads, not plays"
+    );
+    assert_eq!(
+        r.attempt().map(|s| s.concept),
+        Some(2),
+        "the concept that was set at the snap is the one that runs"
+    );
+}
+
+#[test]
+fn the_chosen_concept_carries_into_the_next_attempt() {
+    let mut r = run(0xC0A11_300);
+    assert!(r.select_concept(1));
+    until(&mut r, 2000, |r| {
+        r.ledger().map(|l| l.attempts).unwrap_or(0) >= 1
+    })
+    .expect("an attempt resolves");
+    until(&mut r, 400, |r| {
+        matches!(phase(r), Some(AttemptPhase::PreSnap { .. }))
+    })
+    .expect("the next attempt lines up");
+    assert_eq!(
+        r.attempt().map(|s| s.concept),
+        Some(1),
+        "a liked concept is kept rather than re-picked every eight seconds"
+    );
+}

@@ -11,7 +11,7 @@
 //! row present the same picture.
 
 use crate::ai::{select_defense, variation_key};
-use crate::data::prototype::{triple_read, PROTOTYPE_LINE};
+use crate::data::prototype::{concept_play, PROTOTYPE_LINE};
 use crate::data::PlayDefinition;
 use crate::identity::TeamId;
 use crate::launch::{resolve_defense, RunConfig};
@@ -27,8 +27,8 @@ const NOMINAL_DISTANCE: f32 = 10.0;
 
 /// Install attempt `index`'s play into `sim` and return which defensive call it
 /// drew (for inspection and the debug overlay).
-pub fn install(sim: &mut SimState, config: &RunConfig, index: u32) -> usize {
-    let offense = triple_read();
+pub fn install(sim: &mut SimState, config: &RunConfig, index: u32, concept: usize) -> usize {
+    let offense = concept_play(concept);
     let key = variation_key(config.seed, u64::from(index), NOMINAL_DOWN);
     let selection = select_defense(
         offense.tag,

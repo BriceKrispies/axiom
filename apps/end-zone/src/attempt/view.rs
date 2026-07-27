@@ -33,6 +33,8 @@ pub struct AttemptStep {
     /// the throw), so the loop carries it through rather than owning it.
     pub charging: Option<usize>,
     pub charge: f32,
+    /// The offensive concept the attempt is set in.
+    pub concept: usize,
 }
 
 impl AttemptController {
@@ -52,6 +54,7 @@ impl AttemptController {
         self.read.map(|read| AttemptStep {
             charging,
             charge,
+            concept: self.concept,
             phase: self.phase,
             read,
             attempt: self.attempt_index.max(1),

@@ -11,7 +11,7 @@ use axiom::prelude::Vec3;
 
 use crate::ai::assignment::offense_player;
 use crate::ai::RoleState;
-use crate::data::prototype::{READ_COUNT, READ_REWARD, READ_SLOTS};
+use crate::data::prototype::{concept, READ_COUNT};
 use crate::identity::PlayerId;
 use crate::state::SimState;
 
@@ -52,6 +52,10 @@ pub struct ReadState {
 /// The whole read for one tick.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlayRead {
+    /// Which concept these reads belong to (indexes `data::prototype::concept`).
+    /// Carried on the read rather than looked up globally, because "read 2" now
+    /// means a different receiver and a different route per concept.
+    pub concept: usize,
     pub reads: [ReadState; READ_COUNT],
     /// Distance from the quarterback to the nearest live defender, yards.
     pub nearest_rush: f32,
@@ -112,8 +116,8 @@ fn nearest_opponent(sim: &SimState, pos: Vec3, team: crate::identity::TeamId) ->
 }
 
 /// Measure one read.
-fn measure(sim: &SimState, read: usize) -> ReadState {
-    let id = offense_player(&sim.play, READ_SLOTS[read]);
+fn measure(sim: &SimState, concept_index: usize, read: usize) -> ReadState {
+    let id = offense_player(&sim.play, concept(concept_index).read_slots[read]);
     let player = &sim.players[id.index()];
     let depth = (player.pos.z - sim.frame.line_of_scrimmage_z) * sim.frame.direction.sign();
     let separation = nearest_opponent(sim, player.pos, player.team);
@@ -151,8 +155,8 @@ fn measure(sim: &SimState, read: usize) -> ReadState {
 }
 
 /// Build this tick's read from the authoritative simulation.
-pub fn read_play(sim: &SimState) -> PlayRead {
-    let reads: [ReadState; READ_COUNT] = core::array::from_fn(|read| measure(sim, read));
+pub fn read_play(sim: &SimState, concept_index: usize) -> PlayRead {
+    let reads: [ReadState; READ_COUNT] = core::array::from_fn(|read| measure(sim, concept_index, read));
     let qb = &sim.players[sim.quarterback.index()];
     let nearest_rush = nearest_opponent(sim, qb.pos, qb.team);
     let span = (POCKET_SAFE - POCKET_LOST).max(0.01);
@@ -160,8 +164,9 @@ pub fn read_play(sim: &SimState) -> PlayRead {
     // Value-weighted so the trigger fires on the read that is worth taking, not
     // merely on whoever happens to have the most grass. The deep route needs
     // less separation to be worth asking about than the checkdown does.
-    let max_reward = READ_REWARD[READ_COUNT - 1].max(1.0);
-    let value = |r: &ReadState| r.openness * (0.55 + 0.45 * READ_REWARD[r.read] / max_reward);
+    let rewards = concept(concept_index).read_rewards;
+    let max_reward = rewards[READ_COUNT - 1].max(1.0);
+    let value = |r: &ReadState| r.openness * (0.55 + 0.45 * rewards[r.read] / max_reward);
     let best = reads
         .iter()
         .enumerate()
@@ -174,6 +179,7 @@ pub fn read_play(sim: &SimState) -> PlayRead {
         })
         .0;
     PlayRead {
+        concept: concept_index,
         reads,
         nearest_rush,
         pressure,

@@ -44,6 +44,12 @@ pub struct AttemptController {
     pub(super) attempt_index: u32,
     /// The defensive playbook index this attempt lined up in (inspection).
     pub last_defense_index: usize,
+    /// The concept the offense runs. Chosen pre-snap and CARRIED into the next
+    /// attempt, so a player who likes a concept keeps it rather than re-picking
+    /// every eight seconds.
+    pub(super) concept: usize,
+    /// A concept picked during this pre-snap, applied when the play installs.
+    pub(super) pending_concept: Option<usize>,
 }
 
 impl AttemptController {
@@ -62,16 +68,16 @@ impl AttemptController {
             los_yard: PROTOTYPE_LINE,
             attempt_index: 0,
             last_defense_index: 0,
+            concept: 0,
+            pending_concept: None,
         }
     }
 
-    /// Line the first attempt up, so a freshly built session is already set at
-    /// the line rather than spending its first tick deciding to be (without it
-    /// there is no attempt view at tick zero and the markers have nothing to
-    /// draw).
+    /// Line the first attempt up, so a fresh session is already set at the line
+    /// (without it there is no attempt view at tick zero to draw from).
     pub fn arm(&mut self, sim: &mut SimState, config: &RunConfig) {
         self.build_attempt(sim, config);
-        self.read = Some(read_play(sim));
+        self.read = Some(read_play(sim, self.concept));
         self.phase = AttemptPhase::PreSnap {
             snap_at: sim.tick + SET_TICKS,
         };
@@ -90,11 +96,10 @@ impl AttemptController {
         self.phase.time_scale()
     }
 
-    /// Offer the player's choice. Accepted only while a window is open AND
-    /// nothing has been decided yet — a press at any other moment is stale and
-    /// is dropped, so a mashed button can neither pre-commit the next window's
-    /// read nor overwrite a decision already made. The latch counts as decided:
-    /// a choice lives there for the frames between the press and the next tick.
+    /// Offer the player's choice. Accepted only while the reads are live and
+    /// nothing has been decided yet — anything else is stale and is dropped, so
+    /// a mashed button cannot overwrite a decision already made. The latch
+    /// counts as decided.
     pub fn choose(&mut self, choice: PlayerChoice) -> bool {
         let accepted =
             self.phase.accepts_choice() && self.choice.is_none() && self.pending.is_none();
@@ -105,7 +110,7 @@ impl AttemptController {
     /// Advance one tick and return the simulation commands it implies.
     pub fn step(&mut self, sim: &mut SimState, config: &RunConfig) -> Vec<SimCommand> {
         let tick = sim.tick;
-        let read = read_play(sim);
+        let read = read_play(sim, self.concept);
         self.read = Some(read);
         let mut commands = Vec::new();
 
@@ -141,7 +146,19 @@ impl AttemptController {
                 };
                 AttemptPhase::Developing
             }
-            AttemptPhase::PreSnap { snap_at } => AttemptPhase::PreSnap { snap_at },
+            AttemptPhase::PreSnap { snap_at } => {
+                // Applying the pick RE-INSTALLS the play, which recompiles the
+                // route waypoints and re-lines the offense up. Without that the
+                // picker would only relabel the reads while the receivers ran
+                // whatever concept was installed at reset.
+                if let Some(next) = self.pending_concept.take() {
+                    self.concept = next;
+                    self.last_defense_index =
+                        setup::install(sim, config, self.attempt_index, self.concept);
+                    commands.push(SimCommand::BeginPlay);
+                }
+                AttemptPhase::PreSnap { snap_at }
+            }
             // A choice can land here as well as in a window: throwing early, at
             // full speed, is the anticipatory read.
             AttemptPhase::Developing => match self.pending.take() {
@@ -271,7 +288,7 @@ impl AttemptController {
         self.dead_at = u64::MAX;
         self.los_yard = PROTOTYPE_LINE;
         self.gate = WindowGate::closed();
-        self.last_defense_index = setup::install(sim, config, self.attempt_index);
+        self.last_defense_index = setup::install(sim, config, self.attempt_index, self.concept);
     }
 }
 

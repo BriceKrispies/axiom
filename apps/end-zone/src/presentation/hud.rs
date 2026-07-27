@@ -8,7 +8,7 @@
 //! question the prototype exists to ask.
 
 use crate::attempt::{AttemptLedger, AttemptPhase, AttemptStep};
-use crate::data::prototype::{READ_COUNT, READ_NAMES};
+use crate::data::prototype::{concept, READ_COUNT};
 
 /// One selectable read in the decision prompt.
 #[derive(Debug, Clone, PartialEq)]
@@ -101,6 +101,11 @@ impl HudView {
 
 /// The prompt for an open window (`None` otherwise).
 fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
+    // Pre-snap the same three chips pick the PLAY; the keys never change
+    // meaning mid-decision, only mid-phase.
+    if matches!(step.phase, AttemptPhase::PreSnap { .. }) {
+        return Some(concept_prompt(step));
+    }
     if !step.phase.accepts_choice() {
         return None;
     }
@@ -125,7 +130,7 @@ fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
         reads: (0..READ_COUNT)
             .map(|read| ReadPrompt {
                 key: format!("{}", read + 1),
-                name: READ_NAMES[read].to_string(),
+                name: concept(step.read.concept).read_names[read].to_string(),
                 charge: match step.charging == Some(read) {
                     true => step.charge,
                     false => 0.0,
@@ -140,6 +145,29 @@ fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
     })
 }
 
+/// The pre-snap play picker: the three concepts, keyed like the three reads, so
+/// the number row never changes meaning mid-decision — only mid-phase. The
+/// currently-set concept shows a full chip so the standing call is always
+/// visible without a separate readout.
+fn concept_prompt(step: &AttemptStep) -> DecisionPrompt {
+    DecisionPrompt {
+        headline: "CALL IT".to_string(),
+        reads: (0..crate::data::prototype::CONCEPT_COUNT)
+            .map(|index| ReadPrompt {
+                key: format!("{}", index + 1),
+                name: concept(index).name.to_string(),
+                charge: match index == step.concept {
+                    true => 1.0,
+                    false => 0.0,
+                },
+            })
+            .collect(),
+        scramble: format!("SET  ·  {}", concept(step.concept).name),
+        remaining: 1.0,
+        urgent: false,
+    }
+}
+
 /// The result card while one is showing (`None` otherwise).
 fn result_card(step: &AttemptStep) -> Option<String> {
     let showing = matches!(
@@ -148,7 +176,10 @@ fn result_card(step: &AttemptStep) -> Option<String> {
     );
     let record = step.last.filter(|_| showing)?;
     let detail = match record.read {
-        Some(read) => format!("   {}", READ_NAMES[read.min(READ_COUNT - 1)]),
+        Some(read) => format!(
+            "   {}",
+            concept(step.read.concept).read_names[read.min(READ_COUNT - 1)]
+        ),
         None => String::new(),
     };
     Some(format!(

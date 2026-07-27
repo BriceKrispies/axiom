@@ -19,7 +19,7 @@
 use axiom::prelude::Vec2;
 
 use crate::attempt::{AttemptStep, PlayerChoice, MAX_WINDOWS};
-use crate::data::prototype::{READ_COUNT, READ_REWARD};
+use crate::data::prototype::{concept, READ_COUNT};
 use crate::field::OffensePoint;
 use crate::player::PlayerSim;
 use crate::state::SimState;
@@ -81,8 +81,9 @@ pub fn decide(step: &AttemptStep, patience: Patience) -> Option<PlayerChoice> {
         return None;
     }
     let read = &step.read;
-    let max_reward = READ_REWARD[READ_COUNT - 1].max(1.0);
-    let value = |r: usize| read.read(r).openness * READ_REWARD[r] / max_reward;
+    let rewards = concept(read.concept).read_rewards;
+    let max_reward = rewards[READ_COUNT - 1].max(1.0);
+    let value = |r: usize| read.read(r).openness * rewards[r] / max_reward;
     let pick = (patience.floor.min(READ_COUNT - 1)..READ_COUNT)
         .filter(|r| read.read(*r).live)
         .max_by(|a, b| value(*a).total_cmp(&value(*b)))?;

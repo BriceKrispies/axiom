@@ -41,7 +41,12 @@ fn a_fresh_session_reads_attempt_one_with_an_empty_ledger() {
     );
     assert_eq!(hud.attempt, "ATTEMPT 001");
     assert_eq!(hud.session, "AVG 0.0   BEST 0   INT 0");
-    assert!(hud.decision.is_none(), "no window before the snap");
+    // Pre-snap the prompt is the PLAY PICKER, not a decision window: the same
+    // three chips, naming concepts instead of reads.
+    let picker = hud.decision.expect("the play picker is up at the line");
+    assert_eq!(picker.headline, "CALL IT");
+    assert_eq!(picker.reads.len(), 3, "three concepts to choose between");
+    assert!(!picker.urgent, "the line is not a timed decision");
     assert!(hud.result.is_none(), "nothing has resolved yet");
 }
 

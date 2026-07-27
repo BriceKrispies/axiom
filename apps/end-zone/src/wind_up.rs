@@ -10,6 +10,15 @@ use crate::attempt::PlayerChoice;
 use crate::showcase::ShowcaseRun;
 
 impl ShowcaseRun {
+    /// Whether the offense is still at the line, where the number keys pick a
+    /// concept rather than a read.
+    pub(crate) fn pre_snap(&self) -> bool {
+        self.attempt()
+            .map(|s| matches!(s.phase, crate::attempt::AttemptPhase::PreSnap { .. }))
+            .unwrap_or(false)
+    }
+
+
     /// The player a held read aims at, while the reads are live and the
     /// quarterback still has the ball.
     pub(crate) fn charge_target(&self, read: usize) -> Option<crate::identity::PlayerId> {

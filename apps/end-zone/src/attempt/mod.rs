@@ -30,6 +30,7 @@
 //! [`controller`]), and [`AttemptLedger`] (what happened, in [`ledger`]). The
 //! `SimState` mutators the loop needs live in [`sim_support`].
 
+pub mod call;
 pub mod controller;
 pub mod ledger;
 pub mod phase;

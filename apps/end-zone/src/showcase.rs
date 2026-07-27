@@ -141,6 +141,14 @@ impl ShowcaseRun {
         };
     }
 
+    /// Pick the offensive concept for the coming snap; false outside pre-snap.
+    pub fn select_concept(&mut self, index: usize) -> bool {
+        match &mut self.run_loop {
+            RunLoop::Attempt(controller, _) => controller.select_concept(index),
+            RunLoop::Ambient(_) => false,
+        }
+    }
+
     /// Offer a decision to the loop; false if it was stale and dropped.
     pub fn choose(&mut self, choice: PlayerChoice) -> bool {
         match &mut self.run_loop {
@@ -171,6 +179,11 @@ impl ShowcaseRun {
                 }
                 // A wind-up only reaches the simulation while the reads are
                 // actually live, so a held key before the snap charges nothing.
+                // Pre-snap the number keys pick the PLAY; once the ball is
+                // live they pick the read. Same keys, one mental model.
+                DiagnosticCommand::ChargeRead(read) if self.pre_snap() => {
+                    self.select_concept(*read);
+                }
                 DiagnosticCommand::ChargeRead(read) => {
                     if let Some(target) = self.charge_target(*read) {
                         let gain = self.charge_gain();
