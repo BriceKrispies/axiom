@@ -51,7 +51,7 @@ pub use view::AttemptStep;
 /// How long the offense stands set before the ball snaps itself (~0.8 s). Long
 /// enough to see the formation and the coverage; short enough that a reset is
 /// not a wait.
-pub const SET_TICKS: u64 = 50;
+pub const SET_TICKS: u64 = 180;
 
 /// The earliest a decision window may open after the snap (~1.1 s). Before
 /// this, nothing has developed and there is nothing to read.

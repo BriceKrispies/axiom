@@ -30,14 +30,11 @@ pub fn candidates(
     out: &mut Vec<ScoredAction>,
 ) {
     if !ctx.live {
+        // The defense answers the offense's shift with its own — a call that
+        // swaps the coverage leaves defenders off their spots too, and them
+        // standing frozen while the offense re-aligns would read as a bug.
         *role = RoleState::Waiting;
-        out.push(ScoredAction::new(
-            PlayerIntent::Hold,
-            Priority::Assignment,
-            0.0,
-            "set",
-            1,
-        ));
+        out.push(super::offense::shift_or_set(player, assignment));
         return;
     }
     *role = RoleState::Defending;

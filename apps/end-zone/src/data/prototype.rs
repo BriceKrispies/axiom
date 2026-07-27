@@ -23,7 +23,7 @@
 use crate::field::{DriveDirection, OffensePoint};
 use crate::identity::{PlayId, TeamId};
 
-use super::formation::spread_offense;
+use super::formation::{doubles_offense, spread_offense, trips_right_offense};
 use super::play::{
     OffenseAssignment, OffenseTag, OffensivePlay, PlayDefinition, RouteDefinition, RouteShape,
 };
@@ -125,7 +125,7 @@ pub fn concept_play(index: usize) -> OffensivePlay {
         id: PlayId(id),
         name,
         tag,
-        formation: spread_offense(),
+        formation: concept_formation(index),
         assignments: [
             quarterback,
             OffenseAssignment::Snapper,
@@ -138,10 +138,21 @@ pub fn concept_play(index: usize) -> OffensivePlay {
     }
 }
 
+/// The formation a concept lines up in. Distinct per concept ON PURPOSE: a
+/// picker that changed only the routes would look identical at the line, so the
+/// player could never see that their call had taken.
+pub fn concept_formation(index: usize) -> super::formation::FormationDefinition {
+    match index.min(CONCEPT_COUNT - 1) {
+        0 => spread_offense(),
+        1 => trips_right_offense(),
+        _ => doubles_offense(),
+    }
+}
+
 /// The offense-relative alignment of a read's receiver in `concept`.
 pub fn read_alignment(concept_index: usize, read: usize) -> OffensePoint {
     let slot = concept(concept_index).read_slots[read.min(READ_COUNT - 1)];
-    spread_offense().slots[slot].position
+    concept_formation(concept_index).slots[slot].position
 }
 
 /// The composed play the prototype lines up before any concept is chosen.

@@ -47,11 +47,12 @@ fn an_attempt_begins_pre_snap_and_snaps_itself() {
         phase(&r)
     );
     assert_eq!(r.sim.phase, PlayPhase::PreSnap);
-    let ticks = until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live)
+    let ticks = until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live)
         .expect("the ball snaps without any input");
     assert!(
-        (30..=90).contains(&ticks),
-        "the automatic snap lands in the pre-snap beat, took {ticks} ticks"
+        (150..=210).contains(&ticks),
+        "the automatic snap lands after the three-second pre-snap beat, \
+         long enough to read the picker and shift, took {ticks} ticks"
     );
     assert!(matches!(phase(&r), Some(AttemptPhase::Developing)));
 }
@@ -59,7 +60,7 @@ fn an_attempt_begins_pre_snap_and_snaps_itself() {
 #[test]
 fn the_play_develops_before_any_window_opens() {
     let mut r = run(0xA77E_0002);
-    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
     let developing = until(&mut r, 400, |r| {
         matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
     })
@@ -192,7 +193,7 @@ fn a_press_before_the_snap_is_rejected_but_the_reads_are_live_after_it() {
         !r.choose(PlayerChoice::Throw(2)),
         "a pre-snap press is stale input"
     );
-    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
     until(&mut r, 60, |r| {
         matches!(phase(r), Some(AttemptPhase::Developing))
     })
@@ -224,7 +225,7 @@ fn a_press_before_the_snap_is_rejected_but_the_reads_are_live_after_it() {
 #[test]
 fn the_window_is_the_prompt_not_the_permission() {
     let mut r = run(0xA77E_0107);
-    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
     // Developing: choosable, full speed.
     assert!(phase(&r).map(|p| p.accepts_choice()).unwrap_or(false));
     assert_eq!(r.time_scale(), 1.0);
@@ -331,7 +332,7 @@ fn the_player_never_steers_while_the_play_is_developing() {
     // The premise under test: the simulation owns every player until a decision
     // is made. A stick pushed during the drop-back must be dropped.
     let mut r = run(0xA77E_000A);
-    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
     for _ in 0..40 {
         r.set_user_stick(axiom::prelude::Vec2::new(1.0, 1.0));
         assert_eq!(
@@ -466,7 +467,7 @@ fn a_window_headline_says_why_it_opened() {
 fn route_shape(seed: u64, concept: usize, ticks: usize) -> Vec<(i32, i32)> {
     let mut r = run(seed);
     assert!(r.select_concept(concept), "the picker is open pre-snap");
-    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
     for _ in 0..ticks {
         r.step(&[]);
     }
@@ -493,13 +494,48 @@ fn picking_a_concept_actually_changes_the_routes_the_receivers_run() {
 }
 
 #[test]
+fn a_new_call_makes_the_offense_shift_into_the_new_formation() {
+    // The pre-snap beat exists so the player can SEE their call take: pick a
+    // different concept and the offense walks to a different alignment. Frozen
+    // players would make the picker invisible; a teleport would make it cheap.
+    let spots = |r: &ShowcaseRun| -> Vec<(i32, i32)> {
+        let step = r.attempt().expect("an attempt view");
+        (0..3)
+            .map(|read| {
+                let p = r.sim.players[step.read.target(read).index()].pos;
+                (p.x.round() as i32, p.z.round() as i32)
+            })
+            .collect()
+    };
+    let mut r = run(0xC0A11_5417);
+    let before = spots(&r);
+    assert!(r.select_concept(2), "the picker is open pre-snap");
+    // Mid-shift: moving, but not yet arrived — this is what rules out a teleport.
+    for _ in 0..8 {
+        r.step(&[]);
+    }
+    let moving = spots(&r);
+    for _ in 0..120 {
+        r.step(&[]);
+        assert_eq!(
+            r.sim.phase,
+            PlayPhase::PreSnap,
+            "the whole shift fits inside the pre-snap clock"
+        );
+    }
+    let after = spots(&r);
+    assert_ne!(before, after, "the offense re-aligns for the new call");
+    assert_ne!(moving, after, "it WALKS there rather than snapping into place");
+}
+
+#[test]
 fn every_concept_keeps_the_read_order_contract() {
     // Read 1 is always the earliest/shallowest and read 3 the deepest, in every
     // concept — that contract is what lets one mental model survive the picker.
     for concept in 0..3usize {
         let mut r = run(0xC0A11_100 + concept as u64);
         assert!(r.select_concept(concept));
-        until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+        until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
         for _ in 0..120 {
             r.step(&[]);
         }
@@ -518,7 +554,7 @@ fn every_concept_keeps_the_read_order_contract() {
 fn a_concept_pick_is_rejected_once_the_ball_is_live() {
     let mut r = run(0xC0A11_200);
     assert!(r.select_concept(2), "pre-snap the picker is open");
-    until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
     assert!(
         !r.select_concept(0),
         "once the ball is live the number keys are reads, not plays"

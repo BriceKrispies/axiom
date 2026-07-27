@@ -14,6 +14,9 @@ use crate::identity::PlayerId;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedAssignment {
     pub kind: AssignmentKind,
+    /// Where this player LINES UP, in world space. Carried alongside the route
+    /// so a pre-snap formation change has somewhere to walk everyone to.
+    pub align: Vec3,
     /// World-space route waypoints (empty when the assignment has no route).
     pub route: Vec<Vec3>,
 }
@@ -94,7 +97,11 @@ pub fn compile_assignments(play: &PlayDefinition, frame: &OffenseFrame) -> Vec<R
             OffenseAssignment::LeadBlock => (AssignmentKind::LeadBlock, Vec::new()),
             OffenseAssignment::BallCarry => (AssignmentKind::BallCarry, Vec::new()),
         };
-        resolved[id.index()] = Some(ResolvedAssignment { kind, route });
+        resolved[id.index()] = Some(ResolvedAssignment {
+            kind,
+            align: frame.to_world(start),
+            route,
+        });
     }
 
     for (slot, assignment) in play.defense_assignments.iter().enumerate() {
@@ -117,8 +124,10 @@ pub fn compile_assignments(play: &PlayDefinition, frame: &OffenseFrame) -> Vec<R
             DefenseAssignment::Pursuit => AssignmentKind::Pursuit,
             DefenseAssignment::TackleTarget => AssignmentKind::TackleTarget,
         };
+        let spot = play.defense_formation.slots[slot].position;
         resolved[id.index()] = Some(ResolvedAssignment {
             kind,
+            align: frame.to_world(spot),
             route: Vec::new(),
         });
     }
@@ -128,6 +137,7 @@ pub fn compile_assignments(play: &PlayDefinition, frame: &OffenseFrame) -> Vec<R
         .map(|a| {
             a.unwrap_or(ResolvedAssignment {
                 kind: AssignmentKind::Pursuit,
+                align: Vec3::ZERO,
                 route: Vec::new(),
             })
         })

@@ -19,6 +19,32 @@ use super::PlayerIntent;
 const WAYPOINT_RANGE: f32 = 0.9;
 /// A loose ball inside this range is worth chasing, yards.
 const LOOSE_ALERT: f32 = 14.0;
+/// A player this far off his alignment is considered SET, yards. Loose enough
+/// that ordinary settling never reads as a shift.
+const SET_RANGE: f32 = 0.6;
+
+/// The pre-snap candidate: walk to the spot this play wants, or stand in it.
+///
+/// This is what makes the pre-snap picker legible. Choosing a concept swaps the
+/// formation under the offense, and rather than teleporting everyone into the
+/// new alignment the receivers WALK there — the shift is the feedback that the
+/// call took, and it costs the player some of the pre-snap clock to make it.
+pub(super) fn shift_or_set(player: &PlayerSim, assignment: &ResolvedAssignment) -> ScoredAction {
+    let flat = Vec3::new(player.pos.x, assignment.align.y, player.pos.z);
+    match flat.distance(assignment.align) > SET_RANGE {
+        true => ScoredAction::new(
+            PlayerIntent::MoveToward {
+                point: assignment.align,
+                sprint: false,
+            },
+            Priority::Assignment,
+            0.0,
+            "shift",
+            1,
+        ),
+        false => ScoredAction::new(PlayerIntent::Hold, Priority::Assignment, 0.0, "set", 1),
+    }
+}
 
 /// Push an offensive player's candidate actions.
 pub fn candidates(
@@ -30,13 +56,7 @@ pub fn candidates(
 ) {
     if !ctx.live {
         *role = RoleState::Waiting;
-        out.push(ScoredAction::new(
-            PlayerIntent::Hold,
-            Priority::Assignment,
-            0.0,
-            "set",
-            1,
-        ));
+        out.push(shift_or_set(player, assignment));
         return;
     }
     loose_ball_candidate(player, ctx, out);

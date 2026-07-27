@@ -6,7 +6,6 @@
 //! below it (AI, ball, contact, presentation) is the app's existing machinery,
 //! untouched.
 
-use crate::ai::RoleState;
 use crate::data::prototype::PROTOTYPE_LINE;
 use crate::events::PlayEndReason;
 use crate::launch::RunConfig;
@@ -147,13 +146,15 @@ impl AttemptController {
                 AttemptPhase::Developing
             }
             AttemptPhase::PreSnap { snap_at } => {
-                // Applying the pick RE-INSTALLS the play so the route waypoints
-                // recompile; otherwise it would only relabel the reads.
+                // Applying the pick RE-INSTALLS the play so the routes and the
+                // alignment recompile; otherwise it would only relabel the
+                // reads. Deliberately NO `BeginPlay` — that re-lines both teams
+                // up instantly, and the point of the pre-snap clock is to watch
+                // the offense SHIFT into the new formation on its own feet.
                 if let Some(next) = self.pending_concept.take() {
                     self.concept = next;
                     self.last_defense_index =
                         setup::install(sim, config, self.attempt_index, self.concept);
-                    commands.push(SimCommand::BeginPlay);
                 }
                 AttemptPhase::PreSnap { snap_at }
             }
