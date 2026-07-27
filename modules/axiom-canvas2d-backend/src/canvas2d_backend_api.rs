@@ -454,16 +454,40 @@ fn now_ms() -> f64 {
     0.0
 }
 
+/// Whether per-frame profile logging is switched on, read ONCE from the page
+/// URL (`?profile=1`) and cached.
+///
+/// Off by default, because these lines fire every frame: ~216k console entries
+/// an hour, which the browser retains while devtools is open. That is a real
+/// contributor to a session that is fine at first and laggy after a while, and
+/// it costs a `format!` per frame even when nobody is reading it.
+///
+/// `tools/axiom-render-bench` opts in by loading the page with `?profile=1`.
+#[cfg(target_arch = "wasm32")]
+fn profiling_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        web_sys::window()
+            .and_then(|w| w.location().search().ok())
+            .map(|search| search.contains("profile=1"))
+            .unwrap_or(false)
+    })
+}
+
 /// The phase sink installed on the rasterizer: log the coarse `convert` /
 /// `rasterize` / `post` millisecond split as its own console line (wasm only;
 /// native is a no-op, so the deterministic path emits nothing). `convert` is the
 /// dominant Canvas2D cost — this line is what the render benchmark parses.
 #[cfg(target_arch = "wasm32")]
 fn log_phases(convert_ms: f64, rasterize_ms: f64, post_ms: f64) {
-    let msg = format!(
-        "axiom-canvas2d PROFILE: convert={convert_ms:.1}ms rasterize={rasterize_ms:.1}ms post={post_ms:.1}ms"
-    );
-    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
+    // `then` keeps this branchless AND keeps the `format!` inside, so a frame
+    // with profiling off does no string work at all.
+    let _ = profiling_enabled().then(|| {
+        let msg = format!(
+            "axiom-canvas2d PROFILE: convert={convert_ms:.1}ms rasterize={rasterize_ms:.1}ms post={post_ms:.1}ms"
+        );
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&msg));
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -490,6 +514,12 @@ fn deep_log(_project_ms: f64, _shade_ms: f64, _draws: u32, _triangles: usize) {}
 /// the deterministic path emits nothing and reads no clock).
 #[cfg(target_arch = "wasm32")]
 fn log_timing(result: &SoftwareRasterResult, raster_ms: f64, blit_ms: f64) {
+    // Same gate as the phase line: off by default, and the format! stays inside.
+    let _ = profiling_enabled().then(|| log_timing_now(result, raster_ms, blit_ms));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn log_timing_now(result: &SoftwareRasterResult, raster_ms: f64, blit_ms: f64) {
     let c = result.conversion();
     let msg = format!(
         "axiom-canvas2d: backend=Canvas2d profile=LowPolyFramebuffer depth_cue_profile={} {}x{} \
