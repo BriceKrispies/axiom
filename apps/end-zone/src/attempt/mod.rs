@@ -9,7 +9,7 @@
 //! ```text
 //! PreSnap ──auto snap──▶ Developing ──trigger──▶ DecisionWindow
 //!                            ▲                        │
-//!                            └──── no choice ─────────┤ (slow-motion closes,
+//!                            └──── no choice ─────────┤ (the window closes,
 //!                                                     │  the rush keeps coming)
 //!                       ┌── throw 1|2|3 ──────────────┤
 //!                       │                             └── scramble ──┐
@@ -61,21 +61,22 @@ pub const DEVELOP_MIN_TICKS: u64 = 66;
 /// attempt can ever run without offering at least one decision.
 pub const DEVELOP_MAX_TICKS: u64 = 156;
 
-/// How long a window stays open, in simulation ticks. At
-/// [`DECISION_TIME_SCALE`] this is ~3.6 real seconds for the first window —
-/// enough to actually look at the coverage, pick a receiver and press a key,
-/// including on a touch screen where the "key" is a thumb travelling across
-/// the display. The first pass at 20 ticks / 0.16× (~2.1 s) read as a reflex
-/// test rather than a decision.
-pub const WINDOW_TICKS: u64 = 28;
+/// How long a window stays open, in simulation ticks. Time is NOT dilated (see
+/// [`DECISION_TIME_SCALE`]), so a tick is 1/60 s of real time: 90 → 1.5 s for
+/// the first look, then 1.1 s, then 0.8 s.
+///
+/// Shorter than the dilated version was, and necessarily so: at full speed the
+/// window costs the offense real GAME time, so a long one just hands the pass
+/// rush a free sack. The window is now a prompt, not a pause.
+pub const WINDOW_TICKS: u64 = 90;
 
 /// Every window after the first is this many ticks shorter — declining a read
 /// costs time as well as field position, so the third look is a snap judgement.
-pub const WINDOW_DECAY_TICKS: u64 = 6;
+pub const WINDOW_DECAY_TICKS: u64 = 24;
 
-/// The fewest ticks any window stays open, however late it is (~2.0 s). The
+/// The fewest ticks any window stays open, however late it is (~0.8 s). The
 /// last look is meant to be rushed, not impossible.
-pub const WINDOW_MIN_TICKS: u64 = 16;
+pub const WINDOW_MIN_TICKS: u64 = 48;
 
 /// Windows one attempt may offer before the quarterback is on his own. After
 /// the last one closes the play still runs — the rush simply gets home.
@@ -89,16 +90,22 @@ pub const WINDOW_COOLDOWN_TICKS: u64 = 20;
 /// How long after a window closes the next one opens no matter what.
 pub const REARM_DEADLINE_TICKS: u64 = 48;
 
-/// Time dilation while a decision window is open. Not a pause: the rush keeps
-/// closing, the routes keep running and the coverage keeps rotating — just
-/// slowly enough to read.
+/// Time dilation while a decision window is open. **1.0 — off.**
 ///
-/// This buys reading time far more cheaply than a longer window does: dilation
-/// costs the player only real seconds, while extra `WINDOW_TICKS` also let the
-/// rush get closer. The two are tuned together — the window durations quoted
-/// above are `ticks / (60 * DECISION_TIME_SCALE)` seconds:
-/// **3.6 s → 2.8 s → 2.1 s** across the three looks.
-pub const DECISION_TIME_SCALE: f32 = 0.13;
+/// The slow-motion beat was built, shipped, and then deliberately switched off:
+/// the design moved away from slowing the game down. The machinery is intact
+/// and still compiled — the fractional tick-credit stepping in
+/// [`crate::app::EndZoneApp::advance`] and the render interpolation in
+/// [`crate::presentation::interpolate`] are both keyed on `time_scale < 1.0`,
+/// so setting this back to `0.13` wakes the whole path up in one edit.
+///
+/// If you do, re-tune [`WINDOW_TICKS`] and friends: they are in TICKS, so their
+/// real duration is `ticks / (60 * scale)`, and dilating without re-tuning
+/// shortens every window by the dilation factor.
+///
+/// The technique, and the four rules that stop it looking like frame stutter,
+/// are written up in `docs/time-dilation-and-render-interpolation.md`.
+pub const DECISION_TIME_SCALE: f32 = 1.0;
 
 /// How long the result card holds before the next attempt (~0.9 s).
 pub const RESULT_TICKS: u64 = 54;

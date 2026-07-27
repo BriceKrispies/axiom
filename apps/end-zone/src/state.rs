@@ -34,7 +34,7 @@ use crate::player::{controller, PlayerSim};
 ///
 /// Sized by feel. At 20 it filled in a third of a second, which is a flicker
 /// rather than a wind-up: there was no span in which to release it deliberately.
-pub const CHARGE_MAX_TICKS: u32 = 54;
+pub const CHARGE_MAX_TICKS: u32 = 36;
 
 /// The play lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -84,19 +84,22 @@ fn a_decision_window_always_opens_within_the_deadline() {
 }
 
 #[test]
-fn the_window_runs_in_slow_motion_and_full_speed_everywhere_else() {
+fn the_game_never_dilates_time() {
     let mut r = run(0xA77E_0003);
     assert_eq!(r.time_scale(), 1.0, "pre-snap runs at full speed");
     until(&mut r, 500, |r| {
         matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
     })
     .expect("a window opens");
-    assert_eq!(
-        r.time_scale(),
-        DECISION_TIME_SCALE,
-        "the window dilates time"
-    );
-    // Slow motion is NOT a pause: the simulation still advances through it.
+    // Slow motion is PARKED, not deleted: the tick-credit stepping and the
+    // render interpolation are both still compiled and both keyed on
+    // `time_scale < 1.0`. This pins the switch to OFF so a stray dilation
+    // cannot creep back in unnoticed — and so that re-arming it is a
+    // deliberate act that trips this test.
+    // See docs/time-dilation-and-render-interpolation.md.
+    assert_eq!(DECISION_TIME_SCALE, 1.0, "time dilation stays off");
+    assert_eq!(r.time_scale(), 1.0, "the window runs at full speed");
+    // The play keeps running through the window either way.
     let before = r.sim.tick;
     r.step(&[]);
     assert_eq!(
@@ -219,7 +222,7 @@ fn a_press_before_the_snap_is_rejected_but_the_reads_are_live_after_it() {
 }
 
 #[test]
-fn the_window_is_the_slowdown_not_the_permission() {
+fn the_window_is_the_prompt_not_the_permission() {
     let mut r = run(0xA77E_0107);
     until(&mut r, 200, |r| r.sim.phase == PlayPhase::Live).expect("snap");
     // Developing: choosable, full speed.
@@ -232,7 +235,7 @@ fn the_window_is_the_slowdown_not_the_permission() {
     })
     .expect("a window opens");
     assert!(phase(&r).map(|p| p.accepts_choice()).unwrap_or(false));
-    assert_eq!(r.time_scale(), DECISION_TIME_SCALE);
+    assert_eq!(r.time_scale(), 1.0, "the window is a prompt, not a pause");
 }
 
 #[test]
