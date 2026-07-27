@@ -50,6 +50,10 @@ pub struct AttemptController {
     pub(super) concept: usize,
     /// A concept picked during this pre-snap, applied when the play installs.
     pub(super) pending_concept: Option<usize>,
+    /// Whether the player has called a play this pre-snap. A call arms the
+    /// snap: the ball goes the moment the offense is set in its new alignment,
+    /// so pressing a play IS the snap count.
+    pub(super) called: bool,
 }
 
 impl AttemptController {
@@ -70,6 +74,7 @@ impl AttemptController {
             last_defense_index: 0,
             concept: 0,
             pending_concept: None,
+            called: false,
         }
     }
 
@@ -134,7 +139,7 @@ impl AttemptController {
                     snap_at: tick + SET_TICKS,
                 }
             }
-            AttemptPhase::PreSnap { snap_at } if tick >= snap_at => {
+            AttemptPhase::PreSnap { snap_at } if self.ready_to_snap(sim, tick, snap_at) => {
                 commands.push(SimCommand::Snap);
                 self.dead_at = tick + MAX_LIVE_TICKS;
                 self.gate = WindowGate {
@@ -145,19 +150,7 @@ impl AttemptController {
                 };
                 AttemptPhase::Developing
             }
-            AttemptPhase::PreSnap { snap_at } => {
-                // Applying the pick RE-INSTALLS the play so the routes and the
-                // alignment recompile; otherwise it would only relabel the
-                // reads. Deliberately NO `BeginPlay` — that re-lines both teams
-                // up instantly, and the point of the pre-snap clock is to watch
-                // the offense SHIFT into the new formation on its own feet.
-                if let Some(next) = self.pending_concept.take() {
-                    self.concept = next;
-                    self.last_defense_index =
-                        setup::install(sim, config, self.attempt_index, self.concept);
-                }
-                AttemptPhase::PreSnap { snap_at }
-            }
+            AttemptPhase::PreSnap { snap_at } => self.hold(sim, config, snap_at),
             // A choice can land here as well as in a window: throwing early, at
             // full speed, is the anticipatory read.
             AttemptPhase::Developing => match self.pending.take() {
@@ -286,6 +279,7 @@ impl AttemptController {
         self.windows = 0;
         self.dead_at = u64::MAX;
         self.los_yard = PROTOTYPE_LINE;
+        self.called = false;
         self.gate = WindowGate::closed();
         self.last_defense_index = setup::install(sim, config, self.attempt_index, self.concept);
     }

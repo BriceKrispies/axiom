@@ -35,6 +35,7 @@ pub mod controller;
 pub mod in_flight;
 pub mod ledger;
 pub mod phase;
+mod pre_snap;
 pub mod read;
 mod setup;
 mod sim_support;
@@ -48,10 +49,19 @@ pub use view::AttemptStep;
 
 // --- attempt timing (all in 60 Hz simulation ticks) ---------------------------
 
-/// How long the offense stands set before the ball snaps itself (~0.8 s). Long
-/// enough to see the formation and the coverage; short enough that a reset is
-/// not a wait.
+/// How long the offense holds at the line before the ball snaps itself (3 s).
+/// The beat exists to call a play in, so it is long enough to read the picker
+/// and decide — and it is the fallback, not the norm: calling a play snaps the
+/// ball early (see [`SHIFT_TICKS`]).
 pub const SET_TICKS: u64 = 180;
+
+/// The longest a called play waits for its shift before snapping anyway
+/// (~1 s). Calling is the snap count: the ball goes the moment the offense is
+/// set, and this bounds the wait when the new formation is a long walk away, so
+/// a call is always answered promptly rather than inheriting the full hold. A
+/// man still moving at the snap is simply late — which is what happens on a
+/// real field, and is the cost of calling a formation you were far from.
+pub const SHIFT_TICKS: u64 = 60;
 
 /// The earliest a decision window may open after the snap (~1.1 s). Before
 /// this, nothing has developed and there is nothing to read.

@@ -32,6 +32,7 @@ impl SimState {
         let ctx = BrainCtx {
             tick: self.tick,
             live: self.phase == PlayPhase::Live,
+            pre_snap: self.phase == PlayPhase::PreSnap,
             tuning: &self.tuning,
             ball: &self.ball,
             possession: self.possession,

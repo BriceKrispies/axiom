@@ -123,6 +123,11 @@ pub struct BrainCtx<'a> {
     pub tick: u64,
     /// Whether the play is live (post-snap, pre-whistle).
     pub live: bool,
+    /// Whether the ball has not been snapped yet. Deliberately NOT `!live`,
+    /// which is also true after the whistle: a player lines up before the snap
+    /// and coasts to a stop after it, and conflating the two sends a dead-play
+    /// carrier sprinting back to his alignment.
+    pub pre_snap: bool,
     pub tuning: &'a BehaviorTuning,
     pub ball: &'a BallSim,
     pub possession: Option<PlayerId>,

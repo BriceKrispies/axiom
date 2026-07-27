@@ -21,21 +21,32 @@ const WAYPOINT_RANGE: f32 = 0.9;
 const LOOSE_ALERT: f32 = 14.0;
 /// A player this far off his alignment is considered SET, yards. Loose enough
 /// that ordinary settling never reads as a shift.
-const SET_RANGE: f32 = 0.6;
+pub const SET_RANGE: f32 = 0.6;
 
-/// The pre-snap candidate: walk to the spot this play wants, or stand in it.
+/// The not-live candidate: get to the spot this play wants, or stand still.
 ///
 /// This is what makes the pre-snap picker legible. Choosing a concept swaps the
 /// formation under the offense, and rather than teleporting everyone into the
-/// new alignment the receivers WALK there — the shift is the feedback that the
-/// call took, and it costs the player some of the pre-snap clock to make it.
-pub(super) fn shift_or_set(player: &PlayerSim, assignment: &ResolvedAssignment) -> ScoredAction {
+/// new alignment they RUN there — the shift is the feedback that the call took,
+/// and finishing it is what triggers the snap.
+///
+/// `pre_snap` is not `!live`: the whistle is also not-live, and a player who
+/// went looking for his alignment on a dead play would drag the ball back
+/// upfield after every tackle. After the snap this always holds.
+pub(super) fn shift_or_set(
+    player: &PlayerSim,
+    assignment: &ResolvedAssignment,
+    pre_snap: bool,
+) -> ScoredAction {
     let flat = Vec3::new(player.pos.x, assignment.align.y, player.pos.z);
-    match flat.distance(assignment.align) > SET_RANGE {
+    match pre_snap && flat.distance(assignment.align) > SET_RANGE {
         true => ScoredAction::new(
+            // At a hustle. The shift is what stands between pressing a play and
+            // the snap, so a leisurely walk would turn a responsive call into a
+            // two-second wait.
             PlayerIntent::MoveToward {
                 point: assignment.align,
-                sprint: false,
+                sprint: true,
             },
             Priority::Assignment,
             0.0,
@@ -56,7 +67,7 @@ pub fn candidates(
 ) {
     if !ctx.live {
         *role = RoleState::Waiting;
-        out.push(shift_or_set(player, assignment));
+        out.push(shift_or_set(player, assignment, ctx.pre_snap));
         return;
     }
     loose_ball_candidate(player, ctx, out);

@@ -8,6 +8,7 @@
 
 use axiom_end_zone::attempt::{
     AttemptOutcome, AttemptPhase, PlayerChoice, WindowTrigger, DECISION_TIME_SCALE, MAX_WINDOWS,
+    SHIFT_TICKS,
 };
 use axiom_end_zone::launch::RunConfig;
 use axiom_end_zone::showcase::ShowcaseRun;
@@ -494,6 +495,41 @@ fn picking_a_concept_actually_changes_the_routes_the_receivers_run() {
 }
 
 #[test]
+fn calling_a_play_is_the_snap_count() {
+    // Pressing a play starts the snap: the ball goes as soon as the offense has
+    // shifted into it, and never later than the shift budget. The three-second
+    // hold is the fallback for calling NOTHING — a player who calls is never
+    // left waiting out a clock they cannot influence.
+    let snap_after = |concept: usize| {
+        let mut r = run(0xA77E_9002);
+        r.step(&[]);
+        assert!(r.select_concept(concept), "the picker is open pre-snap");
+        until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("the ball snaps")
+    };
+    let calls: Vec<usize> = (0..3).map(snap_after).collect();
+    calls.iter().enumerate().for_each(|(concept, &ticks)| {
+        assert!(
+            (ticks as u64) <= SHIFT_TICKS + 2,
+            "concept {concept} answered its call in {ticks} ticks, over the \
+             {SHIFT_TICKS}-tick shift budget"
+        );
+    });
+    // Re-calling the formation already on the field has nothing to shift, so it
+    // snaps at once — the cue is "the offense is set", not a fixed delay.
+    assert!(
+        calls[0] <= 4,
+        "calling the standing formation snaps immediately, took {} ticks",
+        calls[0]
+    );
+    // A formation that IS a change costs real time to walk into.
+    assert!(
+        calls[2] > 10,
+        "a real shift is walked, not teleported, took {} ticks",
+        calls[2]
+    );
+}
+
+#[test]
 fn the_world_holds_still_before_the_snap() {
     // The three seconds before the snap are the player's to call a play in, so
     // they have to READ as paused: nothing drifts, nothing settles, nobody
@@ -537,16 +573,10 @@ fn a_new_call_makes_the_offense_shift_into_the_new_formation() {
     // Mid-shift: moving, but not yet arrived — this is what rules out a teleport.
     for _ in 0..8 {
         r.step(&[]);
+        assert_eq!(r.sim.phase, PlayPhase::PreSnap, "still shifting, not snapped");
     }
     let moving = spots(&r);
-    for _ in 0..120 {
-        r.step(&[]);
-        assert_eq!(
-            r.sim.phase,
-            PlayPhase::PreSnap,
-            "the whole shift fits inside the pre-snap clock"
-        );
-    }
+    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("the shift ends in a snap");
     let after = spots(&r);
     assert_ne!(before, after, "the offense re-aligns for the new call");
     assert_ne!(moving, after, "it WALKS there rather than snapping into place");

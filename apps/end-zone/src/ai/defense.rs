@@ -34,7 +34,7 @@ pub fn candidates(
         // swaps the coverage leaves defenders off their spots too, and them
         // standing frozen while the offense re-aligns would read as a bug.
         *role = RoleState::Waiting;
-        out.push(super::offense::shift_or_set(player, assignment));
+        out.push(super::offense::shift_or_set(player, assignment, ctx.pre_snap));
         return;
     }
     *role = RoleState::Defending;
