@@ -35,8 +35,10 @@ export const DT = 1 / FIXED_HZ;
  *   v0    = dir(yaw, θ)·hypot(vFwd, vUp)            (yaw is the player's mouse aim)
  *
  * Early releases are low and weak, the ideal window (idealWindowStart..End) is
- * aligned and strong, late releases are hard and flat. The camera is exclusively
- * mouse-driven — the game never rotates, nudges, or drifts the view.
+ * aligned and strong, late releases are hard and flat. The camera is drag-driven
+ * and never captured; the game never rotates, nudges, or drifts the view while
+ * you shoot. Its one exception is the rack glide's aim hold (see `session.ts`),
+ * which carries the aim the player already had and yields to the first input.
  */
 export const SHOT_TUNING = {
   // ── motion timing (ticks) ──────────────────────────────────────────────────
@@ -71,7 +73,7 @@ export const SHOT_TUNING = {
   /** Scale of the per-slot variation in the ball's chest/entry pose (0..1).
    * Ball presentation only — the camera is NEVER moved by the game. */
   rackSlotPoseInfluence: 0.5,
-  // ── aim (the camera is exclusively player-driven) ──────────────────────────
+  // ── aim (drag-driven; the cursor is never captured) ────────────────────────
   /** Horizontal aim: radians of yaw per pixel of mouse movement. */
   aimYawSensitivity: 0.0026,
   /** Vertical look: radians of pitch per pixel of mouse movement (camera only). */

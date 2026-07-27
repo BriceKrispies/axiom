@@ -7,8 +7,12 @@
  * It exports `readHud()` for the harness's DOM overlay and `configureViewport()`
  * for touch-gesture projection.
  *
- * Desktop: click the court to grab the pointer · mouse aims · hold SPACE to rise
- * into the shot, release at the top · R restarts (Escape releases the pointer).
+ * Nothing here captures the cursor (the harness attaches input with
+ * `pointerLock: false`), so aim is one gesture everywhere: DRAG THE COURT. A
+ * mouse drag and a finger drag feed the identical canvas pointer stream.
+ *
+ * Desktop: drag to aim · hold SPACE to rise into the shot, release at the top ·
+ * R restarts.
  *
  * Touch (the swipe-basketball gesture model): drag anywhere to look; a touch
  * that STARTS in the lower-center zone (on the held ball) is a shot gesture —

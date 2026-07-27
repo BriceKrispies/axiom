@@ -160,14 +160,14 @@
         100% { transform: translateX(-50%) scale(1); }
       }
 
-      /* Pointer-lock cue over the canvas. */
-      #lock-cue {
+      /* One-time controls cue over the canvas (nothing captures the pointer). */
+      #controls-cue {
         position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
         background: rgba(5, 6, 10, 0.45); border-radius: 10px; pointer-events: none;
         font: 700 17px/1 ui-monospace, monospace; color: #ffe25a; letter-spacing: 1px;
         text-shadow: 0 2px 0 #000; opacity: 0; transition: opacity .15s;
       }
-      #lock-cue.on { opacity: 1; }
+      #controls-cue.on { opacity: 1; }
 
       /* Results overlay. */
       #results {
@@ -240,7 +240,7 @@
         <div id="power-track"><div id="power-zone"></div><div id="power-fill"></div></div>
       </div>
       <div id="moving"></div>
-      <div id="lock-cue"><span class="desktop-only">CLICK THE COURT TO AIM</span><span class="touch-only">DRAG TO AIM &middot; HOLD THE SHOOT BUTTON BELOW</span></div>
+      <div id="controls-cue">DRAG THE COURT TO AIM &middot; HOLD THE SHOOT BUTTON BELOW</div>
       <div id="results">
         <div id="res-title">BUZZER</div>
         <div class="row reveal" id="row-score">FINAL <b id="res-score">0</b></div>
@@ -253,7 +253,7 @@
     <div id="pad">
       <div id="pad-shoot">HOLD TO SHOOT</div>
     </div>
-    <div id="instructions"><span class="desktop-only">Click to aim · mouse steers left/right · hold SPACE (or the button) to rise into the shot · release at the top · R restarts</span><span class="touch-only">Drag to aim · hold the button below to rise into the shot and lift off at the top · or swipe up from the ball to flick it</span></div>
+    <div id="instructions"><span class="desktop-only">Drag the court to aim · hold SPACE (or the button) to rise into the shot · release at the top · R restarts · the glide between racks holds your aim until you move it</span><span class="touch-only">Drag to aim · hold the button below to rise into the shot and lift off at the top · or swipe up from the ball to flick it</span></div>
 
     <script type="module" src="/dist/harness.js"></script>
   </body>

@@ -20,11 +20,17 @@
  * `gameplay.ts`); releasing launches at that exact instant. The reticle exists
  * only while a ball is at the chest or rising — it is the true launch calculation.
  *
- * THE CAMERA IS EXCLUSIVELY MOUSE-DRIVEN. The game never rotates, nudges, eases,
- * or drifts the view — no pickup glance, no rise tilt, no follow-through motion,
- * no aim reset. The only thing the game moves is the player's POSITION during the
- * rack-to-rack glide (the spec fixes the shooting spots); orientation stays under
- * the mouse the whole way, inside soft bounds that block-not-snap at the edges.
+ * THE CAMERA IS PLAYER-OWNED, WITH ONE BOUNDED EXCEPTION. The game never rotates,
+ * nudges, eases, or drifts the view — no pickup glance, no rise tilt, no
+ * follow-through motion, no aim reset — while the player is shooting. The one
+ * exception is the rack-to-rack glide: the game moves the player's POSITION
+ * between the fixed shooting spots, and because a sideways slide would otherwise
+ * swing the hoop out from under a stationary aim, the glide HOLDS the aim point.
+ * It freezes the world point the view was already on at hoop distance and keeps
+ * that point centered as the eye travels — the player's own aim, carried, never
+ * a new one chosen for them. The very first look input during a glide releases
+ * the hold for the rest of that glide, instantly and permanently. Everywhere
+ * else orientation is the mouse's alone, inside soft bounds that block-not-snap.
  *
  * Scoring resolves per ball as it lands but is APPLIED in launch order, so the
  * streak formula reads exactly like sequential shots: a make awards
@@ -49,6 +55,7 @@ import {
   RACK_COUNT,
   RACK_LABELS,
   RIM_X,
+  RIM_Y,
   RIM_Z,
   SHOT_TUNING,
   STATIONS,
@@ -112,6 +119,10 @@ export class ThreePointSession {
   // Aim (the stored, player-owned orientation — presentation offsets never touch it).
   #yaw: number = STATIONS[0]!.baseYaw;
   #pitch: number = SHOT_TUNING.pitchNeutral;
+  /** While a rack-to-rack glide holds the aim: the frozen world point the view
+   * stays on as the eye travels. Null means the player owns the view outright —
+   * either no glide is running, or a look input already released the hold. */
+  #glideAimPoint: Vec3 | null = null;
 
   // The ball in hand.
   #handSlot = -1;
@@ -262,6 +273,7 @@ export class ThreePointSession {
     this.#rackTaken = this.#rackTaken.map(() => false);
     this.#yaw = STATIONS[0]!.baseYaw;
     this.#pitch = SHOT_TUNING.pitchNeutral;
+    this.#glideAimPoint = null;
     this.#handSlot = -1;
     this.#handTicks = 0;
     this.#motionTicks = 0;
@@ -353,11 +365,42 @@ export class ThreePointSession {
 
   /** The mouse owns the camera in every phase. Yaw lives inside a SOFT bound
    * around the current station's hoop-facing direction: movement deeper out of
-   * range is blocked, never snapped — the game itself never turns the view. */
+   * range is blocked, never snapped.
+   *
+   * This runs BEFORE the phase step, so a look input during a glide releases the
+   * aim hold in the very tick it arrives — the player's hand always wins the tick
+   * it moves, and the hold never comes back for that glide. */
   #applyAim(intent: Intent): void {
+    if (intent.lookDx !== 0 || intent.lookDy !== 0) this.#glideAimPoint = null;
     const base = this.#currentStation().baseYaw;
     this.#yaw = softBoundedTurn(this.#yaw, intent.lookDx * SHOT_TUNING.aimYawSensitivity, base, SHOT_TUNING.yawClampHalf);
     this.#pitch = clamp(this.#pitch - intent.lookDy * SHOT_TUNING.aimPitchSensitivity, SHOT_TUNING.minPitch, SHOT_TUNING.maxPitch);
+  }
+
+  /** The world point the current aim ray reaches at the hoop's distance — the
+   * spot the view is on right now. Aimed dead at the rim this IS the rim centre;
+   * aimed off it, it is the same amount off. Frozen at the start of a glide so
+   * the travel can keep it centered. */
+  #aimPointAtHoopDistance(): Vec3 {
+    const eye = this.#eyeAtStation(this.#currentStation());
+    const reach = Math.hypot(RIM_X - eye.x, RIM_Y - eye.y, RIM_Z - eye.z);
+    const dir = aimDirection(this.#yaw, this.#pitch);
+    return vec3(eye.x + dir.x * reach, eye.y + dir.y * reach, eye.z + dir.z * reach);
+  }
+
+  /** Point the stored aim at `target` from `eye` — the exact inverse of
+   * `aimDirection`, so re-deriving the aim from the point it is already on is a
+   * no-op (the hold starts without a jump). */
+  #lookAt(eye: Vec3, target: Vec3): void {
+    const dx = target.x - eye.x;
+    const dy = target.y - eye.y;
+    const dz = target.z - eye.z;
+    this.#yaw = Math.atan2(dx, -dz);
+    this.#pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), SHOT_TUNING.minPitch, SHOT_TUNING.maxPitch);
+  }
+
+  #eyeAtStation(station: ShootingStation): Vec3 {
+    return vec3(station.position.x, EYE_HEIGHT, station.position.z);
   }
 
   // ── dealing + shooting ──────────────────────────────────────────────────────
@@ -448,6 +491,8 @@ export class ThreePointSession {
     if (this.#station < RACK_COUNT - 1) {
       this.#phase = "movingToNextRack";
       this.#phaseTicks = 0;
+      // Freeze the spot the player is already looking at; the glide carries it.
+      this.#glideAimPoint = this.#aimPointAtHoopDistance();
       this.#pushGameEvent({ kind: "stationTransitionStarted", label: RACK_LABELS[this.#station + 1] ?? "" });
     } else {
       this.#results = {
@@ -463,10 +508,15 @@ export class ThreePointSession {
   }
 
   /** The glide moves the player's POSITION to the next station (locations are
-   * game-fixed by design); the view stays wherever the mouse points it. */
+   * game-fixed by design). A sideways slide would swing the hoop out from under
+   * a stationary aim, so while the hold is live the view tracks the point frozen
+   * at the start — the player's own aim, carried across. Once `#glideAimPoint`
+   * is null (a look input released it) the view is the mouse's again. */
   #tickMoving(): void {
     this.#phaseTicks += 1;
+    if (this.#glideAimPoint !== null) this.#lookAt(this.#glideEye(), this.#glideAimPoint);
     if (this.#phaseTicks >= MOVE_TICKS) {
+      this.#glideAimPoint = null;
       this.#station += 1;
       this.#ballIndex = 0;
       this.#pushGameEvent({
@@ -643,18 +693,25 @@ export class ThreePointSession {
 
   // ── camera + reticle + scene view ───────────────────────────────────────────
 
+  /** Eye position partway through the rack-to-rack glide. `#tickMoving` and the
+   * camera read the SAME function, so the point the hold tracks is centered from
+   * exactly the eye the frame renders — one authored travel path, not two. */
+  #glideEye(): Vec3 {
+    const t = smoothstep(this.#phaseTicks / MOVE_TICKS);
+    const pos = lerp(this.#currentStation().position, STATIONS[this.#station + 1]!.position, t);
+    return vec3(pos.x, EYE_HEIGHT, pos.z);
+  }
+
   /** The camera: orientation is ALWAYS exactly the player's stored aim (the game
-   * never offsets it); position is the station spot, interpolated during the
-   * rack-to-rack glide, plus the release kick — a tiny, brief POSITION recoil
+   * never offsets it — the glide hold writes that stored aim itself rather than
+   * layering an offset on top); position is the station spot, interpolated during
+   * the rack-to-rack glide, plus the release kick — a tiny, brief POSITION recoil
    * against the shot direction (visual only; it never touches yaw/pitch and
    * never alters a launch). */
   #cameraEye(): { position: Vec3; yaw: number; pitch: number } {
     const station = this.#currentStation();
     if (this.#phase === "movingToNextRack") {
-      const next = STATIONS[this.#station + 1]!;
-      const t = smoothstep(this.#phaseTicks / MOVE_TICKS);
-      const pos = lerp(station.position, next.position, t);
-      return { pitch: this.#pitch, position: vec3(pos.x, EYE_HEIGHT, pos.z), yaw: this.#yaw };
+      return { pitch: this.#pitch, position: this.#glideEye(), yaw: this.#yaw };
     }
     const recoil = this.#polish.kickRecoil();
     const fwd = yawForward(this.#yaw);

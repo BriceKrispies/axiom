@@ -31,13 +31,21 @@ air at once, each scored independently and applied in shot order.
 4. **Follow-through** — a brief beat while the next ball is already on its way
    to your hands.
 
-**The camera is exclusively yours.** The game never rotates, nudges, eases, or
-drifts the view — no pickup glance, no rise tilt, no follow-through motion, no
-aim reset. Only your position moves (the glide between the three fixed shooting
-spots); orientation is pure mouse, inside soft edge bounds that block rather
-than snap. Skill = your horizontal aim (each station's hoop line is different)
-plus release timing. No randomness anywhere — identical aim + release progress
-always produce the identical shot.
+**The camera is yours, and nothing ever captures your cursor.** Aim is a drag on
+the court — the same gesture with a mouse or a finger; the game never requests
+pointer lock. While you are shooting it never rotates, nudges, eases, or drifts
+the view either: no pickup glance, no rise tilt, no follow-through motion, no aim
+reset, all inside soft edge bounds that block rather than snap.
+
+The one exception is the glide between the three fixed shooting spots. Sliding
+sideways would swing the hoop out from under a stationary aim, so the glide
+**holds the aim point you already chose**: it freezes the spot your view was on
+and keeps that spot centered while you travel. It carries your aim; it never
+picks a new one, and it never corrects a bad one. The instant you move the mouse
+mid-glide the hold is gone for the rest of that glide — you take the view back
+immediately, and it does not creep back. Skill = your horizontal aim (each
+station's hoop line is different) plus release timing. No randomness anywhere —
+identical aim + release progress always produce the identical shot.
 
 ## Controls
 

@@ -5,8 +5,11 @@
  * with no external SDK and no wasm. It wires the pieces together (renderer →
  * input → game → loop) and drives the DOM HUD: score / streak, rack + ball pips,
  * the shot meter with its ideal-window band, floating shot feedback, the
- * rack-transition banner, the pointer-lock / touch cue, and the results overlay
+ * rack-transition banner, the one-time controls cue, and the results overlay
  * — all from the game's `readHud()`.
+ *
+ * Input is attached with `pointerLock: false`: this game never captures the
+ * cursor. Aim is a drag on the court, identical for mouse and finger.
  *
  * The two dev-server couplings (the versioned hot-reload import and the
  * `/events` SSE channel) are the anchors the single-file packager rewrites for
@@ -86,7 +89,7 @@ const boot_ = async (): Promise<void> => {
   const powerZone = el("power-zone");
   const moving = el("moving");
   const stationLabel = el("station-label");
-  const lockCue = el("lock-cue");
+  const controlsCue = el("controls-cue");
   const resultsEl = el("results");
   const glowEl = el("glow");
   const award = el("award");
@@ -122,19 +125,13 @@ const boot_ = async (): Promise<void> => {
   let scorePopTimer = 0;
   let lastScore = 0;
 
-  // Desktop: the cue asks for pointer lock. Touch (no pointer lock exists): the
-  // cue is a one-time instruction splash, dismissed by the first touch. Using the
-  // shoot pad also dismisses it — the player has demonstrably found the controls,
-  // so leaving the splash sitting over the court would be pure obstruction.
-  const coarsePointer = globalThis.matchMedia?.("(pointer: coarse)").matches ?? false;
-  let pointerLocked = false;
-  let touched = false;
+  // The controls cue is a one-time instruction splash, identical on every device
+  // now that nothing captures the pointer: the first drag on the court — or the
+  // first press of the shoot pad — retires it. The player has demonstrably found
+  // the controls, and leaving the splash over the court would be pure obstruction.
   let cueDismissed = false;
-  document.addEventListener("pointerlockchange", (): void => {
-    pointerLocked = document.pointerLockElement === canvas;
-  });
   canvas.addEventListener("pointerdown", (): void => {
-    touched = true;
+    cueDismissed = true;
   });
 
   // HUD animation baselines (reset whenever the game restarts).
@@ -254,7 +251,7 @@ const boot_ = async (): Promise<void> => {
     padRestarts = over;
     padShoot.textContent = over ? "SHOOT AGAIN" : "HOLD TO SHOOT";
 
-    lockCue.classList.toggle("on", !over && !cueDismissed && (coarsePointer ? !touched : !pointerLocked));
+    controlsCue.classList.toggle("on", !over && !cueDismissed);
 
     for (const fb of hud.events) {
       spawnFloater(fb);
@@ -282,7 +279,6 @@ const boot_ = async (): Promise<void> => {
   padShoot.addEventListener("pointerdown", (event: PointerEvent): void => {
     event.preventDefault();
     cueDismissed = true;
-    touched = true;
     if (padRestarts) {
       key("KeyR", true);
       globalThis.setTimeout((): void => key("KeyR", false), MIN_PAD_HOLD_MS);
@@ -315,7 +311,10 @@ const boot_ = async (): Promise<void> => {
     // feeds whichever generation is live.
     const live = new InputState();
     input = live;
-    detachInput = attachDomInput(live, canvas);
+    // NO pointer capture: clicking the court must never swallow the cursor. Aim
+    // is drag-driven on every device — the same canvas pointer stream the touch
+    // gestures already run on, which a mouse drag feeds identically.
+    detachInput = attachDomInput(live, canvas, { pointerLock: false });
     const mod = (await import(`/dist/game.js?v=${version}`)) as GameModule;
 
     // Touch gestures project against the DISPLAYED canvas size (CSS px), which

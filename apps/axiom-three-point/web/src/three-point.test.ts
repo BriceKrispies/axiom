@@ -24,6 +24,7 @@ import {
   STATIONS,
   TOTAL_SHOTS,
   UPPER_PLANE_Y,
+  aimDirection,
   rackSlotPosition,
 } from "./constants.ts";
 import { length, vec2, vec3 } from "./vec.ts";
@@ -278,23 +279,20 @@ test("rack slot position deterministically changes the pickup pose", () => {
   }
 });
 
-test("the game never changes the player's aim", () => {
+test("the game never changes the player's aim while shooting", () => {
   const s = new ThreePointSession();
   const yawBefore = s.yaw;
   const pitchBefore = s.pitch;
-  // A full rack of shots with zero mouse input: pickup, rise, release,
-  // follow-through, feedback — none of it may touch the view.
-  for (let shot = 0; shot < BALLS_PER_RACK; shot += 1) {
+  // Shots WITHIN a rack, zero mouse input: pickup, rise, release, follow-through,
+  // feedback — none of it may touch the view. (The rack-to-rack glide is the one
+  // sanctioned exception and has its own tests below.)
+  for (let shot = 0; shot < BALLS_PER_RACK - 1; shot += 1) {
     playShot(s, scoringHoldTicks());
     assert.equal(s.yaw, yawBefore, `yaw changed after shot ${shot}`);
     assert.equal(s.pitch, pitchBefore, `pitch changed after shot ${shot}`);
   }
-  // The rack glide moves the POSITION only; orientation stays mouse-owned.
-  for (let i = 0; i < 3000 && s.phase !== "ready"; i += 1) s.advance(IDLE_INTENT);
-  assert.equal(s.stationIndex, 1);
-  assert.equal(s.yaw, yawBefore, "the glide must not retarget the view");
-  assert.equal(s.pitch, pitchBefore);
-  // And mid-motion the camera target is derived from the stored aim alone.
+  // Mid-motion the camera target is derived from the stored aim alone.
+  waitReady(s);
   s.advance(intent({ shootHeld: true, shootPressed: true }));
   for (let i = 0; i < 20; i += 1) s.advance(intent({ shootHeld: true }));
   const view = s.view();
@@ -305,6 +303,95 @@ test("the game never changes the player's aim", () => {
   };
   assert.ok(Math.abs(Math.atan2(dir.x, -dir.z) - s.yaw) < 1e-9, "camera yaw must equal the stored aim mid-motion");
   assert.ok(Math.abs(Math.asin(dir.y / Math.hypot(dir.x, dir.y, dir.z)) - s.pitch) < 1e-9, "camera pitch must equal the stored aim mid-motion");
+});
+
+/** The world point the view is on, at the hoop's distance from the eye — what the
+ * glide's aim hold freezes. Read at the START of a glide it is exactly the point
+ * the session froze (same eye, same ray). */
+const aimPointAtHoopDistance = (s: ThreePointSession): { x: number; y: number; z: number } => {
+  const eye = s.view().cameraPosition;
+  const reach = Math.hypot(RIM_X - eye.x, RIM_Y - eye.y, RIM_Z - eye.z);
+  const d = aimDirection(s.yaw, s.pitch);
+  return { x: eye.x + d.x * reach, y: eye.y + d.y * reach, z: eye.z + d.z * reach };
+};
+
+/** Angle (rad) between the view's aim ray and the ray from the eye to `point` —
+ * zero exactly when the view is pointed AT that point. This, not the distance
+ * along the ray, is what "stays pointed at the same location" means: mid-glide
+ * the eye cuts across the arc chord, so the range to the point genuinely changes
+ * while the direction must not.
+ *
+ * Compare against ~1e-6 rad, not 0: `acos` has square-root sensitivity near 1, so
+ * a dot product off by one ulp already reads as ~1e-8 rad. At the hoop's 6.75 m
+ * that bound is a few micrometres of aim — exact for every purpose here. */
+const aimErrorTo = (s: ThreePointSession, point: { x: number; y: number; z: number }): number => {
+  const eye = s.view().cameraPosition;
+  const d = aimDirection(s.yaw, s.pitch);
+  const to = { x: point.x - eye.x, y: point.y - eye.y, z: point.z - eye.z };
+  const len = Math.hypot(to.x, to.y, to.z);
+  const cos = (d.x * to.x + d.y * to.y + d.z * to.z) / len;
+  return Math.acos(Math.min(1, Math.max(-1, cos)));
+};
+
+/** Stop ON the first tick of the rack-to-rack glide. `playShot` settles all the
+ * way back to "ready", which rides straight through the glide — so the last ball
+ * of the rack is launched by hand and advanced only until the glide begins. */
+const enterGlide = (s: ThreePointSession): void => {
+  const ticks = scoringHoldTicks();
+  for (let shot = 0; shot < BALLS_PER_RACK - 1; shot += 1) playShot(s, ticks);
+  waitReady(s);
+  s.advance(intent({ shootHeld: true, shootPressed: true }));
+  for (let i = 1; i < ticks - 1; i += 1) s.advance(intent({ shootHeld: true }));
+  s.advance(intent({ shootReleased: true }));
+  for (let i = 0; i < 3000 && s.phase !== "movingToNextRack"; i += 1) s.advance(IDLE_INTENT);
+  assert.equal(s.phase, "movingToNextRack", "the rack should end in a glide");
+};
+
+test("the rack glide holds the aim on the spot the player already chose", () => {
+  const s = new ThreePointSession();
+  // Aim deliberately OFF the rim centre, so the hold cannot be confused with a
+  // snap-to-hoop: what must be preserved is this player's own spot.
+  for (let i = 0; i < 12; i += 1) s.advance(intent({ lookDx: 6 }));
+  enterGlide(s);
+  const frozen = aimPointAtHoopDistance(s);
+  const yawAtStart = s.yaw;
+  let moved = 0;
+  while (s.phase === "movingToNextRack") {
+    s.advance(IDLE_INTENT);
+    const error = aimErrorTo(s, frozen);
+    assert.ok(error < 1e-6, `the view came off the held point by ${error} rad mid-glide`);
+    moved += 1;
+  }
+  // And it is still on that point at the instant the glide hands control back.
+  assert.ok(aimErrorTo(s, frozen) < 1e-6, "the arrival aim must be on the held point");
+  assert.equal(s.stationIndex, 1);
+  // The view genuinely turned to keep that point centered — an unchanged yaw
+  // would mean the hold did nothing at all.
+  assert.ok(Math.abs(s.yaw - yawAtStart) > 0.3, "the glide must turn the view to hold the point");
+  assert.ok(moved > 1, "the glide must span multiple ticks");
+});
+
+test("a look input during the glide releases the hold instantly and for good", () => {
+  const s = new ThreePointSession();
+  enterGlide(s);
+  // Ride the hold a while, then twitch the mouse once.
+  for (let i = 0; i < 20; i += 1) s.advance(IDLE_INTENT);
+  const before = s.yaw;
+  s.advance(intent({ lookDx: 4 }));
+  const afterNudge = s.yaw;
+  // That tick is the player's alone: exactly the nudge, no hold correction.
+  assert.ok(
+    Math.abs(afterNudge - (before + 4 * SHOT_TUNING.aimYawSensitivity)) < 1e-9,
+    "the releasing tick must apply the player's input and nothing else",
+  );
+  // And the hold never returns for the rest of the glide.
+  while (s.phase === "movingToNextRack") {
+    const yawBefore = s.yaw;
+    s.advance(IDLE_INTENT);
+    assert.equal(s.yaw, yawBefore, "the hold must not resume after being released");
+  }
+  assert.equal(s.stationIndex, 1);
+  assert.equal(s.yaw, afterNudge);
 });
 
 test("the soft yaw bound blocks outward movement but never snaps the view", () => {
@@ -320,23 +407,31 @@ test("the soft yaw bound blocks outward movement but never snaps the view", () =
   assert.ok(s.yaw < atEdge, "inward movement always passes through");
 });
 
-test("station changes never make shots without fresh horizontal aim", () => {
-  // With the camera fully player-owned, an ideal-timed Space-tapper who never
-  // moves the mouse keeps station 0's aim forever: racks 2 and 3 point 0.7 rad
-  // away from their hoop line, so only the first rack can score.
+test("the glide carries a good aim across stations, but never invents one", () => {
+  // The hold is what makes station changes playable: an ideal-timed tapper who
+  // arrived aimed at the rim is still aimed at it after the glide, so the same
+  // timing scores on every rack. (Before the hold, racks 2 and 3 pointed 0.7 rad
+  // off their hoop line and only rack 1 could score.)
   const s = new ThreePointSession();
   const ticks = scoringHoldTicks();
   for (let shot = 0; shot < TOTAL_SHOTS; shot += 1) playShot(s, ticks);
   assert.equal(s.phase, "results");
-  assert.ok(s.makes <= BALLS_PER_RACK, `no-mouse tapping must not score beyond rack 1 (made ${s.makes}/15)`);
-  // While re-aiming at each station turns the same timing into makes everywhere.
-  const skilled = new ThreePointSession();
-  for (let shot = 0; shot < TOTAL_SHOTS; shot += 1) {
-    waitReady(skilled);
-    aimToBase(skilled);
-    playShot(skilled, ticks);
-  }
-  assert.ok(skilled.makes > BALLS_PER_RACK, "re-aiming per station scores on every rack");
+  assert.ok(s.makes > BALLS_PER_RACK, `the carried aim should score past rack 1 (made ${s.makes}/15)`);
+
+  // But the hold only PRESERVES an aim — it never corrects a bad one. A player
+  // who drags the view off the rim and then releases the hold mid-glide keeps
+  // exactly the mess they made.
+  const strays = new ThreePointSession();
+  enterGlide(strays);
+  for (let i = 0; i < 30; i += 1) strays.advance(intent({ lookDx: 20 }));
+  const strayYaw = strays.yaw;
+  for (let i = 0; i < 3000 && strays.phase !== "ready"; i += 1) strays.advance(IDLE_INTENT);
+  assert.equal(strays.stationIndex, 1);
+  assert.equal(strays.yaw, strayYaw, "a released hold must leave the player's own aim untouched");
+  assert.ok(
+    Math.abs(strays.yaw - STATIONS[1]!.baseYaw) > 0.3,
+    "the game must not quietly re-centre a view the player steered away",
+  );
 });
 
 // ── the swipe shot (mobile) ───────────────────────────────────────────────────

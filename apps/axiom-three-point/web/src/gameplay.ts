@@ -183,8 +183,9 @@ export const swipeIntents = (velocity: Vec2): SwipeGesture | null => {
  * From inside the range, outward movement stops exactly at the edge; from
  * outside the range (the bound's center changed under the player, e.g. a new
  * station), only inward movement passes — outward is blocked. The bound can
- * therefore never snap or rotate the view on its own — the camera is
- * exclusively mouse-driven.
+ * therefore never snap or rotate the view on its own; it only ever limits a turn
+ * the player asked for. (The rack glide's aim hold in `session.ts` writes yaw
+ * directly and does not pass through here — it tracks a point, not a bound.)
  */
 export const softBoundedTurn = (value: number, delta: number, center: number, half: number): number => {
   const next = value + delta;
