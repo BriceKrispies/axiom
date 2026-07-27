@@ -548,3 +548,57 @@ fn the_chosen_concept_carries_into_the_next_attempt() {
         "a liked concept is kept rather than re-picked every eight seconds"
     );
 }
+
+// --- field position -----------------------------------------------------------
+
+#[test]
+#[ignore = "KNOWN GAP: the loop re-spots every attempt to PROTOTYPE_LINE, so gains 
+           are measured but never carried. Un-ignore when the drive is wired."]
+fn a_completed_pass_advances_the_line_of_scrimmage() {
+    // The offense must actually move down the field: a gain leaves the next
+    // attempt starting where the last one ended, not back at the same spot.
+    let mut r = run(0xF1E1D_001);
+    let mut spots = Vec::new();
+    let mut seen = 0u32;
+    for _ in 0..12_000 {
+        // Take the first read every time — a near-certain completion, so the
+        // drive should march forward attempt after attempt.
+        if let Some(step) = r.attempt() {
+            if step.phase.accepts_choice() {
+                r.choose(PlayerChoice::Throw(0));
+            }
+        }
+        r.set_user_stick(axiom::prelude::Vec2::new(0.0, 1.0));
+        r.step(&[]);
+        let Some(record) = r.ledger().and_then(|l| l.last) else {
+            continue;
+        };
+        if record.index > seen {
+            seen = record.index;
+            spots.push((record.outcome, record.yards.round() as i32, r.sim.ball_yard_line().round() as i32));
+        }
+        if seen >= 5 {
+            break;
+        }
+    }
+    let gains: Vec<i32> = spots.iter().filter(|(o, _, _)| o.is_gain()).map(|(_, y, _)| *y).collect();
+    assert!(!gains.is_empty(), "at least one attempt gained ground: {spots:?}");
+
+    // After a gain, the NEXT attempt must line up further downfield.
+    until(&mut r, 600, |r| {
+        matches!(phase(r), Some(AttemptPhase::PreSnap { .. }))
+    })
+    .expect("the next attempt lines up");
+    let los = r.sim.frame.line_of_scrimmage_z;
+    let start = axiom_end_zone::field::yard_line_to_z(
+        axiom_end_zone::data::prototype::PROTOTYPE_LINE,
+        r.sim.frame.direction,
+    );
+    assert_ne!(
+        los.round(),
+        start.round(),
+        "after {} attempts ({spots:?}) the offense is still snapping from the \
+         original spot — gains are measured but never carried",
+        spots.len()
+    );
+}

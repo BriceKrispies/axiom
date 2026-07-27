@@ -6,6 +6,7 @@
 //! below it (AI, ball, contact, presentation) is the app's existing machinery,
 //! untouched.
 
+use crate::ai::RoleState;
 use crate::data::prototype::PROTOTYPE_LINE;
 use crate::events::PlayEndReason;
 use crate::launch::RunConfig;
@@ -28,7 +29,7 @@ pub struct AttemptController {
     gate: WindowGate,
     pub(super) read: Option<PlayRead>,
     /// The choice the player committed to this attempt.
-    choice: Option<PlayerChoice>,
+    pub(super) choice: Option<PlayerChoice>,
     /// A press latched between simulation ticks. Input arrives once per render
     /// frame, and in slow motion many render frames share one tick — without
     /// this latch a decision made mid-dilation would be dropped.
@@ -114,9 +115,8 @@ impl AttemptController {
         self.read = Some(read);
         let mut commands = Vec::new();
 
-        // A play the simulation (or the attempt clock) has ended preempts every
-        // phase — a sack DURING the decision window is exactly the "waited too
-        // long" outcome the prototype is built to produce.
+        // An ended play preempts every phase — a sack DURING the window is the
+        // "waited too long" outcome the prototype exists to produce.
         if self.is_live() {
             let timed_out = tick >= self.dead_at;
             if timed_out && sim.phase != PlayPhase::Ended {
@@ -147,10 +147,8 @@ impl AttemptController {
                 AttemptPhase::Developing
             }
             AttemptPhase::PreSnap { snap_at } => {
-                // Applying the pick RE-INSTALLS the play, which recompiles the
-                // route waypoints and re-lines the offense up. Without that the
-                // picker would only relabel the reads while the receivers ran
-                // whatever concept was installed at reset.
+                // Applying the pick RE-INSTALLS the play so the route waypoints
+                // recompile; otherwise it would only relabel the reads.
                 if let Some(next) = self.pending_concept.take() {
                     self.concept = next;
                     self.last_defense_index =
@@ -178,7 +176,7 @@ impl AttemptController {
                     trigger,
                 },
             },
-            AttemptPhase::PassInFlight { read } => AttemptPhase::PassInFlight { read },
+            AttemptPhase::PassInFlight { read } => self.pass_in_flight(sim, read),
             AttemptPhase::Scrambling => AttemptPhase::Scrambling,
             AttemptPhase::Resolving => {
                 self.resolve(sim);
