@@ -14,18 +14,18 @@ use crate::ai::{
 };
 use crate::collision_rig::CollisionRig;
 pub use crate::command::SimCommand;
-use crate::config::{EndZoneConfig, DT, PLAYER_COUNT};
+use crate::config::{EndZoneConfig, PLAYER_COUNT};
 use crate::data::{
     showcase_play, showcase_rosters, BehaviorTuning, PlayDefinition, RosterDefinition,
 };
-use crate::events::{EventSink, PlayEndReason, SimEvent, StampedEvent};
+use crate::events::{EventSink, PlayEndReason, SimEvent};
 use crate::field::{OffenseFrame, OffensePoint};
 use crate::football::sim::ball_rest;
 use crate::football::BallSim;
 use crate::identity::PlayerId;
 use crate::physics_rig::PhysicsRig;
 use crate::player::lineup::formation_players;
-use crate::player::{controller, PlayerSim};
+use crate::player::PlayerSim;
 
 /// Charge units for a full wind-up. The run loop scales its per-tick gain by
 /// the inverse time scale, so this is effectively a REAL-TIME budget — roughly
@@ -184,44 +184,6 @@ impl SimState {
         };
         sim.push_perception();
         sim
-    }
-
-    /// Advance one fixed step under `commands`, returning this tick's events.
-    pub fn step(&mut self, commands: &[SimCommand]) -> &[StampedEvent] {
-        self.events.begin_tick(self.tick);
-        for command in commands {
-            self.apply_command(*command);
-        }
-        let prev_possession = self.possession;
-
-        self.decide_intents();
-        let phase = self.phase;
-        controller::integrate_movement(&mut self.players, &self.intents, phase, &self.tuning, DT);
-        self.collision.resolve(&mut self.players, self.tick);
-        self.resolve_contacts();
-
-        self.ball_pre_physics();
-        self.rig.mirror_players(&self.players);
-        self.rig.step(self.tick);
-        self.ball_post_physics();
-        self.check_carrier_bounds();
-        if self.possession.is_some() && self.possession != prev_possession {
-            self.possession_since = self.tick;
-        }
-
-        for player in &mut self.players {
-            player.anim_ticks = player.anim_ticks.saturating_add(1);
-        }
-        self.push_perception();
-        self.update_throwable();
-        self.throw_commanded = false;
-        self.tick += 1;
-        self.events.events()
-    }
-
-    /// This tick's ordered events.
-    pub fn events(&self) -> &[StampedEvent] {
-        self.events.events()
     }
 
     /// First recorded physics fault, if any (debug overlay row) — from either

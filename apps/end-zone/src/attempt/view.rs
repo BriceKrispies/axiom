@@ -59,8 +59,13 @@ impl AttemptController {
             read,
             attempt: self.attempt_index.max(1),
             windows: self.windows,
+            // Ticks left in whichever beat is asking the player something — the
+            // decision window, or the held pre-snap. Both are countdowns the
+            // HUD drains a bar with; a picker whose bar never moved would not
+            // tell the player the hold is finite.
             window_left: match self.phase {
                 AttemptPhase::DecisionWindow { closes_at, .. } => closes_at.saturating_sub(tick),
+                AttemptPhase::PreSnap { snap_at } => snap_at.saturating_sub(tick),
                 _ => 0,
             },
             last: self.ledger.last,

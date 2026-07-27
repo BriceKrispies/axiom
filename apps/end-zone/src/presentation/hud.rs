@@ -7,7 +7,7 @@
 //! actually open is the entire game, and a green/red hint would answer the
 //! question the prototype exists to ask.
 
-use crate::attempt::{AttemptLedger, AttemptPhase, AttemptStep};
+use crate::attempt::{AttemptLedger, AttemptPhase, AttemptStep, SET_TICKS};
 use crate::data::prototype::{concept, READ_COUNT};
 
 /// One selectable read in the decision prompt.
@@ -163,7 +163,9 @@ fn concept_prompt(step: &AttemptStep) -> DecisionPrompt {
             })
             .collect(),
         scramble: format!("SET  ·  {}", concept(step.concept).name),
-        remaining: 1.0,
+        remaining: (step.window_left as f32 / SET_TICKS as f32).clamp(0.0, 1.0),
+        // The hold is generous on purpose; it is a beat to think in, not a
+        // scramble, so it never nags.
         urgent: false,
     }
 }

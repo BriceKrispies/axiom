@@ -494,6 +494,30 @@ fn picking_a_concept_actually_changes_the_routes_the_receivers_run() {
 }
 
 #[test]
+fn the_world_holds_still_before_the_snap() {
+    // The three seconds before the snap are the player's to call a play in, so
+    // they have to READ as paused: nothing drifts, nothing settles, nobody
+    // fidgets. Ambient pre-snap motion made the beat feel like a play already
+    // underway, which is exactly the pressure it exists to remove.
+    let mut r = run(0xA77E_9001);
+    for _ in 0..10 {
+        r.step(&[]);
+    }
+    assert_eq!(r.sim.phase, PlayPhase::PreSnap);
+    let ball = r.sim.ball.pos;
+    let bodies: Vec<_> = r.sim.players.iter().map(|p| (p.pos, p.anim_ticks)).collect();
+    for _ in 0..90 {
+        r.step(&[]);
+        assert_eq!(r.sim.phase, PlayPhase::PreSnap, "still before the snap");
+    }
+    assert_eq!(r.sim.ball.pos, ball, "the ball does not move");
+    let after: Vec<_> = r.sim.players.iter().map(|p| (p.pos, p.anim_ticks)).collect();
+    assert_eq!(after, bodies, "nobody moves and nobody animates");
+    // And the hold ends: the snap still comes on its own.
+    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("the hold releases");
+}
+
+#[test]
 fn a_new_call_makes_the_offense_shift_into_the_new_formation() {
     // The pre-snap beat exists so the player can SEE their call take: pick a
     // different concept and the offense walks to a different alignment. Frozen

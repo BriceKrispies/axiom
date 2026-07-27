@@ -48,6 +48,7 @@ pub mod shell;
 pub mod showcase;
 pub mod showcase_controller;
 pub mod state;
+pub mod tick;
 pub mod trace;
 pub mod wind_up;
 
