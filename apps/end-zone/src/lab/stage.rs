@@ -228,6 +228,7 @@ impl AnimLab {
             throw_preview: None,
             throwable: Vec::new(),
             spot_marker_z: None,
+            line_to_gain_z: None,
             pre_snap_routes: Vec::new(),
         }
     }

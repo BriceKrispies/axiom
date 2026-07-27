@@ -117,3 +117,13 @@ pub const MAX_LIVE_TICKS: u64 = 540;
 /// reaction at ~0.96 and pursuit at ~1.06 — a defense that plays at its listed
 /// ability rather than one handicapped by the dial's midpoint.
 pub const PROTOTYPE_HEAT: u8 = 4;
+
+/// The distance one attempt is played to, yards downfield of the line of
+/// scrimmage.
+///
+/// One value, two consumers: the defensive selector is called against it (see
+/// `setup`), and the field paints its line to gain there (see
+/// [`crate::presentation::snapshot`]). Keeping them the same constant is the
+/// point — a line drawn at a distance the defense was not called against would
+/// be lying to the player.
+pub const ATTEMPT_DISTANCE: f32 = 10.0;

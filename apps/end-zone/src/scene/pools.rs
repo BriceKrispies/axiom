@@ -7,6 +7,7 @@
 use axiom::prelude::{Entity, Handle, Material, Mesh, RunningApp, Spawn};
 
 use crate::debug::DebugMaterial;
+use crate::field::{paint_pool_capacity, PaintCategory, PALETTE};
 use crate::presentation::chalk::{ChalkMaterial, CHALK_LINE_POOL, CHALK_PRIMARY_POOL};
 use crate::presentation::particles::EffectMaterial;
 use crate::presentation::receiver_ring::{
@@ -30,6 +31,26 @@ fn fill<T: Copy>(
     for &(tag, count, handle) in plan {
         for _ in 0..count {
             pool.push((app.spawn(Spawn::new(hidden(), cube, handle)), tag));
+        }
+    }
+    pool
+}
+
+/// The field paint pool: one flat plane per marking slot, grouped into a
+/// contiguous run per [`PaintCategory`] in `PaintCategory::ALL` order, each run
+/// exactly `pool_size()` long.
+///
+/// That layout is the whole batching scheme. A category is one material and one
+/// known slot range, so a frame's paint is a fixed handful of same-material
+/// draw groups whose membership changes but whose count and order never do —
+/// and the per-frame assignment can address a slot by arithmetic instead of by
+/// searching the pool.
+pub(super) fn paint(app: &mut RunningApp, plane: Handle<Mesh>) -> Vec<Entity> {
+    let mut pool = Vec::with_capacity(paint_pool_capacity());
+    for category in PaintCategory::ALL {
+        let material = app.add_material(Material::lit(color3(category.color(&PALETTE))));
+        for _ in 0..category.pool_size() {
+            pool.push(app.spawn(Spawn::new(hidden(), plane, material)));
         }
     }
     pool

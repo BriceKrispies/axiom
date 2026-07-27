@@ -105,6 +105,10 @@ pub struct PresentationSnapshot {
     /// World `Z` of the bright field marker: the line the current attempt
     /// snapped from, so a gain or a loss is legible against it at a glance.
     pub spot_marker_z: Option<f32>,
+    /// World `Z` of the line to gain — the distance this attempt is played to.
+    /// `None` once it would fall in or past the end zone, where the goal line
+    /// already marks the objective.
+    pub line_to_gain_z: Option<f32>,
     /// The live wind-up preview: the arc the ball would fly on if the throw
     /// were released THIS tick, and where it would come down. Present only
     /// while a read is held. This is the whole feedback loop for a charged
@@ -204,6 +208,19 @@ fn throw_preview(sim: &SimState) -> Option<ThrowPreview> {
     })
 }
 
+/// Where the line to gain falls this tick, in world `Z`.
+///
+/// It is [`crate::attempt::ATTEMPT_DISTANCE`] downfield of the line of
+/// scrimmage — the same distance the defensive call was selected against — so
+/// the paint on the field and the defense in front of it agree. Inside the end
+/// zone it disappears: the goal line already marks the objective there, and two
+/// lines a few yards apart would read as one thick smear.
+fn line_to_gain_z(sim: &SimState) -> Option<f32> {
+    let sign = sim.frame.direction.sign();
+    let z = sim.frame.line_of_scrimmage_z + sign * crate::attempt::ATTEMPT_DISTANCE;
+    (z * sign < crate::field::GOAL_LINE_Z).then_some(z)
+}
+
 /// Capture this tick's snapshot from the simulation (read-only).
 pub fn capture(sim: &SimState) -> PresentationSnapshot {
     let players = sim
@@ -262,6 +279,7 @@ pub fn capture(sim: &SimState) -> PresentationSnapshot {
         attempt: None,
         throwable: sim.throwable.clone(),
         spot_marker_z: Some(sim.frame.line_of_scrimmage_z),
+        line_to_gain_z: line_to_gain_z(sim),
         throw_preview: throw_preview(sim),
         pre_snap_routes: pre_snap_chalk(sim),
     }

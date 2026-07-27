@@ -5,7 +5,8 @@ use axiom::prelude::Vec3;
 use axiom_end_zone::field::{
     coordinates::{FIELD_LENGTH, FIELD_WIDTH},
     generate_field, normalized_to_world, world_to_yard_line, yard_line_to_z, DriveDirection,
-    OffenseFrame, OffensePoint, FIELD_HALF_LENGTH, FIELD_HALF_WIDTH, GOAL_LINE_Z,
+    FieldMaterial, FieldMesh, OffenseFrame, OffensePoint, FIELD_HALF_LENGTH, FIELD_HALF_WIDTH,
+    GOAL_LINE_Z, PAINT,
 };
 
 const EPS: f32 = 1.0e-4;
@@ -103,6 +104,15 @@ fn generated_field_geometry_is_finite_and_nonempty() {
         field.pieces.len() > 25,
         "turf bands, zones, apron, goalposts"
     );
+    // The static field is surface only: paint is camera-driven and lives in
+    // `field::paint_layout`, so nothing here may be a marking.
+    assert!(
+        !field
+            .pieces
+            .iter()
+            .any(|p| p.transform.translation.y > 0.0 && p.mesh == FieldMesh::Plane),
+        "no static paint above the turf plane"
+    );
     for piece in &field.pieces {
         let t = piece.transform;
         for v in [
@@ -120,16 +130,46 @@ fn generated_field_geometry_is_finite_and_nonempty() {
             assert!(v.is_finite(), "piece transform is finite");
         }
     }
-    for batch in [&field.markings, &field.numbers] {
-        assert!(!batch.positions().is_empty());
-        assert_eq!(batch.positions().len(), batch.normals().len());
-        assert_eq!(batch.indices().len() % 3, 0, "triangle list");
-        for p in batch.positions() {
-            assert!(p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
-            assert!(p.x.abs() <= FIELD_HALF_WIDTH + 1.0);
-            assert!(p.z.abs() <= FIELD_HALF_LENGTH + 1.0);
-        }
-        let max = batch.positions().len() as u32;
-        assert!(batch.indices().iter().all(|&i| i < max), "indices in range");
+}
+
+#[test]
+fn the_playable_length_is_divided_into_alternating_turf_bands() {
+    let field = generate_field();
+    let mut bands: Vec<_> = field
+        .pieces
+        .iter()
+        .filter(|p| {
+            matches!(
+                p.material,
+                FieldMaterial::TurfLight | FieldMaterial::TurfDark
+            )
+        })
+        .collect();
+    bands.sort_by(|a, b| {
+        a.transform
+            .translation
+            .z
+            .total_cmp(&b.transform.translation.z)
+    });
+
+    let expected = (GOAL_LINE_Z * 2.0 / PAINT.band_yards).round() as usize;
+    assert_eq!(bands.len(), expected, "one band per five-yard section");
+
+    for (index, band) in bands.iter().enumerate() {
+        // Bands tile the field between the goal lines with no gap or overlap.
+        let z0 = -GOAL_LINE_Z + index as f32 * PAINT.band_yards;
+        let center = z0 + PAINT.band_yards * 0.5;
+        assert!(
+            (band.transform.translation.z - center).abs() < EPS,
+            "band {index} tiles"
+        );
+        assert!((band.transform.scale.z - PAINT.band_yards).abs() < EPS);
+        assert!(
+            (band.transform.scale.x - FIELD_HALF_WIDTH * 2.0).abs() < EPS,
+            "full width"
+        );
+        // And they alternate, so parity alone classifies a band.
+        let expected_material = [FieldMaterial::TurfLight, FieldMaterial::TurfDark][index % 2];
+        assert_eq!(band.material, expected_material, "band {index} alternates");
     }
 }

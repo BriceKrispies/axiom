@@ -94,8 +94,18 @@ input (keys → DeviceFrame → InputState)
 - **Menus / focus / a new screen state** → `src/frontend/*` (seven states in
   `screen.rs`: Title → Menu (PLAY/SETTINGS) → InGame, plus Paused/Settings/
   Controls/GameOver; the frontend talks to the shell ONLY via `FrontendCommand`).
-- **Field geometry / markings / numbers** → `src/field/{generator,markings}.rs`
-  (all procedural; no imported assets).
+- **Field geometry** (turf bands, end zones, goalposts, the bowl) →
+  `src/field/generator.rs`. Static surface only, built once.
+- **Field markings** → `src/field/paint.rs` (the one config + palette + the
+  camera-relative LOD classifier) and `src/field/paint_layout.rs` (which quads
+  exist this frame). Markings are **camera-driven**: they are selected per tick
+  from a bounded pool grouped by `PaintCategory`, not baked into a static mesh.
+  Every marking is a world-space rectangle with real width — never a thin line,
+  because sub-pixel geometry cannot be drawn stably at the 240×135 raster.
+  Tuning a marking means editing `PAINT`/`PALETTE`, never a literal in the
+  renderer. Check a change against the six `end-zone-field-*` `axiom-shot`
+  slices (`src/field/inspect.rs`), which hold one frozen frame under six camera
+  states. All procedural; no imported assets.
 - **Anything touching the DOM, storage, gamepad, audio, touch** → `src/web/`
   (wasm32-only, the sanctioned nondeterministic edge). Never elsewhere.
 

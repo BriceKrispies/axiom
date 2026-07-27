@@ -1,12 +1,12 @@
 //! The composition layer's retained engine scene: install every mesh,
-//! material, and entity ONCE (field pieces, marking meshes, two 17-part
-//! player figures per side, the ball, bounded juice + debug pools), then
-//! update transforms per tick from the immutable snapshot. Nothing is
-//! rebuilt per frame.
+//! material, and entity ONCE (static field pieces, two 17-part player figures
+//! per side, the ball, and the bounded field-paint / juice / debug pools), then
+//! update transforms per tick from the immutable snapshot. Nothing is rebuilt
+//! per frame — the camera-driven field paint changes which pool slots are
+//! *aimed where*, never how many entities or meshes exist.
 
 use axiom::prelude::{
-    Color, DirectionalLight, Entity, Handle, Material, Mesh, MeshData, RunningApp, Spawn,
-    Transform, Vec3,
+    Color, DirectionalLight, Entity, Handle, Material, Mesh, RunningApp, Spawn, Transform, Vec3,
 };
 use axiom_figure::FigureDefinition;
 use axiom_host::{FrameAmbient, FramePostProcess};
@@ -15,11 +15,13 @@ use axiom_kernel::Ratio;
 use crate::config::PLAYER_COUNT;
 use crate::data::team::{frostbite, magma};
 use crate::debug::DebugMaterial;
-use crate::presentation::chalk::ChalkMaterial;
-use crate::presentation::receiver_ring::RingKind;
-use crate::field::{generate_field, FieldMaterial, FieldMesh};
+use crate::field::{
+    generate_field, paint_pool_capacity, FieldMaterial, FieldMesh, PaintQuad, PALETTE,
+};
 use crate::player::model::{player_figure, PART_COUNT, TAG_COUNT};
+use crate::presentation::chalk::ChalkMaterial;
 use crate::presentation::particles::{EffectInstance, EffectMaterial};
+use crate::presentation::receiver_ring::RingKind;
 
 mod pools;
 
@@ -56,9 +58,12 @@ pub struct EndZoneScene {
     pub(crate) player_parts: Vec<[Entity; PART_COUNT]>,
     pub(crate) ball: Entity,
     pub(crate) lace: Entity,
-    /// The bright procedural line-to-gain marker (repositioned per tick; parked
-    /// hidden when no drive is active).
-    pub(crate) line_to_gain: Entity,
+    /// The field paint slots, grouped by [`crate::field::PaintCategory`] (see
+    /// [`pools::paint`]). Re-aimed every tick from the camera.
+    pub(crate) paint_pool: Vec<Entity>,
+    /// Reusable buffer for the paint the camera selects — sized once at install
+    /// so the per-frame path never allocates.
+    pub(crate) paint_scratch: Vec<PaintQuad>,
     /// White rings at the feet of every receiver the quarterback can throw to.
     pub(crate) receiver_ring_pool: Vec<(Entity, RingKind)>,
     /// Pre-snap route chalk dots (the called play drawn on the turf).
@@ -76,18 +81,19 @@ impl EndZoneScene {
         let sphere = app.add_mesh(Mesh::sphere());
         let cylinder = app.add_mesh(Mesh::cylinder());
 
-        // Field materials.
-        let apron = app.add_material(Material::lit(color3([0.10, 0.20, 0.10])));
-        // Mowing bands: a saturated grass green with a wide light/dark delta so
-        // the field's dominant macro-texture — the alternating mow stripes —
-        // reads under flat Lambert, instead of washing to a near-uniform sage.
-        // Re-graded toward the reference's deep, vivid grass: red and blue pulled
-        // down and green lifted (a pure saturation push away from luma, luma held
-        // so the field is richer, not darker) — the earlier [0.13,0.40,0.09] band
-        // carried too much red/blue and read pale sage under the 1.32 sun + fill.
-        let turf_light = app.add_material(Material::lit(color3([0.09, 0.45, 0.06])));
-        let turf_dark = app.add_material(Material::lit(color3([0.045, 0.27, 0.04])));
-        let white = app.add_material(Material::lit(color3([0.92, 0.93, 0.92])));
+        // Field materials. The three surface values come from the one field
+        // palette (`field::PALETTE`), so the turf the bands alternate between
+        // and the paint drawn on top are graded against each other in a single
+        // place rather than drifting apart in two.
+        //
+        // The two band values are deliberately CLOSE and dark: the bands exist
+        // to give the eye a distance ruler, and a wide light/dark delta turns
+        // that ruler into stripes that fight the players for attention. The
+        // separation that used to live in the turf now lives in the paint,
+        // where it carries actual information.
+        let apron = app.add_material(Material::lit(color3(PALETTE.apron)));
+        let turf_light = app.add_material(Material::lit(color3(PALETTE.band_light)));
+        let turf_dark = app.add_material(Material::lit(color3(PALETTE.band_dark)));
         let goalpost = app.add_material(Material::lit(color3([0.95, 0.82, 0.20])));
         // The bowl in the reference is PACKED with fans, not bare concrete: its
         // dominant surface is a busy team-color speckle, not gray structure. A
@@ -109,7 +115,6 @@ impl EndZoneScene {
             FieldMaterial::TurfDark => turf_dark,
             FieldMaterial::HomeEndZone => home_zone,
             FieldMaterial::AwayEndZone => away_zone,
-            FieldMaterial::White => white,
             FieldMaterial::Goalpost => goalpost,
             FieldMaterial::Stands => stands,
             FieldMaterial::Crowd => crowd,
@@ -140,14 +145,6 @@ impl EndZoneScene {
                 turf.push((entity, piece.transform));
             }
         }
-        // The merged marking + number meshes.
-        for batch in [field.markings, field.numbers] {
-            let (positions, normals, uvs, indices) = batch.into_streams();
-            if let Ok(mesh) = app.add_mesh_data(MeshData::new(positions, normals, uvs, indices)) {
-                app.spawn(Spawn::new(Transform::IDENTITY, mesh, white));
-            }
-        }
-
         // Lighting: one sun (the key carries form + ground contact shadow) plus
         // a low hemisphere fill kept well below the key, so the shaded box sides
         // deepen instead of flooding flat.
@@ -197,14 +194,9 @@ impl EndZoneScene {
         let ball = app.spawn(Spawn::new(hidden(), sphere, leather).casts_contact_shadow());
         let lace = app.spawn(Spawn::new(hidden(), cube, lace_mat));
 
-        // The line-to-gain marker: a bright volt bar spanning the field,
-        // distinct from every white yard line. Parked hidden until a drive
-        // repositions it each tick.
-        let to_gain_mat = app.add_material(Material::lit(color3([0.72, 0.96, 0.24])));
-        let line_to_gain = app.spawn(Spawn::new(hidden(), cube, to_gain_mat));
-
         // Bounded instance pools (each parked hidden; built once). Their
         // material/count plans live in `pools` so this install stays readable.
+        let paint_pool = pools::paint(app, plane);
         let chalk_pool = pools::chalk(app, cube);
         let juice_pool = pools::juice(app, cube);
         let receiver_ring_pool = pools::receiver_rings(app, cube);
@@ -218,7 +210,8 @@ impl EndZoneScene {
             player_parts,
             ball,
             lace,
-            line_to_gain,
+            paint_pool,
+            paint_scratch: Vec::with_capacity(paint_pool_capacity()),
             juice_pool,
             debug_pool,
             juice_scratch: Vec::with_capacity(JUICE_POOL),

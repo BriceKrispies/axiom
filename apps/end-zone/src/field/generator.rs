@@ -1,14 +1,18 @@
 //! The field generator: every static visible field piece, produced ONCE at
-//! startup as plain placement data (unit engine primitives + two merged quad
-//! meshes) that the composition layer spawns. Nothing here is rebuilt per
-//! frame, and nothing is imported from an asset — turf, paint, numbers, and
-//! goalposts are all procedural.
+//! startup as plain placement data (unit engine primitives) that the
+//! composition layer spawns. Nothing here is rebuilt per frame, and nothing is
+//! imported from an asset — turf, end zones, goalposts and the bowl are all
+//! procedural.
+//!
+//! The *paint* on top of this surface is deliberately not here. It depends on
+//! where the camera is, so it is selected per frame by [`super::paint_layout`]
+//! and drawn from a bounded scene pool.
 
 use axiom::prelude::{Transform, Vec3};
 use axiom_math::Quat;
 
 use super::coordinates::{FIELD_HALF_LENGTH, FIELD_HALF_WIDTH, GOAL_LINE_Z};
-use super::markings::{build_markings, build_numbers, QuadBatch};
+use super::paint::PAINT;
 
 /// Which engine primitive a static piece uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +31,6 @@ pub enum FieldMaterial {
     TurfDark,
     HomeEndZone,
     AwayEndZone,
-    White,
     Goalpost,
     Stands,
     Crowd,
@@ -42,13 +45,13 @@ pub struct FieldPiece {
 }
 
 /// The complete generated field.
+///
+/// Static surface only. Field *paint* is not here: it is selected per frame
+/// from the camera by [`super::paint_layout`] and drawn from a bounded pool,
+/// because which markings are worth drawing depends on where the camera is.
 #[derive(Debug, Clone)]
 pub struct FieldGeometry {
     pub pieces: Vec<FieldPiece>,
-    /// All white line work, one merged mesh.
-    pub markings: QuadBatch,
-    /// Block field numbers, one merged mesh.
-    pub numbers: QuadBatch,
 }
 
 fn plane(x: f32, y: f32, z: f32, sx: f32, sz: f32, material: FieldMaterial) -> FieldPiece {
@@ -155,9 +158,9 @@ fn grandstand(pieces: &mut Vec<FieldPiece>) {
     }
 }
 
-/// Generate the whole field. Alternating five-yard turf bands between the goal
-/// lines, two team-colored end zones, an apron under everything, boundary +
-/// yard-line paint, block numbers, and two goalposts.
+/// Generate the whole static field: an apron under everything, alternating
+/// turf bands between the goal lines, two team-colored end zones, two
+/// goalposts, and the stadium bowl.
 pub fn generate_field() -> FieldGeometry {
     let mut pieces = Vec::new();
 
@@ -171,24 +174,23 @@ pub fn generate_field() -> FieldGeometry {
         FieldMaterial::Apron,
     ));
 
-    // Twenty alternating five-yard turf bands between the goal lines.
-    let mut band = 0;
-    while band < 20 {
-        let z0 = -GOAL_LINE_Z + band as f32 * 5.0;
-        let material = if band % 2 == 0 {
-            FieldMaterial::TurfLight
-        } else {
-            FieldMaterial::TurfDark
-        };
+    // The playable field length divided into alternating turf bands: each band
+    // is one broad four-corner polygon, and the two values it alternates
+    // between are close enough (see `paint::PALETTE`) to read as distance
+    // rather than as stripes. This is what carries perspective now that the
+    // repetitive white yard lines are gone.
+    let band_count = (GOAL_LINE_Z * 2.0 / PAINT.band_yards).round() as i32;
+    for band in 0..band_count {
+        let z0 = -GOAL_LINE_Z + band as f32 * PAINT.band_yards;
+        let material = [FieldMaterial::TurfLight, FieldMaterial::TurfDark][(band % 2) as usize];
         pieces.push(plane(
             0.0,
             0.0,
-            z0 + 2.5,
+            z0 + PAINT.band_yards * 0.5,
             FIELD_HALF_WIDTH * 2.0,
-            5.0,
+            PAINT.band_yards,
             material,
         ));
-        band += 1;
     }
 
     // End zones: home defends -Z, so the home-painted zone sits at -Z.
@@ -214,9 +216,5 @@ pub fn generate_field() -> FieldGeometry {
 
     grandstand(&mut pieces);
 
-    FieldGeometry {
-        pieces,
-        markings: build_markings(),
-        numbers: build_numbers(),
-    }
+    FieldGeometry { pieces }
 }

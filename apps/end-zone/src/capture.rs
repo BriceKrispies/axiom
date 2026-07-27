@@ -12,6 +12,7 @@ use axiom_input::KeyToken;
 
 use crate::app::{EndZoneApp, TouchInput};
 use crate::config::EndZoneConfig;
+use crate::field::inspect::FieldView;
 
 /// `axiom-shot` renders every registered slice at its own framebuffer size
 /// (`registry::WIDTH`×`HEIGHT` = 960×600). Build the app to match so the baked
@@ -66,5 +67,23 @@ pub fn build_end_zone_after_snap() -> RunningApp {
     // hand it off: `axiom-shot` drives the single engine tick that renders this
     // frame, so the host frame sequence is advanced exactly once.
     app.pose_scene();
+    app.into_running()
+}
+
+/// Build End Zone frozen post-snap under one of the development-only field
+/// inspection cameras ([`crate::field::inspect`]) — the deterministic
+/// `end-zone-field-*` slices.
+///
+/// Same sim state as [`build_end_zone_after_snap`], only the framing differs.
+/// That is the point: six renders of one frozen frame isolate the camera as the
+/// single variable, so what changes between them is exactly what the field
+/// paint's level of detail selected.
+pub fn build_end_zone_field_view(view: FieldView) -> RunningApp {
+    let mut app = EndZoneApp::new_sized(EndZoneConfig::default(), CAPTURE_WIDTH, CAPTURE_HEIGHT);
+    let idle: [KeyToken; 0] = [];
+    for _ in 0..POST_SNAP_TICK {
+        app.advance(&idle, TouchInput::default());
+    }
+    app.pose_scene_from(view.camera());
     app.into_running()
 }

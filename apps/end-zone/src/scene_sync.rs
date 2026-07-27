@@ -7,6 +7,9 @@ use axiom_kernel::Meters;
 
 use crate::camera::CameraPose;
 use crate::debug::DebugInstance;
+use crate::field::{
+    field_paint, GameplayLines, PaintCamera, PaintCategory, PaintQuad, PAINT, PAINT_CATEGORY_COUNT,
+};
 use crate::football::model::{
     ball_transform, cradled_ball_transform, lace_transform, throw_ready_ball_transform,
 };
@@ -108,19 +111,23 @@ impl EndZoneScene {
         app.set(self.ball, ball_world);
         app.set(self.lace, lace_transform(&ball_world));
 
-        // The spot marker: a thin bright bar spanning the field at the line the
-        // current attempt snapped from, so a gain or a loss reads at a glance.
-        let to_gain = snapshot
-            .spot_marker_z
-            .map(|z| {
-                Transform::new(
-                    Vec3::new(0.0, 0.06, z),
-                    axiom_math::Quat::IDENTITY,
-                    Vec3::new(crate::field::FIELD_HALF_WIDTH * 2.0, 0.12, 0.5),
-                )
-            })
-            .unwrap_or_else(hidden_transform);
-        app.set(self.line_to_gain, to_gain);
+        // The field paint. Which markings exist is a function of where the
+        // camera is, so it is selected here, once per tick, into a pre-sized
+        // buffer and assigned into the pool by arithmetic — no allocation, no
+        // search, and no marking built for a part of the field the camera
+        // cannot usefully see.
+        let mut quads = core::mem::take(&mut self.paint_scratch);
+        field_paint(
+            PaintCamera::looking(camera.eye, camera.target),
+            GameplayLines {
+                scrimmage_z: snapshot.spot_marker_z,
+                line_to_gain_z: snapshot.line_to_gain_z,
+            },
+            &PAINT,
+            &mut quads,
+        );
+        assign_paint(app, &self.paint_pool, &quads);
+        self.paint_scratch = quads;
 
         // Receiver rings: red on the current read, white on the rest of the cone.
         let mut rings = Vec::with_capacity(RECEIVER_RING_POOL);
@@ -156,6 +163,51 @@ impl EndZoneScene {
         assign_pool(app, &self.debug_pool, debug_markers, |m| {
             (m.transform, m.material)
         });
+    }
+}
+
+/// Where each [`PaintCategory`]'s run of pool slots begins, as a prefix sum
+/// over `pool_size()`. The pool is built in exactly this order (see
+/// [`crate::scene::pools`]), so a category's slots are found by arithmetic
+/// rather than by scanning — which is what keeps the paint pass allocation-free
+/// and linear in the pool rather than quadratic in it.
+fn category_starts() -> [usize; PAINT_CATEGORY_COUNT] {
+    let mut starts = [0usize; PAINT_CATEGORY_COUNT];
+    let mut offset = 0usize;
+    for category in PaintCategory::ALL {
+        starts[category.index()] = offset;
+        offset += category.pool_size();
+    }
+    starts
+}
+
+/// Aim the field paint pool at this frame's quads.
+///
+/// Quads past a category's bound are dropped rather than growing the scene —
+/// the bound is a property of the geometry (there are only so many ten-yard
+/// lines) so hitting it means the emission is wrong, not that the pool is
+/// small. Every slot a category does not use is parked hidden, so the pool can
+/// never show stale paint from an earlier camera.
+fn assign_paint(app: &mut RunningApp, pool: &[Entity], quads: &[PaintQuad]) {
+    let starts = category_starts();
+    let mut cursor = starts;
+    for quad in quads {
+        let index = quad.category.index();
+        let limit = starts[index] + quad.category.pool_size();
+        if cursor[index] < limit {
+            if let Some(entity) = pool.get(cursor[index]) {
+                app.set(*entity, quad.transform());
+            }
+            cursor[index] += 1;
+        }
+    }
+    for category in PaintCategory::ALL {
+        let index = category.index();
+        for slot in cursor[index]..starts[index] + category.pool_size() {
+            if let Some(entity) = pool.get(slot) {
+                app.set(*entity, hidden_transform());
+            }
+        }
     }
 }
 

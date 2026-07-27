@@ -202,12 +202,27 @@ impl EndZoneApp {
     /// sync) **without** ticking the engine — the native capture harness
     /// ([`crate::capture`]) poses here and lets the renderer drive the tick.
     pub fn pose_scene(&mut self) {
+        self.pose(None);
+    }
+
+    /// Pose the most recent step with an explicit camera in place of the
+    /// director's — the development-only field inspection views
+    /// ([`crate::field::inspect`]) use this to hold the camera-driven field
+    /// paint under a fixed set of framings. Nothing in the shipping loop calls
+    /// it, and it does not touch the director, so the next ordinary frame is
+    /// framed exactly as it would have been.
+    pub fn pose_scene_from(&mut self, camera: CameraPose) {
+        self.pose(Some(camera));
+    }
+
+    fn pose(&mut self, camera_override: Option<CameraPose>) {
         if self.last_output.is_none() {
             self.advance(&[], TouchInput::default());
         }
-        let Some(output) = self.presented() else {
+        let Some(mut output) = self.presented() else {
             return;
         };
+        output.camera = camera_override.unwrap_or(output.camera);
         if self.run.debug_enabled {
             debug::build_markers(
                 &output.snapshot,

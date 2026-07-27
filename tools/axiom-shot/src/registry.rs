@@ -13,6 +13,7 @@
 
 use axiom::prelude::*;
 use axiom_animation_lab::scene::LabScene;
+use axiom_end_zone::FieldView;
 
 /// Authoring / GPU render size (also the window size the scenes request).
 pub const WIDTH: u32 = 960;
@@ -76,6 +77,34 @@ pub fn registry() -> Vec<SliceEntry> {
         SliceEntry {
             name: "end-zone-pre-snap",
             build: |_| axiom_end_zone::build_end_zone_pre_snap(),
+        },
+        // The six development-only field-paint inspection cameras. One frozen
+        // post-snap frame, six framings: the camera is the only variable, so
+        // what differs between these renders is exactly what the field paint's
+        // level of detail selected. See `axiom_end_zone::FieldView`.
+        SliceEntry {
+            name: "end-zone-field-gameplay",
+            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::Gameplay),
+        },
+        SliceEntry {
+            name: "end-zone-field-low-angle",
+            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::LowAngle),
+        },
+        SliceEntry {
+            name: "end-zone-field-yaw-left",
+            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::YawLeft),
+        },
+        SliceEntry {
+            name: "end-zone-field-yaw-right",
+            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::YawRight),
+        },
+        SliceEntry {
+            name: "end-zone-field-far-end-zone",
+            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::FarEndZone),
+        },
+        SliceEntry {
+            name: "end-zone-field-major-division",
+            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::MajorDivision),
         },
         SliceEntry {
             name: "sports-physics-lab",

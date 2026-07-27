@@ -17,13 +17,14 @@ use crate::identity::TeamId;
 use crate::launch::{resolve_defense, RunConfig};
 use crate::state::SimState;
 
-use super::PROTOTYPE_HEAT;
+use super::{ATTEMPT_DISTANCE, PROTOTYPE_HEAT};
 
-/// The down/distance the defensive selector is asked to answer. Fixed so the
-/// coverage mix stays a stable, understandable distribution rather than
-/// drifting with a game state the prototype does not have.
+/// The down the defensive selector is asked to answer. Fixed so the coverage
+/// mix stays a stable, understandable distribution rather than drifting with a
+/// game state the prototype does not have. Its distance partner is
+/// [`super::ATTEMPT_DISTANCE`], shared with the field paint so the line drawn
+/// on the turf is the line the defense was called against.
 const NOMINAL_DOWN: u8 = 2;
-const NOMINAL_DISTANCE: f32 = 10.0;
 
 /// Install attempt `index`'s play into `sim` and return which defensive call it
 /// drew (for inspection and the debug overlay).
@@ -33,7 +34,7 @@ pub fn install(sim: &mut SimState, config: &RunConfig, index: u32, concept: usiz
     let selection = select_defense(
         offense.tag,
         NOMINAL_DOWN,
-        NOMINAL_DISTANCE,
+        ATTEMPT_DISTANCE,
         PROTOTYPE_HEAT,
         key,
     );

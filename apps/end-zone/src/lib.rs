@@ -48,8 +48,8 @@ pub mod shell;
 pub mod showcase;
 pub mod showcase_controller;
 pub mod state;
-pub mod wind_up;
 pub mod trace;
+pub mod wind_up;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web;
@@ -59,4 +59,5 @@ pub use lab::end_zone_lab_start;
 pub use web::end_zone_start;
 
 pub use app::{build_end_zone, EndZoneApp};
-pub use capture::{build_end_zone_after_snap, build_end_zone_pre_snap};
+pub use capture::{build_end_zone_after_snap, build_end_zone_field_view, build_end_zone_pre_snap};
+pub use field::inspect::{FieldView, FIELD_VIEWS};
