@@ -7,5 +7,12 @@
   "raf-loop.ts",
   "dom-input.ts",
   "renderer.ts",
-  "run-game.ts"
+  "run-game.ts",
+  "detect.ts",
+  "override.ts",
+  "probe-readback.ts",
+  "probe-canvas2d.ts",
+  "probe-webgl.ts",
+  "probe-webgpu.ts",
+  "probe-css3d.ts"
 ]

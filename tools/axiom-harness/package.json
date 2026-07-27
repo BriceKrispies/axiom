@@ -1,0 +1,10 @@
+{
+  "name": "@axiom/harness",
+  "private": true,
+  "type": "module",
+  "description": "Hostile-environment harness: hosts the real casino-games app and the real chest API behind one origin and denies capabilities to it, so the fallback ladder can be seen (harness UI) and asserted (e2e/test_capability_ladder.py). Repo tooling — outside the engine dependency graph, the Coverage Law and the Branchless Law.",
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test src/*.test.ts"
+  }
+}

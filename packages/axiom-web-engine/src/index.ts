@@ -70,9 +70,22 @@ export {
   spawnRenderable,
 } from "./store.ts";
 
-// ── backend-selecting facade ────────────────────────────────────────────────────
+// ── backend-selecting facade + capability ladder ────────────────────────────────
+// `initRenderer(canvas)` runs the probed ladder (webgpu → webgl2 → webgl1 →
+// canvas2d → css3d), painting a known pattern on each rung instead of trusting
+// a non-null context. `detectTier()` awaits the full ladder (it is the only way
+// the async WebGPU rung is probed) and caches its report, so a later
+// `initRenderer(canvas, "auto")` reuses it. `rendererDetection()` hands back the
+// whole report — every rung's outcome and the readback verdict — for a harness,
+// a diagnostics overlay, or a test to assert on.
 export type { BackendChoice } from "./renderer.ts";
-export { initRenderer } from "./renderer.ts";
+export { initRenderer, rendererDetection, rendererTier, rendererTierAtLeast } from "./renderer.ts";
+export type { DetectionReport, Tier, TierChoice, TierOutcome, TierProbe, TierProbes, TierSource } from "./tier.ts";
+export { TIER_ORDER, chooseTier, isTier, ladderFrom, parseTierChoice, rank } from "./tier.ts";
+export type { PatternVerdict, ReadbackTrust } from "./probe-pattern.ts";
+export { detectTier, detectTierSync, latestDetection, resetDetection } from "./detect.ts";
+export type { OverrideSource, TierOverride } from "./override.ts";
+export { clearTierOverride, readTierOverride } from "./override.ts";
 
 // ── fixed-step loop ─────────────────────────────────────────────────────────────
 export type { LoopConfig } from "./raf-loop.ts";

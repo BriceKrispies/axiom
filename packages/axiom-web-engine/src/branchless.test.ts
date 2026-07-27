@@ -7,7 +7,7 @@
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { ABSENT, absentProbe, assert as bAssert, demand, fail, isPresent, orCompute, orElse, pick, presentOf, select } from "./branchless.ts";
+import { ABSENT, absentProbe, assert as bAssert, both, demand, either, fail, isPresent, orCompute, orElse, pick, presentOf, select } from "./branchless.ts";
 
 test("absentProbe / ABSENT: a 0-arg call is the absent value", () => {
   assert.equal(ABSENT, undefined);
@@ -34,6 +34,17 @@ test("pick indexes in range and throws out of range", () => {
 test("select chooses by condition", () => {
   assert.equal(select(true, "yes", "no"), "yes");
   assert.equal(select(false, "yes", "no"), "no");
+});
+
+test("both / either are the arithmetic AND and OR", () => {
+  assert.equal(both(true, true), true);
+  assert.equal(both(true, false), false);
+  assert.equal(both(false, true), false);
+  assert.equal(both(false, false), false);
+  assert.equal(either(true, true), true);
+  assert.equal(either(true, false), true);
+  assert.equal(either(false, true), true);
+  assert.equal(either(false, false), false);
 });
 
 test("presentOf / isPresent distinguish present from absent", () => {

@@ -94,7 +94,7 @@ total, of which only the nine chest wrappers move per frame.
 # http://localhost:8087/css3d.html   (?seed=N pins the round)
 ```
 
-It is **not** a reimplementation. `src/css3d/game/round.ts` imports the real
+It is **not** a reimplementation. `src/chest-round/round.ts` imports the real
 `planChoicePopulation`, the real config schema and validation gate, and the real
 seeded streams, so a click resolves through exactly the code the engine build
 runs. Layers:
@@ -105,8 +105,79 @@ web/src/css3d/
   render/solid.ts         primitives: a solid as up to 4 CSS 3D planes
   scene/chest.ts          one chest (nested transform tree, hinged lid)
   scene/diorama.ts        sand, CSS lagoon, palm, sandcastle, crab
-  game/round.ts           the REAL chance engine, wired
   main.ts                 shell: seed, DOM events, idle loop
+web/src/chest-round/
+  round.ts                the REAL chance engine, wired — shared by the CSS 3D
+                          page, the resilient page, and the stand-in server
+```
+
+## The resilient (form-first) build
+
+**`/resilient.html` — the same game as a plain HTML form.** Built for a
+locked-down enterprise (Citrix) browser, where JavaScript may not run and
+stylesheets may not survive. The BASELINE is a genuine
+`<form method="POST" action="/api/pick">` with nine `<button type="submit">`
+chests: press one, the browser navigates, and a server-rendered result page
+comes back. Everything richer is layered on top and every layer is optional:
+
+It carries the WHOLE capability ladder — the same one `@axiom/web-engine`
+detects, with the document itself as its bottom rung:
+
+| rung | drawn by | a pick is… |
+|------|----------|------------|
+| `webgpu` / `webgl2` / `webgl1` / `canvas2d` | the engine: the shipped **Treasure Chest Pick** on a canvas layered UNDER the buttons | posted in place; the server's answer is injected into the game, which flies the chest to its close-up and opens it |
+| `css3d` | this page's CSS 3D chests, built INSIDE the buttons | posted in place, revealed without navigating |
+| `form` | nobody — the served document | a native form navigation to an HTML result page |
+
+The render rung is **not guessed**: `detectTier()` paints a known pattern on
+each rung and classifies the pixels that come back, so a context that exists
+but renders nothing is rejected. `?render=<rung>` forces any of them
+(`?render=auto` clears the session pin). The page adds exactly one judgement of
+its own — whether ITS stylesheet applied, read off a `--resilient-css` sentinel
+— because a stripped stylesheet pins the page at `form`.
+
+The POST is **identical at every rung** — the same endpoint, the same fields,
+the same `resolvePick` on the server — so what the no-JS rung exercises is what
+ships. There is exactly one `POST /api/pick` in the build: the engine-rendered
+rung posts nothing, it is HANDED the answer. The page publishes the rung it
+actually reached as `window.__axiomTier` (plus a `data-axiom-tier` attribute, a
+`postMessage` to the parent, and the whole probe report on `window.__renderProbe`
+for support diagnostics), and DOWNGRADES it — walking one rung down and
+republishing — if an enhancement will not mount, or if the transport turns out
+to be a lie: `fetch` can be present and still reject under `connect-src 'none'`,
+so the fallback ladder is try/catch-based (fetch → `XMLHttpRequest` → let the
+native form go), never `typeof`-based.
+
+**The backbone never moves.** At every rung the nine
+`<button type="submit" name="pick" value="N">` controls stay in the DOM, stay
+enabled and stay the only interaction: the engine's canvas is inserted behind
+them with `pointer-events: none` and the buttons are repositioned over the
+projected chests, exactly as the CSS 3D chests are built inside them. The engine
+game's keyboard actions are unbound at mount, so there is no second control that
+could disagree with the form about which chest was chosen.
+
+```sh
+uv run scripts/localhost_servers.py start chest-resilient -- node tools/axiom-chest-server/src/main.ts --port 8090
+# then open http://localhost:8090/
+```
+
+The server is `tools/axiom-chest-server` — one port for the static page and the
+POST endpoint, because a native form navigation has no CORS story. See its
+README.
+
+```text
+web/resilient.html        the `form` rung: a real form, usable with no CSS and no JS
+web/styles/resilient.css  nine buttons decorated into chests, no extra DOM
+web/src/resilient/
+  contract.ts             the wire shape, shared with the server
+  tier.ts                 the ladder's rules (pure) + the stylesheet sentinel
+  transport.ts            fetch -> XHR -> give up, all inside try/catch
+  outcome.ts              the words a result is reported in (pure)
+  chests-3d.ts            css3d rung: css3d/scene/chest.ts dropped in the button
+  board-layout.ts         where the buttons sit over the rendered chests (pure)
+  injected-outcome.ts     the server's answer, as the chance engine wants it (pure)
+  engine-board.ts         canvas2d+ rung: the shipped game, under the buttons
+  main.ts                 shell: the ladder walk, submit interception, fallback
 ```
 
 ## Architecture
@@ -128,6 +199,12 @@ web/src/
   application/          the DOM shell (screens, settings, config store)
   catalog/              catalog cards, filters, procedural thumbnails
   workbench/            the configuration workbench
+  chest-round/          the chest board's rules over the chance engine, with no
+                        presentation attached — shared by the two pages below
+                        and by tools/axiom-chest-server
+  css3d/                the canvas-free CSS 3D page
+  resilient/            the form-first page, carrying the whole ladder
+                        (form -> css3d -> canvas2d -> webgl1/2 -> webgpu)
   main.ts               boot
 ```
 

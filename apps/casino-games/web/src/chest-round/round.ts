@@ -1,5 +1,5 @@
 /*
- * round.ts — LAYER 3 of the CSS3D build: the game rules.
+ * round.ts — the treasure-chest BOARD RULES, with no presentation attached.
  *
  * This file does NOT reimplement the chest game's chance logic. It imports the
  * real thing:
@@ -10,10 +10,23 @@
  *                                         shipped Treasure Chest Pick uses
  *   - `sample01` / streams              — the same seeded, purpose-separated RNG
  *
- * That is what makes this a second PRESENTATION of the game rather than a
- * lookalike: click a chest and the outcome is decided by exactly the code the
- * engine build runs. The whole chance-engine is pure TypeScript with no renderer
- * dependency, which is precisely why it can be reused by a canvas-free front end.
+ * That is what makes every front end below a second PRESENTATION of the game
+ * rather than a lookalike: pick a chest and the outcome is decided by exactly
+ * the code the engine build runs. The whole chance-engine is pure TypeScript
+ * with no renderer dependency, which is precisely why it can be reused by a
+ * canvas-free front end — or by no front end at all.
+ *
+ * WHY IT LIVES HERE and not under `css3d/`. It began as the CSS 3D build's game
+ * layer, but it has three consumers now and none of them is a renderer:
+ *
+ *   - `css3d/main.ts`     the canvas-free CSS 3D page (decides in the browser)
+ *   - `resilient/main.ts` the form-first page's enhanced tiers
+ *   - `tools/axiom-chest-server`  a Node stand-in server that decides the SAME
+ *                         outcome server-side, so the zero-JS form POST resolves
+ *                         through this exact code path
+ *
+ * Filing shared rules under one presentation's folder is how a second copy gets
+ * written. There is one copy, and it is here.
  *
  * FAIRNESS, unchanged from the source: `planChoicePopulation` assigns which
  * chests hold prizes BEFORE the player picks (a deterministic shuffle on the
@@ -24,22 +37,31 @@
  *
  * The shipped default config is `targetWinRate: 1` with a single 5-point
  * consolation tier — every chest wins the same small prize. That is a fine
- * arcade default but shows nothing about chance, so this build defaults to the
+ * arcade default but shows nothing about chance, so these builds default to the
  * documented four-tier ladder from the app README at a 0.44 win rate, and
- * exposes the rate as a live control. The MECHANISM is identical either way.
+ * expose the rate as a control. The MECHANISM is identical either way.
  */
 
-import type { CasinoGameConfig, RewardTier } from "../../chance-engine/configuration/schema.ts";
-import { baseConfig } from "../../chance-engine/configuration/schema.ts";
-import { validateConfig } from "../../chance-engine/configuration/validation.ts";
-import { planChoicePopulation } from "../../chance-engine/probability/choice-population.ts";
-import { sample01 } from "../../chance-engine/randomness/streams.ts";
+import type { CasinoGameConfig, RewardTier } from "../chance-engine/configuration/schema.ts";
+import { baseConfig } from "../chance-engine/configuration/schema.ts";
+import { validateConfig } from "../chance-engine/configuration/validation.ts";
+import { planChoicePopulation } from "../chance-engine/probability/choice-population.ts";
+import { sample01 } from "../chance-engine/randomness/streams.ts";
 
 /** How many chests sit on the board. */
 export const CHEST_COUNT = 9;
 
-/** The README's documented reward ladder — weights are CONDITIONAL ON WINNING. */
-const TIERS: readonly RewardTier[] = [
+/**
+ * The README's documented reward ladder — weights are CONDITIONAL ON WINNING.
+ *
+ * Exported because a front end can be handed an AUTHORITATIVE tier id rather
+ * than drawing one: the resilient page's engine-rendered rung injects the
+ * server's committed outcome into the shipped Treasure Chest Pick, and that
+ * game resolves `tierId → reward` against its own config. Pointing it at THIS
+ * ladder is what makes the reward the chest reveals the same object the server
+ * decided; a second, look-alike ladder would be a place for the two to drift.
+ */
+export const CHEST_REWARD_TIERS: readonly RewardTier[] = [
   { countsAsWin: true, id: "common", label: "Star Token", rarity: "common", reward: { amount: 25, kind: "stars", label: "25 stars" }, weight: 60 },
   { countsAsWin: true, id: "uncommon", label: "Ticket Bundle", rarity: "uncommon", reward: { amount: 120, kind: "tickets", label: "120 tickets" }, weight: 28 },
   { countsAsWin: true, id: "rare", label: "Gem Trophy", rarity: "rare", reward: { amount: 1, kind: "gems", label: "Radiant gem" }, weight: 10 },
@@ -56,7 +78,7 @@ export interface ChestSpec {
 export const buildConfig = (targetWinRate: number): CasinoGameConfig<ChestSpec> =>
   baseConfig<ChestSpec>("treasure-chest-pick", "Treasure Chest Pick", "tabletop", { brand: "ACME", danceLiveliness: 0.7 }, {
     choiceCount: CHEST_COUNT,
-    rewardTiers: TIERS,
+    rewardTiers: CHEST_REWARD_TIERS,
     targetWinRate,
   });
 

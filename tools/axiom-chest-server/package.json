@@ -1,0 +1,10 @@
+{
+  "name": "@axiom/chest-server",
+  "private": true,
+  "type": "module",
+  "description": "Stand-in origin server for the Casino Games 'resilient' form-first page: serves the static page AND the POST endpoint on ONE port, deciding every outcome with the app's real chance engine. Repo tooling — outside the engine dependency graph, invisible to cargo.",
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test \"src/**/*.test.ts\""
+  }
+}

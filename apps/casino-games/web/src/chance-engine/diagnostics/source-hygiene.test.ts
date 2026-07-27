@@ -36,14 +36,26 @@ test("no gameplay file calls Math.random()", () => {
  * allowed to draw boundary entropy. Everything below a shell must be a pure
  * function of the seed the shell drew and recorded.
  *
- * There are two, because there are two front ends over the one chance engine:
- * `application/shell.ts` drives the engine-rendered canvas app, and
- * `css3d/main.ts` is the entry point of the canvas-free CSS 3D build. Both draw
- * one seed at startup and record it; neither is reachable from the other. This
- * list is the invariant, not an exemption — adding an entry means declaring a
- * new app entry point, and every other file in the tree is still forbidden.
+ * There are three, because there are three front ends over the one chance
+ * engine: `application/shell.ts` drives the engine-rendered canvas app,
+ * `css3d/main.ts` is the entry point of the canvas-free CSS 3D build, and
+ * `resilient/main.ts` is the entry point of the form-first build. None is
+ * reachable from another. This list is the invariant, not an exemption — adding
+ * an entry means declaring a new app entry point, and every other file in the
+ * tree is still forbidden.
+ *
+ * `resilient/main.ts` is declared even though it draws NO entropy: its server
+ * (`tools/axiom-chest-server`) owns the seed, because the server decides the
+ * outcome for a zero-JavaScript form POST. Declaring it is what makes that fact
+ * checkable — the test below fails the day someone gives the resilient shell a
+ * seed of its own, and a reader can see at a glance that the app has exactly
+ * three entry points.
  */
-const SHELL_BOUNDARIES: readonly string[] = [join("application", "shell.ts"), join("css3d", "main.ts")];
+const SHELL_BOUNDARIES: readonly string[] = [
+  join("application", "shell.ts"),
+  join("css3d", "main.ts"),
+  join("resilient", "main.ts"),
+];
 
 test("boundary entropy is read only at a shell boundary", () => {
   const offenders = tsFilesUnder(SRC_ROOT).filter(

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom — hostile-environment harness</title>
+    <link rel="stylesheet" href="/__harness/harness.css" />
+  </head>
+  <body>
+    <header class="hh-head">
+      <h1>Hostile-environment harness</h1>
+      <p class="hh-sub">
+        The game below is the real one, served from this origin with the real
+        <code>/api/pick</code> behind it. The controls take capabilities away from it and
+        the readout says which rung it landed on. Nothing here is mocked; the only thing
+        the harness adds is denial.
+      </p>
+    </header>
+
+    <div class="hh-layout">
+      <aside class="hh-panel">
+        <section>
+          <h2>Render rung</h2>
+          <p class="hh-note">
+            One ladder: <code>webgpu → webgl2 → webgl1 → canvas2d → css3d → form</code>. Cumulative:
+            a rung denies every tier <em>above</em> it, so the name of the rung is the tier the page
+            should land on. <code>form</code> is the served document and cannot be denied — it is
+            what is left when everything above it is gone.
+          </p>
+          <div id="rungs" class="hh-group"></div>
+        </section>
+
+        <section>
+          <h2>Cross-cuts</h2>
+          <p class="hh-note">The things a locked-down browser does that are not about drawing.</p>
+          <div id="crosscuts" class="hh-group"></div>
+        </section>
+
+        <section>
+          <h2>No JavaScript</h2>
+          <label class="hh-check">
+            <input type="checkbox" id="nojs" />
+            <span
+              >kill JS in the frame (<code>sandbox</code> without <code>allow-scripts</code>)</span
+            >
+          </label>
+          <p class="hh-note">
+            The sandbox keeps <code>allow-forms allow-same-origin</code>. Without
+            <code>allow-forms</code> the POST is silently swallowed — the harness would delete the
+            exact rung this rung exists to prove.
+          </p>
+        </section>
+
+        <section class="hh-cannot">
+          <h2>Cannot be enforced from this page</h2>
+          <p class="hh-note">
+            These are chosen when the browser is <em>launched</em>. A page cannot relaunch its own
+            browser, so the harness will not pretend to apply them — it prints the command line
+            instead. The Playwright suite does enforce them.
+          </p>
+          <div id="flags" class="hh-group"></div>
+          <pre id="cmdline" class="hh-cmd"></pre>
+          <p class="hh-note">
+            CPU throttling (20x) has no in-page equivalent at all: it is a DevTools-protocol
+            emulation. <code>e2e/test_capability_ladder.py</code> drives it over CDP.
+          </p>
+        </section>
+
+        <section>
+          <h2>Applied</h2>
+          <pre id="applied" class="hh-cmd"></pre>
+          <button id="reboot" class="hh-reboot" type="button">Reboot the frame</button>
+          <p class="hh-note">
+            The mask must run before the game's first script, so there is no live toggle. Every
+            change remounts the iframe with a new <code>?deny=</code>.
+          </p>
+        </section>
+      </aside>
+
+      <main class="hh-stage">
+        <div class="hh-readout">
+          <span class="hh-badge" id="badge-page">page rung: —</span>
+          <span class="hh-badge" id="badge-engine">engine tier: —</span>
+          <span class="hh-badge" id="badge-url">—</span>
+        </div>
+        <div id="frame-slot" class="hh-frame-slot"></div>
+        <pre id="report" class="hh-report">engine detection report: —</pre>
+      </main>
+    </div>
+
+    <script src="/__harness/harness.js" type="module"></script>
+  </body>
+</html>

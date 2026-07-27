@@ -3,7 +3,8 @@
  *
  * It owns the only impure things in the build: the seed drawn once at the app
  * boundary, DOM events, and a requestAnimationFrame idle loop. Everything it
- * decides it asks `game/round.ts` (the real chance engine); everything it draws
+ * decides it asks `../chest-round/round.ts` (the real chance engine, shared with
+ * the resilient page and the stand-in server); everything it draws
  * it asks `scene/` (CSS 3D solids). No canvas is created anywhere in this app.
  *
  * PICKING IS FREE. The engine build has to raycast a pointer into the scene to
@@ -20,7 +21,7 @@
 
 import { buildDiorama } from "./scene/diorama.ts";
 import { buildChest, CHEST, type ChestView } from "./scene/chest.ts";
-import { CHEST_COUNT, type PickResult, type Round, startRound } from "./game/round.ts";
+import { CHEST_COUNT, type PickResult, type Round, startRound } from "../chest-round/round.ts";
 
 const COLS = 3;
 const SPACING_X = 146;

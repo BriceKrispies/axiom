@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Axiom — Treasure Chest Pick (resilient)</title>
+    <!--
+      The stylesheets. Both are pure decoration: strip them and the page below is
+      still a working game, which is the invariant this build exists to hold.
+      `css3d.css` is here because the `css3d` rung reuses the CSS 3D build's
+      chest — its rules are all class-scoped, so it costs nothing until script
+      creates elements carrying those classes.
+    -->
+    <link rel="stylesheet" href="/styles/resilient.css" />
+    <link rel="stylesheet" href="/styles/css3d.css" />
+    <!--
+      The engine specifier, resolved against this app's own dependency link
+      (`web/node_modules/@axiom/web-engine` → `packages/axiom-web-engine`). It is
+      declared HERE rather than left to the dev server because this page is also
+      served by `tools/axiom-chest-server`, which serves the app's `web/`
+      directory and nothing else — the whole point of that server being that the
+      form POST and the page share one origin. `axiom-serve` skips its own
+      injection when a page ships an import map, so one map serves both hosts.
+
+      A browser that ignores import maps also ignores `type="module"` scripts,
+      and lands on exactly the rung it should: the form.
+    -->
+    <script type="importmap">
+      { "imports": { "@axiom/web-engine": "/node_modules/@axiom/web-engine/dist/index.js" } }
+    </script>
+  </head>
+  <body class="resilient-body">
+    <main class="resilient-main">
+      <h1>Treasure Chest Pick</h1>
+      <p class="resilient-sub">
+        Nine chests. The prizes were placed before you arrived. Pick one and it opens.
+      </p>
+
+      <!--
+        THE BASELINE. Everything below this comment works with JavaScript off,
+        CSS off, and both off. It is a real form: the browser serializes the
+        pressed button's name/value and navigates to the POST response.
+
+        Each chest is `type="submit"`, so there is always a real submit control —
+        implicit submission (pressing Enter in a field) is unreliable with
+        multiple controls, and there is no text field here to press Enter in
+        anyway. Pressing a chest IS the submit.
+      -->
+      <form id="pick-form" class="resilient-form" method="POST" action="/api/pick">
+        <fieldset id="chest-board" class="resilient-chests">
+          <legend>Pick a chest</legend>
+          <button class="resilient-chest" type="submit" name="pick" value="0">Chest 1</button>
+          <button class="resilient-chest" type="submit" name="pick" value="1">Chest 2</button>
+          <button class="resilient-chest" type="submit" name="pick" value="2">Chest 3</button>
+          <button class="resilient-chest" type="submit" name="pick" value="3">Chest 4</button>
+          <button class="resilient-chest" type="submit" name="pick" value="4">Chest 5</button>
+          <button class="resilient-chest" type="submit" name="pick" value="5">Chest 6</button>
+          <button class="resilient-chest" type="submit" name="pick" value="6">Chest 7</button>
+          <button class="resilient-chest" type="submit" name="pick" value="7">Chest 8</button>
+          <button class="resilient-chest" type="submit" name="pick" value="8">Chest 9</button>
+        </fieldset>
+      </form>
+
+      <!--
+        Every rung above the form writes the outcome here instead of navigating.
+        It is empty and silent until script has actually succeeded in posting, so
+        a page that falls back to a native submit never flashes a half-built
+        panel.
+      -->
+      <section id="outcome" class="resilient-outcome" aria-live="polite" hidden></section>
+
+      <form id="new-form" class="resilient-again" method="POST" action="/api/new" hidden>
+        <button class="resilient-submit" type="submit">Play another round</button>
+      </form>
+
+      <noscript>
+        <p class="resilient-note">
+          <strong>JavaScript is off, and nothing here needs it.</strong> The chests above are
+          ordinary form buttons: pressing one submits to the server, which decides the outcome
+          with the same code the animated build uses and sends back a result page. Styling and
+          animation are the only things you are missing.
+        </p>
+      </noscript>
+
+      <p class="resilient-footnote">
+        One ladder, top to bottom: <code>webgpu</code> → <code>webgl2</code> → <code>webgl1</code>
+        → <code>canvas2d</code> → <code>css3d</code> → this plain form. The renderer is chosen by
+        painting a test pattern on each rung and looking at the pixels that come back; add
+        <code>?render=canvas2d</code> (or any rung name) to force one. Every rung is optional, the
+        chests are the same nine form buttons at all of them, and the answer is identical — the
+        same <code>POST /api/pick</code>, decided by the same chance engine.
+      </p>
+    </main>
+
+    <!--
+      A module script. Browsers that do not understand `type="module"` ignore it
+      entirely and keep the tier-2 page, which is exactly the fallback we want —
+      no `nomodule` shim, no polyfill, no second bundle.
+    -->
+    <script type="module" src="/dist/resilient/main.js"></script>
+  </body>
+</html>

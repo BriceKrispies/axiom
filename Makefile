@@ -65,7 +65,8 @@ ENDZONE_PORT     ?= 8000
 	agent agent-render agent-bridge growth-agent \
 	asset-stream asset-stream-build asset-stream-pack \
 	end-zone end-zone-build \
-	package loader-test e2e e2e-netplay e2e-matchmaking e2e-scaleout \
+	package loader-test e2e e2e-ladder e2e-netplay e2e-matchmaking e2e-scaleout \
+	hostile-harness \
 	netplay-cluster netplay-load serve ts-gate help \
 	sound sound-check sound-build sound-list sound-clean sound-test
 
@@ -133,6 +134,8 @@ help:
 	@echo "  Browser end-to-end smoke tests (pytest-playwright):"
 	@echo "  make e2e           Build+serve the gallery and drive every non-multiplayer demo in a real browser"
 	@echo "  AXIOM_E2E_REUSE=1 make e2e   Reuse a gallery already serving on :8000 (skip the rebuild)"
+	@echo "  make e2e-ladder    Deny capabilities to the resilient chest game and prove every rung still pays out"
+	@echo "  make hostile-harness  Serve the developer harness for the same ladder at http://localhost:8091/__harness/"
 	@echo "  make e2e-netplay   Build the worker+ .NET server and prove server-authoritative multiplayer in a browser"
 	@echo ""
 	@echo "  TypeScript SDK gate (@axiom/client + @axiom/game static-analysis/branchless/coverage laws):"
@@ -403,7 +406,30 @@ loader-test:
 E2E_UV := uv run --no-project --with pytest --with pytest-playwright --with pillow
 e2e:
 	$(E2E_UV) python -m playwright install chromium
-	$(E2E_UV) pytest e2e -q --ignore=e2e/test_netplay.py --ignore=e2e/test_matchmaking.py --ignore=e2e/test_scaleout.py
+	$(E2E_UV) pytest e2e -q --ignore=e2e/test_netplay.py --ignore=e2e/test_matchmaking.py --ignore=e2e/test_scaleout.py --ignore=e2e/test_capability_ladder.py
+
+# Walk the whole capability ladder (webgpu -> webgl2 -> webgl1 -> canvas2d ->
+# css3d -> form) against the REAL resilient chest game, and assert at every rung
+# both that the expected rung was selected AND that a pick still reached
+# POST /api/pick and came back readable. Render rungs are denied in-realm by
+# tools/axiom-harness/web/caps-mask.js (no sandbox token, CSP directive or
+# Permissions-Policy feature can remove a rendering API — measured); webgl1 and
+# canvas2d are ALSO denied by real Chromium launch flags as a second opinion; the
+# no-JS rungs use java_script_enabled=False and a CSP script-src 'none'. The test
+# module starts its own server (tools/axiom-harness, which embeds the real
+# axiom-chest-server) and builds the engine dist, so nothing needs to be running
+# first. AXIOM_LADDER_REUSE=1 reuses one already on :8091.
+e2e-ladder:
+	$(E2E_UV) python -m playwright install chromium
+	$(E2E_UV) pytest e2e/test_capability_ladder.py -q
+
+# The same ladder, by hand: a developer harness that hosts the real game in an
+# iframe and takes capabilities away from it with radio buttons + checkboxes, then
+# reads back which rung it landed on. It states plainly which toggles it CANNOT
+# enforce (the launch-flag ones — a page cannot relaunch its own browser) and
+# prints their command lines instead.
+hostile-harness:
+	node tools/axiom-harness/src/main.ts --port 8091
 
 # Drive the SERVER-AUTHORITATIVE multiplayer demo end-to-end: builds the native
 # worker cdylib + the .NET 10 server, serves the prebuilt client, and proves in a

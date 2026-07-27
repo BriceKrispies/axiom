@@ -1,0 +1,428 @@
+/*
+ * resilient.css — TIER 2 of the resilient build: the same nine form buttons,
+ * decorated into treasure chests.
+ *
+ * THE RULE THIS FILE OBEYS: it adds no meaning. Every element it styles already
+ * exists and already works in `resilient.html`; delete this stylesheet and the
+ * page is a plain, usable form. Nothing here is load-bearing, which is why the
+ * baseline can be trusted — there is no CSS-only interaction, no `display` trick
+ * that hides a control, and no pseudo-element carrying text a screen reader
+ * would need.
+ *
+ * NO EXTRA DOM. A chest is ONE `<button>` plus its two pseudo-elements:
+ *
+ *     button          the chest BODY   — plank gradient + two gold straps,
+ *                                        painted as stacked background layers
+ *     ::before        the LID          — domed cap with a gold trim edge
+ *     ::after         the LATCH        — the bright plate on the seam
+ *
+ * The straps are background layers rather than elements precisely because a
+ * background layer costs no node: the same trick the CSS 3D build uses when it
+ * spends gradients instead of geometry on plank seams.
+ *
+ * The server-rendered result page (`tools/axiom-chest-server`) links this same
+ * file and uses the same class names, so tier 2 — CSS but no script — looks like
+ * one game across the navigation instead of a styled page followed by a bare
+ * one.
+ */
+
+/* The tier-2 SENTINEL. `resilient/tier.ts` reads this custom property off the
+   root element to answer "did my stylesheet actually load?" — a question no
+   feature detection can answer, and the exact question that matters in an
+   environment that may strip stylesheets. */
+:root {
+  --resilient-css: 1;
+
+  --res-ink: #12283c;
+  --res-paper: #fdf3dd;
+  --res-wood: #8d5a2a;
+  --res-wood-dark: #6d431d;
+  --res-wood-light: #b07a3d;
+  --res-gold: #f0c552;
+  --res-gold-dark: #c9942c;
+  --res-win: #1f8a52;
+  --res-loss: #9a3a26;
+}
+
+.resilient-body {
+  margin: 0;
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 24px 16px 48px;
+  background: radial-gradient(ellipse at 50% 0%, #2a6f86 0%, #14364a 62%, #0e2434 100%);
+  color: var(--res-paper);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  line-height: 1.5;
+}
+
+.resilient-main {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.resilient-main h1 {
+  margin: 0 0 4px;
+  font-size: clamp(20px, 4.2vw, 32px);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 0 #0a1b26;
+}
+
+.resilient-sub,
+.resilient-footnote {
+  margin: 0 0 18px;
+  color: #a9c6d4;
+  font-size: 13px;
+}
+
+.resilient-footnote {
+  margin-top: 28px;
+  border-top: 1px solid #24506a;
+  padding-top: 12px;
+}
+
+.resilient-note {
+  margin: 14px 0;
+  border-left: 4px solid var(--res-gold);
+  padding: 8px 12px;
+  background: #10293a;
+  font-size: 13px;
+}
+
+/* ── the board ────────────────────────────────────────────────────────────── */
+
+.resilient-form {
+  margin: 0;
+}
+
+/* A <fieldset> is the right element for "these nine controls are one choice",
+   and it is the grid container so no wrapper div has to exist. `min-width: 0`
+   is required: a fieldset's default min-content sizing otherwise refuses to
+   shrink below its contents on a narrow screen. */
+.resilient-chests {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+  border: 2px solid #24506a;
+  border-radius: 10px;
+  padding: 18px 16px 20px;
+  background: linear-gradient(180deg, #17415a 0%, #10293a 100%);
+}
+
+.resilient-chests legend {
+  padding: 0 8px;
+  color: var(--res-gold);
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* ── one chest, out of one button ─────────────────────────────────────────── */
+
+.resilient-chest {
+  /* Layer 1: the two gold straps.  Layer 2: the plank seams.  Layer 3: the wood. */
+  background:
+    linear-gradient(90deg, transparent 0 22%, var(--res-gold) 22% 30%, transparent 30% 70%, var(--res-gold) 70% 78%, transparent 78% 100%),
+    repeating-linear-gradient(90deg, #00000000 0 15px, #6d431d55 15px 17px),
+    linear-gradient(180deg, var(--res-wood-light) 0%, var(--res-wood) 46%, var(--res-wood-dark) 100%);
+  position: relative;
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  box-sizing: border-box;
+  /* Room at the top for the ::before lid, which overhangs the body. */
+  padding: 40px 4px 10px;
+  border: 2px solid #4a2c12;
+  border-radius: 4px 4px 7px 7px;
+  color: #fff2cf;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-shadow: 0 1px 0 #3a2210;
+  cursor: pointer;
+  transition: transform 0.14s ease, filter 0.14s ease;
+}
+
+/* The LID: a domed cap sitting on the body's top edge, gold-trimmed along the
+   seam. `border-radius` on the top corners only is the whole dome. */
+.resilient-chest::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: -2px;
+  height: 36px;
+  box-sizing: border-box;
+  border: 2px solid #4a2c12;
+  border-bottom: 3px solid var(--res-gold-dark);
+  border-radius: 16px 16px 3px 3px;
+  background:
+    linear-gradient(90deg, transparent 0 22%, var(--res-gold) 22% 30%, transparent 30% 70%, var(--res-gold) 70% 78%, transparent 78% 100%),
+    linear-gradient(180deg, #c99457 0%, #b07a3d 38%, #96632f 74%, #7d4f24 100%);
+}
+
+/* The LATCH: the bright plate straddling the seam. */
+.resilient-chest::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 26px;
+  width: 20px;
+  height: 16px;
+  margin-left: -10px;
+  border: 1px solid #8a6316;
+  border-radius: 2px;
+  background: radial-gradient(ellipse at 50% 30%, #fff0a8 0%, #ffd964 54%, #dca832 100%);
+  box-shadow: 0 1px 2px #00000055;
+}
+
+.resilient-chest:hover,
+.resilient-chest:focus-visible {
+  transform: translateY(-3px);
+  filter: brightness(1.1);
+}
+
+.resilient-chest:focus-visible {
+  outline: 3px solid var(--res-gold);
+  outline-offset: 3px;
+}
+
+.resilient-chest:active {
+  transform: translateY(1px);
+}
+
+.resilient-chest[disabled] {
+  cursor: default;
+  filter: brightness(0.62) saturate(0.7);
+}
+
+/* The chest the player opened: lid swung back, prize showing. Script sets the
+   class; the animation is pure CSS. */
+.resilient-chest.is-open::before {
+  transform: rotateX(-104deg);
+  transform-origin: 50% 0;
+  transition: transform 0.5s cubic-bezier(0.2, 1.15, 0.32, 1);
+}
+.resilient-chest.is-open {
+  filter: none;
+}
+.resilient-chest.is-open.is-win {
+  box-shadow: 0 0 0 3px var(--res-gold), 0 0 22px #ffd96488;
+}
+
+/* ── the scripted outcome panel (tier 3+) ─────────────────────────────────── */
+
+.resilient-outcome {
+  margin: 18px 0 0;
+  border: 2px solid #24506a;
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: #10293a;
+}
+
+.resilient-outcome[hidden],
+.resilient-again[hidden] {
+  display: none;
+}
+
+.resilient-headline {
+  margin: 0 0 6px;
+  font-size: 20px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.resilient-headline.is-win {
+  color: #7ff0b0;
+}
+.resilient-headline.is-loss {
+  color: #ffb2a0;
+}
+
+.resilient-prize {
+  margin: 0 0 10px;
+}
+
+.resilient-board-list {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  font-size: 13px;
+}
+.resilient-board-list li {
+  color: #a9c6d4;
+}
+
+.resilient-submit {
+  appearance: none;
+  border: 2px solid var(--res-gold-dark);
+  border-radius: 6px;
+  padding: 10px 20px;
+  background: linear-gradient(180deg, var(--res-gold) 0%, var(--res-gold-dark) 100%);
+  color: #3a2210;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.resilient-submit:hover {
+  filter: brightness(1.08);
+}
+
+.resilient-again {
+  margin: 16px 0 0;
+}
+
+/* ── the server-rendered result page ──────────────────────────────────────── */
+
+.resilient-board {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.resilient-board th,
+.resilient-board td {
+  border-bottom: 1px solid #24506a;
+  padding: 6px 8px;
+  text-align: left;
+}
+.resilient-board .is-yours {
+  background: #1c4a63;
+  color: var(--res-gold);
+}
+
+.resilient-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 16px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.resilient-facts dt {
+  color: #a9c6d4;
+}
+.resilient-facts dd {
+  margin: 0;
+}
+
+.resilient-main a {
+  color: var(--res-gold);
+}
+
+/* ── THE ENGINE RUNG: canvas2d and above ──────────────────────────────────── */
+
+/* Script adds `is-engine-board` only once @axiom/web-engine has actually
+   mounted and drawn the chest scene. Everything here is cosmetic — the layout
+   that matters (absolute placement over each projected chest, and
+   `pointer-events: none` on the canvas) is written INLINE by `engine-board.ts`,
+   because it is load-bearing and must survive a stripped stylesheet. */
+.resilient-chests.is-engine-board {
+  display: block;
+  padding: 14px 14px 16px;
+}
+
+/* The stage is the positioning context. It takes its height from the canvas's
+   own intrinsic 960×600 ratio (the canvas is a normal flow element at
+   `height: auto`), so no `aspect-ratio` support and no resize listener are
+   needed for the buttons to land on their chests. */
+.resilient-board3d {
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0e2434;
+}
+
+.resilient-canvas {
+  border-radius: 6px;
+}
+
+/* The button over a rendered chest: a transparent hit target with a focus ring.
+   Its label is still there for assistive tech; the painted chest says the same
+   thing visually. */
+.resilient-chest.is-engine {
+  min-height: 0;
+  border-color: transparent;
+  border-radius: 6px;
+  background: none;
+  color: transparent;
+  text-shadow: none;
+  transition: none;
+}
+
+.resilient-chest.is-engine::before,
+.resilient-chest.is-engine::after {
+  content: none;
+}
+
+.resilient-chest.is-engine:hover,
+.resilient-chest.is-engine:focus-visible,
+.resilient-chest.is-engine:active {
+  transform: none;
+  filter: none;
+}
+
+.resilient-chest.is-engine:focus-visible {
+  outline: 3px solid var(--res-gold);
+  outline-offset: 2px;
+}
+
+/* Once a chest is opened every button is disabled; the rendered reveal carries
+   the result, so nothing is dimmed on top of it. */
+.resilient-chest.is-engine[disabled] {
+  filter: none;
+}
+
+/* ── THE css3d RUNG: the CSS 3D chest takes the button's place ─────────────── */
+
+/* Script adds `is-3d` only once it has actually built the 3D chests, so a
+   browser that cannot do `preserve-3d` never reaches this and keeps the tier-2
+   chest above. The button stays the interactive control — the 3D solid is
+   decoration INSIDE it, so hit-testing, focus, keyboard and the form submission
+   are all untouched. */
+.resilient-chest.is-3d {
+  background: none;
+  border-color: transparent;
+  min-height: 132px;
+  padding: 0;
+  /* The label is still there for assistive tech; the nameplate on the lid says
+     the same thing visually. */
+  color: transparent;
+  text-shadow: none;
+}
+.resilient-chest.is-3d::before,
+.resilient-chest.is-3d::after {
+  content: none;
+}
+
+/* The per-chest camera. Each button is its own 3D viewport, which keeps the
+   nine chests independent — no shared world transform to keep in sync. */
+.resilient-stage {
+  position: absolute;
+  inset: 0;
+  perspective: 900px;
+  perspective-origin: 50% 46%;
+  pointer-events: none;
+}
+
+/* The world root, mirroring `.css3d-world` but scoped to one chest. The tilt
+   comes from `--world-tilt` in css3d.css, so it cannot drift from the CSS 3D
+   page's camera. */
+.resilient-world {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--world-tilt)) scale3d(0.95, 0.95, 0.95) translateZ(-6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resilient-chest,
+  .resilient-chest.is-open::before {
+    transition: none;
+  }
+}

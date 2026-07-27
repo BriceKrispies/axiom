@@ -23,6 +23,15 @@ export const fail = (message: string): never => {
   throw new Error(message);
 };
 
+/** Logical AND without `&&`: the product of the two truth values. Both operands
+ * are always evaluated, so this is for PURE conditions only — never a guard whose
+ * right side is unsafe unless the left holds (that stays a combinator). */
+export const both = (left: boolean, right: boolean): boolean => Boolean(Number(left) * Number(right));
+
+/** Logical OR without `||`: the sum of the two truth values. Same purity rule as
+ * `both` — both operands are always evaluated. */
+export const either = (left: boolean, right: boolean): boolean => Boolean(Number(left) + Number(right));
+
 /** Assert `condition`, branchlessly: true → `slice(1)` → `[]` (nothing runs);
  * false → `slice(0)` → `[message]` whose `.map` calls `fail`. */
 export const assert: (condition: boolean, message: string) => asserts condition = (condition, message): void => {

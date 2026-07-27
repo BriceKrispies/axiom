@@ -34,6 +34,29 @@ test("the retained-scene store + facade are exported as functions", () => {
   }
 });
 
+test("the capability ladder is exported: detection, the tier vocabulary, and the override", () => {
+  const names = [
+    "detectTier",
+    "detectTierSync",
+    "latestDetection",
+    "resetDetection",
+    "rendererTier",
+    "rendererDetection",
+    "rendererTierAtLeast",
+    "chooseTier",
+    "isTier",
+    "ladderFrom",
+    "parseTierChoice",
+    "rank",
+    "readTierOverride",
+    "clearTierOverride",
+  ];
+  for (const name of names) {
+    assert.equal(typeof (engine as Record<string, unknown>)[name], "function", `${name} is exported`);
+  }
+  assert.deepEqual(engine.TIER_ORDER, ["webgpu", "webgl2", "webgl1", "canvas2d", "css3d"], "the ladder, best first");
+});
+
 test("loop, input, and audio are exported", () => {
   assert.equal(typeof engine.startLoop, "function");
   assert.equal(typeof engine.FixedStepper, "function");

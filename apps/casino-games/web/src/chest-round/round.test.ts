@@ -1,9 +1,10 @@
 /*
- * round.test.ts — the CSS3D build's game layer is held to the SAME fairness
- * contract as the engine build, because it runs the same chance engine. These
+ * round.test.ts — the shared chest-board rules are held to the SAME fairness
+ * contract as the engine build, because they run the same chance engine. These
  * tests pin the properties that matter: the population is decided up front, a
  * pick only looks its slot up, and the whole thing is a pure function of the
- * seed. No DOM is touched, so this runs under bare `node --test`.
+ * seed. No DOM is touched, so this runs under bare `node --test` — which is
+ * also why the Node stand-in server can import it verbatim.
  */
 
 import assert from "node:assert/strict";

@@ -1,0 +1,154 @@
+{
+  "_comment": [
+    "The rung matrix, shared VERBATIM by the harness UI (harness.js fetches it) and",
+    "the Playwright suite (e2e/test_capability_ladder.py json.loads it). Same reason",
+    "caps-mask.js is one file: a harness whose rungs differ from the suite's rungs is",
+    "proving a ladder nobody ships.",
+    "",
+    "ONE LADDER, top to bottom:  webgpu -> webgl2 -> webgl1 -> canvas2d -> css3d -> form.",
+    "The first five rungs are @axiom/web-engine's probed render tiers; 'form' is the",
+    "served document itself — nine <button type=submit> in a real <form method=POST>,",
+    "which needs no script and no stylesheet and is therefore the one rung nothing can",
+    "fail to reach. The page publishes where it landed on window.__axiomTier and the",
+    "whole engine report on window.__renderProbe.",
+    "",
+    "A rung is named for the tier you should LAND ON, and its deny list is every tier",
+    "strictly ABOVE it — cumulative, so each rung is the previous one plus one more",
+    "denial. 'webgpu' denies nothing (the unconstrained ladder); 'css3d' denies every",
+    "rung above the terminal fail-safe. Naming rungs by their outcome rather than by",
+    "their denial is the only way a row reads as an assertion: row css3d expects tier",
+    "css3d.",
+    "",
+    "'drawn' is how that rung paints, and it is checked because 'the detector said",
+    "webgl1' and 'a board actually mounted at webgl1' are different facts: engine rungs",
+    "insert a <canvas> behind the buttons, css3d builds its chests inside them, and the",
+    "form draws nothing at all."
+  ],
+  "ladder": ["webgpu", "webgl2", "webgl1", "canvas2d", "css3d"],
+  "formTier": "form",
+  "rungs": [
+    { "tier": "webgpu", "deny": [], "drawn": "engine" },
+    { "tier": "webgl2", "deny": ["webgpu"], "drawn": "engine" },
+    { "tier": "webgl1", "deny": ["webgpu", "webgl2"], "drawn": "engine" },
+    { "tier": "canvas2d", "deny": ["webgpu", "webgl2", "webgl1"], "drawn": "engine" },
+    { "tier": "css3d", "deny": ["webgpu", "webgl2", "webgl1", "canvas2d"], "drawn": "css3d" }
+  ],
+  "_crossCutComment": [
+    "Cross-cuts are the things a locked-down browser does that are NOT about drawing,",
+    "so the claim for almost all of them is the same and is machine-independent:",
+    "'sameTierAsBaseline' — denying this must not move the render tier at all. That is",
+    "asserted against a tier measured on THIS machine with nothing denied, so the row",
+    "means the same thing on a laptop with a GPU and on a VDI session without one.",
+    "'nativePost' says the pick leaves as a real form navigation instead of an in-place",
+    "fetch/XHR, and 'afterPickTier' is the rung the page must ADMIT to once a transport",
+    "has failed for real."
+  ],
+  "crossCuts": [
+    {
+      "id": "no-fetch",
+      "label": "fetch removed (XHR survives)",
+      "deny": ["fetch"],
+      "sameTierAsBaseline": true,
+      "nativePost": false,
+      "via": "xhr",
+      "note": "The transport ladder's second rung. The pick still posts in place, over XMLHttpRequest."
+    },
+    {
+      "id": "fetch-rejects",
+      "label": "fetch present but always rejects",
+      "deny": ["fetch-reject"],
+      "sameTierAsBaseline": true,
+      "nativePost": false,
+      "via": "xhr",
+      "note": "The one that ships broken: typeof fetch === 'function' is true and every request dies. Feature detection cannot see it; only a real attempt inside try/catch can. XHR carries the pick."
+    },
+    {
+      "id": "no-transport",
+      "label": "no fetch, no XHR",
+      "deny": ["fetch", "xhr"],
+      "sameTierAsBaseline": true,
+      "nativePost": true,
+      "afterPickTier": "form",
+      "note": "Nothing can post in place. The render tier is untouched — drawing and posting are orthogonal — and the pick falls all the way back to the form the page shipped with."
+    },
+    {
+      "id": "transport-lies",
+      "label": "fetch rejects, XHR removed",
+      "deny": ["fetch-reject", "xhr"],
+      "sameTierAsBaseline": true,
+      "nativePost": true,
+      "afterPickTier": "form",
+      "note": "Both transports are present-looking and both die. The page must discover it by trying, announce the drop to 'form', and re-submit natively."
+    },
+    {
+      "id": "no-websocket",
+      "label": "WebSocket removed",
+      "deny": ["websocket"],
+      "sameTierAsBaseline": true,
+      "nativePost": false,
+      "note": "A corporate proxy that allows HTTP and kills WS. Nothing here needs a socket."
+    },
+    {
+      "id": "no-wasm",
+      "label": "WebAssembly removed",
+      "deny": ["wasm"],
+      "sameTierAsBaseline": true,
+      "nativePost": false,
+      "note": "Policy-blocked wasm. This build is plain JS and must not care."
+    },
+    {
+      "id": "no-readback",
+      "label": "canvas readback blocked (SecurityError)",
+      "deny": ["readback"],
+      "sameTierAsBaseline": true,
+      "nativePost": false,
+      "expectReadback": "neutralised",
+      "note": "Brave farbling / Tor / a tainted canvas. The engine's control probe must notice, stop treating pixels as evidence and fall back to STRUCTURAL proof — a Tor user on a good GPU must not be dropped to css3d."
+    },
+    {
+      "id": "webgpu-no-adapter",
+      "label": "navigator.gpu present, no adapter",
+      "deny": ["webgpu-adapter"],
+      "notTier": "webgpu",
+      "nativePost": false,
+      "note": "The faithful shape of hardware acceleration being off, and of --disable-3d-apis: presence detection says yes and only asking gets the truth."
+    },
+    {
+      "id": "flat-css",
+      "label": "CSS 3D flattened",
+      "deny": ["css3d"],
+      "sameTierAsBaseline": true,
+      "nativePost": false,
+      "note": "preserve-3d denied AND transform-style forced flat. css3d is the terminal rung, so on a machine that reaches anything above it nothing should move at all."
+    }
+  ],
+  "launchFlags": [
+    {
+      "id": "disable-webgl2",
+      "label": "WebGL2 off at the browser level (WebGL1 survives)",
+      "flags": ["--disable-webgl2"],
+      "expectTier": "webgl1",
+      "why": "Measured: this kills WebGL2 and leaves WebGL1 alive — the same rung the mask reaches one layer up. The suite runs both; a disagreement is a real bug in the detection logic, not a harness artifact."
+    },
+    {
+      "id": "disable-3d-apis",
+      "label": "all WebGL off at the browser level",
+      "flags": ["--disable-3d-apis"],
+      "expectTier": "canvas2d",
+      "why": "Measured: kills WebGL2 and WebGL1 both. Note that --disable-gpu does NOT do this — it falls back to SwiftShader and WebGL stays alive, so it must never be used to mean 'no GPU'."
+    },
+    {
+      "id": "swiftshader",
+      "label": "software WebGL (SwiftShader)",
+      "flags": ["--use-angle=swiftshader"],
+      "expectTier": "webgl2",
+      "why": "The most Citrix-realistic condition: WebGL is present and entirely software-rasterized. The tier must stay webgl2 — a software rasterizer is a usable tier, not a failure."
+    }
+  ],
+  "_unenforceableInPage": [
+    "Every entry in launchFlags is chosen at browser LAUNCH. A page cannot relaunch its own browser, so the harness UI can only print the command line for these — it cannot enforce them. The Playwright suite launches a browser per flag set and does enforce them.",
+    "CPU throttling (Emulation.setCPUThrottlingRate, 20x) is a DevTools-protocol emulation with no in-page equivalent at all. The suite drives it over CDP.",
+    "Turning JavaScript off is enforceable in the harness ONLY through an iframe sandbox without allow-scripts — and that sandbox MUST include allow-forms, or the form POST is silently swallowed and the rung the no-JS test exists to prove is the very thing the harness deletes.",
+    "No sandbox token, CSP directive or Permissions-Policy feature exists for WebGPU, WebGL2, WebGL1, Canvas2D or CSS 3D — measured. That is why the render rungs are masked in-realm by caps-mask.js rather than by the platform."
+  ]
+}

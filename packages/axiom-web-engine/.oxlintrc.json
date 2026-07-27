@@ -133,6 +133,12 @@
       // `max-statements`, `complexity`). These are the exact rules the spine laws are
       // NOT meant to govern; the files are already coverage-exempt (test-exempt.json)
       // and branchless-exempt. Every general-quality rule not listed still applies.
+      // The `probe-*` files, `detect.ts` and `override.ts` are the same boundary in
+      // its purest form: every one of them exists ONLY to touch a browser API
+      // (getContext, readPixels, navigator.gpu, sessionStorage) and hand the result
+      // to a pure classifier. The rules they decide — what correct pixels are, what
+      // a trustworthy readback is, which tier wins, which stored pin is stale —
+      // live branchless and 100% covered in probe-pattern.ts / tier.ts / tier-pin.ts.
       "files": [
         "src/backend-webgl2.ts",
         "src/backend-canvas2d.ts",
@@ -142,7 +148,14 @@
         "src/raf-loop.ts",
         "src/dom-input.ts",
         "src/renderer.ts",
-        "src/run-game.ts"
+        "src/run-game.ts",
+        "src/detect.ts",
+        "src/override.ts",
+        "src/probe-readback.ts",
+        "src/probe-canvas2d.ts",
+        "src/probe-webgl.ts",
+        "src/probe-webgpu.ts",
+        "src/probe-css3d.ts"
       ],
       "rules": {
         "eslint-js/no-restricted-syntax": "off",
