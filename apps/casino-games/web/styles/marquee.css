@@ -108,6 +108,17 @@
  * (`show win-<rarity>` / `show loss` / ""), so ALL base presentation lives
  * on the #result-banner ID — never on a class that assignment would wipe. */
 
+/* Every size here is 15% down on where it started, deliberately and across the
+ * whole arcade: at the authored size the banner was wide and tall enough to
+ * reach up into the prize a reveal had just spent its whole ritual presenting,
+ * and covering the thing you won is the one job this banner must not do. The
+ * type is still the display face at arcade weight — 15% is the most that could
+ * come off before the result stopped reading at a glance, which is why it is
+ * 15% and not more. Scaled uniformly (type AND padding, base and every rarity
+ * rung) so the banner keeps its proportions rather than turning into a thin
+ * strip of large text. The narrow-viewport override in `cabinet-hud.css` is
+ * scaled by the same factor — the two must move together or a phone gets the
+ * old banner back. */
 #result-banner {
   position: absolute;
   left: 50%;
@@ -123,13 +134,13 @@
   font-family: var(--font-display);
   font-weight: 900;
   text-transform: uppercase;
-  font-size: 1.7rem;
+  font-size: 1.445rem;
   /* Own line-height: the banner sits inside #stage (line-height: 0, to kill the
    * canvas inline gap) and must NOT inherit that, or a wrapped result string
    * (common on narrow phones) collapses its lines on top of each other. */
   line-height: 1.15;
   letter-spacing: 0.03em;
-  padding: 10px 22px;
+  padding: 8px 19px;
   background: var(--marquee-red);
   color: #fff6de;
   border: 3px solid var(--ink);
@@ -186,17 +197,17 @@ body[data-active-game="treasure-chest-pick"] #result-banner {
 
 #result-banner.win-common { background: #2a6a8f; color: var(--prize-common); }
 #result-banner.win-uncommon { background: #1e7a55; color: var(--prize-uncommon); }
-#result-banner.win-rare { background: #6a2e8f; color: var(--prize-rare); font-size: 1.85rem; }
+#result-banner.win-rare { background: #6a2e8f; color: var(--prize-rare); font-size: 1.57rem; }
 #result-banner.win-jackpot {
   background: linear-gradient(180deg, var(--action-primary), var(--action-primary-dark));
   color: #3a2200;
-  font-size: 2.3rem;
+  font-size: 1.96rem;
   border-color: #7a4c00;
 }
 #result-banner.loss {
   background: var(--paper);
   color: var(--ink-soft);
-  font-size: 1.15rem;
+  font-size: 0.98rem;
   border-radius: 4px;
   clip-path: none;
   box-shadow: 3px 3px 0 var(--shadow-hard);

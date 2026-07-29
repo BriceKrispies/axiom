@@ -13,7 +13,9 @@ import { planChoicePopulation } from "../../chance-engine/probability/choice-pop
 import { SeededChanceResultSource } from "../../chance-engine/outcomes/result-source.ts";
 import { createSession } from "../../chance-engine/sessions/session.ts";
 import type { SessionState } from "../../chance-engine/sessions/session.ts";
-import { addV3, crossV3, dotV3, hingedTransform, normalizeV3, quatMul, quatPitch, quatYaw, rotateByQuat, scaleV3, subV3, v3 } from "../../presentation/stage/vectors.ts";
+import { RARITIES } from "../../chance-engine/configuration/schema.ts";
+import { addV3, crossV3, dotV3, hingedTransform, normalizeV3, quatMul, quatPitch, quatYaw, QUAT_IDENTITY, rotateByQuat, scaleV3, subV3, v3 } from "../../presentation/stage/vectors.ts";
+import { PRIZE_EXTENT, PRIZE_KINDS, PRIZE_SIZE, prizeExtentOf, prizeInstances, prizeKindOf } from "./prizes/index.ts";
 import { easeOutBack } from "../../presentation/stage/easing.ts";
 import {
   CHEST_BODY,
@@ -332,18 +334,147 @@ test("the chosen chest stays fully inside the frame for the whole flight and rev
     );
   }
 
-  // The prize that climbs out of the parked chest also stays framed, across the
-  // whole rise INCLUDING the overshoot of its ease.
+  // The treasure that climbs out of the parked chest also stays framed, across
+  // the whole rise INCLUDING the overshoot of its ease.
+  //
+  // The budget is read from the catalog rather than copied out of it: every
+  // prize is authored inside the same unit box at the same `PRIZE_SIZE`, and
+  // `PRIZE_EXTENT` is the reach of whichever of the five is widest. So this
+  // assertion re-binds itself the day a prize grows — which is exactly what a
+  // framing test is for, and is why the prizes declare an `extent` at all.
   const top = v3(heroBase.x, heroBase.y + CHEST_BODY_TOP * framing.scale, heroBase.z);
-  const gem = framing.scale * CHEST_TIMING.prizeDamp;
+  const prizeScale = framing.scale * CHEST_TIMING.prizeDamp;
   for (let step = 0; step <= 40; step += 1) {
     const riseT = step / 40;
-    // The largest prize the game can yield (a jackpot gem) is the binding case.
-    const size = (0.54 + 0.18) * (0.5 + 0.5 * riseT) * 1.04 * gem;
+    // 1.04 is the top of the settled size breathe in `heroPrize`.
+    const reach = PRIZE_SIZE * PRIZE_EXTENT * (0.5 + 0.5 * riseT) * 1.04 * prizeScale;
     const climb = CHEST_TIMING.riseHeight * easeOutBack(riseT) * framing.scale * CHEST_TIMING.riseDamp;
-    const apex = project(camera, v3(top.x, top.y + climb + size, top.z), square);
+    const apex = project(camera, v3(top.x, top.y + climb + reach, top.z), square);
     assert.ok(apex.y <= 1, `the prize apex stays in frame at riseT=${riseT.toFixed(2)} (y=${apex.y.toFixed(3)})`);
   }
+});
+
+// ── the prize catalog ──────────────────────────────────────────────────────────
+
+test("every reward tier this game ships names a real treasure", () => {
+  // The tier ids ARE the prize kinds — that identity is the whole binding
+  // between the committed outcome and what the player sees rise out of the
+  // chest. If a tier is ever renamed without its prize, this fails rather than
+  // silently falling through to the rarity default.
+  const tiers = TREASURE_CHEST_PICK.defaultConfig().rewardTiers;
+  assert.equal(tiers.length, PRIZE_KINDS.length, "one tier per treasure");
+  tiers.forEach((tier) => {
+    assert.ok(PRIZE_KINDS.includes(tier.id as (typeof PRIZE_KINDS)[number]), `tier "${tier.id}" names a treasure`);
+    assert.equal(prizeKindOf(tier.id, tier.rarity), tier.id, `tier "${tier.id}" resolves to its own treasure`);
+    assert.ok(tier.countsAsWin, `tier "${tier.id}" pops out of the chest`);
+  });
+  // Every treasure is reachable — no prize is modelled but unwinnable.
+  assert.deepEqual(new Set(tiers.map((t) => t.id)), new Set(PRIZE_KINDS));
+});
+
+test("an unknown tier still yields a real treasure, chosen by rarity", () => {
+  // The reward ladder is editable from the Set Up panel, so a config naming
+  // tiers this catalog has never heard of is a normal state, not a bug: the
+  // chest must still open onto an object rather than onto nothing.
+  const byRarity = RARITIES.map((rarity) => prizeKindOf("some-custom-tier", rarity));
+  byRarity.forEach((kind, i) => assert.ok(PRIZE_KINDS.includes(kind), `${RARITIES[i]} falls back to a real treasure`));
+  assert.equal(new Set(byRarity).size, RARITIES.length, "each rarity has its own canonical treasure");
+  // A null tier id (a win with no tier recorded) is handled the same way.
+  assert.ok(PRIZE_KINDS.includes(prizeKindOf(null, "common")));
+});
+
+test("every treasure is built inside the box it declares, deterministically", () => {
+  const frame = { center: v3(0, 0, 0), settle: 1, size: 1, spin: QUAT_IDENTITY, tick: 0 };
+  PRIZE_KINDS.forEach((kind) => {
+    // Pure in the frame: same inputs → identical geometry, so a replay of a
+    // round yields a byte-identical prize.
+    assert.deepEqual(prizeInstances(kind, "reward", frame), prizeInstances(kind, "reward", frame), `${kind} is deterministic`);
+
+    // Sampled across the tick, no part of any treasure may reach past the
+    // `extent` it declares — that declaration is what the framing budget above
+    // is computed from, so an under-reported prize would quietly break framing.
+    const reach = Array.from({ length: 24 }, (_, i) =>
+      prizeInstances(kind, "reward", { ...frame, tick: i * 17 }).flatMap((inst) => {
+        const p = inst.transform.position;
+        const s = inst.transform.scale;
+        // A rotated box's corner can reach its half-diagonal from its centre,
+        // whatever the rotation — the bound that holds without re-deriving each
+        // part's orientation.
+        return [Math.hypot(p.x, p.y, p.z) + Math.hypot(s.x, s.y, s.z) / 2];
+      }),
+    ).flat();
+    assert.ok(Math.max(...reach) <= prizeExtentOf(kind) * ROTATION_SLACK, `${kind} stays inside its declared extent (reached ${Math.max(...reach).toFixed(2)} vs ${prizeExtentOf(kind)})`);
+
+    // A treasure is a real object, not a stub.
+    assert.ok(prizeInstances(kind, "reward", frame).length >= 4, `${kind} is actually modelled`);
+  });
+});
+
+/**
+ * How far past its declared `extent` a prize's corner-bound may reach.
+ *
+ * The check above bounds every part by `|centre| + |scale|/2` — the half-DIAGONAL
+ * of its box, which is the only bound that holds without re-deriving each part's
+ * orientation. That is deliberately pessimistic: a flat slab lying square to the
+ * axes reaches nothing like its diagonal, and a prize made of slabs (a coin's
+ * denticles, a bar's flanks, a boot's sole) accumulates that pessimism. The
+ * slack keeps the check meaningful — it still catches a prize that has genuinely
+ * outgrown its declaration — without demanding every author bound a rotation
+ * they never applied.
+ */
+const ROTATION_SLACK = 1.6;
+
+/**
+ * Where the result banner sits, as a fraction of frame height from the top.
+ *
+ * Not a guess: `#result-banner` is centred at `top: 74%` for this game
+ * specifically (`styles/marquee.css`, scoped by `body[data-active-game]`), and
+ * stands roughly 6% of the stage tall either side of that. This is the top edge
+ * of the band it claims — the line the treasure must never cross, because
+ * everything below it is chrome drawn OVER the canvas.
+ */
+const BANNER_TOP_FRACTION = 0.66;
+
+/** That line in normalized screen space, where +1 is the top of frame. */
+const BANNER_TOP_NDC = 1 - 2 * BANNER_TOP_FRACTION;
+
+test("the settled treasure owns the upper frame and never sits behind the banner", () => {
+  // THE composition invariant of the reveal, and the reason `heroFill`,
+  // `heroDrop`, `riseHeight`, `riseDamp` and `prizeDamp` are tuned together
+  // rather than one at a time: the chest is the plinth in the lower half, the
+  // treasure owns the air above it, and the result banner lands on the chest's
+  // body — never on the prize.
+  //
+  // Before this was pinned, the prize hovered in the chest's mouth at ~0.45 of
+  // frame height and the banner covered it outright. A framing test that only
+  // asked "is it on screen?" could not see that, because it never was off
+  // screen — it was simply behind the text.
+  const camera = chestCamera(9);
+  const framing = heroFraming(camera);
+  const heroBase = v3(framing.anchor.x, framing.anchor.y - (CHEST_HEIGHT / 2) * framing.scale, framing.anchor.z);
+  const mouth = v3(heroBase.x, heroBase.y + CHEST_BODY_TOP * framing.scale, heroBase.z);
+  const prizeScale = framing.scale * CHEST_TIMING.prizeDamp;
+  const climb = CHEST_TIMING.riseHeight * CHEST_TIMING.riseDamp * framing.scale;
+
+  // Measured on the SMALLEST treasure, since it is the one whose lowest point
+  // hangs closest to the chest — if the coin clears, everything clears.
+  const smallest = Math.min(...PRIZE_KINDS.map((kind) => prizeExtentOf(kind)));
+  const lowest = project(camera, v3(mouth.x, mouth.y + climb - PRIZE_SIZE * smallest * prizeScale, mouth.z), 1);
+  assert.ok(lowest.y > BANNER_TOP_NDC, `the settled treasure clears the banner band (y=${lowest.y.toFixed(3)} > ${BANNER_TOP_NDC.toFixed(2)})`);
+
+  // And it has genuinely LEFT the chest rather than hovering in its mouth: its
+  // lowest point sits clear above the open chest's rim.
+  const rim = project(camera, mouth, 1);
+  assert.ok(lowest.y > rim.y, `the treasure rises clear of the chest mouth (${lowest.y.toFixed(3)} > ${rim.y.toFixed(3)})`);
+
+  // The treasure's centre sits in the UPPER half of the frame — the poster
+  // composition, with the chest reading as the plinth beneath it.
+  const centre = project(camera, v3(mouth.x, mouth.y + climb, mouth.z), 1);
+  assert.ok(centre.y > 0, `the treasure is staged in the upper frame (y=${centre.y.toFixed(3)})`);
+
+  // The chest, meanwhile, must NOT have crept up into the treasure's air.
+  const chestTop = Math.max(...chestCorners(heroBase, framing.scale, 0, 0).map((c) => project(camera, c, 1).y));
+  assert.ok(chestTop < centre.y, "the closed chest silhouette stays below the treasure");
 });
 
 test("the hero framing fills the frame without overflowing it", () => {
@@ -352,6 +483,11 @@ test("the hero framing fills the frame without overflowing it", () => {
 
   // It is genuinely a CLOSE-UP: the chest ends up far bigger ON SCREEN than any
   // chest still on the board, and much nearer to the camera than the board is.
+  // The bar is 2.5× rather than the 3× this once asked for, and deliberately:
+  // the reveal was recomposed so the TREASURE owns the frame and the chest
+  // reads as the plinth under it (see the composition test above and the note
+  // on `heroFill`). The enlargement budget moved to the prize; the chest is
+  // still unmistakably a close-up, just no longer the whole subject.
   // Measured on the PROJECTION, not on `framing.scale` — a longer lens buys the
   // same shot with less world scale at more distance, so world scale alone says
   // nothing about how large the chest reads.
@@ -370,7 +506,7 @@ test("the hero framing fills the frame without overflowing it", () => {
       return Math.max(...slot) - Math.min(...slot);
     }),
   );
-  assert.ok(span > boardSpan * 3, `the hero chest is a real enlargement (${(span / boardSpan).toFixed(2)}× the widest chest on the board)`);
+  assert.ok(span > boardSpan * 2.5, `the hero chest is a real enlargement (${(span / boardSpan).toFixed(2)}× the widest chest on the board)`);
   assert.ok(span > 0.6, `the chest dominates the frame (spans ${(span * 50).toFixed(0)}% of width)`);
   assert.ok(Math.max(...xs.map(Math.abs)) <= 1, `and still fits a square window (max |x| = ${Math.max(...xs.map(Math.abs)).toFixed(3)})`);
 

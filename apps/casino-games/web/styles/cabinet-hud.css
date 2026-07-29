@@ -177,13 +177,16 @@ body[data-active-game="gem-mine"] .cab-cabinet-marquee { --game-accent: #8be9c8;
   .cab-footer {
     flex-wrap: wrap;
   }
+  /* Held 15% down in lock-step with the base rule in `marquee.css` — see the
+   * note there. A phone has the least room of any viewport to spare above the
+   * banner, so this is the size that matters most for keeping the prize clear. */
   #result-banner {
-    font-size: 1.2rem;
-    padding: 8px 14px;
+    font-size: 1.02rem;
+    padding: 7px 12px;
   }
   #result-banner.win-jackpot,
   #result-banner.win-rare {
-    font-size: 1.5rem;
+    font-size: 1.28rem;
   }
 }
 

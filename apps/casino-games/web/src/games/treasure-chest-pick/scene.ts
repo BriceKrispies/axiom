@@ -25,13 +25,13 @@ import { brandMaterials } from "../../presentation/branding/brand.ts";
 import { stampText } from "../../presentation/branding/label.ts";
 import { lowDetail, weldedLetteringReads } from "../../presentation/detail.ts";
 import { confettiBurst, CONFETTI_MATERIALS, sparkleRing } from "../../presentation/celebrations/confetti.ts";
-import { REWARD_MATERIALS, rewardMaterialOf } from "../../presentation/rewards/tiers.ts";
 import { celebrationFor, outcomeRarity, speedTicks } from "../round-state.ts";
 import { clamp01, easeOutBack, easeOutCubic, lerp, pulse } from "../../presentation/stage/easing.ts";
 import { SKY_CLEAR, STAGE_MATERIALS, stageLights, stageRoom } from "../../presentation/stage/props.ts";
 import {
   addV3,
   hingedTransform,
+  lerpV3,
   QUAT_IDENTITY,
   quatMul,
   quatPitch,
@@ -41,6 +41,10 @@ import {
   scaleV3,
   v3,
 } from "../../presentation/stage/vectors.ts";
+import type { CrabPlace } from "./crab.ts";
+import { CRAB_MATERIALS, crabParts } from "./crab.ts";
+import type { PrizeKind } from "./prizes/index.ts";
+import { PRIZE_MATERIALS, PRIZE_SIZE, prizeExtentOf, prizeInstances, prizeKindOf, prizeSpin } from "./prizes/index.ts";
 import type { ChestSpec, ChestState, DecorDrag, HeroFraming } from "./game.ts";
 import {
   CHEST_BODY as BODY,
@@ -90,9 +94,29 @@ const veilMaterialOf = (level: number): string | null => {
   return rung <= 0 ? null : `Veil${Math.min(CHEST_TIMING.dimSteps, rung) - 1}`;
 };
 
+/**
+ * A GLOW overlay: a translucent piece whose rendered color is its `emissive`
+ * and nothing else, because its albedo is BLACK.
+ *
+ * This is the rule the whole warm-light family below obeys, and it is the fix
+ * for the reveal's "flashlight pointed out of the box". The backend composites
+ * `tonemap(diffuse · albedo + specular + emissive)`: an overlay authored with a
+ * near-WHITE albedo (the champion's `[1, 0.85, 0.5]`) is therefore a fully LIT
+ * Lambert card that happens to also emit. On the board that was survivable; at
+ * the hero framing the light sum reaches ~2.2, so the albedo term ALONE was
+ * ~2.2 before the emissive was added and every overlay clipped to flat white —
+ * measured (254, 253, 245) on the interior glow and (254, 253, 251) on the
+ * prize halo. Dimming the emissive could never fix that, because the emissive
+ * was never what was bright.
+ *
+ * With a black albedo the diffuse term vanishes and the piece renders as
+ * exactly the warm color authored here, at exactly this opacity, under ANY
+ * rig — which is what "a glow" means. A light source does not take light.
+ */
+const glowOverlay = (emissive: Rgba, opacity: number): MaterialSpec => ({ baseColor: [0, 0, 0, 1], emissive, opacity });
+
 const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   ...STAGE_MATERIALS,
-  ...REWARD_MATERIALS,
   ...CONFETTI_MATERIALS,
   // The beach margin around the inset lagoon. The shared StageFloor is a pale,
   // near-white cream ([0.94, 0.9, 0.82]) that under the bright warm key lifts to
@@ -171,33 +195,27 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   GildDim: { baseColor: [0.36, 0.28, 0.095, 1] },
   GildBright: { baseColor: [0.92, 0.71, 0.25, 1], emissive: [0.1, 0.07, 0, 1] },
   // Warm reveal light: a layered pool under the chosen chest, seam leak, inner
-  // glow, and the burst — all additive-emissive translucent discs/slabs.
-  // These warm overlays are additive-emissive translucent slabs, and there is no
-  // tonemap/grade stage here: each one adds straight on top of the already-bright
-  // Lambert wood and clips it. Stacked (inner glow + three pool discs + seam +
-  // burst) they flood the whole open chest to a flat yellow fog that erases the
-  // carved-wood value-stepping and washes the gem to a formless white blob — the
-  // champion's blowout. The reference keeps a TIGHT hot core with a fast falloff
-  // to readable brown, so the fix is a halo shape, not a brighter light: hold the
-  // hot PoolCore (it matches the reference's bright center right under the gem)
-  // but pull the WIDE overlays (inner glow + mid/outer pool + seam) and the whole
-  // burst bloom well down, so the warmth stays a contained pool and the brown wood
-  // and blue gem read through it the way they do in the reference.
-  // Foreman merge of two lenses that both attacked this glow family: surfacing
-  // set the MAGNITUDE (dim the wide overlays, cut opacity, hold the hot core) and
-  // colorist set the HUE (desaturate toward warm-WHITE — lift green/blue so the
-  // additive stack no longer clips to saturated gold). Each emissive keeps
-  // surfacing's red-anchor and opacity, with green/blue raised by colorist's
-  // warm-white ratios, so the pool stays a tight, dim halo that reads as warm
-  // light — not a nuclear-yellow flood — and the brown wood + blue gem show through.
-  PoolCore: { baseColor: [1, 0.86, 0.5, 1], emissive: [0.92, 0.78, 0.63, 1], opacity: 0.5 },
-  PoolMid: { baseColor: [1, 0.84, 0.48, 1], emissive: [0.52, 0.42, 0.32, 1], opacity: 0.24 },
-  PoolOuter: { baseColor: [1, 0.82, 0.46, 1], emissive: [0.4, 0.32, 0.24, 1], opacity: 0.12 },
-  SeamGlow: { baseColor: [1, 0.9, 0.55, 1], emissive: [0.72, 0.63, 0.5, 1], opacity: 0.6 },
-  InnerGlow: { baseColor: [1, 0.85, 0.5, 1], emissive: [0.36, 0.3, 0.24, 1], opacity: 0.5 },
-  BurstGlow: { baseColor: [1, 0.92, 0.62, 1], emissive: [0.66, 0.59, 0.5, 1], opacity: 0.36 },
-  BurstRay: { baseColor: [1, 0.9, 0.58, 1], emissive: [0.6, 0.53, 0.43, 1], opacity: 0.18 },
-  Mote: { baseColor: [1, 0.95, 0.72, 1], emissive: [1, 0.9, 0.6, 1] },
+  // glow, and the burst. Every one is a `glowOverlay` (see above) — a black
+  // albedo carrying a warm emissive — so each renders as precisely the color
+  // written here and cannot be inflated by the rig it happens to sit in. That
+  // one property is what stops the open chest reading as a flashlight: the
+  // interior warmth is now AUTHORED at amber rather than being a white card the
+  // three reveal lights drove to clip.
+  //
+  // The values are chosen as rendered colors, not as fudge factors: `PoolCore`
+  // is the hot centre right under the chest, stepping down through `PoolMid` /
+  // `PoolOuter` to a wide, faint edge; `InnerGlow` is the amber wash that fills
+  // the open mouth; the burst pieces are the flash that fires as the lid lands.
+  // They stay saturated (green ≈ 0.7·red, blue ≈ 0.35·red) because a warm light
+  // that has lost its chroma is just a white light.
+  PoolCore: glowOverlay([1, 0.76, 0.4, 1], 0.5),
+  PoolMid: glowOverlay([0.62, 0.44, 0.2, 1], 0.3),
+  PoolOuter: glowOverlay([0.4, 0.27, 0.11, 1], 0.22),
+  SeamGlow: glowOverlay([1, 0.79, 0.42, 1], 0.72),
+  InnerGlow: glowOverlay([0.85, 0.55, 0.22, 1], 0.5),
+  BurstGlow: glowOverlay([0.95, 0.7, 0.33, 1], 0.4),
+  BurstRay: glowOverlay([0.85, 0.63, 0.3, 1], 0.22),
+  Mote: { baseColor: [0, 0, 0, 1], emissive: [1, 0.88, 0.55, 1] },
   // The arcade stage: a turquoise platform with a rim, a warm central glow, and
   // a darker edge falloff — an intentional board, not a flat marker.
   // The lagoon's OPEN WATER: the deeper cyan body inside the shallow shelf, and
@@ -227,11 +245,14 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // seated-below-the-clamp rule as the chest gilding above — a lemon-white rivet
   // ring around an amber-gilded chest grid would break the one metal the frame has.
   BoardRivet: { baseColor: [0.78, 0.6, 0.2, 1], emissive: [0.08, 0.055, 0, 1] },
-  // Like every other translucent overlay here, the puff carries a little
-  // emissive: a purely Lambert translucent grey reads as a dark blob against
-  // the warm, brightly-lit chest mouth it coughs out of, which is the opposite
-  // of the light, playful "nothing here this time" it is meant to be.
-  DustPuff: { baseColor: [0.8, 0.75, 0.68, 1], emissive: [0.34, 0.31, 0.27, 1], opacity: 0.5 },
+  // The empty-chest puff is the one translucent piece here that is NOT a glow —
+  // it is real dust, and it should be modelled by the key like everything else.
+  // So it keeps a lit albedo, seated LOW: at the reveal's light sum a pale-grey
+  // albedo multiplies straight past 1 and the puff clips to the same white every
+  // overlay used to. A dark warm-grey albedo lands it on lit dust instead, and a
+  // whisper of emissive keeps it from reading as a soot blob against the warm
+  // mouth it coughs out of.
+  DustPuff: { baseColor: [0.34, 0.31, 0.28, 1], emissive: [0.06, 0.055, 0.05, 1], opacity: 0.5 },
   // Beach set-dressing (palm, sandcastle, crab, shells) — value-stepped so each
   // prop reads as a chunky faceted assembly under the raking key, matching the
   // reference's toy-diorama shore. No emissive on the solid props (they are lit
@@ -262,12 +283,8 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // chests' gilding — so it carries the same amber ratio and the same headroom
   // below the clamp, or the "tie" is to a gold the chests no longer wear.
   CastleFlagTrim: { baseColor: [0.78, 0.6, 0.2, 1], emissive: [0.06, 0.045, 0, 1] },
-  // The crab reads as a coral beach creature, not a second brand accent: pulled
-  // off the saturated brand red toward warm coral so the only true reds in frame
-  // are the intentional branding surfaces.
-  CrabShell: { baseColor: [0.85, 0.34, 0.24, 1] },
-  CrabShellDark: { baseColor: [0.66, 0.24, 0.16, 1] },
-  CrabEye: { baseColor: [0.06, 0.05, 0.05, 1] },
+  // The crab's own palette lives in `crab.ts` beside the assembly, so the beach
+  // crab and the prize crab cannot drift apart (see `CRAB_MATERIALS` below).
   // Shells/starfish shed the same emissive fakery for the same reason: the warm
   // ambient keeps these little shore pieces reading as pale shells catching the
   // sky rather than dark pebbles, without making them self-luminous.
@@ -284,6 +301,8 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // beneath them.
   ContactShadowSoft: { baseColor: [0.12, 0.1, 0.07, 1], opacity: 0.18 },
   ContactShadowCore: { baseColor: [0.1, 0.08, 0.06, 1], opacity: 0.3 },
+  ...CRAB_MATERIALS,
+  ...PRIZE_MATERIALS,
   ...VEIL_MATERIALS,
 };
 
@@ -794,7 +813,32 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
 
 // ── the light burst (bounded: soft glow + a few rays + a few motes) ─────────────
 
-const lightBurst = (at: EngineVec3, tick: number, t: number, s: number): readonly SceneInstance[] => {
+const BURST_SPIKES = 6;
+
+/**
+ * The flare that fires as the lid lands.
+ *
+ * It is a STARBURST, not a beam. The champion's version was five tall vertical
+ * boxes climbing out of the chest's mouth under a frame-wide horizontal glow
+ * disc — which is, precisely and literally, a torch shining up out of the box,
+ * and it is the single frame that most made this reveal look like one. Two
+ * things were wrong with it and both are fixed here.
+ *
+ * The RAYS were vertical and long (up to 1.8 units before scaling, taller than
+ * the chest itself), so they read as god-rays escaping a lid rather than as a
+ * pop of light around a find. They are now short spikes lying in the SCREEN
+ * PLANE — the classic sparkle star — radiating out from the mouth and gone in
+ * the same beat. Building them in the screen plane rather than in world XZ is
+ * what makes them read as a flash from any camera: `quatPitch(-elevation)`
+ * carries the local XY plane onto the plane the player is actually looking at,
+ * so a spike always points somewhere on screen instead of foreshortening to a
+ * dot when it happens to aim at the lens.
+ *
+ * The GLOW was a horizontal pancake wider than the chest, so at a 50° camera it
+ * spread across the whole floor of the frame. It is now a modest bloom squared
+ * up to the lens, sized to the mouth it comes out of.
+ */
+const lightBurst = (at: EngineVec3, tick: number, t: number, s: number, elevation: number): readonly SceneInstance[] => {
   // t is burst progress 0→1 over the burst window; intensity peaks early, fades.
   // `s` scales the whole figure with the hero chest it erupts from.
   const strength = pulse(t);
@@ -802,20 +846,36 @@ const lightBurst = (at: EngineVec3, tick: number, t: number, s: number): readonl
     return [];
   }
   const rise = (0.2 + t * 0.9) * s;
-  const glow: SceneInstance = disc("burst:glow", "BurstGlow", v3(at.x, at.y + 0.05 * s, at.z), (0.35 + strength * 0.9) * s, 0.02);
-  const rays = [0, 1, 2, 3, 4].map((i) => {
-    const a = (i / 5) * Math.PI * 2 + tick * 0.02;
-    const spread = 0.28 * strength * s;
+  // The screen plane at this camera: local +X/+Y span it, local +Z faces the lens.
+  const screenQ = quatPitch(-elevation);
+  const glow: SceneInstance = {
+    key: "burst:glow",
+    material: "BurstGlow",
+    mesh: "cylinder",
+    transform: {
+      position: v3(at.x, at.y + 0.12 * s, at.z),
+      rotation: quatPitch(Math.PI / 2 - elevation),
+      scale: v3((0.34 + strength * 0.3) * 2 * s, 0.02, (0.34 + strength * 0.3) * 2 * s),
+    },
+  };
+  const rays = Array.from({ length: BURST_SPIKES }, (_, i): SceneInstance => {
+    const a = (i / BURST_SPIKES) * Math.PI * 2 + tick * 0.02;
+    // A box's length runs along its local +Y, so this roll turns that axis onto
+    // the spoke's own direction; the spoke is then pushed out to sit clear of
+    // the centre rather than crossing through it.
+    const spike = (0.22 + strength * 0.34) * s;
+    const inner = 0.16 * s;
+    const along = rotateByQuat(v3(Math.cos(a) * (inner + spike / 2), Math.sin(a) * (inner + spike / 2), 0), screenQ);
     return {
       key: `burst:ray${i}`,
       material: "BurstRay",
       mesh: "box",
       transform: {
-        position: v3(at.x + Math.cos(a) * spread, at.y + (0.3 * s + rise * 0.5), at.z + Math.sin(a) * spread),
-        rotation: quatYaw(a),
-        scale: scaleV3(v3(0.05 + strength * 0.05, 0.5 + strength * 1.3, 0.05 + strength * 0.05), s),
+        position: v3(at.x + along.x, at.y + 0.12 * s + along.y, at.z + along.z),
+        rotation: quatMul(screenQ, quatRoll(a - Math.PI / 2)),
+        scale: v3(0.045 * s, spike, 0.045 * s),
       },
-    } satisfies SceneInstance;
+    };
   });
   const motes = Array.from({ length: CHEST_TIMING.burstParticles }, (_, i) => {
     const a = (i / CHEST_TIMING.burstParticles) * Math.PI * 2 + i * 1.3;
@@ -832,58 +892,52 @@ const lightBurst = (at: EngineVec3, tick: number, t: number, s: number): readonl
   return [glow, ...rays, ...motes];
 };
 
-// ── the hero prize (rises fully clear of the chest, large, spinning, pulsing) ──
+// ── the hero prize (rises fully clear of the chest, large, turning, pulsing) ───
+
+/** Clearance between a treasure's lowest point and the warm pool beneath it, in
+ * prize-local units — enough air that the object reads as floating above the
+ * glow rather than resting on it. */
+const HALO_DROP = 0.22;
 
 /**
- * The prize the winning chest yields — a big spinning rarity gem that climbs
- * fully out to hover as the frame's focal point, with a settle bob, a size
- * pulse, and a pulsing halo behind it. `at` is the chest's open mouth; `riseT`
- * the climb progress; `settle` ramps in the idle bob/pulse once it has arrived.
+ * Where the treasure hovers, given the chest's open mouth (`at`) and how far
+ * through its climb it is.
+ *
+ * Named and shared rather than inlined because the reveal LIGHT has to follow
+ * it: the lamp that lights the prize and the prize itself must agree about
+ * where the prize is, or the shot ends up lighting the box the treasure has
+ * already left. The climb is damped against the hero scale — at full scale an
+ * undamped rise would carry the prize straight out of frame.
  */
-const heroPrize = (rarity: Parameters<typeof rewardMaterialOf>[0], at: EngineVec3, riseT: number, tick: number, settle: number, s: number): readonly SceneInstance[] => {
-  const material = rewardMaterialOf(rarity);
-  // The climb and the gem both scale with the hero chest, but DAMPED: at full
-  // hero scale an undamped rise would carry the prize straight out of frame.
-  const rise = s * CHEST_TIMING.riseDamp;
-  const gem = s * CHEST_TIMING.prizeDamp;
-  const climb = CHEST_TIMING.riseHeight * easeOutBack(riseT) * rise;
-  const bob = Math.sin(tick * 0.12) * 0.035 * settle * gem;
-  const center = v3(at.x, at.y + climb + bob, at.z);
-  const rarityBonus = rarity === "jackpot" ? 0.18 : rarity === "rare" ? 0.1 : 0;
-  const size = (0.54 + rarityBonus) * (0.5 + 0.5 * riseT) * (1 + Math.sin(tick * 0.16) * 0.04 * settle) * gem;
-  const halo = 0.82 * (0.5 + 0.5 * riseT) * (0.9 + Math.sin(tick * 0.14) * 0.12 * settle) * gem;
-  const spin = quatYaw(tick * 0.04);
-  // The prize is a CUT crystal, not a smooth ball. The reference gem is a rounded
-  // stone whose whole surface is broken into triangular/kite facets that each
-  // catch the light at their own angle — the champion's lone sphere + single box
-  // read as a featureless bead. The engine's mesh vocabulary is box/sphere/
-  // cylinder with no faceted-gem primitive, so — exactly as the barrel-lid dome
-  // is an honest arc of flat slats rather than a half-cylinder — the gem is a
-  // rounded core wrapped in a crown of flat box facets, a bright table facet on
-  // top, and a pointed pavilion box below, so the stone reads as cut and
-  // sparkling. Every facet is welded to the gem's spin so the whole cluster turns
-  // as one stone.
-  const gemFacet = (suffix: string, offset: EngineVec3, scale: EngineVec3, localRot: EngineQuat): SceneInstance => ({
-    key: `reward:${suffix}`,
-    material,
-    mesh: "box",
-    transform: { position: addV3(center, rotateByQuat(offset, spin)), rotation: quatMul(spin, localRot), scale },
-  });
-  // Crown: six kite facets fanning around the upper girdle, each tilted up-and-out
-  // so its flat face angles toward the light like a cut gemstone's crown.
-  const crown = Array.from({ length: 6 }, (_, i): SceneInstance => {
-    const ringQ = quatMul(quatYaw((i / 6) * Math.PI * 2), quatPitch(-0.95));
-    return gemFacet(`crown${i}`, rotateByQuat(v3(0, 0, size * 0.38), ringQ), v3(size * 0.3, size * 0.09, size * 0.42), ringQ);
-  });
+const prizeCentre = (at: EngineVec3, riseT: number, s: number): EngineVec3 =>
+  v3(at.x, at.y + CHEST_TIMING.riseHeight * easeOutBack(riseT) * s * CHEST_TIMING.riseDamp, at.z);
+
+const heroPrize = (kind: PrizeKind, at: EngineVec3, riseT: number, tick: number, settle: number, s: number, elevation: number): readonly SceneInstance[] => {
+  const bob = Math.sin(tick * 0.12) * 0.035 * settle * s * CHEST_TIMING.prizeDamp;
+  const risen = prizeCentre(at, riseT, s);
+  const center = v3(risen.x, risen.y + bob, risen.z);
+  // One size for every treasure, so the catalog is interchangeable: a prize
+  // grows in over its climb and breathes gently once settled. `PRIZE_SIZE` is in
+  // world units per prize-local unit at hero scale — the budget every prize is
+  // authored inside (see `prize.ts`).
+  const size = PRIZE_SIZE * (0.5 + 0.5 * riseT) * (1 + Math.sin(tick * 0.16) * 0.04 * settle) * s * CHEST_TIMING.prizeDamp;
+  const halo = 0.62 * (0.5 + 0.5 * riseT) * (0.9 + Math.sin(tick * 0.14) * 0.12 * settle) * s * CHEST_TIMING.prizeDamp;
+  const spin = prizeSpin(kind, elevation, tick);
   return [
-    disc("reward:halo", "BurstGlow", v3(center.x, center.y, center.z + 0.001), halo, 0.02),
-    { key: "reward:core", material, mesh: "sphere", transform: { position: center, rotation: spin, scale: v3(size, size, size) } },
-    ...crown,
-    // The flat top table, faceted octagonally by a 22.5° yaw.
-    gemFacet("table", v3(0, size * 0.42, 0), v3(size * 0.5, size * 0.12, size * 0.5), quatYaw(Math.PI / 8)),
-    // The pavilion: a box tipped 45° on two axes so a single vertex points down,
-    // giving the stone a cut point beneath the girdle instead of a round bottom.
-    gemFacet("pavilion", v3(0, -size * 0.3, 0), v3(size * 0.46, size * 0.46, size * 0.46), quatMul(quatPitch(Math.PI / 4), quatRoll(Math.PI / 4))),
+    // A soft warm disc the treasure hovers OVER — a pool of light it is standing
+    // in, not a card it is standing against.
+    //
+    // Behind is the obvious place for a halo and it is the wrong one here. The
+    // overlay is translucent and depth-tested, so a disc sharing the prize's own
+    // plane intersects it: the ring, the coin and the crab all had a bright band
+    // cutting straight through them. Dropping the disc clear of the object's
+    // lowest point removes the intersection by construction rather than by
+    // tuning a radius — and it reads better besides, since the prize's own cast
+    // warmth on the chest floor is a thing a player already understands.
+    // `prizeExtentOf` is what makes "clear of it" honest: each treasure declares
+    // its own reach, so a tall boot pushes the pool further down than a coin.
+    disc("reward:halo", "BurstGlow", v3(center.x, center.y - size * prizeExtentOf(kind) - HALO_DROP * size, center.z), halo, 0.02),
+    ...prizeInstances(kind, "reward", { center, settle, size, spin, tick }),
   ];
 };
 
@@ -1069,11 +1123,11 @@ const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
   return [...contactShadow("castle:shadow", origin, 1.28 * CASTLE_SCALE, poleTop * CASTLE_SCALE), base, ...towerParts, door, pole, flag, flagTrim];
 };
 
-/** A stubby cartoon crab with a small set of idle animations: a domed shell, two
- * eyestalks, two front claws, and a row of little legs down each side. `crabIdle`
+/** The crab on the beach: the shared `crabParts` assembly (see `crab.ts` — his
+ * girlfriend, the chest prize, is the same creature) posed by `crabIdle`, which
  * elects one bit of business (scuttle / claw wave / bob / turn) or a rest on a
- * random interval from the ambient stream; here every part is placed through the
- * resulting body frame so the crab scoots, bobs, turns, waves, and breathes as
+ * random interval from the ambient stream. Every part is placed through the
+ * resulting body frame, so the crab scoots, bobs, turns, waves, and breathes as
  * one creature. Pure in (tick, seed) — outcome-independent. */
 const crab = (origin: EngineVec3, tick: number, seed: number): readonly SceneInstance[] => {
   const pose = crabIdle(tick, seed);
@@ -1082,41 +1136,13 @@ const crab = (origin: EngineVec3, tick: number, seed: number): readonly SceneIns
   // Place a part given in body-local space: rotate its offset into the (turned)
   // body frame, add the whole-body scoot/bob, and compose the body yaw into its
   // own rotation, so one pose moves the crab as a single creature.
-  const place = (key: string, material: string, mesh: "box" | "sphere", local: EngineVec3, scale: EngineVec3, localRot: EngineQuat = QUAT_IDENTITY): SceneInstance =>
-    decorPart(key, material, mesh, addV3(origin, addV3(bodyShift, rotateByQuat(local, bodyQ))), scale, quatMul(bodyQ, localRot));
-  const body = place("crab:body", "CrabShell", "sphere", v3(0, 0.2, 0), v3(0.62, 0.4 * (1 + pose.breath), 0.5));
-  const eyes = [-1, 1]
-    .map((s): readonly SceneInstance[] => [
-      place(`crab:stalk${s}`, "CrabShell", "box", v3(s * 0.14, 0.44, 0.16), v3(0.06, 0.18, 0.06), quatRoll(-s * pose.eye)),
-      place(`crab:eye${s}`, "CrabEye", "sphere", v3(s * 0.14 + s * pose.eye * 0.12, 0.55, 0.16), v3(0.1, 0.1, 0.1)),
-    ])
-    .flat();
-  const claws = [-1, 1]
-    .map((s): readonly SceneInstance[] => {
-      // Each claw lifts and snaps on its own phase, so a wave alternates sides.
-      const lift = pose.clawLift * (0.7 + 0.3 * Math.sin(tick * 0.5 + (s > 0 ? 0 : Math.PI)));
-      return [
-        place(`crab:arm${s}`, "CrabShellDark", "box", v3(s * 0.42, 0.18 + lift * 0.12, 0.24), v3(0.1, 0.09, 0.28), quatRoll(s * lift)),
-        place(`crab:claw${s}`, "CrabShell", "sphere", v3(s * 0.5, 0.18 + lift * 0.3, 0.42), v3(0.22, 0.18, 0.2), quatRoll(s * lift)),
-      ];
-    })
-    .flat();
-  const legs = [-1, 1]
-    .map((s): readonly SceneInstance[] =>
-      [-0.16, 0.02, 0.2].map((z, i) => {
-        const wiggle = pose.legWiggle * Math.sin(tick * 0.7 + i * 1.2);
-        return place(`crab:leg${s}_${i}`, "CrabShellDark", "box", v3(s * 0.38, 0.08, z), v3(0.24, 0.06, 0.07), quatYaw(s * 0.5 + s * wiggle));
-      }),
-    )
-    .flat();
-  // A little brand pennant on a pole, raised in the crab's right claw — welded to
-  // the body frame, so it scoots and turns with the crab.
-  const flagPole = place("crab:flagpole", "BrandPost", "box", v3(0.58, 0.5, 0.34), v3(0.04, 0.7, 0.04));
-  const flag = place("crab:flag", "BrandPrimary", "box", v3(0.74, 0.66, 0.34), v3(0.3, 0.2, 0.03));
+  const place: CrabPlace = (key, material, mesh, local, scale, localRot = QUAT_IDENTITY): SceneInstance =>
+    decorPart(`crab:${key}`, material, mesh, addV3(origin, addV3(bodyShift, rotateByQuat(local, bodyQ))), scale, quatMul(bodyQ, localRot));
   // The shadow follows the crab's side-scuttle (the horizontal scoot) but not its
   // vertical bob, so it stays planted on the sand as the little creature hops.
   const shadow = contactShadow("crab:shadow", addV3(origin, v3(pose.scootX, 0, 0)), 0.5, 0.6);
-  return [...shadow, body, ...eyes, ...claws, ...legs, flagPole, flag];
+  // He carries the brand pennant and wears no bowtie; she is the other way round.
+  return [...shadow, ...crabParts(place, pose, tick, { bowtie: 0, pennant: true })];
 };
 
 /*
@@ -1342,6 +1368,11 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // chest is" from its grid slot; now the chest moves and they all follow it.
   const camera = chestCamera(count);
   const framing = heroFraming(camera);
+  // How far the camera looks DOWN, in radians above the horizontal. The reveal
+  // stages the prize against this rather than against the world axes — see
+  // `PrizePresentation` — so a treasure meets the lens the way it was authored
+  // to, whatever the camera preset does next.
+  const cameraElevation = Math.asin(-framing.forward.y);
   const flight = selected === null ? 0 : flightProgress(session, speed);
   const liftAmount = CHEST_TIMING.lift * selectEase;
   // `framing.anchor` frames the chest's CENTER; a chest is posed from its base.
@@ -1419,20 +1450,26 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     });
   }).flat();
 
+  // How far the treasure is through its climb out of the chest. Hoisted out of
+  // the reward block below because the reveal LIGHT needs it too — the lamp
+  // follows the prize up, and it can only do that if both read the same clock.
+  const riseT = revealAge >= timeline.lidEnd ? clamp01((revealAge - timeline.lidEnd) / Math.max(1, timeline.riseEnd - timeline.lidEnd)) : 0;
+
   // Reward / empty reveal rising fully clear of the selected, open chest.
   const rewardInstances: SceneInstance[] = [];
   const burst: SceneInstance[] = [];
   if (selected !== null && plan !== null && revealAge >= timeline.lidEnd) {
     const chestTop = heroTop;
-    const riseT = clamp01((revealAge - timeline.lidEnd) / Math.max(1, timeline.riseEnd - timeline.lidEnd));
     const settle = clamp01((revealAge - timeline.riseEnd) / 20);
     const rarity = outcomeRarity(session);
 
     if (rarity !== "loss") {
-      // A win: the warm light burst fires and the prize climbs fully clear of
-      // the chest to hover as the frame's focal point.
-      burst.push(...lightBurst(chestTop, tick, burstT, heroScale));
-      rewardInstances.push(...heroPrize(rarity, chestTop, riseT, tick, settle, heroScale));
+      // A win: the warm light burst fires and the treasure this chest was
+      // assigned at commit time climbs fully clear to hover as the frame's
+      // focal point. The prize is a pure READ of the committed tier — the
+      // presentation never picks it (see `prizes/index.ts`).
+      burst.push(...lightBurst(chestTop, tick, burstT, heroScale, cameraElevation));
+      rewardInstances.push(...heroPrize(prizeKindOf(plan.tierId, rarity), chestTop, riseT, tick, settle, heroScale, cameraElevation));
     } else {
       // An empty chest: a playful grey dust puff coughs up and out (no burst,
       // no prize) — a clear, warm "nothing here this time".
@@ -1508,30 +1545,70 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // to 0.28·albedo — a ~4:1 lit-to-shadow spread instead of ~9:1, landing on warm
   // sand rather than charcoal. The key DIRECTION is untouched, so every contact
   // shadow stays in lock-step.
-  const lights: SceneLight[] = stageLights(focus, 0.5 + 0.4 * selectEase).map((entry) => {
+  //
+  // ONE further rule governs the close-up, and it is what stopped the reveal
+  // reading as a flashlight: the BOARD'S OWN RIG LEAVES WITH THE BOARD. The
+  // shared `light:focus` is the stage's focal pool — it belongs to the nine
+  // chests sitting on the lagoon, and the veil is already dragging that whole
+  // stage down to near-black behind the hero chest. But `focus` is re-posed onto
+  // the FLYING chest and its intensity used to be ramped UP on selection
+  // (0.5 → 0.9), so the moment the chest arrived in close-up it was lit by two
+  // rigs at once: the full board rig AND the dedicated reveal kiss below. The
+  // measured light sum on the open lid was ~2.2 against the board's ~1.5, which
+  // is a full stop of over-exposure on surfaces that were already at the top of
+  // the tone curve — so every warm face clipped and the wood's hue went with it.
+  //
+  // Fading the focus light out along the FLIGHT (not the selection) is the
+  // honest correction: a chest that has left the board is no longer standing in
+  // the board's pool of light. The sun (`light:key`) and the sky (`light:fill`)
+  // stay untouched — they are the world, and they are what keeps modelling the
+  // chest's forms — and the close-up is then lit by exactly one purpose-built
+  // lamp, the warm `light:chest` kiss.
+  const lights: SceneLight[] = stageLights(focus, (0.5 + 0.4 * selectEase) * (1 - flight)).map((entry) => {
     const fill = { key: entry.key, light: { ...entry.light, color: [0.9, 0.94, 1, 1] as Rgba, intensity: 0.3 } };
     const key = { key: entry.key, light: { ...entry.light, intensity: 1.15 } };
     return entry.key === "light:fill" ? fill : entry.key === "light:key" ? key : entry;
   });
   if (selected !== null && revealAge >= timeline.pauseEnd) {
     const warm = clamp01((revealAge - timeline.pauseEnd) / 12);
+    // The reveal's one lamp FOLLOWS THE SUBJECT, because the subject moves.
+    //
+    // For the seam and lid beats the subject is the chest's mouth, and the lamp
+    // hangs just above it. Then the treasure climbs a full chest-height clear
+    // and becomes the subject — and a lamp still parked at the mouth lights the
+    // empty box while the thing the shot is about hangs in the dark above it.
+    // That is precisely what happened when the reveal was recomposed as a
+    // poster: the gold bar rendered brown against a brightly lit chest, the
+    // contrast exactly inverted. So the lamp rides the climb, ending up beside
+    // the risen prize — offset onto the KEY'S OWN SIDE (up, right and forward,
+    // the direction `light:key` arrives from) rather than straight down the view
+    // axis, so it reinforces the sun's modelling instead of flattening it with a
+    // second frontal source.
+    const kissAt = lerpV3(
+      addV3(flown.position, scaleV3(v3(0, 1.1, 0.3), heroScale)),
+      addV3(prizeCentre(heroTop, riseT, heroScale), scaleV3(v3(0.62, 0.6, 0.51), 0.9 * heroScale)),
+      riseT,
+    );
     lights.push({
       key: "light:chest",
-      // A warm reveal KISS, not a flood. At 1.3 this point light — stacked on the
-      // shared key (1.35) and the focus point (~0.9) at close range on the scaled-up
-      // hero chest — drove every face to a uniform yellow-white, crushing the wood's
-      // value modeling and erasing the darks the reference keeps deep. The reference
-      // reveal is a moody near-black shot where the wood stays saddle-brown and the
-      // GEM is the true key; a lower warm kiss lifts the seam/interior without blowing
-      // the whole chest, so the value spread that carves the planks (and the gem's own
-      // glow) survives instead of washing out.
-      light: { color: [1, 0.82, 0.45, 1], intensity: 0.5 * warm * (winReveal ? 1 : 0.4), kind: "point", position: addV3(flown.position, scaleV3(v3(0, 1.1, 0.3), heroScale)) },
+      // The close-up's ONE purpose-built lamp: a warm kiss that lifts the seam,
+      // the interior, and the near face of whatever rose out of the chest. It is
+      // now the only thing added on top of the sun and sky (the board's focal
+      // pool having left with the board), so it can afford to be a real light
+      // rather than the apologetic remnant it had to be when it was the fourth
+      // lamp stacked on the same square metre.
+      light: { color: [1, 0.82, 0.45, 1], intensity: 0.62 * warm * (winReveal ? 1 : 0.4), kind: "point", position: kissAt },
     });
   }
   if (winReveal && selected !== null && burstT > 0 && burstT < 1) {
     lights.push({
       key: "light:burst",
-      light: { color: [1, 0.9, 0.6, 1], intensity: 1.8 * pulse(burstT), kind: "point", position: addV3(flown.position, scaleV3(v3(0, 1.5, 0.2), heroScale)) },
+      // The flash as the lid lands. Halved against the champion's 1.8: that value
+      // was set when the reveal already sat at the clip point, so the flash could
+      // only be read as "everything goes white for a moment". Against the darker,
+      // hue-intact close-up the same beat now reads as a genuine flare of light
+      // across the wood — a smaller number doing more work.
+      light: { color: [1, 0.9, 0.6, 1], intensity: 0.9 * pulse(burstT), kind: "point", position: addV3(flown.position, scaleV3(v3(0, 1.5, 0.2), heroScale)) },
     });
   }
 
@@ -1544,7 +1621,16 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     // (ambient multiplies the albedo) rather than a grey or a self-lit glow.
     // Weighted to keep the chests' shadow boards clearly readable while staying
     // well under the key, so the sun still models the forms.
-    ambient: [0.28, 0.25, 0.21, 1],
+    //
+    // It eases DOWN along the flight for the same reason the board's focal light
+    // does: a hemisphere of hot sand bouncing warm light back is a fact about
+    // standing on the beach, and the hero chest has left it — the veil has pulled
+    // the whole shore to near-black behind it. Holding the full beach ambient
+    // through the close-up meant every face of the chest carried a bright floor
+    // it was no longer standing in, which is a third of the over-exposure that
+    // made the open chest read as a lit box. It only eases (not to zero): the
+    // chest is still lit by the sky, just no longer by the sand.
+    ambient: [lerp(0.28, 0.19, flight), lerp(0.25, 0.165, flight), lerp(0.21, 0.14, flight), 1],
     camera,
     clearColor: SKY_CLEAR,
     // The veil sits between the board and the hero chest: everything before it

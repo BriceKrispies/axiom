@@ -298,20 +298,49 @@ export const CHEST_TIMING = {
   spiralSpinFinish: 0.72, // fraction of the flight by which the turning is DONE
   spiralTurnEaseIn: 2, // how gently the turn starts (see spiralFlight)
   heroDistance: 4, // world units in front of the camera the chest settles at
-  // Sized so the chest is big AND its OPEN lid still fits: the lid swings up
-  // and back well above the closed silhouette, so the closed chest cannot be
-  // allowed to claim the whole frame height on its own.
-  heroFill: 0.45, // fraction of frame HEIGHT the closed hero chest occupies
-  heroDrop: 0.36, // how far below frame center it sits (fraction of half-height)
+  /*
+   * The reveal is composed as a POSTER, and these three numbers are the whole
+   * composition: the chest sits LOW and reads as the plinth, the treasure it
+   * yields owns the air above it, and the result banner — DOM chrome pinned
+   * across the lower third — lands on the chest's body rather than on the prize.
+   *
+   * That ordering is the correction. The champion sized the chest to claim 45%
+   * of the frame height CLOSED, which meant its open lid ran from the top edge
+   * of frame to the bottom, and the prize had nowhere to go but inside the
+   * mouth — where the banner then covered it. Shrinking the chest and dropping
+   * it is what buys the upper third back for the treasure; the prize's own
+   * climb and size (`riseHeight`, `riseDamp`, `prizeDamp`) are tuned against
+   * these, so the four move together.
+   *
+   * Solved rather than eyeballed, in fractions of frame height from the top:
+   * chest bottom 0.94, open-lid apex 0.37, prize spanning 0.18–0.47 around a
+   * centre at 0.32, and the widest treasure's apex (including the overshoot of
+   * its ease) at 0.94 of the half-frame — inside the edge with margin to spare.
+   */
+  heroFill: 0.31, // fraction of frame HEIGHT the closed hero chest occupies
+  heroDrop: 0.54, // how far below frame center it sits (fraction of half-height)
   heroWidthMargin: 0.86, // width guard: fraction of the frame it may ever span
   // The background veil that drops behind the hero chest.
-  dimVeil: 0.82, // peak darkness of the veil (0 = none, 1 = black)
+  // Peak darkness of the veil (0 = none, 1 = black). Deliberately well short of
+  // opaque: the veil exists to push the stage back, not to delete it, and the
+  // beach should still be READABLE behind the hero chest — a palm, a sandcastle,
+  // a crab, all sunk to near-black but still there. Two changes since this was
+  // authored had both pushed it toward flat black without anyone lowering it:
+  // the scene's ambient now eases down through the flight, and the board's focal
+  // lamp fades out with it, so the very thing the veil is dimming got dimmer
+  // underneath it too. This is the compensation.
+  dimVeil: 0.76,
   dimSteps: 16, // quantization of the veil ramp (materials carry fixed opacity)
   veilGap: 1.3, // world units the veil sits BEHIND the hero chest — clear of the
   // hero chest's own depth, still nearer than the closest chest on the board
   // The reveal happens at hero scale, so its offsets are damped to stay framed.
-  riseDamp: 0.38, // prize climb, relative to the hero scale
-  prizeDamp: 0.55, // prize size, relative to the hero scale
+  // Both are up sharply on the champion (0.38 / 0.55), and for one reason: the
+  // treasure now has to climb FULLY CLEAR of the chest and own the top of the
+  // frame, instead of hovering in its mouth where the result banner covered it.
+  // See the composition note on `heroFill` above — these are solved against it,
+  // not tuned independently.
+  riseDamp: 0.58, // prize climb, relative to the hero scale
+  prizeDamp: 0.9, // prize size, relative to the hero scale
   // Reveal ritual durations (ticks, speed-scaled at build time).
   brace: 22,
   latch: 16,
@@ -330,7 +359,7 @@ export const CHEST_TIMING = {
   // reads as a large flat top-down plane. Kept short of vertical so the tall open
   // lid still clears the top of the hero frame.
   burstParticles: 12, // bounded upward light-burst motes
-  riseHeight: 1.2, // world-units the prize climbs to hover clear above the chest
+  riseHeight: 2.4, // world-units the prize climbs to hover clear above the chest
 } as const;
 
 // ── the hero framing (where the chosen chest flies to, and how big) ───────────

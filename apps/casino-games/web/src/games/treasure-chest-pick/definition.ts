@@ -15,23 +15,79 @@ import type { ChestSpec } from "./game.ts";
 import { CHEST_TIMING, chestCues, initialChestExtra, stepChest } from "./game.ts";
 import { chestResources, chestScene, chestWaterOverlay } from "./scene.ts";
 
-/** A single small consolation prize — every win grants 5 points. */
-const CONSOLATION_TIER: RewardTier = {
-  countsAsWin: true,
-  id: "consolation",
-  label: "5 points",
-  rarity: "common",
-  reward: { amount: 5, kind: "points", label: "5 points" },
-  weight: 1,
-};
+/**
+ * The five treasures a chest can hold.
+ *
+ * A tier id here IS a `PrizeKind` (see `prizes/index.ts`): that identity is the
+ * whole binding between the fairness machinery and the presentation. The
+ * choice-population adapter draws one of these per chest at commit time, before
+ * the player can influence anything, and the reveal simply looks up which
+ * object to build. Nothing in the view chooses a prize.
+ *
+ * `weight` is conditional on winning, so these are the odds of WHICH treasure a
+ * winning chest holds. They read as a prize ladder: coins are what you usually
+ * get, the boot is the running joke, and the ring is rare enough to be worth
+ * the ritual. Every one counts as a win — even the boot, which pops out of the
+ * chest with the same ceremony as the ring and is funnier for it.
+ *
+ * `rarity` drives celebration intensity, the HUD accent, and the fallback in
+ * `prizeKindOf`; it is deliberately in step with the weights.
+ */
+const PRIZE_TIERS: readonly RewardTier[] = [
+  {
+    countsAsWin: true,
+    id: "gold-coin",
+    label: "Gold Coin",
+    rarity: "common",
+    reward: { amount: 10, kind: "points", label: "a Gold Coin" },
+    weight: 34,
+  },
+  {
+    countsAsWin: true,
+    id: "leather-boot",
+    label: "Old Boot",
+    rarity: "common",
+    reward: { amount: 1, kind: "prize", label: "an Old Boot" },
+    weight: 20,
+  },
+  {
+    countsAsWin: true,
+    id: "crab-bride",
+    // She has a name. The beach crab is scenery; the one in the chest is a
+    // character the player is being handed, and "the Crab's Girlfriend" defined
+    // her by the other crab. `id` stays `crab-bride` — it is the binding to
+    // `prizes/crab-bride.ts` and to any saved config, and renaming a tier id
+    // silently repoints every chest that drew it.
+    label: "Crabigail",
+    rarity: "uncommon",
+    reward: { amount: 25, kind: "toy", label: "Crabigail" },
+    weight: 24,
+  },
+  {
+    countsAsWin: true,
+    id: "gold-bar",
+    label: "Gold Bar",
+    rarity: "rare",
+    reward: { amount: 100, kind: "points", label: "a Gold Bar" },
+    weight: 16,
+  },
+  {
+    countsAsWin: true,
+    id: "wedding-ring",
+    label: "Diamond Ring",
+    rarity: "jackpot",
+    reward: { amount: 500, kind: "prize", label: "a Diamond Ring" },
+    weight: 6,
+  },
+];
 
-// Win every time, for a small consolation prize. `targetWinRate: 1` makes all
-// nine chests winners (9·1 = 9), so any pick wins; the single reward tier means
-// that win is always the same modest 5 points. Tune either in the Set Up panel.
+// Win every time; what varies is WHICH treasure. `targetWinRate: 1` makes all
+// nine chests winners (9·1 = 9), so any pick opens onto something — and the five
+// tiers above decide what. Tune either in the Set Up panel.
 const defaultConfig = (): CasinoGameConfig<ChestSpec> =>
   baseConfig("treasure-chest-pick", "Treasure Chest Pick", "tabletop", { brand: DEFAULT_BRAND, danceLiveliness: 0.7 }, {
     choiceCount: 9,
-    rewardTiers: [CONSOLATION_TIER],
+    rewardTiers: PRIZE_TIERS,
     targetWinRate: 1,
   });
 
