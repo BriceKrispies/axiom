@@ -12,7 +12,7 @@ import type { CasinoGameDefinition, GameRuntime, RunningCasinoGame } from "../..
 import { brandIssues, DEFAULT_BRAND } from "../../presentation/branding/brand.ts";
 import { mountCasinoGame } from "../casino-mount.ts";
 import type { ChestSpec } from "./game.ts";
-import { CHEST_TIMING, chestCues, initialChestExtra, stepChest } from "./game.ts";
+import { chestCues, commitBeatTicks, initialChestExtra, stepChest } from "./game.ts";
 import { chestResources, chestScene, chestWaterOverlay } from "./scene.ts";
 
 /**
@@ -26,9 +26,9 @@ import { chestResources, chestScene, chestWaterOverlay } from "./scene.ts";
  *
  * `weight` is conditional on winning, so these are the odds of WHICH treasure a
  * winning chest holds. They read as a prize ladder: coins are what you usually
- * get, the boot is the running joke, and the ring is rare enough to be worth
- * the ritual. Every one counts as a win — even the boot, which pops out of the
- * chest with the same ceremony as the ring and is funnier for it.
+ * get, a pearl or Crabigail is a good day, and the ring is rare enough to be
+ * worth the ritual. Every one counts as a win — there is no consolation object
+ * here, so the chest never opens onto a shrug.
  *
  * `rarity` drives celebration intensity, the HUD accent, and the fallback in
  * `prizeKindOf`; it is deliberately in step with the weights.
@@ -44,10 +44,15 @@ const PRIZE_TIERS: readonly RewardTier[] = [
   },
   {
     countsAsWin: true,
-    id: "leather-boot",
-    label: "Old Boot",
-    rarity: "common",
-    reward: { amount: 1, kind: "prize", label: "an Old Boot" },
+    id: "pearl-clam",
+    label: "Pearl Clam",
+    // The clam replaced an old boot, and it is NOT the boot's tier wearing a new
+    // object: a boot was the joke prize at one point, and a pearl is a genuine
+    // find. So it moves up a rung to uncommon and its reward with it. `rarity`
+    // drives celebration intensity and the HUD accent, so leaving it on `common`
+    // would have handed the player a pearl with a consolation-prize fanfare.
+    rarity: "uncommon",
+    reward: { amount: 50, kind: "prize", label: "a Pearl" },
     weight: 20,
   },
   {
@@ -101,9 +106,11 @@ const validateSpec = (spec: ChestSpec): readonly ConfigIssue[] => {
 
 const mount = (canvas: HTMLCanvasElement, runtime: GameRuntime<ChestSpec>): RunningCasinoGame =>
   mountCasinoGame(canvas, runtime, {
-    // The commit beat carries the chest's spiral into its hero framing, so it
-    // runs for the length of that flight rather than the shared default pause.
-    commitPauseTicks: CHEST_TIMING.spiralTicks,
+    // The commit beat carries the crab's walk to the chest AND the chest's spiral
+    // into its hero framing, so it runs for the length of both rather than the
+    // shared default pause. `commitBeatTicks` owns that sum — the reveal cannot
+    // begin until the crab has the lid in his claws and the flight has landed.
+    commitPauseTicks: commitBeatTicks,
     initExtra: initialChestExtra,
     instructionOf: (state) =>
       state.session.phase === "ready" ? "Pick a chest — arrows + Enter, or click one" : null,

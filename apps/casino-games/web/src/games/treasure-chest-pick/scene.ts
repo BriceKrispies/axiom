@@ -41,11 +41,11 @@ import {
   scaleV3,
   v3,
 } from "../../presentation/stage/vectors.ts";
-import type { CrabPlace } from "./crab.ts";
+import type { CrabDress, CrabPlace } from "./crab.ts";
 import { CRAB_MATERIALS, crabParts } from "./crab.ts";
 import type { PrizeKind } from "./prizes/index.ts";
 import { PRIZE_MATERIALS, PRIZE_SIZE, prizeExtentOf, prizeInstances, prizeKindOf, prizeSpin } from "./prizes/index.ts";
-import type { ChestSpec, ChestState, DecorDrag, HeroFraming } from "./game.ts";
+import type { ChestSpec, ChestState, CrabJourney, CrabPose, DecorDrag, HeroFraming } from "./game.ts";
 import {
   CHEST_BODY as BODY,
   CHEST_BODY_TOP as BODY_TOP,
@@ -57,6 +57,7 @@ import {
   chestCamera,
   chestPosition,
   crabIdle,
+  crabJourney,
   dancePose,
   flightProgress,
   heroFraming,
@@ -935,7 +936,7 @@ const heroPrize = (kind: PrizeKind, at: EngineVec3, riseT: number, tick: number,
     // tuning a radius — and it reads better besides, since the prize's own cast
     // warmth on the chest floor is a thing a player already understands.
     // `prizeExtentOf` is what makes "clear of it" honest: each treasure declares
-    // its own reach, so a tall boot pushes the pool further down than a coin.
+    // its own reach, so a wide open clam pushes the pool further down than a coin.
     disc("reward:halo", "BurstGlow", v3(center.x, center.y - size * prizeExtentOf(kind) - HALO_DROP * size, center.z), halo, 0.02),
     ...prizeInstances(kind, "reward", { center, settle, size, spin, tick }),
   ];
@@ -1129,21 +1130,57 @@ const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
  * random interval from the ambient stream. Every part is placed through the
  * resulting body frame, so the crab scoots, bobs, turns, waves, and breathes as
  * one creature. Pure in (tick, seed) — outcome-independent. */
-const crab = (origin: EngineVec3, tick: number, seed: number): readonly SceneInstance[] => {
-  const pose = crabIdle(tick, seed);
-  const bodyQ = quatYaw(pose.yaw);
+/**
+ * Where the crab is standing, how big he is there, and what he is doing.
+ *
+ * He has two homes now — his patch of sand, and the front of a chest he has
+ * climbed onto and is carrying off to the close-up — so the geometry cannot bake
+ * in either. `scale` is what makes the second one work: it is 1 on the beach and
+ * the CHEST'S OWN scale while he rides, so the two stay in proportion through a
+ * flight that shrinks the chest in world units while growing it on screen.
+ */
+interface CrabStance {
+  /** World point his feet sit at. */
+  readonly at: EngineVec3;
+  /** Body yaw, composed with whatever turn his pose carries. */
+  readonly yaw: number;
+  /** World units per crab-local unit. */
+  readonly scale: number;
+  readonly pose: CrabPose;
+  /** Whether to plant a contact shadow beneath him — true on the sand, false in
+   * mid-air on a flying chest, which has a shadow of its own or none at all. */
+  readonly grounded: boolean;
+}
+
+const crabAt = (stance: CrabStance, tick: number, dress: CrabDress): readonly SceneInstance[] => {
+  const pose = stance.pose;
+  const bodyQ = quatYaw(stance.yaw + pose.yaw);
   const bodyShift = v3(pose.scootX, pose.bob, 0);
   // Place a part given in body-local space: rotate its offset into the (turned)
-  // body frame, add the whole-body scoot/bob, and compose the body yaw into its
-  // own rotation, so one pose moves the crab as a single creature.
+  // body frame, add the whole-body scoot/bob, scale the lot to wherever he is
+  // standing, and compose the body yaw into its own rotation — so one stance
+  // moves the crab as a single creature at whatever size he is.
   const place: CrabPlace = (key, material, mesh, local, scale, localRot = QUAT_IDENTITY): SceneInstance =>
-    decorPart(`crab:${key}`, material, mesh, addV3(origin, addV3(bodyShift, rotateByQuat(local, bodyQ))), scale, quatMul(bodyQ, localRot));
+    decorPart(
+      `crab:${key}`,
+      material,
+      mesh,
+      addV3(stance.at, scaleV3(addV3(bodyShift, rotateByQuat(local, bodyQ)), stance.scale)),
+      scaleV3(scale, stance.scale),
+      quatMul(bodyQ, localRot),
+    );
   // The shadow follows the crab's side-scuttle (the horizontal scoot) but not its
   // vertical bob, so it stays planted on the sand as the little creature hops.
-  const shadow = contactShadow("crab:shadow", addV3(origin, v3(pose.scootX, 0, 0)), 0.5, 0.6);
+  const shadow = stance.grounded
+    ? contactShadow("crab:shadow", addV3(stance.at, v3(pose.scootX * stance.scale, 0, 0)), 0.5 * stance.scale, 0.6 * stance.scale)
+    : [];
   // He carries the brand pennant and wears no bowtie; she is the other way round.
-  return [...shadow, ...crabParts(place, pose, tick, { bowtie: 0, pennant: true })];
+  return [...shadow, ...crabParts(place, pose, tick, dress)];
 };
+
+/** The crab at home on his patch of sand, running his ambient idle repertoire. */
+const beachCrab = (origin: EngineVec3, tick: number, seed: number): readonly SceneInstance[] =>
+  crabAt({ at: origin, grounded: true, pose: crabIdle(tick, seed), scale: 1, yaw: 0 }, tick, { bowtie: 0, pennant: true });
 
 /*
  * The shore litter. The reference does NOT leave the sand ring bare: it is the
@@ -1273,10 +1310,86 @@ const beachLitter = (): readonly SceneInstance[] => {
  * pure ambient-keyed values — nothing here reads the outcome. The litter is
  * fixed. */
 const HELD_LIFT = v3(0, 0.5, 0);
-const beachDecor = (tick: number, seed: number, decor: DecorDrag): readonly SceneInstance[] => {
+
+/** The beach, minus the crab when he has left it. He is emitted separately while
+ * he is running his errand, because the veil sits between the two: a crab drawn
+ * with the rest of the shore would be dimmed to near-black exactly when the shot
+ * is about him (see the instance order in `chestScene`). */
+const beachDecor = (tick: number, seed: number, decor: DecorDrag, crabAtHome: boolean): readonly SceneInstance[] => {
   const at = (key: keyof DecorDrag["props"]): EngineVec3 => addV3(decor.props[key], decor.held === key ? HELD_LIFT : v3(0, 0, 0));
-  return [...palmTree(at("palm"), tick), ...sandcastle(at("castle")), ...crab(at("crab"), tick, seed), ...beachLitter()];
+  return [
+    ...palmTree(at("palm"), tick),
+    ...sandcastle(at("castle")),
+    ...(crabAtHome ? beachCrab(at("crab"), tick, seed) : []),
+    ...beachLitter(),
+  ];
 };
+
+// ── the crab's errand (scuttle → grip → ride → hop) ────────────────────────────
+
+/*
+ * Where the crab rides, in CHEST-LOCAL units: CLINGING to the chest's front-left
+ * corner, part-way up it, rather than standing on the ground beside it.
+ *
+ * On the ground beside it was the first attempt and it fails on this framing: the
+ * reveal deliberately sits the chest LOW (see `heroDrop`), with its base at ~0.94
+ * of frame height, so anything level with the chest's feet is already at the
+ * bottom edge — the crab hung half out of frame for the whole close-up. Lifting
+ * him onto the chest's front face solves it at the root instead of nudging the
+ * camera: he is now on the object the shot is framed around, so he is in frame by
+ * construction however that framing is retuned later.
+ *
+ * It is also the better read. A crab CLINGING to the front of a chest with his
+ * claws hooked over the lid rail looks like he is prising it open; a crab standing
+ * politely beside one looks like he is waiting for someone else to. Front-left
+ * rather than centred, so he does not cover the hasp — or, once it is open, the
+ * treasure rising out of the middle.
+ *
+ * `CRAB_FACE_YAW` is derived from the offset rather than picked: it is the yaw that
+ * turns him to look at the chest's centre from wherever the offset puts him, so
+ * moving him around the chest can never leave him facing into space. It works out
+ * near 135°, which is the useful angle — claws onto the lid while the camera still
+ * catches his eyestalks and one claw in profile rather than a flat view of his back.
+ */
+const CRAB_ON_CHEST = v3(-0.66, 0.5, 0.76);
+const CRAB_FACE_YAW = Math.atan2(-CRAB_ON_CHEST.x, -CRAB_ON_CHEST.z);
+/** How high the hop carries him, in crab-local units (so it scales with him). */
+const CRAB_HOP_HEIGHT = 0.5;
+/** Fraction of the walk over which he turns from facing where he is GOING to
+ * facing the chest he is arriving at. */
+const CRAB_TURN_IN = 0.35;
+
+/** Shortest-arc blend between two yaws, so a crab crossing the ±π seam turns the
+ * short way round instead of spinning most of a circle. */
+const blendYaw = (from: number, to: number, t: number): number => {
+  const delta = (((to - from + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  return from + delta * t;
+};
+
+/**
+ * The crab's pose while he is on the errand — walking, gripping, or hopping.
+ *
+ * `journey.grip` raises the claws onto the rail, and the lid's own opening angle
+ * pushes them further: as the lid swings up his arms extend with it, so it reads
+ * as HIM opening it rather than as him standing beside a lid that opens itself.
+ * The legs paddle hard while he is crossing the sand and settle once he is
+ * aboard, and the hop rides `pose.bob`, which `crabAt` scales with him.
+ */
+const errandPose = (journey: CrabJourney, lidOpen: number, tick: number): CrabPose => ({
+  bob: journey.hop * CRAB_HOP_HEIGHT,
+  breath: Math.sin(tick * 0.09) * 0.03,
+  clawLift: journey.grip * (0.55 + 0.45 * lidOpen),
+  // A faint tremor of effort, not a wave. He is holding a lid, and at anything
+  // like the wave's full flap his claws looked like they were shaking violently
+  // against it (see `clawShake`).
+  clawShake: 0.1,
+  eye: Math.sin(tick * 0.06) * 0.06,
+  kind: "wave",
+  // Paddling while he crosses; a fidget once he has hold of something.
+  legWiggle: journey.riding ? 0.12 : 0.55,
+  scootX: 0,
+  yaw: 0,
+});
 
 // The freestanding brand billboard that used to stand across the back of the beach
 // has been removed: the CENTER branded chest (its ACME nameplate) is the only
@@ -1366,6 +1479,13 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // downstream element hangs off (prize, burst, reveal lights, celebration).
   // Before this, six call sites each independently re-derived "where the chosen
   // chest is" from its grid slot; now the chest moves and they all follow it.
+  // Where the chests actually ARE. The grid is only their starting layout: the
+  // player can pick a chest up and put it anywhere, so every position the view
+  // needs comes from state (see `stepChestDrag`). `slotAt` falls back to the home
+  // grid, which matters when the operator changes `choiceCount` from the Set Up
+  // panel and the carried layout is briefly the wrong length.
+  const drag = state.extra.chests;
+  const slotAt = (index: number): EngineVec3 => drag.slots[index] ?? chestPosition(index, count);
   const camera = chestCamera(count);
   const framing = heroFraming(camera);
   // How far the camera looks DOWN, in radians above the horizontal. The reveal
@@ -1378,7 +1498,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // `framing.anchor` frames the chest's CENTER; a chest is posed from its base.
   const heroBase = addV3(framing.anchor, v3(0, (-CHEST_HEIGHT / 2) * framing.scale, 0));
   const flown = spiralFlight(
-    addV3(selected === null ? v3(0, 0, 0) : chestPosition(selected, count), v3(0, liftAmount, 0)),
+    addV3(selected === null ? v3(0, 0, 0) : slotAt(selected), v3(0, liftAmount, 0)),
     heroBase,
     flight,
     framing,
@@ -1387,10 +1507,24 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   /** The chosen chest's open mouth, wherever the flight has carried it. */
   const heroTop = addV3(flown.position, v3(0, BODY_TOP * heroScale, 0));
 
+  // The chosen chest's own animated quantities, hoisted out of the per-chest loop
+  // below because the CRAB is welded to this chest and has to read exactly the
+  // same numbers: he shakes with its anticipation brace, and his claws extend
+  // with its lid. Two places computing "how far is the lid open" would drift.
+  const bracing = selected !== null && revealAge >= 0 && revealAge < timeline.braceEnd;
+  const braceT = bracing ? revealAge / timeline.braceEnd : 0;
+  const heroShiver = bracing ? Math.sin(revealAge * 1.5) * CHEST_TIMING.shakeMag * pulse(braceT) : 0;
+  const heroLidT = selected === null ? 0 : clamp01((revealAge - timeline.lidStart) / Math.max(1, timeline.lidEnd - timeline.lidStart));
+  /** The chest's world yaw — its flight spin plus the brace shake. */
+  const heroYaw = heroShiver + flown.spin;
+
   // The center featured chest: the slot nearest the board origin (index 4 on the
   // standard 3×3). It wears the brand nameplate — the plaque IS its only mark, so
   // the center never reads as permanently highlighted; it looks like every other
   // chest apart from carrying the ACME plate.
+  // Resolved on the HOME grid, not on the live layout: the plaque belongs to a
+  // chest, not to a location, so a player dragging the board around must not
+  // pass the nameplate between chests as they shuffle past the middle.
   const centerIndex = Array.from({ length: count }, (_, i) => i).reduce((best, i) => {
     const p = chestPosition(i, count);
     const b = chestPosition(best, count);
@@ -1398,7 +1532,10 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   }, 0);
 
   const chests = Array.from({ length: count }, (_, index) => {
-    const origin = chestPosition(index, count);
+    const origin = slotAt(index);
+    // A chest the player is holding rides up out of the board, so it reads as
+    // being IN HAND rather than sliding across the water.
+    const held = drag.grab?.dragging === true && drag.grab.index === index;
     const dance = dancePose(index, count, tick, seed, liveliness);
     const isSelected = selected === index;
 
@@ -1410,15 +1547,15 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     const idleTwist = Math.sin(clock * 0.5 + ph) * CHEST_TIMING.idleTwistAmp * idleGate;
 
     // Anticipation brace: a tiny shiver before the latch moves (selected only).
-    const bracing = isSelected && revealAge >= 0 && revealAge < timeline.braceEnd;
-    const braceT = bracing ? revealAge / timeline.braceEnd : 0;
-    const shiver = bracing ? Math.sin(revealAge * 1.5) * CHEST_TIMING.shakeMag * pulse(braceT) : 0;
+    // Read off the hoisted hero values so the crab riding this chest cannot
+    // disagree with it about how hard it is shaking.
+    const shiver = isSelected ? heroShiver : 0;
 
     // Latch: swings open over [latchStart, latchEnd] with a recoil snap at the end.
     const latchT = isSelected ? clamp01((revealAge - timeline.latchStart) / Math.max(1, timeline.latchEnd - timeline.latchStart)) : 0;
     const latchRecoil = isSelected && revealAge >= timeline.latchEnd && revealAge < timeline.latchEnd + 4 ? Math.sin((revealAge - timeline.latchEnd) * 1.3) * CHEST_TIMING.latchRecoil * (1 - (revealAge - timeline.latchEnd) / 4) : 0;
     // Lid: opens with an overshoot-and-settle after the pause.
-    const lidT = isSelected ? clamp01((revealAge - timeline.lidStart) / Math.max(1, timeline.lidEnd - timeline.lidStart)) : 0;
+    const lidT = isSelected ? heroLidT : 0;
     // Seam light grows from latch-land through the lid opening.
     const seam = isSelected ? clamp01((revealAge - timeline.seamStart) / Math.max(1, timeline.lidEnd - timeline.seamStart)) * (1 - lidT * 0.6) : 0;
 
@@ -1426,7 +1563,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
 
     // A chosen chest rides the spiral; every other chest stays in its slot,
     // breathing on the idle bob.
-    const lift = isSelected ? liftAmount : idleBob;
+    const lift = isSelected ? liftAmount : idleBob + (held ? CHEST_TIMING.heldLift : 0);
     const at = isSelected ? flown.position : v3(origin.x, origin.y + lift, origin.z);
 
     return chestInstances(`chest${index}`, {
@@ -1445,7 +1582,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       scale: isSelected ? heroScale : 1,
       seam,
       selected: isSelected,
-      squash: dance.squash + (bracing ? pulse(braceT) * 0.05 : 0),
+      squash: dance.squash + (isSelected && bracing ? pulse(braceT) * 0.05 : 0),
       yaw: dance.twist + idleTwist + shiver + (isSelected ? flown.spin : 0),
     });
   }).flat();
@@ -1504,6 +1641,56 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       rewardInstances.push(...puffs);
     }
   }
+
+  // ── the crab's errand ─────────────────────────────────────────────────────────
+  // He crosses the sand to the chosen chest, takes hold of its lid, and rides it
+  // into the close-up to open it himself. Two stances, one creature: while he is
+  // WALKING he is a beach prop at beach scale, and once he is RIDING he is welded
+  // into the chest's own frame at the chest's own scale, so the flight carries him
+  // with it and the pair stay in proportion the whole way.
+  const journey = crabJourney(session, speed, timeline);
+  const onErrand = journey.riding || journey.approach > 0.001;
+  const crabHome = addV3(state.extra.decor.props.crab, state.extra.decor.held === "crab" ? HELD_LIFT : v3(0, 0, 0));
+  // Where he is heading, in world space. He walks to the chest's front-left corner
+  // at GROUND level — he cannot walk to the spot he ends up clinging to, which is
+  // part-way up the chest's face — and then climbs the last bit as his grip takes
+  // hold. On the board the chest is unrotated, so the walk can aim at the plain
+  // offset with its height dropped.
+  const chestSide = selected === null ? crabHome : addV3(slotAt(selected), v3(CRAB_ON_CHEST.x, 0, CRAB_ON_CHEST.z));
+  const errandCrab: readonly SceneInstance[] = !onErrand
+    ? []
+    : crabAt(
+        journey.riding
+          ? {
+              at: addV3(flown.position, rotateByQuat(scaleV3(CRAB_ON_CHEST, heroScale), quatYaw(heroYaw))),
+              grounded: false,
+              pose: errandPose(journey, easeOutCubic(heroLidT), tick),
+              scale: heroScale,
+              yaw: heroYaw + CRAB_FACE_YAW,
+            }
+          : {
+              // …and climbs the chest's face over the same stretch the grip ramps
+              // on, so taking hold and getting up there are one movement.
+              at: addV3(lerpV3(crabHome, chestSide, journey.approach), v3(0, CRAB_ON_CHEST.y * journey.grip, 0)),
+              grounded: journey.grip < 0.5,
+              pose: errandPose(journey, 0, tick),
+              scale: 1,
+              // He walks facing where he is GOING and turns to face the chest over
+              // the last stretch, so he arrives square to it instead of pivoting
+              // on the spot the instant he lands.
+              yaw: blendYaw(
+                Math.atan2(chestSide.x - crabHome.x, chestSide.z - crabHome.z),
+                CRAB_FACE_YAW,
+                clamp01((journey.approach - (1 - CRAB_TURN_IN)) / CRAB_TURN_IN),
+              ),
+            },
+        tick,
+        // No pennant on the errand. Both claws are on the lid — he cannot be
+        // prising a chest open and waving a flag at the same time, and the pole
+        // read as a stray red stick across the close-up. He picks it back up when
+        // he gets home.
+        { bowtie: 0, pennant: false },
+      );
 
   // Celebration.
   const celebration: SceneInstance[] = [];
@@ -1656,9 +1843,13 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // polygon corners would stick out past the round pool onto the sand.
       ...stageRoom(48, WATER_RADIUS, LAGOON_MESH),
       ...platform(),
-      ...beachDecor(tick, seed, state.extra.decor),
+      // The crab is skipped here while he is on his errand — he is emitted AFTER
+      // the veil instead, so the shot that is about him does not dim him away
+      // with the rest of the shore.
+      ...beachDecor(tick, seed, state.extra.decor, !onErrand),
       ...chests,
       ...backgroundVeil(camera, framing, flight),
+      ...errandCrab,
       ...burst,
       ...rewardInstances,
       ...celebration,
@@ -1742,8 +1933,11 @@ export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext
   // Each hole is sized to its OWN chest: project the chest center and a point one
   // half-width to the side, and use the on-screen distance as the radius — so a
   // far, smaller chest gets a smaller hole and is not haloed by an oversized one.
+  // Read off the LIVE layout, not the grid: the holes exist so the ripple net is
+  // not painted over the chests, so they have to follow a chest the player has
+  // dragged — otherwise a moved chest wears a net and leaves a hole behind it.
   const holes = Array.from({ length: count }, (_, i): { readonly x: number; readonly y: number; readonly r: number } | null => {
-    const base = chestPosition(i, count);
+    const base = state.extra.chests.slots[i] ?? chestPosition(i, count);
     const center = worldToCanvas(camera, addV3(base, v3(0, CHEST_HOLE_LIFT, 0)));
     const side = worldToCanvas(camera, addV3(base, v3(CHEST_HALF_WIDTH, CHEST_HOLE_LIFT, 0)));
     return center === null || side === null ? null : { r: Math.hypot(side.x - center.x, side.y - center.y) + CHEST_HOLE_MARGIN, x: center.x, y: center.y };

@@ -28,19 +28,19 @@ import { QUAT_IDENTITY, addV3, quatMul, rotateByQuat, scaleV3, v3 } from "../../
 
 /** The five treasures a chest can hold. The id doubles as the reward tier id
  * that selects it (see `definition.ts`), so this list IS the prize vocabulary. */
-export type PrizeKind = "gold-bar" | "crab-bride" | "wedding-ring" | "leather-boot" | "gold-coin";
+export type PrizeKind = "gold-bar" | "crab-bride" | "wedding-ring" | "pearl-clam" | "gold-coin";
 
-export const PRIZE_KINDS: readonly PrizeKind[] = ["gold-bar", "crab-bride", "wedding-ring", "leather-boot", "gold-coin"];
+export const PRIZE_KINDS: readonly PrizeKind[] = ["gold-bar", "crab-bride", "wedding-ring", "pearl-clam", "gold-coin"];
 
 /**
  * World units one prize-local unit is worth, at hero scale, before the reveal's
  * own damping. This is what makes the catalog interchangeable: every treasure is
  * authored inside the same unit box and arrives on screen at the same size, so
- * swapping a boot for a ring changes the object and nothing about the shot.
+ * swapping a clam for a ring changes the object and nothing about the shot.
  *
  * Set against the faceted gem this catalog replaced, which reached ~0.32 of the
  * same units from its centre — a treasure filling the box now reads a little
- * over a third larger, which is where a hand-sized object (a bar, a boot, a
+ * over a third larger, which is where a hand-sized object (a bar, a clam, a
  * ring) wants to sit in this framing.
  */
 export const PRIZE_SIZE = 0.52;
@@ -92,10 +92,10 @@ export type PrizePlace = (
  *
  * The two modes differ in what the lean is protecting:
  *
- *   * `turntable` — a solid object (a bar, a boot, a crab). It reads from every
- *     side, so it turns slowly all the way round, and leans back only PARTLY
- *     (`lean`), because tipping a standing object all the way into the lens
- *     makes it look like it is falling over rather than being presented.
+ *   * `turntable` — a solid object that reads from every side (the gold bar). It
+ *     turns slowly all the way round, and leans back only PARTLY (`lean`),
+ *     because tipping a standing object all the way into the lens makes it look
+ *     like it is falling over rather than being presented.
  *   * `faces-camera` — an object whose whole subject is one FACE (a struck coin,
  *     a ring seen through its band). It leans fully into the camera and does not
  *     revolve at all: a full turntable yaw would carry it edge-on for half of

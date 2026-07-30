@@ -41,6 +41,8 @@ export interface ChestExtra {
   readonly choice: ChoiceCore;
   /** Tick at which the reveal began (session tick space), for cue edges. */
   readonly revealStartTick: number | null;
+  /** Where the nine chests sit, and any chest currently being dragged. */
+  readonly chests: ChestDrag;
   /** Where the three draggable beach props sit, and any current drag. */
   readonly decor: DecorDrag;
 }
@@ -258,12 +260,123 @@ export const chestCamera = (count: number): ReturnType<typeof tabletopCamera> =>
   };
 };
 
-export const chestTargets = (count: number): readonly PickTarget[] =>
-  Array.from({ length: count }, (_, index) => ({
-    at: chestPosition(index, count),
-    index,
-    radiusPx: 78,
-  }));
+/** Screen hit-targets for chests sitting at `slots` — the LIVE layout, which a
+ * drag can have moved away from the grid. */
+export const chestTargetsAt = (slots: readonly EngineVec3[]): readonly PickTarget[] =>
+  slots.map((at, index) => ({ at, index, radiusPx: 78 }));
+
+/** Hit-targets for an untouched board. Kept as the `count`-shaped convenience
+ * the resilient shell and the shared choice-input tests are written against;
+ * the live game resolves picks through `chestTargetsAt` instead. */
+export const chestTargets = (count: number): readonly PickTarget[] => chestTargetsAt(defaultChestSlots(count));
+
+// ── draggable chests ──────────────────────────────────────────────────────────
+/*
+ * The nine chests can be picked up and rearranged, exactly as the beach props
+ * can. So — like the props — their positions live in game STATE rather than
+ * being a pure function of the grid slot, which is what makes a drag as
+ * deterministic and replayable as any other input.
+ *
+ * A chest differs from a beach prop in one way that matters, and it is the whole
+ * reason this is not simply another `stepDecorDrag`: a chest is ALSO the thing
+ * you click to open. The props grab on the press EDGE, which is fine because
+ * they sit out on the sand where a press can only mean one thing. Under that
+ * rule a press on a chest would immediately start a drag and suppress the pick,
+ * and the game would be left with no way to open a chest at all.
+ *
+ * So a press on a chest commits to nothing. It is remembered as a PENDING grab —
+ * which chest, where on screen the press began, and the offset from the cursor's
+ * ground point to the chest's base — and it only becomes a drag once the cursor
+ * has travelled `DRAG_THRESHOLD_PX` from that point. Release before then and it
+ * was a click, and the pick runs exactly as it always has. That is how every
+ * desktop UI separates a click from a drag, and it leaves the existing
+ * interaction untouched: a click still opens, a touch still arms-then-confirms,
+ * and dragging is something you have to deliberately do.
+ *
+ * Positions PERSIST across a New Round / Replay (see `initialChestExtra`), the
+ * same as the props: a board the player rearranged stays rearranged, and only a
+ * page reload deals the grid again.
+ */
+
+/** How far the cursor must travel from the press point, in logical canvas
+ * pixels, before a press on a chest becomes a drag instead of a click. Small
+ * enough that a deliberate drag feels immediate, comfortably larger than the
+ * jitter of a mouse click or the roll of a thumb on a tap. */
+export const DRAG_THRESHOLD_PX = 9;
+
+/** A press that has landed on a chest and may or may not become a drag. */
+export interface ChestGrab {
+  readonly index: number;
+  /** Canvas-space point the press began at — what the threshold measures from. */
+  readonly from: { readonly x: number; readonly y: number };
+  /** Cursor-ground-point → chest-base offset, held so a grabbed chest does not
+   * snap its centre to the cursor. */
+  readonly offset: EngineVec3;
+  /** True once the press has travelled past the threshold and committed to being
+   * a drag. While false this is still only a candidate click. */
+  readonly dragging: boolean;
+}
+
+export interface ChestDrag {
+  /** Where each chest currently sits, indexed by its slot. */
+  readonly slots: readonly EngineVec3[];
+  readonly grab: ChestGrab | null;
+  readonly pointerDown: boolean;
+}
+
+/** The untouched 3×N grid — where a fresh board deals its chests. */
+export const defaultChestSlots = (count: number): readonly EngineVec3[] =>
+  Array.from({ length: count }, (_, index) => chestPosition(index, count));
+
+export const initialChestDrag = (count: number): ChestDrag => ({
+  grab: null,
+  pointerDown: false,
+  slots: defaultChestSlots(count),
+});
+
+export interface ChestDragStep {
+  readonly drag: ChestDrag;
+  /** Whether the drag OWNS the pointer this tick. True only once a grab has
+   * committed to dragging — a pending press deliberately does NOT own the
+   * pointer, which is what lets it still land as a pick. */
+  readonly active: boolean;
+}
+
+/**
+ * One tick of chest dragging, pure in (drag, input, camera).
+ *
+ * Three states, in the order they are tested: the pointer is up (any grab ends),
+ * a grab is live (measure the travel, and move the chest once it has committed),
+ * or a fresh press just landed on a chest (remember it as pending).
+ */
+export const stepChestDrag = (drag: ChestDrag, input: InputFrame, camera: Camera3D): ChestDragStep => {
+  const pointer = input.pointer;
+  const down = pointer?.down ?? false;
+  const ground = canvasToGround(camera, pointer);
+
+  if (!down || pointer === undefined || ground === null) {
+    // The grab ends. It still OWNS this tick if it had committed to dragging —
+    // otherwise the release would be read as the click it stopped being.
+    return { active: drag.grab?.dragging ?? false, drag: { ...drag, grab: null, pointerDown: down } };
+  }
+
+  const grab = drag.grab;
+  if (grab !== null) {
+    const travelled = Math.hypot(pointer.pos.x - grab.from.x, pointer.pos.y - grab.from.y);
+    // Once committed it stays committed for the rest of the press, so a drag that
+    // returns to where it started does not turn back into a click.
+    const dragging = grab.dragging || travelled >= DRAG_THRESHOLD_PX;
+    const to = addV3(ground, grab.offset);
+    const slots = dragging ? drag.slots.map((at, i) => (i === grab.index ? v3(to.x, 0, to.z) : at)) : drag.slots;
+    return { active: dragging, drag: { ...drag, grab: { ...grab, dragging }, pointerDown: down, slots } };
+  }
+
+  const hit = down && !drag.pointerDown ? pickAt(camera, chestTargetsAt(drag.slots), pointer) : null;
+  const base = hit === null ? null : drag.slots[hit];
+  return base === undefined || base === null || hit === null
+    ? { active: false, drag: { ...drag, pointerDown: down } }
+    : { active: false, drag: { ...drag, grab: { dragging: false, from: pointer.pos, index: hit, offset: subV3(base, ground) }, pointerDown: down } };
+};
 
 // ── presentation timing (ONE central config — no scattered magic numbers) ──────
 
@@ -282,13 +395,26 @@ export const CHEST_TIMING = {
   // Selection staging — the chosen chest lifts, tilts, and the others recede.
   liftInTicks: 12, // ease-up time when a chest is committed
   lift: 0.17, // world-units the chosen chest rises (~10 px at this camera)
+  heldLift: 0.34, // world-units a chest the player is DRAGGING rides up by, so it
+  // reads as picked up and in hand rather than sliding across the water
   tilt: 0.15, // radians tilted toward the camera
   selectScale: 1.07, // slight enlarge of the chosen chest
   // The hero flight — the chosen chest spirals off the board and up into a
   // close, screen-filling framing before the lid is ever touched. The CAMERA
   // does not move for this: the chest comes to the camera, which keeps the
   // eight others (and the board) exactly where the player left them.
-  spiralTicks: 66, // commit-phase length; the whole spiral plays inside it
+  // The crab fetches the chest. Before the spiral runs, the beach crab scuttles
+  // from wherever he is standing to the front of the chosen chest and gets his
+  // claws onto the lid rail; then he rides it into the close-up and opens it
+  // himself. So the commit beat is now TWO beats — approach, then flight — and
+  // `commitBeatTicks` is what the mount declares as its `commitPauseTicks`.
+  //
+  // The approach is deliberately the shorter of the two: it is a piece of
+  // anticipation, and the player has already made their choice, so it must read
+  // as "something is happening about my pick" rather than as a wait.
+  approachTicks: 42,
+  crabHopTicks: 20, // the little jump when the lid pops
+  spiralTicks: 66, // the flight's own length; the whole spiral plays inside it
   spiralTurns: 2, // whole turns, so the chest lands facing front again
   spiralConverge: 3, // how sharply the orbit radius collapses (see spiralFlight)
   spiralApproach: 2, // how sharply the remaining DEPTH closes (see spiralFlight)
@@ -521,11 +647,19 @@ export const spiralFlight = (from: EngineVec3, to: EngineVec3, t: number, basis:
 /** Flight progress for a state: 0 on the board, 1 at the hero framing. It ramps
  * over the commit beat, HOLDS at 1 for the whole reveal and result (the chest
  * stays in close-up while it opens), and eases back out as the round resets. */
+/** The whole commit beat: the crab's approach, then the chest's flight. What the
+ * mount declares as `commitPauseTicks`, and what every progress read below
+ * divides up. */
+export const commitBeatTicks = CHEST_TIMING.approachTicks + CHEST_TIMING.spiralTicks;
+
 export const flightProgress = (session: SessionState, presentationSpeed: number): number => {
   const phase = session.phase;
   const age = phaseAge(session);
   if (phase === "committing") {
-    return clamp01(age / speedTicks(CHEST_TIMING.spiralTicks, presentationSpeed));
+    // The flight does not start until the crab has arrived — he is the one who
+    // takes the chest, so it cannot leave before he reaches it.
+    const approach = speedTicks(CHEST_TIMING.approachTicks, presentationSpeed);
+    return clamp01((age - approach) / speedTicks(CHEST_TIMING.spiralTicks, presentationSpeed));
   }
   if (phase === "revealing" || phase === "celebrating" || phase === "complete" || phase === "interacting") {
     return 1;
@@ -534,6 +668,67 @@ export const flightProgress = (session: SessionState, presentationSpeed: number)
     return 1 - clamp01(age / speedTicks(10, presentationSpeed));
   }
   return 0;
+};
+
+// ── the crab's errand ─────────────────────────────────────────────────────────
+
+/*
+ * The beach crab fetches the chosen chest and opens it.
+ *
+ * He scuttles from wherever he is standing — his position is player-movable, so
+ * "wherever" is real — to the front of the chosen chest, gets his claws onto the
+ * lid rail, and then RIDES the chest as it spirals into its close-up, so the
+ * player watches him push the lid open at full size and hop when it goes.
+ *
+ * Everything here is a pure read of the session phase and its age. That matters
+ * for the same reason the idle dance's independence matters: the crab reacts to
+ * WHICH CHEST THE PLAYER CHOSE, which is the player's own input, and to nothing
+ * else. He never reads the population, the committed plan, or the tier — so no
+ * part of his errand can hint at what is inside the chest he is opening. The
+ * chest test pins this.
+ */
+export interface CrabJourney {
+  /** 0 = standing on his own patch of sand, 1 = arrived at the chest. Drives the
+   * scuttle across the beach, and runs BACKWARDS as the round resets. */
+  readonly approach: number;
+  /** True once he is welded to the chest and travelling with it. */
+  readonly riding: boolean;
+  /** How far his claws are up on the lid rail, in [0, 1]. */
+  readonly grip: number;
+  /** The hop when the lid pops, in [0, 1] — one spike that settles. */
+  readonly hop: number;
+}
+
+const AT_HOME: CrabJourney = { approach: 0, grip: 0, hop: 0, riding: false };
+
+export const crabJourney = (session: SessionState, presentationSpeed: number, timeline: RevealTimeline): CrabJourney => {
+  const phase = session.phase;
+  const age = phaseAge(session);
+  const approachTicks = speedTicks(CHEST_TIMING.approachTicks, presentationSpeed);
+
+  if (phase === "committing") {
+    // Two beats in one phase: he crosses the sand, then the chest lifts with him
+    // aboard. `grip` ramps over the tail of the approach so the claws are already
+    // on the rail by the time it leaves the ground.
+    const walk = clamp01(age / approachTicks);
+    return { approach: smoothstep(walk), grip: clamp01((walk - 0.6) / 0.4), hop: 0, riding: age >= approachTicks };
+  }
+  if (phase === "revealing") {
+    // The claws follow the lid: they are fully committed by the time it starts to
+    // swing, and the hop fires as it lands open.
+    const hopSpan = speedTicks(CHEST_TIMING.crabHopTicks, presentationSpeed);
+    const since = age - timeline.lidEnd;
+    return { approach: 1, grip: 1, hop: since < 0 || since > hopSpan ? 0 : Math.sin((since / hopSpan) * Math.PI), riding: true };
+  }
+  if (phase === "celebrating" || phase === "complete" || phase === "interacting") {
+    return { approach: 1, grip: 1, hop: 0, riding: true };
+  }
+  if (phase === "resetting") {
+    // He lets go and walks home, the same easing in reverse.
+    const back = 1 - clamp01(age / speedTicks(CHEST_TIMING.approachTicks, presentationSpeed));
+    return { approach: smoothstep(back), grip: 0, hop: 0, riding: false };
+  }
+  return AT_HOME;
 };
 
 // ── the reveal timeline (ticks from entering "revealing", speed-scaled) ────────
@@ -703,6 +898,17 @@ export interface CrabPose {
   readonly bob: number;
   readonly yaw: number;
   readonly clawLift: number;
+  /**
+   * How much the raised claws FLAP, in [0, 1] — separate from how far they are
+   * raised.
+   *
+   * These used to be the same thing: the assembly always oscillated a raised claw
+   * by ±30% at ~5 Hz, which is right for a crab WAVING and wrong for a crab
+   * GRIPPING something. Once the crab started prising chests open, that baked-in
+   * flap read as his claws shaking violently on the lid. Holding still and waving
+   * are different actions, so they are now different numbers.
+   */
+  readonly clawShake: number;
   readonly legWiggle: number;
   readonly eye: number;
   readonly breath: number;
@@ -729,13 +935,14 @@ export const crabIdle = (tick: number, seed: number): CrabPose => {
   const active = sample01(seed, "ambient", window, 40) < 0.55;
   const kind = CRAB_KINDS[sampleInt(CRAB_KINDS.length, seed, "ambient", window, 41)] as CrabIdleKind;
   const jitter = sample01(seed, "ambient", window, 42);
-  const resting: CrabPose = { bob: 0, breath, clawLift: 0, eye: eyeDrift, kind: "rest", legWiggle: 0, scootX: 0, yaw: 0 };
+  const resting: CrabPose = { bob: 0, breath, clawLift: 0, clawShake: 0, eye: eyeDrift, kind: "rest", legWiggle: 0, scootX: 0, yaw: 0 };
   const poses: Record<CrabIdleKind, CrabPose> = {
     // A little side scuttle with the legs paddling and the body leaning into it.
     scuttle: {
       bob: Math.abs(Math.sin(local * Math.PI * 4)) * 0.03 * env,
       breath,
       clawLift: 0,
+      clawShake: 0,
       eye: eyeDrift,
       kind: "scuttle",
       legWiggle: Math.sin(tick * 0.6) * 0.4 * env,
@@ -743,12 +950,13 @@ export const crabIdle = (tick: number, seed: number): CrabPose => {
       yaw: Math.sin(local * Math.PI * 3 + jitter * 6) * 0.12 * env,
     },
     // Raising and snapping the claws.
-    wave: { bob: 0, breath, clawLift: (0.5 + jitter * 0.35) * env, eye: eyeDrift, kind: "wave", legWiggle: 0, scootX: 0, yaw: 0 },
+    wave: { bob: 0, breath, clawLift: (0.5 + jitter * 0.35) * env, clawShake: 1, eye: eyeDrift, kind: "wave", legWiggle: 0, scootX: 0, yaw: 0 },
     // Bobbing up and down with the eyestalks wagging.
     bob: {
       bob: Math.abs(Math.sin(local * Math.PI * 4)) * 0.16 * env,
       breath,
       clawLift: 0,
+      clawShake: 0,
       eye: eyeDrift + Math.sin(tick * 0.22) * 0.12 * env,
       kind: "bob",
       legWiggle: 0,
@@ -756,20 +964,31 @@ export const crabIdle = (tick: number, seed: number): CrabPose => {
       yaw: 0,
     },
     // Turning to look around.
-    turn: { bob: 0, breath, clawLift: 0, eye: eyeDrift, kind: "turn", legWiggle: Math.sin(tick * 0.5) * 0.12 * env, scootX: 0, yaw: Math.sin(local * Math.PI * 2 + jitter * 3) * 0.5 * env },
+    turn: { bob: 0, breath, clawLift: 0, clawShake: 0, eye: eyeDrift, kind: "turn", legWiggle: Math.sin(tick * 0.5) * 0.12 * env, scootX: 0, yaw: Math.sin(local * Math.PI * 2 + jitter * 3) * 0.5 * env },
     rest: resting,
   };
   return active ? poses[kind] : resting;
 };
 
-export const initialChestExtra = (_session: SessionState, previous: ChestExtra | null): ChestExtra => ({
-  choice: initialChoice(4),
-  // The player's placed props persist across rounds (a New Round / Replay keeps
-  // them where they were left); only a page reload starts a session from null
-  // and returns them home. The transient drag fields always start clean.
-  decor: previous === null ? DEFAULT_DECOR : { ...DEFAULT_DECOR, props: previous.decor.props },
-  revealStartTick: null,
-});
+export const initialChestExtra = (session: SessionState, previous: ChestExtra | null): ChestExtra => {
+  const count = session.config.choiceCount ?? 9;
+  const fresh = initialChestDrag(count);
+  return {
+    // Rearranged chests persist across rounds for the same reason the props do —
+    // it is the player's board. The one exception is a CHANGED chest count: the
+    // reward ladder and `choiceCount` are editable from the Set Up panel, so a
+    // carried-over layout can be the wrong length, and a nine-slot arrangement
+    // dealt onto a six-chest board would leave chests stacked or missing. On any
+    // mismatch the grid is dealt fresh.
+    chests: previous === null || previous.chests.slots.length !== count ? fresh : { ...fresh, slots: previous.chests.slots },
+    choice: initialChoice(4),
+    // The player's placed props persist across rounds (a New Round / Replay keeps
+    // them where they were left); only a page reload starts a session from null
+    // and returns them home. The transient drag fields always start clean.
+    decor: previous === null ? DEFAULT_DECOR : { ...DEFAULT_DECOR, props: previous.decor.props },
+    revealStartTick: null,
+  };
+};
 
 /** Per-tick controller. Selection commits; the reveal advances on the shared
  * timeline and hands off to "celebrating" when it completes. */
@@ -783,43 +1002,52 @@ export const stepChest = (
   const count = session.config.choiceCount ?? 9;
   const camera = chestCamera(count);
 
-  // The player can pick up and move the beach props. The drag runs every tick
-  // and takes the pointer first; when it owns the pointer, a chest pick is
-  // suppressed for that tick (input is stripped while the session is locked, so
-  // dragging only happens in ready/celebrating/complete).
-  const drag = stepDecorDrag(state.extra.decor, input, camera);
-  const withDecor: ChestState = { ...state, extra: { ...state.extra, decor: drag.decor } };
+  // The player can pick up and move the beach props AND the chests. The props
+  // take the pointer first — they sit out on the sand, so a press over one is
+  // unambiguous — and the chests only consider a press the props did not claim.
+  const props = stepDecorDrag(state.extra.decor, input, camera);
+  // Chests are only rearrangeable while the board IS the subject. Once a pick
+  // commits, the chosen chest is flying to its close-up and its position belongs
+  // to that flight, not to a drag; any live grab is dropped at the transition.
+  const chests =
+    session.phase === "ready" && !props.active
+      ? stepChestDrag(state.extra.chests, input, camera)
+      : { active: false, drag: { ...state.extra.chests, grab: null, pointerDown: input.pointer?.down ?? false } };
+  const dragged: ChestState = { ...state, extra: { ...state.extra, chests: chests.drag, decor: props.decor } };
 
   if (session.phase === "ready") {
-    if (drag.active) {
-      return withDecor;
-    }
+    // When either drag owns the pointer, the choice step sees NO POINTER at all —
+    // the same trick the harness uses to lock input (`lockedFrame`). That does two
+    // jobs with one move: it suppresses the selection, and it clears the press
+    // state, so a press that turned into a drag can never land as a pick when it
+    // is finally released. Keyboard navigation keeps working throughout.
+    const frame = props.active || chests.active ? { ...input, pointer: undefined } : input;
     // Tap-to-confirm: on touch the first tap highlights a chest and the second
     // opens it; a desktop click still opens in one action (hover pre-arms it).
-    const result = stepChoice(withDecor.extra.choice, input, camera, chestTargets(count), CHEST_COLUMNS, true);
+    const result = stepChoice(dragged.extra.choice, frame, camera, chestTargetsAt(chests.drag.slots), CHEST_COLUMNS, true);
     if (result.selectedNow !== null) {
       return {
-        ...withDecor,
-        extra: { ...withDecor.extra, choice: result.core },
+        ...dragged,
+        extra: { ...dragged.extra, choice: result.core },
         pendingContext: { selectedIndex: result.selectedNow },
         session: transition(session, "committing"),
       };
     }
-    return { ...withDecor, extra: { ...withDecor.extra, choice: result.core } };
+    return { ...dragged, extra: { ...dragged.extra, choice: result.core } };
   }
 
   if (session.phase === "revealing") {
-    const start = withDecor.extra.revealStartTick ?? session.phaseStartTick;
+    const start = dragged.extra.revealStartTick ?? session.phaseStartTick;
     const timeline = revealTimeline(session.config.presentationSpeed, runtime.settings.reducedMotion);
     const withStart: ChestState =
-      withDecor.extra.revealStartTick === null ? { ...withDecor, extra: { ...withDecor.extra, revealStartTick: start } } : withDecor;
+      dragged.extra.revealStartTick === null ? { ...dragged, extra: { ...dragged.extra, revealStartTick: start } } : dragged;
     if (phaseAge(session) >= timeline.total) {
       return { ...withStart, session: transition(session, "celebrating") };
     }
     return withStart;
   }
 
-  return withDecor;
+  return dragged;
 };
 
 /**

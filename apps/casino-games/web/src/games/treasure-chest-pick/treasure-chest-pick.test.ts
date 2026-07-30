@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Camera3D, EngineVec3, InputFrame, PointerSample } from "@axiom/web-engine";
+import type { Camera3D, EngineVec3, InputFrame, PointerSample, SceneInstance } from "@axiom/web-engine";
 import { planChoicePopulation } from "../../chance-engine/probability/choice-population.ts";
 import { SeededChanceResultSource } from "../../chance-engine/outcomes/result-source.ts";
 import { createSession } from "../../chance-engine/sessions/session.ts";
@@ -31,7 +31,14 @@ import {
   DECOR_KEYS,
   decorTargets,
   DEFAULT_DECOR,
+  defaultChestSlots,
+  DRAG_THRESHOLD_PX,
+  chestTargetsAt,
+  commitBeatTicks,
+  crabJourney,
   flightProgress,
+  initialChestDrag,
+  stepChestDrag,
   heroFraming,
   idlePhase,
   initialChestExtra,
@@ -43,7 +50,7 @@ import {
 } from "./game.ts";
 import type { ChestExtra, DecorDrag } from "./game.ts";
 import { TREASURE_CHEST_PICK } from "./definition.ts";
-import { canvasToGround, worldToCanvas } from "../../presentation/cameras/picking.ts";
+import { canvasToGround, pickAt, worldToCanvas } from "../../presentation/cameras/picking.ts";
 
 /**
  * Project a world point into normalized screen coordinates for `camera`, where
@@ -252,11 +259,15 @@ test("the commit beat is long enough to finish the spiral before the lid is touc
   const base = createSession(config, 1, 1, new SeededChanceResultSource(1), { choiceCount: 9, kind: "choice" });
   const at = (phase: SessionState["phase"], age: number): SessionState => ({ ...base, phase, phaseStartTick: 0, tick: age });
 
-  // The flight completes exactly as the commit beat ends — the chest is fully
-  // parked in its hero framing before "revealing" opens the latch.
-  assert.equal(flightProgress(at("committing", 0), 1), 0);
-  assert.ok(flightProgress(at("committing", CHEST_TIMING.spiralTicks - 1), 1) < 1, "still flying mid-beat");
-  assert.equal(flightProgress(at("committing", CHEST_TIMING.spiralTicks), 1), 1);
+  // The commit beat is TWO beats: the crab walks to the chest, and only then does
+  // the chest fly. So nothing moves for the length of the approach, and the flight
+  // completes exactly as the whole beat ends — the chest is fully parked in its
+  // hero framing before "revealing" opens the latch.
+  assert.equal(flightProgress(at("committing", 0), 1), 0, "nothing flies while the crab is still walking");
+  assert.equal(flightProgress(at("committing", CHEST_TIMING.approachTicks), 1), 0, "the flight begins as he arrives");
+  assert.ok(flightProgress(at("committing", CHEST_TIMING.approachTicks + 1), 1) > 0, "and is under way a tick later");
+  assert.ok(flightProgress(at("committing", commitBeatTicks - 1), 1) < 1, "still flying mid-beat");
+  assert.equal(flightProgress(at("committing", commitBeatTicks), 1), 1, "landing exactly as the commit beat ends");
 
   // …and it HOLDS there for the whole reveal and result, so the chest does not
   // slide back to the board while it is opening.
@@ -266,6 +277,73 @@ test("the commit beat is long enough to finish the spiral before the lid is touc
   // Only the reset releases it.
   assert.ok(flightProgress(at("resetting", 0), 1) === 1 && flightProgress(at("resetting", 99), 1) === 0, "reset eases back out");
   assert.equal(flightProgress(at("ready", 5), 1), 0, "an unpicked board is never in flight");
+});
+
+test("the crab walks to the chest, rides it, and hops as the lid lands", () => {
+  const config = TREASURE_CHEST_PICK.defaultConfig();
+  const base = createSession(config, 1, 1, new SeededChanceResultSource(1), { choiceCount: 9, kind: "choice" });
+  const at = (phase: SessionState["phase"], age: number): SessionState => ({ ...base, phase, phaseStartTick: 0, tick: age });
+  const tl = revealTimeline(1, false);
+  const journey = (phase: SessionState["phase"], age: number): ReturnType<typeof crabJourney> => crabJourney(at(phase, age), 1, tl);
+
+  // At rest he is on his own patch of sand and has hold of nothing.
+  assert.deepEqual(journey("ready", 30), { approach: 0, grip: 0, hop: 0, riding: false });
+  assert.deepEqual(journey("intro", 5), { approach: 0, grip: 0, hop: 0, riding: false });
+
+  // The walk: he sets off from a standstill, is genuinely mid-crossing partway
+  // through, and only takes hold at the far end.
+  assert.equal(journey("committing", 0).approach, 0, "he starts where he was standing");
+  const mid = journey("committing", Math.floor(CHEST_TIMING.approachTicks / 2));
+  assert.ok(mid.approach > 0.1 && mid.approach < 0.9, `mid-walk (${mid.approach.toFixed(2)})`);
+  assert.equal(mid.riding, false, "still on the sand");
+  assert.equal(journey("committing", CHEST_TIMING.approachTicks).riding, true, "aboard as the flight begins");
+  // The claws are already on the rail by the time the chest leaves the ground —
+  // he cannot be carrying something he has not gripped.
+  assert.equal(journey("committing", CHEST_TIMING.approachTicks).grip, 1, "gripped before lift-off");
+
+  // He holds on through the flight, the reveal, and the result.
+  (["revealing", "celebrating", "complete"] as const).forEach((phase) => {
+    assert.equal(journey(phase, 5).riding, true, `${phase} keeps him aboard`);
+    assert.equal(journey(phase, 5).approach, 1);
+  });
+
+  // The hop is ONE spike at the moment the lid lands open — nothing before, a
+  // real jump at the mark, and settled again afterwards.
+  assert.equal(journey("revealing", tl.lidEnd - 1).hop, 0, "no hop before the lid lands");
+  const hopPeak = journey("revealing", tl.lidEnd + Math.floor(CHEST_TIMING.crabHopTicks / 2)).hop;
+  assert.ok(hopPeak > 0.8, `he really jumps (${hopPeak.toFixed(2)})`);
+  assert.equal(journey("revealing", tl.lidEnd + CHEST_TIMING.crabHopTicks + 1).hop, 0, "and lands again");
+
+  // The reset walks him home, and lets go on the way.
+  assert.equal(journey("resetting", 0).approach, 1, "he starts the reset still at the chest");
+  assert.equal(journey("resetting", 0).riding, false, "but has let go");
+  assert.equal(journey("resetting", CHEST_TIMING.approachTicks).approach, 0, "and ends up home");
+});
+
+test("the crab's errand cannot leak what is in the chest", () => {
+  // He reacts to WHICH CHEST THE PLAYER CHOSE — the player's own input — and to
+  // nothing else. The same independence the idle dance has, and it has to hold
+  // here too: this crab walks up to the chest and opens it, so if his errand
+  // varied with the contents it would be a tell in the most-watched moment of the
+  // game. Two sessions identical but for their committed outcome must produce a
+  // byte-identical journey at every tick of it.
+  const config = TREASURE_CHEST_PICK.defaultConfig();
+  const base = createSession(config, 1, 1, new SeededChanceResultSource(1), { choiceCount: 9, kind: "choice" });
+  const tl = revealTimeline(1, false);
+  const withPlan = (tierId: string, win: boolean): SessionState => ({
+    ...base,
+    committed: { presentationSeed: 99, reward: null, tierId, win },
+    phase: "revealing",
+    phaseStartTick: 0,
+  });
+
+  for (let age = 0; age < tl.total; age += 3) {
+    const jackpot = crabJourney({ ...withPlan("wedding-ring", true), tick: age }, 1, tl);
+    const coin = crabJourney({ ...withPlan("gold-coin", true), tick: age }, 1, tl);
+    const empty = crabJourney({ ...withPlan("gold-coin", false), tick: age }, 1, tl);
+    assert.deepEqual(jackpot, coin, `tier cannot change the errand (age ${age})`);
+    assert.deepEqual(jackpot, empty, `winning cannot change the errand (age ${age})`);
+  }
 });
 
 test("the chosen chest stays fully inside the frame for the whole flight and reveal", () => {
@@ -417,12 +495,53 @@ test("every treasure is built inside the box it declares, deterministically", ()
  * of its box, which is the only bound that holds without re-deriving each part's
  * orientation. That is deliberately pessimistic: a flat slab lying square to the
  * axes reaches nothing like its diagonal, and a prize made of slabs (a coin's
- * denticles, a bar's flanks, a boot's sole) accumulates that pessimism. The
+ * denticles, a bar's flanks, a clam's ribs) accumulates that pessimism. The
  * slack keeps the check meaningful — it still catches a prize that has genuinely
  * outgrown its declaration — without demanding every author bound a rotation
  * they never applied.
  */
 const ROTATION_SLACK = 1.6;
+
+/**
+ * Crabigail's pink bow is a MIRRORED PAIR, and the plane it mirrors about is the
+ * BOW's own — the one its cock defines — not crab-local vertical.
+ *
+ * That distinction has been this bow's one recurring defect, and every other
+ * check here is blind to it: the wings were symmetric in POSITION about
+ * crab-local X while being symmetric in ROLL about the cocked axis, so one
+ * ribbon read as flowing out of the knot and the other as kinked back into it.
+ * A mismatch of mirror PLANES cannot be retuned away by changing the angles, so
+ * this asserts the mirror itself, measured in the bow's own frame.
+ */
+test("the crab bride's bow is a mirrored pair about the bow's own axis", () => {
+  const parts = prizeInstances("crab-bride", "prize", { center: v3(0, 0, 0), settle: 1, size: 1, spin: QUAT_IDENTITY, tick: 0 });
+  const partAt = (suffix: string): SceneInstance => {
+    const found = parts.find((inst) => inst.key === `prize:${suffix}`);
+    assert.ok(found !== undefined, `${suffix} is drawn`);
+    return found;
+  };
+  const knot = partAt("bowknot");
+  // The bow's own frame: the axis its wings step OUT along, and which way is UP
+  // across it. Both come off the KNOT, which is the bow's origin by construction.
+  const axis = rotateByQuat(v3(1, 0, 0), knot.transform.rotation);
+  const across = rotateByQuat(v3(0, 1, 0), knot.transform.rotation);
+  const inBowFrame = (v: EngineVec3): { out: number; up: number } => ({ out: dotV3(v, axis), up: dotV3(v, across) });
+  const wings = [-1, 1].map((s) => partAt(`bow${s}`));
+
+  // Position: the wings step out to equal and opposite distances ALONG the bow's
+  // axis, and neither drifts off it. A nonzero `up` is exactly the old defect.
+  const offsets = wings.map((w) => inBowFrame(subV3(w.transform.position, knot.transform.position)));
+  assert.ok(Math.abs(offsets[0].out) > 0.02, "the wings stand clear of the knot");
+  assert.ok(Math.abs(offsets[0].out + offsets[1].out) < 1e-9, "equal and opposite along the bow's axis");
+  offsets.forEach((o, i) => assert.ok(Math.abs(o.up) < 1e-9, `wing ${i} sits ON the bow's axis, not above or below it`));
+
+  // Roll: each ribbon leans out of the knot by the same amount and splays to the
+  // opposite side across the bow — which is what makes the two read as one bow.
+  const ribbons = wings.map((w) => inBowFrame(rotateByQuat(v3(1, 0, 0), w.transform.rotation)));
+  assert.ok(Math.abs(ribbons[0].out - ribbons[1].out) < 1e-9, "both ribbons lean out by the same amount");
+  assert.ok(Math.abs(ribbons[0].up) > 0.05, "the ribbons actually splay");
+  assert.ok(Math.abs(ribbons[0].up + ribbons[1].up) < 1e-9, "and they splay to opposite sides");
+});
 
 /**
  * Where the result banner sits, as a fraction of frame height from the top.
@@ -623,6 +742,128 @@ test("a prop is only grabbed on the press EDGE, not while a drag sweeps over it"
   const alreadyDown: DecorDrag = { ...DEFAULT_DECOR, pointerDown: true };
   const sweep = stepDecorDrag(alreadyDown, inputFrame(at(crabPx.x, crabPx.y, true)), camera);
   assert.equal(sweep.decor.held, null, "no grab without a fresh press edge");
+});
+
+// ── draggable chests ──────────────────────────────────────────────────────────
+
+test("a press on a chest is a CLICK until it travels — then it becomes a drag", () => {
+  // The whole disambiguation, pinned. A chest is both the thing you open and the
+  // thing you can pick up, so a press commits to nothing until the cursor moves:
+  // release in place and it was a click (and must NOT own the pointer, or the pick
+  // it was would be swallowed); travel past the threshold and it is a drag (and
+  // must own the pointer, or it would land as a pick on release).
+  const camera = chestCamera(9);
+  const start = initialChestDrag(9);
+  const home = worldToCanvas(camera, defaultChestSlots(9)[4] as EngineVec3) as { x: number; y: number };
+
+  // A fresh press lands on chest 4 and is remembered — but owns nothing yet.
+  const pressed = stepChestDrag(start, inputFrame(at(home.x, home.y, true)), camera);
+  assert.equal(pressed.drag.grab?.index, 4, "the press is remembered against the chest under it");
+  assert.equal(pressed.drag.grab?.dragging, false, "and has not committed to dragging");
+  assert.equal(pressed.active, false, "so it does NOT own the pointer — the click can still happen");
+  assert.deepEqual(pressed.drag.slots, start.slots, "and nothing has moved");
+
+  // Jitter short of the threshold is still a click.
+  const jitter = stepChestDrag(pressed.drag, inputFrame(at(home.x + DRAG_THRESHOLD_PX - 1, home.y, true)), camera);
+  assert.equal(jitter.drag.grab?.dragging, false, "a wobble inside the threshold is not a drag");
+  assert.equal(jitter.active, false);
+  assert.deepEqual(jitter.drag.slots, start.slots, "and still nothing has moved");
+
+  // Releasing in place ends the grab without ever owning the pointer, so the
+  // choice step sees the release and opens the chest exactly as it always did.
+  const clicked = stepChestDrag(jitter.drag, inputFrame(at(home.x, home.y, false)), camera);
+  assert.equal(clicked.drag.grab, null, "the grab is released");
+  assert.equal(clicked.active, false, "a click never owns the pointer");
+
+  // Travelling past the threshold commits, and from then on the chest follows.
+  const far = stepChestDrag(pressed.drag, inputFrame(at(home.x + 60, home.y + 30, true)), camera);
+  assert.equal(far.drag.grab?.dragging, true, "past the threshold it is a drag");
+  assert.equal(far.active, true, "and it owns the pointer, so no pick can land");
+  assert.notDeepEqual(far.drag.slots[4], start.slots[4], "chest 4 has moved");
+  assert.equal(far.drag.slots[4]?.y, 0, "and stays on the ground plane");
+
+  // Committed stays committed: coming back to the press point does not turn a
+  // drag back into a click mid-press.
+  const returned = stepChestDrag(far.drag, inputFrame(at(home.x, home.y, true)), camera);
+  assert.equal(returned.drag.grab?.dragging, true, "a drag that returns home is still a drag");
+
+  // The release tick of a real drag DOES own the pointer — that is what stops it
+  // being read as the click it stopped being.
+  const dropped = stepChestDrag(returned.drag, inputFrame(at(home.x, home.y, false)), camera);
+  assert.equal(dropped.active, true, "the drop tick owns the pointer");
+  assert.equal(dropped.drag.grab, null, "and the grab is over");
+});
+
+test("only the grabbed chest moves, and it keeps the grab offset", () => {
+  const camera = chestCamera(9);
+  const start = initialChestDrag(9);
+  // Press OFF-CENTRE on chest 0 so the offset is non-zero, then drag: the chest
+  // must travel by the cursor's ground delta rather than snapping its base to it.
+  const home = worldToCanvas(camera, defaultChestSlots(9)[0] as EngineVec3) as { x: number; y: number };
+  const press = at(home.x + 18, home.y + 10, true);
+  const grabbed = stepChestDrag(start, inputFrame(press), camera);
+  const grabGround = canvasToGround(camera, press) as EngineVec3;
+  const dest = worldToCanvas(camera, v3(1.5, 0, 2.5)) as { x: number; y: number };
+  const moved = stepChestDrag(grabbed.drag, inputFrame(at(dest.x, dest.y, true)), camera);
+  const destGround = canvasToGround(camera, at(dest.x, dest.y, true)) as EngineVec3;
+
+  const before = start.slots[0] as EngineVec3;
+  const after = moved.drag.slots[0] as EngineVec3;
+  const dx = after.x - before.x;
+  const dz = after.z - before.z;
+  assert.ok(Math.hypot(dx - (destGround.x - grabGround.x), dz - (destGround.z - grabGround.z)) < 0.05, "the chest follows the cursor's ground delta");
+  // Every other chest is untouched.
+  moved.drag.slots.slice(1).forEach((slot, i) => assert.deepEqual(slot, start.slots[i + 1], `chest ${i + 1} did not move`));
+  // Pure in (drag, input, camera).
+  assert.deepEqual(moved, stepChestDrag(grabbed.drag, inputFrame(at(dest.x, dest.y, true)), camera));
+});
+
+test("a dragged chest carries its contents — a pick still resolves to the same chest", () => {
+  // The fairness property. The population is assigned BY INDEX before the pick
+  // (`winnersByIndex`), and dragging moves where a chest IS, never which index it
+  // is. So a click at a moved chest's new screen position must resolve to that
+  // same index — the prize travels with the chest, and no amount of rearranging
+  // can shuffle contents between chests.
+  const camera = chestCamera(9);
+  const config = TREASURE_CHEST_PICK.defaultConfig();
+  const population = planChoicePopulation(config, 9, 4242, 1);
+
+  const start = initialChestDrag(9);
+  const home = worldToCanvas(camera, defaultChestSlots(9)[6] as EngineVec3) as { x: number; y: number };
+  const grabbed = stepChestDrag(start, inputFrame(at(home.x, home.y, true)), camera);
+  const dest = worldToCanvas(camera, v3(-3.2, 0, 3.4)) as { x: number; y: number };
+  const moved = stepChestDrag(grabbed.drag, inputFrame(at(dest.x, dest.y, true)), camera).drag;
+
+  // Hit-testing the LIVE layout at the chest's new home finds chest 6 again.
+  const hit = pickAt(camera, chestTargetsAt(moved.slots), at(dest.x, dest.y, false));
+  assert.equal(hit, 6, "the moved chest is still chest 6");
+  // And what chest 6 holds is untouched by the move — the population never saw it.
+  assert.deepEqual(planChoicePopulation(config, 9, 4242, 1).winnersByIndex, population.winnersByIndex);
+});
+
+test("rearranged chests persist across a round reset, and re-deal when the count changes", () => {
+  const config = TREASURE_CHEST_PICK.defaultConfig();
+  const session = createSession(config, 1, 1, new SeededChanceResultSource(1), { choiceCount: 9, kind: "choice" });
+
+  const first = initialChestExtra(session, null);
+  assert.deepEqual(first.chests.slots, defaultChestSlots(9), "a fresh session deals the grid");
+
+  // A prior round with a rearranged board and a live grab.
+  const scattered = defaultChestSlots(9).map((slot, i) => (i === 3 ? v3(4, 0, 4) : slot));
+  const prior: ChestExtra = {
+    ...first,
+    chests: { grab: { dragging: true, from: { x: 1, y: 2 }, index: 3, offset: v3(0, 0, 0) }, pointerDown: true, slots: scattered },
+  };
+  const next = initialChestExtra(session, prior);
+  assert.deepEqual(next.chests.slots, scattered, "the arrangement survives the reset");
+  assert.equal(next.chests.grab, null, "the transient grab does not");
+  assert.equal(next.chests.pointerDown, false);
+
+  // …but a changed chest count re-deals, because a nine-slot arrangement dealt
+  // onto a six-chest board would leave chests stacked or missing.
+  const sixSession = createSession({ ...config, choiceCount: 6 }, 1, 1, new SeededChanceResultSource(1), { choiceCount: 6, kind: "choice" });
+  const resized = initialChestExtra(sixSession, prior);
+  assert.deepEqual(resized.chests.slots, defaultChestSlots(6), "a changed count deals a fresh grid");
 });
 
 test("moved props persist across a round reset, but reset on a fresh (page-load) session", () => {

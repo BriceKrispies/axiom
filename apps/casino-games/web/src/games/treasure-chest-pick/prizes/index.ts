@@ -26,20 +26,21 @@ import { PRIZE_KINDS, PRIZE_METAL_MATERIALS, prizePlace } from "./prize.ts";
 import { CRAB_BRIDE } from "./crab-bride.ts";
 import { GOLD_BAR } from "./gold-bar.ts";
 import { GOLD_COIN } from "./gold-coin.ts";
-import { LEATHER_BOOT } from "./leather-boot.ts";
+import { PEARL_CLAM } from "./pearl-clam.ts";
 import { WEDDING_RING } from "./wedding-ring.ts";
 
 const CATALOG: Readonly<Record<PrizeKind, Prize>> = {
   "crab-bride": CRAB_BRIDE,
   "gold-bar": GOLD_BAR,
   "gold-coin": GOLD_COIN,
-  "leather-boot": LEATHER_BOOT,
+  "pearl-clam": PEARL_CLAM,
   "wedding-ring": WEDDING_RING,
 };
 
 /** What each rarity looks like when a config names a tier this file does not
- * know. Also the honest ranking of the five: a coin is a small win, a boot is
- * the joke, a bar is a real haul, and the ring is the jackpot. */
+ * know. Also the honest ranking of the five: a coin is a small win, a clam's
+ * pearl and Crabigail sit above it, a bar is a real haul, and the ring is the
+ * jackpot. */
 const CANONICAL: Readonly<Record<Rarity, PrizeKind>> = {
   common: "gold-coin",
   jackpot: "wedding-ring",

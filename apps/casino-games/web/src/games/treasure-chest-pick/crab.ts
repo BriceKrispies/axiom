@@ -16,7 +16,7 @@
  */
 
 import type { EngineQuat, EngineVec3, MaterialSpec, SceneInstance } from "@axiom/web-engine";
-import { quatMul, quatRoll, quatYaw, v3 } from "../../presentation/stage/vectors.ts";
+import { addV3, quatMul, quatRoll, quatYaw, rotateByQuat, v3 } from "../../presentation/stage/vectors.ts";
 import type { CrabPose } from "./game.ts";
 
 /** Place one crab part, given in crab-local space. Both call sites supply this. */
@@ -53,11 +53,6 @@ export interface CrabDress {
   readonly pennant: boolean;
 }
 
-/**
- * The crab's body, eyes, claws and legs, posed by `pose` and placed through
- * `place`. `tick` drives only the per-limb phases (claws alternate, legs
- * paddle); everything gross comes from the pose the caller resolved.
- */
 // ── the legs ────────────────────────────────────────────────────────────────
 
 /*
@@ -112,6 +107,11 @@ const crabLeg = (place: CrabPlace, s: number, row: number, z: number, pose: Crab
   return [segment("thigh", HIP, KNEE, THIGH_THICK), segment("shin", KNEE, TOE, SHIN_THICK)];
 };
 
+/**
+ * The crab's body, eyes, claws and legs, posed by `pose` and placed through
+ * `place`. `tick` drives only the per-limb phases (claws flap, legs paddle);
+ * everything gross comes from the pose the caller resolved.
+ */
 export const crabParts = (place: CrabPlace, pose: CrabPose, tick: number, dress: CrabDress): readonly SceneInstance[] => {
   const body = place("body", "CrabShell", "sphere", v3(0, 0.2, 0), v3(0.62, 0.4 * (1 + pose.breath), 0.5));
   const eyes = [-1, 1]
@@ -122,8 +122,13 @@ export const crabParts = (place: CrabPlace, pose: CrabPose, tick: number, dress:
     .flat();
   const claws = [-1, 1]
     .map((s): readonly SceneInstance[] => {
-      // Each claw lifts and snaps on its own phase, so a wave alternates sides.
-      const lift = pose.clawLift * (0.7 + 0.3 * Math.sin(tick * 0.5 + (s > 0 ? 0 : Math.PI)));
+      // Each claw lifts and snaps on its own phase, so a wave alternates sides —
+      // but only as far as `pose.clawShake` asks for. At 1 this is the full ±30%
+      // flap a wave wants; at 0 the claw is simply HELD where the lift puts it,
+      // which is what a crab gripping a chest lid needs. The flap used to be
+      // unconditional, and on the lid it read as violent shaking.
+      const flap = pose.clawShake * 0.3 * (Math.sin(tick * 0.5 + (s > 0 ? 0 : Math.PI)) - 1);
+      const lift = pose.clawLift * (1 + flap);
       return [
         place(`arm${s}`, "CrabShellDark", "box", v3(s * 0.42, 0.18 + lift * 0.12, 0.24), v3(0.1, 0.09, 0.28), quatRoll(s * lift)),
         place(`claw${s}`, "CrabShell", "sphere", v3(s * 0.5, 0.18 + lift * 0.3, 0.42), v3(0.22, 0.18, 0.2), quatRoll(s * lift)),
@@ -156,32 +161,45 @@ export const crabParts = (place: CrabPlace, pose: CrabPose, tick: number, dress:
 const BOW_OFFSET = v3(0.16, 0.4, 0.02);
 
 /**
- * How far the whole bow is cocked, and how far each wing tips away from that.
+ * How far the whole bow is cocked, how far each wing tips away from that, and
+ * how far out from the knot each wing's centre sits.
  *
- * These two used to be 0.34 and 0.42 — nearly equal, which is what made one wing
- * look wrong. The wings ARE mirrored about the cock, but at those magnitudes the
- * pair landed on −0.08 and +0.76 radians: one wing sat essentially square to the
- * world while the other stood at 43°. A near-square box reads as a rectangle and
- * a box at 43° reads as a diamond, so the two halves of one bow read as two
- * different shapes and the tie looked broken rather than jaunty.
+ * The wings are a MIRRORED PAIR, and the mirror is the bow's own axis — the one
+ * the cock defines — not crab-local vertical. That distinction is the whole
+ * reason this used to look broken: `place` takes a part's offset in the
+ * unrotated crab-local frame and applies `localRot` to the part about itself, so
+ * the previous bow stepped its wings out along ±X (a mirror about crab-local
+ * vertical) while rolling them about the cock (a mirror about the cocked axis).
+ * Two different mirror planes cannot describe one mirrored pair: the wing whose
+ * tip leaned along the step read as a ribbon flowing out of the knot, and the
+ * other read as a ribbon kinked back into it. Retuning the two angles could
+ * never fix that, because the angles were never the defect.
  *
- * The splay is now clearly smaller than the cock, so both wings sit on the same
- * side of square and read as a matched pair tipped together — and the wings are
- * ELONGATED (a 2.5:1 ribbon rather than the old near-square block), which is what
- * makes a wing read as a wing at any angle at all. The bow still sits off-centre
- * and askew; that was never the problem, and it is the whole charm.
+ * So the step-out (`BOW_REACH`) is rotated by the SAME cock as the wing.
+ * In the bow's own frame each wing then sits at (±reach, 0, 0) with roll
+ * ∓splay — mirror-exact by construction, at any cock — and the cocked pair
+ * carries a wing slightly above the knot and the other slightly below, which is
+ * what a ribbon tied askew actually does. The bow still sits off-centre and
+ * cocked; that was never the problem, and it is the whole charm.
+ *
+ * The wings stay ELONGATED (a 2.5:1 ribbon, not a near-square block), which is
+ * what makes a wing read as a wing at any angle at all.
  */
 const BOW_COCK = 0.3;
 const BOW_SPLAY = 0.24;
+const BOW_REACH = 0.125;
 
 const crabBowtie = (place: CrabPlace, pose: CrabPose, amount: number): readonly SceneInstance[] => {
   const lift = BOW_OFFSET.y + 0.4 * pose.breath;
+  const knotAt = v3(BOW_OFFSET.x, lift, BOW_OFFSET.z);
   const wings = [-1, 1].map((s): SceneInstance =>
     place(
       `bow${s}`,
       "CrabBow",
       "box",
-      v3(BOW_OFFSET.x + s * 0.125 * amount, lift, BOW_OFFSET.z),
+      // Out from the knot along the bow's own axis, so the offset mirrors in the
+      // same frame the roll does.
+      addV3(knotAt, rotateByQuat(v3(s * BOW_REACH * amount, 0, 0), quatRoll(BOW_COCK))),
       v3(0.215 * amount, 0.088 * amount, 0.07 * amount),
       quatRoll(BOW_COCK + s * BOW_SPLAY),
     ),
@@ -190,7 +208,7 @@ const crabBowtie = (place: CrabPlace, pose: CrabPose, amount: number): readonly 
     "bowknot",
     "CrabBowKnot",
     "box",
-    v3(BOW_OFFSET.x, lift, BOW_OFFSET.z),
+    knotAt,
     v3(0.07 * amount, 0.075 * amount, 0.085 * amount),
     quatRoll(BOW_COCK),
   );
@@ -202,6 +220,7 @@ export const CRAB_AT_REST: CrabPose = {
   bob: 0,
   breath: 0,
   clawLift: 0,
+  clawShake: 0,
   eye: 0,
   kind: "rest",
   legWiggle: 0,

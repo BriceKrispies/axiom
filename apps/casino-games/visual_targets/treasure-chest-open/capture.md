@@ -47,10 +47,10 @@ and drives the sim as follows:
 
 Note: as of the prize-catalog change the chest no longer yields a rarity gem. It
 yields one of five modelled treasures — a gold bar, a gold coin, a diamond ring,
-an old boot, or the beach crab's girlfriend — chosen by the reward tier the round
+a pearl clam, or Crabigail (the beach crab's girlfriend) — chosen by the reward tier the round
 committed, so WHICH object appears is a function of the seed. Seed 470573198
-yields the diamond ring; 11 the gold bar, 7 the gold coin, 22 the old boot, 55 the
-crab. Pin the seed when comparing frames, or you are comparing two different
+yields the diamond ring; 11 the gold bar, 7 the gold coin, 22 the pearl clam, 55
+Crabigail. Pin the seed when comparing frames, or you are comparing two different
 objects.
 
 ## Reference
