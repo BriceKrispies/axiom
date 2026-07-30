@@ -10,13 +10,14 @@
 
 import type { Handle, MeshData } from "./api.ts";
 import { type FrameNode, type RenderBackend, type SceneFrame, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS } from "./backend.ts";
-import { type Mat4, fromTrs, lookAt, multiply, perspective } from "./mat4.ts";
+import { type Mat4, fromTrs, lookAt, multiply, normalMatrix, perspective } from "./mat4.ts";
 
 const VERT_SRC = `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in float aAo;
 uniform mat4 uModel;
+uniform mat3 uNormalMatrix;
 uniform mat4 uViewProj;
 out vec3 vNormal;
 out vec3 vWorldPos;
@@ -24,9 +25,11 @@ out float vAo;
 void main() {
   vec4 world = uModel * vec4(aPosition, 1.0);
   vWorldPos = world.xyz;
-  // Upper-3x3 of the model matrix; renormalized per-fragment (uniform enough
-  // visually even under non-uniform scale).
-  vNormal = mat3(uModel) * aNormal;
+  // The cofactor matrix of uModel, NOT its upper-3x3: a normal is a covector and
+  // transforms by the inverse transpose, which under non-uniform scale points
+  // somewhere else entirely (see normalMatrix in mat4.ts). Renormalized per
+  // fragment, which also absorbs the cofactor's det(M) scaling.
+  vNormal = uNormalMatrix * aNormal;
   vAo = aAo;
   gl_Position = uViewProj * world;
 }
@@ -107,6 +110,7 @@ interface GpuMesh {
 
 interface Uniforms {
   readonly model: WebGLUniformLocation;
+  readonly normalMatrix: WebGLUniformLocation;
   readonly viewProj: WebGLUniformLocation;
   readonly ambient: WebGLUniformLocation;
   readonly baseColor: WebGLUniformLocation;
@@ -182,6 +186,7 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
   const program = linkProgram(gl);
   const uniforms: Uniforms = {
     model: uniform(gl, program, "uModel"),
+    normalMatrix: uniform(gl, program, "uNormalMatrix"),
     viewProj: uniform(gl, program, "uViewProj"),
     ambient: uniform(gl, program, "uAmbient"),
     baseColor: uniform(gl, program, "uBaseColor"),
@@ -211,6 +216,7 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
     }
     const model: Mat4 = fromTrs(node.transform.position, node.transform.rotation, node.transform.scale);
     gl.uniformMatrix4fv(uniforms.model, false, model);
+    gl.uniformMatrix3fv(uniforms.normalMatrix, false, normalMatrix(model));
     gl.uniform4f(uniforms.baseColor, material.baseColor[0], material.baseColor[1], material.baseColor[2], material.baseColor[3]);
     gl.uniform3f(uniforms.emissive, material.emissive[0], material.emissive[1], material.emissive[2]);
     gl.uniform1f(uniforms.opacity, material.opacity);

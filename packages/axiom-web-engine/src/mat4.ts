@@ -17,6 +17,9 @@ import type { EngineQuat, EngineVec3 } from "./api.ts";
 /** A column-major 4×4 matrix: `m[col * 4 + row]`. */
 export type Mat4 = Float32Array;
 
+/** A column-major 3×3 matrix: `m[col * 3 + row]`. */
+export type Mat3 = Float32Array;
+
 const EPS = 1e-9;
 const HALF = 0.5;
 const TWO = 2;
@@ -146,6 +149,40 @@ export const fromTrs = (position: EngineVec3, rotation: EngineQuat, scale: Engin
     r02 * scale.z, r12 * scale.z, r22 * scale.z, 0,
     position.x, position.y, position.z, 1,
   ]);
+};
+
+/**
+ * The 3×3 that carries a surface NORMAL from local space into world space.
+ *
+ * This is deliberately not the upper-left 3×3 of the model matrix, which is what
+ * the renderer used to use. A normal is a covector: it transforms by the INVERSE
+ * TRANSPOSE of the basis, and the two agree only when that basis is a rotation
+ * times a UNIFORM scale. Under non-uniform scale they diverge — squash a sphere
+ * in Y and the naive upper-3×3 tilts every normal TOWARD the equator when the
+ * true normal tilts away from it, so a surface facing the key light shades as
+ * though it faced the horizon, and the object reads far too dark. Boxes hide the
+ * bug (their normals lie along the scaled axes, where the naive transform is
+ * right up to length, and length is normalized away); spheres and cylinders show
+ * it plainly, which is exactly how it was found.
+ *
+ * Computed as the COFACTOR matrix (`det(M) · M⁻ᵀ`), whose columns are the cross
+ * products of the model's basis columns. That is chosen over a literal
+ * inverse-transpose for two reasons: it needs no division, so a flattened node (a
+ * zero on some scale axis) yields a zero column instead of `Infinity`/NaN — which
+ * keeps this branchless with no degenerate guard at all — and it is fewer
+ * operations. It differs from the true inverse-transpose only by the positive
+ * factor `det(M)`, which the shader normalizes away, and by SIGN when
+ * `det(M) < 0` (a mirrored transform). A mirrored basis also reverses triangle
+ * winding, so the backend's existing `gl_FrontFacing` normal flip cancels
+ * precisely that sign.
+ */
+export const normalMatrix = (model: Mat4): Mat3 => {
+  const column = (col: number): EngineVec3 =>
+    v3(entry(model, col * ORDER), entry(model, col * ORDER + 1), entry(model, col * ORDER + TWO));
+  const c0 = column(0);
+  const c1 = column(1);
+  const c2 = column(TWO);
+  return new Float32Array([cross3(c1, c2), cross3(c2, c0), cross3(c0, c1)].flatMap((col) => [col.x, col.y, col.z]));
 };
 
 /**

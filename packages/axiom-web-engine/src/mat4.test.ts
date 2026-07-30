@@ -11,10 +11,34 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { EngineQuat, EngineVec3 } from "./api.ts";
-import { fromTrs, identity, lookAt, multiply, perspective, transformPoint } from "./mat4.ts";
+import { type Mat3, type Mat4, fromTrs, identity, lookAt, multiply, normalMatrix, perspective, transformPoint } from "./mat4.ts";
 
 const v3 = (x: number, y: number, z: number): EngineVec3 => ({ x, y, z });
 const IDENTITY_QUAT: EngineQuat = [0, 0, 0, 1];
+
+// ── vector/mat3 helpers for the normal-matrix tests ──────────────────────────
+
+const dot = (a: EngineVec3, b: EngineVec3): number => a.x * b.x + a.y * b.y + a.z * b.z;
+
+const cross = (a: EngineVec3, b: EngineVec3): EngineVec3 =>
+  v3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+
+const normalize = (v: EngineVec3): EngineVec3 => {
+  const len = Math.sqrt(dot(v, v));
+  return v3(v.x / len, v.y / len, v.z / len);
+};
+
+/** Apply a column-major 3×3 (`m[col * 3 + row]`) to a vector. */
+const applyMat3 = (m: Mat3, v: EngineVec3): EngineVec3 =>
+  v3(
+    m[0]! * v.x + m[3]! * v.y + m[6]! * v.z,
+    m[1]! * v.x + m[4]! * v.y + m[7]! * v.z,
+    m[2]! * v.x + m[5]! * v.y + m[8]! * v.z,
+  );
+
+/** The model matrix's own upper-left 3×3 — the basis that carries TANGENTS, and
+ * the transform the renderer used to (wrongly) put normals through. */
+const upper3x3 = (m: Mat4): Mat3 => new Float32Array([m[0]!, m[1]!, m[2]!, m[4]!, m[5]!, m[6]!, m[8]!, m[9]!, m[10]!]);
 
 const assertClose = (actual: number, expected: number, msg: string, eps = 1e-5): void => {
   assert.ok(Math.abs(actual - expected) <= eps, `${msg}: expected ${expected}, got ${actual}`);
@@ -113,6 +137,59 @@ test("multiply matches the hand-computed product of translate × scale", () => {
   const expectedSt = [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 2, 6, 12, 1];
   expectedSt.forEach((value, i) => assertClose(st[i]!, value, `S·T entry ${i}`));
   assertVecClose(transformPoint(ts, v3(1, 1, 1)), v3(3, 5, 7), "T·S applied to a point");
+});
+
+/**
+ * The defining property of a normal matrix, and the one the renderer used to get
+ * wrong: a normal stays PERPENDICULAR TO THE SURFACE after transformation. A
+ * tangent is carried by the model basis, a normal by its inverse transpose, and
+ * only then does `dot(N, T)` stay zero. Asserted on the exact shape that exposed
+ * the bug — a sphere squashed on one axis, the crab body's `(0.62, 0.4, 0.5)`.
+ */
+test("normalMatrix keeps normals perpendicular to the surface under non-uniform scale", () => {
+  const scale = v3(0.62, 0.4, 0.5);
+  const model = fromTrs(v3(1, 2, 3), IDENTITY_QUAT, scale);
+  const nrm = normalMatrix(model);
+  // A point on the unit sphere and two independent tangents there (any vectors
+  // perpendicular to the normal — on a sphere the normal IS the position).
+  const n = normalize(v3(1, 1, 0.5));
+  const tangents = [normalize(cross(n, v3(0, 0, 1))), normalize(cross(n, v3(0, 1, 0)))];
+  const worldNormal = normalize(applyMat3(nrm, n));
+  tangents.forEach((t, i) => {
+    // Tangents ride the model basis (they are directions ON the surface).
+    const worldTangent = normalize(applyMat3(upper3x3(model), t));
+    assertClose(dot(worldNormal, worldTangent), 0, `transformed normal ⟂ transformed tangent ${i}`);
+    // And the naive transform this replaced does NOT hold that property — which
+    // is the whole bug: the normal ends up tilted off the surface, so the
+    // Lambert term reads the wrong angle to the light.
+    const naive = normalize(applyMat3(upper3x3(model), n));
+    assert.ok(Math.abs(dot(naive, worldTangent)) > 0.1, `the naive upper-3x3 normal is NOT perpendicular (tangent ${i})`);
+  });
+});
+
+test("normalMatrix agrees with the model basis for a rotation and a uniform scale", () => {
+  // The case where the two transforms coincide (up to length, which the shader
+  // normalizes away): a rigid rotation times a uniform scale.
+  const rotation: EngineQuat = [0, Math.sin(Math.PI / 8), 0, Math.cos(Math.PI / 8)]; // 45° about +Y
+  const model = fromTrs(v3(-2, 5, 0), rotation, v3(3, 3, 3));
+  const n = normalize(v3(0.3, -0.6, 0.74));
+  assertVecClose(
+    normalize(applyMat3(normalMatrix(model), n)),
+    normalize(applyMat3(upper3x3(model), n)),
+    "uniform scale: cofactor and upper-3x3 point the same way",
+  );
+});
+
+test("normalMatrix stays finite when a scale axis is flattened to zero", () => {
+  // Division-free by construction (a cofactor, not a literal inverse), so a
+  // degenerate basis yields a zero column rather than Infinity/NaN — the reason
+  // this needs no branchless guard of its own.
+  const nrm = normalMatrix(fromTrs(v3(0, 0, 0), IDENTITY_QUAT, v3(2, 0, 3)));
+  assert.ok([...nrm].every((value) => Number.isFinite(value)), `finite entries, got ${[...nrm].join(", ")}`);
+  // The surviving axes still describe the flattened plane's own normal: X and Z
+  // are scaled, so the Y column (their cross product) is the only nonzero one.
+  assertVecClose(applyMat3(nrm, v3(0, 1, 0)), v3(0, 6, 0), "the flattened plane's normal survives");
+  assertVecClose(applyMat3(nrm, v3(1, 0, 1)), v3(0, 0, 0), "the collapsed directions carry no normal");
 });
 
 test("transformPoint guards a near-zero clip w (falls back to inv = 1)", () => {

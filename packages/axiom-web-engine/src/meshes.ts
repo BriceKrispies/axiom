@@ -114,11 +114,17 @@ export const unitSphere = (latSegments: number, lonSegments: number): MeshData =
   const positions = normals.map((normal) => v3(normal.x * HALF, normal.y * HALF, normal.z * HALF));
 
   const stride = lonSegments + 1;
+  // Wound counter-clockwise seen from OUTSIDE, so each triangle's right-hand-rule
+  // normal agrees with the smooth vertex normals above. This is not cosmetic: a
+  // backwards quad makes every visible face report `gl_FrontFacing == false`, and
+  // the renderer's two-sided flip then points the normal INTO the sphere, so
+  // `max(dot(n, l), 0)` is zero for every light and the surface renders on ambient
+  // alone — flat and far too dark. `meshes.test.ts` pins the agreement.
   const indices = range(latSegments).flatMap((lat) =>
     range(lonSegments).flatMap((lon) => {
       const va = lat * stride + lon;
       const vb = va + stride;
-      return [va, vb, va + 1, va + 1, vb, vb + 1];
+      return [va, va + 1, vb, va + 1, vb + 1, vb];
     }),
   );
 
@@ -143,12 +149,14 @@ export const unitCylinderY = (segments: number): MeshData => {
     const sinT = Math.sin(theta);
     return [v3(cosT * HALF, HALF, sinT * HALF), v3(cosT * HALF, -HALF, sinT * HALF)];
   });
+  // Same outward-CCW winding rule as the sphere's grid, and for the same reason —
+  // the caps were already right, the side wall was not.
   const sideIndices = range(segments).flatMap((seg) => {
     const topA = seg * TWO;
     const botA = topA + 1;
     const topB = topA + TWO;
     const botB = topA + THREE;
-    return [topA, botA, topB, topB, botA, botB];
+    return [topA, topB, botA, topB, botB, botA];
   });
 
   // Caps: a center vertex plus its own flat-normal ring (normals must not be

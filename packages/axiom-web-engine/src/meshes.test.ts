@@ -128,3 +128,66 @@ test("unitCylinderY scales its ring with the requested segment count", () => {
   // circle. The largest gap between neighbouring rim points shrinks with count.
   assert.ok(rimGap(72) < rimGap(12), "a finer ring has shorter chords");
 });
+
+/**
+ * THE invariant every primitive must hold: each triangle's winding agrees with
+ * its own vertex normals. Wound counter-clockwise seen from outside, a triangle's
+ * right-hand-rule normal points the same way its vertices claim to.
+ *
+ * This is not pedantry about a convention — it is a rendering correctness bug
+ * with a loud symptom. The WebGL2 backend draws with culling OFF and makes back
+ * faces shade like front faces (`n = gl_FrontFacing ? n : -n`) so thin two-sided
+ * meshes work. A primitive wound backwards makes every VISIBLE face report
+ * back-facing, so that flip turns the correct outward normal inward, every
+ * `max(dot(n, l), 0)` collapses to zero, and the surface renders on ambient alone
+ * — flat and far too dark. Both curved-strip generators shipped inverted (the
+ * whole sphere, and the cylinder's side wall while its caps were fine), which is
+ * exactly how it presented: dark spheres, correct boxes.
+ */
+const assertWindingMatchesNormals = (mesh: MeshData, label: string): void => {
+  const at = <T>(list: readonly T[], i: number): T => {
+    const item = list[i];
+    assert.ok(item !== undefined, `${label}: index ${i} in range`);
+    return item;
+  };
+  /** For one triangle: the area its winding spans, and how much its right-hand-rule
+   * normal agrees with the vertex normals (positive = agrees). */
+  const facingAt = (tri: number): { readonly area: number; readonly facing: number; readonly tri: number } => {
+    const ids = [at(mesh.indices, tri), at(mesh.indices, tri + 1), at(mesh.indices, tri + 2)];
+    const a = at(mesh.positions, ids[0] ?? 0);
+    const b = at(mesh.positions, ids[1] ?? 0);
+    const c = at(mesh.positions, ids[2] ?? 0);
+    const edge1 = v3(b.x - a.x, b.y - a.y, b.z - a.z);
+    const edge2 = v3(c.x - a.x, c.y - a.y, c.z - a.z);
+    const geo = v3(
+      edge1.y * edge2.z - edge1.z * edge2.y,
+      edge1.z * edge2.x - edge1.x * edge2.z,
+      edge1.x * edge2.y - edge1.y * edge2.x,
+    );
+    const area = Math.sqrt(geo.x * geo.x + geo.y * geo.y + geo.z * geo.z);
+    const normals = ids.map((id) => at(mesh.normals, id));
+    const sum = v3(
+      normals.reduce((total, n) => total + n.x, 0),
+      normals.reduce((total, n) => total + n.y, 0),
+      normals.reduce((total, n) => total + n.z, 0),
+    );
+    return { area, facing: (geo.x * sum.x + geo.y * sum.y + geo.z * sum.z) / Math.max(area, 1e-12), tri };
+  };
+  // A sphere's pole fans are degenerate slivers — zero area, so no facing at all
+  // and nothing to agree with. Every triangle that actually covers a pixel must.
+  const real = Array.from({ length: mesh.indices.length / 3 }, (unused, i) => facingAt(i * 3)).filter(
+    (t) => t.area >= 1e-12,
+  );
+  real.forEach((t) =>
+    assert.ok(t.facing > 0, `${label}: triangle at index ${t.tri} is wound against its own normals (facing ${t.facing})`),
+  );
+  assert.ok(real.length > 0, `${label}: actually checked some triangles`);
+};
+
+test("every primitive is wound counter-clockwise as seen from outside", () => {
+  assertWindingMatchesNormals(unitBox(), "unitBox");
+  assertWindingMatchesNormals(unitSphere(12, 16), "unitSphere");
+  assertWindingMatchesNormals(unitSphere(3, 4), "unitSphere (coarse)");
+  assertWindingMatchesNormals(unitCylinderY(16), "unitCylinderY");
+  assertWindingMatchesNormals(unitCylinderY(5), "unitCylinderY (coarse)");
+});
