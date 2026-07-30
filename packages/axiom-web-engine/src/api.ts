@@ -51,6 +51,21 @@ export interface MeshData {
   readonly normals: readonly EngineVec3[];
   readonly indices: readonly number[];
   readonly ao?: readonly number[] | Float32Array;
+  /**
+   * Whether this geometry is a CLOSED surface — every triangle's back face is
+   * enclosed by the solid, so no back face is ever the nearest thing along a ray
+   * from outside it. The built-in primitives are all closed solids and declare
+   * it; custom geometry is assumed OPEN (the safe default), because a sheet, a
+   * decal, or a single quad is legitimately visible from both sides.
+   *
+   * It is a fact about the geometry, so it is declared where the geometry is
+   * built rather than guessed at draw time. The software backend uses it to skip
+   * back faces outright — they cost a shade, a clip and a fill, and are then
+   * overdrawn by the front face in front of them. The GPU backend ignores it: it
+   * draws both sides and lets the depth test settle it, which produces the same
+   * image, so the two backends stay matched.
+   */
+  readonly closed?: boolean;
 }
 
 export type MeshKind = "box" | "sphere" | "cylinder";

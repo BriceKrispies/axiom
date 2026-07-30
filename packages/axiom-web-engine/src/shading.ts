@@ -199,27 +199,39 @@ export const diffuseOnly = (
   pz: number,
   frame: ShadingFrame,
 ): Rgb => {
-  const normal: Vec3 = [nx, ny, nz];
-  const surface: Vec3 = [px, py, pz];
   const [ambR, ambG, ambB] = frame.ambient;
   let diffR = ambR;
   let diffG = ambG;
   let diffB = ambB;
-  const accumulate = ([pr, pg, pb]: Rgb): number => {
-    diffR += pr;
-    diffG += pg;
-    diffB += pb;
+  // The `Vec3` helpers each BUILD a tuple, and the software backend calls this
+  // once per triangle — thousands of times a frame, allocating ~10 short-lived
+  // arrays each time just to carry three numbers into a sum. The arithmetic below
+  // is the same operations in the same order (`0 - lx` is the `sub([0,0,0], …)`
+  // it replaces, so a signed zero survives), written on scalars so the hot path
+  // allocates nothing. Destructuring an existing array reads it; it builds none.
+  frame.dirLights.map((light): number => {
+    const [lx, ly, lz] = light.direction;
+    const [lr, lg, lb] = light.color;
+    const ndl = Math.max(0, nx * (0 - lx) + ny * (0 - ly) + nz * (0 - lz));
+    diffR += lr * ndl;
+    diffG += lg * ndl;
+    diffB += lb * ndl;
     return ITERATE;
-  };
-  frame.dirLights.map((light): number =>
-    accumulate(scale(light.color, Math.max(0, dot(normal, sub([0, 0, 0], light.direction))))),
-  );
+  });
   frame.pointLights.map((light): number => {
-    const offset = sub(light.position, surface);
-    const dist = Math.sqrt(lengthSquared(offset));
+    const [lpx, lpy, lpz] = light.position;
+    const [lr, lg, lb] = light.color;
+    const ox = lpx - px;
+    const oy = lpy - py;
+    const oz = lpz - pz;
+    const dist = Math.sqrt(ox * ox + oy * oy + oz * oz);
     const attenuation = 1 / (1 + FALLOFF * dist * dist);
-    const ndl = dot(normal, offset) / Math.max(dist, MIN_DISTANCE);
-    return accumulate(scale(light.color, Math.max(0, ndl) * attenuation));
+    const ndl = (nx * ox + ny * oy + nz * oz) / Math.max(dist, MIN_DISTANCE);
+    const gain = Math.max(0, ndl) * attenuation;
+    diffR += lr * gain;
+    diffG += lg * gain;
+    diffB += lb * gain;
+    return ITERATE;
   });
   return [diffR, diffG, diffB];
 };

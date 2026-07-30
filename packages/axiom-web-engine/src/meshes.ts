@@ -94,7 +94,7 @@ export const unitBox = (): MeshData => {
     return [base, base + 1, base + TWO, base, base + TWO, base + THREE];
   });
 
-  return { indices, normals, positions };
+  return { closed: true, indices, normals, positions };
 };
 
 /** A unit-diameter sphere (radius 0.5) centered at the origin, latitude/
@@ -128,7 +128,7 @@ export const unitSphere = (latSegments: number, lonSegments: number): MeshData =
     }),
   );
 
-  return { indices, normals, positions };
+  return { closed: true, indices, normals, positions };
 };
 
 /** A unit-diameter, unit-height capped cylinder around +Y, centered at the
@@ -168,6 +168,7 @@ export const unitCylinderY = (segments: number): MeshData => {
   const bottom = buildCap({ centerIndex: sideVerts + capVerts, ny: -1, segments, topFlag: 0, y: -HALF });
 
   return {
+    closed: true,
     indices: [...sideIndices, ...top.indices, ...bottom.indices],
     normals: [...sideNormals, ...top.normals, ...bottom.normals],
     positions: [...sidePositions, ...top.positions, ...bottom.positions],

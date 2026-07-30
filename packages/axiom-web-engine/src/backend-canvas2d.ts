@@ -35,6 +35,9 @@ interface CpuMesh {
   readonly ao: Float32Array;
   /** Model-space bounding-sphere radius (for whole-node culling). */
   readonly radius: number;
+  /** Whether the geometry is a closed solid, so its back faces can be skipped
+   * (see `MeshData.closed`). Absent on custom geometry, which stays two-sided. */
+  readonly closed: boolean;
 }
 
 /** Internal framebuffer scale (the software fallback renders at half res). */
@@ -108,9 +111,24 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
   // Scratch buffer, grown on demand, reused across nodes and frames.
   let world = new Float32Array(3 * 1024);
 
-  /** Rasterize one flat-shaded triangle with a 1/w depth test (perspective-
+  /**
+   * Rasterize one flat-shaded triangle with a 1/w depth test (perspective-
    * correct: 1/w interpolates linearly in screen space; bigger = nearer).
-   * Solid triangles write depth; translucent ones test it and alpha-blend. */
+   * Solid triangles write depth; translucent ones test it and alpha-blend.
+   *
+   * The two barycentrics are AFFINE in the pixel centre, so a row does not need
+   * to re-derive them per pixel — which is what this loop used to do, at eight
+   * multiplies and ten add/subs per pixel, in the hottest function of the
+   * software path. Expanding the weight for the first vertex,
+   *
+   *   l0·area = (x1·y2 − x2·y1) + px·(y1 − y2) + py·(x2 − x1)
+   *
+   * shows the per-pixel change is the constant `(y1 − y2)/area`, so stepping x
+   * costs one add per barycentric. Each ROW re-derives its own starting value
+   * from the closed form rather than carrying an accumulator down the whole
+   * triangle, so rounding cannot compound past a single row — the rendered frame
+   * is bit-identical to the per-pixel form (verified against a frozen capture).
+   */
   const rasterize = (tri: RasterTri): void => {
     const { x0, y0, w0, x1, y1, w1, x2, y2, w2 } = tri;
     const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
@@ -126,14 +144,23 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
     const packed = (255 << 24) | (tri.b << 16) | (tri.g << 8) | tri.r;
     const alpha = tri.opacity;
 
+    // Affine coefficients of the two barycentrics, before the 1/area scale.
+    const a0 = y1 - y2;
+    const b0 = x2 - x1;
+    const c0 = x1 * y2 - x2 * y1;
+    const a1 = y2 - y0;
+    const b1 = x0 - x2;
+    const c1 = x2 * y0 - x0 * y2;
+    const stepL0 = a0 * inv;
+    const stepL1 = a1 * inv;
+    const pxStart = minX + 0.5;
+
     for (let y = minY; y <= maxY; y += 1) {
       const py = y + 0.5;
       const rowBase = y * fbWidth;
-      for (let x = minX; x <= maxX; x += 1) {
-        const px = x + 0.5;
-        // Barycentric weights (signed, normalized by the full area).
-        const l0 = ((x1 - px) * (y2 - py) - (x2 - px) * (y1 - py)) * inv;
-        const l1 = ((x2 - px) * (y0 - py) - (x0 - px) * (y2 - py)) * inv;
+      let l0 = (c0 + a0 * pxStart + b0 * py) * inv;
+      let l1 = (c1 + a1 * pxStart + b1 * py) * inv;
+      for (let x = minX; x <= maxX; x += 1, l0 += stepL0, l1 += stepL1) {
         const l2 = 1 - l0 - l1;
         if (l0 < 0 || l1 < 0 || l2 < 0) continue;
         const invW = l0 * w0 + l1 * w1 + l2 * w2;
@@ -247,6 +274,21 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
         const matte = roughness >= 1;
         const meshAo = mesh.ao;
         const indices = mesh.indices;
+        // Back faces of a CLOSED, opaque solid are never the nearest surface along
+        // any ray from outside it — the front face in front of them always wins the
+        // depth test — so drawing them is pure waste: a shade, a near-plane clip and
+        // a fill, all overdrawn. Skipping them removes roughly half the triangles of
+        // every primitive in the scene.
+        //
+        // Three conditions, each guarding a case where a back face IS visible:
+        //  - `mesh.closed`: open geometry (a sheet, a decal, custom data) is
+        //    legitimately two-sided, so it keeps the normal-flip behaviour below.
+        //  - opaque: a translucent solid shows its far wall through the near one,
+        //    which is exactly what the GPU path blends, so it must keep both.
+        //  - camera OUTSIDE the node's bounding sphere: standing inside a mesh (a
+        //    room, an enclosing backdrop box) you see nothing BUT its back faces.
+        const insideBounds = cx * cx + cy * cy + cz * cz <= boundRadius * boundRadius;
+        const cullBackFaces = mesh.closed && opacity >= 1 && !insideBounds;
         for (let i = 0; i < indices.length; i += 3) {
           const ia = indices[i]!;
           const ib = indices[i + 1]!;
@@ -284,6 +326,9 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
           const mz = (world[a + 2]! + world[b + 2]! + world[c + 2]!) / 3;
           const toEye = (eye.x - mx) * nx + (eye.y - my) * ny + (eye.z - mz) * nz;
           if (toEye < 0) {
+            // Facing away. On a closed opaque solid seen from outside, drop it
+            // here — before the shade, the clip and the fill it would have paid.
+            if (cullBackFaces) continue;
             nx = -nx;
             ny = -ny;
             nz = -nz;
@@ -383,7 +428,7 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
         ao[i] = aoSrc?.[i] ?? 1;
         radius = Math.max(radius, Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z));
       }
-      meshes.set(handle, { ao, indices: new Uint32Array(data.indices), positions, radius });
+      meshes.set(handle, { ao, closed: data.closed === true, indices: new Uint32Array(data.indices), positions, radius });
     },
   };
 };
