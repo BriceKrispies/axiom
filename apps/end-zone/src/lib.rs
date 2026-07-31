@@ -50,7 +50,6 @@ pub mod showcase_controller;
 pub mod state;
 pub mod tick;
 pub mod trace;
-pub mod wind_up;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web;

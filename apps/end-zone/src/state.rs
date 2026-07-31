@@ -27,15 +27,6 @@ use crate::physics_rig::PhysicsRig;
 use crate::player::lineup::formation_players;
 use crate::player::PlayerSim;
 
-/// Charge units for a full wind-up. The run loop scales its per-tick gain by
-/// the inverse time scale, so this is effectively a REAL-TIME budget — roughly
-/// 60 units a second whether the game is dilated or not, making a full wind-up
-/// about 0.9 s either way.
-///
-/// Sized by feel. At 20 it filled in a third of a second, which is a flicker
-/// rather than a wind-up: there was no span in which to release it deliberately.
-pub const CHARGE_MAX_TICKS: u32 = 36;
-
 /// The play lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayPhase {
@@ -99,14 +90,6 @@ pub struct SimState {
     /// The receiver the player named this throw, if the throw came from an
     /// explicit read rather than the throwing cone. Cleared at release.
     pub(crate) declared_target: Option<PlayerId>,
-    /// The read the player is currently winding up on, and how many ticks they
-    /// have held it. Charge is measured in SIMULATION ticks, not frames, so the
-    /// wind-up is deterministic — and so that holding through a decision window
-    /// costs game time (the rush keeps closing) rather than free real seconds.
-    pub(crate) charge_target: Option<PlayerId>,
-    pub(crate) charge_ticks: u32,
-    /// The charge the released throw committed at, `0..=1`.
-    pub(crate) throw_power: f32,
     /// The quarterback has been ordered out of the pocket. Latched for the rest
     /// of the play so the defense treats him as a runner from the instant the
     /// decision is made, not once he happens to build up downfield speed.
@@ -175,9 +158,6 @@ impl SimState {
             throwable: Vec::new(),
             throw_commanded: false,
             declared_target: None,
-            charge_target: None,
-            charge_ticks: 0,
-            throw_power: 0.0,
             qb_scrambling: false,
             catch_attempted: false,
             engaged_blocks: Vec::new(),
@@ -190,16 +170,6 @@ impl SimState {
     /// the ball rig or the player-collision rig.
     pub fn fault(&self) -> Option<&'static str> {
         self.rig.fault.or(self.collision.fault)
-    }
-
-    /// How far the current wind-up has charged, `0..=1`.
-    pub fn charge_ratio(&self) -> f32 {
-        self.charge_ticks as f32 / CHARGE_MAX_TICKS as f32
-    }
-
-    /// The read being wound up on, if any.
-    pub fn charge_target(&self) -> Option<PlayerId> {
-        self.charge_target
     }
 
     // The deterministic state digest lives with the other replay artifacts

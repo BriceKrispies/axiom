@@ -70,6 +70,11 @@ fn play(seed: u64, patience: Patience, attempts: u32, verbose: bool) -> Session 
     let mut seen = 0u32;
     for _ in 0..(attempts as usize + 1) * TICKS_PER_ATTEMPT {
         if let Some(step) = run.attempt() {
+            // The attempt blocks at the line until a play is called, so the
+            // autopilot has to make that call as well as the read.
+            if let Some(concept) = autopilot::call_play(&step) {
+                run.select_concept(concept);
+            }
             if let Some(choice) = autopilot::decide(&step, patience) {
                 run.choose(choice);
             }
@@ -257,6 +262,11 @@ fn the_reads_are_ordered_by_how_long_they_take_to_come_open() {
     let mut first_broken = [None::<u64>; 3];
     for tick in 0..400u64 {
         if let Some(step) = r.attempt() {
+            // Routes only develop once the ball is live, and the ball is only
+            // live once a play has been called.
+            if let Some(concept) = autopilot::call_play(&step) {
+                r.select_concept(concept);
+            }
             for slot in 0..3 {
                 if first_broken[slot].is_none() && step.read.read(slot).broken {
                     first_broken[slot] = Some(tick);

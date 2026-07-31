@@ -131,8 +131,10 @@ fn a_defender_who_cannot_secure_it_swats_the_pass_down() {
 #[test]
 fn an_interception_resolves_the_attempt_as_a_turnover() {
     let mut run = ShowcaseRun::new_run(&RunConfig::new(0x1_2345));
-    // Let the attempt loop line up and snap on its own.
+    // Call a play and let the attempt loop shift and snap. The offense holds at
+    // the line indefinitely without a call, so the call is what starts the play.
     for _ in 0..200 {
+        run.select_concept(0);
         run.step(&[]);
         if run.sim.ball.carrier() == Some(run.sim.quarterback) {
             break;

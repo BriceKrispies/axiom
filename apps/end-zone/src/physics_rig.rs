@@ -47,6 +47,23 @@ pub struct PhysicsRig {
 impl PhysicsRig {
     /// Build the world: gravity in yd/s², turf plane, ball, player spheres.
     pub fn new(gravity: f32, ball_spawn: Vec3) -> Self {
+        // Linear damping is ZERO on purpose: the ball must fly the trajectory
+        // the rest of the game predicts.
+        //
+        // Everything that reasons about a pass — the throw solve, the camera,
+        // the defense's perceived landing point, the catch ETA — uses the
+        // closed-form VACUUM ballistic model in `football::flight`. World
+        // damping applied only in the integrator, so the ball quietly flew a
+        // different path from the one every predictor computed: over a ~1 s
+        // flight it bled ~15% of its speed and landed about three yards short
+        // of its own predicted landing, which read as a weak arm that dropped
+        // every pass behind the receiver.
+        //
+        // The only free-flying body in this world is the ball; the player
+        // spheres are kinematic and have their transform and velocity
+        // overwritten from the authoritative sim every tick (`mirror_players`),
+        // so damping never applied to them in the first place. Angular damping
+        // stays — the spin is cosmetic and nothing predicts it.
         let mut physics = PhysicsApi::with_config(
             Vec3::new(0.0, -gravity, 0.0),
             8,
@@ -54,7 +71,7 @@ impl PhysicsRig {
             PLAYER_COUNT as u32 + 8,
             4,
             true,
-            ratio(0.0008),
+            ratio(0.0),
             ratio(0.004),
         )
         .unwrap_or_else(|_| PhysicsApi::new());

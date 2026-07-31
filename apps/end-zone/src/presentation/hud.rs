@@ -7,8 +7,8 @@
 //! actually open is the entire game, and a green/red hint would answer the
 //! question the prototype exists to ask.
 
-use crate::attempt::{AttemptLedger, AttemptPhase, AttemptStep, SET_TICKS};
-use crate::data::prototype::{concept, READ_COUNT};
+use crate::attempt::{AttemptLedger, AttemptPhase, AttemptStep};
+use crate::data::prototype::{concept, CONCEPT_COUNT, READ_COUNT};
 
 /// One selectable read in the decision prompt.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,9 +17,32 @@ pub struct ReadPrompt {
     pub key: String,
     /// The route's name (`SLANT`).
     pub name: String,
-    /// How far this read's wind-up has charged, `0..=1`. Zero unless this is
-    /// the read currently being held — the chip's fill IS the power meter.
-    pub charge: f32,
+}
+
+/// One callable play on the pre-snap card.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayOption {
+    /// The key that calls it (`1`, `2`, `3`).
+    pub key: String,
+    /// The concept's name (`TRIPLE READ`).
+    pub name: String,
+    /// Its three routes in read order (`SLANT · DIG · POST`), so the player is
+    /// choosing between three described shapes rather than three names.
+    pub routes: String,
+}
+
+/// The pre-snap play card: the whole pre-snap decision, and a blocking one.
+///
+/// It is its own view model rather than a dressed-up [`DecisionPrompt`] because
+/// it asks a different question with different stakes and — crucially — **no
+/// timer**. Nothing about it drains, so it carries no `remaining` and no
+/// urgency; borrowing the prompt's shape would have meant a bar that stands
+/// permanently full, which reads as broken rather than as unhurried.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayCallCard {
+    /// The card's headline (`CALL THE PLAY`).
+    pub headline: String,
+    pub plays: Vec<PlayOption>,
 }
 
 /// The on-screen read prompt. Present for the whole live play, because the
@@ -52,7 +75,9 @@ pub struct HudView {
     pub session: String,
     /// What the play is doing right now (`WATCH`, `BALL IN AIR`, `SCRAMBLE`).
     pub state: String,
-    /// The decision prompt, only while a window is open.
+    /// The play card, only while the offense is waiting on a call.
+    pub play_call: Option<PlayCallCard>,
+    /// The decision prompt, only once the ball is live.
     pub decision: Option<DecisionPrompt>,
     /// The result card, only while one is showing (`COMPLETE  +14 YD`).
     pub result: Option<String>,
@@ -71,7 +96,8 @@ fn yards(value: f32) -> String {
 /// The caption for a phase that is not asking anything of the player.
 fn state_caption(phase: AttemptPhase) -> &'static str {
     match phase {
-        AttemptPhase::PreSnap { .. } => "SET",
+        AttemptPhase::PlayCall => "CALL IT",
+        AttemptPhase::Shifting { .. } => "SET",
         AttemptPhase::Developing => "WATCH",
         AttemptPhase::DecisionWindow { .. } => "DECIDE",
         AttemptPhase::PassInFlight { .. } => "BALL IN AIR",
@@ -93,19 +119,15 @@ impl HudView {
                 ledger.interceptions
             ),
             state: state_caption(step.phase).to_string(),
+            play_call: play_call_card(step),
             decision: decision_prompt(step),
             result: result_card(step),
         }
     }
 }
 
-/// The prompt for an open window (`None` otherwise).
+/// The read prompt, once the ball is live (`None` otherwise).
 fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
-    // Pre-snap the same three chips pick the PLAY; the keys never change
-    // meaning mid-decision, only mid-phase.
-    if matches!(step.phase, AttemptPhase::PreSnap { .. }) {
-        return Some(concept_prompt(step));
-    }
     if !step.phase.accepts_choice() {
         return None;
     }
@@ -131,10 +153,6 @@ fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
             .map(|read| ReadPrompt {
                 key: format!("{}", read + 1),
                 name: concept(step.read.concept).read_names[read].to_string(),
-                charge: match step.charging == Some(read) {
-                    true => step.charge,
-                    false => 0.0,
-                },
             })
             .collect(),
         // Action first, key second: the same string is a keyboard hint and a
@@ -145,29 +163,24 @@ fn decision_prompt(step: &AttemptStep) -> Option<DecisionPrompt> {
     })
 }
 
-/// The pre-snap play picker: the three concepts, keyed like the three reads, so
-/// the number row never changes meaning mid-decision — only mid-phase. The
-/// currently-set concept shows a full chip so the standing call is always
-/// visible without a separate readout.
-fn concept_prompt(step: &AttemptStep) -> DecisionPrompt {
-    DecisionPrompt {
-        headline: "CALL IT".to_string(),
-        reads: (0..crate::data::prototype::CONCEPT_COUNT)
-            .map(|index| ReadPrompt {
+/// The pre-snap play card, while the offense is waiting on a call.
+///
+/// Nothing is pre-selected: the attempt does not start until the player calls
+/// something, so showing a standing highlight would suggest a play is already
+/// in when nothing has been chosen. The number row keeps one grammar across the
+/// whole attempt — `1`/`2`/`3` are the three plays here and the three reads once
+/// the ball is live, so the keys change meaning only when the phase does.
+fn play_call_card(step: &AttemptStep) -> Option<PlayCallCard> {
+    matches!(step.phase, AttemptPhase::PlayCall).then(|| PlayCallCard {
+        headline: "CALL THE PLAY".to_string(),
+        plays: (0..CONCEPT_COUNT)
+            .map(|index| PlayOption {
                 key: format!("{}", index + 1),
                 name: concept(index).name.to_string(),
-                charge: match index == step.concept {
-                    true => 1.0,
-                    false => 0.0,
-                },
+                routes: concept(index).read_names.join("  ·  "),
             })
             .collect(),
-        scramble: format!("SET  ·  {}", concept(step.concept).name),
-        remaining: (step.window_left as f32 / SET_TICKS as f32).clamp(0.0, 1.0),
-        // The hold is generous on purpose; it is a beat to think in, not a
-        // scramble, so it never nags.
-        urgent: false,
-    }
+    })
 }
 
 /// The result card while one is showing (`None` otherwise).

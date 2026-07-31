@@ -92,15 +92,17 @@ impl ShowcaseRun {
 
     /// The attempt loop's view for this tick, when this is a real session.
     pub fn attempt(&self) -> Option<AttemptStep> {
-        let RunLoop::Attempt(controller, _) = &self.run_loop else {
-            return None;
-        };
-        // The wind-up lives in the sim; the view carries it to the HUD.
-        let step = controller.view(self.sim.tick)?;
-        let charging = self.sim.charge_target().and_then(|target| {
-            (0..crate::data::prototype::READ_COUNT).find(|r| step.read.target(*r) == target)
-        });
-        controller.view_charging(self.sim.tick, charging, self.sim.charge_ratio())
+        match &self.run_loop {
+            RunLoop::Attempt(controller, _) => controller.view(self.sim.tick),
+            RunLoop::Ambient(_) => None,
+        }
+    }
+
+    /// Whether the offense is at the line waiting for a play to be called,
+    /// where the number keys mean plays rather than reads.
+    fn awaiting_call(&self) -> bool {
+        self.attempt()
+            .is_some_and(|step| matches!(step.phase, crate::attempt::AttemptPhase::PlayCall))
     }
 
     /// The running session totals, when this is a real session.
@@ -174,27 +176,14 @@ impl ShowcaseRun {
                         controller.request_reset();
                     }
                 }
-                DiagnosticCommand::ThrowRead(read) => {
-                    self.choose(PlayerChoice::Throw(*read));
-                }
-                // A wind-up only reaches the simulation while the reads are
-                // actually live, so a held key before the snap charges nothing.
-                // Pre-snap the number keys pick the PLAY; once the ball is
-                // live they pick the read. Same keys, one mental model.
-                DiagnosticCommand::ChargeRead(read) if self.pre_snap() => {
+                // One key, two meanings, split by phase: while the offense is
+                // waiting on a call the number picks the PLAY; once the ball is
+                // live it picks the READ. Same keys, one mental model.
+                DiagnosticCommand::SelectRead(read) if self.awaiting_call() => {
                     self.select_concept(*read);
                 }
-                DiagnosticCommand::ChargeRead(read) => {
-                    if let Some(target) = self.charge_target(*read) {
-                        let gain = self.charge_gain();
-                        user_commands.push(SimCommand::ChargeThrow { target, gain });
-                    }
-                }
-                DiagnosticCommand::ReleaseRead => {
-                    if self.sim.charge_target().is_some() {
-                        self.note_charged_choice();
-                        user_commands.push(SimCommand::ReleaseThrow);
-                    }
+                DiagnosticCommand::SelectRead(read) => {
+                    self.choose(PlayerChoice::Throw(*read));
                 }
                 DiagnosticCommand::Scramble => {
                     self.choose(PlayerChoice::Scramble);

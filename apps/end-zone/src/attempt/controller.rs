@@ -17,7 +17,7 @@ use super::read::{read_play, window_trigger, PlayRead, WindowGate};
 use super::setup;
 use super::{
     DEVELOP_MAX_TICKS, DEVELOP_MIN_TICKS, MAX_LIVE_TICKS, REARM_DEADLINE_TICKS, RESULT_TICKS,
-    SET_TICKS, WINDOW_COOLDOWN_TICKS,
+    WINDOW_COOLDOWN_TICKS,
 };
 
 /// The prototype's run loop.
@@ -44,16 +44,14 @@ pub struct AttemptController {
     pub(super) attempt_index: u32,
     /// The defensive playbook index this attempt lined up in (inspection).
     pub last_defense_index: usize,
-    /// The concept the offense runs. Chosen pre-snap and CARRIED into the next
-    /// attempt, so a player who likes a concept keeps it rather than re-picking
-    /// every eight seconds.
+    /// The concept the offense is currently lined up in. It carries into the
+    /// next attempt so the offense has somewhere to STAND while the next call
+    /// is made — but it is never what gets run: every attempt waits for its own
+    /// call, and calling the same concept again simply means a shift with
+    /// nowhere to go and an immediate snap.
     pub(super) concept: usize,
-    /// A concept picked during this pre-snap, applied when the play installs.
+    /// A concept picked during this play call, applied when the play installs.
     pub(super) pending_concept: Option<usize>,
-    /// Whether the player has called a play this pre-snap. A call arms the
-    /// snap: the ball goes the moment the offense is set in its new alignment,
-    /// so pressing a play IS the snap count.
-    pub(super) called: bool,
 }
 
 impl AttemptController {
@@ -74,18 +72,16 @@ impl AttemptController {
             last_defense_index: 0,
             concept: 0,
             pending_concept: None,
-            called: false,
         }
     }
 
-    /// Line the first attempt up, so a fresh session is already set at the line
-    /// (without it there is no attempt view at tick zero to draw from).
+    /// Line the first attempt up, so a fresh session is already at the line with
+    /// the play card up (without it there is no attempt view at tick zero to
+    /// draw from).
     pub fn arm(&mut self, sim: &mut SimState, config: &RunConfig) {
         self.build_attempt(sim, config);
         self.read = Some(read_play(sim, self.concept));
-        self.phase = AttemptPhase::PreSnap {
-            snap_at: sim.tick + SET_TICKS,
-        };
+        self.phase = AttemptPhase::PlayCall;
     }
 
     pub fn phase(&self) -> AttemptPhase {
@@ -135,11 +131,12 @@ impl AttemptController {
             AttemptPhase::Resetting => {
                 self.build_attempt(sim, config);
                 commands.push(SimCommand::BeginPlay);
-                AttemptPhase::PreSnap {
-                    snap_at: tick + SET_TICKS,
-                }
+                AttemptPhase::PlayCall
             }
-            AttemptPhase::PreSnap { snap_at } if self.ready_to_snap(sim, tick, snap_at) => {
+            AttemptPhase::PlayCall => self.await_call(sim, config, tick),
+            AttemptPhase::Shifting { stalled_at }
+                if self.ready_to_snap(sim, tick, stalled_at) =>
+            {
                 commands.push(SimCommand::Snap);
                 self.dead_at = tick + MAX_LIVE_TICKS;
                 self.gate = WindowGate {
@@ -150,7 +147,7 @@ impl AttemptController {
                 };
                 AttemptPhase::Developing
             }
-            AttemptPhase::PreSnap { snap_at } => self.hold(sim, config, snap_at),
+            AttemptPhase::Shifting { stalled_at } => AttemptPhase::Shifting { stalled_at },
             // A choice can land here as well as in a window: throwing early, at
             // full speed, is the anticipatory read.
             AttemptPhase::Developing => match self.pending.take() {
@@ -232,9 +229,6 @@ impl AttemptController {
                 commands.push(SimCommand::ThrowTo(read.target(target)));
                 AttemptPhase::PassInFlight { read: target }
             }
-            // The wind-up already queued its own release; issuing a throw here
-            // too would overwrite the player's charge with full power.
-            PlayerChoice::ThrowCharged(target) => AttemptPhase::PassInFlight { read: target },
             PlayerChoice::Scramble => {
                 commands.push(SimCommand::Scramble);
                 AttemptPhase::Scrambling
@@ -279,7 +273,7 @@ impl AttemptController {
         self.windows = 0;
         self.dead_at = u64::MAX;
         self.los_yard = PROTOTYPE_LINE;
-        self.called = false;
+        self.pending_concept = None;
         self.gate = WindowGate::closed();
         self.last_defense_index = setup::install(sim, config, self.attempt_index, self.concept);
     }

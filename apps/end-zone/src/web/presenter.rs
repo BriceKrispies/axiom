@@ -138,16 +138,10 @@ fn decision_html(prompt: &crate::presentation::DecisionPrompt) -> String {
         .iter()
         .enumerate()
         .map(|(index, read)| {
-            // `ez-fill` is the wind-up meter: it grows out of the bottom of the
-            // chip you are holding, so the power you are about to throw with is
-            // read off the same control you are pressing.
             format!(
-                "<div class='ez-read ez-read{} {}' data-read='{index}'>\
-                 <i class='ez-fill' style='height:{:.1}%'></i>\
+                "<div class='ez-read ez-read{}' data-read='{index}'>\
                  <b>{}</b><span>{}</span></div>",
                 markup::esc(&read.key),
-                if read.charge > 0.0 { "ez-charging" } else { "" },
-                read.charge.clamp(0.0, 1.0) * 100.0,
                 markup::esc(&read.key),
                 markup::esc(&read.name)
             )
@@ -169,7 +163,40 @@ fn decision_html(prompt: &crate::presentation::DecisionPrompt) -> String {
     )
 }
 
+/// The pre-snap play card. The same `data-read` hook the live chips use, so a
+/// tap calls a play exactly the way a tap throws a read — one piece of UI for
+/// keyboard and touch, which is what stops the two devices disagreeing.
+fn play_call_html(card: &crate::presentation::PlayCallCard) -> String {
+    let plays: String = card
+        .plays
+        .iter()
+        .enumerate()
+        .map(|(index, play)| {
+            format!(
+                "<div class='ez-play ez-read{}' data-read='{index}'>\
+                 <b>{}</b><div class='ez-play-text'><em>{}</em><span>{}</span></div></div>",
+                markup::esc(&play.key),
+                markup::esc(&play.key),
+                markup::esc(&play.name),
+                markup::esc(&play.routes)
+            )
+        })
+        .collect();
+    format!(
+        "<div class='ez-callsheet'>\
+         <div class='ez-callsheet-head'>{}</div>\
+         <div class='ez-plays'>{plays}</div>\
+         </div>",
+        markup::esc(&card.headline)
+    )
+}
+
 fn hud_html(hud: HudView) -> String {
+    let play_call = hud
+        .play_call
+        .as_ref()
+        .map(play_call_html)
+        .unwrap_or_default();
     let decision = hud.decision.as_ref().map(decision_html).unwrap_or_default();
     let result = hud
         .result
@@ -181,7 +208,7 @@ fn hud_html(hud: HudView) -> String {
          <div class='ez-hud-score'>{}</div>\
          <div class='ez-hud-center'><div class='ez-hud-down'>{}</div></div>\
          <div class='ez-hud-heat'>{}</div>\
-         </div>{decision}{result}",
+         </div>{play_call}{decision}{result}",
         markup::esc(&hud.attempt),
         markup::esc(&hud.state),
         markup::esc(&hud.session),

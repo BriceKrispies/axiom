@@ -20,21 +20,43 @@ whichever device you used last.
 `Enter`, `Escape`, and the arrows always work in menus (the emergency path).
 Cancel is consistent: `RESUME` from the pause menu, `BACK` from settings and
 controls. The title leads straight into gameplay — there is no menu tree to walk
-back through, no attract mode, and **no play-call screen**.
+back through and no attract mode.
+
+## In-game — calling the play (keyboard)
+
+Every attempt starts at the line with the play card up, and **nothing happens
+until you call one**. There is no clock on it: the game waits.
+
+| Key | Action |
+|---|---|
+| `1` | Call **TRIPLE READ** — slant · dig · post |
+| `2` | Call **FLOOD** — flat · corner · go |
+| `3` | Call **MIRROR** — hitch · cross · wheel |
+
+The moment you call, the offense sprints into that play's formation. The ball
+snaps as soon as every man is on his spot, so **calling the play is the snap
+count** — a bigger shift is a longer walk, and re-calling the formation already
+on the field snaps at once. The number keys keep the same grammar all attempt:
+they are the three plays here, and the three reads once the ball is live.
 
 ## In-game — the decision window (keyboard)
 
 You do not steer the play. The offense snaps, drops back and runs its routes on
-its own; you watch. At the moment the read is worth making, the game drops into
-slow motion and asks you exactly one question. You have a couple of real seconds.
+its own; you watch. At the moment the read is worth making, the game asks you
+exactly one question.
 
 | Key | Action |
 |---|---|
-| `1` | Throw the **SLANT** — the short read. Almost always there, worth almost nothing. |
-| `2` | Throw the **DIG** — the intermediate crosser. A chunk, through traffic. |
-| `3` | Throw the **POST** — the deep read. The big play, if you have the time. |
+| `1` | Throw to the **short read** (slant / flat / hitch, by play). Almost always there, worth almost nothing. |
+| `2` | Throw to the **intermediate read** (dig / corner / cross). A chunk, through traffic. |
+| `3` | Throw to the **deep read** (post / go / wheel). The big play, if you have the time. |
 | `Space` | **Scramble** — abandon the pocket. You get the quarterback, and the defense knows it instantly. |
 | *(nothing)* | Let the window close. The play runs on, the rush keeps coming, and you get one more (shorter) look. |
+
+One press throws it. There is no meter to fill and no power to get wrong — the
+pass is always on the money, so the only way to be wrong is to have read the
+field wrong. Read `1` is always the earliest and safest and read `3` always the
+latest and largest, in every play, so the mapping survives changing your call.
 
 Each receiver wears a coloured ring and a stack of floating cubes: one cube for
 read `1`, two for `2`, three for `3`. Colours identify **who**, never whether the
@@ -56,17 +78,21 @@ simulation owns every player, which is the premise the prototype exists to test.
 
 ## In-game — touch (mobile)
 
-The virtual joystick (bottom-left) and buttons (bottom-right) appear only while
-a run is live; they work with touch, pen, and mouse.
+**There is no virtual joystick.** The game does not ask you to steer, so a
+thumbstick would advertise a verb it does not have; a touch carrier simply runs
+on his own AI intent.
+
+The prompts *are* the buttons. A delegated pointer listener reads the tapped
+element, so every on-screen chip is a real control on touch, pen, and mouse —
+one piece of UI in the place you are already looking, which is why the touch and
+keyboard controls can never disagree.
 
 | Control | Action |
 |---|---|
-| Joystick | Steer the ball carrier once you have committed (scramble or after the catch). |
-| `SNAP · THROW` | During a decision window, commits the **highlighted** read — the one-button twin of the numbered keys. |
+| A play row on the card | Calls that play — the twin of `1`/`2`/`3` at the line. |
+| A read chip | Throws to that read — the twin of `1`/`2`/`3` once the ball is live. |
+| `SCRAMBLE` | Abandons the pocket (the twin of `Space`). |
 | `PAUSE` | Open the pause menu (RESUME / RESTART RUN / END SESSION / SETTINGS / CONTROLS / RETURN TO TITLE). |
-
-Touch has no per-read buttons yet, so mobile can only take the highlighted read
-or ride the window out. That is a known gap, not a design choice.
 
 ## Diagnostics
 

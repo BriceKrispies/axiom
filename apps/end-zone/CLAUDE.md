@@ -5,9 +5,15 @@ composition-leaf Axiom app: an arcade football game built on a reusable,
 deterministic play-simulation framework that lives entirely inside this app.
 
 The game layer on top is currently the **decision-window prototype**
-(`src/attempt/`): the play simulates itself and the player intervenes once, in
-slow motion, to pick one of three receivers or to run. It replaced the old
+(`src/attempt/`): the player calls a play at the line, the offense shifts into
+it and snaps once it is set, the play then simulates itself, and the player
+intervenes once to pick one of three receivers or to run. It replaced the old
 score-attack drive loop (downs / heat / game over), which is gone.
+
+Two things it deliberately does NOT have: a clock on the play call (it waits
+indefinitely — an attempt never runs a play nobody chose) and a throw-power
+mechanic (one press throws an on-target pass; the decision is which receiver and
+when, never how hard).
 
 Read the repo-root `CLAUDE.md` first — the Layer/Module/Branchless/Coverage laws
 still apply. This file tells you **where** things live so you fix them at the

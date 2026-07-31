@@ -94,66 +94,108 @@ pub fn lead_point(release: Vec3, position: Vec3, velocity: Vec3, speed: f32) -> 
 /// The longest lead the solver will ever produce, seconds.
 const MAX_LEAD_SECONDS: f32 = 2.5;
 
-/// The launch elevation every pass leaves the hand at, radians (~12°). Fixed on
-/// purpose: with the angle constant, **power alone decides range**, which is
-/// what makes a charged throw legible. The player learns one relationship
-/// instead of two coupled ones.
-pub const LAUNCH_ELEVATION: f32 = 0.21;
-
-/// The launch speed that lands a pass `range` yards away, from the level-ground
-/// range `R = v²·sin(2θ)/g`.
-pub fn speed_for_range(range: f32, gravity: f32) -> f32 {
-    let spread = (2.0 * LAUNCH_ELEVATION).sin().max(0.01);
-    (range.max(0.0) * gravity.max(0.01) / spread).sqrt()
+/// The horizontal distance from `release` to `aim`, yards.
+fn flat_range(release: Vec3, aim: Vec3) -> f32 {
+    Vec3::new(aim.x - release.x, 0.0, aim.z - release.z).length()
 }
 
-/// How far in front of (or behind) the receiver a full / empty wind-up puts the
-/// ball, yards.
+/// The speed a pass covering `range` yards leaves the hand at, yd/s.
 ///
-/// The wind-up is **placement, not range**. Every throw is solved to reach the
-/// receiver; power only slides the arrival point along his path. A perfect
-/// half-charge hits him in stride, an over-throw leads him further into space,
-/// an under-throw arrives behind him. That keeps a mistimed release a
-/// *contested* ball rather than a pass that lands twenty yards short of anyone
-/// — which is what "throw harder" produced when power drove distance directly.
-pub const LEAD_BIAS_YARDS: f32 = 3.2;
+/// As hard as the passer can throw, with one cap: a very short pass is slowed
+/// just enough to stay airborne for `min_flight_ticks`, because the catch
+/// pipeline needs a few ticks to contest and resolve a ball. That cap is why a
+/// five-yard slant is not a bullet that arrives the tick it is released — it is
+/// a floor on the *catch*, not a punishment for throwing short.
+fn throw_speed(range: f32, tuning: &BehaviorTuning) -> f32 {
+    let min_flight = (tuning.min_flight_ticks.max(1) as f32) / 60.0;
+    let ceiling = tuning.pass_speed.max(1.0);
+    (range.max(0.0) / min_flight).clamp(tuning.pass_speed_min.clamp(1.0, ceiling), ceiling)
+}
 
-/// The aim point and launch velocity for a throw at `power` (`0.5` is on the
-/// money). ONE function, shared by the release and the on-field preview, so the
-/// arc the player is shown is the arc the ball actually flies.
+/// The launch elevation that carries a pass `range` yards to a point sitting
+/// `rise` yards above the release, radians.
+///
+/// **`rise` is normally negative**, and it is not a rounding error. The ball
+/// leaves the hand at throwing height (1.95 yd) and is caught at chest height
+/// (1.45 yd), so it is falling half a yard over the throw. The level-ground
+/// range equation `R = v²·sin(2θ)/g` assumes those heights are equal; using it
+/// here threw every pass long — about three yards long on a twenty-yard throw,
+/// which is a completion turned into an overthrow.
+///
+/// Solving the trajectory `y(R) = rise` for `u = tan θ` gives a quadratic:
+///
+/// ```text
+///   k·u² − R·u + (rise + k) = 0,      k = g·R²/(2v²)
+/// ```
+///
+/// taking the **smaller** root — the rope rather than the moon-ball, since the
+/// same distance can be covered by either and a quarterback throws the rope.
+/// It is evaluated as `2(rise + k) / (R + √disc)` rather than the textbook
+/// `(R − √disc)/2k`: the two are equal, but on a short throw `k` is tiny and
+/// the textbook form is a small difference of two near-equal numbers divided by
+/// something near zero. A negative discriminant means the target is out of
+/// range at this speed, and the vertex `R/2k` is then the furthest it can throw.
+fn launch_angle(range: f32, rise: f32, speed: f32, gravity: f32) -> f32 {
+    let r = range.max(0.01);
+    let k = gravity.max(0.01) * r * r / (2.0 * speed.max(1.0).powi(2));
+    let disc = r * r - 4.0 * k * (rise + k);
+    let u = match disc >= 0.0 {
+        true => 2.0 * (rise + k) / (r + disc.sqrt()),
+        false => r / (2.0 * k),
+    };
+    u.atan()
+}
+
+/// The aim point and launch velocity for a throw to a receiver.
+///
+/// Always a perfect ball: the intercept solve puts it where the receiver *will
+/// be*, and nothing biases it off that point. The passer's arm is not one of
+/// the things this game asks the player to get right — the read is — so a throw
+/// only fails because the receiver was covered, never because the pass was.
+///
+/// **The lead and the launch must agree on how fast the ball flies.** Solving
+/// the intercept against one speed and then throwing at another is what puts a
+/// nominally perfect pass behind a sprinting receiver: he keeps running for the
+/// difference between the two flight times. Both the speed and the elevation
+/// are functions of the range, and the range is a function of the lead, so this
+/// closes the loop by refining it — the first pass leads at full speed, and the
+/// correction accounts for the fraction of that speed the arc spends climbing.
+/// The second refinement moves the aim by inches; it is there so a deep ball to
+/// a receiver at full stride lands in his hands rather than a stride behind.
 pub fn aim_and_velocity(
     release: Vec3,
     receiver_pos: Vec3,
     receiver_vel: Vec3,
-    power: f32,
     gravity: f32,
     tuning: &BehaviorTuning,
 ) -> (Vec3, Vec3) {
-    // Solve the intercept at a nominal speed first: this is the point that
-    // actually meets the receiver, and it is where a perfect throw goes.
-    let base = lead_point(release, receiver_pos, receiver_vel, tuning.pass_speed);
-    // Bias along his heading — in front on a big wind-up, behind on a rushed
-    // one. A stationary receiver has no heading, so the throw simply finds him.
-    let heading = Vec3::new(receiver_vel.x, 0.0, receiver_vel.z)
-        .normalize()
-        .unwrap_or(Vec3::ZERO);
-    let bias = (power.clamp(0.0, 1.0) - 0.5) * 2.0 * LEAD_BIAS_YARDS;
-    let aim = base.add(heading.mul_scalar(bias));
-    let flat = Vec3::new(aim.x - release.x, 0.0, aim.z - release.z);
-    let velocity = launch_velocity(release, aim, speed_for_range(flat.length(), gravity));
-    (aim, velocity)
+    // Speed and elevation both follow from the range, and the ball is caught
+    // BELOW the height it was thrown from — see `launch_angle`.
+    let solve = |aim: Vec3| {
+        let range = flat_range(release, aim);
+        let speed = throw_speed(range, tuning);
+        let rise = super::catch_point(aim).y - release.y;
+        (speed, launch_angle(range, rise, speed, gravity))
+    };
+    // The ball's HORIZONTAL speed is what an intercept is solved against — the
+    // vertical component carries the arc, not the receiver.
+    let aim = (0..2).fold(
+        lead_point(release, receiver_pos, receiver_vel, tuning.pass_speed),
+        |aim, _| {
+            let (speed, elevation) = solve(aim);
+            lead_point(release, receiver_pos, receiver_vel, speed * elevation.cos())
+        },
+    );
+    let (speed, elevation) = solve(aim);
+    (aim, launch_velocity(release, aim, speed, elevation))
 }
 
-/// Launch velocity for a throw of `speed` toward `aim`, at [`LAUNCH_ELEVATION`].
-pub fn launch_velocity(release: Vec3, aim: Vec3, speed: f32) -> Vec3 {
+/// Launch velocity for a throw of `speed` toward `aim` at `elevation`.
+pub fn launch_velocity(release: Vec3, aim: Vec3, speed: f32, elevation: f32) -> Vec3 {
     let flat = Vec3::new(aim.x - release.x, 0.0, aim.z - release.z);
     let dir = flat.normalize().unwrap_or(Vec3::UNIT_Z);
-    let (sin, cos) = (LAUNCH_ELEVATION.sin(), LAUNCH_ELEVATION.cos());
-    Vec3::new(
-        dir.x * speed * cos,
-        speed * sin,
-        dir.z * speed * cos,
-    )
+    let (sin, cos) = (elevation.sin(), elevation.cos());
+    Vec3::new(dir.x * speed * cos, speed * sin, dir.z * speed * cos)
 }
 
 /// Where a ballistic throw actually comes down, and how long it hangs.
@@ -179,39 +221,6 @@ pub fn predict_landing(release: Vec3, velocity: Vec3, gravity: f32, ground: f32)
 
 /// The longest a pass may hang before the predictor gives up, seconds.
 const MAX_HANG_SECONDS: f32 = 4.0;
-
-/// The charge needed to land a pass `range` yards away — the inverse of
-/// [`predict_landing`], so the autopilot (and the balance harness) can aim as
-/// well as a player who has learned the arc.
-///
-/// Uses the level-ground range `R = v²·sin(2θ)/g`; release and catch heights sit
-/// within a foot of each other, so the error is far inside the catch volume.
-pub fn power_for_range(range: f32, gravity: f32, tuning: &BehaviorTuning) -> f32 {
-    let g = gravity.max(0.01);
-    let spread = (2.0 * LAUNCH_ELEVATION).sin().max(0.01);
-    let speed = (range.max(0.0) * g / spread).sqrt();
-    let min = tuning.pass_speed_min.max(1.0);
-    let max = tuning.pass_speed.max(min + 0.01);
-    ((speed - min) / (max - min)).clamp(0.0, 1.0)
-}
-
-/// Sample a launched pass's arc for the on-field preview, ending at the ground.
-pub fn arc_samples(
-    release: Vec3,
-    velocity: Vec3,
-    gravity: f32,
-    ground: f32,
-    count: usize,
-) -> Vec<Vec3> {
-    let (_, eta) = predict_landing(release, velocity, gravity, ground);
-    let total = eta as f32 / 60.0;
-    (0..count.max(2))
-        .map(|i| {
-            let t = total * i as f32 / (count.max(2) - 1) as f32;
-            predict_position(release, velocity, gravity, t)
-        })
-        .collect()
-}
 
 /// Solve a throw from `release` to `target`: flight time from horizontal
 /// distance at the tuned pass speed (clamped to a minimum), horizontal

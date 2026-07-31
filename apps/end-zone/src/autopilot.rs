@@ -6,9 +6,10 @@
 //!
 //! It is a pure function of the simulation: no I/O, no wall clock, no
 //! randomness, so an autopiloted run replays bit-for-bit like any other run.
-//! The autopilot owns the three decisions that need to read the field: WHICH
-//! read to take in a decision window ([`decide`]), WHERE to run ([`steer`]),
-//! and — for the ambient cone-aimed throw — WHEN to release ([`should_throw`]).
+//! The autopilot owns the four decisions a player makes: WHICH play to call at
+//! the line ([`call_play`]), WHICH read to take in a decision window
+//! ([`decide`]), WHERE to run ([`steer`]), and — for the ambient cone-aimed
+//! throw — WHEN to release ([`should_throw`]).
 //!
 //! [`decide`] is also the prototype's **tuning instrument**: running the same
 //! attempt loop under an impatient, a balanced and a greedy [`Patience`] is how
@@ -18,7 +19,7 @@
 
 use axiom::prelude::Vec2;
 
-use crate::attempt::{AttemptStep, PlayerChoice, MAX_WINDOWS};
+use crate::attempt::{AttemptPhase, AttemptStep, PlayerChoice, MAX_WINDOWS};
 use crate::data::prototype::{concept, READ_COUNT};
 use crate::field::OffensePoint;
 use crate::player::PlayerSim;
@@ -76,6 +77,23 @@ impl Patience {
 /// window close and wait for a better look. `None` is a real decision with a
 /// real cost — the rush is closer when the next window opens, and the window
 /// after that is shorter.
+/// The concept the autopilot always calls.
+///
+/// Fixed, and deliberately so. [`decide`] is the prototype's balance
+/// instrument, and a policy that also shopped the PLAYBOOK would confound the
+/// thing it measures: two patience profiles could post different numbers
+/// because they ran different routes rather than because they waited
+/// differently. The autopilot answers the read question and nothing else.
+pub const AUTOPILOT_CONCEPT: usize = 0;
+
+/// The play to call, while the offense is waiting on one (`None` otherwise).
+///
+/// An attempt does not start until a play is called, so a headless session has
+/// to answer this or it stands at the line forever.
+pub fn call_play(step: &AttemptStep) -> Option<usize> {
+    matches!(step.phase, AttemptPhase::PlayCall).then_some(AUTOPILOT_CONCEPT)
+}
+
 pub fn decide(step: &AttemptStep, patience: Patience) -> Option<PlayerChoice> {
     if !step.phase.in_window() {
         return None;

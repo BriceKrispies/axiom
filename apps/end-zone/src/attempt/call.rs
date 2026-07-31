@@ -11,10 +11,11 @@ use super::controller::AttemptController;
 use super::phase::AttemptPhase;
 
 impl AttemptController {
-    /// Pick the concept for the next snap. Accepted only PRE-SNAP: once the
-    /// ball is live the number keys mean reads, not plays.
+    /// Call the play for this attempt. Accepted only while the card is up:
+    /// once the offense is shifting the call is committed, and once the ball is
+    /// live the number keys mean reads, not plays.
     pub fn select_concept(&mut self, index: usize) -> bool {
-        let accepted = matches!(self.phase, AttemptPhase::PreSnap { .. });
+        let accepted = matches!(self.phase, AttemptPhase::PlayCall);
         self.pending_concept = accepted
             .then(|| index.min(CONCEPT_COUNT - 1))
             .or(self.pending_concept);

@@ -29,19 +29,15 @@ impl WindowTrigger {
     }
 }
 
-/// What the player chose during a decision window. Exactly one of four things —
+/// What the player chose during a decision window. Exactly one of three things —
 /// there is no "do nothing" choice, because doing nothing is letting the window
 /// close, which the loop models as its own outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerChoice {
-    /// Throw to read `0..3` (read 0 is the short one) at full power. The loop
-    /// issues the throw itself.
+    /// Throw to read `0..3` (read 0 is the short one). One press, one throw:
+    /// the pass is on the money, so the decision is purely *which receiver and
+    /// when* — never *how hard*. The loop issues the throw itself.
     Throw(usize),
-    /// A held wind-up was released on read `0..3`. Identical as a *decision* —
-    /// the loop records the same read and leaves the window the same way — but
-    /// the throw command is already on its way from the wind-up, so the loop
-    /// must NOT also issue a full-power one on top of it.
-    ThrowCharged(usize),
     /// Abandon the pocket — the player takes direct control of the quarterback.
     Scramble,
 }
@@ -50,7 +46,7 @@ impl PlayerChoice {
     /// The read this choice throws to, if it is a throw.
     pub fn read(self) -> Option<usize> {
         match self {
-            PlayerChoice::Throw(read) | PlayerChoice::ThrowCharged(read) => Some(read),
+            PlayerChoice::Throw(read) => Some(read),
             PlayerChoice::Scramble => None,
         }
     }
@@ -60,8 +56,17 @@ impl PlayerChoice {
 /// so there is no way to be in `DecisionWindow` without knowing when it closes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttemptPhase {
-    /// Lined up, showing the formation and the coverage. Snaps at `snap_at`.
-    PreSnap { snap_at: u64 },
+    /// At the line with the play card up, waiting for the player to call one.
+    /// **There is no clock.** The snap belongs to the player, so this holds for
+    /// as long as it takes — an attempt never starts on a play nobody chose.
+    PlayCall,
+    /// The call is in and the offense is sprinting into its new alignment. The
+    /// ball snaps the moment every offensive player is on his spot, so the
+    /// shift is not a wait — it IS the snap count, and it is the feedback that
+    /// the call took. `stalled_at` is a stall guard, not a deadline: it exists
+    /// only so a player who somehow cannot reach his spot can never hang the
+    /// attempt.
+    Shifting { stalled_at: u64 },
     /// The play runs itself: drop-back, routes, protection, rush. The player
     /// watches and reads; the window gate decides when to interrupt.
     Developing,
@@ -111,13 +116,17 @@ impl AttemptPhase {
     }
 
     /// Whether the three numbered reads should be on screen — their field
-    /// markers and their prompt. They appear at the line so the player learns
-    /// the mapping, and stay up through the whole live play, because a control
-    /// you can use is a control you should be able to see.
+    /// markers and their prompt.
+    ///
+    /// They appear the moment a play is CALLED, not before: during the call
+    /// itself the three numbers mean plays, and showing receiver numerals for a
+    /// concept nobody has chosen would be labelling routes that are about to
+    /// change. From the shift onward they stay up through the whole live play,
+    /// because a control you can use is a control you should be able to see.
     pub fn shows_reads(self) -> bool {
         matches!(
             self,
-            AttemptPhase::PreSnap { .. }
+            AttemptPhase::Shifting { .. }
                 | AttemptPhase::Developing
                 | AttemptPhase::DecisionWindow { .. }
         )
@@ -142,7 +151,8 @@ impl AttemptPhase {
     /// A short debug/HUD label.
     pub fn label(self) -> &'static str {
         match self {
-            AttemptPhase::PreSnap { .. } => "pre-snap",
+            AttemptPhase::PlayCall => "play-call",
+            AttemptPhase::Shifting { .. } => "shifting",
             AttemptPhase::Developing => "developing",
             AttemptPhase::DecisionWindow { .. } => "decision",
             AttemptPhase::PassInFlight { .. } => "in-flight",

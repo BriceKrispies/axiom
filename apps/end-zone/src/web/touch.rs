@@ -6,12 +6,12 @@
 //! does not have. Without it a touch carrier simply runs on his own AI intent,
 //! which is what he does whenever the stick is centred anyway.
 //!
-//! What touch needs instead is the four answers. Rather than duplicating the
-//! decision prompt as a second row of buttons, the prompt **is** the buttons:
-//! a single delegated pointer listener on the HUD root reads `data-read` off
-//! whichever chip was tapped. One piece of UI, always in the place the player is
-//! already looking, and it can never disagree with the keyboard hints because it
-//! is the same DOM.
+//! What touch needs instead is the answers. Rather than duplicating the prompts
+//! as a second row of buttons, the prompts **are** the buttons: a single
+//! delegated pointer listener reads `data-read` off whichever chip was tapped —
+//! a play row on the pre-snap card, a read chip once the ball is live. One piece
+//! of UI, always in the place the player is already looking, and it can never
+//! disagree with the keyboard hints because it is the same DOM.
 //!
 //! Pointer-event driven, so touch, pen, and mouse all work.
 
@@ -27,10 +27,9 @@ use super::mount_div;
 /// Shared touch-control state the DOM listeners write and the frame reads.
 #[derive(Debug, Default)]
 pub struct TouchHeld {
-    /// The read `0..3` currently HELD under a finger, if any. Held rather than
-    /// edge-triggered because a read is a wind-up: pressing starts charging and
-    /// lifting throws.
-    read_held: Option<usize>,
+    /// A read chip `0..3` TAPPED since the last frame, if any. A one-shot edge:
+    /// the pointer-down IS the whole input, exactly like the keyboard's press.
+    read_edge: Option<usize>,
     scramble_edge: bool,
     pause_edge: bool,
 }
@@ -46,9 +45,7 @@ pub struct TouchFrame {
 impl TouchHeld {
     pub fn take(&mut self) -> TouchFrame {
         TouchFrame {
-            // The held read is NOT consumed — it persists until the finger
-            // lifts, which is what makes the wind-up chargeable.
-            read: self.read_held,
+            read: core::mem::take(&mut self.read_edge),
             scramble: core::mem::take(&mut self.scramble_edge),
             pause: core::mem::take(&mut self.pause_edge),
         }
@@ -130,24 +127,15 @@ fn install_decision_taps(touch: &Rc<RefCell<TouchHeld>>) {
         e.prevent_default();
         e.stop_propagation();
         let mut state = held.borrow_mut();
-        state.read_held = read.or(state.read_held);
+        // First tap of the frame wins: two chips hit in one frame is a fumbled
+        // input, and honouring the later one would let a stray thumb overwrite
+        // a deliberate press.
+        state.read_edge = state.read_edge.or(read);
         state.scramble_edge |= scramble;
     });
     let _ =
         window.add_event_listener_with_callback("pointerdown", on_down.as_ref().unchecked_ref());
     on_down.forget();
-
-    // Lifting (or losing) the finger is the RELEASE that throws the ball, so
-    // `pointercancel` is wired as well: a gesture the browser takes away from
-    // us must let the wind-up go rather than leave it stuck charging.
-    let up_held = touch.clone();
-    let on_up = Closure::<dyn FnMut(PointerEvent)>::new(move |_e: PointerEvent| {
-        up_held.borrow_mut().read_held = None;
-    });
-    let _ = window.add_event_listener_with_callback("pointerup", on_up.as_ref().unchecked_ref());
-    let _ =
-        window.add_event_listener_with_callback("pointercancel", on_up.as_ref().unchecked_ref());
-    on_up.forget();
 }
 
 /// Wire the pause button: a pointer-down is one debounced edge.

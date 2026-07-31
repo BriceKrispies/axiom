@@ -68,19 +68,13 @@ impl SimState {
         // (see `flight::lead_point`), then keep the aim inbounds so leading a
         // receiver down the sideline never throws the ball away.
         let receiver = &self.players[throw_to.index()];
-        // A negative power means "you decide": a programmatic throw (the
-        // autopilot, the harness, the cone-aimed ambient pass) is always on the
-        // money. Only a human wind-up names a power, and only a human can
-        // therefore throw in front of or behind the receiver.
-        let power = match self.throw_power < 0.0 {
-            true => 0.5,
-            false => self.throw_power,
-        };
+        // Every throw is on the money. The game asks WHICH receiver and WHEN;
+        // it never asks how hard, so the solver puts the ball where the receiver
+        // will be and the only way to be wrong is to have read the field wrong.
         let (aim, velocity) = super::flight::aim_and_velocity(
             release,
             receiver.pos,
             receiver.vel,
-            power,
             self.tuning.gravity,
             &self.tuning,
         );
@@ -107,8 +101,6 @@ impl SimState {
         self.players[carrier.index()].facing = velocity.x.atan2(velocity.z);
         self.throw_target = None;
         self.declared_target = None;
-        self.charge_target = None;
-        self.charge_ticks = 0;
         self.ball.state = BallState::Airborne { flight };
         self.ball.pos = release;
         self.ball.vel = velocity;

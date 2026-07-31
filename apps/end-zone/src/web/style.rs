@@ -114,6 +114,39 @@ pub const MENU_CSS: &str = r#"
 .ez-hud-heat{font-weight:700;font-size:16px;letter-spacing:.16em;
   color:var(--ez-chrome);text-shadow:0 2px 3px #000;}
 
+/* --- pre-snap play card -------------------------------------------------- */
+/* The one blocking decision in an attempt: nothing is running and nothing will
+   happen until a play is called, so this deliberately takes the screen — a
+   scrim over the field and a centred sheet. It carries NO timer, because there
+   is nothing to time; a bar standing permanently full would read as broken.
+   The keys keep their read colours so `2` is the same colour here as it is on
+   the receiver it will throw to once the ball is live. */
+.ez-callsheet{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:18px;
+  background:radial-gradient(ellipse at center,rgba(4,7,11,.62),rgba(4,7,11,.86));}
+.ez-callsheet-head{font-weight:900;font-size:24px;letter-spacing:.34em;
+  color:var(--ez-chrome);text-shadow:0 2px 4px #000;}
+.ez-plays{display:flex;flex-direction:column;gap:12px;min-width:340px;}
+/* Each row is a touch target as well as a keyboard hint (see web/touch.rs). */
+.ez-play{pointer-events:auto;cursor:pointer;touch-action:manipulation;
+  user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;
+  display:flex;align-items:center;gap:16px;padding:12px 20px;border-radius:10px;
+  background:linear-gradient(180deg,rgba(18,24,33,.96),rgba(9,13,19,.96));
+  border:2px solid rgba(255,255,255,.12);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.14),0 6px 18px rgba(0,0,0,.6);
+  transition:transform .06s ease,background .1s ease,border-color .1s ease;}
+.ez-play:active{transform:scale(.97);border-color:rgba(255,255,255,.55);}
+.ez-play b{font-weight:900;font-size:30px;line-height:1;min-width:26px;text-align:center;}
+.ez-play-text{display:flex;flex-direction:column;gap:3px;align-items:flex-start;}
+.ez-play-text em{font-style:normal;font-weight:900;font-size:17px;letter-spacing:.2em;
+  color:var(--ez-chrome);}
+.ez-play-text span{font-weight:700;font-size:12px;letter-spacing:.14em;color:var(--ez-text);}
+
+@media (pointer:coarse){
+  .ez-plays{min-width:0;width:min(92%,420px);}
+  .ez-play{padding:16px 18px;}
+}
+
 /* --- decision window ----------------------------------------------------- */
 /* The reads are colour-coded to their on-field rings (cyan/amber/magenta) so
    the key maps to a receiver at a glance. Nothing here reports how OPEN a read
@@ -151,11 +184,6 @@ pub const MENU_CSS: &str = r#"
 .ez-read:active{transform:scale(.94);background:rgba(255,255,255,.16);
   border-color:rgba(255,255,255,.5);}
 .ez-read{position:relative;overflow:hidden;}
-/* The wind-up meter: fills from the bottom of the chip being held. */
-.ez-fill{position:absolute;left:0;right:0;bottom:0;display:block;
-  background:linear-gradient(180deg,rgba(255,255,255,.34),rgba(255,255,255,.12));
-  pointer-events:none;transition:height .05s linear;}
-.ez-read.ez-charging{border-color:rgba(255,255,255,.75);transform:scale(1.04);}
 .ez-read b,.ez-read span{position:relative;z-index:1;}
 .ez-read b{font-weight:900;font-size:26px;line-height:1;}
 .ez-read span{font-weight:700;font-size:12px;letter-spacing:.16em;color:var(--ez-text);}

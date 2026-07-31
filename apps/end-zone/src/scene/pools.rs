@@ -11,7 +11,7 @@ use crate::field::{paint_pool_capacity, PaintCategory, PALETTE};
 use crate::presentation::chalk::{ChalkMaterial, CHALK_LINE_POOL, CHALK_PRIMARY_POOL};
 use crate::presentation::particles::EffectMaterial;
 use crate::presentation::receiver_ring::{
-    RingKind, ELIGIBLE_RING_POOL, PREVIEW_POOL, READ_RING_POOL, RECEIVER_RING_POOL,
+    RingKind, ELIGIBLE_RING_POOL, READ_RING_POOL, RECEIVER_RING_POOL,
     TARGET_RING_POOL,
 };
 
@@ -106,16 +106,12 @@ pub(super) fn receiver_rings(app: &mut RunningApp, cube: Handle<Mesh>) -> Vec<(E
     let read_one = app.add_material(Material::lit(color3([0.18, 0.86, 0.98])));
     let read_two = app.add_material(Material::lit(color3([0.99, 0.70, 0.12])));
     let read_three = app.add_material(Material::lit(color3([0.94, 0.24, 0.86])));
-    // The wind-up preview is plain white: it is information about the BALL, not
-    // about a read, so it must not read as a fourth coloured target.
-    let preview = app.add_material(Material::lit(color3([0.97, 0.98, 0.97])));
     let plan = [
         (RingKind::Target, TARGET_RING_POOL, target),
         (RingKind::Eligible, ELIGIBLE_RING_POOL, eligible),
         (RingKind::ReadOne, READ_RING_POOL, read_one),
         (RingKind::ReadTwo, READ_RING_POOL, read_two),
         (RingKind::ReadThree, READ_RING_POOL, read_three),
-        (RingKind::Preview, PREVIEW_POOL, preview),
     ];
     fill(app, cube, &plan, RECEIVER_RING_POOL)
 }

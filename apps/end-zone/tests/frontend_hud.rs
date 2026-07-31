@@ -9,12 +9,18 @@ use axiom_end_zone::presentation::HudView;
 use axiom_end_zone::showcase::ShowcaseRun;
 
 /// Step the run until `want` holds of the attempt view, or give up.
+///
+/// It calls a play every tick it is offered one. The attempt loop blocks at the
+/// line until the player calls something, so a HUD test that wants to see a
+/// LIVE play has to be that player — otherwise it would sit on the play card
+/// until the limit ran out.
 fn run_until(
     run: &mut ShowcaseRun,
     limit: usize,
     want: impl Fn(&AttemptStep) -> bool,
 ) -> Option<AttemptStep> {
     for _ in 0..limit {
+        run.select_concept(0);
         run.step(&[]);
         if let Some(step) = run.attempt() {
             if want(&step) {
@@ -41,13 +47,45 @@ fn a_fresh_session_reads_attempt_one_with_an_empty_ledger() {
     );
     assert_eq!(hud.attempt, "ATTEMPT 001");
     assert_eq!(hud.session, "AVG 0.0   BEST 0   INT 0");
-    // Pre-snap the prompt is the PLAY PICKER, not a decision window: the same
-    // three chips, naming concepts instead of reads.
-    let picker = hud.decision.expect("the play picker is up at the line");
-    assert_eq!(picker.headline, "CALL IT");
-    assert_eq!(picker.reads.len(), 3, "three concepts to choose between");
-    assert!(!picker.urgent, "the line is not a timed decision");
+    // At the line the HUD shows the PLAY CARD — a separate view model from the
+    // decision prompt, because it is a blocking decision with no clock.
+    let card = hud.play_call.expect("the play card is up at the line");
+    assert_eq!(card.headline, "CALL THE PLAY");
+    assert_eq!(card.plays.len(), 3, "three plays to choose between");
+    let keys: Vec<&str> = card.plays.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, ["1", "2", "3"], "plays are keyed like the reads");
+    assert_eq!(card.plays[0].name, "TRIPLE READ");
+    assert!(
+        card.plays[0].routes.contains("SLANT"),
+        "a play is described by the routes it runs, got {:?}",
+        card.plays[0].routes
+    );
+    assert!(
+        hud.decision.is_none(),
+        "the read prompt belongs to a live ball, not to the line"
+    );
+    assert_eq!(hud.state, "CALL IT");
     assert!(hud.result.is_none(), "nothing has resolved yet");
+}
+
+#[test]
+fn the_play_card_carries_no_clock_and_no_standing_selection() {
+    // The card is the one decision nothing can run out on, and nothing is
+    // pre-chosen: a highlight would claim a play is already in when the whole
+    // point is that none is.
+    let mut run = ShowcaseRun::new_run(&RunConfig::new(0x00D_0009));
+    for _ in 0..300 {
+        run.step(&[]);
+    }
+    let hud = hud_of(&run);
+    let card = hud.play_call.expect("the card is still up five seconds later");
+    assert_eq!(card.plays.len(), 3);
+    // Exhaustive destructuring pins the shape: no `remaining`, no `urgent`, no
+    // `selected` may appear here without this test being rewritten on purpose.
+    for play in &card.plays {
+        let axiom_end_zone::presentation::PlayOption { key, name, routes } = play;
+        assert!(!key.is_empty() && !name.is_empty() && !routes.is_empty());
+    }
 }
 
 #[test]
@@ -81,18 +119,17 @@ fn the_prompt_never_reports_how_open_a_read_is() {
         attempt,
         session,
         state,
+        play_call,
         decision,
         result,
     } = hud_of(&run);
     assert!(!attempt.is_empty() && !session.is_empty() && !state.is_empty());
     assert!(result.is_none());
+    assert!(play_call.is_none(), "the ball is live; the card is gone");
     let prompt = decision.expect("the window prompts");
     for read in &prompt.reads {
-        let axiom_end_zone::presentation::ReadPrompt { key, name, charge } = read;
+        let axiom_end_zone::presentation::ReadPrompt { key, name } = read;
         assert!(!key.is_empty() && !name.is_empty());
-        // The wind-up meter is power, not openness — it says nothing about
-        // whether the read is a good one.
-        assert!((0.0..=1.0).contains(charge));
     }
 }
 

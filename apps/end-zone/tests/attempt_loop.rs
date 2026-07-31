@@ -8,7 +8,7 @@
 
 use axiom_end_zone::attempt::{
     AttemptOutcome, AttemptPhase, PlayerChoice, WindowTrigger, DECISION_TIME_SCALE, MAX_WINDOWS,
-    SHIFT_TICKS,
+    SHIFT_STALL_TICKS,
 };
 use axiom_end_zone::launch::RunConfig;
 use axiom_end_zone::showcase::ShowcaseRun;
@@ -33,6 +33,17 @@ fn until(
     None
 }
 
+/// Call `concept` and run to the snap.
+///
+/// The preamble to every live-play test: an attempt no longer starts on its own
+/// — it blocks at the line until a play is called — so anything that wants a
+/// live ball has to stand in for the player first.
+fn snap(run: &mut ShowcaseRun, concept: usize) {
+    assert!(run.select_concept(concept), "the play card is up");
+    until(run, 400, |r| r.sim.phase == PlayPhase::Live)
+        .expect("the offense shifts into the call and snaps");
+}
+
 fn phase(run: &ShowcaseRun) -> Option<AttemptPhase> {
     run.attempt().map(|s| s.phase)
 }
@@ -40,28 +51,60 @@ fn phase(run: &ShowcaseRun) -> Option<AttemptPhase> {
 // --- state machine ------------------------------------------------------------
 
 #[test]
-fn an_attempt_begins_pre_snap_and_snaps_itself() {
+fn an_attempt_waits_at_the_line_until_a_play_is_called() {
+    // The load-bearing guarantee of the pre-snap: nothing happens until the
+    // player calls something. No timer runs it out, so an attempt can never
+    // start on a play nobody chose.
     let mut r = run(0xA77E_0001);
     assert!(
-        matches!(phase(&r), Some(AttemptPhase::PreSnap { .. })),
-        "the loop opens with the offense set, got {:?}",
+        matches!(phase(&r), Some(AttemptPhase::PlayCall)),
+        "the loop opens on the play card, got {:?}",
         phase(&r)
     );
     assert_eq!(r.sim.phase, PlayPhase::PreSnap);
-    let ticks = until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live)
-        .expect("the ball snaps without any input");
-    assert!(
-        (150..=210).contains(&ticks),
-        "the automatic snap lands after the three-second pre-snap beat, \
-         long enough to read the picker and shift, took {ticks} ticks"
-    );
+    for _ in 0..1200 {
+        r.step(&[]);
+        assert!(
+            matches!(phase(&r), Some(AttemptPhase::PlayCall)),
+            "twenty seconds of silence must not snap the ball, got {:?}",
+            phase(&r)
+        );
+    }
+    // And a call releases it.
+    snap(&mut r, 0);
     assert!(matches!(phase(&r), Some(AttemptPhase::Developing)));
+}
+
+#[test]
+fn a_called_play_shifts_first_and_snaps_only_once_the_offense_is_set() {
+    // The order is the feature: call, shift, snap. The ball must not leave the
+    // snapper's hands while a receiver is still walking to his spot.
+    let mut r = run(0xA77E_0101);
+    // Call a formation that IS a change, so there is a real shift to watch.
+    assert!(r.select_concept(2), "the play card is up");
+    r.step(&[]);
+    assert!(
+        matches!(phase(&r), Some(AttemptPhase::Shifting { .. })),
+        "a call puts the offense into its shift, got {:?}",
+        phase(&r)
+    );
+    let shifting = until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live)
+        .expect("the shift ends in a snap");
+    assert!(
+        shifting > 0,
+        "the offense walks into the new alignment before the ball goes"
+    );
+    assert!(
+        (shifting as u64) < SHIFT_STALL_TICKS,
+        "the snap came from the offense being SET, not from the {SHIFT_STALL_TICKS}-tick \
+         stall guard firing — took {shifting} ticks"
+    );
 }
 
 #[test]
 fn the_play_develops_before_any_window_opens() {
     let mut r = run(0xA77E_0002);
-    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    snap(&mut r, 0);
     let developing = until(&mut r, 400, |r| {
         matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
     })
@@ -78,6 +121,7 @@ fn a_decision_window_always_opens_within_the_deadline() {
     // player is asked at least once per attempt.
     for seed in 0..8u64 {
         let mut r = run(0xA77E_1000 + seed);
+        snap(&mut r, 0);
         let found = until(&mut r, 500, |r| {
             matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
         });
@@ -89,6 +133,7 @@ fn a_decision_window_always_opens_within_the_deadline() {
 fn the_game_never_dilates_time() {
     let mut r = run(0xA77E_0003);
     assert_eq!(r.time_scale(), 1.0, "pre-snap runs at full speed");
+    snap(&mut r, 0);
     until(&mut r, 500, |r| {
         matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
     })
@@ -114,6 +159,7 @@ fn the_game_never_dilates_time() {
 #[test]
 fn a_window_the_player_declines_closes_and_the_play_runs_on() {
     let mut r = run(0xA77E_0004);
+    snap(&mut r, 0);
     until(&mut r, 500, |r| {
         matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
     })
@@ -135,6 +181,7 @@ fn a_window_the_player_declines_closes_and_the_play_runs_on() {
 #[test]
 fn later_windows_are_shorter_than_the_first() {
     let mut r = run(0xA77E_0005);
+    snap(&mut r, 0);
     let mut spans = Vec::new();
     for _ in 0..600 {
         if let Some(AttemptPhase::DecisionWindow {
@@ -163,6 +210,7 @@ fn later_windows_are_shorter_than_the_first() {
 #[test]
 fn the_loop_stops_asking_after_its_window_budget() {
     let mut r = run(0xA77E_0006);
+    snap(&mut r, 0);
     let mut windows = 0u32;
     let mut open = false;
     for _ in 0..900 {
@@ -194,7 +242,7 @@ fn a_press_before_the_snap_is_rejected_but_the_reads_are_live_after_it() {
         !r.choose(PlayerChoice::Throw(2)),
         "a pre-snap press is stale input"
     );
-    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    snap(&mut r, 0);
     until(&mut r, 60, |r| {
         matches!(phase(r), Some(AttemptPhase::Developing))
     })
@@ -226,7 +274,7 @@ fn a_press_before_the_snap_is_rejected_but_the_reads_are_live_after_it() {
 #[test]
 fn the_window_is_the_prompt_not_the_permission() {
     let mut r = run(0xA77E_0107);
-    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    snap(&mut r, 0);
     // Developing: choosable, full speed.
     assert!(phase(&r).map(|p| p.accepts_choice()).unwrap_or(false));
     assert_eq!(r.time_scale(), 1.0);
@@ -244,6 +292,7 @@ fn the_window_is_the_prompt_not_the_permission() {
 fn each_of_the_three_reads_can_be_selected_and_throws_to_that_receiver() {
     for read in 0..3usize {
         let mut r = run(0xA77E_2000 + read as u64);
+        snap(&mut r, 0);
         let step = until(&mut r, 500, |r| {
             matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
         })
@@ -276,6 +325,7 @@ fn each_of_the_three_reads_can_be_selected_and_throws_to_that_receiver() {
 #[test]
 fn the_throw_leads_the_receiver_rather_than_aiming_at_his_feet() {
     let mut r = run(0xA77E_0008);
+    snap(&mut r, 0);
     let step = until(&mut r, 500, |r| {
         matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
     })
@@ -304,8 +354,132 @@ fn the_throw_leads_the_receiver_rather_than_aiming_at_his_feet() {
 }
 
 #[test]
+fn the_throw_solve_puts_the_ball_on_a_running_receiver() {
+    // The unit-level invariant behind "the pass leads the target": fly the
+    // velocity the solver returns, and it must MEET a receiver running at
+    // constant velocity. That is what makes this stronger than checking the aim
+    // point sits ahead of him — an aim point can be ahead and still be wrong by
+    // the amount the two halves of the solve disagree.
+    //
+    // It pins two bugs that both looked fine at the aim point and only showed
+    // up once the ball flew:
+    //
+    // 1. The intercept was solved against `pass_speed` while the ball was
+    //    launched at whatever speed just barely reached the aim point at a
+    //    fixed 12° angle (~19 yd/s at 15 yd). The pass was aimed for a 0.44 s
+    //    flight and thrown with a 0.77 s one, so it arrived behind him.
+    // 2. The launch angle came from the LEVEL-ground range equation, but the
+    //    ball leaves the hand at 1.95 yd and is caught at 1.45 yd. Half a yard
+    //    of drop over a 20 yd throw put the ball ~3 yd long.
+    let tuning = axiom_end_zone::data::BehaviorTuning::default();
+    let release = axiom::prelude::Vec3::new(0.0, 1.95, 0.0);
+    let catch_height = 1.45f32;
+    // Across the whole route tree: a short out, a dig, a deep post — each to a
+    // receiver running flat out, across and away from the passer.
+    for (distance, vel) in [
+        (6.0f32, axiom::prelude::Vec3::new(7.0, 0.0, 1.0)),
+        (14.0, axiom::prelude::Vec3::new(-5.0, 0.0, 6.0)),
+        (22.0, axiom::prelude::Vec3::new(2.0, 0.0, 8.5)),
+        (30.0, axiom::prelude::Vec3::new(0.0, 0.0, 9.0)),
+    ] {
+        let start = axiom::prelude::Vec3::new(0.0, 0.0, distance);
+        let (aim, velocity) = axiom_end_zone::football::flight::aim_and_velocity(
+            release,
+            start,
+            vel,
+            tuning.gravity,
+            &tuning,
+        );
+        // Fly it to the moment it DESCENDS THROUGH catch height — the instant
+        // the receiver could take it — and measure the gap to him right then.
+        //
+        // Measuring the closest approach over the whole arc instead would be
+        // meaningless: a ball thrown three yards long still passes directly
+        // over the receiver's head on its way, so the horizontal gap goes to
+        // zero at some point on every overthrow ever made. Arrival is a moment,
+        // not a minimum.
+        let arrival = (1..2400)
+            .map(|step| step as f32 / 600.0)
+            .find(|t| {
+                let ball = axiom_end_zone::football::predict_position(
+                    release,
+                    velocity,
+                    tuning.gravity,
+                    *t,
+                );
+                ball.y < catch_height && velocity.y - tuning.gravity * t < 0.0
+            })
+            .unwrap_or_else(|| unreachable!("a thrown ball comes down"));
+        let ball = axiom_end_zone::football::predict_position(
+            release,
+            velocity,
+            tuning.gravity,
+            arrival,
+        );
+        let man = start.add(vel.mul_scalar(arrival));
+        let gap = ((ball.x - man.x).powi(2) + (ball.z - man.z).powi(2)).sqrt();
+        assert!(
+            gap < 0.5,
+            "a {distance:.0} yd throw to a receiver running {:.1} yd/s arrived \
+             {gap:.2} yd away from him — the lead and the launch disagree",
+            vel.length()
+        );
+    }
+}
+
+#[test]
+fn the_ball_flies_the_trajectory_the_game_predicts() {
+    // Everything that reasons about a pass — the throw solve, the camera, the
+    // defense's perceived landing point — reads the closed-form VACUUM model in
+    // `football::flight`, while the ball itself is integrated by the physics
+    // facade. If those two disagree the ball quietly flies a different path
+    // from the one every predictor computed.
+    //
+    // They did: world linear damping bled ~15% of the ball's speed over a
+    // one-second flight, landing it about three yards short of its own
+    // predicted landing. That reads as a weak arm dropping passes behind the
+    // receiver, and no amount of fixing the aim can correct it.
+    let mut r = run(0xA77E_6001);
+    snap(&mut r, 0);
+    until(&mut r, 500, |r| {
+        matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
+    })
+    .expect("a window opens");
+    assert!(r.choose(PlayerChoice::Throw(2)));
+    until(&mut r, 200, |r| r.sim.ball.is_airborne()).expect("the pass went up");
+    let (release, velocity, release_tick) = match r.sim.ball.state {
+        axiom_end_zone::football::BallState::Airborne { flight } => {
+            (flight.release, flight.velocity, flight.release_tick)
+        }
+        _ => unreachable!("checked airborne"),
+    };
+    // Fly it for half a second and compare the integrated ball with the model.
+    let mut worst = 0.0f32;
+    for _ in 0..30 {
+        r.step(&[]);
+        if !r.sim.ball.is_airborne() {
+            break;
+        }
+        let t = (r.sim.tick - release_tick) as f32 / 60.0;
+        let predicted = axiom_end_zone::football::predict_position(
+            release,
+            velocity,
+            r.sim.tuning.gravity,
+            t,
+        );
+        worst = worst.max(r.sim.ball.pos.distance(predicted));
+    }
+    assert!(
+        worst < 0.25,
+        "the integrated ball drifted {worst:.2} yd from the trajectory the rest \
+         of the game predicts for it"
+    );
+}
+
+#[test]
 fn scrambling_hands_the_quarterback_to_the_player() {
     let mut r = run(0xA77E_0009);
+    snap(&mut r, 0);
     until(&mut r, 500, |r| {
         matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
     })
@@ -333,7 +507,7 @@ fn the_player_never_steers_while_the_play_is_developing() {
     // The premise under test: the simulation owns every player until a decision
     // is made. A stick pushed during the drop-back must be dropped.
     let mut r = run(0xA77E_000A);
-    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    snap(&mut r, 0);
     for _ in 0..40 {
         r.set_user_stick(axiom::prelude::Vec2::new(1.0, 1.0));
         assert_eq!(
@@ -355,9 +529,10 @@ fn holding_the_ball_through_every_window_gets_the_quarterback_sacked() {
     let mut sacks = 0;
     for seed in 0..6u64 {
         let mut r = run(0xA77E_3000 + seed);
+        snap(&mut r, 0);
         let record = until(&mut r, 1500, |r| r.ledger().and_then(|l| l.last).is_some())
             .and_then(|_| r.ledger().and_then(|l| l.last))
-            .expect("the attempt resolves without any input");
+            .expect("the attempt resolves without any further input");
         assert!(record.declined, "no choice was ever made");
         sacks += u32::from(record.outcome == AttemptOutcome::Sacked);
     }
@@ -373,6 +548,9 @@ fn ten_consecutive_attempts_reset_cleanly() {
     let mut seen = 0u32;
     let mut indices = Vec::new();
     for _ in 0..14_000 {
+        // Every attempt blocks on its own call, so the test has to be the
+        // player: ten attempts means ten calls, not one and nine freebies.
+        r.select_concept(0);
         r.step(&[]);
         let Some(record) = r.ledger().and_then(|l| l.last) else {
             continue;
@@ -409,6 +587,7 @@ fn ten_consecutive_attempts_reset_cleanly() {
 #[test]
 fn a_reset_leaves_no_stale_target_marker_or_decision_state() {
     let mut r = run(0xA77E_000C);
+    snap(&mut r, 0);
     // Commit a read, let the attempt resolve, and run into the next one.
     until(&mut r, 500, |r| {
         matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
@@ -420,7 +599,7 @@ fn a_reset_leaves_no_stale_target_marker_or_decision_state() {
     })
     .expect("the attempt resolves");
     until(&mut r, 400, |r| {
-        matches!(phase(r), Some(AttemptPhase::PreSnap { .. })) && r.sim.phase == PlayPhase::PreSnap
+        matches!(phase(r), Some(AttemptPhase::PlayCall)) && r.sim.phase == PlayPhase::PreSnap
     })
     .expect("the next attempt lines up");
 
@@ -447,6 +626,7 @@ fn a_reset_leaves_no_stale_target_marker_or_decision_state() {
 #[test]
 fn a_window_headline_says_why_it_opened() {
     let mut r = run(0xA77E_000D);
+    snap(&mut r, 0);
     until(&mut r, 500, |r| {
         matches!(phase(r), Some(AttemptPhase::DecisionWindow { .. }))
     })
@@ -467,8 +647,7 @@ fn a_window_headline_says_why_it_opened() {
 /// comparison is about ROUTE SHAPE rather than float noise.
 fn route_shape(seed: u64, concept: usize, ticks: usize) -> Vec<(i32, i32)> {
     let mut r = run(seed);
-    assert!(r.select_concept(concept), "the picker is open pre-snap");
-    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    snap(&mut r, concept);
     for _ in 0..ticks {
         r.step(&[]);
     }
@@ -496,22 +675,22 @@ fn picking_a_concept_actually_changes_the_routes_the_receivers_run() {
 
 #[test]
 fn calling_a_play_is_the_snap_count() {
-    // Pressing a play starts the snap: the ball goes as soon as the offense has
-    // shifted into it, and never later than the shift budget. The three-second
-    // hold is the fallback for calling NOTHING — a player who calls is never
-    // left waiting out a clock they cannot influence.
+    // The ball goes as soon as the offense has shifted into the call, so a call
+    // is answered by the field rather than by a clock: the further the offense
+    // has to move, the longer the snap takes, and re-calling what is already on
+    // the field snaps at once.
     let snap_after = |concept: usize| {
         let mut r = run(0xA77E_9002);
         r.step(&[]);
-        assert!(r.select_concept(concept), "the picker is open pre-snap");
+        assert!(r.select_concept(concept), "the play card is up");
         until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("the ball snaps")
     };
     let calls: Vec<usize> = (0..3).map(snap_after).collect();
     calls.iter().enumerate().for_each(|(concept, &ticks)| {
         assert!(
-            (ticks as u64) <= SHIFT_TICKS + 2,
-            "concept {concept} answered its call in {ticks} ticks, over the \
-             {SHIFT_TICKS}-tick shift budget"
+            (ticks as u64) < SHIFT_STALL_TICKS,
+            "concept {concept} took {ticks} ticks — the snap came from the stall \
+             guard, not from the offense getting set"
         );
     });
     // Re-calling the formation already on the field has nothing to shift, so it
@@ -530,11 +709,12 @@ fn calling_a_play_is_the_snap_count() {
 }
 
 #[test]
-fn the_world_holds_still_before_the_snap() {
-    // The three seconds before the snap are the player's to call a play in, so
-    // they have to READ as paused: nothing drifts, nothing settles, nobody
-    // fidgets. Ambient pre-snap motion made the beat feel like a play already
-    // underway, which is exactly the pressure it exists to remove.
+fn the_world_holds_still_while_the_play_is_being_called() {
+    // The play card is a held moment, and it has to READ as one: nothing
+    // drifts, nothing settles, nobody fidgets. Ambient pre-snap motion made the
+    // beat feel like a play already underway, which is exactly the pressure it
+    // exists to remove — and it holds indefinitely, because the beat now ends
+    // on the player rather than on a clock.
     let mut r = run(0xA77E_9001);
     for _ in 0..10 {
         r.step(&[]);
@@ -542,15 +722,16 @@ fn the_world_holds_still_before_the_snap() {
     assert_eq!(r.sim.phase, PlayPhase::PreSnap);
     let ball = r.sim.ball.pos;
     let bodies: Vec<_> = r.sim.players.iter().map(|p| (p.pos, p.anim_ticks)).collect();
-    for _ in 0..90 {
+    for _ in 0..600 {
         r.step(&[]);
         assert_eq!(r.sim.phase, PlayPhase::PreSnap, "still before the snap");
     }
     assert_eq!(r.sim.ball.pos, ball, "the ball does not move");
     let after: Vec<_> = r.sim.players.iter().map(|p| (p.pos, p.anim_ticks)).collect();
     assert_eq!(after, bodies, "nobody moves and nobody animates");
-    // And the hold ends: the snap still comes on its own.
-    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("the hold releases");
+    // Only a call ends it — and then the offense DOES move.
+    assert!(r.select_concept(2), "the play card is still up");
+    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("the call releases the hold");
 }
 
 #[test]
@@ -589,7 +770,7 @@ fn every_concept_keeps_the_read_order_contract() {
     for concept in 0..3usize {
         let mut r = run(0xC0A11_100 + concept as u64);
         assert!(r.select_concept(concept));
-        until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+        snap(&mut r, 0);
         for _ in 0..120 {
             r.step(&[]);
         }
@@ -607,8 +788,7 @@ fn every_concept_keeps_the_read_order_contract() {
 #[test]
 fn a_concept_pick_is_rejected_once_the_ball_is_live() {
     let mut r = run(0xC0A11_200);
-    assert!(r.select_concept(2), "pre-snap the picker is open");
-    until(&mut r, 400, |r| r.sim.phase == PlayPhase::Live).expect("snap");
+    snap(&mut r, 2);
     assert!(
         !r.select_concept(0),
         "once the ball is live the number keys are reads, not plays"
@@ -621,7 +801,11 @@ fn a_concept_pick_is_rejected_once_the_ball_is_live() {
 }
 
 #[test]
-fn the_chosen_concept_carries_into_the_next_attempt() {
+fn the_next_attempt_lines_up_in_the_last_call_but_still_waits_for_a_new_one() {
+    // Two halves of one rule. The offense STANDS in the concept it last ran, so
+    // it has somewhere to be while the next call is made — but that standing
+    // formation is not a call, and the attempt does not start until the player
+    // makes one. Carrying the alignment must never carry the decision.
     let mut r = run(0xC0A11_300);
     assert!(r.select_concept(1));
     until(&mut r, 2000, |r| {
@@ -629,14 +813,23 @@ fn the_chosen_concept_carries_into_the_next_attempt() {
     })
     .expect("an attempt resolves");
     until(&mut r, 400, |r| {
-        matches!(phase(r), Some(AttemptPhase::PreSnap { .. }))
+        matches!(phase(r), Some(AttemptPhase::PlayCall))
     })
     .expect("the next attempt lines up");
     assert_eq!(
         r.attempt().map(|s| s.concept),
         Some(1),
-        "a liked concept is kept rather than re-picked every eight seconds"
+        "the offense stands in the concept it last ran"
     );
+    // The previous attempt's call must not leak through as this one's.
+    for _ in 0..400 {
+        r.step(&[]);
+        assert!(
+            matches!(phase(&r), Some(AttemptPhase::PlayCall)),
+            "the standing formation is not a call — the ball must not snap, got {:?}",
+            phase(&r)
+        );
+    }
 }
 
 // --- field position -----------------------------------------------------------
@@ -676,7 +869,7 @@ fn a_completed_pass_advances_the_line_of_scrimmage() {
 
     // After a gain, the NEXT attempt must line up further downfield.
     until(&mut r, 600, |r| {
-        matches!(phase(r), Some(AttemptPhase::PreSnap { .. }))
+        matches!(phase(r), Some(AttemptPhase::PlayCall))
     })
     .expect("the next attempt lines up");
     let los = r.sim.frame.line_of_scrimmage_z;

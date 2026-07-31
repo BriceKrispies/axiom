@@ -2,17 +2,16 @@
 //! one rendered frame of raw input becomes typed commands plus a movement
 //! stick. Documented for players in `CONTROLS.md`.
 //!
-//! The number row belongs to **gameplay**: during a decision window `1`/`2`/`3`
-//! ARE the three reads, and `Space` is the scramble. Camera diagnostics were
-//! moved onto F2–F6 for exactly that reason — nothing is more confusing than a
-//! read key that also moves the camera.
+//! The number row belongs to **gameplay** and carries one grammar through the
+//! whole attempt: `1`/`2`/`3` call the three plays before the snap and throw to
+//! the three reads after it, while `Space` is the scramble. Camera diagnostics
+//! were moved onto F2–F6 for exactly that reason — nothing is more confusing
+//! than a read key that also moves the camera.
 //!
 //! Presses are *latched* rather than consumed immediately. Input is sampled
-//! every rendered frame, but simulation ticks are spent according to the run's
-//! time scale, so during the decision window's 0.16× dilation five or six
-//! frames share one tick. A decision made on any of them must survive to that
-//! tick — the latch is what makes the slow-motion window feel responsive
-//! instead of eating inputs.
+//! every rendered frame but consumed once per simulation tick, and a frame is
+//! not a tick: a press landing on a frame that shares its tick with others must
+//! still survive to it. The latch is what stops those inputs being eaten.
 
 use axiom::prelude::Vec2;
 use axiom_input::{ActionId, DeviceFrame, InputState, KeyToken};
@@ -31,14 +30,11 @@ pub enum DiagnosticCommand {
     /// a decision window — commits the highlighted read (the one-button twin of
     /// the numbered keys, for touch).
     PrimaryAction,
-    /// `1`/`2`/`3` tapped: throw to that read at full power (the harness and
-    /// the autopilot use this; a human's hold/release goes through the pair
-    /// below).
-    ThrowRead(usize),
-    /// `1`/`2`/`3` HELD: wind the throw up on that read, one tick per issue.
-    ChargeRead(usize),
-    /// The held read was let go: throw it at whatever charge was reached.
-    ReleaseRead,
+    /// `1`/`2`/`3` pressed. ONE command for the whole number row, because the
+    /// row means one thing at a time: before the snap it calls that play, once
+    /// the ball is live it throws to that read. A press, never a hold — there
+    /// is nothing to hold *for*, since every pass is on the money.
+    SelectRead(usize),
     /// The scramble input: take the quarterback out of the pocket.
     Scramble,
     /// F2–F6: force a camera mode; F6 returns to automatic.
@@ -85,8 +81,8 @@ pub struct TouchInput {
     pub stick_y: f32,
     pub primary: bool,
     pub reset: bool,
-    /// A decision read currently HELD down, `0..3` (the touch chip under the
-    /// finger). This is a wind-up, not a tap.
+    /// A read chip TAPPED this frame, `0..3` — a one-shot edge, matching the
+    /// keyboard's press.
     pub read: Option<usize>,
     /// The scramble control was tapped.
     pub scramble: bool,
@@ -100,8 +96,6 @@ pub struct GameInput {
     /// engine frame index and the simulation tick.
     sample_n: u64,
     pending: Vec<DiagnosticCommand>,
-    /// The read currently being wound up, so the RELEASE edge can be detected.
-    charging: Option<usize>,
 }
 
 impl Default for GameInput {
@@ -146,7 +140,6 @@ impl GameInput {
             state,
             sample_n: 0,
             pending: Vec::new(),
-            charging: None,
         }
     }
 
@@ -157,27 +150,16 @@ impl GameInput {
         self.state.sample(Tick::new(self.sample_n), &frame);
         self.sample_n += 1;
 
-        // The reads are HELD, not tapped: holding winds the throw up, releasing
-        // lets it go at whatever power was charged. The release edge is what
-        // actually throws, so it has to be detected here — `InputState` reports
-        // held state and press edges, not releases.
+        // The reads are TAPPED. A press is the whole input: it calls the play
+        // before the snap and throws the pass after it, and in neither case is
+        // there anything a longer press could add.
         let reads = [ACTION_READ_ONE, ACTION_READ_TWO, ACTION_READ_THREE];
-        let held = reads
+        let read = reads
             .iter()
-            .position(|action| self.state.is_down(*action))
-            .or_else(|| (touch.read.is_some()).then(|| touch.read.unwrap_or(0).min(2)));
-        match (held, self.charging) {
-            // Still holding (or just started): keep winding up.
-            (Some(read), _) => {
-                self.charging = Some(read);
-                self.latch(DiagnosticCommand::ChargeRead(read));
-            }
-            // Let go of a wind-up: throw it.
-            (None, Some(_)) => {
-                self.charging = None;
-                self.latch(DiagnosticCommand::ReleaseRead);
-            }
-            (None, None) => {}
+            .position(|action| self.state.pressed(*action))
+            .or(touch.read.map(|read| read.min(2)));
+        if let Some(read) = read {
+            self.latch(DiagnosticCommand::SelectRead(read));
         }
 
         let pressed: [(ActionId, DiagnosticCommand); 9] = [
@@ -226,7 +208,6 @@ impl GameInput {
     /// Drop every latched command (a run swap must not inherit a press).
     pub fn clear(&mut self) {
         self.pending.clear();
-        self.charging = None;
     }
 
     /// Queue one command for the next simulation tick (deduplicated, bounded).

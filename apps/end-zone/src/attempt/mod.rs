@@ -7,17 +7,25 @@
 //! minutes.
 //!
 //! ```text
-//! PreSnap ──auto snap──▶ Developing ──trigger──▶ DecisionWindow
-//!                            ▲                        │
-//!                            └──── no choice ─────────┤ (the window closes,
-//!                                                     │  the rush keeps coming)
-//!                       ┌── throw 1|2|3 ──────────────┤
-//!                       │                             └── scramble ──┐
-//!                       ▼                                            ▼
-//!                  PassInFlight ───┐                            Scrambling
-//!                                  ├──▶ Resolving ──▶ Result ──▶ Resetting ──▶ PreSnap
-//!                                  └────────────────────────────────────┘
+//! PlayCall ──call 1|2|3──▶ Shifting ──offense set──▶ Developing ──trigger──▶ DecisionWindow
+//!                                                        ▲                        │
+//!                                                        └──── no choice ─────────┤
+//!                                                                                 │
+//!                                   ┌── throw 1|2|3 ────────────────────────────  ┤
+//!                                   │                             └── scramble ──┐
+//!                                   ▼                                            ▼
+//!                              PassInFlight ───┐                            Scrambling
+//!                                              ├──▶ Resolving ──▶ Result ──▶ Resetting
+//!                                              └──────────────────────┬───────────┘
+//!                                                                     ▼
+//!                                                                  PlayCall
 //! ```
+//!
+//! Both ends of the pre-snap belong to the player. `PlayCall` has **no clock**:
+//! it waits for a play to be called, however long that takes. `Shifting` then
+//! ends on a *fact about the field* — every offensive player standing on his
+//! spot — rather than on a timer, so the snap is always the consequence of the
+//! offense being ready.
 //!
 //! Everything football-specific stays here in the app: what the reads are, when
 //! a window is worth opening, how a choice becomes a throw. The simulation, the
@@ -49,19 +57,16 @@ pub use view::AttemptStep;
 
 // --- attempt timing (all in 60 Hz simulation ticks) ---------------------------
 
-/// How long the offense holds at the line before the ball snaps itself (3 s).
-/// The beat exists to call a play in, so it is long enough to read the picker
-/// and decide — and it is the fallback, not the norm: calling a play snaps the
-/// ball early (see [`SHIFT_TICKS`]).
-pub const SET_TICKS: u64 = 180;
-
-/// The longest a called play waits for its shift before snapping anyway
-/// (~1 s). Calling is the snap count: the ball goes the moment the offense is
-/// set, and this bounds the wait when the new formation is a long walk away, so
-/// a call is always answered promptly rather than inheriting the full hold. A
-/// man still moving at the snap is simply late — which is what happens on a
-/// real field, and is the cost of calling a formation you were far from.
-pub const SHIFT_TICKS: u64 = 60;
+/// The stall guard on the shift, in ticks (~2.5 s).
+///
+/// **Not a deadline.** The ball is meant to snap once the offense is set (see
+/// `setup::offense_is_set`), and in practice always does: the offense sprints
+/// into its new alignment and the longest walk on the field finishes well
+/// inside this. It exists purely so a player wedged against a body — or a
+/// formation change nobody can complete — can never hang an attempt that is now
+/// otherwise unbounded on both ends (the call has no clock either). If this
+/// fires, someone is late, which is exactly what happens on a real field.
+pub const SHIFT_STALL_TICKS: u64 = 150;
 
 /// The earliest a decision window may open after the snap (~1.1 s). Before
 /// this, nothing has developed and there is nothing to read.

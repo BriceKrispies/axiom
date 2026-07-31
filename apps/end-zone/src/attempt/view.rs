@@ -28,12 +28,7 @@ pub struct AttemptStep {
     pub window_left: u64,
     /// The most recently resolved attempt (drives the result card).
     pub last: Option<AttemptRecord>,
-    /// The read whose wind-up is being held, and how far it has charged. The
-    /// wind-up lives in the simulation (it is measured in ticks and it decides
-    /// the throw), so the loop carries it through rather than owning it.
-    pub charging: Option<usize>,
-    pub charge: f32,
-    /// The offensive concept the attempt is set in.
+    /// The offensive concept the attempt is lined up in.
     pub concept: usize,
 }
 
@@ -41,31 +36,18 @@ impl AttemptController {
     /// This tick's presentation view. `None` before the loop has read the field
     /// even once — there is genuinely nothing to draw yet.
     pub fn view(&self, tick: u64) -> Option<AttemptStep> {
-        self.view_charging(tick, None, 0.0)
-    }
-
-    /// The same view, told which read the simulation is winding up on.
-    pub fn view_charging(
-        &self,
-        tick: u64,
-        charging: Option<usize>,
-        charge: f32,
-    ) -> Option<AttemptStep> {
         self.read.map(|read| AttemptStep {
-            charging,
-            charge,
             concept: self.concept,
             phase: self.phase,
             read,
             attempt: self.attempt_index.max(1),
             windows: self.windows,
-            // Ticks left in whichever beat is asking the player something — the
-            // decision window, or the held pre-snap. Both are countdowns the
-            // HUD drains a bar with; a picker whose bar never moved would not
-            // tell the player the hold is finite.
+            // Ticks left in the ONE beat that is genuinely running out. The
+            // pre-snap has no clock on either side of it — the call waits for
+            // the player and the shift ends when the offense is set — so there
+            // is nothing there for a bar to drain.
             window_left: match self.phase {
                 AttemptPhase::DecisionWindow { closes_at, .. } => closes_at.saturating_sub(tick),
-                AttemptPhase::PreSnap { snap_at } => snap_at.saturating_sub(tick),
                 _ => 0,
             },
             last: self.ledger.last,

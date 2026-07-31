@@ -14,7 +14,7 @@ pub mod receiver_ring;
 pub mod snapshot;
 
 pub use chalk::{ChalkDot, ChalkMaterial};
-pub use hud::{DecisionPrompt, HudView, ReadPrompt};
+pub use hud::{DecisionPrompt, HudView, PlayCallCard, PlayOption, ReadPrompt};
 pub use juice::{Effect, EffectKind, JuiceStack};
 pub use locomotion::{LocomotionAnimator, LocomotionSample, PlayerPose};
 pub use particles::{effect_instances, trail_instances, EffectInstance, EffectMaterial};

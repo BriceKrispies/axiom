@@ -37,16 +37,9 @@ pub const ELIGIBLE_RING_POOL: usize = RING_SEGMENTS * (MAX_RINGS - 1);
 /// Pooled cubes for one read: its ring plus up to three numeral cubes.
 pub const READ_RING_POOL: usize = RING_SEGMENTS + READ_COUNT;
 
-/// Segments in the small landing ring under a previewed throw. Fewer than a
-/// receiver ring on purpose: it should read as a spot, not as a target.
-pub const LANDING_SEGMENTS: usize = 14;
-
-/// Pooled cubes for the wind-up preview: the sampled arc plus the landing ring.
-pub const PREVIEW_POOL: usize = super::snapshot::ARC_SAMPLES + LANDING_SEGMENTS;
-
 /// Total pooled cubes the scene must allocate for all target markers.
 pub const RECEIVER_RING_POOL: usize =
-    TARGET_RING_POOL + ELIGIBLE_RING_POOL + READ_RING_POOL * READ_COUNT + PREVIEW_POOL;
+    TARGET_RING_POOL + ELIGIBLE_RING_POOL + READ_RING_POOL * READ_COUNT;
 
 /// Which marker a receiver gets. The three read kinds are separate variants
 /// (rather than one kind plus an index) because each is its own pooled material
@@ -63,8 +56,6 @@ pub enum RingKind {
     ReadTwo,
     /// Decision-window read three (the deep route).
     ReadThree,
-    /// The wind-up preview: the arc through the air and the landing spot.
-    Preview,
 }
 
 impl RingKind {
@@ -132,38 +123,9 @@ fn push_numeral(feet: Vec3, read: usize, kind: RingKind, out: &mut Vec<RingSegme
     }
 }
 
-/// Radius of the landing spot ring, yd — small, so it reads as "the ball comes
-/// down here", not as another receiver marker.
-const LANDING_RADIUS: f32 = 0.62;
-/// Size of one landing-ring / arc cube, yd.
-const PREVIEW_SIZE: f32 = 0.17;
-
-/// The wind-up preview: dotted arc through the air, small ring on the ground.
-fn push_preview(snapshot: &PresentationSnapshot, out: &mut Vec<RingSegment>) {
-    let Some(preview) = snapshot.throw_preview.as_ref() else {
-        return;
-    };
-    for point in preview.arc.iter().take(super::snapshot::ARC_SAMPLES) {
-        out.push(cube(*point, PREVIEW_SIZE, RingKind::Preview));
-    }
-    for segment in 0..LANDING_SEGMENTS {
-        let angle = segment as f32 / LANDING_SEGMENTS as f32 * core::f32::consts::TAU;
-        out.push(cube(
-            Vec3::new(
-                preview.landing.x + angle.cos() * LANDING_RADIUS,
-                RING_HEIGHT,
-                preview.landing.z + angle.sin() * LANDING_RADIUS,
-            ),
-            PREVIEW_SIZE,
-            RingKind::Preview,
-        ));
-    }
-}
-
 /// Build this tick's target markers.
 pub fn ring_instances(snapshot: &PresentationSnapshot, out: &mut Vec<RingSegment>) {
     out.clear();
-    push_preview(snapshot, out);
     // In a real session the numbered reads own the markers for the whole live
     // play — from the line, so the player learns which receiver each key
     // belongs to, right through to the throw. Once the ball is gone the field

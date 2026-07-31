@@ -46,6 +46,9 @@ fn chalk_only_shows_before_the_snap() {
     let mut run = ShowcaseRun::new_run(&RunConfig::new(0xC1A1_0002));
     let (mut saw_presnap, mut saw_snapped) = (false, false);
     for _ in 0..1200 {
+        // The offense holds at the line until a play is called, so the test has
+        // to call one or the run never leaves the pre-snap at all.
+        run.select_concept(0);
         run.step(&[]);
         let snap = capture(&run.sim);
         match snap.phase {

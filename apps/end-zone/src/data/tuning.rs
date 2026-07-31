@@ -52,13 +52,26 @@ pub struct BehaviorTuning {
     pub recovery_ticks: u32,
     /// Ticks the snap takes to reach the quarterback.
     pub snap_ticks: u32,
-    /// Launch speed of a FULLY charged throw, yd/s.  A hard NFL
-    /// throw covers ~30–35 yd/s; the original 22 floated every pass long enough
-    /// for the coverage to close on it.
+    /// The speed a pass actually leaves the hand at, yd/s (~58 mph) — a hard,
+    /// realistic NFL throw.
+    ///
+    /// It is the REAL flight speed, which it did not used to be: the launch
+    /// speed was once derived from the range instead (the minimum that just
+    /// reached the target at a fixed 12° angle, ~19 yd/s at 15 yards), while
+    /// this value only fed the intercept solve. The pass was therefore aimed
+    /// for one flight time and thrown with another, which floated it and landed
+    /// it behind a running receiver. Now `flight::aim_and_velocity` leads and
+    /// launches at the same speed, and the *elevation* is what varies with
+    /// range.
+    ///
+    /// Re-tuned from 34 when that changed: 34 was never exercised as a flight
+    /// speed, and as one it is ~76 mph — beyond any real throw, and it completed
+    /// 100% of passes, which leaves the read with nothing to decide.
     pub pass_speed: f32,
-    /// Launch speed of an UNCHARGED throw, yd/s. This is a floor, not a
-    /// punishment: a tap is a short pass that still gets there, never a dropped
-    /// ball. Charge buys range beyond it.
+    /// Floor on the launch speed, yd/s. Only reached on a very short throw,
+    /// where `min_flight_ticks` would otherwise slow the ball below a real
+    /// pass. A floor, not a punishment: a five-yard route still gets a crisp
+    /// ball, never a lob.
     pub pass_speed_min: f32,
     /// Minimum pass flight time, ticks. This is a floor on the CATCH pipeline —
     /// the ball needs a few ticks airborne to be contested and resolved — and
@@ -150,7 +163,7 @@ impl Default for BehaviorTuning {
             fall_ticks: 26,
             recovery_ticks: 40,
             snap_ticks: 7,
-            pass_speed: 34.0,
+            pass_speed: 26.0,
             pass_speed_min: 17.0,
             min_flight_ticks: 16,
             throw_windup_ticks: 9,

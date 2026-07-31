@@ -177,11 +177,17 @@ fn team_data_changes_behavior_without_changing_ai_code() {
     };
     // The point of this test is the DELTA, not the baseline: one archetype
     // number, flipped (a zero catch volume), turns a completion into an
-    // `Incomplete`. The baseline is `Tackled` — the coordinated pursuit runs
-    // the completion down. (It flips to `BrokeFree` if the pass gets much
-    // harder than the current tuning: a receiver who catches in stride outruns
-    // the coverage, which is the balance edge this play sits on.)
-    assert_eq!(run(false), Some(PlayEndReason::Tackled));
+    // `Incomplete`.
+    //
+    // The baseline moved from `Tackled` to `BrokeFree` when the throw solve was
+    // fixed, which is the flip the previous note here predicted: "it flips to
+    // `BrokeFree` if the pass gets much harder … a receiver who catches in
+    // stride outruns the coverage." The pass did get harder, for three reasons
+    // that were all the same bug — the ball arriving somewhere other than where
+    // it was aimed. It is now caught in stride rather than a beat late and
+    // behind, so the receiver keeps his feet and runs. See
+    // `attempt_loop::the_throw_solve_puts_the_ball_on_a_running_receiver`.
+    assert_eq!(run(false), Some(PlayEndReason::BrokeFree));
     assert_eq!(run(true), Some(PlayEndReason::Incomplete));
 }
 

@@ -18,9 +18,10 @@ data-driven play engine (formation → snap → drop-back → routes → blockin
 pass → catch → pursuit → tackle → ground impact). The **attempt layer**
 (`src/attempt/`) sits on top of it and owns pacing, the decision window, and the
 result. It replaced the previous score-attack drive layer (`src/drive.rs`:
-downs, line to gain, heat, game over) and its pre-snap play-call huddle, both of
-which fought the prototype's premise — a play-selection menu is exactly the kind
-of decision this design is trying to move onto the field.
+downs, line to gain, heat, game over) and its separate pre-snap huddle SCREEN.
+The play call itself came back, but on the field rather than in a menu: the
+offense stands at the line with the card up until you call one, and the call is
+what starts the play.
 
 ## App-local boundaries and the one-way flow
 
@@ -95,11 +96,12 @@ same physics as AI movement, and a zero stick reproduces the scripted
 showcase bit-for-bit (`tests/controls.rs`). The contextual
 `DiagnosticCommand::PrimaryAction` (touch A / `Enter`) snaps pre-snap, throws
 while the quarterback holds the ball, and restarts after the whistle. The
-quarterback NEVER throws on his own — the showcase controller auto-starts and
-auto-snaps, but the throw is exclusively user input (the deterministic replay
-harness injects one scripted throw press at `TRACE_THROW_TICK` to stand in
-for it). The platform edge (`web.rs`) mounts a pointer-event virtual joystick
-and two buttons for mobile; `WASD`/arrows and `Enter` are the keyboard twin.
+quarterback NEVER throws on his own — the AMBIENT showcase controller
+auto-starts and auto-snaps, but in a real session the snap follows the player's
+play call, and the throw is always user input (the deterministic replay harness
+injects one scripted throw press at `TRACE_THROW_TICK` to stand in for it). On
+mobile there is no virtual joystick: the on-screen prompts are themselves the
+buttons, read by one delegated pointer listener (`web/touch.rs`).
 
 ## Deterministic stepping
 
@@ -167,15 +169,24 @@ simulation does not already produce; it owns *pacing*, *when the player is
 asked*, and *how the answer is measured*.
 
 ```text
-PreSnap ──auto snap──▶ Developing ──trigger──▶ DecisionWindow
-                           ▲                        │
-                           └──── no choice ─────────┤ (slow motion closes,
-                      ┌── throw 1|2|3 ──────────────┤  the rush keeps coming)
-                      ▼                             └── scramble ──┐
-                 PassInFlight ──┐                            Scrambling
-                                ├─▶ Resolving ─▶ Result ─▶ Resetting ─▶ PreSnap
-                                └──────────────────────────────────┘
+PlayCall ──call 1|2|3──▶ Shifting ──offense set──▶ Developing ──trigger──▶ DecisionWindow
+                                                       ▲                        │
+                                                       └──── no choice ─────────┤
+                                  ┌── throw 1|2|3 ─────────────────────────────┤
+                                  ▼                             └── scramble ──┐
+                             PassInFlight ──┐                            Scrambling
+                                            ├─▶ Resolving ─▶ Result ─▶ Resetting
+                                            └─────────────────┬──────────────┘
+                                                              ▼
+                                                          PlayCall
 ```
+
+- **The pre-snap is two phases, and both ends belong to the player.**
+  `PlayCall` has **no clock**: it holds until a play is called, so an attempt
+  never runs a play nobody chose. `Shifting` then ends on a *fact about the
+  field* — every offensive player standing on his spot (`setup::offense_is_set`)
+  — so the ball goes because the offense is ready, not because a timer expired.
+  `SHIFT_STALL_TICKS` is a stall guard behind that, never the normal path.
 
 - **`AttemptPhase`** (`phase.rs`) is the whole state — never a pile of booleans,
   and every field a state needs is carried *in* the state (a `DecisionWindow`
@@ -190,9 +201,10 @@ PreSnap ──auto snap──▶ Developing ──trigger──▶ DecisionWindo
   the prototype can never silently fail to ask.
 - **`AttemptController`** (`controller.rs`) steps the machine, issues
   `SimCommand`s, and latches the player's choice (input arrives per render
-  frame; in 0.16× slow motion several frames share one simulation tick). A press
-  outside an open window — or a second press after one is committed — is stale
-  and dropped.
+  frame, and is consumed once per simulation tick). A press outside a live ball
+  — or a second press after one is committed — is stale and dropped. A throw is
+  a single press: the pass is always solved onto the receiver, so the decision
+  is *which receiver and when*, never how hard.
 - **Re-arming.** Declining a window is a real decision, not a dismissal: full
   speed resumes for `WINDOW_COOLDOWN_TICKS`, then a shorter window opens
   (`WINDOW_TICKS` decays by `WINDOW_DECAY_TICKS` each time, floor

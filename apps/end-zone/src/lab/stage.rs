@@ -225,7 +225,6 @@ impl AnimLab {
             overseer_transition_reason: "lab",
             overseer_rejected: (crate::ai::TacticalMode::Base, 0.0),
             attempt: None,
-            throw_preview: None,
             throwable: Vec::new(),
             spot_marker_z: None,
             line_to_gain_z: None,
