@@ -346,6 +346,11 @@ fn lib_exports_are_curated_set() {
         "pub use frame_capability::BackendCapabilityProfile;",
         "pub use frame_capability::CapabilityDegradation;",
         "pub use frame_capability::RenderCapability;",
+        // The frame's atmospheric depth fog — the neutral aerial-perspective
+        // contract both backends read (added with the GPU fog term; the curated
+        // set must name every export, so it is pinned here like its `FrameAmbient`
+        // sibling).
+        "pub use frame_depth_fog::FrameDepthFog;",
         "pub use frame_packet::FrameCamera;",
         "pub use frame_packet::FrameDrawItem;",
         "pub use frame_packet::FrameFeatureSet;",
