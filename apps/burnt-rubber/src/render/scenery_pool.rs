@@ -26,8 +26,20 @@ use super::chunks::{CHUNKS_AHEAD, CHUNKS_BEHIND};
 use super::palette::ScenePalette;
 use super::scenery::{prop_bounds, props_for_chunk, PropInstance, PropKind};
 
-/// The LOD distance bands, in metres. Tier 0 is full detail, tier 1 is reduced,
-/// and anything past the last band is tier 2 — not drawn.
+/// The LOD distance bands, in metres. Tier 0 is full detail; every tier beyond
+/// it is drawn *reduced*.
+///
+/// These bands decide how finely a prop is drawn. They deliberately do **not**
+/// decide *whether* it is drawn — that is [`PropKind::draw_distance`]'s job, and
+/// its alone. The two used to disagree: a tier past the last band was skipped
+/// outright, which quietly capped every kind at 340 m and made the per-kind
+/// distances (a tree at 700 m, a building at 900 m) dead numbers. The visible
+/// symptom was a roadside that stopped dead a third of the way down the road and
+/// a horizon with nothing on it but hills — an avenue of trees has to recede all
+/// the way to the vanishing point or it does not read as an avenue at all.
+///
+/// Two culls that answer the same question in two places will always drift
+/// apart, so there is now one: the frustum test, and each kind's own distance.
 pub const LOD_BANDS: [f32; 2] = [120.0, 340.0];
 
 /// How much a tier-1 prop is shrunk. Reducing the silhouette rather than
@@ -183,10 +195,6 @@ impl SceneryField {
                     continue;
                 }
                 let level = levels.get(index).copied().unwrap_or(0);
-                // Tier 2 is "past the last band": not drawn at all.
-                if level >= LOD_BANDS.len() as u8 {
-                    continue;
-                }
                 let Some(entity) = pool.entities.get(slot) else {
                     // The pool is full. This is a hard ceiling by design, and
                     // the test suite proves the generator never reaches it.
@@ -396,8 +404,12 @@ mod tests {
         );
     }
 
+    /// The one cull: a prop is drawn until *its own kind's* distance runs out.
+    ///
+    /// The distance bands only reduce it. Reinstating a band-based drop here is
+    /// exactly the edit that empties the middle distance again, so it fails.
     #[test]
-    fn distance_bands_reduce_and_then_drop_props() {
+    fn only_a_kinds_own_draw_distance_stops_it_being_drawn() {
         let (mut app, track, mut field) = fixture();
         let t = CourseTuning::DEFAULT;
         field.refresh(&track, &t, (2, 18));
@@ -405,22 +417,32 @@ mod tests {
         let eye = here.position.add(Vec3::new(0.0, 3.0, 0.0));
         field.pose(&mut app, eye, view_proj(eye, track.sample_at(360.0).position));
 
-        // A prop past the last band is not drawn at all.
+        let mut beyond_the_last_band = 0;
         for pool in &field.pools {
             for entity in &pool.entities {
                 if app.get::<Visible>(*entity) != Some(Visible(true)) {
                     continue;
                 }
                 let p = app.get::<Transform>(*entity).unwrap().translation;
+                let range = p.distance(eye);
                 assert!(
-                    p.distance(eye) <= pool.kind.draw_distance() + 60.0,
-                    "a {:?} is drawn at {} m, past its {} m limit",
+                    range <= pool.kind.draw_distance() + 60.0,
+                    "a {:?} is drawn at {range} m, past its {} m limit",
                     pool.kind,
-                    p.distance(eye),
                     pool.kind.draw_distance()
                 );
+                if range > LOD_BANDS[LOD_BANDS.len() - 1] {
+                    beyond_the_last_band += 1;
+                }
             }
         }
+        assert!(
+            beyond_the_last_band > 0,
+            "the middle distance is empty: nothing survives past {} m even though \
+             a tree is worth drawing to {} m",
+            LOD_BANDS[LOD_BANDS.len() - 1],
+            PropKind::Tree.draw_distance()
+        );
         assert!(LOD_FAR_SCALE < 1.0, "the far tier is genuinely reduced");
     }
 
