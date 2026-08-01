@@ -246,3 +246,150 @@ atmosphere = 0
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 2
+
+# ---------------------------------------------------------------------------
+# Iteration 3 — SCORING RECALIBRATION + GATE BACKFILL + THE FIRST TARGET
+# CHANGE. No render changed; no candidate was captured. `decision` is
+# deliberately NOT one of the loop's four values, for the same reason as
+# iterations 1 and 2.
+#
+# THE UNRECORDED PROMOTION, AGAIN. Between iteration 2 and this entry, FIVE
+# source commits changed the render and a sixth promoted the result:
+#   045cbbdf architect     spine: FrameDrawItem gains `emissive`
+#   ac4ad576 modeler       subject_fidelity            (greenhouse chop)
+#   86822146 art-director  scale_and_proportion        (chase rig 15% closer)
+#   02ae8da2 lighting      lighting_and_shadow         (pool light)
+#   9412025c surfacing     material_and_texture_detail (asphalt aggregate grain)
+#   8261e072              champion.png replaced, and NOTHING else
+# 8261e072 is a one-file commit. It moved the champion image without touching
+# scorecard.champion.toml, without appending a single [[iteration]], and
+# without an abstractions/ record for the spine surface 045cbbdf introduced.
+# That is the identical defect iteration 2 wrote up for fc940ada, one pass
+# later, in the same shape, after being told. Twice is a process, not a slip.
+# ---------------------------------------------------------------------------
+[[iteration]]
+iteration = 3
+attacked_axis = "none"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/abstractions/0002.toml",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic audit of the promoted pass-2 champion. This pass MEASURED before it
+scored, and that discipline cut both ways.
+
+1. THE TARGET MOVES. contrast_and_exposure 1 -> 0, on measurement, not
+impression. Over the scene band (rows 430..1672) the reference puts 43.8% of
+its pixels below L=16 with a median of 18; the champion puts 0.0% below L=16
+with a median of 60. Not one pixel of the champion's scene reaches the tone
+that is the reference's single most common value. The same asphalt at the same
+place in frame reads 68.3 against the reference's 8.0. Three consecutive
+scorecards held this at 1 on the prose "the image still sits in a narrow band".
+The band is not merely narrow - it is placed entirely off the reference's, with
+the black end absent outright, and the frame reads as overcast dusk rather than
+night. That is the rubric's 0.
+
+Consequence: TWO axes now sit at 0, and the fixed axis order breaks the tie.
+contrast_and_exposure is 7th, atmosphere is 9th, so the next flaw to attack is
+CONTRAST_AND_EXPOSURE. This is the first time the campaign's target has moved,
+and it moved because an inflated score was hiding an EARLIER tie - precisely
+the failure mode the rubric's "when unsure, take the lower" exists to prevent.
+The two are the same disease anyway (a night that holds no blacks and a sky
+that is one flat fill), and contrast is the one that dominates every other
+axis's read: no palette, material or lighting judgement can converge while the
+whole frame sits 3.3x too bright.
+
+2. THREE REGRESSIONS I DID NOT RECORD, because they did not survive
+measurement. Listed because a critic pass that invents regressions to justify
+its existence is the same corruption as a lens that invents progress:
+  - "the camera move oversized the car": red body mass is 229x330 px against
+    the reference's 216x287 - about 15% larger, not double. 86822146 converged.
+  - "the grass shoulders ballooned": grass is 7.6% of the scene band against
+    the reference's 10.6% - less, not more.
+  - "the new asphalt grain is facet mosaic": on a clean asphalt patch the
+    champion's neighbour-to-neighbour steps are SMALLER than the reference's
+    (mean |dx| 2.0 vs 4.0; 3.7% of steps exceed 3 units vs 8.0%).
+composition_and_framing, scale_and_proportion and artifact_level therefore all
+HOLD. scale_and_proportion is the one pass-2 axis whose attack demonstrably
+moved toward the reference, and it is credited as such.
+
+3. STALE SCORECARD, AGAIN. scorecard.champion.toml still described the pass-1
+image. Its notes asserted "the asphalt is uniform matte with no lit pool around
+the car" and "the tail lights are a lighter flat fill, not an emissive
+material"; 9412025c and 045cbbdf made both false. Every axis note is rewritten
+against the image actually at champion.png.
+
+4. MISSING ABSTRACTION RECORD, now backfilled as abstractions/0002.toml.
+045cbbdf introduced new engine-spine surface - FrameDrawItem::emissive, a
+36-to-40-float instance layout, a retained material_emissive map in the render
+pipeline, and read paths in both backends - with no abstractions/NNNN.toml. The
+change CLEARS the gate on the "genuinely cannot express" branch, more cleanly
+than 0001 did: with_emissive was carried to RenderPipelineApi::submit and
+dropped there, so no value an app could set ever reached a backend, and the app
+was reduced to faking lamps with white-hot BASE colours (a reflectance, so they
+went darker as the car turned away from the key). Ruling: missing-record, not
+too-early. The backfill also records a real divergence the commit message
+frames as parity - the skinned pipeline is at its 16-attribute ceiling, carries
+no emissive lane, and silently shades a skinned emissive black.
+
+5. THE NUMBERS THE ABSTRACTION DID NOT BUY. material_and_texture_detail,
+subject_fidelity and lighting_and_shadow all HOLD AT 1 despite being the
+declared targets of three pass-2 commits. The emissive term reaches the pixels
+but the tail lights render as pale salmon fills with no spill; the pool light
+produces no measurable lateral falloff (62.3 next to the car vs 61.9 at the
+frame's left edge, at the car's own depth); the asphalt has grain but no sheen.
+Real structural work landing inside the same rubric band is not a score move.
+
+final_score 0.35 -> 0.325 (0*0.7 + (13/12)*0.3).
+
+RIGHT-AXIS BREACH, THIRD CONSECUTIVE. The lowest axis was atmosphere = 0 from
+iteration 0 through iteration 2 and was named next_attacked_axis every time.
+Pass 1 attacked five axes, none of them atmosphere. Pass 2 attacked five axes,
+none of them atmosphere. Three passes, one axis named, zero attacks on it. A
+parallel proposal board will always tempt N axes at once; the skill's rule is
+ONE bounded change on the LOWEST axis per iteration, and a board that never
+attacks its own stated target is not running the loop - it is running five
+unscored art passes and promoting the bundle. The target has now moved to
+contrast_and_exposure by tie-break; atmosphere remains at 0 behind it.
+
+TWO DEBTS STILL UNPAID from iteration 2, now owed twice: no determinism /
+repeat-capture proof exists for either promoted champion, and no spine gate run
+(coverage / check-architecture / dylint) is recorded for either 5f09965c or
+045cbbdf, both of which touch crates/* and modules/*.
+
+No parity language appears anywhere in the record; none is added here.
+"""
+next_attacked_axis = "contrast_and_exposure"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 2
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 2

@@ -1,0 +1,117 @@
+# BACKFILLED by the critic pass (iteration 3).
+#
+# This record did not exist. Commit 045cbbdf introduced new ENGINE-SPINE
+# surface — a new shading term on `axiom_host::FrameDrawItem`, a changed
+# instance vertex layout, new read paths in BOTH backend modules, and a new
+# retained map in the render pipeline — as part of a convergence pass, with no
+# abstractions/NNNN.toml justifying it.
+#
+# This is the SECOND consecutive pass in which a spine change landed without
+# its gate record (0001.toml backfilled the first). The abstraction gate is not
+# optional bookkeeping, and the fact that the previous pass was told so and the
+# next pass repeated it is the finding, not the paperwork.
+#
+# Judgement of the gate, stated plainly: the change ITSELF clears the gate on
+# the "genuinely cannot express" branch, and clears it more cleanly than 0001
+# did — the commit message itself quotes the app's own forty-line comment
+# documenting the missing path and the white-hot-base-colour workaround it was
+# forced into. It is the RECORD that was missing. Ruling: missing-record,
+# backfilled — not too-early, not ceremonial.
+
+axis = "material_and_texture_detail"
+
+# The ">= 3 failed bounded attempts" branch does not apply. One bounded attempt
+# is on record and it failed for a reason no further bounded attempt could fix:
+# ledger iteration 2 records a7321618 (pass 1, "tail lights that separate from
+# the paint they sit in") attacking this axis at the app tier and the axis
+# holding at 1, because the only knob available was the lamp's BASE colour.
+failed_attempts = []
+
+# TRUE, and the app tier proved it before the spine change was made:
+#
+#   `Material::with_emissive` existed and was carried faithfully through
+#   `axiom-render`'s `RenderMaterial` and `axiom-resources`' `MaterialData`,
+#   then DROPPED at `RenderPipelineApi::submit`, which folded only `opacity`
+#   into the per-draw colour. `axiom_host::FrameDrawItem` had exactly one
+#   shading term, `color`, so neither backend ever saw an emissive at all
+#   (`grep -r emissive modules/axiom-gpu-backend modules/axiom-canvas2d-backend`
+#   returned nothing).
+#
+# The only expression available to an app was to crank a lamp's base colour
+# white-hot. A base colour is a REFLECTANCE: the shader multiplies it by N.L,
+# by the hemisphere ambient and by the shadow term, so under burnt-rubber's
+# authored night ambient a full-red lamp lands as a dull pink slab and gets
+# DARKER as the car turns away from the key. It also drags every lamp toward
+# white, which is exactly why the reference's two saturated glowing strips
+# rendered here as one flat orange panel. No value an app can set fixes a term
+# the packet does not carry.
+inexpressible = true
+
+smallest_api = """
+`FrameDrawItem::emissive: [f32; 3]` — one linear-RGB radiance term beside the
+existing `color`, on the one contract both backends read a draw's shading terms
+from. Additive by construction: `new` stays byte-identical and defaults to
+`[0, 0, 0]`, and `with_emissive` is the only setter, so no existing call site
+changes and no existing frame renders differently.
+
+Spine footprint (for the reviewer, not a claim of minimality by size):
+  crates/axiom-host/src/frame_packet.rs            (the new term + accessor)
+  modules/axiom-render-pipeline/src/render_pipeline_api.rs
+      (a retained `material_emissive` map beside `material_color`, reported
+       per draw — deliberately NOT folded into colour the way opacity is:
+       alpha is not light-modulated, radiance is)
+  modules/axiom-gpu-backend/src/frame_packet_adapter.rs, scene_renderer.rs
+      (instance layout 36 -> 40 floats: mvp | world | colour | emissive+pad;
+       mesh shader adds it after every light term and before fog)
+  modules/axiom-canvas2d-backend/src/frame_packet_raster.rs
+      (added at the same point, after depth cues and before the fog post-pass,
+       so the two backends agree)
+  modules/axiom-windowing, modules/axiom                (carry-through)
+
+KNOWN NON-MINIMALITY / KNOWN DIVERGENCE, recorded rather than hidden: the rigid
+pipeline goes to 14 vertex attributes, inside the WebGL2 downlevel guarantee of
+16. The SKINNED pipeline is already at 16, so it carries no emissive lane and
+reads zero. The commit argues this is parity because Canvas 2D reaches the same
+zero through the same absent field — that is true of the two backends, but it
+is NOT parity between a rigid draw and a skinned draw, which now shade
+differently for the same authored material. Repacking the skinned instance (its
+`joint_base` vec4 has three free lanes) is named in the commit as a separate
+change and is owed. A skinned emissive is silently black today.
+"""
+
+screenshot_command = """
+uv run scripts/localhost_servers.py start-app burnt-rubber --port <PORT>
+AXIOM_PW_VIEWPORT=470x836 AXIOM_PW_DPR=2 AXIOM_PW_TOUCH=1 \\
+  uv run scripts/playwright_controller.py goto http://localhost:<PORT>/
+uv run scripts/playwright_controller.py wait 6500
+uv run scripts/playwright_controller.py screenshot burnt-rubber
+"""
+
+# NOT VERIFIED BY THIS PASS. The critic lens does not build or render, and the
+# promoted champion (8261e072) landed with no determinism note anywhere in the
+# record — the same omission 0001.toml recorded as owed for the pass-1 champion,
+# still unpaid one pass later. This field must not read like a proof it is not.
+screenshot_proof = """
+UNVERIFIED, and now twice owed. No twice-rendered byte-identical (or GPU
+within-tolerance) check is recorded for either the pass-1 or the pass-2
+champion. The harness is a live browser carrying a running wall-clock timer, so
+byte-identity is not available on this path; the honest bar is a repeat capture
+at the same wait with a stated per-pixel tolerance. Owed by the next pass that
+touches this app's render.
+"""
+
+# The Gates section of the skill applies: this change touches crates/* and
+# modules/*, so it owes `bash scripts/coverage.sh` at 100%, `cargo run -p xtask
+# -- check-architecture` clean, and `cargo dylint --all` at/under baseline.
+# 045cbbdf ships test edits in frame_packet_raster/tests.rs and the palette's
+# two tests, and two axiom-shot parity tests were updated — but no gate run is
+# recorded anywhere in this campaign, for this commit or for 5f09965c. Owed.
+gates_recorded = false
+
+# What this abstraction did NOT buy, stated so the next pass does not assume it
+# did: the axis it was reached for, material_and_texture_detail, is still 1
+# after the promotion (see scorecard.champion.toml). The tail lights render as
+# pale salmon fills rather than the reference's saturated glowing strips, and no
+# light spills from them onto the paint or the road. The term now reaches the
+# pixels; the authored values that would make it read as the reference do not
+# yet exist. That is an app-tier follow-on, not more spine surface.
