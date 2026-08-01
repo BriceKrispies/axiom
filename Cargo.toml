@@ -101,6 +101,9 @@ members = [
     # End Zone: the arcade-football engine framework + deterministic systems
     # showcase (composition leaf; all football concepts stay app-local).
     "apps/end-zone",
+    # Burnt Rubber: the third-person arcade racing framework + demonstration game
+    # (composition leaf; every racing concept stays app-local).
+    "apps/burnt-rubber",
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",

@@ -1,0 +1,67 @@
+[package]
+name = "axiom-burnt-rubber"
+description = "Burnt Rubber: an original third-person arcade racing framework and demonstration game. A composition-leaf browser app that reuses the engine's public facades (scene/render via the axiom umbrella, deterministic input, frustum-visibility/LOD, audio, windowing, debug overlay) and keeps every racing concept — the arcade car model, chase camera, procedural course, road mesh, chunk streaming, roadside scenery, traffic, boost, near misses and the racing HUD — app-local."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# `cdylib` for the app's own wasm bundle (the `#[wasm_bindgen]` `burnt_rubber_start`
+# entry); `rlib` so the native test suite and the `axiom-shot` capture harness can
+# compose the pure deterministic core (`build_burnt_rubber`).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The engine umbrella (module `engine`): App/RunningApp/scene/camera/material/mesh
+# authoring the road, scenery, traffic and car are built with.
+axiom = { path = "../../modules/axiom" }
+# Deterministic kernel primitives: `DeterministicRng` (the seeded course source),
+# `Meters`/`Ratio` for the dimensioned engine parameters.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+# Quaternions + transforms for the chassis pose, wheel spin and banked road frames.
+axiom-math = { path = "../../crates/axiom-math" }
+# The fixed-step accumulator: a variable browser frame is banked into whole
+# 60 Hz simulation steps here, never sampled as a wall clock by the sim.
+axiom-frame = { path = "../../crates/axiom-frame" }
+# The deterministic action-binding table: raw key tokens become named actions at a
+# tick boundary, which is what the per-step `DriveCommand` is folded from.
+axiom-input = { path = "../../modules/axiom-input" }
+# Frustum culling + distance-band LOD for the roadside scenery pool.
+axiom-visibility = { path = "../../modules/axiom-visibility" }
+# The neutral audio mixer core: engine/wind/tyre/boost/impact cues are scheduled
+# as data from simulation state (the wasm arm realizes the batch).
+axiom-audio = { path = "../../modules/axiom-audio" }
+
+# The nondeterministic browser edge — wasm32 only, so native `cargo test`
+# compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Navigator",
+    "Performance",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "PointerEvent",
+    "CssStyleDeclaration",
+    "console",
+    # Gamepad polling (the sanctioned frontend edge).
+    "Gamepad",
+    "GamepadButton",
+    # The audio arm `axiom_audio::AudioApi::realize_into` binds into.
+    "AudioContext",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

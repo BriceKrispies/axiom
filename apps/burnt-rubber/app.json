@@ -1,0 +1,10 @@
+{
+  "title": "Burnt Rubber",
+  "blurb": "A third-person arcade racer: nine kilometres of procedurally generated road, dense traffic, and a boost meter you fill by driving dangerously.",
+  "description": "An original arcade racing framework on the engine. The whole course is generated deterministically from one seed — a nine-kilometre point-to-point road with a pacing curve (opening straight, sweeping bends, rolling crests, technical esses, a lit tunnel, a wide traffic straight, a canyon squeeze, a closing sweep and a finish arch), sampled into a banked, arc-length centreline that the road mesh, the guardrails, the traffic lanes and the reset points all read from. The car is an authored arcade model, not a tyre simulator: instant acceleration, speed-sensitive steering, handbrake oversteer and a forgiving drift window. Fill the boost meter by threading traffic at speed (near misses), holding a drift, or simply staying flat out; spend it for a hard shove of acceleration, a wider field of view and a lot more noise. Rendering is chunked and pooled — road chunks stream in and out around you, and the roadside posts, guardrails, trees, poles, tunnel rings and buildings are recycled through a bounded instance pool with distance LOD. Controls: W/Up throttle, S/Down brake and reverse, A/D or Left/Right steer, Space handbrake, Left Shift boost, R reset to the last safe point, Esc pause. Gamepad: left stick steers, triggers drive, A handbrakes, X boosts. On a phone or tablet: drag anywhere on the left half to steer (the joystick appears under your thumb) and use the GAS / BRAKE / DRIFT / BOOST buttons on the right. Deterministic under fixed-step replay. (WebGPU, with a WebGL2 / Canvas2D fallback.)",
+  "kind": "rust-wasm",
+  "tags": [
+    "game",
+    "racing"
+  ]
+}

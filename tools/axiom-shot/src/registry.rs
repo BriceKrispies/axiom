@@ -106,6 +106,41 @@ pub fn registry() -> Vec<SliceEntry> {
             name: "end-zone-field-major-division",
             build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::MajorDivision),
         },
+        // Burnt Rubber: one deterministic frame per thing the game is about —
+        // the start line, raw straight-line speed, a corner, a drift, the
+        // tunnel, threading traffic, and full boost.
+        SliceEntry {
+            name: "burnt-rubber",
+            build: |_| axiom_burnt_rubber::build_burnt_rubber(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-start-line",
+            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_start_line(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-straight",
+            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_straight(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-sweeping-turn",
+            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_sweeping_turn(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-drift",
+            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_drift(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-tunnel",
+            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_tunnel(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-traffic",
+            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_traffic(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-boost",
+            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_boost(),
+        },
         SliceEntry {
             name: "sports-physics-lab",
             // `--frame 1` photographs the third-person view (the player's body).

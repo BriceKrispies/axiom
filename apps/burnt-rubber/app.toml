@@ -1,0 +1,18 @@
+[app]
+name = "burnt-rubber"
+crate_name = "axiom-burnt-rubber"
+
+allowed_layers = [
+    "kernel",
+    "math",
+    "frame",
+]
+
+allowed_modules = [
+    "engine",
+    "input",
+    "visibility",
+    "audio",
+    "windowing",
+    "debug-overlay",
+]
