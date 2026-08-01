@@ -29,6 +29,25 @@
 //! nothing but ambient, and a pure-black ambient makes half of every bright
 //! object black.
 //!
+//! ## ...and bright **against the surface it is mounted on**, not just the road
+//!
+//! "Bright" is meaningless on its own — a lamp is only a lamp if it separates
+//! from whatever it is set into. The original rule here compared every glowing
+//! material against the *tarmac*, which is the right test for a reflector post
+//! standing on the verge and the wrong one for a tail light sunk into a red
+//! car. A `(1.0, 0.14, 0.08)` brake light on a `(0.86, 0.16, 0.07)` body both
+//! display at roughly sRGB `(245, 108, 78)`: same hue, same value, one flat
+//! orange slab where the reference has two glowing strips. The lamp was authored
+//! bright and still rendered invisible.
+//!
+//! With no specular, no emissive and no bloom, a light's *only* separation from
+//! its host is albedo, and albedo separates two ways: **hue** (a red lamp on a
+//! blue traffic car reads at any brightness) or **luminance** (a red lamp on a
+//! red car must be materially hotter than the paint). A lamp whose host shares
+//! its hue therefore has to run toward white-hot — which is also what an
+//! over-exposed tail lamp actually looks like in the night photograph this app
+//! is converging on. `a_light_reads_against_the_body_it_is_mounted_on` pins it.
+//!
 //! This is a real engine gap, and it is deliberately *not* worked around by
 //! adding an emissive path to the renderer: a bright base colour expresses what
 //! this app needs, and a second lighting term in the GPU backend is a
@@ -151,7 +170,10 @@ impl ScenePalette {
             car_body: lit(app, [0.86, 0.16, 0.07]),
             car_glass: lit(app, [0.07, 0.09, 0.13]),
             tyre: lit(app, [0.045, 0.045, 0.05]),
-            brake_light: glowing(app, [1.0, 0.14, 0.08], [0.70, 0.03, 0.02]),
+            // The player's tail lights sit *inside* a red body, so hue cannot
+            // separate them — only luminance can. Run them white-hot in the red
+            // channel: sRGB (255, 170, 149) against the paint's (239, 111, 75).
+            brake_light: glowing(app, [1.0, 0.40, 0.30], [0.85, 0.20, 0.12]),
             boost_flame: glowing(app, [0.62, 0.90, 1.0], [0.55, 0.85, 1.0]),
             traffic: [
                 lit(app, [0.30, 0.44, 0.66]),
@@ -159,7 +181,11 @@ impl ScenePalette {
                 lit(app, [0.20, 0.46, 0.32]),
                 lit(app, [0.52, 0.42, 0.16]),
             ],
-            traffic_light: glowing(app, [0.95, 0.16, 0.10], [0.42, 0.03, 0.02]),
+            // Traffic tail lights separate from their bodies by hue (blue, beige,
+            // green, gold — none of them red), so they stay saturated. Lifted
+            // anyway, because the beige variant out-luminances the old value and
+            // a lamp darker than the car carrying it never reads as lit.
+            traffic_light: glowing(app, [1.0, 0.30, 0.22], [0.55, 0.06, 0.03]),
             streak: glowing(app, [0.86, 0.92, 1.0], [0.42, 0.52, 0.68]),
             // Dark, because it is opaque: bright smoke would punch a light
             // grey hole in the road behind the car.
@@ -258,9 +284,9 @@ mod tests {
         let glowing: [(&str, [f32; 3]); 7] = [
             ("post", [1.0, 0.80, 0.20]),
             ("lamp", [1.0, 0.96, 0.82]),
-            ("brake light", [1.0, 0.14, 0.08]),
+            ("brake light", [1.0, 0.40, 0.30]),
             ("boost flame", [0.62, 0.90, 1.0]),
-            ("traffic light", [0.95, 0.16, 0.10]),
+            ("traffic light", [1.0, 0.30, 0.22]),
             ("spark", [1.0, 0.86, 0.45]),
             ("finish", [0.35, 1.0, 0.72]),
         ];
@@ -273,6 +299,63 @@ mod tests {
             assert!(
                 luminance(colour) > asphalt * 2.0,
                 "{name} does not stand out against the tarmac"
+            );
+        }
+    }
+
+    /// The rule the tarmac comparison above cannot express: a lamp is only a
+    /// lamp if it separates from the surface it is **mounted in**. With no
+    /// specular, no emissive and no bloom, that separation is albedo alone —
+    /// either hue or luminance. A tail light sunk into a body of its own hue
+    /// has only luminance left, and the original `(1.0, 0.14, 0.08)` brake
+    /// light had none of it: it displayed within a couple of sRGB steps of the
+    /// `(0.86, 0.16, 0.07)` paint around it, so the car rendered as one flat
+    /// orange slab with no visible lights at all.
+    #[test]
+    fn a_light_reads_against_the_body_it_is_mounted_on() {
+        let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
+        // Chroma direction, as the ratio of the two non-peak channels to the
+        // peak: two materials that agree here are the same hue and can only be
+        // told apart by brightness.
+        let same_hue = |a: [f32; 3], b: [f32; 3]| {
+            let ratio = |c: [f32; 3]| {
+                let peak = c[0].max(c[1]).max(c[2]).max(1.0e-4);
+                [c[0] / peak, c[1] / peak, c[2] / peak]
+            };
+            let (x, y) = (ratio(a), ratio(b));
+            (0..3).all(|i| (x[i] - y[i]).abs() < 0.35)
+        };
+
+        let car_body = [0.86, 0.16, 0.07];
+        let brake_light = [1.0, 0.40, 0.30];
+        assert!(
+            same_hue(brake_light, car_body),
+            "the brake light and the paint share a hue, so luminance is the only cue"
+        );
+        assert!(
+            luminance(brake_light) > luminance(car_body) * 1.6,
+            "the brake light does not out-shine the body it sits in: {:.3} vs {:.3}",
+            luminance(brake_light),
+            luminance(car_body)
+        );
+
+        // Traffic lamps sit on bodies of a different hue, so they may stay
+        // saturated — but never darker than the car carrying them.
+        let traffic_light = [1.0, 0.30, 0.22];
+        let traffic: [[f32; 3]; 4] = [
+            [0.30, 0.44, 0.66],
+            [0.62, 0.60, 0.55],
+            [0.20, 0.46, 0.32],
+            [0.52, 0.42, 0.16],
+        ];
+        for body in traffic {
+            assert!(
+                !same_hue(traffic_light, body),
+                "a traffic lamp sharing its body's hue would need the luminance rule too"
+            );
+            assert!(
+                luminance(traffic_light) > luminance(body) * 0.7,
+                "the traffic lamp is dimmer than its own car: {body:?}"
             );
         }
     }
