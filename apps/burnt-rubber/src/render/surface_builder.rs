@@ -57,18 +57,42 @@ impl SurfaceBuilder {
     /// `facing`) is still emitted in the given order — it contributes nothing
     /// visible, and silently dropping geometry would be worse than drawing a
     /// sliver.
+    ///
+    /// The quad's texture is stretched **once** across it. That is the right
+    /// default for a prop the size of a post or a bumper; it is the wrong one for
+    /// a surface whose size is not the texture's — see [`Self::quad_with_uvs`].
     pub fn quad(&mut self, a: Vec3, b: Vec3, c: Vec3, d: Vec3, facing: Vec3) {
+        self.quad_with_uvs(a, b, c, d, facing, UNIT_UVS);
+    }
+
+    /// Add a quad with the texture coordinate of each corner given explicitly.
+    ///
+    /// The UVs travel **with their corners** through the winding correction, so a
+    /// quad whose cycle has to be reversed still samples the same texel at the
+    /// same point in space. Corner UVs outside `0..=1` are the point: the material
+    /// sampler wraps with `Repeat`, so a caller that derives them from world
+    /// metres gets a texture tiled at a real physical scale instead of stretched
+    /// once across whatever the quad happens to span.
+    pub fn quad_with_uvs(
+        &mut self,
+        a: Vec3,
+        b: Vec3,
+        c: Vec3,
+        d: Vec3,
+        facing: Vec3,
+        uvs: [Vec2; 4],
+    ) {
         let base = self.positions.len() as u32;
         let computed = b.subtract(a).cross(c.subtract(a));
         let forward = computed.dot(facing) >= 0.0;
-        let (a, b, c, d) = if forward { (a, b, c, d) } else { (a, d, c, b) };
+        let cycle = [(a, uvs[0]), (b, uvs[1]), (c, uvs[2]), (d, uvs[3])];
+        let ordered = if forward {
+            cycle
+        } else {
+            [cycle[0], cycle[3], cycle[2], cycle[1]]
+        };
         let normal = facing.normalize().unwrap_or(Vec3::UNIT_Y);
-        for (corner, uv) in [
-            (a, Vec2::new(0.0, 0.0)),
-            (b, Vec2::new(1.0, 0.0)),
-            (c, Vec2::new(1.0, 1.0)),
-            (d, Vec2::new(0.0, 1.0)),
-        ] {
+        for (corner, uv) in ordered {
             self.positions.push(corner);
             self.normals.push(normal);
             self.uvs.push(uv);
@@ -80,11 +104,18 @@ impl SurfaceBuilder {
     /// Add a horizontal quad facing up. The overwhelmingly common case: road
     /// surface, markings, verges.
     pub fn ground_quad(&mut self, a: Vec3, b: Vec3, c: Vec3, d: Vec3) {
+        self.ground_quad_with_uvs(a, b, c, d, UNIT_UVS);
+    }
+
+    /// A horizontal quad facing up, with explicit corner UVs — the paved surface,
+    /// whose grain is tiled in world metres rather than smeared once across an
+    /// 18 m × 2 m panel.
+    pub fn ground_quad_with_uvs(&mut self, a: Vec3, b: Vec3, c: Vec3, d: Vec3, uvs: [Vec2; 4]) {
         // The face's own plane decides which way "up" is, so a banked or graded
         // road panel still faces out of itself rather than out of world +Y.
         let plane = b.subtract(a).cross(d.subtract(a));
         let up = if plane.y >= 0.0 { plane } else { plane.mul_scalar(-1.0) };
-        self.quad(a, b, c, d, unit_up(up));
+        self.quad_with_uvs(a, b, c, d, unit_up(up), uvs);
     }
 
     /// Add an axis-aligned box spanning `centre ± half`, all six faces outward.
@@ -190,6 +221,14 @@ impl SurfaceBuilder {
     }
 }
 
+/// The corner UVs that stretch a texture exactly once across a quad.
+const UNIT_UVS: [Vec2; 4] = [
+    Vec2::new(0.0, 0.0),
+    Vec2::new(1.0, 0.0),
+    Vec2::new(1.0, 1.0),
+    Vec2::new(0.0, 1.0),
+];
+
 /// A unit vector pointing generally up, falling back to world up.
 fn unit_up(v: Vec3) -> Vec3 {
     v.normalize().unwrap_or(Vec3::UNIT_Y)
@@ -267,6 +306,63 @@ mod tests {
         // Both face up despite opposite input cycles.
         for n in triangle_normals(&forward).into_iter().chain(triangle_normals(&backward)) {
             assert!(n.y > 0.0);
+        }
+    }
+
+    /// A corner's UV belongs to that corner, not to the slot it lands in after
+    /// the winding correction. If it did not, a reversed quad would sample a
+    /// mirrored patch of texture and the world-metre road mapping would fold back
+    /// on itself at every quad the builder had to flip.
+    #[test]
+    fn uvs_travel_with_their_corners_through_the_winding_correction() {
+        let a = Vec3::new(-1.0, 0.0, -1.0);
+        let b = Vec3::new(1.0, 0.0, -1.0);
+        let c = Vec3::new(1.0, 0.0, 1.0);
+        let d = Vec3::new(-1.0, 0.0, 1.0);
+        let uvs = [
+            Vec2::new(4.0, 7.0),
+            Vec2::new(6.0, 7.0),
+            Vec2::new(6.0, 9.0),
+            Vec2::new(4.0, 9.0),
+        ];
+        // The same four (corner, uv) pairs, wound both ways.
+        let pair_of = |builder: &SurfaceBuilder| {
+            let mut pairs: Vec<(String, String)> = builder
+                .positions()
+                .iter()
+                .zip(&builder.uvs)
+                .map(|(p, uv)| (format!("{p:?}"), format!("{uv:?}")))
+                .collect();
+            pairs.sort();
+            pairs
+        };
+        let mut forward = SurfaceBuilder::new();
+        forward.quad_with_uvs(a, b, c, d, Vec3::UNIT_Y, uvs);
+        let mut reversed = SurfaceBuilder::new();
+        reversed.quad_with_uvs(a, b, c, d, Vec3::new(0.0, -1.0, 0.0), uvs);
+        assert_eq!(
+            pair_of(&forward),
+            pair_of(&reversed),
+            "reversing the winding re-assigned the texture coordinates"
+        );
+        // And out-of-range UVs survive untouched — `Repeat` addressing is the
+        // whole mechanism behind tiling in world metres.
+        assert!(forward.uvs.iter().any(|uv| uv.x > 1.0 && uv.y > 1.0));
+    }
+
+    /// The default is still one tile stretched across the quad, for every prop
+    /// that has no world-scale mapping of its own.
+    #[test]
+    fn a_plain_quad_still_stretches_its_texture_once_across_itself() {
+        let mut b = SurfaceBuilder::new();
+        b.ground_quad(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(9.0, 0.0, 0.0),
+            Vec3::new(9.0, 0.0, 9.0),
+            Vec3::new(0.0, 0.0, 9.0),
+        );
+        for uv in &b.uvs {
+            assert!((0.0..=1.0).contains(&uv.x) && (0.0..=1.0).contains(&uv.y), "{uv:?}");
         }
     }
 

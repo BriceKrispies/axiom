@@ -21,11 +21,12 @@
 //! between them. The test suite asserts this by comparing the actual generated
 //! positions across every boundary on the course.
 
-use axiom::prelude::{MeshData, Vec3};
+use axiom::prelude::{MeshData, Vec2, Vec3};
 
 use crate::track::{Track, TrackSample};
 use crate::tuning::CourseTuning;
 
+use super::asphalt_texture::TILE_METRES;
 use super::surface_builder::SurfaceBuilder;
 
 /// The span of course one rendered chunk covers (m).
@@ -96,27 +97,65 @@ pub fn build_chunk(track: &Track, index: usize, tuning: &CourseTuning) -> ChunkM
 }
 
 /// Tarmac plus both shoulders, as three quads per sample pair.
+///
+/// ## The paving is UV-mapped in **metres**, not per quad
+///
+/// A paved quad spans the full road width by one sample spacing — on the opening
+/// straight, **18 m × 2 m**. Stretching the aggregate grain once across that (the
+/// builder's default) does two visible things, and both of them are in the
+/// champion render: the 32-texel grain lands at 0.56 m × 0.06 m per texel, so it
+/// reads as metre-scale camouflage blotches smeared 9:1 across the road instead
+/// of as aggregate; and because *every* quad gets exactly one copy, the identical
+/// pattern repeats in lock-step every 2 m, banding the road transversely all the
+/// way to the horizon.
+///
+/// Deriving each corner's UV from its own world position fixes both at the root.
+/// `u` is the lateral offset in metres and `v` the absolute course distance, each
+/// divided by [`TILE_METRES`] — so the grain is square, at a real physical scale,
+/// and continuous across quad and chunk boundaries (adjacent chunks share their
+/// boundary sample, so they share its `distance` exactly and the mapping cannot
+/// crack). `Repeat` addressing plus the texture's toroidal lattice means the
+/// resulting non-integer tile counts leave no seam.
 fn strip_surface(out: &mut SurfaceBuilder, track: &Track, a: &TrackSample, b: &TrackSample) {
     let shoulder = track.shoulder();
     // Tarmac.
-    out.ground_quad(
+    out.ground_quad_with_uvs(
         a.at_lateral(-a.half_width),
         b.at_lateral(-b.half_width),
         b.at_lateral(b.half_width),
         a.at_lateral(a.half_width),
+        paving_uvs([
+            (-a.half_width, a.distance),
+            (-b.half_width, b.distance),
+            (b.half_width, b.distance),
+            (a.half_width, a.distance),
+        ]),
     );
     // Shoulders, a hair below the tarmac so the join reads as a lip rather than
-    // z-fighting with it.
+    // z-fighting with it. Same mapping, so the grain runs across the join
+    // unbroken rather than restarting at the tarmac edge.
     for side in [-1.0f32, 1.0] {
-        out.ground_quad(
+        out.ground_quad_with_uvs(
             a.at_lateral(side * a.half_width).add(Vec3::new(0.0, -SHOULDER_DROP, 0.0)),
             b.at_lateral(side * b.half_width).add(Vec3::new(0.0, -SHOULDER_DROP, 0.0)),
             b.at_lateral(side * (b.half_width + shoulder))
                 .add(Vec3::new(0.0, -SHOULDER_DROP, 0.0)),
             a.at_lateral(side * (a.half_width + shoulder))
                 .add(Vec3::new(0.0, -SHOULDER_DROP, 0.0)),
+            paving_uvs([
+                (side * a.half_width, a.distance),
+                (side * b.half_width, b.distance),
+                (side * (b.half_width + shoulder), b.distance),
+                (side * (a.half_width + shoulder), a.distance),
+            ]),
         );
     }
+}
+
+/// Corner UVs for a paved quad, from each corner's `(lateral, along)` position on
+/// the course in metres.
+fn paving_uvs(corners: [(f32, f32); 4]) -> [Vec2; 4] {
+    corners.map(|(lateral, along)| Vec2::new(lateral / TILE_METRES, along / TILE_METRES))
 }
 
 /// How far below the tarmac the shoulder sits (m). Deliberately not a hair's
@@ -546,6 +585,67 @@ mod tests {
         // Building it yields empty geometry rather than panicking.
         let chunk = build_chunk(&track, beyond, &CourseTuning::DEFAULT);
         assert!(chunk.surface.positions().is_empty());
+    }
+
+    /// The grain is tiled in **metres**, not once per quad.
+    ///
+    /// The failure this pins is silent and was live: with the builder's default
+    /// `0..1` mapping every paved quad carried exactly one copy of the texture,
+    /// so a 32-texel grain authored as decimetre aggregate rendered as metre-wide
+    /// blotches smeared across an 18 m × 2 m panel — and repeated identically
+    /// every 2 m. Both symptoms are the same number, so both are asserted here:
+    /// the tarmac's UV span in each axis is its world span over `TILE_METRES`.
+    #[test]
+    fn the_paving_grain_is_tiled_in_metres_rather_than_once_per_quad() {
+        let track = track();
+        let chunk = build_chunk(&track, 0, &CourseTuning::DEFAULT);
+        let uvs = chunk.surface.uvs();
+        let (u_lo, u_hi) = uvs
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), uv| (lo.min(uv.x), hi.max(uv.x)));
+        let (v_lo, v_hi) = uvs
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), uv| (lo.min(uv.y), hi.max(uv.y)));
+
+        // Across: the paved width (tarmac + both shoulders) in tiles.
+        let (start, end) = chunk_sample_range(&track, 0);
+        let paved = track.samples()[start..=end]
+            .iter()
+            .map(|s| (s.half_width + track.shoulder()) * 2.0)
+            .fold(0.0f32, f32::max);
+        assert!(
+            ((u_hi - u_lo) - paved / TILE_METRES).abs() < 0.1,
+            "the grain spans {:.1} tiles across a {paved:.1} m road; at {TILE_METRES} m \
+             per tile it should span {:.1}",
+            u_hi - u_lo,
+            paved / TILE_METRES
+        );
+        // Along: a 100 m chunk is many tiles, not one.
+        assert!(
+            v_hi - v_lo > CHUNK_LENGTH / TILE_METRES - 2.0,
+            "the grain repeats only {:.1} times over a {CHUNK_LENGTH} m chunk",
+            v_hi - v_lo
+        );
+        // And it is anchored to absolute course distance, so chunk 30 does not
+        // restart the pattern chunk 0 already drew.
+        let later = build_chunk(&track, 30, &CourseTuning::DEFAULT);
+        let later_v = later.surface.uvs().iter().map(|uv| uv.y).fold(f32::MIN, f32::max);
+        assert!(later_v > v_hi, "the mapping restarts at every chunk: {later_v} vs {v_hi}");
+    }
+
+    /// Adjacent chunks share their boundary sample, so the grain cannot crack at
+    /// a chunk join — the same guarantee the positions have, on the UVs.
+    #[test]
+    fn the_paving_uvs_meet_exactly_across_a_chunk_boundary() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        let here = build_chunk(&track, 7, &t);
+        let next = build_chunk(&track, 8, &t);
+        let (_, end) = chunk_sample_range(&track, 7);
+        let seam = track.samples()[end].distance / TILE_METRES;
+        let touches = |data: &MeshData| data.uvs().iter().any(|uv| (uv.y - seam).abs() < 1.0e-3);
+        assert!(touches(&here.surface), "chunk 7 reaches the seam's v");
+        assert!(touches(&next.surface), "and chunk 8 starts at the same v");
     }
 
     #[test]

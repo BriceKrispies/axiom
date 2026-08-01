@@ -61,11 +61,25 @@
 //! therefore derived from the linear multipliers it must produce, not picked by
 //! eye — see [`byte_for_multiplier`].
 
-/// The texture's edge length in texels. Deliberately small: a tarmac quad spans
-/// the full road width by one `sample_spacing` (2 m), so at 32 texels the grain
-/// cells are decimetre-scale — coarse enough to survive nearest-sampling in the
-/// near field, fine enough to read as aggregate rather than as tiles.
+/// The texture's edge length in texels. Deliberately small: one tile covers
+/// [`TILE_METRES`] square of road (see below), so at 32 texels a texel is ~5 cm
+/// and a lattice cell ~19 cm — decimetre-scale grain, coarse enough to survive
+/// nearest-sampling in the near field, fine enough to read as aggregate.
 pub const RES: u32 = 32;
+
+/// How much road, in metres, one tile of this texture covers — **in both axes**.
+///
+/// This is the number that decides whether the grain reads as asphalt, and it is
+/// a property of the texture rather than of any one quad, which is why it lives
+/// here and `road_mesh` reads it. It is also the constant this module's own scale
+/// claims were silently missing: the paving quads used to be UV-mapped `0..1`
+/// per quad, so a single tile was stretched across an 18 m × 2 m panel — 0.56 m
+/// texels smeared 9:1, `LATTICE` cells over two metres wide, and the identical
+/// pattern repeating in lock-step every 2 m down the road. What was authored as
+/// aggregate rendered as camouflage. At 1.5 m the tile is square, the grain sits
+/// at the scale the amplitude below was measured for, and the repeat period is
+/// short enough that the toroidal lattice hides it completely.
+pub const TILE_METRES: f32 = 1.5;
 
 /// The smooth octave's cell count across the texture. `RES / LATTICE` texels per
 /// cell, so the low-frequency field changes slowly and minifies gracefully.
