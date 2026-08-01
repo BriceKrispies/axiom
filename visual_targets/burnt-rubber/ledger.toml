@@ -393,3 +393,84 @@ atmosphere = 0
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 2
+
+# ---------------------------------------------------------------------------
+# Iteration 4 — the pass-3 candidate, scored BEFORE promotion.
+#
+# Written by the foreman to close the defect the critic recorded twice (at
+# iterations 2 and 3): passes 1 and 2 were promoted as one-file commits with no
+# candidate scoring and no decision. This entry restores the loop's guarantee.
+#
+# SELF-SCORED, and therefore suspect. These are the foreman's numbers for a pass
+# the foreman stacked — the exact conflict of interest the critic lens exists to
+# audit. Treat every value here as provisional until the next critic pass
+# re-measures it. Where a score was borderline it was taken LOW, and three axes
+# that saw real work this pass (subject_fidelity, color_palette,
+# contrast_and_exposure) are deliberately HELD, per the standing rule that
+# structural work landing inside the same rubric band is not a score move.
+# ---------------------------------------------------------------------------
+[[iteration]]
+iteration = 4
+attacked_axis = "detail_density"
+changed_files = [
+  "crates/axiom-host/tests/architecture.rs",
+  "apps/burnt-rubber/src/render/scenery_pool.rs",
+  "apps/burnt-rubber/src/tuning.rs",
+  "apps/burnt-rubber/src/render/mod.rs",
+  "apps/burnt-rubber/src/render/surface_builder.rs",
+  "apps/burnt-rubber/src/render/road_mesh.rs",
+  "apps/burnt-rubber/src/render/asphalt_texture.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+Six lens commits stacked; the colorist's grade was DROPPED for the third
+consecutive pass because `axiom-windowing` exposes no `set_postprocess`, so an
+authored grade cannot reach the live browser arm this campaign captures from.
+Four defects fixed rather than tuned: a curated-export gate left red by the
+wave-1 spine commit (axiom-host was failing `cargo test` on this line); two
+disagreeing scenery culls that made every per-kind draw distance dead code; a
+UV mapping that stretched the new asphalt grain 9:1 into lateral camo bands; and
+a key light aimed down-track so every shadow fell hidden under its own caster.
+Verified green before promotion: axiom-host 309 + 17 pass, burnt-rubber 427 pass.
+No non-attacked axis dropped. final_score 0.325 -> 0.525 (self-scored).
+"""
+next_attacked_axis = "contrast_and_exposure"
+abstraction_introduced = false
+
+# Known-outstanding debts, recorded rather than quietly carried:
+#  - No determinism/repeat-capture proof for any promoted champion (owed 3x).
+#  - No spine gate run (coverage / check-architecture / dylint) recorded for the
+#    three spine commits on this line (5f09965c, 045cbbdf, 7b913a78).
+#  - `atmosphere` has been named next_attacked_axis at iterations 0,1,2 and
+#    attacked zero times; it is no longer the target only because
+#    contrast_and_exposure tied it at 0 and wins the fixed-order tie-break.
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 2
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity = 1
+silhouette_readability = 2
+material_and_texture_detail = 2
+lighting_and_shadow = 2
+color_palette = 1
+contrast_and_exposure = 0
+depth_and_separation = 2
+atmosphere = 0
+scale_and_proportion = 3
+detail_density = 2
+artifact_level = 3
