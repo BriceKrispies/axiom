@@ -34,7 +34,7 @@ use axiom_math::Vec3;
 
 use crate::camera::{CameraPose, ChaseCamera};
 use crate::command::DriveCommand;
-use crate::track::{SectionKind, Track};
+use crate::track::{SectionKind, Track, GRID_DISTANCE};
 use crate::tuning::{Tuning, DT};
 
 use boost::BoostMeter;
@@ -116,7 +116,7 @@ impl RaceSim {
     pub fn new(seed: u64, tuning: Tuning) -> RaceSim {
         let track = Track::generate(seed, &tuning.course);
         let mut car = CarState::parked(Vec3::ZERO, 0.0);
-        controller::place_on_track(&mut car, &track.sample_at(0.0), 0.0);
+        controller::place_on_track(&mut car, &track.sample_at(GRID_DISTANCE), 0.0);
         let mut camera = ChaseCamera::new();
         camera.snap_to(&car, &track, &tuning.camera);
         let camera_pose = camera.step(
@@ -607,6 +607,39 @@ mod tests {
         assert!(sim.progress() < 0.01);
         assert_eq!(sim.section(), SectionKind::StartStraight);
         assert_eq!(sim.step_count(), 0);
+    }
+
+    /// The opening shot must have a floor. The chase camera looks at ground
+    /// behind the car, and the course ribbon stops dead at distance zero, so a
+    /// grid on the first metre of tarmac frames the car against a hole. The
+    /// camera's whole foreground has to land on road that exists.
+    #[test]
+    fn the_grid_leaves_road_behind_the_car_for_the_camera_to_stand_on() {
+        let sim = RaceSim::shipping();
+        assert!(
+            sim.car().distance >= GRID_DISTANCE - sim.track().spacing(),
+            "the car starts on the grid, not on the first metre: {}",
+            sim.car().distance
+        );
+        // A camera that looks forward and down can only ever see ground *ahead*
+        // of its own eye, so "the eye is over road" is exactly the condition for
+        // the whole foreground of the shot being road. Hold it for the entire
+        // countdown, which is when the opening frame is taken.
+        let mut sim = sim;
+        for _ in 0..=(sim.tuning().race.countdown_steps * COUNTDOWN_NUMBERS) {
+            let pose = sim.camera_pose(1.0);
+            let behind = sim
+                .car()
+                .position
+                .subtract(pose.eye)
+                .dot(sim.car().forward());
+            let camera_distance = sim.car().distance - behind;
+            assert!(
+                camera_distance > 0.0,
+                "the eye is {camera_distance} m along a course that starts at 0"
+            );
+            sim.step(DriveCommand::IDLE);
+        }
     }
 
     #[test]

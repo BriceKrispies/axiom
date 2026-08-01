@@ -247,9 +247,10 @@ impl Track {
 
     /// The most recent safe respawn point at or before `distance`: a road-centre
     /// pose on the nearest sample, backed off slightly so a reset never drops
-    /// the car on top of whatever it just hit.
+    /// the car on top of whatever it just hit, and never further back than
+    /// [`GRID_DISTANCE`] so the chase camera always has road beneath it.
     pub fn safe_reset(&self, distance: f32) -> TrackSample {
-        self.sample_at((distance - RESET_BACKOFF).max(0.0))
+        self.sample_at((distance - RESET_BACKOFF).max(GRID_DISTANCE))
     }
 
     /// Progress along the course as a `0..1` fraction.
@@ -269,6 +270,25 @@ pub const MAX_LANES: usize = 8;
 /// How far back up the road a reset places the car (m). Far enough to clear the
 /// obstacle, close enough that a mistake costs a moment rather than a section.
 pub const RESET_BACKOFF: f32 = 24.0;
+
+/// How far into the course the starting grid sits (m).
+///
+/// It is not zero, and the reason is framing rather than gameplay. The course
+/// ribbon simply *stops* at distance zero — there is no tarmac before the first
+/// sample — while the chase camera sits ~6.5 m behind the car, 2.2 m up, and at
+/// a 65-degree field of view the bottom of the frame lands roughly 3.8 m
+/// **behind** the car. Park the car on the first metre of road and the opening
+/// shot is a car floating over a hole: a hard horizontal seam two thirds of the
+/// way down the frame, with the rear of the car silhouetted against the
+/// background instead of standing on the asphalt.
+///
+/// Thirty metres puts the whole of the camera's foreground — at every chase
+/// distance it can reach, including the pull-back under acceleration — on real
+/// road, so the car keeps its ground contact and the road reads as a ribbon
+/// running past the viewer rather than a plank starting under the bumper. Real
+/// grids sit some way down the pit straight for the same reason. It costs 0.3%
+/// of a nine-kilometre course.
+pub const GRID_DISTANCE: f32 = 30.0;
 
 /// Wrap an angle difference into `[-π, π]`.
 pub fn shortest_angle(delta: f32) -> f32 {
@@ -507,9 +527,11 @@ mod tests {
         let t = track();
         let reset = t.safe_reset(1_000.0);
         assert!(reset.distance <= 1_000.0 - RESET_BACKOFF + t.spacing());
-        assert!(reset.distance >= 0.0);
-        // Resetting at the start line stays at the start line.
-        assert_eq!(t.safe_reset(0.0).distance, 0.0);
+        assert!(reset.distance >= GRID_DISTANCE);
+        // Resetting at the start line stays on the grid: never behind it, where
+        // the course has no tarmac for the chase camera to look at.
+        assert_eq!(t.safe_reset(0.0).distance, t.sample_at(GRID_DISTANCE).distance);
+        assert!(t.safe_reset(0.0).distance >= GRID_DISTANCE - t.spacing());
     }
 
     /// The banking must roll *into* the turn: on a right-hand bend the left edge
