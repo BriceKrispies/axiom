@@ -1,0 +1,46 @@
+# Convergence ledger — burnt-rubber
+#
+# Campaign: converge the LIVE browser render of apps/burnt-rubber toward the
+# night opening-straight reference the user supplied.
+#
+# Harness (the capture recipe every pass must reproduce — the reference is a
+# live phone screenshot, so the champion must be one too; axiom-shot's native
+# slices frame a different aspect and carry no DOM HUD):
+#
+#   uv run scripts/localhost_servers.py start-app burnt-rubber --port <PORT>
+#   AXIOM_PW_VIEWPORT=470x836 AXIOM_PW_DPR=2 AXIOM_PW_TOUCH=1 \
+#     uv run scripts/playwright_controller.py goto http://localhost:<PORT>/
+#   uv run scripts/playwright_controller.py wait 6500
+#   uv run scripts/playwright_controller.py screenshot <name>
+#
+# The moment: car stationary on the opening straight, ~5.9 s elapsed, 0%
+# progress, 0 near misses — matching the reference's HUD exactly.
+#
+# Note the browser falls back to WebGL2 on this machine (WebGPU device creation
+# fails on dxil.dll), so the champion is the GL path. That is the path the
+# reference was shot on too.
+
+[[iteration]]
+iteration = 0
+attacked_axis = "none"
+changed_files = []
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = "Campaign seeded. Reference supplied by the user; champion captured from the real live browser build at the same moment (0 KM/H, OPENING STRAIGHT, 0%, 0:05.9). Initial harsh scorecard authored. final_score = 0*0.7 + 1.42*0.3 = 0.43."
+next_attacked_axis = "atmosphere"
+abstraction_introduced = false
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity = 1
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 1
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 2
+artifact_level = 2
