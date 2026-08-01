@@ -95,6 +95,9 @@ pub fn render_gpu(
         // The app authors the frame's hemisphere ambient; honour it instead of
         // forcing the dim engine default so the screenshot matches what the app lit.
         outcome.ambient(),
+        // ...and the frame's authored atmosphere, for the same reason: an unfogged
+        // capture of a fogged scene is not the scene the app authored.
+        outcome.depth_fog().unwrap_or_else(axiom_host::FrameDepthFog::none),
         retro_32bit,
         // Full-fidelity reference render; volumetrics/post-process aren't carried
         // on the FrameOutcome here.
@@ -208,6 +211,12 @@ pub fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
     // the frame the way the GPU path does (else it falls back to the dim default,
     // which is why the canvas2d capture read dark).
     .with_ambient(outcome.ambient());
+    // ...and the authored atmospheric fog, so a captured frame recedes into the
+    // same night the live browser render does.
+    let packet = match outcome.depth_fog() {
+        Some(fog) => packet.with_depth_fog(fog),
+        None => packet,
+    };
     // Attach the frame's SDF scene (if any) so the Canvas2D backend marches and
     // composites the raymarched shapes against the rasterized meshes.
     match outcome.sdf_scene() {

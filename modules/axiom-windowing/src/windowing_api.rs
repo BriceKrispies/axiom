@@ -47,6 +47,22 @@ pub struct WindowingApi {
     surface: Option<HostPresentationRequest>,
     next_tick: u64,
     frames_driven: u64,
+    // The app-authored **render look** the live backend binds with: the hemisphere
+    // ambient that fills unlit faces, and the atmospheric depth fog distance recedes
+    // into. Both are backend-neutral `host` values, so they live in the deterministic
+    // core (not the wasm arm) and are testable on native.
+    //
+    // Before this existed, every `run_web*` entry hardcoded
+    // `FrameAmbient::default_hemisphere()` at bind: an app could author a night
+    // ambient with `set_ambient` and the live browser render would still light the
+    // scene with the engine's default daylight hemisphere, because the authored value
+    // had no route to the binder. That is a silent divergence between what the app
+    // authors and what the browser draws — the same class of defect as a backend
+    // that ignores a frame's fog — so the look is carried here and consumed at bind.
+    // Defaults reproduce the old hardcode exactly, so an app that sets neither is
+    // unchanged.
+    ambient: axiom_host::FrameAmbient,
+    depth_fog: Option<axiom_host::FrameDepthFog>,
     // The live presenter for a caller-owned frame loop (see
     // `bind_present_surface` / `present_frame` in the wasm32 `web` arm). A shared
     // slot so the asynchronous backend init can fill it off-loop; empty until then
@@ -63,6 +79,8 @@ impl WindowingApi {
             surface: None,
             next_tick: 0,
             frames_driven: 0,
+            ambient: axiom_host::FrameAmbient::default_hemisphere(),
+            depth_fog: None,
             #[cfg(target_arch = "wasm32")]
             presenter: std::rc::Rc::new(std::cell::RefCell::new(None)),
         }
@@ -108,6 +126,33 @@ impl WindowingApi {
                 .expect("adapter requires a presentation surface, matching the device request");
             self.surface = Some(request);
         })
+    }
+
+    /// Set the app-authored **hemisphere ambient** the live backend binds with —
+    /// the sky/ground fill every unlit face receives. Without this the driver binds
+    /// the engine default hemisphere, which is why an app that authored a night
+    /// ambient still rendered under a default daylight fill in the browser.
+    pub fn set_ambient(&mut self, ambient: axiom_host::FrameAmbient) {
+        self.ambient = ambient;
+    }
+
+    /// The render-look hemisphere ambient the live backend binds with.
+    pub const fn ambient(&self) -> axiom_host::FrameAmbient {
+        self.ambient
+    }
+
+    /// Set the app-authored **atmospheric depth fog** the live backend binds with —
+    /// the colour distance recedes toward and the normalized-depth range over which
+    /// it does. Both live backends read the same numbers, so the horizon dissolves
+    /// identically whichever won the cascade. Unset (the default) leaves each backend
+    /// on its prior default.
+    pub fn set_depth_fog(&mut self, depth_fog: axiom_host::FrameDepthFog) {
+        self.depth_fog = Some(depth_fog);
+    }
+
+    /// The render-look depth fog the live backend binds with, if the app authored one.
+    pub const fn depth_fog(&self) -> Option<axiom_host::FrameDepthFog> {
+        self.depth_fog
     }
 
     /// Whether a surface has been configured.
@@ -265,6 +310,38 @@ mod tests {
         assert_eq!(d.is_surface_configured(), w.is_surface_configured());
         assert_eq!(d.next_tick(), w.next_tick());
         assert!(format!("{w:?}").starts_with("WindowingApi"));
+    }
+
+    #[test]
+    fn render_look_defaults_to_the_engine_hemisphere_and_no_fog() {
+        // The defaults reproduce exactly what every `run_web*` entry used to
+        // hardcode at bind, so an app that authors neither is unchanged.
+        let w = WindowingApi::new();
+        assert_eq!(
+            w.ambient(),
+            axiom_host::FrameAmbient::default_hemisphere()
+        );
+        assert_eq!(w.depth_fog(), None);
+    }
+
+    #[test]
+    fn authored_render_look_is_what_the_driver_binds_with() {
+        let mut w = WindowingApi::new();
+        // A night race authors a dark, cool ambient; before this the live browser
+        // bind discarded it and lit the scene with the default daylight hemisphere.
+        let night = axiom_host::FrameAmbient::new([0.05, 0.07, 0.13], [0.03, 0.03, 0.04]);
+        w.set_ambient(night);
+        assert_eq!(w.ambient(), night);
+        assert_ne!(w.ambient(), axiom_host::FrameAmbient::default_hemisphere());
+
+        let fog = axiom_host::FrameDepthFog::new(
+            Ratio::finite_or_zero(0.985),
+            Ratio::finite_or_zero(1.0),
+            Ratio::finite_or_zero(0.92),
+            [0.02, 0.03, 0.08],
+        );
+        w.set_depth_fog(fog);
+        assert_eq!(w.depth_fog(), Some(fog));
     }
 
     #[test]

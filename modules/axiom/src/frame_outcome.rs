@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use axiom_host::{FrameAmbient, FramePostProcess, SdfScene};
+use axiom_host::{FrameAmbient, FrameDepthFog, FramePostProcess, SdfScene};
 
 /// One drawn object: its wgpu-ready model-view-projection matrix and its
 /// world (model) matrix (both column-major, 16 floats), its linear RGBA colour,
@@ -202,6 +202,12 @@ pub struct FrameOutcome {
     /// so the offscreen capture and the live present arm light identically from
     /// the app's authored value, instead of each hardcoding a dim default.
     ambient: FrameAmbient,
+    /// The frame's atmospheric depth fog — the colour distance recedes toward and
+    /// the normalized-depth range over which it does. Carried on the frame like the
+    /// ambient (the app's authored render-look) so the GPU shader's fog term and the
+    /// Canvas 2D fog post-pass read the *same* numbers; `None` leaves each backend
+    /// on its prior default, exactly as before.
+    depth_fog: Option<FrameDepthFog>,
     /// The frame's tonemap/colour grade — the exposure/white-balance/contrast/
     /// saturation post-process every backend applies to its presented pixels.
     /// Carried on the frame like the ambient (the app's authored render-look) so
@@ -240,6 +246,9 @@ impl FrameOutcome {
             // the app's authored value. A frame that never sets ambient renders
             // exactly as before.
             ambient: FrameAmbient::default_hemisphere(),
+            // No fog by default; `with_depth_fog` overrides it with the app's
+            // authored atmosphere. A frame that never sets one is unchanged.
+            depth_fog: None,
             // No grade by default; `with_postprocess` overrides it with the app's
             // authored grade. A frame that never sets one presents untonemapped.
             postprocess: None,
@@ -264,6 +273,19 @@ impl FrameOutcome {
     /// The frame's hemisphere ambient — the sky/ground fill lighting unlit faces.
     pub const fn ambient(&self) -> FrameAmbient {
         self.ambient
+    }
+
+    /// Set the frame's atmospheric depth fog (the app's authored aerial
+    /// perspective). Carried as an `Option` so an unfogged frame threads `None`
+    /// through unchanged.
+    pub(crate) fn with_depth_fog(mut self, depth_fog: Option<FrameDepthFog>) -> Self {
+        self.depth_fog = depth_fog;
+        self
+    }
+
+    /// The frame's atmospheric depth fog, or `None` when the app authored none.
+    pub const fn depth_fog(&self) -> Option<FrameDepthFog> {
+        self.depth_fog
     }
 
     /// Set the frame's tonemap/colour grade (the app's authored render-look post
@@ -492,6 +514,35 @@ mod tests {
         let lit = base.with_ambient(daylight);
         assert_eq!(lit.ambient(), daylight);
         assert_ne!(lit.ambient(), FrameAmbient::default_hemisphere());
+    }
+
+    #[test]
+    fn depth_fog_defaults_to_none_and_with_depth_fog_overrides() {
+        let base = FrameOutcome::new(
+            0,
+            0,
+            [0.0; 4],
+            Vec::new(),
+            Vec::new(),
+            [0.0; 16],
+            [0.0; 16],
+            None,
+            false,
+            false,
+        );
+        // A frame that never sets fog carries none, so every backend keeps its own
+        // prior default and existing apps render exactly as before.
+        assert_eq!(base.depth_fog(), None);
+        // `with_depth_fog` carries the app's authored atmosphere onto the frame, and
+        // an explicit `None` threads through unchanged.
+        let night = FrameDepthFog::new(
+            axiom_kernel::Ratio::finite_or_zero(0.985),
+            axiom_kernel::Ratio::finite_or_zero(1.0),
+            axiom_kernel::Ratio::finite_or_zero(0.9),
+            [0.02, 0.03, 0.08],
+        );
+        assert_eq!(base.clone().with_depth_fog(Some(night)).depth_fog(), Some(night));
+        assert_eq!(base.with_depth_fog(None).depth_fog(), None);
     }
 
     #[test]

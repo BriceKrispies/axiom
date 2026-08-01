@@ -482,6 +482,26 @@ fn set_ambient_flows_onto_the_frame_outcome() {
 }
 
 #[test]
+fn set_depth_fog_flows_onto_the_frame_outcome() {
+    let mut app = three_cube_app().build();
+    // A fresh app authors no atmosphere, so every backend keeps its prior default.
+    assert_eq!(app.depth_fog(), None);
+    assert_eq!(app.tick(0).depth_fog(), None);
+    // Authoring a night atmosphere is reflected on both the app and the rendered
+    // frame, so the GPU fog term and the Canvas 2D fog post-pass read the same
+    // numbers on the very next frame.
+    let night = axiom_host::FrameDepthFog::new(
+        axiom_kernel::Ratio::finite_or_zero(0.985),
+        axiom_kernel::Ratio::finite_or_zero(1.0),
+        axiom_kernel::Ratio::finite_or_zero(0.9),
+        [0.02, 0.03, 0.08],
+    );
+    app.set_depth_fog(night);
+    assert_eq!(app.depth_fog(), Some(night));
+    assert_eq!(app.tick(1).depth_fog(), Some(night));
+}
+
+#[test]
 fn set_postprocess_flows_onto_the_frame_outcome() {
     let mut app = three_cube_app().build();
     // A fresh app authors no grade, so the rendered frame presents untonemapped.

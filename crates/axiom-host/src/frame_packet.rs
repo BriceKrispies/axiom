@@ -267,6 +267,7 @@ pub struct FramePacket {
     sdf: Option<SdfScene>,
     volumetrics: Option<crate::frame_volumetrics::FrameVolumetrics>,
     ambient: Option<crate::frame_ambient::FrameAmbient>,
+    depth_fog: Option<crate::frame_depth_fog::FrameDepthFog>,
     postprocess: Option<crate::frame_postprocess::FramePostProcess>,
     retro_32bit: Option<crate::frame_retro_32bit::FrameRetro32BitProfile>,
 }
@@ -300,6 +301,7 @@ impl FramePacket {
             sdf: None,
             volumetrics: None,
             ambient: None,
+            depth_fog: None,
             postprocess: None,
             retro_32bit: None,
         }
@@ -353,6 +355,23 @@ impl FramePacket {
     /// backend then falls back to [`crate::FrameAmbient::default_hemisphere`]).
     pub const fn ambient(&self) -> Option<&crate::frame_ambient::FrameAmbient> {
         self.ambient.as_ref()
+    }
+
+    /// Attach atmospheric depth fog to this frame. It is neutral frame data: every
+    /// backend mixes each pixel toward the fog colour by the *same* normalized-depth
+    /// arithmetic, so aerial perspective reads identically regardless of renderer —
+    /// the divergence [`crate::FrameDepthFog`] exists to close. A packet without one
+    /// (the default) leaves each backend on its prior default, so no existing frame
+    /// changes.
+    #[must_use]
+    pub fn with_depth_fog(mut self, depth_fog: crate::frame_depth_fog::FrameDepthFog) -> Self {
+        self.depth_fog = Some(depth_fog);
+        self
+    }
+
+    /// The frame's atmospheric depth fog, or `None` when the frame carries none.
+    pub const fn depth_fog(&self) -> Option<&crate::frame_depth_fog::FrameDepthFog> {
+        self.depth_fog.as_ref()
     }
 
     /// Attach a tonemap post-process to this frame. It is neutral frame data: every
@@ -593,6 +612,21 @@ mod tests {
         let amb = crate::frame_ambient::FrameAmbient::new([0.6, 0.7, 0.8], [0.2, 0.15, 0.1]);
         let with = base.clone().with_ambient(amb);
         assert_eq!(with.ambient(), Some(&amb));
+        assert_ne!(with, base);
+    }
+
+    #[test]
+    fn with_depth_fog_attaches_and_breaks_equality() {
+        let base = sample_packet();
+        assert!(base.depth_fog().is_none());
+        let fog = crate::frame_depth_fog::FrameDepthFog::new(
+            axiom_kernel::Ratio::finite_or_zero(0.97),
+            axiom_kernel::Ratio::finite_or_zero(1.0),
+            axiom_kernel::Ratio::finite_or_zero(0.9),
+            [0.02, 0.03, 0.07],
+        );
+        let with = base.clone().with_depth_fog(fog);
+        assert_eq!(with.depth_fog(), Some(&fog));
         assert_ne!(with, base);
     }
 

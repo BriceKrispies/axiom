@@ -277,14 +277,26 @@ impl Canvas2dBackendApi {
 
     /// The shared rasterization step behind both [`Self::present_packet`] and
     /// [`Self::render_offscreen_rgba`]: build the per-frame cue options (the fog
-    /// recedes toward the *frame's* sky — override the cue profile's fog colour
-    /// with the packet clear colour each frame, leaving every other knob as
+    /// and hemisphere ambient come from the frame, leaving every other knob as
     /// configured) and run the pure software z-buffer rasterizer.
     fn rasterize(&self, packet: &FramePacket, skinned: &[SkinnedDraw]) -> SoftwareRasterResult {
         // Only one visual profile exists; this avoids an unused-field warning.
         let _ = self.profile;
         let mut cues = self.options.depth_cues();
-        cues.fog.color = packet.clear_color();
+        // The frame's authored atmospheric fog (`axiom_host::FrameDepthFog`) is the
+        // one definition of aerial perspective, and the GPU backend now reads the
+        // same numbers — so an authored fog looks the same on both. A frame that
+        // authors none keeps this backend's historical behaviour exactly: the
+        // profile's own gentle range, receding toward the frame's clear colour.
+        let clear = packet.clear_color();
+        let authored = packet.depth_fog();
+        cues.fog.near = authored.map_or(cues.fog.near, |fog| fog.near().get());
+        cues.fog.far = authored.map_or(cues.fog.far, |fog| fog.far().get());
+        cues.fog.strength = authored.map_or(cues.fog.strength, |fog| fog.strength().get());
+        cues.fog.color = authored.map_or(clear, |fog| {
+            let rgb = fog.color();
+            [rgb[0], rgb[1], rgb[2], clear[3]]
+        });
         // The frame's hemisphere ambient drives the software lighting too, matching the
         // GPU path's ambient uniform. Colours are strength-folded, so the ambient scale
         // is 1.0; an absent frame ambient falls back to the engine default hemisphere.

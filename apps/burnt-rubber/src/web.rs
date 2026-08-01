@@ -74,6 +74,21 @@ pub fn burnt_rubber_start() {
     let meshes = state.borrow_mut().app.running().mesh_set();
     let materials = state.borrow_mut().app.running().material_textures();
 
+    // Hand the driver the render look the scene authored (a dark cool ambient and
+    // the night's depth fog) so the live backend binds with it. Without this the
+    // browser render silently uses the engine's default daylight hemisphere and no
+    // fog, which is why the live race read like an overcast afternoon with a
+    // cut-out horizon while the same scene captured correctly off-screen.
+    {
+        let mut guard = state.borrow_mut();
+        let running = guard.app.running();
+        let (ambient, depth_fog) = (running.ambient(), running.depth_fog());
+        windowing.set_ambient(ambient);
+        if let Some(fog) = depth_fog {
+            windowing.set_depth_fog(fog);
+        }
+    }
+
     let frame_state = state.clone();
     let frame_held = held.clone();
     let frame = move |tick: u64| {

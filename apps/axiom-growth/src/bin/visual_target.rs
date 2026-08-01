@@ -311,6 +311,8 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
         rd.clear,
         None,
         rd.ambient,
+        // The diorama authors no atmosphere; `none` is an exact shader no-op.
+        axiom_host::FrameDepthFog::none(),
         None,
         axiom_host::BackendCapabilityProfile::all(),
         None,

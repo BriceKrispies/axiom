@@ -295,6 +295,8 @@ fn render_capture(inputs: &CaptureInputs) -> Vec<u8> {
         // No SDF raymarch scene in the growth agent screenshot — meshes only.
         None,
         axiom_host::FrameAmbient::default_hemisphere(),
+        // The terrain screenshot authors no atmosphere.
+        axiom_host::FrameDepthFog::none(),
         None,
         axiom_host::BackendCapabilityProfile::all(),
         None,

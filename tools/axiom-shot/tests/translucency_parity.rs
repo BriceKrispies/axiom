@@ -198,6 +198,7 @@ fn render_gpu(
         packet.clear_color(),
         packet.sdf(),
         axiom_host::FrameAmbient::default_hemisphere(),
+        axiom_host::FrameDepthFog::none(),
         None,
         axiom_host::BackendCapabilityProfile::all(),
         None,

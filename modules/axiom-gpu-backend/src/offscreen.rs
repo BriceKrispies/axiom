@@ -34,6 +34,7 @@ pub(crate) fn render_to_rgba(
     clear: [f32; 4],
     sdf: Option<&axiom_host::SdfScene>,
     ambient: axiom_host::FrameAmbient,
+    depth_fog: axiom_host::FrameDepthFog,
     retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
     profile: axiom_host::BackendCapabilityProfile,
     volumetrics: Option<axiom_host::FrameVolumetrics>,
@@ -99,6 +100,7 @@ pub(crate) fn render_to_rgba(
         max_instances,
         shadow_size,
         ambient,
+        depth_fog,
     );
 
     // A retro 32-bit profile renders the scene into a small internal target and then a

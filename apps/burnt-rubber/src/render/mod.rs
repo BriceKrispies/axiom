@@ -24,8 +24,8 @@ pub mod scenery_pool;
 pub mod surface_builder;
 
 use axiom::prelude::{
-    Angle, Camera, Color, DirectionalLight, Entity, FrameAmbient, Mesh, PerspectiveProjection,
-    PointLight, RunningApp, Spawn, Transform, Vec3, Visible,
+    Angle, Camera, Color, DirectionalLight, Entity, FrameAmbient, FrameDepthFog, Mesh,
+    PerspectiveProjection, PointLight, Ratio, RunningApp, Spawn, Transform, Vec3, Visible,
 };
 use axiom_math::{Mat4, Quat};
 
@@ -89,6 +89,21 @@ impl RaceScene {
         app.set_ambient(FrameAmbient::new(
             [0.055, 0.065, 0.100],
             [0.035, 0.040, 0.050],
+        ));
+        // The night air. Everything recedes into the sky colour rather than staying
+        // fully lit out to the far plane, which is what gives the road, the trees and
+        // the skyline their depth instead of a hard cut-out horizon.
+        //
+        // The range is normalized device depth, which is strongly non-linear over a
+        // `NEAR_PLANE`..`FAR_PLANE` frustum: 0.990 is ~110 m out (the fog just starts
+        // to bite past the near traffic) and 0.9993 is ~900 m (the skyline is almost
+        // fully atmosphere). Reaching 0.9 rather than 1.0 keeps a faint silhouette at
+        // the vanishing point instead of erasing it.
+        app.set_depth_fog(FrameDepthFog::new(
+            Ratio::finite_or_zero(0.990),
+            Ratio::finite_or_zero(0.9993),
+            Ratio::finite_or_zero(0.9),
+            palette::SKY,
         ));
 
         let road = RoadChunks::install(app, track, &tuning.course, palette.road);

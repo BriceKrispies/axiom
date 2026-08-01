@@ -10,7 +10,8 @@
 
 use axiom_frame::{FrameApi, FrameBuilder};
 use axiom_host::{
-    FrameAmbient, FramePostProcess, HostApi, HostLifecycleSignal, HostStepDriver, HostViewport,
+    FrameAmbient, FrameDepthFog, FramePostProcess, HostApi, HostLifecycleSignal, HostStepDriver,
+    HostViewport,
 };
 use axiom_kernel::{
     BinaryReader, BinaryWriter, DeterministicRng, KernelError, KernelErrorCode, KernelErrorScope,
@@ -57,8 +58,9 @@ pub use authoring::TextureDataError;
 /// The per-frame `tick` family.
 mod frame;
 
-/// The running app's per-frame render-look setters (clear colour + hemisphere
-/// ambient) — the "what the frame looks like" knobs, grouped in one small file.
+/// The running app's per-frame render-look setters (clear colour, hemisphere
+/// ambient, depth fog, colour grade) — the "what the frame looks like" knobs,
+/// grouped in one small file.
 mod render_look;
 
 /// The live-backend resource exports (mesh streams, material albedos).
@@ -155,6 +157,15 @@ impl App {
         let meshes = running.mesh_set();
         let materials = running.material_textures();
         let max_instances = running.renderable_count() as u32;
+        // The app-authored render look reaches the live driver, which binds the
+        // backend with it. Without this the browser render used the engine default
+        // hemisphere and no fog no matter what the app authored, so a night scene
+        // came out under a default daylight fill.
+        windowing.set_ambient(running.ambient());
+        running
+            .depth_fog()
+            .into_iter()
+            .for_each(|fog| windowing.set_depth_fog(fog));
         let _ =
             windowing.run_web_multi(&surface_id, meshes, materials, max_instances, move |tick| {
                 let outcome = running.tick(tick);
@@ -201,6 +212,15 @@ impl App {
         let meshes = running.mesh_set();
         let materials = running.material_textures();
         let max_instances = running.renderable_count() as u32;
+        // The app-authored render look reaches the live driver, which binds the
+        // backend with it. Without this the browser render used the engine default
+        // hemisphere and no fog no matter what the app authored, so a night scene
+        // came out under a default daylight fill.
+        windowing.set_ambient(running.ambient());
+        running
+            .depth_fog()
+            .into_iter()
+            .for_each(|fog| windowing.set_depth_fog(fog));
         let _ =
             windowing.run_web_compare(surface_ids, meshes, materials, max_instances, move |tick| {
                 let outcome = running.tick(tick);
@@ -258,6 +278,11 @@ pub struct RunningApp {
     // carried onto every `FrameOutcome`. Defaults to the engine hemisphere so an
     // app that never sets it renders exactly as before.
     ambient: FrameAmbient,
+    // The frame's atmospheric depth fog, authored by the app and carried onto every
+    // `FrameOutcome`, so the GPU shader's fog term and the Canvas 2D fog post-pass
+    // read the same numbers. `None` leaves each backend on its own prior default, so
+    // an app that never sets one is unchanged.
+    depth_fog: Option<FrameDepthFog>,
     // The frame's tonemap/colour grade (exposure/white-balance/contrast/
     // saturation), authored by the app and carried onto every `FrameOutcome` so
     // both the offscreen capture and the live present arm grade identically.
@@ -338,6 +363,7 @@ impl RunningApp {
             render: app.render,
             clear_color: surface.clear_color().to_array(),
             ambient: FrameAmbient::default_hemisphere(),
+            depth_fog: None,
             postprocess: None,
             light_direction: authored.light_direction,
             meshes: authored.meshes,

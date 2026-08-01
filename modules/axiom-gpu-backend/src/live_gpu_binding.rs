@@ -108,6 +108,7 @@ impl LiveGpuBinding {
         max_instances: u32,
         shadow_size: u32,
         ambient: axiom_host::FrameAmbient,
+        depth_fog: axiom_host::FrameDepthFog,
         preference: Option<axiom_host::BackendKind>,
     ) -> Result<LiveGpuBinding, JsValue> {
         use axiom_host::BackendKind;
@@ -281,6 +282,10 @@ impl LiveGpuBinding {
             // threaded from the run loop through bind so the live render lights unlit
             // faces the same way the offscreen capture does.
             ambient,
+            // The app-authored atmospheric depth fog, threaded the same way, so the
+            // live horizon recedes exactly as the Canvas 2D fallback's and the
+            // offscreen capture's do.
+            depth_fog,
         );
 
         // The intermediate colour target the scene renders into (then upscaled to

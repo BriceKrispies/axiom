@@ -4,7 +4,7 @@
 //! they live together here (a child module of `app`, so they reach `RunningApp`'s
 //! private render fields) to keep `app.rs` focused on lifecycle + stepping.
 
-use axiom_host::{FrameAmbient, FramePostProcess};
+use axiom_host::{FrameAmbient, FrameDepthFog, FramePostProcess};
 
 use crate::app::RunningApp;
 
@@ -26,6 +26,21 @@ impl RunningApp {
     /// The frame's hemisphere ambient (the app's authored sky/ground fill).
     pub const fn ambient(&self) -> FrameAmbient {
         self.ambient
+    }
+
+    /// Set the frame's atmospheric depth fog — the colour distance recedes toward
+    /// and the normalized-depth range over which it does. The authored value flows
+    /// onto every `FrameOutcome` and is consumed by **both** backends (the GPU
+    /// shader's fog term and the Canvas 2D fog post-pass read the same numbers), so
+    /// a scene's horizon dissolves into its sky the same way whichever backend won
+    /// the cascade. An app that authors none is unchanged.
+    pub fn set_depth_fog(&mut self, depth_fog: FrameDepthFog) {
+        self.depth_fog = Some(depth_fog);
+    }
+
+    /// The frame's atmospheric depth fog, or `None` when the app authored none.
+    pub const fn depth_fog(&self) -> Option<FrameDepthFog> {
+        self.depth_fog
     }
 
     /// Set the frame's tonemap/colour grade (exposure/white-balance/contrast/

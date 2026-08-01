@@ -111,6 +111,10 @@ impl RunningApp {
         // both backends present the same filmic look (captured before the closure
         // borrows `self`).
         let postprocess = self.postprocess;
+        // The app's authored atmospheric fog rides onto the outcome the same way, so
+        // both backends recede distance into the same colour over the same range
+        // (captured before the closure borrows `self`).
+        let depth_fog = self.depth_fog;
         let rendered = self.render.then(|| {
             let mut frame =
                 self.pipeline
@@ -215,6 +219,7 @@ impl RunningApp {
             )
             .with_skinned_draws(skinned_draws)
             .with_ambient(ambient)
+            .with_depth_fog(depth_fog)
             .with_postprocess(postprocess)
         });
         rendered.unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))

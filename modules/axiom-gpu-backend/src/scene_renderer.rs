@@ -43,9 +43,28 @@ struct Lights {
     // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
     sky: vec4<f32>,
     ground: vec4<f32>,
+    // Atmospheric depth fog (the frame's `axiom_host::FrameDepthFog`): rgb = the
+    // colour distance recedes toward, w = the maximum mix fraction. A frame that
+    // carries no fog packs w = 0, so `fog_factor` is 0 for every fragment and the
+    // whole term is an exact no-op.
+    fog_color: vec4<f32>,
+    // x = fog start, y = fog full-density depth (both normalized device depth); zw unused.
+    fog_range: vec4<f32>,
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
+
+// The frame's depth-fog mix fraction for a fragment's normalized device depth.
+// This is the *same* arithmetic the Canvas 2D backend's `fog_mix` applies, on the
+// *same* quantity — that backend reads its z-buffer, this one reads
+// `@builtin(position).z` — which is what keeps the two backends' horizons in
+// parity instead of one fogging and the other not. A degenerate or inverted range
+// is safe: the span is floored before the divide and the result is clamped.
+fn fog_factor(ndc_depth: f32) -> f32 {
+    let span = max(abs(lights.fog_range.y - lights.fog_range.x), 1e-6);
+    let t = clamp((ndc_depth - lights.fog_range.x) / span, 0.0, 1.0);
+    return t * clamp(lights.fog_color.w, 0.0, 1.0);
+}
 
 // Capability bits mirrored from axiom_host::RenderCapability (pinned by the host's
 // `capability_bits_are_the_gpu_shader_contract` test): the four per-fragment features
@@ -242,7 +261,12 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         let diffuse = max(dot(N, L), 0.0) * atten;
         lit = lit + base.rgb * lt.col.rgb * lt.col.w * diffuse;
     }
-    return vec4<f32>(lit, base.a);
+    // Atmospheric perspective, last: distance recedes toward the frame's fog colour.
+    // This is applied AFTER lighting on purpose — fog replaces the surface's radiance,
+    // it does not tint the light — which is also where the Canvas 2D backend's fog
+    // post-pass sits (on the composited image), so the two agree.
+    let fogged = mix(lit, lights.fog_color.rgb, fog_factor(in.clip.z));
+    return vec4<f32>(fogged, base.a);
 }
 "#;
 
@@ -291,9 +315,22 @@ struct Lights {
     // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
     sky: vec4<f32>,
     ground: vec4<f32>,
+    // The frame's depth fog — this pass binds the SAME lights UBO as the mesh pass,
+    // so its `Lights` declaration must stay layout-identical. rgb = fog colour,
+    // w = maximum mix fraction; `fog_range.xy` = start / full-density NDC depth.
+    fog_color: vec4<f32>,
+    fog_range: vec4<f32>,
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
+
+// The marched hit's depth fog: the mesh pass's `fog_factor`, applied to the hit's
+// NDC depth so a raymarched surface recedes into the same atmosphere the triangles do.
+fn fog_factor(ndc_depth: f32) -> f32 {
+    let span = max(abs(lights.fog_range.y - lights.fog_range.x), 1e-6);
+    let t = clamp((ndc_depth - lights.fog_range.x) / span, 0.0, 1.0);
+    return t * clamp(lights.fog_color.w, 0.0, 1.0);
+}
 
 struct SdfPrim {
     inv_transform: mat4x4<f32>,
@@ -457,8 +494,15 @@ fn fs(in: VsOut) -> FsOut {
     let surface = scene_color(p);
     let n = surface_normal(p);
     var out: FsOut;
-    out.color = shade(surface, n, p);
-    out.depth = clip.z / clip.w;
+    let shaded = shade(surface, n, p);
+    let ndc_depth = clip.z / clip.w;
+    // Same atmosphere as the mesh pass, keyed on the hit's own NDC depth, so a
+    // marched surface and a triangle at the same distance recede by the same amount.
+    out.color = vec4<f32>(
+        mix(shaded.rgb, lights.fog_color.rgb, fog_factor(ndc_depth)),
+        shaded.a,
+    );
+    out.depth = ndc_depth;
     return out;
 }
 "#;
@@ -467,10 +511,12 @@ fn fs(in: VsOut) -> FsOut {
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Maximum lights uploaded per frame (must match the WGSL `array<Light, 16>`).
 const MAX_LIGHTS: usize = 16;
-/// Lighting uniform size in bytes: a 48-byte header (count + padding, then the
-/// hemisphere-ambient `sky` + `ground` `vec4`s) plus `MAX_LIGHTS` × two `vec4`s
-/// (32 bytes each) — std140-compatible.
-const LIGHTS_UBO_BYTES: u64 = 48 + (MAX_LIGHTS as u64) * 32;
+/// Lighting uniform size in bytes: an 80-byte header (count + caps + padding, the
+/// hemisphere-ambient `sky` + `ground` `vec4`s, then the depth-fog `fog_color` +
+/// `fog_range` `vec4`s) plus `MAX_LIGHTS` × two `vec4`s (32 bytes each) —
+/// std140-compatible. Both WGSL `Lights` declarations (the mesh pass and the SDF
+/// pass, which bind the same buffer) must match this layout.
+const LIGHTS_UBO_BYTES: u64 = 80 + (MAX_LIGHTS as u64) * 32;
 /// Maximum SDF primitives uploaded per frame (must match the WGSL
 /// `array<SdfPrim, 16>`). Primitives beyond this are dropped, the same honesty
 /// the lights path uses — see [`pack_sdf`].
@@ -541,6 +587,10 @@ pub(crate) struct SceneRenderer {
     sdf_bind_group: wgpu::BindGroup,
     /// The frame's hemisphere ambient, packed into the lights uniform each draw.
     ambient: axiom_host::FrameAmbient,
+    /// The frame's atmospheric depth fog, packed into the lights uniform each draw.
+    /// Bound alongside `ambient` (the app's authored render-look), so the two travel
+    /// together; `FrameDepthFog::none` is the no-fog value and an exact no-op.
+    depth_fog: axiom_host::FrameDepthFog,
     /// The linear-blend-skinning resources, when the device can support them.
     /// [`None`] on a device without vertex-stage storage buffers — see [`Skinning`].
     skinning: Option<Skinning>,
@@ -693,6 +743,7 @@ impl SceneRenderer {
         max_instances: u32,
         shadow_size: u32,
         ambient: axiom_host::FrameAmbient,
+        depth_fog: axiom_host::FrameDepthFog,
     ) -> SceneRenderer {
         let max_instances = max_instances.max(1);
         // The shadow-atlas edge length is the device tier's choice
@@ -954,6 +1005,7 @@ impl SceneRenderer {
             sdf_uniform_buffer,
             sdf_bind_group,
             ambient,
+            depth_fog,
             skinning,
         }
     }
@@ -987,7 +1039,7 @@ impl SceneRenderer {
         queue.write_buffer(
             &self.lights_buffer,
             0,
-            &pack_lights(lights, self.ambient, caps),
+            &pack_lights(lights, self.ambient, self.depth_fog, caps),
         );
         queue.write_buffer(
             &self.light_vp_buffer,
@@ -1733,14 +1785,21 @@ fn upload_texture(
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-/// Pack the frame's lights into the std140 lighting-uniform byte layout: a
-/// 48-byte header — light count `u32` + capability mask `u32` + 8 bytes padding, then the hemisphere-ambient
-/// `sky` + `ground` `vec4`s (rgb, w unused) — then `MAX_LIGHTS` entries of two
+/// Pack the frame's lights into the std140 lighting-uniform byte layout: an
+/// 80-byte header — light count `u32` + capability mask `u32` + 8 bytes padding, the hemisphere-ambient
+/// `sky` + `ground` `vec4`s (rgb, w unused), then the depth-fog `fog_color`
+/// (rgb + max mix fraction) and `fog_range` (start, full-density, 0, 0) `vec4`s —
+/// then `MAX_LIGHTS` entries of two
 /// `vec4`s — `v = (vec.xyz, kind)` and `col = (colour.rgb, intensity)`. Entries past
 /// the count stay zero. Capped at `MAX_LIGHTS`.
+///
+/// An absent [`axiom_host::FrameDepthFog`] packs as [`axiom_host::FrameDepthFog::none`]
+/// — zero strength — so the shader's fog term is an exact no-op and a frame that
+/// authors no fog renders byte-identically to one from before fog existed.
 fn pack_lights(
     lights: &[(u32, [f32; 3], [f32; 3], f32)],
     ambient: axiom_host::FrameAmbient,
+    depth_fog: axiom_host::FrameDepthFog,
     caps: u32,
 ) -> Vec<u8> {
     let count = lights.len().min(MAX_LIGHTS);
@@ -1751,8 +1810,24 @@ fn pack_lights(
     bytes.extend_from_slice(&caps.to_le_bytes());
     bytes.extend_from_slice(&[0u8; 8]);
     let (sky, ground) = (ambient.sky(), ambient.ground());
+    let fog = depth_fog.color();
     [
-        sky[0], sky[1], sky[2], 0.0, ground[0], ground[1], ground[2], 0.0,
+        sky[0],
+        sky[1],
+        sky[2],
+        0.0,
+        ground[0],
+        ground[1],
+        ground[2],
+        0.0,
+        fog[0],
+        fog[1],
+        fog[2],
+        depth_fog.strength().get(),
+        depth_fog.near().get(),
+        depth_fog.far().get(),
+        0.0,
+        0.0,
     ]
     .iter()
     .for_each(|f| bytes.extend_from_slice(&f.to_le_bytes()));

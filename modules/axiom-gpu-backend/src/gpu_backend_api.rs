@@ -325,6 +325,7 @@ impl GpuBackendApi {
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
         ambient: axiom_host::FrameAmbient,
+        depth_fog: axiom_host::FrameDepthFog,
         retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
         profile: axiom_host::BackendCapabilityProfile,
         volumetrics: Option<axiom_host::FrameVolumetrics>,
@@ -357,6 +358,7 @@ impl GpuBackendApi {
             clear,
             sdf,
             ambient,
+            depth_fog,
             retro_32bit,
             profile,
             volumetrics,
@@ -393,6 +395,7 @@ impl GpuBackendApi {
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         ambient: axiom_host::FrameAmbient,
+        depth_fog: axiom_host::FrameDepthFog,
         preference: Option<axiom_host::BackendKind>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let binding = crate::live_gpu_binding::LiveGpuBinding::initialize(
@@ -407,6 +410,7 @@ impl GpuBackendApi {
             max_instances,
             self.shadow_size,
             ambient,
+            depth_fog,
             preference,
         )
         .await?;

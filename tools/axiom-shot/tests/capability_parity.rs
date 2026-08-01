@@ -148,6 +148,7 @@ fn gpu(
         clear,
         sdf,
         bright_ambient(),
+        axiom_host::FrameDepthFog::none(),
         retro,
         profile,
         None,
