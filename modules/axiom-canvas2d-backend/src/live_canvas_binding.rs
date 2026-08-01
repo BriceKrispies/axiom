@@ -29,7 +29,10 @@ impl LiveCanvasBinding {
     /// pixelated upscaling and a **proportional** height. Errors (no context, wrong
     /// type) surface as `JsValue` so the caller can fall through to "unsupported".
     ///
-    /// The display height is `auto`, NOT a fixed pixel value: the canvas is a
+    /// The display width is capped at `max-width: 100%` so this binding can
+    /// never make the canvas overflow the box the app put it in — see the note
+    /// at the `set_property` call. The display height is `auto`, NOT a fixed
+    /// pixel value: the canvas is a
     /// replaced element, so `height: auto` derives the display height from the
     /// backing store's aspect ratio. Because the backing store now preserves the
     /// surface aspect (see [`CanvasQualityPreset::framebuffer_dims`]), the on-screen
@@ -60,6 +63,17 @@ impl LiveCanvasBinding {
         let _ = style.set_property("image-rendering", "pixelated");
         let _ = style.set_property("width", &format!("{display_width}px"));
         let _ = style.set_property("height", "auto");
+        // ...but never wider than whatever the app has put the canvas inside.
+        //
+        // This is an INLINE style, so it beats the app's stylesheet — including
+        // a responsive rule sized to the viewport. Without the clamp, a backing
+        // store wider than the device (a phone showing a 1280-wide surface) lays
+        // the page out 1280 CSS pixels wide, and everything the app positions
+        // against the viewport — a HUD, on-screen controls — ends up off the
+        // side of the screen. The GPU arm sets no CSS at all, so the two
+        // backends disagreed about the app's layout, which a backend has no
+        // business doing.
+        let _ = style.set_property("max-width", "100%");
         // putImageData ignores smoothing, but keep any future drawImage crisp too.
         ctx.set_image_smoothing_enabled(false);
 
