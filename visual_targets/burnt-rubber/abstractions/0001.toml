@@ -1,0 +1,92 @@
+# BACKFILLED by the critic pass (iteration 2).
+#
+# This record did not exist. Commit 5f09965c introduced new ENGINE-SPINE
+# surface — a new value type in the `host` layer, a new `FramePacket` field,
+# new read hooks in two backend modules, and new `WindowingApi` setters — as
+# part of a convergence pass, with no abstractions/NNNN.toml justifying it and
+# no `abstractions/` directory at all. The abstraction gate is not optional
+# bookkeeping: a structural change that lands without its record is exactly the
+# reaching the gate exists to catch, whether or not the change was correct.
+#
+# Judgement of the gate, stated plainly: the change ITSELF clears the gate on
+# the "genuinely cannot express" branch (see `inexpressible` below) — no app
+# author could reach it. It is the RECORD that was missing. The right ruling is
+# "missing-record, backfilled", not "too-early".
+
+axis = "depth_and_separation"
+
+# The gate's ">= 3 failed bounded attempts" branch does not apply — no bounded
+# attempt was ever made on this axis. It clears on the second branch.
+failed_attempts = []
+
+# TRUE, and for two independent reasons, both invisible from the app tier:
+#
+# 1. The live browser arm DISCARDED the frame's authored render look.
+#    `axiom-windowing`'s `run_web*` entries hardcoded
+#    `FrameAmbient::default_hemisphere()` at bind, so burnt-rubber's authored
+#    night ambient ([0.15,0.18,0.26]/[0.10,0.11,0.13]) never reached the
+#    binder and the live race rendered under the engine's default daylight
+#    hemisphere. No value an app can set fixes a value the binder never reads.
+#
+# 2. The two backends disagreed about atmosphere. The Canvas 2D raster has
+#    always run a depth-fog post-pass; the GPU scene renderer had none. The
+#    same scene therefore had a soft horizon on Canvas 2D and a hard,
+#    un-attenuated one on WebGPU/WebGL2 — a backend divergence, not an art
+#    choice, and not expressible as app data because there was no neutral
+#    contract for either backend to read.
+inexpressible = true
+
+smallest_api = """
+`axiom_host::FrameDepthFog` — one neutral value type (colour + normalized-depth
+near/far + strength, all `Ratio`, no naked f32), carried as one `Option` field
+on `FramePacket` exactly like the existing `FrameAmbient`. Absence is the
+disable and `FrameDepthFog::none` is an exact no-op, so no existing frame
+changes. Consumed by: the GPU backend (packed into the lights UBO, mixed in the
+mesh + SDF fragment stages) and the Canvas 2D backend (drives its existing
+`FogCue` from the same numbers). Plus `WindowingApi::set_ambient` /
+`set_depth_fog` so the live browser arm binds with the authored look instead of
+a hardcoded default.
+
+Full spine footprint (for the reviewer, not a claim of minimality by size):
+  crates/axiom-host/src/frame_depth_fog.rs   (new, 126 lines, 2 tests)
+  crates/axiom-host/src/frame_packet.rs      (one Option field + accessor)
+  crates/axiom-host/src/lib.rs               (one re-export)
+  modules/axiom-gpu-backend/*                (UBO pack + fragment mix)
+  modules/axiom-canvas2d-backend/*           (FogCue driven from frame data)
+  modules/axiom-windowing/*                  (render-look carried to bind)
+  modules/axiom/*                            (App facade + prelude)
+
+KNOWN NON-MINIMALITY, recorded rather than hidden: the commit message itself
+states the live arm still captures the render look at BIND rather than reading
+it per frame, and names "fold ambient + fog into one per-frame render-look
+value on the packet route" as the real end state. That follow-on is owed; this
+record exists partly so it is not forgotten.
+"""
+
+screenshot_command = """
+uv run scripts/localhost_servers.py start-app burnt-rubber --port <PORT>
+AXIOM_PW_VIEWPORT=470x836 AXIOM_PW_DPR=2 AXIOM_PW_TOUCH=1 \\
+  uv run scripts/playwright_controller.py goto http://localhost:<PORT>/
+uv run scripts/playwright_controller.py wait 6500
+uv run scripts/playwright_controller.py screenshot burnt-rubber
+"""
+
+# NOT VERIFIED BY THIS PASS. The critic lens does not build or render, and the
+# promoted champion (fc940ada) landed with no determinism note anywhere in the
+# record. This field must not be left reading like a proof it is not.
+screenshot_proof = """
+UNVERIFIED. No twice-rendered byte-identical (or GPU within-tolerance) check is
+recorded for the promoted pass-1 champion. The harness is a live browser and
+the frame carries a running wall-clock timer (champion reads 0:06.300 against
+the reference's 0:05.817), so byte-identity is not available on this path; the
+honest bar here is a repeat capture at the same wait with a stated per-pixel
+tolerance. Owed by the next pass that touches this app's render.
+"""
+
+# The Gates section of the skill applies here: this change touches crates/* and
+# modules/*, so it owes `bash scripts/coverage.sh` at 100%,
+# `cargo run -p xtask -- check-architecture` clean, and `cargo dylint --all`
+# at/under baseline. 5f09965c ships 2 tests in frame_depth_fog.rs and 20 added
+# lines in modules/axiom/src/app_tests.rs, but no gate run is recorded in this
+# campaign. Also owed.
+gates_recorded = false

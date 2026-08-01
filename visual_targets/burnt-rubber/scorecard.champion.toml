@@ -8,102 +8,144 @@
 #
 # Champion: the SAME moment captured from the real live browser build
 # (localhost axiom-serve, phone viewport 470x836 @ DPR 2, WebGL2 backend,
-# 0 KM/H - OPENING STRAIGHT - 0% - 0:05.9).
+# 0 KM/H - OPENING STRAIGHT - 0% - 0:06.3).
 #
-# SCOPE (corrected by the critic pass, iteration 1): the seed scorecard carried
-# the line "The HUD and touch pad are DOM overlay and already match; every score
-# below is about the 3D render." That is a parity claim, it is false, and it
-# silently excluded ~25% of the frame from scoring. The HUD does NOT match: the
-# champion renders its digits in a slashed-zero mono at roughly half the
-# reference's cap height, the control-hint line WRAPS onto a second line that
-# collides with the BRAKE button, and the boost/progress bars differ in cell
-# count. Every pixel of the frame is in scope. HUD mismatches are scored under
-# composition_and_framing (layout) and artifact_level (the overlap).
+# ============================================================================
+# STALENESS CORRECTION (critic pass, iteration 2)
+# ============================================================================
+# Commit fc940ada ("champion: promote pass-1 render") replaced champion.png
+# with the render produced by five source commits (59e4cc57 art-director,
+# d62e3a04 modeler, a7321618 surfacing, c85e483d lighting, 5f09965c architect)
+# and changed NOTHING ELSE. This scorecard was left describing the PREVIOUS
+# champion — an image that is no longer on disk. Concretely it asserted
+# "critically NO tail lights at all" and "a flat blue-grey box cabin" of a car
+# that now has a fastback cabin and two tail-light rectangles, and it made the
+# ~30%-of-frame road-mesh void the load-bearing reason for two of its scores
+# when the road now runs to the bottom edge of the frame.
+#
+# A scorecard that describes a deleted render is worse than an inflated one:
+# it is not measuring the champion at all. Every axis below is re-scored
+# against the image actually at champion.png, and every axis note is rewritten
+# to cite what is in THAT image.
+#
+# Only one NUMBER moves (artifact_level 1 -> 2, because the defect that pinned
+# it at 1 is genuinely gone from the promoted render). Eleven axes keep their
+# value, for materially different reasons.
+#
+# SCOPE (established by the critic pass, iteration 1, and unchanged): every
+# pixel of the frame is in scope, including the DOM HUD and touch pad. The HUD
+# does NOT match the reference — slashed-zero mono at roughly half the
+# reference's cap height, a control-hint line that WRAPS onto a second row and
+# collides with the BRAKE/GAS buttons, different boost/progress bar cell
+# counts. HUD mismatches are scored under composition_and_framing (layout) and
+# artifact_level (the overlap).
 #
 # Scored HARSHLY against IDENTITY, per the visual-convergence rubric:
 # the bar is "indistinguishable from reference.png", not "reads as the same
 # game". Most axes sit at 1 against a polished reference; that is correct.
 #
 # final_score = lowest_axis * 0.7 + average_axis * 0.3
-#             = 0 * 0.7 + 1.0833 * 0.3 = 0.325
+#             = 0 * 0.7 + (14/12) * 0.3 = 0.35   (was 0.325)
 # Lowest axis (ties broken by the fixed order below) = the next flaw to attack.
+# atmosphere is still uniquely 0 — the next attack is UNAFFECTED by this
+# recalibration.
 
 [scores]
-# 2 (was 3 — LOWERED by the critic pass). The eye height, lane and vanishing
-# point are on-model, but two facts are too large for a 3. (a) The champion's
-# road surface terminates in a hard horizontal edge at ~66% frame height and the
-# bottom third of the frame is bare void, where the reference carries asphalt and
-# lane dashes all the way to the bottom edge — roughly a third of the frame shows
-# different content, and the car straddles that seam. (b) The HUD layout differs:
-# half-height digits, a hint line that wraps to two rows, different bar lengths.
-# "Same intent, obvious gap" (3) understates a frame whose lower third is empty.
+# 2 — held, but the reason is replaced. The pass-1 art-director change fixed
+# the defect that pinned this axis: the road mesh now runs to the bottom edge
+# of the frame instead of terminating in a hard horizontal cut at ~66% height
+# with bare void below. What remains: (a) the HUD layout still differs — digits
+# at roughly half the reference's cap height, a hint line that wraps to two
+# rows, different bar cell counts; (b) the horizon sits lower and the grass
+# shoulders are narrower than the reference's, so the frame gives less room to
+# the tree line the reference builds its composition on. On-model framing with
+# a broken HUD layout is not a 3.
 composition_and_framing = 2
 
-# 1 — the car is a crude proxy: an orange box body with a flat blue-grey box
-# cabin. No sculpted rear deck, no C-pillar taper, no visible wheels, and
-# critically NO tail lights at all, where the reference's two glowing red strips
-# are the single most identifiable feature of the shot.
+# 1 — held. The car is no longer a bare box: it has a fastback cabin and two
+# rear light rectangles (d62e3a04, a7321618). It is still a crude proxy. The
+# lights are flat salmon-pink decals, not the reference's two saturated
+# GLOWING red strips — no emission, no bloom, no light thrown onto the paint or
+# road. There are still no visible wheels, no rear diffuser, no bumper break,
+# and the windshield is a flat grey slab that reads as a plate sitting on the
+# body rather than glass set into it. Body colour is orange, not red. Nobody
+# would mistake this for the reference car, which is the definition of 1.
 subject_fidelity = 1
 
-# 1 (was 2 — LOWERED). The posts, conifers and road edge do read cleanly, but
-# the silhouette that carries the shot's identity — the car — is a plain
-# rectangle, not a tapering coupe, and the buildings are featureless slabs with
-# no roofline variation. A 2 ("right structure emerging") cannot be awarded when
-# the hero silhouette is a box. When unsure, take the lower.
+# 1 — held. The fastback taper is real geometry, but from this camera (dead
+# astern) it is almost invisible: the read is still box-on-box. The buildings
+# are still featureless slabs with no roofline variation. The hero silhouette
+# is what carries this axis and it is still a rectangle.
 silhouette_readability = 1
 
-# 1 — everything is flat untextured Lambert. The reference's asphalt has a
-# specular sheen and a lit pool around the car; the champion's road is uniform
-# matte grey. Reference buildings have grids of warm lit windows; champion
-# buildings are blank grey boxes. No surface reads as a material.
+# 1 — held. Everything is flat untextured Lambert. The tail lights are a
+# lighter flat fill, not an emissive material. The asphalt is uniform matte
+# with no specular sheen and no lit pool around the car; the reference's is
+# glossy and picks up its own light. Reference buildings carry grids of warm
+# lit windows; the champion's are blank. No surface reads as a material.
 material_and_texture_detail = 1
 
-# 1 — no shadow under the car, no light cast by the tail lights, no directional
-# key. The scene is lit by what looks like flat ambient: the road, grass and
-# car all sit at roughly one brightness with no falloff toward the distance.
-# Not 0 only because surfaces are differentiated in tone at all.
+# 1 — held. c85e483d rebalanced the night key/fill and the scene's overall
+# value is much closer to night. But this axis is shadow and directionality,
+# and neither moved: there is still NO shadow under the car, no light cast by
+# the tail lights, and no directional key producing a highlight anywhere in
+# frame. A correct exposure with no shadows is still a 1.
 lighting_and_shadow = 1
 
-# 1 (was 2 — LOWERED). The hue FAMILY is right (dark sky, green trees, gold
-# posts, red-ish car) but the value and saturation are wrong on every major
-# surface, and value is what makes a night shot a night shot: reference asphalt
-# is near-black, champion's is mid blue-grey; reference grass is deep saturated
-# forest green, champion's is pale olive-sage that reads as dry daytime grass;
-# reference car is red, champion's is orange. That is not "stylized" (2), it is
-# the wrong palette wearing the right hues.
+# 1 — held. Genuine movement: the grass is now dark green instead of the pale
+# olive-sage that read as dry daytime grass, and the sky is a night navy. But
+# the two surfaces that dominate the frame are still wrong in value and hue:
+# the asphalt is a mid slate-grey where the reference's is near-black, and the
+# car is orange where the reference's is red. The conifers are a dull dark
+# teal against the reference's saturated emerald. Three of the five major
+# surfaces still wrong is the right hue family with the wrong palette, not
+# "stylized" (2).
 color_palette = 1
 
-# 1 — the champion is washed. The reference holds true blacks in the sky and
-# bright near-white lane paint; the champion's darkest pixel is a mid slate and
-# its brightest is a soft grey, so the whole image sits in a narrow mid band.
+# 1 — held. The rebalance widened the range but the image still sits in a
+# narrow band: darkest pixel is a blue-slate sky, not the reference's true
+# near-black, and the brightest lane paint is a light grey, not the
+# reference's near-white. The reference's night reads as night because it
+# holds both ends; the champion holds neither.
 contrast_and_exposure = 1
 
-# 1 — no atmospheric depth cue at all. The reference fades the far road into a
-# blue glow at the vanishing point and layers mountains behind the buildings;
-# in the champion the most distant tree is the same tone as the nearest, and
-# the road just ends at a hard aliased line.
+# 1 — held. 5f09965c added FrameDepthFog and burnt-rubber authors it, so the
+# far road and far trees do dim slightly — a real cue where there was none.
+# It is not enough to move the score: there is still no blue horizon glow at
+# the vanishing point, no mountain layer behind the buildings, and the far
+# road still converges to a hard aliased line rather than dissolving.
 depth_and_separation = 1
 
-# 0 — absent. No stars, no horizon glow, no haze, no night sky gradient. The
-# champion's sky is one flat fill colour. LOWEST AXIS — the next flaw to attack.
+# 0 — held, and this is the finding that matters. The sky is still ONE FLAT
+# FILL: no stars, no horizon glow, no gradient, no visible haze band. Pass 1
+# introduced an engine-spine atmosphere primitive (axiom_host::FrameDepthFog)
+# and this axis did not move off zero, because fog attenuates geometry and
+# this axis is about what is in the EMPTY sky — where the champion has
+# nothing. LOWEST AXIS — still the next flaw to attack, and it has now gone
+# one full pass unattacked while four higher axes were nudged.
 atmosphere = 0
 
-# 2 — the trees and posts are proportioned close to the reference, but the car
-# is too large relative to the lane width and too tall for its width, and the
-# road is too wide for the framing, which compresses the grass shoulders the
-# reference leaves open.
+# 2 — held. The posts and kerb blocks are proportioned close to the reference.
+# The car is still too tall for its width and too large for the lane, and the
+# conifers now read markedly undersized: the reference's near trees rise to
+# roughly a quarter of the frame height at the road edge, the champion's to
+# about half that and set further back. Right structure, wrong magnitude.
 scale_and_proportion = 2
 
-# 1 (was 2 — LOWERED). The dash and post rows do run in densely, but the scene
-# is missing roughly half the reference's content and a whole depth layer: about
-# ten conifers against the reference's two dozen, flat slab buildings against
-# lit apartment blocks on both shoulders, and NO mountain range behind them at
-# all. A missing layer is not "sparse but emerging".
+# 1 — held. Unchanged content: roughly ten conifers against the reference's
+# two dozen, a handful of flat slab buildings against lit apartment blocks on
+# both shoulders, and still NO mountain range behind them. A missing depth
+# layer is not "sparse but emerging".
 detail_density = 1
 
-# 1 (was 2 — LOWERED). The hard road-mesh cut leaves bare void across the lower
-# third of the frame — a defect occupying ~30% of the image, not a blemish. On
-# top of it: aliased road/grass edges, a banded dark red block across the car's
-# rear face that reads as a shading artifact, and a HUD hint line that wraps and
-# collides with the BRAKE button. Severe, frame-dominating defects are a 1.
-artifact_level = 1
+# 2 (was 1 — RAISED, and this is a real improvement in the promoted render,
+# not drift). The defect that pinned this axis at 1 — the hard road-mesh cut
+# leaving bare void across ~30% of the frame — is gone: the road now reaches
+# the bottom edge. What remains is no longer frame-dominating but is still
+# plural: the HUD hint line wraps to a second row and collides with the
+# BRAKE/GAS buttons; the speed digits render in a slashed-zero mono at about
+# half the reference's cap height; road and grass edges are aliased; the tail
+# lights read as hard-edged flat decals; and the windshield slab reads as a
+# detached grey plate. Visible defects that a viewer notices immediately, but
+# not a defect occupying a third of the image.
+artifact_level = 2

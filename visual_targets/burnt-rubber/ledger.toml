@@ -24,6 +24,12 @@
 # 0:05.933 against the reference's 0:05.817. "Matches exactly" is a parity claim
 # and no part of this campaign may carry one.
 #
+# Correction (critic pass, iteration 2): the promoted champion reads 0:06.300,
+# not the 0:05.933 recorded above and not the reference's 0:05.817. The `wait
+# 6500` recipe does not pin the timer, so the "moment" this campaign compares
+# is reproducible in game STATE (stationary, 0%, 0 near misses) but not in the
+# frame the HUD prints. Anything scored off the timer digits is scoring noise.
+#
 # Note the browser falls back to WebGL2 on this machine (WebGPU device creation
 # fails on dxil.dll), so the champion is the GL path. That is the path the
 # reference was shot on too.
@@ -122,3 +128,121 @@ atmosphere = 0
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 1
+
+# ---------------------------------------------------------------------------
+# Iteration 2 — SCORING RECALIBRATION + GATE BACKFILL. No render changed; no
+# candidate was captured. `decision` is deliberately NOT one of the loop's four
+# values, for the same reason as iteration 1: none of them describes "the
+# champion image is untouched and only the record moved".
+#
+# THE UNRECORDED PROMOTION. Between iteration 1 and this entry, FIVE source
+# commits changed the render and a sixth promoted the result:
+#   59e4cc57 art-director  composition_and_framing  (car starts 30 m in)
+#   d62e3a04 modeler       subject_fidelity         (fastback rear)
+#   a7321618 surfacing     material_and_texture_detail (tail lights)
+#   c85e483d lighting      lighting_and_shadow      (night key/fill rebalance)
+#   5f09965c architect     depth_and_separation     (FrameDepthFog + render look)
+#   fc940ada              champion.png replaced, and NOTHING else
+# fc940ada is a one-file commit. It moved the champion image without touching
+# scorecard.champion.toml, without appending a single [[iteration]], and
+# without an abstractions/ record for the spine surface 5f09965c introduced.
+# The loop's whole guarantee — that a champion is promoted only after the
+# candidate is scored against the reference and the decision is written down —
+# was skipped. This entry is the reconstruction, not a re-litigation of whether
+# the render improved (it did).
+# ---------------------------------------------------------------------------
+[[iteration]]
+iteration = 2
+attacked_axis = "none"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/abstractions/0001.toml",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic audit of the promoted pass-1 champion. Three defects in the RECORD, none
+in the decision to promote:
+
+1. STALE SCORECARD (the serious one). scorecard.champion.toml still described
+the PREVIOUS champion — an image no longer on disk. It asserted "critically NO
+tail lights at all" and "a flat blue-grey box cabin" of a car that now has a
+fastback cabin and two tail-light rectangles, and it made the ~30%-of-frame
+road-mesh void the load-bearing reason for composition_and_framing = 2 and
+artifact_level = 1 when the road now runs to the bottom edge. A scorecard
+describing a deleted render is not measuring the champion at all. Every axis
+note is rewritten against the image actually at champion.png.
+
+2. SCORE MOVEMENT. Re-scoring the real champion moves exactly ONE number:
+artifact_level 1 -> 2, because the defect that pinned it at 1 (bare void across
+a third of the frame) is genuinely gone. Eleven axes hold their value for
+materially different reasons. Notably subject_fidelity, material_and_texture_
+detail and lighting_and_shadow all HOLD AT 1 despite being the declared targets
+of three of the five pass-1 commits: the tail lights are flat salmon decals
+with no emission, the car is still an untextured box with no wheels, and there
+is still no shadow under it and no directional key anywhere in frame. Real
+structural work that lands inside the same rubric band is not a score move —
+recording it as one would be the number-gaming this ledger exists to prevent.
+final_score 0.325 -> 0.35 (0*0.7 + (14/12)*0.3).
+
+3. MISSING ABSTRACTION RECORD, now backfilled as abstractions/0001.toml.
+5f09965c introduced new engine-spine surface — axiom_host::FrameDepthFog, a new
+FramePacket field, read hooks in the GPU and Canvas 2D backend modules, and
+WindowingApi::set_ambient/set_depth_fog — with no abstractions/NNNN.toml and no
+abstractions/ directory. The change itself CLEARS the gate on the "genuinely
+cannot express" branch (the live binder discarded the app's authored ambient
+outright, and the two backends disagreed about fog with no neutral contract to
+reconcile them) — an app author could not reach either defect. The ruling is
+missing-record, not too-early. The backfill also records two obligations the
+promotion left open: no determinism/repeat-capture proof for the champion, and
+no spine gate run (coverage / check-architecture / dylint) recorded for a
+change that touches crates/* and modules/*.
+
+RIGHT-AXIS BREACH, recorded for the next pass. The lowest axis has been
+atmosphere = 0 since iteration 0. Pass 1 attacked composition_and_framing,
+subject_fidelity, material_and_texture_detail, lighting_and_shadow and
+depth_and_separation — five axes, none of them the lowest. The skill's rule is
+ONE bounded change on the LOWEST axis per iteration. A parallel proposal board
+will always tempt four axes at once; that is a reason to be explicit in the
+record, not a licence. atmosphere is still uniquely 0 after re-scoring, so this
+recalibration does not change the target — but it is now the second consecutive
+pass in which the lowest axis is named as next and then not attacked.
+
+And the axis is not moving by accident: pass 1 shipped an atmosphere-adjacent
+spine primitive (FrameDepthFog) and atmosphere stayed at 0, because fog
+attenuates GEOMETRY and this axis is about what fills the EMPTY sky — stars, a
+horizon glow at the vanishing point, a night gradient, a mountain layer. The
+champion's sky is one flat fill. The next attack must put content in the sky.
+"""
+next_attacked_axis = "atmosphere"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 2
