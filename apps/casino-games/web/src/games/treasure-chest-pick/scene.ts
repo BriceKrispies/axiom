@@ -14,7 +14,7 @@
  * (index, tick) — so no wobble can hint at which chest holds a prize.
  */
 
-import type { Camera3D, MaterialSpec, Scene, SceneInstance, SceneLight, ViewContext } from "@axiom/web-engine";
+import type { Camera3D, MaterialSpec, Scene, SceneInstance, SceneLabel, SceneLight, ViewContext } from "@axiom/web-engine";
 import type { EngineQuat, EngineVec3, GameResources, Rgba } from "@axiom/web-engine";
 import { drawStylizedWaterSurface } from "@axiom/web-engine";
 import { worldToCanvas } from "../../presentation/cameras/picking.ts";
@@ -23,7 +23,7 @@ import { phaseAge } from "../../chance-engine/sessions/session.ts";
 import type { BrandSpec } from "../../presentation/branding/brand.ts";
 import { brandMaterials } from "../../presentation/branding/brand.ts";
 import { stampText } from "../../presentation/branding/label.ts";
-import { lowDetail, weldedLetteringReads } from "../../presentation/detail.ts";
+import { lowDetail, sparseDetail, weldedLetteringReads } from "../../presentation/detail.ts";
 import { confettiBurst, CONFETTI_MATERIALS, sparkleRing } from "../../presentation/celebrations/confetti.ts";
 import { celebrationFor, outcomeRarity, speedTicks } from "../round-state.ts";
 import { clamp01, easeOutBack, easeOutCubic, lerp, pulse } from "../../presentation/stage/easing.ts";
@@ -547,7 +547,14 @@ interface ChestPose {
 /** All instances of one posed chest (body, planks, gilding, latch, lid,
  * selection pool, seam light). Materials are chosen by facing (front/side/top)
  * and by pose state (dim / selected) rather than by texture. */
-const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] => {
+/**
+ * `labelSink` collects scene TEXT this chest wants drawn. It is an out-parameter
+ * rather than part of the return because labels are a different list in the
+ * `Scene` than instances are, and the plaque's placement is only derivable here —
+ * it hangs off the lid's live pose (`crownAnchor`/`plateOrient`), which nothing
+ * outside this builder knows.
+ */
+const chestInstances = (key: string, labelSink: SceneLabel[], pose: ChestPose): readonly SceneInstance[] => {
   // Tilt toward the camera (a small back-pitch) when chosen; yaw carries idle sway.
   const q = quatMul(quatYaw(pose.yaw), quatPitch(-pose.pitch));
   const squashY = 1 - pose.squash;
@@ -558,6 +565,9 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   // lines and half the lid-arc slats (see `lidArc`). The nameplate is governed by
   // `pose.nameplate`, not by the backend.
   const low = lowDetail();
+  // The DOM renderer needs a deeper cut than `low`: it pays per element, not per
+  // pixel, so a few-pixel trim costs as much as the chest. See `sparseDetail`.
+  const sparse = sparseDetail();
   // How much of the chest is still "on the board" — gates every ground-anchored
   // decoration below.
   const grounded = 1 - clamp01(pose.flight);
@@ -757,7 +767,28 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
   // it flies to hero framing at `heroScale`, where the same strokes are an order
   // of magnitude larger and render exactly as they should. The word appears
   // precisely when the shot is about it.
-  const label = pose.nameplate && (weldedLetteringReads() || pose.selected)
+  // On the DOM renderer the brand is real TEXT — one element, a real font — rather
+  // than welded stroke boxes. That is the thing that backend does better than a
+  // rasterizer, and it is the only way the word survives there: as strokes, the
+  // small ones are culled and the plaque reads "A ME" (measured), which is why
+  // `weldedLetteringReads` had it suppressed entirely.
+  const wantsLabel = pose.nameplate && sparseDetail();
+  if (wantsLabel) {
+    labelSink.push({
+      color: pose.dim ? [0.55, 0.5, 0.48, 1] : [1, 0.98, 0.94, 1],
+      key: `${key}:brand`,
+      // Lifted off the plate by the same clearance the welded lettering used, so
+      // the text sits ON the plaque rather than inside it.
+      size: 0.3 * plateBasis.y,
+      text: pose.brandName,
+      transform: {
+        position: addV3(crownAnchor, rotateByQuat(v3(0, 0, 0.08 * plateBasis.z), plateOrient)),
+        rotation: plateOrient,
+        scale: v3(1, 1, 1),
+      },
+    });
+  }
+  const label = pose.nameplate && !wantsLabel && (weldedLetteringReads() || pose.selected)
     ? stampText(
         `${key}:brand`,
         pose.brandName,
@@ -783,9 +814,16 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
           part("gap2", v3(0, BODY.y * 0.5, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
           part("gap3", v3(0, BODY.y * 0.74, 0), v3(BODY.x + 0.02, 0.034, BODY.z + 0.02), "WoodGap"),
         ]),
-    // Side-facing wood on the end caps for a value step.
-    part("endL", v3(-BODY.x / 2 + 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
-    part("endR", v3(BODY.x / 2 - 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
+    // Side-facing wood on the end caps for a value step. On the DOM renderer
+    // these four trim parts (and the lid ribs below) are dropped: they are a
+    // shading nuance a few pixels wide, they cost a whole element each, and none
+    // of them carries the chest's silhouette. See `sparseDetail`.
+    ...(sparse
+      ? []
+      : [
+          part("endL", v3(-BODY.x / 2 + 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
+          part("endR", v3(BODY.x / 2 - 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
+        ]),
     // Gilding: corner brackets only. The reference body carries NO inboard
     // vertical straps and NO small separate lock plate — its front is a plain
     // dark panel, framed by two corner brackets, capped by the gold rail above,
@@ -796,8 +834,12 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     // chunky posts the reference draws. Net instance cost of this whole
     // re-model is zero: three parts removed here pay for the three extra hasp
     // bars above.
-    part("edgeL", v3(-BODY.x / 2 + 0.01, BODY.y / 2, BODY.z / 2), v3(0.09, BODY.y + 0.02, 0.09), trimSide),
-    part("edgeR", v3(BODY.x / 2 - 0.01, BODY.y / 2, BODY.z / 2), v3(0.09, BODY.y + 0.02, 0.09), trimSide),
+    ...(sparse
+      ? []
+      : [
+          part("edgeL", v3(-BODY.x / 2 + 0.01, BODY.y / 2, BODY.z / 2), v3(0.09, BODY.y + 0.02, 0.09), trimSide),
+          part("edgeR", v3(BODY.x / 2 - 0.01, BODY.y / 2, BODY.z / 2), v3(0.09, BODY.y + 0.02, 0.09), trimSide),
+        ]),
     ...plaque,
     ...label,
     interior,
@@ -805,7 +847,7 @@ const chestInstances = (key: string, pose: ChestPose): readonly SceneInstance[] 
     ...seam,
     lid,
     ...dome,
-    ...ribs,
+    ...(sparse ? [] : ribs),
     lidRim,
     ...hasp,
     ...rings,
@@ -1315,12 +1357,28 @@ const HELD_LIFT = v3(0, 0.5, 0);
  * he is running his errand, because the veil sits between the two: a crab drawn
  * with the rest of the shore would be dimmed to near-black exactly when the shot
  * is about him (see the instance order in `chestScene`). */
+/** How far into the chosen chest's flight the veil is dense enough that the
+ * chests left behind can stop being drawn on the DOM renderer (see the drop in
+ * `chestScene`). Matches the beat by which the water overlay has already faded. */
+const VEILED_CHEST_DROP = 0.25;
+
 const beachDecor = (tick: number, seed: number, decor: DecorDrag, crabAtHome: boolean): readonly SceneInstance[] => {
   const at = (key: keyof DecorDrag["props"]): EngineVec3 => addV3(decor.props[key], decor.held === key ? HELD_LIFT : v3(0, 0, 0));
+  // The DOM renderer skips the two most expensive pieces of set-dressing outright.
+  // The sandcastle is a base, a keep, two turrets and their crenels — the single
+  // biggest prop on the board — and the resident crab is a whole little figure of
+  // shell, claws, legs and eyes. Between them they are a large slice of a ~300
+  // element budget, spent on two things standing at the edge of frame that the
+  // GAME never refers to. Dropping them buys back the budget the chests and the
+  // reveal actually need. See `sparseDetail`.
+  //
+  // Only the crab AT HOME goes: the one that scuttles out to fetch the chosen
+  // chest is a beat of the reveal, not set-dressing, and it still runs.
+  const sparse = sparseDetail();
   return [
     ...palmTree(at("palm"), tick),
-    ...sandcastle(at("castle")),
-    ...(crabAtHome ? beachCrab(at("crab"), tick, seed) : []),
+    ...(sparse ? [] : sandcastle(at("castle"))),
+    ...(crabAtHome && !sparse ? beachCrab(at("crab"), tick, seed) : []),
     ...beachLitter(),
   ];
 };
@@ -1494,6 +1552,9 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // to, whatever the camera preset does next.
   const cameraElevation = Math.asin(-framing.forward.y);
   const flight = selected === null ? 0 : flightProgress(session, speed);
+  const sparse = sparseDetail();
+  /** Scene TEXT the chests want drawn (the brand plaque). See `chestInstances`. */
+  const chestLabels: SceneLabel[] = [];
   const liftAmount = CHEST_TIMING.lift * selectEase;
   // `framing.anchor` frames the chest's CENTER; a chest is posed from its base.
   const heroBase = addV3(framing.anchor, v3(0, (-CHEST_HEIGHT / 2) * framing.scale, 0));
@@ -1560,13 +1621,23 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
     const seam = isSelected ? clamp01((revealAge - timeline.seamStart) / Math.max(1, timeline.lidEnd - timeline.seamStart)) * (1 - lidT * 0.6) : 0;
 
     const dimmed = selected !== null && !isSelected;
+    // On the DOM renderer, a chest the reveal has left behind stops being drawn
+    // once the veil is actually over it. This is the single biggest saving in the
+    // whole phase: the reveal keeps all eight of them IN FRAME as near-black
+    // silhouettes, and the camera is moving, so each one is re-transformed,
+    // re-sorted and re-composited every frame to contribute a dark smudge on a
+    // dark floor. The threshold waits for the veil rather than popping them out
+    // at the moment of the pick. See `sparseDetail`.
+    if (sparse && dimmed && flight > VEILED_CHEST_DROP) {
+      return [];
+    }
 
     // A chosen chest rides the spiral; every other chest stays in its slot,
     // breathing on the idle bob.
     const lift = isSelected ? liftAmount : idleBob + (held ? CHEST_TIMING.heldLift : 0);
     const at = isSelected ? flown.position : v3(origin.x, origin.y + lift, origin.z);
 
-    return chestInstances(`chest${index}`, {
+    return chestInstances(`chest${index}`, chestLabels, {
       at,
       brandName: spec.brand.name,
       dim: dimmed,
@@ -1605,7 +1676,10 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // assigned at commit time climbs fully clear to hover as the frame's
       // focal point. The prize is a pure READ of the committed tier — the
       // presentation never picks it (see `prizes/index.ts`).
-      burst.push(...lightBurst(chestTop, tick, burstT, heroScale, cameraElevation));
+      // The burst's rays and motes are the same one-frame element storm as the
+      // confetti (see the celebration below); the glow disc under them carries the
+      // beat on its own. Dropped on the DOM renderer.
+      burst.push(...(sparse ? [] : lightBurst(chestTop, tick, burstT, heroScale, cameraElevation)));
       rewardInstances.push(...heroPrize(prizeKindOf(plan.tierId, rarity), chestTop, riseT, tick, settle, heroScale, cameraElevation));
     } else {
       // An empty chest: a playful grey dust puff coughs up and out (no burst,
@@ -1657,7 +1731,11 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
   // hold. On the board the chest is unrotated, so the walk can aim at the plain
   // offset with its height dropped.
   const chestSide = selected === null ? crabHome : addV3(slotAt(selected), v3(CRAB_ON_CHEST.x, 0, CRAB_ON_CHEST.z));
-  const errandCrab: readonly SceneInstance[] = !onErrand
+  // The DOM renderer drops the courier crab too. He is a whole articulated figure
+  // — shell, claws, legs, eyes — riding the one object the camera is closest to,
+  // which is precisely when elements are dearest, and he is pure ceremony: the
+  // chest's flight and the reveal read the same without him. See `sparseDetail`.
+  const errandCrab: readonly SceneInstance[] = !onErrand || sparse
     ? []
     : crabAt(
         journey.riding
@@ -1693,8 +1771,18 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       );
 
   // Celebration.
+  //
+  // Particles are the reveal's HITCH on the DOM renderer, and the hitch is what a
+  // player actually feels — the steady phases all trace at ~60fps, but one frame
+  // measured 133ms while it created 689 elements. A confetti burst is dozens of
+  // nodes appearing on a single frame, and each one has to have its DOM built
+  // right then; there is no way to spread that over the frames before it, because
+  // the frame it appears on is the first frame it exists.
+  //
+  // So the DOM renderer celebrates without confetti. Everything that carries the
+  // outcome — the open chest, the prize, the warm light — is untouched.
   const celebration: SceneInstance[] = [];
-  if (session.phase === "celebrating" && plan !== null && selected !== null) {
+  if (session.phase === "celebrating" && plan !== null && selected !== null && !sparse) {
     const profile = celebrationFor(runtime.settings, session);
     const at = addV3(heroTop, v3(0, 0.4 * heroScale, 0));
     celebration.push(
@@ -1854,6 +1942,7 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       ...rewardInstances,
       ...celebration,
     ],
+    labels: chestLabels,
     lights,
   };
 };

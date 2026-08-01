@@ -8,7 +8,7 @@
  */
 
 import type { Scene, ToneSpec, ViewContext } from "@axiom/web-engine";
-import { runGame } from "@axiom/web-engine";
+import { rendererBackendName, runGame } from "@axiom/web-engine";
 import type { CasinoHud, GameRuntime, RunningCasinoGame } from "../chance-engine/registry/definition.ts";
 import { cameraShakeOffset } from "../presentation/cameras/presets.ts";
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "../presentation/cameras/picking.ts";
@@ -88,8 +88,19 @@ export const mountCasinoGame = <TSpec, TExtra>(
   };
 
   // The optional per-frame 2D overlay layer (only games that declare `overlay`).
-  const overlay = spec.overlay === undefined ? null : attachOverlay(canvas);
+  //
+  // Resolved LAZILY, on the first rendered frame, because it depends on which
+  // backend `runGame` resolved and that has not happened yet at this point. The
+  // DOM backend gets none at all: it presents into elements and keeps no canvas
+  // in the page, so hanging a Canvas2D layer over it would put back the very
+  // thing that renderer exists to do without.
+  let overlay: { readonly ctx: CanvasRenderingContext2D; readonly remove: () => void } | null = null;
+  let overlayResolved = false;
   const drawOverlay = spec.overlay;
+  const resolveOverlay = (): void => {
+    overlayResolved = true;
+    overlay = rendererBackendName() === "CSS3D" ? null : attachOverlay(canvas);
+  };
 
   const running = runGame<CasinoState<TExtra>>(
     canvas,
@@ -108,7 +119,13 @@ export const mountCasinoGame = <TSpec, TExtra>(
       now: runtime.pinnedNowMs === undefined ? undefined : (): number => runtime.pinnedNowMs as number,
       onFrame: (state, viewCtx): void => {
         runtime.onHud(hudOf(spec, runtime.source.kind, state));
-        if (overlay !== null && drawOverlay !== undefined) {
+        if (drawOverlay === undefined) {
+          return;
+        }
+        if (!overlayResolved) {
+          resolveOverlay();
+        }
+        if (overlay !== null) {
           overlay.ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
           drawOverlay(state, overlay.ctx, viewCtx);
         }

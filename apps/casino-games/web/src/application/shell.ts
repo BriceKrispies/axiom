@@ -11,6 +11,7 @@
  */
 
 import type { BackendChoice, InputState } from "@axiom/web-engine";
+import { rendererSurface } from "@axiom/web-engine";
 import type { CasinoGameConfig } from "../chance-engine/configuration/schema.ts";
 import type { CasinoHud, CasinoGameDefinition, RunningCasinoGame } from "../chance-engine/registry/definition.ts";
 import type { CasinoGameRegistry } from "../chance-engine/registry/registry.ts";
@@ -181,18 +182,25 @@ export const bootShell = (registry: CasinoGameRegistry): void => {
   /** Re-feed canvas pointer events in LOGICAL canvas coordinates. Registered
    * after the engine's own listener, so its normalized sample wins the tick. */
   const attachPointerNormalizer = (input: InputState): (() => void) => {
+    // The surface the RENDERER presents into — the canvas on the pixel backends,
+    // its own DOM layer on CSS3D, where there is no canvas in the page at all.
+    const surface = rendererSurface();
     const normalize = (event: PointerEvent): void => {
-      const scaleX = CANVAS_WIDTH / canvas.clientWidth;
-      const scaleY = CANVAS_HEIGHT / canvas.clientHeight;
-      input.pointerEvent(event.offsetX * scaleX, event.offsetY * scaleY, event.buttons !== 0);
+      // Relative to the SURFACE, not to `event.target`. On the DOM renderer the
+      // scene is made of elements, so a tap lands on a face a few pixels across
+      // and `event.offsetX` would be measured from that face's own corner.
+      const rect = surface.getBoundingClientRect();
+      const scaleX = CANVAS_WIDTH / Math.max(1, rect.width);
+      const scaleY = CANVAS_HEIGHT / Math.max(1, rect.height);
+      input.pointerEvent((event.clientX - rect.left) * scaleX, (event.clientY - rect.top) * scaleY, event.buttons !== 0);
     };
-    canvas.addEventListener("pointerdown", normalize);
-    canvas.addEventListener("pointermove", normalize);
-    canvas.addEventListener("pointerup", normalize);
+    surface.addEventListener("pointerdown", normalize);
+    surface.addEventListener("pointermove", normalize);
+    surface.addEventListener("pointerup", normalize);
     return (): void => {
-      canvas.removeEventListener("pointerdown", normalize);
-      canvas.removeEventListener("pointermove", normalize);
-      canvas.removeEventListener("pointerup", normalize);
+      surface.removeEventListener("pointerdown", normalize);
+      surface.removeEventListener("pointermove", normalize);
+      surface.removeEventListener("pointerup", normalize);
     };
   };
 

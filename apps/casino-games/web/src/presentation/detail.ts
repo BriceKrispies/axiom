@@ -39,6 +39,35 @@ export const lowDetail = (): boolean => {
 const DOM_BACKEND = "CSS3D";
 
 /**
+ * True on the DOM renderer, the signal to build the SPARSEST variant of a scene.
+ *
+ * `lowDetail()` is not enough for it, and the difference is a difference in kind,
+ * not degree. The software rasterizer pays per pixel, so a 3-pixel gold trim is
+ * nearly free there and `lowDetail()` only needs to shed the geometry that costs
+ * fill. The DOM renderer pays per ELEMENT: that same 3-pixel trim costs a full
+ * composite and depth-sort, exactly as much as the chest behind it. Its whole
+ * budget is ~300 elements for 60fps, and this scene's chests alone are nine
+ * copies of a twenty-part model.
+ *
+ * So on this backend the app drops what exists only to add a VALUE STEP at board
+ * scale — end-cap wood, corner brackets, lid ribs — plus the set-dressing the
+ * game never refers to (the sandcastle, the resident crab, the courier crab) and
+ * the losing chests once the reveal's veil is over them. The chest is still a
+ * chest: body, lid, dome, rim, hasp, plaque.
+ *
+ * This is a scene-authoring decision and belongs here with the rest of the detail
+ * policy, for the same reason `weldedLetteringReads()` does: the backend's job is
+ * HOW to draw, not WHAT is worth drawing.
+ */
+export const sparseDetail = (): boolean => {
+  try {
+    return rendererBackendName() === DOM_BACKEND;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * False when the live backend cannot render HAIRLINE WELDED GEOMETRY — lettering
  * built from many sub-pixel stroke boxes, as `stampText` produces.
  *

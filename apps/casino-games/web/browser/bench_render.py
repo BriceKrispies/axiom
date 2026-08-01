@@ -65,6 +65,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--batches", type=int, default=9)
     ap.add_argument("--per-batch", type=int, default=30)
     ap.add_argument("--settle", type=float, default=6.0)
+    ap.add_argument("--extra", default="", help="extra query string, e.g. press=Space@30 to freeze mid-reveal")
     ap.add_argument("--label", default="")
     ap.add_argument(
         "--profile",
@@ -74,6 +75,7 @@ def main(argv: list[str]) -> int:
     args = ap.parse_args(argv)
 
     boot = f"{args.url.rstrip('/')}/?game={args.game}&backend={args.backend}&seed={args.seed}&shot={args.shot}"
+    boot += f"&{args.extra}" if args.extra else ""
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, args=BROWSER_ARGS)
