@@ -54,6 +54,34 @@ def _viewport():
 
 VIEWPORT = _viewport()
 
+
+def _mobile_emulation():
+    """Optional mobile emulation knobs.
+
+    `AXIOM_PW_DPR` sets the device pixel ratio (a phone is typically 2-3), and
+    `AXIOM_PW_TOUCH=1` presents the page as a touch device. Together with
+    `AXIOM_PW_VIEWPORT` these reproduce what a phone actually renders: a
+    physical surface several times the CSS size, which is what drives the
+    engine's device-tier render-resolution cap and the app's touch controls.
+    A small desktop window is NOT the same thing and will not show
+    resolution-dependent artifacts.
+    """
+    opts = {}
+    raw = os.environ.get("AXIOM_PW_DPR", "")
+    try:
+        dpr = float(raw)
+        if dpr > 0:
+            opts["device_scale_factor"] = dpr
+    except ValueError:
+        pass
+    if os.environ.get("AXIOM_PW_TOUCH", "") == "1":
+        opts["has_touch"] = True
+        opts["is_mobile"] = True
+    return opts
+
+
+MOBILE = _mobile_emulation()
+
 STATE_DIR = Path(__file__).resolve().parent / ".playwright-controller"
 LOG_FILE = STATE_DIR / "commands.log"
 DAEMON_LOG = STATE_DIR / "daemon.log"
@@ -129,7 +157,8 @@ class Daemon:
             pass
         self.browser = self._launch_browser()
         self.context = self.browser.new_context(
-            **({"viewport": VIEWPORT} if VIEWPORT else {})
+            **({"viewport": VIEWPORT} if VIEWPORT else {}),
+            **MOBILE,
         )
         self.page = self.context.new_page()
         self.console = []
