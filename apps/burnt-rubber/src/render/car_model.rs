@@ -4,12 +4,30 @@
 //! cylinders for the wheels — because that vocabulary is what exists, and a
 //! stylised low-poly silhouette read at 300 km/h is worth more than a detailed
 //! model read never. What matters at speed is the **silhouette and the lights**:
-//! a wedge nose, a raked cabin set back, a rear wing, four wheels that visibly
-//! turn and steer, brake lights that come on, and boost exhaust that does not.
+//! a wedge nose, a raked cabin set back, four wheels that visibly turn and
+//! steer, brake lights that come on, and boost exhaust that does not.
+//!
+//! ## The car is seen from behind, so the rear is where the parts go
+//!
+//! The chase camera looks at the player's tail for the entire race: the rear
+//! three-quarter is the only view of this car anyone ever gets. A single body
+//! box therefore spends the whole game presenting one big flat coloured wall,
+//! which is exactly what a car does not look like. The parts that break that
+//! wall up are all rear parts, and they are the ones a real car reads by:
+//!
+//! * **haunches** — the widest point of the car is the rear arches, not the
+//!   cabin, and the body is drawn *narrower* than the wheel track so the tyres
+//!   stand proud of it instead of being buried inside a full-width slab;
+//! * a **raked backlight** — the long dark sloping rear window over a short
+//!   decklid is the single most recognisable line on a fastback;
+//! * **tail-light bars** — wide, shallow, and standing proud of the rear panel
+//!   rather than sunk flush into it;
+//! * a **valance** — a near-black bumper across the bottom of the rear panel,
+//!   which both grounds the car and halves the height of the coloured wall.
 //!
 //! Every part is a separate entity whose world transform is written each frame.
 //! The parts are not parented: the app already knows every part's world pose (it
-//! is composing the chassis basis anyway), so writing thirteen transforms is
+//! is composing the chassis basis anyway), so writing seventeen transforms is
 //! cheaper and far easier to read than maintaining a hierarchy and a set of
 //! local transforms that have to be kept consistent with it.
 
@@ -34,13 +52,30 @@ pub const WHEELBASE_HALF: f32 = 1.42;
 /// Half the track width between wheel centres (m).
 pub const TRACK_HALF: f32 = 0.86;
 
+/// How far the rear window lies back from horizontal (rad).
+///
+/// Applied as a *negative* chassis pitch, because positive pitch is nose-down:
+/// the front edge of the glass has to rise to the roof and the back edge fall to
+/// the decklid, which is the opposite sense.
+pub const BACKLIGHT_RAKE: f32 = 0.38;
+
+/// How wide the body box is, as a fraction of the car's full width.
+///
+/// Strictly less than one: the full width belongs to the rear arches, and the
+/// gap is what lets the tyres show past the bodywork instead of hiding inside
+/// it. A full-width body box is why the old car read as a van.
+pub const BODY_WIDTH_FRACTION: f32 = 0.86;
+
 /// The player car's parts.
 #[derive(Debug, Clone)]
 pub struct PlayerCar {
     body: Entity,
     nose: Entity,
     cabin: Entity,
+    backlight: Entity,
     wing: Entity,
+    haunches: [Entity; 2],
+    valance: Entity,
     wheels: [Entity; 4],
     brake_lights: [Entity; 2],
     exhausts: [Entity; 2],
@@ -58,7 +93,13 @@ impl PlayerCar {
             body: part(app, cube, palette.car_body),
             nose: part(app, cube, palette.car_body),
             cabin: part(app, cube, palette.car_glass),
+            backlight: part(app, cube, palette.car_glass),
             wing: part(app, cube, palette.car_body),
+            haunches: [part(app, cube, palette.car_body), part(app, cube, palette.car_body)],
+            // The valance is the tyre material on purpose: it is the darkest
+            // thing in the palette, and a near-black bumper is what stops the
+            // rear panel reading as one tall coloured slab.
+            valance: part(app, cube, palette.tyre),
             wheels: [
                 part(app, cylinder, palette.tyre),
                 part(app, cylinder, palette.tyre),
@@ -85,40 +126,76 @@ impl PlayerCar {
         let basis = ChassisBasis::of(pose);
         let rotation = basis.rotation();
 
-        // Body: the main mass, sitting low.
+        // Body: the main mass, sitting low — and narrower than the wheel track,
+        // so the tyres and the arches, not the flanks, are the widest thing.
         app.set(
             self.body,
             Transform::new(
-                basis.at(Vec3::new(0.0, 0.52, -0.15)),
+                basis.at(Vec3::new(0.0, 0.46, -0.15)),
                 rotation,
-                Vec3::new(CAR_WIDTH, 0.62, CAR_LENGTH * 0.78),
+                Vec3::new(CAR_WIDTH * BODY_WIDTH_FRACTION, 0.52, CAR_LENGTH * 0.78),
             ),
         );
-        // Nose: narrower and lower, so the silhouette is a wedge.
+        // Nose: narrower and lower still, so the silhouette is a wedge.
         app.set(
             self.nose,
             Transform::new(
-                basis.at(Vec3::new(0.0, 0.40, 1.90)),
+                basis.at(Vec3::new(0.0, 0.34, 1.90)),
                 rotation,
-                Vec3::new(CAR_WIDTH * 0.86, 0.36, 1.20),
+                Vec3::new(CAR_WIDTH * 0.72, 0.34, 1.20),
             ),
         );
-        // Cabin: set back and raked.
+        // Cabin: a narrow greenhouse set forward of the rear axle, so the tail
+        // behind it is long. A cabin as wide as the body is a van roof.
         app.set(
             self.cabin,
             Transform::new(
-                basis.at(Vec3::new(0.0, 1.00, -0.35)),
+                basis.at(Vec3::new(0.0, 0.94, 0.10)),
                 rotation,
-                Vec3::new(CAR_WIDTH * 0.74, 0.46, 1.70),
+                Vec3::new(CAR_WIDTH * 0.64, 0.44, 1.30),
             ),
         );
-        // Rear wing, on struts implied by the body.
+        // Backlight: the long raked rear window running from the back of the
+        // roof down to the decklid. Pitched in the *chassis* frame, so it keeps
+        // its rake through pitch and roll instead of standing up under load.
+        app.set(
+            self.backlight,
+            Transform::new(
+                basis.at(Vec3::new(0.0, 0.95, -1.08)),
+                rotation.multiply(Quat::from_euler_xyz(-BACKLIGHT_RAKE, 0.0, 0.0)),
+                Vec3::new(CAR_WIDTH * 0.62, 0.08, 1.04),
+            ),
+        );
+        // Rear haunches: the arches over the back wheels, reaching the car's
+        // full width. These are the shoulders the whole rear silhouette hangs
+        // off, and the reason the tail reads wider than the roof.
+        for (index, entity) in self.haunches.iter().enumerate() {
+            let side = [-1.0, 1.0][index];
+            app.set(
+                *entity,
+                Transform::new(
+                    basis.at(Vec3::new(side * (CAR_WIDTH * 0.5 - 0.28), 0.56, -1.24)),
+                    rotation,
+                    Vec3::new(0.56, 0.46, 1.52),
+                ),
+            );
+        }
+        // Decklid lip, sitting on the tail rather than floating behind it.
         app.set(
             self.wing,
             Transform::new(
-                basis.at(Vec3::new(0.0, 1.02, -2.05)),
+                basis.at(Vec3::new(0.0, 0.76, -1.74)),
                 rotation,
-                Vec3::new(CAR_WIDTH * 0.98, 0.10, 0.46),
+                Vec3::new(CAR_WIDTH * 0.84, 0.09, 0.36),
+            ),
+        );
+        // Valance: the dark bumper across the bottom of the rear panel.
+        app.set(
+            self.valance,
+            Transform::new(
+                basis.at(Vec3::new(0.0, 0.28, -1.88)),
+                rotation,
+                Vec3::new(CAR_WIDTH * 0.88, 0.24, 0.30),
             ),
         );
 
@@ -142,17 +219,20 @@ impl PlayerCar {
             );
         }
 
-        // Brake lights: always present, but only *tall* when braking, which is
-        // the readable cue at a distance.
-        let light_height = 0.10 + 0.16 * braking.clamp(0.0, 1.0);
+        // Tail lights: a pair of wide, shallow bars reaching out to the arches
+        // with a gap between them, standing *proud* of the rear panel — the old
+        // pair sat flush in the bodywork 0.015 m deep and read as a scratch.
+        // They are always present, and only grow *taller* when braking, which
+        // is the cue that survives being three car-lengths away.
+        let light_height = 0.13 + 0.17 * braking.clamp(0.0, 1.0);
         for (index, entity) in self.brake_lights.iter().enumerate() {
-            let side = if index == 0 { -1.0 } else { 1.0 };
+            let side = [-1.0, 1.0][index];
             app.set(
                 *entity,
                 Transform::new(
-                    basis.at(Vec3::new(side * 0.66, 0.72, -1.86)),
+                    basis.at(Vec3::new(side * 0.50, 0.58, -1.95)),
                     rotation,
-                    Vec3::new(0.52, light_height, 0.12),
+                    Vec3::new(0.72, light_height, 0.12),
                 ),
             );
             app.set(*entity, Visible(true));
@@ -161,12 +241,13 @@ impl PlayerCar {
         // Boost exhaust: a plume that only exists while boosting.
         let plume = boost.clamp(0.0, 1.0);
         for (index, entity) in self.exhausts.iter().enumerate() {
-            let side = if index == 0 { -1.0 } else { 1.0 };
+            let side = [-1.0, 1.0][index];
             let length = 0.35 + 2.4 * plume;
             app.set(
                 *entity,
                 Transform::new(
-                    basis.at(Vec3::new(side * 0.42, 0.44, -2.20 - length * 0.5)),
+                    // Tucked down under the valance, where an exhaust exits.
+                    basis.at(Vec3::new(side * 0.38, 0.30, -2.20 - length * 0.5)),
                     rotation,
                     Vec3::new(0.30 + 0.16 * plume, 0.26 + 0.14 * plume, length),
                 ),
@@ -177,7 +258,15 @@ impl PlayerCar {
 
     /// Every entity, for diagnostics and teardown.
     pub fn entities(&self) -> Vec<Entity> {
-        let mut all = vec![self.body, self.nose, self.cabin, self.wing];
+        let mut all = vec![
+            self.body,
+            self.nose,
+            self.cabin,
+            self.backlight,
+            self.wing,
+            self.valance,
+        ];
+        all.extend_from_slice(&self.haunches);
         all.extend_from_slice(&self.wheels);
         all.extend_from_slice(&self.brake_lights);
         all.extend_from_slice(&self.exhausts);
@@ -468,6 +557,80 @@ mod tests {
         // Two in front, two behind.
         let front = centres.iter().filter(|c| c.z > pose.position.z).count();
         assert_eq!(front, 2, "two front wheels");
+    }
+
+    /// The rear silhouette, pinned: the tail is the widest part of the car, the
+    /// roof is the narrowest, and the tyres are not buried inside the bodywork.
+    /// Widening the body box back to the full car width is exactly the edit that
+    /// turns this car back into a van, so it fails here.
+    #[test]
+    fn the_tail_is_the_widest_part_of_the_car_and_the_tyres_show_past_the_body() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette);
+        let pose = pose_at(0.0, 0.0, 0.0);
+        car.pose(&mut app, &pose, 0.0, 0.0);
+
+        let body = app.get::<Transform>(car.body).unwrap();
+        let cabin = app.get::<Transform>(car.cabin).unwrap();
+        let haunch = app.get::<Transform>(car.haunches[1]).unwrap();
+        let wheel = app.get::<Transform>(car.wheels[3]).unwrap();
+
+        let body_half = body.scale.x * 0.5;
+        let haunch_edge = (haunch.translation.x - pose.position.x) + haunch.scale.x * 0.5;
+        let tyre_edge = (wheel.translation.x - pose.position.x) + WHEEL_WIDTH * 0.5;
+
+        assert!(cabin.scale.x < body.scale.x, "the roof is narrower than the flanks");
+        assert!(body_half < CAR_WIDTH * 0.5, "the body is inboard of the full width");
+        assert!(
+            tyre_edge > body_half + 0.1,
+            "the rear tyre is buried in the bodywork: {tyre_edge} vs {body_half}"
+        );
+        assert!(
+            (haunch_edge - CAR_WIDTH * 0.5).abs() < 0.05,
+            "the arch defines the car's full width: {haunch_edge}"
+        );
+    }
+
+    /// The rear window is glass laid back over the decklid, not a flat roof
+    /// panel: its long axis points up and forward in the chassis frame.
+    #[test]
+    fn the_backlight_is_raked_back_over_the_decklid() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette);
+        car.pose(&mut app, &pose_at(0.0, 0.0, 0.0), 0.0, 0.0);
+
+        let glass = app.get::<Transform>(car.backlight).unwrap();
+        let along = glass.rotation.rotate(Vec3::UNIT_Z);
+        assert!(
+            (along.y - BACKLIGHT_RAKE.sin()).abs() < 0.02,
+            "the glass leans back by the authored rake: {along:?}"
+        );
+        assert!(along.z > 0.8, "and it is still mostly fore-and-aft");
+    }
+
+    /// The tail lights sit on the outside of the rear panel. Sunk flush — as
+    /// they were — they are invisible from the one camera that ever sees them.
+    #[test]
+    fn the_tail_lights_stand_proud_of_the_rear_panel() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette);
+        car.pose(&mut app, &pose_at(0.0, 0.0, 0.0), 0.0, 0.0);
+
+        let body = app.get::<Transform>(car.body).unwrap();
+        let light = app.get::<Transform>(car.brake_lights[0]).unwrap();
+        let valance = app.get::<Transform>(car.valance).unwrap();
+        // At zero yaw the chassis is world-aligned, so -Z is the tail.
+        let panel = body.translation.z - body.scale.z * 0.5;
+        let lens = light.translation.z - light.scale.z * 0.5;
+        assert!(panel - lens > 0.05, "the lens is flush with the panel: {panel} vs {lens}");
+        assert!(light.scale.x > 0.6, "and it is a bar, not a stud");
+        assert!(
+            valance.translation.y < light.translation.y,
+            "the dark valance is below the lights, where a bumper goes"
+        );
     }
 
     #[test]
