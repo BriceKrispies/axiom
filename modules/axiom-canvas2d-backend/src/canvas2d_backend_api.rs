@@ -622,6 +622,18 @@ mod tests {
         (id, v, vec![0, 1, 2, 0, 2, 3])
     }
 
+    /// The `ground` quad at an explicit NDC depth, for the cues that only bite
+    /// away from the near plane (fog).
+    fn ground_at_depth(id: u64, z: f32) -> (u64, Vec<f32>, Vec<u32>) {
+        let c = [0.2, 0.6, 0.3, 1.0];
+        let mut v = Vec::new();
+        v.extend_from_slice(&vertex([-1.0, -1.0, z], c));
+        v.extend_from_slice(&vertex([1.0, -1.0, z], c));
+        v.extend_from_slice(&vertex([1.0, 1.0, z], c));
+        v.extend_from_slice(&vertex([-1.0, 1.0, z], c));
+        (id, v, vec![0, 1, 2, 0, 2, 3])
+    }
+
     fn packet(
         draws: Vec<axiom_host::FrameDrawItem>,
         features: axiom_host::FrameFeatureSet,
@@ -681,6 +693,81 @@ mod tests {
         assert_eq!(report.raster().terrain_draws_preserved, 1);
         assert!(report.raster().candidate_pixels > 0);
         assert!(!report.raster().budget_exhausted);
+    }
+
+    /// An authored [`axiom_host::FrameDepthFog`] must reach the software
+    /// rasterizer's cues — *including its colour*, which is the one fog field
+    /// that is not a scalar and so needs its own arm.
+    ///
+    /// The distinction that matters: with no authored fog this backend recedes
+    /// toward the frame's **clear colour**; with authored fog it must recede
+    /// toward the **fog's own colour** instead. Asserting merely "some fog was
+    /// applied" would pass either way, so this drives a fog colour deliberately
+    /// unlike the clear (the packet clears blue `[0.4, 0.6, 0.9]`; the fog is
+    /// red) and checks the image moves toward red specifically.
+    ///
+    /// The quad sits at NDC z=0.6 rather than the shared helper's z=0.
+    /// `fog_mix` is zero at the near plane by definition, and an authored
+    /// `FrameDepthFog` carries `Ratio` near/far — which cannot go negative — so
+    /// a frame whose geometry sits at depth 0 can never show authored fog at
+    /// all. Depth is what makes this arm observable.
+    #[test]
+    fn an_authored_fog_colour_reaches_the_raster_and_differs_from_the_clear_colour() {
+        use axiom_host::{FrameDepthFog, FrameDrawItem, FrameFeatureSet};
+        use axiom_kernel::Ratio;
+
+        let draws = || {
+            vec![FrameDrawItem::new(
+                1,
+                7,
+                9,
+                IDENTITY,
+                IDENTITY,
+                [1.0, 1.0, 1.0, 1.0],
+                false,
+            )]
+        };
+        let features = || FrameFeatureSet::new(false, false, 0, 0);
+
+        let fog = FrameDepthFog::new(
+            Ratio::new(0.0).expect("finite"),
+            Ratio::new(1.0).expect("finite"),
+            Ratio::new(1.0).expect("finite"),
+            [1.0, 0.0, 0.0],
+        );
+
+        let mut fogged_backend = Canvas2dBackendApi::new(&request(800, 600));
+        fogged_backend.load_meshes(&[ground_at_depth(7, 0.6)]);
+        let fogged = fogged_backend
+            .render_offscreen_rgba(&packet(draws(), features()).with_depth_fog(fog));
+
+        let mut plain_backend = Canvas2dBackendApi::new(&request(800, 600));
+        plain_backend.load_meshes(&[ground_at_depth(7, 0.6)]);
+        let plain = plain_backend.render_offscreen_rgba(&packet(draws(), features()));
+
+        assert_eq!(fogged.1, plain.1, "same framebuffer width");
+        assert_eq!(fogged.2, plain.2, "same framebuffer height");
+        assert_ne!(
+            fogged.0, plain.0,
+            "an authored red fog must not rasterize identically to no authored fog"
+        );
+        // It moved the image toward red specifically, not merely "somewhere".
+        let sum = |bytes: &[u8], offset: usize| -> u64 {
+            bytes
+                .iter()
+                .skip(offset)
+                .step_by(4)
+                .map(|&b| u64::from(b))
+                .sum()
+        };
+        assert!(
+            sum(&fogged.0, 0) > sum(&plain.0, 0),
+            "red channel rises under a red fog"
+        );
+        assert!(
+            sum(&fogged.0, 2) < sum(&plain.0, 2),
+            "blue channel falls under a red fog"
+        );
     }
 
     /// One skinned quad vertex: the 20-float stream (pos·normal·uv·colour·
