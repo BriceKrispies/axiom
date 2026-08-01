@@ -9,6 +9,8 @@ use axiom_render::RenderApi;
 use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
 
+use crate::shadow_view::shadow_light_view_proj;
+
 /// Column-major matrix that remaps OpenGL clip depth `z' = (z + w) / 2` so the
 /// engine's `[-1,1]` projection lands in wgpu's `[0,1]` clip space.
 ///
@@ -32,50 +34,10 @@ use axiom_webgpu::WebGpuApi;
 /// silently break Canvas2D fog and GPU depth compositing. It is a coordinated
 /// follow-up (Stream A `axiom-render` + gpu-backend shaders + canvas2d), not a
 /// local edit — see the report's field docs below.
-const GL_TO_WGPU_DEPTH: [f32; 16] = [
+pub(crate) const GL_TO_WGPU_DEPTH: [f32; 16] = [
     1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 1.0,
 ];
 
-/// Build the directional shadow caster's light view-projection from the sun's
-/// world travel `direction`: an orthographic box of half-size [`SHADOW_EXTENT`]
-/// looking from up-sun back at the origin, depth-corrected to wgpu's `[0,1]`
-/// clip depth (the same `GL_TO_WGPU_DEPTH` fix the camera uses). `None` for a
-/// degenerate (zero) direction — the caller substitutes identity, disabling
-/// shadows. Branchless: the up vector is a table pick and the fallible matrix
-/// steps are `Option` combinators.
-fn shadow_light_view_proj(direction: Vec3) -> Option<Mat4> {
-    /// Orthographic half-extent (world units) the shadow map covers around origin.
-    const SHADOW_EXTENT: f32 = 20.0;
-    /// Distance up-sun the shadow camera sits.
-    const SHADOW_DISTANCE: f32 = 40.0;
-    const NEAR: f32 = 0.1;
-    const FAR: f32 = 100.0;
-
-    let len =
-        (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z).sqrt();
-    let n = Vec3::new(direction.x / len, direction.y / len, direction.z / len);
-    let eye = Vec3::new(
-        -n.x * SHADOW_DISTANCE,
-        -n.y * SHADOW_DISTANCE,
-        -n.z * SHADOW_DISTANCE,
-    );
-    // A near-vertical sun would make the default up parallel to the view; pick a
-    // sideways up in that case (table index, no branch).
-    let up = [Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)][(n.y.abs() > 0.99) as usize];
-    let depth_fix = Mat4::from_cols_array(GL_TO_WGPU_DEPTH);
-    Mat4::look_at(eye, Vec3::ZERO, up).ok().and_then(|view| {
-        Mat4::orthographic(
-            -SHADOW_EXTENT,
-            SHADOW_EXTENT,
-            -SHADOW_EXTENT,
-            SHADOW_EXTENT,
-            NEAR,
-            FAR,
-        )
-        .ok()
-        .map(|proj| depth_fix.multiply(proj).multiply(view))
-    })
-}
 
 /// One mesh asset supplied to a frame: the resolved CPU geometry the renderer
 /// uploads, keyed by the same id the scene's renderables reference.
@@ -873,18 +835,6 @@ mod tests {
         assert!(!api.report_presented(&report));
     }
 
-    #[test]
-    fn shadow_light_view_proj_covers_tilted_vertical_and_degenerate_suns() {
-        let tilted = shadow_light_view_proj(Vec3::new(0.3, -1.0, 0.4)).unwrap();
-        assert_ne!(tilted, Mat4::IDENTITY);
-        // A near-vertical sun (|n.y| > 0.99) takes the sideways-up table arm and
-        // still yields a valid matrix (look-at forward is not parallel to up).
-        let vertical = shadow_light_view_proj(Vec3::new(0.0, -1.0, 0.0)).unwrap();
-        assert_ne!(vertical, Mat4::IDENTITY);
-        // A zero direction is degenerate (look-at eye == target) → None, so the
-        // caller falls back to identity and shadows become a no-op.
-        assert!(shadow_light_view_proj(Vec3::ZERO).is_none());
-    }
 
     #[test]
     fn point_light_resolves_to_its_node_world_position() {

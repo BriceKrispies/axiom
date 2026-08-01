@@ -32,5 +32,6 @@
 //! input and the frame report are reached only through it.
 
 mod render_pipeline_api;
+mod shadow_view;
 
 pub use render_pipeline_api::RenderPipelineApi;
