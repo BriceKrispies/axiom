@@ -14,7 +14,15 @@
 #   uv run scripts/playwright_controller.py screenshot <name>
 #
 # The moment: car stationary on the opening straight, ~5.9 s elapsed, 0%
-# progress, 0 near misses — matching the reference's HUD exactly.
+# progress, 0 near misses — the same game STATE the reference shows.
+#
+# Correction (critic pass, iteration 1): this line originally read "matching the
+# reference's HUD exactly". It does not. The state matches; the HUD does not —
+# different digit font (slashed vs plain zero) at roughly half the reference's
+# cap height, a control-hint line that wraps to two rows and collides with the
+# BRAKE button, different boost/progress bar cell counts, and a timer reading
+# 0:05.933 against the reference's 0:05.817. "Matches exactly" is a parity claim
+# and no part of this campaign may carry one.
 #
 # Note the browser falls back to WebGL2 on this machine (WebGPU device creation
 # fails on dxil.dll), so the champion is the GL path. That is the path the
@@ -27,7 +35,7 @@ changed_files = []
 champion_screenshot = "champion.png"
 candidate_screenshot = "champion.png"
 decision = "keep_candidate"
-reason = "Campaign seeded. Reference supplied by the user; champion captured from the real live browser build at the same moment (0 KM/H, OPENING STRAIGHT, 0%, 0:05.9). Initial harsh scorecard authored. final_score = 0*0.7 + 1.42*0.3 = 0.43."
+reason = "Campaign seeded. Reference supplied by the user; champion captured from the real live browser build at the same moment (0 KM/H, OPENING STRAIGHT, 0%, 0:05.9). Initial harsh scorecard authored. final_score stated as '0*0.7 + 1.42*0.3 = 0.43' — that arithmetic is WRONG for this iteration's own scores (they sum to 18, average 1.50, final 0.45); corrected in iteration 1."
 next_attacked_axis = "atmosphere"
 abstraction_introduced = false
 
@@ -44,3 +52,73 @@ atmosphere = 0
 scale_and_proportion = 2
 detail_density = 2
 artifact_level = 2
+
+# ---------------------------------------------------------------------------
+# Iteration 1 — SCORING RECALIBRATION. No render changed; no candidate was
+# captured. `decision` is deliberately NOT one of the loop's four values,
+# because none of them describes "the champion image is untouched and only the
+# record moved" — calling this a keep_candidate would fake a promotion.
+# ---------------------------------------------------------------------------
+[[iteration]]
+iteration = 1
+attacked_axis = "none"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic audit of the seeded record found inflation on five axes and one false
+parity claim. Recalibrated DOWN, no render touched:
+composition_and_framing 3->2 (the road mesh ends in a hard edge and the bottom
+third of the frame is bare void where the reference carries asphalt and dashes
+to the bottom edge; plus the HUD layout differs);
+silhouette_readability 2->1 (the hero silhouette, the car, is a plain
+rectangle);
+color_palette 2->1 (right hue family, wrong value+saturation on every major
+surface, which is precisely what makes it fail to read as night);
+detail_density 2->1 (~half the reference's conifers/buildings and an entirely
+missing mountain layer);
+artifact_level 2->1 (the road-mesh cut is a defect occupying ~30% of the frame,
+and the HUD hint line wraps into the BRAKE button).
+Also struck the seed's claim that the HUD "already matches" / "matches the
+reference's HUD exactly" — it does not (font, cap height, line wrap, bar cell
+counts), and that claim had quietly scoped ~25% of the frame out of scoring.
+Also corrected iteration 0's arithmetic: its own scores average 1.50, not 1.42,
+so its final_score was 0.45, not 0.43.
+New final_score = 0*0.7 + 1.0833*0.3 = 0.325 (was, correctly computed, 0.45).
+The lowest axis is UNCHANGED at atmosphere = 0, so the next attack is unaffected
+by this recalibration — the inflation was hiding severity, not the target.
+"""
+next_attacked_axis = "atmosphere"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity = 1
+silhouette_readability = 2
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 1
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 2
+artifact_level = 2
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 1
