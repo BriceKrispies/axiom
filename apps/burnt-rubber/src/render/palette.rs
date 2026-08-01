@@ -48,6 +48,7 @@ use axiom::prelude::{Color, Handle, Material, Ratio, RunningApp};
 
 use crate::track::Zone;
 
+use super::asphalt_texture::{asphalt_albedo, RES as ASPHALT_RES};
 use super::chunks::RoadMaterials;
 
 /// A colour from linear RGB components.
@@ -70,10 +71,28 @@ pub fn ratio(v: f32) -> Ratio {
 pub const SKY: [f32; 3] = [0.011, 0.015, 0.026];
 
 /// Register the four road materials.
+///
+/// The tarmac is the one material here that carries a **texture**: it is the
+/// largest surface in any frame, and a flat fill renders it identically at eight
+/// metres and at sixty, which is the one thing real asphalt never does. See
+/// [`super::asphalt_texture`] for the grain and for why it is deliberately quiet.
+/// A malformed buffer would be a bug in that module rather than a condition to
+/// handle at runtime, so an unexpected rejection simply leaves the tarmac
+/// untextured — exactly what it was before, never a missing road.
 pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
+    let asphalt = app
+        .add_texture_data(ASPHALT_RES, ASPHALT_RES, asphalt_albedo())
+        .ok();
     RoadMaterials {
-        // Asphalt: dark, and slightly blue so it separates from the verge.
-        surface: app.add_material(Material::lit(rgb(0.085, 0.088, 0.105))),
+        // Asphalt: dark, and slightly blue so it separates from the verge. The
+        // grain multiplies this base colour (the shader computes
+        // `albedo * colour`), so the hue lives here and only the shading is
+        // sampled.
+        surface: app.add_material(
+            asphalt
+                .map(|t| Material::lit(rgb(0.085, 0.088, 0.105)).with_custom_texture(t.id()))
+                .unwrap_or_else(|| Material::lit(rgb(0.085, 0.088, 0.105))),
+        ),
         // Paint: a real white pigment plus a low emissive floor, so the lane
         // markings hold their brightness in shadow, inside the tunnel, and
         // against the night ambient — the reference's markings are the second
@@ -383,6 +402,48 @@ mod tests {
                 assert_ne!(a, b, "zone {i} shares a tint");
             }
             assert!(a.iter().all(|c| (0.0..=1.0).contains(c)));
+        }
+    }
+
+    /// The tarmac carries the aggregate grain, and **nothing else does**.
+    ///
+    /// Both halves matter. Without a texture the largest surface in the frame is
+    /// a flat fill that renders identically at eight metres and at sixty. With
+    /// the texture on the *paint*, the lane markings — the app's whole speed cue,
+    /// and the brightest thing on the road — would come out mottled instead of
+    /// solid white. `material_textures` is the same resolution the backends read,
+    /// so this asserts what actually reaches the GPU rather than what was
+    /// authored.
+    #[test]
+    fn only_the_tarmac_carries_the_asphalt_grain() {
+        use super::super::asphalt_texture::RES;
+
+        let mut app = app();
+        let m = road_materials(&mut app);
+        let textures = app.material_textures();
+        let of = |h: Handle<Material>| {
+            textures
+                .iter()
+                .find(|(id, _, _, _)| *id == h.id())
+                .map(|(_, w, h, px)| (*w, *h, px.clone()))
+                .expect("every road material resolves a texture entry")
+        };
+
+        let (w, h, pixels) = of(m.surface);
+        assert_eq!((w, h), (RES, RES), "the tarmac samples the authored grain");
+        assert_eq!(pixels.len(), (RES * RES * 4) as usize);
+        assert!(
+            pixels.chunks(4).map(|t| t[0]).collect::<Vec<_>>().windows(2).any(|p| p[0] != p[1]),
+            "a grain that is one flat value is not a texture"
+        );
+
+        // The 1x1 opaque-white fallback: an untextured material, unchanged.
+        for other in [m.paint, m.rail, m.verge] {
+            assert_eq!(
+                of(other),
+                (1, 1, vec![255, 255, 255, 255]),
+                "only the tarmac is textured"
+            );
         }
     }
 

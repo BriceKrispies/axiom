@@ -13,6 +13,7 @@
 //! its vertex and instance buffers from the mesh set captured at startup: a mesh
 //! registered after the render loop begins would never reach the GPU.
 
+pub mod asphalt_texture;
 pub mod car_model;
 pub mod chunks;
 pub mod effects;
