@@ -22,7 +22,7 @@ import type { Handle, ToneSpec } from "./api.ts";
 import { type Game, type MeshRef, type ReconcilePlan, type SceneMemory, type TickContext, type ViewContext, emptyMemory, reconcile } from "./game.ts";
 import { InputState, sampleInput } from "./input.ts";
 import { attachDomInput } from "./dom-input.ts";
-import { type BackendChoice, initRenderer } from "./renderer.ts";
+import { type BackendChoice, initRenderer, rendererSurface } from "./renderer.ts";
 import { startLoop } from "./raf-loop.ts";
 import { playTone } from "./audio.ts";
 import {
@@ -36,6 +36,7 @@ import {
   setAmbient,
   setCamera3D,
   setClearColor,
+  setLabels,
   setLight,
   setNodeTransform,
   spawnRenderable,
@@ -110,7 +111,11 @@ export const runGame = <State>(canvas: HTMLCanvasElement, game: Game<State>, opt
   );
 
   const input = new InputState();
-  const detachInput = attachDomInput(input, canvas, { pointerLock: opts.pointerLock ?? true });
+  // Bind input to the element the RENDERER presents into, not to the canvas. On
+  // the DOM backend there is no canvas in the page at all — the scene is made of
+  // the elements the pointer lands on — so the canvas is the wrong surface to
+  // sample against. For the pixel backends this IS the canvas, unchanged.
+  const detachInput = attachDomInput(input, rendererSurface(), { pointerLock: opts.pointerLock ?? true });
   const actionNames = Object.keys(game.actions);
   for (const [action, codes] of Object.entries(game.actions)) {
     input.bindAction(action, codes);
@@ -172,6 +177,9 @@ export const runGame = <State>(canvas: HTMLCanvasElement, game: Game<State>, opt
       memory = result.memory;
       applyPlan(result.plan);
       setCamera3D(scene.camera);
+      // Labels are replaced wholesale, not reconciled: a frame has a handful at
+      // most, so diffing them by key would cost more than it saves.
+      setLabels(scene.labels ?? []);
       if (scene.clearColor !== undefined) {
         setClearColor(scene.clearColor);
       }

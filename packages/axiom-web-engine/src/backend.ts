@@ -9,7 +9,7 @@
  * draw one frame of it — it need not draw into the canvas at all.
  */
 
-import type { Camera3D, Handle, MeshData, Transform } from "./api.ts";
+import type { Camera3D, Handle, MeshData, Rgba, Transform } from "./api.ts";
 
 /** A material resolved to plain arrays (defaults applied by the store).
  * `roughness ∈ [0, 1]` drives the specular highlight (1 = matte, no specular). */
@@ -40,9 +40,21 @@ export interface FramePointLight {
   readonly color: readonly [number, number, number];
 }
 
+/** One piece of scene text, as the backends receive it. */
+export interface FrameLabel {
+  readonly key: string;
+  readonly text: string;
+  readonly transform: Transform;
+  readonly color: Rgba;
+  readonly size: number;
+}
+
 /** Everything a backend needs to draw one frame. */
 export interface SceneFrame {
   readonly nodes: Iterable<FrameNode>;
+  /** Text to place in the scene (see `SceneLabel`). A backend with no way to draw
+   * text ignores this; the app supplies welded lettering on those backends. */
+  readonly labels: readonly FrameLabel[];
   readonly materials: ReadonlyMap<Handle, ResolvedMaterial>;
   /** The AMBIENT (sky/bounce) term, linear RGB — the omni-directional diffuse
    * floor every surface receives regardless of which way it faces, before the
@@ -85,6 +97,23 @@ export interface RenderBackend {
   readonly resize: (width: number, height: number) => void;
   /** Clear and draw the whole frame. */
   readonly render: (frame: SceneFrame) => void;
+  /**
+   * The element this backend actually PRESENTS into, when that is not the canvas
+   * it was handed.
+   *
+   * The two pixel backends draw into the canvas, so they leave this unset. The
+   * DOM backend draws no pixels at all — it builds a tree of real elements — and
+   * a `<canvas>` in the page is then not merely unused, it is a contradiction:
+   * the whole point of that renderer is that there is no canvas. So it presents
+   * into its own element and reports it here, and the canvas is taken out of the
+   * document (see `initRenderer`).
+   *
+   * It matters beyond tidiness because the canvas is also where INPUT was bound.
+   * A surface the renderer owns is the thing the pointer should be sampled
+   * against; binding to a canvas only worked while every backend happened to use
+   * one.
+   */
+  readonly surface?: HTMLElement;
 }
 
 /** The DEFAULT ambient floor — the historical hard-coded value, kept as the

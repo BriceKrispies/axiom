@@ -12,6 +12,7 @@ import {
   CLEAR_COLOR,
   DEFAULT_AMBIENT,
   type FrameDirLight,
+  type FrameLabel,
   type FrameNode,
   type FramePointLight,
   MAX_DIR_LIGHTS,
@@ -44,6 +45,10 @@ interface RendererState {
    * be re-posed via `setLight`) and resolved to frame lights at render time. */
   readonly lights: Map<Entity, Light>;
   camera: Camera3D;
+  /** Scene text for the next frame. Replaced wholesale rather than diffed: there
+   * are a handful at most, so a key-based reconcile would cost more than it saves
+   * — and keeping labels out of the reconciler keeps that diff about geometry. */
+  labels: readonly FrameLabel[];
   clearColor: [number, number, number];
   /** The scene's ambient (sky/bounce) floor, linear RGB — see `SceneFrame.ambient`. */
   ambient: [number, number, number];
@@ -86,6 +91,7 @@ export const initStore = (backend: RenderBackend, canvas: EngineCanvas): void =>
     camera: DEFAULT_CAMERA,
     canvas,
     clearColor: [cr, cg, cb],
+    labels: [],
     lights: new Map(),
     materials: new Map(),
     nodes: new Map(),
@@ -193,6 +199,12 @@ export const despawnRenderable = (entity: Entity): void => {
   st.nodes.delete(entity);
 };
 
+/** Set the scene TEXT drawn by the next `renderScene` (see `SceneLabel`). A
+ * backend with no way to draw text ignores it. */
+export const setLabels = (labels: readonly FrameLabel[]): void => {
+  requireState().labels = labels;
+};
+
 /** Set the look-at perspective camera used by the next `renderScene`. */
 export const setCamera3D = (cam: Camera3D): void => {
   requireState().camera = cam;
@@ -275,6 +287,7 @@ export const renderScene = (): void => {
       .filter((light): light is Extract<Light, { kind: "directional" }> => isDirectional(light))
       .slice(0, MAX_DIR_LIGHTS)
       .map((light): FrameDirLight => resolveDirLight(light)),
+    labels: st.labels,
     materials: st.materials,
     nodes: st.nodes.values(),
     pointLights: lights

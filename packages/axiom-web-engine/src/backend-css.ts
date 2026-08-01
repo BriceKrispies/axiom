@@ -129,6 +129,71 @@ const CELL_OVERLAP_PX = 1;
 const NODE_MIN_PX = 12;
 const FACE_MIN_PX2 = 30;
 
+
+/**
+ * Once a node has EARNED its place — at least one face clears `FACE_MIN_PX2` —
+ * the rest of its faces are kept down to this fraction of that threshold.
+ *
+ * Without it the two culls disagree with each other. The node cull passes a
+ * solid, and the face cull then strips it to whichever one or two faces happen
+ * to clear an absolute bar: a box at this camera shows a top and two sides, and
+ * losing one of the three does not make it a smaller box, it makes it a flat
+ * CARD. That is what turned the sandcastle's turrets into slabs and left the
+ * crab as a disc with sticks around it. (Measured on the chest board: 213 of 341
+ * nodes were rendering exactly two faces.)
+ *
+ * So the absolute threshold decides whether the NODE is worth drawing, and this
+ * relaxed one decides how completely to draw it — a node is a solid or it is
+ * absent, never half of one.
+ */
+const SOLID_FACE_RELAX = 0.12;
+
+/**
+ * ...and, additionally, a face must be worth this fraction of the node's OWN
+ * largest visible face.
+ *
+ * The relaxed bound alone is not safe on ROUND geometry. A flat disc merges its
+ * cap into one face but keeps a side facet per segment, and the lagoon is a
+ * 96-segment cylinder: relaxing the bound let dozens of one-pixel slivers back
+ * in, and single nodes measured 38-47 elements.
+ *
+ * The obvious fix — cap the face COUNT per node — is wrong in kind, and the sand
+ * proved it: a large slab is one logical face SUBDIVIDED into cells so point
+ * lights fall off across it (see MAX_FACE_GRID), and those cells are not extra
+ * detail, they are the surface. Capping the count punched holes in the beach and
+ * let the background through.
+ *
+ * A RELATIVE floor has no such failure mode, because it asks the only question
+ * that matters: does this face contribute to the shape, or is it a sliver beside
+ * the faces that do? A box's three visible faces are comparable, so all survive;
+ * a disc's side facets are a fraction of a percent of its cap, so they go; and
+ * the slab's cells are all the same size as each other, so every one is kept.
+ */
+const SOLID_FACE_FLOOR = 0.06;
+
+/**
+ * ...and a node draws at most this many distinct PLANES, largest first.
+ *
+ * The relative floor sheds slivers but does not bound a node whose faces are all
+ * genuinely comparable — which is exactly the hero chest, filling the frame with
+ * every slat and strap legitimately large. That is the frame budget gone on one
+ * object.
+ *
+ * The unit is a PLANE, not an element, and that distinction is the whole point:
+ * a big slab is one plane subdivided into cells, so capping elements punched
+ * holes in the beach (see SOLID_FACE_FLOOR), while capping planes keeps every
+ * cell of the planes it keeps.
+ *
+ * The bound is COVERAGE rather than a fixed count, because a fixed count cannot
+ * serve both shapes in this scene: a box wants three planes and a sphere wants
+ * twenty, and capping at four turned the crab's shell back into loose sticks.
+ * Coverage asks the shape-independent question — how many planes does it take to
+ * account for what this node actually puts on screen — and each shape answers for
+ * itself: a box's three faces reach it immediately, a disc's cap reaches it alone,
+ * a sphere needs most of its dome, and a subdivided slab keeps every cell.
+ */
+const SOLID_PLANE_COVERAGE = 0.9;
+
 /**
  * LOD HYSTERESIS. Thresholds are re-evaluated every frame, so anything sitting
  * near one flickers: on a chest that is SCALING and ROTATING into its hero
@@ -148,6 +213,33 @@ const LOD_HYSTERESIS = 0.65;
  * element budget for one ball. */
 const IMPOSTOR_MIN_VERTICES = 40;
 const IMPOSTOR_RADIUS_TOLERANCE = 0.02;
+
+/**
+ * How far a node's scale may depart from uniform and still be drawn as an
+ * impostor disc.
+ *
+ * The impostor is a SPHERE optimization, and its billboard counter-rotation is
+ * only exact because a uniform scale commutes out of the composed transform. A
+ * node that scales its sphere unevenly is not a sphere any more, it is an
+ * ellipsoid: the disc then draws the wrong silhouette AND the counter-rotation
+ * is wrong. (The casino crab's shell is a sphere at 0.62 x 0.40 x 0.50, which is
+ * exactly how it came out as a flat pale blob with limbs poking out of it.)
+ *
+ * Impostor selection is therefore a property of the NODE, not of the mesh: the
+ * same unit sphere is an impostor under a ball's uniform scale and real geometry
+ * under the crab's.
+ */
+const IMPOSTOR_SCALE_TOLERANCE = 0.02;
+
+/** Whether a node's scale is uniform enough for the sphere impostor to be honest. */
+const nearUniformScale = (scale: { x: number; y: number; z: number }): boolean => {
+  const sx = Math.abs(scale.x);
+  const sy = Math.abs(scale.y);
+  const sz = Math.abs(scale.z);
+  const largest = Math.max(sx, sy, sz);
+  const smallest = Math.min(sx, sy, sz);
+  return largest - smallest <= largest * IMPOSTOR_SCALE_TOLERANCE;
+};
 
 /** A face of a merged coplanar triangle group, in MESH-LOCAL space. */
 interface CssFace {
@@ -196,6 +288,10 @@ interface NodeDom {
   readonly faceEls: readonly HTMLElement[];
   /** True while the node is LOD-culled, so becoming visible forces a re-shade. */
   hidden: boolean;
+  /** Whether THIS node draws its sphere as an impostor disc. A property of the
+   * node, not the mesh: the same sphere is an impostor at uniform scale and real
+   * geometry when squashed (see IMPOSTOR_SCALE_TOLERANCE). */
+  readonly impostor: boolean;
   /** Last applied values, so an unchanged node costs zero style writes. */
   lastTransform: unknown;
   lastMaterial: Handle;
@@ -530,16 +626,36 @@ const detectImpostor = (data: MeshData): CssMesh["impostor"] => {
 export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
   const meshes = new Map<Handle, CssMesh>();
   const nodeDom = new Map<object, NodeDom>();
+  /** Scene text, one element per label key. This is the thing a DOM renderer can
+   * do that a rasterizer cannot: real glyphs from a real font, crisp at any size,
+   * for ONE element per word. The pixel backends weld lettering out of stroke
+   * boxes because they have no font; doing that here cost 23 composited elements
+   * for "ACME" and the small ones were culled, which spelled "A ME". */
+  const labelEls = new Map<string, HTMLElement>();
 
   const root = document.createElement("div");
   root.className = "axiom-css3d";
   root.setAttribute("aria-hidden", "true");
+  // This layer REPLACES the canvas in the document (see `initRenderer`), so it has
+  // to take over the canvas's two jobs beyond drawing.
+  //
+  // It is the element the pointer is sampled against (`pointer-events:auto`; it
+  // was `none` back when the canvas sat underneath to catch clicks).
+  //
+  // And it CARRIES THE LAYOUT. A canvas is a replaced element with intrinsic
+  // dimensions, so a stylesheet sizes it `width:100%; aspect-ratio:960/600` and
+  // the container takes its height from it. An absolutely-positioned `height:100%`
+  // layer has no intrinsic size at all: remove the canvas and the container
+  // collapses to nothing, taking the whole scene with it. So the layer declares
+  // the same intrinsic ratio the canvas backing store has, and sits in flow where
+  // the canvas sat.
   root.style.cssText =
-    "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:hidden;transform-style:flat";
+    `position:relative;display:block;width:100%;aspect-ratio:${Math.max(1, canvas.width)} / ${Math.max(1, canvas.height)};` +
+    "pointer-events:auto;touch-action:none;overflow:hidden;transform-style:flat";
   const world = document.createElement("div");
   world.style.cssText = "position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d";
   root.append(world);
-  canvas.parentElement?.append(root);
+  canvas.parentElement?.insertBefore(root, canvas);
 
   /** Fallback viewport, used only before the layer has been laid out. The LIVE
    * size comes from `root.clientWidth/Height`: `resize` reports the canvas
@@ -561,8 +677,18 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
     // A translucent wash (veil, shadow disc, glow pool) is also the case that
     // needs per-cell shading variation least, so it stays one whole face.
     const subdivided = opaque ? subdivideForScale(mesh.faces, scale) : [...mesh.faces];
-    const faces = mesh.impostor === null ? subdivided : [];
-    if (mesh.impostor === null) {
+    const impostor = mesh.impostor !== null && nearUniformScale(scale);
+    const faces = impostor ? [] : subdivided;
+    if (impostor) {
+      // Impostor: one camera-facing disc, shaded by a radial gradient.
+      const fe = document.createElement("i");
+      const d = (mesh.impostor?.r ?? 0) * 2 * WORLD_PX;
+      fe.style.cssText =
+        `position:absolute;left:0;top:0;display:block;pointer-events:none;transform-origin:50% 50%;border-radius:50%;` +
+        `width:${d.toFixed(3)}px;height:${d.toFixed(3)}px;margin-left:${(-d / 2).toFixed(3)}px;margin-top:${(-d / 2).toFixed(3)}px;`;
+      el.append(fe);
+      faceEls.push(fe);
+    } else {
       for (const f of faces) {
         const fe = document.createElement("i");
         const m: Mat4 = new Float32Array([
@@ -572,21 +698,12 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
           f.ox * WORLD_PX, f.oy * WORLD_PX, f.oz * WORLD_PX, 1,
         ]);
         const clipRule = f.clip === "" ? "" : `clip-path:${f.clip};`;
-        fe.style.cssText = `position:absolute;left:0;top:0;display:block;transform-origin:0 0;backface-visibility:hidden;width:${f.width.toFixed(3)}px;height:${f.height.toFixed(3)}px;transform:${matrix3d(m)};${clipRule}`;
+        fe.style.cssText = `position:absolute;left:0;top:0;display:block;pointer-events:none;transform-origin:0 0;backface-visibility:hidden;width:${f.width.toFixed(3)}px;height:${f.height.toFixed(3)}px;transform:${matrix3d(m)};${clipRule}`;
         el.append(fe);
         faceEls.push(fe);
       }
-    } else {
-      // Impostor: one camera-facing disc, shaded by a radial gradient.
-      const fe = document.createElement("i");
-      const d = mesh.impostor.r * 2 * WORLD_PX;
-      fe.style.cssText =
-        `position:absolute;left:0;top:0;display:block;transform-origin:50% 50%;border-radius:50%;` +
-        `width:${d.toFixed(3)}px;height:${d.toFixed(3)}px;margin-left:${(-d / 2).toFixed(3)}px;margin-top:${(-d / 2).toFixed(3)}px;`;
-      el.append(fe);
-      faceEls.push(fe);
     }
-    return { faceEls, faces, hidden: false, lastLightEpoch: -1, lastMaterial: -1, lastMesh: -1, lastTransform: null, root: el };
+    return { faceEls, faces, hidden: false, impostor, lastLightEpoch: -1, lastMaterial: -1, lastMesh: -1, lastTransform: null, root: el };
   };
 
   return {
@@ -597,6 +714,8 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
     },
     meshDetail: "low",
     name: "CSS3D",
+    // This renderer presents into its own element, not into a canvas.
+    surface: root,
     render: (frame: SceneFrame): void => {
       const [cr, cg, cb] = frame.clearColor;
       root.style.background = `rgb(${clamp255(cr)},${clamp255(cg)},${clamp255(cb)})`;
@@ -647,7 +766,8 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
 
         const t = node.transform;
         let dom = nodeDom.get(node);
-        if (dom === undefined || dom.lastMesh !== node.mesh) {
+        const wantsImpostor = mesh.impostor !== null && nearUniformScale(t.scale);
+        if (dom === undefined || dom.lastMesh !== node.mesh || dom.impostor !== wantsImpostor) {
           if (dom !== undefined) disposeNode(dom);
           dom = buildNodeDom(mesh, t.scale, material.opacity >= 1);
           dom.lastMesh = node.mesh;
@@ -707,7 +827,41 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
           return [l[0] + mat(model, 12), l[1] + mat(model, 13), l[2] + mat(model, 14)];
         };
 
-        if (mesh.impostor === null) {
+        if (dom.impostor) {
+          // A ball drawn as ONE camera-facing disc. A low-detail unit sphere is 96
+          // quads; at 13 balls that is 1248 elements — more than the entire CSS
+          // element budget — for a shape whose flat-shaded silhouette is a circle
+          // and whose shading is a smooth gradient. So: shade the point facing the
+          // key light and the point facing away, and let a radial gradient
+          // interpolate. Visually near-identical, 96x cheaper.
+          const imp = mesh.impostor!;
+          const c = wp(imp.cx, imp.cy, imp.cz);
+          const key = frame.dirLights[0];
+          const toLight: readonly [number, number, number] =
+            key === undefined ? [0.4, 1, 0.3] : [-key.direction[0], -key.direction[1], -key.direction[2]];
+          const lit = shadeFace({ ao: 1, frame, material, n: toLight, p: c });
+          const dark = shadeFace({ ao: 1, frame, material, n: [-toLight[0], -toLight[1], -toLight[2]], p: c });
+
+          // Put the gradient's highlight where the light actually is on screen:
+          // rotate the light direction into view space (x right, y down).
+          const sx = mat(viewMatrix, 0) * toLight[0] + mat(viewMatrix, 4) * toLight[1] + mat(viewMatrix, 8) * toLight[2];
+          const sy = mat(viewMatrix, 1) * toLight[0] + mat(viewMatrix, 5) * toLight[1] + mat(viewMatrix, 9) * toLight[2];
+          const sl = Math.hypot(sx, sy) || 1;
+          const hx = (50 + (sx / sl) * 30).toFixed(1);
+          const hy = (50 + (sy / sl) * 30).toFixed(1);
+
+          // Billboard: the disc counter-rotates by the transpose of (view . node)
+          // so the composed transform leaves it square to the screen. For the
+          // uniform scale a sphere always carries, S commutes out exactly.
+          const invNodeRot = fromTrs(
+            { x: 0, y: 0, z: 0 },
+            [-t.rotation[0], -t.rotation[1], -t.rotation[2], t.rotation[3]],
+            { x: 1, y: 1, z: 1 },
+          );
+          const el = dom.faceEls[0]!;
+          el.style.background = `radial-gradient(circle at ${hx}% ${hy}%, ${lit} 0%, ${lit} 22%, ${dark} 100%)`;
+          el.style.transform = matrix3d(multiply(invNodeRot, invViewRot));
+        } else {
           // ── face-level LOD, in TWO passes.
           //
           // Pass 1 measures every face: its exact world normal (normalize(Mu x Mv),
@@ -746,53 +900,102 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
             return { areaPx, backFacing, c, n: [nx, ny, nz] as const };
           });
 
+          // Does this node earn its place at all? One front face clearing the
+          // absolute bar is enough — and once it does, the node is drawn as a
+          // whole solid rather than as whichever faces individually cleared it.
+          let bestFrontFace = 0;
+          for (const m of metrics) {
+            if (!m.backFacing) bestFrontFace = Math.max(bestFrontFace, m.areaPx);
+          }
+          const nodeShown = !dom.hidden;
+          const earnBound = nodeShown ? FACE_MIN_PX2 * LOD_HYSTERESIS : FACE_MIN_PX2;
+          const earns = bestFrontFace >= earnBound;
+          const faceBound = FACE_MIN_PX2 * SOLID_FACE_RELAX;
+          // ...and must be worth a fraction of this node's own largest face, so
+          // round geometry sheds its slivers without a count cap punching holes in
+          // a subdivided slab (see SOLID_FACE_FLOOR).
+          const sliverBound = bestFrontFace * SOLID_FACE_FLOOR;
+          // Rank the node's PLANES by their largest face and keep the biggest few
+          // (see SOLID_PLANE_CAP). Cells of one subdivided face share a plane, so
+          // they are ranked — and kept or dropped — as the single surface they are.
+          const planeArea = new Map<string, number>();
+          dom.faces.forEach((f, i) => {
+            const m = metrics[i]!;
+            if (m.backFacing) return;
+            const key = `${Math.round(f.nx * 1e3)}:${Math.round(f.ny * 1e3)}:${Math.round(f.nz * 1e3)}`;
+            planeArea.set(key, Math.max(planeArea.get(key) ?? 0, m.areaPx));
+          });
+          const rankedPlanes = [...planeArea.entries()].toSorted((a, b) => b[1] - a[1]);
+          let planeTotal = 0;
+          for (const [, area] of rankedPlanes) planeTotal += area;
+          const keptPlanes = new Set<string>();
+          let covered = 0;
+          for (const [key, area] of rankedPlanes) {
+            if (covered >= planeTotal * SOLID_PLANE_COVERAGE) break;
+            keptPlanes.add(key);
+            covered += area;
+          }
+
           dom.faces.forEach((f, i) => {
             const el = dom.faceEls[i]!;
             const m = metrics[i]!;
-            // The element's current state IS the prior — no extra bookkeeping.
-            const wasShown = el.style.display !== "none";
-            const faceBound = wasShown ? FACE_MIN_PX2 * LOD_HYSTERESIS : FACE_MIN_PX2;
-            const drop = m.backFacing || m.areaPx < faceBound;
+            const planeKey = `${Math.round(f.nx * 1e3)}:${Math.round(f.ny * 1e3)}:${Math.round(f.nz * 1e3)}`;
+            const drop =
+              m.backFacing || !earns || m.areaPx < faceBound || m.areaPx < sliverBound || !keptPlanes.has(planeKey);
             el.style.display = drop ? "none" : "";
             // A dropped face also skips the much more expensive shading call.
             if (drop) return;
             el.style.background = shadeFace({ ao: f.ao, frame, material, n: m.n, p: m.c });
           });
-        } else {
-          // A ball drawn as ONE camera-facing disc. A low-detail unit sphere is 96
-          // quads; at 13 balls that is 1248 elements — more than the entire CSS
-          // element budget — for a shape whose flat-shaded silhouette is a circle
-          // and whose shading is a smooth gradient. So: shade the point facing the
-          // key light and the point facing away, and let a radial gradient
-          // interpolate. Visually near-identical, 96x cheaper.
-          const imp = mesh.impostor;
-          const c = wp(imp.cx, imp.cy, imp.cz);
-          const key = frame.dirLights[0];
-          const toLight: readonly [number, number, number] =
-            key === undefined ? [0.4, 1, 0.3] : [-key.direction[0], -key.direction[1], -key.direction[2]];
-          const lit = shadeFace({ ao: 1, frame, material, n: toLight, p: c });
-          const dark = shadeFace({ ao: 1, frame, material, n: [-toLight[0], -toLight[1], -toLight[2]], p: c });
 
-          // Put the gradient's highlight where the light actually is on screen:
-          // rotate the light direction into view space (x right, y down).
-          const sx = mat(viewMatrix, 0) * toLight[0] + mat(viewMatrix, 4) * toLight[1] + mat(viewMatrix, 8) * toLight[2];
-          const sy = mat(viewMatrix, 1) * toLight[0] + mat(viewMatrix, 5) * toLight[1] + mat(viewMatrix, 9) * toLight[2];
-          const sl = Math.hypot(sx, sy) || 1;
-          const hx = (50 + (sx / sl) * 30).toFixed(1);
-          const hy = (50 + (sy / sl) * 30).toFixed(1);
-
-          // Billboard: the disc counter-rotates by the transpose of (view . node)
-          // so the composed transform leaves it square to the screen. For the
-          // uniform scale a sphere always carries, S commutes out exactly.
-          const invNodeRot = fromTrs(
-            { x: 0, y: 0, z: 0 },
-            [-t.rotation[0], -t.rotation[1], -t.rotation[2], t.rotation[3]],
-            { x: 1, y: 1, z: 1 },
-          );
-          const el = dom.faceEls[0]!;
-          el.style.background = `radial-gradient(circle at ${hx}% ${hy}%, ${lit} 0%, ${lit} 22%, ${dark} 100%)`;
-          el.style.transform = matrix3d(multiply(invNodeRot, invViewRot));
         }
+      }
+
+      // ── scene text
+      const liveLabels = new Set<string>();
+      for (const label of frame.labels) {
+        liveLabels.add(label.key);
+        let el = labelEls.get(label.key);
+        if (el === undefined) {
+          el = document.createElement("div");
+          // `pre` so runs of spaces survive; centred on its own origin so the
+          // transform positions the middle of the word, like a node's centre.
+          el.style.cssText =
+            "position:absolute;left:0;top:0;white-space:pre;transform-origin:50% 50%;" +
+            "font-family:ui-sans-serif,system-ui,sans-serif;font-weight:800;line-height:1;" +
+            "pointer-events:none;will-change:transform";
+          world.append(el);
+          labelEls.set(label.key, el);
+        }
+        el.textContent = label.text;
+        const [lr, lg, lb] = label.color;
+        el.style.color = `rgb(${clamp255(lr)},${clamp255(lg)},${clamp255(lb)})`;
+        // Font size is authored in WORLD units, so the text scales with the scene
+        // exactly like geometry does rather than staying a fixed pixel size.
+        const px = label.size * WORLD_PX;
+        el.style.fontSize = `${px.toFixed(2)}px`;
+        el.style.marginLeft = `${(-px * label.text.length * 0.3).toFixed(2)}px`;
+        el.style.marginTop = `${(-px / 2).toFixed(2)}px`;
+        const t = label.transform;
+        // Flip local Y before the node transform. CSS screen Y points DOWN while
+        // the engine's world Y points up; the geometry faces absorb that in their
+        // (u, v, n) basis, but a text element is laid out by the browser in its own
+        // upright box, so without this the word renders mirrored.
+        el.style.transform = matrix3d(
+          multiply(
+            fromTrs(
+              { x: t.position.x * WORLD_PX, y: t.position.y * WORLD_PX, z: t.position.z * WORLD_PX },
+              t.rotation,
+              t.scale,
+            ),
+            fromTrs({ x: 0, y: 0, z: 0 }, [0, 0, 0, 1], { x: 1, y: -1, z: 1 }),
+          ),
+        );
+      }
+      for (const [key, el] of labelEls) {
+        if (liveLabels.has(key)) continue;
+        el.remove();
+        labelEls.delete(key);
       }
 
       for (const [node, dom] of nodeDom) {
@@ -811,7 +1014,9 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
       for (const p of data.positions) {
         radius = Math.max(radius, Math.hypot(p.x, p.y, p.z));
       }
-      meshes.set(handle, { faces: impostor === null ? buildFaces(data) : [], impostor, radius });
+      // Faces are built even for an impostor-capable mesh: a node that scales it
+      // unevenly falls back to real geometry (see IMPOSTOR_SCALE_TOLERANCE).
+      meshes.set(handle, { faces: buildFaces(data), impostor, radius });
     },
   };
 };

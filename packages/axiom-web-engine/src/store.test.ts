@@ -17,6 +17,7 @@ import {
   renderScene,
   resizeRenderer,
   setAmbient,
+  setLabels,
   setCamera3D,
   setClearColor,
   setLight,
@@ -269,6 +270,32 @@ test("setAmbient flows into the next frame, alpha ignored", () => {
   setAmbient([0.28, 0.25, 0.21, 1]);
   renderScene();
   assert.deepEqual([...rec.frames[0]!.ambient], [0.28, 0.25, 0.21]);
+});
+
+// Scene TEXT reaches the backend as frame data, and a frame that sets none carries
+// an empty list rather than a missing field — a backend can always iterate it. The
+// list is replaced wholesale (labels are few), so setting it again REPLACES rather
+// than appends; that is the contract the DOM backend's keyed element pool relies on
+// to drop a label whose key stopped being emitted.
+test("setLabels replaces the scene text carried to the next frame", () => {
+  const rec = setup("WebGL2", "high");
+  renderScene();
+  assert.deepEqual(rec.frames[0]!.labels, [], "a scene with no text carries an empty list");
+
+  const plaque = {
+    color: [1, 1, 1, 1] as const,
+    key: "chest4:brand",
+    size: 0.2,
+    text: "ACME",
+    transform: { position: { x: 1, y: 2, z: 3 }, rotation: [0, 0, 0, 1] as const, scale: { x: 1, y: 1, z: 1 } },
+  };
+  setLabels([plaque]);
+  renderScene();
+  assert.deepEqual(rec.frames[1]!.labels, [plaque]);
+
+  setLabels([]);
+  renderScene();
+  assert.deepEqual(rec.frames[2]!.labels, [], "the previous label is gone, not retained");
 });
 
 test("setCamera3D and setClearColor flow into the next frame", () => {

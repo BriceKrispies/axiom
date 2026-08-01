@@ -42,6 +42,7 @@ export type {
   ReposeOp,
   Scene,
   SceneInstance,
+  SceneLabel,
   SceneLight,
   SceneMemory,
   TickContext,
@@ -64,6 +65,7 @@ export {
   resizeRenderer,
   setAmbient,
   setCamera3D,
+  setLabels,
   setClearColor,
   setLight,
   setNodeTransform,
@@ -79,7 +81,7 @@ export {
 // whole report — every rung's outcome and the readback verdict — for a harness,
 // a diagnostics overlay, or a test to assert on.
 export type { BackendChoice } from "./renderer.ts";
-export { initRenderer, rendererDetection, rendererTier, rendererTierAtLeast } from "./renderer.ts";
+export { initRenderer, rendererDetection, rendererSurface, rendererTier, rendererTierAtLeast } from "./renderer.ts";
 export type { DetectionReport, Tier, TierChoice, TierOutcome, TierProbe, TierProbes, TierSource } from "./tier.ts";
 export { TIER_ORDER, chooseTier, isTier, ladderFrom, parseTierChoice, rank } from "./tier.ts";
 export type { PatternVerdict, ReadbackTrust } from "./probe-pattern.ts";

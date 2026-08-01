@@ -57,6 +57,34 @@ export interface SceneInstance {
   readonly transform: Transform;
 }
 
+/**
+ * A piece of TEXT placed in the scene.
+ *
+ * Text is a value here, not geometry, because the backends genuinely disagree
+ * about what text IS. A DOM renderer draws it as text — one element, a real font,
+ * crisp at any distance — which is the one thing it does better than a
+ * rasterizer. The pixel backends have no font, so they build lettering out of
+ * welded stroke boxes; that works for them and is exactly what a DOM renderer
+ * cannot afford, because each hairline stroke costs a whole composited element
+ * and the small ones get culled, which produces a PARTIAL word ("A ME") rather
+ * than a missing one.
+ *
+ * So the scene says what the text is and where it goes, and each backend answers
+ * in its own terms. A backend with no answer ignores it and the app supplies its
+ * own lettering there.
+ */
+export interface SceneLabel {
+  /** Stable identity across frames, like an instance key. */
+  readonly key: string;
+  readonly text: string;
+  /** Where the text sits. Its +X is the reading direction and +Y is up, so the
+   * rotation orients the text in the world exactly like any other node. */
+  readonly transform: Transform;
+  readonly color: Rgba;
+  /** Cap height of one line, in world units. */
+  readonly size: number;
+}
+
 /** One light in a `Scene`, keyed like an instance so it can be re-posed or dropped. */
 export interface SceneLight {
   readonly key: string;
@@ -77,6 +105,10 @@ export interface Scene {
   readonly ambient?: Rgba;
   readonly lights: readonly SceneLight[];
   readonly instances: readonly SceneInstance[];
+  /** Text placed in the scene. Backends that cannot draw text ignore it — see
+   * `SceneLabel`. Few enough per frame that the shell replaces the whole list
+   * rather than diffing it, so the reconciler does not deal in labels at all. */
+  readonly labels?: readonly SceneLabel[];
 }
 
 // ── the game the author writes ───────────────────────────────────────────────────

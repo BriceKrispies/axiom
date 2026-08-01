@@ -23,7 +23,7 @@ import type { InputState } from "./input.ts";
  */
 const pointerLockRegistrations = (
   input: InputState,
-  canvas: HTMLCanvasElement,
+  canvas: HTMLElement,
 ): readonly [EventTarget, string, EventListener][] => {
   const onClick = (): void => {
     /* Newer engines return a Promise (rejected if the browser denies the lock);
@@ -67,7 +67,7 @@ export interface DomInputOptions {
  * (mouse look + lock-loss release) is added from `pointerLockRegistrations`
  * unless `opts.pointerLock` is `false`. Focus loss always releases held keys.
  */
-export const attachDomInput = (input: InputState, canvas: HTMLCanvasElement, opts: DomInputOptions = {}): (() => void) => {
+export const attachDomInput = (input: InputState, canvas: HTMLElement, opts: DomInputOptions = {}): (() => void) => {
   const onKeyDown = (event: KeyboardEvent): void => {
     input.keyEvent(event.code, true);
   };
@@ -75,7 +75,13 @@ export const attachDomInput = (input: InputState, canvas: HTMLCanvasElement, opt
     input.keyEvent(event.code, false);
   };
   const onPointer = (event: PointerEvent): void => {
-    input.pointerEvent(event.offsetX, event.offsetY, event.buttons !== 0);
+    // Measured against the SURFACE, not `event.offsetX`. `offsetX` is relative to
+    // whatever element the event landed on, which was fine while the surface was a
+    // canvas with nothing above it — but the DOM renderer's scene IS elements, so a
+    // touch lands on some face a few pixels across and `offsetX` is then relative
+    // to that, not to the viewport. Touch reached the wrong world position entirely.
+    const rect = canvas.getBoundingClientRect();
+    input.pointerEvent(event.clientX - rect.left, event.clientY - rect.top, event.buttons !== 0);
   };
   const onPointerLeave = (event: PointerEvent): void => {
     /* A MOUSE leaving the canvas ends hovering, so clear the sample. But a TOUCH

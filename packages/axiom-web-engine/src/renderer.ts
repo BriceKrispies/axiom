@@ -104,6 +104,7 @@ const confirmingBackend = (backend: RenderBackend, tier: Tier): RenderBackend =>
       }
     },
     resize: backend.resize,
+    surface: backend.surface,
     uploadMesh: backend.uploadMesh,
   };
 };
@@ -142,6 +143,44 @@ const resolveExplicit = (canvas: HTMLCanvasElement, choice: Exclude<BackendChoic
   return { backend, tier };
 };
 
+/** Where the canvas was, while a DOM renderer has it out of the document. */
+let parkedCanvas: { readonly parent: Node; readonly before: Node | null } | undefined;
+
+const detachCanvas = (canvas: HTMLCanvasElement, presentsElsewhere: boolean): void => {
+  if (!presentsElsewhere || canvas.parentNode === null) {
+    return;
+  }
+  parkedCanvas = { before: canvas.nextSibling, parent: canvas.parentNode };
+  canvas.remove();
+};
+
+const restoreCanvas = (canvas: HTMLCanvasElement): void => {
+  if (parkedCanvas === undefined) {
+    return;
+  }
+  parkedCanvas.parent.insertBefore(canvas, parkedCanvas.before);
+  parkedCanvas = undefined;
+};
+
+let activeSurface: HTMLElement | undefined;
+
+const demandSurface = (): HTMLElement => {
+  if (activeSurface === undefined) {
+    throw new Error("renderer: rendererSurface() called before initRenderer()");
+  }
+  return activeSurface;
+};
+
+/**
+ * The element the active renderer presents into — the canvas for the pixel
+ * backends, its own DOM layer for the CSS3D one.
+ *
+ * This is what input should be bound to. Binding to the canvas only ever worked
+ * because every backend happened to use one; a DOM renderer has none, and its
+ * scene is made of the very elements the pointer lands on.
+ */
+export const rendererSurface = (): HTMLElement => demandSurface();
+
 /**
  * Initialize the singleton renderer on `canvas`. `choice` defaults to "auto",
  * which runs the probed capability ladder and falls through — all the way to
@@ -153,11 +192,24 @@ const resolveExplicit = (canvas: HTMLCanvasElement, choice: Exclude<BackendChoic
  * function then reuses that report instead of detecting again.
  */
 export const initRenderer = (canvas: HTMLCanvasElement, choice: BackendChoice = "auto"): void => {
+  // A previous mount may have taken the canvas out of the document (the DOM
+  // renderer does — see below). Put it back before resolving, so re-mounting on a
+  // pixel backend finds the page exactly as it was.
+  restoreCanvas(canvas);
   const resolved = choice === "auto" ? resolveAuto(canvas) : resolveExplicit(canvas, choice);
   activeTier = resolved.tier;
   console.log(`axiom-engine: render backend = ${resolved.backend.name} (tier ${resolved.tier})`);
   initStore(confirmingBackend(resolved.backend, resolved.tier), canvas);
+  activeSurface = resolved.backend.surface ?? canvas;
+  // A backend that presents into its OWN element does not want a canvas in the
+  // page at all. Leaving it would be harmless to look at and wrong in substance:
+  // "no canvas" is the entire proposition of the DOM renderer, and a stray
+  // 960x600 canvas element sitting under the scene quietly contradicts it. Its
+  // position is remembered so the next pixel-backend mount can put it back.
+  detachCanvas(canvas, resolved.backend.surface !== undefined);
 };
+
+
 
 /** True when the running tier is at or above `tier` on the ladder — for an app
  * that scales its scene to the machine it landed on. */
