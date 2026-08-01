@@ -247,11 +247,23 @@ pub struct CameraTuning {
 
 impl CameraTuning {
     /// The shipping camera.
+    ///
+    /// The chase distance and the eye height are a *framing* decision, not a
+    /// comfort one: they set how much of the frame the car occupies and how
+    /// steeply the road plane runs out of it. Measured against the art target,
+    /// the rig sat ~15% too far back and ~8% too high — the car read as a small
+    /// object dropped into a wide empty plate rather than as the subject of the
+    /// shot, and the extra elevation flattened the road's convergence. Pulling
+    /// in to 5.5 m and down to 2.0 m puts the car back at the size the target
+    /// frames it at while leaving the depression angle — and so how much of the
+    /// roof you see — where it already was. `distance_high` moves by the same
+    /// factor so the rig keeps its speed character: the same proportional
+    /// pull-back as the car gets going, just from a tighter starting frame.
     pub const DEFAULT: CameraTuning = CameraTuning {
-        distance_low: 6.5,
-        distance_high: 8.5,
+        distance_low: 5.5,
+        distance_high: 7.2,
         distance_boost: 1.1,
-        height: 2.2,
+        height: 2.0,
         look_ahead_low: 5.0,
         look_ahead_high: 14.0,
         fov_low: 65.0,

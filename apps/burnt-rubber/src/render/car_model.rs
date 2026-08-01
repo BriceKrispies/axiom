@@ -46,7 +46,7 @@ use crate::sim::car::CarPose;
 use super::palette::ScenePalette;
 
 /// The car's overall dimensions (m). Chosen against the road: a 4.5 m car on a
-/// 17 m road with the camera 2.2 m up reads as a car, not a toy.
+/// 17 m road with the camera 2.0 m up reads as a car, not a toy.
 pub const CAR_LENGTH: f32 = 4.5;
 /// Overall width (m).
 pub const CAR_WIDTH: f32 = 2.0;

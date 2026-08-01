@@ -44,7 +44,7 @@ use scenery_pool::SceneryField;
 /// to near, and the near plane is the end of that ratio worth moving: at 0.35 m
 /// the road and its markings z-fight into shimmering bands a few hundred metres
 /// ahead, which is most of what the player is looking at. Nothing is ever nearer
-/// than this - the chase camera holds at least 6.5 m of the car.
+/// than this - the chase camera holds at least 5.5 m of the car.
 pub const NEAR_PLANE: f32 = 1.2;
 /// The far plane (m). Just past the furthest drawn chunk
 /// (`CHUNKS_AHEAD` x `CHUNK_LENGTH`) plus its scenery, and no further: every

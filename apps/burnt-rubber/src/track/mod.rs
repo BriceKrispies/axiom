@@ -275,8 +275,8 @@ pub const RESET_BACKOFF: f32 = 24.0;
 ///
 /// It is not zero, and the reason is framing rather than gameplay. The course
 /// ribbon simply *stops* at distance zero — there is no tarmac before the first
-/// sample — while the chase camera sits ~6.5 m behind the car, 2.2 m up, and at
-/// a 65-degree field of view the bottom of the frame lands roughly 3.8 m
+/// sample — while the chase camera sits ~5.5 m behind the car, 2.0 m up, and at
+/// a 65-degree field of view the bottom of the frame lands roughly 3.1 m
 /// **behind** the car. Park the car on the first metre of road and the opening
 /// shot is a car floating over a hole: a hard horizontal seam two thirds of the
 /// way down the frame, with the rear of the car silhouetted against the
