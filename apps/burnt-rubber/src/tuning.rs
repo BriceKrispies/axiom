@@ -249,21 +249,40 @@ impl CameraTuning {
     /// The shipping camera.
     ///
     /// The chase distance and the eye height are a *framing* decision, not a
-    /// comfort one: they set how much of the frame the car occupies and how
-    /// steeply the road plane runs out of it. Measured against the art target,
-    /// the rig sat ~15% too far back and ~8% too high — the car read as a small
-    /// object dropped into a wide empty plate rather than as the subject of the
-    /// shot, and the extra elevation flattened the road's convergence. Pulling
-    /// in to 5.5 m and down to 2.0 m puts the car back at the size the target
-    /// frames it at while leaving the depression angle — and so how much of the
-    /// roof you see — where it already was. `distance_high` moves by the same
-    /// factor so the rig keeps its speed character: the same proportional
-    /// pull-back as the car gets going, just from a tighter starting frame.
+    /// comfort one, and they are two independent decisions that a single "pull
+    /// the camera in" instinct keeps conflating. Distance sets how *wide* the
+    /// car reads. Height sets how far *down* the rig looks at it, and that is
+    /// what decides whether the shot is a car seen from behind or a car seen
+    /// from above.
+    ///
+    /// The previous pass tightened the distance to fix a car that read too
+    /// small, and left the height alone at 2.0 m — twice the car's own
+    /// [`crate::render::car_model::ROOF_HEIGHT`] of 0.98 m, only 5.5 m back.
+    /// That is a 20° depression angle onto a subject four metres away, and the
+    /// near-field perspective at that range turns the roof into a wide flat
+    /// slab: measured against the art target the car's *projected* silhouette
+    /// came out 1.98 tall per unit wide where the target reads 1.19, its rear
+    /// bumper ran to 82% of frame height and collided with the on-screen touch
+    /// controls, and the road ahead was squeezed into the top quarter.
+    ///
+    /// So the correction is almost entirely vertical. Dropping to 1.35 m puts
+    /// the eye 0.37 m above the roof rather than a full metre above it and
+    /// nearly halves the depression angle (20.0° → 12.9°), which is what
+    /// restores the target's read: a rear-three-quarter silhouette — taillights
+    /// and rear glass, a sliver of roof — sitting on open tarmac with the road
+    /// running away underneath it. Distance moves only enough to hold the car's
+    /// on-screen *width* where the target has it (the one thing the previous
+    /// pass got right), and `distance_high` moves by the same factor so the rig
+    /// keeps its speed character.
+    ///
+    /// The eye now sits 0.45 m above the `min_ground_clearance` floor rather
+    /// than 1.1 m, so that clamp does more work over undulating terrain — it is
+    /// a safety floor, not a framing knob, and it is deliberately left alone.
     pub const DEFAULT: CameraTuning = CameraTuning {
-        distance_low: 5.5,
-        distance_high: 7.2,
+        distance_low: 5.9,
+        distance_high: 7.7,
         distance_boost: 1.1,
-        height: 2.0,
+        height: 1.35,
         look_ahead_low: 5.0,
         look_ahead_high: 14.0,
         fov_low: 65.0,
