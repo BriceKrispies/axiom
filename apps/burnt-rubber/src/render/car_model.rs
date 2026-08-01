@@ -15,6 +15,13 @@
 //! which is exactly what a car does not look like. The parts that break that
 //! wall up are all rear parts, and they are the ones a real car reads by:
 //!
+//! * a **chopped greenhouse** — the cabin is a *slot*, not a cab. A tall box of
+//!   glass sitting proud on top of the body is the silhouette of a pickup with
+//!   a crew cab, and it is what the car read as before: from the chase camera
+//!   you saw two vertical walls of glass down each side of the roof. A sports
+//!   car's side glass is a shallow band, so the cabin is barely taller than the
+//!   decklid lip and the rear screen is long and shallow instead of short and
+//!   steep;
 //! * **haunches** — the widest point of the car is the rear arches, not the
 //!   cabin, and the body is drawn *narrower* than the wheel track so the tyres
 //!   stand proud of it instead of being buried inside a full-width slab;
@@ -57,7 +64,27 @@ pub const TRACK_HALF: f32 = 0.86;
 /// Applied as a *negative* chassis pitch, because positive pitch is nose-down:
 /// the front edge of the glass has to rise to the roof and the back edge fall to
 /// the decklid, which is the opposite sense.
-pub const BACKLIGHT_RAKE: f32 = 0.38;
+///
+/// Shallow (about 12°), because the rake is not free: the glass has to span from
+/// the back of the roof to the decklid, so a steep rake and a low roof cannot
+/// both be true. A fastback picks the low roof, and gets a long, nearly-flat
+/// rear screen out of it — which is the line the car is recognised by.
+pub const BACKLIGHT_RAKE: f32 = 0.21;
+
+/// The top of the roof above the car's floor (m).
+///
+/// The whole car is this tall, and at less than half its width it is a low car,
+/// which is the entire point: raise this and the greenhouse turns back into a
+/// cab. The cabin box hangs *below* it, so this is the one number that sets the
+/// car's height.
+pub const ROOF_HEIGHT: f32 = 0.98;
+
+/// How tall the side glass stands above the shoulder line (m).
+///
+/// Shallow on purpose. This is the height of the vertical glass wall the chase
+/// camera sees down each side of the roof, and it is the single number that
+/// decides whether the car reads as a coupe or as a pickup cab.
+pub const GREENHOUSE_HEIGHT: f32 = 0.26;
 
 /// How wide the body box is, as a fraction of the car's full width.
 ///
@@ -145,25 +172,31 @@ impl PlayerCar {
                 Vec3::new(CAR_WIDTH * 0.72, 0.34, 1.20),
             ),
         );
-        // Cabin: a narrow greenhouse set forward of the rear axle, so the tail
-        // behind it is long. A cabin as wide as the body is a van roof.
+        // Cabin: a narrow, *chopped* greenhouse — long fore-and-aft and barely
+        // taller than the decklid lip, sitting straight on the body's shoulder
+        // line at 0.72. A cabin as wide as the body is a van roof; a cabin as
+        // tall as it is wide is a pickup cab.
         app.set(
             self.cabin,
             Transform::new(
-                basis.at(Vec3::new(0.0, 0.94, 0.10)),
+                basis.at(Vec3::new(0.0, ROOF_HEIGHT - GREENHOUSE_HEIGHT * 0.5, 0.24)),
                 rotation,
-                Vec3::new(CAR_WIDTH * 0.64, 0.44, 1.30),
+                Vec3::new(CAR_WIDTH * 0.64, GREENHOUSE_HEIGHT, 1.55),
             ),
         );
         // Backlight: the long raked rear window running from the back of the
         // roof down to the decklid. Pitched in the *chassis* frame, so it keeps
         // its rake through pitch and roll instead of standing up under load.
+        // Its ends are not free: the top edge meets the back of the roof
+        // (z = -0.535, y = ROOF_HEIGHT) and the bottom edge lands on the decklid
+        // ahead of the wing (z = -1.60, y = 0.75), and the rake, length and
+        // centre below are what that span works out to.
         app.set(
             self.backlight,
             Transform::new(
-                basis.at(Vec3::new(0.0, 0.95, -1.08)),
+                basis.at(Vec3::new(0.0, 0.87, -1.07)),
                 rotation.multiply(Quat::from_euler_xyz(-BACKLIGHT_RAKE, 0.0, 0.0)),
-                Vec3::new(CAR_WIDTH * 0.62, 0.08, 1.04),
+                Vec3::new(CAR_WIDTH * 0.62, 0.08, 1.09),
             ),
         );
         // Rear haunches: the arches over the back wheels, reaching the car's
@@ -589,6 +622,88 @@ mod tests {
         assert!(
             (haunch_edge - CAR_WIDTH * 0.5).abs() < 0.05,
             "the arch defines the car's full width: {haunch_edge}"
+        );
+    }
+
+    /// The greenhouse is a chopped slot, not a cab.
+    ///
+    /// This is the edit that turns the car back into a pickup: raise the roof,
+    /// or make the cabin box tall instead of long, and the chase camera sees two
+    /// vertical walls of glass down the sides of the roof. Both the height of
+    /// that wall and the height of the whole car are pinned here.
+    #[test]
+    fn the_greenhouse_is_a_chopped_slot_rather_than_a_cab() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette);
+        let pose = pose_at(0.0, 0.0, 0.0);
+        car.pose(&mut app, &pose, 0.0, 0.0);
+
+        let cabin = app.get::<Transform>(car.cabin).unwrap();
+        let floor = pose.position.y;
+        let roof = cabin.translation.y + cabin.scale.y * 0.5 - floor;
+
+        assert!((roof - ROOF_HEIGHT).abs() < 1.0e-4, "the roof is where it says: {roof}");
+        assert!(
+            roof < CAR_WIDTH * 0.5,
+            "the car is lower than half its width, or it is not a sports car: {roof}"
+        );
+        assert!(
+            cabin.scale.y < cabin.scale.z * 0.25,
+            "the greenhouse is long and shallow, not a box: {} tall, {} long",
+            cabin.scale.y,
+            cabin.scale.z
+        );
+        // And it sits *on* the body's shoulder rather than floating above it.
+        let body = app.get::<Transform>(car.body).unwrap();
+        let shoulder = body.translation.y + body.scale.y * 0.5;
+        assert!(
+            (cabin.translation.y - cabin.scale.y * 0.5 - shoulder).abs() < 0.02,
+            "the cabin sits on the shoulder line"
+        );
+    }
+
+    /// The rear screen spans exactly the gap it has to: the back of the roof
+    /// down to the decklid. A steeper rake with this roof height would leave the
+    /// glass hanging in the air short of the tail.
+    #[test]
+    fn the_rear_screen_reaches_from_the_roof_to_the_decklid() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette);
+        let pose = pose_at(0.0, 0.0, 0.0);
+        car.pose(&mut app, &pose, 0.0, 0.0);
+
+        let cabin = app.get::<Transform>(car.cabin).unwrap();
+        let glass = app.get::<Transform>(car.backlight).unwrap();
+        let body = app.get::<Transform>(car.body).unwrap();
+        let wing = app.get::<Transform>(car.wing).unwrap();
+
+        let along = glass.rotation.rotate(Vec3::UNIT_Z).mul_scalar(glass.scale.z * 0.5);
+        let top = glass.translation.add(along);
+        let bottom = glass.translation.add(along.mul_scalar(-1.0));
+
+        assert!(
+            (top.y - (cabin.translation.y + cabin.scale.y * 0.5)).abs() < 0.02,
+            "the glass meets the roof: {} vs {}",
+            top.y,
+            cabin.translation.y + cabin.scale.y * 0.5
+        );
+        assert!(
+            (top.z - (cabin.translation.z - cabin.scale.z * 0.5)).abs() < 0.02,
+            "and it meets it at the *back* of the roof: {top:?}"
+        );
+        let deck = body.translation.y + body.scale.y * 0.5;
+        assert!(
+            bottom.y > deck - 0.02 && bottom.y < wing.translation.y + wing.scale.y * 0.5 + 0.02,
+            "the glass lands on the decklid, not above or through it: {}",
+            bottom.y
+        );
+        assert!(
+            bottom.z > wing.translation.z,
+            "and ahead of the decklid lip: {} vs {}",
+            bottom.z,
+            wing.translation.z
         );
     }
 
