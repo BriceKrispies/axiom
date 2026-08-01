@@ -15,6 +15,11 @@ use std::collections::HashMap;
 use axiom_host::SdfScene;
 use wgpu::util::DeviceExt;
 
+// Floats per instance (`mvp(16) + world(16) + colour(4) + emissive(3)+pad(1)`) —
+// owned by `frame_packet_adapter`, which does the packing this renderer's vertex
+// layout is derived from.
+use crate::frame_packet_adapter::INSTANCE_FLOATS;
+
 /// WGSL for the lit/textured/shadowed main pass: per-vertex position+normal+uv+
 /// colour, per-instance MVP + world matrix + colour, a material albedo texture
 /// (group 0), a lighting uniform (group 1), and a shadow map + light
@@ -94,6 +99,10 @@ struct VsOut {
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
     @location(3) world_pos: vec3<f32>,
+    // The draw's material emissive (linear RGB). Flat across the instance; carried
+    // as a varying rather than a uniform because it rides the instance buffer, and
+    // the mesh pass batches many materials' instances behind one pipeline.
+    @location(4) emissive: vec3<f32>,
 };
 
 @vertex
@@ -111,6 +120,8 @@ fn vs(
     @location(10) w2: vec4<f32>,
     @location(11) w3: vec4<f32>,
     @location(12) instance_color: vec4<f32>,
+    // rgb = the material's self-illumination; w is the layout pad (unread).
+    @location(13) instance_emissive: vec4<f32>,
 ) -> VsOut {
     let mvp = mat4x4<f32>(m0, m1, m2, m3);
     let world = mat4x4<f32>(w0, w1, w2, w3);
@@ -120,6 +131,10 @@ fn vs(
     out.normal = (world * vec4<f32>(normal, 0.0)).xyz;
     out.uv = uv;
     out.color = vertex_color * instance_color;
+    // Emissive is NOT multiplied into `out.color`: the fragment stage modulates
+    // the colour by N.L, ambient and shadow, and self-illumination must survive
+    // all three. It is added after lighting, before fog.
+    out.emissive = instance_emissive.rgb;
     return out;
 }
 
@@ -162,6 +177,15 @@ fn vs_skinned(
     out.normal = (world * sn).xyz;
     out.uv = uv;
     out.color = vertex_color * instance_color;
+    // The SKINNED instance payload carries no emissive lane. Its pipeline already
+    // binds 16 vertex attributes (6 vertex + 10 instance), which is exactly the
+    // WebGL2 downlevel guarantee for MAX_VERTEX_ATTRIBS, so a 17th attribute would
+    // fail pipeline creation on the browser's fallback path. A skinned material's
+    // emissive therefore reads zero here — and the Canvas 2D backend reaches the
+    // same zero through the same absent field, so the two backends AGREE. Carrying
+    // it means repacking the skinned instance (its `joint_base` vec4 has three free
+    // lanes), which is a separate change to the skinned draw contract.
+    out.emissive = vec3<f32>(0.0, 0.0, 0.0);
     return out;
 }
 
@@ -261,11 +285,16 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         let diffuse = max(dot(N, L), 0.0) * atten;
         lit = lit + base.rgb * lt.col.rgb * lt.col.w * diffuse;
     }
+    // Self-illumination, added after every light term and before fog: it is radiance
+    // the surface emits, so no N.L, no ambient and no shadow attenuates it — but the
+    // air between it and the camera still does. A non-emissive material contributes
+    // exactly zero here, so every existing frame is byte-identical.
+    let emitted = lit + in.emissive;
     // Atmospheric perspective, last: distance recedes toward the frame's fog colour.
     // This is applied AFTER lighting on purpose — fog replaces the surface's radiance,
     // it does not tint the light — which is also where the Canvas 2D backend's fog
     // post-pass sits (on the composited image), so the two agree.
-    let fogged = mix(lit, lights.fog_color.rgb, fog_factor(in.clip.z));
+    let fogged = mix(emitted, lights.fog_color.rgb, fog_factor(in.clip.z));
     return vec4<f32>(fogged, base.a);
 }
 "#;
@@ -528,8 +557,6 @@ const SDF_PRIM_BYTES: u64 = 64 + 16 + 16 + 16;
 /// 64 + `camera_world_pos` 16 + `march` 16 + `count` padded to 16) then
 /// `MAX_SDF_PRIMITIVES` primitives. std140-compatible.
 const SDF_UBO_BYTES: u64 = 176 + (MAX_SDF_PRIMITIVES as u64) * SDF_PRIM_BYTES;
-/// Floats per instance: mvp(16) + world(16) + colour(4) = 36.
-const INSTANCE_FLOATS: usize = 36;
 /// Bytes per instance.
 const INSTANCE_STRIDE: u64 = (INSTANCE_FLOATS as u64) * 4;
 /// Bytes per vertex: position(3) + normal(3) + uv(2) + colour(4) = 12 f32.
@@ -1351,9 +1378,11 @@ fn build_main_pipeline(
         push_constant_ranges: &[],
     });
     // Per-instance attributes: mvp columns (loc 4-7), world columns (loc 8-11),
-    // then colour (loc 12) — one Float32x4 every 16 bytes, derived from the
-    // 36-float instance stride so the layout cannot drift from the packing.
-    let instance_attrs: Vec<wgpu::VertexAttribute> = (0..9)
+    // colour (loc 12), then emissive+pad (loc 13) — one Float32x4 every 16 bytes,
+    // derived from the INSTANCE_FLOATS stride so the layout cannot drift from the
+    // packing. 14 attributes with the 4 per-vertex ones, inside the WebGL2
+    // guarantee of 16.
+    let instance_attrs: Vec<wgpu::VertexAttribute> = (0..10)
         .map(|i| wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Float32x4,
             offset: (i as u64) * 16,
@@ -1543,7 +1572,7 @@ fn build_shadow_pipeline(
         push_constant_ranges: &[],
     });
     // Position from the vertex buffer (loc 0); the four world-matrix columns from
-    // the instance buffer (loc 1-4) at the world offset within the 36-float stride.
+    // the instance buffer (loc 1-4) at the world offset within the instance stride.
     let position_attr = [wgpu::VertexAttribute {
         format: wgpu::VertexFormat::Float32x3,
         offset: 0,

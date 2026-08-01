@@ -4,17 +4,26 @@ use std::collections::HashMap;
 
 use axiom_host::{FrameAmbient, FrameDepthFog, FramePostProcess, SdfScene};
 
+/// Floats one packed instance occupies in the live backend's instance layout:
+/// `mvp(16) + world(16) + colour(4) + emissive(3) + pad(1)`. It is the single
+/// definition both [`FrameOutcome::instance_floats`] and
+/// [`FrameOutcome::mesh_batches`] lay out against, and it must stay equal to the
+/// GPU backend's `INSTANCE_FLOATS` (the two describe the same bytes).
+pub(crate) const INSTANCE_FLOATS: usize = 40;
+
 /// One drawn object: its wgpu-ready model-view-projection matrix and its
 /// world (model) matrix (both column-major, 16 floats), its linear RGBA colour,
-/// and the ids of the mesh it draws and the material it uses. The world matrix
-/// rides alongside the MVP so the fragment shader can recover each pixel's world
-/// position for point-light distance/direction; draws still group into
-/// per-`(mesh, material)` instance batches for the matching albedo texture.
+/// its linear-RGB emissive (self-illumination) radiance, and the ids of the mesh
+/// it draws and the material it uses. The world matrix rides alongside the MVP
+/// so the fragment shader can recover each pixel's world position for
+/// point-light distance/direction; draws still group into per-`(mesh, material)`
+/// instance batches for the matching albedo texture.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawData {
     mvp: [f32; 16],
     world: [f32; 16],
     color: [f32; 4],
+    emissive: [f32; 3],
     mesh_id: u64,
     material_id: u64,
     casts_contact_shadow: bool,
@@ -33,10 +42,18 @@ impl DrawData {
             mvp,
             world,
             color,
+            emissive: [0.0; 3],
             mesh_id,
             material_id,
             casts_contact_shadow,
         }
+    }
+
+    /// This draw with its material's linear-RGB self-illumination. `[0, 0, 0]`
+    /// (the default) is an exact no-op — a non-emissive draw is unchanged.
+    pub(crate) const fn with_emissive(mut self, emissive: [f32; 3]) -> Self {
+        self.emissive = emissive;
+        self
     }
 
     /// The column-major model-view-projection matrix.
@@ -49,9 +66,15 @@ impl DrawData {
         self.world
     }
 
-    /// The linear RGBA colour.
+    /// The linear RGBA colour (reflectance — the light-modulated term).
     pub const fn color(&self) -> [f32; 4] {
         self.color
+    }
+
+    /// The linear-RGB self-illumination this surface adds on top of its shaded
+    /// colour, independent of any light. `[0, 0, 0]` = not emissive.
+    pub const fn emissive(&self) -> [f32; 3] {
+        self.emissive
     }
 
     /// The id of the mesh this object draws.
@@ -391,26 +414,32 @@ impl FrameOutcome {
 
     /// Pack the per-object draws into the live backend's instance layout: each
     /// draw contributes its 16 MVP floats, then its 16 world-matrix floats, then
-    /// its 4 colour floats (36 floats per instance), in submission order. The
-    /// world matrix lets the shader recover world position for point lighting.
-    /// This is the plain data the windowing run loop presents each frame.
+    /// its 4 colour floats, then its 3 emissive floats + 1 pad ([`INSTANCE_FLOATS`]
+    /// floats per instance), in submission order. The world matrix lets the shader
+    /// recover world position for point lighting; the emissive lane carries the
+    /// material's self-illumination, which the colour lane cannot (the shader
+    /// multiplies the colour by the light). The trailing pad keeps the lane a
+    /// `vec4` — the vertex-attribute granularity both wgpu and the WebGL2
+    /// downlevel path use. This is the plain data the windowing run loop presents
+    /// each frame.
     pub fn instance_floats(&self) -> Vec<f32> {
-        let mut out = Vec::with_capacity(self.draws.len() * 36);
+        let mut out = Vec::with_capacity(self.draws.len() * INSTANCE_FLOATS);
         self.draws.iter().for_each(|draw| {
             out.extend_from_slice(&draw.mvp);
             out.extend_from_slice(&draw.world);
             out.extend_from_slice(&draw.color);
+            out.extend_from_slice(&[draw.emissive[0], draw.emissive[1], draw.emissive[2], 0.0]);
         });
         out
     }
 
     /// Group the per-object draws into **per-`(mesh, material)` instance batches**
     /// for the multi-mesh, multi-material live backend: `(mesh_id, material_id,
-    /// [mvp(16), world(16), colour(4)] per instance, count)`, one entry per
-    /// distinct `(mesh, material)` pair in first-appearance order. This is the
-    /// plain data the multi-mesh run loop presents each frame; the backend draws
-    /// each batch against the matching uploaded mesh with the material's albedo
-    /// bound.
+    /// [mvp(16), world(16), colour(4), emissive(3)+pad(1)] per instance, count)`,
+    /// one entry per distinct `(mesh, material)` pair in first-appearance order.
+    /// This is the plain data the multi-mesh run loop presents each frame; the
+    /// backend draws each batch against the matching uploaded mesh with the
+    /// material's albedo bound.
     pub fn mesh_batches(&self) -> Vec<(u64, u64, Vec<f32>, u32)> {
         let mut order: Vec<(u64, u64)> = Vec::new();
         let mut packed: HashMap<(u64, u64), Vec<f32>> = HashMap::new();
@@ -423,12 +452,18 @@ impl FrameOutcome {
             floats.extend_from_slice(&draw.mvp);
             floats.extend_from_slice(&draw.world);
             floats.extend_from_slice(&draw.color);
+            floats.extend_from_slice(&[
+                draw.emissive[0],
+                draw.emissive[1],
+                draw.emissive[2],
+                0.0,
+            ]);
         });
         order
             .into_iter()
             .map(|(mesh_id, material_id)| {
                 let floats = packed.remove(&(mesh_id, material_id)).unwrap_or_default();
-                let count = (floats.len() / 36) as u32;
+                let count = (floats.len() / INSTANCE_FLOATS) as u32;
                 (mesh_id, material_id, floats, count)
             })
             .collect()
@@ -463,14 +498,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn instance_floats_pack_mvp_world_then_colour_per_draw() {
+    fn instance_floats_pack_mvp_world_colour_then_emissive_per_draw() {
         let outcome = FrameOutcome::new(
             0,
             0,
             [0.0; 4],
             vec![
                 DrawData::new([1.0; 16], [9.0; 16], [0.1, 0.2, 0.3, 1.0], 1, 1, false),
-                DrawData::new([2.0; 16], [8.0; 16], [0.4, 0.5, 0.6, 1.0], 1, 1, true),
+                DrawData::new([2.0; 16], [8.0; 16], [0.4, 0.5, 0.6, 1.0], 1, 1, true)
+                    .with_emissive([3.0, 0.25, 0.0]),
             ],
             Vec::new(),
             [0.0; 16],
@@ -482,14 +518,21 @@ mod tests {
         assert_eq!(outcome.camera_view_proj(), [4.0; 16]);
         assert!(!outcome.draws()[0].casts_contact_shadow());
         assert!(outcome.draws()[1].casts_contact_shadow());
+        // A draw with no authored emissive reads zero — the exact no-op that keeps
+        // every pre-existing frame unchanged.
+        assert_eq!(outcome.draws()[0].emissive(), [0.0; 3]);
+        assert_eq!(outcome.draws()[1].emissive(), [3.0, 0.25, 0.0]);
         let floats = outcome.instance_floats();
-        assert_eq!(floats.len(), 72); // 2 draws x (16 mvp + 16 world + 4 colour)
+        // 2 draws x (16 mvp + 16 world + 4 colour + 3 emissive + 1 pad)
+        assert_eq!(floats.len(), 80);
         assert_eq!(&floats[0..16], &[1.0; 16]);
         assert_eq!(&floats[16..32], &[9.0; 16]);
         assert_eq!(&floats[32..36], &[0.1, 0.2, 0.3, 1.0]);
-        assert_eq!(&floats[36..52], &[2.0; 16]);
-        assert_eq!(&floats[52..68], &[8.0; 16]);
-        assert_eq!(&floats[68..72], &[0.4, 0.5, 0.6, 1.0]);
+        assert_eq!(&floats[36..40], &[0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(&floats[40..56], &[2.0; 16]);
+        assert_eq!(&floats[56..72], &[8.0; 16]);
+        assert_eq!(&floats[72..76], &[0.4, 0.5, 0.6, 1.0]);
+        assert_eq!(&floats[76..80], &[3.0, 0.25, 0.0, 0.0]);
     }
 
     #[test]
@@ -622,7 +665,8 @@ mod tests {
             vec![
                 DrawData::new([1.0; 16], [9.0; 16], [0.1, 0.2, 0.3, 1.0], 7, 5, true),
                 DrawData::new([2.0; 16], [8.0; 16], [0.4, 0.5, 0.6, 1.0], 7, 6, false),
-                DrawData::new([3.0; 16], [7.0; 16], [0.7, 0.8, 0.9, 1.0], 7, 5, true),
+                DrawData::new([3.0; 16], [7.0; 16], [0.7, 0.8, 0.9, 1.0], 7, 5, true)
+                    .with_emissive([0.0, 4.0, 0.0]),
             ],
             Vec::new(),
             [0.0; 16],
@@ -643,9 +687,12 @@ mod tests {
         // First-appearance order: (7,5) first (2 instances), then (7,6) (1).
         assert_eq!((batches[0].0, batches[0].1), (7, 5));
         assert_eq!(batches[0].3, 2);
-        assert_eq!(batches[0].2.len(), 72); // 2 instances x 36 floats
+        assert_eq!(batches[0].2.len(), 80); // 2 instances x 40 floats
         assert_eq!(&batches[0].2[0..16], &[1.0; 16]);
-        assert_eq!(&batches[0].2[36..52], &[3.0; 16]);
+        assert_eq!(&batches[0].2[36..40], &[0.0; 4]);
+        assert_eq!(&batches[0].2[40..56], &[3.0; 16]);
+        // The second instance of the pair carries its own emissive lane.
+        assert_eq!(&batches[0].2[76..80], &[0.0, 4.0, 0.0, 0.0]);
         assert_eq!((batches[1].0, batches[1].1), (7, 6));
         assert_eq!(batches[1].3, 1);
         assert_eq!(&batches[1].2[0..16], &[2.0; 16]);

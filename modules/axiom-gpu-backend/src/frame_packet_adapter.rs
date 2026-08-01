@@ -5,18 +5,29 @@
 //! a flat light list (the shape [`crate::GpuBackendApi::present_frame`] takes).
 //! This module derives exactly that shape from a `FramePacket`, so the GPU
 //! backend presents the shared packet with **no** change to the renderer. The
-//! packing layout is byte-identical to the legacy batch format: 36 floats per
-//! instance — `mvp[16]`, then `world[16]`, then `colour[4]` — grouped by
+//! packing layout is byte-identical to the legacy batch format:
+//! `INSTANCE_FLOATS` floats per instance — `mvp[16]`, then `world[16]`, then
+//! `colour[4]`, then `emissive[3]` + one pad float — grouped by
 //! `(mesh_id, material_id)` in first-appearance order.
 
 use std::collections::HashMap;
 
 use axiom_host::FramePacket;
 
+/// Floats one packed instance occupies: `mvp(16) + world(16) + colour(4) +
+/// emissive(3) + pad(1)`. This module owns the number because it owns the
+/// packing; the renderer's vertex layout is derived from it, and it must stay
+/// equal to `axiom::FrameOutcome`'s `INSTANCE_FLOATS` (the same bytes, packed by
+/// the other producer). The emissive lane is padded to a full `vec4` because a
+/// vertex attribute is the granularity both wgpu and the WebGL2 downlevel target
+/// describe; the pad float is never read.
+pub(crate) const INSTANCE_FLOATS: usize = 40;
+
 /// Group a packet's draws into per-`(mesh, material)` instance batches:
-/// `(mesh_id, material_id, [mvp(16), world(16), colour(4)] per instance, count)`,
-/// one entry per distinct `(mesh, material)` pair in first-appearance order.
-/// Byte-identical to the legacy `mesh_batches` layout the live renderer consumes.
+/// `(mesh_id, material_id, [mvp(16), world(16), colour(4), emissive(3)+pad(1)]
+/// per instance, count)`, one entry per distinct `(mesh, material)` pair in
+/// first-appearance order. Byte-identical to the `mesh_batches` layout the live
+/// renderer consumes.
 pub(crate) fn frame_packet_to_batches(packet: &FramePacket) -> Vec<(u64, u64, Vec<f32>, u32)> {
     let mut order: Vec<(u64, u64)> = Vec::new();
     let mut packed: HashMap<(u64, u64), Vec<f32>> = HashMap::new();
@@ -29,12 +40,16 @@ pub(crate) fn frame_packet_to_batches(packet: &FramePacket) -> Vec<(u64, u64, Ve
         floats.extend_from_slice(&draw.mvp());
         floats.extend_from_slice(&draw.world());
         floats.extend_from_slice(&draw.color());
+        // The emissive lane, padded to a `vec4` — the vertex-attribute
+        // granularity the instance buffer is described in.
+        let e = draw.emissive();
+        floats.extend_from_slice(&[e[0], e[1], e[2], 0.0]);
     });
     order
         .into_iter()
         .map(|(mesh_id, material_id)| {
             let floats = packed.remove(&(mesh_id, material_id)).unwrap_or_default();
-            let count = (floats.len() / 36) as u32;
+            let count = (floats.len() / INSTANCE_FLOATS) as u32;
             (mesh_id, material_id, floats, count)
         })
         .collect()
@@ -82,7 +97,8 @@ mod tests {
         let draws = vec![
             FrameDrawItem::new(0, 7, 5, [9.0; 16], [1.0; 16], [0.1, 0.2, 0.3, 1.0], false),
             FrameDrawItem::new(1, 7, 6, [8.0; 16], [2.0; 16], [0.4, 0.5, 0.6, 1.0], false),
-            FrameDrawItem::new(2, 7, 5, [7.0; 16], [3.0; 16], [0.7, 0.8, 0.9, 1.0], false),
+            FrameDrawItem::new(2, 7, 5, [7.0; 16], [3.0; 16], [0.7, 0.8, 0.9, 1.0], false)
+                .with_emissive([2.0, 0.5, 0.0]),
         ];
         let batches = frame_packet_to_batches(&packet(draws, Vec::new()));
 
@@ -90,15 +106,17 @@ mod tests {
         // First-appearance order: (7,5) first with 2 instances, then (7,6) with 1.
         assert_eq!((batches[0].0, batches[0].1), (7, 5));
         assert_eq!(batches[0].3, 2);
-        assert_eq!(batches[0].2.len(), 72); // 2 instances x 36 floats
-                                            // Instance 0 = draw 0: mvp, then world, then colour.
+        assert_eq!(batches[0].2.len(), 80); // 2 instances x 40 floats
+                                            // Instance 0 = draw 0: mvp, world, colour, emissive+pad.
         assert_eq!(&batches[0].2[0..16], &[1.0; 16]);
         assert_eq!(&batches[0].2[16..32], &[9.0; 16]);
         assert_eq!(&batches[0].2[32..36], &[0.1, 0.2, 0.3, 1.0]);
-        // Instance 1 = draw 2 (same pair).
-        assert_eq!(&batches[0].2[36..52], &[3.0; 16]);
-        assert_eq!(&batches[0].2[52..68], &[7.0; 16]);
-        assert_eq!(&batches[0].2[68..72], &[0.7, 0.8, 0.9, 1.0]);
+        assert_eq!(&batches[0].2[36..40], &[0.0, 0.0, 0.0, 0.0]);
+        // Instance 1 = draw 2 (same pair), which authored an emissive.
+        assert_eq!(&batches[0].2[40..56], &[3.0; 16]);
+        assert_eq!(&batches[0].2[56..72], &[7.0; 16]);
+        assert_eq!(&batches[0].2[72..76], &[0.7, 0.8, 0.9, 1.0]);
+        assert_eq!(&batches[0].2[76..80], &[2.0, 0.5, 0.0, 0.0]);
 
         assert_eq!((batches[1].0, batches[1].1), (7, 6));
         assert_eq!(batches[1].3, 1);

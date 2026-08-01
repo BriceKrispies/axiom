@@ -11,8 +11,8 @@
 //! software Canvas 2D path is; the GPU path is only on the same adapter.)
 //!
 //! Vertex layout is the engine's standard 12 floats: position(3) · normal(3) ·
-//! uv(2) · colour(4). Instance layout is the engine's 36 floats: view_proj(16) ·
-//! world(16) · tint(4).
+//! uv(2) · colour(4). Instance layout is the engine's `INSTANCE_FLOATS`:
+//! view_proj(16) · world(16) · tint(4) · emissive(3)+pad(1).
 
 use axiom_host::{
     BackendCapabilityProfile, FrameAmbient, FramePostProcess, FrameVolumetrics, RenderCapability,
@@ -25,6 +25,10 @@ use crate::curves::{lerp, lerp3, smoothstep};
 
 use super::scatter;
 use super::scene::{value_noise, Foliage, Manifest, Style, Terrain, Tree, Tuft};
+
+/// Floats one packed instance occupies, matching the engine's live instance
+/// layout: `mvp(16) · world(16) · tint(4) · emissive(3)+pad(1)`.
+const INSTANCE_FLOATS: usize = 40;
 
 /// Floats per mesh vertex: position(3) + normal(3) + uv(2) + colour(4).
 const VERT_FLOATS: usize = 12;
@@ -86,7 +90,7 @@ pub struct RenderData {
     /// Per-material tangent-space normal maps `(material_id, w, h, RGBA8)` — GPU-only
     /// surface relief; materials absent here get a flat normal (Canvas 2D ignores all).
     pub normals: Vec<(u64, u32, u32, Vec<u8>)>,
-    /// `(mesh_id, material_id, interleaved 36-float instances, instance count)`.
+    /// `(mesh_id, material_id, interleaved `INSTANCE_FLOATS`-float instances, instance count)`.
     pub batches: Vec<(u64, u64, Vec<f32>, u32)>,
     /// Optional volumetric light (god-rays) — neutral frame data every backend
     /// realizes through `host::apply_frame_volumetrics`.
@@ -171,7 +175,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
     let (canopy_mesh_id, canopy_inst, canopy_count, canopy_mat) = match &manifest.foliage {
         Some(f) => {
             let inst = foliage_instances(manifest, &trees, f, lean_deg, &view_proj, eye);
-            let count = (inst.len() / 36) as u32;
+            let count = (inst.len() / INSTANCE_FLOATS) as u32;
             (FOLIAGE_MESH, inst, count, LEAF_ALPHA_MAT)
         }
         None => (
@@ -188,7 +192,7 @@ pub fn build(manifest: &Manifest) -> RenderData {
         .filter(|f| f.branches > 0)
         .map(|f| branch_instances(manifest, &trees, f, lean_deg, &view_proj, eye))
         .unwrap_or_default();
-    let branch_count = (branch_inst.len() / 36) as u32;
+    let branch_count = (branch_inst.len() / INSTANCE_FLOATS) as u32;
 
     let tufts = all_groundcover(manifest);
     // Two ground-plant species from one scatter: ~55% low splayed grass clumps, ~45%
@@ -447,7 +451,7 @@ pub(crate) fn trunk_instances(
 ) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
-    let mut out = Vec::with_capacity(trees.len() * 36);
+    let mut out = Vec::with_capacity(trees.len() * INSTANCE_FLOATS);
     for t in trees {
         let ground = manifest.terrain.height_at(t.x, t.z);
         let (theta, dir) = tree_lean(t, lean_deg);
@@ -482,7 +486,7 @@ pub(crate) fn canopy_instances(
 ) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
-    let mut out = Vec::with_capacity(trees.len() * 36);
+    let mut out = Vec::with_capacity(trees.len() * INSTANCE_FLOATS);
     for t in trees {
         let ground = manifest.terrain.height_at(t.x, t.z);
         let c = canopy_anchor(t, ground, lean_deg);
@@ -730,7 +734,7 @@ fn plant_instances(
 ) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
-    let mut out = Vec::with_capacity(tufts.len() * 36);
+    let mut out = Vec::with_capacity(tufts.len() * INSTANCE_FLOATS);
     for t in tufts {
         let ground = manifest.terrain.height_at(t.x, t.z);
         let yaw = Quat::from_axis_angle(Vec3::UNIT_Y, t.yaw_deg.to_radians())
@@ -760,7 +764,7 @@ fn litter_instances(
 ) -> Vec<f32> {
     let fog = &manifest.fog;
     let vp = Mat4::from_cols_array(*view_proj);
-    let mut out = Vec::with_capacity(litter.len() * 36);
+    let mut out = Vec::with_capacity(litter.len() * INSTANCE_FLOATS);
     for t in litter {
         let ground = manifest.terrain.height_at(t.x, t.z);
         // Tilt each fallen leaf about a varied horizontal axis so it lies at a natural
@@ -787,17 +791,19 @@ fn litter_instances(
     out
 }
 
-/// One 36-float instance: `mvp(16) · world(16) · tint(4)`, where `mvp = view_proj ·
-/// world`. The GPU shader clips with the first matrix directly (`clip = mvp *
-/// position`) and lights with the second (`world`), and the Canvas 2D backend reads
-/// the same `world` + `mvp` pair — so the world transform must be folded into the
-/// first matrix, not left for the shader to apply.
+/// One 40-float instance: `mvp(16) · world(16) · tint(4) · emissive(3)+pad(1)`,
+/// where `mvp = view_proj · world`. The GPU shader clips with the first matrix
+/// directly (`clip = mvp * position`) and lights with the second (`world`), and
+/// the Canvas 2D backend reads the same `world` + `mvp` pair — so the world
+/// transform must be folded into the first matrix, not left for the shader to
+/// apply. Nothing in this scene self-illuminates, so the emissive lane is zero.
 fn instance(vp: &Mat4, world: Mat4, tint: [f32; 4]) -> Vec<f32> {
     let mvp = vp.multiply(world).as_cols_array();
-    let mut v = Vec::with_capacity(36);
+    let mut v = Vec::with_capacity(INSTANCE_FLOATS);
     v.extend_from_slice(&mvp);
     v.extend_from_slice(&world.as_cols_array());
     v.extend_from_slice(&tint);
+    v.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
     v
 }
 
@@ -1318,8 +1324,8 @@ canopy_color = [0.80, 0.42, 0.12]
             (TRUNK_MESH, BARK_MAT, rd.batches[1].2.clone(), 1)
         );
         assert_eq!(rd.batches[2].3, 1);
-        // 36 floats per instance.
-        assert_eq!(rd.batches[1].2.len(), 36);
+        // INSTANCE_FLOATS floats per instance.
+        assert_eq!(rd.batches[1].2.len(), INSTANCE_FLOATS);
     }
 
     #[test]
@@ -1373,7 +1379,7 @@ canopy_color = [0.80, 0.42, 0.12]
             .filter(|(mesh, ..)| is_ground(*mesh))
             .map(|b| b.2.len())
             .sum();
-        assert_eq!(ground_floats, tufts.len() * 36); // 36 floats per instance
+        assert_eq!(ground_floats, tufts.len() * INSTANCE_FLOATS); // per-instance floats
         assert!(rd.meshes.iter().any(|(id, ..)| *id == GROUNDCOVER_MESH));
         assert!(rd.meshes.iter().any(|(id, ..)| *id == FERN_MESH));
     }

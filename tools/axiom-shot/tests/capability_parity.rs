@@ -81,12 +81,14 @@ fn fullscreen_quad(id: u64) -> (u64, Vec<f32>, Vec<u32>) {
     (id, v, vec![0, 1, 2, 0, 2, 3])
 }
 
-/// One 36-float instance: mvp(16) + world(16) + colour(4).
+/// One 40-float instance: mvp(16) + world(16) + colour(4) + emissive(3)+pad(1).
 fn instance(mvp: [f32; 16], world: [f32; 16], color: [f32; 4]) -> Vec<f32> {
-    let mut f = Vec::with_capacity(36);
+    let mut f = Vec::with_capacity(40);
     f.extend_from_slice(&mvp);
     f.extend_from_slice(&world);
     f.extend_from_slice(&color);
+    // Emissive + pad: nothing in this parity scene self-illuminates.
+    f.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
     f
 }
 

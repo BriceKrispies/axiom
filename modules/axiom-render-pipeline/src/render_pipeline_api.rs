@@ -133,7 +133,7 @@ pub struct RenderReport {
     /// drawn (visible) object, in submission order. The caster flag is the
     /// scene's per-renderable contact-shadow mark, carried so a grounding
     /// backend (the software canvas) knows which objects to shadow.
-    draws: Vec<(Mat4, [f32; 4], u64, u64, bool)>,
+    draws: Vec<(Mat4, [f32; 4], [f32; 3], u64, u64, bool)>,
     /// The frame's resolved lights: `(kind, vec, colour, intensity)` where
     /// `kind` is `0` directional / `1` point, and `vec` is the world-space
     /// to-light direction (directional) or the light's world position (point).
@@ -161,12 +161,14 @@ pub struct RenderPipelineApi {
     /// each frame — the per-frame wasm-memory-churn fix. (This is why the facade
     /// is no longer `Copy`.)
     render: RenderApi,
-    /// The frame's mesh-id → render-index, material-id → render-index, and
-    /// material-id → per-draw colour maps, RETAINED and cleared+refilled each
-    /// frame (not rebuilt), so a steady-state frame allocates no fresh hashmaps.
+    /// The frame's mesh-id → render-index, material-id → render-index,
+    /// material-id → per-draw colour, and material-id → per-draw emissive maps,
+    /// RETAINED and cleared+refilled each frame (not rebuilt), so a steady-state
+    /// frame allocates no fresh hashmaps.
     mesh_index: HashMap<u64, u32>,
     material_index: HashMap<u64, u32>,
     material_color: HashMap<u64, [f32; 4]>,
+    material_emissive: HashMap<u64, [f32; 3]>,
 }
 
 impl RenderPipelineApi {
@@ -177,6 +179,7 @@ impl RenderPipelineApi {
             mesh_index: HashMap::new(),
             material_index: HashMap::new(),
             material_color: HashMap::new(),
+            material_emissive: HashMap::new(),
         }
     }
 
@@ -292,6 +295,7 @@ impl RenderPipelineApi {
             mesh_index,
             material_index,
             material_color,
+            material_emissive,
         } = self;
         // Fill the RETAINED render input (reset + refill, no fresh alloc) via its
         // public primitive builders on the `&mut` handle — this module never names
@@ -358,6 +362,7 @@ impl RenderPipelineApi {
         });
         material_index.clear();
         material_color.clear();
+        material_emissive.clear();
         frame.materials.iter().for_each(|material| {
             let c = material.color;
             let e = material.emissive;
@@ -374,6 +379,13 @@ impl RenderPipelineApi {
             // per-draw colour — and the live/canvas instance colour built from it
             // — carries the translucency a `createMaterial`-authored material set.
             material_color.insert(material.id, [c[0], c[1], c[2], c[3] * material.opacity]);
+            // Emissive rides the report as its OWN per-draw term rather than being
+            // folded into the colour like opacity is. Opacity may fold because alpha
+            // is not light-modulated; emissive may not, because the colour is a
+            // reflectance every backend multiplies by N·L, ambient and shadow —
+            // folding self-illumination in there would make a tail light dim when it
+            // faces away from the sun, which is exactly the bug this route removes.
+            material_emissive.insert(material.id, e);
             material_index.insert(material.id, idx);
         });
 
@@ -452,7 +464,7 @@ impl RenderPipelineApi {
         // Sourcing it straight from the snapshot (rather than re-folding the GPU
         // command stream) is what lets each draw carry the renderable's
         // `casts_contact_shadow` mark, which the command stream does not encode.
-        let draws: Vec<(Mat4, [f32; 4], u64, u64, bool)> = snapshot
+        let draws: Vec<(Mat4, [f32; 4], [f32; 3], u64, u64, bool)> = snapshot
             .renderables()
             .iter()
             .filter(|renderable| renderable.visible())
@@ -468,9 +480,14 @@ impl RenderPipelineApi {
                     .get(&material_id)
                     .copied()
                     .unwrap_or([1.0; 4]);
+                let emissive = material_emissive
+                    .get(&material_id)
+                    .copied()
+                    .unwrap_or([0.0; 3]);
                 (
                     world,
                     color,
+                    emissive,
                     mesh_id,
                     material_id,
                     renderable.casts_contact_shadow(),
@@ -576,18 +593,26 @@ impl RenderPipelineApi {
 
     /// The world matrix of the `i`-th drawn object, if present.
     pub fn report_draw_world(&self, report: &RenderReport, i: usize) -> Option<Mat4> {
-        report.draws.get(i).map(|(world, _, _, _, _)| *world)
+        report.draws.get(i).map(|(world, _, _, _, _, _)| *world)
     }
 
     /// The colour of the `i`-th drawn object, if present.
     pub fn report_draw_color(&self, report: &RenderReport, i: usize) -> Option<[f32; 4]> {
-        report.draws.get(i).map(|(_, color, _, _, _)| *color)
+        report.draws.get(i).map(|(_, color, _, _, _, _)| *color)
+    }
+
+    /// The linear-RGB self-illumination of the `i`-th drawn object, if present —
+    /// its material's `emissive`, carried as its own per-draw term (never folded
+    /// into the colour, which every backend modulates by light). `[0, 0, 0]` for
+    /// a non-emissive material, so this is a no-op for existing frames.
+    pub fn report_draw_emissive(&self, report: &RenderReport, i: usize) -> Option<[f32; 3]> {
+        report.draws.get(i).map(|(_, _, e, _, _, _)| *e)
     }
 
     /// The mesh id of the `i`-th drawn object, if present. Lets a caller group
     /// draws by mesh for per-mesh instance batching.
     pub fn report_draw_mesh_id(&self, report: &RenderReport, i: usize) -> Option<u64> {
-        report.draws.get(i).map(|(_, _, mesh_id, _, _)| *mesh_id)
+        report.draws.get(i).map(|(_, _, _, mesh_id, _, _)| *mesh_id)
     }
 
     /// The material id of the `i`-th drawn object, if present. Lets a caller
@@ -596,14 +621,14 @@ impl RenderPipelineApi {
         report
             .draws
             .get(i)
-            .map(|(_, _, _, material_id, _)| *material_id)
+            .map(|(_, _, _, _, material_id, _)| *material_id)
     }
 
     /// Whether the `i`-th drawn object is a contact-shadow caster (a discrete
     /// dynamic object the scene marked), if present. A grounding backend shadows
     /// only the `true` draws; level geometry is `false`.
     pub fn report_draw_casts_shadow(&self, report: &RenderReport, i: usize) -> Option<bool> {
-        report.draws.get(i).map(|(_, _, _, _, casts)| *casts)
+        report.draws.get(i).map(|(_, _, _, _, _, casts)| *casts)
     }
 
     /// The directional shadow caster's wgpu-ready light view-projection
@@ -930,6 +955,22 @@ mod tests {
             api.report_draw_color(&report, 0),
             Some([0.2, 0.4, 0.8, 0.5])
         );
+        // …and its emissive reaches the report as its OWN term, unmultiplied by
+        // the colour and unclamped by the alpha fold — the second half of the same
+        // catalog surface, which used to die here.
+        assert_eq!(api.report_draw_emissive(&report, 0), Some([0.5, 0.0, 0.0]));
+        assert_eq!(api.report_draw_emissive(&report, 9), None);
+    }
+
+    #[test]
+    fn a_material_with_no_authored_emissive_reports_zero_self_illumination() {
+        // The default catalog surface is non-emissive, so every pre-existing frame
+        // carries `[0, 0, 0]` — an exact no-op through both backends.
+        let mut api = RenderPipelineApi::new();
+        let mut scene = cube_scene();
+        let mut webgpu = WebGpuApi::new_recording();
+        let report = api.submit(&frame_with_assets(&api), &mut scene, &mut webgpu);
+        assert_eq!(api.report_draw_emissive(&report, 0), Some([0.0; 3]));
     }
 
     #[test]

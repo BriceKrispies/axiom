@@ -28,9 +28,10 @@ pub const CLEAR_COLOR: [f32; 4] = [0.055, 0.062, 0.078, 1.0];
 pub const SURFACE_W: u32 = 960;
 pub const SURFACE_H: u32 = 720;
 
-/// Floats per instance: MVP (4×4) + world (4×4) + an RGBA colour — the engine's
-/// lit-mesh batch layout (`run_web_multi`).
-const FLOATS_PER_INSTANCE: usize = 36;
+/// Floats per instance: MVP (4×4) + world (4×4) + an RGBA colour + a linear-RGB
+/// emissive and one pad float — the engine's lit-mesh batch layout
+/// (`run_web_multi`).
+const FLOATS_PER_INSTANCE: usize = 40;
 
 /// A cube's colour and vertical extent for a tile, as `(height, [r,g,b,a])`.
 /// Heights read the board as a shallow diorama: floor is a thin slab, walls and
@@ -136,6 +137,8 @@ fn push_instance(
     out.extend_from_slice(&view_proj.multiply(model).as_cols_array());
     out.extend_from_slice(&model.as_cols_array());
     out.extend_from_slice(&color);
+    // Emissive + pad: nothing in this scene self-illuminates.
+    out.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
 }
 
 /// Build the per-frame instance buffer for `model` using an explicit camera

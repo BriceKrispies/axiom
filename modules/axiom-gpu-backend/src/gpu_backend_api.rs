@@ -556,7 +556,7 @@ mod tests {
         let backend = GpuBackendApi::new(&request(640, 480));
         assert!(!backend.binding_is_ready());
         // One batch of one instance: mesh 7, material 5, mvp(16)+world(16)+colour(4).
-        let batches = vec![(7_u64, 5_u64, vec![0.0_f32; 36], 1_u32)];
+        let batches = vec![(7_u64, 5_u64, vec![0.0_f32; 40], 1_u32)];
         let lights = vec![(0_u32, [0.0, 1.0, 0.0], [1.0, 1.0, 1.0], 1.0_f32)];
         let light_vp = [0.0_f32; 16];
         assert!(!backend.present_frame([0.1, 0.2, 0.3, 1.0], &lights, light_vp, &batches, None));

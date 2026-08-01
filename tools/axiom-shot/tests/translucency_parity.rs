@@ -168,12 +168,14 @@ fn packet_to_batches(packet: &FramePacket) -> Vec<(u64, u64, Vec<f32>, u32)> {
         floats.extend_from_slice(&d.mvp());
         floats.extend_from_slice(&d.world());
         floats.extend_from_slice(&d.color());
+        let e = d.emissive();
+        floats.extend_from_slice(&[e[0], e[1], e[2], 0.0]);
     }
     order
         .into_iter()
         .map(|key| {
             let floats = packed.remove(&key).unwrap_or_default();
-            let count = (floats.len() / 36) as u32;
+            let count = (floats.len() / 40) as u32;
             (key.0, key.1, floats, count)
         })
         .collect()

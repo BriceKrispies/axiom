@@ -372,7 +372,8 @@ fn render_canvas2d(rd: &RenderData) -> (Vec<u8>, u32, u32) {
     let mut object_id = 0u64;
     for (mesh_id, material_id, instances, count) in &rd.batches {
         for i in 0..*count as usize {
-            let base = i * 36;
+            // 40 floats per instance: mvp(16) · world(16) · tint(4) · emissive(3)+pad.
+            let base = i * 40;
             let mvp = slice16(&instances[base..base + 16]);
             let world = slice16(&instances[base + 16..base + 32]);
             let tint = [

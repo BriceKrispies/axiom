@@ -13,46 +13,37 @@
 //! zone, which is what makes the tunnel, the canyon and the coast read as
 //! different places rather than the same road repainted.
 //!
-//! ## Anything that should glow is bright in its **base colour**
+//! ## Anything that should glow is **emissive**, not fake-bright
 //!
-//! `Material::with_emissive` exists on the umbrella and is carried all the way
-//! down to `axiom-render`'s `RenderMaterial` — and then stops. The GPU backend
-//! never reads it, and `DrawData` exposes only `color()`, so on the live
-//! browser path an emissive term contributes exactly nothing. A reflector post
-//! authored as a dim amber with a bright emissive therefore renders as a dim
-//! amber, which is the opposite of the one thing it exists to do.
+//! `Material::with_emissive` used to be a dead knob: it was carried down to
+//! `axiom-render`'s `RenderMaterial` and then dropped at the frame packet, so
+//! neither backend ever read it. Every lamp in this file was therefore faked by
+//! cranking its **base colour** white-hot and hoping the key light hit it.
 //!
-//! So every "glowing" material here carries its brightness in `base_color`, and
-//! the emissive is kept only as a declaration of intent for a backend that
-//! grows support. The hemisphere ambient's ground term is raised for the same
-//! reason: with a single directional key light, a face turned away from it has
-//! nothing but ambient, and a pure-black ambient makes half of every bright
-//! object black.
+//! That fake has a fixed cost, and it is the whole reason this scene reads flat.
+//! A base colour is a *reflectance*: the shader multiplies it by N·L, by the
+//! hemisphere ambient and by the shadow term. Under this app's authored night
+//! ambient those factors are small, so a `1.0` red tail lamp arrives on screen as
+//! a dull pink slab, and it goes *darker* the moment the car turns away from the
+//! sun — the exact opposite of a lamp. It also forces every lamp to be
+//! near-white, which is why the reference's two hot red strips came out as one
+//! flat orange panel here.
 //!
-//! ## ...and bright **against the surface it is mounted on**, not just the road
+//! Emissive now reaches both backends as its own per-draw term, added after all
+//! lighting and before fog (`axiom_host::FrameDrawItem::emissive`). So the rule
+//! inverts:
 //!
-//! "Bright" is meaningless on its own — a lamp is only a lamp if it separates
-//! from whatever it is set into. The original rule here compared every glowing
-//! material against the *tarmac*, which is the right test for a reflector post
-//! standing on the verge and the wrong one for a tail light sunk into a red
-//! car. A `(1.0, 0.14, 0.08)` brake light on a `(0.86, 0.16, 0.07)` body both
-//! display at roughly sRGB `(245, 108, 78)`: same hue, same value, one flat
-//! orange slab where the reference has two glowing strips. The lamp was authored
-//! bright and still rendered invisible.
+//! * **base colour = the albedo the object actually has** — a tail lamp is a
+//!   dark red lens, a reflector post is dim amber plastic, a tunnel lamp is a
+//!   grey housing. Dark, so the unlit sides stay dark and the object has shape.
+//! * **emissive = the light it emits** — bright, and free to exceed `1.0` in one
+//!   channel, because nothing modulates it. This is what makes a lamp separate
+//!   from the surface it is mounted in at *any* angle, in shadow, at night.
 //!
-//! With no specular, no emissive and no bloom, a light's *only* separation from
-//! its host is albedo, and albedo separates two ways: **hue** (a red lamp on a
-//! blue traffic car reads at any brightness) or **luminance** (a red lamp on a
-//! red car must be materially hotter than the paint). A lamp whose host shares
-//! its hue therefore has to run toward white-hot — which is also what an
-//! over-exposed tail lamp actually looks like in the night photograph this app
-//! is converging on. `a_light_reads_against_the_body_it_is_mounted_on` pins it.
+//! The hemisphere ambient's ground term no longer has to be propped up to keep
+//! half of every "bright" object from going black, because the objects that are
+//! supposed to be bright now carry their own light.
 //!
-//! This is a real engine gap, and it is deliberately *not* worked around by
-//! adding an emissive path to the renderer: a bright base colour expresses what
-//! this app needs, and a second lighting term in the GPU backend is a
-//! render-pipeline change with nothing to do with racing.
-
 use axiom::prelude::{Color, Handle, Material, Ratio, RunningApp};
 
 use crate::track::Zone;
@@ -83,10 +74,12 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
     RoadMaterials {
         // Asphalt: dark, and slightly blue so it separates from the verge.
         surface: app.add_material(Material::lit(rgb(0.085, 0.088, 0.105))),
-        // Paint: bright, with a little emissive so it stays legible in shadow
-        // and inside the tunnel.
+        // Paint: a real white pigment plus a low emissive floor, so the lane
+        // markings hold their brightness in shadow, inside the tunnel, and
+        // against the night ambient — the reference's markings are the second
+        // brightest thing in the frame after the tail lamps.
         paint: app.add_material(
-            Material::lit(rgb(0.88, 0.89, 0.86)).with_emissive(rgb(0.16, 0.16, 0.15)),
+            Material::lit(rgb(0.72, 0.73, 0.70)).with_emissive(rgb(0.30, 0.30, 0.28)),
         ),
         // Guardrail and tunnel wall: mid grey, matte.
         rail: app.add_material(Material::lit(rgb(0.38, 0.40, 0.44))),
@@ -158,40 +151,41 @@ impl ScenePalette {
         };
         ScenePalette {
             road: road_materials(app),
-            // Retro-reflective amber, bright enough to read from any angle
-            // without leaning on an emissive term the backend ignores.
-            post: glowing(app, [1.0, 0.80, 0.20], [0.55, 0.36, 0.05]),
+            // Retro-reflective amber: dim plastic that throws back a lot of
+            // light. The albedo is what the post looks like switched off.
+            post: glowing(app, [0.34, 0.26, 0.06], [1.0, 0.66, 0.10]),
             timber: lit(app, [0.16, 0.12, 0.09]),
             foliage: lit(app, [0.13, 0.27, 0.15]),
             stone: lit(app, [0.28, 0.26, 0.24]),
-            sign: glowing(app, [0.86, 0.88, 0.84], [0.10, 0.10, 0.09]),
-            lamp: glowing(app, [1.0, 0.96, 0.82], [0.85, 0.72, 0.42]),
+            sign: glowing(app, [0.62, 0.64, 0.60], [0.22, 0.22, 0.20]),
+            lamp: glowing(app, [0.30, 0.28, 0.24], [1.0, 0.86, 0.52]),
             building: lit(app, [0.22, 0.22, 0.25]),
             car_body: lit(app, [0.86, 0.16, 0.07]),
             car_glass: lit(app, [0.07, 0.09, 0.13]),
             tyre: lit(app, [0.045, 0.045, 0.05]),
-            // The player's tail lights sit *inside* a red body, so hue cannot
-            // separate them — only luminance can. Run them white-hot in the red
-            // channel: sRGB (255, 170, 149) against the paint's (239, 111, 75).
-            brake_light: glowing(app, [1.0, 0.40, 0.30], [0.85, 0.20, 0.12]),
-            boost_flame: glowing(app, [0.62, 0.90, 1.0], [0.55, 0.85, 1.0]),
+            // The player's tail lamps sit *inside* a red body. Their albedo is a
+            // dark red lens — DARKER than the paint around it, which is what a
+            // lens actually is — and every bit of their separation comes from the
+            // emissive, so they read as two hot strips at any angle, in shadow,
+            // and with the sun behind the car.
+            brake_light: glowing(app, [0.20, 0.02, 0.01], [1.0, 0.18, 0.10]),
+            boost_flame: glowing(app, [0.10, 0.16, 0.22], [0.70, 0.95, 1.0]),
             traffic: [
                 lit(app, [0.30, 0.44, 0.66]),
                 lit(app, [0.62, 0.60, 0.55]),
                 lit(app, [0.20, 0.46, 0.32]),
                 lit(app, [0.52, 0.42, 0.16]),
             ],
-            // Traffic tail lights separate from their bodies by hue (blue, beige,
-            // green, gold — none of them red), so they stay saturated. Lifted
-            // anyway, because the beige variant out-luminances the old value and
-            // a lamp darker than the car carrying it never reads as lit.
-            traffic_light: glowing(app, [1.0, 0.30, 0.22], [0.55, 0.06, 0.03]),
-            streak: glowing(app, [0.86, 0.92, 1.0], [0.42, 0.52, 0.68]),
+            // Traffic tail lamps: the same dark-lens rule. They no longer need to
+            // out-luminance their host body in albedo, because the emissive does
+            // the separating — so they can be the deep red a tail lamp is.
+            traffic_light: glowing(app, [0.16, 0.02, 0.01], [1.0, 0.14, 0.06]),
+            streak: glowing(app, [0.14, 0.16, 0.20], [0.55, 0.66, 0.85]),
             // Dark, because it is opaque: bright smoke would punch a light
             // grey hole in the road behind the car.
             smoke: lit(app, [0.30, 0.30, 0.33]),
-            spark: glowing(app, [1.0, 0.86, 0.45], [0.95, 0.62, 0.18]),
-            finish: glowing(app, [0.35, 1.0, 0.72], [0.14, 0.62, 0.42]),
+            spark: glowing(app, [0.24, 0.18, 0.06], [1.0, 0.78, 0.28]),
+            finish: glowing(app, [0.08, 0.22, 0.16], [0.26, 1.0, 0.66]),
         }
     }
 }
@@ -262,8 +256,12 @@ mod tests {
     fn the_road_is_dark_and_the_speed_cues_are_bright() {
         let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
         let asphalt = luminance([0.085, 0.088, 0.105]);
-        let paint = luminance([0.88, 0.89, 0.86]);
-        let post = luminance([1.0, 0.80, 0.20]);
+        // Paint reads as its pigment PLUS its emissive floor — the second term is
+        // what keeps the markings white inside the tunnel and under the night sky.
+        let paint = luminance([0.72, 0.73, 0.70]) + luminance([0.30, 0.30, 0.28]);
+        // A reflector post is dim plastic that emits; its emitted light is the
+        // number that has to dominate the road.
+        let post = luminance([1.0, 0.66, 0.10]);
         assert!(asphalt < 0.15, "the tarmac is nearly black");
         assert!(paint > 0.7, "the paint is nearly white");
         assert!(post > asphalt * 4.0, "the reflectors dominate the tarmac");
@@ -273,75 +271,96 @@ mod tests {
         assert!(luminance(SKY) < 0.03, "and the sky is dark enough to see them against");
     }
 
-    /// The rule the module docs explain: everything meant to glow is bright in
-    /// its BASE colour, because the backend never reads `emissive`. A later edit
-    /// that moves the brightness back into the emissive term makes these objects
-    /// disappear on the live path, so the rule is pinned here.
+    /// The rule the module docs explain, inverted now that emissive is real:
+    /// everything meant to glow carries its brightness in the **emissive** term,
+    /// and its base colour is the plausible albedo of the thing switched off. An
+    /// edit that pushes the brightness back into the base colour re-introduces
+    /// the flat-slab bug — a lamp that dims when it turns away from the sun — so
+    /// the rule is pinned here.
     #[test]
-    fn everything_that_should_glow_is_bright_without_its_emissive() {
+    fn everything_that_should_glow_glows_from_its_emissive_not_its_albedo() {
         let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
-        // (name, base colour) for every material whose whole job is to be seen.
-        let glowing: [(&str, [f32; 3]); 7] = [
-            ("post", [1.0, 0.80, 0.20]),
-            ("lamp", [1.0, 0.96, 0.82]),
-            ("brake light", [1.0, 0.40, 0.30]),
-            ("boost flame", [0.62, 0.90, 1.0]),
-            ("traffic light", [1.0, 0.30, 0.22]),
-            ("spark", [1.0, 0.86, 0.45]),
-            ("finish", [0.35, 1.0, 0.72]),
+        // (name, base albedo, emissive) for every material whose job is to be seen.
+        let glowing: [(&str, [f32; 3], [f32; 3]); 7] = [
+            ("post", [0.34, 0.26, 0.06], [1.0, 0.66, 0.10]),
+            ("lamp", [0.30, 0.28, 0.24], [1.0, 0.86, 0.52]),
+            ("brake light", [0.20, 0.02, 0.01], [1.0, 0.18, 0.10]),
+            ("boost flame", [0.10, 0.16, 0.22], [0.70, 0.95, 1.0]),
+            ("traffic light", [0.16, 0.02, 0.01], [1.0, 0.14, 0.06]),
+            ("spark", [0.24, 0.18, 0.06], [1.0, 0.78, 0.28]),
+            ("finish", [0.08, 0.22, 0.16], [0.26, 1.0, 0.66]),
         ];
         let asphalt = luminance([0.085, 0.088, 0.105]);
-        for (name, colour) in glowing {
-            // Its brightest channel is at or near full, so the object is bright
-            // under the key light rather than relying on a dead emissive term.
-            let peak = colour[0].max(colour[1]).max(colour[2]);
-            assert!(peak >= 0.9, "{name} is not bright in base colour: {colour:?}");
+        for (name, albedo, emissive) in glowing {
+            // The emitted light is what makes it bright, and it is bright: its
+            // peak channel is at or near full and nothing in the shader scales it.
+            let peak = emissive[0].max(emissive[1]).max(emissive[2]);
+            assert!(peak >= 0.6, "{name} emits nothing worth seeing: {emissive:?}");
             assert!(
-                luminance(colour) > asphalt * 2.0,
+                luminance(emissive) > luminance(albedo) * 2.0,
+                "{name} is still faking its glow in albedo: {albedo:?} vs {emissive:?}"
+            );
+            // Switched off, it is a dark object with shape — not a white cut-out.
+            assert!(
+                luminance(albedo) < 0.35,
+                "{name}'s unlit albedo is too hot to read as an object: {albedo:?}"
+            );
+            // And lit, it still dominates the road it is seen against.
+            assert!(
+                luminance(emissive) > asphalt * 2.0,
                 "{name} does not stand out against the tarmac"
             );
         }
     }
 
-    /// The rule the tarmac comparison above cannot express: a lamp is only a
-    /// lamp if it separates from the surface it is **mounted in**. With no
-    /// specular, no emissive and no bloom, that separation is albedo alone —
-    /// either hue or luminance. A tail light sunk into a body of its own hue
-    /// has only luminance left, and the original `(1.0, 0.14, 0.08)` brake
-    /// light had none of it: it displayed within a couple of sRGB steps of the
-    /// `(0.86, 0.16, 0.07)` paint around it, so the car rendered as one flat
-    /// orange slab with no visible lights at all.
+    /// The rule the tarmac comparison above cannot express: a lamp is only a lamp
+    /// if it separates from the surface it is **mounted in**. That separation used
+    /// to be albedo alone, which forced a red tail lamp inside a red body to run
+    /// near-white and still lose (a `(1.0, 0.14, 0.08)` lamp displayed within a
+    /// few sRGB steps of the `(0.86, 0.16, 0.07)` paint around it — one flat
+    /// orange slab, no visible lights).
+    ///
+    /// The comparison has to be made **per channel, in the hue the lamp emits**,
+    /// not in luminance: red is a low-luminance hue, so a deep red lamp can never
+    /// out-*luminance* a large red-orange panel however hot it is — which is
+    /// precisely why the old luminance rule kept pushing the lamps toward white
+    /// and away from the reference. With a real emissive term the lamp wins on the
+    /// only axis that matters: the body can never reflect more red than its own
+    /// albedo times the light that reaches it, while the lamp adds its emissive on
+    /// top of its own shading with nothing scaling it down.
     #[test]
     fn a_light_reads_against_the_body_it_is_mounted_on() {
-        let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
-        // Chroma direction, as the ratio of the two non-peak channels to the
-        // peak: two materials that agree here are the same hue and can only be
-        // told apart by brightness.
-        let same_hue = |a: [f32; 3], b: [f32; 3]| {
-            let ratio = |c: [f32; 3]| {
-                let peak = c[0].max(c[1]).max(c[2]).max(1.0e-4);
-                [c[0] / peak, c[1] / peak, c[2] / peak]
-            };
-            let (x, y) = (ratio(a), ratio(b));
-            (0..3).all(|i| (x[i] - y[i]).abs() < 0.35)
-        };
-
+        // Player: a dark lens in red paint. Albedo alone LOSES here on purpose —
+        // the lamp is darker than the body it sits in, exactly like the real part.
         let car_body = [0.86, 0.16, 0.07];
-        let brake_light = [1.0, 0.40, 0.30];
+        let brake_albedo = [0.20, 0.02, 0.01];
+        let brake_emissive = [1.0, 0.18, 0.10];
         assert!(
-            same_hue(brake_light, car_body),
-            "the brake light and the paint share a hue, so luminance is the only cue"
+            brake_albedo[0] < car_body[0],
+            "the tail lens should be darker than the paint when it is switched off"
+        );
+        // Over-exposed in its own channel: full scale, which is the hottest
+        // `rgb()` can author, and the look the night reference actually has.
+        assert!(
+            brake_emissive[0] >= 1.0,
+            "the tail lamp is not running over-exposed: {brake_emissive:?}"
         );
         assert!(
-            luminance(brake_light) > luminance(car_body) * 1.6,
-            "the brake light does not out-shine the body it sits in: {:.3} vs {:.3}",
-            luminance(brake_light),
-            luminance(car_body)
+            brake_emissive[0] > car_body[0],
+            "the tail lamp emits less red than the paint can reflect: {:.2} vs {:.2}",
+            brake_emissive[0],
+            car_body[0]
+        );
+        // …and it stays a LAMP, not a white blob: the off-hue channels stay low,
+        // so the strip reads red rather than blowing out to the body's orange.
+        assert!(
+            brake_emissive[1] < 0.30 && brake_emissive[2] < 0.30,
+            "the tail lamp has washed out to white: {brake_emissive:?}"
         );
 
-        // Traffic lamps sit on bodies of a different hue, so they may stay
-        // saturated — but never darker than the car carrying them.
-        let traffic_light = [1.0, 0.30, 0.22];
+        // Traffic lamps sit on bodies of four different hues; the emitted red has
+        // to beat the reddest of them, not just the average.
+        let traffic_emissive = [1.0, 0.14, 0.06];
         let traffic: [[f32; 3]; 4] = [
             [0.30, 0.44, 0.66],
             [0.62, 0.60, 0.55],
@@ -350,12 +369,8 @@ mod tests {
         ];
         for body in traffic {
             assert!(
-                !same_hue(traffic_light, body),
-                "a traffic lamp sharing its body's hue would need the luminance rule too"
-            );
-            assert!(
-                luminance(traffic_light) > luminance(body) * 0.7,
-                "the traffic lamp is dimmer than its own car: {body:?}"
+                traffic_emissive[0] > body[0],
+                "the traffic lamp emits less red than its own car reflects: {body:?}"
             );
         }
     }

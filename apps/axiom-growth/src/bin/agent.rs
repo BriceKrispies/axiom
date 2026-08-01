@@ -270,10 +270,13 @@ fn shots(backend: &str) {
 /// `cdylib`). The terrain is one identity-world instance whose MVP is the camera
 /// view-projection.
 fn render_capture(inputs: &CaptureInputs) -> Vec<u8> {
-    let mut instance = Vec::with_capacity(36);
+    // 40 floats: mvp(16) + world(16) + tint(4) + emissive(3)+pad(1).
+    let mut instance = Vec::with_capacity(40);
     instance.extend_from_slice(&inputs.view_proj);
     instance.extend_from_slice(&IDENTITY_4X4);
     instance.extend_from_slice(&[1.0, 1.0, 1.0, 1.0]);
+    // The terrain does not self-illuminate; the lane is still required.
+    instance.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
 
     let meshes = vec![(1u64, inputs.vertices.clone(), inputs.indices.clone())];
     let (mat_w, mat_h, mat_rgba) = &inputs.material;

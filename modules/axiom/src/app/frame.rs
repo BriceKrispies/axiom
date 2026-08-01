@@ -176,6 +176,14 @@ impl RunningApp {
                             .report_draw_casts_shadow(&report, i)
                             .expect("draw in range"),
                     )
+                    // The material's self-illumination, carried beside the colour
+                    // rather than multiplied into it — `with_emissive` for a
+                    // non-emissive material is `[0, 0, 0]`, an exact no-op.
+                    .with_emissive(
+                        pipeline
+                            .report_draw_emissive(&report, i)
+                            .expect("draw in range"),
+                    )
                 })
                 .collect();
 

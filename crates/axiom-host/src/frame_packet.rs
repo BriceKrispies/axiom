@@ -121,10 +121,20 @@ impl FrameLight {
 /// One drawn object: a stable identity, the mesh and material it references (by
 /// id, resolved against the backend's uploaded resource tables), its world and
 /// model-view-projection matrices (column-major, 16 floats each), its linear
-/// RGBA colour, and whether it casts a contact shadow (a discrete, dynamic
-/// object the scene marked as a shadow-caster — level geometry leaves this
-/// `false`, so a backend that grounds objects with shadows knows what to ground).
+/// RGBA colour, its linear-RGB **emissive** (self-illumination) radiance, and
+/// whether it casts a contact shadow (a discrete, dynamic object the scene
+/// marked as a shadow-caster — level geometry leaves this `false`, so a backend
+/// that grounds objects with shadows knows what to ground).
 /// Objects appear in the packet in deterministic command-list draw order.
+///
+/// **Why emissive lives here.** `color` is a *reflectance*: every backend
+/// multiplies it by the light that reaches the surface. Self-illumination is
+/// not reflectance — it is radiance the surface adds regardless of the light —
+/// so it cannot be folded into `color` without being wrongly scaled by N·L,
+/// ambient and shadow. It is the material's second shading term, and the
+/// packet is the one place both backends read a draw's shading terms from, so
+/// it belongs on the draw item beside `color` rather than being re-derived per
+/// backend.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameDrawItem {
     object_id: u64,
@@ -133,13 +143,15 @@ pub struct FrameDrawItem {
     world: [f32; 16],
     mvp: [f32; 16],
     color: [f32; 4],
+    emissive: [f32; 3],
     casts_contact_shadow: bool,
 }
 
 impl FrameDrawItem {
     /// A draw item with its stable `object_id`, `mesh_id`, `material_id`,
     /// column-major `world` and `mvp` matrices, linear RGBA `color`, and whether
-    /// it `casts_contact_shadow`.
+    /// it `casts_contact_shadow`. The draw is non-emissive; a self-illuminating
+    /// material adds its radiance with [`Self::with_emissive`].
     pub const fn new(
         object_id: u64,
         mesh_id: u64,
@@ -156,8 +168,17 @@ impl FrameDrawItem {
             world,
             mvp,
             color,
+            emissive: [0.0; 3],
             casts_contact_shadow,
         }
+    }
+
+    /// This draw item with the material's linear-RGB self-illumination
+    /// radiance, added to the shaded colour by every backend. `[0, 0, 0]` (the
+    /// default) is an exact no-op, so a non-emissive draw renders unchanged.
+    pub const fn with_emissive(mut self, emissive: [f32; 3]) -> Self {
+        self.emissive = emissive;
+        self
     }
 
     /// The object's stable identity (for picking / hit-testing).
@@ -185,9 +206,15 @@ impl FrameDrawItem {
         self.mvp
     }
 
-    /// The linear RGBA colour.
+    /// The linear RGBA colour (reflectance — the light-modulated term).
     pub const fn color(&self) -> [f32; 4] {
         self.color
+    }
+
+    /// The linear-RGB self-illumination radiance this surface adds on top of
+    /// its shaded colour, independent of any light. `[0, 0, 0]` = not emissive.
+    pub const fn emissive(&self) -> [f32; 3] {
+        self.emissive
     }
 
     /// Whether this draw is a discrete, dynamic object the scene marked as a
@@ -513,6 +540,13 @@ mod tests {
         assert_eq!(d.world(), mat(9.0));
         assert_eq!(d.mvp(), mat(5.0));
         assert_eq!(d.color(), [0.1, 0.2, 0.3, 1.0]);
+        // A plain draw is non-emissive; `with_emissive` is the only way to add
+        // self-illumination, and it leaves every other field untouched.
+        assert_eq!(d.emissive(), [0.0; 3]);
+        let e = d.with_emissive([4.0, 0.5, 0.25]);
+        assert_eq!(e.emissive(), [4.0, 0.5, 0.25]);
+        assert_eq!(e.color(), d.color());
+        assert_ne!(e, d);
         assert!(d.casts_contact_shadow());
         assert_ne!(
             d,

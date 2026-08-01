@@ -1599,7 +1599,7 @@ fn backend_preference() -> Option<axiom_host::BackendKind> {
 }
 
 /// Reconstruct the backend-neutral frame packet from the per-`(mesh, material)`
-/// instance batches the run loop produces: each 36-float instance is
+/// instance batches the run loop produces: each 40-float instance is
 /// `mvp(16) | world(16) | colour(4)`. Object ids are assigned in draw order.
 /// wasm32 only.
 #[cfg(target_arch = "wasm32")]
@@ -1623,22 +1623,28 @@ fn frame_packet_from_batches(
     let mut object_id: u64 = 0;
     for (mesh_id, material_id, floats, count) in batches {
         for i in 0..*count {
-            let off = (i as usize) * 36;
+            // 40 floats per instance: mvp(16), world(16), colour(4), emissive(3)+pad(1)
+            // — the layout `FrameOutcome::mesh_batches` packs (its `INSTANCE_FLOATS`).
+            let off = (i as usize) * 40;
             let mvp: [f32; 16] = floats[off..off + 16].try_into().unwrap_or([0.0; 16]);
             let world: [f32; 16] = floats[off + 16..off + 32].try_into().unwrap_or([0.0; 16]);
             let color: [f32; 4] = floats[off + 32..off + 36].try_into().unwrap_or([1.0; 4]);
+            let emissive: [f32; 3] = floats[off + 36..off + 39].try_into().unwrap_or([0.0; 3]);
             // The caster flags arrive in the same instance order the batches expand
             // (see `FrameOutcome::mesh_batch_casters`); a missing flag defaults off.
             let casts = casters.get(object_id as usize).copied().unwrap_or(false);
-            draws.push(FrameDrawItem::new(
-                object_id,
-                *mesh_id,
-                *material_id,
-                world,
-                mvp,
-                color,
-                casts,
-            ));
+            draws.push(
+                FrameDrawItem::new(
+                    object_id,
+                    *mesh_id,
+                    *material_id,
+                    world,
+                    mvp,
+                    color,
+                    casts,
+                )
+                .with_emissive(emissive),
+            );
             object_id += 1;
         }
     }

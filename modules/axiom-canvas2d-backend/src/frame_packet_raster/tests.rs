@@ -133,6 +133,23 @@ fn one_mesh_produces_raster_triangles_with_resolved_colour() {
 }
 
 #[test]
+fn a_draws_emissive_is_added_to_the_shaded_colour_with_no_light() {
+    // The GPU peer: `lit + in.emissive`, before fog. With every cue off there is
+    // no light at all, so the shaded colour is the base and the emissive is the
+    // ONLY thing that can brighten it — which is exactly the property a tail
+    // light needs (it glows facing away from the sun, at night, in shadow).
+    let cache = MeshCache::load(&[ground(7, [1.0, 1.0, 1.0, 1.0])]);
+    let base = FrameDrawItem::new(1, 7, 9, IDENTITY, IDENTITY, [0.2, 0.0, 0.0, 1.0], false);
+    let dark = convert(&packet(vec![base]), &cache, &opts());
+    assert_eq!(dark.triangles[0].color(), [0.2, 0.0, 0.0, 1.0]);
+
+    let glowing = base.with_emissive([1.5, 0.1, 0.0]);
+    let lit = convert(&packet(vec![glowing]), &cache, &opts());
+    // Added, not multiplied — and alpha is untouched.
+    assert_eq!(lit.triangles[0].color(), [1.7, 0.1, 0.0, 1.0]);
+}
+
+#[test]
 fn missing_mesh_increments_skipped_draws() {
     let cache = MeshCache::default();
     let out = convert(&packet(vec![draw(1, 404)]), &cache, &opts());

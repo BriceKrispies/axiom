@@ -490,7 +490,7 @@ fn convert_draw(
         .sum::<u64>()
         .min(screen_px2 as u64);
 
-    let triangles = shade_candidates(&acc, cues, light, clock);
+    let triangles = shade_candidates(&acc, cues, light, draw.emissive(), clock);
 
     let n = triangles.len() as u32;
     // Outline anchors are for objects the scene MARKED important (the opt-in
@@ -519,12 +519,21 @@ fn convert_draw(
 }
 
 /// Bake the per-triangle depth cues into each flat colour (lighting → height
-/// tint → distance falloff, the documented order), over the draw's surviving
-/// candidates and its accumulated world-Y extent.
+/// tint → distance falloff, the documented order), then add the draw's
+/// self-illumination, over the draw's surviving candidates and its accumulated
+/// world-Y extent.
+///
+/// `emissive` lands **after** every cue and **before** the fog post-pass, which
+/// is exactly where the GPU mesh shader adds it (`lit + in.emissive`, then the
+/// fog mix). Self-illumination is radiance, so no light factor, no ambient and no
+/// shadow may scale it; the air between it and the camera still may. A
+/// non-emissive draw adds `[0, 0, 0]` — an exact no-op, so every existing frame
+/// rasterizes byte-identically.
 fn shade_candidates(
     acc: &DrawAcc,
     cues: &CanvasDepthCueProfile,
     light: &SceneLight,
+    emissive: [f32; 3],
     clock: fn() -> f64,
 ) -> Vec<RasterTriangle> {
     let (y_min, y_max) = (acc.y_min, acc.y_max);
@@ -544,7 +553,13 @@ fn shade_candidates(
                 c.mean_depth,
                 cues,
             );
-            RasterTriangle::shaded(c.verts, shaded)
+            let emitted = [
+                shaded[0] + emissive[0],
+                shaded[1] + emissive[1],
+                shaded[2] + emissive[2],
+                shaded[3],
+            ];
+            RasterTriangle::shaded(c.verts, emitted)
         })
         .collect();
     deep::exit_shade(clock);
