@@ -300,10 +300,15 @@ fn view_projection(pose: &CameraPose, aspect: f32) -> Mat4 {
 /// car that is gone within a dozen metres, top-lights the car's own upper
 /// surfaces, and leaves the far road to the key alone. That near/far difference
 /// is the depth cue the flat rig had no way to produce.
+///
+/// What the level and the pool together still could not fix is that **the frame
+/// had no shadow in it** — see [`KEY_DIRECTION`], which is the knob that decides
+/// whether the shadow the engine already renders lands anywhere the camera can
+/// see it.
 fn install_lights(app: &mut RunningApp) -> Entity {
     app.add_light(
         DirectionalLight {
-            direction: Vec3::new(-0.36, -1.0, 0.42),
+            direction: KEY_DIRECTION,
             color: Color::linear_rgb(
                 palette::ratio(1.0),
                 palette::ratio(0.94),
@@ -328,6 +333,38 @@ fn install_lights(app: &mut RunningApp) -> Entity {
         Transform::from_translation(Vec3::new(0.0, POOL_LIGHT_HEIGHT, 0.0)),
     )
 }
+
+/// The direction the key light **travels** (world space, un-normalized).
+///
+/// This is the shadow knob, not just a shading knob. The engine renders a real
+/// directional depth-map shadow and always has — but a shadow is cast *along*
+/// the light's travel direction, and the old key travelled `(-0.36, -1.0, 0.42)`:
+/// down-track (`+Z`, the way the car is pointing, away from a chase camera that
+/// sits behind it) and toward screen-right. From the only camera this game ever
+/// uses, that threw the car's shadow **forward, underneath the car, where the car
+/// itself hides it**. The frame therefore contained a shadow and showed none, and
+/// every pass that tried to fix "no shadow" by re-balancing key and fill was
+/// adjusting the wrong term: the light was fine, it was aimed out of shot.
+///
+/// So the horizontal component is flipped. The key now travels toward `-Z` —
+/// *toward* the camera — and toward `+X`, which this app's camera basis renders
+/// as screen-**left**, so the shadow spills down and to the left of the car and
+/// lands squarely in the lower third of the frame, where the reference puts it.
+///
+/// The elevation is lowered with it, from ~61° above the horizon to ~50°. A
+/// shadow's length is `height / tan(elevation)`: at 61° the car's ~1.2 m of body
+/// projected a ~0.7 m smear that its own footprint swallowed even when it was
+/// pointed at the camera; at 50° it projects a full car-height of shadow that
+/// reads as a separate shape. The same change is what finally gives the frame's
+/// *vertical* surfaces a lit and an unlit side — the key's horizontal component
+/// goes 0.49 → 0.64, so a car flank, a reflector post and a tree cone stop being
+/// one flat value each, which is the other half of why this scene read as
+/// ambient-only.
+///
+/// The cost is deliberate and small: the road and verge are horizontal, so their
+/// `N·L` drops 0.87 → 0.77 and the tarmac darkens ~11%, toward the near-black
+/// asphalt its albedo was authored for. The intensity is untouched.
+const KEY_DIRECTION: Vec3 = Vec3::new(0.55, -1.0, -0.62);
 
 /// How high above the road the car's pool light hangs (m).
 ///
@@ -444,6 +481,38 @@ mod tests {
         assert_eq!(
             outcome.clear_color(),
             [palette::SKY[0], palette::SKY[1], palette::SKY[2], 1.0]
+        );
+    }
+
+    /// The key light's aim is a *visibility* rule, not a taste one, so it is
+    /// pinned here.
+    ///
+    /// This game has exactly one camera: a chase rig behind a car that drives
+    /// `+Z`. A shadow is cast along the light's travel direction, so a key with a
+    /// positive `z` throws every shadow in the scene down-track, away from that
+    /// camera and behind the object casting it — which is how the rig spent
+    /// several passes rendering a real depth-map shadow that never appeared in a
+    /// single frame. `z` must stay negative for the shadow to come *toward* the
+    /// viewer, and the sun must stay off the vertical so the shadow has length
+    /// and so vertical surfaces get a lit and an unlit side at all.
+    #[test]
+    fn the_key_throws_its_shadow_toward_the_camera_and_not_out_of_shot() {
+        assert!(
+            KEY_DIRECTION.z < 0.0,
+            "the key travels down-track: every shadow lands behind its caster, \
+             hidden from the only camera this game has ({KEY_DIRECTION:?})"
+        );
+        assert!(KEY_DIRECTION.y < 0.0, "the sun is above the road, not below it");
+
+        // Elevation, from the horizontal reach against the drop. Too steep and
+        // the shadow is a smear the caster's own footprint swallows; too shallow
+        // and it stretches across the whole road and the tarmac loses its key.
+        let horizontal = KEY_DIRECTION.x.hypot(KEY_DIRECTION.z);
+        let elevation = (-KEY_DIRECTION.y).atan2(horizontal).to_degrees();
+        assert!(
+            (35.0..=60.0).contains(&elevation),
+            "the key sits at {elevation:.0}° — outside the band that casts a \
+             shadow with readable length"
         );
     }
 
