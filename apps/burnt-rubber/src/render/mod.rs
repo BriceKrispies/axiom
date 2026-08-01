@@ -30,6 +30,7 @@ use axiom::prelude::{
 use axiom_math::{Mat4, Quat};
 
 use crate::camera::CameraPose;
+use crate::sim::car::CarPose;
 use crate::sim::{RacePhase, RaceSim};
 
 use car_model::{PlayerCar, TrafficVisuals};
@@ -61,6 +62,8 @@ pub struct RaceScene {
     car: PlayerCar,
     effects: Effects,
     finish_arch: Vec<Entity>,
+    /// The pool light that rides over the car (see [`install_lights`]).
+    car_light: Entity,
     aspect: f32,
     last_view_proj: Mat4,
 }
@@ -113,7 +116,7 @@ impl RaceScene {
         let effects = Effects::install(app, &palette, track.seed());
         let finish_arch = install_finish_arch(app, sim);
 
-        install_lights(app);
+        let car_light = install_lights(app);
 
         RaceScene {
             palette,
@@ -123,6 +126,7 @@ impl RaceScene {
             car,
             effects,
             finish_arch,
+            car_light,
             aspect: width.max(1) as f32 / height.max(1) as f32,
             last_view_proj: Mat4::IDENTITY,
         }
@@ -158,6 +162,7 @@ impl RaceScene {
         let braking = brake_intensity(sim);
         let boost = if sim.boost().active() { 1.0 } else { 0.0 };
         self.car.pose(app, &car_pose, braking, boost);
+        app.set(self.car_light, Transform::from_translation(pool_light_at(&car_pose)));
 
         let forward = camera
             .target
@@ -270,9 +275,9 @@ fn view_projection(pose: &CameraPose, aspect: f32) -> Mat4 {
     projection.multiply(view)
 }
 
-/// A directional key light plus a low fill, both static. The course is lit like
-/// a night stage: one hard key from above and behind the start, and a cool fill
-/// so the road's far side is not a silhouette.
+/// A directional key light plus a low fill, both static — and one **pool light**
+/// that rides over the car. Returns the pool light's entity, which
+/// [`RaceScene::pose`] moves with the car every frame.
 ///
 /// The key is held at roughly half power. Its *direction* was never the
 /// problem — the flaw was the level. At full intensity, tarmac authored at a
@@ -282,7 +287,19 @@ fn view_projection(pose: &CameraPose, aspect: f32) -> Mat4 {
 /// asphalt its albedo was chosen for and leaves the markings, the reflector
 /// posts and the brake lights as the only bright things in the frame, which is
 /// exactly the hierarchy this course is authored around.
-fn install_lights(app: &mut RunningApp) {
+///
+/// But a directional key is, by definition, *the same everywhere*: it lights the
+/// tarmac under the bumper and the tarmac at the vanishing point to exactly the
+/// same value, and that is what still read as flat. The whole road sat at one
+/// tone from the car to the horizon, with no sense that the light was near. A
+/// night stage does not look like that — the light is **local**, and the road
+/// falls away into the dark a short way out. So the rig gains a positional light
+/// above the car: the backend attenuates a point light by distance
+/// (`1/(1 + 0.09d + 0.032d²)`), so it lays a bright wash on the tarmac around the
+/// car that is gone within a dozen metres, top-lights the car's own upper
+/// surfaces, and leaves the far road to the key alone. That near/far difference
+/// is the depth cue the flat rig had no way to produce.
+fn install_lights(app: &mut RunningApp) -> Entity {
     app.add_light(
         DirectionalLight {
             direction: Vec3::new(-0.36, -1.0, 0.42),
@@ -295,6 +312,46 @@ fn install_lights(app: &mut RunningApp) {
         },
         Transform::IDENTITY,
     );
+    // Cool, near-neutral: it is the night reading of the same white, and holding
+    // it slightly bluer than the warm key keeps the pool from reading as a
+    // second sun.
+    app.add_point_light(
+        PointLight {
+            color: Color::linear_rgb(
+                palette::ratio(0.88),
+                palette::ratio(0.93),
+                palette::ratio(1.0),
+            ),
+            intensity: palette::ratio(1.0),
+        },
+        Transform::from_translation(Vec3::new(0.0, POOL_LIGHT_HEIGHT, 0.0)),
+    )
+}
+
+/// How high above the road the car's pool light hangs (m).
+///
+/// This is the pool's *radius* knob, not just its height: with the backend's
+/// `1/(1 + 0.09d + 0.032d²)` falloff the wash is brightest directly beneath and
+/// has faded to a twentieth of that by ~13 m out, so raising it spreads a
+/// weaker pool and lowering it tightens a hotter one. At 6.5 m the wash covers
+/// the car's own lane and most of the two beside it — the reference's footprint.
+pub const POOL_LIGHT_HEIGHT: f32 = 6.5;
+/// How far ahead of the car's origin the pool light sits (m). Slightly forward,
+/// so the brightest tarmac is at and just beyond the car rather than in the
+/// foreground behind it, where the reference keeps the road dark.
+pub const POOL_LIGHT_AHEAD: f32 = 1.5;
+
+/// Where the car's pool light hangs for a car pose.
+///
+/// Deliberately built from the **flat** heading and not the chassis basis: a
+/// light parented to the tilting body would swing its pool across the road under
+/// roll and pitch, which is a lamp on a gimbal, not a night stage.
+fn pool_light_at(pose: &CarPose) -> Vec3 {
+    pose.position.add(Vec3::new(
+        pose.yaw.sin() * POOL_LIGHT_AHEAD,
+        POOL_LIGHT_HEIGHT,
+        pose.yaw.cos() * POOL_LIGHT_AHEAD,
+    ))
 }
 
 /// Two pillars and a beam over the finish line.
@@ -514,6 +571,33 @@ mod tests {
         assert_eq!(sim.phase(), RacePhase::Finished);
         assert_eq!(brake_intensity(&sim), 1.0, "the finish lights them fully");
         assert!(cruising <= 1.0);
+    }
+
+    /// The pool light is the frame's only *local* light source, so it has to
+    /// ride the car: parked at the origin it would light the start line for the
+    /// whole race and leave the car in the flat key it was added to break up.
+    #[test]
+    fn the_pool_light_rides_over_the_car() {
+        let (mut app, mut sim, mut scene) = fixture();
+        for _ in 0..600 {
+            sim.step(DriveCommand::FLAT_OUT);
+        }
+        scene.pose(&mut app, &sim, 0.0);
+        let pose = sim.car_pose(0.0);
+        let at = app.get::<Transform>(scene.car_light).expect("posed").translation;
+        assert!(
+            (at.y - pose.position.y - POOL_LIGHT_HEIGHT).abs() < 1e-3,
+            "it hangs {POOL_LIGHT_HEIGHT} m over the road, not on it: {at:?}"
+        );
+        let flat = Vec3::new(at.x - pose.position.x, 0.0, at.z - pose.position.z);
+        assert!(
+            (flat.length() - POOL_LIGHT_AHEAD).abs() < 1e-3,
+            "and just ahead of the car: {flat:?}"
+        );
+        assert!(
+            flat.dot(Vec3::new(pose.yaw.sin(), 0.0, pose.yaw.cos())) > 0.0,
+            "ahead, not behind"
+        );
     }
 
     #[test]
