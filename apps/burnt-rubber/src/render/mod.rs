@@ -73,13 +73,22 @@ impl RaceScene {
         let tuning = sim.tuning();
 
         app.set_clear_color([palette::SKY[0], palette::SKY[1], palette::SKY[2], 1.0]);
-        // A dark, cool ambient. The ground term is deliberately not near-black:
-        // there is one directional key light, so every face turned away from it
-        // has nothing but ambient, and a black ground term makes the whole
-        // shadowed half of every car, post and lamp disappear.
+        // A dark, cool ambient, held at roughly a tenth of the key. It is
+        // deliberately not zero: there is one directional key light, so every
+        // face turned away from it has nothing but ambient, and a black ground
+        // term makes the whole shadowed half of every car, post and lamp
+        // disappear. But it must stay *far* below the key, because ambient is
+        // the one term that lights the lit and the unlit face equally — every
+        // unit of it is contrast removed from the frame. At the old level the
+        // fill was a third of the key and the course read as an overcast
+        // afternoon that had been colour-graded dark: the tarmac a flat mid
+        // slate from the bumper to the horizon, the verge a pale sage, the
+        // trees' shadowed sides barely darker than their lit ones. Night is
+        // not "the same light, less of it" — it is a low key with a much
+        // lower fill.
         app.set_ambient(FrameAmbient::new(
-            [0.15, 0.18, 0.26],
-            [0.10, 0.11, 0.13],
+            [0.055, 0.065, 0.100],
+            [0.035, 0.040, 0.050],
         ));
 
         let road = RoadChunks::install(app, track, &tuning.course, palette.road);
@@ -249,6 +258,15 @@ fn view_projection(pose: &CameraPose, aspect: f32) -> Mat4 {
 /// A directional key light plus a low fill, both static. The course is lit like
 /// a night stage: one hard key from above and behind the start, and a cool fill
 /// so the road's far side is not a silhouette.
+///
+/// The key is held at roughly half power. Its *direction* was never the
+/// problem — the flaw was the level. At full intensity, tarmac authored at a
+/// deliberately near-black `0.085` still lands on screen around a mid slate,
+/// which is what turned a night stage into a grey overcast one: the exposure,
+/// not the paint, was daylight. Halving the key drops the road to the dark
+/// asphalt its albedo was chosen for and leaves the markings, the reflector
+/// posts and the brake lights as the only bright things in the frame, which is
+/// exactly the hierarchy this course is authored around.
 fn install_lights(app: &mut RunningApp) {
     app.add_light(
         DirectionalLight {
@@ -258,7 +276,7 @@ fn install_lights(app: &mut RunningApp) {
                 palette::ratio(0.94),
                 palette::ratio(0.84),
             ),
-            intensity: palette::ratio(1.0),
+            intensity: palette::ratio(0.55),
         },
         Transform::IDENTITY,
     );
