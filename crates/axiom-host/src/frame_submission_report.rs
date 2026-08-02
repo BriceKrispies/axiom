@@ -41,6 +41,14 @@ pub enum FrameFeature {
     MultiLight,
     /// Any post-processing pass.
     PostProcessing,
+    /// A per-pixel sky evaluated behind the scene (a backend without it clears to
+    /// the frame's flat colour instead).
+    Sky,
+    /// The view-dependent specular highlight term on lit surfaces.
+    SpecularHighlight,
+    /// Bright pixels spilling into their neighbours. Distinct from
+    /// [`Self::PostProcessing`]: a backend can grade a frame it cannot bloom.
+    Bloom,
 }
 
 /// The uniform result of presenting one frame through any backend: which backend
@@ -175,7 +183,13 @@ mod tests {
             FrameFeature::PerspectiveCorrectAlbedo,
             FrameFeature::MultiLight,
             FrameFeature::PostProcessing,
+            FrameFeature::Sky,
+            FrameFeature::SpecularHighlight,
+            FrameFeature::Bloom,
         ];
+        // Bloom is its own feature, not a spelling of PostProcessing: a backend
+        // that grades but cannot bloom must be able to report exactly that.
+        assert_ne!(FrameFeature::Bloom, FrameFeature::PostProcessing);
         features.windows(2).for_each(|w| assert_ne!(w[0], w[1]));
         assert_eq!(features[0], FrameFeature::Shadows);
         features

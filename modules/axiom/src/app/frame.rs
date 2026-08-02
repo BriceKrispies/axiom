@@ -115,6 +115,10 @@ impl RunningApp {
         // both backends recede distance into the same colour over the same range
         // (captured before the closure borrows `self`).
         let depth_fog = self.depth_fog;
+        // The app's authored sky and bloom ride onto the outcome the same way, for
+        // the same reason (captured before the closure borrows `self`).
+        let sky = self.sky;
+        let bloom = self.bloom;
         let rendered = self.render.then(|| {
             let mut frame =
                 self.pipeline
@@ -184,6 +188,14 @@ impl RunningApp {
                             .report_draw_emissive(&report, i)
                             .expect("draw in range"),
                     )
+                    // ...and its specular strength, from the same place and for
+                    // the same reason: a fully-rough material yields `0`, which
+                    // is an exact no-op in every backend.
+                    .with_specular(
+                        pipeline
+                            .report_draw_specular(&report, i)
+                            .expect("draw in range"),
+                    )
                 })
                 .collect();
 
@@ -229,6 +241,8 @@ impl RunningApp {
             .with_ambient(ambient)
             .with_depth_fog(depth_fog)
             .with_postprocess(postprocess)
+            .with_sky(sky)
+            .with_bloom(bloom)
         });
         rendered.unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))
     }

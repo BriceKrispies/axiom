@@ -70,6 +70,34 @@ pub fn ratio(v: f32) -> Ratio {
 /// displayed result, which is why they look implausibly dark written down.
 pub const SKY: [f32; 3] = [0.011, 0.015, 0.026];
 
+/// The sky directly overhead, and the top of the frame's gradient.
+///
+/// **Darker than [`SKY`], not brighter.** That is the way a real night sky sits:
+/// the deepest part is overhead, and the band just above the ground is the
+/// lightest, because that is where the atmosphere is thickest and scatters the
+/// most. Getting this the wrong way round is what makes a night sky read as an
+/// overcast day. [`SKY`] stays the *horizon* colour precisely because it is also
+/// the colour the depth fog fades into — so the far road dissolves into the sky
+/// it is standing under, with no seam between the two.
+pub const SKY_ZENITH: [f32; 3] = [0.004, 0.006, 0.015];
+
+/// The moon's disc colour — **deliberately far above `1.0`**.
+///
+/// Every other colour in this file is a reflectance and belongs in `0..1`. This
+/// one is a radiance: it is the brightest thing in the frame by a wide margin,
+/// and authoring it at white would make it a flat white circle. The surplus over
+/// white is what the frame's bloom spends on the halo around it, which is what
+/// makes it read as a light source rather than a sticker. Cool, like the key
+/// light it is the source of, and brightest in blue.
+///
+/// How far above white barely matters, and that is worth knowing before tuning
+/// it: the render target is 8-bit, so every value at or above `1.0` is already
+/// clamped to white before the bloom's bright pass samples it. What decides how
+/// much the moon glows is therefore the *area* of above-threshold pixels — the
+/// disc plus its halo — not this number. Reach for `MOON_HALO_FALLOFF` when the
+/// glow is wrong; this only has to clear `1.0` to say "radiance, not paint".
+pub const MOON: [f32; 3] = [1.25, 1.32, 1.5];
+
 /// Register the four road materials.
 ///
 /// The tarmac is the one material here that carries a **texture**: it is the
@@ -88,10 +116,28 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
         // grain multiplies this base colour (the shader computes
         // `albedo * colour`), so the hue lives here and only the shading is
         // sampled.
+        // `roughness` is what decides how much of the moon the tarmac throws
+        // back. It is not decoration on a night stage: a matte road reflects the
+        // moon nowhere, so the brightest object in the sky leaves no mark on the
+        // largest surface in the frame, and the two read as unrelated. At 0.6 the
+        // road catches a broad, low sheen down the line to the moon — the look of
+        // asphalt that is damp rather than polished, which is also the only way a
+        // near-black surface gets any tonal variation across its length at all.
+        //
+        // 0.68 rather than lower because the streak is brightest in the near
+        // corner, where the reflection geometry is most favourable: any glossier
+        // and that corner saturates to flat white and the sheen stops reading as
+        // a surface and starts reading as a blown highlight.
         surface: app.add_material(
             asphalt
-                .map(|t| Material::lit(rgb(0.085, 0.088, 0.105)).with_custom_texture(t.id()))
-                .unwrap_or_else(|| Material::lit(rgb(0.085, 0.088, 0.105))),
+                .map(|t| {
+                    Material::lit(rgb(0.085, 0.088, 0.105))
+                        .with_custom_texture(t.id())
+                        .with_roughness(ratio(0.68))
+                })
+                .unwrap_or_else(|| {
+                    Material::lit(rgb(0.085, 0.088, 0.105)).with_roughness(ratio(0.68))
+                }),
         ),
         // Paint: a real white pigment plus a low emissive floor, so the lane
         // markings hold their brightness in shadow, inside the tunnel, and
@@ -165,6 +211,13 @@ impl ScenePalette {
     /// Register every material. Called once, at install.
     pub fn install(app: &mut RunningApp) -> ScenePalette {
         let lit = |app: &mut RunningApp, c: [f32; 3]| app.add_material(Material::lit(rgb(c[0], c[1], c[2])));
+        // A lit material with an authored surface roughness (`0` mirror-smooth …
+        // `1` matte), which the backends turn into a specular highlight strength.
+        let glossy = |app: &mut RunningApp, c: [f32; 3], roughness: f32| {
+            app.add_material(
+                Material::lit(rgb(c[0], c[1], c[2])).with_roughness(ratio(roughness)),
+            )
+        };
         let glowing = |app: &mut RunningApp, c: [f32; 3], e: [f32; 3]| {
             app.add_material(Material::lit(rgb(c[0], c[1], c[2])).with_emissive(rgb(e[0], e[1], e[2])))
         };
@@ -179,8 +232,15 @@ impl ScenePalette {
             sign: glowing(app, [0.62, 0.64, 0.60], [0.22, 0.22, 0.20]),
             lamp: glowing(app, [0.30, 0.28, 0.24], [1.0, 0.86, 0.52]),
             building: lit(app, [0.22, 0.22, 0.25]),
-            car_body: lit(app, [0.86, 0.16, 0.07]),
-            car_glass: lit(app, [0.07, 0.09, 0.13]),
+            // Automotive clear-coat — the glossiest surface in the frame, and
+            // the one always closest to the camera. Without it the car is a flat
+            // orange cut-out against a lit road; with it the moon rides along its
+            // upper edges and the body finally reads as a curved metal shell.
+            car_body: glossy(app, [0.86, 0.16, 0.07], 0.30),
+            // Glass is glossier still, and nearly black in albedo — so almost
+            // everything it shows is reflection, which is exactly what a
+            // windscreen at night looks like.
+            car_glass: glossy(app, [0.07, 0.09, 0.13], 0.12),
             tyre: lit(app, [0.045, 0.045, 0.05]),
             // The player's tail lamps sit *inside* a red body. Their albedo is a
             // dark red lens — DARKER than the paint around it, which is what a

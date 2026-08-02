@@ -20,7 +20,7 @@ pub use axiom_frame::{FrameAccumulator, StepBudget};
 // carries them (`postMessage`, `window.location.search`) is the app's platform
 // edge, never here.
 pub use axiom_host::{
-    FrameAmbient, FrameDepthFog, HostApi, HostMetrics, HostOutcome, HostOutcomeSet,
+    FrameAmbient, FrameBloom, FrameDepthFog, FrameSky, HostApi, HostMetrics, HostOutcome, HostOutcomeSet,
     HostParamValue, HostSessionConfig, HostSessionParams, PlayerId, Score,
 };
 pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};

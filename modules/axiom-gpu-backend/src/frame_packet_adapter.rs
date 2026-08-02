@@ -7,7 +7,7 @@
 //! backend presents the shared packet with **no** change to the renderer. The
 //! packing layout is byte-identical to the legacy batch format:
 //! `INSTANCE_FLOATS` floats per instance — `mvp[16]`, then `world[16]`, then
-//! `colour[4]`, then `emissive[3]` + one pad float — grouped by
+//! `colour[4]`, then `emissive[3]` + `specular[1]` — grouped by
 //! `(mesh_id, material_id)` in first-appearance order.
 
 use std::collections::HashMap;
@@ -15,16 +15,17 @@ use std::collections::HashMap;
 use axiom_host::FramePacket;
 
 /// Floats one packed instance occupies: `mvp(16) + world(16) + colour(4) +
-/// emissive(3) + pad(1)`. This module owns the number because it owns the
+/// emissive(3) + specular(1)`. This module owns the number because it owns the
 /// packing; the renderer's vertex layout is derived from it, and it must stay
 /// equal to `axiom::FrameOutcome`'s `INSTANCE_FLOATS` (the same bytes, packed by
-/// the other producer). The emissive lane is padded to a full `vec4` because a
-/// vertex attribute is the granularity both wgpu and the WebGL2 downlevel target
-/// describe; the pad float is never read.
+/// the other producer). The emissive lane is a full `vec4` because a vertex
+/// attribute is the granularity both wgpu and the WebGL2 downlevel target
+/// describe — and its fourth float, once an unread pad, now carries the
+/// material's specular strength, which is why no attribute had to be added.
 pub(crate) const INSTANCE_FLOATS: usize = 40;
 
 /// Group a packet's draws into per-`(mesh, material)` instance batches:
-/// `(mesh_id, material_id, [mvp(16), world(16), colour(4), emissive(3)+pad(1)]
+/// `(mesh_id, material_id, [mvp(16), world(16), colour(4), emissive(3)+specular(1)]
 /// per instance, count)`, one entry per distinct `(mesh, material)` pair in
 /// first-appearance order. Byte-identical to the `mesh_batches` layout the live
 /// renderer consumes.
@@ -40,10 +41,12 @@ pub(crate) fn frame_packet_to_batches(packet: &FramePacket) -> Vec<(u64, u64, Ve
         floats.extend_from_slice(&draw.mvp());
         floats.extend_from_slice(&draw.world());
         floats.extend_from_slice(&draw.color());
-        // The emissive lane, padded to a `vec4` — the vertex-attribute
-        // granularity the instance buffer is described in.
+        // The emissive lane, filled out to a `vec4` — the vertex-attribute
+        // granularity the instance buffer is described in — by the material's
+        // specular strength, which is what that fourth lane carries now that the
+        // shader has a highlight term to spend it on.
         let e = draw.emissive();
-        floats.extend_from_slice(&[e[0], e[1], e[2], 0.0]);
+        floats.extend_from_slice(&[e[0], e[1], e[2], draw.specular().get()]);
     });
     order
         .into_iter()
@@ -98,7 +101,8 @@ mod tests {
             FrameDrawItem::new(0, 7, 5, [9.0; 16], [1.0; 16], [0.1, 0.2, 0.3, 1.0], false),
             FrameDrawItem::new(1, 7, 6, [8.0; 16], [2.0; 16], [0.4, 0.5, 0.6, 1.0], false),
             FrameDrawItem::new(2, 7, 5, [7.0; 16], [3.0; 16], [0.7, 0.8, 0.9, 1.0], false)
-                .with_emissive([2.0, 0.5, 0.0]),
+                .with_emissive([2.0, 0.5, 0.0])
+                .with_specular(axiom_kernel::Ratio::finite_or_zero(0.6)),
         ];
         let batches = frame_packet_to_batches(&packet(draws, Vec::new()));
 
@@ -111,12 +115,13 @@ mod tests {
         assert_eq!(&batches[0].2[0..16], &[1.0; 16]);
         assert_eq!(&batches[0].2[16..32], &[9.0; 16]);
         assert_eq!(&batches[0].2[32..36], &[0.1, 0.2, 0.3, 1.0]);
-        assert_eq!(&batches[0].2[36..40], &[0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(&batches[0].2[36..40], &[0.0, 0.0, 0.0, 0.0], "matte, non-emissive");
         // Instance 1 = draw 2 (same pair), which authored an emissive.
         assert_eq!(&batches[0].2[40..56], &[3.0; 16]);
         assert_eq!(&batches[0].2[56..72], &[7.0; 16]);
         assert_eq!(&batches[0].2[72..76], &[0.7, 0.8, 0.9, 1.0]);
-        assert_eq!(&batches[0].2[76..80], &[2.0, 0.5, 0.0, 0.0]);
+        // The emissive lane's fourth float is the specular strength, not a pad.
+        assert_eq!(&batches[0].2[76..80], &[2.0, 0.5, 0.0, 0.6]);
 
         assert_eq!((batches[1].0, batches[1].1), (7, 6));
         assert_eq!(batches[1].3, 1);

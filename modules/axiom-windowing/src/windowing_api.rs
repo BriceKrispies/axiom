@@ -48,9 +48,10 @@ pub struct WindowingApi {
     next_tick: u64,
     frames_driven: u64,
     // The app-authored **render look** the live backend binds with: the hemisphere
-    // ambient that fills unlit faces, and the atmospheric depth fog distance recedes
-    // into. Both are backend-neutral `host` values, so they live in the deterministic
-    // core (not the wasm arm) and are testable on native.
+    // ambient that fills unlit faces, the atmospheric depth fog distance recedes
+    // into, the sky behind the scene, and the bloom bright pixels spill through. All
+    // are backend-neutral `host` values, so they live in the deterministic core (not
+    // the wasm arm) and are testable on native.
     //
     // Before this existed, every `run_web*` entry hardcoded
     // `FrameAmbient::default_hemisphere()` at bind: an app could author a night
@@ -59,10 +60,14 @@ pub struct WindowingApi {
     // had no route to the binder. That is a silent divergence between what the app
     // authors and what the browser draws — the same class of defect as a backend
     // that ignores a frame's fog — so the look is carried here and consumed at bind.
-    // Defaults reproduce the old hardcode exactly, so an app that sets neither is
+    // Defaults reproduce the old hardcode exactly, so an app that sets nothing is
     // unchanged.
-    ambient: axiom_host::FrameAmbient,
-    depth_fog: Option<axiom_host::FrameDepthFog>,
+    //
+    // Held as one `FrameRenderLook` rather than a field per knob: the parts already
+    // travelled together through every binder, and a separate field each meant a new
+    // look knob widened four signatures and a dozen `wasm32`-only call sites the
+    // native gate never compiles.
+    look: axiom_host::FrameRenderLook,
     // The live presenter for a caller-owned frame loop (see
     // `bind_present_surface` / `present_frame` in the wasm32 `web` arm). A shared
     // slot so the asynchronous backend init can fill it off-loop; empty until then
@@ -92,8 +97,7 @@ impl WindowingApi {
             surface: None,
             next_tick: 0,
             frames_driven: 0,
-            ambient: axiom_host::FrameAmbient::default_hemisphere(),
-            depth_fog: None,
+            look: axiom_host::FrameRenderLook::default(),
             #[cfg(target_arch = "wasm32")]
             presenter: std::rc::Rc::new(std::cell::RefCell::new(None)),
             bound_backend: std::rc::Rc::new(std::cell::Cell::new(None)),
@@ -147,12 +151,12 @@ impl WindowingApi {
     /// the engine default hemisphere, which is why an app that authored a night
     /// ambient still rendered under a default daylight fill in the browser.
     pub fn set_ambient(&mut self, ambient: axiom_host::FrameAmbient) {
-        self.ambient = ambient;
+        self.look = self.look.with_ambient(ambient);
     }
 
     /// The render-look hemisphere ambient the live backend binds with.
     pub const fn ambient(&self) -> axiom_host::FrameAmbient {
-        self.ambient
+        self.look.ambient()
     }
 
     /// Set the app-authored **atmospheric depth fog** the live backend binds with —
@@ -161,12 +165,47 @@ impl WindowingApi {
     /// identically whichever won the cascade. Unset (the default) leaves each backend
     /// on its prior default.
     pub fn set_depth_fog(&mut self, depth_fog: axiom_host::FrameDepthFog) {
-        self.depth_fog = Some(depth_fog);
+        self.look = self.look.with_depth_fog(depth_fog);
     }
 
     /// The render-look depth fog the live backend binds with, if the app authored one.
     pub const fn depth_fog(&self) -> Option<axiom_host::FrameDepthFog> {
-        self.depth_fog
+        self.look.depth_fog()
+    }
+
+    /// Set the app-authored **sky** the live backend binds with — a gradient with an
+    /// optional celestial body in it, evaluated per pixel behind the scene instead of
+    /// a flat clear colour. This is what puts the light source *in* the frame; a night
+    /// scene lit only by a directional light and an ambient reads flat however
+    /// carefully the light values are tuned, because nothing on screen is the source.
+    /// Unset (the default) leaves each backend clearing to the frame's flat colour.
+    pub fn set_sky(&mut self, sky: axiom_host::FrameSky) {
+        self.look = self.look.with_sky(sky);
+    }
+
+    /// The render-look sky the live backend binds with, if the app authored one.
+    pub const fn sky(&self) -> Option<axiom_host::FrameSky> {
+        self.look.sky()
+    }
+
+    /// Set the app-authored **bloom** the live backend binds with — which pixels spill
+    /// light into their neighbours, how far, and how the surplus above white rolls off
+    /// instead of clipping. Without it a material authored to emit above `1.0` simply
+    /// clamps, so a lamp reads as a flat white sticker rather than a light. Unset (the
+    /// default) leaves highlights to clip, exactly as before.
+    pub fn set_bloom(&mut self, bloom: axiom_host::FrameBloom) {
+        self.look = self.look.with_bloom(bloom);
+    }
+
+    /// The render-look bloom the live backend binds with, if the app authored one.
+    pub const fn bloom(&self) -> Option<axiom_host::FrameBloom> {
+        self.look.bloom()
+    }
+
+    /// The whole app-authored render look, as one value — what every binder in the
+    /// wasm arm threads through to the backend it builds.
+    pub const fn render_look(&self) -> axiom_host::FrameRenderLook {
+        self.look
     }
 
     /// Whether a surface has been configured.
@@ -407,6 +446,9 @@ mod tests {
             axiom_host::FrameAmbient::default_hemisphere()
         );
         assert_eq!(w.depth_fog(), None);
+        assert_eq!(w.sky(), None);
+        assert_eq!(w.bloom(), None);
+        assert_eq!(w.render_look(), axiom_host::FrameRenderLook::default());
     }
 
     #[test]
@@ -427,6 +469,25 @@ mod tests {
         );
         w.set_depth_fog(fog);
         assert_eq!(w.depth_fog(), Some(fog));
+
+        // The sky and the bloom ride the same look, and — the part worth pinning
+        // — authoring one must not discard the others. A driver that rebuilt its
+        // look per setter would silently drop the ambient the moment an app set
+        // a sky, which is exactly the class of bug the bundle exists to prevent.
+        let sky = axiom_host::FrameSky::gradient([0.01, 0.02, 0.05], [0.04, 0.05, 0.09]);
+        w.set_sky(sky);
+        assert_eq!(w.sky(), Some(sky));
+        let bloom = axiom_host::FrameBloom::moonlit();
+        w.set_bloom(bloom);
+        assert_eq!(w.bloom(), Some(bloom));
+
+        // Everything authored above is still there, and `render_look` hands the
+        // whole thing over as the one value every binder threads.
+        let look = w.render_look();
+        assert_eq!(look.ambient(), night);
+        assert_eq!(look.depth_fog(), Some(fog));
+        assert_eq!(look.sky(), Some(sky));
+        assert_eq!(look.bloom(), Some(bloom));
     }
 
     #[test]

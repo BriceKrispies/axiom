@@ -283,6 +283,8 @@ pub struct RunningApp {
     // read the same numbers. `None` leaves each backend on its own prior default, so
     // an app that never sets one is unchanged.
     depth_fog: Option<FrameDepthFog>,
+    sky: Option<axiom_host::FrameSky>,
+    bloom: Option<axiom_host::FrameBloom>,
     // The frame's tonemap/colour grade (exposure/white-balance/contrast/
     // saturation), authored by the app and carried onto every `FrameOutcome` so
     // both the offscreen capture and the live present arm grade identically.
@@ -364,6 +366,8 @@ impl RunningApp {
             clear_color: surface.clear_color().to_array(),
             ambient: FrameAmbient::default_hemisphere(),
             depth_fog: None,
+            sky: None,
+            bloom: None,
             postprocess: None,
             light_direction: authored.light_direction,
             meshes: authored.meshes,

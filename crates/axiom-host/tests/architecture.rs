@@ -343,6 +343,9 @@ fn lib_exports_are_curated_set() {
         "pub use host_surface_descriptor::HostSurfaceDescriptor;",
         "pub use host_surface_handle::HostSurfaceHandle;",
         "pub use frame_ambient::FrameAmbient;",
+        "pub use frame_bloom::FrameBloom;",
+        "pub use frame_bloom::rolloff_knee;",
+        "pub use frame_bloom::luminance;",
         "pub use frame_capability::BackendCapabilityProfile;",
         "pub use frame_capability::CapabilityDegradation;",
         "pub use frame_capability::RenderCapability;",
@@ -359,6 +362,11 @@ fn lib_exports_are_curated_set() {
         "pub use frame_packet::FrameViewport;",
         "pub use frame_postprocess::apply_frame_postprocess;",
         "pub use frame_postprocess::FramePostProcess;",
+        // The app-authored render look (ambient + fog + sky + bloom), bound as
+        // one value so a new look knob does not widen four signatures and a
+        // dozen wasm-only call sites.
+        "pub use frame_render_look::FrameRenderLook;",
+        "pub use frame_sky::FrameSky;",
         "pub use frame_retro_32bit::apply_frame_retro_32bit;",
         "pub use frame_retro_32bit::FrameRetro32BitProfile;",
         "pub use frame_volumetrics::apply_frame_volumetrics;",

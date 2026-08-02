@@ -341,9 +341,25 @@ impl Canvas2dBackendApi {
             features.uses_textures() & !profile.contains(RenderCapability::Textures);
         let shadows_degraded =
             features.uses_shadows() & !profile.contains(RenderCapability::Shadows);
+        // The three shader-and-render-target capabilities the software path has no
+        // answer for. Each is read from what the frame actually carries rather than
+        // from a separately-authored flag, so the report cannot claim a drop for a
+        // frame that asked for nothing — or stay silent about one that did.
+        //
+        // This is what "skip it for the Canvas 2D version" means here: not an
+        // app-level `if backend == canvas2d`, but the frame carrying its full intent
+        // and this backend declaring, per frame, the three parts of it that it did
+        // not honour.
+        let sky_degraded = packet.sky().is_some() & !profile.contains(RenderCapability::Sky);
+        let bloom_degraded = packet.bloom().is_some() & !profile.contains(RenderCapability::Bloom);
+        let specular_degraded =
+            packet.uses_specular() & !profile.contains(RenderCapability::Specular);
         let degraded_features: Vec<FrameFeature> = [
             textures_degraded.then_some(FrameFeature::AlbedoSampling),
             shadows_degraded.then_some(FrameFeature::Shadows),
+            sky_degraded.then_some(FrameFeature::Sky),
+            specular_degraded.then_some(FrameFeature::SpecularHighlight),
+            bloom_degraded.then_some(FrameFeature::Bloom),
         ]
         .into_iter()
         .flatten()
@@ -876,6 +892,45 @@ mod tests {
             .contains(&FrameFeature::AlbedoSampling));
         assert!(report.degraded_features().contains(&FrameFeature::Shadows));
         assert_eq!(report.degraded_materials(), 1);
+    }
+
+    /// "Skip it for the Canvas 2D version", done through the capability system
+    /// rather than an app-level backend check: the frame carries the full intent
+    /// and this backend enumerates, per frame, exactly the parts it did not
+    /// honour. A silent omission would be indistinguishable from a bug.
+    #[test]
+    fn reports_the_sky_specular_and_bloom_it_cannot_render() {
+        use axiom_host::{FrameBloom, FrameDrawItem, FrameFeatureSet, FrameSky};
+        let mut backend = Canvas2dBackendApi::new(&request(320, 180));
+        backend.load_meshes(&[ground(7)]);
+        let draws = vec![
+            FrameDrawItem::new(1, 7, 13, IDENTITY, IDENTITY, [1.0; 4], false)
+                .with_specular(axiom_kernel::Ratio::finite_or_zero(0.7)),
+        ];
+        let rich = packet(draws.clone(), FrameFeatureSet::new(false, false, 0, 0))
+            .with_sky(FrameSky::gradient([0.02, 0.03, 0.06], [0.06, 0.08, 0.13]))
+            .with_bloom(FrameBloom::moonlit());
+        let report = backend.present_packet(&rich);
+        let degraded = report.degraded_features();
+        assert!(degraded.contains(&FrameFeature::Sky), "{degraded:?}");
+        assert!(
+            degraded.contains(&FrameFeature::SpecularHighlight),
+            "{degraded:?}"
+        );
+        assert!(degraded.contains(&FrameFeature::Bloom), "{degraded:?}");
+        // The whole-image colour grade is NOT dropped: this backend genuinely
+        // performs it. That is the distinction `PostProcess` vs `Bloom` exists for.
+        assert!(!degraded.contains(&FrameFeature::PostProcessing), "{degraded:?}");
+
+        // ...and a frame that asks for none of the three declares none of them.
+        let plain = packet(draws, FrameFeatureSet::new(false, false, 0, 0));
+        let quiet = backend.present_packet(&plain);
+        assert!(!quiet.degraded_features().contains(&FrameFeature::Sky));
+        assert!(!quiet.degraded_features().contains(&FrameFeature::Bloom));
+        // Specular still is: the draw authored it, even with no sky or bloom.
+        assert!(quiet
+            .degraded_features()
+            .contains(&FrameFeature::SpecularHighlight));
     }
 
     #[test]

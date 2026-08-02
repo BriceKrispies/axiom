@@ -91,11 +91,12 @@ pub struct RenderReport {
     command_count: usize,
     clear_color: [f32; 4],
     view_projection: Mat4,
-    /// One `(world, colour, mesh_id, material_id, casts_contact_shadow)` per
-    /// drawn (visible) object, in submission order. The caster flag is the
-    /// scene's per-renderable contact-shadow mark, carried so a grounding
-    /// backend (the software canvas) knows which objects to shadow.
-    draws: Vec<(Mat4, [f32; 4], [f32; 3], u64, u64, bool)>,
+    /// One `(world, colour, emissive, specular, mesh_id, material_id,
+    /// casts_contact_shadow)` per drawn (visible) object, in submission order.
+    /// The caster flag is the scene's per-renderable contact-shadow mark,
+    /// carried so a grounding backend (the software canvas) knows which objects
+    /// to shadow.
+    draws: Vec<(Mat4, [f32; 4], [f32; 3], f32, u64, u64, bool)>,
     /// The frame's resolved lights: `(kind, vec, colour, intensity)` where
     /// `kind` is `0` directional / `1` point, and `vec` is the world-space
     /// to-light direction (directional) or the light's world position (point).
@@ -131,6 +132,10 @@ pub struct RenderPipelineApi {
     material_index: HashMap<u64, u32>,
     material_color: HashMap<u64, [f32; 4]>,
     material_emissive: HashMap<u64, [f32; 3]>,
+    // material-id → specular strength, derived from the material's authored
+    // `roughness`. Cached per frame beside the colour and emissive maps for the
+    // same reason: the per-draw pass below resolves it once per renderable.
+    material_specular: HashMap<u64, f32>,
 }
 
 impl RenderPipelineApi {
@@ -142,6 +147,7 @@ impl RenderPipelineApi {
             material_index: HashMap::new(),
             material_color: HashMap::new(),
             material_emissive: HashMap::new(),
+            material_specular: HashMap::new(),
         }
     }
 
@@ -258,6 +264,7 @@ impl RenderPipelineApi {
             material_index,
             material_color,
             material_emissive,
+            material_specular,
         } = self;
         // Fill the RETAINED render input (reset + refill, no fresh alloc) via its
         // public primitive builders on the `&mut` handle — this module never names
@@ -325,6 +332,7 @@ impl RenderPipelineApi {
         material_index.clear();
         material_color.clear();
         material_emissive.clear();
+        material_specular.clear();
         frame.materials.iter().for_each(|material| {
             let c = material.color;
             let e = material.emissive;
@@ -348,6 +356,17 @@ impl RenderPipelineApi {
             // folding self-illumination in there would make a tail light dim when it
             // faces away from the sun, which is exactly the bug this route removes.
             material_emissive.insert(material.id, e);
+            // Specular strength IS the authored roughness, inverted.
+            //
+            // `roughness` has been on every material since the catalog existed —
+            // documented as "0 mirror-smooth … 1 matte" — and was then thrown
+            // away: it reached the render layer and no backend ever read it,
+            // because the shading model was Lambert-only and had nothing to spend
+            // it on. So there is no new authoring knob here and no migration; the
+            // engine simply stops discarding a value apps were already setting,
+            // and every material in every existing app becomes as glossy as it
+            // always said it was.
+            material_specular.insert(material.id, 1.0 - material.roughness.clamp(0.0, 1.0));
             material_index.insert(material.id, idx);
         });
 
@@ -426,7 +445,7 @@ impl RenderPipelineApi {
         // Sourcing it straight from the snapshot (rather than re-folding the GPU
         // command stream) is what lets each draw carry the renderable's
         // `casts_contact_shadow` mark, which the command stream does not encode.
-        let draws: Vec<(Mat4, [f32; 4], [f32; 3], u64, u64, bool)> = snapshot
+        let draws: Vec<(Mat4, [f32; 4], [f32; 3], f32, u64, u64, bool)> = snapshot
             .renderables()
             .iter()
             .filter(|renderable| renderable.visible())
@@ -446,10 +465,14 @@ impl RenderPipelineApi {
                     .get(&material_id)
                     .copied()
                     .unwrap_or([0.0; 3]);
+                // A renderable whose material the frame never supplied falls back
+                // to fully matte, matching the flat-white colour fallback above.
+                let specular = material_specular.get(&material_id).copied().unwrap_or(0.0);
                 (
                     world,
                     color,
                     emissive,
+                    specular,
                     mesh_id,
                     material_id,
                     renderable.casts_contact_shadow(),
@@ -555,12 +578,12 @@ impl RenderPipelineApi {
 
     /// The world matrix of the `i`-th drawn object, if present.
     pub fn report_draw_world(&self, report: &RenderReport, i: usize) -> Option<Mat4> {
-        report.draws.get(i).map(|(world, _, _, _, _, _)| *world)
+        report.draws.get(i).map(|(world, ..)| *world)
     }
 
     /// The colour of the `i`-th drawn object, if present.
     pub fn report_draw_color(&self, report: &RenderReport, i: usize) -> Option<[f32; 4]> {
-        report.draws.get(i).map(|(_, color, _, _, _, _)| *color)
+        report.draws.get(i).map(|(_, color, ..)| *color)
     }
 
     /// The linear-RGB self-illumination of the `i`-th drawn object, if present —
@@ -568,13 +591,23 @@ impl RenderPipelineApi {
     /// into the colour, which every backend modulates by light). `[0, 0, 0]` for
     /// a non-emissive material, so this is a no-op for existing frames.
     pub fn report_draw_emissive(&self, report: &RenderReport, i: usize) -> Option<[f32; 3]> {
-        report.draws.get(i).map(|(_, _, e, _, _, _)| *e)
+        report.draws.get(i).map(|(_, _, e, ..)| *e)
+    }
+
+    /// How strongly the `i`-th drawn object catches a view-dependent specular
+    /// highlight, if present — its material's authored `roughness`, inverted
+    /// (`0` matte … `1` mirror-smooth). Carried as its own per-draw term for the
+    /// same reason as emissive: it is not a reflectance, so it cannot be folded
+    /// into the colour. `0` for a fully-rough material, so this is a no-op for a
+    /// frame whose materials never set roughness.
+    pub fn report_draw_specular(&self, report: &RenderReport, i: usize) -> Option<f32> {
+        report.draws.get(i).map(|(_, _, _, s, ..)| *s)
     }
 
     /// The mesh id of the `i`-th drawn object, if present. Lets a caller group
     /// draws by mesh for per-mesh instance batching.
     pub fn report_draw_mesh_id(&self, report: &RenderReport, i: usize) -> Option<u64> {
-        report.draws.get(i).map(|(_, _, _, mesh_id, _, _)| *mesh_id)
+        report.draws.get(i).map(|(_, _, _, _, mesh_id, _, _)| *mesh_id)
     }
 
     /// The material id of the `i`-th drawn object, if present. Lets a caller
@@ -583,14 +616,14 @@ impl RenderPipelineApi {
         report
             .draws
             .get(i)
-            .map(|(_, _, _, _, material_id, _)| *material_id)
+            .map(|(_, _, _, _, _, material_id, _)| *material_id)
     }
 
     /// Whether the `i`-th drawn object is a contact-shadow caster (a discrete
     /// dynamic object the scene marked), if present. A grounding backend shadows
     /// only the `true` draws; level geometry is `false`.
     pub fn report_draw_casts_shadow(&self, report: &RenderReport, i: usize) -> Option<bool> {
-        report.draws.get(i).map(|(_, _, _, _, _, casts)| *casts)
+        report.draws.get(i).map(|(_, _, _, _, _, _, casts)| *casts)
     }
 
     /// The directional shadow caster's wgpu-ready light view-projection

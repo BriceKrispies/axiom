@@ -55,6 +55,11 @@ struct Lights {
     fog_color: vec4<f32>,
     // x = fog start, y = fog full-density depth (both normalized device depth); zw unused.
     fog_range: vec4<f32>,
+    // xyz = the camera's world position, recovered on the CPU from the frame's
+    // view-projection; w unused. Specular is view-dependent — that is the whole
+    // difference between it and the Lambert term — so the fragment stage cannot
+    // compute one without knowing where the frame is being watched from.
+    camera: vec4<f32>,
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
@@ -78,6 +83,15 @@ const CAP_TEXTURES: u32 = 1u;
 const CAP_ALPHAMASK: u32 = 2u;
 const CAP_NORMALMAP: u32 = 4u;
 const CAP_SHADOWS: u32 = 8u;
+const CAP_SPECULAR: u32 = 512u;
+
+// How tight a specular highlight is. One engine gloss profile, because the
+// instance payload has exactly one free lane and it is spent on *strength*: how
+// much a surface catches the highlight is the axis that separates tarmac from
+// car paint from chrome, while how tight it is barely moves between them at this
+// art scale. 48 is a broad, wet-road sheen rather than a pinpoint glint — which
+// is what a low moon on damp asphalt actually looks like.
+const SPECULAR_POWER: f32 = 48.0;
 
 @group(2) @binding(0) var shadow_map: texture_depth_2d;
 @group(2) @binding(1) var shadow_samp: sampler_comparison;
@@ -103,6 +117,11 @@ struct VsOut {
     // as a varying rather than a uniform because it rides the instance buffer, and
     // the mesh pass batches many materials' instances behind one pipeline.
     @location(4) emissive: vec3<f32>,
+    // The draw's specular strength, riding the emissive vec4's fourth lane —
+    // which is why that lane stopped being a pad. Same reasoning as emissive: it
+    // is per-material, and the mesh pass batches many materials behind one
+    // pipeline, so it cannot be a uniform.
+    @location(5) specular: f32,
 };
 
 @vertex
@@ -120,7 +139,7 @@ fn vs(
     @location(10) w2: vec4<f32>,
     @location(11) w3: vec4<f32>,
     @location(12) instance_color: vec4<f32>,
-    // rgb = the material's self-illumination; w is the layout pad (unread).
+    // rgb = the material's self-illumination; w = its specular strength.
     @location(13) instance_emissive: vec4<f32>,
 ) -> VsOut {
     let mvp = mat4x4<f32>(m0, m1, m2, m3);
@@ -135,6 +154,7 @@ fn vs(
     // the colour by N.L, ambient and shadow, and self-illumination must survive
     // all three. It is added after lighting, before fog.
     out.emissive = instance_emissive.rgb;
+    out.specular = instance_emissive.w;
     return out;
 }
 
@@ -186,6 +206,9 @@ fn vs_skinned(
     // it means repacking the skinned instance (its `joint_base` vec4 has three free
     // lanes), which is a separate change to the skinned draw contract.
     out.emissive = vec3<f32>(0.0, 0.0, 0.0);
+    // The skinned instance payload carries no specular lane either, for the same
+    // attribute-budget reason; a skinned material reads as fully matte.
+    out.specular = 0.0;
     return out;
 }
 
@@ -268,6 +291,13 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // shadows read with real contrast instead of being washed flat by full ambient.
     let ambient_shade = mix(SHADOW_AMBIENT, 1.0, shade);
     var lit = base.rgb * hemi * ambient_shade;
+    // Specular capability off, or a matte material → strength 0, which zeroes the
+    // whole term below. Evaluated (not branched around) so control flow stays
+    // uniform, exactly as the other capability gates in this shader do.
+    let gloss = select(0.0, in.specular, (caps & CAP_SPECULAR) != 0u);
+    // Toward the eye. Blinn-Phong uses the half-vector between this and the light,
+    // which is why the camera position has to reach the fragment stage at all.
+    let V = normalize(lights.camera.xyz - in.world_pos);
     for (var i: u32 = 0u; i < lights.count; i = i + 1u) {
         let lt = lights.items[i];
         var L = normalize(lt.v.xyz);
@@ -284,6 +314,15 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         }
         let diffuse = max(dot(N, L), 0.0) * atten;
         lit = lit + base.rgb * lt.col.rgb * lt.col.w * diffuse;
+        // The highlight. NOT multiplied by `base.rgb`: a specular reflection is
+        // light bouncing off the surface without being absorbed, so it takes the
+        // LIGHT's colour, not the surface's — which is what makes a cool moon
+        // read as cool on red car paint instead of turning pink. Gated behind
+        // N·L so a face turned away from the light cannot glint.
+        let H = normalize(L + V);
+        let facing = step(0.0, dot(N, L));
+        let spec = pow(max(dot(N, H), 0.0), SPECULAR_POWER) * gloss * atten * facing;
+        lit = lit + lt.col.rgb * lt.col.w * spec;
     }
     // Self-illumination, added after every light term and before fog: it is radiance
     // the surface emits, so no N.L, no ambient and no shadow attenuates it — but the
@@ -298,6 +337,284 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(fogged, base.a);
 }
 "#;
+
+/// WGSL for the **sky pass**: a fullscreen triangle drawn before the scene that
+/// evaluates the frame's [`axiom_host::FrameSky`] per pixel.
+///
+/// This is the arithmetic of [`axiom_host::FrameSky::radiance`], mirrored. That
+/// function is the definition and this is the copy; the Rust side is the one
+/// with tests, and every constant here (`MIN_ANGULAR_RADIUS`, `LIMB_SOFTNESS`)
+/// is pinned to its value by `sky_shader_constants_match_the_host_definition`.
+///
+/// Why a pass and not a clear colour: a flat clear cannot be a light. A night
+/// scene whose only light is a directional lamp plus a hemisphere ambient reads
+/// as "dark" rather than "moonlit" however carefully the values are tuned,
+/// because nothing in frame *is* the source. Putting the moon on screen — and
+/// giving the horizon a colour distinct from the zenith for fog to fade into —
+/// is what the eye reads as moonlight.
+///
+/// The pixel's world ray comes from the inverse view-projection: unproject the
+/// pixel at the near and far planes and take the difference. The renderer
+/// inverts the camera matrix itself (via `axiom_math::Mat4::inverse`) rather
+/// than making every caller supply an inverse, so an app authoring a sky supplies
+/// only the sky.
+const SKY_WGSL: &str = r#"
+struct SkyU {
+    inv_view_proj: mat4x4<f32>,
+    // rgb = zenith colour; w unused.
+    zenith: vec4<f32>,
+    // rgb = horizon colour; w unused.
+    horizon: vec4<f32>,
+    // xyz = unit direction toward the body; w = its angular radius (radians).
+    body: vec4<f32>,
+    // rgb = the body's colour; w = the halo's cosine exponent.
+    body_color: vec4<f32>,
+    // x = halo strength; yzw unused.
+    halo: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> sky: SkyU;
+
+struct SkyOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) ndc: vec2<f32>,
+};
+
+@vertex
+fn vs(@builtin(vertex_index) vi: u32) -> SkyOut {
+    var pos = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 3.0, -1.0),
+        vec2<f32>(-1.0,  3.0),
+    );
+    var out: SkyOut;
+    out.clip = vec4<f32>(pos[vi], 1.0, 1.0);
+    out.ndc = pos[vi];
+    return out;
+}
+
+// `FrameSky::radiance`, mirrored. Branch-free, exactly as the Rust is — which is
+// what made it portable here unchanged.
+@fragment
+fn fs(in: SkyOut) -> @location(0) vec4<f32> {
+    // Unproject the pixel at two depths and take the difference: the world-space
+    // ray through it, independent of where the camera is.
+    let near = sky.inv_view_proj * vec4<f32>(in.ndc, 0.0, 1.0);
+    let far = sky.inv_view_proj * vec4<f32>(in.ndc, 1.0, 1.0);
+    let dir = normalize(far.xyz / far.w - near.xyz / near.w);
+
+    // The vertical gradient, smoothstepped so the horizon band is soft rather
+    // than a seam. Below the horizon it holds the horizon colour: there is no
+    // ground hemisphere here, because the ground is geometry.
+    let up = clamp(dir.y, 0.0, 1.0);
+    let blend = up * up * (3.0 - 2.0 * up);
+    let gradient = sky.horizon.rgb * (1.0 - blend) + sky.zenith.rgb * blend;
+
+    let cos_angle = dot(dir, sky.body.xyz);
+    // The disc: a smooth step across the limb so the edge does not alias, sized
+    // as a fraction of the radius so a bigger body gets a proportionally softer
+    // edge.
+    let limb = max(sky.body.w, 1.0e-4);
+    let inner = cos(limb * 0.75);
+    let outer = cos(limb);
+    let span = max(abs(inner - outer), 1.1920929e-7);
+    let disc = clamp((cos_angle - outer) / span, 0.0, 1.0);
+    // The halo: the angular cosine raised to a power, so it falls off around the
+    // body without a second radius to keep in sync.
+    let halo = pow(max(cos_angle, 0.0), max(sky.body_color.w, 1.0)) * sky.halo.x;
+
+    return vec4<f32>(gradient + sky.body_color.rgb * (disc + halo), 1.0);
+}
+"#;
+
+/// The sky uniform's size in bytes: a `mat4x4` (64) plus five `vec4`s (80).
+const SKY_UBO_BYTES: u64 = 64 + 5 * 16;
+
+/// The fullscreen sky pass: its pipeline and the uniform it reads.
+///
+/// Held as a whole rather than as loose fields so "the look carries no sky" is
+/// one `Option`, and a frame without one keeps the flat clear colour with no
+/// pipeline built and no pass recorded.
+#[derive(Debug)]
+struct SkyPass {
+    pipeline: wgpu::RenderPipeline,
+    uniform: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    sky: axiom_host::FrameSky,
+}
+
+impl SkyPass {
+    /// Build the sky pipeline for a colour target of `format`.
+    ///
+    /// The pipeline declares the main pass's depth format with **writes off and
+    /// an `Always` compare**, so the triangle fills every pixel behind the scene
+    /// and then leaves the depth buffer exactly as it found it — the scene draws
+    /// over it by ordinary depth testing, and nothing is occluded by the sky.
+    /// Declaring the depth state (rather than `None`) is required: it is drawn
+    /// inside the main pass, whose attachments every pipeline in it must match.
+    fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        sky: axiom_host::FrameSky,
+    ) -> SkyPass {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("axiom-sky"),
+            source: wgpu::ShaderSource::Wgsl(SKY_WGSL.into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("axiom-sky-layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("axiom-sky-uniform"),
+            size: SKY_UBO_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("axiom-sky-bind-group"),
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("axiom-sky-pipeline-layout"),
+            bind_group_layouts: &[&layout],
+            push_constant_ranges: &[],
+        });
+        SkyPass {
+            pipeline: device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("axiom-sky-pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs"),
+                    targets: &[Some(format.into())],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            }),
+            uniform,
+            bind_group,
+            sky,
+        }
+    }
+}
+
+/// The camera's world position, recovered from the frame's view-projection alone.
+///
+/// The specular term is view-dependent, so the fragment stage needs the eye — but
+/// no caller supplies one: the packet carries matrices, and every existing render
+/// path was built around a shading model that never asked. Rather than widen that
+/// contract all the way out to the apps, the eye is derived here from what the
+/// frame already carries.
+///
+/// It is **not** the fourth column of the inverse, which is the tempting
+/// one-liner and is wrong: that unprojects to a point on the centre ray at the
+/// *near plane*, off by the near distance (measurably — it lands ~0.13 units out
+/// on a 0.1-near camera). The eye is where every view ray converges, which is
+/// exactly where clip `w` vanishes, so this unprojects the centre ray and
+/// intersects it with the `w = 0` plane. That is exact for any perspective
+/// projection and needs no knowledge of the fov, aspect, or near/far.
+///
+/// A degenerate or orthographic view-projection has no such convergence point
+/// (`w` is constant, so the intersection divides by zero). The fallback is the
+/// world origin: a wrong highlight direction, never a NaN that would poison every
+/// lit pixel in the frame.
+fn camera_eye(camera_view_proj: [f32; 16]) -> [f32; 3] {
+    let m = camera_view_proj;
+    axiom_math::Mat4::from_cols_array(m)
+        .inverse()
+        .map(|inv| {
+            let unproject = |z: f32| {
+                let p = inv.transform_vec4(axiom_math::Vec4::new(0.0, 0.0, z, 1.0));
+                [p.x / p.w, p.y / p.w, p.z / p.w]
+            };
+            let near = unproject(0.0);
+            let far = unproject(1.0);
+            let dir = [0, 1, 2].map(|c| far[c] - near[c]);
+            // clip.w as an affine function of world position: the eye is its root.
+            let w_at = |p: [f32; 3]| m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+            let w_near = w_at(near);
+            let w_slope = m[3] * dir[0] + m[7] * dir[1] + m[11] * dir[2];
+            let t = -w_near / w_slope;
+            let eye = [0, 1, 2].map(|c| near[c] + t * dir[c]);
+            [0, 1, 2]
+                .map(|c| [0.0, eye[c]][usize::from(eye[c].is_finite())])
+        })
+        .unwrap_or([0.0; 3])
+}
+
+/// Pack a [`axiom_host::FrameSky`] plus the camera's inverse view-projection
+/// into the std140 layout `SkyU` describes.
+///
+/// A camera matrix that cannot be inverted (a degenerate projection) falls back
+/// to the identity, which yields a usable — if wrong — ray rather than a NaN
+/// that would poison every pixel of the frame. This is the same defensive
+/// posture `FrameSky::normalize_or` takes on the Rust side.
+fn pack_sky(sky: &axiom_host::FrameSky, camera_view_proj: [f32; 16]) -> Vec<u8> {
+    let inv = axiom_math::Mat4::from_cols_array(camera_view_proj)
+        .inverse()
+        .unwrap_or(axiom_math::Mat4::IDENTITY)
+        .as_cols_array();
+    let dir = sky.body_direction();
+    let (zenith, horizon, color) = (sky.zenith(), sky.horizon(), sky.body_color());
+    let mut bytes = Vec::with_capacity(SKY_UBO_BYTES as usize);
+    inv.iter()
+        .chain(
+            [
+                zenith[0],
+                zenith[1],
+                zenith[2],
+                0.0,
+                horizon[0],
+                horizon[1],
+                horizon[2],
+                0.0,
+                dir[0],
+                dir[1],
+                dir[2],
+                sky.body_angular_radius().get(),
+                color[0],
+                color[1],
+                color[2],
+                sky.halo_falloff().get(),
+                sky.halo_strength().get(),
+                0.0,
+                0.0,
+                0.0,
+            ]
+            .iter(),
+        )
+        .for_each(|f| bytes.extend_from_slice(&f.to_le_bytes()));
+    bytes
+}
 
 /// WGSL for the shadow depth pre-pass: project each instance through the light
 /// view-projection and the per-instance world matrix; depth-only, no fragment
@@ -349,6 +666,9 @@ struct Lights {
     // w = maximum mix fraction; `fog_range.xy` = start / full-density NDC depth.
     fog_color: vec4<f32>,
     fog_range: vec4<f32>,
+    // Layout parity with the mesh pass's `camera` lane (unread here — the SDF
+    // pass has its own camera in `SdfU`, but the shared buffer must still match).
+    camera: vec4<f32>,
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
@@ -542,10 +862,11 @@ pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth3
 const MAX_LIGHTS: usize = 16;
 /// Lighting uniform size in bytes: an 80-byte header (count + caps + padding, the
 /// hemisphere-ambient `sky` + `ground` `vec4`s, then the depth-fog `fog_color` +
-/// `fog_range` `vec4`s) plus `MAX_LIGHTS` × two `vec4`s (32 bytes each) —
+/// `fog_range` `vec4`s, then the `camera` `vec4`) plus `MAX_LIGHTS` × two `vec4`s
+/// (32 bytes each) —
 /// std140-compatible. Both WGSL `Lights` declarations (the mesh pass and the SDF
 /// pass, which bind the same buffer) must match this layout.
-const LIGHTS_UBO_BYTES: u64 = 80 + (MAX_LIGHTS as u64) * 32;
+const LIGHTS_UBO_BYTES: u64 = 96 + (MAX_LIGHTS as u64) * 32;
 /// Maximum SDF primitives uploaded per frame (must match the WGSL
 /// `array<SdfPrim, 16>`). Primitives beyond this are dropped, the same honesty
 /// the lights path uses — see [`pack_sdf`].
@@ -612,12 +933,16 @@ pub(crate) struct SceneRenderer {
     sdf_uniform_buffer: wgpu::Buffer,
     /// Group 0 of the SDF pass: the SDF uniform.
     sdf_bind_group: wgpu::BindGroup,
-    /// The frame's hemisphere ambient, packed into the lights uniform each draw.
-    ambient: axiom_host::FrameAmbient,
-    /// The frame's atmospheric depth fog, packed into the lights uniform each draw.
-    /// Bound alongside `ambient` (the app's authored render-look), so the two travel
-    /// together; `FrameDepthFog::none` is the no-fog value and an exact no-op.
-    depth_fog: axiom_host::FrameDepthFog,
+    /// The app's authored render look, captured at bind. Its hemisphere ambient and
+    /// depth fog are packed into the lights uniform each draw; its sky drives the
+    /// sky pass below. Bind-time rather than per-frame because that is what the
+    /// uniform layout is built around — changing the look mid-run does not move
+    /// pixels without a rebind, which is the same contract the ambient always had.
+    look: axiom_host::FrameRenderLook,
+    /// The fullscreen sky pass, drawn behind the scene. Present only when the
+    /// look carries a sky; without one the frame keeps its flat clear colour and
+    /// no pipeline is built, so an app that authors no sky is unchanged.
+    sky: Option<SkyPass>,
     /// The linear-blend-skinning resources, when the device can support them.
     /// [`None`] on a device without vertex-stage storage buffers — see [`Skinning`].
     skinning: Option<Skinning>,
@@ -769,8 +1094,7 @@ impl SceneRenderer {
         normals: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
-        ambient: axiom_host::FrameAmbient,
-        depth_fog: axiom_host::FrameDepthFog,
+        look: axiom_host::FrameRenderLook,
     ) -> SceneRenderer {
         let max_instances = max_instances.max(1);
         // The shadow-atlas edge length is the device tier's choice
@@ -1031,8 +1355,11 @@ impl SceneRenderer {
             sdf_pipeline,
             sdf_uniform_buffer,
             sdf_bind_group,
-            ambient,
-            depth_fog,
+            // The sky pipeline, built only when the app authored a sky.
+            sky: look
+                .sky()
+                .map(|sky| SkyPass::new(device, format, sky)),
+            look,
             skinning,
         }
     }
@@ -1059,6 +1386,10 @@ impl SceneRenderer {
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
         caps: u32,
+        // The frame's camera view-projection. Only the sky pass reads it (to
+        // recover each pixel's world ray); the mesh pass gets its transforms
+        // pre-multiplied per instance.
+        camera_view_proj: [f32; 16],
     ) {
         // Gate the SDF raymarch pass on the frame's Sdf capability bit; a profile that
         // drops SDF renders meshes only (the same policy the Canvas 2D backend applies).
@@ -1066,13 +1397,37 @@ impl SceneRenderer {
         queue.write_buffer(
             &self.lights_buffer,
             0,
-            &pack_lights(lights, self.ambient, self.depth_fog, caps),
+            &pack_lights(
+                lights,
+                self.look.ambient(),
+                // An unauthored fog packs as zero strength, an exact no-op in the
+                // shader — so a look with no fog renders as one from before fog.
+                self.look
+                    .depth_fog()
+                    .unwrap_or_else(axiom_host::FrameDepthFog::none),
+                caps,
+                camera_view_proj,
+            ),
         );
         queue.write_buffer(
             &self.light_vp_buffer,
             0,
             bytemuck::cast_slice(&light_view_proj),
         );
+        // The sky this frame actually draws: present only when the look carried
+        // one AND the frame's profile attempts the Sky capability. Resolved ONCE
+        // here and used for both the uniform write and the draw — gating only the
+        // write would leave a dropped-capability frame drawing a stale (or zeroed)
+        // uniform over its clear colour, which is a black screen, not a degrade.
+        let sky = self
+            .sky
+            .as_ref()
+            .filter(|_| (caps & (axiom_host::RenderCapability::Sky as u32)) != 0);
+        // Rewritten each frame: the sky's own parameters are fixed at bind, but
+        // the camera moves, so the ray reconstruction does not.
+        sky.into_iter().for_each(|s| {
+            queue.write_buffer(&s.uniform, 0, &pack_sky(&s.sky, camera_view_proj));
+        });
         // Upload the SDF uniform on frames that carry a scene (zero-or-one, via the
         // Option iterator — no `if`).
         sdf.into_iter()
@@ -1189,6 +1544,16 @@ impl SceneRenderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            // The sky first, filling every pixel behind the scene. It writes no
+            // depth and compares `Always`, so it neither occludes the geometry
+            // drawn after it nor disturbs the depth buffer they test against —
+            // the clear colour is simply replaced by a real sky. A look with no
+            // sky records nothing here and the clear stands, exactly as before.
+            if let Some(sky) = sky {
+                pass.set_pipeline(&sky.pipeline);
+                pass.set_bind_group(0, &sky.bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(1, &self.lights_bind_group, &[]);
             pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
@@ -1830,6 +2195,7 @@ fn pack_lights(
     ambient: axiom_host::FrameAmbient,
     depth_fog: axiom_host::FrameDepthFog,
     caps: u32,
+    camera_view_proj: [f32; 16],
 ) -> Vec<u8> {
     let count = lights.len().min(MAX_LIGHTS);
     let mut bytes = Vec::with_capacity(LIGHTS_UBO_BYTES as usize);
@@ -1840,6 +2206,7 @@ fn pack_lights(
     bytes.extend_from_slice(&[0u8; 8]);
     let (sky, ground) = (ambient.sky(), ambient.ground());
     let fog = depth_fog.color();
+    let eye = camera_eye(camera_view_proj);
     [
         sky[0],
         sky[1],
@@ -1856,6 +2223,10 @@ fn pack_lights(
         depth_fog.near().get(),
         depth_fog.far().get(),
         0.0,
+        0.0,
+        eye[0],
+        eye[1],
+        eye[2],
         0.0,
     ]
     .iter()

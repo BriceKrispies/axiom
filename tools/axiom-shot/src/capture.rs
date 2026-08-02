@@ -87,17 +87,20 @@ pub fn render_gpu(
         &[],
         &lights,
         outcome.light_view_proj(),
+        // The camera the sky pass reconstructs each pixel's world ray from.
+        outcome.camera_view_proj(),
         &batches,
         skinned_mesh_set,
         &skinned_draws,
         outcome.clear_color(),
         outcome.sdf_scene(),
-        // The app authors the frame's hemisphere ambient; honour it instead of
-        // forcing the dim engine default so the screenshot matches what the app lit.
-        outcome.ambient(),
-        // ...and the frame's authored atmosphere, for the same reason: an unfogged
-        // capture of a fogged scene is not the scene the app authored.
-        outcome.depth_fog().unwrap_or_else(axiom_host::FrameDepthFog::none),
+        // The app's whole authored render look — the hemisphere ambient it lit the
+        // scene with, the atmosphere it recedes into, the sky behind it, and the
+        // bloom its lights glow through. Honoured rather than replaced with engine
+        // defaults, because a capture that drops any of them is not the frame the
+        // app authored: an unfogged capture of a fogged scene, or an unbloomed one
+        // of a scene whose lights are meant to glow, is a different picture.
+        look_of(outcome),
         retro_32bit,
         // Full-fidelity reference render; volumetrics/post-process aren't carried
         // on the FrameOutcome here.
@@ -107,6 +110,22 @@ pub fn render_gpu(
     )
     .expect("a native GPU adapter is required to render a GPU screenshot");
     (pixels, w, h)
+}
+
+/// The frame's authored render look, assembled from the parts the outcome
+/// carries. An unauthored part is left unset rather than filled with a
+/// placeholder, so it stays that part's exact no-op in the backend.
+fn look_of(outcome: &FrameOutcome) -> axiom_host::FrameRenderLook {
+    let look = axiom_host::FrameRenderLook::lit_by(outcome.ambient());
+    let look = outcome
+        .depth_fog()
+        .into_iter()
+        .fold(look, |l, fog| l.with_depth_fog(fog));
+    let look = outcome.sky().into_iter().fold(look, |l, s| l.with_sky(s));
+    outcome
+        .bloom()
+        .into_iter()
+        .fold(look, |l, b| l.with_bloom(b))
 }
 
 /// Render a ticked frame through the software Canvas 2D backend (the same
@@ -148,8 +167,9 @@ pub fn render_canvas2d(
 
 /// Reconstruct the backend-neutral frame packet from the per-`(mesh, material)`
 /// instance batches, exactly as `axiom-windowing` does for its Canvas arm: each
-/// 40-float instance is `mvp(16) | world(16) | colour(4) | emissive(3)+pad(1)`,
-/// object ids assigned in draw order.
+/// 40-float instance is `mvp(16) | world(16) | colour(4) | emissive(3)+specular(1)`,
+/// object ids assigned in draw order. The look's sky and bloom ride along too,
+/// so a Canvas 2D capture reports the same drops the live software arm does.
 pub fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
     let batches = outcome.mesh_batches();
     // The caster flags align with the `mesh_batches` instance expansion order.
@@ -163,6 +183,7 @@ pub fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
             let world: [f32; 16] = floats[off + 16..off + 32].try_into().unwrap_or([0.0; 16]);
             let color: [f32; 4] = floats[off + 32..off + 36].try_into().unwrap_or([1.0; 4]);
             let emissive: [f32; 3] = floats[off + 36..off + 39].try_into().unwrap_or([0.0; 3]);
+            let specular = floats.get(off + 39).copied().unwrap_or(0.0);
             let casts = casters.get(object_id as usize).copied().unwrap_or(false);
             draws.push(
                 FrameDrawItem::new(
@@ -174,7 +195,8 @@ pub fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
                     color,
                     casts,
                 )
-                .with_emissive(emissive),
+                .with_emissive(emissive)
+                .with_specular(Ratio::finite_or_zero(specular)),
             );
             object_id += 1;
         }
@@ -223,8 +245,21 @@ pub fn frame_packet(outcome: &FrameOutcome, w: u32, h: u32) -> FramePacket {
     };
     // Attach the frame's SDF scene (if any) so the Canvas2D backend marches and
     // composites the raymarched shapes against the rasterized meshes.
-    match outcome.sdf_scene() {
+    let packet = match outcome.sdf_scene() {
         Some(scene) => packet.with_sdf(scene.clone()),
+        None => packet,
+    };
+    // ...and the sky and bloom. The software rasterizer realizes neither — it
+    // clears to a flat colour and has no render targets to bloom through — but it
+    // reports both as dropped, and it can only do that if the packet says they
+    // were asked for. Carrying them is what makes "skip it for canvas2d" a
+    // declared degradation rather than a silent omission.
+    let packet = match outcome.sky() {
+        Some(sky) => packet.with_sky(sky),
+        None => packet,
+    };
+    match outcome.bloom() {
+        Some(bloom) => packet.with_bloom(bloom),
         None => packet,
     }
 }

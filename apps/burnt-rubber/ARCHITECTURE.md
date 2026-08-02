@@ -584,14 +584,25 @@ player is looking at. The near plane is the end of the ratio worth moving (the
 camera never holds less than 6.5 m of car), and the far plane should reach the
 furthest drawn chunk and stop.
 
-### `Material::with_emissive` never reaches the GPU
+### Emissive and roughness both reach the GPU now
 
-Emissive is carried from the umbrella down through `axiom-render`'s
-`RenderMaterial` — and stops there. The backend never reads it and `DrawData`
-exposes only `color()`, so on the live path an emissive term contributes
-nothing. Every material here that is meant to glow therefore carries its
-brightness in `base_color`; the emissive is kept only as a declaration of intent
-for a backend that grows support. See the note in `render/palette.rs`.
+This section used to read "`Material::with_emissive` never reaches the GPU",
+and that has not been true since `045cbbdf`. Emissive is carried as its own
+per-draw term all the way to the fragment stage, added after every light term
+and before fog, so a lamp reads as lit at any angle and in shadow. The current
+truth is `render/palette.rs:16-45` and its tests.
+
+`roughness` was the same kind of dead knob for longer, and is no longer: the
+render pipeline turns it into a per-draw specular strength (`1 - roughness`)
+that rides the instance payload's fourth emissive lane, and the shader spends it
+on a Blinn-Phong highlight. That is what puts the moon's streak on the tarmac
+and the sheen on the car's clear-coat. A material that authors no roughness is
+fully matte, which is an exact no-op — so this changed nothing for any app that
+had not set it.
+
+Both are gated by the backend's capability profile
+(`RenderCapability::Specular`), and the Canvas 2D arm declares the drop rather
+than silently ignoring it.
 
 ---
 

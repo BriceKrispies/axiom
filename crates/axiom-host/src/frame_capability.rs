@@ -43,6 +43,24 @@ pub enum RenderCapability {
     /// The retro 32-bit console render profile (colour-depth quantize + ordered
     /// dither on the finished frame; low-res + nearest + vertex snap upstream).
     Retro32Bit = 1 << 7,
+    /// A gradient sky with a celestial body in it, evaluated per pixel behind the
+    /// scene ([`crate::FrameSky`]) instead of a flat clear colour.
+    Sky = 1 << 8,
+    /// A specular highlight term on lit materials — the second half of "this
+    /// surface is being lit by something", which a Lambert-only shade cannot
+    /// express however carefully its light values are tuned.
+    Specular = 1 << 9,
+    /// Bloom: bright pixels spilling into their neighbours through a blurred
+    /// bright pass ([`crate::FrameBloom`]).
+    ///
+    /// Deliberately **not** folded into [`Self::PostProcess`]. That capability is
+    /// the whole-image colour grade, which the Canvas 2D backend genuinely
+    /// performs (a CPU loop over the finished framebuffer). Bloom is a different
+    /// thing with a different cost: a bright pass and two blur passes through
+    /// extra render targets, which the software rasterizer does not have. One bit
+    /// covering both would force a backend that does one and not the other to
+    /// either lie or drop the one it can do.
+    Bloom = 1 << 10,
 }
 
 /// How a backend that lacks a [`RenderCapability`] degrades it. A capability is
@@ -80,7 +98,10 @@ const ALL_CAPABILITY_BITS: u32 = RenderCapability::Textures as u32
     | RenderCapability::Sdf as u32
     | RenderCapability::Volumetrics as u32
     | RenderCapability::PostProcess as u32
-    | RenderCapability::Retro32Bit as u32;
+    | RenderCapability::Retro32Bit as u32
+    | RenderCapability::Sky as u32
+    | RenderCapability::Specular as u32
+    | RenderCapability::Bloom as u32;
 
 /// The set of render capabilities a backend will attempt. The hardware GPU backends
 /// use [`Self::all`]; the Canvas 2D software backend uses [`Self::canvas2d`]. Restrict
@@ -114,12 +135,25 @@ impl BackendCapabilityProfile {
     /// and the neutral CPU post effects (volumetrics, post-process, retro). This is
     /// the profile the live Canvas 2D backend defaults to, so it degrades from the
     /// one full-richness frame instead of being handed a lesser scene.
+    ///
+    /// It also drops the three **shader-and-render-target** capabilities the
+    /// software path has no answer for: [`RenderCapability::Sky`] (a per-pixel
+    /// radiance evaluation behind the whole scene — the flat rasterizer clears to
+    /// one colour), [`RenderCapability::Specular`] (its shading is per-triangle
+    /// and view-independent, so there is no fragment normal to catch a highlight
+    /// with), and [`RenderCapability::Bloom`] (a bright pass plus two blur passes
+    /// through extra render targets). Each is a *declared, reported* drop — the
+    /// frame still carries all three, and the Canvas 2D report enumerates what it
+    /// could not honour.
     pub const fn canvas2d() -> Self {
         Self::all()
             .without(RenderCapability::Textures)
             .without(RenderCapability::AlphaMask)
             .without(RenderCapability::NormalMapping)
             .without(RenderCapability::Shadows)
+            .without(RenderCapability::Sky)
+            .without(RenderCapability::Specular)
+            .without(RenderCapability::Bloom)
     }
 
     /// Whether this profile will attempt `cap`.
@@ -154,7 +188,7 @@ impl BackendCapabilityProfile {
 mod tests {
     use super::*;
 
-    const CAPS: [RenderCapability; 8] = [
+    const CAPS: [RenderCapability; 11] = [
         RenderCapability::Textures,
         RenderCapability::AlphaMask,
         RenderCapability::NormalMapping,
@@ -163,6 +197,9 @@ mod tests {
         RenderCapability::Volumetrics,
         RenderCapability::PostProcess,
         RenderCapability::Retro32Bit,
+        RenderCapability::Sky,
+        RenderCapability::Specular,
+        RenderCapability::Bloom,
     ];
 
     #[test]
@@ -175,7 +212,7 @@ mod tests {
         });
         assert_ne!(all, none);
         assert_eq!(none.bits(), 0);
-        assert_eq!(all.bits(), 0b1111_1111);
+        assert_eq!(all.bits(), 0b111_1111_1111);
         assert!(format!("{all:?}").contains("BackendCapabilityProfile"));
         assert!(format!("{:?}", RenderCapability::Textures).contains("Textures"));
     }
@@ -207,7 +244,14 @@ mod tests {
         assert!(!c.contains(RenderCapability::AlphaMask));
         assert!(!c.contains(RenderCapability::NormalMapping));
         assert!(!c.contains(RenderCapability::Shadows));
-        // It still runs the CPU SDF march and the neutral CPU post effects.
+        // Nor can it evaluate a per-pixel sky, catch a view-dependent highlight,
+        // or afford the bloom chain's extra render targets.
+        assert!(!c.contains(RenderCapability::Sky));
+        assert!(!c.contains(RenderCapability::Specular));
+        assert!(!c.contains(RenderCapability::Bloom));
+        // It still runs the CPU SDF march and the neutral CPU post effects. In
+        // particular the whole-image colour grade survives: `PostProcess` is the
+        // grade, not the bloom, which is exactly why they are separate bits.
         assert!(c.contains(RenderCapability::Sdf));
         assert!(c.contains(RenderCapability::Volumetrics));
         assert!(c.contains(RenderCapability::PostProcess));
@@ -246,5 +290,14 @@ mod tests {
         assert_eq!(RenderCapability::Volumetrics as u32, 32);
         assert_eq!(RenderCapability::PostProcess as u32, 64);
         assert_eq!(RenderCapability::Retro32Bit as u32, 128);
+        assert_eq!(RenderCapability::Sky as u32, 256);
+        assert_eq!(RenderCapability::Specular as u32, 512);
+        assert_eq!(RenderCapability::Bloom as u32, 1024);
+        // Every bit is distinct: the OR of all of them has as many set bits as
+        // there are capabilities, which a duplicated discriminant would break.
+        assert_eq!(
+            BackendCapabilityProfile::all().bits().count_ones() as usize,
+            CAPS.len()
+        );
     }
 }

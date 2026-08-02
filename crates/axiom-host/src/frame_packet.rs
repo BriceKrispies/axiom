@@ -135,6 +135,18 @@ impl FrameLight {
 /// packet is the one place both backends read a draw's shading terms from, so
 /// it belongs on the draw item beside `color` rather than being re-derived per
 /// backend.
+///
+/// **Why specular lives here too, and why it is one number.** A Lambert-only
+/// surface cannot catch a highlight, so no amount of light tuning makes it read
+/// as lit *by* something rather than merely bright — which is the third shading
+/// term, alongside reflectance and self-illumination, and belongs in the same
+/// place as those. It is a single strength rather than a strength *and* a gloss
+/// exponent because the instance payload has exactly one free lane (the pad in
+/// the emissive `vec4`); a second per-material lane would widen the instance
+/// stride, which is a contract shared with the other packer. The engine
+/// therefore has one gloss profile and materials differ in *how much* they
+/// catch it, which is the axis that actually separates tarmac from paint from
+/// chrome.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameDrawItem {
     object_id: u64,
@@ -144,6 +156,7 @@ pub struct FrameDrawItem {
     mvp: [f32; 16],
     color: [f32; 4],
     emissive: [f32; 3],
+    specular: axiom_kernel::Ratio,
     casts_contact_shadow: bool,
 }
 
@@ -169,6 +182,7 @@ impl FrameDrawItem {
             mvp,
             color,
             emissive: [0.0; 3],
+            specular: axiom_kernel::Ratio::finite_or_zero(0.0),
             casts_contact_shadow,
         }
     }
@@ -178,6 +192,15 @@ impl FrameDrawItem {
     /// default) is an exact no-op, so a non-emissive draw renders unchanged.
     pub const fn with_emissive(mut self, emissive: [f32; 3]) -> Self {
         self.emissive = emissive;
+        self
+    }
+
+    /// This draw item with the material's **specular strength** — how strongly
+    /// the surface catches a view-dependent highlight from the frame's lights.
+    /// Zero (the default) is an exact no-op, so a matte draw renders unchanged.
+    /// Gated by [`crate::RenderCapability::Specular`].
+    pub const fn with_specular(mut self, specular: axiom_kernel::Ratio) -> Self {
+        self.specular = specular;
         self
     }
 
@@ -215,6 +238,12 @@ impl FrameDrawItem {
     /// its shaded colour, independent of any light. `[0, 0, 0]` = not emissive.
     pub const fn emissive(&self) -> [f32; 3] {
         self.emissive
+    }
+
+    /// How strongly this surface catches a view-dependent specular highlight.
+    /// Zero = matte.
+    pub const fn specular(&self) -> axiom_kernel::Ratio {
+        self.specular
     }
 
     /// Whether this draw is a discrete, dynamic object the scene marked as a
@@ -296,6 +325,8 @@ pub struct FramePacket {
     ambient: Option<crate::frame_ambient::FrameAmbient>,
     depth_fog: Option<crate::frame_depth_fog::FrameDepthFog>,
     postprocess: Option<crate::frame_postprocess::FramePostProcess>,
+    sky: Option<crate::frame_sky::FrameSky>,
+    bloom: Option<crate::frame_bloom::FrameBloom>,
     retro_32bit: Option<crate::frame_retro_32bit::FrameRetro32BitProfile>,
 }
 
@@ -330,6 +361,8 @@ impl FramePacket {
             ambient: None,
             depth_fog: None,
             postprocess: None,
+            sky: None,
+            bloom: None,
             retro_32bit: None,
         }
     }
@@ -376,6 +409,33 @@ impl FramePacket {
     pub fn with_ambient(mut self, ambient: crate::frame_ambient::FrameAmbient) -> Self {
         self.ambient = Some(ambient);
         self
+    }
+
+    /// Attach a sky to this frame. Neutral frame data: the sky's *definition* is
+    /// [`crate::FrameSky::radiance`], so a backend either evaluates that same
+    /// arithmetic or declares [`crate::RenderCapability::Sky`] dropped. A frame
+    /// with no sky keeps its flat clear colour, unchanged.
+    pub fn with_sky(mut self, sky: crate::frame_sky::FrameSky) -> Self {
+        self.sky = Some(sky);
+        self
+    }
+
+    /// The frame's sky, or `None` when the frame is cleared to a flat colour.
+    pub const fn sky(&self) -> Option<&crate::frame_sky::FrameSky> {
+        self.sky.as_ref()
+    }
+
+    /// Attach bloom to this frame. Neutral frame data, gated by
+    /// [`crate::RenderCapability::PostProcess`]: a backend that cannot afford the
+    /// extra render targets declares the drop rather than ignoring it.
+    pub fn with_bloom(mut self, bloom: crate::frame_bloom::FrameBloom) -> Self {
+        self.bloom = Some(bloom);
+        self
+    }
+
+    /// The frame's bloom, or `None` when highlights are left to clip.
+    pub const fn bloom(&self) -> Option<&crate::frame_bloom::FrameBloom> {
+        self.bloom.as_ref()
     }
 
     /// The frame's hemisphere ambient, or `None` when the frame carries none (the
@@ -485,6 +545,18 @@ impl FramePacket {
     pub const fn features(&self) -> FrameFeatureSet {
         self.features
     }
+
+    /// Whether any draw in this frame authored a non-zero specular strength.
+    ///
+    /// Derived from the draws rather than carried as a [`FrameFeatureSet`] flag,
+    /// because it is already recorded per draw and a second, separately-authored
+    /// copy could disagree with them — a backend would then report a drop for a
+    /// frame with no highlights in it, or stay silent about one that had them.
+    /// This is what a backend without [`crate::RenderCapability::Specular`]
+    /// consults to decide whether it has something to declare.
+    pub fn uses_specular(&self) -> bool {
+        self.draws.iter().any(|d| d.specular().get() != 0.0)
+    }
 }
 
 #[cfg(test)]
@@ -547,6 +619,14 @@ mod tests {
         assert_eq!(e.emissive(), [4.0, 0.5, 0.25]);
         assert_eq!(e.color(), d.color());
         assert_ne!(e, d);
+        // Same for specular: a plain draw is matte, and adding a highlight
+        // strength disturbs nothing else.
+        assert_eq!(d.specular().get(), 0.0);
+        let s = d.with_specular(axiom_kernel::Ratio::finite_or_zero(0.8));
+        assert_eq!(s.specular().get(), 0.8);
+        assert_eq!(s.emissive(), d.emissive());
+        assert_eq!(s.color(), d.color());
+        assert_ne!(s, d);
         assert!(d.casts_contact_shadow());
         assert_ne!(
             d,
@@ -616,6 +696,45 @@ mod tests {
         assert_eq!(p.features(), FrameFeatureSet::new(false, true, 1, 0));
         assert!(p.sdf().is_none());
         assert!(format!("{p:?}").contains("FramePacket"));
+    }
+
+    /// A backend without the Specular capability decides whether it has a drop
+    /// to declare by asking the packet — so the answer has to follow the draws.
+    #[test]
+    fn uses_specular_follows_the_draws() {
+        let matte = sample_packet();
+        assert!(!matte.uses_specular(), "every draw is matte");
+
+        let shiny = FramePacket::new(
+            4,
+            240,
+            FrameViewport::new(800, 600),
+            [0.0; 4],
+            None,
+            vec![
+                FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [1.0; 4], false),
+                FrameDrawItem::new(8, 11, 13, mat(9.0), mat(5.0), [1.0; 4], false)
+                    .with_specular(axiom_kernel::Ratio::finite_or_zero(0.4)),
+            ],
+            Vec::new(),
+            mat(7.0),
+            FrameFeatureSet::new(false, false, 0, 0),
+        );
+        assert!(shiny.uses_specular(), "one shiny draw among matte ones counts");
+
+        // An empty frame asks for nothing, so there is nothing to report.
+        let empty = FramePacket::new(
+            0,
+            0,
+            FrameViewport::new(1, 1),
+            [0.0; 4],
+            None,
+            Vec::new(),
+            Vec::new(),
+            mat(0.0),
+            FrameFeatureSet::new(false, false, 0, 0),
+        );
+        assert!(!empty.uses_specular());
     }
 
     #[test]

@@ -28,13 +28,15 @@ pub(crate) fn render_to_rgba(
     normals: &[(u64, u32, u32, Vec<u8>)],
     lights: &[(u32, [f32; 3], [f32; 3], f32)],
     light_view_proj: [f32; 16],
+    // The camera view-projection, read only by the sky pass (to recover each
+    // pixel's world ray).
+    camera_view_proj: [f32; 16],
     batches: &[(u64, u64, Vec<f32>, u32)],
     skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
     skinned: &[crate::scene_renderer::SkinnedGpuDraw],
     clear: [f32; 4],
     sdf: Option<&axiom_host::SdfScene>,
-    ambient: axiom_host::FrameAmbient,
-    depth_fog: axiom_host::FrameDepthFog,
+    look: axiom_host::FrameRenderLook,
     retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
     profile: axiom_host::BackendCapabilityProfile,
     volumetrics: Option<axiom_host::FrameVolumetrics>,
@@ -79,7 +81,10 @@ pub(crate) fn render_to_rgba(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: COLOR_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        // `TEXTURE_BINDING` so the post chain can sample the finished scene.
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
     let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -99,8 +104,7 @@ pub(crate) fn render_to_rgba(
         normals,
         max_instances,
         shadow_size,
-        ambient,
-        depth_fog,
+        look,
     );
 
     // A retro 32-bit profile renders the scene into a small internal target and then a
@@ -121,6 +125,7 @@ pub(crate) fn render_to_rgba(
                 clear,
                 sdf,
                 caps,
+                camera_view_proj,
             );
         }
         Some((iw, ih)) => {
@@ -153,6 +158,7 @@ pub(crate) fn render_to_rgba(
                 clear,
                 sdf,
                 caps,
+                camera_view_proj,
             );
             let blit = UpscaleBlit::new(
                 &device,
@@ -168,6 +174,49 @@ pub(crate) fn render_to_rgba(
         }
     }
 
+    // The GPU post chain (bloom), when the frame asks for it and the profile
+    // allows it. Run into a *second* texture and read that back instead.
+    //
+    // Skipped entirely otherwise, rather than run with a zero intensity: the
+    // composite would be a sample-and-write round trip through an 8-bit sRGB
+    // texture, which is not guaranteed bit-exact, and every existing capture in
+    // the repo is compared byte-for-byte. A frame that authors no bloom must
+    // still produce exactly the pixels it did before this pass existed.
+    let bloomed = look
+        .bloom()
+        .filter(|_| profile.contains(axiom_host::RenderCapability::Bloom))
+        .map(|bloom| {
+            let post_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("axiom-offscreen-post"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: COLOR_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let post_view = post_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let chain = crate::post_chain::PostChain::new(
+                &device,
+                COLOR_FORMAT,
+                COLOR_FORMAT,
+                &color_view,
+                (width, height),
+            );
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("axiom-offscreen-post"),
+            });
+            chain.record(&queue, &mut encoder, &post_view, Some(&bloom));
+            queue.submit(std::iter::once(encoder.finish()));
+            post_texture
+        });
+    let readback_source = bloomed.as_ref().unwrap_or(&color_texture);
+
     // Read the colour texture back through a row-aligned staging buffer.
     let unpadded_row = width * 4;
     let padded_row = unpadded_row.div_ceil(ROW_ALIGN) * ROW_ALIGN;
@@ -182,7 +231,7 @@ pub(crate) fn render_to_rgba(
     });
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: &color_texture,
+            texture: readback_source,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,

@@ -34,8 +34,18 @@ pub struct LiveGpuBinding {
     intermediate_view: wgpu::TextureView,
     /// The depth buffer for the scene pass, sized to the intermediate target.
     depth_view: wgpu::TextureView,
-    /// Presents `intermediate_view` to the swapchain with a linear upscale.
+    /// Presents `intermediate_view` to the swapchain with a linear upscale. Used
+    /// on frames the app authored no bloom for; `post` replaces it otherwise.
     upscale: UpscaleBlit,
+    /// The bloom chain, present only when the app's render look authored bloom.
+    /// Its composite is itself a fullscreen triangle sampling `intermediate_view`
+    /// with a linear filter, so it upscales for free and stands in for
+    /// `upscale` rather than running after it.
+    post: Option<crate::post_chain::PostChain>,
+    /// The authored bloom parameters `post` is recorded with. Held beside the
+    /// chain because the chain owns pipelines and targets (which are sized at
+    /// bind) while these are the per-record tunables.
+    bloom: Option<axiom_host::FrameBloom>,
     renderer: SceneRenderer,
     /// The 2D quad renderer (SPEC-04), the same `Draw2dRenderer` the off-screen
     /// parity path uses. It is built for the **linear** (non-sRGB) view of the
@@ -107,8 +117,7 @@ impl LiveGpuBinding {
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
-        ambient: axiom_host::FrameAmbient,
-        depth_fog: axiom_host::FrameDepthFog,
+        look: axiom_host::FrameRenderLook,
         preference: Option<axiom_host::BackendKind>,
     ) -> Result<LiveGpuBinding, JsValue> {
         use axiom_host::BackendKind;
@@ -278,14 +287,11 @@ impl LiveGpuBinding {
             &[],
             max_instances,
             shadow_size,
-            // The app-authored hemisphere ambient (daylight for the soccer pitch),
-            // threaded from the run loop through bind so the live render lights unlit
-            // faces the same way the offscreen capture does.
-            ambient,
-            // The app-authored atmospheric depth fog, threaded the same way, so the
-            // live horizon recedes exactly as the Canvas 2D fallback's and the
-            // offscreen capture's do.
-            depth_fog,
+            // The app-authored render look — hemisphere ambient, depth fog, sky —
+            // threaded from the run loop through bind, so the live render lights
+            // unlit faces, recedes its horizon and paints its sky exactly as the
+            // offscreen capture and the Canvas 2D fallback do.
+            look,
         );
 
         // The intermediate colour target the scene renders into (then upscaled to
@@ -313,6 +319,21 @@ impl LiveGpuBinding {
             &intermediate_view,
             wgpu::FilterMode::Nearest,
         );
+        // The bloom chain, built only when the app authored bloom. A look with none
+        // keeps the plain blit: the chain's composite is a fourth fullscreen pass
+        // that would cost every non-blooming app three extra passes a frame to
+        // produce a copy. Built at bind, like the ambient and the fog, because the
+        // pipelines and the half-resolution targets are sized from the surface —
+        // the same contract the rest of the render look already has.
+        let post = look.bloom().map(|_| {
+            crate::post_chain::PostChain::new(
+                &device,
+                format,
+                format,
+                &intermediate_view,
+                (render_width, render_height),
+            )
+        });
 
         // The 2D quad renderer, built for the non-sRGB swapchain view and the full
         // canvas size. Its sprite/atlas textures are uploaded later, once the app
@@ -327,6 +348,9 @@ impl LiveGpuBinding {
             intermediate_view,
             depth_view,
             upscale,
+            post,
+            // The authored bloom parameters the chain is recorded with each frame.
+            bloom: look.bloom(),
             renderer,
             draw2d,
             draw2d_format,
@@ -377,6 +401,8 @@ impl LiveGpuBinding {
         clear: [f32; 4],
         sdf: Option<&axiom_host::SdfScene>,
         caps: u32,
+        // The camera view-projection, read only by the sky pass.
+        camera_view_proj: [f32; 16],
     ) -> Result<(), JsValue> {
         let frame = match self.acquire_texture()? {
             Some(frame) => frame,
@@ -400,6 +426,7 @@ impl LiveGpuBinding {
             clear,
             sdf,
             caps,
+            camera_view_proj,
         );
         // ... then upscale-blit it across the full swapchain view and present.
         let mut encoder = self
@@ -407,7 +434,18 @@ impl LiveGpuBinding {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("axiom-upscale-encoder"),
             });
-        self.upscale.record(&mut encoder, &view);
+        // Bloom, when the app authored it: bright-pass → separable blur →
+        // tonemapped composite, straight into the swapchain view. The composite is
+        // itself a fullscreen triangle sampling the intermediate with a linear
+        // filter, so it upscales for free and replaces the blit rather than
+        // following it. Without bloom the plain blit runs, byte-for-byte as before.
+        let bloomed = self
+            .post
+            .as_ref()
+            .map(|chain| chain.record(&self.queue, &mut encoder, &view, self.bloom.as_ref()));
+        bloomed
+            .is_none()
+            .then(|| self.upscale.record(&mut encoder, &view));
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         Ok(())

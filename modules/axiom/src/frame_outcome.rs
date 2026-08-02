@@ -24,6 +24,7 @@ pub struct DrawData {
     world: [f32; 16],
     color: [f32; 4],
     emissive: [f32; 3],
+    specular: f32,
     mesh_id: u64,
     material_id: u64,
     casts_contact_shadow: bool,
@@ -43,6 +44,7 @@ impl DrawData {
             world,
             color,
             emissive: [0.0; 3],
+            specular: 0.0,
             mesh_id,
             material_id,
             casts_contact_shadow,
@@ -53,6 +55,14 @@ impl DrawData {
     /// (the default) is an exact no-op — a non-emissive draw is unchanged.
     pub(crate) const fn with_emissive(mut self, emissive: [f32; 3]) -> Self {
         self.emissive = emissive;
+        self
+    }
+
+    /// This draw with the material's specular strength (`0` matte …
+    /// `1` mirror-smooth), derived from its authored roughness. `0` (the
+    /// default) is an exact no-op — a matte draw is unchanged.
+    pub(crate) const fn with_specular(mut self, specular: f32) -> Self {
+        self.specular = specular;
         self
     }
 
@@ -75,6 +85,12 @@ impl DrawData {
     /// colour, independent of any light. `[0, 0, 0]` = not emissive.
     pub const fn emissive(&self) -> [f32; 3] {
         self.emissive
+    }
+
+    /// How strongly this surface catches a view-dependent specular highlight
+    /// (`0` matte … `1` mirror-smooth). `0` = matte.
+    pub const fn specular(&self) -> axiom_kernel::Ratio {
+        axiom_kernel::Ratio::finite_or_zero(self.specular)
     }
 
     /// The id of the mesh this object draws.
@@ -237,6 +253,14 @@ pub struct FrameOutcome {
     /// the offscreen capture and the live present arm grade identically from the
     /// app's authored value; `None` presents untonemapped, exactly as before.
     postprocess: Option<FramePostProcess>,
+    /// The frame's sky — a gradient with an optional celestial body, evaluated
+    /// behind the scene instead of a flat clear colour. Carried like the ambient;
+    /// `None` leaves the frame on its clear colour, exactly as before.
+    sky: Option<axiom_host::FrameSky>,
+    /// The frame's bloom — how bright pixels spill into their neighbours and how
+    /// the surplus above white rolls off. Carried like the grade; `None` leaves
+    /// highlights to clip, exactly as before.
+    bloom: Option<axiom_host::FrameBloom>,
     presented: bool,
     recorded: bool,
 }
@@ -275,6 +299,11 @@ impl FrameOutcome {
             // No grade by default; `with_postprocess` overrides it with the app's
             // authored grade. A frame that never sets one presents untonemapped.
             postprocess: None,
+            // No sky and no bloom by default; the builders below override them
+            // with the app's authored look. A frame that sets neither is
+            // byte-identical to one rendered before either existed.
+            sky: None,
+            bloom: None,
             presented,
             recorded,
         }
@@ -324,6 +353,30 @@ impl FrameOutcome {
     /// and the live present arm — applies this to its presented pixels.
     pub const fn postprocess(&self) -> Option<FramePostProcess> {
         self.postprocess
+    }
+
+    /// Attach the app's authored sky (or `None`).
+    pub(crate) fn with_sky(mut self, sky: Option<axiom_host::FrameSky>) -> Self {
+        self.sky = sky;
+        self
+    }
+
+    /// The frame's sky, or `None` when the app authored none (the backend then
+    /// clears to a flat colour, exactly as before).
+    pub const fn sky(&self) -> Option<axiom_host::FrameSky> {
+        self.sky
+    }
+
+    /// Attach the app's authored bloom (or `None`).
+    pub(crate) fn with_bloom(mut self, bloom: Option<axiom_host::FrameBloom>) -> Self {
+        self.bloom = bloom;
+        self
+    }
+
+    /// The frame's bloom, or `None` when the app authored none (highlights then
+    /// clip, exactly as before).
+    pub const fn bloom(&self) -> Option<axiom_host::FrameBloom> {
+        self.bloom
     }
 
     /// The frame's skinned draws, in submission order.
@@ -428,7 +481,14 @@ impl FrameOutcome {
             out.extend_from_slice(&draw.mvp);
             out.extend_from_slice(&draw.world);
             out.extend_from_slice(&draw.color);
-            out.extend_from_slice(&[draw.emissive[0], draw.emissive[1], draw.emissive[2], 0.0]);
+            // The fourth lane is the specular strength — it stopped being a pad
+            // when the shader gained a highlight term to spend it on.
+            out.extend_from_slice(&[
+                draw.emissive[0],
+                draw.emissive[1],
+                draw.emissive[2],
+                draw.specular,
+            ]);
         });
         out
     }
@@ -452,11 +512,15 @@ impl FrameOutcome {
             floats.extend_from_slice(&draw.mvp);
             floats.extend_from_slice(&draw.world);
             floats.extend_from_slice(&draw.color);
+            // The fourth lane is the specular strength, matching
+            // `instance_floats` above — these two pack the SAME bytes for two
+            // consumers, so a lane added to one and not the other is a silent
+            // divergence between the live batch path and the packet path.
             floats.extend_from_slice(&[
                 draw.emissive[0],
                 draw.emissive[1],
                 draw.emissive[2],
-                0.0,
+                draw.specular,
             ]);
         });
         order
@@ -506,7 +570,8 @@ mod tests {
             vec![
                 DrawData::new([1.0; 16], [9.0; 16], [0.1, 0.2, 0.3, 1.0], 1, 1, false),
                 DrawData::new([2.0; 16], [8.0; 16], [0.4, 0.5, 0.6, 1.0], 1, 1, true)
-                    .with_emissive([3.0, 0.25, 0.0]),
+                    .with_emissive([3.0, 0.25, 0.0])
+                    .with_specular(0.75),
             ],
             Vec::new(),
             [0.0; 16],
@@ -522,8 +587,12 @@ mod tests {
         // every pre-existing frame unchanged.
         assert_eq!(outcome.draws()[0].emissive(), [0.0; 3]);
         assert_eq!(outcome.draws()[1].emissive(), [3.0, 0.25, 0.0]);
+        // Same for specular: unauthored is matte, and it rides the emissive
+        // vec4's fourth lane rather than a pad.
+        assert_eq!(outcome.draws()[0].specular().get(), 0.0);
+        assert_eq!(outcome.draws()[1].specular().get(), 0.75);
         let floats = outcome.instance_floats();
-        // 2 draws x (16 mvp + 16 world + 4 colour + 3 emissive + 1 pad)
+        // 2 draws x (16 mvp + 16 world + 4 colour + 3 emissive + 1 specular)
         assert_eq!(floats.len(), 80);
         assert_eq!(&floats[0..16], &[1.0; 16]);
         assert_eq!(&floats[16..32], &[9.0; 16]);
@@ -532,7 +601,16 @@ mod tests {
         assert_eq!(&floats[40..56], &[2.0; 16]);
         assert_eq!(&floats[56..72], &[8.0; 16]);
         assert_eq!(&floats[72..76], &[0.4, 0.5, 0.6, 1.0]);
-        assert_eq!(&floats[76..80], &[3.0, 0.25, 0.0, 0.0]);
+        assert_eq!(&floats[76..80], &[3.0, 0.25, 0.0, 0.75]);
+
+        // `mesh_batches` packs the SAME bytes for the other consumer, so the
+        // specular lane has to appear there too — it landing in one packer and
+        // not the other is a silent divergence between the live batch path and
+        // the packet path, and is exactly the bug this pins against.
+        let batches = outcome.mesh_batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(&batches[0].2[36..40], &[0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(&batches[0].2[76..80], &[3.0, 0.25, 0.0, 0.75]);
     }
 
     #[test]

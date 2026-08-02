@@ -501,6 +501,47 @@ fn set_depth_fog_flows_onto_the_frame_outcome() {
     assert_eq!(app.tick(1).depth_fog(), Some(night));
 }
 
+/// A sky is what gives a frame a light source that is actually *in* it, so it
+/// has to reach the backend the same way the ambient and the fog do.
+#[test]
+fn set_sky_flows_onto_the_frame_outcome() {
+    let mut app = three_cube_app().build();
+    // A fresh app authors no sky, so every backend keeps its flat clear colour
+    // and renders byte-identically to before skies existed.
+    assert_eq!(app.sky(), None);
+    assert_eq!(app.tick(0).sky(), None);
+
+    let moonlit = axiom_host::FrameSky::gradient([0.02, 0.03, 0.06], [0.06, 0.08, 0.13])
+        .with_body(
+        [0.0, 0.18, 1.0],
+        axiom_kernel::Radians::finite_or_zero(0.055),
+        [0.85, 0.90, 1.0],
+        axiom_kernel::Ratio::finite_or_zero(220.0),
+        axiom_kernel::Ratio::finite_or_zero(0.45),
+    );
+    app.set_sky(moonlit);
+    assert_eq!(app.sky(), Some(moonlit));
+    assert_eq!(app.tick(1).sky(), Some(moonlit), "and it is on the very next frame");
+}
+
+/// Bloom is what makes an emissive above `1.0` mean anything, so it travels the
+/// same road.
+#[test]
+fn set_bloom_flows_onto_the_frame_outcome() {
+    let mut app = three_cube_app().build();
+    assert_eq!(app.bloom(), None);
+    assert_eq!(app.tick(0).bloom(), None, "highlights clip until asked otherwise");
+
+    let glow = axiom_host::FrameBloom::moonlit();
+    app.set_bloom(glow);
+    assert_eq!(app.bloom(), Some(glow));
+    assert_eq!(app.tick(1).bloom(), Some(glow));
+    // The two render-look knobs are independent: authoring bloom does not
+    // conjure a sky, and neither disturbs the ambient.
+    assert_eq!(app.sky(), None);
+    assert_eq!(app.ambient(), axiom_host::FrameAmbient::default_hemisphere());
+}
+
 #[test]
 fn set_postprocess_flows_onto_the_frame_outcome() {
     let mut app = three_cube_app().build();

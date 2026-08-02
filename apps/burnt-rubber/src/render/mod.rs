@@ -25,8 +25,9 @@ pub mod scenery_pool;
 pub mod surface_builder;
 
 use axiom::prelude::{
-    Angle, Camera, Color, DirectionalLight, Entity, FrameAmbient, FrameDepthFog, Mesh,
-    PerspectiveProjection, PointLight, Ratio, RunningApp, Spawn, Transform, Vec3, Visible,
+    Angle, Camera, Color, DirectionalLight, Entity, FrameAmbient, FrameBloom, FrameDepthFog,
+    FrameSky, Mesh, PerspectiveProjection, PointLight, Ratio, RunningApp, Spawn, Transform, Vec3,
+    Visible,
 };
 use axiom_math::{Mat4, Quat};
 
@@ -103,6 +104,39 @@ impl RaceScene {
         // to bite past the near traffic) and 0.9993 is ~900 m (the skyline is almost
         // fully atmosphere). Reaching 0.9 rather than 1.0 keeps a faint silhouette at
         // the vanishing point instead of erasing it.
+        // Bloom: what turns the emissive cues — reflector posts, tail lights,
+        // tunnel lamps, the lane paint catching the moon — from bright patches of
+        // paint into things that read as lights. Gated by the backend's `Bloom`
+        // capability, which the Canvas 2D profile drops and reports, so the
+        // software arm is untouched without this app knowing which arm it is on.
+        app.set_bloom(FrameBloom::moonlit());
+
+        // The moon itself, drawn behind the scene. This is the piece the rig was
+        // missing: the course was *lit* like a night stage but had no light source
+        // in shot, and a frame whose only bright things are reflectors reads as
+        // "dark", not "moonlit" — the eye needs to see what is doing the lighting.
+        //
+        // Its direction is [`MOON_DIRECTION`], which is also the direction the key
+        // light comes from, so the moon and the thing it lights agree. The horizon
+        // colour is `palette::SKY` — the exact colour the depth fog below fades
+        // into — so the road dissolves into the sky it is standing under instead of
+        // into an unrelated grey. The zenith is darker than the horizon, which is
+        // how a real night sky sits: brightest just above the ground, deepest
+        // overhead.
+        //
+        // The disc's colour is authored well above `1.0`. That surplus is not
+        // wasted: it is exactly what the bloom above spends, so the moon carries a
+        // soft halo rather than being a flat white sticker.
+        app.set_sky(
+            FrameSky::gradient(palette::SKY_ZENITH, palette::SKY).with_body(
+                [MOON_DIRECTION.x, MOON_DIRECTION.y, MOON_DIRECTION.z],
+                axiom_kernel::Radians::finite_or_zero(MOON_ANGULAR_RADIUS),
+                palette::MOON,
+                Ratio::finite_or_zero(MOON_HALO_FALLOFF),
+                Ratio::finite_or_zero(MOON_HALO_STRENGTH),
+            ),
+        );
+
         app.set_depth_fog(FrameDepthFog::new(
             Ratio::finite_or_zero(0.990),
             Ratio::finite_or_zero(0.9993),
@@ -318,12 +352,18 @@ fn install_lights(app: &mut RunningApp) -> Entity {
     app.add_light(
         DirectionalLight {
             direction: KEY_DIRECTION,
+            // Moonlight, not sunlight. The old key was `(1.0, 0.94, 0.84)` — a
+            // warm white, which is the colour of the sun an hour before it sets
+            // and the single most daylight-signalling thing left in the rig. The
+            // moon is sunlight reflected off bare rock and scattered through a
+            // night atmosphere: the eye reads it as distinctly cool, and pushing
+            // blue past green past red is what says "this is not a dim afternoon".
             color: Color::linear_rgb(
+                palette::ratio(0.72),
+                palette::ratio(0.80),
                 palette::ratio(1.0),
-                palette::ratio(0.94),
-                palette::ratio(0.84),
             ),
-            intensity: palette::ratio(0.55),
+            intensity: palette::ratio(KEY_INTENSITY),
         },
         Transform::IDENTITY,
     );
@@ -372,8 +412,83 @@ fn install_lights(app: &mut RunningApp) -> Entity {
 ///
 /// The cost is deliberate and small: the road and verge are horizontal, so their
 /// `N·L` drops 0.87 → 0.77 and the tarmac darkens ~11%, toward the near-black
-/// asphalt its albedo was authored for. The intensity is untouched.
-const KEY_DIRECTION: Vec3 = Vec3::new(0.55, -1.0, -0.62);
+/// asphalt its albedo was authored for.
+///
+/// **The key is now the moon.** It is exactly `-`[`MOON_DIRECTION`], so the thing
+/// lighting the scene and the thing you can see in the sky are the same object —
+/// which is the whole point of putting a sky in the frame. The horizontal
+/// component above is preserved unchanged (that is the shadow-placement result,
+/// and it was right); only the elevation moves, and it moves *down*, because a
+/// moon you can see down the road is by definition near the horizon.
+const KEY_DIRECTION: Vec3 = Vec3::new(
+    -MOON_DIRECTION.x,
+    -MOON_DIRECTION.y,
+    -MOON_DIRECTION.z,
+);
+
+/// The direction **toward the moon** (world space, un-normalized).
+///
+/// Two things are true at once here and the direction has to satisfy both: the
+/// moon must be *visible down the road ahead*, and it must be the light the
+/// course is lit by. So it points down-track (`+Z`, the way the car is pointing
+/// and the way the chase camera looks) and slightly toward `-X`, which this
+/// app's camera basis renders as screen-**right** — off the vanishing point, so
+/// it is not permanently hidden behind the car.
+///
+/// The elevation is **20°**, down from the old key's 50°. That is a real trade,
+/// made deliberately:
+///
+/// * A moon at 50° is above the top of the frame from a chase camera. There is
+///   no elevation at which a light is both "overhead" and "in shot"; the ask was
+///   for a visible moon, so it comes down to where the camera can see it.
+/// * A shadow's length is `height / tan(elevation)`: 50° → 0.84 car-heights,
+///   20° → 2.7. The car's shadow stops being a smear under the bumper and
+///   becomes a long raking shape thrown back toward the camera. (It lands only
+///   near the world origin — the engine's one directional shadow map is a fixed
+///   20 m box there — but where it lands, it now reads.)
+/// * The cost is `N·L` on the horizontal road: 0.77 → 0.34, less than half. That
+///   is why [`KEY_INTENSITY`] rises to compensate. The verticals — car flanks,
+///   reflector posts, tree cones — gain what the road loses, which is exactly
+///   the raking, side-lit look a low moon produces and a high one cannot.
+const MOON_DIRECTION: Vec3 = Vec3::new(-0.55, 0.42, 1.0);
+
+/// The moon's angular radius (radians).
+///
+/// The real moon is about `0.0045` rad — half a degree, which at this field of
+/// view is a handful of pixels and reads as a stuck highlight rather than a moon.
+/// This is roughly ten times that: large enough to read as a disc at a glance,
+/// small enough to still be a *body* in the sky rather than a lamp hanging over
+/// the course.
+const MOON_ANGULAR_RADIUS: f32 = 0.045;
+
+/// The halo's cosine exponent — larger hugs the disc more tightly.
+///
+/// **This is a rim, not the glow.** The frame's bloom is what spreads the moon's
+/// light into the sky around it, and the two compound: a wide halo hands the
+/// bright pass a large disc of above-threshold pixels, and the bloom then spreads
+/// *that* — so a halo tuned as if it were the only glow produces a blown white
+/// cloud several times the moon's diameter.
+///
+/// The disc is `MOON_ANGULAR_RADIUS` = 0.045 rad ≈ 2.6°, and the exponent has to
+/// be read against that. At 220 the halo was still at 43% a full 5° out — nearly
+/// two disc-radii of near-full-brightness sky, all of it feeding the bloom. At
+/// 1400 it is 24% at the limb and gone by 5°, which leaves a thin bright edge on
+/// the disc and lets the bloom do the spreading it exists to do.
+const MOON_HALO_FALLOFF: f32 = 1400.0;
+
+/// How strongly the halo is added against the moon's own colour. Low, for the
+/// reason above: the bloom supplies the glow, this only softens the limb.
+const MOON_HALO_STRENGTH: f32 = 0.18;
+
+/// The key light's intensity.
+///
+/// Raised from `0.55` alongside the elevation drop in [`MOON_DIRECTION`]. It does
+/// **not** restore the road to its old brightness and is not meant to: at 20° the
+/// road's `N·L` more than halves, and this recovers about two thirds of that. The
+/// tarmac ends up genuinely darker than before while every vertical surface ends
+/// up brighter — which is the difference between a scene lit from overhead and
+/// one lit by something sitting on the horizon.
+const KEY_INTENSITY: f32 = 0.85;
 
 /// How high above the road the car's pool light hangs (m).
 ///
@@ -513,16 +628,56 @@ mod tests {
         );
         assert!(KEY_DIRECTION.y < 0.0, "the sun is above the road, not below it");
 
-        // Elevation, from the horizontal reach against the drop. Too steep and
-        // the shadow is a smear the caster's own footprint swallows; too shallow
-        // and it stretches across the whole road and the tarmac loses its key.
+        // Elevation, from the horizontal reach against the drop. The band is low
+        // because the key is the moon and the moon has to be *in shot*: a chase
+        // camera looking down the road sees maybe 25° above the horizon, so a key
+        // above that is a light the player can never see the source of. The floor
+        // is the shadow's other end — below ~12° the shadow stretches past the
+        // whole road and the tarmac's own `N·L` collapses to nothing.
         let horizontal = KEY_DIRECTION.x.hypot(KEY_DIRECTION.z);
         let elevation = (-KEY_DIRECTION.y).atan2(horizontal).to_degrees();
         assert!(
-            (35.0..=60.0).contains(&elevation),
-            "the key sits at {elevation:.0}° — outside the band that casts a \
-             shadow with readable length"
+            (12.0..=28.0).contains(&elevation),
+            "the key sits at {elevation:.0}° — outside the band where the moon is \
+             both visible down the road and still rakes a readable shadow"
         );
+    }
+
+    /// The key light and the moon are **one object**, and that is the whole
+    /// reason the frame reads as moonlit rather than merely dark.
+    ///
+    /// A sky with a moon in one place and a key light arriving from another is
+    /// the specific failure this pins against: every surface would be lit from a
+    /// direction the player can see is wrong, which reads as "some light source
+    /// off-screen" — exactly the flatness the sky was added to cure.
+    #[test]
+    fn the_key_light_is_the_moon_that_is_drawn_in_the_sky() {
+        assert_eq!(KEY_DIRECTION.x, -MOON_DIRECTION.x);
+        assert_eq!(KEY_DIRECTION.y, -MOON_DIRECTION.y);
+        assert_eq!(KEY_DIRECTION.z, -MOON_DIRECTION.z);
+        // ...and the moon is ahead of the car, down the road, not behind it.
+        assert!(
+            MOON_DIRECTION.z > 0.0,
+            "the car drives +Z; a moon at -Z is behind the camera and unseeable"
+        );
+        assert!(MOON_DIRECTION.y > 0.0, "and above the horizon, not below it");
+    }
+
+    /// The halo is a rim; the bloom is the glow. They compound, so a halo tuned
+    /// as if it were the only source of spread produces a blown white cloud
+    /// several times the moon's width — which is exactly what it did at 220.
+    #[test]
+    fn the_moon_halo_dies_within_two_disc_radii() {
+        let at = |degrees: f32| degrees.to_radians().cos().powf(MOON_HALO_FALLOFF);
+        let limb = MOON_ANGULAR_RADIUS.to_degrees();
+        assert!(
+            at(2.0 * limb) < 0.02,
+            "the halo is still {:.3} at two disc-radii — the bloom will spread \
+             all of it and the moon becomes a cloud",
+            at(2.0 * limb)
+        );
+        // But it is not nothing: without a rim the disc has a hard aliased edge.
+        assert!(at(0.5 * limb) > 0.1, "the limb still carries a visible rim");
     }
 
     /// The depth range is a rendering-quality decision, so it is pinned: it must

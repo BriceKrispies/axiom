@@ -2,6 +2,15 @@
 
 use axiom_host::{Draw2dList, FramePacket, HostPresentationRequest, SdfScene};
 
+/// The column-major identity, used where a frame carries no camera and a
+/// matrix is nonetheless required by the call shape.
+const IDENTITY_MATRIX: [f32; 16] = [
+    1.0, 0.0, 0.0, 0.0, //
+    0.0, 1.0, 0.0, 0.0, //
+    0.0, 0.0, 1.0, 0.0, //
+    0.0, 0.0, 0.0, 1.0, //
+];
+
 /// The real GPU presentation backend for one surface.
 ///
 /// Constructed from a validated [`HostPresentationRequest`], from which it reads
@@ -139,6 +148,9 @@ impl GpuBackendApi {
         clear_color: [f32; 4],
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
+        // The camera view-projection, read only by the sky pass (to recover each
+        // pixel's world ray). Identity on a frame with no sky, where it is unread.
+        camera_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
         sdf: Option<&SdfScene>,
     ) -> bool {
@@ -156,6 +168,7 @@ impl GpuBackendApi {
                         clear_color,
                         sdf,
                         self.capability.bits(),
+                        camera_view_proj,
                     )
                     .is_ok()
                 })
@@ -182,6 +195,8 @@ impl GpuBackendApi {
         clear_color: [f32; 4],
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
+        // The camera view-projection, read only by the sky pass.
+        camera_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
         skinned_draws: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
         sdf: Option<&SdfScene>,
@@ -210,6 +225,7 @@ impl GpuBackendApi {
                     clear_color,
                     sdf,
                     self.capability.bits(),
+                    camera_view_proj,
                 )
             })
             .unwrap_or(Ok(()))
@@ -228,6 +244,12 @@ impl GpuBackendApi {
             packet.clear_color(),
             &lights,
             packet.light_view_proj(),
+            // The packet's camera, for the sky pass. A packet carrying no camera
+            // has no view to build a sky ray from, so the identity stands in —
+            // and the sky pass is only built when a look authored one anyway.
+            packet
+                .camera()
+                .map_or(IDENTITY_MATRIX, |camera| camera.view_proj()),
             &batches,
             packet.sdf(),
         )
@@ -319,13 +341,13 @@ impl GpuBackendApi {
         normals: &[(u64, u32, u32, Vec<u8>)],
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
+        camera_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
         skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
         skinned_draws: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
-        ambient: axiom_host::FrameAmbient,
-        depth_fog: axiom_host::FrameDepthFog,
+        look: axiom_host::FrameRenderLook,
         retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
         profile: axiom_host::BackendCapabilityProfile,
         volumetrics: Option<axiom_host::FrameVolumetrics>,
@@ -352,13 +374,13 @@ impl GpuBackendApi {
             normals,
             lights,
             light_view_proj,
+            camera_view_proj,
             batches,
             skinned_mesh_set,
             &skinned,
             clear,
             sdf,
-            ambient,
-            depth_fog,
+            look,
             retro_32bit,
             profile,
             volumetrics,
@@ -394,8 +416,7 @@ impl GpuBackendApi {
         skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
-        ambient: axiom_host::FrameAmbient,
-        depth_fog: axiom_host::FrameDepthFog,
+        look: axiom_host::FrameRenderLook,
         preference: Option<axiom_host::BackendKind>,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let binding = crate::live_gpu_binding::LiveGpuBinding::initialize(
@@ -409,8 +430,7 @@ impl GpuBackendApi {
             materials,
             max_instances,
             self.shadow_size,
-            ambient,
-            depth_fog,
+            look,
             preference,
         )
         .await?;
@@ -559,7 +579,14 @@ mod tests {
         let batches = vec![(7_u64, 5_u64, vec![0.0_f32; 40], 1_u32)];
         let lights = vec![(0_u32, [0.0, 1.0, 0.0], [1.0, 1.0, 1.0], 1.0_f32)];
         let light_vp = [0.0_f32; 16];
-        assert!(!backend.present_frame([0.1, 0.2, 0.3, 1.0], &lights, light_vp, &batches, None));
+        assert!(!backend.present_frame(
+            [0.1, 0.2, 0.3, 1.0],
+            &lights,
+            light_vp,
+            IDENTITY_MATRIX,
+            &batches,
+            None
+        ));
     }
 
     #[test]
@@ -589,6 +616,26 @@ mod tests {
             FrameFeatureSet::new(false, false, 1, 0),
         );
         assert!(!backend.present_packet(&packet));
+        // A packet that DOES carry a camera takes the other arm: its view-
+        // projection is what the sky pass reconstructs each pixel's world ray
+        // from, so a packet with a camera and one without must both present.
+        // (Both no-op on native — this pins the plumbing, not pixels.)
+        let with_camera = FramePacket::new(
+            1,
+            60,
+            FrameViewport::new(640, 480),
+            [0.1, 0.2, 0.3, 1.0],
+            Some(axiom_host::FrameCamera::new(
+                [1.0; 16],
+                [2.0; 16],
+                [3.0; 16],
+            )),
+            Vec::new(),
+            Vec::new(),
+            [0.0; 16],
+            FrameFeatureSet::new(false, false, 0, 0),
+        );
+        assert!(!backend.present_packet(&with_camera));
         let prim = SdfPrimitive::new(
             SdfPrimitive::SPHERE,
             [0.0; 16],

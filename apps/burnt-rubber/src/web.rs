@@ -82,18 +82,28 @@ pub fn burnt_rubber_start() {
     let meshes = state.borrow_mut().app.running().mesh_set();
     let materials = state.borrow_mut().app.running().material_textures();
 
-    // Hand the driver the render look the scene authored (a dark cool ambient and
-    // the night's depth fog) so the live backend binds with it. Without this the
-    // browser render silently uses the engine's default daylight hemisphere and no
-    // fog, which is why the live race read like an overcast afternoon with a
-    // cut-out horizon while the same scene captured correctly off-screen.
+    // Hand the driver the whole render look the scene authored — the dark cool
+    // ambient, the night's depth fog, the moonlit sky, and the bloom that makes
+    // the emissive cues read as lights — so the live backend binds with it.
+    // Without this the browser render silently uses the engine's default daylight
+    // hemisphere and no fog, which is why the live race read like an overcast
+    // afternoon with a cut-out horizon while the same scene captured correctly
+    // off-screen. Each part is forwarded only when the scene authored it, so a
+    // part the scene leaves unset stays on the backend's own default.
     {
         let mut guard = state.borrow_mut();
         let running = guard.app.running();
         let (ambient, depth_fog) = (running.ambient(), running.depth_fog());
+        let (sky, bloom) = (running.sky(), running.bloom());
         windowing.set_ambient(ambient);
         if let Some(fog) = depth_fog {
             windowing.set_depth_fog(fog);
+        }
+        if let Some(sky) = sky {
+            windowing.set_sky(sky);
+        }
+        if let Some(bloom) = bloom {
+            windowing.set_bloom(bloom);
         }
     }
 

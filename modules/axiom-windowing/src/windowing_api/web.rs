@@ -115,7 +115,7 @@ impl WindowingApi {
         // This variant's public closure takes only the frame identity; the engine's
         // cadence read-out is dropped here (multi-mesh apps don't surface it).
         // Read the authored render look before `self` moves into the driver.
-        let (ambient, depth_fog) = (self.ambient(), self.depth_fog());
+        let look = self.render_look();
         self.drive_web_multi(
             canvas_id,
             meshes,
@@ -128,8 +128,7 @@ impl WindowingApi {
             Vec::new(),
             None,
             // ...and carries the app-authored render look to bind.
-            ambient,
-            depth_fog,
+            look,
         )
     }
 
@@ -169,8 +168,9 @@ impl WindowingApi {
             ) + 'static,
     {
         // The explicit `ambient` argument still wins for this entry (the soccer arm
-        // passes its pitch daylight directly); the fog half comes from the driver.
-        let depth_fog = self.depth_fog();
+        // passes its pitch daylight directly); every other part of the look — fog,
+        // sky, bloom — comes from the driver.
+        let look = self.render_look().with_ambient(ambient);
         self.drive_web_multi(
             canvas_id,
             meshes,
@@ -181,8 +181,7 @@ impl WindowingApi {
             None,
             skinned_meshes,
             Some(skinned_source),
-            ambient,
-            depth_fog,
+            look,
         )
     }
 
@@ -248,7 +247,7 @@ impl WindowingApi {
         // Bind each pane's presenter off-loop (each backend init is async); until a
         // slot resolves, presenting to it is a no-op — the first frames simply
         // don't paint on that pane.
-        let (ambient, depth_fog) = (self.ambient(), self.depth_fog());
+        let look = self.render_look();
         (0..3).for_each(|i| {
             let slot = slots[i].clone();
             let canvas = canvases[i].clone();
@@ -257,7 +256,7 @@ impl WindowingApi {
             let materials = materials.clone();
             // Bound per pane (like `backend` above) so each `async move` owns its
             // own copy of the look rather than borrowing the enclosing frame.
-            let (ambient, depth_fog) = (ambient, depth_fog);
+            let look = look;
             wasm_bindgen_futures::spawn_local(async move {
                 *slot.borrow_mut() = LivePresenter::bind_with(
                     request,
@@ -272,8 +271,7 @@ impl WindowingApi {
                     // The comparison view binds each pane with the SAME authored render
                     // look, so the three backends are compared under one lighting/fog
                     // setup instead of an engine default none of them was authored for.
-                    ambient,
-                    depth_fog,
+                    look,
                     // Three panes, three pinned backends: "which backend is bound"
                     // has no single answer here, so this loop reports none.
                     None,
@@ -353,7 +351,7 @@ impl WindowingApi {
         };
         let slot = self.presenter.clone();
         let report = self.bound_backend.clone();
-        let (ambient, depth_fog) = (self.ambient(), self.depth_fog());
+        let look = self.render_look();
         wasm_bindgen_futures::spawn_local(async move {
             let presenter =
                 // A caller-owned-loop host (the @axiom/game SDK) uploads no skinned
@@ -365,8 +363,7 @@ impl WindowingApi {
                     Vec::new(),
                     materials,
                     max_instances,
-                    ambient,
-                    depth_fog,
+                    look,
                     report,
                 )
                 .await;
@@ -493,11 +490,11 @@ impl WindowingApi {
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         skinned_source: Option<std::rc::Rc<std::cell::RefCell<Vec<SkinnedDrawTuple>>>>,
         // The app-authored render look applied at bind: the hemisphere ambient that
-        // fills unlit faces, and the atmospheric depth fog distance recedes into
-        // (`None` = the backend default). Both come from `WindowingApi`, so an app-
-        // authored night look actually reaches the live browser render.
-        ambient: axiom_host::FrameAmbient,
-        depth_fog: Option<axiom_host::FrameDepthFog>,
+        // fills unlit faces, the atmospheric depth fog distance recedes into, the sky
+        // behind the scene, and the bloom bright pixels spill through. It comes from
+        // `WindowingApi`, so an app-authored night look actually reaches the live
+        // browser render; an unauthored part is that part's exact no-op.
+        look: axiom_host::FrameRenderLook,
     ) -> Result<(), wasm_bindgen::JsValue>
     where
         // The closure is handed this frame's identity and the engine's live
@@ -550,8 +547,7 @@ impl WindowingApi {
                 skinned_meshes,
                 materials,
                 max_instances,
-                ambient,
-                depth_fog,
+                look,
                 windowing.bound_backend.clone(),
             )
             .await
@@ -744,7 +740,7 @@ impl WindowingApi {
             1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         // Read the authored render look before `self` moves into the driver.
-        let (ambient, depth_fog) = (self.ambient(), self.depth_fog());
+        let look = self.render_look();
         self.drive_web_multi(
             canvas_id,
             meshes,
@@ -771,8 +767,7 @@ impl WindowingApi {
             Vec::new(),
             None,
             // ...and carries the app-authored render look to bind.
-            ambient,
-            depth_fog,
+            look,
         )
     }
 
@@ -839,14 +834,16 @@ impl WindowingApi {
                 &materials,
                 max_instances,
                 // Streaming terrain binds the app-authored render look too.
-                windowing.ambient(),
-                windowing.depth_fog(),
+                windowing.render_look(),
             )
             .await
             {
                 Some(backend) => Rc::new(RefCell::new(backend)),
                 None => return,
             };
+            // Captured for the per-frame present below, which carries it so the
+            // Canvas arm can declare the parts of the look it cannot honour.
+            let look = windowing.render_look();
             // This arm drives a bare backend rather than a `LivePresenter`, so it
             // announces the cascade's answer itself — an app must be able to ask
             // which backend it got whichever run loop it chose.
@@ -920,6 +917,7 @@ impl WindowingApi {
                     &[],
                     // Streaming terrain authors no SDF shapes.
                     None,
+                    look,
                 );
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {
@@ -997,8 +995,7 @@ impl WindowingApi {
                 &materials,
                 max_instances,
                 // Streaming terrain binds the app-authored render look too.
-                windowing.ambient(),
-                windowing.depth_fog(),
+                windowing.render_look(),
             )
             .await
             {
@@ -1008,6 +1005,9 @@ impl WindowingApi {
             // Bare-backend arm, like the streaming loop above: it reports the
             // cascade's answer itself rather than through a `LivePresenter`.
             windowing.bound_backend.set(Some(backend.borrow().kind()));
+            // Captured before `windowing` moves into the loop cell below; carried
+            // per frame so the Canvas arm can declare the look it cannot honour.
+            let look = windowing.render_look();
             let win = Rc::new(RefCell::new(windowing));
             let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
             let g = f.clone();
@@ -1034,6 +1034,7 @@ impl WindowingApi {
                     camera_vp,
                     &casters,
                     sdf,
+                    look,
                 );
                 let next = f.borrow();
                 next.as_ref().into_iter().for_each(|cb| {
@@ -1108,13 +1109,10 @@ pub(crate) struct LivePresenter {
     // stream), retained so a device-loss rebuild re-uploads them alongside the
     // ordinary meshes. Empty on apps that submit no skinned bodies.
     skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
-    // The app-authored depth fog bound with the backend, kept for the same rebuild
-    // reason as `ambient` below: a context-loss rebuild must restore the SAME look.
-    depth_fog: Option<axiom_host::FrameDepthFog>,
-    // The app-authored hemisphere ambient the scene renderer lights unlit faces
-    // with, retained so a device-loss rebuild re-supplies it (a fresh backend
-    // otherwise falls back to the dim engine default). Copy, so cheap to hold.
-    ambient: axiom_host::FrameAmbient,
+    // The app-authored render look bound with the backend (ambient, fog, sky,
+    // bloom), retained so a device-loss rebuild restores the SAME look — a fresh
+    // backend otherwise falls back to the dim engine default. Copy, so cheap to hold.
+    look: axiom_host::FrameRenderLook,
     // Where this presenter announces which backend the cascade selected, so
     // `WindowingApi::bound_backend` can answer after the driver has been consumed
     // into the run loop. `None` for a presenter nobody asks about: the
@@ -1163,8 +1161,7 @@ impl LivePresenter {
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         materials: Vec<(u64, u32, u32, Vec<u8>)>,
         max_instances: u32,
-        ambient: axiom_host::FrameAmbient,
-        depth_fog: Option<axiom_host::FrameDepthFog>,
+        look: axiom_host::FrameRenderLook,
         report: super::BackendReport,
     ) -> Option<LivePresenter> {
         Self::bind_with(
@@ -1176,8 +1173,7 @@ impl LivePresenter {
             skinned_meshes,
             materials,
             max_instances,
-            ambient,
-            depth_fog,
+            look,
             Some(report),
         )
         .await
@@ -1202,8 +1198,7 @@ impl LivePresenter {
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         materials: Vec<(u64, u32, u32, Vec<u8>)>,
         max_instances: u32,
-        ambient: axiom_host::FrameAmbient,
-        depth_fog: Option<axiom_host::FrameDepthFog>,
+        look: axiom_host::FrameRenderLook,
         report: Option<super::BackendReport>,
     ) -> Option<LivePresenter> {
         use std::cell::{Cell, RefCell};
@@ -1221,8 +1216,7 @@ impl LivePresenter {
             &skinned_meshes[..],
             &materials[..],
             max_instances,
-            ambient,
-            depth_fog,
+            look,
         )
         .await?;
         // Announce the cascade's answer the moment it exists. Everything after
@@ -1251,8 +1245,7 @@ impl LivePresenter {
             applied_mesh_generation: Cell::new(u32::MAX),
             pending_skinned: RefCell::new(Vec::new()),
             skinned_meshes,
-            ambient,
-            depth_fog,
+            look,
             report,
         })
     }
@@ -1368,6 +1361,7 @@ impl LivePresenter {
                 camera_view_proj,
                 casters,
                 sdf,
+                self.look,
             )
             .is_err();
         if lost && !self.reinitializing.get() {
@@ -1379,8 +1373,7 @@ impl LivePresenter {
             let meshes = self.meshes.borrow().clone();
             let materials = self.materials.clone();
             let skinned_meshes = self.skinned_meshes.clone();
-            let ambient = self.ambient;
-            let depth_fog = self.depth_fog;
+            let look = self.look;
             let flag = self.reinitializing.clone();
             // The rebuild re-runs the WebGPU → WebGL2 → Canvas 2D cascade, so the
             // page can legitimately come back on a different backend than it went
@@ -1399,8 +1392,7 @@ impl LivePresenter {
                     &skinned_meshes[..],
                     &materials[..],
                     max_instances,
-                    ambient,
-                    depth_fog,
+                    look,
                 )
                 .await;
                 rebuilt.into_iter().for_each(|backend| {
@@ -1546,12 +1538,19 @@ impl LiveBackend {
         camera_view_proj: [f32; 16],
         casters: &[bool],
         sdf: Option<axiom_host::SdfScene>,
+        // The app-authored look. The GPU arm bound its sky and bloom at
+        // initialise; the Canvas arm carries them on the packet so it can report
+        // the three capabilities it drops.
+        look: axiom_host::FrameRenderLook,
     ) -> Result<(), wasm_bindgen::JsValue> {
         match self {
             LiveBackend::Gpu(backend) => backend.present_frame_result(
                 clear,
                 lights,
                 light_vp,
+                // The camera the GPU sky pass reconstructs each pixel's world ray
+                // from. The Canvas arm gets the same matrix on its packet below.
+                camera_view_proj,
                 batches,
                 skinned,
                 sdf.as_ref(),
@@ -1568,6 +1567,7 @@ impl LiveBackend {
                     camera_view_proj,
                     casters,
                     sdf,
+                    look,
                 );
                 // CPU-skin the athlete bodies too, so the software fallback renders
                 // them the way the GPU skinning pass does (uploaded at bind via
@@ -1679,6 +1679,10 @@ fn frame_packet_from_batches(
     camera_view_proj: [f32; 16],
     casters: &[bool],
     sdf: Option<axiom_host::SdfScene>,
+    // The app-authored render look. The software backend honours none of its sky
+    // or bloom — but the packet carries them anyway, because that is what lets it
+    // REPORT the drops instead of silently ignoring them.
+    look: axiom_host::FrameRenderLook,
 ) -> axiom_host::FramePacket {
     use axiom_host::{
         FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport,
@@ -1687,13 +1691,16 @@ fn frame_packet_from_batches(
     let mut object_id: u64 = 0;
     for (mesh_id, material_id, floats, count) in batches {
         for i in 0..*count {
-            // 40 floats per instance: mvp(16), world(16), colour(4), emissive(3)+pad(1)
-            // — the layout `FrameOutcome::mesh_batches` packs (its `INSTANCE_FLOATS`).
+            // 40 floats per instance: mvp(16), world(16), colour(4),
+            // emissive(3)+specular(1) — the layout `FrameOutcome::mesh_batches`
+            // packs (its `INSTANCE_FLOATS`).
             let off = (i as usize) * 40;
             let mvp: [f32; 16] = floats[off..off + 16].try_into().unwrap_or([0.0; 16]);
             let world: [f32; 16] = floats[off + 16..off + 32].try_into().unwrap_or([0.0; 16]);
             let color: [f32; 4] = floats[off + 32..off + 36].try_into().unwrap_or([1.0; 4]);
             let emissive: [f32; 3] = floats[off + 36..off + 39].try_into().unwrap_or([0.0; 3]);
+            // The emissive vec4's fourth lane: the material's specular strength.
+            let specular = floats.get(off + 39).copied().unwrap_or(0.0);
             // The caster flags arrive in the same instance order the batches expand
             // (see `FrameOutcome::mesh_batch_casters`); a missing flag defaults off.
             let casts = casters.get(object_id as usize).copied().unwrap_or(false);
@@ -1707,7 +1714,8 @@ fn frame_packet_from_batches(
                     color,
                     casts,
                 )
-                .with_emissive(emissive),
+                .with_emissive(emissive)
+                .with_specular(axiom_kernel::Ratio::finite_or_zero(specular)),
             );
             object_id += 1;
         }
@@ -1740,8 +1748,14 @@ fn frame_packet_from_batches(
         features,
     );
     // Attach the frame's SDF scene (zero-or-one, via the Option iterator — no
-    // `if`), so the Canvas software marcher composites it over the meshes.
-    sdf.into_iter().fold(packet, |p, scene| p.with_sdf(scene))
+    // `if`), so the Canvas software marcher composites it over the meshes...
+    let packet = sdf.into_iter().fold(packet, |p, scene| p.with_sdf(scene));
+    // ...and the look's sky and bloom, the same way. The Canvas backend cannot
+    // realize either, and attaching them is precisely how it learns there was
+    // something to declare: its `report` reads them back off the packet and
+    // enumerates them as degraded features.
+    let packet = look.sky().into_iter().fold(packet, |p, s| p.with_sky(s));
+    look.bloom().into_iter().fold(packet, |p, b| p.with_bloom(b))
 }
 
 /// Select the live backend without poisoning the canvas. `preference` decides:
@@ -1766,8 +1780,7 @@ async fn select_backend(
     skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     max_instances: u32,
-    ambient: axiom_host::FrameAmbient,
-    depth_fog: Option<axiom_host::FrameDepthFog>,
+    look: axiom_host::FrameRenderLook,
 ) -> Option<LiveBackend> {
     use axiom_host::BackendKind;
     if matches!(preference, Some(BackendKind::Canvas2d)) {
@@ -1790,10 +1803,10 @@ async fn select_backend(
             skinned_meshes,
             materials,
             max_instances,
-            ambient,
-            // An app that authored no fog binds `FrameDepthFog::none` - zero strength,
-            // an exact no-op in the shader - so an unfogged frame is unchanged.
-            depth_fog.unwrap_or_else(axiom_host::FrameDepthFog::none),
+            // An app that authored no part of the look binds that part's no-op
+            // (zero-strength fog, no sky, no bloom), so an unauthored frame is
+            // byte-identical to one from before the look existed.
+            look,
             preference,
         )
         .await
@@ -1827,8 +1840,7 @@ async fn select_backend_or_report(
     skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
     max_instances: u32,
-    ambient: axiom_host::FrameAmbient,
-    depth_fog: Option<axiom_host::FrameDepthFog>,
+    look: axiom_host::FrameRenderLook,
 ) -> Option<LiveBackend> {
     let backend = select_backend(
         preference,
@@ -1838,8 +1850,7 @@ async fn select_backend_or_report(
         skinned_meshes,
         materials,
         max_instances,
-        ambient,
-        depth_fog,
+        look,
     )
     .await;
     if backend.is_none() {

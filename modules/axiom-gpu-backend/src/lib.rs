@@ -57,6 +57,8 @@ mod scene_renderer;
 // binding's mobile-first render-scale path, and the offscreen retro 32-bit low-res +
 // nearest upscale. Available wherever a real GPU renders (wasm32 / offscreen).
 #[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
+mod post_chain;
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod upscale;
 
 // The real wgpu swap-chain binding.
