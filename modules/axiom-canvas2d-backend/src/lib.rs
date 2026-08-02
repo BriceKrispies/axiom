@@ -54,6 +54,11 @@ mod raster_vertex;
 mod sdf_raymarch;
 mod software_framebuffer;
 mod software_raster_result;
+
+// Per-frame console telemetry (gated on `?profile=1`) and the clock that
+// times it. Its own module because it is the crate's densest cluster of
+// platform `#[cfg]` arms and it reports on the render rather than doing it.
+mod frame_telemetry;
 mod software_rasterizer;
 
 // The host-neutral 2D draw-list (`host::Draw2dList`) software consumer:

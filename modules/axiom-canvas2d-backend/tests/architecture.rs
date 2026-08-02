@@ -53,10 +53,18 @@ fn lib_rs_exports_only_the_facade() {
 
 #[test]
 fn pure_rasterizer_core_has_no_browser_apis() {
-    // Only the platform edge — `live_canvas_binding.rs` and the facade's
-    // wasm32 `attach_canvas` arm in `canvas2d_backend_api.rs` — may name
-    // web-sys/canvas APIs; every other file must be clean.
-    let edge = ["live_canvas_binding.rs", "canvas2d_backend_api.rs"];
+    // Only the platform edge may name web-sys/canvas APIs; every other file
+    // must be clean. Three files are the edge: `live_canvas_binding.rs` (the
+    // `putImageData` blit), the facade's wasm32 `attach_canvas` arm in
+    // `canvas2d_backend_api.rs`, and `frame_telemetry.rs` (the per-frame console
+    // lines — every entry there is a real `console::log_1` on wasm32 and a no-op
+    // on native, which is precisely why it is its own file rather than a hundred
+    // lines of `#[cfg]` inside the facade).
+    let edge = [
+        "live_canvas_binding.rs",
+        "canvas2d_backend_api.rs",
+        "frame_telemetry.rs",
+    ];
     let needles = [
         "web_sys",
         "wasm_bindgen",
