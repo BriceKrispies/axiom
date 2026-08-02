@@ -249,6 +249,8 @@ pub fn deliberate_excursion(
 pub struct CollisionReport {
     /// Whether contact was actually made.
     pub made_contact: bool,
+    /// How the contact classified, once one happened.
+    pub severity: Option<crate::sim::contact::Severity>,
     /// The player's ground speed the step before impact (m/s).
     pub speed_before: f32,
     /// The traffic car's speed (m/s).
@@ -259,8 +261,11 @@ pub struct CollisionReport {
     pub strength: f32,
     /// Ground speed the step after impact (m/s).
     pub speed_after_impact: f32,
-    /// How much the shunt swung the car's nose (radians).
+    /// The peak swing the shunt put into the car's nose (radians), measured
+    /// over the disturbance window that follows the impact.
     pub yaw_kick: f32,
+    /// The heading at the moment of impact, which `yaw_kick` is measured from.
+    pub yaw_at_impact: f32,
     /// Whether the shunt spun the car far enough to lose the road ahead.
     pub spun: bool,
     /// Whether the car ended up off the tarmac because of it.
@@ -293,6 +298,11 @@ impl CollisionReport {
 /// Yaw swing (radians) past which a shunt counts as having spun the car.
 const SPIN_THRESHOLD: f32 = 1.0;
 
+/// How many steps after an impact the nose swing is measured over. Twenty steps
+/// is a third of a second — several times the collision's own yaw decay, and
+/// well short of the distance the autopilot needs to turn a corner.
+const YAW_WINDOW_STEPS: u32 = 20;
+
 /// Drive `sim` into the back of a traffic car on purpose, then hand it back to
 /// the autopilot and see whether it drives out of it.
 ///
@@ -307,12 +317,14 @@ pub fn deliberate_collision(
 ) -> CollisionReport {
     let mut report = CollisionReport {
         made_contact: false,
+        severity: None,
         speed_before: 0.0,
         traffic_speed: 0.0,
         closing_speed: 0.0,
         strength: 0.0,
         speed_after_impact: 0.0,
         yaw_kick: 0.0,
+        yaw_at_impact: 0.0,
         spun: false,
         went_off_road: false,
         slowest: f32::INFINITY,
@@ -346,19 +358,35 @@ pub fn deliberate_collision(
         sim.step(command);
         report.slowest = report.slowest.min(sim.car().speed());
 
+        // Only a *fresh* traffic contact is the collision this harness is
+        // measuring; the rate-limited scrape cues an ongoing grind emits are
+        // presentation, not new impacts.
         let hit = sim.events().iter().find_map(|e| match e {
-            RaceEvent::Impact { strength, traffic: true } => Some(*strength),
+            RaceEvent::Impact {
+                severity,
+                strength,
+                traffic: true,
+                fresh: true,
+            } => Some((*severity, *strength)),
             _ => None,
         });
-        if let Some(strength) = hit {
+        if let Some((severity, strength)) = hit {
             report.made_contact = true;
+            report.severity = Some(severity);
             report.strength = strength;
             report.speed_before = speed_before;
             report.traffic_speed = target.map(|t| t.speed).unwrap_or(0.0);
             report.closing_speed = (speed_before - report.traffic_speed).max(0.0);
             report.speed_after_impact = sim.car().speed();
-            report.yaw_kick = crate::track::shortest_angle(sim.car().yaw - yaw_before).abs();
-            report.spun = report.yaw_kick > SPIN_THRESHOLD;
+            // The disturbance is measured over the steps that FOLLOW the
+            // impact, not the impact step alone. A collision's rotation is now
+            // a decaying yaw *rate* added to the player's steering rather than
+            // a one-shot rotation, precisely so the recovery assist has
+            // something it can damp — so the swing it actually produces
+            // develops over the next third of a second and a single-step
+            // reading of it is always zero.
+            report.yaw_kick = 0.0;
+            report.yaw_at_impact = yaw_before;
             break;
         }
     }
@@ -373,6 +401,14 @@ pub fn deliberate_collision(
         report.slowest = report.slowest.min(car.speed());
         report.went_off_road |= car.surface.is_off_road();
         report.needed_a_reset |= sim.is_stuck();
+        // The disturbance window: long enough for the collision's yaw rate to
+        // have played out, short enough that the autopilot's own cornering has
+        // not yet dominated the reading.
+        (taken < YAW_WINDOW_STEPS).then(|| {
+            let swung = crate::track::shortest_angle(car.yaw - report.yaw_at_impact).abs();
+            report.yaw_kick = report.yaw_kick.max(swung);
+            report.spun = report.yaw_kick > SPIN_THRESHOLD;
+        });
 
         on_tarmac_for = if car.surface.is_off_road() {
             0
@@ -762,16 +798,24 @@ mod tests {
         );
         assert!(report.strength > 0.0 && report.strength <= 1.0);
 
-        // It hurts. How *much* depends on whether the approach ended up square
-        // on the back of the car or brushing down its side, and both are real
-        // outcomes — the exact cost of each is pinned in
-        // `sim::collision::tests::a_side_swipe_costs_less_than_a_shunt_but_is_not_free`,
-        // where the geometry can be controlled. What matters here is that
-        // contact is never free.
+        // It hurts, and it hurts by exactly as much as its severity allows.
+        //
+        // How much *that* is depends on whether the approach ended up square on
+        // the back of the car or brushing down its side, and both are real
+        // outcomes of a genuine pursuit — so the claim here is the one that
+        // holds either way: contact is never free, and never costs more than the
+        // retained-momentum floor for the severity that was actually reported.
+        let severity = report.severity.expect("a contact that happened classifies");
+        let floor = severity.speed_floor(&sim.tuning().collision);
         assert!(
-            report.speed_lost() > 0.04,
-            "the contact cost only {:.0}% of the speed",
-            report.speed_lost() * 100.0
+            report.speed_lost() > 0.0,
+            "contact was completely free ({severity:?})"
+        );
+        assert!(
+            report.speed_lost() <= 1.0 - floor + 1.0e-3,
+            "a {severity:?} took {:.0}% of the speed, past its {:.0}% floor",
+            report.speed_lost() * 100.0,
+            floor * 100.0
         );
         // ...but never stops the demo.
         assert!(

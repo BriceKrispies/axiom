@@ -80,6 +80,14 @@ pub struct CarState {
     pub impact_direction: Vec3,
     /// Strength of the most recent impact, `0..1`.
     pub impact_strength: f32,
+    /// Yaw rate (rad/s) a collision is still imparting, decaying on its own.
+    ///
+    /// A collision's rotation is *state*, not a one-shot `yaw +=`, and that is
+    /// the whole reason the recovery assist can help with it: a disturbance
+    /// applied and forgotten in a single step is a disturbance nothing can damp.
+    /// It is added to the steering's yaw rate rather than replacing it, so the
+    /// player keeps the wheel throughout. See [`super::contact`].
+    pub impact_yaw_rate: f32,
     /// Accumulated wheel rotation (radians), driven by distance travelled.
     pub wheel_spin: f32,
     /// Whether boost is being spent this step.
@@ -116,6 +124,7 @@ impl CarState {
             impact_steps: 0,
             impact_direction: Vec3::UNIT_Z,
             impact_strength: 0.0,
+            impact_yaw_rate: 0.0,
             wheel_spin: 0.0,
             boosting: false,
             stuck_steps: 0,
@@ -179,6 +188,7 @@ impl CarState {
             self.distance,
             self.lateral,
             self.impact_strength,
+            self.impact_yaw_rate,
             self.wheel_spin,
         ];
         vectors

@@ -25,6 +25,7 @@ use axiom_audio::{AudioApi, AudioSeconds, Envelope, Hertz, Lfo, ToneSpec, Wave};
 use axiom_kernel::Ratio;
 
 use crate::sim::car::CarState;
+use crate::sim::contact::Severity;
 use crate::sim::{RaceEvent, RaceSim};
 use crate::tuning::{VehicleTuning, DT};
 
@@ -164,7 +165,7 @@ impl RaceAudio {
             return;
         }
         match event {
-            RaceEvent::Impact { strength, .. } => self.impact(*strength),
+            RaceEvent::Impact { severity, strength, .. } => self.impact(*severity, *strength),
             RaceEvent::NearMiss { .. } => self.blip(1_180.0, 0.16, 0.35),
             RaceEvent::BoostStarted => self.blip(220.0, 0.5, 0.45),
             RaceEvent::CountdownTick(_) => self.blip(660.0, 0.28, 0.5),
@@ -175,24 +176,57 @@ impl RaceAudio {
         }
     }
 
-    /// A collision: a short, low, loud burst scaled by how hard it was.
-    fn impact(&mut self, strength: f32) {
+    /// A collision, voiced by severity.
+    ///
+    /// # What was wrong with the old one
+    ///
+    /// One sound served every contact: a **square** wave at 70–130 Hz, up to
+    /// 0.4 s long, at up to 0.75 volume, with a 23 Hz LFO at 0.85 depth. Every
+    /// one of those choices points the same way. A square wave is all odd
+    /// harmonics, so a 70 Hz fundamental puts real energy at 210 and 350 Hz. An
+    /// LFO at 23 Hz is below the pitch floor, so it is not heard as vibrato but
+    /// as *amplitude pulsing* — twenty-three times a second, at near-full depth.
+    /// A harsh buzz, pulsing, held for four tenths of a second, is not the sound
+    /// of an impact; it is the sound of an alarm. And it fired **every fixed
+    /// step** the boxes overlapped, so a graze along a car was that alarm at
+    /// 60 Hz.
+    ///
+    /// # What replaces it
+    ///
+    /// A body and a detail, per severity. The body is a **sine** — a thud is a
+    /// low-frequency displacement of air, and a sine is what that is — short,
+    /// with a fast attack and a decay that is over before it can ring. The
+    /// detail is a brief high triangle, the metal, quiet enough to colour the
+    /// thud rather than compete with it. Neither has an LFO: the thing that made
+    /// the old cue an alarm is simply gone. Pitch varies with `strength`, which
+    /// is measured, so identical runs make identical noises.
+    ///
+    /// Rate limiting is structural rather than a matter for this function: a
+    /// contact episode emits one fresh impact and then rate-limited scrape cues
+    /// (see [`crate::sim::contact`]), so there is no path by which one collision
+    /// can schedule two thuds.
+    fn impact(&mut self, severity: Severity, strength: f32) {
         let strength = strength.clamp(0.0, 1.0);
+        let voice = IMPACT_VOICES[severity.index()];
+        // A harder hit is a *lower*, longer thud — bigger things resonate lower.
+        let body_hz = voice.body_hz - voice.body_drop * strength;
         self.audio.play_tone(ToneSpec {
-            wave: Wave::Square,
-            freq: Hertz::new(70.0 + 60.0 * (1.0 - strength)),
-            duration: AudioSeconds::from_seconds(0.18 + 0.22 * strength),
-            envelope: Some(Envelope {
-                attack: AudioSeconds::from_seconds(0.004),
-                decay: AudioSeconds::from_seconds(0.10),
-                sustain: Ratio::finite_or_zero(0.25),
-                release: AudioSeconds::from_seconds(0.16),
-            }),
-            lfo: Some(Lfo {
-                freq: Hertz::new(23.0),
-                depth: Ratio::finite_or_zero(0.85),
-            }),
-            volume: Ratio::finite_or_zero(0.30 + 0.45 * strength),
+            wave: voice.body_wave,
+            freq: Hertz::new(body_hz),
+            duration: AudioSeconds::from_seconds(voice.body_seconds),
+            envelope: Some(thump_envelope(voice.body_seconds)),
+            lfo: None,
+            volume: Ratio::finite_or_zero(voice.body_volume * (0.55 + 0.45 * strength)),
+        });
+        // The metallic detail: short, bright, and quiet. Its pitch rises with
+        // the hit so a scrape tinkles and a crash clangs.
+        self.audio.play_tone(ToneSpec {
+            wave: Wave::Triangle,
+            freq: Hertz::new(voice.detail_hz * (1.0 + DETAIL_RISE * strength)),
+            duration: AudioSeconds::from_seconds(voice.detail_seconds),
+            envelope: Some(thump_envelope(voice.detail_seconds)),
+            lfo: None,
+            volume: Ratio::finite_or_zero(voice.detail_volume * (0.5 + 0.5 * strength)),
         });
     }
 
@@ -228,6 +262,82 @@ fn grain_envelope() -> Envelope {
         decay: AudioSeconds::from_seconds(0.03),
         sustain: Ratio::finite_or_zero(0.8),
         release: AudioSeconds::from_seconds(GRAIN_SECONDS * 0.6),
+    }
+}
+
+/// One severity's impact voice: a low body and a brief metallic detail.
+#[derive(Debug, Clone, Copy)]
+struct ImpactVoice {
+    body_wave: Wave,
+    /// Body pitch (Hz) at zero strength.
+    body_hz: f32,
+    /// How far the body pitch falls (Hz) at full strength.
+    body_drop: f32,
+    body_seconds: f32,
+    body_volume: f32,
+    detail_hz: f32,
+    detail_seconds: f32,
+    detail_volume: f32,
+}
+
+/// The three impact voices, indexed by [`Severity::index`].
+///
+/// Read down the columns: everything gets lower, longer and louder as the
+/// severity rises, and nothing gets *long* — the worst crash in the game is a
+/// 0.22 s body under a 0.09 s clang, because a tail is what turns an impact into
+/// an alarm. A scrape uses a **triangle** body rather than a sine, which is the
+/// only place a harmonic is wanted: friction is a rasp, and at 0.06 volume for
+/// 60 ms a rasp is a hiss.
+const IMPACT_VOICES: [ImpactVoice; 3] = [
+    // Scrape: quiet, short, metallic friction.
+    ImpactVoice {
+        body_wave: Wave::Triangle,
+        body_hz: 2_300.0,
+        body_drop: 700.0,
+        body_seconds: 0.06,
+        body_volume: 0.07,
+        detail_hz: 3_400.0,
+        detail_seconds: 0.04,
+        detail_volume: 0.045,
+    },
+    // Bump: a compact thud with restrained metallic detail.
+    ImpactVoice {
+        body_wave: Wave::Sine,
+        body_hz: 118.0,
+        body_drop: 34.0,
+        body_seconds: 0.13,
+        body_volume: 0.30,
+        detail_hz: 780.0,
+        detail_seconds: 0.055,
+        detail_volume: 0.10,
+    },
+    // Major crash: deeper and stronger, and still over quickly.
+    ImpactVoice {
+        body_wave: Wave::Sine,
+        body_hz: 78.0,
+        body_drop: 22.0,
+        body_seconds: 0.22,
+        body_volume: 0.50,
+        detail_hz: 560.0,
+        detail_seconds: 0.09,
+        detail_volume: 0.18,
+    },
+];
+
+/// How much the metallic detail's pitch rises across a severity's strength band.
+const DETAIL_RISE: f32 = 0.35;
+
+/// The envelope every impact shares: an attack fast enough to read as a hit, and
+/// a decay that is over inside the tone's own duration.
+///
+/// `sustain` is zero on purpose. A sustained impact is a note; an impact with no
+/// sustain is a hit.
+fn thump_envelope(seconds: f32) -> Envelope {
+    Envelope {
+        attack: AudioSeconds::from_seconds(0.003),
+        decay: AudioSeconds::from_seconds(seconds * 0.45),
+        sustain: Ratio::finite_or_zero(0.0),
+        release: AudioSeconds::from_seconds(seconds * 0.4),
     }
 }
 
@@ -335,7 +445,12 @@ mod tests {
     #[test]
     fn every_event_that_should_make_a_noise_does() {
         let audible = [
-            RaceEvent::Impact { strength: 0.8, traffic: false },
+            RaceEvent::Impact {
+                severity: Severity::Bump,
+                strength: 0.8,
+                traffic: false,
+                fresh: true,
+            },
             RaceEvent::NearMiss { boost_awarded: 0.13 },
             RaceEvent::BoostStarted,
             RaceEvent::CountdownTick(2),
@@ -390,6 +505,105 @@ mod tests {
         let loud = drained(&mut sliding);
         assert_ne!(loud, quiet, "the slide adds a voice");
         assert!(loud.len() > quiet.len(), "and it is an extra voice, not a swap");
+    }
+
+    /// The impact voices encode the design brief as an ordering, and the
+    /// ordering is the thing a player actually hears.
+    #[test]
+    fn the_impact_voices_get_lower_louder_and_longer_with_severity_and_never_ring() {
+        let voices = IMPACT_VOICES;
+        let ladder = [Severity::Scrape, Severity::Bump, Severity::MajorCrash];
+        assert_eq!(
+            ladder.map(|s| s.index()),
+            [0, 1, 2],
+            "the table is indexed by the severity ladder"
+        );
+        // The body drops in pitch, rises in volume and lengthens with severity.
+        let bodies = [voices[1], voices[2]];
+        assert!(bodies[0].body_hz > bodies[1].body_hz, "a worse hit is deeper");
+        assert!(bodies[0].body_volume < bodies[1].body_volume);
+        assert!(bodies[0].body_seconds < bodies[1].body_seconds);
+        // A scrape is a different creature: high, quiet, and the shortest of
+        // the three, because friction is not a thud.
+        assert!(voices[0].body_hz > voices[1].body_hz * 5.0, "a scrape is a hiss");
+        assert!(voices[0].body_volume < voices[1].body_volume * 0.5, "and quiet");
+
+        for (index, voice) in voices.iter().enumerate() {
+            // **No long ringing tail.** This is the specific failure the old cue
+            // had, and it is the one thing that turns an impact into an alarm.
+            assert!(
+                voice.body_seconds <= 0.25,
+                "voice {index} rings for {} s",
+                voice.body_seconds
+            );
+            assert!(voice.detail_seconds < voice.body_seconds, "the detail is briefer");
+            // Volumes stay inside a bounded, non-shouting range.
+            assert!((0.0..=0.6).contains(&voice.body_volume), "voice {index}");
+            assert!(voice.detail_volume < voice.body_volume, "the detail colours, not competes");
+            assert!(voice.body_drop < voice.body_hz, "pitch can never go negative");
+            assert!(voice.detail_hz > voice.body_hz.min(200.0), "the detail is the bright part");
+        }
+    }
+
+    /// **The alarm is gone.** The old cue's character came from three specific
+    /// choices, and every one of them is now absent from every impact.
+    #[test]
+    fn no_impact_cue_pulses_buzzes_or_sustains() {
+        for voice in IMPACT_VOICES {
+            // A sustain of zero is what makes it a hit rather than a note.
+            let envelope = thump_envelope(voice.body_seconds);
+            assert_eq!(
+                envelope.sustain,
+                Ratio::finite_or_zero(0.0),
+                "an impact that sustains is a note"
+            );
+            // The decay and release both finish inside the tone's own length.
+            let tail = envelope.decay.seconds() + envelope.release.seconds();
+            assert!(
+                tail <= voice.body_seconds,
+                "the envelope tail ({tail} s) outlasts the {} s tone",
+                voice.body_seconds
+            );
+            // No square wave anywhere: odd harmonics on a low fundamental are
+            // what made the old cue buzz.
+            assert_ne!(voice.body_wave, Wave::Square, "a square body buzzes");
+        }
+    }
+
+    /// The three severities genuinely schedule three different sounds, and a
+    /// harder hit within one severity is a different sound again.
+    #[test]
+    fn each_severity_and_strength_schedules_a_distinguishable_cue() {
+        let voiced = |severity: Severity, strength: f32| {
+            let mut audio = RaceAudio::new();
+            audio.enable(true);
+            audio.on_event(&RaceEvent::Impact {
+                severity,
+                strength,
+                traffic: true,
+                fresh: true,
+            });
+            drained(&mut audio)
+        };
+        let scrape = voiced(Severity::Scrape, 0.5);
+        let bump = voiced(Severity::Bump, 0.5);
+        let crash = voiced(Severity::MajorCrash, 0.5);
+        assert_ne!(scrape, bump, "a scrape and a bump sound different");
+        assert_ne!(bump, crash, "a bump and a crash sound different");
+        assert_ne!(scrape, crash);
+        assert_ne!(scrape, silence(), "and all three make a sound");
+        // Pitch varies with the measured strength, deterministically — the same
+        // hit always sounds the same, a harder one does not.
+        assert_ne!(
+            voiced(Severity::Bump, 0.1),
+            voiced(Severity::Bump, 0.9),
+            "strength colours the cue"
+        );
+        assert_eq!(
+            voiced(Severity::Bump, 0.42),
+            voiced(Severity::Bump, 0.42),
+            "and it is derived, never random"
+        );
     }
 
     #[test]

@@ -111,21 +111,6 @@ pub struct VehicleTuning {
     pub ground_snap_speed: f32,
     /// How fast the car settles onto the road surface when grounded (per second).
     pub ground_settle_rate: f32,
-    /// Fraction of forward speed kept after a barrier impact.
-    pub barrier_speed_keep: f32,
-    /// Fraction of the incoming lateral speed reflected off a barrier.
-    pub barrier_restitution: f32,
-    /// How fast a car pressed against a barrier is turned to run *along* it
-    /// (per second). Without this a car that noses into a wall grinds there
-    /// forever: with zero yaw authority of its own and no rotation from the
-    /// contact, nothing in the model ever points it back down the road.
-    pub barrier_align: f32,
-    /// Fraction of forward speed kept after hitting a traffic car.
-    pub traffic_speed_keep: f32,
-    /// Sideways shove (m/s) applied when the player hits traffic.
-    pub traffic_deflect: f32,
-    /// Simulation steps a collision keeps the impact state raised.
-    pub impact_steps: u32,
     /// The half-length of the player's collision box (m).
     pub half_length: f32,
     /// The half-width of the player's collision box (m).
@@ -168,12 +153,6 @@ impl VehicleTuning {
         gravity: 24.0,
         ground_snap_speed: 0.0,
         ground_settle_rate: 11.0,
-        barrier_speed_keep: 0.66,
-        barrier_restitution: 0.34,
-        barrier_align: 7.0,
-        traffic_speed_keep: 0.58,
-        traffic_deflect: 7.0,
-        impact_steps: 26,
         half_length: 2.25,
         half_width: 1.0,
         chassis: ChassisGeometry::DEFAULT,
@@ -183,6 +162,230 @@ impl VehicleTuning {
 impl Default for VehicleTuning {
     fn default() -> Self {
         VehicleTuning::DEFAULT
+    }
+}
+
+/// **Everything about hitting something.** Classification thresholds, the
+/// retained-momentum floors, the contact-episode rules, the separation assist,
+/// the recovery assist and the feedback amplitudes — one record, because they
+/// are one design.
+///
+/// The governing idea, and the reason this record exists at all: an ordinary
+/// collision in an arcade racer is an *event*, not a *state*. It costs a bounded
+/// slice of momentum once, disturbs the car's direction briefly, and hands
+/// control straight back. The failure mode this replaced was the opposite —
+/// contact was a state the simulation re-entered every fixed step for as long as
+/// two boxes overlapped, so one mistake compounded its own speed loss
+/// geometrically, retriggered its own sound, and re-armed its own camera shake
+/// until the player had stopped moving. See [`crate::sim::contact`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CollisionTuning {
+    /// Closing speed along the contact normal (m/s) at or below which a contact
+    /// is a [`crate::sim::contact::Severity::Scrape`], whatever its angle.
+    pub scrape_normal_speed: f32,
+    /// Normal closing speed (m/s) at or above which a *square* contact is a
+    /// [`crate::sim::contact::Severity::MajorCrash`].
+    pub crash_normal_speed: f32,
+    /// Squareness (`0` = parallel, `1` = head-on) at or below which a contact is
+    /// shallow enough to be a scrape however fast it was.
+    pub scrape_squareness: f32,
+    /// Squareness at or above which a fast contact counts as near-perpendicular.
+    pub crash_squareness: f32,
+    /// Speed (m/s) below which an obstacle counts as "nearly stationary".
+    pub stationary_obstacle_speed: f32,
+    /// Player speed (m/s) above which hitting a nearly stationary obstacle
+    /// square-on is a major crash regardless of the other thresholds.
+    pub stationary_crash_speed: f32,
+    /// Normal closing speed (m/s) at or above which a square *barrier* contact
+    /// is a major crash. Barriers are firmer than traffic, so this is the one
+    /// classification threshold that differs between the two.
+    pub barrier_crash_normal_speed: f32,
+    /// Normal closing speed (m/s) at or above which a square contact with major
+    /// scenery — the rock and tunnel walls of a
+    /// [`crate::track::SectionKind::walled`] section, which have no guardrail
+    /// and no give — is a major crash. The lowest of the three, because these
+    /// are the one thing on the course that genuinely does not move.
+    pub scenery_crash_normal_speed: f32,
+
+    /// Fraction of the pre-impact forward speed a scrape must leave behind.
+    ///
+    /// The three floors below are **the** headline promise of the whole system,
+    /// and the speed loss for each severity is derived from its floor
+    /// (`max_loss = 1 - floor`) rather than authored separately — two numbers
+    /// that must agree are one number.
+    pub scrape_speed_floor: f32,
+    /// Fraction of the pre-impact forward speed an ordinary bump must leave.
+    pub bump_speed_floor: f32,
+    /// Fraction of the pre-impact forward speed a major crash must leave.
+    pub crash_speed_floor: f32,
+    /// Normal closing speed (m/s) at which a severity's speed loss reaches its
+    /// cap. Below it the loss ramps in proportionally, so a light touch inside a
+    /// severity band costs less than a heavy one.
+    pub loss_reference_speed: f32,
+
+    /// Lateral separation impulse (m/s) a scrape applies.
+    pub scrape_deflect: f32,
+    /// Lateral deflection (m/s) an ordinary bump applies.
+    pub bump_deflect: f32,
+    /// Lateral deflection (m/s) a major crash applies.
+    pub crash_deflect: f32,
+    /// Yaw disturbance (rad/s) an ordinary bump applies.
+    pub bump_yaw_kick: f32,
+    /// Yaw disturbance (rad/s) a major crash applies.
+    pub crash_yaw_kick: f32,
+    /// How fast a collision's yaw disturbance decays on its own (per second).
+    pub impact_yaw_decay: f32,
+
+    /// Camera/spark impulse amplitude for a scrape (`0..1`).
+    pub scrape_pulse: f32,
+    /// Camera/spark impulse amplitude for a bump.
+    pub bump_pulse: f32,
+    /// Camera/spark impulse amplitude for a major crash.
+    pub crash_pulse: f32,
+
+    /// Fixed steps a contact episode with one obstacle suppresses further full
+    /// impact responses against **that same obstacle**. 39 steps is 0.65 s.
+    pub episode_steps: u32,
+    /// Clearance (m) beyond touching at which a pair counts as genuinely
+    /// separated, ending the episode early so a fresh collision reads as fresh.
+    ///
+    /// **Roughly a car's width, and that is the point.** Separation itself opens
+    /// a few centimetres of daylight within a step or two, so a small value here
+    /// makes "the vehicles separated and collided again" true on almost every
+    /// step of a grind — and the cooldown, which exists precisely to stop a
+    /// grind re-charging itself, is re-armed by the very assist that is pushing
+    /// the pair apart. Measured, that reintroduced the original bug in a milder
+    /// form: holding full lock into a car alongside escalated a scrape into a
+    /// bump partway through. A gap the player has to genuinely *drive* is what
+    /// makes the clause mean what it says.
+    pub separation_clearance: f32,
+    /// Fixed steps between the rate-limited scrape cues emitted while a contact
+    /// episode is still grinding. 12 steps is 0.2 s.
+    pub scrape_repeat_steps: u32,
+
+    /// Most a body may be moved out of penetration in one fixed step (m). Deep
+    /// overlaps resolve over several steps rather than as a visible teleport.
+    pub separation_step: f32,
+    /// Velocity bias (m/s) pushing an overlapping pair apart, so separation
+    /// continues under the integrator rather than only as position edits.
+    pub separation_speed: f32,
+    /// Share of a traffic de-penetration the *player* absorbs; the traffic car
+    /// takes the rest. Below a half, because traffic yields and concrete does
+    /// not.
+    pub player_separation_share: f32,
+
+    /// Most a traffic car may be pushed out of its lane by contact (m).
+    pub traffic_yield_lateral: f32,
+    /// Most forward speed (m/s) a traffic car may be shunted by.
+    pub traffic_yield_speed: f32,
+    /// How fast a yielded traffic car returns to its lane (per second).
+    pub traffic_yield_return: f32,
+    /// How fast a shunted traffic car's extra speed bleeds off (per second).
+    pub traffic_yield_decay: f32,
+
+    /// Fixed steps of recovery assistance after a bump or a crash. 60 is 1 s.
+    pub recovery_steps: u32,
+    /// Extra forward acceleration at full assist, as a fraction of the car's own
+    /// acceleration. **Not boost**: it neither reads nor writes the meter.
+    pub recovery_accel_gain: f32,
+    /// Extra lateral bleed at full assist (per second), applied only to the
+    /// slide above [`Self::recovery_stable_lateral`].
+    pub recovery_lateral_damp: f32,
+    /// Extra decay on the collision's yaw disturbance at full assist (per s).
+    pub recovery_yaw_damp: f32,
+    /// How strongly the heading is biased toward the recovery target (per s).
+    pub recovery_heading_pull: f32,
+    /// How much of the heading target is the road ahead rather than the car's
+    /// own direction of travel (`0..1`).
+    pub recovery_road_blend: f32,
+    /// Lateral speed (m/s) below which the car counts as stable again.
+    pub recovery_stable_lateral: f32,
+    /// Yaw disturbance (rad/s) below which the car counts as stable again.
+    pub recovery_stable_yaw: f32,
+
+    /// Fraction of the incoming lateral speed reflected off a barrier.
+    pub barrier_restitution: f32,
+    /// How fast a car pressed against a barrier is turned to run *along* it
+    /// (per second). Without this a car that noses into a wall grinds there
+    /// forever: with zero yaw authority of its own and no rotation from the
+    /// contact, nothing in the model ever points it back down the road.
+    pub barrier_align: f32,
+}
+
+impl CollisionTuning {
+    /// The shipping collision feel.
+    pub const DEFAULT: CollisionTuning = CollisionTuning {
+        scrape_normal_speed: 9.0,
+        crash_normal_speed: 26.0,
+        scrape_squareness: 0.30,
+        crash_squareness: 0.68,
+        stationary_obstacle_speed: 6.0,
+        stationary_crash_speed: 55.0,
+        barrier_crash_normal_speed: 22.0,
+        scenery_crash_normal_speed: 14.0,
+
+        scrape_speed_floor: 0.95,
+        bump_speed_floor: 0.85,
+        crash_speed_floor: 0.65,
+        loss_reference_speed: 40.0,
+
+        scrape_deflect: 2.2,
+        bump_deflect: 5.5,
+        crash_deflect: 8.0,
+        bump_yaw_kick: 0.55,
+        crash_yaw_kick: 1.15,
+        impact_yaw_decay: 6.0,
+
+        scrape_pulse: 0.10,
+        bump_pulse: 0.42,
+        crash_pulse: 0.95,
+
+        episode_steps: 39,
+        separation_clearance: 1.1,
+        scrape_repeat_steps: 12,
+
+        separation_step: 0.35,
+        separation_speed: 3.0,
+        player_separation_share: 0.35,
+
+        traffic_yield_lateral: 1.4,
+        traffic_yield_speed: 6.0,
+        traffic_yield_return: 1.6,
+        traffic_yield_decay: 2.2,
+
+        recovery_steps: 60,
+        recovery_accel_gain: 0.85,
+        recovery_lateral_damp: 7.0,
+        recovery_yaw_damp: 5.5,
+        recovery_heading_pull: 2.2,
+        recovery_road_blend: 0.4,
+        recovery_stable_lateral: 2.5,
+        recovery_stable_yaw: 0.35,
+
+        barrier_restitution: 0.34,
+        barrier_align: 7.0,
+    };
+
+    /// The most forward speed a `severity` collision may take, as a fraction.
+    /// Derived from the floor so the two can never disagree.
+    pub fn max_loss(&self, floor: f32) -> f32 {
+        (1.0 - floor).clamp(0.0, 1.0)
+    }
+
+    /// The episode length in seconds — what the design brief is written in.
+    pub fn episode_seconds(&self) -> f32 {
+        self.episode_steps as f32 * DT
+    }
+
+    /// The recovery length in seconds.
+    pub fn recovery_seconds(&self) -> f32 {
+        self.recovery_steps as f32 * DT
+    }
+}
+
+impl Default for CollisionTuning {
+    fn default() -> Self {
+        CollisionTuning::DEFAULT
     }
 }
 
@@ -239,6 +442,14 @@ pub struct CameraTuning {
     /// Impact shake amplitude (m) at the moment of a full-speed collision.
     pub impact_shake: f32,
     /// Per-second exponential decay of the impact shake.
+    ///
+    /// This one number sets how long *every* severity of impact is visible for,
+    /// because the shake is an impulse that decays rather than a level that is
+    /// held: the time an amplitude stays above the eye's floor is
+    /// `ln(amplitude / floor) / decay`. At `11.0` the three severities'
+    /// amplitudes land at roughly 0.10 s, 0.22 s and 0.30 s of visible kick,
+    /// which is the design brief's three bands — from one constant rather than
+    /// three that could drift apart.
     pub impact_decay: f32,
     /// Minimum eye height above the road surface (m) — the cheap, bounded
     /// stand-in for camera obstruction, using the track surface we already have.
@@ -301,7 +512,7 @@ impl CameraTuning {
         speed_shake: 0.035,
         boost_shake: 0.05,
         impact_shake: 0.55,
-        impact_decay: 7.5,
+        impact_decay: 11.0,
         min_ground_clearance: 0.9,
     };
 }
@@ -432,6 +643,18 @@ pub struct RaceTuning {
     /// How far past the start line traffic begins (m) — the countdown and the
     /// first acceleration happen on clear road.
     pub traffic_clear_start: f32,
+    /// How far ahead of the player a traffic car may never *appear* (m).
+    ///
+    /// Recycled traffic normally spawns [`Self::traffic_ahead`] away, but a jump
+    /// — a capture, a reset, the finish teleport — refills the pool around
+    /// wherever the player now is, and without this the next slot can land on
+    /// top of the car. Sized so that even at the boosted top speed a newly
+    /// spawned car is more than a second of warning away.
+    pub traffic_safe_ahead: f32,
+    /// How far behind the player a traffic car may never appear (m). Shorter
+    /// than the window ahead: a car materialising in the mirror is startling,
+    /// one materialising in the windscreen is unfair.
+    pub traffic_safe_behind: f32,
     /// Slowest traffic speed (m/s).
     pub traffic_speed_min: f32,
     /// Fastest traffic speed (m/s).
@@ -474,6 +697,8 @@ impl RaceTuning {
         traffic_behind: 90.0,
         traffic_spacing: 85.0,
         traffic_clear_start: 300.0,
+        traffic_safe_ahead: 140.0,
+        traffic_safe_behind: 20.0,
         traffic_speed_min: 22.0,
         traffic_speed_max: 38.0,
         traffic_half_length: 2.3,
@@ -504,6 +729,7 @@ impl Default for RaceTuning {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Tuning {
     pub vehicle: VehicleTuning,
+    pub collision: CollisionTuning,
     pub camera: CameraTuning,
     pub course: CourseTuning,
     pub race: RaceTuning,
@@ -513,6 +739,7 @@ impl Tuning {
     /// The shipping tuning.
     pub const DEFAULT: Tuning = Tuning {
         vehicle: VehicleTuning::DEFAULT,
+        collision: CollisionTuning::DEFAULT,
         camera: CameraTuning::DEFAULT,
         course: CourseTuning::DEFAULT,
         race: RaceTuning::DEFAULT,
@@ -527,6 +754,7 @@ mod tests {
     fn the_default_tuning_is_the_shipping_tuning() {
         assert_eq!(Tuning::default(), Tuning::DEFAULT);
         assert_eq!(VehicleTuning::default(), VehicleTuning::DEFAULT);
+        assert_eq!(CollisionTuning::default(), CollisionTuning::DEFAULT);
         assert_eq!(CameraTuning::default(), CameraTuning::DEFAULT);
         assert_eq!(CourseTuning::default(), CourseTuning::DEFAULT);
         assert_eq!(RaceTuning::default(), RaceTuning::DEFAULT);
@@ -559,7 +787,6 @@ mod tests {
             "boost is a different order of thing from the throttle, not a bonus on it"
         );
         assert!(v.handbrake_grip < v.grip, "the handbrake breaks traction");
-        assert!(v.barrier_align > 0.0, "a wall always turns you back along itself");
         assert!(v.offroad_grip < v.grip, "and so does the dirt");
         // The dirt must not out-brake the brakes. `offroad_drag` is a rate, so
         // its effect scales with speed; unchecked, running wide at top speed
@@ -601,6 +828,74 @@ mod tests {
         assert!(v.steer_authority_floor > 0.0, "steering never dies completely");
     }
 
+    /// The collision numbers encode the design brief as an *ordering*, and the
+    /// ordering is what makes a scrape a scrape and a crash a crash. Every claim
+    /// here is one sentence of that brief turned into an assertion.
+    #[test]
+    fn the_collision_numbers_encode_the_intended_severity_ladder() {
+        let c = CollisionTuning::DEFAULT;
+        // The three severities are genuinely ordered on every axis they share.
+        assert!(c.scrape_normal_speed < c.crash_normal_speed, "the bands are ordered");
+        // Firmness ladder: traffic yields, a guardrail does not, rock does not
+        // even pretend to — so each takes less closing speed to be a crash.
+        assert!(c.scenery_crash_normal_speed < c.barrier_crash_normal_speed);
+        assert!(c.barrier_crash_normal_speed < c.crash_normal_speed);
+        assert!(c.scrape_normal_speed < c.scenery_crash_normal_speed);
+        assert!(c.scrape_squareness < c.crash_squareness);
+        assert!(c.crash_speed_floor < c.bump_speed_floor);
+        assert!(c.bump_speed_floor < c.scrape_speed_floor);
+        assert!(c.scrape_speed_floor < 1.0, "even a scrape costs something");
+        assert!(c.scrape_deflect < c.bump_deflect && c.bump_deflect < c.crash_deflect);
+        assert!(c.bump_yaw_kick < c.crash_yaw_kick);
+        assert!(c.scrape_pulse < c.bump_pulse && c.bump_pulse < c.crash_pulse);
+
+        // The brief's headline floors, verbatim.
+        assert!((c.scrape_speed_floor - 0.95).abs() < 1.0e-6);
+        assert!((c.bump_speed_floor - 0.85).abs() < 1.0e-6);
+        assert!((c.crash_speed_floor - 0.65).abs() < 1.0e-6);
+        // And the losses are the floors' complements, by construction.
+        assert!((c.max_loss(c.bump_speed_floor) - 0.15).abs() < 1.0e-6);
+        assert!((c.max_loss(c.crash_speed_floor) - 0.35).abs() < 1.0e-6);
+        assert_eq!(c.max_loss(2.0), 0.0, "a floor above one costs nothing");
+
+        // "suppress another full impact response ... for 0.65 seconds".
+        assert!(
+            (c.episode_seconds() - 0.65).abs() < 0.01,
+            "the episode is {} s",
+            c.episode_seconds()
+        );
+        // "for approximately one second following the impact".
+        assert!((c.recovery_seconds() - 1.0).abs() < 0.02);
+        // A scrape cue repeats several times inside one episode, so a grind
+        // sounds continuous — but far less often than every step.
+        assert!(c.scrape_repeat_steps > 1 && c.scrape_repeat_steps < c.episode_steps);
+
+        // Separation is bounded on every axis, and traffic yields more than the
+        // player does.
+        assert!(c.player_separation_share < 0.5, "traffic is the lighter body");
+        assert!(c.player_separation_share > 0.0, "but the player still moves");
+        assert!(c.separation_step > 0.0 && c.separation_step < 1.0, "no teleports");
+        assert!(c.traffic_yield_lateral > 0.0 && c.traffic_yield_lateral < 2.0);
+        assert!(c.traffic_yield_speed > 0.0 && c.traffic_yield_speed < 10.0);
+        assert!(c.traffic_yield_return > 0.0, "a yielded car comes back to its lane");
+        assert!(c.traffic_yield_decay > 0.0);
+
+        // Recovery is an assist, not an autopilot: the extra acceleration is a
+        // fraction of the car's own, never a multiple of it.
+        assert!(c.recovery_accel_gain > 0.0 && c.recovery_accel_gain < 1.0);
+        assert!(c.recovery_heading_pull < VehicleTuning::DEFAULT.max_yaw_rate);
+        assert!((0.0..1.0).contains(&c.recovery_road_blend));
+        assert!(c.recovery_stable_lateral > 0.0 && c.recovery_stable_yaw > 0.0);
+        assert!(
+            c.recovery_stable_lateral < VehicleTuning::DEFAULT.drift_threshold,
+            "recovery settles the car well before it counts as drifting"
+        );
+
+        // A barrier is firmer than traffic but still not a brick wall.
+        assert!(c.barrier_align > 0.0, "a wall always turns you back along itself");
+        assert!((0.0..1.0).contains(&c.barrier_restitution), "walls do not launch you");
+    }
+
     /// The course constraints have to be self-consistent or the generator's
     /// bounded correction pass cannot converge.
     #[test]
@@ -627,6 +922,45 @@ mod tests {
         assert!(r.boost_drain_rate > r.high_speed_boost_rate, "boost is spent faster than it trickles in");
         assert!(r.traffic_speed_min < r.traffic_speed_max);
         assert!(r.traffic_speed_max < VehicleTuning::DEFAULT.top_speed, "the player always closes on traffic");
+    }
+
+    /// Traffic has to stay dense enough to be worth avoiding and fair enough to
+    /// be avoidable, and those are two numbers pulling opposite ways.
+    #[test]
+    fn the_traffic_layout_is_dense_but_navigable() {
+        let r = RaceTuning::DEFAULT;
+        let v = VehicleTuning::DEFAULT;
+        // Consecutive spawn slots are far enough apart that two cars can never
+        // form a wall across the road: a blocked cross-section needs cars within
+        // a car length of each other along the course, and the slot pitch is an
+        // order of magnitude past that.
+        let car_length = (v.half_length + r.traffic_half_length) * 2.0;
+        assert!(
+            r.traffic_spacing > car_length * 5.0,
+            "slots {} m apart cannot block a {car_length} m cross-section",
+            r.traffic_spacing
+        );
+        // But close enough that traffic is a constant presence: at the top speed
+        // the player meets one every couple of seconds.
+        let closing = v.top_speed - r.traffic_speed_max;
+        assert!(
+            r.traffic_spacing / closing < 2.5,
+            "traffic arrives every {} s at top speed, which is scenery",
+            r.traffic_spacing / closing
+        );
+        // A newly spawned car is always more than a second of warning away, even
+        // at the boosted top speed and even against the slowest traffic.
+        let worst_closing = v.top_speed + v.boost_top_speed_bonus - r.traffic_speed_min;
+        assert!(
+            r.traffic_safe_ahead / worst_closing > 1.0,
+            "only {} s of warning at the worst closing speed",
+            r.traffic_safe_ahead / worst_closing
+        );
+        assert!(r.traffic_safe_behind > 0.0 && r.traffic_safe_behind < r.traffic_safe_ahead);
+        assert!(
+            r.traffic_safe_ahead < r.traffic_ahead,
+            "the safety window is a floor on the spawn horizon, not a replacement for it"
+        );
     }
 
     #[test]

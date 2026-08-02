@@ -27,19 +27,21 @@ pub mod boost;
 pub mod car;
 pub mod chassis;
 pub mod collision;
+pub mod contact;
 pub mod controller;
 pub mod rails;
 pub mod traffic;
 
 use axiom_math::Vec3;
 
-use crate::camera::{CameraPose, ChaseCamera};
+use crate::camera::{CameraPose, ChaseCamera, ImpactImpulse};
 use crate::command::DriveCommand;
 use crate::track::{SectionKind, Track, GRID_DISTANCE};
 use crate::tuning::{Tuning, DT};
 
 use boost::BoostMeter;
 use car::{CarPose, CarState};
+use contact::{ContactState, Severity};
 use traffic::Traffic;
 
 /// What the run is doing.
@@ -68,7 +70,18 @@ pub enum RaceEvent {
     /// The countdown finished.
     Go,
     /// Something was hit.
-    Impact { strength: f32, traffic: bool },
+    ///
+    /// `severity` is what presentation keys off — sound, camera impulse, sparks
+    /// — and `strength` only scales *within* that severity's band. `fresh`
+    /// distinguishes the opening response of a collision from the rate-limited
+    /// cue a sustained grind emits, which is what stops one long scrape from
+    /// sounding like a dozen separate crashes.
+    Impact {
+        severity: Severity,
+        strength: f32,
+        traffic: bool,
+        fresh: bool,
+    },
     /// A traffic car was threaded.
     NearMiss { boost_awarded: f32 },
     /// A drift began.
@@ -92,6 +105,9 @@ pub struct RaceSim {
     /// This one `Option` is the whole of "the simulation is on rails" — see
     /// [`crate::PlayProfile`] for why the decision is made once, far above here.
     rails: Option<rails::RailsState>,
+    /// Live collision state: which contact episodes are running, and whether the
+    /// car is under recovery assistance. See [`contact`].
+    contact: ContactState,
     traffic: Traffic,
     boost: BoostMeter,
     camera: ChaseCamera,
@@ -112,6 +128,11 @@ pub struct RaceSim {
     previous_camera_pose: CameraPose,
     camera_pose: CameraPose,
     last_forward_accel: f32,
+    /// The camera kick owed to a collision resolved this step, consumed by
+    /// [`RaceSim::repose`]. At most one per step, and only ever from a *fresh*
+    /// contact — which is the mechanism behind "camera impulses are triggered
+    /// once per impact episode".
+    pending_impulse: Option<ImpactImpulse>,
     was_off_road: bool,
     was_boosting: bool,
 }
@@ -140,8 +161,7 @@ impl RaceSim {
             &track,
             &tuning.camera,
             &tuning.vehicle,
-            0.0,
-            false,
+            crate::camera::CameraDrive::default(),
         );
         let car_pose = pose_of(&car, &track, 0.0);
         // Lane 0 is the centreline lane, and it exists for the whole course, so
@@ -150,6 +170,7 @@ impl RaceSim {
         let rails = profile.is_rails().then(|| rails::RailsState::in_lane(0));
         RaceSim {
             rails,
+            contact: ContactState::new(),
             traffic: Traffic::new(seed, &tuning.race),
             boost: BoostMeter::new(),
             camera,
@@ -169,6 +190,7 @@ impl RaceSim {
             previous_camera_pose: camera_pose,
             camera_pose,
             last_forward_accel: 0.0,
+            pending_impulse: None,
             was_off_road: false,
             was_boosting: false,
             track,
@@ -200,6 +222,12 @@ impl RaceSim {
     /// The boost meter.
     pub const fn boost(&self) -> &BoostMeter {
         &self.boost
+    }
+
+    /// The live collision state — which contacts are still in progress, and
+    /// whether the car is recovering from one.
+    pub const fn contact(&self) -> &ContactState {
+        &self.contact
     }
 
     /// The tuning this race is running under.
@@ -337,6 +365,9 @@ impl RaceSim {
         controller::place_on_track(&mut self.car, &sample, 0.0);
         self.camera.snap_to(&self.car, &self.track, &self.tuning.camera);
         self.traffic.clear();
+        // "The car I am still touching" is meaningless after a teleport, and the
+        // traffic pool it referred to has just been emptied.
+        self.contact.clear();
         self.repose();
     }
 
@@ -353,6 +384,7 @@ impl RaceSim {
         let sample = self.track.safe_reset(self.car.distance);
         controller::place_on_track(&mut self.car, &sample, 0.0);
         self.camera.snap_to(&self.car, &self.track, &self.tuning.camera);
+        self.contact.clear();
         self.events.push(RaceEvent::Reset);
     }
 
@@ -404,6 +436,7 @@ impl RaceSim {
             controller::settle_steering(&mut self.car, command, &self.tuning.vehicle);
             self.last_forward_accel = 0.0;
             self.resolve_traffic();
+            self.contact.advance(&mut self.car, &self.tuning.collision);
             return;
         }
         let boost_available = self.boost.step(command.boost, &self.car, &self.tuning.race);
@@ -416,8 +449,9 @@ impl RaceSim {
             &mut self.car,
             command,
             &self.track,
-            &self.tuning.vehicle,
+            &self.tuning,
             boost_available,
+            &mut self.contact,
             self.rails.as_mut(),
         );
         self.last_forward_accel = report.forward_accel;
@@ -425,15 +459,17 @@ impl RaceSim {
             self.events.push(RaceEvent::DriftStarted);
         }
         if let Some(impact) = report.barrier_impact {
-            self.impact_count += 1;
-            self.events.push(RaceEvent::Impact {
-                strength: impact.strength,
-                traffic: false,
-            });
+            self.report_impact(impact);
         }
 
         self.resolve_traffic();
         self.note_surface();
+
+        // One call, at the very end of the step, ages every episode and fades
+        // the recovery. Doing it here rather than inside the controller is what
+        // makes "one fixed step is one tick of every contact" true even though
+        // barriers resolve in the controller and traffic resolves after it.
+        self.contact.advance(&mut self.car, &self.tuning.collision);
 
         self.top_speed_seen = self.top_speed_seen.max(self.car.speed());
         self.near_miss_notice = self.near_miss_notice.saturating_sub(1);
@@ -441,52 +477,110 @@ impl RaceSim {
     }
 
     /// Traffic contacts first, then near misses on whatever was not hit.
+    ///
+    /// The order inside a contact matters and is fixed: **separate, then
+    /// respond**. Separation runs on every overlapping step — it is the physics
+    /// of two bodies not occupying one space, and suppressing it would leave the
+    /// player interpenetrated. The *response* — momentum, sound, camera — is
+    /// gated by the episode ledger, and runs once per collision.
     fn resolve_traffic(&mut self) {
-        self.traffic
-            .step(self.car.distance, &self.track, &self.tuning.race);
+        self.traffic.step(
+            self.car.distance,
+            &self.track,
+            &self.tuning.race,
+            &self.tuning.collision,
+        );
 
         let race = self.tuning.race;
         let vehicle = self.tuning.vehicle;
-        let snapshot: Vec<(usize, f32, f32, f32, bool)> = self
+        let collision = self.tuning.collision;
+        let snapshot: Vec<(usize, f32, f32, f32, u32, bool)> = self
             .traffic
             .cars()
             .iter()
             .enumerate()
             .filter(|(_, c)| c.active)
-            .map(|(i, c)| (i, c.distance, c.lateral, c.speed, c.near_missed))
+            .map(|(i, c)| (i, c.distance, c.lateral, c.speed, c.slot, c.near_missed))
             .collect();
 
-        for (index, distance, lateral, speed, near_missed) in snapshot {
-            if let Some(impact) = collision::resolve_traffic(
-                &mut self.car,
-                &self.track,
-                distance,
-                lateral,
-                speed,
-                &race,
-                &vehicle,
-            ) {
-                self.impact_count += 1;
-                self.events.push(RaceEvent::Impact {
-                    strength: impact.strength,
-                    traffic: true,
-                });
-                // A car you hit is not a car you threaded.
-                self.traffic.mark_near_missed(index);
+        for (index, distance, lateral, speed, slot, near_missed) in snapshot {
+            let obstacle = contact::Obstacle::Traffic { slot };
+            let gap = collision::traffic_gap(&self.car, distance, lateral, &race, &vehicle);
+            // Report the clearance every step, whether or not there is contact:
+            // an episode ends the moment the pair genuinely comes apart, and
+            // that fact is only visible from here.
+            self.contact.note_gap(obstacle, gap, &collision);
+
+            let Some(overlap) =
+                collision::traffic_overlap(&self.car, distance, lateral, &race, &vehicle)
+            else {
+                if !near_missed
+                    && collision::is_near_miss(&self.car, distance, lateral, speed, &race, &vehicle)
+                {
+                    self.traffic.mark_near_missed(index);
+                    self.boost.award(race.near_miss_boost);
+                    self.near_miss_count += 1;
+                    self.near_miss_notice = race.notify_steps;
+                    self.events.push(RaceEvent::NearMiss {
+                        boost_awarded: race.near_miss_boost,
+                    });
+                }
                 continue;
-            }
-            if !near_missed
-                && collision::is_near_miss(&self.car, distance, lateral, speed, &race, &vehicle)
-            {
-                self.traffic.mark_near_missed(index);
-                self.boost.award(race.near_miss_boost);
-                self.near_miss_count += 1;
-                self.near_miss_notice = race.notify_steps;
-                self.events.push(RaceEvent::NearMiss {
-                    boost_awarded: race.near_miss_boost,
-                });
+            };
+
+            let sample = self.track.sample_at(self.car.distance);
+            // Which way round the obstacle has more room. A shunt has no natural
+            // side, and biasing the player toward the middle of the road is what
+            // turns "stuck behind a car" into "slide past it".
+            let escape = escape_side(self.car.lateral, lateral, &sample);
+            let facts =
+                collision::traffic_facts(&self.car, &overlap, speed, slot, &sample, escape);
+            let responded = self.contact.respond(&mut self.car, &facts, &collision);
+            let length = self.track.length();
+            collision::separate_from_traffic(
+                &mut self.car,
+                &mut self.traffic.cars_mut()[index],
+                &overlap,
+                &sample,
+                escape,
+                length,
+                &collision,
+            );
+            // A car you are touching is not a car you threaded, whether or not
+            // the contact was loud enough to report.
+            self.traffic.mark_near_missed(index);
+            if let Some(impact) = responded {
+                self.report_impact(impact);
             }
         }
+    }
+
+    /// Push a resolved contact out as an event, and count it.
+    ///
+    /// Only a *fresh* contact counts as an impact. The rate-limited cues a
+    /// sustained grind emits are presentation — a scrape you can hear and see —
+    /// and counting them would turn one long rub against a wall into a HUD
+    /// reading of forty crashes.
+    fn report_impact(&mut self, impact: contact::Impact) {
+        self.impact_count += u32::from(impact.fresh);
+        // The strongest fresh contact of the step owns the camera kick. A
+        // suppressed grind's cue carries a zero pulse and therefore never
+        // re-arms it.
+        let stronger = self
+            .pending_impulse
+            .is_none_or(|held| impact.pulse > held.amplitude);
+        if impact.pulse > 0.0 && stronger {
+            self.pending_impulse = Some(ImpactImpulse {
+                direction: impact.direction,
+                amplitude: impact.pulse,
+            });
+        }
+        self.events.push(RaceEvent::Impact {
+            severity: impact.severity,
+            strength: impact.strength,
+            traffic: impact.traffic,
+            fresh: impact.fresh,
+        });
     }
 
     /// Track the on/off-road transition so the HUD can warn once.
@@ -544,8 +638,11 @@ impl RaceSim {
             &self.track,
             &self.tuning.camera,
             &self.tuning.vehicle,
-            self.last_forward_accel,
-            self.boost.active(),
+            crate::camera::CameraDrive {
+                forward_accel: self.last_forward_accel,
+                boosting: self.boost.active(),
+                impact: self.pending_impulse.take(),
+            },
         );
     }
 
@@ -554,6 +651,31 @@ impl RaceSim {
         self.car.stuck_steps as f32 * DT >= self.tuning.race.stuck_seconds
     }
 }
+
+/// Which way round an obstacle the player should be biased to slide.
+///
+/// A nose-to-tail shunt has no natural side, and the difference between "you
+/// were pushed back" and "you were pushed *round*" is the difference between
+/// being stuck behind a car and overtaking it. The rule: take the side the
+/// player is already leaning toward, unless that side has run out of road, in
+/// which case take the roomier one. Both branches are pure functions of the
+/// geometry, so the choice replays exactly.
+fn escape_side(player_lateral: f32, traffic_lateral: f32, sample: &crate::track::TrackSample) -> f32 {
+    let room_right = sample.half_width - traffic_lateral;
+    let room_left = sample.half_width + traffic_lateral;
+    let roomier = if room_right >= room_left { 1.0 } else { -1.0 };
+    let natural = if player_lateral >= traffic_lateral { 1.0 } else { -1.0 };
+    let natural_room = if natural > 0.0 { room_right } else { room_left };
+    if natural_room >= ESCAPE_MIN_ROOM {
+        natural
+    } else {
+        roomier
+    }
+}
+
+/// Road (m) that must remain beyond an obstacle for the player to be biased that
+/// way round it. Roughly a car's width plus a margin.
+const ESCAPE_MIN_ROOM: f32 = 2.6;
 
 /// How many numbers the countdown shows.
 pub const COUNTDOWN_NUMBERS: u32 = 3;
@@ -949,12 +1071,540 @@ mod tests {
         assert!(sim.car().is_finite());
     }
 
+    // ---------------------------------------------------------------------
+    // Traffic collisions, end to end.
+    //
+    // Everything below drives a *staged* contact through the whole pipeline —
+    // controller, traffic step, contact episodes, separation, events, camera —
+    // rather than calling the resolver directly. The unit-level claims live in
+    // `contact` and `collision`; what these prove is that the pipeline actually
+    // delivers them, which is a different question and the one that was wrong.
+    // ---------------------------------------------------------------------
+
+    /// A race with exactly one traffic car, so a scenario owns the only thing
+    /// on the road and no unrelated car can wander into the measurement.
+    fn solo_traffic() -> Tuning {
+        Tuning {
+            race: crate::tuning::RaceTuning {
+                traffic_active: 1,
+                ..crate::tuning::RaceTuning::DEFAULT
+            },
+            ..Tuning::DEFAULT
+        }
+    }
+
+    /// Stage a contact and return the race one step *before* it happens.
+    ///
+    /// `along` is how far behind the traffic car the player starts and `across`
+    /// how far to its side, both in metres; the two speeds are m/s. The traffic
+    /// car's lateral is read *after* a settling step rather than assumed,
+    /// because the traffic step re-derives it from the lane and the in-lane
+    /// wander — a hand-placed lateral is overwritten before any contact test
+    /// ever sees it.
+    fn staged(along: f32, across: f32, player_speed: f32, traffic_speed: f32) -> RaceSim {
+        let mut sim = RaceSim::new(crate::DEFAULT_SEED, solo_traffic());
+        while sim.phase() == RacePhase::Countdown {
+            sim.step(DriveCommand::IDLE);
+        }
+        sim.place_at(STAGE_DISTANCE);
+        // Several idle steps, not one: the spawn budget is one slot per pool
+        // entry per step, and a slot skipped for landing inside the player's
+        // safety region spends a slot of that budget. With a pool of one, the
+        // first usable slot therefore takes a few steps to arrive.
+        let index = (0..8)
+            .find_map(|_| {
+                sim.step(DriveCommand::IDLE);
+                sim.traffic.cars().iter().position(|c| c.active)
+            })
+            .expect("the solo traffic car spawned");
+        {
+            let car = &mut sim.traffic.cars_mut()[index];
+            car.distance = STAGE_DISTANCE + 40.0;
+            car.speed = traffic_speed;
+            // The near-miss reward is not what any of these measure, and a
+            // pending one would add boost events to the stream.
+            car.near_missed = true;
+        }
+        sim.step(DriveCommand::IDLE);
+
+        let target = sim.traffic.cars()[index];
+        let sample = sim.track.sample_at(target.distance - along);
+        controller::place_on_track(&mut sim.car, &sample, target.lateral + across);
+        sim.car.forward_speed = player_speed;
+        sim.contact.clear();
+        sim
+    }
+
+    /// Where staged scenarios happen — well past the traffic clear-start, on
+    /// ordinary road.
+    const STAGE_DISTANCE: f32 = 1_200.0;
+
+    /// Every fresh impact reported over `steps` of `command`.
+    fn impacts(sim: &mut RaceSim, command: DriveCommand, steps: u32) -> Vec<(Severity, f32)> {
+        (0..steps)
+            .flat_map(|_| {
+                sim.step(command);
+                sim.events()
+                    .iter()
+                    .filter_map(|e| match e {
+                        RaceEvent::Impact {
+                            severity,
+                            strength,
+                            fresh: true,
+                            ..
+                        } => Some((*severity, *strength)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_shallow_pass_down_the_side_of_traffic_is_a_scrape() {
+        let t = solo_traffic();
+        let overlap = t.vehicle.half_width + t.race.traffic_half_width - 0.12;
+        let mut sim = staged(0.0, overlap, 60.0, 45.0);
+        let before = sim.car().forward_speed;
+        let hits = impacts(&mut sim, DriveCommand::FLAT_OUT, 4);
+        assert_eq!(hits.first().map(|h| h.0), Some(Severity::Scrape), "{hits:?}");
+        assert!(
+            sim.car().forward_speed >= before * t.collision.scrape_speed_floor,
+            "a scrape left {} of {before} m/s",
+            sim.car().forward_speed
+        );
+    }
+
+    #[test]
+    fn rear_ending_traffic_at_an_ordinary_closing_speed_is_a_bump() {
+        let t = solo_traffic();
+        let mut sim = staged(5.2, 0.0, 50.0, 30.0);
+        let before = sim.car().forward_speed;
+        let hits = impacts(&mut sim, DriveCommand::FLAT_OUT, 4);
+        assert_eq!(hits.first().map(|h| h.0), Some(Severity::Bump), "{hits:?}");
+        assert!(
+            sim.car().forward_speed >= before * t.collision.bump_speed_floor,
+            "a bump left {} of {before} m/s",
+            sim.car().forward_speed
+        );
+        assert!(sim.car().forward_speed < before, "but it cost something");
+    }
+
+    #[test]
+    fn ploughing_into_much_slower_traffic_is_a_major_crash() {
+        let t = solo_traffic();
+        let mut sim = staged(5.2, 0.0, 90.0, 24.0);
+        let before = sim.car().forward_speed;
+        let hits = impacts(&mut sim, DriveCommand::FLAT_OUT, 4);
+        assert_eq!(hits.first().map(|h| h.0), Some(Severity::MajorCrash), "{hits:?}");
+        assert!(
+            sim.car().forward_speed >= before * t.collision.crash_speed_floor,
+            "a crash left {} of {before} m/s",
+            sim.car().forward_speed
+        );
+        // And it is genuinely still driving, not spun to a halt.
+        assert!(sim.car().forward_speed > 40.0);
+        assert!(sim.car().is_finite());
+    }
+
+    /// **The headline regression.** Riding alongside a traffic car, leaning on
+    /// it the whole time, must cost its momentum once.
+    ///
+    /// Before contact episodes this was the worst case in the game: the full
+    /// response fired every fixed step for as long as the boxes overlapped, so
+    /// two seconds of rubbing along a car took the player from racing speed to
+    /// walking pace with a thud and a camera kick every step.
+    ///
+    /// The scenario is deliberately a *matched-speed coast* rather than a
+    /// flat-out chase: at matched speed the pair genuinely stays abreast for the
+    /// whole two seconds, which is the only way to make the overlap sustained
+    /// rather than something the player drives out of in three steps. The
+    /// steering leans into the traffic car throughout, so separation is fighting
+    /// a live input the whole time.
+    #[test]
+    fn sustained_side_by_side_contact_costs_its_momentum_once() {
+        let t = solo_traffic();
+        let overlap = t.vehicle.half_width + t.race.traffic_half_width - 0.2;
+        let lean = DriveCommand {
+            steer: GRIND_STEER,
+            ..DriveCommand::IDLE
+        };
+
+        // The control: the identical two seconds with nothing to touch. Coasting
+        // costs speed on its own (drag and rolling resistance), so the question
+        // is what the *contact* added on top of that.
+        let coasted = {
+            let mut sim = staged(0.0, overlap, GRIND_SPEED, GRIND_SPEED);
+            sim.traffic.clear();
+            (0..GRIND_STEPS).for_each(|_| sim.step(lean));
+            sim.car().forward_speed
+        };
+
+        let mut sim = staged(0.0, overlap, GRIND_SPEED, GRIND_SPEED);
+        let before = sim.car().forward_speed;
+        let mut contact_steps = 0u32;
+        let mut hits: Vec<(Severity, f32)> = Vec::new();
+        for _ in 0..GRIND_STEPS {
+            sim.step(lean);
+            let touching = sim.events().iter().any(
+                |e| matches!(e, RaceEvent::Impact { traffic: true, .. }),
+            );
+            contact_steps += u32::from(touching);
+            hits.extend(sim.events().iter().filter_map(|e| match e {
+                RaceEvent::Impact {
+                    severity,
+                    strength,
+                    traffic: true,
+                    fresh: true,
+                } => Some((*severity, *strength)),
+                _ => None,
+            }));
+            assert!(
+                !sim.car().surface.is_off_road(),
+                "the grind wandered off the road, so this stopped being a traffic test"
+            );
+        }
+
+        assert!(contact_steps > 0, "the contact happened at all");
+        // Every contact in a grind is a scrape. Nothing about rubbing along a
+        // car escalates, however long you hold it there.
+        assert!(
+            hits.iter().all(|(s, _)| *s == Severity::Scrape),
+            "rubbing along a car escalated: {hits:?}"
+        );
+        // And there are only as many full responses as there are cooldowns in
+        // two seconds — four, not a hundred and twenty.
+        let episodes = (GRIND_STEPS / t.collision.episode_steps + 1) as usize;
+        assert!(
+            hits.len() <= episodes,
+            "{} full impacts in one grind; at most {episodes} cooldowns fit: {hits:?}",
+            hits.len()
+        );
+
+        // The measurement that matters. Two seconds of continuous scraping cost
+        // barely more than two seconds of coasting past.
+        //
+        // The comparison is deliberately one-sided. Contact changes the *line*
+        // as well as the speed: the traffic car and the separation assist
+        // together hold the player straighter than the same steering input does
+        // on open road, and cornering costs speed of its own, so a grind can
+        // legitimately finish marginally *faster* than the control. What must
+        // never happen is the other direction.
+        let grind_cost = coasted - sim.car().forward_speed;
+        assert!(
+            sim.car().forward_speed >= coasted * t.collision.scrape_speed_floor,
+            "two seconds of scraping cost {grind_cost:.2} m/s on top of coasting              ({} vs {coasted} m/s), past the scrape floor",
+            sim.car().forward_speed
+        );
+        assert!(
+            sim.car().forward_speed > before * 0.9,
+            "and the car is still going: {before} -> {} m/s",
+            sim.car().forward_speed
+        );
+        assert!(sim.car().is_finite());
+    }
+
+    /// Matched speeds, so the pair genuinely stays abreast for the whole grind.
+    const GRIND_SPEED: f32 = 55.0;
+    /// Leaning into the traffic car — enough that separation is fighting a live
+    /// input, not enough to steer off the road inside two seconds.
+    const GRIND_STEER: f32 = 0.35;
+    /// Two seconds of it.
+    const GRIND_STEPS: u32 = 120;
+
+    /// The same grind, seen from the audio and camera side: a contact episode
+    /// schedules a bounded number of cues and arms exactly one camera impulse.
+    #[test]
+    fn a_grind_is_rate_limited_in_sound_and_kicks_the_camera_once_per_episode() {
+        let t = solo_traffic();
+        let overlap = t.vehicle.half_width + t.race.traffic_half_width - 0.2;
+        let mut sim = staged(0.0, overlap, GRIND_SPEED, GRIND_SPEED);
+        let lean = DriveCommand {
+            steer: GRIND_STEER,
+            ..DriveCommand::IDLE
+        };
+        let (mut cues, mut kicks) = (0u32, 0u32);
+        for _ in 0..GRIND_STEPS {
+            sim.step(lean);
+            cues += sim
+                .events()
+                .iter()
+                .filter(|e| matches!(e, RaceEvent::Impact { traffic: true, .. }))
+                .count() as u32;
+            kicks += u32::from(sim.events().iter().any(|e| {
+                matches!(
+                    e,
+                    RaceEvent::Impact {
+                        traffic: true,
+                        fresh: true,
+                        ..
+                    }
+                )
+            }));
+        }
+        assert!(cues > 1, "a grind is audible and continuous: {cues} cues");
+        // Rate limited to the scrape cadence, not one per step.
+        let ceiling = GRIND_STEPS / t.collision.scrape_repeat_steps + 2;
+        assert!(
+            cues <= ceiling,
+            "{cues} cues in {GRIND_STEPS} steps, ceiling {ceiling}"
+        );
+        // The camera is armed only by the opening response of an episode, so it
+        // is strictly rarer than the sound.
+        assert!(kicks < cues, "camera kicks are rarer than cues: {kicks} vs {cues}");
+        assert!(
+            kicks <= GRIND_STEPS / t.collision.episode_steps + 1,
+            "{kicks} camera kicks in one grind"
+        );
+    }
+
+    /// A cooldown must never make the player intangible: an unrelated car hit
+    /// during one still lands.
+    #[test]
+    fn a_second_traffic_car_still_lands_during_the_first_ones_cooldown() {
+        let mut sim = RaceSim::new(crate::DEFAULT_SEED, Tuning::DEFAULT);
+        while sim.phase() == RacePhase::Countdown {
+            sim.step(DriveCommand::IDLE);
+        }
+        crate::script::drive_autopilot(&mut sim, 900);
+        // Two contacts against two different cars, back to back.
+        let mut struck: Vec<u32> = Vec::new();
+        for _ in 0..2 {
+            let target = sim
+                .traffic()
+                .active()
+                .filter(|c| c.distance > sim.car().distance + 6.0)
+                .min_by(|a, b| a.distance.total_cmp(&b.distance))
+                .copied()
+                .expect("traffic ahead");
+            let approach = sim.track().sample_at(target.distance - 3.0);
+            controller::place_on_track(&mut sim.car, &approach, target.lateral);
+            sim.car.forward_speed = 85.0;
+            sim.step(DriveCommand::FLAT_OUT);
+            let landed = sim
+                .events()
+                .iter()
+                .any(|e| matches!(e, RaceEvent::Impact { fresh: true, traffic: true, .. }));
+            assert!(landed, "the contact against slot {} landed", target.slot);
+            struck.push(target.slot);
+        }
+        assert_ne!(struck[0], struck[1], "two genuinely different cars");
+        assert!(sim.car().is_finite());
+    }
+
+    /// Every input keeps working through every severity. No stun, no lock, no
+    /// frozen frames — the player is always the one responsible for the fix.
+    #[test]
+    fn the_player_keeps_every_control_through_every_severity() {
+        let scenarios = [
+            (Severity::Scrape, 0.0, 1.93f32, 60.0, 45.0),
+            (Severity::Bump, 5.2, 0.0, 50.0, 30.0),
+            (Severity::MajorCrash, 5.2, 0.0, 90.0, 24.0),
+        ];
+        for (expected, along, across, player, traffic) in scenarios {
+            let mut sim = staged(along, across, player, traffic);
+            let hits = impacts(&mut sim, DriveCommand::FLAT_OUT, 4);
+            assert_eq!(hits.first().map(|h| h.0), Some(expected), "{hits:?}");
+
+            // Throttle: the car accelerates on the very next step.
+            let before = sim.car().forward_speed;
+            sim.step(DriveCommand::FLAT_OUT);
+            assert!(
+                sim.car().forward_speed > before,
+                "{expected:?}: throttle was dead after the hit"
+            );
+
+            // Steering: full lock actually turns the car.
+            let yaw_before = sim.car().yaw;
+            for _ in 0..10 {
+                sim.step(DriveCommand::turning(1.0));
+            }
+            assert!(
+                crate::track::shortest_angle(sim.car().yaw - yaw_before).abs() > 0.01,
+                "{expected:?}: steering was dead after the hit"
+            );
+
+            // Braking, and the handbrake, both bite.
+            let rolling = sim.car().forward_speed;
+            for _ in 0..10 {
+                sim.step(DriveCommand {
+                    brake: 1.0,
+                    ..DriveCommand::IDLE
+                });
+            }
+            assert!(
+                sim.car().forward_speed < rolling,
+                "{expected:?}: the brake was dead after the hit"
+            );
+            for _ in 0..10 {
+                sim.step(DriveCommand {
+                    handbrake: true,
+                    ..DriveCommand::turning(1.0)
+                });
+            }
+            // Boost: engages when the meter allows, and is never blocked by a
+            // collision.
+            sim.boost.award(1.0);
+            sim.step(DriveCommand {
+                boost: true,
+                ..DriveCommand::FLAT_OUT
+            });
+            assert!(
+                sim.car().boosting,
+                "{expected:?}: boost was refused after the hit"
+            );
+            assert!(sim.car().is_finite());
+        }
+    }
+
+    /// A collision must not be a way to earn or spend boost, in either
+    /// direction — the recovery assist is forgiving handling, not a power-up.
+    #[test]
+    fn a_collision_neither_awards_nor_consumes_boost() {
+        // Measured against a control, because the meter is *always* moving: the
+        // high-speed trickle pays out every step above the threshold, and this
+        // scenario is deliberately run well above it. The claim is that the
+        // collision changes nothing, not that nothing changes.
+        let control = {
+            let mut sim = staged(5.2, 0.0, 90.0, 24.0);
+            let before = sim.boost().charge();
+            sim.traffic.clear();
+            sim.step(DriveCommand::FLAT_OUT);
+            sim.boost().charge() - before
+        };
+
+        let mut sim = staged(5.2, 0.0, 90.0, 24.0);
+        let charge = sim.boost().charge();
+        let hits = impacts(&mut sim, DriveCommand::FLAT_OUT, 1);
+        assert!(!hits.is_empty(), "the crash happened");
+        assert!(
+            (sim.boost().charge() - charge - control).abs() < 1.0e-6,
+            "the collision moved the meter by {} beyond the ordinary trickle",
+            sim.boost().charge() - charge - control
+        );
+        assert!(
+            !sim.events()
+                .iter()
+                .any(|e| matches!(e, RaceEvent::BoostStarted | RaceEvent::NearMiss { .. })),
+            "and it fired no boost events: {:?}",
+            sim.events()
+        );
+        assert!(sim.contact().is_recovering(), "but recovery did start");
+    }
+
+    /// Recovery gets the player back to racing speed in about a second under
+    /// throttle — the brief's one quantitative feel requirement.
+    #[test]
+    fn a_bump_at_full_throttle_is_recovered_from_in_about_a_second() {
+        let mut sim = staged(5.2, 0.0, 50.0, 30.0);
+        let before = sim.car().forward_speed;
+        impacts(&mut sim, DriveCommand::FLAT_OUT, 1);
+        let after = sim.car().forward_speed;
+        assert!(after < before, "the bump cost speed: {before} -> {after}");
+
+        // Sixty steps is one second.
+        for _ in 0..60 {
+            sim.step(DriveCommand::FLAT_OUT);
+        }
+        assert!(
+            sim.car().forward_speed >= before,
+            "a second of throttle got back to {} of the {before} m/s lost",
+            sim.car().forward_speed
+        );
+        assert!(!sim.contact().is_recovering(), "and the assist has finished");
+    }
+
+    /// The whole pipeline stays finite and deterministic through a scripted
+    /// sequence of several genuine traffic contacts.
+    #[test]
+    fn a_scripted_sequence_of_traffic_contacts_replays_identically() {
+        let run = || {
+            let mut sim = RaceSim::new(crate::DEFAULT_SEED, Tuning::DEFAULT);
+            while sim.phase() == RacePhase::Countdown {
+                sim.step(DriveCommand::IDLE);
+            }
+            crate::script::drive_autopilot(&mut sim, 600);
+            // Chase whatever is ahead and drive straight into it, repeatedly.
+            let mut contacts = 0u32;
+            for _ in 0..3_000 {
+                let car = *sim.car();
+                let command = sim
+                    .traffic()
+                    .active()
+                    .filter(|c| c.distance > car.distance + 2.0)
+                    .min_by(|a, b| a.distance.total_cmp(&b.distance))
+                    .map(|t| DriveCommand {
+                        throttle: 1.0,
+                        steer: crate::script::steer_toward_line(&car, sim.track(), t.lateral),
+                        ..DriveCommand::IDLE
+                    })
+                    .unwrap_or_else(|| crate::script::autopilot(&car, sim.track()));
+                sim.step(command);
+                contacts += u32::from(
+                    sim.events()
+                        .iter()
+                        .any(|e| matches!(e, RaceEvent::Impact { fresh: true, .. })),
+                );
+                assert!(sim.car().is_finite(), "the run stayed finite");
+            }
+            (
+                contacts,
+                *sim.car(),
+                sim.traffic().cars().to_vec(),
+                sim.camera_pose,
+                sim.impact_count(),
+                sim.contact().clone(),
+            )
+        };
+        let a = run();
+        let b = run();
+        assert!(a.0 >= 3, "the script genuinely hit things: {} contacts", a.0);
+        assert_eq!(a.0, b.0, "contact count");
+        assert_eq!(a.1, b.1, "car state");
+        assert_eq!(a.2, b.2, "traffic, including its yields");
+        assert_eq!(a.3, b.3, "camera");
+        assert_eq!(a.4, b.4, "impact count");
+        assert_eq!(a.5, b.5, "contact episodes and recovery");
+    }
+
+    /// A traffic car that is hit is nudged, and only nudged.
+    #[test]
+    fn contact_yields_the_traffic_car_within_its_bounds_and_it_returns() {
+        let t = solo_traffic();
+        let mut sim = staged(5.2, 0.0, 85.0, 26.0);
+        let lane_before = sim.traffic().cars()[0].lane;
+        impacts(&mut sim, DriveCommand::FLAT_OUT, 2);
+        let hit = sim.traffic().cars()[0];
+        assert!(
+            hit.yield_speed != 0.0 || hit.yield_offset != 0.0,
+            "the traffic car was moved by being hit"
+        );
+        assert!(hit.yield_offset.abs() <= t.collision.traffic_yield_lateral + 1.0e-4);
+        assert!(hit.yield_speed.abs() <= t.collision.traffic_yield_speed + 1.0e-4);
+        assert_eq!(hit.lane, lane_before, "and it never changes lane");
+
+        for _ in 0..300 {
+            sim.step(DriveCommand::IDLE);
+        }
+        let settled = sim.traffic().cars()[0];
+        assert!(
+            !settled.active || (settled.yield_offset == 0.0 && settled.yield_speed == 0.0),
+            "and it returns to its lane: {settled:?}"
+        );
+    }
+
     #[test]
     fn going_off_road_is_reported_once_per_excursion() {
         let mut sim = racing();
-        for _ in 0..600 {
-            sim.step(DriveCommand::FLAT_OUT);
-        }
+        // On the racing line, not flat-out-and-straight. An unsteered car on a
+        // curving road is already off the tarmac by the time this test starts
+        // measuring, so the excursion it is trying to observe has already
+        // happened and the "leaving the road" edge never fires.
+        crate::script::drive_autopilot(&mut sim, 600);
+        assert!(
+            !sim.car().surface.is_off_road(),
+            "the test starts on the tarmac"
+        );
         let sample = sim.track().sample_at(sim.car().distance);
         sim.car.position = sample.at_lateral(sample.half_width + 3.0);
         sim.step(DriveCommand::FLAT_OUT);

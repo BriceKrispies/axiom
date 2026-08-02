@@ -111,6 +111,14 @@ Behavioural, not structural — each asserts the *design intent*:
 * barrier impacts cost speed without stopping the demo, and the car can be
   **driven out of a wall** it has been ground against at full lock for four
   seconds — the scrape-alignment property;
+* a shallow contact classifies as `Scrape` however fast it was, and a gentle one
+  does too; an ordinary rear-end or side impact is a `Bump`; a fast square hit,
+  or ploughing into something barely moving, is a `MajorCrash`;
+* each severity retains at least its floor (95% / 85% / 65%) of the pre-impact
+  forward speed, measured at closing speeds well past the loss reference so every
+  band takes its full cut;
+* a guardrail and a tunnel wall classify differently under the *identical* hit —
+  a rail gives, rock does not;
 * a rear-ender never leaves the player slower than the car in front;
 * near misses need closeness *and* closing speed *and* no contact;
 * the field of view rises with speed, widens further on boost, stays inside its
@@ -212,22 +220,70 @@ overlap, so it measures the game rather than the collision resolver. It reports
 the closing speed, the impact strength, the speed either side of the hit, how
 far the shunt swung the nose, and the recovery.
 
-Three tests use it, asserting that contact is never free, never spins the car,
-never needs a reset, and always ends with the car driving again — plus that a
-shunt can never leave the player slower than the car it hit.
+Three tests use it, asserting that contact is never free, never costs more than
+the reported severity's retained-momentum floor, never spins the car, never needs
+a reset, and always ends with the car driving again — plus that a shunt can never
+leave the player slower than the car it hit.
 
-Measured on the shipping course, entering at ~91 m/s:
+Measured on the shipping course, entering at ~90 m/s:
 
-| Contact | Closing | Strength | Speed | Lost | Yaw kick | Recovered |
+| Severity | Closing | Strength | Speed | Lost | Yaw kick | Recovered |
 |---|---|---|---|---|---|---|
-| Rear-ender | 63.4 m/s | 0.56 | 91.2 → 53.1 | 42% | 0.00 rad | 0.50 s |
-| Rear-ender | 52.8 m/s | 0.46 | 84.0 → 48.9 | 42% | 0.00 rad | 0.50 s |
-| Graze | 63.3 m/s | 0.19 | 91.1 → 84.1 | 8% | 0.00 rad | 0.50 s |
-| Graze | 54.7 m/s | 0.19 | 90.7 → 84.1 | 7% | 0.00 rad | 0.50 s |
+| `Scrape` | 64.8 m/s | 0.05 | 91.4 → 90.9 | 1% | 0.03 rad | 0.50 s |
+| `Scrape` | 64.1 m/s | 0.00 | 88.4 → 88.6 | 0% | 0.06 rad | 0.50 s |
+| `MajorCrash` | 54.2 m/s | 0.59 | 91.4 → 59.6 | 35% | 0.04 rad | 0.50 s |
+| `MajorCrash` | 65.0 m/s | 0.72 | 89.8 → 58.9 | 34% | 0.02 rad | 0.50 s |
+| `MajorCrash` | 62.3 m/s | 0.71 | 87.2 → 56.9 | 35% | 0.08 rad | 0.50 s |
 
-The two kinds are deliberately far apart — brushing past costs almost nothing,
-squaring up the back of a car costs nearly half your speed — and neither ever
-spins the car or ends the run.
+The bands are deliberately far apart, and each is pinned at its floor: brushing
+past costs a percent or nothing at all, while squaring up the back of a much
+slower car at 60 m/s of closing speed costs exactly the 35% a `MajorCrash` is
+capped at and not a point more. Neither ever spins the car (the yaw kick is
+two orders of magnitude below the 1.0 rad spin threshold) or ends the run.
+
+A pursuit at full speed produces only these two outcomes, which is correct: a
+`Bump` is what an *ordinary* closing speed gives, and the harness deliberately
+never brakes. The `Bump` band is exercised directly by the staged scenarios in
+`sim::tests`.
+
+### Contact episodes — the regression that motivated all of it
+
+A collision used to be a **state** rather than an event: the full response fired
+once per traffic car per fixed step for as long as the boxes overlapped. Three
+groups of tests pin the fix, at three different altitudes:
+
+| Level | Test | Proves |
+|---|---|---|
+| Resolver | `sim::contact::tests::a_sustained_overlap_does_not_compound_the_speed_loss` | Half a second of continuous contact takes momentum once |
+| Resolver | `sim::contact::tests::the_same_vehicle_cannot_trigger_a_second_full_impact_during_the_cooldown` | The cooldown holds for its whole length, then releases |
+| Resolver | `sim::contact::tests::a_different_vehicle_can_still_be_hit_during_the_cooldown` | And never makes the player intangible |
+| Resolver | `sim::contact::tests::several_contacts_in_one_step_clamp_against_a_single_baseline` | Four cars hit at once still leave 85% of the speed |
+| Pipeline | `sim::tests::sustained_side_by_side_contact_costs_its_momentum_once` | Two seconds of leaning on a car, measured against a coasting control, stays inside the scrape floor and never escalates past `Scrape` |
+| Pipeline | `sim::tests::a_grind_is_rate_limited_in_sound_and_kicks_the_camera_once_per_episode` | A grind is audible and continuous but far from one cue per step, and the camera is armed strictly more rarely still |
+| Pipeline | `sim::collision::tests::grinding_a_barrier_does_not_take_speed_every_step` | The barrier half of the same bug, through the real sub-move loop |
+| Camera | `camera::tests::one_impulse_decays_and_is_never_re_armed_by_a_lingering_impact_state` | 120 steps of held impact state produce a monotonically decaying kick |
+
+Separation, yielding and recovery each have their own group:
+
+| Test | Proves |
+|---|---|
+| `sim::collision::tests::separation_reduces_penetration_step_after_step_until_the_pair_is_clear` | Penetration falls strictly monotonically and the pair genuinely comes apart |
+| `sim::collision::tests::separation_never_teleports_either_body_or_lifts_them_off_the_road` | Every move is inside `separation_step`, no vertical impulse, both yields bounded — under a pathologically deep overlap |
+| `sim::collision::tests::a_rear_end_biases_the_player_sideways_as_well_as_back` | A shunt pushes the player *round* the obstacle, not only back from it |
+| `sim::traffic::tests::a_traffic_car_yields_sideways_but_only_within_its_budget` | Fifty shoves stop at the budget, and the car returns to its lane exactly |
+| `sim::controller::tests::recovery_never_overrides_the_players_steering` | Full lock still points the car both ways under the assist, with most of its authority intact |
+| `sim::controller::tests::recovery_acceleration_helps_under_throttle_and_fades_away` | The assist is a bounded fraction of the throttle and fades monotonically to nothing |
+| `sim::contact::tests::stabilisation_stops_early_when_steady_but_the_throttle_help_does_not` | The two halves of recovery have different lifetimes, on purpose |
+| `sim::tests::a_collision_neither_awards_nor_consumes_boost` | Measured against a control, because the meter is always moving |
+| `sim::tests::the_player_keeps_every_control_through_every_severity` | Throttle, steering, brake, handbrake and boost all bite on the next step, after all three severities |
+
+And traffic fairness:
+
+| Test | Proves |
+|---|---|
+| `sim::traffic::tests::recycled_traffic_never_spawns_inside_the_player_safety_region` | Swept across a whole slot pitch, so every phase relationship is exercised |
+| `sim::traffic::tests::traffic_never_appears_inside_the_safety_region_across_repeated_jumps` | Forty teleports, checking only the *first sighting* of each slot — a car may drive into the region, it may never be created there |
+| `sim::traffic::tests::traffic_never_blocks_the_road_across_the_whole_generation_range` | Over 10 000 cross-sections along the entire nine kilometres, some lane centre is always clear |
 
 ---
 

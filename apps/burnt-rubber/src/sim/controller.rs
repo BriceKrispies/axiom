@@ -19,9 +19,10 @@ use axiom_math::Vec3;
 
 use crate::command::DriveCommand;
 use crate::track::{shortest_angle, Track, TrackSample};
-use crate::tuning::{VehicleTuning, DT};
+use crate::tuning::{CollisionTuning, Tuning, VehicleTuning, DT};
 
 use super::car::{CarState, Surface};
+use super::contact::ContactState;
 
 /// Position is integrated in this many equal sub-moves per fixed step, each with
 /// its own boundary check. Two sub-moves at the boosted top speed is under a
@@ -56,13 +57,23 @@ pub struct StepReport {
     /// controller is the only code that knows one happened. Reporting it here —
     /// rather than leaving the simulation to infer it from the car's impact
     /// counter — is what keeps "a wall was hit" a fact rather than a deduction.
-    pub barrier_impact: Option<super::collision::Impact>,
+    pub barrier_impact: Option<super::contact::Impact>,
 }
 
 /// Advance the car one fixed step.
 ///
 /// `boost_available` gates the boost force: the meter is owned by
 /// [`super::boost`], and the controller only asks whether it may pull.
+///
+/// `contact` is the live collision state, and it is threaded in here rather than
+/// resolved above because **barriers are resolved inside the position
+/// integration** (see [`integrate`]): the sub-move loop is the only code that
+/// knows a wall was touched, so it is the only code that can consult the episode
+/// ledger about whether that touch is a new collision or the same one still in
+/// progress. It is also where the recovery assist has to act, because the assist
+/// is a modification of ordinary driving — extra acceleration, extra lateral
+/// bleed, a gentle heading pull — not a separate motion applied afterwards.
+///
 /// `rails` selects the lateral model, and is the only thing about this function
 /// that differs between the two games. `None` is the wheel game: the chassis is
 /// rotated by the steering input and the grip model decides how much of the
@@ -71,18 +82,30 @@ pub struct StepReport {
 /// because there is no slide to bleed. Everything after the lateral model —
 /// longitudinal forces, the integrator, collisions, the surface classifier — is
 /// shared, which is what keeps the two games one game.
+///
+/// A railed car takes the collision's *deflection* (its lane solver then carries
+/// it back, which is exactly the phone game's version of correcting) but not its
+/// yaw disturbance: a car on rails cannot be spun, and pretending otherwise
+/// would be a rotation the lane solver immediately overwrote.
 pub fn step(
     car: &mut CarState,
     command: DriveCommand,
     track: &Track,
-    tuning: &VehicleTuning,
+    tuning: &Tuning,
     boost_available: bool,
+    contact: &mut ContactState,
     rails: Option<&mut super::rails::RailsState>,
 ) -> StepReport {
+    let vehicle = &tuning.vehicle;
+    let collision = &tuning.collision;
     let command = command.sanitised();
     let speed_before = car.forward_speed;
     let distance_before = car.distance;
     let was_drifting = car.drifting;
+    // Two assists, two lifetimes: the throttle help runs its full second, the
+    // stabilisation stops the moment the car is steady. See [`super::contact`].
+    let assist = contact.recovery_assist();
+    let stabilise = contact.stabilise_assist();
 
     // `>= 0` rather than `> 0`: boost applies its own throttle, so it has to be
     // able to launch a stopped car. It still refuses while reversing.
@@ -94,22 +117,26 @@ pub fn step(
             true
         }
         None => {
-            steer(car, command, tuning);
-            rotate_chassis(car, command, tuning);
+            steer(car, command, vehicle);
+            let road_heading = track.sample_at(car.distance).heading;
+            rotate_chassis(car, command, vehicle, collision, road_heading, stabilise);
             false
         }
     };
-    longitudinal(car, command, tuning);
+    longitudinal(car, command, vehicle, collision, assist);
     // The grip model exists to bleed a slide. A railed car has no slide: its
     // lateral velocity is the lane solver's output, and bleeding it would fight
     // the solver for control of the same channel.
     if !on_rails {
-        lateral_grip(car, command, tuning);
+        lateral_grip(car, command, vehicle);
+        // Recovery trims the *excess* slide only, so the collision's readable
+        // deflection survives and the spin it would otherwise become does not.
+        super::contact::recovery_damp_lateral(car, stabilise, collision);
     }
-    let barrier_impact = integrate(car, track, tuning);
-    settle_onto_the_road(car, track, tuning);
+    let barrier_impact = integrate(car, track, vehicle, collision, contact);
+    settle_onto_the_road(car, track, vehicle);
     classify_surface(car, track);
-    update_drift(car, tuning);
+    update_drift(car, vehicle);
     decay_impact(car);
 
     car.wheel_spin = (car.wheel_spin + car.forward_speed * DT / WHEEL_RADIUS)
@@ -166,7 +193,14 @@ pub fn steering_authority(speed: f32, tuning: &VehicleTuning) -> f32 {
 }
 
 /// Turn the chassis. This is the step that manufactures a slide.
-fn rotate_chassis(car: &mut CarState, command: DriveCommand, tuning: &VehicleTuning) {
+fn rotate_chassis(
+    car: &mut CarState,
+    command: DriveCommand,
+    tuning: &VehicleTuning,
+    collision: &CollisionTuning,
+    road_heading: f32,
+    assist: f32,
+) {
     // The front tyres are what point the car, so a front-biased mass bites
     // harder on entry. A 50/50 car scales by exactly 1.0 — this is a bias, not
     // free authority.
@@ -203,6 +237,17 @@ fn rotate_chassis(car: &mut CarState, command: DriveCommand, tuning: &VehicleTun
         let error = shortest_angle(travel_yaw - car.yaw);
         yaw_rate += error * tuning.drift_recovery;
     }
+
+    // The collision's own rotation, **added to** the player's rather than
+    // replacing it. This is the "brief directional disturbance" of the design —
+    // the car is knocked off line and the player corrects it — and because it is
+    // decaying state rather than a one-shot rotation, the recovery assist has
+    // something it can damp. See [`super::contact`].
+    yaw_rate += car.impact_yaw_rate;
+
+    // And the recovery assist's gentle pull back toward the line, which fades
+    // out over the second after an impact and is zero the rest of the time.
+    yaw_rate += super::contact::recovery_heading_pull(car, road_heading, assist, collision);
 
     // Capture the world velocity BEFORE the chassis turns.
     let velocity = car
@@ -267,7 +312,13 @@ fn handling_surface(car: &CarState) -> Surface {
 }
 
 /// Throttle, brake, reverse, boost, drag.
-fn longitudinal(car: &mut CarState, command: DriveCommand, tuning: &VehicleTuning) {
+fn longitudinal(
+    car: &mut CarState,
+    command: DriveCommand,
+    tuning: &VehicleTuning,
+    collision: &CollisionTuning,
+    assist: f32,
+) {
     let off_road = handling_surface(car).is_off_road();
     let surface_scale = if off_road {
         tuning.offroad_accel_scale
@@ -300,8 +351,17 @@ fn longitudinal(car: &mut CarState, command: DriveCommand, tuning: &VehicleTunin
     } else {
         command.throttle
     };
+    // The recovery assist's share of the throttle.
+    //
+    // A bounded *fraction* of the car's own acceleration, fading out over the
+    // second after an impact, and applied only while the player is asking for
+    // throttle: this is forgiving handling, not a rescue. It deliberately reads
+    // nothing from the boost meter and writes nothing to it — being knocked into
+    // a car must never be a way to earn or spend boost, and it must never look
+    // like one either (no widened field of view, no boost cue, no streaks).
+    let recovered = 1.0 + collision.recovery_accel_gain * assist;
     let headroom = (1.0 - (car.forward_speed.max(0.0) / ceiling).clamp(0.0, 1.0)).powf(ACCEL_CURVE);
-    car.forward_speed += accel * throttle * headroom * surface_scale * traction * DT;
+    car.forward_speed += accel * throttle * headroom * surface_scale * traction * recovered * DT;
 
     // Braking bleeds forward motion; once stopped, the same input reverses.
     let braking = command.brake * traction;
@@ -410,9 +470,11 @@ fn integrate(
     car: &mut CarState,
     track: &Track,
     tuning: &VehicleTuning,
-) -> Option<super::collision::Impact> {
+    collision: &CollisionTuning,
+    contact: &mut ContactState,
+) -> Option<super::contact::Impact> {
     let sub_dt = DT / POSITION_SUBSTEPS as f32;
-    let mut strongest: Option<super::collision::Impact> = None;
+    let mut strongest: Option<super::contact::Impact> = None;
     for _ in 0..POSITION_SUBSTEPS {
         // The planar velocity is re-read each sub-move, so a barrier resolved in
         // the first one actually changes where the second one goes — which is
@@ -428,7 +490,9 @@ fn integrate(
         let (distance, lateral) = track.localise(car.position, car.distance, LOCALISE_WINDOW);
         car.distance = distance;
         car.lateral = lateral;
-        if let Some(impact) = super::collision::resolve_barrier(car, track, tuning) {
+        if let Some(impact) =
+            super::collision::resolve_barrier(car, track, tuning, collision, contact)
+        {
             let stronger = strongest.map_or(true, |best| impact.strength > best.strength);
             if stronger {
                 strongest = Some(impact);
@@ -543,6 +607,7 @@ pub fn place_on_track(car: &mut CarState, sample: &TrackSample, lateral: f32) {
     car.drift_steps = 0;
     car.impact_steps = 0;
     car.impact_strength = 0.0;
+    car.impact_yaw_rate = 0.0;
     car.boosting = false;
     car.stuck_steps = 0;
 }
@@ -555,7 +620,7 @@ const RESET_LIFT: f32 = 0.05;
 mod tests {
     use super::*;
     use crate::sim::chassis::ChassisGeometry;
-    use crate::tuning::CourseTuning;
+    use crate::tuning::{CourseTuning, Tuning};
 
     fn fixture() -> (Track, CarState, VehicleTuning) {
         let track = Track::generate(crate::DEFAULT_SEED, &CourseTuning::DEFAULT);
@@ -564,9 +629,38 @@ mod tests {
         (track, car, VehicleTuning::DEFAULT)
     }
 
+    /// The full tuning surface around a test's chosen vehicle. These tests vary
+    /// the *car*, so everything else stays shipping.
+    fn tuned(vehicle: &VehicleTuning) -> Tuning {
+        Tuning {
+            vehicle: *vehicle,
+            ..Tuning::DEFAULT
+        }
+    }
+
+    /// One controller step with a throwaway contact state.
+    ///
+    /// Fine for every test in this module: these are handling tests, and a car
+    /// that never touches anything never opens a contact episode. The tests that
+    /// are genuinely about contact carry a persistent state and live in
+    /// [`crate::sim::collision`] and [`crate::sim::contact`].
+    fn once(
+        car: &mut CarState,
+        command: DriveCommand,
+        track: &Track,
+        vehicle: &VehicleTuning,
+        boost: bool,
+    ) -> StepReport {
+        let tuning = tuned(vehicle);
+        let mut contact = ContactState::new();
+        let report = step(car, command, track, &tuning, boost, &mut contact, None);
+        contact.advance(car, &tuning.collision);
+        report
+    }
+
     fn drive(car: &mut CarState, track: &Track, tuning: &VehicleTuning, command: DriveCommand, steps: u32) {
         for _ in 0..steps {
-            step(car, command, track, tuning, true, None);
+            once(car, command, track, tuning, true);
         }
     }
 
@@ -608,7 +702,7 @@ mod tests {
         let mut best = 0.0f32;
         for _ in 0..6_000 {
             let command = crate::script::autopilot(&car, &track);
-            step(&mut car, command, &track, &t, false, None);
+            once(&mut car, command, &track, &t, false);
             best = best.max(car.forward_speed);
             assert!(car.forward_speed <= t.top_speed * SPEED_HEADROOM);
         }
@@ -752,16 +846,16 @@ mod tests {
                 if car.forward_speed >= target {
                     break;
                 }
-                step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false, None);
+                once(&mut car, DriveCommand::FLAT_OUT, &track, &t, false);
             }
             let gentle = DriveCommand { steer: 0.3, ..DriveCommand::IDLE };
             // Let the steering ramp reach its held value first.
             for _ in 0..30 {
-                step(&mut car, gentle, &track, &t, false, None);
+                once(&mut car, gentle, &track, &t, false);
             }
             let before = car.yaw;
             for _ in 0..30 {
-                step(&mut car, gentle, &track, &t, false, None);
+                once(&mut car, gentle, &track, &t, false);
             }
             assert!(!car.drifting, "a gentle input does not slide the car");
             shortest_angle(car.yaw - before).abs()
@@ -782,7 +876,7 @@ mod tests {
         let (track, mut car, t) = fixture();
         let brake = DriveCommand { brake: 1.0, ..DriveCommand::IDLE };
         for _ in 0..135 {
-            step(&mut car, brake, &track, &t, false, None);
+            once(&mut car, brake, &track, &t, false);
         }
         assert!(
             car.forward_speed < -5.0,
@@ -808,31 +902,215 @@ mod tests {
         let _ = track;
     }
 
+    // ---------------------------------------------------------------------
+    // The recovery assist, as the controller actually applies it.
+    // ---------------------------------------------------------------------
+
+    /// A contact state with recovery armed by a genuine bump, so these tests
+    /// exercise the same path the game does rather than poking the state.
+    fn after_a_bump(car: &mut CarState) -> ContactState {
+        use crate::sim::contact::{ContactFacts, Obstacle};
+        let mut contact = ContactState::new();
+        let facts = ContactFacts {
+            obstacle: Obstacle::Traffic { slot: 1 },
+            normal: car.right(),
+            bias: car.right(),
+            normal_speed: 18.0,
+            player_speed: car.forward_speed,
+            obstacle_speed: 30.0,
+            squareness: 0.6,
+            rear_hit: false,
+        };
+        contact
+            .respond(car, &facts, &CollisionTuning::DEFAULT)
+            .expect("a bump");
+        assert!(contact.is_recovering());
+        contact
+    }
+
+    /// The assist adds throttle, and only while the player is asking for it.
+    #[test]
+    fn recovery_acceleration_helps_under_throttle_and_fades_away() {
+        let (track, car, t) = fixture();
+        let tuning = tuned(&t);
+        let run = |assisted: bool| {
+            let mut c = car;
+            c.forward_speed = 55.0;
+            let mut contact = after_a_bump(&mut c);
+            (!assisted).then(|| contact.clear());
+            let start = c.forward_speed;
+            let mut samples = Vec::new();
+            for _ in 0..tuning.collision.recovery_steps {
+                step(&mut c, DriveCommand::FLAT_OUT, &track, &tuning, false, &mut contact, None);
+                contact.advance(&mut c, &tuning.collision);
+                samples.push(contact.recovery_assist());
+            }
+            (c.forward_speed - start, samples)
+        };
+        let (assisted, fade) = run(true);
+        let (plain, _) = run(false);
+        assert!(
+            assisted > plain,
+            "the assist added nothing: {assisted} vs {plain} m/s gained"
+        );
+        // A bounded fraction of the car's own acceleration, never a boost.
+        assert!(
+            assisted < plain * (1.0 + tuning.collision.recovery_accel_gain) + 1.0,
+            "the assist is a fraction of the throttle, not a power-up: {assisted} vs {plain}"
+        );
+        // And it genuinely fades rather than switching off.
+        assert!(fade.first().is_some_and(|a| *a > 0.5), "starts strong: {fade:?}");
+        assert_eq!(fade.last().copied(), Some(0.0), "and finishes at nothing");
+        assert!(
+            fade.windows(2).all(|w| w[1] <= w[0] + 1.0e-6),
+            "the fade never rises"
+        );
+    }
+
+    /// **The assist is not an autopilot.** Full lock still turns the car, and it
+    /// still turns it the way the player asked.
+    #[test]
+    fn recovery_never_overrides_the_players_steering() {
+        let (track, car, t) = fixture();
+        let tuning = tuned(&t);
+        let turn = |steer: f32, recovering: bool| {
+            let mut c = car;
+            c.forward_speed = 55.0;
+            let mut contact = after_a_bump(&mut c);
+            (!recovering).then(|| contact.clear());
+            // The disturbance the bump left is not part of what is being
+            // measured — the question is only whether steering still works.
+            c.impact_yaw_rate = 0.0;
+            c.lateral_speed = 0.0;
+            let before = c.yaw;
+            for _ in 0..30 {
+                let command = DriveCommand {
+                    steer,
+                    ..DriveCommand::FLAT_OUT
+                };
+                step(&mut c, command, &track, &tuning, false, &mut contact, None);
+                contact.advance(&mut c, &tuning.collision);
+            }
+            shortest_angle(c.yaw - before)
+        };
+        let right = turn(1.0, true);
+        let left = turn(-1.0, true);
+        assert!(
+            right.signum() != left.signum(),
+            "steering still points the car both ways under the assist: {right} vs {left}"
+        );
+        assert!(right.abs() > 0.2 && left.abs() > 0.2, "and with real authority");
+
+        // The assist costs the player some authority — that is what a bias
+        // toward the road *is* — but nowhere near all of it.
+        let free = turn(1.0, false);
+        assert!(
+            right.abs() > free.abs() * 0.5,
+            "the assist ate {:.0}% of the steering",
+            (1.0 - right.abs() / free.abs()) * 100.0
+        );
+    }
+
+    /// The assist damps the collision's yaw disturbance, not the player's.
+    #[test]
+    fn recovery_damps_the_collisions_yaw_disturbance_faster_than_it_decays_alone() {
+        let (track, car, t) = fixture();
+        let tuning = tuned(&t);
+        let settle = |recovering: bool| {
+            let mut c = car;
+            c.forward_speed = 55.0;
+            let mut contact = after_a_bump(&mut c);
+            (!recovering).then(|| contact.clear());
+            c.impact_yaw_rate = 1.0;
+            // Held sliding, so the "already stable" early exit cannot fire and
+            // shorten the assisted run.
+            for _ in 0..30 {
+                c.lateral_speed = 8.0;
+                step(&mut c, DriveCommand::FLAT_OUT, &track, &tuning, false, &mut contact, None);
+                contact.advance(&mut c, &tuning.collision);
+            }
+            c.impact_yaw_rate.abs()
+        };
+        let assisted = settle(true);
+        let alone = settle(false);
+        assert!(
+            assisted < alone,
+            "the assist did not damp the kick: {assisted} vs {alone} rad/s"
+        );
+        assert!(alone > 0.0, "and it would still be ringing without it");
+    }
+
+    /// The disturbance is a rotation the player can drive out of, not a
+    /// rotation applied to them once and forgotten.
+    #[test]
+    fn the_collisions_yaw_disturbance_turns_the_car_and_then_lets_go() {
+        let (track, car, t) = fixture();
+        let tuning = tuned(&t);
+        let mut c = car;
+        c.forward_speed = 55.0;
+        let mut contact = ContactState::new();
+        c.impact_yaw_rate = 1.2;
+        let before = c.yaw;
+        for _ in 0..10 {
+            step(&mut c, DriveCommand::FLAT_OUT, &track, &tuning, false, &mut contact, None);
+            contact.advance(&mut c, &tuning.collision);
+        }
+        assert!(
+            shortest_angle(c.yaw - before).abs() > 0.05,
+            "the kick actually swung the nose"
+        );
+        for _ in 0..180 {
+            step(&mut c, DriveCommand::FLAT_OUT, &track, &tuning, false, &mut contact, None);
+            contact.advance(&mut c, &tuning.collision);
+        }
+        assert_eq!(c.impact_yaw_rate, 0.0, "and then it is completely gone");
+        assert!(c.is_finite());
+    }
+
     /// The centre of gravity is *causal*, not decoration: raise it and the same
     /// corner, taken identically, throws more load onto the outside wheels and
     /// the car slides more. This is the whole claim of [`super::chassis`].
     #[test]
     fn a_higher_centre_of_gravity_slides_more_through_the_same_corner() {
         let (track, car, base) = fixture();
-        // A *sustained, moderate* corner, and the mean slide once it has settled.
+        // A *sustained, moderate* corner, on the tarmac, and the mean slide once
+        // it has settled.
         //
         // Neither the endpoint nor the peak of a full-lock turn measures grip. At
         // the endpoint a tall car reads lower, because sliding earlier drops its
         // yaw rate. At full lock both cars end up fully sideways against a
         // barrier, and the peak is the impact rather than the tyres. A held
-        // half-lock corner reaches a steady state in which the only thing setting
+        // part-lock corner reaches a steady state in which the only thing setting
         // the lateral speed is how much grip survived the load transfer.
+        //
+        // **The car has to still be on the road when that is measured**, and this
+        // is the part an earlier version of this test got wrong: accelerating in
+        // a straight line down a road that curves, then holding lock for two
+        // seconds, put the car fifteen metres from the centreline — five metres
+        // past the tarmac, on dirt, where `offroad_grip` swamps the effect being
+        // measured. It compared two dirt slides and happened to get the right
+        // answer. So the warm-up follows the racing line and the corner is held
+        // only as long as the car genuinely stays on the road, which the test
+        // asserts rather than assumes.
         let corner = |height: f32| {
             let mut t = base;
             t.chassis = ChassisGeometry { cog_height: height, ..t.chassis };
             let mut c = car;
-            drive(&mut c, &track, &t, DriveCommand::FLAT_OUT, 180);
+            for _ in 0..300 {
+                let line = crate::script::autopilot(&c, &track);
+                once(&mut c, line, &track, &t, true);
+            }
             let turn = DriveCommand { steer: 0.45, ..DriveCommand::FLAT_OUT };
-            drive(&mut c, &track, &t, turn, 60);
+            drive(&mut c, &track, &t, turn, 20);
             let (mut slide, mut transfer) = (0.0f32, 0.0f32);
-            for _ in 0..60 {
-                step(&mut c, turn, &track, &t, true, None);
-                slide += c.lateral_speed.abs() / 60.0;
+            for _ in 0..20 {
+                once(&mut c, turn, &track, &t, true);
+                assert!(
+                    !c.surface.is_off_road(),
+                    "the measurement left the tarmac at {} m, where the dirt decides the slide",
+                    c.lateral
+                );
+                slide += c.lateral_speed.abs() / 20.0;
                 transfer = transfer.max(c.load_transfer);
             }
             (slide, transfer)
@@ -880,7 +1158,7 @@ mod tests {
             c.steer = 1.0;
             let before = c.position;
             let yaw_before = c.yaw;
-            rotate_chassis(&mut c, DriveCommand::turning(1.0), &t);
+            rotate_chassis(&mut c, DriveCommand::turning(1.0), &t, &CollisionTuning::DEFAULT, 0.0, 0.0);
             assert!((c.yaw - yaw_before).abs() > 0.0, "the car did turn");
             c.position.distance(before)
         };
@@ -973,7 +1251,7 @@ mod tests {
         // looking at the frame conversion alone.
         let mut turned = car;
         turned.steer = 1.0;
-        rotate_chassis(&mut turned, DriveCommand::turning(1.0), &t);
+        rotate_chassis(&mut turned, DriveCommand::turning(1.0), &t, &CollisionTuning::DEFAULT, 0.0, 0.0);
 
         assert!(turned.yaw != car.yaw, "the chassis turned");
         assert!(
@@ -1007,8 +1285,8 @@ mod tests {
         let mut straight = car;
         let mut turning = car;
         for _ in 0..60 {
-            step(&mut straight, DriveCommand::FLAT_OUT, &track, &t, false, None);
-            step(&mut turning, DriveCommand::turning(0.8), &track, &t, false, None);
+            once(&mut straight, DriveCommand::FLAT_OUT, &track, &t, false);
+            once(&mut turning, DriveCommand::turning(0.8), &track, &t, false);
         }
         assert!(
             turning.speed() < straight.speed(),
@@ -1028,8 +1306,8 @@ mod tests {
         let turn = DriveCommand::turning(1.0);
         let flick = DriveCommand { handbrake: true, ..turn };
         for _ in 0..40 {
-            step(&mut gripped, turn, &track, &t, false, None);
-            step(&mut slid, flick, &track, &t, false, None);
+            once(&mut gripped, turn, &track, &t, false);
+            once(&mut slid, flick, &track, &t, false);
         }
         assert!(
             slid.lateral_speed.abs() > gripped.lateral_speed.abs() * 2.0,
@@ -1097,13 +1375,12 @@ mod tests {
         let launch = |boost: bool| {
             let mut c = car;
             for _ in 0..120 {
-                step(
+                once(
                     &mut c,
                     DriveCommand { boost, ..DriveCommand::FLAT_OUT },
                     &track,
                     &t,
                     boost,
-                    None,
                 );
             }
             c.forward_speed
@@ -1118,7 +1395,7 @@ mod tests {
                 boost: true,
                 ..crate::script::autopilot(&c, &track)
             };
-            step(&mut c, command, &track, &t, true, None);
+            once(&mut c, command, &track, &t, true);
             best = best.max(c.forward_speed);
         }
         assert!(
@@ -1136,8 +1413,8 @@ mod tests {
         let mut boosting = car;
         let boost_only = DriveCommand { boost: true, ..DriveCommand::IDLE };
         for _ in 0..120 {
-            step(&mut coasting, DriveCommand::IDLE, &track, &t, false, None);
-            step(&mut boosting, boost_only, &track, &t, true, None);
+            once(&mut coasting, DriveCommand::IDLE, &track, &t, false);
+            once(&mut boosting, boost_only, &track, &t, true);
         }
         assert!(
             boosting.forward_speed > 30.0,
@@ -1154,13 +1431,12 @@ mod tests {
         let reach = |boost: bool, steps: u32| {
             let mut c = car;
             for _ in 0..steps {
-                step(
+                once(
                     &mut c,
                     DriveCommand { boost, ..DriveCommand::FLAT_OUT },
                     &track,
                     &t,
                     boost,
-                    None,
                 );
             }
             c.forward_speed
@@ -1193,14 +1469,13 @@ mod tests {
         let mut struggling = car;
         let mut boosting = car;
         for _ in 0..90 {
-            step(&mut struggling, DriveCommand::FLAT_OUT, &track, &t, false, None);
-            step(
+            once(&mut struggling, DriveCommand::FLAT_OUT, &track, &t, false);
+            once(
                 &mut boosting,
                 DriveCommand { boost: true, ..DriveCommand::FLAT_OUT },
                 &track,
                 &t,
                 true,
-                None,
             );
         }
         assert!(
@@ -1232,13 +1507,12 @@ mod tests {
         drive(&mut car, &track, &t, DriveCommand::FLAT_OUT, 60);
         let mut refused = car;
         for _ in 0..120 {
-            step(
+            once(
                 &mut refused,
                 DriveCommand { boost: true, ..DriveCommand::FLAT_OUT },
                 &track,
                 &t,
                 false,
-                None,
             );
         }
         assert!(!refused.boosting, "an empty meter does not boost");
@@ -1264,8 +1538,8 @@ mod tests {
 
         let mut tarmac = car;
         for _ in 0..60 {
-            step(&mut dirt, DriveCommand::FLAT_OUT, &track, &t, false, None);
-            step(&mut tarmac, DriveCommand::FLAT_OUT, &track, &t, false, None);
+            once(&mut dirt, DriveCommand::FLAT_OUT, &track, &t, false);
+            once(&mut tarmac, DriveCommand::FLAT_OUT, &track, &t, false);
         }
         assert!(
             dirt.forward_speed < tarmac.forward_speed - 2.0,
@@ -1313,14 +1587,14 @@ mod tests {
         drive(&mut car, &track, &t, DriveCommand::FLAT_OUT, 600);
         assert!(car.wheel_spin >= 0.0 && car.wheel_spin < std::f32::consts::TAU);
         let before = car.wheel_spin;
-        step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false, None);
+        once(&mut car, DriveCommand::FLAT_OUT, &track, &t, false);
         assert_ne!(car.wheel_spin, before, "the wheels keep turning");
     }
 
     #[test]
     fn the_step_report_describes_what_happened() {
         let (track, mut car, t) = fixture();
-        let report = step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false, None);
+        let report = once(&mut car, DriveCommand::FLAT_OUT, &track, &t, false);
         assert!(report.forward_accel > 0.0, "throttle is acceleration");
         assert!(report.distance_delta >= 0.0);
         assert!(!report.drift_started);
@@ -1336,7 +1610,7 @@ mod tests {
             ..DriveCommand::IDLE
         };
         for _ in 0..120 {
-            step(&mut car, poison, &track, &t, true, None);
+            once(&mut car, poison, &track, &t, true);
         }
         assert!(car.is_finite(), "the sanitiser held: {car:?}");
     }
@@ -1347,10 +1621,10 @@ mod tests {
         car.impact_steps = 3;
         car.impact_strength = 1.0;
         for _ in 0..2 {
-            step(&mut car, DriveCommand::IDLE, &track, &t, false, None);
+            once(&mut car, DriveCommand::IDLE, &track, &t, false);
         }
         assert!(car.impact_steps > 0 && car.impact_strength > 0.0);
-        step(&mut car, DriveCommand::IDLE, &track, &t, false, None);
+        once(&mut car, DriveCommand::IDLE, &track, &t, false);
         assert_eq!(car.impact_steps, 0);
         assert_eq!(car.impact_strength, 0.0);
     }

@@ -72,6 +72,34 @@ impl CameraPose {
     }
 }
 
+/// What the car is doing to the camera this fixed step.
+///
+/// Grouped rather than passed as three loose arguments because they are one
+/// idea — the frame's *drive state*, as opposed to the car's pose, which the
+/// camera reads from [`CarState`] directly.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CameraDrive {
+    /// Forward acceleration over the step (m/s²) — the chase pull-back.
+    pub forward_accel: f32,
+    /// Whether boost is being spent.
+    pub boosting: bool,
+    /// A collision resolved this step, if there was one.
+    pub impact: Option<ImpactImpulse>,
+}
+
+/// A one-shot camera kick from a collision resolved this fixed step.
+///
+/// Deliberately *not* a state the camera reads off the car: an impulse happens
+/// once, and one collision must produce exactly one of these however many fixed
+/// steps the two bodies stay overlapped. See [`crate::sim::contact`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImpactImpulse {
+    /// World direction the car was shoved.
+    pub direction: Vec3,
+    /// Kick amplitude, `0..1`, scaled by [`CameraTuning::impact_shake`].
+    pub amplitude: f32,
+}
+
 /// The chase camera's persistent, deterministic state.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChaseCamera {
@@ -81,6 +109,7 @@ pub struct ChaseCamera {
     fov: f32,
     roll: f32,
     impact_shake: f32,
+    impact_direction: Vec3,
     /// A monotonically advancing phase the vibration is derived from — a
     /// deterministic stand-in for noise, so shake replays exactly.
     shake_phase: f32,
@@ -98,6 +127,7 @@ impl ChaseCamera {
             fov: CameraTuning::DEFAULT.fov_low,
             roll: 0.0,
             impact_shake: 0.0,
+            impact_direction: Vec3::UNIT_Z,
             shake_phase: 0.0,
             settled: false,
         }
@@ -114,28 +144,41 @@ impl ChaseCamera {
         self.fov = tuning.fov_low;
         self.roll = 0.0;
         self.impact_shake = 0.0;
+        self.impact_direction = Vec3::UNIT_Z;
         self.settled = true;
         let _ = track;
     }
 
     /// Advance the camera one fixed step and return the pose to render.
+    ///
+    /// `impact` is the *impulse* from a collision resolved this step, and it is
+    /// passed in rather than read off the car deliberately. The camera used to
+    /// take its kick from `car.impact_strength`, which is a value held raised
+    /// for the whole time an impact is "ringing" — so `max`-ing against it every
+    /// step re-armed the shake continuously and produced a long flat rattle
+    /// instead of a hit. An impulse arrives once, and what the player sees after
+    /// that is the decay, which is what reads as force.
     pub fn step(
         &mut self,
         car: &CarState,
         track: &Track,
         tuning: &CameraTuning,
         vehicle: &VehicleTuning,
-        forward_accel: f32,
-        boosting: bool,
+        drive: CameraDrive,
     ) -> CameraPose {
         let speed_t = (car.speed() / vehicle.top_speed.max(1.0)).clamp(0.0, 1.0);
+        let CameraDrive {
+            forward_accel,
+            boosting,
+            impact,
+        } = drive;
 
         self.advance_heading(car, track, tuning);
         let distance = self.chase_distance(tuning, speed_t, forward_accel, boosting);
         self.advance_position(car, distance, tuning);
         self.advance_fov(tuning, speed_t, boosting);
         self.advance_roll(car, tuning);
-        let shake = self.advance_shake(car, tuning, speed_t, boosting);
+        let shake = self.advance_shake(impact, tuning, speed_t, boosting);
 
         let eye = self.clear_of_the_road(self.eye.add(shake), car, track, tuning);
         let look_ahead = tuning.look_ahead_low
@@ -240,11 +283,18 @@ impl ChaseCamera {
     }
 
     /// The layered, bounded shake: a fine vibration that only exists at real
-    /// speed, a little more of it while boosting, and a decaying directional
-    /// kick after an impact.
+    /// speed, a little more of it while boosting, and a **decaying directional
+    /// kick** delivered once per impact.
+    ///
+    /// The perceived duration of the kick falls out of the decay rather than
+    /// being authored per severity: with an exponential decay at
+    /// [`CameraTuning::impact_decay`], the time an amplitude `a` stays above the
+    /// perceptual floor is `ln(a / floor) / decay`, so the three severities'
+    /// amplitudes produce roughly 0.10 s, 0.22 s and 0.30 s of visible shake
+    /// without a second set of numbers that could disagree with the first.
     fn advance_shake(
         &mut self,
-        car: &CarState,
+        impact: Option<ImpactImpulse>,
         tuning: &CameraTuning,
         speed_t: f32,
         boosting: bool,
@@ -255,9 +305,15 @@ impl ChaseCamera {
         let vibration = tuning.speed_shake * speed_t * speed_t
             + if boosting { tuning.boost_shake } else { 0.0 };
 
-        // A fresh impact raises the kick; it then decays on its own.
-        let fresh = car.impact_strength * tuning.impact_shake;
-        self.impact_shake = self.impact_shake.max(fresh);
+        // An impulse arrives at most once per collision; everything after it is
+        // decay. A sustained overlap delivers no further impulses, which is why
+        // grinding along a car no longer rattles the camera indefinitely.
+        if let Some(pulse) = impact {
+            self.impact_shake = self
+                .impact_shake
+                .max(pulse.amplitude.clamp(0.0, 1.0) * tuning.impact_shake);
+            self.impact_direction = pulse.direction.normalize().unwrap_or(Vec3::UNIT_Z);
+        }
         self.impact_shake *= (-tuning.impact_decay * DT).exp();
 
         let p = self.shake_phase;
@@ -268,7 +324,7 @@ impl ChaseCamera {
             (p * 1.7).cos() + (p * 3.9).sin() * 0.4,
             (p * 2.3).sin() * 0.6,
         );
-        let kick = car
+        let kick = self
             .impact_direction
             .mul_scalar(self.impact_shake * (p * 5.0).sin());
         wobble.mul_scalar(vibration).add(kick)
@@ -327,8 +383,9 @@ fn ideal_eye(car: &CarState, heading: f32, distance: f32, tuning: &CameraTuning)
 mod tests {
     use super::*;
     use crate::command::DriveCommand;
-    use crate::sim::controller::{place_on_track, step as drive_step};
-    use crate::tuning::CourseTuning;
+    use crate::sim::contact::ContactState;
+    use crate::sim::controller::{place_on_track, step as drive_step, StepReport};
+    use crate::tuning::{CourseTuning, Tuning};
 
     fn fixture() -> (Track, CarState, ChaseCamera) {
         let track = Track::generate(crate::DEFAULT_SEED, &CourseTuning::DEFAULT);
@@ -337,6 +394,38 @@ mod tests {
         let mut camera = ChaseCamera::new();
         camera.snap_to(&car, &track, &CameraTuning::DEFAULT);
         (track, car, camera)
+    }
+
+    /// One controller step with its own throwaway contact state — these are
+    /// camera tests, and none of them is about collisions.
+    fn drive(car: &mut CarState, command: DriveCommand, track: &Track, boost: bool) -> StepReport {
+        let tuning = Tuning::DEFAULT;
+        let mut contact = ContactState::new();
+        let report = drive_step(car, command, track, &tuning, boost, &mut contact, None);
+        contact.advance(car, &tuning.collision);
+        report
+    }
+
+    /// One camera step with no collision impulse.
+    fn frame(
+        camera: &mut ChaseCamera,
+        car: &CarState,
+        track: &Track,
+        tuning: &CameraTuning,
+        accel: f32,
+        boosting: bool,
+    ) -> CameraPose {
+        camera.step(
+            car,
+            track,
+            tuning,
+            &VehicleTuning::DEFAULT,
+            CameraDrive {
+                forward_accel: accel,
+                boosting,
+                ..CameraDrive::default()
+            },
+        )
     }
 
     /// Run the car and the camera together for `steps`, returning the last pose.
@@ -348,11 +437,10 @@ mod tests {
         steps: u32,
     ) -> CameraPose {
         let t = CameraTuning::DEFAULT;
-        let v = VehicleTuning::DEFAULT;
-        let mut pose = camera.step(car, track, &t, &v, 0.0, false);
+        let mut pose = frame(camera, car, track, &t, 0.0, false);
         for _ in 0..steps {
-            let report = drive_step(car, command, track, &v, command.boost, None);
-            pose = camera.step(car, track, &t, &v, report.forward_accel, command.boost);
+            let report = drive(car, command, track, command.boost);
+            pose = frame(camera, car, track, &t, report.forward_accel, command.boost);
         }
         pose
     }
@@ -420,8 +508,7 @@ mod tests {
     fn the_field_of_view_never_snaps() {
         let (track, mut car, mut camera) = fixture();
         let t = CameraTuning::DEFAULT;
-        let v = VehicleTuning::DEFAULT;
-        let mut previous = camera.step(&car, &track, &t, &v, 0.0, false).fov_degrees;
+        let mut previous = frame(&mut camera, &car, &track, &t, 0.0, false).fov_degrees;
         for i in 0..900 {
             // Slam between flat out and hard braking, the worst case for a
             // speed-driven field of view.
@@ -430,8 +517,8 @@ mod tests {
             } else {
                 DriveCommand { brake: 1.0, ..DriveCommand::IDLE }
             };
-            let report = drive_step(&mut car, command, &track, &v, true, None);
-            let pose = camera.step(&car, &track, &t, &v, report.forward_accel, command.boost);
+            let report = drive(&mut car, command, &track, true);
+            let pose = frame(&mut camera, &car, &track, &t, report.forward_accel, command.boost);
             let jump = (pose.fov_degrees - previous).abs();
             assert!(jump < 2.0, "step {i} moved the field of view by {jump} degrees");
             previous = pose.fov_degrees;
@@ -471,13 +558,12 @@ mod tests {
     fn the_position_spring_converges_rather_than_oscillating() {
         let (track, car, mut camera) = fixture();
         let t = CameraTuning::DEFAULT;
-        let v = VehicleTuning::DEFAULT;
         // Displace the camera hard, then let it settle behind a stationary car.
         camera.eye = car.position.add(Vec3::new(120.0, 60.0, -90.0));
         camera.eye_velocity = Vec3::ZERO;
         let mut previous = f32::INFINITY;
         for i in 0..240 {
-            camera.step(&car, &track, &t, &v, 0.0, false);
+            frame(&mut camera, &car, &track, &t, 0.0, false);
             let error = camera
                 .eye
                 .subtract(ideal_eye(&car, camera.heading, t.distance_low, &t))
@@ -493,19 +579,16 @@ mod tests {
     fn the_camera_follows_travel_rather_than_the_nose_in_a_drift() {
         let (track, mut car, mut camera) = fixture();
         let t = CameraTuning::DEFAULT;
-        let v = VehicleTuning::DEFAULT;
         run(&track, &mut car, &mut camera, DriveCommand::FLAT_OUT, 200);
         // Establish a big slide.
         for _ in 0..40 {
-            let report = drive_step(
+            let report = drive(
                 &mut car,
                 DriveCommand { handbrake: true, ..DriveCommand::turning(1.0) },
                 &track,
-                &v,
                 false,
-                None,
             );
-            camera.step(&car, &track, &t, &v, report.forward_accel, false);
+            frame(&mut camera, &car, &track, &t, report.forward_accel, false);
         }
         assert!(car.drifting, "the car really is sideways");
         let travel = car.heading_of_travel();
@@ -530,7 +613,7 @@ mod tests {
             c.snap_to(&car, &track, &t);
             let tuned = CameraTuning { velocity_heading_blend: blend, ..t };
             for _ in 0..90 {
-                c.step(&car, &track, &tuned, &v, 0.0, false);
+                frame(&mut c, &car, &track, &tuned, 0.0, false);
             }
             shortest_angle(travel_yaw - c.heading).abs()
         };
@@ -562,16 +645,24 @@ mod tests {
     fn an_impact_kicks_the_camera_and_the_kick_decays() {
         let (track, mut car, mut camera) = fixture();
         let t = CameraTuning::DEFAULT;
-        let v = VehicleTuning::DEFAULT;
         run(&track, &mut car, &mut camera, DriveCommand::FLAT_OUT, 200);
-        car.impact_strength = 1.0;
-        car.impact_direction = Vec3::UNIT_X;
-        camera.step(&car, &track, &t, &v, 0.0, false);
+        camera.step(
+            &car,
+            &track,
+            &t,
+            &VehicleTuning::DEFAULT,
+            CameraDrive {
+                impact: Some(ImpactImpulse {
+                    direction: Vec3::UNIT_X,
+                    amplitude: 1.0,
+                }),
+                ..CameraDrive::default()
+            },
+        );
         let kicked = camera.impact_shake;
         assert!(kicked > 0.0, "the hit registered");
-        car.impact_strength = 0.0;
         for _ in 0..90 {
-            camera.step(&car, &track, &t, &v, 0.0, false);
+            frame(&mut camera, &car, &track, &t, 0.0, false);
         }
         assert!(
             camera.impact_shake < kicked * 0.05,
@@ -581,20 +672,123 @@ mod tests {
         );
     }
 
+    /// The bug the impulse replaced: the camera used to re-arm its kick from
+    /// `car.impact_strength` every step, and that value is *held raised* for the
+    /// whole time an impact rings. The result was a long flat rattle instead of
+    /// a hit. One impulse must decay monotonically, however long the car spends
+    /// still touching whatever it hit.
+    #[test]
+    fn one_impulse_decays_and_is_never_re_armed_by_a_lingering_impact_state() {
+        let (track, mut car, mut camera) = fixture();
+        let t = CameraTuning::DEFAULT;
+        run(&track, &mut car, &mut camera, DriveCommand::FLAT_OUT, 200);
+        // The car is left in exactly the state a collision leaves it in, and
+        // stays there — which is what a sustained overlap looks like.
+        car.impact_strength = 1.0;
+        car.impact_steps = 200;
+        car.impact_direction = Vec3::UNIT_X;
+
+        camera.step(
+            &car,
+            &track,
+            &t,
+            &VehicleTuning::DEFAULT,
+            CameraDrive {
+                impact: Some(ImpactImpulse {
+                    direction: Vec3::UNIT_X,
+                    amplitude: 1.0,
+                }),
+                ..CameraDrive::default()
+            },
+        );
+        let mut previous = camera.impact_shake;
+        for step in 0..120 {
+            frame(&mut camera, &car, &track, &t, 0.0, false);
+            assert!(
+                camera.impact_shake < previous,
+                "step {step}: the kick was re-armed ({previous} -> {})",
+                camera.impact_shake
+            );
+            previous = camera.impact_shake;
+        }
+    }
+
+    /// The three severities' kicks last roughly the durations the design brief
+    /// names, and they get there from one decay constant rather than three.
+    #[test]
+    fn each_severity_of_kick_settles_inside_its_authored_window() {
+        use crate::sim::contact::Severity;
+        let t = CameraTuning::DEFAULT;
+        let collision = crate::tuning::CollisionTuning::DEFAULT;
+        // The amplitude below which the kick is no longer visible against the
+        // ordinary speed vibration.
+        let floor = t.speed_shake;
+        let bands = [
+            (Severity::Scrape, 0.0, 0.13),
+            (Severity::Bump, 0.13, 0.24),
+            (Severity::MajorCrash, 0.24, 0.36),
+        ];
+        for (severity, low, high) in bands {
+            let mut shake = severity.pulse(&collision) * t.impact_shake;
+            let mut seconds = 0.0;
+            while shake > floor && seconds < 2.0 {
+                shake *= (-t.impact_decay * DT).exp();
+                seconds += DT;
+            }
+            assert!(
+                seconds > low && seconds < high,
+                "{severity:?} shakes for {seconds} s, outside {low}..{high}"
+            );
+        }
+    }
+
     #[test]
     fn shake_is_bounded_and_absent_at_a_standstill() {
         let (track, mut car, mut camera) = fixture();
         let t = CameraTuning::DEFAULT;
-        let still = camera.advance_shake(&car, &t, 0.0, false);
+        let still = camera.advance_shake(None, &t, 0.0, false);
         assert!(still.length() < 1.0e-6, "a parked car does not vibrate");
 
         run(&track, &mut car, &mut camera, DriveCommand::FLAT_OUT, 600);
-        for _ in 0..600 {
-            let shake = camera.advance_shake(&car, &t, 1.0, true);
+        let kick = Some(ImpactImpulse {
+            direction: Vec3::UNIT_X,
+            amplitude: 1.0,
+        });
+        for step in 0..600 {
+            // Feed an impulse on every single step — the worst case the camera
+            // can ever be handed — and the shake still stays inside its bound.
+            let shake = camera.advance_shake(kick.filter(|_| step % 30 == 0), &t, 1.0, true);
             // Three unit-amplitude terms, so the bound is generous but real.
             let bound = (t.speed_shake + t.boost_shake) * 3.0 + t.impact_shake;
             assert!(shake.length() <= bound, "shake {shake:?} exceeded {bound}");
         }
+    }
+
+    #[test]
+    fn a_degenerate_impulse_direction_does_not_poison_the_shake() {
+        let (_, _, mut camera) = fixture();
+        let t = CameraTuning::DEFAULT;
+        let shake = camera.advance_shake(
+            Some(ImpactImpulse {
+                direction: Vec3::ZERO,
+                amplitude: 1.0,
+            }),
+            &t,
+            0.5,
+            false,
+        );
+        assert!(shake.x.is_finite() && shake.y.is_finite() && shake.z.is_finite());
+        // And an out-of-range amplitude is clamped rather than trusted.
+        let absurd = camera.advance_shake(
+            Some(ImpactImpulse {
+                direction: Vec3::UNIT_X,
+                amplitude: 40.0,
+            }),
+            &t,
+            0.5,
+            false,
+        );
+        assert!(absurd.length() <= t.impact_shake + (t.speed_shake * 3.0) + 1.0e-4);
     }
 
     /// The bug the velocity feed-forward exists to prevent: at racing speed the
@@ -604,15 +798,14 @@ mod tests {
     fn the_chase_distance_holds_at_racing_speed() {
         let (track, mut car, mut camera) = fixture();
         let t = CameraTuning::DEFAULT;
-        let v = VehicleTuning::DEFAULT;
         for _ in 0..900 {
             let command = crate::script::autopilot(&car, &track);
-            let report = drive_step(&mut car, command, &track, &v, false, None);
-            camera.step(&car, &track, &t, &v, report.forward_accel, false);
+            let report = drive(&mut car, command, &track, false);
+            frame(&mut camera, &car, &track, &t, report.forward_accel, false);
         }
         assert!(car.speed() > 70.0, "the test is at speed: {}", car.speed());
 
-        let pose = camera.step(&car, &track, &t, &v, 0.0, false);
+        let pose = frame(&mut camera, &car, &track, &t, 0.0, false);
         let offset = pose.eye.subtract(car.position);
         let planar = Vec3::new(offset.x, 0.0, offset.z).length();
         assert!(
@@ -632,11 +825,10 @@ mod tests {
     fn the_camera_never_drops_below_the_road() {
         let (track, mut car, mut camera) = fixture();
         let t = CameraTuning::DEFAULT;
-        let v = VehicleTuning::DEFAULT;
         for i in 0..4_000 {
             let steer = ((i as f32) * 0.01).sin();
-            let report = drive_step(&mut car, DriveCommand::turning(steer), &track, &v, true, None);
-            let pose = camera.step(&car, &track, &t, &v, report.forward_accel, true);
+            let report = drive(&mut car, DriveCommand::turning(steer), &track, true);
+            let pose = frame(&mut camera, &car, &track, &t, report.forward_accel, true);
             let behind = track.interpolated_at((car.distance - t.distance_high).max(0.0));
             assert!(
                 pose.eye.y >= behind.position.y + t.min_ground_clearance - 1.0e-3,

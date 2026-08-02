@@ -15,7 +15,8 @@ This app owns, end to end:
 | Spline sampling and the arc-length table | `track/spline.rs`, `track/mod.rs` |
 | The arcade car model | `sim/car.rs`, `sim/controller.rs` |
 | Where the mass sits, and what it costs | `sim/chassis.rs` |
-| Racing collision response | `sim/collision.rs` |
+| Racing collision geometry and separation | `sim/collision.rs` |
+| Collision severity, contact episodes, recovery | `sim/contact.rs` |
 | Deterministic traffic | `sim/traffic.rs` |
 | Boost, near misses, the reward loop | `sim/boost.rs`, `sim/collision.rs` |
 | Race flow (countdown, progress, finish, reset) | `sim/mod.rs` |
@@ -312,26 +313,116 @@ reacted would remove exactly the judgement being asked for.
 
 ## 9. Collision response
 
-Both barriers and traffic resolve **positionally, then in velocity**, entirely
-in bounded velocities. A contact removes the motion heading into the obstacle,
-reflects a fraction, and scrubs forward speed proportionally to how square the
-hit was.
+Split across two modules, and the split is the design:
+
+| Module | Answers |
+|---|---|
+| `sim/collision.rs` | **Geometry.** Are these two boxes overlapping, along which axis, how deep, and how fast are they closing? Plus the bounded separation that pushes them apart. No opinions. |
+| `sim/contact.rs` | **Response.** How bad was it, is this a new collision or one still in progress, what may it cost, and how is the car helped back onto its line? Nothing but opinions. |
+
+Both cases resolve **positionally, then in velocity**, entirely in bounded
+velocities. There is no penetration spring, no integrated impulse, and therefore
+no way for one bad frame to hand the next a number that grows.
 
 The design goal is specific: a collision must **hurt momentum without stopping
-the demo**.
+the player playing**. Concretely — impact → readable feedback → brief
+directional disturbance → the player corrects → the speed comes back.
+
+### A collision is an event, not a state
+
+This is the load-bearing idea, and getting it wrong was the defect this system
+replaced. `resolve_traffic` used to run once per traffic car per fixed step and
+its response was unconditional: if the boxes still overlapped, the *full*
+response fired again. So one mistake compounded at 60 Hz. Rear-ending a 28 m/s
+car at 85 m/s went `85 → 49 → 29 → 17` over three consecutive steps — three
+separate thuds, three camera kicks, and 80% of the player's speed gone in fifty
+milliseconds. Riding alongside a car, or grinding a barrier, did the same thing
+for as long as you held it there.
+
+The fix is structural. A contact is an **episode** with an identity
+(`Obstacle` — a traffic *slot* id, a barrier, or scenery), and an episode gets
+exactly one full response. Within the episode the pair is still pushed apart and
+a rate-limited scrape cue still plays, but no further momentum is taken, no
+further camera impulse is armed and no further thud is scheduled. An episode
+ends after `episode_steps` (0.65 s) **or** once the pair has genuinely come
+apart by `separation_clearance` — a car's width, deliberately, because
+separation itself opens a few centimetres within a step and a smaller value lets
+the assist re-arm the very cooldown it is meant to respect.
+
+Keying on the traffic *slot* rather than the pool index matters: pool entries are
+recycled through many slots, and an index key would suppress a collision with a
+brand new car because an unrelated one had used the same array cell.
+
+### Three severities
+
+`Scrape` / `Bump` / `MajorCrash`, classified deterministically from the relative
+normal closing speed, the impact angle, both speeds, and what was hit. Never
+from a random value. Each severity carries its own retained-momentum floor, and
+the speed loss is *derived* from the floor (`max_loss = 1 - floor`) so the two
+can never disagree:
+
+| Severity | Retains at least | Deflection | Yaw kick | Recovery | Sound |
+|---|---|---|---|---|---|
+| `Scrape` | 95% | small | none | no | quiet high friction, ~60 ms |
+| `Bump` | 85% | readable | small | yes | compact sine thud, 130 ms |
+| `MajorCrash` | 65% | stronger | bounded | yes | deeper thud, 220 ms |
+
+Obstacles differ only in how much closing speed makes a square hit a crash:
+traffic yields, a guardrail does not, and the rock of a walled section does not
+even pretend to.
+
+The **retained-momentum rule** lives in one place. Several contacts inside one
+fixed step clamp against a single baseline — the forward speed before the first
+of them — so two cars hit at once cannot each take their cut of what the other
+left.
+
+### Separation, yielding and recovery
+
+* **Separation** runs on every overlapping step, including suppressed ones — the
+  ledger stops the player being charged twice for one mistake, it does not make
+  them intangible. Every move is clamped to `separation_step` so a deep overlap
+  resolves over several steps rather than as a visible jump, and only the
+  lateral and along-course axes are touched, so nothing here can launch a car.
+* **Traffic yields** and concrete does not. A hit car takes a bounded lateral
+  offset and a bounded forward shunt, both of which decay back to its lane. This
+  is the entire extent to which traffic reacts to anything — it is not avoidance
+  AI, and it would do the same against a wall.
+* On a shunt the player is also biased **round** the obstacle rather than only
+  back from it, toward whichever side has road left. That is the difference
+  between being stuck behind a car and overtaking it.
+* **Recovery** has two halves with different lifetimes, and conflating them was
+  its own bug. *Stabilisation* (slide damping, yaw damping, a heading bias) ends
+  the moment the car is steady, because an assist still nudging a settled car is
+  slop the player can feel. *Momentum restoration* (extra throttle, only while
+  the player asks for it) runs its full second, because the car stops wobbling
+  almost immediately after a bump and is still 15% down on speed. Neither reads
+  or writes the boost meter.
+
+### What the player keeps
+
+Throttle, steering, brake, handbrake and boost all keep working through every
+severity. There is no input lock, no stun and no timed loss of control. A
+collision may disturb the car; correcting it is always the player's job.
+
+Other invariants:
 
 * Position is integrated in two sub-moves per step, each with a barrier check;
   at the boosted top speed that is under a metre per check, far shorter than the
-  car, the traffic or the barrier.
+  car, the traffic or the barrier. The episode ledger is threaded into the
+  controller precisely because barriers resolve *inside* that loop — two
+  sub-moves against one wall are one collision, and only the ledger knows that.
 * A **scrape alignment** turns a car pressed against a barrier to run along it.
   This is load-bearing rather than decorative: the chassis has no yaw authority
   of its own at low speed and the contact response only touches velocity, so
   without it a car that nosed into a wall would grind there forever with nothing
   in the model ever pointing it back down the road.
-* A rear-ender can never leave the player slower than the car in front.
-* A side-swipe always shoves, whether or not the player was still closing.
-* Grazes below a threshold are still resolved but not *reported*, so running a
-  wall does not strobe the camera, the audio and the HUD.
+* The collision's rotation is decaying **state** (`impact_yaw_rate`) added to the
+  player's steering, not a one-shot `yaw +=`. That is what lets recovery damp it
+  at all — a disturbance applied and forgotten is one nothing can help with.
+* The camera takes a one-shot `ImpactImpulse` rather than reading
+  `car.impact_strength`, which is held raised for as long as an impact rings.
+  Re-arming from a held value produced a long flat rattle; an impulse plus decay
+  reads as force. One decay constant produces all three severities' durations.
 
 ---
 

@@ -24,7 +24,7 @@
 
 use crate::draw::Draw;
 use crate::track::Track;
-use crate::tuning::{RaceTuning, DT};
+use crate::tuning::{CollisionTuning, RaceTuning, DT};
 
 /// One live traffic car.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,6 +47,19 @@ pub struct TrafficCar {
     pub variant: u8,
     /// Whether the player has already been awarded a near miss on this car.
     pub near_missed: bool,
+    /// A temporary lateral offset from this car's lane (m), given by being hit
+    /// and returned smoothly afterwards.
+    ///
+    /// This is the *entire* extent to which traffic reacts to anything, and it
+    /// is deliberately not behaviour: a car that has been shoved slides over and
+    /// then comes back to its lane. It is not avoiding you, it does not know you
+    /// are there, and it will do exactly the same thing to a barrier. Traffic
+    /// yielding a little is what makes it feel lighter than concrete — the one
+    /// thing the collision brief actually asks of it.
+    pub yield_offset: f32,
+    /// A temporary addition to this car's speed (m/s) from being shunted, which
+    /// bleeds off.
+    pub yield_speed: f32,
     /// Phase of the in-lane wander (radians).
     wander_phase: f32,
     /// Amplitude of the in-lane wander (m).
@@ -63,10 +76,57 @@ impl TrafficCar {
         speed: 0.0,
         variant: 0,
         near_missed: false,
+        yield_offset: 0.0,
+        yield_speed: 0.0,
         wander_phase: 0.0,
         wander_amount: 0.0,
     };
+
+    /// Yield sideways by up to `amount` metres, returning how much was actually
+    /// taken. Bounded by [`CollisionTuning::traffic_yield_lateral`], so a car
+    /// can be nudged out of the player's way but never pushed off the road or
+    /// bulldozed across the course.
+    pub fn yield_lateral(&mut self, amount: f32, tuning: &CollisionTuning) -> f32 {
+        let limit = tuning.traffic_yield_lateral;
+        let wanted = self.yield_offset + amount;
+        let taken = wanted.clamp(-limit, limit) - self.yield_offset;
+        self.yield_offset += taken;
+        taken
+    }
+
+    /// Take up to `amount` metres of along-course displacement as a forward
+    /// shunt, returning how much was taken. The displacement is converted to a
+    /// bounded extra speed rather than a position jump, so a shunted car
+    /// accelerates away rather than teleporting.
+    pub fn yield_forward(&mut self, amount: f32, tuning: &CollisionTuning) -> f32 {
+        let limit = tuning.traffic_yield_speed;
+        let wanted = self.yield_speed + amount / DT.max(1.0e-6) * SHUNT_TRANSFER;
+        let clamped = wanted.clamp(-limit, limit);
+        let taken = (clamped - self.yield_speed) * DT / SHUNT_TRANSFER;
+        self.yield_speed = clamped;
+        taken
+    }
+
+    /// Fade both yields back toward nothing. Called once per fixed step.
+    fn relax(&mut self, tuning: &CollisionTuning) {
+        self.yield_offset *= (-tuning.traffic_yield_return * DT).exp();
+        self.yield_speed *= (-tuning.traffic_yield_decay * DT).exp();
+        if self.yield_offset.abs() <= YIELD_EPSILON {
+            self.yield_offset = 0.0;
+        }
+        if self.yield_speed.abs() <= YIELD_EPSILON {
+            self.yield_speed = 0.0;
+        }
+    }
 }
+
+/// How much of a requested along-course displacement becomes speed rather than
+/// being refused. Below one, so a shunt reads as a nudge the car drives out of
+/// rather than as the player's whole closing speed transferring across.
+const SHUNT_TRANSFER: f32 = 0.35;
+
+/// Yield magnitude below which a car counts as back in its lane.
+const YIELD_EPSILON: f32 = 1.0e-3;
 
 /// How many distinct traffic car shapes exist.
 pub const TRAFFIC_VARIANTS: u8 = 4;
@@ -118,9 +178,15 @@ impl Traffic {
     }
 
     /// Advance the traffic one fixed step around a player at `player_distance`.
-    pub fn step(&mut self, player_distance: f32, track: &Track, race: &RaceTuning) {
+    pub fn step(
+        &mut self,
+        player_distance: f32,
+        track: &Track,
+        race: &RaceTuning,
+        collision: &CollisionTuning,
+    ) {
         self.retire_behind(player_distance, track, race);
-        self.advance(track);
+        self.advance(track, collision);
         self.spawn_ahead(player_distance, track, race);
     }
 
@@ -131,14 +197,17 @@ impl Traffic {
         }
     }
 
-    fn advance(&mut self, track: &Track) {
+    fn advance(&mut self, track: &Track, collision: &CollisionTuning) {
         for car in self.cars.iter_mut().filter(|c| c.active) {
-            car.distance += car.speed * DT;
+            car.distance += (car.speed + car.yield_speed) * DT;
             car.lateral = lane_lateral(track, car.distance, car.lane)
                 // The wander is driven by distance travelled, not by a tick
                 // count, so a car resampled at a different moment is in the same
                 // place — which is what keeps replay exact.
-                + car.wander_amount * (car.wander_phase + car.distance * WANDER_RATE).sin();
+                + car.wander_amount * (car.wander_phase + car.distance * WANDER_RATE).sin()
+                // ...and the temporary offset a contact gave it, which decays.
+                + car.yield_offset;
+            car.relax(collision);
         }
     }
 
@@ -162,6 +231,21 @@ impl Traffic {
             let Some(index) = self.cars.iter().position(|c| !c.active) else {
                 break;
             };
+            // **The safety region.** A slot inside it is skipped, never spawned.
+            //
+            // In ordinary play this never fires: slots enter the horizon
+            // `traffic_ahead` metres away and the cursor only moves forward. It
+            // fires after a *jump* — `place_at`, a capture, the finish teleport,
+            // any of which clears the pool and refills it around wherever the
+            // player now is. Without the skip, refilling from
+            // `player - traffic_behind` puts the very next slot anywhere in the
+            // 85 m after that, which includes on top of the car. A car
+            // materialising inside the player is the least fair thing traffic
+            // can do, and it is the one failure the slot model made possible.
+            if inside_safety_region(base, player_distance, race) {
+                self.next_slot += 1;
+                continue;
+            }
             self.cars[index] = spawn_slot(self.seed, self.next_slot, track, race);
             self.next_slot += 1;
         }
@@ -177,6 +261,18 @@ impl Traffic {
 
 /// How quickly the in-lane wander cycles with distance (rad/m).
 const WANDER_RATE: f32 = 0.011;
+
+/// Whether `distance` is inside the region around the player where a car may
+/// never appear from nothing.
+///
+/// The window ahead is a *reaction* window, not a collision one: a car that pops
+/// into existence 10 m ahead is unfair even though it is not yet touching you.
+/// [`RaceTuning::traffic_safe_ahead`] is sized so that a player at the boosted
+/// top speed still gets more than a second of warning.
+pub fn inside_safety_region(distance: f32, player_distance: f32, race: &RaceTuning) -> bool {
+    let relative = distance - player_distance;
+    relative > -race.traffic_safe_behind && relative < race.traffic_safe_ahead
+}
 
 /// Build the car for `slot` — a pure function of `(seed, slot)`.
 pub fn spawn_slot(seed: u64, slot: u32, track: &Track, race: &RaceTuning) -> TrafficCar {
@@ -199,6 +295,8 @@ pub fn spawn_slot(seed: u64, slot: u32, track: &Track, race: &RaceTuning) -> Tra
         speed,
         variant,
         near_missed: false,
+        yield_offset: 0.0,
+        yield_speed: 0.0,
         wander_phase,
         wander_amount,
     }
@@ -257,7 +355,7 @@ mod tests {
             let mut d = 0.0f32;
             for _ in 0..3_000 {
                 d += 60.0 * DT;
-                t.step(d, &track, &r);
+                t.step(d, &track, &r, &CollisionTuning::DEFAULT);
             }
             t.cars().to_vec()
         };
@@ -275,7 +373,7 @@ mod tests {
         let mut seen: Vec<(u32, TrafficCar)> = Vec::new();
         for _ in 0..12_000 {
             distance += 70.0 * DT;
-            traffic.step(distance, &track, &r);
+            traffic.step(distance, &track, &r, &CollisionTuning::DEFAULT);
             for car in traffic.active() {
                 if !seen.iter().any(|(s, _)| *s == car.slot) {
                     // Capture each slot the first time it appears, at spawn.
@@ -299,10 +397,10 @@ mod tests {
         let track = track();
         let r = RaceTuning::DEFAULT;
         let mut traffic = Traffic::new(1, &r);
-        traffic.step(600.0, &track, &r);
+        traffic.step(600.0, &track, &r, &CollisionTuning::DEFAULT);
         assert!(traffic.active_count() > 0, "traffic appears");
         for _ in 0..600 {
-            traffic.step(600.0, &track, &r);
+            traffic.step(600.0, &track, &r, &CollisionTuning::DEFAULT);
         }
         assert!(
             traffic.active_count() <= r.traffic_active,
@@ -317,7 +415,7 @@ mod tests {
         let track = track();
         let r = RaceTuning::DEFAULT;
         let mut traffic = Traffic::new(3, &r);
-        traffic.step(0.0, &track, &r);
+        traffic.step(0.0, &track, &r, &CollisionTuning::DEFAULT);
         for car in traffic.active() {
             assert!(
                 car.distance >= r.traffic_clear_start - 1.0,
@@ -332,10 +430,10 @@ mod tests {
         let track = track();
         let r = RaceTuning::DEFAULT;
         let mut traffic = Traffic::new(5, &r);
-        traffic.step(400.0, &track, &r);
+        traffic.step(400.0, &track, &r, &CollisionTuning::DEFAULT);
         let before: Vec<(u32, f32)> = traffic.active().map(|c| (c.slot, c.distance)).collect();
         for _ in 0..60 {
-            traffic.step(400.0, &track, &r);
+            traffic.step(400.0, &track, &r, &CollisionTuning::DEFAULT);
         }
         for (slot, start) in before {
             if let Some(car) = traffic.active().find(|c| c.slot == slot) {
@@ -357,7 +455,7 @@ mod tests {
         let mut distance = 0.0f32;
         for _ in 0..9_000 {
             distance = (distance + 80.0 * DT).min(track.length() - 10.0);
-            traffic.step(distance, &track, &r);
+            traffic.step(distance, &track, &r, &CollisionTuning::DEFAULT);
             for car in traffic.active() {
                 let sample = track.sample_at(car.distance);
                 assert!(
@@ -378,12 +476,12 @@ mod tests {
         let track = track();
         let r = RaceTuning::DEFAULT;
         let mut traffic = Traffic::new(2, &r);
-        traffic.step(500.0, &track, &r);
+        traffic.step(500.0, &track, &r, &CollisionTuning::DEFAULT);
         let filled = traffic.active_count();
         assert!(filled > 0);
         // Jump the player a long way forward: everything behind must retire, and
         // the pool refills ahead.
-        traffic.step(5_000.0, &track, &r);
+        traffic.step(5_000.0, &track, &r, &CollisionTuning::DEFAULT);
         for car in traffic.active() {
             assert!(car.distance >= 5_000.0 - r.traffic_behind - 1.0);
         }
@@ -394,11 +492,11 @@ mod tests {
         let track = track();
         let r = RaceTuning::DEFAULT;
         let mut traffic = Traffic::new(6, &r);
-        traffic.step(2_000.0, &track, &r);
+        traffic.step(2_000.0, &track, &r, &CollisionTuning::DEFAULT);
         assert!(traffic.active_count() > 0);
         traffic.clear();
         assert_eq!(traffic.active_count(), 0);
-        traffic.step(400.0, &track, &r);
+        traffic.step(400.0, &track, &r, &CollisionTuning::DEFAULT);
         let lowest = traffic.active().map(|c| c.slot).min().expect("refilled");
         assert!(
             lowest as f32 * r.traffic_spacing >= r.traffic_clear_start - 1.0,
@@ -437,12 +535,208 @@ mod tests {
         }
     }
 
+    /// A traffic car yields, and there is a hard limit on how far.
+    #[test]
+    fn a_traffic_car_yields_sideways_but_only_within_its_budget() {
+        let c = CollisionTuning::DEFAULT;
+        let mut car = spawn_slot(1, 10, &track(), &RaceTuning::DEFAULT);
+        // A modest shove is taken in full.
+        let taken = car.yield_lateral(0.4, &c);
+        assert!((taken - 0.4).abs() < 1.0e-5, "took {taken} of 0.4");
+        assert!((car.yield_offset - 0.4).abs() < 1.0e-5);
+
+        // Repeated shoves accumulate, and then stop at the budget however hard
+        // the player keeps pushing.
+        for _ in 0..50 {
+            car.yield_lateral(1.0, &c);
+        }
+        assert!(
+            (car.yield_offset - c.traffic_yield_lateral).abs() < 1.0e-5,
+            "yielded {} past the {} m limit",
+            car.yield_offset,
+            c.traffic_yield_lateral
+        );
+        assert_eq!(car.yield_lateral(1.0, &c), 0.0, "a full budget takes nothing more");
+
+        // And it comes back to its lane on its own.
+        for _ in 0..600 {
+            car.relax(&c);
+        }
+        assert_eq!(car.yield_offset, 0.0, "and returns to its lane exactly");
+    }
+
+    #[test]
+    fn a_traffic_car_shunts_forward_but_only_within_its_budget() {
+        let c = CollisionTuning::DEFAULT;
+        let mut car = spawn_slot(1, 10, &track(), &RaceTuning::DEFAULT);
+        for _ in 0..200 {
+            car.yield_forward(1.0, &c);
+        }
+        assert!(
+            (car.yield_speed - c.traffic_yield_speed).abs() < 1.0e-4,
+            "shunted to {} m/s past the {} m/s limit",
+            car.yield_speed,
+            c.traffic_yield_speed
+        );
+        assert_eq!(car.yield_forward(1.0, &c), 0.0);
+        // A shunt the other way is bounded too — a car cannot be driven
+        // backwards down the course.
+        for _ in 0..400 {
+            car.yield_forward(-1.0, &c);
+        }
+        assert!(car.yield_speed >= -c.traffic_yield_speed - 1.0e-4);
+        for _ in 0..600 {
+            car.relax(&c);
+        }
+        assert_eq!(car.yield_speed, 0.0);
+    }
+
+    #[test]
+    fn a_yielded_car_actually_moves_and_then_returns_to_its_lane() {
+        let track = track();
+        let r = RaceTuning::DEFAULT;
+        let c = CollisionTuning::DEFAULT;
+        let mut traffic = Traffic::new(21, &r);
+        traffic.step(500.0, &track, &r, &c);
+        let index = traffic
+            .cars()
+            .iter()
+            .position(|car| car.active)
+            .expect("a live car");
+        let lane_line = traffic.cars()[index].lateral;
+
+        traffic.cars_mut()[index].yield_lateral(1.0, &c);
+        traffic.step(500.0, &track, &r, &c);
+        let shoved = traffic.cars()[index].lateral;
+        assert!(
+            (shoved - lane_line).abs() > 0.5,
+            "the shove moved it: {lane_line} -> {shoved}"
+        );
+
+        for _ in 0..300 {
+            traffic.step(500.0, &track, &r, &c);
+        }
+        assert_eq!(traffic.cars()[index].yield_offset, 0.0, "and it came back");
+        // Still on the road, throughout — a yield can never push a car off it.
+        let sample = track.sample_at(traffic.cars()[index].distance);
+        assert!(traffic.cars()[index].lateral.abs() <= sample.half_width + 0.1);
+    }
+
+    /// The fairness rule with the sharpest edge: after a jump, the pool refills
+    /// around wherever the player now is, and nothing may materialise on top of
+    /// them.
+    #[test]
+    fn recycled_traffic_never_spawns_inside_the_player_safety_region() {
+        let track = track();
+        let r = RaceTuning::DEFAULT;
+        let c = CollisionTuning::DEFAULT;
+        // Sweep the player across a whole slot pitch, so every possible phase
+        // relationship between the player and the slot grid is exercised — the
+        // bug only appears at some of them.
+        for offset in 0..85 {
+            let player = 2_000.0 + offset as f32;
+            let mut traffic = Traffic::new(33, &r);
+            traffic.step(player, &track, &r, &c);
+            for car in traffic.active() {
+                assert!(
+                    !inside_safety_region(car.distance, player, &r),
+                    "slot {} spawned {} m from a player at {player}",
+                    car.slot,
+                    car.distance - player
+                );
+            }
+        }
+    }
+
+    /// The same rule, driven the way the game actually reaches it: a long run
+    /// with repeated teleports, which is what a capture, a reset and the finish
+    /// all do.
+    #[test]
+    fn traffic_never_appears_inside_the_safety_region_across_repeated_jumps() {
+        let track = track();
+        let r = RaceTuning::DEFAULT;
+        let c = CollisionTuning::DEFAULT;
+        let mut traffic = Traffic::new(44, &r);
+        let mut seen: Vec<u32> = Vec::new();
+        let mut player = 400.0f32;
+        for jump in 0..40 {
+            player = (player + 231.0 * (jump as f32 + 1.0)).min(track.length() - 500.0);
+            traffic.clear();
+            for _ in 0..30 {
+                player += 70.0 * DT;
+                traffic.step(player, &track, &r, &c);
+                for car in traffic.active() {
+                    // A car may *drive* into the region — that is traffic being
+                    // caught up with, which is the game. What may never happen
+                    // is one being *created* there, which is what the first
+                    // sighting of a slot detects.
+                    let fresh = !seen.contains(&car.slot);
+                    assert!(
+                        !fresh || !inside_safety_region(car.distance, player, &r),
+                        "slot {} appeared {} m from the player",
+                        car.slot,
+                        car.distance - player
+                    );
+                    (fresh).then(|| seen.push(car.slot));
+                }
+            }
+        }
+        assert!(seen.len() >= 40, "the run genuinely recycled: {} slots", seen.len());
+    }
+
+    /// Traffic must never form a wall. Checked over the whole generated course,
+    /// not a sample of it.
+    #[test]
+    fn traffic_never_blocks_the_road_across_the_whole_generation_range() {
+        let track = track();
+        let r = RaceTuning::DEFAULT;
+        let c = CollisionTuning::DEFAULT;
+        let mut traffic = Traffic::new(55, &r);
+        let mut player = 0.0f32;
+        let vehicle = crate::tuning::VehicleTuning::DEFAULT;
+        // The along-course window inside which two cars are "abreast" — a
+        // player cannot slip between them longitudinally, so the road has to
+        // offer a gap sideways.
+        let abreast = vehicle.half_length + r.traffic_half_length;
+        let mut checked = 0u32;
+        while player < track.length() - 200.0 {
+            player += 80.0 * DT;
+            traffic.step(player, &track, &r, &c);
+            let live: Vec<(f32, f32)> = traffic.active().map(|t| (t.distance, t.lateral)).collect();
+            for (distance, _) in &live {
+                let sample = track.sample_at(*distance);
+                let lanes = track.lane_count(&sample);
+                // Everything abreast of this car, including itself.
+                let blockers: Vec<f32> = live
+                    .iter()
+                    .filter(|(d, _)| (d - distance).abs() < abreast * 2.0)
+                    .map(|(_, l)| *l)
+                    .collect();
+                // A cross-section is passable if some lane centre is clear of
+                // every car abreast by more than the two half-widths.
+                let clearance = vehicle.half_width + r.traffic_half_width;
+                let reach = track.lane_reach(&sample);
+                let open = (-reach..=reach).filter(|lane| {
+                    let centre = track.lane_lateral(&sample, *lane);
+                    blockers.iter().all(|l| (l - centre).abs() >= clearance)
+                });
+                assert!(
+                    open.count() > 0,
+                    "at {distance} m, {} cars abreast blocked all {lanes} lanes",
+                    blockers.len()
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 10_000, "the sweep saw {checked} cross-sections");
+    }
+
     #[test]
     fn marking_a_near_miss_sticks_and_ignores_a_bad_index() {
         let track = track();
         let r = RaceTuning::DEFAULT;
         let mut traffic = Traffic::new(8, &r);
-        traffic.step(500.0, &track, &r);
+        traffic.step(500.0, &track, &r, &CollisionTuning::DEFAULT);
         traffic.mark_near_missed(0);
         assert!(traffic.cars()[0].near_missed);
         traffic.mark_near_missed(9_999);
