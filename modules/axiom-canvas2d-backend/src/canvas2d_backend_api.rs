@@ -180,6 +180,10 @@ impl Canvas2dBackendApi {
     /// upscale. On success later [`Self::present_packet`] calls blit real
     /// pixels; on failure the binding stays absent so the caller can fall
     /// through to "unsupported".
+    ///
+    /// The canvas's on-screen *size* is deliberately not passed and not set:
+    /// the CSS box is the page's, the backing store is the backend's. See
+    /// [`crate::live_canvas_binding::LiveCanvasBinding::attach`].
     #[cfg(target_arch = "wasm32")]
     pub fn attach_canvas(
         &mut self,
@@ -189,7 +193,6 @@ impl Canvas2dBackendApi {
             canvas,
             self.options.framebuffer_width(),
             self.options.framebuffer_height(),
-            self.width,
         )?);
         Ok(())
     }

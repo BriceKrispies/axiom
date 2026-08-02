@@ -210,10 +210,19 @@ impl Controls {
         } else {
             analogue.steer
         };
+        // A lane hop is the *press edge* of the same two steering actions the
+        // wheel game reads as a held axis. One physical control therefore serves
+        // both games — keyboard A/D and the on-screen LEFT/RIGHT buttons (which
+        // present those same key tokens) hop a lane on press and do nothing
+        // while held — and the rails solver never has to know which device asked.
+        // Only `PlayProfile::Rails` reads the field; the wheel game ignores it.
+        let lane_step = i8::from(self.state.pressed(action::STEER_RIGHT))
+            - i8::from(self.state.pressed(action::STEER_LEFT));
         DriveCommand {
             throttle: bool_or_analogue(self.state.is_down(action::THROTTLE), analogue.throttle),
             brake: bool_or_analogue(self.state.is_down(action::BRAKE), analogue.brake),
             steer,
+            lane_step,
             handbrake: self.state.is_down(action::HANDBRAKE),
             boost: self.state.is_down(action::BOOST),
             reset: self.state.pressed(action::RESET),

@@ -102,7 +102,21 @@ impl BurntRubber {
 
     /// An app for a given seed, tuning and framebuffer.
     pub fn with(seed: u64, tuning: Tuning, width: u32, height: u32) -> BurntRubber {
-        let sim = RaceSim::new(seed, tuning);
+        BurntRubber::with_profile(seed, tuning, width, height, crate::PlayProfile::Wheel)
+    }
+
+    /// As [`BurntRubber::with`], for whichever game `profile` names.
+    ///
+    /// This is the only place the profile enters the simulation half; everything
+    /// downstream reads it from the sim. See [`crate::PlayProfile`].
+    pub fn with_profile(
+        seed: u64,
+        tuning: Tuning,
+        width: u32,
+        height: u32,
+        profile: crate::PlayProfile,
+    ) -> BurntRubber {
+        let sim = RaceSim::with_profile(seed, tuning, profile);
         let mut running = App::new()
             .window(
                 Window::new(width, height)

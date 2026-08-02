@@ -54,6 +54,9 @@ web-sys = { version = "0.3", features = [
     "KeyboardEvent",
     "PointerEvent",
     "CssStyleDeclaration",
+    # `matchMedia("(pointer: coarse)")` — the browser's own answer to the same
+    # question the stylesheet asks, so layout and gameplay cannot disagree.
+    "MediaQueryList",
     "console",
     # Gamepad polling (the sanctioned frontend edge).
     "Gamepad",

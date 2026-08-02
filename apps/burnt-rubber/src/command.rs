@@ -22,6 +22,17 @@ pub struct DriveCommand {
     pub brake: f32,
     /// Steering, `-1` (left) to `+1` (right).
     pub steer: f32,
+    /// A lane change: `-1` one lane left, `+1` one lane right, `0` none.
+    ///
+    /// **Edge-triggered by the caller**, exactly like [`Self::reset`]: it is one
+    /// hop, not a held direction, so a finger resting on the LEFT button moves
+    /// the car one lane and no further. Only [`crate::PlayProfile::Rails`] reads
+    /// it; the wheel game steers with [`Self::steer`] and ignores this entirely.
+    /// It lives on the same command as everything else because the simulation
+    /// reads exactly one input type — a second command struct for the phone
+    /// would be a second way for input to reach the sim, and the replay
+    /// guarantee rests on there being only one.
+    pub lane_step: i8,
     /// Handbrake held.
     pub handbrake: bool,
     /// Boost held.
@@ -40,6 +51,7 @@ impl DriveCommand {
         throttle: 0.0,
         brake: 0.0,
         steer: 0.0,
+        lane_step: 0,
         handbrake: false,
         boost: false,
         reset: false,
@@ -71,6 +83,10 @@ impl DriveCommand {
             throttle: finite(self.throttle).clamp(0.0, 1.0),
             brake: finite(self.brake).clamp(0.0, 1.0),
             steer: finite(self.steer).clamp(-1.0, 1.0),
+            // One hop per command, whatever a caller asks for: the rails solver
+            // treats this as a lane delta and a value of 7 would teleport the car
+            // across the road.
+            lane_step: self.lane_step.clamp(-1, 1),
             ..self
         }
     }
@@ -96,6 +112,7 @@ mod tests {
         assert_eq!(c.throttle, 0.0);
         assert_eq!(c.brake, 0.0);
         assert_eq!(c.steer, 0.0);
+        assert_eq!(c.lane_step, 0);
         assert!(!c.handbrake && !c.boost && !c.reset && !c.pause && !c.restart);
         assert_eq!(DriveCommand::default(), c);
     }
@@ -115,6 +132,7 @@ mod tests {
             throttle: 4.0,
             brake: -2.0,
             steer: 9.0,
+            lane_step: 7,
             handbrake: true,
             boost: true,
             reset: true,
@@ -125,6 +143,8 @@ mod tests {
         assert_eq!(clean.throttle, 1.0);
         assert_eq!(clean.brake, 0.0);
         assert_eq!(clean.steer, 1.0);
+        // A lane delta is one hop, however many a caller asked for.
+        assert_eq!(clean.lane_step, 1);
         // The digital channels pass through untouched.
         assert!(clean.handbrake && clean.boost && clean.reset && clean.pause && clean.restart);
     }
@@ -141,6 +161,20 @@ mod tests {
         assert_eq!(clean.throttle, 0.0);
         assert_eq!(clean.brake, 0.0);
         assert_eq!(clean.steer, 0.0);
+    }
+
+    #[test]
+    fn sanitising_clamps_a_lane_hop_in_both_directions() {
+        let far_left = DriveCommand {
+            lane_step: -9,
+            ..DriveCommand::IDLE
+        };
+        assert_eq!(far_left.sanitised().lane_step, -1);
+        let single = DriveCommand {
+            lane_step: -1,
+            ..DriveCommand::IDLE
+        };
+        assert_eq!(single.sanitised().lane_step, -1);
     }
 
     #[test]

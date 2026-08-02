@@ -10,7 +10,14 @@
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         gap: 12px; font: 12px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
       }
-      #c { background: #07090e; border: 1px solid #1c2230; border-radius: 6px; max-width: 96vw; }
+      /* The canvas's on-screen size is the page's decision, not a backend's.
+         `width`/`height` are stated here because the Canvas 2D backend swaps the
+         backing store to its own low internal resolution — without an author
+         size the element would fall back to that intrinsic size and shrink.
+         `height: auto` keeps the aspect from the backing store, so this one rule
+         is correct for the WebGPU, WebGL2 and Canvas 2D arms alike. */
+      #c { background: #07090e; border: 1px solid #1c2230; border-radius: 6px;
+           width: 960px; height: auto; max-width: 96vw; }
       #hud { display: flex; gap: 16px; justify-content: space-between; width: 960px; max-width: 96vw; }
       #hud b { color: #d8e6ff; font-weight: 600; }
       #status { transition: color .2s; }

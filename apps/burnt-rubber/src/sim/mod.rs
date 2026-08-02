@@ -28,6 +28,7 @@ pub mod car;
 pub mod chassis;
 pub mod collision;
 pub mod controller;
+pub mod rails;
 pub mod traffic;
 
 use axiom_math::Vec3;
@@ -87,6 +88,10 @@ pub enum RaceEvent {
 pub struct RaceSim {
     track: Track,
     car: CarState,
+    /// The lane the phone game is driving toward, or `None` in the wheel game.
+    /// This one `Option` is the whole of "the simulation is on rails" — see
+    /// [`crate::PlayProfile`] for why the decision is made once, far above here.
+    rails: Option<rails::RailsState>,
     traffic: Traffic,
     boost: BoostMeter,
     camera: ChaseCamera,
@@ -113,7 +118,18 @@ pub struct RaceSim {
 
 impl RaceSim {
     /// Build the race for `seed` under `tuning`, at the start line, counting in.
+    ///
+    /// The wheel game. [`RaceSim::with_profile`] builds either.
     pub fn new(seed: u64, tuning: Tuning) -> RaceSim {
+        RaceSim::with_profile(seed, tuning, crate::PlayProfile::Wheel)
+    }
+
+    /// Build the race for `seed` under `tuning` for `profile`.
+    ///
+    /// On [`crate::PlayProfile::Rails`] the car starts in the middle lane —
+    /// the phone game opens with a choice in both directions rather than
+    /// against a barrier.
+    pub fn with_profile(seed: u64, tuning: Tuning, profile: crate::PlayProfile) -> RaceSim {
         let track = Track::generate(seed, &tuning.course);
         let mut car = CarState::parked(Vec3::ZERO, 0.0);
         controller::place_on_track(&mut car, &track.sample_at(GRID_DISTANCE), 0.0);
@@ -128,7 +144,12 @@ impl RaceSim {
             false,
         );
         let car_pose = pose_of(&car, &track, 0.0);
+        let rails = profile.is_rails().then(|| {
+            let sample = track.sample_at(GRID_DISTANCE);
+            rails::RailsState::in_lane(track.lane_count(&sample) / 2)
+        });
         RaceSim {
+            rails,
             traffic: Traffic::new(seed, &tuning.race),
             boost: BoostMeter::new(),
             camera,
@@ -397,6 +418,7 @@ impl RaceSim {
             &self.track,
             &self.tuning.vehicle,
             boost_available,
+            self.rails.as_mut(),
         );
         self.last_forward_accel = report.forward_accel;
         if report.drift_started {

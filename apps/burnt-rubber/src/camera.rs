@@ -351,7 +351,7 @@ mod tests {
         let v = VehicleTuning::DEFAULT;
         let mut pose = camera.step(car, track, &t, &v, 0.0, false);
         for _ in 0..steps {
-            let report = drive_step(car, command, track, &v, command.boost);
+            let report = drive_step(car, command, track, &v, command.boost, None);
             pose = camera.step(car, track, &t, &v, report.forward_accel, command.boost);
         }
         pose
@@ -430,7 +430,7 @@ mod tests {
             } else {
                 DriveCommand { brake: 1.0, ..DriveCommand::IDLE }
             };
-            let report = drive_step(&mut car, command, &track, &v, true);
+            let report = drive_step(&mut car, command, &track, &v, true, None);
             let pose = camera.step(&car, &track, &t, &v, report.forward_accel, command.boost);
             let jump = (pose.fov_degrees - previous).abs();
             assert!(jump < 2.0, "step {i} moved the field of view by {jump} degrees");
@@ -503,6 +503,7 @@ mod tests {
                 &track,
                 &v,
                 false,
+                None,
             );
             camera.step(&car, &track, &t, &v, report.forward_accel, false);
         }
@@ -606,7 +607,7 @@ mod tests {
         let v = VehicleTuning::DEFAULT;
         for _ in 0..900 {
             let command = crate::script::autopilot(&car, &track);
-            let report = drive_step(&mut car, command, &track, &v, false);
+            let report = drive_step(&mut car, command, &track, &v, false, None);
             camera.step(&car, &track, &t, &v, report.forward_accel, false);
         }
         assert!(car.speed() > 70.0, "the test is at speed: {}", car.speed());
@@ -634,7 +635,7 @@ mod tests {
         let v = VehicleTuning::DEFAULT;
         for i in 0..4_000 {
             let steer = ((i as f32) * 0.01).sin();
-            let report = drive_step(&mut car, DriveCommand::turning(steer), &track, &v, true);
+            let report = drive_step(&mut car, DriveCommand::turning(steer), &track, &v, true, None);
             let pose = camera.step(&car, &track, &t, &v, report.forward_accel, true);
             let behind = track.interpolated_at((car.distance - t.distance_high).max(0.0));
             assert!(

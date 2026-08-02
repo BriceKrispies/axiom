@@ -63,12 +63,21 @@ pub struct StepReport {
 ///
 /// `boost_available` gates the boost force: the meter is owned by
 /// [`super::boost`], and the controller only asks whether it may pull.
+/// `rails` selects the lateral model, and is the only thing about this function
+/// that differs between the two games. `None` is the wheel game: the chassis is
+/// rotated by the steering input and the grip model decides how much of the
+/// velocity survives. `Some(state)` is the phone game: [`super::rails::guide`]
+/// drives the car to a chosen lane instead, and the grip model is skipped
+/// because there is no slide to bleed. Everything after the lateral model —
+/// longitudinal forces, the integrator, collisions, the surface classifier — is
+/// shared, which is what keeps the two games one game.
 pub fn step(
     car: &mut CarState,
     command: DriveCommand,
     track: &Track,
     tuning: &VehicleTuning,
     boost_available: bool,
+    rails: Option<&mut super::rails::RailsState>,
 ) -> StepReport {
     let command = command.sanitised();
     let speed_before = car.forward_speed;
@@ -79,10 +88,24 @@ pub fn step(
     // able to launch a stopped car. It still refuses while reversing.
     car.boosting = command.boost & boost_available & (car.forward_speed >= 0.0);
 
-    steer(car, command, tuning);
-    rotate_chassis(car, command, tuning);
+    let on_rails = match rails {
+        Some(state) => {
+            super::rails::guide(car, command, track, state);
+            true
+        }
+        None => {
+            steer(car, command, tuning);
+            rotate_chassis(car, command, tuning);
+            false
+        }
+    };
     longitudinal(car, command, tuning);
-    lateral_grip(car, command, tuning);
+    // The grip model exists to bleed a slide. A railed car has no slide: its
+    // lateral velocity is the lane solver's output, and bleeding it would fight
+    // the solver for control of the same channel.
+    if !on_rails {
+        lateral_grip(car, command, tuning);
+    }
     let barrier_impact = integrate(car, track, tuning);
     settle_onto_the_road(car, track, tuning);
     classify_surface(car, track);
@@ -543,7 +566,7 @@ mod tests {
 
     fn drive(car: &mut CarState, track: &Track, tuning: &VehicleTuning, command: DriveCommand, steps: u32) {
         for _ in 0..steps {
-            step(car, command, track, tuning, true);
+            step(car, command, track, tuning, true, None);
         }
     }
 
@@ -585,7 +608,7 @@ mod tests {
         let mut best = 0.0f32;
         for _ in 0..6_000 {
             let command = crate::script::autopilot(&car, &track);
-            step(&mut car, command, &track, &t, false);
+            step(&mut car, command, &track, &t, false, None);
             best = best.max(car.forward_speed);
             assert!(car.forward_speed <= t.top_speed * SPEED_HEADROOM);
         }
@@ -729,16 +752,16 @@ mod tests {
                 if car.forward_speed >= target {
                     break;
                 }
-                step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false);
+                step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false, None);
             }
             let gentle = DriveCommand { steer: 0.3, ..DriveCommand::IDLE };
             // Let the steering ramp reach its held value first.
             for _ in 0..30 {
-                step(&mut car, gentle, &track, &t, false);
+                step(&mut car, gentle, &track, &t, false, None);
             }
             let before = car.yaw;
             for _ in 0..30 {
-                step(&mut car, gentle, &track, &t, false);
+                step(&mut car, gentle, &track, &t, false, None);
             }
             assert!(!car.drifting, "a gentle input does not slide the car");
             shortest_angle(car.yaw - before).abs()
@@ -759,7 +782,7 @@ mod tests {
         let (track, mut car, t) = fixture();
         let brake = DriveCommand { brake: 1.0, ..DriveCommand::IDLE };
         for _ in 0..135 {
-            step(&mut car, brake, &track, &t, false);
+            step(&mut car, brake, &track, &t, false, None);
         }
         assert!(
             car.forward_speed < -5.0,
@@ -808,7 +831,7 @@ mod tests {
             drive(&mut c, &track, &t, turn, 60);
             let (mut slide, mut transfer) = (0.0f32, 0.0f32);
             for _ in 0..60 {
-                step(&mut c, turn, &track, &t, true);
+                step(&mut c, turn, &track, &t, true, None);
                 slide += c.lateral_speed.abs() / 60.0;
                 transfer = transfer.max(c.load_transfer);
             }
@@ -984,8 +1007,8 @@ mod tests {
         let mut straight = car;
         let mut turning = car;
         for _ in 0..60 {
-            step(&mut straight, DriveCommand::FLAT_OUT, &track, &t, false);
-            step(&mut turning, DriveCommand::turning(0.8), &track, &t, false);
+            step(&mut straight, DriveCommand::FLAT_OUT, &track, &t, false, None);
+            step(&mut turning, DriveCommand::turning(0.8), &track, &t, false, None);
         }
         assert!(
             turning.speed() < straight.speed(),
@@ -1005,8 +1028,8 @@ mod tests {
         let turn = DriveCommand::turning(1.0);
         let flick = DriveCommand { handbrake: true, ..turn };
         for _ in 0..40 {
-            step(&mut gripped, turn, &track, &t, false);
-            step(&mut slid, flick, &track, &t, false);
+            step(&mut gripped, turn, &track, &t, false, None);
+            step(&mut slid, flick, &track, &t, false, None);
         }
         assert!(
             slid.lateral_speed.abs() > gripped.lateral_speed.abs() * 2.0,
@@ -1080,6 +1103,7 @@ mod tests {
                     &track,
                     &t,
                     boost,
+                    None,
                 );
             }
             c.forward_speed
@@ -1094,7 +1118,7 @@ mod tests {
                 boost: true,
                 ..crate::script::autopilot(&c, &track)
             };
-            step(&mut c, command, &track, &t, true);
+            step(&mut c, command, &track, &t, true, None);
             best = best.max(c.forward_speed);
         }
         assert!(
@@ -1112,8 +1136,8 @@ mod tests {
         let mut boosting = car;
         let boost_only = DriveCommand { boost: true, ..DriveCommand::IDLE };
         for _ in 0..120 {
-            step(&mut coasting, DriveCommand::IDLE, &track, &t, false);
-            step(&mut boosting, boost_only, &track, &t, true);
+            step(&mut coasting, DriveCommand::IDLE, &track, &t, false, None);
+            step(&mut boosting, boost_only, &track, &t, true, None);
         }
         assert!(
             boosting.forward_speed > 30.0,
@@ -1136,6 +1160,7 @@ mod tests {
                     &track,
                     &t,
                     boost,
+                    None,
                 );
             }
             c.forward_speed
@@ -1168,13 +1193,14 @@ mod tests {
         let mut struggling = car;
         let mut boosting = car;
         for _ in 0..90 {
-            step(&mut struggling, DriveCommand::FLAT_OUT, &track, &t, false);
+            step(&mut struggling, DriveCommand::FLAT_OUT, &track, &t, false, None);
             step(
                 &mut boosting,
                 DriveCommand { boost: true, ..DriveCommand::FLAT_OUT },
                 &track,
                 &t,
                 true,
+                None,
             );
         }
         assert!(
@@ -1212,6 +1238,7 @@ mod tests {
                 &track,
                 &t,
                 false,
+                None,
             );
         }
         assert!(!refused.boosting, "an empty meter does not boost");
@@ -1237,8 +1264,8 @@ mod tests {
 
         let mut tarmac = car;
         for _ in 0..60 {
-            step(&mut dirt, DriveCommand::FLAT_OUT, &track, &t, false);
-            step(&mut tarmac, DriveCommand::FLAT_OUT, &track, &t, false);
+            step(&mut dirt, DriveCommand::FLAT_OUT, &track, &t, false, None);
+            step(&mut tarmac, DriveCommand::FLAT_OUT, &track, &t, false, None);
         }
         assert!(
             dirt.forward_speed < tarmac.forward_speed - 2.0,
@@ -1286,14 +1313,14 @@ mod tests {
         drive(&mut car, &track, &t, DriveCommand::FLAT_OUT, 600);
         assert!(car.wheel_spin >= 0.0 && car.wheel_spin < std::f32::consts::TAU);
         let before = car.wheel_spin;
-        step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false);
+        step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false, None);
         assert_ne!(car.wheel_spin, before, "the wheels keep turning");
     }
 
     #[test]
     fn the_step_report_describes_what_happened() {
         let (track, mut car, t) = fixture();
-        let report = step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false);
+        let report = step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false, None);
         assert!(report.forward_accel > 0.0, "throttle is acceleration");
         assert!(report.distance_delta >= 0.0);
         assert!(!report.drift_started);
@@ -1309,7 +1336,7 @@ mod tests {
             ..DriveCommand::IDLE
         };
         for _ in 0..120 {
-            step(&mut car, poison, &track, &t, true);
+            step(&mut car, poison, &track, &t, true, None);
         }
         assert!(car.is_finite(), "the sanitiser held: {car:?}");
     }
@@ -1320,10 +1347,10 @@ mod tests {
         car.impact_steps = 3;
         car.impact_strength = 1.0;
         for _ in 0..2 {
-            step(&mut car, DriveCommand::IDLE, &track, &t, false);
+            step(&mut car, DriveCommand::IDLE, &track, &t, false, None);
         }
         assert!(car.impact_steps > 0 && car.impact_strength > 0.0);
-        step(&mut car, DriveCommand::IDLE, &track, &t, false);
+        step(&mut car, DriveCommand::IDLE, &track, &t, false, None);
         assert_eq!(car.impact_steps, 0);
         assert_eq!(car.impact_strength, 0.0);
     }

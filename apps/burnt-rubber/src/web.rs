@@ -25,8 +25,11 @@ use web_sys::{KeyboardEvent, PointerEvent};
 use crate::app::BurntRubber;
 use crate::controls::{AnalogueInput, Controls, HeldKeys};
 use crate::hud::{HudModel, CONTROLS_HINT};
+use crate::profile::PlayProfile;
 use crate::touch::TouchControls;
-use crate::{CANVAS_ID, HEIGHT, WIDTH};
+use crate::tuning::Tuning;
+use crate::{CANVAS_ID, DEFAULT_SEED, HEIGHT, WIDTH};
+
 
 /// The live per-instance buffer capacity. Comfortably above the road chunks,
 /// scenery pools, traffic, car parts and effects put together.
@@ -53,9 +56,14 @@ pub fn burnt_rubber_start() {
         .configure_surface(WIDTH, HEIGHT)
         .expect("the surface dimensions are valid");
 
-    let app = BurntRubber::new();
+    // THE seam. "Is this a phone?" is asked exactly once, here, and everything
+    // that follows from the answer — the lane game vs the driving game, lane
+    // buttons vs a joystick — is derived from this one value. See
+    // `crate::PlayProfile` for the full contract.
     let (view_w, view_h) = viewport();
-    let mut touch = TouchControls::new(view_w, view_h);
+    let profile = PlayProfile::for_presentation(view_w, coarse_pointer());
+    let app = BurntRubber::with_profile(DEFAULT_SEED, Tuning::DEFAULT, WIDTH, HEIGHT, profile);
+    let mut touch = TouchControls::for_profile(view_w, view_h, profile);
     // A device that reports touch points gets the pad immediately, rather than
     // after a first blind tap.
     if touch_capable() {
@@ -376,6 +384,21 @@ fn viewport() -> (f32, f32) {
 }
 
 /// Whether the device reports any touch points.
+/// Whether the device's primary pointer is coarse (a finger), the `pointer:
+/// coarse` half of the media query in `web/index.html`.
+///
+/// Distinct from [`touch_capable`], deliberately: a laptop with a touchscreen
+/// reports touch points but has a mouse as its *primary* pointer, so it gets the
+/// on-screen pad if it wants one but keeps the driving game. `matchMedia` is the
+/// browser's own answer to the same question the stylesheet asks, which is what
+/// keeps layout and gameplay from disagreeing.
+fn coarse_pointer() -> bool {
+    web_sys::window()
+        .and_then(|w| w.match_media("(pointer: coarse)").ok().flatten())
+        .map(|m| m.matches())
+        .unwrap_or(false)
+}
+
 fn touch_capable() -> bool {
     web_sys::window()
         .map(|w| w.navigator().max_touch_points() > 0)

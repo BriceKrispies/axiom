@@ -22,6 +22,8 @@
 
 use axiom_math::Vec2;
 
+use crate::profile::PlayProfile;
+
 /// The actions the on-screen pad can fire, and the key token each one presents
 /// itself to the action table as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,16 +38,22 @@ pub enum PadButton {
     Boost,
     /// Reset to the last safe point.
     Reset,
+    /// Hop one lane left. Rails only — the wheel game steers with the stick.
+    LaneLeft,
+    /// Hop one lane right. Rails only.
+    LaneRight,
 }
 
 impl PadButton {
     /// Every button, in a stable order.
-    pub const ALL: [PadButton; 5] = [
+    pub const ALL: [PadButton; 7] = [
         PadButton::Accelerate,
         PadButton::Brake,
         PadButton::Handbrake,
         PadButton::Boost,
         PadButton::Reset,
+        PadButton::LaneLeft,
+        PadButton::LaneRight,
     ];
 
     /// The key token this button presents itself as, so it flows through the
@@ -57,6 +65,11 @@ impl PadButton {
             PadButton::Handbrake => "Space",
             PadButton::Boost => "ShiftLeft",
             PadButton::Reset => "KeyR",
+            // The same tokens the keyboard steers with. `controls` reads their
+            // press edge as a lane hop, so one binding serves both games and the
+            // rails solver never learns what a touchscreen is.
+            PadButton::LaneLeft => "KeyA",
+            PadButton::LaneRight => "KeyD",
         }
     }
 
@@ -68,6 +81,8 @@ impl PadButton {
             PadButton::Handbrake => "DRIFT",
             PadButton::Boost => "BOOST",
             PadButton::Reset => "R",
+            PadButton::LaneLeft => "◀",
+            PadButton::LaneRight => "▶",
         }
     }
 }
@@ -101,10 +116,82 @@ pub struct PadLayout {
     pub slots: Vec<PadSlot>,
     /// Radius of the joystick ring once it appears.
     pub stick_radius: f32,
+    /// Whether this layout has a joystick at all. False on rails, where lateral
+    /// intent is two buttons and a stick would be a second, contradictory way to
+    /// ask for the same thing.
+    pub stick_enabled: bool,
 }
 
 impl PadLayout {
-    /// Lay the controls out for a viewport of `width` × `height` pixels.
+    /// Lay the controls out for a viewport of `width` × `height` pixels, for
+    /// whichever game [`PlayProfile`] says this is.
+    pub fn for_profile(width: f32, height: f32, profile: PlayProfile) -> PadLayout {
+        [
+            PadLayout::for_viewport as fn(f32, f32) -> PadLayout,
+            PadLayout::rails_for_viewport,
+        ][usize::from(profile.is_rails())](width, height)
+    }
+
+    /// The rails pad: lane buttons under the left thumb, GAS/BOOST/BRAKE under
+    /// the right, and no joystick.
+    ///
+    /// DRIFT is absent on purpose rather than disabled — a railed car has no
+    /// slide to provoke, so a handbrake button would be a control that visibly
+    /// does nothing. BRAKE stays: longitudinal force is shared between the two
+    /// games, so it still slows the car exactly as it always did.
+    pub fn rails_for_viewport(width: f32, height: f32) -> PadLayout {
+        let viewport = Vec2::new(width.max(1.0), height.max(1.0));
+        let unit = (viewport.x.min(viewport.y) * UNIT_FRACTION).clamp(UNIT_MIN, UNIT_MAX);
+        let margin = unit * 0.55;
+        let right = viewport.x - margin;
+        let bottom = viewport.y - margin;
+        let left = margin;
+        // The lane buttons are the primary control and are sized like the
+        // accelerator, side by side so a thumb can roll between them without
+        // looking. They sit at the bottom-left, mirroring GAS at bottom-right.
+        let slots = vec![
+            PadSlot {
+                button: PadButton::LaneLeft,
+                centre: Vec2::new(left + unit, bottom - unit),
+                radius: unit,
+            },
+            PadSlot {
+                button: PadButton::LaneRight,
+                centre: Vec2::new(left + unit * 3.15, bottom - unit),
+                radius: unit,
+            },
+            PadSlot {
+                button: PadButton::Accelerate,
+                centre: Vec2::new(right - unit, bottom - unit),
+                radius: unit,
+            },
+            PadSlot {
+                button: PadButton::Boost,
+                centre: Vec2::new(right - unit * 1.05, bottom - unit * 2.90),
+                radius: unit * 0.74,
+            },
+            PadSlot {
+                button: PadButton::Brake,
+                centre: Vec2::new(right - unit * 2.95, bottom - unit * 2.60),
+                radius: unit * 0.66,
+            },
+            PadSlot {
+                button: PadButton::Reset,
+                centre: Vec2::new(right - unit * 0.6, margin + unit * 0.6),
+                radius: (unit * 0.55).max(MIN_TOUCH_RADIUS),
+            },
+        ];
+        PadLayout {
+            viewport,
+            unit,
+            slots,
+            stick_radius: unit * 1.3,
+            stick_enabled: false,
+        }
+    }
+
+    /// Lay the wheel game's controls out for a viewport of `width` × `height`
+    /// pixels: the dynamic joystick plus GAS/BRAKE/DRIFT/BOOST.
     pub fn for_viewport(width: f32, height: f32) -> PadLayout {
         let viewport = Vec2::new(width.max(1.0), height.max(1.0));
         let unit = (viewport.x.min(viewport.y) * UNIT_FRACTION).clamp(UNIT_MIN, UNIT_MAX);
@@ -146,6 +233,7 @@ impl PadLayout {
             unit,
             slots,
             stick_radius: unit * 1.3,
+            stick_enabled: true,
         }
     }
 
@@ -167,7 +255,7 @@ impl PadLayout {
     pub fn in_steering_zone(&self, point: Vec2) -> bool {
         let left = point.x < self.viewport.x * STEER_ZONE_WIDTH;
         let below_hud = point.y > self.viewport.y * STEER_ZONE_TOP;
-        left && below_hud && self.hit(point).is_none()
+        self.stick_enabled && left && below_hud && self.hit(point).is_none()
     }
 }
 
@@ -203,6 +291,7 @@ pub struct VirtualStick {
 /// The on-screen control state.
 #[derive(Debug, Clone)]
 pub struct TouchControls {
+    profile: PlayProfile,
     layout: PadLayout,
     stick: Option<VirtualStick>,
     /// Held buttons, each with the pointer holding it.
@@ -213,10 +302,16 @@ pub struct TouchControls {
 }
 
 impl TouchControls {
-    /// Controls laid out for a viewport.
+    /// Controls laid out for a viewport, for the wheel game.
     pub fn new(width: f32, height: f32) -> TouchControls {
+        TouchControls::for_profile(width, height, PlayProfile::Wheel)
+    }
+
+    /// Controls laid out for a viewport, for whichever game `profile` names.
+    pub fn for_profile(width: f32, height: f32, profile: PlayProfile) -> TouchControls {
         TouchControls {
-            layout: PadLayout::for_viewport(width, height),
+            profile,
+            layout: PadLayout::for_profile(width, height, profile),
             stick: None,
             held: Vec::new(),
             engaged: false,
@@ -227,7 +322,7 @@ impl TouchControls {
     /// a rotated phone has moved every button, so keeping a press would leave a
     /// finger holding a button that is no longer under it.
     pub fn resize(&mut self, width: f32, height: f32) {
-        let layout = PadLayout::for_viewport(width, height);
+        let layout = PadLayout::for_profile(width, height, self.profile);
         if layout.viewport != self.layout.viewport {
             self.layout = layout;
             self.stick = None;
@@ -391,12 +486,20 @@ mod tests {
 
     #[test]
     fn every_button_is_present_distinct_and_does_not_overlap_its_neighbours() {
+        // The wheel pad carries every button EXCEPT the lane hops, which belong
+        // to the rails pad — see `the_rails_pad_swaps_the_stick_for_lane_buttons`.
         let layout = PadLayout::for_viewport(844.0, 390.0);
-        assert_eq!(layout.slots.len(), PadButton::ALL.len());
+        let expected: Vec<PadButton> = PadButton::ALL
+            .into_iter()
+            .filter(|b| !matches!(b, PadButton::LaneLeft | PadButton::LaneRight))
+            .collect();
+        assert_eq!(layout.slots.len(), expected.len());
         for button in PadButton::ALL {
-            assert!(layout.slot(button).is_some(), "{button:?} is missing");
             assert!(!button.key().is_empty());
             assert!(!button.label().is_empty());
+        }
+        for button in expected {
+            assert!(layout.slot(button).is_some(), "{button:?} is missing");
         }
         for (i, a) in layout.slots.iter().enumerate() {
             for b in layout.slots.iter().skip(i + 1) {
@@ -564,13 +667,59 @@ mod tests {
         // The reset button sits top-right; the gas bottom-right. Neither is in
         // the steering zone, but the test is explicit about the rule.
         for button in PadButton::ALL {
+            // Only the buttons this pad actually lays out.
+            let Some(slot) = touch.layout().slot(button) else {
+                continue;
+            };
+            let centre = slot.centre;
             let mut touch = touch.clone();
-            let centre = touch.layout().slot(button).unwrap().centre;
             touch.press(1, centre);
             assert!(touch.is_held(button));
             assert!(touch.stick().is_none(), "{button:?} started a joystick");
         }
         touch.release_all();
+    }
+
+    #[test]
+    fn the_rails_pad_swaps_the_stick_for_lane_buttons() {
+        let layout = PadLayout::for_profile(390.0, 844.0, PlayProfile::Rails);
+        assert!(
+            !layout.stick_enabled,
+            "rails has no joystick to contradict the lane buttons"
+        );
+        assert!(layout.slot(PadButton::LaneLeft).is_some());
+        assert!(layout.slot(PadButton::LaneRight).is_some());
+        // The two controls the brief keeps.
+        assert!(layout.slot(PadButton::Accelerate).is_some());
+        assert!(layout.slot(PadButton::Boost).is_some());
+        // A railed car cannot slide, so a drift button would do nothing.
+        assert!(
+            layout.slot(PadButton::Handbrake).is_none(),
+            "DRIFT is absent on rails, not merely inert"
+        );
+        // No stick means no steering zone, so a stray finger on the left of the
+        // screen cannot start one.
+        assert!(!layout.in_steering_zone(Vec2::new(10.0, 800.0)));
+        // The lane buttons must not overlap each other or anything else.
+        layout.slots.iter().enumerate().for_each(|(i, a)| {
+            layout.slots.iter().skip(i + 1).for_each(|b| {
+                let gap = (a.centre.x - b.centre.x).hypot(a.centre.y - b.centre.y);
+                assert!(
+                    gap > a.radius + b.radius,
+                    "{:?} overlaps {:?}",
+                    a.button,
+                    b.button
+                );
+            });
+        });
+    }
+
+    #[test]
+    fn the_wheel_pad_keeps_its_joystick() {
+        let layout = PadLayout::for_profile(1440.0, 900.0, PlayProfile::Wheel);
+        assert!(layout.stick_enabled);
+        assert!(layout.slot(PadButton::Handbrake).is_some());
+        assert!(layout.slot(PadButton::LaneLeft).is_none());
     }
 
     #[test]

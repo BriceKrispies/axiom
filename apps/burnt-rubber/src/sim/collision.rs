@@ -391,10 +391,10 @@ mod tests {
     fn barrier_alignment_fades_as_the_nose_turns_away_from_the_wall() {
         let (track, mut car, t) = fixture();
         for _ in 0..240 {
-            step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false);
+            step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false, None);
         }
         for _ in 0..240 {
-            step(&mut car, DriveCommand::turning(1.0), &track, &t, false);
+            step(&mut car, DriveCommand::turning(1.0), &track, &t, false, None);
         }
         let pinned = car.lateral;
         assert!(pinned.abs() > track.sample_at(car.distance).half_width, "it is on the wall");
@@ -408,7 +408,7 @@ mod tests {
             let was_off_road = previous > track.sample_at(car.distance).half_width;
             for _ in 0..60 {
                 let command = crate::script::autopilot(&car, &track);
-                step(&mut car, command, &track, &t, false);
+                step(&mut car, command, &track, &t, false, None);
             }
             let now = car.lateral.abs();
             assert!(
@@ -427,11 +427,11 @@ mod tests {
     fn the_car_cannot_be_trapped_against_a_barrier() {
         let (track, mut car, t) = fixture();
         for _ in 0..240 {
-            step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false);
+            step(&mut car, DriveCommand::FLAT_OUT, &track, &t, false, None);
         }
         // Steer hard into the wall and hold it there.
         for _ in 0..240 {
-            step(&mut car, DriveCommand::turning(1.0), &track, &t, false);
+            step(&mut car, DriveCommand::turning(1.0), &track, &t, false, None);
         }
         let sample = track.sample_at(car.distance);
         assert!(
@@ -446,7 +446,7 @@ mod tests {
         // off-road acceleration, which is the intended cost of the mistake.)
         for _ in 0..240 {
             let command = crate::script::autopilot(&car, &track);
-            step(&mut car, command, &track, &t, false);
+            step(&mut car, command, &track, &t, false, None);
         }
         let sample = track.sample_at(car.distance);
         assert!(
@@ -490,7 +490,7 @@ mod tests {
         let (track, mut car, t) = fixture();
         for i in 0..6_000 {
             let steer = if (i / 40) % 2 == 0 { 1.0 } else { -1.0 };
-            step(&mut car, DriveCommand::turning(steer), &track, &t, true);
+            step(&mut car, DriveCommand::turning(steer), &track, &t, true, None);
             assert!(car.is_finite(), "step {i} produced {car:?}");
         }
         let sample = track.sample_at(car.distance);
