@@ -144,10 +144,10 @@ impl RaceSim {
             false,
         );
         let car_pose = pose_of(&car, &track, 0.0);
-        let rails = profile.is_rails().then(|| {
-            let sample = track.sample_at(GRID_DISTANCE);
-            rails::RailsState::in_lane(track.lane_count(&sample) / 2)
-        });
+        // Lane 0 is the centreline lane, and it exists for the whole course, so
+        // "start in the middle" needs no lookup and can never be a lane that
+        // stops existing further on.
+        let rails = profile.is_rails().then(|| rails::RailsState::in_lane(0));
         RaceSim {
             rails,
             traffic: Traffic::new(seed, &tuning.race),

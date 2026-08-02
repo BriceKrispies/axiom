@@ -53,21 +53,23 @@ const LANE_LEAN: f32 = 0.16;
 /// Which lane the phone game's car is heading for.
 ///
 /// Just the target index: everything else — where that lane *is* — is asked of
-/// the [`Track`] each step, because lane count varies with road width along the
-/// course and a stored lateral would go stale the moment the road narrowed.
+/// the [`Track`] each step, so nothing here can go stale. The index is **signed
+/// and centre-anchored** ([`Track::lane_lateral`]): `0` is the centreline lane,
+/// which exists everywhere on the course, so the default is a car in the middle
+/// of the road rather than a car in "lane zero of however many there are here".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RailsState {
-    lane: usize,
+    lane: i32,
 }
 
 impl RailsState {
-    /// A car starting in `lane`.
-    pub const fn in_lane(lane: usize) -> RailsState {
+    /// A car starting in `lane`, numbered out from the centreline.
+    pub const fn in_lane(lane: i32) -> RailsState {
         RailsState { lane }
     }
 
     /// The lane currently being driven toward.
-    pub const fn lane(self) -> usize {
+    pub const fn lane(self) -> i32 {
         self.lane
     }
 }
@@ -81,7 +83,7 @@ impl RailsState {
 /// visual lean proportional to how fast it is crossing.
 pub fn guide(car: &mut CarState, command: DriveCommand, track: &Track, state: &mut RailsState) {
     let sample = track.sample_at(car.distance);
-    let lanes = track.lane_count(&sample);
+    let reach = track.lane_reach(&sample);
 
     // Retarget.
     //
@@ -90,8 +92,8 @@ pub fn guide(car: &mut CarState, command: DriveCommand, track: &Track, state: &m
     // way, so it is negated here. Two facts make that so, and neither is
     // guessable from this file alone:
     //
-    //   * `Track::lane_lateral` puts lane 0 at `-half_width`, so a rising lane
-    //     index moves toward `+lateral`.
+    //   * `Track::lane_lateral` puts lane `n` at `n * lane_width`, so a rising
+    //     lane index moves toward `+lateral`.
     //   * `+lateral` is the *simulation's* right, and this engine renders world
     //     `+X` to SCREEN-LEFT. That is why `rotate_chassis` negates the steering
     //     input into a yaw rate (`-(car.steer * ...)`) — the wheel game makes
@@ -102,12 +104,13 @@ pub fn guide(car: &mut CarState, command: DriveCommand, track: &Track, state: &m
     // keeps `lane_step` meaning "the direction the player pointed", which is the
     // only meaning a button can honestly have.
     //
-    // The clamp is against *this* sample's lane count, so a road that narrows
-    // under the car pulls the target in rather than aiming it off the edge — and
-    // a hop into a wall is simply refused at the outermost lane.
-    let last = lanes.saturating_sub(1) as i32;
-    let requested = state.lane as i32 - command.lane_step as i32;
-    state.lane = requested.clamp(0, last) as usize;
+    // The clamp is against *this* sample's reach, so a road that drops its outer
+    // lane pulls the target in rather than aiming it off the edge — and a hop
+    // into a wall is simply refused at the outermost lane. Because the numbering
+    // is centre-anchored, that is now the ONLY way a held lane can move: a road
+    // that merely widens appends lanes further out and leaves this one alone.
+    let requested = state.lane - command.lane_step as i32;
+    state.lane = requested.clamp(-reach, reach);
 
     let target = track.lane_lateral(&sample, state.lane);
     let error = target - car.lateral;
@@ -166,7 +169,7 @@ mod tests {
     /// A car parked at distance 40 m, sitting in `lane`'s centre. The lane must
     /// match the `RailsState` the test starts from, or the car is already
     /// crossing before the test presses anything.
-    fn car_on(track: &Track, lane: usize) -> CarState {
+    fn car_on(track: &Track, lane: i32) -> CarState {
         let sample = track.sample_at(40.0);
         let mut car = CarState::parked(sample.position, road_yaw(track, 40.0));
         car.distance = 40.0;
@@ -191,52 +194,47 @@ mod tests {
         }
     }
 
-    /// Lane index of the lane whose centre is furthest SCREEN-RIGHT, i.e. the
-    /// most negative lateral, i.e. index 0.
-    const RIGHTMOST_LANE: usize = 0;
+    /// The lane whose centre is furthest SCREEN-RIGHT is the most negative
+    /// lateral, i.e. the lowest (most negative) index — `-reach`.
 
     #[test]
     fn a_hop_retargets_one_lane_and_only_one() {
         let track = track();
-        let mut car = car_on(&track, 2);
-        let mut state = RailsState::in_lane(2);
+        let mut car = car_on(&track, 1);
+        let mut state = RailsState::in_lane(1);
         // RIGHT button -> a lane nearer screen-right -> a LOWER index.
         guide(&mut car, hop(1), &track, &mut state);
-        assert_eq!(state.lane(), 1);
+        assert_eq!(state.lane(), 0, "and lane 0 is the centreline lane");
         // Holding the button is not a second hop: the caller edge-triggers, so a
         // held finger arrives here as `lane_step: 0`.
         guide(&mut car, hop(0), &track, &mut state);
-        assert_eq!(state.lane(), 1);
+        assert_eq!(state.lane(), 0);
     }
 
     #[test]
     fn a_hop_off_the_road_is_refused_rather_than_clamped_late() {
         let track = track();
-        let mut car = car_on(&track, 2);
+        let mut car = car_on(&track, 0);
         let sample = track.sample_at(car.distance);
-        let lanes = track.lane_count(&sample);
-        let mut state = RailsState::in_lane(RIGHTMOST_LANE);
+        let reach = track.lane_reach(&sample);
+        let mut state = RailsState::in_lane(-reach);
         guide(&mut car, hop(1), &track, &mut state);
         assert_eq!(
             state.lane(),
-            RIGHTMOST_LANE,
+            -reach,
             "cannot hop right out of the rightmost lane"
         );
 
-        let mut outer = RailsState::in_lane(lanes - 1);
+        let mut outer = RailsState::in_lane(reach);
         guide(&mut car, hop(-1), &track, &mut outer);
-        assert_eq!(
-            outer.lane(),
-            lanes - 1,
-            "cannot hop left out of the leftmost lane"
-        );
+        assert_eq!(outer.lane(), reach, "cannot hop left out of the leftmost lane");
     }
 
     #[test]
     fn the_car_accelerates_toward_the_chosen_lane_and_settles_on_it() {
         let track = track();
-        let mut car = car_on(&track, 2);
-        let mut state = RailsState::in_lane(2);
+        let mut car = car_on(&track, 1);
+        let mut state = RailsState::in_lane(1);
         // Aim one lane right and integrate the lateral channel by hand (the real
         // integrator is the controller's; here we only prove the solver drives
         // the car to the lane centre and stops there).

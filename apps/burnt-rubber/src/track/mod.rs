@@ -137,7 +137,20 @@ impl Track {
         self.lane_width
     }
 
-    /// How many lanes the road has at `sample`.
+    /// How far out from the centreline lanes reach at `sample`: the road carries
+    /// lanes `-reach ..= reach`.
+    ///
+    /// A lane pair is added only once the road is wide enough to hold it whole,
+    /// so the count is always **odd** and never below three — and growing it
+    /// appends lanes at the shoulders without disturbing any lane that already
+    /// existed.
+    pub fn lane_reach(&self, sample: &TrackSample) -> i32 {
+        let fits = (sample.half_width / self.lane_width.max(0.1) - 0.5).floor() as i32;
+        fits.clamp(1, MAX_LANE_REACH)
+    }
+
+    /// How many lanes the road has at `sample`. Always odd — one lane sits on
+    /// the centreline and the rest are paired off either side of it.
     ///
     /// This lives on the track, not on the traffic and not on the road mesh,
     /// because **both** of them need it and they must agree: the painted
@@ -146,17 +159,30 @@ impl Track {
     /// painted line, and it is exactly the kind of second-idea-of-the-road this
     /// table exists to prevent.
     pub fn lane_count(&self, sample: &TrackSample) -> usize {
-        let raw = (sample.half_width * 2.0 / self.lane_width.max(0.1)).floor() as usize;
-        raw.clamp(MIN_LANES, MAX_LANES)
+        (self.lane_reach(sample) * 2 + 1) as usize
     }
 
-    /// The centre of `lane` at `sample` (m from the road centre). An
-    /// out-of-range lane clamps to the outermost one.
-    pub fn lane_lateral(&self, sample: &TrackSample, lane: usize) -> f32 {
-        let lanes = self.lane_count(sample);
-        let width = sample.half_width * 2.0 / lanes as f32;
-        let index = lane.min(lanes - 1);
-        -sample.half_width + width * (index as f32 + 0.5)
+    /// The centre of `lane` at `sample` (m from the road centre). A lane beyond
+    /// the road's reach clamps to the outermost one on that side.
+    ///
+    /// **Lanes are numbered out from the centreline and are a fixed width.**
+    /// Lane 0 *is* the centreline, `-1`/`+1` flank it, `±2` sit outboard of
+    /// those — so lane 0 is at 0.0 m and lane `n` is at `n * lane_width` for the
+    /// entire nine kilometres, whatever the road is doing.
+    ///
+    /// Both halves of that matter, and the old shape got both wrong. It divided
+    /// the local road width by a lane count derived from that same width, which
+    /// meant (a) every lane centre was a *fraction* of the road, so lanes slid
+    /// outward as it widened, and (b) the count was unsigned and edge-anchored,
+    /// so going from four lanes to five renumbered all of them — lane 2 of 4 and
+    /// lane 2 of 5 are different pieces of road. A car holding a lane index was
+    /// therefore shunted sideways by a road that merely got wider. Anchoring the
+    /// numbering at the centre instead of the edge is what makes a lane a
+    /// durable identity rather than an ordinal into a list that keeps changing
+    /// length.
+    pub fn lane_lateral(&self, sample: &TrackSample, lane: i32) -> f32 {
+        let reach = self.lane_reach(sample);
+        lane.clamp(-reach, reach) as f32 * self.lane_width
     }
 
     /// How far from the centreline the barrier stands at `sample` (m).
@@ -259,13 +285,19 @@ impl Track {
     }
 }
 
-/// The fewest lanes a road is ever divided into.
-pub const MIN_LANES: usize = 2;
+/// The fewest lanes a road is ever divided into: the centre lane and one either
+/// side. These three exist at the same three lateral offsets for the whole
+/// course — that is the guarantee the whole lane lattice is built to give.
+pub const MIN_LANES: usize = 3;
 
-/// The most lanes a road is ever divided into. A very wide road is a wide road,
-/// not a road with twenty lanes: past this the dividers stop reading as lanes
-/// and start reading as stripes.
-pub const MAX_LANES: usize = 8;
+/// How far out from the centreline lanes may ever reach. A very wide road is a
+/// wide road, not a road with twenty lanes: past this the dividers stop reading
+/// as lanes and start reading as stripes. The shipping course tops out at 2
+/// (five lanes); this is the ceiling, not the target.
+pub const MAX_LANE_REACH: i32 = 3;
+
+/// The most lanes a road is ever divided into.
+pub const MAX_LANES: usize = (MAX_LANE_REACH * 2 + 1) as usize;
 
 /// How far back up the road a reset places the car (m). Far enough to clear the
 /// obstacle, close enough that a mistake costs a moment rather than a section.
@@ -606,30 +638,88 @@ mod tests {
         for distance in [0.0f32, 900.0, 4_400.0, 8_000.0] {
             let sample = t.sample_at(distance);
             let lanes = t.lane_count(&sample);
+            let reach = t.lane_reach(&sample);
             assert!((MIN_LANES..=MAX_LANES).contains(&lanes));
+            assert_eq!(lanes % 2, 1, "a lane always sits on the centreline");
+            assert_eq!(lanes, (reach * 2 + 1) as usize);
 
             let mut previous = f32::NEG_INFINITY;
-            for lane in 0..lanes {
+            for lane in -reach..=reach {
                 let lateral = t.lane_lateral(&sample, lane);
                 assert!(lateral > previous, "lanes run left to right");
                 previous = lateral;
                 assert!(
-                    lateral.abs() < sample.half_width,
-                    "lane {lane} at {lateral} is off a road {} m wide",
+                    lateral.abs() + t.lane_width() * 0.5 <= sample.half_width + 1.0e-4,
+                    "lane {lane} at {lateral} hangs off a road {} m wide",
                     sample.half_width
                 );
             }
             // Evenly spaced, and symmetric about the centreline.
-            let first = t.lane_lateral(&sample, 0);
-            let last = t.lane_lateral(&sample, lanes - 1);
-            assert!((first + last).abs() < 1.0e-3, "the lanes are centred");
-            // Out of range clamps rather than panicking.
-            assert_eq!(t.lane_lateral(&sample, 999), last);
+            assert!(
+                (t.lane_lateral(&sample, -reach) + t.lane_lateral(&sample, reach)).abs() < 1.0e-3,
+                "the lanes are centred"
+            );
+            // Out of range clamps rather than panicking, on both sides.
+            assert_eq!(t.lane_lateral(&sample, 999), t.lane_lateral(&sample, reach));
+            assert_eq!(t.lane_lateral(&sample, -999), t.lane_lateral(&sample, -reach));
         }
     }
 
+    /// **The invariant the whole lattice exists for.** The three centre lanes
+    /// are the same three pieces of road for the entire course: lane 0 is the
+    /// centreline and `±1` are exactly one lane width either side of it,
+    /// everywhere, whatever the road is doing.
+    ///
+    /// Before this, lane centres were fractions of the local road width and the
+    /// numbering was edge-anchored, so a car holding a lane was slid sideways as
+    /// the road breathed and re-seated wholesale whenever the lane count
+    /// changed. A widening road may now only *append* lanes at the shoulders.
     #[test]
-    fn a_wider_road_gets_more_lanes_until_the_ceiling() {
+    fn the_three_centre_lanes_never_move_along_the_whole_course() {
+        let t = track();
+        let width = t.lane_width();
+        for sample in t.samples() {
+            assert_eq!(t.lane_lateral(sample, 0), 0.0, "lane 0 IS the centreline");
+            assert_eq!(t.lane_lateral(sample, 1), width);
+            assert_eq!(t.lane_lateral(sample, -1), -width);
+            assert!(
+                t.lane_count(sample) >= MIN_LANES,
+                "and those three always exist"
+            );
+        }
+    }
+
+    /// The width jitter breathes the shoulder, never the lane ladder.
+    ///
+    /// A section authors a lane count and the tarmac follows; the cosmetic
+    /// wander on top of that must stay well inside the next lane's threshold. If
+    /// it does not, the count flickers up and down *within* a section and every
+    /// car on the road gets shoved about — the original defect. The road may
+    /// therefore only change lane count where sections meet, which bounds the
+    /// changes over the whole course by the number of joins.
+    #[test]
+    fn the_width_jitter_cannot_change_the_lane_count() {
+        for seed in [1u64, 7, 99, 4_242] {
+            let t = Track::generate(seed, &CourseTuning::DEFAULT);
+            let changes = t
+                .samples()
+                .windows(2)
+                .filter(|w| t.lane_count(&w[0]) != t.lane_count(&w[1]))
+                .count();
+            assert!(
+                changes <= SectionKind::ALL.len(),
+                "seed {seed}: {changes} lane-count changes for {} sections — \
+                 the jitter is crossing a lane threshold mid-section",
+                SectionKind::ALL.len()
+            );
+            assert!(changes > 0, "seed {seed}: the course should still open out");
+        }
+    }
+
+    /// Extra lanes are appended at the shoulders, so a lane that exists on the
+    /// narrow road is at the identical offset on the wide one.
+    #[test]
+    fn a_wider_road_appends_lanes_without_moving_the_existing_ones() {
         let t = track();
         let narrow = t
             .samples()
@@ -643,7 +733,15 @@ mod tests {
             .max_by(|a, b| a.half_width.total_cmp(&b.half_width))
             .copied()
             .expect("the course has road");
-        assert!(t.lane_count(&wide) >= t.lane_count(&narrow));
+        let (thin, thick) = (t.lane_reach(&narrow), t.lane_reach(&wide));
+        assert!(thick > thin, "the course does actually change lane count");
+        for lane in -thin..=thin {
+            assert_eq!(
+                t.lane_lateral(&narrow, lane),
+                t.lane_lateral(&wide, lane),
+                "lane {lane} moved when the road widened"
+            );
+        }
         assert!(t.lane_width() > 0.0);
     }
 

@@ -101,7 +101,7 @@ impl SectionKind {
                 hilliness: 0.0,
                 hill_points: (3, 4),
                 hill_gap: (8, 12),
-                half_width: 9.0,
+                lanes: 5,
                 width_jitter: 0.0,
             },
             SectionKind::SweepingBends => SectionProfile {
@@ -112,8 +112,8 @@ impl SectionKind {
                 hilliness: 0.28,
                 hill_points: (4, 7),
                 hill_gap: (5, 10),
-                half_width: 8.5,
-                width_jitter: 0.8,
+                lanes: 5,
+                width_jitter: 0.4,
             },
             SectionKind::RollingHills => SectionProfile {
                 length: 1250.0,
@@ -123,8 +123,8 @@ impl SectionKind {
                 hilliness: 1.0,
                 hill_points: (2, 4),
                 hill_gap: (2, 4),
-                half_width: 8.0,
-                width_jitter: 0.6,
+                lanes: 3,
+                width_jitter: 0.4,
             },
             SectionKind::TechnicalBends => SectionProfile {
                 length: 1150.0,
@@ -134,8 +134,8 @@ impl SectionKind {
                 hilliness: 0.35,
                 hill_points: (3, 5),
                 hill_gap: (4, 7),
-                half_width: 7.0,
-                width_jitter: 0.5,
+                lanes: 3,
+                width_jitter: 0.4,
             },
             SectionKind::Tunnel => SectionProfile {
                 length: 780.0,
@@ -145,7 +145,7 @@ impl SectionKind {
                 hilliness: 0.12,
                 hill_points: (3, 5),
                 hill_gap: (6, 10),
-                half_width: 7.5,
+                lanes: 3,
                 width_jitter: 0.0,
             },
             SectionKind::HighSpeedStraight => SectionProfile {
@@ -156,7 +156,7 @@ impl SectionKind {
                 hilliness: 0.15,
                 hill_points: (4, 7),
                 hill_gap: (7, 12),
-                half_width: 10.5,
+                lanes: 5,
                 width_jitter: 0.4,
             },
             SectionKind::Canyon => SectionProfile {
@@ -167,7 +167,7 @@ impl SectionKind {
                 hilliness: 0.45,
                 hill_points: (3, 5),
                 hill_gap: (3, 6),
-                half_width: 6.5,
+                lanes: 3,
                 width_jitter: 0.4,
             },
             SectionKind::FinalSweeps => SectionProfile {
@@ -178,8 +178,8 @@ impl SectionKind {
                 hilliness: 0.30,
                 hill_points: (3, 6),
                 hill_gap: (5, 9),
-                half_width: 9.0,
-                width_jitter: 0.5,
+                lanes: 5,
+                width_jitter: 0.4,
             },
             SectionKind::Finish => SectionProfile {
                 length: 320.0,
@@ -189,7 +189,7 @@ impl SectionKind {
                 hilliness: 0.0,
                 hill_points: (3, 4),
                 hill_gap: (8, 12),
-                half_width: 11.0,
+                lanes: 5,
                 width_jitter: 0.0,
             },
         }
@@ -277,9 +277,21 @@ pub struct SectionProfile {
     pub hill_points: (u32, u32),
     /// Inclusive range of control points between hills.
     pub hill_gap: (u32, u32),
-    /// The section's nominal road half-width (m).
-    pub half_width: f32,
+    /// How many lanes the section's road carries. **Always odd**: one lane on
+    /// the centreline and the rest paired off either side of it, so the three
+    /// centre lanes are the same three lanes in every section of the course and
+    /// a wider section differs only by lanes appended at the shoulders.
+    ///
+    /// This, not a width in metres, is what a section authors. The tarmac is
+    /// then however wide those lanes plus a shoulder need it to be — see
+    /// [`crate::tuning::CourseTuning::half_width_for_lanes`].
+    pub lanes: usize,
     /// How much the half-width is allowed to wander within the section (m).
+    ///
+    /// Cosmetic only: it breathes the shoulder, never the lanes. Keep it well
+    /// inside half a lane width or the wander will cross a lane-count threshold
+    /// and add or drop a lane pair mid-section, which is exactly the churn this
+    /// design exists to prevent (`the_width_jitter_cannot_change_the_lane_count`).
     pub width_jitter: f32,
 }
 
@@ -349,9 +361,23 @@ mod tests {
         assert!(straight.curviness < esses.curviness);
         assert!(hills.hilliness > esses.hilliness);
         assert!(
-            SectionKind::HighSpeedStraight.profile().half_width
-                > SectionKind::Canyon.profile().half_width,
+            SectionKind::HighSpeedStraight.profile().lanes
+                > SectionKind::Canyon.profile().lanes,
             "the canyon squeezes and the long haul opens up"
         );
+    }
+
+    /// Every section is an odd number of lanes, so every section has a lane on
+    /// the centreline and the three centre lanes are common to all of them.
+    #[test]
+    fn every_section_carries_an_odd_number_of_lanes() {
+        for kind in SectionKind::ALL {
+            let profile = kind.profile();
+            assert!(
+                profile.lanes >= crate::track::MIN_LANES && profile.lanes % 2 == 1,
+                "{kind:?} carries {} lanes",
+                profile.lanes
+            );
+        }
     }
 }

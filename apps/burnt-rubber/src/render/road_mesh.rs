@@ -226,17 +226,25 @@ fn strip_paint(
     if phase < tuning.dash_length {
         // The dividers are painted between the *track's* lanes, the same ones
         // the traffic holds — see `Track::lane_count`.
-        let lanes = track.lane_count(a) as i32;
-        for lane in 1..lanes {
-            let t = lane as f32 / lanes as f32;
-            let offset_a = -a.half_width + t * a.half_width * 2.0;
-            let offset_b = -b.half_width + t * b.half_width * 2.0;
-            out.ground_quad(
-                a.at_lateral(offset_a - DASH_HALF_WIDTH).add(PAINT_LIFT),
-                b.at_lateral(offset_b - DASH_HALF_WIDTH).add(PAINT_LIFT),
-                b.at_lateral(offset_b + DASH_HALF_WIDTH).add(PAINT_LIFT),
-                a.at_lateral(offset_a + DASH_HALF_WIDTH).add(PAINT_LIFT),
-            );
+        //
+        // A divider sits on the boundary between lanes `k` and `k+1`, at
+        // `(k + 0.5) * lane_width` out from the centreline on each side. That is
+        // an absolute offset, not a fraction of the local road width, so a
+        // divider is at the same place on a wide section as on a narrow one and
+        // does not swing sideways as the road breathes — which also makes it far
+        // stabler to rasterize than the old tapering line was.
+        let reach = track.lane_reach(a);
+        let lane_width = track.lane_width();
+        for boundary in 0..reach {
+            for side in [-1.0f32, 1.0] {
+                let offset = side * (boundary as f32 + 0.5) * lane_width;
+                out.ground_quad(
+                    a.at_lateral(offset - DASH_HALF_WIDTH).add(PAINT_LIFT),
+                    b.at_lateral(offset - DASH_HALF_WIDTH).add(PAINT_LIFT),
+                    b.at_lateral(offset + DASH_HALF_WIDTH).add(PAINT_LIFT),
+                    a.at_lateral(offset + DASH_HALF_WIDTH).add(PAINT_LIFT),
+                );
+            }
         }
     }
 

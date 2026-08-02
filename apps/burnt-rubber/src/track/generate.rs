@@ -148,8 +148,13 @@ fn emit_hills(
     }
 }
 
-/// Emit `count` half-widths for one section: the section's nominal width with a
-/// slow, smooth wander inside its jitter band.
+/// Emit `count` half-widths for one section: the width its **lane count**
+/// requires, with a slow, smooth wander inside its jitter band.
+///
+/// The wander is shoulder, not lanes. It is deliberately kept well short of the
+/// next lane threshold, so a section that authors five lanes carries five lanes
+/// end to end — the road breathes without the lane ladder shifting underneath a
+/// car that is driving on it.
 fn emit_width(
     draw: &mut Draw,
     profile: &super::section::SectionProfile,
@@ -157,14 +162,12 @@ fn emit_width(
     count: usize,
     out: &mut Vec<f32>,
 ) {
+    let nominal = tuning.half_width_for_lanes(profile.lanes);
     let phase = draw.range(0.0, std::f32::consts::TAU);
     let rate = draw.range(0.05, 0.16);
     for i in 0..count {
         let wander = profile.width_jitter * (phase + rate * i as f32).sin();
-        out.push(
-            (profile.half_width + wander)
-                .clamp(tuning.min_half_width, tuning.max_half_width),
-        );
+        out.push((nominal + wander).clamp(tuning.min_half_width, tuning.max_half_width));
     }
 }
 
@@ -400,7 +403,7 @@ mod tests {
             hilliness: 1.0,
             hill_points: (0, 0),
             hill_gap: (0, 0),
-            half_width: 8.0,
+            lanes: 5,
             width_jitter: 0.0,
         };
         let mut bends = Vec::new();
@@ -409,9 +412,12 @@ mod tests {
         let mut hills = Vec::new();
         emit_hills(&mut draw, &profile, &CourseTuning::DEFAULT, 10, &mut hills);
         assert_eq!(hills.len(), 10);
+        // Zero jitter, so every point is exactly the width the section's lane
+        // count asks for — the road is a consequence of its lanes.
         let mut widths = Vec::new();
         emit_width(&mut draw, &profile, &CourseTuning::DEFAULT, 10, &mut widths);
-        assert!(widths.iter().all(|w| (*w - 8.0).abs() < 1.0e-5));
+        let expected = CourseTuning::DEFAULT.half_width_for_lanes(profile.lanes);
+        assert!(widths.iter().all(|w| (*w - expected).abs() < 1.0e-5));
     }
 
     #[test]

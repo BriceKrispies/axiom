@@ -351,7 +351,14 @@ pub struct CourseTuning {
     /// barrier sits right at the shoulder, which is what makes them feel tight.
     pub verge: f32,
     /// Lane width (m) — traffic lanes and the painted dividers share it.
+    ///
+    /// **Constant for the whole course.** A lane is a fixed physical thing, not
+    /// a fraction of however wide the road happens to be here; see
+    /// [`crate::track::Track::lane_lateral`].
     pub lane_width: f32,
+    /// Paved margin (m) between the outermost lane and the edge of the tarmac,
+    /// each side. The hard shoulder: the road is its lanes plus this.
+    pub lane_shoulder: f32,
     /// Spacing of a lane dash plus its gap (m).
     pub dash_period: f32,
     /// Length of the painted part of a dash (m).
@@ -361,6 +368,20 @@ pub struct CourseTuning {
 }
 
 impl CourseTuning {
+    /// The tarmac half-width (m) that carries `lanes` lanes plus its shoulder.
+    ///
+    /// **This is the direction the dependency runs**: a section authors how many
+    /// lanes it has and the road is however wide that needs to be. It used to run
+    /// the other way — a section authored a width and the lane count fell out of
+    /// a division — which meant every lane centre was a fraction of the local
+    /// road width, so lanes slid sideways as the road breathed and were
+    /// renumbered wholesale whenever the division crossed an integer. A car
+    /// holding a lane got shunted across the road by geometry it never asked to
+    /// change. See [`crate::track::Track::lane_lateral`].
+    pub fn half_width_for_lanes(&self, lanes: usize) -> f32 {
+        lanes as f32 * self.lane_width * 0.5 + self.lane_shoulder
+    }
+
     /// The shipping course shape.
     pub const DEFAULT: CourseTuning = CourseTuning {
         sample_spacing: 2.0,
@@ -373,12 +394,17 @@ impl CourseTuning {
         max_grade_delta: 0.018,
         max_bank: 0.14,
         bank_per_curvature: 26.0,
-        min_half_width: 6.0,
-        max_half_width: 11.0,
+        // The road is authored in LANES (see `SectionProfile::lanes`), so these
+        // bounds are the three-lane and five-lane widths plus the jitter band
+        // either side — not free parameters. Widening them without widening the
+        // lane ladder just adds unpainted tarmac.
+        min_half_width: 5.6,
+        max_half_width: 9.9,
         correction_passes: 6,
         shoulder: 1.6,
         verge: 5.0,
         lane_width: 3.5,
+        lane_shoulder: 0.75,
         dash_period: 12.0,
         dash_length: 5.0,
         post_spacing: 8.0,

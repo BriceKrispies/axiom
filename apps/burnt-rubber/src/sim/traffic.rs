@@ -37,8 +37,10 @@ pub struct TrafficCar {
     pub distance: f32,
     /// Lateral offset from the road centre (m), including the in-lane wander.
     pub lateral: f32,
-    /// The lane index this car holds.
-    pub lane: u32,
+    /// The lane this car holds, numbered out from the centreline (see
+    /// [`Track::lane_lateral`]). Signed, so a road that gains an outer lane pair
+    /// leaves every car where it is instead of renumbering the whole road.
+    pub lane: i32,
     /// Cruising speed (m/s).
     pub speed: f32,
     /// Which of the visual car shapes this is.
@@ -180,8 +182,10 @@ const WANDER_RATE: f32 = 0.011;
 pub fn spawn_slot(seed: u64, slot: u32, track: &Track, race: &RaceTuning) -> TrafficCar {
     let mut draw = Draw::seeded(seed).fork(TRAFFIC_SALT ^ slot as u64);
     let distance = slot as f32 * race.traffic_spacing;
+    // Pick among the lanes that exist here, then re-centre the index: the draw
+    // is an ordinal `0..lanes` and a lane is a signed offset from the middle.
     let lanes = lane_count(track, distance);
-    let lane = draw.index(lanes) as u32;
+    let lane = draw.index(lanes) as i32 - lane_reach(track, distance);
     let speed = draw.range(race.traffic_speed_min, race.traffic_speed_max);
     let variant = draw.index(TRAFFIC_VARIANTS as usize) as u8;
     let wander_phase = draw.range(0.0, std::f32::consts::TAU);
@@ -212,10 +216,15 @@ pub fn lane_count(track: &Track, distance: f32) -> usize {
     track.lane_count(&track.sample_at(distance))
 }
 
+/// How far out from the centreline lanes reach at `distance`.
+pub fn lane_reach(track: &Track, distance: f32) -> i32 {
+    track.lane_reach(&track.sample_at(distance))
+}
+
 /// The centre of `lane` at `distance` (m from the road centre).
-pub fn lane_lateral(track: &Track, distance: f32, lane: u32) -> f32 {
+pub fn lane_lateral(track: &Track, distance: f32, lane: i32) -> f32 {
     let sample = track.sample_at(distance);
-    track.lane_lateral(&sample, lane as usize)
+    track.lane_lateral(&sample, lane)
 }
 
 #[cfg(test)]
@@ -405,18 +414,24 @@ mod tests {
             let lanes = lane_count(&track, distance);
             let sample = track.sample_at(distance);
             assert_eq!(lanes, track.lane_count(&sample), "one definition of lanes");
+            let reach = lane_reach(&track, distance);
+            assert_eq!(lanes, (reach * 2 + 1) as usize, "an odd count, centred");
             let mut previous = f32::NEG_INFINITY;
-            for lane in 0..lanes as u32 {
+            for lane in -reach..=reach {
                 let lateral = lane_lateral(&track, distance, lane);
-                assert_eq!(lateral, track.lane_lateral(&sample, lane as usize));
+                assert_eq!(lateral, track.lane_lateral(&sample, lane));
                 assert!(lateral > previous, "lanes run left to right");
                 previous = lateral;
                 assert!(lateral.abs() < sample.half_width, "and stay on the road");
             }
-            // An out-of-range lane clamps rather than panicking.
+            // An out-of-range lane clamps rather than panicking, on both sides.
             assert_eq!(
                 lane_lateral(&track, distance, 99),
-                lane_lateral(&track, distance, lanes as u32 - 1)
+                lane_lateral(&track, distance, reach)
+            );
+            assert_eq!(
+                lane_lateral(&track, distance, -99),
+                lane_lateral(&track, distance, -reach)
             );
             let _ = &r;
         }
