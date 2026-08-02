@@ -375,12 +375,12 @@ mod tests {
         );
     }
 
+    /// Scrape alignment must not fight a car that is steering off the wall.
+    ///
     /// The failure mode that ruins an arcade racer is being *pinned* against a
     /// wall. Grinding one at full lock for four seconds is allowed to cost most
     /// of your speed — but the moment you straighten up you must be able to
     /// drive away, which is what the scrape alignment guarantees.
-    #[test]
-    /// Scrape alignment must not fight a car that is steering off the wall.
     ///
     /// Unconditional alignment gave the system a stable fixed point — the pull
     /// and the driver's steering cancelling exactly — in which the car ground

@@ -142,6 +142,15 @@ impl RaceScene {
         self.effects.step(sim.car());
     }
 
+    /// Cull road paint to the near field, or stop doing so.
+    ///
+    /// Driven by the browser arm from the backend it actually bound. See
+    /// [`crate::render::chunks::RoadChunks::set_paint_near_field_only`] for why
+    /// the raster, not taste, decides this.
+    pub fn set_paint_near_field_only(&mut self, limited: bool) {
+        self.road.set_paint_near_field_only(limited);
+    }
+
     /// Pose the whole scene for a render frame `alpha` of the way through the
     /// current simulation step.
     pub fn pose(&mut self, app: &mut RunningApp, sim: &RaceSim, alpha: f32) {

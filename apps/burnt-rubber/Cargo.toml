@@ -37,6 +37,10 @@ axiom-audio = { path = "../../modules/axiom-audio" }
 # compiles none of it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axiom-windowing = { path = "../../modules/axiom-windowing" }
+# The neutral backend identity (`BackendKind`) the windowing driver reports the
+# cascade's selection as — the app reads it to decide whether it is drawing into
+# the Canvas 2D software rasterizer and must cull road paint to the near field.
+axiom-host = { path = "../../crates/axiom-host" }
 axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
 wasm-bindgen = "0.2"
 js-sys = "0.3"

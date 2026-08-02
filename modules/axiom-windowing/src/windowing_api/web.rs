@@ -274,6 +274,9 @@ impl WindowingApi {
                     // setup instead of an engine default none of them was authored for.
                     ambient,
                     depth_fog,
+                    // Three panes, three pinned backends: "which backend is bound"
+                    // has no single answer here, so this loop reports none.
+                    None,
                 )
                 .await;
             });
@@ -349,6 +352,7 @@ impl WindowingApi {
             Err(_) => return,
         };
         let slot = self.presenter.clone();
+        let report = self.bound_backend.clone();
         let (ambient, depth_fog) = (self.ambient(), self.depth_fog());
         wasm_bindgen_futures::spawn_local(async move {
             let presenter =
@@ -363,6 +367,7 @@ impl WindowingApi {
                     max_instances,
                     ambient,
                     depth_fog,
+                    report,
                 )
                 .await;
             *slot.borrow_mut() = presenter;
@@ -547,6 +552,7 @@ impl WindowingApi {
                 max_instances,
                 ambient,
                 depth_fog,
+                windowing.bound_backend.clone(),
             )
             .await
             {
@@ -841,6 +847,10 @@ impl WindowingApi {
                 Some(backend) => Rc::new(RefCell::new(backend)),
                 None => return,
             };
+            // This arm drives a bare backend rather than a `LivePresenter`, so it
+            // announces the cascade's answer itself — an app must be able to ask
+            // which backend it got whichever run loop it chose.
+            windowing.bound_backend.set(Some(backend.borrow().kind()));
             let windowing = Rc::new(RefCell::new(windowing));
             // The shared dev frame-scrubber overlay (see `run_web_multi`).
             let scrubber = crate::frame_scrubber::FrameScrubber::mount(None, None);
@@ -995,6 +1005,9 @@ impl WindowingApi {
                 Some(backend) => Rc::new(RefCell::new(backend)),
                 None => return,
             };
+            // Bare-backend arm, like the streaming loop above: it reports the
+            // cascade's answer itself rather than through a `LivePresenter`.
+            windowing.bound_backend.set(Some(backend.borrow().kind()));
             let win = Rc::new(RefCell::new(windowing));
             let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
             let g = f.clone();
@@ -1102,6 +1115,12 @@ pub(crate) struct LivePresenter {
     // with, retained so a device-loss rebuild re-supplies it (a fresh backend
     // otherwise falls back to the dim engine default). Copy, so cheap to hold.
     ambient: axiom_host::FrameAmbient,
+    // Where this presenter announces which backend the cascade selected, so
+    // `WindowingApi::bound_backend` can answer after the driver has been consumed
+    // into the run loop. `None` for a presenter nobody asks about: the
+    // backend-comparison loop pins one backend per pane, so "the" bound backend
+    // is not a question with an answer there.
+    report: Option<super::BackendReport>,
 }
 
 // The live backends hold no `Debug`; the presenter is a field of the
@@ -1133,7 +1152,9 @@ impl LivePresenter {
     /// WebGPU → WebGL2 → Canvas 2D cascade), upload the mesh set `meshes` and
     /// material set `materials` once, and mount the scrub-only dev overlay so a
     /// caller-owned loop gets the frame slider + Escape/blur freeze the engine's
-    /// own run loops have. `None` if no backend could be built.
+    /// own run loops have. `report` is the driver's backend-reading cell, which
+    /// the selection is announced into (at bind, and again after every rebuild).
+    /// `None` if no backend could be built.
     #[allow(clippy::too_many_arguments)]
     async fn bind(
         request: axiom_host::HostPresentationRequest,
@@ -1144,6 +1165,7 @@ impl LivePresenter {
         max_instances: u32,
         ambient: axiom_host::FrameAmbient,
         depth_fog: Option<axiom_host::FrameDepthFog>,
+        report: super::BackendReport,
     ) -> Option<LivePresenter> {
         Self::bind_with(
             request,
@@ -1156,6 +1178,7 @@ impl LivePresenter {
             max_instances,
             ambient,
             depth_fog,
+            Some(report),
         )
         .await
     }
@@ -1165,8 +1188,10 @@ impl LivePresenter {
     /// controls whether the dev frame-scrubber overlay is mounted for this
     /// presenter — the backend-comparison loop pins each backend and mounts NO
     /// scrubber (three stacked overlays over the panes would be noise). Uploads
-    /// the scene once and captures the rebuild inputs. `None` if no backend could
-    /// be built.
+    /// the scene once and captures the rebuild inputs. `report` is the driver's
+    /// backend-reading cell, or `None` for a presenter whose selection nobody can
+    /// meaningfully ask about (the comparison loop's pinned panes). `None` if no
+    /// backend could be built.
     #[allow(clippy::too_many_arguments)]
     async fn bind_with(
         request: axiom_host::HostPresentationRequest,
@@ -1179,6 +1204,7 @@ impl LivePresenter {
         max_instances: u32,
         ambient: axiom_host::FrameAmbient,
         depth_fog: Option<axiom_host::FrameDepthFog>,
+        report: Option<super::BackendReport>,
     ) -> Option<LivePresenter> {
         use std::cell::{Cell, RefCell};
         use std::rc::Rc;
@@ -1199,6 +1225,12 @@ impl LivePresenter {
             depth_fog,
         )
         .await?;
+        // Announce the cascade's answer the moment it exists. Everything after
+        // this point — including a rebuild that re-runs the cascade — reports
+        // through `Self::report_backend`.
+        report
+            .iter()
+            .for_each(|cell| cell.set(Some(backend.kind())));
         Some(LivePresenter {
             backend: Rc::new(RefCell::new(backend)),
             canvas,
@@ -1221,6 +1253,7 @@ impl LivePresenter {
             skinned_meshes,
             ambient,
             depth_fog,
+            report,
         })
     }
 
@@ -1349,6 +1382,11 @@ impl LivePresenter {
             let ambient = self.ambient;
             let depth_fog = self.depth_fog;
             let flag = self.reinitializing.clone();
+            // The rebuild re-runs the WebGPU → WebGL2 → Canvas 2D cascade, so the
+            // page can legitimately come back on a different backend than it went
+            // down on. Re-announce it, or every consumer of
+            // `WindowingApi::bound_backend` is reading a stale bind-time snapshot.
+            let report = self.report.clone();
             let request = self.request;
             let preference = self.preference;
             let max_instances = self.max_instances;
@@ -1365,9 +1403,12 @@ impl LivePresenter {
                     depth_fog,
                 )
                 .await;
-                rebuilt
-                    .into_iter()
-                    .for_each(|backend| *be.borrow_mut() = backend);
+                rebuilt.into_iter().for_each(|backend| {
+                    report
+                        .iter()
+                        .for_each(|cell| cell.set(Some(backend.kind())));
+                    *be.borrow_mut() = backend;
+                });
                 flag.set(false);
             });
         }
@@ -1463,6 +1504,29 @@ enum LiveBackend {
 
 #[cfg(target_arch = "wasm32")]
 impl LiveBackend {
+    /// Which backend this actually is, as the neutral
+    /// [`axiom_host::BackendKind`].
+    ///
+    /// The selection cascade (`?backend=` else WebGPU→WebGL2→Canvas 2D) runs in
+    /// here and its *outcome* was previously unreportable: an app could not
+    /// discover that it had silently landed on the software rasterizer, which is
+    /// exactly the case where an app most wants to adapt — the Canvas 2D
+    /// framebuffer is low-resolution, so geometry that is fine on the GPU
+    /// degrades into sub-pixel flicker there. Reading the URL back in the app
+    /// would not do: it misses every fallback, including the no-parameter page
+    /// that ended up on Canvas 2D because the GPU refused a device.
+    ///
+    /// The GPU arm reports [`axiom_host::BackendKind::GpuPrimary`] for both
+    /// WebGPU and the WebGL2 downlevel: they share a code path and a resolution,
+    /// and no caller has yet needed to tell them apart. Splitting them later is
+    /// additive.
+    fn kind(&self) -> axiom_host::BackendKind {
+        match self {
+            LiveBackend::Gpu(_) => axiom_host::BackendKind::GpuPrimary,
+            LiveBackend::Canvas(_) => axiom_host::BackendKind::Canvas2d,
+        }
+    }
+
     /// Present one frame. The GPU arm draws the instance `batches` directly; the
     /// Canvas arm rasterizes a frame packet reconstructed from them. Returns
     /// `Err` only when the GPU surface is **unrecoverably lost** (the run loop

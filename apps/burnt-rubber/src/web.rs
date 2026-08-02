@@ -97,10 +97,25 @@ pub fn burnt_rubber_start() {
         }
     }
 
+    // Which backend the cascade picks is not known yet — it is chosen
+    // asynchronously, after `run_web_multi` below has consumed the driver — so
+    // take the reading now and consult it per frame. The Canvas 2D software
+    // rasterizer runs a framebuffer small enough that distant lane markings
+    // project to less than a pixel and shimmer, so it gets the near-field paint
+    // window and the GPU does not. Asking the driver rather than re-reading
+    // `?backend=` is deliberate: the URL misses every fallback, and a page with
+    // no parameter that landed on Canvas 2D because the GPU refused a device is
+    // exactly the case that needs the window.
+    let bound_backend = windowing.observe_bound_backend();
+
     let frame_state = state.clone();
     let frame_held = held.clone();
     let frame = move |tick: u64| {
         let mut guard = frame_state.borrow_mut();
+        // Read, not latch: a device-loss rebuild re-runs the cascade, so this
+        // can change mid-session in either direction.
+        let software_raster = bound_backend() == Some(axiom_host::BackendKind::Canvas2d);
+        guard.app.set_paint_near_field_only(software_raster);
         let elapsed = guard.elapsed_nanos();
         // Keyboard, gamepad and the on-screen pad all feed the same action
         // table: the pad's buttons and the gamepad's face buttons both arrive as

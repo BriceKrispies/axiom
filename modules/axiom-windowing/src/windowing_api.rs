@@ -70,7 +70,20 @@ pub struct WindowingApi {
     // object exists in the native deterministic core.
     #[cfg(target_arch = "wasm32")]
     presenter: std::rc::Rc<std::cell::RefCell<Option<web::LivePresenter>>>,
+    // Which live backend the cascade actually selected, reported by every arm that
+    // binds one (and re-reported by a device-loss rebuild). See `bound_backend`.
+    bound_backend: BackendReport,
 }
+
+/// The shared cell a bound backend reports its identity into.
+///
+/// Shared rather than owned because backend selection is **asynchronous and
+/// happens after the driver is gone**: every `run_web_*` entry consumes `self`
+/// into the animation-frame loop, and the GPU device request resolves later
+/// still. A caller that wants the answer therefore has to be holding a view of
+/// this cell from before that move, which is what
+/// [`WindowingApi::observe_bound_backend`] hands out.
+type BackendReport = std::rc::Rc<std::cell::Cell<Option<axiom_host::BackendKind>>>;
 
 impl WindowingApi {
     /// A fresh driver: no surface configured, loop at tick 0.
@@ -83,6 +96,7 @@ impl WindowingApi {
             depth_fog: None,
             #[cfg(target_arch = "wasm32")]
             presenter: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            bound_backend: std::rc::Rc::new(std::cell::Cell::new(None)),
         }
     }
 
@@ -172,6 +186,42 @@ impl WindowingApi {
         self.surface
             .as_ref()
             .map(|r| r.descriptor().viewport().physical_height())
+    }
+
+    /// Which live backend is bound right now, or `None` before the
+    /// (asynchronous) bind has resolved — and always `None` on native, which
+    /// binds no browser presentation.
+    ///
+    /// Lets an app adapt to the backend it actually got rather than the one it
+    /// hoped for. The motivating case: the Canvas 2D software rasterizer runs a
+    /// low-resolution framebuffer, so detail geometry that is stable on the GPU
+    /// decays into sub-pixel flicker there, and an app wants to draw less of it
+    /// — but only if it can find out. The selection cascade (`?backend=`, else
+    /// WebGPU→WebGL2→Canvas 2D) lives inside this module, so this is the only
+    /// place that honestly knows the answer; an app re-reading the URL would
+    /// miss every fallback, including the no-parameter page that ended up on
+    /// Canvas 2D because the GPU refused a device.
+    ///
+    /// The answer can **change**: a device-loss rebuild re-runs the cascade, so
+    /// a page that started on the GPU can legitimately finish on Canvas 2D. It
+    /// is a reading, not a one-off announcement, and a consumer that latches it
+    /// is wrong.
+    pub fn bound_backend(&self) -> Option<axiom_host::BackendKind> {
+        self.bound_backend.get()
+    }
+
+    /// A read-only reading of [`Self::bound_backend`] that **outlives this
+    /// driver**.
+    ///
+    /// Every `run_web_*` entry consumes the driver into the animation-frame
+    /// loop, and the backend is selected asynchronously after that — so the one
+    /// moment an app can ask is the one moment there is nothing to ask. Take
+    /// this before handing the driver over and call it per frame; it reads the
+    /// same cell the binder writes, so it starts `None`, becomes the selected
+    /// backend when the bind resolves, and follows a later device-loss rebuild.
+    pub fn observe_bound_backend(&self) -> impl Fn() -> Option<axiom_host::BackendKind> + 'static {
+        let bound = self.bound_backend.clone();
+        move || bound.get()
     }
 
     /// The validated presentation request, once a surface is configured. This
@@ -296,6 +346,41 @@ impl FrameClock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_driver_that_has_bound_nothing_reports_no_backend() {
+        // Native binds no browser presentation, so the answer is always `None`
+        // here — and an app asking "am I on the software rasterizer?" natively
+        // must get a definite no rather than a guess. The wasm32 arm reports the
+        // cascade's real selection into the same cell and is exercised in the
+        // browser.
+        let mut driver = WindowingApi::new();
+        assert_eq!(driver.bound_backend(), None);
+        driver
+            .configure_surface(640, 360)
+            .expect("valid surface dimensions");
+        assert_eq!(
+            driver.bound_backend(),
+            None,
+            "configuring a surface is not binding a backend"
+        );
+    }
+
+    #[test]
+    fn the_backend_reading_survives_the_driver_it_came_from() {
+        // The whole point of the observer: every `run_web_*` entry consumes the
+        // driver, so a reading taken beforehand has to keep working once the
+        // driver is gone. Dropping it here is the native stand-in for that move.
+        let driver = WindowingApi::new();
+        let observed = driver.observe_bound_backend();
+        assert_eq!(observed(), driver.bound_backend());
+        drop(driver);
+        assert_eq!(
+            observed(),
+            None,
+            "the reading outlives the driver and still answers"
+        );
+    }
 
     #[test]
     fn new_is_unconfigured_at_tick_zero() {

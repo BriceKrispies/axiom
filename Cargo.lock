@@ -186,6 +186,7 @@ dependencies = [
  "axiom-audio",
  "axiom-debug-overlay",
  "axiom-frame",
+ "axiom-host",
  "axiom-input",
  "axiom-kernel",
  "axiom-math",

@@ -33,6 +33,24 @@ pub const CHUNKS_AHEAD: usize = 14;
 /// pull-back and a moment of looking backwards after a spin.
 pub const CHUNKS_BEHIND: usize = 2;
 
+/// How far ahead of the car road **paint** is drawn once the near-field paint
+/// window is engaged, metres.
+///
+/// The tarmac still runs to the horizon; only the markings stop. The reason is
+/// End Zone's (`apps/end-zone/src/field/paint.rs`) and it is a property of the
+/// raster rather than of taste: the Canvas 2D software rasterizer runs a
+/// low-resolution framebuffer, and a lane dash a few tens of metres out
+/// projects to *less than one pixel*. Sub-pixel geometry cannot be drawn
+/// stably — its coverage flips on and off as the camera moves, so it shimmers —
+/// and it costs a projection and a shade per triangle to produce that shimmer.
+/// End Zone's rule is the one applied here: cull a marking while it is still
+/// several pixels across, never once it has decayed into an unstable fragment.
+///
+/// Past 50 m the road's own converging edges and the tarmac/verge boundary
+/// carry the sense of distance — the job End Zone hands to broad turf bands
+/// rather than to lines.
+pub const PAINT_AHEAD_METRES: f32 = 50.0;
+
 /// The four material-separated entities one chunk occupies.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ChunkEntities {
@@ -53,6 +71,13 @@ impl ChunkEntities {
 pub struct RoadChunks {
     chunks: Vec<ChunkEntities>,
     active: Option<(usize, usize)>,
+    /// The paint entities' own, shorter active range. `None` until the first
+    /// update after the window is engaged.
+    paint_active: Option<(usize, usize)>,
+    /// Whether paint is culled to [`PAINT_AHEAD_METRES`] instead of running the
+    /// full road distance. Set by the app from the backend it actually bound —
+    /// see [`RoadChunks::limit_paint_to_near_field`].
+    paint_window: bool,
     triangles: usize,
 }
 
@@ -96,8 +121,62 @@ impl RoadChunks {
         RoadChunks {
             chunks,
             active: None,
+            paint_active: None,
+            paint_window: false,
             triangles,
         }
+    }
+
+    /// Cull road paint to the near field, or stop doing so.
+    ///
+    /// Driven by the backend the app actually bound
+    /// (`WindowingApi::bound_backend`): on for the Canvas 2D software
+    /// rasterizer, off for the GPU, whose framebuffer resolves distant markings
+    /// perfectly well. It is a property of the raster, not a preference — which
+    /// is why the app asks the backend rather than guessing from the URL: a page
+    /// that fell back to Canvas 2D because the GPU refused a device needs this
+    /// exactly as much as one that asked for it.
+    ///
+    /// Settable both ways, and not a latch, because the bound backend is not
+    /// one: a device-loss rebuild re-runs the cascade, so a page that started on
+    /// the GPU can come back on Canvas 2D and vice versa.
+    pub fn set_paint_near_field_only(&mut self, limited: bool) {
+        let changed = limited != self.paint_window;
+        self.paint_window = limited;
+        // Force the next update to re-evaluate rather than early-out on an
+        // unchanged range: the ranges may be identical, but which pass owns the
+        // paint entity is not. Only on a real change, or the early-out — the
+        // whole reason `update` is cheap — would never fire again.
+        if changed {
+            self.active = None;
+            self.paint_active = None;
+        }
+    }
+
+    /// Whether paint is currently culled to the near field.
+    pub const fn paint_is_near_field_only(&self) -> bool {
+        self.paint_window
+    }
+
+    /// The chunk range road **paint** should occupy for a car at `distance`.
+    ///
+    /// Without the window this is exactly [`Self::range_for`]. With it, the
+    /// range stops at the chunk a [`PAINT_AHEAD_METRES`] look-ahead lands in —
+    /// so the granularity is a chunk ([`CHUNK_LENGTH`] m), not a metre, and a
+    /// car entering a chunk keeps paint for up to a chunk further than the
+    /// nominal distance. That is deliberate: the alternative is rebuilding a
+    /// paint mesh every frame, and the flicker this exists to remove comes from
+    /// paint *hundreds* of metres out, which a chunk-granular window already
+    /// removes.
+    pub fn paint_range_for(&self, distance: f32) -> (usize, usize) {
+        let full = self.range_for(distance);
+        [
+            full,
+            (
+                full.0,
+                self.chunk_at(distance + PAINT_AHEAD_METRES).min(full.1),
+            ),
+        ][usize::from(self.paint_window)]
     }
 
     /// How many chunks the course has.
@@ -150,11 +229,26 @@ impl RoadChunks {
             return false;
         }
         let wanted = self.range_for(distance);
-        if self.active == Some(wanted) {
+        let wanted_paint = self.paint_range_for(distance);
+        if self.active == Some(wanted) && self.paint_active == Some(wanted_paint) {
             return false;
         }
         let previous = self.active;
+        let previous_paint = self.paint_active;
         self.active = Some(wanted);
+        self.paint_active = Some(wanted_paint);
+        // While the window is engaged, paint gets its own pass — its range is
+        // much shorter and so moves far more often than the surface range does,
+        // and riding the surface's early-out would leave markings a chunk behind
+        // the car. While it is off, `set_visible` owns the paint entity along
+        // with the other three and this pass does not run at all, so the GPU
+        // path is exactly what it was before the window existed.
+        if self.paint_window && previous_paint != Some(wanted_paint) {
+            for (index, chunk) in self.chunks.iter().enumerate() {
+                let show = index >= wanted_paint.0 && index <= wanted_paint.1;
+                app.set(chunk.paint, Visible(show));
+            }
+        }
         // Hide only what actually left the window, and show only what entered.
         if let Some((old_lo, old_hi)) = previous {
             for index in old_lo..=old_hi {
@@ -176,10 +270,18 @@ impl RoadChunks {
         true
     }
 
+    /// Show or hide one chunk's meshes.
+    ///
+    /// Paint is skipped while the near-field window is engaged: it is owned by
+    /// the paint pass in [`Self::update`], and writing it here too would show
+    /// markings across the whole surface range on every frame that range moved.
     fn set_visible(&self, app: &mut RunningApp, index: usize, visible: bool) {
         if let Some(chunk) = self.chunks.get(index) {
             for entity in chunk.each() {
-                app.set(entity, Visible(visible));
+                let owned_by_paint_pass = self.paint_window && entity == chunk.paint;
+                if !owned_by_paint_pass {
+                    app.set(entity, Visible(visible));
+                }
             }
         }
     }
@@ -328,6 +430,82 @@ mod tests {
         chunks.update(&mut app, 500.0);
         let after: Vec<[Entity; 4]> = chunks.chunks.iter().map(|c| c.each()).collect();
         assert_eq!(before, after, "the same entities, never respawned");
+    }
+
+    #[test]
+    fn the_paint_window_culls_markings_far_sooner_than_the_road_surface() {
+        let (_app, _track, mut road) = fixture();
+        // Off by default: paint runs exactly as far as the tarmac.
+        assert!(!road.paint_is_near_field_only());
+        let distance = CHUNK_LENGTH * 3.0;
+        assert_eq!(road.paint_range_for(distance), road.range_for(distance));
+
+        road.set_paint_near_field_only(true);
+        assert!(road.paint_is_near_field_only());
+        let surface = road.range_for(distance);
+        let paint = road.paint_range_for(distance);
+        assert_eq!(paint.0, surface.0, "paint keeps the same chunks behind");
+        assert!(
+            paint.1 < surface.1,
+            "paint stops well short of the road: paint {paint:?} vs surface {surface:?}"
+        );
+        // Its edge is the look-ahead distance, not a chunk count.
+        assert_eq!(paint.1, road.chunk_at(distance + PAINT_AHEAD_METRES));
+    }
+
+    #[test]
+    fn engaging_the_paint_window_hides_paint_the_road_still_draws() {
+        let (mut app, _track, mut road) = fixture();
+        let distance = CHUNK_LENGTH * 3.0;
+        road.update(&mut app, distance);
+        let far = road.range_for(distance).1;
+        let far_paint = road.chunks[far].paint;
+        let far_surface = road.chunks[far].surface;
+        assert_eq!(
+            app.get::<Visible>(far_paint),
+            Some(Visible(true)),
+            "without the window the farthest chunk paints"
+        );
+
+        road.set_paint_near_field_only(true);
+        road.update(&mut app, distance);
+        assert_eq!(
+            app.get::<Visible>(far_surface),
+            Some(Visible(true)),
+            "the tarmac still runs to the horizon"
+        );
+        assert_eq!(
+            app.get::<Visible>(far_paint),
+            Some(Visible(false)),
+            "but its markings are culled before they go sub-pixel"
+        );
+
+        // A device-loss rebuild can put the page back on the GPU, so the window
+        // has to come off as cleanly as it went on.
+        road.set_paint_near_field_only(false);
+        road.update(&mut app, distance);
+        assert_eq!(
+            app.get::<Visible>(far_paint),
+            Some(Visible(true)),
+            "back on the GPU the far markings return"
+        );
+    }
+
+    #[test]
+    fn setting_the_paint_window_to_what_it_already_is_keeps_the_early_out() {
+        // The early-out is the whole reason `update` is cheap. Feeding the
+        // window the same answer every frame — which is exactly what an app
+        // polling the bound backend does — must not defeat it.
+        let (mut app, _track, mut road) = fixture();
+        let distance = CHUNK_LENGTH * 3.0;
+        road.set_paint_near_field_only(true);
+        assert!(road.update(&mut app, distance), "the first update places");
+
+        road.set_paint_near_field_only(true);
+        assert!(
+            !road.update(&mut app, distance),
+            "an unchanged window and an unchanged distance change nothing"
+        );
     }
 
     #[test]

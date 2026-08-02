@@ -105,6 +105,13 @@ impl BurntRubber {
         BurntRubber::with_profile(seed, tuning, width, height, crate::PlayProfile::Wheel)
     }
 
+    /// Cull road paint to the near field, or stop doing so — the Canvas 2D
+    /// adaptation. See
+    /// [`crate::render::chunks::RoadChunks::set_paint_near_field_only`].
+    pub fn set_paint_near_field_only(&mut self, limited: bool) {
+        self.scene.set_paint_near_field_only(limited);
+    }
+
     /// As [`BurntRubber::with`], for whichever game `profile` names.
     ///
     /// This is the only place the profile enters the simulation half; everything
