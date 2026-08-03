@@ -25,7 +25,9 @@ pub fn render_gpu(
     w: u32,
     h: u32,
 ) -> (Vec<u8>, u32, u32) {
-    axiom_shot::capture::render_gpu(meshes, materials, outcome, w, h, None)
+    // The skinned mesh set, the retro profile and the grade: none of the parity
+    // scenes use them, so all three are absent.
+    axiom_shot::capture::render_gpu(meshes, &[], materials, outcome, w, h, None, None)
 }
 
 /// The maximum per-channel absolute byte difference between two equal-length RGBA8

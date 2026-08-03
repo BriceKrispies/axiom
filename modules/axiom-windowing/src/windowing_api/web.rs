@@ -1875,9 +1875,24 @@ fn make_canvas(
     // The bake-once skinned athlete bodies, CPU-skinned each frame by the software
     // backend (peer of the GPU arm's skinned mesh upload at bind).
     backend.load_skinned_meshes(skinned_meshes);
-    // The forced-fallback default is the Low tier; `?quality=ultralow|low|medium|high`
-    // (or 0..3) overrides it for testing/perf comparison.
-    backend.set_quality_level(canvas_quality_level().unwrap_or(1));
+    // The default is the **High** tier; `?quality=ultralow|low|medium|high` (or
+    // 0..3) overrides it for testing and perf comparison.
+    //
+    // It used to be Low, which was a defensible default when this backend was
+    // only ever a crash-guard for a device with no working GPU — but it is also
+    // what made the software arm look like a different, worse game rather than
+    // the same game rendered simply. At Low the internal framebuffer is 240×150,
+    // so lane markings and distant scenery project to under a pixel and shimmer
+    // or vanish; at High it is 426×266 and the frame reads as deliberate chunky
+    // low-poly instead of broken.
+    //
+    // The cost is real and lands on the weakest devices: this is a CPU
+    // rasterizer, and High is ~2× the pixels of Low per frame. If that proves
+    // too slow on a phone, the fix is a *device-tier-aware* default (the host
+    // already resolves a `HostDeviceProfile`), not a flat return to Low — a
+    // desktop falling back to Canvas 2D because of a driver bug should not be
+    // held to a phone's pixel budget.
+    backend.set_quality_level(canvas_quality_level().unwrap_or(HIGH_QUALITY_TIER));
     backend
         .attach_canvas(canvas)
         .ok()
@@ -1891,6 +1906,11 @@ fn make_canvas(
             ));
         })
 }
+
+/// The Canvas 2D internal-resolution tier the software arm binds with when the
+/// page does not ask for one — the top of `CanvasQualityPreset`'s `0..3` range.
+#[cfg(target_arch = "wasm32")]
+const HIGH_QUALITY_TIER: u8 = 3;
 
 /// Parse the Canvas 2D quality tier from `?quality=` (`ultralow|low|medium|high`
 /// or `0..3`), or `None` to use the default. wasm32 only — the platform edge, so

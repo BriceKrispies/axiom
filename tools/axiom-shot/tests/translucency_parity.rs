@@ -196,11 +196,19 @@ fn render_gpu(
         &[],
         &[],
         packet.light_view_proj(),
+        // The camera the sky pass would read; these scenes author no sky.
+        packet
+            .camera()
+            .map_or(IDENTITY16, |camera| camera.view_proj()),
         &batches,
+        // No skinned bodies in the translucency scenes.
+        &[],
+        &[],
         packet.clear_color(),
         packet.sdf(),
-        axiom_host::FrameAmbient::default_hemisphere(),
-        axiom_host::FrameDepthFog::none(),
+        // No sky and no bloom: this proof is about the capability plumbing, and
+        // an unauthored look part is that part's exact no-op.
+        axiom_host::FrameRenderLook::lit_by(axiom_host::FrameAmbient::default_hemisphere()),
         None,
         axiom_host::BackendCapabilityProfile::all(),
         None,

@@ -38,6 +38,13 @@ const IDENTITY: [f32; 16] = [
     1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
 ];
 
+/// The render look every scene here binds with: the bright ambient, no fog, no
+/// sky, no bloom. These proofs are about capability plumbing, and an unauthored
+/// look part is that part's exact no-op — so the look never colours the result.
+fn plain_look() -> axiom_host::FrameRenderLook {
+    axiom_host::FrameRenderLook::lit_by(bright_ambient())
+}
+
 /// A validated host presentation request a backend is sized from.
 fn request(w: u32, h: u32) -> HostPresentationRequest {
     let host = HostApi::new();
@@ -87,8 +94,18 @@ fn instance(mvp: [f32; 16], world: [f32; 16], color: [f32; 4]) -> Vec<f32> {
     f.extend_from_slice(&mvp);
     f.extend_from_slice(&world);
     f.extend_from_slice(&color);
-    // Emissive + pad: nothing in this parity scene self-illuminates.
+    // Emissive + specular: nothing in this parity scene self-illuminates or
+    // catches a highlight.
     f.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+    f
+}
+
+/// One instance whose fourth emissive lane carries a specular strength — the
+/// lane `instance` above leaves at zero, and the one the highlight is gated on.
+fn glossy_instance(mvp: [f32; 16], world: [f32; 16], color: [f32; 4], specular: f32) -> Vec<f32> {
+    let mut f = instance(mvp, world, color);
+    let last = f.len() - 1;
+    f[last] = specular;
     f
 }
 
@@ -126,6 +143,50 @@ fn front_light() -> Vec<(u32, [f32; 3], [f32; 3], f32)> {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
+fn gpu_look(
+    meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    materials: &[(u64, u32, u32, Vec<u8>)],
+    normals: &[(u64, u32, u32, Vec<u8>)],
+    lights: &[(u32, [f32; 3], [f32; 3], f32)],
+    light_view_proj: [f32; 16],
+    batches: &[(u64, u64, Vec<f32>, u32)],
+    clear: [f32; 4],
+    sdf: Option<&SdfScene>,
+    retro: Option<FrameRetro32BitProfile>,
+    profile: BackendCapabilityProfile,
+    // The render look the frame binds with, and the camera its sky pass reads.
+    // Most scenes here author neither and pass the plain bright ambient.
+    look: axiom_host::FrameRenderLook,
+    camera: [f32; 16],
+) -> Vec<u8> {
+    GpuBackendApi::render_offscreen_rgba(
+        W,
+        H,
+        meshes,
+        materials,
+        normals,
+        lights,
+        light_view_proj,
+        // The camera the sky pass reads; a scene authoring a sky passes its own.
+        camera,
+        batches,
+        // These scenes submit no skinned bodies.
+        &[],
+        &[],
+        clear,
+        sdf,
+        look,
+        retro,
+        profile,
+        None,
+        None,
+    )
+    .expect("a native GPU adapter is required for the capability parity proof")
+}
+
+/// The ten scenes that author no sky and no bloom, and whose camera is unread.
+#[allow(clippy::too_many_arguments)]
 fn gpu(
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
     materials: &[(u64, u32, u32, Vec<u8>)],
@@ -137,10 +198,10 @@ fn gpu(
     sdf: Option<&SdfScene>,
     retro: Option<FrameRetro32BitProfile>,
     profile: BackendCapabilityProfile,
+    look: axiom_host::FrameRenderLook,
+    camera: [f32; 16],
 ) -> Vec<u8> {
-    GpuBackendApi::render_offscreen_rgba(
-        W,
-        H,
+    gpu_look(
         meshes,
         materials,
         normals,
@@ -149,14 +210,11 @@ fn gpu(
         batches,
         clear,
         sdf,
-        bright_ambient(),
-        axiom_host::FrameDepthFog::none(),
         retro,
         profile,
-        None,
-        None,
+        look,
+        camera,
     )
-    .expect("a native GPU adapter is required for the capability parity proof")
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +249,8 @@ fn textures_gpu_samples_albedo_canvas2d_reports_the_drop() {
         None,
         None,
         BackendCapabilityProfile::all(),
+        plain_look(),
+        IDENTITY,
     );
     let flat = gpu(
         &meshes,
@@ -203,6 +263,8 @@ fn textures_gpu_samples_albedo_canvas2d_reports_the_drop() {
         None,
         None,
         BackendCapabilityProfile::all().without(RenderCapability::Textures),
+        plain_look(),
+        IDENTITY,
     );
     assert!(
         differs(&textured, &flat),
@@ -284,6 +346,8 @@ fn alpha_cutout_is_gated_on_the_gpu_and_dropped_on_canvas2d() {
         None,
         None,
         BackendCapabilityProfile::all(),
+        plain_look(),
+        IDENTITY,
     );
     let opaque = gpu(
         &meshes,
@@ -296,6 +360,8 @@ fn alpha_cutout_is_gated_on_the_gpu_and_dropped_on_canvas2d() {
         None,
         None,
         BackendCapabilityProfile::all().without(RenderCapability::AlphaMask),
+        plain_look(),
+        IDENTITY,
     );
     assert!(
         differs(&cutout, &opaque),
@@ -360,6 +426,8 @@ fn sdf_renders_on_both_backends_and_both_gate_it() {
         Some(&scene),
         None,
         BackendCapabilityProfile::all(),
+        plain_look(),
+        IDENTITY,
     );
     let without = gpu(
         &[],
@@ -372,6 +440,8 @@ fn sdf_renders_on_both_backends_and_both_gate_it() {
         Some(&scene),
         None,
         BackendCapabilityProfile::all().without(RenderCapability::Sdf),
+        plain_look(),
+        IDENTITY,
     );
     assert!(
         coverage(&with, 24) > 0.02,
@@ -436,6 +506,8 @@ fn retro_32bit_is_gated_on_both_backends() {
         None,
         Some(retro),
         BackendCapabilityProfile::all(),
+        plain_look(),
+        IDENTITY,
     );
     let full = gpu(
         &meshes,
@@ -448,6 +520,8 @@ fn retro_32bit_is_gated_on_both_backends() {
         None,
         Some(retro),
         BackendCapabilityProfile::all().without(RenderCapability::Retro32Bit),
+        plain_look(),
+        IDENTITY,
     );
     assert!(
         differs(&quantized, &full),
@@ -565,6 +639,8 @@ fn shadows_gpu_casts_pcf_canvas2d_substitutes_planar_contact() {
         None,
         None,
         BackendCapabilityProfile::all(),
+        plain_look(),
+        IDENTITY,
     );
     let unshadowed = gpu(
         &meshes,
@@ -577,6 +653,8 @@ fn shadows_gpu_casts_pcf_canvas2d_substitutes_planar_contact() {
         None,
         None,
         BackendCapabilityProfile::all().without(RenderCapability::Shadows),
+        plain_look(),
+        IDENTITY,
     );
     assert!(
         differs(&shadowed, &unshadowed),
@@ -616,5 +694,183 @@ fn shadows_gpu_casts_pcf_canvas2d_substitutes_planar_contact() {
     assert!(
         report.raster().depth_cues.contact_shadows_drawn > 0,
         "Canvas 2D must draw the planar contact-shadow substitute"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sky, specular and bloom — the GPU realizes all three; Canvas 2D reports the
+// drops. This is what "skip it for the Canvas 2D version" means: the frame
+// carries its full intent and the backend declares what it could not honour.
+// ---------------------------------------------------------------------------
+
+/// A moonlit look: a gradient sky with a bright body in it, plus bloom.
+fn moonlit_look() -> axiom_host::FrameRenderLook {
+    plain_look()
+        .with_sky(
+            axiom_host::FrameSky::gradient([0.02, 0.03, 0.06], [0.06, 0.08, 0.13]).with_body(
+                // Toward -Z: `sdf_camera` looks that way, so the moon is IN
+                // frame. Behind the camera the sky is just a dim gradient, well
+                // under the bloom threshold, and the bloom proof is vacuous.
+                [0.0, 0.35, -1.0],
+                axiom_kernel::Radians::finite_or_zero(0.14),
+                [1.6, 1.7, 1.9],
+                Ratio::finite_or_zero(400.0),
+                Ratio::finite_or_zero(0.3),
+            ),
+        )
+        .with_bloom(axiom_host::FrameBloom::moonlit())
+}
+
+#[test]
+fn sky_specular_and_bloom_render_on_the_gpu_and_are_reported_dropped_on_canvas2d() {
+    let meshes = [fullscreen_quad(1)];
+    let materials = [checker_texture(7)];
+    let clear = [0.0, 0.0, 0.0, 1.0];
+    let all = BackendCapabilityProfile::all();
+
+    // A sky is load-bearing on the GPU: the same frame with the Sky capability
+    // dropped clears to the flat colour instead of evaluating the gradient+moon.
+    // (No draws at all, so the ONLY thing in frame is the sky.)
+    // A REAL camera: with the identity, the inverse view-projection maps every
+    // pixel to the same direction, so the sky renders one flat colour and proves
+    // nothing about the gradient or the disc.
+    let (camera, _, _) = sdf_camera();
+    let with_sky = gpu_look(
+        &meshes, &materials, &[], &[], IDENTITY, &[], clear, None, None, all, moonlit_look(),
+        camera,
+    );
+    let without_sky = gpu_look(
+        &meshes,
+        &materials,
+        &[],
+        &[],
+        IDENTITY,
+        &[],
+        clear,
+        None,
+        None,
+        all.without(RenderCapability::Sky),
+        moonlit_look(),
+        camera,
+    );
+    assert!(
+        differs(&with_sky, &without_sky),
+        "the GPU must consult the Sky capability"
+    );
+    assert!(
+        coverage(&with_sky, 4) > 0.2,
+        "the sky is a GRADIENT with a disc in it, so it varies across the frame"
+    );
+    assert_eq!(
+        coverage(&without_sky, 0),
+        0.0,
+        "a dropped Sky leaves the flat clear colour, which varies nowhere"
+    );
+
+    // Bloom is load-bearing too: it spreads the moon's light into the sky
+    // around it, so the same frame with Bloom dropped is a different image.
+    let unbloomed = gpu_look(
+        &meshes,
+        &materials,
+        &[],
+        &[],
+        IDENTITY,
+        &[],
+        clear,
+        None,
+        None,
+        all.without(RenderCapability::Bloom),
+        moonlit_look(),
+        camera,
+    );
+    assert!(
+        differs(&with_sky, &unbloomed),
+        "the GPU must consult the Bloom capability"
+    );
+
+    // Specular likewise, on a lit surface that authors a highlight strength.
+    let lit_batch = [(
+        1_u64,
+        7_u64,
+        glossy_instance(IDENTITY, IDENTITY, [1.0; 4], 0.9),
+        1_u32,
+    )];
+    let shiny = gpu_look(
+        &meshes,
+        &materials,
+        &[],
+        &front_light(),
+        IDENTITY,
+        &lit_batch,
+        clear,
+        None,
+        None,
+        all,
+        plain_look(),
+        camera,
+    );
+    let matte = gpu_look(
+        &meshes,
+        &materials,
+        &[],
+        &front_light(),
+        IDENTITY,
+        &lit_batch,
+        clear,
+        None,
+        None,
+        all.without(RenderCapability::Specular),
+        plain_look(),
+        camera,
+    );
+    assert!(
+        differs(&shiny, &matte),
+        "the GPU must consult the Specular capability"
+    );
+
+    // All three degrade to a REPORTED drop, never a silent no-op...
+    [
+        RenderCapability::Sky,
+        RenderCapability::Specular,
+        RenderCapability::Bloom,
+    ]
+    .iter()
+    .for_each(|c| assert_eq!(c.degradation(), CapabilityDegradation::Drop));
+
+    // ...and the Canvas 2D backend, whose profile drops all three, says so.
+    let mut backend = Canvas2dBackendApi::new(&request(W, H));
+    backend.load_meshes(&meshes);
+    let packet = FramePacket::new(
+        1,
+        1,
+        FrameViewport::new(W, H),
+        clear,
+        Some(FrameCamera::new(IDENTITY, IDENTITY, IDENTITY)),
+        vec![
+            FrameDrawItem::new(0, 1, 7, IDENTITY, IDENTITY, [1.0; 4], false)
+                .with_specular(Ratio::finite_or_zero(0.8)),
+        ],
+        Vec::new(),
+        IDENTITY,
+        FrameFeatureSet::new(false, false, 0, 0),
+    )
+    .with_sky(moonlit_look().sky().expect("the moonlit look carries a sky"))
+    .with_bloom(
+        moonlit_look()
+            .bloom()
+            .expect("the moonlit look carries bloom"),
+    );
+    let degraded = backend.present_packet(&packet).degraded_features().to_vec();
+    assert!(degraded.contains(&FrameFeature::Sky), "{degraded:?}");
+    assert!(
+        degraded.contains(&FrameFeature::SpecularHighlight),
+        "{degraded:?}"
+    );
+    assert!(degraded.contains(&FrameFeature::Bloom), "{degraded:?}");
+    // But NOT the colour grade, which this backend genuinely performs — the
+    // whole reason Bloom is its own capability bit and not part of PostProcess.
+    assert!(
+        !degraded.contains(&FrameFeature::PostProcessing),
+        "{degraded:?}"
     );
 }

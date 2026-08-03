@@ -89,7 +89,7 @@ fn nova_roll_renders_one_frame_on_both_backends_in_agreement() {
 
     let (gpu_px, gw, gh) = common::render_gpu(&meshes, &materials, &outcome, W, H);
     // Quality 2 → a 320×180 internal framebuffer (16:9, same aspect as W×H).
-    let (sw_px, sw_w, sw_h) = common::render_canvas2d(&meshes, &outcome, 2, W, H);
+    let (sw_px, sw_w, sw_h) = common::render_canvas2d(&meshes, &[], &outcome, 2, W, H);
 
     assert_eq!((gw, gh), (W, H));
     assert!(sw_w > 0 && sw_h > 0);
