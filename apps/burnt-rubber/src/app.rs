@@ -34,6 +34,7 @@ use crate::diagnostics::Diagnostics;
 use crate::hud::HudModel;
 use crate::render::RaceScene;
 use crate::sim::{RaceEvent, RaceSim};
+use crate::start_screen::{StartCommand, StartOutcome, StartScreen};
 use crate::tuning::{Tuning, FIXED_STEP_NANOS};
 use crate::{CANVAS_ID, DEFAULT_SEED, HEIGHT, WIDTH};
 
@@ -79,6 +80,23 @@ pub const MAX_STEPS_PER_FRAME: u32 = 12;
 /// handed more than it can use.
 pub const MAX_FRAME_NANOS: u64 = MAX_STEPS_PER_FRAME as u64 * FIXED_STEP_NANOS;
 
+/// What the app is doing: waiting on the start screen, or racing.
+///
+/// The stage sits **above** the simulation rather than inside it, and that is
+/// the whole design of the pre-race screen. `RaceSim` has exactly one job —
+/// advance a race by one fixed step — and adding a "not started yet" phase to it
+/// would have made every one of its callers ask "is this a phase that moves?"
+/// before every step. Instead the app simply does not step it: while the screen
+/// is up the frozen race is still *posed* every frame, which is what puts the
+/// night road behind the title at no cost and with nothing to keep in sync.
+#[derive(Debug)]
+enum Stage {
+    /// The start screen is up and the race is frozen on the grid.
+    Waiting(StartScreen),
+    /// The race is running.
+    Racing,
+}
+
 /// The whole app: simulation, scene, engine and the step accumulator.
 #[derive(Debug)]
 pub struct BurntRubber {
@@ -92,15 +110,31 @@ pub struct BurntRubber {
     alpha: f32,
     frame: u64,
     events: Vec<RaceEvent>,
+    stage: Stage,
+    /// The build parameters, so starting a race can rebuild the simulation
+    /// without the app having to be rebuilt around it.
+    seed: u64,
+    profile: crate::PlayProfile,
+    /// The viewport the start screen is laid out for.
+    viewport: (f32, f32),
 }
 
 impl BurntRubber {
-    /// The shipping app at the default framebuffer size.
+    /// **The shipping app**: the night road on screen, the race frozen on the
+    /// grid, and the start screen up.
+    ///
+    /// This is the one constructor that opens on the start screen, because it is
+    /// the one that models what a player actually gets. [`BurntRubber::with`]
+    /// and its siblings skip straight to a race — which is what the
+    /// deterministic tests and the capture slices drive, none of which are about
+    /// the screen.
     pub fn new() -> BurntRubber {
-        BurntRubber::with(DEFAULT_SEED, Tuning::DEFAULT, WIDTH, HEIGHT)
+        let mut app = BurntRubber::with(DEFAULT_SEED, Tuning::DEFAULT, WIDTH, HEIGHT);
+        app.open_start_screen();
+        app
     }
 
-    /// An app for a given seed, tuning and framebuffer.
+    /// An app for a given seed, tuning and framebuffer, already racing.
     pub fn with(seed: u64, tuning: Tuning, width: u32, height: u32) -> BurntRubber {
         BurntRubber::with_profile(seed, tuning, width, height, crate::PlayProfile::Wheel)
     }
@@ -153,7 +187,73 @@ impl BurntRubber {
             alpha: 0.0,
             frame: 0,
             events: Vec::new(),
+            stage: Stage::Racing,
+            seed,
+            profile,
+            viewport: (width as f32, height as f32),
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // The pre-race screen.
+    //
+    // Four calls, and between them they are the whole of it: put the screen up,
+    // tell it how big the viewport is, feed it a frame of input, and — when it
+    // says so — start the race. Nothing about the screen is on the fixed step.
+    // ---------------------------------------------------------------------
+
+    /// Put the start screen up, freezing the race where it stands.
+    pub fn open_start_screen(&mut self) {
+        self.stage = Stage::Waiting(StartScreen::open(self.viewport.0, self.viewport.1));
+    }
+
+    /// The start screen, while it is up.
+    pub fn start_screen(&self) -> Option<&StartScreen> {
+        match &self.stage {
+            Stage::Waiting(screen) => Some(screen),
+            Stage::Racing => None,
+        }
+    }
+
+    /// Whether the start screen is up.
+    pub fn waiting(&self) -> bool {
+        self.start_screen().is_some()
+    }
+
+    /// Tell the start screen how big the viewport is.
+    pub fn set_viewport(&mut self, width: f32, height: f32) {
+        self.viewport = (width.max(1.0), height.max(1.0));
+        if let Stage::Waiting(screen) = &mut self.stage {
+            screen.resize(self.viewport.0, self.viewport.1);
+        }
+    }
+
+    /// Fold one frame of start-screen input. Does nothing at all while racing.
+    ///
+    /// The cue is scheduled here rather than by the caller because it is a
+    /// *consequence* of the outcome, and a second place deciding what starting a
+    /// race sounds like is a second place for the two to disagree.
+    pub fn update_start_screen(&mut self, command: StartCommand) -> StartOutcome {
+        let Stage::Waiting(screen) = &self.stage else {
+            return StartOutcome::Idle;
+        };
+        let outcome = screen.update(command);
+        if outcome == StartOutcome::Started {
+            self.audio.on_race_start();
+            self.start_race();
+        }
+        outcome
+    }
+
+    /// Build the race at the start line, counting in, and leave the screen.
+    ///
+    /// A fresh [`RaceSim`] rather than a mutated one: the screen's answer is
+    /// "go", and the cleanest way to honour it is the same one the constructor
+    /// already takes.
+    pub fn start_race(&mut self) {
+        self.sim = RaceSim::with_profile(self.seed, *self.sim.tuning(), self.profile);
+        self.scene.reset();
+        self.stage = Stage::Racing;
     }
 
     /// The race.
@@ -238,6 +338,16 @@ impl BurntRubber {
     /// step and cleared for the rest, so a single key press is a single action
     /// regardless of how many steps the frame happened to bank.
     pub fn advance(&mut self, elapsed_nanos: u64, command: DriveCommand) -> u32 {
+        // **The start screen holds the world still.** Not by pausing the race,
+        // and not by a phase inside the simulation, but by simply not running
+        // any steps: no car, no traffic, no timer, no boost, no progress. The
+        // accumulator is not fed either, so the time the player spent looking at
+        // the title does not come back as banked steps the moment they go.
+        if self.waiting() {
+            self.events.clear();
+            self.alpha = 0.0;
+            return 0;
+        }
         // Never hand the accumulator more than a frame can spend — see
         // [`MAX_FRAME_NANOS`]. Without this the excess is banked and replayed at
         // five times real time.
@@ -268,6 +378,9 @@ impl BurntRubber {
     /// The deterministic path the tests and the capture harness drive.
     pub fn advance_steps(&mut self, steps: u32, command: DriveCommand) {
         self.events.clear();
+        if self.waiting() {
+            return;
+        }
         let mut held = command;
         for _ in 0..steps {
             self.sim.step(held);
@@ -334,10 +447,17 @@ pub fn build_burnt_rubber() -> RunningApp {
 mod tests {
     use super::*;
     use crate::sim::RacePhase;
+    use axiom_math::Vec2;
+
+    /// The shipping app with the start screen already answered — what every
+    /// test below drives, because none of them is about the screen.
+    fn racing() -> BurntRubber {
+        BurntRubber::with(DEFAULT_SEED, Tuning::DEFAULT, WIDTH, HEIGHT)
+    }
 
     #[test]
     fn a_new_app_builds_a_renderable_scene() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         let outcome = app.present();
         assert!(!outcome.draws().is_empty(), "the opening frame draws");
         assert_eq!(app.sim().phase(), RacePhase::Countdown);
@@ -356,7 +476,7 @@ mod tests {
     /// and never reaches the simulation.
     #[test]
     fn real_time_is_banked_into_whole_fixed_steps() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         // Exactly one step's worth.
         assert_eq!(app.advance(FIXED_STEP_NANOS, DriveCommand::IDLE), 1);
         assert_eq!(app.sim().step_count(), 1);
@@ -371,7 +491,7 @@ mod tests {
 
     #[test]
     fn a_stalled_frame_is_capped_rather_than_spiralling() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         // Two whole seconds in one frame.
         let steps = app.advance(2_000_000_000, DriveCommand::IDLE);
         assert_eq!(steps, MAX_STEPS_PER_FRAME, "the catch-up is capped");
@@ -386,7 +506,7 @@ mod tests {
     /// steps a frame until it drains.
     #[test]
     fn a_stall_does_not_leave_the_simulation_running_fast() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         for _ in 0..10 {
             app.advance(FIXED_STEP_NANOS, DriveCommand::IDLE);
         }
@@ -414,7 +534,7 @@ mod tests {
     #[test]
     fn acceleration_after_a_stall_matches_acceleration_without_one() {
         let launch = |stall: bool| {
-            let mut app = BurntRubber::new();
+            let mut app = racing();
             while app.sim().phase() == crate::sim::RacePhase::Countdown {
                 app.advance(FIXED_STEP_NANOS, DriveCommand::IDLE);
             }
@@ -442,7 +562,7 @@ mod tests {
     fn a_slow_renderer_still_runs_the_game_at_real_time() {
         // Ten frames a second: 100 ms of real time per frame.
         let frame = FIXED_STEP_NANOS * 6;
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         for _ in 0..10 {
             app.advance(frame, DriveCommand::IDLE);
         }
@@ -472,7 +592,7 @@ mod tests {
     #[test]
     fn the_frame_budget_is_the_step_cap_expressed_in_time() {
         assert_eq!(MAX_FRAME_NANOS, MAX_STEPS_PER_FRAME as u64 * FIXED_STEP_NANOS);
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         // Exactly the budget still runs the full cap.
         assert_eq!(app.advance(MAX_FRAME_NANOS, DriveCommand::IDLE), MAX_STEPS_PER_FRAME);
         // And anything beyond it is discarded rather than banked.
@@ -483,7 +603,7 @@ mod tests {
     /// A single key press is a single action however many steps the frame banks.
     #[test]
     fn edge_triggered_input_fires_once_per_frame_not_once_per_step() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         while app.sim().phase() == RacePhase::Countdown {
             app.advance(FIXED_STEP_NANOS, DriveCommand::IDLE);
         }
@@ -510,7 +630,7 @@ mod tests {
     #[test]
     fn stepping_deterministically_ignores_the_clock_entirely() {
         let run = || {
-            let mut app = BurntRubber::new();
+            let mut app = racing();
             app.advance_steps(900, DriveCommand::FLAT_OUT);
             (*app.sim().car(), app.sim().step_count())
         };
@@ -519,7 +639,7 @@ mod tests {
 
     #[test]
     fn presenting_twice_renders_the_same_frame_and_advances_nothing() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         app.advance_steps(300, DriveCommand::FLAT_OUT);
         let steps = app.sim().step_count();
         let first = app.present();
@@ -540,7 +660,7 @@ mod tests {
     #[test]
     fn the_same_steps_sound_the_same_however_many_frames_delivered_them() {
         let run = |frames: u32, steps_per_frame: u32| {
-            let mut app = BurntRubber::new();
+            let mut app = racing();
             app.audio_mut().enable(true);
             for _ in 0..frames {
                 app.advance(
@@ -564,7 +684,7 @@ mod tests {
 
     #[test]
     fn the_sound_bank_starts_silent_and_is_reachable() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         assert!(!app.audio().enabled(), "silent until the page has been touched");
         app.audio_mut().enable(true);
         assert!(app.audio().enabled());
@@ -572,7 +692,7 @@ mod tests {
 
     #[test]
     fn the_hud_and_the_diagnostics_track_the_run() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         while app.sim().phase() == RacePhase::Countdown {
             app.advance_steps(1, DriveCommand::IDLE);
         }
@@ -590,7 +710,7 @@ mod tests {
 
     #[test]
     fn events_from_a_frame_are_collected_and_then_cleared() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         // The countdown emits ticks and a GO.
         let total = app.sim().tuning().race.countdown_steps * crate::sim::COUNTDOWN_NUMBERS;
         app.advance(FIXED_STEP_NANOS * total as u64, DriveCommand::IDLE);
@@ -615,11 +735,146 @@ mod tests {
     fn the_default_app_is_the_shipping_app() {
         let a = BurntRubber::default();
         assert_eq!(a.sim().track().seed(), DEFAULT_SEED);
+        assert!(a.waiting(), "and the shipping app opens on the start screen");
+    }
+
+    // ---------------------------------------------------------------------
+    // The pre-race screen.
+    // ---------------------------------------------------------------------
+
+    /// The shipping app opens on the start screen, over a night road that is
+    /// genuinely drawn.
+    #[test]
+    fn the_shipping_app_opens_on_the_start_screen_over_the_road() {
+        let mut app = BurntRubber::new();
+        assert!(app.waiting());
+        assert!(app.start_screen().is_some());
+
+        let outcome = app.present();
+        assert!(!outcome.draws().is_empty(), "the night road is drawn");
+        assert!(!outcome.lights().is_empty());
+    }
+
+    /// **The headline rule of the pre-race flow**: nothing moves while the start
+    /// screen is up. Not the car, not the traffic, not the clock, not the boost.
+    #[test]
+    fn the_simulation_does_not_advance_while_the_start_screen_is_up() {
+        let mut app = BurntRubber::new();
+        let before = *app.sim().car();
+        let boost = app.sim().boost().charge();
+
+        // Real time, deterministic steps, and a full-throttle boosting command:
+        // none of it may move anything.
+        for _ in 0..120 {
+            assert_eq!(
+                app.advance(
+                    FIXED_STEP_NANOS,
+                    DriveCommand {
+                        boost: true,
+                        ..DriveCommand::FLAT_OUT
+                    }
+                ),
+                0,
+                "a frame ran steps with the start screen up"
+            );
+        }
+        app.advance_steps(600, DriveCommand::FLAT_OUT);
+
+        assert_eq!(app.sim().step_count(), 0, "no steps were taken");
+        assert_eq!(*app.sim().car(), before, "the car did not move");
+        assert_eq!(app.sim().boost().charge(), boost, "the meter did not move");
+        assert_eq!(app.sim().elapsed_seconds(), 0.0, "the clock did not start");
+        assert_eq!(app.sim().traffic().active_count(), 0, "no traffic spawned");
+        assert!(app.events().is_empty());
+    }
+
+    /// The flow, in order: press START RACE, the screen exits, the countdown
+    /// begins, the race runs.
+    #[test]
+    fn starting_the_race_leaves_the_screen_and_begins_the_countdown() {
+        let mut app = BurntRubber::new();
+        assert_eq!(app.update_start_screen(StartCommand::IDLE), StartOutcome::Idle);
+        assert!(app.waiting(), "an idle frame does not start the race");
+
+        assert_eq!(
+            app.update_start_screen(StartCommand::CONFIRM),
+            StartOutcome::Started
+        );
+        assert!(!app.waiting(), "the screen exits");
+        assert_eq!(app.sim().phase(), RacePhase::Countdown, "the countdown begins");
+        assert_eq!(app.sim().step_count(), 0);
+
+        app.advance_steps(30, DriveCommand::FLAT_OUT);
+        assert_eq!(app.sim().step_count(), 30, "and the race now runs");
+    }
+
+    /// A tap on the button starts the race; a tap on the road behind it does
+    /// not.
+    #[test]
+    fn only_a_press_on_the_button_starts_the_race() {
+        let mut app = BurntRubber::new();
+        app.set_viewport(1280.0, 720.0);
+        assert_eq!(
+            app.update_start_screen(StartCommand::tap(Vec2::new(4.0, 4.0))),
+            StartOutcome::Idle
+        );
+        assert!(app.waiting());
+
+        let button = app.start_screen().expect("the screen").layout().start;
+        assert_eq!(
+            app.update_start_screen(StartCommand::tap(button.centre())),
+            StartOutcome::Started
+        );
+        assert!(!app.waiting());
+    }
+
+    #[test]
+    fn the_screen_relays_out_when_the_viewport_changes_and_ignores_race_input() {
+        let mut app = BurntRubber::new();
+        app.set_viewport(390.0, 844.0);
+        assert_eq!(
+            app.start_screen().expect("the screen").layout().viewport,
+            Vec2::new(390.0, 844.0)
+        );
+        app.set_viewport(1600.0, 900.0);
+        assert_eq!(
+            app.start_screen().expect("the screen").layout().viewport,
+            Vec2::new(1600.0, 900.0)
+        );
+
+        // And a start command while racing is simply ignored.
+        app.start_race();
+        assert_eq!(
+            app.update_start_screen(StartCommand::CONFIRM),
+            StartOutcome::Idle
+        );
+        assert!(!app.waiting());
+    }
+
+    /// A quick restart stays in the race — it does not send the player back to
+    /// the start screen.
+    #[test]
+    fn a_quick_restart_stays_in_the_race() {
+        let mut app = BurntRubber::new();
+        app.start_race();
+        app.advance_steps(400, DriveCommand::FLAT_OUT);
+        assert!(app.sim().car().distance > 10.0);
+
+        app.advance(
+            FIXED_STEP_NANOS,
+            DriveCommand {
+                restart: true,
+                ..DriveCommand::IDLE
+            },
+        );
+        assert!(!app.waiting(), "a restart does not go back to the screen");
+        assert_eq!(app.sim().phase(), RacePhase::Countdown);
+        assert_eq!(app.sim().step_count(), 0);
     }
 
     #[test]
     fn the_debug_overlay_is_off_by_default_and_toggles() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         assert!(!app.debug_enabled());
         app.present();
         assert!(app.debug().markers().is_empty(), "nothing is drawn while off");
@@ -637,7 +892,7 @@ mod tests {
 
     #[test]
     fn the_simulation_is_reachable_for_scripted_posing() {
-        let mut app = BurntRubber::new();
+        let mut app = racing();
         app.sim_mut().place_at(4_000.0);
         assert!((app.sim().car().distance - 4_000.0).abs() < 5.0);
         app.pose();

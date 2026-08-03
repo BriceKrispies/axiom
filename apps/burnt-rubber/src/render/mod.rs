@@ -176,6 +176,18 @@ impl RaceScene {
         self.effects.step(sim.car());
     }
 
+    /// Start a new race: forget the transient presentation state the previous
+    /// one left behind.
+    ///
+    /// Everything else the scene shows — the road chunks, the scenery, the
+    /// traffic, the car — is re-derived from the simulation on every
+    /// [`Self::pose`], so a fresh race needs nothing done to it. The effects are
+    /// the exception, because they are the only presentation state that *ages*
+    /// rather than being read.
+    pub fn reset(&mut self) {
+        self.effects.reset();
+    }
+
     /// Cull road paint to the near field, or stop doing so.
     ///
     /// Driven by the browser arm from the backend it actually bound. See

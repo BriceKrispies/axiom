@@ -26,6 +26,9 @@ use crate::app::BurntRubber;
 use crate::controls::{AnalogueInput, Controls, HeldKeys};
 use crate::hud::{HudModel, CONTROLS_HINT};
 use crate::profile::PlayProfile;
+use crate::start_screen::{
+    StartCommand, StartScreen, START_HINT, START_LABEL, START_SUBTITLE, START_TITLE,
+};
 use crate::touch::TouchControls;
 use crate::tuning::Tuning;
 use crate::{CANVAS_ID, DEFAULT_SEED, HEIGHT, WIDTH};
@@ -62,7 +65,13 @@ pub fn burnt_rubber_start() {
     // `crate::PlayProfile` for the full contract.
     let (view_w, view_h) = viewport();
     let profile = PlayProfile::for_presentation(view_w, coarse_pointer());
-    let app = BurntRubber::with_profile(DEFAULT_SEED, Tuning::DEFAULT, WIDTH, HEIGHT, profile);
+    let mut app = BurntRubber::with_profile(DEFAULT_SEED, Tuning::DEFAULT, WIDTH, HEIGHT, profile);
+    // The shipping flow: the night road is up, the race is frozen on the grid,
+    // and the player presses START RACE before anything moves. The viewport is
+    // set first so the screen is laid out for the device rather than for the
+    // framebuffer.
+    app.set_viewport(view_w, view_h);
+    app.open_start_screen();
     let mut touch = TouchControls::for_profile(view_w, view_h, profile);
     // A device that reports touch points gets the pad immediately, rather than
     // after a first blind tap.
@@ -75,6 +84,7 @@ pub fn burnt_rubber_start() {
         context: None,
         last_ms: 0.0,
         touch,
+        pointer: None,
     }));
     install_pointer_listeners(&state);
     install_focus_listeners(&state, &held);
@@ -133,6 +143,7 @@ pub fn burnt_rubber_start() {
         // command path for all three devices.
         let (view_w, view_h) = viewport();
         guard.touch.resize(view_w, view_h);
+        guard.app.set_viewport(view_w, view_h);
         let mut keys = frame_held.borrow().tokens();
         keys.extend(gamepad_keys().into_iter().map(KeyToken::new));
         keys.extend(guard.touch.keys().into_iter().map(KeyToken::new));
@@ -153,16 +164,31 @@ pub fn burnt_rubber_start() {
 
         // The first real input is what lets a browser start an AudioContext, so
         // the sound bank arms itself the moment the player touches anything.
-        let interacted = !keys.is_empty();
+        let interacted = !keys.is_empty() || guard.pointer.is_some();
         guard.arm_audio(interacted);
+
+        // The start screen and the race are two consumers of the same frame.
+        // Which one is up is the app's business, not this file's:
+        // `update_start_screen` does nothing while racing, and `advance` does
+        // nothing while waiting, so both are simply called.
+        let start = StartCommand {
+            pointer: guard.pointer.take(),
+            ..guard.controls.start_command()
+        };
+        guard.app.update_start_screen(start);
 
         // The simulation ticks the sound bank itself, once per fixed step — the
         // browser arm only hands the finished batch to Web Audio.
         guard.app.advance(elapsed, command);
         guard.realize_audio();
 
-        update_hud(&guard.app.hud());
-        update_touch_pad(&guard.touch);
+        let waiting = guard.app.waiting();
+        update_start_screen(guard.app.start_screen());
+        update_hud(&guard.app.hud(), waiting);
+        // The driving pad has nothing to do while the start screen is up, and
+        // leaving it on screen would invite a thumb onto a control that does
+        // nothing.
+        update_touch_pad(&guard.touch, waiting);
 
         let outcome = guard.app.present();
         let lights = outcome
@@ -192,6 +218,12 @@ struct LiveState {
     context: Option<web_sys::AudioContext>,
     last_ms: f64,
     touch: TouchControls,
+    /// A pointer press since the last frame, in viewport pixels.
+    ///
+    /// Latched here rather than acted on in the listener because a press is a
+    /// *frame's* input, exactly like a key: acting on it inside the event would
+    /// mutate the app from outside the frame.
+    pointer: Option<Vec2>,
 }
 
 impl LiveState {
@@ -440,20 +472,23 @@ fn install_pointer_listeners(state: &Rc<RefCell<LiveState>>) {
 
     let down_state = state.clone();
     let on_down = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
-        // A mouse is not a thumb. Without this, clicking anywhere in the lower
-        // left of the page — including just clicking the canvas to focus it —
-        // plants a virtual joystick and starts steering, and if the release is
-        // ever missed the car is stuck turning with no on-screen pad visible to
-        // explain why.
-        if e.pointer_type() == "mouse" {
-            return;
-        }
+        let point = Vec2::new(e.client_x() as f32, e.client_y() as f32);
         if let Ok(mut guard) = down_state.try_borrow_mut() {
-            guard
-                .touch
-                .press(e.pointer_id(), Vec2::new(e.client_x() as f32, e.client_y() as f32));
+            // Every pointer type reaches the start screen — a button is
+            // something you click as well as tap.
+            guard.pointer = Some(point);
+            // A mouse is not a thumb. Without this, clicking anywhere in the
+            // lower left of the page — including just clicking the canvas to
+            // focus it — plants a virtual joystick and starts steering, and if
+            // the release is ever missed the car is stuck turning with no
+            // on-screen pad visible to explain why.
+            if e.pointer_type() != "mouse" {
+                guard.touch.press(e.pointer_id(), point);
+            }
         }
-        e.prevent_default();
+        if e.pointer_type() != "mouse" {
+            e.prevent_default();
+        }
     });
     let move_state = state.clone();
     let on_move = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
@@ -492,7 +527,7 @@ fn install_pointer_listeners(state: &Rc<RefCell<LiveState>>) {
 /// is screen-space UI over a 3D view, it must stay crisp at any device pixel
 /// ratio, and drawing it in the scene would mean a second camera and a second
 /// pass to show five circles.
-fn update_touch_pad(touch: &TouchControls) {
+fn update_touch_pad(touch: &TouchControls, hidden: bool) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
@@ -508,7 +543,7 @@ fn update_touch_pad(touch: &TouchControls) {
             element
         }
     };
-    if !touch.engaged() {
+    if !touch.engaged() || hidden {
         let _ = root.set_attribute("style", &format!("{PAD_STYLE}display:none;"));
         return;
     }
@@ -564,6 +599,107 @@ fn update_touch_pad(touch: &TouchControls) {
     root.set_inner_html(&html);
 }
 
+// ---------------------------------------------------------------------------
+// The pre-race start screen.
+//
+// A *painter*. It draws the two rectangles [`crate::start_screen`] computed and
+// makes no decisions of its own — which is why the whole screen is testable
+// without a browser: the only thing not asserted natively is the CSS.
+// ---------------------------------------------------------------------------
+
+/// Create (once) and refresh the start screen.
+fn update_start_screen(screen: Option<&StartScreen>) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let root = match document.get_element_by_id(START_ID) {
+        Some(element) => element,
+        None => {
+            let element = document
+                .create_element("div")
+                .expect("the start screen div is created");
+            element.set_id(START_ID);
+            if let Some(body) = document.body() {
+                let _ = body.append_child(&element);
+            }
+            element
+        }
+    };
+
+    // The page's own heading and key list are furniture around the canvas, not
+    // part of the game. A full-screen title covers them; the stylesheet owns
+    // *how*, this owns *when*.
+    let chrome = document.body().map(|body| body.class_list());
+    let Some(screen) = screen else {
+        let _ = root.set_attribute("style", &format!("{START_STYLE}display:none;"));
+        chrome.map(|list| list.remove_1(START_OPEN_CLASS));
+        root.set_inner_html("");
+        return;
+    };
+    let _ = root.set_attribute("style", START_STYLE);
+    chrome.map(|list| list.add_1(START_OPEN_CLASS));
+
+    let layout = screen.layout();
+    let short = layout.viewport.x.min(layout.viewport.y);
+
+    root.set_inner_html(&format!(
+        // The veil: nearly opaque top and bottom so the page chrome behind the
+        // canvas cannot bleed through, and thin across the middle so the night
+        // road is genuinely the background rather than a memory of one.
+        "<div style=\"position:absolute;inset:0;background:\
+         linear-gradient(178deg,rgba(4,8,16,.97) 0%,rgba(7,14,28,.50) 34%,\
+         rgba(7,14,28,.54) 66%,rgba(3,6,13,.97) 100%)\"></div>\
+         <div style=\"position:absolute;left:{tx}px;top:{ty}px;width:{tw}px;height:{th}px;\
+         display:flex;flex-direction:column;align-items:center;justify-content:center;\
+         gap:{gap}px;text-align:center\">\
+         <div style=\"font:800 {title}px/1 ui-monospace,Menlo,Consolas,monospace;\
+         letter-spacing:.28em;color:#eaf6ff;text-shadow:0 0 26px rgba(122,226,255,.35)\">{heading}</div>\
+         <div style=\"font:400 {sub}px/1.5 ui-monospace,Menlo,Consolas,monospace;\
+         letter-spacing:.10em;color:rgba(198,220,244,.62);max-width:{tw}px\">{subtitle}</div></div>\
+         <div style=\"position:absolute;left:{bx}px;top:{by}px;width:{bw}px;height:{bh}px;\
+         box-sizing:border-box;border:1.5px solid {highlight};border-radius:6px;\
+         background:linear-gradient(180deg,rgba(22,54,76,.93) 0%,rgba(8,16,30,.95) 100%);\
+         box-shadow:0 0 30px rgba(122,226,255,.22);display:flex;flex-direction:column;\
+         align-items:center;justify-content:center;gap:6px\">\
+         <div style=\"font:800 {label}px/1 ui-monospace,Menlo,Consolas,monospace;\
+         letter-spacing:.22em;color:#f4fcff\">{button}</div>\
+         <div style=\"font:500 {hint}px/1 ui-monospace,Menlo,Consolas,monospace;\
+         letter-spacing:.16em;color:rgba(190,216,240,.58)\">{prompt}</div></div>",
+        tx = layout.title.x,
+        ty = layout.title.y,
+        tw = layout.title.width,
+        th = layout.title.height,
+        gap = (short * 0.02).clamp(8.0, 18.0),
+        title = (short * 0.062).clamp(22.0, 54.0),
+        heading = START_TITLE,
+        sub = (short * 0.021).clamp(11.0, 16.0),
+        subtitle = START_SUBTITLE,
+        bx = layout.start.x,
+        by = layout.start.y,
+        bw = layout.start.width,
+        bh = layout.start.height,
+        highlight = "rgb(122,226,255)",
+        label = (layout.start.height * 0.28).clamp(14.0, 23.0),
+        button = START_LABEL,
+        hint = (layout.start.height * 0.15).clamp(9.5, 12.5),
+        prompt = START_HINT,
+    ));
+}
+
+/// The start screen's element id.
+const START_ID: &str = "burnt-rubber-start";
+
+/// The class the body carries while the start screen is up. The stylesheet in
+/// `web/index.html` uses it to fold the page's own chrome away.
+const START_OPEN_CLASS: &str = "burnt-rubber-start-open";
+
+/// The start screen's overlay style. `pointer-events: none` because the
+/// listeners are on the window and hit testing happens in Rust against the same
+/// rectangle this file draws — the DOM is a picture of state the model already
+/// owns, and must never intercept a press.
+const START_STYLE: &str = "position:fixed;inset:0;z-index:40;pointer-events:none;\
+     user-select:none;-webkit-user-select:none;touch-action:none;";
+
 /// The on-screen pad's element id.
 const PAD_ID: &str = "burnt-rubber-pad";
 
@@ -580,7 +716,7 @@ const PAD_STYLE: &str = "position:fixed;inset:0;z-index:25;pointer-events:none;\
 /// the HUD in 3D would mean building that bridge here — a general engine
 /// capability, in an app, to show a speedometer. The established pattern in this
 /// repository is a DOM overlay, and that is what this is.
-fn update_hud(hud: &HudModel) {
+fn update_hud(hud: &HudModel, hidden: bool) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
@@ -596,6 +732,13 @@ fn update_hud(hud: &HudModel) {
             element
         }
     };
+
+    // The racing HUD has nothing to say while the start screen is up.
+    if hidden {
+        let _ = root.set_attribute("style", &format!("{HUD_STYLE}display:none;"));
+        return;
+    }
+    let _ = root.set_attribute("style", HUD_STYLE);
 
     let boost_bar = bar(hud.boost, 16);
     let progress_bar = bar(hud.progress, 20);

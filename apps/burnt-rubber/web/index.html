@@ -21,6 +21,11 @@
       canvas { width: 100vw; height: 100vh; aspect-ratio: auto; border: 0; border-radius: 0; }
     }
     .keys { font-size: 12px; opacity: .62; text-align: center; max-width: 900px; line-height: 1.7; }
+    /* The pre-race start screen is a full-screen title, so the page's own
+       heading and key list get out of its way. The class is set by the wasm arm
+       while the screen is up (see `web.rs`). */
+    body.burnt-rubber-start-open h1,
+    body.burnt-rubber-start-open .keys { visibility: hidden; }
     .keys b { color: #ffd166; font-weight: 700; }
   </style>
 </head>
@@ -32,6 +37,8 @@
     <b>W</b>/<b>↑</b> throttle · <b>S</b>/<b>↓</b> brake &amp; reverse ·
     <b>A</b><b>D</b>/<b>←</b><b>→</b> steer · <b>Space</b> handbrake ·
     <b>Left Shift</b> boost · <b>R</b> reset · <b>Esc</b> pause · <b>Enter</b> restart · <b>F1</b> debug
+    <br />
+    <b>Enter</b>, <b>Space</b> or a tap on <b>START RACE</b> drops the flag.
     <br />
     Gamepad: left stick steers, triggers drive, <b>A</b> handbrake, <b>X</b> boost.
     Touch: drag anywhere on the left to steer, <b>GAS</b>/<b>BRAKE</b>/<b>DRIFT</b>/<b>BOOST</b> on the right.

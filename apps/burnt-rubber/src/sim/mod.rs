@@ -345,11 +345,21 @@ impl RaceSim {
         self.repose();
     }
 
-    /// Restart the whole run from the start line.
+    /// Restart the whole run from the start line, **in the same game**.
+    ///
+    /// The profile has to be carried across: `RaceSim::new` is the wheel game,
+    /// so rebuilding through it silently turned a phone's lane game into the
+    /// driving game on every restart. The profile is a property of the *device*,
+    /// not of the run, and a restart does not change what device you are on.
     pub fn restart(&mut self) {
         let seed = self.track.seed();
         let tuning = self.tuning;
-        *self = RaceSim::new(seed, tuning);
+        let profile = self
+            .rails
+            .is_some()
+            .then_some(crate::PlayProfile::Rails)
+            .unwrap_or(crate::PlayProfile::Wheel);
+        *self = RaceSim::with_profile(seed, tuning, profile);
     }
 
     /// Place the car on the road centre at `distance` metres along, at rest,
@@ -895,6 +905,20 @@ mod tests {
         assert_eq!(a.3, b.3, "camera");
         assert_eq!(a.4, b.4, "near misses");
         assert_eq!(a.5, b.5, "impacts");
+    }
+
+    /// The regression: a restart on a phone stayed the phone's game.
+    #[test]
+    fn restarting_keeps_the_game_the_device_is_playing() {
+        let mut rails =
+            RaceSim::with_profile(crate::DEFAULT_SEED, Tuning::DEFAULT, crate::PlayProfile::Rails);
+        assert!(rails.rails.is_some());
+        rails.restart();
+        assert!(rails.rails.is_some(), "a restart kept the lane game");
+
+        let mut wheel = RaceSim::shipping();
+        wheel.restart();
+        assert!(wheel.rails.is_none(), "and the driving game stayed the driving game");
     }
 
     #[test]

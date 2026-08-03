@@ -99,6 +99,15 @@ impl Effects {
         self.visible
     }
 
+    /// Forget every transient — a new race, after which last race's smoke and
+    /// sparks are not this race's. The per-slot seeds are untouched: they are
+    /// drawn once at install and are part of the pool's identity, not its state.
+    pub fn reset(&mut self) {
+        self.phase = 0.0;
+        self.smoke_life.iter_mut().for_each(|life| *life = 0.0);
+        self.spark_life = 0.0;
+    }
+
     /// Advance the deterministic phase one fixed step.
     ///
     /// Called from the simulation side of the frame, not the render side, so a
@@ -322,6 +331,29 @@ mod tests {
         for e in effects.streaks.iter().chain(&effects.smoke).chain(&effects.sparks) {
             assert_eq!(app.get::<Visible>(*e), Some(Visible(false)));
         }
+    }
+
+    /// A new race starts with none of the last race's smoke or sparks in the
+    /// air.
+    #[test]
+    fn resetting_clears_the_transients_but_not_the_pool() {
+        let (mut app, mut effects) = fixture();
+        let t = VehicleTuning::DEFAULT;
+        let mut car = car_at(40.0);
+        car.drifting = true;
+        car.grounded = true;
+        car.impact_strength = 0.9;
+        car.impact_steps = 20;
+        for _ in 0..30 {
+            effects.step(&car);
+        }
+        effects.pose(&mut app, &car, Vec3::ZERO, Vec3::UNIT_Z, &t);
+        assert!(effects.visible_count() > 0, "something was in the air");
+
+        effects.reset();
+        let quiet = car_at(0.0);
+        effects.pose(&mut app, &quiet, Vec3::ZERO, Vec3::UNIT_Z, &t);
+        assert_eq!(effects.visible_count(), 0, "and now nothing is");
     }
 
     #[test]

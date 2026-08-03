@@ -159,6 +159,21 @@ impl RaceAudio {
         });
     }
 
+    /// The cue for starting a race from the pre-race screen.
+    ///
+    /// Scheduled directly rather than as a [`RaceEvent`], because it is not one:
+    /// a `RaceEvent` is something that happened *in a race*, and this happens
+    /// before there is one. A short rising arpeggio — unmistakably a go-ahead,
+    /// and deliberately not an alarm.
+    pub fn on_race_start(&mut self) {
+        if !self.enabled {
+            return;
+        }
+        self.blip(440.0, 0.14, 0.34);
+        self.blip(880.0, 0.20, 0.30);
+        self.blip(1_320.0, 0.26, 0.22);
+    }
+
     /// Schedule the one-shot cue for a simulation event.
     pub fn on_event(&mut self, event: &RaceEvent) {
         if !self.enabled {

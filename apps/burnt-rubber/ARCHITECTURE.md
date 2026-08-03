@@ -20,6 +20,7 @@ This app owns, end to end:
 | Deterministic traffic | `sim/traffic.rs` |
 | Boost, near misses, the reward loop | `sim/boost.rs`, `sim/collision.rs` |
 | Race flow (countdown, progress, finish, reset) | `sim/mod.rs` |
+| The pre-race start screen | `start_screen.rs` |
 | The chase camera | `camera.rs` |
 | Road geometry and chunk lifecycle | `render/road_mesh.rs`, `render/chunks.rs` |
 | Roadside scenery and its pool | `render/scenery.rs`, `render/scenery_pool.rs` |
@@ -443,6 +444,41 @@ Other invariants:
 Telemetry (`diagnostics.rs`) reports active chunks, total road triangles, drawn
 scenery instances, cached scenery chunks, live traffic, effect instances,
 simulation steps, speed and progress — as **structured values**, never printed.
+
+---
+
+## 10a. The pre-race start screen
+
+The app opens on a title over the night road with one button. It is deliberately
+the smallest thing that could work: two rectangles, one outcome, no state beyond
+the layout.
+
+| Piece | Where |
+|---|---|
+| The layout | `start_screen.rs` — `StartLayout::for_viewport(w, h)`, a pure function to a title band and a button rect |
+| The screen | `start_screen.rs` — `StartScreen::update(StartCommand) -> StartOutcome` |
+| The stage | `app.rs` — `Stage::Waiting(StartScreen)` / `Stage::Racing` |
+| The painter | `web.rs` — draws the two rectangles and nothing else |
+
+### The stage lives above the simulation
+
+`BurntRubber` holds the stage; while the screen is up the app simply **does not
+step the simulation** — no car, no traffic, no clock, no boost — and still poses
+it every frame, which is what puts the night road behind the title at no cost
+and with nothing to keep in sync. The alternative, a "not started yet" phase
+inside `RaceSim`, would have made every caller ask "is this a phase that moves?"
+before every step.
+
+Nothing crosses into the deterministic half at all. The screen's only output is
+"go", and `start_race` answers it by building a fresh `RaceSim` exactly as the
+constructor already does — so the simulation is untouched by the screen's
+existence, and a race started from it is bit-identical to one built directly.
+
+A press only counts **on the button**: the road behind it is not a start button,
+and a stray tap while getting comfortable must not drop the flag. Confirmation
+comes from the same bindings the race already uses (`Enter`, `Space`, the pad's
+south button), on their press edge, so there is no second control scheme and no
+second binding table to keep in step.
 
 ---
 

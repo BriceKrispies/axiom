@@ -231,6 +231,22 @@ impl Controls {
         }
     }
 
+    /// One frame of **start-screen** intent, from the actions the car already
+    /// reads.
+    ///
+    /// Reads the state [`Self::command`] already sampled this frame rather than
+    /// sampling again: one device frame is one fold, and folding twice would
+    /// advance the tick and eat every press edge in it. The bindings are shared
+    /// on purpose — the key that restarts a race is the key that starts one, and
+    /// the handbrake is the pad's south button — so there is no second control
+    /// scheme to learn and no second binding table to keep in step.
+    pub fn start_command(&self) -> crate::start_screen::StartCommand {
+        crate::start_screen::StartCommand {
+            confirm: self.state.pressed(action::RESTART) | self.state.pressed(action::HANDBRAKE),
+            pointer: None,
+        }
+    }
+
     /// Whether the debug overlay was toggled this frame.
     pub fn debug_pressed(&self) -> bool {
         self.state.pressed(action::DEBUG)
@@ -573,6 +589,44 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(run(), run());
+    }
+
+    /// The start screen confirms from the same two keys the race already binds,
+    /// on their press edge only.
+    #[test]
+    fn the_start_screen_confirms_from_the_driving_bindings() {
+        for key_name in ["Enter", "Space"] {
+            let mut controls = Controls::new();
+            controls.command(&held(&[key_name]), AnalogueInput::default());
+            assert!(controls.start_command().confirm, "{key_name} confirms");
+            controls.command(&held(&[key_name]), AnalogueInput::default());
+            assert!(
+                !controls.start_command().confirm,
+                "{key_name} held does not re-confirm"
+            );
+            controls.command(&[], AnalogueInput::default());
+            controls.command(&held(&[key_name]), AnalogueInput::default());
+            assert!(controls.start_command().confirm, "a fresh press confirms again");
+        }
+
+        let mut controls = Controls::new();
+        controls.command(&held(&["KeyW"]), AnalogueInput::default());
+        let start = controls.start_command();
+        assert!(!start.confirm, "the throttle does not start the race");
+        assert_eq!(start.pointer, None, "the pointer is the caller's to supply");
+    }
+
+    /// Reading the start command must not consume the frame the car already
+    /// read.
+    #[test]
+    fn reading_the_start_command_does_not_disturb_the_drive_command() {
+        let mut controls = Controls::new();
+        let command = controls.command(&held(&["KeyW", "KeyD"]), AnalogueInput::default());
+        let tick = controls.tick();
+        assert_eq!(controls.start_command(), controls.start_command());
+        assert_eq!(controls.tick(), tick, "and does not advance the fold");
+        assert_eq!(command.throttle, 1.0);
+        assert!(command.steer > 0.0);
     }
 
     #[test]

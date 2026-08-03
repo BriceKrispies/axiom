@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn observing_reads_the_whole_frame() {
-        let mut app = BurntRubber::new();
+        let mut app = BurntRubber::with(crate::DEFAULT_SEED, crate::Tuning::DEFAULT, crate::WIDTH, crate::HEIGHT);
         while app.sim().phase() == RacePhase::Countdown {
             app.advance_steps(1, DriveCommand::IDLE);
         }
@@ -186,7 +186,7 @@ mod tests {
     /// Collecting telemetry must not change the frame.
     #[test]
     fn observing_does_not_disturb_the_simulation() {
-        let mut app = BurntRubber::new();
+        let mut app = BurntRubber::with(crate::DEFAULT_SEED, crate::Tuning::DEFAULT, crate::WIDTH, crate::HEIGHT);
         app.advance_steps(400, DriveCommand::FLAT_OUT);
         let before = *app.sim().car();
         app.pose();
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn the_rows_are_stable_labelled_and_complete() {
-        let mut app = BurntRubber::new();
+        let mut app = BurntRubber::with(crate::DEFAULT_SEED, crate::Tuning::DEFAULT, crate::WIDTH, crate::HEIGHT);
         app.advance_steps(300, DriveCommand::FLAT_OUT);
         app.present();
         let rows = app.diagnostics().rows();

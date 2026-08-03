@@ -52,6 +52,7 @@ pub mod draw;
 pub mod hud;
 pub mod profile;
 pub mod sim;
+pub mod start_screen;
 pub mod touch;
 pub mod track;
 pub mod tuning;
@@ -74,6 +75,7 @@ pub use camera::{CameraPose, ChaseCamera};
 pub use command::DriveCommand;
 pub use profile::PlayProfile;
 pub use sim::{RaceEvent, RacePhase, RaceSim};
+pub use start_screen::{StartCommand, StartOutcome, StartScreen};
 pub use track::{SectionKind, Track, TrackSample, Zone};
 pub use tuning::Tuning;
 

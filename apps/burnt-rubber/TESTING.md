@@ -1,6 +1,6 @@
 # Burnt Rubber — Testing
 
-380 tests, all co-located with the code they cover. Everything below runs under
+525 tests, all co-located with the code they cover. Everything below runs under
 plain `cargo test` on the native target; the `wasm32` browser edge
 (`src/web.rs`) is the only file with no native coverage, by construction — see
 §6.
@@ -284,6 +284,31 @@ And traffic fairness:
 | `sim::traffic::tests::recycled_traffic_never_spawns_inside_the_player_safety_region` | Swept across a whole slot pitch, so every phase relationship is exercised |
 | `sim::traffic::tests::traffic_never_appears_inside_the_safety_region_across_repeated_jumps` | Forty teleports, checking only the *first sighting* of each slot — a car may drive into the region, it may never be created there |
 | `sim::traffic::tests::traffic_never_blocks_the_road_across_the_whole_generation_range` | Over 10 000 cross-sections along the entire nine kilometres, some lane centre is always clear |
+
+---
+
+## 4a. The pre-race start screen
+
+| Test | Proves |
+|---|---|
+| `start_screen::tests::the_button_is_centred_and_on_screen_at_every_viewport` | Centred, on screen, a usable touch target and never a banner, across five viewports |
+| `start_screen::tests::the_title_sits_above_the_button_and_never_collides_with_it` | The two bands never overlap |
+| `start_screen::tests::a_very_short_viewport_still_produces_a_usable_button` | A 200 px-tall landscape phone still gets a reachable 48 px button |
+| `start_screen::tests::a_degenerate_viewport_still_lays_out_finite_rectangles` | A 0 x 0 viewport produces finite, usable rectangles |
+| `start_screen::tests::the_same_viewport_always_produces_the_same_layout` | Deterministic layout |
+| `start_screen::tests::confirming_starts_the_race_and_an_idle_frame_does_not` | The press edge starts it; an idle frame does not |
+| `start_screen::tests::only_a_press_on_the_button_starts_the_race` | Every edge of the button counts; a press two pixels outside does not |
+| `start_screen::tests::resizing_re_solves_the_layout` | And the button is hit-testable where it moved to |
+| `app::tests::the_shipping_app_opens_on_the_start_screen_over_the_road` | The screen is up and the night road behind it is genuinely drawn |
+| `app::tests::the_simulation_does_not_advance_while_the_start_screen_is_up` | **Nothing moves**: no steps, no car, no traffic, no clock, no meter - under real time *and* deterministic stepping, with a boosting full-throttle command held |
+| `app::tests::starting_the_race_leaves_the_screen_and_begins_the_countdown` | Press -> the screen exits -> countdown -> the race runs |
+| `app::tests::only_a_press_on_the_button_starts_the_race` | The same rule through the app |
+| `app::tests::the_screen_relays_out_when_the_viewport_changes_and_ignores_race_input` | Resizing re-lays it out; a start command while racing is ignored |
+| `app::tests::a_quick_restart_stays_in_the_race` | A restart does not send the player back to the screen |
+| `controls::tests::the_start_screen_confirms_from_the_driving_bindings` | `Enter`/`Space` confirm on their press edge; the throttle does not |
+| `controls::tests::reading_the_start_command_does_not_disturb_the_drive_command` | One device frame is one fold |
+| `sim::tests::restarting_keeps_the_game_the_device_is_playing` | The regression: a restart on a phone stays the phone's lane game |
+| `render::effects::tests::resetting_clears_the_transients_but_not_the_pool` | A new race starts with none of the last race's smoke or sparks in the air |
 
 ---
 
