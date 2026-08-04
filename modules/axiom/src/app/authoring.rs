@@ -498,12 +498,12 @@ mod tests {
         let set = app.material_textures();
         let entry = set
             .iter()
-            .find(|(id, _, _, _)| *id == material.id())
+            .find(|t| t.material_id() == material.id())
             .expect("the material is in the set");
-        assert_eq!((entry.1, entry.2), (1, 2), "authored dimensions surface");
+        assert_eq!((entry.width(), entry.height()), (1, 2), "authored dimensions surface");
         assert_eq!(
-            entry.3,
-            vec![255, 0, 0, 255, 0, 255, 0, 255],
+            entry.pixels(),
+            &[255, 0, 0, 255, 0, 255, 0, 255],
             "authored pixels surface"
         );
         // An untextured material still gets the 1x1 white fallback.
@@ -511,11 +511,11 @@ mod tests {
         let plain_entry = app
             .material_textures()
             .into_iter()
-            .find(|(id, _, _, _)| *id == plain.id())
+            .find(|t| t.material_id() == plain.id())
             .expect("plain material present");
         assert_eq!(
-            (plain_entry.1, plain_entry.2, plain_entry.3),
-            (1, 1, vec![255, 255, 255, 255])
+            (plain_entry.width(), plain_entry.height(), plain_entry.pixels()),
+            (1, 1, [255, 255, 255, 255].as_slice())
         );
     }
 
@@ -542,9 +542,9 @@ mod tests {
         let entry = app
             .material_textures()
             .into_iter()
-            .find(|(id, _, _, _)| *id == material.id())
+            .find(|t| t.material_id() == material.id())
             .expect("material present");
-        assert_eq!(entry.3, vec![9, 8, 7, 255]);
+        assert_eq!(entry.pixels(), &[9, 8, 7, 255]);
     }
 
     #[test]

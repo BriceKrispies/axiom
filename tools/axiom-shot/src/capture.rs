@@ -51,7 +51,7 @@ pub fn present_request(w: u32, h: u32) -> HostPresentationRequest {
 pub fn render_gpu(
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
     skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
-    materials: &[(u64, u32, u32, Vec<u8>)],
+    materials: &[axiom_host::MaterialTexture],
     outcome: &FrameOutcome,
     w: u32,
     h: u32,

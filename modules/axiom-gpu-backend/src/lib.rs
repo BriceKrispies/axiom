@@ -33,6 +33,19 @@ mod frame_packet_adapter;
 // branchless — the 2D peer of `frame_packet_adapter`.
 mod draw2d_geometry;
 
+// Box-filtered mip reductions of a material texture, averaged in linear light.
+// Pure and branchless, so the filtering arithmetic that decides whether a
+// receding surface aliases is measured by the coverage gate rather than hidden
+// behind the GPU arm's `cfg`.
+#[cfg(any(test, target_arch = "wasm32", feature = "offscreen"))]
+mod mip_chain;
+
+// Resolves a material's host-authored TextureSampling mode into the concrete
+// filters + anisotropy clamp the sampler is built from, bounded by what the
+// device reports. Pure and branchless, for the same reason as `mip_chain`.
+#[cfg(any(test, target_arch = "wasm32", feature = "offscreen"))]
+mod texture_sampling;
+
 // The real wgpu pipeline that draws `draw2d_geometry`'s output, alpha-blended,
 // to a wgpu colour target — the 2D peer of `scene_renderer`.
 #[cfg(any(target_arch = "wasm32", feature = "offscreen"))]

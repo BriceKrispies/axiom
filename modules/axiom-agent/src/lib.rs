@@ -33,7 +33,7 @@
 //! `lib.rs` exposes **exactly one** thing: the [`AgentApi`] facade. Every
 //! contract type (`AgentId`, `AgentProfile`, `AgentMemory`, `Observation`,
 //! `ObservationBuilder`, `ObservationChannel`, `ActionIntent`, `ActionQueue`,
-//! `ScriptedBrain`, `ReplayBrain`, `DecisionReport`) is sealed behind a private
+//! `ScriptedBrain`, `ReplayBrain`, `AxisMapBrain`, `DecisionReport`) is sealed behind a private
 //! module and is reachable only *through* the facade — constructed by it and
 //! handed back as opaque values.
 
@@ -45,6 +45,7 @@ mod agent_id;
 mod agent_memory;
 mod agent_profile;
 mod agent_runtime;
+mod axis_map_brain;
 mod decision_report;
 mod hold_set_brain;
 mod observation;

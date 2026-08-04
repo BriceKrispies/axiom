@@ -33,6 +33,13 @@ axiom-visibility = { path = "../../modules/axiom-visibility" }
 # as data from simulation state (the wasm arm realizes the batch).
 axiom-audio = { path = "../../modules/axiom-audio" }
 
+# The deterministic embodied-agent substrate the ghost runs every control input
+# through: the axis-map brain turns perceived scalars into `move_axis` intents.
+# Not optional — the ghost is part of the game, so it ships in the wasm bundle.
+axiom-agent = { path = "../../modules/axiom-agent" }
+# `RuntimeStep`, stamping each agent decision with the fixed 60 Hz step.
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+
 # The nondeterministic browser edge — wasm32 only, so native `cargo test`
 # compiles none of it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -79,6 +79,25 @@ impl ActionQueue {
             .iter()
             .fold(0, |acc, intent| acc | intent.control_code())
     }
+
+    /// The sum of every queued `move_axis` intent's value for `axis_code` — the
+    /// tick's combined deflection of one continuous control axis.
+    ///
+    /// The analogue counterpart of [`Self::combined_control_code`]: where held
+    /// controls fold by bitwise-OR, axis deflections fold by addition, so a
+    /// decision that drove one axis from several bindings (a proportional term
+    /// and a damping term, say) yields their sum rather than only the first.
+    /// Intents of any other kind, and axes other than `axis_code`, contribute
+    /// nothing; an empty queue yields `0` (axis centred).
+    pub fn axis_value(&self, axis_code: u32) -> i64 {
+        self.intents
+            .iter()
+            .filter(|intent| {
+                (intent.kind_code() == ActionIntent::KIND_MOVE_AXIS)
+                    & (intent.axis_code() == axis_code)
+            })
+            .fold(0i64, |acc, intent| acc.saturating_add(intent.value()))
+    }
 }
 
 #[cfg(test)]
@@ -152,5 +171,31 @@ mod tests {
             ActionIntent::press_control(0b0001),
         ]);
         assert_eq!(q.combined_control_code(), 0b0101);
+    }
+
+    #[test]
+    fn axis_value_sums_only_that_axis_move_intents() {
+        assert_eq!(ActionQueue::empty_with_capacity(2).axis_value(3), 0);
+        let q = ActionQueue::from_intents(vec![
+            // Two terms driving the same axis: they sum.
+            ActionIntent::move_axis(3, 400),
+            ActionIntent::move_axis(3, -150),
+            // A different axis, and a non-axis intent: neither contributes.
+            ActionIntent::move_axis(4, 999),
+            ActionIntent::press_control(3),
+            ActionIntent::look_axis(3, 777),
+        ]);
+        assert_eq!(q.axis_value(3), 250);
+        assert_eq!(q.axis_value(4), 999);
+        assert_eq!(q.axis_value(5), 0);
+    }
+
+    #[test]
+    fn axis_value_saturates_rather_than_overflowing() {
+        let q = ActionQueue::from_intents(vec![
+            ActionIntent::move_axis(1, i64::MAX),
+            ActionIntent::move_axis(1, i64::MAX),
+        ]);
+        assert_eq!(q.axis_value(1), i64::MAX);
     }
 }

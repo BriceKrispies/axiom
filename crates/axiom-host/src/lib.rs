@@ -52,6 +52,7 @@ mod frame_submission_report;
 mod frame_volumetrics;
 mod handles;
 mod host_adapter_request;
+mod material_texture;
 mod host_alpha_mode;
 mod host_api;
 mod host_boundary_config;
@@ -168,6 +169,11 @@ pub use frame_submission_report::FrameFeature;
 pub use frame_submission_report::FrameSubmissionReport;
 pub use frame_volumetrics::apply_frame_volumetrics;
 pub use frame_volumetrics::FrameVolumetrics;
+
+// A material's albedo pixels plus the sampling mode a backend cannot infer from
+// them. Bind-time resident state, not per-frame packet data.
+pub use material_texture::MaterialTexture;
+pub use material_texture::TextureSampling;
 
 // The raymarch peer of FramePacket's triangle draws, carried as an optional
 // FramePacket arm.

@@ -44,7 +44,7 @@
 //! half of every "bright" object from going black, because the objects that are
 //! supposed to be bright now carry their own light.
 //!
-use axiom::prelude::{Color, Handle, Material, Ratio, RunningApp};
+use axiom::prelude::{Color, Handle, Material, Ratio, RunningApp, TextureSampling};
 
 use crate::track::Zone;
 
@@ -69,6 +69,14 @@ pub fn ratio(v: f32) -> Ratio {
 /// `0.25` - a mid slate, not a night sky. These values are chosen for the
 /// displayed result, which is why they look implausibly dark written down.
 pub const SKY: [f32; 3] = [0.011, 0.015, 0.026];
+
+/// How solid the ghost car is, `0` invisible … `1` opaque.
+///
+/// Tuned against the rendered frame rather than derived: the 3D pipeline does
+/// not back-face cull, so every translucent box blends twice over itself, and
+/// the car's parts overlap on top of that. The value that *looks* like a third
+/// opaque is well under a third.
+pub const GHOST_OPACITY: f32 = 1.0;
 
 /// The sky directly overhead, and the top of the frame's gradient.
 ///
@@ -134,6 +142,19 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
                     Material::lit(rgb(0.085, 0.088, 0.105))
                         .with_custom_texture(t.id())
                         .with_roughness(ratio(0.68))
+                        // The tarmac is the one surface in this game that runs
+                        // from under the front wheels to the vanishing point, so
+                        // it is the one that needs anisotropic sampling. At the
+                        // camera's grazing angle a screen pixel a few hundred
+                        // metres out covers a metre or more *along* the road
+                        // while still covering only centimetres *across* it. A
+                        // trilinear sampler picks its mip level from the larger
+                        // of those two, so it would blur the road laterally by
+                        // that same ratio — the grain, and with it any sense of
+                        // surface, would wash out to flat grey a short way past
+                        // the car. Anisotropic filtering averages along the long
+                        // axis only, which is exactly the shape of the problem.
+                        .with_texture_sampling(TextureSampling::Anisotropic)
                 })
                 .unwrap_or_else(|| {
                     Material::lit(rgb(0.085, 0.088, 0.105)).with_roughness(ratio(0.68))
@@ -163,6 +184,27 @@ pub const fn zone_tint(zone: Zone) -> [f32; 3] {
         Zone::Industrial => [0.30, 0.29, 0.26],
         Zone::Canyon => [0.36, 0.24, 0.17],
     }
+}
+
+/// The five materials one car body is built from.
+///
+/// A livery is what makes the *same* car model render as two different cars.
+/// The player's is opaque paint; the ghost's is the translucent set below. The
+/// alternative — a second `PlayerCar::install` that reaches into the palette for
+/// different fields — would duplicate the model's material choices in two
+/// places and let them drift.
+#[derive(Debug, Clone, Copy)]
+pub struct CarLivery {
+    /// Painted bodywork.
+    pub body: Handle<Material>,
+    /// Glazing.
+    pub glass: Handle<Material>,
+    /// Tyres, and the near-black valance.
+    pub tyre: Handle<Material>,
+    /// Tail lamps.
+    pub brake_light: Handle<Material>,
+    /// The boost plume.
+    pub exhaust: Handle<Material>,
 }
 
 /// Every material the scene uses, registered once at install.
@@ -205,6 +247,21 @@ pub struct ScenePalette {
     pub spark: Handle<Material>,
     /// The finish arch.
     pub finish: Handle<Material>,
+    /// The ghost car's translucent livery.
+    pub ghost: CarLivery,
+}
+
+impl ScenePalette {
+    /// The player's own livery — opaque paint, glass, rubber and lamps.
+    pub const fn player_livery(&self) -> CarLivery {
+        CarLivery {
+            body: self.car_body,
+            glass: self.car_glass,
+            tyre: self.tyre,
+            brake_light: self.brake_light,
+            exhaust: self.boost_flame,
+        }
+    }
 }
 
 impl ScenePalette {
@@ -220,6 +277,16 @@ impl ScenePalette {
         };
         let glowing = |app: &mut RunningApp, c: [f32; 3], e: [f32; 3]| {
             app.add_material(Material::lit(rgb(c[0], c[1], c[2])).with_emissive(rgb(e[0], e[1], e[2])))
+        };
+        // Lit, faintly self-luminous, and *translucent* — the ghost set. The
+        // emissive term is what keeps it readable at night: a purely diffuse
+        // surface at a third opacity all but vanishes against a dark road.
+        let ghostly = |app: &mut RunningApp, c: [f32; 3], e: [f32; 3], opacity: f32| {
+            app.add_material(
+                Material::lit(rgb(c[0], c[1], c[2]))
+                    .with_emissive(rgb(e[0], e[1], e[2]))
+                    .with_opacity(ratio(opacity)),
+            )
         };
         ScenePalette {
             road: road_materials(app),
@@ -265,6 +332,27 @@ impl ScenePalette {
             smoke: lit(app, [0.30, 0.30, 0.33]),
             spark: glowing(app, [0.24, 0.18, 0.06], [1.0, 0.78, 0.28]),
             finish: glowing(app, [0.08, 0.22, 0.16], [0.26, 1.0, 0.66]),
+            // The ghost. Cold cyan-white against the player's hot orange, so at a
+            // glance you always know which car is yours, and translucent through
+            // the engine's real alpha path (`Material::with_opacity` — folded
+            // into the per-draw alpha, blended with `ALPHA_BLENDING`, and sorted
+            // back-to-front by `axiom-render`).
+            //
+            // The authored numbers are deliberately *lower* than the opacity you
+            // want to see. The 3D pipeline draws with `cull_mode: None`, so a
+            // translucent box blends its far faces and then its near faces over
+            // them, and the car's parts overlap each other as well — a ghost
+            // authored at 0.5 reads nearly solid. These are tuned by eye against
+            // the rendered frame, not by arithmetic.
+            ghost: CarLivery {
+                body: ghostly(app, [0.30, 0.70, 0.95], [0.05, 0.22, 0.34], GHOST_OPACITY),
+                glass: ghostly(app, [0.12, 0.26, 0.38], [0.02, 0.08, 0.14], GHOST_OPACITY * 0.8),
+                tyre: ghostly(app, [0.06, 0.10, 0.14], [0.0, 0.0, 0.0], GHOST_OPACITY),
+                // A ghost's lamps are a hint, not a warning — dimmer than the
+                // player's, so they never read as *your* brake lights.
+                brake_light: ghostly(app, [0.10, 0.18, 0.24], [0.20, 0.55, 0.75], GHOST_OPACITY),
+                exhaust: ghostly(app, [0.10, 0.20, 0.28], [0.35, 0.70, 0.95], GHOST_OPACITY),
+            },
         }
     }
 }
@@ -484,12 +572,12 @@ mod tests {
         let of = |h: Handle<Material>| {
             textures
                 .iter()
-                .find(|(id, _, _, _)| *id == h.id())
-                .map(|(_, w, h, px)| (*w, *h, px.clone()))
+                .find(|t| t.material_id() == h.id())
                 .expect("every road material resolves a texture entry")
         };
 
-        let (w, h, pixels) = of(m.surface);
+        let tarmac = of(m.surface);
+        let (w, h, pixels) = (tarmac.width(), tarmac.height(), tarmac.pixels().to_vec());
         assert_eq!((w, h), (RES, RES), "the tarmac samples the authored grain");
         assert_eq!(pixels.len(), (RES * RES * 4) as usize);
         assert!(
@@ -499,10 +587,45 @@ mod tests {
 
         // The 1x1 opaque-white fallback: an untextured material, unchanged.
         for other in [m.paint, m.rail, m.verge] {
+            let entry = of(other);
             assert_eq!(
-                of(other),
-                (1, 1, vec![255, 255, 255, 255]),
+                (entry.width(), entry.height(), entry.pixels()),
+                (1, 1, [255, 255, 255, 255].as_slice()),
                 "only the tarmac is textured"
+            );
+        }
+    }
+
+    /// The tarmac — and **only** the tarmac — is sampled anisotropically.
+    ///
+    /// Both halves are load-bearing. Without it the road's grain is blurred away
+    /// laterally by the ratio between its along-view and across-view footprints,
+    /// which at this camera's grazing angle is tens to one; the surface goes flat
+    /// grey a short way past the car. With it on anything else, that material
+    /// loses the hard magnified texels that are the engine's whole look, for a
+    /// surface that never recedes far enough to need the trade.
+    #[test]
+    fn only_the_tarmac_is_sampled_anisotropically() {
+        let mut app = app();
+        let m = road_materials(&mut app);
+        let textures = app.material_textures();
+        let sampling = |h: Handle<Material>| {
+            textures
+                .iter()
+                .find(|t| t.material_id() == h.id())
+                .expect("the material resolves a texture entry")
+                .sampling()
+        };
+        assert_eq!(
+            sampling(m.surface),
+            TextureSampling::Anisotropic,
+            "the road runs to the horizon and must be filtered for it"
+        );
+        for other in [m.paint, m.rail, m.verge] {
+            assert_eq!(
+                sampling(other),
+                TextureSampling::Crisp,
+                "nothing but the tarmac should give up crisp magnification"
             );
         }
     }

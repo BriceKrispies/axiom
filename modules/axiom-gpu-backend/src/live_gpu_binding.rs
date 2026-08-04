@@ -114,7 +114,7 @@ impl LiveGpuBinding {
         render_height: u32,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
         skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
-        materials: &[(u64, u32, u32, Vec<u8>)],
+        materials: &[axiom_host::MaterialTexture],
         max_instances: u32,
         shadow_size: u32,
         look: axiom_host::FrameRenderLook,
@@ -292,6 +292,16 @@ impl LiveGpuBinding {
             // unlit faces, recedes its horizon and paints its sky exactly as the
             // offscreen capture and the Canvas 2D fallback do.
             look,
+            // Anisotropic filtering rides on an extension the WebGL2 arm may not
+            // have; asking the adapter here is what lets `texture_sampling`
+            // resolve a clamp that is already legal for this device rather than
+            // one wgpu has to silently correct behind our back.
+            crate::texture_sampling::device_max_anisotropy(
+                adapter
+                    .get_downlevel_capabilities()
+                    .flags
+                    .contains(wgpu::DownlevelFlags::ANISOTROPIC_FILTERING),
+            ),
         );
 
         // The intermediate colour target the scene renders into (then upscaled to

@@ -371,6 +371,11 @@ fn lib_exports_are_curated_set() {
         "pub use frame_retro_32bit::FrameRetro32BitProfile;",
         "pub use frame_volumetrics::apply_frame_volumetrics;",
         "pub use frame_volumetrics::FrameVolumetrics;",
+        // A material's albedo pixels plus how they must be filtered. Bind-time
+        // resident state rather than frame-packet data, and the one texture
+        // property a backend cannot derive from the payload itself.
+        "pub use material_texture::MaterialTexture;",
+        "pub use material_texture::TextureSampling;",
         "pub use frame_raster_stats::FrameDepthCueStats;",
         "pub use frame_raster_stats::FrameRasterStats;",
         "pub use frame_submission_report::BackendKind;",

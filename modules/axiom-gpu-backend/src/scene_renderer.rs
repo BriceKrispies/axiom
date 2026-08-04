@@ -19,6 +19,7 @@ use wgpu::util::DeviceExt;
 // owned by `frame_packet_adapter`, which does the packing this renderer's vertex
 // layout is derived from.
 use crate::frame_packet_adapter::INSTANCE_FLOATS;
+use crate::mip_chain;
 
 /// WGSL for the lit/textured/shadowed main pass: per-vertex position+normal+uv+
 /// colour, per-instance MVP + world matrix + colour, a material albedo texture
@@ -277,8 +278,32 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let inv_det = 1.0 / max(dot(dp1, r1), 0.0001);
     let tangent = (r1 * duv1.x + r2 * duv2.x) * inv_det;
     let bitangent = (r1 * duv1.y + r2 * duv2.y) * inv_det;
-    let inv_max = inverseSqrt(max(dot(tangent, tangent), dot(bitangent, bitangent)));
-    let N = normalize(tangent * (nmap.x * inv_max) + bitangent * (nmap.y * inv_max) + geo_n * nmap.z);
+    // The frame can be degenerate, and it must not be allowed to poison N.
+    //
+    // `inverseSqrt(0)` is `+inf`, and a surface whose four corners share a UV —
+    // every quad drawn without explicit texture coordinates — has exactly zero uv
+    // derivatives, so both tangent and bitangent are the zero vector and the
+    // length is exactly 0. Multiplying that `inf` by a flat normal map's `nmap.x`
+    // of `0.0` is `0 * inf`, which is **NaN**, and `normalize` of a NaN vector is
+    // NaN: the fragment's whole lighting result is then undefined.
+    //
+    // Worse, it is undefined *per 2x2 pixel quad*, because `dpdx`/`dpdy` are
+    // constant within a quad and vary between them — so the failure rasterizes as
+    // a two-pixel-granularity pattern across the whole surface rather than as an
+    // obvious hole, and how it resolves depends on how a given GPU handles
+    // `0 * inf` and `inverseSqrt(0)`. That is why it can be invisible on one
+    // device and a dense static hatch on another.
+    //
+    // Flooring the length keeps `inv_max` finite for every input.
+    let frame_len2 = max(max(dot(tangent, tangent), dot(bitangent, bitangent)), 1.0e-12);
+    let inv_max = inverseSqrt(frame_len2);
+    let mapped = normalize(tangent * (nmap.x * inv_max) + bitangent * (nmap.y * inv_max) + geo_n * nmap.z);
+    // And with no normal map bound, N is the geometric normal *exactly* — chosen,
+    // not arrived at by hoping a degenerate frame multiplied by a zero `nmap.xy`
+    // cancels itself. `select` keeps control flow uniform so the derivatives above
+    // stay valid, and it takes the value rather than the arithmetic, so nothing
+    // the unused arm computed can reach the lit result.
+    let N = select(geo_n, mapped, (caps & CAP_NORMALMAP) != 0u);
     // Shadow capability off → fully lit (`shadow_factor` is still evaluated in uniform
     // control flow via `select`, so its `textureSampleCompare` derivatives stay valid).
     let shade = select(1.0, shadow_factor(in.world_pos), (caps & CAP_SHADOWS) != 0u);
@@ -1090,11 +1115,12 @@ impl SceneRenderer {
         format: wgpu::TextureFormat,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
         skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
-        materials: &[(u64, u32, u32, Vec<u8>)],
+        materials: &[axiom_host::MaterialTexture],
         normals: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
         look: axiom_host::FrameRenderLook,
+        device_max_anisotropy: u16,
     ) -> SceneRenderer {
         let max_instances = max_instances.max(1);
         // The shadow-atlas edge length is the device tier's choice
@@ -1151,20 +1177,23 @@ impl SceneRenderer {
         let flat_normal: (u32, u32, Vec<u8>) = (1, 1, vec![128, 128, 255, 255]);
         let materials: HashMap<u64, wgpu::BindGroup> = materials
             .iter()
-            .map(|(id, w, h, rgba8)| {
+            .map(|texture| {
+                let id = texture.material_id();
                 let (nw, nh, nrgba) = normals
                     .iter()
-                    .find(|(nid, ..)| nid == id)
+                    .find(|(nid, ..)| *nid == id)
                     .map(|(_, nw, nh, nrgba)| (*nw, *nh, nrgba.as_slice()))
                     .unwrap_or((flat_normal.0, flat_normal.1, flat_normal.2.as_slice()));
                 (
-                    *id,
+                    id,
                     upload_material(
                         device,
                         queue,
                         &material_layout,
-                        (*w, *h, rgba8),
+                        (texture.width(), texture.height(), texture.pixels()),
                         (nw, nh, nrgba),
+                        texture.sampling(),
+                        device_max_anisotropy,
                     ),
                 )
             })
@@ -2072,14 +2101,22 @@ fn upload_mesh(device: &wgpu::Device, vertices: &[f32], indices: &[u32]) -> Mesh
     }
 }
 
-/// Build a material's albedo bind group from RGBA8 pixels (sRGB texture + repeat
-/// nearest sampler), bound at group 0 (binding 0 = texture, 1 = sampler).
+/// Build a material's albedo bind group from RGBA8 pixels (sRGB texture + a
+/// repeat sampler resolved from the material's own sampling mode), bound at
+/// group 0 (binding 0 = texture, 1 = sampler).
+///
+/// `sampling` is the material's authored [`axiom_host::TextureSampling`] and
+/// `device_max_anisotropy` is what the adapter reports; together they resolve —
+/// in the pure, tested [`crate::texture_sampling`] — to filters and an anisotropy
+/// clamp that are already valid for this device.
 fn upload_material(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     albedo: (u32, u32, &[u8]),
     normal: (u32, u32, &[u8]),
+    sampling: axiom_host::TextureSampling,
+    device_max_anisotropy: u16,
 ) -> wgpu::BindGroup {
     // Albedo is sRGB-encoded colour; the normal map is linear data (RGB = the
     // tangent-space normal), so it uses the non-sRGB format.
@@ -2099,16 +2136,26 @@ fn upload_material(
         normal.2,
         wgpu::TextureFormat::Rgba8Unorm,
     );
+    // The filters and anisotropy clamp are decided by the pure, tested
+    // `texture_sampling` module rather than written out here, so the rule
+    // ("magnification is hard unless the material asked for anisotropy;
+    // minification is always linear across the mip chain; anisotropy never
+    // exceeds the device") is asserted by unit tests instead of living only in
+    // this descriptor.
+    let config = crate::texture_sampling::sampler_config(sampling, device_max_anisotropy);
+    let filter = |kind| match kind {
+        crate::texture_sampling::FilterKind::Nearest => wgpu::FilterMode::Nearest,
+        crate::texture_sampling::FilterKind::Linear => wgpu::FilterMode::Linear,
+    };
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("axiom-material-sampler"),
         address_mode_u: wgpu::AddressMode::Repeat,
         address_mode_v: wgpu::AddressMode::Repeat,
         address_mode_w: wgpu::AddressMode::Repeat,
-        // Nearest filtering for crunchy retro 32-bit texels (hard, un-smoothed texture
-        // pixels). Solid-colour materials (1x1 white) are unaffected by the filter.
-        mag_filter: wgpu::FilterMode::Nearest,
-        min_filter: wgpu::FilterMode::Nearest,
-        mipmap_filter: wgpu::FilterMode::Nearest,
+        mag_filter: filter(config.mag),
+        min_filter: filter(config.min),
+        mipmap_filter: filter(config.mipmap),
+        anisotropy_clamp: config.anisotropy,
         ..Default::default()
     });
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2135,7 +2182,24 @@ fn upload_material(
     })
 }
 
-/// Upload one RGBA8 texture of the given format and return its default view.
+/// Upload one RGBA8 texture of the given format, **with its full mip chain**,
+/// and return its default view.
+///
+/// The chain is not optional decoration. Without it a minified sample has only
+/// the base level to read, so it returns one arbitrary texel of the many a pixel
+/// covers — which is the moiré and the crawl on any surface that recedes. The
+/// levels are built on the CPU by [`crate::mip_chain`] and written here, in order,
+/// **after** the base: `write_texture` is queued work, and a level written before
+/// the level it was derived from would be reading a texture that does not exist
+/// yet. Building them on the CPU rather than with a GPU blit chain keeps the
+/// filtering arithmetic pure, native-testable and inside the coverage gate, and
+/// costs one bind-time pass over a texture that is at most a few hundred
+/// kilobytes.
+///
+/// The encoding is derived from the format, not passed in, so the two can never
+/// disagree: an `Rgba8UnormSrgb` albedo must average in linear light, and an
+/// `Rgba8Unorm` normal map must not. See [`crate::mip_chain`] for why that
+/// distinction is load-bearing.
 fn upload_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -2151,31 +2215,53 @@ fn upload_texture(
         height,
         depth_or_array_layers: 1,
     };
+    let encoding = match format {
+        wgpu::TextureFormat::Rgba8UnormSrgb => mip_chain::TexelEncoding::Srgb,
+        _ => mip_chain::TexelEncoding::Linear,
+    };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("axiom-material-texture"),
         size,
-        mip_level_count: 1,
+        mip_level_count: mip_chain::level_count(width, height),
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        rgba8,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(4 * width),
-            rows_per_image: Some(height),
-        },
-        size,
-    );
+    let write = |level: u32, w: u32, h: u32, pixels: &[u8]| {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: level,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * w),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+    };
+    write(0, width, height, rgba8);
+    mip_chain::build(width, height, rgba8, encoding)
+        .iter()
+        .enumerate()
+        .for_each(|(index, level)| {
+            write(
+                index as u32 + 1,
+                level.width(),
+                level.height(),
+                level.pixels(),
+            );
+        });
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 

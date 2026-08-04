@@ -63,7 +63,16 @@ pub mod render;
 
 pub mod app;
 pub mod capture;
+// A deterministic, steppable control surface over the live browser session —
+// how a motion-only defect (crawl, shimmer) is diagnosed, since a still cannot
+// show one. Inert unless a probe command is issued.
+pub mod probe;
 pub mod script;
+
+/// Playing the race through the `axiom-agent` substrate.
+pub mod agent;
+/// The agent, running live as a translucent ghost you race against.
+pub mod ghost;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web;

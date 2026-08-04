@@ -14,5 +14,7 @@ introduced_capabilities = [
   "deterministic-agent-decision",
   "agent-replay-brain",
   "agent-scripted-brain",
+  "agent-axis-map-brain",
+  "continuous-control-axes",
   "decision-reporting",
 ]

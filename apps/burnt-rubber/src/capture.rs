@@ -18,7 +18,7 @@ use crate::app::BurntRubber;
 use crate::command::DriveCommand;
 use crate::script;
 use crate::sim::RacePhase;
-use crate::track::SectionKind;
+use crate::track::{SectionKind, GRID_DISTANCE};
 use crate::tuning::Tuning;
 
 /// `axiom-shot` renders every registered slice at its own framebuffer size.
@@ -104,6 +104,52 @@ pub fn build_burnt_rubber_boost() -> RunningApp {
     app.pose();
     app.into_running()
 }
+
+/// Racing the agent's ghost: the player on the scripted line, the translucent
+/// ghost already pulling away up the road.
+///
+/// The one slice that frames the ghost itself, so its opacity and colour are
+/// regression evidence rather than a memory of a browser session. Both cars
+/// launch from the grid; the agent is the quicker driver, so a couple of seconds
+/// in it sits ahead of the player and slightly across the road — which is
+/// exactly how a ghost is met in play.
+pub fn build_burnt_rubber_ghost() -> RunningApp {
+    let mut app = sized();
+    // Let both cars off the line and give the agent a moment to get up to pace.
+    for _ in 0..GHOST_SLICE_STEPS {
+        let command = script::autopilot(app.sim().car(), app.sim().track());
+        app.advance_steps(1, command);
+    }
+    // Then place the player just behind the ghost, at the ghost's own speed.
+    //
+    // The agent is the quicker driver — it boosts off the line — so left alone
+    // it is half a kilometre up the road by the time it is worth photographing,
+    // and the ghost this slice exists to show is four pixels wide. Placing the
+    // player is the same framing tool `at_section` uses for every other slice:
+    // the slice's job is to photograph a moment, and this is the moment a player
+    // who *is* on the agent's pace actually sees.
+    let (ahead, pace) = app
+        .ghost()
+        .map(|ghost| (ghost.distance(), ghost.sim().car().speed()))
+        .unwrap_or((GRID_DISTANCE, 0.0));
+    app.sim_mut().place_at(ahead - GHOST_SLICE_GAP);
+    app.sim_mut().launch_at(pace);
+    // A few steps so the chase camera settles behind the replaced car rather
+    // than snapping from where it was.
+    for _ in 0..GHOST_SLICE_SETTLE_STEPS {
+        let command = script::autopilot(app.sim().car(), app.sim().track());
+        app.advance_steps(1, command);
+    }
+    app.pose();
+    app.into_running()
+}
+
+/// Long enough for the countdown to clear and the agent to be at racing speed.
+const GHOST_SLICE_STEPS: u32 = 260;
+/// How far behind the ghost the player is placed (m).
+const GHOST_SLICE_GAP: f32 = 34.0;
+/// Steps for the chase camera to settle after the placement.
+const GHOST_SLICE_SETTLE_STEPS: u32 = 14;
 
 /// How long the traffic slice hunts for a near miss before posing regardless.
 const NEAR_MISS_SEARCH_STEPS: u32 = 900;

@@ -199,9 +199,10 @@ impl GameBridge {
         self.runtime.app().mesh_set()
     }
 
-    /// The live-backend material upload set for the current scene (`(material_id,
-    /// width, height, RGBA8 albedo)`) — uploaded once when the surface is bound.
-    pub fn material_set(&self) -> Vec<(u64, u32, u32, Vec<u8>)> {
+    /// The live-backend material upload set for the current scene (one
+    /// [`axiom_host::MaterialTexture`] per material: its albedo pixels plus the
+    /// sampling mode) — uploaded once when the surface is bound.
+    pub fn material_set(&self) -> Vec<axiom_host::MaterialTexture> {
         self.runtime.app().material_textures()
     }
 

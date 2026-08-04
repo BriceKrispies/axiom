@@ -1,5 +1,6 @@
 //! A material description an app adds to an `Assets<Material>` collection.
 
+use axiom_host::TextureSampling;
 use axiom_kernel::Ratio;
 
 use crate::color::Color;
@@ -38,6 +39,9 @@ pub struct Material {
     /// app registered via `RunningApp::add_texture_data`. Kept a scalar so
     /// `Material` stays `Copy`.
     custom_texture: u64,
+    /// How this material's texture must be filtered as it minifies. See
+    /// [`TextureSampling`].
+    texture_sampling: TextureSampling,
 }
 
 impl Material {
@@ -51,6 +55,7 @@ impl Material {
             roughness: ratio_lit!(1.0),
             opacity: ratio_lit!(1.0),
             custom_texture: 0,
+            texture_sampling: TextureSampling::Crisp,
         }
     }
 
@@ -72,6 +77,21 @@ impl Material {
     /// the lit result.
     pub const fn with_emissive(mut self, emissive: Color) -> Self {
         self.emissive = emissive;
+        self
+    }
+
+    /// This material with an explicit texture sampling mode.
+    ///
+    /// Reach for [`TextureSampling::Anisotropic`] when the surface is seen at a
+    /// grazing angle across a wide depth range — a road, a floor, a terrain. Those
+    /// are minified hard along one screen axis while staying near 1:1 along the
+    /// other, and the default trilinear filter picks its mip level from the larger
+    /// of the two, so it blurs away lateral detail the pixel grid could still
+    /// resolve. It is opt-in rather than automatic because anisotropy forces
+    /// linear magnification, which would smooth the hard texels that are the
+    /// engine's look everywhere else.
+    pub const fn with_texture_sampling(mut self, sampling: TextureSampling) -> Self {
+        self.texture_sampling = sampling;
         self
     }
 
@@ -101,6 +121,11 @@ impl Material {
     /// The material's app-authored raw-pixel albedo texture id (0 = none).
     pub const fn custom_texture(self) -> u64 {
         self.custom_texture
+    }
+
+    /// How this material's texture is filtered as it minifies.
+    pub const fn texture_sampling(self) -> TextureSampling {
+        self.texture_sampling
     }
 
     /// The material's emissive (self-illumination) colour.
@@ -160,6 +185,21 @@ mod tests {
         assert_eq!(m.emissive(), Color::BLACK);
         assert_eq!(m.roughness().get(), 1.0);
         assert_eq!(m.opacity().get(), 1.0);
+    }
+
+    /// A material filters its texture the default way unless it asks otherwise.
+    /// The default is what every existing app relies on, so it is pinned here as
+    /// well as at the host type.
+    #[test]
+    fn texture_sampling_defaults_to_crisp_and_is_opt_in() {
+        let m = Material::lit(Color::WHITE);
+        assert_eq!(m.texture_sampling(), TextureSampling::Crisp);
+        let ground = m.with_texture_sampling(TextureSampling::Anisotropic);
+        assert_eq!(ground.texture_sampling(), TextureSampling::Anisotropic);
+        assert_ne!(ground, m, "the sampling mode is part of equality");
+        // And it is orthogonal to everything else the builder carries.
+        assert_eq!(ground.base_color(), m.base_color());
+        assert_eq!(ground.custom_texture(), m.custom_texture());
     }
 
     #[test]

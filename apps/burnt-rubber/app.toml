@@ -7,10 +7,14 @@ allowed_layers = [
     "math",
     "frame",
     "host",
+    # `RuntimeStep` — stamps each agent decision (the `agent` feature).
+    "runtime",
 ]
 
 allowed_modules = [
     "engine",
+    # The deterministic embodied-agent substrate the agent driver plays through.
+    "agent",
     "input",
     "visibility",
     "audio",

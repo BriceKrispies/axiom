@@ -418,8 +418,8 @@ fn realized_app_exposes_geometry_and_renderable_count() {
 
     let mats = app.material_textures();
     assert_eq!(mats.len(), 3);
-    assert_eq!((mats[0].1, mats[0].2), (1, 1));
-    assert_eq!(mats[0].3, vec![255, 255, 255, 255]);
+    assert_eq!((mats[0].width(), mats[0].height()), (1, 1));
+    assert_eq!(mats[0].pixels(), &[255, 255, 255, 255]);
 }
 
 #[test]

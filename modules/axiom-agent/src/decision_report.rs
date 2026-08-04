@@ -32,6 +32,9 @@ impl DecisionReport {
     /// The hold-set brain decided (emits one press-control intent per held
     /// control, so one decision carries several simultaneous controls).
     pub const BRAIN_KIND_HOLD_SET: u16 = 3;
+    /// The axis-map brain decided (emits one move-axis intent per binding whose
+    /// fact was perceived, so one decision carries several continuous axes).
+    pub const BRAIN_KIND_AXIS_MAP: u16 = 4;
 
     /// Unset / no reason recorded.
     pub const REASON_NO_REASON: u16 = 0;
@@ -49,6 +52,8 @@ impl DecisionReport {
     pub const REASON_ACTION_BUDGET_ZERO: u16 = 6;
     /// A hold-set step emitted one press-control intent per held control.
     pub const REASON_HOLD_SET_EMITTED: u16 = 7;
+    /// An axis-map step drove at least one control axis from a perceived fact.
+    pub const REASON_AXIS_MAP_EMITTED: u16 = 8;
 
     /// Assemble a report. Built only by the agent runtime, from a completed
     /// decision.

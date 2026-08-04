@@ -142,6 +142,10 @@ pub fn registry() -> Vec<SliceEntry> {
             build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_boost(),
         },
         SliceEntry {
+            name: "burnt-rubber-ghost",
+            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_ghost(),
+        },
+        SliceEntry {
             name: "sports-physics-lab",
             // `--frame 1` photographs the third-person view (the player's body).
             build: |p| axiom_sports_physics_lab::build_sports_physics_lab_posed(p.frame > 0),

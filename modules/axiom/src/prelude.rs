@@ -56,5 +56,9 @@ pub use crate::sdf_shape::SdfShape;
 pub use crate::spawn::Spawn;
 pub use crate::spin::Spin;
 pub use crate::texture::Texture;
+// How a material's texture is filtered as it minifies — `Crisp` (the default,
+// hard magnified texels) or `Anisotropic` (for ground surfaces seen at a grazing
+// angle across a wide depth range).
+pub use axiom_host::TextureSampling;
 pub use crate::visible::Visible;
 pub use crate::window::Window;

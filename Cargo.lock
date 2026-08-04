@@ -183,6 +183,7 @@ name = "axiom-burnt-rubber"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-agent",
  "axiom-audio",
  "axiom-debug-overlay",
  "axiom-frame",
@@ -190,6 +191,7 @@ dependencies = [
  "axiom-input",
  "axiom-kernel",
  "axiom-math",
+ "axiom-runtime",
  "axiom-visibility",
  "axiom-windowing",
  "console_error_panic_hook",

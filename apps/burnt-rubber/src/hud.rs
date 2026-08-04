@@ -50,6 +50,9 @@ pub struct HudModel {
     pub phase: RacePhase,
     /// Whether this is early enough in the run to still show the controls hint.
     pub show_controls_hint: bool,
+    /// How far ahead of the agent's ghost the player is, in metres — negative
+    /// when the ghost is winning. `None` when no ghost is running.
+    pub ghost_delta_metres: Option<f32>,
 }
 
 impl HudModel {
@@ -72,10 +75,28 @@ impl HudModel {
             stuck: sim.is_stuck(),
             phase: sim.phase(),
             show_controls_hint: sim.step_count() < CONTROLS_HINT_STEPS,
+            // Filled in by `with_ghost_delta` — the ghost is not in this sim.
+            ghost_delta_metres: None,
         }
     }
 
     /// The elapsed time as `M:SS.mmm`, the format the finish panel shows.
+    /// The same model with the ghost gap filled in. The gap is the one number
+    /// on the HUD that does not come from the player's simulation — the ghost
+    /// runs in its own — so it is attached here rather than smuggled into
+    /// [`Self::of`].
+    pub const fn with_ghost_delta(mut self, delta: Option<f32>) -> HudModel {
+        self.ghost_delta_metres = delta;
+        self
+    }
+
+    /// The ghost gap as it is read out: `+12 m` when the player leads, `-12 m`
+    /// when the ghost does. `None` when there is no ghost.
+    pub fn formatted_ghost_delta(&self) -> Option<String> {
+        self.ghost_delta_metres
+            .map(|d| format!("{}{:.0} m", ["-", "+"][usize::from(d >= 0.0)], d.abs()))
+    }
+
     pub fn formatted_time(&self) -> String {
         let total = self.elapsed.max(0.0);
         let minutes = (total / 60.0).floor() as u32;
@@ -96,7 +117,11 @@ impl HudModel {
             RacePhase::Finished => Some(format!("FINISH  {}", self.formatted_time())),
             _ if self.countdown > 0 => Some(self.countdown.to_string()),
             _ if self.go => Some("GO".to_string()),
-            _ if self.near_miss => Some("NEAR MISS  +BOOST".to_string()),
+            // A near miss deliberately does *not* banner. It is the most
+            // frequent event in the game — 47 of them in a clean lap — and a
+            // 64px word across the middle of the screen every time you thread a
+            // car is the one piece of the HUD that actively covers the road you
+            // are threading it on. The boost meter filling is the feedback.
             _ if self.stuck => Some("PRESS R TO RESET".to_string()),
             _ => None,
         }
@@ -202,8 +227,13 @@ mod tests {
 
         hud.stuck = true;
         assert_eq!(hud.banner().as_deref(), Some("PRESS R TO RESET"));
+        // A near miss never banners — it would cover the road it happens on.
         hud.near_miss = true;
-        assert_eq!(hud.banner().as_deref(), Some("NEAR MISS  +BOOST"));
+        assert_eq!(
+            hud.banner().as_deref(),
+            Some("PRESS R TO RESET"),
+            "a near miss must not take the banner"
+        );
         hud.countdown = 2;
         assert_eq!(hud.banner().as_deref(), Some("2"));
 

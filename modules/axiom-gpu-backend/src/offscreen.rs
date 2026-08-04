@@ -24,7 +24,7 @@ pub(crate) fn render_to_rgba(
     width: u32,
     height: u32,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
-    materials: &[(u64, u32, u32, Vec<u8>)],
+    materials: &[axiom_host::MaterialTexture],
     normals: &[(u64, u32, u32, Vec<u8>)],
     lights: &[(u32, [f32; 3], [f32; 3], f32)],
     light_view_proj: [f32; 16],
@@ -105,6 +105,15 @@ pub(crate) fn render_to_rgba(
         max_instances,
         shadow_size,
         look,
+        // The capture path renders on a real native adapter, so it gets the same
+        // anisotropy the browser arm does — which is what keeps a still usable as
+        // evidence about how the live frame samples its ground surfaces.
+        crate::texture_sampling::device_max_anisotropy(
+            adapter
+                .get_downlevel_capabilities()
+                .flags
+                .contains(wgpu::DownlevelFlags::ANISOTROPIC_FILTERING),
+        ),
     );
 
     // A retro 32-bit profile renders the scene into a small internal target and then a

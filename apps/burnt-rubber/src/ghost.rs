@@ -1,0 +1,181 @@
+//! The **ghost** — the agent driving its own race alongside yours.
+//!
+//! A ghost in a racing game is an opponent you cannot touch: it shows you the
+//! line and the pace, and it never blocks you. Burnt Rubber's ghost is the
+//! [`crate::agent`] driver running live, one fixed step per player step, so what
+//! you are racing is the real agent making real decisions — not a recorded
+//! trace, and not a rubber-banded chase car.
+//!
+//! # Why it cannot collide with you
+//!
+//! Because it is not in your simulation at all.
+//!
+//! [`GhostRun`] owns a **second, entirely separate [`RaceSim`]**, built from the
+//! same seed and tuning as yours. Your simulation has no idea it exists: no
+//! entry in your traffic pool, no body in your collision pass, nothing to test
+//! against. "The ghost does not collide with the player" is therefore not a flag
+//! that has to be honoured by every collision site — it is a structural
+//! property, true by construction and impossible to regress. The only place the
+//! two runs ever meet is the renderer, which draws the ghost's car pose into
+//! your frame, and the HUD, which reports the gap.
+//!
+//! That also means the ghost meets its *own* copy of the traffic. Both pools
+//! start from the same seed, so early on the ghost is threading the same cars
+//! you are; they drift apart over a run as each pool yields to its own car. That
+//! is the honest cost of the isolation, and it is the right trade: a ghost that
+//! shared your traffic would have to be able to hit it, and then it could hit
+//! you too.
+//!
+//! # Cost
+//!
+//! One extra `RaceSim::step` and one agent decision per fixed step — the
+//! simulation is far cheaper than the frame it is drawn in, and the agent's
+//! brain is a five-entry table.
+
+use crate::agent::{self, DriverTuning};
+use crate::sim::car::CarPose;
+use crate::sim::{RacePhase, RaceSim};
+use crate::tuning::Tuning;
+use crate::PlayProfile;
+
+/// The agent's run, advancing in lockstep with the player's.
+#[derive(Debug, Clone)]
+pub struct GhostRun {
+    /// The ghost's own world. Nothing outside this struct ever steps it, and
+    /// the player's simulation never reads it.
+    sim: RaceSim,
+    driver: DriverTuning,
+    steps: u64,
+}
+
+impl GhostRun {
+    /// Put the ghost on the grid, on the same course as the player.
+    pub fn new(seed: u64, tuning: Tuning, profile: PlayProfile) -> GhostRun {
+        GhostRun {
+            sim: RaceSim::with_profile(seed, tuning, profile),
+            driver: DriverTuning::FAST,
+            steps: 0,
+        }
+    }
+
+    /// Advance the ghost one fixed step: perceive, decide through `axiom-agent`,
+    /// and drive. The command comes back from the agent exactly as it does in
+    /// the offline race — this is the same [`agent::drive_one_step`] the
+    /// 91.7-second reference run is made of.
+    pub fn step(&mut self) {
+        let (command, _intents) = agent::drive_one_step(&self.sim, &self.driver, self.steps);
+        self.sim.step(command);
+        self.steps += 1;
+    }
+
+    /// The ghost's car, interpolated `alpha` of the way through the current step
+    /// — the one thing the renderer needs.
+    pub fn car_pose(&self, alpha: f32) -> CarPose {
+        self.sim.car_pose(alpha)
+    }
+
+    /// Whether the ghost is spending boost this step (the exhaust plume).
+    pub fn boosting(&self) -> bool {
+        self.sim.boost().active()
+    }
+
+    /// How far along the course the ghost has travelled (m).
+    pub fn distance(&self) -> f32 {
+        self.sim.car().distance
+    }
+
+    /// The ghost's elapsed race time (s).
+    pub fn elapsed_seconds(&self) -> f32 {
+        self.sim.elapsed_seconds()
+    }
+
+    /// Whether the ghost has crossed the line.
+    pub fn finished(&self) -> bool {
+        self.sim.phase() == RacePhase::Finished
+    }
+
+    /// The ghost's race, for tests and diagnostics. Read-only on purpose: the
+    /// ghost's world is stepped by [`Self::step`] and by nothing else.
+    pub const fn sim(&self) -> &RaceSim {
+        &self.sim
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::DriveCommand;
+    use crate::DEFAULT_SEED;
+
+    fn ghost() -> GhostRun {
+        GhostRun::new(DEFAULT_SEED, Tuning::DEFAULT, PlayProfile::default())
+    }
+
+    #[test]
+    fn the_ghost_drives_itself_down_the_road() {
+        let mut g = ghost();
+        let start = g.distance();
+        (0..600).for_each(|_| g.step());
+        assert!(
+            g.distance() > start + 100.0,
+            "the ghost should have covered ground: {} -> {}",
+            start,
+            g.distance()
+        );
+        assert!(!g.finished(), "not in ten seconds it hasn't");
+    }
+
+    /// The property the whole design exists for: the ghost is not in the
+    /// player's world, so it cannot touch the player's car. Driving the player
+    /// flat out through the same stretch the ghost occupies produces no impact
+    /// the ghost is responsible for — because the player's simulation has no
+    /// body for it at all.
+    #[test]
+    fn the_ghost_is_not_in_the_players_simulation() {
+        let mut player = RaceSim::with_profile(DEFAULT_SEED, Tuning::DEFAULT, PlayProfile::default());
+        let mut solo = player.clone();
+        let mut g = ghost();
+
+        // Step the player identically twice — once with a ghost running beside
+        // it, once without. A ghost that could touch the player would change the
+        // player's run; this one cannot, so the two are bit-identical.
+        (0..900).for_each(|_| {
+            g.step();
+            player.step(DriveCommand::FLAT_OUT);
+            solo.step(DriveCommand::FLAT_OUT);
+        });
+
+        assert_eq!(player.car().distance, solo.car().distance);
+        assert_eq!(player.car().lateral, solo.car().lateral);
+        assert_eq!(player.impact_count(), solo.impact_count());
+        assert_eq!(player.elapsed_seconds(), solo.elapsed_seconds());
+    }
+
+    /// Same seed, same agent, same run — the ghost is reproducible, so the pace
+    /// you race is the same pace every time.
+    #[test]
+    fn the_ghost_is_deterministic() {
+        let (mut a, mut b) = (ghost(), ghost());
+        (0..900).for_each(|_| {
+            a.step();
+            b.step();
+        });
+        assert_eq!(a.distance(), b.distance());
+        assert_eq!(a.elapsed_seconds(), b.elapsed_seconds());
+    }
+
+    #[test]
+    fn the_ghost_reaches_the_finish_on_the_shipping_course() {
+        let mut g = ghost();
+        (0..60 * 60 * 3).for_each(|_| {
+            (!g.finished()).then(|| g.step());
+        });
+        assert!(g.finished(), "the ghost got {:.0} m", g.distance());
+        // The reference run, to the step.
+        assert!(
+            (g.elapsed_seconds() - 91.68).abs() < 0.05,
+            "ghost time {:.2}s",
+            g.elapsed_seconds()
+        );
+    }
+}

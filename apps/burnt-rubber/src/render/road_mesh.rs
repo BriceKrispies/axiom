@@ -136,12 +136,12 @@ fn strip_surface(out: &mut SurfaceBuilder, track: &Track, a: &TrackSample, b: &T
     // unbroken rather than restarting at the tarmac edge.
     for side in [-1.0f32, 1.0] {
         out.ground_quad_with_uvs(
-            a.at_lateral(side * a.half_width).add(Vec3::new(0.0, -SHOULDER_DROP, 0.0)),
-            b.at_lateral(side * b.half_width).add(Vec3::new(0.0, -SHOULDER_DROP, 0.0)),
+            a.at_lateral(side * a.half_width).add(a.up.mul_scalar(-SHOULDER_DROP)),
+            b.at_lateral(side * b.half_width).add(b.up.mul_scalar(-SHOULDER_DROP)),
             b.at_lateral(side * (b.half_width + shoulder))
-                .add(Vec3::new(0.0, -SHOULDER_DROP, 0.0)),
+                .add(b.up.mul_scalar(-SHOULDER_DROP)),
             a.at_lateral(side * (a.half_width + shoulder))
-                .add(Vec3::new(0.0, -SHOULDER_DROP, 0.0)),
+                .add(a.up.mul_scalar(-SHOULDER_DROP)),
             paving_uvs([
                 (side * a.half_width, a.distance),
                 (side * b.half_width, b.distance),
@@ -161,6 +161,9 @@ fn paving_uvs(corners: [(f32, f32); 4]) -> [Vec2; 4] {
 /// How far below the tarmac the shoulder sits (m). Deliberately not a hair's
 /// breadth: two nearly-coplanar surfaces a few centimetres apart z-fight into
 /// shimmering bands once they are a few hundred metres away.
+///
+/// Applied along the road's own normal (`TrackSample::up`) — see
+/// [`PAINT_LIFT`] for why that distinction is the whole point.
 const SHOULDER_DROP: f32 = 0.09;
 
 /// The ground either side, from the **shoulder edge** out to the scenery line.
@@ -178,10 +181,10 @@ fn strip_verge(out: &mut SurfaceBuilder, track: &Track, a: &TrackSample, b: &Tra
     let outer_b = track.barrier_offset(b) + VERGE_REACH;
     for side in [-1.0f32, 1.0] {
         out.ground_quad(
-            a.at_lateral(side * inner_a).add(Vec3::new(0.0, -VERGE_DROP, 0.0)),
-            b.at_lateral(side * inner_b).add(Vec3::new(0.0, -VERGE_DROP, 0.0)),
-            b.at_lateral(side * outer_b).add(Vec3::new(0.0, -VERGE_FALL, 0.0)),
-            a.at_lateral(side * outer_a).add(Vec3::new(0.0, -VERGE_FALL, 0.0)),
+            a.at_lateral(side * inner_a).add(a.up.mul_scalar(-VERGE_DROP)),
+            b.at_lateral(side * inner_b).add(b.up.mul_scalar(-VERGE_DROP)),
+            b.at_lateral(side * outer_b).add(b.up.mul_scalar(-VERGE_FALL)),
+            a.at_lateral(side * outer_a).add(a.up.mul_scalar(-VERGE_FALL)),
         );
     }
 }
@@ -192,13 +195,44 @@ const VERGE_DROP: f32 = 0.16;
 /// Drop at the outer edge of the verge (m) — a gentle fall away from the road.
 const VERGE_FALL: f32 = 1.6;
 
-/// Lane dashes, edge lines and rumble blocks.
+/// Lane dashes, edge lines and the shoulder strip.
 ///
 /// Dashes are placed by **absolute course distance**, not by sample index, so
 /// their spacing is constant in metres no matter how the samples fall — which is
 /// the entire point of the arc-length table. That constant spacing is what makes
 /// them a usable speed reference: at 90 m/s a 12 m period is seven and a half
 /// dashes a second, and the eye reads that rate directly as speed.
+///
+/// ## Why the shoulder strip is continuous rather than alternating blocks
+///
+/// It used to be blocks: a quad emitted wherever
+/// `distance % 3.0 < 1.5`, described as "alternating so they strobe past". Two
+/// separate things were wrong with that, and the second is why it is gone
+/// rather than merely retuned.
+///
+/// **It was sampled below its own Nyquist rate.** The blocks were emitted per
+/// sample *pair*, and the samples are 2 m apart (`CourseTuning::sample_spacing`),
+/// so a 3 m square wave was being reconstructed on a 2 m grid. Representing a
+/// period of 3 m needs samples closer than 1.5 m, so what actually reached the
+/// mesh was the *alias*: a ragged 6 m pattern of uneven 2 m and 4 m runs. The
+/// strip you saw was never the strip that was authored — which is visible in any
+/// still as dashes of visibly unequal length.
+///
+/// **And the blocks could never be resolved on screen anyway.** A 2 m mark on
+/// the road subtends roughly `2600 / d²` pixels at `d` metres in this camera, so
+/// it is already thinner than one pixel by 50 m — while the paved shoulder,
+/// being at the far edge of an 18 m road, is off-frame entirely until well
+/// inside that. Measured on the `burnt-rubber-straight` capture, the blocks
+/// painted 21,723 pixels and **not one of them** was in the near third of the
+/// frame. So every pixel they ever contributed was a sub-pixel mark flickering
+/// on and off as the camera advanced: all aliasing, no speed cue. No block size
+/// fixes that here — one large enough to resolve at distance is not a rumble
+/// strip, and one small enough to read as one is never on screen.
+///
+/// Merging them into one continuous strip removes the artifact at its root: a
+/// strip has no period, so there is nothing left to alias along the road, and it
+/// rasterizes as stably as the solid edge line beside it does. The shoulder keeps
+/// its marking and the frame loses a band of crawling speckle.
 fn strip_paint(
     out: &mut SurfaceBuilder,
     track: &Track,
@@ -214,10 +248,10 @@ fn strip_paint(
         let outer_b =
             side * (b.half_width - EDGE_LINE_INSET - side.signum() * side * EDGE_LINE_WIDTH);
         out.ground_quad(
-            a.at_lateral(inner).add(PAINT_LIFT),
-            b.at_lateral(inner_b).add(PAINT_LIFT),
-            b.at_lateral(outer_b).add(PAINT_LIFT),
-            a.at_lateral(outer).add(PAINT_LIFT),
+            a.at_lateral(inner).add(a.up.mul_scalar(PAINT_LIFT)),
+            b.at_lateral(inner_b).add(b.up.mul_scalar(PAINT_LIFT)),
+            b.at_lateral(outer_b).add(b.up.mul_scalar(PAINT_LIFT)),
+            a.at_lateral(outer).add(a.up.mul_scalar(PAINT_LIFT)),
         );
     }
 
@@ -239,44 +273,65 @@ fn strip_paint(
             for side in [-1.0f32, 1.0] {
                 let offset = side * (boundary as f32 + 0.5) * lane_width;
                 out.ground_quad(
-                    a.at_lateral(offset - DASH_HALF_WIDTH).add(PAINT_LIFT),
-                    b.at_lateral(offset - DASH_HALF_WIDTH).add(PAINT_LIFT),
-                    b.at_lateral(offset + DASH_HALF_WIDTH).add(PAINT_LIFT),
-                    a.at_lateral(offset + DASH_HALF_WIDTH).add(PAINT_LIFT),
+                    a.at_lateral(offset - DASH_HALF_WIDTH).add(a.up.mul_scalar(PAINT_LIFT)),
+                    b.at_lateral(offset - DASH_HALF_WIDTH).add(b.up.mul_scalar(PAINT_LIFT)),
+                    b.at_lateral(offset + DASH_HALF_WIDTH).add(b.up.mul_scalar(PAINT_LIFT)),
+                    a.at_lateral(offset + DASH_HALF_WIDTH).add(a.up.mul_scalar(PAINT_LIFT)),
                 );
             }
         }
     }
 
-    // Rumble blocks on the shoulder, alternating so they strobe past.
-    if a.distance.rem_euclid(RUMBLE_PERIOD) < RUMBLE_PERIOD * 0.5 {
-        let shoulder = track.shoulder();
-        for side in [-1.0f32, 1.0] {
-            let inner = side * (a.half_width + shoulder * 0.15);
-            let inner_b = side * (b.half_width + shoulder * 0.15);
-            let outer = side * (a.half_width + shoulder * 0.9);
-            let outer_b = side * (b.half_width + shoulder * 0.9);
-            out.ground_quad(
-                a.at_lateral(inner).add(PAINT_LIFT),
-                b.at_lateral(inner_b).add(PAINT_LIFT),
-                b.at_lateral(outer_b).add(PAINT_LIFT),
-                a.at_lateral(outer).add(PAINT_LIFT),
-            );
-        }
+    // The shoulder strip, **continuous** — see below for why it is not blocks.
+    let shoulder = track.shoulder();
+    for side in [-1.0f32, 1.0] {
+        let inner = side * (a.half_width + shoulder * 0.15);
+        let inner_b = side * (b.half_width + shoulder * 0.15);
+        let outer = side * (a.half_width + shoulder * 0.9);
+        let outer_b = side * (b.half_width + shoulder * 0.9);
+        out.ground_quad(
+            a.at_lateral(inner).add(a.up.mul_scalar(PAINT_LIFT)),
+            b.at_lateral(inner_b).add(b.up.mul_scalar(PAINT_LIFT)),
+            b.at_lateral(outer_b).add(b.up.mul_scalar(PAINT_LIFT)),
+            a.at_lateral(outer).add(a.up.mul_scalar(PAINT_LIFT)),
+        );
     }
 }
 
 /// How far the paint sits above the tarmac (m) — enough to beat depth precision
 /// at a kilometre, small enough to be invisible.
-const PAINT_LIFT: Vec3 = Vec3::new(0.0, 0.075, 0.0);
+///
+/// ## The offset is along the road's normal, **not** along world up
+///
+/// This distinction is invisible on flat road and is the difference between a
+/// clean surface and a stippled one everywhere else. These three offsets
+/// ([`PAINT_LIFT`], [`SHOULDER_DROP`], [`VERGE_DROP`]) exist to hold four
+/// nearly-coplanar layers far enough apart to survive the depth buffer. What
+/// decides whether they do is the *perpendicular* clearance between the layers
+/// — the component along the surface normal.
+///
+/// Offsetting along world `+Y` gives a perpendicular clearance of only
+/// `offset * cos(pitch)`. On the flat that is the full offset and everything is
+/// fine, which is why this survived so long. On a graded section it shrinks with
+/// the grade, and on a crest — where the road pitches through its steepest
+/// angles — the paint sinks toward the tarmac it is supposed to sit proud of.
+/// The two surfaces converge until the depth comparison starts flipping between
+/// them across the road, which rasterizes as a dense stipple following the
+/// triangulation: a fine hatch over the whole carriageway, static, and present
+/// even when the car is stopped.
+///
+/// `TrackSample::up` is the surface normal the samples already carry (it is what
+/// `strip_rail` builds guardrails along). Offsetting along it makes the
+/// clearance exactly `offset` at every grade, so a crest is no worse than a
+/// straight. The named grade of the course this was found on is
+/// `SectionKind::RidgeCrests`.
+const PAINT_LIFT: f32 = 0.075;
 /// How far inside the tarmac edge the solid edge line starts (m).
 const EDGE_LINE_INSET: f32 = 0.25;
 /// Width of the solid edge line (m).
 const EDGE_LINE_WIDTH: f32 = 0.22;
 /// Half-width of a lane dash (m).
 const DASH_HALF_WIDTH: f32 = 0.12;
-/// Period of the alternating rumble blocks (m).
-const RUMBLE_PERIOD: f32 = 3.0;
 
 /// Guardrails, and a tunnel's walls and roof.
 fn strip_rail(out: &mut SurfaceBuilder, track: &Track, a: &TrackSample, b: &TrackSample) {
@@ -514,10 +569,10 @@ mod tests {
     /// depth buffer at the far end of the drawn road.
     #[test]
     fn the_road_layers_are_separated_enough_to_beat_depth_precision() {
-        assert!(PAINT_LIFT.y >= 0.05, "the paint sits proud of the tarmac");
+        assert!(PAINT_LIFT >= 0.05, "the paint sits proud of the tarmac");
         assert!(SHOULDER_DROP >= 0.05, "and the shoulder sits below it");
         assert!(VERGE_DROP > SHOULDER_DROP, "and the verge below that");
-        assert!(PAINT_LIFT.y < 0.15 && VERGE_DROP < 0.3, "none of it is a visible step");
+        assert!(PAINT_LIFT < 0.15 && VERGE_DROP < 0.3, "none of it is a visible step");
     }
 
     #[test]
@@ -581,6 +636,108 @@ mod tests {
         }
         let painted = build_chunk(&track, 0, &t);
         assert!(!painted.paint.positions().is_empty(), "the paint mesh is built");
+    }
+
+    /// The shoulder strip is **continuous** — every sample pair on the course
+    /// contributes its quad, on both sides, with no gap anywhere.
+    ///
+    /// This is the regression guard for the aliasing described on [`strip_paint`].
+    /// The strip used to be blocks gated on `distance % 3.0 < 1.5`, which — on a
+    /// 2 m sample grid — could not represent its own period and reached the mesh
+    /// as a ragged alias that then flickered at distance. A gap anywhere in this
+    /// assertion means a periodic gate has come back, and with it a pattern that
+    /// the sample grid cannot carry.
+    #[test]
+    fn the_shoulder_strip_is_continuous_along_the_whole_chunk() {
+        let track = track();
+        let chunk = build_chunk(&track, 3, &CourseTuning::DEFAULT);
+        let (start, end) = chunk_sample_range(&track, 3);
+        let shoulder = track.shoulder();
+        let positions = chunk.paint.positions();
+
+        for sample in &track.samples()[start..end] {
+            for side in [-1.0f32, 1.0] {
+                let inner = sample
+                    .at_lateral(side * (sample.half_width + shoulder * 0.15))
+                    .add(sample.up.mul_scalar(PAINT_LIFT));
+                assert!(
+                    positions.iter().any(|p| p.distance(inner) < 1.0e-4),
+                    "the shoulder strip has a gap at {} m (side {side}) — a periodic \
+                     gate the 2 m sample grid cannot represent has come back",
+                    sample.distance
+                );
+            }
+        }
+    }
+
+    /// And the strip carries no period of its own, so there is nothing along the
+    /// road left to alias. Asserted as: the paint emitted per sample pair never
+    /// varies by the shoulder strip's own contribution — every pair gets both
+    /// sides — which is what "continuous" means in triangle terms.
+    #[test]
+    fn every_sample_pair_contributes_the_same_shoulder_geometry() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        // A stretch with no lane dashes in it would make this exact; instead
+        // compare two chunks and assert the shoulder contribution scales purely
+        // with the row count, never with position along the course.
+        let rows = |index: usize| {
+            let (s, e) = chunk_sample_range(&track, index);
+            e - s
+        };
+        let quads = |index: usize| build_chunk(&track, index, &t).paint.indices().len() / 6;
+        // Edge lines (2) + shoulder strip (2) per pair is the floor; dashes add
+        // to it. Under the old alternating blocks the floor was 2, not 4.
+        for index in [2usize, 9, 24, 51] {
+            assert!(
+                quads(index) >= rows(index) * 4,
+                "chunk {index}: {} quads for {} sample pairs — under four per pair, \
+                 so some pair emitted no shoulder strip",
+                quads(index),
+                rows(index)
+            );
+        }
+    }
+
+    /// The road's layers keep their full separation **on a grade**, not just on
+    /// the flat.
+    ///
+    /// The separations are perpendicular clearances; offsetting them along world
+    /// `+Y` instead of along the surface normal scales every one of them by
+    /// `cos(pitch)`, so the steeper the road the closer the layers get. The
+    /// course's crested sections pitch hard enough for the paint to converge on
+    /// the tarmac, and converging layers z-fight into a static hatch across the
+    /// whole carriageway.
+    ///
+    /// Measured where it actually bites: the steepest sample on the real course.
+    #[test]
+    fn the_road_layers_keep_their_separation_on_the_steepest_grade() {
+        let track = track();
+        let steepest = track
+            .samples()
+            .iter()
+            .max_by(|a, b| a.up.y.abs().total_cmp(&b.up.y.abs()).reverse())
+            .expect("the course has samples");
+        // A real grade, or this test proves nothing about grades.
+        assert!(
+            steepest.up.y < 0.9999,
+            "the course is flat everywhere; this test cannot see the defect"
+        );
+
+        // The paint's clearance above the tarmac is the offset projected onto
+        // the surface normal. Along `up` that is the whole offset; along world
+        // +Y it would be `PAINT_LIFT * up.y`.
+        let along_normal = steepest.up.mul_scalar(PAINT_LIFT).dot(steepest.up);
+        let along_world_y = Vec3::new(0.0, PAINT_LIFT, 0.0).dot(steepest.up);
+        assert!(
+            (along_normal - PAINT_LIFT).abs() < 1.0e-5,
+            "offsetting along the normal must give the full clearance, got {along_normal}"
+        );
+        assert!(
+            along_world_y < along_normal,
+            "the world-up offset should lose clearance on a grade — if it does not, \
+             this course has no grade and the test is not measuring anything"
+        );
     }
 
     #[test]

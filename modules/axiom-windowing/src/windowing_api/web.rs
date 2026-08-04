@@ -89,7 +89,7 @@ impl WindowingApi {
         self,
         canvas_id: &str,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
-        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        materials: Vec<axiom_host::MaterialTexture>,
         max_instances: u32,
         mut frame_fn: F,
     ) -> Result<(), wasm_bindgen::JsValue>
@@ -147,7 +147,7 @@ impl WindowingApi {
         self,
         canvas_id: &str,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
-        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        materials: Vec<axiom_host::MaterialTexture>,
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         max_instances: u32,
         ambient: axiom_host::FrameAmbient,
@@ -200,7 +200,7 @@ impl WindowingApi {
         self,
         canvas_ids: [&str; 3],
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
-        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        materials: Vec<axiom_host::MaterialTexture>,
         max_instances: u32,
         frame_fn: F,
     ) -> Result<(), wasm_bindgen::JsValue>
@@ -338,7 +338,7 @@ impl WindowingApi {
         &self,
         canvas_id: &str,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
-        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        materials: Vec<axiom_host::MaterialTexture>,
         max_instances: u32,
     ) {
         let request = match self.surface.as_ref() {
@@ -479,7 +479,7 @@ impl WindowingApi {
         self,
         canvas_id: &str,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
-        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        materials: Vec<axiom_host::MaterialTexture>,
         max_instances: u32,
         frame_fn: F,
         snapshot: Option<crate::frame_scrubber::SnapshotHook>,
@@ -684,7 +684,12 @@ impl WindowingApi {
         const DEFAULT_MATERIAL_ID: u64 = 0;
         let meshes = vec![(SINGLE_MESH_ID, vertices, indices)];
         // One untextured material: a 1×1 opaque-white albedo.
-        let materials = vec![(DEFAULT_MATERIAL_ID, 1, 1, vec![255_u8, 255, 255, 255])];
+        let materials = vec![axiom_host::MaterialTexture::new(
+            DEFAULT_MATERIAL_ID,
+            1,
+            1,
+            vec![255_u8, 255, 255, 255],
+        )];
         // Identity light view-projection ⇒ the shadow map is unused (single-mesh
         // apps are unshadowed, matching their previous look).
         const NO_SHADOW: [f32; 16] = [
@@ -735,7 +740,12 @@ impl WindowingApi {
         const SINGLE_MESH_ID: u64 = 0;
         const DEFAULT_MATERIAL_ID: u64 = 0;
         let meshes = vec![(SINGLE_MESH_ID, vertices, indices)];
-        let materials = vec![(DEFAULT_MATERIAL_ID, 1, 1, vec![255_u8, 255, 255, 255])];
+        let materials = vec![axiom_host::MaterialTexture::new(
+            DEFAULT_MATERIAL_ID,
+            1,
+            1,
+            vec![255_u8, 255, 255, 255],
+        )];
         const NO_SHADOW: [f32; 16] = [
             1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
@@ -823,7 +833,12 @@ impl WindowingApi {
             let height = request.descriptor().viewport().physical_height();
             let meshes = vec![(STREAM_MESH_ID, vertices, indices)];
             let (mat_w, mat_h, mat_pixels) = material;
-            let materials = vec![(STREAM_MATERIAL_ID, mat_w, mat_h, mat_pixels)];
+            let materials = vec![axiom_host::MaterialTexture::new(
+                STREAM_MATERIAL_ID,
+                mat_w,
+                mat_h,
+                mat_pixels,
+            )];
             let backend = match select_backend_or_report(
                 preference,
                 &request,
@@ -950,7 +965,7 @@ impl WindowingApi {
         self,
         canvas_id: &str,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
-        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        materials: Vec<axiom_host::MaterialTexture>,
         stream_mesh_id: u64,
         max_instances: u32,
         frame_fn: F,
@@ -1069,7 +1084,7 @@ pub(crate) struct LivePresenter {
     // meshes after bind: `load_meshes` swaps in the current set (so a later
     // device-loss rebuild re-uploads *that*, not the stale bind-time set).
     meshes: std::cell::RefCell<std::rc::Rc<Vec<(u64, Vec<f32>, Vec<u32>)>>>,
-    materials: std::rc::Rc<Vec<(u64, u32, u32, Vec<u8>)>>,
+    materials: std::rc::Rc<Vec<axiom_host::MaterialTexture>>,
     max_instances: u32,
     width: u32,
     height: u32,
@@ -1159,7 +1174,7 @@ impl LivePresenter {
         canvas: web_sys::HtmlCanvasElement,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
-        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        materials: Vec<axiom_host::MaterialTexture>,
         max_instances: u32,
         look: axiom_host::FrameRenderLook,
         report: super::BackendReport,
@@ -1196,7 +1211,7 @@ impl LivePresenter {
         with_scrubber: bool,
         meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
-        materials: Vec<(u64, u32, u32, Vec<u8>)>,
+        materials: Vec<axiom_host::MaterialTexture>,
         max_instances: u32,
         look: axiom_host::FrameRenderLook,
         report: Option<super::BackendReport>,
@@ -1778,7 +1793,7 @@ async fn select_backend(
     canvas: web_sys::HtmlCanvasElement,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
     skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
-    materials: &[(u64, u32, u32, Vec<u8>)],
+    materials: &[axiom_host::MaterialTexture],
     max_instances: u32,
     look: axiom_host::FrameRenderLook,
 ) -> Option<LiveBackend> {
@@ -1838,7 +1853,7 @@ async fn select_backend_or_report(
     canvas: web_sys::HtmlCanvasElement,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
     skinned_meshes: &[(u64, Vec<f32>, Vec<u32>)],
-    materials: &[(u64, u32, u32, Vec<u8>)],
+    materials: &[axiom_host::MaterialTexture],
     max_instances: u32,
     look: axiom_host::FrameRenderLook,
 ) -> Option<LiveBackend> {

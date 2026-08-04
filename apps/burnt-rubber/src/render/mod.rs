@@ -62,6 +62,9 @@ pub struct RaceScene {
     scenery: SceneryField,
     traffic: TrafficVisuals,
     car: PlayerCar,
+    /// The agent's car. The same model in a translucent livery, posed from a
+    /// simulation this scene never steps — see [`crate::ghost`].
+    ghost_car: PlayerCar,
     effects: Effects,
     finish_arch: Vec<Entity>,
     /// The pool light that rides over the car (see [`install_lights`]).
@@ -147,7 +150,12 @@ impl RaceScene {
         let road = RoadChunks::install(app, track, &tuning.course, palette.road);
         let scenery = SceneryField::install(app, &palette, track, track.seed());
         let traffic = TrafficVisuals::install(app, &palette, tuning.race.traffic_active);
-        let car = PlayerCar::install(app, &palette);
+        let car = PlayerCar::install(app, &palette.player_livery());
+        // Installed unconditionally at startup, even though a race may never
+        // show it: the live browser backend sizes its vertex and instance
+        // buffers from the mesh set captured here, so nothing may be spawned
+        // later (see the module note at the top of this file).
+        let ghost_car = PlayerCar::install(app, &palette.ghost);
         let effects = Effects::install(app, &palette, track.seed());
         let finish_arch = install_finish_arch(app, sim);
 
@@ -159,6 +167,7 @@ impl RaceScene {
             scenery,
             traffic,
             car,
+            ghost_car,
             effects,
             finish_arch,
             car_light,
@@ -199,7 +208,13 @@ impl RaceScene {
 
     /// Pose the whole scene for a render frame `alpha` of the way through the
     /// current simulation step.
-    pub fn pose(&mut self, app: &mut RunningApp, sim: &RaceSim, alpha: f32) {
+    pub fn pose(
+        &mut self,
+        app: &mut RunningApp,
+        sim: &RaceSim,
+        ghost: Option<&crate::ghost::GhostRun>,
+        alpha: f32,
+    ) {
         let camera = sim.camera_pose(alpha);
         let car_pose = sim.car_pose(alpha);
         let tuning = sim.tuning();
@@ -219,6 +234,17 @@ impl RaceScene {
         let boost = if sim.boost().active() { 1.0 } else { 0.0 };
         self.car.pose(app, &car_pose, braking, boost);
         app.set(self.car_light, Transform::from_translation(pool_light_at(&car_pose)));
+
+        // The ghost. It gets no pool light and casts no glow — it is a
+        // translucent record of a lap, not a second car in the world.
+        match ghost {
+            Some(ghost) => {
+                let ghost_boost = [0.0, 1.0][usize::from(ghost.boosting())];
+                self.ghost_car
+                    .pose(app, &ghost.car_pose(alpha), 0.0, ghost_boost);
+            }
+            None => self.ghost_car.hide(app),
+        }
 
         let forward = camera
             .target
@@ -610,7 +636,7 @@ mod tests {
     #[test]
     fn the_scene_installs_and_renders_a_frame() {
         let (mut app, sim, mut scene) = fixture();
-        scene.pose(&mut app, &sim, 0.0);
+        scene.pose(&mut app, &sim, None, 0.0);
         let outcome = app.tick(0);
         assert!(!outcome.draws().is_empty(), "the scene draws something");
         assert!(!outcome.lights().is_empty(), "and it is lit");
@@ -715,7 +741,7 @@ mod tests {
             sim.step(DriveCommand::FLAT_OUT);
             scene.step(&sim);
         }
-        scene.pose(&mut app, &sim, 0.5);
+        scene.pose(&mut app, &sim, None, 0.5);
         let c = scene.counters();
         assert!(c.active_chunks > 0);
         assert!(
@@ -739,7 +765,7 @@ mod tests {
             sim.step(command);
             scene.step(&sim);
             if step % 30 == 0 {
-                scene.pose(&mut app, &sim, 0.0);
+                scene.pose(&mut app, &sim, None, 0.0);
                 let c = scene.counters();
                 assert!(c.active_chunks <= ceiling, "step {step}: {} chunks", c.active_chunks);
                 assert!(
@@ -757,7 +783,7 @@ mod tests {
         for _ in 0..300 {
             sim.step(DriveCommand::FLAT_OUT);
         }
-        scene.pose(&mut app, &sim, 1.0);
+        scene.pose(&mut app, &sim, None, 1.0);
         let pose = sim.camera_pose(1.0);
         let outcome = app.tick(1);
         assert_ne!(outcome.camera_view_proj(), [0.0f32; 16]);
@@ -770,13 +796,13 @@ mod tests {
         for _ in 0..200 {
             sim.step(DriveCommand::FLAT_OUT);
         }
-        scene.pose(&mut app, &sim, 0.0);
+        scene.pose(&mut app, &sim, None, 0.0);
         let first = scene.view_projection();
         assert!(first.as_cols_array().iter().all(|v| v.is_finite()));
         for _ in 0..200 {
             sim.step(DriveCommand::FLAT_OUT);
         }
-        scene.pose(&mut app, &sim, 0.0);
+        scene.pose(&mut app, &sim, None, 0.0);
         assert_ne!(scene.view_projection(), first, "it follows the car");
     }
 
@@ -786,7 +812,7 @@ mod tests {
         for _ in 0..900 {
             sim.step(DriveCommand::FLAT_OUT);
         }
-        scene.pose(&mut app, &sim, 0.0);
+        scene.pose(&mut app, &sim, None, 0.0);
         let live = sim.traffic().active_count();
         assert!(live > 0, "there is traffic");
         // Every live traffic body ends up near the road.
@@ -828,7 +854,7 @@ mod tests {
         for _ in 0..600 {
             sim.step(DriveCommand::FLAT_OUT);
         }
-        scene.pose(&mut app, &sim, 0.0);
+        scene.pose(&mut app, &sim, None, 0.0);
         let pose = sim.car_pose(0.0);
         let at = app.get::<Transform>(scene.car_light).expect("posed").translation;
         assert!(
@@ -872,12 +898,12 @@ mod tests {
             sim.step(DriveCommand::FLAT_OUT);
             scene.step(&sim);
         }
-        scene.pose(&mut app, &sim, 0.4);
+        scene.pose(&mut app, &sim, None, 0.4);
         let first = app.tick(10);
         let first_draws = first.draws().len();
         let first_camera = first.camera_view_proj();
 
-        scene.pose(&mut app, &sim, 0.4);
+        scene.pose(&mut app, &sim, None, 0.4);
         let second = app.tick(11);
         assert_eq!(second.draws().len(), first_draws);
         assert_eq!(second.camera_view_proj(), first_camera);
@@ -901,7 +927,7 @@ mod tests {
             .setup(|_, _, _| {})
             .build();
         let mut scene = RaceScene::install(&mut app, &sim, 0, 0);
-        scene.pose(&mut app, &sim, 0.0);
+        scene.pose(&mut app, &sim, None, 0.0);
         assert!(scene
             .view_projection()
             .as_cols_array()

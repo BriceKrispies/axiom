@@ -33,7 +33,7 @@ use crate::debug_view::DebugView;
 use crate::diagnostics::Diagnostics;
 use crate::hud::HudModel;
 use crate::render::RaceScene;
-use crate::sim::{RaceEvent, RaceSim};
+use crate::sim::{RaceEvent, RacePhase, RaceSim};
 use crate::start_screen::{StartCommand, StartOutcome, StartScreen};
 use crate::tuning::{Tuning, FIXED_STEP_NANOS};
 use crate::{CANVAS_ID, DEFAULT_SEED, HEIGHT, WIDTH};
@@ -101,6 +101,11 @@ enum Stage {
 #[derive(Debug)]
 pub struct BurntRubber {
     sim: RaceSim,
+    /// The agent's run, advancing one step for every step the player takes.
+    /// `None` until a race starts. It owns its own `RaceSim`, so it is not in
+    /// the player's world and cannot touch the player's car — see
+    /// [`crate::ghost`].
+    ghost: Option<crate::ghost::GhostRun>,
     scene: RaceScene,
     running: RunningApp,
     accumulator: FrameAccumulator,
@@ -178,6 +183,10 @@ impl BurntRubber {
             .expect("the fixed step is a valid, non-zero duration");
         BurntRubber {
             sim,
+            // Every race has a ghost, however it was built — the constructors
+            // that skip the title screen (the tests and the capture slices) are
+            // still races. `open_start_screen` clears it again.
+            ghost: Some(crate::ghost::GhostRun::new(seed, tuning, profile)),
             scene,
             running,
             accumulator,
@@ -205,6 +214,9 @@ impl BurntRubber {
     /// Put the start screen up, freezing the race where it stands.
     pub fn open_start_screen(&mut self) {
         self.stage = Stage::Waiting(StartScreen::open(self.viewport.0, self.viewport.1));
+        // No race, no ghost: the title screen shows the empty grid, not an
+        // agent sitting on it.
+        self.ghost = None;
     }
 
     /// The start screen, while it is up.
@@ -252,8 +264,74 @@ impl BurntRubber {
     /// already takes.
     pub fn start_race(&mut self) {
         self.sim = RaceSim::with_profile(self.seed, *self.sim.tuning(), self.profile);
+        self.restart_ghost();
         self.scene.reset();
         self.stage = Stage::Racing;
+    }
+
+    /// Park the car `distance` metres along the course at `speed` m/s, leaving
+    /// the start screen and the countdown behind — the diagnosis probe's
+    /// placement (see [`crate::probe`]).
+    ///
+    /// This exists because a rendering defect that only appears in motion has to
+    /// be observed at a *chosen* point on the course, at a *chosen* speed, twice,
+    /// identically. Reaching 300 km/h on a given straight by driving there is not
+    /// reproducible; placing the car there is. It reuses `start_race` rather than
+    /// mutating the current stage so a placement from the title screen and one
+    /// mid-race land in the same state.
+    pub fn place_for_probe(&mut self, distance: f32, speed: f32) {
+        if self.waiting() {
+            self.start_race();
+        }
+        // Past the countdown, or the car is held on the grid and cannot move.
+        while self.sim.phase() == RacePhase::Countdown {
+            self.sim.step(DriveCommand::IDLE);
+        }
+        self.sim.place_at(distance);
+        self.sim.launch_at(speed);
+    }
+
+    /// Put the ghost back on the grid alongside a freshly built race.
+    ///
+    /// Its own simulation is rebuilt from the same seed, tuning and profile as
+    /// the player's, which is what makes the two runs comparable: the same
+    /// course, the same traffic stream, the same car.
+    fn restart_ghost(&mut self) {
+        self.ghost = Some(crate::ghost::GhostRun::new(
+            self.seed,
+            *self.sim.tuning(),
+            self.profile,
+        ));
+    }
+
+    /// The agent's run, if a race is under way.
+    pub const fn ghost(&self) -> Option<&crate::ghost::GhostRun> {
+        self.ghost.as_ref()
+    }
+
+    /// How far ahead of the ghost the player is, in metres (negative = behind).
+    /// `None` before a race starts.
+    pub fn ghost_delta_metres(&self) -> Option<f32> {
+        self.ghost
+            .as_ref()
+            .map(|ghost| self.sim.car().distance - ghost.distance())
+    }
+
+    /// Advance the ghost by the steps the player's simulation just took.
+    ///
+    /// Two rules keep the two runs honest against each other. A **restart**
+    /// rebuilds the ghost, because the player's race was rebuilt (the sim
+    /// consumes `restart` internally and never reports it, so it is read off the
+    /// command here). A **paused** race advances neither, because a ghost that
+    /// kept driving while the player was in the pause menu would not be a
+    /// ghost, it would be a penalty.
+    fn advance_ghost(&mut self, steps: u32, restarted: bool) {
+        restarted.then(|| self.restart_ghost());
+        let running = self.sim.phase() != RacePhase::Paused;
+        self.ghost
+            .as_mut()
+            .filter(|_| running & !restarted)
+            .map(|ghost| (0..steps).for_each(|_| ghost.step()));
     }
 
     /// The race.
@@ -278,7 +356,7 @@ impl BurntRubber {
 
     /// The HUD model for the current state.
     pub fn hud(&self) -> HudModel {
-        HudModel::of(&self.sim)
+        HudModel::of(&self.sim).with_ghost_delta(self.ghost_delta_metres())
     }
 
     /// Diagnostics for the last presented frame.
@@ -354,6 +432,7 @@ impl BurntRubber {
         let elapsed = elapsed_nanos.min(MAX_FRAME_NANOS);
         let budget = self.accumulator.advance(elapsed, MAX_STEPS_PER_FRAME);
         self.events.clear();
+        let restarted = command.restart;
         let mut held = command;
         for _ in 0..budget.steps() {
             self.sim.step(held);
@@ -370,6 +449,7 @@ impl BurntRubber {
                 ..held
             };
         }
+        self.advance_ghost(budget.steps(), restarted);
         self.alpha = budget.remainder_nanos() as f32 / budget.fixed_step_nanos() as f32;
         budget.steps()
     }
@@ -381,6 +461,7 @@ impl BurntRubber {
         if self.waiting() {
             return;
         }
+        let restarted = command.restart;
         let mut held = command;
         for _ in 0..steps {
             self.sim.step(held);
@@ -397,6 +478,7 @@ impl BurntRubber {
                 ..held
             };
         }
+        self.advance_ghost(steps, restarted);
         self.alpha = 0.0;
     }
 
@@ -407,7 +489,8 @@ impl BurntRubber {
     /// advanced exactly once.
     pub fn pose(&mut self) {
         let alpha = self.alpha;
-        self.scene.pose(&mut self.running, &self.sim, alpha);
+        self.scene
+            .pose(&mut self.running, &self.sim, self.ghost.as_ref(), alpha);
         self.debug.update(&mut self.running, &self.sim);
         self.diagnostics.observe(&self.sim, &self.scene);
     }

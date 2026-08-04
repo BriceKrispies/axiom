@@ -13,6 +13,7 @@ use crate::agent_id::AgentId;
 use crate::agent_memory::AgentMemory;
 use crate::agent_profile::AgentProfile;
 use crate::agent_runtime::AgentRuntime;
+use crate::axis_map_brain::{AxisBinding, AxisMapBrain};
 use crate::decision_report::DecisionReport;
 use crate::hold_set_brain::HoldSetBrain;
 use crate::observation::{Observation, ObservationFact};
@@ -43,6 +44,8 @@ impl AgentApi {
     pub const BRAIN_KIND_REPLAY: u16 = DecisionReport::BRAIN_KIND_REPLAY;
     /// The hold-set brain decided (one press-control intent per held control).
     pub const BRAIN_KIND_HOLD_SET: u16 = DecisionReport::BRAIN_KIND_HOLD_SET;
+    /// The axis-map brain decided (one move-axis intent per perceived binding).
+    pub const BRAIN_KIND_AXIS_MAP: u16 = DecisionReport::BRAIN_KIND_AXIS_MAP;
     /// Unset / no reason recorded.
     pub const REASON_NO_REASON: u16 = DecisionReport::REASON_NO_REASON;
     /// No scripted rule matched.
@@ -59,6 +62,8 @@ impl AgentApi {
     pub const REASON_ACTION_BUDGET_ZERO: u16 = DecisionReport::REASON_ACTION_BUDGET_ZERO;
     /// A hold-set step emitted one press-control intent per held control.
     pub const REASON_HOLD_SET_EMITTED: u16 = DecisionReport::REASON_HOLD_SET_EMITTED;
+    /// An axis-map step drove at least one control axis from a perceived fact.
+    pub const REASON_AXIS_MAP_EMITTED: u16 = DecisionReport::REASON_AXIS_MAP_EMITTED;
 }
 
 impl AgentApi {
@@ -260,6 +265,39 @@ impl AgentApi {
         HoldSetBrain::new(controls)
     }
 
+    /// One perceived-scalar → control-axis binding: "when you perceive a fact of
+    /// `fact_kind_code`, drive axis `axis_code` by
+    /// `offset + value · gain_milli / 1000`, held inside
+    /// `[min_value, max_value]`". Integer throughout — the neutral shape of a
+    /// proportional control law, carrying no game noun and no float.
+    pub fn axis_binding(
+        fact_kind_code: u16,
+        axis_code: u32,
+        gain_milli: i64,
+        offset: i64,
+        min_value: i64,
+        max_value: i64,
+    ) -> AxisBinding {
+        AxisBinding::new(
+            fact_kind_code,
+            axis_code,
+            gain_milli,
+            offset,
+            min_value,
+            max_value,
+        )
+    }
+
+    /// An axis-map brain that emits one `move_axis` intent per binding whose fact
+    /// the observation carries — the **analogue** counterpart of
+    /// [`Self::hold_set_brain`], and the only brain that drives continuous
+    /// controls (a steering wheel, a throttle, a stick) from what was perceived.
+    /// Pair it with [`ActionQueue::axis_value`] to fold the emitted intents back
+    /// into one deflection per axis.
+    pub fn axis_map_brain(bindings: Vec<AxisBinding>) -> AxisMapBrain {
+        AxisMapBrain::new(bindings)
+    }
+
     /// Step `brain` once: observe, decide, emit player-equivalent intents, and
     /// produce a deterministic decision report. The step's tick stamps the
     /// report and the recorded memory entry.
@@ -308,5 +346,50 @@ mod tests {
         assert_eq!(report.emitted_action_count(), 2);
         assert_eq!(report.reason_code(), AgentApi::REASON_HOLD_SET_EMITTED);
         assert_eq!(queue.combined_control_code(), 0b011);
+    }
+
+    /// The analogue path end to end through the facade alone: perceive two
+    /// scalars, bind both to one axis, and read back the summed deflection.
+    #[test]
+    fn axis_map_brain_facade_drives_an_axis_from_perception() {
+        const HEADING_ERROR: u16 = 40;
+        const YAW_RATE: u16 = 41;
+        const STEER_AXIS: u32 = 1;
+
+        let agent_id = AgentApi::create_agent_id(1);
+        let mut brain = AgentApi::axis_map_brain(vec![
+            AgentApi::axis_binding(HEADING_ERROR, STEER_AXIS, 2_000, 0, -1_000_000, 1_000_000),
+            AgentApi::axis_binding(YAW_RATE, STEER_AXIS, -500, 0, -1_000_000, 1_000_000),
+        ]);
+        let mut memory = AgentApi::empty_memory(1);
+        let mut builder = AgentApi::observation_builder(agent_id, Tick::new(3), 1, 2, 0);
+        builder
+            .add_channel(AgentApi::channel_geometric())
+            .expect("one channel within the channel bound");
+        builder
+            .add_fact(AgentApi::observation_fact(HEADING_ERROR, 0, 0, 0, 0, 300))
+            .expect("heading-error fact within the fact bound");
+        builder
+            .add_fact(AgentApi::observation_fact(YAW_RATE, 0, 0, 0, 0, 200))
+            .expect("yaw-rate fact within the fact bound");
+        let observation = builder.build();
+        let step = RuntimeStep::new(FrameIndex::new(0), Tick::new(3), 16_666_667, 0);
+        let (report, queue) = AgentApi::step(
+            agent_id,
+            AgentApi::debug_perfect_profile(),
+            &mut brain,
+            &observation,
+            &mut memory,
+            step,
+        );
+
+        assert_eq!(
+            report.selected_brain_kind_code(),
+            AgentApi::BRAIN_KIND_AXIS_MAP
+        );
+        assert_eq!(report.reason_code(), AgentApi::REASON_AXIS_MAP_EMITTED);
+        assert_eq!(report.emitted_action_count(), 2);
+        // 300 * 2.0 proportional, minus 200 * 0.5 damping.
+        assert_eq!(queue.axis_value(STEER_AXIS), 500);
     }
 }

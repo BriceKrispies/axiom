@@ -177,9 +177,41 @@ pub fn burnt_rubber_start() {
         };
         guard.app.update_start_screen(start);
 
+        // The diagnosis probe (`crate::probe`). Entirely inert unless a probe
+        // command has been issued from JavaScript, in which case it takes over
+        // *when* the simulation advances so that a screenshot is a known game
+        // state rather than a frame at an unknown moment. This is what makes a
+        // motion-only defect — crawl, shimmer — measurable at all.
+        let (placement, probe_steps, probe_paused, probe_autopilot) =
+            crate::probe::with_probe(|p| {
+                (
+                    p.take_placement(),
+                    p.take_steps(),
+                    p.paused(),
+                    p.autopilot(),
+                )
+            });
+        if let Some((distance, speed)) = placement {
+            guard.app.place_for_probe(distance, speed);
+        }
+        // The deterministic script line, so the car holds the racing line
+        // without a human and two runs from one placement are identical.
+        let command = if probe_autopilot {
+            crate::script::autopilot(guard.app.sim().car(), guard.app.sim().track())
+        } else {
+            command
+        };
+
         // The simulation ticks the sound bank itself, once per fixed step — the
         // browser arm only hands the finished batch to Web Audio.
-        guard.app.advance(elapsed, command);
+        if probe_paused {
+            guard.app.advance_steps(probe_steps, command);
+        } else {
+            guard.app.advance(elapsed, command);
+        }
+        crate::probe::with_probe(|p| {
+            p.report(guard.app.sim().car().distance, guard.app.sim().car().speed())
+        });
         guard.realize_audio();
 
         let waiting = guard.app.waiting();
@@ -758,15 +790,31 @@ fn update_hud(hud: &HudModel, hidden: bool) {
     .collect::<Vec<_>>()
     .join("  ");
 
+    // The ghost gap: green when the player leads, cyan-blue when the agent does
+    // — the same cold blue the ghost car itself is painted, so the colour on the
+    // HUD and the colour on the road mean the same thing.
+    let ghost = hud
+        .formatted_ghost_delta()
+        .map(|delta| {
+            let ahead = hud.ghost_delta_metres.unwrap_or(0.0) >= 0.0;
+            let colour = ["#6cf", "#7f9"][usize::from(ahead)];
+            format!(
+                "<div style=\"color:{colour};min-height:1.2em\">GHOST {delta}</div>"
+            )
+        })
+        .unwrap_or_default();
+
     root.set_inner_html(&format!(
         "<div style=\"font-size:52px;line-height:1;font-weight:700\">{speed}<span style=\"font-size:18px;opacity:.7\"> KM/H</span></div>\
-         <div style=\"margin-top:6px\">BOOST [{boost_bar}]</div>\
-         <div>{section}</div>\
+         <div style=\"margin-top:6px\">{section}</div>\
          <div>[{progress_bar}] {percent}%  ·  {time}</div>\
          <div style=\"color:#ffd166;min-height:1.2em\">{state}</div>\
          <div style=\"color:#8ef;min-height:1.2em\">NEAR MISSES {near}</div>\
+         {ghost}\
          <div style=\"position:fixed;left:0;right:0;top:34%;text-align:center;font-size:64px;\
                      font-weight:800;letter-spacing:.06em;text-shadow:0 0 24px #000\">{banner}</div>\
+         <div style=\"position:fixed;left:0;right:0;bottom:92px;text-align:center;\
+                     letter-spacing:.08em;opacity:.55\">BOOST [{boost_bar}]</div>\
          <div style=\"position:fixed;left:0;right:0;bottom:14px;text-align:center;font-size:13px;opacity:.65\">{hint}</div>",
         speed = hud.speed_kmh,
         boost_bar = boost_bar,
@@ -776,6 +824,7 @@ fn update_hud(hud: &HudModel, hidden: bool) {
         time = hud.formatted_time(),
         state = state,
         near = hud.near_miss_count,
+        ghost = ghost,
         banner = banner,
         hint = hint,
     ));

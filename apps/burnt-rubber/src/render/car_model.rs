@@ -43,7 +43,7 @@ use axiom_math::Quat;
 
 use crate::sim::car::CarPose;
 
-use super::palette::ScenePalette;
+use super::palette::{CarLivery, ScenePalette};
 
 /// The car's overall dimensions (m). Chosen against the road: a 4.5 m car on a
 /// 17 m road with the camera 2.0 m up reads as a car, not a toy.
@@ -109,37 +109,41 @@ pub struct PlayerCar {
 }
 
 impl PlayerCar {
-    /// Spawn the player's car.
-    pub fn install(app: &mut RunningApp, palette: &ScenePalette) -> PlayerCar {
+    /// Spawn a car in `livery`.
+    ///
+    /// The model is the same whoever is driving it; only the materials differ,
+    /// which is what lets the ghost be this exact car rendered translucent
+    /// rather than a second, drifting copy of the model.
+    pub fn install(app: &mut RunningApp, livery: &CarLivery) -> PlayerCar {
         let cube = app.add_mesh(Mesh::cube());
         let cylinder = app.add_mesh(Mesh::cylinder());
         let part = |app: &mut RunningApp, mesh, material| {
             app.spawn(Spawn::new(Transform::IDENTITY, mesh, material))
         };
         PlayerCar {
-            body: part(app, cube, palette.car_body),
-            nose: part(app, cube, palette.car_body),
-            cabin: part(app, cube, palette.car_glass),
-            backlight: part(app, cube, palette.car_glass),
-            wing: part(app, cube, palette.car_body),
-            haunches: [part(app, cube, palette.car_body), part(app, cube, palette.car_body)],
+            body: part(app, cube, livery.body),
+            nose: part(app, cube, livery.body),
+            cabin: part(app, cube, livery.glass),
+            backlight: part(app, cube, livery.glass),
+            wing: part(app, cube, livery.body),
+            haunches: [part(app, cube, livery.body), part(app, cube, livery.body)],
             // The valance is the tyre material on purpose: it is the darkest
             // thing in the palette, and a near-black bumper is what stops the
             // rear panel reading as one tall coloured slab.
-            valance: part(app, cube, palette.tyre),
+            valance: part(app, cube, livery.tyre),
             wheels: [
-                part(app, cylinder, palette.tyre),
-                part(app, cylinder, palette.tyre),
-                part(app, cylinder, palette.tyre),
-                part(app, cylinder, palette.tyre),
+                part(app, cylinder, livery.tyre),
+                part(app, cylinder, livery.tyre),
+                part(app, cylinder, livery.tyre),
+                part(app, cylinder, livery.tyre),
             ],
             brake_lights: [
-                part(app, cube, palette.brake_light),
-                part(app, cube, palette.brake_light),
+                part(app, cube, livery.brake_light),
+                part(app, cube, livery.brake_light),
             ],
             exhausts: [
-                part(app, cube, palette.boost_flame),
-                part(app, cube, palette.boost_flame),
+                part(app, cube, livery.exhaust),
+                part(app, cube, livery.exhaust),
             ],
         }
     }
@@ -152,6 +156,14 @@ impl PlayerCar {
     pub fn pose(&self, app: &mut RunningApp, pose: &CarPose, braking: f32, boost: f32) {
         let basis = ChassisBasis::of(pose);
         let rotation = basis.rotation();
+        // Posing a car shows it. The parts that are always on say so explicitly
+        // rather than relying on never having been hidden — the ghost is hidden
+        // whenever there is no ghost run, and this is what brings it back.
+        self.always_on()
+            .into_iter()
+            .for_each(|entity| {
+                app.set(entity, Visible(true));
+            });
 
         // Body: the main mass, sitting low — and narrower than the wheel track,
         // so the tyres and the arches, not the flanks, are the widest thing.
@@ -287,6 +299,32 @@ impl PlayerCar {
             );
             app.set(*entity, Visible(plume > 0.02));
         }
+    }
+
+    /// Hide every part — the car is not in this frame at all.
+    pub fn hide(&self, app: &mut RunningApp) {
+        self.entities()
+            .into_iter()
+            .for_each(|entity| {
+                app.set(entity, Visible(false));
+            });
+    }
+
+    /// The parts that are visible whenever the car is, i.e. everything except
+    /// the two conditional sets [`Self::pose`] drives itself (the brake lamps
+    /// and the boost plume).
+    fn always_on(&self) -> Vec<Entity> {
+        let mut all = vec![
+            self.body,
+            self.nose,
+            self.cabin,
+            self.backlight,
+            self.wing,
+            self.valance,
+        ];
+        all.extend_from_slice(&self.haunches);
+        all.extend_from_slice(&self.wheels);
+        all
     }
 
     /// Every entity, for diagnostics and teardown.
@@ -552,7 +590,7 @@ mod tests {
     fn the_player_car_poses_every_part_somewhere_sensible() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
-        let car = PlayerCar::install(&mut app, &palette);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
         let pose = pose_at(0.7, 0.02, -0.03);
         car.pose(&mut app, &pose, 0.0, 0.0);
 
@@ -571,7 +609,7 @@ mod tests {
     fn the_wheels_sit_at_the_corners_and_on_the_ground() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
-        let car = PlayerCar::install(&mut app, &palette);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
         let pose = pose_at(0.0, 0.0, 0.0);
         car.pose(&mut app, &pose, 0.0, 0.0);
 
@@ -600,7 +638,7 @@ mod tests {
     fn the_tail_is_the_widest_part_of_the_car_and_the_tyres_show_past_the_body() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
-        let car = PlayerCar::install(&mut app, &palette);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
         let pose = pose_at(0.0, 0.0, 0.0);
         car.pose(&mut app, &pose, 0.0, 0.0);
 
@@ -635,7 +673,7 @@ mod tests {
     fn the_greenhouse_is_a_chopped_slot_rather_than_a_cab() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
-        let car = PlayerCar::install(&mut app, &palette);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
         let pose = pose_at(0.0, 0.0, 0.0);
         car.pose(&mut app, &pose, 0.0, 0.0);
 
@@ -670,7 +708,7 @@ mod tests {
     fn the_rear_screen_reaches_from_the_roof_to_the_decklid() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
-        let car = PlayerCar::install(&mut app, &palette);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
         let pose = pose_at(0.0, 0.0, 0.0);
         car.pose(&mut app, &pose, 0.0, 0.0);
 
@@ -713,7 +751,7 @@ mod tests {
     fn the_backlight_is_raked_back_over_the_decklid() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
-        let car = PlayerCar::install(&mut app, &palette);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
         car.pose(&mut app, &pose_at(0.0, 0.0, 0.0), 0.0, 0.0);
 
         let glass = app.get::<Transform>(car.backlight).unwrap();
@@ -731,7 +769,7 @@ mod tests {
     fn the_tail_lights_stand_proud_of_the_rear_panel() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
-        let car = PlayerCar::install(&mut app, &palette);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
         car.pose(&mut app, &pose_at(0.0, 0.0, 0.0), 0.0, 0.0);
 
         let body = app.get::<Transform>(car.body).unwrap();
@@ -752,7 +790,7 @@ mod tests {
     fn braking_grows_the_brake_lights_and_boosting_shows_the_exhaust() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
-        let car = PlayerCar::install(&mut app, &palette);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
         let pose = pose_at(0.0, 0.0, 0.0);
 
         car.pose(&mut app, &pose, 0.0, 0.0);
@@ -776,7 +814,7 @@ mod tests {
     fn steering_turns_only_the_front_wheels() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
-        let car = PlayerCar::install(&mut app, &palette);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
         let straight = CarPose { steer_angle: 0.0, ..pose_at(0.0, 0.0, 0.0) };
         car.pose(&mut app, &straight, 0.0, 0.0);
         let rear_before = app.get::<Transform>(car.wheels[2]).unwrap().rotation;
