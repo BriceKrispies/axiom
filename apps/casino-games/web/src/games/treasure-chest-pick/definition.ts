@@ -5,6 +5,7 @@
  * the player chooses.
  */
 
+import type { RenderQualityInput } from "@axiom/web-engine";
 import type { CasinoGameConfig, RewardTier } from "../../chance-engine/configuration/schema.ts";
 import { baseConfig } from "../../chance-engine/configuration/schema.ts";
 import type { ConfigIssue } from "../../chance-engine/configuration/validation.ts";
@@ -86,12 +87,51 @@ const PRIZE_TIERS: readonly RewardTier[] = [
   },
 ];
 
+/**
+ * Rasterization defaults for this game, and the values RESET QUALITY restores.
+ *
+ * These reproduce the look and the frame rate the game shipped with before the
+ * quality controls existed. That is a deliberate choice, not an oversight: the
+ * settings are here so a player can spend frames on smoother edges, but the
+ * DEFAULT should not quietly hand everyone a slower game than the one they had.
+ *
+ * The setting that governs the frame rate is `renderScale`, because the software
+ * rasterizer costs very nearly one unit of time per backing pixel and this scene
+ * is dense (≈365 nodes). Measured end-to-end on this scene at 936×585 CSS, after
+ * the rasterizer's span and back-face-cull fixes:
+ *
+ *     0.5×  →  137k samples  →  ~59 fps   (this default; the engine's former look)
+ *     1.0×  →  547k samples  →  ~31 fps   (native 1:1 with the display)
+ *     2.0×  →  2.19M samples →  single digits
+ *
+ * `0.5` is not "half quality" in the abstract — it is the resolution this engine
+ * always drew at, back when that was hard-coded and unchangeable. The difference
+ * now is that it is a floor a player can leave, not a ceiling nobody could see
+ * past. The rung worth reaching for is `1.0`, which removes the upscale entirely.
+ *
+ * `pixelRatioMode` is deliberately `fixed-1x` rather than following the display:
+ * on a GPU renderer honouring a 2× device ratio is close to free, and on this one
+ * it quadruples the per-frame work. A player on a HiDPI screen who wants those
+ * samples can ask for them; nobody should be handed a 4× bill by default for
+ * owning a nice monitor. The engine's `maxSamples` then bounds the maximised-
+ * window case whatever the other settings say.
+ */
+const CHEST_RENDER_QUALITY: RenderQualityInput = {
+  curveDetail: 1,
+  lineCap: "round",
+  lineJoin: "round",
+  maxPixelRatio: 2,
+  pixelRatioMode: "fixed-1x",
+  renderScale: 0.5,
+};
+
 // Win every time; what varies is WHICH treasure. `targetWinRate: 1` makes all
 // nine chests winners (9·1 = 9), so any pick opens onto something — and the five
 // tiers above decide what. Tune either in the Set Up panel.
 const defaultConfig = (): CasinoGameConfig<ChestSpec> =>
   baseConfig("treasure-chest-pick", "Treasure Chest Pick", "tabletop", { brand: DEFAULT_BRAND, danceLiveliness: 0.7 }, {
     choiceCount: 9,
+    renderQuality: CHEST_RENDER_QUALITY,
     rewardTiers: PRIZE_TIERS,
     targetWinRate: 1,
   });

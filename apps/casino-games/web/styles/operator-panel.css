@@ -79,6 +79,24 @@
   padding: 4px 0;
 }
 
+/* Subdued explanatory line under a plate's legend, and the resolved readout
+   under the rendering-quality controls. Quieter than a .row label: it is
+   context, not something to operate. */
+.cab-panel .wb-note {
+  margin: 2px 0 8px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--cab-trim) 55%, transparent);
+}
+
+/* The curve-detail readout beside its slider. */
+.cab-panel output {
+  min-width: 3.2em;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: var(--cab-trim);
+}
+
 .cab-panel label {
   font-weight: 700;
   font-size: 0.78rem;

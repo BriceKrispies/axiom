@@ -11,6 +11,8 @@
 import type { Handle, MeshData } from "./api.ts";
 import { type FrameNode, type RenderBackend, type SceneFrame, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS } from "./backend.ts";
 import { type Mat4, fromTrs, lookAt, multiply, normalMatrix, perspective } from "./mat4.ts";
+import type { RenderQuality } from "./render-quality.ts";
+import { FULL_DETAIL_SCALE } from "./tessellation.ts";
 
 const VERT_SRC = `#version 300 es
 layout(location = 0) in vec3 aPosition;
@@ -178,7 +180,7 @@ const packVec3s = (items: readonly (readonly [number, number, number])[]): Float
 };
 
 /** Create the WebGL2 backend, or return null when the context is unavailable. */
-export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | null => {
+export const createWebGl2Backend = (canvas: HTMLCanvasElement, quality: RenderQuality): RenderBackend | null => {
   const gl = canvas.getContext("webgl2", { antialias: true });
   if (gl === null) {
     return null;
@@ -235,7 +237,7 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement): RenderBackend | 
       }
       meshes.clear();
     },
-    meshDetail: "high",
+    detailScale: FULL_DETAIL_SCALE * quality.curveDetail,
     name: "WebGL2",
     render: (frame: SceneFrame): void => {
       gl.depthMask(true);

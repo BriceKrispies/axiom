@@ -61,6 +61,8 @@
 import type { Handle, MeshData } from "./api.ts";
 import type { RenderBackend, ResolvedMaterial, SceneFrame } from "./backend.ts";
 import { type Mat4, fromTrs, lookAt, multiply } from "./mat4.ts";
+import type { RenderQuality } from "./render-quality.ts";
+import { SOFTWARE_DETAIL_SCALE } from "./tessellation.ts";
 import { diffuseOnly, shadeSurface, tonemap } from "./shading.ts";
 
 /** CSS pixels per world unit. The projection is mathematically independent of
@@ -623,7 +625,7 @@ const detectImpostor = (data: MeshData): CssMesh["impostor"] => {
 /** Build the CSS3D backend over `canvas`. The canvas element itself is NEVER
  * drawn into: it stays a transparent layout + pointer-input anchor, and the DOM
  * scene is mounted as a sibling layer pinned on top of it. */
-export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
+export const createCssBackend = (canvas: HTMLCanvasElement, quality: RenderQuality): RenderBackend => {
   const meshes = new Map<Handle, CssMesh>();
   const nodeDom = new Map<object, NodeDom>();
   /** Scene text, one element per label key. This is the thing a DOM renderer can
@@ -712,7 +714,7 @@ export const createCssBackend = (canvas: HTMLCanvasElement): RenderBackend => {
       for (const dom of nodeDom.values()) disposeNode(dom);
       nodeDom.clear();
     },
-    meshDetail: "low",
+    detailScale: SOFTWARE_DETAIL_SCALE * quality.curveDetail,
     name: "CSS3D",
     // This renderer presents into its own element, not into a canvas.
     surface: root,

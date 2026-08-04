@@ -86,6 +86,15 @@ export interface StylizedWaterOptions {
   readonly cellSize: number;
   /** Highlight line width in px. */
   readonly lineWidth: number;
+  /** How ripple and shoreline strokes are joined and capped. Omitted, they
+   * INHERIT whatever the caller configured on the context — which is how a host's
+   * rendering-quality setting reaches this effect without every caller having to
+   * thread it through. The effect was authored at `"round"`/`"round"`, which is
+   * also the Canvas2D-wide default this ends up at when nobody sets anything. */
+  readonly lineJoin?: CanvasLineJoin;
+  readonly lineCap?: CanvasLineCap;
+  /** Miter limit applied when `lineJoin` is `"miter"`. Inherited when omitted. */
+  readonly miterLimit?: number;
   /** Ripple opacity (0..1) — keep low for a subtle, low-contrast net. */
   readonly opacity: number;
   /** Blur radius in px for the soft, non-razor edges. Keep small. */
@@ -223,10 +232,20 @@ const paintGlint = (ctx: CanvasRenderingContext2D, spec: { readonly bounds: Wate
   ctx.restore();
 };
 
+/** The stroke shaping the caller had configured on the context when it called in
+ * — captured BEFORE the first `ctx.save()`, so each layer can fall back to it
+ * even though the effect saves and restores around every pass. */
+interface InheritedStroke {
+  readonly lineJoin: CanvasLineJoin;
+  readonly lineCap: CanvasLineCap;
+  readonly miterLimit: number;
+}
+
 /** One drifted, alpha-scaled pass of the ripple net. */
 interface RippleLayer {
   readonly segments: readonly Segment[];
   readonly options: StylizedWaterOptions;
+  readonly inherited: InheritedStroke;
   readonly driftX: number;
   readonly driftY: number;
   readonly alpha: number;
@@ -235,12 +254,13 @@ interface RippleLayer {
 /** Stroke one drifted layer of the ripple net (optional darker trough under each
  * highlight, then the highlight), softened by a small blur. */
 const strokeRipples = (ctx: CanvasRenderingContext2D, layer: RippleLayer): void => {
-  const { segments, options, driftX, driftY, alpha } = layer;
+  const { segments, options, driftX, driftY, alpha, inherited } = layer;
   ctx.save();
   ctx.translate(driftX, driftY);
   ctx.filter = `blur(${options.softnessPx}px)`;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+  ctx.lineCap = options.lineCap ?? inherited.lineCap;
+  ctx.lineJoin = options.lineJoin ?? inherited.lineJoin;
+  ctx.miterLimit = options.miterLimit ?? inherited.miterLimit;
   ctx.lineWidth = options.lineWidth;
   if (options.troughColor !== undefined) {
     ctx.globalAlpha = alpha * 0.8;
@@ -297,6 +317,7 @@ const paintSparkles = (ctx: CanvasRenderingContext2D, layer: SparkleLayer): void
  */
 export const drawStylizedWaterSurface = (ctx: CanvasRenderingContext2D, options: StylizedWaterOptions): void => {
   const { bounds } = options;
+  const inherited: InheritedStroke = { lineCap: ctx.lineCap, lineJoin: ctx.lineJoin, miterLimit: ctx.miterLimit };
   ctx.save();
 
   // Clip to the pool, minus any holes (objects on the water).
@@ -326,8 +347,8 @@ export const drawStylizedWaterSurface = (ctx: CanvasRenderingContext2D, options:
   const driftX2 = Math.sin(options.timeSeconds * DRIFT2_X_RATE + 1.7) * options.driftAmount * DRIFT2_SCALE;
   const driftY2 = Math.cos(options.timeSeconds * DRIFT2_Y_RATE + 0.5) * options.driftAmount * DRIFT2_SCALE;
   const segments = cachedSegments(bounds, options.cellSize);
-  strokeRipples(ctx, { alpha: options.opacity * DRIFT2_OPACITY, driftX: driftX2, driftY: driftY2, options, segments });
-  strokeRipples(ctx, { alpha: options.opacity, driftX, driftY, options, segments });
+  strokeRipples(ctx, { alpha: options.opacity * DRIFT2_OPACITY, driftX: driftX2, driftY: driftY2, inherited, options, segments });
+  strokeRipples(ctx, { alpha: options.opacity, driftX, driftY, inherited, options, segments });
   if (options.sparkleColor !== undefined) {
     paintSparkles(ctx, { color: options.sparkleColor, driftX, driftY, opacity: options.opacity, segments });
   }
@@ -338,7 +359,9 @@ export const drawStylizedWaterSurface = (ctx: CanvasRenderingContext2D, options:
   // sharp stubs. Two passes deepen the cover without a hard rim.
   ctx.filter = `blur(${options.edgeFadePx * 0.5}px)`;
   ctx.strokeStyle = options.edgeColor;
-  ctx.lineJoin = "round";
+  ctx.lineJoin = options.lineJoin ?? inherited.lineJoin;
+  ctx.lineCap = options.lineCap ?? inherited.lineCap;
+  ctx.miterLimit = options.miterLimit ?? inherited.miterLimit;
   ctx.globalAlpha = 0.7;
   ctx.lineWidth = options.edgeFadePx * 2;
   ctx.beginPath();

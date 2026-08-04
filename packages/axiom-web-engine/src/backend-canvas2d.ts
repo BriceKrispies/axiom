@@ -13,18 +13,35 @@
  * exactly like the hardware path, with no painter's-sort artifacts. The
  * framebuffer is blitted up to the canvas each frame.
  *
- * Softening the workload keeps it real-time: half-resolution internally (the
- * chunky look of a software fallback is embraced), low-detail primitive meshes
- * (`meshDetail: "low"`), and whole-node culls — behind the camera, or a
+ * Softening the workload keeps it real-time: low-detail primitive meshes (half
+ * the GPU path's facet budget) and whole-node culls — behind the camera, or a
  * bounding sphere projecting under half a pixel. Translucent triangles
  * rasterize after opaque ones with depth TEST but no depth WRITE, alpha-blended
  * in software.
+ *
+ * RESOLUTION is the other half of that budget, and it is the one the player can
+ * see. This backend used to rasterize at a hard-coded HALF of the canvas backing
+ * store, itself a fixed 960x600 regardless of how large the canvas was actually
+ * displayed — so every edge in the scene was drawn at 480x300 and then stretched
+ * across the real element, which is what made diagonals stair-step. The size now
+ * comes from `render-quality.ts`: the canvas backing store is resolved from its
+ * CSS box, the display's pixel ratio and the quality's render scale, and the
+ * framebuffer matches it exactly, so the blit is 1:1 and a sample is a pixel.
+ * Supersampling (`renderScale > 1`) is therefore real supersampling — more
+ * samples across the same CSS box, downsampled by the browser on display.
+ *
+ * Note on `imageSmoothingEnabled`: it is gone, and it was never anti-aliasing.
+ * It only ever interpolated the upscale of the finished half-res bitmap — it
+ * cannot smooth the edges of polygons this rasterizer draws, because those edges
+ * are already resolved into the pixel buffer by the time it would apply.
  */
 
 import type { Handle, MeshData } from "./api.ts";
 import type { RenderBackend, SceneFrame } from "./backend.ts";
 import { type Mat4, fromTrs, lookAt, multiply, perspective } from "./mat4.ts";
+import type { RenderQuality } from "./render-quality.ts";
 import { diffuseOnly, shadeSurface, tonemap } from "./shading.ts";
+import { SOFTWARE_DETAIL_SCALE } from "./tessellation.ts";
 
 interface CpuMesh {
   /** xyz-interleaved model-space positions. */
@@ -35,13 +52,16 @@ interface CpuMesh {
   readonly ao: Float32Array;
   /** Model-space bounding-sphere radius (for whole-node culling). */
   readonly radius: number;
+  /** Model-space axis-aligned bounds, as [minX, minY, minZ, maxX, maxY, maxZ].
+   * Kept alongside the sphere because the two answer different questions: the
+   * sphere is the cheap conservative test for "could this be on screen at all",
+   * the box is the tight test for "is the camera INSIDE this solid" — and for a
+   * wide flat mesh those differ enormously (see `cullBackFaces` below). */
+  readonly bounds: Float32Array;
   /** Whether the geometry is a closed solid, so its back faces can be skipped
    * (see `MeshData.closed`). Absent on custom geometry, which stays two-sided. */
   readonly closed: boolean;
 }
-
-/** Internal framebuffer scale (the software fallback renders at half res). */
-const INTERNAL_SCALE = 0.5;
 
 /** The specular bucket for a matte material — identically zero, so the diffuse-only
  * fast path can reuse one frozen triple instead of allocating per triangle. */
@@ -67,18 +87,16 @@ interface RasterTri {
 }
 
 /** Create the Canvas2D software backend (always available). */
-export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend => {
+export const createCanvas2dBackend = (canvas: HTMLCanvasElement, quality: RenderQuality): RenderBackend => {
   const ctx = canvas.getContext("2d");
   if (ctx === null) {
     throw new Error("renderer: the 2D canvas context is unavailable");
   }
   const meshes = new Map<Handle, CpuMesh>();
 
-  // The reduced-resolution framebuffer, rebuilt when the canvas size changes.
+  // The framebuffer, rebuilt only when the canvas backing store changes size.
   let fbWidth = 0;
   let fbHeight = 0;
-  let fbCanvas: HTMLCanvasElement | null = null;
-  let fbCtx: CanvasRenderingContext2D | null = null;
   let image: ImageData | null = null;
   let pixels = new Uint32Array(0);
   let depth = new Float32Array(0);
@@ -87,25 +105,19 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
   const clearPixelOf = (rgb: readonly [number, number, number]): number =>
     (255 << 24) | (channel(rgb[2]) << 16) | (channel(rgb[1]) << 8) | channel(rgb[0]);
 
-  const ensureFramebuffer = (): boolean => {
-    const width = Math.max(1, Math.round(canvas.width * INTERNAL_SCALE));
-    const height = Math.max(1, Math.round(canvas.height * INTERNAL_SCALE));
+  /** Match the framebuffer to the canvas backing store. Allocation happens here
+   * and only on a real size change, never per frame. */
+  const ensureFramebuffer = (): void => {
+    const width = Math.max(1, canvas.width);
+    const height = Math.max(1, canvas.height);
     if (fbWidth === width && fbHeight === height && image !== null) {
-      return true;
+      return;
     }
     fbWidth = width;
     fbHeight = height;
-    fbCanvas = document.createElement("canvas");
-    fbCanvas.width = width;
-    fbCanvas.height = height;
-    fbCtx = fbCanvas.getContext("2d");
-    if (fbCtx === null) {
-      return false;
-    }
-    image = fbCtx.createImageData(width, height);
+    image = ctx.createImageData(width, height);
     pixels = new Uint32Array(image.data.buffer);
     depth = new Float32Array(width * height);
-    return true;
   };
 
   // Scratch buffer, grown on demand, reused across nodes and frames.
@@ -153,14 +165,41 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
     const c1 = x2 * y0 - x0 * y2;
     const stepL0 = a0 * inv;
     const stepL1 = a1 * inv;
-    const pxStart = minX + 0.5;
+    const stepL2 = -(stepL0 + stepL1);
+    const HALF_PIXEL = 0.5;
 
     for (let y = minY; y <= maxY; y += 1) {
-      const py = y + 0.5;
+      const py = y + HALF_PIXEL;
       const rowBase = y * fbWidth;
-      let l0 = (c0 + a0 * pxStart + b0 * py) * inv;
-      let l1 = (c1 + a1 * pxStart + b1 * py) * inv;
-      for (let x = minX; x <= maxX; x += 1, l0 += stepL0, l1 += stepL1) {
+      // Each barycentric is AFFINE in x on this row: `li(x) = stepLi*x + basei`.
+      // Solving `li(x) >= 0` for all three gives the row's SPAN — the pixels the
+      // triangle can actually cover — so the loop below walks the span instead of
+      // the bounding box. For a thin diagonal (a chest lid's edge, a palm frond)
+      // the box is mostly empty, and walking it meant computing and rejecting far
+      // more pixels than were ever filled.
+      //
+      // The bounds are rounded OUTWARD, and the exact per-pixel sign test is kept
+      // below, so the span is a conservative skip and never a coverage decision:
+      // the rendered frame is bit-identical to walking the whole box.
+      const base0 = (c0 + a0 * HALF_PIXEL + b0 * py) * inv;
+      const base1 = (c1 + a1 * HALF_PIXEL + b1 * py) * inv;
+      const base2 = 1 - base0 - base1;
+      let lo = minX;
+      let hi = maxX;
+      if (stepL0 > 0) lo = Math.max(lo, Math.floor(-base0 / stepL0));
+      else if (stepL0 < 0) hi = Math.min(hi, Math.ceil(-base0 / stepL0));
+      else if (base0 < 0) continue;
+      if (stepL1 > 0) lo = Math.max(lo, Math.floor(-base1 / stepL1));
+      else if (stepL1 < 0) hi = Math.min(hi, Math.ceil(-base1 / stepL1));
+      else if (base1 < 0) continue;
+      if (stepL2 > 0) lo = Math.max(lo, Math.floor(-base2 / stepL2));
+      else if (stepL2 < 0) hi = Math.min(hi, Math.ceil(-base2 / stepL2));
+      else if (base2 < 0) continue;
+      if (lo > hi) continue;
+
+      let l0 = stepL0 * lo + base0;
+      let l1 = stepL1 * lo + base1;
+      for (let x = lo; x <= hi; x += 1, l0 += stepL0, l1 += stepL1) {
         const l2 = 1 - l0 - l1;
         if (l0 < 0 || l1 < 0 || l2 < 0) continue;
         const invW = l0 * w0 + l1 * w1 + l2 * w2;
@@ -188,10 +227,11 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
     dropMeshes: (): void => {
       meshes.clear();
     },
-    meshDetail: "low",
+    detailScale: SOFTWARE_DETAIL_SCALE * quality.curveDetail,
     name: "Canvas2D",
     render: (frame: SceneFrame): void => {
-      if (!ensureFramebuffer() || image === null || fbCtx === null || fbCanvas === null) {
+      ensureFramebuffer();
+      if (image === null) {
         return;
       }
       pixels.fill(clearPixelOf(frame.clearColor));
@@ -285,10 +325,36 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
         //    legitimately two-sided, so it keeps the normal-flip behaviour below.
         //  - opaque: a translucent solid shows its far wall through the near one,
         //    which is exactly what the GPU path blends, so it must keep both.
-        //  - camera OUTSIDE the node's bounding sphere: standing inside a mesh (a
-        //    room, an enclosing backdrop box) you see nothing BUT its back faces.
-        const insideBounds = cx * cx + cy * cy + cz * cz <= boundRadius * boundRadius;
-        const cullBackFaces = mesh.closed && opacity >= 1 && !insideBounds;
+        //  - camera OUTSIDE the solid: standing inside a mesh (a room, an
+        //    enclosing backdrop box) you see nothing BUT its back faces.
+        //
+        // That last test is against the mesh's BOX, not its bounding sphere, and
+        // the difference is not a micro-optimization. A sphere around a wide, flat
+        // mesh — a ground plane, a water slab, the scenery a top-down scene is
+        // mostly made of — has a radius of half its DIAGONAL, so a camera looking
+        // down at it from any normal height sits "inside" that sphere while being
+        // nowhere near inside the solid. The sphere test therefore switched back-
+        // face culling off for precisely the largest objects in the frame, the
+        // ones whose hidden faces cost the most to draw: measured on the treasure-
+        // chest scene, two ground/water slabs alone accounted for 72% of all pixel
+        // coverage, roughly half of it faces that could never be seen.
+        // The eye in MODEL space. `model`'s upper 3x3 is R·S, so its inverse is
+        // S⁻¹·Rᵀ: dotting with a column and dividing by that axis' scale SQUARED
+        // (once to undo the scale baked into the column, once for S⁻¹) inverts it
+        // without building a second matrix.
+        const ex = eye.x - t.position.x;
+        const ey = eye.y - t.position.y;
+        const ez = eye.z - t.position.z;
+        const sx2 = t.scale.x * t.scale.x;
+        const sy2 = t.scale.y * t.scale.y;
+        const sz2 = t.scale.z * t.scale.z;
+        const lx = (model[0]! * ex + model[1]! * ey + model[2]! * ez) / sx2;
+        const ly = (model[4]! * ex + model[5]! * ey + model[6]! * ez) / sy2;
+        const lz = (model[8]! * ex + model[9]! * ey + model[10]! * ez) / sz2;
+        const bb = mesh.bounds;
+        const insideSolid =
+          lx >= bb[0]! && lx <= bb[3]! && ly >= bb[1]! && ly <= bb[4]! && lz >= bb[2]! && lz <= bb[5]!;
+        const cullBackFaces = mesh.closed && opacity >= 1 && !insideSolid;
         for (let i = 0; i < indices.length; i += 3) {
           const ia = indices[i]!;
           const ib = indices[i + 1]!;
@@ -405,13 +471,16 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
         rasterize(tri);
       }
 
-      fbCtx.putImageData(image, 0, 0);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(fbCanvas, 0, 0, canvas.width, canvas.height);
+      // The framebuffer IS the backing store, so this is a 1:1 blit: no
+      // intermediate canvas, no scaling draw, no interpolation. `putImageData`
+      // ignores the context transform by definition, which is exactly right —
+      // these are already device pixels.
+      ctx.putImageData(image, 0, 0);
     },
     resize: (): void => {
-      // The framebuffer follows canvas.width/height on the next render.
+      // The framebuffer follows canvas.width/height on the next render, so there
+      // is nothing to do here: `renderer.ts` owns the backing store and has
+      // already resized it by the time this is called.
     },
     uploadMesh: (handle: Handle, data: MeshData): void => {
       const count = data.positions.length;
@@ -420,6 +489,17 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
       const ao = new Float32Array(count).fill(1);
       const aoSrc = data.ao;
       let radius = 0;
+      // [minX, minY, minZ, maxX, maxY, maxZ]. Seeded at +/-Infinity so an empty
+      // mesh yields an inverted box that contains nothing — which is the honest
+      // answer for "is the camera inside this?" when there is no geometry.
+      const bounds = new Float32Array([
+        Number.POSITIVE_INFINITY,
+        Number.POSITIVE_INFINITY,
+        Number.POSITIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+      ]);
       for (let i = 0; i < count; i += 1) {
         const p = data.positions[i]!;
         positions[i * 3] = p.x;
@@ -427,8 +507,14 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement): RenderBackend 
         positions[i * 3 + 2] = p.z;
         ao[i] = aoSrc?.[i] ?? 1;
         radius = Math.max(radius, Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z));
+        bounds[0] = Math.min(bounds[0]!, p.x);
+        bounds[1] = Math.min(bounds[1]!, p.y);
+        bounds[2] = Math.min(bounds[2]!, p.z);
+        bounds[3] = Math.max(bounds[3]!, p.x);
+        bounds[4] = Math.max(bounds[4]!, p.y);
+        bounds[5] = Math.max(bounds[5]!, p.z);
       }
-      meshes.set(handle, { ao, closed: data.closed === true, indices: new Uint32Array(data.indices), positions, radius });
+      meshes.set(handle, { ao, bounds, closed: data.closed === true, indices: new Uint32Array(data.indices), positions, radius });
     },
   };
 };

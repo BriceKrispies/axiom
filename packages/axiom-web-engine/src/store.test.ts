@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Handle, MeshData } from "./api.ts";
+import { FULL_DETAIL_SCALE, SOFTWARE_DETAIL_SCALE } from "./tessellation.ts";
 import { CLEAR_COLOR, DEFAULT_AMBIENT, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS, type RenderBackend, type SceneFrame } from "./backend.ts";
 import {
   addLight,
@@ -39,13 +40,13 @@ interface Fake {
   rec: Recorder;
 }
 
-const makeFake = (name: RenderBackend["name"], meshDetail: RenderBackend["meshDetail"]): Fake => {
+const makeFake = (name: RenderBackend["name"], detailScale: RenderBackend["detailScale"]): Fake => {
   const rec: Recorder = { drops: 0, frames: [], resizes: [], uploads: [] };
   const backend: RenderBackend = {
     dropMeshes: (): void => {
       rec.drops += 1;
     },
-    meshDetail,
+    detailScale,
     name,
     render: (frame): void => {
       rec.frames.push(frame);
@@ -60,8 +61,8 @@ const makeFake = (name: RenderBackend["name"], meshDetail: RenderBackend["meshDe
   return { backend, rec };
 };
 
-const setup = (name: RenderBackend["name"], meshDetail: RenderBackend["meshDetail"]): Recorder => {
-  const { backend, rec } = makeFake(name, meshDetail);
+const setup = (name: RenderBackend["name"], detailScale: RenderBackend["detailScale"]): Recorder => {
+  const { backend, rec } = makeFake(name, detailScale);
   initStore(backend, { height: 1, width: 1 });
   return rec;
 };
@@ -92,7 +93,7 @@ test("store functions reject before initStore", () => {
 });
 
 test("initStore seeds the default camera, clear color, and ambient", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   assert.equal(rendererBackendName(), "WebGL2");
   assert.equal(rendererNodeCount(), 0);
   renderScene();
@@ -103,7 +104,7 @@ test("initStore seeds the default camera, clear color, and ambient", () => {
 });
 
 test("createMesh caches per kind and builds high-detail primitives", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const box = createMesh("box");
   const sphere = createMesh("sphere");
   const cylinder = createMesh("cylinder");
@@ -114,24 +115,24 @@ test("createMesh caches per kind and builds high-detail primitives", () => {
 });
 
 test("createMesh builds lower-poly primitives on the software backend", () => {
-  const low = setup("Canvas2D", "low");
+  const low = setup("Canvas2D", SOFTWARE_DETAIL_SCALE);
   createMesh("box");
   createMesh("cylinder");
   createMesh("sphere");
   const lowSphereVerts = low.uploads[2]!.data.positions.length;
-  const high = setup("WebGL2", "high");
+  const high = setup("WebGL2", FULL_DETAIL_SCALE);
   createMesh("sphere");
   assert.ok(lowSphereVerts < high.uploads[0]!.data.positions.length);
 });
 
 test("createMesh reproduces the historical fixed counts when no budget is given", () => {
-  const high = setup("WebGL2", "high");
+  const high = setup("WebGL2", FULL_DETAIL_SCALE);
   createMesh("cylinder");
   createMesh("sphere");
   // 24-segment cylinder: 2·(24+1) wall verts + 2·(24+2) cap verts. 16×24 sphere.
   assert.equal(high.uploads[0]!.data.positions.length, 2 * 25 + 2 * 26);
   assert.equal(high.uploads[1]!.data.positions.length, 17 * 25);
-  const low = setup("Canvas2D", "low");
+  const low = setup("Canvas2D", SOFTWARE_DETAIL_SCALE);
   createMesh("cylinder");
   createMesh("sphere");
   // Halved by the software detail scale: 12 segments, and an 8×12 sphere.
@@ -140,7 +141,7 @@ test("createMesh reproduces the historical fixed counts when no budget is given"
 });
 
 test("createMesh caches per (kind, budget) so a big primitive can be smooth alone", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const rivet = createMesh("cylinder");
   const lagoon = createMesh("cylinder", 72);
   assert.notEqual(rivet, lagoon, "a distinct budget is distinct geometry, not a replacement");
@@ -152,14 +153,14 @@ test("createMesh caches per (kind, budget) so a big primitive can be smooth alon
 });
 
 test("createMesh applies the software detail scale to a requested budget", () => {
-  const low = setup("Canvas2D", "low");
+  const low = setup("Canvas2D", SOFTWARE_DETAIL_SCALE);
   createMesh("cylinder", 72);
   // The backend LOD still halves it: 36 segments, not the requested 72.
   assert.equal(low.uploads[0]!.data.positions.length, 2 * 37 + 2 * 38);
 });
 
 test("createMesh floors a degenerate budget at a closable ring", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   createMesh("cylinder", 0);
   assert.equal(rec.uploads[0]!.data.positions.length, 2 * 4 + 2 * 5, "clamped to 3 segments");
   // A sphere's latitude rings derive from the radial budget, and floor too.
@@ -168,7 +169,7 @@ test("createMesh floors a degenerate budget at a closable ring", () => {
 });
 
 test("createMeshData rejects mismatched positions/normals", () => {
-  setup("WebGL2", "high");
+  setup("WebGL2", FULL_DETAIL_SCALE);
   assert.throws(
     () => createMeshData({ indices: [], normals: [], positions: [{ x: 0, y: 0, z: 0 }] }),
     /positions \(1\) and normals \(0\) differ/u,
@@ -176,7 +177,7 @@ test("createMeshData rejects mismatched positions/normals", () => {
 });
 
 test("createMeshData accepts a per-vertex ao array and forwards it to the backend", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const data = {
     ao: [0.5, 0.75],
     indices: [0, 1, 0],
@@ -194,7 +195,7 @@ test("createMeshData accepts a per-vertex ao array and forwards it to the backen
 });
 
 test("createMeshData rejects an ao array whose length differs from the vertices", () => {
-  setup("WebGL2", "high");
+  setup("WebGL2", FULL_DETAIL_SCALE);
   assert.throws(
     () =>
       createMeshData({
@@ -214,7 +215,7 @@ test("createMeshData rejects an ao array whose length differs from the vertices"
 });
 
 test("createMaterial applies emissive, opacity, roughness, and their defaults", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const withDefaults = createMaterial({ baseColor: [0.2, 0.4, 0.6, 1] });
   const explicit = createMaterial({
     baseColor: [1, 0, 0, 1],
@@ -240,13 +241,13 @@ test("createMaterial applies emissive, opacity, roughness, and their defaults", 
 });
 
 test("spawnRenderable rejects an unknown material handle", () => {
-  setup("WebGL2", "high");
+  setup("WebGL2", FULL_DETAIL_SCALE);
   const box = createMesh("box");
   assert.throws(() => spawnRenderable(box, 9999, IDENTITY_TRANSFORM), /unknown material handle 9999/u);
 });
 
 test("setNodeTransform re-poses a node and rejects an unknown entity", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const material = createMaterial({ baseColor: [1, 1, 1, 1] });
   const node = spawnRenderable(createMesh("box"), material, IDENTITY_TRANSFORM);
   const moved = { position: { x: 3, y: 0, z: 0 }, rotation: [0, 0, 0, 1] as const, scale: { x: 1, y: 1, z: 1 } };
@@ -266,7 +267,7 @@ test("setNodeTransform re-poses a node and rejects an unknown entity", () => {
 // scene can describe a warm sky/bounce environment instead of faking one with a
 // near-white directional fill or material emissive.
 test("setAmbient flows into the next frame, alpha ignored", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   setAmbient([0.28, 0.25, 0.21, 1]);
   renderScene();
   assert.deepEqual([...rec.frames[0]!.ambient], [0.28, 0.25, 0.21]);
@@ -278,7 +279,7 @@ test("setAmbient flows into the next frame, alpha ignored", () => {
 // than appends; that is the contract the DOM backend's keyed element pool relies on
 // to drop a label whose key stopped being emitted.
 test("setLabels replaces the scene text carried to the next frame", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   renderScene();
   assert.deepEqual(rec.frames[0]!.labels, [], "a scene with no text carries an empty list");
 
@@ -299,7 +300,7 @@ test("setLabels replaces the scene text carried to the next frame", () => {
 });
 
 test("setCamera3D and setClearColor flow into the next frame", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const camera = { far: 50, fovY: 1, near: 1, position: { x: 1, y: 2, z: 3 }, target: { x: 0, y: 0, z: 0 } };
   setCamera3D(camera);
   setClearColor([0.1, 0.2, 0.3, 1]);
@@ -309,7 +310,7 @@ test("setCamera3D and setClearColor flow into the next frame", () => {
 });
 
 test("addLight normalizes directional lights and handles a degenerate direction", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   addLight({ color: [1, 1, 1, 1], direction: { x: 2, y: 0, z: 0 }, intensity: 0.5, kind: "directional" });
   addLight({ color: [1, 1, 1, 1], direction: { x: 0, y: 0, z: 0 }, intensity: 1, kind: "directional" });
   renderScene();
@@ -320,7 +321,7 @@ test("addLight normalizes directional lights and handles a degenerate direction"
 });
 
 test("addLight records point lights and honors both capacity caps", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   for (let index = 0; index < MAX_DIR_LIGHTS + 2; index += 1) {
     addLight({ color: [1, 1, 1, 1], direction: { x: 0, y: -1, z: 0 }, intensity: 1, kind: "directional" });
   }
@@ -335,7 +336,7 @@ test("addLight records point lights and honors both capacity caps", () => {
 });
 
 test("setLight re-aims an existing light on the very next frame", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const sun = addLight({ color: [1, 1, 1, 1], direction: { x: 0, y: -1, z: 0 }, intensity: 1, kind: "directional" });
   renderScene();
   setLight(sun, { color: [1, 0.5, 0, 1], direction: { x: 2, y: 0, z: 0 }, intensity: 2, kind: "directional" });
@@ -346,7 +347,7 @@ test("setLight re-aims an existing light on the very next frame", () => {
 });
 
 test("setLight can change a light's kind and rejects an unknown entity", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const light = addLight({ color: [0, 1, 0, 1], intensity: 1, kind: "point", position: { x: 1, y: 2, z: 3 } });
   setLight(light, { color: [1, 1, 1, 1], direction: { x: 0, y: -1, z: 0 }, intensity: 1, kind: "directional" });
   renderScene();
@@ -361,7 +362,7 @@ test("setLight can change a light's kind and rejects an unknown entity", () => {
 });
 
 test("clearScene drops the backend meshes, materials, nodes, and lights", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const material = createMaterial({ baseColor: [1, 1, 1, 1] });
   spawnRenderable(createMesh("box"), material, IDENTITY_TRANSFORM);
   addLight({ color: [1, 1, 1, 1], direction: { x: 0, y: -1, z: 0 }, intensity: 1, kind: "directional" });
@@ -376,7 +377,7 @@ test("clearScene drops the backend meshes, materials, nodes, and lights", () => 
 });
 
 test("clearScene resets the mesh-kind cache so the next createMesh re-uploads", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   createMesh("box");
   clearScene();
   createMesh("box");
@@ -384,7 +385,7 @@ test("clearScene resets the mesh-kind cache so the next createMesh re-uploads", 
 });
 
 test("resizeRenderer clamps and forwards the viewport to the backend", () => {
-  const { backend, rec } = makeFake("WebGL2", "high");
+  const { backend, rec } = makeFake("WebGL2", FULL_DETAIL_SCALE);
   const canvas = { height: 1, width: 1 };
   initStore(backend, canvas);
   resizeRenderer(640.7, 0);
@@ -393,7 +394,7 @@ test("resizeRenderer clamps and forwards the viewport to the backend", () => {
 });
 
 test("despawnRenderable drops a node from the next frame and rejects an unknown entity", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const material = createMaterial({ baseColor: [1, 1, 1, 1] });
   const box = createMesh("box");
   const kept = spawnRenderable(box, material, IDENTITY_TRANSFORM);
@@ -415,7 +416,7 @@ test("despawnRenderable drops a node from the next frame and rejects an unknown 
 });
 
 test("removeLight drops a light from the next frame and rejects an unknown entity", () => {
-  const rec = setup("WebGL2", "high");
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
   const sun = addLight({ color: [1, 1, 1, 1], direction: { x: 0, y: -1, z: 0 }, intensity: 1, kind: "directional" });
   addLight({ color: [0, 1, 0, 1], intensity: 1, kind: "point", position: { x: 0, y: 0, z: 0 } });
   removeLight(sun);

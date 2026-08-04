@@ -6,6 +6,8 @@
  * Validation lives in `validation.ts`; JSON import/export in `serialization.ts`.
  */
 
+import type { RenderQualityInput } from "@axiom/web-engine";
+
 /** The one schema version this build reads and writes. Imports with any other
  * version are rejected with a readable error — never silently coerced. */
 export const CONFIG_SCHEMA_VERSION = 1;
@@ -75,6 +77,18 @@ export interface CasinoGameConfig<TSpec = Record<string, never>> {
   readonly cameraPreset: CameraPresetId;
   readonly reducedMotion: ReducedMotionMode;
   readonly theme?: ThemeOverrides;
+  /**
+   * How finely this game is rasterized (see `@axiom/web-engine`'s
+   * render-quality). Present only for games that expose the controls; absent
+   * means "the engine default", which is what every other game gets.
+   *
+   * It is stored here, alongside the other setup fields, because it is a
+   * per-game SETUP choice with the same lifecycle as the rest of them — edited
+   * in the Set Up panel, saved with the config, restored on replay. It is
+   * carefully NOT part of the fairness surface: nothing downstream of the
+   * resolver reads it, so no value here can move an outcome, a seed, or a tier.
+   */
+  readonly renderQuality?: RenderQualityInput;
   readonly gameSpecific: TSpec;
 }
 
@@ -120,7 +134,7 @@ export const baseConfig = <TSpec>(
   displayName: string,
   cameraPreset: CameraPresetId,
   gameSpecific: TSpec,
-  overrides: Partial<Pick<CasinoGameConfig<TSpec>, "targetWinRate" | "rewardTiers" | "choiceCount">> = {},
+  overrides: Partial<Pick<CasinoGameConfig<TSpec>, "targetWinRate" | "rewardTiers" | "choiceCount" | "renderQuality">> = {},
 ): CasinoGameConfig<TSpec> => ({
   cameraPreset,
   celebrationIntensity: 1,
@@ -133,4 +147,5 @@ export const baseConfig = <TSpec>(
   schemaVersion: CONFIG_SCHEMA_VERSION,
   targetWinRate: overrides.targetWinRate ?? 0.42,
   ...(overrides.choiceCount === undefined ? {} : { choiceCount: overrides.choiceCount }),
+  ...(overrides.renderQuality === undefined ? {} : { renderQuality: overrides.renderQuality }),
 });

@@ -23,6 +23,7 @@ import { type Game, type MeshRef, type ReconcilePlan, type SceneMemory, type Tic
 import { InputState, sampleInput } from "./input.ts";
 import { attachDomInput } from "./dom-input.ts";
 import { type BackendChoice, initRenderer, rendererSurface } from "./renderer.ts";
+import { type RenderQuality, clampRenderQuality } from "./render-quality.ts";
 import { startLoop } from "./raf-loop.ts";
 import { playTone } from "./audio.ts";
 import {
@@ -46,6 +47,16 @@ import {
 export interface RunGameOptions<State> {
   /** Which drawing backend to use (default "auto": WebGL2, else Canvas2D). */
   readonly backend?: BackendChoice;
+  /**
+   * How finely the scene is rasterized: backing-store resolution, supersampling,
+   * curve tessellation, and stroke shaping (default `DEFAULT_RENDER_QUALITY`).
+   *
+   * Read once, when the backend is built — a change takes effect on the next
+   * `runGame`, which is how a game applies a setup screen's values at the start
+   * of a round. It affects sampling only: the logical coordinate space, input,
+   * simulation, and every deterministic result are identical at every setting.
+   */
+  readonly quality?: RenderQuality;
   /** Whether clicking the canvas captures the pointer for mouse look (default
    * true). A cursor-driven game (clickable objects, menus) sets this false so
    * the cursor stays visible and clicks stay clicks. */
@@ -100,7 +111,7 @@ export const runGame = <State>(canvas: HTMLCanvasElement, game: Game<State>, opt
   const now = opts.now ?? ((): number => performance.now());
   const freezeAtTick = opts.freezeAtTick ?? Number.POSITIVE_INFINITY;
 
-  initRenderer(canvas, opts.backend ?? "auto");
+  initRenderer(canvas, opts.backend ?? "auto", clampRenderQuality(opts.quality));
 
   // Declared resources → store handles, created exactly once.
   const meshHandles = new Map<string, Handle>(

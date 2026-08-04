@@ -86,9 +86,10 @@ export interface SceneFrame {
 /** The drawing backend the store delegates to. */
 export interface RenderBackend {
   readonly name: "WebGL2" | "Canvas2D" | "CSS3D";
-  /** Softer geometry suits the software rasterizer: the store builds primitive
-   * meshes at this detail level. */
-  readonly meshDetail: "high" | "low";
+  /** Facet scale the store builds ROUND primitive meshes at (see
+   * `tessellation.ts`). The backend's own baseline — softer geometry suits the
+   * software rasterizer — multiplied by the active quality's `curveDetail`. */
+  readonly detailScale: number;
   /** Ingest triangle-list geometry under the store's handle. */
   readonly uploadMesh: (handle: Handle, data: MeshData) => void;
   /** Forget every uploaded mesh (the store is clearing the scene). */

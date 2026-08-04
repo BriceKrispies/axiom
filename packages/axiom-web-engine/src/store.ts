@@ -141,7 +141,7 @@ export const createMeshData = (data: MeshData): Handle => {
  * radial facet budget.
  *
  * `segments` is the budget at FULL detail; `tessellation.ts` resolves it against
- * the active backend's `meshDetail` (the software path halves it), and the
+ * the active backend's `detailScale` (the software path halves it), and the
  * result keys the cache — so asking for the same budget twice reuses one upload,
  * and asking for a bigger one adds geometry beside the default rather than
  * replacing it. Omitting `segments` reproduces the previous fixed counts exactly
@@ -149,7 +149,7 @@ export const createMeshData = (data: MeshData): Handle => {
  */
 export const createMesh = (kind: MeshKind, segments?: number): Handle => {
   const st = requireState();
-  const facets = resolveFacets(segments, st.backend.meshDetail);
+  const facets = resolveFacets(segments, st.backend.detailScale);
   const cacheKey = primitiveCacheKey(kind, facets);
   return orCompute(st.primitiveCache.get(cacheKey), (): Handle => {
     const handle = createMeshData(buildPrimitive(kind, facets));

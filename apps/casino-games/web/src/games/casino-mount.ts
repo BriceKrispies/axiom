@@ -7,8 +7,8 @@
  * rule of the fairness contract lives in the pure fold, not here.
  */
 
-import type { Scene, ToneSpec, ViewContext } from "@axiom/web-engine";
-import { rendererBackendName, runGame } from "@axiom/web-engine";
+import type { RenderQuality, Scene, ToneSpec, ViewContext } from "@axiom/web-engine";
+import { MITER_LIMIT, clampRenderQuality, rendererBackendName, resolveBackingSize, runGame } from "@axiom/web-engine";
 import type { CasinoHud, GameRuntime, RunningCasinoGame } from "../chance-engine/registry/definition.ts";
 import { cameraShakeOffset } from "../presentation/cameras/presets.ts";
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "../presentation/cameras/picking.ts";
@@ -17,11 +17,22 @@ import type { CasinoMountSpec, CasinoState } from "./round-state.ts";
 import { celebrationFor, COMMON_ACTIONS, foldRoundTick, freshRoundState, hudOf, outcomeRarity } from "./round-state.ts";
 
 /** A transparent Canvas2D layer that exactly covers the game canvas, for a game's
- * optional flat 2D overlay (the stylized water surface). Its backing store is the
- * shared logical 960×600 space, so a game draws in the SAME coordinates its
- * `worldToCanvas` projection returns; CSS stretches it over the 3D canvas. Absent
- * unless the game provides an `overlay`. */
-const attachOverlay = (canvas: HTMLCanvasElement): { readonly ctx: CanvasRenderingContext2D; readonly remove: () => void } | null => {
+ * optional flat 2D overlay (the stylized water surface). Absent unless the game
+ * provides an `overlay`.
+ *
+ * A game DRAWS on it in the shared logical 960×600 space, so its coordinates are
+ * exactly what `worldToCanvas` returns. Its BACKING STORE, though, is resolved
+ * from the same quality as the 3D canvas: this layer carries the pond rim, the
+ * ripple net and the shoreline — long, shallow curves, the most aliasing-prone
+ * marks on the screen — and pinning it to 960×600 while the scene behind it drew
+ * at the display's real resolution would leave the water the one visibly jagged
+ * thing in the frame. The logical-to-backing scale is applied to the context as
+ * a whole transform each frame with `setTransform`, which REPLACES rather than
+ * multiplies, so it cannot compound however many times the layer is resized. */
+const attachOverlay = (
+  canvas: HTMLCanvasElement,
+  quality: RenderQuality,
+): { readonly ctx: CanvasRenderingContext2D; readonly remove: () => void } | null => {
   const layer = document.createElement("canvas");
   layer.width = CANVAS_WIDTH;
   layer.height = CANVAS_HEIGHT;
@@ -32,8 +43,34 @@ const attachOverlay = (canvas: HTMLCanvasElement): { readonly ctx: CanvasRenderi
   if (ctx === null || parent === null) {
     return null;
   }
+  const syncBacking = (): void => {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) {
+      return;
+    }
+    const size = resolveBackingSize({
+      cssHeight: rect.height,
+      cssWidth: rect.width,
+      deviceRatio: window.devicePixelRatio,
+      quality,
+    });
+    if (layer.width === size.width && layer.height === size.height) {
+      return;
+    }
+    layer.width = size.width;
+    layer.height = size.height;
+  };
+  const observer = new ResizeObserver(syncBacking);
+  observer.observe(canvas);
   parent.append(layer);
-  return { ctx, remove: (): void => layer.remove() };
+  syncBacking();
+  return {
+    ctx,
+    remove: (): void => {
+      observer.disconnect();
+      layer.remove();
+    },
+  };
 };
 
 export type { CasinoMountSpec, CasinoState } from "./round-state.ts";
@@ -51,6 +88,12 @@ export const mountCasinoGame = <TSpec, TExtra>(
     settings: runtime.settings,
     source: runtime.source,
   };
+
+  // Rasterization quality: validated once here, then read by the renderer and by
+  // the 2D overlay layer so both surfaces sample at the same rate. A game that
+  // sets nothing gets the engine default. Nothing below this line feeds the fold,
+  // the seed, or the result source — quality cannot reach an outcome.
+  const quality = clampRenderQuality(runtime.config.renderQuality);
 
   const view = (state: CasinoState<TExtra>, ctx: ViewContext): Scene => {
     const scene = spec.viewScene(state, ctx);
@@ -99,7 +142,7 @@ export const mountCasinoGame = <TSpec, TExtra>(
   const drawOverlay = spec.overlay;
   const resolveOverlay = (): void => {
     overlayResolved = true;
-    overlay = rendererBackendName() === "CSS3D" ? null : attachOverlay(canvas);
+    overlay = rendererBackendName() === "CSS3D" ? null : attachOverlay(canvas, quality);
   };
 
   const running = runGame<CasinoState<TExtra>>(
@@ -126,11 +169,20 @@ export const mountCasinoGame = <TSpec, TExtra>(
           resolveOverlay();
         }
         if (overlay !== null) {
+          // One whole transform, logical 960×600 → this layer's backing store.
+          // `setTransform` REPLACES the matrix, so re-applying it every frame is
+          // idempotent by construction — there is no state to accumulate.
+          const layer = overlay.ctx.canvas;
+          overlay.ctx.setTransform(layer.width / CANVAS_WIDTH, 0, 0, layer.height / CANVAS_HEIGHT, 0, 0);
+          overlay.ctx.lineJoin = quality.lineJoin;
+          overlay.ctx.lineCap = quality.lineCap;
+          overlay.ctx.miterLimit = MITER_LIMIT;
           overlay.ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
           drawOverlay(state, overlay.ctx, viewCtx);
         }
       },
       pointerLock: false,
+      quality,
       script: runtime.script,
       seed: runtime.seed,
     },

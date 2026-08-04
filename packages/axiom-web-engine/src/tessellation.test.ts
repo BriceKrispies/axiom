@@ -12,29 +12,48 @@
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { buildPrimitive, primitiveCacheKey, resolveFacets } from "./tessellation.ts";
+import { FULL_DETAIL_SCALE, SOFTWARE_DETAIL_SCALE, buildPrimitive, primitiveCacheKey, resolveFacets } from "./tessellation.ts";
 
 test("an omitted budget reproduces the engine's historical fixed counts", () => {
-  assert.equal(resolveFacets(undefined, "high"), 24, "GPU path: the old 24-segment default");
-  assert.equal(resolveFacets(undefined, "low"), 12, "software path: the old halved 12");
+  assert.equal(resolveFacets(undefined, FULL_DETAIL_SCALE), 24, "GPU path: the old 24-segment default");
+  assert.equal(resolveFacets(undefined, SOFTWARE_DETAIL_SCALE), 12, "software path: the old halved 12");
 });
 
 test("a requested budget survives the backend's detail scale", () => {
-  assert.equal(resolveFacets(96, "high"), 96, "full detail honours the request exactly");
-  assert.equal(resolveFacets(96, "low"), 48, "software halves the REQUEST, not a fixed table");
-  assert.ok(resolveFacets(96, "low") > resolveFacets(undefined, "high"), "a large request outranks the default even when halved");
+  assert.equal(resolveFacets(96, FULL_DETAIL_SCALE), 96, "full detail honours the request exactly");
+  assert.equal(resolveFacets(96, SOFTWARE_DETAIL_SCALE), 48, "software halves the REQUEST, not a fixed table");
+  assert.ok(resolveFacets(96, SOFTWARE_DETAIL_SCALE) > resolveFacets(undefined, FULL_DETAIL_SCALE), "a large request outranks the default even when halved");
+});
+
+test("a quality's curve detail composes with the backend's baseline", () => {
+  const curveDetail = 2;
+  assert.equal(
+    resolveFacets(undefined, SOFTWARE_DETAIL_SCALE * curveDetail),
+    24,
+    "doubling curve detail on the software path reaches the GPU path's default",
+  );
+  const identityDetail = 1;
+  assert.equal(
+    resolveFacets(undefined, SOFTWARE_DETAIL_SCALE * identityDetail),
+    resolveFacets(undefined, SOFTWARE_DETAIL_SCALE),
+    "curve detail 1 is the identity — the default re-tessellates nothing",
+  );
+  assert.ok(
+    resolveFacets(undefined, SOFTWARE_DETAIL_SCALE * 0.25) < resolveFacets(undefined, SOFTWARE_DETAIL_SCALE),
+    "the low rung genuinely sheds facets",
+  );
 });
 
 test("no ring closes with fewer facets than a triangle", () => {
-  assert.equal(resolveFacets(0, "high"), 3, "a zero budget floors at a triangle");
-  assert.equal(resolveFacets(-40, "high"), 3, "a negative budget floors at a triangle");
-  assert.equal(resolveFacets(4, "low"), 3, "halving a small budget still floors at a triangle");
+  assert.equal(resolveFacets(0, FULL_DETAIL_SCALE), 3, "a zero budget floors at a triangle");
+  assert.equal(resolveFacets(-40, FULL_DETAIL_SCALE), 3, "a negative budget floors at a triangle");
+  assert.equal(resolveFacets(4, SOFTWARE_DETAIL_SCALE), 3, "halving a small budget still floors at a triangle");
 });
 
 test("a fractional budget resolves to a whole number of facets", () => {
-  assert.equal(resolveFacets(12.4, "high"), 12);
-  assert.equal(resolveFacets(12.6, "high"), 13);
-  assert.equal(resolveFacets(15, "low"), 8, "15 * 0.5 = 7.5 rounds to 8");
+  assert.equal(resolveFacets(12.4, FULL_DETAIL_SCALE), 12);
+  assert.equal(resolveFacets(12.6, FULL_DETAIL_SCALE), 13);
+  assert.equal(resolveFacets(15, SOFTWARE_DETAIL_SCALE), 8, "15 * 0.5 = 7.5 rounds to 8");
 });
 
 test("the sphere keeps its authored 16:24 latitude proportion at any budget", () => {

@@ -18,7 +18,13 @@ export const storedConfigOf = (definition: CasinoGameDefinition<unknown>): Casin
       const parsed = JSON.parse(raw) as CasinoGameConfig<unknown>;
       const issues = [...validateConfig(parsed), ...definition.validateSpec(parsed.gameSpecific)];
       if (issues.length === 0 && parsed.gameId === definition.id) {
-        return parsed;
+        // Reconcile against the definition's CURRENT defaults before returning.
+        // A stored config is a snapshot of the fields that existed when it was
+        // saved, so a config saved before a field was added simply has no key
+        // for it — and returning it verbatim would hand the game a config
+        // missing that field forever. The stored value wins wherever the player
+        // actually set one; the defaults only fill genuine absences.
+        return { ...definition.defaultConfig(), ...parsed };
       }
     }
   } catch {

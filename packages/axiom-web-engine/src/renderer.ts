@@ -44,6 +44,7 @@ import { beginAttempt, confirmFirstFrame } from "./override.ts";
 import { createCanvas2dBackend } from "./backend-canvas2d.ts";
 import { createCssBackend } from "./backend-css.ts";
 import { createWebGl2Backend } from "./backend-webgl2.ts";
+import { type RenderQuality, DEFAULT_RENDER_QUALITY, backingSizeMatches, resolveBackingSize } from "./render-quality.ts";
 import { detectTierSync, latestDetection } from "./detect.ts";
 import { initStore } from "./store.ts";
 
@@ -54,7 +55,7 @@ export type BackendChoice = "auto" | Tier | "css";
 
 /** How each rung is actually drawn. Several tiers share a backend — see the
  * file header for why. `null` means the backend could not be constructed. */
-const TIER_BACKENDS: Readonly<Record<Tier, (canvas: HTMLCanvasElement) => RenderBackend | null>> = {
+const TIER_BACKENDS: Readonly<Record<Tier, (canvas: HTMLCanvasElement, quality: RenderQuality) => RenderBackend | null>> = {
   canvas2d: createCanvas2dBackend,
   css3d: createCssBackend,
   webgl1: createCanvas2dBackend,
@@ -94,7 +95,7 @@ const confirmingBackend = (backend: RenderBackend, tier: Tier): RenderBackend =>
   let confirmed = false;
   return {
     dropMeshes: backend.dropMeshes,
-    meshDetail: backend.meshDetail,
+    detailScale: backend.detailScale,
     name: backend.name,
     render: (frame): void => {
       backend.render(frame);
@@ -112,35 +113,98 @@ const confirmingBackend = (backend: RenderBackend, tier: Tier): RenderBackend =>
 /** Build the backend for `tier`, walking DOWN the ladder when construction
  * fails. The walk always terminates: `css3d` acquires no context and cannot
  * fail to be constructed. */
-const buildFrom = (canvas: HTMLCanvasElement, tier: Tier): { backend: RenderBackend; tier: Tier } => {
+const buildFrom = (canvas: HTMLCanvasElement, tier: Tier, quality: RenderQuality): { backend: RenderBackend; tier: Tier } => {
   for (const candidate of ladderFrom(tier)) {
-    const backend = TIER_BACKENDS[candidate](canvas);
+    const backend = TIER_BACKENDS[candidate](canvas, quality);
     if (backend) {
       return { backend, tier: candidate };
     }
   }
-  return { backend: createCssBackend(canvas), tier: FALLBACK_TIER };
+  return { backend: createCssBackend(canvas, quality), tier: FALLBACK_TIER };
 };
 
-const resolveAuto = (canvas: HTMLCanvasElement): { backend: RenderBackend; tier: Tier } => {
+const resolveAuto = (canvas: HTMLCanvasElement, quality: RenderQuality): { backend: RenderBackend; tier: Tier } => {
   const detection = latestDetection() ?? detectTierSync();
   activeReport = detection;
   beginAttempt(detection.tier);
   console.log(
     `axiom-engine: tier = ${detection.tier} via ${detection.source} (readback ${detection.readback}, ceiling ${detection.ceiling}, ${Math.round(detection.elapsedMs)}ms)`,
   );
-  return buildFrom(canvas, detection.tier);
+  return buildFrom(canvas, detection.tier, quality);
 };
 
-const resolveExplicit = (canvas: HTMLCanvasElement, choice: Exclude<BackendChoice, "auto">): { backend: RenderBackend; tier: Tier } => {
+const resolveExplicit = (
+  canvas: HTMLCanvasElement,
+  choice: Exclude<BackendChoice, "auto">,
+  quality: RenderQuality,
+): { backend: RenderBackend; tier: Tier } => {
   const tier = CHOICE_TIERS[choice];
   activeReport = undefined;
   beginAttempt(tier);
-  const backend = TIER_BACKENDS[tier](canvas);
+  const backend = TIER_BACKENDS[tier](canvas, quality);
   if (!backend) {
     throw new Error(`renderer: ${choice} was forced but is not available in this browser/canvas`);
   }
   return { backend, tier };
+};
+
+/**
+ * The canvas's BACKING STORE, kept in step with its CSS box.
+ *
+ * This lives here, not in a backend, because it is a property of the CANVAS —
+ * every pixel backend wants the same answer, and the canvas is this file's to
+ * own (it already parks and restores it for the DOM renderer). Wiring it into
+ * one backend only is how the engine ended up with a hardware path still drawing
+ * at whatever `width`/`height` the app's HTML happened to hard-code, stretched to
+ * fit, no matter how large the element or how dense the display.
+ *
+ * Only the backing store moves; the CSS box belongs to the page and is never
+ * written here, so the app's logical coordinate space is untouched.
+ *
+ * A ResizeObserver rather than a per-frame measurement: `getBoundingClientRect`
+ * forces layout, and paying that every frame to learn a number that changes when
+ * the window changes would be its own performance bug. A zero-sized rect (not laid
+ * out yet, `display:none`, or parked by the DOM renderer) is ignored rather than
+ * acted on — shrinking the surface to 1x1 because the page was hidden is not a
+ * resize, it is data loss.
+ */
+let backingObserver: ResizeObserver | undefined;
+let clampReported = false;
+
+const observeBackingSize = (canvas: HTMLCanvasElement, backend: RenderBackend, quality: RenderQuality): void => {
+  backingObserver?.disconnect();
+  backingObserver = undefined;
+  // A backend that presents into its own element draws no pixels into the canvas.
+  if (backend.surface !== undefined) {
+    return;
+  }
+  const sync = (): void => {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) {
+      return;
+    }
+    const size = resolveBackingSize({
+      cssHeight: rect.height,
+      cssWidth: rect.width,
+      deviceRatio: window.devicePixelRatio,
+      quality,
+    });
+    if (backingSizeMatches(canvas, size)) {
+      return;
+    }
+    canvas.width = size.width;
+    canvas.height = size.height;
+    backend.resize(size.width, size.height);
+    if (size.clamped && !clampReported) {
+      clampReported = true;
+      console.log(
+        `axiom-engine: backing store clamped to ${size.width}x${size.height} (scale ${size.scale.toFixed(3)}) by the quality's sample/dimension budget`,
+      );
+    }
+  };
+  backingObserver = new ResizeObserver(sync);
+  backingObserver.observe(canvas);
+  sync();
 };
 
 /** Where the canvas was, while a DOM renderer has it out of the document. */
@@ -191,16 +255,22 @@ export const rendererSurface = (): HTMLElement => demandSurface();
  * app that wants the webgpu rung reported awaits `detectTier()` first; this
  * function then reuses that report instead of detecting again.
  */
-export const initRenderer = (canvas: HTMLCanvasElement, choice: BackendChoice = "auto"): void => {
+export const initRenderer = (
+  canvas: HTMLCanvasElement,
+  choice: BackendChoice = "auto",
+  quality: RenderQuality = DEFAULT_RENDER_QUALITY,
+): void => {
   // A previous mount may have taken the canvas out of the document (the DOM
   // renderer does — see below). Put it back before resolving, so re-mounting on a
   // pixel backend finds the page exactly as it was.
   restoreCanvas(canvas);
-  const resolved = choice === "auto" ? resolveAuto(canvas) : resolveExplicit(canvas, choice);
+  const resolved = choice === "auto" ? resolveAuto(canvas, quality) : resolveExplicit(canvas, choice, quality);
   activeTier = resolved.tier;
   console.log(`axiom-engine: render backend = ${resolved.backend.name} (tier ${resolved.tier})`);
   initStore(confirmingBackend(resolved.backend, resolved.tier), canvas);
   activeSurface = resolved.backend.surface ?? canvas;
+  // Size the canvas to its CSS box at this quality, and keep it there.
+  observeBackingSize(canvas, resolved.backend, quality);
   // A backend that presents into its OWN element does not want a canvas in the
   // page at all. Leaving it would be harmless to look at and wrong in substance:
   // "no canvas" is the entire proposition of the DOM renderer, and a stray

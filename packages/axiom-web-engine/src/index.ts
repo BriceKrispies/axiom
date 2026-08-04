@@ -82,6 +82,36 @@ export {
 // a diagnostics overlay, or a test to assert on.
 export type { BackendChoice } from "./renderer.ts";
 export { initRenderer, rendererDetection, rendererSurface, rendererTier, rendererTierAtLeast } from "./renderer.ts";
+
+// ── rasterization quality ───────────────────────────────────────────────────────
+// How finely the scene is sampled: backing-store resolution vs the canvas's CSS
+// box, supersampling, curve tessellation, and stroke shaping. Pass a `quality` to
+// `runGame`; use `clampRenderQuality` to validate values coming from a stored
+// config or a setup screen, and `resolveBackingSize` to size any SECOND canvas an
+// app layers over the scene so it matches the renderer's sampling. See
+// render-quality.ts.
+export type {
+  BackingSize,
+  BackingSizeSpec,
+  CanvasLineCap,
+  CanvasLineJoin,
+  PixelRatioMode,
+  RenderQuality,
+  RenderQualityInput,
+} from "./render-quality.ts";
+export {
+  DEFAULT_MAX_SAMPLES,
+  DEFAULT_RENDER_QUALITY,
+  LINE_CAPS,
+  LINE_JOINS,
+  MITER_LIMIT,
+  PIXEL_RATIO_MODES,
+  RENDER_SCALES,
+  backingSizeMatches,
+  clampRenderQuality,
+  resolveBackingSize,
+  resolvePixelRatio,
+} from "./render-quality.ts";
 export type { DetectionReport, Tier, TierChoice, TierOutcome, TierProbe, TierProbes, TierSource } from "./tier.ts";
 export { TIER_ORDER, chooseTier, isTier, ladderFrom, parseTierChoice, rank } from "./tier.ts";
 export type { PatternVerdict, ReadbackTrust } from "./probe-pattern.ts";

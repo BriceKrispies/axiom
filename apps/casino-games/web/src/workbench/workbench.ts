@@ -7,6 +7,8 @@
  * are readable and invalid drafts can be neither saved nor previewed.
  */
 
+import type { RenderQualityInput } from "@axiom/web-engine";
+import { LINE_CAPS, LINE_JOINS, PIXEL_RATIO_MODES, RENDER_SCALES, clampRenderQuality, resolveBackingSize } from "@axiom/web-engine";
 import type { CasinoGameConfig, Rarity, RewardKind, RewardTier } from "../chance-engine/configuration/schema.ts";
 import { exportConfigJson, importConfigJson } from "../chance-engine/configuration/serialization.ts";
 import type { ConfigIssue } from "../chance-engine/configuration/validation.ts";
@@ -37,6 +39,141 @@ export interface Workbench {
   readonly open: (definition: CasinoGameDefinition<unknown>) => void;
   readonly host: HTMLElement;
 }
+
+/** Player-facing wording for each pixel-ratio mode. The engine's names are
+ * accurate and unreadable; this panel is a Set Up screen, not an API. */
+const PIXEL_DENSITY_LABELS: Readonly<Record<string, string>> = {
+  "capped-device": "Device, Max 2×",
+  device: "Device",
+  "fixed-1x": "1×",
+};
+
+const CURVE_DETAIL_MIN = 0.25;
+const CURVE_DETAIL_MAX = 2;
+const CURVE_DETAIL_STEP = 0.25;
+
+/** A labelled `<select>` row over a fixed set of string values. */
+const optionRow = <T extends string>(
+  label: string,
+  value: T,
+  options: readonly T[],
+  textOf: (option: T) => string,
+  apply: (next: T) => void,
+): HTMLElement => {
+  const row = document.createElement("div");
+  row.className = "row";
+  const caption = document.createElement("label");
+  caption.textContent = label;
+  const select = document.createElement("select");
+  for (const option of options) {
+    const node = document.createElement("option");
+    node.value = option;
+    node.textContent = textOf(option);
+    node.selected = option === value;
+    select.append(node);
+  }
+  select.addEventListener("change", () => apply(select.value as T));
+  row.append(caption, select);
+  return row;
+};
+
+/**
+ * The RENDERING QUALITY plate: how finely the scene is sampled.
+ *
+ * Every control here changes rasterization only. None of them is wired to the
+ * fold, the seed, or the result source, so no setting on this plate can move an
+ * outcome — the same seed plays the same round at every quality.
+ */
+const buildQualityPlate = (
+  current: RenderQualityInput,
+  defaults: RenderQualityInput,
+  apply: (next: RenderQualityInput) => void,
+): HTMLElement => {
+  const resolved = clampRenderQuality(current);
+  const patchQuality = (changes: RenderQualityInput): void => apply({ ...current, ...changes });
+
+  const box = document.createElement("fieldset");
+  const legend = document.createElement("legend");
+  legend.textContent = "Rendering quality";
+  box.append(legend);
+
+  const note = document.createElement("p");
+  note.className = "wb-note";
+  note.textContent = "Higher settings smooth diagonal and curved edges but require more rendering work.";
+  box.append(note);
+
+  box.append(
+    optionRow(
+      "Pixel density",
+      resolved.pixelRatioMode,
+      PIXEL_RATIO_MODES,
+      (mode) => PIXEL_DENSITY_LABELS[mode] ?? mode,
+      (pixelRatioMode) => patchQuality({ pixelRatioMode }),
+    ),
+    optionRow(
+      "Supersampling",
+      String(resolved.renderScale),
+      RENDER_SCALES.map((scale) => String(scale)),
+      (scale) => `${scale}×`,
+      (scale) => patchQuality({ renderScale: Number(scale) }),
+    ),
+    optionRow("Edge join", resolved.lineJoin, LINE_JOINS, (join) => join, (lineJoin) => patchQuality({ lineJoin })),
+    optionRow("Edge cap", resolved.lineCap, LINE_CAPS, (cap) => cap, (lineCap) => patchQuality({ lineCap })),
+  );
+
+  // Curve detail: a real tessellation budget, not a cosmetic slider — it scales
+  // the facet count round primitives (the pond rim, the chests' barrel lids) are
+  // actually built at, so the numbers below are geometry, not a filter strength.
+  const curveRow = document.createElement("div");
+  curveRow.className = "row";
+  const curveLabel = document.createElement("label");
+  curveLabel.textContent = "Curve detail";
+  const curveSlider = document.createElement("input");
+  curveSlider.type = "range";
+  curveSlider.min = String(CURVE_DETAIL_MIN);
+  curveSlider.max = String(CURVE_DETAIL_MAX);
+  curveSlider.step = String(CURVE_DETAIL_STEP);
+  curveSlider.value = String(resolved.curveDetail);
+  const curveValue = document.createElement("output");
+  curveValue.textContent = `${resolved.curveDetail}×`;
+  curveSlider.addEventListener("input", () => {
+    curveValue.textContent = `${curveSlider.value}×`;
+  });
+  curveSlider.addEventListener("change", () => patchQuality({ curveDetail: Number(curveSlider.value) }));
+  curveRow.append(curveLabel, curveSlider, curveValue);
+  box.append(curveRow);
+
+  // What the settings above actually resolve to on THIS window — the honest
+  // readout, since the backing store depends on the canvas's CSS box and the
+  // display as much as on the controls.
+  const readout = document.createElement("p");
+  readout.className = "wb-note";
+  const rect = document.getElementById("axiom-canvas")?.getBoundingClientRect();
+  // Only report a resolved size when the canvas is actually laid out. Opened from
+  // the prize floor the game screen is hidden, so its rect is 0×0 — and feeding
+  // that through the resolver would print a confident "1×1", which is not a
+  // smaller number, it is a wrong one.
+  const measurable = rect !== undefined && rect.width >= 1 && rect.height >= 1;
+  const size = resolveBackingSize({
+    cssHeight: rect?.height ?? 1,
+    cssWidth: rect?.width ?? 1,
+    deviceRatio: window.devicePixelRatio,
+    quality: resolved,
+  });
+  readout.textContent = measurable
+    ? `Drawing surface on this window: ${size.width}×${size.height}` +
+      ` (${((size.width * size.height) / 1000).toFixed(0)}k samples, ${size.scale.toFixed(2)}× the displayed size)` +
+      `${size.clamped ? " — reduced to stay inside the sample budget" : ""}`
+    : "Start a round to see the drawing surface these settings resolve to.";
+  box.append(readout);
+
+  const reset = document.createElement("button");
+  reset.id = "wb-reset-quality";
+  reset.textContent = "Reset quality";
+  reset.addEventListener("click", () => apply({ ...defaults }));
+  box.append(reset);
+  return box;
+};
 
 export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): Workbench => {
   let definition: CasinoGameDefinition<unknown> | null = null;
@@ -258,6 +395,19 @@ export const buildWorkbench = (host: HTMLElement, handlers: WorkbenchHandlers): 
     themeRow.append(themeLabel, themeSelect, motionLabel, motionSelect);
     knobs.append(themeRow);
     host.append(knobs);
+
+    // ── rendering quality (only for games that expose it) ───────
+    // Same convention as `choiceCount` and the brand block above: the section
+    // appears when the config carries the field, so a game opts in by putting a
+    // `renderQuality` in its defaults rather than by this panel knowing which
+    // games are special.
+    if (config.renderQuality !== undefined) {
+      host.append(
+        buildQualityPlate(config.renderQuality, def.defaultConfig().renderQuality ?? {}, (renderQuality) =>
+          patch({ renderQuality }),
+        ),
+      );
+    }
 
     // ── brand controls (only for games whose gameSpecific carries a brand) ──
     const brand = readBrand(config.gameSpecific);

@@ -35,13 +35,16 @@ const DEFAULT_RADIAL_SEGMENTS = 24;
 const SPHERE_LAT_SEGMENTS = 16;
 const SPHERE_LAT_RATIO = SPHERE_LAT_SEGMENTS / DEFAULT_RADIAL_SEGMENTS;
 
+/** The GPU path draws a primitive at exactly the requested budget. */
+export const FULL_DETAIL_SCALE = 1;
+
 /** The software rasterizer pays per triangle, so it draws every primitive at
  * HALF the facet budget of the GPU path. Expressed as a scale rather than a
  * second table of constants: it is the same halving the old fixed low-detail
  * counts encoded (24→12 cylinder, 16/24→8/12 sphere), now applied to whatever
  * budget the caller asked for — so the backend LOD survives a caller's request
  * instead of being silently defeated by it. */
-const DETAIL_SCALE: Readonly<Record<"high" | "low", number>> = { high: 1, low: 0.5 };
+export const SOFTWARE_DETAIL_SCALE = 0.5;
 
 /** No ring closes with fewer facets than a triangle. */
 const MIN_SEGMENTS = 3;
@@ -51,14 +54,20 @@ const clampFacets = (facets: number): number => Math.max(MIN_SEGMENTS, Math.roun
 
 /**
  * Resolve a caller's requested budget (or none) against the active backend's
- * detail level, yielding the facet count the geometry is actually built at.
+ * detail scale, yielding the facet count the geometry is actually built at.
  *
- * Omitting `segments` reproduces the engine's historical fixed counts exactly
- * (24 / 12 cylinder), so a call site that never asked for a budget renders
- * byte-identically to before per-mesh tessellation existed.
+ * `detailScale` is the backend's own baseline (`FULL_DETAIL_SCALE` /
+ * `SOFTWARE_DETAIL_SCALE`) already multiplied by the quality's `curveDetail`, so
+ * the backend's LOD and the player's curve-detail setting compose into one
+ * number instead of fighting over the budget.
+ *
+ * Omitting `segments` at a backend's baseline scale reproduces the engine's
+ * historical fixed counts exactly (24 / 12 cylinder), so a call site that never
+ * asked for a budget renders byte-identically to before per-mesh tessellation
+ * existed.
  */
-export const resolveFacets = (segments: number | undefined, detail: "high" | "low"): number =>
-  clampFacets(clampFacets(orElse(segments, DEFAULT_RADIAL_SEGMENTS)) * DETAIL_SCALE[detail]);
+export const resolveFacets = (segments: number | undefined, detailScale: number): number =>
+  clampFacets(clampFacets(orElse(segments, DEFAULT_RADIAL_SEGMENTS)) * detailScale);
 
 /** Primitive builders, each taking the resolved radial facet count. `box` is
  * flat-faceted by definition and ignores it. */
