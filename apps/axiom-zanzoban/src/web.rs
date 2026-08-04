@@ -139,7 +139,12 @@ pub fn zanzoban_start() {
     // sampled albedo is (1,1,1,1) and each draw's colour reduces to its per-
     // instance colour. The lit-mesh batch format wants 36 floats/instance.
     let meshes = vec![(0_u64, vertices, indices)];
-    let materials = vec![(0_u64, 1_u32, 1_u32, vec![255_u8, 255, 255, 255])];
+    let materials = vec![axiom_host::MaterialTexture::new(
+        0,
+        1,
+        1,
+        vec![255_u8, 255, 255, 255],
+    )];
     let _ = windowing.run_web_multi(CANVAS_ID, meshes, materials, MAX_INSTANCES, frame);
 }
 

@@ -21,7 +21,7 @@
 //! between them. The test suite asserts this by comparing the actual generated
 //! positions across every boundary on the course.
 
-use axiom::prelude::{MeshData, Vec2, Vec3};
+use axiom::prelude::{MeshData, Vec2};
 
 use crate::track::{Track, TrackSample};
 use crate::tuning::CourseTuning;
@@ -388,6 +388,9 @@ const RAIL_CURVATURE: f32 = 0.0012;
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the world-up comparison needs a raw vector now that the layer offsets
+    // are expressed along the surface normal.
+    use axiom::prelude::Vec3;
 
     fn track() -> Track {
         Track::generate(crate::DEFAULT_SEED, &CourseTuning::DEFAULT)
