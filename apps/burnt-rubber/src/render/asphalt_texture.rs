@@ -61,11 +61,29 @@
 //! therefore derived from the linear multipliers it must produce, not picked by
 //! eye — see [`byte_for_multiplier`].
 
-/// The texture's edge length in texels. Deliberately small: one tile covers
-/// [`TILE_METRES`] square of road (see below), so at 32 texels a texel is ~5 cm
-/// and a lattice cell ~19 cm — decimetre-scale grain, coarse enough to survive
-/// nearest-sampling in the near field, fine enough to read as aggregate.
-pub const RES: u32 = 32;
+/// The texture's edge length in texels. One tile covers [`TILE_METRES`] square
+/// of road (see below), so at 128 texels a texel is **~1.2 cm** — the size of a
+/// real chipping, which is the scale the word "aggregate" actually means.
+///
+/// It used to be 32, and that was the frame's most conspicuous surface defect.
+/// A 32-texel tile puts a texel at ~4.7 cm and a `LATTICE` cell at ~19 cm, and
+/// 19 cm is not a grain size — it is a *paving stone*. The smooth octave carries
+/// [`SMOOTH_SHARE`] of the amplitude, so that decimetre field is what the eye
+/// actually tracks, and the near road rendered as a regular quilt of rounded
+/// diamonds: embossed leather, or cobbles, not tarmac. The reference's asphalt
+/// at the same depth is a fine near-uniform micro-grain with no structure
+/// resolvable above a centimetre or two.
+///
+/// The fix is a pure change of *scale*, not of amplitude: `RES` and [`LATTICE`]
+/// are raised **together**, by the same factor, so `RES / LATTICE` — the texels
+/// per lattice cell, and therefore the interpolation slope between neighbours —
+/// is unchanged at 4. Every statistical claim this module makes survives
+/// untouched: the displayed variation stays at ~6% of the tarmac's value and the
+/// worst adjacent-texel step stays at the *same* 12.0 display levels it has
+/// always been (both re-measured; see the tests). What changes is only how much
+/// road one cycle of the pattern covers. 128 × 128 × RGBA is 64 KiB — a rounding
+/// error against a frame, and the one surface in the game that is never far away.
+pub const RES: u32 = 128;
 
 /// How much road, in metres, one tile of this texture covers — **in both axes**.
 ///
@@ -83,7 +101,17 @@ pub const TILE_METRES: f32 = 1.5;
 
 /// The smooth octave's cell count across the texture. `RES / LATTICE` texels per
 /// cell, so the low-frequency field changes slowly and minifies gracefully.
-const LATTICE: u32 = 8;
+///
+/// **This is locked to [`RES`] at 4 texels per cell**, and that ratio — not
+/// either number alone — is what the alias budget is bought with. Raising
+/// `LATTICE` on its own would steepen the interpolation between neighbouring
+/// texels and hand the road straight back to the sparkle the smooth octave
+/// exists to prevent; raising `RES` on its own would leave the decimetre quilt
+/// exactly where it was and merely dither it. They move together, and
+/// [`tests::the_grain_sits_at_the_physical_scale_of_aggregate`] pins the metres
+/// the result covers rather than the texels, which is the unit the defect was
+/// ever visible in.
+const LATTICE: u32 = 32;
 
 /// The darkest linear multiplier a texel may apply to the tarmac's base colour.
 const MIN_MULTIPLIER: f32 = 0.62;
@@ -308,6 +336,41 @@ mod tests {
         let one_texel = 1.0 / (RES / LATTICE) as f32;
         assert!(worst_x <= one_texel, "vertical seam across the tile: {worst_x}");
         assert!(worst_y <= one_texel, "horizontal seam across the tile: {worst_y}");
+    }
+
+    /// **The grain is the size of gravel, in metres.**
+    ///
+    /// Every other test here speaks in texels, and a texel is not a unit anyone
+    /// can see — the tile's metre coverage is what decides whether the result
+    /// reads as aggregate or as paving. The defect this pins was invisible to
+    /// all of them: at `RES = 32` the amplitude, the alias step and the seam
+    /// were all in budget while the road rendered a periodic quilt of 19 cm
+    /// blobs, because the *scale* was never asserted.
+    ///
+    /// The bounds are the physical thing they describe. Road-surface chippings
+    /// run roughly 5–14 mm, so a texel above ~1.5 cm cannot resolve one. The
+    /// smooth octave is the mix's patchiness rather than its stones, so it is
+    /// allowed to be coarser — but past ~6 cm it stops being a surface and
+    /// starts being masonry, which is exactly the failure being locked out.
+    #[test]
+    fn the_grain_sits_at_the_physical_scale_of_aggregate() {
+        let texel_metres = TILE_METRES / RES as f32;
+        let cell_metres = TILE_METRES / LATTICE as f32;
+        assert!(
+            texel_metres <= 0.015,
+            "a {:.1} cm texel cannot resolve a chipping",
+            texel_metres * 100.0
+        );
+        assert!(
+            cell_metres <= 0.06,
+            "the smooth octave repeats every {:.0} cm; past ~6 cm the road reads \
+             as paving stones rather than tarmac",
+            cell_metres * 100.0
+        );
+        // And the ratio the alias budget is actually bought with, stated once:
+        // four texels per cell, whatever the two constants are set to.
+        assert_eq!(RES / LATTICE, 4, "the smooth octave's slope has moved");
+        assert_eq!(RES % LATTICE, 0, "a cell that is not a whole number of texels");
     }
 
     #[test]
