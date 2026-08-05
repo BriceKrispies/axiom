@@ -52,21 +52,70 @@ pub struct ChunkMeshes {
     pub verge: MeshData,
 }
 
-/// How many chunks cover `track`.
-pub fn chunk_count(track: &Track) -> usize {
-    ((track.length() / CHUNK_LENGTH).ceil() as usize).max(1)
+/// The span of course one **paint** chunk covers (m).
+///
+/// Paint is chunked an order of magnitude finer than the surface it sits on,
+/// and only paint is. The reason is the Canvas 2D near-field window: that arm
+/// wants markings for the few metres around the car and nothing beyond, and a
+/// window can only ever be as sharp as the geometry it switches. At the
+/// surface's 100 m granularity "five metres ahead" rounds up to the whole
+/// hundred-metre chunk the car happens to be standing in — the window was
+/// nominally 50 m and actually delivered between 80 m and 150 m of markings
+/// depending on where in a chunk you were. Ten metres makes the window mean
+/// what it says.
+///
+/// The surface keeps its 100 m chunks: it is one continuous quad strip whose
+/// cost is per-triangle, and cutting it finer would multiply draw calls for
+/// geometry that is never culled early anyway.
+pub const PAINT_CHUNK_LENGTH: f32 = 10.0;
+
+/// How many chunks of `span` metres cover `track`.
+fn span_count(track: &Track, span: f32) -> usize {
+    ((track.length() / span).ceil() as usize).max(1)
 }
 
-/// The inclusive sample index range chunk `index` is built from.
+/// The inclusive sample index range the `index`-th chunk of `span` metres is
+/// built from.
 ///
 /// Both ends are inclusive, and consecutive chunks *share* their boundary index.
 /// That sharing is the whole crack-free guarantee — see the module docs.
-pub fn chunk_sample_range(track: &Track, index: usize) -> (usize, usize) {
-    let per_chunk = (CHUNK_LENGTH / track.spacing()).round().max(1.0) as usize;
+fn span_sample_range(track: &Track, index: usize, span: f32) -> (usize, usize) {
+    let per_chunk = (span / track.spacing()).round().max(1.0) as usize;
     let last = track.samples().len().saturating_sub(1);
     let start = (index * per_chunk).min(last);
     let end = ((index + 1) * per_chunk).min(last);
     (start, end)
+}
+
+/// How many chunks cover `track`.
+pub fn chunk_count(track: &Track) -> usize {
+    span_count(track, CHUNK_LENGTH)
+}
+
+/// The inclusive sample index range chunk `index` is built from.
+pub fn chunk_sample_range(track: &Track, index: usize) -> (usize, usize) {
+    span_sample_range(track, index, CHUNK_LENGTH)
+}
+
+/// How many **paint** chunks cover `track`.
+pub fn paint_chunk_count(track: &Track) -> usize {
+    span_count(track, PAINT_CHUNK_LENGTH)
+}
+
+/// Build the paint of paint-chunk `index` — the same markings
+/// [`build_chunk`] produces, cut at [`PAINT_CHUNK_LENGTH`] instead.
+///
+/// This is a second *chunking* of the paint, not a second idea of it: both go
+/// through [`strip_paint`], so a dash is in the same place, the same size and
+/// the same colour whichever set is on screen.
+pub fn build_paint_chunk(track: &Track, index: usize, tuning: &CourseTuning) -> MeshData {
+    let (start, end) = span_sample_range(track, index, PAINT_CHUNK_LENGTH);
+    let samples = &track.samples()[start..=end];
+    let mut paint = SurfaceBuilder::with_quad_capacity(samples.len() * 3);
+    for pair in samples.windows(2) {
+        strip_paint(&mut paint, track, &pair[0], &pair[1], tuning);
+    }
+    paint.build()
 }
 
 /// Build chunk `index` of `track`.

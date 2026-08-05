@@ -23,7 +23,10 @@ use axiom::prelude::{Entity, Handle, Material, Mesh, RunningApp, Spawn, Transfor
 use crate::track::Track;
 use crate::tuning::CourseTuning;
 
-use super::road_mesh::{build_chunk, chunk_count, CHUNK_LENGTH};
+use super::road_mesh::{
+    build_chunk, build_paint_chunk, chunk_count, paint_chunk_count, CHUNK_LENGTH,
+    PAINT_CHUNK_LENGTH,
+};
 
 /// Chunks drawn ahead of the car. At 100 m each this is 1.4 km of road — beyond
 /// the far plane's useful range, so nothing pops in even at boosted speed.
@@ -46,10 +49,23 @@ pub const CHUNKS_BEHIND: usize = 2;
 /// End Zone's rule is the one applied here: cull a marking while it is still
 /// several pixels across, never once it has decayed into an unstable fragment.
 ///
-/// Past 50 m the road's own converging edges and the tarmac/verge boundary
-/// carry the sense of distance — the job End Zone hands to broad turf bands
-/// rather than to lines.
-pub const PAINT_AHEAD_METRES: f32 = 50.0;
+/// Past the window the road's own converging edges and the tarmac/verge
+/// boundary carry the sense of distance — the job End Zone hands to broad turf
+/// bands rather than to lines.
+///
+/// Five metres, not the fifty this was: the markings the software raster draws
+/// well are the ones under and immediately in front of the car, where a dash is
+/// tens of pixels long. Everything past that was the shimmer. Note this is a
+/// *distance*, and it only became an honest one when paint got its own
+/// [`PAINT_CHUNK_LENGTH`] chunking — against the surface's 100 m chunks the same
+/// number bought between 80 m and 150 m of markings depending on where in a
+/// chunk the car happened to be.
+pub const PAINT_AHEAD_METRES: f32 = 5.0;
+
+/// How far *behind* the car road paint is drawn once the window is engaged,
+/// metres. Enough to cover the road under the car itself, which is 4.5 m long
+/// and drawn from a chase camera sitting further back again.
+pub const PAINT_BEHIND_METRES: f32 = 6.0;
 
 /// The four material-separated entities one chunk occupies.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,9 +87,18 @@ impl ChunkEntities {
 pub struct RoadChunks {
     chunks: Vec<ChunkEntities>,
     active: Option<(usize, usize)>,
-    /// The paint entities' own, shorter active range. `None` until the first
-    /// update after the window is engaged.
-    paint_active: Option<(usize, usize)>,
+    /// The near-field paint set: the same markings as the chunks' own `paint`,
+    /// cut at [`PAINT_CHUNK_LENGTH`] instead of [`CHUNK_LENGTH`].
+    ///
+    /// Two chunkings of one set of markings, and only ever one of them on
+    /// screen. The coarse set is what the GPU draws, because at 100 m a chunk it
+    /// is a dozen draw calls for the whole visible road. The fine set exists so
+    /// the Canvas 2D window can be *sharp* — a window is only as precise as the
+    /// geometry it switches, and switching 100 m chunks is how "five metres
+    /// ahead" turned into a hundred and fifty.
+    fine_paint: Vec<Entity>,
+    /// The fine paint set's active range, in paint-chunk indices.
+    fine_paint_active: Option<(usize, usize)>,
     /// Whether paint is culled to [`PAINT_AHEAD_METRES`] instead of running the
     /// full road distance. Set by the app from the backend it actually bound —
     /// see [`RoadChunks::limit_paint_to_near_field`].
@@ -118,10 +143,21 @@ impl RoadChunks {
                 verge: spawn_part(app, meshes.verge, materials.verge),
             });
         }
+        // The fine paint set. Retired like everything else, and never touched at
+        // all until an arm asks for the window — a GPU-only session pays for the
+        // meshes and not a draw call more.
+        let fine_paint = (0..paint_chunk_count(track))
+            .map(|index| {
+                let data = build_paint_chunk(track, index, tuning);
+                spawn_retired(app, data, materials.paint)
+            })
+            .collect();
+
         RoadChunks {
             chunks,
             active: None,
-            paint_active: None,
+            fine_paint,
+            fine_paint_active: None,
             paint_window: false,
             triangles,
         }
@@ -149,7 +185,6 @@ impl RoadChunks {
         // whole reason `update` is cheap — would never fire again.
         if changed {
             self.active = None;
-            self.paint_active = None;
         }
     }
 
@@ -158,25 +193,18 @@ impl RoadChunks {
         self.paint_window
     }
 
-    /// The chunk range road **paint** should occupy for a car at `distance`.
+    /// The **fine** paint-chunk range for a car at `distance` — the near-field
+    /// window, in [`PAINT_CHUNK_LENGTH`] units.
     ///
-    /// Without the window this is exactly [`Self::range_for`]. With it, the
-    /// range stops at the chunk a [`PAINT_AHEAD_METRES`] look-ahead lands in —
-    /// so the granularity is a chunk ([`CHUNK_LENGTH`] m), not a metre, and a
-    /// car entering a chunk keeps paint for up to a chunk further than the
-    /// nominal distance. That is deliberate: the alternative is rebuilding a
-    /// paint mesh every frame, and the flicker this exists to remove comes from
-    /// paint *hundreds* of metres out, which a chunk-granular window already
-    /// removes.
-    pub fn paint_range_for(&self, distance: f32) -> (usize, usize) {
-        let full = self.range_for(distance);
-        [
-            full,
-            (
-                full.0,
-                self.chunk_at(distance + PAINT_AHEAD_METRES).min(full.1),
-            ),
-        ][usize::from(self.paint_window)]
+    /// This is the window the player actually sees: markings from just behind
+    /// the car to [`PAINT_AHEAD_METRES`] in front of it, and nothing beyond.
+    /// The granularity is now ten metres rather than a hundred, so the number
+    /// means what it says to within one dash.
+    pub fn fine_paint_range_for(&self, distance: f32) -> (usize, usize) {
+        let last = self.fine_paint.len().saturating_sub(1);
+        let first = ((distance - PAINT_BEHIND_METRES).max(0.0) / PAINT_CHUNK_LENGTH) as usize;
+        let end = ((distance + PAINT_AHEAD_METRES).max(0.0) / PAINT_CHUNK_LENGTH) as usize;
+        (first.min(last), end.min(last))
     }
 
     /// How many chunks the course has.
@@ -229,25 +257,32 @@ impl RoadChunks {
             return false;
         }
         let wanted = self.range_for(distance);
-        let wanted_paint = self.paint_range_for(distance);
-        if self.active == Some(wanted) && self.paint_active == Some(wanted_paint) {
+        // `None` when the window is off, which is also what `fine_paint_active`
+        // reads once the fine set has been retired — so the early-out below is
+        // one comparison on the GPU path, exactly as it was.
+        let wanted_paint = self
+            .paint_window
+            .then(|| self.fine_paint_range_for(distance));
+        if self.active == Some(wanted) && self.fine_paint_active == wanted_paint {
             return false;
         }
         let previous = self.active;
-        let previous_paint = self.paint_active;
+        let previous_paint = self.fine_paint_active;
         self.active = Some(wanted);
-        self.paint_active = Some(wanted_paint);
-        // While the window is engaged, paint gets its own pass — its range is
-        // much shorter and so moves far more often than the surface range does,
-        // and riding the surface's early-out would leave markings a chunk behind
-        // the car. While it is off, `set_visible` owns the paint entity along
-        // with the other three and this pass does not run at all, so the GPU
-        // path is exactly what it was before the window existed.
-        if self.paint_window && previous_paint != Some(wanted_paint) {
-            for (index, chunk) in self.chunks.iter().enumerate() {
-                let show = index >= wanted_paint.0 && index <= wanted_paint.1;
-                app.set(chunk.paint, Visible(show));
+        self.fine_paint_active = wanted_paint;
+        // The two paint sets hand over to each other here, and exactly one of
+        // them is ever on screen. Engaging the window retires the coarse set the
+        // chunks own; releasing it retires the fine set. `set_paint_near_field_only`
+        // clears both ranges, so a `None` on either side *is* that transition.
+        match (previous_paint, wanted_paint) {
+            (_, Some(range)) => {
+                previous_paint
+                    .is_none()
+                    .then(|| self.retire_coarse_paint(app));
+                self.show_fine_paint(app, previous_paint, range);
             }
+            (Some(_), None) => self.retire_fine_paint(app),
+            (None, None) => {}
         }
         // Hide only what actually left the window, and show only what entered.
         if let Some((old_lo, old_hi)) = previous {
@@ -268,6 +303,53 @@ impl RoadChunks {
             }
         }
         true
+    }
+
+    /// Place the fine paint set: show what entered the window, hide what left.
+    ///
+    /// `previous` is `None` on the frame the window engages, and then every fine
+    /// chunk is written once — the set is a thousand entities and only a handful
+    /// are ever wanted, so the alternative is a thousand stale `Visible(true)`s
+    /// nobody clears.
+    fn show_fine_paint(
+        &self,
+        app: &mut RunningApp,
+        previous: Option<(usize, usize)>,
+        wanted: (usize, usize),
+    ) {
+        match previous {
+            Some((old_lo, old_hi)) => {
+                (old_lo..=old_hi)
+                    .filter(|i| *i < wanted.0 || *i > wanted.1)
+                    .for_each(|i| self.set_fine_paint(app, i, false));
+                (wanted.0..=wanted.1)
+                    .filter(|i| *i < old_lo || *i > old_hi)
+                    .for_each(|i| self.set_fine_paint(app, i, true));
+            }
+            None => (0..self.fine_paint.len())
+                .for_each(|i| self.set_fine_paint(app, i, i >= wanted.0 && i <= wanted.1)),
+        }
+    }
+
+    /// Hide every fine paint chunk — the fine set handing back to the coarse one.
+    fn retire_fine_paint(&self, app: &mut RunningApp) {
+        (0..self.fine_paint.len()).for_each(|i| self.set_fine_paint(app, i, false));
+    }
+
+    /// Hide every chunk's own paint — the coarse set handing over to the fine one.
+    fn retire_coarse_paint(&self, app: &mut RunningApp) {
+        self.chunks
+            .iter()
+            .for_each(|chunk| {
+                app.set(chunk.paint, Visible(false));
+            });
+    }
+
+    /// Show or hide one fine paint chunk.
+    fn set_fine_paint(&self, app: &mut RunningApp, index: usize, visible: bool) {
+        self.fine_paint
+            .get(index)
+            .map(|entity| app.set(*entity, Visible(visible)));
     }
 
     /// Show or hide one chunk's meshes.
@@ -432,25 +514,81 @@ mod tests {
         assert_eq!(before, after, "the same entities, never respawned");
     }
 
+    /// The window is a distance, and this is the test that makes it one.
+    ///
+    /// Against the surface's 100 m chunks the same `PAINT_AHEAD_METRES` bought
+    /// between 80 m and 150 m of markings depending on where in a chunk the car
+    /// stood — the window was nominally 50 m and never once delivered it. Paint
+    /// has its own chunking now, so the answer has to hold *wherever* the car is,
+    /// which is why this sweeps a whole chunk's worth of offsets rather than
+    /// checking one convenient distance.
     #[test]
-    fn the_paint_window_culls_markings_far_sooner_than_the_road_surface() {
+    fn the_paint_window_is_metres_of_road_wherever_the_car_stands() {
         let (_app, _track, mut road) = fixture();
-        // Off by default: paint runs exactly as far as the tarmac.
         assert!(!road.paint_is_near_field_only());
-        let distance = CHUNK_LENGTH * 3.0;
-        assert_eq!(road.paint_range_for(distance), road.range_for(distance));
-
         road.set_paint_near_field_only(true);
         assert!(road.paint_is_near_field_only());
-        let surface = road.range_for(distance);
-        let paint = road.paint_range_for(distance);
-        assert_eq!(paint.0, surface.0, "paint keeps the same chunks behind");
-        assert!(
-            paint.1 < surface.1,
-            "paint stops well short of the road: paint {paint:?} vs surface {surface:?}"
-        );
-        // Its edge is the look-ahead distance, not a chunk count.
-        assert_eq!(paint.1, road.chunk_at(distance + PAINT_AHEAD_METRES));
+
+        // One paint chunk of slack either side: the window switches whole
+        // chunks, so it can only ever be as sharp as one of them.
+        let slack = PAINT_CHUNK_LENGTH;
+        for offset in [0.0, 3.0, 17.0, 49.0, 83.0, 99.0] {
+            let distance = CHUNK_LENGTH * 3.0 + offset;
+            let (first, last) = road.fine_paint_range_for(distance);
+            let starts = first as f32 * PAINT_CHUNK_LENGTH;
+            let ends = (last + 1) as f32 * PAINT_CHUNK_LENGTH;
+            assert!(
+                ends > distance,
+                "there is always paint under and ahead of the car (offset {offset})"
+            );
+            assert!(
+                ends - distance <= PAINT_AHEAD_METRES + slack,
+                "markings run {:.0} m ahead at offset {offset}, not ~{PAINT_AHEAD_METRES}",
+                ends - distance
+            );
+            assert!(
+                distance - starts <= PAINT_BEHIND_METRES + slack,
+                "and {:.0} m behind, not the whole chunk",
+                distance - starts
+            );
+        }
+    }
+
+    /// The two paint sets are one set of markings cut two ways, and exactly one
+    /// is ever on screen: a frame showing both would double-draw every dash.
+    #[test]
+    fn only_one_of_the_two_paint_sets_is_ever_visible() {
+        let (mut app, _track, mut road) = fixture();
+        let distance = CHUNK_LENGTH * 3.0;
+        road.update(&mut app, distance);
+
+        let coarse_on = |app: &RunningApp, road: &RoadChunks| {
+            road.chunks
+                .iter()
+                .filter(|c| app.get::<Visible>(c.paint) == Some(Visible(true)))
+                .count()
+        };
+        let fine_on = |app: &RunningApp, road: &RoadChunks| {
+            road.fine_paint
+                .iter()
+                .filter(|e| app.get::<Visible>(**e) == Some(Visible(true)))
+                .count()
+        };
+
+        assert!(coarse_on(&app, &road) > 0, "the GPU path draws the coarse set");
+        assert_eq!(fine_on(&app, &road), 0, "and none of the fine one");
+
+        road.set_paint_near_field_only(true);
+        road.update(&mut app, distance);
+        assert_eq!(coarse_on(&app, &road), 0, "engaging retires the coarse set");
+        let near = fine_on(&app, &road);
+        assert!(near > 0, "and places the fine one");
+        assert!(near <= 3, "a handful of chunks, not the road: {near}");
+
+        road.set_paint_near_field_only(false);
+        road.update(&mut app, distance);
+        assert!(coarse_on(&app, &road) > 0, "releasing hands it back");
+        assert_eq!(fine_on(&app, &road), 0, "and retires the fine set");
     }
 
     #[test]
