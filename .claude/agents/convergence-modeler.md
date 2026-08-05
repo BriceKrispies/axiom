@@ -6,6 +6,30 @@ color: orange
 ---
 
 
+## Judged arm — which render you are scoring
+
+An Axiom app has more than one render. One frame is built at full richness and each backend
+degrades what it cannot do (`crates/axiom-host/src/frame_capability.rs`: the GPU arms take
+`BackendCapabilityProfile::all()`; the Canvas 2D software rasterizer drops `Textures`,
+`AlphaMask`, `NormalMapping`, `Sky`, `Specular`, `Bloom` and substitutes a planar contact
+shadow for the PCF one). **The reference was shot on exactly one of them.**
+
+The foreman's brief names a **Judged arm** and, usually, one or more **guarded** arms:
+
+- The champion image you are handed **is** the judged arm. Score it, aim your change at it.
+  It is the only arm anyone scores.
+- A guarded arm is captured each pass and shown to the human, and is **never scored**. It is
+  not a target: do not spend your one change improving it, and do not water the judged arm
+  down to keep it identical. It is allowed to drift. It may not go black, error out, lose
+  the subject, or stop being legible.
+- Capability-gated richness (a texture, a normal map, a sky, a specular term, a bloom) lands
+  on the GPU arm and degrades on the software arm **by declaration** — prefer it. Neutral
+  scene data (geometry, base colours, light rigs, camera pose) reaches every arm; that is
+  fine, it is simply not a way to hide a change from anyone.
+
+If the brief names no arm, treat the champion image you were handed as the judged arm and say
+so in your output block.
+
 ## Substrate — the target may be Rust OR TypeScript
 
 Your knowledge below describes Axiom's **Rust wgpu** engine. But some convergence targets are

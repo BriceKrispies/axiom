@@ -1,0 +1,91 @@
+# Convergence campaign — burnt-rubber
+#
+# The machine-readable half of this campaign: which app, which renderer arm is
+# JUDGED, which arms are only GUARDED, how to capture each of them, and the fixed
+# axis order. The foreman (/visual-convergence-propose) reads this in Step 1
+# instead of re-deriving the recipe from ledger prose.
+
+[campaign]
+slug = "burnt-rubber"
+app = "burnt-rubber"
+source_dir = "apps/burnt-rubber/"
+substrate = "Rust"                    # Rust wasm cdylib on axiom-windowing
+reference_era = "B"                   # bump when the user supplies a new reference
+reference_supplied = 2026-08-04
+
+# The moment both images must show: car stationary on the opening straight,
+# ~9 s elapsed, 0% progress, 0 near misses. The timer digits are NOT pinnable
+# (see ledger) — anything scored off them is scoring noise.
+moment = "opening straight, stationary, 0%, 0 near misses, ~0:09"
+
+# ---------------------------------------------------------------------------
+# Renderer arms
+# ---------------------------------------------------------------------------
+# The engine drives every backend from ONE full-richness frame and lets each
+# backend degrade what it cannot do (crates/axiom-host/src/frame_capability.rs).
+# This campaign therefore judges exactly one arm and merely guards the other.
+
+[arms]
+# The arm the scorecard, the ledger and every lens are aimed at. On this machine
+# WebGPU device creation fails (dxil.dll) and the cascade lands on WebGL2 — the
+# same hardware arm the reference was shot on. `gpu` here means "whichever
+# hardware backend the cascade binds", not specifically Dawn.
+judged = "gpu"
+
+# Captured every pass and shown to the human, but NOT scored and NOT a target.
+# A lens must never spend its change making this arm better, and must never
+# trade GPU-arm parity away to keep it identical. It may drift. It may not
+# become illegible or error out — that is a regression the foreman reports.
+guard = ["canvas2d"]
+guard_rule = "legibility, not parity"
+
+# ---------------------------------------------------------------------------
+# Capture
+# ---------------------------------------------------------------------------
+# The reference is a phone screenshot, so the champion must be one too: a live
+# browser at a phone viewport, not an axiom-shot native slice (different aspect,
+# no DOM HUD).
+#
+# GOTCHA 1: AXIOM_PW_* are read when the controller LAUNCHES the browser. If a
+#   daemon is already up from an earlier session it keeps its old viewport —
+#   `playwright_controller.py stop` first, or you silently capture a desktop
+#   frame at the wrong aspect.
+# GOTCHA 2: since 2f5ad14b the app opens on a start screen. The race must be
+#   started (Enter / Space / tap) or every frame is the title card.
+
+[capture]
+serve = "uv run scripts/localhost_servers.py start-app burnt-rubber --port 8085"
+viewport = "470x836"
+dpr = 2
+touch = true
+start_race = "window.dispatchEvent(new KeyboardEvent('keydown',{code:'Enter',key:'Enter',bubbles:true}))"
+settle_ms = 2500     # after goto, before starting the race
+hold_ms = 8600       # after starting, before the shot — lands the timer near 0:09
+
+[capture.judged]
+url = "http://localhost:8085/"                  # no ?backend= — take what the cascade binds
+expect_backend = "Gl"                           # console: "axiom: render backend = Gl"
+out = "champion.png"
+
+[capture.guard]
+url = "http://localhost:8085/?backend=canvas2d"
+expect_backend = "Canvas2d"
+out = "canvas-guard.png"
+
+# ---------------------------------------------------------------------------
+# Axes — fixed for the whole campaign; order is the tie-break for "lowest axis"
+# ---------------------------------------------------------------------------
+axes = [
+  "composition_and_framing",
+  "subject_fidelity",
+  "silhouette_readability",
+  "material_and_texture_detail",
+  "lighting_and_shadow",
+  "color_palette",
+  "contrast_and_exposure",
+  "depth_and_separation",
+  "atmosphere",
+  "scale_and_proportion",
+  "detail_density",
+  "artifact_level",
+]

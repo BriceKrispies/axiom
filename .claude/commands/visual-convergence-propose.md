@@ -49,7 +49,14 @@ capture recipe and Step-4's render use the app's **own capture script + `axiom-s
    `<target-dir>/reference.png` (absolute). Confirm both exist; if not, **ask**.
 4. **App/game name** + **source dir** (`apps/axiom-gallery/src/<name>/`, `apps/axiom-<name>/`,
    `games/<name>/`). If unknown, **ask**.
-5. **Capture recipe** for the render:
+5. **Judged arm + guarded arms** — read `<target-dir>/campaign.toml` `[arms]`
+   (`judged`, `guard`). The judged arm is the only arm scored, rendered as `champion.png`,
+   and named to every lens. Each guarded arm is captured to `<arm>-guard.png`, shown to the
+   human, and **never scored** — see the skill's §Judged renderer arm. If the campaign has
+   no `campaign.toml`, write one before the pass (arms, capture recipes, fixed axis order);
+   if the judged arm is genuinely ambiguous, **ask** — do not guess which backend the
+   reference was shot on.
+6. **Capture recipe** for the render:
    - **Rust target** (from the scorecard/manifest or the skill's Step 1): `--app`, `--backend`,
      `--tick`, any `--pose`/`--script`. Default `--backend gpu --tick 0`. (Some harnesses need
      `--features offscreen` — check the app's `axiom-shot` wiring.)
@@ -69,6 +76,9 @@ In a **single message**, spawn all seven with the `Agent` tool, **each `isolatio
 > Champion image (absolute): `<abs-champion-png>`
 > App/game: `<name>` · Substrate: `<Rust | TypeScript @axiom/web-engine>` · Source to edit in
 > YOUR worktree: `<source-dir>`
+> Judged arm: `<judged>` — the champion image IS that arm and it is the only arm scored.
+> Guarded arms: `<guard…>` — captured but never scored, never a target, allowed to drift,
+> must stay legible. Do not spend your change on them.
 > Base: `<base>`. **FIRST run `git reset --hard <base>`** (rebase onto the champion line — do
 > NOT skip). Then, from your lens alone, score the champion against the reference, pick the
 > flaw *you* see, and make ONE bounded commit per your definition: `--no-verify`, pinned
@@ -77,7 +87,9 @@ In a **single message**, spawn all seven with the `Agent` tool, **each `isolatio
 
 (`Substrate` names Rust-vs-TypeScript and the source dir only — it is NOT axis-steering. The
 lens's own **Substrate** section then tells it which files to reach for. Naming the substrate is
-required: without it a lens edits Rust paths that don't exist on a TS target.)
+required: without it a lens edits Rust paths that don't exist on a TS target. `Judged arm` is
+the same kind of fact — which of the app's renders the reference was shot on — and is likewise
+not axis-steering; every lens carries a **Judged arm** section that says what to do with it.)
 
 The seven `subagent_type`s: `convergence-art-director`, `convergence-modeler`,
 `convergence-lighting`, `convergence-surfacing`, `convergence-colorist`,
@@ -103,7 +115,10 @@ accumulating champion line, never squashed, never moved to `main` here.
 
 ## Step 4 — Render the champion + promote
 
-From the **champion worktree** (isolated `target/`), render with the Step-1 recipe.
+From the **champion worktree** (isolated `target/`), render **the judged arm** with the
+Step-1 recipe. Then render each **guarded arm** with its own recipe from `campaign.toml`
+`[capture.guard]` — same moment, same viewport, only the backend differs. The guard render
+is a check, not a candidate: it is never scored and never promoted over `champion.png`.
 
 **Rust target** — `axiom-shot`:
 ```sh
@@ -136,20 +151,28 @@ uv run "$WT/apps/<name>/web/browser/<capture-script>.py" --url "http://localhost
 netstat -ano | grep -E "[:.]$RPORT[[:space:]].*LISTENING" | awk '{print $NF}' | sort -u \
   | while read pid; do taskkill //PID "$pid" //F >/dev/null 2>&1; done
 ```
-Then **promote** it as the new champion on the line:
+Then **promote** it as the new champion on the line, alongside this pass's guard images:
 ```sh
-cp <scratch>/candidate.png .claude/worktrees/convergence-champion-<slug>/visual_targets/<slug>/champion.png
-git -C .claude/worktrees/convergence-champion-<slug> add visual_targets/<slug>/champion.png
+WTT=.claude/worktrees/convergence-champion-<slug>/visual_targets/<slug>
+cp <scratch>/candidate.png     $WTT/champion.png
+cp <scratch>/guard-<arm>.png   $WTT/<arm>-guard.png      # one per guarded arm
+git -C .claude/worktrees/convergence-champion-<slug> add visual_targets/<slug>
 git -C .claude/worktrees/convergence-champion-<slug> commit --no-verify -m "champion: promote pass render"
 ```
-(So the next pass automatically scores against this render.)
+(So the next pass automatically scores against this render.) The promote commit must also
+carry the pass's `scorecard.champion.toml` and `ledger.toml` updates — a one-file promote
+commit is how this campaign twice ended up with a scorecard describing an image that was no
+longer on disk.
 
 ## Step 5 — Show the human
 
 Composite **reference | before (prior champion) | after (this pass)** (PIL: equal height +
-label bars) and `SendUserFile` it with `display: "render"`. Report: which lenses committed
-vs `Change: none`/dropped; the architect's advisory (any spine commit + gates a real landing
-needs); the critic's re-score + next-attack axis. Keep it factual — no over-claiming parity.
+label bars) and `SendUserFile` it with `display: "render"`. Send the **guard** image(s)
+separately, labelled as the un-scored arm. Report: which lenses committed vs `Change:
+none`/dropped; the architect's advisory (any spine commit + gates a real landing needs);
+the critic's re-score + next-attack axis; and one line per guarded arm — **still legible /
+regressed**, with what broke if it regressed. Keep it factual — no over-claiming parity, and
+never present guard drift as either progress or damage without looking at it.
 
 ## Step 6 — Clean out the agent worktrees + the render server (keep the champion worktree)
 
@@ -179,3 +202,19 @@ it on `main`: rebase/cherry-pick the champion line onto then-current `main`, and
 commit run the four CI gates (`cargo xtask check-architecture`, coverage, dylint-gate,
 ts-gate) + GPU-verify wgpu changes. That landing is a separate, explicit human-approved step —
 never part of this command.
+
+**Landing is not finished until the champion is archived.** `champion.png` is overwritten by
+the next pass, so a landed champion that is only in git is progress nobody can see. As the last
+step of the landing, before it is called done:
+
+```sh
+T=visual_targets/<slug>
+SHA=$(git rev-parse --short HEAD)                  # the landed commit on main
+N=$(printf '%04d' $(( $(ls $T/champions/[0-9]*.png 2>/dev/null | wc -l) )))
+cp $T/champion.png $T/champions/$N-$(date +%F)-$SHA.png
+```
+
+Then add the row to `champions/INDEX.md` (index, date, commit, reference era, which lenses
+landed, lowest axis afterwards), regenerate `champions/contact-sheet.png` with the recipe in
+the skill's §Champion archive, and commit the archive on `main`. Archive **only** the judged
+arm — guard images are per-pass diagnostics, not history.

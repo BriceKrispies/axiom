@@ -1,0 +1,27 @@
+# Champion archive — burnt-rubber
+
+Every champion image that has **landed on `main`**, kept forever so the campaign's
+progress is visible without digging through git. `champion.png` one directory up is
+overwritten every pass; these are not.
+
+One row per landing, oldest first. `contact-sheet.png` is the same set tiled left to
+right behind the current reference — regenerate it whenever a row is added (recipe in
+`.claude/skills/visual-convergence/SKILL.md` § Champion archive).
+
+**Reference era** matters: a champion is only comparable to the reference it was scored
+against. When the user supplies a new reference the era letter advances, and scores do
+not carry across it.
+
+- **era A** — `b8010795`: stylized night straight, green conifers, lit apartment blocks,
+  a bright red car, blue horizon glow. Retired 2026-08-04.
+- **era B** — current: near-black night, no visible shoulders or skyline, a black
+  muscle car with twin stripes and glowing tail-light bars on wet glossy asphalt.
+  **Judged on the GPU/WebGL arm only** (see `../campaign.toml`).
+
+| # | Landed | Commit | Era | What landed | Lowest axis after |
+|---|---|---|---|---|---|
+| 0000 | 2026-08-01 | `b8010795` | A | Campaign seed — first live-browser capture at the reference moment. | `atmosphere` 0 |
+| 0001 | 2026-08-01 | `fc940ada` | A | Pass 1: art-director start grid, modeler fastback rear, surfacing tail lights, lighting night key/fill, architect forwards the authored render look to the live arm. | `atmosphere` 0 |
+| 0002 | 2026-08-01 | `8261e072` | A | Pass 2: emissive reaches the pixels, greenhouse chop, chase rig 15% closer, pool light, asphalt aggregate grain. | `atmosphere` 0 |
+| 0003 | 2026-08-01 | `fac33fc4` | A | Pass 3: prop-kind draw distances, chase eye at roof height, key aimed so its shadow lands in frame, asphalt grain tiled in world metres. | `contrast_and_exposure` 0 |
+| 0004 | 2026-08-04 | `main` | B | No convergence pass. Re-capture of `main` under the **new** era-B reference, after four unrelated app commits (start screen, phone rails, lane lattice, collision episodes) had moved the render out from under the era-A champion. Baseline for era B. | `contrast_and_exposure` 0 |

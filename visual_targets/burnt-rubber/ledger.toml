@@ -474,3 +474,89 @@ atmosphere = 0
 scale_and_proportion = 3
 detail_density = 2
 artifact_level = 3
+
+# ============================================================================
+# REFERENCE ERA B BEGINS HERE (2026-08-04)
+# ============================================================================
+# The user supplied a new reference and scoped the campaign to the WebGPU/WebGL
+# arm. Everything above this line was scored against the era-A reference
+# (retired; recoverable at b8010795:visual_targets/burnt-rubber/reference.png)
+# and does not compare to anything below it.
+#
+# Two structural changes come in with the era:
+#
+#  1. `campaign.toml` now holds the machine-readable half of the campaign —
+#     the judged arm (`gpu`), the guarded arm (`canvas2d`, legibility only,
+#     never scored, never a target), both capture recipes, and the fixed axis
+#     order. The foreman reads it instead of re-deriving the recipe from these
+#     header comments.
+#  2. `champions/` archives every champion that has landed on `main`, with an
+#     INDEX.md and a contact sheet, so progress survives champion.png being
+#     overwritten each pass. Backfilled with all four era-A champions.
+#
+# The capture recipe gained two steps since era A and both are load-bearing:
+# the controller daemon must be restarted for AXIOM_PW_VIEWPORT to apply (an
+# already-running daemon silently keeps its old desktop viewport), and the race
+# must be started with Enter/Space/tap or every frame is the start screen
+# 2f5ad14b added.
+
+[[iteration]]
+iteration = 5
+attacked_axis = "none"
+changed_files = [
+  "visual_targets/burnt-rubber/reference.png",
+  "visual_targets/burnt-rubber/champion.png",
+  "visual_targets/burnt-rubber/canvas-guard.png",
+  "visual_targets/burnt-rubber/campaign.toml",
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/champions/",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+Reference swap + recalibration, not a convergence pass. No lens ran and no app \
+source changed. The reference was replaced with the user's new era-B image \
+(925x1700: near-black night, black muscle car with stripes/badge/plate, wet \
+glossy asphalt, unbloomed posts) and the campaign was scoped to the judged GPU \
+arm. The era-A champion on disk was four commits stale — 8c3f408f, 67093433, \
+89560b17, 2f5ad14b had moved the render out from under it — so it was archived \
+to champions/0003 and main was re-captured at the same moment (0 KM/H, OPENING \
+STRAIGHT, 0%, 0 near misses, 0:09.200 against the reference's 0:09.117). The \
+Canvas 2D arm was captured alongside it as the first guard image. \
+scorecard_before/after below are NOT before-and-after of a change: before is \
+the last era-A scorecard, after is the era-B scoring of a re-captured render. \
+They are different exams and no movement between them is progress. \
+final_score 0.325 (era A) -> 0.30 (era B), lowest axis contrast_and_exposure 0 \
+in both.
+"""
+next_attacked_axis = "contrast_and_exposure"
+abstraction_introduced = false
+
+[iteration.scorecard_before]   # era A — the reference this scored is retired
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 2
+
+[iteration.scorecard_after]    # era B — a different exam, not an improvement
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 1
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 1

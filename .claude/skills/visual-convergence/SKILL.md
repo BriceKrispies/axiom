@@ -103,18 +103,61 @@ Mirror the `visual_targets/<name>/` layout, app-agnostic:
 
 ```
 <target-dir>/
+  campaign.toml                # app, substrate, judged arm, guarded arms, capture recipes, axis order
   reference.png                # the user's target image
-  champion.png                 # current best real screenshot (+ champion.gpu.png if two backends)
+  champion.png                 # current best real screenshot — always the JUDGED arm
   candidate.png                # latest candidate real screenshot
+  <arm>-guard.png              # one per guarded arm (e.g. canvas-guard.png) — captured, never scored
   scorecard.champion.toml      # champion's axis scores (hand-authored)
   scorecard.candidate.toml     # candidate's axis scores
   ledger.toml                  # append-only [[iteration]] log (schema below)
+  champions/                   # every champion that has LANDED on main (see Champion archive)
   abstractions/NNNN.toml       # justified structural changes (abstraction gate)
   diagnostics/                 # per-iteration diff/compare artifacts
   manifest.toml                # ONLY for visual-target manifest scenes
 ```
 
 The first real screenshot from Step 1 is the initial **champion**.
+
+`campaign.toml` is the machine-readable half of the campaign — what the foreman
+reads in Step 1 instead of re-deriving the recipe from ledger prose. See
+`visual_targets/burnt-rubber/campaign.toml` for a filled-in one.
+
+## Judged renderer arm
+
+Axiom drives every backend from **one full-richness frame** and lets each backend degrade
+what it cannot do (`crates/axiom-host/src/frame_capability.rs`: the GPU arms take
+`BackendCapabilityProfile::all()`, the Canvas 2D software rasterizer takes `canvas2d()`,
+which drops `Textures`, `AlphaMask`, `NormalMapping`, `Sky`, `Specular`, `Bloom` and
+substitutes a planar contact shadow for the PCF one). So the same app has more than one
+render, and **a reference was shot on exactly one of them.**
+
+A campaign therefore declares, in `campaign.toml`:
+
+```toml
+[arms]
+judged = "gpu"                        # the arm every score, lens and decision is aimed at
+guard  = ["canvas2d"]                 # captured every pass, shown to the human, NEVER scored
+guard_rule = "legibility, not parity"
+```
+
+- **The judged arm is the only arm that is scored.** `champion.png`,
+  `scorecard.*.toml` and every ledger score describe it. Pick the arm the reference
+  was actually shot on; if you don't know, ask.
+- **A guarded arm is captured, shown, and left alone.** It is not a target: a lens must
+  never spend its one change making the guarded arm better, and must never trade
+  judged-arm parity away to keep the guarded arm identical. It is allowed to drift.
+  What it may not do is **break** — go black, error out, lose the subject, or stop being
+  legible. That is a regression the foreman reports and the human decides on.
+- **Most richness is arm-scoped for free.** A texture, a normal map, a sky gradient, a
+  specular term or a bloom is capability-gated, so it lands on the GPU arm and the
+  software arm degrades it as declared. Prefer those. What is *not* free is neutral
+  scene data — geometry, base colours, light rigs, camera pose — which reaches every
+  arm. That is fine (the guarded arm may drift); it is simply not a way to hide a
+  change from the gate.
+- **Never lower the judged arm to keep a guarded arm happy.** If the reference needs
+  something the guarded arm cannot express, that is exactly what the capability system
+  is for. The fix is a declared degradation, never a lesser scene.
 
 ## Step 3 — Choose the axes (once per campaign, then keep them fixed)
 
@@ -218,6 +261,58 @@ material_and_texture_detail = 3
 ```
 (For a `visual-target` manifest scene, `visual-target review` writes this for you.)
 
+## Champion archive — keep every landed champion
+
+`champion.png` is **overwritten** every time a candidate is promoted, so by design the
+campaign directory only ever holds the newest render. The history of how the app actually
+looked is then recoverable only by digging shas out of git, which nobody does. So:
+
+> **Every champion that lands on `main` is copied into `<target-dir>/champions/` and kept
+> forever.** Archive on landing — not on promotion. A champion that only ever lived on a
+> convergence branch is not history; a champion that is on `main` is what the app looks
+> like, and that is the progress worth seeing.
+
+```
+<target-dir>/champions/
+  0000-<yyyy-mm-dd>-<sha>.png   # one per landing, oldest first, never edited or deleted
+  0001-<yyyy-mm-dd>-<sha>.png
+  INDEX.md                      # one row per landing + the reference-era key
+  contact-sheet.png             # reference first, then every champion, left to right
+```
+
+Do this as the **last step of landing** (after the champion line is merged to `main`, in
+the same commit as the merge or immediately after it):
+
+1. `cp <target-dir>/champion.png <target-dir>/champions/NNNN-<date>-<sha>.png` — `NNNN`
+   is the next landing index, `<sha>` the landed commit.
+2. Add one row to `champions/INDEX.md`: index, date, commit, reference era, what landed
+   (which lenses, in one line), and the lowest axis afterwards.
+3. Regenerate `contact-sheet.png`:
+   ```python
+   from PIL import Image, ImageDraw; import glob, os
+   T = '<target-dir>'
+   tiles = [(T+'/reference.png','REFERENCE')] + [(p, os.path.basename(p)[:-4])
+            for p in sorted(glob.glob(T+'/champions/0*.png'))]
+   H, BAR, PAD = 520, 26, 8
+   ims = [(Image.open(p).convert('RGB'), lab) for p, lab in tiles]
+   ims = [(im.resize((max(1,int(im.width*H/im.height)), H), Image.LANCZOS), lab) for im, lab in ims]
+   W = sum(i.width for i,_ in ims) + PAD*(len(ims)+1)
+   sheet = Image.new('RGB', (W, H+BAR+PAD*2), (16,16,18)); d = ImageDraw.Draw(sheet); x = PAD
+   for im, lab in ims:
+       sheet.paste(im, (x, PAD+BAR)); d.text((x+3, PAD+7), lab, fill=(225,225,230)); x += im.width + PAD
+   sheet.save(T+'/champions/contact-sheet.png')
+   ```
+4. Commit the archive with the landing.
+
+**Reference eras.** A champion is only comparable to the reference it was scored against.
+When the user supplies a **new** reference, the campaign enters a new era: bump
+`reference_era` in `campaign.toml`, record the era key in `champions/INDEX.md` (what
+changed, and the sha the old `reference.png` is recoverable from), re-score the champion
+from scratch, and say plainly in the ledger that no score movement across the era
+boundary is progress — it is a different exam. Do **not** carry scores across an era, and
+do not delete the older champions: the contact sheet spanning both eras is the record of
+what the app has actually looked like.
+
 ## Abstraction gate
 
 A **new primitive / structural change** (a new manifest field, a new engine capability, a
@@ -261,9 +356,10 @@ in a **layer or module** (`crates/*`, `modules/*`), it must ship green:
 
 ## Notes / gotchas
 
-- **Canvas 2D is flat-shaded and ignores textures/normal maps** — texture + normal-map
-  richness is GPU-only; canvas2d keeps a legible flat proxy (per the capability system). Score
-  the backend the reference implies.
+- **Canvas 2D is flat-shaded and ignores textures/normal maps** — texture, normal-map, sky,
+  specular and bloom richness is GPU-only; canvas2d keeps a legible flat proxy (per the
+  capability system). Score the arm the reference was shot on and guard the other — see
+  §Judged renderer arm. Never score two arms on one scorecard.
 - **Match the moment.** For a game, the screenshot must capture the same camera/tick/state the
   reference shows, or the axes are comparing different things.
 - **Reference-derived composites** (side-by-side comparison images you build for review) are
