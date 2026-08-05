@@ -384,7 +384,7 @@ fn view_projection(pose: &CameraPose, aspect: f32) -> Mat4 {
 ///
 /// The key is held at roughly half power. Its *direction* was never the
 /// problem — the flaw was the level. At full intensity, tarmac authored at a
-/// deliberately near-black `0.085` still lands on screen around a mid slate,
+/// deliberately near-black [`palette::TARMAC`] still lands on screen around a mid slate,
 /// which is what turned a night stage into a grey overcast one: the exposure,
 /// not the paint, was daylight. Halving the key drops the road to the dark
 /// asphalt its albedo was chosen for and leaves the markings, the reflector

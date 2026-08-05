@@ -134,6 +134,40 @@ pub const SKY_ZENITH: [f32; 3] = [0.0003, 0.0006, 0.0012];
 /// glow is wrong; this only has to clear `1.0` to say "radiance, not paint".
 pub const MOON: [f32; 3] = [1.25, 1.32, 1.5];
 
+/// The tarmac's own colour — the largest surface in any frame, and therefore the
+/// one that decides the **colour temperature of the whole shot**.
+///
+/// It was `[0.085, 0.088, 0.105]`: a deliberate blue tilt, blue a quarter above
+/// red. That reads as a reasonable choice in isolation and is wrong in context,
+/// because it is the *third* blue-weighted term stacked on the same pixels. The
+/// hemisphere ambient's sky colour is blue by 1.9× red, the depth fog fades into
+/// a [`SKY`] blue by 2.3×, and the moon and its key light are cool by authorship.
+/// Multiply a blue albedo by a blue light under a blue fog and the road does not
+/// read as *lit coolly* — it reads as **navy**, which is what the champion's
+/// lower half is and what the reference's is not. Measured against the reference,
+/// the champion's near tarmac carries a blue excess of roughly a third over red
+/// where the reference's is neutral-to-warm.
+///
+/// The physical fact the old value contradicted: bitumen is a warm near-black.
+/// Real asphalt is neutral with a brown tilt, and every cool cast a night road
+/// carries is the *moon's*, not the road's. Putting the cool in the light and
+/// keeping it out of the surface is exactly what gives the reference its
+/// warm-neutral near lane under a cold sky, instead of one flat blue wash — the
+/// near road is where the car's own warm pool light wins, and the far road, lit
+/// by nothing but ambient and fog, stays cold. A blue albedo erases that split.
+///
+/// So this is a **pure hue rotation, not an exposure change**: red and blue swap
+/// roles at the same magnitude (blue was 1.24× red; red is now 1.19× blue), and
+/// the Rec.709 luminance is held at `0.0889` against the old `0.0886` — a 0.3%
+/// difference, below a display level. Nothing here lifts or crushes the frame,
+/// so it cannot disturb the black point the grade is spending on the floor, and
+/// the software arm — which sees the same albedo through a different shader —
+/// changes colour without changing brightness.
+///
+/// Named once because it was written out four times (two material arms and two
+/// tests) and a colour authored in four places is a colour that drifts.
+pub const TARMAC: [f32; 3] = [0.095, 0.088, 0.080];
+
 /// Register the four road materials.
 ///
 /// The tarmac is the one material here that carries a **texture**: it is the
@@ -148,10 +182,12 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
         .add_texture_data(ASPHALT_RES, ASPHALT_RES, asphalt_albedo())
         .ok();
     RoadMaterials {
-        // Asphalt: dark, and slightly blue so it separates from the verge. The
-        // grain multiplies this base colour (the shader computes
-        // `albedo * colour`), so the hue lives here and only the shading is
-        // sampled.
+        // Asphalt: dark, and neutral-warm — see [`TARMAC`] for why the hue is
+        // the road's single most consequential number and why it is no longer
+        // blue. It still separates from the verge, which is green and half a
+        // stop brighter. The grain multiplies this base colour (the shader
+        // computes `albedo * colour`), so the hue lives here and only the
+        // shading is sampled.
         // `roughness` is what decides how much of the moon the tarmac throws
         // back. It is not decoration on a night stage: a matte road reflects the
         // moon nowhere, so the brightest object in the sky leaves no mark on the
@@ -167,7 +203,7 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
         surface: app.add_material(
             asphalt
                 .map(|t| {
-                    Material::lit(rgb(0.085, 0.088, 0.105))
+                    Material::lit(rgb(TARMAC[0], TARMAC[1], TARMAC[2]))
                         .with_custom_texture(t.id())
                         .with_roughness(ratio(0.68))
                         // The tarmac is the one surface in this game that runs
@@ -185,7 +221,7 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
                         .with_texture_sampling(TextureSampling::Anisotropic)
                 })
                 .unwrap_or_else(|| {
-                    Material::lit(rgb(0.085, 0.088, 0.105)).with_roughness(ratio(0.68))
+                    Material::lit(rgb(TARMAC[0], TARMAC[1], TARMAC[2])).with_roughness(ratio(0.68))
                 }),
         ),
         // Paint: a real white pigment plus a low emissive floor, so the lane
@@ -464,7 +500,7 @@ mod tests {
     #[test]
     fn the_road_is_dark_and_the_speed_cues_are_bright() {
         let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
-        let asphalt = luminance([0.085, 0.088, 0.105]);
+        let asphalt = luminance(TARMAC);
         // Paint reads as its pigment PLUS its emissive floor — the second term is
         // what keeps the markings white inside the tunnel and under the night sky.
         let paint = luminance([0.72, 0.73, 0.70]) + luminance([0.30, 0.30, 0.28]);
@@ -478,6 +514,43 @@ mod tests {
         // conversion this lands around 0.13 on screen, which is the night it
         // looks like rather than the black it reads as here.
         assert!(luminance(SKY) < 0.03, "and the sky is dark enough to see them against");
+    }
+
+    /// The colour-temperature rule, pinned: **the cool on this stage belongs to
+    /// the light, not to the road.**
+    ///
+    /// Three terms already tint the tarmac blue — the hemisphere ambient's sky
+    /// colour, the depth fog's [`SKY`], and the moon key. A blue albedo under all
+    /// three is what turns a moonlit road into a navy wash, and it is the one of
+    /// the four that is a *surface* property and therefore simply wrong: bitumen
+    /// is a warm near-black. So the tarmac is asserted warm-side-of-neutral, and
+    /// asserted to have been rotated in hue *without* being re-exposed — a future
+    /// edit that "fixes" the road by brightening it is not this rule.
+    #[test]
+    fn the_tarmac_is_warm_neutral_and_the_night_gets_its_cool_from_the_light() {
+        let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
+        assert!(
+            TARMAC[0] > TARMAC[2],
+            "the road is bitumen, not water: it may not be authored blue ({TARMAC:?})"
+        );
+        // Warm, but asphalt — not terracotta. A red/blue ratio past ~1.4 stops
+        // reading as a road surface and starts reading as a tinted one.
+        assert!(TARMAC[0] / TARMAC[2] < 1.4, "the tarmac is warm-neutral, not orange");
+        // A hue rotation, not an exposure change: the grade's black point is
+        // spending its whole budget on the frame's floor, and a brighter road
+        // would take that back. Held within 2% of the value this replaced.
+        assert!(
+            (luminance(TARMAC) - 0.0886).abs() < 0.002,
+            "the tarmac changed brightness, not just hue: {:?}",
+            luminance(TARMAC)
+        );
+        // And the cool the frame does carry is still the light's: the ambient
+        // that lands on this surface is blue-weighted by a wide margin.
+        let ambient_sky = [0.014_f32, 0.016, 0.026];
+        assert!(
+            ambient_sky[2] > ambient_sky[0] * 1.5,
+            "the moonlit ambient is no longer the cool in the frame"
+        );
     }
 
     /// The rule the module docs explain, inverted now that emissive is real:
@@ -499,7 +572,7 @@ mod tests {
             ("spark", [0.24, 0.18, 0.06], [1.0, 0.78, 0.28]),
             ("finish", [0.08, 0.22, 0.16], [0.26, 1.0, 0.66]),
         ];
-        let asphalt = luminance([0.085, 0.088, 0.105]);
+        let asphalt = luminance(TARMAC);
         for (name, albedo, emissive) in glowing {
             // The emitted light is what makes it bright, and it is bright: its
             // peak channel is at or near full and nothing in the shader scales it.
