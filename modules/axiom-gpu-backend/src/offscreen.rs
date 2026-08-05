@@ -220,7 +220,10 @@ pub(crate) fn render_to_rgba(
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("axiom-offscreen-post"),
             });
-            chain.record(&queue, &mut encoder, &post_view, Some(&bloom));
+            // No grade here: this arm reads the frame back and runs
+            // `apply_frame_postprocess` over the bytes below, which is the same
+            // arithmetic. Passing it twice would grade the frame twice.
+            chain.record(&queue, &mut encoder, &post_view, Some(&bloom), None);
             queue.submit(std::iter::once(encoder.finish()));
             post_texture
         });

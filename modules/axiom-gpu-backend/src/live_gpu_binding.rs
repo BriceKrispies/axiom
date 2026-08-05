@@ -46,6 +46,12 @@ pub struct LiveGpuBinding {
     /// chain because the chain owns pipelines and targets (which are sized at
     /// bind) while these are the per-record tunables.
     bloom: Option<axiom_host::FrameBloom>,
+    /// The authored colour grade the composite presents through, on the same
+    /// terms as `bloom`. This is the live arm's half of
+    /// `axiom_host::apply_frame_postprocess`: the off-screen and Canvas 2D arms
+    /// run that loop over their read-back bytes, and a swap-chain frame — which
+    /// never becomes bytes — folds the identical arithmetic into the composite.
+    grade: Option<axiom_host::FramePostProcess>,
     renderer: SceneRenderer,
     /// The 2D quad renderer (SPEC-04), the same `Draw2dRenderer` the off-screen
     /// parity path uses. It is built for the **linear** (non-sRGB) view of the
@@ -329,13 +335,20 @@ impl LiveGpuBinding {
             &intermediate_view,
             wgpu::FilterMode::Nearest,
         );
-        // The bloom chain, built only when the app authored bloom. A look with none
-        // keeps the plain blit: the chain's composite is a fourth fullscreen pass
-        // that would cost every non-blooming app three extra passes a frame to
-        // produce a copy. Built at bind, like the ambient and the fog, because the
-        // pipelines and the half-resolution targets are sized from the surface —
-        // the same contract the rest of the render look already has.
-        let post = look.bloom().map(|_| {
+        // The post chain, built only when the app authored something for it to do
+        // — bloom **or** a colour grade. A look with neither keeps the plain blit:
+        // the chain's composite is a fourth fullscreen pass that would cost every
+        // plain app three extra passes a frame to produce a copy. Built at bind,
+        // like the ambient and the fog, because the pipelines and the
+        // half-resolution targets are sized from the surface — the same contract
+        // the rest of the render look already has.
+        //
+        // The grade has to be able to build it on its own: an app that wants its
+        // finished frame graded and nothing bloomed would otherwise fall through
+        // to the blit and present ungraded, which is precisely the divergence
+        // carrying the grade on the look exists to close.
+        let wants_post = look.bloom().is_some() | look.grade().is_some();
+        let post = wants_post.then(|| {
             crate::post_chain::PostChain::new(
                 &device,
                 format,
@@ -359,8 +372,10 @@ impl LiveGpuBinding {
             depth_view,
             upscale,
             post,
-            // The authored bloom parameters the chain is recorded with each frame.
+            // The authored bloom parameters and colour grade the chain is
+            // recorded with each frame.
             bloom: look.bloom(),
+            grade: look.grade(),
             renderer,
             draw2d,
             draw2d_format,
@@ -444,15 +459,21 @@ impl LiveGpuBinding {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("axiom-upscale-encoder"),
             });
-        // Bloom, when the app authored it: bright-pass → separable blur →
-        // tonemapped composite, straight into the swapchain view. The composite is
-        // itself a fullscreen triangle sampling the intermediate with a linear
-        // filter, so it upscales for free and replaces the blit rather than
-        // following it. Without bloom the plain blit runs, byte-for-byte as before.
-        let bloomed = self
-            .post
-            .as_ref()
-            .map(|chain| chain.record(&self.queue, &mut encoder, &view, self.bloom.as_ref()));
+        // The post chain, when the app authored bloom or a grade: bright-pass →
+        // separable blur → tonemapped, graded composite, straight into the
+        // swapchain view. The composite is itself a fullscreen triangle sampling
+        // the intermediate with a linear filter, so it upscales for free and
+        // replaces the blit rather than following it. With neither the plain blit
+        // runs, byte-for-byte as before.
+        let bloomed = self.post.as_ref().map(|chain| {
+            chain.record(
+                &self.queue,
+                &mut encoder,
+                &view,
+                self.bloom.as_ref(),
+                self.grade.as_ref(),
+            )
+        });
         bloomed
             .is_none()
             .then(|| self.upscale.record(&mut encoder, &view));

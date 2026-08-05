@@ -11,6 +11,15 @@
 //! graded look is identical no matter which renderer produced the frame.
 //!
 //! The grade is the standard LDR "filmic look" chain, in order, per pixel:
+//! 0. **black point** — subtract the frame's black floor and renormalize,
+//!    `max(v - black, 0) / (1 - black)`, so the darkest thing the raster produced lands on
+//!    true black while white stays white. This is the term a **low-key** frame needs and
+//!    the one the rest of the chain structurally cannot supply: exposure is a *multiply*
+//!    (it scales a lifted floor, it never removes it), and the contrast S-curve pivots on
+//!    `0.5`, so on a night frame whose every pixel sits below `0.2` any `contrast > 1`
+//!    drives the whole image negative and clamps it to a black rectangle. A floor is a
+//!    *subtract*; there was no subtract in the chain. `black = 0` is the exact identity,
+//!    so every frame authored before this term existed is byte-identical;
 //! 1. **exposure + white balance** — scale each channel by the global exposure and by its
 //!    own per-channel white-balance gain (a `< 1` red / `> 1` blue gain cools a warm frame
 //!    toward daylight; neutral `[1, 1, 1]` is the identity). White balance rides here, with
@@ -35,32 +44,61 @@ use crate::frame_packet::FramePacket;
 /// (`[1.0, 1.0, 1.0]` = neutral; drop red / lift blue to cool toward daylight), `contrast`
 /// is the S-curve strength around the 0.5 pivot (`1.0` = unchanged, `>1` deepens), and
 /// `saturation` scales the distance of each channel from the pixel's luma (`1.0` =
-/// unchanged, `>1` richer). Presence of a `FramePostProcess` on a [`FramePacket`] *is* the
-/// enable.
+/// unchanged, `>1` richer). `black_point` is the display-encoded floor subtracted and
+/// renormalized away before any of them (`0.0` = unchanged). Presence of a
+/// `FramePostProcess` on a [`FramePacket`] *is* the enable.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FramePostProcess {
     exposure: f32,
     white_balance: [f32; 3],
     contrast: f32,
     saturation: f32,
+    black_point: f32,
 }
 
 impl FramePostProcess {
-    /// Assemble grade parameters. Crate-internal: the public constructor is
-    /// [`FramePostProcess::cinematic`] (a preset), so no naked tuning scalar crosses the
-    /// module facade.
+    /// Assemble grade parameters. Crate-internal: the public constructors are
+    /// [`FramePostProcess::cinematic`] and [`FramePostProcess::low_key`] (presets), so no
+    /// naked tuning scalar crosses the module facade.
     pub(crate) const fn new(
         exposure: f32,
         white_balance: [f32; 3],
         contrast: f32,
         saturation: f32,
+        black_point: f32,
     ) -> Self {
         FramePostProcess {
             exposure,
             white_balance,
             contrast,
             saturation,
+            black_point,
         }
+    }
+
+    /// The global exposure scale.
+    pub const fn exposure(&self) -> f32 {
+        self.exposure
+    }
+
+    /// The per-channel white-balance gain.
+    pub const fn white_balance(&self) -> [f32; 3] {
+        self.white_balance
+    }
+
+    /// The contrast S-curve strength around the `0.5` pivot.
+    pub const fn contrast(&self) -> f32 {
+        self.contrast
+    }
+
+    /// The saturation scale about the pixel's Rec.709 luma.
+    pub const fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    /// The display-encoded black floor removed before the rest of the chain.
+    pub const fn black_point(&self) -> f32 {
+        self.black_point
     }
 
     /// The public constructor: a tuned filmic preset that counters a washed-out,
@@ -79,14 +117,45 @@ impl FramePostProcess {
     /// contrast eased so shadows deepen without clipping to black, and saturation tamed so
     /// the vivid albedo stays vivid rather than radioactive.
     pub const fn cinematic() -> Self {
-        FramePostProcess::new(1.02, [0.98, 1.0, 1.06], 1.10, 1.18)
+        FramePostProcess::new(1.02, [0.98, 1.0, 1.06], 1.10, 1.18, 0.0)
+    }
+
+    /// The **low-key** preset: a pure black-point lift-removal, everything else neutral.
+    ///
+    /// A night raster's problem is never its highlights — a moon, a headlamp and a lane
+    /// marking all reach the top of the range on their own. Its problem is that the
+    /// *floor* never reaches the bottom: a hemisphere ambient lights the lit and the unlit
+    /// face equally, an atmospheric fog adds a constant to everything far away, and each
+    /// one is a term that can be reduced but not driven to zero without also erasing the
+    /// shadowed side of every object that needs to stay readable. The result is a frame
+    /// whose whites are correct and whose blacks sit a tenth of the way up the range —
+    /// which the eye reads as *grey daylight, dimmed*, not as night.
+    ///
+    /// Removing that floor is one subtract on the finished image, and it is the only
+    /// operation in this chain that leaves the highlights where they are: `0.16` maps a
+    /// raster floor of ≈`0.18` to ≈`0.03` and a highlight of `0.82` to `0.79`. Exposure,
+    /// white balance, contrast and saturation are all held at their identity, because a
+    /// low-key frame has no midtones to separate and a mid-pivot contrast would crush the
+    /// image it is meant to deepen.
+    pub const fn low_key() -> Self {
+        FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 1.0, 1.0, 0.16)
     }
 }
 
-/// Grade one RGBA8 pixel's R/G/B in place (alpha untouched): (exposure × white-balance) →
-/// contrast S-curve → saturation toward Rec.709 luma → clamp + re-quantize. Pure arithmetic.
+/// Grade one RGBA8 pixel's R/G/B in place (alpha untouched): black-point floor removal →
+/// (exposure × white-balance) → contrast S-curve → saturation toward Rec.709 luma → clamp +
+/// re-quantize. Pure arithmetic.
+///
+/// The floor is removed **first**, on the display-encoded value, because that is the space
+/// the lift lives in: the raster wrote a byte, and "no pixel is darker than 46/255" is a
+/// statement about bytes. `(1 - black)` is floored so a degenerate `black_point` of `1.0`
+/// cannot divide by zero; the trailing `max(0)` is what makes the subtract a floor removal
+/// rather than a sign flip.
 fn grade_pixel(px: &mut [u8], pp: &FramePostProcess) {
-    let lin = |b: u8, wb: f32| f32::from(b) / 255.0 * pp.exposure * wb;
+    let floored = |b: u8| {
+        ((f32::from(b) / 255.0 - pp.black_point) / (1.0 - pp.black_point).max(1.0e-6)).max(0.0)
+    };
+    let lin = |b: u8, wb: f32| floored(b) * pp.exposure * wb;
     let contrast = |v: f32| (v - 0.5) * pp.contrast + 0.5;
     let (r, g, b) = (
         contrast(lin(px[0], pp.white_balance[0])),
@@ -155,7 +224,7 @@ mod tests {
         assert_eq!(c.white_balance, [0.98, 1.0, 1.06]);
         assert_eq!(c.contrast, 1.10);
         assert_eq!(c.saturation, 1.18);
-        let n = FramePostProcess::new(0.5, [0.3, 0.6, 0.9], 2.0, 0.25);
+        let n = FramePostProcess::new(0.5, [0.3, 0.6, 0.9], 2.0, 0.25, 0.5);
         assert_eq!(n.exposure, 0.5);
         assert_eq!(n.white_balance, [0.3, 0.6, 0.9]);
         assert_eq!(n.contrast, 2.0);
@@ -179,7 +248,7 @@ mod tests {
     fn identity_grade_returns_count_and_preserves_pixel_and_alpha() {
         // exposure 1, neutral white balance, contrast 1, saturation 1 → the grade is the
         // identity map.
-        let pp = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 1.0, 1.0);
+        let pp = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 1.0, 1.0, 0.0);
         let mut rgba = vec![80u8, 160, 240, 200, 0, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0];
         let count = apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(pp)));
         assert_eq!(count, 4);
@@ -191,7 +260,7 @@ mod tests {
     fn exposure_only_scales_and_clamps() {
         // neutral white balance + contrast 1 + saturation 1 → grade reduces to the exposure
         // scale.
-        let pp = FramePostProcess::new(2.0, [1.0, 1.0, 1.0], 1.0, 1.0);
+        let pp = FramePostProcess::new(2.0, [1.0, 1.0, 1.0], 1.0, 1.0, 0.0);
         let mut rgba = vec![100u8, 200, 0, 77, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(pp)));
         assert_eq!(rgba[0], 200); // 100/255*2 = 0.784 → 200
@@ -205,7 +274,7 @@ mod tests {
         // exposure 1 + contrast 1 + saturation 1 → the grade reduces to the per-channel
         // white-balance gain: a mid-grey pixel splits by channel (red boosted, green held,
         // blue halved), which uniform exposure alone could never do.
-        let pp = FramePostProcess::new(1.0, [2.0, 1.0, 0.5], 1.0, 1.0);
+        let pp = FramePostProcess::new(1.0, [2.0, 1.0, 0.5], 1.0, 1.0, 0.0);
         let mut rgba = vec![128u8, 128, 128, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(pp)));
         assert_eq!(rgba[0], 255); // 128/255*2 = 1.004 → clamp 255
@@ -218,7 +287,7 @@ mod tests {
     fn contrast_deepens_darks_and_lifts_lights() {
         // contrast 2 around the 0.5 pivot: a dark channel collapses toward 0, a light
         // one saturates toward 1, a mid stays put (neutral WB + saturation 1 keep channels).
-        let pp = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 2.0, 1.0);
+        let pp = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 2.0, 1.0, 0.0);
         let mut rgba = vec![64u8, 192, 128, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(pp)));
         assert_eq!(rgba[0], 1); // (0.251-0.5)*2+0.5 = 0.002 → 1
@@ -230,7 +299,7 @@ mod tests {
     fn saturation_pushes_channels_from_luma_but_leaves_grey() {
         // A warm pixel gets more saturated (R up, B toward 0); a neutral-grey pixel is
         // unchanged because every channel already equals the luma.
-        let warm = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 1.0, 2.0);
+        let warm = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 1.0, 2.0, 0.0);
         let mut rgba = vec![
             200u8, 100, 50, 255, 128, 128, 128, 255, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
@@ -239,5 +308,73 @@ mod tests {
         assert_eq!(rgba[1], 82); // toward-luma distance doubled
         assert_eq!(rgba[2], 0); // pushed below 0 → clamp
         assert_eq!(&rgba[4..7], &[128, 128, 128]); // grey unchanged by saturation
+    }
+
+    /// Every field is readable across the crate boundary, because a GPU backend packing
+    /// the grade into a uniform cannot see the private fields the CPU path reads directly.
+    #[test]
+    fn every_grade_parameter_is_readable() {
+        let pp = FramePostProcess::new(0.5, [0.3, 0.6, 0.9], 2.0, 0.25, 0.5);
+        assert_eq!(pp.exposure(), 0.5);
+        assert_eq!(pp.white_balance(), [0.3, 0.6, 0.9]);
+        assert_eq!(pp.contrast(), 2.0);
+        assert_eq!(pp.saturation(), 0.25);
+        assert_eq!(pp.black_point(), 0.5);
+    }
+
+    /// A zero black point must be the *exact* identity, or every frame graded before the
+    /// term existed changes the day it lands.
+    #[test]
+    fn a_zero_black_point_leaves_every_pixel_where_it_was() {
+        let none = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 1.0, 1.0, 0.0);
+        let mut rgba = vec![0u8, 1, 46, 255, 128, 200, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0];
+        apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(none)));
+        assert_eq!(&rgba[0..3], &[0, 1, 46]);
+        assert_eq!(&rgba[4..7], &[128, 200, 255]);
+        assert_eq!(FramePostProcess::cinematic().black_point(), 0.0);
+    }
+
+    /// The floor removal: everything at or under the black point lands on true black, and
+    /// white stays white — the property that separates it from an exposure cut.
+    #[test]
+    fn the_black_point_lands_the_floor_on_black_and_leaves_white_alone() {
+        // black 0.5: 128/255 = 0.502 → 0.004; 64 is under the floor → 0; 255 → 255.
+        let pp = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 1.0, 1.0, 0.5);
+        let mut rgba = vec![128u8, 64, 255, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(pp)));
+        assert_eq!(rgba[0], 1); // just above the floor: nearly black, not clipped away
+        assert_eq!(rgba[1], 0); // below the floor: true black
+        assert_eq!(rgba[2], 255); // white is untouched — this is not an exposure cut
+        assert_eq!(rgba[3], 200); // alpha untouched
+    }
+
+    /// A degenerate `black_point` of `1.0` (every pixel at or under the floor) must yield a
+    /// black frame, not a division by zero.
+    #[test]
+    fn a_full_black_point_is_finite_and_yields_black() {
+        let pp = FramePostProcess::new(1.0, [1.0, 1.0, 1.0], 1.0, 1.0, 1.0);
+        let mut rgba = vec![255u8, 128, 1, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(pp)));
+        assert_eq!(&rgba[0..3], &[0, 0, 0]);
+    }
+
+    /// The low-key preset is a pure floor removal: identity everywhere else, and the
+    /// measured night-raster floor (≈0.18) really does land near black while a highlight
+    /// (≈0.82) barely moves.
+    #[test]
+    fn low_key_removes_the_floor_and_holds_the_highlights() {
+        let lk = FramePostProcess::low_key();
+        assert_eq!(lk.exposure(), 1.0);
+        assert_eq!(lk.white_balance(), [1.0, 1.0, 1.0]);
+        assert_eq!(lk.contrast(), 1.0);
+        assert_eq!(lk.saturation(), 1.0);
+        assert_eq!(lk.black_point(), 0.16);
+        assert_ne!(lk, FramePostProcess::cinematic());
+
+        let mut rgba = vec![47u8, 26, 209, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(lk)));
+        assert!(rgba[0] < 10, "the raster floor collapses to near-black");
+        assert_eq!(rgba[1], 0, "below the floor is true black");
+        assert!(rgba[2] > 190, "the highlight is essentially where it was");
     }
 }

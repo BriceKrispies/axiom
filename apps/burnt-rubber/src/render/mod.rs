@@ -26,8 +26,8 @@ pub mod surface_builder;
 
 use axiom::prelude::{
     Angle, Camera, Color, DirectionalLight, Entity, FrameAmbient, FrameBloom, FrameDepthFog,
-    FrameSky, Mesh, PerspectiveProjection, PointLight, Ratio, RunningApp, Spawn, Transform, Vec3,
-    Visible,
+    FramePostProcess, FrameSky, Mesh, PerspectiveProjection, PointLight, Ratio, RunningApp, Spawn,
+    Transform, Vec3, Visible,
 };
 use axiom_math::{Mat4, Quat};
 
@@ -153,6 +153,20 @@ impl RaceScene {
             Ratio::finite_or_zero(0.9),
             palette::SKY,
         ));
+
+        // The black point. Every term above is additive and none of them can be
+        // driven to zero without taking something the frame needs with it: the
+        // hemisphere ambient is what keeps the shadowed side of a car, a post and
+        // a tree from vanishing, and the depth fog is what stops the horizon
+        // being a cut-out. Both therefore leave a floor — the tarmac, the verge
+        // and the sky all sit an eighth of the way up the range, and a night whose
+        // darkest pixel is a mid-dark grey reads as *overcast afternoon, dimmed*
+        // however cold its palette is. The measured floor off the verge is ≈0.18
+        // against a reference ≈0.02, while the highlights (the lane paint, the
+        // moon's limb) already agree to within a few levels: the range is
+        // compressed from the bottom only, which is exactly what one subtract on
+        // the finished image fixes and what no amount of light-tuning does.
+        app.set_postprocess(FramePostProcess::low_key());
 
         let road = RoadChunks::install(app, track, &tuning.course, palette.road);
         let scenery = SceneryField::install(app, &palette, track, track.seed());

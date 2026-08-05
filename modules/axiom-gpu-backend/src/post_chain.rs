@@ -1,4 +1,4 @@
-//! The GPU **post chain**: bright-pass → separable blur → tonemapped composite.
+//! The GPU **post chain**: bright-pass → separable blur → tonemapped, graded composite.
 //!
 //! This is the pass that makes a bright thing read as a *light*. Before it, the
 //! GPU path had no post-process at all — `FramePostProcess` and
@@ -31,8 +31,35 @@
 //! produces the soft halo that is the point; it just cannot rank two blown
 //! highlights against each other. [`axiom_host::FrameBloom::tonemap`] still earns
 //! its keep on the *composite*, where source + bloom genuinely exceeds one.
+//!
+//! # The colour grade rides the composite
+//!
+//! [`axiom_host::FramePostProcess`] is the engine's one whole-frame grade, and
+//! [`axiom_host::apply_frame_postprocess`] is its definition — a CPU loop over a
+//! finished RGBA8 buffer. Every arm that *owns* its pixels as bytes runs exactly
+//! that: the Canvas 2D software raster and the off-screen capture. A live
+//! swap-chain frame never becomes bytes, so before this the grade simply did not
+//! reach the browser — an app authored one, saw it in every capture, and
+//! presented ungraded. That is a backend divergence, not a cost decision.
+//!
+//! The composite is where it belongs, because the composite is already the
+//! fullscreen pass over the finished image. Two things make it the *same* grade
+//! rather than a lookalike:
+//!
+//! - **Space.** The CPU stage grades display-encoded bytes (`byte / 255`). The
+//!   render targets here are sRGB, so `textureSample` hands the shader *linear*
+//!   values and the store re-encodes. `graded` therefore encodes to sRGB, applies
+//!   the identical arithmetic, and decodes back — the round trip is what keeps
+//!   the two arms the same picture instead of the same formula on different
+//!   numbers.
+//! - **Order.** It runs last, after the bloom composite and its rolloff, exactly
+//!   as the CPU stage runs on the composited frame.
+//!
+//! An unauthored grade packs the identity (exposure 1, neutral balance, contrast
+//! 1, saturation 1, black point 0), so a frame that authors none still presents
+//! byte-identically to one from before the grade rode this pass.
 
-use axiom_host::FrameBloom;
+use axiom_host::{FrameBloom, FramePostProcess};
 
 /// Bright-pass, blur and composite, sharing one fullscreen-triangle vertex stage.
 ///
@@ -68,6 +95,12 @@ struct Params {
     tune: vec4<f32>,
     // xy = the blur step in UV (radius * texel, along one axis), zw unused.
     step: vec4<f32>,
+    // The frame's colour grade: x = exposure, y = contrast, z = saturation,
+    // w = black point. The identity (1, 1, 1, 0) is packed when the app
+    // authored none, so the composite's grade is then an exact no-op.
+    grade: vec4<f32>,
+    // rgb = the grade's per-channel white-balance gain; w unused.
+    balance: vec4<f32>,
 };
 @group(0) @binding(0) var src_tex: texture_2d<f32>;
 @group(0) @binding(1) var src_sampler: sampler;
@@ -124,6 +157,40 @@ fn fs_blur(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(sum, 1.0);
 }
 
+// Linear <-> sRGB, so the grade below runs on the same display-encoded numbers
+// `axiom_host::apply_frame_postprocess` reads out of a byte buffer. The render
+// targets are sRGB, so what this shader samples and stores is linear; grading
+// there instead would be a different curve wearing the same parameters.
+fn srgb_encode(c: vec3<f32>) -> vec3<f32> {
+    let v = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    let lo = v * 12.92;
+    let hi = 1.055 * pow(v, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, v <= vec3<f32>(0.0031308));
+}
+
+fn srgb_decode(c: vec3<f32>) -> vec3<f32> {
+    let v = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    let lo = v / 12.92;
+    let hi = pow((v + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(hi, lo, v <= vec3<f32>(0.04045));
+}
+
+// The frame's colour grade, term for term the same chain as the CPU
+// `grade_pixel`: black-point floor removal, then exposure x white balance, then
+// the contrast S-curve about 0.5, then saturation about Rec.709 luma.
+fn graded(linear: vec3<f32>) -> vec3<f32> {
+    let d = srgb_encode(linear);
+    // A floor is a subtract, and `max` is what makes it a floor rather than a
+    // sign flip; `1 - black` is floored so a degenerate black point of 1.0
+    // cannot divide by zero.
+    let f = max((d - vec3<f32>(params.grade.w)) / max(1.0 - params.grade.w, 1e-6), vec3<f32>(0.0));
+    let e = f * params.grade.x * params.balance.rgb;
+    let k = (e - vec3<f32>(0.5)) * params.grade.y + vec3<f32>(0.5);
+    let l = dot(k, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let s = vec3<f32>(l) + (k - vec3<f32>(l)) * params.grade.z;
+    return srgb_decode(s);
+}
+
 @fragment
 fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     let scene = textureSample(src_tex, src_sampler, in.uv).rgb;
@@ -132,7 +199,10 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     // Rolled off per channel rather than on luminance: a saturated light that
     // blows one channel should desaturate toward white as it gets brighter,
     // which is what a real overexposed highlight does.
-    return vec4<f32>(rolloff(sum.r), rolloff(sum.g), rolloff(sum.b), 1.0);
+    let rolled = vec3<f32>(rolloff(sum.r), rolloff(sum.g), rolloff(sum.b));
+    // The grade runs last, on the composited image — the same place, and the
+    // same arithmetic, as the CPU stage the read-back arms run.
+    return vec4<f32>(graded(rolled), 1.0);
 }
 "#;
 
@@ -208,7 +278,8 @@ impl PostChain {
         let make_params = |label| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
-                size: std::mem::size_of::<[f32; 8]>() as u64,
+                // Four `vec4`s: tune, step, grade, balance — see `Params` in the WGSL.
+                size: std::mem::size_of::<[f32; 16]>() as u64,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
@@ -350,19 +421,25 @@ impl PostChain {
     }
 
     /// Record the whole chain: scene → bright → blur H → blur V → composite into
-    /// `target`.
+    /// `target`, with the frame's `bloom` and colour `grade`.
     ///
     /// A frame with no bloom runs the same four passes with an intensity of zero,
-    /// so the composite reduces to a copy of the scene. Keeping the shape
-    /// identical is deliberate: a frame that toggles bloom on and off does not
-    /// change which pipelines exist, so it cannot stutter on a pipeline the
-    /// driver compiles the first time it is used.
+    /// so the composite reduces to a copy of the scene; a frame with no grade
+    /// packs the grade identity, so the composite's grade is an exact no-op.
+    /// Keeping the shape identical is deliberate: a frame that toggles either one
+    /// on and off does not change which pipelines exist, so it cannot stutter on a
+    /// pipeline the driver compiles the first time it is used.
+    ///
+    /// `grade` is the **live** arm's channel. An arm that reads its pixels back and
+    /// runs [`axiom_host::apply_frame_postprocess`] over them passes `None` here —
+    /// one grade per frame, whichever arm applies it.
     pub(crate) fn record(
         &self,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         bloom: Option<&FrameBloom>,
+        grade: Option<&FramePostProcess>,
     ) {
         let tune = bloom.map_or(
             // No bloom: a threshold above any possible luminance means the bright
@@ -383,6 +460,15 @@ impl PostChain {
             radius / self.bloom_size.0 as f32,
             radius / self.bloom_size.1 as f32,
         );
+        // The grade identity when the app authored none: unit exposure, unit
+        // contrast, unit saturation, zero black point, neutral balance.
+        let (tone, balance) = grade.map_or(([1.0, 1.0, 1.0, 0.0], [1.0, 1.0, 1.0, 0.0]), |g| {
+            let wb = g.white_balance();
+            (
+                [g.exposure(), g.contrast(), g.saturation(), g.black_point()],
+                [wb[0], wb[1], wb[2], 0.0],
+            )
+        });
 
         let mut pass = |pipeline: &wgpu::RenderPipeline,
                         group: &wgpu::BindGroup,
@@ -411,16 +497,16 @@ impl PostChain {
         // Both buffers are written up front — which is fine precisely *because*
         // they are two buffers: each pass reads the one bound to it, so the write
         // ordering that would break a single shared buffer is irrelevant here.
-        queue.write_buffer(
-            &self.params_h,
-            0,
-            bytemuck::cast_slice(&[tune[0], tune[1], tune[2], tune[3], texel.0, 0.0, 0.0, 0.0]),
-        );
-        queue.write_buffer(
-            &self.params_v,
-            0,
-            bytemuck::cast_slice(&[tune[0], tune[1], tune[2], tune[3], 0.0, texel.1, 0.0, 0.0]),
-        );
+        // The composite reads `params_h` (via `scene_group`), so the grade must
+        // reach that buffer; it is written to both so the two stay one layout.
+        let pack = |step: [f32; 2]| {
+            [
+                tune[0], tune[1], tune[2], tune[3], step[0], step[1], 0.0, 0.0, tone[0], tone[1],
+                tone[2], tone[3], balance[0], balance[1], balance[2], balance[3],
+            ]
+        };
+        queue.write_buffer(&self.params_h, 0, bytemuck::cast_slice(&pack([texel.0, 0.0])));
+        queue.write_buffer(&self.params_v, 0, bytemuck::cast_slice(&pack([0.0, texel.1])));
         // scene → ping (bright) → pong (blur H) → ping (blur V) → target.
         pass(&self.bright, &self.scene_group, &self.ping_view, None);
         pass(&self.blur, &self.ping_group, &self.pong_view, None);

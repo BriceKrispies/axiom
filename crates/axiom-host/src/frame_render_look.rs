@@ -1,10 +1,11 @@
 //! The **render look**: the app-authored, backend-neutral description of how a
 //! frame is lit and graded, bound once rather than authored per draw.
 //!
-//! Four things travel together everywhere the engine binds a backend — the
+//! Five things travel together everywhere the engine binds a backend — the
 //! hemisphere ambient that fills unlit faces, the atmospheric depth fog distance
-//! recedes into, the sky behind the scene, and the bloom that decides how bright
-//! things spill. They are one concept: *what this world looks like*. They were
+//! recedes into, the sky behind the scene, the bloom that decides how bright
+//! things spill, and the colour grade the finished image is presented through.
+//! They are one concept: *what this world looks like*. They were
 //! already travelling as a de-facto tuple through the windowing driver, the GPU
 //! backend facade, the live binding and the scene renderer, and every new look
 //! knob widened four signatures and about a dozen call sites — most of them in
@@ -20,6 +21,21 @@
 //! backend treats that as an exact no-op — so a look that sets nothing renders
 //! byte-identically to a frame from before this type existed.
 //!
+//! ## Why the grade had to join them
+//!
+//! The colour grade was the one part of "what this world looks like" that could
+//! only travel on a [`FramePacket`](crate::FramePacket) — the read-back path.
+//! That was fine while the only graded arms were the ones that already own their
+//! pixels as bytes (the Canvas 2D software raster and the off-screen capture,
+//! both of which run [`crate::apply_frame_postprocess`] over a finished buffer),
+//! and it silently stopped being fine the moment the **live** GPU arm grew a
+//! fullscreen composite of its own. From then on an app could author a grade,
+//! see it in every capture, and never see it in the browser — the exact
+//! backend divergence this type was introduced to end, reappearing one field
+//! lower down. `RunningApp::set_postprocess` has documented itself as reaching
+//! "both the offscreen capture and the live present arm" since it landed; this
+//! field is what makes that true.
+//!
 //! Which parts a given backend can actually honour is a separate question,
 //! answered by [`crate::BackendCapabilityProfile`]: the look always carries the
 //! full intent, and a backend that cannot evaluate the sky or afford the bloom
@@ -28,6 +44,7 @@
 use crate::frame_ambient::FrameAmbient;
 use crate::frame_bloom::FrameBloom;
 use crate::frame_depth_fog::FrameDepthFog;
+use crate::frame_postprocess::FramePostProcess;
 use crate::frame_sky::FrameSky;
 
 /// The app-authored render look a backend binds with.
@@ -49,6 +66,7 @@ pub struct FrameRenderLook {
     depth_fog: Option<FrameDepthFog>,
     sky: Option<FrameSky>,
     bloom: Option<FrameBloom>,
+    grade: Option<FramePostProcess>,
 }
 
 impl FrameRenderLook {
@@ -59,6 +77,7 @@ impl FrameRenderLook {
             depth_fog: None,
             sky: None,
             bloom: None,
+            grade: None,
         }
     }
 
@@ -90,6 +109,20 @@ impl FrameRenderLook {
         self
     }
 
+    /// This look with a **colour grade** — the exposure / white-balance / contrast /
+    /// saturation / black-point pass the finished image is presented through.
+    ///
+    /// Every backend realizes the same [`FramePostProcess`] arithmetic, but not in
+    /// the same place: the ones that hold their pixels as bytes run
+    /// [`crate::apply_frame_postprocess`] over the buffer, while a live GPU arm
+    /// folds it into the fullscreen composite it already draws. Gated by
+    /// [`crate::RenderCapability::PostProcess`], so a backend that cannot afford the
+    /// pass reports the drop rather than quietly presenting an ungraded frame.
+    pub const fn with_grade(mut self, grade: FramePostProcess) -> Self {
+        self.grade = Some(grade);
+        self
+    }
+
     /// The hemisphere ambient filling unlit faces. Always present.
     pub const fn ambient(&self) -> FrameAmbient {
         self.ambient
@@ -109,6 +142,12 @@ impl FrameRenderLook {
     /// The bloom parameters, or `None` when highlights are left to clip.
     pub const fn bloom(&self) -> Option<FrameBloom> {
         self.bloom
+    }
+
+    /// The colour grade, or `None` when the app authored none (the frame is
+    /// presented exactly as the raster produced it).
+    pub const fn grade(&self) -> Option<FramePostProcess> {
+        self.grade
     }
 }
 
@@ -148,6 +187,7 @@ mod tests {
         assert!(look.depth_fog().is_none());
         assert!(look.sky().is_none());
         assert!(look.bloom().is_none());
+        assert!(look.grade().is_none());
         assert_eq!(
             look,
             FrameRenderLook::lit_by(FrameAmbient::default_hemisphere())
@@ -173,8 +213,14 @@ mod tests {
         assert!(with_bloom.sky().is_none());
         assert!(with_bloom.depth_fog().is_none());
 
+        let with_grade = base.with_grade(FramePostProcess::low_key());
+        assert_eq!(with_grade.grade(), Some(FramePostProcess::low_key()));
+        assert!(with_grade.bloom().is_none());
+        assert!(with_grade.sky().is_none());
+        assert!(with_grade.depth_fog().is_none());
+
         // The ambient survives every addition.
-        [with_fog, with_sky, with_bloom]
+        [with_fog, with_sky, with_bloom, with_grade]
             .iter()
             .for_each(|l| assert_eq!(l.ambient(), FrameAmbient::default_hemisphere()));
     }
@@ -188,11 +234,13 @@ mod tests {
             .with_depth_fog(fog())
             .with_sky(sky())
             .with_bloom(FrameBloom::moonlit())
+            .with_grade(FramePostProcess::low_key())
             .with_ambient(night);
         assert_eq!(look.ambient(), night);
         assert_eq!(look.depth_fog(), Some(fog()));
         assert_eq!(look.sky(), Some(sky()));
         assert_eq!(look.bloom(), Some(FrameBloom::moonlit()));
+        assert_eq!(look.grade(), Some(FramePostProcess::low_key()));
     }
 
     #[test]
@@ -201,11 +249,13 @@ mod tests {
         let full = FrameRenderLook::lit_by(night)
             .with_depth_fog(fog())
             .with_sky(sky())
-            .with_bloom(FrameBloom::moonlit());
+            .with_bloom(FrameBloom::moonlit())
+            .with_grade(FramePostProcess::low_key());
         assert_eq!(full.ambient(), night);
         assert_eq!(full.depth_fog(), Some(fog()));
         assert_eq!(full.sky(), Some(sky()));
         assert_eq!(full.bloom(), Some(FrameBloom::moonlit()));
+        assert_eq!(full.grade(), Some(FramePostProcess::low_key()));
 
         assert_eq!(full, full);
         assert_ne!(full, FrameRenderLook::default());
@@ -216,6 +266,15 @@ mod tests {
                 .with_depth_fog(fog())
                 .with_sky(sky())
                 .with_bloom(FrameBloom::highlights())
+                .with_grade(FramePostProcess::low_key())
+        );
+        assert_ne!(
+            full,
+            FrameRenderLook::lit_by(night)
+                .with_depth_fog(fog())
+                .with_sky(sky())
+                .with_bloom(FrameBloom::moonlit())
+                .with_grade(FramePostProcess::cinematic())
         );
         assert!(format!("{full:?}").contains("FrameRenderLook"));
     }
@@ -226,7 +285,10 @@ mod tests {
     fn authoring_a_part_twice_keeps_the_last_one() {
         let look = FrameRenderLook::default()
             .with_bloom(FrameBloom::highlights())
-            .with_bloom(FrameBloom::moonlit());
+            .with_bloom(FrameBloom::moonlit())
+            .with_grade(FramePostProcess::cinematic())
+            .with_grade(FramePostProcess::low_key());
         assert_eq!(look.bloom(), Some(FrameBloom::moonlit()));
+        assert_eq!(look.grade(), Some(FramePostProcess::low_key()));
     }
 }

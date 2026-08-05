@@ -202,6 +202,22 @@ impl WindowingApi {
         self.look.bloom()
     }
 
+    /// Set the app-authored **colour grade** the live backend binds with — the
+    /// exposure / white-balance / contrast / saturation / black-point pass the finished
+    /// image is presented through. Without it the live arm presents the raster exactly as
+    /// it came out, while the off-screen capture of the *same* frame ran the grade over
+    /// its read-back buffer: an app authoring a grade saw it in every capture and never in
+    /// the browser. Unset (the default) leaves the presented frame ungraded, exactly as
+    /// before.
+    pub fn set_grade(&mut self, grade: axiom_host::FramePostProcess) {
+        self.look = self.look.with_grade(grade);
+    }
+
+    /// The render-look colour grade the live backend binds with, if the app authored one.
+    pub const fn grade(&self) -> Option<axiom_host::FramePostProcess> {
+        self.look.grade()
+    }
+
     /// The whole app-authored render look, as one value — what every binder in the
     /// wasm arm threads through to the backend it builds.
     pub const fn render_look(&self) -> axiom_host::FrameRenderLook {
@@ -448,6 +464,7 @@ mod tests {
         assert_eq!(w.depth_fog(), None);
         assert_eq!(w.sky(), None);
         assert_eq!(w.bloom(), None);
+        assert_eq!(w.grade(), None);
         assert_eq!(w.render_look(), axiom_host::FrameRenderLook::default());
     }
 
@@ -481,6 +498,13 @@ mod tests {
         w.set_bloom(bloom);
         assert_eq!(w.bloom(), Some(bloom));
 
+        // The grade is the fifth part, and the one that used to reach only the
+        // read-back arms: an app could author it, see it in every off-screen
+        // capture, and never see it in the browser.
+        let grade = axiom_host::FramePostProcess::low_key();
+        w.set_grade(grade);
+        assert_eq!(w.grade(), Some(grade));
+
         // Everything authored above is still there, and `render_look` hands the
         // whole thing over as the one value every binder threads.
         let look = w.render_look();
@@ -488,6 +512,7 @@ mod tests {
         assert_eq!(look.depth_fog(), Some(fog));
         assert_eq!(look.sky(), Some(sky));
         assert_eq!(look.bloom(), Some(bloom));
+        assert_eq!(look.grade(), Some(grade));
     }
 
     #[test]

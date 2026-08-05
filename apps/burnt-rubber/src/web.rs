@@ -105,6 +105,7 @@ pub fn burnt_rubber_start() {
         let running = guard.app.running();
         let (ambient, depth_fog) = (running.ambient(), running.depth_fog());
         let (sky, bloom) = (running.sky(), running.bloom());
+        let grade = running.postprocess();
         windowing.set_ambient(ambient);
         if let Some(fog) = depth_fog {
             windowing.set_depth_fog(fog);
@@ -114,6 +115,14 @@ pub fn burnt_rubber_start() {
         }
         if let Some(bloom) = bloom {
             windowing.set_bloom(bloom);
+        }
+        // The colour grade — the black point that puts the night's floor on true
+        // black. The off-screen capture already read this off the frame packet;
+        // the live arm could not receive it at all until the render look carried
+        // it, which is why the browser race presented a full stop lighter than
+        // the same frame captured.
+        if let Some(grade) = grade {
+            windowing.set_grade(grade);
         }
     }
 
