@@ -68,7 +68,31 @@ pub fn ratio(v: f32) -> Ratio {
 /// converts to sRGB for display, so a linear `0.055` lands on screen at roughly
 /// `0.25` - a mid slate, not a night sky. These values are chosen for the
 /// displayed result, which is why they look implausibly dark written down.
-pub const SKY: [f32; 3] = [0.011, 0.015, 0.026];
+///
+/// This constant is the **black level of the whole frame**, not just the colour
+/// of the empty top of it, and that is why it is authored this far down. It is
+/// three things at once: the clear colour (`set_clear_color`), the horizon stop
+/// of the sky gradient, and — decisively — the colour [`super::FrameDepthFog`]
+/// fades every distant surface into. Whatever value sits here is therefore the
+/// darkest tone the frame can contain, and every receding thing is dragged up to
+/// meet it.
+///
+/// The previous `[0.011, 0.015, 0.026]` was a *displayed* sRGB `(27, 33, 45)` —
+/// measured on the rendered frame, the sky read a flat, milky navy across the
+/// whole upper half, and the road dissolved into that navy rather than into the
+/// night. A real moonlit night stage has no such floor: the sky off-axis from the
+/// moon is essentially black, and the reference frame measures `(1.5, 2.4, 4.3)`
+/// there — roughly a **seventeenth** of the linear radiance this constant was
+/// carrying. Authoring the floor at that level is what lets the emissive cues
+/// (paint, reflector posts, tail lamps, the moon) be the only light in shot,
+/// which is the entire look; a lifted floor is contrast subtracted uniformly from
+/// every pixel, and no amount of key light adds it back.
+///
+/// Held a whisker above the reference's own reading, and blue-weighted rather
+/// than neutral, on purpose: a literal `0` floor would flatten the sky gradient
+/// and the fog's far end into a single dead black, and the moon would hang in a
+/// void with no atmosphere around it to sit in.
+pub const SKY: [f32; 3] = [0.0009, 0.0012, 0.0021];
 
 /// How solid the ghost car is, `0` invisible … `1` opaque.
 ///
@@ -87,7 +111,11 @@ pub const GHOST_OPACITY: f32 = 1.0;
 /// overcast day. [`SKY`] stays the *horizon* colour precisely because it is also
 /// the colour the depth fog fades into — so the far road dissolves into the sky
 /// it is standing under, with no seam between the two.
-pub const SKY_ZENITH: [f32; 3] = [0.004, 0.006, 0.015];
+///
+/// Lowered with [`SKY`] and by the same reasoning, keeping the ratio between the
+/// two — the zenith stays roughly a third of the horizon's radiance, so the
+/// gradient still falls off upward instead of inverting.
+pub const SKY_ZENITH: [f32; 3] = [0.0003, 0.0006, 0.0012];
 
 /// The moon's disc colour — **deliberately far above `1.0`**.
 ///
