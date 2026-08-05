@@ -784,3 +784,173 @@ atmosphere = 2
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 1
+
+# ---------------------------------------------------------------------------
+# Iteration 8 — SCORING RECALIBRATION + GATE BACKFILL. No render changed; no
+# candidate was captured; no app source was touched. `decision` is deliberately
+# NOT one of the loop's four values, for the same reason as iterations 1, 2, 3
+# and 6: none of them describes "the champion image is untouched and only the
+# record moved", and calling this a keep_candidate would fake a promotion.
+# ---------------------------------------------------------------------------
+[[iteration]]
+iteration = 8
+attacked_axis = "none"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/abstractions/0005.toml",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic audit of era-B pass 1. Four findings; the target moves.
+
+THE CHAMPION IS CLEAN, and that is checked first because three earlier passes on
+this campaign were not. `champion.png` hashes byte-identical to
+`champions/0005-2026-08-04-d2509552.png`, and the only two commits on `main`
+since `d2509552` are `7c983c54` (promote) and `1bf3776a` (archive) — neither
+touches an app or spine source file. The scorecard describes the image on disk.
+Era is consistent: campaign.toml `reference_era = "B"`, INDEX.md era B current,
+and iteration 7's before/after both sit inside era B. No score crosses the
+boundary.
+
+EVERY MEASUREMENT IN THE PASS-1 SCORECARD REPRODUCES. Re-measured from the two
+PNGs, band rows 0.30h..0.72h: band median 0.0 (reference 3.9), 83.7% of pixels
+below L=16 (reference 80.2%), sky (0,0,0) against (1,2,4), road-left (0,0,5)
+against (7,8,11), tail-light span 0.312w against 0.522w. The pass reported its
+own overshoot accurately and did not smooth it. That is the part of this record
+that is working.
+
+1. THREE AXES INFLATED — subject_fidelity, atmosphere, scale_and_proportion,
+each 2 -> 1. Seven of twelve axes rose in a pass whose one attacked axis was
+exposure, and these three are the ones credited for something other than a new
+resemblance to the reference:
+
+  (a) subject_fidelity. Raised on the arrival of the twin stripes and a plate.
+  Both are real; neither makes the structure emerge, which is what the 2 anchor
+  requires. New measurements: the car has no wheels and no glass at all; its
+  body is 0.75 wide-to-tall against the reference's 1.52 (2.0x too tall for its
+  width); its lamp bars are 0.097h against 0.032h (3.0x too deep, aspect 1.8:1
+  against 9.3:1) and filled flat orange where the reference has two thin
+  dark-red bars with a badge between them; the plate is grey and hangs below the
+  body where the reference's is warm yellow and inset; the decklid is bright red
+  where the reference is black head to toe. Six identifying features wrong, two
+  stripes right. That is the 1 anchor almost verbatim — "present but crude/proxy
+  … nobody would mistake it for the reference". A decal on a proxy is a proxy.
+
+  (b) atmosphere. Raised 0 -> 2 on three DELETIONS: the 7x navy sky, the
+  green/teal haze band, and post bloom from 1.88% to 0.94% of band area against
+  the reference's 0.98%. All three are real and none is disputed. All three are
+  the removal of atmosphere the reference does not have, and this axis scores
+  the atmosphere it DOES have. What the champion now contains is a sky of
+  literal (0,0,0) with no gradient and no hue, no haze, no scattering, no glow
+  on the far posts, and a moon halo larger and softer than the reference's.
+  Scoring a deletion as an arrival is the cleanest example on this scorecard of
+  a number moving without the render moving toward identity.
+
+  (c) scale_and_proportion. Raised on one real measurement (tail-light span
+  0.220w -> 0.312w against 0.522w) covering half the axis. The proportion half
+  was never measured and is grossly wrong: body aspect 0.75 against 1.52. A
+  subject at 58% of the reference's width AND 2.0x its aspect error is not the
+  reference's shape at a smaller size; it is a different shape.
+
+Two more axes were examined and HELD at 2 with corrected reasoning rather than
+lowered: lighting_and_shadow (the pool is real but is one-sided — road left of
+the car (1,5,14) against road right (37,42,54), a 36-level asymmetry, where the
+reference is symmetric within 2 levels — and neutral grey where the reference's
+is warm amber (68,55,23)) and color_palette (background is a 3, the car is a 1,
+the axis takes the lower). Neither correction changes a number.
+
+THE TARGET MOVES. subject_fidelity at 1 joins the tie at 1, and campaign.toml's
+fixed axis order places it 2nd against silhouette_readability's 3rd.
+
+  NEXT FLAW = subject_fidelity   (iteration 7 recorded silhouette_readability)
+
+Both axes indict the same car, so this is not a redirection away from the model
+— it is a change of question, and the question matters to whoever attacks it.
+silhouette_readability asks "does the outline read": chamfers, rolled haunch,
+tucked valance, the things the modeler correctly recorded as beyond the app's
+cube/plane/sphere/cylinder vocabulary. subject_fidelity asks "is that the
+reference's car at all": wheels, glass, a body half as wide as it should be for
+its height, lamp bars 3x too deep, a grey plate, a red decklid. The second is
+reachable with the vocabulary that already exists and is, by the campaign's own
+fixed order, owed first.
+
+final_score 1.20 -> 1.125 (1*0.7 + (17/12)*0.3). The lowest axis is unchanged at
+1; the inflation was hiding WHICH axis, not the severity.
+
+2. MISSING ABSTRACTION RECORD, now backfilled as abstractions/0005.toml.
+Iteration 7 sets `abstraction_introduced = true` and then names no abstraction.
+The pass landed new engine-spine surface in `cc71f189` (FrameRenderLook gains
+the colour grade as its fifth part; FramePostProcess gains a black_point term;
+a live-arm grade path through post_chain/live_gpu_binding; a WindowingApi
+forwarding entry; a widened prelude), tidied by `d2509552`. A flag that says an
+abstraction was introduced with no record of WHICH one is worse than no flag: it
+tells the next pass the gate was considered and gives it nothing to check.
+
+The change CLEARS the gate on the "genuinely cannot express" branch, and clears
+it well: the judged arm — the live browser present — could not receive a colour
+grade at all (FramePostProcess travelled only on a FramePacket, so only the two
+read-back arms were graded), and the chain had no subtract, so no composition of
+exposure/contrast/saturation/white-balance expresses "remove 0.16 of lift". Both
+are spine facts no app-tier value reaches. Ledger iterations 4, 5 and 7 each
+record a colorist grade authored and not reaching the captured frame — three
+passes unable to mount any bounded attempt, stated in advance.
+
+This is the FIFTH consecutive spine change on this campaign's line to land
+without its gate record (0001, 0002, 0003, 0004, now 0005). Four of the five
+cleared the gate on the merits. The repetition is the finding: the records are
+being written by the critic afterwards instead of by the lens that reached.
+
+3. ONE ARITHMETIC SLIP, in the conservative direction. Iteration 7's prose says
+"six axes rose and none fell"; its own before/after tables show SEVEN rose
+(subject_fidelity, lighting_and_shadow, color_palette, contrast_and_exposure,
+depth_and_separation, atmosphere, scale_and_proportion). Recorded, not because
+one miscount matters, but because seven of twelve axes rising off one attacked
+axis is the pattern this recalibration is about.
+
+4. TWO THINGS THIS RECORD DOES RIGHT AND SHOULD KEEP DOING. The overshoot was
+named in the same breath as the win, with the numbers that prove it and the one
+constant that caused it — no smoothing. And the guarded canvas2d arm is reported
+("darkened in parallel, remains fully legible, no regression") and NOWHERE
+scored, credited or blamed: it appears in no axis comment on the scorecard and
+in no score in this ledger. The campaign has one exam and it is the GPU arm.
+
+PARITY LANGUAGE: clean. The only occurrence of the word on the scorecard is the
+art-director's finding that "full parity is unreachable from the camera at all",
+which is a stated limitation, not a claim. Nothing anywhere claims a matched,
+finished or done axis, and nothing on this scorecard is above 2.
+
+NO RENDER, NO APP SOURCE AND NO CHAMPION IMAGE WAS TOUCHED BY THIS ITERATION.
+"""
+next_attacked_axis = "subject_fidelity"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 2
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+atmosphere = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 1

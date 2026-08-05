@@ -1,0 +1,111 @@
+# BACKFILLED by the critic pass (iteration 8).
+#
+# This record did not exist. Ledger iteration 7 — the era-B pass-1 landing —
+# sets `abstraction_introduced = true` and then names no abstraction. The pass
+# landed new engine-spine surface in `cc71f189` ("axiom-host: the render look
+# carries the frame's colour grade, and it gains a black point"), tidied by
+# `d2509552` ("the grade's public scalars are Ratio, like every frame peer's"):
+# a fifth part on `FrameRenderLook`, a `black_point` term on `FramePostProcess`,
+# a live-arm grade path through `post_chain` / `live_gpu_binding`, a new
+# `WindowingApi` forwarding entry, and a widened `axiom::prelude`.
+#
+# A flag that says an abstraction was introduced, with no record of WHICH one,
+# is worse than no flag: it tells the next pass the gate was considered and
+# tells it nothing it can check. This is the FIFTH consecutive spine change on
+# this campaign's line to land without its gate record (0001, 0002, 0003, 0004,
+# and now this). The repetition is the finding, not the paperwork.
+#
+# Ruling: MISSING-RECORD, backfilled. The change itself CLEARS the gate on the
+# "genuinely cannot express" branch — cleanly, and with the inexpressibility
+# stated three passes in advance (see `inexpressible`). It is not ceremonial.
+#
+# One thing this record does NOT do is bless the number the change shipped with.
+# `low_key()`'s 0.16 black point was derived from a 0.18 floor measured BEFORE
+# the same pass's two light cuts landed, the architect said so in its own
+# proposal, and the champion is now clipped to a literal-zero floor (band median
+# 0.0 against the reference's 3.9). The abstraction is sound; its first authored
+# constant overshot. Retuning a preset is app-tier work and needs no gate.
+
+id = 5
+date = 2026-08-04
+commits = ["cc71f189", "d2509552"]
+iteration = 7
+axis = "contrast_and_exposure"
+
+# The ">= 3 failed bounded attempts" branch does not apply, and does not need
+# to. It is the SAME wall 0003 recorded, one layer further in: 0003 gave the
+# spine a grade the offscreen and Canvas 2D arms could apply, and the JUDGED arm
+# — the live browser present — still could not receive one. Ledger iterations 4,
+# 5 and 7 each record a colorist grade authored and not reaching the captured
+# frame. Three passes of a lens unable to mount ANY bounded attempt on this axis
+# is the inexpressibility branch stated in advance, not an excuse assembled
+# afterwards.
+failed_attempts = []
+
+# TRUE, on two independent counts, and neither is an art choice:
+#
+# 1. THE JUDGED ARM PRESENTED UNGRADED. `FramePostProcess` travelled only on a
+#    `FramePacket`, so the two arms that read their pixels back as bytes (the
+#    Canvas 2D raster and the off-screen capture) ran `apply_frame_postprocess`
+#    over a finished buffer, while a swap-chain frame — which never becomes
+#    bytes — presented with no grade at all. `RunningApp::set_postprocess` had
+#    documented itself as reaching "both the offscreen capture and the live
+#    present arm" since it landed, and did not. That is a backend divergence
+#    reachable only from the spine: no app-tier value fixes a path that does not
+#    read it. It is also, precisely, why this campaign's judged arm and its
+#    guarded arm had been diverging on every colour change for three passes.
+#
+# 2. THE CHAIN HAD NO SUBTRACT. Exposure is a multiply, so it SCALES a lifted
+#    floor instead of removing it; the contrast S-curve pivots on 0.5, so on a
+#    night frame whose every pixel sits below 0.2 any contrast > 1 drives the
+#    whole image negative. A low-key frame's defect is never its highlights — it
+#    is that the floor never reaches the bottom. There is no composition of
+#    exposure/contrast/saturation/white-balance that expresses "remove 0.16 of
+#    lift". The operator was absent from the algebra, not mis-tuned.
+inexpressible = true
+
+smallest_api = """
+One field, one scalar, one forwarding method — no new type:
+
+  `FrameRenderLook` gains the GRADE as its fifth part, beside the ambient, the
+                    fog, the sky and the bloom. This is the minimality argument
+                    0003 already paid for: the parts travel together through
+                    every binder, so a fifth field costs no signature anywhere,
+                    where a parallel channel would widen four signatures and a
+                    dozen wasm32-only call sites the native gate never compiles.
+
+  `FramePostProcess::black_point` — one `Ratio`, applied FIRST, as
+                    `max(v - black, 0) / (1 - black)`. `black_point = 0` is the
+                    exact identity, so `cinematic()` and every frame graded
+                    before this commit are byte-identical. A new grade preset
+                    would not have been smaller: it would have hidden the same
+                    arithmetic behind a name and left the operator unavailable
+                    to every other frame.
+
+  `WindowingApi::set_render_look` forwarding for the grade — the existing
+                    forwarding shape, not a new one.
+
+Arm behaviour is DECLARED, not divergent: the live GPU arm folds the grade into
+the fullscreen composite it already draws (encoding to sRGB first, so it is the
+same arithmetic on the same numbers as the CPU stage, not the same formula in a
+different space); the off-screen arm passes `None` and keeps its read-back loop.
+One grade per frame, whichever arm applies it. The guarded Canvas 2D arm takes
+the black point through the CPU stage it already ran — it darkened in parallel
+and stayed legible, which is the guard rule met, and is NOT scored.
+
+Spine footprint (for the reviewer, not a claim of minimality by size):
+  crates/axiom-host/src/frame_postprocess.rs        (+167)
+  crates/axiom-host/src/frame_render_look.rs        (+74)
+  modules/axiom-gpu-backend/src/post_chain.rs       (+124)
+  modules/axiom-gpu-backend/src/live_gpu_binding.rs (+55)
+  modules/axiom-gpu-backend/src/offscreen.rs        (+5)
+  modules/axiom-windowing/src/windowing_api.rs      (+25)
+  modules/axiom/src/prelude.rs                      (+5)
+"""
+
+# What the record owes the next pass, stated so it cannot be quietly dropped:
+# the abstraction is kept, the CONSTANT is retuned. `low_key()`'s 0.16 is
+# app-tier (apps/burnt-rubber/src/render/palette.rs) and moving it is a config
+# change on the lowest rung of the ladder — it needs no gate, no record, and no
+# revert of any of the three commits that pushed the exposure down together.
+followup = "retune apps/burnt-rubber low_key() black point; the floor is clipped to 0 against the reference's 3.9"
