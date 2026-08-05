@@ -347,29 +347,51 @@ fn squareness(velocity: Vec3, normal: Vec3) -> f32 {
         .unwrap_or(0.0)
 }
 
-/// Whether a traffic car at `(distance, lateral)` is close enough to the player,
-/// and being passed fast enough, to count as a near miss.
+/// Whether the player is passing a traffic car closely enough to count as a
+/// near miss.
 ///
-/// Near misses are decided from **relative geometry and velocity**, never a
-/// timer: the player must actually be alongside the traffic car, within
-/// `near_miss_gap` laterally, closing at `near_miss_closing_speed` or more, and
-/// not touching it. That is what makes the reward feel earned — you get boost
-/// for threading a gap, not for existing near a car.
+/// **The rule is the one a player can state without being told it:** you are in
+/// the lane next to a car, and you go past it. Nothing else. No history of where
+/// you were before, no timer, and — deliberately — no tuned thresholds.
+///
+/// What that replaced is worth writing down, because the old rule was three
+/// numbers pretending to be a rule. It asked for a lateral gap under a
+/// `near_miss_gap` of 3.1 m *and* a closing speed over a `near_miss_closing_speed`
+/// of 16 m/s. Both are invisible from the driver's seat. A lane is 3.5 m, so the
+/// 3.1 m gap meant "adjacent lane, but only if you were also drifting toward the
+/// inside of yours" — two identical-looking passes would score differently
+/// because of half a metre of lane wander nobody can see. And the closing-speed
+/// floor silently switched the whole mechanic off in the exact situation it looks
+/// most earned: easing past a car you have nearly matched speed with. The player
+/// was left to infer a rule from rewards that fired about half the time.
+///
+/// Lanes are the right unit precisely because they are the unit the game already
+/// speaks in — the traffic holds a lane, the on-rails car picks a lane, and the
+/// road is painted in them. "The lane next to it" is a thing you can see.
+///
+/// The one condition kept beyond adjacency is that **you** are the one passing
+/// (`car.forward_speed > traffic_speed`). That is not a threshold to tune, it is
+/// the sign of the relative motion, and without it the mechanic pays out for
+/// being overtaken while parked — traffic streams past a stationary player in the
+/// next lane and every one of them is a near miss.
+///
+/// Not touching is not tested here because it cannot be false: this is only ever
+/// reached on the no-overlap branch of the caller, which handles contact itself
+/// and marks the car as spent either way.
 pub fn is_near_miss(
     car: &CarState,
+    player_lane: i32,
     traffic_distance: f32,
-    traffic_lateral: f32,
+    traffic_lane: i32,
     traffic_speed: f32,
     race: &RaceTuning,
     tuning: &VehicleTuning,
 ) -> bool {
     let along = (car.distance - traffic_distance).abs();
-    let across = (car.lateral - traffic_lateral).abs();
     let alongside = along < tuning.half_length + race.traffic_half_length + NEAR_MISS_ALONG;
-    let touching = across < tuning.half_width + race.traffic_half_width;
-    let close = across < race.near_miss_gap;
-    let closing = car.forward_speed - traffic_speed >= race.near_miss_closing_speed;
-    alongside & close & closing & !touching
+    let adjacent = (player_lane - traffic_lane).abs() == 1;
+    let passing = car.forward_speed > traffic_speed;
+    alongside & adjacent & passing
 }
 
 /// Extra along-course window (m) either side of contact in which a pass counts.
@@ -717,30 +739,53 @@ mod tests {
         assert!(stopped.normal_speed > 30.0, "{}", stopped.normal_speed);
     }
 
+    /// The whole rule, stated as a player would: the lane next to you, and you
+    /// go past it. Each assertion below is one half of that sentence failing.
     #[test]
-    fn a_near_miss_needs_closeness_and_closing_speed_and_no_contact() {
+    fn a_near_miss_is_the_next_lane_over_and_you_going_past_it() {
         let (_, mut car, t, _) = fixture();
         let r = t.race;
         let v = t.vehicle;
         car.forward_speed = 80.0;
-        car.lateral = 0.0;
         car.distance = 500.0;
-        let gap = v.half_width + r.traffic_half_width + 0.4;
 
         assert!(
-            is_near_miss(&car, 500.0, gap, 30.0, &r, &v),
-            "alongside, close, and closing fast"
+            is_near_miss(&car, 0, 500.0, 1, 30.0, &r, &v),
+            "the next lane over, alongside, and going past it"
         );
-        assert!(!is_near_miss(&car, 500.0, gap, 79.0, &r, &v), "not closing fast enough");
         assert!(
-            !is_near_miss(&car, 500.0, r.near_miss_gap + 1.0, 30.0, &r, &v),
-            "too far across"
+            is_near_miss(&car, 1, 500.0, 0, 30.0, &r, &v),
+            "and it reads the same from the other side"
         );
-        assert!(!is_near_miss(&car, 560.0, gap, 30.0, &r, &v), "not alongside");
         assert!(
-            !is_near_miss(&car, 500.0, 0.1, 30.0, &r, &v),
-            "that is a collision, not a near miss"
+            !is_near_miss(&car, 1, 500.0, 1, 30.0, &r, &v),
+            "the same lane is a car you are about to hit, not one you threaded"
         );
+        assert!(
+            !is_near_miss(&car, -1, 500.0, 1, 30.0, &r, &v),
+            "two lanes away is just traffic on the far side of the road"
+        );
+        assert!(
+            !is_near_miss(&car, 0, 560.0, 1, 30.0, &r, &v),
+            "60 m up the road is not a pass"
+        );
+        assert!(
+            !is_near_miss(&car, 0, 500.0, 1, 95.0, &r, &v),
+            "being overtaken is not passing — otherwise parking pays out"
+        );
+    }
+
+    /// The closing-speed floor is gone on purpose, and this is the case that
+    /// argued for removing it: easing past a car you have nearly matched speed
+    /// with is the pass that *looks* most deliberate, and the old rule scored it
+    /// zero. One metre per second of advantage is a pass.
+    #[test]
+    fn crawling_past_a_car_still_counts() {
+        let (_, mut car, t, _) = fixture();
+        let (r, v) = (t.race, t.vehicle);
+        car.forward_speed = 31.0;
+        car.distance = 500.0;
+        assert!(is_near_miss(&car, 0, 500.0, 1, 30.0, &r, &v));
     }
 
     /// Build a traffic car overlapping the player by construction.

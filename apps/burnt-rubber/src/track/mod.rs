@@ -185,6 +185,26 @@ impl Track {
         lane.clamp(-reach, reach) as f32 * self.lane_width
     }
 
+    /// Which lane a car at `lateral` (m from the road centre) is in at `sample` —
+    /// the exact inverse of [`Track::lane_lateral`], and here rather than at the
+    /// call site for the same reason that one is: **there is one idea of where
+    /// the lanes are.** The traffic holds a lane index, the player steers a
+    /// continuous offset, and anything that wants to compare the two has to
+    /// convert. A caller doing that conversion with its own `/ 3.5` would be a
+    /// second idea of the road, and it would drift the first time the lane width
+    /// or the reach clamp moved.
+    ///
+    /// Lanes are a fixed width anchored on the centreline, so the inverse is a
+    /// rounding: the lane whose centre is nearest. Beyond the road's reach it
+    /// clamps to the outermost lane on that side, which is what
+    /// [`Track::lane_lateral`] does going the other way — so a round trip
+    /// through both is the identity for every lane the road actually has.
+    pub fn lane_at_lateral(&self, sample: &TrackSample, lateral: f32) -> i32 {
+        let reach = self.lane_reach(sample);
+        let nearest = (lateral / self.lane_width.max(0.1)).round() as i32;
+        nearest.clamp(-reach, reach)
+    }
+
     /// How far from the centreline the barrier stands at `sample` (m).
     ///
     /// This is the *one* definition of "the edge of the world" — the collision
@@ -686,6 +706,33 @@ mod tests {
                 t.lane_count(sample) >= MIN_LANES,
                 "and those three always exist"
             );
+        }
+    }
+
+    /// The two lane functions are one function read in both directions, and the
+    /// near-miss rule leans on that: it compares a traffic car's lane index to a
+    /// lane derived from the player's continuous steering offset, so a round trip
+    /// that is not the identity would score passes against the wrong lane.
+    #[test]
+    fn a_lane_survives_the_round_trip_through_its_own_lateral() {
+        let t = track();
+        for sample in t.samples() {
+            let reach = t.lane_reach(sample);
+            for lane in -reach..=reach {
+                let lateral = t.lane_lateral(sample, lane);
+                assert_eq!(
+                    t.lane_at_lateral(sample, lateral),
+                    lane,
+                    "lane {lane} came back as something else"
+                );
+            }
+            // Anywhere inside a lane reads as that lane, not just its centre.
+            let width = t.lane_width();
+            assert_eq!(t.lane_at_lateral(sample, width * 0.49), 0);
+            assert_eq!(t.lane_at_lateral(sample, width * 0.51), 1);
+            // And off the edge of the road clamps, exactly as lane_lateral does.
+            assert_eq!(t.lane_at_lateral(sample, width * 99.0), reach);
+            assert_eq!(t.lane_at_lateral(sample, width * -99.0), -reach);
         }
     }
 

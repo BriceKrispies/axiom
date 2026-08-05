@@ -171,9 +171,15 @@ mod tests {
             (!g.finished()).then(|| g.step());
         });
         assert!(g.finished(), "the ghost got {:.0} m", g.distance());
-        // The reference run, to the step.
+        // The reference run, to the step. This number is a *consequence*, not a
+        // setting: the ghost drives the real sim, so any rule that changes how
+        // much boost a lap earns moves it. It last moved from 91.68 s when the
+        // near-miss rule became "the next lane over, and you go past it" — the
+        // old rule's 16 m/s closing-speed floor was silently refusing to pay out
+        // for passes the ghost was already making, and paying for them is worth
+        // 0.73 s over nine kilometres.
         assert!(
-            (g.elapsed_seconds() - 91.68).abs() < 0.05,
+            (g.elapsed_seconds() - 90.95).abs() < 0.05,
             "ghost time {:.2}s",
             g.elapsed_seconds()
         );

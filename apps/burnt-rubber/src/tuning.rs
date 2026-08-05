@@ -699,10 +699,6 @@ pub struct RaceTuning {
     pub traffic_half_length: f32,
     /// Traffic collision half-width (m).
     pub traffic_half_width: f32,
-    /// Lateral gap (m) inside which passing traffic counts as a near miss.
-    pub near_miss_gap: f32,
-    /// Minimum closing speed (m/s) for a pass to count as a near miss.
-    pub near_miss_closing_speed: f32,
     /// Boost awarded by one near miss (fraction of the meter).
     pub near_miss_boost: f32,
     /// Boost awarded per second of sustained drift (fraction of the meter).
@@ -739,8 +735,6 @@ impl RaceTuning {
         traffic_speed_max: 38.0,
         traffic_half_length: 2.3,
         traffic_half_width: 1.05,
-        near_miss_gap: 3.1,
-        near_miss_closing_speed: 16.0,
         near_miss_boost: 0.13,
         drift_boost_rate: 0.22,
         high_speed_boost_rate: 0.075,

@@ -504,16 +504,23 @@ impl RaceSim {
         let race = self.tuning.race;
         let vehicle = self.tuning.vehicle;
         let collision = self.tuning.collision;
-        let snapshot: Vec<(usize, f32, f32, f32, u32, bool)> = self
+        let snapshot: Vec<(usize, f32, f32, f32, u32, bool, i32)> = self
             .traffic
             .cars()
             .iter()
             .enumerate()
             .filter(|(_, c)| c.active)
-            .map(|(i, c)| (i, c.distance, c.lateral, c.speed, c.slot, c.near_missed))
+            .map(|(i, c)| (i, c.distance, c.lateral, c.speed, c.slot, c.near_missed, c.lane))
             .collect();
 
-        for (index, distance, lateral, speed, slot, near_missed) in snapshot {
+        // The player's lane, once per step rather than once per traffic car: it
+        // is a property of where the car is, not of what it is passing.
+        let player_lane = {
+            let here = self.track.sample_at(self.car.distance);
+            self.track.lane_at_lateral(&here, self.car.lateral)
+        };
+
+        for (index, distance, lateral, speed, slot, near_missed, lane) in snapshot {
             let obstacle = contact::Obstacle::Traffic { slot };
             let gap = collision::traffic_gap(&self.car, distance, lateral, &race, &vehicle);
             // Report the clearance every step, whether or not there is contact:
@@ -525,7 +532,15 @@ impl RaceSim {
                 collision::traffic_overlap(&self.car, distance, lateral, &race, &vehicle)
             else {
                 if !near_missed
-                    && collision::is_near_miss(&self.car, distance, lateral, speed, &race, &vehicle)
+                    && collision::is_near_miss(
+                        &self.car,
+                        player_lane,
+                        distance,
+                        lane,
+                        speed,
+                        &race,
+                        &vehicle,
+                    )
                 {
                     self.traffic.mark_near_missed(index);
                     self.boost.award(race.near_miss_boost);
