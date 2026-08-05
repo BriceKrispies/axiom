@@ -466,34 +466,52 @@ impl CameraTuning {
     /// what decides whether the shot is a car seen from behind or a car seen
     /// from above.
     ///
-    /// The previous pass tightened the distance to fix a car that read too
-    /// small, and left the height alone at 2.0 m — twice the car's own
-    /// [`crate::render::car_model::ROOF_HEIGHT`] of 0.98 m, only 5.5 m back.
-    /// That is a 20° depression angle onto a subject four metres away, and the
-    /// near-field perspective at that range turns the roof into a wide flat
-    /// slab: measured against the art target the car's *projected* silhouette
-    /// came out 1.98 tall per unit wide where the target reads 1.19, its rear
-    /// bumper ran to 82% of frame height and collided with the on-screen touch
-    /// controls, and the road ahead was squeezed into the top quarter.
+    /// Those two knobs are also not independent of each other, which is the
+    /// thing the last two passes each got half-right. Measured against the art
+    /// target, the shot the previous rig produces is already the *right shot* —
+    /// the horizon sits within 3% of frame height of the target's, the road
+    /// converges on the same line, the roadside posts run past at the same
+    /// cadence, and the car's rear bumper sits at 0.69 of frame height where the
+    /// target has it at 0.72. Everything about the world matches. The one thing
+    /// that does not is the **subject**: the car spans 22% of frame width where
+    /// the target's spans 59%.
     ///
-    /// So the correction is almost entirely vertical. Dropping to 1.35 m puts
-    /// the eye 0.37 m above the roof rather than a full metre above it and
-    /// nearly halves the depression angle (20.0° → 12.9°), which is what
-    /// restores the target's read: a rear-three-quarter silhouette — taillights
-    /// and rear glass, a sliver of roof — sitting on open tarmac with the road
-    /// running away underneath it. Distance moves only enough to hold the car's
-    /// on-screen *width* where the target has it (the one thing the previous
-    /// pass got right), and `distance_high` moves by the same factor so the rig
-    /// keeps its speed character.
+    /// That gap cannot be closed by pulling the camera in, and the arithmetic is
+    /// worth writing down because it is counter-intuitive. For anything standing
+    /// on the road, the ratio of its on-screen width to its distance *below the
+    /// horizon* is `width / eye_height` — the chase distance cancels out
+    /// entirely. Halving the distance makes the car twice as big and puts it
+    /// twice as far down the frame, straight through the touch controls and off
+    /// the bottom edge; it never makes the car bigger *where it is*. Field of
+    /// view does not help either, because it magnifies the road and the posts by
+    /// exactly the same factor, and those already match.
     ///
-    /// The eye now sits 0.45 m above the `min_ground_clearance` floor rather
-    /// than 1.1 m, so that clamp does more work over undulating terrain — it is
-    /// a safety floor, not a framing knob, and it is deliberately left alone.
+    /// The only lever that changes how much frame the subject owns is therefore
+    /// the **eye height**, with the distance scaled by the same factor so the
+    /// car keeps its place in the frame and every angle in the rig is preserved.
+    /// So the whole rig scales by 0.815: the eye drops from 1.35 m to 1.10 m,
+    /// and 5.9 m becomes 4.81 m behind the car.
+    ///
+    /// What that buys is two things at once. The car grows by a quarter without
+    /// moving down the frame. And the eye is now 0.12 m above the car's own
+    /// [`crate::render::car_model::ROOF_HEIGHT`] of 0.98 m rather than 0.37 m
+    /// above it, so the roof and the shallow-raked backlight — which at 12° from
+    /// horizontal present as a wide flat slab to anything looking down at them —
+    /// go nearly edge-on. That is the target's read: a wide, low car seen from
+    /// its own roofline, taillights across the middle of the silhouette, not a
+    /// tall box seen from above.
+    ///
+    /// `min_ground_clearance` scales with the rig rather than being left behind.
+    /// It is a safety floor, not a framing knob, but a floor that does not move
+    /// when the eye above it does stops being a floor and becomes the framing:
+    /// held at 0.9 m it would sit 0.2 m under a 1.10 m eye and take the shot over
+    /// on every crest. Scaled to 0.73 m it keeps the same 0.37 m of headroom it
+    /// has always had, and goes on doing only its own job.
     pub const DEFAULT: CameraTuning = CameraTuning {
-        distance_low: 5.9,
-        distance_high: 7.7,
-        distance_boost: 1.1,
-        height: 1.35,
+        distance_low: 4.81,
+        distance_high: 6.28,
+        distance_boost: 0.9,
+        height: 1.1,
         look_ahead_low: 5.0,
         look_ahead_high: 14.0,
         fov_low: 65.0,
@@ -513,7 +531,7 @@ impl CameraTuning {
         boost_shake: 0.05,
         impact_shake: 0.55,
         impact_decay: 11.0,
-        min_ground_clearance: 0.9,
+        min_ground_clearance: 0.73,
     };
 }
 
@@ -771,6 +789,32 @@ mod tests {
         assert!(c.distance_low < c.distance_high, "and so does chase distance");
         assert!(c.look_ahead_low < c.look_ahead_high);
         assert!(c.turn_roll_limit <= 6.0, "ordinary roll stays subtle");
+    }
+
+    /// The framing decision behind [`CameraTuning::DEFAULT`], as an assertion
+    /// rather than a memory: the eye sits just *above* the car's roofline, and
+    /// the clearance floor stays below the eye by a real margin.
+    ///
+    /// Both bounds are one-sided for a reason. Drop the eye under the roof and
+    /// the car becomes a wall across the road ahead. Raise it and the roof and
+    /// the shallow backlight turn back into the flat slab that made the car read
+    /// as a box seen from above instead of a wide, low car seen from behind.
+    #[test]
+    fn the_eye_sits_just_above_the_roofline_and_clear_of_its_own_floor() {
+        let c = CameraTuning::DEFAULT;
+        let roof = crate::render::car_model::ROOF_HEIGHT;
+        assert!(c.height > roof, "the eye is above the roof: {} vs {roof}", c.height);
+        assert!(
+            c.height - roof < 0.3,
+            "but only just — {} m of it is a look-down angle",
+            c.height - roof
+        );
+        assert!(
+            c.height - c.min_ground_clearance > 0.3,
+            "and the clearance floor is a floor, not the framing: {} vs {}",
+            c.min_ground_clearance,
+            c.height
+        );
     }
 
     /// The car's headline behaviour is an ordering between numbers, and the
