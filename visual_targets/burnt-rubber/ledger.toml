@@ -954,3 +954,91 @@ atmosphere = 1
 scale_and_proportion = 1
 detail_density = 1
 artifact_level = 1
+
+[[iteration]]
+iteration = 9
+attacked_axis = "subject_fidelity"
+changed_files = [
+  "apps/burnt-rubber/src/tuning.rs",
+  "apps/burnt-rubber/src/render/car_model.rs",
+  "apps/burnt-rubber/src/render/mod.rs",
+  "apps/burnt-rubber/src/render/palette.rs",
+  "apps/burnt-rubber/src/render/asphalt_texture.rs",
+  "apps/burnt-rubber/src/web.rs",
+  "crates/axiom-host/src/host_device_profile.rs",
+  "modules/axiom-windowing/src/windowing_api.rs",
+  "modules/axiom-gpu-backend/src/live_gpu_binding.rs",
+  "modules/axiom-gpu-backend/src/upscale.rs",
+  "modules/axiom-gpu-backend/src/gpu_backend_api.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+Era-B pass 2. Seven lenses, seven commits, all cherry-picked with zero conflicts, \
+one render on the judged GPU arm (WebGL2) at the campaign moment (0 KM/H, OPENING \
+STRAIGHT, 0%, 0:10.983) plus the canvas2d guard. Attacked axis subject_fidelity \
+1 -> 2 on the tail's arrangement: lamp clusters of twin tubes in fixed bezels, and \
+a centre badge. No non-attacked axis dropped, so this is a keep by the table. Four \
+axes rose, each on a measurement stated at the axis; final_score 1.125 -> 1.225. \
+\
+The pass-1 overshoot is repaired, and NOT by the route pass 1 predicted. Pass 1 \
+named low_key()'s 0.16 black point. The lighting lens found the compounding term \
+instead: the black point is a hard clip at 41/255 and pass 1 had also cut \
+KEY_INTENSITY 0.85 -> 0.30, so tarmac rendered at byte 27 and the verge at 35, both \
+under the subtract, both clipped to zero. It predicted a byte-35 verge and measured \
+0.0. Raising the key to 0.88 restores the ground plane: road (0,2,11) -> (14,14,17) \
+against the reference's (7,8,11). The grade was untouched and no other lens moved \
+exposure, so nothing compounded — the lens warned that it must not, and the \
+architect independently advised the same. \
+\
+artifact_level is HELD as unverified rather than credited: the architect's \
+supersample targets it, but the edge-ramp probe (2.34 -> 4.11 against the \
+reference's 1.03) cannot separate sampling from the road's simultaneous luminance \
+rise. It needs a probe that holds lighting fixed. \
+\
+Standing finding, not acted on and not scored: the judged arm is anamorphically \
+squashed 3.16x horizontally (web.rs boots surface and camera from a compile-time \
+1280x720 while the live canvas is portrait 470x836 @ DPR 2; configure_surface also \
+hardcodes a 1.0 scale factor so the host never learns DPR). Two lenses reached it \
+independently. It is unscored because the reference carries the same squash in its \
+world and only its car was redrawn true, so correcting it would diverge from the \
+reference on composition — a foreman decision about the target, not a silent fix. \
+\
+Guarded arm: canvas2d captured, still fully legible, not scored. \
+\
+Also fixed on main before this pass (339d7bda): the pass-1 stripe test landed red \
+and had been failing on main — it measured centre-to-centre distance where the twin \
+stripes straddle the centreline by +/-0.30, so a correctly-placed stripe could never \
+pass. Now measured along the glass's normal. 545 app tests green.
+"""
+next_attacked_axis = "silhouette_readability"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+silhouette_readability = 1
+material_and_texture_detail = 2
+lighting_and_shadow = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 2
+detail_density = 2
+artifact_level = 1
