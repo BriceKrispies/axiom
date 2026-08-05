@@ -170,18 +170,45 @@ impl BuildPlan {
     }
 }
 
-/// Run a prepared command with inherited stdio, mapping non-success to an error.
+/// Run a prepared command, mapping non-success to an error that **carries the
+/// compiler's own diagnostics**.
+///
+/// stderr is teed rather than inherited: it is echoed to the terminal as it was
+/// before, and also captured so the failure string contains the actual `error[E…]`
+/// lines. That string is what the served page displays, and "exit code 101" in a
+/// banner is not worth the banner — the whole value is being told *which* line
+/// failed without leaving the browser.
 fn run(cmd: &mut Command, what: &str) -> Result<(), String> {
     println!("axiom-serve: $ {what}");
-    let status = cmd
-        .status()
-        .map_err(|err| format!("could not start `{what}`: {err}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("`{what}` failed ({status})"))
+    let output = cmd
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("could not start `{what}`: {err}"))
+        .and_then(|child| {
+            child
+                .wait_with_output()
+                .map_err(|err| format!("`{what}` could not be waited on: {err}"))
+        })?;
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    // Echo it, so the terminal behaves exactly as it did before this captured.
+    eprint!("{stderr}");
+    if output.status.success() {
+        return Ok(());
     }
+    // Cargo puts the diagnostics first and a short summary last; the tail is
+    // therefore the useful end. Bounded so a pathological build cannot push a
+    // megabyte of text into every served page.
+    let tail: Vec<&str> = stderr.lines().rev().take(DIAGNOSTIC_LINES).collect();
+    let diagnostics: String = tail
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(format!("`{what}` failed ({})\n\n{diagnostics}", output.status))
 }
+
+/// How many trailing stderr lines a failure carries into the page banner.
+const DIAGNOSTIC_LINES: usize = 40;
 
 /// `wasm-bindgen --target web --out-dir <out_dir> <wasm>`.
 fn wasm_bindgen(root: &Path, wasm: &Path, out_dir: &Path) -> Result<(), String> {

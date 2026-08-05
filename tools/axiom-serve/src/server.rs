@@ -63,10 +63,66 @@ pub struct ServeCtx {
     pub kind: AppKind,
     pub version: Arc<AtomicU64>,
     pub clients: Clients,
+    /// The last build's error, or `None` when the last build succeeded.
+    ///
+    /// A failed build does **not** stop the server: the previous bundle is still
+    /// on disk and still served, so the page keeps working and looks fine. That
+    /// is the trap — a compile error reads in the browser as "my change did
+    /// nothing", and the only evidence is a line in a terminal nobody is
+    /// watching. Holding the error here lets the served page say so itself.
+    pub build_error: BuildError,
 }
 
+/// The shared slot holding the last build failure, if any.
+pub type BuildError = Arc<Mutex<Option<String>>>;
+
+/// The SSE version that means "the build failed" rather than "reload".
+///
+/// The broadcast channel carries a `u64` version, and every real version is a
+/// millisecond epoch, so zero is free and unambiguous. Reusing the channel keeps
+/// one notification path rather than two.
+pub const BUILD_FAILED: u64 = 0;
+
 /// The full-page reload script injected into RustWasm pages.
-const RELOAD_SCRIPT: &str = "<script>new EventSource(\"/events\").addEventListener(\"reload\",()=>location.reload());</script>";
+///
+/// It also subscribes to `builderror` and paints [`BUILD_ERROR_ROUTE`]'s contents
+/// into a banner **below the page content**, and asks for that state once on
+/// load so a browser opened after a failed build is told immediately rather than
+/// silently showing the last bundle that happened to compile.
+const RELOAD_SCRIPT: &str = concat!(
+    "<script>(()=>{",
+    "const es=new EventSource(\"/events\");",
+    "es.addEventListener(\"reload\",()=>location.reload());",
+    "const id=\"axiom-build-error\";",
+    "const paint=t=>{",
+    "let el=document.getElementById(id);",
+    "if(!t){if(el)el.remove();return;}",
+    "if(!el){el=document.createElement(\"pre\");el.id=id;",
+    "el.style.cssText=\"margin:0;padding:14px 18px;background:#2b0b0b;color:#ff8f8f;",
+    "font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;",
+    "border-top:3px solid #ff3b30;max-height:45vh;overflow:auto;position:relative;z-index:2147483647\";",
+    "document.body.appendChild(el);}",
+    "el.textContent=\"axiom-serve: BUILD FAILED - the page above is the last bundle that \"",
+    // `\\n` so the JS string literal carries an escape, not a real newline (a
+    // literal newline inside a JS string is a syntax error).
+    "+\"compiled, NOT your change.\\n\\n\"+t;};",
+    "const poll=()=>fetch(\"", // continued below so the route constant is shared
+);
+
+/// Where the served page reads the current build error from. Plain text; an
+/// empty body means the last build succeeded.
+pub const BUILD_ERROR_ROUTE: &str = "/__axiom/build-error";
+
+/// The tail of [`RELOAD_SCRIPT`], after the route.
+const RELOAD_SCRIPT_TAIL: &str = concat!(
+    "\",{cache:\"no-store\"}).then(r=>r.text()).then(paint).catch(()=>{});",
+    "es.addEventListener(\"builderror\",poll);poll();})();</script>",
+);
+
+/// The whole injected script, assembled from its two halves and the route.
+fn reload_script() -> String {
+    format!("{RELOAD_SCRIPT}{BUILD_ERROR_ROUTE}{RELOAD_SCRIPT_TAIL}")
+}
 
 /// The import map injected into TsWebEngine pages that lack one. The target
 /// carries the cache-bust version like every other asset URL — it is the entry
@@ -92,6 +148,26 @@ pub fn handle(request: Request, ctx: &ServeCtx) {
 
     if path == "/events" {
         serve_events(request, ctx);
+        return;
+    }
+    if path == BUILD_ERROR_ROUTE {
+        let body = ctx
+            .build_error
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+            .unwrap_or_default();
+        let _ = request.respond(
+            Response::from_string(body)
+                .with_header(
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/plain; charset=utf-8"[..])
+                        .expect("a static header is well formed"),
+                )
+                .with_header(
+                    tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-store"[..])
+                        .expect("a static header is well formed"),
+                ),
+        );
         return;
     }
     // Reject path traversal outright, on every file-serving route.
@@ -327,12 +403,16 @@ pub fn stamp_page_assets(html: &str, version: u64) -> String {
 /// a page that already carries the script is returned unchanged, so it can never
 /// be double-injected into reloading twice.
 pub fn inject_reload_script(html: &str) -> String {
-    if html.contains(RELOAD_SCRIPT) {
+    let script = reload_script();
+    if html.contains(&script) {
         return html.to_owned();
     }
+    // Appended at the end of `<body>` so the banner is the last element on the
+    // page — it renders *below* the game rather than over it, which is the point:
+    // it must be impossible to miss without covering the thing being debugged.
     match html.rfind("</body>") {
-        Some(idx) => format!("{}{RELOAD_SCRIPT}\n{}", &html[..idx], &html[idx..]),
-        None => format!("{html}\n{RELOAD_SCRIPT}"),
+        Some(idx) => format!("{}{script}\n{}", &html[..idx], &html[idx..]),
+        None => format!("{html}\n{script}"),
     }
 }
 
@@ -534,7 +614,40 @@ mod tests {
         let script = out.find("EventSource").unwrap();
         assert!(script < out.find("</body>").unwrap());
         // No </body>: appended at the end.
-        assert!(inject_reload_script("<p>x</p>").ends_with(RELOAD_SCRIPT));
+        assert!(inject_reload_script("<p>x</p>").ends_with(&reload_script()));
+        // Injecting twice must not stack two listeners (and so two banners).
+        assert_eq!(inject_reload_script(&out), out);
+    }
+
+    /// The banner is the whole point of the script: a failed build leaves the
+    /// previous bundle on disk and still served, so without this the page looks
+    /// fine and the change appears to have done nothing.
+    #[test]
+    fn the_injected_script_reports_a_failed_build_in_the_page() {
+        let script = reload_script();
+        // It asks the server for the current error, and re-asks whenever a build
+        // fails — not only on load, or a page left open would never hear.
+        assert!(script.contains(BUILD_ERROR_ROUTE), "{script}");
+        assert!(script.contains("builderror"), "{script}");
+        // …and on load, for a browser opened after the failure.
+        assert!(script.contains("poll();"), "{script}");
+        // It says the visible page is stale, which is the actually confusing part.
+        assert!(script.contains("BUILD FAILED"), "{script}");
+        assert!(script.contains("NOT your change"), "{script}");
+        // A failed build must never trigger a reload — that re-serves the stale
+        // bundle and loses the message.
+        assert!(
+            !script.contains("builderror\",()=>location.reload()"),
+            "a failed build must not reload the page"
+        );
+    }
+
+    /// The event name is chosen by the broadcast version, and zero is reserved.
+    #[test]
+    fn the_build_failed_version_is_distinct_from_every_real_one() {
+        assert_eq!(BUILD_FAILED, 0);
+        // Real versions are millisecond epochs, so they can never collide.
+        assert!(super::super::epoch_ms() > BUILD_FAILED);
     }
 
     #[test]

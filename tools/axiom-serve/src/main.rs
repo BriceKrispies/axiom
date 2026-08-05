@@ -186,9 +186,16 @@ fn run() -> Result<(), String> {
     };
     plan.prepare()?;
 
+    // A failed build does not stop the server — the previous bundle is still on
+    // disk, so the page keeps loading and looks fine. That is exactly why the
+    // error has to reach the *browser*: in the terminal it is one line that
+    // scrolls away, and in the page it is indistinguishable from "my change did
+    // nothing". `build_error` is what the served page reads to say so itself.
+    let build_error: server::BuildError = Arc::new(Mutex::new(None));
     if let Err(err) = plan.build() {
         eprintln!("axiom-serve: initial build failed: {err}");
-        eprintln!("axiom-serve: starting the server anyway — fix the error and save to rebuild");
+        eprintln!("axiom-serve: starting the server anyway — the page will show the error");
+        *build_error.lock().unwrap_or_else(|p| p.into_inner()) = Some(err);
     }
 
     let version = Arc::new(AtomicU64::new(epoch_ms()));
@@ -201,18 +208,29 @@ fn run() -> Result<(), String> {
         let plan = plan.clone();
         let version = Arc::clone(&version);
         let clients = Arc::clone(&clients);
+        let build_error = Arc::clone(&build_error);
         thread::spawn(move || {
             watch::run(&spec, || {
                 println!("axiom-serve: change detected — rebuilding…");
                 match plan.build() {
                     Ok(()) => {
+                        // Clear first: the reload that follows must never race a
+                        // page into fetching a stale error and painting a banner
+                        // over a build that has already succeeded.
+                        *build_error.lock().unwrap_or_else(|p| p.into_inner()) = None;
                         let v = epoch_ms();
                         version.store(v, Ordering::SeqCst);
                         server::broadcast(&clients, v);
                         println!("axiom-serve: rebuilt — reloading connected browsers");
                     }
                     Err(err) => {
-                        eprintln!("axiom-serve: rebuild failed: {err} (not reloading)");
+                        eprintln!("axiom-serve: rebuild failed: {err}");
+                        eprintln!("axiom-serve: the page is showing the error (the bundle is unchanged)");
+                        *build_error.lock().unwrap_or_else(|p| p.into_inner()) = Some(err);
+                        // Not a reload — that would only re-serve the stale
+                        // bundle. `BUILD_FAILED` makes every open page fetch and
+                        // display the error in place.
+                        server::broadcast(&clients, server::BUILD_FAILED);
                     }
                 }
             });
@@ -233,6 +251,7 @@ fn run() -> Result<(), String> {
         kind,
         version,
         clients,
+        build_error,
     });
     for request in http.incoming_requests() {
         let ctx = Arc::clone(&ctx);
