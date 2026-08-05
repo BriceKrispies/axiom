@@ -548,32 +548,44 @@ const MOON_HALO_STRENGTH: f32 = 0.18;
 /// value. Every unit of it is therefore a floor under the *whole* frame, in the
 /// one place a night stage cannot afford one.
 ///
-/// Measured against the reference the arithmetic is unambiguous. At `0.85`, the
-/// road's key term alone is ~0.019 linear and the verge's ~0.028 — a verge that
-/// lands on screen around `(53, 63, 61)` where the reference's is `(6, 8, 5)`,
-/// and a far road at `(38, 41, 52)` where the reference's is `(3, 4, 7)`. The
-/// key was supplying ~78% of both. Cutting it to `0.30` takes the verge to
-/// roughly a quarter of that and the distant road with it, while costing the
-/// road *beside the car* almost nothing — because there the pool light is
-/// already ~80% of the signal.
+/// All of that is true, and the level it produced — `0.30` — was still wrong,
+/// because it removed the pedestal a **second** time. The frame's floor is taken
+/// out twice: once here, by starving the globals, and once again downstream by
+/// [`FramePostProcess::low_key`], which subtracts `0.16` **in display-encoded
+/// space** (41/255) off the finished image and renormalizes. That subtract is a
+/// hard floor, not a curve: every pixel the raster writes below byte 41 does not
+/// get *deeper*, it becomes exactly `0`.
 ///
-/// That last clause is the whole point, and it is the rule this constant and the
-/// scene's ambient now share: **a night stage is lit locally.** What the eye
-/// reads as "night" is not low light, it is a steep ramp — the reference falls
-/// from `(58, 62, 75)` beside the car to `(9, 12, 19)` in the near corner to
-/// `(3, 4, 7)` down the road, ~15x, and no global term can produce a ramp at
-/// all. Spending the frame's light on the two flat terms buys uniform grey and
-/// takes the ramp away; spending it on the pool that rides the car buys the
-/// ramp. So the globals fall back to what is needed to keep an unlit face from
-/// being a hole, and [`POOL_LIGHT_HEIGHT`]'s wash is left as the thing you
-/// actually see.
+/// At `0.30` the globals on flat ground are `0.019 + 0.30·0.345 = 0.122`. The
+/// tarmac's own albedo is a deliberate `0.0886` luma, so the road renders at byte
+/// **27** and the verge at **35** — both under the subtract. Measured on the
+/// champion, that is precisely what happened: off the pool and off the moon's
+/// sheen, the whole ground plane reads `0.0`. The verge columns are `0.0–3.1`
+/// against the reference's steady `6.5–9.6`, and the mid-field road left of the
+/// car is `0.7–3.2` against the reference's `10.0–11.7`. The scene stopped being
+/// a road at night and became lane paint floating in a void: no verge, no
+/// shoulder, no surface between the car and the horizon.
 ///
-/// The verticals are the deliberate cost: a car flank, a reflector post and a
-/// tree cone all lose key. They keep their shape because the pool top-lights
-/// everything near the camera, and every cue that has to stay bright at any
-/// distance — paint, posts, lamps, tail lights — carries its own **emissive**,
-/// which nothing here scales (see `palette`).
-const KEY_INTENSITY: f32 = 0.30;
+/// So the rule this constant obeys has a second half. The globals must stay under
+/// the pool — that is the ramp, and it still holds. But they must also land the
+/// **road above the grade's black point**, or the grade clips the ground plane
+/// away instead of deepening it. `0.88` puts the globals at `0.322`: the road
+/// renders at byte 48 and survives the subtract at ~`7`, next to the reference's
+/// `10`, while the pool beneath the car (`0.341`) still out-lights them.
+///
+/// And the subtract *sharpens* the ramp rather than flattening it, which is why
+/// this costs the night nothing: road-beside-the-car goes to byte 69 in the
+/// raster and mid-field road to 48 — 1.4x — but after the black point is removed
+/// those are `33` and `7`, near 5x. The ramp the previous level was protecting is
+/// produced by the grade acting on a raster that has something in it, not by
+/// authoring the raster at zero.
+///
+/// The verticals come back with it, and that is the other half of the win: at
+/// `0.30` a car flank facing the moon got `0.135`, so the car was a black
+/// silhouette with no lit side at all. At `0.88` it gets `0.395` and the raking,
+/// side-lit modelling [`MOON_DIRECTION`]'s low elevation was chosen for finally
+/// reaches the geometry.
+const KEY_INTENSITY: f32 = 0.88;
 
 /// How high above the road the car's pool light hangs (m).
 ///
@@ -765,25 +777,30 @@ mod tests {
         assert!(at(0.5 * limb) > 0.1, "the limb still carries a visible rim");
     }
 
-    /// **The night is lit locally.** The two *global* terms — the hemisphere
-    /// ambient and the directional key — must together stay well under what the
-    /// car's pool light lays on the road beneath it.
+    /// **The night is lit locally — but the ground plane still has to exist.**
+    /// The two *global* terms (the hemisphere ambient and the directional key)
+    /// live inside a window with a wall on each side, and this pins both.
     ///
-    /// This is the rule that keeps a pedestal out of the frame, and it is worth
-    /// a test rather than a comment because it is the one every previous pass
-    /// broke by accident. A global term is the same value on the tarmac under
-    /// the bumper and on the verge two hundred metres out, so raising either one
-    /// does not brighten the scene — it raises the *floor* of the scene, and a
-    /// floor is what makes a night read as a colour-graded overcast afternoon.
-    /// (Measured: at the old levels nothing in the frame's 3D band fell below
-    /// ~29/255, against a reference whose median is 3.) Only the pool falls off,
-    /// so only the pool can produce the steep near-to-far ramp the eye actually
-    /// reads as darkness.
+    /// *Ceiling:* they must stay under what the car's pool light lays on the road
+    /// beneath it. A global term is the same value on the tarmac under the bumper
+    /// and on the verge two hundred metres out, so raising either one does not
+    /// brighten the scene — it raises the *floor* of the scene. Only the pool
+    /// falls off, so only the pool can produce a near-to-far ramp at all.
     ///
-    /// The comparison is made on a **horizontal** surface — the road, the
-    /// largest thing in any frame and the one both terms land on hardest.
+    /// *Floor:* they must render the road **above the grade's black point**.
+    /// [`FramePostProcess::low_key`] subtracts `0.16` in display-encoded space off
+    /// the finished image, and that subtract is a hard clip, not a curve: a road
+    /// that renders below byte 41 does not get deeper, it becomes `0`. Starving
+    /// the globals past this line does not deepen the night, it deletes the verge,
+    /// the shoulder and the mid-field tarmac outright — which is exactly what the
+    /// measured champion did (verge `0.0–3.1` against a reference `6.5–9.6`).
+    ///
+    /// Both walls are worth a test rather than a comment because passes keep
+    /// walking into one while defending the other. The comparison is made on a
+    /// **horizontal** surface — the road, the largest thing in any frame and the
+    /// one every term lands on hardest.
     #[test]
-    fn the_pool_light_out_lights_the_globals_on_the_road_it_rides_over() {
+    fn the_globals_sit_between_the_pool_light_and_the_grade_s_black_point() {
         // The backend's point-light falloff, mirrored: 1/(1 + 0.09d + 0.032d²).
         let d = POOL_LIGHT_HEIGHT;
         let pool = 1.0 / (1.0 + 0.09 * d + 0.032 * d * d);
@@ -801,10 +818,24 @@ mod tests {
         let globals = key + ambient;
 
         assert!(
-            pool > globals * 2.0,
+            pool > globals,
             "the flat terms ({globals:.3}) have caught up with the pool \
              ({pool:.3}): the road is about to go one uniform tone again"
         );
+
+        // The tarmac's luma albedo, and the sRGB transfer the backend writes it
+        // through — the road as the display actually receives it, before grading.
+        let road = 0.2126 * 0.085 + 0.7152 * 0.088 + 0.0722 * 0.105;
+        let linear = road * globals;
+        let encoded = 1.055 * linear.powf(1.0 / 2.4) - 0.055;
+        let black_point = FramePostProcess::low_key().black_point().get();
+        assert!(
+            encoded > black_point,
+            "the globals put the road at {encoded:.3} encoded, under the grade's \
+             black point of {black_point:.3} — the subtract will clip the whole \
+             ground plane to zero instead of deepening it"
+        );
+
         // ...and the ambient stays the *residual* it is documented to be, not a
         // second key: it lights the lit and the unlit face equally, so every
         // unit of it is contrast removed from every object in the frame.
