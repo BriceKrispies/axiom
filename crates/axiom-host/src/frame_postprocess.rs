@@ -38,6 +38,7 @@
 //! no feedback, no browser types.
 
 use crate::frame_packet::FramePacket;
+use axiom_kernel::Ratio;
 
 /// Tuning for the color-grade post-process, carried as neutral frame data: `exposure`
 /// scales every channel uniformly, `white_balance` scales each channel independently
@@ -77,8 +78,8 @@ impl FramePostProcess {
     }
 
     /// The global exposure scale.
-    pub const fn exposure(&self) -> f32 {
-        self.exposure
+    pub const fn exposure(&self) -> Ratio {
+        Ratio::finite_or_zero(self.exposure)
     }
 
     /// The per-channel white-balance gain.
@@ -87,18 +88,18 @@ impl FramePostProcess {
     }
 
     /// The contrast S-curve strength around the `0.5` pivot.
-    pub const fn contrast(&self) -> f32 {
-        self.contrast
+    pub const fn contrast(&self) -> Ratio {
+        Ratio::finite_or_zero(self.contrast)
     }
 
     /// The saturation scale about the pixel's Rec.709 luma.
-    pub const fn saturation(&self) -> f32 {
-        self.saturation
+    pub const fn saturation(&self) -> Ratio {
+        Ratio::finite_or_zero(self.saturation)
     }
 
     /// The display-encoded black floor removed before the rest of the chain.
-    pub const fn black_point(&self) -> f32 {
-        self.black_point
+    pub const fn black_point(&self) -> Ratio {
+        Ratio::finite_or_zero(self.black_point)
     }
 
     /// The public constructor: a tuned filmic preset that counters a washed-out,
@@ -315,11 +316,11 @@ mod tests {
     #[test]
     fn every_grade_parameter_is_readable() {
         let pp = FramePostProcess::new(0.5, [0.3, 0.6, 0.9], 2.0, 0.25, 0.5);
-        assert_eq!(pp.exposure(), 0.5);
+        assert_eq!(pp.exposure().get(), 0.5);
         assert_eq!(pp.white_balance(), [0.3, 0.6, 0.9]);
-        assert_eq!(pp.contrast(), 2.0);
-        assert_eq!(pp.saturation(), 0.25);
-        assert_eq!(pp.black_point(), 0.5);
+        assert_eq!(pp.contrast().get(), 2.0);
+        assert_eq!(pp.saturation().get(), 0.25);
+        assert_eq!(pp.black_point().get(), 0.5);
     }
 
     /// A zero black point must be the *exact* identity, or every frame graded before the
@@ -331,7 +332,7 @@ mod tests {
         apply_frame_postprocess(&mut rgba, 2, 2, &packet(Some(none)));
         assert_eq!(&rgba[0..3], &[0, 1, 46]);
         assert_eq!(&rgba[4..7], &[128, 200, 255]);
-        assert_eq!(FramePostProcess::cinematic().black_point(), 0.0);
+        assert_eq!(FramePostProcess::cinematic().black_point().get(), 0.0);
     }
 
     /// The floor removal: everything at or under the black point lands on true black, and
@@ -364,11 +365,11 @@ mod tests {
     #[test]
     fn low_key_removes_the_floor_and_holds_the_highlights() {
         let lk = FramePostProcess::low_key();
-        assert_eq!(lk.exposure(), 1.0);
+        assert_eq!(lk.exposure().get(), 1.0);
         assert_eq!(lk.white_balance(), [1.0, 1.0, 1.0]);
-        assert_eq!(lk.contrast(), 1.0);
-        assert_eq!(lk.saturation(), 1.0);
-        assert_eq!(lk.black_point(), 0.16);
+        assert_eq!(lk.contrast().get(), 1.0);
+        assert_eq!(lk.saturation().get(), 1.0);
+        assert_eq!(lk.black_point().get(), 0.16);
         assert_ne!(lk, FramePostProcess::cinematic());
 
         let mut rgba = vec![47u8, 26, 209, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

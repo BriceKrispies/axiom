@@ -465,7 +465,12 @@ impl PostChain {
         let (tone, balance) = grade.map_or(([1.0, 1.0, 1.0, 0.0], [1.0, 1.0, 1.0, 0.0]), |g| {
             let wb = g.white_balance();
             (
-                [g.exposure(), g.contrast(), g.saturation(), g.black_point()],
+                [
+                    g.exposure().get(),
+                    g.contrast().get(),
+                    g.saturation().get(),
+                    g.black_point().get(),
+                ],
                 [wb[0], wb[1], wb[2], 0.0],
             )
         });
