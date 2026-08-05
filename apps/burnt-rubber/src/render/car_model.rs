@@ -27,8 +27,18 @@
 //!   stand proud of it instead of being buried inside a full-width slab;
 //! * a **raked backlight** — the long dark sloping rear window over a short
 //!   decklid is the single most recognisable line on a fastback;
-//! * **tail-light bars** — wide, shallow, and standing proud of the rear panel
-//!   rather than sunk flush into it;
+//! * **tail-light clusters** — a *cluster*, not a patch. One glowing block per
+//!   side is what the chase camera used to see, and under braking it inflated
+//!   into a square orange eye, which is the one shape a car's tail never is.
+//!   Each side is now a dark bezel of fixed size with two thin lens tubes
+//!   inside it, all standing proud of the rear panel rather than sunk flush
+//!   into it. The bezel holds the silhouette still; only the lit tubes swell
+//!   when the brakes come on;
+//! * a **centre badge** — a small disc between the two clusters. It is the one
+//!   piece of furniture that was missing from the middle of the tail, and the
+//!   gap it fills is exactly the gap the lamps leave: a rear panel with two
+//!   lamps and nothing between them reads as a pair of eyes on a wall, and a
+//!   rear panel with a roundel between them reads as the back of a car;
 //! * a **valance** — a near-black bumper across the bottom of the rear panel,
 //!   which both grounds the car and halves the height of the coloured wall.
 //!
@@ -122,6 +132,45 @@ pub const STRIPE_OFFSET: f32 = 0.30;
 /// How wide one stripe is (m).
 pub const STRIPE_WIDTH: f32 = 0.22;
 
+/// How wide one tail-lamp cluster is (m).
+///
+/// Two of these plus the badge between them span nearly the whole tail, which
+/// is what makes the rear panel read as lamps-with-a-car-around-them rather
+/// than a wall with two patches on it.
+pub const LAMP_WIDTH: f32 = 0.68;
+
+/// How tall the dark bezel around one tail-lamp cluster is (m).
+///
+/// Fixed, on purpose: this is the lamp's *silhouette*, and a silhouette that
+/// changes size when the driver brakes is a lamp that looks like it is
+/// inflating. The lit tubes inside it are what change.
+pub const LAMP_BEZEL_HEIGHT: f32 = 0.22;
+
+/// How tall one lens tube is with the brakes off (m).
+pub const LAMP_TUBE_HEIGHT: f32 = 0.05;
+
+/// How far each lens tube sits above/below the cluster's centreline (m).
+///
+/// Set so that both tubes, at their braking height, still clear each other and
+/// still sit inside the bezel — the dark line between them is the detail that
+/// makes it a cluster instead of one thick bar.
+pub const LAMP_TUBE_OFFSET: f32 = 0.052;
+
+/// How tall the tail-lamp centre sits above the car's floor (m).
+pub const LAMP_HEIGHT: f32 = 0.58;
+
+/// How far each tail-lamp cluster sits from the centreline (m).
+pub const LAMP_OFFSET: f32 = 0.50;
+
+/// How far back the rear-panel furniture — lamps, badge — sits (m).
+pub const TAIL_PANEL_Z: f32 = -1.95;
+
+/// The diameter of the centre badge (m).
+///
+/// Sized to the gap the two lamp clusters leave between them, with a margin:
+/// a badge that touches the lenses is a bar, not a roundel.
+pub const BADGE_DIAMETER: f32 = 0.17;
+
 /// How far proud of the panel a stripe or the plate stands (m).
 ///
 /// Paint has no thickness, but a coincident face z-fights, so the trim is a
@@ -143,8 +192,14 @@ pub struct PlayerCar {
     /// decklid pair.
     stripes: [Entity; 6],
     plate: Entity,
+    /// The round centre badge, between the two lamp clusters.
+    badge: Entity,
     wheels: [Entity; 4],
-    brake_lights: [Entity; 2],
+    /// The dark surround of each tail-lamp cluster, left then right.
+    lamp_bezels: [Entity; 2],
+    /// The lit lens tubes inside the bezels, in cluster order: left upper, left
+    /// lower, right upper, right lower.
+    brake_lights: [Entity; 4],
     exhausts: [Entity; 2],
 }
 
@@ -180,13 +235,23 @@ impl PlayerCar {
                 part(app, cube, livery.trim),
             ],
             plate: part(app, cube, livery.trim),
+            // The badge is the cylinder mesh stood on its end so its flat face
+            // points at the chase camera — the one round thing on a car built
+            // entirely out of boxes, which is exactly why it reads.
+            badge: part(app, cylinder, livery.trim),
             wheels: [
                 part(app, cylinder, livery.tyre),
                 part(app, cylinder, livery.tyre),
                 part(app, cylinder, livery.tyre),
                 part(app, cylinder, livery.tyre),
             ],
+            // The bezels take the tyre material for the same reason the valance
+            // does: it is the darkest thing in the palette, and a dark surround
+            // is what makes a lit lens look lit.
+            lamp_bezels: [part(app, cube, livery.tyre), part(app, cube, livery.tyre)],
             brake_lights: [
+                part(app, cube, livery.brake_light),
+                part(app, cube, livery.brake_light),
                 part(app, cube, livery.brake_light),
                 part(app, cube, livery.brake_light),
             ],
@@ -374,24 +439,55 @@ impl PlayerCar {
             );
         }
 
-        // Tail lights: a pair of wide, shallow bars reaching out to the arches
-        // with a gap between them, standing *proud* of the rear panel — the old
-        // pair sat flush in the bodywork 0.015 m deep and read as a scratch.
-        // They are always present, and only grow *taller* when braking, which
-        // is the cue that survives being three car-lengths away.
-        let light_height = 0.13 + 0.17 * braking.clamp(0.0, 1.0);
-        for (index, entity) in self.brake_lights.iter().enumerate() {
+        // Tail lamps: two clusters reaching out towards the arches, each a dark
+        // bezel with a pair of thin lens tubes inside it, all standing *proud*
+        // of the rear panel — the old lamps sat flush in the bodywork and read
+        // as a scratch. The bezel never changes size: braking swells only the
+        // lit tubes, so the car's tail keeps the same shape whether or not the
+        // driver is on the brakes, and the cue is the light growing rather than
+        // the lamp growing.
+        for (index, entity) in self.lamp_bezels.iter().enumerate() {
             let side = [-1.0, 1.0][index];
             app.set(
                 *entity,
                 Transform::new(
-                    basis.at(Vec3::new(side * 0.50, 0.58, -1.95)),
+                    basis.at(Vec3::new(side * LAMP_OFFSET, LAMP_HEIGHT, TAIL_PANEL_Z)),
                     rotation,
-                    Vec3::new(0.72, light_height, 0.12),
+                    Vec3::new(LAMP_WIDTH + 0.06, LAMP_BEZEL_HEIGHT, 0.12),
+                ),
+            );
+        }
+        let lens_height = LAMP_TUBE_HEIGHT + 0.035 * braking.clamp(0.0, 1.0);
+        for (index, entity) in self.brake_lights.iter().enumerate() {
+            let side = [-1.0, 1.0][index / 2];
+            let tube = [1.0, -1.0][index % 2];
+            app.set(
+                *entity,
+                Transform::new(
+                    basis.at(Vec3::new(
+                        side * LAMP_OFFSET,
+                        LAMP_HEIGHT + tube * LAMP_TUBE_OFFSET,
+                        TAIL_PANEL_Z - 0.04,
+                    )),
+                    rotation,
+                    Vec3::new(LAMP_WIDTH, lens_height, 0.08),
                 ),
             );
             app.set(*entity, Visible(true));
         }
+
+        // Centre badge: a disc filling the gap between the clusters, at the
+        // lamps' own height. The engine's cylinder runs along +Y, so it takes a
+        // quarter turn about the chassis X to lay its flat face against the
+        // tail — the same trick the wheels use, a quarter turn the other way.
+        app.set(
+            self.badge,
+            Transform::new(
+                basis.at(Vec3::new(0.0, LAMP_HEIGHT, TAIL_PANEL_Z - 0.05)),
+                rotation.multiply(Quat::from_euler_xyz(std::f32::consts::FRAC_PI_2, 0.0, 0.0)),
+                Vec3::new(BADGE_DIAMETER, 0.06, BADGE_DIAMETER),
+            ),
+        );
 
         // Boost exhaust: a plume that only exists while boosting.
         let plume = boost.clamp(0.0, 1.0);
@@ -432,10 +528,12 @@ impl PlayerCar {
             self.wing,
             self.valance,
             self.plate,
+            self.badge,
         ];
         all.extend_from_slice(&self.stripes);
         all.extend_from_slice(&self.haunches);
         all.extend_from_slice(&self.wheels);
+        all.extend_from_slice(&self.lamp_bezels);
         all
     }
 
@@ -449,10 +547,12 @@ impl PlayerCar {
             self.wing,
             self.valance,
             self.plate,
+            self.badge,
         ];
         all.extend_from_slice(&self.stripes);
         all.extend_from_slice(&self.haunches);
         all.extend_from_slice(&self.wheels);
+        all.extend_from_slice(&self.lamp_bezels);
         all.extend_from_slice(&self.brake_lights);
         all.extend_from_slice(&self.exhausts);
         all
@@ -898,6 +998,71 @@ mod tests {
             valance.translation.y < light.translation.y,
             "the dark valance is below the lights, where a bumper goes"
         );
+    }
+
+    /// A tail lamp is a *cluster*: a dark bezel of fixed size holding two thin
+    /// lens tubes that clear each other, with the badge in the gap between the
+    /// two clusters. Collapsing it back to one glowing block per side — which
+    /// is what it was — is exactly the edit that turns the tail back into two
+    /// square orange eyes on a black wall, so it fails here.
+    #[test]
+    fn each_tail_lamp_is_a_bezel_holding_two_lens_tubes_with_a_badge_between_them() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
+        let pose = pose_at(0.0, 0.0, 0.0);
+
+        for braking in [0.0, 1.0] {
+            car.pose(&mut app, &pose, braking, 0.0);
+            let bezel = app.get::<Transform>(car.lamp_bezels[0]).unwrap();
+            let upper = app.get::<Transform>(car.brake_lights[0]).unwrap();
+            let lower = app.get::<Transform>(car.brake_lights[1]).unwrap();
+
+            assert!(
+                (bezel.scale.y - LAMP_BEZEL_HEIGHT).abs() < 1.0e-4,
+                "the bezel changes size with the brakes: {}",
+                bezel.scale.y
+            );
+            for tube in [&upper, &lower] {
+                assert!(tube.scale.x > tube.scale.y * 4.0, "a lens is a tube, not a patch");
+                let inside = (tube.translation.y - bezel.translation.y).abs() + tube.scale.y * 0.5;
+                assert!(
+                    inside < bezel.scale.y * 0.5,
+                    "a lens hangs out of its bezel: {inside} vs {}",
+                    bezel.scale.y * 0.5
+                );
+                // And it stands proud of the bezel it sits in.
+                assert!(
+                    tube.translation.z - tube.scale.z * 0.5
+                        < bezel.translation.z - bezel.scale.z * 0.5,
+                    "the lens is sunk into the bezel"
+                );
+            }
+            assert!(
+                upper.translation.y - upper.scale.y * 0.5 > lower.translation.y + lower.scale.y * 0.5,
+                "the two lenses have merged into one bar at braking {braking}"
+            );
+        }
+
+        // Badge: round, centred, and filling the gap without touching a lens.
+        let badge = app.get::<Transform>(car.badge).unwrap();
+        let lamp = app.get::<Transform>(car.brake_lights[0]).unwrap();
+        assert!((badge.translation.x - pose.position.x).abs() < 1.0e-4, "on the centreline");
+        assert!((badge.scale.x - badge.scale.z).abs() < 1.0e-4, "it is a disc");
+        assert!(badge.scale.y < badge.scale.x * 0.5, "and a thin one");
+        let lamp_inner = (lamp.translation.x - pose.position.x).abs() - lamp.scale.x * 0.5;
+        assert!(
+            badge.scale.x * 0.5 < lamp_inner,
+            "the badge runs into the lenses: {} vs {lamp_inner}",
+            badge.scale.x * 0.5
+        );
+        assert!(
+            badge.scale.x > lamp_inner * 0.8,
+            "the badge rattles around in the gap instead of filling it"
+        );
+        // Its flat face points at the chase camera, not at the sky.
+        let axis = badge.rotation.rotate(Vec3::UNIT_Y);
+        assert!(axis.z.abs() > 0.99, "the badge is laid face-up: {axis:?}");
     }
 
     /// The stripes are a pair, they run the length of the car's centre, and each
