@@ -1,0 +1,128 @@
+# BACKFILLED by the critic pass (iteration 6).
+#
+# This record did not exist. Commit ece53937 ("render: a tangent frame that
+# cannot be built is not a normal") introduced new engine-spine surface —
+# `axiom_host::MaterialTexture`, a CPU mip-chain builder, and a per-material
+# `TextureSampling` choice — and changed how EVERY lit fragment in every app is
+# shaded. It landed with no `abstractions/NNNN.toml` and, like 08731280, is
+# absent from the era-B ledger entry's "four commits" of drift, even though the
+# `GHOST -648 m` line the champion's HUD prints (and which the scorecard counts
+# as an artifact) is from this very commit.
+#
+# Ruling: MISSING-RECORD, backfilled. Two thirds of this commit is a DEFECT FIX,
+# which needs no gate at all — but the third that names a new host type and adds
+# a per-material sampling knob is new surface on the judged arm's render path,
+# and that is what the gate is for.
+
+axis = "material_and_texture_detail"
+
+# The ">= 3 failed bounded attempts" branch does not apply. No bounded attempt
+# could have been mounted: the two defects below are invisible from the app tier
+# and one of them was not reproducible on this machine at all.
+failed_attempts = []
+
+# TRUE, on three counts, and the first two are not art choices — they are
+# undefined behaviour and a missing mip chain:
+#
+# 1. THE SHADER BUILT A TANGENT FRAME IT HAD NO USE FOR, AND IT WAS UNDEFINED.
+#    `scene_renderer`'s fragment stage computed the Mikkelsen cotangent frame for
+#    every fragment of every material, then neutralised it through a flat normal
+#    map. Any quad whose four corners share a UV — every
+#    `SurfaceBuilder::ground_quad` without explicit coordinates, so burnt-rubber's
+#    paint, verge and rail meshes — has zero uv derivatives, so tangent and
+#    bitangent are the zero vector. `inverseSqrt(0)` is `+inf`, `nmap.x` is `0.0`
+#    with no normal map bound, `0 * inf` is NaN, and `normalize` of NaN is NaN:
+#    the fragment's entire lighting result was undefined. The live browser arm
+#    binds no normal maps at all, so EVERY surface in EVERY app took this path.
+#    It failed per 2x2 pixel quad (`dpdx`/`dpdy` are quad-constant), so it
+#    rasterized as a two-pixel weave rather than an obvious hole, and how it
+#    resolved depended on the GPU's handling of `0 * inf` — invisible on this
+#    desktop, a dense static crosshatch on the reporter's phone. No capture taken
+#    for this campaign could reproduce it. An app cannot fix a shader's
+#    degenerate arithmetic.
+#
+# 2. MATERIAL TEXTURES HAD NO MIP CHAIN AND WERE POINT-SAMPLED. Uploaded with
+#    `mip_level_count: 1` and `Nearest` on every axis, so a receding surface
+#    returned one arbitrary texel of the many a pixel covered — moiré when still,
+#    crawl when moving. This one is directly this campaign's business: the
+#    asphalt aggregate grain landed at ledger iteration 3 (9412025c) and then
+#    re-tiled in world metres at iteration 4 (264a62c9), and both were sampling
+#    into a chain that did not exist.
+#
+# 3. ANISOTROPY COULD NOT BE A GLOBAL. wgpu validates that an anisotropy clamp
+#    above one requires linear magnification, which would smooth every magnified
+#    texel in every app — the crunchy look several apps depend on. So the choice
+#    has to be per material, and there was no per-material place to put it.
+inexpressible = true
+
+smallest_api = """
+`axiom_host::MaterialTexture` — one named type replacing the anonymous
+`(u64, u32, u32, Vec<u8>)` material tuple that was threading six signatures
+across four modules, carrying alongside the pixels a `TextureSampling` choice
+(`Nearest` default, `Anisotropic` opt-in). Plus `mip_chain`, which builds the
+full chain on the CPU averaged in LINEAR light for sRGB albedo (a byte-space
+average darkens every level) with alpha averaged as stored.
+
+Magnification stays `Nearest` — that is where the crunchy look lives, and only
+MINIFICATION was ever the defect. Only burnt-rubber's tarmac opts into
+`Anisotropic`; trilinear alone would blur it laterally by the footprint ratio
+and wash the surface to flat grey.
+
+Spine footprint (for the reviewer, not a claim of minimality by size):
+  crates/axiom-host/src/material_texture.rs   (new, 191 lines)
+  crates/axiom-host/src/lib.rs                (one re-export)
+  crates/axiom-host/tests/architecture.rs     (curated-export gate)
+  modules/axiom-gpu-backend/*                 (mip upload + sampler choice)
+  the shader's tangent frame: length floored so the reciprocal is always finite,
+  and N `select`ed to the GEOMETRIC normal when no normal map is bound — taking
+  the value, never trusting degenerate arithmetic to cancel itself.
+
+CAPABILITY SHAPE: `Textures` and `NormalMapping` are already GPU-arm
+capabilities the Canvas 2D guard arm drops by declaration, so this richness is
+arm-scoped for free and the guard arm is not lowered to carry it.
+
+KNOWN COST, recorded rather than hidden: the commit also landed
+`apps/burnt-rubber/src/{agent,ghost,probe}.rs` and a large `axiom-agent` block
+in the same push. The GHOST HUD line that arrived with it is, by this
+campaign's own scorecard, an ARTIFACT — the reference has no counterpart for
+it. A commit that fixes a render defect and adds an unrelated HUD element in one
+push makes the campaign unable to attribute either.
+"""
+
+screenshot_command = """
+uv run scripts/localhost_servers.py start-app burnt-rubber --port 8085
+uv run scripts/playwright_controller.py stop      # daemon must relaunch for viewport
+AXIOM_PW_VIEWPORT=470x836 AXIOM_PW_DPR=2 AXIOM_PW_TOUCH=1 \\
+  uv run scripts/playwright_controller.py goto http://localhost:8085/
+uv run scripts/playwright_controller.py wait 2500
+uv run scripts/playwright_controller.py eval "window.dispatchEvent(new KeyboardEvent('keydown',{code:'Enter',key:'Enter',bubbles:true}))"
+uv run scripts/playwright_controller.py wait 8600
+uv run scripts/playwright_controller.py screenshot burnt-rubber
+"""
+
+# NOT VERIFIED BY THIS PASS. The critic lens does not build or render.
+screenshot_proof = """
+UNVERIFIED. Same standing debt as 0001, 0002 and 0003 — no repeat-capture
+tolerance check exists for any champion on this campaign.
+
+Worth flagging specifically here: the defect this commit fixed was MOBILE-GPU
+ONLY and could not be reproduced by any capture this campaign takes. A
+convergence campaign whose only evidence is one desktop-class WebGL2 capture
+cannot see a whole class of defect in the arm it judges. That is a limit of the
+harness, recorded so it is not mistaken for absence of defects.
+"""
+
+# The Gates section applies: crates/* and modules/* both touched. No gate run
+# (coverage / check-architecture / dylint) is recorded in this campaign for this
+# commit. Note also 2ba0bb66, the immediately following commit, exists ONLY
+# because this one's wasm32-only call sites are not compiled by any native gate
+# on this machine — `axiom-zanzoban` still built the old tuple and broke the
+# Pages deploy. That is direct evidence the gate story on this line is
+# incomplete, not merely unrecorded.
+gates_recorded = false
+
+# What this abstraction did NOT buy: material_and_texture_detail is STILL 1. The
+# road now has a real mip chain and anisotropic minification, and the reference's
+# defining material fact — wet gloss throwing a long soft reflection down the
+# lane and picking the lane paint out with a sheen — is still absent. Sampling
+# correctness is not surface character.

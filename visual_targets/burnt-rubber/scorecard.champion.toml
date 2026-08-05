@@ -28,11 +28,42 @@
 # THE CHAMPION THIS SCORES
 # ============================================================================
 # champion.png is a FRESH capture of `main` (2026-08-04), not a convergence
-# render. The era-A champion on disk was four commits stale — 8c3f408f (phone
-# rails), 67093433 (lane lattice), 89560b17 (collision episodes) and 2f5ad14b
-# (start screen) had all moved the render out from under it — so scoring it
-# would have been scoring an image the app no longer produces. It was archived
-# to champions/0003-2026-08-01-fac33fc4.png and re-captured.
+# render. The era-A champion on disk was stale — the app's render had moved out
+# from under it — so scoring it would have been scoring an image the app no
+# longer produces. It was archived to champions/0003-2026-08-01-fac33fc4.png and
+# re-captured.
+#
+# CORRECTED by the critic pass (iteration 6). This header, and the ledger's
+# iteration-5 entry, both said the era-A champion was "four commits stale" and
+# named 8c3f408f (phone rails), 67093433 (lane lattice), 89560b17 (collision
+# episodes) and 2f5ad14b (start screen). `git log fac33fc4..51db97d6 --
+# apps/burnt-rubber/ crates/axiom-host/ modules/axiom-gpu-backend/
+# modules/axiom-windowing/` returns NINE:
+#
+#   8c3f408f  burnt-rubber: a phone plays a different game, on rails
+#   32ced933  windowing: report the bound backend, cull canvas2d road paint
+#   67093433  burnt-rubber: anchor the lane lattice at the centreline
+#   89560b17  burnt-rubber: a collision is an event, not a state
+#   08731280  render: give the engine a sky, a bloom chain and a specular term
+#   631ca158  moonlit glow: prove the new capabilities, and the software arm
+#   2f5ad14b  burnt-rubber: a start screen before the flag drops
+#   ece53937  render: a tangent frame that cannot be built is not a normal
+#   2ba0bb66  zanzoban: carry the named material texture on the wasm arm too
+#
+# The two omitted from the named four are the two LARGEST — 08731280 introduced
+# `FrameSky`, `FrameBloom`, `FrameRenderLook`, a GPU post chain and a specular
+# term (and authored a burnt-rubber sky/bloom/roughness look on top of them),
+# and ece53937 introduced `axiom_host::MaterialTexture`, CPU mip chains and
+# per-material anisotropic sampling. They are the source of the navy sky, the
+# reflector-post halos and the road surface this scorecard scores, and neither
+# had an `abstractions/NNNN.toml`. Both are now recorded (0003.toml, 0004.toml).
+# The GHOST line this scorecard twice blames on "the four commits" is from
+# ece53937, which was not among them — the accounting, not just the count, was
+# wrong.
+#
+# The champion itself is NOT stale: it postdates all nine (its HUD carries the
+# `GHOST -648 m` line ece53937 added), and its md5 matches
+# champions/0004-2026-08-04-main.png byte for byte.
 #
 #   live browser, phone viewport 470x836 @ DPR 2, touch on
 #   WebGPU device creation fails on this machine (dxil.dll) -> the cascade binds
@@ -64,12 +95,17 @@
 #   bright-yellow area       0.98%           1.88%
 #
 # final_score = lowest_axis * 0.7 + average_axis * 0.3
-#             = 0 * 0.7 + (12/12) * 0.3 = 0.30
+#             = 0 * 0.7 + (11/12) * 0.3 = 0.275
+#             (was 0.30 on 12/12 before the critic pass lowered `atmosphere`)
 #
-# NEXT FLAW = contrast_and_exposure, uniquely lowest at 0. It was already the
-# named target at the end of era A and the new reference makes it more extreme,
-# not less: era A wanted 43.8% of the scene below L=16, era B wants 80.2%, and
-# the champion delivers 2.4%.
+# NEXT FLAW = contrast_and_exposure. It is no longer UNIQUELY lowest — the
+# critic pass (iteration 6) took `atmosphere` down to 0 as well — but the fixed
+# axis order in campaign.toml breaks the tie in its favour: contrast_and_exposure
+# is 7th, atmosphere is 9th. The target is therefore UNCHANGED by that
+# recalibration; the inflation was hiding severity, not the target. It was
+# already the named target at the end of era A and the new reference makes it
+# more extreme, not less: era A wanted 43.8% of the scene below L=16, era B
+# wants 80.2%, and the champion delivers 2.4%.
 
 [scores]
 # 2 — the framing structure is genuinely on-model: chase camera centred on the
@@ -146,17 +182,38 @@ contrast_and_exposure = 0
 # is a different colour from the road.
 depth_and_separation = 1
 
-# 1 — LABEL THIS ONE CAREFULLY. It read 0 on 2026-08-01 and reads 1 now, and
-# the render did not improve. Era A wanted a graded night sky with stars and a
-# blue horizon glow, and the champion's flat fill was wrong in kind. Era B
-# wants a black sky — the reference samples (1,2,4) high and (2,3,5) at the
-# horizon, a flat fill within 3 units — so the champion's flat sky is now wrong
-# only in value. Add the moon, which is very nearly right. What keeps it off 2
-# is atmosphere the champion ADDS that the reference does not have: every
-# reflector post carries a bloom halo (bright-yellow area 1.88% of the band
-# against the reference's 0.98%), where the reference's posts are flat yellow
-# markers with no glow at all.
-atmosphere = 1
+# 0 — LOWERED from 1 by the critic pass (iteration 6). "When unsure, take the
+# lower", and this one was not even close on re-reading. The 1 rested on two
+# arguments and both fail:
+#
+#   (a) "the champion's flat sky is now wrong only in value." It is not flat and
+#       the error is not only in value. The champion carries a navy gradient
+#       (26,32,44 high) at ~7x the reference's (1,2,4), and — the part the old
+#       note omitted entirely — a green/teal haze band sitting across the whole
+#       horizon where the reference has nothing but black. That is atmosphere
+#       present and PLAINLY INCORRECT, which is the rubric's 0, not atmosphere
+#       merely crude, which is its 1.
+#   (b) "Add the moon, which is very nearly right." The moon is ALREADY the
+#       load-bearing credit in composition_and_framing above ("the closest match
+#       anywhere in this frame"). Spending one matched feature twice, to hold two
+#       axes up, is double-counting — exactly the inflation this lens exists to
+#       catch. It is scored once, at composition, and not here.
+#
+# What remains at this axis after removing the double credit is entirely
+# additive error: the 7x-bright graded sky, the green horizon band, and a bloom
+# halo on every reflector post (bright-yellow area 1.88% of the band against the
+# reference's 0.98%) where the reference's posts are flat markers with no glow.
+# The halos are `08731280`'s bloom chain, not any of the commits the old header
+# named.
+#
+# CONSEQUENCE, stated so nobody mistakes it for a moved target: this creates a
+# TIE at 0 with contrast_and_exposure. The fixed axis order (campaign.toml) puts
+# contrast_and_exposure 7th and atmosphere 9th, so the next flaw is UNCHANGED.
+# And this is still not a cross-era comparison: it reads 0 in era B for era-B
+# reasons (an added green band and added halos against a black reference), not
+# because it read 0 in era A for era-A reasons (a missing gradient and missing
+# stars). No movement across the era boundary is progress in either direction.
+atmosphere = 0
 
 # 1 — era B moved the camera a long way in and this is the largest single
 # compositional gap in the frame. The reference's tail-light bar spans 0.522 of
@@ -176,11 +233,16 @@ scale_and_proportion = 1
 # where this reference puts it.
 detail_density = 1
 
-# 1 — LOWERED from era A's 2, on new artifacts rather than a new opinion. The
-# four unrelated commits since the era-A champion left the HUD with a BOOST bar
-# drawn over the touch pad and a GHOST line the reference has no counterpart
-# for. The reflector-post bloom halos are a second: not merely absent from the
-# reference, but actively unlike it. And against an 80%-black reference the
-# champion's aliased kerb blocks and hard far-road line are far more visible
-# than they were against era A's brighter frame.
+# 1 — HOLDS at 1. Value unchanged by the critic pass; the ATTRIBUTION is
+# corrected. This note read "the four unrelated commits since the era-A champion
+# left the HUD with a BOOST bar drawn over the touch pad and a GHOST line". The
+# GHOST line is `ece53937`'s, which was not one of the four the record named
+# (see the header), and the reflector-post bloom halos are `08731280`'s bloom
+# chain, also unnamed. The artifacts are real and correctly counted — a BOOST
+# bar drawn over the touch pad, a GHOST line with no counterpart in the
+# reference, a control-hint line that runs off both frame edges and through the
+# steering buttons, post halos actively unlike the reference's flat markers, and
+# aliased kerb blocks and a hard far-road line that an 80%-black reference makes
+# far more visible than era A's brighter frame did. Only the blame was wrong,
+# and blaming the wrong commit is how the next pass fixes the wrong thing.
 artifact_level = 1

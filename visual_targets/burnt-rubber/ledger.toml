@@ -560,3 +560,148 @@ atmosphere = 1
 scale_and_proportion = 1
 detail_density = 1
 artifact_level = 1
+
+# ---------------------------------------------------------------------------
+# Iteration 6 — SCORING RECALIBRATION + GATE BACKFILL. No render changed; no
+# candidate was captured; no app source was touched. `decision` is deliberately
+# NOT one of the loop's four values, for the same reason as iterations 1, 2
+# and 3: none of them describes "the champion image is untouched and only the
+# record moved", and calling this a keep_candidate would fake a promotion.
+# ---------------------------------------------------------------------------
+[[iteration]]
+iteration = 6
+attacked_axis = "none"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/abstractions/0003.toml",
+  "visual_targets/burnt-rubber/abstractions/0004.toml",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic audit of the era-B baseline. Three findings. The champion itself is
+CLEAN — it postdates every commit on the line (its HUD carries the `GHOST` line
+ece53937 added) and its md5 matches champions/0004-2026-08-04-main.png byte for
+byte, so unlike passes 1, 2 and 3 this record is not scoring a deleted image.
+
+1. ONE AXIS INFLATED: atmosphere 1 -> 0. It rested on two arguments and both
+fail. (a) "the champion's flat sky is now wrong only in value" — it is not flat
+(a navy gradient at ~7x the reference's (1,2,4)) and it carries a green/teal
+haze band across the whole horizon that the reference has no counterpart for.
+Atmosphere present and plainly INCORRECT is the rubric's 0; atmosphere merely
+crude is its 1. (b) "add the moon, which is very nearly right" — the moon is
+already the load-bearing credit at composition_and_framing ("the closest match
+anywhere in this frame"). Spending one matched feature twice to hold two axes up
+is double-counting. Removing the double credit leaves this axis holding nothing
+but additive error: the 7x sky, the green band, and a bloom halo on every
+reflector post (1.88% bright-yellow band area against the reference's 0.98%)
+where the reference's posts are flat.
+
+THE TARGET DOES NOT MOVE. This creates a tie at 0 with contrast_and_exposure,
+and campaign.toml's fixed axis order puts contrast_and_exposure 7th against
+atmosphere's 9th. Next attack is UNCHANGED at contrast_and_exposure — the
+inflation was hiding severity, not the target. final_score 0.30 -> 0.275
+(0*0.7 + (11/12)*0.3).
+
+2. THE ERA-B DRIFT ACCOUNTING WAS WRONG, and wrong in the direction that hides
+work. Iteration 5 and the scorecard header both said the era-A champion was
+"four commits stale" and named 8c3f408f, 67093433, 89560b17 and 2f5ad14b.
+`git log fac33fc4..51db97d6 -- apps/burnt-rubber/ crates/axiom-host/
+modules/axiom-gpu-backend/ modules/axiom-windowing/` returns NINE, and the two
+omitted are the two largest:
+
+  08731280  FrameSky + FrameBloom + FrameRenderLook + a GPU post chain + a
+            specular term + three new RenderCapability bits, AND a burnt-rubber
+            sky/bloom/roughness look authored on top of them.
+  ece53937  axiom_host::MaterialTexture + CPU mip chains + per-material
+            anisotropic sampling + the tangent-frame NaN fix.
+
+Also unnamed: 32ced933 and 631ca158 (which moved the Canvas 2D GUARD arm from
+the Low to the High quality tier — noted only, never scored; the guard arm is
+not this campaign's exam).
+
+This is not pedantry about a count. The scorecard blames 08731280's bloom halos
+at TWO axes and its sky at a third, and blames a GHOST line on "the four
+commits" when the GHOST line is ece53937's. Blaming the wrong commit is how the
+next pass fixes the wrong thing. Both attributions are corrected in place; no
+score moved for either.
+
+3. TWO MISSING ABSTRACTION RECORDS, now backfilled as 0003.toml (08731280) and
+0004.toml (ece53937). Both changes CLEAR the gate on the "genuinely cannot
+express" branch, and 0003 clears it more cleanly than any abstraction on this
+campaign so far: ledger iteration 4 had ALREADY written down, one pass before
+the commit landed, that "the colorist's grade was DROPPED for the third
+consecutive pass because axiom-windowing exposes no set_postprocess". Three
+passes of a lens unable to mount ANY bounded attempt is the inexpressibility
+branch stated in advance. Ruling for both: missing-record, not too-early, not
+ceremonial.
+
+That makes FOUR consecutive spine changes on this campaign's line that landed
+without their gate record (0001, 0002, 0003, 0004), each one backfilled by a
+critic pass after the fact. Iteration 2 wrote this up. Iteration 3 wrote it up
+again, calling it "a process, not a slip". It is now four for four.
+
+WHAT 0003 IS AND IS NOT. It is capability-gated richness — Sky, Specular and
+Bloom land on the judged GPU arm and the Canvas 2D guard arm drops them by
+declaration — which is exactly the shape the skill asks for, and the guard arm
+was not lowered to carry it. It is also a worked example of a lesson the record
+should keep: new spine capability aimed at one axis moved a DIFFERENT axis
+backwards. It was reached for contrast_and_exposure, which is still 0, and its
+bloom and sky are two of the three reasons atmosphere drops to 0 in this same
+entry. A record that only lists what a change was FOR will never show that.
+
+DEBTS, now owed four times over and unchanged: no determinism / repeat-capture
+tolerance proof exists for ANY champion this campaign has promoted, and no spine
+gate run (coverage / check-architecture / dylint) is recorded for any of the
+four spine commits. 0004 adds a harness limit worth keeping: the defect
+ece53937 fixed was mobile-GPU-only and no capture this campaign takes could
+reproduce it, so one desktop-class WebGL2 frame cannot see a whole class of
+defect in the arm it judges.
+
+RIGHT-AXIS CHECK: contrast_and_exposure is confirmed correct as the next attack,
+now by tie-break rather than uniquely. `atmosphere` has now been at 0 for
+essentially the whole campaign and attacked zero times; it sits directly behind
+contrast_and_exposure in the order and the two are the same disease (a night
+that holds no blacks, and air that adds light the reference does not have).
+
+GUARDED-ARM CHECK: clean. No scorecard note, ledger reason or axis score in this
+campaign credits or blames the Canvas 2D arm. campaign.toml scopes it correctly
+and scorecard.champion.toml says so at the top.
+
+PARITY-CLAIM CHECK: clean. No "done", "matched" or "parity" language anywhere in
+the record; none is added here. The moon note's "very nearly right" is an axis
+detail about one feature, not a campaign claim, and it is now scored once rather
+than twice.
+"""
+next_attacked_axis = "contrast_and_exposure"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 1
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 1

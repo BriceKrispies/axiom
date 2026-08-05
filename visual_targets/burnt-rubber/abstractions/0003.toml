@@ -1,0 +1,154 @@
+# BACKFILLED by the critic pass (iteration 6).
+#
+# This record did not exist. Commit 08731280 ("render: give the engine a sky, a
+# bloom chain and a specular term") introduced the LARGEST block of new
+# engine-spine render surface this campaign has ever had land under it — three
+# new `axiom-host` value types, a fourth that bundles them, three new
+# `RenderCapability` bits, an entire new GPU post-process chain module, and a
+# rewritten fragment stage — and it authored a burnt-rubber sky/bloom/roughness
+# look on top of them in the same commit. It landed with no
+# `abstractions/NNNN.toml`, no `[[iteration]]`, and no mention in the campaign
+# record at all.
+#
+# It is also the commit the record most needed to name. The scorecard blames its
+# bloom halos at TWO axes (`atmosphere`, `artifact_level`) and its sky gradient
+# at a third (`color_palette`) without ever recording that the commit exists;
+# the era-B ledger entry lists "four commits" of drift and this is not one of
+# them. A campaign that scores an effect it has no record of cannot tell a lens
+# where the effect came from.
+#
+# This is the THIRD consecutive spine change on this campaign's line to land
+# without its gate record (0001, 0002, and now this). The repetition is the
+# finding, not the paperwork.
+#
+# Judgement of the gate, stated plainly: the change ITSELF clears the gate on
+# the "genuinely cannot express" branch (see `inexpressible`), and the campaign's
+# own ledger had already documented the inexpressibility in writing, one pass
+# before the commit landed. Ruling: MISSING-RECORD, backfilled — not too-early,
+# not ceremonial.
+
+axis = "contrast_and_exposure"
+
+# The ">= 3 failed bounded attempts" branch does not apply, and does not need to.
+# ZERO bounded attempts are on record for this axis, because the loop could not
+# even mount one: ledger iteration 4 records that "the colorist's grade was
+# DROPPED for the third consecutive pass because `axiom-windowing` exposes no
+# `set_postprocess`, so an authored grade cannot reach the live browser arm this
+# campaign captures from." Three passes of a lens being unable to make ANY
+# bounded attempt is the inexpressibility branch stated in advance, not an
+# excuse assembled afterwards.
+failed_attempts = []
+
+# TRUE, for three independent reasons, each of which the commit message
+# diagnoses separately and none of which an app author could reach:
+#
+# 1. THERE WAS NO GPU POST-PROCESS ON THE LIVE PATH. `FramePostProcess` and
+#    `FrameVolumetrics` are CPU loops over a read-back framebuffer — affordable
+#    for the Canvas 2D raster and the offscreen capture, not for a live
+#    swap-chain frame. The only post slot on the live GPU arm was a bare
+#    `textureSample` blit. This is exactly the wall ledger iteration 4 hit: the
+#    authored grade had nowhere to land.
+#
+# 2. NOTHING COULD GLOW. Emissive reached the fragment shader (that was 0002's
+#    abstraction) but the target is 8-bit sRGB with no rolloff, so every value
+#    above 1.0 hard-clipped to white and the surplus was discarded. An app could
+#    author a radiance of 40 and get the same pixel as a radiance of 1.
+#
+# 3. NO SPECULAR ANYWHERE IN THE SHADER — Lambert only. `roughness` had been on
+#    every material since the catalog existed, documented "0 mirror-smooth … 1
+#    matte", and was silently discarded. This is the sharpest case: the app had
+#    already authored the value (burnt-rubber's tarmac at 0.68) and the spine
+#    threw it away. No app-tier change fixes a term the shader does not compute.
+inexpressible = true
+
+smallest_api = """
+Four value types in the `host` layer plus three capability bits:
+
+  `FrameSky`        — a gradient with a celestial body in it. `FrameSky::radiance`
+                      is the definition; the WGSL sky pass mirrors it. (9 tests)
+  `FrameBloom`      — the bright-pass knee and the highlight rolloff, again as
+                      the reference the shader mirrors. (8 tests)
+  `FrameRenderLook` — ambient + fog + sky + bloom as ONE value. This is the
+                      genuinely load-bearing piece of minimality: the four
+                      already travelled together through every binder, and a
+                      field each would widen four signatures and a dozen
+                      wasm32-only call sites that the native gate never compiles
+                      (the exact failure mode 2ba0bb66 later hit for a different
+                      type). Naming the bundle is what stops that.
+  `RenderCapability::Sky | ::Specular | ::Bloom` — three bits, deliberately NOT
+                      folded into the existing `PostProcess` bit. `PostProcess`
+                      is the whole-image grade, which the Canvas 2D backend
+                      genuinely performs; bloom needs extra render targets it
+                      does not have. One bit covering both would force a backend
+                      that does one and not the other to lie.
+
+Spine footprint (for the reviewer, not a claim of minimality by size):
+  crates/axiom-host/src/frame_sky.rs           (new, 370 lines)
+  crates/axiom-host/src/frame_bloom.rs         (new, 280 lines)
+  crates/axiom-host/src/frame_render_look.rs   (new, 232 lines)
+  crates/axiom-host/src/frame_capability.rs    (+61: the three new bits)
+  crates/axiom-host/src/frame_packet.rs        (+119)
+  modules/axiom-gpu-backend/src/post_chain.rs  (new, 457 lines — bright pass,
+      separable blur, tonemapped composite; REPLACES `UpscaleBlit` when a look
+      authors bloom, and is not built at all otherwise, so a non-blooming app
+      pays nothing)
+  modules/axiom-gpu-backend/src/scene_renderer.rs   (+399: sky pass + specular)
+  modules/axiom-gpu-backend/src/{gpu_backend_api,live_gpu_binding,offscreen}.rs
+  modules/axiom-windowing/src/windowing_api{,/web}.rs
+  modules/axiom/src/app{,/frame,/render_look}.rs, frame_outcome.rs
+
+THIS IS THE JUDGED ARM'S RICHNESS, BY DECLARATION — and that is the right shape
+for it. Sky, Specular and Bloom are capability-gated, so they land on the GPU
+arm this campaign judges and the Canvas 2D guard arm degrades them as declared,
+without the scene being lowered for it. That is the capability system used the
+way the skill asks, not a change hidden from anyone.
+"""
+
+screenshot_command = """
+uv run scripts/localhost_servers.py start-app burnt-rubber --port 8085
+uv run scripts/playwright_controller.py stop      # daemon must relaunch for viewport
+AXIOM_PW_VIEWPORT=470x836 AXIOM_PW_DPR=2 AXIOM_PW_TOUCH=1 \\
+  uv run scripts/playwright_controller.py goto http://localhost:8085/
+uv run scripts/playwright_controller.py wait 2500
+uv run scripts/playwright_controller.py eval "window.dispatchEvent(new KeyboardEvent('keydown',{code:'Enter',key:'Enter',bubbles:true}))"
+uv run scripts/playwright_controller.py wait 8600
+uv run scripts/playwright_controller.py screenshot burnt-rubber
+"""
+
+# NOT VERIFIED BY THIS PASS. The critic lens does not build or render.
+screenshot_proof = """
+UNVERIFIED, and now THREE TIMES OWED (0001, 0002, and this). No twice-rendered
+byte-identical (or GPU within-tolerance) check is recorded for any champion this
+campaign has promoted. The harness is a live browser carrying a running
+wall-clock timer — the ledger already concedes at iteration 2 that the timer is
+not pinnable and that anything scored off the digits is noise — so byte-identity
+is not available on this path. The honest bar is a repeat capture at the same
+hold with a stated per-pixel tolerance, and it has never been run.
+"""
+
+# The Gates section of the skill applies: this change touches crates/* and
+# modules/* heavily (three new layer files, a new backend module, a rewritten
+# fragment stage). It owes `bash scripts/coverage.sh` at 100%, `cargo run -p
+# xtask -- check-architecture` clean, and `cargo dylint --all` at/under
+# baseline. The commit ships 9 + 8 tests in the two new frame types and edits
+# crates/axiom-host/tests/architecture.rs, and 631ca158 followed it specifically
+# to add the capability-parity proofs — which is real evidence the author ran
+# tests, but is NOT a recorded gate run. Owed, for the third campaign pass
+# running.
+gates_recorded = false
+
+# What this abstraction did NOT buy, stated so the next pass does not assume it
+# did: the axis it is recorded against, contrast_and_exposure, is STILL 0. The
+# machinery to author a night now exists on the judged arm — a sky that is a
+# light source, a bloom that survives above 1.0, a specular that catches the
+# moon — and the scene band still measures median luma 41 against the
+# reference's 4, with 2.4% of pixels below L=16 against 80.2%. The spine can
+# express it; the authored values do not. That is an app-tier follow-on, not
+# more spine surface, and it is precisely the next attack.
+#
+# It also COST two axes. `atmosphere` is lowered to 0 by this same critic pass
+# partly because of what this commit added: a navy graded sky at ~7x the
+# reference's value, a green horizon band the reference has no counterpart for,
+# and a bloom halo on every reflector post where the reference's are flat. New
+# spine capability aimed at an axis can move a DIFFERENT axis backwards, and a
+# record that only lists what a change was for will never show that.
