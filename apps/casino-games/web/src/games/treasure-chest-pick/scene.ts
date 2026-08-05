@@ -15,7 +15,7 @@
  */
 
 import type { Camera3D, MaterialSpec, Scene, SceneInstance, SceneLabel, SceneLight, ViewContext } from "@axiom/web-engine";
-import type { EngineQuat, EngineVec3, GameResources, Rgba } from "@axiom/web-engine";
+import type { EngineQuat, EngineVec3, GameResources, MeshData, Rgba } from "@axiom/web-engine";
 import { drawStylizedWaterSurface } from "@axiom/web-engine";
 import { worldToCanvas } from "../../presentation/cameras/picking.ts";
 import type { GameRuntime } from "../../chance-engine/registry/definition.ts";
@@ -332,12 +332,69 @@ const LAGOON_SEGMENTS = 96;
 /** The mesh name the lagoon-scale discs draw with (see `LAGOON_SEGMENTS`). */
 const LAGOON_MESH = "lagoon";
 
+/** The mesh name the edge vignette draws with (see `LAGOON_RING_INNER`). */
+const LAGOON_RING_MESH = "lagoonRing";
+
+/**
+ * Where the vignette RING starts, as a fraction of its own outer radius.
+ *
+ * The vignette is the pool's outermost layer and it sat at the BOTTOM of the
+ * stack: the opaque shallow-shelf ring (`stage:floor-ring`, radius
+ * `WATER_RADIUS`) covers everything inside 5.0/5.357 = 0.933 of it, so only a
+ * thin band at the sand line was ever visible. Drawn as a solid disc, the other
+ * 87% of it was shaded, blended and thrown away — and because it is TRANSLUCENT
+ * it was doing that in the renderer's most expensive inner loop. Measured on the
+ * software backend it was the single largest consumer of fill in the whole frame:
+ * 137k covered pixels on a 137k-pixel framebuffer, of which 5% survived the depth
+ * test.
+ *
+ * So the geometry stops where the visibility does. `0.9` rather than `0.933` so
+ * the ring's inner edge tucks a clear margin UNDER the shelf that covers it,
+ * leaving no hairline seam where two same-radius polygons would have met.
+ */
+const LAGOON_RING_INNER = 0.9;
+
+/**
+ * A flat RING (annulus) in the XZ plane, unit outer diameter and unit height, so
+ * it drops into the same `disc()` scale convention as `cylinder`.
+ *
+ * Two annular caps and no side wall: the walls of a 0.006-tall decal project to
+ * four hundredths of a pixel and cannot be seen, while BOTH caps must stay — a
+ * translucent surface writes no depth, so the underside blends too, and dropping
+ * it would visibly lighten the rim it is there to darken.
+ */
+const ringMeshData = (segments: number, innerRatio: number): MeshData => {
+  const outer = 0.5;
+  const inner = outer * innerRatio;
+  const rim = Array.from({ length: segments + 1 }, (_, seg) => (seg / segments) * Math.PI * 2);
+  // Vertex order per rim step, per cap: [outer, inner].
+  const positions = [1, -1].flatMap((side) =>
+    rim.flatMap((theta) =>
+      [outer, inner].map((radius) => v3(Math.cos(theta) * radius, side * 0.5, Math.sin(theta) * radius)),
+    ),
+  );
+  const normals = positions.map((p) => v3(0, Math.sign(p.y), 0));
+  const capVerts = (segments + 1) * 2;
+  const indices = [0, 1].flatMap((cap) =>
+    Array.from({ length: segments }, (_, seg) => {
+      const base = cap * capVerts + seg * 2;
+      const [outerA, innerA, outerB, innerB] = [base, base + 1, base + 2, base + 3];
+      // The bottom cap faces -Y, so its two triangles wind the other way round.
+      return cap === 0
+        ? [outerA, outerB, innerA, innerA, outerB, innerB]
+        : [outerA, innerA, outerB, innerA, innerB, outerB];
+    }).flat(),
+  );
+  return { indices, normals, positions };
+};
+
 export const chestResources = (brand: BrandSpec): GameResources => ({
   materials: { ...MATERIALS, ...brandMaterials(brand) },
   meshes: {
     box: { kind: "box" },
     cylinder: { kind: "cylinder" },
     [LAGOON_MESH]: { kind: "cylinder", segments: LAGOON_SEGMENTS },
+    [LAGOON_RING_MESH]: { data: ringMeshData(LAGOON_SEGMENTS, LAGOON_RING_INNER) },
     sphere: { kind: "sphere" },
   },
 });
@@ -1009,8 +1066,10 @@ const LAGOON_SHELF_INSET = 0.9;
 const platform = (): readonly SceneInstance[] => [
   // Every water disc is lagoon-scale, so all of them draw the high-tessellation
   // mesh: the vignette is the OUTERMOST, and a faceted vignette under a round
-  // pool would just move the polygon out to the sand line.
-  disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006, LAGOON_MESH),
+  // pool would just move the polygon out to the sand line. It draws the RING
+  // variant of that mesh, because the shelf above it hides all but its outer band
+  // — see `LAGOON_RING_INNER`.
+  disc("plat:vignette", "EdgeVignette", v3(0, -0.048, 0), WATER_RADIUS * (9 / 8.4), 0.006, LAGOON_RING_MESH),
   // The open water, inset so the shallow shelf rings it. It is deliberately
   // stacked ABOVE the shelf ring (whose top face is at -0.039) with clear air
   // between the two faces: co-planar water discs would z-fight across a third of
@@ -1965,12 +2024,67 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
  * backend halves a mesh's facet budget): the 2D clip path and the 3D shoreline it
  * is clipped to are then literally the same polygon on Canvas2D. */
 const WATER_RIM_POINTS = 48;
-/** The height up each chest the punched hole is centered on, the world half-width
- * whose projection sets each hole's radius (so far/smaller chests get smaller
- * holes and are not ringed by raw pool), and a small screen margin. */
-const CHEST_HOLE_LIFT = 0.3;
-const CHEST_HALF_WIDTH = 0.82;
-const CHEST_HOLE_MARGIN = 6;
+/**
+ * The chest's world ENVELOPE, as offsets from its base origin — the volume a
+ * punched hole has to cover, and nothing more.
+ *
+ * A hole exists so the ripple net is not painted across a chest. It used to be a
+ * CIRCLE, of a world radius (0.82) larger than the chest's own half-width, taken
+ * at a fixed height up the chest — so it overshot the chest on every side, and
+ * because the overlay carries a broad edge TINT and not only the net, the
+ * overshoot was not "no ripples here", it was a disc of visibly untinted pool.
+ * That is the "orb": the back row wore it most plainly, but every chest had one.
+ *
+ * A circle cannot be the answer, at any radius: a chest is a BOX, so a circle that
+ * covers its corners must overshoot its edges, and one that hugs its edges must
+ * leave its corners netted. The hole is now the chest's actual screen silhouette —
+ * the convex hull of this envelope's eight corners, projected — which is the one
+ * shape that both covers the chest and stops there.
+ *
+ * The numbers are the chest's real extents: the lid (plus its gold rail's 0.05
+ * overhang) is the widest part, the rail the frontmost, the dome the tallest.
+ *
+ * The envelope is NOT a plain box, and that matters. The lid is barrel-topped, so
+ * a box drawn to `CHEST_HEIGHT` has two top corners the chest never occupies —
+ * enough, at this camera pitch, to leave a bright tab of pool above each lid. So
+ * the top is the dome's CREST (a ridge along x at the lid's mid-depth) sitting over
+ * the flat-lidded box below it, and the hull wraps that instead.
+ */
+const CHEST_HOLE_HALF_WIDTH = (LID.x + 0.05) / 2;
+const CHEST_HOLE_BACK = -BODY.z / 2;
+const CHEST_HOLE_FRONT = LID.z / 2 + 0.05;
+/** Top of the lid's flat BOARD — where the box part of the silhouette ends. */
+const CHEST_HOLE_BOARD_TOP = BODY.y + LID.y;
+/**
+ * The barrel top, as the half-ellipse `lidArc` actually sweeps it: centred on the
+ * lid board at the lid's mid-depth, rising `CHEST_LID_ARCH` and reaching
+ * `LID.z / 2` fore and aft, both widened by the end ribs' swell so the hole clears
+ * the raised ribs too.
+ *
+ * Sampled rather than reduced to its crest. A single crest point leaves the hull
+ * cutting a CHORD under the dome, and a hull that falls short is the mirror of the
+ * orb: instead of pool showing beside the chest, the pool's tint paints a hazy band
+ * across the back of the lid. Five samples put the outline on the curve.
+ */
+const CHEST_HOLE_ARCH_Y = BODY.y + LID.y;
+const CHEST_HOLE_ARCH_Z = -BODY.z / 2 + LID.z / 2;
+const CHEST_HOLE_ARCH_RISE = CHEST_LID_ARCH + LID_RIB_SWELL;
+const CHEST_HOLE_ARCH_DEPTH = LID.z / 2 + LID_RIB_SWELL + LID_ARC_THICKNESS / 2;
+const CHEST_HOLE_ARCH_SAMPLES = 5;
+/**
+ * Screen-space slack on the silhouette, as a FRACTION of its own size rather than
+ * a pixel count — the old fixed 6px was a fifth of a far chest's width and a tenth
+ * of a near one's, which is precisely the asymmetry that made the back row worst.
+ *
+ * It is here because the overlay knows each chest's SLOT but not its live pose. Two
+ * of the three displacements are handled exactly instead of being absorbed here —
+ * a HELD chest rides up by `CHEST_TIMING.heldLift`, which `chestHole` takes as its
+ * `lift`, and the idle dance only twists and squashes a chest (it does not scoot
+ * it; see `dancePose`'s use in `chestScene`). What is left for slack is the idle
+ * bob (0.014 world units, under a pixel here), the dance's ±2.8° twist, and its
+ * 1.7% swell — a few percent of the silhouette, not a doubling of it.
+ */
+const CHEST_HOLE_SLACK = 1.02;
 /** The lagoon's water palette. The EDGE color matches the rendered pool AT THE
  * SHORE — which is now the paler shallow shelf, not the deeper open water — so
  * the shoreline cover is invisible except that it hides the net. (Left at the
@@ -1992,6 +2106,81 @@ const WATER_LINE_COLOR = "rgba(210, 244, 252, 0.95)";
 const WATER_TROUGH_COLOR = "rgba(16, 92, 92, 0.6)";
 const WATER_SPARKLE_COLOR = "rgba(234, 251, 255, 0.9)";
 const WATER_SHALLOW_COLOR = "rgba(148, 224, 240, 0.44)";
+
+/** A point in the shared 960×600 overlay space. */
+interface OverlayPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Convex hull of a handful of screen points (Andrew's monotone chain).
+ *
+ * Eight projected box corners come in; the outline that encloses them comes out.
+ * A hull rather than a fixed vertex order because WHICH corners are on the
+ * silhouette depends on where the chest sits relative to the camera — the near
+ * row shows its front face, the far row shows more of its top — and a hard-coded
+ * winding would cross itself for some of them. The clip is applied with the
+ * `evenodd` rule, so a self-crossing hole would un-punch its own overlap.
+ */
+const screenHull = (points: readonly OverlayPoint[]): readonly OverlayPoint[] => {
+  const sorted = [...points].sort((p, q) => p.x - q.x || p.y - q.y);
+  const cross = (o: OverlayPoint, a: OverlayPoint, b: OverlayPoint): number =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (source: readonly OverlayPoint[]): OverlayPoint[] => {
+    const chain: OverlayPoint[] = [];
+    for (const p of source) {
+      while (chain.length >= 2 && cross(chain[chain.length - 2]!, chain[chain.length - 1]!, p) <= 0) {
+        chain.pop();
+      }
+      chain.push(p);
+    }
+    chain.pop();
+    return chain;
+  };
+  return [...half(sorted), ...half([...sorted].reverse())];
+};
+
+/**
+ * One chest's punched hole: the projected silhouette of its envelope, grown by
+ * `CHEST_HOLE_SLACK` about its own centroid.
+ *
+ * Growing about the centroid rather than adding a pixel margin keeps the slack
+ * proportional to how big the chest actually is on screen, which is the whole
+ * point — a far chest is smaller, so its slack is smaller too.
+ *
+ * `lift` is how far the chest currently rides above its slot. It is a parameter
+ * rather than an assumption because a chest the player is DRAGGING rises a clear
+ * `CHEST_TIMING.heldLift` out of the board: a hole cut at the slot would leave the
+ * net painted across the top of the very chest in the player's hand.
+ */
+const chestHole = (camera: Camera3D, base: EngineVec3, lift: number): readonly OverlayPoint[] => {
+  const corners = [-1, 1].flatMap((sx) => [
+    // The flat-lidded box: four corners a side.
+    ...[0, CHEST_HOLE_BOARD_TOP].flatMap((y) =>
+      [CHEST_HOLE_BACK, CHEST_HOLE_FRONT].map((z) => v3(sx * CHEST_HOLE_HALF_WIDTH, y + lift, z)),
+    ),
+    // The barrel top, sampled along its sweep.
+    ...Array.from({ length: CHEST_HOLE_ARCH_SAMPLES }, (_, i) => {
+      const angle = -Math.PI / 2 + (i / (CHEST_HOLE_ARCH_SAMPLES - 1)) * Math.PI;
+      return v3(
+        sx * CHEST_HOLE_HALF_WIDTH,
+        CHEST_HOLE_ARCH_Y + CHEST_HOLE_ARCH_RISE * Math.cos(angle) + lift,
+        CHEST_HOLE_ARCH_Z + CHEST_HOLE_ARCH_DEPTH * Math.sin(angle),
+      );
+    }),
+  ]);
+  const onScreen = corners
+    .map((local) => worldToCanvas(camera, addV3(base, local)))
+    .filter((p): p is OverlayPoint => p !== null);
+  if (onScreen.length < 3) {
+    return [];
+  }
+  const hull = screenHull(onScreen);
+  const cx = hull.reduce((sum, p) => sum + p.x, 0) / hull.length;
+  const cy = hull.reduce((sum, p) => sum + p.y, 0) / hull.length;
+  return hull.map((p) => ({ x: cx + (p.x - cx) * CHEST_HOLE_SLACK, y: cy + (p.y - cy) * CHEST_HOLE_SLACK }));
+};
 
 /** Draw the stylized water into the overlay layer for one frame. Fades out as the
  * chosen chest flies off and the veil dims the board (the pool is no longer the
@@ -2019,18 +2208,16 @@ export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext
   if (rim.length < 3) {
     return;
   }
-  // Each hole is sized to its OWN chest: project the chest center and a point one
-  // half-width to the side, and use the on-screen distance as the radius — so a
-  // far, smaller chest gets a smaller hole and is not haloed by an oversized one.
+  // Each hole is the chest's own projected SILHOUETTE (see `chestHole`), so it
+  // covers the chest and no pool around it.
   // Read off the LIVE layout, not the grid: the holes exist so the ripple net is
   // not painted over the chests, so they have to follow a chest the player has
   // dragged — otherwise a moved chest wears a net and leaves a hole behind it.
-  const holes = Array.from({ length: count }, (_, i): { readonly x: number; readonly y: number; readonly r: number } | null => {
-    const base = state.extra.chests.slots[i] ?? chestPosition(i, count);
-    const center = worldToCanvas(camera, addV3(base, v3(0, CHEST_HOLE_LIFT, 0)));
-    const side = worldToCanvas(camera, addV3(base, v3(CHEST_HALF_WIDTH, CHEST_HOLE_LIFT, 0)));
-    return center === null || side === null ? null : { r: Math.hypot(side.x - center.x, side.y - center.y) + CHEST_HOLE_MARGIN, x: center.x, y: center.y };
-  }).filter((p): p is { readonly x: number; readonly y: number; readonly r: number } => p !== null);
+  const drag = state.extra.chests;
+  const heldIndex = drag.grab?.dragging === true ? drag.grab.index : null;
+  const holes = Array.from({ length: count }, (_, i) =>
+    chestHole(camera, drag.slots[i] ?? chestPosition(i, count), i === heldIndex ? CHEST_TIMING.heldLift : 0),
+  ).filter((hole) => hole.length >= 3);
   const xs = rim.map((p) => p.x);
   const ys = rim.map((p) => p.y);
   const minX = Math.min(...xs);
@@ -2055,9 +2242,9 @@ export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext
     timeSeconds: view.nowMs / 1000,
     troughColor: WATER_TROUGH_COLOR,
     traceHoles: (c) => {
-      for (const p of holes) {
-        c.moveTo(p.x + p.r, p.y);
-        c.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      for (const hole of holes) {
+        hole.forEach((p, i) => (i === 0 ? c.moveTo(p.x, p.y) : c.lineTo(p.x, p.y)));
+        c.closePath();
       }
     },
     tracePool: (c) => {
