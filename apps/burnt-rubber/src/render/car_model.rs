@@ -943,7 +943,13 @@ mod tests {
         );
         // Backlight pair: carrying the glass's rake, and clear of its outer face.
         assert_eq!(stripes[2].rotation, glass.rotation, "the stripe follows the rake");
-        let lift = stripes[2].translation.subtract(glass.translation).length();
+        // "Proud of the glass" is a distance along the glass's OWN normal, not the
+        // distance between the two centres: the pair straddles the centreline by
+        // ±STRIPE_OFFSET (asserted above), so the raw separation is dominated by that
+        // lateral span — 0.30 across against 0.065 of lift — and measuring it would
+        // fail a correctly-placed stripe.
+        let normal = glass.rotation.rotate(Vec3::UNIT_Y);
+        let lift = stripes[2].translation.subtract(glass.translation).dot(normal);
         assert!(
             lift > glass.scale.y * 0.5 && lift < glass.scale.y * 0.5 + 0.05,
             "the glass stripe is inside the glass, or floating: {lift}"
