@@ -9,32 +9,49 @@
 //! a standard deviation of ~2.4 sRGB levels around a mean of ~16 — about 15% of
 //! its own value, all of it in the darks. This module produces exactly that.
 //!
-//! ## The amplitude is measured, not chosen
+//! ## The amplitude is measured; the *frequency* is what the sampler decides
 //!
-//! The backend's material sampler is `Repeat` + **`Nearest`, with no mipmaps**
-//! (`scene_renderer.rs`). A road runs to the vanishing point, so its texels
-//! minify without bound, and a high-contrast texture under a mip-less nearest
-//! sampler does not fade into an average — it aliases into a crawling carpet of
-//! sparkle, which is a far worse artifact than the flat grey it replaced. The
-//! grain therefore has to be strong enough to read and weak enough not to crawl,
-//! and both ends of that are pinned by measurement rather than by taste:
+//! Unpainted asphalt in the reference measures a standard deviation of 10–15% of
+//! its own displayed value (three patches at different depths: `0.80/7.6`,
+//! `3.91/31.7`, `2.35/15.8`) — though some of that is the frame's lighting
+//! falloff across the patch, not texture. This texture lands at **~5.9%** of the
+//! tarmac's displayed value: unmistakably a surface, and deliberately short of a
+//! number that is partly lighting. That total is settled, and the retune below
+//! holds it to the second decimal.
 //!
-//! * **Strong enough.** Unpainted asphalt in the reference measures a standard
-//!   deviation of 10–15% of its own displayed value (three patches at different
-//!   depths: `0.80/7.6`, `3.91/31.7`, `2.35/15.8`) — though some of that is the
-//!   frame's lighting falloff across the patch, not texture. This texture lands
-//!   at **~6%** of the tarmac's displayed value: unmistakably a surface, and
-//!   deliberately short of a number that is partly lighting.
-//! * **Quiet enough.** The worst *adjacent-texel* step is **~10 sRGB levels** on
-//!   the tarmac. That is the whole error budget of a minified sample that lands
-//!   on the wrong texel — a fine dither in the darkest region of the frame, not
-//!   a sparkle. [`tests::adjacent_texels_stay_inside_the_alias_budget`] holds it.
+//! What was *never* settled is where in the spectrum that 5.9% sits — and getting
+//! it wrong is what the near road actually looked like. The split used to be
+//! pinned by a sampler that no longer exists. This module was authored against a
+//! `Repeat` + **`Nearest`, no-mipmap** material sampler, under which a minified
+//! road takes one arbitrary texel per pixel and a per-texel hash aliases into a
+//! crawling carpet of sparkle. The defence was **low-frequency dominance**: two
+//! thirds of the amplitude pushed into the smoothly-interpolated `LATTICE`-cell
+//! field, so neighbours are nearly equal and whichever texel a minified sample
+//! lands on, it lands near the local mean.
 //!
-//! The second bound is bought by **low-frequency dominance**: [`SMOOTH_SHARE`] of
-//! the amplitude lives in a smoothly-interpolated `LATTICE`-cell field, so
-//! neighbouring texels are nearly equal and a minified sample lands near the
-//! local mean whichever texel it hits. Only the remainder is per-texel hash — the
-//! part that survives to give the near field its bite.
+//! The engine has since grown real mip chains and per-material anisotropic
+//! filtering, and [`super::palette`] opts the tarmac into
+//! `TextureSampling::Anisotropic`: minification is now trilinear across a mip
+//! chain with 16× anisotropy along the view axis
+//! (`axiom-gpu-backend/src/texture_sampling.rs`). A minified sample is an
+//! *average* now, not a lottery, so the fine octave can no longer sparkle — but
+//! the premium the road had been paying for that insurance kept coming due, as a
+//! visible artifact. A `LATTICE` cell is 4.7 cm, and with two thirds of the
+//! amplitude living in it the near tarmac rendered as a soft cellular quilt of
+//! centimetre blobs: embossed leather, or orange peel. The reference's asphalt at
+//! the same depth is a fine micro-speckle with nothing resolvable at that scale
+//! at all.
+//!
+//! So the split inverts. Most of the amplitude now lives in the per-texel hash —
+//! aggregate, at the size of a chipping — and the smooth octave stays on only as
+//! the low-amplitude patchiness of the mix. Measured over the whole tile, the
+//! displayed variation is unchanged (5.92% before, 5.92% after) while the share
+//! of it carried at cell scale falls from **66% to 31%**: the same surface, at
+//! the frequency asphalt actually has.
+//! [`tests::most_of_the_grain_lives_at_texel_scale_not_at_cell_scale`] is the
+//! assertion that keeps it there, and it is the one this module was missing —
+//! every existing test measured the grain's *strength*, and the defect was
+//! entirely in its *scale*.
 //!
 //! ## The grain darkens the tarmac, and that is the honest direction
 //!
@@ -77,11 +94,12 @@
 /// The fix is a pure change of *scale*, not of amplitude: `RES` and [`LATTICE`]
 /// are raised **together**, by the same factor, so `RES / LATTICE` — the texels
 /// per lattice cell, and therefore the interpolation slope between neighbours —
-/// is unchanged at 4. Every statistical claim this module makes survives
-/// untouched: the displayed variation stays at ~6% of the tarmac's value and the
-/// worst adjacent-texel step stays at the *same* 12.0 display levels it has
-/// always been (both re-measured; see the tests). What changes is only how much
-/// road one cycle of the pattern covers. 128 × 128 × RGBA is 64 KiB — a rounding
+/// is unchanged at 4. The displayed variation survives that change untouched at
+/// ~6% of the tarmac's value. What changes is only how much road one cycle of the
+/// pattern covers — which fixed the *period* of the quilt while leaving its
+/// amplitude exactly where it was; see [`SMOOTH_SHARE`] for the half of the
+/// defect a pure change of scale could never reach.
+/// 128 × 128 × RGBA is 64 KiB — a rounding
 /// error against a frame, and the one surface in the game that is never far away.
 pub const RES: u32 = 128;
 
@@ -117,18 +135,37 @@ const LATTICE: u32 = 32;
 const MIN_MULTIPLIER: f32 = 0.62;
 
 /// Share of the amplitude carried by the smooth octave. The remainder is
-/// per-texel hash — see the module docs on why the split is weighted this way.
-const SMOOTH_SHARE: f32 = 0.75;
+/// per-texel hash.
+///
+/// **This is the constant that decides whether the road reads as aggregate or as
+/// leather**, and the module docs above explain why it used to sit at `0.75`: a
+/// mip-less nearest sampler made the fine octave sparkle, so the amplitude was
+/// parked in the smooth one where a minified sample could not miss. The tarmac is
+/// sampled trilinear + 16× anisotropic now, so that debt is settled and the
+/// smooth field's only remaining job is the patchiness of the mix — which is a
+/// *quiet* thing in real asphalt, not the thing you see first.
+///
+/// At `0.30` the per-texel hash carries the grain and the smooth field carries
+/// the patchiness, which is the right way round: a `LATTICE` cell is 4.7 cm, far
+/// too coarse to be a chipping, so every unit of amplitude spent there is spent
+/// on a feature asphalt does not have.
+const SMOOTH_SHARE: f32 = 0.30;
 
 /// Contrast applied about the field's midpoint before it is mapped to a
 /// multiplier. Two independent `0..=1` sources summed give a triangular
 /// distribution — most texels pile up in the middle, so the *range* looks right
-/// while the actual variation reads as almost nothing (measured: 4.1% of the
-/// tarmac's value at gain `1.0`, against the reference's 10–15%). Expanding
-/// about the midpoint spends the authored range instead of wasting it, and
-/// `1.5` is the largest gain that still keeps the adjacent-texel step inside
-/// the alias budget above.
-const CONTRAST: f32 = 1.5;
+/// while the actual variation reads as almost nothing. Expanding about the
+/// midpoint spends the authored range instead of wasting it.
+///
+/// Lowered from `1.5` in lock-step with [`SMOOTH_SHARE`], and by arithmetic
+/// rather than by eye: the per-texel hash is a full-width uniform where the
+/// interpolated smooth field is not, so moving amplitude into it *raises* the
+/// total variation on its own. `1.2` is the gain that gives back exactly what the
+/// re-weighting added — 5.92% of the tarmac's displayed value, the same figure
+/// the old pair produced. The whole change is therefore a pure move along the
+/// frequency axis, with the strength held fixed, and
+/// [`tests::the_grain_varies_enough_to_read_as_a_surface`] is what proves it.
+const CONTRAST: f32 = 1.2;
 
 /// The tiling asphalt albedo, as `RES * RES` RGBA8 texels ready for
 /// `RunningApp::add_texture_data`.
@@ -290,15 +327,21 @@ mod tests {
         );
     }
 
-    /// **Quiet enough not to crawl.** The material sampler is `Repeat` +
-    /// `Nearest` with *no mipmaps*, so a minified road samples one arbitrary
-    /// texel per pixel and the error of that choice is bounded by how far
-    /// adjacent texels sit apart. Measured in display levels, that error budget
-    /// is what separates asphalt grain from a sparkling carpet, and it is bought
-    /// by `SMOOTH_SHARE` — most of the amplitude is in a field whose neighbours
-    /// are nearly equal.
+    /// **Quiet enough not to crawl.** The tarmac is sampled trilinear across a
+    /// real mip chain with 16× anisotropy (`super::super::palette` opts it into
+    /// `TextureSampling::Anisotropic`), so a minified sample is an average of the
+    /// texels it covers rather than an arbitrary one of them, and the fine octave
+    /// cannot alias into sparkle however sharp it is.
+    ///
+    /// The step is therefore no longer an *alias* budget — it is a **magnified**
+    /// one. Up close a texel covers more than a pixel, and this is the hardest
+    /// edge the near road can show between two neighbouring chippings. It is
+    /// allowed to be larger than the 12.0 the mip-less sampler forced (the
+    /// re-weighting toward the per-texel hash takes it to ~16.4), because that
+    /// sharpness *is* the aggregate; what it may not do is run away, or the
+    /// grain stops being a surface and becomes noise laid over one.
     #[test]
-    fn adjacent_texels_stay_inside_the_alias_budget() {
+    fn adjacent_texels_stay_inside_the_magnified_step_budget() {
         let levels = tarmac_levels();
         let at = |x: u32, y: u32| levels[(y * RES + x) as usize];
         let worst = (0..RES)
@@ -313,9 +356,63 @@ mod tests {
             })
             .fold(0.0f32, f32::max);
         assert!(
-            worst <= 12.0,
-            "adjacent texels differ by {worst:.1} display levels; past ~12 a \
-             mip-less nearest sampler turns the distant road into sparkle"
+            worst <= 18.0,
+            "adjacent texels differ by {worst:.1} display levels; past ~18 the \
+             near road reads as noise laid over asphalt rather than as asphalt"
+        );
+    }
+
+    /// **The grain is at the scale of a chipping, not of a paving stone.**
+    ///
+    /// This is the assertion the module was missing, and the one the visible
+    /// defect lived under. Every other test here measures how *strong* the grain
+    /// is; none of them could tell a fine aggregate speckle from a soft cellular
+    /// quilt of 4.7 cm blobs, because the two have the identical mean, the
+    /// identical standard deviation and the identical multiplier band. They
+    /// differ only in *where in the spectrum* the amplitude sits — and that is
+    /// the whole difference between tarmac and orange peel.
+    ///
+    /// Box-averaging each `LATTICE` cell (`RES / LATTICE` = 4 texels square)
+    /// strips the per-texel hash and leaves exactly the low-frequency field the
+    /// eye tracks as blobs. Its standard deviation, as a share of the whole
+    /// texture's, is the quilt's weight: it measured **66%** at the old
+    /// `SMOOTH_SHARE = 0.75`, and **31%** now. The bound is a minority share,
+    /// which is the structural claim — the smooth octave is the mix's patchiness,
+    /// a supporting term, and the moment it carries most of the amplitude the
+    /// road stops being made of stones.
+    #[test]
+    fn most_of_the_grain_lives_at_texel_scale_not_at_cell_scale() {
+        let owned = tarmac_levels();
+        let levels: &[f32] = &owned;
+        let per_cell = (RES / LATTICE) as usize;
+        let cells_across = RES as usize / per_cell;
+        let sd = |v: &[f32]| {
+            let mean = v.iter().sum::<f32>() / v.len() as f32;
+            (v.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / v.len() as f32).sqrt()
+        };
+        let cells: Vec<f32> = (0..cells_across)
+            .flat_map(|cy| {
+                (0..cells_across).map(move |cx| {
+                    let sum: f32 = (0..per_cell)
+                        .flat_map(|j| {
+                            (0..per_cell).map(move |i| {
+                                ((cy * per_cell + j) * RES as usize) + cx * per_cell + i
+                            })
+                        })
+                        .map(|idx| levels[idx])
+                        .sum();
+                    sum / (per_cell * per_cell) as f32
+                })
+            })
+            .collect();
+        let share = sd(&cells) / sd(levels);
+        assert!(
+            share < 0.45,
+            "{:.0}% of the grain's amplitude sits at the {:.0} cm cell scale; \
+             past a minority share the near road renders as embossed leather \
+             rather than as aggregate",
+            share * 100.0,
+            TILE_METRES / LATTICE as f32 * 100.0
         );
     }
 
