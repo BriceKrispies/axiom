@@ -105,11 +105,39 @@ impl WindowingApi {
     }
 
     /// Assemble and store the validated presentation request for a
-    /// `width` x `height` surface. **No browser objects are touched** — this is
-    /// pure host-owned data, so it runs and is tested on native exactly as it
-    /// will on the web. Fails (leaving the driver unconfigured) when the host
-    /// rejects the viewport dimensions.
+    /// `width` x `height` surface, on the mobile-first
+    /// [`HostDeviceProfile::Baseline`] device tier. **No browser objects are
+    /// touched** — this is pure host-owned data, so it runs and is tested on
+    /// native exactly as it will on the web. Fails (leaving the driver
+    /// unconfigured) when the host rejects the viewport dimensions.
     pub fn configure_surface(&mut self, width: u32, height: u32) -> KernelResult<()> {
+        self.configure_surface_with_profile(width, height, HostDeviceProfile::Baseline)
+    }
+
+    /// [`Self::configure_surface`], choosing the **device tier** the surface is
+    /// presented under instead of taking the mobile-first default.
+    ///
+    /// The tier is a property of the surface you are configuring, so it is an
+    /// argument here rather than a setter: there is no order in which an app can
+    /// ask for a tier and silently have it ignored because the request was
+    /// already assembled.
+    ///
+    /// [`HostDeviceProfile::Baseline`] is the mobile budget — one render sample
+    /// per surface pixel, a capped render dimension, the smaller shadow atlas —
+    /// and is what [`Self::configure_surface`] keeps giving every existing
+    /// caller. [`HostDeviceProfile::ExtendedLimits`] is the opt-up: a larger
+    /// shadow atlas and a supersampled render target
+    /// ([`HostDeviceProfile::render_supersample`]), which is the engine's only
+    /// geometric anti-aliasing. An app whose content is thin, high-contrast,
+    /// receding geometry — lane markings, wires, railings — has nothing else to
+    /// reach for: at one sample per pixel those edges stair-step, and no
+    /// material, light or camera change can alter a sampling rate.
+    pub fn configure_surface_with_profile(
+        &mut self,
+        width: u32,
+        height: u32,
+        profile: HostDeviceProfile,
+    ) -> KernelResult<()> {
         let host = HostApi::new();
         let kernel = KernelApi::new();
 
@@ -138,7 +166,7 @@ impl WindowingApi {
                 HostColorFormat::Bgra8UnormSrgb,
             );
             let adapter = host.adapter_request(HostPowerPreference::HighPerformance, true);
-            let device = host.device_request(true, HostDeviceProfile::Baseline);
+            let device = host.device_request(true, profile);
             let request = host
                 .presentation_request(target, surface, descriptor, adapter, device)
                 .expect("adapter requires a presentation surface, matching the device request");
@@ -544,6 +572,58 @@ mod tests {
         assert!(w.configure_surface(0, 600).is_err());
         assert!(!w.is_surface_configured());
         assert_eq!(w.surface_width(), None);
+    }
+
+    #[test]
+    fn the_default_surface_is_the_mobile_tier_and_the_opt_up_is_carried() {
+        // The plain entry point still asks for the mobile-first tier, so every
+        // existing caller's request is unchanged.
+        let mut default_tier = WindowingApi::new();
+        default_tier.configure_surface(1280, 720).unwrap();
+        let baseline = default_tier.presentation_request().expect("configured");
+        assert_eq!(
+            baseline.device().profile(),
+            axiom_host::HostDeviceProfile::Baseline
+        );
+        // Opting up reaches the request the backend is built from — which is the
+        // whole point: the tier decides the shadow atlas AND the supersampled
+        // render target, and an app that asked for it must actually get it.
+        let mut opted_up = WindowingApi::new();
+        opted_up
+            .configure_surface_with_profile(
+                1280,
+                720,
+                axiom_host::HostDeviceProfile::ExtendedLimits,
+            )
+            .expect("valid dimensions");
+        let extended = opted_up.presentation_request().expect("configured");
+        assert_eq!(
+            extended.device().profile(),
+            axiom_host::HostDeviceProfile::ExtendedLimits
+        );
+        // The surface itself is untouched by the tier: same viewport, same
+        // composition — only the sampling rate behind it changes.
+        assert_eq!(
+            extended.descriptor().viewport().physical_width(),
+            baseline.descriptor().viewport().physical_width()
+        );
+        assert_eq!(
+            extended.device().profile().render_size(1280, 720),
+            (2560, 1440)
+        );
+    }
+
+    #[test]
+    fn configure_surface_with_profile_rejects_zero_dimensions_too() {
+        let mut w = WindowingApi::new();
+        assert!(w
+            .configure_surface_with_profile(
+                800,
+                0,
+                axiom_host::HostDeviceProfile::ExtendedLimits
+            )
+            .is_err());
+        assert!(!w.is_surface_configured());
     }
 
     #[test]

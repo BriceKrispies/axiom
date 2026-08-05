@@ -15,6 +15,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use axiom_host::HostDeviceProfile;
 use axiom_input::KeyToken;
 use axiom_math::Vec2;
 use axiom_windowing::WindowingApi;
@@ -55,8 +56,16 @@ pub fn burnt_rubber_start() {
     install_key_listeners(&held);
 
     let mut windowing = WindowingApi::new();
+    // Opt up out of the mobile render budget, for one reason: this game's frame
+    // is mostly thin, high-contrast, receding geometry — lane markings, kerb
+    // blocks and the post rows running to a vanishing point — and at one render
+    // sample per pixel every one of those edges stair-steps in runs of `1/slope`
+    // pixels. That is a sampling-rate artifact; no material, light, grade or
+    // camera change can touch it. `ExtendedLimits` renders the scene 2× per axis
+    // and the present resolve box-filters it back down, which is four coverage
+    // samples on every edge in the frame.
     windowing
-        .configure_surface(WIDTH, HEIGHT)
+        .configure_surface_with_profile(WIDTH, HEIGHT, HostDeviceProfile::ExtendedLimits)
         .expect("the surface dimensions are valid");
 
     // THE seam. "Is this a phone?" is asked exactly once, here, and everything

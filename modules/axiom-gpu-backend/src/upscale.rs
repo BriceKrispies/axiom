@@ -1,9 +1,10 @@
 //! Upscale blit: present a reduced-resolution render target to the swapchain.
 //!
-//! The mobile-first render-scale path renders the 3D scene into an intermediate
-//! colour texture sized by [`axiom_host::HostDeviceProfile::render_size`] — below
-//! the physical surface on a high-DPR phone — then this blit samples that texture
-//! across the full swapchain with a linear filter, upscaling it on present. One
+//! The render-scale path renders the 3D scene into an intermediate colour texture
+//! sized by [`axiom_host::HostDeviceProfile::render_size`] — below the physical
+//! surface on a high-DPR phone, above it on a supersampling tier — then this blit
+//! samples that texture across the full swapchain, magnifying or resolving it on
+//! present as the two sizes require. One
 //! fullscreen triangle, no vertex buffer; the source texture is fixed (the
 //! intermediate target), so the pipeline + bind group are built once and the only
 //! per-frame work is one draw into the acquired swapchain view.
@@ -56,8 +57,18 @@ pub(crate) struct UpscaleBlit {
 
 impl UpscaleBlit {
     /// Build the blit for a `source_view` (the intermediate colour target) to a
-    /// swapchain of `target_format`. The `filter` chooses the upscale character:
+    /// swapchain of `target_format`. The `filter` chooses the **magnification**
+    /// character — the direction where the target is smaller than the swapchain:
     /// `Linear` smooths, `Nearest` gives hard retro 32-bit-style chunky pixels.
+    ///
+    /// Minification is **not** the caller's choice: it is always `Linear`. When
+    /// the target is larger than the swapchain the pass is not an upscale at all,
+    /// it is a supersample *resolve* (`HostDeviceProfile::render_supersample`),
+    /// and at an exact 2× the destination pixel centre lands on the corner of
+    /// four source texels, so a linear tap is precisely the 2×2 box average those
+    /// extra samples were rendered for. Point-sampling there would render four
+    /// samples per pixel and then throw three of them away — the aliasing would
+    /// be identical to no supersampling at all, at four times the cost.
     pub(crate) fn new(
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
@@ -70,7 +81,7 @@ impl UpscaleBlit {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: filter,
-            min_filter: filter,
+            min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: filter,
             ..Default::default()
         });

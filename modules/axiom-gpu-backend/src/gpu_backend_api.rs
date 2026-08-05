@@ -21,9 +21,10 @@ const IDENTITY_MATRIX: [f32; 16] = [
 pub struct GpuBackendApi {
     width: u32,
     height: u32,
-    // Render-target size the device tier renders at before upscaling to the
-    // surface on present (`HostDeviceProfile::render_size`); smaller than the
-    // surface on a high-DPR phone the tier caps.
+    // Render-target size the device tier renders at before the frame is resolved
+    // onto the surface on present (`HostDeviceProfile::render_size`): smaller
+    // than the surface on a high-DPR phone the tier caps, LARGER on a
+    // supersampling tier, where the extra samples are box-filtered back down.
     render_width: u32,
     render_height: u32,
     // Shadow-atlas edge length from the device tier
@@ -110,15 +111,17 @@ impl GpuBackendApi {
         self.capability
     }
 
-    /// The render-target width the device tier renders the scene at before
-    /// upscaling to the swapchain — the tier's
-    /// [`axiom_host::HostDeviceProfile::render_size`] applied to the surface.
+    /// The render-target width the device tier renders the scene at before the
+    /// frame is resolved onto the swapchain — the tier's
+    /// [`axiom_host::HostDeviceProfile::render_size`] applied to the surface. It
+    /// may be below the surface (a capped tier) or above it (a supersampling
+    /// tier); the present filter handles both directions.
     pub fn render_width(&self) -> u32 {
         self.render_width
     }
 
-    /// The render-target height the device tier renders the scene at before
-    /// upscaling to the swapchain.
+    /// The render-target height the device tier renders the scene at before the
+    /// frame is resolved onto the swapchain.
     pub fn render_height(&self) -> u32 {
         self.render_height
     }
@@ -533,7 +536,9 @@ mod tests {
             HostDeviceProfile::Baseline,
         ));
         assert_eq!((large.render_width(), large.render_height()), (1600, 800));
-        // ExtendedLimits' 4096 cap leaves the same large surface 1:1.
+        // ExtendedLimits supersamples: it asks for 2× the surface and its 4096
+        // cap takes the long edge back down, so the same large surface renders
+        // ABOVE the swapchain and the present resolve does the downsample.
         let extended = GpuBackendApi::new(&request_with_profile(
             3000,
             1500,
@@ -541,8 +546,9 @@ mod tests {
         ));
         assert_eq!(
             (extended.render_width(), extended.render_height()),
-            (3000, 1500)
+            (4096, 2048)
         );
+        assert!(extended.render_width() > 3000);
     }
 
     #[test]

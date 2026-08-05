@@ -19,7 +19,8 @@ use crate::upscale::UpscaleBlit;
 /// [`SceneRenderer`]. Each frame the scene is recorded into an **intermediate
 /// colour target** sized to the device tier's render resolution (with a matching
 /// depth view), then the [`UpscaleBlit`] samples that target across the acquired
-/// swap-chain texture, upscaling it on present.
+/// swap-chain texture — magnifying it (a capped tier) or box-filtering it back
+/// down (a supersampling tier) on present.
 /// The surface `config` is retained so the binding can **reconfigure and
 /// re-acquire** the drawing context after a backgrounded mobile browser drops it
 /// (the surface then reports `Lost`/`Outdated`) — see [`Self::render_frame`].
@@ -29,8 +30,9 @@ pub struct LiveGpuBinding {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    /// The reduced-resolution colour target the scene is rendered into (then
-    /// upscaled to the swapchain). Sized `render_width × render_height`.
+    /// The off-swapchain colour target the scene is rendered into (then resolved
+    /// to the swapchain). Sized `render_width × render_height`, which is below
+    /// the surface on a capped tier and above it on a supersampling one.
     intermediate_view: wgpu::TextureView,
     /// The depth buffer for the scene pass, sized to the intermediate target.
     depth_view: wgpu::TextureView,
@@ -133,10 +135,14 @@ impl LiveGpuBinding {
         let width = width.max(1);
         let height = height.max(1);
         // The scene renders at the device tier's resolution (`render_size`),
-        // never larger than the swapchain; it is upscaled to `width × height` on
-        // present.
-        let render_width = render_width.max(1).min(width);
-        let render_height = render_height.max(1).min(height);
+        // which may be SMALLER than the swapchain (a capped high-DPR phone) or
+        // LARGER (a supersampling tier — `HostDeviceProfile::render_supersample`).
+        // Both directions resolve to `width × height` through the same present
+        // filter, so the only ceiling that belongs here is what the device can
+        // actually hold as a texture; that clamp is applied below, once the
+        // device exists and its real limit is known.
+        let render_width = render_width.max(1);
+        let render_height = render_height.max(1);
 
         // Probe WebGPU *fully* — adapter AND device — on its own instance, with no
         // canvas (`navigator.gpu` needs none), so the probe never acquires the
@@ -310,7 +316,24 @@ impl LiveGpuBinding {
             ),
         );
 
-        // The intermediate colour target the scene renders into (then upscaled to
+        // Clamp the tier's requested render target to what this device can hold.
+        // A supersampled tier can ask for more than the device's
+        // `max_texture_dimension_2d`, and exceeding it is not a soft failure —
+        // wgpu rejects the texture and the whole backend dies — so the request is
+        // a request, and this is the ceiling. Clamping (rather than refusing)
+        // means a device with less headroom simply supersamples less, which is
+        // the same graceful shape the anisotropy clamp above has. The aspect is
+        // preserved by scaling both axes by the same clamped ratio.
+        let device_max = device.limits().max_texture_dimension_2d.max(1);
+        let requested_longest = render_width.max(render_height).max(1);
+        let held_longest = requested_longest.min(device_max);
+        let hold = |axis: u32| {
+            (((axis as u64) * (held_longest as u64)) / (requested_longest as u64)).max(1) as u32
+        };
+        let render_width = hold(render_width);
+        let render_height = hold(render_height);
+
+        // The intermediate colour target the scene renders into (then resolved to
         // the swapchain). Same format as the surface, plus `TEXTURE_BINDING` so the
         // blit can sample it. Its depth view matches it, not the swapchain.
         let intermediate = device.create_texture(&wgpu::TextureDescriptor {
@@ -543,18 +566,43 @@ impl LiveGpuBinding {
     }
 }
 
+/// The largest render-target edge the live arm will ever ask a device for. The
+/// supersampling tier multiplies the surface, and a supersample is worth nothing
+/// past the point where the target stops fitting in memory on a phone; 4096 is
+/// two doublings of a 1080p-class surface and is what every WebGL2-capable GPU
+/// in practice reports.
+const MAX_LIVE_TEXTURE_DIMENSION: u32 = 4096;
+
 /// Request the render device + queue from an adapter, with the engine's shared
 /// descriptor (`downlevel_webgl2_defaults` limits so WebGPU and WebGL2 agree).
 /// Used both to *probe* WebGPU viability before committing the canvas and to
 /// create the real device on the chosen backend.
+///
+/// One limit is deliberately raised above the downlevel defaults:
+/// `max_texture_dimension_2d`, which those defaults pin to 2048 — the GLES 3.0
+/// *floor*, not what any real device has. That number is the ceiling on the
+/// intermediate render target, so leaving it at the floor would make a
+/// supersampled tier (`HostDeviceProfile::render_supersample`) unrepresentable on
+/// any surface above 1024 px. It is raised to what this adapter itself reports,
+/// capped at [`MAX_LIVE_TEXTURE_DIMENSION`] and never lowered below the downlevel
+/// value, so the request can never exceed what the adapter already advertises —
+/// i.e. it cannot turn a working device into a failed one. Every other limit
+/// stays at the downlevel value, so WebGPU and WebGL2 still agree on what the
+/// renderer may use.
 async fn request_render_device(
     adapter: &wgpu::Adapter,
 ) -> Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError> {
+    let mut limits = wgpu::Limits::downlevel_webgl2_defaults();
+    limits.max_texture_dimension_2d = adapter
+        .limits()
+        .max_texture_dimension_2d
+        .min(MAX_LIVE_TEXTURE_DIMENSION)
+        .max(limits.max_texture_dimension_2d);
     adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: Some("axiom-live-device"),
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+            required_limits: limits,
             memory_hints: wgpu::MemoryHints::default(),
             trace: wgpu::Trace::Off,
         })
