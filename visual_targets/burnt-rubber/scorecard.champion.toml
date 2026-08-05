@@ -1,248 +1,165 @@
 # Champion scorecard — burnt-rubber
 #
 # ============================================================================
-# REFERENCE ERA B — the reference was REPLACED on 2026-08-04
+# PASS 1 OF ERA B — scored 2026-08-04 against the render this pass produced
 # ============================================================================
-# The user supplied a new reference and asked that the campaign converge the
-# WebGPU/WebGL arm toward it. It is a different art direction from era A, not a
-# refinement of it:
+# Seven lenses committed, all seven cherry-picked clean, one render. The
+# attacked axis was contrast_and_exposure (0) and it moved. Measured over the
+# scene band (rows 0.30h..0.72h), same method every pass:
 #
-#   era A (b8010795, retired): stylized night straight — green conifers, lit
-#     apartment blocks, a bright red car, a blue horizon glow, the car small in
-#     frame.
-#   era B (current): near-black night — no shoulders, no skyline, no horizon
-#     glow. A black muscle car with twin silver stripes, a badge, a yellow
-#     plate and two long glowing tail-light bars, filling much more of the
-#     frame, on wet glossy asphalt lit by one pool of light. Yellow reflector
-#     posts, flat and unbloomed. A moon top-right.
+#                        reference     before      after
+#   band luma median         3.9        40.9        0.0
+#   pixels below L=16       80.2%        2.4%      83.7%
+#   sky                    (1,2,4)   (26,32,44)   (0,0,0)
+#   road, left            (7,8,11)   (50,54,65)   (0,2,11)
+#   shoulder               (3,5,4)   (47,56,55)   (0,0,0)
+#   tail-light span         0.522w      0.220w     0.312w
+#   bright-yellow area      0.98%       1.88%      0.94%
 #
-# EVERY SCORE BELOW IS A FRESH SCORE, NOT A CONTINUATION. Nothing carries
-# across the era boundary, and no movement between the era-A scorecard and this
-# one is progress or regression — it is a different exam. `atmosphere` reads
-# higher than it did on 2026-08-01 purely because era B asks for a flat black
-# sky where era A asked for a gradient with stars. That is the reference
-# moving, and it is labelled as such at the axis. `artifact_level` reads lower
-# for reasons that ARE real changes in the render, also labelled.
+# THE OVERSHOOT, NAMED. The frame no longer sits above the reference — it now
+# sits BELOW it, clipped. The reference's darks are dark but alive: sky (1,2,4),
+# shoulder (3,5,4), a floor that still carries hue. The champion's are literal
+# zero. Three commits pushed the same direction at once — the colorist dropped
+# SKY ~13x, lighting cut ambient ~4x and the key 0.85->0.30, and the architect's
+# low_key() black point subtracts 0.16 on top — and the architect said in its own
+# proposal that 0.16 was derived from the OLD 0.18 floor and would over-crush a
+# frame whose ambient had already come down. It did. That constant is the single
+# number the next pass should move, and it is a retune, not a revert: the
+# histogram SHAPE is now right (83.7% vs 80.2% below L=16) where it was 2.4%.
 #
-# ============================================================================
-# THE CHAMPION THIS SCORES
-# ============================================================================
-# champion.png is a FRESH capture of `main` (2026-08-04), not a convergence
-# render. The era-A champion on disk was stale — the app's render had moved out
-# from under it — so scoring it would have been scoring an image the app no
-# longer produces. It was archived to champions/0003-2026-08-01-fac33fc4.png and
-# re-captured.
-#
-# CORRECTED by the critic pass (iteration 6). This header, and the ledger's
-# iteration-5 entry, both said the era-A champion was "four commits stale" and
-# named 8c3f408f (phone rails), 67093433 (lane lattice), 89560b17 (collision
-# episodes) and 2f5ad14b (start screen). `git log fac33fc4..51db97d6 --
-# apps/burnt-rubber/ crates/axiom-host/ modules/axiom-gpu-backend/
-# modules/axiom-windowing/` returns NINE:
-#
-#   8c3f408f  burnt-rubber: a phone plays a different game, on rails
-#   32ced933  windowing: report the bound backend, cull canvas2d road paint
-#   67093433  burnt-rubber: anchor the lane lattice at the centreline
-#   89560b17  burnt-rubber: a collision is an event, not a state
-#   08731280  render: give the engine a sky, a bloom chain and a specular term
-#   631ca158  moonlit glow: prove the new capabilities, and the software arm
-#   2f5ad14b  burnt-rubber: a start screen before the flag drops
-#   ece53937  render: a tangent frame that cannot be built is not a normal
-#   2ba0bb66  zanzoban: carry the named material texture on the wasm arm too
-#
-# The two omitted from the named four are the two LARGEST — 08731280 introduced
-# `FrameSky`, `FrameBloom`, `FrameRenderLook`, a GPU post chain and a specular
-# term (and authored a burnt-rubber sky/bloom/roughness look on top of them),
-# and ece53937 introduced `axiom_host::MaterialTexture`, CPU mip chains and
-# per-material anisotropic sampling. They are the source of the navy sky, the
-# reflector-post halos and the road surface this scorecard scores, and neither
-# had an `abstractions/NNNN.toml`. Both are now recorded (0003.toml, 0004.toml).
-# The GHOST line this scorecard twice blames on "the four commits" is from
-# ece53937, which was not among them — the accounting, not just the count, was
-# wrong.
-#
-# The champion itself is NOT stale: it postdates all nine (its HUD carries the
-# `GHOST -648 m` line ece53937 added), and its md5 matches
-# champions/0004-2026-08-04-main.png byte for byte.
-#
-#   live browser, phone viewport 470x836 @ DPR 2, touch on
-#   WebGPU device creation fails on this machine (dxil.dll) -> the cascade binds
-#   WebGL2; console reads "axiom: render backend = Gl". That is the JUDGED arm
-#   and the arm the reference was shot on.
-#   940x1672; state 0 KM/H - OPENING STRAIGHT - 0% - 0 near misses - 0:09.200
-#   against the reference's 0:09.117.
-#
-# The Canvas 2D arm is captured each pass to canvas-guard.png and is NOT scored
-# here (campaign.toml [arms]). It is guarded for legibility only.
-#
-# ============================================================================
-# MEASUREMENTS THIS SCORECARD RESTS ON
-# ============================================================================
-# Taken over the scene band (rows 0.30h..0.72h), both images, same method:
-#
-#                          reference        champion
-#   band luma median           4               41
-#   band luma 1st pct          0                4
-#   pixels below L=16       80.2%             2.4%
-#   sky, high (0.33h)      (1,2,4)         (26,32,44)
-#   sky, at horizon        (2,3,5)         (28,35,44)
-#   road, left (0.69h)     (7,8,11)        (50,54,65)
-#   shoulder (0.02w,0.51h) (3,5,4)         (47,56,55)
-#   tail-light span         0.522w           0.220w
-#   tail-light bar height   0.019h           0.091h
-#   moon bbox            x.557-.881       x.564-.876
-#                        y.059-.180       y.074-.175
-#   bright-yellow area       0.98%           1.88%
+# What moved and is not in dispute: the post bloom that was 1.88% of the band
+# against the reference's 0.98% is now 0.94% — that axis's added-atmosphere
+# complaint is gone. The far road dissolves into black instead of into a hard
+# aliased line. The car reads at 0.312w against 0.220w.
 #
 # final_score = lowest_axis * 0.7 + average_axis * 0.3
-#             = 0 * 0.7 + (11/12) * 0.3 = 0.275
-#             (was 0.30 on 12/12 before the critic pass lowered `atmosphere`)
+#             = 1 * 0.7 + (20/12) * 0.3 = 1.20   (was 0.275)
 #
-# NEXT FLAW = contrast_and_exposure. It is no longer UNIQUELY lowest — the
-# critic pass (iteration 6) took `atmosphere` down to 0 as well — but the fixed
-# axis order in campaign.toml breaks the tie in its favour: contrast_and_exposure
-# is 7th, atmosphere is 9th. The target is therefore UNCHANGED by that
-# recalibration; the inflation was hiding severity, not the target. It was
-# already the named target at the end of era A and the new reference makes it
-# more extreme, not less: era A wanted 43.8% of the scene below L=16, era B
-# wants 80.2%, and the champion delivers 2.4%.
+# NEXT FLAW = silhouette_readability. Four axes tie at 1 and campaign.toml's
+# fixed order breaks it 3rd. The car is bigger and striped now, which makes the
+# box-on-box outline MORE visible, not less — the art-director's own note that
+# camera work has spent its envelope (the reference car is 55% of road width,
+# this one 21%) points at the same place: the model, not the shot.
 
 [scores]
-# 2 — the framing structure is genuinely on-model: chase camera centred on the
-# lane, road converging to a centred vanishing point, moon top-right at very
-# nearly the reference's position and size (bbox x .564-.876 / y .074-.175
-# against x .557-.881 / y .059-.180 — the closest match anywhere in this
-# frame). What holds it at 2 is the HUD, which now diverges more than it did in
-# era A: the champion carries a `GHOST -648 m` line the reference does not, and
-# its BOOST bar is drawn near the bottom of the frame over the touch pad
-# instead of on line 2 under the speed where the reference puts it. The camera
-# DISTANCE is also wrong, but that is scored at scale_and_proportion, not here.
+# 2 - HELD, for the same reason as before the pass: the road framing was already
+# on-model (centred vanishing point, moon within a few pixels of the reference's
+# bbox) and what keeps it off 3 is the HUD, which no lens touched. The champion
+# still carries a `GHOST -651 m` line the reference has no counterpart for, and its
+# BOOST bar is still drawn near the bottom over the touch pad instead of on line 2
+# under the speed. The chase rig moved (art-director, 1fa94054) but that is scored
+# at scale_and_proportion; the frame it frames is unchanged.
 composition_and_framing = 2
 
-# 1 — the reference's subject is a modelled muscle car: tapered greenhouse with
-# a rear window, C-pillar, body shoulders, a round centre badge, a yellow
-# `AX10M` plate, twin silver stripes running the length of the body, and two
-# long thin glowing tail-light bars. The champion's is a box with a flat
-# blue-grey slab for a windshield and two orange rectangles for lamps, sampling
-# (51,20,14) red-brown where the reference's body is near-black. You can tell
-# it is meant to be a car. Nobody would mistake it for that car.
-subject_fidelity = 1
+# 1 -> 2. The reference car's single most identifying feature is its twin centre
+# stripes, and they are now there (modeler, ca3a8891): visible on the roof and on
+# the raked backlight, plus a plate on the valance. That is the difference between
+# "a car-shaped box" and "that car, crudely". It stops at 2 on three counts, all
+# visible in the crop: the decklid is a bright red slab and is now the lightest
+# thing on the car, where the reference's whole body is near-black; the plate
+# renders silver-grey, not the reference's warm yellow, because one `trim` material
+# serves both stripe and plate (the modeler flagged this in its own proposal as the
+# colorist's follow-up); and the lamps are still two filled rectangles where the
+# reference has two thin bars with a badge between them.
+subject_fidelity = 2
 
-# 1 — from dead astern the champion still reads box-on-box: a rectangle with a
-# smaller rectangle set on top of it. The reference's silhouette carries a
-# roofline that tapers into the deck, a distinct shoulder line, and a lip at
-# the tail. This is the same finding as era A and the new reference does not
-# soften it — a bigger, closer car makes the flat silhouette MORE visible, not
-# less.
+# 1 - HELD, and it is now the campaign's target. The outline is still a rectangle
+# with a smaller rectangle set on it: hard corners, no rolled haunch, no tucked
+# valance. The pass made this MORE visible rather than less - the car is larger in
+# frame and sits against a now-black surround, so the flat box reads harder than it
+# did against a lifted navy wash. The modeler recorded the ceiling honestly: the
+# mesh vocabulary (cube/plane/sphere/cylinder, no CSG, no subdiv) cannot chamfer or
+# loft, so the corners stay hard at app tier. That is the next structural question,
+# not a config one.
 silhouette_readability = 1
 
-# 1 — the app does author surface roughness (the tarmac at 0.68, palette.rs
-# L144/160) and the GPU arm does have the Specular capability, so this is not
-# "the feature is missing". It is that at 0.68 the road returns no readable
-# highlight: the reference's asphalt is wet-glossy, throwing a long soft
-# reflection of its own light source down the lane and picking out the lane
-# paint with a sheen. The champion's asphalt grain resolves as low-frequency
-# mottle rather than aggregate, the car body is uniformly matte where the
-# reference's has a clear coat, and the tail lights are flat fills rather than
-# lamp housings with a lit lens.
+# 1 - HELD, and the reason changed. The grain itself is fixed: surfacing (5e9eb60b)
+# found the champion's tarmac was a periodic quilt at exactly TILE_METRES/LATTICE -
+# an 18.75 cm cell reading as cobbles - and rescaled RES/LATTICE together so the
+# texel lands near 1.2 cm with the interpolation slope, and therefore the alias
+# budget, numerically unchanged. But at this exposure almost none of it is visible:
+# the road is at or near zero across most of the frame, so the axis cannot be
+# credited from this image. There is still no specular anywhere, and the reference's
+# asphalt is wet-glossy with a long reflection down the lane. Re-score once the
+# black point is retuned - this axis is currently hidden, not measured.
 material_and_texture_detail = 1
 
-# 1 — there is a pool light riding over the car and there is a dark mass under
-# it, both real. Two things keep it at 1. The pool is far too broad: the
-# champion's road samples 50 at the left frame edge and only rises toward the
-# car, so the whole lower third is lit, where the reference falls to (7,8,11)
-# two car-widths off centre and keeps one tight hero pool. And nothing but the
-# car interacts with light — the reflector posts, the kerb blocks and the sign
-# cast nothing, while the reference's posts each sit in their own small pool.
-lighting_and_shadow = 1
+# 1 -> 2. The structure is now the reference's: one pool of light around the car,
+# and real falloff away from it. Before, the road read 50 at the frame's left edge
+# and the "pool" was a 0.4-unit difference; now the edge is black and the lit road
+# is confined to the car's surround. Lighting (1def5117) got there by cutting the
+# two GLOBAL terms - ambient ~4x, key 0.85->0.30 - and leaving the car's local pool
+# to carry the near road, which is the right diagnosis: the darks were lifted by
+# lights, not by grade. Not 3 because nothing but the car interacts with light -
+# the posts, kerb blocks and sign still cast nothing, where the reference's posts
+# each sit in their own small pool.
+lighting_and_shadow = 2
 
-# 1 — right hue family, wrong value everywhere, by a factor of 5 to 8. Sky
-# (26,32,44) against (1,2,4). Road (50,54,65) against (7,8,11). Shoulder
-# (47,56,55) against (3,5,4) — the reference has no visible shoulders at all,
-# they are simply black, while the champion's read as lit olive-green bands.
-# The hero colour is wrong in kind as well as value: red-brown body against a
-# near-black body with silver stripes and one saturated yellow plate.
-color_palette = 1
+# 1 -> 2. Every value moved a long way toward the reference and one moved past it.
+# Sky (26,32,44) -> (0,0,0) against the reference's (1,2,4). Road (50,54,65) ->
+# (0,2,11) against (7,8,11) - genuinely close. Shoulder (47,56,55) -> (0,0,0)
+# against (3,5,4). The lifted blue cast is gone. What holds it at 2 is that the
+# convergence overshot into clipping: where the reference's darks still carry hue,
+# the champion's are literal zero, so the palette is not wrong-but-close, it is
+# absent across the bottom of the range. The car is also still red where the
+# reference's is black.
+color_palette = 2
 
-# 0 — the dominant flaw, unchanged in kind from the end of era A and worse in
-# degree. Over the scene band the reference's median luma is 4 and 80.2% of its
-# pixels sit below L=16; the champion's median is 41 and 2.4% sit below L=16.
-# The champion's darkest 1% is L=4, which is the reference's MEDIAN. The
-# reference is a black frame with one pool of light in it; the champion is a
-# uniformly lit frame with a brighter patch. No amount of palette work fixes
-# that — the exposure itself is placed a full stop and a half off.
-contrast_and_exposure = 0
+# 0 -> 2, the attacked axis, and the largest single move the campaign has made.
+# Before: median 40.9, 2.4% of the band below L=16, against a reference that is
+# 80.2% below L=16 - a night scene with no blacks at all. After: 83.7% below L=16.
+# The histogram SHAPE is now the reference's. It is not 3 because the frame
+# overshot: median 0.0 against the reference's 3.9, and the floor is clipped rather
+# than dark. Three commits pushed the same way in one pass (SKY down ~13x, ambient
+# and key down, then low_key()'s 0.16 black point subtracted on top of both), and
+# the architect predicted this exact interaction in its own proposal. The fix is to
+# retune that one constant, not to revert any of the three.
+contrast_and_exposure = 2
 
-# 1 — both frames converge to a centred vanishing point and the champion's
-# depth fog does dim the far road. The separation cues the reference uses are
-# absent: its far road dissolves into black long before the horizon, and its
-# car is separated from the tarmac by light (a bright pool behind it, a dark
-# contact under it) rather than by hue. The champion's far road stays a hard
-# aliased line into the vanishing point and its car separates only because it
-# is a different colour from the road.
-depth_and_separation = 1
+# 1 -> 2. The reference separates depth two ways and the champion now does both:
+# the far road dissolves into black well before the horizon instead of converging
+# to a hard aliased line, and the car separates from the tarmac by light - a lit
+# pool behind it, dark under it - rather than by being a different colour. Not 3
+# because the receding post rows still alias into a dotted stipple toward the
+# vanishing point, and the dissolve is a hard fade rather than the reference's
+# graded one.
+depth_and_separation = 2
 
-# 0 — LOWERED from 1 by the critic pass (iteration 6). "When unsure, take the
-# lower", and this one was not even close on re-reading. The 1 rested on two
-# arguments and both fail:
-#
-#   (a) "the champion's flat sky is now wrong only in value." It is not flat and
-#       the error is not only in value. The champion carries a navy gradient
-#       (26,32,44 high) at ~7x the reference's (1,2,4), and — the part the old
-#       note omitted entirely — a green/teal haze band sitting across the whole
-#       horizon where the reference has nothing but black. That is atmosphere
-#       present and PLAINLY INCORRECT, which is the rubric's 0, not atmosphere
-#       merely crude, which is its 1.
-#   (b) "Add the moon, which is very nearly right." The moon is ALREADY the
-#       load-bearing credit in composition_and_framing above ("the closest match
-#       anywhere in this frame"). Spending one matched feature twice, to hold two
-#       axes up, is double-counting — exactly the inflation this lens exists to
-#       catch. It is scored once, at composition, and not here.
-#
-# What remains at this axis after removing the double credit is entirely
-# additive error: the 7x-bright graded sky, the green horizon band, and a bloom
-# halo on every reflector post (bright-yellow area 1.88% of the band against the
-# reference's 0.98%) where the reference's posts are flat markers with no glow.
-# The halos are `08731280`'s bloom chain, not any of the commits the old header
-# named.
-#
-# CONSEQUENCE, stated so nobody mistakes it for a moved target: this creates a
-# TIE at 0 with contrast_and_exposure. The fixed axis order (campaign.toml) puts
-# contrast_and_exposure 7th and atmosphere 9th, so the next flaw is UNCHANGED.
-# And this is still not a cross-era comparison: it reads 0 in era B for era-B
-# reasons (an added green band and added halos against a black reference), not
-# because it read 0 in era A for era-A reasons (a missing gradient and missing
-# stars). No movement across the era boundary is progress in either direction.
-atmosphere = 0
+# 0 -> 2, measured rather than judged. The critic's 0 rested on three specifics: a
+# navy sky at ~7x the reference, a green/teal haze band across the horizon, and a
+# bloom halo on every post at 1.88% of band area against the reference's 0.98%. All
+# three are gone: sky (0,0,0), no haze band, and the bright-yellow area is now
+# 0.94% - within 0.04 points of the reference. Not 3 because the sky is now flat
+# zero where the reference's is a live (1,2,4) with a faint gradient, and the moon's
+# halo is larger and softer than the reference's.
+atmosphere = 2
 
-# 1 — era B moved the camera a long way in and this is the largest single
-# compositional gap in the frame. The reference's tail-light bar spans 0.522 of
-# frame width; the champion's spans 0.220. The hero reads roughly 2.4x too
-# small. The proportions inside it are wrong in the same direction: the
-# reference's lamps are thin full-width strips (0.019h) and the champion's are
-# chunky blocks (0.091h), so even scaled up the champion would not land on the
-# reference's proportions.
-scale_and_proportion = 1
+# 1 -> 2. The car spans 0.312 of frame width by its tail-light bar against 0.220
+# before and the reference's 0.522. The art-director (1fa94054) got there by
+# scaling the whole chase rig - eye 1.35 -> 1.10 m with the distances following -
+# on the measurement that on-screen width divided by distance-below-horizon reduces
+# to width/eye_height, so chase distance cancels and only eye height is a real
+# lever. Worth carrying forward: it also measured that full parity is unreachable
+# from the camera at all, because the reference car spans ~55% of the ROAD width and
+# this one spans ~21%. The rest of this axis belongs to CAR_WIDTH or the track's
+# half_width, not to the rig.
+scale_and_proportion = 2
 
-# 1 — density measured in the reference's own terms, which is where it is
-# unkind. The reference spends its detail on the car and the road surface: a
-# badge, a plate, stripes, lane paint picked out by a wet sheen, two receding
-# rows of posts, one sign. The champion spends its detail on scenery the
-# reference does not show at all — conifers and lit green shoulders — while the
-# car and the road carry almost none. More objects in frame is not more detail
-# where this reference puts it.
+# 1 - HELD. The frame lost the conifers and the lit green shoulders, which is
+# correct (the reference has neither), and the car gained stripes and a plate. But
+# density is scored in the reference's own terms, and the reference spends its
+# detail on the car and the road surface: a badge, plate lettering, lane paint
+# picked out by a wet sheen, aggregate underfoot. The car has no badge and no
+# lettering, and the new asphalt grain is invisible at this exposure. Nothing was
+# added where this reference puts its detail.
 detail_density = 1
 
-# 1 — HOLDS at 1. Value unchanged by the critic pass; the ATTRIBUTION is
-# corrected. This note read "the four unrelated commits since the era-A champion
-# left the HUD with a BOOST bar drawn over the touch pad and a GHOST line". The
-# GHOST line is `ece53937`'s, which was not one of the four the record named
-# (see the header), and the reflector-post bloom halos are `08731280`'s bloom
-# chain, also unnamed. The artifacts are real and correctly counted — a BOOST
-# bar drawn over the touch pad, a GHOST line with no counterpart in the
-# reference, a control-hint line that runs off both frame edges and through the
-# steering buttons, post halos actively unlike the reference's flat markers, and
-# aliased kerb blocks and a hard far-road line that an 80%-black reference makes
-# far more visible than era A's brighter frame did. Only the blame was wrong,
-# and blaming the wrong commit is how the next pass fixes the wrong thing.
+# 1 - HELD, with the ledger of what moved each way. Gone: the disproportionate post
+# bloom (1.88% -> 0.94%) and the paving-stone quilt in the tarmac. Arrived: a
+# clipped black floor, which is itself an artifact - a night frame whose darks are
+# all exactly zero has quantised away information the reference retains. Unchanged
+# and now more visible against black: the lane markings stair-step in hard 4-8 px
+# staircases (surfacing traced this to the absence of MSAA on the GPU arm and handed
+# it to the architect rather than faking it app-side), and the car's decklid reads
+# as a bright red error. Net: a different set of artifacts, not fewer.
 artifact_level = 1

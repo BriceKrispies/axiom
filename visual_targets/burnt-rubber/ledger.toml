@@ -705,3 +705,82 @@ atmosphere = 0
 scale_and_proportion = 1
 detail_density = 1
 artifact_level = 1
+
+[[iteration]]
+iteration = 7
+attacked_axis = "contrast_and_exposure"
+changed_files = [
+  "apps/burnt-rubber/src/tuning.rs",
+  "apps/burnt-rubber/src/render/car_model.rs",
+  "apps/burnt-rubber/src/render/palette.rs",
+  "apps/burnt-rubber/src/render/mod.rs",
+  "apps/burnt-rubber/src/render/asphalt_texture.rs",
+  "apps/burnt-rubber/src/web.rs",
+  "crates/axiom-host/src/frame_postprocess.rs",
+  "crates/axiom-host/src/frame_render_look.rs",
+  "modules/axiom-windowing/src/windowing_api.rs",
+  "modules/axiom-gpu-backend/src/post_chain.rs",
+  "modules/axiom-gpu-backend/src/live_gpu_binding.rs",
+  "modules/axiom-gpu-backend/src/offscreen.rs",
+  "modules/axiom/src/prelude.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+Era-B pass 1. Seven lenses ran with no steering; all seven committed and all seven \
+cherry-picked without a conflict. Rendered once on the judged GPU arm (WebGL2) at the \
+campaign moment (0 KM/H, OPENING STRAIGHT, 0%, 0:09.233 against the reference's \
+0:09.117), and once on the guarded canvas2d arm. Attacked axis contrast_and_exposure \
+0 -> 2: the band went from 2.4% of pixels below L=16 to 83.7% against the reference's \
+80.2%, so the histogram shape is now the reference's where it was a night scene with no \
+blacks at all. No non-attacked axis dropped, so this is a keep by the table; six axes \
+rose and none fell. final_score 0.275 -> 1.20, lowest axis 0 -> 1. \
+\
+THE OVERSHOOT IS RECORDED, NOT SMOOTHED. The frame now sits BELOW the reference and \
+clipped: median 0.0 against 3.9, sky (0,0,0) against (1,2,4), shoulder (0,0,0) against \
+(3,5,4). Three commits pushed the same direction in one pass — colorist dropped SKY \
+~13x, lighting cut ambient ~4x and the key 0.85->0.30, architect's low_key() subtracts \
+a 0.16 black point on top — and the architect's own proposal predicted this exact \
+interaction, having derived 0.16 from the pre-pass 0.18 floor. The next pass retunes \
+that one constant; it does not revert the three. \
+\
+Two axes are HIDDEN rather than measured at this exposure and are flagged as such in \
+the scorecard: material_and_texture_detail (the new 1.2 cm asphalt grain is invisible \
+under a clipped floor) and part of detail_density. They must be re-scored after the \
+retune, not carried. \
+\
+Guarded arm: canvas2d darkened in parallel (it takes the same black point through the \
+CPU post path) and remains fully legible — car, lane paint, reflector posts, stripes \
+and HUD all readable. No regression; not scored.
+"""
+next_attacked_axis = "silhouette_readability"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+atmosphere = 2
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 1
