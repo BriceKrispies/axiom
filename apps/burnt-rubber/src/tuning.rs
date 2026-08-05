@@ -466,88 +466,70 @@ impl CameraTuning {
     /// what decides whether the shot is a car seen from behind or a car seen
     /// from above.
     ///
-    /// Those two knobs are also not independent of each other, which is the
-    /// thing the last two passes each got half-right. Measured against the art
-    /// target, the shot the previous rig produces is already the *right shot* —
-    /// the horizon sits within 3% of frame height of the target's, the road
-    /// converges on the same line, the roadside posts run past at the same
-    /// cadence, and the car's rear bumper sits at 0.69 of frame height where the
-    /// target has it at 0.72. Everything about the world matches. The one thing
-    /// that does not is the **subject**: the car spans 22% of frame width where
-    /// the target's spans 59%.
+    /// **This rig is set by what the driver needs to see, not by the art
+    /// reference.** That is a deliberate reversal and it is worth stating,
+    /// because the two want opposite things and the file used to argue the
+    /// other side. The convergence campaign's reference is a hero shot: the car
+    /// fills the frame, its tail-light bar spanning 52% of frame width, and
+    /// everything the rig did for several passes was in service of that. A
+    /// player driving at 300 km/h needs the opposite — road ahead, early enough
+    /// to read a corner and the traffic standing in it. A car that owns the
+    /// frame is a car that hides the thing you are about to hit.
     ///
-    /// That gap cannot be closed by pulling the camera in, and the arithmetic is
-    /// worth writing down because it is counter-intuitive. For anything standing
-    /// on the road, the ratio of its on-screen width to its distance *below the
-    /// horizon* is `width / eye_height` — the chase distance cancels out
-    /// entirely. Halving the distance makes the car twice as big and puts it
-    /// twice as far down the frame, straight through the touch controls and off
-    /// the bottom edge; it never makes the car bigger *where it is*. Field of
-    /// view does not help either, because it magnifies the road and the posts by
-    /// exactly the same factor, and those already match.
+    /// So the rig is pulled back and lifted: `distance_low` 3.90 m → 5.60 m and
+    /// `height` 1.02 m → 1.55 m. Both matter and they do different jobs.
     ///
-    /// The only lever that changes how much frame the subject owns is therefore
-    /// the **eye height**, with the distance scaled by the same factor so the
-    /// car keeps its place in the frame and every angle in the rig is preserved.
-    /// So the whole rig scales by 0.815: the eye drops from 1.35 m to 1.10 m,
-    /// and 5.9 m becomes 4.81 m behind the car.
+    /// **Height is what actually buys road.** The look-at target is pinned at a
+    /// fixed 0.9 m above the road a set distance ahead of the car (`TARGET_HEIGHT`
+    /// in `camera.rs`), and it does *not* rise with the eye — so lifting the eye
+    /// pitches the whole view down, which lifts the horizon in frame and hands
+    /// the freed space to road surface. Pulling back alone would not do this: it
+    /// shows more of everything at once, the sky included.
     ///
-    /// What that buys is two things at once. The car grows by a quarter without
-    /// moving down the frame. And the eye is now above the car's own
-    /// [`crate::render::car_model::ROOF_HEIGHT`] of 0.98 m rather than 0.37 m
-    /// above it, so the roof and the shallow-raked backlight — which at 12° from
-    /// horizontal present as a wide flat slab to anything looking down at them —
-    /// go nearly edge-on. That is the target's read: a wide, low car seen from
-    /// its own roofline, taillights across the middle of the silhouette, not a
-    /// tall box seen from above.
+    /// **Distance is what stops the car eating the middle of the shot.** For
+    /// anything standing on the road, on-screen width goes as `1/d` and its drop
+    /// below the horizon goes as `(height − 0.58) / d`. Pulling back to 5.60 m
+    /// shrinks the car by 30%, and the lift then puts it lower in frame rather
+    /// than higher, so the space that opens up opens ahead of it rather than
+    /// above it. Field of view is deliberately not touched: it magnifies the
+    /// road and the car by exactly the same factor, so it trades legibility for
+    /// nothing.
     ///
-    /// That pass was right about the lever and short on the amount, because it
-    /// measured the *body*, whose edges are guesswork against a night road. The
-    /// numbers below are measured off the one feature on the car whose world
-    /// size is a constant in this file's sibling — the **tail-light bar**: two
-    /// 0.72 m bars at ±0.50 m, so 1.72 m tip to tip, standing 0.58 m up at
-    /// z = −1.95. Against that ruler the rendered frame and the art target
-    /// disagree by two numbers and only two:
+    /// The eye still clears the car's own
+    /// [`crate::render::car_model::ROOF_HEIGHT`] of 0.98 m — that floor has not
+    /// moved and is not negotiable, because under it the car becomes a wall
+    /// across the road ahead, which is the very thing this rig exists to avoid.
+    /// What has moved is the *ceiling*: at 1.55 m the eye sits 0.57 m over the
+    /// roof instead of 0.04 m, so the roof and the shallow 12° backlight no
+    /// longer present edge-on and the car reads slightly more from above. That
+    /// is the price, it is paid knowingly, and it is what the reference-parity
+    /// framing was protecting. The bound in
+    /// `the_eye_sits_just_above_the_roofline_and_clear_of_its_own_floor` was
+    /// rewritten to match this intent rather than deleted: the eye must still
+    /// stay under twice the roofline, or the shot becomes a plan view of a car
+    /// rather than a view down a road.
     ///
-    /// * the bar spans 253 px of a 940 px frame where the target's spans 456 px
-    ///   of 925 — the subject is **1.77× too narrow**;
-    /// * its centre sits 242 px below the horizon where the target's sits 307 —
-    ///   the subject is **1.25× too high** in the frame.
+    /// Two knobs travel with the rig, at its own 1.436:
     ///
-    /// Both fall out of the rig at once, because on-screen width goes as `1/d`
-    /// and the drop below the horizon goes as `(height − 0.58) / d`. Wanting the
-    /// car 1.77× wider fixes the distance: the eye moves from 2.80 m behind the
-    /// tail-light plane to 1.89 m, which is `distance_low = 3.90`. Wanting it
-    /// 1.25× lower then fixes the height, since closing the distance alone would
-    /// push it 1.77× lower and overshoot: `height = 1.02`. That is a smaller
-    /// drop than the distance took, and deliberately so — 1.02 m still clears
-    /// the 0.98 m roofline, and the roofline is the floor under this knob. Below
-    /// it the car stops being a car seen from behind and becomes a wall across
-    /// the road ahead, which is worth more than the last few per cent of width.
+    /// * `distance_high` and `distance_boost`, so the speed ramp and the boost
+    ///   pull keep the proportions they were authored at instead of shrinking to
+    ///   a rounding error at racing speed;
+    /// * `min_ground_clearance`, which is a safety floor rather than a framing
+    ///   knob — but a floor that stays put while the eye above it rises stops
+    ///   being a floor and starts being decoration.
     ///
-    /// `distance_high` and `distance_boost` travel with `distance_low` at its
-    /// own 0.811, so the speed ramp and the boost pull keep the proportions they
-    /// were authored at rather than becoming a third of the rig at racing speed.
-    /// `accel_pullback_limit` does **not**, and that is the one number here that
-    /// is set by a floor rather than by a ratio: it is *subtracted* from the
-    /// chase distance under braking, so what it has to preserve is not its share
-    /// of the rig but the absolute gap between the eye and the car's tail. Left
-    /// at 1.6 m it would pull a 3.90 m rig to 2.30 m, a third of a metre behind
-    /// a 2.25 m tail and well inside the 1.2 m near plane. At 0.69 m the closest
-    /// braking can ever bring the eye is 3.21 m — the same closest approach, to
-    /// the centimetre, that the wider rig it replaces already had.
-    ///
-    /// `min_ground_clearance` scales with the rig rather than being left behind.
-    /// It is a safety floor, not a framing knob, but a floor that does not move
-    /// when the eye above it does stops being a floor and becomes the framing:
-    /// held at 0.9 m it would sit under the eye entirely and take the shot over
-    /// on every crest. At 0.68 m it keeps the ~0.35 m of headroom it has always
-    /// had, and goes on doing only its own job.
+    /// `accel_pullback_limit` travels too, 0.69 → 0.99, and it is the one number
+    /// here bounded by a floor rather than a ratio: it is *subtracted* from the
+    /// chase distance under braking, so what it must preserve is the absolute
+    /// gap between the eye and the car's tail. At 0.99 m the closest braking can
+    /// ever bring the eye is 4.61 m, against a 2.25 m tail — 2.36 m of clearance,
+    /// comfortably outside the 1.2 m near plane, and more headroom than the
+    /// tighter rig it replaces had.
     pub const DEFAULT: CameraTuning = CameraTuning {
-        distance_low: 3.90,
-        distance_high: 5.09,
-        distance_boost: 0.73,
-        height: 1.02,
+        distance_low: 5.60,
+        distance_high: 7.31,
+        distance_boost: 1.05,
+        height: 1.55,
         look_ahead_low: 5.0,
         look_ahead_high: 14.0,
         fov_low: 65.0,
@@ -560,14 +542,14 @@ impl CameraTuning {
         track_anticipation: 0.3,
         anticipation_distance: 34.0,
         accel_pullback: 0.055,
-        accel_pullback_limit: 0.69,
+        accel_pullback_limit: 0.99,
         turn_roll: 1.9,
         turn_roll_limit: 4.0,
         speed_shake: 0.035,
         boost_shake: 0.05,
         impact_shake: 0.55,
         impact_decay: 11.0,
-        min_ground_clearance: 0.68,
+        min_ground_clearance: 0.98,
     };
 }
 
@@ -831,19 +813,24 @@ mod tests {
     /// rather than a memory: the eye sits just *above* the car's roofline, and
     /// the clearance floor stays below the eye by a real margin.
     ///
-    /// Both bounds are one-sided for a reason. Drop the eye under the roof and
-    /// the car becomes a wall across the road ahead. Raise it and the roof and
-    /// the shallow backlight turn back into the flat slab that made the car read
-    /// as a box seen from above instead of a wide, low car seen from behind.
+    /// Both bounds are one-sided for a reason, and the upper one has moved once
+    /// already. Drop the eye under the roof and the car becomes a wall across
+    /// the road ahead — that floor is not negotiable. The ceiling used to hold
+    /// the eye within 0.3 m of the roofline, which was the art reference's
+    /// framing: a wide, low car seen from its own roofline. This rig is set by
+    /// what the driver needs to see instead, so the eye is allowed well above
+    /// the roof — but not without limit, or the shot stops being a view down a
+    /// road and becomes a plan view of a car with some road around it.
     #[test]
     fn the_eye_sits_just_above_the_roofline_and_clear_of_its_own_floor() {
         let c = CameraTuning::DEFAULT;
         let roof = crate::render::car_model::ROOF_HEIGHT;
         assert!(c.height > roof, "the eye is above the roof: {} vs {roof}", c.height);
         assert!(
-            c.height - roof < 0.3,
-            "but only just — {} m of it is a look-down angle",
-            c.height - roof
+            c.height < roof * 2.0,
+            "but the shot is still down a road, not onto a car: {} vs a {} ceiling",
+            c.height,
+            roof * 2.0
         );
         assert!(
             c.height - c.min_ground_clearance > 0.3,
