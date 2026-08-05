@@ -32,9 +32,28 @@
 //! * a **valance** — a near-black bumper across the bottom of the rear panel,
 //!   which both grounds the car and halves the height of the coloured wall.
 //!
+//! ## The chase camera looks *down* on the car, so the top surfaces are furniture too
+//!
+//! The camera rides above the roofline, which means the largest continuous area
+//! of car on screen is not the tail panel at all — it is the roof, the rear
+//! screen and the decklid, seen from above. Those were three flat, unbroken
+//! planes. Two things break them up, and both are the things a muscle car is
+//! recognised by from directly behind:
+//!
+//! * **twin centre stripes**, in three segments that follow the surfaces they
+//!   cross — over the roof, down the raked backlight, and out to the tail over
+//!   the decklid lip. Painted stripes are not a texture here: the engine's
+//!   material vocabulary has no decals, so a stripe is a shallow box laid a
+//!   centimetre proud of the panel it sits on. That is also why they are
+//!   segmented — one straight box cannot follow a roof, a rake and a deck;
+//! * a **number plate**, a small pale rectangle mounted on the valance below the
+//!   lamps. It is tiny, and it is the single most car-like object on the whole
+//!   rear panel: nothing else in a night frame is a bright horizontal rectangle
+//!   sitting low and central between two red bars.
+//!
 //! Every part is a separate entity whose world transform is written each frame.
 //! The parts are not parented: the app already knows every part's world pose (it
-//! is composing the chassis basis anyway), so writing seventeen transforms is
+//! is composing the chassis basis anyway), so writing two dozen transforms is
 //! cheaper and far easier to read than maintaining a hierarchy and a set of
 //! local transforms that have to be kept consistent with it.
 
@@ -93,6 +112,23 @@ pub const GREENHOUSE_HEIGHT: f32 = 0.26;
 /// it. A full-width body box is why the old car read as a van.
 pub const BODY_WIDTH_FRACTION: f32 = 0.86;
 
+/// How far the centre of each racing stripe sits from the car's centreline (m).
+///
+/// Set against the cabin, not the car: both stripes plus the gap between them
+/// have to sit inside the roof, or the stripe runs off the side of the panel it
+/// is painted on.
+pub const STRIPE_OFFSET: f32 = 0.30;
+
+/// How wide one stripe is (m).
+pub const STRIPE_WIDTH: f32 = 0.22;
+
+/// How far proud of the panel a stripe or the plate stands (m).
+///
+/// Paint has no thickness, but a coincident face z-fights, so the trim is a
+/// shallow box lifted off its panel by the smallest offset that reads as flush
+/// from a car's length away.
+pub const TRIM_PROUD: f32 = 0.015;
+
 /// The player car's parts.
 #[derive(Debug, Clone)]
 pub struct PlayerCar {
@@ -103,6 +139,10 @@ pub struct PlayerCar {
     wing: Entity,
     haunches: [Entity; 2],
     valance: Entity,
+    /// The twin centre stripes, in surface order: roof pair, backlight pair,
+    /// decklid pair.
+    stripes: [Entity; 6],
+    plate: Entity,
     wheels: [Entity; 4],
     brake_lights: [Entity; 2],
     exhausts: [Entity; 2],
@@ -131,6 +171,15 @@ impl PlayerCar {
             // thing in the palette, and a near-black bumper is what stops the
             // rear panel reading as one tall coloured slab.
             valance: part(app, cube, livery.tyre),
+            stripes: [
+                part(app, cube, livery.trim),
+                part(app, cube, livery.trim),
+                part(app, cube, livery.trim),
+                part(app, cube, livery.trim),
+                part(app, cube, livery.trim),
+                part(app, cube, livery.trim),
+            ],
+            plate: part(app, cube, livery.trim),
             wheels: [
                 part(app, cylinder, livery.tyre),
                 part(app, cylinder, livery.tyre),
@@ -203,12 +252,16 @@ impl PlayerCar {
         // (z = -0.535, y = ROOF_HEIGHT) and the bottom edge lands on the decklid
         // ahead of the wing (z = -1.60, y = 0.75), and the rake, length and
         // centre below are what that span works out to.
+        let glass_centre = Vec3::new(0.0, 0.87, -1.07);
+        let glass_rotation = rotation.multiply(Quat::from_euler_xyz(-BACKLIGHT_RAKE, 0.0, 0.0));
+        let glass_thickness = 0.08;
+        let glass_length = 1.09;
         app.set(
             self.backlight,
             Transform::new(
-                basis.at(Vec3::new(0.0, 0.87, -1.07)),
-                rotation.multiply(Quat::from_euler_xyz(-BACKLIGHT_RAKE, 0.0, 0.0)),
-                Vec3::new(CAR_WIDTH * 0.62, 0.08, 1.09),
+                basis.at(glass_centre),
+                glass_rotation,
+                Vec3::new(CAR_WIDTH * 0.62, glass_thickness, glass_length),
             ),
         );
         // Rear haunches: the arches over the back wheels, reaching the car's
@@ -241,6 +294,63 @@ impl PlayerCar {
                 basis.at(Vec3::new(0.0, 0.28, -1.88)),
                 rotation,
                 Vec3::new(CAR_WIDTH * 0.88, 0.24, 0.30),
+            ),
+        );
+
+        // Twin centre stripes, in three segments that each lie on the panel they
+        // are painted on. The roof and decklid segments are square to the
+        // chassis; the middle one carries the backlight's own rake, and is
+        // lifted along the *raked* normal rather than straight up, or it would
+        // sink through the low end of the glass and float off the high end.
+        let stripe_thickness = 0.02;
+        let (rake_sin, rake_cos) = BACKLIGHT_RAKE.sin_cos();
+        let glass_lift = glass_thickness * 0.5 + stripe_thickness * 0.5 + TRIM_PROUD;
+        // (height, along-track centre, orientation, length) per surface.
+        let segments: [(f32, f32, Quat, f32); 3] = [
+            // Roof: the full length of the cabin, sitting on its top face.
+            (
+                ROOF_HEIGHT + stripe_thickness * 0.5 + TRIM_PROUD,
+                0.24,
+                rotation,
+                1.55,
+            ),
+            // Backlight: the same box as the glass, thinner and lifted clear.
+            (
+                glass_centre.y + glass_lift * rake_cos,
+                glass_centre.z - glass_lift * rake_sin,
+                glass_rotation,
+                glass_length,
+            ),
+            // Decklid: out over the lip to the back edge of the car.
+            (
+                0.805 + stripe_thickness * 0.5 + TRIM_PROUD,
+                -1.74,
+                rotation,
+                0.36,
+            ),
+        ];
+        for (index, entity) in self.stripes.iter().enumerate() {
+            let (height, along, orientation, length) = segments[index / 2];
+            let side = [-1.0, 1.0][index % 2];
+            app.set(
+                *entity,
+                Transform::new(
+                    basis.at(Vec3::new(side * STRIPE_OFFSET, height, along)),
+                    orientation,
+                    Vec3::new(STRIPE_WIDTH, stripe_thickness, length),
+                ),
+            );
+        }
+
+        // Number plate: low and central *on* the valance — fully inside the
+        // bumper's height so it reads as bolted to it rather than floating in
+        // the air behind the tail, and standing proud of its back face.
+        app.set(
+            self.plate,
+            Transform::new(
+                basis.at(Vec3::new(0.0, 0.30, -2.03 - TRIM_PROUD)),
+                rotation,
+                Vec3::new(0.40, 0.16, 0.05),
             ),
         );
 
@@ -321,7 +431,9 @@ impl PlayerCar {
             self.backlight,
             self.wing,
             self.valance,
+            self.plate,
         ];
+        all.extend_from_slice(&self.stripes);
         all.extend_from_slice(&self.haunches);
         all.extend_from_slice(&self.wheels);
         all
@@ -336,7 +448,9 @@ impl PlayerCar {
             self.backlight,
             self.wing,
             self.valance,
+            self.plate,
         ];
+        all.extend_from_slice(&self.stripes);
         all.extend_from_slice(&self.haunches);
         all.extend_from_slice(&self.wheels);
         all.extend_from_slice(&self.brake_lights);
@@ -783,6 +897,92 @@ mod tests {
         assert!(
             valance.translation.y < light.translation.y,
             "the dark valance is below the lights, where a bumper goes"
+        );
+    }
+
+    /// The stripes are a pair, they run the length of the car's centre, and each
+    /// segment sits *on* the panel it is painted on rather than inside it.
+    #[test]
+    fn the_twin_stripes_lie_on_the_roof_the_glass_and_the_decklid() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
+        let pose = pose_at(0.0, 0.0, 0.0);
+        car.pose(&mut app, &pose, 0.0, 0.0);
+
+        let cabin = app.get::<Transform>(car.cabin).unwrap();
+        let glass = app.get::<Transform>(car.backlight).unwrap();
+        let stripes: Vec<Transform> = car
+            .stripes
+            .iter()
+            .map(|e| app.get::<Transform>(*e).expect("posed"))
+            .collect();
+
+        // A pair per surface, symmetric about the centreline and inside the roof.
+        for pair in stripes.chunks(2) {
+            let left = pair[0].translation.x - pose.position.x;
+            let right = pair[1].translation.x - pose.position.x;
+            assert!((left + right).abs() < 1.0e-4, "the pair straddles the centre");
+            assert!(right > 0.0 && left < 0.0);
+            assert!(
+                right + STRIPE_WIDTH * 0.5 < cabin.scale.x * 0.5,
+                "a stripe hangs off the side of the roof: {right}"
+            );
+            assert!(
+                left + STRIPE_WIDTH * 0.5 < 0.0,
+                "the two stripes have run into each other"
+            );
+        }
+        // Roof pair: resting on the cabin's top face.
+        let roof = cabin.translation.y + cabin.scale.y * 0.5;
+        assert!(
+            stripes[0].translation.y - stripes[0].scale.y * 0.5 > roof
+                && stripes[0].translation.y - stripes[0].scale.y * 0.5 < roof + 0.05,
+            "the roof stripe floats or sinks: {}",
+            stripes[0].translation.y
+        );
+        // Backlight pair: carrying the glass's rake, and clear of its outer face.
+        assert_eq!(stripes[2].rotation, glass.rotation, "the stripe follows the rake");
+        let lift = stripes[2].translation.subtract(glass.translation).length();
+        assert!(
+            lift > glass.scale.y * 0.5 && lift < glass.scale.y * 0.5 + 0.05,
+            "the glass stripe is inside the glass, or floating: {lift}"
+        );
+        // And every segment is a long thin band, not a patch.
+        for s in &stripes {
+            assert!(s.scale.z > s.scale.x, "a stripe runs fore-and-aft: {s:?}");
+            assert!(s.scale.y < 0.05, "and it is paint, not a spoiler");
+        }
+    }
+
+    /// The plate is bolted to the bumper: inside its height, proud of its face.
+    #[test]
+    fn the_number_plate_sits_on_the_valance_below_the_lamps() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
+        car.pose(&mut app, &pose_at(0.0, 0.0, 0.0), 0.0, 0.0);
+
+        let plate = app.get::<Transform>(car.plate).unwrap();
+        let valance = app.get::<Transform>(car.valance).unwrap();
+        let light = app.get::<Transform>(car.brake_lights[0]).unwrap();
+
+        assert!(
+            plate.translation.y + plate.scale.y * 0.5
+                <= valance.translation.y + valance.scale.y * 0.5 + 1.0e-4,
+            "the plate hangs off the top of the bumper"
+        );
+        assert!(
+            plate.translation.y + plate.scale.y * 0.5 < light.translation.y,
+            "and it is below the lamps, where a plate goes"
+        );
+        assert!(plate.scale.x < light.scale.x, "narrower than a lamp bar");
+        assert!(plate.scale.x > plate.scale.y * 2.0, "and it is a landscape plate");
+        // At zero yaw the tail is -Z: the plate's back face is behind the bumper's.
+        assert!(
+            plate.translation.z - plate.scale.z * 0.5
+                < valance.translation.z - valance.scale.z * 0.5,
+            "the plate is sunk into the bumper instead of standing on it"
         );
     }
 

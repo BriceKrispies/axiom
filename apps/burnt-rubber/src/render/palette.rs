@@ -186,7 +186,7 @@ pub const fn zone_tint(zone: Zone) -> [f32; 3] {
     }
 }
 
-/// The five materials one car body is built from.
+/// The six materials one car body is built from.
 ///
 /// A livery is what makes the *same* car model render as two different cars.
 /// The player's is opaque paint; the ghost's is the translucent set below. The
@@ -201,6 +201,9 @@ pub struct CarLivery {
     pub glass: Handle<Material>,
     /// Tyres, and the near-black valance.
     pub tyre: Handle<Material>,
+    /// Twin bonnet stripes and the number plate — the pale trim that stops the
+    /// paint reading as one unbroken coloured shell.
+    pub trim: Handle<Material>,
     /// Tail lamps.
     pub brake_light: Handle<Material>,
     /// The boost plume.
@@ -231,6 +234,8 @@ pub struct ScenePalette {
     pub car_glass: Handle<Material>,
     /// Wheels, on every car.
     pub tyre: Handle<Material>,
+    /// The player's stripes and number plate.
+    pub car_trim: Handle<Material>,
     /// Brake lights.
     pub brake_light: Handle<Material>,
     /// Boost exhaust.
@@ -258,6 +263,7 @@ impl ScenePalette {
             body: self.car_body,
             glass: self.car_glass,
             tyre: self.tyre,
+            trim: self.car_trim,
             brake_light: self.brake_light,
             exhaust: self.boost_flame,
         }
@@ -309,6 +315,12 @@ impl ScenePalette {
             // windscreen at night looks like.
             car_glass: glossy(app, [0.07, 0.09, 0.13], 0.12),
             tyre: lit(app, [0.045, 0.045, 0.05]),
+            // Stripe and plate trim: pale, slightly warm, and with a whisper of
+            // self-luminance. It is the only *light* value on the car, so it has
+            // to survive a night key that leaves the paint at a quarter value —
+            // a purely diffuse pale grey goes the same dark as the bodywork and
+            // the stripes disappear, which is the whole point of having them.
+            car_trim: glowing(app, [0.72, 0.70, 0.64], [0.10, 0.09, 0.08]),
             // The player's tail lamps sit *inside* a red body. Their albedo is a
             // dark red lens — DARKER than the paint around it, which is what a
             // lens actually is — and every bit of their separation comes from the
@@ -348,6 +360,7 @@ impl ScenePalette {
                 body: ghostly(app, [0.30, 0.70, 0.95], [0.05, 0.22, 0.34], GHOST_OPACITY),
                 glass: ghostly(app, [0.12, 0.26, 0.38], [0.02, 0.08, 0.14], GHOST_OPACITY * 0.8),
                 tyre: ghostly(app, [0.06, 0.10, 0.14], [0.0, 0.0, 0.0], GHOST_OPACITY),
+                trim: ghostly(app, [0.40, 0.62, 0.78], [0.10, 0.26, 0.36], GHOST_OPACITY),
                 // A ghost's lamps are a hint, not a warning — dimmer than the
                 // player's, so they never read as *your* brake lights.
                 brake_light: ghostly(app, [0.10, 0.18, 0.24], [0.20, 0.55, 0.75], GHOST_OPACITY),
@@ -398,6 +411,7 @@ mod tests {
             p.car_body,
             p.car_glass,
             p.tyre,
+            p.car_trim,
             p.brake_light,
             p.boost_flame,
             p.traffic_light,
