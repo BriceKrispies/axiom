@@ -57,6 +57,68 @@ presses (e.g. `?press=Enter@140`), `?backend=canvas2d|webgl2` forces a render
 backend, `?debug=1` opens the diagnostics drawer, `?workbench=1` opens the
 workbench for `?game`.
 
+## Headless frame-rate regression test (Canvas2D, no browser)
+
+`games/treasure-chest-pick/frame-rate.test.ts` plays a whole chest round under
+bare `node --test` — boot, intro, **click** the centre chest, then the crab's
+errand, the spiral into close-up, the latch, the lid, the treasure and the
+celebration — and times **every frame of it** on the engine's real Canvas2D
+software rasterizer.
+
+```sh
+node --test "apps/casino-games/web/src/games/treasure-chest-pick/frame-rate.test.ts"
+```
+
+It prints a per-phase report (`OVERALL … fps`, then `intro` / `ready` /
+`committing` / `revealing` / `celebrating`) and then gates on it. At the shipped
+default quality (936×585 CSS, `renderScale` 0.5 → 137k samples/frame) it
+reproduces the numbers `treasure-chest-pick/definition.ts` documents.
+
+Everything below the harness is the shipped path: `TREASURE_CHEST_PICK.mount` →
+`mountCasinoGame` → `runGame` → `initRenderer(…, "canvas2d", …)` → the real
+z-buffered scanline rasterizer writing a real framebuffer. The browser surface it
+needs comes from `games/headless-canvas2d.testkit.ts`, which is deliberately
+strict: it throws the moment the engine touches a DOM member it does not
+implement, because a permissive stub would silently stop measuring work. Two
+costs are counted rather than paid, and its header says so — the framebuffer
+present (`putImageData`) and the water overlay's final vector fills (the
+overlay's *geometry* runs for real).
+
+The engine's clock is virtual and steps exactly one fixed tick per frame, so the
+round is byte-identical on every machine (always the same 333 frames); the
+measurement uses `process.hrtime` and is unrelated to it. The treasure is pinned
+through the shipped `InjectedChanceResultSource`, so the work is the same every
+run — one treasure is enough, the ritual is the same for all five.
+
+**The scene-cost ceiling is the real regression guard.** Wall-clock fps on a dev
+machine drifts by well over 50% run to run (`bench_rasterizer.py` documents the
+same code measuring 20.6ms and 34.1ms minutes apart), so a before/after fps
+comparison cannot see a regression worth less than ~2×. So the test also pins the
+scene's *size*, which has no noise at all — this round costs exactly **398 peak
+nodes/frame and 124,517 node-frames**, identical on every run, and the software
+rasterizer costs ~1 unit of time per node per frame. The ceilings sit ~3% above
+that, deliberately thin.
+
+The asymmetry is the point, and it is what makes this safe to run a
+`/visual-convergence` campaign against: a camera, grade, exposure, fog or
+light-rig change moves node count by **exactly zero** and passes freely, while
+added geometry trips it immediately. If a change needs that geometry for the
+hardware renderer, gate it on the tier (`rendererTierAtLeast`) rather than raising
+the ceiling — that is the fix the failure message asks for.
+
+Alongside the frame rate it asserts the round really happened: the committed
+outcome resolved against the chest the *click* landed on, the commit beat and the
+reveal ritual each ran their full timeline, and every frame presented a
+full-resolution framebuffer. The fps floor is a **ratchet** (like the Rust
+render-churn gate) — raise it as the software path gets faster, never lower it to
+make a change pass. Override it for a local run on a busy machine with
+`AXIOM_CHEST_FPS_FLOOR=10`.
+
+This is the complement to `web/browser/bench_render.py`, which times the renderer
+alone on a frozen scene in a real browser. That one judges a rasterizer change;
+this one is the number the player actually lives with, and it runs in CI-shaped
+conditions with no browser and no served build.
+
 ## The canvas-free CSS 3D build
 
 There are two ways to see Treasure Chest Pick rendered without a canvas, both
@@ -365,6 +427,7 @@ its reveal (tested).
 ```sh
 npm --prefix packages/axiom-game exec -- tsgo -p apps/casino-games/web/tsconfig.json   # build
 node --test "apps/casino-games/web/src/**/*.test.ts"                                    # app tests
+node --test "apps/casino-games/web/src/games/treasure-chest-pick/frame-rate.test.ts"    # headless Canvas2D fps gate
 cargo xtask check-architecture                                                          # repo architecture
 cargo test --workspace                                                                  # Rust workspace
 npm --prefix packages/axiom-web-engine run gate                                         # TS engine gate
