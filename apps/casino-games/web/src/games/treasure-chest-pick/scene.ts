@@ -1167,19 +1167,25 @@ const decorPart = (
 
 /** Leaflet stations PER SIDE of a frond's midrib on the hardware arm. Five spaced
  * a fifth of the frond apart, with leaflets `FROND_LEAFLET_WIDTH` across, leaves a
- * notch of ~0.06 between neighbours — a serrated blade edge, which is exactly how
- * the reference's leaflets read at this size. */
+ * notch of ~0.04·length between neighbours — a serrated blade edge, which is exactly
+ * how the reference's leaflets read at this size. */
 const FROND_LEAFLETS = 5;
 /** How far a leaflet leans back toward the frond's tip, off straight-out. */
 const FROND_LEAFLET_SWEEP = 0.72;
-/** The widest leaflet's reach, as a fraction of the frond's length. Twice this is
- * the blade's width/length ratio (~0.42), measured off the reference. */
+/** EVERY cross-section measure on a frond is a fraction of that frond's LENGTH, so
+ * a longer frond is a proportionally bigger leaf rather than the same stick drawn
+ * further out. (Each fraction below is the value it was authored at — 0.21 / 0.24 /
+ * 0.11 / 0.34 — divided by the 1.5 it was authored against, so at that length the
+ * blade is unchanged to the pixel.)
+ *
+ * The widest leaflet's reach. Twice this is the blade's width/length ratio (~0.42),
+ * measured off the reference. */
 const FROND_LEAFLET_SPAN = 0.21;
-const FROND_LEAFLET_WIDTH = 0.24;
+const FROND_LEAFLET_WIDTH = 0.16;
 /** The midrib's width once leaflets carry the blade — a stem, not a board. */
-const FROND_RIB_WIDTH = 0.11;
+const FROND_RIB_WIDTH = 0.0733;
 /** The whole frond as ONE board, which is what a frond IS on the frugal arms. */
-const FROND_BOARD_WIDTH = 0.34;
+const FROND_BOARD_WIDTH = 0.2267;
 
 /**
  * One palm frond.
@@ -1211,7 +1217,7 @@ const palmFrond = (key: string, material: string, crown: EngineVec3, q: EngineQu
     material,
     "box",
     addV3(crown, rotateByQuat(v3(0, 0.05, len / 2), q)),
-    v3(feathered ? FROND_RIB_WIDTH : FROND_BOARD_WIDTH, 0.09, len),
+    v3(len * (feathered ? FROND_RIB_WIDTH : FROND_BOARD_WIDTH), 0.09, len),
     q,
   );
   const leaflets = feathered
@@ -1230,13 +1236,47 @@ const palmFrond = (key: string, material: string, crown: EngineVec3, q: EngineQu
           material,
           "box",
           addV3(crown, addV3(rotateByQuat(v3(0, 0.05, t * len), q), rotateByQuat(v3(0, 0, span / 2), leafQ))),
-          v3(FROND_LEAFLET_WIDTH, 0.055, span),
+          v3(len * FROND_LEAFLET_WIDTH, 0.055, span),
           leafQ,
         );
       })
     : [];
   return [rib, ...leaflets];
 };
+
+/**
+ * The crown's SPAN and ATTITUDE — the two numbers that decide how big the palm
+ * reads, measured against the reference rather than guessed.
+ *
+ * The trunk is already right: the champion's trunk covers y 0.106..0.476 of frame
+ * against the reference's 0.100..0.469 — the same height, planted in the same place.
+ * The CROWN is not. Its silhouette spans 0.204 of frame width against the
+ * reference's 0.281 (38% short), and its top sits at 0.084H against the
+ * reference's 0.029H, so the palm floats inside a bare band of sand instead of
+ * anchoring the top-left corner the way the reference's does. That is a pure
+ * scale-and-proportion error on the second-largest subject in the shot, and it is
+ * two levers deep:
+ *
+ *   1. LENGTH. The fronds were 1.5–1.78 long off a 2.66-high trunk — a crown
+ *      radius of ~1.35 world units where the reference's is ~1.86 (both converted
+ *      through the lagoon disc, which the two frames agree on to 1%).
+ *   2. DROOP. They were pitched 0.55–0.67 rad (32–38°) below horizontal, which on
+ *      a ~52° camera foreshortens the crown badly: the champion's crown bbox is
+ *      0.62 as tall as it is wide where the reference's is 0.73 — i.e. the
+ *      reference's fronds leave the crown nearly HORIZONTAL and arch down only near
+ *      the tips, which is also what a coconut palm actually does.
+ *
+ * Lengthening alone widens the crown but leaves its top low; flattening alone
+ * raises it but leaves it narrow. Together, 1.88–2.22 long at 0.40–0.49 rad puts
+ * all three measured extremes on the reference: crown width 0.280W (ref 0.281),
+ * top 0.032H (ref 0.029), bottom 0.331H (ref 0.339).
+ *
+ * Node count moves by exactly ZERO — the same seven fronds, the same leaflets, at
+ * different lengths and angles — so the software arm's frame-rate gate
+ * (`frame-rate.test.ts`) is untouched.
+ */
+const FROND_LENGTH = 1.88;
+const FROND_DROOP = 0.4;
 
 /** A leaning palm swaying in the wind: a curved stack of tapering bark cylinders,
  * a coconut cluster, and a fan of drooping feathered fronds radiating from the crown.
@@ -1272,9 +1312,9 @@ const palmTree = (origin: EngineVec3, tick: number): readonly SceneInstance[] =>
   );
   const fronds = Array.from({ length: 7 }, (_, i): readonly SceneInstance[] => {
     const a = (i / 7) * Math.PI * 2;
-    const droop = 0.55 + (i % 2) * 0.12 + sway.flutter(i);
+    const droop = FROND_DROOP + (i % 2) * 0.09 + sway.flutter(i);
     const q = quatMul(crownRoll, quatMul(quatYaw(a), quatPitch(droop)));
-    const len = 1.5 + (i % 3) * 0.14;
+    const len = FROND_LENGTH + (i % 3) * 0.17;
     return palmFrond(`palm:frond${i}`, i % 2 === 0 ? "PalmLeaf" : "PalmLeafDark", crown, q, len);
   }).flat();
   return [...contactShadow("palm:shadow", origin, 0.62, PALM_CROWN_Y), ...trunk, ...coconuts, ...fronds];
