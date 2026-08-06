@@ -124,11 +124,40 @@ impl RaceScene {
         // fully atmosphere). Reaching 0.9 rather than 1.0 keeps a faint silhouette at
         // the vanishing point instead of erasing it.
         // Bloom: what turns the emissive cues — reflector posts, tail lights,
-        // tunnel lamps, the lane paint catching the moon — from bright patches of
+        // tunnel lamps, the lane paint catching the sun — from bright patches of
         // paint into things that read as lights. Gated by the backend's `Bloom`
         // capability, which the Canvas 2D profile drops and reports, so the
         // software arm is untouched without this app knowing which arm it is on.
-        app.set_bloom(FrameBloom::moonlit());
+        //
+        // **The daylight preset, not the night one**, and this is the single
+        // largest thing standing between the champion frame and the reference.
+        // `FrameBloom::moonlit()` is `(threshold 0.62, knee 0.35, intensity 0.85,
+        // radius 2.6)`: the bright pass therefore starts at luma `0.27` and is at
+        // full surplus by `0.97`. That is the right window for a moonlit stage,
+        // where `0.27` is reached by a lamp and by nothing else in shot. Under a
+        // midday sun it is not a highlight threshold at all — it is *most of the
+        // frame*. The blue sky sits near `0.5`, the cumulus and the sea near
+        // `0.8`, and the lane paint (a `0.72` white pigment carrying a `0.30`
+        // emissive floor) is over the top of it; all of them clear the knee, get
+        // blurred at a 2.6-pixel radius and are added back at `0.85`.
+        //
+        // What that does to the image is exactly what the champion shows: a milky
+        // white wash over the whole upper half with the sky's blue bleached out of
+        // it, and a blown white streak running from the vanishing point down the
+        // centre of the road where the lane markings smear into each other. It is
+        // *whitening added to every bright pixel*, so it costs the frame twice —
+        // the highlights lose their separation (contrast) and the midtones lose
+        // their colour (saturation), which is why the grade above cannot recover
+        // either one. No exposure, contrast or saturation number can subtract a
+        // haze that is added after them.
+        //
+        // `highlights()` — `(1.0, 0.15, 0.55, 1.4)` — is the preset authored for
+        // this case: nothing below luma `0.85` spills at all, so the sky stays the
+        // blue it is authored as and the sea keeps its turquoise, and what does
+        // spill (the sun's disc, which is authored above `1.0` precisely so it
+        // has surplus to spend, plus the specular crest on the car) spills a short
+        // distance and reads as a flare rather than as fog.
+        app.set_bloom(FrameBloom::highlights());
 
         // The sun itself, drawn behind the scene. This is the piece the rig was
         // missing: the course was *lit* by a key with no source in shot, and the
