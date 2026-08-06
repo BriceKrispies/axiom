@@ -75,6 +75,33 @@ impl DriveCommand {
         }
     }
 
+    /// The same intent, with every **one-shot** channel spent.
+    ///
+    /// A browser frame is not a fixed step. When one frame banks two or three
+    /// steps, the app runs them all under the command the player gave *once* —
+    /// which is right for the held channels (a finger on the throttle means
+    /// throttle for the whole frame) and wrong for every edge-triggered one. A
+    /// tap is one tap however many steps the frame turned out to be worth.
+    ///
+    /// This is the single definition of which channels those are, and it lives
+    /// here beside the fields rather than at the call sites that iterate. It was
+    /// a hand-copied list at two of them, and `lane_step` was added to the struct
+    /// without being added to either — so on any frame long enough to bank two
+    /// steps, one tap of LEFT moved the car two lanes. Which frames those are is
+    /// not a fixed property of the game: it moved with the render cost, so the
+    /// bug arrived with a heavier frame rather than with the code that caused it.
+    ///
+    /// Adding a one-shot channel means adding it here, once.
+    pub fn spent(self) -> DriveCommand {
+        DriveCommand {
+            lane_step: 0,
+            reset: false,
+            pause: false,
+            restart: false,
+            ..self
+        }
+    }
+
     /// Clamp every analogue channel into its legal range. The simulation calls
     /// this on entry so a misbehaving input source can never inject a `NaN` or
     /// an out-of-range axis into the deterministic state.

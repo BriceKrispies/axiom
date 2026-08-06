@@ -442,12 +442,7 @@ impl BurntRubber {
                 self.audio.on_event(event);
             }
             self.events.extend_from_slice(self.sim.events());
-            held = DriveCommand {
-                reset: false,
-                pause: false,
-                restart: false,
-                ..held
-            };
+            held = held.spent();
         }
         self.advance_ghost(budget.steps(), restarted);
         self.alpha = budget.remainder_nanos() as f32 / budget.fixed_step_nanos() as f32;
@@ -471,12 +466,7 @@ impl BurntRubber {
                 self.audio.on_event(event);
             }
             self.events.extend_from_slice(self.sim.events());
-            held = DriveCommand {
-                reset: false,
-                pause: false,
-                restart: false,
-                ..held
-            };
+            held = held.spent();
         }
         self.advance_ghost(steps, restarted);
         self.alpha = 0.0;
@@ -708,6 +698,51 @@ mod tests {
             .count();
         assert_eq!(resets, 1, "one press, one reset");
         assert!(app.sim().car().distance < before);
+    }
+
+    /// The same rule, on the channel that actually broke it.
+    ///
+    /// This test existed for `reset` alone and passed the whole time the phone
+    /// was hopping two lanes per tap: `lane_step` was added to `DriveCommand`
+    /// without being added to either step loop's hand-copied list of one-shot
+    /// channels. Naming one channel is not testing the rule, so this drives the
+    /// hop — and it is a *long* frame, because that is the only frame that ever
+    /// showed the bug. On a phone that frame arrived when the render got
+    /// heavier, not when the input code changed.
+    #[test]
+    fn one_tap_is_one_lane_however_many_steps_the_frame_banks() {
+        let mut app = BurntRubber::with_profile(
+            DEFAULT_SEED,
+            Tuning::DEFAULT,
+            WIDTH,
+            HEIGHT,
+            crate::PlayProfile::Rails,
+        );
+        while app.sim().phase() == RacePhase::Countdown {
+            app.advance(FIXED_STEP_NANOS, DriveCommand::IDLE);
+        }
+        // Measured where the player sees it — the car's lateral offset — rather
+        // than through the rails state, which is private and should stay so.
+        let lane_width = app.sim().track().lane_width();
+        let start = app.sim().car().lateral;
+
+        // One tap, on a frame worth four fixed steps, then long enough under no
+        // input for the car to settle on whichever lane it was aimed at.
+        app.advance(
+            FIXED_STEP_NANOS * 4,
+            DriveCommand {
+                lane_step: 1,
+                ..DriveCommand::FLAT_OUT
+            },
+        );
+        app.advance_steps(120, DriveCommand::FLAT_OUT);
+
+        let moved = (app.sim().car().lateral - start).abs();
+        assert!(
+            (moved - lane_width).abs() < lane_width * 0.25,
+            "one tap moved {moved:.2} m — a lane is {lane_width:.2} m, so this is {:.1} lanes",
+            moved / lane_width
+        );
     }
 
     #[test]
