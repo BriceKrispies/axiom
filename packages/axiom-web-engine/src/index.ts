@@ -160,7 +160,8 @@ export type {
 // ── stylized water surface (Canvas2D) ─────────────────────────────────────────────────
 // `drawStylizedWaterSurface(ctx, options)` paints a subtle, broken cellular
 // highlight net inside a caller-supplied boundary so a flat blue region reads as
-// water — a small, deterministic Canvas2D effect (base fill, hex markings, soft
-// shoreline fade). Part of the Canvas2D module. See `canvas-water.ts`.
+// water — a small, deterministic Canvas2D effect (base fill, bowed caustic
+// filaments via `waviness`, soft shoreline fade). Part of the Canvas2D module.
+// See `canvas-water.ts`.
 export { drawStylizedWaterSurface } from "./canvas-water.ts";
 export type { StylizedWaterOptions, WaterBounds } from "./canvas-water.ts";

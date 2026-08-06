@@ -9,16 +9,19 @@
  * "water" is a few cheap, stacked cues, drawn in this order inside the clip:
  *   1. a DEPTH gradient (deeper toward the middle) so it has volume, not flat paint;
  *   2. a soft sun GLINT (a broad sheen offset toward the light) — the reflective cue;
- *   3. a broken cellular RIPPLE net (two-tone lines + sparkles) that drifts slowly;
+ *   3. a broken cellular RIPPLE net of BOWED filaments (two-tone + sparkles) that
+ *      drifts slowly — the caustic cue (see `waviness`);
  *   4. a shoreline FADE that dissolves the net before the edge (no sharp line ends);
  *   5. a lighter SHALLOW rim just inside the edge, where water meets the shore.
  * Every layer is optional — pass only the cues you want.
  *
- * Determinism: the ripple net's edges and sparkles are kept/dropped by a pure
- * COORDINATE HASH (never Math.random). All motion is a tiny deterministic drift
- * derived from an explicit `timeSeconds` the caller passes in — the renderer never
- * reads a wall clock. The generated segment geometry is cached by (cellSize,
- * bounds) so it is built once and only re-translated per frame.
+ * Determinism: the ripple net's edges, their bow and the sparkles are all
+ * kept/dropped/shaped by a pure COORDINATE HASH (never Math.random). All motion is
+ * a tiny deterministic drift derived from an explicit `timeSeconds` the caller
+ * passes in — the renderer never reads a wall clock. The generated filament
+ * geometry is cached by (cellSize, bounds) so it is built once and only
+ * re-translated per frame; `waviness` scales a stored unit bow at stroke time, so
+ * dialling the curvature never rebuilds the lattice.
  *
  * This is a browser-API boundary (CanvasRenderingContext2D), so like the other
  * Canvas2D module files it sits outside the branchless / 100%-coverage spine laws
@@ -26,8 +29,27 @@
  * proven on the live browser path.
  */
 
-/** A short line segment of the ripple net, in canvas pixels. */
+/**
+ * One filament of the ripple net, in canvas pixels: the two hex-edge endpoints,
+ * the edge MIDPOINT, and the unit BOW that bends it away from that midpoint.
+ *
+ * A filament is a quadratic Bézier rather than a straight line because a straight
+ * one cannot read as water. The net's topology is a hexagonal lattice, which is the
+ * right topology for caustics (irregular closed cells), but drawn with `lineTo` the
+ * cells are literal polygons: at a large `cellSize` the eye reads hex TILES, and at
+ * a small one it reads a wire mesh. Neither is a shortcoming of the caller's
+ * parameters — the straightness is in the geometry, so it is fixed here.
+ *
+ * `bx`/`by` is the control-point offset at `waviness` 1: perpendicular to the edge,
+ * scaled by the edge's own length, and hash-SIGNED so neighbouring filaments bend
+ * opposite ways. Storing it pre-scaled keeps the cached lattice independent of
+ * `waviness` (see `cachedSegments`).
+ */
 interface Segment {
+  readonly bx: number;
+  readonly by: number;
+  readonly mx: number;
+  readonly my: number;
   readonly x1: number;
   readonly y1: number;
   readonly x2: number;
@@ -84,6 +106,21 @@ export interface StylizedWaterOptions {
   readonly shallowColor?: string;
   /** Hexagon size (center-to-vertex) in canvas px — large = sparse, big cells. */
   readonly cellSize: number;
+  /**
+   * How far each ripple filament BOWS, as a fraction of the authored full bow.
+   * `0` (the default) is the straight-edged lattice this effect drew before the
+   * option existed — byte-identical output, so an existing caller is unaffected —
+   * and `1` is a pronounced caustic curve. Values above 1 are accepted and simply
+   * bend further; the cells stop closing cleanly well before that is useful.
+   *
+   * Water is the one thing in a stylized scene with no straight lines in it. Real
+   * caustics are a net of curved, wandering filaments, and the difference between
+   * "curved net" and "straight net" is the difference between a pool and a hex
+   * board — it dominates the read at every cell size, which is why this is a
+   * property of the effect rather than something a caller can approximate by
+   * choosing `cellSize`.
+   */
+  readonly waviness?: number;
   /** Highlight line width in px. */
   readonly lineWidth: number;
   /** How ripple and shoreline strokes are joined and capped. Omitted, they
@@ -130,6 +167,18 @@ const TROUGH_OFFSET = 1.6;
 const SPARKLE_RADIUS = 1.8;
 const GLINT_DRIFT_RATE = 0.1;
 
+/** Peak control-point offset of a filament at `waviness` 1, as a fraction of its
+ * own length. A quadratic Bézier only reaches HALF its control offset, so the
+ * visible sagitta is half of this — enough that no straight run survives anywhere
+ * in the net, not enough for a filament to cross its neighbour. */
+const BOW_FRACTION = 0.5;
+
+/** Coordinate shift that gives the BOW its own hash stream, independent of the
+ * keep/drop decision. Sharing one stream would correlate the two: the surviving
+ * edges (`coordHash < EDGE_KEEP_PERCENT`, i.e. the low half) would all take the
+ * same side of the bow range and the whole net would bend one way. */
+const BOW_HASH_SHIFT = 7919;
+
 /** A tiny deterministic hash of an integer pixel coordinate pair → 0..99. Not
  * cryptographic — just a stable, seed-free way to keep "some" edges/sparkles. */
 const coordHash = (ix: number, iy: number): number => {
@@ -138,7 +187,11 @@ const coordHash = (ix: number, iy: number): number => {
   return h % 100;
 };
 
-/** Build the (undrifted) kept hex-edge segments across `bounds`. Deterministic. */
+/** Which way and how hard one filament bends, in [-1, 1) — a stable function of its
+ * midpoint, drawn from the bow's own hash stream (see `BOW_HASH_SHIFT`). */
+const bowSwing = (ix: number, iy: number): number => coordHash(ix + BOW_HASH_SHIFT, iy - BOW_HASH_SHIFT) / 50 - 1;
+
+/** Build the (undrifted) kept hex-edge filaments across `bounds`. Deterministic. */
 const buildSegments = (bounds: WaterBounds, cellSize: number): Segment[] => {
   const segments: Segment[] = [];
   const size = cellSize;
@@ -162,10 +215,29 @@ const buildSegments = (bounds: WaterBounds, cellSize: number): Segment[] => {
         const y1 = cy + size * Math.sin(a0);
         const x2 = cx + size * Math.cos(a1);
         const y2 = cy + size * Math.sin(a1);
-        const mx = Math.round((x1 + x2) * 0.5);
-        const my = Math.round((y1 + y2) * 0.5);
-        if (coordHash(mx, my) < EDGE_KEEP_PERCENT) {
-          segments.push({ x1, x2, y1, y2 });
+        // The hash key is the ROUNDED midpoint (shared by both hexagons that own
+        // this edge, so keep/drop and bow agree); the bow itself is built off the
+        // exact midpoint, so a filament stays centred on its edge.
+        const hx = Math.round((x1 + x2) * 0.5);
+        const hy = Math.round((y1 + y2) * 0.5);
+        if (coordHash(hx, hy) < EDGE_KEEP_PERCENT) {
+          // The bow is the edge's own perpendicular, `(-ey, ex)`, scaled by the
+          // hash-signed swing. The edge length cancels exactly: a perpendicular
+          // UNIT times (BOW_FRACTION · length) is the same vector, so no square
+          // root and no divide-by-zero guard are needed, and the bow is
+          // automatically proportional to the cell — a smaller `cellSize` curves
+          // by the same amount relative to its own filaments.
+          const swing = bowSwing(hx, hy) * BOW_FRACTION;
+          segments.push({
+            bx: -(y2 - y1) * swing,
+            by: (x2 - x1) * swing,
+            mx: (x1 + x2) * 0.5,
+            my: (y1 + y2) * 0.5,
+            x1,
+            x2,
+            y1,
+            y2,
+          });
         }
       }
     }
@@ -251,10 +323,24 @@ interface RippleLayer {
   readonly alpha: number;
 }
 
+/** Trace every filament of the net into the current path, offset vertically by
+ * `dy` (the trough pass rides just under the highlight). At `waviness` 0 the
+ * control point IS the midpoint, and a quadratic whose control lies on the chord
+ * is exactly that chord — which is why the default reproduces the old straight
+ * lattice rather than merely approximating it. */
+const traceRipples = (ctx: CanvasRenderingContext2D, layer: RippleLayer, dy: number): void => {
+  const bow = layer.options.waviness ?? 0;
+  ctx.beginPath();
+  for (const s of layer.segments) {
+    ctx.moveTo(s.x1, s.y1 + dy);
+    ctx.quadraticCurveTo(s.mx + s.bx * bow, s.my + s.by * bow + dy, s.x2, s.y2 + dy);
+  }
+};
+
 /** Stroke one drifted layer of the ripple net (optional darker trough under each
  * highlight, then the highlight), softened by a small blur. */
 const strokeRipples = (ctx: CanvasRenderingContext2D, layer: RippleLayer): void => {
-  const { segments, options, driftX, driftY, alpha, inherited } = layer;
+  const { options, driftX, driftY, alpha, inherited } = layer;
   ctx.save();
   ctx.translate(driftX, driftY);
   ctx.filter = `blur(${options.softnessPx}px)`;
@@ -265,20 +351,12 @@ const strokeRipples = (ctx: CanvasRenderingContext2D, layer: RippleLayer): void 
   if (options.troughColor !== undefined) {
     ctx.globalAlpha = alpha * 0.8;
     ctx.strokeStyle = options.troughColor;
-    ctx.beginPath();
-    for (const s of segments) {
-      ctx.moveTo(s.x1, s.y1 + TROUGH_OFFSET);
-      ctx.lineTo(s.x2, s.y2 + TROUGH_OFFSET);
-    }
+    traceRipples(ctx, layer, TROUGH_OFFSET);
     ctx.stroke();
   }
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = options.lineColor;
-  ctx.beginPath();
-  for (const s of segments) {
-    ctx.moveTo(s.x1, s.y1);
-    ctx.lineTo(s.x2, s.y2);
-  }
+  traceRipples(ctx, layer, 0);
   ctx.stroke();
   ctx.restore();
 };

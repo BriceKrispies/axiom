@@ -2385,6 +2385,14 @@ export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext
     sparkleColor: WATER_SPARKLE_COLOR,
     timeSeconds: view.nowMs / 1000,
     troughColor: WATER_TROUGH_COLOR,
+    // Bow every filament to the effect's full authored curve. The reference's
+    // lagoon is a net of WANDERING caustic ribbons; drawn straight, the same net
+    // reads as a hex TILING laid over the pool — the single most obviously
+    // synthetic thing in the frame, and the one the eye finds first because the
+    // water is the second-largest area in it. Curvature is not something this
+    // caller can reach by choosing `cellSize` (a smaller cell is a denser hex
+    // grid, not a curvier one), so it is an engine option; 1 is "as authored".
+    waviness: 1,
     traceHoles: (c) => {
       for (const hole of holes) {
         hole.forEach((p, i) => (i === 0 ? c.moveTo(p.x, p.y) : c.lineTo(p.x, p.y)));

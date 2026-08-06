@@ -187,6 +187,10 @@ const createContext2d = (canvas: unknown, counters: HeadlessCounters): CanvasRen
     fillRect: op,
     lineTo: op,
     moveTo: op,
+    // The water overlay's ripple filaments are quadratic curves, not line
+    // segments (`canvas-water.ts` `waviness`) — the stub is `strict`, so an
+    // unlisted path op is a thrown error, not a quietly cheaper frame.
+    quadraticCurveTo: op,
     restore: op,
     save: op,
     setTransform: op,
