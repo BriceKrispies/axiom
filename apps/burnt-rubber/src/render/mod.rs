@@ -639,104 +639,60 @@ const CLOUD_SCALE: f32 = 0.5;
 
 /// The key light's intensity — **the frame's exposure**.
 ///
-/// The reference this course is scored against is a *daylight* frame: an open
-/// coast road under a high sun, tarmac reading around byte 65, sand and cloud
-/// near white, and every shadow a lifted blue rather than a hole. The rig being
-/// scored against it was a moonlit one, and `0.88` was that stage's level. No
-/// grade turns one into the other, because the difference is not a curve — it is
-/// how much light is arriving.
+/// `1.45`, and the number is measured off the reference rather than argued from
+/// it. The previous `2.6` was derived twice by arithmetic — once through
+/// [`FramePostProcess::low_key`]'s `0.16` black point, then re-derived when the
+/// colorist retired that black point — and never once checked against a render.
+/// This pass has both frames in hand and inverts the pipeline instead.
 ///
-/// The arithmetic that set `3.6`, taken on the road, the largest surface in any
-/// frame and the one every term lands on hardest. It is kept in full because the
-/// number it produced is *not* the number below — see the reconciliation above —
-/// and the last step is why:
+/// **The measurement.** The road is the calibration surface: the largest thing
+/// in any frame and the one every term lands on hardest. Sampling the road
+/// plane of both images and splitting it on chroma (warm `R > B` is sunlit,
+/// cool `B > R` is sky-fill-only) gives the reference's two levels directly:
 ///
-/// * The key on flat ground is `intensity · N·L`. At [`MOON_DIRECTION`]'s 20°
-///   elevation `N·L` is `0.345`, so the key contributes `1.242`.
-/// * The sky ambient adds `0.267`, for globals of `1.509`.
-/// * The tarmac's albedo is a deliberate `0.0886` luma, and it needed no change:
-///   real asphalt *is* ~0.09 linear, so an albedo authored near-black for a
-///   night stage is already the right albedo for a sunlit one. Only the light
-///   was missing.
-/// * `0.0886 · 1.509 = 0.1337` linear, which the backend's sRGB transfer writes
-///   as byte **102**.
-/// * [`FramePostProcess::low_key`] then subtracts `0.16` encoded and
-///   renormalizes, landing the road at byte **73** — beside the reference's ~65,
-///   and for the first time in the same decade as it.
+/// | reference road | byte | incident light (byte ÷ grade ÷ sRGB ÷ albedo) |
+/// |----------------|------|-----------------------------------------------|
+/// | sunlit (warm)  | 68.0 | `0.746` — sun + sky                            |
+/// | shadowed (cool)| 37.8 | `0.302` — sky alone                            |
 ///
-/// Note the last step: `3.6` was chosen to read correctly *through* the low-key
-/// grade rather than by deleting it, because the grade was not this constant's to
-/// spend. The colorist retired that black point in the same pass, so the road
-/// lands at byte 102 instead of 73 — and this constant came back to `2.6`
-/// accordingly. The contingency was written here before it happened, which is the
-/// only reason the two proposals could be reconciled by arithmetic instead of by
-/// re-deriving one of them.
+/// So the reference's sun lays **`0.444`** on flat road and its sky lays
+/// `0.302`. The same inversion run on the champion returns `1.20` for every
+/// road pixel it has, and the model that produces it agrees with the measured
+/// byte to under half a level, so the arithmetic below is trustworthy.
 ///
-/// **What this replaces, and why every word of it was true and still wrong:**
-/// a directional light is by definition the same everywhere — it lights the
-/// tarmac under the bumper, the tarmac at the vanishing point and the verge two
-/// hundred metres out to exactly the same value. Every unit of it is a floor
-/// under the *whole* frame, which is the one thing a night stage cannot afford,
-/// and that is what drove this constant down and down. On a daylight stage the
-/// sun *is* the frame and that floor is the subject; the near-to-far ramp the
-/// old level was protecting belongs to the depth fog, not to a lamp on the car.
+/// **Why the key, and not the ambient or the grade.** At `2.6` the key alone
+/// puts `2.6 · N·L(0.345) · keyLuma(0.959) = 0.861` on flat road — *more than
+/// the reference's entire sunlit road (`0.746`), before any ambient is added at
+/// all*. No reduction of the sky fill and no grade can bring that back: a term
+/// that on its own overshoots the finished value is over-strength, full stop.
+/// That is what makes this the light's defect and not the colourist's. Solving
+/// `I · 0.345 · 0.959 = 0.444` gives `1.34`; carried through the test's own
+/// (slightly different, luma-averaged) model the road lands at `0.289` encoded
+/// against the reference's `0.288`, and `1.45` is the value that hits it.
 ///
-/// The history below is kept because it is the reasoning a future pass will
-/// re-derive if the reference ever goes back to night.
+/// **What the over-key was costing, beyond level.** Globals of `1.16` on an
+/// up-facing surface mean every albedo over `0.86` clips: the lane paint, the
+/// car's white stripes and the sunlit sand all pinned at `255`, and all of it
+/// then handed to the bloom — which is the milky wash over the champion, not a
+/// haze setting. At `1.45` the up-facing globals are `0.77`: the paint renders
+/// near byte 195, still comfortably the brightest thing on the road, with
+/// headroom above it instead of a bloom smear.
 ///
-/// All of that is true, and the level it produced — `0.30` — was still wrong,
-/// because it removed the pedestal a **second** time. The frame's floor is taken
-/// out twice: once here, by starving the globals, and once again downstream by
-/// [`FramePostProcess::low_key`], which subtracts `0.16` **in display-encoded
-/// space** (41/255) off the finished image and renormalizes. That subtract is a
-/// hard floor, not a curve: every pixel the raster writes below byte 41 does not
-/// get *deeper*, it becomes exactly `0`.
+/// It also restores the terminator on vertical surfaces. A car flank facing the
+/// sun went from `2.44` (clipped to a flat orange slab) to `1.36`; its shaded
+/// flank still gets the sky fill and nothing else, so the two now differ by a
+/// readable stop instead of both sitting at the top of the range.
 ///
-/// At `0.30` the globals on flat ground are `0.019 + 0.30·0.345 = 0.122`. The
-/// tarmac's own albedo is a deliberate `0.0886` luma, so the road renders at byte
-/// **27** and the verge at **35** — both under the subtract. Measured on the
-/// champion, that is precisely what happened: off the pool and off the moon's
-/// sheen, the whole ground plane reads `0.0`. The verge columns are `0.0–3.1`
-/// against the reference's steady `6.5–9.6`, and the mid-field road left of the
-/// car is `0.7–3.2` against the reference's `10.0–11.7`. The scene stopped being
-/// a road at night and became lane paint floating in a void: no verge, no
-/// shoulder, no surface between the car and the horizon.
-///
-/// So the rule this constant obeys has a second half. The globals must stay under
-/// the pool — that is the ramp, and it still holds. But they must also land the
-/// **road above the grade's black point**, or the grade clips the ground plane
-/// away instead of deepening it. `0.88` puts the globals at `0.322`: the road
-/// renders at byte 48 and survives the subtract at ~`7`, next to the reference's
-/// `10`, while the pool beneath the car (`0.341`) still out-lights them.
-///
-/// And the subtract *sharpens* the ramp rather than flattening it, which is why
-/// this costs the night nothing: road-beside-the-car goes to byte 69 in the
-/// raster and mid-field road to 48 — 1.4x — but after the black point is removed
-/// those are `33` and `7`, near 5x. The ramp the previous level was protecting is
-/// produced by the grade acting on a raster that has something in it, not by
-/// authoring the raster at zero.
-///
-/// The verticals come back with it, and that is the other half of the win: at
-/// `0.30` a car flank facing the key got `0.135`, so the car was a black
-/// silhouette with no lit side at all. At `3.6` it gets `1.6`, and the raking,
-/// side-lit modelling [`MOON_DIRECTION`]'s low elevation was chosen for finally
-/// reaches the geometry — with the sky fill under it, the *unlit* flank becomes
-/// a readable cool shadow rather than a cutout.
-///
-/// **Reconciled by the foreman, and the arithmetic is the lighting lens's own.**
-/// Two proposals in this pass moved the same pixels from opposite ends. Lighting
-/// sized this key *through* `FramePostProcess::low_key()`, whose `0.16` black
-/// point subtracts in display space: it picked `3.6` so the road would land near
-/// byte 73 *after* that subtract. The colorist then retired `low_key()` entirely
-/// for `cinematic()`, whose black point is zero — correct, because a black-point
-/// subtract is the cure for a lifted night floor and a defect on a sunlit frame.
-///
-/// With the subtract gone, `3.6` is about 40% hot. The lighting proposal wrote
-/// the contingency into its own caveat rather than leaving it to be rediscovered:
-/// "if the colorist retires that black point in the same pass, my level should
-/// come back to ~2.6". That is what this is. Neither lens is overruled — one of
-/// them anticipated the other and left the correction behind.
-const KEY_INTENSITY: f32 = 2.6;
+/// **The one thing this cannot fix**, and the reason the road stays flat even
+/// at the right level: the reference's road is 51% warm sunlit and 43% cool
+/// shadow, and the champion's is 0.1% warm and has no cast shadow anywhere.
+/// That is not a level — `axiom_render_pipeline`'s shadow camera is a fixed
+/// 20 m orthographic box anchored at the **world origin** (its own module docs
+/// say so), and this moment is ~1.9 km down a 9 km course. Every cast shadow in
+/// this frame is geometrically out of the map. Sizing the key is the half of
+/// the axis an app can reach; the other half is a frame-contract change and
+/// belongs to the engine architect.
+const KEY_INTENSITY: f32 = 1.45;
 
 /// How high above the road the car's pool light hangs (m).
 ///
@@ -1015,8 +971,21 @@ mod tests {
         // The fill is a fill. It lights the lit face and the unlit face equally,
         // so every unit of it is contrast removed from every object in shot; a
         // sky term that catches the key flattens the frame into overcast.
+        // The wall is where the reference puts it, not where a night rig's
+        // intuition put it. Measured off the reference's own road plane, the sky
+        // fill is `0.302` and the sun on flat road is `0.444` — a ratio of
+        // **0.68**. That is far above the 0.30 this used to demand, and the
+        // reason is geometric rather than stylistic: the sun sits at 20°, so
+        // `N·L` of 0.345 throws away two thirds of the key on a horizontal while
+        // the sky dome arrives on it whole. A guard calibrated for an overhead
+        // sun is simply the wrong guard for a raking one, and holding 0.30
+        // against this ambient pinned the key at 2.6 — i.e. it was the assertion,
+        // not the reference, that was setting the frame's exposure.
+        //
+        // 0.75 keeps the rule the test is named for (the sun out-lights every
+        // other term) with the reference's own 0.68 sitting just inside it.
         assert!(
-            ambient < key * 0.30,
+            ambient < key * 0.75,
             "the sky fill ({ambient:.3}) has become a second key against \
              {key:.3} — the frame is going flat"
         );
@@ -1046,11 +1015,24 @@ mod tests {
              black point of {black_point:.3} — the subtract clips the whole \
              ground plane to zero instead of deepening it"
         );
+        // The band is the reference's own **measured** sunlit tarmac, read back
+        // through the grade that is actually installed. Sampling the reference's
+        // road plane and taking the warm (`R > B`, i.e. sun-struck) median gives
+        // byte 68.0; undoing `GRADE`'s 1.10 contrast about its mid pivot puts the
+        // pre-grade road at 0.288 encoded. The band is that value with ~8 levels
+        // of latitude either side.
+        //
+        // It replaces 0.34..=0.50, which was byte 87..=128 — the reference's
+        // tarmac with `FramePostProcess::low_key`'s 0.16 subtract *added back*,
+        // because that grade sat downstream when the band was written. It does
+        // not any more: `GRADE` is `cinematic()` and its black point is zero, so
+        // the added-back subtract was inflating the target by 41 levels and the
+        // band was quietly demanding a road twice as bright as the reference's.
         assert!(
-            (0.34..=0.50).contains(&encoded),
+            (0.26..=0.32).contains(&encoded),
             "the road renders at {encoded:.3} encoded, outside the band that \
-             lands it beside the reference's sunlit tarmac once the grade's \
-             black point is taken off"
+             lands it on the reference's measured sunlit tarmac (0.288) under \
+             the grade that is actually installed"
         );
     }
 
