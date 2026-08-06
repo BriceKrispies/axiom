@@ -362,10 +362,16 @@ impl Default for ChaseCamera {
 ///
 /// Crate-visible because it is the **pivot the whole rig pitches about**: the
 /// eye is above it and the target is on it, so the angle the view sits below
-/// horizontal is `atan((height - TARGET_HEIGHT) / reach)`. Any re-solve of the
-/// rig that wants to keep the horizon where it is has to hold that angle, and
-/// it cannot do that without this number — see
-/// [`crate::tuning::CameraTuning::framed_for_aspect`].
+/// horizontal is `atan((height - TARGET_HEIGHT) / reach)` — which is what slides
+/// the horizon up and down the frame.
+///
+/// It is deliberately *not* what
+/// [`crate::tuning::CameraTuning::framed_for_aspect`] solves the eye height
+/// against. The target sits well beyond the car, so holding this angle across a
+/// stretched arm holds the horizon while letting `height / distance` — the angle
+/// the rig looks down at the car itself — fall away, which flattens the shot onto
+/// the road plane. Pinning the horizon is worth about 2% of frame height; the
+/// depression is the whole read of the ground.
 pub(crate) const TARGET_HEIGHT: f32 = 0.9;
 
 /// Radians of camera lead per unit of steering input.
