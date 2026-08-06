@@ -1846,3 +1846,95 @@ atmosphere = 1
 scale_and_proportion = 2
 detail_density = 2
 artifact_level = 1
+
+[[iteration]]
+iteration = 16
+attacked_axis = "subject_fidelity"
+changed_files = [
+  "modules/axiom-render-pipeline/src/shadow_view.rs",
+  "modules/axiom-render-pipeline/src/render_pipeline_api.rs",
+  "apps/burnt-rubber/src/render/car_model.rs",
+  "apps/burnt-rubber/src/render/mod.rs",
+  "apps/burnt-rubber/src/render/asphalt_texture.rs",
+  "apps/burnt-rubber/src/tuning.rs",
+  "apps/burnt-rubber/src/camera.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+Era-C pass 3. Seven lenses, seven commits, ZERO cherry-pick conflicts — the first \
+clean stack of the campaign, despite two lenses in render/mod.rs and two in \
+tuning.rs. Attacked subject_fidelity 1 -> 2. No axis fell; eight rose. Every axis \
+is now at 2 for the first time. final_score 1.10 -> 2.00. \
+\
+THE CAR CASTS A SHADOW, for the first time in fourteen iterations. The shadow map \
+was never broken: it was anchored at Vec3::ZERO while the moment sits 1.9 km along \
+the course, and scene_renderer.rs treats fragments outside the frustum as lit — so \
+every shadow was being discarded rather than dimmed. The architect anchored the \
+volume on the view instead, and notably REFUSED the fix the code's own doc \
+proposed (letting the caller supply the volume, "a change to the frame contract"), \
+on the grounds that it would push a derivable quantity into an authorable field \
+every app must remember to set. The pipeline already resolves the camera. \
+\
+FOUR LENSES FOUND ONE CLASS OF BUG — a value correct in the source and destroyed \
+downstream. Cloud coverage 0.55 produced a threshold of 0.329 against a field \
+whose mean is 0.5, so a lid was painted over a zenith gradient that was already \
+the reference's cobalt. The asphalt grain was authored isotropically and sampled \
+by a 16x anisotropic filter along the road, arriving at a quarter of its \
+amplitude. The hemisphere ambient spanned 0.067 across the whole normal sphere — \
+a constant wearing a hemisphere's name. And the shadow box above. None were taste \
+calls; all four were arithmetic. \
+\
+A CLAIM DECLINED. The art-director's proposal rested on "zero road paint below 60% \
+of frame height"; my own detector finds paint reaching 0.95 of frame height both \
+before and after, so composition_and_framing is HELD and the depression change is \
+recorded as landed-but-uncredited. It may have improved the frame; this scorecard \
+does not know that it did. \
+\
+A RESIDUAL RETIRED. The critic established that the reference car spans ~0.30 of \
+frame width, not the 0.598 an earlier naive bbox returned by swallowing roofs, an \
+umbrella and sand — and the champion sits at 109% of that. The width gap this \
+campaign scored against for three passes did not exist, and the human's decision \
+to keep the pulled-back rig has therefore cost scale_and_proportion nothing. \
+\
+STILL ABSENT: the reference's defining palm shadows raking the road (the car's \
+shadow is present; the avenue's is not), and its entire left third — sea, beach, \
+sailboats, stilt houses — which needs terrain the flat 46 m verge quad cannot \
+carry. \
+\
+HEADROOM WARNING from the architect, unrelated to any axis: \
+render_pipeline_api.rs is now 996 lines against the engine_no_large_files hard cap \
+of 1000, baseline 0. This commit is safe; the next edit to that file very likely \
+is not. It wants splitting.
+"""
+next_attacked_axis = "composition_and_framing"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 2
+detail_density = 2
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+silhouette_readability = 2
+material_and_texture_detail = 2
+lighting_and_shadow = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+atmosphere = 2
+scale_and_proportion = 2
+detail_density = 2
+artifact_level = 2
