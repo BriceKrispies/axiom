@@ -1,214 +1,328 @@
 # Champion scorecard — treasure-chest-pick
 #
-# CRITIC PASS 7 recalibration. This file REPLACES the pass-6 scorecard, which was
-# marked STALE in-file by the pass-6 setup commit (1e821742) because two things
-# changed underneath it at once.
+# CRITIC PASS 7 — THE FIRST SCORE OF AN IMAGE THAT WAS ACTUALLY ON MAIN WHEN IT WAS
+# SCORED. This file replaces the card committed in f4fc1f79, which scored the
+# PRE-STACK champion (the image 1e821742 installed) because it was written in
+# parallel with the six render proposals that then landed on top of it. The pass-6
+# `promote` entry says so in its own `scoring_honesty` block. So this is a genuine
+# RE-SCORE of a changed image, not a recalibration of a mis-scored one.
 #
-# ── THIS IS A FRESH DERIVATION, NOT A DELTA ───────────────────────────────────
+# ── SAME EXAM AS THE CARD IT REPLACES ─────────────────────────────────────────
+# Judged arm webgl2, 948x597, --clip stage, scene chests-ready. Reference era D
+# (1536x1024, installed 2026-08-06). Both cards measure that arm against that
+# reference, so — for the first time in this campaign — the two are COMPARABLE, and
+# the delta between them is a real result rather than an arm/era artifact. Every
+# earlier card (iterations 0-6) measured canvas2d at 468x293 against a different
+# reference and stays void for comparison (campaign.toml
+# [scoring.calibration] comparable_from_pass = 6).
 #
-#   1. THE JUDGED ARM CHANGED. Iterations 0-6 all scored the CANVAS2D software
-#      rasterizer at 468x293 without the campaign ever saying so. The judged arm
-#      is now WEBGL2 at 948x597 native (campaign.toml [arms]).
-#   2. THE REFERENCE CHANGED. reference.png was replaced on 2026-08-06 (era C ->
-#      era D: 1408903 -> 2085031 bytes, 1614x974 -> 1536x1024, aspect 1.657 ->
-#      1.50). It is the FOURTH reference this campaign has had.
-#
-# Every number below is re-derived from scratch against the CURRENT champion.png
-# and the CURRENT reference.png. NONE of it is comparable to any score in
-# iterations 0-6 (campaign.toml [scoring.calibration] comparable_from_pass = 6).
-# Several axes below read HIGHER than the pass-6 card. THAT IS NOT PROGRESS. It is
-# a different arm being measured against a different reference — a different exam.
-# Anyone who reports one of these numbers as an improvement is faking progress,
-# and the ledger entry for this pass says so in as many words.
+# ── THE RESULT OF PASS 6, STATED FIRST AND PLAINLY ────────────────────────────
+# Seven proposals were stacked. NO AXIS MOVED. Every one of the twelve integers
+# below is identical to the card it replaces. That is not a claim that nothing
+# happened — four changes are measurably real (see `pass6_landed` below) — it is the
+# statement that all four landed INSIDE an existing score band, and that two of them
+# were partly paid for by a measured loss elsewhere in the same frame.
 #
 # ── CALIBRATION ────────────────────────────────────────────────────────────────
 # Bar = "indistinguishable from the reference." A render that merely reads as the
 # same subject is a 1, not a 3; a stylized/low-poly render is not a 4-5. When
-# unsure between two scores, take the LOWER.
-# final_score = lowest_axis * 0.7 + average * 0.3. Lowest axis (ties broken by
-# the fixed axis order) is the next flaw.
+# unsure between two scores, take the LOWER. That rule is doing real work on
+# color_palette this pass — see the note there.
+# final_score = lowest_axis * 0.7 + average * 0.3. Lowest axis (ties broken by the
+# fixed axis order) is the next flaw.
 #
-# AXIS ORDER. campaign.toml [scoring] axes is the canonical order and this file is
-# now laid out in it. It has to be said plainly that the campaign has been
-# carrying TWO conflicting "fixed orders": campaign.toml puts
-# scene_props_completeness 11th, while every scorecard and ledger key block since
-# iteration 0 puts it 3rd. That discrepancy is load-bearing — it IS the tie-break —
-# and it is why iterations 1, 2, 5 and 6 each named scene_props_completeness "the
-# earliest axis tied at 1" when under campaign.toml's order it is the LAST of the
-# tied axes. See the ledger. It does not change this pass's answer: subject_fidelity
-# is the earliest axis at the minimum under BOTH orders.
+# AXIS ORDER: campaign.toml [scoring] axes, canonical from pass 6 onward (the
+# contradiction the pass-6 card found was resolved in 6993ef1e). This file is laid
+# out in it. The resolution does not change this pass's answer: subject_fidelity is
+# the earliest axis at the minimum under the canonical order AND under the
+# superseded one.
+#
+# ── MEASUREMENT METHOD (so the next pass can reproduce, not re-invent) ────────
+# Every number below is measured on the two PNGs on disk, and every before/after
+# pair is measured with ONE method on BOTH images (the pre-stack champion recovered
+# with `git show 1e821742:.../champion.png`). Detail energy is mean |laplacian| on a
+# copy resampled to 948px wide, so the resolution difference cannot flatter either
+# image. Foliage mass is a strict green mask (g>r+15 & g>b+15) RESTRICTED TO THE
+# PALM QUADRANT (upper-left 40% x 50%): the whole-frame version of that mask is
+# invalid here, because the PRE-STACK lagoon was teal enough to leak into it and the
+# current cyan one is not — a whole-frame reading appears to show the canopy
+# SHRINKING by 39% when the quadrant reading shows it GROWING by 12%. The card this
+# replaces quoted the whole-frame figure. Do not use it.
 #
 # ── WHAT THE REFERENCE (1536x1024) IS ─────────────────────────────────────────
 # A photoreal-toy beach diorama, path-traced look. Warm tan sand fills the frame
-# with a real gradient and grain (measured 241,186,90 top-left drifting to
-# 232,176,81 bottom-left, ~10-12 levels per channel corner to corner). A round
-# turquoise pool sits centre-frame (measured 57,196,198 — a BRIGHT cyan, G and B
-# essentially equal) carrying irregular, organic caustic ripple cells in near-white,
-# plus a distinctly paler shallow RIM ring. Nine wooden chests staged 3x3 on the
-# water, each with visible plank grain, dark iron/brass strap bands across the
-# barrel lid, gold corner brackets, and a large gold lock plate with a square
-# keyhole; their bases are slightly submerged with a legible waterline and soft
-# reflections. Margin props: a tall segmented palm with SIX drooping tapered fronds,
-# three coconuts, a grass tuft, rocks, and a LONG soft cast shadow raking left; a
-# red crab with modelled claws, legs and eyes; a crenellated sand castle with corner
-# turrets, an arched doorway and a red pennant on a pole; an orange scallop, white
-# scallops, spiral conches, a sea urchin, small snail shells, pebbles. Everything is
-# grounded by soft directional cast shadows. The brand appears EXACTLY ONCE, on a
-# red rounded nameplate above the CENTRE chest.
+# with a real gradient and grain (corners measured 246,191,94 / 242,188,94 /
+# 234,177,81 — 8-13 levels per channel corner to corner). A round turquoise pool
+# sits centre-frame (56,194,197 in open water — bright cyan, G and B within 3)
+# carrying irregular organic caustic cells: broad soft bands rising to near-white
+# (water luminance p5/median/p95 = 124/167/216, std 25.5), plus a distinctly paler
+# shallow RIM ring. Nine wooden chests staged 3x3 on the water, each with visible
+# plank grain, dark iron/brass strap bands framing the barrel lid, gold corner
+# brackets, and a large gold lock plate with a square keyhole; their bases are
+# slightly submerged with a legible waterline and soft reflections. Margin props: a
+# tall segmented tapering palm with SIX long drooping tapered fronds, three
+# coconuts, a grass tuft, rocks, and a LONG soft cast shadow raking left that throws
+# a LEGIBLE FROND SILHOUETTE (shadow core 140,104,57 against sand 247,192,95 =
+# luminance ratio 0.553, per-channel [0.567,0.542,0.600], so cool-tinted); a red
+# crab with modelled claws, legs and eyes; a crenellated sand castle with corner
+# turrets, an arched doorway and a red pennant; an orange scallop, white scallops,
+# spiral conches, a sea urchin, snail shells, pebbles — staged right into all four
+# corners. The brand appears EXACTLY ONCE, on a red rounded nameplate above the
+# CENTRE chest.
 #
 # ── WHAT THE CHAMPION (948x597, webgl2, --clip stage, chests-ready) IS ────────
-# The same staging skeleton, executed as flat-shaded low-poly proxies. Measured:
-# a single-value sand field (240,197,113 at three corners, 241,199,114 at the
-# fourth — spread <=2 levels, so still NO gradient and no grain, and 11-23 levels
-# paler/less saturated than the reference); a round lagoon whose water is the right
-# HUE family but far too dark (63,163,158 against the reference's 57,196,198 — G is
-# 33 low, B is 40 low) overlaid with a REGULAR geometric hex lattice where the
-# reference has irregular caustics; nine chests that are boxes with slat lines, a
-# faceted lid and one small flat yellow tab, with NO strap band at the lid seam, NO
-# corner brackets and NO lock plate; a five-plank palm with no coconuts, no taper
-# and no grass tuft; a cylinder-cluster castle; a red blob crab; and shells that
-# render as hard-edged cream polygon fans. Whole-frame measurements: luminance
-# p2/median/p98 = 45/181/206 against the reference's 35/164/223 (range 161 vs 188,
-# std 45.1 vs 53.0), mean saturation 140.4 vs 158.9, and mean |laplacian| on a
-# resolution-normalised copy 6.69 vs 11.0 — the champion carries 61% of the
-# reference's local detail energy, and a visible share of what it does carry is the
-# hex lattice rather than legible detail.
+# The same staging skeleton, executed as flat-shaded low-poly proxies. The lagoon's
+# base colour is now essentially correct (59,193,197 against 56,194,197; water
+# luminance median 167, exactly the reference's) and the pool sits where the
+# reference's pool sits to within 1-2 thousandths of frame on three of four edges.
+# Against that: the sand is a single flat value (240,197,113 at every corner, spread
+# <=2 levels) that is 19 levels too blue and 6 too green; the pool carries a web of
+# thin hard white filaments with visible junction dots where the reference carries
+# broad soft caustic cells, and its internal modulation is now only 69% of the
+# reference's (water lum std 17.6 vs 25.5) with the near-white highlights entirely
+# absent (p95 191 vs 216); the nine chests are boxes with slat lines, a faceted lid
+# and one small flat yellow tab — NO lid strap band, NO corner brackets, NO lock
+# plate; the palm has correctly serrated midrib-and-leaflet fronds on a two-cylinder
+# untapered trunk with no coconuts, no grass tuft and no rocks, and throws a plain
+# ELLIPSE; the castle is a cylinder cluster with no doorway; the crab is a red blob;
+# the shells are hard-edged cream polygon fans. Whole-frame: luminance
+# p2/median/p98 = 45/181/206 against 36/172/225 (std 42.8 vs 53.0), mean saturation
+# 144.3 vs 159.3, mean |laplacian| 7.30 vs 10.78 — 68% of the reference's local
+# detail energy, and a visible share of what it does carry is the filament net
+# rather than legible incident (champion |laplacian| p99 is 156 against the
+# reference's 110: the champion's edges are HARDER than the reference's, not richer).
 
 final_score = 1.23   # lowest 1 * 0.7 + average 1.75 * 0.3
 next_attack_axis = "subject_fidelity"   # tied lowest (1), earliest in the fixed axis order
 
 reference_era = "D"        # 1536x1024, installed 2026-08-06 (1e821742)
 judged_arm = "webgl2"      # the ONLY arm scored here; canvas2d-guard.png is NOT scored
-comparable_with = "pass 7 onward only"
+comparable_with = "the f4fc1f79 card (same arm, same reference) and pass 7 onward"
+
+# ── PASS-6 ACCOUNTING ─────────────────────────────────────────────────────────
+# Recorded on the card, not only in the ledger, because a score of "unchanged" is
+# the exact place a reader will otherwise assume "nothing was done".
+pass6_landed = """
+FOUR changes are measurably real, all inside an existing band:
+
+1. colorist 889a7a7a — THE LAGOON BASE COLOUR. Open water at (0.50,0.90):
+   55,158,154 -> 59,193,197, against the reference's 56,194,197. G error 36 -> 1,
+   B error 43 -> 0. Water luminance median 145 -> 167 = the reference's 167 exactly.
+   This is the single largest measured convergence in the pass and it fixed the
+   dominant defect the previous card named under color_palette.
+2. art-director a4abb798 — THE POOL'S TOP MARGIN. Pool bbox top edge 0.184 ->
+   0.159 of frame height, against the reference's 0.160. The one framing error the
+   previous card could measure is gone; left and right edges already matched.
+3. modeler 6253156a — FROND SHAPE. Verified in matched crops: the fronds are
+   midrib-plus-leaflets with serrated edges, no longer flat planks. Palm-quadrant
+   foliage mass 7.36% -> 8.21% against the reference's 12.90% (57% -> 64%).
+4. surfacing bf8cc58e + architect dc760d39 — NET REGULARITY. The ripple net is no
+   longer a countable straight-edged hex tiling: filaments bow and cells are ~2.6x
+   finer. Whole-frame detail energy 6.69 -> 7.30 against the reference's 10.78
+   (62% -> 68%).
+"""
+pass6_did_not_land = """
+THREE things did not move, or moved the wrong way. None is a >=2 regression on any
+axis, so none of it was a reject; all of it is on the record so pass 8 does not
+inherit a false picture.
+
+5. lighting 5051e918 — DENSITY DID NOT LAND; TINT DID. The champion's palm shadow
+   core measures 162,139,83 against its sand 240,197,113 = luminance ratio 0.699,
+   per-channel [0.675,0.706,0.735] — blue least attenuated, so the cool tint is
+   present and correctly signed. But the commit's stated target was the reference's
+   measured 0.59 and the reference itself reads 0.553; the shipped judged frame is
+   0.699, LIGHTER than both the target and the reference. The opacity change
+   (0.18 -> 0.26) moved in the right direction and stopped short. Nobody may cite
+   "lands on the reference's measured 0.59 density" as a fact about this image.
+6. FRAME CONTRAST WENT SLIGHTLY THE WRONG WAY. Whole-frame luminance std
+   44.3 -> 42.8 against the reference's 53.0, and the pool specifically FLATTENED:
+   water luminance std 23.0 -> 17.6 against the reference's 25.5. The colour
+   re-solve bought the correct base value at the cost of internal modulation, and
+   the thinner filament net returns less energy than the old lattice did. Water p95
+   is unchanged at 191, still 25 levels short of the reference's 216 — the
+   near-white caustic highlights are still entirely absent. This is why
+   contrast_and_exposure did not move, and it must not be reported as "no change".
+7. THE SAND IS BYTE-IDENTICAL. 240,197,113 at the corners before and after, still
+   flat to <=2 levels across the whole frame where the reference varies 8-13, still
+   19 levels too blue and 6 too green. It is the largest single area in the frame
+   and no proposal in pass 6 touched it.
+"""
 
 [axes]
 
-# Measured, and it is the champion's strongest axis. The lagoon's watery-pixel
-# bounding box lands at x 0.168..0.831, y 0.184..0.988 of frame against the
-# reference's x 0.180..0.854, y 0.160..0.979 — width share 0.664 vs 0.674, height
-# share 0.804 vs 0.818. The pool sits where the reference's pool sits to within
-# ~1.5% of frame on both axes, DESPITE the aspect mismatch (1.588 judged vs 1.50
-# reference), and the palm, castle and crab occupy the same quadrants at roughly
-# the same relative scale. Clearly on-model -> 3. Not 4: the reference's margins
-# are staged edge to edge (props right into all four corners) where the champion's
-# bottom corners are nearly bare, and the aspect difference is visible in the crop.
-# NOTE: this is a fresh derivation on a new arm and a new reference. Do NOT read it
-# against the pass-6 card's 2.
+# The champion's strongest axis, and it got stronger inside the band. Measured pool
+# bbox: champion x 0.169..0.830, y 0.159..0.988 against the reference's
+# x 0.169..0.854, y 0.160..0.979. Left edge and top edge now agree to within 1
+# thousandth of frame; the camera reseat closed the 24-thousandth top-margin gap.
+# The palm, castle and crab occupy the same quadrants at roughly the same relative
+# scale. Clearly on-model -> 3.
+# NOT 4, and the reason is staging rather than pose: the reference stages props
+# right into all four corners and along all four edges, where the champion's
+# margins carry four or five lone shell fans and two discs and its bottom corners
+# are nearly bare. The aspect mismatch (1.588 judged vs 1.50 reference) is also
+# visible in the crop and can never fully resolve.
 composition_and_framing = 3
 
-# THE LOWEST AXIS, and the one the higher-resolution judged arm exposed. The
-# reference chest's three most identifying features are a strap band across the
-# barrel lid, gold corner brackets, and a large gold lock plate with a square
-# keyhole. At 948x597 native it is now unambiguous that the champion chest has NONE
-# of them: it is a box with slat lines, a faceted lid, and one small flat yellow tab
-# at the base. The palm is five flat planks with no taper, no coconuts and no grass
-# tuft; the crab is a red blob with two dots; the shells are cream polygon fans. The
-# ACME nameplate is the one element that genuinely reads. This is the textbook 1:
-# you can tell what each thing is MEANT to be, and nobody would mistake any of it
-# for the reference. The pass-6 card's 2 was granted on a 468x293 canvas2d image
-# where the missing hardware could not be resolved at all; it does not survive
-# being able to see the chest.
+# THE LOWEST AXIS, unchanged, AND UNATTACKED. The reference chest's three most
+# identifying features are a strap band framing the barrel lid, gold corner
+# brackets, and a large gold lock plate with a square keyhole. Verified again on a
+# 4x matched crop of the centre chest: the champion chest has NONE of them — it is a
+# box with horizontal slat lines, a faceted lid, gold-ish corner strips on the base
+# skirt and one small yellow latch tab. It also has no plank grain, no nails, no
+# waterline and no reflection, all four of which read plainly in the reference at
+# the same crop. The castle has no arched doorway; the crab is a red blob with two
+# dots; the shells are cream polygon fans. The ACME nameplate is the one element
+# that genuinely reads. Textbook 1: you can tell what each thing is MEANT to be, and
+# nobody would mistake any of it for the reference.
+# THIS AXIS WAS PASS 6'S NOMINAL TARGET AND WAS NOT TOUCHED. The proposal booked
+# against it (6253156a) reshaped the PALM — a margin prop this card scores under
+# scale_and_proportion, silhouette_readability and scene_props_completeness. The
+# subject of this frame is the nine chests. The palm change was real and is credited
+# above; it is not a subject_fidelity change, and this axis is therefore the next
+# attack axis for the SECOND consecutive pass.
 subject_fidelity = 1
 
-# Mixed, with systematic prop undersizing. Chest-to-pool staging is close and the
-# 3x3 grid's footprint is right. The margin props are not: the palm-foliage mask
-# covers 1.38% of the champion frame against 2.46% of the reference's — the canopy
-# carries 56% of the reference's visual mass — and the castle is too short for its
-# footprint while the crab and shells shrink to tokens. Right structure, obviously
+# Mixed, with systematic prop undersizing that eased slightly. Chest-to-pool staging
+# is close and the 3x3 grid's footprint is right, though the champion's total wood
+# mass is 9.67% of frame against the reference's 13.57% — the chests are somewhat
+# small and thin for their pool. The margin props remain the real error: palm-
+# quadrant foliage mass 8.21% against the reference's 12.90% (the canopy carries 64%
+# of the reference's visual mass, up from 57%), the castle is too short for its
+# footprint, and the crab and shells shrink to tokens. Right structure, obviously
 # simplified in the margins -> 2.
 scale_and_proportion = 2
 
 # The nine chests read instantly and cleanly at native resolution, and that is the
-# subject. Nothing in the margins does: the palm silhouette reads as a pinwheel of
-# planks rather than a frond crown, the castle as a bundle of cylinders, the crab as
-# a smear, the shells as folded paper. Right structure emerging, obviously
-# stylized -> 2.
-# ARM WARNING: this axis reads the rasterizer directly. Its movement from the
-# pass-6 card is caused by the arm switch (half-resolution-and-stretched -> native
-# 1:1) and is NOT campaign progress.
+# subject. The palm silhouette genuinely improved — it reads as a serrated frond
+# crown rather than a pinwheel of planks — but it still reads as a green sawtooth
+# star on a fat two-cylinder trunk, against six long drooping tapered fronds on a
+# segmented tapering one. Nothing else in the margins reads: the castle is a bundle
+# of cylinders, the crab a smear, the shells folded paper. Right structure emerging,
+# obviously stylized -> 2.
 silhouette_readability = 2
 
-# The families are right and the hue error the pass-6 card measured is genuinely
-# gone — the water is cyan again (champion 63,163,158, G and B within 5 of each
-# other, matching the reference's G=B relationship) rather than navy. What is left
-# is a VALUE error in the same direction across the whole frame: water 33/40 levels
-# too dark in G/B, sand 11/23 levels too pale in G/B and completely flat, mean
-# saturation 140.4 vs 158.9, and the chest gold reduced to one small tab so the
-# reference's brass mass is essentially absent. Right palette, visibly detuned -> 2.
+# THE AXIS THAT MOVED MOST WITHOUT MOVING, and the note matters more than the
+# number. The dominant defect the previous card named — water 33/40 levels too dark
+# in G/B — is GONE: open water measures 59,193,197 against 56,194,197 and the water
+# luminance median is now exactly the reference's 167. What is left is the SAND,
+# which is 55% of the frame: 240,197,113 against the reference's 246,191,94 (19
+# levels too blue, 6 too green, 6 too red-dark), completely flat where the reference
+# carries an 8-13 level corner-to-corner gradient, and reading noticeably more lemon
+# and more washed than the reference's warm tan. Whole-frame mean saturation is
+# 144.3 against 159.3 — 19% of that gap closed, 81% remaining — and the reference's
+# brass/gold hardware mass is still reduced to one small matte tab.
+# HELD AT 2 UNDER "WHEN UNSURE, TAKE THE LOWER". A 3 would say the palette is
+# on-model with differences of execution; on the single largest area in the frame it
+# is wrong in hue AND carries no modulation at all. What genuinely changed is that
+# the axis's defect has RELOCATED from the water to the sand. That is the actionable
+# fact for whoever attacks this next, and it is the kind of progress an integer
+# cannot express — which is exactly why it is written down instead of scored.
 color_palette = 2
 
-# Re-measured on this arm: luminance p2/median/p98 = 45/181/206 (champion) vs
-# 35/164/223 (reference); std 45.1 vs 53.0. The champion is compressed at BOTH
-# ends — blacks 10 levels lighter, highlights 17 levels darker, total range 161 vs
-# 188 — and its median sits 17 levels high, so the frame reads flat and slightly
-# hot. The reference's contrast comes from near-white caustic highlights against
-# genuinely dark shadow cores; the champion's comes from hard steps between flat
-# facets. Right range family, wrong mechanism, measurably narrower -> 2.
+# Re-measured, and it moved slightly the WRONG way. Luminance p2/median/p98 =
+# 45/181/206 (champion) against 36/172/225 (reference); std 42.8 against 53.0, down
+# from the pre-stack 44.3. The champion is compressed at BOTH ends — blacks 9 levels
+# lighter, highlights 19 levels darker, total range 161 against 189 — and its median
+# sits 9 levels high. The reference's contrast comes from near-white caustic
+# highlights against genuinely dark shadow cores; the champion's comes from hard
+# steps between flat facets, and its pool is now FLATTER than before the pass (water
+# lum std 23.0 -> 17.6 against 25.5). Right range family, wrong mechanism,
+# measurably narrower, and narrowing -> 2.
 contrast_and_exposure = 2
 
-# There is now a coherent key: every shadow in the frame offsets the same way, and
-# the palm, castle, crab and all nine chests are grounded by a contact shadow. That
-# is the right structure. It is not more than 2, because every one of those shadows
-# is a soft blob or an ellipse — there is no shadow SHAPE anywhere. The reference's
-# palm throws a long raking silhouette with legible fronds; the champion's throws a
-# diffuse patch. And there is no light in the water at all: no caustics, no
-# specular, no waterline. Right structure, obviously simplified -> 2.
+# There is a coherent key: every shadow in the frame offsets the same way, the palm,
+# castle, crab and all nine chests are grounded, and the cast-shadow family is now
+# cool-tinted with the correct channel signature (palm shadow per-channel
+# [0.675,0.706,0.735] of sand — blue least attenuated, matching the reference's
+# [0.567,0.542,0.600]). That is the right structure. It is not more than 2 for two
+# unchanged reasons and one new one:
+#   * there is no shadow SHAPE anywhere. Every shadow is a soft blob or an ellipse.
+#     The reference's palm throws a long raking silhouette with legible fronds; the
+#     champion's throws a plain oval, and the pass-6 frond work did not reach it.
+#   * there is no light in the water at all: no caustics, no specular, no waterline.
+#     Nothing in this scene sets `roughness`, so every surface — including the brass
+#     latches and gold hardware the reference gives visible specular — is fully
+#     matte by omission (campaign.toml documents that the lever is live on both
+#     arms).
+#   * the density target missed: 0.699 shipped against the reference's 0.553.
+# Right structure, obviously simplified -> 2.
 lighting_and_shadow = 2
 
-# Tied lowest. @axiom/web-engine has no textures and no normal maps on EITHER arm
-# (campaign.toml is explicit), so this axis is flat base colour plus Lambert against
-# a reference that carries plank grain, brass sheen, sand grain and water caustics.
-# Measured proof that nothing has moved: the sand field samples within 2 levels at
-# all four corners while the reference varies 10-12; mean |laplacian| on a
-# resolution-normalised copy is 6.69 vs 11.0. The slat lines on the chests are
-# geometry, not material. A legible flat proxy -> 1.
+# Tied lowest, and nothing has moved. @axiom/web-engine has no textures and no
+# normal maps on EITHER arm (campaign.toml is explicit), so this axis is flat base
+# colour plus a shading model whose gloss term this scene never enables, against a
+# reference carrying plank grain, brass sheen, sand grain and water caustics.
+# Measured proof: the sand field samples 240,197,113 at every corner, spread <=2
+# levels, byte-identical to the pre-stack image, where the reference varies 8-13;
+# mean |laplacian| is 7.30 against 10.78, and the champion's p99 is 156 against the
+# reference's 110, i.e. what edge energy it has is HARDER than the reference's, not
+# richer. The slat lines on the chests are geometry, not material. A legible flat
+# proxy -> 1.
+# TWO LEVERS ARE SHIPPED AND ENTIRELY UNUSED, both verified in-tree this pass:
+# `MaterialSpec.roughness` drives a Blinn-Phong lobe + Schlick Fresnel rim through
+# `gloss = 1 - roughness` in shading.ts and is uploaded as `uRoughness` by
+# backend-webgl2.ts, and `MeshData.ao` is multiplied into diffuse AND ambient by
+# both backends. `grep -rn roughness` and `grep -rn createMeshData` in this game's
+# directory both return nothing.
 # FOR WHOEVER ATTACKS THIS: the stylized-water primitive (abstractions/0003) was
-# justified against a "hex-honeycomb water surface" read off a SUPERSEDED
-# reference. Era D's water carries IRREGULAR organic caustic cells, not a regular
-# hex lattice. Re-examine that premise before spending a change on top of it.
+# justified against a "hex-honeycomb water surface" read off a SUPERSEDED reference.
+# Era D's water carries irregular organic caustic CELLS with broad soft value bands,
+# not a net of lines. abstractions/0006 is now a SECOND spine widening built on that
+# same unre-examined premise. Re-examine it before spending a third change on top.
 material_and_texture_detail = 1
 
-# The lagoon rim reads as a real shoreline, the chest shadows land on the water,
-# and sand/water separate by value. Against that: the chests sit ON the water
-# rather than IN it — no submerged base, no waterline, no reflection, where the
-# reference gives all three — and the sand is a single flat value with no gradient
-# to carry distance. Right structure, obviously simplified -> 2.
+# The lagoon rim reads as a real shoreline, the paler shallow rim ring is present,
+# the chest shadows land on the water, and sand/water separate by value. Against
+# that, unchanged: the chests sit ON the water rather than IN it — no submerged
+# base, no waterline, no reflection, where the reference gives all three at the same
+# crop — and the sand is a single flat value with no gradient to carry distance. The
+# pool's own depth cue also weakened this pass (water lum std 23.0 -> 17.6), which
+# works against this axis even though the camera reseat helped the read. Right
+# structure, obviously simplified -> 2.
 depth_and_separation = 2
 
-# Tied lowest. Measured: the champion carries 61% of the reference's local detail
-# energy (mean |laplacian| 6.69 vs 11.0) on a resolution-normalised copy, and part
-# of that 61% is the hex lattice rather than legible incident. Absent at every
-# scale: sand grain, caustics, coconuts, the grass tuft, rock clusters, the castle's
-# arched doorway, keyholes, plank grain, shell variety. The reference is dense at
-# every scale; the champion is a clean, sparse proxy -> 1.
-# ARM WARNING: this axis reads the rasterizer directly. Movement from the pass-6
-# card is arm-caused, not progress.
+# Tied lowest. Measured: 68% of the reference's local detail energy (mean
+# |laplacian| 7.30 vs 10.78) on a resolution-normalised copy, up from 62%.
+# THE 62% -> 68% IS NOT BOOKED AS CONVERGENCE ON THIS AXIS. A share of the added
+# energy is the filament net and the leaflet sawtooth — hard line work, not the
+# reference's soft incident — and the champion's |laplacian| p99 of 156 against the
+# reference's 110 shows the added energy is harder-edged than what it is standing in
+# for. Absent at every scale, unchanged: sand grain, real caustics, coconuts, the
+# grass tuft, rock clusters, the castle's arched doorway, keyholes, plank grain,
+# nails, shell variety. The reference is dense at every scale; the champion is a
+# clean, sparse proxy -> 1.
 detail_density = 1
 
 # Tied lowest, and it is presence that is missing, not just quality. Present: palm,
 # castle, pennant, crab, chests, nameplate, some cream shell fans, orange and yellow
-# discs. ABSENT ENTIRELY: the palm's three coconuts, the grass tuft, the rock
-# clusters at the palm base, the castle's arched doorway, the pool's paler shallow
-# rim ring, the sea urchin, the spiral conches, and the pebble scatter — and the
-# reference's five distinct shell forms collapse into one repeated polygon fan.
-# Roughly half the reference's roster is missing and the half that is present is
-# proxy. Present but proxy -> 1.
+# discs, and the pool's paler shallow rim ring — which the card this replaces listed
+# as ABSENT and which is plainly present in the image on disk. That correction does
+# not move the score. ABSENT ENTIRELY: the palm's three coconuts, the grass tuft,
+# the rock clusters at the palm base, the castle's arched doorway, the sea urchin,
+# the spiral conches, and the pebble scatter — and the reference's five distinct
+# shell forms still collapse into one repeated polygon fan. Roughly half the
+# reference's roster is missing and the half that is present is proxy -> 1.
 scene_props_completeness = 1
 
-# LOWERED FROM 3, and the reason matters for the record. Three off-reference
-# artifacts are visible at a GLANCE, which is exactly what a 4 excludes and what a
-# 3 ("mostly clean") no longer survives:
-#   1. a REGULAR geometric hex lattice is drawn across the whole lagoon — roughly
-#      30% of the frame — reading as a wireframe overlay. Era D's reference water
-#      carries irregular organic caustics; a uniform hex net matches nothing in it.
-#   2. a large soft dark oval still sits behind the centre chest with no reference
-#      counterpart.
-#   3. the shell props render as hard-edged cream polygon fans that read as clipped
-#      geometry rather than as shells.
-# Otherwise clean: no z-fighting, no tearing, and the stair-stepped diagonals the
-# old arm had are gone. -> 2.
-# THIS IS NOT A REGRESSION IN THE APP. Artifact 1 was sub-resolution and "barely
-# legible" on the old 468x293 canvas2d arm; the judged arm now draws at native 1:1,
-# so it became visible. Nobody may book this as a drop, and nobody may book its
-# absence on the guarded arm as a win — the guard is never scored.
+# Held at 2. Of the three at-a-glance off-reference artifacts the previous card
+# named, ONE softened and TWO are untouched:
+#   1. SOFTENED, NOT RESOLVED. The pool no longer wears a countable straight-edged
+#      hex tiling — filaments bow and the pitch is ~2.6x finer. But it still wears a
+#      full-pool web of thin hard white outlines with visible white DOTS at the
+#      filament junctions, over roughly 30% of the frame, with cells several times
+#      larger than the reference's caustic cells. It reads as a drawn decal rather
+#      than as light in water. Two commits (bf8cc58e, dc760d39, one of them a spine
+#      widening) have now been spent on this artifact without retiring it.
+#   2. UNTOUCHED. A large soft dark oval still sits around the centre chest — and
+#      another around the right-centre chest — extending on all sides of the chest
+#      rather than offsetting with the key, so it reads as a halo rather than as a
+#      cast shadow. There is no reference counterpart.
+#   3. UNTOUCHED. The shell props still render as hard-edged cream polygon fans that
+#      read as clipped geometry rather than as shells.
+# Otherwise clean: no z-fighting, no tearing, no stair-stepping. -> 2.
+# THIS WAS NOT A REGRESSION WHEN IT WAS LOWERED FROM 3 AND IT IS NOT ONE NOW.
+# Artifact 1 was sub-resolution on the retired 468x293 canvas2d arm; the judged arm
+# draws at native 1:1, so it became visible. Nobody may book this as a drop, and
+# nobody may book the net's greater faintness on the guarded canvas2d arm as a win —
+# that arm is never scored.
 artifact_level = 2

@@ -774,6 +774,17 @@ scorecard = "marked STALE in-file; the pass-6 critic owns the recalibration"
 comparability = "scores are NOT comparable across the arm switch — see campaign.toml [scoring.calibration]"
 
 # ── pass 7 — CRITIC scoring recalibration (era D, judged arm webgl2) ──────────
+#
+# LABEL CORRECTION, added by the critic lens in the real pass 7 (see iteration 8 at
+# the foot of this file). This entry says `pass = 7`, but it was written and
+# committed as f4fc1f79 INSIDE THE PASS-6 BOARD, before the pass-6 stack was
+# promoted. It scores the PRE-STACK champion — the image 1e821742 installed — not the
+# image the pass-6 promote entry then published. The promote entry's own
+# `scoring_honesty` block admits this. The entry is left exactly as written rather
+# than renumbered, because editing a past entry's identity is rewriting the record;
+# it is labelled instead. Read it as the PASS-6 BOARD's critic entry. The first
+# ledger entry in this campaign that scores an image which was already on main when
+# it was scored is iteration 8.
 [[iteration]]
 iteration = 7
 pass = 7
@@ -1010,3 +1021,234 @@ Two mistakes of the foreman's, recorded so the next pass does not inherit them:
    cheapest unspent wins on the board, and both cost zero scene nodes. Carry them
    into the pass-7 brief.
 """
+
+# ── pass 7 — CRITIC re-score of the promoted pass-6 champion ───────────────────
+[[iteration]]
+iteration = 8
+pass = 7
+kind = "rescore"
+date = "2026-08-06"
+attacked_axis = "none"           # CRITIC bookkeeping; no render change
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/scorecard.champion.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/abstractions/0006.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+]
+champion_screenshot = "champion.png"          # webgl2, --clip stage, 948x597, post-stack
+candidate_screenshot = "champion.png"
+guard_screenshot = "canvas2d-guard.png"       # captured, shown, NEVER scored
+decision = "rescore"
+abstraction_introduced = false   # this entry BACKFILLS a record; it introduces nothing
+next_attacked_axis = "subject_fidelity"
+reason = """
+CRITIC PASS 7. This is a RE-SCORE, not a recalibration. The card on disk (f4fc1f79)
+was not wrong about its own image — it scored the PRE-STACK champion, because the
+critic and the six render lenses worked in parallel off one base. Both cards measure
+the SAME arm (webgl2, 948x597) against the SAME reference (era D, 1536x1024), so for
+the first time in this campaign's history the two are comparable and the delta
+between them is a real result. Every number was re-derived from the two PNGs on disk,
+and every before/after pair was measured by ONE method on BOTH images, with the
+pre-stack champion recovered via `git show 1e821742:.../champion.png`.
+
+CALIBRATION: NO INFLATION FOUND, AND NO NUMBER CHANGED. All twelve integers are
+identical to the card they replace: 3,1,2,2,2,2,2,1,2,1,1,2 — final_score 1.23,
+next_attack_axis subject_fidelity. What changed is the EVIDENCE, which had gone
+stale on eight specific measurable points (see below). A scorecard whose integers
+are right and whose evidence is false is not an honest scorecard, so the card is
+rewritten rather than left in place.
+
+THE HEADLINE: SEVEN STACKED PROPOSALS, ZERO AXIS MOVEMENT. That is not "nothing
+happened". Four changes are measurably real and all four landed INSIDE an existing
+score band; two were partly paid for by a measured loss in the same frame.
+
+WHAT GENUINELY MOVED (measured, one method, pre-stack -> champion):
+  1. colorist 889a7a7a  THE LAGOON BASE COLOUR — the largest measured convergence in
+     the pass. Open water at (0.50,0.90): 55,158,154 -> 59,193,197 against the
+     reference's 56,194,197. G error 36 -> 1, B error 43 -> 0. Water luminance median
+     145 -> 167, exactly the reference's 167. The dominant defect the previous card
+     named under color_palette is gone.
+  2. art-director a4abb798  THE POOL'S TOP MARGIN — bbox top edge 0.184 -> 0.159 of
+     frame height against the reference's 0.160. The one framing error that was
+     measurable is closed; left and right already agreed.
+  3. modeler 6253156a  FROND SHAPE — verified in matched crops: midrib-plus-leaflets
+     with serrated edges, no longer flat planks. Palm-quadrant foliage mass
+     7.36% -> 8.21% against the reference's 12.90% (57% -> 64%).
+  4. surfacing bf8cc58e + architect dc760d39  NET REGULARITY — no longer a countable
+     straight-edged hex tiling; filaments bow, pitch ~2.6x finer. Whole-frame detail
+     energy 6.69 -> 7.30 against the reference's 10.78 (62% -> 68%).
+
+WHAT DID NOT MOVE, OR MOVED THE WRONG WAY:
+  5. lighting 5051e918  DENSITY MISSED; TINT LANDED. The champion's palm shadow core
+     is 162,139,83 against its sand 240,197,113 = luminance ratio 0.699, per-channel
+     [0.675,0.706,0.735] — blue least attenuated, so the cool tint is present and
+     correctly signed. The reference's is 0.553, per-channel [0.567,0.542,0.600]. The
+     commit's stated target was the reference's "measured 0.59"; the shipped judged
+     frame reads 0.699 — lighter than both the target and the reference. The
+     direction was right and it stopped short. NOBODY MAY CITE "lands on the
+     reference's measured 0.59 density" AS A FACT ABOUT THIS IMAGE.
+  6. FRAME CONTRAST WENT SLIGHTLY THE WRONG WAY. Whole-frame luminance std
+     44.3 -> 42.8 against the reference's 53.0, and the pool FLATTENED: water
+     luminance std 23.0 -> 17.6 against the reference's 25.5. Water p95 unchanged at
+     191, still 25 levels short of 216 — the near-white caustic highlights remain
+     entirely absent. The colour re-solve bought the correct base value at the cost of
+     internal modulation. This is why contrast_and_exposure did not move, and it may
+     not be reported as "no change".
+  7. THE SAND IS BYTE-IDENTICAL. 240,197,113 at the corners before and after, flat to
+     <=2 levels where the reference varies 8-13, 19 levels too blue and 6 too green.
+     It is the largest single area in the frame and no proposal in pass 6 touched it.
+
+NONE of 5-7 is a >=2 drop on any axis, so none of it was a reject. All of it is on
+the record so pass 8 does not inherit a false picture of what the frame is.
+
+A MEASUREMENT TRAP, RECORDED SO IT IS NOT WALKED INTO AGAIN. The previous card
+measured palm-foliage mass with a WHOLE-FRAME green mask (g>r+15 & g>b+15). On the
+pre-stack image the teal lagoon leaks into that mask and on the current cyan one it
+does not, so the whole-frame reading appears to show the canopy SHRINKING 3.00% ->
+1.82% when the same mask restricted to the palm quadrant shows it GROWING
+7.36% -> 8.21%. The quadrant figure is the true one. Had this gone unchecked, the
+critic would have published a fabricated regression against the one lens proposal
+that genuinely reshaped its prop.
+
+THE STALE EVIDENCE THE PREVIOUS CARD CARRIED (all eight now corrected):
+  water 63,163,158 "G 33 low, B 40 low"      -> 59,193,197, G 1 low, B 0
+  pool bbox top y 0.184                      -> 0.159
+  "a five-plank palm", "pinwheel of planks"  -> midrib + leaflets, serrated
+  "a REGULAR geometric hex lattice"          -> irregular bowed filament web
+  the pool's paler shallow rim ring "ABSENT" -> present in the image on disk
+  mean |laplacian| 6.69 / "61%"              -> 7.30 / 68%
+  foliage "1.38% vs 2.46% = 56%"             -> quadrant 8.21% vs 12.90% = 64%
+  luminance std 45.1                         -> 42.8
+
+RIGHT-AXIS CHECK: subject_fidelity IS CORRECT, FOR THE SECOND CONSECUTIVE PASS, AND
+THAT IS THE FINDING. Four axes tie at 1 (subject_fidelity, material_and_texture_detail,
+detail_density, scene_props_completeness) and subject_fidelity is earliest under the
+canonical order AND under the superseded one. It is also correct on merit. But it was
+pass 6's NOMINAL target and was never touched: the proposal booked against it
+(6253156a) reshaped the PALM, a margin prop this card scores under
+scale_and_proportion, silhouette_readability and scene_props_completeness. The
+subject of this frame is the nine chests, and a 4x matched crop of the centre chest
+confirms it still has no lid strap band, no corner brackets, no lock plate, no plank
+grain, no nails, no waterline and no reflection. A pass was spent on the campaign's
+lowest axis without attacking that axis's stated defect. Pass 8 must not repeat it.
+
+STACKING COST, stated once. Six of the seven proposals were render changes aimed at
+six DIFFERENT axes in one pass. The loop scores one axis at a time precisely so a
+movement can be attributed; with six simultaneous attacks, the pool's lost
+modulation cannot be cleanly assigned between the colour re-solve and the thinner
+filament net, and no single change can be credited with a score movement because
+there were none. Attributability was the thing the stack spent.
+
+FOREMAN-ERROR RESOLUTIONS (6993ef1e) — AUDITED, BOTH SOUND, ONE RATIONALE STRUCK.
+  * AXIS ORDER: RESOLVED CORRECTLY. campaign.toml's list is declared canonical, and
+    the manifest being the single declared machine-readable source of truth is a
+    sufficient and correct reason. Verified independently: subject_fidelity is the
+    earliest axis at the minimum under BOTH orders, so the resolution changes no
+    outcome. STRIKE THE SECOND RATIONALE, though — "reverting to the historical order
+    would invalidate the only scorecard that measures the current arm" is not a real
+    argument, because a scorecard's row ORDER is cosmetic and re-ordering rows
+    invalidates no score. If that reasoning were ever load-bearing it would be
+    "pick the ordering that protects my card", which is the exact species of
+    number-protection this loop exists to catch. The decision is right; keep it on
+    the first reason alone.
+  * CAPABILITY FACT: RESOLVED CORRECTLY, AND THE CORRECTION IS ITSELF TRUE. Verified
+    in-tree this pass: shading.ts computes `gloss = Math.min(Math.max(1 - roughness,
+    0), 1)`, drives a Blinn-Phong lobe plus a Schlick Fresnel rim from it, and
+    backend-webgl2.ts declares `uniform float uRoughness` and uploads
+    `material.roughness`. `grep -rn roughness` and `grep -rn createMeshData` in
+    apps/casino-games/web/src/games/treasure-chest-pick/ both return NOTHING. So both
+    levers are live on both arms and unused by this game, exactly as the correction
+    says. One addition the correction does not draw out: the roughness lever serves
+    the ACTUAL next axis, not only the one it is filed under — the reference gives
+    visible specular to the brass latches, the corner brackets and the lock plate,
+    which are three of subject_fidelity's named absences.
+
+ABSTRACTION GATE: MISSING RECORD, BACKFILLED AS abstractions/0006.toml. dc760d39
+added a new public field (`waviness`) to the exported `StylizedWaterOptions` of
+@axiom/web-engine, plus new filament geometry and a quadratic Bezier stroke, to serve
+this target. No record existed. ON THE MERITS it is sound: the inexpressibility
+branch genuinely applies (the caller owns only cellSize and no cellSize produces a
+curve; the straightness is in the geometry, inside the module that owns the
+geometry), it is the smallest possible surface (one optional field), and `waviness`
+defaults to 0 where a quadratic with its control point on its chord IS that chord, so
+every existing caller is byte-identical — the same zero-cost-default contract 0005
+shipped under, and a pattern worth keeping. NOT too-early on that branch, NOT
+ceremonial. The >=3-attempts branch is not satisfied and is not claimed: exactly ONE
+bounded attempt (bf8cc58e) had been made, and it landed in the same pass.
+  Two honest riders are in the record. (a) The artifact it reached for is still
+  there — the pool still wears a full-pool web of thin hard outlines with visible
+  junction dots over ~30% of the frame, and artifact_level scores 2 before and 2
+  after. (b) It is the SECOND spine widening built on abstractions/0003's premise of
+  a "hex-honeycomb water surface", which was read off a SUPERSEDED reference; era D's
+  water is broad soft caustic value bands, not a net of lines. The pass-6 card told
+  the board to re-examine that premise before spending a change on top of it, and two
+  changes were then spent on top of it in the same pass. Bending the lattice a third
+  time is not the next move; re-testing the premise is.
+  This is the FOURTH record the critic has backfilled (0003, 0004, 0005, 0006) —
+  five of the campaign's six. The mechanism that would make the gate self-satisfying,
+  a proposing lens writing its own NNNN.toml in its own commit, has never been used.
+
+FINDING CARRIED FORWARD, STILL UNRESOLVED: THE CHAMPION ARCHIVE DOES NOT EXIST.
+Raised in the pass-6 entry as finding 5 and still true — there is no champions/
+directory for this target across four references and at least nine landed champions
+(4921ba29, 2e70a614, ec137bd9, 4c7284cb, f233fe43, 09d9f6ec, ee6a2a64, 1e821742 and
+now 41d06d29). The record of what this game has looked like is recoverable only from
+git. That is the foreman's step on landing, not the critic's to fabricate; the shas
+are here so it can still be reconstructed.
+
+CHAMPION FRESHNESS: THE CARD DESCRIBES THE IMAGE ON DISK. Verified rather than
+assumed: champion.png and canvas2d-guard.png are byte-identical between this
+worktree at 6993ef1e and the champion worktree (md5 2561c75308c6e5ace9712840c56b86fe
+and 1f4c69a47f7a5187bd0c864671907565), the reference matches the working checkout,
+and `git log -- apps/casino-games/web/src/games/treasure-chest-pick` shows NO app
+commit after the promote 41d06d29. The champion is not stale.
+
+GUARDED ARM. canvas2d-guard.png was read for LEGIBILITY ONLY and is scored nowhere
+in this entry or in the scorecard: 468x293, subject present, all nine chests and the
+nameplate legible, pool, palm, castle, crab and shells present, not black, no error
+state. The drift the pass-6 promote entry reported — the finer net is fainter on that
+arm because its overlay samples at renderScale 0.5 — is confirmed as a legibility
+non-issue: the water there reads flatter, and the frame still reads. Nothing is
+credited or blamed to it, and the net's greater faintness there is explicitly NOT a
+win. Its deterministic frame-rate gate remains the check that governs it, not any
+axis.
+
+PARITY-CLAIM: clean. No "done / matched / parity" language in the scorecard, this
+ledger, campaign.toml, the abstraction records or the pass-6 commits. One phrase was
+checked and cleared: the lighting commit's "lands on the reference's measured 0.59
+density" is a claim about a NUMBER, not about parity — and it is recorded above as
+not landing (0.699 shipped). The champion stands at final_score 1.23 out of 5: a
+clean, legible, flat-shaded low-poly proxy of a photoreal-toy reference, correctly
+framed, correctly coloured in its water, and wrongly surfaced everywhere else.
+"""
+
+# `scorecard_before` is the f4fc1f79 card. It measured the SAME arm against the SAME
+# reference as `scorecard_after`, so unlike every earlier pair in this file the delta
+# here IS meaningful — and the delta is zero on all twelve axes. The prose above is
+# where the pass's real, sub-band movement is recorded.
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity = 1
+scale_and_proportion = 2
+silhouette_readability = 2
+color_palette = 2
+contrast_and_exposure = 2
+lighting_and_shadow = 2
+material_and_texture_detail = 1
+depth_and_separation = 2
+detail_density = 1
+scene_props_completeness = 1
+artifact_level = 2
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity = 1
+scale_and_proportion = 2
+silhouette_readability = 2
+color_palette = 2
+contrast_and_exposure = 2
+lighting_and_shadow = 2
+material_and_texture_detail = 1
+depth_and_separation = 2
+detail_density = 1
+scene_props_completeness = 1
+artifact_level = 2

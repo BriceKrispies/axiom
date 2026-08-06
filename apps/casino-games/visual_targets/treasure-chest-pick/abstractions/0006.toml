@@ -1,0 +1,127 @@
+# BACKFILLED BY THE CRITIC LENS (pass 7). A NEW ENGINE-SPINE API surface was added
+# to packages/axiom-web-engine to serve this convergence target — commit dc760d39,
+# whose own subject line begins `convergence(architect):` — with no abstraction
+# record. It landed inside the pass-6 stack, in parallel with the critic's own
+# commit, so the pass-6 critic could not have recorded it; this is the first pass in
+# which it could be recorded at all.
+#
+# That is the FOURTH spine change this campaign has shipped without its record
+# (0003, 0004, 0005, and now this one), and the THIRD since ledger iteration 5 wrote
+# down the commitment that "every future structural change on this target ships with
+# its NNNN.toml and a scored ledger entry in the SAME commit". FIVE of the campaign's
+# six abstraction records have now been written by the critic after the fact. A gate
+# satisfied only retroactively is not a gate — and in this campaign's case, the one
+# structural mechanism that would make it self-satisfying (the proposing lens writing
+# its own record in its own commit) has never once been used.
+
+axis = "artifact_level"   # the pool wore a countable hex GRID over ~30% of the frame
+
+failed_attempts = []
+# The >=3-failed-bounded-attempts route is NOT satisfied and is not claimed. Exactly
+# ONE bounded attempt had been made on this artifact — bf8cc58e, cellSize 58 -> 22 —
+# and it landed in the SAME pass as this spine change rather than before it. The
+# record rests entirely on the inexpressibility route below.
+
+inexpressible = true
+# And it genuinely is, on the merits. `drawStylizedWaterSurface` owns the RENDERING
+# of the effect and the caller owns only the boundary and the cell size. The net's
+# filaments were emitted with `lineTo`, so every cell was a literal straight-edged
+# polygon. No value of `cellSize` produces a curve: a smaller one is a denser hex
+# grid, a larger one is bigger hex tiles. The straightness lives in the geometry,
+# inside the module that owns the geometry, so that is where it had to be fixed —
+# the alternative would have been the app re-implementing the effect's stroke path
+# in the game, which is precisely the "fix placed too high" this repo's No-Shortcuts
+# rule bans. Going structural here on the first attempt was correct.
+
+smallest_api = """
+packages/axiom-web-engine/src/canvas-water.ts:
+  * `StylizedWaterOptions` gains ONE optional field, `waviness` — how far each
+    ripple filament bows, as a fraction of the authored full bow.
+  * the internal `Segment` gains its exact midpoint (`mx`,`my`) and a pre-scaled
+    unit BOW (`bx`,`by`) — the edge's own perpendicular, hash-signed from a hash
+    stream independent of the keep/drop decision so neighbouring filaments bend
+    opposite ways. Storing the bow pre-scaled keeps the cached lattice
+    waviness-independent, so it is still built once per (cellSize, bounds).
+  * a filament strokes as a quadratic Bézier rather than a line.
+  * the headless Canvas2D test stub learns `quadraticCurveTo`.
+App tier: treasure-chest-pick opts in by passing a `waviness`.
+
+CRITIC ASSESSMENT OF THE PLACEMENT: sound, minimal, and correctly placed. One
+optional field on an existing options interface is the smallest surface that could
+express this. `waviness` defaults to 0, and a quadratic whose control point lies on
+its chord IS that chord, so every pre-existing caller's output is byte-identical
+rather than merely close — the same zero-cost-default contract `SceneFrame.ambient`
+(0005) shipped under, which is the right pattern and worth keeping. No new
+primitive, no new module, no new export, no branch added to the spine's laws
+(canvas-water.ts is the documented Canvas2D browser-API boundary, already outside
+the branchless/coverage spine). Scene node count moves by exactly zero, so the
+guarded arm's deterministic frame-rate gate is untouched. NOT too-early on the
+inexpressibility route, and NOT ceremonial.
+
+TWO THINGS THIS RECORD MUST ALSO SAY, because they are the honest part.
+
+(a) THE ARTIFACT IT REACHED FOR IS STILL THERE. Measured on the judged arm in
+pass 7: the pool no longer wears a countable straight-edged hex tiling — that much
+landed — but it still wears a full-pool web of thin hard white outlines with visible
+white DOTS at the filament junctions, over roughly 30% of the frame, with cells
+several times larger than the reference's caustic cells. `artifact_level` scores 2
+before this change and 2 after it. The spine surface was widened, correctly and
+cheaply, for a result that did not move the axis it was aimed at. That is not a
+reason to revert it; it is the reason the next change on this axis must not be a
+third adjustment to the same net.
+
+(b) THE PREMISE UNDERNEATH IT IS UNRE-EXAMINED, AND THIS IS THE SECOND WIDENING
+BUILT ON IT. abstractions/0003 justified the stylized-water primitive against a
+"hex-honeycomb water surface" read off a SUPERSEDED reference. Era D's water is not
+a net of lines at all: it is irregular organic caustic CELLS made of broad soft
+value bands rising to near-white (water luminance p5/med/p95 124/167/216, std 25.5,
+against the champion's 137/167/191, std 17.6). The pass-6 card told the board in as
+many words to re-examine that premise before spending a change on top of it; two
+changes were then spent on top of it in the same pass, one of them this one. The
+open structural question is whether a hex-lattice-derived FILAMENT net can ever read
+as era D's caustics, or whether the honest answer is a different cue entirely — a
+soft multi-octave value field rather than strokes. Bending a lattice further is a
+third adjustment to a premise nobody has re-tested.
+
+ONE STANDING CAVEAT, the same one 0005 carries: `waviness` is a parameter of the
+2D overlay effect and reaches EVERY arm identically. It is NOT capability-gated,
+arm-scoped richness. The guarded canvas2d arm gets the same curved net, only fainter
+because that arm's overlay samples at renderScale 0.5 (recorded in the pass-6
+promote entry as guard drift). That is allowed — the guard may drift and stays
+legible — and it is written here so nobody later mistakes this field for a
+judged-arm-only lever.
+"""
+
+commits = [
+  "dc760d39 convergence(architect): axiom-web-engine — the water's ripple filaments bow, so the net reads as caustics instead of a hex tiling",
+  "bf8cc58e convergence(surfacing): artifact_level — the lagoon's ripple net is caustic crazing, not a countable hex lattice (the app-tier cellSize 58 -> 22 this field was added to serve)",
+]
+
+screenshot_command = """
+NOT RE-RENDERED BY THIS LENS — the critic does not build or render. The judged-arm
+recipe is campaign.toml [capture.judged]:
+
+  npm --prefix packages/axiom-web-engine run build
+  uv run scripts/localhost_servers.py start-app casino-games --port 8087
+  uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready \\
+    --backend webgl2 --clip stage --url http://localhost:8087/ --out champion.png
+"""
+
+screenshot_proof = """
+NO DEDICATED BEFORE/AFTER PAIR EXISTS FOR THIS COMMIT, because it landed inside a
+seven-proposal stack and only the stacked result was captured. What CAN be stated
+honestly, from the two images actually on disk plus the pre-stack champion recovered
+with `git show 1e821742:.../champion.png` and measured by one method:
+
+  the net's regularity                    genuinely reduced (verified in matched crops)
+  whole-frame detail energy, mean |lap|   6.69 -> 7.30   (reference 10.78)
+  water luminance std                     23.0 -> 17.6   (reference 25.5)  WORSE
+  artifact_level                          2 -> 2          UNCHANGED
+
+The middle line is the one to carry forward: the pool ended this pass with LESS
+internal value modulation than it started with, so whatever the bowed filaments
+bought in regularity they did not buy in the cue the reference actually uses. Part of
+that loss belongs to the colour re-solve landing in the same stack and cannot be
+attributed to this commit alone — which is itself the cost of stacking six
+axis-attacks into one pass, and is recorded as such rather than guessed at.
+"""
