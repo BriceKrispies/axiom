@@ -14,7 +14,7 @@
  * to full detail.
  */
 
-import { rendererBackendName } from "@axiom/web-engine";
+import { rendererBackendName, rendererTierAtLeast } from "@axiom/web-engine";
 
 /** The engine's names for the two non-GPU backends: the software rasterizer and
  * the canvas-free DOM renderer. Both pay per primitive rather than per pixel on
@@ -30,6 +30,29 @@ const FRUGAL_BACKENDS: readonly string[] = ["Canvas2D", "CSS3D"];
 export const lowDetail = (): boolean => {
   try {
     return FRUGAL_BACKENDS.includes(rendererBackendName());
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * True only on a HARDWARE tier — the gate for richness that exists solely for the
+ * GPU arm, and that the frugal arms must never be asked to pay for.
+ *
+ * This is the mirror image of `lowDetail()`, and the difference is not cosmetic.
+ * `lowDetail()` answers "should I SHED something the full scene has?", so its
+ * safe default with no renderer mounted is *full* detail. This answers "should I
+ * ADD something only a GPU can afford?", so its safe default is *no* — a headless
+ * caller, and every non-GPU tier, gets the frugal scene and its exact node count.
+ *
+ * It keys on the TIER rather than the backend name on purpose: the Canvas2D
+ * rasterizer serves BOTH the `canvas2d` and the `webgl1` tiers, so "not Canvas2D"
+ * is not the same question as "at least webgl2", and only the latter is the one a
+ * geometry budget cares about.
+ */
+export const gpuDetail = (): boolean => {
+  try {
+    return rendererTierAtLeast("webgl2");
   } catch {
     return false;
   }

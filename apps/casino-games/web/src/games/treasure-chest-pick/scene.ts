@@ -23,7 +23,7 @@ import { phaseAge } from "../../chance-engine/sessions/session.ts";
 import type { BrandSpec } from "../../presentation/branding/brand.ts";
 import { brandMaterials } from "../../presentation/branding/brand.ts";
 import { stampText } from "../../presentation/branding/label.ts";
-import { lowDetail, sparseDetail, weldedLetteringReads } from "../../presentation/detail.ts";
+import { gpuDetail, lowDetail, sparseDetail, weldedLetteringReads } from "../../presentation/detail.ts";
 import { confettiBurst, CONFETTI_MATERIALS, sparkleRing } from "../../presentation/celebrations/confetti.ts";
 import { celebrationFor, outcomeRarity, speedTicks } from "../round-state.ts";
 import { clamp01, easeOutBack, easeOutCubic, lerp, pulse } from "../../presentation/stage/easing.ts";
@@ -1118,8 +1118,81 @@ const decorPart = (
   rotation: EngineQuat = QUAT_IDENTITY,
 ): SceneInstance => ({ key, material, mesh, transform: { position, rotation, scale } });
 
+/** Leaflet stations PER SIDE of a frond's midrib on the hardware arm. Five spaced
+ * a fifth of the frond apart, with leaflets `FROND_LEAFLET_WIDTH` across, leaves a
+ * notch of ~0.06 between neighbours — a serrated blade edge, which is exactly how
+ * the reference's leaflets read at this size. */
+const FROND_LEAFLETS = 5;
+/** How far a leaflet leans back toward the frond's tip, off straight-out. */
+const FROND_LEAFLET_SWEEP = 0.72;
+/** The widest leaflet's reach, as a fraction of the frond's length. Twice this is
+ * the blade's width/length ratio (~0.42), measured off the reference. */
+const FROND_LEAFLET_SPAN = 0.21;
+const FROND_LEAFLET_WIDTH = 0.24;
+/** The midrib's width once leaflets carry the blade — a stem, not a board. */
+const FROND_RIB_WIDTH = 0.11;
+/** The whole frond as ONE board, which is what a frond IS on the frugal arms. */
+const FROND_BOARD_WIDTH = 0.34;
+
+/**
+ * One palm frond.
+ *
+ * The reference's fronds are FEATHERS: a slim midrib carrying a row of leaflets
+ * that splay back toward the tip, the blade widest around mid-length and closing
+ * to a point. The champion drew each frond as one flat 0.34-wide board — a green
+ * popsicle stick — and seven of those radiating from the crown read as a paper
+ * pinwheel rather than a palm. The palm is the second-largest subject in the shot
+ * and it was the crudest proxy left in the frame.
+ *
+ * The engine's mesh vocabulary is box / sphere / cylinder — there is no sheet, no
+ * alpha-cutout card, and no way to cut a leaf silhouette out of a quad. So a rib
+ * plus a splayed row of leaflet boxes IS the primitive-honest frond, the same
+ * argument the lid dome (`lidArc`) and the clam fan (`clamShell`) already make in
+ * this file. It reads for the same reason too: every leaflet meets the key light
+ * at its own angle, so the blade carries interior shading as well as a feathered
+ * silhouette.
+ *
+ * It costs 2·`FROND_LEAFLETS` extra nodes a frond, so it is gated on `gpuDetail()`
+ * (webgl2-or-better — see `detail.ts`). On the frugal arms the frond stays the
+ * single full-width board it already was, unchanged and unmoved, so their node
+ * count moves by exactly zero.
+ */
+const palmFrond = (key: string, material: string, crown: EngineVec3, q: EngineQuat, len: number): readonly SceneInstance[] => {
+  const feathered = gpuDetail();
+  const rib = decorPart(
+    key,
+    material,
+    "box",
+    addV3(crown, rotateByQuat(v3(0, 0.05, len / 2), q)),
+    v3(feathered ? FROND_RIB_WIDTH : FROND_BOARD_WIDTH, 0.09, len),
+    q,
+  );
+  const leaflets = feathered
+    ? Array.from({ length: FROND_LEAFLETS * 2 }, (_, i): SceneInstance => {
+        const side = i % 2 === 0 ? -1 : 1;
+        // Stations march up the rib from just off the crown to just short of the tip.
+        const t = (Math.floor(i / 2) + 0.5) / FROND_LEAFLETS;
+        // The blade profile: short leaflets at the base, longest around mid-frond,
+        // closing to a point at the tip.
+        const span = len * FROND_LEAFLET_SPAN * Math.sin(Math.PI * t) ** 0.6;
+        // Out to the side, leaning back toward the tip, and tipped down a little so
+        // the blade domes over its rib instead of lying flat in one plane.
+        const leafQ = quatMul(q, quatMul(quatYaw(side * (Math.PI / 2 - FROND_LEAFLET_SWEEP)), quatPitch(0.26)));
+        return decorPart(
+          `${key}f${i}`,
+          material,
+          "box",
+          addV3(crown, addV3(rotateByQuat(v3(0, 0.05, t * len), q), rotateByQuat(v3(0, 0, span / 2), leafQ))),
+          v3(FROND_LEAFLET_WIDTH, 0.055, span),
+          leafQ,
+        );
+      })
+    : [];
+  return [rib, ...leaflets];
+};
+
 /** A leaning palm swaying in the wind: a curved stack of tapering bark cylinders,
- * a coconut cluster, and a fan of drooping frond boards radiating from the crown.
+ * a coconut cluster, and a fan of drooping feathered fronds radiating from the crown.
  * `tick` drives a gentle whole-crown sway (bend grows with height, so the trunk
  * arcs and the crown leads) plus a faster per-frond flutter — a pure function of
  * the tick via `palmSway`, so it can never correlate with the outcome. */
@@ -1150,20 +1223,13 @@ const palmTree = (origin: EngineVec3, tick: number): readonly SceneInstance[] =>
   const coconuts = [v3(-0.14, -0.04, 0.12), v3(0.12, -0.02, -0.14), v3(-0.02, -0.16, -0.02)].map((d, i) =>
     decorPart(`palm:coco${i}`, "Coconut", "sphere", addV3(crown, rotateByQuat(d, crownRoll)), v3(0.2, 0.2, 0.2)),
   );
-  const fronds = Array.from({ length: 7 }, (_, i): SceneInstance => {
+  const fronds = Array.from({ length: 7 }, (_, i): readonly SceneInstance[] => {
     const a = (i / 7) * Math.PI * 2;
     const droop = 0.55 + (i % 2) * 0.12 + sway.flutter(i);
     const q = quatMul(crownRoll, quatMul(quatYaw(a), quatPitch(droop)));
     const len = 1.5 + (i % 3) * 0.14;
-    return decorPart(
-      `palm:frond${i}`,
-      i % 2 === 0 ? "PalmLeaf" : "PalmLeafDark",
-      "box",
-      addV3(crown, rotateByQuat(v3(0, 0.05, len / 2), q)),
-      v3(0.34, 0.09, len),
-      q,
-    );
-  });
+    return palmFrond(`palm:frond${i}`, i % 2 === 0 ? "PalmLeaf" : "PalmLeafDark", crown, q, len);
+  }).flat();
   return [...contactShadow("palm:shadow", origin, 0.62, PALM_CROWN_Y), ...trunk, ...coconuts, ...fronds];
 };
 
