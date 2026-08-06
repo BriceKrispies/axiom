@@ -228,35 +228,54 @@ export const chestCamera = (count: number): ReturnType<typeof tabletopCamera> =>
   const center = v3(0, 0.42, -0.1);
   // Start from the shared tabletop framing (which the other card-table games
   // keep), then reseat the PITCH for THIS game only, measured off the reference
-  // rather than judged by eye. Two scale-invariant quantities pin the reference
-  // camera's elevation, and both are read straight off reference.png:
+  // rather than judged by eye.
   //
-  //   * the 3x3 chest grid's screen bbox is TALLER than it is wide — depth/width
-  //     = 0.467/0.433 = 1.08. A ground-plane grid's screen depth/width is
-  //     essentially sin(elevation), so 1.08 wants a high, plan-leaning camera.
-  //   * the lagoon disc's far rim sits at 0.225 of frame height. A shallower
-  //     camera pushes that rim DOWN the frame and opens a dead band of empty
-  //     sand above the pool.
+  // The seat this replaces (span·1.076 / span·0.887, 50.5° down) was fitted on a
+  // quantity that was computed WRONG. It read the reference grid's screen bbox as
+  // "depth/width = 0.467/0.433 = 1.08" — but 0.467 is a fraction of frame HEIGHT
+  // and 0.433 a fraction of frame WIDTH, and reference.png is 1536x1024. In
+  // PIXELS, the only units in which a screen aspect means anything, that bbox is
+  // 448x572, i.e. depth/width = 0.783. The old number was inflated by exactly the
+  // 1.5 frame aspect, which is why a fit that wanted "as plan-leaning as
+  // possible" still landed 4° shy of the real answer.
   //
-  // The previous seat (span·0.95 / span·1.02, ~43° down) failed both: it
-  // projected the grid at depth/width 0.93 — a full 14% too shallow, so the
-  // three rows crowded together and the nine chests stopped reading as a grid —
-  // and it put the lagoon rim at 0.264, with the sand band above it. This
-  // reseats the camera at span·1.076 / span·0.887 (~50.5° down), which is the
-  // joint least-squares fit over grid depth/width, grid top/bottom, grid width,
-  // row-to-row perspective divergence, and lagoon rim + width: it cuts the
-  // weighted framing error against the reference by ~4x. Only the angle moves
-  // there; the on-screen size of the board is held by `LENS_PULL` above, which
-  // scales distance and lens angle together. Pitching UP also strictly helps the
-  // old backdrop worry below: a steeper look drops the top frame-edge ray onto
-  // the lagoon floor even closer in, so the pastel sheet stays out of frame. The
-  // hero close-up is derived from this camera via `heroFraming` off a fixed
-  // heroDistance + fovY, so its on-screen scale is untouched and it re-centers.
+  // Re-measured, in pixels, on reference.png against champion.png (948x597), the
+  // four framing facts this seat controls are:
+  //
+  //                                   reference   champion (50.5°)
+  //   grid screen bbox depth/width       0.783       0.699
+  //   grid bbox top, of frame height     0.288       0.310
+  //   grid bbox bottom                   0.726       0.742
+  //   lagoon far rim                     0.161       0.185
+  //
+  // The grid is 12% too FLAT — the three rows stack too shallowly, which is what
+  // makes the near and middle rows crowd instead of reading as three depths — and
+  // the lagoon's far rim sits 0.024 of frame height too low, so the sandy band
+  // that carries the palm and the sandcastle is too wide. Both want a steeper
+  // camera. What CAPS how steep is a third, scale-invariant fact that wants the
+  // opposite: the gap from the far rim to the back row, over the lagoon's screen
+  // semi-width, is 0.248 in the reference and 0.238 here — already at parity, and
+  // pitching up opens it. (The three cannot be satisfied at once; the reference is
+  // an illustration, not a pinhole render of this scene.)
+  //
+  // 54.5° down (span·1.1353 / span·0.8098) is the least-squares seat over those
+  // four, and it more than halves the weighted framing error — 9.9% -> 4.5% RMS.
+  // It recovers a quarter of the grid's missing depth and nearly all of the rim
+  // error, and stops short of the pitch where the rim tears away from the back row.
+  //
+  // Only the ANGLE moves: the multipliers are the old pair rotated about the
+  // target, so |(up, fwd)| is 1.3945 either way. Distance, `LENS_PULL`, fovY, the
+  // board's on-screen size and the row-to-row perspective divergence are all
+  // untouched, as is the backdrop crop (a steeper look drops the top frame-edge
+  // ray onto the lagoon floor even closer in, so the pastel sheet stays out of
+  // frame). The hero close-up is derived from this camera via `heroFraming` off a
+  // fixed heroDistance + fovY, so its on-screen scale is untouched and it
+  // re-centers. Node count moves by exactly zero.
   const base = tabletopCamera(center, span);
   return {
     ...base,
     fovY: 2 * Math.atan(Math.tan(base.fovY / 2) / LENS_PULL),
-    position: v3(center.x, center.y + span * 1.076 * LENS_PULL, center.z + span * 0.887 * LENS_PULL),
+    position: v3(center.x, center.y + span * 1.1353 * LENS_PULL, center.z + span * 0.8098 * LENS_PULL),
   };
 };
 
