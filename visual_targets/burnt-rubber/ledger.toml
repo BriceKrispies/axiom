@@ -1143,3 +1143,142 @@ atmosphere = 0
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 1
+
+[[iteration]]
+iteration = 11
+attacked_axis = "none"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/abstractions/0006.toml",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+SCORING RECALIBRATION by the critic lens. No lens ran, no app source changed, \
+no render was captured. The champion on disk is unchanged and remains the \
+era-C baseline (md5 e6346ecf..., byte-identical to champions/0007). This entry \
+corrects two inflated axes, backfills one missing abstraction record, and \
+records what the era swap dropped. \
+\
+FIRST, WHAT THIS AUDIT FOUND HONEST, because a critic that only reports faults \
+is not measuring anything. Every measurement in scorecard.champion.toml's \
+header was re-derived from the two PNGs and reproduced exactly: band median \
+139.7 / 0.1, 1st percentile 23.2 / 0.0, %below-L16 0.5 / 78.1, saturation 0.522 \
+/ 0.141, whole-frame luma 114.4 / 23.3. Not one figure was rounded in the \
+campaign's favour. The era-C boundary is handled better than the skill asks: \
+the scorecard warns a reader against reading 1.225 -> 0.25 as a regression \
+before anyone can misread it, and iteration 10 says plainly that the two \
+numbers are different exams. The champion is fresh, not stale — it was captured \
+at c8d11623 and the only commit since (edb4f4ff) touched visual_targets/ alone. \
+No forbidden parity or done/matched language anywhere in the record; the two \
+"parity" hits in campaign.toml are the guard-arm rule stating what must NOT be \
+traded away, which is correct usage. The guarded canvas2d arm is captured, \
+never scored, and never credited or blamed in any axis note. \
+\
+CORRECTION 1 — scale_and_proportion 2 -> 1. The judged arm renders the WORLD \
+anamorphically and the campaign has known it since iteration 9, where it was \
+written down as a standing finding and then dropped by the era-C swap: it \
+appears nowhere in iteration 10 or in the era-C scorecard. web.rs still \
+configures the surface from the compile-time WIDTH x HEIGHT (1280x720) while \
+the live canvas is 470x836 @ DPR 2 = 940x1672, a 3.16x horizontal squash. \
+Proved from the champion itself rather than inferred: the moon (world space) \
+measures 34w x 114h, h/w 3.35, while the BRAKE ring (screen space) measures \
+180w x 190h, h/w 1.06 — 3.35/1.06 = 3.16, the predicted factor to the second \
+decimal. A round HUD and an elliptical moon in one image. The old note scored \
+the axis a 2 on the car's share of frame and the road's width at the bottom \
+edge; both readings were taken through the squash, and the car's "comparable \
+share of frame" is two errors cancelling. An axis named scale_and_proportion \
+cannot be "the right structure is emerging" on a frame stretched 3.16x. \
+\
+The era-B reason for not scoring the squash — "the reference carries the same \
+squash in its world and only its car was redrawn true" — EXPIRED WITH ERA B and \
+was never re-examined when the reference changed. The era-C reference is a \
+painted daylight frame with a round sun and round cumulus. Nothing in it is \
+anamorphic. Whether to FIX the squash remains a foreman decision about the \
+target, exactly as iteration 9 said; whether to SCORE it is not, and it has been \
+scored now. \
+\
+CORRECTION 2 — artifact_level 1 -> 0. The old note named two artifacts. \
+Auditing this axis on a frame that is 78% black requires lifting the exposure, \
+and at 6x the champion shows at least six: a stray green streak crossing the \
+black sky from ~(132,460) to ~(152,660) at RGB ~(17,52,35) against a (0,0,0) \
+sky, never named before; lane paint blooming into wide white smears where the \
+reference's is clean matte white; the HUD's BOOST row drawn on top of the touch \
+buttons, overlapping the D-pad and the GAS ring; a gear disc reading "R" while \
+the HUD reads 156 KM/H; the aliasing already named; and the crushed floor \
+already named, at 78.1% of the scene band and 99.7% of rows 0.28h..0.45h below \
+L=10. Six classes against a reference with none is anchor 0. \
+\
+NEITHER CORRECTION MOVES THE ATTACK, and that was checked before they were \
+written rather than after. scale_and_proportion goes to 1, not 0, so it joins no \
+tie. artifact_level goes to 0 but is 12th in campaign.toml's fixed order, behind \
+lighting_and_shadow at 5th. The zeros are now lighting_and_shadow (5), \
+color_palette (6), contrast_and_exposure (7), atmosphere (9), artifact_level \
+(12); the fixed order still breaks the tie to lighting_and_shadow. \
+next_attacked_axis is CONFIRMED, not changed. final_score 0.25 -> 0.20 \
+(average 10/12 -> 8/12, lowest still 0) — a recalibration of the same image, not \
+a regression of the render, and it must not be reported as one. \
+\
+ABSTRACTION GATE — missing record, backfilled as abstractions/0006.toml. \
+Iteration 9 sets abstraction_introduced = true and names no abstraction, the \
+same defect 0005.toml recorded for iteration 7. The unnamed abstraction is \
+09b5c12e's supersample tier: a new public method on axiom-host's \
+HostDeviceProfile, a new public entry on the windowing module's WindowingApi, \
+and a rewritten render-target clamp in gpu-backend. The change CLEARS the gate \
+on the "genuinely cannot express" branch — the engine had no anti-aliasing of \
+any kind and render_size only ever scaled DOWN, so no app-tier config could ask \
+for more samples — so the ruling is missing-record, not too-early and not \
+ceremonial. Two things are recorded there that were not recorded anywhere \
+before: its screenshot_proof is UNVERIFIED and the A/B at fixed lighting that \
+would prove it has still not been run, and it was spent on artifact_level while \
+the pass was attacking subject_fidelity, i.e. off both the attacked axis and \
+the lowest axis. \
+\
+THE PATTERN IS NOW THE FINDING. This is the SIXTH consecutive spine change on \
+this line to land without its gate record (0001-0006), and each of the five \
+previous backfills said in as many words that the repetition was the finding. \
+It should stop being read as six oversights and start being read as a process \
+defect: nothing in the loop makes the gate record a precondition of landing, so \
+it is the step that gets dropped whenever a pass is going well. \
+\
+MINOR, recorded and not acted on: the era-C bookkeeping is dated 2026-08-06 \
+(campaign.toml reference_supplied, the ledger's era header, the INDEX row and \
+the champions/0007 filename) while both the era commit edb4f4ff and the \
+captured commit c8d11623 are dated 2026-08-05. Not corrected here — the date is \
+baked into an archive filename the INDEX references, and renaming it is churn \
+with a real chance of desyncing the archive to fix a day. \
+\
+Guarded arm: canvas2d not re-captured (no render ran) and not scored, as ever.
+"""
+next_attacked_axis = "lighting_and_shadow"
+abstraction_introduced = false
+
+[iteration.scorecard_before]   # era C as previously written — final_score 0.25
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 0
+color_palette = 0
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 1
+
+[iteration.scorecard_after]    # same image, recalibrated — final_score 0.20
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 0
+color_palette = 0
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 0

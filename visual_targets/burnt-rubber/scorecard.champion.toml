@@ -71,14 +71,49 @@
 # The champion's scene band is 78% black against a reference that is 0.5% black.
 # Its most common tone is one the reference essentially does not contain.
 #
-# final_score = lowest_axis * 0.7 + average_axis * 0.3
-#             = 0 * 0.7 + (10/12) * 0.3 = 0.25
+# Every figure above was re-measured by the critic pass (iteration 11) from the
+# two PNGs on disk and reproduced to the decimal. This scorecard's numbers are
+# real; two of its SCORES were not, and are corrected below.
 #
-# NEXT FLAW = lighting_and_shadow. Four axes sit at 0 and campaign.toml's fixed
-# order breaks the tie 5th, ahead of color_palette (6th), contrast_and_exposure
-# (7th) and atmosphere (9th). That order is also the right order causally: the
-# other three are all downstream of the frame being lit by a moon. Nothing about
-# the palette, the exposure or the sky can be judged until there is a sun.
+# ---------------------------------------------------------------------------
+# ADDED BY THE CRITIC PASS — the world render is anamorphic, and it is measured
+# ---------------------------------------------------------------------------
+# The judged arm renders the WORLD at a 16:9 camera and blits it to a portrait
+# surface, so every horizontal proportion in the frame is wrong by construction:
+#
+#   web.rs configures the surface from the compile-time WIDTH x HEIGHT
+#   (1280x720, lib.rs) while the live canvas is 470x836 @ DPR 2 = 940x1672.
+#   (1280/720) / (940/1672) = 3.16x horizontal squash.
+#
+# Proved from the champion itself, not inferred:
+#
+#   moon (world space)        bbox 34w x 114h    h/w = 3.35
+#   BRAKE ring (screen space) bbox 180w x 190h   h/w = 1.06
+#   3.35 / 1.06 = 3.16 — the predicted factor, to the second decimal.
+#
+# The HUD is round and the moon is an ellipse in the same image. This was found
+# at ledger iteration 9 and recorded there as a STANDING FINDING; era C's swap
+# (iteration 10) dropped it, and it appears nowhere in this file until now. It
+# is charged to `scale_and_proportion` — the axis that is literally about
+# proportion — and deliberately NOT double-counted at composition_and_framing.
+#
+# The era-B reason for not scoring it ("the reference carries the same squash in
+# its world") EXPIRED WITH ERA B. The era-C reference is a painted daylight
+# frame with a round sun and round cumulus; nothing in it is anamorphic. The
+# reason was never re-examined when the reference changed.
+#
+# final_score = lowest_axis * 0.7 + average_axis * 0.3
+#             = 0 * 0.7 + (8/12) * 0.3 = 0.20
+#             (was stated 0.25 on a 10/12 average, before the two corrections)
+#
+# NEXT FLAW = lighting_and_shadow — UNCHANGED by this recalibration, and that is
+# the point of checking. Five axes now sit at 0 and campaign.toml's fixed order
+# breaks the tie 5th, ahead of color_palette (6th), contrast_and_exposure (7th),
+# atmosphere (9th) and artifact_level (12th). That order is also the right order
+# causally: the others are all downstream of the frame being lit by a moon.
+# Nothing about the palette, the exposure or the sky can be judged until there
+# is a sun. Neither corrected axis can reach the tie-break, so no number here
+# was moved in a way that redirects the attack.
 
 [scores]
 # 2 — the one axis era C inherits in good shape, because it is about where things
@@ -153,12 +188,25 @@ depth_and_separation = 1
 # no gradient, no cloud, no scattering and no flare to grade toward.
 atmosphere = 0
 
-# 2 — the car occupies a comparable share of frame in both, and the road's width
-# at the bottom edge is close, so the rig's scale is roughly on-model. It does
-# not reach 3 because the reference's road carries four visible lanes plus
-# shoulders where the champion shows a narrower ribbon, and its palms establish a
-# vertical scale the champion has nothing to answer with.
-scale_and_proportion = 2
+# 1 — CORRECTED BY THE CRITIC PASS, was 2.
+#
+# The previous note read the car's share of frame and the road's width at the
+# bottom edge and called the rig "roughly on-model". Both of those readings were
+# taken THROUGH a 3.16x horizontal squash (measured in the header: world-space
+# moon 3.35:1 against screen-space HUD ring 1.06:1). A frame whose world aspect
+# is off by 3.16x has no correct horizontal proportion anywhere in it — the car's
+# width, the road's width, the post spacing and the lane pitch are all wrong by
+# the same factor, and the car's "comparable share of frame" is two errors
+# cancelling, not a proportion that matches.
+#
+# An axis named scale_and_proportion cannot be a 2 ("the right structure is
+# emerging") on a frame that is anamorphically stretched. 1 is the honest anchor:
+# the proportions are PRESENT as a proxy — a car of roughly car size on a road of
+# roughly road width — and nobody would mistake them for the reference's. The
+# original note's own reasons for withholding 3 (four reference lanes against
+# three, palms setting a vertical scale the champion cannot answer) survive
+# unchanged and are reasons on top of this one.
+scale_and_proportion = 1
 
 # 1 — the reference is dense and the density is the point: two rows of palms in
 # perspective, a village of stilt houses, parasols, rocks, sailboats, breaking
@@ -167,9 +215,31 @@ scale_and_proportion = 2
 # is sparse, and most of what is there is not visible at this exposure.
 detail_density = 1
 
-# 1 — the champion's aliasing (lane edges, kerb blocks, the receding post rows)
-# is currently half-hidden by darkness and will be fully exposed by a daylight
-# frame, which is worth stating before it looks like a regression later. The
-# crushed floor that this era inherits from era B's grade is itself an artifact
-# here: against a daylight reference it is not a look, it is clipping.
-artifact_level = 1
+# 0 — CORRECTED BY THE CRITIC PASS, was 1.
+#
+# The previous note named two artifacts. The frame carries at least six, and the
+# critic pass found four of them by looking at the champion with the exposure
+# lifted 6x — which is the only way to audit an axis on a frame that is 78%
+# black:
+#
+#   1. A stray green streak crosses the black sky, running roughly (132,460) to
+#      (152,660) at RGB ~(17,52,35) against a (0,0,0) sky. Unnamed until now.
+#   2. The lane paint blooms into wide white smears at the bottom of the frame;
+#      the reference's paint is clean matte white with hard edges.
+#   3. The HUD's "BOOST [######----]" row is drawn ON TOP of the touch buttons,
+#      overlapping the left D-pad and the GAS ring. The reference's boost meter
+#      sits clear below its controls.
+#   4. The gear disc top-right reads "R" while the HUD reads 156 KM/H. The
+#      reference reads "4 / GEAR". A reverse gear at 156 km/h is an inconsistent
+#      state in the captured moment, not a look difference — see the ledger note,
+#      it is probably the probe placing speed without placing the gear.
+#   5. The aliasing already named (lane edges, kerb blocks, receding post rows).
+#   6. The crushed floor already named: 78.1% of the scene band and 99.7% of rows
+#      0.28h..0.45h below L=10. Against a daylight reference that is clipping.
+#
+# Six artifact classes, one of them covering three quarters of the scene band,
+# against a reference with none, is anchor 0 — "plainly incorrect" — not anchor
+# 1. Recorded explicitly: artifact_level is 12th in campaign.toml's fixed order,
+# so taking it to 0 CANNOT win the tie-break against lighting_and_shadow (5th).
+# This correction does not and cannot redirect the attack.
+artifact_level = 0

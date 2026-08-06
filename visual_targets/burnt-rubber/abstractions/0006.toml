@@ -1,0 +1,124 @@
+# BACKFILLED by the critic pass (iteration 11).
+#
+# This record did not exist. Ledger iteration 9 — the era-B pass-2 landing —
+# sets `abstraction_introduced = true` and then names no abstraction, exactly as
+# iteration 7 did before it (see 0005.toml, which backfilled that one and said
+# in as many words that a flag claiming an abstraction with no record of WHICH
+# one is worse than no flag).
+#
+# The abstraction it did not name is `09b5c12e` ("convergence(architect):
+# axiom-host — give the render-scale path an upward direction (supersample
+# tier)"): a new public method on the `host` layer's `HostDeviceProfile`, a new
+# public entry point on the `windowing` module's `WindowingApi`, and a rewritten
+# render-target clamp plus a raised texture-dimension limit in the
+# `gpu-backend` module. New engine-spine surface on the judged arm's render
+# path, landed in a convergence pass, with no gate record.
+#
+# This is the SIXTH consecutive spine change on this campaign's line to land
+# without its record (0001, 0002, 0003, 0004, 0005, and now this). Five previous
+# critic passes have each written down that the repetition is the finding and
+# not the paperwork, and the pass after each one did it again. That is now the
+# most durable fact in this campaign's record, and it should be read as a
+# process defect rather than as six independent oversights: nothing in the loop
+# makes the gate record a precondition of landing, so it is always the step that
+# gets dropped when a pass is going well.
+#
+# Ruling: MISSING-RECORD, backfilled — not too-early, not ceremonial. The change
+# itself clears the gate cleanly on the "genuinely cannot express" branch (see
+# `inexpressible`). One SCOPE concern is recorded at the bottom; it is a concern
+# about which axis the abstraction was spent on, not about whether it was owed.
+
+axis = "artifact_level"
+
+# The ">= 3 failed bounded attempts" branch does not apply, and could not: no
+# bounded attempt on this axis was possible from the app tier at all. It clears
+# on the second branch.
+failed_attempts = []
+
+inexpressible = true
+
+# Why no config or data change could reach it — quoting the commit's own
+# diagnosis, which the critic pass verified against the diff:
+#
+#   "HostDeviceProfile::render_size only ever scaled a surface DOWN, and
+#    live_gpu_binding clamped the render target to <= the swapchain, so an
+#    upward direction did not exist to ask for."
+#
+# The axis's defect is a sampling-rate defect: at one render sample per surface
+# pixel, every near-vertical edge stair-steps in runs of 1/slope pixels, and
+# this app's frame is almost entirely thin receding geometry — lane markings,
+# kerb blocks, the post rows running to a vanishing point. No material, light,
+# grade, camera or geometry change at the app tier can remove it, because none
+# of them changes how many samples are taken. The engine had no anti-aliasing of
+# any kind and no way for an app to ask for more samples. That is the textbook
+# shape of the gate's second branch: the current implementation cannot express
+# the needed change, so the structural fix is correct on the first attempt.
+
+smallest_api = """
+Three pieces, each at the lowest layer that could own it:
+
+  crates/axiom-host  — `HostDeviceProfile::render_supersample() -> u32`, a
+    per-tier table (Baseline 1, ExtendedLimits 2) folded into the existing
+    `render_size` before the existing tier cap. One const fn on an enum that
+    already existed, on a type that already owned the render-size decision. It
+    adds no new type and no new field. Baseline is bit-for-bit unchanged, so
+    every app on the mobile default is untouched by it.
+
+  modules/axiom-windowing — `configure_surface_with_profile(w, h, profile)`;
+    the existing `configure_surface(w, h)` delegates with Baseline. Deliberately
+    an ARGUMENT rather than a setter, so a tier can never be silently ignored by
+    a caller that forgot to set it — which is the smaller API in the sense that
+    matters, not the one with fewer characters.
+
+  modules/axiom-gpu-backend — no new surface at all: the <=-swapchain clamp
+    becomes a real device-limit clamp (aspect preserved), the downlevel 2048
+    texture floor is raised to what the adapter itself reports (capped 4096,
+    never lowered), and the present blit's minification is always Linear so a 2x
+    target resolves as an exact 2x2 box average instead of discarding three of
+    four samples.
+
+Smaller alternatives that were NOT available: a manifest/config knob (there is
+no field to add it to that anything reads), an app-tier render-scale (the clamp
+lived below the app and refused values above 1.0), or MSAA (the engine has no
+multisample path at all, and adding one is strictly more surface than a scale
+factor the pipeline already carried).
+"""
+
+screenshot_command = """
+uv run scripts/localhost_servers.py start-app burnt-rubber --port 8085
+uv run scripts/playwright_controller.py goto http://localhost:8085/
+# then the era-C recipe in campaign.toml: start the race, place with
+# window.__probe.burnt_rubber_probe_place(1900, 45), freeze, screenshot.
+"""
+
+# NOT PROVEN, and recorded as not proven rather than quietly asserted.
+screenshot_proof = """
+UNVERIFIED. Ledger iteration 9 states this plainly and this record repeats it
+rather than dressing it up: the edge-ramp probe moved 2.34 -> 4.11 against the
+reference's 1.03, and that measurement cannot separate the supersample's effect
+from the road's simultaneous luminance rise in the same pass (the lighting lens
+raised the key by 0.30 -> 0.88 in the same landing). The pass HELD artifact_level
+rather than crediting it, which was the honest call.
+
+The proof this record is owed is a two-capture A/B at fixed lighting: the same
+frozen moment captured with `HostDeviceProfile::Baseline` and with
+`ExtendedLimits`, nothing else changed, edge-ramp measured on both. It has not
+been run. Era C's reference swap has not made it any less owed — the daylight
+reference will EXPOSE aliasing that era B's darkness hid, so the tier's real
+effect matters more now than it did when it landed.
+"""
+
+# ---------------------------------------------------------------------------
+# SCOPE CONCERN — which axis this was spent on
+# ---------------------------------------------------------------------------
+# Iteration 9's attacked axis was `subject_fidelity`. This abstraction targets
+# `artifact_level`, which was not the attacked axis and was not the lowest axis
+# (`silhouette_readability` at 1 was). So a pass introduced new engine-spine
+# surface for an axis it was not attacking, and then could not verify the
+# effect, and correctly declined to credit it.
+#
+# That is not a reason to unwind the change — the change is right, it is at the
+# right layer, and the engine genuinely had no anti-aliasing. It is a reason the
+# record must exist: an abstraction spent off-axis is exactly the kind of
+# reaching the gate is for, and without this file there was nothing in the
+# campaign that could notice it. Recorded, not reversed.
