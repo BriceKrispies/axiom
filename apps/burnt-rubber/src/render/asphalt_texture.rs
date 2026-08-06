@@ -4,20 +4,37 @@
 //! surface renders the *same* RGB at eight metres and at sixty, and the largest
 //! object in any frame — the tarmac fills roughly half of it — has no surface at
 //! all. Real asphalt is a bound aggregate, and what makes it read as asphalt
-//! rather than as grey paper is a fine, low-amplitude mottle: in the night
-//! reference this app is converging on, an unpainted patch of near road measures
-//! a standard deviation of ~2.4 sRGB levels around a mean of ~16 — about 15% of
-//! its own value, all of it in the darks. This module produces exactly that.
+//! rather than as grey paper is a fine, low-amplitude mottle. This module
+//! produces exactly that.
 //!
-//! ## The amplitude is measured; the *frequency* is what the sampler decides
+//! ## The amplitude is measured — and the reference it was measured against has
+//! ## changed
 //!
-//! Unpainted asphalt in the reference measures a standard deviation of 10–15% of
-//! its own displayed value (three patches at different depths: `0.80/7.6`,
-//! `3.91/31.7`, `2.35/15.8`) — though some of that is the frame's lighting
-//! falloff across the patch, not texture. This texture lands at **~5.9%** of the
-//! tarmac's displayed value: unmistakably a surface, and deliberately short of a
-//! number that is partly lighting. That total is settled, and the retune below
-//! holds it to the second decimal.
+//! The numbers below used to be derived from a **night** reference, where an
+//! unpainted patch of near road measured a standard deviation of 10–15% of its
+//! own displayed value around a mean of ~16 levels. Against that, this texture
+//! was authored at **5.92%** — deliberately short of a figure that was partly the
+//! frame's lighting falloff rather than its surface.
+//!
+//! The app now converges on the **era-C daylight** reference, and that reference
+//! measures a completely different surface. Sampling its cleanest unpainted
+//! asphalt — the patches with the lowest total variance, so no lane paint, no
+//! palm shadow, no kerb — gives `1.28/81.2` in full sun and `0.76/33.6` in shade:
+//! a standard deviation of **1.6–2.3%** of the road's own displayed value. A 5×5
+//! high-pass over the same patches isolates the texture from the lighting ramp
+//! and lands at 1.0–1.8%. The two agree, which is the point: on this reference
+//! the asphalt is *nearly smooth*, carrying a faint broad mottle and a scatter of
+//! isolated grit, and nothing like a carpet.
+//!
+//! Relative amplitude is the right unit here and it is **exposure-invariant**:
+//! the grain is a multiplied albedo, so re-exposing the frame scales the road and
+//! its grain together and this ratio does not move. The 5.92% authored for the
+//! night frame is therefore not a number a lighting change can absolve — it is
+//! ~3× the reference's, on the largest surface in the shot, and normalising the
+//! two frames for brightness shows exactly what that buys: the reference's near
+//! road is a smooth plane, and this one is television static. That is the defect
+//! [`MIN_MULTIPLIER`] now closes, at **1.87%** — mid-band of the reference's own
+//! measurement.
 //!
 //! What was *never* settled is where in the spectrum that 5.9% sits — and getting
 //! it wrong is what the near road actually looked like. The split used to be
@@ -44,24 +61,30 @@
 //!
 //! So the split inverts. Most of the amplitude now lives in the per-texel hash —
 //! aggregate, at the size of a chipping — and the smooth octave stays on only as
-//! the low-amplitude patchiness of the mix. Measured over the whole tile, the
-//! displayed variation is unchanged (5.92% before, 5.92% after) while the share
-//! of it carried at cell scale falls from **66% to 31%**: the same surface, at
-//! the frequency asphalt actually has.
+//! the low-amplitude patchiness of the mix. That inversion was a pure move along
+//! the frequency axis — the displayed variation was held at 5.92% across it while
+//! the share carried at cell scale fell from **66% to 31%** — and it survives the
+//! amplitude retune above untouched: [`SMOOTH_SHARE`] and [`CONTRAST`] do not
+//! move, so the cell-scale share stays at 31%. Only the *strength* changes.
 //! [`tests::most_of_the_grain_lives_at_texel_scale_not_at_cell_scale`] is the
 //! assertion that keeps it there, and it is the one this module was missing —
 //! every existing test measured the grain's *strength*, and the defect was
 //! entirely in its *scale*.
 //!
-//! ## The grain darkens the tarmac, and that is the honest direction
+//! ## The grain darkens the tarmac, and how much is now a *cost*, not a bonus
 //!
-//! A multiplied albedo can only ever darken (a texel's ceiling is `1.0`), so a
-//! band wide enough to read pulls the mean down — here to `0.81`, about a fifth.
-//! That is not a side effect to apologise for: asphalt *is* dark, and the live
-//! render's tarmac currently sits far brighter than the reference's. A texture
-//! wide enough to be a material and centred on `1.0` does not exist on a
-//! multiply-only path; this is the trade, taken deliberately and in the
-//! direction the reference points.
+//! A multiplied albedo can only ever darken (a texel's ceiling is `1.0`), so the
+//! band's width is also an unavoidable exposure cut: the mean multiplier is
+//! `1 - (1 - MIN_MULTIPLIER) / 2` give or take the contrast.
+//!
+//! Under the night reference that was a free win — the render's tarmac sat
+//! brighter than the reference's, so the wide band's `0.81` mean pulled it the
+//! way it needed to go anyway. Era C inverts that too. The daylight reference's
+//! sunlit asphalt displays at ~81 levels and this render's sits near 13, so every
+//! stop the texture takes out is now a stop working against the frame. Narrowing
+//! the band to `0.86` lifts the mean multiplier to **0.93** — a ~15% brightening
+//! of the largest surface in the shot, in the direction era C points, obtained
+//! for free as the same edit that kills the static.
 //!
 //! ## Why it tiles without a seam
 //!
@@ -131,8 +154,27 @@ pub const TILE_METRES: f32 = 1.5;
 /// ever visible in.
 const LATTICE: u32 = 32;
 
-/// The darkest linear multiplier a texel may apply to the tarmac's base colour.
-const MIN_MULTIPLIER: f32 = 0.62;
+/// The darkest linear multiplier a texel may apply to the tarmac's base colour —
+/// and therefore, on its own, **the grain's strength**.
+///
+/// [`SMOOTH_SHARE`] and [`CONTRAST`] decide how the amplitude is *distributed*
+/// across the spectrum; this decides how much of it there is. It is the one knob
+/// the reference change reaches, because the reference's asphalt did not change
+/// frequency between eras — it changed how much surface it shows.
+///
+/// `0.62` was measured against the night reference, whose asphalt varied by
+/// 10–15% of its own displayed value; it produced 5.92%. The era-C daylight
+/// reference measures **1.6–2.3%** on the same statistic (see the module docs for
+/// the patches), and `0.86` produces **1.87%** — mid-band. That is a 3.2× cut,
+/// and the frame it fixes is unambiguous: normalised for exposure, the champion's
+/// near road was a dense per-pixel speckle where the reference's was a smooth
+/// plane with a few specks of grit on it.
+///
+/// The floor this may not cross is a flat fill. At `0.86` a tile still spans 17
+/// distinct sRGB byte levels and neighbouring texels still differ, so the road
+/// still renders differently at eight metres and at sixty — which was, and
+/// remains, the entire reason this module exists.
+const MIN_MULTIPLIER: f32 = 0.86;
 
 /// Share of the amplitude carried by the smooth octave. The remainder is
 /// per-texel hash.
@@ -160,11 +202,16 @@ const SMOOTH_SHARE: f32 = 0.30;
 /// Lowered from `1.5` in lock-step with [`SMOOTH_SHARE`], and by arithmetic
 /// rather than by eye: the per-texel hash is a full-width uniform where the
 /// interpolated smooth field is not, so moving amplitude into it *raises* the
-/// total variation on its own. `1.2` is the gain that gives back exactly what the
-/// re-weighting added — 5.92% of the tarmac's displayed value, the same figure
-/// the old pair produced. The whole change is therefore a pure move along the
-/// frequency axis, with the strength held fixed, and
-/// [`tests::the_grain_varies_enough_to_read_as_a_surface`] is what proves it.
+/// total variation on its own. `1.2` is the gain that gave back exactly what the
+/// re-weighting added, so that re-weighting was a pure move along the frequency
+/// axis with the strength held fixed.
+///
+/// It stays at `1.2` through the era-C amplitude retune, and that is deliberate:
+/// the strength belongs to [`MIN_MULTIPLIER`] alone. Spending this gain on the
+/// cut instead would have narrowed the *distribution* rather than the band,
+/// piling texels back into the middle and trading a surface for a flat fill with
+/// outliers — which is the one failure mode this constant was introduced to
+/// prevent.
 const CONTRAST: f32 = 1.2;
 
 /// The tiling asphalt albedo, as `RES * RES` RGBA8 texels ready for
@@ -302,27 +349,38 @@ mod tests {
         assert!(hi <= 1.0, "a multiplier cannot brighten past the base colour: {hi}");
     }
 
-    /// **Strong enough to be a material.** The whole point of the texture is
-    /// that the tarmac stops rendering one identical value everywhere, and the
-    /// unit that decides whether a human sees that is the *displayed* spread as
-    /// a fraction of the displayed value — not the authored linear range, which
-    /// sRGB encoding compresses by more than half.
+    /// **As strong as the reference's asphalt, and no stronger.** The whole point
+    /// of the texture is that the tarmac stops rendering one identical value
+    /// everywhere, and the unit that decides whether a human sees that is the
+    /// *displayed* spread as a fraction of the displayed value — not the authored
+    /// linear range, which sRGB encoding compresses by more than half.
     ///
-    /// The reference's own unpainted asphalt measures 10–15% (part of which is
-    /// its lighting falloff, not its surface). Falling under 4% here means the
-    /// grain has quietly become a flat fill again — which is exactly what an
-    /// innocent-looking tweak to `CONTRAST` or `MIN_MULTIPLIER` would do.
+    /// That fraction is the right unit for a second reason: the grain is a
+    /// multiplied albedo, so it is **exposure-invariant**. Re-lighting the frame
+    /// scales the road and its grain together and this number does not move —
+    /// which is why it can be compared against a reference shot under completely
+    /// different light, and why no lighting change can ever excuse a bad value
+    /// here.
+    ///
+    /// The band is the era-C daylight reference's own measurement: its cleanest
+    /// unpainted asphalt reads `1.28/81.2` in sun and `0.76/33.6` in shade —
+    /// **1.6–2.3%**. Widened by a whisker at each end for the byte quantisation.
+    /// Above it the road renders as television static laid over tarmac (the
+    /// defect the night reference's 10–15% left behind, at 5.92%); below it the
+    /// grain has quietly become a flat fill again. Either is a regression, and
+    /// an innocent-looking tweak to `CONTRAST` or `MIN_MULTIPLIER` reaches both.
     #[test]
-    fn the_grain_varies_enough_to_read_as_a_surface() {
+    fn the_grain_is_as_strong_as_the_reference_asphalt_and_no_stronger() {
         let levels = tarmac_levels();
         let mean = levels.iter().sum::<f32>() / levels.len() as f32;
         let sd = (levels.iter().map(|l| (l - mean).powi(2)).sum::<f32>() / levels.len() as f32)
             .sqrt();
         let relative = sd / mean;
         assert!(
-            (0.04..0.10).contains(&relative),
-            "displayed variation is {:.1}% of the tarmac's value; the reference \
-             measures 10-15% (lighting included) and a flat fill measures 0%",
+            (0.012..0.030).contains(&relative),
+            "displayed variation is {:.2}% of the tarmac's value; the era-C \
+             reference measures 1.6-2.3%, static measures 6% and a flat fill \
+             measures 0%",
             relative * 100.0
         );
     }
@@ -335,11 +393,14 @@ mod tests {
     ///
     /// The step is therefore no longer an *alias* budget — it is a **magnified**
     /// one. Up close a texel covers more than a pixel, and this is the hardest
-    /// edge the near road can show between two neighbouring chippings. It is
-    /// allowed to be larger than the 12.0 the mip-less sampler forced (the
-    /// re-weighting toward the per-texel hash takes it to ~16.4), because that
-    /// sharpness *is* the aggregate; what it may not do is run away, or the
-    /// grain stops being a surface and becomes noise laid over one.
+    /// edge the near road can show between two neighbouring chippings.
+    ///
+    /// The bound tightens with the era-C amplitude cut, and it has to: at the
+    /// night reference's strength this ran to ~16.4 levels under a ceiling of
+    /// 18, which is a bound that could no longer fail. The 3.2× cut takes the
+    /// worst step to ~5.5, and `8.0` restores the same ratio of headroom — so
+    /// this stays what it was written to be, a live guard against the grain
+    /// becoming noise laid over asphalt rather than the asphalt itself.
     #[test]
     fn adjacent_texels_stay_inside_the_magnified_step_budget() {
         let levels = tarmac_levels();
@@ -356,8 +417,8 @@ mod tests {
             })
             .fold(0.0f32, f32::max);
         assert!(
-            worst <= 18.0,
-            "adjacent texels differ by {worst:.1} display levels; past ~18 the \
+            worst <= 8.0,
+            "adjacent texels differ by {worst:.1} display levels; past ~8 the \
              near road reads as noise laid over asphalt rather than as asphalt"
         );
     }
