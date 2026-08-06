@@ -177,7 +177,50 @@ export const stepDecorDrag = (decor: DecorDrag, input: InputFrame, camera: Camer
 export type ChestState = CasinoState<ChestExtra>;
 
 export const CHEST_COLUMNS = 3;
-export const CHEST_SPACING = 2.05;
+
+/*
+ * The grid's two pitches, measured separately off the reference because they are
+ * separately wrong — and they had been welded together by a single constant and a
+ * `* 0.92` fudge, so no one could move one without silently moving the other.
+ *
+ * Every quantity below is normalised by the LAGOON's screen semi-width, which is
+ * already at parity (0.681 of frame width on reference.png, 0.662 on
+ * champion.png), so each is scale- and aspect-invariant and was read the same way
+ * on both images (reference 1536x1024, champion 948x597):
+ *
+ *                                        reference   champion   error
+ *   chest screen WIDTH, middle row          0.285      0.283     -0.7%
+ *   chest screen HEIGHT, middle row         0.241      0.239     -0.8%
+ *   ROW pitch (mean back->mid->front)       0.326      0.317     -2.9%
+ *   COLUMN pitch, middle row                0.386      0.417     +8.0%
+ *
+ * The chest is the right size and the rows stack at the right depth. The COLUMNS
+ * are 8% too far apart — the one isolated error — and that is the whole of what
+ * reads wrong: the reference's chests very nearly touch (its inter-chest water gap
+ * is 36% of a chest's width) while the champion opens a 47% channel between them,
+ * so the field reads as nine separate objects floating in a pond instead of the
+ * reference's packed raft of treasure.
+ *
+ * It also accounts for most of the grid's remaining "too flat" reading. The grid's
+ * screen bbox depth/width is 0.775 on the reference and 0.717 here — but the
+ * numerator is already right, so that gap is a WIDTH excess, not a missing depth.
+ * Tightening the columns alone predicts 0.760 without touching the pitch that the
+ * hero-flight depth budgets and the veil plane are solved against.
+ *
+ * So: column pitch 2.05 -> 1.89 (x0.922, the ratio the two column measurements
+ * agree on: 0.386/0.417 = 0.926 and 1.356/1.472 = 0.921 taken against chest
+ * width). Row pitch is pinned at the EXACT value the old expression produced
+ * (2.05 * 0.92 = 1.886) so the row stacking, `nearestOnBoard`, the veil depth and
+ * the button-box row separation are all bit-identical. Node count moves by exactly
+ * zero — this is nine transforms, not new geometry — so the guarded canvas2d arm
+ * pays nothing for it.
+ */
+/** Pitch between the grid's COLUMNS, in world units (chest width is 1.34). */
+export const CHEST_SPACING = 1.89;
+/** Pitch between the grid's ROWS. Deliberately independent of the column pitch:
+ * the reference's grid is not square, and welding the two together is what let a
+ * column-only fix flatten the row stack by accident. */
+export const CHEST_ROW_PITCH = 1.886;
 
 // ── chest proportions ─────────────────────────────────────────────────────────
 // The chest's physical facts live beside its layout and timing, so the framing
@@ -216,7 +259,7 @@ export const chestPosition = (index: number, count: number): EngineVec3 => {
   const rows = Math.ceil(count / columns);
   const col = index % columns;
   const row = Math.floor(index / columns);
-  return v3((col - (columns - 1) / 2) * CHEST_SPACING, 0, (row - (rows - 1) / 2) * CHEST_SPACING * 0.92);
+  return v3((col - (columns - 1) / 2) * CHEST_SPACING, 0, (row - (rows - 1) / 2) * CHEST_ROW_PITCH);
 };
 
 /*
