@@ -61,38 +61,38 @@ pub fn ratio(v: f32) -> Ratio {
     Ratio::finite_or_zero(v.clamp(0.0, 1.0))
 }
 
-/// The night-adjacent sky the whole demo is lit against. Dark enough that the
-/// paint, the reflectors and the boost read as genuinely bright.
+/// The **daylight haze at the horizon** — the colour the whole world recedes
+/// into, and the single value that decides whether this frame reads as midday or
+/// as night.
 ///
 /// Authored in **linear** light, which is not what it looks like: the backend
-/// converts to sRGB for display, so a linear `0.055` lands on screen at roughly
-/// `0.25` - a mid slate, not a night sky. These values are chosen for the
-/// displayed result, which is why they look implausibly dark written down.
+/// converts to sRGB for display, so this lands on screen at roughly
+/// `(129, 184, 231)` — the pale blue band a coastal noon has just above the sea,
+/// not the saturated blue overhead ([`SKY_ZENITH`] carries that).
 ///
-/// This constant is the **black level of the whole frame**, not just the colour
+/// This constant is the **white level of the whole frame**, not just the colour
 /// of the empty top of it, and that is why it is authored this far down. It is
 /// three things at once: the clear colour (`set_clear_color`), the horizon stop
 /// of the sky gradient, and — decisively — the colour [`super::FrameDepthFog`]
 /// fades every distant surface into. Whatever value sits here is therefore the
-/// darkest tone the frame can contain, and every receding thing is dragged up to
-/// meet it.
+/// tone the vanishing point, the far road and the distant scenery all converge
+/// on, and every receding thing is dragged toward it.
 ///
-/// The previous `[0.011, 0.015, 0.026]` was a *displayed* sRGB `(27, 33, 45)` —
-/// measured on the rendered frame, the sky read a flat, milky navy across the
-/// whole upper half, and the road dissolved into that navy rather than into the
-/// night. A real moonlit night stage has no such floor: the sky off-axis from the
-/// moon is essentially black, and the reference frame measures `(1.5, 2.4, 4.3)`
-/// there — roughly a **seventeenth** of the linear radiance this constant was
-/// carrying. Authoring the floor at that level is what lets the emissive cues
-/// (paint, reflector posts, tail lamps, the moon) be the only light in shot,
-/// which is the entire look; a lifted floor is contrast subtracted uniformly from
-/// every pixel, and no amount of key light adds it back.
+/// The previous `[0.0009, 0.0012, 0.0021]` was authored for a moonlit stage: a
+/// near-black floor, so that the emissive cues were the only light in shot. The
+/// reference is now a **daylight** coastal highway — a blue sky with a sun in it,
+/// a turquoise sea and sunlit sand — and against that reference a near-black
+/// horizon is not a dark grade, it is the wrong time of day. Every downstream
+/// term inherits it: the fog fades the far road into the sky it is standing
+/// under, so a black sky fades a sunlit road into a black tunnel mouth, and no
+/// key light or exposure can add daylight back to a frame whose atmosphere is
+/// night.
 ///
-/// Held a whisker above the reference's own reading, and blue-weighted rather
-/// than neutral, on purpose: a literal `0` floor would flatten the sky gradient
-/// and the fog's far end into a single dead black, and the moon would hang in a
-/// void with no atmosphere around it to sit in.
-pub const SKY: [f32; 3] = [0.0009, 0.0012, 0.0021];
+/// Held *below* the reference's whitest cloud on purpose: this is haze, not
+/// highlight. Pushing it to white would blow the vanishing point out and take the
+/// far lane markings with it, and there would be no headroom left for the sun
+/// disc ([`SUN`]) or the clouds to read as brighter than the sky they sit in.
+pub const SKY: [f32; 3] = [0.22, 0.48, 0.80];
 
 /// How solid the ghost car is, `0` invisible … `1` opaque.
 ///
@@ -104,35 +104,45 @@ pub const GHOST_OPACITY: f32 = 1.0;
 
 /// The sky directly overhead, and the top of the frame's gradient.
 ///
-/// **Darker than [`SKY`], not brighter.** That is the way a real night sky sits:
-/// the deepest part is overhead, and the band just above the ground is the
-/// lightest, because that is where the atmosphere is thickest and scatters the
-/// most. Getting this the wrong way round is what makes a night sky read as an
-/// overcast day. [`SKY`] stays the *horizon* colour precisely because it is also
-/// the colour the depth fog fades into — so the far road dissolves into the sky
-/// it is standing under, with no seam between the two.
+/// **Deeper and far more saturated than [`SKY`], not paler.** That is the way a
+/// clear daylight sky sits, and it is the same aerial-perspective fact that
+/// governed the night version: the band just above the ground is the *lightest*,
+/// because that is where the atmosphere is thickest and scatters the most, and
+/// the deepest, bluest part is overhead where you are looking through the least
+/// air. Getting this the wrong way round is what makes a clear noon read as
+/// overcast. [`SKY`] stays the *horizon* colour precisely because it is also the
+/// colour the depth fog fades into — so the far road dissolves into the sky it
+/// is standing under, with no seam between the two.
 ///
-/// Lowered with [`SKY`] and by the same reasoning, keeping the ratio between the
-/// two — the zenith stays roughly a third of the horizon's radiance, so the
-/// gradient still falls off upward instead of inverting.
-pub const SKY_ZENITH: [f32; 3] = [0.0003, 0.0006, 0.0012];
+/// Displayed, this is roughly `(29, 101, 215)`: the strong blue the reference
+/// carries across the top of the frame. Note how *little* red it holds — a
+/// daylight zenith is nearly a pure blue primary, and the usual mistake is to
+/// author it as a light grey-blue, which is a hazy sky, not a clear one.
+pub const SKY_ZENITH: [f32; 3] = [0.012, 0.13, 0.68];
 
-/// The moon's disc colour — **deliberately far above `1.0`**.
+/// The sun's disc colour — **deliberately far above `1.0`**.
 ///
 /// Every other colour in this file is a reflectance and belongs in `0..1`. This
 /// one is a radiance: it is the brightest thing in the frame by a wide margin,
 /// and authoring it at white would make it a flat white circle. The surplus over
-/// white is what the frame's bloom spends on the halo around it, which is what
-/// makes it read as a light source rather than a sticker. Cool, like the key
-/// light it is the source of, and brightest in blue.
+/// white is what the frame's bloom spends on the flare around it, which is what
+/// makes it read as a light source rather than a sticker.
+///
+/// **Warm, and brightest in red** — the inversion of the cool, blue-brightest
+/// disc this replaced. A midday sun is not neutral white against its own sky:
+/// the sky took the blue out of it (that is *why* the sky is blue), so the disc
+/// and the flare around it run warm while the shadows they leave stay cool. That
+/// split — warm light, cool shade — is most of what makes a frame read as
+/// sunlit rather than merely bright, and it cannot be graded in afterwards: the
+/// three grade knobs are global, so a warmth added there warms the shadows too.
 ///
 /// How far above white barely matters, and that is worth knowing before tuning
 /// it: the render target is 8-bit, so every value at or above `1.0` is already
 /// clamped to white before the bloom's bright pass samples it. What decides how
-/// much the moon glows is therefore the *area* of above-threshold pixels — the
+/// much the sun glows is therefore the *area* of above-threshold pixels — the
 /// disc plus its halo — not this number. Reach for `MOON_HALO_FALLOFF` when the
 /// glow is wrong; this only has to clear `1.0` to say "radiance, not paint".
-pub const MOON: [f32; 3] = [1.25, 1.32, 1.5];
+pub const SUN: [f32; 3] = [2.4, 2.25, 1.95];
 
 /// The tarmac's own colour — the largest surface in any frame, and therefore the
 /// one that decides the **colour temperature of the whole shot**.
@@ -510,10 +520,51 @@ mod tests {
         assert!(asphalt < 0.15, "the tarmac is nearly black");
         assert!(paint > 0.7, "the paint is nearly white");
         assert!(post > asphalt * 4.0, "the reflectors dominate the tarmac");
-        // The sky is authored in linear light; after the backend's sRGB
-        // conversion this lands around 0.13 on screen, which is the night it
-        // looks like rather than the black it reads as here.
-        assert!(luminance(SKY) < 0.03, "and the sky is dark enough to see them against");
+        // ...and the road still reads as a dark ribbon laid across a bright
+        // world, which is what the daylight reference shows: the tarmac is a
+        // fraction of the sky it sits under, so the frame's contrast comes from
+        // the road being dark rather than from the sky being dim.
+        assert!(
+            luminance(SKY) > asphalt * 4.0,
+            "the road no longer separates from the sky above it"
+        );
+    }
+
+    /// The **time of day**, pinned where it is actually decided.
+    ///
+    /// [`SKY`] is not just the empty top of the frame: it is the clear colour,
+    /// the horizon stop of the gradient, and the colour the depth fog fades every
+    /// distant surface into. A frame whose atmosphere is authored at night is a
+    /// night frame however it is lit and however it is graded — the fog adds its
+    /// colour after the lighting, and the three grade knobs (exposure, contrast,
+    /// saturation) are global multiplies that cannot put daylight into a black
+    /// horizon. So the daylight the reference is shot in lives here, and the two
+    /// properties that make it read as a *clear* day rather than an overcast one
+    /// are asserted rather than left to a comment.
+    #[test]
+    fn the_atmosphere_is_a_clear_daylight_sky_and_the_zenith_is_the_deep_end() {
+        let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
+        assert!(
+            luminance(SKY) > 0.3,
+            "the horizon haze is not daylight: {:?}",
+            luminance(SKY)
+        );
+        // Aerial perspective, in both directions: the horizon is the *paler*
+        // stop (most air, most scattering) and the zenith is the deeper, more
+        // saturated one. Inverting this is what makes a clear noon look overcast.
+        assert!(
+            luminance(SKY_ZENITH) < luminance(SKY),
+            "the sky gets lighter overhead — that is an overcast lid, not a clear day"
+        );
+        let saturation = |c: [f32; 3]| c[2] / c[0].max(1.0e-6);
+        assert!(
+            saturation(SKY_ZENITH) > saturation(SKY) * 2.0,
+            "the zenith is no more saturated than the haze: the gradient has no blue in it"
+        );
+        // And the sun is a radiance, warm, and over the top of the range so the
+        // bloom has something above threshold to spread.
+        assert!(SUN.iter().all(|c| *c > 1.0), "the sun is paint, not light: {SUN:?}");
+        assert!(SUN[0] > SUN[2], "a midday sun is warm; its sky took the blue out of it");
     }
 
     /// The colour-temperature rule, pinned: **the cool on this stage belongs to

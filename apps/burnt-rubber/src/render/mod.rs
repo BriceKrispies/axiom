@@ -111,9 +111,12 @@ impl RaceScene {
             [0.19, 0.25, 0.36],
             [0.24, 0.21, 0.15],
         ));
-        // The night air. Everything recedes into the sky colour rather than staying
+        // The air. Everything recedes into the sky colour rather than staying
         // fully lit out to the far plane, which is what gives the road, the trees and
-        // the skyline their depth instead of a hard cut-out horizon.
+        // the skyline their depth instead of a hard cut-out horizon. On a daylight
+        // stage this is the *dominant* atmospheric cue rather than a finishing
+        // touch: the reference's road, palms and headland all wash toward the pale
+        // haze at the vanishing point long before they reach it.
         //
         // The range is normalized device depth, which is strongly non-linear over a
         // `NEAR_PLANE`..`FAR_PLANE` frustum: 0.990 is ~110 m out (the fog just starts
@@ -127,27 +130,29 @@ impl RaceScene {
         // software arm is untouched without this app knowing which arm it is on.
         app.set_bloom(FrameBloom::moonlit());
 
-        // The moon itself, drawn behind the scene. This is the piece the rig was
-        // missing: the course was *lit* like a night stage but had no light source
-        // in shot, and a frame whose only bright things are reflectors reads as
-        // "dark", not "moonlit" — the eye needs to see what is doing the lighting.
+        // The sun itself, drawn behind the scene. This is the piece the rig was
+        // missing: the course was *lit* by a key with no source in shot, and the
+        // eye needs to see the thing that is doing the lighting.
         //
         // Its direction is [`MOON_DIRECTION`], which is also the direction the key
-        // light comes from, so the moon and the thing it lights agree. The horizon
-        // colour is `palette::SKY` — the exact colour the depth fog below fades
-        // into — so the road dissolves into the sky it is standing under instead of
-        // into an unrelated grey. The zenith is darker than the horizon, which is
-        // how a real night sky sits: brightest just above the ground, deepest
-        // overhead.
+        // light comes from, so the disc and the thing it lights agree. (The name
+        // still says moon; the *geometry* constants belong to the light rig and
+        // are left for the pass that re-aims the key, but the colour it hands the
+        // sky is now `palette::SUN`.) The horizon colour is `palette::SKY` — the
+        // exact colour the depth fog below fades into — so the road dissolves into
+        // the sky it is standing under instead of into an unrelated grey. The
+        // zenith is the deeper, bluer end and the horizon the pale hazy one, which
+        // is how a clear day sits: you are looking through the most air at the
+        // ground line and the least of it overhead.
         //
         // The disc's colour is authored well above `1.0`. That surplus is not
-        // wasted: it is exactly what the bloom above spends, so the moon carries a
-        // soft halo rather than being a flat white sticker.
+        // wasted: it is exactly what the bloom above spends, so the sun carries a
+        // soft flare rather than being a flat white sticker.
         app.set_sky(
             FrameSky::gradient(palette::SKY_ZENITH, palette::SKY).with_body(
                 [MOON_DIRECTION.x, MOON_DIRECTION.y, MOON_DIRECTION.z],
                 axiom_kernel::Radians::finite_or_zero(MOON_ANGULAR_RADIUS),
-                palette::MOON,
+                palette::SUN,
                 Ratio::finite_or_zero(MOON_HALO_FALLOFF),
                 Ratio::finite_or_zero(MOON_HALO_STRENGTH),
             ),
@@ -160,19 +165,9 @@ impl RaceScene {
             palette::SKY,
         ));
 
-        // The black point. Every term above is additive and none of them can be
-        // driven to zero without taking something the frame needs with it: the
-        // hemisphere ambient is what keeps the shadowed side of a car, a post and
-        // a tree from vanishing, and the depth fog is what stops the horizon
-        // being a cut-out. Both therefore leave a floor — the tarmac, the verge
-        // and the sky all sit an eighth of the way up the range, and a night whose
-        // darkest pixel is a mid-dark grey reads as *overcast afternoon, dimmed*
-        // however cold its palette is. The measured floor off the verge is ≈0.18
-        // against a reference ≈0.02, while the highlights (the lane paint, the
-        // moon's limb) already agree to within a few levels: the range is
-        // compressed from the bottom only, which is exactly what one subtract on
-        // the finished image fixes and what no amount of light-tuning does.
-        app.set_postprocess(FramePostProcess::low_key());
+        // The grade. See [`GRADE`] for why a daylight frame takes the opposite
+        // one from the night frame this scene used to be.
+        app.set_postprocess(GRADE);
 
         let road = RoadChunks::install(app, track, &tuning.course, palette.road);
         let scenery = SceneryField::install(app, &palette, track, track.seed());
@@ -467,6 +462,32 @@ fn install_lights(app: &mut RunningApp) -> Entity {
     )
 }
 
+/// The colour grade laid over the finished frame.
+///
+/// This was [`FramePostProcess::low_key`] — a pure `0.16` black-point subtract
+/// and nothing else, the correct grade for the moonlit stage this scene used to
+/// be. A night raster's defect is a lifted *floor*: the hemisphere ambient, the
+/// key and the fog each add a constant that cannot be driven to zero without
+/// erasing something, so the blacks stall a tenth of the way up the range and the
+/// eye reads the result as grey daylight, dimmed. One subtract fixes exactly
+/// that and leaves the highlights alone.
+///
+/// The reference is now **midday**, and against a daylight frame that same
+/// subtract is the defect rather than the cure. It is a hard clip, not a curve:
+/// every pixel below byte 41 becomes exactly `0`. A sunlit frame's shadow side —
+/// the shaded flank of the car, the underside of a palm crown, the dark half of
+/// the tarmac — is *full of information* in the reference, and low-key deletes
+/// all of it while dragging the sky and the sea down by the same 41 levels.
+///
+/// So the frame takes the daylight preset instead: exposure held near neutral so
+/// the sky reads at the level it is authored at, a slight cool white balance
+/// (the shade on a sunny day is lit by the blue sky, not by the sun), a gentle
+/// contrast that separates the midtones without clipping the shadows, and a
+/// saturation lift for the reference's vivid sea, foliage and paint. The black
+/// point goes to zero: with a bright sky and a bright sea there is no lifted
+/// floor left to remove, and removing one anyway would only mud the frame.
+const GRADE: FramePostProcess = FramePostProcess::cinematic();
+
 /// The direction the key light **travels** (world space, un-normalized).
 ///
 /// This is the shadow knob, not just a shading knob. The engine renders a real
@@ -655,7 +676,21 @@ const MOON_HALO_STRENGTH: f32 = 0.18;
 /// side-lit modelling [`MOON_DIRECTION`]'s low elevation was chosen for finally
 /// reaches the geometry — with the sky fill under it, the *unlit* flank becomes
 /// a readable cool shadow rather than a cutout.
-const KEY_INTENSITY: f32 = 3.6;
+///
+/// **Reconciled by the foreman, and the arithmetic is the lighting lens's own.**
+/// Two proposals in this pass moved the same pixels from opposite ends. Lighting
+/// sized this key *through* `FramePostProcess::low_key()`, whose `0.16` black
+/// point subtracts in display space: it picked `3.6` so the road would land near
+/// byte 73 *after* that subtract. The colorist then retired `low_key()` entirely
+/// for `cinematic()`, whose black point is zero — correct, because a black-point
+/// subtract is the cure for a lifted night floor and a defect on a sunlit frame.
+///
+/// With the subtract gone, `3.6` is about 40% hot. The lighting proposal wrote
+/// the contingency into its own caveat rather than leaving it to be rediscovered:
+/// "if the colorist retires that black point in the same pass, my level should
+/// come back to ~2.6". That is what this is. Neither lens is overruled — one of
+/// them anticipated the other and left the correction behind.
+const KEY_INTENSITY: f32 = 2.6;
 
 /// How high above the road the car's pool light hangs (m).
 ///
@@ -877,8 +912,23 @@ mod tests {
     /// the very ground the car's own sun shadow is supposed to darken, which
     /// deletes the single most reference-defining feature of the frame.
     ///
-    /// Measured, as always, on a **horizontal** surface: the road is the largest
-    /// thing in any frame and the one every term lands on hardest.
+    /// *Floor:* they must render the road **above the grade's black point**, for
+    /// whatever [`GRADE`] currently is. A black point is subtracted in
+    /// display-encoded space off the finished image, and that subtract is a hard
+    /// clip rather than a curve: a road rendering below it does not get deeper, it
+    /// becomes `0`. Starving the globals past that line deletes the verge, the
+    /// shoulder and the mid-field tarmac outright — which is exactly what a
+    /// measured champion once did (verge `0.0-3.1` against a reference `6.5-9.6`).
+    /// The daylight grade spends nothing on a black point, so the wall sits at zero
+    /// today; the rule is pinned against [`GRADE`] and not against a number,
+    /// precisely so it survives the next change of grade — including a change back.
+    ///
+    /// Both walls are worth a test rather than a comment because passes keep
+    /// walking into one while defending the other, and this pass walked into the
+    /// seam between them: the key was sized through a black point that another
+    /// proposal removed in the same round. The comparison is made on a
+    /// **horizontal** surface — the road, the largest thing in any frame and the
+    /// one every term lands on hardest.
     #[test]
     fn the_sun_out_lights_every_other_term_in_the_frame() {
         // The key on flat ground is `intensity * N·L`, with N = +Y.
@@ -943,7 +993,7 @@ mod tests {
         let road = 0.2126 * 0.085 + 0.7152 * 0.088 + 0.0722 * 0.105;
         let linear = road * (key + ambient);
         let encoded = 1.055 * linear.powf(1.0 / 2.4) - 0.055;
-        let black_point = FramePostProcess::low_key().black_point().get();
+        let black_point = GRADE.black_point().get();
         assert!(
             encoded > black_point,
             "the globals put the road at {encoded:.3} encoded, under the grade's \
