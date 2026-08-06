@@ -546,10 +546,10 @@ mod tests {
         );
         // And the cool the frame does carry is still the light's: the ambient
         // that lands on this surface is blue-weighted by a wide margin.
-        let ambient_sky = [0.014_f32, 0.016, 0.026];
+        let ambient_sky = [0.19_f32, 0.25, 0.36];
         assert!(
             ambient_sky[2] > ambient_sky[0] * 1.5,
-            "the moonlit ambient is no longer the cool in the frame"
+            "the sky fill is no longer the cool in the frame"
         );
     }
 

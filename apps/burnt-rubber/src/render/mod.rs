@@ -81,29 +81,35 @@ impl RaceScene {
         let tuning = sim.tuning();
 
         app.set_clear_color([palette::SKY[0], palette::SKY[1], palette::SKY[2], 1.0]);
-        // A *residual* ambient. See [`KEY_INTENSITY`] for the rule this and the
-        // key now share: on this stage the light is **local**, and the two
-        // global terms exist only to keep an unlit face from being a hole.
+        // **Daylight sky-fill.** This is the term that decides what a shadow
+        // looks like, and on a sunlit coast road it is not a rounding error: it
+        // is the entire open sky, roughly a quarter of the sun's own strength,
+        // arriving on every up-facing surface from every direction at once.
         //
-        // The previous level claimed to be "a tenth of the key" and was not. On
-        // the road's own geometry — an up-facing surface under a 20° key at
-        // `N·L` 0.345 and intensity 0.85 — the old sky term was 22% of the
-        // tarmac's total, and 100% of every face turned away from the moon.
-        // That is what put a *pedestal* under the whole frame: measured against
-        // the reference, nothing in the champion's 3D band fell below ~29/255,
-        // where the reference's own median is 3 and its 25th percentile is 2.
-        // A pedestal is the one defect a colour grade cannot lift out, because
-        // it is added after the falloff — it is precisely the term that flattens
-        // the car's pool light from the reference's ~15x near-to-far ramp down
-        // to under 3x.
+        // The previous values — `0.014 / 0.016 / 0.026`, a mean of 0.019 — were
+        // authored for a moonlit stage where the only real light was a lamp
+        // riding over the car, and they are the single reason the champion's
+        // shadows and every sun-facing surface's dark side read as *holes*
+        // rather than as shadow. Under a directional key there is exactly one
+        // lit direction; everything turned away from it gets the ambient and
+        // nothing else. At 0.019 that is black. In the reference, the palm's
+        // cast shadow on the tarmac is a *blue-grey*, clearly lifted and clearly
+        // cooler than the sunlit road beside it — that colour is this term.
         //
-        // So it drops to roughly a quarter, which puts it near a tenth of the
-        // key *as measured on the road* rather than as claimed. It is still not
-        // zero: with one directional key, a black ambient makes the shadowed
-        // half of every car, post and lamp vanish outright.
+        // Hemisphere, so the two halves say where the fill comes from:
+        //
+        // * **Sky (up)** is blue by 1.9x red — the scattered dome the reference
+        //   is shot under. It is what tints the shadows cool.
+        // * **Ground (down)** is warm and slightly weaker — the sun bouncing off
+        //   sand and pale tarmac back onto undersides, wheel arches, the car's
+        //   sills and the underside of every palm frond.
+        //
+        // Level: the sky term (mean 0.267) is ~21% of what the key lays on flat
+        // road (1.242), so it fills without becoming a second key — see the
+        // ceiling `the_sun_out_lights_every_other_term_in_the_frame` pins.
         app.set_ambient(FrameAmbient::new(
-            [0.014, 0.016, 0.026],
-            [0.009, 0.010, 0.013],
+            [0.19, 0.25, 0.36],
+            [0.24, 0.21, 0.15],
         ));
         // The night air. Everything recedes into the sky colour rather than staying
         // fully lit out to the far plane, which is what gives the road, the trees and
@@ -382,26 +388,29 @@ fn view_projection(pose: &CameraPose, aspect: f32) -> Mat4 {
 /// that rides over the car. Returns the pool light's entity, which
 /// [`RaceScene::pose`] moves with the car every frame.
 ///
-/// The key is held at roughly half power. Its *direction* was never the
-/// problem — the flaw was the level. At full intensity, tarmac authored at a
-/// deliberately near-black [`palette::TARMAC`] still lands on screen around a mid slate,
-/// which is what turned a night stage into a grey overcast one: the exposure,
-/// not the paint, was daylight. Halving the key drops the road to the dark
-/// asphalt its albedo was chosen for and leaves the markings, the reflector
-/// posts and the brake lights as the only bright things in the frame, which is
-/// exactly the hierarchy this course is authored around.
+/// **The rig is a daylight rig.** The key is the sun: warm, near-white, and
+/// strong enough that it — not the lamp over the car, not the ambient — is what
+/// every surface in the frame is lit by. See [`KEY_INTENSITY`] for the exposure
+/// arithmetic that sizes it against the reference's sunlit tarmac.
 ///
-/// But a directional key is, by definition, *the same everywhere*: it lights the
-/// tarmac under the bumper and the tarmac at the vanishing point to exactly the
-/// same value, and that is what still read as flat. The whole road sat at one
-/// tone from the car to the horizon, with no sense that the light was near. A
-/// night stage does not look like that — the light is **local**, and the road
-/// falls away into the dark a short way out. So the rig gains a positional light
-/// above the car: the backend attenuates a point light by distance
-/// (`1/(1 + 0.09d + 0.032d²)`), so it lays a bright wash on the tarmac around the
-/// car that is gone within a dozen metres, top-lights the car's own upper
-/// surfaces, and leaves the far road to the key alone. That near/far difference
-/// is the depth cue the flat rig had no way to produce.
+/// It arrived here from a night authorship in which all three of those terms
+/// were the other way round, and the inversion is the whole change. On that rig
+/// the key was held at roughly half power on the argument that a directional
+/// light is *the same everywhere* — it lights the tarmac under the bumper and
+/// the tarmac at the vanishing point to exactly the same value, so every unit of
+/// it is a floor under the whole frame, which a night stage cannot afford. True,
+/// and the reason the level kept being cut. Outdoors at noon that floor is not a
+/// defect, it is the subject: the sun genuinely does land the same value on the
+/// near lane and the far one, and what separates them is atmosphere
+/// ([`FrameDepthFog`]), not falloff.
+///
+/// The positional light above the car survives the change, demoted. The backend
+/// attenuates a point light by distance (`1/(1 + 0.09d + 0.032d²)`), which on
+/// the night rig laid the brightest wash in the frame on the tarmac around the
+/// car. At daylight levels that same wash reads as a spotlight following the
+/// player and — worse — fills in the ground the car's own cast shadow has to
+/// darken, so it drops to [`POOL_LIGHT_INTENSITY`] and becomes what it can
+/// honestly be by day: a warm bounce off hot asphalt onto the car's sills.
 ///
 /// What the level and the pool together still could not fix is that **the frame
 /// had no shadow in it** — see [`KEY_DIRECTION`], which is the knob that decides
@@ -411,32 +420,48 @@ fn install_lights(app: &mut RunningApp) -> Entity {
     app.add_light(
         DirectionalLight {
             direction: KEY_DIRECTION,
-            // Moonlight, not sunlight. The old key was `(1.0, 0.94, 0.84)` — a
-            // warm white, which is the colour of the sun an hour before it sets
-            // and the single most daylight-signalling thing left in the rig. The
-            // moon is sunlight reflected off bare rock and scattered through a
-            // night atmosphere: the eye reads it as distinctly cool, and pushing
-            // blue past green past red is what says "this is not a dim afternoon".
+            // **Sunlight.** The cool `(0.72, 0.80, 1.0)` this replaces was
+            // moonlight — sunlight reflected off bare rock — and a cool key is
+            // the single most night-signalling term a rig has, because the eye
+            // reads warm-key-against-cool-fill as *day* and the reverse as
+            // *night* before it reads anything else in the frame.
+            //
+            // The reference is a high coastal sun: near-white, warm only by the
+            // slight red-over-blue a short atmospheric path leaves. Pairing it
+            // with the blue sky ambient above is what produces the reference's
+            // defining split — warm sunlit tarmac against blue-grey shadow.
             color: Color::linear_rgb(
-                palette::ratio(0.72),
-                palette::ratio(0.80),
                 palette::ratio(1.0),
+                palette::ratio(0.955),
+                palette::ratio(0.88),
             ),
-            intensity: palette::ratio(KEY_INTENSITY),
+            // NOT `palette::ratio`, which clamps to `0..=1`. That helper is a
+            // sanitizer for *colour channels*, where above-one is meaningless,
+            // and putting a sun through it silently pins the whole stage back at
+            // the night rig's brightness with no error anywhere. A light's
+            // intensity is a gain, not a channel — `palette::MOON` is authored
+            // past one for the same reason.
+            intensity: Ratio::finite_or_zero(KEY_INTENSITY),
         },
         Transform::IDENTITY,
     );
-    // Cool, near-neutral: it is the night reading of the same white, and holding
-    // it slightly bluer than the warm key keeps the pool from reading as a
-    // second sun.
+    // The pool that rides over the car. Under the daylight key it is demoted
+    // from *the* light of the stage to a residual: at `1.0` it laid a lamp-lit
+    // wash on the tarmac around the car, brighter than the sun on the same
+    // surface, which in a daylight frame reads as a spotlight following the car
+    // and — worse — fills in the very ground the car's own sun shadow is
+    // supposed to darken. `0.16` keeps only what it is still good for: a warm
+    // near-field bounce off the tarmac onto the car's sills and arches, gone
+    // within a few metres. Warm now, because in daylight the bounce comes off
+    // sunlit asphalt and sand, not off a cold moon.
     app.add_point_light(
         PointLight {
             color: Color::linear_rgb(
-                palette::ratio(0.88),
-                palette::ratio(0.93),
                 palette::ratio(1.0),
+                palette::ratio(0.94),
+                palette::ratio(0.82),
             ),
-            intensity: palette::ratio(1.0),
+            intensity: palette::ratio(POOL_LIGHT_INTENSITY),
         },
         Transform::from_translation(Vec3::new(0.0, POOL_LIGHT_HEIGHT, 0.0)),
     )
@@ -485,7 +510,18 @@ const KEY_DIRECTION: Vec3 = Vec3::new(
     -MOON_DIRECTION.z,
 );
 
-/// The direction **toward the moon** (world space, un-normalized).
+/// The direction **toward the light body in the sky** (world space,
+/// un-normalized).
+///
+/// The name still says moon; the body is now the **daylight sun**, and the
+/// direction survived the change unaltered because it was already right: the
+/// reference's sun sits ~20° above the horizon and ~29° off the vanishing point
+/// toward the road's right, which is exactly what this vector encodes. Only the
+/// key's level and colour moved. The rename — and the disc's own colour, which
+/// is `palette::MOON` and still cool — belong with the palette, not here.
+///
+/// The reasoning below is written for a moon and holds verbatim for a low sun:
+/// every argument in it is about elevation, visibility and shadow length.
 ///
 /// Two things are true at once here and the direction has to satisfy both: the
 /// moon must be *visible down the road ahead*, and it must be the light the
@@ -539,14 +575,47 @@ const MOON_HALO_FALLOFF: f32 = 1400.0;
 /// reason above: the bloom supplies the glow, this only softens the limb.
 const MOON_HALO_STRENGTH: f32 = 0.18;
 
-/// The key light's intensity.
+/// The key light's intensity — **the frame's exposure**.
 ///
-/// **This is the frame's black-point knob, and it is the other half of the
-/// pedestal the ambient above describes.** A directional light is by definition
-/// the same everywhere: it lights the tarmac under the bumper, the tarmac at the
-/// vanishing point and the verge two hundred metres out to exactly the same
-/// value. Every unit of it is therefore a floor under the *whole* frame, in the
-/// one place a night stage cannot afford one.
+/// The reference this course is scored against is a *daylight* frame: an open
+/// coast road under a high sun, tarmac reading around byte 65, sand and cloud
+/// near white, and every shadow a lifted blue rather than a hole. The rig being
+/// scored against it was a moonlit one, and `0.88` was that stage's level. No
+/// grade turns one into the other, because the difference is not a curve — it is
+/// how much light is arriving.
+///
+/// The arithmetic that sets `3.6`, taken on the road, the largest surface in any
+/// frame and the one every term lands on hardest:
+///
+/// * The key on flat ground is `intensity · N·L`. At [`MOON_DIRECTION`]'s 20°
+///   elevation `N·L` is `0.345`, so the key contributes `1.242`.
+/// * The sky ambient adds `0.267`, for globals of `1.509`.
+/// * The tarmac's albedo is a deliberate `0.0886` luma, and it needed no change:
+///   real asphalt *is* ~0.09 linear, so an albedo authored near-black for a
+///   night stage is already the right albedo for a sunlit one. Only the light
+///   was missing.
+/// * `0.0886 · 1.509 = 0.1337` linear, which the backend's sRGB transfer writes
+///   as byte **102**.
+/// * [`FramePostProcess::low_key`] then subtracts `0.16` encoded and
+///   renormalizes, landing the road at byte **73** — beside the reference's ~65,
+///   and for the first time in the same decade as it.
+///
+/// Note the last step: this level is chosen to read correctly *through* the
+/// existing low-key grade rather than by deleting it, because the grade is not
+/// this constant's to spend. Retire that black point and the road lands at 102,
+/// and this should come back to ~`2.6`.
+///
+/// **What this replaces, and why every word of it was true and still wrong:**
+/// a directional light is by definition the same everywhere — it lights the
+/// tarmac under the bumper, the tarmac at the vanishing point and the verge two
+/// hundred metres out to exactly the same value. Every unit of it is a floor
+/// under the *whole* frame, which is the one thing a night stage cannot afford,
+/// and that is what drove this constant down and down. On a daylight stage the
+/// sun *is* the frame and that floor is the subject; the near-to-far ramp the
+/// old level was protecting belongs to the depth fog, not to a lamp on the car.
+///
+/// The history below is kept because it is the reasoning a future pass will
+/// re-derive if the reference ever goes back to night.
 ///
 /// All of that is true, and the level it produced — `0.30` — was still wrong,
 /// because it removed the pedestal a **second** time. The frame's floor is taken
@@ -581,11 +650,12 @@ const MOON_HALO_STRENGTH: f32 = 0.18;
 /// authoring the raster at zero.
 ///
 /// The verticals come back with it, and that is the other half of the win: at
-/// `0.30` a car flank facing the moon got `0.135`, so the car was a black
-/// silhouette with no lit side at all. At `0.88` it gets `0.395` and the raking,
+/// `0.30` a car flank facing the key got `0.135`, so the car was a black
+/// silhouette with no lit side at all. At `3.6` it gets `1.6`, and the raking,
 /// side-lit modelling [`MOON_DIRECTION`]'s low elevation was chosen for finally
-/// reaches the geometry.
-const KEY_INTENSITY: f32 = 0.88;
+/// reaches the geometry — with the sky fill under it, the *unlit* flank becomes
+/// a readable cool shadow rather than a cutout.
+const KEY_INTENSITY: f32 = 3.6;
 
 /// How high above the road the car's pool light hangs (m).
 ///
@@ -599,6 +669,21 @@ pub const POOL_LIGHT_HEIGHT: f32 = 6.5;
 /// so the brightest tarmac is at and just beyond the car rather than in the
 /// foreground behind it, where the reference keeps the road dark.
 pub const POOL_LIGHT_AHEAD: f32 = 1.5;
+
+/// How strong the car's pool light is.
+///
+/// On the night rig this was `1.0` and it was the brightest light in the frame —
+/// the stage was lit *locally*, and the pool's falloff was the only thing
+/// producing a near-to-far ramp. Under a daylight key that reading inverts: a
+/// lamp that out-lights the sun on the tarmac beneath the car is a spotlight
+/// following the player, and it fills in exactly the ground the car's own cast
+/// shadow has to darken.
+///
+/// So it is demoted to a residual — the warm near-field bounce off sunlit
+/// asphalt onto the car's sills and arches, a twentieth of the sun on the same
+/// surface and gone within a few metres. Pinned against the key by
+/// `the_sun_out_lights_every_other_term_in_the_frame`.
+const POOL_LIGHT_INTENSITY: f32 = 0.16;
 
 /// Where the car's pool light hangs for a car pose.
 ///
@@ -777,34 +862,25 @@ mod tests {
         assert!(at(0.5 * limb) > 0.1, "the limb still carries a visible rim");
     }
 
-    /// **The night is lit locally — but the ground plane still has to exist.**
-    /// The two *global* terms (the hemisphere ambient and the directional key)
-    /// live inside a window with a wall on each side, and this pins both.
+    /// **This is a daylight stage: the sun is the frame.** The three terms that
+    /// reach the road — the directional key, the hemisphere sky ambient, and the
+    /// pool light riding over the car — have a fixed order of precedence, and
+    /// this pins it, because the rig arrived here from a *night* authorship in
+    /// which the order was exactly inverted.
     ///
-    /// *Ceiling:* they must stay under what the car's pool light lays on the road
-    /// beneath it. A global term is the same value on the tarmac under the bumper
-    /// and on the verge two hundred metres out, so raising either one does not
-    /// brighten the scene — it raises the *floor* of the scene. Only the pool
-    /// falls off, so only the pool can produce a near-to-far ramp at all.
+    /// Under that night rig the pool was the brightest thing on the tarmac and
+    /// the globals were deliberately starved beneath it, so that only the pool's
+    /// falloff produced any near-to-far ramp. Every one of those sentences is
+    /// wrong outdoors at noon: a car does not out-light the sun, a lamp that
+    /// does reads as a spotlight following the car, and — the reason this is a
+    /// test and not a comment — a pool bright enough to beat the key fills in
+    /// the very ground the car's own sun shadow is supposed to darken, which
+    /// deletes the single most reference-defining feature of the frame.
     ///
-    /// *Floor:* they must render the road **above the grade's black point**.
-    /// [`FramePostProcess::low_key`] subtracts `0.16` in display-encoded space off
-    /// the finished image, and that subtract is a hard clip, not a curve: a road
-    /// that renders below byte 41 does not get deeper, it becomes `0`. Starving
-    /// the globals past this line does not deepen the night, it deletes the verge,
-    /// the shoulder and the mid-field tarmac outright — which is exactly what the
-    /// measured champion did (verge `0.0–3.1` against a reference `6.5–9.6`).
-    ///
-    /// Both walls are worth a test rather than a comment because passes keep
-    /// walking into one while defending the other. The comparison is made on a
-    /// **horizontal** surface — the road, the largest thing in any frame and the
-    /// one every term lands on hardest.
+    /// Measured, as always, on a **horizontal** surface: the road is the largest
+    /// thing in any frame and the one every term lands on hardest.
     #[test]
-    fn the_globals_sit_between_the_pool_light_and_the_grade_s_black_point() {
-        // The backend's point-light falloff, mirrored: 1/(1 + 0.09d + 0.032d²).
-        let d = POOL_LIGHT_HEIGHT;
-        let pool = 1.0 / (1.0 + 0.09 * d + 0.032 * d * d);
-
+    fn the_sun_out_lights_every_other_term_in_the_frame() {
         // The key on flat ground is `intensity * N·L`, with N = +Y.
         let len = (KEY_DIRECTION.x * KEY_DIRECTION.x
             + KEY_DIRECTION.y * KEY_DIRECTION.y
@@ -813,36 +889,72 @@ mod tests {
         let n_dot_l = -KEY_DIRECTION.y / len;
         let key = KEY_INTENSITY * n_dot_l;
 
+        // A daylight key is a gain past one, and `palette::ratio` clamps to
+        // `0..=1`. Routing the intensity through that helper — the obvious thing
+        // to do, and what every other value in this file does — pins the sun
+        // back at the night rig's brightness and reports nothing. Pinned here
+        // because the failure is invisible in the source and only shows up as a
+        // frame that mysteriously refuses to get brighter.
+        assert!(
+            palette::ratio(KEY_INTENSITY).get() < KEY_INTENSITY,
+            "the sanitizer no longer clamps the key — if that changed, the \
+             comment at the `add_light` call site is stale"
+        );
+
         // The hemisphere ambient's sky term is what an up-facing surface gets.
-        let ambient = (0.014 + 0.016 + 0.026) / 3.0;
-        let globals = key + ambient;
+        let ambient = (0.19 + 0.25 + 0.36) / 3.0;
+
+        // The backend's point-light falloff, mirrored: 1/(1 + 0.09d + 0.032d²),
+        // times the pool's own intensity.
+        let d = POOL_LIGHT_HEIGHT;
+        let pool = POOL_LIGHT_INTENSITY / (1.0 + 0.09 * d + 0.032 * d * d);
 
         assert!(
-            pool > globals,
-            "the flat terms ({globals:.3}) have caught up with the pool \
-             ({pool:.3}): the road is about to go one uniform tone again"
+            key > pool * 4.0,
+            "the pool ({pool:.3}) is competing with the sun ({key:.3}) on the \
+             tarmac beneath the car — that is a headlight at noon, and it erases \
+             the car's cast shadow"
+        );
+
+        // The fill is a fill. It lights the lit face and the unlit face equally,
+        // so every unit of it is contrast removed from every object in shot; a
+        // sky term that catches the key flattens the frame into overcast.
+        assert!(
+            ambient < key * 0.30,
+            "the sky fill ({ambient:.3}) has become a second key against \
+             {key:.3} — the frame is going flat"
+        );
+        // But it is emphatically not zero. Under one directional key, every
+        // surface turned away from the sun receives this and nothing else: at
+        // the night rig's 0.019 the reference's blue-grey palm shadow renders as
+        // a black hole, which is the defect this floor exists to prevent.
+        assert!(
+            ambient > 0.15,
+            "the sky fill ({ambient:.3}) is back to a night residual — every \
+             shadow in the frame is a hole again"
         );
 
         // The tarmac's luma albedo, and the sRGB transfer the backend writes it
-        // through — the road as the display actually receives it, before grading.
+        // through — the road as the display receives it, before grading.
+        //
+        // The band is the reference's own sunlit tarmac (~byte 65) with the
+        // low-key grade's `0.16` subtract added back, since that stage still
+        // sits downstream of this one: byte 87..=128 pre-grade.
         let road = 0.2126 * 0.085 + 0.7152 * 0.088 + 0.0722 * 0.105;
-        let linear = road * globals;
+        let linear = road * (key + ambient);
         let encoded = 1.055 * linear.powf(1.0 / 2.4) - 0.055;
         let black_point = FramePostProcess::low_key().black_point().get();
         assert!(
             encoded > black_point,
             "the globals put the road at {encoded:.3} encoded, under the grade's \
-             black point of {black_point:.3} — the subtract will clip the whole \
+             black point of {black_point:.3} — the subtract clips the whole \
              ground plane to zero instead of deepening it"
         );
-
-        // ...and the ambient stays the *residual* it is documented to be, not a
-        // second key: it lights the lit and the unlit face equally, so every
-        // unit of it is contrast removed from every object in the frame.
         assert!(
-            ambient < key * 0.25,
-            "the ambient fill ({ambient:.3}) is no longer a fill against a key \
-             of {key:.3} — it is flattening the frame"
+            (0.34..=0.50).contains(&encoded),
+            "the road renders at {encoded:.3} encoded, outside the band that \
+             lands it beside the reference's sunlit tarmac once the grade's \
+             black point is taken off"
         );
     }
 
