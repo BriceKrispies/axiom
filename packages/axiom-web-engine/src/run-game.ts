@@ -28,9 +28,6 @@ import { startLoop } from "./raf-loop.ts";
 import { playTone } from "./audio.ts";
 import {
   addLight,
-  createMaterial,
-  createMesh,
-  createMeshData,
   despawnRenderable,
   removeLight,
   renderScene,
@@ -42,6 +39,7 @@ import {
   setNodeTransform,
   spawnRenderable,
 } from "./store.ts";
+import { createMaterial, createMesh, createMeshData } from "./store-resources.ts";
 
 /** Tuning + hooks for `runGame`. All optional; the defaults suit a 60 Hz game. */
 export interface RunGameOptions<State> {

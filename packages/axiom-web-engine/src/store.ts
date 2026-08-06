@@ -1,11 +1,17 @@
 /*
  * Store: the retained-scene store behind the `api.ts` contract — a module-level
  * singleton (`initStore` once with an INJECTED backend, then the free scene
- * functions). It owns meshes/materials/nodes/lights/camera as plain data and
- * delegates drawing to a `backend.ts` backend. This is the branchless, fully-
- * covered spine half of the old `renderer.ts`: it builds no WebGL/Canvas context
- * itself, so every path is exercisable with a fake backend. The thin `renderer.ts`
- * edge resolves a real backend and hands it here.
+ * functions). It owns the SCENE — nodes, lights, camera, labels, clear color,
+ * ambient — and assembles the per-frame `SceneFrame` it hands a `backend.ts`
+ * backend. Resource REGISTRATION (geometry uploads, materials, the primitive
+ * cache) is the other half of the store and lives in `store-resources.ts`; the
+ * singleton itself lives here, and that file reaches it through the two internal
+ * accessors below.
+ *
+ * This is the branchless, fully-covered spine half of the old `renderer.ts`: it
+ * builds no WebGL/Canvas context itself, so every path is exercisable with a
+ * fake backend. The thin `renderer.ts` edge resolves a real backend and hands it
+ * here.
  */
 
 import {
@@ -20,9 +26,9 @@ import {
   type RenderBackend,
   type ResolvedMaterial,
 } from "./backend.ts";
-import type { Camera3D, Entity, Handle, Light, MaterialSpec, MeshData, MeshKind, Rgba, Transform } from "./api.ts";
-import { absentProbe, assert, demand, orCompute, orElse, presentOf } from "./branchless.ts";
-import { buildPrimitive, primitiveCacheKey, resolveFacets } from "./tessellation.ts";
+import type { Camera3D, Entity, Handle, Light, Rgba, Transform } from "./api.ts";
+import { absentProbe, assert, demand } from "./branchless.ts";
+import { fromTrs, normalMatrix } from "./mat4.ts";
 import { isDirectional, isPoint, resolveDirLight, resolvePointLight } from "./light-resolve.ts";
 
 /** The canvas backing store the renderer resizes (a real `HTMLCanvasElement`
@@ -59,12 +65,6 @@ const DEFAULT_CAMERA_DISTANCE = 6;
 const DEFAULT_FOV_DIVISOR = 3;
 const DEFAULT_NEAR_PLANE = 0.1;
 const DEFAULT_FAR_PLANE = 200;
-const DEFAULT_EMISSIVE: Rgba = [0, 0, 0, 1];
-const DEFAULT_OPACITY = 1;
-// Absent roughness is fully MATTE: glossiness 0 -> zero specular, so a material
-// that never sets roughness renders byte-identically to the old Lambert-only path.
-const DEFAULT_ROUGHNESS = 1;
-
 const DEFAULT_CAMERA: Camera3D = {
   far: DEFAULT_FAR_PLANE,
   fovY: Math.PI / DEFAULT_FOV_DIVISOR,
@@ -77,8 +77,20 @@ let state = absentProbe<RendererState>();
 let nextEntity: Entity = 1;
 let nextHandle: Handle = 1;
 
-const requireState = (): RendererState =>
+/** The singleton, or a thrown error if the renderer was never initialized.
+ * Exported for `store-resources.ts`, the other half of this store — NOT part of
+ * the engine's public surface (`index.ts` does not re-export it). */
+export const requireState = (): RendererState =>
   demand(state, "store: initStore(backend, canvas) must be called before any other store function");
+
+/** Allocate the next resource handle. Lives here because the counter is part of
+ * the singleton's identity; `store-resources.ts` draws from it so mesh and
+ * material handles cannot collide. Internal, like `requireState`. */
+export const allocHandle = (): Handle => {
+  const handle = nextHandle;
+  nextHandle += 1;
+  return handle;
+};
 
 /** Initialize the singleton store with an already-resolved backend and the
  * canvas it draws into. Sets the default camera, clear color, and ambient. */
@@ -113,65 +125,33 @@ export const resizeRenderer = (width: number, height: number): void => {
   st.backend.resize(st.canvas.width, st.canvas.height);
 };
 
-/** Register custom triangle-list geometry and return its handle. */
-export const createMeshData = (data: MeshData): Handle => {
-  const st = requireState();
-  assert(
-    data.positions.length === data.normals.length,
-    `store: createMeshData positions (${data.positions.length}) and normals (${data.normals.length}) differ`,
-  );
-  // An `ao` array, when present, must carry one scalar per vertex; absent -> the
-  // backends default it to 1.0, so this only fires on a genuine length mismatch.
-  const aoLength = orElse(
-    presentOf(data.ao).map((ao): number => ao.length)[0],
-    data.positions.length,
-  );
-  assert(
-    aoLength === data.positions.length,
-    `store: createMeshData ao (${aoLength}) must match positions (${data.positions.length})`,
-  );
-  const handle = nextHandle;
-  nextHandle += 1;
-  st.backend.uploadMesh(handle, data);
-  return handle;
-};
-
 /**
- * Get (or lazily build + cache) the shared geometry for a primitive kind at a
- * radial facet budget.
+ * Build a node record: its pose PLUS the two matrices every backend derives from
+ * that pose.
  *
- * `segments` is the budget at FULL detail; `tessellation.ts` resolves it against
- * the active backend's `detailScale` (the software path halves it), and the
- * result keys the cache — so asking for the same budget twice reuses one upload,
- * and asking for a bigger one adds geometry beside the default rather than
- * replacing it. Omitting `segments` reproduces the previous fixed counts exactly
- * (24/12 cylinder, 16×24 / 8×12 sphere).
+ * The matrices are cached here, at the one place a pose can change, rather than
+ * recomputed per frame in each backend — which is what all three used to do. That
+ * was the single largest avoidable cost in the frame: `fromTrs` ran once per node
+ * per frame in `backend-webgl2`, `backend-canvas2d` AND `backend-css`, and
+ * `normalMatrix` (the top named function in a live CPU profile of the chest
+ * scene) ran once per node per frame in the GL path, each call allocating a
+ * handful of vectors and a fresh `Float32Array`. A scene of a few hundred mostly
+ * STATIC nodes was rebuilding every one of those matrices sixty times a second to
+ * arrive at the same numbers.
+ *
+ * The store is the lowest correct owner because it is the only thing that knows
+ * when a pose actually changed: `spawnRenderable` and `setNodeTransform` are the
+ * only two ways in. So a static node now computes its matrices exactly once, ever,
+ * and a moving node exactly once per re-pose — and all three backends get the
+ * saving for free, from one implementation instead of three.
+ *
+ * `FrameNode` is fully readonly and replaced wholesale rather than mutated in
+ * place, which is what makes the cache impossible to desync: there is no way to
+ * write a new `transform` without also producing its matrices.
  */
-export const createMesh = (kind: MeshKind, segments?: number): Handle => {
-  const st = requireState();
-  const facets = resolveFacets(segments, st.backend.detailScale);
-  const cacheKey = primitiveCacheKey(kind, facets);
-  return orCompute(st.primitiveCache.get(cacheKey), (): Handle => {
-    const handle = createMeshData(buildPrimitive(kind, facets));
-    st.primitiveCache.set(cacheKey, handle);
-    return handle;
-  });
-};
-
-/** Register a Lambert material (diffuse base + additive emissive + opacity). */
-export const createMaterial = (spec: MaterialSpec): Handle => {
-  const st = requireState();
-  const [br, bg, bb, ba] = spec.baseColor;
-  const [er, eg, eb] = orElse(spec.emissive, DEFAULT_EMISSIVE);
-  const handle = nextHandle;
-  nextHandle += 1;
-  st.materials.set(handle, {
-    baseColor: [br, bg, bb, ba],
-    emissive: [er, eg, eb],
-    opacity: orElse(spec.opacity, DEFAULT_OPACITY),
-    roughness: orElse(spec.roughness, DEFAULT_ROUGHNESS),
-  });
-  return handle;
+const posedNode = (mesh: Handle, material: Handle, transform: Transform): FrameNode => {
+  const model = fromTrs(transform.position, transform.rotation, transform.scale);
+  return { material, mesh, model, normal: normalMatrix(model), transform };
 };
 
 /** Add a scene node drawing `mesh` with `material` at `transform`. */
@@ -180,14 +160,15 @@ export const spawnRenderable = (mesh: Handle, material: Handle, transform: Trans
   assert(st.materials.has(material), `store: spawnRenderable got unknown material handle ${material}`);
   const entity = nextEntity;
   nextEntity += 1;
-  st.nodes.set(entity, { material, mesh, transform });
+  st.nodes.set(entity, posedNode(mesh, material, transform));
   return entity;
 };
 
-/** Re-pose an existing node. */
+/** Re-pose an existing node (its cached matrices are rebuilt with it). */
 export const setNodeTransform = (entity: Entity, transform: Transform): void => {
-  const node = demand(requireState().nodes.get(entity), `store: setNodeTransform got unknown entity ${entity}`);
-  node.transform = transform;
+  const st = requireState();
+  const node = demand(st.nodes.get(entity), `store: setNodeTransform got unknown entity ${entity}`);
+  st.nodes.set(entity, posedNode(node.mesh, node.material, transform));
 };
 
 /** Remove a node from the retained scene (its geometry/material handles live on;

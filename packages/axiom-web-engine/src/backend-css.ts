@@ -818,7 +818,8 @@ export const createCssBackend = (canvas: HTMLCanvasElement, quality: RenderQuali
         dom.lastMaterial = node.material;
         dom.lastLightEpoch = lightEpoch;
 
-        const model = fromTrs(t.position, t.rotation, t.scale);
+        // CACHED on the node by the store (see `posedNode`), not rebuilt here.
+        const model = node.model;
         const lx = (x: number, y: number, z: number): readonly [number, number, number] => [
           mat(model, 0) * x + mat(model, 4) * y + mat(model, 8) * z,
           mat(model, 1) * x + mat(model, 5) * y + mat(model, 9) * z,

@@ -10,6 +10,7 @@
  */
 
 import type { Camera3D, Handle, MeshData, Rgba, Transform } from "./api.ts";
+import type { Mat3, Mat4 } from "./mat4.ts";
 
 /** A material resolved to plain arrays (defaults applied by the store).
  * `roughness ∈ [0, 1]` drives the specular highlight (1 = matte, no specular). */
@@ -21,10 +22,25 @@ export interface ResolvedMaterial {
 }
 
 /** One drawable node (the store mutates `transform` in place on re-pose). */
+/**
+ * One drawable in the frame: its pose, and the two matrices derived from that
+ * pose.
+ *
+ * `model` and `normal` are CACHED by the store (see `posedNode` in `store.ts`),
+ * computed once per pose rather than once per node per frame in every backend.
+ * A backend must READ them, never recompute from `transform` — that is the whole
+ * saving. `normal` is the cofactor matrix (`det(M)·M⁻ᵀ`), which the GL path
+ * normalizes; the software path lights per triangle and needs only `model`.
+ *
+ * Every field is readonly and the store replaces the whole record on a re-pose,
+ * so the cache cannot drift out of step with `transform`.
+ */
 export interface FrameNode {
   readonly mesh: Handle;
   readonly material: Handle;
-  transform: Transform;
+  readonly transform: Transform;
+  readonly model: Mat4;
+  readonly normal: Mat3;
 }
 
 export interface FrameDirLight {

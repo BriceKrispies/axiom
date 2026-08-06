@@ -38,7 +38,7 @@
 
 import type { Handle, MeshData } from "./api.ts";
 import type { RenderBackend, SceneFrame } from "./backend.ts";
-import { type Mat4, fromTrs, lookAt, multiply, perspective } from "./mat4.ts";
+import { type Mat4, lookAt, multiply, perspective } from "./mat4.ts";
 import type { RenderQuality } from "./render-quality.ts";
 import { diffuseOnly, shadeSurface, tonemap } from "./shading.ts";
 import { SOFTWARE_DETAIL_SCALE } from "./tessellation.ts";
@@ -362,7 +362,10 @@ export const createCanvas2dBackend = (canvas: HTMLCanvasElement, quality: Render
         if (along + boundRadius < frame.camera.near) continue;
         if ((boundRadius * pxPerUnit) / Math.max(along, frame.camera.near) < 0.5) continue;
 
-        const model: Mat4 = fromTrs(t.position, t.rotation, t.scale);
+        // CACHED on the node by the store, rebuilt only on a re-pose — this used
+        // to be a fresh `fromTrs` per node per frame here, in the GL backend and
+        // in the DOM backend, three times over for the same numbers.
+        const model: Mat4 = node.model;
         const vertexCount = mesh.positions.length / 3;
         if (world.length < vertexCount * 3) {
           world = new Float32Array(vertexCount * 3);

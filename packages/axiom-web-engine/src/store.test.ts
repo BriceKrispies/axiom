@@ -7,9 +7,6 @@ import { CLEAR_COLOR, DEFAULT_AMBIENT, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS, type Re
 import {
   addLight,
   clearScene,
-  createMaterial,
-  createMesh,
-  createMeshData,
   despawnRenderable,
   initStore,
   removeLight,
@@ -25,6 +22,8 @@ import {
   setNodeTransform,
   spawnRenderable,
 } from "./store.ts";
+import { createMaterial, createMesh, createMeshData } from "./store-resources.ts";
+import { fromTrs, normalMatrix } from "./mat4.ts";
 
 // A recording fake backend: it constructs no context, it just captures the calls
 // the store makes, so every store path is exercisable without a browser.
@@ -429,4 +428,59 @@ test("removeLight drops a light from the next frame and rejects an unknown entit
     },
     /unknown light entity 9999/u,
   );
+});
+
+/*
+ * The per-node matrix cache (`posedNode`). These are the contract the backends
+ * rely on: the matrices exist and MATCH what each backend used to compute for
+ * itself (so moving the work changes nothing on screen), a re-pose rebuilds them,
+ * and a static node reuses the same objects frame after frame — which is the
+ * saving itself, stated as an assertion.
+ *
+ * The stale-cache case is the regression that matters: it would freeze every
+ * MOVING object while leaving the still ones correct, which reads as a
+ * game-logic fault rather than a renderer one.
+ */
+
+const POSED = {
+  position: { x: 3, y: -2, z: 5 },
+  rotation: [0, Math.SQRT1_2, 0, Math.SQRT1_2] as const,
+  scale: { x: 2, y: 2, z: 2 },
+};
+
+test("a spawned node carries the model and normal matrices its pose implies", () => {
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
+  const material = createMaterial({ baseColor: [1, 1, 1, 1] });
+  spawnRenderable(createMesh("box"), material, POSED);
+  renderScene();
+  const node = [...rec.frames[0]!.nodes][0]!;
+  const expected = fromTrs(POSED.position, POSED.rotation, POSED.scale);
+  assert.deepEqual([...node.model], [...expected], "the model matrix the backends used to build per frame");
+  assert.deepEqual([...node.normal], [...normalMatrix(expected)], "and its cofactor normal matrix");
+});
+
+test("re-posing a node rebuilds its cached matrices", () => {
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
+  const material = createMaterial({ baseColor: [1, 1, 1, 1] });
+  const node = spawnRenderable(createMesh("box"), material, IDENTITY_TRANSFORM);
+  renderScene();
+  const before = [...[...rec.frames[0]!.nodes][0]!.model];
+  setNodeTransform(node, POSED);
+  renderScene();
+  const after = [...[...rec.frames[1]!.nodes][0]!.model];
+  assert.notDeepEqual(after, before, "the cache followed the re-pose");
+  assert.deepEqual(after, [...fromTrs(POSED.position, POSED.rotation, POSED.scale)]);
+});
+
+test("a node the scene never re-poses reuses its matrix objects across frames", () => {
+  const rec = setup("WebGL2", FULL_DETAIL_SCALE);
+  const material = createMaterial({ baseColor: [1, 1, 1, 1] });
+  spawnRenderable(createMesh("box"), material, POSED);
+  renderScene();
+  renderScene();
+  const first = [...rec.frames[0]!.nodes][0]!;
+  const second = [...rec.frames[1]!.nodes][0]!;
+  // Object identity, not equality: an equal copy would mean it was rebuilt.
+  assert.equal(second.model, first.model, "the same Float32Array, not an equal copy");
+  assert.equal(second.normal, first.normal);
 });

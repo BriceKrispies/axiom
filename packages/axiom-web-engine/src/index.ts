@@ -53,12 +53,13 @@ export type { RunGameOptions, RunningGame } from "./run-game.ts";
 export { runGame } from "./run-game.ts";
 
 // ── retained-scene store ────────────────────────────────────────────────────────
+// Two halves, one singleton: `store.ts` owns the SCENE (nodes, lights, camera,
+// and the per-frame `SceneFrame`), `store-resources.ts` owns REGISTRATION
+// (geometry uploads, materials, the primitive cache). The split is internal —
+// callers see one flat surface here, exactly as before.
 export {
   addLight,
   clearScene,
-  createMaterial,
-  createMesh,
-  createMeshData,
   rendererBackendName,
   rendererNodeCount,
   renderScene,
@@ -71,6 +72,7 @@ export {
   setNodeTransform,
   spawnRenderable,
 } from "./store.ts";
+export { createMaterial, createMesh, createMeshData } from "./store-resources.ts";
 
 // ── backend-selecting facade + capability ladder ────────────────────────────────
 // `initRenderer(canvas)` runs the probed ladder (webgpu → webgl2 → webgl1 →

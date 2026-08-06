@@ -10,7 +10,7 @@
 
 import type { Handle, MeshData } from "./api.ts";
 import { type FrameNode, type RenderBackend, type SceneFrame, MAX_DIR_LIGHTS, MAX_POINT_LIGHTS } from "./backend.ts";
-import { type Mat4, fromTrs, lookAt, multiply, normalMatrix, perspective } from "./mat4.ts";
+import { lookAt, multiply, perspective } from "./mat4.ts";
 import type { RenderQuality } from "./render-quality.ts";
 import { FULL_DETAIL_SCALE } from "./tessellation.ts";
 
@@ -216,9 +216,11 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement, quality: RenderQu
     if (mesh === undefined || material === undefined) {
       return; // dropped by clearScene between spawn and draw — nothing to render
     }
-    const model: Mat4 = fromTrs(node.transform.position, node.transform.rotation, node.transform.scale);
-    gl.uniformMatrix4fv(uniforms.model, false, model);
-    gl.uniformMatrix3fv(uniforms.normalMatrix, false, normalMatrix(model));
+    // Both matrices are CACHED on the node by the store, rebuilt only when the
+    // pose changes. Recomputing them here is what made `normalMatrix` the top
+    // named function in a live profile of a few-hundred-node scene.
+    gl.uniformMatrix4fv(uniforms.model, false, node.model);
+    gl.uniformMatrix3fv(uniforms.normalMatrix, false, node.normal);
     gl.uniform4f(uniforms.baseColor, material.baseColor[0], material.baseColor[1], material.baseColor[2], material.baseColor[3]);
     gl.uniform3f(uniforms.emissive, material.emissive[0], material.emissive[1], material.emissive[2]);
     gl.uniform1f(uniforms.opacity, material.opacity);
