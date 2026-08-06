@@ -121,7 +121,9 @@ pub struct RoadChunks {
     /// eye, from [`paint_behind_metres`], because the frame's bottom edge is
     /// road just in front of the camera and the camera is behind the car.
     paint_behind: f32,
-    triangles: usize,
+    /// Each chunk's own triangle count, so the drawn total is a sum over the
+    /// active range.
+    per_chunk: Vec<usize>,
 }
 
 /// The material handles a chunk's four meshes are drawn with.
@@ -144,14 +146,15 @@ impl RoadChunks {
     ) -> RoadChunks {
         let count = chunk_count(track);
         let mut chunks = Vec::with_capacity(count);
-        let mut triangles = 0usize;
+        let mut per_chunk = Vec::with_capacity(count);
         for index in 0..count {
             let meshes = build_chunk(track, index, tuning);
-            triangles += (meshes.surface.indices().len()
+            let chunk_triangles = (meshes.surface.indices().len()
                 + meshes.paint.indices().len()
                 + meshes.rail.indices().len()
                 + meshes.verge.indices().len())
                 / 3;
+            per_chunk.push(chunk_triangles);
             let spawn_part = |app: &mut RunningApp, data, material| {
                 spawn_retired(app, data, material)
             };
@@ -179,7 +182,7 @@ impl RoadChunks {
             fine_paint_active: None,
             paint_window: false,
             paint_behind: paint_behind_metres(camera),
-            triangles,
+            per_chunk,
         }
     }
 
@@ -237,9 +240,19 @@ impl RoadChunks {
         self.chunks.is_empty()
     }
 
-    /// The total triangle count of the whole course's road geometry.
-    pub const fn total_triangles(&self) -> usize {
-        self.triangles
+    /// The triangles the road is actually **drawing** this frame: the active
+    /// range's own, not the whole course's.
+    ///
+    /// This replaced a course-total counter, which is what made the old
+    /// telemetry useless: a figure labelled "what the scene drew" that reads
+    /// 109,916 in every section of the course cannot answer a question about
+    /// any of them.
+    pub fn active_triangles(&self) -> usize {
+        self.active.map_or(0, |(lo, hi)| {
+            self.per_chunk
+                .get(lo..=hi.min(self.per_chunk.len().saturating_sub(1)))
+                .map_or(0, |span| span.iter().sum())
+        })
     }
 
     /// The currently active `[first, last]` chunk range, if any.
@@ -439,12 +452,39 @@ mod tests {
         assert_eq!(chunks.len(), chunk_count(&track));
         assert!(!chunks.is_empty());
         assert_eq!(chunks.active_count(), 0, "nothing is drawn until the first update");
-        assert!(chunks.total_triangles() > 10_000, "the course has real geometry");
+        assert_eq!(
+            chunks.active_triangles(),
+            0,
+            "nothing is drawn, so nothing is counted as drawn"
+        );
         for chunk in &chunks.chunks {
             for entity in chunk.each() {
                 assert_eq!(app.get::<Visible>(entity), Some(Visible(false)));
             }
         }
+    }
+
+    #[test]
+    fn the_drawn_triangle_count_is_the_active_range_not_the_course() {
+        let (mut app, _track, mut chunks) = fixture();
+        chunks.update(&mut app, 0.0);
+        let near = chunks.active_triangles();
+        assert!(near > 0, "an active range draws real geometry");
+
+        // The point of the counter: it must be a *fraction* of the course, or it
+        // is the course total under a different name and answers nothing.
+        let whole_course: usize = chunks.per_chunk.iter().sum();
+        assert!(whole_course > 10_000, "the course has real geometry");
+        assert!(
+            near < whole_course / 2,
+            "the drawn count ({near}) should be far below the course total ({whole_course})"
+        );
+
+        // And it moves with the car rather than staying pinned to chunk zero.
+        chunks.update(&mut app, 4_000.0);
+        let (lo, _) = chunks.active_range().expect("a range is active");
+        assert!(lo > 0, "the car has left the opening chunks");
+        assert!(chunks.active_triangles() > 0);
     }
 
     #[test]

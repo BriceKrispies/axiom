@@ -408,7 +408,7 @@ impl RaceScene {
         SceneCounters {
             active_chunks: self.road.active_count(),
             total_chunks: self.road.len(),
-            road_triangles: self.road.total_triangles(),
+            road_triangles: self.road.active_triangles(),
             scenery_instances: self.scenery.drawn_count(),
             cached_scenery_chunks: self.scenery.cached_chunks(),
             effect_instances: self.effects.visible_count(),

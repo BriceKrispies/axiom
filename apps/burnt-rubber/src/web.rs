@@ -30,6 +30,7 @@ use crate::profile::PlayProfile;
 use crate::start_screen::{
     StartCommand, StartScreen, START_HINT, START_LABEL, START_SUBTITLE, START_TITLE,
 };
+use crate::telemetry::{top_three, FrameTimes, TripleTap};
 use crate::touch::TouchControls;
 use crate::tuning::Tuning;
 use crate::{CANVAS_ID, DEFAULT_SEED};
@@ -116,6 +117,9 @@ pub fn burnt_rubber_start() {
         last_ms: 0.0,
         touch,
         pointer: None,
+        frames: FrameTimes::new(),
+        speedo_taps: TripleTap::new(),
+        telemetry: false,
     }));
     install_pointer_listeners(&state);
     install_focus_listeners(&state, &held);
@@ -177,6 +181,7 @@ pub fn burnt_rubber_start() {
         let software_raster = bound_backend() == Some(axiom_host::BackendKind::Canvas2d);
         guard.app.set_paint_near_field_only(software_raster);
         let elapsed = guard.elapsed_nanos();
+        guard.frames.push(elapsed as f32 / 1.0e6);
         // Keyboard, gamepad and the on-screen pad all feed the same action
         // table: the pad's buttons and the gamepad's face buttons both arrive as
         // synthetic key tokens, so there is exactly one binding table and one
@@ -256,7 +261,11 @@ pub fn burnt_rubber_start() {
 
         let waiting = guard.app.waiting();
         update_start_screen(guard.app.start_screen());
-        update_hud(&guard.app.hud(), waiting);
+        let readout = guard
+            .telemetry
+            .then(|| telemetry_panel(&guard.frames, &guard.app.diagnostics().scene))
+            .unwrap_or_default();
+        update_hud(&guard.app.hud(), waiting, &readout);
         // The driving pad has nothing to do while the start screen is up, and
         // leaving it on screen would invite a thumb onto a control that does
         // nothing.
@@ -296,6 +305,17 @@ struct LiveState {
     /// *frame's* input, exactly like a key: acting on it inside the event would
     /// mutate the app from outside the frame.
     pointer: Option<Vec2>,
+    /// The rolling frame-time window behind the telemetry readout.
+    ///
+    /// Fed from the same clock reading the simulation steps on, so the number on
+    /// screen is the frame the player is looking at rather than a second,
+    /// separately-drifting measurement of it.
+    frames: FrameTimes,
+    /// Taps on the speedometer, counting toward a toggle.
+    speedo_taps: TripleTap,
+    /// Whether the telemetry panel is showing. Off until asked for — this is an
+    /// instrument, not chrome.
+    telemetry: bool,
 }
 
 impl LiveState {
@@ -545,7 +565,21 @@ fn install_pointer_listeners(state: &Rc<RefCell<LiveState>>) {
     let down_state = state.clone();
     let on_down = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
         let point = Vec2::new(e.client_x() as f32, e.client_y() as f32);
+        // Three taps on the speedometer open the telemetry panel. Matched by
+        // walking up from the event's target rather than by hit-testing a
+        // rectangle: the HUD is rebuilt as fresh DOM every frame, so a listener
+        // bound to the speedometer element would be destroyed within 16 ms of
+        // being attached, and a hard-coded rectangle would silently stop
+        // matching the moment the readout's font or position changed.
+        let on_speedo = e
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+            .and_then(|el| el.closest(&format!("#{SPEEDO_ID}")).ok().flatten())
+            .is_some();
         if let Ok(mut guard) = down_state.try_borrow_mut() {
+            if on_speedo && guard.speedo_taps.tap(e.time_stamp()) {
+                guard.telemetry = !guard.telemetry;
+            }
             // Every pointer type reaches the start screen — a button is
             // something you click as well as tap.
             guard.pointer = Some(point);
@@ -788,7 +822,7 @@ const PAD_STYLE: &str = "position:fixed;inset:0;z-index:25;pointer-events:none;\
 /// the HUD in 3D would mean building that bridge here — a general engine
 /// capability, in an app, to show a speedometer. The established pattern in this
 /// repository is a DOM overlay, and that is what this is.
-fn update_hud(hud: &HudModel, hidden: bool) {
+fn update_hud(hud: &HudModel, hidden: bool, telemetry: &str) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
@@ -845,17 +879,21 @@ fn update_hud(hud: &HudModel, hidden: bool) {
         .unwrap_or_default();
 
     root.set_inner_html(&format!(
-        "<div style=\"font-size:52px;line-height:1;font-weight:700\">{speed}<span style=\"font-size:18px;opacity:.7\"> KM/H</span></div>\
+        "<div id=\"{SPEEDO_ID}\" style=\"font-size:52px;line-height:1;font-weight:700;\
+          pointer-events:auto;cursor:pointer\">{speed}<span style=\"font-size:18px;opacity:.7\"> KM/H</span></div>\
          <div style=\"margin-top:6px\">{section}</div>\
          <div>[{progress_bar}] {percent}%  ·  {time}</div>\
          <div style=\"color:#ffd166;min-height:1.2em\">{state}</div>\
          <div style=\"color:#8ef;min-height:1.2em\">NEAR MISSES {near}</div>\
          {ghost}\
+         {telemetry}\
          <div style=\"position:fixed;left:0;right:0;top:34%;text-align:center;font-size:64px;\
                      font-weight:800;letter-spacing:.06em;text-shadow:0 0 24px #000\">{banner}</div>\
          <div style=\"position:fixed;left:0;right:0;bottom:92px;text-align:center;\
                      letter-spacing:.08em;opacity:.55\">BOOST [{boost_bar}]</div>\
          <div style=\"position:fixed;left:0;right:0;bottom:14px;text-align:center;font-size:13px;opacity:.65\">{hint}</div>",
+        SPEEDO_ID = SPEEDO_ID,
+        telemetry = telemetry,
         speed = hud.speed_kmh,
         boost_bar = boost_bar,
         section = hud.section.name(),
@@ -870,8 +908,42 @@ fn update_hud(hud: &HudModel, hidden: bool) {
     ));
 }
 
+/// The telemetry panel's markup, or the empty string when it is off.
+///
+/// A separate function from [`update_hud`] because it is the one part of the
+/// HUD that is about the *renderer* rather than the race, and because keeping the
+/// markup here — rather than in [`crate::telemetry`] — keeps every DOM string in
+/// the platform arm and every judgement out of it.
+fn telemetry_panel(frames: &FrameTimes, counters: &crate::render::SceneCounters) -> String {
+    let rows = top_three(counters)
+        .iter()
+        .map(|c| {
+            format!(
+                "<div>{label:<8}{count:>7} {unit}</div>",
+                label = c.label,
+                count = c.count,
+                unit = c.unit
+            )
+        })
+        .collect::<String>();
+    format!(
+        "<div style=\"margin-top:14px;font-size:13px;line-height:1.5;opacity:.85;\
+                    white-space:pre\">\
+         <div style=\"color:#8ef\">{fps:.0} FPS · {median:.1}ms · worst {worst:.1}ms</div>\
+         {rows}</div>",
+        fps = frames.fps(),
+        median = frames.median_ms(),
+        worst = frames.worst_ms(),
+        rows = rows,
+    )
+}
+
 /// The HUD element id.
 const HUD_ID: &str = "burnt-rubber-hud";
+
+/// The speedometer element. Named because it is the telemetry panel's toggle:
+/// three taps on it turn the readout on.
+const SPEEDO_ID: &str = "burnt-rubber-speed";
 
 /// The HUD's style. Anchored top-left and `pointer-events: none`, so it never
 /// covers the road or eats a click.

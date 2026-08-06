@@ -53,6 +53,7 @@ pub mod hud;
 pub mod profile;
 pub mod sim;
 pub mod start_screen;
+pub mod telemetry;
 pub mod touch;
 pub mod track;
 pub mod tuning;
