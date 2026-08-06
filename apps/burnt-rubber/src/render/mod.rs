@@ -688,11 +688,36 @@ const MOON_HALO_STRENGTH: f32 = 0.18;
 
 /// How much of the sky the cloud layer covers.
 ///
-/// Just over half: enough that the upper band is weather rather than a wash, and
-/// enough to break the sun's flare into the ragged edge a coastal sky has —
-/// while leaving real gaps of open sky, which is what stops it reading as
-/// overcast. Past ~0.75 the gaps close and the frame loses its ceiling.
-const CLOUD_COVERAGE: f32 = 0.55;
+/// **This number is not a fraction of the sky — it is a threshold, and the two
+/// are nothing like each other.** The sky shader (`FrameSky::radiance`, mirrored
+/// into the GPU arm) turns it into `threshold = 1 - coverage · (1 + CLOUD_EDGE)`
+/// with `CLOUD_EDGE = 0.22`, and every point of the cloud field above that
+/// threshold is cloud, fully opaque `CLOUD_EDGE` past it. The field is four
+/// weighted sinusoid octaves summed to `0..1` with a mean of exactly `0.5`, so
+/// the threshold has to sit *well above* `0.5` before the sky is mostly open.
+///
+/// At `0.55` the threshold was `0.329` — **below the field's own mean**. Sampled
+/// over the field, that is 82% of the sky carrying cloud and 49% of it fully
+/// opaque: not weather, a lid. It is exactly what the champion frame shows. The
+/// top band of that frame — the deepest, cleanest part of any clear sky, where
+/// `dir.y` is largest and the field's low-frequency octave spreads one lobe over
+/// the whole width — measures 59% white pixels and a mean of `(143, 197, 236)`.
+/// The reference's same band is 3% white and `(43, 125, 207)`: open cobalt.
+/// [`palette::SKY_ZENITH`] is already authored at that cobalt; nothing but this
+/// constant was painting over it, which is why no grade, bloom or exposure move
+/// ever shifted the zenith.
+///
+/// `0.32` puts the threshold at `0.610`, a full `0.11` above the field's mean.
+/// That leaves **18% of the sky carrying any cloud and 2% fully opaque** —
+/// against the reference's measured ~19% cloud fraction across its sky — so the
+/// dome reads as open blue with broken cumulus rather than as a ceiling. The
+/// puffs survive where they belong: `reach = CLOUD_SCALE / dir.y` compresses the
+/// field toward the horizon, so the same threshold that clears the zenith still
+/// crowds cloud into the low band the reference's cumulus sit in.
+///
+/// Gated by the backend's `Sky` capability, so this reaches the GPU arm only;
+/// the Canvas 2D arm drops the sky whole and is untouched.
+const CLOUD_COVERAGE: f32 = 0.32;
 
 /// The cloud field's scale — larger is smaller, busier cloud.
 ///
@@ -963,6 +988,31 @@ mod tests {
         );
         // But it is not nothing: without a rim the disc has a hard aliased edge.
         assert!(at(0.5 * limb) > 0.1, "the limb still carries a visible rim");
+    }
+
+    /// The cloud coverage is a **threshold on a field whose mean is 0.5**, not a
+    /// fraction of the sky, and reading it as the latter is what put a lid over
+    /// the champion frame. Pinned against the field's mean, because that is the
+    /// number that decides whether the zenith is open sky or overcast.
+    #[test]
+    fn the_cloud_layer_leaves_the_zenith_open() {
+        // `FrameSky::radiance`: threshold = 1 - coverage * (1 + CLOUD_EDGE).
+        const CLOUD_EDGE: f32 = 0.22;
+        let threshold = 1.0 - CLOUD_COVERAGE * (1.0 + CLOUD_EDGE);
+        // The four octave weights sum to 1 and each octave averages 0.5, so the
+        // field's mean is exactly 0.5. A threshold at or below it means more than
+        // half the sky is cloud — an overcast lid, not weather.
+        assert!(
+            threshold > 0.6,
+            "threshold {threshold:.3} sits at the cloud field's mean (0.5): most \
+             of the sky is cloud and the zenith gradient never shows"
+        );
+        // And not so high that the layer disappears: the field has to be able to
+        // clear the threshold *and* the CLOUD_EDGE ramp above it somewhere.
+        assert!(
+            threshold + CLOUD_EDGE < 1.0,
+            "nothing in a 0..1 field can reach full density: the sky has no weather"
+        );
     }
 
     /// **This is a daylight stage: the sun is the frame.** The three terms that
