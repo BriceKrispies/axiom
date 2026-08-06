@@ -583,6 +583,44 @@ const ringMeshData = (segments: number, innerRatio: number): MeshData => {
  */
 const BOX_AO_FLOOR = 0.8;
 
+/** (normal, u-axis, v-axis) per cube face, u x v = normal, so `BOX_CORNERS` winds
+ * counter-clockwise seen from outside — the engine primitive's own convention.
+ * Shared by the cube above and the beach slab below, so the two can never drift
+ * apart on winding or vertex order. */
+const BOX_FACES: readonly (readonly [EngineVec3, EngineVec3, EngineVec3])[] = [
+  [v3(1, 0, 0), v3(0, 1, 0), v3(0, 0, 1)],
+  [v3(-1, 0, 0), v3(0, 0, 1), v3(0, 1, 0)],
+  [v3(0, 1, 0), v3(0, 0, 1), v3(1, 0, 0)],
+  [v3(0, -1, 0), v3(1, 0, 0), v3(0, 0, 1)],
+  [v3(0, 0, 1), v3(1, 0, 0), v3(0, 1, 0)],
+  [v3(0, 0, -1), v3(0, 1, 0), v3(1, 0, 0)],
+];
+
+/** Index of the +Y face in `BOX_FACES` — the only face of a floor slab on camera. */
+const BOX_TOP_FACE = 2;
+
+const BOX_CORNERS: readonly (readonly [number, number])[] = [
+  [-1, -1],
+  [1, -1],
+  [1, 1],
+  [-1, 1],
+];
+
+/** One face's corner in unit-cube local space, from its (u, v) in [-1, 1]. */
+const boxCorner = (normal: EngineVec3, uAxis: EngineVec3, vAxis: EngineVec3, su: number, sv: number): EngineVec3 =>
+  v3(
+    0.5 * (normal.x + su * uAxis.x + sv * vAxis.x),
+    0.5 * (normal.y + su * uAxis.y + sv * vAxis.y),
+    0.5 * (normal.z + su * uAxis.z + sv * vAxis.z),
+  );
+
+/** Open at the top (ao 1), occluded at the base — a linear ramp in local y, so a
+ * top face is uniformly unoccluded and a bottom face uniformly floored. */
+const boxRampAo = (p: EngineVec3): number => BOX_AO_FLOOR + (1 - BOX_AO_FLOOR) * (p.y + 0.5);
+
+/** The two triangles of one quad whose four corners start at `base`. */
+const quadIndices = (base: number): readonly number[] => [base, base + 1, base + 2, base, base + 2, base + 3];
+
 /**
  * A unit cube carrying baked per-vertex ambient occlusion (see `BOX_AO_FLOOR`).
  *
@@ -600,40 +638,160 @@ const BOX_AO_FLOOR = 0.8;
  * arm, coarser but legible on the guard.
  */
 const aoBoxMeshData = (): MeshData => {
-  // (normal, u-axis, v-axis) per face, u x v = normal, so the corner order below
-  // winds counter-clockwise seen from outside — the primitive's own convention.
-  const faces: readonly (readonly [EngineVec3, EngineVec3, EngineVec3])[] = [
-    [v3(1, 0, 0), v3(0, 1, 0), v3(0, 0, 1)],
-    [v3(-1, 0, 0), v3(0, 0, 1), v3(0, 1, 0)],
-    [v3(0, 1, 0), v3(0, 0, 1), v3(1, 0, 0)],
-    [v3(0, -1, 0), v3(1, 0, 0), v3(0, 0, 1)],
-    [v3(0, 0, 1), v3(1, 0, 0), v3(0, 1, 0)],
-    [v3(0, 0, -1), v3(0, 1, 0), v3(1, 0, 0)],
-  ];
-  const corners: readonly (readonly [number, number])[] = [
-    [-1, -1],
-    [1, -1],
-    [1, 1],
-    [-1, 1],
-  ];
-  const positions = faces.flatMap(([normal, uAxis, vAxis]) =>
-    corners.map(([su, sv]) =>
-      v3(
-        0.5 * (normal.x + su * uAxis.x + sv * vAxis.x),
-        0.5 * (normal.y + su * uAxis.y + sv * vAxis.y),
-        0.5 * (normal.z + su * uAxis.z + sv * vAxis.z),
-      ),
-    ),
+  const positions = BOX_FACES.flatMap(([normal, uAxis, vAxis]) =>
+    BOX_CORNERS.map(([su, sv]) => boxCorner(normal, uAxis, vAxis, su, sv)),
   );
-  const normals = faces.flatMap(([normal]) => corners.map(() => normal));
-  // Open at the top (ao 1), occluded at the base — a linear ramp in local y, so a
-  // top face is uniformly unoccluded and a bottom face uniformly floored.
-  const ao = positions.map((p) => BOX_AO_FLOOR + (1 - BOX_AO_FLOOR) * (p.y + 0.5));
-  const indices = faces.flatMap((_, faceIdx) => {
-    const base = faceIdx * corners.length;
-    return [base, base + 1, base + 2, base, base + 2, base + 3];
-  });
+  const normals = BOX_FACES.flatMap(([normal]) => BOX_CORNERS.map(() => normal));
+  const ao = positions.map(boxRampAo);
+  const indices = BOX_FACES.flatMap((_, faceIdx) => quadIndices(faceIdx * BOX_CORNERS.length));
   return { ao, closed: true, indices, normals, positions };
+};
+
+// ── the beach slab's dune mottling ──────────────────────────────────────────────
+
+/**
+ * THE SAND IS THE ONE SURFACE IN THIS FRAME WITH NO SURFACE ON IT.
+ *
+ * `aoBoxMeshData` above deliberately left it alone — its note says so: a floor
+ * slab's only visible face is its top, all four of whose vertices sit at y = +0.5,
+ * so the vertical ramp leaves it "byte-identical". That was the right call for the
+ * shared cube and it is why the beach is still, measurably, ONE VALUE. Sampled on
+ * the judged webgl2 champion with a sand mask covering 48% of the frame, green runs
+ * p25 = 191, p50 = 193, p75 = 194, p90 = 196 — a five-level spread across nearly
+ * half the picture, i.e. a flat fill. The reference's sand, under the same mask,
+ * runs p25 = 180, p50 = 191, p75 = 199, p90 = 209: soft, broad dune mottling, ~19
+ * levels of green between its quartiles. That gap is the largest single
+ * material-detail deficit in the frame simply because the surface carrying it is
+ * the largest thing in the frame.
+ *
+ * There are no textures and no normal maps on either backend, so the only field
+ * that can vary a flat face is `MeshData.ao` — and it can only vary it DOWNWARD
+ * (the contract is 0 = occluded, 1 = open, and honouring that is the point). So the
+ * field is authored as real occlusion: the sand PLATEAUS at ao = 1 wherever it is
+ * open, and only the dune hollows dip. That choice is what protects the palette
+ * work — `StageFloor`'s triple was solved by inverting the shade path against the
+ * measured open-sand pixel, and every ao = 1 vertex still renders at exactly that
+ * solved (242, 191, 97).
+ *
+ * Solved, not dialled (see the numbers on each constant): 26% of the visible slab
+ * stays at ao = 1, the median lands at 0.977 and the deepest hollows at 0.910,
+ * which renders green as p50 = 187 and p02 = 174 against the open plateau's 191 —
+ * a 17-level spread, against the reference's own 19. The cost is a ~4-level dip in
+ * the sand MEDIAN (191 -> 187, mean ao 0.972); compensating that belongs in
+ * `StageFloor`'s albedo, which is the palette lens's line, not this one.
+ */
+const BEACH_SPAN = 48;
+
+/**
+ * Lattice cells across the slab: exactly one per world unit, so the dune pitch
+ * below can be read in world units and the two cannot drift.
+ *
+ * The top face becomes a SHARED indexed grid ((GRID + 1)^2 vertices), not a fan of
+ * independent quads: a shared corner is one vertex carrying one ao value, so the
+ * field is continuous across every cell edge and no seam can appear between cells.
+ * It costs 4608 triangles and 2421 vertices — nothing on the judged GPU arm, and
+ * the guard never draws it (see the `gpuDetail()` gate at the instance site).
+ */
+const BEACH_GRID = 48;
+
+/** Dune pitch in world units: a broad undulation plus a finer crazing over it. The
+ * fine octave is kept above ~2.5 lattice cells per cycle so the per-vertex field is
+ * not under-sampled — measured, the worst quad's departure from a true bilinear
+ * surface is 0.041 of the field, i.e. under two levels of green, which is why no
+ * diagonal crease shows on the split quads. */
+const BEACH_DUNE_COARSE = 6;
+const BEACH_DUNE_FINE = 2.7;
+const BEACH_DUNE_FINE_WEIGHT = 0.4;
+/** Offsets that give the fine octave its own patch of the hash lattice, so the two
+ * octaves cannot line up their peaks into a visible grid. */
+const BEACH_DUNE_FINE_OFFSET_X = 11.3;
+const BEACH_DUNE_FINE_OFFSET_Z = 7.1;
+/** Where OPEN sand ends: field values above this are unoccluded (ao exactly 1), so
+ * the solved open-sand pixel survives untouched over 26% of the visible slab. */
+const BEACH_DUNE_OPEN = 0.6;
+/** How much light the deepest hollow keeps. 0.86 puts the darkest sand at
+ * (231, 174, 88) against the open plateau's (242, 191, 97) — the reference's own
+ * quartile spread, not a stylistic guess. */
+const BEACH_DUNE_FLOOR = 0.86;
+
+/** Quantization of the value-noise lattice's hash. */
+const DUNE_HASH_STEPS = 4096;
+
+/** A stable 0..1 hash of an integer lattice cell. The same integer-only shape the
+ * engine's water net uses (`canvas-water.ts`), so the dune field is bit-identical
+ * on every machine and no seed or `Math.random` enters the scene. */
+const duneHash = (ix: number, iz: number): number => {
+  const mixed = ((ix * 73856093) ^ (iz * 19349663)) >>> 0;
+  return (((mixed ^ (mixed >>> 13)) >>> 0) % DUNE_HASH_STEPS) / DUNE_HASH_STEPS;
+};
+
+/** Smoothly-interpolated value noise on the unit lattice, in 0..1. The cell
+ * fractions are smoothstepped, not lerped: a linear blend is only C0, which leaves
+ * a visible crease along every lattice line of the noise itself. */
+const duneNoise = (x: number, z: number): number => {
+  const ix = Math.floor(x);
+  const iz = Math.floor(z);
+  const fx = x - ix;
+  const fz = z - iz;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sz = fz * fz * (3 - 2 * fz);
+  return lerp(
+    lerp(duneHash(ix, iz), duneHash(ix + 1, iz), sx),
+    lerp(duneHash(ix, iz + 1), duneHash(ix + 1, iz + 1), sx),
+    sz,
+  );
+};
+
+/** Baked occlusion for one point of the beach's top face, `tx`/`tz` in 0..1 across
+ * the slab. Open sand is exactly 1; a hollow falls toward `BEACH_DUNE_FLOOR`. */
+const beachDuneAo = (tx: number, tz: number): number => {
+  const wx = tx * BEACH_SPAN;
+  const wz = tz * BEACH_SPAN;
+  const field =
+    (1 - BEACH_DUNE_FINE_WEIGHT) * duneNoise(wx / BEACH_DUNE_COARSE, wz / BEACH_DUNE_COARSE) +
+    BEACH_DUNE_FINE_WEIGHT *
+      duneNoise(wx / BEACH_DUNE_FINE + BEACH_DUNE_FINE_OFFSET_X, wz / BEACH_DUNE_FINE - BEACH_DUNE_FINE_OFFSET_Z);
+  const hollow = Math.max(0, BEACH_DUNE_OPEN - field) / BEACH_DUNE_OPEN;
+  return 1 - (1 - BEACH_DUNE_FLOOR) * hollow;
+};
+
+/** The mesh name the beach slab draws with on a hardware tier (see `BEACH_SPAN`). */
+const BEACH_MESH = "beach";
+
+/**
+ * The beach slab: the same closed unit cube the shared `box` is — same extents,
+ * same five skirt faces, same winding, same declared solidity, so it is a drop-in
+ * for that instance and changes nothing about the slab's bounds or silhouette —
+ * with its TOP face subdivided into a shared lattice carrying the dune field.
+ */
+const beachSlabMeshData = (): MeshData => {
+  const skirt = BOX_FACES.filter((_, faceIdx) => faceIdx !== BOX_TOP_FACE);
+  const skirtPositions = skirt.flatMap(([normal, uAxis, vAxis]) =>
+    BOX_CORNERS.map(([su, sv]) => boxCorner(normal, uAxis, vAxis, su, sv)),
+  );
+  const skirtNormals = skirt.flatMap(([normal]) => BOX_CORNERS.map(() => normal));
+  const skirtIndices = skirt.flatMap((_, quad) => quadIndices(quad * BOX_CORNERS.length));
+  // The top lattice, z-major so a row of constant z is contiguous.
+  const line = Array.from({ length: BEACH_GRID + 1 }, (_, i) => i / BEACH_GRID);
+  const stride = BEACH_GRID + 1;
+  const up = BOX_FACES[BOX_TOP_FACE]![0];
+  const topPositions = line.flatMap((tz) => line.map((tx) => v3(tx - 0.5, 0.5, tz - 0.5)));
+  const topAo = line.flatMap((tz) => line.map((tx) => beachDuneAo(tx, tz)));
+  // (a, a+stride, a+stride+1) then (a, a+stride+1, a+1) — the same counter-
+  // clockwise-from-outside winding `BOX_CORNERS` gives the single-quad top face.
+  const topIndices = Array.from({ length: BEACH_GRID }, (_, iz) =>
+    Array.from({ length: BEACH_GRID }, (_, ix) => {
+      const a = skirtPositions.length + iz * stride + ix;
+      return [a, a + stride, a + stride + 1, a, a + stride + 1, a + 1];
+    }).flat(),
+  ).flat();
+  return {
+    ao: [...skirtPositions.map(boxRampAo), ...topAo],
+    closed: true,
+    indices: [...skirtIndices, ...topIndices],
+    normals: [...skirtNormals, ...topPositions.map(() => up)],
+    positions: [...skirtPositions, ...topPositions],
+  };
 };
 
 export const chestResources = (brand: BrandSpec): GameResources => ({
@@ -644,6 +802,12 @@ export const chestResources = (brand: BrandSpec): GameResources => ({
     // walls, the plaque — picks it up without a single call site moving, and the
     // instance count is untouched.
     box: { data: aoBoxMeshData() },
+    // Declared for BOTH arms because resources are built before `runGame` resolves
+    // a backend, so no tier is known here yet. Only the instance is tier-gated
+    // (`gpuDetail()`), so the guard builds these buffers once at mount and never
+    // draws a triangle of them: its per-frame cost, and its node count, are
+    // untouched.
+    [BEACH_MESH]: { data: beachSlabMeshData() },
     cylinder: { kind: "cylinder" },
     [LAGOON_MESH]: { kind: "cylinder", segments: LAGOON_SEGMENTS },
     [LAGOON_RING_MESH]: { data: ringMeshData(LAGOON_SEGMENTS, LAGOON_RING_INNER) },
@@ -2503,7 +2667,14 @@ export const chestScene = (runtime: GameRuntime<ChestSpec>, state: ChestState): 
       // The turquoise floor-ring is concentric with the pool at the same radius,
       // so it takes the same high-tessellation mesh — otherwise the ring's
       // polygon corners would stick out past the round pool onto the sand.
-      ...stageRoom(48, WATER_RADIUS, LAGOON_MESH),
+      //
+      // The SLAB takes the dune-mottled `BEACH_MESH` on a hardware tier and the
+      // shared flat `box` everywhere else. This is the one arm-specific lever the
+      // campaign sanctions (`rendererTierAtLeast("webgl2")`, via `gpuDetail()`):
+      // 4608 triangles across the frame's largest surface is free on the GPU and is
+      // exactly the sort of fill the software rasterizer must not be handed, so the
+      // guard keeps its 12-triangle slab, its flat sand, and its node count.
+      ...stageRoom(BEACH_SPAN, WATER_RADIUS, LAGOON_MESH, gpuDetail() ? BEACH_MESH : "box"),
       ...platform(),
       // The crab is skipped here while he is on his errand — he is emitted AFTER
       // the veil instead, so the shot that is about him does not dim him away

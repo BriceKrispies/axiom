@@ -36,12 +36,24 @@ export const SKY_CLEAR: Rgba = [0.71, 0.87, 0.99, 1];
  * declare its own higher-tessellation cylinder (`{ kind: "cylinder", segments }`)
  * and name it here — otherwise the ring's silhouette is the default facet budget,
  * which reads as an obvious polygon once the ring spans a third of the frame.
+ *
+ * `floorMesh` names the mesh the floor SLAB draws, on the same terms and for the
+ * same reason as `ringMesh`. It defaults to the shared `box`, whose top face is one
+ * quad and therefore renders as exactly one value — fine for a small stage floor,
+ * but a game whose slab is the largest surface in the frame can declare its own
+ * subdivided slab (carrying baked per-vertex `MeshData.ao`) and name it here, so the
+ * ground has some variation across it instead of reading as a flat fill.
  */
-export const stageRoom = (span = 20, accentRadius = span * 0.5, ringMesh = "cylinder"): readonly SceneInstance[] => [
+export const stageRoom = (
+  span = 20,
+  accentRadius = span * 0.5,
+  ringMesh = "cylinder",
+  floorMesh = "box",
+): readonly SceneInstance[] => [
   {
     key: "stage:floor",
     material: "StageFloor",
-    mesh: "box",
+    mesh: floorMesh,
     transform: { position: v3(0, -0.55, 0), rotation: QUAT_IDENTITY, scale: v3(span, 1, span) },
   },
   {
