@@ -946,3 +946,67 @@ depth_and_separation = 2
 detail_density = 1
 scene_props_completeness = 1
 artifact_level = 2
+
+# ── pass 6 — promote ──────────────────────────────────────────────────────────
+[[iteration]]
+pass = 6
+kind = "promote"
+date = "2026-08-06"
+title = "seven proposals stacked; champion re-rendered on the judged webgl2 arm"
+stacked = """
+All seven cherry-picked clean onto the champion line, no conflicts, none dropped:
+  a4abb798  art-director  composition_and_framing  camera seat 50.5 -> 54.5 deg down
+  6253156a  modeler       subject_fidelity         palm fronds -> midrib + leaflets (TIER-GATED)
+  5051e918  lighting      lighting_and_shadow      ContactShadow* opacity 0.18 -> 0.26, cool tint
+  bf8cc58e  surfacing     artifact_level           ripple net 58 -> 22px pitch (hex lattice -> crazing)
+  889a7a7a  colorist      color_palette            LagoonWater re-solved against the era-D reference
+  dc760d39  architect     (spine)                  canvas-water.ts ripple filaments bow (waviness)
+  f4fc1f79  critic        (bookkeeping)            fresh era-D scorecard + abstraction 0005
+"""
+canvas2d_guard = """
+NOT A REGRESSION, and measured rather than assumed. After all seven proposals the
+deterministic gate reads byte-identical to the pass-6 baseline:
+  backing 468x293 = 137k samples/frame
+  peak 398 nodes/frame (ceiling 410)
+  124517 node-frames (ceiling 128000)
+The modeler's palm detail is the only proposal that adds geometry and it is gated on
+`gpuDetail()` (= rendererTierAtLeast("webgl2")), so the software arm draws the same
+single frond board at the same transform as before. Every other proposal is camera,
+material colour, material opacity, or the 2D overlay layer — none of which are scene
+nodes.
+
+Guard drift to watch (reported, not scored): the finer ripple net is FAINTER on the
+software arm than the old hex lattice was, because the overlay layer samples at the
+same renderScale 0.5 as the scene. The arm stays legible — pool, chests, props and
+brand all read — but the water is closer to flat there now. If that becomes a
+legibility problem the fix is a guard-arm-specific net pitch, not reverting the
+judged arm's crazing.
+"""
+scoring_honesty = """
+The scorecard committed in f4fc1f79 scores the image the critic was HANDED (the
+pass-6 setup champion), not the image promoted here. That is inherent to the board:
+lenses and critic work in parallel off one base, so the critic cannot score a render
+that does not exist yet. Stated explicitly because this campaign has five recorded
+image-only promotions where exactly this gap went unmentioned. The promoted image is
+scored at the top of pass 7 and the ledger there carries the comparison.
+"""
+foreman_errors = """
+Two mistakes of the foreman's, recorded so the next pass does not inherit them:
+
+1. AXIS ORDER CONTRADICTION, introduced by pass-6 setup. campaign.toml [scoring]
+   axes puts scene_props_completeness 11th; every scorecard and ledger key block
+   since iteration 0 puts it 3rd. Order IS the tie-break, so the campaign now has
+   TWO orderings, one of them mine. The critic found it and showed the pass-7
+   next-axis answer survives either (subject_fidelity is earliest under both), but
+   the contradiction is unresolved and owes a decision.
+
+2. WRONG CAPABILITY FACT IN THE LENS BRIEF. The lenses were told
+   `MaterialSpec.roughness` is "carried but not used". It is live: shading.ts drives
+   a Blinn-Phong lobe + Schlick Fresnel rim from `gloss = 1 - roughness`, and
+   backend-webgl2.ts uploads uRoughness. `grep roughness` in this game returns
+   nothing, so the brass latches and polished bands are fully matte while the
+   reference shows specular on exactly those. Together with the unused
+   `MeshData.ao` (baked per-vertex AO, honoured by both backends) these are the two
+   cheapest unspent wins on the board, and both cost zero scene nodes. Carry them
+   into the pass-7 brief.
+"""
