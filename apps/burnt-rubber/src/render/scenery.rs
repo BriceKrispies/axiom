@@ -27,6 +27,7 @@ use crate::draw::Draw;
 use crate::track::{SectionKind, Track, TrackSample, Zone};
 use crate::tuning::CourseTuning;
 
+use super::prop_meshes::CROWN_ROOT_HEIGHT;
 use super::road_mesh::{chunk_sample_range, CHUNK_LENGTH};
 
 /// The prop archetypes. Each is one mesh and one material, so a pool of them is
@@ -47,11 +48,17 @@ pub enum PropKind {
     TunnelLight,
     /// A low industrial building.
     Building,
+    /// The bare stem of a coastal palm. Half of a palm; the other half is a
+    /// [`PropKind::PalmCrown`] seated on its top, because one pool draws one
+    /// mesh with one material and a palm is emphatically two of each.
+    PalmTrunk,
+    /// The frond fan of a coastal palm.
+    PalmCrown,
 }
 
 impl PropKind {
     /// Every kind, in a stable order — the pool is laid out in this order.
-    pub const ALL: [PropKind; 7] = [
+    pub const ALL: [PropKind; 9] = [
         PropKind::Post,
         PropKind::Tree,
         PropKind::Rock,
@@ -59,6 +66,8 @@ impl PropKind {
         PropKind::Sign,
         PropKind::TunnelLight,
         PropKind::Building,
+        PropKind::PalmTrunk,
+        PropKind::PalmCrown,
     ];
 
     /// The hard ceiling on live instances of this kind.
@@ -71,6 +80,7 @@ impl PropKind {
             PropKind::Sign => 24,
             PropKind::TunnelLight => 220,
             PropKind::Building => 60,
+            PropKind::PalmTrunk | PropKind::PalmCrown => 200,
         }
     }
 
@@ -84,6 +94,11 @@ impl PropKind {
             PropKind::Sign => Vec3::new(1.8, 1.6, 0.2),
             PropKind::TunnelLight => Vec3::new(0.7, 0.2, 0.25),
             PropKind::Building => Vec3::new(9.0, 5.0, 9.0),
+            // A palm is mostly stem: 11 m of it, 0.44 m thick, so the crown
+            // clears the car's roofline and the road is seen *through* the
+            // avenue rather than behind a hedge.
+            PropKind::PalmTrunk => Vec3::new(0.22, 5.6, 0.22),
+            PropKind::PalmCrown => Vec3::new(3.0, 1.7, 3.0),
         }
     }
 
@@ -101,6 +116,9 @@ impl PropKind {
             PropKind::Sign => 460.0,
             PropKind::TunnelLight => 400.0,
             PropKind::Building => 900.0,
+            // An avenue has to recede all the way to the vanishing point or it
+            // is not an avenue, so a palm outlives every other roadside prop.
+            PropKind::PalmTrunk | PropKind::PalmCrown => 900.0,
         }
     }
 }
@@ -139,6 +157,7 @@ pub fn props_for_chunk(
 
     reflector_posts(track, from, to, tuning, out);
     tunnel_lights(track, from, to, out);
+    coastal_palms(seed, track, index, from, to, out);
     zone_props(&mut draw, track, from, to, out);
 }
 
@@ -207,6 +226,82 @@ fn tunnel_lights(track: &Track, from: f32, to: f32, out: &mut Vec<PropInstance>)
 
 /// Spacing of tunnel ceiling lights (m).
 const TUNNEL_LIGHT_SPACING: f32 = 11.0;
+
+/// The palm avenue: a colonnade down both shoulders of every coastal section.
+///
+/// This is placed **by distance**, like the reflector posts and unlike the
+/// random zone scatter, and that is the whole point. A coast road is not a
+/// clearing with some trees in it; it is a corridor, and a corridor is made by
+/// regular repetition marching to the vanishing point. Scattering the same
+/// number of palms at random would cost the same and read as a swamp.
+///
+/// Each palm is emitted as two instances — a stem and a crown seated on its top
+/// — so a palm's two materials are two pools and therefore still two draw calls
+/// for the whole avenue.
+fn coastal_palms(
+    seed: u64,
+    track: &Track,
+    index: usize,
+    from: f32,
+    to: f32,
+    out: &mut Vec<PropInstance>,
+) {
+    let mut draw = Draw::seeded(seed).fork(PALM_SALT ^ index as u64);
+    let first = (from / PALM_SPACING).ceil();
+    let count = ((to - from) / PALM_SPACING).ceil().max(0.0) as usize;
+    for i in 0..count {
+        let distance = (first + i as f32) * PALM_SPACING;
+        if distance > to {
+            break;
+        }
+        let sample = track.interpolated_at(distance);
+        if sample.section.zone() != Zone::Coast {
+            continue;
+        }
+        for side in [-1.0f32, 1.0] {
+            // Drawn unconditionally, before the side is known to be used, so the
+            // stream advances the same way for both shoulders.
+            let size = draw.range(0.80, 1.24);
+            let depth = PALM_INSET + draw.range(0.0, PALM_DEPTH_JITTER);
+            let spin = draw.range(0.0, std::f32::consts::TAU);
+            let scale = Vec3::ONE.mul_scalar(size);
+            let base = sample
+                .at_lateral(side * (track.barrier_offset(&sample) + depth))
+                .add(Vec3::new(0.0, -PROP_SINK, 0.0));
+            let trunk_top = base.y + PropKind::PalmTrunk.half_extents().y * 2.0 * size;
+            let crown_height = PropKind::PalmCrown.half_extents().y * 2.0 * size;
+            out.push(PropInstance {
+                kind: PropKind::PalmTrunk,
+                position: base,
+                yaw: sample.heading,
+                scale,
+            });
+            out.push(PropInstance {
+                kind: PropKind::PalmCrown,
+                // Seated so the fronds *leave the stem at its top*: the crown
+                // box's root height is where the blades meet, and it is the same
+                // constant the mesh is authored around.
+                position: Vec3::new(
+                    base.x,
+                    trunk_top - crown_height * CROWN_ROOT_HEIGHT,
+                    base.z,
+                ),
+                yaw: spin,
+                scale,
+            });
+        }
+    }
+}
+
+/// Salt separating the palm stream from the rest of the scenery.
+const PALM_SALT: u64 = 0x7A19_C4E0_2B85_D33F;
+/// Along-course spacing of a palm pair (m). Wide enough that the avenue is seen
+/// through rather than along a wall, tight enough to beat past at racing speed.
+const PALM_SPACING: f32 = 24.0;
+/// How far beyond the barrier the nearest palm stands (m).
+const PALM_INSET: f32 = 2.6;
+/// How much further out a palm may be set, so the row is a row and not a ruler.
+const PALM_DEPTH_JITTER: f32 = 3.4;
 
 /// The zone-specific scatter: trees, rocks, poles, signs, buildings.
 fn zone_props(
@@ -280,13 +375,14 @@ fn pick_kind(draw: &mut Draw, zone: Zone, section: SectionKind) -> Option<PropKi
                 PropKind::Tree
             }
         }),
-        Zone::Coast => (roll < 0.34).then(|| {
+        // No conifers on a beach. The coast's trees are the palm avenue, placed
+        // by distance in `coastal_palms`; what is left to scatter here is the
+        // shoreline boulders and the occasional pole.
+        Zone::Coast => (roll < 0.18).then(|| {
             if roll < 0.05 {
                 PropKind::Pole
-            } else if roll < 0.14 {
-                PropKind::Rock
             } else {
-                PropKind::Tree
+                PropKind::Rock
             }
         }),
         Zone::Forest => (roll < 0.82).then(|| {
@@ -489,6 +585,79 @@ mod tests {
                 t.post_spacing
             );
         }
+    }
+
+    /// The avenue: a coastal chunk carries palms down *both* shoulders at a
+    /// constant spacing, and every stem has exactly one crown.
+    #[test]
+    fn the_coast_is_lined_with_a_palm_avenue_on_both_sides() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        let mut out = Vec::new();
+        let mut stems = 0usize;
+        let mut crowns = 0usize;
+        let mut sides = (0usize, 0usize);
+        for index in 0..super::super::road_mesh::chunk_count(&track) {
+            props_for_chunk(crate::DEFAULT_SEED, &track, index, &t, &mut out);
+            for prop in &out {
+                let (distance, lateral) =
+                    track.localise(prop.position, chunk_reference(&track, index).distance, 220.0);
+                if prop.kind == PropKind::PalmTrunk {
+                    stems += 1;
+                    *[&mut sides.0, &mut sides.1][usize::from(lateral > 0.0)] += 1;
+                    assert_eq!(
+                        track.sample_at(distance).section.zone(),
+                        Zone::Coast,
+                        "a palm at {distance} m is inland"
+                    );
+                }
+                crowns += usize::from(prop.kind == PropKind::PalmCrown);
+            }
+        }
+        assert!(stems > 200, "the coast is genuinely lined: {stems} palms");
+        assert_eq!(stems, crowns, "every stem carries exactly one crown");
+        assert!(
+            sides.0 > 0 && sides.1 > 0 && sides.0.abs_diff(sides.1) < stems / 4,
+            "both shoulders are planted: {sides:?}"
+        );
+    }
+
+    /// A crown floating off its stem is the one way this can look broken, and
+    /// the seating is pure arithmetic, so it is worth pinning exactly.
+    #[test]
+    fn a_palm_crown_is_seated_on_the_top_of_its_own_stem() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        let mut out = Vec::new();
+        let mut checked = 0usize;
+        for index in 0..40 {
+            props_for_chunk(crate::DEFAULT_SEED, &track, index, &t, &mut out);
+            let stems: Vec<PropInstance> = out
+                .iter()
+                .copied()
+                .filter(|p| p.kind == PropKind::PalmTrunk)
+                .collect();
+            let crowns: Vec<PropInstance> = out
+                .iter()
+                .copied()
+                .filter(|p| p.kind == PropKind::PalmCrown)
+                .collect();
+            for (stem, crown) in stems.iter().zip(&crowns) {
+                assert!((stem.position.x - crown.position.x).abs() < 1.0e-4);
+                assert!((stem.position.z - crown.position.z).abs() < 1.0e-4);
+                assert_eq!(stem.scale, crown.scale, "one palm, one size");
+                let top = stem.position.y
+                    + PropKind::PalmTrunk.half_extents().y * 2.0 * stem.scale.y;
+                let roots = crown.position.y
+                    + PropKind::PalmCrown.half_extents().y * 2.0 * crown.scale.y * CROWN_ROOT_HEIGHT;
+                assert!(
+                    (top - roots).abs() < 1.0e-3,
+                    "the fronds leave the stem at {roots} m but its top is {top} m"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 20, "the coast was actually reached: {checked}");
     }
 
     #[test]
