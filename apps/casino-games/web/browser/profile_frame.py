@@ -199,15 +199,21 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--extra", default="", help="extra query string, e.g. press=Space@30 to profile the reveal")
     ap.add_argument("--settle", type=float, default=2.5, help="seconds to wait before profiling (pick the phase)")
     ap.add_argument("--label", default="", help="tag for the report header")
+    ap.add_argument("--vw", type=int, default=1280, help="page viewport width (drives the canvas CSS box)")
+    ap.add_argument("--vh", type=int, default=900, help="page viewport height")
+    ap.add_argument("--headed", action="store_true",
+                    help="run on the REAL display: real vsync, real compositor. Headless Chromium "
+                         "presents through a synthetic path, so its frame INTERVAL is not the "
+                         "player's; only a headed run answers 'what fps do I actually get'.")
     args = ap.parse_args(argv)
 
     boot = f"{args.url.rstrip('/')}/?game={args.game}&backend={args.backend}&seed={args.seed}"
     boot += f"&{args.extra}" if args.extra else ""
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True, args=BROWSER_ARGS)
+        browser = pw.chromium.launch(headless=not args.headed, args=BROWSER_ARGS)
         for rnd in range(args.rounds):
-            ctx = browser.new_context(viewport={"width": 1280, "height": 900}, device_scale_factor=args.dpr)
+            ctx = browser.new_context(viewport={"width": args.vw, "height": args.vh}, device_scale_factor=args.dpr)
             ctx.add_init_script(f"({INSTRUMENT})({json.dumps(not args.no_gl_timing)})")
             page = ctx.new_page()
             errors: list[str] = []
