@@ -73,7 +73,27 @@ ceiling.
 #      textures and no normal maps, on EITHER arm.
 #    * neither arm has shadow mapping; every shadow in this scene is authored
 #      geometry.
-#    * both light through the same shared Lambert model (`shading.ts`).
+#    * both light through the same shared model in `shading.ts`.
+#
+#  CORRECTION (pass 6 gave the lenses this wrong, twice — see ledger pass 6
+#  `foreman_errors`). That shared model is NOT "Lambert only", and `roughness` is
+#  NOT inert:
+#
+#    * `shading.ts` computes `gloss = 1 - roughness` and drives a Blinn-Phong
+#      specular lobe + a Schlick Fresnel rim + a Reinhard tonemap from it;
+#      `backend-webgl2.ts` uploads it as `uRoughness` and is byte-matched to the
+#      software path. So there IS a working specular/gloss lever.
+#      `grep -r roughness apps/casino-games/web/src/games/treasure-chest-pick/`
+#      returns NOTHING — every surface in this scene is fully matte by omission,
+#      including the brass latches, the gold lock hardware and the polished
+#      bands, all of which carry visible specular in the reference.
+#    * `MeshData.ao` (baked per-vertex ambient occlusion, multiplied into diffuse
+#      AND ambient by BOTH backends) is likewise shipped and entirely unused —
+#      the game builds nothing through `createMeshData`. Plank recesses, chest
+#      seams and a sand falloff are all bakeable through it.
+#
+#  Both levers cost ZERO scene nodes and reach BOTH arms identically, which makes
+#  them the cheapest unspent wins on the board.
 #
 #  So colour, camera, light, material and geometry edits land IDENTICALLY on both
 #  arms. The only genuinely arm-specific levers are:
@@ -121,6 +141,25 @@ size = "468x293"
 
 [scoring]
 #  Fixed axis order, so a scorecard is comparable pass to pass.
+#
+#  AUTHORITY, resolved in pass 7. The campaign carried TWO contradictory orders:
+#  every scorecard/ledger key block from iteration 0 to 5 put
+#  `scene_props_completeness` THIRD, and the pass-6 setup (foreman's error) wrote
+#  it ELEVENTH here. Because order is the lowest-axis tie-break, that silently
+#  chose the next attack axis for four earlier iterations — iterations 1, 2, 5 and
+#  6 each called props "earliest tied at 1", which is false under this order.
+#
+#  THE LIST BELOW IS CANONICAL from pass 6 onward. The manifest is the single
+#  declared source of truth — that is what it is for — and the pass-6 critic
+#  already re-derived `scorecard.champion.toml` under it, so reverting to the
+#  historical order would invalidate the only scorecard that measures the current
+#  arm and the current reference. The pre-pass-6 ordering is SUPERSEDED, not
+#  retroactively corrected: those scores measured a different arm against a
+#  different reference and are not comparable anyway
+#  (`comparable_from_pass = 6`).
+#
+#  This resolution changes nothing about pass 7's target: `subject_fidelity` is
+#  the earliest axis tied at 1 under BOTH orders.
 axes = [
   "composition_and_framing",
   "subject_fidelity",
