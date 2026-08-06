@@ -315,23 +315,35 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // sky rather than dark pebbles, without making them self-luminous.
   Shell: { baseColor: [0.96, 0.86, 0.8, 1] },
   Starfish: { baseColor: [0.92, 0.5, 0.29, 1] },
-  // ── one consistent cast-shadow family ─────────────────────────────────────
+  // ── the BEACH cast-shadow pair (the lagoon pair follows below) ─────────────
   // Every prop anchors to the ground with the same two translucent pieces: a
   // SOFT tail raking down-light (length set by how tall the caster is) and a
   // smaller, darker CORE where the object actually meets the ground. A whisper
   // of nothing else — no emissive — so they only ever darken what is beneath
   // them.
   //
+  // The pair below is the one solved for SAND. The nine chests stand on water and
+  // use their own solved pair (`LagoonShadowSoft`/`Core`) for the reason spelled
+  // out there: a translucent overlay is a multiply, so a single pair cannot be
+  // right on two grounds whose channel balance is opposite.
+  //
   // The DENSITY is not a taste dial, it is the reference's, measured. There is no
   // shadow mapping on either backend (see campaign.toml), so these discs ARE the
   // scene's shadow term and their opacity is the only lever on how deep a shadow
   // reads. Sampled off reference.png, a cast shadow multiplies the ground it
   // falls on by a hair under 0.6 — open sand (250,197,95) against the palm's
-  // shadow band (148,113,62) is 0.59/0.57/0.65 per channel, and the water under
-  // a chest darkens the same way (158G -> 118G, 0.62). The champion's tail was
-  // landing at 0.72 of the sand: present, but a smudge you have to look for, so
-  // no key direction read across the frame at all — the frame's props were lit
-  // from the upper right and grounded by nothing.
+  // shadow band (148,113,62) is 0.59/0.57/0.65 per channel. The champion's tail
+  // was landing at 0.72 of the sand: present, but a smudge you have to look for,
+  // so no key direction read across the frame at all — the frame's props were lit
+  // from the upper right and grounded by nothing. Re-measured on reference era D,
+  // this pair still holds on sand: the palm and crab shadows land at
+  // 0.61/0.62/0.69 of open sand against the reference's 0.60/0.58/0.58.
+  //
+  // The clause that used to sit here — "and the water under a chest darkens the
+  // same way (158G -> 118G, 0.62)" — is RETIRED, not carried. It was measured on
+  // reference era C, whose open water read G=158; era D's reads G=191, and its
+  // shadowed water reads G=83, which is 0.44, not 0.62. That is the whole reason
+  // the lagoon half drifted, and it is solved separately below.
   //
   // 0.26 is solved for, not nudged. `CULL_FACE` is off and translucent nodes draw
   // with `depthMask(false)`, so a disc blends TWICE (its lit top face at ~1.06x
@@ -349,6 +361,53 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // wash of the sand's own hue.
   ContactShadowSoft: { baseColor: [0.1, 0.1, 0.12, 1], opacity: 0.26 },
   ContactShadowCore: { baseColor: [0.08, 0.08, 0.1, 1], opacity: 0.3 },
+  // ── the same shadow rule, re-solved for the LAGOON ────────────────────────
+  //
+  // A cast shadow here is a translucent overlay, and an overlay is a MULTIPLY:
+  // what it leaves behind depends on the ground it falls on. The pair above was
+  // solved against sand, and on sand it still measures at parity — the palm and
+  // crab shadows land at 0.61/0.62/0.69 of open sand against the reference's
+  // 0.60/0.58/0.58. The nine chests, however, do not stand on sand. They stand on
+  // water, and one overlay cannot be right on both grounds, because the two
+  // grounds have opposite channel balance (sand is red-led, the lagoon is
+  // cyan-led). So the water-borne shadows get their own solved pair.
+  //
+  // MEASURED, on the CURRENT reference (era D, 1536x1024 — the era-C numbers the
+  // pair above was solved against are stale, and its lagoon half was solved
+  // against an open-water green of 158 where era D's is 191, which is the whole
+  // reason this half drifted):
+  //   reference lagoon, chest field, water pixels only
+  //     open water (p75)   (51, 188, 193)   L 155
+  //     shadow core (p02)  (15,  83,  86)   L  69   -> ratio 0.29/0.44/0.45, L 0.49
+  //   champion, same statistic
+  //     open water (p50)   (52, 191, 195)   L 162
+  //     shadow core (p02)  (43, 120, 124)   L 104   -> ratio 0.83/0.63/0.64, L 0.64
+  // The champion's chest shadows are ~30% too shallow in luminance AND wrong in
+  // hue: a near-neutral overlay knocks all three channels down together, so
+  // shadowed water goes PALE GREY-TEAL, where the reference's goes DEEP
+  // SATURATED TEAL — it loses nearly all its red (0.29) and keeps almost half its
+  // green and blue (0.44/0.45). That is what a shadow on water physically is: the
+  // sun's bounce off the surface is what carried the red, and taking the sun away
+  // reveals the body colour of the water underneath, which is teal.
+  //
+  // So the overlay is authored as a DEEP TEAL, not a grey, and at a higher
+  // opacity. Solved through the same double-blend the pair above uses (translucent
+  // nodes draw with `depthMask(false)` and `CULL_FACE` off, so the ground survives
+  // at (1-a)^2 while the disc's lit top and ambient-only underside each add their
+  // own shaded colour back): at a = 0.38 over (52,191,195) the ground survives at
+  // 0.384 and a (0, 0.12, 0.13) overlay adds back nothing in red and ~0.06 in
+  // green/blue, landing the tail at (27, 94, 97) — ratio 0.52/0.49/0.50, luminance
+  // 0.48 against the reference's 0.49. Red is still generous (0.52 against 0.29),
+  // but it has come down from 0.83, and the luminance and the green/blue pair are
+  // inside a couple of levels of the reference on the statistic that decides
+  // whether a chest reads as sitting IN the water or floating on top of a picture
+  // of it.
+  //
+  // The CORE follows the tail's ratio rather than the sand core's, so the two
+  // stack the same way they do on the beach. It is hidden under a resting chest's
+  // hull; it is what darkens the contact once a lifting chest exposes it.
+  LagoonShadowSoft: { baseColor: [0, 0.12, 0.13, 1], opacity: 0.38 },
+  LagoonShadowCore: { baseColor: [0, 0.1, 0.11, 1], opacity: 0.42 },
   ...CRAB_MATERIALS,
   ...PRIZE_MATERIALS,
   ...VEIL_MATERIALS,
@@ -507,16 +566,31 @@ const shadowEllipse = (key: string, material: string, at: EngineVec3, width: num
 });
 
 /**
+ * The two overlay materials one cast shadow is built from — the soft tail and the
+ * darker contact core. Which pair a prop uses is decided by the GROUND it stands
+ * on, not by the prop: a shadow is a multiply, so the same overlay lands on a very
+ * different value over red-led sand than over cyan-led water (see the two solved
+ * pairs in `MATERIALS`).
+ */
+type ShadowOverlay = { readonly core: string; readonly soft: string };
+
+/** The beach pair — everything standing on the sand slab. */
+const SAND_SHADOW: ShadowOverlay = { core: "ContactShadowCore", soft: "ContactShadowSoft" };
+
+/** The lagoon pair — the nine chests, which stand on water. */
+const LAGOON_SHADOW: ShadowOverlay = { core: "LagoonShadowCore", soft: "LagoonShadowSoft" };
+
+/**
  * A soft directional CAST shadow: an ellipse stretched down-light by the
  * caster's height and swung onto the key's throw, plus a smaller, darker CORE
  * held at the object's actual footprint so the point where it meets the ground
  * reads darker than the tail raking away from it. `radius` is the object's
  * ground footprint and `height` how tall it stands — together they set the
  * shadow's shape. `spread` scales the whole shadow (a ground-fade for a chest
- * leaving the board, or a clarity boost for the hero slot). Returns nothing once
- * the object has lifted clear.
+ * leaving the board, or a clarity boost for the hero slot). `overlay` is the
+ * ground's solved pair. Returns nothing once the object has lifted clear.
  */
-const contactShadow = (keyPrefix: string, at: EngineVec3, radius: number, height: number, spread = 1, coreScale = 1): readonly SceneInstance[] => {
+const contactShadow = (keyPrefix: string, at: EngineVec3, radius: number, height: number, spread = 1, coreScale = 1, overlay: ShadowOverlay = SAND_SHADOW): readonly SceneInstance[] => {
   const r = radius * spread;
   const reach = height * spread * SHADOW_THROW;
   return r < 0.04
@@ -524,12 +598,12 @@ const contactShadow = (keyPrefix: string, at: EngineVec3, radius: number, height
     : [
         shadowEllipse(
           `${keyPrefix}:soft`,
-          "ContactShadowSoft",
+          overlay.soft,
           v3(at.x + SHADOW_DIR.x * reach * 0.5, SHADOW_Y, at.z + SHADOW_DIR.z * reach * 0.5),
           r * 2.2,
           r * 2 + reach,
         ),
-        disc(`${keyPrefix}:core`, "ContactShadowCore", v3(at.x + SHADOW_DIR.x * r * 0.22, SHADOW_Y + 0.002, at.z + SHADOW_DIR.z * r * 0.22), r * 0.6 * coreScale, 0.008),
+        disc(`${keyPrefix}:core`, overlay.core, v3(at.x + SHADOW_DIR.x * r * 0.22, SHADOW_Y + 0.002, at.z + SHADOW_DIR.z * r * 0.22), r * 0.6 * coreScale, 0.008),
       ];
 };
 
@@ -798,9 +872,12 @@ const chestInstances = (key: string, labelSink: SceneLabel[], pose: ChestPose): 
       : [];
 
   // Directional contact shadow anchoring the chest to the board — the same
-  // down-light rule every prop obeys. It shrinks with the chest as it lifts off
-  // on the hero flight (`grounded`).
-  const shadow: readonly SceneInstance[] = grounded > 0.02 ? contactShadow(`${key}:shadow`, pose.origin, BODY.x * 0.52, CHEST_HEIGHT, grounded, 1) : [];
+  // down-light rule every prop obeys, on the LAGOON overlay pair rather than the
+  // beach one, because this is the one prop in the scene whose ground is water
+  // (see `LAGOON_SHADOW`). It shrinks with the chest as it lifts off on the hero
+  // flight (`grounded`), so the teal pair never reaches the sand: by the time a
+  // flown chest is anywhere near the shore its shadow has already faded out.
+  const shadow: readonly SceneInstance[] = grounded > 0.02 ? contactShadow(`${key}:shadow`, pose.origin, BODY.x * 0.52, CHEST_HEIGHT, grounded, 1, LAGOON_SHADOW) : [];
 
   // Warm seam light leaking from the lid/body join before it fully opens. It
   // hangs just BELOW and IN FRONT OF the gold rail: the rail is now a deep band
