@@ -1,4 +1,4 @@
-//! Speed streaks, tyre smoke and impact sparks.
+//! Speed streaks and impact sparks.
 //!
 //! All three are the same mechanism: a **bounded pool of boxes** whose positions
 //! come from a deterministic phase advanced on the fixed step, not from a
@@ -24,13 +24,6 @@ use super::palette::ScenePalette;
 
 /// Wind streaks flicking past the camera.
 pub const STREAK_COUNT: usize = 64;
-/// Tyre smoke puffs behind the rear wheels.
-///
-/// Deliberately few and deliberately small. The engine has no alpha blending —
-/// `Material`'s opacity is carried but does not blend — so a "smoke puff" is an
-/// **opaque** box. Anything bigger than a scuff at the tyre reads as a wall of
-/// grey cubes chasing the car, which is worse than no smoke at all.
-pub const SMOKE_COUNT: usize = 14;
 /// Impact sparks.
 pub const SPARK_COUNT: usize = 28;
 
@@ -42,15 +35,12 @@ pub const STREAK_ONSET: f32 = 34.0;
 #[derive(Debug, Clone)]
 pub struct Effects {
     streaks: Vec<Entity>,
-    smoke: Vec<Entity>,
     sparks: Vec<Entity>,
     /// Fixed per-slot offsets, drawn once at install — this is the only
     /// randomness in the whole effect system, and it never changes again.
     streak_seeds: Vec<Vec3>,
-    smoke_seeds: Vec<Vec3>,
     spark_seeds: Vec<Vec3>,
     phase: f32,
-    smoke_life: Vec<f32>,
     spark_life: f32,
     visible: usize,
 }
@@ -82,13 +72,10 @@ impl Effects {
         };
         Effects {
             streaks: pool(app, STREAK_COUNT, palette.streak),
-            smoke: pool(app, SMOKE_COUNT, palette.smoke),
             sparks: pool(app, SPARK_COUNT, palette.spark),
             streak_seeds: seeds(&mut draw, STREAK_COUNT, Vec3::new(12.0, 2.4, 1.0)),
-            smoke_seeds: seeds(&mut draw, SMOKE_COUNT, Vec3::new(0.34, 0.16, 0.30)),
             spark_seeds: seeds(&mut draw, SPARK_COUNT, Vec3::new(1.0, 1.0, 1.0)),
             phase: 0.0,
-            smoke_life: vec![0.0; SMOKE_COUNT],
             spark_life: 0.0,
             visible: 0,
         }
@@ -99,33 +86,21 @@ impl Effects {
         self.visible
     }
 
-    /// Forget every transient — a new race, after which last race's smoke and
-    /// sparks are not this race's. The per-slot seeds are untouched: they are
+    /// Forget every transient — a new race, after which last race's sparks are
+    /// not this race's. The per-slot seeds are untouched: they are
     /// drawn once at install and are part of the pool's identity, not its state.
     pub fn reset(&mut self) {
         self.phase = 0.0;
-        self.smoke_life.iter_mut().for_each(|life| *life = 0.0);
         self.spark_life = 0.0;
     }
 
     /// Advance the deterministic phase one fixed step.
     ///
     /// Called from the simulation side of the frame, not the render side, so a
-    /// browser rendering at 144 Hz does not run the smoke four times as fast as
-    /// one rendering at 60.
+    /// browser rendering at 144 Hz does not run the sparks four times as fast
+    /// as one rendering at 60.
     pub fn step(&mut self, car: &CarState) {
         self.phase = (self.phase + DT).rem_euclid(PHASE_WRAP);
-        // Smoke: each slot ages, and slots are re-lit while the car is sliding.
-        let sliding = car.drifting && car.grounded;
-        for (index, life) in self.smoke_life.iter_mut().enumerate() {
-            *life = (*life - DT / SMOKE_LIFETIME).max(0.0);
-            // One slot per step is re-lit, cycling through the pool, so a long
-            // drift lays a continuous trail without any emitter bookkeeping.
-            let slot = (self.phase / DT) as usize % SMOKE_COUNT.max(1);
-            if sliding && slot == index {
-                *life = 1.0;
-            }
-        }
         self.spark_life = (self.spark_life - DT / SPARK_LIFETIME).max(0.0);
         if car.impact_strength > 0.0 && car.impact_steps > 0 {
             self.spark_life = self.spark_life.max(car.impact_strength);
@@ -143,7 +118,6 @@ impl Effects {
     ) {
         self.visible = 0;
         self.pose_streaks(app, car, eye, forward, tuning);
-        self.pose_smoke(app, car);
         self.pose_sparks(app, car);
     }
 
@@ -193,41 +167,6 @@ impl Effects {
             app.set(
                 *entity,
                 Transform::new(position, rotation, Vec3::new(0.05, 0.05, length)),
-            );
-            app.set(*entity, Visible(true));
-            self.visible += 1;
-        }
-    }
-
-    /// Smoke: small scuffs at the rear contact patches, kept low and short.
-    ///
-    /// Emitted at the two rear wheels rather than as a cloud behind the car, and
-    /// grown only a little, because these are opaque boxes (see
-    /// [`SMOKE_COUNT`]): a puff that grows to the size of the car is a grey box
-    /// the size of the car, sitting between the camera and the road.
-    fn pose_smoke(&mut self, app: &mut RunningApp, car: &CarState) {
-        let back = car.forward().mul_scalar(-REAR_AXLE_OFFSET);
-        let right = car.right();
-        for (index, entity) in self.smoke.iter().enumerate() {
-            let life = self.smoke_life[index];
-            if life <= 0.0 {
-                app.set(*entity, Visible(false));
-                continue;
-            }
-            let age = 1.0 - life;
-            let seed = self.smoke_seeds[index];
-            // Alternate wheels, so a slide lays a scuff either side.
-            let side = if index % 2 == 0 { -1.0 } else { 1.0 };
-            let size = SMOKE_SIZE + age * SMOKE_GROWTH;
-            let position = car
-                .position
-                .add(back)
-                .add(right.mul_scalar(side * REAR_TRACK_HALF))
-                .add(seed.mul_scalar(1.0 + age))
-                .add(Vec3::new(0.0, SMOKE_HEIGHT + age * SMOKE_RISE, 0.0));
-            app.set(
-                *entity,
-                Transform::new(position, Quat::IDENTITY, Vec3::ONE.mul_scalar(size)),
             );
             app.set(*entity, Visible(true));
             self.visible += 1;
@@ -284,21 +223,6 @@ const STREAK_INNER: f32 = 7.5;
 const STREAK_DROP: f32 = 2.6;
 /// Extra streak intensity while boosting.
 const BOOST_STREAK_BONUS: f32 = 0.45;
-/// How long a smoke puff lasts (s). Short: an opaque puff that lingers is a box
-/// that lingers.
-const SMOKE_LIFETIME: f32 = 0.55;
-/// How far behind the car's centre the rear contact patches are (m).
-const REAR_AXLE_OFFSET: f32 = 1.42;
-/// Half the distance between the rear wheels (m).
-const REAR_TRACK_HALF: f32 = 0.86;
-/// A puff's size when it appears (m).
-const SMOKE_SIZE: f32 = 0.16;
-/// How much a puff grows over its life (m).
-const SMOKE_GROWTH: f32 = 0.34;
-/// How far off the ground a puff starts (m).
-const SMOKE_HEIGHT: f32 = 0.14;
-/// How far a puff drifts upward over its life (m).
-const SMOKE_RISE: f32 = 0.30;
 /// How long a spark burst lasts (s).
 const SPARK_LIFETIME: f32 = 0.42;
 
@@ -328,12 +252,12 @@ mod tests {
     fn everything_starts_retired() {
         let (app, effects) = fixture();
         assert_eq!(effects.visible_count(), 0);
-        for e in effects.streaks.iter().chain(&effects.smoke).chain(&effects.sparks) {
+        for e in effects.streaks.iter().chain(&effects.sparks) {
             assert_eq!(app.get::<Visible>(*e), Some(Visible(false)));
         }
     }
 
-    /// A new race starts with none of the last race's smoke or sparks in the
+    /// A new race starts with none of the last race's sparks in the
     /// air.
     #[test]
     fn resetting_clears_the_transients_but_not_the_pool() {
@@ -418,102 +342,6 @@ mod tests {
     }
 
     #[test]
-    fn drifting_lays_smoke_and_it_fades_when_the_drift_ends() {
-        let (mut app, mut effects) = fixture();
-        let t = VehicleTuning::DEFAULT;
-        let mut car = car_at(40.0);
-        car.drifting = true;
-        car.grounded = true;
-        for _ in 0..SMOKE_COUNT * 2 {
-            effects.step(&car);
-        }
-        effects.pose(&mut app, &car, Vec3::ZERO, Vec3::UNIT_Z, &t);
-        let smoking = effects
-            .smoke
-            .iter()
-            .filter(|e| app.get::<Visible>(**e) == Some(Visible(true)))
-            .count();
-        assert!(smoking > 0, "the drift smokes");
-
-        car.drifting = false;
-        for _ in 0..(SMOKE_LIFETIME / DT) as usize + 4 {
-            effects.step(&car);
-        }
-        effects.pose(&mut app, &car, Vec3::ZERO, Vec3::UNIT_Z, &t);
-        let after = effects
-            .smoke
-            .iter()
-            .filter(|e| app.get::<Visible>(**e) == Some(Visible(true)))
-            .count();
-        assert_eq!(after, 0, "and it clears once the slide stops");
-    }
-
-    /// The engine draws these opaque, so their size is a correctness property,
-    /// not a taste one: a puff bigger than a wheel is a grey box parked between
-    /// the camera and the road.
-    #[test]
-    fn smoke_puffs_stay_small_and_low_and_at_the_wheels() {
-        let (mut app, mut effects) = fixture();
-        let t = VehicleTuning::DEFAULT;
-        let mut car = car_at(40.0);
-        car.drifting = true;
-        car.grounded = true;
-        for _ in 0..SMOKE_COUNT * 4 {
-            effects.step(&car);
-            effects.pose(&mut app, &car, Vec3::ZERO, Vec3::UNIT_Z, &t);
-            for entity in &effects.smoke {
-                if app.get::<Visible>(*entity) != Some(Visible(true)) {
-                    continue;
-                }
-                let transform = app.get::<Transform>(*entity).expect("posed");
-                assert!(
-                    transform.scale.x <= SMOKE_SIZE + SMOKE_GROWTH + 1.0e-4,
-                    "a puff grew to {} m",
-                    transform.scale.x
-                );
-                assert!(
-                    transform.scale.x < crate::render::car_model::CAR_WIDTH * 0.4,
-                    "a puff is a scuff, not a box the size of the car"
-                );
-                let offset = transform.translation.subtract(car.position);
-                assert!(
-                    offset.y < 1.0,
-                    "a puff is at wheel height, not over the roof: {}",
-                    offset.y
-                );
-                assert!(
-                    offset.length() < 3.0,
-                    "a puff is at the wheels, not trailing the car: {}",
-                    offset.length()
-                );
-            }
-        }
-        assert!(SMOKE_COUNT <= 16, "and there are few of them");
-    }
-
-    #[test]
-    fn an_airborne_drift_lays_no_smoke() {
-        let (mut app, mut effects) = fixture();
-        let t = VehicleTuning::DEFAULT;
-        let mut car = car_at(40.0);
-        car.drifting = true;
-        car.grounded = false;
-        for _ in 0..SMOKE_COUNT * 2 {
-            effects.step(&car);
-        }
-        effects.pose(&mut app, &car, Vec3::ZERO, Vec3::UNIT_Z, &t);
-        assert_eq!(
-            effects
-                .smoke
-                .iter()
-                .filter(|e| app.get::<Visible>(**e) == Some(Visible(true)))
-                .count(),
-            0,
-            "there is nothing to smoke against in the air"
-        );
-    }
-
-    #[test]
     fn an_impact_throws_sparks_that_die_away() {
         let (mut app, mut effects) = fixture();
         let t = VehicleTuning::DEFAULT;
@@ -559,7 +387,7 @@ mod tests {
             effects.step(&car);
             effects.pose(&mut app, &car, Vec3::ZERO, Vec3::UNIT_Z, &t);
             assert!(
-                effects.visible_count() <= STREAK_COUNT + SMOKE_COUNT + SPARK_COUNT,
+                effects.visible_count() <= STREAK_COUNT + SPARK_COUNT,
                 "{} instances exceeds the pools",
                 effects.visible_count()
             );
@@ -567,7 +395,7 @@ mod tests {
     }
 
     /// The effects advance on the fixed step, so the same step sequence produces
-    /// the same phase — a 144 Hz browser does not get faster smoke.
+    /// the same phase — a 144 Hz browser does not get faster sparks.
     #[test]
     fn the_effect_phase_is_deterministic_and_wraps() {
         let (mut app, _) = fixture();
@@ -596,7 +424,6 @@ mod tests {
         let (_, a) = fixture();
         let (_, b) = fixture();
         assert_eq!(a.streak_seeds, b.streak_seeds);
-        assert_eq!(a.smoke_seeds, b.smoke_seeds);
         assert_eq!(a.spark_seeds, b.spark_seeds);
         assert_eq!(a.streak_seeds.len(), STREAK_COUNT);
     }

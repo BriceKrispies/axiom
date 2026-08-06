@@ -54,7 +54,7 @@ pub fn build_burnt_rubber_sweeping_turn() -> RunningApp {
 }
 
 /// A handbrake drift: the car pointing into the slide while travelling along
-/// its velocity, with tyre smoke laid down behind it.
+/// its velocity.
 pub fn build_burnt_rubber_drift() -> RunningApp {
     let mut app = at_section(SectionKind::TechnicalBends, 62.0);
     app.advance_steps(

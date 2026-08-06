@@ -377,8 +377,6 @@ pub struct ScenePalette {
     pub traffic_light: Handle<Material>,
     /// Wind/speed streaks.
     pub streak: Handle<Material>,
-    /// Tyre smoke.
-    pub smoke: Handle<Material>,
     /// Impact sparks.
     pub spark: Handle<Material>,
     /// The finish arch.
@@ -476,9 +474,6 @@ impl ScenePalette {
             // the separating — so they can be the deep red a tail lamp is.
             traffic_light: glowing(app, [0.16, 0.02, 0.01], [1.0, 0.14, 0.06]),
             streak: glowing(app, [0.14, 0.16, 0.20], [0.55, 0.66, 0.85]),
-            // Dark, because it is opaque: bright smoke would punch a light
-            // grey hole in the road behind the car.
-            smoke: lit(app, [0.30, 0.30, 0.33]),
             spark: glowing(app, [0.24, 0.18, 0.06], [1.0, 0.78, 0.28]),
             finish: glowing(app, [0.08, 0.22, 0.16], [0.26, 1.0, 0.66]),
             // The ghost. Cold cyan-white against the player's hot orange, so at a
@@ -553,7 +548,6 @@ mod tests {
             p.boost_flame,
             p.traffic_light,
             p.streak,
-            p.smoke,
             p.spark,
             p.finish,
         ];

@@ -291,7 +291,7 @@ impl RaceScene {
     /// Advance the presentation-only state one fixed step.
     ///
     /// Kept separate from [`Self::pose`] on purpose: the effects age on the
-    /// simulation's clock, so a browser rendering at 144 Hz gets the same smoke
+    /// simulation's clock, so a browser rendering at 144 Hz gets the same sparks
     /// as one rendering at 30.
     pub fn step(&mut self, sim: &RaceSim) {
         self.effects.step(sim.car());
