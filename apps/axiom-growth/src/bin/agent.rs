@@ -304,6 +304,7 @@ fn render_capture(inputs: &CaptureInputs) -> Vec<u8> {
         axiom_host::BackendCapabilityProfile::all(),
         None,
         None,
+        1,
     )
     .expect("a native GPU adapter renders the growth snapshot")
 }

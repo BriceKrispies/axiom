@@ -355,6 +355,11 @@ impl GpuBackendApi {
         profile: axiom_host::BackendCapabilityProfile,
         volumetrics: Option<axiom_host::FrameVolumetrics>,
         postprocess: Option<axiom_host::FramePostProcess>,
+        // How many times to record the scene before reading it back. `1` for
+        // every caller that wants a picture; higher only for a caller that wants
+        // to *measure* one, which must difference two runs to cancel the device
+        // setup this path pays on every call.
+        repeat: u32,
     ) -> Option<Vec<u8>> {
         let skinned: Vec<crate::scene_renderer::SkinnedGpuDraw> = skinned_draws
             .iter()
@@ -388,6 +393,7 @@ impl GpuBackendApi {
             profile,
             volumetrics,
             postprocess,
+            repeat,
         )
     }
 

@@ -41,6 +41,7 @@ pub(crate) fn render_to_rgba(
     profile: axiom_host::BackendCapabilityProfile,
     volumetrics: Option<axiom_host::FrameVolumetrics>,
     postprocess: Option<axiom_host::FramePostProcess>,
+    repeat: u32,
 ) -> Option<Vec<u8>> {
     let width = width.max(1);
     let height = height.max(1);
@@ -122,20 +123,34 @@ pub(crate) fn render_to_rgba(
     match internal.map(|(iw, ih)| (iw.max(1), ih.max(1))) {
         None => {
             let depth_view = create_depth_view(&device, width, height);
-            renderer.record(
-                &device,
-                &queue,
-                &color_view,
-                &depth_view,
-                lights,
-                light_view_proj,
-                batches,
-                skinned,
-                clear,
-                sdf,
-                caps,
-                camera_view_proj,
-            );
+            // Recorded `repeat` times, not once. One frame's GPU cost is not
+            // separable from device creation here — building the instance,
+            // adapter, device, pipelines and buffers dominates a single
+            // offscreen render by orders of magnitude — so a caller that wants
+            // to *measure* the frame renders it many times and differences two
+            // runs: `(T(n) - T(1)) / (n - 1)` cancels the setup exactly. The
+            // clock stays with the caller; this only supplies the repetition.
+            // `repeat` is 1 for every rendering (as opposed to measuring)
+            // caller, which is bit-for-bit what it did before.
+            (0..repeat.max(1)).for_each(|_| {
+                renderer.record(
+                    &device,
+                    &queue,
+                    &color_view,
+                    &depth_view,
+                    lights,
+                    light_view_proj,
+                    batches,
+                    skinned,
+                    clear,
+                    sdf,
+                    caps,
+                    camera_view_proj,
+                );
+            });
+            // Wait for the last submission before the caller stops its clock,
+            // or the measurement times command *submission* and not the work.
+            device.poll(wgpu::PollType::Wait).ok()?;
         }
         Some((iw, ih)) => {
             let scene_texture = device.create_texture(&wgpu::TextureDescriptor {

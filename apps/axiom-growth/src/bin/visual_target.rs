@@ -317,6 +317,7 @@ fn render_gpu(rd: &RenderData) -> Vec<u8> {
         axiom_host::BackendCapabilityProfile::all(),
         None,
         None,
+        1,
     )
     .expect("a native GPU adapter renders the visual-target frame");
     // The off-screen GPU path takes raw args (no FramePacket), so the composition

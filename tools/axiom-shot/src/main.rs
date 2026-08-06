@@ -29,6 +29,8 @@
 //!     [--quality 0..3] [--frame N] \
 //!     [--script "ticks:key=val,...;..."]
 
+use std::time::Instant;
+
 use axiom::prelude::*;
 use axiom_shot::capture;
 use axiom_shot::registry::{self, BuildParams, HEIGHT, WIDTH};
@@ -90,6 +92,147 @@ fn main() {
     // presenting the flat, washed-out raster. `None` presents untonemapped.
     let postprocess = outcome.postprocess();
 
+    // `--profile-frames N`: render the SAME frame N times and report what it
+    // costs, instead of writing a picture.
+    //
+    // This is the only realistic headless way to ask "why is this part of the
+    // game slow". A section's cost is mostly *fragment* work — how much of the
+    // frame is covered, how many lights and shadow taps each covered pixel runs,
+    // how much of it is spent on pixels something later draws over — and none of
+    // that is visible to a CPU profiler timing the simulation, nor to a counter
+    // of triangles. Re-rendering one pinned frame on the real GPU measures it
+    // directly, with no browser, no clock skew from a variable simulation, and
+    // no frame-to-frame content change to average over.
+    //
+    // The frame is pinned by the registry entry (`--app burnt-rubber-tunnel`
+    // places the car in the tunnel deterministically), so two runs differ only
+    // by the renderer.
+    // Render size overrides. The default is the slice's registered size, which is
+    // a *composition* choice; fragment cost is a different question and needs the
+    // size the game actually presents at. The phone arm renders 940x1672 at DPR 2
+    // on ExtendedLimits (a 2x supersampled target), i.e. ~6.3 Mpix against this
+    // tool's default 0.58 Mpix — an 11x difference in fragment count, which is
+    // enough to hide a fill-bound cost completely.
+    let pw: u32 = flag(&args, "--width")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(WIDTH);
+    let ph: u32 = flag(&args, "--height")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(HEIGHT);
+    let profile_frames: u32 = flag(&args, "--profile-frames")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    // `--profile-compare a,b[,c] --profile-frames N`: measure several slices
+    // INTERLEAVED IN ONE PROCESS and report medians.
+    //
+    // Measuring them in separate runs does not work on this machine. Two
+    // consecutive runs of the *same* slice at 1880x3344 measured 3.29 ms and
+    // 13.52 ms per frame — a 4x swing from whatever else the GPU was doing —
+    // so any A/B conclusion drawn across processes is noise. Interleaving the
+    // slices inside one process and taking a median per slice makes the drift
+    // common-mode: it moves every sample together and cancels in the ratio,
+    // which is the only comparison being asked for.
+    let compare = flag(&args, "--profile-compare").unwrap_or_default();
+    if !compare.is_empty() {
+        let names: Vec<String> = compare.split(',').map(|n| n.trim().to_string()).collect();
+        let n = profile_frames.max(2);
+        let trials = flag(&args, "--profile-trials")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(5);
+
+        // Build and tick each slice once; the frame is what we re-render.
+        let built: Vec<(String, FrameOutcome, Vec<(u64, Vec<f32>, Vec<u32>)>, Vec<(u64, Vec<f32>, Vec<u32>)>, Vec<axiom_host::MaterialTexture>)> = names
+            .iter()
+            .filter_map(|name| {
+                let mut r = registry::build(name, &params)?;
+                let m = r.mesh_set();
+                let sm = r.skinned_mesh_set();
+                let mt = r.material_textures();
+                let mut oc = None;
+                for t in 0..=render_tick {
+                    oc = Some(r.tick(t));
+                }
+                oc.map(|o| (name.clone(), o, m, sm, mt))
+            })
+            .collect();
+
+        let mut samples: Vec<Vec<f64>> = vec![Vec::new(); built.len()];
+        for _ in 0..trials {
+            for (i, (_, oc, m, sm, mt)) in built.iter().enumerate() {
+                let a = Instant::now();
+                let (p1, _, _) = render(
+                    &backend, m, sm, mt, oc, quality, retro_32bit, oc.postprocess(), 1, pw, ph,
+                );
+                let t1 = a.elapsed().as_secs_f64() * 1000.0;
+                std::hint::black_box(p1.len());
+                let b = Instant::now();
+                let (pn, _, _) = render(
+                    &backend, m, sm, mt, oc, quality, retro_32bit, oc.postprocess(), n, pw, ph,
+                );
+                let tn = b.elapsed().as_secs_f64() * 1000.0;
+                std::hint::black_box(pn.len());
+                samples[i].push((tn - t1) / f64::from(n - 1));
+            }
+        }
+
+        println!("axiom-shot: {pw}x{ph} backend={backend} frames={n} trials={trials}");
+        let mut baseline = 0.0f64;
+        for (i, (name, ..)) in built.iter().enumerate() {
+            samples[i].sort_by(f64::total_cmp);
+            let med = samples[i][samples[i].len() / 2];
+            let lo = samples[i][0];
+            let hi = samples[i][samples[i].len() - 1];
+            (i == 0).then(|| baseline = med);
+            let rel = med / baseline.max(1.0e-9);
+            println!("  {name:28} median {med:7.3}ms  (spread {lo:6.3}..{hi:6.3})  x{rel:.2}");
+        }
+        return;
+    }
+
+    if profile_frames > 0 {
+        // Two runs, differenced. `render` pays full device+pipeline setup on
+        // every call — instance, adapter, device, every pipeline, every buffer —
+        // which on this machine is ~500 ms and swamps a single frame completely.
+        // Timing repeated calls therefore measures wgpu start-up, not the game:
+        // the first version of this flag reported three sections as identical to
+        // within noise, which is exactly what setup-dominated timing looks like.
+        //
+        // Rendering the scene n times inside ONE call and differencing against a
+        // 1-frame call cancels that constant exactly:
+        //     T(n) = setup + n*frame        T(1) = setup + frame
+        //     frame = (T(n) - T(1)) / (n - 1)
+        let n = profile_frames.max(2);
+        let warm = Instant::now();
+        let _ = render(
+            &backend, &meshes, &skinned_meshes, &materials, &outcome, quality, retro_32bit,
+            postprocess, 1, pw, ph,
+        );
+        let _ = warm.elapsed();
+
+        let t1s = Instant::now();
+        let (px1, _, _) = render(
+            &backend, &meshes, &skinned_meshes, &materials, &outcome, quality, retro_32bit,
+            postprocess, 1, pw, ph,
+        );
+        let t1 = t1s.elapsed().as_secs_f64() * 1000.0;
+        std::hint::black_box(px1.len());
+
+        let tns = Instant::now();
+        let (pxn, _, _) = render(
+            &backend, &meshes, &skinned_meshes, &materials, &outcome, quality, retro_32bit,
+            postprocess, n, pw, ph,
+        );
+        let tn = tns.elapsed().as_secs_f64() * 1000.0;
+        std::hint::black_box(pxn.len());
+
+        let per_frame = (tn - t1) / f64::from(n - 1);
+        println!(
+            "axiom-shot: app={app} backend={backend} {pw}x{ph}               setup+1={t1:.1}ms  setup+{n}={tn:.1}ms  =>  frame {per_frame:.3}ms               ({:.0} fps if frame-bound)",
+            1000.0 / per_frame.max(1.0e-6)
+        );
+        return;
+    }
+
     let (pixels, w, h) = render(
         &backend,
         &meshes,
@@ -99,6 +242,9 @@ fn main() {
         quality,
         retro_32bit,
         postprocess,
+        1,
+        pw,
+        ph,
     );
 
     capture::write_png(&out, &pixels, w, h);
@@ -118,20 +264,24 @@ fn render(
     quality: u8,
     retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
     postprocess: Option<axiom_host::FramePostProcess>,
+    repeat: u32,
+    w: u32,
+    h: u32,
 ) -> (Vec<u8>, u32, u32) {
     match backend {
         "canvas2d" | "canvas" => {
-            capture::render_canvas2d(meshes, skinned_meshes, outcome, quality, WIDTH, HEIGHT)
+            capture::render_canvas2d(meshes, skinned_meshes, outcome, quality, w, h)
         }
         _ => capture::render_gpu(
             meshes,
             skinned_meshes,
             materials,
             outcome,
-            WIDTH,
-            HEIGHT,
+            w,
+            h,
             retro_32bit,
             postprocess,
+            repeat,
         ),
     }
 }
@@ -146,6 +296,9 @@ fn render(
     quality: u8,
     _retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
     _postprocess: Option<axiom_host::FramePostProcess>,
+    _repeat: u32,
+    w: u32,
+    h: u32,
 ) -> (Vec<u8>, u32, u32) {
     (backend != "canvas2d" && backend != "canvas").then(|| {
         eprintln!(
@@ -153,7 +306,7 @@ fn render(
              (rebuild with `--features offscreen`); rendering canvas2d instead."
         );
     });
-    capture::render_canvas2d(meshes, skinned_meshes, outcome, quality, WIDTH, HEIGHT)
+    capture::render_canvas2d(meshes, skinned_meshes, outcome, quality, w, h)
 }
 
 /// One phase's held first-person inputs (per-tick deltas).

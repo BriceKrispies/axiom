@@ -57,6 +57,7 @@ pub fn render_gpu(
     h: u32,
     retro_32bit: Option<axiom_host::FrameRetro32BitProfile>,
     postprocess: Option<axiom_host::FramePostProcess>,
+    repeat: u32,
 ) -> (Vec<u8>, u32, u32) {
     use axiom_gpu_backend::GpuBackendApi;
     let batches = outcome.mesh_batches();
@@ -107,6 +108,7 @@ pub fn render_gpu(
         axiom_host::BackendCapabilityProfile::all(),
         None,
         postprocess,
+        repeat,
     )
     .expect("a native GPU adapter is required to render a GPU screenshot");
     (pixels, w, h)
