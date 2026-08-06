@@ -646,8 +646,10 @@ const CLOUD_SCALE: f32 = 0.5;
 /// grade turns one into the other, because the difference is not a curve — it is
 /// how much light is arriving.
 ///
-/// The arithmetic that sets `3.6`, taken on the road, the largest surface in any
-/// frame and the one every term lands on hardest:
+/// The arithmetic that set `3.6`, taken on the road, the largest surface in any
+/// frame and the one every term lands on hardest. It is kept in full because the
+/// number it produced is *not* the number below — see the reconciliation above —
+/// and the last step is why:
 ///
 /// * The key on flat ground is `intensity · N·L`. At [`MOON_DIRECTION`]'s 20°
 ///   elevation `N·L` is `0.345`, so the key contributes `1.242`.
@@ -662,10 +664,13 @@ const CLOUD_SCALE: f32 = 0.5;
 ///   renormalizes, landing the road at byte **73** — beside the reference's ~65,
 ///   and for the first time in the same decade as it.
 ///
-/// Note the last step: this level is chosen to read correctly *through* the
-/// existing low-key grade rather than by deleting it, because the grade is not
-/// this constant's to spend. Retire that black point and the road lands at 102,
-/// and this should come back to ~`2.6`.
+/// Note the last step: `3.6` was chosen to read correctly *through* the low-key
+/// grade rather than by deleting it, because the grade was not this constant's to
+/// spend. The colorist retired that black point in the same pass, so the road
+/// lands at byte 102 instead of 73 — and this constant came back to `2.6`
+/// accordingly. The contingency was written here before it happened, which is the
+/// only reason the two proposals could be reconciled by arithmetic instead of by
+/// re-deriving one of them.
 ///
 /// **What this replaces, and why every word of it was true and still wrong:**
 /// a directional light is by definition the same everywhere — it lights the
