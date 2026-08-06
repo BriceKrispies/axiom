@@ -1370,3 +1370,218 @@ modeler is the first proposal to actually attack that defect.
 As in pass 6, this scorecard scores the image the critic was HANDED, not the image
 promoted here. Stated rather than left implicit.
 """
+
+# -- pass 8 -- critic scoring recalibration / re-score of the re-baselined champion --
+[[iteration]]
+iteration = 8
+pass = 8
+kind = "scoring_recalibration"
+date = "2026-08-06"
+attacked_axis = "none"           # CRITIC re-score; no render change, no app source touched
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/scorecard.champion.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/abstractions/0007.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+]
+champion_screenshot = "champion.png"          # webgl2, --clip stage, 948x597, captured at cff697db
+candidate_screenshot = "champion.png"
+guard_screenshot = "canvas2d-guard.png"       # captured, shown, NEVER scored
+decision = "scoring_recalibration"
+abstraction_introduced = false   # this entry BACKFILLS a record; it introduces nothing
+next_attacked_axis = "material_and_texture_detail"
+reason = """
+CRITIC PASS 8. The card on disk (97aae627) measured the PASS-6 champion. Between it
+and this pass FIVE render changes landed (78fdb2d8, 312b0880, 1a788d9b, 367bf28d,
+8abc0027), the champion was recaptured at 0442a4b2, and then cff697db moved the palm
+and the crab off the shoreline and removed the crab's side-scuttle idle, forcing a
+second recapture (e8ad0260). The re-baseline commit flagged its own staleness in its
+body rather than letting the card read as true — the right call, and the reason this
+entry is a RE-SCORE OF A CHANGED IMAGE rather than a recalibration of a mis-scored
+one. Same arm (webgl2), same era (D), so the delta against the 97aae627 card is a real
+result.
+
+THE STALE CARD WAS WRONG ABOUT THE IMAGE ON DISK IN FOUR PLACES, ALL TOO HARSH.
+Measured on the two PNGs on disk (champion md5 3b34763099960355b64effe453eaae69):
+  1. "the chests ... NO lid strap band, NO corner brackets, NO lock plate" — FALSE of
+     this image. Verified at 7x on THREE separate chests: every one of the nine carries
+     a gold lock plate with a square keyhole, two gold corner brackets on the base
+     skirt, two strap posts framing a barrel-curved four-slat lid, and a base skirt.
+     That is 312b0880 in the frame.
+  2. "the sand ... 240,197,113 ... 19 levels too blue" — FALSE. Four sand samples read
+     242,190,96 / 242,190,96 / 243,193,98 / 243,194,98 against the reference's
+     248,194,97 / 244,190,97 / 238,183,86 / 242,188,97. Blue error ~3 levels. That is
+     8abc0027, and it is the largest measured convergence of pass 7.
+  3. "the castle has no arched doorway", and the doorway listed ABSENT under
+     scene_props_completeness — the castle plinth carries a dark recessed doorway. It
+     is RECTANGULAR, so the execution gap is real; the presence claim was not.
+  4. "the density target missed: 0.699" — re-measured 0.621 (palm shadow core
+     147,119,69 on sand 242,192,97, per-channel [0.607,0.620,0.711]) against the
+     reference's 0.556 (142,104,55 on 248,192,92, [0.573,0.542,0.598]). Closer than
+     the card said, still lighter than the reference. 0.621 is what shipped; no target
+     may be quoted as landed.
+Only (1) moves a score, and it moves the attack axis with it.
+
+RE-SCORED (twelve axes, canonical order, fresh derivation on the image on disk):
+  composition_and_framing     3   held
+  subject_fidelity            2   RAISED FROM 1 — the only integer that moves
+  scale_and_proportion        2   held; the palm error FLIPPED SIGN (canopy now 14.53%
+                                  of the palm quadrant against the reference's 12.90%,
+                                  i.e. 113% of its mass, where the previous card
+                                  measured 64% — the ~38% crown growth overshot)
+  silhouette_readability      2   held; the grown crown now BURIES the trunk and the
+                                  palm reads as a flat radial sawtooth splat
+  color_palette               2   HELD under "take the lower" though a 3 is arguable:
+                                  sand hue lands, water lands, saturation 153.3 vs
+                                  159.3 (56% of the remaining gap closed) — what keeps
+                                  it at 2 is the missing bright end (p98 200 vs 223)
+                                  and the near-absent brass family
+  contrast_and_exposure       2   held; std 43.2 vs 53.0, range 155 vs 188
+  lighting_and_shadow         2   held; density 0.621 vs 0.556, still zero shadow SHAPE
+  material_and_texture_detail 1   TIED LOWEST -> the attack axis
+  depth_and_separation        2   held; chests still sit ON the water, not IN it
+  detail_density              1   tied lowest; 71% of the reference's detail energy
+  scene_props_completeness    1   tied lowest; two mis-listed absences corrected, score
+                                  unmoved
+  artifact_level              2   held; the pool net softened AGAIN, the chest shadow
+                                  halos got WORSE
+  final_score 1.25 (lowest 1 * 0.7 + average 1.83 * 0.3), up from 1.23
+
+THE ATTACK AXIS MOVES: subject_fidelity -> material_and_texture_detail. With
+subject_fidelity at 2, the three axes tied at 1 are material_and_texture_detail (8th),
+detail_density (10th) and scene_props_completeness (11th), and the earliest in
+campaign.toml's canonical order wins the tie.
+
+THIS IS THE FIRST AXIS TO CROSS A BAND IN THIS CAMPAIGN'S CURRENT ERA, so the case for
+it is on the card in full and the definition it rests on is stated there rather than
+assumed: `subject_fidelity` scores THE NINE CHESTS AND THE NAMEPLATE, the subject of
+the frame. That is the definition the 97aae627 card itself asserted, and used to
+criticise pass 6 for spending its subject_fidelity change on the palm. Under the
+alternative reading (fold the crab, castle and shells in, as that same card's prose
+also did) the axis stays 1 and the attack axis stays subject_fidelity, because the crab
+is still a blob. The disagreement is live and is published, not buried — anyone who
+holds the other reading should say so before a change is spent.
+  The move is credited to 312b0880 (pass-7 modeler), measured on disk. It is NOT
+credited to cff697db.
+
+cff697db IS NOT CONVERGENCE AND IS NOT A REGRESSION. It is a correctness fix — props
+out of the water, the crab stays on his mark — and it is the right fix at the right
+layer. On this exam its effect is neutral-to-slightly-negative and no axis moves for
+it: the palm's new home puts its crown within ~0.02 of frame of the LEFT FRAME EDGE
+(the commit says the frame edge, not the water, is what caps it), against a reference
+palm that sits comfortably inside the frame with its raking shadow filling the left
+sand; and the crab's pennant now reads as a red bar laid across his shell. Nobody may
+report it as progress toward the reference, and nobody may report the promote of it as
+a scored pass — e8ad0260 correctly attached no score to itself.
+
+ABSTRACTION GATE: MISSING RECORD, BACKFILLED AS abstractions/0007.toml. 367bf28d
+(pass-7 surfacing) re-declared the game's shared `box` from the ENGINE PRIMITIVE
+`{ kind: "box" }` to app-authored custom geometry `{ data: aoBoxMeshData() }` carrying
+a baked per-vertex AO ramp, changing the construction path for every box in the scene.
+No record existed. ON THE MERITS IT IS SOUND, and the strongest thing about it is what
+it did NOT add: `MeshData.ao` was already shipped by @axiom/web-engine and already
+consumed by both backends, so this is the first CONSUMER, not a spine widening. The
+inexpressibility branch genuinely applies (no textures and no normal maps on either
+arm, so a flat facet carries exactly one value and no config can put a gradient inside
+it), the bake value is solved from a reference measurement rather than dialled, and it
+cost zero new nodes and zero new triangles. NOT too-early on that branch, NOT
+ceremonial. The >=3-attempts branch is not satisfied and is not claimed: ZERO bounded
+attempts had been spent on this axis, which had been tied-lowest for two passes.
+  Three honest riders are in the record. (a) The axis it was booked against did not
+  move: material_and_texture_detail is 1 before and 1 after. (b) It is the change that
+  makes the guard's gate blind spot REACHABLE — the ceiling counts scene NODES, and an
+  app-authored mesh is one node whatever its triangle count — and it did not spend it
+  (24 vertices, 12 triangles, byte-for-byte the primitive box), so no new cost landed
+  on the guarded arm and this pass's arm constraint holds. The blind spot stays OPEN.
+  (c) The other pass-7 change examined for the gate, 312b0880, was judged NOT to owe a
+  record (box instances within the vocabulary the scene already used — generation/data,
+  not a new primitive); that judgement is written into 0007 rather than left silent,
+  because it is the change that moved the lowest axis.
+  This is the SIXTH record the critic has backfilled (0003, 0004, 0005, 0006, 0007 —
+  six of the campaign's seven). The mechanism that would make the gate
+  self-satisfying, a proposing lens writing its own NNNN.toml in its own commit, has
+  still never been used once.
+
+RETIRED LEVER CLAIMS, so no change is spent on a dead one. Two claims that stood on
+the previous card as unspent wins are now closed, and the card says so:
+  * `MeshData.ao` IS NOW IN USE (367bf28d). It is ONE SCALAR per vertex: it darkens,
+    it cannot change hue and it cannot add grain.
+  * `MaterialSpec.roughness` IS NOT A LEVER ON THIS GEOMETRY. Settled in-tree in the
+    pass-7 promote entry's `disputes_resolved`: shading.ts multiplies the Blinn lobe by
+    gloss and drives shininess = 8 + 120*gloss from it, so on an axis-aligned box face
+    under this rig the specular term peaks near 4.4e-4 — invisible. campaign.toml's
+    "the cheapest unspent wins on the board" block still reads as though both levers
+    are live and unspent; it is now WRONG on both counts and should be corrected by
+    whoever next owns that file. This lens did not edit campaign.toml, to keep this
+    commit to bookkeeping the audit strictly requires.
+
+FINDING CARRIED FORWARD, STILL UNRESOLVED: THE CHAMPION ARCHIVE DOES NOT EXIST. Raised
+as finding 5 in the pass-6 entry, repeated in pass 7, and still true — there is no
+champions/ directory for this target, no INDEX.md and therefore no era key anywhere
+except campaign.toml's `reference_era`. Two more champion images have landed on main
+since it was last raised (0442a4b2 and e8ad0260), so the record of what this game has
+looked like is still recoverable only from git: 4921ba29, 2e70a614, ec137bd9, 4c7284cb,
+f233fe43, 09d9f6ec, ee6a2a64, 1e821742, 41d06d29, 0442a4b2, e8ad0260. That is the
+foreman's step on landing, not the critic's to fabricate; the shas are kept here so it
+can still be reconstructed.
+
+ERA HONESTY: CLEAN. campaign.toml carries `reference_era = "D"`, reference.png is
+unchanged from the pass-7 exam, and this re-score is inside that era. No score is
+carried across an era boundary in this entry and no movement across one is reported as
+progress. (There is still no champions/INDEX.md to cross-check the era key against —
+see the finding above.)
+
+GUARDED ARM. canvas2d-guard.png was opened once, for LEGIBILITY ONLY, and is scored
+nowhere in this entry or in the scorecard: 468x293, subject present, all nine chests
+and the nameplate legible, pool, palm, castle, crab and shells present, not black, no
+error state. Nothing is credited to it or blamed on it. This pass's arm constraint —
+appearance may drift, NO NEW COST may land — is satisfied by the one change that could
+have violated it (367bf28d kept 24 vertices / 12 triangles / zero new nodes).
+  ONE SOFT FINDING ON THE RECORD, not a violation: the pass-7 promote entry's
+  `canvas2d_guard` block reads "Guard legibility: holds, and arguably improves --
+  warmer sand, deeper teal chest shadows". No score derives from it and it is framed as
+  legibility, so it stays inside the guard rule — but "improves", with aesthetic
+  reasons attached, is one word away from crediting an arm that is never scored. The
+  honest form is "holds". The paired A/B timing in the same block is a different thing
+  and is legitimate: cost on the guarded arm is exactly what the campaign governs.
+
+PARITY-CLAIM: clean. No "done / matched / parity" language in the scorecard, this
+ledger, campaign.toml, the abstraction records, or the commit bodies of cff697db and
+e8ad0260. Two phrases were checked and cleared: "left and right edges already matched"
+is a bbox measurement, and e8ad0260's body explicitly states that NO score is attached
+to it and that the card is stale until re-scored — which is the opposite of a parity
+claim and is the behaviour this campaign should keep. The champion stands at final_score
+1.25 out of 5: a clean, legible, flat-shaded low-poly proxy of a photoreal-toy
+reference, correctly framed, correctly coloured in its sand and its water, now carrying
+recognisable chest hardware, and still unsurfaced everywhere.
+"""
+
+# `scorecard_before` is the 97aae627 card. It measured the SAME arm against the SAME
+# reference as `scorecard_after`, so the delta here IS meaningful — one axis, +1,
+# attributable to 312b0880.
+[iteration.scorecard_before]
+composition_and_framing = 3
+subject_fidelity = 1
+scale_and_proportion = 2
+silhouette_readability = 2
+color_palette = 2
+contrast_and_exposure = 2
+lighting_and_shadow = 2
+material_and_texture_detail = 1
+depth_and_separation = 2
+detail_density = 1
+scene_props_completeness = 1
+artifact_level = 2
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity = 2
+scale_and_proportion = 2
+silhouette_readability = 2
+color_palette = 2
+contrast_and_exposure = 2
+lighting_and_shadow = 2
+material_and_texture_detail = 1
+depth_and_separation = 2
+detail_density = 1
+scene_props_completeness = 1
+artifact_level = 2

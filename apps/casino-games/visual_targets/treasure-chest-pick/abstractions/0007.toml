@@ -1,0 +1,115 @@
+# BACKFILLED BY THE CRITIC LENS (pass 8). A structural change to this game's mesh
+# construction path landed in the pass-7 stack — commit 367bf28d, whose own subject
+# line begins `convergence(surfacing):` and names this campaign's
+# material_and_texture_detail axis — with no abstraction record and no scored ledger
+# entry of its own.
+#
+# It is the FIFTH structural change this campaign has shipped without its record
+# (0003, 0004, 0005, 0006, and now this one) and the FOURTH since ledger iteration 5
+# wrote down the commitment that "every future structural change on this target ships
+# with its NNNN.toml and a scored ledger entry in the SAME commit". SIX of the
+# campaign's seven abstraction records have now been written by the critic after the
+# fact. Backfilling records what was done; it does not retroactively bless it. The one
+# mechanism that would make this gate self-satisfying — a proposing lens writing its
+# own NNNN.toml inside its own commit — has still never been used once.
+#
+# This record is APP-TIER, not a spine widening: nothing was added to
+# @axiom/web-engine. It is filed because this campaign's own precedent says app-tier
+# geometry counts (abstractions/0001 was backfilled for exactly that, "new prop
+# geometry inside the game's own presentation tier — no new engine primitive"), and
+# because this particular change swaps the construction path used by EVERY box in the
+# scene, which is the kind of change the guard's cost gate cannot see.
+
+axis = "material_and_texture_detail"   # a flat face was drawn with exactly one value
+
+failed_attempts = []
+# The >=3-failed-bounded-attempts route is NOT satisfied and is not claimed. ZERO
+# bounded attempts had been made on this axis when the change landed — it had been the
+# tied-lowest axis for two consecutive passes with nothing spent on it. The
+# inexpressibility branch is what carries this record, and for a parity target the
+# skill says that branch is the norm rather than an escape.
+inexpressible = true
+# Genuinely inexpressible at config/data level, and the reason is a capability fact
+# the campaign manifest already states: @axiom/web-engine has no textures and no
+# normal maps on EITHER arm, and a flat face is therefore shaded with exactly ONE
+# value. Measured before the change: a chest's whole front panel read (156,96,46)
+# from its top edge to its bottom on the judged webgl2 arm, unbroken. The reference's
+# panel runs (202,120,48) at the top to (166,94,35) at the rail. No base colour, no
+# light-rig value and no camera value can put a gradient inside a single flat facet;
+# the only per-surface modulation this engine has is `MeshData.ao`, and the only way
+# to supply it is to author the geometry. That is inexpressibility of the plain kind,
+# not a preference for going structural.
+
+smallest_api = """
+NO NEW ENGINE SURFACE — and that is the strongest thing in this record's favour.
+`MeshData.ao` was already shipped by @axiom/web-engine, already multiplied into BOTH
+the diffuse and the ambient term by BOTH backends, and entirely unused by every app.
+This change is the first consumer, not a widening.
+
+The whole change is one function plus one registry line in the game's own
+presentation tier, apps/casino-games/web/src/games/treasure-chest-pick/scene.ts:
+
+  * `aoBoxMeshData()` builds a unit cube — 24 vertices, 12 triangles, same winding,
+    `closed: true` — carrying one baked occlusion scalar per vertex: a linear ramp in
+    LOCAL y from BOX_AO_FLOOR = 0.8 at the bottom to 1.0 at the top. The 0.8 is
+    SOLVED from the reference measurement (166/202 = 0.82 and 151/207 = 0.73 down two
+    columns of the reference chest's front panel), not dialled by eye.
+  * the shared mesh registry entry changes from `box: { kind: "box" }` to
+    `box: { data: aoBoxMeshData() }`.
+
+Nothing else moved: not one call site, not one instance, not one material. Because the
+bake is a function of local y it is correct for every box at once rather than a chest
+special case — a tall box ramps over its own height, a thin decal over its own small
+one, and a floor slab (whose only visible face is its top, all four vertices at
+y = +0.5) is left byte-identical, which is why the sand and the lagoon masses the
+palette was solved against did not move.
+"""
+
+structural_class = """
+THE PART THAT MAKES THIS A STRUCTURAL CHANGE RATHER THAN A DATA NUDGE, stated plainly
+because the commit does not: the shared `box` is no longer an ENGINE PRIMITIVE. It is
+now app-authored custom geometry. Every box in this scene — chest bodies, slats,
+strap posts, the lock plate, the hasp, castle walls, the plaque — is drawn from a mesh
+this game builds itself, and it therefore no longer participates in whatever the
+engine's own `createMesh` path does for a primitive (its per-MeshKind handle cache and
+its backend-chosen facet/LOD scaling; see abstractions/0004, which exists because that
+cache used to be one handle per kind).
+
+That is exactly the gate blind spot the pass-7 promote entry names in
+`gate_blind_spots`: the guard's deterministic ceiling counts scene NODES, so an
+app-authored mesh is one node no matter how many triangles it carries, while the
+software rasterizer genuinely pays per triangle. This change is the first one on this
+target to make that reachable.
+
+ON THE MERITS IT DID NOT SPEND IT: 24 vertices and 12 triangles, byte-for-byte what
+the primitive box had, and zero new nodes — so no new cost landed on the guarded arm,
+which is this pass's stated arm constraint. The blind spot stays OPEN for the next
+change, and closing it means the gate also pinning triangles-per-frame.
+"""
+
+screenshot_command = "uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready --backend webgl2 --clip stage --url http://localhost:PORT/ --out champion.png"
+screenshot_proof = """
+Not re-rendered by this lens — the critic does not render. The judged frame the record
+describes is the champion on disk at e8ad0260, md5 3b34763099960355b64effe453eaae69,
+verified byte-identical to the champion worktree's copy.
+
+WHAT THE FRAME ACTUALLY SHOWS OF IT, measured rather than assumed: the AO ramp is
+visible on the chest and castle faces at 7x, and the axis it was booked against DID
+NOT MOVE — material_and_texture_detail scores 1 before and 1 after
+(scorecard.champion.toml, pass 8). Whole-frame detail energy is 71% of the
+reference's, and the sand — 55% of the frame, and a floor slab, so deliberately
+untouched by this change — still spreads only 1/4/2 levels per channel where the
+reference spreads 10/10/11. The change is real, correctly placed and correctly sized;
+it landed inside an existing band.
+"""
+
+not_recorded_and_why = """
+ONE OTHER pass-7 change was examined for this gate and judged NOT to owe a record:
+312b0880 (modeler, subject_fidelity — the chest's gold becomes one lock plate with a
+keyhole plus two corner brackets). It adds and removes box instances within the mesh
+vocabulary the scene already used, introduces no new mesh, no new material field, no
+new engine surface and no new construction path. That is generation/data on the
+ladder, not a new primitive. The judgement is written down here rather than left
+silent so that a future pass can disagree with it explicitly — it is the change that
+moved this campaign's lowest axis, and a reader is entitled to know it was weighed.
+"""
