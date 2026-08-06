@@ -755,6 +755,63 @@ const LID_RIB_WIDTH = 0.24;
 /** How far the raised end ribs stand proud of the dome panel they flank. */
 const LID_RIB_SWELL = 0.03;
 
+/*
+ * THE BODY'S CORNER POSTS — the one piece of the reference chest's construction the
+ * champion had no geometry for at all.
+ *
+ * Magnify the reference's front row and the base is unmistakable: the dark body
+ * front is a RECESSED PANEL, and it is recessed because a chunky light-tan CORNER
+ * POST stands at each corner, running the full body height from under the lid lip
+ * down to the waterline, with the brass stud capping it. The champion's body is one
+ * flat box: below the dome it reads as a single dark band with a gold tab on it, and
+ * its bottom silhouette is a dead-straight horizontal cut into the water. That band
+ * is only ~12px of a 76px chest at this camera, but it is the whole difference
+ * between "a barrel-lidded box" and "a chest standing on its corners".
+ *
+ * The posts are the light `woodLid` tan the lid ribs and lip already use, against
+ * the mid-tone `wood` body they flank — exactly the value relationship the reference
+ * draws there (WoodLid 0.64,0.44,0.25 over WoodBrown 0.52,0.34,0.18). No new
+ * material, no new mesh: four boxes a chest.
+ *
+ * Read this together with `edgeL`/`edgeR` below, which is a correction of the same
+ * feature from the other side. The champion once had full-height corner posts in
+ * GOLD; the era-D re-solve measured them as 2.5x too much metal and cut them back to
+ * a small brass bracket. That was right about the METAL and wrong to take the FORM
+ * with it — the reference's corner post is real, it is just wood with a brass stud
+ * on it. So the post comes back in `woodLid` and the bracket stays short: the gold
+ * mass measured against the reference is untouched.
+ *
+ * Every number is bounded by an envelope that already exists, so nothing downstream
+ * moves. The outer faces sit 0.005 proud of the body's sides — visually flush, and
+ * still INSIDE the lid's half-width (0.67), because the reference's lid overhangs
+ * its base and must keep doing so. `POST_PROUD` applies to the FRONT pair only: the
+ * back pair is flush, since standing it proud would push the chest behind
+ * `CHEST_HOLE_BACK` and leave a sliver of post outside the water overlay's
+ * silhouette hole. Front face lands at z 0.495, inside the hole's 0.53. The existing
+ * brass brackets (`edgeL`/`edgeR`, front face 0.505) then sit a hair in FRONT of the
+ * posts and over their upper half — which is precisely where the reference puts the
+ * brass stud, so the two parts now read as one piece of hardware.
+ *
+ * Four posts, not the two the camera sees: the chest yaws with the idle dance and
+ * spirals to its hero close-up, and a chest with two legs is worse than one with
+ * none the moment it turns.
+ */
+const POST_WIDTH = 0.17;
+const POST_DEPTH = 0.19;
+/** How far the FRONT posts stand forward of the body's front face — the depth of
+ * the recess the dark front panel now sits in. */
+const POST_PROUD = 0.035;
+/** How far a post's outer face stands proud of the body's side. Visually flush; the
+ * clearance only keeps it off the body's plane so neither face z-fights. */
+const POST_FLANK = 0.005;
+/** A post's centre x, per side sign. */
+const POST_X = BODY.x / 2 + POST_FLANK - POST_WIDTH / 2;
+/** The two post rows along Z, as (key suffix, centre z): back flush, front proud. */
+const POST_ROWS: readonly (readonly [string, number])[] = [
+  ["B", -BODY.z / 2 + POST_DEPTH / 2],
+  ["F", BODY.z / 2 + POST_PROUD - POST_DEPTH / 2],
+];
+
 /**
  * One arc of slats sweeping the lid's full depth, from its back edge up over
  * the crown and down to its front edge.
@@ -862,6 +919,12 @@ const chestInstances = (key: string, labelSink: SceneLabel[], pose: ChestPose): 
   // The DOM renderer needs a deeper cut than `low`: it pays per element, not per
   // pixel, so a few-pixel trim costs as much as the chest. See `sparseDetail`.
   const sparse = sparseDetail();
+  // The corner posts are hardware-tier-only geometry (see `POST_WIDTH`): four boxes
+  // a chest, 36 across the board, which the software arm's node budget has no room
+  // for and which its half-resolution frame would barely resolve anyway. `gpuDetail`
+  // is the correct gate rather than `!low`: the Canvas2D rasterizer also serves the
+  // `webgl1` tier, and a headless caller must get the frugal arm's exact node count.
+  const gpu = gpuDetail();
   // How much of the chest is still "on the board" — gates every ground-anchored
   // decoration below.
   const grounded = 1 - clamp01(pose.flight);
@@ -1138,6 +1201,17 @@ const chestInstances = (key: string, labelSink: SceneLabel[], pose: ChestPose): 
           part("endL", v3(-BODY.x / 2 + 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
           part("endR", v3(BODY.x / 2 - 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
         ]),
+    // The four light-tan CORNER POSTS the body's dark front is recessed between —
+    // the reference chest's base construction, and the thing that turns its bottom
+    // silhouette from a straight cut into a stepped foot profile. Drawn BEFORE the
+    // brass brackets below so the stud reads as capping the post it sits on.
+    ...(gpu
+      ? [-1, 1].flatMap((side) =>
+          POST_ROWS.map(([row, z]) =>
+            part(`post${side < 0 ? "L" : "R"}${row}`, v3(side * POST_X, BODY.y / 2, z), v3(POST_WIDTH, BODY.y, POST_DEPTH), woodLid),
+          ),
+        )
+      : []),
     // Gilding: two SHORT brass corner brackets, and that is all the body's metal.
     // Era D's reference frames the dark front panel with a small brass bracket at
     // each front corner — a strap cap a fifth of the body's height, not a post
