@@ -100,16 +100,53 @@ impl RaceScene {
         //
         // * **Sky (up)** is blue by 1.9x red — the scattered dome the reference
         //   is shot under. It is what tints the shadows cool.
-        // * **Ground (down)** is warm and slightly weaker — the sun bouncing off
-        //   sand and pale tarmac back onto undersides, wheel arches, the car's
-        //   sills and the underside of every palm frond.
+        // * **Ground (down)** is warm — the sun bouncing off sand and pale tarmac
+        //   back onto undersides, wheel arches, the car's sills and the underside
+        //   of every palm frond. It is a *bounce*, and the level below says so.
+        //
+        // **The ground term is the frame's flatness, and this is the pass that
+        // fixes it.** The backend evaluates the hemisphere as a plain lerp on the
+        // normal's up-component — `mix(ground, sky, N.y*0.5+0.5)` in the GPU
+        // shader, `hemisphere_ambient` on the Canvas 2D arm — so the *only*
+        // modelling a hemisphere ambient contributes is the span between its two
+        // ends. At `0.24/0.21/0.15` (mean 0.200) against a sky of mean 0.267 that
+        // span was 0.067 across the entire normal sphere: a fill that lands within
+        // 25% of itself on an up-face, a side-face and a down-face is not a
+        // hemisphere at all, it is a *constant* ambient wearing one. That is the
+        // single term making the champion read as ambient-only, and it costs the
+        // frame in the two places it can least afford:
+        //
+        // * **Camera-facing verticals** (`N.y = 0`) — the car's rear panel, which
+        //   is the subject of the shot, plus every reflector post, palm trunk,
+        //   barrier and traffic car — are turned fully away from a key that
+        //   travels down-track, so this fill is *all the light they get*. They
+        //   took `(sky+ground)/2 = 0.233`, within 13% of the fully sky-facing
+        //   road, and rendered as flat slabs against it.
+        // * **Down-facing surfaces** (`N.y = -1`) — the valance, the underside of
+        //   the bumper, the wheel arches, the underside of every palm crown —
+        //   took the full 0.200. Nothing in this frame could go dark. And the
+        //   engine's one directional shadow map is a fixed 20 m box at the world
+        //   origin while this moment is ~1.9 km down the course (see
+        //   [`KEY_INTENSITY`]), so **the ground term is the only knob in the rig
+        //   that can put a dark under the car at all**. Propping it up spent that.
+        //
+        // So the bounce becomes a bounce: the same warm hue, at a quarter of the
+        // sky dome (mean 0.065). Undersides drop ~3x and finally read as contact;
+        // verticals drop ~29% and regain a terminator against the sunlit
+        // horizontals; the sky/ground span goes 1.15:1 -> 1.6:1, which is form.
+        //
+        // **The sky term is deliberately untouched.** It is the reference's own
+        // measured shadowed-road level (0.302 incident — see [`KEY_INTENSITY`]'s
+        // table), and it alone lights the road, the calibration surface every
+        // exposure number in this file is derived against. An up-facing pixel is
+        // bit-for-bit what it was; this change cannot move the frame's exposure.
         //
         // Level: the sky term (mean 0.267) is ~21% of what the key lays on flat
         // road (1.242), so it fills without becoming a second key — see the
         // ceiling `the_sun_out_lights_every_other_term_in_the_frame` pins.
         app.set_ambient(FrameAmbient::new(
             [0.19, 0.25, 0.36],
-            [0.24, 0.21, 0.15],
+            [0.078, 0.068, 0.049],
         ));
         // The air. Everything recedes into the sky colour rather than staying
         // fully lit out to the far plane, which is what gives the road, the trees and
