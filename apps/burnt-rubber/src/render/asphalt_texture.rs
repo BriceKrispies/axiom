@@ -71,6 +71,43 @@
 //! every existing test measured the grain's *strength*, and the defect was
 //! entirely in its *scale*.
 //!
+//! ## The grain has an *axis*, because the filter that erases it has one
+//!
+//! Both octaves above are **isotropic** — they carry the same detail across the
+//! road as along it — and that is the assumption this module was built on and
+//! never re-examined when it opted the tarmac into anisotropic sampling. A 16×
+//! anisotropic sampler at this camera's grazing angle is not a blur: it is a
+//! *directional* low-pass. It picks its mip from the **across**-road footprint
+//! (centimetres) and then averages up to sixteen taps **along** the road (tens of
+//! centimetres to metres). Every octave whose detail lives on the along-road axis
+//! is therefore averaged toward its own mean before it ever reaches a pixel, and
+//! an isotropic field is *entirely* made of such detail.
+//!
+//! That is not a theory, it is the measured champion frame. The authored variation
+//! is 1.87% of the tarmac's displayed value; the frame's near road measures
+//! **0.80%**, its mid road **1.4%**, and the reference's cleanest asphalt at the
+//! same depth measures **2.4%**. Simulating the sampler's own footprint reproduces
+//! it exactly — an isotropic 1.87% survives at 0.49% near and decays to 0.22% by
+//! the middle distance. The road the module set out to stop being a flat fill was
+//! being flat-filled by the filter, and getting flatter with depth, which is the
+//! one direction real asphalt never goes.
+//!
+//! Spending more amplitude does not fix this; it buys a stronger signal into the
+//! same shredder, at the exposure cost [`MIN_MULTIPLIER`] documents below. The fix
+//! is to put the amplitude where the filter cannot reach: a **cross-road** octave
+//! ([`CROSS_SHARE`]), a field that varies with the lateral coordinate only and is
+//! constant along the course. Averaging sixteen taps along the road leaves it
+//! **untouched** — it survives at 1.79% at nine centimetres of footprint and
+//! 1.73% at seventy-five, where the isotropic octaves have long since vanished.
+//!
+//! And it is the correct surface, not a trick played on a sampler. `road_mesh`
+//! maps `u` to the lateral offset and `v` to course distance, so a cross-road
+//! band is a band that runs *down* the road — which is what a road is actually
+//! made of: paver-lane seams, tyre-polished wheel tracks, the wear stripe between
+//! them. Those are the features a driver's eye sees at a grazing angle, they are
+//! why the reference's tarmac still reads as a surface at the vanishing point, and
+//! at [`CROSS_BANDS`] they sit at a plausible ~19 cm.
+//!
 //! ## The grain darkens the tarmac, and how much is now a *cost*, not a bonus
 //!
 //! A multiplied albedo can only ever darken (a texel's ceiling is `1.0`), so the
@@ -187,11 +224,45 @@ const MIN_MULTIPLIER: f32 = 0.86;
 /// smooth field's only remaining job is the patchiness of the mix — which is a
 /// *quiet* thing in real asphalt, not the thing you see first.
 ///
-/// At `0.30` the per-texel hash carries the grain and the smooth field carries
-/// the patchiness, which is the right way round: a `LATTICE` cell is 4.7 cm, far
-/// too coarse to be a chipping, so every unit of amplitude spent there is spent
-/// on a feature asphalt does not have.
-const SMOOTH_SHARE: f32 = 0.30;
+/// At `0.25` the per-texel hash still carries the grain and the smooth field
+/// still carries the patchiness, which is the right way round: a `LATTICE` cell
+/// is 4.7 cm, far too coarse to be a chipping, so every unit of amplitude spent
+/// there is spent on a feature asphalt does not have. It gives up a little to
+/// [`CROSS_SHARE`], which is the only octave the sampler delivers at depth.
+const SMOOTH_SHARE: f32 = 0.25;
+
+/// Share of the amplitude carried by the **cross-road** octave — the one the
+/// anisotropic sampler cannot average away.
+///
+/// This is the majority share, and the module docs above carry the argument: the
+/// tarmac is sampled with 16× anisotropy at a grazing angle, which averages up to
+/// sixteen taps *along* the road and leaves the *across*-road axis at full
+/// resolution. Both other octaves are isotropic, so all of their detail lies on
+/// the axis that gets averaged; measured against the champion frame they arrive at
+/// 0.49% near and 0.22% at the middle distance, from 1.87% authored. This octave
+/// arrives at 1.79% and 1.73% — the difference between a road that has a surface
+/// all the way to the vanishing point and one that washes to flat grey a short way
+/// past the car.
+///
+/// It is a majority because it has to be, not because bands are the look: the two
+/// isotropic octaves keep the near road from reading as pure corduroy (up close,
+/// where the footprint is a texel or two, they arrive nearly intact and the road
+/// is speckled aggregate), and this one keeps the *mid and far* road from reading
+/// as nothing at all. Push it much past here and the near tarmac loses its
+/// stones; pull it back and the far tarmac loses its surface.
+const CROSS_SHARE: f32 = 0.55;
+
+/// The cross-road octave's band count across one tile, so a band is
+/// `TILE_METRES / CROSS_BANDS` = **18.8 cm** wide.
+///
+/// Sized as the physical thing it stands for, exactly like [`LATTICE`]. A wheel
+/// track polished into asphalt, the seam between two paver lanes, and the wear
+/// stripe beside them are all decimetre-scale features — nothing on a road runs
+/// longitudinally at a centimetre. It is also the scale that has to *survive*: at
+/// this frame's near road a pixel spans roughly 1.6 cm, so an 18.8 cm band is a
+/// dozen pixels across and plainly resolvable, where the 1.2 cm texels of the fine
+/// octave are already at or below Nyquist before the sampler touches them.
+const CROSS_BANDS: u32 = 8;
 
 /// Contrast applied about the field's midpoint before it is mapped to a
 /// multiplier. Two independent `0..=1` sources summed give a triangular
@@ -206,13 +277,23 @@ const SMOOTH_SHARE: f32 = 0.30;
 /// re-weighting added, so that re-weighting was a pure move along the frequency
 /// axis with the strength held fixed.
 ///
-/// It stays at `1.2` through the era-C amplitude retune, and that is deliberate:
-/// the strength belongs to [`MIN_MULTIPLIER`] alone. Spending this gain on the
-/// cut instead would have narrowed the *distribution* rather than the band,
-/// piling texels back into the middle and trading a surface for a flat fill with
-/// outliers — which is the one failure mode this constant was introduced to
+/// It stayed at `1.2` through the era-C amplitude retune, and that was
+/// deliberate: the strength belongs to [`MIN_MULTIPLIER`] alone. Spending this
+/// gain on the cut instead would have narrowed the *distribution* rather than the
+/// band, piling texels back into the middle and trading a surface for a flat fill
+/// with outliers — which is the one failure mode this constant was introduced to
 /// prevent.
-const CONTRAST: f32 = 1.2;
+///
+/// It moves to `1.6` with [`CROSS_SHARE`] by that same arithmetic, in the
+/// opposite direction. The rule is the one stated above: a full-width uniform
+/// (the per-texel hash) contributes more variation per unit of share than an
+/// interpolated field does, so *taking* share out of the hash and giving it to a
+/// second interpolated octave lowers the total on its own. `1.6` gives back
+/// exactly what the re-weighting removed — the authored variation lands at 1.95%
+/// against 1.87%, inside a band that has not moved — so introducing the
+/// cross-road octave is again a pure move along the frequency axis with the
+/// strength held fixed. [`MIN_MULTIPLIER`] is untouched, so the exposure is too.
+const CONTRAST: f32 = 1.6;
 
 /// The tiling asphalt albedo, as `RES * RES` RGBA8 texels ready for
 /// `RunningApp::add_texture_data`.
@@ -229,11 +310,41 @@ pub fn asphalt_albedo() -> Vec<u8> {
 }
 
 /// The combined grain field at a texel, in `0..=1`.
+///
+/// Three octaves, and the third is the one that reaches the screen at depth: the
+/// smooth field is the mix's patchiness, the fine hash is its aggregate, and the
+/// cross-road field is the longitudinal structure that the anisotropic sampler
+/// cannot average away (see the module docs).
 fn grain(x: u32, y: u32) -> f32 {
     let smooth = smooth_octave(x, y);
+    let cross = cross_octave(x);
     let fine = hash_unit(x, y, 0x9E37_79B9);
-    let mixed = smooth * SMOOTH_SHARE + fine * (1.0 - SMOOTH_SHARE);
+    let mixed = smooth * SMOOTH_SHARE
+        + cross * CROSS_SHARE
+        + fine * (1.0 - SMOOTH_SHARE - CROSS_SHARE);
     ((mixed - 0.5) * CONTRAST + 0.5).clamp(0.0, 1.0)
+}
+
+/// Value noise on a `CROSS_BANDS` toroidal ring across the road, smoothstep-
+/// interpolated — the wheel tracks, paver seams and wear stripes that run *down*
+/// a road rather than across it.
+///
+/// It depends on `x` alone, and that is the entire point: `road_mesh` maps `u` to
+/// the lateral offset, so this field is constant along the course, and the
+/// sixteen along-road taps an anisotropic sampler takes at a grazing angle all
+/// return the same value. It is the only octave here whose amplitude reaches a
+/// distant pixel intact.
+///
+/// Toroidal for the same reason [`smooth_octave`] is: band `CROSS_BANDS` *is*
+/// band `0`, so the field is continuous across the tile wrap and the repeat
+/// leaves no stripe down the road.
+fn cross_octave(x: u32) -> f32 {
+    let per_band = (RES / CROSS_BANDS) as f32;
+    let fx = x as f32 / per_band;
+    let bx = fx.floor();
+    let t = smoothstep(fx - bx);
+    let band = |o: u32| hash_unit((bx as u32 + o) % CROSS_BANDS, 0, 0xC2B2_AE35);
+    lerp(band(0), band(1), t)
 }
 
 /// Value noise on a `LATTICE x LATTICE` toroidal grid, smoothstep-interpolated.
@@ -435,12 +546,27 @@ mod tests {
     ///
     /// Box-averaging each `LATTICE` cell (`RES / LATTICE` = 4 texels square)
     /// strips the per-texel hash and leaves exactly the low-frequency field the
-    /// eye tracks as blobs. Its standard deviation, as a share of the whole
-    /// texture's, is the quilt's weight: it measured **66%** at the old
-    /// `SMOOTH_SHARE = 0.75`, and **31%** now. The bound is a minority share,
-    /// which is the structural claim — the smooth octave is the mix's patchiness,
-    /// a supporting term, and the moment it carries most of the amplitude the
-    /// road stops being made of stones.
+    /// eye tracks as blobs.
+    ///
+    /// **What is measured of that field is its wobble *along the road*, and the
+    /// direction is the whole assertion.** This test used to take the cell field's
+    /// standard deviation flat — every cell against the global mean — and that
+    /// statistic cannot tell a blob from a stripe. [`CROSS_SHARE`] is a
+    /// cell-scale field by that measure and scores 91%, while being the exact
+    /// opposite of orange peel: it is dead straight down the course, so it has no
+    /// blobs in it at all. Left as it was, this test would have forced the
+    /// amplitude back onto the one axis the anisotropic sampler averages away —
+    /// it would have been an assertion *for* the defect, which is the worst thing
+    /// a test can quietly become.
+    ///
+    /// Embossed leather is cell-scale structure that varies in **both** axes; a
+    /// road surface is allowed — required — to be structured across its width.
+    /// So the metric is the RMS, over the cell columns, of each column's
+    /// variation down the course, as a share of the whole texture's. It measured
+    /// **66%** at the old `SMOOTH_SHARE = 0.75`, 31% at `0.30`, and **23%** now.
+    /// The bound has not moved, because the claim has not: the smooth octave is
+    /// the mix's patchiness, a supporting term, and the moment it carries most of
+    /// the amplitude the road stops being made of stones.
     #[test]
     fn most_of_the_grain_lives_at_texel_scale_not_at_cell_scale() {
         let owned = tarmac_levels();
@@ -451,30 +577,83 @@ mod tests {
             let mean = v.iter().sum::<f32>() / v.len() as f32;
             (v.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / v.len() as f32).sqrt()
         };
-        let cells: Vec<f32> = (0..cells_across)
-            .flat_map(|cy| {
-                (0..cells_across).map(move |cx| {
-                    let sum: f32 = (0..per_cell)
-                        .flat_map(|j| {
-                            (0..per_cell).map(move |i| {
-                                ((cy * per_cell + j) * RES as usize) + cx * per_cell + i
-                            })
-                        })
-                        .map(|idx| levels[idx])
-                        .sum();
-                    sum / (per_cell * per_cell) as f32
+        let cell = |cx: usize, cy: usize| {
+            let sum: f32 = (0..per_cell)
+                .flat_map(|j| {
+                    (0..per_cell)
+                        .map(move |i| ((cy * per_cell + j) * RES as usize) + cx * per_cell + i)
                 })
+                .map(|idx| levels[idx])
+                .sum();
+            sum / (per_cell * per_cell) as f32
+        };
+        // Each column of cells is one lateral position; its spread down the
+        // course is that column's contribution to the quilt.
+        let along: Vec<f32> = (0..cells_across)
+            .map(|cx| {
+                let column: Vec<f32> = (0..cells_across).map(|cy| cell(cx, cy)).collect();
+                sd(&column)
             })
             .collect();
-        let share = sd(&cells) / sd(levels);
+        let rms = (along.iter().map(|s| s * s).sum::<f32>() / along.len() as f32).sqrt();
+        let share = rms / sd(levels);
         assert!(
             share < 0.45,
-            "{:.0}% of the grain's amplitude sits at the {:.0} cm cell scale; \
-             past a minority share the near road renders as embossed leather \
-             rather than as aggregate",
+            "{:.0}% of the grain's amplitude is {:.0} cm blobs wobbling down the \
+             course; past a minority share the near road renders as embossed \
+             leather rather than as aggregate",
             share * 100.0,
             TILE_METRES / LATTICE as f32 * 100.0
         );
+    }
+
+    /// **The grain survives the sampler it is actually read through.**
+    ///
+    /// This is the assertion the module was missing, and the champion frame's
+    /// road lived in the gap. Every other test here measures the texture as
+    /// authored — its strength, its spectrum, its scale — and a *buffer* cannot
+    /// see the thing that was wrong: [`super::palette`] opts the tarmac into 16×
+    /// anisotropic sampling, and at this camera's grazing angle that averages up
+    /// to sixteen taps **along** the road before a pixel is written. An isotropic
+    /// field is entirely made of detail on that axis, so 1.87% of authored
+    /// variation arrived as 0.49% near and 0.22% at the middle distance — a road
+    /// getting *flatter* with depth, which is the one thing asphalt never does.
+    ///
+    /// Averaging whole runs of texels down the `v` axis is exactly that filter,
+    /// and the bound is the reference's own asphalt: its cleanest unpainted
+    /// patches measure 1.6–2.3% of their displayed value. The footprints span a
+    /// near-road pixel to a far one; the point of the lower bound is that the
+    /// number must still be there at 75 cm, not just at 9.
+    #[test]
+    fn the_grain_survives_the_anisotropic_filter_it_is_sampled_with() {
+        let owned = tarmac_levels();
+        let levels: &[f32] = &owned;
+        for taps in [8_u32, 16, 32, 64] {
+            let filtered: Vec<f32> = (0..RES / taps)
+                .flat_map(|band| {
+                    (0..RES).map(move |x| {
+                        (0..taps)
+                            .map(|j| levels[((band * taps + j) * RES + x) as usize])
+                            .sum::<f32>()
+                            / taps as f32
+                    })
+                })
+                .collect();
+            let mean = filtered.iter().sum::<f32>() / filtered.len() as f32;
+            let sd = (filtered.iter().map(|l| (l - mean).powi(2)).sum::<f32>()
+                / filtered.len() as f32)
+                .sqrt();
+            let relative = sd / mean;
+            assert!(
+                (0.012..0.030).contains(&relative),
+                "after averaging {taps} texels ({:.0} cm) along the road the \
+                 tarmac varies by {:.2}% of its own value; the reference's \
+                 asphalt measures 1.6-2.3% at every depth, and an isotropic \
+                 grain measures 0.2-0.5% here",
+                taps as f32 * TILE_METRES / RES as f32 * 100.0,
+                relative * 100.0
+            );
+        }
     }
 
     /// The seam test. `Repeat` addressing puts column `RES-1` next to column `0`,
@@ -494,6 +673,16 @@ mod tests {
         let one_texel = 1.0 / (RES / LATTICE) as f32;
         assert!(worst_x <= one_texel, "vertical seam across the tile: {worst_x}");
         assert!(worst_y <= one_texel, "horizontal seam across the tile: {worst_y}");
+
+        // The cross-road octave wraps too, and it is the one that would show:
+        // it carries the majority of the amplitude and runs the full length of
+        // the course, so a discontinuity here is not a blemish, it is a stripe
+        // drawn down the road every 1.5 m for nine kilometres.
+        let cross_seam = (cross_octave(RES - 1) - cross_octave(0)).abs();
+        assert!(
+            cross_seam <= 1.0 / (RES / CROSS_BANDS) as f32,
+            "the cross-road bands do not wrap: {cross_seam}"
+        );
     }
 
     /// **The grain is the size of gravel, in metres.**
@@ -529,6 +718,20 @@ mod tests {
         // four texels per cell, whatever the two constants are set to.
         assert_eq!(RES / LATTICE, 4, "the smooth octave's slope has moved");
         assert_eq!(RES % LATTICE, 0, "a cell that is not a whole number of texels");
+
+        // The cross-road bands are decimetre features, and both bounds are
+        // physical. Below ~8 cm nothing on a road runs longitudinally at that
+        // width and the near tarmac reads as corduroy; above ~40 cm a band is
+        // wider than a wheel track and the road reads as painted lanes. It must
+        // also stay well clear of the near road's ~1.6 cm pixel, which is the
+        // reason this octave exists at all.
+        let band_metres = TILE_METRES / CROSS_BANDS as f32;
+        assert!(
+            (0.08..=0.40).contains(&band_metres),
+            "a {:.0} cm longitudinal band is not a wheel track or a paver seam",
+            band_metres * 100.0
+        );
+        assert_eq!(RES % CROSS_BANDS, 0, "a band that is not a whole number of texels");
     }
 
     #[test]
