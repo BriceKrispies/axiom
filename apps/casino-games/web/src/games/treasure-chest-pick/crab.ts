@@ -16,7 +16,7 @@
  */
 
 import type { EngineQuat, EngineVec3, MaterialSpec, SceneInstance } from "@axiom/web-engine";
-import { addV3, quatMul, quatRoll, quatYaw, rotateByQuat, scaleV3, v3 } from "../../presentation/stage/vectors.ts";
+import { addV3, quatMul, quatRoll, quatYaw, rotateByQuat, v3 } from "../../presentation/stage/vectors.ts";
 import type { CrabPose } from "./game.ts";
 
 /** Place one crab part, given in crab-local space. Both call sites supply this. */
@@ -65,64 +65,20 @@ export interface CrabDress {
  * So each leg is now two segments about a knee — the same "a form the primitive
  * vocabulary can't express becomes an honest run of facets" move the chest lid's
  * dome and the clam's ribs make. The bend is what does the work: the thigh goes
- * out from the shoulder almost level, the shin turns at the knuckle and drops
- * steeply to the sand, so the leg reads as a leg from the side (the beach crab)
- * AND head-on (the prize), where the two segments cross at an angle instead of
- * vanishing into one line.
- *
- * ── THE ARCH, and why the leg had to leave the belly ─────────────────────────
- *
- * The joint CHAIN was right and the STANCE was wrong. Hip (0.22, 0.19), knee
- * (0.42, 0.13), toe (0.49, 0) put the whole limb BELOW the shell's equator: the
- * shell is a 0.62 x 0.4 x 0.5 dome centred at y 0.2, so y 0.19 is its widest
- * line and everything the leg did after that went down and INSIDE its own
- * silhouette. Under this game's camera (54.5 deg down) the dome then hides its
- * own legs — the frame showed a bare red blob with two pale claw balls beneath it
- * and one leg peeking out at the bottom left, while the reference crab's whole
- * read is eight limbs radiating CLEAR of a round shell (three walking legs a
- * side, plus the claws in front). No retune of a sub-equator leg recovers that:
- * the leg has to come out of the SHOULDER and arch over the dome's outline.
- *
- * So the hip climbs to y 0.30 — the shell's upper flank, where the dome is still
- * 0.268 half-wide, so the joint stays socketed inside it — the thigh runs out
- * almost LEVEL to 0.52, clearing the dome's projected outline by a real margin at
- * this pitch, and the shin drops steeply from that knuckle to the sand at 0.58.
- * Reach goes 0.49 -> 0.58: from 0.18 past the shell's edge to 0.27, putting the
- * tips at ~1.9x shell width overall against the reference's measured 1.98x.
- *
- * The segments THICKEN with the extra length (0.075/0.06 -> 0.09/0.075). A
- * 0.32-long shin at 0.06 is a 5:1 wire at this scale and the reference's legs are
- * chunky ~3:1 tapers; longer AND thinner would have traded a hidden leg for a
- * hair. Node count is untouched — this is the same twelve boxes, posed.
+ * out and slightly down, the shin turns and drops steeply, so the leg reads as a
+ * leg from the side (the beach crab) AND head-on (the prize), where the two
+ * segments cross at an angle instead of vanishing into one line.
  */
-const HIP = { x: 0.24, y: 0.3 };
-const KNEE = { x: 0.52, y: 0.31 };
-const TOE = { x: 0.58, y: 0.0 };
-const THIGH_THICK = 0.09;
-const SHIN_THICK = 0.075;
+const HIP = { x: 0.22, y: 0.19 };
+const KNEE = { x: 0.42, y: 0.13 };
+const TOE = { x: 0.49, y: 0.0 };
+const LEG_ROW = [-0.16, 0.02, 0.2];
+const THIGH_THICK = 0.075;
+const SHIN_THICK = 0.06;
 
 /**
- * The three walking legs on a side: where each hip sits along the body (`z`, +Z
- * toward the camera) and how far that whole leg is swung fore/aft off
- * straight-out (`fan`, radians, positive = swept toward the crab's REAR).
- *
- * The fan used to be a single constant 0.5 shared by all six, which is the second
- * half of the same defect: three legs at one hip x with one identical heading are
- * three COINCIDENT legs from above, so each side contributed one thick limb to the
- * silhouette instead of three. The reference fans them plainly — rear leg swept
- * back over the shoulder, middle straight out, front leg reaching forward past the
- * shell's cheek — so that is what the table says now, per row.
- */
-const LEG_STATIONS: readonly { readonly fan: number; readonly z: number }[] = [
-  { fan: 0.72, z: -0.16 },
-  { fan: 0.16, z: 0.02 },
-  { fan: -0.34, z: 0.2 },
-];
-
-/**
- * One jointed leg: `s` is the side, `station` its hip's place and sweep along the
- * body, and the row index gives it its own wiggle phase so the six never paddle
- * in unison.
+ * One jointed leg: `s` is the side, `z` its place along the body, and the row
+ * index gives it its own wiggle phase so the six never paddle in unison.
  *
  * Each segment is a box whose LENGTH runs along its local +Y, rolled onto the
  * segment's own direction in the body's X/Y plane — so the joint angles fall out
@@ -130,26 +86,9 @@ const LEG_STATIONS: readonly { readonly fan: number; readonly z: number }[] = [
  * OUTSIDE that roll, which swings the whole finished leg toward the front or
  * back of the crab; composing it the other way round would twist each segment
  * about its own length and leave the knee behind.
- *
- * And the fan swings the leg's POSITIONS about the hip, not just its heading. It
- * used to rotate the heading alone, which is why a fan bought no silhouette at
- * all: knee and toe stayed stacked at the same x/z whatever the yaw said, so a
- * "swept" leg was a box pointing one way while sitting exactly where an unswept
- * leg sits. A limb swings from its joint or it does not swing.
  */
-const crabLeg = (
-  place: CrabPlace,
-  s: number,
-  row: number,
-  station: { readonly fan: number; readonly z: number },
-  pose: CrabPose,
-  tick: number,
-): readonly SceneInstance[] => {
-  const fan = quatYaw(s * (station.fan + pose.legWiggle * Math.sin(tick * 0.7 + row * 1.2)));
-  const hipAt = v3(HIP.x * s, HIP.y, station.z);
-  /** A point on the leg's own plane, swung about the hip into the body frame. */
-  const swung = (p: { x: number; y: number }): EngineVec3 =>
-    addV3(hipAt, rotateByQuat(v3((p.x - HIP.x) * s, p.y - HIP.y, 0), fan));
+const crabLeg = (place: CrabPlace, s: number, row: number, z: number, pose: CrabPose, tick: number): readonly SceneInstance[] => {
+  const fan = quatYaw(s * 0.5 + s * pose.legWiggle * Math.sin(tick * 0.7 + row * 1.2));
   const segment = (suffix: string, from: { x: number; y: number }, to: { x: number; y: number }, thick: number): SceneInstance => {
     const dx = (to.x - from.x) * s;
     const dy = to.y - from.y;
@@ -160,7 +99,7 @@ const crabLeg = (
       `${suffix}${s}_${row}`,
       "CrabShellDark",
       "box",
-      scaleV3(addV3(swung(from), swung(to)), 0.5),
+      v3(((from.x + to.x) / 2) * s, (from.y + to.y) / 2, z),
       v3(thick, Math.hypot(dx, dy), thick),
       quatMul(fan, roll),
     );
@@ -196,9 +135,7 @@ export const crabParts = (place: CrabPlace, pose: CrabPose, tick: number, dress:
       ];
     })
     .flat();
-  const legs = [-1, 1]
-    .map((s): readonly SceneInstance[] => LEG_STATIONS.map((station, i) => crabLeg(place, s, i, station, pose, tick)).flat())
-    .flat();
+  const legs = [-1, 1].map((s): readonly SceneInstance[] => LEG_ROW.map((z, i) => crabLeg(place, s, i, z, pose, tick)).flat()).flat();
   // A little brand pennant on a pole, raised in the right claw — welded to the
   // body frame, so it scoots and turns with the crab.
   const pennant: readonly SceneInstance[] = dress.pennant
