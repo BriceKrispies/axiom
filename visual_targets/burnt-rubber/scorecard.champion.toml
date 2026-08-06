@@ -1,163 +1,240 @@
 # Champion scorecard — burnt-rubber
 #
 # ============================================================================
-# ERA C, PASS 1 — scored 2026-08-06 against the render this pass produced
+# ERA C, PASS 1 — RECALIBRATED by the critic pass (iteration 13)
 # ============================================================================
-# Seven lenses ran. SIX were stacked; the art-director's was declined by the
-# human (see below). Two conflicted on render/mod.rs and were resolved by the
-# foreman rather than dropped, because dropping either would have left a
-# daylight rig under a night sky — a broken frame and a wasted pass.
+# The image on disk is unchanged. Four of its twelve scores were not honest and
+# are corrected below, each against a measurement taken from the two PNGs in
+# this directory. final_score 1.175 -> 0.375 on an unchanged render.
 #
-# THE FRAME IS DAYLIGHT NOW. That was the pass's whole object and it happened.
-# Measured over the scene band (rows 0.30h..0.72h):
+# That is not a claim the pass failed. Under this calibration the era-C baseline
+# scored 0.20 and this render scores 0.375, so the night-to-day conversion moved
+# the campaign forward — by about a third of what the scorecard claimed, and
+# with the next flaw in a different place than the ledger recorded.
+#
+# BASE CORRECTION, RECORDED BECAUSE IT NEARLY BROKE THIS PASS: the fan-out brief
+# for era-C pass 1 named `main` as the base for all seven lenses. `main` is
+# edb4f4ff and the champion line is 8f027579, eight commits ahead. A lens that
+# obeyed the brief would have authored its proposal against the NIGHT scene and
+# scored it against the daylight reference. The colorist detected it and rebased
+# itself; the rest were corrected mid-flight. Any proposal in this pass that
+# reads as authored against a night frame has that as its cause.
+#
+# ============================================================================
+# WHAT THE PASS DID — kept from the pass-1 scorecard, re-measured, all correct
+# ============================================================================
+# Scene band = rows 0.30h..0.72h. Every figure below reproduces to the decimal:
 #
 #                          reference    before      after
 #   band luma median          139.7       0.1       178.3
 #   pixels below L=16          0.5%      78.1%       0.0%
 #   whole-frame saturation    0.522      0.141      0.204
 #   whole-frame mean luma     114.4       23.3      160.8
-#   sky, high             (27,111,198) (19,19,20) (228,231,232)
 #   sky, at horizon      (145,219,239)  (0,1,0)  (128,202,249)
-#   left shoulder          (74,197,186)  (2,6,5)  (105,149,166)
 #
-# TWO OVERSHOOTS, BOTH NAMED AND NEITHER SMOOTHED:
+# The frame is daylight. The crushed floor is gone. Those are real and they are
+# the pass's object.
 #
-#  1. The frame is now BRIGHTER than the reference, not darker — median 178.3
-#     against 139.7 — and flatter: saturation 0.204 against 0.522. It went from
-#     three stops under to about half a stop over, which is the right kind of
-#     error to have but is still an error.
-#  2. The zenith is WHITE. (228,231,232) against the reference's deep
-#     (27,111,198). The horizon band, by contrast, is nearly right —
-#     (128,202,249) against (145,219,239). So the sky gradient is correct and
-#     the cloud layer is burying it: CLOUD_COVERAGE = 0.55 was authored blind,
-#     and the architect said in its own proposal that whether the field reads as
-#     cumulus rather than a wash was the one thing GPU verification had to judge.
-#     It reads as a wash. That is a one-constant answer, and it is the reason
-#     color_palette and contrast_and_exposure are 1 rather than 2.
+# ============================================================================
+# WHAT THE PASS-1 SCORECARD DID NOT MEASURE — the top end
+# ============================================================================
+# It measured the floor it had just repaired and did not measure the ceiling it
+# had just broken. Pixels above L=250, this critic pass, same two files:
 #
-# WHAT THE REFERENCE STILL HAS THAT THIS DOES NOT: the sea, the beach, the
-# stilt houses, the sailboats — the entire left third of the reference is water
-# and the champion's left shoulder is a green hillside. And no palm throws a
-# shadow across the road, which is the reference's single most characteristic
-# feature.
+#                          reference    champion
+#   whole frame                1.4%       11.0%
+#   sky band (rows 0..0.40)    2.8%       19.3%
+#   road band (rows .72..1)    0.3%        3.4%
 #
+# A fifth of the champion's sky is pure white. The reference's 2.8% is a sun
+# and its flare — a deliberate, localised highlight. The champion's 19.3% is a
+# field. The era-C baseline's defect was 78% of the scene band clipped BLACK;
+# this render's defect is 11% of the frame clipped WHITE. The sign changed and
+# the area shrank, but a clipped frame is still a clipped frame, and no axis in
+# the pass-1 scorecard was scored against it.
+#
+# AND THERE IS STILL NO SHADOW. Measured on the road, not inferred:
+#   reference, row 0.60h:  centre x=0.50 luma 54  |  x=0.25 luma 92
+#   champion,  row 0.72h:  centre x=0.50 luma 99  |  x=0.25 luma 85
+# In the reference the middle of the road is DARKER than the road beside it,
+# because a palm shadow lies across it. In the champion the middle of the road
+# is BRIGHTER than the road beside it, because a specular streak runs down it.
+# The reference's most characteristic feature is not merely missing; the frame
+# carries its photographic opposite in the same place.
+#
+# ONE CLAIM I CHECKED AND COULD NOT SUPPORT, recorded so it is not repeated: I
+# expected the 1280x720 -> 940x1672 blit to leave the frame measurably soft.
+# High-frequency RMS over the scene band is 8.26 (reference) against 8.24
+# (champion) — indistinguishable. The anamorphic squash is real and measured
+# (see scale_and_proportion); a global softness from it is NOT, and nothing in
+# this scorecard rests on one.
+#
+# ============================================================================
 # final_score = lowest_axis * 0.7 + average_axis * 0.3
-#             = 1 * 0.7 + (19/12) * 0.3 = 1.175   (was 0.20)
+#             = 0 * 0.7 + (15/12) * 0.3 = 0.375   (pass 1 stated 1.175 on 19/12)
 #
-# NEXT FLAW, BY THE RULE = silhouette_readability (five axes tie at 1; fixed
-# order breaks it 3rd). BUT the human has already scheduled the anamorphic fix
-# for the next pass, and the art-director measured why that ordering is right:
-# the judged arm squeezes the world 3.16x horizontally, and "a wedge squashed 3x
-# in plan IS a rectangle" — so silhouette work cannot survive on this arm and
-# would be spent twice. scale_and_proportion is therefore the pass-2 target by
-# human decision, with silhouette_readability blocked behind it. Recorded rather
-# than quietly re-ordered.
+# NEXT FLAW = artifact_level, alone at 0, no tie to break.
 #
-# THE CAMERA PROPOSAL WAS DECLINED, AND THAT IS NOT A DROPPED PROPOSAL. The
-# art-director measured the car at 20% of frame width against the reference's
-# 30% and proposed scaling the rig 0.70 to close it. The human declined: the
-# camera was pulled back and lifted two days ago as an explicit gameplay
-# requirement — road ahead to read a corner and the traffic in it — and a
-# reference cannot overrule that. scale_and_proportion is therefore capped by a
-# deliberate design decision, not by an unfixed flaw, and no future pass should
-# re-propose the rig scale without the human revisiting it.
+# This CHANGES the recorded next axis, and the change is the point of checking.
+# Ledger iteration 12 recorded "by the rule, silhouette_readability (five axes
+# tie at 1)" and then targeted scale_and_proportion by human decision. With
+# artifact_level scored honestly there is no tie at the bottom at all.
+#
+# The human's decision is not overruled by this and does not need to be. The
+# 3.16x anamorphic squash and the blown highlight field are the same pass's
+# work: one is the geometry of the blit, the other is the top of the grade, and
+# both are defects the reference does not have anywhere in it. A pass-2 that
+# fixes the aspect and pulls the ceiling back under 255 attacks artifact_level
+# and scale_and_proportion together, which is what the rule and the human's
+# schedule both point at. What is NOT defensible is recording silhouette work as
+# "next by the rule" — it never was, and now it is two axes away.
 
 [scores]
-# 2 - HELD. Camera, centred subject, horizon and HUD corners still match above
-# proxy level and no lens touched them. The HUD is still one monochrome mono font
-# where the reference styles its own (a gear disc, a progress track with a car
-# token, cyan and green button rings) — unchanged, and unattacked.
+# 2 — HELD. Chase camera, centred car, road to a centred vanishing point,
+# horizon near 0.46h, HUD block top-left, drive controls bottom-right, and the
+# same HUD FIELDS (speed, section, progress, elapsed, near misses, ghost delta,
+# boost). The reference styles those fields — a gear disc, a progress track with
+# a car token riding it, cyan and green button rings — where the champion is one
+# monochrome mono font. That is what holds it at 2 and it is unchanged. The HUD's
+# overprinting and edge-clipping are charged to artifact_level, not double-counted
+# here.
 composition_and_framing = 2
 
-# 1 -> 2. The car is LIT for the first time in this campaign: its red body and
-# white stripes read, and the pure-black rear-facing panel that surfacing flagged
-# (N.L <= 0 against an ambient of ~0.001 linear) is gone now that there is a sky
-# fill under the key. What holds it at 2 is unchanged shape — a box with a raised
-# deck against the reference's tapering wedge — and, per the art-director's
-# measurement, that shape cannot be judged on this arm until the squash is fixed.
-subject_fidelity = 2
+# 1 — CORRECTED BY THE CRITIC PASS, was 2.
+# The pass-1 note raised this to 2 and then wrote, in the same paragraph, "what
+# holds it at 2 is unchanged shape". The axis IS the shape. Everything the note
+# offered as the reason for the rise — "the car is LIT for the first time", "the
+# pure-black rear-facing panel is gone now that there is a sky fill under the
+# key" — is the attacked axis's work seen on the subject. lighting_and_shadow
+# already scored that; scoring it again here is the same improvement counted
+# twice, and it is exactly the drift the skill warns about: a number moving
+# without the render moving toward identity on that axis.
+# What the image shows: an orange-red box with a raised deck slab, grey-white
+# stripes, a black lower rear with a white plate, and two dark grille bars. The
+# reference is a scarlet wedge — long tapering nose, cabin set well back, twin
+# white stripes running the full length, thin red lamp bars, visible exhaust
+# tips. "Present but crude/proxy: you can tell what it is meant to be, but
+# nobody would mistake it for the reference" is the anchor for 1, and it is a
+# literal description of a boxy proxy standing in for a modelled car.
+subject_fidelity = 1
 
-# 1 - HELD, and deliberately not attacked. The outline is still box-on-box. The
-# art-director's finding is why this stays where it is rather than being worked:
-# the judged arm squeezes the world 3.16x horizontally, and a wedge squashed 3x
-# in plan renders as a rectangle — so modelling a wedge now would be spent twice,
-# once before the aspect fix and once after. Blocked behind scale_and_proportion
-# by decision, not by difficulty.
+# 1 — HELD. Still box-on-box. Blocked behind the aspect fix by the
+# art-director's measurement (a wedge squashed 3.16x in plan renders as a
+# rectangle), which is a sound reason not to work it and not a reason to score
+# it higher.
 silhouette_readability = 1
 
-# 1 -> 2. Surfacing measured the reference's asphalt variation at 1.6-2.3% and
-# the champion's authored 5.92%, cut MIN_MULTIPLIER 0.62 -> 0.86 to land at
-# 1.87%, and the road no longer reads as static — it reads as tarmac. Because
-# the grain is a multiplied albedo that ratio is exposure-invariant, so it
-# survived the day conversion landing on top of it, which is exactly what the
-# lens predicted. Not 3: the surfaces are washed by the cloud haze, and nothing
-# in frame yet carries the reference's sand, foam, roof tile or frond detail.
+# 2 — HELD, and it is the most generous score left standing. Surfacing measured
+# the reference's asphalt variation at 1.6-2.3%, the champion's authored grain at
+# 5.92%, and cut MIN_MULTIPLIER to land at 1.87%. That is a real measured
+# convergence on one material and it is exposure-invariant, so it survived the
+# day conversion. The caveat a future pass should hold onto: that ratio was
+# measured in ALBEDO, and what the delivered frame shows over the road is
+# dominated by the highlight streak sitting on top of it. Nothing else in frame
+# carries the reference's sand, foam, roof tile or frond detail.
 material_and_texture_detail = 2
 
-# 0 -> 2, the attacked axis and the pass's object. The rig is a daylight rig:
-# key 0.88 cool -> 2.6 warm-white, hemisphere ambient from a night residual
-# (~0.019 mean) to a blue-sky-over-warm-sand fill, and the car's pool light
-# 1.0 -> 0.16 so a lamp stops out-lighting the sun. Every surface in frame is now
-# lit by something. It is not 3 for one reason and it is the big one: NO PALM
-# THROWS A SHADOW ACROSS THE ROAD. That is the reference's most characteristic
-# feature and the engine has one directional shadow caster; whether it can reach
-# is an architect question nobody has answered yet.
-lighting_and_shadow = 2
+# 1 — CORRECTED BY THE CRITIC PASS, was 2. THE ATTACKED AXIS.
+# The axis did improve and the improvement is real: the rig went from a moon and
+# one pool light to a warm-white key with a sky fill, and every surface in frame
+# is lit by something. 0 -> 1 is earned. 0 -> 2 is not, for two measured reasons.
+#   (1) The shadow half of this axis is not merely weak, it is inverted. In the
+#       reference the road's centre is DARKER than the road beside it (54 vs 92
+#       at row 0.60h) because palm shadows lie across it; in the champion the
+#       road's centre is BRIGHTER than the road beside it (99 vs 85 at row
+#       0.72h). Not one cast shadow is measurable anywhere in the frame. An axis
+#       named lighting_and_shadow cannot be at "the right structure is emerging"
+#       with the shadow term at zero and the one place the reference puts its
+#       signature shadow carrying a specular streak instead.
+#   (2) The new key is what clips 11.0% of the frame to white against the
+#       reference's 1.4%. A rig that cannot be turned up to daylight without
+#       blowing a fifth of the sky is not yet a daylight rig; it is a night rig
+#       driven past its range. That cost belongs partly here and not only at
+#       contrast_and_exposure, because it is the light that is doing it.
+# 1 is the honest anchor: daylight is PRESENT, and it is a proxy for the
+# reference's light rather than a stylised version of it.
+lighting_and_shadow = 1
 
-# 0 -> 1. The hue families exist now — blue above, green land, a red car — where
-# before there were greys. But saturation is 0.204 against the reference's 0.522
-# and the zenith is (228,231,232) where the reference is (27,111,198). The frame
-# is day-coloured and washed out rather than day-coloured and saturated, and the
-# cloud layer burying the gradient is most of why.
+# 1 — HELD. The hue families exist (blue above, green land, a red car) where
+# before there were greys — that is the whole of the improvement and it is real.
+# Saturation 0.204 against 0.522, and the zenith samples (234,255,255) against
+# the reference's (0,102,207): two of three channels are clipped at 255, so the
+# sky at the top of frame has no hue left to be wrong about. The reference's
+# whole left third is turquoise sea (1,221,223); the champion's left shoulder is
+# a grey-green hillside (96,116,108).
 color_palette = 1
 
-# 0 -> 1. The crushed floor is gone: 78.1% of the band below L=16 is now 0.0%,
-# against the reference's 0.5%. That is the whole of the improvement and it is
-# real. It stops at 1 because the error changed sign rather than closing — median
-# 178.3 against 139.7, so the frame is now about half a stop hot, and with the
-# zenith blown to near-white the range is compressed at the top instead of the
-# bottom. Under before it was over.
+# 1 — HELD, on re-measured and now two-sided evidence. The floor repair is real:
+# 78.1% of the scene band below L=16 is now 0.0% against the reference's 0.5%.
+# The pass-1 note called the residual error "about half a stop hot" from the band
+# median (178.3 vs 139.7). The stronger statement, which it did not make, is that
+# the error changed KIND as well as sign: 11.0% of the frame is now above L=250
+# against the reference's 1.4%, and in the sky band 19.3% against 2.8%. Under
+# before, over and clipped now. 1 stands, but for the ceiling, not the median.
 contrast_and_exposure = 1
 
-# 1 -> 2. The palm avenue does what depth cues do: a receding colonnade at a
-# known spacing reads distance far better than a converging road alone, and
-# there are distinct planes now (road, verge, hills, sky). Not 3 because the haze
-# washes the mid-distance into the sky rather than separating them, and the
-# reference's layering — near palms, beach, boats, village, mountains, sky — has
-# four planes this frame does not contain at all.
+# 2 — HELD. The palm avenue is a genuine depth cue: a receding colonnade at a
+# known spacing reads distance in a way a converging road alone does not, and
+# there are distinct planes (road, verge, hills, sky). Not 3 because the haze
+# and the highlight wash flatten the mid-distance into the sky rather than
+# separating them, and the reference's near-palms / beach / boats / village /
+# mountains layering has four planes this frame does not contain at all.
 depth_and_separation = 2
 
-# 0 -> 2. There is weather in the sky. The architect's cloud layer composites on
-# a cloud plane so lumps foreshorten toward the vanishing point, and it carries
-# no colour of its own — which is why it survived the palette going from night to
-# noon underneath it without a retune. The horizon band lands at (128,202,249)
-# against the reference's (145,219,239), close. It is not 3 because at
-# CLOUD_COVERAGE 0.55 the layer reads as a milky wash rather than discrete
-# cumulus, and it has buried the zenith the gradient was painting correctly.
-atmosphere = 2
+# 1 — CORRECTED BY THE CRITIC PASS, was 2.
+# The pass-1 note scored 2 and then described a milky wash. Both cannot be true.
+# What landed is a cloud layer that (a) reads as an undifferentiated wash rather
+# than the reference's sculpted cumulus banks, (b) buried the sky gradient that
+# was otherwise landing nearly right — horizon (128,202,249) against (145,219,239)
+# is close, zenith (234,255,255) against (0,102,207) is not a colour error, it is
+# a clipped channel — and (c) is 19.3% pure white by area. There is no lens flare
+# and no visible scattering through the palms.
+# The horizon band being close is why this is not 0. "Present but crude/proxy"
+# is exactly what a flat white overcast standing in for a deep blue sky with
+# cumulus and a flare is. The architect's own proposal named the thing GPU
+# verification had to judge — whether the field reads as cumulus or as a wash —
+# and the verification answered "wash". The score should have followed that
+# answer rather than the intent.
+atmosphere = 1
 
-# 1 - HELD, on two separate causes that both resolve outside this pass. The
-# anamorphic 3.16x squash is unfixed and is scheduled for pass 2 by human
-# decision. The chase rig is unchanged because the human declined the proposal to
-# scale it, preferring the road-ahead visibility they asked for over reference
-# parity — so the part of this axis that is about subject size is capped by
-# choice and should stop being re-proposed.
+# 1 — HELD. The 3.16x horizontal squash (world rendered at a 16:9 camera, blitted
+# to a 940x1672 portrait surface) is unfixed, and it is the reason no horizontal
+# proportion in the frame can be right. The chase rig's distance is separately
+# capped by an explicit human design decision (road-ahead visibility beats
+# reference parity) and must not be re-proposed without them revisiting it.
 scale_and_proportion = 1
 
-# 1 -> 2. The palm avenue is real new content: 7-blade procedural crowns on
-# scaled stems, planted every 24 m on both shoulders through the coast sections,
-# ~150 instances in the visible window for 2 extra draw calls. Not 3 because the
-# reference's density is mostly things this frame still lacks entirely — the sea,
-# the sailboats, the beach, the stilt houses, the parasols, the mountains — and
-# because the fronds are flat blades rather than pinnate leaves, which the
-# modeler recorded as the app-tier ceiling without an alpha-cutout foliage card.
+# 2 — HELD, and flagged as the second-most generous score standing. ~150 palm
+# instances on both shoulders is real new content in the right arrangement, for
+# 2 extra draw calls. Against it: the fronds are flat blades and read as bare
+# drooping sticks at this distance, and the reference's density is mostly things
+# this frame lacks entirely — sea, sailboats, beach, stilt houses, parasols,
+# rocks, surf, mountains.
 detail_density = 2
 
-# 0 -> 1. Three of the six artifact classes the critic named are gone with the
-# night: the crushed floor, the stray green sky streak, and the black rear panel.
-# What replaces them is smaller but real — the cloud wash flattening the upper
-# band, and aliasing on lane edges and palm stems that daylight now shows in full
-# where darkness was hiding it. The HUD boost row still overprints the pad, and
-# the gear disc still reads "R" at 156 km/h, which remains a defect in the
-# capture recipe rather than in the render.
-artifact_level = 1
+# 0 — CORRECTED BY THE CRITIC PASS, was 1.
+# The rise to 1 was justified as "three of the six artifact classes the critic
+# named are gone with the night". Three did go — the crushed floor, the green sky
+# streak, the black rear panel. At least three arrived in the same pass, and the
+# count is back where it was:
+#
+#   NEW  1. Highlight clipping, pervasive: 11.0% of the frame above L=250
+#           against the reference's 1.4%; 19.3% of the sky band against 2.8%;
+#           3.4% of the road band against 0.3%. A white field, not a highlight.
+#   NEW  2. A specular blowout streak running the length of the road, occupying
+#           the exact place the reference puts its palm shadows.
+#   NEW  3. The bottom HUD instruction line runs into the left frame edge — mean
+#           luma over the leftmost 6px of those rows is 83 against the
+#           reference's 37, i.e. glyph ink at x=0, text cut off by the viewport.
+#   HELD 4. The BOOST row is drawn over the touch pads.
+#   HELD 5. The gear disc reads "R" at 156 km/h. The pass-1 note calls this a
+#           capture-recipe defect rather than a render defect; it is in the
+#           judged image and this scorecard scores the judged image.
+#   HELD 6. Aliasing on lane edges and palm stems, which daylight now shows in
+#           full.
+#
+# Six classes against a reference with none. The previous critic pass scored this
+# axis 0 for six classes; the same standard applied to the same count is 0. A net
+# swap of three defects for three is not a point of progress, and scoring it as
+# one is how an axis drifts upward while the image stands still.
+artifact_level = 0

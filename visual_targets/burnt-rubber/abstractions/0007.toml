@@ -1,0 +1,124 @@
+# BACKFILLED by the critic pass (iteration 13).
+#
+# Ledger iteration 12 — the era-C pass-1 landing — sets
+# `abstraction_introduced = true` and then names no abstraction. That is the
+# same defect 0005.toml and 0006.toml were each written to repair, and each of
+# those said in as many words that a flag claiming an abstraction with no record
+# of WHICH one is worse than no flag at all.
+#
+# The abstraction it did not name is `a06678a3` ("convergence(architect):
+# axiom-host — a sky can hold weather, not just a gradient and a body"):
+#
+#   crates/axiom-host/src/frame_sky.rs        +319 lines
+#   modules/axiom-gpu-backend/src/scene_renderer.rs  +57 lines (SKY_WGSL mirror
+#                                             + one new vec4 in the sky uniform)
+#   apps/burnt-rubber/src/render/mod.rs       the single adopting call site
+#
+# New public surface on a LAYER (`axiom-host`), mirrored into a MODULE's shader
+# and uniform layout, landed inside a convergence pass, with no gate record.
+#
+# This is the SEVENTH consecutive spine change on this campaign's line to land
+# without its record (0001..0006, and now this). Six previous critic passes have
+# each written that the repetition is the finding and not the paperwork, and the
+# pass after each one did it again. Nothing in the loop makes the gate record a
+# precondition of landing, so it is always what gets dropped when a pass is
+# going well. That is a process defect and it is now the single most durable
+# fact in this campaign's record.
+#
+# Ruling: MISSING-RECORD, backfilled — not too-early, not ceremonial. The change
+# itself clears the gate cleanly on the "genuinely cannot express" branch. Two
+# concerns are recorded at the bottom: which axis it was spent on, and what GPU
+# verification actually said about it.
+
+axis = "atmosphere"
+
+# The ">= 3 failed bounded attempts" branch does not apply and could not have.
+# Era C is one pass old; `atmosphere` had never been attacked under this
+# reference, so there were zero bounded attempts, let alone three failed ones.
+# It clears on the second branch only, and the burden is correspondingly higher.
+failed_attempts = []
+
+inexpressible = true
+
+# Why no config or data change could reach it. Quoting the commit's own
+# diagnosis, which this critic pass verified against the diff:
+#
+#   "FrameSky could express a two-stop gradient, one disc and one halo, and
+#    nothing else — so that band is the largest area of the frame no app-tier
+#    knob and no scene geometry can reach (above the horizon there is nothing to
+#    put geometry on)."
+#
+# Verified: the reference's upper ~45% is cumulus, and the champion's upper 40%
+# is where 19.3% of the pixels clip to white. The app tier's only lever over
+# that band was the two gradient stops and the body — a smooth ramp cannot be a
+# cloud field, at any setting.
+#
+# The app-tier alternative was named and rejected on a capability argument, not
+# on effort: alpha-cutout cloud CARDS would need alpha the software rasterizer
+# does not have, would sort against the depth fog, and — being ordinary textured
+# geometry — would survive on a backend that has already DECLARED it drops
+# `RenderCapability::Sky`. That is silent backend divergence, which is precisely
+# what the capability system exists to prevent, and it is the strongest part of
+# the justification: the wrong fix would have been invisible to the arm that is
+# supposed to degrade it.
+
+smallest_api = """
+One layer, one module, one call site.
+
+  crates/axiom-host — `FrameSky::with_clouds(coverage: Ratio, scale: Ratio)`
+    plus `cloud_coverage()` / `cloud_scale()` getters, and two private f32
+    fields on a struct that already owned the sky's evaluation. NO new
+    capability bit: `RenderCapability::Sky` already gates this band and Canvas
+    2D already drops and reports it, so the degradation is declared by
+    construction rather than added. Coverage 0 is the default and is EXACTLY
+    clear — the threshold is laid out so at zero coverage it sits at 1.0, which
+    the field's maximum (exactly 1.0, the octave weights summing to 1) cannot
+    beat. No branch, no separate "no cloud" representation, which is what keeps
+    it inside the Branchless Law and keeps every existing app bit-identical.
+
+  modules/axiom-gpu-backend — the same arithmetic mirrored into SKY_WGSL and
+    packed into ONE new vec4 of the sky uniform. No new bind group, no new
+    texture, no new pass. The field is a sum of four rotated separable
+    sinusoids rather than a hashed lattice specifically so the Rust and the WGSL
+    are the same expression — no integer hashing, no fract precision cliff — and
+    `radiance()` stays portable to the shader unchanged, the way the rest of
+    FrameSky already is.
+
+  apps/burnt-rubber — one `set_sky` call site adopts it.
+
+Smaller was available and would have been wrong: a bare `cloud_coverage` setter
+with no `scale` would have made the field's size a hidden constant of the
+engine, and a colour on the cloud would have needed re-tuning every time the
+palette moved. The cloud carries NO COLOUR OF ITS OWN — the gradient behind it
+fills its shaded body and the body's colour lights its sunward face through one
+broad forward lobe — which is why one authored layer survived the palette going
+from moonlit night to coastal midday underneath it without a retune. That
+property is the reason this API is the right size rather than merely a small one.
+"""
+
+# ---------------------------------------------------------------------------
+# CONCERN 1 — SPENT OFF THE ATTACKED AXIS
+# ---------------------------------------------------------------------------
+# The pass's attacked axis was `lighting_and_shadow`. This abstraction was spent
+# on `atmosphere`, which was one of four axes tied at 0 going in. The board runs
+# seven lenses in parallel by design and that is not itself a violation — but the
+# gate exists so that the ONE structural allowance a pass gets is aimed at the
+# flaw the rule chose. Recorded so a reader can see where it went.
+#
+# ---------------------------------------------------------------------------
+# CONCERN 2 — THE PROOF, AND WHAT VERIFICATION ACTUALLY RETURNED
+# ---------------------------------------------------------------------------
+# The architect's proposal named its own falsifiable test: whether the field
+# reads as discrete cumulus rather than as a wash was "the one thing GPU
+# verification had to judge". Verification ran, on the judged arm, and answered
+# WASH. Measured on the promoted champion: 19.3% of the sky band clips to white,
+# and the zenith reads (234,255,232-255) against the reference's (0,102,207) —
+# two channels pinned at 255, so the gradient the layer was meant to sit in
+# front of is buried rather than revealed.
+#
+# The abstraction is therefore JUSTIFIED but its first tuning is UNPROVEN. The
+# pass-1 scorecard scored `atmosphere` 0 -> 2 on the strength of the mechanism
+# existing; this critic pass corrected it to 1 on the strength of what the
+# mechanism produced. `CLOUD_COVERAGE = 0.55` was authored blind and is a
+# one-constant retune, at the config rung of the ladder — no further abstraction
+# is owed for it, and none should be reached for.

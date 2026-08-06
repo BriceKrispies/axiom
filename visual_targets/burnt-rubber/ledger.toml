@@ -1371,3 +1371,137 @@ atmosphere = 2
 scale_and_proportion = 1
 detail_density = 2
 artifact_level = 1
+
+[[iteration]]
+iteration = 13
+attacked_axis = "none — scoring recalibration"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/abstractions/0007.toml",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+SCORING RECALIBRATION — no render change. The image on disk is byte-identical \
+to the one iteration 12 promoted; four of its twelve scores were not honest. \
+final_score 1.175 -> 0.375 on an unchanged frame. The pass still moved the \
+campaign (0.20 -> 0.375 under one calibration), by about a third of what it \
+claimed, and the next flaw is not where iteration 12 recorded it. \
+\
+FOUR AXES LOWERED, each against a measurement from the two PNGs in this \
+directory: \
+\
+  subject_fidelity 2 -> 1. The iteration-12 note raised this and then wrote, in \
+  the same paragraph, "what holds it at 2 is unchanged shape". The axis IS the \
+  shape. Every reason it gave for the rise — the car is lit for the first time, \
+  the black rear panel is gone under the sky fill — is the ATTACKED axis's work \
+  seen on the subject, already scored at lighting_and_shadow. Counting it twice \
+  is a number moving without the render moving toward identity, which is the \
+  precise failure mode the skill names. \
+\
+  lighting_and_shadow 2 -> 1. THE ATTACKED AXIS. It improved and 0 -> 1 is \
+  earned. 0 -> 2 is not. The shadow half of the axis is not weak, it is \
+  INVERTED: at row 0.60h the reference's road centre is DARKER than the road \
+  beside it (54 vs 92) because palm shadows lie across it; at row 0.72h the \
+  champion's road centre is BRIGHTER than the road beside it (99 vs 85) because \
+  a specular streak runs down it. The reference's signature feature is not just \
+  absent, its photographic opposite occupies the same place. And the new key is \
+  what clips 11.0% of the frame to white. \
+\
+  atmosphere 2 -> 1. The note scored 2 and described a milky wash; both cannot \
+  be true. The architect named the falsifiable test in its own proposal — does \
+  the field read as cumulus or as a wash — GPU verification answered WASH, and \
+  the score followed the intent rather than the answer. \
+\
+  artifact_level 1 -> 0. The rise was justified as "three of six artifact \
+  classes gone with the night". Three went; at least three arrived in the same \
+  pass — 11.0% of the frame above L=250 against the reference's 1.4% (19.3% of \
+  the sky band against 2.8%), a specular blowout streak down the road, and the \
+  bottom HUD instruction line running off the LEFT frame edge (leftmost-6px mean \
+  luma 83 against the reference's 37). Six classes against a reference with \
+  none, which is the count the previous critic pass scored 0 for. A net swap of \
+  three defects for three is not a point of progress. \
+\
+WHAT THE PASS-1 SCORECARD MEASURED AND WHAT IT DID NOT. It measured the floor it \
+had repaired (78.1% of the scene band below L=16 -> 0.0%) and did not measure \
+the ceiling it had broken (1.4% -> 11.0% above L=250). Every figure it DID \
+publish reproduces to the decimal — the numbers were real, four of the scores \
+drawn from them were not. \
+\
+ONE CLAIM I CHECKED AND DROPPED, recorded so nobody repeats it: I expected the \
+1280x720 -> 940x1672 blit to leave the frame measurably soft. Scene-band \
+high-frequency RMS is 8.26 (reference) against 8.24 (champion) — \
+indistinguishable. The anamorphic squash is real; a global softness from it is \
+not, and nothing in the recalibrated scorecard rests on one. \
+\
+ABSTRACTION GATE: abstractions/0007.toml BACKFILLED. Iteration 12 sets \
+abstraction_introduced = true and names no abstraction — the same defect 0005 \
+and 0006 were each written to repair. The unnamed change is a06678a3, \
+FrameSky::with_clouds on the axiom-host LAYER plus its SKY_WGSL mirror and a new \
+sky-uniform vec4 in the gpu-backend MODULE. It clears the gate cleanly on the \
+"cannot express" branch (above the horizon there is no geometry to put a cloud \
+on, and the app-tier alternative — alpha cloud cards — would have survived on a \
+backend that declares it DROPS RenderCapability::Sky, i.e. silent backend \
+divergence). Justified, but this is the SEVENTH consecutive spine change on this \
+line to land without its record. Six critic passes have each written that the \
+repetition is the finding rather than the paperwork. Nothing in the loop makes \
+the gate record a precondition of landing, so it is always what gets dropped \
+when a pass is going well. \
+\
+NEXT AXIS CHANGES: artifact_level, alone at 0, no tie to break. Iteration 12 \
+recorded "by the rule, silhouette_readability (five axes tie at 1)" and then \
+targeted scale_and_proportion by human decision. With artifact_level scored \
+honestly there is no tie at the bottom at all, and silhouette was never next by \
+the rule. The human's decision is NOT overruled and does not need to be: the \
+3.16x anamorphic squash and the blown highlight field are the same pass's work \
+— the geometry of the blit and the top of the grade — so a pass 2 that fixes the \
+aspect and pulls the ceiling under 255 serves artifact_level and \
+scale_and_proportion together. \
+\
+JUDGED ARM: gpu (WebGL2), the only arm scored. The guarded canvas2d arm is \
+mentioned nowhere in this recalibration and no axis credits or blames it. \
+\
+BASE ERROR IN THIS PASS'S FAN-OUT, recorded because it is a process fact and I \
+am the lens that keeps those. The brief named `main` (edb4f4ff) as the base for \
+all seven era-C pass-1 lenses; the champion line was 8f027579, eight commits \
+ahead. A lens that obeyed the brief would have authored against the NIGHT scene \
+and scored against the daylight reference. The colorist detected it and rebased \
+itself; the rest, this one included, were corrected mid-flight by the foreman. \
+Any proposal in this pass that reads as authored against a night frame has that \
+as its cause. \
+\
+NO PARITY LANGUAGE: nothing in this campaign claims the render matches the \
+reference, and nothing should. Twelve axes, none above 2.
+"""
+next_attacked_axis = "artifact_level"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 2
+silhouette_readability = 1
+material_and_texture_detail = 2
+lighting_and_shadow = 2
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 2
+scale_and_proportion = 1
+detail_density = 2
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 2
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 1
+detail_density = 2
+artifact_level = 0
