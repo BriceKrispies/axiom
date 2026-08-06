@@ -1706,3 +1706,47 @@ confounded -- the metric counted the colorist's new radial depth ramp as shadow.
 Dividing the radial ramp out per bin gives the figures above. The eyeball read that
 prompted it ("the shadows look too big") was also wrong.
 """
+
+[[iteration]]
+pass = 8
+kind = "human_rejection"
+date = "2026-08-06"
+title = "the rigger's crab pose REJECTED by the human after seeing it rendered; the other six stand"
+rejected = """
+a05ff855 (rigger, crab legs) reverted in 3b001b94. The human reviewed the promoted
+pass-8 render on the live app and rejected this one proposal by eye: "everything looks
+great except for the crab's legs."
+
+Not overturned on measurement, and the lens's diagnosis was not disputed. This is the
+board working as intended -- the lens argued its case from the reference, the human
+looked at the result in motion at full size, and the human decides. Recorded as a
+rejection rather than a regression: nothing was found wrong with it, it was not wanted.
+
+WHAT THE REVERT ALSO GIVES BACK, recorded so it is not lost. The rigger found a real
+latent defect and fixed it in the same commit: `crabLeg`'s fan quaternion rotated each
+leg segment's HEADING but never its POSITION, so all three legs on a side sat at the
+same hip point and rendered as one thick limb instead of three. Reverting the pose
+restores that bug. The human was told and chose the full revert. A future pass may fix
+the coincidence WITHOUT re-posing -- that is a separable, smaller change, and it is the
+part of this proposal that was never in question.
+
+champion.png / canvas2d-guard.png re-captured after the revert, so the promoted images
+match the promoted source. The pass-8 scorecard (f3a70eb7) is unaffected: it scored the
+RE-BASELINED image (e8ad0260), which predates every proposal in this pass.
+"""
+still_stacked = """
+16296aff  art-director  chest grid column pitch
+d793552a  modeler       chest corner posts
+4edb422d  lighting      cast-shadow penumbra step
+20ed3dd3  colorist      lagoon depth ramp
+8f4710cc  surfacing     beach dune AO mottling
+f3a70eb7  critic        re-score + abstraction 0007
+"""
+reverify = """
+Re-run after the revert, in the champion worktree:
+  tsgo --noEmit                                     clean
+  node --test "src/**/*.test.ts"                    167/167 pass
+  peak nodes/frame                                  398 (ceiling 410) -- unchanged
+  node-frames                                       124517 (ceiling 128000) -- unchanged
+The revert touches one file (crab.ts) and no other proposal reads it.
+"""
