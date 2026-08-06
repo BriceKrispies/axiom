@@ -500,8 +500,8 @@ impl CameraTuning {
     /// moved and is not negotiable, because under it the car becomes a wall
     /// across the road ahead, which is the very thing this rig exists to avoid.
     /// What has moved is the *ceiling*: at 1.55 m the eye sits 0.57 m over the
-    /// roof instead of 0.04 m, so the roof and the shallow 12° backlight no
-    /// longer present edge-on and the car reads slightly more from above. That
+    /// roof instead of 0.04 m, so the roof and the raked backlight no longer
+    /// present edge-on and the car reads slightly more from above. That
     /// is the price, it is paid knowingly, and it is what the reference-parity
     /// framing was protecting. The bound in
     /// `the_eye_sits_just_above_the_roofline_and_clear_of_its_own_floor` was

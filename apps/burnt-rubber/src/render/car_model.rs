@@ -25,8 +25,17 @@
 //! * **haunches** — the widest point of the car is the rear arches, not the
 //!   cabin, and the body is drawn *narrower* than the wheel track so the tyres
 //!   stand proud of it instead of being buried inside a full-width slab;
-//! * a **raked backlight** — the long dark sloping rear window over a short
-//!   decklid is the single most recognisable line on a fastback;
+//! * a **raked backlight** — the dark sloping rear window over the decklid is
+//!   the single most recognisable line on a fastback. It is a *window*, which
+//!   means it is an **aperture in bodywork**, not a pane laid across the whole
+//!   top of the car. That distinction is the difference between a car and a
+//!   glasshouse, and from the chase camera — which looks down on the largest
+//!   continuous area of car there is — it is the difference you see first. The
+//!   glass is therefore framed on three sides by painted panels: a **roof skin**
+//!   above it (the top slice of the cabin, painted, with the side glass showing
+//!   as a shallow band underneath), **sail panels** down either side of it, and
+//!   the **decklid** below it. The glass itself is drawn narrow enough, and
+//!   stops far enough forward, to leave room for all three;
 //! * **tail-light clusters** — a *cluster*, not a patch. One glowing block per
 //!   side is what the chase camera used to see, and under braking it inflated
 //!   into a square orange eye, which is the one shape a car's tail never is.
@@ -51,11 +60,14 @@
 //! recognised by from directly behind:
 //!
 //! * **twin centre stripes**, in three segments that follow the surfaces they
-//!   cross — over the roof, down the raked backlight, and out to the tail over
+//!   cross — over the roof skin, across the decklid, and out to the tail over
 //!   the decklid lip. Painted stripes are not a texture here: the engine's
 //!   material vocabulary has no decals, so a stripe is a shallow box laid a
 //!   centimetre proud of the panel it sits on. That is also why they are
-//!   segmented — one straight box cannot follow a roof, a rake and a deck;
+//!   segmented — one straight box cannot follow a roof and a deck at two
+//!   heights. They do **not** cross the backlight: paint does not run over
+//!   glass, and a stripe drawn on the rear screen fills the one dark shape the
+//!   whole rear silhouette is read by;
 //! * a **number plate**, a small pale rectangle mounted on the valance below the
 //!   lamps. It is tiny, and it is the single most car-like object on the whole
 //!   rear panel: nothing else in a night frame is a bright horizontal rectangle
@@ -94,11 +106,29 @@ pub const TRACK_HALF: f32 = 0.86;
 /// the front edge of the glass has to rise to the roof and the back edge fall to
 /// the decklid, which is the opposite sense.
 ///
-/// Shallow (about 12°), because the rake is not free: the glass has to span from
-/// the back of the roof to the decklid, so a steep rake and a low roof cannot
-/// both be true. A fastback picks the low roof, and gets a long, nearly-flat
-/// rear screen out of it — which is the line the car is recognised by.
-pub const BACKLIGHT_RAKE: f32 = 0.21;
+/// About 18°. The rake is not free — the glass has to span from the back of the
+/// roof to the decklid, so rake, length and roof height are three names for one
+/// number. The screen used to be raked as shallowly as it could be and run as
+/// far back as it could reach, which spent the entire top of the car on glass
+/// and left no decklid at all: from behind, the car was a pane of navy from
+/// flank to flank with the tail panel bolted under it. A slightly steeper rake
+/// buys the same drop in two-thirds of the length, and the two-thirds it gives
+/// back is the painted deck the stripes and the lip live on.
+pub const BACKLIGHT_RAKE: f32 = 0.31;
+
+/// How wide the rear screen is, as a fraction of the car's full width.
+///
+/// Strictly narrower than the cabin: the glass is an aperture, and the margin is
+/// the sail panel down each side of it. A screen as wide as the bodywork is not
+/// a window, it is a roof made of glass.
+pub const BACKLIGHT_WIDTH_FRACTION: f32 = 0.44;
+
+/// How thick the painted roof skin over the cabin is (m).
+///
+/// The cabin box is the glazing; this is the panel that caps it. Without it the
+/// roof is glass, and the single largest area of car the chase camera ever sees
+/// is a dark slab instead of paint.
+pub const ROOF_SKIN: f32 = 0.06;
 
 /// The top of the roof above the car's floor (m).
 ///
@@ -108,12 +138,13 @@ pub const BACKLIGHT_RAKE: f32 = 0.21;
 /// car's height.
 pub const ROOF_HEIGHT: f32 = 0.98;
 
-/// How tall the side glass stands above the shoulder line (m).
+/// How tall the glazed cabin box stands above the shoulder line (m).
 ///
-/// Shallow on purpose. This is the height of the vertical glass wall the chase
-/// camera sees down each side of the roof, and it is the single number that
-/// decides whether the car reads as a coupe or as a pickup cab.
-pub const GREENHOUSE_HEIGHT: f32 = 0.26;
+/// Shallow on purpose. This is the height of the glass wall the chase camera
+/// sees down each side of the roof, and it is the single number that decides
+/// whether the car reads as a coupe or as a pickup cab. The painted
+/// [`ROOF_SKIN`] takes the top slice of it, so what is left showing is a band.
+pub const GREENHOUSE_HEIGHT: f32 = 0.20;
 
 /// How wide the body box is, as a fraction of the car's full width.
 ///
@@ -184,7 +215,11 @@ pub struct PlayerCar {
     body: Entity,
     nose: Entity,
     cabin: Entity,
+    /// The painted panel capping the cabin — the roof, as opposed to the glass.
+    roof: Entity,
     backlight: Entity,
+    /// The painted pillars down either side of the backlight, left then right.
+    sails: [Entity; 2],
     wing: Entity,
     haunches: [Entity; 2],
     valance: Entity,
@@ -219,7 +254,11 @@ impl PlayerCar {
             body: part(app, cube, livery.body),
             nose: part(app, cube, livery.body),
             cabin: part(app, cube, livery.glass),
+            // The roof skin and the sail panels are paint, not glass: they are
+            // the frame the rear screen is an aperture in.
+            roof: part(app, cube, livery.body),
             backlight: part(app, cube, livery.glass),
+            sails: [part(app, cube, livery.body), part(app, cube, livery.body)],
             wing: part(app, cube, livery.body),
             haunches: [part(app, cube, livery.body), part(app, cube, livery.body)],
             // The valance is the tyre material on purpose: it is the darkest
@@ -301,34 +340,70 @@ impl PlayerCar {
         // Cabin: a narrow, *chopped* greenhouse — long fore-and-aft and barely
         // taller than the decklid lip, sitting straight on the body's shoulder
         // line at 0.72. A cabin as wide as the body is a van roof; a cabin as
-        // tall as it is wide is a pickup cab.
+        // tall as it is wide is a pickup cab. This box is the *glazing*; the
+        // painted skin below caps it, so what shows down each flank is a band.
         app.set(
             self.cabin,
             Transform::new(
-                basis.at(Vec3::new(0.0, ROOF_HEIGHT - GREENHOUSE_HEIGHT * 0.5, 0.24)),
+                basis.at(Vec3::new(
+                    0.0,
+                    ROOF_HEIGHT - ROOF_SKIN - GREENHOUSE_HEIGHT * 0.5,
+                    0.24,
+                )),
                 rotation,
                 Vec3::new(CAR_WIDTH * 0.64, GREENHOUSE_HEIGHT, 1.55),
             ),
         );
-        // Backlight: the long raked rear window running from the back of the
-        // roof down to the decklid. Pitched in the *chassis* frame, so it keeps
-        // its rake through pitch and roll instead of standing up under load.
-        // Its ends are not free: the top edge meets the back of the roof
-        // (z = -0.535, y = ROOF_HEIGHT) and the bottom edge lands on the decklid
-        // ahead of the wing (z = -1.60, y = 0.75), and the rake, length and
-        // centre below are what that span works out to.
-        let glass_centre = Vec3::new(0.0, 0.87, -1.07);
+        // Roof skin: the painted panel over the cabin, a shade wider and longer
+        // than the glass it caps so its edge reads as a drip rail rather than
+        // z-fighting the glazing. Its top face *is* ROOF_HEIGHT.
+        app.set(
+            self.roof,
+            Transform::new(
+                basis.at(Vec3::new(0.0, ROOF_HEIGHT - ROOF_SKIN * 0.5, 0.24)),
+                rotation,
+                Vec3::new(CAR_WIDTH * 0.66, ROOF_SKIN, 1.57),
+            ),
+        );
+        // Backlight: the raked rear window running from the back of the roof
+        // down to the decklid. Pitched in the *chassis* frame, so it keeps its
+        // rake through pitch and roll instead of standing up under load. Its
+        // ends are not free: the top edge meets the back of the roof skin
+        // (z = -0.535, y = ROOF_HEIGHT) and the bottom edge lands on the deck
+        // at z = -1.24, well ahead of the lip — the deck aft of it is what the
+        // stripes cross and what stops the top of the car being all glass.
+        let glass_centre = Vec3::new(0.0, 0.867, -0.887);
         let glass_rotation = rotation.multiply(Quat::from_euler_xyz(-BACKLIGHT_RAKE, 0.0, 0.0));
         let glass_thickness = 0.08;
-        let glass_length = 1.09;
+        let glass_length = 0.74;
+        let glass_half_width = CAR_WIDTH * BACKLIGHT_WIDTH_FRACTION * 0.5;
         app.set(
             self.backlight,
             Transform::new(
                 basis.at(glass_centre),
                 glass_rotation,
-                Vec3::new(CAR_WIDTH * 0.62, glass_thickness, glass_length),
+                Vec3::new(glass_half_width * 2.0, glass_thickness, glass_length),
             ),
         );
+        // Sail panels: the painted pillars the screen is set between. They carry
+        // the glass's own rake and sit on its centreline, thicker than it, so
+        // the glass is recessed between two raised edges — which is what turns a
+        // dark quad into a window instead of a hole in the roof.
+        for (index, entity) in self.sails.iter().enumerate() {
+            let side = [-1.0, 1.0][index];
+            app.set(
+                *entity,
+                Transform::new(
+                    basis.at(Vec3::new(
+                        side * (glass_half_width + 0.11),
+                        glass_centre.y,
+                        glass_centre.z,
+                    )),
+                    glass_rotation,
+                    Vec3::new(0.22, glass_thickness + 0.04, glass_length),
+                ),
+            );
+        }
         // Rear haunches: the arches over the back wheels, reaching the car's
         // full width. These are the shoulders the whole rear silhouette hangs
         // off, and the reason the tail reads wider than the roof.
@@ -362,31 +437,30 @@ impl PlayerCar {
             ),
         );
 
-        // Twin centre stripes, in three segments that each lie on the panel they
-        // are painted on. The roof and decklid segments are square to the
-        // chassis; the middle one carries the backlight's own rake, and is
-        // lifted along the *raked* normal rather than straight up, or it would
-        // sink through the low end of the glass and float off the high end.
+        // Twin centre stripes, in three segments that each lie on the painted
+        // panel they belong to. All three are square to the chassis, because all
+        // three surfaces are: the stripes stop at the foot of the roof and pick
+        // up again at the foot of the glass, exactly as paint does.
         let stripe_thickness = 0.02;
-        let (rake_sin, rake_cos) = BACKLIGHT_RAKE.sin_cos();
-        let glass_lift = glass_thickness * 0.5 + stripe_thickness * 0.5 + TRIM_PROUD;
         // (height, along-track centre, orientation, length) per surface.
         let segments: [(f32, f32, Quat, f32); 3] = [
-            // Roof: the full length of the cabin, sitting on its top face.
+            // Roof skin: the full length of the cabin, sitting on its top face.
             (
                 ROOF_HEIGHT + stripe_thickness * 0.5 + TRIM_PROUD,
                 0.24,
                 rotation,
                 1.55,
             ),
-            // Backlight: the same box as the glass, thinner and lifted clear.
+            // Decklid: the flat deck between the foot of the backlight
+            // (z = -1.24) and the front of the lip (z = -1.56), on the body's
+            // own top face at 0.72.
             (
-                glass_centre.y + glass_lift * rake_cos,
-                glass_centre.z - glass_lift * rake_sin,
-                glass_rotation,
-                glass_length,
+                0.72 + stripe_thickness * 0.5 + TRIM_PROUD,
+                -1.40,
+                rotation,
+                0.32,
             ),
-            // Decklid: out over the lip to the back edge of the car.
+            // Decklid lip: out over it to the back edge of the car.
             (
                 0.805 + stripe_thickness * 0.5 + TRIM_PROUD,
                 -1.74,
@@ -524,12 +598,14 @@ impl PlayerCar {
             self.body,
             self.nose,
             self.cabin,
+            self.roof,
             self.backlight,
             self.wing,
             self.valance,
             self.plate,
             self.badge,
         ];
+        all.extend_from_slice(&self.sails);
         all.extend_from_slice(&self.stripes);
         all.extend_from_slice(&self.haunches);
         all.extend_from_slice(&self.wheels);
@@ -543,12 +619,14 @@ impl PlayerCar {
             self.body,
             self.nose,
             self.cabin,
+            self.roof,
             self.backlight,
             self.wing,
             self.valance,
             self.plate,
             self.badge,
         ];
+        all.extend_from_slice(&self.sails);
         all.extend_from_slice(&self.stripes);
         all.extend_from_slice(&self.haunches);
         all.extend_from_slice(&self.wheels);
@@ -892,9 +970,20 @@ mod tests {
         car.pose(&mut app, &pose, 0.0, 0.0);
 
         let cabin = app.get::<Transform>(car.cabin).unwrap();
+        let skin = app.get::<Transform>(car.roof).unwrap();
         let floor = pose.position.y;
-        let roof = cabin.translation.y + cabin.scale.y * 0.5 - floor;
+        let roof = skin.translation.y + skin.scale.y * 0.5 - floor;
 
+        // The roof is paint, and it caps the glazing rather than floating over
+        // it: swapping the skin back out for glass is the edit that turns the
+        // whole top of the car into a navy slab, so it fails here.
+        assert!(skin.scale.x > cabin.scale.x, "the skin caps the glazing it sits on");
+        assert!(
+            (skin.translation.y - skin.scale.y * 0.5 - (cabin.translation.y + cabin.scale.y * 0.5))
+                .abs()
+                < 1.0e-4,
+            "the roof skin floats off the cabin instead of capping it"
+        );
         assert!((roof - ROOF_HEIGHT).abs() < 1.0e-4, "the roof is where it says: {roof}");
         assert!(
             roof < CAR_WIDTH * 0.5,
@@ -926,7 +1015,7 @@ mod tests {
         let pose = pose_at(0.0, 0.0, 0.0);
         car.pose(&mut app, &pose, 0.0, 0.0);
 
-        let cabin = app.get::<Transform>(car.cabin).unwrap();
+        let skin = app.get::<Transform>(car.roof).unwrap();
         let glass = app.get::<Transform>(car.backlight).unwrap();
         let body = app.get::<Transform>(car.body).unwrap();
         let wing = app.get::<Transform>(car.wing).unwrap();
@@ -936,13 +1025,13 @@ mod tests {
         let bottom = glass.translation.add(along.mul_scalar(-1.0));
 
         assert!(
-            (top.y - (cabin.translation.y + cabin.scale.y * 0.5)).abs() < 0.02,
+            (top.y - (skin.translation.y + skin.scale.y * 0.5)).abs() < 0.02,
             "the glass meets the roof: {} vs {}",
             top.y,
-            cabin.translation.y + cabin.scale.y * 0.5
+            skin.translation.y + skin.scale.y * 0.5
         );
         assert!(
-            (top.z - (cabin.translation.z - cabin.scale.z * 0.5)).abs() < 0.02,
+            (top.z - (skin.translation.z - skin.scale.z * 0.5)).abs() < 0.02,
             "and it meets it at the *back* of the roof: {top:?}"
         );
         let deck = body.translation.y + body.scale.y * 0.5;
@@ -951,12 +1040,65 @@ mod tests {
             "the glass lands on the decklid, not above or through it: {}",
             bottom.y
         );
+        // And it stops with real deck left behind it. A screen that runs back to
+        // the lip spends the whole top of the car on glass, which is exactly the
+        // silhouette this model exists not to have.
         assert!(
-            bottom.z > wing.translation.z,
-            "and ahead of the decklid lip: {} vs {}",
+            bottom.z > wing.translation.z + wing.scale.z * 0.5 + 0.25,
+            "no decklid is left aft of the glass: {} vs a lip at {}",
             bottom.z,
-            wing.translation.z
+            wing.translation.z + wing.scale.z * 0.5
         );
+    }
+
+    /// The rear screen is an *aperture*: narrower than the roof it hangs off,
+    /// with a painted pillar down each side of it, recessed between them.
+    ///
+    /// Widening the glass back out to the bodywork is the edit that turns the
+    /// car's whole top surface into one navy pane, so it fails here.
+    #[test]
+    fn the_backlight_is_a_glazed_aperture_framed_by_sail_panels() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
+        let pose = pose_at(0.0, 0.0, 0.0);
+        car.pose(&mut app, &pose, 0.0, 0.0);
+
+        let skin = app.get::<Transform>(car.roof).unwrap();
+        let glass = app.get::<Transform>(car.backlight).unwrap();
+        let left = app.get::<Transform>(car.sails[0]).unwrap();
+        let right = app.get::<Transform>(car.sails[1]).unwrap();
+
+        assert!(
+            glass.scale.x < skin.scale.x * 0.75,
+            "the screen is as wide as the roof: {} vs {}",
+            glass.scale.x,
+            skin.scale.x
+        );
+        for (sail, side) in [(&left, -1.0_f32), (&right, 1.0_f32)] {
+            let inner = (sail.translation.x - pose.position.x).abs() - sail.scale.x * 0.5;
+            assert!(
+                (sail.translation.x - pose.position.x).signum() == side,
+                "the sails are on the wrong sides"
+            );
+            assert!(
+                (inner - glass.scale.x * 0.5).abs() < 0.02,
+                "a sail does not meet the edge of the glass: {inner} vs {}",
+                glass.scale.x * 0.5
+            );
+            assert_eq!(sail.rotation, glass.rotation, "a sail must carry the glass's rake");
+            assert!(
+                sail.scale.y > glass.scale.y,
+                "the glass stands proud of its own frame instead of being recessed in it"
+            );
+            // Outboard of the glass, but inboard of the flanks: the shoulder
+            // still shows past them.
+            assert!(
+                (sail.translation.x - pose.position.x).abs() + sail.scale.x * 0.5
+                    < CAR_WIDTH * 0.5,
+                "a sail panel hangs off the side of the car"
+            );
+        }
     }
 
     /// The rear window is glass laid back over the decklid, not a flat roof
@@ -1066,9 +1208,10 @@ mod tests {
     }
 
     /// The stripes are a pair, they run the length of the car's centre, and each
-    /// segment sits *on* the panel it is painted on rather than inside it.
+    /// segment sits *on* the painted panel it belongs to rather than inside it —
+    /// and none of them is painted on the glass.
     #[test]
-    fn the_twin_stripes_lie_on_the_roof_the_glass_and_the_decklid() {
+    fn the_twin_stripes_lie_on_the_roof_the_decklid_and_the_lip() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
         let car = PlayerCar::install(&mut app, &palette.player_livery());
@@ -1076,7 +1219,10 @@ mod tests {
         car.pose(&mut app, &pose, 0.0, 0.0);
 
         let cabin = app.get::<Transform>(car.cabin).unwrap();
+        let skin = app.get::<Transform>(car.roof).unwrap();
         let glass = app.get::<Transform>(car.backlight).unwrap();
+        let body = app.get::<Transform>(car.body).unwrap();
+        let wing = app.get::<Transform>(car.wing).unwrap();
         let stripes: Vec<Transform> = car
             .stripes
             .iter()
@@ -1098,27 +1244,39 @@ mod tests {
                 "the two stripes have run into each other"
             );
         }
-        // Roof pair: resting on the cabin's top face.
-        let roof = cabin.translation.y + cabin.scale.y * 0.5;
+        // Roof pair: resting on the painted skin's top face, not on the glazing.
+        let roof = skin.translation.y + skin.scale.y * 0.5;
         assert!(
             stripes[0].translation.y - stripes[0].scale.y * 0.5 > roof
                 && stripes[0].translation.y - stripes[0].scale.y * 0.5 < roof + 0.05,
             "the roof stripe floats or sinks: {}",
             stripes[0].translation.y
         );
-        // Backlight pair: carrying the glass's rake, and clear of its outer face.
-        assert_eq!(stripes[2].rotation, glass.rotation, "the stripe follows the rake");
-        // "Proud of the glass" is a distance along the glass's OWN normal, not the
-        // distance between the two centres: the pair straddles the centreline by
-        // ±STRIPE_OFFSET (asserted above), so the raw separation is dominated by that
-        // lateral span — 0.30 across against 0.065 of lift — and measuring it would
-        // fail a correctly-placed stripe.
-        let normal = glass.rotation.rotate(Vec3::UNIT_Y);
-        let lift = stripes[2].translation.subtract(glass.translation).dot(normal);
+        // Decklid pair: on the body's own top face, in the gap the backlight
+        // leaves between its foot and the lip.
+        let deck = body.translation.y + body.scale.y * 0.5;
         assert!(
-            lift > glass.scale.y * 0.5 && lift < glass.scale.y * 0.5 + 0.05,
-            "the glass stripe is inside the glass, or floating: {lift}"
+            stripes[2].translation.y - stripes[2].scale.y * 0.5 > deck
+                && stripes[2].translation.y - stripes[2].scale.y * 0.5 < deck + 0.05,
+            "the deck stripe floats or sinks: {}",
+            stripes[2].translation.y
         );
+        let glass_foot = glass
+            .translation
+            .subtract(glass.rotation.rotate(Vec3::UNIT_Z).mul_scalar(glass.scale.z * 0.5));
+        assert!(
+            stripes[2].translation.z + stripes[2].scale.z * 0.5 <= glass_foot.z + 1.0e-3
+                && stripes[2].translation.z - stripes[2].scale.z * 0.5
+                    >= wing.translation.z + wing.scale.z * 0.5 - 1.0e-3,
+            "the deck stripe runs under the glass or over the lip: {:?}",
+            stripes[2].translation
+        );
+        // No segment is painted on the glass, and none carries its rake.
+        let square = ChassisBasis::of(&pose).rotation();
+        for s in &stripes {
+            assert_eq!(s.rotation, square, "a stripe follows a flat painted panel");
+            assert_ne!(s.rotation, glass.rotation, "a stripe is painted on the rear screen");
+        }
         // And every segment is a long thin band, not a patch.
         for s in &stripes {
             assert!(s.scale.z > s.scale.x, "a stripe runs fore-and-aft: {s:?}");
