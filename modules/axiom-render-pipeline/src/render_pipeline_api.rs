@@ -9,7 +9,7 @@ use axiom_render::RenderApi;
 use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
 
-use crate::shadow_view::shadow_light_view_proj;
+use crate::shadow_view::{shadow_focus, shadow_light_view_proj};
 
 /// Column-major matrix that remaps OpenGL clip depth `z' = (z + w) / 2` so the
 /// engine's `[-1,1]` projection lands in wgpu's `[0,1]` clip space.
@@ -297,7 +297,9 @@ impl RenderPipelineApi {
                 .expect("camera intrinsics were validated at scene insertion");
             let depth_fix = Mat4::from_cols_array(GL_TO_WGPU_DEPTH);
             let view_projection = depth_fix.multiply(projection).multiply(view);
-            (view, projection, view_projection, cam_world.translation)
+            // The whole world transform travels, not just the position: the SDF
+            // marcher wants the position, `shadow_focus` wants the forward axis.
+            (view, projection, view_projection, cam_world)
         });
         // Set the input camera and read the wgpu-ready view-projection (0-or-1
         // over the Option — no branch; absent yields identity, no camera command).
@@ -505,16 +507,20 @@ impl RenderPipelineApi {
             .collect();
 
         // The directional shadow caster's light view-projection (identity when
-        // there is no usable sun direction → shadows are a no-op).
+        // there is no usable sun direction → shadows are a no-op). Its volume is
+        // centred on what this frame's camera looks at, so the map covers the
+        // action wherever in the world it happens; a camera-less scene has no
+        // view to follow and keeps the origin (`map_or`, no branch).
+        let focus = camera.map_or(Vec3::ZERO, |(_, _, _, cam)| shadow_focus(cam));
         let light_view_proj =
-            shadow_light_view_proj(frame.light_direction).unwrap_or(Mat4::IDENTITY);
+            shadow_light_view_proj(frame.light_direction, focus).unwrap_or(Mat4::IDENTITY);
 
         // SDF shapes: translate each into the backend-neutral scene the live /
         // canvas path marches, reusing render's shared SDF-scene assembly. Built
         // only with a camera (the marcher needs the inverse view-projection), and
         // from the *same* wgpu-ready view-projection the meshes use, so the
         // marched SDF depth composites correctly against the rasterized meshes.
-        let sdf = camera.and_then(|(_, _, view_proj, camera_world_pos)| {
+        let sdf = camera.and_then(|(_, _, view_proj, cam_world)| {
             let shapes: Vec<(u32, Mat4, Vec3, Vec4)> = snapshot
                 .sdf_shapes()
                 .iter()
@@ -534,7 +540,7 @@ impl RenderPipelineApi {
                 })
                 .collect();
             render
-                .build_sdf_scene(view_proj, camera_world_pos, &shapes)
+                .build_sdf_scene(view_proj, cam_world.translation, &shapes)
         });
 
         // Summarise the retained submission clone-free — the report only needs
