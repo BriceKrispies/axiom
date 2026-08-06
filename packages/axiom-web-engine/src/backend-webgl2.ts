@@ -210,6 +210,31 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement, quality: RenderQu
 
   const meshes = new Map<Handle, GpuMesh>();
 
+  /*
+   * REDUNDANT-STATE ELIMINATION.
+   *
+   * A census of this backend on a ~580-node scene counted 4,668 WebGL calls per
+   * frame — eight per node: two matrices, four material uniforms, a VAO bind and
+   * the draw. Six of those eight are usually setting state that is ALREADY set,
+   * because a scene is overwhelmingly built from a handful of meshes and
+   * materials: hundreds of boxes sharing one `box` VAO, dozens of parts sharing
+   * one wood material. Each redundant call is a JS→native crossing and a driver
+   * state check for no change in what is drawn.
+   *
+   * So the last-set mesh and material are remembered and re-set only when they
+   * actually differ. What is NOT skipped is the pair of per-node matrices: those
+   * genuinely differ per node, and that is the irreducible floor of this design
+   * (instancing is what would remove it, and that is a larger change).
+   *
+   * The draw ORDER is deliberately untouched. Sorting nodes by material would cut
+   * more, but with `depthFunc(LEQUAL)` two exactly-coplanar opaque surfaces
+   * resolve by draw order, so reordering can silently change which one wins.
+   * Skipping redundant state cannot: every draw sees byte-identical state to
+   * before, in the same sequence.
+   */
+  let boundVao: WebGLVertexArrayObject | null = null;
+  let boundMaterial: Handle | undefined;
+
   const drawNode = (frame: SceneFrame, node: FrameNode): void => {
     const mesh = meshes.get(node.mesh);
     const material = frame.materials.get(node.material);
@@ -218,14 +243,21 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement, quality: RenderQu
     }
     // Both matrices are CACHED on the node by the store, rebuilt only when the
     // pose changes. Recomputing them here is what made `normalMatrix` the top
-    // named function in a live profile of a few-hundred-node scene.
+    // named function in a live profile of a few-hundred-node scene. They are the
+    // only genuinely per-node uniforms, so they are always uploaded.
     gl.uniformMatrix4fv(uniforms.model, false, node.model);
     gl.uniformMatrix3fv(uniforms.normalMatrix, false, node.normal);
-    gl.uniform4f(uniforms.baseColor, material.baseColor[0], material.baseColor[1], material.baseColor[2], material.baseColor[3]);
-    gl.uniform3f(uniforms.emissive, material.emissive[0], material.emissive[1], material.emissive[2]);
-    gl.uniform1f(uniforms.opacity, material.opacity);
-    gl.uniform1f(uniforms.roughness, material.roughness);
-    gl.bindVertexArray(mesh.vao);
+    if (node.material !== boundMaterial) {
+      boundMaterial = node.material;
+      gl.uniform4f(uniforms.baseColor, material.baseColor[0], material.baseColor[1], material.baseColor[2], material.baseColor[3]);
+      gl.uniform3f(uniforms.emissive, material.emissive[0], material.emissive[1], material.emissive[2]);
+      gl.uniform1f(uniforms.opacity, material.opacity);
+      gl.uniform1f(uniforms.roughness, material.roughness);
+    }
+    if (mesh.vao !== boundVao) {
+      boundVao = mesh.vao;
+      gl.bindVertexArray(mesh.vao);
+    }
     gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_INT, 0);
   };
 
@@ -242,6 +274,11 @@ export const createWebGl2Backend = (canvas: HTMLCanvasElement, quality: RenderQu
     detailScale: FULL_DETAIL_SCALE * quality.curveDetail,
     name: "WebGL2",
     render: (frame: SceneFrame): void => {
+      // The tracked state is per FRAME, because this function ends with
+      // `bindVertexArray(null)` and a caller may touch the context between
+      // frames. Resetting is two assignments; guessing wrong would drop draws.
+      boundVao = null;
+      boundMaterial = undefined;
       gl.depthMask(true);
       gl.clearColor(frame.clearColor[0], frame.clearColor[1], frame.clearColor[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
