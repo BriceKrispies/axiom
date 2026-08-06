@@ -553,7 +553,8 @@ mod tests {
                 .cloud_density(dir)
         };
         assert_eq!(at(0.0), 0.0, "clear");
-        assert!(at(1.0) >= 1.0 - 1.0e-6, "overcast: {}", at(1.0));
+        let full = at(1.0);
+        assert!(full >= 1.0 - 1.0e-6, "overcast: {full}");
         let ramp: Vec<f32> = (0..=10).map(|i| at(i as f32 / 10.0)).collect();
         assert!(
             ramp.windows(2).all(|w| w[1] >= w[0]),
@@ -591,12 +592,11 @@ mod tests {
                 .collect();
             samples.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<f32>()
         };
-        assert!(
-            edges(0.25) > edges(2.5),
-            "low sky is busier than high: {} vs {}",
-            edges(0.25),
-            edges(2.5)
-        );
+        // Bound to locals rather than recomputed inside the failure message: a
+        // format argument is only evaluated when the assertion fails, so writing
+        // it inline leaves a region no passing test can ever reach.
+        let (low, high) = (edges(0.25), edges(2.5));
+        assert!(low > high, "low sky is busier than high: {low} vs {high}");
     }
 
     /// The cloud takes its light from the body and the gradient — which is what
@@ -613,15 +613,14 @@ mod tests {
         let sunward = normalize_or([0.0, 0.5, 1.0], [0.0, 1.0, 0.0]);
         let away = normalize_or([0.0, 0.5, -1.0], [0.0, 1.0, 0.0]);
         let sun = overcast([3.0, 2.8, 2.4]);
+        let (lit, shaded) = (sun.radiance(sunward), sun.radiance(away));
         assert!(
-            sun.radiance(sunward)[0] > sun.radiance(away)[0] + 0.5,
-            "the sunward face is lit: {:?} vs {:?}",
-            sun.radiance(sunward),
-            sun.radiance(away)
+            lit[0] > shaded[0] + 0.5,
+            "the sunward face is lit: {lit:?} vs {shaded:?}"
         );
         // The disc is *behind* the layer: at full density it is covered, so the
         // pixel is nowhere near the body's own 3.0 radiance.
-        assert!(sun.radiance(sunward)[0] < 2.0, "{:?}", sun.radiance(sunward));
+        assert!(lit[0] < 2.0, "{lit:?}");
         let clear_sky = FrameSky::gradient([0.10, 0.28, 0.75], [0.55, 0.72, 0.95])
             .with_body([0.0, 0.5, 1.0], rad(0.03), [3.0, 2.8, 2.4], q(600.0), q(0.6));
         assert!(
