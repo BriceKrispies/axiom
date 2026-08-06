@@ -20,7 +20,7 @@
  */
 
 import type { Camera3D, EngineQuat, EngineVec3, InputFrame, Light, MaterialSpec, MeshData, MeshKind, Rgba, ToneSpec, Transform } from "./api.ts";
-import { isPresent, presentOf } from "./branchless.ts";
+import { both, either, isPresent, presentOf } from "./branchless.ts";
 
 // ── the declarative scene value ─────────────────────────────────────────────────
 
@@ -184,16 +184,24 @@ export interface ReconcilePlan {
 
 // ── value equality (branchless) ──────────────────────────────────────────────────
 
+/*
+ * These run once per instance per frame — several hundred times at 60Hz — so they
+ * are written with `both`/`either` rather than the `[a, b].every(Boolean)` idiom
+ * used elsewhere in the spine. Both are equally branchless; the difference is that
+ * the array form allocates a throwaway array on every call, and at this call rate
+ * that churn is the reconciler's largest contribution to GC. Same truth table, no
+ * garbage.
+ */
 const vec3Eq = (lhs: EngineVec3, rhs: EngineVec3): boolean =>
-  [lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z].every((delta): boolean => delta === 0);
+  both(both(lhs.x === rhs.x, lhs.y === rhs.y), lhs.z === rhs.z);
 const quatEq = (lhs: EngineQuat, rhs: EngineQuat): boolean => lhs.every((value, index): boolean => value === rhs[index]);
 const transformEq = (lhs: Transform, rhs: Transform): boolean =>
-  [vec3Eq(lhs.position, rhs.position), vec3Eq(lhs.scale, rhs.scale), quatEq(lhs.rotation, rhs.rotation)].every(Boolean);
+  both(both(vec3Eq(lhs.position, rhs.position), vec3Eq(lhs.scale, rhs.scale)), quatEq(lhs.rotation, rhs.rotation));
 
 /** Whether an instance's mesh/material differs from a remembered signature — a
  * change either forces a despawn+respawn (the node's resources are fixed at spawn). */
 const resourceChanged = (sig: InstanceSig, instance: SceneInstance): boolean =>
-  [sig.mesh !== instance.mesh, sig.material !== instance.material].some(Boolean);
+  either(sig.mesh !== instance.mesh, sig.material !== instance.material);
 
 /** The reconciler's memory before any scene has been applied. */
 export const emptyMemory = (): SceneMemory => ({ instances: new Map(), lights: new Map() });
@@ -208,49 +216,62 @@ export const emptyMemory = (): SceneMemory => ({ instances: new Map(), lights: n
  * had that `scene` drops is a despawn. Lights: new keys are adds, surviving keys
  * are re-set unconditionally (a handful of lights — cheaper than diffing), dropped
  * keys are removes.
+ *
+ * COMPLEXITY. `nextByKey` is one keyed map of the new scene, built once and used
+ * for everything that asks "is this key in the new scene, and as what". It
+ * replaces a `Set` of keys plus a per-key `scene.instances.find(...)` in the
+ * despawn pass — a linear scan nested inside a walk of the previous scene, which
+ * made the reconciler QUADRATIC in the node count. A ~580-node scene paid roughly
+ * 340,000 key comparisons per frame, 20 million a second at 60Hz, to discover that
+ * almost nothing had been removed. It is now one hash lookup per previous key:
+ * O(n) instead of O(n²).
+ *
+ * That same map is ALSO the memory carried into the next frame, because
+ * "key → the instance as applied" is exactly what that memory is. A
+ * `SceneInstance` satisfies `InstanceSig` structurally (it is that, plus the key),
+ * so the second `Map` and the several-hundred freshly allocated signature objects
+ * this used to build were re-deriving, every frame, a structure it had just
+ * finished building.
  */
 export const reconcile = (prev: SceneMemory, scene: Scene): { readonly plan: ReconcilePlan; readonly memory: SceneMemory } => {
-  const nextKeys = new Set(scene.instances.map((instance): string => instance.key));
+  const nextByKey = new Map<string, SceneInstance>(
+    scene.instances.map((instance): readonly [string, SceneInstance] => [instance.key, instance]),
+  );
+  const nextLights = new Map<string, Light>(
+    scene.lights.map((entry): readonly [string, Light] => [entry.key, entry.light]),
+  );
 
   const spawns = scene.instances.filter((instance): boolean => {
     const previous = prev.instances.get(instance.key);
-    const fresh = !isPresent(previous);
-    const replaced = presentOf(previous).some((sig): boolean => resourceChanged(sig, instance));
-    return [fresh, replaced].some(Boolean);
+    return either(
+      !isPresent(previous),
+      presentOf(previous).some((sig): boolean => resourceChanged(sig, instance)),
+    );
   });
 
   const reposes = scene.instances
     .filter((instance): boolean =>
       presentOf(prev.instances.get(instance.key)).some(
-        (sig): boolean => [!resourceChanged(sig, instance), !transformEq(sig.transform, instance.transform)].every(Boolean),
+        (sig): boolean => both(!resourceChanged(sig, instance), !transformEq(sig.transform, instance.transform)),
       ),
     )
     .map((instance): ReposeOp => ({ key: instance.key, transform: instance.transform }));
 
   const despawns = [...prev.instances.entries()]
-    .filter(([key, sig]): boolean => {
-      const gone = !nextKeys.has(key);
-      const replaced = presentOf(scene.instances.find((instance): boolean => instance.key === key)).some(
-        (instance): boolean => resourceChanged(sig, instance),
-      );
-      return [gone, replaced].some(Boolean);
-    })
+    .filter(([key, sig]): boolean =>
+      either(
+        !nextByKey.has(key),
+        presentOf(nextByKey.get(key)).some((instance): boolean => resourceChanged(sig, instance)),
+      ),
+    )
     .map(([key]): string => key);
 
-  const nextLightKeys = new Set(scene.lights.map((entry): string => entry.key));
   const addLights = scene.lights.filter((entry): boolean => !isPresent(prev.lights.get(entry.key)));
   const setLights = scene.lights.filter((entry): boolean => isPresent(prev.lights.get(entry.key)));
-  const removeLights = [...prev.lights.keys()].filter((key): boolean => !nextLightKeys.has(key));
+  const removeLights = [...prev.lights.keys()].filter((key): boolean => !nextLights.has(key));
 
-  const memory: SceneMemory = {
-    instances: new Map(
-      scene.instances.map((instance): readonly [string, InstanceSig] => [
-        instance.key,
-        { material: instance.material, mesh: instance.mesh, transform: instance.transform },
-      ]),
-    ),
-    lights: new Map(scene.lights.map((entry): readonly [string, Light] => [entry.key, entry.light])),
+  return {
+    memory: { instances: nextByKey, lights: nextLights },
+    plan: { addLights, despawns, removeLights, reposes, setLights, spawns },
   };
-
-  return { memory, plan: { addLights, despawns, removeLights, reposes, setLights, spawns } };
 };
