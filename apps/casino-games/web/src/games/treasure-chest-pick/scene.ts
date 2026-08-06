@@ -387,6 +387,23 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // wash of the sand's own hue.
   ContactShadowSoft: { baseColor: [0.1, 0.1, 0.12, 1], opacity: 0.26 },
   ContactShadowCore: { baseColor: [0.08, 0.08, 0.1, 1], opacity: 0.3 },
+  // The OUTERMOST step of the ramp — the penumbra haze (see `contactShadow`).
+  //
+  // The density above is measured and correct; what the frame was missing is that
+  // the shadow reached that density in ONE step. A shadow built from tail + core
+  // ramps inward (0.55 -> 0.33 of the sand) but its OUTER boundary was a cliff
+  // from open sand straight to 0.55 — a knife-sharp ellipse rim on a flat beach,
+  // which is what made the palm's shadow read as an oval decal laid on the sand
+  // rather than light being blocked. A real penumbra widens with distance from the
+  // contact point; the sun is ~0.5deg wide, so a shadow edge a metre off the ground
+  // is centimetres of gradient, not a line.
+  //
+  // Solved through the same double blend the pair above uses (ground survives at
+  // (1-a)^2): a = 0.08 leaves the sand at 0.846, so the frame's outermost shadow
+  // step is a 15% darkening instead of a 45% one, and the tail's own rim now steps
+  // 0.846 -> 0.55 rather than 1.0 -> 0.55. Same measured floor, three steps to
+  // reach it.
+  ContactShadowHaze: { baseColor: [0.1, 0.1, 0.12, 1], opacity: 0.08 },
   // ── the same shadow rule, re-solved for the LAGOON ────────────────────────
   //
   // A cast shadow here is a translucent overlay, and an overlay is a MULTIPLY:
@@ -434,6 +451,19 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // hull; it is what darkens the contact once a lifting chest exposes it.
   LagoonShadowSoft: { baseColor: [0, 0.12, 0.13, 1], opacity: 0.38 },
   LagoonShadowCore: { baseColor: [0, 0.1, 0.11, 1], opacity: 0.42 },
+  // The lagoon's penumbra haze — the same outermost ramp step as
+  // `ContactShadowHaze`, re-solved for water, and the harder-working of the two.
+  // The chest shadows are the deepest overlay in the frame (the tail leaves the
+  // water at 0.384) and they land on the flattest, most uniform ground, so their
+  // rim was the most visible cliff in the picture: nine hard-edged teal ellipses,
+  // each reading as a placemat under its chest rather than as the chest's shadow.
+  //
+  // In the reference the water immediately around a chest is not one flat shade of
+  // shadow — it grades continuously from the deep contact under the hull out to
+  // open water with no boundary you can point at. a = 0.11 leaves the water at
+  // 0.792, so the outer boundary becomes a 21% darkening and the tail's rim steps
+  // 0.79 -> 0.38 rather than 1.0 -> 0.38.
+  LagoonShadowHaze: { baseColor: [0, 0.12, 0.13, 1], opacity: 0.11 },
   ...CRAB_MATERIALS,
   ...PRIZE_MATERIALS,
   ...VEIL_MATERIALS,
@@ -671,6 +701,18 @@ const SHADOW_THROW = (0.5 * Math.hypot(KEY_LIGHT_DIR.x, KEY_LIGHT_DIR.z)) / Math
 /** Just above the ground so the discs never z-fight the water/sand slab. */
 const SHADOW_Y = 0.01;
 
+/**
+ * The penumbra haze's own plane, a hair UNDER the tail's.
+ *
+ * The three shadow steps are translucent, so they draw with `depthMask(false)`
+ * and must not be coplanar with each other: the tail's 0.008-thick disc spans
+ * 0.006..0.014, so the haze is dropped clear of it (spanning -0.003..0.005) and
+ * stacks cleanly beneath. It is still ~0.02 above the lagoon's water surface
+ * (top -0.022) and ~0.036 above the sand ring (top -0.039), so nothing z-fights
+ * the ground either.
+ */
+const SHADOW_HAZE_Y = 0.001;
+
 /** A shadow ellipse: a thin disc `width` across and `length` along the key's
  * ground throw, yawed onto it. (A cylinder under T·R·S — the non-uniform scale
  * is applied in local space, so the ellipse elongates along the light.) */
@@ -682,19 +724,19 @@ const shadowEllipse = (key: string, material: string, at: EngineVec3, width: num
 });
 
 /**
- * The two overlay materials one cast shadow is built from — the soft tail and the
- * darker contact core. Which pair a prop uses is decided by the GROUND it stands
- * on, not by the prop: a shadow is a multiply, so the same overlay lands on a very
- * different value over red-led sand than over cyan-led water (see the two solved
- * pairs in `MATERIALS`).
+ * The three overlay materials one cast shadow is built from — the outer penumbra
+ * HAZE, the soft tail, and the darker contact CORE. Which trio a prop uses is
+ * decided by the GROUND it stands on, not by the prop: a shadow is a multiply, so
+ * the same overlay lands on a very different value over red-led sand than over
+ * cyan-led water (see the two solved trios in `MATERIALS`).
  */
-type ShadowOverlay = { readonly core: string; readonly soft: string };
+type ShadowOverlay = { readonly core: string; readonly haze: string; readonly soft: string };
 
-/** The beach pair — everything standing on the sand slab. */
-const SAND_SHADOW: ShadowOverlay = { core: "ContactShadowCore", soft: "ContactShadowSoft" };
+/** The beach trio — everything standing on the sand slab. */
+const SAND_SHADOW: ShadowOverlay = { core: "ContactShadowCore", haze: "ContactShadowHaze", soft: "ContactShadowSoft" };
 
-/** The lagoon pair — the nine chests, which stand on water. */
-const LAGOON_SHADOW: ShadowOverlay = { core: "LagoonShadowCore", soft: "LagoonShadowSoft" };
+/** The lagoon trio — the nine chests, which stand on water. */
+const LAGOON_SHADOW: ShadowOverlay = { core: "LagoonShadowCore", haze: "LagoonShadowHaze", soft: "LagoonShadowSoft" };
 
 /**
  * A soft directional CAST shadow: an ellipse stretched down-light by the
@@ -704,14 +746,49 @@ const LAGOON_SHADOW: ShadowOverlay = { core: "LagoonShadowCore", soft: "LagoonSh
  * ground footprint and `height` how tall it stands — together they set the
  * shadow's shape. `spread` scales the whole shadow (a ground-fade for a chest
  * leaving the board, or a clarity boost for the hero slot). `overlay` is the
- * ground's solved pair. Returns nothing once the object has lifted clear.
+ * ground's solved trio. Returns nothing once the object has lifted clear.
+ *
+ * ── the OUTER EDGE is a ramp, not a rim ──
+ *
+ * The two inner steps were already right in density and direction, and wrong in
+ * one thing: the shadow arrived at full density in a single step. Tail and core
+ * ramp *inward* (on the lagoon, 0.38 of the water then 0.33), but the tail's own
+ * OUTER boundary went from open ground straight to 0.38 — a hard elliptical rim,
+ * at full strength, all the way round. That is what a blob decal looks like, and
+ * it is the one thing about this frame's shadows that no amount of correct density
+ * could fix: the palm read as an oval sticker on the sand and each chest as a dark
+ * placemat, because the eye finds the *edge* of a shadow before it finds its value.
+ *
+ * The fix is the step the ramp was missing at the far end. A penumbra widens with
+ * distance from the contact point (the sun is a disc, not a point), so the haze is
+ * both wider across the light and reaches ~45% further down-light than the tail,
+ * where the geometric umbra has already washed out. Outside-in the ground now
+ * grades 1.00 -> 0.79 -> 0.38 -> 0.33 on water and 1.00 -> 0.85 -> 0.55 -> 0.33 on
+ * sand: same measured floor under the caster, three steps to reach it, and the
+ * outermost boundary a fifth as strong as the boundary it replaces.
+ *
+ * It is GPU-GATED (`gpuDetail()`), because it is one node per caster of pure
+ * softness and the software path's node budget is spoken for. The frugal arms keep
+ * exactly the tail + core they have today, at exactly their current node count.
  */
 const contactShadow = (keyPrefix: string, at: EngineVec3, radius: number, height: number, spread = 1, coreScale = 1, overlay: ShadowOverlay = SAND_SHADOW): readonly SceneInstance[] => {
   const r = radius * spread;
   const reach = height * spread * SHADOW_THROW;
+  const haze: readonly SceneInstance[] = gpuDetail()
+    ? [
+        shadowEllipse(
+          `${keyPrefix}:haze`,
+          overlay.haze,
+          v3(at.x + SHADOW_DIR.x * reach * 0.72, SHADOW_HAZE_Y, at.z + SHADOW_DIR.z * reach * 0.72),
+          r * 2.95,
+          r * 2.7 + reach * 1.45,
+        ),
+      ]
+    : [];
   return r < 0.04
     ? []
     : [
+        ...haze,
         shadowEllipse(
           `${keyPrefix}:soft`,
           overlay.soft,
