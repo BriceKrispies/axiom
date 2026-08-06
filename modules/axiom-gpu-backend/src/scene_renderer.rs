@@ -396,6 +396,8 @@ struct SkyU {
     body_color: vec4<f32>,
     // x = halo strength; yzw unused.
     halo: vec4<f32>,
+    // x = cloud coverage (0 = clear sky); y = the cloud field's scale; zw unused.
+    cloud: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> sky: SkyU;
 
@@ -415,6 +417,27 @@ fn vs(@builtin(vertex_index) vi: u32) -> SkyOut {
     out.clip = vec4<f32>(pos[vi], 1.0, 1.0);
     out.ndc = pos[vi];
     return out;
+}
+
+// `FrameSky::cloud_octave`, mirrored: a separable sinusoid on a rotated lattice,
+// remapped to 0..1.
+fn cloud_octave(p: vec2<f32>, rotation: f32, frequency: f32) -> f32 {
+    let sin_r = sin(rotation);
+    let cos_r = cos(rotation);
+    let x = (p.x * cos_r + p.y * sin_r) * frequency;
+    let y = (p.y * cos_r - p.x * sin_r) * frequency;
+    return sin(x) * sin(y) * 0.5 + 0.5;
+}
+
+// `FrameSky::cloud_field`, mirrored: the four `CLOUD_OCTAVES` summed by weight.
+// Written out rather than looped, which is both what keeps it branch-free and what
+// makes the weights visibly sum to exactly 1.0 — the property that pins the field
+// to 0..1 and gives the coverage threshold exact ends.
+fn cloud_field(p: vec2<f32>) -> f32 {
+    return 0.50 * cloud_octave(p, 0.00, 1.00)
+         + 0.25 * cloud_octave(p, 1.13, 2.31)
+         + 0.15 * cloud_octave(p, 2.47, 4.73)
+         + 0.10 * cloud_octave(p, 3.71, 9.17);
 }
 
 // `FrameSky::radiance`, mirrored. Branch-free, exactly as the Rust is — which is
@@ -446,13 +469,35 @@ fn fs(in: SkyOut) -> @location(0) vec4<f32> {
     // The halo: the angular cosine raised to a power, so it falls off around the
     // body without a second radius to keep in sync.
     let halo = pow(max(cos_angle, 0.0), max(sky.body_color.w, 1.0)) * sky.halo.x;
+    let behind = gradient + sky.body_color.rgb * (disc + halo);
 
-    return vec4<f32>(gradient + sky.body_color.rgb * (disc + halo), 1.0);
+    // The cloud layer, sampled on a plane one unit overhead rather than on the
+    // dome, so the lumps foreshorten toward the horizon as real cumulus do. The up
+    // component is floored (CLOUD_HORIZON_FLOOR) so a grazing ray lands somewhere
+    // finite, and the density is faded across that same band (CLOUD_HORIZON_FADE)
+    // so the layer dissolves into the haze rather than ending on a seam.
+    let reach = max(sky.cloud.y, 0.0) / max(dir.y, 0.06);
+    let field = cloud_field(vec2<f32>(dir.x, dir.z) * reach);
+    // CLOUD_EDGE = 0.22. Threshold 1.0 at zero coverage — which the field, whose
+    // maximum is exactly 1.0, cannot beat — so a clear sky is exactly clear.
+    let threshold = 1.0 - clamp(sky.cloud.x, 0.0, 1.0) * (1.0 + 0.22);
+    let shaped = clamp((field - threshold) / 0.22, 0.0, 1.0);
+    let fade = clamp(dir.y / 0.10, 0.0, 1.0);
+    let density = (shaped * shaped * (3.0 - 2.0 * shaped)) * (fade * fade * (3.0 - 2.0 * fade));
+
+    // The cloud carries no colour of its own: CLOUD_FILL_GAIN = 1.6 of the sky
+    // behind it fills its shaded body, and a broad forward lobe about the body
+    // (CLOUD_SUN_GAIN = 0.35, CLOUD_FORWARD = 6.0) lights its sunward face. Mixed
+    // rather than added, so cloud in front of the body occludes the disc.
+    let sunlit = pow(max(cos_angle, 0.0), 6.0) * 0.35;
+    let cloud = gradient * 1.6 + sky.body_color.rgb * sunlit;
+
+    return vec4<f32>(mix(behind, cloud, density), 1.0);
 }
 "#;
 
-/// The sky uniform's size in bytes: a `mat4x4` (64) plus five `vec4`s (80).
-const SKY_UBO_BYTES: u64 = 64 + 5 * 16;
+/// The sky uniform's size in bytes: a `mat4x4` (64) plus six `vec4`s (96).
+const SKY_UBO_BYTES: u64 = 64 + 6 * 16;
 
 /// The fullscreen sky pass: its pipeline and the uniform it reads.
 ///
@@ -632,6 +677,10 @@ fn pack_sky(sky: &axiom_host::FrameSky, camera_view_proj: [f32; 16]) -> Vec<u8> 
                 sky.halo_falloff().get(),
                 sky.halo_strength().get(),
                 0.0,
+                0.0,
+                0.0,
+                sky.cloud_coverage().get(),
+                sky.cloud_scale().get(),
                 0.0,
                 0.0,
             ]

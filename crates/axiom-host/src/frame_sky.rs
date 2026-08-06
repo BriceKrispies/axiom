@@ -1,5 +1,6 @@
 //! Backend-neutral **sky**: a vertical gradient with an optional celestial body
-//! (a moon or a sun) sitting in it, and a soft halo around that body.
+//! (a moon or a sun) sitting in it, a soft halo around that body, and an optional
+//! layer of cloud drawn in front of both.
 //!
 //! This exists because a flat clear colour cannot be a light. A night scene lit
 //! only by a directional light and a hemisphere ambient has nothing in frame that
@@ -7,6 +8,18 @@
 //! as "dark" rather than "moonlit", however carefully the light values are tuned.
 //! Giving the frame a real sky puts the source on screen, and gives the horizon a
 //! colour for depth fog to fade into that is not the same colour as the zenith.
+//!
+//! The cloud layer exists for the same reason one level up. A gradient plus a body
+//! is a sky with *nothing in it*: however well the two colours are chosen, an
+//! outdoor frame whose upper half is a clean two-stop wash reads as a backdrop
+//! rather than as weather, and no amount of scene geometry below the horizon fixes
+//! that. Cloud belongs **here**, in the sky's own evaluation, and not in the app as
+//! billboard cards: cards need alpha the rasterizer does not have, would sort
+//! against the depth fog, and — being ordinary textured geometry — would survive on
+//! a backend that has already declared it drops [`crate::RenderCapability::Sky`],
+//! which is precisely the silent divergence the capability system exists to
+//! prevent. Carried here, cloud degrades with the sky it belongs to, by
+//! declaration.
 //!
 //! Carried as neutral frame data — like [`crate::FrameAmbient`] and
 //! [`crate::FrameDepthFog`] — so the *definition* of the sky is one piece of
@@ -35,6 +48,8 @@ pub struct FrameSky {
     body_color: [f32; 3],
     halo_falloff: f32,
     halo_strength: f32,
+    cloud_coverage: f32,
+    cloud_scale: f32,
 }
 
 impl FrameSky {
@@ -51,6 +66,11 @@ impl FrameSky {
             body_color: [0.0, 0.0, 0.0],
             halo_falloff: 1.0,
             halo_strength: 0.0,
+            // Zero coverage puts the density threshold above the field's maximum,
+            // so "no cloud" is exactly zero everywhere and needs no branch and no
+            // separate representation — the same posture the body takes.
+            cloud_coverage: 0.0,
+            cloud_scale: 1.0,
         }
     }
 
@@ -74,6 +94,24 @@ impl FrameSky {
         self.body_color = color;
         self.halo_falloff = halo_falloff.get();
         self.halo_strength = halo_strength.get();
+        self
+    }
+
+    /// Put a layer of cloud in the sky.
+    ///
+    /// `coverage` runs `0` (a clear sky — the default, and exactly clear, not
+    /// nearly) to `1` (overcast). `scale` sets how large the lumps read: it
+    /// multiplies the cloud plane's coordinates, so *larger* is *smaller and
+    /// busier* cloud. Around `0.5` gives the broad cumulus of a wide outdoor shot.
+    ///
+    /// The cloud takes no colour of its own. It is lit by the two things the sky
+    /// already carries — the gradient behind it fills its shaded body, and the
+    /// body's colour lights its sunward face — so one authored cloud layer is
+    /// correct under a moon and under a midday sun without being re-tuned, and a
+    /// cloud can never disagree with the sky it is sitting in.
+    pub const fn with_clouds(mut self, coverage: Ratio, scale: Ratio) -> Self {
+        self.cloud_coverage = coverage.get();
+        self.cloud_scale = scale.get();
         self
     }
 
@@ -112,12 +150,27 @@ impl FrameSky {
         Ratio::finite_or_zero(self.halo_strength)
     }
 
+    /// How much of the sky the cloud layer covers, `0` (clear) to `1` (overcast).
+    pub const fn cloud_coverage(&self) -> Ratio {
+        Ratio::finite_or_zero(self.cloud_coverage)
+    }
+
+    /// The cloud field's scale — larger is smaller, busier cloud.
+    pub const fn cloud_scale(&self) -> Ratio {
+        Ratio::finite_or_zero(self.cloud_scale)
+    }
+
     /// **The sky, evaluated.** The linear-RGB radiance looking along `view`.
     ///
-    /// Three terms, added: the vertical gradient, the body's disc, and the body's
-    /// halo. All of it is pure arithmetic with no branches — which is required
-    /// here (this is a layer) and is also exactly what makes it portable to a
-    /// shader unchanged.
+    /// Four terms: the vertical gradient, the body's disc and the body's halo
+    /// added together as the sky *behind*, then the cloud layer composited in
+    /// front of that by its density. Compositing rather than adding is what makes
+    /// a cloud a cloud: at full density it replaces what is behind it, so cloud
+    /// drifting across the body occludes the disc instead of glowing through it.
+    ///
+    /// All of it is pure arithmetic with no branches — which is required here
+    /// (this is a layer) and is also exactly what makes it portable to a shader
+    /// unchanged.
     ///
     /// The gradient uses the *raw* up-component rather than an angle, so it costs
     /// no trigonometry, and is smoothstepped so the horizon band is soft rather
@@ -141,10 +194,44 @@ impl FrameSky {
         let halo = cos_angle.max(0.0).powf(self.halo_falloff.max(1.0)) * self.halo_strength;
         let emission = disc + halo;
 
+        let density = self.cloud_density(dir);
+        // The cloud's sunward face: one broad forward-scattering lobe about the
+        // body, so the whole sun side of the sky carries lit tops and the far side
+        // stays in the gradient's own shade. This is why a cloud needs no authored
+        // colour — its light is the body's light.
+        let sunlit = cos_angle.max(0.0).powf(CLOUD_FORWARD) * CLOUD_SUN_GAIN;
+
         [0, 1, 2].map(|c| {
             let gradient = lerp(self.horizon[c], self.zenith[c], blend);
-            gradient + self.body_color[c] * emission
+            let behind = gradient + self.body_color[c] * emission;
+            // A cumulus is brighter than the sky it covers even in shade, which is
+            // the fill gain, plus whatever the body throws on its sunward face.
+            let cloud = gradient * CLOUD_FILL_GAIN + self.body_color[c] * sunlit;
+            lerp(behind, cloud, density)
         })
+    }
+
+    /// How much cloud stands between the eye and the sky along the unit ray `dir`,
+    /// `0`..`1`.
+    ///
+    /// The field is sampled on a **cloud plane** — where the ray meets a plane one
+    /// unit overhead — rather than on the dome. That is what makes the layer read
+    /// as weather at a distance instead of wallpaper: the lumps foreshorten and
+    /// crowd together toward the horizon exactly as real cumulus do, and open out
+    /// overhead. The up-component is floored so a ray at or below the horizon
+    /// lands somewhere finite and very far instead of at infinity, and the density
+    /// is faded out across that same band so the layer dissolves into the horizon
+    /// haze rather than shimmering along a seam.
+    fn cloud_density(&self, dir: [f32; 3]) -> f32 {
+        let reach = self.cloud_scale.max(0.0) / dir[1].max(CLOUD_HORIZON_FLOOR);
+        let field = cloud_field([dir[0] * reach, dir[2] * reach]);
+        // The threshold the field must beat, laid out so both ends are exact
+        // rather than nearly: at coverage `0` it is `1.0`, which the field (whose
+        // maximum is exactly `1.0`) cannot beat at all — a provably clear sky, with
+        // no branch. At coverage `1` it sits a full edge-width below zero, which
+        // the field (whose minimum is `0.0`) always beats — overcast.
+        let threshold = 1.0 - self.cloud_coverage.clamp(0.0, 1.0) * (1.0 + CLOUD_EDGE);
+        smoothstep((field - threshold) / CLOUD_EDGE) * smoothstep(dir[1] / CLOUD_HORIZON_FADE)
     }
 }
 
@@ -154,6 +241,67 @@ const MIN_ANGULAR_RADIUS: f32 = 1.0e-4;
 
 /// How much of the body's radius is spent softening its edge.
 const LIMB_SOFTNESS: f32 = 0.25;
+
+/// The width of the cloud field's coverage window — how much field value separates
+/// a clear pixel from a fully opaque one. Wide enough that a cumulus has a soft,
+/// wispy limb rather than a paper edge; narrow enough that it still reads as a
+/// distinct puff rather than a smear.
+const CLOUD_EDGE: f32 = 0.22;
+
+/// The smallest up-component the cloud plane is sampled at, so a ray at or below
+/// the horizon lands somewhere finite rather than at infinity.
+const CLOUD_HORIZON_FLOOR: f32 = 0.06;
+
+/// The up-component over which cloud density fades in from the horizon, so the
+/// layer dissolves into the haze instead of ending at a seam.
+const CLOUD_HORIZON_FADE: f32 = 0.10;
+
+/// How much brighter a cloud's shaded body is than the sky directly behind it.
+/// Above one because a cumulus in shade still out-scatters clear air.
+const CLOUD_FILL_GAIN: f32 = 1.6;
+
+/// How much of the body's colour lands on a cloud's sunward face.
+const CLOUD_SUN_GAIN: f32 = 0.35;
+
+/// The forward-scattering lobe's exponent — small, because a cloud's sunward
+/// brightening is broad, not a second halo.
+const CLOUD_FORWARD: f32 = 6.0;
+
+/// The cloud field's octaves as `[rotation, frequency, weight]`.
+///
+/// A sum of separable sinusoids, not a hashed lattice noise: it is the same eight
+/// lines of arithmetic in Rust and in WGSL with no texture, no integer hashing and
+/// no `fract` precision cliff, which is what keeps this function portable to the
+/// shader unchanged the way the rest of [`FrameSky`] is.
+///
+/// Each octave is rotated by its own odd angle and scaled by a non-integer
+/// frequency ratio. Both matter: axis-aligned harmonics of a common frequency
+/// re-align into a visible grid, and a grid is the one thing a sky may not look
+/// like. The weights sum to exactly `1.0`, which is what pins the field's range to
+/// `0.0..=1.0` and lets the coverage threshold have exact ends.
+const CLOUD_OCTAVES: [[f32; 3]; 4] = [
+    [0.00, 1.00, 0.50],
+    [1.13, 2.31, 0.25],
+    [2.47, 4.73, 0.15],
+    [3.71, 9.17, 0.10],
+];
+
+/// One octave of the cloud field: a separable sinusoid on a rotated lattice,
+/// remapped to `0.0..=1.0`.
+fn cloud_octave(p: [f32; 2], rotation: f32, frequency: f32) -> f32 {
+    let (sin_r, cos_r) = (rotation.sin(), rotation.cos());
+    let x = (p[0] * cos_r + p[1] * sin_r) * frequency;
+    let y = (p[1] * cos_r - p[0] * sin_r) * frequency;
+    x.sin() * y.sin() * 0.5 + 0.5
+}
+
+/// The cloud field at a point on the cloud plane, in `0.0..=1.0`.
+fn cloud_field(p: [f32; 2]) -> f32 {
+    CLOUD_OCTAVES
+        .iter()
+        .map(|octave| octave[2] * cloud_octave(p, octave[0], octave[1]))
+        .sum()
+}
 
 /// Hermite smoothstep on an already-`0..1` value.
 fn smoothstep(t: f32) -> f32 {
@@ -346,6 +494,165 @@ mod tests {
             .with_body([0.0, 0.0, 0.0], rad(0.05), [1.0; 3], q(100.0), q(1.0));
         assert_eq!(headless.body_direction(), [0.0, 1.0, 0.0]);
         assert!(finite(headless.radiance([0.0, 1.0, 0.0])));
+    }
+
+    /// A blue day sky with broad cumulus and a sun — the shape an outdoor frame
+    /// authors.
+    fn daylit() -> FrameSky {
+        FrameSky::gradient([0.10, 0.28, 0.75], [0.55, 0.72, 0.95])
+            .with_body([0.45, 0.30, 1.0], rad(0.03), [3.0, 2.8, 2.4], q(600.0), q(0.6))
+            .with_clouds(q(0.55), q(0.5))
+    }
+
+    /// The default is a *clear* sky, exactly — not nearly. This is the property
+    /// that lets "no clouds" need no separate representation and no branch, and it
+    /// is why the coverage threshold is laid out with exact ends.
+    #[test]
+    fn a_sky_with_no_clouds_is_exactly_the_sky_without_the_layer() {
+        let clear = FrameSky::gradient([0.1, 0.2, 0.4], [0.5, 0.4, 0.3]);
+        assert_eq!(clear.cloud_coverage().get(), 0.0);
+        // Every direction, well above the horizon fade, is untouched arithmetic.
+        [[0.0, 1.0, 0.0], [0.3, 0.6, 0.7], [0.0, 0.5, 0.87], [-0.4, 0.9, 0.2]]
+            .into_iter()
+            .for_each(|dir| {
+                assert_eq!(clear.cloud_density(normalize_or(dir, [0.0, 1.0, 0.0])), 0.0);
+            });
+        assert_eq!(clear.radiance([0.3, 0.6, 0.7]), {
+            let blend = smoothstep(normalize_or([0.3, 0.6, 0.7], [0.0, 1.0, 0.0])[1]);
+            [0, 1, 2].map(|c| lerp([0.5, 0.4, 0.3][c], [0.1, 0.2, 0.4][c], blend))
+        });
+    }
+
+    /// The field the whole layer is thresholded against must actually span its
+    /// stated range, or neither end of the coverage window is exact.
+    #[test]
+    fn the_cloud_field_stays_inside_zero_to_one_and_is_not_a_flat_sheet() {
+        let samples: Vec<f32> = (0..64)
+            .map(|i| {
+                let t = i as f32 * 0.37;
+                cloud_field([t.cos() * 9.0 + t, t.sin() * 7.0 - t * 0.5])
+            })
+            .collect();
+        assert!(samples.iter().all(|v| (0.0..=1.0).contains(v)), "{samples:?}");
+        let lo = samples.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = samples.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        assert!(hi - lo > 0.3, "the field varies rather than sitting flat: {lo}..{hi}");
+        // The octaves are genuinely rotated against each other: a single unrotated
+        // separable sinusoid is symmetric under swapping x and z, and the field
+        // must not be.
+        assert!((cloud_field([1.7, 0.4]) - cloud_field([0.4, 1.7])).abs() > 1.0e-3);
+    }
+
+    #[test]
+    fn more_coverage_is_more_cloud_and_full_coverage_is_overcast() {
+        let up = [0.2, 0.8, 0.5];
+        let dir = normalize_or(up, [0.0, 1.0, 0.0]);
+        let at = |c: f32| {
+            FrameSky::gradient([0.1; 3], [0.2; 3])
+                .with_clouds(q(c), q(0.5))
+                .cloud_density(dir)
+        };
+        assert_eq!(at(0.0), 0.0, "clear");
+        assert!(at(1.0) >= 1.0 - 1.0e-6, "overcast: {}", at(1.0));
+        let ramp: Vec<f32> = (0..=10).map(|i| at(i as f32 / 10.0)).collect();
+        assert!(
+            ramp.windows(2).all(|w| w[1] >= w[0]),
+            "coverage is monotone: {ramp:?}"
+        );
+    }
+
+    /// The cloud plane, not the dome: the layer must crowd toward the horizon and
+    /// open out overhead, and it must fade out at the horizon rather than end at a
+    /// seam.
+    #[test]
+    fn clouds_crowd_toward_the_horizon_and_dissolve_into_it() {
+        let sky = daylit();
+        // Below the horizon the layer is exactly absent, and it fades in across the
+        // band above it rather than starting at full strength on a seam.
+        assert_eq!(sky.cloud_density([0.0, -0.5, 0.86]), 0.0, "nothing below the horizon");
+        let ray = |y: f32| normalize_or([0.0, y, 1.0], [0.0, 1.0, 0.0]);
+        assert_eq!(sky.cloud_density(ray(0.0)), 0.0, "nor exactly on it");
+        // Across the whole fade band the density is held under the fade itself, so
+        // however dense the field is down there the layer arrives gradually.
+        (0..=20).for_each(|i| {
+            let y = i as f32 * 0.006;
+            let d = sky.cloud_density(ray(y));
+            let fade = smoothstep(ray(y)[1] / CLOUD_HORIZON_FADE);
+            assert!(d <= fade + 1.0e-6, "at y={y}: density {d} exceeds the fade {fade}");
+        });
+        // Sweeping a fixed angular step across the sky crosses far more cloud
+        // edges near the horizon than overhead — that is the foreshortening.
+        let edges = |elevation: f32| {
+            let samples: Vec<f32> = (0..96)
+                .map(|i| {
+                    let a = i as f32 * 0.02;
+                    sky.cloud_density(normalize_or([a.sin(), elevation, a.cos()], [0.0, 1.0, 0.0]))
+                })
+                .collect();
+            samples.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<f32>()
+        };
+        assert!(
+            edges(0.25) > edges(2.5),
+            "low sky is busier than high: {} vs {}",
+            edges(0.25),
+            edges(2.5)
+        );
+    }
+
+    /// The cloud takes its light from the body and the gradient — which is what
+    /// lets one authored layer be correct under a moon and under a midday sun.
+    #[test]
+    fn a_cloud_is_lit_by_the_body_and_occludes_it_rather_than_glowing_through() {
+        // Full overcast, so every ray is entirely cloud and the composite is the
+        // cloud term alone.
+        let overcast = |body: [f32; 3]| {
+            FrameSky::gradient([0.10, 0.28, 0.75], [0.55, 0.72, 0.95])
+                .with_body([0.0, 0.5, 1.0], rad(0.03), body, q(600.0), q(0.6))
+                .with_clouds(q(1.0), q(0.5))
+        };
+        let sunward = normalize_or([0.0, 0.5, 1.0], [0.0, 1.0, 0.0]);
+        let away = normalize_or([0.0, 0.5, -1.0], [0.0, 1.0, 0.0]);
+        let sun = overcast([3.0, 2.8, 2.4]);
+        assert!(
+            sun.radiance(sunward)[0] > sun.radiance(away)[0] + 0.5,
+            "the sunward face is lit: {:?} vs {:?}",
+            sun.radiance(sunward),
+            sun.radiance(away)
+        );
+        // The disc is *behind* the layer: at full density it is covered, so the
+        // pixel is nowhere near the body's own 3.0 radiance.
+        assert!(sun.radiance(sunward)[0] < 2.0, "{:?}", sun.radiance(sunward));
+        let clear_sky = FrameSky::gradient([0.10, 0.28, 0.75], [0.55, 0.72, 0.95])
+            .with_body([0.0, 0.5, 1.0], rad(0.03), [3.0, 2.8, 2.4], q(600.0), q(0.6));
+        assert!(
+            clear_sky.radiance(sunward)[0] > sun.radiance(sunward)[0],
+            "an uncovered disc is brighter than a covered one"
+        );
+        // A dim body (a moon) gives a dim cloud from the same authored layer: the
+        // layer scales with the light rather than carrying a colour of its own.
+        let moon = overcast([0.9, 0.94, 1.0]);
+        assert!(moon.radiance(sunward)[0] < sun.radiance(sunward)[0]);
+        // ...and it is still brighter than the sky it covers, in shade.
+        assert!(moon.radiance(away)[0] > clear_sky.radiance(away)[0]);
+    }
+
+    #[test]
+    fn cloud_accessors_round_trip_and_degenerate_input_cannot_poison_the_sky() {
+        let sky = daylit();
+        assert_eq!(sky.cloud_coverage().get(), 0.55);
+        assert_eq!(sky.cloud_scale().get(), 0.5);
+        assert_ne!(sky, daylit().with_clouds(q(0.55), q(0.9)));
+        // Coverage outside its range is clamped, not extrapolated into a negative
+        // or runaway density.
+        let silly = FrameSky::gradient([0.1; 3], [0.2; 3]).with_clouds(q(9.0), q(0.0));
+        let d = silly.cloud_density(normalize_or([0.2, 0.8, 0.5], [0.0, 1.0, 0.0]));
+        assert!((0.0..=1.0).contains(&d), "{d}");
+        let negative = FrameSky::gradient([0.1; 3], [0.2; 3]).with_clouds(q(-4.0), q(0.5));
+        assert_eq!(negative.cloud_density(normalize_or([0.2, 0.8, 0.5], [0.0; 3])), 0.0);
+        // A poisoned view direction is caught upstream by `normalize_or`, so the
+        // cloud layer sees only usable rays and the frame stays finite.
+        assert!(daylit().radiance([f32::NAN, 1.0, 0.0]).iter().all(|v| v.is_finite()));
+        assert!(daylit().radiance([0.0, 0.0, 0.0]).iter().all(|v| v.is_finite()));
     }
 
     #[test]

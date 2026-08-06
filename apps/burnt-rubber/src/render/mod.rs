@@ -148,14 +148,38 @@ impl RaceScene {
         // The disc's colour is authored well above `1.0`. That surplus is not
         // wasted: it is exactly what the bloom above spends, so the sun carries a
         // soft flare rather than being a flat white sticker.
+        //
+        // ...and weather in it. A gradient plus a body is a sky with *nothing in
+        // it*: whatever two colours it runs between, the upper half of a coastal
+        // frame is a clean wash, and a clean wash reads as a backdrop the course
+        // is pasted on rather than as sky the course is standing under. That is
+        // the largest single area of this frame no scene geometry can reach —
+        // above the horizon there is nothing to put geometry on.
+        //
+        // The cloud layer carries no colour of its own: the gradient behind it
+        // fills its shaded body and the body's own colour lights its sunward
+        // face. That is why it survived this pass unchanged while the palette
+        // underneath it went from night to noon — it was authored to read as
+        // silver moonlit cumulus under a moon and as blown-white tops under a
+        // sun, from the same two numbers, and the sun arrived in the same round.
+        //
+        // Gated by the backend's `Sky` capability, exactly as the gradient and the
+        // body already are: the Canvas 2D arm drops the whole sky and reports it,
+        // so the software arm gains nothing to go wrong with and this app never
+        // has to ask which arm it is on.
         app.set_sky(
-            FrameSky::gradient(palette::SKY_ZENITH, palette::SKY).with_body(
-                [MOON_DIRECTION.x, MOON_DIRECTION.y, MOON_DIRECTION.z],
-                axiom_kernel::Radians::finite_or_zero(MOON_ANGULAR_RADIUS),
-                palette::SUN,
-                Ratio::finite_or_zero(MOON_HALO_FALLOFF),
-                Ratio::finite_or_zero(MOON_HALO_STRENGTH),
-            ),
+            FrameSky::gradient(palette::SKY_ZENITH, palette::SKY)
+                .with_body(
+                    [MOON_DIRECTION.x, MOON_DIRECTION.y, MOON_DIRECTION.z],
+                    axiom_kernel::Radians::finite_or_zero(MOON_ANGULAR_RADIUS),
+                    palette::SUN,
+                    Ratio::finite_or_zero(MOON_HALO_FALLOFF),
+                    Ratio::finite_or_zero(MOON_HALO_STRENGTH),
+                )
+                .with_clouds(
+                    Ratio::finite_or_zero(CLOUD_COVERAGE),
+                    Ratio::finite_or_zero(CLOUD_SCALE),
+                ),
         );
 
         app.set_depth_fog(FrameDepthFog::new(
@@ -595,6 +619,23 @@ const MOON_HALO_FALLOFF: f32 = 1400.0;
 /// How strongly the halo is added against the moon's own colour. Low, for the
 /// reason above: the bloom supplies the glow, this only softens the limb.
 const MOON_HALO_STRENGTH: f32 = 0.18;
+
+/// How much of the sky the cloud layer covers.
+///
+/// Just over half: enough that the upper band is weather rather than a wash, and
+/// enough to break the sun's flare into the ragged edge a coastal sky has —
+/// while leaving real gaps of open sky, which is what stops it reading as
+/// overcast. Past ~0.75 the gaps close and the frame loses its ceiling.
+const CLOUD_COVERAGE: f32 = 0.55;
+
+/// The cloud field's scale — larger is smaller, busier cloud.
+///
+/// Read against the chase camera's field of view: at 0.5 a puff overhead is a
+/// couple of dozen degrees across, which is the broad cumulus of a wide coastal
+/// shot rather than the fine mackerel sky a larger value gives. The field is
+/// sampled on a plane, so this value also sets how fast the layer crowds toward
+/// the vanishing point the road runs to.
+const CLOUD_SCALE: f32 = 0.5;
 
 /// The key light's intensity — **the frame's exposure**.
 ///
