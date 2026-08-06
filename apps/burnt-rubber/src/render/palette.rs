@@ -178,6 +178,69 @@ pub const SUN: [f32; 3] = [2.4, 2.25, 1.95];
 /// tests) and a colour authored in four places is a colour that drifts.
 pub const TARMAC: [f32; 3] = [0.095, 0.088, 0.080];
 
+/// ## The gloss set, and why every value in it moved with the era
+///
+/// `roughness` (`0` mirror-smooth … `1` matte) is the one authored material
+/// property that is **not** self-contained: the backend spends it as
+/// `spec = pow(N·H, 48) * (1 - roughness)` and then adds
+/// `light_colour * light_intensity * spec` on top of the diffuse term
+/// (`axiom-gpu-backend/src/scene_renderer.rs`). A gloss value is therefore only
+/// meaningful *against a key intensity*, and the peak radiance a surface can
+/// throw is exactly `(1 - roughness) * KEY_INTENSITY`.
+///
+/// Every number below was authored against the **moonlit** key, which ran at
+/// `0.85`. The era-C rig is a midday sun at [`super::KEY_INTENSITY`] `2.6` —
+/// **3.06×** — and nothing rescaled the gloss with it, so every specular peak in
+/// the frame was multiplied by three and clipped. That is not a subtle shift; it
+/// is the champion frame's single largest defect and it lands on the two things
+/// the eye goes to first:
+///
+/// * the **tarmac** at `0.68` threw `0.32 × 2.6 = 0.83` linear — an order of
+///   magnitude over its own diffuse value (`0.09 × 2.6 × N·L ≈ 0.08`) — so the
+///   broad `48`-power lobe painted a blown white sheet from the bumper to the
+///   vanishing point. It erased the asphalt grain [`super::asphalt_texture`]
+///   exists to provide, it erased the lane markings' contrast against the road,
+///   and it read as a lens defect rather than as a surface.
+/// * the **car**: paint at `0.30` threw `1.82` and glass at `0.12` threw `2.29`,
+///   both far past the `1.0` the 8-bit target can hold. The bonnet is very nearly
+///   a road-parallel plane, so it caught the same lobe the road did and went
+///   white — taking the twin stripes, which are the model's whole read, with it.
+///
+/// The reference decides the direction, and it is unambiguous: a **dry** road at
+/// noon under a high sun is matte. There is no sheen anywhere in that frame — the
+/// tarmac is flat charcoal carrying palm shadows, and the only blown pixels in
+/// the shot belong to the sun itself. The wet-look streak was a night-stage
+/// device (it existed to put the moon's mark on the largest surface in a frame
+/// that had almost no light in it), and daylight retires it: by day the tarmac
+/// gets its tonal range from the sun's diffuse, from cast shadows and from
+/// atmosphere, none of which a night stage had.
+///
+/// So the set is re-sized **by the budget, not by eye**: each value is chosen so
+/// that `(1 - roughness) * KEY_INTENSITY` lands where that surface belongs, and
+/// the ordering glass > paint > tarmac — the physical fact that survives the era
+/// change — is preserved exactly.
+/// [`tests::the_gloss_set_is_sized_against_the_key_it_is_lit_by`] is the
+/// assertion that keeps the two in step, and it is the one this module was
+/// missing: it fires the next time the key moves without the gloss moving.
+///
+/// Tarmac: `0.06 × 2.6 = 0.156` linear at the exact mirror point, roughly
+/// two-fifths of the way up the display range over a `0.08` diffuse base. A
+/// whisper of directionality down the sun line, so the road is not one flat fill
+/// across its length — and nothing the eye reads as a highlight.
+pub const TARMAC_ROUGHNESS: f32 = 0.94;
+
+/// Automotive clear-coat. `0.16 × 2.6 = 0.416` linear — a real, visible
+/// highlight riding the crown of the bonnet and the shoulder line, about a stop
+/// under clipping, so the stripes and the panel breaks stay legible underneath
+/// it. See [`TARMAC_ROUGHNESS`] for the budget this is drawn from.
+pub const CAR_PAINT_ROUGHNESS: f32 = 0.84;
+
+/// Glazing — still the glossiest surface in the frame, as it must be.
+/// `0.32 × 2.6 = 0.832` linear: the windscreen holds a hot sun glint at the
+/// mirror point and stays a dark near-black trapezoid everywhere else, which is
+/// what a raked screen at noon actually looks like. See [`TARMAC_ROUGHNESS`].
+pub const CAR_GLASS_ROUGHNESS: f32 = 0.68;
+
 /// Register the four road materials.
 ///
 /// The tarmac is the one material here that carries a **texture**: it is the
@@ -198,24 +261,17 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
         // stop brighter. The grain multiplies this base colour (the shader
         // computes `albedo * colour`), so the hue lives here and only the
         // shading is sampled.
-        // `roughness` is what decides how much of the moon the tarmac throws
-        // back. It is not decoration on a night stage: a matte road reflects the
-        // moon nowhere, so the brightest object in the sky leaves no mark on the
-        // largest surface in the frame, and the two read as unrelated. At 0.6 the
-        // road catches a broad, low sheen down the line to the moon — the look of
-        // asphalt that is damp rather than polished, which is also the only way a
-        // near-black surface gets any tonal variation across its length at all.
-        //
-        // 0.68 rather than lower because the streak is brightest in the near
-        // corner, where the reflection geometry is most favourable: any glossier
-        // and that corner saturates to flat white and the sheen stops reading as
-        // a surface and starts reading as a blown highlight.
+        // `roughness` is [`TARMAC_ROUGHNESS`], and that constant carries the
+        // whole argument: the value here was sized against a moonlit key three
+        // times dimmer than the era-C sun, and left unchanged it turns the
+        // largest surface in the frame into a blown white sheet that erases the
+        // grain sampled just above it. A dry road at noon is matte.
         surface: app.add_material(
             asphalt
                 .map(|t| {
                     Material::lit(rgb(TARMAC[0], TARMAC[1], TARMAC[2]))
                         .with_custom_texture(t.id())
-                        .with_roughness(ratio(0.68))
+                        .with_roughness(ratio(TARMAC_ROUGHNESS))
                         // The tarmac is the one surface in this game that runs
                         // from under the front wheels to the vanishing point, so
                         // it is the one that needs anisotropic sampling. At the
@@ -231,7 +287,8 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
                         .with_texture_sampling(TextureSampling::Anisotropic)
                 })
                 .unwrap_or_else(|| {
-                    Material::lit(rgb(TARMAC[0], TARMAC[1], TARMAC[2])).with_roughness(ratio(0.68))
+                    Material::lit(rgb(TARMAC[0], TARMAC[1], TARMAC[2]))
+                        .with_roughness(ratio(TARMAC_ROUGHNESS))
                 }),
         ),
         // Paint: a real white pigment plus a low emissive floor, so the lane
@@ -379,15 +436,21 @@ impl ScenePalette {
             sign: glowing(app, [0.62, 0.64, 0.60], [0.22, 0.22, 0.20]),
             lamp: glowing(app, [0.30, 0.28, 0.24], [1.0, 0.86, 0.52]),
             building: lit(app, [0.22, 0.22, 0.25]),
-            // Automotive clear-coat — the glossiest surface in the frame, and
-            // the one always closest to the camera. Without it the car is a flat
-            // orange cut-out against a lit road; with it the moon rides along its
-            // upper edges and the body finally reads as a curved metal shell.
-            car_body: glossy(app, [0.86, 0.16, 0.07], 0.30),
+            // Automotive clear-coat — glossier than anything else on the ground,
+            // and the surface always closest to the camera. Without it the car is
+            // a flat orange cut-out against a lit road; with it the sun rides
+            // along its upper edges and the body reads as a curved metal shell.
+            // Re-sized to [`CAR_PAINT_ROUGHNESS`] against the daylight key: the
+            // bonnet is very nearly a road-parallel plane, so at the old value it
+            // caught the same blown lobe the tarmac did and took the twin stripes
+            // — the model's whole read — with it.
+            car_body: glossy(app, [0.86, 0.16, 0.07], CAR_PAINT_ROUGHNESS),
             // Glass is glossier still, and nearly black in albedo — so almost
-            // everything it shows is reflection, which is exactly what a
-            // windscreen at night looks like.
-            car_glass: glossy(app, [0.07, 0.09, 0.13], 0.12),
+            // everything it shows is reflection, which is exactly what a raked
+            // windscreen looks like. [`CAR_GLASS_ROUGHNESS`] keeps it the frame's
+            // glossiest surface while holding the glint to the mirror point
+            // instead of flooding the whole screen white.
+            car_glass: glossy(app, [0.07, 0.09, 0.13], CAR_GLASS_ROUGHNESS),
             tyre: lit(app, [0.045, 0.045, 0.05]),
             // Stripe and plate trim: pale, slightly warm, and with a whisper of
             // self-luminance. It is the only *light* value on the car, so it has
@@ -706,6 +769,74 @@ mod tests {
                 "the traffic lamp emits less red than its own car reflects: {body:?}"
             );
         }
+    }
+
+    /// **A gloss value is only meaningful against the key it is lit by.**
+    ///
+    /// This is the assertion the module was missing, and the champion frame's
+    /// largest defect lived in the gap. The backend spends roughness as
+    /// `spec = pow(N·H, 48) * (1 - roughness)` and adds
+    /// `light_colour * light_intensity * spec` after the diffuse term, so a
+    /// surface's peak specular radiance is exactly `(1 - roughness) * key`. Every
+    /// other test in this file measures a colour, and a colour cannot see that
+    /// product: the whole set stayed byte-identical while the era-C rig tripled
+    /// `KEY_INTENSITY` (`0.85` → `2.6`) underneath it, and three surfaces
+    /// silently went from "shiny" to "clipped white".
+    ///
+    /// The render target is 8-bit, so `1.0` is the whole budget. What each
+    /// surface may spend of it is the physical claim:
+    ///
+    /// * **tarmac** — a dry road at noon is matte, and the reference has no sheen
+    ///   on it at all. Anything approaching its own diffuse value stops being a
+    ///   surface property and becomes a white sheet laid over the largest object
+    ///   in the frame, erasing the asphalt grain and the lane markings with it.
+    /// * **car paint** — a real highlight, and deliberately under `1.0`: past
+    ///   that the bonnet clips and the twin stripes go with it.
+    /// * **glass** — allowed to be the hottest, because a windscreen glint is the
+    ///   one thing in shot that legitimately approaches the sun's own value. Not
+    ///   past it.
+    ///
+    /// And the ordering, which is the part that must survive any future re-tune:
+    /// glass is glossier than paint is glossier than tarmac. That is physics, not
+    /// art direction, and no exposure change may invert it.
+    #[test]
+    fn the_gloss_set_is_sized_against_the_key_it_is_lit_by() {
+        let key = super::super::KEY_INTENSITY;
+        let peak = |roughness: f32| (1.0 - roughness) * key;
+
+        // The road. Its own diffuse under this key is about
+        // `TARMAC_g * key * N·L ≈ 0.088 * 2.6 * 0.35 ≈ 0.08`; a specular peak
+        // that runs away from that is the blown streak, not a damp sheen.
+        let tarmac = peak(TARMAC_ROUGHNESS);
+        assert!(
+            tarmac < 0.25,
+            "the tarmac's specular peak is {tarmac:.2} linear against a key of \
+             {key}; past ~0.25 the sun's lobe paints a blown white sheet from the \
+             bumper to the vanishing point and the asphalt grain stops existing"
+        );
+        // ...and not zero: a road with no directionality at all is one flat fill
+        // down its whole length, which is the defect the texture also fights.
+        assert!(tarmac > 0.05, "the road has lost its sun line entirely: {tarmac:.3}");
+
+        let paint = peak(CAR_PAINT_ROUGHNESS);
+        assert!(
+            (0.2..0.7).contains(&paint),
+            "the car's clear-coat peaks at {paint:.2} linear; under ~0.2 it is a \
+             flat cut-out and over ~0.7 the bonnet clips and the stripes vanish"
+        );
+
+        let glass = peak(CAR_GLASS_ROUGHNESS);
+        assert!(
+            glass < 1.0,
+            "the windscreen peaks at {glass:.2} linear — past 1.0 the glint is not \
+             a glint, it is a clipped region the bloom then spreads"
+        );
+
+        assert!(
+            glass > paint && paint > tarmac,
+            "glass > paint > tarmac is physics, not art direction: {glass:.2} / \
+             {paint:.2} / {tarmac:.2}"
+        );
     }
 
     #[test]
