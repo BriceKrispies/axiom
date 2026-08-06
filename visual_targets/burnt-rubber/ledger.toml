@@ -1042,3 +1042,104 @@ atmosphere = 1
 scale_and_proportion = 2
 detail_density = 2
 artifact_level = 1
+
+# ============================================================================
+# REFERENCE ERA C BEGINS HERE (2026-08-06)
+# ============================================================================
+# The user supplied a daylight reference and stated explicitly that they
+# understand it is sunny where eras A and B were night, and that this is the
+# intent. Everything above this line was scored against a night reference and
+# does not compare to anything below it. Era B's reference is recoverable at
+# 493dac58:visual_targets/burnt-rubber/reference.png.
+#
+# Three things moved with the era, and only the first is a look:
+#
+#  1. Day, not night. Sun and lens flare, cumulus, turquoise sea, sand, palms
+#     casting hard shadows across the road, stilt houses, mountains.
+#  2. The MOMENT. Eras A and B were parked on the opening straight at ~0:09;
+#     this reference is mid-race at 162 km/h. The campaign follows it to the
+#     game's COASTAL SWEEPERS section rather than to the reference's stated 72%,
+#     because 72% is inside CANYON RUN — walls on both sides, the one stretch
+#     that cannot show a beach. The reference is a concept frame whose section
+#     name ("COASTAL HIGHWAY") does not exist in this game, so its PLACE is the
+#     honest thing to match and its percentage is not.
+#  3. The capture method. A mid-race moment cannot be waited for reproducibly —
+#     driving there takes ~40 s and the traffic decides where you end up — so it
+#     is PLACED with the browser probe and then FROZEN. Recipe in campaign.toml.
+#
+# Also fixed here, and unrelated to the era: campaign.toml's `axes` array had sat
+# under the `[capture.guard]` table header since era B, so it parsed as
+# `capture.guard.axes`. Every foreman so far read that file by eye and never
+# noticed; one that parsed it would have found no axis order at all — and the
+# axis order is what breaks ties for "which axis do we attack next". Moved under
+# [campaign], where the tie-break for this very entry was computed from it.
+
+[[iteration]]
+iteration = 10
+attacked_axis = "none"
+changed_files = [
+  "visual_targets/burnt-rubber/reference.png",
+  "visual_targets/burnt-rubber/champion.png",
+  "visual_targets/burnt-rubber/canvas-guard.png",
+  "visual_targets/burnt-rubber/campaign.toml",
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/champions/",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+Reference swap + recalibration, not a convergence pass. No lens ran and no app \
+source changed. The reference was replaced with the user's daylight coastal \
+image, the moment moved to a driving frame in COASTAL SWEEPERS, and main was \
+re-captured on both arms at the new moment via the probe (place 1900 m / 45 m/s, \
+then freeze). \
+\
+scorecard_before/after below are NOT before-and-after of a change: before is the \
+last era-B scoring, after is the era-C scoring of a freshly captured render. \
+They are different exams. final_score 1.225 -> 0.25, and that fall is the \
+reference moving, not the render getting worse — the same app that scored 1.225 \
+against a night reference scores 0.25 against a daylight one. \
+\
+Measured, band = rows 0.30h..0.72h: reference median luma 139.7 with 0.5% of \
+pixels below L=16; champion median 0.1 with 78.1%. Mean saturation 0.522 against \
+0.141. Sky (27,111,198) against (19,19,20). \
+\
+Four axes sit at 0 — lighting_and_shadow, color_palette, contrast_and_exposure, \
+atmosphere — and the fixed order breaks the tie to lighting_and_shadow, which is \
+also the causal order: the other three are downstream of the frame being lit by \
+a moon. There is no grading a palette or an exposure toward daylight until there \
+is a sun. \
+\
+Guarded arm captured at the same frozen moment. Not scored.
+"""
+next_attacked_axis = "lighting_and_shadow"
+abstraction_introduced = false
+
+[iteration.scorecard_before]   # era B — the reference this scored is retired
+composition_and_framing = 2
+subject_fidelity = 2
+silhouette_readability = 1
+material_and_texture_detail = 2
+lighting_and_shadow = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 2
+detail_density = 2
+artifact_level = 1
+
+[iteration.scorecard_after]    # era C — a different exam, not a regression
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 0
+color_palette = 0
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 1

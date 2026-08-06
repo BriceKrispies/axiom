@@ -14,9 +14,16 @@ not carry across it.
 
 - **era A** — `b8010795`: stylized night straight, green conifers, lit apartment blocks,
   a bright red car, blue horizon glow. Retired 2026-08-04.
-- **era B** — current: near-black night, no visible shoulders or skyline, a black
-  muscle car with twin stripes and glowing tail-light bars on wet glossy asphalt.
-  **Judged on the GPU/WebGL arm only** (see `../campaign.toml`).
+- **era B** — `493dac58`: near-black night, no visible shoulders or skyline, a
+  black muscle car with twin stripes and glowing tail-light bars on wet glossy
+  asphalt. Retired 2026-08-06.
+- **era C** — current: full daylight on a coastal highway — sun and lens flare,
+  cumulus, turquoise sea with sailboats, sand, palms casting hard shadows across
+  the road, stilt houses, mountains, a scarlet wedge coupe with twin white
+  stripes at 162 km/h. The user asked for this knowing it inverts eras A and B.
+  The **moment** moved with it: eras A and B were parked on the opening straight,
+  era C is driving through COASTAL SWEEPERS. **Judged on the GPU/WebGL arm only**
+  (see `../campaign.toml`).
 
 | # | Landed | Commit | Era | What landed | Lowest axis after |
 |---|---|---|---|---|---|
@@ -27,3 +34,4 @@ not carry across it.
 | 0004 | 2026-08-04 | `main` | B | No convergence pass. Re-capture of `main` under the **new** era-B reference, after nine unrelated commits across the app and the render spine (start screen, phone rails, lane lattice, collision episodes, and the two large ones — `08731280`'s FrameSky/FrameBloom/GPU post chain and `ece53937`'s material textures + mip chains) had moved the render out from under the era-A champion. Baseline for era B. | `contrast_and_exposure` 0 |
 | 0005 | 2026-08-04 | `d2509552` | B | Era-B pass 1, all seven lenses: chase rig scaled to roofline height, twin stripes + number plate on the car, both global light terms cut, asphalt grain rescaled to aggregate size, sky black level dropped ~13x, and the spine fix that finally carries the colour grade to the live browser arm (plus a black-point term the chain had no way to express). Attacked `contrast_and_exposure` 0 → 2: the scene band went from 2.4% of pixels below L=16 to 83.7%, against the reference's 80.2%. Overshot into a clipped floor — `low_key()`'s 0.16 black point is the one constant the next pass retunes. | `silhouette_readability` 1 |
 | 0006 | 2026-08-05 | `03f15dca` | B | Era-B pass 2, all seven lenses: chase rig set off the tail-light bar (the one ruler both frames share), tail lamps become twin-tube clusters in fixed bezels plus a centre badge, the key raised so the ground plane clears the grade's hard black-point clip, asphalt grain moved from cell scale to texel scale, tarmac hue rotated off blue at matched luminance, and a spine supersample tier giving the render-scale path an upward direction. Attacked `subject_fidelity` 1 → 2; four axes rose, none fell. The pass-1 clipped floor is repaired — road `(0,2,11)` → `(14,14,17)` against the reference's `(7,8,11)`. `artifact_level` held as **unverified**: the supersample's effect could not be separated from the road's simultaneous luminance rise. | `silhouette_readability` 1 |
+| 0007 | 2026-08-06 | `c8d11623` | C | No convergence pass. Re-capture of `main` at the **new era-C moment** (COASTAL SWEEPERS, placed and frozen with the browser probe) under the daylight reference. Baseline for era C. The app is unchanged from 0006 apart from the day's gameplay work — camera pulled back, near-miss rule, canvas2d paint window, one-tap-one-lane fix — none of which is a look change. | `lighting_and_shadow` 0 |

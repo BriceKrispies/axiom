@@ -10,13 +10,45 @@ slug = "burnt-rubber"
 app = "burnt-rubber"
 source_dir = "apps/burnt-rubber/"
 substrate = "Rust"                    # Rust wasm cdylib on axiom-windowing
-reference_era = "B"                   # bump when the user supplies a new reference
-reference_supplied = 2026-08-04
+reference_era = "C"                   # bump when the user supplies a new reference
+reference_supplied = 2026-08-06
 
-# The moment both images must show: car stationary on the opening straight,
-# ~9 s elapsed, 0% progress, 0 near misses. The timer digits are NOT pinnable
-# (see ledger) — anything scored off them is scoring noise.
-moment = "opening straight, stationary, 0%, 0 near misses, ~0:09"
+# The moment both images must show: driving the COASTAL SWEEPERS section at
+# ~155 km/h, mid-course, open road with scenery on both shoulders.
+#
+# Era C moved the moment as well as the look, and the two are not independent.
+# The reference is captioned "COASTAL HIGHWAY" at 72% progress — but this course
+# has no such section, and 72% lands the car inside CANYON RUN with rock walls
+# on both sides, which is the one place on nine kilometres that cannot show what
+# the reference is about. The reference is a concept frame, not a screenshot, so
+# the campaign matches its PLACE (the game's own COASTAL SWEEPERS, open road,
+# scenery both sides, ~21%) rather than its percentage. Matching the number
+# instead would have compared a canyon to a beach and called the difference a
+# lighting problem.
+moment = "COASTAL SWEEPERS at ~155 km/h, open road, both shoulders in frame"
+
+# The fixed axis order — the tie-break for "lowest axis", so its position in the
+# file is load-bearing. It lives under [campaign] rather than at the end of the
+# file because TOML binds a bare key to whichever table precedes it: sitting
+# below [capture.guard], as it did from era B until 2026-08-06, it parsed as
+# `capture.guard.axes` and any foreman that read this file mechanically would
+# have found no axis order at all. It was never noticed because it was only ever
+# read by eye.
+axes = [
+  "composition_and_framing",
+  "subject_fidelity",
+  "silhouette_readability",
+  "material_and_texture_detail",
+  "lighting_and_shadow",
+  "color_palette",
+  "contrast_and_exposure",
+  "depth_and_separation",
+  "atmosphere",
+  "scale_and_proportion",
+  "detail_density",
+  "artifact_level",
+]
+
 
 # ---------------------------------------------------------------------------
 # Renderer arms
@@ -52,6 +84,13 @@ guard_rule = "legibility, not parity"
 #   frame at the wrong aspect.
 # GOTCHA 2: since 2f5ad14b the app opens on a start screen. The race must be
 #   started (Enter / Space / tap) or every frame is the title card.
+# GOTCHA 3: era C's moment is mid-race, so it is PLACED with the probe rather
+#   than waited for. Driving there would take ~40 s of real time and arrive
+#   somewhere different every run — the traffic decides. The probe hooks are
+#   `#[wasm_bindgen]` exports that index.html does not import, so the page has to
+#   pull the already-initialised module in again to reach them:
+#     import('./pkg/axiom_burnt_rubber.js').then(m => { window.__probe = m; })
+#   ES module caching returns the same instance, so nothing is re-initialised.
 
 [capture]
 serve = "uv run scripts/localhost_servers.py start-app burnt-rubber --port 8085"
@@ -60,7 +99,14 @@ dpr = 2
 touch = true
 start_race = "window.dispatchEvent(new KeyboardEvent('keydown',{code:'Enter',key:'Enter',bubbles:true}))"
 settle_ms = 2500     # after goto, before starting the race
-hold_ms = 8600       # after starting, before the shot — lands the timer near 0:09
+
+# Place the car, let it settle a beat, then FREEZE it. Freezing is what makes the
+# moment repeatable: placed and left running it coasts, so the speed the HUD
+# prints depends on how quickly the screenshot lands.
+place = "window.__probe.burnt_rubber_probe_place(1900, 45)"
+place_settle_ms = 900
+freeze = "window.__probe.burnt_rubber_probe_pause(true)"
+freeze_settle_ms = 400
 
 [capture.judged]
 url = "http://localhost:8085/"                  # no ?backend= — take what the cascade binds
@@ -72,20 +118,3 @@ url = "http://localhost:8085/?backend=canvas2d"
 expect_backend = "Canvas2d"
 out = "canvas-guard.png"
 
-# ---------------------------------------------------------------------------
-# Axes — fixed for the whole campaign; order is the tie-break for "lowest axis"
-# ---------------------------------------------------------------------------
-axes = [
-  "composition_and_framing",
-  "subject_fidelity",
-  "silhouette_readability",
-  "material_and_texture_detail",
-  "lighting_and_shadow",
-  "color_palette",
-  "contrast_and_exposure",
-  "depth_and_separation",
-  "atmosphere",
-  "scale_and_proportion",
-  "detail_density",
-  "artifact_level",
-]
