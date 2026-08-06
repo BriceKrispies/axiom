@@ -725,3 +725,50 @@ depth_and_separation = 2
 scale_and_proportion = 2
 detail_density = 1
 artifact_level = 3
+
+# ── pass 6 — setup ────────────────────────────────────────────────────────────
+[[iteration]]
+pass = 6
+kind = "setup"
+date = "2026-08-06"
+title = "the judged arm becomes webgl2; the hardware path stops drawing at half resolution"
+what_changed = """
+Three things, none of them a lens proposal:
+
+1. ARMS ARE NOW EXPLICIT (campaign.toml). This campaign had been scoring the
+   CANVAS2D software rasterizer for five iterations, because capture.md pinned
+   `backend=canvas2d` as "the deterministic baseline". That is the arm with the
+   least headroom against a detailed reference and it is not what a player with a
+   GPU sees. judged = webgl2; guard = [canvas2d].
+
+2. RENDER QUALITY IS RESOLVED PER TIER (games/casino-mount.ts, `qualityForTier`).
+   The game's configured `renderQuality` (renderScale 0.5, fixed-1x) is its
+   SOFTWARE baseline, and it was being handed to BOTH backends — so the hardware
+   path drew at half the canvas and let the browser stretch it, which is what made
+   every diagonal in the champion stair-step. definition.ts already said "the rung
+   worth reaching for is 1.0"; there was simply nowhere to say "0.5 on software,
+   native on hardware". Now there is. The split is one-directional: software tiers
+   get exactly what the config asked for, byte for byte.
+
+3. THE WEBGL2 ARM IS CAPTURABLE AT ALL (browser/agent_capture.py). Two real bugs
+   stood between this campaign and a webgl2 champion:
+     - the engine builds its GL context without `preserveDrawingBuffer`, so
+       `toDataURL` (the `native` clip) reads back BLANK. A webgl2 champion captured
+       the old way was a white image.
+     - `await_frozen` ALSO polled `toDataURL` regardless of clip, so on webgl2 two
+       blank reads compared equal and the freeze gate returned on its first two
+       polls — passing while capturing an unsettled frame. The detector now reads
+       through the same path as the shot (`read_frame`), and compositor reads
+       suppress the arcade chrome that overlaps the render.
+"""
+canvas2d_guard = """
+UNCHANGED, and proven so rather than assumed. The deterministic gate reads
+identically before and after the tier split:
+  backing 468x293 = 137k samples/frame
+  peak 398 nodes/frame (ceiling 410)
+  124517 node-frames (ceiling 128000)
+Nothing in `qualityForTier` can make the software path draw one extra sample.
+"""
+champion_png = "webgl2, --clip stage, 948x597 (was: canvas2d, --clip native, 468x293)"
+scorecard = "marked STALE in-file; the pass-6 critic owns the recalibration"
+comparability = "scores are NOT comparable across the arm switch — see campaign.toml [scoring.calibration]"

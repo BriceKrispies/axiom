@@ -1,0 +1,134 @@
+#  Campaign manifest — treasure-chest-pick
+#
+#  This game ships TWO renderers off ONE scene, and until this pass the campaign
+#  had never said which one it was converging. It was in fact converging the
+#  SOFTWARE one, because that is what `capture.md` happened to pin
+#  (`backend=canvas2d`, "the deterministic baseline backend"). That made every
+#  iteration 1-5 a judgement of the Canvas2D rasterizer's flat, half-resolution
+#  output — which is the arm with the least headroom against a reference this
+#  detailed, and not the arm a player with a GPU ever sees.
+#
+#  From pass 6 the arms are explicit.
+
+[arms]
+#  The one arm that is SCORED, rendered as champion.png, and named to every lens.
+judged = "webgl2"
+#  Captured every pass and shown to the human, NEVER scored, allowed to drift,
+#  must stay legible.
+guard = ["canvas2d"]
+
+[arms.rationale]
+judged = """
+webgl2 is the arm the engine's own capability ladder prefers (webgpu -> webgl2 ->
+webgl1 -> canvas2d -> css3d), so it is what a player with working hardware gets.
+It is also the only arm with real headroom: per-pixel shading, antialiasing, and
+the full facet budget (the software path draws every round primitive at
+SOFTWARE_DETAIL_SCALE = 0.5).
+"""
+guard = """
+canvas2d is the fallback for machines with no working WebGL2 — a real state on
+locked-down enterprise and remote-desktop machines, which is why the ladder
+probes rather than trusts. It is guarded, not scored: it must stay LEGIBLE and it
+must not get SLOWER, but it is not expected to approach the reference.
+
+Its frame rate is not a matter of opinion here. It is gated, deterministically,
+by `apps/casino-games/web/src/games/treasure-chest-pick/frame-rate.test.ts`:
+
+    node --test "apps/casino-games/web/src/games/treasure-chest-pick/frame-rate.test.ts"
+
+  peak nodes/frame 398 (ceiling 410) - node-frames 124517 (ceiling 128000)
+
+Node count is an exact integer with no run-to-run noise, and the rasterizer costs
+~1 unit of time per node per frame. A camera / grade / exposure / fog / light-rig
+change moves it by exactly ZERO. Added GEOMETRY trips it immediately, and the fix
+is to gate that geometry on the tier (`rendererTierAtLeast`), never to raise the
+ceiling.
+"""
+
+#  ── what the two arms can and cannot differ by ────────────────────────────────
+#
+#  Worth knowing before spending a change on "make it better on GPU only": on
+#  @axiom/web-engine the two backends are far more alike than on a normal engine.
+#
+#    * `MaterialSpec` is `{ baseColor, emissive?, roughness?, opacity? }` — no
+#      textures and no normal maps, on EITHER arm.
+#    * neither arm has shadow mapping; every shadow in this scene is authored
+#      geometry.
+#    * both light through the same shared Lambert model (`shading.ts`).
+#
+#  So colour, camera, light, material and geometry edits land IDENTICALLY on both
+#  arms. The only genuinely arm-specific levers are:
+#
+#    1. render quality per tier — resolved in `games/casino-mount.ts`
+#       (`qualityForTier`). The config's `renderQuality` is the SOFTWARE baseline;
+#       a webgl2-or-better tier is lifted to native 1:1 + capped-device. This is
+#       what stopped the hardware arm drawing at half resolution and stretching.
+#    2. tier-gated content — `rendererTierAtLeast("webgl2")`, for detail only the
+#       hardware arm pays for. Note the software backend also serves the `webgl1`
+#       tier, so a tier gate must key on webgl2-or-better, not "not canvas2d".
+
+[capture.judged]
+#  webgl2 CANNOT be read back with `toDataURL`: the engine builds its GL context
+#  without `preserveDrawingBuffer`, so the backing store reads back BLANK (this is
+#  why an earlier attempt at a webgl2 champion produced a white image). It must be
+#  read through the compositor, and `--clip stage` is the correct element: `#stage`
+#  holds the 3D canvas AND the transparent Canvas2D overlay layer the game hangs
+#  over it (the stylized water surface). `--clip canvas` would silently drop the
+#  water.
+#
+#  `agent_capture.py` suppresses the arcade chrome that overlaps the render (rails,
+#  signboard, result banner) for any compositor read, and its `frozen` gate polls
+#  through the SAME read path as the shot — it used to always poll `toDataURL`, so
+#  on webgl2 two blank reads compared equal and the gate passed instantly, before
+#  the sim had reached its freeze tick.
+command = "uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready --backend webgl2 --clip stage --url http://localhost:PORT/ --out champion.png"
+scene = "chests-ready"
+backend = "webgl2"
+clip = "stage"
+size = "948x597"
+
+[capture.guard]
+#  Same moment, same seed, same freeze tick — only the backend differs. Read
+#  `native` (the canvas backing store via `toDataURL`), which is exact and
+#  chrome-free on the software path. 468x293 is the backing store the game's
+#  `renderScale: 0.5` + `fixed-1x` resolves to from a 936x585 CSS box; it is NOT a
+#  regression from the 960x600 that `capture.md` still quotes — that number predates
+#  the render-quality work.
+command = "uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready --backend canvas2d --clip native --url http://localhost:PORT/ --out canvas2d-guard.png"
+scene = "chests-ready"
+backend = "canvas2d"
+clip = "native"
+size = "468x293"
+
+[scoring]
+#  Fixed axis order, so a scorecard is comparable pass to pass.
+axes = [
+  "composition_and_framing",
+  "subject_fidelity",
+  "scale_and_proportion",
+  "silhouette_readability",
+  "color_palette",
+  "contrast_and_exposure",
+  "lighting_and_shadow",
+  "material_and_texture_detail",
+  "depth_and_separation",
+  "detail_density",
+  "scene_props_completeness",
+  "artifact_level",
+]
+
+[scoring.calibration]
+#  The arm switch RESETS comparability. Every score in iterations 1-5 measured a
+#  canvas2d image; pass 6's champion is a webgl2 image at native resolution. Axes
+#  that read the rasterizer directly (artifact_level, detail_density,
+#  silhouette_readability) will move purely because the arm changed, and that is
+#  NOT campaign progress. The critic re-baselines in pass 6 and says so.
+comparable_from_pass = 6
+reference_aspect = 1.50   # 1536x1024 (installed 2026-08-06)
+judged_aspect = 1.588     # 948x597 — the app's stage, NOT the reference's shape
+aspect_note = """
+The reference is 3:2 and the app's stage is ~1.59:1, so composition_and_framing
+can never read as an exact match. Score framing on WHERE THINGS SIT in the frame
+(the pool's share of frame height, the margin above the far rim, where the props
+land), not on edge-to-edge correspondence.
+"""

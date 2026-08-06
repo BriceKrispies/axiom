@@ -130,21 +130,73 @@ class CasinoAgent:
         self.settle()
 
     # ── capture ──────────────────────────────────────────────────────────────
+    #
+    # There are two ways to read a frame out of this app, and which one is
+    # correct depends on the BACKEND:
+    #
+    #   * `native` reads the canvas BACKING STORE via `toDataURL` — exactly the
+    #     pixels the renderer wrote, no browser resampling, no page chrome. It is
+    #     the right read for canvas2d and it is the only read that is a pure
+    #     function of (seed, config, tick).
+    #   * `canvas` / `stage` screenshot the composited PAGE and clip to an
+    #     element. This is the only read that works on **webgl2**: the engine
+    #     builds its GL context without `preserveDrawingBuffer`, so by the time
+    #     `toDataURL` runs the drawing buffer has been presented and cleared, and
+    #     the backing store reads back BLANK.
+    #
+    # Because the compositor path screenshots the real page, the arcade chrome
+    # that sits on top of the render (the rails, the signboard, the result
+    # banner) lands in the shot. The convergence campaign converges the RENDER,
+    # not the UI text (see visual_targets/*/capture.md), so `_chrome` takes it off
+    # for the duration of the read and puts it straight back.
+    #
+    # Prefer `stage` over `canvas` for a webgl2 convergence capture: `#stage`
+    # contains the 3D canvas AND the transparent Canvas2D overlay layer the game
+    # hangs over it (the stylized water surface), so it is the whole render.
+    # `#axiom-canvas` alone would silently drop the water.
+
+    #: Chrome that OVERLAPS the render surface, hidden for a compositor read.
+    CHROME_SELECTORS = (".cab-rail--left", ".cab-rail--right", "#instruction", "#result-banner")
+
+    def _chrome(self, visible: bool) -> None:
+        self.page.evaluate(
+            """([selectors, visible]) => {
+                 for (const selector of selectors)
+                   for (const el of document.querySelectorAll(selector))
+                     el.style.visibility = visible ? "" : "hidden";
+               }""",
+            [list(self.CHROME_SELECTORS), visible],
+        )
+
+    def _composite(self, clip: str, scale: float) -> bytes:
+        """Screenshot the composited page, clipped to the render surface, with the
+        chrome suppressed. Restores the chrome even if the screenshot raises."""
+        self._chrome(False)
+        try:
+            kwargs = {"scale": "css" if scale == 1 else "device"}
+            if clip in ("canvas", "stage"):
+                kwargs["clip"] = self.page.locator("#axiom-canvas" if clip == "canvas" else "#stage").bounding_box()
+            return self.page.screenshot(**kwargs)
+        finally:
+            self._chrome(True)
+
+    def read_frame(self, clip: str, scale: float = 1.0) -> bytes:
+        """The current frame, read the same way `screenshot` will read it.
+
+        The freeze detector below MUST agree with the capture about what "the
+        frame" is. It used to always poll `toDataURL` regardless of clip, which is
+        blank on webgl2 — so two blank reads compared equal, `frozen` returned on
+        its first two polls, and the gate reported a settled frame before the sim
+        had reached its freeze tick. It passed while capturing nothing.
+        """
+        if clip == "native":
+            data = self.page.evaluate("() => document.getElementById('axiom-canvas').toDataURL('image/png')")
+            return base64.b64decode(data.split(",", 1)[1])
+        return self._composite(clip, scale)
+
     def screenshot(self, path: pathlib.Path, clip: str, scale: float) -> pathlib.Path:
         path.parent.mkdir(parents=True, exist_ok=True)
-        if clip == "native":
-            # The canvas BACKING STORE: exactly what the renderer drew (960x600),
-            # with no browser resampling. Reliable on canvas2d; a WebGL2 context
-            # without preserveDrawingBuffer can read back blank — use --clip canvas
-            # for webgl2 captures.
-            data = self.page.evaluate("() => document.getElementById('axiom-canvas').toDataURL('image/png')")
-            path.write_bytes(base64.b64decode(data.split(",", 1)[1]))
-            return path
-        kwargs = {}
-        if clip in ("canvas", "stage"):
-            box = self.page.locator("#axiom-canvas" if clip == "canvas" else "#stage").bounding_box()
-            kwargs["clip"] = box
-        self.page.screenshot(path=str(path), scale="css" if scale == 1 else "device", **kwargs)
+        path.write_bytes(self.read_frame(clip, scale))
         return path
 
     def settle(self, frames: int = 6):
@@ -152,7 +204,7 @@ class CasinoAgent:
         # next observation/capture.
         self.page.wait_for_timeout(frames * 16)
 
-    def await_frozen(self, max_polls: int = 60, interval_ms: int = 50):
+    def await_frozen(self, clip: str = "native", scale: float = 1.0, max_polls: int = 60, interval_ms: int = 50):
         # Block until the rendered frame stops changing — the real condition a
         # `?shot=N` capture needs, not a wall-clock guess. With the sim frozen at
         # tick N the canvas backing store becomes CONSTANT, so once two
@@ -163,7 +215,7 @@ class CasinoAgent:
         prev = None
         stable = 0
         for _ in range(max_polls):
-            data = self.page.evaluate("() => document.getElementById('axiom-canvas').toDataURL('image/png')")
+            data = self.read_frame(clip, scale)
             if data == prev:
                 stable += 1
                 if stable >= 2:
@@ -229,7 +281,9 @@ def run_step(agent: CasinoAgent, step: str, out: pathlib.Path, shots: list[pathl
     elif verb == "wait":
         agent.page.wait_for_timeout(int(arg))
     elif verb == "frozen":
-        agent.await_frozen()
+        # Poll through the SAME read path the shot will use, so the freeze gate
+        # cannot pass on a read that the capture does not share (see read_frame).
+        agent.await_frozen(clip, scale)
     elif verb == "key":
         agent.key(arg)
     elif verb in ("move", "click"):

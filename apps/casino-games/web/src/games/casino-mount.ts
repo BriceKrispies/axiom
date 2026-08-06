@@ -7,8 +7,17 @@
  * rule of the fairness contract lives in the pure fold, not here.
  */
 
-import type { RenderQuality, Scene, ToneSpec, ViewContext } from "@axiom/web-engine";
-import { MITER_LIMIT, clampRenderQuality, rendererBackendName, resolveBackingSize, runGame } from "@axiom/web-engine";
+import type { BackendChoice, RenderQuality, Scene, Tier, ToneSpec, ViewContext } from "@axiom/web-engine";
+import {
+  MITER_LIMIT,
+  clampRenderQuality,
+  detectTierSync,
+  latestDetection,
+  rank,
+  rendererBackendName,
+  resolveBackingSize,
+  runGame,
+} from "@axiom/web-engine";
 import type { CasinoHud, GameRuntime, RunningCasinoGame } from "../chance-engine/registry/definition.ts";
 import { cameraShakeOffset } from "../presentation/cameras/presets.ts";
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "../presentation/cameras/picking.ts";
@@ -76,6 +85,74 @@ const attachOverlay = (
 export type { CasinoMountSpec, CasinoState } from "./round-state.ts";
 export { celebrationFor, COMMON_ACTIONS, outcomeRarity, speedTicks } from "./round-state.ts";
 
+/*
+ * ── rasterization quality is resolved PER TIER ────────────────────────────────
+ *
+ * A game's configured `renderQuality` is its SOFTWARE baseline. It has to be:
+ * the Canvas2D rasterizer costs very nearly one unit of time per backing pixel,
+ * so a game that wants to stay playable on the software path picks a
+ * conservative `renderScale` (the chest game pins 0.5 with `fixed-1x`, which is
+ * the resolution the engine drew at back when that was hard-coded).
+ *
+ * The HARDWARE path has no reason to wear that number. On WebGL2 the cost of a
+ * backing pixel is a rounding error next to the cost of a draw call, and drawing
+ * at half the canvas and letting the browser stretch the result is exactly what
+ * makes every diagonal in the scene stair-step. The game's own config comment
+ * says as much — "the rung worth reaching for is 1.0, which removes the upscale
+ * entirely" — and then hands 0.5 to both backends anyway, because there was
+ * nowhere to say "0.5 on software, native on hardware."
+ *
+ * This is that place. It is the right one: `casino-mount.ts` is the app's impure
+ * mount shell and already the single site where quality is validated, and the
+ * tier is a property of the MACHINE, not of the game's configuration — so it
+ * must not become a twentieth field in the config schema that every operator
+ * panel and stored config has to carry.
+ *
+ * The split is strictly one-directional: the software tiers get exactly what the
+ * config asked for, byte for byte. Nothing here can make the Canvas2D path draw
+ * a single extra sample, which is what keeps
+ * `treasure-chest-pick/frame-rate.test.ts` (398 nodes/frame, 137k samples) green
+ * by construction rather than by luck.
+ */
+
+/** The best tier that still rasterizes in SOFTWARE. `webgl1` maps to the Canvas2D
+ * backend (the GL backend needs GLSL 300 es), so the hardware split has to key on
+ * webgl2-or-better — not on "anything that isn't canvas2d". */
+const SOFTWARE_CEILING: Tier = "webgl1";
+
+/** Backing resolution the hardware path is allowed to reach: native 1:1 with the
+ * canvas's CSS box, so the blit stops being an upscale. */
+const HARDWARE_RENDER_SCALE = 1;
+
+/** Which tier this mount is about to land on, resolved BEFORE `runGame` builds the
+ * backend (the quality is read once, at construction).
+ *
+ * An explicit `?backend=` choice is taken at its word — that is what forcing a
+ * rung means. Otherwise the probed ladder decides, and `latestDetection()` is
+ * preferred so this shares the one probe `initRenderer("auto")` will itself reuse
+ * rather than painting the ladder's test patterns twice per mount. */
+const mountTier = (choice: BackendChoice | undefined): Tier =>
+  choice === undefined || choice === "auto"
+    ? (latestDetection() ?? detectTierSync()).tier
+    : choice === "css"
+      ? "css3d"
+      : choice;
+
+/** The configured quality on a software tier; the same quality lifted to native
+ * resolution on a hardware one. `rank` is ascending-by-capability-loss (webgpu 0 …
+ * css3d 4), so "at least as good as webgl2" is `rank(tier) < rank("webgl1")`. */
+const qualityForTier = (configured: RenderQuality, tier: Tier): RenderQuality =>
+  rank(tier) < rank(SOFTWARE_CEILING)
+    ? clampRenderQuality({
+        ...configured,
+        // Follow the display, bounded by the config's own `maxPixelRatio` — a
+        // HiDPI player gets the sharpness their panel can show, and the engine's
+        // `maxSamples` still bounds the maximised-window case.
+        pixelRatioMode: "capped-device",
+        renderScale: Math.max(configured.renderScale, HARDWARE_RENDER_SCALE),
+      })
+    : configured;
+
 /** Mount one game on `canvas` under `runtime`. */
 export const mountCasinoGame = <TSpec, TExtra>(
   canvas: HTMLCanvasElement,
@@ -93,7 +170,11 @@ export const mountCasinoGame = <TSpec, TExtra>(
   // the 2D overlay layer so both surfaces sample at the same rate. A game that
   // sets nothing gets the engine default. Nothing below this line feeds the fold,
   // the seed, or the result source — quality cannot reach an outcome.
-  const quality = clampRenderQuality(runtime.config.renderQuality);
+  //
+  // The configured value is the SOFTWARE baseline; a hardware tier lifts it to
+  // native resolution. See the `qualityForTier` note above — the software path is
+  // guaranteed to get exactly what the config asked for.
+  const quality = qualityForTier(clampRenderQuality(runtime.config.renderQuality), mountTier(runtime.backend));
 
   const view = (state: CasinoState<TExtra>, ctx: ViewContext): Scene => {
     const scene = spec.viewScene(state, ctx);

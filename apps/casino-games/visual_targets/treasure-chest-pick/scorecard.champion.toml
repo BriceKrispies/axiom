@@ -1,3 +1,27 @@
+# =============================================================================
+#  !! STALE — DO NOT READ THE SCORES BELOW AS CURRENT !!
+#
+#  Pass 6 changed TWO things under this file at once:
+#
+#    1. the JUDGED ARM. This campaign had been silently scoring the CANVAS2D
+#       software rasterizer (capture.md pinned `backend=canvas2d`). It now scores
+#       WEBGL2, with canvas2d demoted to a guarded, never-scored arm. See
+#       campaign.toml [arms].
+#    2. the REFERENCE. reference.png was replaced (1408903 -> 2085031 bytes,
+#       1614x974 -> 1536x1024, aspect 1.657 -> 1.50) on 2026-08-06.
+#
+#  Every measured claim below was taken from a 468x293 canvas2d image against the
+#  PREVIOUS reference. It describes neither the current champion nor the current
+#  reference, so it is marked stale rather than left to read as true — that quiet
+#  drift is the exact corruption the note below was written to stop, and this file
+#  is not going to commit it a fifth time by staying silent.
+#
+#  The pass-6 critic lens owns the recalibration. Scores are NOT comparable across
+#  the arm switch (campaign.toml [scoring.calibration] comparable_from_pass = 6):
+#  artifact_level, detail_density and silhouette_readability will all move purely
+#  because the arm changed, and that is not progress.
+# =============================================================================
+
 # Champion scorecard — treasure-chest-pick
 #
 # CRITIC PASS 6 re-calibration against the CURRENT champion.png (the image
