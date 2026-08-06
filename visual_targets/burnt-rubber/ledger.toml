@@ -1607,3 +1607,242 @@ atmosphere = 1
 scale_and_proportion = 3
 detail_density = 2
 artifact_level = 1
+
+# ---------------------------------------------------------------------------
+# Iteration 15 — SCORING RECALIBRATION + GATE BACKFILL. No render changed; no
+# candidate was captured; no app source was touched. `decision` is deliberately
+# NOT one of the loop's four values, for the same reason as iterations 1, 2, 3,
+# 6, 8 and 11: none of them describes "the champion image is untouched and only
+# the record moved", and calling this a keep_candidate would fake a promotion.
+# ---------------------------------------------------------------------------
+[[iteration]]
+iteration = 15
+attacked_axis = "none — scoring recalibration"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/abstractions/0008.toml",
+  "visual_targets/burnt-rubber/champions/INDEX.md",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic audit of era-C pass 2. Four axes lowered, one abstraction backfilled, the
+attacked axis CONFIRMED unchanged. final_score 1.20 -> 1.10 on an image that did
+not move.
+
+FIRST, WHAT IS HONEST, checked before anything was corrected.
+
+  THE CHAMPION IS CLEAN. champion.png hashes 433540235183900a48c85f98dfe04de2,
+  byte-identical to champions/0009-2026-08-06-b0f4e518.png and to the copy on the
+  champion line. `git log b0f4e518..HEAD -- apps/burnt-rubber/ crates/ modules/`
+  returns nothing, so the only commit since the capture (0245cbce) touched
+  visual_targets/ alone. This scorecard describes the image on disk.
+
+  THE ERA IS CONSISTENT. campaign.toml reference_era = "C", INDEX.md marks era C
+  current, iteration 14's before/after both sit inside era C. No score crosses the
+  boundary and no movement across one is reported as progress.
+
+  EVERY MEASUREMENT IN THE PASS-2 SCORECARD REPRODUCES EXACTLY, re-derived from
+  the two PNGs: band median 139.7 / 99.1, whole-frame saturation 0.522 / 0.221,
+  whole-frame mean luma 114.4 / 137.1, above-L250 1.43% / 7.50%. Not one figure
+  was rounded in the campaign's favour, and the pass named its own overshoot (39
+  over became 40 under) in the same breath as its win. That is the part of this
+  record that is working, and it is the reason the corrections below are about
+  apportionment rather than about honesty.
+
+  THE GUARDED ARM IS CLEAN. No score, no axis note and no ledger reason in this
+  campaign credits or blames the canvas2d arm. The four "canvas" hits on the
+  scorecard are the HTML canvas element the projection fix measures, not the
+  software arm. campaign.toml scopes the guard correctly (legibility, not parity).
+
+  PARITY LANGUAGE: clean. Nothing claims the render matches, is done, or has
+  reached parity. Two per-feature phrasings sat at the drift edge — "the road is
+  right" and "measured-correct" — and are rewritten in the axis notes this pass
+  touches. A per-feature "is right" is one step from "matched" and the record
+  should not take that step casually. Nothing on this scorecard is above 2.
+
+1. FOUR AXES INFLATED. The pass's own header declared the risk it was taking —
+"the projection fix improves what three axes measure at once … if a critic folds
+silhouette back, that is a fair call and this note is the evidence for it" — and
+declaring it was right. The split it chose does not survive measurement.
+
+  (a) scale_and_proportion 3 -> 2. THE HEADLINE, and the central finding.
+  Its ceiling reason was "the subject still spans 0.313 of frame width against
+  the reference's 0.598". The champion figure reproduces exactly. The REFERENCE
+  figure is wrong by 2x. Three independent readings agree it is ~0.30: the
+  painted body's widest row measures 0.287w, a direct crop read of the rear track
+  gives ~0.305w, and this campaign's OWN art-director measured "the reference's
+  30%" at iteration 12. A naive full-width red bbox on the reference returns
+  1.000w — it swallows the roofs, the umbrella and the sand — which is exactly
+  the error shape that produces a figure like 0.598. So the champion's car is at
+  109% of the reference's width and the residual this axis was scored against
+  does not exist.
+  The half that DOES fail was never measured: painted-body aspect 3.42 wide-to-
+  tall against the reference's 1.13 (3.0x); full silhouette ~1.89 against ~0.97
+  (1.95x). An axis named scale_and_proportion cannot be "clearly on-model" with
+  its subject's governing ratio off by 2-3x.
+  What genuinely improved is real and is why this is 2 and not 1: the world is no
+  longer anamorphic, the moon-vs-BRAKE-ring test is retired, road width and palm
+  spacing land, the horizon holds at 0.474 against 0.464, and the car's width now
+  matches. That is 1 -> 2. It is not 1 -> 3, because 3 was taken from a source
+  proof and a mis-measured residual rather than from the image.
+
+  (b) silhouette_readability 2 -> 1. The fold-back the pass invited, made on
+  measurement rather than on the invitation. "A low wide wedge instead of a
+  rectangle" is accurate, and the wedge is twice as wide for its height as the
+  reference's outline. Off by 2-3x in the governing ratio, no wheels, no exhaust
+  tips, no visible rear deck: that is the 1 anchor almost verbatim. The 2 anchor
+  asks for the right structure emerging, and the structure emerging is a
+  different one — the reference is seen down onto its deck, the champion nearly
+  edge-on at its tail panel.
+
+  (c) subject_fidelity HELD AT 1 — the third leg of the split, and it SURVIVES.
+  Holding it while raising the other two was the right call and this audit
+  confirms it with the measurement the pass did not take: the painted body is
+  3.42 w/h against 1.13, so the car is not the reference's at a different size,
+  it is a different shape. Recorded because a critic pass that only reports what
+  failed is not measuring anything.
+
+  (d) lighting_and_shadow 2 -> 1, and this is the SECOND fold of the same axis.
+  Iteration 13 folded it 2 -> 1 with the ruling "0 -> 1 is earned, 0 -> 2 is
+  not"; pass 2 raised it back to 2 on the LEVEL half alone. The level half is
+  genuinely excellent — the key solved off the reference's own sunlit tarmac,
+  overturning a foreman derivation with a measurement, correctly. But the axis is
+  lighting AND shadow. The shadow half is still 0 by this scorecard's own
+  diagnosis (SHADOW_EXTENT = 20.0 anchored at Vec3::ZERO, this moment ~1.9 km
+  down the course, so every cast shadow is outside the map): no palm shadow
+  raking the road, and no contact shadow under the car at all, so the subject
+  floats. NEW FINDING never before in the record: the key is on the wrong side of
+  frame — the reference's sun sits upper-RIGHT with a flare and casts its palm
+  shadows leftward; the champion's disc sits upper-LEFT (bright-pixel centroid
+  0.262w). That may be rig azimuth or the frozen moment's heading on a curving
+  road; the campaign has never established which, and either way it is a fact
+  about the judged image.
+
+  (e) material_and_texture_detail 2 -> 1. The previous note credited a road VALUE
+  and then said the grain "was not separately measured this pass and is not
+  credited on assumption". Measured now, on three clean asphalt patches: the
+  champion's lateral micro-step is 0.32-0.47 with patch std 0.79-0.95, against
+  the reference's 0.89 step and 2.96 std. The road is a flat gradient. A correct
+  road value is colour and is already carried by color_palette; it is not
+  material, and nothing in frame carries the reference's sand, foam, water, roof
+  tile or frond detail.
+
+  TWO AXES EXAMINED AND HELD, borderline, flagged rather than folded:
+  depth_and_separation (recession reads, but four of the reference's planes do
+  not exist and haze is doing the separating) and detail_density (green-dominant
+  pixels 2.64% against the reference's 16.96%, a 6.4x gap, with six absent
+  classes). Both are the most likely next inflations on this file. They are held
+  because a critic pass that folds every borderline axis is as unreliable as one
+  that folds none.
+
+2. THE HUMAN DECISION ON THE CHASE RIG — audited specifically, and it is
+recorded correctly.
+  RECORDED AS A DECISION: yes. Iteration 12 states it plainly ("the human
+  declined the revert … capped by a deliberate design decision and should not be
+  re-proposed without them revisiting it") and the scorecard carries it at the
+  axis.
+  QUIETLY RE-SCORED AS A DEFECT: no. No axis note penalises the declined pull-in,
+  and this recalibration does not either. The opposite is now true and is the
+  useful finding: with the reference's car measured correctly at ~0.30w against
+  the champion's 0.313w, the width gap the declined proposal was about is CLOSED
+  — the un-squash closed it — so the human's decision has cost this axis nothing
+  at all. What is folded is the ASPECT residual, a different quantity that was
+  never put to them, and which is camera height/pitch rather than pull-in
+  distance.
+  RE-PROPOSED SINCE: not the pull-in. But disclosure is owed and was not given:
+  iteration 14 DID re-solve the rig (arm 5.60 -> 8.91 m, height 1.55 -> 1.71 m)
+  in the pass immediately after the decision. It moves AWAY from the declined
+  pull-in — further back, holding the adjacent lane in frame — so it respects the
+  ruling in direction. It is still a rig change made under a standing human
+  decision about the rig, and the ledger describes it only as "the rig was
+  re-solved with it". Recorded here so the human can see that their rig moved.
+  THE PRINCIPLE, restated because it is the one this pass came closest to
+  bending: a decision caps what may be PROPOSED. It does not cap what is
+  MEASURED. This campaign set that at iteration 11 — "whether to FIX the squash
+  remains a foreman decision; whether to SCORE it is not" — and it holds here.
+  Using a decision as the reason an axis stops at 3 quietly converts a residual
+  into a non-residual, which is how a capped axis becomes an unscored one.
+
+3. THE TARGET DOES NOT MOVE, and that was checked before the corrections were
+written rather than after. Eight axes now tie at 1 (subject_fidelity,
+silhouette_readability, material_and_texture_detail, lighting_and_shadow,
+color_palette, contrast_and_exposure, atmosphere, artifact_level) and
+campaign.toml's fixed order breaks it 2nd.
+
+  NEXT FLAW = subject_fidelity   — UNCHANGED from what iteration 14 recorded.
+
+The inflation was hiding severity and apportionment, not the target. It is also
+still the honest next target for the reason the pass gave: the projection fix
+means the car's real shape is finally visible, so modelling work will no longer
+be spent twice.
+
+4. MISSING ABSTRACTION RECORD, now backfilled as abstractions/0008.toml.
+Iteration 14 sets `abstraction_introduced = true` and names no abstraction — the
+same defect 0005, 0006 and 0007 were each written to repair. The unnamed change
+is 110b59a1 (`WindowingApi::configure_surface_with_scale` /
+`configure_surface_with_profile` / `surface_scale_factor`, new public surface on
+a spine module) plus 25d16abf typing the ratio as the kernel's `Ratio`. It
+CLEARS the gate on the "genuinely cannot express" branch more strongly than any
+abstraction on this campaign so far: Module Law #9 makes browser APIs legal only
+in `host` and `windowing`, so an app-tier value could not have carried a canvas
+measurement even in principle, and the inexpressibility was stated in advance
+twice (iterations 9 and 11) across two eras. Ruling: missing-record, not
+too-early, not ceremonial.
+
+That is the EIGHTH consecutive spine change on this line to land without its gate
+record (0001..0008). Seven previous critic passes each wrote that the repetition
+was the finding. Eight for eight is no longer a pattern worth noting; it is the
+loop's most reliably reproduced behaviour, and the cause is structural — nothing
+makes the gate record a precondition of landing, so it is what gets dropped
+whenever a pass is going well.
+
+5. DEBTS, unchanged and now owed eight times: no determinism / repeat-capture
+tolerance proof exists for ANY champion this campaign has promoted, and no spine
+gate run (coverage / check-architecture / dylint) is recorded for any of the
+eight spine commits — 110b59a1 included, whose own message asserts "native,
+covered, branchless" with no run in the record that confirms it.
+
+final_score 1.20 -> 1.10 (1*0.7 + (16/12)*0.3). A recalibration of the same
+image. The pass still moved the campaign 0.375 -> 1.10 under one calibration, and
+the projection fix remains the largest single win this campaign has landed — the
+correction is about how it was apportioned across four axes, not about whether it
+happened.
+
+JUDGED ARM: gpu (WebGL2), the only arm scored. The guarded canvas2d arm is
+mentioned nowhere in this recalibration and no axis credits or blames it.
+
+NO RENDER, NO APP SOURCE AND NO CHAMPION IMAGE WAS TOUCHED BY THIS ITERATION.
+"""
+next_attacked_axis = "subject_fidelity"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 2
+material_and_texture_detail = 2
+lighting_and_shadow = 2
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 3
+detail_density = 2
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 2
+detail_density = 2
+artifact_level = 1

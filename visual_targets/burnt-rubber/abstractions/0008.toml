@@ -1,0 +1,130 @@
+# BACKFILLED by the critic pass (ledger iteration 15).
+#
+# Ledger iteration 14 — the era-C pass-2 landing — sets
+# `abstraction_introduced = true` and then names no abstraction. That is the
+# same defect 0005.toml, 0006.toml and 0007.toml were each written to repair,
+# and each of those said in as many words that a flag claiming an abstraction
+# with no record of WHICH one is worse than no flag at all: it tells the next
+# pass the gate was considered and gives it nothing to check.
+#
+# The abstraction it did not name is `110b59a1` ("convergence(architect):
+# axiom-windowing — a surface is measured, not declared, and the rig is solved
+# for the frame it lands in"), tidied by `25d16abf` ("a device pixel ratio is a
+# Ratio, not a naked float"):
+#
+#   modules/axiom-windowing/src/windowing_api.rs      new public constructors
+#   modules/axiom-windowing/src/windowing_api/web.rs  the live measurement path
+#   apps/burnt-rubber/src/web.rs, camera.rs, app.rs   the adopting call sites
+#
+# New public surface on a MODULE inside the engine spine, landed inside a
+# convergence pass, with no gate record.
+#
+# This is the EIGHTH consecutive spine change on this campaign's line to land
+# without its record (0001..0007, and now this). Seven previous critic passes
+# have each written that the repetition is the finding and not the paperwork,
+# and the pass after each one did it again. Nothing in the loop makes the gate
+# record a precondition of landing, so it is the step that gets dropped whenever
+# a pass is going well. Eight for eight is no longer a pattern to note; it is the
+# loop's most reliably reproduced behaviour.
+
+axis = "scale_and_proportion"
+
+# The ">= 3 failed bounded attempts" branch does not apply, and the record shows
+# why it could not have: the defect was not reachable by any bounded attempt from
+# the tier the lenses work in. Every rig tune this campaign has run — era-B
+# iteration 9's rig set off the tail-light bar, era-C iteration 12's declined
+# pull-in — moved the CAMERA inside a projection that was already wrong, so no
+# setting of it could have converged. The campaign wrote this down twice before
+# the fix landed: iteration 9 recorded the 3.16x squash as a "standing finding …
+# not acted on and not scored", and iteration 11 proved it from the champion
+# itself (a world-space moon at h/w 3.35 beside a DOM BRAKE ring at 1.06) and
+# scored it. Inexpressibility stated in advance, twice, across two eras.
+failed_attempts = []
+
+inexpressible = true
+
+# Why no config or data change could reach it, and why the fix belongs at exactly
+# this layer and no higher:
+#
+#   `WindowingApi` only ever let a caller DECLARE a surface size, and hardcoded
+#   its scale factor to 1.0. A page's canvas is laid out by CSS and filled with
+#   device pixels at a ratio only the browser knows, so the declared pair is
+#   neither the right size nor the right shape, and every camera resolved against
+#   it compounds the error instead of cancelling it.
+#
+# The "nothing above it could have caught this" claim is not rhetoric — it is
+# Module Law #9. Browser and platform APIs are legal only in the `host` layer and
+# the `windowing` module (PLATFORM_FACING_LAYERS / PLATFORM_FACING_MODULES in
+# crates/xtask/src/hygiene.rs). An app may not look at a canvas, so an app-tier
+# value could not have carried the measurement even in principle, and a
+# mechanically enforced law says so. That is the strongest inexpressibility
+# argument any abstraction on this campaign has offered.
+#
+# Ruling: MISSING-RECORD, backfilled — not too-early, not ceremonial.
+
+smallest_api = """
+One module, three entry points, and the call sites that adopt them.
+
+  modules/axiom-windowing — `configure_surface_with_scale(width, height, ratio)`
+    takes the shape a real surface has: a logical box plus a device pixel ratio.
+    `configure_surface_with_profile` is its profile-carrying sibling, and
+    `surface_scale_factor()` REPORTS the ratio rather than asserting 1.0. The two
+    older entry points become this one at ratio 1, so every existing app is
+    bit-identical and no caller is forced to migrate. A non-finite or
+    non-positive ratio is an error, not a silent fallback — the surface stays
+    unconfigured and the caller is told, rather than the engine quietly
+    rendering at a scale the platform never reported.
+
+  `25d16abf` then types the ratio as the kernel's `Ratio` instead of a naked
+    f32, which is the correct home for a dimensionless quantity many layers need
+    (the same reasoning as Meters/Radians) and keeps the public surface from
+    trafficking in bare floats.
+
+Smaller was available and would have been wrong: a bare `set_device_pixel_ratio`
+setter would have left the surface configurable in two independent, ordering-
+sensitive steps, and a caller could have configured a size and then never
+supplied a ratio — reproducing the original bug with an extra method. The
+constructor takes both because a surface HAS both; that is why this API is the
+right size rather than merely a small one.
+
+Nothing above the module changed shape: `axiom_host::HostViewport` has modelled
+logical size + scale factor since it existed. The windowing facade was simply
+never offering what the host layer already knew how to hold, which is the
+signature of a missing adapter rather than a missing concept.
+"""
+
+# ---------------------------------------------------------------------------
+# CONCERN 1 — THE PROOF WAS A SOURCE FACT, AND IT WAS SCORED AS AN IMAGE FACT
+# ---------------------------------------------------------------------------
+# This abstraction's verification is excellent and this campaign should keep
+# doing it: the drawing buffer (940x1672) and the CSS box (470x836) were read off
+# the live page and agree to four decimals at DPR 2. That PROVES the squash is
+# gone and it is checkable by anyone.
+#
+# What it does not prove is that the frame's proportions are the reference's, and
+# iteration 14 scored `scale_and_proportion` 1 -> 3 as though it did — "the only
+# axis where the fix is verified at the source rather than inferred". A
+# self-consistency proof about the renderer is not a measurement of identity with
+# the reference. Measured on the image (critic pass, iteration 15): the painted
+# car body is 3.42 wide-to-tall against the reference's 1.13, and the reference
+# width figure the ceiling argument rested on (0.598w) is wrong by 2x — the
+# reference's car is ~0.30w and the champion's is 0.313w, so the width gap the
+# axis was scored against does not exist. The axis is recalibrated to 2.
+#
+# This is the generalisable finding and it is why it is recorded HERE rather than
+# only in the ledger: an abstraction that can be verified at the source is
+# exactly the kind whose verification is most likely to be substituted for the
+# scoring measurement it is not.
+#
+# ---------------------------------------------------------------------------
+# CONCERN 2 — THE STANDING DEBTS, NOW OWED EIGHT TIMES
+# ---------------------------------------------------------------------------
+# No determinism / repeat-capture tolerance proof exists for ANY champion this
+# campaign has promoted, and no spine gate run (coverage / check-architecture /
+# dylint) is recorded for any of the eight spine commits on this line — this one
+# included, and it touches a module inside both the Coverage Law's and the
+# Branchless Law's scope. `110b59a1`'s own message says the new constructor is
+# "native, covered, branchless"; the record contains no run that confirms it.
+#
+# Also open and named by the pass itself, recorded so it is not lost: ExtendedLimits
+# now costs 1.70x the fragments at an honest DPR, and surface resize is unhandled.
