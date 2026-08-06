@@ -1,0 +1,86 @@
+# BACKFILLED BY THE CRITIC LENS (pass 7). A NEW ENGINE-SPINE API surface was added
+# to packages/axiom-web-engine to serve this convergence target — commit 810f9506,
+# whose own subject line begins `convergence(architect):` and names
+# treasure-chest-pick — with no abstraction record and no ledger iteration.
+#
+# This is the THIRD time this campaign has shipped a spine change that way (0003,
+# 0004, and now this one), and the SECOND time since ledger iteration 5 wrote down
+# the commitment that "every future structural change on this target ships with its
+# NNNN.toml and a scored ledger entry in the SAME commit". Backfilling records what
+# was done; it does not retroactively bless the process. Four of the five
+# abstraction records this campaign owes have now been written by the critic after
+# the fact, and a gate satisfied only retroactively is not a gate.
+
+axis = "lighting_and_shadow"   # the reference's warm sand-bounce ambient environment
+failed_attempts = []
+inexpressible = true
+# The engine's ambient floor was a hard-coded monochrome AMBIENT = 0.12, baked into
+# shading.ts AND inlined a second time as a GLSL `vec3(0.12)` literal in the WebGL2
+# twin. A scene needing a different environment had only app-tier hacks, both of
+# which the treasure-chest-pick scene's own comments already flagged as debt:
+#   * a near-white DIRECTIONAL "fill" lamp — still directional, so faces pointing
+#     away from both lamps stayed crushed regardless of how bright it got;
+#   * fake material `emissive` on CastleSand / CastleSandDark / Shell / Starfish —
+#     paint compensating for missing light, which poisons color_palette to buy
+#     lighting_and_shadow.
+# No app-tier config value can turn a directional lamp into a hemisphere, and the
+# GLSL literal means the hardware arm could not have followed even if one could.
+# The "cannot express" branch of the gate genuinely applies, and going structural on
+# the first attempt was correct. What was missing was only the record and the score.
+
+smallest_api = """
+packages/axiom-web-engine — one field on the render contract, threaded to both
+backends so they cannot diverge:
+  * SceneFrame gains `ambient` (linear RGB).
+  * the store gains `setAmbient()`, defaulting to DEFAULT_AMBIENT = [0.12, 0.12,
+    0.12], so every pre-existing scene is byte-identical.
+  * Scene gains an optional `ambient` that the run-game shell applies the same way
+    it already applies `clearColor`.
+  * shading.ts (the software truth) seeds its diffuse term from `frame.ambient`;
+    backend-webgl2.ts replaces its inlined `vec3(0.12)` with a `uAmbient` uniform.
+    No backend divergence — the value the software arm reads is the value the
+    hardware arm reads.
+App tier (apps/casino-games/web/src/games/treasure-chest-pick/scene.ts) then
+authors what the reference actually shows: a warm sand-bounce hemisphere
+([0.28, 0.25, 0.21]) with key/fill trimmed by exactly the exposure it supplies so
+lit faces are unchanged, and the fake emissive dropped from the four materials that
+were carrying it.
+
+CRITIC ASSESSMENT OF THE PLACEMENT: correct, and correctly placed. Ambient IS a
+per-frame property of the render contract, not a constant of the renderer, and the
+diagnosis names that wrong shape rather than routing around it. The new surface is
+one field plus one setter; the default reproduces the old constant exactly; the
+duplicated GLSL literal — a real second source of truth — is retired rather than
+edited; and the change DELETES app-tier debt (the fake fill lamp and four fake
+emissives) instead of adding more. Not too-early, not ceremonial.
+
+ONE STANDING CAVEAT: `ambient` is neutral scene data on the render contract, so it
+reaches EVERY arm, including the guarded canvas2d one. That is allowed (the guard
+is permitted to drift) and it is explicitly not a way to aim a change at one arm.
+It is recorded here so nobody later mistakes an ambient change for
+capability-gated, arm-scoped richness.
+"""
+
+commits = [
+  "810f9506 convergence(architect): packages/axiom-web-engine — ambient becomes a per-frame render-contract field (SceneFrame.ambient / setAmbient / Scene.ambient), retiring the fake-fill + fake-emissive workarounds in treasure-chest-pick",
+]
+
+screenshot_command = """
+NOT RE-RENDERED BY THIS LENS — the critic does not build or render, and no
+screenshot proof was captured when the change landed. The judged-arm recipe that
+would produce it is campaign.toml [capture.judged]:
+
+  npm --prefix packages/axiom-web-engine run build
+  uv run scripts/localhost_servers.py start-app casino-games --port 8087
+  uv run apps/casino-games/web/browser/agent_capture.py --scene chests-ready \\
+    --backend webgl2 --clip stage --url http://localhost:8087/ --out champion.png
+"""
+screenshot_proof = """
+NONE ON RECORD. The change landed with no candidate capture, no scorecard and no
+ledger iteration, so there is no before/after image pair proving what it bought on
+the judged arm. This is a gap in the record, not a proof, and it is stated as such.
+The current champion.png does contain the result: the pass-7 recalibration scores
+lighting_and_shadow = 2 and notes that a coherent key direction and contact
+shadows now read across the frame — but that score is a fresh derivation on a new
+arm against a new reference, and it CANNOT be credited to this commit.
+"""

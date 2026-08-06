@@ -10,9 +10,28 @@
 #
 #  From pass 6 the arms are explicit.
 
+#  ── reference era (added by the critic lens, pass 7) ─────────────────────────
+#
+#  The skill requires this key and the campaign never had it, across FOUR
+#  references. A champion is only comparable to the reference it was scored
+#  against, so the era has to be nameable:
+#
+#    era A  4921ba29  the original reference
+#    era B  2e70a614
+#    era C  f233fe43  1614x974, aspect 1.657
+#    era D  1e821742  1536x1024, aspect 1.50 — CURRENT, installed 2026-08-06
+#
+#  No score crosses an era boundary and no movement across one is progress. There
+#  is no champions/ archive for this target at all (see ledger pass 7, finding 5),
+#  so this key is currently the only place the era is recorded.
+reference_era = "D"
+
 [arms]
 #  The one arm that is SCORED, rendered as champion.png, and named to every lens.
 judged = "webgl2"
+#  Restated because it governs every lens: the guard is captured and shown, never
+#  scored. Legibility, not parity.
+guard_rule = "legibility, not parity"
 #  Captured every pass and shown to the human, NEVER scored, allowed to drift,
 #  must stay legible.
 guard = ["canvas2d"]

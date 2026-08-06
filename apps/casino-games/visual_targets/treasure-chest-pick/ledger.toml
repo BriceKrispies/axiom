@@ -772,3 +772,177 @@ Nothing in `qualityForTier` can make the software path draw one extra sample.
 champion_png = "webgl2, --clip stage, 948x597 (was: canvas2d, --clip native, 468x293)"
 scorecard = "marked STALE in-file; the pass-6 critic owns the recalibration"
 comparability = "scores are NOT comparable across the arm switch — see campaign.toml [scoring.calibration]"
+
+# ── pass 7 — CRITIC scoring recalibration (era D, judged arm webgl2) ──────────
+[[iteration]]
+iteration = 7
+pass = 7
+kind = "scoring_recalibration"
+date = "2026-08-06"
+attacked_axis = "none"           # CRITIC recalibration; no render change
+changed_files = [
+  "apps/casino-games/visual_targets/treasure-chest-pick/scorecard.champion.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/abstractions/0005.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/campaign.toml",
+  "apps/casino-games/visual_targets/treasure-chest-pick/ledger.toml",
+]
+champion_screenshot = "champion.png"          # webgl2, --clip stage, 948x597
+candidate_screenshot = "champion.png"
+guard_screenshot = "canvas2d-guard.png"       # captured, shown, NEVER scored
+decision = "scoring_recalibration"
+abstraction_introduced = false   # this entry BACKFILLS a record; it introduces nothing
+next_attacked_axis = "subject_fidelity"
+reason = """
+CRITIC PASS 7. The pass-6 setup commit (1e821742) changed the judged arm AND the
+reference in one move and marked the scorecard STALE in-file rather than letting it
+read as true. This entry is the recalibration that owed, and the scorecard is
+rewritten from scratch.
+
+ERA / ARM BOUNDARY — NOTHING CARRIES ACROSS IT.
+  * reference.png is on its FOURTH version. Era A 4921ba29, era B 2e70a614, era C
+    f233fe43, era D 1e821742 (1536x1024, aspect 1.50, installed 2026-08-06).
+    campaign.toml now carries `reference_era = "D"` so the era is nameable at all;
+    it previously carried no era key.
+  * the judged arm moved canvas2d 468x293 -> webgl2 948x597 native.
+Iterations 0-6 measured a different arm against a different reference. Their scores
+are VOID for comparison. Several pass-7 numbers read HIGHER than the pass-6 card
+(composition 2->3, silhouette 1->2, colour 1->2, lighting 1->2). THAT IS NOT
+PROGRESS and must never be reported as any: it is a different exam. Two of those
+axes (silhouette_readability, detail_density) and artifact_level read the rasterizer
+directly and were always going to move on the arm switch — campaign.toml said so
+before the numbers existed, which is the only reason it is safe to have switched.
+
+RECALIBRATED (fresh derivation, measured where measurable):
+  composition_and_framing     3   pool bbox within ~1.5% of frame of the reference's
+                                  on both axes despite the aspect mismatch
+  subject_fidelity            1   LOWEST. chests have NO lid strap band, NO corner
+                                  brackets, NO lock plate; palm is 5 planks, no
+                                  coconuts; crab a blob; shells polygon fans
+  scale_and_proportion        2   palm foliage carries 56% of the reference's mass
+  silhouette_readability      2   chests read; every margin prop does not
+  color_palette               2   hue family right (water cyan again, G=B) but
+                                  water 33/40 levels dark, sand flat and 11/23 pale
+  contrast_and_exposure       2   range 161 vs 188, std 45.1 vs 53.0, median +17
+  lighting_and_shadow         2   coherent key + contact shadows, but every shadow
+                                  is a blob and there is no light in the water
+  material_and_texture_detail 1   no textures on either arm; sand flat to <=2 levels
+                                  where the reference varies 10-12
+  depth_and_separation        2   chests sit ON the water, not IN it
+  detail_density              1   61% of the reference's local detail energy
+  scene_props_completeness    1   ~half the reference's roster absent outright
+  artifact_level              2   LOWERED FROM 3 — see below
+  final_score 1.23 (lowest 1 * 0.7 + average 1.75 * 0.3)
+
+ARTIFACT_LEVEL LOWERED 3 -> 2, AND IT IS NOT AN APP REGRESSION. Three off-reference
+artifacts are visible at a glance on the judged arm: a REGULAR geometric hex lattice
+across ~30% of the frame (era D's water carries irregular organic caustics — a
+uniform hex net matches nothing in it), the dark oval behind the centre chest, and
+shells rendering as hard-edged polygon fans. Artifact 1 was sub-resolution on the
+old 468x293 arm and the pass-6 card called it "barely legible"; the judged arm draws
+at native 1:1, so it became visible. The app did not get worse — the exam got
+sharper. Nobody may book this as a drop.
+
+FINDING 1 — THE FIXED AXIS ORDER IS CONTRADICTORY, AND IT IS THE TIE-BREAK.
+campaign.toml [scoring] axes puts scene_props_completeness ELEVENTH. Every scorecard
+and every ledger scorecard block since iteration 0 puts it THIRD. Because ties for
+"lowest axis" are broken by the fixed order, that contradiction has been silently
+choosing the campaign's next axis. Iterations 1, 2, 5 and 6 each named
+scene_props_completeness "the earliest axis tied at 1" — true under the scorecard
+layout, false under campaign.toml's declared order, where it is the LAST of the tied
+axes. campaign.toml is the machine-readable manifest and the later, explicit
+declaration, so it is canonical and this scorecard is now laid out in it. The
+contradiction did not change this pass's answer: subject_fidelity is the earliest
+axis at the minimum under BOTH orders. Whoever next edits this campaign should
+delete one of the two orders, not keep both.
+
+FINDING 2 — NEXT AXIS MOVES TO subject_fidelity, ON MERIT, NOT ON ORDER. Four axes
+tie at 1 (subject_fidelity, material_and_texture_detail, detail_density,
+scene_props_completeness). subject_fidelity is earliest in either order and is also
+the right target: the nine chests are the frame's centre, its subject, and the whole
+interactive surface of the game, and at native resolution the judged arm makes it
+plain that the reference chest's three identifying features — lid strap band, gold
+corner brackets, square-keyhole lock plate — are all absent. Note that the pass-6
+card scored subject_fidelity 2 and flagged it as a WATCH-ITEM one step from 1; the
+higher-resolution arm resolved that watch, downward.
+
+FINDING 3 — A FIFTH IMAGE-ONLY PROMOTION, AND AN ENTIRE UNSCORED PASS.
+`ee6a2a64 champion: promote pass-2 render (teal lagoon + shallow shelf,
+height-scaled cast shadows, long lens, shore scatter)` changed champion.png with no
+candidate scorecard, no re-score and no ledger entry — the fifth such promotion
+(iterations 1, 2, 4, the 09d9f6ec swap, and now this one). Behind it sit SIX render
+commits that also have no ledger iteration: 13be2727 (art-director, camera dolly),
+1df0672e (modeler, shore scatter), a941877c (surfacing, water surface), 51069ce2
+(lighting, height-driven cast shadows), 810f9506 (architect, engine ambient
+contract) and e6bc5a09 (foreman merge). Those commits are why the champion now has a
+coherent key light and a shore scatter that the pass-6 card describes as absent —
+the card was not merely stale on arm and reference, it was stale on the render too.
+The pattern is now this campaign's single most reliable behaviour and no further
+backfill should be treated as routine.
+
+FINDING 4 — ABSTRACTION GATE: MISSING RECORD, backfilled as abstractions/0005.toml.
+810f9506 added a new engine-spine API surface (SceneFrame.ambient / setAmbient /
+Scene.ambient, plus a uAmbient uniform replacing an inlined GLSL literal) to
+packages/axiom-web-engine to serve this target, with no record and no score. ON THE
+MERITS it is sound and correctly placed — ambient IS a per-frame render-contract
+property, the default reproduces the old constant byte-for-byte, the duplicated GLSL
+literal is retired, and the change DELETES app-tier debt (a fake directional fill
+and four fake emissives). Not too-early, not ceremonial. What was missing was the
+paperwork and the score, and there is no before/after capture on record for it. The
+other five lens commits in that pass are app-tier scene edits inside the game's own
+presentation tier and owe no record; the pass-6 `qualityForTier` split is likewise
+app-tier (apps/casino-games/web/src/games/casino-mount.ts) and owes none. Four of
+the five records this campaign owes (0001, 0003, 0004, 0005) have now been written
+by the critic after the fact. A gate satisfied only retroactively is not a gate.
+
+FINDING 5 — THE CHAMPION ARCHIVE DOES NOT EXIST. The skill requires every champion
+that lands on main to be copied into <target-dir>/champions/ with an INDEX.md
+carrying the reference-era key. There is no champions/ directory for this target at
+all, across four references and at least eight landed champions
+(4921ba29, 2e70a614, ec137bd9, 4c7284cb, f233fe43, 09d9f6ec, ee6a2a64, 1e821742).
+The record of what this game has actually looked like is recoverable only from git.
+That is the foreman's step to take on landing, not the critic's to fabricate; it is
+recorded here with the shas so it can be reconstructed.
+
+GUARDED ARM. canvas2d-guard.png was read for legibility ONLY and is not scored
+anywhere in this entry or in the scorecard: 468x293, subject present, all nine
+chests and the nameplate legible, lagoon and props present, not black, no error
+state. Nothing is credited or blamed to it. Its frame-rate gate remains the
+deterministic check that governs it (campaign.toml [arms.rationale]), not any axis.
+
+PARITY-CLAIM: clean. No "done / matched / parity" language in the scorecard, this
+ledger, campaign.toml, the abstraction records or the commits. The champion is at
+final_score 1.23 out of 5 — a clean, legible, flat-shaded low-poly proxy of a
+photoreal-toy reference, correctly framed and wrongly surfaced. Nothing in this
+record says otherwise, and nothing may.
+"""
+
+# NOTE: `scorecard_before` is recorded ONLY to identify which numbers this entry
+# voids. It measured a canvas2d image against the era-C reference. The delta
+# between these two blocks is NOT a result and must never be reported as one.
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 2
+scale_and_proportion = 2
+silhouette_readability = 1
+color_palette = 1
+contrast_and_exposure = 2
+lighting_and_shadow = 1
+material_and_texture_detail = 1
+depth_and_separation = 2
+detail_density = 1
+scene_props_completeness = 1
+artifact_level = 3
+
+[iteration.scorecard_after]
+composition_and_framing = 3
+subject_fidelity = 1
+scale_and_proportion = 2
+silhouette_readability = 2
+color_palette = 2
+contrast_and_exposure = 2
+lighting_and_shadow = 2
+material_and_texture_detail = 1
+depth_and_separation = 2
+detail_density = 1
+scene_props_completeness = 1
+artifact_level = 2
