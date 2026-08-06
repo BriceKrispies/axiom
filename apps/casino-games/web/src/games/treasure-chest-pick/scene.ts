@@ -494,10 +494,100 @@ const ringMeshData = (segments: number, innerRatio: number): MeshData => {
   return { indices, normals, positions };
 };
 
+/**
+ * How dark a box's BOTTOM edge sits relative to its top, as baked ambient
+ * occlusion — the one surfacing lever this engine has, and until now the one it
+ * shipped unused.
+ *
+ * There are no textures and no normal maps on either backend (see
+ * campaign.toml), so a flat face is drawn with EXACTLY ONE value: measured on the
+ * judged webgl2 champion, a chest's whole front panel is (156, 96, 46) from its
+ * top edge to its bottom, unbroken but for the three groove lines. The reference
+ * chest's panel is not: sampled down the bottom-left chest's front at 1536x1024
+ * it runs (202, 120, 48) at the top edge to (166, 94, 35) at the rail, and each
+ * plank inside it is brightest along its own upper edge and falls into the seam
+ * below — the soft occlusion of a lapped board, which is most of what makes that
+ * chest read as carved timber rather than printed cardboard.
+ *
+ * `MeshData.ao` is the engine field that models exactly this: one baked
+ * occlusion scalar per vertex, multiplied into BOTH the diffuse and the ambient
+ * term by both backends. So the value is SOLVED from that measurement rather
+ * than dialled: 166/202 = 0.82 and 151/207 = 0.73 down two columns, i.e. the
+ * reference's panel keeps ~0.8 of its top value at its base, and the shade is
+ * linear below the tone curve's 0.9 knee, so an AO of 0.8 at the bottom vertices
+ * reproduces that ratio directly.
+ *
+ * It is baked as a function of LOCAL y, which is what makes it correct for every
+ * box in the scene at once rather than a chest special case: a tall box (the
+ * chest body, a corner post, a castle wall) ramps over its own height, a thin
+ * decal (a groove line, the gold rail) over its own small one, and a floor slab
+ * — whose only visible face is its TOP, all four of whose vertices sit at
+ * y = +0.5 — is left byte-identical. That last part matters: the sand and the
+ * lagoon are the two masses the palette was solved against, and neither moves.
+ */
+const BOX_AO_FLOOR = 0.8;
+
+/**
+ * A unit cube carrying baked per-vertex ambient occlusion (see `BOX_AO_FLOOR`).
+ *
+ * Geometrically it is the engine's own `box` primitive, exactly: extents ±0.5,
+ * flat per-face normals, the same 24 vertices in the same order, the same 12
+ * triangles with the same winding. Nothing about any silhouette, any facet
+ * normal or any node's cost changes — the only addition is one float per vertex,
+ * which is why this reaches the software arm for free and cannot trip the
+ * node-count gate.
+ *
+ * The two arms then answer it in their own terms, exactly as the contract
+ * declares: the GPU interpolates `vAo` per fragment, so a face carries a smooth
+ * gradient; the software rasterizer averages it over each triangle, so the same
+ * face reads as a two-step approximation of that gradient. Richer on the judged
+ * arm, coarser but legible on the guard.
+ */
+const aoBoxMeshData = (): MeshData => {
+  // (normal, u-axis, v-axis) per face, u x v = normal, so the corner order below
+  // winds counter-clockwise seen from outside — the primitive's own convention.
+  const faces: readonly (readonly [EngineVec3, EngineVec3, EngineVec3])[] = [
+    [v3(1, 0, 0), v3(0, 1, 0), v3(0, 0, 1)],
+    [v3(-1, 0, 0), v3(0, 0, 1), v3(0, 1, 0)],
+    [v3(0, 1, 0), v3(0, 0, 1), v3(1, 0, 0)],
+    [v3(0, -1, 0), v3(1, 0, 0), v3(0, 0, 1)],
+    [v3(0, 0, 1), v3(1, 0, 0), v3(0, 1, 0)],
+    [v3(0, 0, -1), v3(0, 1, 0), v3(1, 0, 0)],
+  ];
+  const corners: readonly (readonly [number, number])[] = [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ];
+  const positions = faces.flatMap(([normal, uAxis, vAxis]) =>
+    corners.map(([su, sv]) =>
+      v3(
+        0.5 * (normal.x + su * uAxis.x + sv * vAxis.x),
+        0.5 * (normal.y + su * uAxis.y + sv * vAxis.y),
+        0.5 * (normal.z + su * uAxis.z + sv * vAxis.z),
+      ),
+    ),
+  );
+  const normals = faces.flatMap(([normal]) => corners.map(() => normal));
+  // Open at the top (ao 1), occluded at the base — a linear ramp in local y, so a
+  // top face is uniformly unoccluded and a bottom face uniformly floored.
+  const ao = positions.map((p) => BOX_AO_FLOOR + (1 - BOX_AO_FLOOR) * (p.y + 0.5));
+  const indices = faces.flatMap((_, faceIdx) => {
+    const base = faceIdx * corners.length;
+    return [base, base + 1, base + 2, base, base + 2, base + 3];
+  });
+  return { ao, closed: true, indices, normals, positions };
+};
+
 export const chestResources = (brand: BrandSpec): GameResources => ({
   materials: { ...MATERIALS, ...brandMaterials(brand) },
   meshes: {
-    box: { kind: "box" },
+    // The shared `box` name, re-declared as the AO-baked cube above: every box in
+    // this scene — chest bodies, planks, posts, the gold rail, the hasp, castle
+    // walls, the plaque — picks it up without a single call site moving, and the
+    // instance count is untouched.
+    box: { data: aoBoxMeshData() },
     cylinder: { kind: "cylinder" },
     [LAGOON_MESH]: { kind: "cylinder", segments: LAGOON_SEGMENTS },
     [LAGOON_RING_MESH]: { data: ringMeshData(LAGOON_SEGMENTS, LAGOON_RING_INNER) },
