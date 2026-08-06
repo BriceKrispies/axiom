@@ -10,7 +10,14 @@
 //!   cones reads as a pine plantation. No scaling of any primitive produces the
 //!   thing a palm actually is — a bare stem with a splayed star on top — so the
 //!   frond fan is authored here as flat blades, which is exactly how a real-time
-//!   palm has always been built.
+//!   palm has always been built;
+//! * a **shrub clump**, a low splayed rosette of leaf blades, because the ground
+//!   between a coast road and the treeline is not bare. A palm avenue standing on
+//!   an unbroken sheet of green is a colonnade in a car park: the avenue supplies
+//!   the vertical beat and nothing supplies the *floor*. A squashed cone is a
+//!   green pyramid, and a box is a box — the thing a roadside plant actually is,
+//!   at this scale, is a handful of stiff blades thrown out of one root, so that
+//!   is what is authored.
 //!
 //! Each is registered once, at install, and every instance in the course shares
 //! it — which is what keeps two hundred of them to a single draw call.
@@ -87,6 +94,75 @@ fn palm_crown_surface() -> SurfaceBuilder {
         };
         let edge = |p: Vec3, half: f32, sign: f32| p.add(across.mul_scalar(half * sign));
         for (near, far) in [(root, arch), (arch, tip)] {
+            let (a, b) = (point(near), point(far));
+            for facing in [Vec3::UNIT_Y, Vec3::new(0.0, -1.0, 0.0)] {
+                builder.quad(
+                    edge(a, near.2, -1.0),
+                    edge(a, near.2, 1.0),
+                    edge(b, far.2, 1.0),
+                    edge(b, far.2, -1.0),
+                    facing,
+                );
+            }
+        }
+    }
+    builder
+}
+
+/// How many leaf blades one shrub clump throws out.
+///
+/// Nine, splayed on the golden angle rather than on an even division, so no two
+/// blades line up and one clump never reads as the regular star the palm crown
+/// deliberately is. Nine is also the point where the rosette stops looking like
+/// a handful of spikes and starts looking like a plant.
+pub const SHRUB_BLADES: u32 = 9;
+
+/// The three blade reaches a clump cycles through, as fractions of the full
+/// blade. A rosette of nine identical blades has a domed top and reads as a
+/// clipped topiary ball; ragged is what a wild plant is.
+const SHRUB_REACHES: [f32; 3] = [1.0, 0.72, 0.88];
+
+/// Register the unit shrub clump: `SHRUB_BLADES` stiff blades sweeping up and
+/// out of one root, authored centred on the origin inside the unit box like the
+/// engine's own primitives and like the palm crown.
+///
+/// A blade is two flat quads — root to belly, belly to tip — emitted twice with
+/// opposite facing, so a clump is solid from every side including from the
+/// chase camera's angle looking down onto it. The normals are the *facings*,
+/// straight up and straight down, for the same reason the fronds' are: a blade
+/// shaded by its own near-vertical normal goes black in a low sun, and a verge
+/// full of black plants is worse than a bare verge.
+pub fn install_shrub(app: &mut RunningApp) -> Handle<Mesh> {
+    app.add_mesh_data(shrub_surface().build())
+        .unwrap_or_else(|_| app.add_mesh(Mesh::cube()))
+}
+
+/// The shrub clump's geometry, with no engine involved — so the shape itself can
+/// be asserted on directly rather than through a mesh handle.
+fn shrub_surface() -> SurfaceBuilder {
+    let blades = SHRUB_BLADES.max(3);
+    let mut builder = SurfaceBuilder::with_quad_capacity(blades as usize * 4);
+    // The golden angle. Successive blades land in the widest remaining gap, so
+    // the clump is evenly covered without ever being symmetric.
+    let step = std::f32::consts::PI * (3.0 - 5.0f32.sqrt());
+    for i in 0..blades {
+        let angle = i as f32 * step;
+        let reach = SHRUB_REACHES[i as usize % SHRUB_REACHES.len()];
+        let out = Vec3::new(angle.cos(), 0.0, angle.sin());
+        let across = Vec3::new(-angle.sin(), 0.0, angle.cos());
+        // (radius from the root, height, half-width) at the three points that
+        // define a blade: the root it leaves the ground at, the belly where it
+        // is widest, and the tip it sweeps up and out to. The tip is *above*
+        // the belly: these blades stand up and splay, they do not droop, which
+        // is what separates a shrub from a palm crown.
+        let root = (0.03f32, -0.46f32, 0.045f32);
+        let belly = (0.20 * reach, -0.06 + 0.30 * reach, 0.085 * reach);
+        let tip = (0.47 * reach, 0.10 + 0.38 * reach, 0.010f32);
+        let point = |(radius, height, _): (f32, f32, f32)| {
+            out.mul_scalar(radius).add(Vec3::new(0.0, height, 0.0))
+        };
+        let edge = |p: Vec3, half: f32, sign: f32| p.add(across.mul_scalar(half * sign));
+        for (near, far) in [(root, belly), (belly, tip)] {
             let (a, b) = (point(near), point(far));
             for facing in [Vec3::UNIT_Y, Vec3::new(0.0, -1.0, 0.0)] {
                 builder.quad(
@@ -194,6 +270,60 @@ mod tests {
         let down = data.normals().iter().filter(|n| n.y < 0.0).count();
         assert_eq!(up, down, "the fan is exactly half up-facing, half down");
         assert!(up > 0 && !surface.is_empty());
+    }
+
+    #[test]
+    fn the_shrub_clump_registers_as_its_own_mesh() {
+        let mut app = app();
+        let clump = install_shrub(&mut app);
+        assert_ne!(clump, app.add_mesh(Mesh::cube()), "not the cube fallback");
+        assert_ne!(clump, install_palm_crown(&mut app), "nor the frond fan");
+    }
+
+    /// The shape claim, asserted directly: blades that sweep **up** and out of
+    /// one root, filling the unit box. A rosette whose tips fall below its
+    /// belly is a palm crown wearing a different name, and the whole reason
+    /// this mesh exists is that a coast verge is not made of small palms.
+    #[test]
+    fn the_shrub_clump_splays_upward_out_of_one_root_inside_the_unit_box() {
+        let surface = shrub_surface();
+        let data = surface.clone().build();
+        let lowest = data.positions().iter().fold(f32::MAX, |m, p| m.min(p.y));
+        let highest = data.positions().iter().fold(f32::MIN, |m, p| m.max(p.y));
+        let reach = data
+            .positions()
+            .iter()
+            .fold(0.0f32, |m, p| m.max((p.x * p.x + p.z * p.z).sqrt()));
+        assert!(lowest <= -0.44, "the clump is rooted at the ground: {lowest}");
+        assert!(highest > 0.4, "and stands up out of it: {highest}");
+        assert!(highest <= 0.5 && lowest >= -0.5, "inside the box");
+        assert!(reach > 0.4, "and splays wide: {reach}");
+        assert!(reach <= 0.5, "while staying in the box: {reach}");
+        assert_eq!(
+            surface.triangle_count(),
+            SHRUB_BLADES as usize * 8,
+            "each blade is two segments, each double-sided"
+        );
+    }
+
+    /// Ragged, not domed. Every blade the same length gives a topiary ball;
+    /// this asserts the clump genuinely carries more than one reach.
+    #[test]
+    fn a_shrub_clump_has_an_uneven_top_and_two_faces_per_blade() {
+        let data = shrub_surface().build();
+        let up = data.normals().iter().filter(|n| n.y > 0.0).count();
+        let down = data.normals().iter().filter(|n| n.y < 0.0).count();
+        assert_eq!(up, down, "every blade is drawn from both sides");
+        let mut tips: Vec<i32> = data
+            .positions()
+            .iter()
+            .map(|p| (p.y * 1000.0) as i32)
+            .collect();
+        tips.sort_unstable();
+        tips.dedup();
+        assert!(tips.len() > 6, "the blade tops differ: {} heights", tips.len());
+        // And the whole thing is deterministic, like every other prop mesh.
+        assert_eq!(shrub_surface().build().positions(), data.positions());
     }
 
     #[test]

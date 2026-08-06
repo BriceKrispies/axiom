@@ -81,12 +81,13 @@ impl SceneryField {
         let cylinder = app.add_mesh(Mesh::cylinder());
         let cone = super::prop_meshes::install_cone(app);
         let frond_fan = super::prop_meshes::install_palm_crown(app);
+        let clump = super::prop_meshes::install_shrub(app);
 
         let pools = PropKind::ALL
             .iter()
             .map(|kind| {
                 let (mesh, material) =
-                    mesh_and_material(*kind, palette, cube, cylinder, cone, frond_fan);
+                    mesh_and_material(*kind, palette, cube, cylinder, cone, frond_fan, clump);
                 KindPool {
                     kind: *kind,
                     entities: (0..kind.pool_capacity())
@@ -243,6 +244,7 @@ fn mesh_and_material(
     cylinder: Handle<Mesh>,
     cone: Handle<Mesh>,
     frond_fan: Handle<Mesh>,
+    clump: Handle<Mesh>,
 ) -> (Handle<Mesh>, Handle<Material>) {
     match kind {
         PropKind::Post => (cube, palette.post),
@@ -254,6 +256,7 @@ fn mesh_and_material(
         PropKind::Building => (cube, palette.building),
         PropKind::PalmTrunk => (cylinder, palette.timber),
         PropKind::PalmCrown => (frond_fan, palette.foliage),
+        PropKind::Shrub => (clump, palette.foliage),
     }
 }
 
@@ -495,8 +498,10 @@ mod tests {
         let cylinder = app.add_mesh(Mesh::cylinder());
         let cone = super::super::prop_meshes::install_cone(&mut app);
         let frond_fan = super::super::prop_meshes::install_palm_crown(&mut app);
+        let clump = super::super::prop_meshes::install_shrub(&mut app);
         for kind in PropKind::ALL {
-            let (_, material) = mesh_and_material(kind, &palette, cube, cylinder, cone, frond_fan);
+            let (_, material) =
+                mesh_and_material(kind, &palette, cube, cylinder, cone, frond_fan, clump);
             // Every kind gets a real material handle rather than a default.
             assert!(
                 [

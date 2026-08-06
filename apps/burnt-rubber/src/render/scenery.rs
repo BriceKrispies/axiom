@@ -54,11 +54,18 @@ pub enum PropKind {
     PalmTrunk,
     /// The frond fan of a coastal palm.
     PalmCrown,
+    /// A clump of roadside undergrowth: one splayed rosette of leaf blades.
+    ///
+    /// The floor of the roadside. A palm avenue gives the verge its vertical
+    /// beat; without something growing between the stems the ground under it is
+    /// an unbroken sheet of one colour, which is the one thing no coast road has
+    /// ever looked like.
+    Shrub,
 }
 
 impl PropKind {
     /// Every kind, in a stable order — the pool is laid out in this order.
-    pub const ALL: [PropKind; 9] = [
+    pub const ALL: [PropKind; 10] = [
         PropKind::Post,
         PropKind::Tree,
         PropKind::Rock,
@@ -68,6 +75,7 @@ impl PropKind {
         PropKind::Building,
         PropKind::PalmTrunk,
         PropKind::PalmCrown,
+        PropKind::Shrub,
     ];
 
     /// The hard ceiling on live instances of this kind.
@@ -81,6 +89,10 @@ impl PropKind {
             PropKind::TunnelLight => 220,
             PropKind::Building => 60,
             PropKind::PalmTrunk | PropKind::PalmCrown => 200,
+            // The densest kind on the course, because ground cover is the one
+            // thing that only works in quantity. Sized to the whole active
+            // window at [`SHRUB_SPACING`] on both shoulders, with headroom.
+            PropKind::Shrub => 480,
         }
     }
 
@@ -99,6 +111,10 @@ impl PropKind {
             // avenue rather than behind a hedge.
             PropKind::PalmTrunk => Vec3::new(0.22, 5.6, 0.22),
             PropKind::PalmCrown => Vec3::new(3.0, 1.7, 3.0),
+            // Knee-to-waist high and wider than it is tall — a plant, not a
+            // bush-shaped tree. Anything taller hides the road edge from the
+            // chase camera, which is the one thing the verge must never do.
+            PropKind::Shrub => Vec3::new(1.05, 0.62, 1.05),
         }
     }
 
@@ -119,6 +135,10 @@ impl PropKind {
             // An avenue has to recede all the way to the vanishing point or it
             // is not an avenue, so a palm outlives every other roadside prop.
             PropKind::PalmTrunk | PropKind::PalmCrown => 900.0,
+            // A metre-high plant is under a pixel well before this, and there
+            // are hundreds of them: the near verge is the only place they earn
+            // their draw, so they stop early and stay cheap.
+            PropKind::Shrub => 240.0,
         }
     }
 }
@@ -158,6 +178,7 @@ pub fn props_for_chunk(
     reflector_posts(track, from, to, tuning, out);
     tunnel_lights(track, from, to, out);
     coastal_palms(seed, track, index, from, to, out);
+    verge_undergrowth(seed, track, index, from, to, out);
     zone_props(&mut draw, track, from, to, out);
 }
 
@@ -302,6 +323,76 @@ const PALM_SPACING: f32 = 24.0;
 const PALM_INSET: f32 = 2.6;
 /// How much further out a palm may be set, so the row is a row and not a ruler.
 const PALM_DEPTH_JITTER: f32 = 3.4;
+
+/// The undergrowth band: ground cover crowding the verge through every green
+/// zone, from the barrier line out into the middle distance.
+///
+/// This is the floor the palm avenue stands on. It is placed by distance for
+/// the same reason the avenue is — the band has to be continuous, and a random
+/// scatter at this density leaves bald patches that read as mown lawn — but
+/// unlike the avenue every clump is jittered hard in depth, size and spin. The
+/// beat here is not the point; the *cover* is, and a visible rhythm in ground
+/// cover is a hedge.
+///
+/// Rock and tunnel zones are skipped outright: a canyon floor and a tunnel are
+/// bare by definition, and planting them would undo the thing that makes those
+/// stretches feel different from the coast.
+fn verge_undergrowth(
+    seed: u64,
+    track: &Track,
+    index: usize,
+    from: f32,
+    to: f32,
+    out: &mut Vec<PropInstance>,
+) {
+    let mut draw = Draw::seeded(seed).fork(SHRUB_SALT ^ index as u64);
+    let first = (from / SHRUB_SPACING).ceil();
+    let count = ((to - from) / SHRUB_SPACING).ceil().max(0.0) as usize;
+    for i in 0..count {
+        let distance = (first + i as f32) * SHRUB_SPACING;
+        if distance > to {
+            break;
+        }
+        let sample = track.interpolated_at(distance);
+        let planted = matches!(
+            sample.section.zone(),
+            Zone::Coast | Zone::Meadow | Zone::Forest
+        );
+        for side in [-1.0f32, 1.0] {
+            // Every draw happens before the zone is consulted, so the stream
+            // advances identically whether or not this slot is planted — the
+            // undergrowth of a coastal chunk cannot depend on what zone the
+            // chunk before it was.
+            let size = draw.range(0.70, 1.45);
+            let depth = SHRUB_INSET + draw.range(0.0, SHRUB_BAND);
+            let spin = draw.range(0.0, std::f32::consts::TAU);
+            if !planted {
+                continue;
+            }
+            out.push(PropInstance {
+                kind: PropKind::Shrub,
+                position: sample
+                    .at_lateral(side * (track.barrier_offset(&sample) + depth))
+                    .add(Vec3::new(0.0, -PROP_SINK, 0.0)),
+                yaw: spin,
+                scale: Vec3::ONE.mul_scalar(size),
+            });
+        }
+    }
+}
+
+/// Salt separating the undergrowth stream from the palms and the scatter.
+const SHRUB_SALT: u64 = 0x3D62_18BC_9F04_A7E5;
+/// Along-course spacing of an undergrowth pair (m). One clump per shoulder every
+/// eight metres, jittered across a wide band, is what turns a green sheet into a
+/// verge without turning it into a wall.
+const SHRUB_SPACING: f32 = 8.0;
+/// How far beyond the barrier the undergrowth band starts (m). Close, because
+/// the plants nearest the camera are the ones doing the work.
+const SHRUB_INSET: f32 = 0.9;
+/// How deep the band runs beyond its inset (m) — wide enough that consecutive
+/// clumps never line up into a row.
+const SHRUB_BAND: f32 = 11.0;
 
 /// The zone-specific scatter: trees, rocks, poles, signs, buildings.
 fn zone_props(
@@ -620,6 +711,49 @@ mod tests {
             sides.0 > 0 && sides.1 > 0 && sides.0.abs_diff(sides.1) < stems / 4,
             "both shoulders are planted: {sides:?}"
         );
+    }
+
+    /// The verge is *covered*, not decorated. This is the count test: ground
+    /// cover only works in quantity, and a handful of plants per chunk is worse
+    /// than none because it reads as litter on a lawn.
+    #[test]
+    fn the_green_verge_is_planted_thickly_on_both_shoulders() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        let mut out = Vec::new();
+        let mut clumps = 0usize;
+        let mut sides = (0usize, 0usize);
+        let mut depths: Vec<f32> = Vec::new();
+        for index in 0..60 {
+            props_for_chunk(crate::DEFAULT_SEED, &track, index, &t, &mut out);
+            let origin = chunk_reference(&track, index).distance;
+            for prop in out.iter().filter(|p| p.kind == PropKind::Shrub) {
+                clumps += 1;
+                let (distance, lateral) = track.localise(prop.position, origin, 220.0);
+                let sample = track.sample_at(distance);
+                assert!(
+                    matches!(
+                        sample.section.zone(),
+                        Zone::Coast | Zone::Meadow | Zone::Forest
+                    ),
+                    "a shrub at {distance} m is planted in bare ground"
+                );
+                let beyond = lateral.abs() - track.barrier_offset(&sample);
+                assert!(beyond >= 0.0, "a shrub at {beyond} m is inside the barrier");
+                depths.push(beyond);
+                *[&mut sides.0, &mut sides.1][usize::from(lateral > 0.0)] += 1;
+            }
+        }
+        assert!(clumps > 400, "the verge is genuinely covered: {clumps} clumps");
+        assert!(
+            sides.0 > 0 && sides.1 > 0 && sides.0.abs_diff(sides.1) < clumps / 4,
+            "both shoulders are planted: {sides:?}"
+        );
+        // Scattered across the band rather than lined up: a constant depth is a
+        // hedge, and a hedge is the failure mode this jitter exists to avoid.
+        let spread = depths.iter().fold(f32::MIN, |m, d| m.max(*d))
+            - depths.iter().fold(f32::MAX, |m, d| m.min(*d));
+        assert!(spread > SHRUB_BAND * 0.5, "the band has depth: {spread} m");
     }
 
     /// A crown floating off its stem is the one way this can look broken, and
