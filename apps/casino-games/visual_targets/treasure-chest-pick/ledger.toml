@@ -1252,3 +1252,121 @@ depth_and_separation = 2
 detail_density = 1
 scene_props_completeness = 1
 artifact_level = 2
+
+# -- pass 7 -- promote -------------------------------------------------------
+[[iteration]]
+pass = 7
+kind = "promote"
+date = "2026-08-06"
+title = "six proposals stacked; the architect's spine commit DROPPED on the engine gate"
+stacked = """
+Six cherry-picked clean:
+  78fdb2d8  art-director  scale_and_proportion         palm crown to the reference's measured span
+  312b0880  modeler       subject_fidelity             chest gold -> one lock plate + keyhole + brackets
+  1a788d9b  lighting      lighting_and_shadow          chest cast shadows re-solved for WATER, not sand
+  367bf28d  surfacing     material_and_texture_detail  per-vertex AO baked into the game's box mesh
+  8abc0027  colorist      color_palette                beach sand chroma inverse-solved to 242,191,98
+  1dcc6339  critic        (bookkeeping)                re-score + abstraction 0006
+"""
+dropped = """
+2f2bfec5  engine-architect  MeshData.tint (per-vertex albedo tint, 3 backends + a new
+GLSL attribute at location 3).
+
+DROPPED BY THE FOREMAN on the engine gate, not on merit. The gate
+(npm --prefix packages/axiom-web-engine run gate) fails Oxlint on two SIZE rules:
+
+    src/store.ts:311:3   eslint(max-lines)       File has too many lines (311). Max 300.
+    src/store.ts:120:31  eslint(max-statements)  function has too many statements (11). Max 10.
+
+Attributable and verified: store.ts was 298 lines at the pass-7 base (two under the
+limit) and 311 after. max-lines/max-statements are switched off ONLY for the
+platform-edge override group; store.ts is strict spine, so they apply. The lens's own
+legality section checked Module/Branchless/Coverage and did not check the size rules --
+it could not, having no node_modules to run the gate with.
+
+Kept out rather than patched because (a) its own visual delta is ZERO this pass -- it
+only opens the channel, and no app authors a tint yet -- and (b) the honest fix is to
+split store.ts at the 300-line law, a structural change that deserves its own
+considered pass rather than a rushed hunk inside a convergence stack.
+
+The diagnosis behind it is sound and worth keeping: MeshData.ao is ONE SCALAR per
+vertex, so it cannot change hue or saturation, and the reference's water shoaling ramp
+is a DESATURATION (deep sat 0.69 -> shallow sat 0.42). A chromatic per-vertex channel
+is genuinely the lowest correct owner for that. Re-propose with the file split.
+"""
+canvas2d_guard = """
+NOT A REGRESSION. Deterministic metric byte-identical to the pass-6 baseline:
+  backing 468x293 = 137k samples/frame
+  peak 398 nodes/frame (ceiling 410)
+  124517 node-frames (ceiling 128000)
+
+A single fps sample read 40.8 fps against pass 6's 102.7 and was NOT trusted: this
+machine's documented drift is 1.7x and that is 2.5x. Settled with the paired
+interleaved A/B that this repo's own bench_rasterizer.py mandates -- base and head
+alternating in one window, three rounds:
+    round 1  base 15.40ms  head 14.47ms
+    round 2  base 16.71ms  head 17.22ms
+    round 3  base 16.17ms  head 14.65ms
+Head wins 2 of 3, median ratio ~0.94 -- marginally FASTER. The base itself read
+15-17ms in this window against 9.7ms earlier, i.e. the whole machine was ~1.7x slower.
+That is the drift, not the change.
+
+Guard legibility: holds, and arguably improves -- warmer sand, deeper teal chest
+shadows that read as water rather than smudge. The surfacing lens's AO degrades as
+DECLARED on this arm (per-triangle averaging turns each face's smooth gradient into a
+two-step diagonal); nothing goes black, since AO only scales between 0.8x and 1.0x.
+"""
+gate_blind_spots = """
+Two, both real, neither closed.
+
+1. TRIANGLES PER NODE. The gate counts scene NODES, so a subdivided custom mesh is one
+   node with hundreds of triangles and reads as zero change while the software
+   rasterizer genuinely pays per triangle. Pass 7 makes this reachable: surfacing moved
+   the shared box from createMesh (primitive, LOD-scaled) to createMeshData (custom
+   geometry). It kept 12 triangles byte-for-byte, so nothing is wrong today.
+
+2. RASTERIZED FILL. The art-director grew the palm crown ~38%, which costs real
+   per-pixel time in the software rasterizer and is invisible to BOTH the node count
+   and the sample count.
+
+Closing them means the gate also pinning triangles-per-frame and, harder, covered area.
+"""
+disputes_resolved = """
+Two lenses contradicted each other on roughness; settled in-tree by the foreman rather
+than by preferring an agent.
+
+The architect called it "the cheapest unspent lever on the board". Surfacing called it
+a NON-LEVER on this geometry. Surfacing is right. shading.ts sets
+shininess = SHINE_MIN + gloss*(SHINE_MAX-SHINE_MIN) = 8 + 120*gloss, and BOTH
+dirContribution and pointContribution multiply the Blinn lobe by gloss as well. On an
+axis-aligned box face under this rig max N.H ~= 0.72, so the specular term is
+gloss * 0.72^(8+120*gloss), maximised at gloss ~= 0.025 for a value of ~4.4e-4 --
+invisible. A highlight on this frame needs curved hardware geometry (modeler) or a
+lower SHINE_MIN / broader lobe in shading.ts (architect). It is NOT a material edit,
+and the pass-7 campaign.toml correction overstated it as one.
+"""
+foreman_errors = """
+One, found by the critic and accepted: the pass-7 axis-order resolution (6993ef1e) gave
+TWO rationales, and the second -- "reverting would invalidate the only scorecard
+measuring the current arm" -- is STRUCK. Row order is cosmetic; if that argument were
+load-bearing it would reduce to "pick the order that protects my card". The resolution
+stands on its first rationale alone: the manifest is the single declared source of
+truth, and pass 7's target is unaffected either way.
+"""
+scoring_honesty = """
+The critic's re-score of the PASS-6 champion (1dcc6339) is the headline and it is not
+flattering: all twelve axes hold at 3,1,2,2,2,2,2,1,2,1,1,2, final 1.23 unchanged.
+NET AXIS EFFECT OF PASS 6'S SEVEN PROPOSALS: ZERO. Real sub-band convergence did happen
+-- lagoon 55,158,154 -> 59,193,197 against the reference's 56,194,197, pool top margin
+0.184 -> 0.159 against 0.160, detail energy 62% -> 68% -- but nothing crossed a
+threshold. It also found pass 6's cast-shadow change shipped at 0.699 against its own
+stated 0.59 target (the TINT landed; the DENSITY did not), and that frame contrast went
+the WRONG way (luminance std 44.3 -> 42.8, water std 23.0 -> 17.6 against 25.5).
+
+Sharpest finding: pass 6 booked its proposal against the lowest axis (subject_fidelity)
+but spent it on the PALM, a margin prop. The subject is the nine chests. Pass 7's
+modeler is the first proposal to actually attack that defect.
+
+As in pass 6, this scorecard scores the image the critic was HANDED, not the image
+promoted here. Stated rather than left implicit.
+"""
