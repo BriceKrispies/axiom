@@ -705,16 +705,21 @@ const chestInstances = (key: string, labelSink: SceneLabel[], pose: ChestPose): 
     mesh: "box",
     transform: hingedTransform(lidHinge, scaleV3(v3(0, LID.y / 2, LID.z / 2), grow), lidQ, scaleV3(LID, grow)),
   };
-  // The chest's ONE piece of heavy gilding: a thick gold RAIL along the lid's
-  // front lip. In the reference this is the chest's defining metal — a deep
-  // plinth-like band that straddles the lid/body seam and stands well proud of
-  // the body front, with the hasp ring hanging off it. The champion's rim was a
-  // 0.13-tall, 0.05-deep hairline that read as a thin yellow sliver; this is
-  // ~1.6x taller and 2x deeper, and it is dropped so its lower half covers the
-  // top of the body front, which is exactly where the reference's gold sits.
+  // The lid's front LIP: a chunky board standing proud of the body front, in the
+  // light `woodLid` tan.
+  //
+  // It used to be GOLD, and that was authored against the superseded era-C
+  // reference. Era D's lid lip is unambiguously WOOD — a lighter tan board, the
+  // same value as the raised end ribs, overhanging a DARK body front. Measured
+  // proof that the gold was wrong in quantity as well as placement: strict-gold
+  // pixels (r>140, g>0.72r, b<0.55g) are 1.96% of the reference chest's
+  // silhouette and 1.52% of its whole 3x3 board, against the champion's 4.85% and
+  // 5.08% — 2.5x and 3.3x too much metal, nearly all of it this rail. The bright
+  // horizontal band at the seam survives the swap: a light tan lip over a dark
+  // front is exactly the value break the reference draws there.
   const lidRim: SceneInstance = {
     key: `${key}:lidrim`,
-    material: trimTop,
+    material: woodLid,
     mesh: "box",
     transform: hingedTransform(lidHinge, scaleV3(v3(0, LID.y / 2 - 0.03, LID.z - 0.03), grow), lidQ, scaleV3(v3(LID.x + 0.05, 0.21, 0.1), grow)),
   };
@@ -729,38 +734,50 @@ const chestInstances = (key: string, labelSink: SceneLabel[], pose: ChestPose): 
     )
     .flat();
 
-  // The hasp: in the reference this is a big HOLLOW square ring hanging off the
-  // gold rail onto the dark body front — a buckle you can see daylight through,
-  // and after the rail it is the chest's most recognisable piece of hardware.
-  // The champion had it as one small solid tab, which read as a nub. Four bars
-  // make the ring (the engine has no torus and no CSG, so a square ring IS the
-  // primitive-honest form — and it is the shape the reference actually draws).
-  // It wears `trimFront` rather than `trimTop`: it faces the camera, and it is
-  // now the front-metal that brightens on hover, which is the job the deleted
-  // `plate` used to do — with far more surface to read it on.
+  // THE LOCK PLATE — the chest's one piece of gold, and its single most
+  // identifying feature.
+  //
+  // Era D's reference draws the front metal as a compact ESCUTCHEON: a gold plate
+  // with a pressed bevel across its upper half, a bottom flange, and a SQUARE
+  // KEYHOLE punched through the middle, centred on the chest front and straddling
+  // the wood lip. It draws no hollow buckle ring and no gold rail. The champion's
+  // hollow four-bar ring was read off the superseded era-C reference; you can see
+  // daylight through it where era D shows solid pressed brass with one dark hole.
+  //
+  // The engine has no CSG, so the "punched" hole is a near-black `ChestInterior`
+  // box sitting a hair proud of the plate face. Under flat shading with no shadow
+  // map that reads exactly as a hole — and a keyhole is, honestly, a view into
+  // the chest. Each part steps monotonically forward in z so none is coplanar
+  // with the one behind it.
+  //
+  // The four parts REPLACE the four ring bars, so the re-model costs exactly ZERO
+  // scene nodes.
   const latchQ = quatMul(lidQ, quatPitch(pose.latchAngle));
   const latchHinge = addV3(lidHinge, rotateByQuat(scaleV3(v3(0, 0.02, LID.z - 0.01), grow), lidQ));
-  // Measured off the reference: the ring is 0.27 of the chest's width across and
-  // ~0.82 as tall as it is wide, with bars ~0.21 of its width. `haspDrop` hangs
-  // it below the hinge so its top bar tucks BEHIND the rail's lower edge and the
-  // rest of the ring reads clear against the dark body front, and the bars sit a
-  // full `LATCH.z` forward so they bite into the rail's front face and stand
-  // proud of it instead of landing coplanar with it.
-  const haspW = LID.x * 0.27;
-  const haspH = haspW * 0.82;
-  const haspBar = haspW * 0.21;
-  const haspDrop = 0.06;
-  const haspPart = (suffix: string, x: number, y: number, w: number, h: number): SceneInstance => ({
+  // Measured off the reference: the plate is 0.27 of the chest's width across and
+  // 0.62 as tall as it is wide, and its keyhole is ~0.21 of the plate across and
+  // roughly square. `lockY` drops it so its top edge tucks under the wood lip's
+  // lower edge and its lower two-thirds read clear against the dark body front —
+  // exactly where the reference seats it.
+  const lockW = LID.x * 0.27;
+  const lockH = lockW * 0.62;
+  const lockY = -0.15;
+  const lockPart = (suffix: string, y: number, z: number, w: number, h: number, d: number, material: string): SceneInstance => ({
     key: `${key}:${suffix}`,
-    material: trimFront,
+    material,
     mesh: "box",
-    transform: hingedTransform(latchHinge, scaleV3(v3(x, y - haspDrop, LATCH.z), grow), latchQ, scaleV3(v3(w, h, LATCH.z), grow)),
+    transform: hingedTransform(latchHinge, scaleV3(v3(0, y, z), grow), latchQ, scaleV3(v3(w, h, d), grow)),
   });
   const hasp: readonly SceneInstance[] = [
-    haspPart("latch", 0, -haspBar / 2, haspW, haspBar),
-    haspPart("latchL", -(haspW - haspBar) / 2, -haspH / 2, haspBar, haspH),
-    haspPart("latchR", (haspW - haspBar) / 2, -haspH / 2, haspBar, haspH),
-    haspPart("latchB", 0, -haspH + haspBar / 2, haspW, haspBar),
+    // The plate. `trimFront` keeps it the front-metal that brightens on hover.
+    lockPart("latch", lockY, LATCH.z, lockW, lockH, 0.05, trimFront),
+    // Its bottom flange — the thin bright lip where the plate meets the base.
+    lockPart("latchflange", lockY - lockH / 2, LATCH.z + 0.002, lockW * 1.06, lockH * 0.16, 0.06, trimTop),
+    // The pressed bevel across the plate's upper half: what makes an escutcheon
+    // read as formed metal rather than a flat gold rectangle.
+    lockPart("latchbevel", lockY + lockH * 0.28, LATCH.z + 0.012, lockW * 0.86, lockH * 0.34, 0.05, trimTop),
+    // The keyhole.
+    lockPart("latchhole", lockY - lockH * 0.1, LATCH.z + 0.028, lockW * 0.21, lockW * 0.23, 0.03, "ChestInterior"),
   ];
 
   const interior: SceneInstance = part("interior", v3(0, BODY.y - 0.03, 0), v3(BODY.x - 0.1, 0.05, BODY.z - 0.1), "ChestInterior");
@@ -928,21 +945,22 @@ const chestInstances = (key: string, labelSink: SceneLabel[], pose: ChestPose): 
           part("endL", v3(-BODY.x / 2 + 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
           part("endR", v3(BODY.x / 2 - 0.02, BODY.y / 2, 0), v3(0.04, BODY.y - 0.04, BODY.z - 0.04), woodSide),
         ]),
-    // Gilding: corner brackets only. The reference body carries NO inboard
-    // vertical straps and NO small separate lock plate — its front is a plain
-    // dark panel, framed by two corner brackets, capped by the gold rail above,
-    // with the big hasp ring hanging over it. The champion's two thin ochre
-    // straps and its 0.26-wide plate were both inventions that broke that read
-    // (the straps in particular sliced the front into strips the reference does
-    // not have), so both are gone and the corner brackets are thickened to the
-    // chunky posts the reference draws. Net instance cost of this whole
-    // re-model is zero: three parts removed here pay for the three extra hasp
-    // bars above.
+    // Gilding: two SHORT brass corner brackets, and that is all the body's metal.
+    // Era D's reference frames the dark front panel with a small brass bracket at
+    // each front corner — a strap cap a fifth of the body's height, not a post
+    // running the whole way down. The champion's full-height gold posts were the
+    // third of its three over-gilded pieces (see the lock plate above for the
+    // measurement), and shortening them is what brings the chest's gold mass back
+    // to the reference's ~2% of silhouette. They stay `trimSide`: a small bracket
+    // on a corner is edge-on to the key light, so the darker ochre rung is the
+    // honest one. Their upper halves sit behind the lip, which is deliberate — the
+    // reference's brackets tuck under it too — and their front face is set 0.015
+    // shy of the lip's so the two never land coplanar.
     ...(sparse
       ? []
       : [
-          part("edgeL", v3(-BODY.x / 2 + 0.01, BODY.y / 2, BODY.z / 2), v3(0.09, BODY.y + 0.02, 0.09), trimSide),
-          part("edgeR", v3(BODY.x / 2 - 0.01, BODY.y / 2, BODY.z / 2), v3(0.09, BODY.y + 0.02, 0.09), trimSide),
+          part("edgeL", v3(-BODY.x / 2 + 0.015, 0.28, BODY.z / 2), v3(0.13, 0.22, 0.09), trimSide),
+          part("edgeR", v3(BODY.x / 2 - 0.015, 0.28, BODY.z / 2), v3(0.13, 0.22, 0.09), trimSide),
         ]),
     ...plaque,
     ...label,
