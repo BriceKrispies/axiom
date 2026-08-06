@@ -126,7 +126,33 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // stages): pull the blue channel well down and widen the red→blue spread so the
   // warm rig lands the beach at golden sand rather than bleached cream. This is a
   // pure palette warm/saturation move — no grade/tonemap stage exists here.
-  StageFloor: { baseColor: [0.9, 0.75, 0.47, 1] },
+  //
+  // SOLVED, not guessed. The beach slab is a box top face, so its normal is
+  // constant and the whole sand field renders as EXACTLY ONE value — which makes
+  // it invertible from a single shot. Measured on the judged webgl2 champion, a
+  // sand mask covering 41.5% of the frame reads 241,199,114 at the median and at
+  // all four corners (spread <= 2 levels). Against the same mask on the reference
+  // (39.5% of frame) at 242,191,98. So red already matches and the error is a
+  // pure CHROMA one, all in the cool channels: green +8, blue +16, HSV saturation
+  // 0.529 against the reference's 0.596. The sand is the single largest surface in
+  // the frame and it was the largest remaining contributor to the whole-frame
+  // saturation deficit (140-144 measured against 159).
+  //
+  // Inverting the shared shade path (`shading.ts`: out = 255 * tonemap(diffuse *
+  // albedo), Reinhard knee at 0.9) through the measured pixel gives this ground
+  // plane's diffuse multiplier as (1.0843, 1.0327, 0.947) — note red lands ABOVE
+  // the knee, so it is compressed and its albedo has to travel further per level.
+  // Solving each channel for the reference's measured target:
+  //
+  //     R  0.918 * 1.0843 = 0.9954 -> tonemap -> 242
+  //     G  0.725 * 1.0327 = 0.7490 ->            191
+  //     B  0.402 * 0.9470 = 0.3803 ->             98
+  //
+  // i.e. warmth is bought by pulling the cool channels DOWN, not by pushing red
+  // up — the only way to add saturation on a substrate with no grade stage and a
+  // red channel already sitting on the tonemap shoulder. Landed saturation 0.599
+  // against the reference's 0.596. Costs zero scene nodes and reaches both arms.
+  StageFloor: { baseColor: [0.918, 0.725, 0.402, 1] },
   // The lagoon's SHALLOW SHELF — the full-radius water disc (the shared
   // `stage:floor-ring`), which the inset open-water body sits inside, so a
   // lighter band of water rings the whole shore. The reference lagoon is not one
