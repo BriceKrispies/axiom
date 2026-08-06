@@ -1282,3 +1282,92 @@ atmosphere = 0
 scale_and_proportion = 1
 detail_density = 1
 artifact_level = 0
+
+[[iteration]]
+iteration = 12
+attacked_axis = "lighting_and_shadow"
+changed_files = [
+  "apps/burnt-rubber/src/render/mod.rs",
+  "apps/burnt-rubber/src/render/palette.rs",
+  "apps/burnt-rubber/src/render/asphalt_texture.rs",
+  "apps/burnt-rubber/src/render/prop_meshes.rs",
+  "apps/burnt-rubber/src/render/scenery.rs",
+  "apps/burnt-rubber/src/render/scenery_pool.rs",
+  "crates/axiom-host/src/frame_sky.rs",
+  "modules/axiom-gpu-backend/src/scene_renderer.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+Era-C pass 1 — the night-to-day conversion. Seven lenses ran; SIX stacked, one \
+declined by the human. Attacked lighting_and_shadow 0 -> 2. No axis fell; seven \
+rose. final_score 0.20 -> 1.175. \
+\
+THE ART-DIRECTOR'S PROPOSAL WAS DECLINED, NOT DROPPED. It measured the car at \
+20% of frame width against the reference's 30% and proposed scaling the chase \
+rig 0.70 to close it. That rig was pulled back and lifted two days ago at the \
+human's explicit request, for gameplay — road ahead to read a corner and the \
+traffic standing in it. The human declined the revert. scale_and_proportion is \
+therefore capped by a deliberate design decision and should not be re-proposed \
+without them revisiting it. \
+\
+TWO LENSES CONFLICTED AND WERE RECONCILED, NOT DROPPED. Lighting sized \
+KEY_INTENSITY through low_key()'s 0.16 black point and chose 3.6; the colorist \
+retired low_key() for cinematic() in the same round, whose black point is zero. \
+Dropping either would have left a daylight rig under a night sky. The lighting \
+proposal had written the contingency into its own caveat — 'come back to ~2.6' — \
+so the foreman resolved both hunks by hand and applied that arithmetic, in a \
+separate labelled commit. Neither lens was overruled. \
+\
+TWO OVERSHOOTS RECORDED. The frame is now brighter than the reference rather \
+than darker (band median 178.3 against 139.7) and flatter (saturation 0.204 \
+against 0.522); and the zenith is blown to (228,231,232) against the reference's \
+(27,111,198) while the horizon band lands nearly right at (128,202,249) against \
+(145,219,239). The gradient is correct and the cloud layer is burying it — \
+CLOUD_COVERAGE 0.55, authored blind, which the architect itself named as the one \
+thing GPU verification had to judge. It reads as a wash, not cumulus. \
+\
+Still absent and now conspicuous: the sea, beach, sailboats and stilt houses \
+(the reference's whole left third is water; the champion's left shoulder is a \
+green hillside), and any palm shadow across the road — the reference's single \
+most characteristic feature. \
+\
+Guarded canvas2d arm captured at the same frozen moment. Not scored. \
+\
+NEXT: by the rule, silhouette_readability (five axes tie at 1, fixed order breaks \
+it 3rd). By human decision, pass 2 targets the anamorphic squash \
+(scale_and_proportion) first, because the art-director measured that a wedge \
+squashed 3.16x in plan renders as a rectangle — so silhouette work is blocked \
+behind the aspect fix and would otherwise be spent twice.
+"""
+next_attacked_axis = "scale_and_proportion"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 0
+color_palette = 0
+contrast_and_exposure = 0
+depth_and_separation = 1
+atmosphere = 0
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 0
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 2
+silhouette_readability = 1
+material_and_texture_detail = 2
+lighting_and_shadow = 2
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 2
+scale_and_proportion = 1
+detail_density = 2
+artifact_level = 1
