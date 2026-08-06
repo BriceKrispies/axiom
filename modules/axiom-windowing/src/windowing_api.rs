@@ -165,18 +165,27 @@ impl WindowingApi {
     /// factor since [`axiom_host::HostViewport`] existed; this is the windowing
     /// facade finally offering it.
     ///
-    /// A non-finite or non-positive ratio is an error, not a silent fallback:
-    /// the surface stays unconfigured and the caller is told, rather than the
-    /// engine quietly rendering at a scale the platform did not report.
+    /// A non-positive ratio is an error, not a silent fallback: the surface stays
+    /// unconfigured and the caller is told, rather than the engine quietly
+    /// rendering at a scale the platform did not report.
+    ///
+    /// The scale is a [`Ratio`] rather than an `f32` because this is public
+    /// engine surface, where a naked float is banned — a bare number here does
+    /// not say whether it is a ratio, a percentage or a pixel count, and the
+    /// caller would have to guess. It also moves the non-finite case out of
+    /// reach entirely: `Ratio::new` rejects NaN and infinity at construction, so
+    /// this function cannot be *called* with one, where before it accepted one
+    /// and returned an error. Non-positive is still checked downstream, by the
+    /// host viewport, because zero and negative are finite and so are a
+    /// windowing question rather than a kernel one.
     pub fn configure_surface_with_scale(
         &mut self,
         logical_width: u32,
         logical_height: u32,
-        device_pixel_ratio: f32,
+        device_pixel_ratio: Ratio,
         profile: HostDeviceProfile,
     ) -> KernelResult<()> {
-        Ratio::new(device_pixel_ratio)
-            .and_then(|scale| self.configure(logical_width, logical_height, scale, profile))
+        self.configure(logical_width, logical_height, device_pixel_ratio, profile)
     }
 
     /// Assemble and store the validated request for a logical `width` x `height`
@@ -684,7 +693,8 @@ mod tests {
     #[test]
     fn a_scaled_surface_carries_the_device_pixels_and_the_ratio_that_produced_them() {
         let mut w = WindowingApi::new();
-        w.configure_surface_with_scale(470, 836, 2.0, HostDeviceProfile::ExtendedLimits)
+        let dpr = Ratio::new(2.0).expect("2.0 is finite");
+        w.configure_surface_with_scale(470, 836, dpr, HostDeviceProfile::ExtendedLimits)
             .expect("a laid-out box at a real device pixel ratio is a valid surface");
         assert_eq!(w.surface_width(), Some(940));
         assert_eq!(w.surface_height(), Some(1672));
@@ -708,7 +718,12 @@ mod tests {
 
         let mut scaled = WindowingApi::new();
         scaled
-            .configure_surface_with_scale(800, 600, 1.0, HostDeviceProfile::Baseline)
+            .configure_surface_with_scale(
+                800,
+                600,
+                Ratio::new(1.0).expect("1.0 is finite"),
+                HostDeviceProfile::Baseline,
+            )
             .expect("valid");
         assert_eq!(declared.presentation_request(), scaled.presentation_request());
     }
@@ -722,17 +737,31 @@ mod tests {
     /// A ratio the platform could not report honestly is an error, not a
     /// silently substituted `1.0`: a surface whose scale is a guess is exactly
     /// the defect this constructor exists to remove.
+    ///
+    /// The two halves are now enforced in two different places, and that split is
+    /// the point of taking a [`Ratio`] rather than an `f32`. **Non-finite** is
+    /// unrepresentable: `Ratio::new` rejects NaN and infinity, so the argument
+    /// cannot be built and the call cannot be made — checked here at the
+    /// constructor, because there is no longer a way to check it at the call.
+    /// **Non-positive** is finite and therefore a perfectly good `Ratio`, so it
+    /// stays this module's job and is still rejected downstream by the host
+    /// viewport, leaving the surface unconfigured.
     #[test]
     fn a_non_finite_or_non_positive_device_pixel_ratio_leaves_the_surface_unconfigured() {
-        let mut nan = WindowingApi::new();
-        assert!(nan
-            .configure_surface_with_scale(470, 836, f32::NAN, HostDeviceProfile::Baseline)
-            .is_err());
-        assert!(!nan.is_surface_configured());
+        assert!(Ratio::new(f32::NAN).is_err(), "a NaN scale never becomes a Ratio");
+        assert!(
+            Ratio::new(f32::INFINITY).is_err(),
+            "nor does an infinite one"
+        );
 
         let mut zero = WindowingApi::new();
         assert!(zero
-            .configure_surface_with_scale(470, 836, 0.0, HostDeviceProfile::Baseline)
+            .configure_surface_with_scale(
+                470,
+                836,
+                Ratio::new(0.0).expect("0.0 is finite, and finite is all a Ratio promises"),
+                HostDeviceProfile::Baseline,
+            )
             .is_err());
         assert!(!zero.is_surface_configured());
     }

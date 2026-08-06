@@ -57,12 +57,18 @@ impl WindowingApi {
                 )
             })
             .and_then(|((width, height), ratio)| {
-                self.configure_surface_with_scale(
-                    width as u32,
-                    height as u32,
-                    ratio as f32,
-                    profile,
-                )
+                // `devicePixelRatio` arrives from the DOM as an `f64` and this is
+                // the boundary where it becomes an engine quantity: `Ratio::new`
+                // rejects a non-finite reading here, so a browser that reported
+                // NaN can never reach the surface request at all.
+                axiom_kernel::Ratio::new(ratio as f32).and_then(|scale| {
+                    self.configure_surface_with_scale(
+                        width as u32,
+                        height as u32,
+                        scale,
+                        profile,
+                    )
+                })
             })
     }
 
