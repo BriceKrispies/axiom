@@ -294,14 +294,37 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // ── one consistent cast-shadow family ─────────────────────────────────────
   // Every prop anchors to the ground with the same two translucent pieces: a
   // SOFT tail raking down-light (length set by how tall the caster is) and a
-  // smaller, darker CORE where the object actually meets the ground. Warm-neutral
-  // so they read as soft sunlit grounding, never as separate black cut-outs —
-  // but no longer so faint they vanish: at 0.14 the tail was invisible against
-  // dry sand, which left every prop sitting ON the frame instead of IN it. A
-  // whisper of nothing else — no emissive — so they only ever darken what is
-  // beneath them.
-  ContactShadowSoft: { baseColor: [0.12, 0.1, 0.07, 1], opacity: 0.18 },
-  ContactShadowCore: { baseColor: [0.1, 0.08, 0.06, 1], opacity: 0.3 },
+  // smaller, darker CORE where the object actually meets the ground. A whisper
+  // of nothing else — no emissive — so they only ever darken what is beneath
+  // them.
+  //
+  // The DENSITY is not a taste dial, it is the reference's, measured. There is no
+  // shadow mapping on either backend (see campaign.toml), so these discs ARE the
+  // scene's shadow term and their opacity is the only lever on how deep a shadow
+  // reads. Sampled off reference.png, a cast shadow multiplies the ground it
+  // falls on by a hair under 0.6 — open sand (250,197,95) against the palm's
+  // shadow band (148,113,62) is 0.59/0.57/0.65 per channel, and the water under
+  // a chest darkens the same way (158G -> 118G, 0.62). The champion's tail was
+  // landing at 0.72 of the sand: present, but a smudge you have to look for, so
+  // no key direction read across the frame at all — the frame's props were lit
+  // from the upper right and grounded by nothing.
+  //
+  // 0.26 is solved for, not nudged. `CULL_FACE` is off and translucent nodes draw
+  // with `depthMask(false)`, so a disc blends TWICE (its lit top face at ~1.06x
+  // albedo, its unlit underside at ambient only): the ground survives at
+  // (1-a)^2, i.e. 0.55 at a=0.26, and the two dark faces add back ~0.035 — which
+  // puts the tail at 0.58/0.59/0.63 of the sand and 0.60 of the water, inside two
+  // levels of the reference on every channel. The CORE, stacking over the tail,
+  // then lands at ~0.33 against the reference's darkest contact (0.35).
+  //
+  // The tint goes cool-neutral rather than brown for the same measured reason: a
+  // shadow here is not "less sun", it is what the SKY and the warm ambient still
+  // deliver, which is relatively bluer than the direct key. That is why the
+  // reference's shadow keeps more of its blue (0.65) than its red (0.59); a warm
+  // brown overlay pulled blue down hardest and flattened the shadow into a mud
+  // wash of the sand's own hue.
+  ContactShadowSoft: { baseColor: [0.1, 0.1, 0.12, 1], opacity: 0.26 },
+  ContactShadowCore: { baseColor: [0.08, 0.08, 0.1, 1], opacity: 0.3 },
   ...CRAB_MATERIALS,
   ...PRIZE_MATERIALS,
   ...VEIL_MATERIALS,
