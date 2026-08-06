@@ -232,15 +232,39 @@ const MATERIALS: Readonly<Record<string, MaterialSpec>> = {
   // cyan the surface ring was always meant to be, one step below the shallow
   // shelf that now rings it.
   //
-  // The TRIPLE is the colorist lens's empirically-calibrated one, kept when the
-  // two lenses that independently found this occlusion were merged. It is solved
-  // backwards from the reference rather than picked: dividing the reference's
-  // measured open-water median (51, 160, 159) by this rig's Lambert multiplier
-  // on a water-facing normal ((1.177, 1.139, 1.055)) yields exactly this base
-  // color. The distinguishing property is GREEN ~= BLUE — the reference lagoon
-  // is caribbean TEAL, and every azure-leaning value tried here (blue well above
-  // green) measured further from the reference, not closer.
-  LagoonWater: { baseColor: [0.17, 0.55, 0.59, 1] },
+  // The TRIPLE is solved BACKWARDS from the reference rather than picked: divide
+  // the reference's measured open-water median by this rig's Lambert multiplier on
+  // a water-facing normal and the base color falls out.
+  //
+  // It had gone STALE. The triple was solved against the PREVIOUS reference, whose
+  // open water measured (51, 160, 159); the reference installed on 2026-08-06
+  // measures (53, 194, 197) — a full 35 levels brighter in green and 44 in blue.
+  // So the champion's lagoon was not "a shade off": the single largest surface in
+  // the frame rendered at 82% of the reference's green and 78% of its blue, which
+  // is why the pool reads as a dull aquarium teal where the reference is lit
+  // caribbean turquoise. Measured on the judged webgl2 champion, the water body
+  // came out (52, 159, 153) from the old base — i.e. an effective multiplier of
+  // (1.199, 1.134, 1.017), matching the rig's independently-computed one and
+  // confirming the sample is the bare 3D surface, not the 2D overlay over it.
+  //
+  // Re-solved against the CURRENT reference: (53, 194, 197) / (1.199, 1.134,
+  // 1.017) / 255 = this triple. Nothing else about the water's construction moves.
+  //
+  // The distinguishing property is no longer GREEN ~= BLUE in the BASE: the new
+  // reference's rendered water sits at blue a hair ABOVE green (197 vs 194), and
+  // this rig's blue multiplier (1.017) is the weakest of the three, so the base
+  // must carry blue clearly above green for the warm key to land them level. That
+  // is the same pre-baked warm-rig compensation `StageFloorAccent` already does
+  // one step up the value ladder — the two water tones now agree on the recipe as
+  // well as on the hue. Both channels still land well under the clamp (194, 197),
+  // so the turquoise keeps its chroma instead of blowing to cyan-white.
+  //
+  // The shelf ring above is deliberately NOT touched: it already measures
+  // (119, 209, 220) against the reference's (103-142, 215-228) shore band. Lifting
+  // the body to meet it is what turns the champion's harsh dark-core-inside-a-pale-
+  // ring step into the reference's gentle one — the reference lagoon is very nearly
+  // ONE bright turquoise, brightening only in a narrow band at the sand line.
+  LagoonWater: { baseColor: [0.173, 0.671, 0.76, 1] },
   EdgeVignette: { baseColor: [0.03, 0.2, 0.26, 1], opacity: 0.34 },
   // A gold accent, so it obeys the same amber ratio and the same
   // seated-below-the-clamp rule as the chest gilding above — a lemon-white rivet
@@ -2192,7 +2216,15 @@ const CHEST_HOLE_SLACK = 1.02;
  * authorities have to agree on the hue or the pool averages out between them. */
 const POOL_EDGE_COLOR = "rgb(102, 196, 206)";
 const WATER_LINE_COLOR = "rgba(210, 244, 252, 0.95)";
-const WATER_TROUGH_COLOR = "rgba(16, 92, 92, 0.6)";
+// The ripple TROUGH is a fraction of the water it is drawn over, so it moved with
+// the re-solved `LagoonWater` above. At (16, 92, 92) x 0.6 x the layer's 0.32 it
+// took 19 levels of green out of the surface — calibrated against the old, darker
+// pool. On the lifted turquoise that same tint would have dragged the troughs to
+// ~174 green where the reference's darkest ripple sits at ~191: the reference's
+// net is mostly BRIGHTER caustic lines on an even turquoise, not dark gouges in it.
+// Seated higher and at a lower alpha so the net keeps exactly its current legibility
+// as a ripple pattern without re-darkening the body the lift just corrected.
+const WATER_TROUGH_COLOR = "rgba(40, 150, 152, 0.5)";
 const WATER_SPARKLE_COLOR = "rgba(234, 251, 255, 0.9)";
 const WATER_SHALLOW_COLOR = "rgba(148, 224, 240, 0.44)";
 
