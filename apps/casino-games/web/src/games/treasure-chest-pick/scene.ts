@@ -2318,15 +2318,38 @@ export const chestWaterOverlay = (state: ChestState, ctx: CanvasRenderingContext
     // holes, ringing the chests in "orbs". The water read comes from the lighter
     // SHALLOW rim, the ripple net, and sparkles, which leave no hole seams.
     bounds: { height: Math.max(...ys) - minY, width: Math.max(...xs) - minX, x: minX, y: minY },
-    cellSize: 58,
-    driftAmount: 2.4,
+    //  CAUSTIC FREQUENCY. `cellSize` is the hexagon's centre-to-vertex radius, so
+    //  the net's pitch on screen is 1.5x it. At 58 the pitch was ~87px across a
+    //  pool only ~560px wide in this overlay space — seven cells edge to edge, big
+    //  enough that the eye stops reading "ripples" and starts reading the LATTICE:
+    //  whole hexagons are countable in the judged frame, which is the exact
+    //  board-game-tile failure `EDGE_KEEP_PERCENT` exists to break up (it cannot,
+    //  at that size — dropping 42% of the edges of a seven-cell grid just makes a
+    //  gappy seven-cell grid). The reference's caustics are fine CRAZING: on the
+    //  order of seventeen cells across the pool, thin bright filaments, no readable
+    //  repeat unit. 22 puts the pitch at ~33px, which is that frequency.
+    cellSize: 22,
+    //  Both layers of the net drift, and their offset shows as a doubled line. At a
+    //  33px pitch, 2.4px of separation is a visible ghost on a hairline stroke, so
+    //  the drift comes down with the cell.
+    driftAmount: 1.6,
     edgeColor: POOL_EDGE_COLOR,
     edgeFadePx: 36,
     lineColor: WATER_LINE_COLOR,
-    lineWidth: 2.2,
-    opacity: 0.32 * strength,
+    //  A filament, not a wire: 2.2px was a fifteenth of the old cell and would be a
+    //  twenty-second of the new pitch's worth of ink, thickening the finer net into
+    //  a mesh. The reference's caustic lines are ~1.5px at this scale.
+    lineWidth: 1.5,
+    //  Thinner, finer strokes lay down less ink over the same water, so the net
+    //  would read WEAKER than before at the old alpha even though there is more of
+    //  it. 0.42 holds the caustics as legible as the reference's without touching
+    //  the broad tints (`depthColor`/`glint` stay off, so no hole can be ringed).
+    opacity: 0.42 * strength,
     shallowColor: WATER_SHALLOW_COLOR,
-    softnessPx: 1.4,
+    //  Blur is scaled to the stroke, not to the pool: at 1.4px it was equal to the
+    //  new line width, which dissolves a 1.5px filament into haze instead of
+    //  softening its edge.
+    softnessPx: 1,
     sparkleColor: WATER_SPARKLE_COLOR,
     timeSeconds: view.nowMs / 1000,
     troughColor: WATER_TROUGH_COLOR,
