@@ -49,6 +49,7 @@ import {
   stepDecorDrag,
 } from "./game.ts";
 import type { ChestExtra, DecorDrag } from "./game.ts";
+import { chestScene, WATER_RADIUS } from "./scene.ts";
 import { TREASURE_CHEST_PICK } from "./definition.ts";
 import { canvasToGround, pickAt, worldToCanvas } from "../../presentation/cameras/picking.ts";
 
@@ -163,6 +164,102 @@ test("the palm sways in the wind — pure in the tick, bounded, and moving", () 
   assert.notEqual(sway.flutter(0), sway.flutter(1), "fronds flutter out of unison");
 });
 
+/*
+ * The beach props stand ON THE SAND — nothing they are made of hangs over the lagoon.
+ *
+ * This is measured on the REAL emitted scene rather than on a copy of either prop's
+ * geometry: the test asks `chestScene` for the frame, takes every instance a prop
+ * contributed, and walks the eight corners of each one. That way a change to the
+ * palm's frond length, or to how far the crab's `turn` idle swings his pennant, is
+ * caught by the same assertion that catches a change to a home position — there is
+ * no second description of either prop here to drift out of step with the first.
+ *
+ * The quantity checked is the corner's APPARENT radius, not its footprint radius,
+ * and that distinction is the whole test. A frond tip is 2.5 units in the air under
+ * a camera pitched 54.5° down, so what the player sees it sitting over is not the
+ * ground point beneath it: it is where the camera's ray through it meets the lagoon
+ * plane, which is pushed AWAY FROM THE CAMERA by roughly the tip's height. Which
+ * way that helps depends on which shore the prop stands on — it pushes the palm
+ * (far side) outward and the crab (near side) toward the pool, which is why the
+ * crab's raised flag clipped the water from a position his shell cleared easily.
+ * Only the ray answers what the frame shows.
+ */
+const SHORE_MARGIN = 0.15;
+
+/** Session seeds sampled for the crab. His idle repertoire is elected from the
+ * ambient stream, so WHICH figure plays — and therefore how far the pennant swings
+ * — depends on the seed; the reach varies by ~0.05 units across seeds. The palm
+ * takes no seed at all (`palmSway` is pure in the tick), so it is unaffected. */
+const PROP_SEEDS = [1, 7, 470573198];
+
+test("the beach props stand clear of the lagoon", () => {
+  const config = TREASURE_CHEST_PICK.defaultConfig();
+  const runtime = {
+    config,
+    onHud: (): void => {},
+    round: 1,
+    seed: 1,
+    settings: { cameraShake: true, highContrast: false, masterVolume: 0, particleScale: 1, reducedMotion: false, sfxVolume: 0 },
+    source: new SeededChanceResultSource(1),
+  };
+  const camera = chestCamera(9);
+
+  /** Where `point` appears to sit on the lagoon plane: the radius at which the
+   * camera ray through it crosses y = 0. */
+  const apparentRadius = (point: EngineVec3): number => {
+    const d = subV3(point, camera.position);
+    const hit = addV3(camera.position, scaleV3(d, -camera.position.y / d.y));
+    return Math.hypot(hit.x, hit.z);
+  };
+
+  const CORNERS = [-0.5, 0.5].flatMap((sx) => [-0.5, 0.5].flatMap((sy) => [-0.5, 0.5].map((sz) => v3(sx, sy, sz))));
+  const cornersOf = (instance: SceneInstance): readonly EngineVec3[] => {
+    const t = instance.transform;
+    return CORNERS.map((c) =>
+      addV3(t.position, rotateByQuat(v3(c.x * t.scale.x, c.y * t.scale.y, c.z * t.scale.z), t.rotation)),
+    );
+  };
+
+  /** Every frame the props are sampled in. The window is long enough to cover
+   * `palmSway`'s slowest term (~1050 ticks) and several of the crab's 150-tick idle
+   * slots, since each prop only reaches its furthest at one phase of its cycle. */
+  const reach = (seed: number, prefix: string): number => {
+    const session = createSession(config, seed, 1, new SeededChanceResultSource(1), { choiceCount: 9, kind: "choice" });
+    const extra: ChestExtra = initialChestExtra(session, null);
+    return Array.from({ length: 145 }, (_, i) => i * 11)
+      .map((tick) => {
+        const scene = chestScene(runtime, { extra, pendingContext: null, pendingReset: null, session: { ...session, tick } });
+        const parts = scene.instances.filter((instance) => instance.key.startsWith(prefix));
+        assert.ok(parts.length > 5, `the ${prefix} prop really is in the scene being measured`);
+        return Math.min(...parts.flatMap((instance) => cornersOf(instance).map(apparentRadius)));
+      })
+      .reduce((a, b) => Math.min(a, b));
+  };
+
+  // The palm: a headless scene is the FRUGAL arm (`gpuDetail()` is false with no
+  // renderer mounted), whose fronds are single boards. The hardware arm replaces
+  // each board with a slim midrib plus leaflets that splay ~0.04·length further out
+  // to the side than the board's own half-width — about 0.08 world units at these
+  // frond lengths. `SHORE_MARGIN` is set above that gap, so clearing it here clears
+  // it on both arms. (The crab is identical on every arm, so his figure is exact.)
+  //
+  // Both props are checked against the same floor and both are on the same sand
+  // band, so one loop covers them: what differs is only which part of each reaches
+  // furthest — the palm's leeward frond, and the crab's pennant.
+  for (const prefix of ["palm:", "crab:"]) {
+    for (const seed of PROP_SEEDS) {
+      const worst = reach(seed, prefix);
+      assert.ok(
+        worst >= WATER_RADIUS + SHORE_MARGIN,
+        `at seed ${seed}, "${prefix}" reaches an apparent radius of ${worst.toFixed(2)}, inside the lagoon's shore ` +
+          `at ${WATER_RADIUS} (+${SHORE_MARGIN} of required daylight) — it would read as hanging over the water. ` +
+          `Move the prop's home further out (DEFAULT_DECOR.props) rather than shrinking the prop; note the left ` +
+          `frame edge is what caps how far out either one can go.`,
+      );
+    }
+  }
+});
+
 test("the crab's idle animations fire on a random interval from the ambient stream", () => {
   // Pure in (tick, seed): same inputs → identical pose.
   for (let tick = 0; tick < 1200; tick += 13) {
@@ -171,13 +268,17 @@ test("the crab's idle animations fire on a random interval from the ambient stre
   // Across many windows the crab performs every idle in its repertoire AND rests
   // — i.e. the animations come on an interval, not every window and not never.
   const kinds = new Set(Array.from({ length: 60 }, (_, w) => crabIdle(w * CRAB_WINDOW + CRAB_WINDOW / 2, 7).kind));
-  assert.ok(kinds.has("rest"), "the crab rests between bits of business");
-  assert.ok(kinds.has("scuttle") && kinds.has("wave") && kinds.has("bob") && kinds.has("turn"), "every idle in the repertoire plays");
+  // The repertoire is EXACTLY rest + the three in-place figures. Asserted as an
+  // equality rather than three `has` checks, because the thing that matters is as
+  // much what is absent: no idle may translate the crab off the mark the player
+  // set him on (the side-scuttle that used to do exactly that is gone — see
+  // `CrabIdleKind`), and only an exact set catches one coming back.
+  assert.deepEqual([...kinds].sort(), ["bob", "rest", "turn", "wave"], "rest plus the three in-place figures, and nothing that travels");
   // A performed idle is real motion somewhere in its run (each figure passes
   // through zero-crossings, so check the PEAK across many ticks, not one instant);
   // a rest is still but for the breathe.
   const motion = (p: ReturnType<typeof crabIdle>): number =>
-    Math.abs(p.scootX) + Math.abs(p.bob) + Math.abs(p.yaw) + Math.abs(p.clawLift) + Math.abs(p.legWiggle);
+    Math.abs(p.bob) + Math.abs(p.yaw) + Math.abs(p.clawLift) + Math.abs(p.legWiggle);
   const poses = Array.from({ length: 2000 }, (_, tick) => crabIdle(tick, 7));
   const peakActive = Math.max(...poses.filter((p) => p.kind !== "rest").map(motion));
   assert.ok(peakActive > 0.1, "an active idle really moves the crab");

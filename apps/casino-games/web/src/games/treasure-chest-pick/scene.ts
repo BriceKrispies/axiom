@@ -1591,10 +1591,11 @@ const sandcastle = (origin: EngineVec3): readonly SceneInstance[] => {
 
 /** The crab on the beach: the shared `crabParts` assembly (see `crab.ts` — his
  * girlfriend, the chest prize, is the same creature) posed by `crabIdle`, which
- * elects one bit of business (scuttle / claw wave / bob / turn) or a rest on a
- * random interval from the ambient stream. Every part is placed through the
- * resulting body frame, so the crab scoots, bobs, turns, waves, and breathes as
- * one creature. Pure in (tick, seed) — outcome-independent. */
+ * elects one bit of business (claw wave / bob / turn) or a rest on a random
+ * interval from the ambient stream. Every part is placed through the resulting
+ * body frame, so the crab bobs, turns, waves, and breathes as one creature —
+ * always in place on his own mark, never travelling. Pure in (tick, seed) —
+ * outcome-independent. */
 /**
  * Where the crab is standing, how big he is there, and what he is doing.
  *
@@ -1620,11 +1621,11 @@ interface CrabStance {
 const crabAt = (stance: CrabStance, tick: number, dress: CrabDress): readonly SceneInstance[] => {
   const pose = stance.pose;
   const bodyQ = quatYaw(stance.yaw + pose.yaw);
-  const bodyShift = v3(pose.scootX, pose.bob, 0);
+  const bodyShift = v3(0, pose.bob, 0);
   // Place a part given in body-local space: rotate its offset into the (turned)
-  // body frame, add the whole-body scoot/bob, scale the lot to wherever he is
-  // standing, and compose the body yaw into its own rotation — so one stance
-  // moves the crab as a single creature at whatever size he is.
+  // body frame, add the whole-body bob, scale the lot to wherever he is standing,
+  // and compose the body yaw into its own rotation — so one stance moves the crab
+  // as a single creature at whatever size he is.
   const place: CrabPlace = (key, material, mesh, local, scale, localRot = QUAT_IDENTITY): SceneInstance =>
     decorPart(
       `crab:${key}`,
@@ -1634,11 +1635,11 @@ const crabAt = (stance: CrabStance, tick: number, dress: CrabDress): readonly Sc
       scaleV3(scale, stance.scale),
       quatMul(bodyQ, localRot),
     );
-  // The shadow follows the crab's side-scuttle (the horizontal scoot) but not its
-  // vertical bob, so it stays planted on the sand as the little creature hops.
-  const shadow = stance.grounded
-    ? contactShadow("crab:shadow", addV3(stance.at, v3(pose.scootX * stance.scale, 0, 0)), 0.5 * stance.scale, 0.6 * stance.scale)
-    : [];
+  // The shadow sits on his mark and does NOT ride the vertical bob, so it stays
+  // planted on the sand as the little creature hops. It needs no horizontal term:
+  // no pose translates him any more (see `CrabIdleKind`), so his feet never leave
+  // the point his stance puts them on.
+  const shadow = stance.grounded ? contactShadow("crab:shadow", stance.at, 0.5 * stance.scale, 0.6 * stance.scale) : [];
   // He carries the brand pennant and wears no bowtie; she is the other way round.
   return [...shadow, ...crabParts(place, pose, tick, dress)];
 };
@@ -1868,7 +1869,6 @@ const errandPose = (journey: CrabJourney, lidOpen: number, tick: number): CrabPo
   kind: "wave",
   // Paddling while he crosses; a fidget once he has hold of something.
   legWiggle: journey.riding ? 0.12 : 0.55,
-  scootX: 0,
   yaw: 0,
 });
 

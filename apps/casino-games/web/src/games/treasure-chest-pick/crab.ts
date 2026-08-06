@@ -224,6 +224,5 @@ export const CRAB_AT_REST: CrabPose = {
   eye: 0,
   kind: "rest",
   legWiggle: 0,
-  scootX: 0,
   yaw: 0,
 };

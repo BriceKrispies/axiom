@@ -73,12 +73,54 @@ export interface DecorDrag {
 
 export const DECOR_KEYS: readonly (keyof DecorProps)[] = ["palm", "castle", "crab"];
 
-/** The props' home positions — where the beach was authored. */
+/*
+ * The props' home positions — where the beach was authored.
+ *
+ * The palm stands FURTHER BACK FROM THE SHORE than its trunk alone needs, and the
+ * reason is its crown rather than its trunk. The palm leans toward the lagoon
+ * (`palmTree` offsets the crown +0.74 in x off the base) and carries a ~2.1-unit
+ * frond reach, so what decides whether the tree is on the sand is the apparent
+ * radius of its outermost LEAF, not of its base. At its previous home (-5.3, -2.8)
+ * the crown's own radius was 5.35 against a shore at `WATER_RADIUS` = 5.0, so the
+ * two fronds facing the pool hung over the shallow shelf and one tip touched the
+ * open water — the tree looked planted in the surf.
+ *
+ * That was not a mistake at authoring time; it is drift. The convergence pass that
+ * sized the crown to the reference lengthened the fronds from 1.5–1.78 to 1.88–2.22
+ * and flattened their droop from ~0.6 to 0.4–0.49 rad, which grew the crown's reach
+ * by ~0.5 units in every direction. The home position was never re-derived against
+ * the bigger crown.
+ *
+ * So (-6.0, 0, -3.0) is derived, not nudged. It is the nearest home to the
+ * authored one at which every corner of every crown box — on BOTH detail arms, at
+ * either extreme of the sway — appears over sand with ~0.35 units of daylight to
+ * the shore ring, while keeping the whole crown inside the frame with a real
+ * margin (the crown's top lands at 0.027 of frame height, against the reference's
+ * 0.029).
+ *
+ * The CRAB is out at -6.0 for the same reason, and the part that decides it is his
+ * PENNANT. His shell sits well inside the sand at either position; what reached
+ * over the water is the little brand flag he holds out at crab-local x +0.59..+0.89
+ * and ~0.7 up (see `crabParts`), which the `turn` idle swings a further ±0.5 rad
+ * about his body. Height works against him where it works for the palm: he stands
+ * on the NEAR shore, so the camera ray through anything he holds up crosses the
+ * lagoon plane further from the camera — i.e. deeper into the pool — and the raised
+ * flag read as planted in the shallows. From (-5.4, 1.0) it reached 0.32-0.36 units
+ * INSIDE the shore depending on which idle the ambient stream elected; from
+ * (-6.0, 1.0) it clears by 0.25-0.29.
+ *
+ * Both props are as far out as this framing allows: the left frame edge is the
+ * binding constraint, and another 0.2 units would put the crab's claw through it.
+ *
+ * "the beach props stand clear of the lagoon", in `treasure-chest-pick.test.ts`,
+ * measures all of this against the emitted scene and fails if either the props or
+ * the geometry they are made of drifts again.
+ */
 export const DEFAULT_DECOR: DecorDrag = {
   grabOffset: v3(0, 0, 0),
   held: null,
   pointerDown: false,
-  props: { castle: v3(5.0, 0, -3.3), crab: v3(-5.4, 0, 1.0), palm: v3(-5.3, 0, -2.8) },
+  props: { castle: v3(5.0, 0, -3.3), crab: v3(-6.0, 0, 1.0), palm: v3(-6.0, 0, -3.0) },
 };
 
 /** Per-prop grab anchor height (up its visible mass) and screen pick radius —
@@ -905,15 +947,25 @@ export const palmSway = (tick: number): PalmSway => ({
 });
 
 /** The crab's idle repertoire. `rest` is the between-animation default (just a
- * faint breathe + eyestalk drift); the other four are the little bits of
- * business it performs. */
-export type CrabIdleKind = "rest" | "scuttle" | "wave" | "bob" | "turn";
+ * faint breathe + eyestalk drift); the other three are the little bits of
+ * business he performs.
+ *
+ * He does NOT travel on his own patch of sand. There used to be a `scuttle` idle
+ * that slid the whole body sideways, and it read wrong for the one crab the frame
+ * has: he is a fixed piece of set-dressing standing where the player put him (his
+ * position is draggable — see `DecorProps`), so a body that wanders off its own
+ * mark looks like the prop has come loose rather than like the creature is alive.
+ * The only journey he makes is the errand — fetching the chosen chest — which is
+ * a beat of the reveal with its own path (`crabJourney`), not an idle. What is
+ * left here are the three figures he performs IN PLACE. */
+export type CrabIdleKind = "rest" | "wave" | "bob" | "turn";
 
-/** One tick of the crab's idle pose. Whole-body `scootX`/`bob`/`yaw`, plus the
- * per-limb `clawLift`/`legWiggle`/`eye` amounts and an always-on `breath`. */
+/** One tick of the crab's idle pose. Whole-body `bob`/`yaw`, plus the per-limb
+ * `clawLift`/`legWiggle`/`eye` amounts and an always-on `breath`. Every figure is
+ * performed in place: there is no whole-body translation here (see
+ * `CrabIdleKind`), so the pose carries no lateral offset for the view to apply. */
 export interface CrabPose {
   readonly kind: CrabIdleKind;
-  readonly scootX: number;
   readonly bob: number;
   readonly yaw: number;
   readonly clawLift: number;
@@ -937,7 +989,7 @@ export interface CrabPose {
  * elected idle or rests, decided from the ambient stream — so the animations
  * fire on a random interval rather than every window. */
 export const CRAB_WINDOW = 150;
-const CRAB_KINDS: readonly CrabIdleKind[] = ["scuttle", "wave", "bob", "turn"];
+const CRAB_KINDS: readonly CrabIdleKind[] = ["wave", "bob", "turn"];
 
 /**
  * The crab's idle pose at `tick`, drawn ONLY from the AMBIENT stream (the same
@@ -954,22 +1006,10 @@ export const crabIdle = (tick: number, seed: number): CrabPose => {
   const active = sample01(seed, "ambient", window, 40) < 0.55;
   const kind = CRAB_KINDS[sampleInt(CRAB_KINDS.length, seed, "ambient", window, 41)] as CrabIdleKind;
   const jitter = sample01(seed, "ambient", window, 42);
-  const resting: CrabPose = { bob: 0, breath, clawLift: 0, clawShake: 0, eye: eyeDrift, kind: "rest", legWiggle: 0, scootX: 0, yaw: 0 };
+  const resting: CrabPose = { bob: 0, breath, clawLift: 0, clawShake: 0, eye: eyeDrift, kind: "rest", legWiggle: 0, yaw: 0 };
   const poses: Record<CrabIdleKind, CrabPose> = {
-    // A little side scuttle with the legs paddling and the body leaning into it.
-    scuttle: {
-      bob: Math.abs(Math.sin(local * Math.PI * 4)) * 0.03 * env,
-      breath,
-      clawLift: 0,
-      clawShake: 0,
-      eye: eyeDrift,
-      kind: "scuttle",
-      legWiggle: Math.sin(tick * 0.6) * 0.4 * env,
-      scootX: Math.sin(local * Math.PI * 3 + jitter * 6) * 0.45 * env,
-      yaw: Math.sin(local * Math.PI * 3 + jitter * 6) * 0.12 * env,
-    },
     // Raising and snapping the claws.
-    wave: { bob: 0, breath, clawLift: (0.5 + jitter * 0.35) * env, clawShake: 1, eye: eyeDrift, kind: "wave", legWiggle: 0, scootX: 0, yaw: 0 },
+    wave: { bob: 0, breath, clawLift: (0.5 + jitter * 0.35) * env, clawShake: 1, eye: eyeDrift, kind: "wave", legWiggle: 0, yaw: 0 },
     // Bobbing up and down with the eyestalks wagging.
     bob: {
       bob: Math.abs(Math.sin(local * Math.PI * 4)) * 0.16 * env,
@@ -979,11 +1019,10 @@ export const crabIdle = (tick: number, seed: number): CrabPose => {
       eye: eyeDrift + Math.sin(tick * 0.22) * 0.12 * env,
       kind: "bob",
       legWiggle: 0,
-      scootX: 0,
       yaw: 0,
     },
     // Turning to look around.
-    turn: { bob: 0, breath, clawLift: 0, clawShake: 0, eye: eyeDrift, kind: "turn", legWiggle: Math.sin(tick * 0.5) * 0.12 * env, scootX: 0, yaw: Math.sin(local * Math.PI * 2 + jitter * 3) * 0.5 * env },
+    turn: { bob: 0, breath, clawLift: 0, clawShake: 0, eye: eyeDrift, kind: "turn", legWiggle: Math.sin(tick * 0.5) * 0.12 * env, yaw: Math.sin(local * Math.PI * 2 + jitter * 3) * 0.5 * env },
     rest: resting,
   };
   return active ? poses[kind] : resting;
