@@ -33,6 +33,13 @@ fn host_to_kernel(_: HostError) -> KernelError {
     )
 }
 
+/// The scale factor of a surface whose logical pixels **are** its device pixels
+/// — the reading [`WindowingApi::configure_surface`] takes when the caller
+/// supplies a size and nothing else.
+fn unit_scale() -> Ratio {
+    Ratio::new(1.0).expect("unit scale factor is finite")
+}
+
 /// The deterministic presentation driver for one window.
 ///
 /// It holds the validated [`HostPresentationRequest`] once a surface is
@@ -138,40 +145,80 @@ impl WindowingApi {
         height: u32,
         profile: HostDeviceProfile,
     ) -> KernelResult<()> {
+        self.configure(width, height, unit_scale(), profile)
+    }
+
+    /// [`Self::configure_surface_with_profile`], for a surface whose box is
+    /// measured in **logical (device-independent) pixels** at a known **device
+    /// pixel ratio** — the shape every real presentation surface actually has.
+    ///
+    /// This is the honest constructor, and the other two are the special case
+    /// `device_pixel_ratio = 1`. A caller that only ever had
+    /// [`Self::configure_surface`] had to pick *one* number for a surface that
+    /// has two: the box it is laid out in, and the device pixels inside that
+    /// box. Passing the device-pixel count as if it were the logical size makes
+    /// the host's scale factor a lie; passing the logical size makes the render
+    /// target smaller than the display. Either way the surface the engine
+    /// configures is not the surface the display shows, and the frame is
+    /// resampled — anisotropically, if the two aspects also disagree — on its
+    /// way to the screen. The host layer has modelled logical size + scale
+    /// factor since [`axiom_host::HostViewport`] existed; this is the windowing
+    /// facade finally offering it.
+    ///
+    /// A non-finite or non-positive ratio is an error, not a silent fallback:
+    /// the surface stays unconfigured and the caller is told, rather than the
+    /// engine quietly rendering at a scale the platform did not report.
+    pub fn configure_surface_with_scale(
+        &mut self,
+        logical_width: u32,
+        logical_height: u32,
+        device_pixel_ratio: f32,
+        profile: HostDeviceProfile,
+    ) -> KernelResult<()> {
+        Ratio::new(device_pixel_ratio)
+            .and_then(|scale| self.configure(logical_width, logical_height, scale, profile))
+    }
+
+    /// Assemble and store the validated request for a logical `width` x `height`
+    /// surface at `scale`. The single place the presentation request is built.
+    fn configure(
+        &mut self,
+        width: u32,
+        height: u32,
+        scale: Ratio,
+        profile: HostDeviceProfile,
+    ) -> KernelResult<()> {
         let host = HostApi::new();
         let kernel = KernelApi::new();
 
         // The one genuinely fallible step with caller-supplied data: the host
-        // rejects a zero/oversized viewport. The remaining steps use fixed,
-        // valid constants and so cannot fail (documented at each site). The
-        // success arm builds and stores the request; on the viewport error we
-        // return it and leave the surface unconfigured.
-        host.viewport(
-            width,
-            height,
-            Ratio::new(1.0).expect("unit scale factor is finite"),
-        )
-        .map_err(host_to_kernel)
-        .map(|viewport| {
-            let target = host
-                .presentation_target(&kernel, TARGET_HANDLE_RAW, TARGET_LABEL)
-                .expect("fixed non-zero target handle and non-empty label are valid");
-            let surface = host
-                .surface_handle(&kernel, SURFACE_HANDLE_RAW)
-                .expect("fixed non-zero surface handle is valid");
-            let descriptor = host.surface_descriptor(
-                viewport,
-                HostPresentMode::Fifo,
-                HostAlphaMode::Opaque,
-                HostColorFormat::Bgra8UnormSrgb,
-            );
-            let adapter = host.adapter_request(HostPowerPreference::HighPerformance, true);
-            let device = host.device_request(true, profile);
-            let request = host
-                .presentation_request(target, surface, descriptor, adapter, device)
-                .expect("adapter requires a presentation surface, matching the device request");
-            self.surface = Some(request);
-        })
+        // rejects a zero/oversized viewport or a non-positive scale. The
+        // remaining steps use fixed, valid constants and so cannot fail
+        // (documented at each site). The success arm builds and stores the
+        // request; on the viewport error we return it and leave the surface
+        // unconfigured.
+        host.viewport(width, height, scale)
+            .map_err(host_to_kernel)
+            .map(|viewport| {
+                let target = host
+                    .presentation_target(&kernel, TARGET_HANDLE_RAW, TARGET_LABEL)
+                    .expect("fixed non-zero target handle and non-empty label are valid");
+                let surface = host
+                    .surface_handle(&kernel, SURFACE_HANDLE_RAW)
+                    .expect("fixed non-zero surface handle is valid");
+                let descriptor = host.surface_descriptor(
+                    viewport,
+                    HostPresentMode::Fifo,
+                    HostAlphaMode::Opaque,
+                    HostColorFormat::Bgra8UnormSrgb,
+                );
+                let adapter = host.adapter_request(HostPowerPreference::HighPerformance, true);
+                let device = host.device_request(true, profile);
+                let request = host
+                    .presentation_request(target, surface, descriptor, adapter, device)
+                    .expect("adapter requires a presentation surface, matching the device request");
+                self.surface = Some(request);
+            })
     }
 
     /// Set the app-authored **hemisphere ambient** the live backend binds with —
@@ -269,6 +316,20 @@ impl WindowingApi {
         self.surface
             .as_ref()
             .map(|r| r.descriptor().viewport().physical_height())
+    }
+
+    /// The configured surface's **device pixel ratio** — the factor between the
+    /// box it is laid out in and the device pixels inside it — if any.
+    ///
+    /// Reported rather than assumed. A caller that sizes anything against the
+    /// surface (a camera aspect, a screen-space overlay, a raster budget) needs
+    /// to know which of the two sizes it is holding, and the ratio is the only
+    /// thing that tells it apart. Always `1` for a surface configured through
+    /// [`Self::configure_surface`], which has no second size to report.
+    pub fn surface_scale_factor(&self) -> Option<Ratio> {
+        self.surface
+            .as_ref()
+            .map(|r| r.descriptor().viewport().scale_factor())
     }
 
     /// Which live backend is bound right now, or `None` before the
@@ -611,6 +672,69 @@ mod tests {
             extended.device().profile().render_size(1280, 720),
             (2560, 1440)
         );
+    }
+
+    /// A surface configured from a logical box plus a device pixel ratio is
+    /// **two** sizes, and the request carries both: the box the display shows,
+    /// and the device pixels the backend renders into it. This is the whole
+    /// point of the constructor — a 470x836 CSS canvas on a 2x screen is a
+    /// 940x1672 render target, and an engine that only ever heard "470x836" (or
+    /// only ever heard a declared 1280x720) renders the wrong number of pixels
+    /// into the wrong shape.
+    #[test]
+    fn a_scaled_surface_carries_the_device_pixels_and_the_ratio_that_produced_them() {
+        let mut w = WindowingApi::new();
+        w.configure_surface_with_scale(470, 836, 2.0, HostDeviceProfile::ExtendedLimits)
+            .expect("a laid-out box at a real device pixel ratio is a valid surface");
+        assert_eq!(w.surface_width(), Some(940));
+        assert_eq!(w.surface_height(), Some(1672));
+        assert_eq!(w.surface_scale_factor().map(Ratio::get), Some(2.0));
+        let viewport = w
+            .presentation_request()
+            .expect("configured")
+            .descriptor()
+            .viewport();
+        assert_eq!(viewport.logical_width(), 470);
+        assert_eq!(viewport.logical_height(), 836);
+    }
+
+    /// The two older entry points are exactly this constructor at ratio 1, and
+    /// they report that ratio rather than leaving it unknowable.
+    #[test]
+    fn an_unscaled_surface_reports_a_unit_ratio_and_matches_the_scaled_constructor() {
+        let mut declared = WindowingApi::new();
+        declared.configure_surface(800, 600).expect("valid");
+        assert_eq!(declared.surface_scale_factor().map(Ratio::get), Some(1.0));
+
+        let mut scaled = WindowingApi::new();
+        scaled
+            .configure_surface_with_scale(800, 600, 1.0, HostDeviceProfile::Baseline)
+            .expect("valid");
+        assert_eq!(declared.presentation_request(), scaled.presentation_request());
+    }
+
+    /// Nothing reports a scale factor before a surface exists.
+    #[test]
+    fn an_unconfigured_driver_has_no_scale_factor() {
+        assert_eq!(WindowingApi::new().surface_scale_factor(), None);
+    }
+
+    /// A ratio the platform could not report honestly is an error, not a
+    /// silently substituted `1.0`: a surface whose scale is a guess is exactly
+    /// the defect this constructor exists to remove.
+    #[test]
+    fn a_non_finite_or_non_positive_device_pixel_ratio_leaves_the_surface_unconfigured() {
+        let mut nan = WindowingApi::new();
+        assert!(nan
+            .configure_surface_with_scale(470, 836, f32::NAN, HostDeviceProfile::Baseline)
+            .is_err());
+        assert!(!nan.is_surface_configured());
+
+        let mut zero = WindowingApi::new();
+        assert!(zero
+            .configure_surface_with_scale(470, 836, 0.0, HostDeviceProfile::Baseline)
+            .is_err());
+        assert!(!zero.is_surface_configured());
     }
 
     #[test]

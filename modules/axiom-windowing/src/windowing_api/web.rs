@@ -16,6 +16,56 @@ use super::WindowingApi;
 type SkinnedDrawTuple = (u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>);
 
 impl WindowingApi {
+    /// Configure the surface **from the canvas it will actually present into**:
+    /// the element's laid-out box in CSS pixels, at the page's device pixel
+    /// ratio. wasm32 only — it is a DOM measurement, and the arithmetic it feeds
+    /// lives in the native-testable core ([`Self::configure_surface_with_scale`]).
+    ///
+    /// This exists because *declaring* a surface size is guesswork an app cannot
+    /// win. A page's canvas is laid out by CSS — `100vw`/`100vh`, an
+    /// `aspect-ratio`, a media query — so its real box is not known until the
+    /// page has laid out, and its device-pixel count is that box times a ratio
+    /// only the browser knows. An app that hands `configure_surface` a
+    /// compile-time `WIDTH x HEIGHT` therefore configures a surface of the wrong
+    /// size *and* the wrong shape: the backend renders a frame of the declared
+    /// aspect, the browser stretches it to fill the element's box, and the world
+    /// is squeezed by exactly the ratio between the two aspects — while every
+    /// camera resolved against the declared size compounds the error rather than
+    /// cancelling it. Nothing above this module can see the discrepancy, because
+    /// nothing above this module is allowed to look at the canvas. So this is
+    /// where the surface stops being declared and starts being measured.
+    ///
+    /// Fails (leaving the surface unconfigured) when there is no such canvas, or
+    /// when the page has not laid it out to a usable box yet.
+    #[cfg(target_arch = "wasm32")]
+    pub fn configure_surface_from_canvas(
+        &mut self,
+        canvas_id: &str,
+        profile: axiom_host::HostDeviceProfile,
+    ) -> axiom_kernel::KernelResult<()> {
+        find_canvas(canvas_id)
+            .ok()
+            .map(|canvas| canvas.get_bounding_client_rect())
+            .map(|box_| (box_.width().round(), box_.height().round()))
+            .filter(|(w, h)| (*w >= 1.0) & (*h >= 1.0))
+            .zip(web_sys::window().map(|w| w.device_pixel_ratio()))
+            .ok_or_else(|| {
+                axiom_kernel::KernelError::new(
+                    axiom_kernel::KernelErrorScope::Id,
+                    axiom_kernel::KernelErrorCode::InvalidId,
+                    "no laid-out canvas with that id to measure the surface from",
+                )
+            })
+            .and_then(|((width, height), ratio)| {
+                self.configure_surface_with_scale(
+                    width as u32,
+                    height as u32,
+                    ratio as f32,
+                    profile,
+                )
+            })
+    }
+
     /// Install unified pointer capture (mouse + touch + pen) on the canvas with
     /// the given id, returning a handle whose [`samples`] the app reads each
     /// frame and feeds to `axiom_input::TouchControls`. `None` if no such canvas

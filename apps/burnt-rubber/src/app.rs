@@ -162,6 +162,25 @@ impl BurntRubber {
         height: u32,
         profile: crate::PlayProfile,
     ) -> BurntRubber {
+        // The chase rig is a *composition*, and `width x height` is the frame it
+        // has to compose in. A perspective camera's horizontal field is its
+        // vertical field scaled by the aspect, so the same rig that fills a 16:9
+        // frame has barely a lane of road either side of the car in an upright
+        // phone frame — see `CameraTuning::framed_for_aspect`, which re-solves
+        // the arm and the eye height for this frame and returns the authored
+        // numbers untouched for any frame at least as wide as the one they were
+        // authored in.
+        //
+        // Done here, once, at construction, rather than per frame: the camera is
+        // deterministic simulation state, and a rig that changed shape mid-race
+        // would make a replay depend on when the window was resized. Everything
+        // downstream — the sim, the ghost, a reset — reads this tuning.
+        let tuning = Tuning {
+            camera: tuning
+                .camera
+                .framed_for_aspect(width.max(1) as f32 / height.max(1) as f32),
+            ..tuning
+        };
         let sim = RaceSim::with_profile(seed, tuning, profile);
         let mut running = App::new()
             .window(

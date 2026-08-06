@@ -359,7 +359,14 @@ impl Default for ChaseCamera {
 
 /// Height above the car the look target sits at (m) — aiming a little above the
 /// bonnet rather than at the road keeps the horizon in frame.
-const TARGET_HEIGHT: f32 = 0.9;
+///
+/// Crate-visible because it is the **pivot the whole rig pitches about**: the
+/// eye is above it and the target is on it, so the angle the view sits below
+/// horizontal is `atan((height - TARGET_HEIGHT) / reach)`. Any re-solve of the
+/// rig that wants to keep the horizon where it is has to hold that angle, and
+/// it cannot do that without this number — see
+/// [`crate::tuning::CameraTuning::framed_for_aspect`].
+pub(crate) const TARGET_HEIGHT: f32 = 0.9;
 
 /// Radians of camera lead per unit of steering input.
 const STEER_LEAD: f32 = 0.14;

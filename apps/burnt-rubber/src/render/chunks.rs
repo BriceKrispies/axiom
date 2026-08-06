@@ -63,9 +63,23 @@ pub const CHUNKS_BEHIND: usize = 2;
 pub const PAINT_AHEAD_METRES: f32 = 5.0;
 
 /// How far *behind* the car road paint is drawn once the window is engaged,
-/// metres. Enough to cover the road under the car itself, which is 4.5 m long
-/// and drawn from a chase camera sitting further back again.
-pub const PAINT_BEHIND_METRES: f32 = 6.0;
+/// metres, for a given chase rig.
+///
+/// It is not a taste number and it is not a constant: it is **wherever the eye
+/// is**. The bottom edge of the frame is road a little in front of the camera,
+/// and the camera sits behind the car — so the window has to reach back past
+/// the eye or the bottom band of the picture is bare tarmac with the markings
+/// starting part-way up it. The furthest back the rig ever puts the eye is its
+/// top-speed chase distance plus the boost pull, and that is exactly this.
+///
+/// Hard-coding it worked only while the rig was one fixed arm authored for one
+/// fixed frame. [`crate::tuning::CameraTuning::framed_for_aspect`] makes the arm
+/// a function of the frame's shape, so a fixed 6 m is a number that silently
+/// stops being true on a taller screen — and only on the software raster, the
+/// one arm nobody scores and everybody has to keep legible.
+pub fn paint_behind_metres(camera: &crate::tuning::CameraTuning) -> f32 {
+    camera.distance_high + camera.distance_boost
+}
 
 /// The four material-separated entities one chunk occupies.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,6 +117,10 @@ pub struct RoadChunks {
     /// full road distance. Set by the app from the backend it actually bound —
     /// see [`RoadChunks::limit_paint_to_near_field`].
     paint_window: bool,
+    /// How far behind the car the near-field window reaches — the rig's own
+    /// eye, from [`paint_behind_metres`], because the frame's bottom edge is
+    /// road just in front of the camera and the camera is behind the car.
+    paint_behind: f32,
     triangles: usize,
 }
 
@@ -121,6 +139,7 @@ impl RoadChunks {
         app: &mut RunningApp,
         track: &Track,
         tuning: &CourseTuning,
+        camera: &crate::tuning::CameraTuning,
         materials: RoadMaterials,
     ) -> RoadChunks {
         let count = chunk_count(track);
@@ -159,6 +178,7 @@ impl RoadChunks {
             fine_paint,
             fine_paint_active: None,
             paint_window: false,
+            paint_behind: paint_behind_metres(camera),
             triangles,
         }
     }
@@ -202,7 +222,7 @@ impl RoadChunks {
     /// means what it says to within one dash.
     pub fn fine_paint_range_for(&self, distance: f32) -> (usize, usize) {
         let last = self.fine_paint.len().saturating_sub(1);
-        let first = ((distance - PAINT_BEHIND_METRES).max(0.0) / PAINT_CHUNK_LENGTH) as usize;
+        let first = ((distance - self.paint_behind).max(0.0) / PAINT_CHUNK_LENGTH) as usize;
         let end = ((distance + PAINT_AHEAD_METRES).max(0.0) / PAINT_CHUNK_LENGTH) as usize;
         (first.min(last), end.min(last))
     }
@@ -403,7 +423,13 @@ mod tests {
             .setup(|_, _, _| {})
             .build();
         let materials = palette::road_materials(&mut app);
-        let chunks = RoadChunks::install(&mut app, &track, &CourseTuning::DEFAULT, materials);
+        let chunks = RoadChunks::install(
+            &mut app,
+            &track,
+            &CourseTuning::DEFAULT,
+            &crate::tuning::CameraTuning::DEFAULT,
+            materials,
+        );
         (app, track, chunks)
     }
 
@@ -547,7 +573,7 @@ mod tests {
                 ends - distance
             );
             assert!(
-                distance - starts <= PAINT_BEHIND_METRES + slack,
+                distance - starts <= road.paint_behind + slack,
                 "and {:.0} m behind, not the whole chunk",
                 distance - starts
             );

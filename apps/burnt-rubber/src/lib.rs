@@ -98,9 +98,18 @@ pub const CANVAS_ID: &str = "axiom-burnt-rubber-canvas";
 /// drives the same road. Changing this number changes the game.
 pub const DEFAULT_SEED: u64 = 0x0B17_4E7A_5C09_1D33;
 
-/// The browser framebuffer the live app is configured for.
+/// The **fallback** frame size — a nominal 16:9 pair, used where no real
+/// surface has been measured.
+///
+/// It is explicitly *not* what the live app renders at. The browser arm asks
+/// `WindowingApi::configure_surface_from_canvas` for the canvas's actual box in
+/// device pixels and builds the app from that, because a canvas laid out by CSS
+/// (`100vw x 100vh` on a phone) has neither this size nor this shape, and a
+/// camera resolved against a number the display does not honour renders a world
+/// squeezed by the ratio between the two. What is left for these constants is
+/// the native tests, and the window-size fallback for a page with no `window`.
 pub const WIDTH: u32 = 1280;
-/// The browser framebuffer the live app is configured for.
+/// See [`WIDTH`].
 pub const HEIGHT: u32 = 720;
 
 #[cfg(test)]

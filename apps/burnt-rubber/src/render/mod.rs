@@ -193,7 +193,7 @@ impl RaceScene {
         // one from the night frame this scene used to be.
         app.set_postprocess(GRADE);
 
-        let road = RoadChunks::install(app, track, &tuning.course, palette.road);
+        let road = RoadChunks::install(app, track, &tuning.course, &tuning.camera, palette.road);
         let scenery = SceneryField::install(app, &palette, track, track.seed());
         let traffic = TrafficVisuals::install(app, &palette, tuning.race.traffic_active);
         let car = PlayerCar::install(app, &palette.player_livery());

@@ -32,7 +32,7 @@ use crate::start_screen::{
 };
 use crate::touch::TouchControls;
 use crate::tuning::Tuning;
-use crate::{CANVAS_ID, DEFAULT_SEED, HEIGHT, WIDTH};
+use crate::{CANVAS_ID, DEFAULT_SEED};
 
 
 /// The live per-instance buffer capacity. Comfortably above the road chunks,
@@ -56,17 +56,38 @@ pub fn burnt_rubber_start() {
     install_key_listeners(&held);
 
     let mut windowing = WindowingApi::new();
-    // Opt up out of the mobile render budget, for one reason: this game's frame
-    // is mostly thin, high-contrast, receding geometry — lane markings, kerb
-    // blocks and the post rows running to a vanishing point — and at one render
-    // sample per pixel every one of those edges stair-steps in runs of `1/slope`
-    // pixels. That is a sampling-rate artifact; no material, light, grade or
-    // camera change can touch it. `ExtendedLimits` renders the scene 2× per axis
-    // and the present resolve box-filters it back down, which is four coverage
+    // The surface is **measured, not declared**. `WIDTH x HEIGHT` is a
+    // compile-time 16:9 pair and the canvas is whatever `web/index.html` laid
+    // out — `100vw x 100vh` on a phone, a 16:9 box capped at 1180 px on a
+    // desktop — times a device pixel ratio only the browser knows. Handing the
+    // constant to `configure_surface` configured a surface of the wrong size and
+    // the wrong shape: on an upright phone the engine rendered a 16:9 frame that
+    // the browser then stretched into a 0.56 box, squeezing the whole world
+    // horizontally by the ratio between the two aspects, and resampling it 2.3x
+    // vertically on the way. Nothing above `axiom-windowing` can see a canvas,
+    // so nothing above it could have caught that; asking the driver to measure
+    // the element it is about to present into is the fix, and it is the same
+    // reading that then sizes the camera below.
+    //
+    // The tier stays the opt-up, for one reason: this game's frame is mostly
+    // thin, high-contrast, receding geometry — lane markings, kerb blocks and
+    // the post rows running to a vanishing point — and at one render sample per
+    // pixel every one of those edges stair-steps in runs of `1/slope` pixels.
+    // That is a sampling-rate artifact; no material, light, grade or camera
+    // change can touch it. `ExtendedLimits` renders the scene 2× per axis and
+    // the present resolve box-filters it back down, which is four coverage
     // samples on every edge in the frame.
     windowing
-        .configure_surface_with_profile(WIDTH, HEIGHT, HostDeviceProfile::ExtendedLimits)
-        .expect("the surface dimensions are valid");
+        .configure_surface_from_canvas(CANVAS_ID, HostDeviceProfile::ExtendedLimits)
+        .expect("the canvas is on the page and laid out to a usable box");
+    // The device pixels the backend will actually render, straight from the
+    // surface that was just measured. The camera resolves its aspect against
+    // this, so the projection and the render target are two readings of one
+    // number instead of two numbers that have to be kept in step by hand.
+    let surface = (
+        windowing.surface_width().expect("a configured surface"),
+        windowing.surface_height().expect("a configured surface"),
+    );
 
     // THE seam. "Is this a phone?" is asked exactly once, here, and everything
     // that follows from the answer — the lane game vs the driving game, lane
@@ -74,7 +95,8 @@ pub fn burnt_rubber_start() {
     // `crate::PlayProfile` for the full contract.
     let (view_w, view_h) = viewport();
     let profile = PlayProfile::for_presentation(view_w, coarse_pointer());
-    let mut app = BurntRubber::with_profile(DEFAULT_SEED, Tuning::DEFAULT, WIDTH, HEIGHT, profile);
+    let mut app =
+        BurntRubber::with_profile(DEFAULT_SEED, Tuning::DEFAULT, surface.0, surface.1, profile);
     // The shipping flow: the night road is up, the race is frozen on the grid,
     // and the player presses START RACE before anything moves. The viewport is
     // set first so the screen is laid out for the device rather than for the
