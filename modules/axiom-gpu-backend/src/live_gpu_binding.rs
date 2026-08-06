@@ -276,6 +276,31 @@ impl LiveGpuBinding {
         let view_formats = (draw2d_format != format)
             .then(|| vec![draw2d_format])
             .unwrap_or_default();
+        // The swapchain is a texture, and it has the same ceiling every other
+        // texture does. Until the surface was *measured* this could not bite: the
+        // size was a compile-time constant every app picked small enough. Now the
+        // windowing layer reports the real canvas, so a large window or a high
+        // device-pixel-ratio can ask for a surface the device cannot allocate —
+        // and `Surface::configure` does not return an error for that, it raises a
+        // wgpu validation error, which on wasm aborts the module. The whole game
+        // dies at startup on exactly the devices that asked for the most pixels.
+        //
+        // Measured on this machine (`max_texture_dimension_2d` = 4096): a
+        // 2700x3900 canvas binds, 2700x4800 panics.
+        //
+        // So the requested surface is a request, exactly as the render target
+        // below already treats its own: clamp to what the device can hold, scale
+        // both axes by the same ratio so the aspect the camera was solved for is
+        // preserved, and let the browser scale the slightly smaller buffer up to
+        // the element. A device with less headroom presents a little softer;
+        // nothing crashes, and no app has to know its own limits.
+        let surface_max = device.limits().max_texture_dimension_2d.max(1);
+        let surface_longest = width.max(height).max(1);
+        let surface_held = surface_longest.min(surface_max);
+        let fit = |axis: u32| {
+            (((axis as u64) * (surface_held as u64)) / (surface_longest as u64)).max(1) as u32
+        };
+        let (width, height) = (fit(width), fit(height));
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
