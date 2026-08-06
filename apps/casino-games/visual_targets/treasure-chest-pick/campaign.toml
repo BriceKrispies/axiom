@@ -76,24 +76,52 @@ ceiling.
 #    * both light through the same shared model in `shading.ts`.
 #
 #  CORRECTION (pass 6 gave the lenses this wrong, twice — see ledger pass 6
-#  `foreman_errors`). That shared model is NOT "Lambert only", and `roughness` is
-#  NOT inert:
+#  `foreman_errors`). That shared model is NOT "Lambert only":
 #
 #    * `shading.ts` computes `gloss = 1 - roughness` and drives a Blinn-Phong
 #      specular lobe + a Schlick Fresnel rim + a Reinhard tonemap from it;
 #      `backend-webgl2.ts` uploads it as `uRoughness` and is byte-matched to the
-#      software path. So there IS a working specular/gloss lever.
-#      `grep -r roughness apps/casino-games/web/src/games/treasure-chest-pick/`
-#      returns NOTHING — every surface in this scene is fully matte by omission,
-#      including the brass latches, the gold lock hardware and the polished
-#      bands, all of which carry visible specular in the reference.
+#      software path. The FIELD is real and wired end to end.
 #    * `MeshData.ao` (baked per-vertex ambient occlusion, multiplied into diffuse
-#      AND ambient by BOTH backends) is likewise shipped and entirely unused —
-#      the game builds nothing through `createMeshData`. Plank recesses, chest
-#      seams and a sand falloff are all bakeable through it.
+#      AND ambient by BOTH backends) is likewise shipped end to end.
 #
-#  Both levers cost ZERO scene nodes and reach BOTH arms identically, which makes
-#  them the cheapest unspent wins on the board.
+#  ── BOTH "cheapest unspent win" CLAIMS ARE NOW RETIRED (foreman, pass 8) ──────
+#
+#  This block used to end "Both levers cost ZERO scene nodes and reach BOTH arms
+#  identically, which makes them the cheapest unspent wins on the board." That
+#  sentence was wrong by pass 8 and is struck. It is recorded rather than deleted
+#  because it was handed to lenses across three passes and cost real proposals.
+#
+#    * `roughness` IS A NON-LEVER ON THIS GEOMETRY — not merely unspent. Wired,
+#      yes; inert here. `shading.ts` couples amplitude to exponent
+#      (shininess = 8 + 120*gloss) and BOTH `dirContribution` and
+#      `pointContribution` multiply the lobe by gloss again, so the term is
+#      gloss * (N.H)^(8+120*gloss). Under this rig no axis-aligned box face in the
+#      scene reaches N.H much past ~0.94, and the best achievable add on the lid or
+#      the brass escutcheon is well under two levels of 255; the Fresnel rim is
+#      smaller still. This is now settled by FOUR independent derivations (pass-7
+#      surfacing, pass-8 surfacing, pass-8 critic, and the pass-7 ledger's
+#      `disputes_resolved`), each measuring the shade path directly.
+#
+#      DISPUTE, RESOLVED HERE. Pass 8's engine-architect advisory again named
+#      specular "the one genuinely unspent lever" and proposed spending it on the
+#      `Gild*`/`BoardRivet`/`CastleFlagTrim` family. That is the losing side of an
+#      already-settled question, and it lost on arithmetic both times. Resolved in
+#      favour of the surfacing/critic measurement — as in pass 7, by the numbers
+#      rather than by preferring an agent. A specular highlight on this frame needs
+#      CURVED hardware geometry (modeler) or a lower SHINE_MIN / broader lobe in
+#      `shading.ts` (a spine change, with its GLSL twin) — it is NOT a material edit.
+#
+#      One part of that advisory DOES stand and is worth keeping: `roughness` is
+#      invisible to the node gate but is NOT free on the guard, because
+#      `backend-canvas2d.ts` switches such a material's triangles from the
+#      allocation-free `diffuseOnly` to `shadeSurface`. So the lever is both inert
+#      and not-free — doubly not a win.
+#
+#    * `MeshData.ao` IS NOW SPENT, twice. Pass 7 (367bf28d) made the shared box an
+#      app-authored `aoBoxMeshData()`; pass 8 surfacing gave the beach slab a
+#      48x48 dune-mottling AO lattice. It is one scalar per vertex — no hue, no
+#      grain — so it is not a general "detail" lever either.
 #
 #  So colour, camera, light, material and geometry edits land IDENTICALLY on both
 #  arms. The only genuinely arm-specific levers are:

@@ -1585,3 +1585,124 @@ depth_and_separation = 2
 detail_density = 1
 scene_props_completeness = 1
 artifact_level = 2
+
+[[iteration]]
+pass = 8
+kind = "promote"
+date = "2026-08-06"
+title = "all seven proposals stacked clean; the human's arm constraint held on the deterministic metric"
+stacked = """
+Seven cherry-picked clean, ZERO conflicts -- the first pass on this target with no
+drop:
+  16296aff  art-director  scale_and_proportion         chest grid COLUMN pitch 2.05 -> 1.89, row pitch pinned
+  a05ff855  rigger        subject_fidelity/silhouette  crab legs arch from the shoulder + a per-row fan
+  d793552a  modeler       subject_fidelity             chest body gets its four wooden corner posts
+  4edb422d  lighting      lighting_and_shadow          third penumbra step feathers the cast-shadow rim
+  20ed3dd3  colorist      contrast_and_exposure        lagoon depthColor ramp switched on
+  8f4710cc  surfacing     material_and_texture_detail  48x48 MeshData.ao dune mottling on the beach slab
+  f3a70eb7  critic        (bookkeeping)                re-score of the re-baselined image + abstraction 0007
+"""
+dropped = """
+Nothing dropped on conflict. One lens committed nothing BY CHOICE:
+
+engine-architect -- advisory only, worktree clean at e8ad0260. It found the judged-arm
+gap entirely app-tier and every spine lever it needs already shipped at the correct
+layer by earlier passes (SceneFrame.ambient, MeshData.ao, StylizedWaterOptions.waviness,
+rendererTierAtLeast). It considered and rejected a hemispheric ambient
+(SceneFrame.ambientGround) on LEVERAGE, not legality: ~2-3 levels of 255 on a wood
+panel for 9 files + 15 test-literal updates. Declining to spend a spine change is the
+right result for that lens, not a failure of it.
+"""
+foreman_resolution = """
+ROUGHNESS / SPECULAR, resolved against the architect for the second consecutive pass.
+
+Its advisory again named specular "the one genuinely unspent lever" and proposed
+spending it on the Gild*/BoardRivet/CastleFlagTrim family. Pass-8 surfacing
+independently priced the same lever and rejected it, as pass-7 surfacing and the
+pass-8 critic did: shading.ts couples amplitude to exponent
+(shininess = 8 + 120*gloss) and both light contributions multiply the lobe by gloss
+again, so on this scene's axis-aligned box faces the best achievable add is under two
+levels of 255. Four independent derivations against one recommendation, all measuring
+the shade path directly. Resolved by the arithmetic, not by preferring an agent.
+
+campaign.toml's "Both levers cost ZERO scene nodes ... the cheapest unspent wins on
+the board" sentence is therefore STRUCK by the foreman this pass, with the reasoning
+recorded in place rather than deleted -- it was handed to lenses across three passes
+and cost real proposals. MeshData.ao is retired for the opposite reason: it is now
+SPENT twice (pass-7 box AO, pass-8 dune lattice).
+
+One part of the architect's advisory survives and is kept: roughness is invisible to
+the node gate but NOT free on the guard, because backend-canvas2d.ts switches such a
+material's triangles from the allocation-free diffuseOnly to shadeSurface. The lever
+is both inert and not-free.
+"""
+arm_constraint = """
+PASS-SPECIFIC, SET BY THE HUMAN: "changes may only impact the webgl version." On this
+substrate that cannot mean byte-identical -- campaign.toml's own arms block records
+that colour/camera/light/material/geometry edits land IDENTICALLY on both arms, since
+the two backends share shading.ts and neither has textures or shadow mapping. Bound,
+with the human's agreement, as: the guard may drift in APPEARANCE, but no NEW COST may
+land on it, and any added GEOMETRY must be gated on rendererTierAtLeast("webgl2").
+
+HELD, on the deterministic metric. Three of the six render proposals added geometry
+and all three gated it (modeler +36 nodes, lighting +1/caster, surfacing a whole
+2421-vertex slab) -- judged arm only.
+"""
+canvas2d_guard = """
+HOLDS. Legible, and the crab is more legible than before.
+
+Deterministic metric byte-identical to the pass-8 baseline, verified in the champion
+worktree:
+  backing 468x293 = 137k samples/frame
+  peak 398 nodes/frame (ceiling 410)
+  124517 node-frames (ceiling 128000)
+
+fps settled by the paired interleaved A/B this repo mandates rather than by a single
+sample -- base and head alternating, three rounds:
+  BASE   33.9 / 38.4 / 33.1 fps
+  STACK  43.7 / 36.4 / 33.3 fps
+Fully overlapping, stack slightly ahead on the median. An earlier single stacked
+sample read 27.6 fps and was NOT trusted; it was noise, exactly as the arms block
+warns.
+
+Guard APPEARANCE drifted in the two arm-agnostic transform proposals only (grid pitch,
+crab legs), both zero-node. Every tier-gated change is correctly absent: no corner
+posts, no penumbra haze, flat sand.
+
+CAPTURE BLIND SPOT, recorded rather than left implicit. The colorist's proposal claimed
+the guard image is byte-unchanged, and it is -- but only because [capture.guard] reads
+--clip native (the 3D backing store) and the stylized water overlay is a separate 2D
+layer. The overlay DOES draw on canvas2d (frame-rate.test.ts asserts overlayOps > 0),
+so a real canvas2d player sees the depth ramp and pays one extra radial-gradient fill
+for it. "Guard image unchanged" is NOT the same claim as "guard arm unaffected", and
+this pass's guard image understates the drift. The A/B above is what actually cleared
+the cost question.
+"""
+verification = """
+The lenses are blind by design (no build, no render), so the foreman ran what they
+could not:
+  tsgo --noEmit on the stacked worktree             clean
+  node --test "src/**/*.test.ts" (whole app)        167/167 pass
+
+The second one mattered. The rigger's re-posed legs land on "the beach props stand
+clear of the lagoon", the shore-clearance guard added in cff697db, and the lens
+hand-computed its margin (worst ~5.44 against a 5.15 floor) while explicitly asking a
+reviewer to run it rather than trust the arithmetic. Run: it passes.
+"""
+measured = """
+Three proposals measured on the promoted render, normalised by the pool's screen
+semi-width so the 1536x1024 reference and the 948x597 champion compare. Before -> after
+(reference):
+  grid column pitch     0.215 -> 0.199  (0.195)
+  inter-chest gap       0.060 -> 0.045  (0.047)
+  water radial ramp     38    -> 65     (66 levels)
+  local shadow mass     0.105 -> 0.179  (0.229)
+All three land, none overshoots. NO AXIS SCORE IS CLAIMED FOR ANY OF IT -- this is
+sub-band movement measured by the foreman, and the axes are the next critic's to move.
+
+Foreman error worth recording: the first shadow figure computed here was 0.093 -> 0.430
+against a reference 0.257, read as an overshoot and briefly reported as one. It was
+confounded -- the metric counted the colorist's new radial depth ramp as shadow.
+Dividing the radial ramp out per bin gives the figures above. The eyeball read that
+prompted it ("the shadows look too big") was also wrong.
+"""
