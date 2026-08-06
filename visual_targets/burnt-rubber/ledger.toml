@@ -1505,3 +1505,105 @@ atmosphere = 1
 scale_and_proportion = 1
 detail_density = 2
 artifact_level = 0
+
+[[iteration]]
+iteration = 14
+attacked_axis = "scale_and_proportion"
+changed_files = [
+  "modules/axiom-windowing/src/windowing_api.rs",
+  "modules/axiom-windowing/src/windowing_api/web.rs",
+  "apps/burnt-rubber/src/tuning.rs",
+  "apps/burnt-rubber/src/app.rs",
+  "apps/burnt-rubber/src/web.rs",
+  "apps/burnt-rubber/src/camera.rs",
+  "apps/burnt-rubber/src/lib.rs",
+  "apps/burnt-rubber/src/render/mod.rs",
+  "apps/burnt-rubber/src/render/chunks.rs",
+  "apps/burnt-rubber/src/render/palette.rs",
+  "apps/burnt-rubber/src/render/prop_meshes.rs",
+  "apps/burnt-rubber/src/render/scenery.rs",
+  "apps/burnt-rubber/src/render/scenery_pool.rs",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "keep_candidate"
+reason = """
+Era-C pass 2 — the anamorphic projection is fixed. Attacked scale_and_proportion \
+1 -> 3, verified at the source rather than inferred: the canvas drawing buffer \
+(940x1672, aspect 0.5622) and its CSS box (470x836, aspect 0.5622) now agree to \
+four decimals at devicePixelRatio 2, where the buffer had been declared at the \
+compile-time 1280x720. No axis fell; four rose. final_score 0.375 -> 1.20. \
+\
+THE FIX LANDED IN axiom-windowing BECAUSE IT IS THE ONLY CRATE THAT CAN SEE A \
+CANVAS — which is why nothing above it had ever caught it, and why every app in \
+this repo carries the same latent bug. The rig was re-solved in the same commit \
+(arm 5.60 -> 8.91 m, height 1.55 -> 1.71 m), derived by holding the neighbouring \
+lane in frame and holding the pitch so the horizon does not move, and floored at \
+the authored numbers so landscape displays and the native capture are \
+bit-identical. \
+\
+A MEASUREMENT OVERTURNED A FOREMAN DERIVATION, correctly. Last pass the foreman \
+reconciled KEY_INTENSITY to 2.6 by arithmetic through a black point, with no \
+render to check against. Lighting this pass inverted the pipeline against both \
+frames and found the key ALONE laid 0.861 on flat road where the reference's \
+entire sunlit road is 0.746 — so no ambient or grade change could have fixed it. \
+1.45 is measured; 2.6 was argued. The road now sits at (63,65,72) against the \
+reference's (64,57,55). \
+\
+TWO LENSES SPLIT ONE ERROR. Surfacing found specular is live and the gloss set \
+had never been re-sized for a key that tripled — peak specular is exactly \
+(1-roughness)*KEY_INTENSITY, so the tarmac threw 0.83 linear against its own 0.08 \
+diffuse and erased its own grain. Both fixes move that product down, so they \
+composed without reconciliation. \
+\
+RECORDED AND NOT SMOOTHED: the exposure overshot the other way (band median 178.3 \
+-> 99.1 against 139.7: 39 over became 40 under), clipping is improved but still \
+five times the reference (7.50% vs 1.43%), and the zenith did not move at all \
+((228,231,232) -> (227,231,232) against (27,111,198)) — which confirms the \
+colorist's own stated risk and isolates CLOUD_COVERAGE = 0.55 as the single named \
+cause. \
+\
+FOREMAN ERROR, RECORDED: this pass's fan-out brief named `Base: main` for all \
+seven lenses, but main was eight commits behind the champion line and still held \
+the night scene. The colorist detected it unaided and rebased itself; the other \
+five were corrected mid-flight by message. No proposal was authored against the \
+wrong base in the end, but that was luck plus one lens's diligence, not process. \
+\
+STANDING FINDING FOR THE NEXT ARCHITECT PASS: shadow_view.rs sets SHADOW_EXTENT = \
+20.0 as an orthographic box anchored at Vec3::ZERO while this moment is ~1.9 km \
+down the course, so every cast shadow is outside the shadow map and the \
+reference's defining feature cannot appear at any key setting. Also open: the \
+terrain is one flat verge quad to 46 m, so the reference's sea, beach, houses and \
+headland have nothing to stand on; ExtendedLimits now costs 1.70x the fragments \
+at an honest DPR; and surface resize is unhandled.
+"""
+next_attacked_axis = "subject_fidelity"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 2
+lighting_and_shadow = 1
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 1
+detail_density = 2
+artifact_level = 0
+
+[iteration.scorecard_after]
+composition_and_framing = 2
+subject_fidelity = 1
+silhouette_readability = 2
+material_and_texture_detail = 2
+lighting_and_shadow = 2
+color_palette = 1
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 3
+detail_density = 2
+artifact_level = 1
