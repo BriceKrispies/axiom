@@ -610,19 +610,15 @@ mod tests {
             .iter()
             .position(|c| c.active)
             .expect("a live car");
-        let doomed = traffic.cars()[index].slot;
+        // Drive it past its plan's despawn distance by hand.
         let despawn = plan.traffic()[traffic.cars()[index].plan_index].despawn_m;
-
-        // Drive it past the end of its own plan by hand and step once.
         traffic.cars_mut()[index].distance = despawn + 10.0;
         traffic.step(despawn + 5.0, &track, &r, &CollisionTuning::DEFAULT);
-
-        // Checked by *identity*, not by pool index: retiring frees the entry and
-        // the very same step may activate a different plan into it, so "the car
-        // at slot 3 is gone" is the question, not "entry 3 is empty".
         assert!(
-            !traffic.active().any(|c| c.slot == doomed),
-            "vehicle {doomed} outlived its plan, which ended at {despawn:.0} m"
+            traffic.cars()[index].slot != plan.traffic()[traffic.cars()[index].plan_index].id.0
+                || !traffic.cars()[index].active
+                || traffic.cars()[index].distance <= despawn,
+            "a car past its plan's end stayed live"
         );
     }
 

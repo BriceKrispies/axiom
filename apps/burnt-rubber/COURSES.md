@@ -168,23 +168,9 @@ Layered on a section's base primitive, in order.
 |---|---|
 | `lateral_wave` | `amplitude`, `wavelength`, `phase` |
 | `elevation_wave` | `amplitude`, `wavelength`, `phase` |
-| `grade_profile` | `drop` — a sustained change of elevation |
 | `banking` | `mode` (`follow_curvature`/`fixed`/`flat`), `strength`, `maximum` |
 | `width_profile` | `from`, `to` (half-widths) |
 | `lane_profile` | `from`, `to` (lane counts) |
-
-`grade_profile` is **the only way to author a net elevation change**, and it is a
-modifier rather than a primitive because elevation is orthogonal to what the road
-does in plan — a descending turn is a turn with a drop on it. `crest` and `dip`
-both return to the level they started at by construction and an elevation wave is
-periodic, so before it existed the only way to end lower than you began was to
-ride a quarter of a wave whose wavelength you had worked out by hand.
-
-Its grade is **constant** across the section rather than eased at the ends. That
-is what lets a figure cut into several sections descend continuously *through*
-the joins instead of levelling off at each one; the compiler's rate limiter
-smooths the ends of the whole figure, so a section falls a little short of the
-drop it asked for wherever it meets level road.
 
 A lateral wave is realised as **curvature** (`y'' = −A k² sin(ks + φ)`), not as a
 displacement added to finished positions. That matters: displacing a centreline
@@ -208,20 +194,6 @@ nothing downstream records that a motif was involved.
 | `tunnel_squeeze` | collapse → corridor → release, at `narrow_lanes` |
 | `blind_crest` | approach → crest → a turn you cannot see |
 | `lane_collapse` | staged lane loss with no recovery |
-| `corkscrew` | one continuous banked turn, descending far enough to pass under itself |
-
-The corkscrew is worth a note because it is the one motif that **derives** its
-geometry rather than taking it: it is told how much road it has and how many
-revolutions to spend it on, and the radius falls out (`count` is revolutions for
-this motif, not repetitions). That is the right way round — "one turn down a
-ridge in twelve hundred metres" is the design and the radius is its consequence —
-and if the consequence is tighter than `min_turn_radius` the compiler rejects it
-by name rather than quietly opening the figure out.
-
-It is also deliberately a **single** turn section rather than a string of them: a
-`turn` eases its curvature in and out at each end, so a helix built from several
-would relax to straight between every coil and be a sequence of corners rather
-than a screw.
 
 Every motif draws from `SeedDomain::Motif` salted by its **own stable id**, so
 re-tuning one motif cannot re-roll another. `count` is bounded by
@@ -361,30 +333,6 @@ same compilation produce byte-identical reports.
 
 ---
 
-## 11a. What a course authors about its own envelope
-
-`ValidationThresholds` is not only what the validator *judges* against — it is
-also the envelope the geometry compiler clamps to, and both are per-course:
-
-| Threshold | What it bounds |
-|---|---|
-| `min_turn_radius` | the tightest turn any primitive may author |
-| `max_grade` | the steepest the compiled road may get |
-| `max_bank` | the hardest the compiled road may lean |
-| `max_curvature_step`, `max_grade_step`, `max_bank_step` | how fast each may change between adjacent samples |
-| `traversal_step`, `lateral_speed`, `lateral_margin`, `min_reaction_time` | the traversability model |
-| `near_miss_conversion`, `target_boost_duty`, `high_speed_share`, `starved_ratio`, `excellent_ratio`, `excellent_route_width` | the boost budget |
-
-`max_grade` and `max_bank` live here rather than in `CourseTuning` because how
-steep and how banked a road may get is a property of *a course*, not of the game:
-a rolling motorway and a road that screws its way down a ridge want different
-answers, and the author of each is the one who knows which. What stays in
-`CourseTuning` is `bank_per_curvature` — how hard the road leans *per unit of
-corner* — because that is the game's road-building style rather than one course's
-limit.
-
----
-
 ## 12. Boost-sustain analysis
 
 ```text
@@ -477,14 +425,11 @@ bounded at parse time by `MAX_REPEAT` (32). A course source is data.
 course "<name>" {
     seed = <int>
     defaults   { lanes lane_width shoulder_width expected_speed environment }
-    thresholds { min_turn_radius max_grade max_bank
-                 traversal_step lateral_speed lateral_margin
+    thresholds { min_turn_radius traversal_step lateral_speed lateral_margin
                  min_reaction_time near_miss_conversion target_boost_duty
                  starved_ratio excellent_ratio excellent_route_width }
 
     <primitive> { id length … <modifier blocks> traffic { … } }
-    # modifier blocks: lateral_wave, elevation_wave, grade_profile { drop = 40m },
-    #                  banking, width_profile, lane_profile
 
     section "<name>" { lanes environment expected_speed
                        <primitive blocks> traffic { … } }
@@ -558,9 +503,6 @@ validated by the real pipeline in the test suite.
 
 ## 18. Current limitations
 
-* **A corkscrew's radius is derived, so asking for more revolutions in the same
-  road makes it tighter until `min_turn_radius` refuses.** There is no way to say
-  "keep this radius and take as much road as you need".
 * **Lane width is per-course, not per-section.** `Track::lane_lateral` puts lane
   `n` at `n · lane_width` for the whole course, and that is what makes a lane a
   durable identity. A per-section width would break it, so the specification does
@@ -568,11 +510,6 @@ validated by the real pipeline in the test suite.
 * **The road tops out at seven lanes** (`MAX_LANE_REACH = 3`), and the shipping
   course's tarmac band (`min_half_width`/`max_half_width`) only reaches five. An
   authored count the tarmac cannot carry is rejected rather than clamped.
-* **The grade and bank envelope is per *course*, not per *section*.** A course
-  that wants one dramatic figure has to raise the ceiling for the whole road; the
-  shipping course works around it by keeping its ordinary sweepers to an authored
-  lean of their own rather than to the ceiling. Per-section envelopes are the
-  natural next step and are not built.
 * **Speed changes are compiled but the shipping course authors none.** The field
   exists and the runtime honours it; the ambient generator uses a per-burst speed
   scale rather than mid-life changes.

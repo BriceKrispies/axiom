@@ -12,20 +12,6 @@ use crate::course::error::{finite, positive, CourseErrorCode, CourseResult};
 pub struct ValidationThresholds {
     /// The tightest turn radius any primitive may author (m).
     pub min_turn_radius_m: f32,
-    /// The steepest grade (rise over run) the compiled road may reach.
-    ///
-    /// A course-level envelope rather than an engine constant: a rolling
-    /// motorway and a road that screws its way down a ridge want different
-    /// answers, and the author of each is the one who knows which. Geometry that
-    /// exceeds it is clamped and the section is named in a warning.
-    pub max_grade: f32,
-    /// The steepest banking the compiled road may reach (rad).
-    ///
-    /// Same reasoning as [`Self::max_grade`]. `bank_per_curvature` — how hard
-    /// the road leans per unit of corner — stays in
-    /// [`CourseTuning`](crate::tuning::CourseTuning), because that is a property
-    /// of the game's roads; this is how far a *particular* course lets that go.
-    pub max_bank_rad: f32,
     /// Largest curvature step between adjacent samples the geometry may contain
     /// (rad/m). Above this the road kinks visibly.
     pub max_curvature_step: f32,
@@ -80,13 +66,6 @@ impl ValidationThresholds {
     /// against, and the defaults a source that says nothing inherits.
     pub const DEFAULT: ValidationThresholds = ValidationThresholds {
         min_turn_radius_m: 90.0,
-        max_grade: 0.10,
-        // ~15 degrees. Well clear of what an ordinary corner asks for
-        // (`bank_per_curvature` times a 350 m radius is 4.3 degrees), so this
-        // only ever binds on the tight, deliberately-leaned figures — which is
-        // the point of it being here rather than being a fixed 8 degrees
-        // nothing could author its way past.
-        max_bank_rad: 0.26,
         max_curvature_step: 0.0025,
         max_grade_step: 0.004,
         max_bank_step: 0.006,
@@ -109,8 +88,6 @@ impl ValidationThresholds {
             "min_turn_radius_m",
             CourseErrorCode::InvalidRadius,
         )?;
-        positive(self.max_grade, "max_grade", CourseErrorCode::InvalidFiniteScalar)?;
-        positive(self.max_bank_rad, "max_bank", CourseErrorCode::InvalidFiniteScalar)?;
         positive(
             self.max_curvature_step,
             "max_curvature_step",
@@ -179,10 +156,6 @@ mod tests {
             "excellent has to be a higher bar than starved"
         );
         assert!((0.0..=1.0).contains(&t.near_miss_conversion));
-        // A limit has to be looser than the step allowed toward it, or the road
-        // can never reach it.
-        assert!(t.max_grade > t.max_grade_step);
-        assert!(t.max_bank_rad > t.max_bank_step);
         assert!((0.0..=1.0).contains(&t.target_boost_duty));
     }
 
@@ -191,8 +164,6 @@ mod tests {
         let base = ValidationThresholds::DEFAULT;
         for broken in [
             ValidationThresholds { min_turn_radius_m: 0.0, ..base },
-            ValidationThresholds { max_grade: 0.0, ..base },
-            ValidationThresholds { max_bank_rad: -1.0, ..base },
             ValidationThresholds { max_curvature_step: 0.0, ..base },
             ValidationThresholds { max_grade_step: -1.0, ..base },
             ValidationThresholds { max_bank_step: 0.0, ..base },

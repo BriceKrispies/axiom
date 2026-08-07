@@ -56,19 +56,18 @@ fn the_agent_drives_the_shipping_course_to_the_finish() {
     // function of how much boost the lap earns, and boost is earned by threading
     // traffic: each near miss is 0.13 of the meter and the meter buys 22 m/s.
     //
-    // The numbers moved when the course became a compiled plan, and again when
-    // its third section became a corkscrew. The road is genuinely a different
-    // road — constant-radius corners rather than relaxed heading noise, a
-    // traffic density band rather than a fixed 85 m pitch, authored figures that
-    // were not there before, and nine hundred metres of full-revolution spiral
-    // in the middle of it — and the agent's technique was fitted by measurement
-    // against the *old* one. Measured on the compiled course: 99.72 s, 71 near
-    // misses, 8 contacts, of which the corkscrew alone is about 4.5 s. The bar
-    // is set around that rather than around the old road's, because tightening
-    // it further is a re-fit of the driver and not a statement about the course.
+    // The numbers moved when the course became a compiled plan. The road is
+    // genuinely a different road — constant-radius corners rather than relaxed
+    // heading noise, a traffic density band rather than a fixed 85 m pitch, and
+    // two authored figures (a rolling wall and a slalom) that were not there
+    // before — and the agent's technique was fitted by measurement against the
+    // *old* one. Measured on the compiled course: 92.30 s, 74 near misses, 9
+    // contacts. The bar is set around that rather than around the old road's,
+    // because tightening it further is a re-fit of the driver and not a
+    // statement about the course.
     assert!(
-        run.elapsed_seconds < 105.0,
-        "the agent took {:.2}s — it must beat 105 s",
+        run.elapsed_seconds < 95.0,
+        "the agent took {:.2}s — it must beat 95 s",
         run.elapsed_seconds
     );
     assert!(

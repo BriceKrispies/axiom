@@ -136,9 +136,9 @@ impl Limits {
             spacing: tuning.sample_spacing,
             max_curvature: 1.0 / thresholds.min_turn_radius_m.max(1.0),
             max_curvature_step: thresholds.max_curvature_step,
-            max_grade: thresholds.max_grade,
+            max_grade: tuning.max_grade,
             max_grade_step: thresholds.max_grade_step,
-            max_bank: thresholds.max_bank_rad,
+            max_bank: tuning.max_bank,
             max_bank_step: thresholds.max_bank_step,
             min_half_width: tuning.min_half_width,
             max_half_width: tuning.max_half_width,
@@ -382,14 +382,6 @@ fn author_signals(sections: &[ExpandedSection], plan: &Layout, limits: &Limits) 
                         bank_ceiling = 0.0;
                     }
                 },
-                RoadModifierSpec::GradeProfile { .. } => {
-                    // Constant across the section, so a figure cut into several
-                    // sections descends through the joins rather than levelling
-                    // off at each one.
-                    grade += modifier
-                        .sustained_grade(section.primitive.length_m())
-                        .unwrap_or(0.0);
-                }
                 RoadModifierSpec::WidthProfile {
                     start_half_width_m,
                     end_half_width_m,
@@ -896,52 +888,6 @@ mod tests {
             .any(|s| s.tangent.x.abs() > 0.02), "the tangents never left +Z");
     }
 
-    /// The modifier the whole elevation story rests on: a section that ends
-    /// lower than it began, and several of them descending *through* the joins.
-    #[test]
-    fn a_grade_profile_drops_the_road_and_keeps_dropping_across_a_join() {
-        let mut falling = section("d", RoadPrimitiveSpec::Straight { length_m: 400.0 });
-        falling
-            .modifiers
-            .push(RoadModifierSpec::GradeProfile { drop_m: 30.0 });
-        let g = build(&[falling.clone()]);
-        let end = g.samples.last().unwrap().position.y;
-        assert!(
-            (end + 30.0).abs() < 2.5,
-            "asked for a 30 m drop, got {:.1} m",
-            -end
-        );
-        // Monotone: it descends the whole way, it does not dip and recover.
-        assert!(g
-            .samples
-            .windows(2)
-            .all(|w| w[1].position.y <= w[0].position.y + 1.0e-3));
-
-        // Two of them in a row keep descending through the join — the grade does
-        // not return to zero between them.
-        let mut second = falling.clone();
-        second.id = SectionId::new("d2");
-        let joined = build(&[falling, second]);
-        let middle = joined.samples[joined.samples.len() / 2];
-        assert!(
-            middle.grade < -0.05,
-            "the road levelled off at the join: grade {}",
-            middle.grade
-        );
-        assert!(
-            (joined.samples.last().unwrap().position.y + 60.0).abs() < 4.0,
-            "two 30 m drops should be ~60 m, got {:.1}",
-            -joined.samples.last().unwrap().position.y
-        );
-
-        // And a negative drop climbs.
-        let mut rising = section("u", RoadPrimitiveSpec::Straight { length_m: 400.0 });
-        rising
-            .modifiers
-            .push(RoadModifierSpec::GradeProfile { drop_m: -20.0 });
-        assert!(build(&[rising]).samples.last().unwrap().position.y > 15.0);
-    }
-
     #[test]
     fn an_elevation_wave_rolls_the_road() {
         let mut waved = section("w", RoadPrimitiveSpec::Straight { length_m: 800.0 });
@@ -1030,7 +976,7 @@ mod tests {
         assert!(g
             .samples
             .iter()
-            .all(|s| s.grade.abs() <= ValidationThresholds::DEFAULT.max_grade + 1.0e-4));
+            .all(|s| s.grade.abs() <= CourseTuning::DEFAULT.max_grade + 1.0e-4));
 
         // And a course inside its limits reports nothing.
         let g = build(&[section("q", RoadPrimitiveSpec::Straight { length_m: 200.0 })]);

@@ -57,51 +57,19 @@ pub fn radius_for_curviness(curviness: f32, tuning: &CourseTuning) -> f32 {
 ///
 /// A wave `A·sin(2πs/λ)` has a maximum slope of `2πA/λ`, so the amplitude that
 /// reaches a given grade is `g·λ/2π`.
-pub fn amplitude_for_hilliness(
-    hilliness: f32,
-    wavelength_m: f32,
-    thresholds: &ValidationThresholds,
-) -> f32 {
-    hilliness.clamp(0.0, 1.0) * thresholds.max_grade * wavelength_m / std::f32::consts::TAU
-}
-
-/// What a section's road actually is.
-///
-/// The dispatch used to be a pair of thresholds on `curviness` — under 0.15 was
-/// a straight, over 0.8 was a slalom — which meant a section could not be given
-/// a shape without also being given a curviness that implied it. Naming the
-/// shape is both clearer and the only way a figure like the corkscrew, whose
-/// character is not a point on a curviness scale, can be asked for at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Shape {
-    /// Level, straight road.
-    Straight,
-    /// Long alternating banked bends: [`MotifKind::HighSpeedSweeps`].
-    Sweepers,
-    /// Tight alternating S-bends: [`MotifKind::AlternatingSlalom`].
-    Slalom,
-    /// One continuous banked turn that descends under itself:
-    /// [`MotifKind::Corkscrew`].
-    Corkscrew,
+pub fn amplitude_for_hilliness(hilliness: f32, wavelength_m: f32, tuning: &CourseTuning) -> f32 {
+    hilliness.clamp(0.0, 1.0) * tuning.max_grade * wavelength_m
+        / std::f32::consts::TAU
 }
 
 /// One entry of the pacing plan: the character the old generator drew inside.
 struct Pacing {
     environment: SectionKind,
-    shape: Shape,
     length_m: f32,
-    /// Peak bend severity, as the old `SectionProfile::curviness` — the radius a
-    /// [`Shape::Sweepers`] or [`Shape::Slalom`] section turns on. Unread by the
-    /// other shapes, which derive their geometry differently.
     curviness: f32,
-    /// Peak hill severity, as the old `SectionProfile::hilliness`. Unread by
-    /// [`Shape::Corkscrew`], whose descent is a stated drop rather than a wave.
     hilliness: f32,
-    /// The total drop of a [`Shape::Corkscrew`] (m). Unread by the others.
-    drop_m: f32,
     lanes: u32,
-    /// How many figures the section is broken into — revolutions, for a
-    /// corkscrew.
+    /// How many figures the section is broken into.
     pieces: u32,
     /// Vehicles per kilometre of ambient traffic, or zero for clear road.
     vehicles_per_km: f32,
@@ -117,11 +85,9 @@ struct Pacing {
 const PACING: [Pacing; 9] = [
     Pacing {
         environment: SectionKind::StartStraight,
-        shape: Shape::Straight,
         length_m: 620.0,
         curviness: 0.10,
         hilliness: 0.0,
-        drop_m: 0.0,
         lanes: 5,
         pieces: 1,
         // The opening is clear road: the countdown and the first acceleration
@@ -131,69 +97,45 @@ const PACING: [Pacing; 9] = [
     },
     Pacing {
         environment: SectionKind::SweepingBends,
-        shape: Shape::Sweepers,
         length_m: 1_700.0,
         curviness: 0.78,
         hilliness: 0.28,
-        drop_m: 0.0,
         lanes: 5,
         pieces: 5,
         vehicles_per_km: 11.8,
     },
-    // **The corkscrew.** The road leaves the ridge by screwing its way down it
-    // — one continuous banked turn, a full revolution, seventy metres of
-    // descent, passing under its own entry on the way out. It replaces a run of
-    // rolling crests, and it is the one section of the shipping course that
-    // spends the full grade and bank envelope the course authors for itself.
     Pacing {
         environment: SectionKind::RollingHills,
-        shape: Shape::Corkscrew,
         length_m: 1_250.0,
-        curviness: 0.0,
-        hilliness: 0.0,
-        drop_m: 70.0,
-        // Five lanes, where the crests it replaced had three. A sustained
-        // maximum-lean descent held for nine hundred metres needs somewhere to
-        // run wide *to*: on a three-lane road the usable width is barely four
-        // metres once the car and its edge margin are taken out, and a driver
-        // holding the cornering limit that long finds the guardrail rather than
-        // the exit. Measured, the three-lane version cost the ghost five barrier
-        // grinds inside the coil alone.
-        lanes: 5,
-        // Revolutions, for this shape. One is what makes the exit pass under
-        // the entry; the radius is whatever that needs (about 112 m here).
-        pieces: 1,
-        vehicles_per_km: 6.0,
+        curviness: 0.42,
+        hilliness: 1.0,
+        lanes: 3,
+        pieces: 5,
+        vehicles_per_km: 11.0,
     },
     Pacing {
         environment: SectionKind::TechnicalBends,
-        shape: Shape::Slalom,
         length_m: 1_150.0,
         curviness: 1.0,
         hilliness: 0.35,
-        drop_m: 0.0,
         lanes: 3,
         pieces: 6,
         vehicles_per_km: 10.5,
     },
     Pacing {
         environment: SectionKind::Tunnel,
-        shape: Shape::Sweepers,
         length_m: 780.0,
         curviness: 0.34,
         hilliness: 0.12,
-        drop_m: 0.0,
         lanes: 3,
         pieces: 3,
         vehicles_per_km: 12.5,
     },
     Pacing {
         environment: SectionKind::HighSpeedStraight,
-        shape: Shape::Sweepers,
         length_m: 1_500.0,
         curviness: 0.22,
         hilliness: 0.15,
-        drop_m: 0.0,
         lanes: 5,
         pieces: 5,
         // "Wide, flat, flat-out — and full of traffic to thread."
@@ -201,47 +143,32 @@ const PACING: [Pacing; 9] = [
     },
     Pacing {
         environment: SectionKind::Canyon,
-        shape: Shape::Slalom,
         length_m: 1_100.0,
         curviness: 0.86,
         hilliness: 0.45,
-        drop_m: 0.0,
         lanes: 3,
         pieces: 5,
         vehicles_per_km: 11.0,
     },
     Pacing {
         environment: SectionKind::FinalSweeps,
-        shape: Shape::Sweepers,
         length_m: 850.0,
         curviness: 0.70,
         hilliness: 0.30,
-        drop_m: 0.0,
         lanes: 5,
         pieces: 3,
         vehicles_per_km: 12.0,
     },
     Pacing {
         environment: SectionKind::Finish,
-        shape: Shape::Straight,
         length_m: 320.0,
         curviness: 0.0,
         hilliness: 0.0,
-        drop_m: 0.0,
         lanes: 5,
         pieces: 1,
         vehicles_per_km: 0.0,
     },
 ];
-
-/// How far the shipping course's ordinary sweepers are allowed to lean (rad).
-///
-/// Named here rather than derived from the course's grade/bank envelope: the
-/// envelope is what an *authored figure* may reach, and the sweepers are
-/// deliberately kept to the gentler lean the road has always had.
-const SWEEPER_BANK_MIN_RAD: f32 = 0.063;
-/// See [`SWEEPER_BANK_MIN_RAD`].
-const SWEEPER_BANK_MAX_RAD: f32 = 0.14;
 
 /// The wavelength the shipping course's elevation wave uses (m).
 ///
@@ -338,7 +265,7 @@ pub fn shipping_spec(seed: u64, tuning: &Tuning) -> crate::course::specification
             }));
         }
 
-        if pacing.shape == Shape::Straight {
+        if pacing.curviness < 0.15 {
             // A straight section: the old generator's near-zero curviness
             // produced a road that reads as straight, so it is authored as one.
             let mut section = SectionSpec::new(
@@ -360,51 +287,31 @@ pub fn shipping_spec(seed: u64, tuning: &Tuning) -> crate::course::specification
             }
             builder = builder.push_section(section);
         } else {
-            // Everything else is a motif, named by the section rather than
-            // inferred from a number.
+            // Everything else is a motif: sweepers where the old profile wanted
+            // long bends, a slalom of S-bends where it wanted tight alternating
+            // ones.
+            let tight = pacing.curviness >= 0.8;
             builder = builder.motif(MotifInvocation {
                 id: SectionId::new(id),
-                kind: match pacing.shape {
-                    Shape::Slalom => MotifKind::AlternatingSlalom,
-                    Shape::Corkscrew => MotifKind::Corkscrew,
-                    Shape::Straight | Shape::Sweepers => MotifKind::HighSpeedSweeps,
-                },
+                kind: tight
+                    .then_some(MotifKind::AlternatingSlalom)
+                    .unwrap_or(MotifKind::HighSpeedSweeps),
                 params: MotifParams {
                     count: pacing.pieces,
                     length_m: pacing.length_m,
-                    // A corkscrew *derives* its radius from the road it has
-                    // and the revolutions it was asked for, and reads this only
-                    // as the floor it may not go under. Handing it a curviness
-                    // band would floor it at a seven-kilometre radius and
-                    // quietly straighten the figure out.
-                    radius_m: (pacing.shape == Shape::Corkscrew)
-                        .then_some(ScalarRange::exact(
-                            ValidationThresholds::DEFAULT.min_turn_radius_m,
-                        ))
-                        .unwrap_or(ScalarRange::new(
-                            radius_for_curviness(pacing.curviness, course),
-                            radius_for_curviness(pacing.curviness * 0.62, course),
-                        )),
-                    // A corkscrew is the one figure allowed the full envelope:
-                    // a banked descent that is not leaning is just a long
-                    // corner you happen to be falling down.
-                    bank_rad: (pacing.shape == Shape::Corkscrew)
-                        .then_some(ScalarRange::new(
-                            SWEEPER_BANK_MIN_RAD,
-                            ValidationThresholds::DEFAULT.max_bank_rad,
-                        ))
-                        .unwrap_or(ScalarRange::new(
-                            SWEEPER_BANK_MIN_RAD,
-                            SWEEPER_BANK_MAX_RAD,
-                        )),
+                    radius_m: ScalarRange::new(
+                        radius_for_curviness(pacing.curviness, course),
+                        radius_for_curviness(pacing.curviness * 0.62, course),
+                    ),
+                    bank_rad: ScalarRange::new(course.max_bank * 0.45, course.max_bank),
                     elevation_amplitude_m: amplitude_for_hilliness(
                         pacing.hilliness,
                         WAVELENGTH_M,
-                        &ValidationThresholds::DEFAULT,
+                        course,
                     ),
                     lateral_amplitude_m: 0.0,
                     wavelength_m: WAVELENGTH_M,
-                    height_m: pacing.drop_m,
+                    height_m: 0.0,
                     lanes: CountRange::exact(pacing.lanes),
                     narrow_lanes: pacing.lanes,
                 },
@@ -442,26 +349,14 @@ mod tests {
             (8_000.0..=10_000.0).contains(&total),
             "the course is 8-10 km, got {total} m"
         );
-        // The character ordering the old profiles had, still true where the
-        // shape still reads a curviness.
+        // The character ordering the old profiles had, still true.
         assert!(PACING[0].curviness < PACING[3].curviness, "the esses are curvier");
+        assert!(PACING[2].hilliness > PACING[3].hilliness, "the ridge is hillier");
         assert!(
             PACING[5].lanes > PACING[6].lanes,
             "the long haul opens up and the canyon squeezes"
         );
         assert!(PACING.iter().all(|p| p.lanes % 2 == 1));
-        // The third section is the corkscrew, and it is the only one.
-        assert_eq!(PACING[2].shape, Shape::Corkscrew);
-        assert_eq!(
-            PACING.iter().filter(|p| p.shape == Shape::Corkscrew).count(),
-            1
-        );
-        assert!(PACING[2].drop_m > 0.0, "and it actually descends");
-        // Only the corkscrew states a drop; the rest roll on waves.
-        PACING
-            .iter()
-            .filter(|p| p.shape != Shape::Corkscrew)
-            .for_each(|p| assert_eq!(p.drop_m, 0.0));
     }
 
     #[test]
@@ -477,15 +372,15 @@ mod tests {
 
     #[test]
     fn the_hilliness_mapping_reaches_the_courses_maximum_grade() {
-        let thresholds = ValidationThresholds::DEFAULT;
-        let amplitude = amplitude_for_hilliness(1.0, 220.0, &thresholds);
+        let course = CourseTuning::DEFAULT;
+        let amplitude = amplitude_for_hilliness(1.0, 220.0, &course);
         let peak_grade = amplitude * std::f32::consts::TAU / 220.0;
         assert!(
-            (peak_grade - thresholds.max_grade).abs() < 1.0e-4,
+            (peak_grade - course.max_grade).abs() < 1.0e-4,
             "peaked at {peak_grade}, wanted {}",
-            thresholds.max_grade
+            course.max_grade
         );
-        assert_eq!(amplitude_for_hilliness(0.0, 220.0, &thresholds), 0.0);
+        assert_eq!(amplitude_for_hilliness(0.0, 220.0, &course), 0.0);
     }
 
     #[test]
@@ -525,69 +420,6 @@ mod tests {
         assert_ne!(plan.report().status, BoostStatus::Invalid);
         assert!(plan.report().metrics.vehicles > 60, "the road has traffic");
         assert!(!plan.encounters().is_empty(), "and authored figures on it");
-    }
-
-    /// **The corkscrew, on the road the game ships.** One continuous turn in
-    /// the third section, banked past what an ordinary sweeper is allowed,
-    /// dropping far enough that the road passes under its own entry.
-    #[test]
-    fn the_third_section_screws_its_way_down_the_ridge() {
-        let plan = shipping_plan(crate::DEFAULT_SEED).expect("compiles");
-        let coil = plan
-            .sections()
-            .iter()
-            .find(|s| s.id.as_str().ends_with("/coil"))
-            .expect("the shipping course has a corkscrew");
-        assert_eq!(coil.environment, SectionKind::RollingHills, "the third section");
-        assert_eq!(coil.primitive, "turn");
-
-        let track = plan.track();
-        let samples: Vec<&crate::track::TrackSample> = track
-            .samples()
-            .iter()
-            .filter(|s| (s.distance >= coil.start_m) & (s.distance < coil.end_m))
-            .collect();
-
-        // One revolution, one way round the whole time.
-        let turned: f32 = samples.windows(2).map(|w| w[1].heading - w[0].heading).sum();
-        assert!(
-            turned.abs() > 5.6,
-            "the coil turns {:.2} rad, which is not a revolution",
-            turned.abs()
-        );
-        assert!(
-            samples.iter().all(|s| s.curvature * turned >= -1.0e-4),
-            "the coil reverses — that is a slalom, not a screw"
-        );
-
-        // It descends the whole way, by about what it was asked for.
-        let drop = samples[0].position.y - samples.last().unwrap().position.y;
-        assert!((55.0..=75.0).contains(&drop), "the coil dropped {drop:.1} m");
-        assert!(
-            samples.windows(2).all(|w| w[1].position.y <= w[0].position.y + 0.05),
-            "the coil climbs somewhere"
-        );
-
-        // It leans harder than the course's ordinary sweepers are allowed to.
-        let lean = samples.iter().map(|s| s.bank.abs()).fold(0.0f32, f32::max);
-        assert!(
-            lean > SWEEPER_BANK_MAX_RAD,
-            "the corkscrew leans {:.1} deg, no more than a sweeper",
-            lean.to_degrees()
-        );
-        assert!(lean <= ValidationThresholds::DEFAULT.max_bank_rad + 1.0e-3);
-
-        // And the exit passes under the entry: somewhere in the figure the road
-        // is close to itself horizontally and far from itself vertically.
-        let under = samples.iter().enumerate().any(|(i, a)| {
-            samples.iter().skip(i + 200).any(|b| {
-                let flat = ((a.position.x - b.position.x).powi(2)
-                    + (a.position.z - b.position.z).powi(2))
-                .sqrt();
-                (flat < 30.0) & ((a.position.y - b.position.y).abs() > 25.0)
-            })
-        });
-        assert!(under, "the corkscrew never passes under itself");
     }
 
     #[test]

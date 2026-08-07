@@ -304,8 +304,6 @@ impl<'a> Parser<'a> {
         self.block(|p, field, at| {
             match field.as_str() {
                 "min_turn_radius" => thresholds.min_turn_radius_m = p.scalar()?,
-                "max_grade" => thresholds.max_grade = p.scalar()?,
-                "max_bank" => thresholds.max_bank_rad = p.scalar()?,
                 "traversal_step" => thresholds.traversal_step_m = p.scalar()?,
                 "lateral_speed" => thresholds.lateral_speed_mps = p.scalar()?,
                 "lateral_margin" => thresholds.lateral_margin_m = p.scalar()?,
@@ -452,7 +450,6 @@ impl<'a> Parser<'a> {
                 "banking" => modifiers.push(p.banking()?),
                 "width_profile" => modifiers.push(p.width_profile()?),
                 "lane_profile" => modifiers.push(p.lane_profile()?),
-                "grade_profile" => modifiers.push(p.grade_profile()?),
                 "traffic" => traffic = Some(p.traffic()?),
                 other => return Err(p.unknown_field(field_at, &keyword_owned, other)),
             }
@@ -596,18 +593,6 @@ impl<'a> Parser<'a> {
             start_half_width_m,
             end_half_width_m,
         })
-    }
-
-    fn grade_profile(&mut self) -> CourseResult<RoadModifierSpec> {
-        let mut drop_m = 0.0f32;
-        self.block(|p, field, at| {
-            match field.as_str() {
-                "drop" => drop_m = p.scalar()?,
-                other => return Err(p.unknown_field(at, "grade_profile", other)),
-            }
-            Ok(())
-        })?;
-        Ok(RoadModifierSpec::GradeProfile { drop_m })
     }
 
     fn lane_profile(&mut self) -> CourseResult<RoadModifierSpec> {
@@ -989,8 +974,6 @@ mod tests {
                 }
                 thresholds {
                     min_turn_radius = 120m
-                    max_grade = 0.16
-                    max_bank = 20deg
                     starved_ratio = 1.2
                     excellent_ratio = 2.0
                     excellent_route_width = 3
@@ -1012,12 +995,6 @@ mod tests {
         assert!((spec.defaults.expected_speed_mps - 80.467_2).abs() < 1.0e-2);
         assert_eq!(spec.defaults.environment, SectionKind::Tunnel);
         assert_eq!(spec.thresholds.min_turn_radius_m, 120.0);
-        assert!((spec.thresholds.max_grade - 0.16).abs() < 1.0e-6);
-        assert!(
-            (spec.thresholds.max_bank_rad - 20.0f32.to_radians()).abs() < 1.0e-6,
-            "a course authors its own lean: {}",
-            spec.thresholds.max_bank_rad
-        );
         assert_eq!(spec.thresholds.excellent_route_width, 3);
         assert!((spec.thresholds.min_reaction_time_s - 0.5).abs() < 1.0e-6);
     }
@@ -1035,7 +1012,6 @@ mod tests {
                     lateral_wave { amplitude = 8m wavelength = 260m phase = 0rad }
                     elevation_wave { amplitude = 3m wavelength = 180m }
                     banking { mode = follow_curvature strength = 0.8 maximum = 18deg }
-                    grade_profile { drop = 12m }
                 }
                 turn { id = "right" length = 400m radius = 200m direction = right }
                 s_bend { id = "ess" length = 400m radius = 220m first = left }
@@ -1065,11 +1041,7 @@ mod tests {
         assert_eq!(primitive(7).token(), "width_transition");
         match &spec.items[0] {
             CourseItem::Section(s) => {
-                assert_eq!(s.modifiers.len(), 4);
-                assert!(s
-                    .modifiers
-                    .iter()
-                    .any(|m| matches!(m, RoadModifierSpec::GradeProfile { drop_m } if *drop_m == 12.0)));
+                assert_eq!(s.modifiers.len(), 3);
                 assert!(matches!(
                     s.modifiers[2],
                     RoadModifierSpec::Banking {

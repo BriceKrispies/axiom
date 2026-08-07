@@ -430,13 +430,9 @@ mod tests {
                     s.half_width
                 );
                 assert!(s.half_width <= c.max_half_width + 1.0e-3);
+                assert!(s.bank.abs() <= c.max_bank + 1.0e-3, "seed {seed}: bank {}", s.bank);
                 assert!(
-                    s.bank.abs() <= thresholds.max_bank_rad + 1.0e-3,
-                    "seed {seed}: bank {}",
-                    s.bank
-                );
-                assert!(
-                    s.grade.abs() <= thresholds.max_grade + 1.0e-3,
+                    s.grade.abs() <= c.max_grade + 1.0e-3,
                     "seed {seed}: grade {}",
                     s.grade
                 );

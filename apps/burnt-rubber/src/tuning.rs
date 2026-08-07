@@ -667,22 +667,23 @@ pub struct CourseTuning {
     /// Maximum heading change between adjacent control points (rad). With
     /// `control_spacing` this sets the minimum turn radius.
     pub max_yaw_step: f32,
-
+    /// Maximum change in heading *rate* between adjacent control points (rad) —
+    /// the curvature-continuity bound that stops instant reversals.
+    pub max_yaw_step_delta: f32,
+    /// Maximum road grade (rise/run) on ordinary road.
+    pub max_grade: f32,
+    /// Maximum change in grade between adjacent control points.
+    pub max_grade_delta: f32,
+    /// Maximum banking angle (rad).
+    pub max_bank: f32,
     /// Banking per unit curvature (rad per rad/m), before clamping.
-    ///
-    /// How *hard* the road leans for a given corner — a style knob, and the one
-    /// piece of banking that is a property of the game rather than of a course.
-    /// The **ceiling** it is clamped against is not here: a course authors its
-    /// own envelope in
-    /// [`ValidationThresholds`](crate::course::specification::ValidationThresholds),
-    /// because how steep and how banked a road may get is exactly the sort of
-    /// thing one course wants differently from another.
     pub bank_per_curvature: f32,
     /// Narrowest the road is ever allowed to get, half-width (m).
     pub min_half_width: f32,
     /// Widest half-width the generator may author (m).
     pub max_half_width: f32,
-
+    /// How many bounded smoothing iterations the correction pass runs.
+    pub correction_passes: u32,
     /// Paved shoulder beyond the lane edge (m) — rumble strips and a little
     /// drag, still recoverable at speed.
     pub shoulder: f32,
@@ -729,6 +730,10 @@ impl CourseTuning {
         // 40 m of arc through 0.115 rad is a ~348 m radius: fast and sweeping,
         // never a hairpin.
         max_yaw_step: 0.115,
+        max_yaw_step_delta: 0.032,
+        max_grade: 0.10,
+        max_grade_delta: 0.018,
+        max_bank: 0.14,
         bank_per_curvature: 26.0,
         // The road is authored in LANES, so these bounds are the widths a lane
         // ladder actually needs — not free parameters. The floor is three lanes
@@ -740,6 +745,7 @@ impl CourseTuning {
         // silently clamped.
         min_half_width: 5.6,
         max_half_width: 11.2,
+        correction_passes: 6,
         shoulder: 1.6,
         verge: 5.0,
         lane_width: 3.5,
@@ -1162,21 +1168,16 @@ mod tests {
         assert!((0.0..1.0).contains(&c.barrier_restitution), "walls do not launch you");
     }
 
-    /// The course constraints have to be self-consistent or the compiler's
+    /// The course constraints have to be self-consistent or the generator's
     /// bounded correction pass cannot converge.
-    ///
-    /// The *limits* it converges toward now live in `ValidationThresholds`,
-    /// because how steep and how banked a road may get is a property of a
-    /// course rather than of the game; what is left here is the road's own
-    /// shape and its lane ladder.
     #[test]
     fn the_course_constraints_are_self_consistent() {
         let c = CourseTuning::DEFAULT;
-        let thresholds = crate::course::specification::ValidationThresholds::DEFAULT;
         assert!(c.sample_spacing < c.control_spacing);
-        assert!(thresholds.max_grade_step < thresholds.max_grade);
-        assert!(thresholds.max_bank_step < thresholds.max_bank_rad);
+        assert!(c.max_yaw_step_delta < c.max_yaw_step);
+        assert!(c.max_grade_delta < c.max_grade);
         assert!(c.min_half_width < c.max_half_width);
+        assert!(c.correction_passes > 0);
         assert!(c.dash_length < c.dash_period);
         assert!(c.lane_width * 2.0 <= c.min_half_width * 2.0);
         assert!(c.shoulder > 0.0 && c.verge > c.shoulder, "the verge is the recoverable margin");
