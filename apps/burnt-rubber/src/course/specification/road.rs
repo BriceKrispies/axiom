@@ -383,6 +383,26 @@ pub enum RoadModifierSpec {
         /// Hard ceiling on the magnitude (rad).
         maximum_rad: f32,
     },
+    /// A sustained change of elevation across the section.
+    ///
+    /// **The only way to author a net elevation change**, and the reason it is a
+    /// modifier rather than a primitive: elevation is orthogonal to what the
+    /// road does in plan. A crest and a dip both return to the level they
+    /// started at by construction, and an elevation wave is periodic, so before
+    /// this existed the only way to get a road that ended lower than it began
+    /// was to ride a quarter of a wave whose wavelength you had worked out by
+    /// hand. Now a descending turn is a turn with a drop on it.
+    ///
+    /// The grade is **constant** across the section (`drop / length`) rather
+    /// than eased at its ends. That is what lets a figure cut into several
+    /// sections descend *continuously* through the joins instead of levelling
+    /// off at each one; the compiler's rate limiter is what smooths the ends of
+    /// the whole figure, so a section actually falls a little short of the drop
+    /// it asks for wherever it meets level road.
+    GradeProfile {
+        /// How much lower the section ends than it began (m). Negative climbs.
+        drop_m: f32,
+    },
     /// A width ramp across the section, independent of its lane count.
     WidthProfile {
         /// Half-width at the start (m).
@@ -439,6 +459,7 @@ impl RoadModifierSpec {
             RoadModifierSpec::LateralWave { .. } => "lateral_wave",
             RoadModifierSpec::ElevationWave { .. } => "elevation_wave",
             RoadModifierSpec::Banking { .. } => "banking",
+            RoadModifierSpec::GradeProfile { .. } => "grade_profile",
             RoadModifierSpec::WidthProfile { .. } => "width_profile",
             RoadModifierSpec::LaneProfile { .. } => "lane_profile",
         }
@@ -480,6 +501,9 @@ impl RoadModifierSpec {
                     .in_field("maximum_rad")
                 })?;
             }
+            RoadModifierSpec::GradeProfile { drop_m } => {
+                finite(drop_m, "drop_m")?;
+            }
             RoadModifierSpec::WidthProfile {
                 start_half_width_m,
                 end_half_width_m,
@@ -504,6 +528,17 @@ impl RoadModifierSpec {
             }
         }
         Ok(())
+    }
+}
+
+impl RoadModifierSpec {
+    /// The constant grade a [`Self::GradeProfile`] asks for over a section of
+    /// `length_m`, or `None` for every other modifier.
+    pub fn sustained_grade(&self, length_m: f32) -> Option<f32> {
+        match *self {
+            RoadModifierSpec::GradeProfile { drop_m } => Some(-drop_m / length_m.max(1.0e-3)),
+            _ => None,
+        }
     }
 }
 
@@ -824,6 +859,13 @@ mod tests {
         }
         .validate()
         .is_err());
+        assert!(RoadModifierSpec::GradeProfile { drop_m: 40.0 }.validate().is_ok());
+        assert!(RoadModifierSpec::GradeProfile { drop_m: -40.0 }
+            .validate()
+            .is_ok(), "a negative drop climbs");
+        assert!(RoadModifierSpec::GradeProfile { drop_m: f32::NAN }
+            .validate()
+            .is_err());
         assert!(RoadModifierSpec::WidthProfile {
             start_half_width_m: 6.0,
             end_half_width_m: 9.0,
@@ -876,6 +918,7 @@ mod tests {
                 strength: 1.0,
                 maximum_rad: 0.1,
             },
+            RoadModifierSpec::GradeProfile { drop_m: 1.0 },
             RoadModifierSpec::WidthProfile {
                 start_half_width_m: 6.0,
                 end_half_width_m: 6.0,
@@ -918,6 +961,31 @@ mod tests {
         assert!(validate_lane_count(1, "lanes").is_err());
         assert!(validate_lane_count(4, "lanes").is_err());
         assert!(validate_lane_count(9, "lanes").is_err());
+    }
+
+    /// A drop over a length is a grade, and a section that carries one really
+    /// does end where it said it would.
+    #[test]
+    fn a_grade_profile_states_a_drop_and_yields_the_grade_that_makes_it() {
+        let drop = RoadModifierSpec::GradeProfile { drop_m: 50.0 };
+        let grade = drop.sustained_grade(500.0).expect("a grade");
+        assert!((grade + 0.1).abs() < 1.0e-6, "50 m over 500 m is -10%: {grade}");
+        // Integrating a constant grade over the length recovers the drop.
+        assert!((grade * 500.0 + 50.0).abs() < 1.0e-3);
+        // Negative drops climb.
+        let climb = RoadModifierSpec::GradeProfile { drop_m: -50.0 };
+        assert!((climb.sustained_grade(500.0).unwrap() - 0.1).abs() < 1.0e-6);
+        // A degenerate length cannot divide by zero.
+        assert!(drop.sustained_grade(0.0).unwrap().is_finite());
+        // And nothing else claims a sustained grade.
+        assert_eq!(
+            RoadModifierSpec::WidthProfile {
+                start_half_width_m: 6.0,
+                end_half_width_m: 6.0
+            }
+            .sustained_grade(100.0),
+            None
+        );
     }
 
     #[test]

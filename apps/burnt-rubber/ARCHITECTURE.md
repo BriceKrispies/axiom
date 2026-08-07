@@ -532,7 +532,8 @@ second binding table to keep in step.
 * **A second course** — write a `.brc` file and hand
   `RaceSim::from_plan` what it compiles to, or edit `course::procedural`'s
   pacing plan. See [`COURSES.md`](COURSES.md).
-* **A new road primitive, motif or encounter** — one variant plus one function;
+* **A new road primitive, modifier, motif or encounter** — one variant plus one
+  function;
   the compiler needs no change, because a motif's whole output is sections that
   already existed and an encounter's whole output is ordinary traffic plans.
 * **A new environment** — add a `SectionKind` variant and a zone; the mesh

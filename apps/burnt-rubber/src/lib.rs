@@ -3,9 +3,10 @@
 //!
 //! Nine kilometres of road, **compiled once from an authored course
 //! specification**, with a pacing curve rather than uniform noise: an opening
-//! straight to learn the throttle on, long sweepers, rolling crests, a set of
-//! esses, a lit tunnel, a wide traffic-choked straight, a canyon squeeze, a
-//! closing sweep and a finish arch. The road, its traffic, its authored
+//! straight to learn the throttle on, long sweepers, a corkscrew that screws its
+//! way down off the ridge and passes under its own entry, a set of esses, a lit
+//! tunnel, a wide traffic-choked straight, a canyon squeeze, a closing sweep and
+//! a finish arch. The road, its traffic, its authored
 //! encounters and its near-miss opportunities are all produced by [`course`] —
 //! from Rust for the shipping course, or from a `.brc` source for a
 //! hand-authored one — and validated before anybody drives them. See

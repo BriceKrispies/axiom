@@ -75,6 +75,9 @@ const FACT_SPEED_HEADROOM: u16 = 3;
 const FACT_SPEED_EXCESS: u16 = 4;
 const FACT_BOOST_OPPORTUNITY: u16 = 5;
 const FACT_LANE_INTENT: u16 = 6;
+/// The steering the *corner itself* needs, before any error has been made. See
+/// [`Perception::corner_steer`].
+const FACT_CORNER_STEER: u16 = 7;
 
 /// Fixed-point scale: one whole unit (a radian, a metre per second, a full axis
 /// deflection) is a million.
@@ -188,6 +191,27 @@ pub struct DriverTuning {
     /// the agent is given, in thousandths.
     pub steer_gain_milli: i64,
     pub steer_damping_milli: i64,
+    /// How much of the corner's own required steering the driver applies before
+    /// it has made any error at all, in thousandths of a full deflection.
+    ///
+    /// **The feedforward term, and the reason a long corner is drivable.** The
+    /// other two bindings are proportional and derivative on an *error*, and a
+    /// proportional controller has steady-state error against a sustained input:
+    /// on a constant-radius corner the car settles at whatever heading error is
+    /// large enough to command the steering the corner needs, which means it
+    /// settles *outside* the line it was aiming at, and it stays there for as
+    /// long as the corner lasts. On the short, varying corners this course used
+    /// to be made of that never had time to matter. On the nine-hundred-metre
+    /// constant-radius descent through the corkscrew it does: measured, the
+    /// ghost ground the guardrail five times inside one coil.
+    ///
+    /// Feeding the corner forward removes the cause rather than the symptom.
+    /// `Perception::corner_steer` is not a tuned gain — it is the deflection the
+    /// chassis actually needs (`v·κ / steering_authority(v)`), so at `1.0` the
+    /// error terms are left with nothing to do but correct genuine error. Below
+    /// one because the aim point already leads the car into the corner, so some
+    /// of the turn is asked for twice.
+    pub steer_feedforward_milli: i64,
 }
 
 impl DriverTuning {
@@ -249,6 +273,7 @@ impl DriverTuning {
         near_miss_reward: 5.05,
         steer_gain_milli: 35_000,
         steer_damping_milli: 83,
+        steer_feedforward_milli: 900,
     };
 }
 
@@ -274,6 +299,15 @@ pub struct Perception {
     pub boost_opportunity: bool,
     /// The lateral offset from the centreline the driver picked (m).
     pub target_lateral: f32,
+    /// The steering deflection the corner ahead needs on its own, signed the
+    /// way the steering axis wants it.
+    ///
+    /// Holding curvature `κ` at speed `v` demands a yaw rate of `v·κ`, and the
+    /// chassis supplies `steering_authority(v)` per unit of steering, so the
+    /// deflection the corner costs is `v·κ / authority(v)`. That is a fact about
+    /// the road and the car, not a tuning knob — which is exactly why it belongs
+    /// in perception.
+    pub corner_steer: f32,
     /// The lane hop the driver wants *this step*, in the same screen-direction
     /// units [`DriveCommand::lane_step`] uses, or `0` for "stay put".
     ///
@@ -310,10 +344,19 @@ pub fn perceive(sim: &RaceSim, driver: &DriverTuning) -> Perception {
     let aim_distance = car.distance + lookahead;
     let target_lateral = choose_line(sim, aim_distance, driver);
 
-    let aim = track.interpolated_at(aim_distance).at_lateral(target_lateral);
+    let aim_sample = track.interpolated_at(aim_distance);
+    let aim = aim_sample.at_lateral(target_lateral);
     let to_aim = aim.subtract(car.position);
     let wanted_yaw = to_aim.x.atan2(to_aim.z);
     let heading_error = -shortest_angle(wanted_yaw - car.yaw);
+
+    // What the corner costs in steering before any error has been made. The
+    // sign follows `heading_error`'s: a positive-curvature corner turns the
+    // road's heading up, so following it is a *negative* deflection.
+    let authority =
+        crate::sim::controller::steering_authority(car.speed(), &sim.tuning().vehicle);
+    let corner_steer =
+        (-car.speed() * aim_sample.curvature / authority.max(1.0e-3)).clamp(-1.0, 1.0);
 
     let target_speed = plan_speed(sim, driver);
     let headroom = (target_speed - car.speed()).max(0.0);
@@ -348,6 +391,7 @@ pub fn perceive(sim: &RaceSim, driver: &DriverTuning) -> Perception {
 
     Perception {
         heading_error,
+        corner_steer,
         yaw_rate: car.yaw_rate,
         speed_headroom: headroom,
         speed_excess: (car.speed() - target_speed * driver.brake_margin).max(0.0),
@@ -655,7 +699,7 @@ pub fn drive_one_step(sim: &RaceSim, driver: &DriverTuning, tick: u64) -> (Drive
     // is not over it, no boost fact when boost is not worth spending. An absent
     // fact drives no axis, which is how "lift off" and "do not brake" are
     // expressed without the control law needing a conditional.
-    let mut builder = AgentApi::observation_builder(agent_id, Tick::new(tick), 2, 6, 0);
+    let mut builder = AgentApi::observation_builder(agent_id, Tick::new(tick), 2, 7, 0);
     builder
         .add_channel(AgentApi::channel_geometric())
         .expect("one channel within the channel bound");
@@ -672,6 +716,8 @@ pub fn drive_one_step(sim: &RaceSim, driver: &DriverTuning, tick: u64) -> (Drive
             .then_some((FACT_BOOST_OPPORTUNITY, 1.0)),
         (perception.lane_intent != 0)
             .then_some((FACT_LANE_INTENT, f32::from(perception.lane_intent))),
+        (perception.corner_steer.abs() > 1.0e-4)
+            .then_some((FACT_CORNER_STEER, perception.corner_steer)),
     ]
     .into_iter()
     .flatten()
@@ -685,19 +731,21 @@ pub fn drive_one_step(sim: &RaceSim, driver: &DriverTuning, tick: u64) -> (Drive
                 0,
                 (value * MICRO) as i64,
             ))
-            .expect("at most six facts, within the fact bound");
+            .expect("at most seven facts, within the fact bound");
     });
     let observation = builder.build();
 
     // Decide. The control law: a perceived scalar in, an axis deflection out.
-    // Steering takes two bindings (proportional + damping) onto one axis; the
-    // queue sums them.
+    // Steering takes three bindings (feedforward + proportional + damping) onto
+    // one axis; the queue sums them.
     // The control law: a table of neutral bindings. There is not one racing
     // noun in it — a perceived scalar, a proportional gain in thousandths, and
     // the limits the axis is held inside. Two bindings drive the steering axis
     // (a proportional term on heading error and a damping term on the car's own
-    // yaw rate) and the queue sums them, which is the difference between a
-    // controller that converges and one that oscillates into the guardrail. It
+    // yaw rate), a third feeds the corner itself forward, and the queue sums
+    // them — which is the difference between a controller that converges and one
+    // that oscillates into the guardrail, and between one that holds a long
+    // corner and one that drifts steadily out of it. It
     // is written inline because `axiom-agent`'s binding type is sealed behind
     // the facade and so cannot be named as a helper's return type.
     let mut brain = AgentApi::axis_map_brain(vec![
@@ -713,6 +761,14 @@ pub fn drive_one_step(sim: &RaceSim, driver: &DriverTuning, tick: u64) -> (Drive
             FACT_YAW_RATE,
             AXIS_STEER,
             driver.steer_damping_milli,
+            0,
+            -1_000_000,
+            1_000_000,
+        ),
+        AgentApi::axis_binding(
+            FACT_CORNER_STEER,
+            AXIS_STEER,
+            driver.steer_feedforward_milli,
             0,
             -1_000_000,
             1_000_000,

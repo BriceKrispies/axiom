@@ -26,17 +26,21 @@ pub enum MotifKind {
     BlindCrest,
     /// A staged loss of lanes with no recovery.
     LaneCollapse,
+    /// A road that screws its way down: one continuous banked turn, descending
+    /// far enough to pass under itself.
+    Corkscrew,
 }
 
 impl MotifKind {
     /// Every motif, in a stable order.
-    pub const ALL: [MotifKind; 6] = [
+    pub const ALL: [MotifKind; 7] = [
         MotifKind::HighSpeedSweeps,
         MotifKind::AlternatingSlalom,
         MotifKind::RollingFreeway,
         MotifKind::TunnelSqueeze,
         MotifKind::BlindCrest,
         MotifKind::LaneCollapse,
+        MotifKind::Corkscrew,
     ];
 
     /// The DSL token / dump keyword.
@@ -48,6 +52,7 @@ impl MotifKind {
             MotifKind::TunnelSqueeze => "tunnel_squeeze",
             MotifKind::BlindCrest => "blind_crest",
             MotifKind::LaneCollapse => "lane_collapse",
+            MotifKind::Corkscrew => "corkscrew",
         }
     }
 
@@ -79,6 +84,10 @@ impl MotifKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MotifParams {
     /// How many repetitions the motif runs for. Bounded by [`MAX_MOTIF_COUNT`].
+    ///
+    /// [`MotifKind::Corkscrew`] reads it as **revolutions** rather than
+    /// repetitions — it is one continuous turn, and what varies is how far round
+    /// it goes.
     pub count: u32,
     /// Total road the motif covers (m), where the motif is length-driven rather
     /// than count-driven.
@@ -93,7 +102,7 @@ pub struct MotifParams {
     pub lateral_amplitude_m: f32,
     /// Wavelength for both waves (m).
     pub wavelength_m: f32,
-    /// Height of a crest (m).
+    /// Height of a crest, or the total drop of a corkscrew (m).
     pub height_m: f32,
     /// Lanes the motif starts with.
     pub lanes: CountRange,

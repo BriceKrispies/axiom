@@ -40,6 +40,7 @@ pub fn expand(course_seed: u64, invocation: &MotifInvocation) -> CourseResult<Ve
         MotifKind::TunnelSqueeze => tunnel_squeeze(&invocation.id, params, &mut draw),
         MotifKind::BlindCrest => blind_crest(&invocation.id, params, &mut draw),
         MotifKind::LaneCollapse => lane_collapse(&invocation.id, params, &mut draw),
+        MotifKind::Corkscrew => corkscrew(&invocation.id, params, &mut draw),
     };
     Ok(sections
         .into_iter()
@@ -330,6 +331,73 @@ fn lane_collapse(id: &SectionId, params: &MotifParams, draw: &mut Draw) -> Vec<S
         .collect()
 }
 
+/// **Corkscrew** — a run in, one continuous banked turn that descends far
+/// enough to pass under itself, and a run out.
+///
+/// It is a *single* turn section rather than a string of them, and that is the
+/// whole trick. A `Turn` eases its curvature in and out over
+/// [`TURN_EASE_FRACTION`](crate::course::specification::road::TURN_EASE_FRACTION)
+/// at each end, so a helix built from several of them would relax to straight
+/// between every coil — a sequence of corners, not a screw. One section eases
+/// once, at the lip and at the exit, which is exactly where a corkscrew should
+/// ease.
+///
+/// The radius is **derived**, not authored: the motif is told how much road it
+/// has and how many revolutions to spend it on, and the radius falls out. That
+/// is the right way round — "one and a bit turns down a ridge in twelve hundred
+/// metres" is the design, and the radius is its consequence. If the consequence
+/// is tighter than the course allows, `RoadPrimitiveSpec::validate` rejects it
+/// by name rather than this quietly opening the figure out.
+fn corkscrew(id: &SectionId, params: &MotifParams, draw: &mut Draw) -> Vec<SectionSpec> {
+    let entry = (params.length_m * CORKSCREW_ENTRY_SHARE).max(60.0);
+    let runout = (params.length_m * CORKSCREW_RUNOUT_SHARE).max(80.0);
+    let coil = (params.length_m - entry - runout).max(200.0);
+    // The eased ends of the turn spend their arc at less than full curvature, so
+    // the constant-radius middle has to make up the difference for the figure to
+    // come round as many times as it was asked to.
+    let turning_arc = coil * (1.0 - crate::course::specification::road::TURN_EASE_FRACTION);
+    let revolutions = params.count.max(1) as f32;
+    let radius_m = (turning_arc / (revolutions * std::f32::consts::TAU))
+        .max(params.radius_m.lo);
+    let direction = draw
+        .chance(0.5)
+        .then_some(TurnDirection::Right)
+        .unwrap_or(TurnDirection::Left);
+    vec![
+        SectionSpec::new(
+            id.child("entry"),
+            RoadPrimitiveSpec::Straight { length_m: entry },
+        ),
+        SectionSpec::new(
+            id.child("coil"),
+            RoadPrimitiveSpec::Turn {
+                length_m: coil,
+                radius_m,
+                direction,
+            },
+        )
+        .with_modifier(RoadModifierSpec::Banking {
+            mode: BankingMode::FollowCurvature,
+            strength: 1.0,
+            maximum_rad: params.bank_rad.hi,
+        })
+        .with_modifier(RoadModifierSpec::GradeProfile {
+            drop_m: params.height_m,
+        }),
+        SectionSpec::new(
+            id.child("runout"),
+            RoadPrimitiveSpec::Straight { length_m: runout },
+        ),
+    ]
+}
+
+/// How much of a corkscrew's length is spent lining the car up for it.
+const CORKSCREW_ENTRY_SHARE: f32 = 0.12;
+/// How much is spent letting the car settle afterwards. Larger than the entry:
+/// a car leaving a long banked descent is unloaded and needs somewhere to put
+/// itself straight.
+const CORKSCREW_RUNOUT_SHARE: f32 = 0.16;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,6 +445,7 @@ mod tests {
             MotifKind::RollingFreeway,
             MotifKind::TunnelSqueeze,
             MotifKind::BlindCrest,
+            MotifKind::Corkscrew,
         ] {
             assert_ne!(
                 expand(7, &invocation(kind)).unwrap(),
@@ -464,6 +533,82 @@ mod tests {
         for pair in firsts.windows(2) {
             assert_ne!(pair[0], pair[1]);
         }
+    }
+
+    /// The figure the motif exists for: one continuous turn, banked, descending,
+    /// and round far enough to pass under itself.
+    #[test]
+    fn a_corkscrew_is_one_continuous_descending_turn() {
+        let mut m = invocation(MotifKind::Corkscrew);
+        m.params.count = 1;
+        m.params.length_m = 1_250.0;
+        m.params.height_m = 70.0;
+        m.params.radius_m = ScalarRange::exact(90.0);
+        m.params.bank_rad = ScalarRange::new(0.0, 0.25);
+        let sections = expand(4, &m).unwrap();
+
+        assert_eq!(sections.len(), 3, "run in, one coil, run out");
+        assert!(sections[0].id.as_str().ends_with("/entry"));
+        assert!(sections[2].id.as_str().ends_with("/runout"));
+
+        // Exactly one turn section — several would relax to straight between
+        // the coils and stop being a screw.
+        let turns: Vec<&SectionSpec> = sections
+            .iter()
+            .filter(|s| matches!(s.primitive, RoadPrimitiveSpec::Turn { .. }))
+            .collect();
+        assert_eq!(turns.len(), 1);
+        let coil = turns[0];
+
+        // The radius is derived from the road available and the revolutions
+        // asked for, not taken from the parameter.
+        let (length_m, radius_m) = match coil.primitive {
+            RoadPrimitiveSpec::Turn { length_m, radius_m, .. } => (length_m, radius_m),
+            ref other => panic!("expected a turn, got {other:?}"),
+        };
+        let revolutions = length_m * (1.0 - 0.22) / (radius_m * std::f32::consts::TAU);
+        assert!(
+            (revolutions - 1.0).abs() < 0.02,
+            "asked for one revolution, the geometry makes {revolutions:.2}"
+        );
+        assert!(radius_m > 90.0, "and it is not a hairpin: {radius_m:.0} m");
+
+        // It descends, and it leans.
+        assert!(coil
+            .modifiers
+            .iter()
+            .any(|m| matches!(m, RoadModifierSpec::GradeProfile { drop_m } if *drop_m == 70.0)));
+        assert!(coil.modifiers.iter().any(|m| matches!(
+            m,
+            RoadModifierSpec::Banking { maximum_rad, .. } if *maximum_rad == 0.25
+        )));
+
+        // More revolutions in the same road is a tighter radius.
+        let mut tighter = m.clone();
+        tighter.params.count = 2;
+        let tight_radius = expand(4, &tighter)
+            .unwrap()
+            .into_iter()
+            .find_map(|s| match s.primitive {
+                RoadPrimitiveSpec::Turn { radius_m, .. } => Some(radius_m),
+                _ => None,
+            })
+            .unwrap();
+        assert!(tight_radius < radius_m, "{tight_radius} vs {radius_m}");
+
+        // And the authored radius is a floor the derivation cannot go under.
+        let mut cramped = m.clone();
+        cramped.params.count = 8;
+        cramped.params.radius_m = ScalarRange::exact(120.0);
+        let floored = expand(4, &cramped)
+            .unwrap()
+            .into_iter()
+            .find_map(|s| match s.primitive {
+                RoadPrimitiveSpec::Turn { radius_m, .. } => Some(radius_m),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(floored, 120.0);
     }
 
     #[test]

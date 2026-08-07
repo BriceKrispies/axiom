@@ -177,13 +177,15 @@ mod tests {
         // setting: the ghost drives the real sim, so any rule that changes how
         // much boost a lap earns moves it.
         //
-        // It moved when the course became a compiled plan rather than a
-        // control-point walk (89.33 s on the old road). The road it drives is
-        // genuinely a different road — analytic constant-radius corners instead
-        // of relaxed heading noise, and two authored figures that were not there
-        // before — so the reference had to be re-measured rather than restored.
+        // It moved twice. First when the course became a compiled plan rather
+        // than a control-point walk (89.33 s on the old road, 92.30 s on the
+        // compiled one). Then again when the third section became a corkscrew:
+        // nine hundred metres of constant-radius spiral is 4.5 s slower than the
+        // rolling crests it replaced, which is not a regression — it is what a
+        // corkscrew costs, and it is the single biggest thing this course now
+        // asks of a driver.
         assert!(
-            (g.elapsed_seconds() - 92.30).abs() < 0.05,
+            (g.elapsed_seconds() - 99.72).abs() < 0.05,
             "ghost time {:.2}s",
             g.elapsed_seconds()
         );
@@ -198,11 +200,20 @@ mod tests {
     /// by measurement against the *old* course, and the course is now compiled
     /// from an authored specification: its corners hold a constant radius where
     /// the old road's curvature was relaxed noise, its traffic is drawn from a
-    /// density band rather than a fixed 85 m pitch, and it carries two authored
-    /// figures. Measured on that road the ghost runs 92.30 s (wheel) and 90.03 s
-    /// (rails) with nine and six contacts. Ninety-five seconds and a dozen
-    /// contacts is the honest bar for *this* course; tightening it further is a
-    /// re-fit of the driver, not a change to the course.
+    /// density band rather than a fixed 85 m pitch, it carries authored figures,
+    /// and its third section is a full-revolution corkscrew. Measured on that
+    /// road the ghost runs 99.72 s (wheel) and 92.33 s (rails) with eight and
+    /// four contacts. A hundred and five seconds and a dozen contacts is the
+    /// honest bar for *this* course; tightening it further is a re-fit of the
+    /// driver, not a change to the course.
+    ///
+    /// The contact count is the part worth watching, and it is *lower* than
+    /// before the corkscrew existed. The first draft of that section cost the
+    /// ghost fifteen contacts — five of them barrier grinds inside one coil —
+    /// because a proportional steering law drifts steadily outward on a
+    /// sustained corner. That was fixed in the driver, where the cause was
+    /// (`DriverTuning::steer_feedforward_milli`), not by opening the corner out
+    /// until the driver stopped noticing.
     ///
     /// What has not moved is the part that says the ghost is playing the game
     /// rather than bulldozing it: it still scores more than sixty near misses a
@@ -224,8 +235,8 @@ mod tests {
                 });
                 assert!(g.finished(), "{profile:?} ghost did not finish");
                 assert!(
-                    g.elapsed_seconds() < 95.0,
-                    "{profile:?} ghost took {:.2}s — the ghost must beat 95 s",
+                    g.elapsed_seconds() < 105.0,
+                    "{profile:?} ghost took {:.2}s — the ghost must beat 105 s",
                     g.elapsed_seconds()
                 );
                 // And it gets there by threading traffic, not by bulldozing it:
