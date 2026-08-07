@@ -12,9 +12,24 @@
 //! and there is no timer anywhere. If the car is not doing something dangerous,
 //! the meter is not filling.
 //!
-//! Spending is gated by a minimum charge so a nearly-empty meter cannot be
-//! tapped into a stutter, and by an "already released" latch so a boost that
-//! empties does not silently re-engage while the key is still held.
+//! # Holding the button *is* the request
+//!
+//! There is no latch. While the button is held the meter is trying to spend,
+//! and the moment it has enough to spend it does — so a boost that runs dry
+//! mid-corner comes back on its own as soon as the next near miss pays for it,
+//! with the player's thumb never leaving the button.
+//!
+//! It used to work the other way: running dry set an "exhausted" flag that only
+//! a *release* could clear, so a player holding the button through a pass
+//! watched the meter refill and nothing happen. That is the wrong shape for a
+//! held control. A held button is a continuous request, not an edge, and the
+//! meter's job is to answer it whenever it can.
+//!
+//! What stops that becoming a stutter is the one gate that remains:
+//! [`RaceTuning::boost_min_to_start`]. Starting a boost needs a meter with
+//! something in it; once running it drains to nothing. That is ordinary
+//! hysteresis, and it is what turns "spend whatever you have the instant you
+//! have it" into "wait until it is worth spending, then spend it".
 
 use crate::tuning::{RaceTuning, DT};
 
@@ -27,9 +42,6 @@ pub struct BoostMeter {
     charge: f32,
     /// Whether boost is being spent this step.
     active: bool,
-    /// Set when a boost runs the meter dry; cleared when the key is released, so
-    /// an empty meter cannot re-engage under a held key.
-    exhausted: bool,
     /// Charge earned since the last drain, for the HUD's "+" flash.
     recent_gain: f32,
 }
@@ -40,7 +52,6 @@ impl BoostMeter {
         BoostMeter {
             charge: STARTING_CHARGE,
             active: false,
-            exhausted: false,
             recent_gain: 0.0,
         }
     }
@@ -87,18 +98,20 @@ impl BoostMeter {
             * DT;
         self.award(earned);
 
-        // Releasing the key always clears the exhaustion latch.
-        self.exhausted &= held;
-
-        let can_start = self.ready(race) && !self.exhausted;
-        let can_continue = self.active && self.charge > 0.0 && !self.exhausted;
+        // The hysteresis, and the whole of it: **starting** needs a meter worth
+        // spending, **continuing** only needs one that is not empty. Without the
+        // gap between those two the meter would re-engage on the first
+        // hundredth it earned and fire in single frames.
+        let can_start = self.ready(race);
+        let can_continue = self.active && self.charge > 0.0;
         self.active = held && (can_continue || can_start);
 
         if self.active {
             self.charge = (self.charge - race.boost_drain_rate * DT).max(0.0);
-            // Running dry latches until the key is let go.
-            self.exhausted = self.charge <= 0.0;
-            self.active = !self.exhausted;
+            // Running dry ends *this* boost. It does not lock the button out:
+            // the next step asks the same question again, and the moment the
+            // meter is back above the starting gate the answer is yes.
+            self.active = self.charge > 0.0;
         }
         self.active
     }
@@ -159,22 +172,93 @@ mod tests {
         assert!(!m.active());
     }
 
+    /// **The thing a held button means.** Run the meter dry with the button
+    /// still down, keep holding, and boost comes back on its own the moment the
+    /// meter is worth spending again — no release, no re-press.
     #[test]
-    fn an_empty_meter_does_not_re_engage_under_a_held_key() {
+    fn a_held_button_re_engages_as_soon_as_the_meter_can_pay() {
         let mut m = BoostMeter::new();
         let r = RaceTuning::DEFAULT;
-        // A car that is earning: flat out.
         let fast = car_at(r.high_speed_threshold + 5.0, false);
+
+        // Hold until it runs out.
         while m.step(true, &fast, &r) {}
         assert!(!m.active());
-        // Keep holding while it trickles back up — it must stay off.
-        for _ in 0..600 {
-            assert!(!m.step(true, &fast, &r), "still latched off");
+        assert!(m.charge() < r.boost_min_to_start);
+
+        // Keep holding. It must come back by itself.
+        let mut steps = 0;
+        while !m.step(true, &fast, &r) {
+            steps += 1;
+            assert!(steps < 3_000, "a held button never re-engaged");
         }
-        assert!(m.charge() > r.boost_min_to_start, "even though it has recharged");
-        // Release, then press again.
-        assert!(!m.step(false, &fast, &r));
-        assert!(m.step(true, &fast, &r), "a fresh press works");
+        assert!(m.active(), "boost came back without the button being released");
+        assert!(
+            m.charge() >= r.boost_min_to_start - r.boost_drain_rate * DT,
+            "and it waited until the meter was worth spending: {}",
+            m.charge()
+        );
+    }
+
+    /// A near miss is the case this exists for: dry, still holding, one pass
+    /// pays for the next boost and it fires on the spot.
+    #[test]
+    fn a_near_miss_re_lights_the_boost_under_a_held_button() {
+        let mut m = BoostMeter::new();
+        let r = RaceTuning::DEFAULT;
+        // A car earning nothing passively, so the award is the only income.
+        let idle = car_at(10.0, false);
+        while m.step(true, &idle, &r) {}
+        assert!(!m.active());
+
+        m.award(r.near_miss_boost);
+        assert!(
+            m.step(true, &idle, &r),
+            "a near miss did not re-light a held boost"
+        );
+    }
+
+    /// The whole point, end to end: hold the button, run dry, thread one car,
+    /// and the boost is back — without the thumb moving.
+    #[test]
+    fn one_pass_is_enough_to_relight_a_held_boost() {
+        let r = RaceTuning::DEFAULT;
+        assert!(
+            r.near_miss_boost > r.boost_min_to_start,
+            "the gate is not payable by one pass"
+        );
+        let mut m = BoostMeter::new();
+        let idle = car_at(10.0, false);
+        while m.step(true, &idle, &r) {}
+        assert!(!m.active(), "dry");
+        m.award(r.near_miss_boost);
+        assert!(m.step(true, &idle, &r));
+        // And it is a real boost, not a single frame: it runs until the meter
+        // is spent.
+        let mut steps = 0;
+        while m.step(true, &idle, &r) {
+            steps += 1;
+        }
+        assert!(
+            steps > 10,
+            "the re-lit boost lasted {steps} steps, which is a flicker"
+        );
+    }
+
+    /// The gate that replaced the latch has to be doing its job: a meter with
+    /// almost nothing in it may not fire, or a held button would flicker every
+    /// frame it earned a hundredth.
+    #[test]
+    fn a_nearly_empty_meter_still_will_not_start_under_a_held_button() {
+        let mut m = BoostMeter::new();
+        let r = RaceTuning::DEFAULT;
+        let idle = car_at(10.0, false);
+        while m.step(true, &idle, &r) {}
+
+        m.award(r.boost_min_to_start * 0.5);
+        assert!(!m.step(true, &idle, &r), "half the gate is not enough");
+        m.award(r.boost_min_to_start);
+        assert!(m.step(true, &idle, &r), "and over the gate it fires");
     }
 
     #[test]

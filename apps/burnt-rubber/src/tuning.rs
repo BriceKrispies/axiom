@@ -807,7 +807,24 @@ pub struct RaceTuning {
     pub high_speed_threshold: f32,
     /// Boost drained per second while held (fraction of the meter).
     pub boost_drain_rate: f32,
-    /// Minimum meter needed to start a boost (stops a stuttering tap).
+    /// Minimum meter needed to **start** a boost. Once running, it drains to
+    /// nothing — the gap between those two is the whole hysteresis.
+    ///
+    /// It carries more weight than it used to. It was once only the guard on a
+    /// fresh press, because running the meter dry latched boost off until the
+    /// button was released; now that a held button re-engages on its own
+    /// ([`crate::sim::boost`]) this is the *re-arm* threshold, and it alone
+    /// decides how often a held button re-fires. Measured over ten seconds of
+    /// holding an empty meter at racing speed: at 0.06 it re-lit ten times in
+    /// bursts of 0.19 s, which reads as a flicker and machine-guns the cue; at
+    /// 0.12 it re-lights five times in bursts of 0.39 s, for exactly the same
+    /// nineteen per cent of the time spent boosting. Same boost, fewer and
+    /// longer shoves.
+    ///
+    /// It must stay **below [`Self::near_miss_boost`]**, or threading one car
+    /// would no longer be enough to re-light a held boost — which is the case
+    /// the held-button behaviour exists for. `the_boost_gate_is_payable_by_one_near_miss`
+    /// pins that.
     pub boost_min_to_start: f32,
     /// Simulation steps a near-miss notification stays on the HUD.
     pub notify_steps: u32,
@@ -838,7 +855,7 @@ impl RaceTuning {
         high_speed_boost_rate: 0.075,
         high_speed_threshold: 74.0,
         boost_drain_rate: 0.36,
-        boost_min_to_start: 0.06,
+        boost_min_to_start: 0.12,
         notify_steps: 75,
         countdown_steps: 45,
         stuck_seconds: 2.5,
@@ -1181,6 +1198,23 @@ mod tests {
         assert!(c.dash_length < c.dash_period);
         assert!(c.lane_width * 2.0 <= c.min_half_width * 2.0);
         assert!(c.shoulder > 0.0 && c.verge > c.shoulder, "the verge is the recoverable margin");
+    }
+
+    /// A held button re-lights the moment the meter clears
+    /// [`RaceTuning::boost_min_to_start`], so a single near miss has to be able
+    /// to pay for that. If the gate ever rose above what one pass awards, a
+    /// player holding the button through traffic would be back to watching the
+    /// meter fill and nothing happen — the exact behaviour the held-button
+    /// change removed.
+    #[test]
+    fn the_boost_gate_is_payable_by_one_near_miss() {
+        let r = RaceTuning::DEFAULT;
+        assert!(
+            r.near_miss_boost > r.boost_min_to_start,
+            "one near miss pays {} but the gate asks {}",
+            r.near_miss_boost,
+            r.boost_min_to_start
+        );
     }
 
     /// Boost must be earnable faster than it drains under aggressive driving, or

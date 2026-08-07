@@ -331,8 +331,14 @@ pub fn perceive(sim: &RaceSim, driver: &DriverTuning) -> Perception {
         .active()
         .then(|| charge > 0.0)
         .unwrap_or(charge >= driver.boost_start_charge);
-    let boost_opportunity = sim.boost().ready(&sim.tuning().race)
-        && meter_says_go
+    // `meter_says_go` is the *whole* meter condition. Asking the meter's own
+    // `ready` as well — which it used to — made the driver let go at the meter's
+    // **start** gate rather than at empty, so every boost was abandoned with
+    // that much charge still in it and the driver then had to bank all the way
+    // back to `boost_start_charge` to use it. That was invisible while the gate
+    // was 0.06 and cost a second a lap the moment it moved. The start gate is
+    // the meter's business: if the meter cannot pay, it simply does not engage.
+    let boost_opportunity = meter_says_go
         && headroom > driver.boost_min_headroom
         && !car.surface.is_off_road();
 
