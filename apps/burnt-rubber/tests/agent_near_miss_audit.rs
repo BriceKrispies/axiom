@@ -72,4 +72,24 @@ fn audit_where_the_near_misses_go() {
         f32::from(missed as u16) * 0.13 / 0.36,
         f32::from(missed as u16) * 0.13 / 0.36 * 22.0
     );
+
+    // The audit only means anything if the run it audited actually happened,
+    // and if the two numbers it compares are the two it claims to compare: every
+    // near miss the game awarded has to be one of the overtakes seen here, or
+    // this is measuring a different rule from the one that pays out.
+    assert_eq!(sim.phase(), RacePhase::Finished, "the audited run did not finish");
+    assert!(overtaken.len() > 50, "only {} overtakes seen", overtaken.len());
+    assert!(
+        sim.near_miss_count() as usize <= overtaken.len(),
+        "the game scored {} near misses out of {} overtakes — the audit's \
+         alongside window is not the rule's",
+        sim.near_miss_count(),
+        overtaken.len()
+    );
+    assert_eq!(
+        scored + same_lane as usize + too_far as usize,
+        overtaken.len(),
+        "every overtake is scored, same-lane or too far — the buckets must partition"
+    );
+    assert!(room_min.is_finite() && room_min > 0.0);
 }

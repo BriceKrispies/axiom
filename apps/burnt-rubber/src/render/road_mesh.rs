@@ -442,7 +442,7 @@ mod tests {
     use axiom::prelude::Vec3;
 
     fn track() -> Track {
-        Track::generate(crate::DEFAULT_SEED, &CourseTuning::DEFAULT)
+        Track::fixture(crate::DEFAULT_SEED)
     }
 
     #[test]

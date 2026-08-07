@@ -160,10 +160,10 @@ pub fn guide(car: &mut CarState, command: DriveCommand, track: &Track, state: &m
 mod tests {
     use super::*;
     use crate::track::{shortest_angle, Track};
-    use crate::tuning::Tuning;
+    
 
     fn track() -> Track {
-        Track::generate(7, &Tuning::DEFAULT.course)
+        Track::fixture(7)
     }
 
     /// A car parked at distance 40 m, sitting in `lane`'s centre. The lane must

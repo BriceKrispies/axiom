@@ -8,22 +8,21 @@
 //! the app. That is deliberate: two representations of a racing line drift, and
 //! when they drift the car drives through the scenery.
 //!
-//! The table is generated once at construction and is then immutable. It is
-//! bounded (a ~9 km course at 2 m spacing is a few thousand entries, a few
+//! The table is **built by the course compiler** ([`crate::course`]) and is then
+//! immutable. It used to be generated here, from a bespoke control-point walk;
+//! that generator is gone, and what is left is the table and the questions
+//! everything asks of it. The split matters: this file answers *where is the
+//! road*, and the course system answers *what road should there be*.
+//!
+//! It is bounded (a ~9 km course at 2 m spacing is a few thousand entries, a few
 //! hundred kilobytes), which is why the *logical* course can stay resident while
 //! only the *rendered* geometry is chunked and streamed.
-
-pub mod generate;
-pub mod section;
-pub mod spline;
 
 use axiom_math::Vec3;
 
 use crate::tuning::CourseTuning;
 
-pub use generate::ControlPoint;
-pub use section::{SectionKind, SectionProfile, Zone};
-pub use spline::unit_or;
+pub use crate::course::specification::{SectionKind, Zone};
 
 /// One sampled point of road, with the complete local frame the geometry and
 /// the simulation are both built from.
@@ -49,8 +48,18 @@ pub struct TrackSample {
     pub bank: f32,
     /// Half-width of the driving surface (m).
     pub half_width: f32,
-    /// The section this sample belongs to.
+    /// The environment/scenery profile of the section this sample belongs to.
     pub section: SectionKind,
+    /// The **identity** of the compiled section this sample belongs to — an
+    /// index into [`CoursePlan::sections`](crate::course::runtime::CoursePlan::sections).
+    ///
+    /// Distinct from [`Self::section`] on purpose: several sections may share an
+    /// environment (two stretches of coast look the same), but each is its own
+    /// authored piece of road with its own id, seeds and traffic.
+    pub section_index: u16,
+    /// The speed a competent player is expected to be carrying here (m/s), from
+    /// the section's authored value.
+    pub expected_speed: f32,
 }
 
 impl TrackSample {
@@ -70,7 +79,7 @@ impl TrackSample {
     }
 }
 
-/// The generated course.
+/// The compiled course's road.
 #[derive(Debug, Clone)]
 pub struct Track {
     samples: Vec<TrackSample>,
@@ -83,13 +92,11 @@ pub struct Track {
 }
 
 impl Track {
-    /// Generate the course for `seed` under `tuning`. A pure function of both.
-    pub fn generate(seed: u64, tuning: &CourseTuning) -> Track {
-        let controls = generate::control_points(seed, tuning);
-        let positions: Vec<Vec3> = controls.iter().map(|c| c.position).collect();
-        let dense = spline::densify(&positions);
-        let resampled = spline::resample(&dense, tuning.sample_spacing);
-        let samples = build_samples(&resampled, &controls, tuning);
+    /// Wrap a compiled sample table.
+    ///
+    /// The only constructor: a `Track` is a *result*, and the one thing allowed
+    /// to produce the samples is [`crate::course::geometry`].
+    pub fn from_samples(seed: u64, samples: Vec<TrackSample>, tuning: &CourseTuning) -> Track {
         let length = samples.last().map(|s| s.distance).unwrap_or(0.0);
         Track {
             samples,
@@ -170,16 +177,10 @@ impl Track {
     /// those — so lane 0 is at 0.0 m and lane `n` is at `n * lane_width` for the
     /// entire nine kilometres, whatever the road is doing.
     ///
-    /// Both halves of that matter, and the old shape got both wrong. It divided
-    /// the local road width by a lane count derived from that same width, which
-    /// meant (a) every lane centre was a *fraction* of the road, so lanes slid
-    /// outward as it widened, and (b) the count was unsigned and edge-anchored,
-    /// so going from four lanes to five renumbered all of them — lane 2 of 4 and
-    /// lane 2 of 5 are different pieces of road. A car holding a lane index was
-    /// therefore shunted sideways by a road that merely got wider. Anchoring the
-    /// numbering at the centre instead of the edge is what makes a lane a
-    /// durable identity rather than an ordinal into a list that keeps changing
-    /// length.
+    /// Both halves of that matter. Anchoring the numbering at the centre instead
+    /// of the edge is what makes a lane a durable identity rather than an
+    /// ordinal into a list that keeps changing length — a car holding a lane
+    /// index is not shunted sideways by a road that merely got wider.
     pub fn lane_lateral(&self, sample: &TrackSample, lane: i32) -> f32 {
         let reach = self.lane_reach(sample);
         lane.clamp(-reach, reach) as f32 * self.lane_width
@@ -188,17 +189,7 @@ impl Track {
     /// Which lane a car at `lateral` (m from the road centre) is in at `sample` —
     /// the exact inverse of [`Track::lane_lateral`], and here rather than at the
     /// call site for the same reason that one is: **there is one idea of where
-    /// the lanes are.** The traffic holds a lane index, the player steers a
-    /// continuous offset, and anything that wants to compare the two has to
-    /// convert. A caller doing that conversion with its own `/ 3.5` would be a
-    /// second idea of the road, and it would drift the first time the lane width
-    /// or the reach clamp moved.
-    ///
-    /// Lanes are a fixed width anchored on the centreline, so the inverse is a
-    /// rounding: the lane whose centre is nearest. Beyond the road's reach it
-    /// clamps to the outermost lane on that side, which is what
-    /// [`Track::lane_lateral`] does going the other way — so a round trip
-    /// through both is the identity for every lane the road actually has.
+    /// the lanes are.**
     pub fn lane_at_lateral(&self, sample: &TrackSample, lateral: f32) -> i32 {
         let reach = self.lane_reach(sample);
         let nearest = (lateral / self.lane_width.max(0.1)).round() as i32;
@@ -252,7 +243,11 @@ impl Track {
             grade: a.grade + (b.grade - a.grade) * t,
             bank: a.bank + (b.bank - a.bank) * t,
             half_width: a.half_width + (b.half_width - a.half_width) * t,
+            // Discrete labels take the nearer sample rather than a meaningless
+            // blend.
             section: a.section,
+            section_index: a.section_index,
+            expected_speed: a.expected_speed,
         }
     }
 
@@ -303,6 +298,20 @@ impl Track {
     pub fn progress(&self, distance: f32) -> f32 {
         (distance / self.length.max(1.0)).clamp(0.0, 1.0)
     }
+
+    /// The shipping course's road for `seed` — the fixture every test that
+    /// wants *a road* asks for.
+    ///
+    /// Test-only, and deliberately routed through the real compiler rather than
+    /// through a hand-built sample table: a fixture that is not the road the
+    /// game builds proves nothing about the road the game builds.
+    #[cfg(test)]
+    pub fn fixture(seed: u64) -> Track {
+        crate::course::procedural::shipping_plan(seed)
+            .expect("the shipping course compiles")
+            .track()
+            .clone()
+    }
 }
 
 /// The fewest lanes a road is ever divided into: the centre lane and one either
@@ -327,125 +336,40 @@ pub const RESET_BACKOFF: f32 = 24.0;
 ///
 /// It is not zero, and the reason is framing rather than gameplay. The course
 /// ribbon simply *stops* at distance zero — there is no tarmac before the first
-/// sample — while the chase camera sits ~5.5 m behind the car, 2.0 m up, and at
-/// a 65-degree field of view the bottom of the frame lands roughly 3.1 m
-/// **behind** the car. Park the car on the first metre of road and the opening
-/// shot is a car floating over a hole: a hard horizontal seam two thirds of the
-/// way down the frame, with the rear of the car silhouetted against the
-/// background instead of standing on the asphalt.
-///
-/// Thirty metres puts the whole of the camera's foreground — at every chase
-/// distance it can reach, including the pull-back under acceleration — on real
-/// road, so the car keeps its ground contact and the road reads as a ribbon
-/// running past the viewer rather than a plank starting under the bumper. Real
-/// grids sit some way down the pit straight for the same reason. It costs 0.3%
-/// of a nine-kilometre course.
+/// sample — while the chase camera sits ~5.5 m behind the car, so a grid on the
+/// first metre of road frames the car against a hole. Thirty metres puts the
+/// whole of the camera's foreground on real road. It costs 0.3% of a
+/// nine-kilometre course.
 pub const GRID_DISTANCE: f32 = 30.0;
 
 /// Wrap an angle difference into `[-π, π]`.
 pub fn shortest_angle(delta: f32) -> f32 {
     let tau = std::f32::consts::TAU;
-    let wrapped = (delta + std::f32::consts::PI).rem_euclid(tau) - std::f32::consts::PI;
-    wrapped
+    (delta + std::f32::consts::PI).rem_euclid(tau) - std::f32::consts::PI
 }
 
-/// Turn the resampled polyline plus the control attributes into the final table.
-fn build_samples(
-    resampled: &[spline::DensePoint],
-    controls: &[ControlPoint],
-    tuning: &CourseTuning,
-) -> Vec<TrackSample> {
-    if resampled.len() < 3 || controls.is_empty() {
-        return Vec::new();
-    }
-    let n = resampled.len();
-    // Tangents from a central difference, so a sample's frame reflects the road
-    // through it rather than the road leaving it.
-    let tangents: Vec<Vec3> = (0..n)
-        .map(|i| {
-            let a = resampled[i.saturating_sub(1)].position;
-            let b = resampled[(i + 1).min(n - 1)].position;
-            unit_or(b.subtract(a), Vec3::UNIT_Z)
-        })
-        .collect();
-    let headings: Vec<f32> = tangents.iter().map(|t| t.x.atan2(t.z)).collect();
-    let curvature: Vec<f32> = (0..n)
-        .map(|i| {
-            let a = headings[i.saturating_sub(1)];
-            let b = headings[(i + 1).min(n - 1)];
-            let span = ((i + 1).min(n - 1) - i.saturating_sub(1)) as f32 * tuning.sample_spacing;
-            shortest_angle(b - a) / span.max(1.0e-3)
-        })
-        .collect();
-    // Banking follows curvature, clamped, then smoothed in a fixed number of
-    // passes so the road rolls into a corner instead of stepping into it.
-    let mut bank: Vec<f32> = curvature
-        .iter()
-        .map(|k| (-tuning.bank_per_curvature * k).clamp(-tuning.max_bank, tuning.max_bank))
-        .collect();
-    smooth(&mut bank, BANK_SMOOTHING_PASSES);
-
-    (0..n)
-        .map(|i| {
-            let point = resampled[i];
-            let control = control_attributes(point.control_t, controls);
-            let tangent = tangents[i];
-            let flat_right = unit_or(Vec3::UNIT_Y.cross(tangent), Vec3::UNIT_X);
-            let flat_up = unit_or(tangent.cross(flat_right), Vec3::UNIT_Y);
-            let (sin_b, cos_b) = bank[i].sin_cos();
-            TrackSample {
-                position: point.position,
-                tangent,
-                right: flat_right.mul_scalar(cos_b).add(flat_up.mul_scalar(sin_b)),
-                up: flat_up.mul_scalar(cos_b).subtract(flat_right.mul_scalar(sin_b)),
-                distance: point.distance,
-                heading: headings[i],
-                curvature: curvature[i],
-                grade: tangent.y,
-                bank: bank[i],
-                half_width: control.0,
-                section: control.1,
-            }
-        })
-        .collect()
-}
-
-/// Smoothing passes applied to the banking signal.
-const BANK_SMOOTHING_PASSES: u32 = 8;
-
-/// A fixed number of three-tap box smoothing passes. Bounded by construction.
-fn smooth(signal: &mut [f32], passes: u32) {
-    for _ in 0..passes {
-        let previous = signal.to_vec();
-        for i in 1..previous.len().saturating_sub(1) {
-            signal[i] = (previous[i - 1] + previous[i] * 2.0 + previous[i + 1]) * 0.25;
-        }
-    }
-}
-
-/// The half-width and section at a fractional control-point index.
-fn control_attributes(control_t: f32, controls: &[ControlPoint]) -> (f32, SectionKind) {
-    let last = controls.len() - 1;
-    let i = (control_t.floor().max(0.0) as usize).min(last);
-    let j = (i + 1).min(last);
-    let t = (control_t - i as f32).clamp(0.0, 1.0);
-    let half_width = controls[i].half_width + (controls[j].half_width - controls[i].half_width) * t;
-    // The section is a discrete label, so it takes the nearer control point
-    // rather than a meaningless blend.
-    let section = if t < 0.5 {
-        controls[i].section
-    } else {
-        controls[j].section
-    };
-    (half_width, section)
+/// A unit vector, or `fallback` if the input has no direction.
+///
+/// Every normalisation in the course geometry goes through this, because a zero
+/// vector normalised is a `NaN` and one `NaN` in a road frame poisons every
+/// position downstream of it.
+pub fn unit_or(v: Vec3, fallback: Vec3) -> Vec3 {
+    let length = v.length();
+    (length > 1.0e-6)
+        .then(|| v.mul_scalar(1.0 / length))
+        .unwrap_or(fallback)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::course::procedural;
 
     fn track() -> Track {
-        Track::generate(crate::DEFAULT_SEED, &CourseTuning::DEFAULT)
+        procedural::shipping_plan(crate::DEFAULT_SEED)
+            .expect("the shipping course compiles")
+            .track()
+            .clone()
     }
 
     #[test]
@@ -469,8 +393,8 @@ mod tests {
 
     #[test]
     fn different_seeds_sample_different_centrelines() {
-        let a = Track::generate(11, &CourseTuning::DEFAULT);
-        let b = Track::generate(12, &CourseTuning::DEFAULT);
+        let a = procedural::shipping_plan(11).unwrap().track().clone();
+        let b = procedural::shipping_plan(12).unwrap().track().clone();
         assert_ne!(a.samples(), b.samples());
     }
 
@@ -489,14 +413,16 @@ mod tests {
             assert!(s.tangent.dot(s.right).abs() < 1.0e-3, "tangent ⟂ right");
             assert!(s.right.dot(s.up).abs() < 1.0e-3, "right ⟂ up");
             assert!(s.up.y > 0.5, "the road is never inverted");
+            assert!(s.expected_speed > 0.0, "every sample knows its target speed");
         }
     }
 
     #[test]
     fn every_sampled_constraint_holds() {
-        let c = CourseTuning::DEFAULT;
+        let c = crate::tuning::CourseTuning::DEFAULT;
+        let thresholds = crate::course::specification::ValidationThresholds::DEFAULT;
         for seed in [0u64, 5, 77, 9001, u64::MAX] {
-            let t = Track::generate(seed, &c);
+            let t = procedural::shipping_plan(seed).unwrap().track().clone();
             for s in t.samples() {
                 assert!(
                     s.half_width >= c.min_half_width - 1.0e-3,
@@ -506,13 +432,15 @@ mod tests {
                 assert!(s.half_width <= c.max_half_width + 1.0e-3);
                 assert!(s.bank.abs() <= c.max_bank + 1.0e-3, "seed {seed}: bank {}", s.bank);
                 assert!(
-                    s.grade.abs() <= c.max_grade * 1.35 + 1.0e-2,
-                    "seed {seed}: grade {} (spline overshoot allowance)",
+                    s.grade.abs() <= c.max_grade + 1.0e-3,
+                    "seed {seed}: grade {}",
                     s.grade
                 );
-                // Minimum turn radius: 1/|curvature|.
                 let radius = 1.0 / s.curvature.abs().max(1.0e-6);
-                assert!(radius > 90.0, "seed {seed}: turn radius {radius} m is a hairpin");
+                assert!(
+                    radius >= thresholds.min_turn_radius_m - 1.0,
+                    "seed {seed}: turn radius {radius} m is a hairpin"
+                );
             }
         }
     }
@@ -571,6 +499,7 @@ mod tests {
             let interpolated = t.interpolated_at(s.distance);
             assert!(interpolated.position.distance(s.position) < 1.0e-2);
             assert!((interpolated.half_width - s.half_width).abs() < 1.0e-2);
+            assert_eq!(interpolated.section_index, s.section_index);
         }
     }
 
@@ -580,8 +509,6 @@ mod tests {
         let reset = t.safe_reset(1_000.0);
         assert!(reset.distance <= 1_000.0 - RESET_BACKOFF + t.spacing());
         assert!(reset.distance >= GRID_DISTANCE);
-        // Resetting at the start line stays on the grid: never behind it, where
-        // the course has no tarmac for the chase camera to look at.
         assert_eq!(t.safe_reset(0.0).distance, t.sample_at(GRID_DISTANCE).distance);
         assert!(t.safe_reset(0.0).distance >= GRID_DISTANCE - t.spacing());
     }
@@ -611,7 +538,6 @@ mod tests {
     fn shortest_angle_wraps_both_ways() {
         let pi = std::f32::consts::PI;
         assert!((shortest_angle(0.0)).abs() < 1.0e-6);
-        // A half turn is equally +pi and -pi; only the magnitude is defined.
         assert!((shortest_angle(3.0 * pi).abs() - pi).abs() < 1.0e-4);
         assert!((shortest_angle(-3.0 * pi).abs() - pi).abs() < 1.0e-4);
         assert!((shortest_angle(0.25) - 0.25).abs() < 1.0e-6);
@@ -619,25 +545,15 @@ mod tests {
     }
 
     #[test]
-    fn smoothing_a_degenerate_signal_is_harmless() {
-        let mut empty: Vec<f32> = Vec::new();
-        smooth(&mut empty, 3);
-        assert!(empty.is_empty());
-        let mut pair = vec![1.0, 2.0];
-        smooth(&mut pair, 3);
-        assert_eq!(pair, vec![1.0, 2.0], "the endpoints are never smoothed");
+    fn unit_or_falls_back_instead_of_producing_a_nan() {
+        assert_eq!(unit_or(Vec3::ZERO, Vec3::UNIT_Z), Vec3::UNIT_Z);
+        let u = unit_or(Vec3::new(0.0, 0.0, 4.0), Vec3::UNIT_X);
+        assert!((u.length() - 1.0).abs() < 1.0e-6);
+        assert_eq!(u, Vec3::UNIT_Z);
     }
 
     #[test]
-    fn building_from_a_degenerate_polyline_yields_no_samples() {
-        let t = CourseTuning::DEFAULT;
-        assert!(build_samples(&[], &[], &t).is_empty());
-        let controls = generate::control_points(1, &t);
-        assert!(build_samples(&[], &controls, &t).is_empty());
-    }
-
-    #[test]
-    fn the_sections_are_laid_out_along_the_course_in_order() {
+    fn the_environments_are_laid_out_along_the_course_in_order() {
         let t = track();
         let mut seen: Vec<SectionKind> = Vec::new();
         for s in t.samples() {
@@ -648,6 +564,35 @@ mod tests {
         assert_eq!(seen, SectionKind::ALL.to_vec());
         assert_eq!(t.samples()[0].section, SectionKind::StartStraight);
         assert_eq!(t.samples().last().unwrap().section, SectionKind::Finish);
+    }
+
+    /// Section *identity* is finer than section *environment*: the compiled
+    /// course has many more sections than it has environments, and the index
+    /// only ever moves forward.
+    #[test]
+    fn every_sample_names_the_compiled_section_it_belongs_to() {
+        let plan = procedural::shipping_plan(crate::DEFAULT_SEED).unwrap();
+        let t = plan.track();
+        assert!(plan.sections().len() > SectionKind::ALL.len());
+        for pair in t.samples().windows(2) {
+            assert!(
+                pair[1].section_index >= pair[0].section_index,
+                "the section index went backwards at {} m",
+                pair[0].distance
+            );
+        }
+        for s in t.samples() {
+            let section = &plan.sections()[s.section_index as usize];
+            assert_eq!(section.environment, s.section);
+            assert!(
+                (s.distance >= section.start_m - 1.0e-2) & (s.distance <= section.end_m + 1.0e-2),
+                "sample at {} m claims section {} which spans {}..{}",
+                s.distance,
+                section.id,
+                section.start_m,
+                section.end_m
+            );
+        }
     }
 
     /// The lanes the traffic holds and the lanes the road is painted with are
@@ -674,26 +619,17 @@ mod tests {
                     sample.half_width
                 );
             }
-            // Evenly spaced, and symmetric about the centreline.
             assert!(
                 (t.lane_lateral(&sample, -reach) + t.lane_lateral(&sample, reach)).abs() < 1.0e-3,
                 "the lanes are centred"
             );
-            // Out of range clamps rather than panicking, on both sides.
             assert_eq!(t.lane_lateral(&sample, 999), t.lane_lateral(&sample, reach));
             assert_eq!(t.lane_lateral(&sample, -999), t.lane_lateral(&sample, -reach));
         }
     }
 
     /// **The invariant the whole lattice exists for.** The three centre lanes
-    /// are the same three pieces of road for the entire course: lane 0 is the
-    /// centreline and `±1` are exactly one lane width either side of it,
-    /// everywhere, whatever the road is doing.
-    ///
-    /// Before this, lane centres were fractions of the local road width and the
-    /// numbering was edge-anchored, so a car holding a lane was slid sideways as
-    /// the road breathed and re-seated wholesale whenever the lane count
-    /// changed. A widening road may now only *append* lanes at the shoulders.
+    /// are the same three pieces of road for the entire course.
     #[test]
     fn the_three_centre_lanes_never_move_along_the_whole_course() {
         let t = track();
@@ -702,17 +638,10 @@ mod tests {
             assert_eq!(t.lane_lateral(sample, 0), 0.0, "lane 0 IS the centreline");
             assert_eq!(t.lane_lateral(sample, 1), width);
             assert_eq!(t.lane_lateral(sample, -1), -width);
-            assert!(
-                t.lane_count(sample) >= MIN_LANES,
-                "and those three always exist"
-            );
+            assert!(t.lane_count(sample) >= MIN_LANES, "and those three always exist");
         }
     }
 
-    /// The two lane functions are one function read in both directions, and the
-    /// near-miss rule leans on that: it compares a traffic car's lane index to a
-    /// lane derived from the player's continuous steering offset, so a round trip
-    /// that is not the identity would score passes against the wrong lane.
     #[test]
     fn a_lane_survives_the_round_trip_through_its_own_lateral() {
         let t = track();
@@ -720,34 +649,23 @@ mod tests {
             let reach = t.lane_reach(sample);
             for lane in -reach..=reach {
                 let lateral = t.lane_lateral(sample, lane);
-                assert_eq!(
-                    t.lane_at_lateral(sample, lateral),
-                    lane,
-                    "lane {lane} came back as something else"
-                );
+                assert_eq!(t.lane_at_lateral(sample, lateral), lane);
             }
-            // Anywhere inside a lane reads as that lane, not just its centre.
             let width = t.lane_width();
             assert_eq!(t.lane_at_lateral(sample, width * 0.49), 0);
             assert_eq!(t.lane_at_lateral(sample, width * 0.51), 1);
-            // And off the edge of the road clamps, exactly as lane_lateral does.
             assert_eq!(t.lane_at_lateral(sample, width * 99.0), reach);
             assert_eq!(t.lane_at_lateral(sample, width * -99.0), -reach);
         }
     }
 
-    /// The width jitter breathes the shoulder, never the lane ladder.
-    ///
-    /// A section authors a lane count and the tarmac follows; the cosmetic
-    /// wander on top of that must stay well inside the next lane's threshold. If
-    /// it does not, the count flickers up and down *within* a section and every
-    /// car on the road gets shoved about — the original defect. The road may
-    /// therefore only change lane count where sections meet, which bounds the
-    /// changes over the whole course by the number of joins.
+    /// A road may only change lane count where the author asked it to, and the
+    /// compiled ramp is smooth, so the count changes a bounded number of times
+    /// over the whole course rather than flickering.
     #[test]
-    fn the_width_jitter_cannot_change_the_lane_count() {
+    fn the_lane_count_changes_only_where_the_course_authored_a_change() {
         for seed in [1u64, 7, 99, 4_242] {
-            let t = Track::generate(seed, &CourseTuning::DEFAULT);
+            let t = procedural::shipping_plan(seed).unwrap().track().clone();
             let changes = t
                 .samples()
                 .windows(2)
@@ -755,8 +673,7 @@ mod tests {
                 .count();
             assert!(
                 changes <= SectionKind::ALL.len(),
-                "seed {seed}: {changes} lane-count changes for {} sections — \
-                 the jitter is crossing a lane threshold mid-section",
+                "seed {seed}: {changes} lane-count changes for {} authored widths",
                 SectionKind::ALL.len()
             );
             assert!(changes > 0, "seed {seed}: the course should still open out");
@@ -801,5 +718,14 @@ mod tests {
         let flat = s.flat_forward();
         assert!((flat.length() - 1.0).abs() < 1.0e-4);
         assert!(flat.y.abs() < 1.0e-6, "the flattened forward is horizontal");
+    }
+
+    #[test]
+    fn an_empty_sample_table_is_a_zero_length_course_rather_than_a_panic() {
+        let t = Track::from_samples(1, Vec::new(), &crate::tuning::CourseTuning::DEFAULT);
+        assert_eq!(t.length(), 0.0);
+        assert_eq!(t.samples().len(), 0);
+        assert_eq!(t.index_at(500.0), 0);
+        assert_eq!(t.progress(500.0), 1.0);
     }
 }

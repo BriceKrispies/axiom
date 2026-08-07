@@ -273,7 +273,7 @@ mod tests {
     use axiom::prelude::{App, DefaultPlugins, Window};
 
     fn fixture() -> (RunningApp, Track, SceneryField) {
-        let track = Track::generate(crate::DEFAULT_SEED, &CourseTuning::DEFAULT);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         let mut app = App::new()
             .window(Window::new(320, 200))
             .add_plugins(DefaultPlugins)

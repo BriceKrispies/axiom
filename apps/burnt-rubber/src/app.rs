@@ -378,6 +378,28 @@ impl BurntRubber {
         HudModel::of(&self.sim).with_ghost_delta(self.ghost_delta_metres())
     }
 
+    /// **The course authoring surface**: what the compiled course knows about
+    /// where the player is now.
+    ///
+    /// Ordered, labelled `(label, value)` rows — the seed, the section and its
+    /// primitive, the local curvature/grade/bank, the active traffic zone and
+    /// encounter, what is ahead, the traversability classification, the boost
+    /// verdict, and the validation counts. The browser telemetry panel appends
+    /// them under the frame counters; a test asserts on them directly.
+    pub fn course_rows(&self) -> Vec<(String, String)> {
+        crate::course::runtime::inspect::rows(
+            self.sim.plan(),
+            self.sim.car().distance,
+            crate::course::runtime::inspect::DEFAULT_LOOKAHEAD_M,
+        )
+    }
+
+    /// The compiled course as deterministic text — the whole plan, for a test
+    /// to diff or an agent to read.
+    pub fn dump_course(&self) -> String {
+        self.sim.plan().dump()
+    }
+
     /// Diagnostics for the last presented frame.
     pub const fn diagnostics(&self) -> &Diagnostics {
         &self.diagnostics

@@ -1,11 +1,15 @@
 //! **Burnt Rubber** — an original third-person arcade racing framework and
 //! demonstration game.
 //!
-//! Nine kilometres of procedurally generated road, generated once from a single
-//! seed, with a pacing curve rather than uniform noise: an opening straight to
-//! learn the throttle on, long sweepers, rolling crests, a set of esses, a lit
-//! tunnel, a wide traffic-choked straight, a canyon squeeze, a closing sweep and
-//! a finish arch. The car is an authored arcade model — instant acceleration,
+//! Nine kilometres of road, **compiled once from an authored course
+//! specification**, with a pacing curve rather than uniform noise: an opening
+//! straight to learn the throttle on, long sweepers, rolling crests, a set of
+//! esses, a lit tunnel, a wide traffic-choked straight, a canyon squeeze, a
+//! closing sweep and a finish arch. The road, its traffic, its authored
+//! encounters and its near-miss opportunities are all produced by [`course`] —
+//! from Rust for the shipping course, or from a `.brc` source for a
+//! hand-authored one — and validated before anybody drives them. See
+//! `COURSES.md`. The car is an authored arcade model — instant acceleration,
 //! speed-sensitive steering, handbrake oversteer, a forgiving drift window — and
 //! the reward loop is one number: fill the boost meter by threading traffic,
 //! holding a drift, or simply staying flat out, and spend it on more of all
@@ -46,6 +50,8 @@
 
 pub mod camera;
 pub mod command;
+/// The course authoring, compilation, validation and runtime system.
+pub mod course;
 pub mod controls;
 pub mod diagnostics;
 pub mod draw;
@@ -84,6 +90,9 @@ pub use app::{build_burnt_rubber, BurntRubber};
 pub use camera::{CameraPose, ChaseCamera};
 pub use command::DriveCommand;
 pub use profile::PlayProfile;
+pub use course::runtime::CoursePlan;
+pub use course::specification::CourseSpec;
+pub use course::{compile as compile_course, CourseError, ValidationReport};
 pub use sim::{RaceEvent, RacePhase, RaceSim};
 pub use start_screen::{StartCommand, StartOutcome, StartScreen};
 pub use track::{SectionKind, Track, TrackSample, Zone};
@@ -128,13 +137,20 @@ mod tests {
     /// properties are pinned here rather than left to the generator's mood.
     #[test]
     fn the_shipping_course_is_the_designed_course() {
-        let track = Track::generate(DEFAULT_SEED, &Tuning::DEFAULT.course);
+        let plan = course::procedural::shipping_plan(DEFAULT_SEED)
+            .expect("the shipping course compiles");
         assert!(
-            (8_000.0..=10_500.0).contains(&track.length()),
+            (8_000.0..=10_500.0).contains(&plan.length()),
             "the demo course is 8-10 km: {} m",
-            track.length()
+            plan.length()
         );
-        assert!(track.samples().len() > 4_000);
-        assert_eq!(track.seed(), DEFAULT_SEED);
+        assert!(plan.track().samples().len() > 4_000);
+        assert_eq!(plan.seed(), DEFAULT_SEED);
+        assert!(
+            !plan.report().has_errors(),
+            "and it validates:
+{}",
+            plan.report().dump()
+        );
     }
 }

@@ -620,10 +620,10 @@ const RESET_LIFT: f32 = 0.05;
 mod tests {
     use super::*;
     use crate::sim::chassis::ChassisGeometry;
-    use crate::tuning::{CourseTuning, Tuning};
+    use crate::tuning::Tuning;
 
     fn fixture() -> (Track, CarState, VehicleTuning) {
-        let track = Track::generate(crate::DEFAULT_SEED, &CourseTuning::DEFAULT);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         let mut car = CarState::parked(Vec3::ZERO, 0.0);
         place_on_track(&mut car, &track.sample_at(0.0), 0.0);
         (track, car, VehicleTuning::DEFAULT)

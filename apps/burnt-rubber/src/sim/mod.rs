@@ -32,10 +32,13 @@ pub mod controller;
 pub mod rails;
 pub mod traffic;
 
+use std::sync::Arc;
+
 use axiom_math::Vec3;
 
 use crate::camera::{CameraPose, ChaseCamera, ImpactImpulse};
 use crate::command::DriveCommand;
+use crate::course::runtime::CoursePlan;
 use crate::track::{SectionKind, Track, GRID_DISTANCE};
 use crate::tuning::{Tuning, DT};
 
@@ -99,7 +102,10 @@ pub enum RaceEvent {
 /// The deterministic race.
 #[derive(Debug, Clone)]
 pub struct RaceSim {
-    track: Track,
+    /// The compiled course. Immutable and shared: a `RaceSim` clone (the ghost,
+    /// a replay, a test fixture) costs a refcount rather than a copy of nine
+    /// kilometres of samples, and no clone can diverge from another's road.
+    plan: Arc<CoursePlan>,
     car: CarState,
     /// The lane the phone game is driving toward, or `None` in the wheel game.
     /// This one `Option` is the whole of "the simulation is on rails" — see
@@ -151,7 +157,26 @@ impl RaceSim {
     /// the phone game opens with a choice in both directions rather than
     /// against a barrier.
     pub fn with_profile(seed: u64, tuning: Tuning, profile: crate::PlayProfile) -> RaceSim {
-        let track = Track::generate(seed, &tuning.course);
+        // The shipping course for this seed, compiled through the ordinary
+        // pipeline. Compilation happens exactly here, once per race — never on
+        // a frame path.
+        let plan = crate::course::procedural::plan_for(seed, &tuning)
+            .unwrap_or_else(|error| panic!("the shipping course must compile: {error}"));
+        RaceSim::from_plan(Arc::new(plan), tuning, profile)
+    }
+
+    /// Build the race on an already-compiled course.
+    ///
+    /// This is the door every other constructor goes through, and the one a
+    /// hand-authored course, a validation harness or a replay uses: the plan is
+    /// a value, so "which course is this" is answered by what you were handed
+    /// rather than by re-running a generator and hoping it agrees.
+    pub fn from_plan(
+        plan: Arc<CoursePlan>,
+        tuning: Tuning,
+        profile: crate::PlayProfile,
+    ) -> RaceSim {
+        let track = plan.track().clone();
         let mut car = CarState::parked(Vec3::ZERO, 0.0);
         controller::place_on_track(&mut car, &track.sample_at(GRID_DISTANCE), 0.0);
         let mut camera = ChaseCamera::new();
@@ -171,7 +196,7 @@ impl RaceSim {
         RaceSim {
             rails,
             contact: ContactState::new(),
-            traffic: Traffic::new(seed, &tuning.race),
+            traffic: Traffic::new(plan.clone(), &tuning.race),
             boost: BoostMeter::new(),
             camera,
             phase: RacePhase::Countdown,
@@ -193,7 +218,7 @@ impl RaceSim {
             pending_impulse: None,
             was_off_road: false,
             was_boosting: false,
-            track,
+            plan,
             car,
             tuning,
         }
@@ -204,9 +229,15 @@ impl RaceSim {
         RaceSim::new(crate::DEFAULT_SEED, Tuning::DEFAULT)
     }
 
-    /// The course.
+    /// The course's road.
     pub fn track(&self) -> &Track {
-        &self.track
+        self.plan.track()
+    }
+
+    /// The compiled course — sections, traffic plans, encounters, opportunity
+    /// windows and the validation report.
+    pub fn plan(&self) -> &Arc<CoursePlan> {
+        &self.plan
     }
 
     /// The car.
@@ -302,12 +333,12 @@ impl RaceSim {
 
     /// Progress along the course, `0..1`.
     pub fn progress(&self) -> f32 {
-        self.track.progress(self.car.distance)
+        self.plan.track().progress(self.car.distance)
     }
 
     /// The section the car is currently in.
     pub fn section(&self) -> SectionKind {
-        self.track.sample_at(self.car.distance).section
+        self.plan.track().sample_at(self.car.distance).section
     }
 
     /// Elapsed race time in seconds — a **step count**, not a clock reading.
@@ -377,14 +408,17 @@ impl RaceSim {
     /// driving game on every restart. The profile is a property of the *device*,
     /// not of the run, and a restart does not change what device you are on.
     pub fn restart(&mut self) {
-        let seed = self.track.seed();
         let tuning = self.tuning;
         let profile = self
             .rails
             .is_some()
             .then_some(crate::PlayProfile::Rails)
             .unwrap_or(crate::PlayProfile::Wheel);
-        *self = RaceSim::with_profile(seed, tuning, profile);
+        // The **same compiled plan**, not a recompiled one. A restart must
+        // reproduce the road and the traffic exactly, and re-running the
+        // compiler to get back to where you already were is both slower and one
+        // more place the two could disagree.
+        *self = RaceSim::from_plan(self.plan.clone(), tuning, profile);
     }
 
     /// Place the car on the road centre at `distance` metres along, at rest,
@@ -396,9 +430,9 @@ impl RaceSim {
     /// here" — not a back door: it goes through the same placement the start
     /// line and the reset use, so the resulting state is always a valid one.
     pub fn place_at(&mut self, distance: f32) {
-        let sample = self.track.sample_at(distance);
+        let sample = self.plan.track().sample_at(distance);
         controller::place_on_track(&mut self.car, &sample, 0.0);
-        self.camera.snap_to(&self.car, &self.track, &self.tuning.camera);
+        self.camera.snap_to(&self.car, self.plan.track(), &self.tuning.camera);
         self.traffic.clear();
         // "The car I am still touching" is meaningless after a teleport, and the
         // traffic pool it referred to has just been emptied.
@@ -416,9 +450,9 @@ impl RaceSim {
 
     /// Return the car to the most recent safe point on the road.
     pub fn reset_to_safe_point(&mut self) {
-        let sample = self.track.safe_reset(self.car.distance);
+        let sample = self.plan.track().safe_reset(self.car.distance);
         controller::place_on_track(&mut self.car, &sample, 0.0);
-        self.camera.snap_to(&self.car, &self.track, &self.tuning.camera);
+        self.camera.snap_to(&self.car, self.plan.track(), &self.tuning.camera);
         self.contact.clear();
         self.events.push(RaceEvent::Reset);
     }
@@ -483,7 +517,7 @@ impl RaceSim {
         let report = controller::step(
             &mut self.car,
             command,
-            &self.track,
+            self.plan.track(),
             &self.tuning,
             boost_available,
             &mut self.contact,
@@ -521,7 +555,7 @@ impl RaceSim {
     fn resolve_traffic(&mut self) {
         self.traffic.step(
             self.car.distance,
-            &self.track,
+            self.plan.track(),
             &self.tuning.race,
             &self.tuning.collision,
         );
@@ -541,8 +575,8 @@ impl RaceSim {
         // The player's lane, once per step rather than once per traffic car: it
         // is a property of where the car is, not of what it is passing.
         let player_lane = {
-            let here = self.track.sample_at(self.car.distance);
-            self.track.lane_at_lateral(&here, self.car.lateral)
+            let here = self.plan.track().sample_at(self.car.distance);
+            self.plan.track().lane_at_lateral(&here, self.car.lateral)
         };
 
         for (index, distance, lateral, speed, slot, near_missed, lane) in snapshot {
@@ -578,7 +612,7 @@ impl RaceSim {
                 continue;
             };
 
-            let sample = self.track.sample_at(self.car.distance);
+            let sample = self.plan.track().sample_at(self.car.distance);
             // Which way round the obstacle has more room. A shunt has no natural
             // side, and biasing the player toward the middle of the road is what
             // turns "stuck behind a car" into "slide past it".
@@ -586,7 +620,7 @@ impl RaceSim {
             let facts =
                 collision::traffic_facts(&self.car, &overlap, speed, slot, &sample, escape);
             let responded = self.contact.respond(&mut self.car, &facts, &collision);
-            let length = self.track.length();
+            let length = self.plan.track().length();
             collision::separate_from_traffic(
                 &mut self.car,
                 &mut self.traffic.cars_mut()[index],
@@ -670,7 +704,7 @@ impl RaceSim {
                 }
             }
             RacePhase::Racing => {
-                if self.car.distance >= self.track.length() - FINISH_MARGIN {
+                if self.car.distance >= self.plan.track().length() - FINISH_MARGIN {
                     self.phase = RacePhase::Finished;
                     self.finish_step = self.step_n;
                     self.events.push(RaceEvent::Finished { steps: self.step_n });
@@ -682,10 +716,10 @@ impl RaceSim {
 
     /// Refresh the interpolatable poses from the settled state.
     fn repose(&mut self) {
-        self.car_pose = pose_of(&self.car, &self.track, self.last_forward_accel);
+        self.car_pose = pose_of(&self.car, self.plan.track(), self.last_forward_accel);
         self.camera_pose = self.camera.step(
             &self.car,
-            &self.track,
+            self.plan.track(),
             &self.tuning.camera,
             &self.tuning.vehicle,
             crate::camera::CameraDrive {
@@ -1192,7 +1226,7 @@ mod tests {
         sim.step(DriveCommand::IDLE);
 
         let target = sim.traffic.cars()[index];
-        let sample = sim.track.sample_at(target.distance - along);
+        let sample = sim.track().sample_at(target.distance - along);
         controller::place_on_track(&mut sim.car, &sample, target.lateral + across);
         sim.car.forward_speed = player_speed;
         sim.contact.clear();

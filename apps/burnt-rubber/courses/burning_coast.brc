@@ -1,0 +1,247 @@
+# Burning Coast — the demo course, written in Burnt Rubber's course DSL.
+#
+# This file is the worked example of the authoring language: it uses every
+# construct the grammar has, and it is parsed by the real parser, compiled by
+# the real compiler and validated by the real validator every time the test
+# suite runs (`course::authoring::tests`). Nothing here is illustrative.
+#
+# Units are mandatory on anything dimensioned: `700m`, `18deg`, `0.75s`,
+# `180mph`. A bare number is a count, a weight or a probability.
+
+course "burning_coast" {
+    seed = 84192
+
+    defaults {
+        lanes          = 3
+        lane_width     = 3.8m
+        shoulder_width = 1.5m
+        expected_speed = 180mph
+        environment    = start_straight
+    }
+
+    # How hard this course wants to be judged. Every one of these is a number
+    # the validator measures against; none of them is buried in the analysis.
+    thresholds {
+        min_turn_radius   = 90m
+        target_boost_duty = 0.35
+        starved_ratio     = 0.9
+        excellent_ratio   = 1.6
+    }
+
+    # ---- the opening -----------------------------------------------------
+    # Clear road to learn the throttle on.
+
+    straight {
+        id     = "opening"
+        length = 500m
+        lanes  = 5
+    }
+
+    # ---- the coast -------------------------------------------------------
+    # Four long sweepers, banked into the corner, with the sea on the outside.
+
+    motif high_speed_sweeps {
+        id          = "coastal_sweeps"
+        count       = 4
+        length      = 1400m
+        radius      = 190m..280m
+        bank        = 8deg..16deg
+        lanes       = 5
+        environment = sweeping_bends
+
+        traffic {
+            flow {
+                vehicles_per_km     = 11
+                headway             = 60m..130m
+                speed               = 24mps..36mps
+                platoon_probability = 0.25
+                platoon_size        = 2..3
+                platoon_gap         = 46m
+                open_corridor_every = 600m..900m
+                open_corridor_length = 200m
+                lane -2 = 1.0
+                lane -1 = 2.0
+                lane  0 = 2.0
+                lane  1 = 2.0
+                lane  2 = 1.0
+            }
+        }
+    }
+
+    # ---- the blind crest -------------------------------------------------
+    # A rise you cannot see over. The height is deliberately inside the
+    # course's grade limit; author it steeper and the validator will warn that
+    # the compiled road is not the road you wrote.
+
+    crest {
+        id          = "blind_crest"
+        length      = 180m
+        height      = 5m
+        lanes       = 5
+        environment = rolling_hills
+    }
+
+    # ---- the esses -------------------------------------------------------
+    # Bounded alternation: four mirrored bends from one authored figure.
+
+    alternate 4 {
+        turn {
+            id          = "ess"
+            length      = 210m
+            radius      = 150m
+            direction   = right
+            lanes       = 3
+            environment = technical_bends
+            banking { mode = follow_curvature strength = 0.9 maximum = 14deg }
+        }
+    }
+
+    # ---- the tunnel squeeze ----------------------------------------------
+    # One named section built from three primitives, sharing one traffic zone.
+    # The zipper is the figure: every lane but one is blocked and the opening
+    # walks, so the only way through is a weave.
+
+    section "tunnel_squeeze" {
+        lanes       = 3
+        environment = tunnel
+
+        straight { length = 620m }
+
+        lane_transition {
+            from   = 5
+            to     = 3
+            length = 140m
+        }
+
+        traffic {
+            flow {
+                vehicles_per_km     = 14
+                headway              = 55m..110m
+                open_corridor_every  = 400m..600m
+                open_corridor_length = 180m
+                archetype van    = 2.0
+                archetype saloon = 3.0
+                archetype hatch  = 3.0
+                archetype pickup = 1.0
+            }
+
+            encounter zipper {
+                at                       = 90m
+                length                   = 280m
+                spacing                  = 95m
+                speed                    = 30mps
+                first_open_lane          = 0
+                alternation              = right
+                minimum_clearance        = 0.55m
+                target_near_misses       = 6
+                minimum_reaction_time    = 0.75s
+                require_continuous_route = true
+            }
+
+            near_miss {
+                at                     = 460m
+                length                 = 260m
+                clearance              = 0.4m..1.6m
+                side                   = either
+                minimum_relative_speed = 14mps
+                opportunities          = 3
+                difficulty             = 0.8
+            }
+        }
+    }
+
+    # ---- the long haul ---------------------------------------------------
+    # Wide, fast, and carrying a rolling wall whose opening walks across the
+    # road one lane at a time.
+
+    section "long_haul" {
+        lanes       = 5
+        environment = high_speed_straight
+
+        straight {
+            length = 900m
+            elevation_wave { amplitude = 4m wavelength = 260m }
+            lateral_wave   { amplitude = 6m wavelength = 420m }
+        }
+
+        traffic {
+            flow {
+                vehicles_per_km = 16
+                headway         = 45m..95m
+                burst_length    = 320m
+                recovery_length = 380m
+            }
+
+            encounter rolling_wall {
+                at                = 240m
+                wall_width        = 2
+                open_lane         = -1
+                opening_step      = 1
+                phase_length      = 190m
+                phases            = 3
+                speed             = 33mps
+                group_spacing     = 190m
+                reaction_distance = 150m
+            }
+        }
+    }
+
+    # ---- the canyon ------------------------------------------------------
+    # Rock walls close on both sides, and a slalom to thread between them.
+
+    section "canyon_run" {
+        lanes       = 3
+        environment = canyon
+
+        s_bend {
+            id     = "entry"
+            length = 320m
+            radius = 170m
+            first  = left
+        }
+
+        straight { length = 520m }
+
+        traffic {
+            flow { vehicles_per_km = 10 headway = 70m..140m }
+
+            encounter slalom {
+                at            = 300m
+                blockers      = 5
+                spacing       = 90m
+                lane_sequence = [ -1, 1 ]
+                speed         = 31mps
+                clearance     = 0.9m
+                recovery_gap  = 140m
+            }
+        }
+    }
+
+    # ---- the final run ---------------------------------------------------
+    # Rolling freeway: authored as straight road, and nothing of the kind by
+    # the time its two waves are on it.
+
+    motif rolling_freeway {
+        id                  = "final_run"
+        count               = 4
+        length              = 900m
+        elevation_amplitude = 4m
+        lateral_amplitude   = 8m
+        wavelength          = 300m
+        lanes               = 5
+        environment         = final_sweeps
+
+        traffic {
+            flow { vehicles_per_km = 12 headway = 55m..120m }
+        }
+    }
+
+    # ---- the finish ------------------------------------------------------
+
+    straight {
+        id          = "finish"
+        length      = 320m
+        lanes       = 5
+        environment = finish
+    }
+}

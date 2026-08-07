@@ -420,3 +420,38 @@ capacities and draw distances (`render/scenery.rs`), the effect pool sizes
 (`render/effects.rs`), the audio grain rate (`audio_cues.rs`) and the autopilot's
 gains (`script.rs`). Those are *structural* numbers rather than feel numbers:
 changing them changes what exists, not how it drives.
+
+---
+
+## The course system
+
+`src/course/` carries its own tests throughout — the specification's validation,
+the geometry compiler's continuity, motif expansion, traffic flow density and
+spacing, each encounter template, the traversability grid, the boost budget, the
+lexer, the parser and the runtime indexes are each tested where they live.
+
+Two suites drive the whole pipeline rather than a piece of it:
+
+| Suite | What it proves |
+|---|---|
+| `tests/course_pipeline.rs` | The demo source parses, compiles, validates and is drivable; the shipping game runs on the compiled plan; a restart reproduces the same traffic identities; the runtime never recompiles; every vehicle activates once; ghost validation measures the course; an unplayable course is refused with every reason |
+| `course_performance_report` (in the same file) | The deterministic size of a compiled course — samples, sections, vehicles, grid cells — asserted, plus wall-clock compile and lookup timings *reported* rather than asserted |
+
+Run them with:
+
+```sh
+cargo test -p axiom-burnt-rubber --test course_pipeline -- --nocapture
+```
+
+The `--nocapture` is worth it: the performance report and the ghost validation
+summary are printed there.
+
+### Reading a course without running it
+
+```rust
+let plan = axiom_burnt_rubber::course::procedural::shipping_plan(seed)?;
+println!("{}", plan.dump());
+```
+
+`CoursePlan::dump` is stable text — the validation report, then every vehicle,
+encounter and opportunity window. Same plan in, byte-identical string out.

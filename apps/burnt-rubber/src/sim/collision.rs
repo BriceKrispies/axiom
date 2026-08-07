@@ -403,11 +403,11 @@ mod tests {
     use crate::command::DriveCommand;
     use crate::sim::contact::Severity;
     use crate::sim::controller::{place_on_track, step, LOCALISE_WINDOW};
-    use crate::tuning::{CourseTuning, Tuning};
+    use crate::tuning::Tuning;
 
     fn fixture() -> (Track, CarState, Tuning, ContactState) {
         let tuning = Tuning::DEFAULT;
-        let track = Track::generate(crate::DEFAULT_SEED, &tuning.course);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         let mut car = CarState::parked(Vec3::ZERO, 0.0);
         place_on_track(&mut car, &track.sample_at(120.0), 0.0);
         (track, car, tuning, ContactState::new())
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn a_walled_section_is_scenery_rather_than_a_barrier() {
         let tuning = Tuning::DEFAULT;
-        let track = Track::generate(crate::DEFAULT_SEED, &tuning.course);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         let walled = track
             .samples()
             .iter()
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn walled_sections_have_their_barriers_at_the_shoulder() {
-        let track = Track::generate(crate::DEFAULT_SEED, &CourseTuning::DEFAULT);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         let tunnel = track
             .samples()
             .iter()
@@ -790,9 +790,8 @@ mod tests {
 
     /// Build a traffic car overlapping the player by construction.
     fn planted(car: &CarState, along: f32, across: f32, speed: f32) -> TrafficCar {
-        let t = Tuning::DEFAULT;
-        let track = Track::generate(crate::DEFAULT_SEED, &t.course);
-        let mut planted = crate::sim::traffic::spawn_slot(1, 200, &track, &t.race);
+        let course = crate::course::procedural::shipping_plan(1).expect("compiles");
+        let mut planted = crate::sim::traffic::activate(&course.traffic()[3], 3, course.track());
         planted.active = true;
         planted.distance = car.distance + along;
         planted.lateral = car.lateral + across;
@@ -902,7 +901,7 @@ mod tests {
     #[test]
     fn a_shunt_cannot_push_the_car_past_either_end_of_the_course() {
         let t = Tuning::DEFAULT;
-        let track = Track::generate(crate::DEFAULT_SEED, &t.course);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         for (place, along) in [(track.length(), -3.0f32), (0.0, 3.0)] {
             let mut car = CarState::parked(Vec3::ZERO, 0.0);
             place_on_track(&mut car, &track.sample_at(place), 0.0);

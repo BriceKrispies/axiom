@@ -263,7 +263,13 @@ pub fn burnt_rubber_start() {
         update_start_screen(guard.app.start_screen());
         let readout = guard
             .telemetry
-            .then(|| telemetry_panel(&guard.frames, &guard.app.diagnostics().scene))
+            .then(|| {
+                telemetry_panel(
+                    &guard.frames,
+                    &guard.app.diagnostics().scene,
+                    &guard.app.course_rows(),
+                )
+            })
             .unwrap_or_default();
         update_hud(&guard.app.hud(), waiting, &readout);
         // The driving pad has nothing to do while the start screen is up, and
@@ -914,7 +920,11 @@ fn update_hud(hud: &HudModel, hidden: bool, telemetry: &str) {
 /// HUD that is about the *renderer* rather than the race, and because keeping the
 /// markup here — rather than in [`crate::telemetry`] — keeps every DOM string in
 /// the platform arm and every judgement out of it.
-fn telemetry_panel(frames: &FrameTimes, counters: &crate::render::SceneCounters) -> String {
+fn telemetry_panel(
+    frames: &FrameTimes,
+    counters: &crate::render::SceneCounters,
+    course: &[(String, String)],
+) -> String {
     let rows = top_three(counters)
         .iter()
         .map(|c| {
@@ -926,15 +936,23 @@ fn telemetry_panel(frames: &FrameTimes, counters: &crate::render::SceneCounters)
             )
         })
         .collect::<String>();
+    // The course rows are the authoring surface: which authored section the car
+    // is on, what the compiler made of it, and what the validator said about it.
+    let authored = course
+        .iter()
+        .map(|(label, value)| format!("<div>{label:<26}{value}</div>"))
+        .collect::<String>();
     format!(
         "<div style=\"margin-top:14px;font-size:13px;line-height:1.5;opacity:.85;\
                     white-space:pre\">\
          <div style=\"color:#8ef\">{fps:.0} FPS · {median:.1}ms · worst {worst:.1}ms</div>\
-         {rows}</div>",
+         {rows}\
+         <div style=\"color:#8ef;margin-top:8px\">course</div>{authored}</div>",
         fps = frames.fps(),
         median = frames.median_ms(),
         worst = frames.worst_ms(),
         rows = rows,
+        authored = authored,
     )
 }
 

@@ -647,7 +647,7 @@ mod tests {
 
     #[test]
     fn the_autopilot_backs_off_for_a_corner() {
-        let track = Track::generate(crate::DEFAULT_SEED, &crate::Tuning::DEFAULT.course);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         let straight = corner_severity(&track, 100.0, 200.0);
         let sharpest = track
             .samples()
@@ -690,7 +690,7 @@ mod tests {
 
     #[test]
     fn corner_severity_is_bounded_for_a_degenerate_span() {
-        let track = Track::generate(crate::DEFAULT_SEED, &crate::Tuning::DEFAULT.course);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         assert!(corner_severity(&track, 0.0, 0.0).is_finite());
         assert!(corner_severity(&track, 0.0, -50.0).is_finite());
         assert!(corner_severity(&track, 0.0, 1.0e9).is_finite());
@@ -886,7 +886,7 @@ mod tests {
 
     #[test]
     fn each_stage_asks_for_what_it_says_it_does() {
-        let track = Track::generate(crate::DEFAULT_SEED, &crate::Tuning::DEFAULT.course);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         let mut car = CarState::parked(track.sample_at(400.0).position, 0.0);
         car.distance = 400.0;
         car.forward_speed = 50.0;

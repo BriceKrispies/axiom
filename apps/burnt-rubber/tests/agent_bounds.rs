@@ -48,6 +48,16 @@ fn what_is_limiting_the_lap() {
         f32::from(countdown as u16) / 60.0
     );
     println!("boost lever is worth at most {:.2} s", normal - unlimited);
+
+    // The measurement is only worth reading if it measured something: both runs
+    // have to have finished, and the boost lever has to be the right way round.
+    assert!(normal > 0.0 && unlimited > 0.0, "neither run reached the line");
+    assert!(
+        unlimited < normal,
+        "infinite boost was not faster than the raced lap: {unlimited:.2}s vs {normal:.2}s"
+    );
+    assert!(countdown > 0, "the countdown is dead time and there is some");
+    assert!(nm > 0 && nm_u > 0, "neither run threaded any traffic");
 }
 
 #[test]
@@ -90,6 +100,31 @@ fn where_does_the_traffic_actually_sit() {
     println!("cars spawned, by lane   : {traffic_lane:?}");
     println!("UNSCORED overtakes, by that car's lane: {unscored_lane:?}");
     println!("(a car in lane L is scorable only from lane L-1 or L+1)");
+
+    // The census is only evidence if it censused a real run: every lane the
+    // traffic used has to be a lane the road actually has, and the unscored
+    // cars have to be a subset of the cars seen.
+    assert_eq!(sim.phase(), RacePhase::Finished, "the censused run did not finish");
+    assert!(seen.len() > 50, "only {} cars seen", seen.len());
+    let reach = crate_lane_reach();
+    traffic_lane.keys().for_each(|lane| {
+        assert!(lane.abs() <= reach, "a car was censused in lane {lane}");
+    });
+    assert!(
+        unscored_lane.values().sum::<u32>() as usize <= best_delta.len(),
+        "more unscored overtakes than overtakes"
+    );
+}
+
+/// The widest the shipping course's lane lattice ever reaches.
+fn crate_lane_reach() -> i32 {
+    let sim = RaceSim::shipping();
+    sim.track()
+        .samples()
+        .iter()
+        .map(|s| sim.track().lane_reach(s))
+        .max()
+        .expect("the course has road")
 }
 
 #[test]
@@ -125,6 +160,19 @@ fn how_is_the_boost_actually_spent() {
     println!("mean episode  : {mean:.3} s");
     println!("longest       : {:.2} s", f32::from(longest as u16) / 60.0);
     println!("speed histogram (m/s bucket -> steps): {speed_hist:?}");
+
+    // The pattern is only readable if the meter was actually used, and if the
+    // episodes account for exactly the boosting steps — a leak in the episode
+    // bookkeeping would make every number above a fiction.
+    assert_eq!(sim.phase(), RacePhase::Finished, "the measured run did not finish");
+    assert!(!episodes.is_empty(), "the driver never used boost");
+    assert!(total > 0 && total <= steps, "{total} boost steps of {steps}");
+    assert!(longest >= *episodes.iter().min().unwrap());
+    assert_eq!(
+        speed_hist.values().sum::<u32>(),
+        steps,
+        "the speed histogram lost steps"
+    );
 }
 
 #[test]
@@ -146,6 +194,11 @@ fn how_much_does_the_course_actually_turn() {
         total * 3.0
     );
     println!("  = {:.2} s at 103 m/s", total * 3.0 / 103.0);
+
+    // A course that does not turn has no inside line to find, so the number
+    // above would be meaningless.
+    assert!(track.length() > 8_000.0, "{} m", track.length());
+    assert!(total > 1.0, "the course barely turns: {total:.2} rad");
 }
 
 #[test]
@@ -172,6 +225,11 @@ fn the_ghost_can_actually_drive_the_phone_game() {
                 g.distance(),
                 g.sim().near_miss_count(),
                 g.sim().impact_count()
+            );
+            assert!(g.finished(), "{profile:?} ghost got only {:.0} m", g.distance());
+            assert!(
+                g.sim().near_miss_count() > 0,
+                "{profile:?} ghost threaded nothing"
             );
         });
 }

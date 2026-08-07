@@ -735,12 +735,16 @@ impl CourseTuning {
         max_grade_delta: 0.018,
         max_bank: 0.14,
         bank_per_curvature: 26.0,
-        // The road is authored in LANES (see `SectionProfile::lanes`), so these
-        // bounds are the three-lane and five-lane widths plus the jitter band
-        // either side — not free parameters. Widening them without widening the
-        // lane ladder just adds unpainted tarmac.
+        // The road is authored in LANES, so these bounds are the widths a lane
+        // ladder actually needs — not free parameters. The floor is three lanes
+        // of the shipping course's 3.5 m plus its shoulder (6.0 m); the ceiling
+        // is five lanes of the widest a course may author (`burning_coast`'s
+        // 3.8 m lanes and 1.5 m shoulder, 11.0 m). Widening them without
+        // widening the lane ladder just adds unpainted tarmac; a lane count the
+        // band cannot carry is rejected by the geometry compiler rather than
+        // silently clamped.
         min_half_width: 5.6,
-        max_half_width: 9.9,
+        max_half_width: 11.2,
         correction_passes: 6,
         shoulder: 1.6,
         verge: 5.0,

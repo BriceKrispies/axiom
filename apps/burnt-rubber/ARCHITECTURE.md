@@ -11,13 +11,14 @@ This app owns, end to end:
 
 | Concern | Where it lives |
 |---|---|
-| Course generation (seeded, constrained, paced) | `track/generate.rs`, `track/section.rs` |
-| Spline sampling and the arc-length table | `track/spline.rs`, `track/mod.rs` |
+| Course authoring, compilation, validation | `course/` — see [`COURSES.md`](COURSES.md) |
+| The compiled course plan the runtime reads | `course/runtime/` |
+| The arc-length sample table and its lookups | `track/mod.rs` |
 | The arcade car model | `sim/car.rs`, `sim/controller.rs` |
 | Where the mass sits, and what it costs | `sim/chassis.rs` |
 | Racing collision geometry and separation | `sim/collision.rs` |
 | Collision severity, contact episodes, recovery | `sim/contact.rs` |
-| Deterministic traffic | `sim/traffic.rs` |
+| Traffic activation from the compiled plan | `sim/traffic.rs` |
 | Boost, near misses, the reward loop | `sim/boost.rs`, `sim/collision.rs` |
 | Race flow (countdown, progress, finish, reset) | `sim/mod.rs` |
 | The pre-race start screen | `start_screen.rs` |
@@ -32,6 +33,7 @@ This app owns, end to end:
 | Visual debugging | `debug_view.rs` |
 | Deterministic scripting and capture | `script.rs`, `capture.rs` |
 | Tuning | `tuning.rs` |
+| The demo course, in the course DSL | `courses/burning_coast.brc` |
 
 ### Why all of this is app-local
 
@@ -186,7 +188,7 @@ the frame already does.
 
 ---
 
-## 5. The procedural track
+## 5. The course
 
 ### Representation
 
@@ -212,31 +214,48 @@ Arc-length uniformity is load-bearing: every downstream consumer addresses the
 course by *metres travelled*. A parameter-uniform table would make lane dashes
 bunch in corners and "4 200 m along" not a distance.
 
-### Generation
+### Where the table comes from
 
-1. **Plan** — nine authored sections with an ordered pacing curve (opening
-   straight → coastal sweepers → ridge crests → esses → tunnel → long haul →
-   canyon → final sweep → finish), each with its own curviness, hilliness,
-   width and event-length envelope.
-2. **Author** — per control point (40 m apart), a heading-step and grade signal
-   emitted as *events*: smooth half-sine bumps over several points, separated by
-   straights. A bend therefore has an entry, an apex and an exit rather than
-   being per-point noise.
-3. **Correct** — clamp magnitudes, then run exactly `correction_passes` bounded
-   forward+backward relaxation sweeps limiting how fast the heading step and
-   grade may change. Every loop has a compile-time bound; there is no
-   "retry until valid".
-4. **Integrate** — walk the corrected signals into world positions. Constraints
-   hold on the *signal*, and the geometry is built from the signal, so a
-   position can never encode an illegal turn.
-5. **Sample** — Catmull-Rom through the control points (C¹ continuous, passes
-   *through* its points), densified to 1 m and resampled at exactly 2 m.
-6. **Frame** — central-difference tangents, curvature from heading change,
-   banking from clamped curvature smoothed over a fixed number of passes.
+The table used to be *generated here*, by a bespoke control-point walk with the
+pacing plan baked into an enum. It is now **compiled** by `course/`, and this
+file is only the table and the questions everything asks of it. The split is the
+point: `track/` answers *where is the road*, and `course/` answers *what road
+should there be*.
 
-Enforced and asserted: minimum turn radius, maximum curvature change between
-adjacent samples, maximum grade and grade change, maximum banking, minimum and
-maximum road width, no inverted road, no non-finite geometry.
+```text
+courses/*.brc  ──parse──┐
+                        ├──▶ CourseSpec ──expand──▶ ExpandedCourse
+procedural::shipping ───┘                              │
+                                          ┌────────────┴────────────┐
+                                    geometry/                  traffic/
+                                Track + sections        vehicles + encounters
+                                          └────────────┬────────────┘
+                                                validation/ (grid, budget, ghost)
+                                                       ▼
+                                                  CoursePlan ──▶ RaceSim
+```
+
+Sections are authored as *semantic road* — a straight, a constant-radius turn,
+an S-bend, a crest, a lane transition — with deterministic modifiers layered on
+top, and the compiler lays every section's signals end to end and integrates
+them **once**. Position, tangent and heading are therefore continuous by
+construction rather than by agreement: nothing restarts at a section boundary,
+and no primitive ever writes a position.
+
+Enforced and asserted, by the compiler's bounded correction pass and then again
+by the validator: minimum turn radius, maximum curvature change between adjacent
+samples, maximum grade and grade change, maximum banking, minimum and maximum
+road width, no inverted road, no non-finite geometry — plus, new with the
+compiler, that the traffic on the road leaves a route through it.
+
+Where a clamp actually bit, the validator raises a **warning naming the
+section**: the compiled road is not the road that was authored, and saying so is
+more useful than either silently changing it or refusing to build it.
+
+The full model — the specification, the motifs, the traffic and encounter
+system, the near-miss opportunity windows, the traversability grid, the boost
+budget, ghost validation and the DSL — is documented in
+[`COURSES.md`](COURSES.md).
 
 ---
 
@@ -295,16 +314,41 @@ archetypes, how far is each worth drawing, what does a reduced tier look like".
 
 ## 8. Traffic
 
-An infinite ordered list of **slots** along the course, slot `k` at
-`k · traffic_spacing`. A slot's lane, speed, variant and lane-wander phase are a
-pure function of `(seed, k)`. A bounded pool of live cars is recycled through
-those slots.
+Every vehicle on the course is decided **before the race starts** — a
+`TrafficPlan` with a stable id, a spawn distance, a lane, a speed, a shape and
+any scheduled lane or speed changes — sorted by spawn distance and indexed. The
+runtime's whole job is to notice which plans have entered the forward horizon
+and copy them into a bounded pool.
 
-The consequence is the property the tests pin: **recycling a pool entry cannot
-change what a slot contains.** The spawn cursor also skips consumed slots
-*arithmetically* rather than one per loop iteration, so a player who jumped
-forward (a capture, a reset, the finish) does not find an empty road while the
-cursor crawls up to them.
+This replaced an infinite arithmetic list of **slots** (slot `k` at
+`k · traffic_spacing`, its contents a pure function of `(seed, k)`). That was
+deterministic and it was also the reason a course could not be authored: there
+was nowhere to say "a van here, in this lane, at this speed", because a slot's
+contents were computed rather than chosen.
+
+The determinism property is *stronger* than the slot model's, because it no
+longer rests on arithmetic being reproducible: **recycling a pool entry cannot
+change what a plan contains** for the simplest possible reason — the pool holds
+copies and the plan is immutable. The activation cursor still skips consumed
+plans *arithmetically*, through the plan's distance index, so a player who
+jumped forward (a capture, a reset, the finish) does not find an empty road
+while a cursor crawls up to them.
+
+Two rules keep ambient traffic honest, both of which the previous model lacked:
+
+* **Neighbouring traffic travels at neighbouring speeds.** Speeds are walked
+  along the course by a slow wave rather than drawn independently, because
+  independent draws put a 22 m/s car in front of a 38 m/s one and, over the
+  ~13 s both are inside the player's horizon, that closes 200 m — far more than
+  the gap they were generated with. Cars a comfortable distance apart arrive
+  abreast, and three of them wall a three-lane road.
+* **Ambient traffic always leaves a lane open**, and the protected lane walks
+  along the course. Blocking every lane is a thing only an *authored encounter*
+  may do, because only an encounter is checked for leaving a route.
+
+Traffic still has no AI, no pathfinding and no awareness of the player. The
+interesting agent in a game about threading traffic is the player; traffic that
+reacted would remove exactly the judgement being asked for.
 
 Traffic has no AI, no pathfinding and no awareness of the player. The
 interesting agent in a game about threading traffic is the player; traffic that
@@ -485,10 +529,14 @@ second binding table to keep in step.
 ## 11. Extension points
 
 * **A second car** — `VehicleTuning` is a value; `RaceSim::new` takes a `Tuning`.
-* **A second course** — `RaceSim::new` takes a seed; the pacing plan is
-  `SectionKind::ALL` and its profiles.
-* **A new section kind** — add a variant, a profile and a zone; the generator,
-  the mesh builder, the scenery and the HUD all pick it up.
+* **A second course** — write a `.brc` file and hand
+  `RaceSim::from_plan` what it compiles to, or edit `course::procedural`'s
+  pacing plan. See [`COURSES.md`](COURSES.md).
+* **A new road primitive, motif or encounter** — one variant plus one function;
+  the compiler needs no change, because a motif's whole output is sections that
+  already existed and an encounter's whole output is ordinary traffic plans.
+* **A new environment** — add a `SectionKind` variant and a zone; the mesh
+  builder, the scenery and the HUD all pick it up.
 * **A new prop archetype** — add a `PropKind` variant with a capacity, extents,
   draw distance and a mesh/material mapping.
 * **Rebindable controls** — `Controls::new` is a binding table; the simulation

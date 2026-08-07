@@ -398,10 +398,10 @@ mod tests {
     use crate::command::DriveCommand;
     use crate::sim::contact::ContactState;
     use crate::sim::controller::{place_on_track, step as drive_step, StepReport};
-    use crate::tuning::{CourseTuning, Tuning};
+    use crate::tuning::Tuning;
 
     fn fixture() -> (Track, CarState, ChaseCamera) {
-        let track = Track::generate(crate::DEFAULT_SEED, &CourseTuning::DEFAULT);
+        let track = Track::fixture(crate::DEFAULT_SEED);
         let mut car = CarState::parked(Vec3::ZERO, 0.0);
         place_on_track(&mut car, &track.sample_at(60.0), 0.0);
         let mut camera = ChaseCamera::new();
