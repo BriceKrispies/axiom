@@ -53,7 +53,9 @@ impl GhostRun {
     pub fn new(seed: u64, tuning: Tuning, profile: PlayProfile) -> GhostRun {
         GhostRun {
             sim: RaceSim::with_profile(seed, tuning, profile),
-            driver: DriverTuning::FAST,
+            // The technique has to match the control scheme the profile gives
+            // the car — see `DriverTuning::for_profile`.
+            driver: DriverTuning::for_profile(profile),
             steps: 0,
         }
     }
@@ -61,7 +63,7 @@ impl GhostRun {
     /// Advance the ghost one fixed step: perceive, decide through `axiom-agent`,
     /// and drive. The command comes back from the agent exactly as it does in
     /// the offline race — this is the same [`agent::drive_one_step`] the
-    /// 91.7-second reference run is made of.
+    /// reference run in `tests/agent_race.rs` is made of.
     pub fn step(&mut self) {
         let (command, _intents) = agent::drive_one_step(&self.sim, &self.driver, self.steps);
         self.sim.step(command);
@@ -173,15 +175,51 @@ mod tests {
         assert!(g.finished(), "the ghost got {:.0} m", g.distance());
         // The reference run, to the step. This number is a *consequence*, not a
         // setting: the ghost drives the real sim, so any rule that changes how
-        // much boost a lap earns moves it. It last moved from 91.68 s when the
-        // near-miss rule became "the next lane over, and you go past it" — the
-        // old rule's 16 m/s closing-speed floor was silently refusing to pay out
-        // for passes the ghost was already making, and paying for them is worth
-        // 0.73 s over nine kilometres.
+        // much boost a lap earns moves it.
         assert!(
-            (g.elapsed_seconds() - 90.95).abs() < 0.05,
+            (g.elapsed_seconds() - 89.33).abs() < 0.05,
             "ghost time {:.2}s",
             g.elapsed_seconds()
         );
+    }
+
+    /// **The bar.** The ghost is the pace you race, and it is required to be
+    /// under ninety seconds on *both* games — not just the one a developer
+    /// happens to run on a desktop.
+    ///
+    /// Asserted per profile because the two are genuinely different drives, and
+    /// because the phone arm is the one that was quietly broken: the agent only
+    /// ever emitted `steer`, which `sim::rails` ignores, so the phone ghost held
+    /// one lane for nine kilometres, hit 25 cars and took 96.45 s. Nothing
+    /// tested it, so nothing caught it.
+    #[test]
+    fn the_ghost_beats_ninety_seconds_on_both_games() {
+        [PlayProfile::Wheel, PlayProfile::Rails]
+            .into_iter()
+            .for_each(|profile| {
+                let mut g = GhostRun::new(DEFAULT_SEED, Tuning::DEFAULT, profile);
+                (0..60 * 60 * 3).for_each(|_| {
+                    (!g.finished()).then(|| g.step());
+                });
+                assert!(g.finished(), "{profile:?} ghost did not finish");
+                assert!(
+                    g.elapsed_seconds() < 90.0,
+                    "{profile:?} ghost took {:.2}s — the ghost must beat 90 s",
+                    g.elapsed_seconds()
+                );
+                // And it gets there by threading traffic, not by bulldozing it:
+                // a near miss pays 0.13 of the meter, contact pays nothing and
+                // costs speed.
+                assert!(
+                    g.sim().near_miss_count() > 60,
+                    "{profile:?} ghost only scored {} near misses — it is not hunting them",
+                    g.sim().near_miss_count()
+                );
+                assert!(
+                    g.sim().impact_count() <= 5,
+                    "{profile:?} ghost hit {} things",
+                    g.sim().impact_count()
+                );
+            });
     }
 }

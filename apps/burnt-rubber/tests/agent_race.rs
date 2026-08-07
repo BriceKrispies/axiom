@@ -51,6 +51,23 @@ fn the_agent_drives_the_shipping_course_to_the_finish() {
 
     assert!(run.finished, "the agent did not reach the finish line");
     assert!(run.progress > 0.99);
+    // The bar, and how it is cleared. The course is flat out end to end — the
+    // agent never lifts and never brakes — so lap time is very nearly a linear
+    // function of how much boost the lap earns, and boost is earned by threading
+    // traffic. Measured: 103 cars get overtaken, each near miss is 0.13 of the
+    // meter, and the meter buys 22 m/s. Scoring 71 of them is a 90.95 s lap;
+    // scoring 95 is an 89.33 s one.
+    assert!(
+        run.elapsed_seconds < 90.0,
+        "the agent took {:.2}s — it must beat 90 s",
+        run.elapsed_seconds
+    );
+    assert!(
+        run.near_misses > 85,
+        "only {} near misses — the agent is not hunting them",
+        run.near_misses
+    );
+    assert!(run.impacts <= 2, "{} impacts", run.impacts);
     // Every step of the race was an agent decision, and every decision emitted
     // at least the two steering intents — cut the agent out and the car does not
     // move.

@@ -220,6 +220,31 @@ impl RaceSim {
     }
 
     /// The boost meter.
+    /// Whether this race is on rails — the phone game, where lateral position is
+    /// chosen a lane at a time rather than steered.
+    ///
+    /// A driver has to know which of the two control schemes it is holding: the
+    /// wheel game's lateral position is emergent from steering, the rails game's
+    /// is commanded in lane hops, and a plan expressed in the wrong one does
+    /// nothing at all. This is the same fact `step` already branches on
+    /// internally, published rather than re-derived.
+    pub const fn on_rails(&self) -> bool {
+        self.rails.is_some()
+    }
+
+    /// The lane the rails car is committed to, or `None` off rails.
+    ///
+    /// Distinct from "the lane the car is nearest to": during a lane change the
+    /// car is between two lanes but has already *chosen* one, and a driver that
+    /// cannot tell the difference cannot tell an in-progress move from a
+    /// finished one. Published because `DriveCommand::lane_step` is a
+    /// **relative** control — it retargets from this value on every step it is
+    /// non-zero — so a driver that cannot read it can only steer blind and hope,
+    /// which is exactly what it had to do before this existed.
+    pub fn rails_lane(&self) -> Option<i32> {
+        self.rails.map(rails::RailsState::lane)
+    }
+
     pub const fn boost(&self) -> &BoostMeter {
         &self.boost
     }

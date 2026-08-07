@@ -1,8 +1,10 @@
 //! Driving Burnt Rubber with the reusable `axiom-agent` module.
 //!
-//! Native-only and gated behind the `agent` cargo feature, so the wasm bundle
-//! and the default workspace gates never compile it — the same shape the
-//! Zanzoban, retro FPS and growth agent drivers use.
+//! This compiles everywhere the app does, wasm included, because the browser
+//! build genuinely needs it: the ghost you race is this driver, running live.
+//! (An earlier version of this note claimed the module was "gated behind the
+//! `agent` cargo feature". There is no such feature in this crate's manifest and
+//! there never was — `cargo test --features agent` fails outright.)
 //!
 //! # What is the agent's, and what is the app's
 //!
@@ -57,6 +59,9 @@ const AXIS_STEER: u32 = 1;
 const AXIS_THROTTLE: u32 = 2;
 const AXIS_BRAKE: u32 = 3;
 const AXIS_BOOST: u32 = 4;
+/// The lane-hop axis — the phone game's entire lateral control. See
+/// [`Perception::lane_intent`].
+const AXIS_LANE: u32 = 5;
 
 /// The app's observation-fact vocabulary: what the driver can *see*. Each fact's
 /// `value` is a fixed-point micro-unit scalar (`axiom-agent` facts are integer
@@ -69,6 +74,7 @@ const FACT_YAW_RATE: u16 = 2;
 const FACT_SPEED_HEADROOM: u16 = 3;
 const FACT_SPEED_EXCESS: u16 = 4;
 const FACT_BOOST_OPPORTUNITY: u16 = 5;
+const FACT_LANE_INTENT: u16 = 6;
 
 /// Fixed-point scale: one whole unit (a radian, a metre per second, a full axis
 /// deflection) is a million.
@@ -121,6 +127,15 @@ pub struct DriverTuning {
     pub edge_margin: f32,
     /// How heavily a candidate line is punished per metre it intrudes inside the
     /// touching width.
+    ///
+    /// **Ordinal, not a weight.** Since safety became lexicographic — any
+    /// intruding candidate forfeits its near-miss reward outright — this no
+    /// longer trades against anything: every clean candidate already outscores
+    /// every dirty one regardless of its size, so scaling it cannot change which
+    /// line wins. All it still does is rank the bad options against each other,
+    /// for the case where every candidate intrudes and the driver has to pick
+    /// the least-bad one. Sweeping it over 30..90 moves nothing, which is the
+    /// measurement that says so.
     pub contact_penalty: f32,
     /// A mild pull back toward the centre of the road when nothing else decides
     /// the line.
@@ -136,6 +151,38 @@ pub struct DriverTuning {
     /// (m/s): holding it against a limit the car is already at burns the meter
     /// for nothing.
     pub boost_min_headroom: f32,
+    /// How full the meter must be before a *new* boost is started, `0..1`.
+    ///
+    /// The driver's one piece of patience, and it is worth more than any other
+    /// number here. Without it the meter is a relaxation oscillator at the
+    /// bottom of its range: the game lets boost start at 6% charge, the drain is
+    /// 0.36/s, so engaging the instant it is legal buys 0.17 s and runs dry —
+    /// measured, 699 separate boosts averaging **four steps each**. Four steps
+    /// is nothing. Boost raises the speed ceiling by 22 m/s and adds 95 to
+    /// acceleration, but acceleration takes *time*: a car cruising at 92 needs
+    /// seconds to climb toward 114, so a four-step burst pays out almost none of
+    /// what it costs, and the car sits at 103 having spent the whole meter.
+    ///
+    /// Banking to this level and then holding until dry converts the same charge
+    /// into far more distance. It is also just what a person does — you save the
+    /// bar for the straight instead of feathering it away.
+    pub boost_start_charge: f32,
+    /// How much a candidate line is *rewarded* for sitting in the lane next to a
+    /// car it is about to overtake — the near-miss hunt.
+    ///
+    /// This is the one term that makes the driver seek traffic rather than
+    /// merely survive it, and it is worth its own number because the payoff is
+    /// real: a near miss is 0.13 of the boost meter, the meter drains at 0.36/s,
+    /// so each one buys 0.36 s at the +22 m/s boost gives — about 7.9 m. Over a
+    /// course with a hundred overtakes on it, that is the race.
+    ///
+    /// Scored against the *lane* the candidate falls in, because that is what
+    /// the near-miss rule actually reads (see `sim::collision::is_near_miss`).
+    /// A driver that threads *between* lanes — which an earlier version of this
+    /// function deliberately did — rounds into one of them and is then either
+    /// level with the car it is passing or two lanes off it, and is paid for
+    /// neither.
+    pub near_miss_reward: f32,
     /// Steering per radian of heading error, and per rad/s of the car's own yaw
     /// rate opposing it — the proportional and damping halves of the control law
     /// the agent is given, in thousandths.
@@ -144,26 +191,64 @@ pub struct DriverTuning {
 }
 
 impl DriverTuning {
+    /// The technique for the profile this race is being driven on.
+    ///
+    /// The two games do not share a lateral control, so they cannot share a
+    /// technique. The wheel game steers continuously and rewards a short
+    /// lookahead with a sharp, well-damped correction; the rails game commits a
+    /// whole lane at a time and has to see far enough ahead to finish the move
+    /// before it arrives. Driving the phone game on the wheel game's numbers is
+    /// what left the ghost hitting cars there.
+    pub const fn for_profile(profile: crate::PlayProfile) -> DriverTuning {
+        [DriverTuning::FAST, DriverTuning::FAST_RAILS][profile.is_rails() as usize]
+    }
+
+    /// The phone game's technique: a longer look up the road, a heavier cost on
+    /// changing lane, and a hungrier near-miss reward.
+    ///
+    /// Every difference from [`Self::FAST`] follows from the same fact — the
+    /// rails car commits a whole lane at a time and crosses at a fixed 12 m/s,
+    /// so a move takes about 0.3 s and roughly 30 m of road. It has to look
+    /// further ahead to start one in time, and it must not start one lightly.
+    /// The reward is larger because it converts better here: a rails car is
+    /// always *exactly* on a lane centre, which is precisely what the near-miss
+    /// rule pays for, so it captures passes the wheel car only approximates.
+    pub const FAST_RAILS: DriverTuning = DriverTuning {
+        lookahead_base: 9.1,
+        lookahead_per_speed: 0.15,
+        traffic_horizon: 60.0,
+        touch_margin: 0.88,
+        edge_margin: 0.93,
+        centre_pull: 0.039,
+        urgency_falloff: 0.85,
+        lane_change_cost: 0.41,
+        boost_start_charge: 0.17,
+        near_miss_reward: 11.7,
+        ..DriverTuning::FAST
+    };
+
     /// The technique the agent races with.
     pub const FAST: DriverTuning = DriverTuning {
         lookahead_base: 2.5,
-        lookahead_per_speed: 0.34,
+        lookahead_per_speed: 0.21,
         grip_usage: 0.92,
         corner_speed_floor: 18.0,
         brake_usage: 0.75,
         brake_margin: 1.02,
         corner_horizon_seconds: 2.6,
         corner_horizon_floor: 60.0,
-        traffic_horizon: 50.0,
-        touch_margin: 0.8,
-        edge_margin: 1.8,
+        traffic_horizon: 46.0,
+        touch_margin: 0.87,
+        edge_margin: 0.94,
         contact_penalty: 30.0,
-        centre_pull: 0.04,
-        urgency_falloff: 0.2,
-        lane_change_cost: 0.1,
+        centre_pull: 0.063,
+        urgency_falloff: 0.36,
+        lane_change_cost: 0.107,
         boost_min_headroom: 1.5,
-        steer_gain_milli: 20_000,
-        steer_damping_milli: 200,
+        boost_start_charge: 0.345,
+        near_miss_reward: 5.05,
+        steer_gain_milli: 35_000,
+        steer_damping_milli: 83,
     };
 }
 
@@ -189,6 +274,31 @@ pub struct Perception {
     pub boost_opportunity: bool,
     /// The lateral offset from the centreline the driver picked (m).
     pub target_lateral: f32,
+    /// The lane hop the driver wants *this step*, in the same screen-direction
+    /// units [`DriveCommand::lane_step`] uses, or `0` for "stay put".
+    ///
+    /// This exists because the two play profiles do not share a lateral control.
+    /// The wheel game steers and its lateral position is emergent; the phone
+    /// game is on rails and its lateral position is *driven* by discrete lane
+    /// hops, and `sim::rails` reads `lane_step` and ignores `steer` completely.
+    /// Emitting only `steer` therefore left the ghost unable to change lane at
+    /// all on a phone — measured, it ploughed through 25 cars and took 96.45 s
+    /// against the wheel game's 89.93 s. It was not driving badly; it was not
+    /// steering.
+    ///
+    /// `lane_step` is a *relative* control — `sim::rails` retargets from the lane
+    /// it currently holds on every step it sees a non-zero value — so this is
+    /// computed against that committed lane ([`RaceSim::rails_lane`]) rather than
+    /// against where the car happens to be. Doing it that way needs no pacing
+    /// rule at all: once the committed lane equals the wanted one this is `0`, so
+    /// there is nothing to march.
+    ///
+    /// The first version of this could not read the committed lane and so gated
+    /// on "the car has settled in a lane centre" to avoid marching sixty lanes a
+    /// second. That worked, and cost 15 collisions a race, because a driver that
+    /// may only re-decide once it has *arrived* cannot abort a lane change into a
+    /// car that appeared while it was crossing. The pacing hack was the bug.
+    pub lane_intent: i8,
 }
 
 /// Look at the road, the traffic and the boost meter, and measure what a driver
@@ -211,9 +321,30 @@ pub fn perceive(sim: &RaceSim, driver: &DriverTuning) -> Perception {
     // straight, on the exit of a corner, anywhere the car is not already against
     // the limit the road imposes. Holding it into a corner the car must brake
     // for burns the meter to be braked straight back off.
+    // Hysteresis, not a threshold: start only on a well-filled meter, then hold
+    // until it is dry. Both halves are read off state the driver can genuinely
+    // see — the boost bar on the HUD is exactly `charge`, and whether boost is
+    // lit is exactly `active` — so this is technique, not privileged access.
+    let charge = sim.boost().charge();
+    let meter_says_go = sim
+        .boost()
+        .active()
+        .then(|| charge > 0.0)
+        .unwrap_or(charge >= driver.boost_start_charge);
     let boost_opportunity = sim.boost().ready(&sim.tuning().race)
+        && meter_says_go
         && headroom > driver.boost_min_headroom
         && !car.surface.is_off_road();
+
+    // The same chosen line, expressed as the phone game's control. `lane_step`
+    // is a screen direction and the lane index runs the other way (see the sign
+    // note in `sim::rails`), so wanting a *lower* lane index is a *positive*
+    // step.
+    let here = track.sample_at(car.distance);
+    let lane_intent = sim
+        .rails_lane()
+        .map(|held| (held - track.lane_at_lateral(&here, target_lateral)).clamp(-1, 1) as i8)
+        .unwrap_or(0);
 
     Perception {
         heading_error,
@@ -222,6 +353,7 @@ pub fn perceive(sim: &RaceSim, driver: &DriverTuning) -> Perception {
         speed_excess: (car.speed() - target_speed * driver.brake_margin).max(0.0),
         boost_opportunity,
         target_lateral,
+        lane_intent,
     }
 }
 
@@ -341,37 +473,87 @@ fn choose_line(sim: &RaceSim, aim_distance: f32, driver: &DriverTuning) -> f32 {
 
     // The traffic that will still be in front of us when we get there, each
     // projected forward by its own speed over the time it takes us to arrive.
+    // `lane` and `unscored` ride along because the near-miss reward is a
+    // *lane* question and pays only once per car.
     let closing_floor = 1.0f32;
-    let ahead: Vec<(f32, f32)> = sim
+    let ahead: Vec<(f32, f32, i32, bool)> = sim
         .traffic()
         .active()
         .filter_map(|other| {
             let gap = other.distance - car.distance;
             let closing = (car.speed() - other.speed).max(closing_floor);
             let time_to_reach = gap / closing;
-            ((gap > -8.0) & (gap < driver.traffic_horizon))
-                .then_some((other.lateral, time_to_reach.max(0.0)))
+            // Only a car we will actually go past can pay a near miss — being
+            // overtaken scores nothing, by the same rule.
+            let overtaking = car.speed() > other.speed;
+            ((gap > -8.0) & (gap < driver.traffic_horizon)).then_some((
+                other.lateral,
+                time_to_reach.max(0.0),
+                other.lane,
+                !other.near_missed & overtaking,
+            ))
         })
         .collect();
+
+    // Which lane a candidate offset falls in, read at the point we are aiming
+    // for. This is the same question `is_near_miss` asks of the player, so the
+    // driver is scoring itself against the rule the game actually pays out on.
+    let aim_sample = track.sample_at(aim_distance);
 
     // Anything closer than this laterally is a collision, not a pass.
     let touching = vehicle.half_width + race.traffic_half_width + driver.touch_margin;
 
-    let candidates = 41;
-    (0..candidates)
-        .map(|i| {
-            let lateral = -room + 2.0 * room * (i as f32 / (candidates - 1) as f32);
-            let score = ahead
+    // The candidate set is the driver's **action space**, and the two profiles do
+    // not have the same one. The wheel game can hold any offset, so it scores a
+    // fine grid across the usable road. The rails game can only ever be at a lane
+    // centre — so scoring a continuum and rounding the winner, which is what this
+    // did first, evaluates lines the car cannot take and then takes a line it
+    // never scored. Measured, that mismatch was worth 28 collisions a race.
+    let reach = track.lane_reach(&aim_sample);
+    let grid = 41;
+    let offsets: Vec<f32> = sim
+        .on_rails()
+        .then(|| {
+            (-reach..=reach)
+                .map(|lane| track.lane_lateral(&aim_sample, lane))
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            (0..grid)
+                .map(|i| -room + 2.0 * room * (i as f32 / (grid - 1) as f32))
+                .collect()
+        });
+    offsets
+        .into_iter()
+        .map(|lateral| {
+            let lane = track.lane_at_lateral(&aim_sample, lateral);
+            let (contact, reward) = ahead
                 .iter()
-                .map(|&(other_lateral, time_to_reach)| {
+                .map(|&(other_lateral, time_to_reach, other_lane, unscored)| {
                     let gap = (lateral - other_lateral).abs();
                     // A car we reach in half a second matters far more than one
                     // four seconds out, whose lateral we will re-read many times
                     // before it counts.
                     let urgency = 1.0 / (1.0 + time_to_reach * driver.urgency_falloff);
-                    -(touching - gap).max(0.0) * driver.contact_penalty * urgency
+                    let contact = (touching - gap).max(0.0) * driver.contact_penalty * urgency;
+                    // The hunt: one lane over from a car we are about to pass is
+                    // where the boost is.
+                    let adjacent = ((lane - other_lane).abs() == 1) & unscored;
+                    let reward =
+                        f32::from(u8::from(adjacent)) * driver.near_miss_reward * urgency;
+                    (contact, reward)
                 })
-                .sum::<f32>();
+                .fold((0.0f32, 0.0f32), |(c, r), (dc, dr)| (c + dc, r + dr));
+            // Safety is **lexicographic**, not weighted: a candidate that
+            // intrudes on anything scores no reward at all, however many near
+            // misses it would otherwise line up. Making it a large negative
+            // weight instead — which is what this did first — lets a line that
+            // clips one car outbid a clean one by being adjacent to three, and
+            // the measured cost of that was two impacts in every run. A driver
+            // that trades paint for boost has misunderstood the trade: the
+            // collision costs more speed than the boost returns, and the near
+            // miss it was reaching for is forfeited by the contact anyway.
+            let score = -contact + (contact <= 0.0).then_some(reward).unwrap_or(0.0);
             let travel = (lateral - car.lateral).abs() * driver.lane_change_cost;
             // A mild pull back toward the middle of the road. With no traffic in
             // sight every candidate scores zero, and without this the driver
@@ -393,6 +575,9 @@ const THROTTLE_GAIN_MILLI: i64 = 1_000;
 const BRAKE_GAIN_MILLI: i64 = 500;
 /// A seen boost opportunity is a full deflection of the boost axis.
 const BOOST_GAIN_MILLI: i64 = 1_000;
+/// A lane hop is passed through at unit gain — the fact is already `-1`, `0` or
+/// `+1`, which is exactly the command's vocabulary.
+const LANE_GAIN_MILLI: i64 = 1_000;
 
 /// The outcome of one agent-driven run.
 #[derive(Debug, Clone, PartialEq)]
@@ -470,7 +655,7 @@ pub fn drive_one_step(sim: &RaceSim, driver: &DriverTuning, tick: u64) -> (Drive
     // is not over it, no boost fact when boost is not worth spending. An absent
     // fact drives no axis, which is how "lift off" and "do not brake" are
     // expressed without the control law needing a conditional.
-    let mut builder = AgentApi::observation_builder(agent_id, Tick::new(tick), 2, 5, 0);
+    let mut builder = AgentApi::observation_builder(agent_id, Tick::new(tick), 2, 6, 0);
     builder
         .add_channel(AgentApi::channel_geometric())
         .expect("one channel within the channel bound");
@@ -485,6 +670,8 @@ pub fn drive_one_step(sim: &RaceSim, driver: &DriverTuning, tick: u64) -> (Drive
         perception
             .boost_opportunity
             .then_some((FACT_BOOST_OPPORTUNITY, 1.0)),
+        (perception.lane_intent != 0)
+            .then_some((FACT_LANE_INTENT, f32::from(perception.lane_intent))),
     ]
     .into_iter()
     .flatten()
@@ -498,7 +685,7 @@ pub fn drive_one_step(sim: &RaceSim, driver: &DriverTuning, tick: u64) -> (Drive
                 0,
                 (value * MICRO) as i64,
             ))
-            .expect("at most five facts, within the fact bound");
+            .expect("at most six facts, within the fact bound");
     });
     let observation = builder.build();
 
@@ -554,6 +741,14 @@ pub fn drive_one_step(sim: &RaceSim, driver: &DriverTuning, tick: u64) -> (Drive
             0,
             1_000_000,
         ),
+        AgentApi::axis_binding(
+            FACT_LANE_INTENT,
+            AXIS_LANE,
+            LANE_GAIN_MILLI,
+            0,
+            -1_000_000,
+            1_000_000,
+        ),
     ]);
     let mut memory = AgentApi::empty_memory(1);
     let step = RuntimeStep::new(
@@ -579,6 +774,9 @@ pub fn drive_one_step(sim: &RaceSim, driver: &DriverTuning, tick: u64) -> (Drive
         brake: deflection(queue.axis_value(AXIS_BRAKE)).clamp(0.0, 1.0),
         steer: deflection(queue.axis_value(AXIS_STEER)).clamp(-1.0, 1.0),
         boost: deflection(queue.axis_value(AXIS_BOOST)) > 0.5,
+        // Inert on the wheel profile — `sim::rails` is the only reader, and a
+        // wheel race has no rails state — so this needs no profile branch here.
+        lane_step: deflection(queue.axis_value(AXIS_LANE)).round().clamp(-1.0, 1.0) as i8,
         ..DriveCommand::IDLE
     };
     (command, report.emitted_action_count())

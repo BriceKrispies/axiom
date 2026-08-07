@@ -78,6 +78,21 @@ fn axes() -> Vec<(&'static str, Vec<f32>, Setter)> {
             |d, v| d.boost_min_headroom = v,
         ),
         (
+            "boost_start_charge",
+            vec![0.06, 0.15, 0.22, 0.26, 0.30, 0.34, 0.38],
+            |d, v| d.boost_start_charge = v,
+        ),
+        (
+            "traffic_horizon",
+            vec![50.0, 65.0, 85.0, 110.0, 140.0, 180.0],
+            |d, v| d.traffic_horizon = v,
+        ),
+        (
+            "near_miss_reward",
+            vec![0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0],
+            |d, v| d.near_miss_reward = v,
+        ),
+        (
             "grip_usage",
             vec![0.9, 1.0, 1.3],
             |d, v| d.grip_usage = v,
@@ -90,20 +105,25 @@ fn axes() -> Vec<(&'static str, Vec<f32>, Setter)> {
 fn sweep() {
     let mut best = DriverTuning::FAST;
     let base = run(&best);
-    let mut best_t = base.elapsed_seconds;
+    let mut best_t = base.elapsed_seconds
+        + f32::from(base.impacts as u16) * 0.5
+        + f32::from(base.offroad_steps.min(600) as u16) / 60.0;
     println!(
         "base {:.2}s impacts={} nm={} offroad={} boost={}",
         base.elapsed_seconds, base.impacts, base.near_misses, base.offroad_steps, base.boost_steps
     );
 
     let axes = axes();
-    (0..4).for_each(|pass| {
+    (0..6).for_each(|pass| {
         axes.iter().for_each(|(name, values, set)| {
             values.iter().for_each(|&v| {
                 let mut candidate = best;
                 set(&mut candidate, v);
                 let r = run(&candidate);
-                let better = r.finished && r.elapsed_seconds < best_t - 0.005;
+                let cost = r.elapsed_seconds
+                    + f32::from(r.impacts as u16) * 0.5
+                    + f32::from(r.offroad_steps.min(600) as u16) / 60.0;
+                let better = r.finished && cost < best_t - 0.005;
                 (better | (pass == 0)).then(|| {
                     println!(
                         "  p{pass} {name}={v}: {:.2}s fin={} imp={} nm={} off={} boost={}{}",
@@ -117,7 +137,7 @@ fn sweep() {
                     );
                 });
                 better.then(|| {
-                    best_t = r.elapsed_seconds;
+                    best_t = cost;
                     best = candidate;
                 });
             });
