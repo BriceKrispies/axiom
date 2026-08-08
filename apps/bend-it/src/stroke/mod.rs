@@ -28,4 +28,4 @@ pub use capture::{Drawing, StrokeCapture};
 pub use interpret::{interpret, Reading};
 pub use line::Stroke;
 pub use pace::Pace;
-pub use view::{hint_for, GameView, StrokeView};
+pub use view::{hint_for, speed_readout, GameView, StrokeView};

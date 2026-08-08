@@ -59,6 +59,11 @@ pub struct Session {
     /// produces, so nothing else in here is allowed to guess it.
     swing: Swing,
     kick_tick: u32,
+    /// How fast the ball left the boot, metres per second — measured off the
+    /// ball on the tick it was struck, not read back off what the shot was
+    /// authored at. If the two ever disagree it is the ball that is telling the
+    /// truth, and it is the ball the readout should be showing.
+    struck: Option<f32>,
     result: Option<ShotResult>,
     tally: Tally,
     net: Option<NetImpulse>,
@@ -110,6 +115,7 @@ impl Session {
             kick: KickPlan::for_shot(origin, KickDrive::for_shot(&intent, &tuning), &tuning.kick),
             swing: Swing::cocked(&tuning.kick),
             kick_tick: 0,
+            struck: None,
             result: None,
             tally: Tally::default(),
             net: None,
@@ -156,6 +162,10 @@ impl Session {
     }
     pub fn result(&self) -> Option<ShotResult> {
         self.result
+    }
+    /// The speed the ball left at, metres per second, once it has.
+    pub fn struck_speed(&self) -> Option<f32> {
+        self.struck
     }
     pub fn tally(&self) -> Tally {
         self.tally
@@ -235,6 +245,7 @@ impl Session {
         let nerve = self.next_nerve();
         self.keeper = Keeper::shaded(across, up, weight, nerve);
         self.result = None;
+        self.struck = None;
         self.net = None;
         self.phase = Phase::Ready;
         self.phase_tick = 0;

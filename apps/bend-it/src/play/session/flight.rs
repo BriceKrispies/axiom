@@ -33,6 +33,7 @@ impl Session {
         self.advance_swing();
         self.swing.struck_at().map(|_| {
             self.ball.launch(&self.shot.trajectory);
+            self.struck = Some(self.ball.velocity.length());
             self.phase = Phase::BallInFlight;
         });
     }

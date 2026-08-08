@@ -190,7 +190,7 @@ mod tests {
         // forwards and level, which is exactly where crossing the reach with a
         // fixed "forwards" pole degenerates. Walk the whole arc and check that
         // the hinge axis — and therefore the limb's roll — never lurches.
-        let (hip, thigh, shin) = bones();
+        let (hip, _, _) = bones();
         let arc: Vec<Solve> = (0..64)
             .map(|i| {
                 let a = 1.0 - (i as f32 / 63.0) * 3.0;
@@ -214,7 +214,6 @@ mod tests {
             let roll = s.upper.to_euler_xyz().z.abs();
             assert!(roll < 0.25, "the limb rolled to {:.0}°", roll.to_degrees());
         });
-        let _ = (thigh, shin);
     }
 
     #[test]
@@ -243,7 +242,7 @@ mod tests {
 
     #[test]
     fn a_target_out_of_reach_straightens_the_limb_and_points_at_it() {
-        let (hip, thigh, shin) = bones();
+        let (hip, _, _) = bones();
         let miles = Vec3::new(hip.x, hip.y - 0.4, hip.z + 8.0);
         let solve = leg(miles);
         assert!(solve.lower.x.abs() < 0.05, "a reaching limb is a straight limb");

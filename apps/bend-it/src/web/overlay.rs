@@ -5,8 +5,8 @@
 //! colours.
 //!
 //! There is very little to choose. The interface is the line under your finger —
-//! no panels, no buttons, no stages — so this draws a stroke, a score, and at
-//! most one word.
+//! no panels, no buttons, no stages — so this draws a stroke, a score, a speed,
+//! and at most one word.
 //!
 //! SVG rather than canvas for two reasons: it stays crisp at any device pixel
 //! ratio, which matters when the whole interface is a thin line and a word; and
@@ -41,6 +41,7 @@ pub fn paint(view: &GameView) {
             .unwrap_or_default(),
         hint(view),
         tally(view),
+        speed(view),
         banner(view),
     ]
     .concat();
@@ -120,6 +121,32 @@ fn tally(view: &GameView) -> String {
         INK,
         0.62,
     )
+}
+
+/// How hard the ball was hit, under the score.
+///
+/// It is the one number the game shows, so it is worth being clear about what it
+/// measures: the speed the ball genuinely **left the boot at**, taken off the
+/// ball on the tick it was struck. Not an average over the flight, which would
+/// read low, and not what the shot was authored at, which would be the game
+/// marking its own homework.
+///
+/// Accented rather than plain, because it is the answer to a question the player
+/// asked with the tempo of their line — and it holds through the flight and the
+/// result, so there is time to look at it.
+fn speed(view: &GameView) -> String {
+    view.speed
+        .map(|kmh| {
+            text(
+                view.viewport.x * 0.5,
+                view.short * 0.150,
+                &format!("{kmh} KM/H"),
+                view.short * 0.045,
+                ACCENT,
+                0.88,
+            )
+        })
+        .unwrap_or_default()
 }
 
 /// The result banner.

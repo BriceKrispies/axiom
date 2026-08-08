@@ -1,4 +1,5 @@
-//! The overlay view model: the line under the finger, and four short words.
+//! The overlay view model: the line under the finger, a few short words, and one
+//! number.
 //!
 //! There is almost nothing here now, and that is the design. The old interface
 //! was three stages, two panels and four buttons; this one is the line you are
@@ -32,6 +33,9 @@ pub struct GameView {
     pub banner: Option<&'static str>,
     /// Goals and attempts.
     pub tally: (u32, u32),
+    /// How hard the last shot was struck, km/h — shown from the moment of
+    /// contact and held until the next attempt is set up.
+    pub speed: Option<u32>,
     pub viewport: Vec2,
     pub short: f32,
 }
@@ -43,11 +47,23 @@ impl GameView {
             stroke: None,
             hint: None,
             banner: None,
+            speed: None,
             tally,
             viewport,
             short: viewport.x.min(viewport.y),
         }
     }
+}
+
+/// The ball's speed as the readout says it, kilometres per hour.
+///
+/// The engine works in metres and seconds, and metres per second is the wrong
+/// unit to show a person a football in: 38 is a number without a feel, and 137 is
+/// a number everybody has seen on a television. The conversion lives here, with
+/// the rest of the view model, because choosing what a number *means* to a reader
+/// is not something the painter should be deciding.
+pub fn speed_readout(metres_per_second: f32) -> u32 {
+    (metres_per_second.max(0.0) * 3.6).round() as u32
 }
 
 /// The instruction, which stops being shown once the player has clearly got it.
@@ -64,12 +80,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_speed_readout_is_the_number_a_person_recognises() {
+        // 27.8 m/s is 100 km/h, and it is the slowest a penalty leaves here — so
+        // the readout should never open with a two-digit number.
+        assert_eq!(speed_readout(27.8), 100);
+        assert_eq!(speed_readout(44.4), 160);
+        assert_eq!(speed_readout(0.0), 0);
+        // It rounds rather than truncating, and a nonsense input does not produce
+        // a nonsense readout.
+        assert_eq!(speed_readout(10.0), 36);
+        assert_eq!(speed_readout(-5.0), 0);
+    }
+
+    #[test]
     fn an_empty_view_still_carries_the_score() {
         let view = GameView::empty(Phase::BallInFlight, Vec2::new(390.0, 844.0), (2, 5));
         assert_eq!(view.tally, (2, 5));
         assert_eq!(view.stroke, None);
         assert_eq!(view.banner, None);
         assert_eq!(view.short, 390.0);
+        assert_eq!(view.speed, None, "nothing has been struck yet");
     }
 
     #[test]

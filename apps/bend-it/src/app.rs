@@ -27,7 +27,8 @@ use crate::play::{Phase, PlayCommand, Session};
 use crate::projection::ScreenProjection;
 use crate::scene::BendItScene;
 use crate::stroke::{
-    hint_for, interpret, Drawing, GameView, Reading, Stroke, StrokeCapture, StrokeView,
+    hint_for, interpret, speed_readout, Drawing, GameView, Reading, Stroke, StrokeCapture,
+    StrokeView,
 };
 use crate::tuning::{Tuning, DT};
 
@@ -226,6 +227,7 @@ impl BendIt {
         );
         view.banner = self.session.result().map(|r| r.banner());
         view.hint = hint_for(self.session.phase(), self.session.tally().attempts);
+        view.speed = self.session.struck_speed().map(speed_readout);
         // The line under the finger, or the one that just left it.
         let live = self.capture.drawing().then(|| StrokeView {
             points: self.capture.stroke().points().to_vec(),
