@@ -231,11 +231,29 @@ fn play(
             }
         }
         if trace {
-            if let Some(target) = seen.charge_target {
-                println!(
-                    "         TELL: defender {} can be run through (overload {:.2})",
-                    target.0, seen.charge_overload
-                );
+            // Why the tell is or is not open, every tick there is anybody to
+            // charge. Printing only the successes tells you nothing about the
+            // failures, which is the thing that needed diagnosing.
+            if let Some(enc) = report.encounter {
+                if enc.gap <= 9.0 {
+                    let c = enc.predicted_charge;
+                    println!(
+                        "         gap {:5.2} meet {:>5} | close {:5.2} align {:4.2} time {:4.2}                          brace {:4.2} | {:5.2} vs {:5.2} {} | tell {}",
+                        enc.gap,
+                        match enc.contact_in_ticks {
+                            Some(t) => format!("{t}t"),
+                            None => "none".to_string(),
+                        },
+                        c.closing_speed,
+                        c.alignment,
+                        c.timing,
+                        c.brace,
+                        c.impulse,
+                        c.resistance,
+                        if c.won { "WIN " } else { "lose" },
+                        if seen.charge_target.is_some() { "ON" } else { "-" },
+                    );
+                }
             }
         }
 

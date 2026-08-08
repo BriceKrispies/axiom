@@ -81,11 +81,17 @@ pub struct RunbackTuning {
     /// used to be measured as the GAP at the press, which quietly punished the
     /// one thing a player has to do to beat their own reaction time: press
     /// early. Committing a second out is eight yards out, and eight yards scored
-    /// as badly mistimed however perfectly the hit was judged — so the tell
-    /// almost never opened at a lead anybody could act on, and the charge became
-    /// unusable the moment latency entered the loop. Measuring the same skill in
-    /// time says what was always meant: drop your pads about a third of a second
-    /// before contact, whatever distance that happens to be at.
+    /// as badly mistimed however perfectly the hit was judged.
+    ///
+    /// **It must be longer than a human reaction time**, and that is the whole
+    /// reason this number is 40 rather than the 20 it started at. Instrumenting
+    /// the contest showed the arithmetic was simply impossible: the ideal press
+    /// was a third of a second before contact, a person needs half a second to
+    /// press at all, so the moment a human was in the loop the timing term sat
+    /// pinned at its floor (0.58) for every charge they could physically throw.
+    /// A move whose best moment is earlier than you can react to has no best
+    /// moment. At 40 ticks the ideal press is two thirds of a second out, which
+    /// leaves a real margin either side of a real reaction.
     pub charge_ideal_lead_ticks: u32,
     /// How far either side of the ideal lead timing decays to its floor, ticks.
     ///
@@ -152,11 +158,11 @@ impl Default for RunbackTuning {
             shoulder_recovery_ticks: 26,
             shoulder_expire_ticks: 8,
             shoulder_reach: 0.4,
-            charge_drive: 2.2,
-            charge_ideal_lead_ticks: 20,
-            charge_timing_span_ticks: 26,
+            charge_drive: 4.0,
+            charge_ideal_lead_ticks: 40,
+            charge_timing_span_ticks: 34,
             charge_timing_penalty: 0.42,
-            charge_resist_speed: 5.6,
+            charge_resist_speed: 3.8,
             charge_brace_floor: 0.55,
             charge_knock_speed: 5.5,
             charge_airborne_overload: 1.5,

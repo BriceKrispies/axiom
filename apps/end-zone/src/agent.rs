@@ -111,8 +111,8 @@ pub struct Perception {
 /// reach the height that clears a man, so one launched too late lands him back
 /// on the turf just in time to be tackled, and one launched too early has him
 /// down again before the defender arrives.
-const CHARGE_LEAD_MIN: u32 = 6;
-const CHARGE_LEAD_MAX: u32 = 34;
+const CHARGE_LEAD_MIN: u32 = 22;
+const CHARGE_LEAD_MAX: u32 = 58;
 const LEAP_LEAD_MIN: u32 = 14;
 
 /// Which move answers an encounter is decided in **time**, not distance.
@@ -210,6 +210,11 @@ pub const DEFAULT_REACTION_MILLIS: u32 = 500;
 #[derive(Debug)]
 pub struct TickReport<'a> {
     pub observation: &'a AgentObservation,
+    /// The encounter read this tick, with its projection and the charge it
+    /// predicts — the raw material behind every decision, published so a trace
+    /// can show *why* a move was or was not chosen instead of only *that* it
+    /// was not.
+    pub encounter: Option<crate::runback::Encounter>,
     pub decision: AgentDecision,
     pub events: &'a [crate::events::StampedEvent],
     pub ledger: crate::attempt::AttemptLedger,
@@ -359,8 +364,10 @@ pub fn drive(
 
         let out = run.step(&[]);
         let ledger = run.ledger().unwrap_or_default();
+        let encounter = autopilot::encounter(&run.sim, &step);
         observer(TickReport {
             observation: &seen,
+            encounter,
             decision,
             events: &out.events,
             ledger,
