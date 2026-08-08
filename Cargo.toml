@@ -104,6 +104,9 @@ members = [
     # Burnt Rubber: the third-person arcade racing framework + demonstration game
     # (composition leaf; every racing concept stays app-local).
     "apps/burnt-rubber",
+    # Bend It: the mobile-first penalty-kick trajectory sculptor (composition
+    # leaf; every soccer concept stays app-local).
+    "apps/bend-it",
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",

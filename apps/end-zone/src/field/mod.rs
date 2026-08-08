@@ -10,7 +10,8 @@ pub mod paint_layout;
 
 pub use coordinates::{
     normalized_to_world, world_to_yard_line, yard_line_to_z, z_to_yards_from_own_goal,
-    DriveDirection, OffenseFrame, OffensePoint, FIELD_HALF_LENGTH, FIELD_HALF_WIDTH, GOAL_LINE_Z,
+    DriveDirection, OffenseFrame, OffensePoint, FIELD_HALF_LENGTH, FIELD_HALF_WIDTH, FIELD_WIDTH,
+    GOAL_LINE_Z,
 };
 pub use generator::{generate_field, FieldGeometry, FieldMaterial, FieldMesh, FieldPiece};
 pub use paint::{

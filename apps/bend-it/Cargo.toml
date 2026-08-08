@@ -1,0 +1,47 @@
+[package]
+name = "axiom-bend-it"
+description = "Bend It: a mobile-first penalty-kick game whose whole mechanic is sculpting the SHAPE of the shot. The player picks a point inside the goal, bends the shot left or right in a top-down projection, lofts or flattens it in a side projection, and then watches the kicker execute exactly that authored trajectory against a goalkeeper that reads the early flight and dives for where it thinks the ball is going. A composition-leaf app: every soccer concept — pitch, goal, net, shot intent, trajectory authoring, keeper interception — is app-local, over the engine's public facades."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+axiom = { path = "../../modules/axiom" }
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+axiom-math = { path = "../../crates/axiom-math" }
+axiom-figure = { path = "../../modules/axiom-figure" }
+axiom-input = { path = "../../modules/axiom-input" }
+# The deterministic embodied-agent substrate the striker plays through.
+axiom-agent = { path = "../../modules/axiom-agent" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+
+# The nondeterministic browser edge — wasm32 only, so native `cargo test`
+# compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-host = { path = "../../crates/axiom-host" }
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+axiom-debug-overlay = { path = "../../modules/axiom-debug-overlay" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Navigator",
+    "Location",
+    "Document",
+    "Element",
+    "Node",
+    "HtmlElement",
+    "Event",
+    "EventTarget",
+    "KeyboardEvent",
+    "console",
+    "CssStyleDeclaration",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

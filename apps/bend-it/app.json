@@ -1,0 +1,10 @@
+{
+  "title": "Bend It",
+  "blurb": "A penalty-kick game with no power meter: you sculpt the shape of the shot, then watch the kicker execute exactly the trajectory you drew.",
+  "description": "Bend It is a mobile-first penalty shootout built entirely around a trajectory editor. Touch inside the goal to choose where the ball should finish, drag a top-down projection to bend the shot left or right, drag a side projection to loft or flatten it, and kick. The two projections are two views of ONE world-space trajectory: it always starts at the ball, always ends at the point you picked, and the ball is never secretly steered once it leaves the boot. There is no power meter — speed and flight time are inferred from the shape, so a flat driven shot is fast and a big curling loft trades pace for movement. The goalkeeper is not a coin flip: it reads only the first fraction of the flight, extrapolates where the ball is going, and dives for that — so a straight shot and a heavily bent shot at the same corner get completely different saves, and a dipping trajectory beats a keeper who commits high. Everything is procedural: mown turf, penalty-area markings, a goal with a rippling net, and a procedural humanoid kicker and keeper. Portrait phone first (one thumb, huge forgiving touch targets), mouse on desktop through the same interaction model.",
+  "kind": "rust-wasm",
+  "tags": [
+    "game",
+    "sports"
+  ]
+}

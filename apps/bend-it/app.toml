@@ -1,0 +1,24 @@
+[app]
+name = "bend-it"
+crate_name = "axiom-bend-it"
+
+allowed_layers = [
+    "kernel",
+    "math",
+    # The browser edge only: `HostDeviceProfile` for the measured surface.
+    "host",
+    # `RuntimeStep` — stamps each agent decision.
+    "runtime",
+]
+
+allowed_modules = [
+    "engine",
+    # The articulated box figure the kicker and the keeper are both built from.
+    "figure",
+    # The neutral pointer/key sampling boundary the trajectory editor reads.
+    "input",
+    # The embodied-agent substrate an agent striker plays the game through.
+    "agent",
+    "windowing",
+    "debug-overlay",
+]
