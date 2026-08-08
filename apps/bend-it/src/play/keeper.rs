@@ -258,9 +258,6 @@ mod tests {
         KeeperNerve::steady(&Tuning::DEFAULT.keeper)
     }
 
-    /// The shipping read gravity, so a test reads what the keeper reads.
-    const GRAVITY: f32 = Tuning::DEFAULT.keeper.read_gravity;
-
     fn shot(bend: f32, loft: f32, h: f32, v: f32) -> ResolvedShot {
         shaped(bend, 0.5, loft, 0.5, h, v)
     }
@@ -275,6 +272,7 @@ mod tests {
                 target: GoalTarget::new(h, v),
                 bend: BendCurve::through(bend_at, bend, 0.14),
                 loft: BendCurve::through(loft_at, loft, 0.14),
+                ..Default::default()
             },
             &GoalMouth::new(tuning.goal.inset),
             &tuning,
@@ -297,7 +295,7 @@ mod tests {
         // A later tick executes the same commitment; it never re-decides.
         keeper.advance(
             &s.trajectory,
-            tuning.keeper.reaction + tuning.keeper.adjust_delay * 0.5,
+            tuning.keeper.reaction + tuning.keeper.adjust_delay * 0.9,
             &tuning.keeper,
         );
         assert_eq!(keeper.read(), Some(first));
@@ -345,12 +343,17 @@ mod tests {
         assert!(read.aim.x.abs() <= tuning.keeper.dive_distance + 1.0e-4);
         assert!(read.aim.y <= HIP_HEIGHT + tuning.keeper.vertical_reach + 1.0e-4);
         assert!(keeper.motion().hips.x.abs() <= tuning.keeper.dive_distance + 1.0e-4);
-        // A long dive takes longer than a short one — there is a speed here.
-        let near = shot(0.0, 0.2, 0.05, 0.3);
-        let mut lazy = Keeper::set(steady());
-        lazy.advance(&near.trajectory, tuning.keeper.reaction, &tuning.keeper);
+        // A long dive takes longer than a short one — there is a speed here, and
+        // both are measured on the FIRST read so the comparison is dive against
+        // dive rather than dive against mid-flight correction.
+        let first = |target_h: f32| {
+            let s = shot(0.0, 0.2, target_h, 0.3);
+            let mut k = Keeper::set(steady());
+            k.advance(&s.trajectory, tuning.keeper.reaction + 1.0e-3, &tuning.keeper);
+            k.read().expect("committed").extend_time
+        };
         assert!(
-            lazy.read().expect("committed").extend_time <= read.extend_time,
+            first(0.05) <= first(1.0),
             "a short dive is not slower than a long one"
         );
     }

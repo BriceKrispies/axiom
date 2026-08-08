@@ -183,7 +183,7 @@ impl BendIt {
         let sample = pointer.filter(|_| accepting);
         match self
             .capture
-            .update(sample, short * tuning.stroke.spacing, short)
+            .update(sample, self.frame_n, short * tuning.stroke.spacing, short)
         {
             Drawing::Idle | Drawing::Drawing => Vec::new(),
             Drawing::Finished(line) => {
@@ -310,6 +310,7 @@ mod tests {
                 target: GoalTarget::new(h, v),
                 bend: BendCurve::through(0.55, bend, 0.14),
                 loft: BendCurve::through(0.5, 1.0, 0.14),
+                ..Default::default()
             },
             game.session().mouth(),
             game.session().tuning(),

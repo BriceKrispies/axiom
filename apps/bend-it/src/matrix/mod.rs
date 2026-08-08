@@ -19,7 +19,12 @@
 use crate::pitch::GoalMouth;
 use crate::play::{PlayCommand, Phase, Session, ShotResult};
 use crate::shot::{BendCurve, GoalTarget, ShotIntent};
+use crate::stroke::Pace;
 use crate::tuning::Tuning;
+
+mod tally;
+
+pub use tally::{group_by, sweep, sweep_detailed, totals, Outcomes, Row};
 
 /// One shot to take: where it finishes and what shape it takes to get there.
 ///
@@ -33,6 +38,8 @@ pub struct ShotSpec {
     pub bend_at: f32,
     pub loft: f32,
     pub loft_at: f32,
+    /// How hard it was hit, `0` a careful stroke to `1` a flick.
+    pub pace: f32,
 }
 
 impl ShotSpec {
@@ -50,6 +57,13 @@ impl ShotSpec {
                 self.loft * tuning.loft.max_offset,
                 tuning.loft.peak_margin,
             ),
+            pace: Pace {
+                speed: self.pace,
+                // An even hand: the sweep varies how *hard* a shot is hit
+                // separately from how it is shaped, and folding the easing in
+                // here would confound the two.
+                easing: 0.0,
+            },
         }
     }
 
@@ -65,17 +79,19 @@ pub const AIM_UP: [f32; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 pub const BEND: [f32; 7] = [-1.0, -0.6, -0.3, 0.0, 0.3, 0.6, 1.0];
 pub const LOFT: [f32; 5] = [-1.0, -0.4, 0.0, 0.4, 1.0];
 pub const BREAK_AT: [f32; 3] = [0.3, 0.5, 0.7];
+pub const PACE: [f32; 3] = [0.0, 0.5, 1.0];
 
 /// The coarser axes, for the sweep that runs on every `cargo test`.
 pub const COARSE_ACROSS: [f32; 5] = [-1.0, -0.5, 0.0, 0.5, 1.0];
 pub const COARSE_UP: [f32; 3] = [0.0, 0.5, 1.0];
 pub const COARSE_SHAPE: [f32; 3] = [-1.0, 0.0, 1.0];
 pub const COARSE_BREAK: [f32; 2] = [0.3, 0.7];
+pub const COARSE_PACE: [f32; 2] = [0.15, 0.85];
 
 /// Every shot in the matrix: every corner, every bend, every arc, and every
 /// place a curve can break.
 pub fn full_matrix() -> Vec<ShotSpec> {
-    matrix_over(&AIM_ACROSS, &AIM_UP, &BEND, &LOFT, &BREAK_AT)
+    matrix_over(&AIM_ACROSS, &AIM_UP, &BEND, &LOFT, &BREAK_AT, &PACE)
 }
 
 /// A coarser matrix over the same space — the one the default test suite plays,
@@ -87,6 +103,7 @@ pub fn coarse_matrix() -> Vec<ShotSpec> {
         &COARSE_SHAPE,
         &COARSE_SHAPE,
         &COARSE_BREAK,
+        &COARSE_PACE,
     )
 }
 
@@ -102,6 +119,7 @@ pub fn matrix_over(
     bends: &[f32],
     lofts: &[f32],
     breaks: &[f32],
+    paces: &[f32],
 ) -> Vec<ShotSpec> {
     let points = |magnitude: f32| -> Vec<f32> {
         match magnitude == 0.0 {
@@ -124,13 +142,21 @@ pub fn matrix_over(
                 .map(move |loft| (h, v, bend, bend_at, *loft))
         })
         .flat_map(move |(h, v, bend, bend_at, loft)| {
-            points(loft).into_iter().map(move |loft_at| ShotSpec {
+            points(loft)
+                .into_iter()
+                .map(move |loft_at| (h, v, bend, bend_at, loft, loft_at))
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flat_map(|(h, v, bend, bend_at, loft, loft_at)| {
+            paces.to_vec().into_iter().map(move |pace| ShotSpec {
                 h,
                 v,
                 bend,
                 bend_at,
                 loft,
                 loft_at,
+                pace,
             })
         })
         .collect()
@@ -194,102 +220,6 @@ impl ShotSpec {
     }
 }
 
-/// What a set of shots came to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Outcomes {
-    pub goals: u32,
-    pub saves: u32,
-    pub frame: u32,
-    pub misses: u32,
-}
-
-impl Outcomes {
-    pub fn record(&mut self, result: ShotResult) {
-        match result {
-            ShotResult::Goal => self.goals += 1,
-            ShotResult::Save => self.saves += 1,
-            ShotResult::Frame(_) => self.frame += 1,
-            ShotResult::Miss => self.misses += 1,
-        }
-    }
-
-    pub fn total(&self) -> u32 {
-        self.goals + self.saves + self.frame + self.misses
-    }
-
-    /// The share of shots the keeper stopped, `0..1`.
-    pub fn save_rate(&self) -> f32 {
-        self.saves as f32 / self.total().max(1) as f32
-    }
-
-    /// The share that went in, `0..1`.
-    pub fn goal_rate(&self) -> f32 {
-        self.goals as f32 / self.total().max(1) as f32
-    }
-
-    pub fn merge(&mut self, other: &Outcomes) {
-        self.goals += other.goals;
-        self.saves += other.saves;
-        self.frame += other.frame;
-        self.misses += other.misses;
-    }
-}
-
-/// One row of a breakdown: a label and what happened under it.
-pub type Row = (String, Outcomes);
-
-/// Sweep a matrix against a set of keeper seeds.
-pub fn sweep(specs: &[ShotSpec], seeds: &[u64], tuning: Tuning) -> Outcomes {
-    specs
-        .iter()
-        .flat_map(|spec| seeds.iter().map(move |seed| (spec, *seed)))
-        .fold(Outcomes::default(), |mut out, (spec, seed)| {
-            out.record(take(spec, seed, tuning));
-            out
-        })
-}
-
-/// Sweep once, keeping every result.
-///
-/// Every breakdown a report wants is a different grouping of the *same* shots,
-/// so the sweep is run once and grouped many times. Re-running it per breakdown
-/// would multiply the cost of the report by the number of questions asked of it.
-pub fn sweep_detailed(specs: &[ShotSpec], seeds: &[u64], tuning: Tuning) -> Vec<(ShotSpec, ShotResult)> {
-    specs
-        .iter()
-        .flat_map(|spec| seeds.iter().map(move |seed| (spec, *seed)))
-        .map(|(spec, seed)| (*spec, take(spec, seed, tuning)))
-        .collect()
-}
-
-/// Group finished results by a label derived from each shot.
-pub fn group_by(
-    results: &[(ShotSpec, ShotResult)],
-    label: impl Fn(&ShotSpec) -> String,
-) -> Vec<Row> {
-    let mut rows: Vec<Row> = Vec::new();
-    results.iter().for_each(|(spec, result)| {
-        let key = label(spec);
-        match rows.iter_mut().find(|(name, _)| *name == key) {
-            Some((_, cell)) => cell.record(*result),
-            None => {
-                let mut cell = Outcomes::default();
-                cell.record(*result);
-                rows.push((key, cell));
-            }
-        }
-    });
-    rows
-}
-
-/// The totals of a finished sweep.
-pub fn totals(results: &[(ShotSpec, ShotResult)]) -> Outcomes {
-    results.iter().fold(Outcomes::default(), |mut out, (_, r)| {
-        out.record(*r);
-        out
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,9 +248,16 @@ mod tests {
             .filter(|s| s.bend == 0.0)
             .all(|s| s.bend_at == 0.5));
         // Nothing is listed twice.
+        PACE.iter()
+            .for_each(|p| assert!(matrix.iter().any(|s| s.pace == *p), "missing pace {p}"));
         let mut keys: Vec<String> = matrix
             .iter()
-            .map(|s| format!("{:?}", (s.h, s.v, s.bend, s.bend_at, s.loft, s.loft_at)))
+            .map(|s| {
+                format!(
+                    "{:?}",
+                    (s.h, s.v, s.bend, s.bend_at, s.loft, s.loft_at, s.pace)
+                )
+            })
             .collect();
         keys.sort();
         let before = keys.len();
@@ -337,6 +274,7 @@ mod tests {
             bend_at: 0.7,
             loft: 0.4,
             loft_at: 0.5,
+            pace: 0.5,
         };
         assert_eq!(
             take(&spec, 11, Tuning::DEFAULT),
@@ -349,12 +287,13 @@ mod tests {
         // Somewhere in a run of seeds, one keeper does something another does not
         // — otherwise the nerve is not reaching the pitch at all.
         let spec = ShotSpec {
-            h: 0.5,
-            v: 0.3,
+            h: 0.3,
+            v: 0.35,
             bend: 0.0,
             bend_at: 0.5,
             loft: 0.4,
             loft_at: 0.5,
+            pace: 0.3,
         };
         let results: Vec<ShotResult> = (0..24)
             .map(|seed| take(&spec, seed, Tuning::DEFAULT))
@@ -395,6 +334,7 @@ mod tests {
                 bend_at: 0.5,
                 loft: 0.4,
                 loft_at: 0.5,
+                pace: 0.5,
             })
             .collect();
         let seeds = [1u64, 2, 3];

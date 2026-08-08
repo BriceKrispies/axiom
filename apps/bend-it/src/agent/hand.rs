@@ -10,7 +10,7 @@ use axiom::prelude::Vec2;
 use crate::play::Session;
 use crate::projection::ScreenProjection;
 use crate::shot::{BendCurve, GoalTarget, ResolvedShot, ShotIntent};
-use crate::stroke::Stroke;
+use crate::stroke::{Pace, Stroke};
 
 use super::{Striker, HAND_SAMPLES, HAND_TREMOR};
 
@@ -34,7 +34,18 @@ impl Striker {
                     .map(|p| p.add(self.tremor(i)))
             })
             .collect();
-        (points.len() >= 3).then(|| Stroke::from_points(points))
+        // It draws at a tempo, because tempo is how hard a shot is hit and the
+        // game reads that from the drawing rather than from anything the agent
+        // could simply declare. A quick hand is a hard shot.
+        let per_point = self.tempo(wanted.intent.pace.speed);
+        (points.len() >= 3).then(|| Stroke::from_timed_points(points, per_point))
+    }
+
+    /// Ticks between drawn points, for a wanted pace. Faster means fewer.
+    fn tempo(&self, speed: f32) -> u64 {
+        let slowest = 6.0f32;
+        let fastest = 1.0f32;
+        (slowest + (fastest - slowest) * speed.clamp(0.0, 1.0)).round().max(1.0) as u64
     }
 
     /// A small, deterministic unsteadiness in the drawing hand.
@@ -62,6 +73,13 @@ impl Striker {
                     axes.loft * tuning.loft.max_offset,
                     tuning.loft.peak_margin,
                 ),
+                // How hard it means to hit it. Only used to shape the trace it
+                // draws — the pace the game finally reads comes from the tempo of
+                // that drawing, exactly as it would from a hand.
+                pace: Pace {
+                    speed: axes.pace,
+                    easing: 0.0,
+                },
             },
             session.mouth(),
             tuning,

@@ -40,6 +40,7 @@ fn main() {
     report("BY AIM HEIGHT", &results, |s| num(s.v));
     report("BY BEND", &results, |s| num(s.bend));
     report("BY ARC", &results, |s| num(s.loft));
+    report("BY PACE (how fast it was drawn)", &results, |s| num(s.pace));
     report("BY WHERE THE BEND BREAKS", &results, |s| match s.bend == 0.0 {
         true => "straight".into(),
         false => num(s.bend_at),

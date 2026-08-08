@@ -55,6 +55,7 @@ pub const AXIS_AIM_V: u32 = 2;
 pub const AXIS_BEND: u32 = 3;
 pub const AXIS_BREAK_AT: u32 = 4;
 pub const AXIS_LOFT: u32 = 5;
+pub const AXIS_PACE: u32 = 6;
 
 /// The app's observation-fact vocabulary: what the striker can *see*. Values are
 /// milli-units, because agent facts are integer only.
@@ -63,6 +64,7 @@ pub const FACT_OPEN_HEIGHT: u16 = 11;
 pub const FACT_BEND_DEMAND: u16 = 12;
 pub const FACT_BREAK_LATENESS: u16 = 13;
 pub const FACT_LOFT_DEMAND: u16 = 14;
+pub const FACT_PACE_DEMAND: u16 = 15;
 
 /// One milli-unit.
 const MILLI: f32 = 1000.0;
@@ -91,6 +93,7 @@ pub(super) struct Axes {
     pub bend: f32,
     pub break_at: f32,
     pub loft: f32,
+    pub pace: f32,
 }
 
 mod eyes;
@@ -186,9 +189,10 @@ impl Striker {
             AgentApi::axis_binding(FACT_BEND_DEMAND, AXIS_BEND, 1_000, 0, -1_000, 1_000),
             AgentApi::axis_binding(FACT_BREAK_LATENESS, AXIS_BREAK_AT, 1_000, 0, 300, 800),
             AgentApi::axis_binding(FACT_LOFT_DEMAND, AXIS_LOFT, 1_000, 0, -450, 1_000),
+            AgentApi::axis_binding(FACT_PACE_DEMAND, AXIS_PACE, 1_000, 0, 150, 1_000),
         ]);
         let mut memory = AgentApi::empty_memory(1);
-        let mut builder = AgentApi::observation_builder(agent, Tick::new(self.steps), 2, 8, 4);
+        let mut builder = AgentApi::observation_builder(agent, Tick::new(self.steps), 2, 10, 4);
         let _ = builder.add_channel(AgentApi::channel_semantic());
         let _ = builder.add_channel(AgentApi::channel_geometric());
         self.sightings(session)
@@ -222,6 +226,7 @@ impl Striker {
             bend: axis(AXIS_BEND),
             break_at: axis(AXIS_BREAK_AT),
             loft: axis(AXIS_LOFT),
+            pace: axis(AXIS_PACE),
         }
     }
 

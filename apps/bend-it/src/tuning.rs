@@ -39,22 +39,35 @@ pub struct SculptTuning {
     pub peak_margin: f32,
 }
 
-/// Ball flight: how the shape becomes speed, and how densely the path is
-/// sampled.
+/// Ball flight: how hard the ball is hit, and how densely the path is sampled.
+///
+/// **Speed is the authored quantity here, not time.** Flight time used to be
+/// the number the game chose and speed was whatever fell out of it, which is how
+/// the ball ended up crossing 11 metres at 35 km/h. Now the shot is given a
+/// launch speed and the flight time is derived from it — so "how hard was it
+/// hit" is a number a person can read, sanity-check against a real penalty, and
+/// tune, and everything downstream is timed against a ball that behaves like one.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlightTuning {
-    /// Flight time of a plain, unsculpted shot, seconds.
-    pub base_duration: f32,
-    /// Extra flight time at full bend, seconds.
-    pub bend_duration_gain: f32,
-    /// Extra flight time at full loft, seconds.
-    pub loft_duration_gain: f32,
-    /// Hard bounds on flight time, seconds.
-    pub min_duration: f32,
-    pub max_duration: f32,
-    /// Air-drag shape of the traversal. `0` is exactly uniform speed; larger
-    /// values make the ball leave hot and bleed pace, which is what stops an
-    /// evenly-parameterised curve from looking like a lift on rails.
+    /// How fast the ball leaves the boot, metres per second, for the slowest and
+    /// the fastest line the reading can produce.
+    ///
+    /// 27.8 m/s is 100 km/h and 44.4 is 160 — the real range of a struck
+    /// penalty. At those speeds the ball is on the keeper in about a third of a
+    /// second, which is the fact the whole keeper model is calibrated against.
+    pub slow_launch: f32,
+    pub fast_launch: f32,
+    /// How much of the tempo a heavily-shaped shot gives up, `0..1`. Bending and
+    /// lifting a ball costs pace: the boot's energy goes into the movement
+    /// instead of into the flight. A fully-shaped shot drawn at full tempo lands
+    /// this fraction of the way back down toward the slow end.
+    pub shape_cost: f32,
+    /// How much pace the ball bleeds over its flight, as the exponent of the
+    /// speed profile — the ball keeps `e^-decel` of its launch speed at the line.
+    ///
+    /// A real ball loses 10–15% of its speed over 11 m to drag, so this belongs
+    /// near `0.15`. Larger values are what made a struck shot arrive at walking
+    /// pace, floating in as if on a string.
     pub decel: f32,
     /// Number of arc-length-uniform samples in the canonical trajectory.
     pub samples: usize,
@@ -157,23 +170,73 @@ pub struct KeeperTuning {
     pub shade_limit: f32,
 }
 
-/// The kick, in fixed ticks from the start of the run-up. The ball leaves at
-/// [`KickTuning::contact`] and not one tick before.
+/// The kick, as a body and a swing rather than a schedule.
+///
+/// The contact tick is **not** in here: it is solved by integrating the swing,
+/// so a harder shot genuinely reaches the ball sooner. What is here is what the
+/// hip can do and what the drawing is allowed to ask of it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KickTuning {
-    /// Tick the plant foot lands.
+    /// The shortest a run-up may be, in ticks — a floor under the arrival so a
+    /// furious drawing still reads as a run-up rather than a teleport.
     pub plant: u32,
-    /// Tick the boot meets the ball — the launch tick.
-    pub contact: u32,
     /// How long the follow-through keeps playing after contact, ticks.
     pub follow_through: u32,
     /// Where the run-up starts, relative to the ball: metres back, and metres to
     /// the side at zero bend.
     pub approach_back: f32,
     pub approach_side: f32,
-    /// Extra sideways offset of the run-up at full bend, metres. A shot the
-    /// player has bent hard is approached from a wider angle.
+    /// Extra sideways offset of the run-up at full bend, metres.
     pub approach_bend_widen: f32,
+
+    /// The swing: the leg's own physics.
+    ///
+    /// A rough but honest human leg — about 1.1 kg·m² about the hip, with the
+    /// damping soft tissue provides. The numbers matter less than the fact that
+    /// the same ones produce every shot, so a harder swing is *earned* rather
+    /// than animated.
+    pub leg_inertia: f32,
+    pub swing_damping: f32,
+    /// Where the leg is cocked to before it is released, radians behind.
+    pub cock_angle: f32,
+    /// How much faster the ball leaves than the boot that hit it.
+    ///
+    /// A football is light and the collision is near-elastic, so a struck ball
+    /// outruns the boot by about a third. It is the number that ties the swing to
+    /// the flight: the hip's torque is whatever gets the boot to `launch /
+    /// ball_off_boot`, so a harder shot is a visibly harder swing rather than the
+    /// same swing with a faster ball leaving it.
+    pub ball_off_boot: f32,
+    /// The swing travel the torque is sized against — where the boot meets the
+    /// ball on a typical stance. The true contact angle is measured off the
+    /// planted body per shot; this is only the figure the work-energy sum uses.
+    pub nominal_contact: f32,
+    /// What fraction of the torque keeps driving after contact.
+    pub follow_through_torque: f32,
+    /// Where the hip runs out of travel, radians in front. The leg stops there
+    /// rather than carrying on over the top — a hip is not a windmill.
+    pub follow_through_limit: f32,
+    /// How much speed the ball takes off the leg, `0..1`.
+    pub impact_loss: f32,
+
+    /// The run-up's speed, and what the tempo adds to it, m/s.
+    pub base_approach: f32,
+    pub approach_from_pace: f32,
+    /// Where the plant foot goes: beside the ball, and behind it.
+    pub plant_side: f32,
+    pub plant_back: f32,
+    /// How much a bent shot widens the plant, and a lofted one drops it back.
+    pub plant_side_from_bend: f32,
+    pub plant_back_from_loft: f32,
+    /// How far the body leans away for a lofted shot, and forward for a hard one.
+    pub lean_from_loft: f32,
+    pub lean_from_pace: f32,
+    /// How far the hips open through the ball.
+    pub turn_from_bend: f32,
+    pub turn_from_pace: f32,
+    /// How late the knee snaps straight, and what the tempo adds.
+    pub base_whip: f32,
+    pub whip_from_pace: f32,
 }
 
 /// How a drawn line is captured and read.
@@ -192,6 +255,23 @@ pub struct StrokeTuning {
     pub ridge: f32,
     /// How long the drawn line takes to flick away after release, seconds.
     pub fade: f32,
+}
+
+/// How the tempo of a drawing becomes the pace of a shot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PaceTuning {
+    /// The drawing speed that counts as a full-blooded flick, as a fraction of
+    /// the viewport's short edge per fixed tick. A swipe at this rate or faster
+    /// reads as `1`.
+    pub reference: f32,
+    /// How much a hand that sped up (or trailed off) through the stroke changes
+    /// how sharply the ball bleeds pace.
+    pub easing_gain: f32,
+    /// Hard bounds on that decay. **Both are above zero**, which is the whole
+    /// normalisation: whatever was drawn, the ball's speed only ever falls, so it
+    /// can never dawdle through the air and then hurry.
+    pub min_decay: f32,
+    pub max_decay: f32,
 }
 
 /// Phase timings, in fixed ticks.
@@ -247,6 +327,7 @@ pub struct Tuning {
     pub keeper: KeeperTuning,
     pub kick: KickTuning,
     pub stroke: StrokeTuning,
+    pub pace: PaceTuning,
     pub transitions: TransitionTuning,
     pub camera: CameraTuning,
 }
@@ -272,54 +353,79 @@ impl Tuning {
             peak_margin: 0.14,
         },
         flight: FlightTuning {
-            base_duration: 0.92,
-            bend_duration_gain: 0.22,
-            loft_duration_gain: 0.78,
-            min_duration: 0.74,
-            max_duration: 1.92,
-            decel: 0.55,
+            slow_launch: 27.8,
+            fast_launch: 44.4,
+            shape_cost: 0.42,
+            decel: 0.16,
             samples: 96,
             ball_radius: 0.11,
-            spin_per_curve: 1.35,
-            roll_per_speed: 0.30,
+            spin_per_curve: 0.42,
+            roll_per_speed: 0.085,
         },
         keeper: KeeperTuning {
-            reaction: 0.17,
-            adjust_delay: 0.30,
-            read_fidelity: 0.42,
-            adjust_fidelity: 0.80,
+            reaction: 0.09,
+            adjust_delay: 0.13,
+            read_fidelity: 0.30,
+            adjust_fidelity: 0.60,
             read_gravity: 4.4,
-            vertical_trust: 0.58,
-            dive_speed: 5.4,
+            vertical_trust: 0.95,
+            dive_speed: 8.6,
             dive_distance: 2.60,
             vertical_reach: 0.85,
             arm_span: 0.86,
-            reach_radius: 0.13,
-            body_radius: 0.28,
-            execution: 0.90,
-            extend_time: 0.44,
-            reaction_jitter: 0.055,
-            read_error_across: 0.42,
-            read_error_up: 0.34,
+            reach_radius: 0.17,
+            body_radius: 0.30,
+            execution: 0.92,
+            extend_time: 0.20,
+            reaction_jitter: 0.030,
+            read_error_across: 0.26,
+            read_error_up: 0.21,
             execution_spread: 0.10,
-            guess_chance: 0.17,
-            correction_chance: 0.80,
+            guess_chance: 0.10,
+            correction_chance: 0.55,
             shade_gain: 0.62,
             shade_limit: 1.15,
         },
         kick: KickTuning {
-            plant: 19,
-            contact: 24,
-            follow_through: 26,
-            approach_back: 2.7,
+            plant: 14,
+            follow_through: 14,
+            approach_back: 2.2,
             approach_side: 0.62,
             approach_bend_widen: 0.80,
+
+            leg_inertia: 0.35,
+            swing_damping: 0.22,
+            cock_angle: 0.95,
+            ball_off_boot: 1.35,
+            nominal_contact: -0.40,
+            follow_through_torque: 0.22,
+            follow_through_limit: -1.85,
+            impact_loss: 0.35,
+
+            base_approach: 3.6,
+            approach_from_pace: 0.60,
+            plant_side: -0.26,
+            plant_back: 0.10,
+            plant_side_from_bend: -0.16,
+            plant_back_from_loft: 0.16,
+            lean_from_loft: 0.26,
+            lean_from_pace: 0.14,
+            turn_from_bend: 0.42,
+            turn_from_pace: 0.18,
+            base_whip: 0.45,
+            whip_from_pace: 0.35,
         },
         stroke: StrokeTuning {
             min_length: 0.16,
             spacing: 0.008,
             ridge: 0.055,
             fade: 0.22,
+        },
+        pace: PaceTuning {
+            reference: 0.070,
+            easing_gain: 0.55,
+            min_decay: 0.09,
+            max_decay: 0.30,
         },
         transitions: TransitionTuning {
             ready: 6,
@@ -356,12 +462,18 @@ mod tests {
     #[test]
     fn the_default_tuning_is_internally_consistent() {
         let t = Tuning::DEFAULT;
-        assert!(t.flight.min_duration < t.flight.base_duration);
-        assert!(t.flight.base_duration < t.flight.max_duration);
+        assert!(t.flight.slow_launch < t.flight.fast_launch);
+        assert!(t.flight.decel > 0.0 && t.flight.decel < 0.5);
         assert!(t.bend.min_offset < 0.0 && t.bend.max_offset > 0.0);
         assert!(t.loft.min_offset < 0.0 && t.loft.max_offset > 0.0);
-        assert!(t.kick.plant < t.kick.contact);
+        assert!(t.kick.leg_inertia > 0.0 && t.kick.swing_damping > 0.0);
+        assert!(t.kick.cock_angle > t.kick.nominal_contact);
+        assert!(t.kick.ball_off_boot > 1.0);
+        assert!((0.0..1.0).contains(&t.kick.impact_loss));
+        assert!(t.kick.follow_through_limit < 0.0);
         assert!(t.stroke.min_length > 0.0 && t.stroke.ridge > 0.0);
+        assert!(t.pace.min_decay < t.pace.max_decay);
+        assert!(t.pace.min_decay > 0.0 && t.pace.max_decay > t.pace.min_decay);
         assert!(t.camera.min_fov < t.camera.max_fov);
         assert!((0.0..=1.0).contains(&t.keeper.read_fidelity));
         assert!(t.keeper.adjust_fidelity > t.keeper.read_fidelity);

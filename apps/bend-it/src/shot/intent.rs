@@ -7,6 +7,7 @@
 //! other. Replaying a shot is replaying four numbers and a target.
 
 use crate::shot::curve::BendCurve;
+use crate::stroke::Pace;
 use crate::tuning::Tuning;
 
 /// The chosen finish, in normalized goal coordinates: `h ∈ [-1, +1]` across the
@@ -43,6 +44,10 @@ pub struct ShotIntent {
     pub bend: BendCurve,
     /// The side projection: height offset, in metres, over shot progress.
     pub loft: BendCurve,
+    /// How hard it was hit — read from the *tempo* of the drawing rather than
+    /// from its shape, so the same line drawn quickly and slowly is the same shot
+    /// struck with different conviction.
+    pub pace: Pace,
 }
 
 impl ShotIntent {
@@ -55,6 +60,7 @@ impl ShotIntent {
             target,
             bend: BendCurve::STRAIGHT,
             loft: BendCurve::through(0.52, 0.55, 0.14),
+            pace: Pace::STEADY,
         }
     }
 
@@ -66,16 +72,27 @@ impl ShotIntent {
         (bend, loft)
     }
 
-    /// Flight time, seconds, inferred from the shape alone.
+    /// How fast the ball leaves the boot, metres per second.
     ///
-    /// Flatter and straighter is faster; a big curling loft trades pace for
-    /// movement. The player never sees this number and never sets it — they set
-    /// the shape, and the shape has consequences.
-    pub fn duration(&self, tuning: &Tuning) -> f32 {
-        let (bend, loft) = self.effort(tuning);
+    /// This is the number a shot is actually authored in; flight time is derived
+    /// from it rather than the other way round. Tempo sets it — a flick is struck
+    /// harder than a careful stroke — and shape takes some back, because bending
+    /// and lifting a ball costs pace: the boot's energy goes into the movement
+    /// instead of into the flight.
+    ///
+    /// It is bounded at both ends by construction, so no drawing can produce a
+    /// shot slower than a firm penalty or faster than a very good one.
+    pub fn launch_speed(&self, tuning: &Tuning) -> f32 {
         let f = &tuning.flight;
-        (f.base_duration + bend * f.bend_duration_gain + loft * f.loft_duration_gain)
-            .clamp(f.min_duration, f.max_duration)
+        let (bend, loft) = self.effort(tuning);
+        let hit = (self.pace.speed.clamp(0.0, 1.0) - f.shape_cost * (bend + loft) * 0.5)
+            .clamp(0.0, 1.0);
+        f.slow_launch + (f.fast_launch - f.slow_launch) * hit
+    }
+
+    /// How sharply this shot bleeds pace through its flight.
+    pub fn decay(&self, tuning: &Tuning) -> f32 {
+        self.pace.decay(tuning.flight.decel, &tuning.pace)
     }
 }
 
@@ -107,21 +124,38 @@ mod tests {
     }
 
     #[test]
-    fn shape_sets_the_flight_time_and_nothing_else_does() {
+    fn tempo_sets_how_hard_it_is_hit_and_shape_takes_some_back() {
         let tuning = Tuning::DEFAULT;
-        let flat = ShotIntent {
+        let with = |bend: f32, loft: f32, speed: f32| ShotIntent {
             target: GoalTarget::new(0.0, 0.2),
-            bend: BendCurve::STRAIGHT,
-            loft: BendCurve::STRAIGHT,
+            bend: BendCurve::through(0.5, bend, 0.14),
+            loft: BendCurve::through(0.5, loft, 0.14),
+            pace: crate::stroke::Pace { speed, easing: 0.0 },
         };
-        let curled = ShotIntent {
-            target: GoalTarget::new(0.0, 0.2),
-            bend: BendCurve::through(0.5, tuning.bend.max_offset, 0.14),
-            loft: BendCurve::through(0.5, tuning.loft.max_offset, 0.14),
-        };
-        assert!(flat.duration(&tuning) < curled.duration(&tuning));
-        assert!(flat.duration(&tuning) >= tuning.flight.min_duration);
-        assert!(curled.duration(&tuning) <= tuning.flight.max_duration);
+        let flat = with(0.0, 0.0, 1.0);
+        let curled = with(tuning.bend.max_offset, tuning.loft.max_offset, 1.0);
+        assert!(
+            flat.launch_speed(&tuning) > curled.launch_speed(&tuning),
+            "movement costs pace"
+        );
+        // Whatever was drawn, the ball leaves inside the range a penalty is
+        // actually struck at: never a floated 35 km/h, never an impossible 200.
+        [0.0f32, 0.5, 1.0].into_iter().for_each(|speed| {
+            [0.0f32, 1.0, tuning.bend.max_offset]
+                .into_iter()
+                .for_each(|shape| {
+                    let v = with(shape, shape, speed).launch_speed(&tuning);
+                    assert!(
+                        (tuning.flight.slow_launch..=tuning.flight.fast_launch).contains(&v),
+                        "speed {speed} shape {shape} left at {v} m/s"
+                    );
+                });
+        });
+        assert_eq!(flat.launch_speed(&tuning), tuning.flight.fast_launch);
+        assert_eq!(
+            with(0.0, 0.0, 0.0).launch_speed(&tuning),
+            tuning.flight.slow_launch
+        );
         let (bend, loft) = curled.effort(&tuning);
         assert!((bend - 1.0).abs() < 1.0e-3);
         assert!((loft - 1.0).abs() < 1.0e-3);

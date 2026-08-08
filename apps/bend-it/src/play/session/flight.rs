@@ -20,17 +20,33 @@ use crate::play::phase::Phase;
 use crate::play::resolution::ShotResult;
 use crate::tuning::DT;
 
-use super::{Session, SHADE_MEMORY};
+use super::Session;
 
 impl Session {
-    /// The run-up. The ball is launched on the contact tick, and the kicker's
-    /// boot is on it then — the two read the same constant.
+    /// The run-up, and the swing at the end of it.
+    ///
+    /// The ball leaves on the tick the **integrated swing** reaches it. There is
+    /// no contact constant any more: a harder drawing produces more torque, the
+    /// leg arrives sooner, and the ball goes earlier — the animation and the
+    /// launch cannot drift apart because they are the same number.
     pub(super) fn kicking(&mut self) {
-        let contact = self.tuning.kick.contact;
-        (self.phase_tick + 1 >= contact).then(|| {
+        self.advance_swing();
+        self.swing.struck_at().map(|_| {
             self.ball.launch(&self.shot.trajectory);
             self.phase = Phase::BallInFlight;
         });
+    }
+
+    /// One step of the leg. Before the plant lands it is simply carried through
+    /// the run-up; after that the hip is driving it.
+    pub(super) fn advance_swing(&mut self) {
+        let released = self.kick_tick >= self.kick.release_tick(&self.tuning.kick);
+        let contact_angle = self.kick.contact_angle();
+        released.then(|| {
+            self.swing
+                .step(&self.kick.drive, contact_angle, &self.tuning.kick)
+        });
+        self.kick_tick += 1;
     }
 
     /// One tick of flight: move the ball, move the keeper, then ask the geometry
@@ -75,7 +91,7 @@ impl Session {
             let scored = inside_mouth(at, radius);
             self.net = Some(NetImpulse {
                 point: Vec3::new(at.x, at.y, -NET_DEPTH),
-                strength: (self.ball.velocity.length() * 0.028).clamp(0.10, 0.55),
+                strength: (self.ball.velocity.length() * 0.011).clamp(0.10, 0.55),
                 age: 0.0,
             });
             self.finish([ShotResult::Miss, ShotResult::Goal][usize::from(scored)]);
@@ -89,11 +105,8 @@ impl Session {
     }
 
     pub(super) fn finish(&mut self, result: ShotResult) {
-        // The keeper watches where this one finished. It is the *authored*
-        // finish, not where a deflection ended up, because that is what it was
-        // beaten by.
-        self.seen.push(self.shot.world_target);
-        (self.seen.len() > SHADE_MEMORY).then(|| self.seen.remove(0));
+        // The keeper watches where this one finished.
+        self.remember(self.shot.world_target);
         self.result = Some(result);
         self.tally.record(result);
         self.phase = Phase::Resolution;

@@ -37,6 +37,7 @@ use crate::tuning::Tuning;
 
 use super::fit::{fit, offsets_at, path_point, progress_at_fraction, ruler_lengths};
 use super::line::Stroke;
+use super::pace::Pace;
 
 /// How many evenly-spaced points the drawing is read at.
 const FIT_SAMPLES: usize = 28;
@@ -126,6 +127,10 @@ pub fn interpret(
             target,
             bend,
             loft,
+            // Shape came from the geometry; how hard it was hit comes from the
+            // tempo, read from the *unoriented* line so a drawing is timed as it
+            // was made rather than as it is read.
+            pace: Pace::read(stroke, short_edge, &tuning.pace),
         },
         raw_target,
         read_points: read
@@ -208,13 +213,24 @@ mod tests {
     /// Draw the screen-space picture of an actual shot — the drawing a player
     /// would make if they traced the flight they wanted.
     fn trace(shot: &ResolvedShot, projection: &ScreenProjection, count: usize) -> Stroke {
-        Stroke::from_points(
+        traced_at(shot, projection, count, 1)
+    }
+
+    /// The same, drawn at an explicit tempo: `per_point` ticks between points.
+    fn traced_at(
+        shot: &ResolvedShot,
+        projection: &ScreenProjection,
+        count: usize,
+        per_point: u64,
+    ) -> Stroke {
+        Stroke::from_timed_points(
             (0..count)
                 .filter_map(|i| {
                     let u = i as f32 / (count - 1) as f32;
                     projection.project(shot.trajectory.at_progress(u))
                 })
                 .collect(),
+            per_point,
         )
     }
 
@@ -226,6 +242,7 @@ mod tests {
                 target: GoalTarget::new(h, v),
                 bend: BendCurve::through(bend_at, bend, 0.14),
                 loft: BendCurve::through(loft_at, loft, 0.14),
+                ..Default::default()
             },
             &mouth,
             &tuning,
@@ -309,10 +326,54 @@ mod tests {
         let b = interpret(&drawing, &projection, ball, &mouth, &tuning).expect("readable");
         assert_eq!(a.intent, b.intent);
         assert_eq!(a.read_points, b.read_points);
-        // ... and how fast it was drawn changes nothing.
+        // ... and how densely it was sampled changes nothing about the SHAPE.
+        // (Its tempo may differ — that is the point of reading them separately.)
         let hurried = trace(&shot_of(1.4, 0.6, 1.2, 0.5, -0.5, 0.6), &projection, 9);
         let c = interpret(&hurried, &projection, ball, &mouth, &tuning).expect("readable");
         assert!((c.intent.bend.magnitude() - a.intent.bend.magnitude()).abs() < 0.35);
+    }
+
+    #[test]
+    fn the_tempo_of_the_drawing_sets_the_pace_and_nothing_else() {
+        // The two halves of a drawing are read separately and must stay
+        // separate: how it is SHAPED comes from the geometry, how HARD it was hit
+        // comes from the timing. The same line drawn quickly and slowly is the
+        // same shot, struck with different conviction.
+        let (projection, ball, mouth, tuning) = setup();
+        let original = shot_of(1.4, 0.6, 1.2, 0.5, -0.5, 0.6);
+        let flicked = interpret(
+            &traced_at(&original, &projection, 30, 1),
+            &projection,
+            ball,
+            &mouth,
+            &tuning,
+        )
+        .expect("readable");
+        let careful = interpret(
+            &traced_at(&original, &projection, 30, 7),
+            &projection,
+            ball,
+            &mouth,
+            &tuning,
+        )
+        .expect("readable");
+
+        // Same shape, to the letter.
+        assert_eq!(flicked.intent.target, careful.intent.target);
+        assert_eq!(flicked.intent.bend, careful.intent.bend);
+        assert_eq!(flicked.intent.loft, careful.intent.loft);
+        // Different pace, and the quick one is the harder shot.
+        assert!(
+            flicked.intent.pace.speed > careful.intent.pace.speed + 0.3,
+            "flicked {:.2} vs careful {:.2}",
+            flicked.intent.pace.speed,
+            careful.intent.pace.speed
+        );
+        let quick = ResolvedShot::build(ball, flicked.intent, &mouth, &tuning);
+        let slow = ResolvedShot::build(ball, careful.intent, &mouth, &tuning);
+        assert!(quick.trajectory.duration() < slow.trajectory.duration());
+        // ... and it is the same flight, taken faster: identical geometry.
+        assert_eq!(quick.trajectory.points(), slow.trajectory.points());
     }
 
     #[test]

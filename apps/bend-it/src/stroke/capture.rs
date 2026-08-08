@@ -16,9 +16,17 @@ use axiom_input::Pointer;
 use super::line::Stroke;
 
 /// How far a contact may jump in one tick before it is treated as a different
-/// contact entirely. Browsers do drop a `pointerup`, and without this the next
-/// press continues the last line instead of starting a new one.
-const JUMP: f32 = 0.30;
+/// contact entirely, as a fraction of the viewport's short edge. Browsers do drop
+/// a `pointerup`, and without this the next press continues the last line instead
+/// of starting a new one.
+///
+/// It has to sit **above** the fastest hand and **below** a fresh press across
+/// the screen, and that gap is narrower than it looks now that the tempo of the
+/// drawing is what decides how hard the ball is hit. At 60 Hz, `0.55` of a
+/// 390-pixel screen is 214 px a tick — about 12,800 px/s, faster than any hand
+/// — so the guard can never split a genuine flick into two lines and quietly
+/// throw away the half that was drawn hardest.
+const JUMP: f32 = 0.55;
 
 /// What the gesture did this tick.
 #[derive(Debug, Clone, PartialEq)]
@@ -68,7 +76,13 @@ impl StrokeCapture {
     ///
     /// `spacing` decimates the incoming samples and `short_edge` scales the
     /// teleport guard, so both are in the caller's pixels rather than baked in.
-    pub fn update(&mut self, pointer: Option<Pointer>, spacing: f32, short_edge: f32) -> Drawing {
+    pub fn update(
+        &mut self,
+        pointer: Option<Pointer>,
+        tick: u64,
+        spacing: f32,
+        short_edge: f32,
+    ) -> Drawing {
         let contact = pointer.filter(|p| p.down);
         let teleported = contact
             .filter(|_| self.down)
@@ -80,15 +94,15 @@ impl StrokeCapture {
             // the old line and start a fresh one from here.
             (Some(p), true, true) => {
                 let finished = core::mem::take(&mut self.stroke);
-                self.begin(p.pos, spacing);
+                self.begin(p.pos, tick, spacing);
                 Drawing::Finished(finished)
             }
             (Some(p), false, _) => {
-                self.begin(p.pos, spacing);
+                self.begin(p.pos, tick, spacing);
                 Drawing::Drawing
             }
             (Some(p), true, false) => {
-                self.stroke.push(p.pos, spacing);
+                self.stroke.push(p.pos, tick, spacing);
                 self.last = p.pos;
                 Drawing::Drawing
             }
@@ -101,10 +115,10 @@ impl StrokeCapture {
         }
     }
 
-    fn begin(&mut self, at: Vec2, spacing: f32) {
+    fn begin(&mut self, at: Vec2, tick: u64, spacing: f32) {
         self.down = true;
         self.stroke.clear();
-        self.stroke.push(at, spacing);
+        self.stroke.push(at, tick, spacing);
         self.last = at;
     }
 
@@ -119,6 +133,21 @@ impl StrokeCapture {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::cell::Cell;
+
+    thread_local! {
+        /// A monotonic clock for the tests, so each `update` lands on its own
+        /// tick exactly as the frame loop delivers them.
+        static CLOCK: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// The next tick.
+    fn tick() -> u64 {
+        CLOCK.with(|c| {
+            c.set(c.get() + 1);
+            c.get()
+        })
+    }
 
     fn down(x: f32, y: f32) -> Option<Pointer> {
         Some(Pointer {
@@ -130,18 +159,18 @@ mod tests {
     #[test]
     fn a_drawing_accumulates_while_the_finger_is_down_and_arrives_on_release() {
         let mut c = StrokeCapture::new();
-        assert_eq!(c.update(None, 4.0, 390.0), Drawing::Idle);
-        assert_eq!(c.update(down(100.0, 700.0), 4.0, 390.0), Drawing::Drawing);
+        assert_eq!(c.update(None, tick(), 4.0, 390.0), Drawing::Idle);
+        assert_eq!(c.update(down(100.0, 700.0), tick(), 4.0, 390.0), Drawing::Drawing);
         assert!(c.drawing());
         (1..6).for_each(|i| {
             let step = i as f32 * 20.0;
             assert_eq!(
-                c.update(down(100.0 + step, 700.0 - step), 4.0, 390.0),
+                c.update(down(100.0 + step, 700.0 - step), tick(), 4.0, 390.0),
                 Drawing::Drawing
             );
         });
         assert_eq!(c.stroke().len(), 6);
-        let Drawing::Finished(line) = c.update(None, 4.0, 390.0) else {
+        let Drawing::Finished(line) = c.update(None, tick(), 4.0, 390.0) else {
             panic!("releasing must finish the line");
         };
         assert_eq!(line.len(), 6);
@@ -152,10 +181,10 @@ mod tests {
     #[test]
     fn a_new_press_starts_a_new_line_rather_than_extending_the_last() {
         let mut c = StrokeCapture::new();
-        c.update(down(10.0, 10.0), 4.0, 390.0);
-        c.update(down(60.0, 60.0), 4.0, 390.0);
-        c.update(None, 4.0, 390.0);
-        c.update(down(300.0, 300.0), 4.0, 390.0);
+        c.update(down(10.0, 10.0), tick(), 4.0, 390.0);
+        c.update(down(60.0, 60.0), tick(), 4.0, 390.0);
+        c.update(None, tick(), 4.0, 390.0);
+        c.update(down(300.0, 300.0), tick(), 4.0, 390.0);
         assert_eq!(c.stroke().len(), 1);
         assert_eq!(c.stroke().points()[0], Vec2::new(300.0, 300.0));
     }
@@ -163,10 +192,10 @@ mod tests {
     #[test]
     fn a_contact_that_teleports_finishes_the_line_and_begins_another() {
         let mut c = StrokeCapture::new();
-        c.update(down(50.0, 700.0), 4.0, 390.0);
-        c.update(down(80.0, 640.0), 4.0, 390.0);
+        c.update(down(50.0, 700.0), tick(), 4.0, 390.0);
+        c.update(down(80.0, 640.0), tick(), 4.0, 390.0);
         // One finger lifts and another lands, with the release lost on the way.
-        let Drawing::Finished(line) = c.update(down(360.0, 120.0), 4.0, 390.0) else {
+        let Drawing::Finished(line) = c.update(down(360.0, 120.0), tick(), 4.0, 390.0) else {
             panic!("a teleport must end the old line");
         };
         assert_eq!(line.len(), 2);
@@ -177,15 +206,15 @@ mod tests {
     #[test]
     fn cancelling_leaves_nothing_stuck_to_the_finger() {
         let mut c = StrokeCapture::new();
-        c.update(down(50.0, 700.0), 4.0, 390.0);
-        c.update(down(90.0, 600.0), 4.0, 390.0);
+        c.update(down(50.0, 700.0), tick(), 4.0, 390.0);
+        c.update(down(90.0, 600.0), tick(), 4.0, 390.0);
         c.cancel();
         assert!(!c.drawing());
         assert!(c.stroke().is_empty());
         // The next contact is a fresh line, and releasing it does not resurrect
         // the abandoned one.
-        assert_eq!(c.update(down(10.0, 10.0), 4.0, 390.0), Drawing::Drawing);
-        let Drawing::Finished(line) = c.update(None, 4.0, 390.0) else {
+        assert_eq!(c.update(down(10.0, 10.0), tick(), 4.0, 390.0), Drawing::Drawing);
+        let Drawing::Finished(line) = c.update(None, tick(), 4.0, 390.0) else {
             panic!("finished");
         };
         assert_eq!(line.len(), 1);
@@ -200,6 +229,7 @@ mod tests {
                     pos: Vec2::ZERO,
                     down: false
                 }),
+                tick(),
                 4.0,
                 390.0
             ),

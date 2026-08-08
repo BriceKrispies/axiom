@@ -9,12 +9,12 @@ use crate::play::Session;
 
 use super::{
     Striker, FACT_BEND_DEMAND, FACT_BREAK_LATENESS, FACT_LOFT_DEMAND, FACT_OPEN_HEIGHT,
-    FACT_OPEN_SIDE,
+    FACT_OPEN_SIDE, FACT_PACE_DEMAND,
 };
 
 impl Striker {
     /// The striker's eyes: what it can see this tick, as `(fact kind, scalar)`.
-    pub fn sightings(&self, session: &Session) -> [(u16, f32); 5] {
+    pub fn sightings(&self, session: &Session) -> [(u16, f32); 6] {
         // Which side is open. A keeper that went one way is not going the other,
         // and a shape that scored is worth repeating; anything else, switch. With
         // nothing yet remembered, it takes its cue from where the keeper is
@@ -40,12 +40,16 @@ impl Striker {
         // Break it late: movement before the keeper's correction is movement the
         // keeper answers.
         let lateness = 0.72;
+        // Hit it hard. A keeper that has read you correctly still has to get
+        // there, and pace is the one thing that takes time away from it.
+        let pace = 0.88;
         [
             (FACT_OPEN_SIDE, side),
             (FACT_OPEN_HEIGHT, height),
             (FACT_BEND_DEMAND, bend),
             (FACT_BREAK_LATENESS, lateness),
             (FACT_LOFT_DEMAND, loft),
+            (FACT_PACE_DEMAND, pace),
         ]
     }
 

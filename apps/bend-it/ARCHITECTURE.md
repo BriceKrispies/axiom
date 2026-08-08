@@ -36,7 +36,7 @@ Every arrow is one-way, and three are enforced by `tests/architecture.rs`:
 * **`the_same_drawing_is_read_the_same_way_every_time`** — the reading may not
   touch a clock, a random source, or an unordered container.
 
-## The mechanic, in three ideas
+## The mechanic, in four ideas
 
 ### 1. Reading a drawing is a fit, not a parse
 
@@ -99,9 +99,63 @@ what the mechanic tests play against, so "a bent shot beats a keeper that read i
 straight" is a claim about the mechanic rather than about a lucky roll. Nothing a
 player ever meets is steady.
 
+### 4. The kick is solved, not scheduled
+
+*How fast* and *how* you drew are read alongside *where* — the tempo of the line
+becomes a `Pace` (`stroke/pace.rs`), its shape becomes a `KickDrive`
+(`figure/strike.rs`) — and between them they drive the body.
+
+**Speed is the authored quantity; time is derived.** A shot names the speed the
+ball *leaves at*, between 100 km/h and 160 (`FlightTuning::slow_launch` /
+`fast_launch`), and the flight time falls out of it — the path length, the launch
+speed and the fixed exponential bleed determine each other, so nobody chooses how
+long a penalty takes. That is the right way round: "how hard was it hit" is a
+number a person can check against a real penalty, and "1.1 seconds to cross 11
+metres" is how the ball ended up floating in at 35 km/h.
+
+Measured over the coarse matrix: **launch 100–151 km/h, arriving at 86–129, in
+0.28–0.47 s**, keeping ~85% of its pace to the line — which is a real ball's
+drag, not a ball on a string.
+
+The striking leg is a **driven pendulum**: the hip applies a torque, the leg has
+inertia and damping, and the swing is integrated (at eight substeps a tick — the
+downswing is only about six ticks long, so tick resolution would swing the boot
+straight through where the ball was). So the tick the ball leaves is not a
+constant anywhere; it is whatever the integration produces.
+
+And the torque is not a free number either — it is **derived from the speed the
+shot has to leave at**:
+
+```text
+v_boot = launch / ball_off_boot     ω = v_boot / leg_length     τ = I·ω² / (2·Δθ)
+```
+
+so a 160 km/h shot is *visibly* a harder swing than a 100 km/h one: more torque,
+a leg that reaches the ball sooner, a follow-through carrying the speed it
+genuinely had. The animation and the flight cannot drift apart because there is
+only one number, and a test (`the_leg_is_moving_as_fast_as_the_ball_it_sends_away`)
+asserts the boot really does arrive at 20–35 m/s to match.
+
+The joints that put the boot on the arc are **solved**, not posed
+(`figure/ik.rs`): a two-bone IK for the striking leg onto a target on the swing
+arc, and another for the support leg onto a foot that is planted in the world and
+stays there. That is what lets the rest of the body vary at all — a bent shot
+plants wider and opens the hips through the ball, a lofted one plants further
+behind it and leans away, a hard one commits forward — while the boot still meets
+the ball, because meeting the ball is a geometric fact rather than a tuned number.
+
+The one thing deliberately held fixed is the **frame the swing is solved in**: the
+strike's root lean, roll and lift are a function of the drive alone and do not
+grow through the swing. A lean that accumulated mid-swing would move the hip out
+from under its own arc and put the boot *through* the ball instead of on it.
+
+The hip also runs out of travel (`follow_through_limit`) rather than carrying on
+over the top. An unbounded integrator is happy to swing the leg over the kicker's
+head; a hip is not a windmill.
+
 ## How often does the keeper save it?
 
-`src/matrix.rs` sweeps the whole authorable space — every corner, every bend,
+`src/matrix/` sweeps the whole authorable space — every corner, every bend,
 every arc, every place a curve can break — against a run of seeded keepers, and
 counts. It is the game's tuning instrument as much as its test: change a keeper
 number, run the sweep, and see what it did to *every* shot rather than to the
@@ -112,20 +166,23 @@ cargo test  -p axiom-bend-it --test keeper_sweep            # the coarse sweep
 cargo run --release -p axiom-bend-it --example keeper_report -- 96
 ```
 
-Over 11,115 shapes × 96 keepers (1,067,040 penalties, ~95 s release) the keeper
-saves **≈ 39–41%** — and that is a *uniform* average over the shape space, not
-over how anyone actually shoots. Aim at a corner and shape the ball and it falls
-to around 30%.
+Over 11,115 shapes × 96 keepers (1,067,040 penalties) the keeper saves **≈ 38%**
+— and that is a *uniform* average over the shape space, not over how anyone
+actually shoots. Aim at a corner and shape the ball and it falls to under 20%.
 
 | | saved |
 |---|---|
-| everything | 39% |
-| flat, no arc | 52% |
-| straight, no bend | 47% |
-| middle height | 51% |
-| top or bottom corner | 30–34% |
-| full arc | 33% |
-| arc peaking early | 34% (late: 42%) |
+| everything | 38% |
+| flat, no arc | 45% |
+| shaped | 36% |
+| down the middle | 53% |
+| into a corner | 18% |
+
+The keeper is calibrated **against the flight time, not against a feel**: at
+0.3–0.5 s it reacts in 0.09 s, commits, and gets one lateral correction 0.13 s
+later. Those are a real keeper's numbers, and they are why the shape of the
+line still buys something — most of a curve happens after the correction — while
+a shot down the middle is still the easiest thing in the game to save.
 
 **A seed is a keeper.** Each one produces exactly one nerve for a cold attempt,
 so a handful of seeds is a handful of keepers and aliases hard: at eight seeds
@@ -176,7 +233,7 @@ footballer and procedural field:
 ## Running it
 
 ```sh
-cargo test -p axiom-bend-it                                  # 148 native tests
+cargo test -p axiom-bend-it                                  # 190 native tests
 uv run scripts/localhost_servers.py start-app bend-it        # play it
 cargo run -p axiom-bend-it --example playthrough -- 12 1     # the agent plays
 cargo run -p axiom-bend-it --example playthrough -- sweep    # balance sweep

@@ -26,6 +26,7 @@ fn sweep() {
             target: GoalTarget::new(h, v),
             bend: BendCurve::through(bend_at, bend, 0.14),
             loft: BendCurve::through(loft_at, loft, 0.14),
+            ..Default::default()
         })]);
         let mut n = 0;
         while s.result().is_none() && n < 900 {
@@ -107,7 +108,7 @@ fn main() {
                 .map(|r| format!("({:+.2},{:.2})", r.aim.x, r.aim.y))
                 .unwrap_or_else(|| "stayed".into());
             println!(
-                "{:>3}  h{:+.2} v{:.2}  bend {:+.2}@{:.2} lift {:+.2}@{:.2}  {:^15}  {}",
+                "{:>3}  h{:+.2} v{:.2}  bend {:+.2}@{:.2} lift {:+.2}@{:.2} pace {:.2}  {:^15}  {}",
                 reported,
                 intent.target.h,
                 intent.target.v,
@@ -115,6 +116,7 @@ fn main() {
                 bend_at,
                 loft,
                 loft_at,
+                intent.pace.speed,
                 keeper,
                 session
                     .result()

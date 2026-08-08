@@ -89,10 +89,10 @@ impl BendItScene {
         // into the flight, which is the whole reason the pose is a function of a
         // tick rather than of a phase.
         let (ground, facing, pose) = match phase {
-            Phase::Kicking => kick_frame(kick, session.phase_tick(), &session.tuning().kick),
-            Phase::BallInFlight | Phase::Resolution => kick_frame(
+            Phase::Kicking | Phase::BallInFlight | Phase::Resolution => kick_frame(
                 kick,
-                session.tuning().kick.contact + session.phase_tick(),
+                session.swing(),
+                session.kick_tick(),
                 &session.tuning().kick,
             ),
             _ => kick.waiting(),

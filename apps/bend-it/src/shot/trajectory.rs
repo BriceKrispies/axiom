@@ -131,11 +131,21 @@ impl Trajectory {
         });
         points.push(target);
 
+        // Flight time is not a free number. The speed profile is fixed (an
+        // exponential bleed) and the shot names the speed the ball LEAVES at, so
+        // the time follows from the two:
+        //
+        //     v(0) = L·k / (T·(1 − e^{−k}))   ⇒   T = L·k / (v₀·(1 − e^{−k}))
+        //
+        // which is also why a longer, loopier path takes longer without anyone
+        // having decided that it should.
+        let decel = intent.decay(tuning).max(1.0e-4);
+        let launch = intent.launch_speed(tuning).max(1.0);
         Trajectory {
             points,
             length,
-            duration: intent.duration(tuning),
-            decel: flight.decel,
+            duration: length * decel / (launch * (1.0 - (-decel).exp())),
+            decel,
         }
     }
 
@@ -166,9 +176,14 @@ impl Trajectory {
 
     /// How much of the path has been covered at time `t` seconds.
     ///
-    /// A struck ball leaves hot and bleeds pace; an exponential ease-out with a
-    /// gentle constant gives that without ever stalling, and lands exactly on
-    /// `1.0` at the end of the flight.
+    /// A struck ball leaves hot and bleeds pace; an exponential ease-out gives
+    /// that without ever stalling, and lands exactly on `1.0` at the end of the
+    /// flight.
+    ///
+    /// The constant comes from the *tempo of the drawing* (see
+    /// [`crate::stroke::Pace::decay`]) and is always positive, so this is always
+    /// a smooth fall in speed. The hand chooses how sharply the ball dies; it
+    /// cannot make the ball hesitate and then hurry.
     pub fn progress_at(&self, t: f32) -> f32 {
         let tau = (t / self.duration.max(1.0e-4)).clamp(0.0, 1.0);
         let k = self.decel.max(1.0e-4);
@@ -218,6 +233,7 @@ mod tests {
     use crate::pitch::ball_spot;
     use crate::shot::curve::BendCurve;
     use crate::shot::intent::GoalTarget;
+    use crate::stroke::Pace;
 
     fn resolved(bend: f32, loft: f32, target: GoalTarget) -> ResolvedShot {
         let tuning = Tuning::DEFAULT;
@@ -225,6 +241,7 @@ mod tests {
             target,
             bend: BendCurve::through(0.5, bend, 0.14),
             loft: BendCurve::through(0.5, loft, 0.14),
+            ..Default::default()
         };
         ResolvedShot::build(
             ball_spot(tuning.flight.ball_radius),
@@ -336,9 +353,125 @@ mod tests {
         let early = shot.trajectory.sample(duration * 0.05).velocity.length();
         let late = shot.trajectory.sample(duration * 0.95).velocity.length();
         assert!(early > late, "{early} should exceed {late}");
-        assert!(late > early * 0.4, "but it must not stall: {late} vs {early}");
+        assert!(late > early * 0.6, "but it must not stall: {late} vs {early}");
         assert!(shot.trajectory.progress_at(-1.0) == 0.0);
         assert!((shot.trajectory.progress_at(duration * 2.0) - 1.0).abs() < 1.0e-5);
+    }
+
+    /// The ball's speed at a series of moments through the flight.
+    fn speed_profile(shot: &ResolvedShot, samples: usize) -> Vec<f32> {
+        (0..samples)
+            .map(|i| {
+                let t = shot.trajectory.duration() * (i as f32 + 0.5) / samples as f32;
+                shot.trajectory.sample(t).velocity.length()
+            })
+            .collect()
+    }
+
+    fn paced(pace: Pace) -> ResolvedShot {
+        let tuning = Tuning::DEFAULT;
+        ResolvedShot::build(
+            ball_spot(tuning.flight.ball_radius),
+            ShotIntent {
+                target: GoalTarget::new(0.2, 0.5),
+                bend: BendCurve::through(0.5, 1.2, 0.14),
+                loft: BendCurve::through(0.5, 1.0, 0.14),
+                pace,
+            },
+            &GoalMouth::new(tuning.goal.inset),
+            &tuning,
+        )
+    }
+
+    #[test]
+    fn the_ball_leaves_at_the_speed_the_shot_was_authored_at() {
+        // The contract the whole flight model rests on: whatever was drawn, the
+        // ball's speed at t=0 IS the shot's launch speed — and that speed is a
+        // real penalty's, not a floated one.
+        let tuning = Tuning::DEFAULT;
+        for speed in [0.0f32, 0.35, 0.7, 1.0] {
+            for easing in [-1.0f32, 0.0, 1.0] {
+                let shot = paced(Pace { speed, easing });
+                let launch = shot.trajectory.sample(0.0001).velocity.length();
+                let want = shot.intent.launch_speed(&tuning);
+                assert!(
+                    (launch - want).abs() < want * 0.05,
+                    "authored {want:.1} m/s, left at {launch:.1}"
+                );
+                assert!(launch >= 27.0, "100 km/h is the floor: {launch:.1} m/s");
+                assert!(launch <= 45.0, "160 km/h is the ceiling: {launch:.1} m/s");
+                // And it is over in the time a real penalty takes.
+                let d = shot.trajectory.duration();
+                assert!((0.20..0.60).contains(&d), "the flight took {d:.2}s");
+                // It arrives with most of its pace rather than walking in.
+                let arrive = shot.trajectory.sample(d * 0.98).velocity.length();
+                assert!(arrive > launch * 0.70, "{launch:.1} died to {arrive:.1}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_quicker_hand_hits_the_ball_harder() {
+        let quick = paced(Pace { speed: 1.0, easing: 0.0 });
+        let careful = paced(Pace { speed: 0.0, easing: 0.0 });
+        assert!(
+            quick.trajectory.duration() < careful.trajectory.duration(),
+            "a flick ({:.2}s) must arrive before a careful stroke ({:.2}s)",
+            quick.trajectory.duration(),
+            careful.trajectory.duration()
+        );
+        // Same path, so a shorter flight is a faster ball throughout.
+        assert_eq!(quick.trajectory.points(), careful.trajectory.points());
+        let (fast, slow) = (speed_profile(&quick, 8), speed_profile(&careful, 8));
+        fast.iter().zip(slow.iter()).for_each(|(f, s)| {
+            assert!(f > s, "the harder shot is faster at every moment: {f} vs {s}");
+        });
+    }
+
+    #[test]
+    fn the_ball_never_hesitates_and_then_hurries_whatever_the_hand_did() {
+        // The normalisation, stated as the only thing that actually matters: for
+        // EVERY tempo a drawing can be read as, the ball's speed falls
+        // monotonically through the flight. It may die quickly or hold on, but it
+        // never dawdles through the air and then picks up.
+        for speed in [0.0f32, 0.5, 1.0] {
+            for easing in [-1.0f32, -0.5, 0.0, 0.5, 1.0] {
+                let shot = paced(Pace { speed, easing });
+                let profile = speed_profile(&shot, 24);
+                profile.windows(2).for_each(|w| {
+                    assert!(
+                        w[1] <= w[0] + 1.0e-3,
+                        "speed {speed} easing {easing}: the ball sped up mid-flight                          ({:.3} then {:.3})",
+                        w[0],
+                        w[1]
+                    );
+                });
+                // And it never stalls to a crawl either.
+                let (first, last) = (profile[0], profile[profile.len() - 1]);
+                assert!(last > first * 0.65, "it died in the air: {first} -> {last}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_hand_that_accelerated_produces_a_ball_that_holds_its_pace() {
+        let sped_up = paced(Pace { speed: 0.5, easing: 1.0 });
+        let trailed = paced(Pace { speed: 0.5, easing: -1.0 });
+        let hold = |s: &ResolvedShot| {
+            let p = speed_profile(s, 16);
+            p[p.len() - 1] / p[0]
+        };
+        assert!(
+            hold(&sped_up) > hold(&trailed) + 0.05,
+            "accelerating hand kept {:.2} of its pace, trailing one kept {:.2}",
+            hold(&sped_up),
+            hold(&trailed)
+        );
+        // Both still arrive at the same place at the end of their own flight.
+        assert_eq!(
+            sped_up.trajectory.at_progress(1.0),
+            trailed.trajectory.at_progress(1.0)
+        );
     }
 
     #[test]

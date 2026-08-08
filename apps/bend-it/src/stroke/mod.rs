@@ -8,6 +8,7 @@
 //! * [`interpret`] — the reading: a drawing becomes the closest legal shot.
 //! * [`fit`] — the maths that does it: a closed-form least-squares solve onto
 //!   the space of shots the kicker can take.
+//! * [`pace`] — how fast it was drawn, and what that means for the ball.
 //! * [`view`] — what the screen draws while the line exists.
 //!
 //! Nothing in here may touch the shot after it has been read. The interpretation
@@ -20,9 +21,11 @@ pub mod capture;
 pub mod fit;
 pub mod interpret;
 pub mod line;
+pub mod pace;
 pub mod view;
 
 pub use capture::{Drawing, StrokeCapture};
 pub use interpret::{interpret, Reading};
 pub use line::Stroke;
+pub use pace::Pace;
 pub use view::{hint_for, GameView, StrokeView};

@@ -185,6 +185,7 @@ mod tests {
                 target: GoalTarget::new(h, v),
                 bend: BendCurve::through(0.5, bend, 0.14),
                 loft: BendCurve::through(0.5, 0.6, 0.14),
+                ..Default::default()
             },
             &GoalMouth::new(tuning.goal.inset),
             &tuning,

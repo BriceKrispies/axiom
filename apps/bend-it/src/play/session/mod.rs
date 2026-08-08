@@ -12,7 +12,7 @@
 
 use axiom_kernel::DeterministicRng;
 
-use crate::figure::KickPlan;
+use crate::figure::{KickDrive, KickPlan, Swing};
 use crate::pitch::{ball_spot, GoalMouth, NetImpulse};
 use crate::shot::{ResolvedShot, ShotIntent};
 use crate::tuning::{Tuning, DT};
@@ -24,6 +24,7 @@ use super::phase::Phase;
 use super::resolution::{ShotResult, Tally};
 
 mod flight;
+mod memory;
 
 /// What the drawing layer asks the session to do.
 ///
@@ -53,6 +54,11 @@ pub struct Session {
     ball: Ball,
     keeper: Keeper,
     kick: KickPlan,
+    /// The striking leg, and how far into the kick the body is. The swing is
+    /// state because it is physics: the contact tick is whatever the integration
+    /// produces, so nothing else in here is allowed to guess it.
+    swing: Swing,
+    kick_tick: u32,
     result: Option<ShotResult>,
     tally: Tally,
     net: Option<NetImpulse>,
@@ -66,9 +72,6 @@ pub struct Session {
 
 /// The seed a session uses when none is named.
 pub const DEFAULT_SEED: u64 = 0x0BE4_D17_5EED;
-
-/// How many past shots the keeper's shading averages over.
-pub(super) const SHADE_MEMORY: usize = 4;
 
 impl Session {
     /// A fresh session at the default seed.
@@ -104,7 +107,9 @@ impl Session {
             shot,
             ball: Ball::placed(origin),
             keeper: Keeper::set(KeeperNerve::steady(&tuning.keeper)),
-            kick: KickPlan::for_shot(origin, 0.0, &tuning.kick),
+            kick: KickPlan::for_shot(origin, KickDrive::for_shot(&intent, &tuning), &tuning.kick),
+            swing: Swing::cocked(&tuning.kick),
+            kick_tick: 0,
             result: None,
             tally: Tally::default(),
             net: None,
@@ -115,42 +120,6 @@ impl Session {
             tuning,
         }
         .with_first_nerve()
-    }
-
-    /// The first attempt gets a rolled keeper too — it is a penalty like any
-    /// other, and starting every shootout against the average keeper would make
-    /// the opening kick the one you could practise against.
-    fn with_first_nerve(mut self) -> Session {
-        let nerve = self.next_nerve();
-        self.keeper = Keeper::set(nerve);
-        self
-    }
-
-    /// The nerve for the next attempt: rolled, unless this session is steady.
-    fn next_nerve(&mut self) -> KeeperNerve {
-        match self.steady {
-            true => KeeperNerve::steady(&self.tuning.keeper),
-            false => KeeperNerve::roll(&mut self.rng, &self.tuning.keeper),
-        }
-    }
-
-    /// Where the keeper stands for the next penalty, and how high it expects the
-    /// ball: shaded toward the average of the last few finishes, bounded so it
-    /// never abandons the middle of the goal.
-    fn shade(&self) -> (f32, f32, f32) {
-        let count = self.seen.len().max(1) as f32;
-        let gain = self.tuning.keeper.shade_gain;
-        let across = self.seen.iter().map(|p| p.x).sum::<f32>() / count;
-        let up = self.seen.iter().map(|p| p.y).sum::<f32>() / count;
-        let weight = gain * (self.seen.len() as f32 / SHADE_MEMORY as f32).min(1.0);
-        (
-            (across * gain).clamp(
-                -self.tuning.keeper.shade_limit,
-                self.tuning.keeper.shade_limit,
-            ),
-            [1.0, up][usize::from(!self.seen.is_empty())],
-            weight,
-        )
     }
 
     pub fn phase(&self) -> Phase {
@@ -176,6 +145,14 @@ impl Session {
     }
     pub fn kick(&self) -> &KickPlan {
         &self.kick
+    }
+    pub fn swing(&self) -> &Swing {
+        &self.swing
+    }
+    /// Ticks since the run-up began — the kick's own clock, which keeps running
+    /// through the flight so the follow-through never restarts.
+    pub fn kick_tick(&self) -> u32 {
+        self.kick_tick
     }
     pub fn result(&self) -> Option<ShotResult> {
         self.result
@@ -227,6 +204,7 @@ impl Session {
                     loft: intent
                         .loft
                         .bounded(self.tuning.loft.min_offset, self.tuning.loft.max_offset),
+                    pace: intent.pace,
                 };
                 self.rebuild();
                 self.phase = Phase::ShotReady;
@@ -237,12 +215,14 @@ impl Session {
         }
     }
 
-    /// Re-resolve the authored shot from the current intent.
+    /// Re-resolve the authored shot from the current intent, and with it the
+    /// body that is going to strike it. The drawing decides both.
     fn rebuild(&mut self) {
         self.shot = ResolvedShot::build(self.shot.origin, self.intent, &self.mouth, &self.tuning);
-        let (bend, _) = self.intent.effort(&self.tuning);
-        let signed = bend * self.intent.bend.magnitude().signum();
-        self.kick = KickPlan::for_shot(self.shot.origin, signed, &self.tuning.kick);
+        let drive = KickDrive::for_shot(&self.intent, &self.tuning);
+        self.kick = KickPlan::for_shot(self.shot.origin, drive, &self.tuning.kick);
+        self.swing = Swing::cocked(&self.tuning.kick);
+        self.kick_tick = 0;
     }
 
     /// Set up a fresh attempt, keeping only the tally and the keeper's memory.
@@ -263,7 +243,7 @@ impl Session {
 
     /// The phase machine: every transition, in one place.
     fn advance_phase(&mut self) {
-        let t = &self.tuning.transitions;
+        let t = self.tuning.transitions;
         match self.phase {
             Phase::Ready => self.after(t.ready, Phase::Aiming),
             // Aiming ends only when a drawing does, which is a command, not a
@@ -271,8 +251,16 @@ impl Session {
             Phase::Aiming => {}
             Phase::ShotReady => self.after(t.commit, Phase::Kicking),
             Phase::Kicking => self.kicking(),
-            Phase::BallInFlight => self.in_flight(),
-            Phase::Resolution => self.after(t.resolution, Phase::Reset),
+            Phase::BallInFlight => {
+                self.advance_swing();
+                self.in_flight();
+            }
+            // The leg is still following through while the ball is in the air,
+            // and for a beat after it has finished.
+            Phase::Resolution => {
+                self.advance_swing();
+                self.after(t.resolution, Phase::Reset);
+            }
             Phase::Reset => {
                 self.after(t.reset, Phase::Ready);
                 // Entering Ready through a reset rebuilds the attempt.
@@ -306,6 +294,7 @@ mod tests {
             target: GoalTarget::new(h, v),
             bend: BendCurve::through(bend_at, bend, 0.14),
             loft: BendCurve::through(loft_at, loft, 0.14),
+            ..Default::default()
         }
     }
 
@@ -382,21 +371,53 @@ mod tests {
     }
 
     #[test]
-    fn the_ball_launches_on_the_contact_tick_and_not_before() {
+    fn the_ball_leaves_on_the_tick_the_swing_reaches_it() {
         let mut session = armed();
         session.step(&[PlayCommand::Kick(shot(0.0, 0.5, 0.0, 0.5, 0.6, 0.5))]);
         while session.phase() != Phase::Kicking {
             session.step(&[]);
         }
         let spot = session.ball().position;
-        let contact = session.tuning().kick.contact;
-        (session.phase_tick()..contact - 1).for_each(|_| {
-            session.step(&[]);
-            assert_eq!(session.phase(), Phase::Kicking);
+        // Through the whole run-up and swing the ball sits on the spot: nothing
+        // launches it but the leg arriving.
+        let mut ticks = 0;
+        while session.phase() == Phase::Kicking && ticks < 400 {
             assert_eq!(session.ball().position, spot, "the ball waits for the boot");
-        });
-        session.step(&[]);
+            assert_eq!(session.swing().struck_at(), None);
+            session.step(&[]);
+            ticks += 1;
+        }
         assert_eq!(session.phase(), Phase::BallInFlight);
+        assert!(session.swing().struck_at().is_some(), "it was struck");
+        assert!(session.swing().impact_rate() < 0.0, "and struck at speed");
+    }
+
+    #[test]
+    fn a_harder_drawing_puts_the_ball_in_the_air_sooner_and_off_a_faster_leg() {
+        // The same shot, drawn slowly and drawn quickly. Nothing about the
+        // TARGET differs — only the tempo — so any difference here is the body.
+        let played = [0.0f32, 1.0].map(|speed| {
+            let mut session = armed();
+            let mut intent = shot(0.0, 0.6, 0.0, 0.5, 0.6, 0.5);
+            intent.pace = crate::stroke::Pace { speed, easing: 0.0 };
+            session.step(&[PlayCommand::Kick(intent)]);
+            while session.phase() != Phase::BallInFlight {
+                session.step(&[]);
+            }
+            (session.kick_tick(), session.swing().impact_rate().abs())
+        });
+        assert!(
+            played[1].0 < played[0].0,
+            "a hurried penalty is struck sooner: {} vs {}",
+            played[1].0,
+            played[0].0
+        );
+        assert!(
+            played[1].1 > played[0].1 * 1.15,
+            "and off a faster leg: {:.2} vs {:.2}",
+            played[1].1,
+            played[0].1
+        );
     }
 
     #[test]
@@ -420,8 +441,8 @@ mod tests {
     fn the_same_endpoint_can_be_saved_or_scored_depending_on_the_shape() {
         // One point in the goal — low, left of centre, well inside the keeper's
         // range — reached two ways.
-        let plain = take(shot(-0.45, 0.30, 0.0, 0.5, 0.9, 0.5));
-        let sculpted = take(shot(-0.45, 0.30, 2.0, 0.28, 0.9, 0.5));
+        let plain = take(shot(-0.35, 0.45, 0.0, 0.5, 0.9, 0.5));
+        let sculpted = take(shot(-0.35, 0.45, 2.0, 0.28, 0.9, 0.5));
         assert_eq!(
             plain.shot().world_target,
             sculpted.shot().world_target,

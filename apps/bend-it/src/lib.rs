@@ -90,3 +90,9 @@ pub use app::{build_bend_it, BendIt};
 
 /// The canvas id the browser page binds the surface to.
 pub const CANVAS_ID: &str = "axiom-bend-it-canvas";
+
+
+
+
+
+

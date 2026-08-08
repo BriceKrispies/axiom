@@ -224,6 +224,7 @@ mod tests {
             target: GoalTarget::new(-0.6, 0.7),
             bend: BendCurve::through(0.6, 1.6, 0.14),
             loft: BendCurve::through(0.5, 1.0, 0.14),
+            ..Default::default()
         })]);
         s
     }

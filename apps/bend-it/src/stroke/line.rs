@@ -8,24 +8,67 @@
 
 use axiom::prelude::Vec2;
 
-/// A drawn line, in physical surface pixels.
+/// A drawn line, in physical surface pixels, with the tick each point landed on.
+///
+/// The two vectors are kept in lockstep by [`Stroke::push`] and by nothing else,
+/// which is what lets every geometric method below stay a plain slice of points.
+/// The timing is carried separately because the two are read for different
+/// things and must not contaminate each other: **shape** comes from the geometry
+/// alone (so a line drawn slowly and the same line drawn fast are the same shot),
+/// and **pace** comes from the timing alone.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Stroke {
     points: Vec<Vec2>,
+    ticks: Vec<u64>,
 }
 
 impl Stroke {
     pub fn new() -> Stroke {
-        Stroke { points: Vec::new() }
+        Stroke {
+            points: Vec::new(),
+            ticks: Vec::new(),
+        }
     }
 
-    /// Build from points directly (the agent draws this way, and so do tests).
+    /// Build from points drawn one per tick — the ordinary tempo.
     pub fn from_points(points: Vec<Vec2>) -> Stroke {
-        Stroke { points }
+        Stroke::from_timed_points(points, 1)
+    }
+
+    /// Build from points spaced `per_point` ticks apart: a hand moving at a
+    /// chosen tempo. `0` collapses to one tick per point.
+    pub fn from_timed_points(points: Vec<Vec2>, per_point: u64) -> Stroke {
+        let step = per_point.max(1);
+        let ticks = (0..points.len() as u64).map(|i| i * step).collect();
+        Stroke { points, ticks }
+    }
+
+    /// The same points, on an explicit tick stamp each — a hand whose tempo
+    /// varies through the stroke. Stamps beyond the point count are ignored, and
+    /// missing ones fall back to one tick apart.
+    pub fn with_ticks(mut self, ticks: Vec<u64>) -> Stroke {
+        self.ticks = (0..self.points.len())
+            .map(|i| ticks.get(i).copied().unwrap_or(i as u64))
+            .collect();
+        self
     }
 
     pub fn points(&self) -> &[Vec2] {
         &self.points
+    }
+
+    /// The tick each point landed on.
+    pub fn ticks(&self) -> &[u64] {
+        &self.ticks
+    }
+
+    /// How many ticks the hand was moving for.
+    pub fn drawn_ticks(&self) -> u64 {
+        self.ticks
+            .first()
+            .zip(self.ticks.last())
+            .map(|(first, last)| last.saturating_sub(*first))
+            .unwrap_or(0)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -38,6 +81,7 @@ impl Stroke {
 
     pub fn clear(&mut self) {
         self.points.clear();
+        self.ticks.clear();
     }
 
     /// Add a point, unless it is closer than `spacing` to the last one.
@@ -45,13 +89,16 @@ impl Stroke {
     /// Decimating on the way in rather than on the way out matters: a finger on a
     /// 120 Hz screen emits hundreds of samples for one swipe, and a shape built
     /// from every one of them is mostly a record of how fast the hand was moving.
-    pub fn push(&mut self, point: Vec2, spacing: f32) {
+    pub fn push(&mut self, point: Vec2, tick: u64, spacing: f32) {
         let far_enough = self
             .points
             .last()
             .map(|last| point.subtract(*last).length() >= spacing.max(0.5))
             .unwrap_or(true);
-        far_enough.then(|| self.points.push(point));
+        far_enough.then(|| {
+            self.points.push(point);
+            self.ticks.push(tick);
+        });
     }
 
     /// Total drawn length, pixels.
@@ -85,8 +132,24 @@ impl Stroke {
             .map(|(a, b)| a.subtract(goal).length() < b.subtract(goal).length())
             .unwrap_or(false);
         let mut points = self.points.clone();
-        reversed.then(|| points.reverse());
-        Stroke { points }
+        let mut ticks = self.ticks.clone();
+        reversed.then(|| {
+            points.reverse();
+            // Time still runs forwards even when the hand ran backwards: the
+            // gaps between points are re-laid in the order the line is now read,
+            // so a reversed drawing keeps its tempo instead of inheriting a
+            // decreasing clock.
+            let gaps: Vec<u64> = ticks.windows(2).map(|w| w[1] - w[0]).rev().collect();
+            ticks = gaps
+                .iter()
+                .scan(0u64, |at, gap| {
+                    *at += gap;
+                    Some(*at)
+                })
+                .collect();
+            ticks.insert(0, 0);
+        });
+        Stroke { points, ticks }
     }
 
     /// `count` points spaced evenly along the drawn length.
@@ -132,17 +195,18 @@ mod tests {
     #[test]
     fn pushing_decimates_a_hand_that_reports_faster_than_it_moves() {
         let mut s = Stroke::new();
-        s.push(Vec2::new(0.0, 0.0), 10.0);
-        s.push(Vec2::new(2.0, 0.0), 10.0);
-        s.push(Vec2::new(3.0, 0.0), 10.0);
+        s.push(Vec2::new(0.0, 0.0), 0, 10.0);
+        s.push(Vec2::new(2.0, 0.0), 1, 10.0);
+        s.push(Vec2::new(3.0, 0.0), 2, 10.0);
         assert_eq!(s.len(), 1, "a jittering finger adds nothing");
-        s.push(Vec2::new(20.0, 0.0), 10.0);
+        s.push(Vec2::new(20.0, 0.0), 3, 10.0);
         assert_eq!(s.len(), 2);
         assert!(!s.is_empty());
         s.clear();
         assert!(s.is_empty());
         assert_eq!(Stroke::new().length(), 0.0);
         assert_eq!(Stroke::new().span(), 0.0);
+        assert_eq!(Stroke::new().drawn_ticks(), 0);
     }
 
     #[test]
@@ -151,6 +215,52 @@ mod tests {
         let s = line(&[(0.0, 0.0), (3.0, 0.0), (3.0, 4.0)]);
         assert!((s.length() - 7.0).abs() < 1.0e-4);
         assert!((s.span() - 5.0).abs() < 1.0e-4);
+    }
+
+    #[test]
+    fn a_point_carries_the_tick_it_landed_on() {
+        let mut s = Stroke::new();
+        s.push(Vec2::new(0.0, 0.0), 10, 1.0);
+        s.push(Vec2::new(40.0, 0.0), 14, 1.0);
+        s.push(Vec2::new(80.0, 0.0), 21, 1.0);
+        assert_eq!(s.ticks(), &[10, 14, 21]);
+        assert_eq!(s.points().len(), s.ticks().len(), "always in lockstep");
+        assert_eq!(s.drawn_ticks(), 11, "measured from the first point, not zero");
+        // An explicit tempo, and an explicit stamp list.
+        assert_eq!(
+            Stroke::from_timed_points(vec![Vec2::ZERO; 4], 3).ticks(),
+            &[0, 3, 6, 9]
+        );
+        assert_eq!(Stroke::from_points(vec![Vec2::ZERO; 3]).ticks(), &[0, 1, 2]);
+        // A zero tempo collapses to one tick per point rather than to no time.
+        assert_eq!(
+            Stroke::from_timed_points(vec![Vec2::ZERO; 3], 0).drawn_ticks(),
+            2
+        );
+        // Short or missing stamp lists fall back rather than panicking.
+        let stamped = Stroke::from_points(vec![Vec2::ZERO; 4]).with_ticks(vec![5, 9]);
+        assert_eq!(stamped.ticks().len(), 4);
+    }
+
+    #[test]
+    fn turning_a_line_around_keeps_its_tempo_running_forwards() {
+        // Drawn goal-to-ball with the hand slowing down; read ball-to-goal, the
+        // gaps must still increase in the order the line is now read.
+        let points = vec![
+            Vec2::new(0.0, 10.0),
+            Vec2::new(0.0, 40.0),
+            Vec2::new(0.0, 90.0),
+            Vec2::new(0.0, 160.0),
+        ];
+        let drawn = Stroke::from_points(points).with_ticks(vec![0, 1, 3, 9]);
+        let turned = drawn.oriented(Vec2::new(0.0, 0.0));
+        assert_eq!(turned.points().first(), Some(&Vec2::new(0.0, 160.0)));
+        let ticks = turned.ticks();
+        assert!(
+            ticks.windows(2).all(|w| w[1] > w[0]),
+            "time must still run forwards: {ticks:?}"
+        );
+        assert_eq!(turned.drawn_ticks(), drawn.drawn_ticks());
     }
 
     #[test]
