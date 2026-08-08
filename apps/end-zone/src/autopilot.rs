@@ -22,6 +22,14 @@ use crate::attempt::{AttemptPhase, AttemptStep};
 use crate::runback::{read, Encounter, RunbackMove};
 use crate::state::SimState;
 
+/// How close to the collision a leap must be launched for the runner to be at
+/// height when the defender arrives.
+///
+/// The apex is about 26 ticks after launch and he is above a defender's reach
+/// from roughly tick 9 to tick 43, so committing much earlier than this puts him
+/// back on the turf just in time to be tackled.
+pub const LEAP_LEAD_TICKS: u32 = 38;
+
 /// The concept the autopilot calls, unless told otherwise.
 ///
 /// Fixed by default, and deliberately: [`decide_move`] is the instrument, and a
@@ -41,26 +49,16 @@ pub fn call_play(step: &AttemptStep) -> Option<usize> {
 /// How a simulated back answers an encounter — the knob the harness sweeps.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Aggression {
-    /// How near a defender must be before the policy does anything at all, yd.
+    /// How long before the collision the policy commits to an answer, in ticks.
     ///
-    /// This is the number that decides **how long a decision window is**, and it
-    /// turned out to be the binding constraint on the whole game. At 3.4 yd with
-    /// two bodies closing at ~10 yd/s, a player has a third of a second between
-    /// noticing an encounter and being inside it — which is less than a human
-    /// reaction time. Measured: an agent given a 500 ms latency threw ONE charge
-    /// in twelve carries and never once got a leap off, against eight charges and
-    /// three leaps for the same agent with reflexes. The moves were not hard to
-    /// use; they were impossible to use in time.
+    /// A **lead time**, not a distance, and that is the whole fix. A distance
+    /// threshold asks "is he near?", which at 10 yd/s of closing leaves a third
+    /// of a second to act — less than a human reaction time, which is why an
+    /// agent given 500 ms of latency could not use the charge or the leap at all.
+    /// A lead time asks "how long until this happens?", so the answer is decided
+    /// with a fixed amount of time in hand however fast the two are travelling.
+    pub react_ticks: u32,
     ///
-    /// Widening it to 7 yd is NOT the fix, and measuring that was worth the
-    /// attempt: the policy then answers every encounter from range, spends its
-    /// move before the defender has committed, and is in recovery when he
-    /// arrives. The real fix is for a decision made early to still be the right
-    /// one when it lands — the policy has to reason about where the encounter
-    /// WILL be, not where it is — and that is a piece of work in its own right.
-    /// Left at the value that plays well with reflexes, with the latency finding
-    /// recorded rather than papered over.
-    pub react_range: f32,
     /// How decisively the predicted charge must be won before the policy will
     /// take contact rather than avoid it. `1.0` is a dead heat; above it is
     /// margin, because the prediction is made a few ticks before the collision
@@ -74,7 +72,7 @@ impl Aggression {
     /// Reads the geometry and picks the move that fits it — the profile the
     /// agent and the balance harness both run.
     pub const BALANCED: Aggression = Aggression {
-        react_range: 3.4,
+        react_ticks: 75,
         charge_margin: 1.05,
         will_jump: true,
     };
@@ -88,13 +86,13 @@ impl Aggression {
     };
     /// Never takes contact: everything is a cut.
     pub const EVASIVE: Aggression = Aggression {
-        react_range: 3.4,
+        react_ticks: 75,
         charge_margin: f32::INFINITY,
         will_jump: false,
     };
     /// Runs at everything it could win.
     pub const BRUISING: Aggression = Aggression {
-        react_range: 3.0,
+        react_ticks: 40,
         charge_margin: 1.0,
         will_jump: false,
     };
@@ -126,12 +124,16 @@ pub fn decide_move(sim: &SimState, step: &AttemptStep, policy: Aggression) -> Op
         return None;
     }
     let seen = encounter(sim, step)?;
-    if seen.gap > policy.react_range {
+    // Answer the collision that is COMING, not the man who is near. A defender
+    // three yards away who is running parallel is not an encounter; one eight
+    // yards away closing hard is, and is about to be your problem.
+    let meeting = seen.contact_in_ticks?;
+    if meeting > policy.react_ticks {
         return None;
     }
     let can_charge =
         seen.predicted_charge.won && seen.predicted_charge.overload >= policy.charge_margin;
-    let can_jump = policy.will_jump && step.runback.jump_available;
+    let can_jump = policy.will_jump && step.runback.jump_available && meeting <= LEAP_LEAD_TICKS;
     match (can_charge, can_jump) {
         (true, _) => Some(RunbackMove::Shoulder),
         // Over the top of a man who is squared up and waiting: exactly the

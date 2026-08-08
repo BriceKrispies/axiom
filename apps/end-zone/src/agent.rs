@@ -103,29 +103,53 @@ pub struct Perception {
     pub cut_right: Option<f32>,
 }
 
-/// The distance bands that decide **which** move answers an encounter.
+/// The lead times each move wants between the press and the collision.
 ///
-/// The scripted brain evaluates its rules in a fixed order, so if every fact
-/// were present at every distance the first rule would win every time — measured,
-/// an agent with the leap always available leapt at everything and threw not one
-/// charge or juke in twelve carries. Ordering cannot express "it depends how far
-/// away he is", so the *facts* do: a defender is only a leaping problem once he
-/// is close enough to be under you at the apex, and only a charging problem once
-/// the contest is winnable from here. Anything further out is a cut, which is the
-/// cheap answer you should be making most of the time anyway.
-const CHARGE_BAND: f32 = 5.5;
-const LEAP_BAND: f32 = 4.5;
+/// Every one of them is a fact about how long the move takes to happen. The
+/// shoulder stays armed for a bounded window, so a charge thrown at a collision
+/// further off than that touches nobody; a leap needs most of half a second to
+/// reach the height that clears a man, so one launched too late lands him back
+/// on the turf just in time to be tackled, and one launched too early has him
+/// down again before the defender arrives.
+const CHARGE_LEAD_MIN: u32 = 6;
+const CHARGE_LEAD_MAX: u32 = 34;
+const LEAP_LEAD_MIN: u32 = 14;
+
+/// Which move answers an encounter is decided in **time**, not distance.
+///
+/// The scripted brain evaluates rules in a fixed order, so if every fact were
+/// present at every moment the first rule would win every time — measured, an
+/// agent with the leap always available leapt at everything and threw not one
+/// charge in twelve carries. Ordering cannot express "it depends when he gets
+/// here", so the *facts* do: a defender is a leaping problem only once the
+/// collision is close enough that the apex will coincide with it, and a charging
+/// problem only when the predicted collision is winnable. Everything else is a
+/// cut, which is the cheap answer you should be making most of the time.
 
 /// Look at the field and measure what a back would need to know.
 ///
 /// The three "can I" questions are asked against the same [`Aggression`] profile
 /// the headless policy uses, so the agent's *standards* are tunable data rather
 /// than a constant buried in a decision.
-pub fn perceive(sim: &SimState, step: &AttemptStep, policy: Aggression) -> Perception {
+pub fn perceive(
+    sim: &SimState,
+    step: &AttemptStep,
+    policy: Aggression,
+    latency_ticks: u32,
+) -> Perception {
     let awaiting_call = step.phase.accepts_call();
+    // **Lead the encounter by your own reaction time.** This observation will be
+    // acted on `latency_ticks` from now, so the collision it should be judged
+    // against is that much nearer than it looks. Subtracting the latency is not
+    // the agent cheating — it is the thing a person does without noticing, and
+    // it is the whole difference between a decision that is right when it is
+    // made and one that is still right when it lands.
     let Some(seen) = autopilot::encounter(sim, step)
         .filter(|_| step.phase.controllable() && step.runback.move_ready)
-        .filter(|seen| seen.gap <= policy.react_range)
+        .filter(|seen| {
+            seen.contact_in_ticks
+                .is_some_and(|ticks| ticks.saturating_sub(latency_ticks) <= policy.react_ticks)
+        })
     else {
         return Perception {
             awaiting_call,
@@ -137,16 +161,23 @@ pub fn perceive(sim: &SimState, step: &AttemptStep, policy: Aggression) -> Perce
     // lights the marker under the defender and warms the shoulder chip. The
     // agent perceives the tell the player sees, rather than a private
     // re-derivation of it that could quietly disagree.
+    // How long after the press the collision actually arrives.
+    let lead = seen
+        .contact_in_ticks
+        .unwrap_or(u32::MAX)
+        .saturating_sub(latency_ticks);
     let run_through = step
         .runback
         .charge_window
-        .filter(|_| seen.gap <= CHARGE_BAND)
         .filter(|window| window.overload >= policy.charge_margin)
+        // The shoulder stays armed for a bounded number of ticks: pressing for a
+        // collision further off than that spends the move on nobody.
+        .filter(|_| (CHARGE_LEAD_MIN..=CHARGE_LEAD_MAX).contains(&lead))
         .map(|window| window.overload);
     let go_over = (run_through.is_none()
         && policy.will_jump
         && step.runback.jump_available
-        && seen.gap <= LEAP_BAND)
+        && (LEAP_LEAD_MIN..=autopilot::LEAP_LEAD_TICKS).contains(&lead))
         .then_some(seen.gap);
     let cut = (run_through.is_none() && go_over.is_none()).then_some(seen.gap);
     Perception {
@@ -220,6 +251,7 @@ pub fn drive(
         reaction_millis,
         FIXED_DELTA_NANOS,
     );
+    let latency = AgentApi::reaction_ticks_for_millis(reaction_millis, FIXED_DELTA_NANOS);
     let mut reaction =
         AgentApi::reaction_buffer(agent_id, Tick::new(0), REACTION_MEMORY_TICKS);
     let mut memory = AgentApi::empty_memory(1);
@@ -262,7 +294,7 @@ pub fn drive(
         let Some(step) = run.attempt() else { break };
         let tick = run.sim.tick;
         let seen = observe(&run.sim, &step);
-        let perception = perceive(&run.sim, &step, policy);
+        let perception = perceive(&run.sim, &step, policy, latency);
 
         // Perceive now — the observation is built inline because every type in
         // it is sealed behind the facade and so cannot be a helper's return

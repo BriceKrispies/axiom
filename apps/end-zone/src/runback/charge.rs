@@ -67,8 +67,9 @@ pub struct ChargeResolution {
     pub defender: PlayerId,
     /// Ground gap between the two bodies' centres at contact, yd.
     pub contact_gap: f32,
-    /// The gap at the moment the shoulder went down, yd — the timing input.
-    pub commit_gap: f32,
+    /// Ticks between the press and the collision — the timing input, and the
+    /// term the player's skill lives in.
+    pub commit_lead_ticks: u32,
     /// Closing speed along the contact normal, yd/s.
     pub closing_speed: f32,
     /// How squarely the runner is travelling at the defender, `0..=1`.
@@ -101,16 +102,17 @@ impl ChargeResolution {
     }
 }
 
-/// The timing factor for a shoulder dropped with `commit_gap` yards to go.
+/// The timing factor for a shoulder dropped `lead_ticks` before the collision.
 ///
-/// Peaks at [`RunbackTuning::charge_ideal_gap`] and falls off linearly in both
-/// directions to a floor of `1 - charge_timing_penalty`. A floor rather than
-/// zero because a badly-timed charge should be *weak*, not inert — a
+/// Peaks at [`RunbackTuning::charge_ideal_lead_ticks`] and falls off linearly in
+/// both directions to a floor of `1 - charge_timing_penalty`. A floor rather
+/// than zero because a badly-timed charge should be *weak*, not inert — a
 /// fast-enough runner can still bulldoze a light defender on poor timing, and
 /// that is a fair outcome rather than a bug.
-pub fn timing_factor(commit_gap: f32, tuning: &RunbackTuning) -> f32 {
-    let span = tuning.charge_timing_span.max(1.0e-3);
-    let off = ((commit_gap - tuning.charge_ideal_gap).abs() / span).clamp(0.0, 1.0);
+pub fn timing_factor(lead_ticks: u32, tuning: &RunbackTuning) -> f32 {
+    let span = f32::from(u16::try_from(tuning.charge_timing_span_ticks.max(1)).unwrap_or(1));
+    let ideal = tuning.charge_ideal_lead_ticks as f32;
+    let off = ((lead_ticks as f32 - ideal).abs() / span).clamp(0.0, 1.0);
     1.0 - off * tuning.charge_timing_penalty
 }
 
@@ -120,13 +122,13 @@ fn flat(v: Vec3) -> Vec3 {
 
 /// Resolve one shoulder charge. Pure: same inputs, same verdict, every time.
 ///
-/// `commit_gap` is the ground distance between the two when the player pressed,
-/// which the stage captured then and carries here — the resolution cannot
-/// recover it from the contact tick, and it is the term the skill lives in.
+/// `commit_lead_ticks` is how long after the press the collision arrives, which
+/// the caller measured when it pressed — the resolution cannot recover it, and
+/// it is the term the skill lives in.
 pub fn resolve(
     runner: &PlayerSim,
     defender: &PlayerSim,
-    commit_gap: f32,
+    commit_lead_ticks: u32,
     tuning: &RunbackTuning,
 ) -> ChargeResolution {
     let to_defender = flat(defender.pos.subtract(runner.pos));
@@ -147,7 +149,7 @@ pub fn resolve(
         // dead stop.
         false => 0.0,
     };
-    let timing = timing_factor(commit_gap, tuning);
+    let timing = timing_factor(commit_lead_ticks, tuning);
     let power = 0.5 + 0.5 * runner.archetype.block_strength;
     let hit = closing_speed * alignment;
     let drive = tuning.charge_drive * runner.archetype.block_strength;
@@ -169,7 +171,7 @@ pub fn resolve(
         runner: runner.id,
         defender: defender.id,
         contact_gap,
-        commit_gap,
+        commit_lead_ticks,
         closing_speed,
         alignment,
         timing,

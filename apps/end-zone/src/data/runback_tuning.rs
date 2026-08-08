@@ -74,22 +74,25 @@ pub struct RunbackTuning {
     /// all. Lowering your pads and driving through a man is worth something even
     /// when you are not running at him.
     pub charge_drive: f32,
-    /// The gap at which lowering the shoulder is perfectly timed, yd.
+    /// The lead — ticks between the press and the collision — at which lowering
+    /// the shoulder is perfectly timed.
     ///
-    /// A back drops his shoulder about half a second out, and half a second at
-    /// running speed is three and a half yards — not the two and a half this
-    /// used to say, which taxed every realistically-timed charge by a third
-    /// before the contest even started.
-    pub charge_ideal_gap: f32,
-    /// How far either side of the ideal gap timing decays to its floor, yd.
+    /// **Ticks, not yards**, and that swap is what made leading possible. Timing
+    /// used to be measured as the GAP at the press, which quietly punished the
+    /// one thing a player has to do to beat their own reaction time: press
+    /// early. Committing a second out is eight yards out, and eight yards scored
+    /// as badly mistimed however perfectly the hit was judged — so the tell
+    /// almost never opened at a lead anybody could act on, and the charge became
+    /// unusable the moment latency entered the loop. Measuring the same skill in
+    /// time says what was always meant: drop your pads about a third of a second
+    /// before contact, whatever distance that happens to be at.
+    pub charge_ideal_lead_ticks: u32,
+    /// How far either side of the ideal lead timing decays to its floor, ticks.
     ///
-    /// Wide, and deliberately. The skill the charge is meant to test is *which
-    /// defender you take on* — reading whether he is squared up and whether you
-    /// have the speed — not whether you pressed inside a narrow band of
-    /// distance. At a span of 3.0 the winnable band was so tight that the tell
-    /// lit for about a tenth of a second at a time, which is a flicker rather
-    /// than a cue, and no amount of indicator work fixes a window that small.
-    pub charge_timing_span: f32,
+    /// Wide, deliberately. The skill the charge tests is *which defender you take
+    /// on* — whether he is squared up, whether you have the speed — not whether
+    /// you pressed inside a narrow slice of a second.
+    pub charge_timing_span_ticks: u32,
     /// How much of the charge is lost at the worst possible timing, `0..1`.
     pub charge_timing_penalty: f32,
     /// The speed (yd/s) a unit-mass, fully braced defender is worth. This is the
@@ -150,8 +153,8 @@ impl Default for RunbackTuning {
             shoulder_expire_ticks: 8,
             shoulder_reach: 0.4,
             charge_drive: 2.2,
-            charge_ideal_gap: 3.4,
-            charge_timing_span: 4.6,
+            charge_ideal_lead_ticks: 20,
+            charge_timing_span_ticks: 26,
             charge_timing_penalty: 0.42,
             charge_resist_speed: 5.6,
             charge_brace_floor: 0.55,

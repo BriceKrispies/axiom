@@ -133,6 +133,15 @@ pub struct RunbackSim {
     /// fact the agent perceives and the outcome the contest produces are one
     /// value with one history.
     pub charge_window: Option<ChargeWindow>,
+    /// The charge the player **committed to** when they pressed: which defender,
+    /// and the resolution predicted for the collision with him.
+    ///
+    /// Held from the press until contact so the outcome is the one that was
+    /// shown. Deciding it at the press rather than at the collision is what
+    /// turns the tell from a forecast into a promise — and it is the honest
+    /// model of the move besides, because dropping your shoulder IS the
+    /// decision; everything after it is the hit you already bought.
+    pub(crate) committed_charge: Option<(PlayerId, ChargeResolution)>,
     /// This play's confirmed successes.
     pub dodges: u32,
     pub hurdled: u32,
@@ -158,6 +167,7 @@ impl RunbackSim {
             hurdles: Vec::new(),
             last_charge: None,
             charge_window: None,
+            committed_charge: None,
             dodges: 0,
             hurdled: 0,
             broken: 0,

@@ -24,7 +24,6 @@ use crate::identity::PlayerId;
 use crate::player::AnimState;
 use crate::state::SimState;
 
-use super::charge;
 use super::evade::{self, ThreatVerdict};
 use super::read;
 use super::{ActiveMove, RunbackMove, RunbackStatus};
@@ -169,10 +168,19 @@ impl SimState {
         player.set_anim(AnimState::Juke);
     }
 
-    /// Lower the shoulder: nothing moves yet. The charge is *armed*, and the gap
-    /// at this instant is the timing input the resolution will read.
+    /// Lower the shoulder. Nothing moves yet — but the **outcome is decided
+    /// here**, against the collision this press is aimed at.
+    ///
+    /// The alternative, resolving when the bodies actually touch, is what this
+    /// used to do and it cannot be made to work: contact is most of a second
+    /// after the press, the geometry has moved by then, and a charge the player
+    /// correctly read as a win resolves as a loss through nothing they did. So
+    /// the press buys a specific hit, the prediction the tell showed and the
+    /// resolution applied are the same object, and the move keeps its promise.
     fn begin_shoulder(&mut self, back: PlayerId) {
         self.runback.last_charge = None;
+        self.runback.committed_charge = read::encounter(self, back)
+            .map(|seen| (seen.defender, seen.predicted_charge));
         self.players[back.index()].set_anim(AnimState::Shoulder);
     }
 
@@ -259,39 +267,40 @@ impl SimState {
         // The gap when the shoulder went down — recovered from where the two of
         // them were at the commit tick, through the perception ring the AI
         // already keeps, so nothing new has to be stored to know it.
-        // The contest is resolved on the geometry as it was **when the player
-        // pressed**, not as it is at impact.
-        //
-        // That is the honest reading of the mechanic — you drop your pads at
-        // what you can see, and the hit you get is the hit you brought into it —
-        // and it is also the only version that is fair. Resolving on
-        // contact-time geometry meant the alignment collapsed in the ~35 ticks
-        // between the press and the collision, so a charge the player (and the
-        // agent) correctly read as a win resolved as a loss: measured, one win
-        // in seven. A control whose outcome contradicts the picture you pressed
-        // on is not a skill, it is a lie.
-        //
-        // The commit-time state costs nothing to recover: the AI's perception
-        // ring already remembers every player's position and velocity, so this
-        // is a lookup rather than new bookkeeping.
-        let seen = self
-            .perception
-            .sample((self.tick.saturating_sub(active.started)) as u32);
-        let at_commit = |id: PlayerId| {
-            let mut player = self.players[id.index()];
-            player.pos = seen.positions[id.index()];
-            player.vel = seen.velocities[id.index()];
-            player
-        };
-        let runner_then = at_commit(back);
-        let defender_then = at_commit(defender);
-        let commit_gap = Vec3::new(
-            defender_then.pos.x - runner_then.pos.x,
-            0.0,
-            defender_then.pos.z - runner_then.pos.z,
-        )
-        .length();
-        let resolution = charge::resolve(&runner_then, &defender_then, commit_gap, &runback);
+        // The outcome was decided at the press (see `begin_shoulder`) — this
+        // just applies it. The committed resolution is used only if the man we
+        // actually met is the man it was aimed at; if somebody else arrived
+        // first, that is a different hit and it is resolved on its own terms
+        // from the commit-time state, which the AI's perception ring already
+        // remembers for free.
+        let committed = self
+            .runback
+            .committed_charge
+            .filter(|(target, _)| *target == defender)
+            .map(|(_, resolution)| resolution);
+        let resolution = committed.unwrap_or_else(|| {
+            let seen = self
+                .perception
+                .sample((self.tick.saturating_sub(active.started)) as u32);
+            let at_commit = |id: PlayerId| {
+                let mut player = self.players[id.index()];
+                player.pos = seen.positions[id.index()];
+                player.vel = seen.velocities[id.index()];
+                player
+            };
+            let runner_then = at_commit(back);
+            let defender_then = at_commit(defender);
+            let meeting = read::contact_in_ticks(
+                &runner_then,
+                &defender_then,
+                runner_then.archetype.body_radius
+                    + defender_then.archetype.body_radius
+                    + runback.shoulder_reach,
+                read::CONTACT_HORIZON_TICKS,
+            );
+            read::predict_charge(&runner_then, &defender_then, meeting, &runback)
+        });
+        self.runback.committed_charge = None;
         self.runback.last_charge = Some(resolution);
 
         match resolution.won {
