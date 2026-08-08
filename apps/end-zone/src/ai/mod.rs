@@ -14,6 +14,7 @@
 pub mod action;
 pub mod assignment;
 pub mod brain;
+pub mod carry;
 pub mod commitment;
 pub mod coordination;
 pub mod defense;

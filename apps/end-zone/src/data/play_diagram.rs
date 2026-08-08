@@ -43,16 +43,22 @@ pub struct PlayDiagram {
 }
 
 impl PlayDiagram {
-    /// Build the diagram for an offensive play. The primary read is the
-    /// highest-slot live route (the convention the playbook authors to).
+    /// Build the diagram for an offensive play. The highlighted mark is the
+    /// **ball carrier** on a run and the primary read (the highest-slot live
+    /// route) on a pass — in both cases, the man the play is about.
     pub fn of(play: &OffensivePlay) -> Self {
         let primary_slot = play
             .assignments
             .iter()
-            .enumerate()
-            .filter(|(_, a)| matches!(a, OffenseAssignment::Route(_)))
-            .map(|(i, _)| i)
-            .max();
+            .position(|a| matches!(a, OffenseAssignment::RunBack { .. }))
+            .or_else(|| {
+                play.assignments
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| matches!(a, OffenseAssignment::Route(_)))
+                    .map(|(i, _)| i)
+                    .max()
+            });
 
         let marks = play
             .assignments
@@ -92,6 +98,15 @@ fn mark_for(
                 OffensePoint::new(align.lateral, align.downfield - drop_depth),
             ],
         ),
+        // The run game's quarterback: his "route" is the open step to the mesh,
+        // so the chalkboard shows where the exchange is going to happen.
+        OffenseAssignment::HandOff { mesh, .. } => {
+            (DiagramRole::Quarterback, false, vec![align, *mesh])
+        }
+        // The back's is the run the play designs: to the mesh, then at the hole.
+        OffenseAssignment::RunBack { mesh, aim } => {
+            (DiagramRole::Carrier, false, vec![align, *mesh, *aim])
+        }
         OffenseAssignment::Snapper => (DiagramRole::Snapper, false, Vec::new()),
         OffenseAssignment::PassBlock | OffenseAssignment::LeadBlock => {
             (DiagramRole::Blocker, false, Vec::new())

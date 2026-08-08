@@ -1,56 +1,47 @@
 //! The attempt loop's **presentation view** — the one-way window the HUD, the
-//! target markers and the debug overlay read the loop through.
+//! camera and the debug overlay read the loop through, and the same window the
+//! agent's observation is built from.
 //!
 //! Presentation never touches [`AttemptController`] itself. It gets a plain
-//! `Copy` snapshot of what the loop is doing, captured once per tick and hung
-//! on the immutable [`crate::presentation::snapshot::PresentationSnapshot`]
+//! `Copy` snapshot of what the loop is doing, captured once per tick and hung on
+//! the immutable [`crate::presentation::snapshot::PresentationSnapshot`]
 //! alongside every other presentation input. That is what keeps the app's
 //! "presentation cannot mutate simulation" boundary intact now that there is a
 //! gameplay layer worth looking at.
 
+use crate::runback::RunbackStatus;
+
 use super::controller::AttemptController;
 use super::ledger::AttemptRecord;
 use super::phase::AttemptPhase;
-use super::read::PlayRead;
 
 /// Everything the presentation layer needs about the attempt in progress, and
 /// nothing the simulation owns.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AttemptStep {
     pub phase: AttemptPhase,
-    /// This tick's read — who the three targets are and where they stand.
-    pub read: PlayRead,
     /// 1-based number of the attempt in progress.
     pub attempt: u32,
-    /// Decision windows offered so far this attempt.
-    pub windows: u32,
-    /// Simulation ticks left in the open window (`0` outside one).
-    pub window_left: u64,
-    /// The most recently resolved attempt (drives the result card).
-    pub last: Option<AttemptRecord>,
     /// The offensive concept the attempt is lined up in.
     pub concept: usize,
+    /// The running back's live move state — what he is doing, whether he is in
+    /// the air, and whether the leap is ready. The HUD's jump pip and the
+    /// agent's observation are both built from this one struct, so they can
+    /// never disagree about what the player is allowed to do.
+    pub runback: RunbackStatus,
+    /// The most recently resolved attempt (drives the result card).
+    pub last: Option<AttemptRecord>,
 }
 
 impl AttemptController {
-    /// This tick's presentation view. `None` before the loop has read the field
-    /// even once — there is genuinely nothing to draw yet.
-    pub fn view(&self, tick: u64) -> Option<AttemptStep> {
-        self.read.map(|read| AttemptStep {
-            concept: self.concept,
+    /// This tick's presentation view.
+    pub fn view(&self, runback: RunbackStatus) -> AttemptStep {
+        AttemptStep {
             phase: self.phase,
-            read,
             attempt: self.attempt_index.max(1),
-            windows: self.windows,
-            // Ticks left in the ONE beat that is genuinely running out. The
-            // pre-snap has no clock on either side of it — the call waits for
-            // the player and the shift ends when the offense is set — so there
-            // is nothing there for a bar to drain.
-            window_left: match self.phase {
-                AttemptPhase::DecisionWindow { closes_at, .. } => closes_at.saturating_sub(tick),
-                _ => 0,
-            },
+            concept: self.concept,
+            runback,
             last: self.ledger.last,
-        })
+        }
     }
 }

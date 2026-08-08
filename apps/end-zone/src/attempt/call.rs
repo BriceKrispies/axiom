@@ -1,11 +1,11 @@
-//! Calling the play: the pre-snap concept picker.
+//! Calling the play: the pre-snap run-concept picker.
 //!
 //! Separate from the loop because it is the one decision made BEFORE the ball
 //! is live, and it has a different rule from every other input — it is accepted
 //! only at the line, and it changes what the offense IS rather than what the
 //! quarterback does with it.
 
-use crate::data::prototype::CONCEPT_COUNT;
+use crate::data::concept::CONCEPT_COUNT;
 
 use super::controller::AttemptController;
 use super::phase::AttemptPhase;
@@ -13,7 +13,7 @@ use super::phase::AttemptPhase;
 impl AttemptController {
     /// Call the play for this attempt. Accepted only while the card is up:
     /// once the offense is shifting the call is committed, and once the ball is
-    /// live the number keys mean reads, not plays.
+    /// live the number row is spent — the call is the play.
     pub fn select_concept(&mut self, index: usize) -> bool {
         let accepted = matches!(self.phase, AttemptPhase::PlayCall);
         self.pending_concept = accepted

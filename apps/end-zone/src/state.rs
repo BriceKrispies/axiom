@@ -26,6 +26,8 @@ use crate::identity::PlayerId;
 use crate::physics_rig::PhysicsRig;
 use crate::player::lineup::formation_players;
 use crate::player::PlayerSim;
+use crate::runback::RunbackSim;
+use crate::data::RunbackTuning;
 
 /// The play lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +42,8 @@ pub enum PlayPhase {
 pub struct SimState {
     pub seed: u64,
     pub tuning: BehaviorTuning,
+    /// The running back's move numbers (juke / charge / leap).
+    pub runback_tuning: RunbackTuning,
     pub tick: u64,
     pub phase: PlayPhase,
     pub play: PlayDefinition,
@@ -71,7 +75,10 @@ pub struct SimState {
     /// (`x` = offense right, `y` = downfield), each in `-1..=1`. Part of the
     /// deterministic input stream: zero when no one is steering, in which
     /// case the AI intent stands untouched.
-    pub user_stick: axiom::prelude::Vec2,
+    /// The running back's authoritative move state — the one place the player's
+    /// three arcade verbs live. Rebuilt at every formation reset, so no move,
+    /// cooldown, or pending success can survive a whistle.
+    pub runback: RunbackSim,
     pub(crate) perception: Perception,
     pub(crate) events: EventSink,
     pub(crate) rig: PhysicsRig,
@@ -132,6 +139,7 @@ impl SimState {
         let mut sim = SimState {
             seed: setup.seed,
             tuning,
+            runback_tuning: RunbackTuning::default(),
             tick: 0,
             phase: PlayPhase::PreSnap,
             play,
@@ -149,7 +157,7 @@ impl SimState {
             engagements: vec![None; PLAYER_COUNT],
             overseer: DefensiveOverseer::new(),
             end_reason: None,
-            user_stick: axiom::prelude::Vec2::ZERO,
+            runback: RunbackSim::new(),
             perception: Perception::new(),
             events: EventSink::default(),
             rig,
@@ -164,6 +172,17 @@ impl SimState {
         };
         sim.push_perception();
         sim
+    }
+
+    /// The [`PlayerId`] running the back assignment on the installed play, if it
+    /// fields one. Resolved from the play rather than from a constant, so a play
+    /// with no back (the ambient pass showcase) simply has no controlled runner
+    /// and every runback rule is inert.
+    pub fn locate_running_back(&self) -> Option<PlayerId> {
+        self.assignments
+            .iter()
+            .position(|a| matches!(a.kind, AssignmentKind::RunBack { .. }))
+            .map(|i| PlayerId(i as u8))
     }
 
     /// First recorded physics fault, if any (debug overlay row) — from either
@@ -182,6 +201,7 @@ impl SimState {
         self.roles = vec![RoleState::Waiting; PLAYER_COUNT];
         self.intents = vec![PlayerIntent::Hold; PLAYER_COUNT];
         self.ai_memory.reset();
+        self.runback.reset_play(self.locate_running_back());
         self.engagements = vec![None; PLAYER_COUNT];
         self.overseer.reset_play(self.tick);
         let spawn = self

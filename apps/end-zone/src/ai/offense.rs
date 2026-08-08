@@ -73,6 +73,10 @@ pub fn candidates(
     loose_ball_candidate(player, ctx, out);
     match assignment.kind {
         AssignmentKind::Quarterback { drop_to } => quarterback(player, drop_to, role, ctx, out),
+        AssignmentKind::HandOff { back, mesh } => {
+            handoff_quarterback(player, back, mesh, role, ctx, out)
+        }
+        AssignmentKind::RunBack { mesh, .. } => run_back(mesh, role, out),
         AssignmentKind::Snapper | AssignmentKind::PassBlock => {
             super::protection::pass_block(player, role, ctx, out)
         }
@@ -80,10 +84,86 @@ pub fn candidates(
         AssignmentKind::Route { .. } => route_runner(player, assignment, role, ctx, out),
         AssignmentKind::BallCarry => {
             *role = RoleState::Carrying;
-            carry_candidates(player, ctx, out);
+            carry_candidates(player, assignment, ctx, out);
         }
         _ => {}
     }
+}
+
+/// The run game's quarterback: take the snap, open to the mesh, and give it up.
+///
+/// He never decides to hand off — that is a *fact about the field* the attempt
+/// loop reads (are the two of them actually together yet), exactly as the snap
+/// is a fact about the offense being set. All he does here is get to the meeting
+/// point and keep his eyes on the back so the exchange is something the player
+/// can watch happen.
+fn handoff_quarterback(
+    player: &PlayerSim,
+    back: crate::identity::PlayerId,
+    mesh: Vec3,
+    role: &mut RoleState,
+    ctx: &BrainCtx<'_>,
+    out: &mut Vec<ScoredAction>,
+) {
+    let holds_ball = ctx.possession == Some(player.id);
+    // Once the ball is gone he is a bystander who must not wander back into the
+    // hole his own back is running through.
+    if !holds_ball {
+        *role = RoleState::QbDone;
+        out.push(ScoredAction::new(
+            PlayerIntent::Face {
+                direction: ctx.players[back.index()].pos.subtract(player.pos),
+            },
+            Priority::Assignment,
+            0.2,
+            "handed-off",
+            2,
+        ));
+        return;
+    }
+    *role = RoleState::QbDrop;
+    let to_mesh = flat(mesh.subtract(player.pos));
+    // Turn and carry the ball to the meeting point, facing the man taking it.
+    // `DropBack` rather than `MoveToward` because the whole point of the open
+    // step is that he does NOT turn to face where he is going — his body opens
+    // to the back while his feet take him to the spot.
+    out.push(ScoredAction::new(
+        PlayerIntent::DropBack {
+            point: match to_mesh.length() > 0.35 {
+                true => mesh,
+                false => player.pos,
+            },
+            face: ctx.players[back.index()].pos.subtract(player.pos),
+            sprint: false,
+        },
+        Priority::Assignment,
+        0.7,
+        "mesh",
+        4,
+    ));
+}
+
+/// The running back before the exchange: get to the mesh point, on time.
+///
+/// After it he is the carrier, and [`crate::ai::brain::decide`] routes every
+/// carrier — this one included — through [`carry_candidates`]. So this function
+/// is only ever the *approach*, which is why it is three lines and not a state
+/// machine.
+fn run_back(mesh: Vec3, role: &mut RoleState, out: &mut Vec<ScoredAction>) {
+    *role = RoleState::Route { index: 0 };
+    out.push(ScoredAction::new(
+        PlayerIntent::MoveToward {
+            point: mesh,
+            // Not a sprint: he has three yards to cover and has to arrive under
+            // control, or he runs through the exchange and the mesh gate refuses
+            // a handoff that never happened.
+            sprint: false,
+        },
+        Priority::Assignment,
+        0.8,
+        "mesh",
+        4,
+    ));
 }
 
 /// The quarterback: drop back, scan, wind up on command, or take off if he has
@@ -253,16 +333,26 @@ fn route_runner(
     }
 }
 
-/// Carry the ball: run for the end zone, drifting toward the middle third.
-pub fn carry_candidates(player: &PlayerSim, ctx: &BrainCtx<'_>, out: &mut Vec<ScoredAction>) {
-    let target = Vec3::new(
-        player.pos.x * 0.6 + ctx.end_zone_target.x * 0.4,
-        0.0,
-        ctx.end_zone_target.z,
-    );
+/// Carry the ball: run downfield through the best lane the field offers,
+/// attacking the play's designed hole while it is still ahead.
+///
+/// This is the **automatic forward run**. It is the same candidate the AI has
+/// always produced for a carrier — the player's three moves modify what it does,
+/// they never replace it, which is why nothing here knows the runner is human.
+/// The heading itself is [`super::carry::carry_point`].
+pub fn carry_candidates(
+    player: &PlayerSim,
+    assignment: &ResolvedAssignment,
+    ctx: &BrainCtx<'_>,
+    out: &mut Vec<ScoredAction>,
+) {
+    let aim = match assignment.kind {
+        AssignmentKind::RunBack { aim, .. } => Some(aim),
+        _ => None,
+    };
     out.push(ScoredAction::new(
         PlayerIntent::Carry {
-            point: OffenseFrame::clamp_in_bounds(target, ctx.tuning.bounds_margin),
+            point: super::carry::carry_point(player, aim, ctx),
         },
         Priority::BallThreat,
         0.9,

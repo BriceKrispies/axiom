@@ -44,12 +44,12 @@ pub fn build(
     let focused = fe.focus.focused();
     let summary = fe.summary.unwrap_or(SessionSummary {
         attempts: 0,
-        completions: 0,
         touchdowns: 0,
-        interceptions: 0,
-        sacks: 0,
         best_yards: 0,
         yards_per_attempt: 0.0,
+        dodges: 0,
+        broken: 0,
+        hurdled: 0,
     });
 
     let mut widgets = vec![Placed::new(
@@ -64,15 +64,15 @@ pub fn build(
 
     let stats = [
         ("ATTEMPTS", summary.attempts.to_string()),
+        ("TOUCHDOWNS", summary.touchdowns.to_string()),
+        ("YARDS PER CARRY", format!("{:.1}", summary.yards_per_attempt)),
+        ("BEST CARRY", format!("{} YD", summary.best_yards)),
         (
-            "COMPLETIONS",
-            format!("{} / {}", summary.completions, summary.attempts),
-        ),
-        ("YARDS PER TRY", format!("{:.1}", summary.yards_per_attempt)),
-        ("BEST GAIN", format!("{} YD", summary.best_yards)),
-        (
-            "GIVEN AWAY",
-            format!("{} INT   {} SACK", summary.interceptions, summary.sacks),
+            "MOVES MADE",
+            format!(
+                "{} DODGE   {} BROKE   {} OVER",
+                summary.dodges, summary.broken, summary.hurdled
+            ),
         ),
     ];
     let stat_count = stats.len();

@@ -20,6 +20,7 @@
 //! only to typed [`events::SimEvent`]s. All variation derives from the explicit
 //! seed in [`config::EndZoneConfig`] — no wall clock, no ambient randomness.
 
+pub mod agent;
 pub mod ai;
 pub mod app;
 pub mod attempt;
@@ -42,6 +43,8 @@ pub mod launch;
 pub mod physics_rig;
 pub mod player;
 pub mod presentation;
+pub mod runback;
+pub mod scenario;
 pub mod scene;
 pub mod scene_sync;
 pub mod shell;

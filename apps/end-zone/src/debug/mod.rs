@@ -168,6 +168,9 @@ pub fn overlay_rows(
         BallState::Dead => "dead".to_string(),
         BallState::Held { carrier } => format!("held by #{}", snapshot.player(carrier).jersey),
         BallState::Snap { .. } => "snap".to_string(),
+        BallState::Handoff { to, .. } => {
+            format!("handoff to #{}", snapshot.player(to).jersey)
+        }
         BallState::Airborne { .. } => "airborne pass".to_string(),
         BallState::Loose => "loose".to_string(),
         BallState::Grounded => "grounded".to_string(),

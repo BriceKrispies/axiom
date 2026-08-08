@@ -27,6 +27,18 @@ pub enum AnimState {
     Sprint,
     DropBack,
     Throw,
+    /// The quarterback extending the ball into the back's belly.
+    HandOff,
+    /// A **juke**: the back's plant-and-cut, body thrown across the new line.
+    Juke,
+    /// A **shoulder charge**: the back low and square, running through contact
+    /// rather than round it.
+    Shoulder,
+    /// A **leap**: the back airborne over a defender, under his own power. Not
+    /// [`AnimState::AirborneFall`] — that is a man who has been hit and has lost
+    /// the play; this is a man in control of one, still carrying, who will land
+    /// running.
+    Leap,
     Catch,
     Block,
     Tackle,
@@ -72,6 +84,20 @@ impl AnimState {
                 | AnimState::Jog
                 | AnimState::Sprint
                 | AnimState::DropBack
+                | AnimState::HandOff
+                | AnimState::Juke
+                | AnimState::Shoulder
+                | AnimState::Leap
+        )
+    }
+
+    /// Whether this state is one of the running back's three arcade moves — the
+    /// states the [`crate::runback`] stage owns and the ordinary locomotion
+    /// animator must keep its hands off.
+    pub fn is_runback_move(self) -> bool {
+        matches!(
+            self,
+            AnimState::Juke | AnimState::Shoulder | AnimState::Leap
         )
     }
 

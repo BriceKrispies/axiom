@@ -277,12 +277,17 @@ fn override_reason(anim: AnimState) -> OverrideReason {
         | AnimState::Sprint
         | AnimState::DropBack => OverrideReason::None,
         AnimState::Throw
+        | AnimState::HandOff
         | AnimState::Catch
         | AnimState::Block
         | AnimState::Tackle
+        | AnimState::Juke
+        | AnimState::Shoulder
         | AnimState::HitReaction
         | AnimState::Stumble => OverrideReason::Action,
-        AnimState::Dive | AnimState::AirborneFall => OverrideReason::Airborne,
+        // The leap is airborne under the runner's OWN power, so it is posed by
+        // the override like a fall — but it is not a fall, and the pose says so.
+        AnimState::Leap | AnimState::Dive | AnimState::AirborneFall => OverrideReason::Airborne,
         AnimState::GroundImpact | AnimState::Recovery => OverrideReason::Down,
     }
 }

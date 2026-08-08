@@ -36,6 +36,30 @@ pub enum PlayEndReason {
     Intercepted,
 }
 
+/// Which of the running back's three moves an event refers to. A plain code on
+/// the event rather than a reference into [`crate::runback`], so the event
+/// stream stays a leaf that presentation and the agent can read without
+/// depending on the gameplay subsystem that produced it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunbackMoveCode {
+    JukeLeft,
+    JukeRight,
+    Shoulder,
+    Jump,
+}
+
+impl RunbackMoveCode {
+    /// The short label the HUD and the agent trace print.
+    pub fn label(self) -> &'static str {
+        match self {
+            RunbackMoveCode::JukeLeft => "JUKE LEFT",
+            RunbackMoveCode::JukeRight => "JUKE RIGHT",
+            RunbackMoveCode::Shoulder => "SHOULDER",
+            RunbackMoveCode::Jump => "LEAP",
+        }
+    }
+}
+
 /// One typed simulation event. Payload floats are exact sim values, so replays
 /// compare bit-for-bit.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -49,6 +73,60 @@ pub enum SimEvent {
     },
     /// The quarterback began the drop-back.
     DropBack { quarterback: PlayerId },
+    /// The exchange began: the ball is leaving the quarterback's hands for the
+    /// back's. Possession changes when it lands, not here.
+    Handoff {
+        quarterback: PlayerId,
+        back: PlayerId,
+        point: Vec3,
+    },
+    /// The running back committed to one of his three moves this tick. The
+    /// *attempt*, not the outcome — the outcome is one of the three success
+    /// events below, or nothing at all.
+    RunbackMove {
+        runner: PlayerId,
+        move_code: RunbackMoveCode,
+        /// Ground speed at the moment of commitment, yd/s. Every move's worth
+        /// is a function of it, so it is the number worth recording.
+        speed: f32,
+    },
+    /// **A successful dodge.** A defender who had a credible imminent tackle on
+    /// the runner's pre-juke line was left behind by the juke, and the play went
+    /// on. `gap` is how far the defender ended up off the runner when he was
+    /// beaten, yd.
+    TackleDodged {
+        runner: PlayerId,
+        defender: PlayerId,
+        gap: f32,
+    },
+    /// **A successful jump over a defender.** The runner was airborne, the
+    /// defender passed through the horizontal encounter region beneath him with
+    /// `clearance` yards of daylight above the defender's tackling reach, and
+    /// the runner landed still carrying.
+    DefenderHurdled {
+        runner: PlayerId,
+        defender: PlayerId,
+        clearance: f32,
+    },
+    /// **A successful shoulder charge.** The contact resolved in the runner's
+    /// favour: `impulse` (his momentum into the hit) beat `resistance` (the
+    /// defender's braced anchor), the defender was displaced, and the runner
+    /// kept the ball. Both terms ride along so the reason is inspectable.
+    TackleBroken {
+        runner: PlayerId,
+        defender: PlayerId,
+        impulse: f32,
+        resistance: f32,
+    },
+    /// A shoulder charge that **lost** — the same contest, decided the other
+    /// way. Not a success signal; it exists so the failure is as legible as the
+    /// win, to the player and to a test.
+    ChargeStuffed {
+        runner: PlayerId,
+        defender: PlayerId,
+        impulse: f32,
+        resistance: f32,
+    },
     /// The forward pass was released.
     Throw {
         quarterback: PlayerId,

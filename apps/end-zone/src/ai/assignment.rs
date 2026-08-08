@@ -25,6 +25,12 @@ pub struct ResolvedAssignment {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AssignmentKind {
     Quarterback { drop_to: Vec3 },
+    /// The run game's quarterback: open away from the line, carry the ball to
+    /// `mesh`, and give it to `back`. He never throws.
+    HandOff { back: PlayerId, mesh: Vec3 },
+    /// The running back: take the exchange at `mesh`, attack `aim` — the hole
+    /// the play designed — then turn upfield.
+    RunBack { mesh: Vec3, aim: Vec3 },
     Snapper,
     Route { decoy: bool },
     PassBlock,
@@ -59,7 +65,12 @@ pub fn compile_assignments(play: &PlayDefinition, frame: &OffenseFrame) -> Vec<R
     let quarterback_id = play
         .offense_assignments
         .iter()
-        .position(|a| matches!(a, OffenseAssignment::Quarterback { .. }))
+        .position(|a| {
+            matches!(
+                a,
+                OffenseAssignment::Quarterback { .. } | OffenseAssignment::HandOff { .. }
+            )
+        })
         .map(|slot| offense_player(play, slot))
         .unwrap_or_else(|| offense_player(play, 0));
 
@@ -75,6 +86,24 @@ pub fn compile_assignments(play: &PlayDefinition, frame: &OffenseFrame) -> Vec<R
                     )),
                 },
                 Vec::new(),
+            ),
+            OffenseAssignment::HandOff { back_slot, mesh } => (
+                AssignmentKind::HandOff {
+                    back: offense_player(play, *back_slot),
+                    mesh: frame.to_world(*mesh),
+                },
+                Vec::new(),
+            ),
+            // The back's route is authored as the two points the run is made
+            // of: the exchange, then the hole. Carrying it as a `route` (rather
+            // than as two more fields) is what lets the pre-snap chalk and the
+            // debug overlay draw the design without knowing it is a run.
+            OffenseAssignment::RunBack { mesh, aim } => (
+                AssignmentKind::RunBack {
+                    mesh: frame.to_world(*mesh),
+                    aim: frame.to_world(*aim),
+                },
+                vec![frame.to_world(*mesh), frame.to_world(*aim)],
             ),
             OffenseAssignment::Snapper => (AssignmentKind::Snapper, Vec::new()),
             OffenseAssignment::Route(route) => (

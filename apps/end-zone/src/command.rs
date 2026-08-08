@@ -33,6 +33,13 @@ pub enum SimCommand {
     /// steering him: it tells the defense he is a runner immediately, instead
     /// of waiting for the scramble detector to notice.
     Scramble,
+    /// Hand the ball to `PlayerId` — the exchange. Refused unless the field
+    /// agrees (see [`SimState::hand_off`]), so ordering one is a request, never
+    /// a possession transfer.
+    HandOff(PlayerId),
+    /// The running back's move for this tick. The whole of the player's live
+    /// control: there is no movement command, because the run is the AI's.
+    Runback(crate::runback::RunbackMove),
     /// Reset to formation without starting (diagnostic R).
     ResetPlay,
 }
@@ -48,6 +55,11 @@ impl SimState {
                 self.declared_target = Some(target);
             }
             SimCommand::Scramble => self.qb_scrambling = true,
+            SimCommand::HandOff(back) => self.hand_off(back),
+            // Latched, not applied: the runback stage is the authority on
+            // whether the move is legal this tick, so a command that arrives
+            // during a cooldown is dropped there rather than half-honoured here.
+            SimCommand::Runback(wanted) => self.runback.pending = Some(wanted),
             SimCommand::ResetPlay => self.reset_to_formation(false),
         }
     }

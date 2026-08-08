@@ -1,89 +1,35 @@
-//! The headless autopilot: the deterministic "brain" that drives the user's
-//! ball-carrier slot when no human is steering. It reads the authoritative
-//! simulation and returns this tick's movement stick — a policy that carries the
-//! ball toward the opponent goal while steering through the defense — plus the
-//! decision of when to release a pass.
+//! The headless **autopilot**: the deterministic policy that plays the run game
+//! when nobody is holding a phone.
+//!
+//! It answers exactly the questions a player answers, and nothing else — which
+//! play to call at the line ([`call_play`]), and what to do about the defender
+//! in front of you right now ([`decide_move`]). *Where* to run is not one of
+//! them: the ball carrier's heading is the AI's, for everybody, and lives in
+//! [`crate::ai::carry`]. That split is the point — this file used to also
+//! produce a movement stick, which meant the headless game and the played game
+//! were being driven by two different pieces of code that could disagree.
 //!
 //! It is a pure function of the simulation: no I/O, no wall clock, no
 //! randomness, so an autopiloted run replays bit-for-bit like any other run.
-//! The autopilot owns the four decisions a player makes: WHICH play to call at
-//! the line ([`call_play`]), WHICH read to take in a decision window
-//! ([`decide`]), WHERE to run ([`steer`]), and — for the ambient cone-aimed
-//! throw — WHEN to release ([`should_throw`]).
 //!
-//! [`decide`] is also the prototype's **tuning instrument**: running the same
-//! attempt loop under an impatient, a balanced and a greedy [`Patience`] is how
-//! we check that waiting for the deep read really is a trade rather than a free
-//! upgrade. If every patience profile posts the same numbers, the prototype has
-//! failed its own design question.
+//! It is also the game's **tuning instrument**. Running the same carry under
+//! different [`Aggression`] profiles is how we check that the three moves are
+//! genuinely different tools rather than three spellings of one: if a policy
+//! that only ever jukes posts the same numbers as one that reads the geometry,
+//! the design has failed its own claim.
 
-use axiom::prelude::Vec2;
-
-use crate::attempt::{AttemptPhase, AttemptStep, PlayerChoice, MAX_WINDOWS};
-use crate::data::prototype::{concept, READ_COUNT};
-use crate::field::OffensePoint;
+use crate::attempt::{AttemptPhase, AttemptStep};
+use crate::identity::PlayerId;
 use crate::player::PlayerSim;
+use crate::runback::RunbackMove;
 use crate::state::SimState;
 
-/// How far around the carrier a defender begins to influence steering, yards.
-const THREAT_RADIUS: f32 = 11.0;
-/// Candidate headings the policy scores, radians off straight-downfield
-/// (negative = toward the offense's left, positive = toward its right).
-const FAN: [f32; 9] = [-1.15, -0.8, -0.5, -0.25, 0.0, 0.25, 0.5, 0.8, 1.15];
-/// How far off centre the steering treats as the sideline, yards.
-const SIDELINE: f32 = 24.5;
-/// A receiver is "open" once his nearest defender is farther than this, yards —
-/// the band below which a throw risks an interception.
-const OPEN_ENOUGH: f32 = 4.0;
-/// A receiver must be at least this far downfield of the passer to be worth a
-/// throw, yards (throwing flat or behind never advances the ball).
-const THROW_LEAD: f32 = 3.0;
-
-/// How patient a simulated quarterback is — the knob the balance harness
-/// sweeps. A patient policy holds out for a deeper read and eats the sacks that
-/// come with waiting; an impatient one takes the checkdown every time.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Patience {
-    /// The shallowest read this policy will settle for (`0` = the quick out).
-    pub floor: usize,
-    /// How open a read must look before this policy takes it, `0..1`.
-    pub demand: f32,
-    /// Pocket pressure above which it abandons the read and runs, `0..1`.
-    pub bail: f32,
-}
-
-impl Patience {
-    /// Takes the first thing available.
-    pub const IMPATIENT: Patience = Patience {
-        floor: 0,
-        demand: 0.20,
-        bail: 0.92,
-    };
-    /// Waits for a real look but does not chase the deep shot.
-    pub const BALANCED: Patience = Patience {
-        floor: 0,
-        demand: 0.48,
-        bail: 0.80,
-    };
-    /// Refuses the checkdown and holds out for the intermediate or the post.
-    pub const GREEDY: Patience = Patience {
-        floor: 1,
-        demand: 0.42,
-        bail: 0.74,
-    };
-}
-
-/// The choice this policy makes in an open decision window, or `None` to let the
-/// window close and wait for a better look. `None` is a real decision with a
-/// real cost — the rush is closer when the next window opens, and the window
-/// after that is shorter.
-/// The concept the autopilot always calls.
+/// The concept the autopilot calls, unless told otherwise.
 ///
-/// Fixed, and deliberately so. [`decide`] is the prototype's balance
-/// instrument, and a policy that also shopped the PLAYBOOK would confound the
-/// thing it measures: two patience profiles could post different numbers
-/// because they ran different routes rather than because they waited
-/// differently. The autopilot answers the read question and nothing else.
+/// Fixed by default, and deliberately: [`decide_move`] is the instrument, and a
+/// policy that also shopped the playbook would confound what it measures — two
+/// profiles could post different numbers because they ran different plays rather
+/// than because they answered defenders differently.
 pub const AUTOPILOT_CONCEPT: usize = 0;
 
 /// The play to call, while the offense is waiting on one (`None` otherwise).
@@ -94,116 +40,150 @@ pub fn call_play(step: &AttemptStep) -> Option<usize> {
     matches!(step.phase, AttemptPhase::PlayCall).then_some(AUTOPILOT_CONCEPT)
 }
 
-pub fn decide(step: &AttemptStep, patience: Patience) -> Option<PlayerChoice> {
-    if !step.phase.in_window() {
-        return None;
-    }
-    let read = &step.read;
-    let rewards = concept(read.concept).read_rewards;
-    let max_reward = rewards[READ_COUNT - 1].max(1.0);
-    let value = |r: usize| read.read(r).openness * rewards[r] / max_reward;
-    let pick = (patience.floor.min(READ_COUNT - 1)..READ_COUNT)
-        .filter(|r| read.read(*r).live)
-        .max_by(|a, b| value(*a).total_cmp(&value(*b)))?;
-    // The last window is the last chance: after it closes, nobody is asking
-    // again and the rush finishes the job.
-    let last_chance = step.windows >= MAX_WINDOWS;
-    let panicking = read.pressure >= patience.bail;
-    if read.read(pick).openness >= patience.demand {
-        return Some(PlayerChoice::Throw(pick));
-    }
-    match (panicking, last_chance) {
-        (true, _) => Some(PlayerChoice::Scramble),
-        (false, true) => Some(PlayerChoice::Throw(pick)),
-        (false, false) => None,
-    }
+/// How a simulated back answers an encounter — the knob the harness sweeps.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Aggression {
+    /// How near a defender must be before the policy does anything at all, yd.
+    /// Its whole skill is here: react too early and the move is spent before the
+    /// defender commits, too late and he has already made the tackle.
+    pub react_range: f32,
+    /// Closing speed at or above which contact is worth *taking* rather than
+    /// avoiding, yd/s.
+    pub charge_speed: f32,
+    /// How square the defender must be, `0..1`, before the policy prefers going
+    /// round or over him to going through him.
+    pub charge_max_brace: f32,
+    /// Whether the leap is on the table at all.
+    pub will_jump: bool,
 }
 
-/// This tick's movement stick for the autopilot, offense-relative (`x` = right,
-/// `y` = downfield), each in `-1..=1`. Returns [`Vec2::ZERO`] whenever the
-/// autopilot is steering no one — pre-snap, the ball in flight, the play dead,
-/// or the defense in possession — leaving the AI intents untouched.
-pub fn steer(sim: &SimState) -> Vec2 {
-    let Some(id) = sim.controlled_player() else {
-        return Vec2::ZERO;
+impl Aggression {
+    /// Reads the geometry and picks the move that fits it — the profile the
+    /// agent and the balance harness both run.
+    pub const BALANCED: Aggression = Aggression {
+        react_range: 3.4,
+        charge_speed: 6.2,
+        charge_max_brace: 0.72,
+        will_jump: true,
     };
-    let carrier = sim.players[id.index()];
-    let here = sim.frame.from_world(carrier.pos);
-    // Defenders still able to make a play, in offense-relative coordinates.
-    let threats: Vec<OffensePoint> = sim
-        .players
-        .iter()
-        .filter(|p| p.team != carrier.team && p.anim.can_act())
-        .map(|p| sim.frame.from_world(p.pos))
-        .collect();
-    let best = FAN
-        .iter()
-        .map(|&angle| (angle, score_heading(angle, here, &threats)))
-        .max_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(angle, _)| angle)
-        .unwrap_or(0.0);
-    // Offense-relative unit heading: `y` downfield (cos), `x` lateral (sin).
-    Vec2::new(best.sin(), best.cos())
-}
-
-/// Score a candidate heading (radians off downfield) from the carrier at `here`:
-/// reward downfield progress, punish running toward a defender or off the field.
-fn score_heading(angle: f32, here: OffensePoint, threats: &[OffensePoint]) -> f32 {
-    let dir_down = angle.cos();
-    let dir_lat = angle.sin();
-    // Downfield progress is the base reward; a backward heading scores negative.
-    let mut score = dir_down * 2.0;
-    // Steer off a near sideline: look a few yards along the heading and penalize
-    // leaving the field.
-    let ahead_lat = here.lateral + dir_lat * 6.0;
-    score -= (ahead_lat.abs() - SIDELINE).max(0.0) * 1.5;
-    for threat in threats {
-        let rel_down = threat.downfield - here.downfield;
-        let rel_lat = threat.lateral - here.lateral;
-        let dist = (rel_down * rel_down + rel_lat * rel_lat).sqrt();
-        // Only defenders ahead or beside, and within reach, threaten this run.
-        if dist >= THREAT_RADIUS || rel_down <= -1.5 {
-            continue;
-        }
-        let inv = 1.0 / dist.max(0.5);
-        // How aligned the heading is with the defender's bearing (1 = straight
-        // at him); running away from him costs nothing.
-        let alignment = ((dir_down * rel_down + dir_lat * rel_lat) * inv).max(0.0);
-        let closeness = (THREAT_RADIUS - dist) / THREAT_RADIUS;
-        score -= alignment * closeness * 4.0;
-    }
-    score
-}
-
-/// Whether the autopilot should release the pass THIS tick: the quarterback is
-/// holding a live ball and the receiver the simulation would throw to (the
-/// nearest eligible one) is open and working downfield of the passer. Until then
-/// the quarterback keeps scrambling and the routes keep developing.
-pub fn should_throw(sim: &SimState) -> bool {
-    let holding = sim.possession == Some(sim.quarterback);
-    let Some(&target) = sim.throwable.first() else {
-        return false;
+    /// Never takes contact: everything is a cut.
+    pub const EVASIVE: Aggression = Aggression {
+        react_range: 3.4,
+        charge_speed: f32::INFINITY,
+        charge_max_brace: 0.0,
+        will_jump: false,
     };
-    let here = sim
-        .frame
-        .from_world(sim.players[sim.quarterback.index()].pos);
-    let receiver = sim.players[target.index()];
-    let spot = sim.frame.from_world(receiver.pos);
-    holding
-        && spot.downfield > here.downfield + THROW_LEAD
-        && nearest_defender_distance(sim, receiver) > OPEN_ENOUGH
+    /// Runs at everything.
+    pub const BRUISING: Aggression = Aggression {
+        react_range: 3.0,
+        charge_speed: 0.0,
+        charge_max_brace: 1.0,
+        will_jump: false,
+    };
 }
 
-/// The distance from `receiver` to the nearest opposing player who can still
-/// make a play, yards on the ground plane ([`f32::INFINITY`] if none can).
-fn nearest_defender_distance(sim: &SimState, receiver: PlayerSim) -> f32 {
+/// The nearest defender in front of the runner who can still make a play, with
+/// the ground gap to him.
+///
+/// "In front" is measured along the drive, not around him: a defender level with
+/// or behind the runner is not an encounter, and answering one is how a policy
+/// wastes the move it needs two ticks later.
+pub fn nearest_threat(sim: &SimState, runner: &PlayerSim) -> Option<(PlayerId, f32)> {
+    let forward = sim.frame.forward();
     sim.players
         .iter()
-        .filter(|p| p.team != receiver.team && p.anim.can_act())
-        .map(|p| {
-            let dx = p.pos.x - receiver.pos.x;
-            let dz = p.pos.z - receiver.pos.z;
-            (dx * dx + dz * dz).sqrt()
+        .filter(|p| p.team != runner.team && p.anim.can_act())
+        .filter_map(|p| {
+            let to = p.pos.subtract(runner.pos);
+            let flat = axiom::prelude::Vec3::new(to.x, 0.0, to.z);
+            (flat.dot(forward) > -0.5).then(|| (p.id, flat.length()))
         })
-        .fold(f32::INFINITY, f32::min)
+        .fold(None::<(PlayerId, f32)>, |best, (id, gap)| {
+            match best.map(|(_, b)| gap < b).unwrap_or(true) {
+                true => Some((id, gap)),
+                false => best,
+            }
+        })
+}
+
+/// The encounter in front of the runner right now: who, how far, how fast the
+/// two are coming together, and how set he is to meet it.
+///
+/// This is the **eyes**, and it is deliberately separate from every policy that
+/// reads it. [`decide_move`] and [`crate::agent`] both look at exactly this, so
+/// the headless game and the agent can never end up judging different fields —
+/// only deciding differently about the same one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Encounter {
+    pub defender: PlayerId,
+    /// Ground gap between the two bodies, yd.
+    pub gap: f32,
+    /// Closing speed along the contact normal, yd/s — the charge's own input.
+    pub closing: f32,
+    /// How squarely the defender is set to meet a hit, `0..=1`.
+    pub brace: f32,
+    /// Whether he is coming from the offense's right hand. A cut goes the other
+    /// way.
+    pub from_right: bool,
+}
+
+/// Read the encounter in front of the runner, if there is one.
+pub fn encounter(sim: &SimState, step: &AttemptStep) -> Option<Encounter> {
+    let back = step.runback.back?;
+    let runner = &sim.players[back.index()];
+    let (defender_id, gap) = nearest_threat(sim, runner)?;
+    let defender = &sim.players[defender_id.index()];
+    let to = defender.pos.subtract(runner.pos);
+    let flat = axiom::prelude::Vec3::new(to.x, 0.0, to.z);
+    let direction = flat.mul_scalar(1.0 / flat.length().max(1.0e-4));
+    Some(Encounter {
+        defender: defender_id,
+        gap,
+        closing: axiom::prelude::Vec3::new(
+            runner.vel.x - defender.vel.x,
+            0.0,
+            runner.vel.z - defender.vel.z,
+        )
+        .dot(direction),
+        brace: defender.facing_dir().dot(direction.mul_scalar(-1.0)).max(0.0),
+        from_right: direction.dot(sim.frame.right()) >= 0.0,
+    })
+}
+
+/// What the policy does about the man in front of it this tick, or `None` to
+/// keep running.
+///
+/// The decision is the geometry, in the order a person would read it:
+///
+/// 1. **Is anyone actually there?** Nothing inside `react_range` means nothing
+///    to answer, and a move spent on empty grass is a move you do not have when
+///    somebody arrives.
+/// 2. **Can I go through him?** Enough closing speed, and he is not squared up
+///    to meet it. This is the [`crate::runback::charge`] contest's own inputs,
+///    read the same way the resolution will read them, so the policy is
+///    *predicting* the collision rather than guessing at it.
+/// 3. **Can I go over him?** Only if the leap is ready — otherwise this is a
+///    free way to be tackled while airborne and out of options.
+/// 4. **Otherwise, go round him** — cut away from the side he is coming from.
+pub fn decide_move(sim: &SimState, step: &AttemptStep, policy: Aggression) -> Option<RunbackMove> {
+    if !step.phase.controllable() {
+        return None;
+    }
+    let seen = encounter(sim, step)?;
+    if seen.gap > policy.react_range {
+        return None;
+    }
+    let can_charge = seen.closing >= policy.charge_speed && seen.brace <= policy.charge_max_brace;
+    let can_jump = policy.will_jump && step.runback.jump_available;
+    match (can_charge, can_jump) {
+        (true, _) => Some(RunbackMove::Shoulder),
+        // Over the top of a man who is squared up and waiting: exactly the
+        // encounter the charge would lose.
+        (false, true) => Some(RunbackMove::Jump),
+        // Cut AWAY from him.
+        (false, false) => match seen.from_right {
+            true => Some(RunbackMove::JukeLeft),
+            false => Some(RunbackMove::JukeRight),
+        },
+    }
 }

@@ -84,6 +84,70 @@ pub fn trips_right_offense() -> FormationDefinition {
 }
 
 // ---------------------------------------------------------------------------
+// RUN formations. Same seven slots, but slot 6 is the RUNNING BACK — the
+// player-controlled character — and he lines up in the BACKFIELD rather than
+// split out. Slots 4/5 stay the two wide players; on a run they block the
+// perimeter rather than run routes.
+//
+// The three sets differ where the back stands relative to the quarterback,
+// because that is what decides which hole he can reach: straight behind him for
+// a downhill dive, offset away from the play for an off-tackle cut, and set
+// opposite the sweep so he can cross the formation and get outside.
+// ---------------------------------------------------------------------------
+
+/// Power I: the back stacked deep and straight behind the quarterback, both
+/// wide players tight enough to crack back inside. The downhill set.
+pub fn power_i_offense() -> FormationDefinition {
+    FormationDefinition {
+        name: "power-i",
+        slots: [
+            slot(0, 0.0, -2.2),   // quarterback, under centre
+            slot(1, 0.0, -0.7),   // snapper on the ball
+            slot(2, -1.8, -0.8),  // left guard
+            slot(3, 1.8, -0.8),   // right guard
+            slot(4, -9.5, -0.6),  // split end (offense left)
+            slot(5, 9.5, -0.6),   // split end (offense right)
+            slot(6, 0.0, -6.0),   // I-back, deep and square
+        ],
+    }
+}
+
+/// Single back: the back offset to the LEFT of the quarterback so his first
+/// step carries him across and out behind the right guard, with an extra body
+/// walked in to that side.
+pub fn single_back_offense() -> FormationDefinition {
+    FormationDefinition {
+        name: "single-back",
+        slots: [
+            slot(0, 0.0, -2.2),
+            slot(1, 0.0, -0.7),
+            slot(2, -1.8, -0.8),
+            slot(3, 1.8, -0.8),
+            slot(4, -11.5, -0.6), // split end (offense left)
+            slot(5, 7.0, -1.4),   // wing right — the extra edge blocker
+            slot(6, -2.6, -5.2),  // offset back, working right
+        ],
+    }
+}
+
+/// Wing left: the back set to the RIGHT and a wing walked in tight on the LEFT,
+/// so the sweep crosses the formation behind a blocker already on the edge.
+pub fn wing_left_offense() -> FormationDefinition {
+    FormationDefinition {
+        name: "wing-left",
+        slots: [
+            slot(0, 0.0, -2.2),
+            slot(1, 0.0, -0.7),
+            slot(2, -1.8, -0.8),
+            slot(3, 1.8, -0.8),
+            slot(4, -7.5, -1.4),  // wing left — leads the sweep
+            slot(5, 11.0, -0.6),  // split end (offense right)
+            slot(6, 3.0, -5.2),   // back set opposite the play
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Defensive formations, authored in the OFFENSE's frame (downfield > 0 is the
 // defense's side of the ball). The count of players near the line vs deep is
 // what makes a front "heavy" or "light" — the selector picks a call whose

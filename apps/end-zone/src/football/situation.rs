@@ -98,6 +98,10 @@ pub fn classify(
             _ => BallSituation::Dead,
         },
         BallState::Snap { .. } => BallSituation::HeldByQb,
+        // The exchange is already a run: the defense must rally to the back
+        // while the ball is in the air between them, not a fifth of a second
+        // after it lands.
+        BallState::Handoff { .. } => BallSituation::Caught,
         BallState::Held { carrier } if carrier == quarterback => {
             if qb_windup {
                 BallSituation::ThrowWindup

@@ -45,6 +45,10 @@ pub fn call_weights(tag: OffenseTag, down: u8, distance: f32, heat: u8) -> [u32;
         OffenseTag::QuickPass => [3, 1, 2, 3, 0],
         OffenseTag::DeepPass => [2, 3, 2, 1, 1],
         OffenseTag::Flood => [1, 3, 3, 1, 1],
+        // A run is answered by bodies near the line, never by a shell: tight
+        // man keeps a defender on every gap, the edge blitz sets a hard edge,
+        // and a two-man-front prevent hands the back the whole field.
+        OffenseTag::Run => [3, 2, 1, 3, 0],
     };
 
     let long = distance >= 8.0;

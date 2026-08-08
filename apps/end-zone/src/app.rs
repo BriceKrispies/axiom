@@ -150,12 +150,11 @@ impl EndZoneApp {
     /// the dilated frames from being a held-and-jump slideshow.
     pub fn advance(&mut self, keys_down: &[KeyToken], touch: TouchInput) {
         let size = Vec2::new(WIDTH as f32, HEIGHT as f32);
-        let stick = self.input.sample(size, keys_down, touch);
+        self.input.sample(size, keys_down, touch);
 
         self.sim_credit += self.run.time_scale().clamp(MIN_TIME_SCALE, MAX_TIME_SCALE);
         while self.sim_credit >= 1.0 {
             self.sim_credit -= 1.0;
-            self.run.set_user_stick(stick);
             let commands = self.input.drain();
             let output = self.run.step(&commands);
             self.last_camera_mode = output.camera_mode;

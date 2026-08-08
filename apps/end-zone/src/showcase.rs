@@ -1,10 +1,14 @@
 //! The headless [`ShowcaseRun`] harness the app, tests, and replay proofs all
-//! share. A run is either the AMBIENT loop (one play cycling behind the title,
-//! triggered at fixed tick offsets, every other behavior emerging from the real
-//! systems) or a real [`AttemptController`] session: the decision-window
-//! prototype.
+//! share. A run is either the AMBIENT loop (one pass play cycling behind the
+//! title, triggered at fixed tick offsets, every other behavior emerging from
+//! the real systems) or a real [`AttemptController`] session: the run game.
+//!
+//! The two loops are deliberately different football. The ambient showcase keeps
+//! the pass play it always ran — it is the menu backdrop, and it is what keeps
+//! the app's throw/flight/catch framework exercised and honest. The session is
+//! the game: call a run, take the handoff, survive it.
 
-use crate::attempt::{AttemptController, AttemptStep, PlayerChoice};
+use crate::attempt::{AttemptController, AttemptStep};
 use crate::camera::{CameraDirector, CameraMode, CameraPose};
 use crate::config::EndZoneConfig;
 use crate::data::{CameraTuning, JuiceTuning};
@@ -74,9 +78,9 @@ impl ShowcaseRun {
     /// A real decision-window session from one immutable [`RunConfig`].
     /// Restarting with the same config reproduces the same initial state.
     pub fn new_run(config: &RunConfig) -> Self {
-        let setup = resolve_run(config, crate::attempt::PROTOTYPE_HEAT);
+        let setup = resolve_run(config, crate::attempt::RUN_HEAT);
         let mut sim = SimState::new_match(&setup);
-        sim.install_play(crate::data::prototype::prototype_play());
+        sim.install_play(crate::data::concept::opening_play());
         let mut controller = AttemptController::new();
         controller.arm(&mut sim, config);
         sim.reset_to_formation(true);
@@ -93,16 +97,9 @@ impl ShowcaseRun {
     /// The attempt loop's view for this tick, when this is a real session.
     pub fn attempt(&self) -> Option<AttemptStep> {
         match &self.run_loop {
-            RunLoop::Attempt(controller, _) => controller.view(self.sim.tick),
+            RunLoop::Attempt(controller, _) => Some(controller.view(self.sim.runback_status())),
             RunLoop::Ambient(_) => None,
         }
-    }
-
-    /// Whether the offense is at the line waiting for a play to be called,
-    /// where the number keys mean plays rather than reads.
-    fn awaiting_call(&self) -> bool {
-        self.attempt()
-            .is_some_and(|step| matches!(step.phase, crate::attempt::AttemptPhase::PlayCall))
     }
 
     /// The running session totals, when this is a real session.
@@ -113,8 +110,7 @@ impl ShowcaseRun {
         }
     }
 
-    /// How fast the simulation should advance relative to real time — the
-    /// decision window's slow motion, without the simulation knowing about it.
+    /// How fast the simulation should advance relative to real time.
     pub fn time_scale(&self) -> f32 {
         match &self.run_loop {
             RunLoop::Attempt(controller, _) => controller.time_scale(),
@@ -130,19 +126,6 @@ impl ShowcaseRun {
         }
     }
 
-    /// Feed the movement stick. Only a committed decision hands the player a
-    /// body; while the play develops the simulation owns everyone.
-    pub fn set_user_stick(&mut self, stick: axiom::prelude::Vec2) {
-        let allowed = match &self.run_loop {
-            RunLoop::Ambient(_) => true,
-            RunLoop::Attempt(controller, _) => controller.phase().steerable(),
-        };
-        self.sim.user_stick = match allowed {
-            true => stick,
-            false => axiom::prelude::Vec2::ZERO,
-        };
-    }
-
     /// Pick the offensive concept for the coming snap; false outside pre-snap.
     pub fn select_concept(&mut self, index: usize) -> bool {
         match &mut self.run_loop {
@@ -151,10 +134,11 @@ impl ShowcaseRun {
         }
     }
 
-    /// Offer a decision to the loop; false if it was stale and dropped.
-    pub fn choose(&mut self, choice: PlayerChoice) -> bool {
+    /// Offer the running back's move to the loop; false if it was stale and
+    /// dropped. The ONE gameplay verb the player has once the ball is theirs.
+    pub fn command(&mut self, wanted: crate::runback::RunbackMove) -> bool {
         match &mut self.run_loop {
-            RunLoop::Attempt(controller, _) => controller.choose(choice),
+            RunLoop::Attempt(controller, _) => controller.command(wanted),
             RunLoop::Ambient(_) => false,
         }
     }
@@ -176,17 +160,15 @@ impl ShowcaseRun {
                         controller.request_reset();
                     }
                 }
-                // One key, two meanings, split by phase: while the offense is
-                // waiting on a call the number picks the PLAY; once the ball is
-                // live it picks the READ. Same keys, one mental model.
-                DiagnosticCommand::SelectRead(read) if self.awaiting_call() => {
-                    self.select_concept(*read);
+                // The number row means one thing all game: which play to run.
+                DiagnosticCommand::SelectPlay(play) => {
+                    self.select_concept(*play);
                 }
-                DiagnosticCommand::SelectRead(read) => {
-                    self.choose(PlayerChoice::Throw(*read));
-                }
-                DiagnosticCommand::Scramble => {
-                    self.choose(PlayerChoice::Scramble);
+                // The four moves. Stale ones (before the exchange, during a
+                // cooldown) are refused by the loop and the simulation, never
+                // banked.
+                DiagnosticCommand::Move(wanted) => {
+                    self.command(*wanted);
                 }
                 DiagnosticCommand::PrimaryAction => self.primary_action(tick, &mut user_commands),
                 _ => {}
@@ -219,13 +201,14 @@ impl ShowcaseRun {
     }
 
     /// The contextual action button, resolved against the PRE-step state.
+    ///
+    /// It belongs to the AMBIENT showcase only. The run game has no contextual
+    /// verb — every one of its four moves is its own explicit input, because a
+    /// button whose meaning depends on the geometry would be making the read for
+    /// the player.
     fn primary_action(&mut self, tick: u64, user_commands: &mut Vec<SimCommand>) {
-        // In a real session this is the touch twin of the numbered keys.
-        if let Some(step) = self.attempt() {
-            if step.phase.accepts_choice() {
-                self.choose(PlayerChoice::Throw(step.read.best));
-                return;
-            }
+        if self.attempt().is_some() {
+            return;
         }
         match self.sim.phase {
             crate::state::PlayPhase::PreSnap => {

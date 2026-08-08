@@ -48,6 +48,7 @@ impl SimState {
                 0.0,
                 end_zone_target.z,
             ),
+            frame: self.frame,
             throw_commanded: self.throw_commanded,
         };
         let mut intents = Vec::with_capacity(PLAYER_COUNT);
@@ -69,13 +70,17 @@ impl SimState {
         self.roles = roles;
         self.ai_memory.commitments = commitments;
         self.intents = intents;
-        self.apply_user_stick();
     }
 
-    /// The player the user steers: the ball holder while the OFFENSE has
-    /// possession in a live play (the quarterback pre-throw, the receiver
-    /// after the catch). `None` otherwise — the ball in flight, the defense,
-    /// a downed carrier, or a dead play are never user-driven.
+    /// The player the user's controls act on: the ball holder while the OFFENSE
+    /// has possession in a live play. `None` otherwise — the ball mid-exchange,
+    /// the defense, a downed carrier, or a dead play are never user-driven.
+    ///
+    /// Note what it does *not* do any more: it no longer hands anyone a
+    /// movement stick. The carrier's path is the AI's (see
+    /// [`crate::ai::carry`]); what the player owns is
+    /// [`crate::runback::RunbackMove`], and only when this resolves to the
+    /// running back.
     pub fn controlled_player(&self) -> Option<crate::identity::PlayerId> {
         self.possession
             .filter(|_| self.phase == PlayPhase::Live)
@@ -83,64 +88,6 @@ impl SimState {
                 let player = &self.players[id.index()];
                 player.team == self.play.possession && player.anim.can_act()
             })
-    }
-
-    /// A live stick past the dead zone replaces the controlled player's AI
-    /// intent with a movement intent (the controller still applies every
-    /// acceleration/turn-rate/boundary limit). Stick `x` is toward the
-    /// offense's right hand, `y` is downfield — matching the follow cameras,
-    /// which look downfield from behind the offense.
-    fn apply_user_stick(&mut self) {
-        const DEAD_ZONE: f32 = 0.18;
-        const REACH: f32 = 4.0;
-        let stick = self.user_stick;
-        let magnitude = (stick.x * stick.x + stick.y * stick.y).sqrt();
-        if magnitude <= DEAD_ZONE {
-            return;
-        }
-        let Some(id) = self.controlled_player() else {
-            return;
-        };
-        let clamped = magnitude.min(1.0);
-        let direction = self
-            .frame
-            .right()
-            .mul_scalar(stick.x)
-            .add(self.frame.forward().mul_scalar(stick.y));
-        let length = direction.length();
-        if length <= 1.0e-4 {
-            return;
-        }
-        let player = &self.players[id.index()];
-        let point = player
-            .pos
-            .add(direction.mul_scalar(REACH * clamped / length));
-        let point = Vec3::new(point.x, 0.0, point.z);
-        let sprint = clamped > 0.55;
-        // The passer is steered differently from a ball carrier: he STRAFES.
-        // A carrier turns to run where he is going, but a quarterback keeps his
-        // eyes downfield — the stick slides him around the pocket and only
-        // swings his aim within a bounded forward arc, so he never spins away
-        // from the play (and the throwing cone stays usable).
-        self.intents[id.index()] = match id == self.quarterback {
-            true => super::PlayerIntent::DropBack {
-                point,
-                face: self.passer_aim(stick.x),
-                sprint,
-            },
-            false => super::PlayerIntent::MoveToward { point, sprint },
-        };
-    }
-
-    /// The direction a steered quarterback faces for a given lateral stick.
-    /// Straight downfield at centre, swinging to at most `qb_aim_max_yaw` off
-    /// it at full deflection — the forward arc his facing is clamped to.
-    fn passer_aim(&self, lateral: f32) -> Vec3 {
-        let yaw = lateral.clamp(-1.0, 1.0) * self.tuning.qb_aim_max_yaw;
-        self.frame
-            .forward()
-            .mul_scalar(yaw.cos())
-            .add(self.frame.right().mul_scalar(yaw.sin()))
     }
 
     /// Record this tick's true world state into the perception ring the

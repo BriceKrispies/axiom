@@ -15,12 +15,28 @@ pub enum CameraMode {
     PassFlight,
     CatchResolve,
     Impact,
-    /// The decision window's read framing: high and pulled back so the pocket,
-    /// all three routes and the coverage between them are on screen at once.
-    /// Without it the window asks the player to judge a picture they cannot
-    /// see — the follow shot behind the quarterback frames the pocket beautifully
-    /// and crops every receiver out of frame.
-    DecisionRead,
+    /// **The run game's shot.** A close third-person chase, tucked in behind and
+    /// a little above the running back, looking downfield.
+    ///
+    /// It is not [`CameraMode::BallCarrierFollow`] with new numbers, and the
+    /// difference is the whole point. The follow shot is a *broadcast* camera:
+    /// it sits well back, bends hard toward the carrier's velocity, and frames
+    /// him against the field — beautiful, and useless for the only four
+    /// judgements this game asks you to make. This one is composed backwards
+    /// from those judgements:
+    ///
+    /// * **read the man in front of you** — low and close, so a defender eight
+    ///   yards out fills real screen space instead of being four pixels near the
+    ///   horizon;
+    /// * **find the gap** — the yaw is pinned near straight downfield rather
+    ///   than to the runner's heading, so the blocking ahead stays in a stable
+    ///   frame you can read a seam out of, and a juke moves the *runner* across
+    ///   the picture rather than swinging the whole picture;
+    /// * **judge a jump** — the eye rises with the leap, but only partly, so you
+    ///   can see how much daylight is under you;
+    /// * **feel the speed** — close, low, and slightly wide of centre, where the
+    ///   turf detail streams past.
+    RunbackChase,
 }
 
 /// A camera pose: eye, look-at target, vertical field of view in degrees.
@@ -141,61 +157,70 @@ pub fn desired_pose(
             target: impact_focus.add(Vec3::new(0.0, 0.9, 0.0)),
             fov_degrees: tuning.base_fov_degrees - 8.0,
         },
-        CameraMode::DecisionRead => decision_read(snapshot, tuning),
+        CameraMode::RunbackChase => runback_chase(snapshot, tuning),
     }
 }
 
-/// The read framing: high behind the offense, aimed at the middle of the route
-/// distribution, wide enough to hold every eligible target.
+/// The chase shot behind the running back.
 ///
-/// The look point is derived from where the receivers ACTUALLY are, not from a
-/// fixed offset, so the shot opens up as the routes get deeper — which is what
-/// makes the later windows feel bigger as well as more dangerous.
-fn decision_read(snapshot: &PresentationSnapshot, tuning: &CameraTuning) -> CameraPose {
+/// The yaw is a **clamped bend** off straight-downfield rather than a follow of
+/// the runner's heading, and that clamp ([`CameraTuning::chase_max_yaw_lag`]) is
+/// what makes the camera survive a juke. A camera that tracked the heading would
+/// whip through 40° in a fifth of a second every time the player cut — the exact
+/// moment they most need to see where they are going. Bending only a little
+/// keeps the world stable and lets the *runner* be the thing that moves, which
+/// is both more readable and a better sell of the cut.
+///
+/// The eye follows the leap at [`CameraTuning::chase_height_follow`] of the
+/// runner's height, never all of it: rising with him completely would hide the
+/// very thing the jump is for, which is how much air is between him and the man
+/// underneath.
+fn runback_chase(snapshot: &PresentationSnapshot, tuning: &CameraTuning) -> CameraPose {
     let back = Vec3::new(0.0, 0.0, -snapshot.drive_sign);
-    let qb = flat(snapshot.player(snapshot.quarterback).pos);
-    let targets: Vec<Vec3> = snapshot
+    let runner = snapshot
         .attempt
-        .map(|step| {
-            (0..crate::data::prototype::READ_COUNT)
-                .map(|read| flat(step.read.read(read).pos))
-                .collect()
-        })
-        .unwrap_or_default();
-    // How far downfield the deepest route has run, and how wide the spread is.
-    let depth = targets
-        .iter()
-        .map(|p| (p.z - qb.z) * snapshot.drive_sign)
-        .fold(8.0f32, f32::max);
-    let centre = match targets.is_empty() {
-        true => qb,
-        false => {
-            let sum = targets
-                .iter()
-                .fold(Vec3::ZERO, |acc, p| acc.add(*p))
-                .mul_scalar(1.0 / targets.len() as f32);
-            // Bias the look point back toward the pocket: the rush is half the
-            // read, and a shot centred on the receivers hides who is closing.
-            flat(sum).mul_scalar(0.6).add(qb.mul_scalar(0.4))
-        }
+        .and_then(|step| step.runback.back)
+        .map(|id| snapshot.player(id));
+    let (anchor, vel, height) = match runner {
+        Some(view) => (flat(view.pos), view.vel, view.pos.y),
+        None => (flat(snapshot.ball.pos), snapshot.ball.vel, 0.0),
     };
+    let speed = flat(vel).length();
+    let behind = match speed > 1.5 {
+        true => {
+            let v = flat(vel).mul_scalar(1.0 / speed);
+            let drive_yaw = back.x.atan2(back.z);
+            let vel_yaw = (-v.x).atan2(-v.z);
+            let delta = wrap_pi(vel_yaw - drive_yaw);
+            let yaw = drive_yaw + delta.clamp(-tuning.chase_max_yaw_lag, tuning.chase_max_yaw_lag);
+            Vec3::new(yaw.sin(), 0.0, yaw.cos())
+        }
+        false => back,
+    };
+    let rise = height * tuning.chase_height_follow;
     CameraPose {
-        eye: qb.add(back.mul_scalar(DECISION_PULL_BACK)).add(Vec3::new(
-            0.0,
-            DECISION_HEIGHT + depth * 0.22,
-            0.0,
-        )),
-        target: centre.add(Vec3::new(0.0, 1.2, 0.0)),
-        fov_degrees: tuning.base_fov_degrees + DECISION_FOV_WIDEN,
+        eye: anchor
+            .add(behind.mul_scalar(tuning.chase_distance))
+            .add(Vec3::new(0.0, tuning.chase_height + rise, 0.0)),
+        // Aimed past the runner, down the field: the frame's centre of interest
+        // is the traffic he is running into, not the back of his helmet.
+        target: anchor
+            .add(behind.mul_scalar(-tuning.chase_look_ahead))
+            .add(Vec3::new(0.0, 1.35 + rise * 0.5, 0.0)),
+        fov_degrees: tuning.base_fov_degrees + tuning.chase_fov_widen,
     }
 }
 
-/// How far behind the quarterback the read shot sits, yards.
-const DECISION_PULL_BACK: f32 = 17.0;
-/// Base height of the read shot, yards (it rises with route depth).
-const DECISION_HEIGHT: f32 = 11.5;
-/// Extra field of view the read shot opens up, degrees.
-const DECISION_FOV_WIDEN: f32 = 12.0;
+/// Shortest signed angle into `-PI..=PI`.
+fn wrap_pi(mut delta: f32) -> f32 {
+    while delta > core::f32::consts::PI {
+        delta -= core::f32::consts::TAU;
+    }
+    while delta < -core::f32::consts::PI {
+        delta += core::f32::consts::TAU;
+    }
+    delta
+}
 
 /// Behind-and-above follow of the current carrier (falls back to the ball
 /// when possession is empty) with velocity look-ahead and a yaw-lag clamp so

@@ -21,6 +21,9 @@ axiom-physics = { path = "../../modules/axiom-physics" }
 axiom-physical-animation = { path = "../../modules/axiom-physical-animation" }
 axiom-figure = { path = "../../modules/axiom-figure" }
 axiom-input = { path = "../../modules/axiom-input" }
+# The reusable embodied-agent substrate: End Zone is played by an agent through
+# the same controls a person uses (see `src/agent.rs`).
+axiom-agent = { path = "../../modules/axiom-agent" }
 
 # The nondeterministic browser edge — wasm32 only, so native `cargo test`
 # compiles none of it.

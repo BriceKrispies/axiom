@@ -12,6 +12,7 @@ allowed_layers = [
 ]
 
 allowed_modules = [
+    "agent",
     "engine",
     "physics",
     "physical-animation",

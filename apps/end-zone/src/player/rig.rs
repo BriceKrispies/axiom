@@ -8,7 +8,7 @@ use axiom_figure::{FigureApi, FigureDefinition, PosedPart};
 use axiom_math::{Quat, Transform, Vec3};
 
 use super::animation::JointPose;
-use super::model::{FIGURE_CENTER_Y, PARTS, PART_COUNT};
+use super::model::FIGURE_CENTER_Y;
 
 /// The **visual body root** for a player: the cosmetic frame derived from the
 /// authoritative gameplay root (`ground_pos` + `facing`, straight from the
@@ -46,23 +46,12 @@ pub fn body_transform(ground_pos: Vec3, facing: f32, pose: &JointPose, squash: f
 }
 
 /// Resolve every part to world space: joint chain under the body transform,
-/// box offsets baked by the figure facade. Falls back to an empty list if the
+/// box offsets baked. Both halves belong to the figure module — the chain walk
+/// is figure mechanism, not football — so this delegates the whole hop to
+/// [`FigureApi::posed_parts_from_joints`]. Falls back to an empty list if the
 /// figure/pose ever disagree on part count (they are both compile-time here).
 pub fn world_parts(figure: &FigureDefinition, body: Transform, pose: &JointPose) -> Vec<PosedPart> {
-    let mut locals: Vec<Transform> = Vec::with_capacity(PART_COUNT);
-    for (index, spec) in PARTS.iter().enumerate() {
-        let local = Transform::new(spec.offset, pose.joints[index], Vec3::ONE);
-        let chained = match spec.parent {
-            None => local,
-            Some(parent) => Transform::combine(locals[parent as usize], local),
-        };
-        locals.push(chained);
-    }
-    let worlds: Vec<Transform> = locals
-        .iter()
-        .map(|local| Transform::combine(body, *local))
-        .collect();
     FigureApi::new()
-        .posed_parts(figure, &worlds)
+        .posed_parts_from_joints(figure, body, &pose.joints)
         .unwrap_or_default()
 }

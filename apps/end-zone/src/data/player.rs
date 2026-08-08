@@ -70,6 +70,34 @@ pub const fn receiver() -> PlayerArchetype {
     }
 }
 
+/// The running back — the player-controlled character.
+///
+/// He is deliberately NOT a receiver with a new name. The three arcade moves
+/// each read one of his numbers, so the numbers are what make the moves feel
+/// different from anyone else's: the highest `acceleration` and `turn_rate` on
+/// the field (a juke is a change of direction, and a back who accelerated like a
+/// lineman would juke into a jog), a `mass` between a receiver's and a lineman's
+/// (the shoulder charge is a momentum contest — too light and no charge ever
+/// wins), and a `block_strength` well above a receiver's, which is the *power*
+/// term the charge reads (see `runback::charge`). Top speed sits just under a
+/// cornerback's, so breaking into space is a real escape and not a guarantee.
+pub const fn running_back() -> PlayerArchetype {
+    PlayerArchetype {
+        name: "running-back",
+        max_speed: 8.4,
+        acceleration: 12.5,
+        turn_rate: 8.5,
+        body_radius: 0.56,
+        mass: 1.25,
+        block_strength: 0.62,
+        tackle_strength: 0.4,
+        catch_radius: 1.4,
+        catch_tolerance_ticks: 12,
+        pursuit_aggressiveness: 0.5,
+        reaction_delay_ticks: 5,
+    }
+}
+
 pub const fn lineman() -> PlayerArchetype {
     PlayerArchetype {
         name: "lineman",
@@ -140,6 +168,12 @@ pub const fn safety() -> PlayerArchetype {
         reaction_delay_ticks: 7,
     }
 }
+
+/// The offensive roster slot the running back occupies — the one slot the human
+/// player inhabits, and the single place that fact is written down. Every
+/// consumer (the formations, the run concepts, the attempt loop, the camera, the
+/// agent) resolves the controlled player through it rather than hard-coding a 6.
+pub const RUNNING_BACK_SLOT: usize = 6;
 
 /// One rostered player.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -220,7 +254,8 @@ fn rated(mut a: PlayerArchetype, team: &TeamDefinition, side: RosterSide) -> Pla
 /// archetypes scaled by the team's ratings. Roster slot order is meaningful:
 /// play formations and assignments address players by roster slot `0..=6`.
 ///
-/// Offense slots: 0 QB, 1 snapper, 2/3 linemen, 4/5 receivers, 6 slot.
+/// Offense slots: 0 QB, 1 snapper, 2/3 linemen, 4/5 receivers, **6 running
+/// back** (the player-controlled character — see [`RUNNING_BACK_SLOT`]).
 /// Defense slots: 0/3 rushers, 1/2 line, 4/5 corners, 6 safety.
 pub fn roster_for(team: TeamDefinition, base_id: u8, side: RosterSide) -> RosterDefinition {
     let archetypes = match side {
@@ -231,7 +266,7 @@ pub fn roster_for(team: TeamDefinition, base_id: u8, side: RosterSide) -> Roster
             lineman(),
             receiver(),
             receiver(),
-            receiver(),
+            running_back(),
         ],
         RosterSide::Defense => [
             defender(),

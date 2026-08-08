@@ -1,22 +1,39 @@
-//! The game's fixed input map: which key or touch control means what, and how
-//! one rendered frame of raw input becomes typed commands plus a movement
-//! stick. Documented for players in `CONTROLS.md`.
+//! The game's fixed input map: which key or gesture means what, and how one
+//! rendered frame of raw input becomes typed commands. Documented for players in
+//! `CONTROLS.md`.
 //!
-//! The number row belongs to **gameplay** and carries one grammar through the
-//! whole attempt: `1`/`2`/`3` call the three plays before the snap and throw to
-//! the three reads after it, while `Space` is the scramble. Camera diagnostics
-//! were moved onto F2–F6 for exactly that reason — nothing is more confusing
-//! than a read key that also moves the camera.
+//! **One gameplay vocabulary, two surfaces.** Every input the player has resolves
+//! to a [`crate::runback::RunbackMove`] or a play call, and nothing else — there
+//! is no movement axis, because the running back runs by himself. So `W`/`A`/`S`/`D`
+//! and the four swipes are not two control schemes; they are two spellings of the
+//! same four verbs, and they meet in [`DiagnosticCommand::Move`] before anything
+//! gameplay-shaped sees them.
+//!
+//! | Verb | Key | Swipe |
+//! |---|---|---|
+//! | juke left | `A` / `←` | ◀ |
+//! | juke right | `D` / `→` | ▶ |
+//! | shoulder charge | `S` / `↓` | ▼ |
+//! | leap | `W` / `↑` | ▲ |
+//!
+//! The number row belongs to the play call: `1`/`2`/`3` pick the concept before
+//! the snap and mean nothing after it. Camera diagnostics live on F2–F6 for
+//! exactly the reason they always did — nothing is more confusing than a
+//! gameplay key that also moves the camera.
 //!
 //! Presses are *latched* rather than consumed immediately. Input is sampled
 //! every rendered frame but consumed once per simulation tick, and a frame is
 //! not a tick: a press landing on a frame that shares its tick with others must
 //! still survive to it. The latch is what stops those inputs being eaten.
 
-use axiom::prelude::Vec2;
+pub mod swipe;
+
 use axiom_input::{ActionId, DeviceFrame, InputState, KeyToken};
 use axiom_kernel::Tick;
 
+pub use swipe::{SwipeRecognizer, SwipeSample};
+
+use crate::runback::RunbackMove;
 
 /// Diagnostic + gameplay input commands — the vocabulary this map emits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,18 +42,14 @@ pub enum DiagnosticCommand {
     StartPlay,
     /// R: reset all showcase state to formation (idle until started).
     ResetAll,
-    /// The contextual action button (touch A / Enter): snaps the ambient play,
-    /// orders the cone-aimed throw while the quarterback holds it, and — during
-    /// a decision window — commits the highlighted read (the one-button twin of
-    /// the numbered keys, for touch).
+    /// The contextual action button (touch A / Enter): snaps the ambient play
+    /// and orders the cone-aimed throw while the ambient quarterback holds it.
     PrimaryAction,
-    /// `1`/`2`/`3` pressed. ONE command for the whole number row, because the
-    /// row means one thing at a time: before the snap it calls that play, once
-    /// the ball is live it throws to that read. A press, never a hold — there
-    /// is nothing to hold *for*, since every pass is on the money.
-    SelectRead(usize),
-    /// The scramble input: take the quarterback out of the pocket.
-    Scramble,
+    /// `1`/`2`/`3` pressed — the play call. ONE command for the whole number
+    /// row, because the row means one thing: which concept to run.
+    SelectPlay(usize),
+    /// **The running back's move.** The whole of the player's live control.
+    Move(RunbackMove),
     /// F2–F6: force a camera mode; F6 returns to automatic.
     ForceFormationCamera,
     ForceQuarterbackCamera,
@@ -48,16 +61,16 @@ pub enum DiagnosticCommand {
 }
 
 /// Gameplay actions.
-const ACTION_SCRAMBLE: ActionId = ActionId::new(1);
+const ACTION_START: ActionId = ActionId::new(1);
 const ACTION_RESET: ActionId = ActionId::new(2);
 const ACTION_PRIMARY: ActionId = ActionId::new(9);
-const ACTION_UP: ActionId = ActionId::new(10);
-const ACTION_DOWN: ActionId = ActionId::new(11);
-const ACTION_LEFT: ActionId = ActionId::new(12);
-const ACTION_RIGHT: ActionId = ActionId::new(13);
-const ACTION_READ_ONE: ActionId = ActionId::new(14);
-const ACTION_READ_TWO: ActionId = ActionId::new(15);
-const ACTION_READ_THREE: ActionId = ActionId::new(16);
+const ACTION_JUMP: ActionId = ActionId::new(10);
+const ACTION_SHOULDER: ActionId = ActionId::new(11);
+const ACTION_JUKE_LEFT: ActionId = ActionId::new(12);
+const ACTION_JUKE_RIGHT: ActionId = ActionId::new(13);
+const ACTION_PLAY_ONE: ActionId = ActionId::new(14);
+const ACTION_PLAY_TWO: ActionId = ActionId::new(15);
+const ACTION_PLAY_THREE: ActionId = ActionId::new(16);
 /// Diagnostic actions.
 const ACTION_CAM_FORMATION: ActionId = ActionId::new(3);
 const ACTION_CAM_QB: ActionId = ActionId::new(4);
@@ -71,21 +84,16 @@ const COMMAND_CAP: usize = 8;
 
 /// One frame of pointer/gamepad input from the platform edge, already debounced
 /// to single-frame edges.
-///
-/// `stick_x` / `stick_y` are fed by a **gamepad** only — there is no on-screen
-/// joystick, because the prototype does not ask the player to steer (see
-/// `web/touch.rs`). The four answers arrive as `read` / `scramble`.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct TouchInput {
-    pub stick_x: f32,
-    pub stick_y: f32,
     pub primary: bool,
     pub reset: bool,
-    /// A read chip TAPPED this frame, `0..3` — a one-shot edge, matching the
+    /// A play row TAPPED this frame, `0..3` — a one-shot edge, matching the
     /// keyboard's press.
-    pub read: Option<usize>,
-    /// The scramble control was tapped.
-    pub scramble: bool,
+    pub play: Option<usize>,
+    /// A swipe COMPLETED this frame, already recognised by
+    /// [`swipe::SwipeRecognizer`] on the deterministic side of the boundary.
+    pub swipe: Option<RunbackMove>,
 }
 
 /// The deterministic input sampler plus the latch of commands awaiting a tick.
@@ -108,11 +116,11 @@ impl GameInput {
     /// The bound input map.
     pub fn new() -> Self {
         let mut state = InputState::new();
-        state.bind_action(ACTION_SCRAMBLE, &[KeyToken::new("Space")]);
+        state.bind_action(ACTION_START, &[KeyToken::new("Space")]);
         state.bind_action(ACTION_RESET, &[KeyToken::new("KeyR")]);
-        state.bind_action(ACTION_READ_ONE, &[KeyToken::new("Digit1")]);
-        state.bind_action(ACTION_READ_TWO, &[KeyToken::new("Digit2")]);
-        state.bind_action(ACTION_READ_THREE, &[KeyToken::new("Digit3")]);
+        state.bind_action(ACTION_PLAY_ONE, &[KeyToken::new("Digit1")]);
+        state.bind_action(ACTION_PLAY_TWO, &[KeyToken::new("Digit2")]);
+        state.bind_action(ACTION_PLAY_THREE, &[KeyToken::new("Digit3")]);
         state.bind_action(ACTION_CAM_FORMATION, &[KeyToken::new("F2")]);
         state.bind_action(ACTION_CAM_QB, &[KeyToken::new("F3")]);
         state.bind_action(ACTION_CAM_FLIGHT, &[KeyToken::new("F4")]);
@@ -120,20 +128,19 @@ impl GameInput {
         state.bind_action(ACTION_CAM_AUTO, &[KeyToken::new("F6")]);
         state.bind_action(ACTION_DEBUG, &[KeyToken::new("F1")]);
         state.bind_action(ACTION_PRIMARY, &[KeyToken::new("Enter")]);
+        // The four moves. Arrow keys mirror WASD so the left hand and the right
+        // hand play the same game.
+        state.bind_action(ACTION_JUMP, &[KeyToken::new("KeyW"), KeyToken::new("ArrowUp")]);
         state.bind_action(
-            ACTION_UP,
-            &[KeyToken::new("KeyW"), KeyToken::new("ArrowUp")],
-        );
-        state.bind_action(
-            ACTION_DOWN,
+            ACTION_SHOULDER,
             &[KeyToken::new("KeyS"), KeyToken::new("ArrowDown")],
         );
         state.bind_action(
-            ACTION_LEFT,
+            ACTION_JUKE_LEFT,
             &[KeyToken::new("KeyA"), KeyToken::new("ArrowLeft")],
         );
         state.bind_action(
-            ACTION_RIGHT,
+            ACTION_JUKE_RIGHT,
             &[KeyToken::new("KeyD"), KeyToken::new("ArrowRight")],
         );
         GameInput {
@@ -143,27 +150,48 @@ impl GameInput {
         }
     }
 
-    /// Sample one rendered frame: latch its press edges and return the movement
-    /// stick, offense-relative and clamped.
-    pub fn sample(&mut self, size: Vec2, keys_down: &[KeyToken], touch: TouchInput) -> Vec2 {
+    /// Sample one rendered frame and latch its press edges.
+    ///
+    /// Every move is a **press**, never a hold: a juke is an event, and holding
+    /// `A` down is not a request to keep juking — it is a finger resting on a
+    /// key. That is the same rule the swipe recogniser enforces on the other
+    /// surface, which is why the two feel identical.
+    pub fn sample(
+        &mut self,
+        size: axiom::prelude::Vec2,
+        keys_down: &[KeyToken],
+        touch: TouchInput,
+    ) {
         let frame = DeviceFrame::new(size, keys_down, &[]);
         self.state.sample(Tick::new(self.sample_n), &frame);
         self.sample_n += 1;
 
-        // The reads are TAPPED. A press is the whole input: it calls the play
-        // before the snap and throws the pass after it, and in neither case is
-        // there anything a longer press could add.
-        let reads = [ACTION_READ_ONE, ACTION_READ_TWO, ACTION_READ_THREE];
-        let read = reads
+        let plays = [ACTION_PLAY_ONE, ACTION_PLAY_TWO, ACTION_PLAY_THREE];
+        let called = plays
             .iter()
             .position(|action| self.state.pressed(*action))
-            .or(touch.read.map(|read| read.min(2)));
-        if let Some(read) = read {
-            self.latch(DiagnosticCommand::SelectRead(read));
+            .or(touch.play.map(|play| play.min(2)));
+        if let Some(play) = called {
+            self.latch(DiagnosticCommand::SelectPlay(play));
+        }
+
+        let moves: [(ActionId, RunbackMove); 4] = [
+            (ACTION_JUKE_LEFT, RunbackMove::JukeLeft),
+            (ACTION_JUKE_RIGHT, RunbackMove::JukeRight),
+            (ACTION_SHOULDER, RunbackMove::Shoulder),
+            (ACTION_JUMP, RunbackMove::Jump),
+        ];
+        for (action, wanted) in moves {
+            if self.state.pressed(action) {
+                self.latch(DiagnosticCommand::Move(wanted));
+            }
+        }
+        if let Some(wanted) = touch.swipe {
+            self.latch(DiagnosticCommand::Move(wanted));
         }
 
         let pressed: [(ActionId, DiagnosticCommand); 9] = [
-            (ACTION_SCRAMBLE, DiagnosticCommand::Scramble),
+            (ACTION_START, DiagnosticCommand::StartPlay),
             (ACTION_RESET, DiagnosticCommand::ResetAll),
             (
                 ACTION_CAM_FORMATION,
@@ -187,17 +215,6 @@ impl GameInput {
         if touch.reset {
             self.latch(DiagnosticCommand::ResetAll);
         }
-        if touch.scramble {
-            self.latch(DiagnosticCommand::Scramble);
-        }
-
-        let axis = |negative: ActionId, positive: ActionId| -> f32 {
-            f32::from(self.state.is_down(positive)) - f32::from(self.state.is_down(negative))
-        };
-        Vec2::new(
-            (touch.stick_x + axis(ACTION_LEFT, ACTION_RIGHT)).clamp(-1.0, 1.0),
-            (touch.stick_y + axis(ACTION_DOWN, ACTION_UP)).clamp(-1.0, 1.0),
-        )
     }
 
     /// Take the latched commands for one simulation tick.

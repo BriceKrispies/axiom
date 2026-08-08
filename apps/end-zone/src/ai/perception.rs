@@ -202,7 +202,9 @@ impl SimState {
         let carrier = self.ball.carrier();
         let ground_threat = match situation {
             BallSituation::QbScramble => Some(self.quarterback),
-            BallSituation::Caught => carrier,
+            // Mid-exchange there is no carrier yet, but the back the ball is
+            // travelling to is already the man to stop.
+            BallSituation::Caught => carrier.or_else(|| self.ball.handoff_target()),
             _ => None,
         };
         let (catch_point, eta_tick, intended_receiver) = match self.ball.state {

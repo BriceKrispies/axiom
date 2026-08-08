@@ -97,29 +97,31 @@ impl CameraDirector {
         self.forced = None;
     }
 
-    /// Pull the camera up and back for an open decision window, and drop it
-    /// back where it was when the window closes.
+    /// Hold the chase shot for as long as the player has the back.
     ///
-    /// This is a snapshot-driven mode, not an event-driven one, because the
-    /// window's whole job is to persist for a beat — an edge-triggered impulse
-    /// would fire once and leave the framing behind. The spring rig does the
-    /// rest: the move OUT to the read shot and back IN to the pocket is the
-    /// most legible signal the player gets that the game is asking them
-    /// something, which is exactly what the transition needs to be.
-    fn follow_decision_window(&mut self, snapshot: &PresentationSnapshot) {
-        let asking = snapshot.attempt.is_some_and(|step| step.phase.in_window());
-        match (asking, self.mode == CameraMode::DecisionRead) {
-            (true, false) => {
-                self.return_mode = self.mode;
-                self.transition(snapshot.tick, CameraMode::DecisionRead);
+    /// Snapshot-driven, not event-driven, and that is load-bearing: the chase is
+    /// the game's *default* framing rather than a beat, so an edge-triggered
+    /// transition would be one cut away from being wrong for the rest of the
+    /// carry. Anything that legitimately steals the frame — an impact, the
+    /// whistle — sets its own mode and this hands the frame straight back the
+    /// moment it is done, because the condition (does the player have a body?)
+    /// is still true.
+    fn follow_runback(&mut self, snapshot: &PresentationSnapshot) {
+        let carrying = snapshot
+            .attempt
+            .is_some_and(|step| step.phase.shows_moves() && step.runback.back.is_some());
+        // An impact is the one thing allowed to hold the frame away from the
+        // chase: the tackle that ends a carry deserves its beat, and stealing
+        // the shot back on the same tick it began would delete every hit in the
+        // game. It returns here on its own timer via `return_mode`.
+        let impact = self.mode == CameraMode::Impact;
+        match (carrying, self.mode == CameraMode::RunbackChase, impact) {
+            (true, _, true) => self.return_mode = CameraMode::RunbackChase,
+            (true, false, false) => {
+                self.return_mode = CameraMode::RunbackChase;
+                self.transition(snapshot.tick, CameraMode::RunbackChase);
             }
-            (false, true) => {
-                let restore = match snapshot.possession == Some(snapshot.quarterback) {
-                    true => CameraMode::QuarterbackFollow,
-                    false => self.return_mode,
-                };
-                self.transition(snapshot.tick, restore);
-            }
+            (false, true, _) => self.transition(snapshot.tick, CameraMode::FormationWide),
             _ => {}
         }
     }
@@ -129,7 +131,7 @@ impl CameraDirector {
         for stamped in events {
             self.observe(snapshot, stamped);
         }
-        self.follow_decision_window(snapshot);
+        self.follow_runback(snapshot);
         if self.mode == CameraMode::CatchResolve {
             self.catch_ticks = self.catch_ticks.saturating_add(1);
             if self.catch_ticks >= self.tuning.catch_blend_ticks && snapshot.possession.is_some() {

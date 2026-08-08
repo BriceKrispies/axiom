@@ -64,11 +64,21 @@ pub fn resolve_tackle(
         );
         let distance = to_carrier.length();
         // A dive lands only on real body contact from the collision world (arc
-        // height included); a standing tackle keeps its horizontal arm-reach.
+        // height included); a standing tackle keeps its horizontal arm-reach —
+        // but only up to the height a man on his feet can actually reach.
+        //
+        // That height gate is the fix for a defect the horizontal-only test had
+        // from the start: a whiffed dive sailing clean over the carrier still
+        // measured "in range" and landed a phantom tackle, which ended the play
+        // and shook the camera for a hit that never happened. It is also what
+        // makes the running back's leap a real answer rather than an animation
+        // — a carrier genuinely above a defender's arms cannot be brought down
+        // by them, and that is one rule, written once, for both cases.
+        let within_reach = carrier_sim.pos.y <= tuning.tackle_reach_height;
         let landed = if diving {
             collision.in_contact(players[index].id, carrier)
         } else {
-            distance <= tuning.tackle_range
+            distance <= tuning.tackle_range && within_reach
         };
         if !landed {
             continue;

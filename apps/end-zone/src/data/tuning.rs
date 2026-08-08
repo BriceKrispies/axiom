@@ -1,6 +1,8 @@
-//! Named tuning data: behavior (steering/contact), camera, and juice numbers.
+//! Named tuning data: the behaviour (steering/contact) and camera numbers.
 //! Every knob the systems read lives here as plain data — nothing is buried in
-//! system code.
+//! system code. The other authoring concerns have their own files next to this
+//! one: [`super::juice_tuning`], [`super::runback_tuning`],
+//! [`super::locomotion_tuning`], [`super::biomech_tuning`].
 
 /// Steering + contact tuning shared by the generic player systems. Units:
 /// yards, seconds, radians, ticks (60 Hz), normalized strengths `0..=1`.
@@ -18,6 +20,16 @@ pub struct BehaviorTuning {
     pub block_resist: f32,
     /// Range at which a tackle attempt can land, yd.
     pub tackle_range: f32,
+    /// How high off the turf a carrier's feet may be and still be tackled by a
+    /// player standing on it, yd — a defender's tackling reach.
+    ///
+    /// The standing-tackle gate used to be purely horizontal, which is a bug
+    /// with two faces: a whiffed dive sailing *over* the carrier still registered
+    /// a tackle (the "phantom dive"), and — once the back could leap — a
+    /// defender could bring down a man clean over his head. One height is the
+    /// fix for both, and it is the number that makes the leap a real answer to
+    /// an encounter rather than an animation.
+    pub tackle_reach_height: f32,
     /// Minimum closing speed for a tackle to count, yd/s.
     pub tackle_min_closing_speed: f32,
     /// Relative speed mapped to impact strength 1.0, yd/s.
@@ -52,6 +64,15 @@ pub struct BehaviorTuning {
     pub recovery_ticks: u32,
     /// Ticks the snap takes to reach the quarterback.
     pub snap_ticks: u32,
+    /// Ticks the **exchange** takes: how long the ball is visibly travelling
+    /// from the quarterback's hands into the back's. Longer than the snap on
+    /// purpose — the snap is a blur behind the line, the handoff is the beat the
+    /// player has to be able to read, because it is the moment they take over.
+    pub handoff_ticks: u32,
+    /// How close the back must be to the quarterback for the exchange to be
+    /// legal, yd. The mesh gate: an order to hand off from further away than
+    /// this is simply refused, so possession can never jump across the field.
+    pub handoff_range: f32,
     /// The speed a pass actually leaves the hand at, yd/s (~58 mph) — a hard,
     /// realistic NFL throw.
     ///
@@ -149,6 +170,7 @@ impl Default for BehaviorTuning {
             block_engage_range: 1.4,
             block_resist: 0.8,
             tackle_range: 1.3,
+            tackle_reach_height: 1.5,
             tackle_min_closing_speed: 2.0,
             tackle_full_strength_speed: 14.0,
             pursuit_cushion: 6.0,
@@ -163,6 +185,8 @@ impl Default for BehaviorTuning {
             fall_ticks: 26,
             recovery_ticks: 40,
             snap_ticks: 7,
+            handoff_ticks: 12,
+            handoff_range: 1.9,
             pass_speed: 26.0,
             pass_speed_min: 17.0,
             min_flight_ticks: 16,
@@ -220,6 +244,23 @@ pub struct CameraTuning {
     pub formation_height: f32,
     /// Catch-resolve blend length, ticks.
     pub catch_blend_ticks: u32,
+    // --- the run game's chase shot ---
+    /// How far behind the running back the eye sits, yd. Close: the whole shot
+    /// exists to make the defender in front of him legible.
+    pub chase_distance: f32,
+    /// How high above him, yd. Above head height so the blocking ahead is not
+    /// hidden behind his own shoulders, and no higher, so it still reads as
+    /// being *with* him rather than watching from a blimp.
+    pub chase_look_ahead: f32,
+    pub chase_height: f32,
+    /// How much of the runner's airborne height the eye takes on, `0..1`.
+    pub chase_height_follow: f32,
+    /// How far the shot may bend off straight-downfield toward his heading,
+    /// radians. Small on purpose — see [`crate::camera::modes`].
+    pub chase_max_yaw_lag: f32,
+    /// Extra field of view the chase opens up, degrees: a wider frame catches
+    /// the defender arriving from the side, which is the one you get hit by.
+    pub chase_fov_widen: f32,
 }
 
 impl Default for CameraTuning {
@@ -239,61 +280,12 @@ impl Default for CameraTuning {
             formation_distance: 7.0,
             formation_height: 2.8,
             catch_blend_ticks: 18,
-        }
-    }
-}
-
-/// Presentation-effect tuning: bounded lifetimes and clamped amplitudes for
-/// every juice effect. All effects decay to exactly zero.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct JuiceTuning {
-    /// Max simultaneous effects (fixed pool).
-    pub max_effects: usize,
-    /// Dust burst: particles, life, max radius, max amplitude.
-    pub dust_particles: usize,
-    pub dust_life_ticks: u32,
-    pub dust_radius: f32,
-    /// Impact ring life + max radius.
-    pub ring_life_ticks: u32,
-    pub ring_radius: f32,
-    /// Speed streaks: count + life.
-    pub streak_count: usize,
-    pub streak_life_ticks: u32,
-    /// Ball trail: sample count + spacing ticks.
-    pub trail_points: usize,
-    pub trail_spacing_ticks: u32,
-    /// Catch flash life.
-    pub flash_life_ticks: u32,
-    /// Field wobble: max amplitude (yd) + life.
-    pub field_wobble_amplitude: f32,
-    pub field_wobble_life_ticks: u32,
-    /// Player squash: max pose compression `0..=1` + life.
-    pub squash_amplitude: f32,
-    pub squash_life_ticks: u32,
-    /// Multiplier on flash effects (catch flash, throw pulse) — the flash
-    /// accessibility control; `0` spawns no flash effects at all.
-    pub flash_scale: f32,
-}
-
-impl Default for JuiceTuning {
-    fn default() -> Self {
-        JuiceTuning {
-            max_effects: 16,
-            dust_particles: 10,
-            dust_life_ticks: 34,
-            dust_radius: 1.7,
-            ring_life_ticks: 26,
-            ring_radius: 2.2,
-            streak_count: 6,
-            streak_life_ticks: 16,
-            trail_points: 14,
-            trail_spacing_ticks: 2,
-            flash_life_ticks: 18,
-            field_wobble_amplitude: 0.16,
-            field_wobble_life_ticks: 30,
-            squash_amplitude: 0.35,
-            squash_life_ticks: 18,
-            flash_scale: 1.0,
+            chase_distance: 7.2,
+            chase_look_ahead: 9.0,
+            chase_height: 3.3,
+            chase_height_follow: 0.55,
+            chase_max_yaw_lag: 0.22,
+            chase_fov_widen: 6.0,
         }
     }
 }

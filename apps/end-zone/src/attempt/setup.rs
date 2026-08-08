@@ -1,11 +1,9 @@
-//! Building one attempt: the same offensive concept every time, against a
-//! deterministically varied defensive answer, spotted at the fixed prototype
-//! line.
+//! Building one attempt: the concept the player called, against a
+//! deterministically varied defensive answer, spotted at the fixed run line.
 //!
-//! Two things are deliberately constant. The **offense** never changes, because
-//! the prototype is testing a read, not a playbook. The **aggression** never
-//! escalates, because it is testing a decision, not a difficulty curve. What
-//! varies is the coverage the three reads have to beat — drawn from the app's
+//! One thing is deliberately constant: the **aggression** never escalates,
+//! because this is a game about executing three moves well, not a difficulty
+//! curve. What varies is the front the run has to beat — drawn from the app's
 //! existing deterministic defensive selector, keyed only on the run seed and
 //! the attempt number, so a session replays exactly and no two attempts in a
 //! row present the same picture.
@@ -15,17 +13,17 @@ use axiom::prelude::Vec3;
 use crate::ai::offense::SET_RANGE;
 use crate::ai::assignment::offense_player;
 use crate::ai::{select_defense, variation_key};
-use crate::data::prototype::{concept_play, PROTOTYPE_LINE};
+use crate::data::concept::{concept_play, RUN_LINE};
 use crate::data::PlayDefinition;
 use crate::identity::TeamId;
 use crate::launch::{resolve_defense, RunConfig};
 use crate::state::SimState;
 
-use super::{ATTEMPT_DISTANCE, PROTOTYPE_HEAT};
+use super::{ATTEMPT_DISTANCE, RUN_HEAT};
 
 /// The down the defensive selector is asked to answer. Fixed so the coverage
 /// mix stays a stable, understandable distribution rather than drifting with a
-/// game state the prototype does not have. Its distance partner is
+/// game state the run game does not have. Its distance partner is
 /// [`super::ATTEMPT_DISTANCE`], shared with the field paint so the line drawn
 /// on the turf is the line the defense was called against.
 const NOMINAL_DOWN: u8 = 2;
@@ -39,7 +37,7 @@ pub fn install(sim: &mut SimState, config: &RunConfig, index: u32, concept: usiz
         offense.tag,
         NOMINAL_DOWN,
         ATTEMPT_DISTANCE,
-        PROTOTYPE_HEAT,
+        RUN_HEAT,
         key,
     );
     let play = PlayDefinition::compose(
@@ -47,12 +45,12 @@ pub fn install(sim: &mut SimState, config: &RunConfig, index: u32, concept: usiz
         &selection.call,
         TeamId(0),
         sim.frame.direction,
-        PROTOTYPE_LINE,
+        RUN_LINE,
     );
     sim.install_play(play);
-    let (defense, tuning) = resolve_defense(config, PROTOTYPE_HEAT);
+    let (defense, tuning) = resolve_defense(config, RUN_HEAT);
     sim.reload_defense(defense, tuning);
-    sim.respot(PROTOTYPE_LINE);
+    sim.respot(RUN_LINE);
     selection.index
 }
 

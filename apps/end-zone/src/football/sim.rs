@@ -50,10 +50,90 @@ impl SimState {
         });
     }
 
+    /// Begin the exchange: the quarterback puts the ball in the back's hands.
+    ///
+    /// A *fact about the field*, exactly like the snap: it is refused unless the
+    /// quarterback is genuinely holding a live ball and the back is genuinely
+    /// close enough to take it, so a mistimed order can never conjure a handoff
+    /// across ten yards of turf. The attempt loop decides *when* to ask; this
+    /// decides whether the field agrees.
+    pub(crate) fn hand_off(&mut self, back: PlayerId) {
+        let holder = self.ball.carrier();
+        let ready = holder == Some(self.quarterback)
+            && self.phase == PlayPhase::Live
+            && back != self.quarterback
+            && self.players[back.index()].anim.can_act()
+            && self.mesh_distance(back) <= self.tuning.handoff_range;
+        if !ready {
+            return;
+        }
+        self.ball.state = BallState::Handoff {
+            from: self.quarterback,
+            to: back,
+            start: self.ball.pos,
+            elapsed: 0,
+            total: self.tuning.handoff_ticks,
+        };
+        self.possession = None;
+        self.roles[self.quarterback.index()] = RoleState::QbDone;
+        self.players[self.quarterback.index()].set_anim(crate::player::AnimState::HandOff);
+        self.events.emit(SimEvent::PossessionChanged {
+            from: Some(self.quarterback),
+            to: None,
+        });
+        self.events.emit(SimEvent::Handoff {
+            quarterback: self.quarterback,
+            back,
+            point: self.ball.pos,
+        });
+    }
+
+    /// Ground-plane distance from the quarterback to `back` — the mesh gap the
+    /// exchange is gated on, and the same number the attempt loop reads to know
+    /// the two of them have met.
+    pub fn mesh_distance(&self, back: PlayerId) -> f32 {
+        let qb = self.players[self.quarterback.index()].pos;
+        let rb = self.players[back.index()].pos;
+        Vec3::new(rb.x - qb.x, 0.0, rb.z - qb.z).length()
+    }
+
     /// Pre-physics ball update: held sockets, the snap lerp, the release.
     pub(crate) fn ball_pre_physics(&mut self) {
         match self.ball.state {
             BallState::Dead | BallState::Grounded => {}
+            BallState::Handoff {
+                from,
+                to,
+                start,
+                elapsed,
+                total,
+            } => {
+                let taker = &self.players[to.index()];
+                let target = carry_socket(taker.pos, taker.facing, taker.anim);
+                let t = (elapsed + 1) as f32 / total.max(1) as f32;
+                self.ball.pos = Vec3::new(
+                    start.x + (target.x - start.x) * t,
+                    start.y + (target.y - start.y) * t,
+                    start.z + (target.z - start.z) * t,
+                );
+                self.ball.state = match elapsed + 1 >= total {
+                    true => {
+                        self.possession = Some(to);
+                        self.events.emit(SimEvent::PossessionChanged {
+                            from: None,
+                            to: Some(to),
+                        });
+                        BallState::Held { carrier: to }
+                    }
+                    false => BallState::Handoff {
+                        from,
+                        to,
+                        start,
+                        elapsed: elapsed + 1,
+                        total,
+                    },
+                };
+            }
             BallState::Held { carrier } => {
                 let holder = &self.players[carrier.index()];
                 self.ball.pos = carry_socket(holder.pos, holder.facing, holder.anim);

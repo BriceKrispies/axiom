@@ -20,7 +20,7 @@ use crate::player::model::{R_FOREARM, R_HAND};
 use crate::player::rig;
 use crate::presentation::juice::JuiceStack;
 use crate::presentation::particles::{effect_instances, trail_instances};
-use crate::presentation::receiver_ring::{self, RECEIVER_RING_POOL};
+use crate::presentation::carrier_ring::{self, CARRIER_RING_POOL};
 use crate::presentation::snapshot::PresentationSnapshot;
 use crate::presentation::PlayerPose;
 use crate::scene::EndZoneScene;
@@ -131,10 +131,11 @@ impl EndZoneScene {
         assign_paint(app, &self.paint_pool, &quads);
         self.paint_scratch = quads;
 
-        // Receiver rings: red on the current read, white on the rest of the cone.
-        let mut rings = Vec::with_capacity(RECEIVER_RING_POOL);
-        receiver_ring::ring_instances(snapshot, &mut rings);
-        assign_pool(app, &self.receiver_ring_pool, &rings, |r| {
+        // The foot marker: amber under the back pre-exchange, white once he is
+        // carrying (and the throwing-cone reads in the ambient showcase).
+        let mut rings = Vec::with_capacity(CARRIER_RING_POOL);
+        carrier_ring::ring_instances(snapshot, &mut rings);
+        assign_pool(app, &self.carrier_ring_pool, &rings, |r| {
             (r.transform, r.kind)
         });
 

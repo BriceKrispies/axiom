@@ -21,7 +21,7 @@ use crate::field::{
 use crate::player::model::{player_figure, PART_COUNT, TAG_COUNT};
 use crate::presentation::chalk::ChalkMaterial;
 use crate::presentation::particles::{EffectInstance, EffectMaterial};
-use crate::presentation::receiver_ring::RingKind;
+use crate::presentation::carrier_ring::RingKind;
 
 mod pools;
 
@@ -64,8 +64,9 @@ pub struct EndZoneScene {
     /// Reusable buffer for the paint the camera selects — sized once at install
     /// so the per-frame path never allocates.
     pub(crate) paint_scratch: Vec<PaintQuad>,
-    /// White rings at the feet of every receiver the quarterback can throw to.
-    pub(crate) receiver_ring_pool: Vec<(Entity, RingKind)>,
+    /// The foot marker under the player-controlled runner (and, in the ambient
+    /// showcase, the throwing-cone reads).
+    pub(crate) carrier_ring_pool: Vec<(Entity, RingKind)>,
     /// Pre-snap route chalk dots (the called play drawn on the turf).
     pub(crate) chalk_pool: Vec<(Entity, ChalkMaterial)>,
     pub(crate) juice_pool: Vec<(Entity, EffectMaterial)>,
@@ -199,12 +200,12 @@ impl EndZoneScene {
         let paint_pool = pools::paint(app, plane);
         let chalk_pool = pools::chalk(app, cube);
         let juice_pool = pools::juice(app, cube);
-        let receiver_ring_pool = pools::receiver_rings(app, cube);
+        let carrier_ring_pool = pools::carrier_rings(app, cube);
         let debug_pool = pools::debug(app, cube);
 
         EndZoneScene {
             figure,
-            receiver_ring_pool,
+            carrier_ring_pool,
             chalk_pool,
             turf,
             player_parts,

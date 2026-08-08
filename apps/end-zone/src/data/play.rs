@@ -97,6 +97,23 @@ pub enum OffenseAssignment {
     /// throwing cone (`crate::football::targeting`), so who the ball goes to
     /// depends on where he is facing, not on the play sheet.
     Quarterback { drop_depth: f32 },
+    /// Take the snap and **hand the ball to the back in `back_slot`** at the
+    /// offense-relative `mesh` point. The run game's quarterback: he opens,
+    /// carries the ball to the mesh, and gives it up. He never throws.
+    ///
+    /// The mesh is authored rather than derived because it is the play — a dive
+    /// meshes tight and immediately, a sweep meshes deep and wide, and the
+    /// difference between them is most of what makes the three concepts feel
+    /// unalike before the back ever has the ball.
+    HandOff {
+        back_slot: usize,
+        mesh: OffensePoint,
+    },
+    /// **Carry the ball.** Meet the quarterback at `mesh`, take the exchange,
+    /// then attack `aim` — the hole the play is designed to open — before
+    /// turning upfield for the end zone. This is the slot the human player
+    /// inhabits; the same assignment drives it under AI when nobody is steering.
+    RunBack { mesh: OffensePoint, aim: OffensePoint },
     /// Snap the ball, then pass-block.
     Snapper,
     /// Run a pass route (the primary or a real option).
@@ -138,6 +155,8 @@ pub enum OffenseTag {
     DeepPass,
     /// A concept that floods one side of the field to outnumber the coverage.
     Flood,
+    /// A handoff to the back: no pass, one ball carrier, and a designed hole.
+    Run,
 }
 
 /// A named offensive play: a formation plus each slot's job. This is the unit

@@ -142,6 +142,11 @@ pub struct BrainCtx<'a> {
     pub quarterback: PlayerId,
     /// Where a carrier should run (center of the opponent end zone).
     pub end_zone_target: Vec3,
+    /// The drive's offense-relative frame. The carrier's heading policy
+    /// ([`super::carry`]) reasons in lateral/downfield, and deriving that from
+    /// `end_zone_target` would be guessing at a value the simulation already
+    /// holds exactly.
+    pub frame: crate::field::OffenseFrame,
     /// The showcase controller ordered the quarterback to throw.
     pub throw_commanded: bool,
 }
@@ -175,10 +180,12 @@ pub fn decide(
     // data). After the whistle the holder just stands with the ball.
     if ctx.live && ctx.possession == Some(player.id) && !is_quarterback(assignment) {
         *role = RoleState::Carrying;
-        offense::carry_candidates(player, ctx, &mut candidates);
+        offense::carry_candidates(player, assignment, ctx, &mut candidates);
     } else {
         match assignment.kind {
             AssignmentKind::Quarterback { .. }
+            | AssignmentKind::HandOff { .. }
+            | AssignmentKind::RunBack { .. }
             | AssignmentKind::Snapper
             | AssignmentKind::Route { .. }
             | AssignmentKind::PassBlock
@@ -210,5 +217,8 @@ pub fn decide(
 }
 
 fn is_quarterback(assignment: &ResolvedAssignment) -> bool {
-    matches!(assignment.kind, AssignmentKind::Quarterback { .. })
+    matches!(
+        assignment.kind,
+        AssignmentKind::Quarterback { .. } | AssignmentKind::HandOff { .. }
+    )
 }

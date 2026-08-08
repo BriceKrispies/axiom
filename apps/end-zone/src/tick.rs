@@ -39,6 +39,10 @@ impl SimState {
         // him; it simply does not SIMULATE while the world is held.
         self.rig.mirror_players(&self.players);
         if !held {
+            // The running back's move, before contact: a won charge must have
+            // already put its defender on the turf, and a leap must already be
+            // at this tick's height, by the time the tackle stage looks.
+            self.advance_runback();
             self.resolve_contacts();
             self.ball_pre_physics();
             self.rig.step(self.tick);

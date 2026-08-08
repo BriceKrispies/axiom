@@ -1,54 +1,48 @@
-//! The attempt loop: the one place the prototype's state machine advances and
-//! the only thing that issues simulation commands on the player's behalf.
+//! The attempt loop: the one place the game's state machine advances and the
+//! only thing that issues simulation commands on the player's behalf.
 //!
 //! It is stepped once per simulation tick and returns that tick's
-//! [`SimCommand`]s, exactly like the old drive controller did — everything
-//! below it (AI, ball, contact, presentation) is the app's existing machinery,
-//! untouched.
+//! [`SimCommand`]s — everything below it (AI, ball, contact, the runback moves,
+//! presentation) is the app's existing machinery, driven rather than
+//! reimplemented.
 
-use crate::data::prototype::PROTOTYPE_LINE;
+use crate::data::concept::RUN_LINE;
 use crate::events::PlayEndReason;
+use crate::identity::PlayerId;
 use crate::launch::RunConfig;
+use crate::runback::RunbackMove;
 use crate::state::{PlayPhase, SimCommand, SimState};
 
 use super::ledger::{AttemptLedger, AttemptOutcome, AttemptRecord};
-use super::phase::{window_length, AttemptPhase, PlayerChoice};
-use super::read::{read_play, window_trigger, PlayRead, WindowGate};
+use super::phase::AttemptPhase;
 use super::setup;
-use super::{
-    DEVELOP_MAX_TICKS, DEVELOP_MIN_TICKS, MAX_LIVE_TICKS, REARM_DEADLINE_TICKS, RESULT_TICKS,
-    WINDOW_COOLDOWN_TICKS,
-};
+use super::{HANDOFF_EARLIEST_TICKS, MAX_LIVE_TICKS, MESH_DEADLINE_TICKS, RESULT_TICKS};
 
-/// The prototype's run loop.
+/// The run game's loop.
 #[derive(Debug)]
 pub struct AttemptController {
     pub(super) phase: AttemptPhase,
     pub(super) ledger: AttemptLedger,
-    gate: WindowGate,
-    pub(super) read: Option<PlayRead>,
-    /// The choice the player committed to this attempt.
-    pub(super) choice: Option<PlayerChoice>,
-    /// A press latched between simulation ticks. Input arrives once per render
-    /// frame, and in slow motion many render frames share one tick — without
-    /// this latch a decision made mid-dilation would be dropped.
-    pending: Option<PlayerChoice>,
-    /// Windows offered this attempt.
-    pub(super) windows: u32,
+    /// A move latched between simulation ticks. Input arrives once per render
+    /// frame and is consumed once per simulation tick; without this latch a move
+    /// made on a frame that shares its tick with others would be dropped.
+    /// First press of the tick wins — two moves in one tick is a fumbled input,
+    /// and honouring the later one would let a stray thumb overwrite a
+    /// deliberate press.
+    pending: Option<RunbackMove>,
     /// The tick this attempt's play must be dead by.
     dead_at: u64,
     /// Line of scrimmage the attempt snapped from (yards are measured from it).
     los_yard: f32,
-    /// Monotonic attempt counter — the defensive variation key.s only input
+    /// Monotonic attempt counter — the defensive variation key's only input
     /// besides the run seed, so coverage varies but never randomly.
     pub(super) attempt_index: u32,
     /// The defensive playbook index this attempt lined up in (inspection).
     pub last_defense_index: usize,
     /// The concept the offense is currently lined up in. It carries into the
-    /// next attempt so the offense has somewhere to STAND while the next call
-    /// is made — but it is never what gets run: every attempt waits for its own
-    /// call, and calling the same concept again simply means a shift with
-    /// nowhere to go and an immediate snap.
+    /// next attempt so the offense has somewhere to STAND while the next call is
+    /// made — but it is never what gets run: every attempt waits for its own
+    /// call.
     pub(super) concept: usize,
     /// A concept picked during this play call, applied when the play installs.
     pub(super) pending_concept: Option<usize>,
@@ -61,13 +55,9 @@ impl AttemptController {
         AttemptController {
             phase: AttemptPhase::Resetting,
             ledger: AttemptLedger::new(),
-            gate: WindowGate::closed(),
-            read: None,
-            choice: None,
             pending: None,
-            windows: 0,
             dead_at: u64::MAX,
-            los_yard: PROTOTYPE_LINE,
+            los_yard: RUN_LINE,
             attempt_index: 0,
             last_defense_index: 0,
             concept: 0,
@@ -76,11 +66,9 @@ impl AttemptController {
     }
 
     /// Line the first attempt up, so a fresh session is already at the line with
-    /// the play card up (without it there is no attempt view at tick zero to
-    /// draw from).
+    /// the play card up.
     pub fn arm(&mut self, sim: &mut SimState, config: &RunConfig) {
         self.build_attempt(sim, config);
-        self.read = Some(read_play(sim, self.concept));
         self.phase = AttemptPhase::PlayCall;
     }
 
@@ -92,32 +80,27 @@ impl AttemptController {
         &self.ledger
     }
 
-    /// Time dilation for this tick (the decision window's slow motion).
+    /// Time dilation for this tick.
     pub fn time_scale(&self) -> f32 {
         self.phase.time_scale()
     }
 
-    /// Offer the player's choice. Accepted only while the reads are live and
-    /// nothing has been decided yet — anything else is stale and is dropped, so
-    /// a mashed button cannot overwrite a decision already made. The latch
-    /// counts as decided.
-    pub fn choose(&mut self, choice: PlayerChoice) -> bool {
-        let accepted =
-            self.phase.accepts_choice() && self.choice.is_none() && self.pending.is_none();
-        self.pending = accepted.then_some(choice).or(self.pending);
+    /// Offer the player's move. Accepted only while they actually have the back;
+    /// anything else is stale and dropped, so a move mashed during the mesh
+    /// cannot fire itself the instant control arrives.
+    pub fn command(&mut self, wanted: RunbackMove) -> bool {
+        let accepted = self.phase.controllable() && self.pending.is_none();
+        self.pending = accepted.then_some(wanted).or(self.pending);
         accepted
     }
 
     /// Advance one tick and return the simulation commands it implies.
     pub fn step(&mut self, sim: &mut SimState, config: &RunConfig) -> Vec<SimCommand> {
         let tick = sim.tick;
-        let read = read_play(sim, self.concept);
-        self.read = Some(read);
         let mut commands = Vec::new();
 
-        // An ended play preempts every phase — a sack DURING the window is the
-        // "waited too long" outcome the prototype exists to produce.
-        if self.is_live() {
+        // An ended play preempts every phase.
+        if self.phase.is_live() {
             let timed_out = tick >= self.dead_at;
             if timed_out && sim.phase != PlayPhase::Ended {
                 sim.blow_dead();
@@ -127,6 +110,12 @@ impl AttemptController {
             }
         }
 
+        // The player's move rides the same command stream as everything else,
+        // so the simulation cannot tell a human's juke from the agent's.
+        if let Some(wanted) = self.pending.take().filter(|_| self.phase.controllable()) {
+            commands.push(SimCommand::Runback(wanted));
+        }
+
         self.phase = match self.phase {
             AttemptPhase::Resetting => {
                 self.build_attempt(sim, config);
@@ -134,41 +123,17 @@ impl AttemptController {
                 AttemptPhase::PlayCall
             }
             AttemptPhase::PlayCall => self.await_call(sim, config, tick),
-            AttemptPhase::Shifting { stalled_at }
-                if self.ready_to_snap(sim, tick, stalled_at) =>
-            {
+            AttemptPhase::Shifting { stalled_at } if self.ready_to_snap(sim, tick, stalled_at) => {
                 commands.push(SimCommand::Snap);
                 self.dead_at = tick + MAX_LIVE_TICKS;
-                self.gate = WindowGate {
-                    armed_at: tick + DEVELOP_MIN_TICKS,
-                    deadline: tick + DEVELOP_MAX_TICKS,
-                    windows_used: 0,
-                    last_best: None,
-                };
-                AttemptPhase::Developing
+                AttemptPhase::Mesh { snapped_at: tick }
             }
             AttemptPhase::Shifting { stalled_at } => AttemptPhase::Shifting { stalled_at },
-            // A choice can land here as well as in a window: throwing early, at
-            // full speed, is the anticipatory read.
-            AttemptPhase::Developing => match self.pending.take() {
-                Some(choice) => self.commit(&read, choice, &mut commands),
-                None => self.maybe_open_window(&read, tick),
-            },
-            AttemptPhase::DecisionWindow {
-                opened_at,
-                closes_at,
-                trigger,
-            } => match self.pending.take() {
-                Some(choice) => self.commit(&read, choice, &mut commands),
-                None if tick >= closes_at => self.decline(tick),
-                None => AttemptPhase::DecisionWindow {
-                    opened_at,
-                    closes_at,
-                    trigger,
-                },
-            },
-            AttemptPhase::PassInFlight { read } => self.pass_in_flight(sim, read),
-            AttemptPhase::Scrambling => AttemptPhase::Scrambling,
+            AttemptPhase::Mesh { snapped_at } => {
+                self.mesh(sim, tick, snapped_at, &mut commands)
+            }
+            AttemptPhase::Exchange => self.exchange(sim),
+            AttemptPhase::Carrying => AttemptPhase::Carrying,
             AttemptPhase::Resolving => {
                 self.resolve(sim);
                 AttemptPhase::Result {
@@ -181,100 +146,81 @@ impl AttemptController {
         commands
     }
 
-    /// Whether the play underneath is running.
-    fn is_live(&self) -> bool {
-        matches!(
-            self.phase,
-            AttemptPhase::Developing
-                | AttemptPhase::DecisionWindow { .. }
-                | AttemptPhase::PassInFlight { .. }
-                | AttemptPhase::Scrambling
-        )
-    }
-
-    /// Open a window if this tick earns one.
-    fn maybe_open_window(&mut self, read: &PlayRead, tick: u64) -> AttemptPhase {
-        let Some(trigger) = window_trigger(read, tick, &self.gate) else {
-            return AttemptPhase::Developing;
+    /// The quarterback and the back closing on each other. The handoff is
+    /// ordered the moment the field says they are together — never on a timer,
+    /// so what the player sees (two men meeting) is exactly what happened.
+    fn mesh(
+        &mut self,
+        sim: &SimState,
+        tick: u64,
+        snapped_at: u64,
+        commands: &mut Vec<SimCommand>,
+    ) -> AttemptPhase {
+        let Some(back) = sim.runback.back else {
+            return AttemptPhase::Mesh { snapped_at };
         };
-        let length = window_length(self.gate.windows_used);
-        self.gate.windows_used += 1;
-        self.gate.last_best = Some(read.best);
-        self.windows += 1;
-        AttemptPhase::DecisionWindow {
-            opened_at: tick,
-            closes_at: tick + length,
-            trigger,
+        let ready = tick >= snapped_at + HANDOFF_EARLIEST_TICKS
+            && sim.possession == Some(sim.quarterback)
+            && sim.mesh_distance(back) <= sim.tuning.handoff_range;
+        // Past the deadline the loop stops asking: the quarterback keeps it, and
+        // the play resolves however the field decides.
+        let give_up = tick >= snapped_at + MESH_DEADLINE_TICKS;
+        match (ready, give_up) {
+            (true, _) => {
+                commands.push(SimCommand::HandOff(back));
+                AttemptPhase::Exchange
+            }
+            (false, true) => AttemptPhase::Carrying,
+            (false, false) => AttemptPhase::Mesh { snapped_at },
         }
     }
 
-    /// The player let the window close. Full speed resumes, the rush keeps
-    /// coming, and the next look is armed — shorter, and later.
-    fn decline(&mut self, tick: u64) -> AttemptPhase {
-        self.gate.armed_at = tick + WINDOW_COOLDOWN_TICKS;
-        self.gate.deadline = tick + REARM_DEADLINE_TICKS;
-        AttemptPhase::Developing
-    }
-
-    /// Turn a choice into simulation commands.
-    fn commit(
-        &mut self,
-        read: &PlayRead,
-        choice: PlayerChoice,
-        commands: &mut Vec<SimCommand>,
-    ) -> AttemptPhase {
-        self.choice = Some(choice);
-        match choice {
-            PlayerChoice::Throw(target) => {
-                commands.push(SimCommand::ThrowTo(read.target(target)));
-                AttemptPhase::PassInFlight { read: target }
-            }
-            PlayerChoice::Scramble => {
-                commands.push(SimCommand::Scramble);
-                AttemptPhase::Scrambling
-            }
+    /// Wait out the exchange. Control arrives the instant the ball does — and
+    /// not before, which is what the whole phase exists to guarantee.
+    fn exchange(&mut self, sim: &SimState) -> AttemptPhase {
+        let landed = sim
+            .runback
+            .back
+            .map(|back| sim.possession == Some(back))
+            .unwrap_or(false);
+        // A refused handoff (the two came apart before it completed) falls back
+        // rather than stranding the loop in a phase nothing can leave.
+        match (landed, sim.ball.is_exchanging()) {
+            (true, _) => AttemptPhase::Carrying,
+            (false, true) => AttemptPhase::Exchange,
+            (false, false) => AttemptPhase::Carrying,
         }
     }
 
     /// Measure the resolved play and record it.
     fn resolve(&mut self, sim: &SimState) {
-        let reason = sim.end_reason.unwrap_or(PlayEndReason::Incomplete);
-        let scrambled = self.choice == Some(PlayerChoice::Scramble);
-        let outcome = AttemptOutcome::classify(
-            reason,
-            self.choice.and_then(|c| c.read()),
-            scrambled,
-            sim.ball.carrier(),
-            sim.quarterback,
-        );
-        // Yards always come from where the play actually ended. A dead ball the
-        // offense never possessed (incompletion, interception) moves nothing.
-        let yards = match outcome {
-            AttemptOutcome::Incomplete | AttemptOutcome::Intercepted => 0.0,
-            _ => sim.ball_yard_line() - self.los_yard,
-        };
+        let reason = sim.end_reason.unwrap_or(PlayEndReason::Tackled);
+        let back = sim.runback.back.unwrap_or(sim.quarterback);
+        let outcome = AttemptOutcome::classify(reason, sim.ball.carrier(), back);
         self.ledger.record(AttemptRecord {
             index: self.attempt_index,
             outcome,
-            yards,
-            read: self.choice.and_then(|c| c.read()),
-            windows: self.windows,
-            declined: self.choice.is_none() && self.windows > 0,
+            yards: sim.ball_yard_line() - self.los_yard,
+            dodges: sim.runback.dodges,
+            broken: sim.runback.broken,
+            hurdled: sim.runback.hurdled,
         });
     }
 
+    /// The running back for the installed play (inspection + the agent).
+    pub fn back(&self, sim: &SimState) -> Option<PlayerId> {
+        sim.runback.back
+    }
+
     /// Build the next attempt. Every piece of per-attempt state is reset HERE
-    /// and nowhere else, so a stale window, a stale choice or a stale clock
+    /// and nowhere else, so a stale move, a stale clock or a stale success
     /// cannot survive into the next attempt however the last one ended.
     fn build_attempt(&mut self, sim: &mut SimState, config: &RunConfig) {
         self.attempt_index += 1;
-        self.choice = None;
         self.pending = None;
-        self.windows = 0;
         self.dead_at = u64::MAX;
-        self.los_yard = PROTOTYPE_LINE;
+        self.los_yard = RUN_LINE;
         self.pending_concept = None;
-        self.gate = WindowGate::closed();
         self.last_defense_index = setup::install(sim, config, self.attempt_index, self.concept);
     }
 }

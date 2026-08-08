@@ -110,6 +110,48 @@ pub fn override_pose(anim: AnimState, ticks: u32) -> JointPose {
         | AnimState::Sprint
         | AnimState::DropBack => {}
         AnimState::Throw => throw_pose(&mut out, t),
+        // The exchange: the quarterback's arms extended low and forward,
+        // offering the ball into the back's belly. Short, still, and readable —
+        // the whole point is that the player can see the ball change hands.
+        AnimState::HandOff => {
+            out.joints[L_UPPER_ARM] = qx(-1.15);
+            out.joints[R_UPPER_ARM] = qx(-1.15);
+            out.joints[L_FOREARM] = qx(-0.25);
+            out.joints[R_FOREARM] = qx(-0.25);
+            out.root_pitch = 0.22;
+        }
+        // The plant-and-cut: the whole body thrown across the new line. The
+        // bank is what makes a juke *read* as a deliberate move rather than as
+        // the runner sliding sideways, so it is deliberately large.
+        AnimState::Juke => {
+            out.root_roll = 0.42;
+            out.root_pitch = 0.10;
+            out.joints[L_UPPER_ARM] = Quat::from_euler_xyz(-0.7, 0.0, -0.9);
+            out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(-0.3, 0.0, 0.5);
+            out.joints[L_THIGH] = qx(-0.75);
+            out.joints[R_THIGH] = qx(0.35);
+            out.joints[L_SHIN] = qx(0.55);
+        }
+        // The shoulder: low, square, and driving. Pad height, not head height.
+        AnimState::Shoulder => {
+            crouch(&mut out, 0.75);
+            out.root_pitch = 0.62;
+            out.joints[L_UPPER_ARM] = Quat::from_euler_xyz(-0.5, 0.0, -0.35);
+            out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(-0.9, 0.0, 0.25);
+            out.joints[R_FOREARM] = qx(-1.1);
+        }
+        // The leap: tucked knees and an outstretched lead arm. Deliberately not
+        // the airborne-FALL pose — that is a man who has lost the play, and this
+        // is a man who is winning one.
+        AnimState::Leap => {
+            out.root_pitch = 0.18;
+            out.joints[L_THIGH] = qx(-1.25);
+            out.joints[R_THIGH] = qx(-0.85);
+            out.joints[L_SHIN] = qx(1.35);
+            out.joints[R_SHIN] = qx(0.95);
+            out.joints[L_UPPER_ARM] = qx(-2.0);
+            out.joints[R_UPPER_ARM] = Quat::from_euler_xyz(-0.6, 0.0, 0.4);
+        }
         AnimState::Catch => {
             // Both arms reach up and forward for the ball.
             out.joints[L_UPPER_ARM] = qx(-2.4);

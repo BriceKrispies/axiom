@@ -10,9 +10,8 @@ use crate::debug::DebugMaterial;
 use crate::field::{paint_pool_capacity, PaintCategory, PALETTE};
 use crate::presentation::chalk::{ChalkMaterial, CHALK_LINE_POOL, CHALK_PRIMARY_POOL};
 use crate::presentation::particles::EffectMaterial;
-use crate::presentation::receiver_ring::{
-    RingKind, ELIGIBLE_RING_POOL, READ_RING_POOL, RECEIVER_RING_POOL,
-    TARGET_RING_POOL,
+use crate::presentation::carrier_ring::{
+    RingKind, BACK_RING_POOL, CARRIER_RING_POOL, ELIGIBLE_RING_POOL, TARGET_RING_POOL,
 };
 
 use super::{color3, hidden, JUICE_POOL};
@@ -95,25 +94,21 @@ pub(super) fn juice(app: &mut RunningApp, cube: Handle<Mesh>) -> Vec<(Entity, Ef
     fill(app, cube, &plan, JUICE_POOL)
 }
 
-/// Target markers. The ambient cone read keeps its red/white pair; the
-/// prototype's three decision reads each get their own hue so the key the
-/// player presses maps to a colour on the field. The hues are ordered by route
-/// depth (cyan → amber → magenta) and are deliberately unrelated to how open
-/// the read is — colour identifies WHO, never whether it is the right call.
-pub(super) fn receiver_rings(app: &mut RunningApp, cube: Handle<Mesh>) -> Vec<(Entity, RingKind)> {
+/// Foot markers. Amber under the running back before the exchange (that is the
+/// man you are about to be), white under him once he is carrying (that is the
+/// man you are), and the ambient showcase's red cone-target read. Colour
+/// identifies WHO, and the amber→white change is the game's clearest signal
+/// that control has arrived.
+pub(super) fn carrier_rings(app: &mut RunningApp, cube: Handle<Mesh>) -> Vec<(Entity, RingKind)> {
     let target = app.add_material(Material::lit(color3([0.96, 0.16, 0.14])));
-    let eligible = app.add_material(Material::lit(color3([0.97, 0.98, 0.97])));
-    let read_one = app.add_material(Material::lit(color3([0.18, 0.86, 0.98])));
-    let read_two = app.add_material(Material::lit(color3([0.99, 0.70, 0.12])));
-    let read_three = app.add_material(Material::lit(color3([0.94, 0.24, 0.86])));
+    let carrier = app.add_material(Material::lit(color3([0.97, 0.98, 0.97])));
+    let back = app.add_material(Material::lit(color3([0.99, 0.70, 0.12])));
     let plan = [
         (RingKind::Target, TARGET_RING_POOL, target),
-        (RingKind::Eligible, ELIGIBLE_RING_POOL, eligible),
-        (RingKind::ReadOne, READ_RING_POOL, read_one),
-        (RingKind::ReadTwo, READ_RING_POOL, read_two),
-        (RingKind::ReadThree, READ_RING_POOL, read_three),
+        (RingKind::Carrier, ELIGIBLE_RING_POOL, carrier),
+        (RingKind::Back, BACK_RING_POOL, back),
     ];
-    fill(app, cube, &plan, RECEIVER_RING_POOL)
+    fill(app, cube, &plan, CARRIER_RING_POOL)
 }
 
 /// Diagnostic markers (F1 overlay): routes, steering targets, collision circles,
