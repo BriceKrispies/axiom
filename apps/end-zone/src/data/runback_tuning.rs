@@ -44,6 +44,25 @@ pub struct RunbackTuning {
     pub dodge_clear_yards: f32,
 
     // --- the shoulder charge ------------------------------------------------
+    /// How long the charge keeps the back on his feet through contact, ticks.
+    ///
+    /// **The charge is a window, not a hit.** It used to be a single collision
+    /// resolved on a knife edge, and that could not be made to work: the ideal
+    /// press was a third of a second before contact while a person needs half a
+    /// second to press at all, so for every charge a human could physically
+    /// throw the timing term sat pinned at its floor. A move whose best moment
+    /// is earlier than you can react to has no best moment.
+    ///
+    /// So it is a couple of seconds of running THROUGH people instead. You press
+    /// it when you can see traffic coming, not on a frame; everything you touch
+    /// while it lasts gets knocked aside; and the cost is the cooldown, not a
+    /// mistimed press. That is a control a person can actually use, and it is
+    /// what makes the run feel like a run rather than a series of timing tests.
+    pub charge_immunity_ticks: u32,
+    /// Simulation ticks before another charge may begin, measured from the
+    /// press. The whole cost of the move: spending it on empty grass is the
+    /// mistake, not mistiming it.
+    pub charge_cooldown_ticks: u64,
     /// How long a lowered shoulder stays armed looking for contact, ticks.
     ///
     /// Must be longer than the time it takes to actually *reach* the man you
@@ -154,6 +173,8 @@ impl Default for RunbackTuning {
             dodge_resolve_ticks: 60,
             dodge_clear_yards: 0.6,
 
+            charge_immunity_ticks: 150,
+            charge_cooldown_ticks: 360,
             shoulder_ticks: 42,
             shoulder_recovery_ticks: 26,
             shoulder_expire_ticks: 8,

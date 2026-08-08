@@ -109,6 +109,13 @@ pub struct RunbackSim {
     pub active: Option<ActiveMove>,
     /// The tick at which any move may next begin (move recovery).
     pub ready_at: u64,
+    /// The tick the charge window ends. Charging is deliberately NOT an
+    /// [`ActiveMove`]: it is a state you are *in* while still running, cutting
+    /// and leaping, which is what makes the game fluid rather than a queue of
+    /// animations waiting their turn.
+    pub charge_until: u64,
+    /// The tick at which a **charge** may next begin.
+    pub charge_ready_at: u64,
     /// The tick at which a **jump** may next begin. Separate from `ready_at`
     /// because the leap's cost is its own three-second wait, not the shared
     /// recovery every move pays.
@@ -159,6 +166,8 @@ impl RunbackSim {
             pending: None,
             active: None,
             ready_at: 0,
+            charge_until: 0,
+            charge_ready_at: 0,
             jump_ready_at: 0,
             airborne: false,
             vertical: 0.0,
@@ -183,6 +192,21 @@ impl RunbackSim {
             last_charge,
             ..RunbackSim::new()
         };
+    }
+
+    /// Whether the back is mid-charge at `tick` — running through people.
+    pub fn charging(&self, tick: u64) -> bool {
+        tick < self.charge_until
+    }
+
+    /// Whether a charge may begin at `tick`.
+    pub fn charge_available(&self, tick: u64) -> bool {
+        !self.charging(tick) && tick >= self.charge_ready_at
+    }
+
+    /// Ticks of charge cooldown remaining at `tick` (`0` when it is ready).
+    pub fn charge_cooldown_left(&self, tick: u64) -> u64 {
+        self.charge_ready_at.saturating_sub(tick)
     }
 
     /// Ticks of jump cooldown remaining at `tick` (`0` when it is ready).
@@ -225,6 +249,11 @@ pub struct RunbackStatus {
     pub height: f32,
     pub jump_available: bool,
     pub jump_cooldown_left: u64,
+    /// Whether the back is running through people right now.
+    pub charging: bool,
+    /// Whether a charge may begin, and the ticks left if not.
+    pub charge_available: bool,
+    pub charge_cooldown_left: u64,
     /// The open **charge window**: a defender the back could run through right
     /// now. `None` when pressing shoulder would not clearly win.
     ///

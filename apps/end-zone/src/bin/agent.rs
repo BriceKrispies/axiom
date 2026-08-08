@@ -50,6 +50,10 @@ struct Tally {
     tackles: u32,
     dodges: u32,
     hurdles: u32,
+    /// Every resolved carry's net yards, in order — the distribution the bench
+    /// reports. Kept per carry rather than summed because the SHAPE is the
+    /// thing worth looking at.
+    carry_yards: Vec<f32>,
 }
 
 impl Tally {
@@ -74,10 +78,15 @@ fn main() {
     let trace = args.iter().any(|a| a == "--trace");
     let ab = args.iter().any(|a| a == "--ab");
     let sweep = args.iter().any(|a| a == "--sweep");
+    let bench = args.iter().any(|a| a == "--bench");
     let seed = value("--seed", scenario::VALIDATION_SEED);
     let reaction = value("--reaction-ms", u64::from(DEFAULT_REACTION_MILLIS)) as u32;
     let carries = value("--carries", if ab { 20 } else { 12 }) as u32;
 
+    if bench {
+        run_bench(value("--seeds", 25), carries, reaction);
+        return;
+    }
     if sweep {
         run_sweep(carries.min(8), reaction);
         return;
@@ -97,6 +106,90 @@ fn main() {
     let tally = play(seed, carries, Aggression::BALANCED, reaction, trace, true);
     report(&tally);
     std::process::exit(i32::from(!tally.complete()));
+}
+
+/// **The bench.** Run the game many times and report how far the back actually
+/// gets.
+///
+/// One number nobody should trust is the average. A run game where every carry
+/// goes eleven yards and one where half are stuffed and half break for thirty
+/// have the same mean and are completely different games — so this prints the
+/// whole **distribution**: how often a carry is stopped short, how often it
+/// grinds out a few yards, how often it breaks. That shape is the thing worth
+/// tuning against, and it is invisible to any single statistic.
+///
+/// It is driven by the agent through the real controls, at a real reaction time,
+/// so it measures the game a person would play rather than a headless ideal.
+fn run_bench(seeds: u64, carries: u32, reaction: u32) {
+    println!("=== End Zone — carry distribution ===");
+    println!("{seeds} seeds x up to {carries} carries, {reaction} ms reaction, real controls.
+");
+
+    let mut yards: Vec<f32> = Vec::new();
+    let mut total = Tally::default();
+    for seed in 0..seeds {
+        let t = play(seed, carries, Aggression::BALANCED, reaction, false, false);
+        yards.extend(t.carry_yards.iter().copied());
+        total.carries += t.carries;
+        total.touchdowns += t.touchdowns;
+        total.tackled += t.tackled;
+        total.dodges += t.dodges;
+        total.charges_won += t.charges_won;
+        total.hurdles += t.hurdles;
+        total.sheds += t.sheds;
+        total.tackles += t.tackles;
+    }
+    if yards.is_empty() {
+        println!("no carries resolved");
+        return;
+    }
+    let mut sorted = yards.clone();
+    sorted.sort_by(f32::total_cmp);
+    let at = |q: f32| sorted[((sorted.len() as f32 - 1.0) * q) as usize];
+    let mean = yards.iter().sum::<f32>() / yards.len() as f32;
+
+    // The buckets a football person would ask for, not even ones.
+    const BANDS: [(&str, f32, f32); 7] = [
+        ("loss      ", f32::NEG_INFINITY, 0.0),
+        ("0-2 yd    ", 0.0, 2.0),
+        ("3-5 yd    ", 2.0, 5.0),
+        ("6-9 yd    ", 5.0, 9.0),
+        ("10-19 yd  ", 9.0, 19.0),
+        ("20-39 yd  ", 19.0, 39.0),
+        ("40+ / TD  ", 39.0, f32::INFINITY),
+    ];
+    println!("  carry distribution ({} carries)", yards.len());
+    for (label, low, high) in BANDS {
+        let n = yards.iter().filter(|y| **y > low && **y <= high).count();
+        let pct = 100.0 * n as f32 / yards.len() as f32;
+        let bar = "#".repeat((pct / 2.0).round() as usize);
+        println!("  {label} {n:>4}  {pct:>5.1}%  {bar}");
+    }
+    println!(
+        "
+  median {:.1} yd   mean {:.1} yd   p25 {:.1}   p75 {:.1}   p95 {:.1}   worst {:.1}   best {:.1}",
+        at(0.5),
+        mean,
+        at(0.25),
+        at(0.75),
+        at(0.95),
+        sorted[0],
+        sorted[sorted.len() - 1]
+    );
+    println!(
+        "  {} touchdowns ({:.0}%)   {} tackled ({:.0}%)",
+        total.touchdowns,
+        100.0 * total.touchdowns as f32 / total.carries.max(1) as f32,
+        total.tackled,
+        100.0 * total.tackled as f32 / total.carries.max(1) as f32,
+    );
+    println!(
+        "  moves per carry: {:.2} dodges, {:.2} charges through, {:.2} hurdles, {:.2} tackles shed",
+        total.dodges as f32 / total.carries.max(1) as f32,
+        total.charges_won as f32 / total.carries.max(1) as f32,
+        total.hurdles as f32 / total.carries.max(1) as f32,
+        total.sheds as f32 / total.carries.max(1) as f32,
+    );
 }
 
 /// **The sweep.** Vary the knobs that decide which move owns which situation,
@@ -391,6 +484,7 @@ fn play(
                 tally.touchdowns += u32::from(last.outcome == AttemptOutcome::Touchdown);
                 tally.tackled += u32::from(last.outcome == AttemptOutcome::Tackled);
                 tally.yards += last.yards;
+                tally.carry_yards.push(last.yards);
                 if narrate {
                     println!(
                         "  ---- carry {} : {} {:+.1} yd   {} dodge / {} broke / {} over ----
@@ -440,7 +534,7 @@ fn record(tally: &mut Tally, tick: u64, event: SimEvent, narrate: bool) {
         } => {
             tally.charges_won += 1;
             let line = format!(
-                "t{tick} defender {} run through, impulse {impulse:.2} > resistance {resistance:.2}",
+                "t{tick} defender {} run through (hit {impulse:.2} vs {resistance:.2})",
                 defender.0
             );
             if narrate {

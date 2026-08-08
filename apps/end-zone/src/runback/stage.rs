@@ -24,6 +24,7 @@ use crate::identity::PlayerId;
 use crate::player::AnimState;
 use crate::state::SimState;
 
+use super::charge;
 use super::evade::{self, ThreatVerdict};
 use super::read;
 use super::{ActiveMove, RunbackMove, RunbackStatus};
@@ -46,6 +47,9 @@ impl SimState {
                 && self.runback.back.is_some(),
             jump_cooldown_left: self.runback.jump_cooldown_left(self.tick),
             move_ready: self.runback.move_available(self.tick) && self.back_is_carrying(),
+            charging: self.runback.charging(self.tick),
+            charge_available: self.runback.charge_available(self.tick) && self.back_is_carrying(),
+            charge_cooldown_left: self.runback.charge_cooldown_left(self.tick),
             charge_window: self.runback.charge_window,
             dodges: self.runback.dodges,
             hurdled: self.runback.hurdled,
@@ -72,6 +76,9 @@ impl SimState {
         };
         self.commit_move(back);
         self.carry_move(back);
+        if self.runback.charging(self.tick) {
+            self.carry_charge(back);
+        }
         self.judge_threats(back);
         self.advance_charge_window(back);
     }
@@ -83,7 +90,7 @@ impl SimState {
         self.runback.charge_window = read::advance_charge_window(
             self,
             back,
-            self.runback.move_available(self.tick) && self.back_is_carrying(),
+            self.runback.charge_available(self.tick) && self.back_is_carrying(),
             self.runback.charge_window,
         );
     }
@@ -108,6 +115,24 @@ impl SimState {
             return;
         };
         let tick = self.tick;
+        // The charge is a window, not a blocking move: it has its own cooldown,
+        // it does not occupy the move slot, and you can keep cutting and leaping
+        // while it runs. That is the whole of what makes the run feel fluid.
+        if wanted == RunbackMove::Shoulder {
+            let runback = self.runback_tuning;
+            if self.runback.charge_available(tick) {
+                let speed = self.players[back.index()].speed();
+                self.runback.charge_until = tick + u64::from(runback.charge_immunity_ticks);
+                self.runback.charge_ready_at = tick + runback.charge_cooldown_ticks;
+                self.players[back.index()].set_anim(AnimState::Shoulder);
+                self.events.emit(SimEvent::RunbackMove {
+                    runner: back,
+                    move_code: wanted.code(),
+                    speed,
+                });
+            }
+            return;
+        }
         let jump = wanted == RunbackMove::Jump;
         // Two gates, deliberately separate. Every move waits out the shared
         // recovery; only the jump additionally waits out its own cooldown, and
@@ -125,6 +150,8 @@ impl SimState {
         let ends = tick
             + u64::from(match wanted {
                 RunbackMove::JukeLeft | RunbackMove::JukeRight => runback.juke_ticks,
+                // Unreachable: the charge returned above. Kept exhaustive so a
+                // new move has to answer this question rather than inherit one.
                 RunbackMove::Shoulder => runback.shoulder_ticks,
                 // The leap ends when it lands, not on a timer; this is the
                 // backstop that keeps a move from ever being unbounded.
@@ -137,7 +164,7 @@ impl SimState {
         });
         match wanted {
             RunbackMove::JukeLeft | RunbackMove::JukeRight => self.begin_juke(back, wanted),
-            RunbackMove::Shoulder => self.begin_shoulder(back),
+            RunbackMove::Shoulder => {}
             RunbackMove::Jump => self.begin_jump(back),
         }
         self.events.emit(SimEvent::RunbackMove {
@@ -168,22 +195,6 @@ impl SimState {
         player.set_anim(AnimState::Juke);
     }
 
-    /// Lower the shoulder. Nothing moves yet — but the **outcome is decided
-    /// here**, against the collision this press is aimed at.
-    ///
-    /// The alternative, resolving when the bodies actually touch, is what this
-    /// used to do and it cannot be made to work: contact is most of a second
-    /// after the press, the geometry has moved by then, and a charge the player
-    /// correctly read as a win resolves as a loss through nothing they did. So
-    /// the press buys a specific hit, the prediction the tell showed and the
-    /// resolution applied are the same object, and the move keeps its promise.
-    fn begin_shoulder(&mut self, back: PlayerId) {
-        self.runback.last_charge = None;
-        self.runback.committed_charge = read::encounter(self, back)
-            .map(|seen| (seen.defender, seen.predicted_charge));
-        self.players[back.index()].set_anim(AnimState::Shoulder);
-    }
-
     /// Leave the ground. Horizontal motion is untouched — the controller keeps
     /// running him forward through the whole arc, which is what makes timing a
     /// leap over an incoming defender useful rather than a stop.
@@ -203,7 +214,8 @@ impl SimState {
         };
         match active.kind {
             RunbackMove::JukeLeft | RunbackMove::JukeRight => self.carry_juke(back, active),
-            RunbackMove::Shoulder => self.carry_shoulder(back, active),
+            // The charge is not an active move — see `commit_move`.
+            RunbackMove::Shoulder => {}
             RunbackMove::Jump => self.carry_jump(back),
         }
     }
@@ -225,128 +237,66 @@ impl SimState {
         }
     }
 
-    /// Look for the man the shoulder was dropped for, and resolve the contest
-    /// the instant the bodies meet.
-    fn carry_shoulder(&mut self, back: PlayerId, active: ActiveMove) {
+    /// One tick of **running through people**.
+    ///
+    /// Everybody the back touches while the charge lasts is knocked aside and
+    /// counted as a broken tackle. There is no contest to lose: the contest was
+    /// the old design and it was unusable, because it asked for a press timed
+    /// finer than a human reaction. What the arithmetic still decides is *how
+    /// hard* each man goes — the same impulse-against-resistance terms, now
+    /// setting the size of the hit rather than gatekeeping whether it happens —
+    /// so a big back at full speed visibly flattens people and a tired one
+    /// merely shoves them off.
+    fn carry_charge(&mut self, back: PlayerId) {
         let runback = self.runback_tuning;
         let runner = self.players[back.index()];
-        let reach = |other: &crate::player::PlayerSim| {
-            runner.archetype.body_radius + other.archetype.body_radius + runback.shoulder_reach
-        };
-        // Nearest first, in ascending id order on a tie, so the contest is
-        // reproducible when two defenders arrive together.
-        let hit = self
+        let hits: Vec<PlayerId> = self
             .players
             .iter()
             .filter(|p| p.team != runner.team && p.anim.can_act())
-            .map(|p| {
-                let gap = Vec3::new(p.pos.x - runner.pos.x, 0.0, p.pos.z - runner.pos.z).length();
-                (p.id, gap, reach(p))
+            .filter(|p| {
+                let reach = runner.archetype.body_radius
+                    + p.archetype.body_radius
+                    + runback.shoulder_reach;
+                Vec3::new(p.pos.x - runner.pos.x, 0.0, p.pos.z - runner.pos.z).length() <= reach
             })
-            .filter(|(_, gap, reach)| gap <= reach)
-            .fold(None::<(PlayerId, f32)>, |best, (id, gap, _)| {
-                match best.map(|(_, b)| gap < b).unwrap_or(true) {
-                    true => Some((id, gap)),
-                    false => best,
-                }
-            });
-        match hit {
-            Some((defender, _)) => self.resolve_charge(back, defender, active),
-            // No contact yet — keep the shoulder down until the window expires,
-            // then hand control straight back.
-            None if self.tick >= active.ends => {
-                self.finish_move(runback.shoulder_expire_ticks)
-            }
-            None => {}
-        }
-    }
+            .map(|p| p.id)
+            .collect();
 
-    /// Settle the contest and apply it to both bodies.
-    fn resolve_charge(&mut self, back: PlayerId, defender: PlayerId, active: ActiveMove) {
-        let runback = self.runback_tuning;
-        // The gap when the shoulder went down — recovered from where the two of
-        // them were at the commit tick, through the perception ring the AI
-        // already keeps, so nothing new has to be stored to know it.
-        // The outcome was decided at the press (see `begin_shoulder`) — this
-        // just applies it. The committed resolution is used only if the man we
-        // actually met is the man it was aimed at; if somebody else arrived
-        // first, that is a different hit and it is resolved on its own terms
-        // from the commit-time state, which the AI's perception ring already
-        // remembers for free.
-        let committed = self
-            .runback
-            .committed_charge
-            .filter(|(target, _)| *target == defender)
-            .map(|(_, resolution)| resolution);
-        let resolution = committed.unwrap_or_else(|| {
-            let seen = self
-                .perception
-                .sample((self.tick.saturating_sub(active.started)) as u32);
-            let at_commit = |id: PlayerId| {
-                let mut player = self.players[id.index()];
-                player.pos = seen.positions[id.index()];
-                player.vel = seen.velocities[id.index()];
-                player
-            };
-            let runner_then = at_commit(back);
-            let defender_then = at_commit(defender);
-            let meeting = read::contact_in_ticks(
-                &runner_then,
-                &defender_then,
-                runner_then.archetype.body_radius
-                    + defender_then.archetype.body_radius
-                    + runback.shoulder_reach,
-                read::CONTACT_HORIZON_TICKS,
+        for defender in hits {
+            let resolution = charge::resolve(
+                &self.players[back.index()],
+                &self.players[defender.index()],
+                runback.charge_ideal_lead_ticks,
+                &runback,
             );
-            read::predict_charge(&runner_then, &defender_then, meeting, &runback)
-        });
-        self.runback.committed_charge = None;
-        self.runback.last_charge = Some(resolution);
-
-        match resolution.won {
-            true => {
-                let knock = runback.charge_knock_speed * resolution.overload.min(2.5);
-                let flattened = resolution.overload >= runback.charge_airborne_overload;
-                let hit = &mut self.players[defender.index()];
-                hit.balance = 0.0;
-                hit.impact_strength = (resolution.overload * 0.5).clamp(0.15, 1.0);
-                hit.vel = resolution.direction.mul_scalar(knock);
-                match flattened {
-                    true => {
-                        hit.vertical_vel = self.tuning.launch_up_speed * 0.7;
-                        hit.set_anim(AnimState::AirborneFall);
-                    }
-                    false => hit.set_anim(AnimState::Stumble),
+            self.runback.last_charge = Some(resolution);
+            let knock = runback.charge_knock_speed * resolution.overload.clamp(0.4, 2.5);
+            let flattened = resolution.overload >= runback.charge_airborne_overload;
+            let hit = &mut self.players[defender.index()];
+            hit.balance = 0.0;
+            hit.impact_strength = (resolution.overload * 0.5).clamp(0.15, 1.0);
+            hit.vel = resolution.direction.mul_scalar(knock);
+            match flattened {
+                true => {
+                    hit.vertical_vel = self.tuning.launch_up_speed * 0.7;
+                    hit.set_anim(AnimState::AirborneFall);
                 }
-                let runner = &mut self.players[back.index()];
-                runner.vel = runner.vel.mul_scalar(runback.charge_win_keep);
-                self.runback.broken += 1;
-                self.runback.last_success = Some((RunbackMove::Shoulder.code(), self.tick));
-                self.events.emit(SimEvent::TackleBroken {
-                    runner: back,
-                    defender,
-                    impulse: resolution.impulse,
-                    resistance: resolution.resistance,
-                });
+                false => hit.set_anim(AnimState::Stumble),
             }
-            false => {
-                // Nothing is done TO him beyond what a failed collision does:
-                // his balance is gone and most of his speed with it. The tackle
-                // that follows is the existing contact framework's, landed by
-                // the defender who is now right on top of a runner who has
-                // stopped — which is exactly what a stuffed charge looks like.
-                let runner = &mut self.players[back.index()];
-                runner.vel = runner.vel.mul_scalar(runback.charge_loss_keep);
-                runner.balance = 0.0;
-                self.events.emit(SimEvent::ChargeStuffed {
-                    runner: back,
-                    defender,
-                    impulse: resolution.impulse,
-                    resistance: resolution.resistance,
-                });
-            }
+            // Contact costs the runner something even when he wins it, so a
+            // charge through four men leaves him walking rather than flying.
+            let carrier = &mut self.players[back.index()];
+            carrier.vel = carrier.vel.mul_scalar(runback.charge_win_keep);
+            self.runback.broken += 1;
+            self.runback.last_success = Some((RunbackMove::Shoulder.code(), self.tick));
+            self.events.emit(SimEvent::TackleBroken {
+                runner: back,
+                defender,
+                impulse: resolution.impulse,
+                resistance: resolution.resistance,
+            });
         }
-        self.finish_move(runback.shoulder_recovery_ticks);
     }
 
     /// Integrate the leap's arc, watch who goes underneath, and land him.

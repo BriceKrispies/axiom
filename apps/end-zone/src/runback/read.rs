@@ -245,47 +245,30 @@ pub const CHARGE_TELL_HORIZON_TICKS: u32 = 78;
 /// that is occasionally optimistic.
 pub const CHARGE_TELL_MARGIN: f32 = 1.06;
 
-/// Advance the charge window one tick, **with hysteresis**.
+/// Advance the charge window one tick.
 ///
-/// Opening and closing are deliberately different tests, and that asymmetry is
-/// the whole of what makes the tell readable:
+/// Now that the charge is a couple of seconds of immunity rather than a single
+/// contested collision, the tell has a much simpler and much more honest job:
+/// **there is somebody in front of you and you have the charge available.** No
+/// prediction, no threshold, no hysteresis to stop it strobing — it cannot
+/// strobe, because it is not tracking a quantity that drifts. The old version
+/// needed all three because it was forecasting the outcome of a knife-edge
+/// contest, and the reason it needed them was the reason the contest had to go.
 ///
-/// * it **opens** only on a comfortable win ([`CHARGE_TELL_MARGIN`]), so a
-///   window that appears is worth acting on;
-/// * it **stays open** for as long as pressing would still win at all — a bare
-///   `overload >= 1.0` — against the same man.
-///
-/// Without the asymmetry the marker chased the threshold: `overload` drifts as
-/// two bodies converge, so a single approach crossed 1.06 several times and the
-/// tell strobed on and off in tenth-of-a-second flashes. Hysteresis turns that
-/// into one window that opens once and lasts until the chance is genuinely
-/// gone.
-///
-/// It is **not** a latch, and the difference matters. A latch would hold the
-/// marker lit for a fixed time after the chance had passed, which is exactly the
-/// bait-and-switch the charge itself was just fixed to stop doing: while this is
-/// lit, pressing wins. When it stops being true it goes out on that tick.
+/// While it is lit, pressing runs you through that man. That is still a promise;
+/// it is just one the game can now keep trivially.
 pub fn advance_charge_window(
     sim: &SimState,
     back: PlayerId,
-    can_move: bool,
-    open: Option<ChargeWindow>,
+    can_charge: bool,
+    _open: Option<ChargeWindow>,
 ) -> Option<ChargeWindow> {
-    let held_defender = open.map(|window| window.defender);
-    can_move
+    can_charge
         .then(|| encounter(sim, back))
         .flatten()
         .filter(|seen| {
             seen.contact_in_ticks
                 .is_some_and(|ticks| ticks <= CHARGE_TELL_HORIZON_TICKS)
-        })
-        .filter(|seen| seen.predicted_charge.won)
-        .filter(|seen| {
-            // Already open on this man: hold it while it is still a win.
-            // Otherwise it has to clear the higher bar to open at all.
-            let holding = held_defender == Some(seen.defender);
-            let bar = [CHARGE_TELL_MARGIN, 1.0][usize::from(holding)];
-            seen.predicted_charge.overload >= bar
         })
         .map(|seen| ChargeWindow {
             defender: seen.defender,

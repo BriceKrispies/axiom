@@ -62,6 +62,7 @@ pub fn resolve_tackle(
     players: &mut [PlayerSim],
     intents: &[PlayerIntent],
     carrier: Option<PlayerId>,
+    carrier_charging: bool,
     tuning: &BehaviorTuning,
     collision: &CollisionRig,
 ) -> TackleResolution {
@@ -69,7 +70,11 @@ pub fn resolve_tackle(
     let Some(carrier) = carrier else {
         return resolution;
     };
-    if !players[carrier.index()].anim.can_act() {
+    // A back mid-charge is running THROUGH people: nobody brings him down for
+    // the length of the window. The defenders he meets are dealt with by
+    // `runback::stage::carry_charge`, which knocks them aside — so this is not
+    // "nothing happens", it is "the collision goes the other way".
+    if carrier_charging || !players[carrier.index()].anim.can_act() {
         return resolution;
     }
     for index in 0..players.len() {

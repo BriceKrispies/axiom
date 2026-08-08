@@ -173,9 +173,14 @@ fn move_hints(step: &AttemptStep) -> Vec<MoveHint> {
             key: "S".to_string(),
             swipe: "▼".to_string(),
             name: RunbackMoveCode::Shoulder.label().to_string(),
-            ready: true,
-            cooldown: 0.0,
-            hot: step.runback.charge_window.is_some(),
+            ready: step.runback.charge_available || step.runback.charging,
+            cooldown: match step.runback.charge_cooldown_left {
+                0 => 0.0,
+                left => (left as f32
+                    / crate::data::RunbackTuning::default().charge_cooldown_ticks as f32)
+                    .clamp(0.0, 1.0),
+            },
+            hot: step.runback.charge_window.is_some() || step.runback.charging,
         },
         MoveHint {
             key: "W".to_string(),

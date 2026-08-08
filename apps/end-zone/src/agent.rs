@@ -154,16 +154,13 @@ pub fn perceive(
         .contact_in_ticks
         .unwrap_or(u32::MAX)
         .saturating_sub(latency_ticks);
-    // Each move owns a situation, so the rule ORDER rarely has to break a tie.
-    // A man who is squared up and set is one you go over — the charge reads his
-    // brace and would lose against him, so offering it there offers a mistake.
+    // The charge is now a window you spend, so the question is simply "is there
+    // traffic worth spending it on, and do I have it?" — not "would this exact
+    // collision be won", which is a question no human could answer in time.
     let run_through = step
         .runback
         .charge_window
-        .filter(|window| window.overload >= policy.charge_margin)
-        .filter(|_| seen.brace <= policy.charge_max_brace)
-        // The shoulder stays armed for a bounded number of ticks: pressing for a
-        // collision further off than that spends the move on nobody.
+        .filter(|_| step.runback.charge_available)
         .filter(|_| (policy.charge_lead.0..=policy.charge_lead.1).contains(&lead))
         .map(|window| window.overload);
     let go_over = (run_through.is_none()

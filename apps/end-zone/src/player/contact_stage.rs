@@ -41,10 +41,12 @@ impl SimState {
         let securing =
             self.tick.saturating_sub(self.possession_since) < u64::from(self.tuning.catch_secure_ticks);
         let carrier = self.ball.carrier().filter(|_| !securing);
+        let charging = self.runback.charging(self.tick);
         let resolution = contact::resolve_tackle(
             &mut self.players,
             &self.intents,
             carrier,
+            charging,
             &self.tuning,
             &self.collision,
         );
