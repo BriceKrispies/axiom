@@ -172,6 +172,15 @@ pub const MENU_CSS: &str = r#"
   user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}
 .ez-move:active{transform:scale(.94);background:rgba(255,255,255,.18);
   border-color:rgba(255,255,255,.55);}
+/* The charge tell, HUD half: the shoulder chip warms when the hit would be won.
+   Deliberately a warm EDGE rather than a flash — it has to be catchable in
+   peripheral vision while the eyes stay on the defender, and anything that
+   pulses or moves would pull them off him, which is the opposite of the point.
+   The colour matches the marker at the defender's feet so the two read as one
+   signal. */
+.ez-move-hot{border-color:rgba(255,82,40,.85);background:rgba(255,82,40,.16);
+  box-shadow:0 0 14px rgba(255,82,40,.45),inset 0 0 10px rgba(255,82,40,.2);}
+.ez-move-hot b,.ez-move-hot span{color:#ff8a63;}
 .ez-move b{font-weight:900;font-size:20px;line-height:1;color:var(--ez-chrome);}
 .ez-move u{text-decoration:none;font-weight:900;font-size:12px;letter-spacing:.1em;
   color:rgba(255,255,255,.5);}

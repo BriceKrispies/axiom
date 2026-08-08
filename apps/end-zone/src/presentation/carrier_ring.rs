@@ -36,8 +36,16 @@ pub const ELIGIBLE_RING_POOL: usize = RING_SEGMENTS * (MAX_RINGS - 1);
 /// Pooled cubes for the pre-snap amber ring on the back.
 pub const BACK_RING_POOL: usize = RING_SEGMENTS;
 
+/// Cubes in the **charge tell** — the marker under a defender the back could run
+/// through right now. Fewer and smaller than a foot ring on purpose: it has to
+/// be noticed without being read, so it reads as a texture change at the man's
+/// feet rather than as a second thing to look at.
+pub const CHARGE_SEGMENTS: usize = 10;
+pub const CHARGE_RING_POOL: usize = CHARGE_SEGMENTS;
+
 /// Total pooled cubes the scene must allocate for all foot markers.
-pub const CARRIER_RING_POOL: usize = TARGET_RING_POOL + ELIGIBLE_RING_POOL + BACK_RING_POOL;
+pub const CARRIER_RING_POOL: usize =
+    TARGET_RING_POOL + ELIGIBLE_RING_POOL + BACK_RING_POOL + CHARGE_RING_POOL;
 
 /// Which marker a player gets. Each is its own pooled material — the scene
 /// assigns colour by tag, exactly like the juice pools.
@@ -49,6 +57,9 @@ pub enum RingKind {
     Carrier,
     /// The back you are about to become — drawn amber (pre-exchange).
     Back,
+    /// **The charge tell**: a defender the shoulder would go through. Drawn hot,
+    /// small, and tight to his feet.
+    ChargeTarget,
 }
 
 /// One marker cube: where it sits and which marker it belongs to.
@@ -60,6 +71,9 @@ pub struct RingSegment {
 
 /// Ring radius at the player's feet, yd.
 const RING_RADIUS: f32 = 0.95;
+/// The charge tell sits tighter and lower than a foot ring.
+const CHARGE_RADIUS: f32 = 0.62;
+const CHARGE_SEGMENT_SIZE: f32 = 0.2;
 /// Height of the ring above the turf, yd.
 const RING_HEIGHT: f32 = 0.10;
 /// Size of one ring segment cube, yd.
@@ -91,6 +105,42 @@ fn push_ring(feet: Vec3, kind: RingKind, out: &mut Vec<RingSegment>) {
     });
 }
 
+/// The charge tell: a tight hot arc at the feet of a defender the shoulder would
+/// go through.
+///
+/// **It is a promise, not a hint.** The simulation resolves a charge on the
+/// geometry as it was when the player pressed, and this is drawn from that same
+/// resolution (`runback::read::charge_window`), so the tell being lit and the
+/// charge being won are one fact rather than two that have to agree.
+///
+/// That is also what earns it the right to exist. End Zone otherwise refuses to
+/// tell the player whether a move will work, because reading the field IS the
+/// game — but the charge's inputs, closing speed and the defender's brace, are
+/// the one set a low chase camera genuinely cannot show you. Two bodies about to
+/// collide look identical from behind whether one of them is squared up and
+/// braced or turned and coasting. The tell gives back information the camera
+/// takes away; it never answers a question the player could have answered by
+/// looking.
+///
+/// Its arc length scales with how decisively the charge would be won, so a
+/// comfortable window reads as a fuller mark than a marginal one — without ever
+/// putting a number on the screen.
+fn push_charge_tell(feet: Vec3, overload: f32, out: &mut Vec<RingSegment>) {
+    let filled = ((overload - 1.0) * 6.0).clamp(3.0, CHARGE_SEGMENTS as f32) as usize;
+    (0..filled).for_each(|segment| {
+        let angle = segment as f32 / CHARGE_SEGMENTS as f32 * core::f32::consts::TAU;
+        out.push(cube(
+            Vec3::new(
+                feet.x + angle.cos() * CHARGE_RADIUS,
+                RING_HEIGHT,
+                feet.z + angle.sin() * CHARGE_RADIUS,
+            ),
+            CHARGE_SEGMENT_SIZE,
+            RingKind::ChargeTarget,
+        ));
+    });
+}
+
 /// Build this tick's foot markers.
 pub fn ring_instances(snapshot: &PresentationSnapshot, out: &mut Vec<RingSegment>) {
     out.clear();
@@ -103,6 +153,9 @@ pub fn ring_instances(snapshot: &PresentationSnapshot, out: &mut Vec<RingSegment
             false => RingKind::Back,
         };
         push_ring(snapshot.player(back).pos, kind, out);
+        if let Some(window) = step.runback.charge_window {
+            push_charge_tell(snapshot.player(window.defender).pos, window.overload, out);
+        }
         return;
     }
     // The ambient showcase keeps the original throwing-cone read: the snapshot

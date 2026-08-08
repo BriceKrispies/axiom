@@ -58,6 +58,11 @@ pub struct MoveHint {
     /// `0..1` of the leap's cooldown still to run — the pip's drain. `0` for
     /// every move that has no cooldown.
     pub cooldown: f32,
+    /// Whether this move is **live right now** — currently only the shoulder,
+    /// when the charge would be won. The HUD half of the charge tell, reading
+    /// the same value that lights the marker on the field, so a player watching
+    /// the defender and a player watching the chip are told the same thing.
+    pub hot: bool,
 }
 
 /// The formatted read-out for one tick of a live session.
@@ -154,6 +159,7 @@ fn move_hints(step: &AttemptStep) -> Vec<MoveHint> {
             name: RunbackMoveCode::JukeLeft.label().to_string(),
             ready: true,
             cooldown: 0.0,
+            hot: false,
         },
         MoveHint {
             key: "D".to_string(),
@@ -161,6 +167,7 @@ fn move_hints(step: &AttemptStep) -> Vec<MoveHint> {
             name: RunbackMoveCode::JukeRight.label().to_string(),
             ready: true,
             cooldown: 0.0,
+            hot: false,
         },
         MoveHint {
             key: "S".to_string(),
@@ -168,6 +175,7 @@ fn move_hints(step: &AttemptStep) -> Vec<MoveHint> {
             name: RunbackMoveCode::Shoulder.label().to_string(),
             ready: true,
             cooldown: 0.0,
+            hot: step.runback.charge_window.is_some(),
         },
         MoveHint {
             key: "W".to_string(),
@@ -175,6 +183,7 @@ fn move_hints(step: &AttemptStep) -> Vec<MoveHint> {
             name: RunbackMoveCode::Jump.label().to_string(),
             ready: step.runback.jump_available,
             cooldown,
+            hot: false,
         },
     ]
 }

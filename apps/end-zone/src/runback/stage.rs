@@ -26,6 +26,7 @@ use crate::state::SimState;
 
 use super::charge;
 use super::evade::{self, ThreatVerdict};
+use super::read;
 use super::{ActiveMove, RunbackMove, RunbackStatus};
 
 impl SimState {
@@ -46,6 +47,13 @@ impl SimState {
                 && self.runback.back.is_some(),
             jump_cooldown_left: self.runback.jump_cooldown_left(self.tick),
             move_ready: self.runback.move_available(self.tick) && self.back_is_carrying(),
+            charge_window: self.runback.back.and_then(|back| {
+                read::charge_window(
+                    self,
+                    back,
+                    self.runback.move_available(self.tick) && self.back_is_carrying(),
+                )
+            }),
             dodges: self.runback.dodges,
             hurdled: self.runback.hurdled,
             broken: self.runback.broken,

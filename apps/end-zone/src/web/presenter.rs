@@ -148,7 +148,13 @@ fn moves_html(moves: &[crate::presentation::MoveHint]) -> String {
         .iter()
         .enumerate()
         .map(|(index, hint)| {
-            let dim = if hint.ready { "" } else { " ez-move-cold" };
+            let dim = match (hint.ready, hint.hot) {
+                (false, _) => " ez-move-cold",
+                // Live right now: the charge would be won if pressed. Same fact
+                // as the marker under the defender's feet.
+                (true, true) => " ez-move-hot",
+                (true, false) => "",
+            };
             let pip = match hint.cooldown > 0.0 {
                 true => format!(
                     "<div class='ez-move-pip'><i style='width:{:.0}%'></i></div>",

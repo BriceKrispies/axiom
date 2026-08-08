@@ -19,9 +19,7 @@
 //! the design has failed its own claim.
 
 use crate::attempt::{AttemptPhase, AttemptStep};
-use crate::identity::PlayerId;
-use crate::player::PlayerSim;
-use crate::runback::{charge, ChargeResolution, RunbackMove};
+use crate::runback::{read, Encounter, RunbackMove};
 use crate::state::SimState;
 
 /// The concept the autopilot calls, unless told otherwise.
@@ -86,84 +84,10 @@ impl Aggression {
     };
 }
 
-/// The nearest defender in front of the runner who can still make a play, with
-/// the ground gap to him.
-///
-/// "In front" is measured along the drive, not around him: a defender level with
-/// or behind the runner is not an encounter, and answering one is how a policy
-/// wastes the move it needs two ticks later.
-pub fn nearest_threat(sim: &SimState, runner: &PlayerSim) -> Option<(PlayerId, f32)> {
-    let forward = sim.frame.forward();
-    sim.players
-        .iter()
-        .filter(|p| p.team != runner.team && p.anim.can_act())
-        .filter_map(|p| {
-            let to = p.pos.subtract(runner.pos);
-            let flat = axiom::prelude::Vec3::new(to.x, 0.0, to.z);
-            (flat.dot(forward) > -0.5).then(|| (p.id, flat.length()))
-        })
-        .fold(None::<(PlayerId, f32)>, |best, (id, gap)| {
-            match best.map(|(_, b)| gap < b).unwrap_or(true) {
-                true => Some((id, gap)),
-                false => best,
-            }
-        })
-}
-
-/// The encounter in front of the runner right now: who, how far, how fast the
-/// two are coming together, and how set he is to meet it.
-///
-/// This is the **eyes**, and it is deliberately separate from every policy that
-/// reads it. [`decide_move`] and [`crate::agent`] both look at exactly this, so
-/// the headless game and the agent can never end up judging different fields —
-/// only deciding differently about the same one.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Encounter {
-    pub defender: PlayerId,
-    /// Ground gap between the two bodies, yd.
-    pub gap: f32,
-    /// Closing speed along the contact normal, yd/s — the charge's own input.
-    pub closing: f32,
-    /// How squarely the defender is set to meet a hit, `0..=1`.
-    pub brace: f32,
-    /// Whether he is coming from the offense's right hand. A cut goes the other
-    /// way.
-    pub from_right: bool,
-    /// **What the shoulder charge would actually do**, resolved right now
-    /// through the same [`crate::runback::charge::resolve`] the simulation will
-    /// run at contact.
-    ///
-    /// Predicting the real contest replaces what used to be here — a pair of
-    /// hand-picked thresholds on closing speed and brace, which were a guess at
-    /// the arithmetic rather than the arithmetic. The guess was wrong in the
-    /// only way that mattered: measured against real play it never once fired,
-    /// because it demanded a closing speed that only occurs in a head-on
-    /// collision. Asking the resolution directly cannot drift from it.
-    pub predicted_charge: ChargeResolution,
-}
-
-/// Read the encounter in front of the runner, if there is one.
+/// The encounter in front of the runner, read through the one shared
+/// [`crate::runback::read`] the tell and the agent also use.
 pub fn encounter(sim: &SimState, step: &AttemptStep) -> Option<Encounter> {
-    let back = step.runback.back?;
-    let runner = &sim.players[back.index()];
-    let (defender_id, gap) = nearest_threat(sim, runner)?;
-    let defender = &sim.players[defender_id.index()];
-    let to = defender.pos.subtract(runner.pos);
-    let flat = axiom::prelude::Vec3::new(to.x, 0.0, to.z);
-    let direction = flat.mul_scalar(1.0 / flat.length().max(1.0e-4));
-    Some(Encounter {
-        defender: defender_id,
-        gap,
-        predicted_charge: charge::resolve(runner, defender, gap, &sim.runback_tuning),
-        closing: axiom::prelude::Vec3::new(
-            runner.vel.x - defender.vel.x,
-            0.0,
-            runner.vel.z - defender.vel.z,
-        )
-        .dot(direction),
-        brace: defender.facing_dir().dot(direction.mul_scalar(-1.0)).max(0.0),
-        from_right: direction.dot(sim.frame.right()) >= 0.0,
-    })
+    step.runback.back.and_then(|back| read::encounter(sim, back))
 }
 
 /// What the policy does about the man in front of it this tick, or `None` to

@@ -11,7 +11,8 @@ use crate::field::{paint_pool_capacity, PaintCategory, PALETTE};
 use crate::presentation::chalk::{ChalkMaterial, CHALK_LINE_POOL, CHALK_PRIMARY_POOL};
 use crate::presentation::particles::EffectMaterial;
 use crate::presentation::carrier_ring::{
-    RingKind, BACK_RING_POOL, CARRIER_RING_POOL, ELIGIBLE_RING_POOL, TARGET_RING_POOL,
+    RingKind, BACK_RING_POOL, CARRIER_RING_POOL, CHARGE_RING_POOL, ELIGIBLE_RING_POOL,
+    TARGET_RING_POOL,
 };
 
 use super::{color3, hidden, JUICE_POOL};
@@ -103,10 +104,13 @@ pub(super) fn carrier_rings(app: &mut RunningApp, cube: Handle<Mesh>) -> Vec<(En
     let target = app.add_material(Material::lit(color3([0.96, 0.16, 0.14])));
     let carrier = app.add_material(Material::lit(color3([0.97, 0.98, 0.97])));
     let back = app.add_material(Material::lit(color3([0.99, 0.70, 0.12])));
+    // The charge tell: hot, and the only thing on the field this colour.
+    let charge = app.add_material(Material::lit(color3([1.0, 0.32, 0.16])));
     let plan = [
         (RingKind::Target, TARGET_RING_POOL, target),
         (RingKind::Carrier, ELIGIBLE_RING_POOL, carrier),
         (RingKind::Back, BACK_RING_POOL, back),
+        (RingKind::ChargeTarget, CHARGE_RING_POOL, charge),
     ];
     fill(app, cube, &plan, CARRIER_RING_POOL)
 }

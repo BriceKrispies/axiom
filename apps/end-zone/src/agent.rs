@@ -117,11 +117,16 @@ pub fn perceive(sim: &SimState, step: &AttemptStep, policy: Aggression) -> Perce
             ..Perception::default()
         };
     };
-    // "Can I run through him?" is answered by resolving the real contest, not
-    // by a threshold that hopes to approximate it.
-    let run_through = (seen.predicted_charge.won
-        && seen.predicted_charge.overload >= policy.charge_margin)
-        .then_some(seen.predicted_charge.overload);
+    // "Can I run through him?" is not asked here at all. It is answered once,
+    // by the simulation, and published as `charge_window` — the SAME value that
+    // lights the marker under the defender and warms the shoulder chip. The
+    // agent perceives the tell the player sees, rather than a private
+    // re-derivation of it that could quietly disagree.
+    let run_through = step
+        .runback
+        .charge_window
+        .filter(|window| window.overload >= policy.charge_margin)
+        .map(|window| window.overload);
     let go_over =
         (run_through.is_none() && policy.will_jump && step.runback.jump_available).then_some(seen.gap);
     let cut = (run_through.is_none() && go_over.is_none()).then_some(seen.gap);
@@ -306,6 +311,15 @@ pub struct AgentObservation {
     /// Whether a leap may begin now, and the ticks left if not.
     pub jump_available: bool,
     pub jump_cooldown_left: u64,
+    /// **The charge tell**, machine-readable: the defender the shoulder would go
+    /// through right now, and how decisively. `None` when there is no window.
+    ///
+    /// This is exactly the value the player is shown on the field. An agent that
+    /// had to infer it from pixels — or from its own copy of the contest — could
+    /// be told something different from the human, which would make the two
+    /// incomparable.
+    pub charge_target: Option<PlayerId>,
+    pub charge_overload: f32,
     /// Nearby opposing players, nearest first: who, how far (yd), and the
     /// bearing in the offense frame (`lateral`, `downfield`, unit).
     pub threats: Vec<ThreatView>,
@@ -366,6 +380,8 @@ pub fn observe(sim: &SimState, step: &AttemptStep) -> AgentObservation {
         height: step.runback.height,
         jump_available: step.runback.jump_available,
         jump_cooldown_left: step.runback.jump_cooldown_left,
+        charge_target: step.runback.charge_window.map(|w| w.defender),
+        charge_overload: step.runback.charge_window.map(|w| w.overload).unwrap_or(0.0),
         threats,
         dodges: step.runback.dodges,
         broken: step.runback.broken,

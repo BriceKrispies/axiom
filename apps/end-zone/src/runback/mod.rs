@@ -30,10 +30,12 @@
 
 pub mod charge;
 pub mod evade;
+pub mod read;
 pub mod stage;
 
 pub use charge::ChargeResolution;
 pub use evade::{HurdleWatch, ThreatSnapshot};
+pub use read::{ChargeWindow, Encounter};
 
 use crate::events::RunbackMoveCode;
 use crate::identity::PlayerId;
@@ -206,6 +208,14 @@ pub struct RunbackStatus {
     pub height: f32,
     pub jump_available: bool,
     pub jump_cooldown_left: u64,
+    /// The open **charge window**: a defender the back could run through right
+    /// now. `None` when pressing shoulder would not clearly win.
+    ///
+    /// One value, four readers — the on-field tell, the HUD chip, the headless
+    /// policy and the agent's observation — so what the player is shown, what
+    /// the agent perceives, and what the simulation will do are the same thing
+    /// by construction rather than by three pieces of code agreeing.
+    pub charge_window: Option<ChargeWindow>,
     /// Whether ANY move may begin this tick (no move in progress, recovery
     /// elapsed). Published because everything that decides to press something —
     /// the HUD, the headless policy, the agent — otherwise has to guess, and a
