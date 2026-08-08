@@ -22,6 +22,18 @@ pub struct StrokeView {
     pub live: bool,
 }
 
+/// How hard the shot is being hit, kilometres per hour.
+///
+/// One reading with two lives. While a line is under the finger it is what the
+/// shot **would** leave at if it were let go now; from the moment of contact it
+/// is what the ball actually left at. `struck` is which, and it is what lets the
+/// screen show the first as a promise and the second as a fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Speed {
+    pub kmh: u32,
+    pub struck: bool,
+}
+
 /// Everything the screen draws.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameView {
@@ -33,9 +45,9 @@ pub struct GameView {
     pub banner: Option<&'static str>,
     /// Goals and attempts.
     pub tally: (u32, u32),
-    /// How hard the last shot was struck, km/h — shown from the moment of
-    /// contact and held until the next attempt is set up.
-    pub speed: Option<u32>,
+    /// How hard the shot is being hit — previewed while the line is drawn, then
+    /// held from contact until the next attempt is set up.
+    pub speed: Option<Speed>,
     pub viewport: Vec2,
     pub short: f32,
 }
@@ -90,6 +102,14 @@ mod tests {
         // a nonsense readout.
         assert_eq!(speed_readout(10.0), 36);
         assert_eq!(speed_readout(-5.0), 0);
+    }
+
+    #[test]
+    fn a_preview_and_a_result_are_the_same_number_wearing_different_hats() {
+        let previewed = Speed { kmh: 137, struck: false };
+        let struck = Speed { kmh: 137, struck: true };
+        assert_ne!(previewed, struck, "the screen has to be able to tell them apart");
+        assert_eq!(previewed.kmh, struck.kmh);
     }
 
     #[test]

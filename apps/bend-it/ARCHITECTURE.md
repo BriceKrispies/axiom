@@ -136,9 +136,22 @@ metres" is how the ball ended up floating in at 35 km/h.
 
 Measured over the coarse matrix: **launch 100–151 km/h, arriving at 86–129, in
 0.28–0.47 s**, keeping ~85% of its pace to the line — which is a real ball's
-drag, not a ball on a string. The game shows the figure: the readout under the
-score is the speed the ball genuinely left the boot at, taken off the ball on the
-tick it was struck rather than read back off what the shot was authored at.
+drag, not a ball on a string.
+
+The game shows the figure, and shows it **twice**, in the same place. The readout
+under the score is faint while a line is under the finger — what the shot *would*
+leave at if it were let go now, read with the very same call the finished line
+gets — and solid from the moment of contact, taken off the ball rather than read
+back off what the shot was authored at. A promise, then the fact.
+
+That is what makes the tempo mechanic legible. The speed of your hand has decided
+how hard the ball is hit since the pace work, but you could only find out
+afterwards; now you watch your own tempo become a number while you are still
+drawing. A preview that could disagree with the kick would be worse than none at
+all — it would teach you something untrue about your own hand — so a test draws a
+real shot in real pixels, keeps what the screen promised, runs it to the strike
+and asserts the two agree within 3 km/h
+(`the_speed_the_line_promises_is_the_speed_the_ball_leaves_at`).
 
 The striking leg is a **driven pendulum**: the hip applies a torque, the leg has
 inertia and damping, and the swing is integrated (at eight substeps a tick — the
@@ -295,7 +308,7 @@ footballer and procedural field:
 ## Running it
 
 ```sh
-cargo test -p axiom-bend-it                                  # 202 native tests
+cargo test -p axiom-bend-it                                  # 205 native tests
 uv run scripts/localhost_servers.py start-app bend-it        # play it
 cargo run -p axiom-bend-it --example playthrough -- 12 1     # the agent plays
 cargo run -p axiom-bend-it --example playthrough -- sweep    # balance sweep

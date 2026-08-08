@@ -23,12 +23,13 @@ use axiom_kernel::Tick;
 use crate::camera::{self, CameraPose};
 use crate::debug::{self, DebugMarker};
 use crate::pitch::GoalMouth;
+mod screen;
+
 use crate::play::{Phase, PlayCommand, Session};
 use crate::projection::ScreenProjection;
 use crate::scene::BendItScene;
 use crate::stroke::{
-    hint_for, interpret, speed_readout, Drawing, GameView, Reading, Stroke, StrokeCapture,
-    StrokeView,
+    interpret, Drawing, GameView, Reading, Stroke, StrokeCapture,
 };
 use crate::tuning::{Tuning, DT};
 
@@ -51,6 +52,8 @@ pub struct BendIt {
     debug: bool,
     markers: Vec<DebugMarker>,
     view: GameView,
+    /// What the line under the finger would be struck at, metres per second.
+    preview: Option<f32>,
     /// The line left over from the last release, flicking away.
     ghost: Option<(Stroke, f32)>,
     /// The most recent reading, kept for the debug view.
@@ -80,6 +83,7 @@ impl BendIt {
             debug: false,
             markers: Vec::new(),
             view: GameView::empty(Phase::Ready, surface, (0, 0)),
+            preview: None,
             ghost: None,
             reading: None,
             last_phase: Phase::Ready,
@@ -186,7 +190,33 @@ impl BendIt {
             .capture
             .update(sample, self.frame_n, short * tuning.stroke.spacing, short)
         {
-            Drawing::Idle | Drawing::Drawing => Vec::new(),
+            Drawing::Idle => {
+                self.preview = None;
+                Vec::new()
+            }
+            // What the line would be struck at if it were let go now.
+            //
+            // Read with exactly the same call the finished line gets, not an
+            // approximation of it — a preview that could disagree with the kick
+            // is worse than no preview, because it teaches the player something
+            // untrue about their own hand. Below the length that counts as a shot
+            // there is nothing honest to say yet, so it says nothing.
+            Drawing::Drawing => {
+                self.preview = (self.capture.stroke().length()
+                    >= short * tuning.stroke.min_length)
+                    .then(|| {
+                        interpret(
+                            self.capture.stroke(),
+                            projection,
+                            self.session.shot().origin,
+                            self.session.mouth(),
+                            &tuning,
+                        )
+                    })
+                    .flatten()
+                    .map(|r| r.intent.launch_speed(&tuning));
+                Vec::new()
+            }
             Drawing::Finished(line) => {
                 // The line leaves the screen the moment it is let go, whether or
                 // not it was long enough to mean anything.
@@ -214,34 +244,6 @@ impl BendIt {
             .take()
             .map(|(line, life)| (line, life - rate))
             .filter(|(_, life)| *life > 0.0);
-    }
-
-    /// What the screen should show.
-    fn compose(&self) -> GameView {
-        let tuning = self.session.tuning();
-        let short = self.surface.x.min(self.surface.y);
-        let mut view = GameView::empty(
-            self.session.phase(),
-            self.surface,
-            (self.session.tally().goals, self.session.tally().attempts),
-        );
-        view.banner = self.session.result().map(|r| r.banner());
-        view.hint = hint_for(self.session.phase(), self.session.tally().attempts);
-        view.speed = self.session.struck_speed().map(speed_readout);
-        // The line under the finger, or the one that just left it.
-        let live = self.capture.drawing().then(|| StrokeView {
-            points: self.capture.stroke().points().to_vec(),
-            fade: 1.0,
-            live: self.capture.stroke().length() >= short * tuning.stroke.min_length,
-        });
-        view.stroke = live.or_else(|| {
-            self.ghost.as_ref().map(|(line, life)| StrokeView {
-                points: line.points().to_vec(),
-                fade: *life,
-                live: true,
-            })
-        });
-        view
     }
 
     /// Pose the scene and hand the frame to the renderer.
@@ -302,6 +304,52 @@ mod tests {
             let _ = game.frame(&[], &[(*p, true)]);
         });
         let _ = game.frame(&[], &[]);
+    }
+
+    #[test]
+    fn the_speed_the_line_promises_is_the_speed_the_ball_leaves_at() {
+        // The whole reason for showing it early. A preview that could disagree
+        // with the kick is worse than no preview: it teaches the player something
+        // untrue about their own hand.
+        let mut game = armed(390, 844);
+        let shot = a_shot(&game, 0.55, 0.6, 1.2);
+        let projection = ScreenProjection::new(&game.camera(), game.surface);
+        let points: Vec<Vec2> = (0..30)
+            .filter_map(|i| projection.project(shot.trajectory.at_progress(i as f32 / 29.0)))
+            .collect();
+        // Draw it, keeping the last thing the screen promised.
+        let mut promised = None;
+        points.iter().for_each(|p| {
+            let _ = game.frame(&[], &[(*p, true)]);
+            promised = game.view().speed.or(promised);
+        });
+        let promised = promised.expect("a line that long is worth a number");
+        assert!(!promised.struck, "nothing has been struck while it is being drawn");
+        assert!(promised.kmh >= 100 && promised.kmh <= 160, "{} km/h", promised.kmh);
+
+        // Let go, and run it to the strike.
+        let _ = game.frame(&[], &[]);
+        while game.session().struck_speed().is_none() {
+            let _ = game.frame(&[], &[]);
+        }
+        let struck = game.view().speed.expect("the ball has left");
+        assert!(struck.struck, "and now it is a fact rather than a promise");
+        assert!(
+            struck.kmh.abs_diff(promised.kmh) <= 3,
+            "the line promised {} km/h and the ball left at {}",
+            promised.kmh,
+            struck.kmh
+        );
+    }
+
+    #[test]
+    fn a_line_too_short_to_be_a_shot_promises_nothing() {
+        let mut game = armed(390, 844);
+        let start = Vec2::new(195.0, 700.0);
+        (0..4).for_each(|i| {
+            let _ = game.frame(&[], &[(Vec2::new(start.x, start.y - i as f32 * 2.0), true)]);
+        });
+        assert_eq!(game.view().speed, None, "there is nothing honest to say yet");
     }
 
     fn a_shot(game: &BendIt, h: f32, v: f32, bend: f32) -> ResolvedShot {

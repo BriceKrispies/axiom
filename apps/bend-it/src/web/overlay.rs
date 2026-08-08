@@ -123,7 +123,7 @@ fn tally(view: &GameView) -> String {
     )
 }
 
-/// How hard the ball was hit, under the score.
+/// How hard the ball is being hit, under the score.
 ///
 /// It is the one number the game shows, so it is worth being clear about what it
 /// measures: the speed the ball genuinely **left the boot at**, taken off the
@@ -134,16 +134,22 @@ fn tally(view: &GameView) -> String {
 /// Accented rather than plain, because it is the answer to a question the player
 /// asked with the tempo of their line — and it holds through the flight and the
 /// result, so there is time to look at it.
+///
+/// While the line is still under the finger the same number is drawn **faint**,
+/// as a promise rather than a fact. That difference is the whole point of showing
+/// it early: the player can see the tempo of their own hand becoming a speed, and
+/// then watch the promise be kept.
 fn speed(view: &GameView) -> String {
     view.speed
-        .map(|kmh| {
+        .map(|speed| {
+            let settled = usize::from(speed.struck);
             text(
                 view.viewport.x * 0.5,
                 view.short * 0.150,
-                &format!("{kmh} KM/H"),
-                view.short * 0.045,
+                &format!("{} KM/H", speed.kmh),
+                view.short * [0.040, 0.045][settled],
                 ACCENT,
-                0.88,
+                [0.46, 0.88][settled],
             )
         })
         .unwrap_or_default()
