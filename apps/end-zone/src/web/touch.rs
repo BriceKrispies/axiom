@@ -1,19 +1,28 @@
 //! In-match touch controls.
 //!
-//! There is **no virtual joystick**. The prototype's whole premise is that the
-//! player does not steer — the play simulates itself and the player answers one
-//! question — so a thumbstick sitting in the corner advertised a verb the game
-//! does not have. Without it a touch carrier simply runs on his own AI intent,
-//! which is what he does whenever the stick is centred anyway.
+//! There is **no virtual joystick**: the running back runs by himself, so there
+//! is nothing to steer. What the player needs is four decisions made fast, and
+//! on a phone they get two ways to make each one — **flick anywhere**, or **tap
+//! the chip**.
 //!
-//! What touch needs instead is the answers. Rather than duplicating the prompts
-//! as a second row of buttons, the prompts **are** the buttons: a single
-//! delegated pointer listener reads `data-read` off whichever chip was tapped —
-//! a play row on the pre-snap card, a read chip once the ball is live. One piece
-//! of UI, always in the place the player is already looking, and it can never
-//! disagree with the keyboard hints because it is the same DOM.
+//! Both, and not one or the other. The flick is faster and keeps a thumb off
+//! the field; the chip is discoverable and can never be mis-recognised as a
+//! diagonal. An earlier version of this file shipped only the flick, and the
+//! move row was drawn as four button-shaped things that were in fact labels —
+//! which is the worst of both, because a phone player taps what looks like a
+//! button and concludes the game is broken. Anything drawn as a button IS a
+//! button.
 //!
-//! Pointer-event driven, so touch, pen, and mouse all work.
+//! What lives here is **only the reading of pointer events**. Whether a drag is
+//! a deliberate swipe, which axis it took, and which of the four moves that
+//! means is decided by [`crate::controls::swipe`], on the deterministic side of
+//! the platform boundary, where a native test can drive it. This file knows
+//! about `PointerEvent` and nothing about gameplay.
+//!
+//! The pre-snap play card keeps its taps: the three plays are a menu, and a menu
+//! is a thing you touch. One delegated listener reads `data-play` off whichever
+//! row was tapped, so the prompt the player is already looking at *is* the
+//! button and can never disagree with the keyboard hints — it is the same DOM.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -22,37 +31,45 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Element, PointerEvent};
 
+use crate::controls::swipe::{SwipePhase, SwipeRecognizer, SwipeSample};
+use crate::runback::RunbackMove;
+
 use super::mount_div;
 
 /// Shared touch-control state the DOM listeners write and the frame reads.
 #[derive(Debug, Default)]
 pub struct TouchHeld {
-    /// A read chip `0..3` TAPPED since the last frame, if any. A one-shot edge:
-    /// the pointer-down IS the whole input, exactly like the keyboard's press.
-    read_edge: Option<usize>,
-    scramble_edge: bool,
+    /// A play row TAPPED since the last frame, if any. A one-shot edge: the
+    /// pointer-down IS the whole input, exactly like the keyboard's press.
+    play_edge: Option<usize>,
+    /// A move committed since the last frame — a tapped chip or a recognised
+    /// swipe. One field, because they are one verb.
+    move_edge: Option<RunbackMove>,
     pause_edge: bool,
+    /// The gesture recogniser, fed by every pointer sample.
+    recognizer: SwipeRecognizer,
 }
 
 /// One frame's touch reading (consumes the one-shot edges).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TouchFrame {
-    pub read: Option<usize>,
-    pub scramble: bool,
+    pub play: Option<usize>,
+    pub wanted: Option<RunbackMove>,
     pub pause: bool,
 }
 
 impl TouchHeld {
     pub fn take(&mut self) -> TouchFrame {
         TouchFrame {
-            read: core::mem::take(&mut self.read_edge),
-            scramble: core::mem::take(&mut self.scramble_edge),
+            play: core::mem::take(&mut self.play_edge),
+            wanted: core::mem::take(&mut self.move_edge),
             pause: core::mem::take(&mut self.pause_edge),
         }
     }
 }
 
-/// The only mounted touch button left: everything else is the live prompt.
+/// The only mounted touch button: everything else is a tap on the live HUD or a
+/// flick anywhere on the field.
 const CONTROL_IDS: [&str; 1] = ["end-zone-btn-pause"];
 
 /// Show/hide the mounted control cluster (menus hide it).
@@ -70,7 +87,7 @@ pub fn set_controls_visible(visible: bool) {
     }
 }
 
-/// Mount the pause button and wire the decision prompt as the touch input.
+/// Mount the pause button, the play-card taps, and the swipe surface.
 pub fn mount_touch_controls(touch: &Rc<RefCell<TouchHeld>>) {
     let pause = mount_div(
         "end-zone-btn-pause",
@@ -84,58 +101,99 @@ pub fn mount_touch_controls(touch: &Rc<RefCell<TouchHeld>>) {
     if let Some(pause) = pause {
         install_pause(&pause, touch);
     }
-    install_decision_taps(touch);
+    install_pointer(touch);
 }
 
-/// Delegate taps on the decision prompt's chips.
+/// One delegated pointer listener for the whole window: it feeds the swipe
+/// recogniser and, on a tap that landed on a play row or a move chip, records
+/// that instead.
 ///
-/// Two reasons this is delegated rather than a listener per chip, and bound to
-/// `window` rather than to the HUD root:
+/// Delegated rather than a listener per element, and bound to `window` rather
+/// than to the HUD root, for two reasons that have both bitten this file before:
 ///
-/// 1. The presenter rewrites the HUD's `innerHTML` whenever the read-out
-///    changes, so a listener bound to a chip would be destroyed on the next
-///    repaint — several times a second during a window.
-/// 2. Controls are mounted before the presenter mounts the HUD root, so
-///    binding to `#end-zone-hud` silently bound to nothing at all. `window`
-///    always exists, which removes the ordering dependency entirely rather
-///    than papering over it with a reordered boot sequence.
-fn install_decision_taps(touch: &Rc<RefCell<TouchHeld>>) {
+/// 1. the presenter rewrites the HUD's `innerHTML` whenever the read-out
+///    changes, so a listener bound to a row would be destroyed on the next
+///    repaint;
+/// 2. controls are mounted before the presenter mounts the HUD root, so binding
+///    to `#end-zone-hud` silently bound to nothing at all.
+///
+/// It also means the **whole screen** is the swipe surface, which is what you
+/// want on a phone: there is no correct place to put your thumb, so every place
+/// is correct.
+fn install_pointer(touch: &Rc<RefCell<TouchHeld>>) {
     let Some(window) = web_sys::window() else {
         return;
     };
-    let held = touch.clone();
-    let on_down = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
-        let Some(target) = e.target().and_then(|t| t.dyn_into::<Element>().ok()) else {
-            return;
-        };
-        // `closest` walks up from whatever child glyph took the hit (the big
-        // number or the route name), so a tap anywhere on the chip counts.
-        let read = target
-            .closest("[data-read]")
-            .ok()
-            .flatten()
-            .and_then(|el| el.get_attribute("data-read"))
-            .and_then(|value| value.parse::<usize>().ok());
-        let scramble = target
-            .closest("[data-scramble]")
-            .ok()
-            .flatten()
-            .is_some();
-        if read.is_none() && !scramble {
-            return;
-        }
-        e.prevent_default();
-        e.stop_propagation();
-        let mut state = held.borrow_mut();
-        // First tap of the frame wins: two chips hit in one frame is a fumbled
-        // input, and honouring the later one would let a stray thumb overwrite
-        // a deliberate press.
-        state.read_edge = state.read_edge.or(read);
-        state.scramble_edge |= scramble;
-    });
-    let _ =
-        window.add_event_listener_with_callback("pointerdown", on_down.as_ref().unchecked_ref());
-    on_down.forget();
+    for (event, phase) in [
+        ("pointerdown", SwipePhase::Down),
+        ("pointermove", SwipePhase::Move),
+        ("pointerup", SwipePhase::Up),
+        ("pointercancel", SwipePhase::Up),
+    ] {
+        let held = touch.clone();
+        let on_event = Closure::<dyn FnMut(PointerEvent)>::new(move |e: PointerEvent| {
+            let mut state = held.borrow_mut();
+            let down = phase == SwipePhase::Down;
+            // A tap on a chip is a press, not the start of a gesture — so it
+            // short-circuits the recogniser rather than also dragging it.
+            // First press of the frame wins: two chips hit at once is a fumbled
+            // input, and honouring the later one would let a stray thumb
+            // overwrite a deliberate one.
+            if let Some(play) = down.then(|| attribute(&e, "data-play")).flatten() {
+                e.prevent_default();
+                state.play_edge = state.play_edge.or(Some(play));
+                state.recognizer.clear();
+                return;
+            }
+            if let Some(index) = down.then(|| attribute(&e, "data-move")).flatten() {
+                e.prevent_default();
+                state.move_edge = state.move_edge.or(move_of(index));
+                state.recognizer.clear();
+                return;
+            }
+            let recognised = state.recognizer.sample(SwipeSample {
+                phase,
+                x: e.client_x() as f32,
+                y: e.client_y() as f32,
+            });
+            if let Some(wanted) = recognised {
+                e.prevent_default();
+                state.move_edge = state.move_edge.or(Some(wanted));
+            }
+        });
+        let _ = window.add_event_listener_with_callback(event, on_event.as_ref().unchecked_ref());
+        on_event.forget();
+    }
+}
+
+/// The index carried by the nearest ancestor of the event's target that has
+/// `selector` as an attribute, if any.
+///
+/// `closest` walks up from whatever child glyph actually took the hit (the big
+/// arrow, the key letter, the move name), so a tap anywhere inside a chip
+/// counts — which on a phone is the difference between a control that works and
+/// one that works only if you hit the 4-pixel gap between two words.
+fn attribute(e: &PointerEvent, selector: &str) -> Option<usize> {
+    let target = e.target().and_then(|t| t.dyn_into::<Element>().ok())?;
+    target
+        .closest(&format!("[{selector}]"))
+        .ok()
+        .flatten()
+        .and_then(|el| el.get_attribute(selector))
+        .and_then(|value| value.parse::<usize>().ok())
+}
+
+/// The move a chip index means. The order is the row's order, which is also
+/// [`crate::presentation::hud`]'s — one list, authored once.
+fn move_of(index: usize) -> Option<RunbackMove> {
+    [
+        RunbackMove::JukeLeft,
+        RunbackMove::JukeRight,
+        RunbackMove::Shoulder,
+        RunbackMove::Jump,
+    ]
+    .get(index)
+    .copied()
 }
 
 /// Wire the pause button: a pointer-down is one debounced edge.

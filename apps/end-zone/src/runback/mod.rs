@@ -206,6 +206,12 @@ pub struct RunbackStatus {
     pub height: f32,
     pub jump_available: bool,
     pub jump_cooldown_left: u64,
+    /// Whether ANY move may begin this tick (no move in progress, recovery
+    /// elapsed). Published because everything that decides to press something —
+    /// the HUD, the headless policy, the agent — otherwise has to guess, and a
+    /// guess here means issuing a move every single tick and having the
+    /// simulation quietly drop all but the first.
+    pub move_ready: bool,
     pub dodges: u32,
     pub hurdled: u32,
     pub broken: u32,

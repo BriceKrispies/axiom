@@ -44,14 +44,42 @@ pub struct RunbackTuning {
     pub dodge_clear_yards: f32,
 
     // --- the shoulder charge ------------------------------------------------
-    /// How long a lowered shoulder stays armed looking for contact, ticks. Miss
-    /// the window and the move simply expires — no signal, no penalty.
+    /// How long a lowered shoulder stays armed looking for contact, ticks.
+    ///
+    /// Must be longer than the time it takes to actually *reach* the man you
+    /// dropped your pads for. At 24 ticks it was not: a back committing at the
+    /// ideal gap of ~3.4 yd with ~6 yd/s of closing needs about 35 ticks to
+    /// arrive, so eight charges in ten expired having touched nobody — and each
+    /// one still cost a full move lockout, which made the down button a trap
+    /// that measurably doubled the tackled rate.
     pub shoulder_ticks: u32,
-    /// Ticks after a charge resolves before another move may begin.
+    /// Ticks after a charge RESOLVES before another move may begin. Contact
+    /// costs something either way.
     pub shoulder_recovery_ticks: u32,
+    /// Ticks after a charge EXPIRES untouched. Small on purpose: standing a man
+    /// up who never arrived is a misread, and a misread should cost you the
+    /// beat you spent on it, not the next three.
+    pub shoulder_expire_ticks: u32,
     /// Extra reach beyond the two body radii at which the charge finds contact.
     pub shoulder_reach: f32,
+    /// The speed-independent **drive** a lowered shoulder is worth, yd/s of
+    /// equivalent impulse, scaled by the back's `block_strength`.
+    ///
+    /// The charge's counterpart of the tackle's `tackle_grip`, and it exists for
+    /// the same measured reason: modelling contact as pure momentum meant a
+    /// charge could only be won in a head-on collision, and the encounters this
+    /// game actually produces are pursuits. Instrumented against real play, the
+    /// charge lost *every* contest it was ever offered — impulse 3.5–5.4 against
+    /// a resistance of 5.5–6.5 — which is to say the down button did nothing at
+    /// all. Lowering your pads and driving through a man is worth something even
+    /// when you are not running at him.
+    pub charge_drive: f32,
     /// The gap at which lowering the shoulder is perfectly timed, yd.
+    ///
+    /// A back drops his shoulder about half a second out, and half a second at
+    /// running speed is three and a half yards — not the two and a half this
+    /// used to say, which taxed every realistically-timed charge by a third
+    /// before the contest even started.
     pub charge_ideal_gap: f32,
     /// How far either side of the ideal gap timing decays to its floor, yd.
     pub charge_timing_span: f32,
@@ -110,13 +138,15 @@ impl Default for RunbackTuning {
             dodge_resolve_ticks: 60,
             dodge_clear_yards: 0.6,
 
-            shoulder_ticks: 24,
+            shoulder_ticks: 42,
             shoulder_recovery_ticks: 26,
+            shoulder_expire_ticks: 8,
             shoulder_reach: 0.4,
-            charge_ideal_gap: 2.6,
-            charge_timing_span: 2.6,
-            charge_timing_penalty: 0.7,
-            charge_resist_speed: 6.0,
+            charge_drive: 2.2,
+            charge_ideal_gap: 3.4,
+            charge_timing_span: 3.0,
+            charge_timing_penalty: 0.6,
+            charge_resist_speed: 5.6,
             charge_brace_floor: 0.55,
             charge_knock_speed: 5.5,
             charge_airborne_overload: 1.5,

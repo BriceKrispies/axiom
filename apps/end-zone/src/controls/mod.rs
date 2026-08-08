@@ -11,10 +11,17 @@
 //!
 //! | Verb | Key | Swipe |
 //! |---|---|---|
-//! | juke left | `A` / `←` | ◀ |
-//! | juke right | `D` / `→` | ▶ |
-//! | shoulder charge | `S` / `↓` | ▼ |
-//! | leap | `W` / `↑` | ▲ |
+//! | juke left | `A` / `←` | ◀ swipe, or tap the chip |
+//! | juke right | `D` / `→` | ▶ swipe, or tap the chip |
+//! | shoulder charge | `S` / `↓` | ▼ swipe, or tap the chip |
+//! | leap | `W` / `↑` | ▲ swipe, or tap the chip |
+//!
+//! A phone gets **both** the swipe and the button, and that is deliberate. The
+//! flick is faster and keeps a thumb off the field; the button is discoverable
+//! and never mis-recognised. Making the player choose between them would be
+//! making them choose between speed and certainty in a game whose whole subject
+//! is a decision made under time pressure — so they get both, and they produce
+//! the identical [`crate::runback::RunbackMove`].
 //!
 //! The number row belongs to the play call: `1`/`2`/`3` pick the concept before
 //! the snap and mean nothing after it. Camera diagnostics live on F2–F6 for
@@ -91,9 +98,15 @@ pub struct TouchInput {
     /// A play row TAPPED this frame, `0..3` — a one-shot edge, matching the
     /// keyboard's press.
     pub play: Option<usize>,
-    /// A swipe COMPLETED this frame, already recognised by
-    /// [`swipe::SwipeRecognizer`] on the deterministic side of the boundary.
-    pub swipe: Option<RunbackMove>,
+    /// A move committed by the touch surface this frame, from **either** a
+    /// tapped button or a recognised swipe.
+    ///
+    /// One field for both on purpose. A phone gets two ways to make the same
+    /// move — the row of buttons, which is discoverable and reliable, and the
+    /// flick, which is faster and does not put a thumb over the field — and
+    /// they are the same verb, so they arrive here as the same value. Anything
+    /// downstream that could tell them apart would be a second control scheme.
+    pub wanted: Option<RunbackMove>,
 }
 
 /// The deterministic input sampler plus the latch of commands awaiting a tick.
@@ -186,7 +199,7 @@ impl GameInput {
                 self.latch(DiagnosticCommand::Move(wanted));
             }
         }
-        if let Some(wanted) = touch.swipe {
+        if let Some(wanted) = touch.wanted {
             self.latch(DiagnosticCommand::Move(wanted));
         }
 

@@ -7,10 +7,19 @@
 //! player can see on the screen and a test can construct by hand.
 //!
 //! ```text
-//!   impulse    = mass · closing_speed · alignment · timing · power · balance
-//!   resistance = mass · anchor       · brace                · resist_speed
+//!   hit        = closing_speed · alignment
+//!   drive      = charge_drive  · block_strength
+//!   impulse    = mass · (hit + drive) · timing · power · balance
+//!   resistance = mass · anchor · brace · resist_speed
 //!   the runner goes through  ⇔  impulse > resistance
 //! ```
+//!
+//! Like the tackle it is answering (see [`crate::player::tackle`]), contact is
+//! **two things**: a hit and a drive. The first version of this file had only
+//! the hit, and instrumenting it against real play showed what that costs — the
+//! charge lost every single contest the game ever offered it, because the
+//! encounters a run produces are pursuits rather than head-on collisions. A
+//! button that can never do anything is worse than no button.
 //!
 //! Reading each term, and what the player is doing when they move it:
 //!
@@ -140,9 +149,10 @@ pub fn resolve(
     };
     let timing = timing_factor(commit_gap, tuning);
     let power = 0.5 + 0.5 * runner.archetype.block_strength;
+    let hit = closing_speed * alignment;
+    let drive = tuning.charge_drive * runner.archetype.block_strength;
     let impulse = runner.archetype.mass
-        * closing_speed
-        * alignment
+        * (hit + drive)
         * timing
         * power
         * runner.balance.clamp(0.0, 1.0);

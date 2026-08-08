@@ -11,6 +11,7 @@ pub mod controller;
 pub mod lineup;
 pub mod model;
 pub mod rig;
+pub mod tackle;
 
 use axiom::prelude::Vec3;
 

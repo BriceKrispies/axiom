@@ -47,11 +47,19 @@ use crate::state::SimState;
 
 /// The app's control vocabulary: the meaning this app assigns to a neutral
 /// `press_control` code. `axiom-agent` carries the `u32` opaquely.
-pub const CONTROL_CALL_PLAY: u32 = 1;
-pub const CONTROL_JUKE_LEFT: u32 = 2;
-pub const CONTROL_JUKE_RIGHT: u32 = 3;
-pub const CONTROL_SHOULDER: u32 = 4;
-pub const CONTROL_JUMP: u32 = 5;
+///
+/// They are **distinct bit flags**, not 1/2/3/4/5, because
+/// `ActionQueue::combined_control_code` folds a tick's presses with a bitwise
+/// OR — the queue models "which controls are held", which is a set. With
+/// sequential integers the codes alias (`3` is `1|2`), so a single juke-right
+/// press reads back as "call the play AND juke left" and the game does neither
+/// thing you asked for. Getting this wrong is silent: the agent decides
+/// correctly, emits correctly, and the lowering hands the game nonsense.
+pub const CONTROL_CALL_PLAY: u32 = 1 << 0;
+pub const CONTROL_JUKE_LEFT: u32 = 1 << 1;
+pub const CONTROL_JUKE_RIGHT: u32 = 1 << 2;
+pub const CONTROL_SHOULDER: u32 = 1 << 3;
+pub const CONTROL_JUMP: u32 = 1 << 4;
 
 /// The app's observation-fact vocabulary: what the back can *see*. A fact is
 /// present only when there is something to perceive, which is what lets the
@@ -101,7 +109,7 @@ pub struct Perception {
 pub fn perceive(sim: &SimState, step: &AttemptStep, policy: Aggression) -> Perception {
     let awaiting_call = step.phase.accepts_call();
     let Some(seen) = autopilot::encounter(sim, step)
-        .filter(|_| step.phase.controllable())
+        .filter(|_| step.phase.controllable() && step.runback.move_ready)
         .filter(|seen| seen.gap <= policy.react_range)
     else {
         return Perception {
@@ -109,8 +117,11 @@ pub fn perceive(sim: &SimState, step: &AttemptStep, policy: Aggression) -> Perce
             ..Perception::default()
         };
     };
-    let run_through = (seen.closing >= policy.charge_speed && seen.brace <= policy.charge_max_brace)
-        .then_some(seen.closing);
+    // "Can I run through him?" is answered by resolving the real contest, not
+    // by a threshold that hopes to approximate it.
+    let run_through = (seen.predicted_charge.won
+        && seen.predicted_charge.overload >= policy.charge_margin)
+        .then_some(seen.predicted_charge.overload);
     let go_over =
         (run_through.is_none() && policy.will_jump && step.runback.jump_available).then_some(seen.gap);
     let cut = (run_through.is_none() && go_over.is_none()).then_some(seen.gap);
@@ -217,18 +228,13 @@ pub fn decide_one_step(
     // decision reaches the game.
     let control = queue.combined_control_code();
     AgentDecision {
-        call_play: (control & bit(CONTROL_CALL_PLAY) != 0)
+        call_play: (control & CONTROL_CALL_PLAY != 0)
             .then_some(crate::autopilot::AUTOPILOT_CONCEPT),
         wanted: lower(control),
         reason_code: report.reason_code(),
         emitted: report.emitted_action_count(),
         perception: seen,
     }
-}
-
-/// The bit a control code occupies in the queue's folded bitmask.
-fn bit(control: u32) -> u32 {
-    1u32 << control
 }
 
 /// Turn the queue's folded control bitmask into the game's move vocabulary.
@@ -240,7 +246,7 @@ fn lower(control: u32) -> Option<RunbackMove> {
         (CONTROL_JUKE_RIGHT, RunbackMove::JukeRight),
     ]
     .into_iter()
-    .find(|(code, _)| control & bit(*code) != 0)
+    .find(|(code, _)| control & *code != 0)
     .map(|(_, wanted)| wanted)
 }
 
@@ -348,11 +354,11 @@ pub fn observe(sim: &SimState, step: &AttemptStep) -> AgentObservation {
         carrying: sim.back_is_carrying(),
         position: (pos.x, pos.y, pos.z),
         normalized: (
-            (pos.x / crate::field::FIELD_WIDTH) + 0.5,
-            (crate::field::z_to_yards_from_own_goal(pos.z, sim.frame.direction) / 100.0)
+            (pos.x / crate::field::coordinates::FIELD_WIDTH) + 0.5,
+            (crate::field::coordinates::z_to_yards_from_own_goal(pos.z, sim.frame.direction) / 100.0)
                 .clamp(-0.2, 1.2),
         ),
-        yards_to_goal: crate::field::GOAL_LINE_Z - pos.z * sign,
+        yards_to_goal: crate::field::coordinates::GOAL_LINE_Z - pos.z * sign,
         speed: runner.map(|p| p.speed()).unwrap_or(0.0),
         velocity: (vel.x, vel.z),
         action: step.runback.active.map(|m| m.label()),

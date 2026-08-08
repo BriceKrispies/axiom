@@ -45,6 +45,7 @@ impl SimState {
                 && self.controlled_player() == self.runback.back
                 && self.runback.back.is_some(),
             jump_cooldown_left: self.runback.jump_cooldown_left(self.tick),
+            move_ready: self.runback.move_available(self.tick) && self.back_is_carrying(),
             dodges: self.runback.dodges,
             hurdled: self.runback.hurdled,
             broken: self.runback.broken,
@@ -227,9 +228,10 @@ impl SimState {
             });
         match hit {
             Some((defender, _)) => self.resolve_charge(back, defender, active),
-            // No contact yet — keep the shoulder down until the window expires.
+            // No contact yet — keep the shoulder down until the window expires,
+            // then hand control straight back.
             None if self.tick >= active.ends => {
-                self.finish_move(runback.shoulder_recovery_ticks)
+                self.finish_move(runback.shoulder_expire_ticks)
             }
             None => {}
         }
@@ -241,21 +243,39 @@ impl SimState {
         // The gap when the shoulder went down — recovered from where the two of
         // them were at the commit tick, through the perception ring the AI
         // already keeps, so nothing new has to be stored to know it.
+        // The contest is resolved on the geometry as it was **when the player
+        // pressed**, not as it is at impact.
+        //
+        // That is the honest reading of the mechanic — you drop your pads at
+        // what you can see, and the hit you get is the hit you brought into it —
+        // and it is also the only version that is fair. Resolving on
+        // contact-time geometry meant the alignment collapsed in the ~35 ticks
+        // between the press and the collision, so a charge the player (and the
+        // agent) correctly read as a win resolved as a loss: measured, one win
+        // in seven. A control whose outcome contradicts the picture you pressed
+        // on is not a skill, it is a lie.
+        //
+        // The commit-time state costs nothing to recover: the AI's perception
+        // ring already remembers every player's position and velocity, so this
+        // is a lookup rather than new bookkeeping.
         let seen = self
             .perception
             .sample((self.tick.saturating_sub(active.started)) as u32);
+        let at_commit = |id: PlayerId| {
+            let mut player = self.players[id.index()];
+            player.pos = seen.positions[id.index()];
+            player.vel = seen.velocities[id.index()];
+            player
+        };
+        let runner_then = at_commit(back);
+        let defender_then = at_commit(defender);
         let commit_gap = Vec3::new(
-            seen.positions[defender.index()].x - seen.positions[back.index()].x,
+            defender_then.pos.x - runner_then.pos.x,
             0.0,
-            seen.positions[defender.index()].z - seen.positions[back.index()].z,
+            defender_then.pos.z - runner_then.pos.z,
         )
         .length();
-        let resolution = charge::resolve(
-            &self.players[back.index()],
-            &self.players[defender.index()],
-            commit_gap,
-            &runback,
-        );
+        let resolution = charge::resolve(&runner_then, &defender_then, commit_gap, &runback);
         self.runback.last_charge = Some(resolution);
 
         match resolution.won {

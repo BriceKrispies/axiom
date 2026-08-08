@@ -21,7 +21,7 @@
 use crate::attempt::{AttemptPhase, AttemptStep};
 use crate::identity::PlayerId;
 use crate::player::PlayerSim;
-use crate::runback::RunbackMove;
+use crate::runback::{charge, ChargeResolution, RunbackMove};
 use crate::state::SimState;
 
 /// The concept the autopilot calls, unless told otherwise.
@@ -47,12 +47,11 @@ pub struct Aggression {
     /// Its whole skill is here: react too early and the move is spent before the
     /// defender commits, too late and he has already made the tackle.
     pub react_range: f32,
-    /// Closing speed at or above which contact is worth *taking* rather than
-    /// avoiding, yd/s.
-    pub charge_speed: f32,
-    /// How square the defender must be, `0..1`, before the policy prefers going
-    /// round or over him to going through him.
-    pub charge_max_brace: f32,
+    /// How decisively the predicted charge must be won before the policy will
+    /// take contact rather than avoid it. `1.0` is a dead heat; above it is
+    /// margin, because the prediction is made a few ticks before the collision
+    /// and the geometry moves in between.
+    pub charge_margin: f32,
     /// Whether the leap is on the table at all.
     pub will_jump: bool,
 }
@@ -62,22 +61,27 @@ impl Aggression {
     /// agent and the balance harness both run.
     pub const BALANCED: Aggression = Aggression {
         react_range: 3.4,
-        charge_speed: 6.2,
-        charge_max_brace: 0.72,
+        charge_margin: 1.05,
         will_jump: true,
+    };
+    /// Identical to [`Self::BALANCED`] in every respect except that it never
+    /// presses the down button. The B arm of the shoulder-charge A/B: with one
+    /// control removed and nothing else changed, any difference in the numbers
+    /// is that control's doing.
+    pub const NO_SHOULDER: Aggression = Aggression {
+        charge_margin: f32::INFINITY,
+        ..Aggression::BALANCED
     };
     /// Never takes contact: everything is a cut.
     pub const EVASIVE: Aggression = Aggression {
         react_range: 3.4,
-        charge_speed: f32::INFINITY,
-        charge_max_brace: 0.0,
+        charge_margin: f32::INFINITY,
         will_jump: false,
     };
-    /// Runs at everything.
+    /// Runs at everything it could win.
     pub const BRUISING: Aggression = Aggression {
         react_range: 3.0,
-        charge_speed: 0.0,
-        charge_max_brace: 1.0,
+        charge_margin: 1.0,
         will_jump: false,
     };
 }
@@ -125,6 +129,17 @@ pub struct Encounter {
     /// Whether he is coming from the offense's right hand. A cut goes the other
     /// way.
     pub from_right: bool,
+    /// **What the shoulder charge would actually do**, resolved right now
+    /// through the same [`crate::runback::charge::resolve`] the simulation will
+    /// run at contact.
+    ///
+    /// Predicting the real contest replaces what used to be here — a pair of
+    /// hand-picked thresholds on closing speed and brace, which were a guess at
+    /// the arithmetic rather than the arithmetic. The guess was wrong in the
+    /// only way that mattered: measured against real play it never once fired,
+    /// because it demanded a closing speed that only occurs in a head-on
+    /// collision. Asking the resolution directly cannot drift from it.
+    pub predicted_charge: ChargeResolution,
 }
 
 /// Read the encounter in front of the runner, if there is one.
@@ -139,6 +154,7 @@ pub fn encounter(sim: &SimState, step: &AttemptStep) -> Option<Encounter> {
     Some(Encounter {
         defender: defender_id,
         gap,
+        predicted_charge: charge::resolve(runner, defender, gap, &sim.runback_tuning),
         closing: axiom::prelude::Vec3::new(
             runner.vel.x - defender.vel.x,
             0.0,
@@ -166,14 +182,15 @@ pub fn encounter(sim: &SimState, step: &AttemptStep) -> Option<Encounter> {
 ///    free way to be tackled while airborne and out of options.
 /// 4. **Otherwise, go round him** — cut away from the side he is coming from.
 pub fn decide_move(sim: &SimState, step: &AttemptStep, policy: Aggression) -> Option<RunbackMove> {
-    if !step.phase.controllable() {
+    if !step.phase.controllable() || !step.runback.move_ready {
         return None;
     }
     let seen = encounter(sim, step)?;
     if seen.gap > policy.react_range {
         return None;
     }
-    let can_charge = seen.closing >= policy.charge_speed && seen.brace <= policy.charge_max_brace;
+    let can_charge =
+        seen.predicted_charge.won && seen.predicted_charge.overload >= policy.charge_margin;
     let can_jump = policy.will_jump && step.runback.jump_available;
     match (can_charge, can_jump) {
         (true, _) => Some(RunbackMove::Shoulder),

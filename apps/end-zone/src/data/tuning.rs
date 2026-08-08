@@ -30,8 +30,38 @@ pub struct BehaviorTuning {
     /// fix for both, and it is the number that makes the leap a real answer to
     /// an encounter rather than an animation.
     pub tackle_reach_height: f32,
-    /// Minimum closing speed for a tackle to count, yd/s.
+    /// Minimum closing speed for a tackle to even be ATTEMPTED, yd/s. Below it
+    /// a defender is jogging alongside, not hitting anybody.
     pub tackle_min_closing_speed: f32,
+    /// The speed-independent **grip** a tackler brings, yd/s of equivalent
+    /// impulse per unit mass. A tackle is two things at once — a hit and a wrap
+    /// — and this is the wrap: getting hold of a man and dragging him down, which
+    /// works at a dead run alongside him where a hit does not.
+    ///
+    /// It exists because modelling only the hit made chase-down tackles
+    /// impossible: the pursuit AI converges on the carrier and *matches his
+    /// pace*, so closing speed at contact is near zero, and a measured run had
+    /// six of nine carries walking into the end zone untouched. Real football
+    /// has both, and so does this.
+    pub tackle_grip: f32,
+    /// The speed (yd/s) one unit of carrier mass is worth resisting with — the
+    /// scale of the **tackle contest** (see [`crate::player::tackle`]).
+    ///
+    /// This is the single number that decides how often a hit is shed. Raise it
+    /// and the carrier stays up more; lower it and contact becomes the
+    /// guaranteed takedown it used to be, which is the thing this exists to stop.
+    pub tackle_break_speed: f32,
+    /// How much balance a shed tackle costs the carrier, `0..=1`. Sheds are
+    /// meant to be survivable but **cumulative**: the second man through gets a
+    /// runner who is already off balance, which is what stops a good carrier
+    /// running through the whole defense.
+    pub tackle_shed_balance_cost: f32,
+    /// How much harder a committed DIVE is to shed than a standing wrap. A diver
+    /// has thrown his whole body at you; he has also given up his feet to do it.
+    pub tackle_dive_bonus: f32,
+    /// Ticks a defender who was shed spends bounced off and out of the play.
+    /// Without this he simply re-attempts next tick and the shed means nothing.
+    pub hit_reaction_ticks: u32,
     /// Relative speed mapped to impact strength 1.0, yd/s.
     pub tackle_full_strength_speed: f32,
     /// Deep-pursuit cushion: how many yards a rallying deep defender stays
@@ -172,6 +202,11 @@ impl Default for BehaviorTuning {
             tackle_range: 1.3,
             tackle_reach_height: 1.5,
             tackle_min_closing_speed: 2.0,
+            tackle_grip: 3.7,
+            tackle_break_speed: 3.7,
+            tackle_shed_balance_cost: 0.34,
+            tackle_dive_bonus: 1.25,
+            hit_reaction_ticks: 26,
             tackle_full_strength_speed: 14.0,
             pursuit_cushion: 6.0,
             airborne_threshold: 0.55,

@@ -130,14 +130,13 @@ pub fn end_zone_start() {
             pointer_pressed: pressed,
             pointer_is_touch: is_touch,
         };
-        // The stick is gamepad-only now: there is no on-screen joystick.
+        // Touch contributes a play call and a recognised swipe; there is no
+        // stick on any surface, because the back runs by himself.
         let touch_input = TouchInput {
-            stick_x: pad.stick.0.clamp(-1.0, 1.0),
-            stick_y: pad.stick.1.clamp(-1.0, 1.0),
             primary: false,
             reset: false,
-            read: touch_frame.read,
-            scramble: touch_frame.scramble,
+            play: touch_frame.play,
+            wanted: touch_frame.wanted,
         };
         let (css_w, css_h) = viewport_size();
 
@@ -151,7 +150,7 @@ pub fn end_zone_start() {
                 let run = &shell.app.run;
                 run.attempt()
                     .zip(run.ledger())
-                    .map(|(step, ledger)| HudView::from_attempt(&step, &ledger))
+                    .map(|(step, ledger)| HudView::from_attempt(&step, &ledger, run.sim.tick))
             })
             .flatten();
         menu.render_hud(hud);

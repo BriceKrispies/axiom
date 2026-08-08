@@ -169,6 +169,22 @@ pub enum SimEvent {
         strength: f32,
         target_airborne: bool,
     },
+    /// **A tackle the carrier shed.** A defender reached him and lost the
+    /// contest: not enough closing speed, a bad angle, or simply outmuscled.
+    /// Both terms ride along so the reason is inspectable.
+    ///
+    /// Not a player *move* — the runner did nothing but stay on his feet — so it
+    /// is its own event rather than one of the three success signals. It is what
+    /// makes contact a question the game asks rather than an answer it gives.
+    TackleShed {
+        tackler: PlayerId,
+        runner: PlayerId,
+        impulse: f32,
+        resistance: f32,
+        /// The carrier's balance AFTER paying for it: sheds are cumulative, and
+        /// this is the number that says how close the next one is to landing.
+        balance_left: f32,
+    },
     /// A player left the ground (big hit).
     PlayerAirborne { player: PlayerId },
     /// A falling player hit the turf. `strength` is normalized `0..=1`.

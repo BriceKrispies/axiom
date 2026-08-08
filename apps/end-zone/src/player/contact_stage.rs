@@ -41,13 +41,26 @@ impl SimState {
         let securing =
             self.tick.saturating_sub(self.possession_since) < u64::from(self.tuning.catch_secure_ticks);
         let carrier = self.ball.carrier().filter(|_| !securing);
-        match contact::resolve_tackle(
+        let resolution = contact::resolve_tackle(
             &mut self.players,
             &self.intents,
             carrier,
             &self.tuning,
             &self.collision,
-        ) {
+        );
+        // Every attempt he survived, in tackler order, before whichever one
+        // finally got him.
+        for contest in &resolution.shed {
+            let balance_left = self.players[contest.target.index()].balance;
+            self.events.emit(SimEvent::TackleShed {
+                tackler: contest.tackler,
+                runner: contest.target,
+                impulse: contest.impulse,
+                resistance: contest.resistance,
+                balance_left,
+            });
+        }
+        match resolution.landed {
             Some(outcome) => {
                 self.events.emit(SimEvent::TackleContact {
                     tackler: outcome.tackler,
@@ -64,8 +77,13 @@ impl SimState {
                     });
                 }
             }
-            // No tackle landed — let close, fast chasers leave their feet.
-            None => contact::commit_dives(&mut self.players, &self.intents, carrier, &self.tuning),
+            // Nobody got him — let close, fast chasers leave their feet. Gated on
+            // NO contact at all this tick, so a defender who was just shed is not
+            // immediately dived over by the next man before the shed reads.
+            None if !resolution.any_contact() => {
+                contact::commit_dives(&mut self.players, &self.intents, carrier, &self.tuning)
+            }
+            None => {}
         }
 
         for (player, strength) in contact::advance_falls(&mut self.players, &self.tuning, DT) {

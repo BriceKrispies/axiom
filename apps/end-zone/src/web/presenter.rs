@@ -127,45 +127,50 @@ impl MenuPresenter {
     }
 }
 
-/// The decision prompt: the three read keys, the scramble key, and a draining
-/// timer bar. It never says which read is open — that is the game.
-fn decision_html(prompt: &crate::presentation::DecisionPrompt) -> String {
-    // `data-read` / `data-scramble` are what makes the prompt the TOUCH input
-    // too: `web/touch.rs` delegates taps on the HUD root and reads them back.
-    // One piece of UI for both devices, so they can never disagree.
-    let reads: String = prompt
-        .reads
+/// The move row: the four verbs, each showing the key AND the swipe that does
+/// it, so one strip of UI teaches both surfaces and they can never disagree.
+///
+/// `data-move` is what makes each chip a real TOUCH BUTTON as well as a legend
+/// (`web/touch.rs` delegates taps and reads it back). That matters more than it
+/// sounds: these are drawn as buttons, and a phone player will tap them. A row
+/// that looks like four buttons and is in fact four labels is not a minor
+/// polish problem — it is the game not working.
+///
+/// The leap carries a pip that drains through its cooldown. It is the only
+/// availability the player cannot read off the field, and it is deliberately the
+/// only thing on this row that ever changes — everything else is a constant
+/// reminder, and a HUD that moves is a HUD you look at instead of the defender.
+fn moves_html(moves: &[crate::presentation::MoveHint]) -> String {
+    if moves.is_empty() {
+        return String::new();
+    }
+    let cells: String = moves
         .iter()
         .enumerate()
-        .map(|(index, read)| {
+        .map(|(index, hint)| {
+            let dim = if hint.ready { "" } else { " ez-move-cold" };
+            let pip = match hint.cooldown > 0.0 {
+                true => format!(
+                    "<div class='ez-move-pip'><i style='width:{:.0}%'></i></div>",
+                    (1.0 - hint.cooldown) * 100.0
+                ),
+                false => String::new(),
+            };
             format!(
-                "<div class='ez-read ez-read{}' data-read='{index}'>\
-                 <b>{}</b><span>{}</span></div>",
-                markup::esc(&read.key),
-                markup::esc(&read.key),
-                markup::esc(&read.name)
+                "<div class='ez-move{dim}' data-move='{index}'>\
+                 <b>{}</b><u>{}</u><span>{}</span>{pip}</div>",
+                markup::esc(&hint.swipe),
+                markup::esc(&hint.key),
+                markup::esc(&hint.name)
             )
         })
         .collect();
-    // The chips are up for the whole live play; `ez-urgent` is what marks the
-    // beat where the game has actually slowed down and is asking.
-    let urgent = if prompt.urgent { "ez-urgent" } else { "" };
-    format!(
-        "<div class='ez-decision {urgent}'>\
-         <div class='ez-decision-head'>{}</div>\
-         <div class='ez-reads'>{reads}</div>\
-         <div class='ez-scramble' data-scramble='1'>{}</div>\
-         <div class='ez-timer'><i style='width:{:.1}%'></i></div>\
-         </div>",
-        markup::esc(&prompt.headline),
-        markup::esc(&prompt.scramble),
-        prompt.remaining.clamp(0.0, 1.0) * 100.0,
-    )
+    format!("<div class='ez-moves'>{cells}</div>")
 }
 
-/// The pre-snap play card. The same `data-read` hook the live chips use, so a
-/// tap calls a play exactly the way a tap throws a read — one piece of UI for
-/// keyboard and touch, which is what stops the two devices disagreeing.
+/// The pre-snap play card. `data-play` is what makes the card the TOUCH input
+/// too: `web/touch.rs` delegates taps and reads it back, so the prompt the
+/// player is already looking at IS the button.
 fn play_call_html(card: &crate::presentation::PlayCallCard) -> String {
     let plays: String = card
         .plays
@@ -173,9 +178,8 @@ fn play_call_html(card: &crate::presentation::PlayCallCard) -> String {
         .enumerate()
         .map(|(index, play)| {
             format!(
-                "<div class='ez-play ez-read{}' data-read='{index}'>\
+                "<div class='ez-play' data-play='{index}'>\
                  <b>{}</b><div class='ez-play-text'><em>{}</em><span>{}</span></div></div>",
-                markup::esc(&play.key),
                 markup::esc(&play.key),
                 markup::esc(&play.name),
                 markup::esc(&play.routes)
@@ -197,7 +201,12 @@ fn hud_html(hud: HudView) -> String {
         .as_ref()
         .map(play_call_html)
         .unwrap_or_default();
-    let decision = hud.decision.as_ref().map(decision_html).unwrap_or_default();
+    let moves = moves_html(&hud.moves);
+    let flash = hud
+        .flash
+        .as_ref()
+        .map(|text| format!("<div class='ez-flash'>{}</div>", markup::esc(text)))
+        .unwrap_or_default();
     let result = hud
         .result
         .as_ref()
@@ -208,7 +217,7 @@ fn hud_html(hud: HudView) -> String {
          <div class='ez-hud-score'>{}</div>\
          <div class='ez-hud-center'><div class='ez-hud-down'>{}</div></div>\
          <div class='ez-hud-heat'>{}</div>\
-         </div>{play_call}{decision}{result}",
+         </div>{play_call}{moves}{flash}{result}",
         markup::esc(&hud.attempt),
         markup::esc(&hud.state),
         markup::esc(&hud.session),

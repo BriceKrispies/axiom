@@ -95,6 +95,22 @@ fn main() {
                     "t{:>5}  --- charge stuffed by player {} ({impulse:.2} vs {resistance:.2})",
                     stamped.tick, defender.0
                 ),
+                SimEvent::TackleShed {
+                    tackler,
+                    impulse,
+                    resistance,
+                    balance_left,
+                    ..
+                } => println!(
+                    "t{:>5}  ~~~ SHED tackler {} ({impulse:.2} < {resistance:.2}, balance now {balance_left:.2})",
+                    stamped.tick, tackler.0
+                ),
+                SimEvent::TackleContact {
+                    tackler, strength, ..
+                } => println!(
+                    "t{:>5}  ### TACKLED by {} (strength {strength:.2})",
+                    stamped.tick, tackler.0
+                ),
                 SimEvent::PlayEnded { reason } => {
                     println!("t{:>5}  whistle: {reason:?}", stamped.tick)
                 }

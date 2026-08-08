@@ -147,73 +147,61 @@ pub const MENU_CSS: &str = r#"
   .ez-play{padding:16px 18px;}
 }
 
-/* --- decision window ----------------------------------------------------- */
-/* The reads are colour-coded to their on-field rings (cyan/amber/magenta) so
-   the key maps to a receiver at a glance. Nothing here reports how OPEN a read
-   is — reading the coverage is the game. */
-.ez-decision{position:absolute;left:50%;bottom:5%;transform:translateX(-50%);
-  display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 26px;
-  background:linear-gradient(180deg,rgba(14,19,27,.94),rgba(7,10,15,.94));
+/* --- the move row -------------------------------------------------------- */
+/* Four verbs, each showing the swipe AND the key, so one strip of UI teaches a
+   phone and a keyboard the same game. It sits low and quiet on purpose: the
+   player's eyes belong on the defender eight yards ahead, and a HUD that moves
+   is a HUD you look at instead of him. The ONLY thing here that ever changes is
+   the leap's pip, because its availability is the one thing you cannot read off
+   the field. */
+.ez-moves{position:absolute;left:50%;bottom:4%;transform:translateX(-50%);
+  display:flex;gap:10px;padding:10px 14px;opacity:.8;
+  background:linear-gradient(180deg,rgba(14,19,27,.9),rgba(7,10,15,.9));
   border:3px solid #06090e;border-radius:10px;
-  box-shadow:inset 0 2px 0 rgba(255,255,255,.18),0 10px 26px rgba(0,0,0,.7);}
-/* Standing state: the reads are live from the snap, so they are always legible
-   but visually quiet. `.ez-urgent` is the window — the game has slowed down and
-   the clock is running — and it is what should catch the eye. */
-.ez-decision{opacity:.82;transition:opacity .12s ease,transform .12s ease,box-shadow .12s ease;}
-.ez-decision.ez-urgent{opacity:1;transform:translateX(-50%) scale(1.04);
-  box-shadow:inset 0 2px 0 rgba(255,255,255,.18),0 10px 26px rgba(0,0,0,.7),
-  0 0 0 2px rgba(227,62,48,.55),0 0 34px rgba(227,62,48,.35);}
-.ez-decision-head{font-weight:900;font-size:20px;letter-spacing:.3em;
-  color:var(--ez-chrome);text-shadow:0 2px 3px #000;}
-.ez-decision.ez-urgent .ez-decision-head{color:var(--ez-hot);
-  text-shadow:0 0 16px rgba(227,62,48,.6),0 2px 3px #000;}
-/* The timer only reads as a clock while one is actually running. */
-.ez-timer{opacity:0;}
-.ez-decision.ez-urgent .ez-timer{opacity:1;}
-.ez-reads{display:flex;gap:14px;}
-/* The chips are the touch buttons (see web/touch.rs), so they must take
-   pointer events even though the HUD root does not, and they must be big
-   enough for a thumb. `touch-action:manipulation` kills the 300 ms tap delay
-   and the double-tap zoom that would otherwise eat a decision. */
-.ez-read,.ez-scramble{pointer-events:auto;cursor:pointer;touch-action:manipulation;
-  user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}
-.ez-read{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
-  min-width:104px;min-height:64px;padding:8px 10px;border-radius:8px;
-  background:rgba(255,255,255,.05);border:2px solid rgba(255,255,255,.12);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.16),0 10px 26px rgba(0,0,0,.65);}
+.ez-move{position:relative;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:2px;min-width:92px;min-height:58px;padding:6px 10px;
+  border-radius:8px;background:rgba(255,255,255,.05);
+  border:2px solid rgba(255,255,255,.12);
   transition:transform .06s ease,background .1s ease,border-color .1s ease;}
-.ez-read:active{transform:scale(.94);background:rgba(255,255,255,.16);
-  border-color:rgba(255,255,255,.5);}
-.ez-read{position:relative;overflow:hidden;}
-.ez-read b,.ez-read span{position:relative;z-index:1;}
-.ez-read b{font-weight:900;font-size:26px;line-height:1;}
-.ez-read span{font-weight:700;font-size:12px;letter-spacing:.16em;color:var(--ez-text);}
-.ez-read1 b{color:#2edcfa;text-shadow:0 0 12px rgba(46,220,250,.6);}
-.ez-read1{border-color:rgba(46,220,250,.35);}
-.ez-read2 b{color:#ffb31f;text-shadow:0 0 12px rgba(255,179,31,.6);}
-.ez-read2{border-color:rgba(255,179,31,.35);}
-.ez-read3 b{color:#f03cdc;text-shadow:0 0 12px rgba(240,60,220,.6);}
-.ez-read3{border-color:rgba(240,60,220,.35);}
-.ez-scramble{font-weight:700;font-size:13px;letter-spacing:.22em;color:var(--ez-chrome);
-  padding:10px 22px;border-radius:8px;border:2px solid rgba(255,255,255,.12);
-  background:rgba(255,255,255,.04);transition:transform .06s ease,background .1s ease;}
-.ez-scramble:active{transform:scale(.96);background:rgba(255,255,255,.16);}
+/* Each chip is a real button, not a legend. The HUD root is pointer-events:none
+   so overlay chrome never eats a click on the field; these opt back in, and
+   `touch-action:manipulation` kills the 300 ms tap delay and the double-tap
+   zoom that would otherwise eat a juke. */
+.ez-move{pointer-events:auto;cursor:pointer;touch-action:manipulation;
+  user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;}
+.ez-move:active{transform:scale(.94);background:rgba(255,255,255,.18);
+  border-color:rgba(255,255,255,.55);}
+.ez-move b{font-weight:900;font-size:20px;line-height:1;color:var(--ez-chrome);}
+.ez-move u{text-decoration:none;font-weight:900;font-size:12px;letter-spacing:.1em;
+  color:rgba(255,255,255,.5);}
+.ez-move span{font-weight:700;font-size:11px;letter-spacing:.14em;color:var(--ez-text);}
+/* On cooldown the leap dims rather than vanishing: a control that disappears
+   reads as broken, one that greys out reads as "not yet". */
+.ez-move-cold{opacity:.42;}
+.ez-move-pip{position:absolute;left:8px;right:8px;bottom:4px;height:3px;
+  border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden;}
+.ez-move-pip i{display:block;height:100%;background:var(--ez-chrome);}
 
-/* Coarse pointers (phones/tablets): bigger targets, and the prompt sits low
-   and full-width so both thumbs reach every answer. */
+/* --- the success flash --------------------------------------------------- */
+/* One line, centred, gone in under a second. It is a reward, not a read-out:
+   anything more would be asking the player to look away mid-carry. */
+.ez-flash{position:absolute;left:50%;top:22%;transform:translateX(-50%);
+  font-weight:900;font-size:34px;letter-spacing:.28em;color:var(--ez-hot);
+  text-shadow:0 0 22px rgba(227,62,48,.65),0 3px 4px #000;pointer-events:none;}
+
+/* Coarse pointers (phones/tablets): the row goes full-width along the bottom
+   and the chips grow to thumb size. They are BUTTONS here — the whole screen is
+   also the swipe surface, and a player gets whichever of the two they reach
+   for. The row is opaque enough to read against turf, and low enough that a
+   thumb resting on it is not covering the defender you are about to meet. */
 @media (pointer:coarse){
-  .ez-decision{left:0;right:0;transform:none;bottom:0;border-radius:12px 12px 0 0;
-    padding:14px 12px calc(14px + env(safe-area-inset-bottom));}
-  /* The full-width bar is already anchored; scaling it would only clip it. */
-  .ez-decision.ez-urgent{transform:none;}
-  .ez-reads{width:100%;gap:10px;}
-  .ez-read{flex:1;min-width:0;min-height:88px;}
-  .ez-read b{font-size:32px;}
-  .ez-scramble{width:100%;text-align:center;min-height:56px;
-    display:flex;align-items:center;justify-content:center;}
+  .ez-moves{left:0;right:0;transform:none;bottom:0;border-radius:12px 12px 0 0;
+    padding:10px 8px calc(10px + env(safe-area-inset-bottom));gap:6px;opacity:.95;}
+  .ez-move{flex:1;min-width:0;min-height:74px;}
+  .ez-move b{font-size:24px;}
+  .ez-flash{font-size:28px;}
 }
-.ez-timer{width:100%;height:6px;border-radius:3px;background:rgba(255,255,255,.12);
-  overflow:hidden;}
-.ez-timer i{display:block;height:100%;background:var(--ez-hot);
   box-shadow:0 0 10px rgba(227,62,48,.8);}
 
 /* --- attempt result card ------------------------------------------------- */

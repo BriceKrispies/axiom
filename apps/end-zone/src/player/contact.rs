@@ -10,12 +10,30 @@ use crate::collision_rig::CollisionRig;
 use crate::data::BehaviorTuning;
 use crate::identity::PlayerId;
 
+use super::tackle::{self, TackleContest};
 use super::{AnimState, PlayerSim};
 
 /// Ticks a stumble lasts before the trip completes.
 const STUMBLE_TICKS: u32 = 10;
 /// Ticks the ground-impact pose holds before recovery starts.
 const GROUND_TICKS: u32 = 16;
+
+/// What one tick's tackling produced: the hit that brought the carrier down (if
+/// any), and every attempt he shed getting there.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TackleResolution {
+    /// The tackle that landed, with the contest that decided it.
+    pub landed: Option<TackleOutcome>,
+    /// Attempts the carrier survived, in tackler id order.
+    pub shed: Vec<TackleContest>,
+}
+
+impl TackleResolution {
+    /// Whether anybody got a hand on the carrier at all this tick.
+    pub fn any_contact(&self) -> bool {
+        self.landed.is_some() || !self.shed.is_empty()
+    }
+}
 
 /// A tackle that landed this tick.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,26 +45,37 @@ pub struct TackleOutcome {
     pub relative_speed: f32,
     pub strength: f32,
     pub target_airborne: bool,
+    /// The contest itself, so the reason is inspectable downstream.
+    pub contest: TackleContest,
 }
 
-/// Tackle evaluation: the first (in tackler id order) in-range, closing-fast
-/// tackle on the carrier lands. The hit is authoritative and deterministic:
-/// impulse to the carrier, controlled stumble or airborne fall — no ragdoll.
+/// Tackle evaluation: every defender who reaches the carrier this tick gets a
+/// **contest**, in id order, until one of them wins it.
+///
+/// It used to be that reaching him *was* winning: the first man in range with
+/// any closing speed above a floor put him on the turf, every time. Now reaching
+/// him only earns the attempt (see [`super::tackle`]), and a man who has run the
+/// carrier down but has no closing speed left to hit him with gets shed. The
+/// hits and the sheds are both authoritative and deterministic — impulse against
+/// resistance, no ragdoll and no roll.
 pub fn resolve_tackle(
     players: &mut [PlayerSim],
     intents: &[PlayerIntent],
     carrier: Option<PlayerId>,
     tuning: &BehaviorTuning,
     collision: &CollisionRig,
-) -> Option<TackleOutcome> {
-    let carrier = carrier?;
+) -> TackleResolution {
+    let mut resolution = TackleResolution::default();
+    let Some(carrier) = carrier else {
+        return resolution;
+    };
     if !players[carrier.index()].anim.can_act() {
-        return None;
+        return resolution;
     }
     for index in 0..players.len() {
         // Either a standing chaser holding a `Tackle` intent, or a committed
         // diver mid-lunge (whose intent has already lapsed — the dive is the
-        // commitment) can land the hit here.
+        // commitment) can attempt the hit here.
         let diving = players[index].anim == AnimState::Dive;
         let standing = matches!(
             intents[index],
@@ -63,7 +92,7 @@ pub fn resolve_tackle(
             carrier_sim.pos.z - tackler_pos.z,
         );
         let distance = to_carrier.length();
-        // A dive lands only on real body contact from the collision world (arc
+        // A dive reaches only on real body contact from the collision world (arc
         // height included); a standing tackle keeps its horizontal arm-reach —
         // but only up to the height a man on his feet can actually reach.
         //
@@ -75,71 +104,47 @@ pub fn resolve_tackle(
         // — a carrier genuinely above a defender's arms cannot be brought down
         // by them, and that is one rule, written once, for both cases.
         let within_reach = carrier_sim.pos.y <= tuning.tackle_reach_height;
-        let landed = if diving {
-            collision.in_contact(players[index].id, carrier)
-        } else {
-            distance <= tuning.tackle_range && within_reach
+        let reached = match diving {
+            true => collision.in_contact(players[index].id, carrier),
+            false => distance <= tuning.tackle_range && within_reach,
         };
-        if !landed {
+        if !reached {
             continue;
         }
         let relative = players[index].vel.subtract(carrier_sim.vel);
         let relative_speed = relative.length() + players[index].speed() * 0.25;
         // A diver is already airborne and past the point of no return — no
-        // minimum-closing-speed gate; a standing tackle still needs pop.
+        // minimum-closing-speed gate; a standing attempt still needs pop to be
+        // worth making at all.
         if !diving && relative_speed < tuning.tackle_min_closing_speed {
             continue;
         }
-        let direction = if distance > 1.0e-4 {
-            to_carrier.mul_scalar(1.0 / distance)
-        } else {
-            players[index].facing_dir()
-        };
-        let power = 0.5 + 0.5 * players[index].archetype.tackle_strength;
-        let mass_edge = (players[index].archetype.mass / carrier_sim.archetype.mass).min(1.6);
-        let strength = ((relative_speed / tuning.tackle_full_strength_speed) * power * mass_edge)
-            .clamp(0.05, 1.0);
-        let airborne = strength >= tuning.airborne_threshold;
 
-        let contact_point = carrier_sim.pos.add(Vec3::new(0.0, 1.0, 0.0));
-        let tackler_id = players[index].id;
-
-        // The carrier takes the hit.
-        let hit = &mut players[carrier.index()];
-        hit.balance = 0.0;
-        hit.impact_strength = strength;
-        hit.vel = direction.mul_scalar(relative_speed * 0.35);
-        if airborne {
-            hit.vertical_vel = tuning.launch_up_speed * strength;
-            hit.set_anim(AnimState::AirborneFall);
-        } else {
-            hit.set_anim(AnimState::Stumble);
+        let contest = tackle::contest(&players[index], &players[carrier.index()], diving, tuning);
+        if !contest.landed {
+            tackle::apply_shed(players, &contest, tuning);
+            resolution.shed.push(contest);
+            // The next man in id order still gets his attempt this tick, against
+            // a carrier who is now slower and less balanced — which is exactly
+            // how a swarm is supposed to work.
+            continue;
         }
-
-        // The tackler commits: a diver wraps and lands prone; a standing
-        // tackler plants into the wrap.
-        let tackler = &mut players[index];
-        if diving {
-            tackler.pos = Vec3::new(tackler.pos.x, 0.0, tackler.pos.z);
-            tackler.vertical_vel = 0.0;
-            tackler.vel = tackler.vel.mul_scalar(0.2);
-            tackler.set_anim(AnimState::GroundImpact);
-        } else {
-            tackler.vel = tackler.vel.mul_scalar(0.25);
-            tackler.set_anim(AnimState::Tackle);
-        }
-
-        return Some(TackleOutcome {
-            tackler: tackler_id,
+        let contact_point = players[carrier.index()].pos.add(Vec3::new(0.0, 1.0, 0.0));
+        let strength = contest.strength(tuning);
+        let target_airborne = tackle::apply_landed(players, &contest, tuning);
+        resolution.landed = Some(TackleOutcome {
+            tackler: contest.tackler,
             target: carrier,
             contact_point,
-            contact_direction: direction,
+            contact_direction: contest.direction,
             relative_speed,
             strength,
-            target_airborne: airborne,
+            target_airborne,
+            contest,
         });
+        return resolution;
     }
-    None
+    resolution
 }
 
 /// Commit diving tackles: a chaser holding a `Tackle` intent whose carrier is
@@ -253,6 +258,20 @@ pub fn advance_falls(
                     player.vel = player.vel.mul_scalar(0.2);
                     player.set_anim(AnimState::GroundImpact);
                     impacts.push((player.id, player.impact_strength));
+                }
+            }
+            // Bounced off a carrier he could not bring down: on his feet, but
+            // out of the play for a beat. Without this the shed defender simply
+            // re-attempts on the very next tick and nothing was survived.
+            AnimState::HitReaction => {
+                player.pos = Vec3::new(
+                    player.pos.x + player.vel.x * dt,
+                    0.0,
+                    player.pos.z + player.vel.z * dt,
+                );
+                player.vel = player.vel.mul_scalar(0.86);
+                if player.anim_ticks >= tuning.hit_reaction_ticks {
+                    player.set_anim(AnimState::Idle);
                 }
             }
             AnimState::Stumble => {
