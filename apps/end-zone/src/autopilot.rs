@@ -66,6 +66,26 @@ pub struct Aggression {
     pub charge_margin: f32,
     /// Whether the leap is on the table at all.
     pub will_jump: bool,
+    /// **Which situation each move owns**, as a brace threshold.
+    ///
+    /// This is the fix for the real problem, which was never any one move's
+    /// numbers: the moves all said "yes" in the same situations, so a fixed
+    /// priority order decided everything and whichever move was made easier
+    /// starved the ones below it. Measured twice, in both directions — an easier
+    /// leap left zero charges, an easier charge left zero leaps.
+    ///
+    /// So they are given different jobs. A defender who is **squared up and
+    /// set** is one you go over: the charge reads his brace directly and should
+    /// lose against him, so offering it there is offering a mistake. A defender
+    /// caught turned or crossing is one you go **through**. Now the situation
+    /// picks the move and the list order stops mattering, because usually only
+    /// one of them says yes.
+    pub charge_max_brace: f32,
+    /// The lead window, in ticks, each move is offered in — how long before the
+    /// collision it may be committed. Each is a fact about how long that move
+    /// takes to happen.
+    pub charge_lead: (u32, u32),
+    pub leap_lead: (u32, u32),
 }
 
 impl Aggression {
@@ -75,6 +95,15 @@ impl Aggression {
         react_ticks: 75,
         charge_margin: 1.05,
         will_jump: true,
+        // Chosen by the sweep (`--sweep`), not by hand. It is the point at
+        // which all three moves actually happen, and hand-tuning provably could
+        // not find it: every single-knob adjustment starved whichever mechanic
+        // sat below it in the rule order. The charge commits later than the leap
+        // because it needs longer to build into the hit, while the leap must
+        // launch about 26 ticks out for its apex to meet the collision.
+        charge_max_brace: 0.55,
+        charge_lead: (34, 66),
+        leap_lead: (14, 38),
     };
     /// Identical to [`Self::BALANCED`] in every respect except that it never
     /// presses the down button. The B arm of the shoulder-charge A/B: with one
@@ -86,15 +115,16 @@ impl Aggression {
     };
     /// Never takes contact: everything is a cut.
     pub const EVASIVE: Aggression = Aggression {
-        react_ticks: 75,
         charge_margin: f32::INFINITY,
         will_jump: false,
+        ..Aggression::BALANCED
     };
     /// Runs at everything it could win.
     pub const BRUISING: Aggression = Aggression {
-        react_ticks: 40,
         charge_margin: 1.0,
         will_jump: false,
+        charge_max_brace: 1.0,
+        ..Aggression::BALANCED
     };
 }
 

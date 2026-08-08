@@ -73,10 +73,15 @@ fn main() {
     };
     let trace = args.iter().any(|a| a == "--trace");
     let ab = args.iter().any(|a| a == "--ab");
+    let sweep = args.iter().any(|a| a == "--sweep");
     let seed = value("--seed", scenario::VALIDATION_SEED);
     let reaction = value("--reaction-ms", u64::from(DEFAULT_REACTION_MILLIS)) as u32;
     let carries = value("--carries", if ab { 20 } else { 12 }) as u32;
 
+    if sweep {
+        run_sweep(carries.min(8), reaction);
+        return;
+    }
     if ab {
         ab_test(seed, carries, reaction);
         return;
@@ -92,6 +97,111 @@ fn main() {
     let tally = play(seed, carries, Aggression::BALANCED, reaction, trace, true);
     report(&tally);
     std::process::exit(i32::from(!tally.complete()));
+}
+
+/// **The sweep.** Vary the knobs that decide which move owns which situation,
+/// across several seeds, and measure all three success signals at once.
+///
+/// This exists because hand-tuning one mechanic at a time provably does not
+/// work here: the moves compete for the same moment, so making one easier
+/// starves the others, and fixing them one at a time just moves the hole around
+/// — measured twice, in both directions. The only way to choose is to look at
+/// every signal together and pick a *point* rather than a parameter.
+///
+/// The objective is deliberately blunt: a configuration is only interesting if
+/// **all three moves actually happen**. Among those, prefer the one whose
+/// yards-per-carry sits nearest the target band — a game where the back never
+/// gets tackled is as broken as one where he never gets anywhere.
+fn run_sweep(carries: u32, reaction: u32) {
+    const SEEDS: [u64; 3] = [7, 11, 23];
+    /// The yards-per-carry a carry should average. A run game where a back
+    /// breaks forty yards every time has no defense in it.
+    const TARGET_YARDS: f32 = 9.0;
+
+    println!("=== End Zone — move-ownership sweep ===");
+    println!(
+        "{} seeds x {carries} carries per point, {reaction} ms reaction.
+         Every move must actually HAPPEN — a point that never charges or never
+         leaps is not balanced, it is one mechanic short.
+",
+        SEEDS.len()
+    );
+    println!(
+        "  {:>5} {:>9} {:>9} | {:>6} {:>6} {:>6} | {:>7} {:>6}",
+        "brace", "chargeLead", "leapLead", "dodges", "charge", "leaps", "yd/car", "tkl%"
+    );
+    println!("  {}", "-".repeat(72));
+
+    let mut best: Option<(f32, String, Aggression)> = None;
+    for brace in [0.55f32, 0.7, 0.85] {
+        // Disjoint windows, and overlapping ones, so the sweep can show which
+        // it is: the leap must launch ~26 ticks out for its apex to meet the
+        // collision, the charge needs longer to build into the hit.
+        for charge_lead in [(34u32, 66u32), (28, 60), (22, 58)] {
+            for leap_lead in [(10u32, 30u32), (14, 33), (14, 38)] {
+                let policy = Aggression {
+                    charge_max_brace: brace,
+                    charge_lead,
+                    leap_lead,
+                    ..Aggression::BALANCED
+                };
+                let mut total = Tally::default();
+                for seed in SEEDS {
+                    let t = play(seed, carries, policy, reaction, false, false);
+                    total.dodges += t.dodges;
+                    total.charges_won += t.charges_won;
+                    total.hurdles += t.hurdles;
+                    total.carries += t.carries;
+                    total.tackled += t.tackled;
+                    total.yards += t.yards;
+                }
+                let per_carry = total.yards / total.carries.max(1) as f32;
+                let tackled_pct = 100.0 * total.tackled as f32 / total.carries.max(1) as f32;
+                let row = format!(
+                    "  {brace:>5.2} {:>4}-{:<4} {:>4}-{:<4} | {:>6} {:>6} {:>6} | {per_carry:>7.1} {tackled_pct:>5.0}%",
+                    charge_lead.0,
+                    charge_lead.1,
+                    leap_lead.0,
+                    leap_lead.1,
+                    total.dodges,
+                    total.charges_won,
+                    total.hurdles,
+                );
+                println!("{row}");
+
+                // All three must happen; among those, closest to the target.
+                let complete =
+                    total.dodges > 0 && total.charges_won > 0 && total.hurdles > 0;
+                let score = match complete {
+                    true => -(per_carry - TARGET_YARDS).abs(),
+                    false => f32::NEG_INFINITY,
+                };
+                let better = best.as_ref().map(|(b, _, _)| score > *b).unwrap_or(true);
+                if better && score > f32::NEG_INFINITY {
+                    best = Some((score, row.trim().to_string(), policy));
+                }
+            }
+        }
+    }
+
+    println!();
+    match best {
+        Some((_, row, policy)) => {
+            println!("BEST POINT (all three moves land, yards nearest {TARGET_YARDS:.0}/carry):");
+            println!("  {row}");
+            println!(
+                "
+  charge_max_brace: {:.2},
+  charge_lead: {:?},
+  leap_lead: {:?},",
+                policy.charge_max_brace, policy.charge_lead, policy.leap_lead
+            );
+        }
+        None => println!(
+            "NO POINT LANDS ALL THREE MOVES. The grid is in the wrong place, or two of
+             the mechanics still overlap too much to coexist at any setting in it."
+        ),
+    }
 }
 
 /// The A/B the down button deserves: the identical seed, the identical agent,

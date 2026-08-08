@@ -103,18 +103,6 @@ pub struct Perception {
     pub cut_right: Option<f32>,
 }
 
-/// The lead times each move wants between the press and the collision.
-///
-/// Every one of them is a fact about how long the move takes to happen. The
-/// shoulder stays armed for a bounded window, so a charge thrown at a collision
-/// further off than that touches nobody; a leap needs most of half a second to
-/// reach the height that clears a man, so one launched too late lands him back
-/// on the turf just in time to be tackled, and one launched too early has him
-/// down again before the defender arrives.
-const CHARGE_LEAD_MIN: u32 = 22;
-const CHARGE_LEAD_MAX: u32 = 58;
-const LEAP_LEAD_MIN: u32 = 14;
-
 /// Which move answers an encounter is decided in **time**, not distance.
 ///
 /// The scripted brain evaluates rules in a fixed order, so if every fact were
@@ -166,18 +154,22 @@ pub fn perceive(
         .contact_in_ticks
         .unwrap_or(u32::MAX)
         .saturating_sub(latency_ticks);
+    // Each move owns a situation, so the rule ORDER rarely has to break a tie.
+    // A man who is squared up and set is one you go over — the charge reads his
+    // brace and would lose against him, so offering it there offers a mistake.
     let run_through = step
         .runback
         .charge_window
         .filter(|window| window.overload >= policy.charge_margin)
+        .filter(|_| seen.brace <= policy.charge_max_brace)
         // The shoulder stays armed for a bounded number of ticks: pressing for a
         // collision further off than that spends the move on nobody.
-        .filter(|_| (CHARGE_LEAD_MIN..=CHARGE_LEAD_MAX).contains(&lead))
+        .filter(|_| (policy.charge_lead.0..=policy.charge_lead.1).contains(&lead))
         .map(|window| window.overload);
     let go_over = (run_through.is_none()
         && policy.will_jump
         && step.runback.jump_available
-        && (LEAP_LEAD_MIN..=autopilot::LEAP_LEAD_TICKS).contains(&lead))
+        && (policy.leap_lead.0..=policy.leap_lead.1).contains(&lead))
         .then_some(seen.gap);
     let cut = (run_through.is_none() && go_over.is_none()).then_some(seen.gap);
     Perception {
