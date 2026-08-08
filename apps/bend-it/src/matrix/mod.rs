@@ -287,13 +287,13 @@ mod tests {
         // Somewhere in a run of seeds, one keeper does something another does not
         // — otherwise the nerve is not reaching the pitch at all.
         let spec = ShotSpec {
-            h: 0.3,
-            v: 0.35,
+            h: 0.2,
+            v: 0.9,
             bend: 0.0,
             bend_at: 0.5,
             loft: 0.4,
             loft_at: 0.5,
-            pace: 0.3,
+            pace: 0.5,
         };
         let results: Vec<ShotResult> = (0..24)
             .map(|seed| take(&spec, seed, Tuning::DEFAULT))

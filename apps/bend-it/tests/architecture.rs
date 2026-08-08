@@ -308,7 +308,7 @@ fn nothing_downstream_of_the_trajectory_can_rewrite_it() {
     // flight and the keeper may READ it; neither may construct one, because a
     // second producer is exactly how "the ball follows what you drew" quietly
     // becomes "the ball follows what you drew, mostly".
-    for file in ["ball.rs", "keeper.rs", "keeper_read.rs"] {
+    for file in ["ball.rs", "keeper/mod.rs", "keeper/dive.rs", "keeper_read.rs"] {
         let path = app_root().join("src").join("play").join(file);
         let text = strip(&read(&path));
         let production = text.split("#[cfg(test)]").next().unwrap_or("");

@@ -76,6 +76,27 @@ valid by construction and nothing downstream has to steer it there.
 
 ### 3. The keeper only sees the beginning
 
+Its dive is **integrated, not parameterised**: a position and a velocity,
+accelerating toward whatever it is committed to, capped at its own top speed. The
+mid-flight correction moves the *target* and never touches the body. That is the
+fix for a real defect — the dive used to be an eased curve over a re-settable
+interval, and the correction reset both ends of it. A smoothstep begins at zero
+velocity, so a keeper mid-dive at full speed was stopped dead and made to
+accelerate again: it committed a bit, stopped, then carried on. A body with
+momentum cannot do that whatever its target does.
+
+Its **arms are solved onto the point it is throwing its hands at**, and the
+capsule the ball is tested against is built from those same solved fingertips —
+one description of the reach instead of two that could drift apart. It reaches for
+its *read*, never for the ball: a keeper that could aim its hands at the real ball
+would save everything it could get near, and the whole reason a shaped shot beats
+a keeper is that its read is wrong. The dive aims the **hips** an arm's stretch
+short and lets the arm cover the rest, which is what a keeper does — and that
+stretch is *measured* off a full-stretch pose rather than written down, because
+the arms are bounded by the figure's ranges of motion and only the skeleton knows
+how far they really get.
+
+
 It reads once at the end of its reaction, dives, and gets **one lateral
 correction** — it can still adjust its line but cannot un-commit its height. It
 also remembers where the last few penalties finished and shades both its starting
@@ -144,6 +165,45 @@ plants wider and opens the hips through the ball, a lofted one plants further
 behind it and leans away, a hard one commits forward — while the boot still meets
 the ball, because meeting the ball is a geometric fact rather than a tuned number.
 
+### 5. A joint only does what a joint can do
+
+A solve produces a *rotation*, and a rotation is unbounded. The IK will hand back
+125° of hip abduction if that is what the arithmetic says; a knee will bend
+backwards; a shin will roll about its own length. That is not the solve
+misbehaving — it is the solve doing what it was asked, and nobody having said
+what a leg is.
+
+`figure/joints.rs` says. Each joint declares a **range** — how far the limb may
+swing from rest in each of four directions, and how far it may twist about its own
+length — and every pose is put through it before anything draws or tests against
+it. The numbers are the ordinary clinical ones: a hip flexes 120° and extends 22°,
+a knee flexes 140° and does not hyperextend, an ankle plantarflexes 50°.
+
+A rotation splits into a **swing** (where the limb points, bounded by the joint
+capsule) and a **twist** (the limb rotating about its own length, bounded by the
+ligaments — the one nobody thinks about and the one that reads as *broken* rather
+than merely strained). Each is clamped against its own budget, the swing against
+an ellipse blended from the four directional limits, and they are put back
+together. The split is exact, so a legal rotation comes back untouched: the limits
+cost nothing until something asks for the impossible. A hinge needs no special
+case — a knee is just a joint with a large backward budget and zero of everything
+else.
+
+Two structural bugs came out of building it, both of the "the symptom was in the
+animation and the cause was three layers down" kind:
+
+* The IK derived its hinge axis by **crossing the reach with a fixed "the knee
+  points forward" pole** — the textbook formulation, with a singularity exactly
+  where a kick lives. When the leg comes up past horizontal the reach is parallel
+  to "forward", the cross product collapses, and the hip rolls through 125° on its
+  way to nothing in particular. It now projects a *stable* axis (a knee turns
+  about the body's lateral axis wherever the leg is), whose own singularity — a
+  leg pointing straight out sideways — is nowhere a leg goes.
+* The swing's contact snap was being **undone by the remaining substeps of the
+  same tick**, so the one frame anyone actually sees of the strike had the boot
+  already through the ball by a hand's width. The leg now rests on the ball for
+  the frame it strikes it, which is what a real ~10 ms contact does anyway.
+
 The one thing deliberately held fixed is the **frame the swing is solved in**: the
 strike's root lean, roll and lift are a function of the drive alone and do not
 grow through the swing. A lean that accumulated mid-swing would move the hip out
@@ -173,10 +233,10 @@ actually shoots. Aim at a corner and shape the ball and it falls to under 20%.
 | | saved |
 |---|---|
 | everything | 38% |
-| flat, no arc | 45% |
-| shaped | 36% |
-| down the middle | 53% |
-| into a corner | 18% |
+| flat, no arc | 52% |
+| shaped | 35% |
+| down the middle | 76% |
+| into a corner | 20% |
 
 The keeper is calibrated **against the flight time, not against a feel**: at
 0.3–0.5 s it reacts in 0.09 s, commits, and gets one lateral correction 0.13 s
@@ -233,7 +293,7 @@ footballer and procedural field:
 ## Running it
 
 ```sh
-cargo test -p axiom-bend-it                                  # 190 native tests
+cargo test -p axiom-bend-it                                  # 201 native tests
 uv run scripts/localhost_servers.py start-app bend-it        # play it
 cargo run -p axiom-bend-it --example playthrough -- 12 1     # the agent plays
 cargo run -p axiom-bend-it --example playthrough -- sweep    # balance sweep

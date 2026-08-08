@@ -8,6 +8,10 @@
 //!   to `axiom-figure`, which owns chain resolution).
 //! * [`ik`] — two-bone inverse kinematics: put the foot *there*, and let the
 //!   joints work out how.
+//! * [`joints`] — what a joint can actually DO. Every pose is put through the
+//!   figure's own ranges of motion before anything draws or tests against it, so
+//!   a solve cannot hand back a hip that abducts 125° or a knee that bends the
+//!   wrong way.
 //! * [`strike`] — what the drawing asks the body for, and the driven pendulum
 //!   that is the striking leg. The contact tick comes out of the integration.
 //! * [`kicker`] — the run-up, the plant and the swing, assembled: the body a
@@ -16,6 +20,7 @@
 //!   and the capsules the ball is tested against.
 
 pub mod ik;
+pub mod joints;
 pub mod keeper_pose;
 pub mod kicker;
 pub mod model;
@@ -23,9 +28,10 @@ pub mod pose;
 pub mod rig;
 pub mod strike;
 
-pub use keeper_pose::{keeper_frame, KeeperFrame, KeeperMotion};
+pub use keeper_pose::{arm_reach, keeper_frame, stretch_from_hips, KeeperFrame, KeeperMotion};
 pub use kicker::{kick_frame, KickPlan, STRIKE_FOOT};
 pub use model::{soccer_figure, FIGURE_HEIGHT, PART_COUNT, PARTS, TAG_COUNT};
+pub use joints::{constrain, Range, RANGES};
 pub use pose::JointPose;
 pub use rig::{body_transform, world_parts};
 pub use strike::{KickDrive, Swing};

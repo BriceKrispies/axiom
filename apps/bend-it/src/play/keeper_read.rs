@@ -80,7 +80,15 @@ pub(super) fn take_read_with(
         .guess
         .map(|side| side * tuning.dive_distance)
         .unwrap_or(seen.x - home.x);
-    let travel = desire.clamp(-tuning.dive_distance, tuning.dive_distance) * nerve.execution;
+    // The hips only have to get within an arm's length. Aiming them AT the ball
+    // would make the keeper's own reach worth nothing — the arm would arrive
+    // exactly where the body already was — and would need an unphysical dive
+    // speed to cover the goal. So the body goes as far as it needs to and the
+    // arm covers the last stretch, which is both what a keeper does and what
+    // keeps `dive_speed` a number about a person.
+    let reach = crate::figure::stretch_from_hips(tuning);
+    let short = desire.signum() * (desire.abs() - reach).max(0.0);
+    let travel = short.clamp(-tuning.dive_distance, tuning.dive_distance) * nerve.execution;
     let ceiling = HIP_HEIGHT + tuning.vertical_reach;
     // The vertical commitment, in two steps that are deliberately not the same.
     //

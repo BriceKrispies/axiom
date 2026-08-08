@@ -91,6 +91,7 @@ mod tests {
                 lean: 0.0,
                 extend: 0.0,
                 height_bias: 0.0,
+                hands: Vec3::new(0.0, 1.30, 0.72),
             },
             &Tuning::DEFAULT.keeper,
         );

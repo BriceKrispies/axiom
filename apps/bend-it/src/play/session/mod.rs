@@ -441,8 +441,8 @@ mod tests {
     fn the_same_endpoint_can_be_saved_or_scored_depending_on_the_shape() {
         // One point in the goal — low, left of centre, well inside the keeper's
         // range — reached two ways.
-        let plain = take(shot(-0.35, 0.45, 0.0, 0.5, 0.9, 0.5));
-        let sculpted = take(shot(-0.35, 0.45, 2.0, 0.28, 0.9, 0.5));
+        let plain = take(shot(-0.60, 0.75, 0.0, 0.5, 0.9, 0.5));
+        let sculpted = take(shot(-0.60, 0.75, 2.0, 0.28, 0.9, 0.5));
         assert_eq!(
             plain.shot().world_target,
             sculpted.shot().world_target,

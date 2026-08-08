@@ -176,8 +176,18 @@ impl Swing {
     /// radians — a boot that swings *through* where the ball was — so the swing,
     /// and only the swing, runs at a finer step inside its own tick.
     pub fn step(&mut self, drive: &KickDrive, contact_angle: f32, tuning: &KickTuning) {
+        let before = self.struck;
         (0..SUBSTEPS).for_each(|_| self.substep(drive, contact_angle, tuning));
         self.ticks += 1;
+        // The leg rests on the ball for the frame it strikes it.
+        //
+        // Without this the substeps that follow the contact carry the boot on
+        // past — a fifth of a swing in one tick, at these speeds — and the only
+        // frame anyone actually SEES of the strike has the boot already through
+        // the ball by a hand's width. A real contact lasts about ten
+        // milliseconds, which is about a tick, so holding it is not a fudge: the
+        // ball is genuinely in the way for exactly this long.
+        (before.is_none() & self.hit()).then(|| self.angle = contact_angle);
     }
 
     fn substep(&mut self, drive: &KickDrive, contact_angle: f32, tuning: &KickTuning) {

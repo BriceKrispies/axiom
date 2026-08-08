@@ -21,6 +21,9 @@
 //! Nothing here ever touches the ball. The dive produces a body; the body
 //! produces capsules; the capsules either intersect the ball's path or they do
 //! not.
+//!
+//! Deciding is here; *moving* is in [`dive`], which integrates a body with
+//! momentum so a mid-flight correction cannot make the keeper stutter.
 
 use axiom::prelude::Vec3;
 
@@ -28,6 +31,8 @@ use crate::figure::{keeper_frame, KeeperFrame, KeeperMotion};
 use crate::pitch::{GOAL_HALF_WIDTH, GOAL_HEIGHT, KEEPER_LINE_Z};
 use crate::shot::Trajectory;
 use crate::tuning::KeeperTuning;
+
+mod dive;
 
 use super::keeper_read::{take_read, take_read_with, KeeperRead};
 use super::nerve::KeeperNerve;
@@ -50,6 +55,12 @@ pub struct Keeper {
     /// Whether the one mid-flight correction has been spent.
     adjusted: bool,
     motion: KeeperMotion,
+    /// The hips' velocity. This is what makes a corrected dive one continuous
+    /// movement instead of two.
+    velocity: Vec3,
+    /// The flight time this keeper was last advanced to, so a step knows how much
+    /// time it is integrating.
+    at: f32,
 }
 
 impl Keeper {
@@ -75,7 +86,10 @@ impl Keeper {
                 lean: 0.0,
                 extend: 0.0,
                 height_bias: 0.0,
+                hands: Vec3::new(shade, hips.y + 0.35, KEEPER_LINE_Z + 0.30),
             },
+            velocity: Vec3::ZERO,
+            at: 0.0,
         }
     }
 
@@ -126,9 +140,11 @@ impl Keeper {
                 })
             });
         self.adjust(trajectory, t, tuning);
+        let dt = (t - self.at).max(0.0);
+        self.at = t;
         self.motion = match self.read {
             None => self.set_stance(t),
-            Some(read) => self.diving(read, t),
+            Some(read) => self.dive_step(read, dt, tuning),
         };
     }
 
@@ -183,56 +199,11 @@ impl Keeper {
             aim: Vec3::new(aim_x, previous.aim.y, previous.aim.z),
             lean: ((aim_x - self.home.x) / tuning.dive_distance.max(1.0e-3)).clamp(-1.0, 1.0),
             height_bias: previous.height_bias,
-            // The correction re-times the dive from here, but it inherits how far
-            // through the first commitment the body already is.
-            extend_time: (remaining.max(1.0e-3)).min(previous.extend_time),
+            extend_time: previous.extend_time,
             at: t,
         });
-        // The body carries its momentum: the dive restarts from where it is, not
-        // from the line.
-        self.home = Vec3::new(from, self.motion.hips.y, self.home.z);
     }
 
-    /// The tiny weight-shifting bounce a keeper does on the line before a
-    /// penalty. It is presentation, but it comes out of the same motion value the
-    /// capsules are built from, so a keeper who has drifted is genuinely there.
-    fn set_stance(&self, t: f32) -> KeeperMotion {
-        let bounce = (t * 9.0).sin();
-        KeeperMotion {
-            hips: Vec3::new(
-                self.home.x + bounce * 0.06,
-                self.home.y - bounce.abs() * 0.04,
-                self.home.z,
-            ),
-            lean: bounce * 0.08,
-            extend: 0.0,
-            height_bias: 0.0,
-        }
-    }
-
-    /// Execute the committed dive: the hips travel from where they were when the
-    /// commitment was made to where it aims, on an eased curve whose duration is
-    /// the keeper's own speed over that distance.
-    fn diving(&self, read: KeeperRead, t: f32) -> KeeperMotion {
-        let elapsed = (t - read.at).max(0.0);
-        let extend = (elapsed / read.extend_time.max(1.0e-3)).clamp(0.0, 1.0);
-        let eased = extend * extend * (3.0 - 2.0 * extend);
-        // A dive for a low ball drops the hips toward the turf; a dive for a high
-        // one drives them up. Both are absolute targets, so a correction mid-dive
-        // moves toward the new one from wherever the body already is.
-        let target = Vec3::new(
-            read.aim.x,
-            HIP_HEIGHT + (read.aim.y - HIP_HEIGHT).max(0.0)
-                - (HIP_HEIGHT - read.aim.y).max(0.0) * 0.55,
-            self.home.z - 0.16,
-        );
-        KeeperMotion {
-            hips: self.home.add(target.subtract(self.home).mul_scalar(eased)),
-            lean: read.lean,
-            extend: extend.max(self.motion.extend * (1.0 - eased)),
-            height_bias: read.height_bias,
-        }
-    }
 }
 
 /// Clamp a predicted crossing to somewhere a keeper would plausibly believe —

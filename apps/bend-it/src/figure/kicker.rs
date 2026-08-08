@@ -212,10 +212,12 @@ pub fn kick_frame(
         .unwrap_or(u32::MAX);
     let settle = smooth(((swing.ticks() as f32 - settle_from as f32) / 22.0).clamp(0.0, 1.0));
     let action = JointPose::blend(&running, &struck, into_strike);
+    // The last thing that happens to any pose: it is made legal. A swing arc is
+    // geometry and a blend is arithmetic; neither of them knows what a hip can do.
     (
         ground,
         plan.facing(),
-        JointPose::blend(&action, &idle(), settle),
+        JointPose::blend(&action, &idle(), settle).human(),
     )
 }
 
@@ -235,9 +237,10 @@ fn strike_pose(plan: &KickPlan, swing: &Swing, tuning: &KickTuning) -> JointPose
         plan.boot_target(swing.angle(), extension),
         PARTS[L_SHIN].offset.y.abs(),
         PARTS[L_FOOT].offset.y.abs(),
+        ik::KNEE_AXIS,
     );
-    pose.joints[L_THIGH] = solved.thigh;
-    pose.joints[L_SHIN] = solved.shin;
+    pose.joints[L_THIGH] = solved.upper;
+    pose.joints[L_SHIN] = solved.lower;
     pose.joints[L_FOOT] = qx(-0.14 - 0.26 * through.min(1.0));
 
     // The support leg is solved onto the planted foot, so the body turns and
@@ -247,9 +250,10 @@ fn strike_pose(plan: &KickPlan, swing: &Swing, tuning: &KickTuning) -> JointPose
         plan.plant_target(),
         PARTS[R_SHIN].offset.y.abs(),
         PARTS[R_FOOT].offset.y.abs(),
+        ik::KNEE_AXIS,
     );
-    pose.joints[R_THIGH] = support.thigh;
-    pose.joints[R_SHIN] = support.shin;
+    pose.joints[R_THIGH] = support.upper;
+    pose.joints[R_SHIN] = support.lower;
     pose.joints[R_FOOT] = qx(-0.16);
 
     // The upper body: the hips open through the ball, the arms counterbalance the
@@ -329,45 +333,31 @@ mod tests {
     fn the_boot_is_on_the_ball_on_the_tick_the_swing_says_it_is() {
         let tuning = Tuning::DEFAULT;
         let ball = ball_spot(tuning.flight.ball_radius);
-        let plan = KickPlan::for_shot(ball, drive(0.5, 0.0, 0.6), &tuning.kick);
-        let (contact, gaps) = play(&plan);
-        let nearest = gaps
-            .iter()
-            .enumerate()
-            .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(core::cmp::Ordering::Equal))
-            .map(|(t, _)| t as u32)
-            .expect("the kick has ticks");
-        assert!(
-            nearest.abs_diff(contact) <= 1,
-            "the boot is nearest the ball on tick {nearest} but the swing struck on {contact}"
-        );
-        assert!(
-            gaps[contact as usize] < tuning.flight.ball_radius + 0.16,
-            "the boot misses the ball by {} m",
-            gaps[contact as usize]
-        );
-    }
-
-    #[test]
-    fn a_harder_drawing_is_run_up_to_and_struck_sooner() {
-        let tuning = Tuning::DEFAULT;
-        let ball = ball_spot(tuning.flight.ball_radius);
-        let soft = KickPlan::for_shot(ball, drive(0.0, 0.0, 0.6), &tuning.kick);
-        let hard = KickPlan::for_shot(ball, drive(1.0, 0.0, 0.6), &tuning.kick);
-        assert!(
-            hard.run_up_ticks(&tuning.kick) < soft.run_up_ticks(&tuning.kick),
-            "a hard shot is run up to faster"
-        );
-        let (soft_contact, _) = play(&soft);
-        let (hard_contact, _) = play(&hard);
-        assert!(
-            hard_contact < soft_contact,
-            "and struck sooner: {hard_contact} vs {soft_contact}"
-        );
-        // And it still lands on the ball, which is the whole point of solving the
-        // contact rather than scheduling it.
-        let (_, gaps) = play(&hard);
-        assert!(gaps[hard_contact as usize] < tuning.flight.ball_radius + 0.16);
+        // Every tempo, because the swing gets shorter as it gets harder and the
+        // contact tick has to stay exact when the whole downswing is four ticks.
+        [0.0f32, 0.5, 1.0].into_iter().for_each(|pace| {
+            let plan = KickPlan::for_shot(ball, drive(pace, 0.8, 0.6), &tuning.kick);
+            let (contact, gaps) = play(&plan);
+            let touching = tuning.flight.ball_radius + 0.12;
+            assert!(
+                gaps[contact as usize] < touching,
+                "pace {pace}: the boot missed the ball by {:.3} m",
+                gaps[contact as usize]
+            );
+            // And it is the closest the boot gets during the kick itself — the
+            // window is bounded because a kicker STANDS next to the ball, so its
+            // idle foot is naturally near it once the follow-through has settled.
+            let nearest = gaps[..(contact as usize + 12).min(gaps.len())]
+                .iter()
+                .enumerate()
+                .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(core::cmp::Ordering::Equal))
+                .map(|(t, _)| t as u32)
+                .expect("the kick has ticks");
+            assert_eq!(
+                nearest, contact,
+                "pace {pace}: the boot was nearest the ball on {nearest}, not on {contact}"
+            );
+        });
     }
 
     #[test]

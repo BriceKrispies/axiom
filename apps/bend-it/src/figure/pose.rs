@@ -44,6 +44,20 @@ impl JointPose {
         }
     }
 
+    /// Every joint brought inside the figure's own range of motion.
+    ///
+    /// The one place a pose becomes anatomically legal, and it is applied where
+    /// poses are *finished* rather than where they are built — so a solve, a
+    /// blend or a hand-authored angle all pass through it and none of them has to
+    /// know the ranges exist.
+    pub fn human(&self) -> JointPose {
+        let mut out = *self;
+        (0..PART_COUNT).for_each(|i| {
+            out.joints[i] = super::joints::constrain(self.joints[i], super::joints::RANGES[i]);
+        });
+        out
+    }
+
     /// Blend two poses. Used to ease between a run-up and a strike without
     /// either one having to know about the other.
     pub fn blend(a: &JointPose, b: &JointPose, t: f32) -> JointPose {

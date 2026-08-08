@@ -124,11 +124,17 @@ pub struct KeeperTuning {
     /// Lateral dive speed, m/s.
     pub dive_speed: f32,
     /// Furthest the keeper's hips can travel sideways in one dive, metres.
+    ///
+    /// Bounded BELOW the goal by design. The hips reach `dive_distance ×
+    /// execution` and the laid-over body plus arm covers a further
+    /// `figure::stretch_from_hips()`, and that
+    /// total has to stay short of the far corner — otherwise a keeper with a
+    /// clean read covers the whole goal and there is nowhere left to shoot.
+    /// Standing off-centre (the shading its memory does) is what brings a corner
+    /// into range, which is the point: the keeper earns a corner by expecting it.
     pub dive_distance: f32,
     /// How high the keeper's hips can leave the ground, metres.
     pub vertical_reach: f32,
-    /// Arm span from the hips to the leading fingertip, metres.
-    pub arm_span: f32,
     /// Radius of the swept reach capsule (hand + forearm), metres.
     pub reach_radius: f32,
     /// Radius of the keeper's torso capsule, metres.
@@ -369,20 +375,19 @@ impl Tuning {
             adjust_fidelity: 0.60,
             read_gravity: 4.4,
             vertical_trust: 0.95,
-            dive_speed: 8.6,
-            dive_distance: 2.60,
+            dive_speed: 9.0,
+            dive_distance: 2.80,
             vertical_reach: 0.85,
-            arm_span: 0.86,
-            reach_radius: 0.17,
-            body_radius: 0.30,
-            execution: 0.92,
-            extend_time: 0.20,
+            reach_radius: 0.19,
+            body_radius: 0.38,
+            execution: 0.97,
+            extend_time: 0.06,
             reaction_jitter: 0.030,
             read_error_across: 0.26,
             read_error_up: 0.21,
             execution_spread: 0.10,
             guess_chance: 0.10,
-            correction_chance: 0.55,
+            correction_chance: 0.75,
             shade_gain: 0.62,
             shade_limit: 1.15,
         },
