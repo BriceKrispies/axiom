@@ -12,6 +12,7 @@ use crate::shot::Trajectory;
 use crate::tuning::KeeperTuning;
 
 use super::keeper::HIP_HEIGHT;
+use super::nerve::KeeperNerve;
 
 /// What the keeper decided, once, at the end of its reaction.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,11 +36,20 @@ pub struct KeeperRead {
 pub(super) fn take_read(
     home: Vec3,
     expectation: (f32, f32),
+    nerve: &KeeperNerve,
     trajectory: &Trajectory,
     t: f32,
     tuning: &KeeperTuning,
 ) -> KeeperRead {
-    take_read_with(home, expectation, trajectory, t, tuning, tuning.read_fidelity)
+    take_read_with(
+        home,
+        expectation,
+        nerve,
+        trajectory,
+        t,
+        tuning,
+        tuning.read_fidelity,
+    )
 }
 
 /// The same, at an explicit fidelity — the correction reads better than the
@@ -47,18 +57,30 @@ pub(super) fn take_read(
 pub(super) fn take_read_with(
     home: Vec3,
     expectation: (f32, f32),
+    nerve: &KeeperNerve,
     trajectory: &Trajectory,
     t: f32,
     tuning: &KeeperTuning,
     fidelity: f32,
 ) -> KeeperRead {
-    let seen = predict_crossing(trajectory, t, fidelity, tuning.read_gravity);
+    // What it judged, plus how wrong it is today.
+    let read = predict_crossing(trajectory, t, fidelity, tuning.read_gravity);
+    let seen = Vec3::new(
+        read.x + nerve.read_error_across,
+        read.y + nerve.read_error_up,
+        read.z,
+    );
     let (remembered, weight) = expectation;
 
     // What the keeper can actually get to: its dive reaches only so far
     // sideways and only so high, and it executes its own plan imperfectly.
-    let desire = seen.x - home.x;
-    let travel = desire.clamp(-tuning.dive_distance, tuning.dive_distance) * tuning.execution;
+    // A keeper that guessed is not reading at all: it picked a side before the
+    // ball moved and is going there, whatever the ball does.
+    let desire = nerve
+        .guess
+        .map(|side| side * tuning.dive_distance)
+        .unwrap_or(seen.x - home.x);
+    let travel = desire.clamp(-tuning.dive_distance, tuning.dive_distance) * nerve.execution;
     let ceiling = HIP_HEIGHT + tuning.vertical_reach;
     // The vertical commitment, in two steps that are deliberately not the same.
     //

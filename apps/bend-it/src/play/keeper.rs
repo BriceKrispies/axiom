@@ -30,6 +30,7 @@ use crate::shot::Trajectory;
 use crate::tuning::KeeperTuning;
 
 use super::keeper_read::{take_read, take_read_with, KeeperRead};
+use super::nerve::KeeperNerve;
 
 /// Standing hip height, metres. Matches the figure the pose module draws.
 pub(super) const HIP_HEIGHT: f32 = 0.92;
@@ -38,6 +39,9 @@ pub(super) const HIP_HEIGHT: f32 = 0.92;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Keeper {
     home: Vec3,
+    /// What kind of attempt this keeper is having. Drawn once, before the ball
+    /// moved; nothing during the flight rolls anything.
+    nerve: KeeperNerve,
     /// The height its own memory of recent penalties says to expect, and how far
     /// it trusts that memory over what it sees.
     expects: f32,
@@ -50,17 +54,18 @@ pub struct Keeper {
 
 impl Keeper {
     /// A keeper set on its line, in the middle of the goal.
-    pub fn set() -> Keeper {
-        Keeper::shaded(0.0, HIP_HEIGHT, 0.0)
+    pub fn set(nerve: KeeperNerve) -> Keeper {
+        Keeper::shaded(0.0, HIP_HEIGHT, 0.0, nerve)
     }
 
     /// A keeper set `shade` metres off centre and expecting the ball at
     /// `expects` metres up — where its own reading of the last few penalties has
     /// told it to stand and to look.
-    pub fn shaded(shade: f32, expects: f32, memory_weight: f32) -> Keeper {
+    pub fn shaded(shade: f32, expects: f32, memory_weight: f32, nerve: KeeperNerve) -> Keeper {
         let hips = Vec3::new(shade, HIP_HEIGHT, KEEPER_LINE_Z);
         Keeper {
             home: hips,
+            nerve,
             expects,
             memory_weight: memory_weight.clamp(0.0, 1.0),
             read: None,
@@ -89,6 +94,11 @@ impl Keeper {
         keeper_frame(self.motion, tuning)
     }
 
+    /// The nerve it is playing this penalty with.
+    pub fn nerve(&self) -> KeeperNerve {
+        self.nerve
+    }
+
     /// What its memory says about arrival height, as `(height, weight)`.
     fn expectation(&self) -> (f32, f32) {
         (self.expects, self.memory_weight)
@@ -104,8 +114,15 @@ impl Keeper {
         self.read = self
             .read
             .or_else(|| {
-                (t >= tuning.reaction).then(|| {
-                    take_read(self.home, self.expectation(), trajectory, t, tuning)
+                (t >= self.nerve.reaction).then(|| {
+                    take_read(
+                        self.home,
+                        self.expectation(),
+                        &self.nerve,
+                        trajectory,
+                        t,
+                        tuning,
+                    )
                 })
             });
         self.adjust(trajectory, t, tuning);
@@ -130,6 +147,9 @@ impl Keeper {
         let due = self
             .read
             .filter(|_| !self.adjusted)
+            // A keeper who guessed has nothing to correct, and some attempts it
+            // simply does not get a second look in.
+            .filter(|_| self.nerve.corrects)
             .filter(|read| t >= read.at + tuning.adjust_delay);
         let Some(previous) = due else {
             return;
@@ -138,6 +158,7 @@ impl Keeper {
         let fresh = take_read_with(
             self.home,
             self.expectation(),
+            &self.nerve,
             trajectory,
             t,
             tuning,
@@ -231,6 +252,12 @@ mod tests {
     use crate::shot::{BendCurve, GoalTarget, ResolvedShot, ShotIntent};
     use crate::tuning::Tuning;
 
+    /// The mechanic tests face the average keeper: what is being tested is the
+    /// dive, not the dice.
+    fn steady() -> KeeperNerve {
+        KeeperNerve::steady(&Tuning::DEFAULT.keeper)
+    }
+
     /// The shipping read gravity, so a test reads what the keeper reads.
     const GRAVITY: f32 = Tuning::DEFAULT.keeper.read_gravity;
 
@@ -258,7 +285,7 @@ mod tests {
     fn the_keeper_is_still_until_it_reacts_then_commits_once() {
         let tuning = Tuning::DEFAULT;
         let s = shot(0.0, 0.6, 0.8, 0.4);
-        let mut keeper = Keeper::set();
+        let mut keeper = Keeper::set(steady());
         keeper.advance(&s.trajectory, 0.0, &tuning.keeper);
         assert!(keeper.read().is_none());
         assert!(keeper.motion().extend == 0.0);
@@ -283,7 +310,7 @@ mod tests {
         let tuning = Tuning::DEFAULT;
         // A shot that swings out early and comes back: the first read is wrong.
         let s = shaped(-2.0, 0.28, 2.6, 0.28, 0.55, 0.30);
-        let mut keeper = Keeper::set();
+        let mut keeper = Keeper::set(steady());
         keeper.advance(&s.trajectory, tuning.keeper.reaction, &tuning.keeper);
         let first = keeper.read().expect("committed");
         let after = tuning.keeper.reaction + tuning.keeper.adjust_delay;
@@ -310,7 +337,7 @@ mod tests {
         let tuning = Tuning::DEFAULT;
         // A shot into the very corner: the keeper wants more than it has.
         let s = shot(0.0, 0.2, 1.0, 0.0);
-        let mut keeper = Keeper::set();
+        let mut keeper = Keeper::set(steady());
         (0..40).for_each(|i| {
             keeper.advance(&s.trajectory, i as f32 / 60.0, &tuning.keeper);
         });
@@ -320,7 +347,7 @@ mod tests {
         assert!(keeper.motion().hips.x.abs() <= tuning.keeper.dive_distance + 1.0e-4);
         // A long dive takes longer than a short one — there is a speed here.
         let near = shot(0.0, 0.2, 0.05, 0.3);
-        let mut lazy = Keeper::set();
+        let mut lazy = Keeper::set(steady());
         lazy.advance(&near.trajectory, tuning.keeper.reaction, &tuning.keeper);
         assert!(
             lazy.read().expect("committed").extend_time <= read.extend_time,
@@ -334,14 +361,14 @@ mod tests {
         let high = shot(0.0, 0.4, 0.6, 1.0);
         let low = shot(0.0, 0.0, 0.6, 0.0);
         let commit = |s: &ResolvedShot| {
-            let mut k = Keeper::set();
+            let mut k = Keeper::set(steady());
             k.advance(&s.trajectory, tuning.keeper.reaction, &tuning.keeper);
             k.read().expect("committed")
         };
         assert!(commit(&high).height_bias > commit(&low).height_bias);
         assert!(commit(&low).height_bias < 0.0);
         // The body it produces answers the same way.
-        let mut k = Keeper::set();
+        let mut k = Keeper::set(steady());
         (0..30).for_each(|i| k.advance(&low.trajectory, i as f32 / 60.0, &tuning.keeper));
         let frame = k.frame(&tuning.keeper);
         assert!(frame.reach.a.y < HIP_HEIGHT + 0.6);

@@ -1,0 +1,411 @@
+//! The shot matrix: every shape of shot the game can produce, played headlessly
+//! against the keeper, and counted.
+//!
+//! This is the game's own instrument for the one question no amount of reading
+//! the code answers: **how often does the keeper actually save it?** It sweeps
+//! the whole authorable space — every corner, every bend, every arc, every place
+//! a curve can break — plays each shot against a set of seeded keepers, and
+//! reports what happened.
+//!
+//! It lives in `src` rather than in a test because it is not only a test. It is
+//! how the game is tuned: change a keeper number, run the sweep, and see what it
+//! did to every shot at once rather than to the three you thought to try. The
+//! test suite and the reporting example are both just callers.
+//!
+//! Every run is deterministic. A shot is `(shape, seed)` and nothing else, so a
+//! surprising cell in the report can be reproduced exactly by replaying that one
+//! pair.
+
+use crate::pitch::GoalMouth;
+use crate::play::{PlayCommand, Phase, Session, ShotResult};
+use crate::shot::{BendCurve, GoalTarget, ShotIntent};
+use crate::tuning::Tuning;
+
+/// One shot to take: where it finishes and what shape it takes to get there.
+///
+/// `bend` and `loft` are fractions of what the game allows, signed, so a matrix
+/// is independent of the tuning it is swept against.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShotSpec {
+    pub h: f32,
+    pub v: f32,
+    pub bend: f32,
+    pub bend_at: f32,
+    pub loft: f32,
+    pub loft_at: f32,
+}
+
+impl ShotSpec {
+    /// The shot as the session would receive it from a reading.
+    pub fn intent(&self, tuning: &Tuning) -> ShotIntent {
+        ShotIntent {
+            target: GoalTarget::new(self.h, self.v),
+            bend: BendCurve::through(
+                self.bend_at,
+                self.bend * tuning.bend.max_offset,
+                tuning.bend.peak_margin,
+            ),
+            loft: BendCurve::through(
+                self.loft_at,
+                self.loft * tuning.loft.max_offset,
+                tuning.loft.peak_margin,
+            ),
+        }
+    }
+
+    /// Where this shot finishes, in metres.
+    pub fn finish(&self, tuning: &Tuning) -> axiom::prelude::Vec3 {
+        GoalMouth::new(tuning.goal.inset).to_world(self.h, self.v)
+    }
+}
+
+/// The axes the full matrix sweeps.
+pub const AIM_ACROSS: [f32; 9] = [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0];
+pub const AIM_UP: [f32; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+pub const BEND: [f32; 7] = [-1.0, -0.6, -0.3, 0.0, 0.3, 0.6, 1.0];
+pub const LOFT: [f32; 5] = [-1.0, -0.4, 0.0, 0.4, 1.0];
+pub const BREAK_AT: [f32; 3] = [0.3, 0.5, 0.7];
+
+/// The coarser axes, for the sweep that runs on every `cargo test`.
+pub const COARSE_ACROSS: [f32; 5] = [-1.0, -0.5, 0.0, 0.5, 1.0];
+pub const COARSE_UP: [f32; 3] = [0.0, 0.5, 1.0];
+pub const COARSE_SHAPE: [f32; 3] = [-1.0, 0.0, 1.0];
+pub const COARSE_BREAK: [f32; 2] = [0.3, 0.7];
+
+/// Every shot in the matrix: every corner, every bend, every arc, and every
+/// place a curve can break.
+pub fn full_matrix() -> Vec<ShotSpec> {
+    matrix_over(&AIM_ACROSS, &AIM_UP, &BEND, &LOFT, &BREAK_AT)
+}
+
+/// A coarser matrix over the same space — the one the default test suite plays,
+/// so `cargo test` stays a thing you run without thinking about it.
+pub fn coarse_matrix() -> Vec<ShotSpec> {
+    matrix_over(
+        &COARSE_ACROSS,
+        &COARSE_UP,
+        &COARSE_SHAPE,
+        &COARSE_SHAPE,
+        &COARSE_BREAK,
+    )
+}
+
+/// Build a matrix over explicit axes.
+///
+/// Where a curve is flat its break point is meaningless, so those combinations
+/// are collapsed rather than swept — otherwise a third of the matrix would be
+/// the same shot counted several times, and every rate in the report would be
+/// quietly weighted toward straight shots.
+pub fn matrix_over(
+    across: &[f32],
+    up: &[f32],
+    bends: &[f32],
+    lofts: &[f32],
+    breaks: &[f32],
+) -> Vec<ShotSpec> {
+    let points = |magnitude: f32| -> Vec<f32> {
+        match magnitude == 0.0 {
+            true => vec![0.5],
+            false => breaks.to_vec(),
+        }
+    };
+    across
+        .iter()
+        .flat_map(|h| up.iter().map(move |v| (*h, *v)))
+        .flat_map(|(h, v)| bends.iter().map(move |bend| (h, v, *bend)))
+        .flat_map(move |(h, v, bend)| {
+            points(bend)
+                .into_iter()
+                .map(move |bend_at| (h, v, bend, bend_at))
+        })
+        .flat_map(|(h, v, bend, bend_at)| {
+            lofts
+                .iter()
+                .map(move |loft| (h, v, bend, bend_at, *loft))
+        })
+        .flat_map(move |(h, v, bend, bend_at, loft)| {
+            points(loft).into_iter().map(move |loft_at| ShotSpec {
+                h,
+                v,
+                bend,
+                bend_at,
+                loft,
+                loft_at,
+            })
+        })
+        .collect()
+}
+
+/// A run of keeper seeds. Spread widely, because a seed IS a keeper: each one
+/// produces exactly one nerve for a cold attempt, so a handful of seeds is a
+/// handful of keepers and aliases badly. Ask for enough of them.
+pub fn keepers(count: u64) -> Vec<u64> {
+    (0..count)
+        .map(|i| 0x9E37_79B9_7F4A_7C15u64.wrapping_mul(i + 1) ^ 0x5EED)
+        .collect()
+}
+
+/// Take one shot, against the keeper this seed produces, and report the outcome.
+///
+/// Every attempt is a fresh session, so the keeper's memory of previous shots
+/// never leaks between cells — the matrix measures how a shot fares *cold*,
+/// which is the only comparable thing to measure.
+pub fn take(spec: &ShotSpec, seed: u64, tuning: Tuning) -> ShotResult {
+    let mut session = Session::seeded(tuning, seed);
+    while session.phase() != Phase::Aiming {
+        session.step(&[]);
+    }
+    session.step(&[PlayCommand::Kick(spec.intent(&tuning))]);
+    let mut spent = 0u32;
+    while session.result().is_none() && spent < 600 {
+        session.step(&[]);
+        spent += 1;
+    }
+    session.result().unwrap_or(ShotResult::Miss)
+}
+
+/// Take one shot against the **average** keeper — no jitter, no guess.
+///
+/// The comparable measurement when the question is about the *pitch* rather than
+/// about the dice: two shots that mirror each other must come out the same, and
+/// a rolled keeper would hide that behind its own luck.
+pub fn take_steady(spec: &ShotSpec, tuning: Tuning) -> ShotResult {
+    let mut session = Session::steady(tuning);
+    while session.phase() != Phase::Aiming {
+        session.step(&[]);
+    }
+    session.step(&[PlayCommand::Kick(spec.intent(&tuning))]);
+    let mut spent = 0u32;
+    while session.result().is_none() && spent < 600 {
+        session.step(&[]);
+        spent += 1;
+    }
+    session.result().unwrap_or(ShotResult::Miss)
+}
+
+impl ShotSpec {
+    /// The same shot, mirrored across the centre of the goal.
+    pub fn mirrored(&self) -> ShotSpec {
+        ShotSpec {
+            h: -self.h,
+            bend: -self.bend,
+            ..*self
+        }
+    }
+}
+
+/// What a set of shots came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Outcomes {
+    pub goals: u32,
+    pub saves: u32,
+    pub frame: u32,
+    pub misses: u32,
+}
+
+impl Outcomes {
+    pub fn record(&mut self, result: ShotResult) {
+        match result {
+            ShotResult::Goal => self.goals += 1,
+            ShotResult::Save => self.saves += 1,
+            ShotResult::Frame(_) => self.frame += 1,
+            ShotResult::Miss => self.misses += 1,
+        }
+    }
+
+    pub fn total(&self) -> u32 {
+        self.goals + self.saves + self.frame + self.misses
+    }
+
+    /// The share of shots the keeper stopped, `0..1`.
+    pub fn save_rate(&self) -> f32 {
+        self.saves as f32 / self.total().max(1) as f32
+    }
+
+    /// The share that went in, `0..1`.
+    pub fn goal_rate(&self) -> f32 {
+        self.goals as f32 / self.total().max(1) as f32
+    }
+
+    pub fn merge(&mut self, other: &Outcomes) {
+        self.goals += other.goals;
+        self.saves += other.saves;
+        self.frame += other.frame;
+        self.misses += other.misses;
+    }
+}
+
+/// One row of a breakdown: a label and what happened under it.
+pub type Row = (String, Outcomes);
+
+/// Sweep a matrix against a set of keeper seeds.
+pub fn sweep(specs: &[ShotSpec], seeds: &[u64], tuning: Tuning) -> Outcomes {
+    specs
+        .iter()
+        .flat_map(|spec| seeds.iter().map(move |seed| (spec, *seed)))
+        .fold(Outcomes::default(), |mut out, (spec, seed)| {
+            out.record(take(spec, seed, tuning));
+            out
+        })
+}
+
+/// Sweep once, keeping every result.
+///
+/// Every breakdown a report wants is a different grouping of the *same* shots,
+/// so the sweep is run once and grouped many times. Re-running it per breakdown
+/// would multiply the cost of the report by the number of questions asked of it.
+pub fn sweep_detailed(specs: &[ShotSpec], seeds: &[u64], tuning: Tuning) -> Vec<(ShotSpec, ShotResult)> {
+    specs
+        .iter()
+        .flat_map(|spec| seeds.iter().map(move |seed| (spec, *seed)))
+        .map(|(spec, seed)| (*spec, take(spec, seed, tuning)))
+        .collect()
+}
+
+/// Group finished results by a label derived from each shot.
+pub fn group_by(
+    results: &[(ShotSpec, ShotResult)],
+    label: impl Fn(&ShotSpec) -> String,
+) -> Vec<Row> {
+    let mut rows: Vec<Row> = Vec::new();
+    results.iter().for_each(|(spec, result)| {
+        let key = label(spec);
+        match rows.iter_mut().find(|(name, _)| *name == key) {
+            Some((_, cell)) => cell.record(*result),
+            None => {
+                let mut cell = Outcomes::default();
+                cell.record(*result);
+                rows.push((key, cell));
+            }
+        }
+    });
+    rows
+}
+
+/// The totals of a finished sweep.
+pub fn totals(results: &[(ShotSpec, ShotResult)]) -> Outcomes {
+    results.iter().fold(Outcomes::default(), |mut out, (_, r)| {
+        out.record(*r);
+        out
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_matrix_covers_the_whole_authorable_space_without_repeating_itself() {
+        let matrix = full_matrix();
+        // Every corner, every height, every bend and every arc is in there.
+        AIM_ACROSS
+            .iter()
+            .for_each(|h| assert!(matrix.iter().any(|s| s.h == *h), "missing aim {h}"));
+        AIM_UP
+            .iter()
+            .for_each(|v| assert!(matrix.iter().any(|s| s.v == *v), "missing height {v}"));
+        BEND.iter()
+            .for_each(|b| assert!(matrix.iter().any(|s| s.bend == *b), "missing bend {b}"));
+        LOFT.iter()
+            .for_each(|l| assert!(matrix.iter().any(|s| s.loft == *l), "missing loft {l}"));
+        BREAK_AT.iter().for_each(|at| {
+            assert!(matrix.iter().any(|s| s.bend_at == *at && s.bend != 0.0));
+            assert!(matrix.iter().any(|s| s.loft_at == *at && s.loft != 0.0));
+        });
+        // A flat curve has exactly one break point, not three.
+        assert!(matrix
+            .iter()
+            .filter(|s| s.bend == 0.0)
+            .all(|s| s.bend_at == 0.5));
+        // Nothing is listed twice.
+        let mut keys: Vec<String> = matrix
+            .iter()
+            .map(|s| format!("{:?}", (s.h, s.v, s.bend, s.bend_at, s.loft, s.loft_at)))
+            .collect();
+        keys.sort();
+        let before = keys.len();
+        keys.dedup();
+        assert_eq!(keys.len(), before, "the matrix repeats itself");
+    }
+
+    #[test]
+    fn a_shot_taken_twice_the_same_way_comes_out_the_same_way() {
+        let spec = ShotSpec {
+            h: 0.5,
+            v: 0.25,
+            bend: -0.6,
+            bend_at: 0.7,
+            loft: 0.4,
+            loft_at: 0.5,
+        };
+        assert_eq!(
+            take(&spec, 11, Tuning::DEFAULT),
+            take(&spec, 11, Tuning::DEFAULT)
+        );
+    }
+
+    #[test]
+    fn different_keepers_do_different_things_with_the_same_shot() {
+        // Somewhere in a run of seeds, one keeper does something another does not
+        // — otherwise the nerve is not reaching the pitch at all.
+        let spec = ShotSpec {
+            h: 0.5,
+            v: 0.3,
+            bend: 0.0,
+            bend_at: 0.5,
+            loft: 0.4,
+            loft_at: 0.5,
+        };
+        let results: Vec<ShotResult> = (0..24)
+            .map(|seed| take(&spec, seed, Tuning::DEFAULT))
+            .collect();
+        assert!(
+            results.iter().any(|r| *r != results[0]),
+            "every seeded keeper produced {:?}",
+            results[0]
+        );
+    }
+
+    #[test]
+    fn outcomes_count_what_happened() {
+        let mut out = Outcomes::default();
+        out.record(ShotResult::Goal);
+        out.record(ShotResult::Goal);
+        out.record(ShotResult::Save);
+        out.record(ShotResult::Miss);
+        assert_eq!(out.total(), 4);
+        assert!((out.goal_rate() - 0.5).abs() < 1.0e-6);
+        assert!((out.save_rate() - 0.25).abs() < 1.0e-6);
+        let mut other = Outcomes::default();
+        other.record(ShotResult::Frame(crate::pitch::FrameMember::LeftPost));
+        out.merge(&other);
+        assert_eq!(out.total(), 5);
+        assert_eq!(out.frame, 1);
+        assert_eq!(Outcomes::default().save_rate(), 0.0);
+    }
+
+    #[test]
+    fn a_small_sweep_groups_and_totals_correctly() {
+        let specs: Vec<ShotSpec> = [-1.0f32, 1.0]
+            .iter()
+            .map(|h| ShotSpec {
+                h: *h,
+                v: 0.5,
+                bend: 0.0,
+                bend_at: 0.5,
+                loft: 0.4,
+                loft_at: 0.5,
+            })
+            .collect();
+        let seeds = [1u64, 2, 3];
+        let total = sweep(&specs, &seeds, Tuning::DEFAULT);
+        assert_eq!(total.total(), 6);
+        // The detailed sweep sees the same shots, and grouping preserves them.
+        let detailed = sweep_detailed(&specs, &seeds, Tuning::DEFAULT);
+        assert_eq!(detailed.len(), 6);
+        assert_eq!(totals(&detailed), total);
+        let rows = group_by(&detailed, |s| format!("h {:+.2}", s.h));
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.iter().map(|(_, o)| o.total()).sum::<u32>(), 6);
+    }
+}

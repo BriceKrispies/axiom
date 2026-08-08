@@ -125,6 +125,25 @@ pub struct KeeperTuning {
     pub execution: f32,
     /// Seconds the dive takes to reach full extension.
     pub extend_time: f32,
+    /// The keeper's nerve: how much any one attempt varies from its average
+    /// self. Every value here is a *bound* on a seeded roll taken once per
+    /// penalty, so a keeper is unpredictable without the game ever being
+    /// unrepeatable — the same seed is the same shootout, always.
+    ///
+    /// A keeper with no nerve at all is a machine you solve once and beat
+    /// forever; a keeper who is merely random is a coin toss. These bound the
+    /// space between.
+    pub reaction_jitter: f32,
+    /// How far its judgement of where the ball is going can be out, metres.
+    pub read_error_across: f32,
+    pub read_error_up: f32,
+    /// How much its follow-through varies around `execution`.
+    pub execution_spread: f32,
+    /// How often it abandons the read entirely and simply picks a side before
+    /// the ball is struck, `0..1` — the thing real penalty keepers do.
+    pub guess_chance: f32,
+    /// How often it gets its one mid-flight correction at all, `0..1`.
+    pub correction_chance: f32,
     /// How far the keeper shades its starting position toward where recent shots
     /// have finished, as a fraction of the average, and how far it will go,
     /// metres.
@@ -279,6 +298,12 @@ impl Tuning {
             body_radius: 0.28,
             execution: 0.90,
             extend_time: 0.44,
+            reaction_jitter: 0.055,
+            read_error_across: 0.42,
+            read_error_up: 0.34,
+            execution_spread: 0.10,
+            guess_chance: 0.17,
+            correction_chance: 0.80,
             shade_gain: 0.62,
             shade_limit: 1.15,
         },
@@ -341,6 +366,9 @@ mod tests {
         assert!((0.0..=1.0).contains(&t.keeper.read_fidelity));
         assert!(t.keeper.adjust_fidelity > t.keeper.read_fidelity);
         assert!((0.0..=1.0).contains(&t.keeper.execution));
+        assert!((0.0..=1.0).contains(&t.keeper.guess_chance));
+        assert!((0.0..=1.0).contains(&t.keeper.correction_chance));
+        assert!(t.keeper.reaction_jitter < t.keeper.reaction);
         assert_eq!(Tuning::default(), t);
     }
 }

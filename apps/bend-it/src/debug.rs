@@ -163,6 +163,10 @@ pub fn rows(session: &Session, reading: Option<&Reading>) -> Vec<(String, String
             .unwrap_or_else(|| "none yet".into()),
     ));
     rows.push((
+        "nerve".into(),
+        session.keeper().nerve().describe(),
+    ));
+    rows.push((
         "keeper".into(),
         session
             .keeper()
@@ -253,8 +257,8 @@ mod tests {
         let rows = rows(&session, None);
         let names: Vec<&str> = rows.iter().map(|(k, _)| k.as_str()).collect();
         [
-            "phase", "target", "bend", "loft", "flight", "ball", "drawing", "keeper",
-            "result", "tally",
+            "phase", "target", "bend", "loft", "flight", "ball", "drawing", "nerve",
+            "keeper", "result", "tally",
         ]
             .iter()
             .for_each(|k| assert!(names.contains(k), "missing row {k}"));

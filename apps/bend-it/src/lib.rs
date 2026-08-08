@@ -63,6 +63,7 @@
 //! | Framing, and screen ↔ world | [`camera`], [`projection`] |
 //! | The engine scene | [`scene`] |
 //! | The diagnostic view | [`debug`] |
+//! | Every shot vs the keeper, measured | [`matrix`] |
 //! | The browser | `web` (wasm32 only) |
 
 pub mod agent;
@@ -71,6 +72,7 @@ pub mod camera;
 pub mod contact;
 pub mod debug;
 pub mod figure;
+pub mod matrix;
 pub mod pitch;
 pub mod play;
 pub mod projection;

@@ -83,6 +83,56 @@ position and its expected height toward them, so no shape stays a solved answer.
 Its *memory* is not hedged the way a single glance is: four penalties into the
 same corner is evidence, not a guess.
 
+And it has **nerves**. Everything about one penalty that is not the same twice —
+how fast it reacts, how far out its judgement is, how completely it follows
+through, whether it abandons the read and simply picks a side, whether it gets
+its correction at all — is drawn once, up front, from the session's seeded
+generator (`play/nerve.rs`). Nothing during the flight rolls anything.
+
+Drawing it all up front buys three things: the tick loop stays a pure function
+of `(nerve, trajectory, t)` and is testable at a fixed nerve; a penalty replays
+exactly, because the whole of its luck is five numbers; and the variation is
+*inspectable* — `F1` prints whether the keeper read you or guessed.
+
+`Session::steady` faces the average keeper with no roll in it at all. That is
+what the mechanic tests play against, so "a bent shot beats a keeper that read it
+straight" is a claim about the mechanic rather than about a lucky roll. Nothing a
+player ever meets is steady.
+
+## How often does the keeper save it?
+
+`src/matrix.rs` sweeps the whole authorable space — every corner, every bend,
+every arc, every place a curve can break — against a run of seeded keepers, and
+counts. It is the game's tuning instrument as much as its test: change a keeper
+number, run the sweep, and see what it did to *every* shot rather than to the
+three you thought to try.
+
+```sh
+cargo test  -p axiom-bend-it --test keeper_sweep            # the coarse sweep
+cargo run --release -p axiom-bend-it --example keeper_report -- 96
+```
+
+Over 11,115 shapes × 96 keepers (1,067,040 penalties, ~95 s release) the keeper
+saves **≈ 39–41%** — and that is a *uniform* average over the shape space, not
+over how anyone actually shoots. Aim at a corner and shape the ball and it falls
+to around 30%.
+
+| | saved |
+|---|---|
+| everything | 39% |
+| flat, no arc | 52% |
+| straight, no bend | 47% |
+| middle height | 51% |
+| top or bottom corner | 30–34% |
+| full arc | 33% |
+| arc peaking early | 34% (late: 42%) |
+
+**A seed is a keeper.** Each one produces exactly one nerve for a cold attempt,
+so a handful of seeds is a handful of keepers and aliases hard: at eight seeds
+the report came back visibly lopsided — one keeper that guessed right handed
+every right-aimed shot in the matrix a free save. The number only settles past
+about 96.
+
 ## Boundaries
 
 | Boundary | Lives in | Rule |
@@ -90,18 +140,22 @@ same corner is evidence, not a guess.
 | **Tuning** | `tuning.rs` | Every gameplay number, one file. Systems read their own sub-table; no system hides a constant. |
 | **Data** | `pitch/`, `figure/model.rs` | Coordinates, pitch geometry, the goal, the humanoid. Built once, never per frame. |
 | **Authoring** | `shot/` | Pure data → one deterministic path. Cannot see a pointer. |
-| **Simulation** | `play/` | One fixed 60 Hz step, a pure function of `(commands, tick)`. No clock, no randomness. |
+| **Simulation** | `play/` | One fixed 60 Hz step, a pure function of `(commands, tick, seed)`. No clock; the only randomness is the kernel's seeded generator. |
 | **Presentation** | `camera.rs`, `scene/`, `debug.rs` | Reads the session; can never write it. |
 | **Interaction** | `stroke/`, `projection.rs` | Pixels in, one `ShotIntent` out. |
 | **Agent** | `agent/` | Perceives (`eyes`), decides through `axiom-agent`, and *draws* (`hand`) — its whole output is pixels. |
+| **Measurement** | `matrix.rs` | Every shot vs the keeper, headless and reproducible. |
 | **Platform edge** | `web/` (wasm32) | The only nondeterministic directory. |
 
 ## Determinism
 
-The simulation's only time is the tick counter and there is no randomness
-anywhere — not in the keeper, not in the result. A replay of the same commands
-is the same shootout, which is what makes `agent::play_through` a reproducible
-measurement of both the agent and the game's balance.
+The simulation's only time is the tick counter, and its only randomness is the
+kernel's seeded generator — which reads no entropy, no clock and no global state.
+A session is `(commands, seed)` and nothing else, so the same pair is the same
+shootout on any machine. That is what makes both `agent::play_through` and the
+whole shot matrix reproducible measurements rather than anecdotes: a surprising
+cell in a million-penalty sweep can be replayed exactly from the one
+`(shape, seed)` pair that produced it.
 
 ## Reused from End Zone, and what was left behind
 

@@ -10,6 +10,8 @@
 //! contact. There is no code path here that edits the trajectory once it has been
 //! committed.
 
+use axiom_kernel::DeterministicRng;
+
 use crate::figure::KickPlan;
 use crate::pitch::{ball_spot, GoalMouth, NetImpulse};
 use crate::shot::{ResolvedShot, ShotIntent};
@@ -17,6 +19,7 @@ use crate::tuning::{Tuning, DT};
 
 use super::ball::Ball;
 use super::keeper::Keeper;
+use super::nerve::KeeperNerve;
 use super::phase::Phase;
 use super::resolution::{ShotResult, Tally};
 
@@ -55,14 +58,40 @@ pub struct Session {
     net: Option<NetImpulse>,
     /// Where the last few shots finished, so the keeper can shade toward them.
     seen: Vec<axiom::prelude::Vec3>,
+    /// The shootout's luck, drawn from here and nowhere else.
+    rng: DeterministicRng,
+    /// Whether this session faces the average keeper rather than a rolled one.
+    steady: bool,
 }
+
+/// The seed a session uses when none is named.
+pub const DEFAULT_SEED: u64 = 0x0BE4_D17_5EED;
 
 /// How many past shots the keeper's shading averages over.
 pub(super) const SHADE_MEMORY: usize = 4;
 
 impl Session {
-    /// A fresh session, set up for its first attempt.
+    /// A fresh session at the default seed.
     pub fn new(tuning: Tuning) -> Session {
+        Session::seeded(tuning, DEFAULT_SEED)
+    }
+
+    /// A session facing the **average** keeper: no jitter, no guesses, always
+    /// corrects.
+    ///
+    /// This is what the mechanic tests play against, so that "a bent shot beats a
+    /// keeper that read it straight" is a claim about the mechanic rather than
+    /// about a lucky roll. Nothing a player ever meets is steady.
+    pub fn steady(tuning: Tuning) -> Session {
+        Session {
+            steady: true,
+            keeper: Keeper::set(KeeperNerve::steady(&tuning.keeper)),
+            ..Session::seeded(tuning, DEFAULT_SEED)
+        }
+    }
+
+    /// A fresh session on an explicit seed. The same seed is the same shootout.
+    pub fn seeded(tuning: Tuning, seed: u64) -> Session {
         let mouth = GoalMouth::new(tuning.goal.inset);
         let origin = ball_spot(tuning.flight.ball_radius);
         let intent = ShotIntent::default();
@@ -74,14 +103,34 @@ impl Session {
             intent,
             shot,
             ball: Ball::placed(origin),
-            keeper: Keeper::set(),
+            keeper: Keeper::set(KeeperNerve::steady(&tuning.keeper)),
             kick: KickPlan::for_shot(origin, 0.0, &tuning.kick),
             result: None,
             tally: Tally::default(),
             net: None,
             seen: Vec::new(),
+            rng: DeterministicRng::seeded(seed),
+            steady: false,
             mouth,
             tuning,
+        }
+        .with_first_nerve()
+    }
+
+    /// The first attempt gets a rolled keeper too — it is a penalty like any
+    /// other, and starting every shootout against the average keeper would make
+    /// the opening kick the one you could practise against.
+    fn with_first_nerve(mut self) -> Session {
+        let nerve = self.next_nerve();
+        self.keeper = Keeper::set(nerve);
+        self
+    }
+
+    /// The nerve for the next attempt: rolled, unless this session is steady.
+    fn next_nerve(&mut self) -> KeeperNerve {
+        match self.steady {
+            true => KeeperNerve::steady(&self.tuning.keeper),
+            false => KeeperNerve::roll(&mut self.rng, &self.tuning.keeper),
         }
     }
 
@@ -203,7 +252,8 @@ impl Session {
         self.intent = ShotIntent::default();
         self.ball = Ball::placed(origin);
         let (across, up, weight) = self.shade();
-        self.keeper = Keeper::shaded(across, up, weight);
+        let nerve = self.next_nerve();
+        self.keeper = Keeper::shaded(across, up, weight, nerve);
         self.result = None;
         self.net = None;
         self.phase = Phase::Ready;
@@ -259,9 +309,10 @@ mod tests {
         }
     }
 
-    /// Settle into the aiming stage.
+    /// Settle into the aiming stage, against the AVERAGE keeper: these tests are
+    /// about the mechanic, not about the dice.
     fn armed() -> Session {
-        let mut session = Session::new(Tuning::DEFAULT);
+        let mut session = Session::steady(Tuning::DEFAULT);
         while session.phase() != Phase::Aiming {
             session.step(&[]);
         }
@@ -283,7 +334,7 @@ mod tests {
 
     #[test]
     fn the_attempt_is_draw_then_watch() {
-        let mut session = Session::new(Tuning::DEFAULT);
+        let mut session = Session::steady(Tuning::DEFAULT);
         assert_eq!(session.phase(), Phase::Ready);
         let mut settle = 0;
         while session.phase() == Phase::Ready {
