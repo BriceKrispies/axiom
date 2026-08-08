@@ -208,12 +208,10 @@ impl Session {
                 // once, on the way in.
                 self.intent = ShotIntent {
                     target: intent.target,
-                    bend: intent
-                        .bend
-                        .bounded(self.tuning.bend.min_offset, self.tuning.bend.max_offset),
-                    loft: intent
-                        .loft
-                        .bounded(self.tuning.loft.min_offset, self.tuning.loft.max_offset),
+                    shape: intent.shape.bounded(
+                        (self.tuning.bend.min_offset, self.tuning.bend.max_offset),
+                        (self.tuning.loft.min_offset, self.tuning.loft.max_offset),
+                    ),
                     pace: intent.pace,
                 };
                 self.rebuild();
@@ -301,12 +299,7 @@ mod tests {
 
     /// The shot a drawing would have been read as.
     fn shot(h: f32, v: f32, bend: f32, bend_at: f32, loft: f32, loft_at: f32) -> ShotIntent {
-        ShotIntent {
-            target: GoalTarget::new(h, v),
-            bend: BendCurve::through(bend_at, bend, 0.14),
-            loft: BendCurve::through(loft_at, loft, 0.14),
-            ..Default::default()
-        }
+        ShotIntent::curved(GoalTarget::new(h, v), BendCurve::through(bend_at, bend, 0.14), BendCurve::through(loft_at, loft, 0.14), crate::stroke::Pace::STEADY)
     }
 
     /// Settle into the aiming stage, against the AVERAGE keeper: these tests are
@@ -361,8 +354,9 @@ mod tests {
         // A reading far outside anything a kicker could strike.
         session.step(&[PlayCommand::Kick(shot(0.4, 0.5, 40.0, 0.5, 40.0, 0.5))]);
         let tuning = Tuning::DEFAULT;
-        assert!(session.intent().bend.magnitude().abs() <= tuning.bend.max_offset + 1.0e-3);
-        assert!(session.intent().loft.magnitude().abs() <= tuning.loft.max_offset + 1.0e-3);
+        let (bend, loft) = session.intent().shape.reach();
+        assert!(bend.abs() <= tuning.bend.max_offset + 1.0e-3);
+        assert!(loft.abs() <= tuning.loft.max_offset + 1.0e-3);
         // And the path it produced is still legal end to end.
         let points = session.shot().trajectory.points();
         assert_eq!(points[0], session.shot().origin);

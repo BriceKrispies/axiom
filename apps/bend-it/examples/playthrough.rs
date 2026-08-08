@@ -22,12 +22,7 @@ fn sweep() {
         while s.phase() != Phase::Aiming {
             s.step(&[]);
         }
-        s.step(&[PlayCommand::Kick(ShotIntent {
-            target: GoalTarget::new(h, v),
-            bend: BendCurve::through(bend_at, bend, 0.14),
-            loft: BendCurve::through(loft_at, loft, 0.14),
-            ..Default::default()
-        })]);
+        s.step(&[PlayCommand::Kick(ShotIntent::curved(GoalTarget::new(h, v), BendCurve::through(bend_at, bend, 0.14), BendCurve::through(loft_at, loft, 0.14), axiom_bend_it::stroke::Pace::STEADY))]);
         let mut n = 0;
         while s.result().is_none() && n < 900 {
             s.step(&[]);
@@ -100,8 +95,8 @@ fn main() {
         if resolved {
             reported += 1;
             let intent = session.intent();
-            let (bend_at, bend) = intent.bend.peak();
-            let (loft_at, loft) = intent.loft.peak();
+            let (bend, loft) = intent.shape.reach();
+            let (bend_at, loft_at) = intent.shape.peak_at();
             let keeper = session
                 .keeper()
                 .read()

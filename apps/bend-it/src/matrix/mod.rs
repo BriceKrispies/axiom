@@ -45,26 +45,26 @@ pub struct ShotSpec {
 impl ShotSpec {
     /// The shot as the session would receive it from a reading.
     pub fn intent(&self, tuning: &Tuning) -> ShotIntent {
-        ShotIntent {
-            target: GoalTarget::new(self.h, self.v),
-            bend: BendCurve::through(
+        ShotIntent::curved(
+            GoalTarget::new(self.h, self.v),
+            BendCurve::through(
                 self.bend_at,
                 self.bend * tuning.bend.max_offset,
                 tuning.bend.peak_margin,
             ),
-            loft: BendCurve::through(
+            BendCurve::through(
                 self.loft_at,
                 self.loft * tuning.loft.max_offset,
                 tuning.loft.peak_margin,
             ),
-            pace: Pace {
+            Pace {
                 speed: self.pace,
                 // An even hand: the sweep varies how *hard* a shot is hit
                 // separately from how it is shaped, and folding the easing in
                 // here would confound the two.
                 easing: 0.0,
             },
-        }
+        )
     }
 
     /// Where this shot finishes, in metres.

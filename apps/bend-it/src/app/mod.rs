@@ -356,12 +356,7 @@ mod tests {
         use crate::shot::{BendCurve, GoalTarget, ShotIntent};
         ResolvedShot::build(
             game.session().shot().origin,
-            ShotIntent {
-                target: GoalTarget::new(h, v),
-                bend: BendCurve::through(0.55, bend, 0.14),
-                loft: BendCurve::through(0.5, 1.0, 0.14),
-                ..Default::default()
-            },
+            ShotIntent::curved(GoalTarget::new(h, v), BendCurve::through(0.55, bend, 0.14), BendCurve::through(0.5, 1.0, 0.14), crate::stroke::Pace::STEADY),
             game.session().mouth(),
             game.session().tuning(),
         )

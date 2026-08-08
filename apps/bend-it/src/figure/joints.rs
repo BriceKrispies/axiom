@@ -383,12 +383,7 @@ mod tests {
         [(0.0f32, 0.0f32), (0.5, 1.8), (1.0, -1.8)]
             .into_iter()
             .for_each(|(pace, bend)| {
-                let intent = ShotIntent {
-                    target: GoalTarget::new(0.6, 0.7),
-                    bend: BendCurve::through(0.4, bend, 0.14),
-                    loft: BendCurve::through(0.5, 1.2, 0.14),
-                    pace: Pace { speed: pace, easing: 0.0 },
-                };
+                let intent = ShotIntent::curved(GoalTarget::new(0.6, 0.7), BendCurve::through(0.4, bend, 0.14), BendCurve::through(0.5, 1.2, 0.14), Pace { speed: pace, easing: 0.0 });
                 let plan =
                     KickPlan::for_shot(ball, KickDrive::for_shot(&intent, &tuning), &tuning.kick);
                 let release = plan.release_tick(&tuning.kick);

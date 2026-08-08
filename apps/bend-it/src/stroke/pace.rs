@@ -259,7 +259,7 @@ mod tests {
         );
         let pace = Pace::read(&instant, 390.0, &t);
         assert!(pace.speed.is_finite() && (0.0..=1.0).contains(&pace.speed));
-        assert_eq!(Pace::default(), Pace::STEADY);
+        assert_eq!(Pace::default(), crate::stroke::Pace::STEADY);
         assert!(Pace::STEADY.describe().contains("steady"));
         assert!(Pace {
             speed: 0.9,

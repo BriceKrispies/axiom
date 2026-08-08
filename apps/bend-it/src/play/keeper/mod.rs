@@ -239,12 +239,7 @@ mod tests {
         let tuning = Tuning::DEFAULT;
         ResolvedShot::build(
             ball_spot(tuning.flight.ball_radius),
-            ShotIntent {
-                target: GoalTarget::new(h, v),
-                bend: BendCurve::through(bend_at, bend, 0.14),
-                loft: BendCurve::through(loft_at, loft, 0.14),
-                ..Default::default()
-            },
+            ShotIntent::curved(GoalTarget::new(h, v), BendCurve::through(bend_at, bend, 0.14), BendCurve::through(loft_at, loft, 0.14), crate::stroke::Pace::STEADY),
             &GoalMouth::new(tuning.goal.inset),
             &tuning,
         )

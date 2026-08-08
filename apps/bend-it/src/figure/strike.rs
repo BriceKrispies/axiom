@@ -52,10 +52,10 @@ impl KickDrive {
     pub fn for_shot(intent: &ShotIntent, tuning: &Tuning) -> KickDrive {
         let k = &tuning.kick;
         let effort = intent.pace.speed.clamp(0.0, 1.0);
-        let (bend_effort, loft_effort) = intent.effort(tuning);
+        let (_, loft_effort) = intent.effort(tuning);
         // Which way the shot bends decides which side of the ball the boot has to
         // come across, and therefore which side the body plants on.
-        let across = intent.bend.magnitude().signum() * bend_effort;
+        let across = intent.across(tuning);
         KickDrive {
             torque: hip_torque(intent.launch_speed(tuning), k),
             approach: k.base_approach * (1.0 + k.approach_from_pace * effort),
@@ -229,15 +229,10 @@ mod tests {
     use crate::stroke::Pace;
 
     fn shot(pace: f32, bend: f32, loft: f32) -> ShotIntent {
-        ShotIntent {
-            target: GoalTarget::new(0.0, 0.5),
-            bend: BendCurve::through(0.5, bend, 0.14),
-            loft: BendCurve::through(0.5, loft, 0.14),
-            pace: Pace {
+        ShotIntent::curved(GoalTarget::new(0.0, 0.5), BendCurve::through(0.5, bend, 0.14), BendCurve::through(0.5, loft, 0.14), Pace {
                 speed: pace,
                 easing: 0.0,
-            },
-        }
+            })
     }
 
     /// Swing until the ball is struck, and report `(tick, speed at contact)`.

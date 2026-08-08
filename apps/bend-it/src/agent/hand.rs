@@ -61,14 +61,14 @@ impl Striker {
         let tuning = session.tuning();
         ResolvedShot::build(
             session.shot().origin,
-            ShotIntent {
-                target: GoalTarget::new(axes.aim_h, axes.aim_v),
-                bend: BendCurve::through(
+            ShotIntent::curved(
+                GoalTarget::new(axes.aim_h, axes.aim_v),
+                BendCurve::through(
                     axes.break_at,
                     axes.bend * tuning.bend.max_offset,
                     tuning.bend.peak_margin,
                 ),
-                loft: BendCurve::through(
+                BendCurve::through(
                     axes.break_at,
                     axes.loft * tuning.loft.max_offset,
                     tuning.loft.peak_margin,
@@ -76,11 +76,11 @@ impl Striker {
                 // How hard it means to hit it. Only used to shape the trace it
                 // draws — the pace the game finally reads comes from the tempo of
                 // that drawing, exactly as it would from a hand.
-                pace: Pace {
+                Pace {
                     speed: axes.pace,
                     easing: 0.0,
                 },
-            },
+            ),
             session.mouth(),
             tuning,
         )

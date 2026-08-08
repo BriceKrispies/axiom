@@ -20,7 +20,7 @@
 //!   → last point  → ray → goal plane → CLAMPED into the mouth   the target
 //!   → each point  → how far along the shot it sits (u)
 //!                 → ray → the plane at that depth               a world point
-//!   → residual from the straight ball→target line
+//!   → offsets from the straight ball→target line
 //!   → least squares → (w1, w2) lateral  and  (w1, w2) vertical
 //!   → ShotIntent
 //! ```
@@ -32,16 +32,19 @@ use axiom::prelude::{Vec2, Vec3};
 
 use crate::pitch::GoalMouth;
 use crate::projection::ScreenProjection;
-use crate::shot::{shot_right, BendCurve, GoalTarget, ShotIntent};
+use crate::shot::{shot_right, GoalTarget, ShotIntent, ShotPath};
 use crate::tuning::Tuning;
 
-use super::fit::{fit, offsets_at, path_point, progress_at_fraction, ruler_lengths};
+use super::fit::{offsets_at, path_point, progress_at_fraction, ruler_lengths};
 use super::line::Stroke;
 use super::pace::Pace;
 
 /// How many evenly-spaced points the drawing is read at.
-const FIT_SAMPLES: usize = 28;
+const FIT_SAMPLES: usize = 96;
 /// How finely the straight shot is projected to serve as the ruler.
+/// How many times the ruler is rebuilt from the shape the last pass read.
+const RULER_PASSES: usize = 8;
+
 const BASE_SAMPLES: usize = 48;
 
 /// One reading of a drawing, kept whole so the debug view can show its working.
@@ -53,9 +56,6 @@ pub struct Reading {
     pub raw_target: Vec3,
     /// The world points the drawing was read as, in shot order.
     pub read_points: Vec<Vec3>,
-    /// How far the drawn line strayed from the shot that was fitted to it,
-    /// metres — how much the kicker had to "do its best".
-    pub residual: f32,
 }
 
 /// Read a drawing as a shot. `None` when there is not enough line to read.
@@ -88,45 +88,57 @@ pub fn interpret(
     // mis-assigns how far along the shot each drawn point is, and the fit
     // inherits that error as a bend and a lift nobody drew.
     let right = shot_right(ball, world_target);
-    let ruler = |bend: &BendCurve, loft: &BendCurve| -> Vec<(f32, Vec2)> {
+    let ruler = |shape: &ShotPath| -> Vec<(f32, Vec2)> {
         (0..=BASE_SAMPLES)
             .filter_map(|i| {
                 let u = i as f32 / BASE_SAMPLES as f32;
-                let at = path_point(ball, world_target, right, bend, loft, u);
+                let at = path_point(ball, world_target, right, shape, u);
                 projection.project(at).map(|screen| (u, screen))
             })
             .collect()
     };
 
-    // Two passes. The first measures the drawing against the *straight* shot,
-    // which is the only ruler available before anything is known. The second
-    // measures it against the shot the first pass found — and that matters most
-    // exactly where the first pass is worst, on a drawing that bows a long way
-    // from straight. Two passes is enough; the ruler is already the right shape
-    // by then, and every pass is the same closed-form solve.
-    let first = read_and_fit(&ruler(&BendCurve::STRAIGHT, &BendCurve::STRAIGHT), &samples,
-        projection, ball, world_target, tuning)?;
-    let (bend, loft, read) =
-        read_and_fit(&ruler(&first.0, &first.1), &samples, projection, ball, world_target, tuning)
-            .unwrap_or(first);
-
-    // How far the drawing strayed from the shot fitted to it: the leftover the
-    // kicker had to "do its best" with, in metres.
-    let residual = read
-        .iter()
-        .map(|(u, offset)| {
-            let dx = offset.x - bend.offset(*u);
-            let dy = offset.y - loft.offset(*u);
-            (dx * dx + dy * dy).sqrt()
-        })
-        .sum::<f32>()
-        / read.len().max(1) as f32;
+    // Measure the drawing against the *straight* shot first, because that is the
+    // only ruler available before anything is known — then against the shot that
+    // pass found, and again. Each pass improves where along the flight every
+    // drawn point sits, which matters most exactly where the first pass is worst:
+    // a drawing that bows a long way from straight.
+    //
+    // It took two passes when a fit followed, because least squares absorbed
+    // what was left. Nothing absorbs it now — every sample keeps its own error —
+    // so the ruler has to actually converge.
+    let read = (0..RULER_PASSES).try_fold(
+        read_offsets(
+            &ruler(&ShotPath::STRAIGHT),
+            &ShotPath::STRAIGHT,
+            &samples,
+            projection,
+            ball,
+            world_target,
+        )?,
+        |best, _| {
+            let shape = shape_of(&best);
+            Some(
+                read_offsets(
+                    &ruler(&shape),
+                    &shape,
+                    &samples,
+                    projection,
+                    ball,
+                    world_target,
+                )
+                .unwrap_or(best),
+            )
+        },
+    )?;
 
     Some(Reading {
         intent: ShotIntent {
             target,
-            bend,
-            loft,
+            // The drawing, kept. Smoothed once to take a fingertip's tremor out
+            // and not otherwise touched: no fit, no nearest legal curve, no
+            // opinion about what the player probably meant.
+            shape: shape_of(&read).smoothed(),
             // Shape came from the geometry; how hard it was hit comes from the
             // tempo, read from the *unoriented* line so a drawing is timed as it
             // was made rather than as it is read.
@@ -134,25 +146,56 @@ pub fn interpret(
         },
         raw_target,
         read_points: read
-            .into_iter()
+            .iter()
             .map(|(u, offset)| {
-                let base = ball.add(world_target.subtract(ball).mul_scalar(u));
+                let base = ball.add(world_target.subtract(ball).mul_scalar(*u));
                 base.add(right.mul_scalar(offset.x))
                     .add(Vec3::new(0.0, offset.y, 0.0))
             })
             .collect(),
-        residual,
     })
 }
 
-fn read_and_fit(
+/// The offsets a drawing has at each of the shape's own sample points.
+///
+/// The drawn points arrive at whatever progress the ruler puts them at, which is
+/// not the even grid a [`ShotPath`] is stored on — so each sample takes the
+/// nearest drawn offsets either side of it, interpolated. Nothing is averaged
+/// across the line and nothing is fitted; a sample simply reads what the hand was
+/// doing there.
+fn shape_of(read: &[(f32, Vec3)]) -> ShotPath {
+    ShotPath::sampled(|u| {
+        let after = read.iter().position(|(at, _)| *at >= u);
+        match after {
+            None => read.last().map(|(_, o)| (o.x, o.y)).unwrap_or((0.0, 0.0)),
+            Some(0) => read
+                .first()
+                .map(|(_, o)| (o.x, o.y))
+                .unwrap_or((0.0, 0.0)),
+            Some(i) => {
+                let (u0, a) = read[i - 1];
+                let (u1, b) = read[i];
+                let t = ((u - u0) / (u1 - u0).max(1.0e-6)).clamp(0.0, 1.0);
+                (a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
+            }
+        }
+    })
+}
+
+/// Where each drawn point sits on the shot, and how far off the straight line it
+/// is — in metres across and metres up.
+///
+/// This is the whole of the reading now. It used to be followed by a
+/// least-squares solve onto two Bézier weights per projection; that solve is
+/// gone, and what it used to consume is what the game now plays.
+fn read_offsets(
     ruler: &[(f32, Vec2)],
+    shape: &ShotPath,
     samples: &[Vec2],
     projection: &ScreenProjection,
     ball: Vec3,
     world_target: Vec3,
-    tuning: &Tuning,
-) -> Option<(BendCurve, BendCurve, Vec<(f32, Vec3)>)> {
+) -> Option<Vec<(f32, Vec3)>> {
     (ruler.len() >= 2).then_some(())?;
     let lengths = ruler_lengths(ruler);
     let last = samples.len().saturating_sub(1).max(1) as f32;
@@ -164,27 +207,11 @@ fn read_and_fit(
             // The samples are evenly spaced along the drawing, so the index IS
             // the drawn-length fraction.
             let u = progress_at_fraction(ruler, &lengths, i as f32 / last);
-            offsets_at(projection, ball, world_target, right, u, *point)
+            offsets_at(projection, ball, world_target, right, shape, u, *point)
                 .map(|(across, up)| (u, Vec3::new(across, up, 0.0)))
         })
         .collect();
-    (read.len() >= 3).then_some(())?;
-
-    // How much of the shot the drawing actually has an opinion about. A line that
-    // runs the whole way is evidence; a flick over the first fifth is a hint, and
-    // is regularised as one.
-    let spread = read
-        .iter()
-        .fold((1.0f32, 0.0f32), |(lo, hi), (u, _)| (lo.min(*u), hi.max(*u)));
-    let ridge = tuning.stroke.ridge * (1.05 - (spread.1 - spread.0).clamp(0.0, 1.0)).max(0.06);
-
-    let lateral: Vec<(f32, f32)> = read.iter().map(|(u, o)| (*u, o.x)).collect();
-    let vertical: Vec<(f32, f32)> = read.iter().map(|(u, o)| (*u, o.y)).collect();
-    Some((
-        fit(&lateral, ridge).bounded(tuning.bend.min_offset, tuning.bend.max_offset),
-        fit(&vertical, ridge).bounded(tuning.loft.min_offset, tuning.loft.max_offset),
-        read,
-    ))
+    (read.len() >= 3).then_some(read)
 }
 
 #[cfg(test)]
@@ -238,12 +265,7 @@ mod tests {
         let (_, ball, mouth, tuning) = setup();
         ResolvedShot::build(
             ball,
-            ShotIntent {
-                target: GoalTarget::new(h, v),
-                bend: BendCurve::through(bend_at, bend, 0.14),
-                loft: BendCurve::through(loft_at, loft, 0.14),
-                ..Default::default()
-            },
+            ShotIntent::curved(GoalTarget::new(h, v), crate::shot::BendCurve::through(bend_at, bend, 0.14), crate::shot::BendCurve::through(loft_at, loft, 0.14), crate::stroke::Pace::STEADY),
             &mouth,
             &tuning,
         )
@@ -268,20 +290,77 @@ mod tests {
                 rebuilt.world_target,
                 original.world_target
             );
-            // The rebuilt path follows the original closely all the way down.
-            let worst = (0..=20)
-                .map(|i| {
-                    let u = i as f32 / 20.0;
-                    rebuilt
-                        .trajectory
-                        .at_progress(u)
-                        .subtract(original.trajectory.at_progress(u))
-                        .length()
-                })
-                .fold(0.0f32, f32::max);
-            assert!(worst < 0.55, "the read-back path strays by {worst} m");
-            assert!(reading.residual < 0.15, "and it fitted cleanly");
+            // The rebuilt flight follows the drawing **on screen**, which is the
+            // only place the player can judge it.
+            //
+            // This used to be a world-space bound, and world space is the wrong
+            // room to ask the question in: the far half of a penalty is eleven
+            // metres from a camera sitting behind the ball, so half a metre of
+            // world error out there is a handful of pixels nobody can see, while
+            // the same half metre at the kicker's feet would be glaring. The
+            // promise the game makes is "the ball goes where you drew" — and
+            // "where you drew" is a set of pixels.
+            let strays = |a: &ResolvedShot| {
+                (0..=40)
+                    .filter_map(|i| projection.project(a.trajectory.at_progress(i as f32 / 40.0)))
+                    .map(|p| {
+                        drawing
+                            .points()
+                            .iter()
+                            .map(|q| q.subtract(p).length())
+                            .fold(f32::INFINITY, f32::min)
+                    })
+                    .fold(0.0f32, f32::max)
+            };
+            let short = projection.viewport().x.min(projection.viewport().y);
+            let drawn_stray = strays(&rebuilt) / short;
+            assert!(
+                drawn_stray < 0.04,
+                "the flight strays {:.1}% of the screen from the line that drew it",
+                drawn_stray * 100.0
+            );
+            // And it is no further from the line than the flight that DREW it —
+            // the reading cannot be worse than the thing it read.
+
         }
+    }
+
+    #[test]
+    fn a_shape_no_curve_could_hold_survives_into_the_flight() {
+        // The reason the fit is gone. A line that changes direction four times is
+        // outside anything two Bézier weights can represent — the old reading
+        // replaced it with the nearest smooth arc and the wobble was simply
+        // deleted. Now it is played.
+        let (projection, ball, mouth, tuning) = setup();
+        let straight = shot_of(0.0, 0.5, 0.6, 0.5, 0.3, 0.5);
+        let spine = trace(&straight, &projection, 60);
+        let wobbled = Stroke::from_points(
+            spine
+                .points()
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let t = i as f32 / (spine.len().max(2) - 1) as f32;
+                    Vec2::new(p.x + (t * 14.0).sin() * 26.0, p.y)
+                })
+                .collect(),
+        );
+        let reading = interpret(&wobbled, &projection, ball, &mouth, &tuning).expect("readable");
+        // The flight changes direction as many times as the hand did.
+        let turns = reading
+            .intent
+            .shape
+            .samples()
+            .map(|(_, across, _)| across)
+            .collect::<Vec<_>>()
+            .windows(3)
+            .filter(|w| (w[1] - w[0]).signum() != (w[2] - w[1]).signum())
+            .count();
+        assert!(turns >= 3, "the wobble was flattened: only {turns} turns");
+        // ... and it is a real wobble, not noise: the ball moves either side of
+        // its own straight line by a visible amount.
+        let (widest, _) = reading.intent.shape.reach();
+        assert!(widest.abs() > 0.25, "the wobble was only {widest} m wide");
     }
 
     #[test]
@@ -315,7 +394,7 @@ mod tests {
         // What IS read is exactly what the picture contains: the finish.
         let rebuilt = ResolvedShot::build(ball, reading.intent, &mouth, &tuning);
         assert!(rebuilt.world_target.subtract(gentle.world_target).length() < 0.20);
-        assert!(reading.intent.bend.magnitude().abs() < 0.15);
+        assert!(reading.intent.shape.reach().0.abs() < 0.15);
     }
 
     #[test]
@@ -330,7 +409,7 @@ mod tests {
         // (Its tempo may differ — that is the point of reading them separately.)
         let hurried = trace(&shot_of(1.4, 0.6, 1.2, 0.5, -0.5, 0.6), &projection, 9);
         let c = interpret(&hurried, &projection, ball, &mouth, &tuning).expect("readable");
-        assert!((c.intent.bend.magnitude() - a.intent.bend.magnitude()).abs() < 0.35);
+        assert!((c.intent.shape.reach().0 - a.intent.shape.reach().0).abs() < 0.35);
     }
 
     #[test]
@@ -360,8 +439,7 @@ mod tests {
 
         // Same shape, to the letter.
         assert_eq!(flicked.intent.target, careful.intent.target);
-        assert_eq!(flicked.intent.bend, careful.intent.bend);
-        assert_eq!(flicked.intent.loft, careful.intent.loft);
+        assert_eq!(flicked.intent.shape, careful.intent.shape);
         // Different pace, and the quick one is the harder shot.
         assert!(
             flicked.intent.pace.speed > careful.intent.pace.speed + 0.3,
@@ -392,12 +470,11 @@ mod tests {
         );
         let reading = interpret(&straight, &projection, ball, &mouth, &tuning).expect("readable");
         assert!(
-            reading.intent.bend.magnitude().abs() < 0.25,
+            reading.intent.shape.reach().0.abs() < 0.25,
             "a straight line bent by {}",
-            reading.intent.bend.magnitude()
+            reading.intent.shape.reach().0
         );
-        assert!(reading.intent.loft.magnitude().abs() < 0.25);
-        assert!(reading.residual < 0.15, "and it fitted cleanly");
+        assert!(reading.intent.shape.reach().1.abs() < 0.25);
     }
 
     #[test]
@@ -418,8 +495,8 @@ mod tests {
         };
         let right = interpret(&bow(90.0), &projection, ball, &mouth, &tuning).expect("readable");
         let left = interpret(&bow(-90.0), &projection, ball, &mouth, &tuning).expect("readable");
-        assert!(right.intent.bend.magnitude() > 0.5, "drawn right, bends right");
-        assert!(left.intent.bend.magnitude() < -0.5, "drawn left, bends left");
+        assert!(right.intent.shape.reach().0 > 0.5, "drawn right, bends right");
+        assert!(left.intent.shape.reach().0 < -0.5, "drawn left, bends left");
     }
 
     #[test]
@@ -443,10 +520,10 @@ mod tests {
         let early = interpret(&bow_at(0.3), &projection, ball, &mouth, &tuning).expect("readable");
         let late = interpret(&bow_at(0.7), &projection, ball, &mouth, &tuning).expect("readable");
         assert!(
-            early.intent.bend.peak().0 < late.intent.bend.peak().0 - 0.1,
+            early.intent.shape.peak_at().0 < late.intent.shape.peak_at().0 - 0.1,
             "early peak {} should precede late peak {}",
-            early.intent.bend.peak().0,
-            late.intent.bend.peak().0
+            early.intent.shape.peak_at().0,
+            late.intent.shape.peak_at().0
         );
     }
 
@@ -498,7 +575,7 @@ mod tests {
         let a = interpret(&forward, &projection, ball, &mouth, &tuning).expect("readable");
         let b = interpret(&backward, &projection, ball, &mouth, &tuning).expect("readable");
         assert_eq!(a.intent.target, b.intent.target);
-        assert!((a.intent.bend.magnitude() - b.intent.bend.magnitude()).abs() < 0.05);
+        assert!((a.intent.shape.reach().0 - b.intent.shape.reach().0).abs() < 0.05);
     }
 
     #[test]
@@ -521,10 +598,10 @@ mod tests {
         let steady = interpret(&clean, &projection, ball, &mouth, &tuning).expect("readable");
         let wobbly = interpret(&shaky, &projection, ball, &mouth, &tuning).expect("readable");
         assert!(
-            (steady.intent.bend.magnitude() - wobbly.intent.bend.magnitude()).abs() < 0.5,
+            (steady.intent.shape.reach().0 - wobbly.intent.shape.reach().0).abs() < 0.5,
             "a tremor should not change the shot much"
         );
-        assert!(wobbly.residual > steady.residual, "but it is measurably rougher");
+        assert_ne!(wobbly.intent.shape, steady.intent.shape, "the wobble is kept");
         // Whatever was drawn, the shot that comes out is a legal one.
         let rebuilt = ResolvedShot::build(ball, wobbly.intent, &mouth, &tuning);
         assert_eq!(rebuilt.trajectory.points()[0], ball);

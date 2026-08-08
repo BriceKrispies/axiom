@@ -38,19 +38,27 @@ Every arrow is one-way, and three are enforced by `tests/architecture.rs`:
 
 ## The mechanic, in four ideas
 
-### 1. Reading a drawing is a fit, not a parse
+### 1. The drawing is kept, not fitted
 
-The line is projected back into the world and **least-squares fitted** onto the
-space of legal shots — the two Bézier weights per projection that `shot/curve.rs`
-defines. The model is linear in those weights, so the fit is a 2×2
-normal-equation solve in closed form: no search, no iteration, no tolerance, and
-the same pixels always produce the same kick.
+The line is projected back into the world and **kept**: a flight's shape is the
+`(across, up)` offsets it takes from the straight line ball→target, sampled
+evenly along the shot (`shot/path.rs`). Draw a wobble and the ball wobbles. Draw
+a late dip and it dips late, not at the nearest place a cubic could put a dip.
 
-Nothing is ever rejected. A clean banana gives a banana; a shaky line gives the
-smooth shot nearest to it; a scribble gives the best single shot that scribble is
-evidence for. That is what "the kicker does its best" means, precisely.
+It used to be a **fit** — a least-squares solve for the two Bézier weights per
+projection nearest to what the hand did — and that was the single biggest thing
+wrong with the game. Not because it was inaccurate; because it was a *translator*.
+The player's model is "I drew that line"; the game's model was "you drew evidence
+for a shot". Every bit of character in a hand-drawn curve was averaged into the
+nearest smooth thing, and the player's sense of having *done* it leaked out
+through the gap. A game about drawing a shot has nothing else to sell.
 
-Two details carry most of the accuracy, and both exist because the camera looks
+`BendCurve` survived the change as a **generator**, not a filter: the shot matrix
+has to sweep a parameter space, the agent has to author without a screen, and a
+test has to be able to say "one that breaks late". None of them sit between a
+player and the ball any more.
+
+Three details carry the accuracy, and all three exist because the camera looks
 almost straight *down* the shot:
 
 * **Progress comes from arc length, not from nearest approach.** On screen,
@@ -58,9 +66,21 @@ almost straight *down* the shot:
   perpendicular-foot ruler reads every bit of lift as distance and the height of
   an arc vanishes — silently, with a perfect residual.
 * **Offsets are solved in a local screen basis, never unprojected.** One metre
-  across and one metre up are projected *forward* at each point of the flight,
-  and the drawn point's offset is solved in that 2×2 basis. No depth is ever
-  guessed, so a small depth error cannot masquerade as a bend.
+  across and one metre up are projected *forward* at each point of the flight and
+  the drawn point's offset is solved in that 2×2 basis. No depth is ever guessed,
+  so a small depth error cannot masquerade as a bend.
+* **The basis is anchored where the flight is, and the ruler is rebuilt from what
+  the last pass read.** Both are linearisations, and both used to be anchored on
+  the straight line — fine when a least-squares fit followed, because it absorbed
+  what was left. Nothing absorbs it now. So the reading iterates: eight passes,
+  each re-anchoring on the shape the last one found.
+
+The bar it is held to is **screen-space**, because that is the only room the
+player can judge it in: trace a known flight, read the drawing back, and the
+rebuilt flight must follow the drawn pixels to within 4% of the short edge —
+about ten pixels on a phone. A world-space bound would be the wrong question, as
+half a metre eleven metres away is invisible and half a metre at the kicker's
+feet is glaring.
 
 One thing is genuinely unreadable, and is recorded as a test rather than left as
 a mystery: a *small* arc on a shot aimed dead centre. The camera sits on that
@@ -308,7 +328,7 @@ footballer and procedural field:
 ## Running it
 
 ```sh
-cargo test -p axiom-bend-it                                  # 205 native tests
+cargo test -p axiom-bend-it                                  # 215 native tests
 uv run scripts/localhost_servers.py start-app bend-it        # play it
 cargo run -p axiom-bend-it --example playthrough -- 12 1     # the agent plays
 cargo run -p axiom-bend-it --example playthrough -- sweep    # balance sweep

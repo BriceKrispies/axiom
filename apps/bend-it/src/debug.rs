@@ -105,8 +105,8 @@ pub fn markers(session: &Session, reading: Option<&Reading>, out: &mut Vec<Debug
 pub fn rows(session: &Session, reading: Option<&Reading>) -> Vec<(String, String)> {
     let intent = session.intent();
     let (bend_effort, loft_effort) = intent.effort(session.tuning());
-    let (bend_at, bend_size) = intent.bend.peak();
-    let (loft_at, loft_size) = intent.loft.peak();
+    let (bend_size, loft_size) = intent.shape.reach();
+    let (bend_at, loft_at) = intent.shape.peak_at();
     let shot = session.shot();
     let mut rows = vec![
         (
@@ -153,9 +153,8 @@ pub fn rows(session: &Session, reading: Option<&Reading>) -> Vec<(String, String
         reading
             .map(|r| {
                 format!(
-                    "{} points read, fit off by {:.2} m, raw finish ({:+.2}, {:.2})",
+                    "{} points kept, raw finish ({:+.2}, {:.2})",
                     r.read_points.len(),
-                    r.residual,
                     r.raw_target.x,
                     r.raw_target.y
                 )
@@ -220,12 +219,7 @@ mod tests {
         while s.phase() != Phase::Aiming {
             s.step(&[]);
         }
-        s.step(&[PlayCommand::Kick(ShotIntent {
-            target: GoalTarget::new(-0.6, 0.7),
-            bend: BendCurve::through(0.6, 1.6, 0.14),
-            loft: BendCurve::through(0.5, 1.0, 0.14),
-            ..Default::default()
-        })]);
+        s.step(&[PlayCommand::Kick(ShotIntent::curved(GoalTarget::new(-0.6, 0.7), BendCurve::through(0.6, 1.6, 0.14), BendCurve::through(0.5, 1.0, 0.14), crate::stroke::Pace::STEADY))]);
         s
     }
 

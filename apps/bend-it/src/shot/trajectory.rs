@@ -6,9 +6,12 @@
 //!
 //! ```text
 //! forward(u) = lerp(ball, target, u)              the shot's straight spine
-//! lateral(u) = bend.offset(u)  along the right axis     (the top-down editor)
-//! height(u)  = loft.offset(u)  along up                 (the side editor)
+//! lateral(u) = shape.across(u)  along the right axis
+//! height(u)  = shape.up(u)      along up
 //! ```
+//!
+//! where the shape is the one the player drew (`shot::path`), sampled rather than
+//! fitted — so the flight is the line, not the nearest smooth thing to it.
 //!
 //! summed into one `worldPosition(u)`, then **re-sampled by arc length** so the
 //! stored points are evenly spaced along the path rather than evenly spaced in
@@ -65,8 +68,8 @@ fn raw_point(origin: Vec3, target: Vec3, right: Vec3, intent: &ShotIntent, floor
     move |u| {
         let u = u.clamp(0.0, 1.0);
         let base = origin.add(target.subtract(origin).mul_scalar(u));
-        let lateral = right.mul_scalar(intent.bend.offset(u));
-        let height = intent.loft.offset(u);
+        let (across, height) = intent.shape.at(u);
+        let lateral = right.mul_scalar(across);
         Vec3::new(
             base.x + lateral.x,
             (base.y + height).max(floor),
@@ -86,15 +89,14 @@ impl Trajectory {
         // never a shape the player can actually reach — a dip stays a smooth dip
         // rather than developing a flat spot along the ground.
         let base_height = |u: f32| origin.y + (target.y - origin.y) * u;
-        let safe_loft = intent
-            .loft
-            .bounded(tuning.loft.min_offset, tuning.loft.max_offset)
-            .floored(|u| (base_height(u) - flight.ball_radius).max(0.0));
         let bounded = ShotIntent {
-            bend: intent
-                .bend
-                .bounded(tuning.bend.min_offset, tuning.bend.max_offset),
-            loft: safe_loft,
+            shape: intent
+                .shape
+                .bounded(
+                    (tuning.bend.min_offset, tuning.bend.max_offset),
+                    (tuning.loft.min_offset, tuning.loft.max_offset),
+                )
+                .floored(|u| (base_height(u) - flight.ball_radius).max(0.0)),
             ..*intent
         };
         let eval = raw_point(origin, target, right, &bounded, flight.ball_radius);
@@ -237,12 +239,7 @@ mod tests {
 
     fn resolved(bend: f32, loft: f32, target: GoalTarget) -> ResolvedShot {
         let tuning = Tuning::DEFAULT;
-        let intent = ShotIntent {
-            target,
-            bend: BendCurve::through(0.5, bend, 0.14),
-            loft: BendCurve::through(0.5, loft, 0.14),
-            ..Default::default()
-        };
+        let intent = ShotIntent::curved(target, BendCurve::through(0.5, bend, 0.14), BendCurve::through(0.5, loft, 0.14), crate::stroke::Pace::STEADY);
         ResolvedShot::build(
             ball_spot(tuning.flight.ball_radius),
             intent,
@@ -372,12 +369,7 @@ mod tests {
         let tuning = Tuning::DEFAULT;
         ResolvedShot::build(
             ball_spot(tuning.flight.ball_radius),
-            ShotIntent {
-                target: GoalTarget::new(0.2, 0.5),
-                bend: BendCurve::through(0.5, 1.2, 0.14),
-                loft: BendCurve::through(0.5, 1.0, 0.14),
-                pace,
-            },
+            ShotIntent::curved(GoalTarget::new(0.2, 0.5), BendCurve::through(0.5, 1.2, 0.14), BendCurve::through(0.5, 1.0, 0.14), pace),
             &GoalMouth::new(tuning.goal.inset),
             &tuning,
         )

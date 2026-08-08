@@ -6,7 +6,7 @@
 //! writes one of these, the trajectory layer reads it, and neither can reach the
 //! other. Replaying a shot is replaying four numbers and a target.
 
-use crate::shot::curve::BendCurve;
+use crate::shot::path::ShotPath;
 use crate::stroke::Pace;
 use crate::tuning::Tuning;
 
@@ -40,10 +40,9 @@ impl Default for GoalTarget {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShotIntent {
     pub target: GoalTarget,
-    /// The top-down projection: lateral offset, in metres, over shot progress.
-    pub bend: BendCurve,
-    /// The side projection: height offset, in metres, over shot progress.
-    pub loft: BendCurve,
+    /// The shape of the flight: how far it runs off the straight line ball →
+    /// point, across and up, sampled along the shot. Whatever was drawn.
+    pub shape: ShotPath,
     /// How hard it was hit — read from the *tempo* of the drawing rather than
     /// from its shape, so the same line drawn quickly and slowly is the same shot
     /// struck with different conviction.
@@ -51,6 +50,25 @@ pub struct ShotIntent {
 }
 
 impl ShotIntent {
+    /// A shot authored from a pair of curves rather than from a hand.
+    ///
+    /// The way everything without fingers describes a shape: the shot matrix
+    /// sweeping its parameter space, the agent picking a corner, a test saying
+    /// "one that breaks late". The curves are a *generator* here and nothing
+    /// more — no drawing is ever put through them.
+    pub fn curved(
+        target: GoalTarget,
+        bend: crate::shot::curve::BendCurve,
+        loft: crate::shot::curve::BendCurve,
+        pace: Pace,
+    ) -> ShotIntent {
+        ShotIntent {
+            target,
+            shape: ShotPath::from_curves(bend, loft),
+            pace,
+        }
+    }
+
     /// The shot the editor opens on: aimed where the player last touched, dead
     /// straight, with the small natural arc a struck ball has anyway. It is
     /// deliberately a *plausible penalty* rather than a flat line — the player's
@@ -58,8 +76,10 @@ impl ShotIntent {
     pub fn opening(target: GoalTarget) -> Self {
         ShotIntent {
             target,
-            bend: BendCurve::STRAIGHT,
-            loft: BendCurve::through(0.52, 0.55, 0.14),
+            shape: ShotPath::from_curves(
+                crate::shot::curve::BendCurve::STRAIGHT,
+                crate::shot::curve::BendCurve::through(0.52, 0.55, 0.14),
+            ),
             pace: Pace::STEADY,
         }
     }
@@ -67,9 +87,18 @@ impl ShotIntent {
     /// How hard the shot has been sculpted, `0..1` per axis. Flight time is read
     /// off these, which is what replaces a power meter.
     pub fn effort(&self, tuning: &Tuning) -> (f32, f32) {
-        let bend = (self.bend.magnitude().abs() / tuning.bend.max_offset.max(1.0e-3)).min(1.0);
-        let loft = (self.loft.magnitude().abs() / tuning.loft.max_offset.max(1.0e-3)).min(1.0);
-        (bend, loft)
+        let (bend, loft) = self.shape.reach();
+        (
+            (bend.abs() / tuning.bend.max_offset.max(1.0e-3)).min(1.0),
+            (loft.abs() / tuning.loft.max_offset.max(1.0e-3)).min(1.0),
+        )
+    }
+
+    /// Which way the shot bends, and how hard — signed, because it decides which
+    /// side of the ball the boot has to come across.
+    pub fn across(&self, tuning: &Tuning) -> f32 {
+        let (bend, _) = self.shape.reach();
+        bend.signum() * self.effort(tuning).0
     }
 
     /// How fast the ball leaves the boot, metres per second.
@@ -105,6 +134,7 @@ impl Default for ShotIntent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shot::curve::BendCurve;
 
     #[test]
     fn a_target_is_always_inside_the_normalized_mouth() {
@@ -118,19 +148,22 @@ mod tests {
     #[test]
     fn the_opening_shot_is_straight_with_a_natural_arc() {
         let intent = ShotIntent::opening(GoalTarget::new(0.5, 0.5));
-        assert_eq!(intent.bend, BendCurve::STRAIGHT);
-        assert!(intent.loft.magnitude() > 0.3);
+        let (bend, lift) = intent.shape.reach();
+        assert_eq!(bend, 0.0, "it does not bend");
+        assert!(lift > 0.3, "but it has the arc a struck ball has anyway");
         assert_eq!(ShotIntent::default().target, GoalTarget::default());
     }
 
     #[test]
     fn tempo_sets_how_hard_it_is_hit_and_shape_takes_some_back() {
         let tuning = Tuning::DEFAULT;
-        let with = |bend: f32, loft: f32, speed: f32| ShotIntent {
-            target: GoalTarget::new(0.0, 0.2),
-            bend: BendCurve::through(0.5, bend, 0.14),
-            loft: BendCurve::through(0.5, loft, 0.14),
-            pace: crate::stroke::Pace { speed, easing: 0.0 },
+        let with = |bend: f32, loft: f32, speed: f32| {
+            ShotIntent::curved(
+                GoalTarget::new(0.0, 0.2),
+                BendCurve::through(0.5, bend, 0.14),
+                BendCurve::through(0.5, loft, 0.14),
+                crate::stroke::Pace { speed, easing: 0.0 },
+            )
         };
         let flat = with(0.0, 0.0, 1.0);
         let curled = with(tuning.bend.max_offset, tuning.loft.max_offset, 1.0);
@@ -156,9 +189,11 @@ mod tests {
             with(0.0, 0.0, 0.0).launch_speed(&tuning),
             tuning.flight.slow_launch
         );
+        // Full effort, to within where the samples fall: a sampled shape finds
+        // its extreme at a sample rather than exactly at the curve's peak.
         let (bend, loft) = curled.effort(&tuning);
-        assert!((bend - 1.0).abs() < 1.0e-3);
-        assert!((loft - 1.0).abs() < 1.0e-3);
+        assert!((bend - 1.0).abs() < 0.02, "bend effort {bend}");
+        assert!((loft - 1.0).abs() < 0.02, "loft effort {loft}");
         assert_eq!(flat.effort(&tuning), (0.0, 0.0));
     }
 }

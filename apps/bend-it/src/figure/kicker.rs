@@ -290,15 +290,10 @@ mod tests {
     fn drive(pace: f32, bend: f32, loft: f32) -> KickDrive {
         let tuning = Tuning::DEFAULT;
         KickDrive::for_shot(
-            &ShotIntent {
-                target: GoalTarget::new(0.0, 0.5),
-                bend: BendCurve::through(0.5, bend, 0.14),
-                loft: BendCurve::through(0.5, loft, 0.14),
-                pace: Pace {
+            &ShotIntent::curved(GoalTarget::new(0.0, 0.5), BendCurve::through(0.5, bend, 0.14), BendCurve::through(0.5, loft, 0.14), Pace {
                     speed: pace,
                     easing: 0.0,
-                },
-            },
+                }),
             &tuning,
         )
     }
@@ -369,12 +364,7 @@ mod tests {
         let tuning = Tuning::DEFAULT;
         let ball = ball_spot(tuning.flight.ball_radius);
         for speed in [0.0f32, 0.5, 1.0] {
-            let intent = ShotIntent {
-                target: GoalTarget::new(0.2, 0.5),
-                bend: BendCurve::through(0.5, 0.8, 0.14),
-                loft: BendCurve::through(0.5, 0.6, 0.14),
-                pace: Pace { speed, easing: 0.0 },
-            };
+            let intent = ShotIntent::curved(GoalTarget::new(0.2, 0.5), BendCurve::through(0.5, 0.8, 0.14), BendCurve::through(0.5, 0.6, 0.14), Pace { speed, easing: 0.0 });
             let plan = KickPlan::for_shot(ball, KickDrive::for_shot(&intent, &tuning), &tuning.kick);
             let contact = plan.contact_angle();
             let mut swing = Swing::cocked(&tuning.kick);
