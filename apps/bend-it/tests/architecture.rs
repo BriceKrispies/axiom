@@ -258,13 +258,13 @@ fn source_files_stay_narrowly_owned() {
 }
 
 #[test]
-fn gesture_code_can_only_speak_in_commands() {
-    // The seam the whole design rests on: the editor may write an EditorCommand
-    // and nothing else. If it ever learns to build a trajectory, take a shot, or
-    // move the ball itself, the promise that the ball is never secretly steered
-    // stops being structural and becomes a habit.
+fn the_drawing_layer_can_only_produce_a_shot_intent() {
+    // The seam the whole design rests on: reading a drawing yields a ShotIntent
+    // and nothing else. If it ever learns to build a trajectory, move the ball,
+    // or step the session, the promise that the ball goes where you drew stops
+    // being structural and becomes a habit.
     let mut files = Vec::new();
-    collect_rs(&app_root().join("src").join("editor"), &mut files);
+    collect_rs(&app_root().join("src").join("stroke"), &mut files);
     let mut leaks = Vec::new();
     for path in files {
         let text = strip(&read(&path));
@@ -277,9 +277,29 @@ fn gesture_code_can_only_speak_in_commands() {
     }
     assert!(
         leaks.is_empty(),
-        "the editor may only author commands:\n{}",
+        "the drawing layer may only produce a ShotIntent:\n{}",
         leaks.join("\n")
     );
+}
+
+#[test]
+fn the_same_drawing_is_read_the_same_way_every_time() {
+    // "The same swipe always produces the same kick" is a promise about the
+    // reading, so nothing in it may consult a clock, a random source, or an
+    // iteration order that is not its own.
+    let mut files = Vec::new();
+    collect_rs(&app_root().join("src").join("stroke"), &mut files);
+    for path in files {
+        let text = strip(&read(&path));
+        for needle in ["HashMap", "HashSet", "rand", "Instant", "SystemTime"] {
+            assert!(
+                !text.contains(needle),
+                "{}: the reading must be deterministic, found `{}`",
+                path.display(),
+                needle
+            );
+        }
+    }
 }
 
 #[test]

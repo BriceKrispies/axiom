@@ -170,6 +170,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-bend-it"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-agent",
+ "axiom-debug-overlay",
+ "axiom-figure",
+ "axiom-host",
+ "axiom-input",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-runtime",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-biome"
 version = "0.1.0"
 dependencies = [
@@ -290,6 +309,7 @@ name = "axiom-end-zone"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-agent",
  "axiom-debug-overlay",
  "axiom-figure",
  "axiom-host",

@@ -1,27 +1,21 @@
 //! The explicit gameplay state, and the commands that move it.
 //!
-//! One enum, not a drawer of booleans. Everything that varies with where the
-//! player is in an attempt — which prompt shows, whether the aim overlay is
-//! live, which projection the sculpt panel is editing, whether the preview is
-//! drawn, whether the ball moves — is a function of this value, so there is no
-//! state to get out of step with itself.
+//! One enum, not a drawer of booleans. It is deliberately short: the game is
+//! *draw a line, watch the shot*, and every stage that was really a planning
+//! step rather than a moment of play is gone.
 
 /// Where an attempt is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
-    /// A beat to settle after a reset before the editor accepts anything.
+    /// A beat to settle after a reset, before the pitch accepts a drawing.
     Ready,
-    /// Touching inside the goal chooses where the ball should finish.
-    TargetSelection,
-    /// Dragging the top-down projection bends the shot.
-    HorizontalSculpt,
-    /// Dragging the side projection lofts or flattens it.
-    VerticalSculpt,
-    /// The shot is committed: the editor fades, the preview brightens.
+    /// Drawing. The line is live and nothing has been decided.
+    Aiming,
+    /// The line has been read. It flicks away, the kicker starts moving.
     ShotReady,
     /// The run-up. The ball leaves on the contact tick and not before.
     Kicking,
-    /// The ball is on the authored path (until something physically hits it).
+    /// The ball is on the authored path, until something physically hits it.
     BallInFlight,
     /// The result is up.
     Resolution,
@@ -30,93 +24,26 @@ pub enum Phase {
 }
 
 impl Phase {
-    /// Whether the player may currently re-aim by touching the goal. Re-aiming
-    /// is allowed throughout editing, not only in its own stage — a player who
-    /// changes their mind about the corner while bending the shot should not
-    /// have to walk backwards through the flow.
-    pub fn accepts_aim(self) -> bool {
-        matches!(
-            self,
-            Phase::TargetSelection | Phase::HorizontalSculpt | Phase::VerticalSculpt
-        )
-    }
-
-    /// Whether a sculpt panel is up, and which projection it edits.
-    pub fn sculpting(self) -> Option<Projection> {
-        match self {
-            Phase::HorizontalSculpt => Some(Projection::Horizontal),
-            Phase::VerticalSculpt => Some(Projection::Vertical),
-            _ => None,
-        }
+    /// Whether a drawing is accepted right now.
+    pub fn accepts_drawing(self) -> bool {
+        matches!(self, Phase::Aiming)
     }
 
     /// Whether the authored path is drawn in the world this phase.
+    ///
+    /// Only during the commit beat: while the player is still drawing there is
+    /// nothing authored yet, and once the ball moves the ball *is* the preview.
     pub fn shows_preview(self) -> bool {
+        matches!(self, Phase::ShotReady)
+    }
+
+    /// Whether the shot has been decided.
+    pub fn committed(self) -> bool {
         matches!(
             self,
-            Phase::TargetSelection
-                | Phase::HorizontalSculpt
-                | Phase::VerticalSculpt
-                | Phase::ShotReady
+            Phase::ShotReady | Phase::Kicking | Phase::BallInFlight | Phase::Resolution
         )
     }
-
-    /// Whether the whole editing interface is live.
-    pub fn editing(self) -> bool {
-        self.accepts_aim()
-    }
-
-    /// The stage this one steps forward to when the player commits, if any.
-    pub fn advanced(self) -> Option<Phase> {
-        match self {
-            Phase::TargetSelection => Some(Phase::HorizontalSculpt),
-            Phase::HorizontalSculpt => Some(Phase::VerticalSculpt),
-            Phase::VerticalSculpt => Some(Phase::ShotReady),
-            _ => None,
-        }
-    }
-
-    /// The stage this one steps back to, if any. Going back is always allowed
-    /// while editing and never allowed after the commit.
-    pub fn backed(self) -> Option<Phase> {
-        match self {
-            Phase::HorizontalSculpt => Some(Phase::TargetSelection),
-            Phase::VerticalSculpt => Some(Phase::HorizontalSculpt),
-            _ => None,
-        }
-    }
-
-    /// The very short label this stage puts in front of the player. The design
-    /// rule is one word: the interaction teaches the mechanic, not the text.
-    pub fn label(self) -> &'static str {
-        match self {
-            Phase::Ready | Phase::TargetSelection => "AIM",
-            Phase::HorizontalSculpt => "BEND",
-            Phase::VerticalSculpt => "HEIGHT",
-            Phase::ShotReady | Phase::Kicking => "KICK",
-            Phase::BallInFlight => "",
-            Phase::Resolution | Phase::Reset => "",
-        }
-    }
-
-    /// What the single bottom action button says here.
-    pub fn action_label(self) -> &'static str {
-        match self {
-            Phase::TargetSelection => "BEND",
-            Phase::HorizontalSculpt => "HEIGHT",
-            Phase::VerticalSculpt => "KICK",
-            _ => "",
-        }
-    }
-}
-
-/// Which projection of the one shot a sculpt panel shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Projection {
-    /// Looking down: forward runs up the panel, bend runs across it.
-    Horizontal,
-    /// Looking from the side: forward runs across the panel, height runs up it.
-    Vertical,
 }
 
 #[cfg(test)]
@@ -124,17 +51,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_editing_stages_take_input() {
-        let editing = [
-            Phase::TargetSelection,
-            Phase::HorizontalSculpt,
-            Phase::VerticalSculpt,
-        ];
-        editing.iter().for_each(|p| {
-            assert!(p.accepts_aim());
-            assert!(p.editing());
-            assert!(p.shows_preview());
-        });
+    fn only_the_aiming_stage_takes_a_drawing() {
+        assert!(Phase::Aiming.accepts_drawing());
         [
             Phase::Ready,
             Phase::ShotReady,
@@ -144,59 +62,36 @@ mod tests {
             Phase::Reset,
         ]
         .iter()
-        .for_each(|p| assert!(!p.accepts_aim()));
+        .for_each(|p| assert!(!p.accepts_drawing(), "{p:?} must not take a drawing"));
+    }
+
+    #[test]
+    fn the_preview_exists_only_in_the_beat_between_the_line_and_the_kick() {
         assert!(Phase::ShotReady.shows_preview());
-        assert!(!Phase::BallInFlight.shows_preview());
+        [
+            Phase::Ready,
+            Phase::Aiming,
+            Phase::Kicking,
+            Phase::BallInFlight,
+            Phase::Resolution,
+            Phase::Reset,
+        ]
+        .iter()
+        .for_each(|p| assert!(!p.shows_preview(), "{p:?} must not show a preview"));
     }
 
     #[test]
-    fn the_editing_flow_runs_forward_and_back() {
-        assert_eq!(
-            Phase::TargetSelection.advanced(),
-            Some(Phase::HorizontalSculpt)
-        );
-        assert_eq!(
-            Phase::HorizontalSculpt.advanced(),
-            Some(Phase::VerticalSculpt)
-        );
-        assert_eq!(Phase::VerticalSculpt.advanced(), Some(Phase::ShotReady));
-        assert_eq!(Phase::ShotReady.advanced(), None);
-        assert_eq!(
-            Phase::VerticalSculpt.backed(),
-            Some(Phase::HorizontalSculpt)
-        );
-        assert_eq!(
-            Phase::HorizontalSculpt.backed(),
-            Some(Phase::TargetSelection)
-        );
-        assert_eq!(Phase::TargetSelection.backed(), None);
-        assert_eq!(Phase::Kicking.backed(), None);
-    }
-
-    #[test]
-    fn each_stage_names_itself_in_one_word() {
-        assert_eq!(Phase::TargetSelection.label(), "AIM");
-        assert_eq!(Phase::HorizontalSculpt.label(), "BEND");
-        assert_eq!(Phase::VerticalSculpt.label(), "HEIGHT");
-        assert_eq!(Phase::ShotReady.label(), "KICK");
-        assert_eq!(Phase::Ready.label(), "AIM");
-        assert_eq!(Phase::Kicking.label(), "KICK");
-        assert_eq!(Phase::BallInFlight.label(), "");
-        assert_eq!(Phase::Resolution.label(), "");
-        assert_eq!(Phase::Reset.label(), "");
-        assert_eq!(Phase::TargetSelection.action_label(), "BEND");
-        assert_eq!(Phase::VerticalSculpt.action_label(), "KICK");
-        assert_eq!(Phase::BallInFlight.action_label(), "");
-    }
-
-    #[test]
-    fn the_sculpt_stages_name_their_projection() {
-        assert_eq!(
-            Phase::HorizontalSculpt.sculpting(),
-            Some(Projection::Horizontal)
-        );
-        assert_eq!(Phase::VerticalSculpt.sculpting(), Some(Projection::Vertical));
-        assert_eq!(Phase::TargetSelection.sculpting(), None);
-        assert_ne!(Projection::Horizontal, Projection::Vertical);
+    fn everything_after_the_line_counts_as_committed() {
+        [
+            Phase::ShotReady,
+            Phase::Kicking,
+            Phase::BallInFlight,
+            Phase::Resolution,
+        ]
+        .iter()
+        .for_each(|p| assert!(p.committed()));
+        [Phase::Ready, Phase::Aiming, Phase::Reset]
+            .iter()
+            .for_each(|p| assert!(!p.committed()));
     }
 }

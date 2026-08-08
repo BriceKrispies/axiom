@@ -7,39 +7,47 @@
 //!
 //! ## The mechanic
 //!
-//! There is no aim-and-swipe and there is no power meter. The player **designs
-//! the shape of the shot** and then watches it be taken:
+//! There is one gesture. You **draw the line you want the ball to take**, and
+//! when you let go the line disappears and the kicker takes the closest shot it
+//! is actually capable of.
 //!
 //! ```text
-//! AIM      touch inside the goal          → GoalTarget (normalized h, v)
-//! BEND     drag the top-down projection   → horizontal BendCurve
-//! HEIGHT   drag the side projection       → vertical  BendCurve
-//! KICK     commit                         → one world-space Trajectory
+//! draw     one freehand line, anywhere on the pitch
+//! release  the line goes; the kicker reads it and strikes
+//! watch    the ball follows what was read, and the keeper tries to stop it
 //! ```
+//!
+//! Reading a drawing is a **fit, not a parse**. The line is measured against the
+//! shot it most resembles and least-squares fitted onto the space of shots a
+//! kicker can strike — two Bézier weights per projection. A clean banana gives a
+//! banana; a shaky line gives the smooth shot nearest to it; a scribble gives the
+//! best single shot that scribble is evidence for. Nothing is rejected, and the
+//! finish is clamped into the goal, so every shot is **valid by construction**.
+//!
+//! The fit is closed form, so the same pixels always produce the same kick.
 //!
 //! ## One-way flow
 //!
 //! ```text
 //! pointer + keys  →  DeviceFrame  →  InputState              axiom-input
-//!   → drag intents                                           editor::drag
-//!   → EditorCommand — the only thing gesture code may say     editor
-//!   → ShotIntent (a target and two curves)                    shot::intent
+//!   → a drawn line                                           stroke::capture
+//!   → ShotIntent — the only thing a drawing may produce       stroke::interpret
 //!   → ONE arc-length-uniform world Trajectory                 shot::trajectory
 //!   → fixed-step play state machine                           play::session
 //!   → keeper read + physical capsule interception             play::keeper
 //!   → camera framed from the viewport                         camera
 //!   → retained scene submission                               scene::sync
-//!   → screen-space overlay view model                         editor::view
+//!   → screen-space overlay view model                         stroke::view
 //! ```
 //!
 //! Each arrow is one-way. The trajectory layer cannot see a pointer; the flight
-//! layer cannot see a gesture; and **nothing downstream of `shot::trajectory` is
+//! layer cannot see a drawing; and **nothing downstream of `shot::trajectory` is
 //! permitted to move the ball off the authored path** — a save is a real capsule
 //! contact ([`contact`]), never an edit to the shot.
 //!
-//! Because the seam between "what the player said" and "what the game did" is a
-//! five-word command vocabulary rather than a pile of gestures, a machine can
-//! play it too: [`agent`] drives the same commands through the same session.
+//! Because the whole player interface is a line of pixels, a machine can play it
+//! too: [`agent`] *draws*, and the game reads its line with the same code and the
+//! same loss as a thumb's.
 //!
 //! ## Where things live
 //!
@@ -50,7 +58,7 @@
 //! | The humanoid, its kit, its poses | [`figure`] |
 //! | The authored shot and the path it means | [`shot`] |
 //! | The attempt, the ball, the keeper, the result | [`play`] |
-//! | Touch/mouse → commands, and the overlay model | [`editor`] |
+//! | Drawing, reading it, and the overlay model | [`stroke`] |
 //! | An embodied agent that plays it | [`agent`] |
 //! | Framing, and screen ↔ world | [`camera`], [`projection`] |
 //! | The engine scene | [`scene`] |
@@ -62,13 +70,13 @@ pub mod app;
 pub mod camera;
 pub mod contact;
 pub mod debug;
-pub mod editor;
 pub mod figure;
 pub mod pitch;
 pub mod play;
 pub mod projection;
 pub mod scene;
 pub mod shot;
+pub mod stroke;
 pub mod tuning;
 
 #[cfg(target_arch = "wasm32")]

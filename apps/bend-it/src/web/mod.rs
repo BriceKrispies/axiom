@@ -23,22 +23,14 @@ use wasm_bindgen::JsCast;
 use web_sys::{Element, KeyboardEvent};
 
 use crate::app::BendIt;
-use crate::editor::EditorView;
+use crate::stroke::GameView;
 use crate::scene::LIVE_CAPACITY;
 use crate::CANVAS_ID;
 
 use pointer::PointerCapture;
 
 /// Keys whose browser default would fight the game.
-const PREVENTED: [&str; 7] = [
-    "Space",
-    "Enter",
-    "ArrowUp",
-    "ArrowDown",
-    "ArrowLeft",
-    "ArrowRight",
-    "F1",
-];
+const PREVENTED: [&str; 3] = ["Space", "Enter", "F1"];
 
 /// Start the game.
 #[wasm_bindgen]
@@ -105,7 +97,7 @@ pub fn bend_it_start() {
             .map(|c| c.samples())
             .unwrap_or_default();
         guard.advance(&tokens, &contacts);
-        let view: EditorView = guard.view().clone();
+        let view: GameView = guard.view().clone();
         overlay::paint(&view);
         overlay_panel.set_app_rows(&guard.overlay_rows());
         overlay_panel.set_frame(guard.frame_index(), guard.frame_index(), 1, 60_000, 16_666);

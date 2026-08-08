@@ -17,6 +17,6 @@ pub mod session;
 pub use ball::{Ball, BallMotion};
 pub use keeper::{drawable_prediction, Keeper};
 pub use keeper_read::{predict_crossing, KeeperRead};
-pub use phase::{Phase, Projection};
+pub use phase::Phase;
 pub use resolution::{ShotResult, Tally};
-pub use session::{EditorCommand, Session};
+pub use session::{PlayCommand, Session};

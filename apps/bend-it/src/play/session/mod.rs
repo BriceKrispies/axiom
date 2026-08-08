@@ -1,8 +1,8 @@
 //! The attempt: one explicit state machine, stepped at a fixed 60 Hz.
 //!
 //! The session owns the whole of an attempt and nothing outside it. It takes
-//! [`EditorCommand`]s — never pointers, never pixels — and produces a state the
-//! presentation layers read. Everything it does is a pure function of
+//! [`PlayCommand`]s — never pointers, never pixels, never a drawing — and
+//! produces a state the presentation layers read. Everything it does is a pure function of
 //! `(commands, tick)`, so a replay of the same commands is the same attempt.
 //!
 //! The one rule the whole file is arranged around: between the strike and the
@@ -12,7 +12,7 @@
 
 use crate::figure::KickPlan;
 use crate::pitch::{ball_spot, GoalMouth, NetImpulse};
-use crate::shot::{BendCurve, GoalTarget, ResolvedShot, ShotIntent};
+use crate::shot::{ResolvedShot, ShotIntent};
 use crate::tuning::{Tuning, DT};
 
 use super::ball::Ball;
@@ -22,20 +22,17 @@ use super::resolution::{ShotResult, Tally};
 
 mod flight;
 
-/// What the editor asks the session to do. The editor may say only these five
-/// things, which is why gesture code can never reach into the shot.
+/// What the drawing layer asks the session to do.
+///
+/// Two words, and that is on purpose. Whatever the player drew, the *only* thing
+/// that crosses this boundary is a finished [`ShotIntent`] — so the session
+/// cannot be told to nudge a shot, and there is no path by which gesture code
+/// could reach the ball.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum EditorCommand {
-    /// Put the finish here.
-    Aim(GoalTarget),
-    /// Replace the top-down projection.
-    SetBend(BendCurve),
-    /// Replace the side projection.
-    SetLoft(BendCurve),
-    /// Go on to the next stage (and, from the last one, take the kick).
-    Advance,
-    /// Go back to the previous stage.
-    Back,
+pub enum PlayCommand {
+    /// Take this shot. The intent is read from the drawing; the session bounds
+    /// it and commits.
+    Kick(ShotIntent),
     /// Abandon this attempt and set up another.
     Restart,
 }
@@ -148,7 +145,7 @@ impl Session {
     }
 
     /// Advance one fixed tick.
-    pub fn step(&mut self, commands: &[EditorCommand]) {
+    pub fn step(&mut self, commands: &[PlayCommand]) {
         commands.iter().for_each(|c| self.apply(*c));
         let before = self.phase;
         self.advance_phase();
@@ -163,42 +160,35 @@ impl Session {
         });
     }
 
-    /// Apply one editor command. Commands that do not belong to the current
-    /// phase are ignored rather than queued — a stale tap from before a
-    /// transition must not fire into the next stage.
-    fn apply(&mut self, command: EditorCommand) {
+    /// Apply one command. A kick that arrives outside the aiming stage is
+    /// ignored rather than queued — a drawing finished by a phase change beneath
+    /// the player's finger must not fire into the next attempt.
+    fn apply(&mut self, command: PlayCommand) {
         match command {
-            EditorCommand::Aim(target) if self.phase.accepts_aim() => {
-                self.intent.target = target;
+            PlayCommand::Kick(intent) if self.phase.accepts_drawing() => {
+                // The session bounds what it was handed. The reading is the
+                // player's instruction; staying inside the shapes a kicker can
+                // actually strike is the game's business, and it happens here,
+                // once, on the way in.
+                self.intent = ShotIntent {
+                    target: intent.target,
+                    bend: intent
+                        .bend
+                        .bounded(self.tuning.bend.min_offset, self.tuning.bend.max_offset),
+                    loft: intent
+                        .loft
+                        .bounded(self.tuning.loft.min_offset, self.tuning.loft.max_offset),
+                };
                 self.rebuild();
-            }
-            EditorCommand::SetBend(curve) if self.phase == Phase::HorizontalSculpt => {
-                self.intent.bend = curve.bounded(
-                    self.tuning.bend.min_offset,
-                    self.tuning.bend.max_offset,
-                );
-                self.rebuild();
-            }
-            EditorCommand::SetLoft(curve) if self.phase == Phase::VerticalSculpt => {
-                self.intent.loft = curve
-                    .bounded(self.tuning.loft.min_offset, self.tuning.loft.max_offset);
-                self.rebuild();
-            }
-            EditorCommand::Advance => {
-                self.phase = self.phase.advanced().unwrap_or(self.phase);
+                self.phase = Phase::ShotReady;
                 self.phase_tick = 0;
             }
-            EditorCommand::Back => {
-                self.phase = self.phase.backed().unwrap_or(self.phase);
-                self.phase_tick = 0;
-            }
-            EditorCommand::Restart => self.reset(),
-            _ => {}
+            PlayCommand::Restart => self.reset(),
+            PlayCommand::Kick(_) => {}
         }
     }
 
-    /// Re-resolve the authored shot. Cheap enough to do on every edit, which is
-    /// what makes the 3D preview track the finger instead of lagging it.
+    /// Re-resolve the authored shot from the current intent.
     fn rebuild(&mut self) {
         self.shot = ResolvedShot::build(self.shot.origin, self.intent, &self.mouth, &self.tuning);
         let (bend, _) = self.intent.effort(&self.tuning);
@@ -206,11 +196,11 @@ impl Session {
         self.kick = KickPlan::for_shot(self.shot.origin, signed, &self.tuning.kick);
     }
 
-    /// Set up a fresh attempt, keeping the tally and the last aim (a player
-    /// taking ten penalties should not have to re-find the same corner).
+    /// Set up a fresh attempt, keeping only the tally and the keeper's memory.
+    /// The shot itself starts blank: the next drawing is the next instruction.
     fn reset(&mut self) {
         let origin = ball_spot(self.tuning.flight.ball_radius);
-        self.intent = ShotIntent::opening(self.intent.target);
+        self.intent = ShotIntent::default();
         self.ball = Ball::placed(origin);
         let (across, up, weight) = self.shade();
         self.keeper = Keeper::shaded(across, up, weight);
@@ -225,8 +215,10 @@ impl Session {
     fn advance_phase(&mut self) {
         let t = &self.tuning.transitions;
         match self.phase {
-            Phase::Ready => self.after(t.ready, Phase::TargetSelection),
-            Phase::TargetSelection | Phase::HorizontalSculpt | Phase::VerticalSculpt => {}
+            Phase::Ready => self.after(t.ready, Phase::Aiming),
+            // Aiming ends only when a drawing does, which is a command, not a
+            // timer: the player takes as long as they like over the line.
+            Phase::Aiming => {}
             Phase::ShotReady => self.after(t.commit, Phase::Kicking),
             Phase::Kicking => self.kicking(),
             Phase::BallInFlight => self.in_flight(),
@@ -256,13 +248,30 @@ mod tests {
     use super::*;
     use crate::play::ball::BallMotion;
     use crate::play::phase::Phase;
+    use crate::shot::{BendCurve, GoalTarget};
 
-    /// Drive a session to a result, feeding `commands` on the first tick.
-    fn play(commands: &[EditorCommand]) -> Session {
+    /// The shot a drawing would have been read as.
+    fn shot(h: f32, v: f32, bend: f32, bend_at: f32, loft: f32, loft_at: f32) -> ShotIntent {
+        ShotIntent {
+            target: GoalTarget::new(h, v),
+            bend: BendCurve::through(bend_at, bend, 0.14),
+            loft: BendCurve::through(loft_at, loft, 0.14),
+        }
+    }
+
+    /// Settle into the aiming stage.
+    fn armed() -> Session {
         let mut session = Session::new(Tuning::DEFAULT);
-        // Get out of Ready and into the editor.
-        (0..12).for_each(|_| session.step(&[]));
-        session.step(commands);
+        while session.phase() != Phase::Aiming {
+            session.step(&[]);
+        }
+        session
+    }
+
+    /// Take one shot and run it to a result.
+    fn take(intent: ShotIntent) -> Session {
+        let mut session = armed();
+        session.step(&[PlayCommand::Kick(intent)]);
         let mut spent = 0;
         while session.result().is_none() && spent < 900 {
             session.step(&[]);
@@ -272,75 +281,62 @@ mod tests {
         session
     }
 
-    fn shape(h: f32, v: f32, bend: f32, loft: f32) -> Vec<EditorCommand> {
-        shaped(h, v, bend, 0.5, loft, 0.5)
-    }
-
-    /// The same, with explicit peak positions — so a test can say "this one
-    /// breaks late" rather than only "this one breaks".
-    fn shaped(
-        h: f32,
-        v: f32,
-        bend: f32,
-        bend_at: f32,
-        loft: f32,
-        loft_at: f32,
-    ) -> Vec<EditorCommand> {
-        vec![
-            EditorCommand::Aim(GoalTarget::new(h, v)),
-            EditorCommand::Advance,
-            EditorCommand::SetBend(BendCurve::through(bend_at, bend, 0.14)),
-            EditorCommand::Advance,
-            EditorCommand::SetLoft(BendCurve::through(loft_at, loft, 0.14)),
-            EditorCommand::Advance,
-        ]
-    }
-
     #[test]
-    fn the_flow_walks_forward_through_every_stage() {
+    fn the_attempt_is_draw_then_watch() {
         let mut session = Session::new(Tuning::DEFAULT);
         assert_eq!(session.phase(), Phase::Ready);
-        (0..12).for_each(|_| session.step(&[]));
-        assert_eq!(session.phase(), Phase::TargetSelection);
-        session.step(&[EditorCommand::Advance]);
-        assert_eq!(session.phase(), Phase::HorizontalSculpt);
-        session.step(&[EditorCommand::Advance]);
-        assert_eq!(session.phase(), Phase::VerticalSculpt);
-        session.step(&[EditorCommand::Advance]);
+        let mut settle = 0;
+        while session.phase() == Phase::Ready {
+            session.step(&[]);
+            settle += 1;
+        }
+        assert!(settle <= 10, "the settle is a beat, not a wait: {settle} ticks");
+        assert_eq!(session.phase(), Phase::Aiming);
+        // Aiming lasts as long as the player wants; nothing times it out.
+        (0..600).for_each(|_| session.step(&[]));
+        assert_eq!(session.phase(), Phase::Aiming);
+        // One command commits the whole shot.
+        session.step(&[PlayCommand::Kick(shot(0.5, 0.6, 1.0, 0.6, 0.9, 0.5))]);
         assert_eq!(session.phase(), Phase::ShotReady);
-        (0..20).for_each(|_| session.step(&[]));
+        while session.phase() == Phase::ShotReady {
+            session.step(&[]);
+        }
         assert_eq!(session.phase(), Phase::Kicking);
     }
 
     #[test]
-    fn the_player_can_go_back_and_change_their_mind() {
-        let mut session = Session::new(Tuning::DEFAULT);
-        (0..12).for_each(|_| session.step(&[]));
-        session.step(&[EditorCommand::Advance, EditorCommand::Advance]);
-        assert_eq!(session.phase(), Phase::VerticalSculpt);
-        session.step(&[EditorCommand::Back]);
-        assert_eq!(session.phase(), Phase::HorizontalSculpt);
-        // Re-aiming works from a sculpt stage, without losing the curve.
-        session.step(&[EditorCommand::SetBend(BendCurve::through(0.5, 3.0, 0.14))]);
-        let bend = session.intent().bend;
-        session.step(&[EditorCommand::Aim(GoalTarget::new(-0.9, 0.8))]);
-        assert_eq!(session.intent().bend, bend);
-        assert!((session.intent().target.h + 0.9).abs() < 1.0e-5);
-        // A stale command for the wrong stage is ignored, not queued.
-        session.step(&[EditorCommand::SetLoft(BendCurve::through(0.5, 3.0, 0.14))]);
-        assert_eq!(session.intent().loft, ShotIntent::default().loft);
+    fn the_session_bounds_whatever_the_drawing_asked_for() {
+        let mut session = armed();
+        // A reading far outside anything a kicker could strike.
+        session.step(&[PlayCommand::Kick(shot(0.4, 0.5, 40.0, 0.5, 40.0, 0.5))]);
+        let tuning = Tuning::DEFAULT;
+        assert!(session.intent().bend.magnitude().abs() <= tuning.bend.max_offset + 1.0e-3);
+        assert!(session.intent().loft.magnitude().abs() <= tuning.loft.max_offset + 1.0e-3);
+        // And the path it produced is still legal end to end.
+        let points = session.shot().trajectory.points();
+        assert_eq!(points[0], session.shot().origin);
+        assert_eq!(*points.last().expect("a path"), session.shot().world_target);
+        assert!(points.iter().all(|p| p.y >= tuning.flight.ball_radius - 1.0e-4));
+    }
+
+    #[test]
+    fn a_kick_that_arrives_outside_the_aiming_stage_is_ignored() {
+        let mut session = armed();
+        session.step(&[PlayCommand::Kick(shot(0.5, 0.6, 1.0, 0.5, 0.9, 0.5))]);
+        let committed = *session.intent();
+        // A second reading, arriving a tick late, must not re-author the shot.
+        session.step(&[PlayCommand::Kick(shot(-0.9, 0.1, -2.0, 0.5, 0.0, 0.5))]);
+        assert_eq!(*session.intent(), committed);
+        assert_eq!(session.phase(), Phase::ShotReady);
     }
 
     #[test]
     fn the_ball_launches_on_the_contact_tick_and_not_before() {
-        let mut session = Session::new(Tuning::DEFAULT);
-        (0..12).for_each(|_| session.step(&[]));
-        session.step(&shape(0.0, 0.5, 0.0, 0.6));
+        let mut session = armed();
+        session.step(&[PlayCommand::Kick(shot(0.0, 0.5, 0.0, 0.5, 0.6, 0.5))]);
         while session.phase() != Phase::Kicking {
             session.step(&[]);
         }
-        // Count from the first tick of the run-up: the ball must not move until
-        // the tick the boot reaches it, and must move on exactly that tick.
         let spot = session.ball().position;
         let contact = session.tuning().kick.contact;
         (session.phase_tick()..contact - 1).for_each(|_| {
@@ -354,8 +350,7 @@ mod tests {
 
     #[test]
     fn a_clean_shot_into_an_empty_corner_is_a_goal() {
-        // A hard, flat shot into the top corner, well past the keeper's reach.
-        let session = play(&shape(-0.95, 0.92, 0.0, 0.2));
+        let session = take(shot(-0.95, 0.92, 0.0, 0.5, 0.2, 0.5));
         assert_eq!(session.result(), Some(ShotResult::Goal));
         assert_eq!(session.tally(), Tally { attempts: 1, goals: 1 });
         assert!(session.net_impulse().is_some(), "the net answers");
@@ -363,7 +358,7 @@ mod tests {
 
     #[test]
     fn a_shot_straight_at_the_keeper_is_saved_by_its_actual_reach() {
-        let session = play(&shape(0.0, 0.25, 0.0, 0.15));
+        let session = take(shot(0.0, 0.25, 0.0, 0.5, 0.15, 0.5));
         assert_eq!(session.result(), Some(ShotResult::Save));
         assert_eq!(session.tally(), Tally { attempts: 1, goals: 0 });
         // A save is a real contact: the ball has been knocked off the path.
@@ -374,8 +369,8 @@ mod tests {
     fn the_same_endpoint_can_be_saved_or_scored_depending_on_the_shape() {
         // One point in the goal — low, left of centre, well inside the keeper's
         // range — reached two ways.
-        let plain = play(&shaped(-0.45, 0.30, 0.0, 0.5, 0.9, 0.5));
-        let sculpted = play(&shaped(-0.45, 0.30, 2.0, 0.28, 0.9, 0.5));
+        let plain = take(shot(-0.45, 0.30, 0.0, 0.5, 0.9, 0.5));
+        let sculpted = take(shot(-0.45, 0.30, 2.0, 0.28, 0.9, 0.5));
         assert_eq!(
             plain.shot().world_target,
             sculpted.shot().world_target,
@@ -395,26 +390,26 @@ mod tests {
 
     #[test]
     fn an_attempt_resets_cleanly_and_quickly() {
-        let mut session = play(&shape(-0.95, 0.92, 0.0, 0.2));
-        let hold = session.tuning().transitions.resolution + session.tuning().transitions.reset + 2;
+        let mut session = take(shot(-0.95, 0.92, 0.0, 0.5, 0.2, 0.5));
+        let hold = session.tuning().transitions.resolution
+            + session.tuning().transitions.reset
+            + session.tuning().transitions.ready
+            + 3;
         (0..hold).for_each(|_| session.step(&[]));
-        assert_eq!(session.phase(), Phase::Ready);
+        assert_eq!(session.phase(), Phase::Aiming, "straight back to drawing");
         assert_eq!(session.result(), None);
         assert_eq!(session.ball().motion, BallMotion::Placed);
         assert_eq!(session.keeper().read(), None);
         assert_eq!(session.tally().attempts, 1, "the tally survives the reset");
-        // The aim survives too, but the sculpt is back to a plain shot.
-        assert_eq!(session.intent().bend, BendCurve::STRAIGHT);
-        // And a restart mid-edit does the same thing.
-        (0..12).for_each(|_| session.step(&[]));
-        session.step(&[EditorCommand::Restart]);
+        // A restart mid-draw does the same thing.
+        session.step(&[PlayCommand::Restart]);
         assert_eq!(session.phase(), Phase::Ready);
     }
 
     #[test]
-    fn the_same_commands_always_produce_the_same_attempt() {
-        let a = play(&shape(0.4, 0.6, 2.5, 1.5));
-        let b = play(&shape(0.4, 0.6, 2.5, 1.5));
+    fn the_same_command_always_produces_the_same_attempt() {
+        let a = take(shot(0.4, 0.6, 1.5, 0.5, 1.2, 0.5));
+        let b = take(shot(0.4, 0.6, 1.5, 0.5, 1.2, 0.5));
         assert_eq!(a.result(), b.result());
         assert_eq!(a.ball().position, b.ball().position);
         assert_eq!(a.keeper().read(), b.keeper().read());

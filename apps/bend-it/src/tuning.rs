@@ -157,29 +157,22 @@ pub struct KickTuning {
     pub approach_bend_widen: f32,
 }
 
-/// Screen-space feel of the trajectory editor. Sizes are fractions of the
-/// viewport's short edge unless named `_px`, so the layout derives from the
-/// device rather than assuming one phone.
+/// How a drawn line is captured and read.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct EditorTuning {
-    /// Movement below this (fraction of the short edge) is a tap, not a drag.
-    pub dead_zone: f32,
-    /// How far above the finger the active handle is drawn, as a fraction of the
-    /// short edge, so a thumb never covers the only feedback that matters.
-    pub handle_lift: f32,
-    /// Handle dot radius, fraction of the short edge.
-    pub handle_radius: f32,
-    /// The sculpt panel, as fractions of the viewport: side inset, top edge and
-    /// bottom edge in portrait.
-    pub panel_inset: f32,
-    pub panel_top: f32,
-    pub panel_bottom: f32,
-    /// Height of the bottom action bar, fraction of the viewport height.
-    pub action_height: f32,
-    /// How much of the goal-plane half-width the aim pad extends past the frame,
-    /// so a sloppy touch outside the posts still clamps to the nearest legal
-    /// point instead of doing nothing.
-    pub aim_overshoot: f32,
+pub struct StrokeTuning {
+    /// The shortest line that counts as a shot, as a fraction of the viewport's
+    /// short edge. Below it the drawing is a tap and nothing is kicked.
+    pub min_length: f32,
+    /// How far apart captured points are kept, as a fraction of the short edge.
+    /// A finger reports far more samples than a shape needs.
+    pub spacing: f32,
+    /// How strongly the fit is pulled toward a plain straight shot when the
+    /// drawing does not constrain much. This is the "does its best" knob: at `0`
+    /// a two-inch flick can author a wild curve; higher, and only a line that
+    /// really says *bend* gets one.
+    pub ridge: f32,
+    /// How long the drawn line takes to flick away after release, seconds.
+    pub fade: f32,
 }
 
 /// Phase timings, in fixed ticks.
@@ -234,7 +227,7 @@ pub struct Tuning {
     pub flight: FlightTuning,
     pub keeper: KeeperTuning,
     pub kick: KickTuning,
-    pub editor: EditorTuning,
+    pub stroke: StrokeTuning,
     pub transitions: TransitionTuning,
     pub camera: CameraTuning,
 }
@@ -286,7 +279,7 @@ impl Tuning {
             body_radius: 0.28,
             execution: 0.90,
             extend_time: 0.44,
-            shade_gain: 0.42,
+            shade_gain: 0.62,
             shade_limit: 1.15,
         },
         kick: KickTuning {
@@ -297,21 +290,17 @@ impl Tuning {
             approach_side: 0.62,
             approach_bend_widen: 0.80,
         },
-        editor: EditorTuning {
-            dead_zone: 0.012,
-            handle_lift: 0.075,
-            handle_radius: 0.030,
-            panel_inset: 0.045,
-            panel_top: 0.585,
-            panel_bottom: 0.858,
-            action_height: 0.115,
-            aim_overshoot: 0.55,
+        stroke: StrokeTuning {
+            min_length: 0.16,
+            spacing: 0.008,
+            ridge: 0.055,
+            fade: 0.22,
         },
         transitions: TransitionTuning {
-            ready: 10,
-            commit: 12,
-            resolution: 96,
-            reset: 20,
+            ready: 6,
+            commit: 7,
+            resolution: 74,
+            reset: 14,
         },
         camera: CameraTuning {
             eye_height: 4.15,
@@ -347,7 +336,7 @@ mod tests {
         assert!(t.bend.min_offset < 0.0 && t.bend.max_offset > 0.0);
         assert!(t.loft.min_offset < 0.0 && t.loft.max_offset > 0.0);
         assert!(t.kick.plant < t.kick.contact);
-        assert!(t.editor.panel_top < t.editor.panel_bottom);
+        assert!(t.stroke.min_length > 0.0 && t.stroke.ridge > 0.0);
         assert!(t.camera.min_fov < t.camera.max_fov);
         assert!((0.0..=1.0).contains(&t.keeper.read_fidelity));
         assert!(t.keeper.adjust_fidelity > t.keeper.read_fidelity);

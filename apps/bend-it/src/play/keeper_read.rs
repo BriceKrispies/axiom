@@ -53,27 +53,25 @@ pub(super) fn take_read_with(
     fidelity: f32,
 ) -> KeeperRead {
     let seen = predict_crossing(trajectory, t, fidelity, tuning.read_gravity);
-    // What it has been beaten by lately pulls the height it reads toward that
-    // memory. Put four in the same place and the keeper stops being surprised
-    // there — which is what makes any one authored shape a good answer rather
-    // than a solved one.
     let (remembered, weight) = expectation;
-    let predicted = Vec3::new(
-        seen.x,
-        seen.y + (remembered - seen.y) * weight,
-        seen.z,
-    );
 
     // What the keeper can actually get to: its dive reaches only so far
     // sideways and only so high, and it executes its own plan imperfectly.
-    let desire = predicted.x - home.x;
+    let desire = seen.x - home.x;
     let travel = desire.clamp(-tuning.dive_distance, tuning.dive_distance) * tuning.execution;
     let ceiling = HIP_HEIGHT + tuning.vertical_reach;
-    // The vertical commitment is hedged toward standing height: see
-    // `KeeperTuning::vertical_trust`.
-    let trusted =
-        HIP_HEIGHT + (predicted.y - HIP_HEIGHT) * tuning.vertical_trust.clamp(0.0, 1.0);
-    let aim = Vec3::new(home.x + travel, trusted.clamp(0.10, ceiling), predicted.z);
+    // The vertical commitment, in two steps that are deliberately not the same.
+    //
+    // What it *sees* is hedged toward standing height, because one glimpse of a
+    // ball's climb is a poor guide to where it will arrive (see
+    // `KeeperTuning::vertical_trust`). What it *remembers* is not hedged at all:
+    // four penalties into the same corner is not a glance, it is evidence, and a
+    // keeper that kept discounting it would never learn to get down to a shot it
+    // has already been beaten by three times.
+    let glimpsed =
+        HIP_HEIGHT + (seen.y - HIP_HEIGHT) * tuning.vertical_trust.clamp(0.0, 1.0);
+    let trusted = glimpsed + (remembered - glimpsed) * weight.clamp(0.0, 1.0);
+    let aim = Vec3::new(home.x + travel, trusted.clamp(0.10, ceiling), seen.z);
     let lean = (desire / tuning.dive_distance.max(1.0e-3)).clamp(-1.0, 1.0);
     // Where the hands go. Around hip height the keeper stays square; the higher
     // or lower the read, the more committed the hands are — and a keeper who
@@ -81,7 +79,7 @@ pub(super) fn take_read_with(
     let height_bias = (((trusted - HIP_HEIGHT) / 0.85) * 1.4).clamp(-1.0, 1.0);
     let travel_time = travel.abs() / tuning.dive_speed.max(1.0e-3);
     KeeperRead {
-        predicted,
+        predicted: Vec3::new(seen.x, trusted, 0.0),
         aim,
         lean,
         height_bias,

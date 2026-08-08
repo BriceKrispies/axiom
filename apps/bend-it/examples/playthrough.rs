@@ -4,30 +4,29 @@
 //! cargo run -p axiom-bend-it --example playthrough -- [attempts] [seed]
 //! ```
 //!
-//! Every line is one attempt: what the striker aimed at, the shape it authored,
+//! Every line is one attempt: what the striker DREW, what the kicker read it as,
 //! where the keeper went, and what happened. It is deterministic, so a run is a
-//! reproducible measurement of the agent *and* of the game's balance.
+//! reproducible measurement of the agent, the game's balance, and the reading.
 
-use axiom_bend_it::agent::Striker;
+use axiom_bend_it::agent::{agent_projection, Striker};
 use axiom_bend_it::play::{Phase, Session};
 use axiom_bend_it::tuning::Tuning;
 
 /// A balance sweep: how often each *shape* of shot beats the keeper, over a grid
 /// of targets. Run with `-- sweep`.
 fn sweep() {
-    use axiom_bend_it::play::{EditorCommand, ShotResult};
-    use axiom_bend_it::shot::{BendCurve, GoalTarget};
+    use axiom_bend_it::play::{PlayCommand, ShotResult};
+    use axiom_bend_it::shot::{BendCurve, GoalTarget, ShotIntent};
     let play = |h: f32, v: f32, bend: f32, bend_at: f32, loft: f32, loft_at: f32| {
         let mut s = Session::new(Tuning::DEFAULT);
-        (0..12).for_each(|_| s.step(&[]));
-        s.step(&[
-            EditorCommand::Aim(GoalTarget::new(h, v)),
-            EditorCommand::Advance,
-            EditorCommand::SetBend(BendCurve::through(bend_at, bend, 0.14)),
-            EditorCommand::Advance,
-            EditorCommand::SetLoft(BendCurve::through(loft_at, loft, 0.14)),
-            EditorCommand::Advance,
-        ]);
+        while s.phase() != Phase::Aiming {
+            s.step(&[]);
+        }
+        s.step(&[PlayCommand::Kick(ShotIntent {
+            target: GoalTarget::new(h, v),
+            bend: BendCurve::through(bend_at, bend, 0.14),
+            loft: BendCurve::through(loft_at, loft, 0.14),
+        })]);
         let mut n = 0;
         while s.result().is_none() && n < 900 {
             s.step(&[]);
@@ -92,7 +91,8 @@ fn main() {
     );
     while (reported < attempts) & (ticks < attempts * 400) {
         let was = session.phase();
-        striker.play(&mut session);
+        let projection = agent_projection(&session);
+        striker.play(&mut session, &projection);
         ticks += 1;
         // Report on the tick the attempt resolves.
         let resolved = (was != Phase::Resolution) & (session.phase() == Phase::Resolution);
@@ -104,7 +104,7 @@ fn main() {
             let keeper = session
                 .keeper()
                 .read()
-                .map(|r| format!("dived {:+.2} m", r.aim.x))
+                .map(|r| format!("({:+.2},{:.2})", r.aim.x, r.aim.y))
                 .unwrap_or_else(|| "stayed".into());
             println!(
                 "{:>3}  h{:+.2} v{:.2}  bend {:+.2}@{:.2} lift {:+.2}@{:.2}  {:^15}  {}",

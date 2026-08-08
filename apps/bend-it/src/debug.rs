@@ -16,6 +16,7 @@ use axiom_math::Quat;
 
 use crate::pitch::PENALTY_SPOT_Z;
 use crate::play::Session;
+use crate::stroke::Reading;
 
 /// One marker to draw. `alternate` picks the second (keeper-coloured) pool.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,7 +48,7 @@ fn segment(a: Vec3, b: Vec3, beads: usize, size: f32, alternate: bool, out: &mut
 /// the sampled 3D path, its horizontal projection flattened onto the turf, its
 /// vertical projection pushed out to the goal plane, the authored endpoint, and
 /// the keeper's chosen interception point and swept reach.
-pub fn markers(session: &Session, out: &mut Vec<DebugMarker>) {
+pub fn markers(session: &Session, reading: Option<&Reading>, out: &mut Vec<DebugMarker>) {
     out.clear();
     let trajectory = &session.shot().trajectory;
     let points = trajectory.points();
@@ -78,6 +79,16 @@ pub fn markers(session: &Session, out: &mut Vec<DebugMarker>) {
     // The authored endpoint.
     out.push(dot(session.shot().world_target, 0.16, false));
 
+    // What the last drawing was actually read as, in the world: the points the
+    // line was understood to pass through. Seeing these next to the fitted path
+    // is the only way to tell "the fit is wrong" from "I drew that".
+    reading.into_iter().for_each(|r| {
+        r.read_points
+            .iter()
+            .for_each(|p| out.push(dot(*p, 0.09, true)));
+        out.push(dot(r.raw_target, 0.18, true));
+    });
+
     // The keeper: where it thinks the ball is going, and the reach it is
     // actually sweeping.
     if let Some(read) = session.keeper().read() {
@@ -91,7 +102,7 @@ pub fn markers(session: &Session, out: &mut Vec<DebugMarker>) {
 
 /// The overlay rows: the state machine, the shot's own parameters, and the
 /// keeper's decision, as text.
-pub fn rows(session: &Session) -> Vec<(String, String)> {
+pub fn rows(session: &Session, reading: Option<&Reading>) -> Vec<(String, String)> {
     let intent = session.intent();
     let (bend_effort, loft_effort) = intent.effort(session.tuning());
     let (bend_at, bend_size) = intent.bend.peak();
@@ -138,6 +149,20 @@ pub fn rows(session: &Session) -> Vec<(String, String)> {
         ),
     ];
     rows.push((
+        "drawing".into(),
+        reading
+            .map(|r| {
+                format!(
+                    "{} points read, fit off by {:.2} m, raw finish ({:+.2}, {:.2})",
+                    r.read_points.len(),
+                    r.residual,
+                    r.raw_target.x,
+                    r.raw_target.y
+                )
+            })
+            .unwrap_or_else(|| "none yet".into()),
+    ));
+    rows.push((
         "keeper".into(),
         session
             .keeper()
@@ -182,18 +207,20 @@ pub fn path_spans_the_shot(session: &Session) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::play::{EditorCommand, Phase, Session};
-    use crate::shot::{BendCurve, GoalTarget};
+    use crate::play::{Phase, PlayCommand, Session};
+    use crate::shot::{BendCurve, GoalTarget, ShotIntent};
     use crate::tuning::Tuning;
 
     fn sculpted() -> Session {
         let mut s = Session::new(Tuning::DEFAULT);
-        (0..12).for_each(|_| s.step(&[]));
-        s.step(&[
-            EditorCommand::Aim(GoalTarget::new(-0.6, 0.7)),
-            EditorCommand::Advance,
-            EditorCommand::SetBend(BendCurve::through(0.6, 1.6, 0.14)),
-        ]);
+        while s.phase() != Phase::Aiming {
+            s.step(&[]);
+        }
+        s.step(&[PlayCommand::Kick(ShotIntent {
+            target: GoalTarget::new(-0.6, 0.7),
+            bend: BendCurve::through(0.6, 1.6, 0.14),
+            loft: BendCurve::through(0.5, 1.0, 0.14),
+        })]);
         s
     }
 
@@ -201,7 +228,7 @@ mod tests {
     fn the_markers_cover_every_thing_the_brief_asks_to_see() {
         let session = sculpted();
         let mut out = Vec::new();
-        markers(&session, &mut out);
+        markers(&session, None, &mut out);
         assert!(out.len() > 40, "the sampled path is drawn");
         // The 3D path, its flattened shadow on the turf, and its side elevation
         // are three distinct sets of markers.
@@ -216,39 +243,36 @@ mod tests {
         assert!(out.iter().any(|m| m.alternate));
         // Rebuilding replaces rather than appends.
         let first = out.len();
-        markers(&session, &mut out);
+        markers(&session, None, &mut out);
         assert_eq!(out.len(), first);
     }
 
     #[test]
     fn the_rows_report_the_state_machine_and_the_shot_parameters() {
         let session = sculpted();
-        let rows = rows(&session);
+        let rows = rows(&session, None);
         let names: Vec<&str> = rows.iter().map(|(k, _)| k.as_str()).collect();
-        ["phase", "target", "bend", "loft", "flight", "ball", "keeper", "result", "tally"]
+        [
+            "phase", "target", "bend", "loft", "flight", "ball", "drawing", "keeper",
+            "result", "tally",
+        ]
             .iter()
             .for_each(|k| assert!(names.contains(k), "missing row {k}"));
-        assert!(rows.iter().any(|(k, v)| k == "phase" && v.contains("Horizontal")));
+        assert!(rows.iter().any(|(k, v)| k == "phase" && v.contains("ShotReady")));
         assert!(rows.iter().any(|(k, v)| k == "keeper" && v == "set"));
         assert!(rows.iter().any(|(k, v)| k == "result" && v == "-"));
     }
 
     #[test]
     fn the_keeper_row_fills_in_once_it_has_committed() {
-        let mut session = Session::new(Tuning::DEFAULT);
-        (0..12).for_each(|_| session.step(&[]));
-        session.step(&[
-            EditorCommand::Advance,
-            EditorCommand::Advance,
-            EditorCommand::Advance,
-        ]);
+        let mut session = sculpted();
         let mut n = 0;
         while session.result().is_none() && n < 600 {
             session.step(&[]);
             n += 1;
         }
-        assert!(rows(&session).iter().any(|(k, v)| k == "keeper" && v.contains("aim")));
-        assert!(rows(&session).iter().any(|(k, v)| k == "result" && v != "-"));
+        assert!(rows(&session, None).iter().any(|(k, v)| k == "keeper" && v.contains("aim")));
+        assert!(rows(&session, None).iter().any(|(k, v)| k == "result" && v != "-"));
         assert_eq!(session.phase(), Phase::Resolution);
     }
 
