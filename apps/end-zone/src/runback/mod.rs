@@ -127,6 +127,12 @@ pub struct RunbackSim {
     /// "why did that resolve the way it did", for a test, the overlay, and the
     /// agent.
     pub last_charge: Option<ChargeResolution>,
+    /// The open charge window, advanced once per tick with hysteresis (see
+    /// [`read::advance_charge_window`]). Authoritative simulation state rather
+    /// than something presentation derives, so the tell the player sees, the
+    /// fact the agent perceives and the outcome the contest produces are one
+    /// value with one history.
+    pub charge_window: Option<ChargeWindow>,
     /// This play's confirmed successes.
     pub dodges: u32,
     pub hurdled: u32,
@@ -151,6 +157,7 @@ impl RunbackSim {
             threats: Vec::new(),
             hurdles: Vec::new(),
             last_charge: None,
+            charge_window: None,
             dodges: 0,
             hurdled: 0,
             broken: 0,

@@ -21,9 +21,9 @@
 //! Exit code `0` means every mechanic was demonstrated; `1` means one was not,
 //! which is a real failure of the game rather than of the harness.
 
-use axiom_end_zone::agent::{decide_one_step, observe};
+use axiom_end_zone::agent::{self, DEFAULT_REACTION_MILLIS};
 use axiom_end_zone::attempt::AttemptOutcome;
-use axiom_end_zone::autopilot::{self, Aggression};
+use axiom_end_zone::autopilot::Aggression;
 use axiom_end_zone::events::{RunbackMoveCode, SimEvent};
 use axiom_end_zone::launch::RunConfig;
 use axiom_end_zone::scenario;
@@ -74,19 +74,22 @@ fn main() {
     let trace = args.iter().any(|a| a == "--trace");
     let ab = args.iter().any(|a| a == "--ab");
     let seed = value("--seed", scenario::VALIDATION_SEED);
+    let reaction = value("--reaction-ms", u64::from(DEFAULT_REACTION_MILLIS)) as u32;
     let carries = value("--carries", if ab { 20 } else { 12 }) as u32;
 
     if ab {
-        ab_test(seed, carries);
+        ab_test(seed, carries, reaction);
         return;
     }
 
     println!("=== End Zone — agent validation run ===");
-    println!("seed {seed}   up to {carries} carries   policy BALANCED");
+    println!(
+        "seed {seed}   up to {carries} carries   policy BALANCED   reaction {reaction} ms"
+    );
     println!("the agent drives the same controls a person does: 1/2/3 to call a");
     println!("play, then juke / shoulder / leap. Nothing else is touched.\n");
 
-    let tally = play(seed, carries, Aggression::BALANCED, trace, true);
+    let tally = play(seed, carries, Aggression::BALANCED, reaction, trace, true);
     report(&tally);
     std::process::exit(i32::from(!tally.complete()));
 }
@@ -99,13 +102,15 @@ fn main() {
 /// does not move a single number is not a mechanic, and the only way to know is
 /// to run the game with it and without it and put the two columns next to each
 /// other.
-fn ab_test(seed: u64, carries: u32) {
+fn ab_test(seed: u64, carries: u32, reaction: u32) {
     println!("=== End Zone — shoulder-charge A/B ===");
-    println!("seed {seed}, {carries} carries per arm, identical agent and defense.");
+    println!(
+        "seed {seed}, {carries} carries per arm, identical agent ({reaction} ms reaction) and defense."
+    );
     println!("The ONLY difference is whether the down button may be pressed.\n");
 
-    let with = play(seed, carries, Aggression::BALANCED, false, false);
-    let without = play(seed, carries, Aggression::NO_SHOULDER, false, false);
+    let with = play(seed, carries, Aggression::BALANCED, reaction, false, false);
+    let without = play(seed, carries, Aggression::NO_SHOULDER, reaction, false, false);
 
     let row = |label: &str, a: String, b: String| println!("  {label:<26} {a:>14} {b:>14}");
     println!("  {:<26} {:>14} {:>14}", "", "WITH down", "WITHOUT down");
@@ -172,61 +177,46 @@ fn ab_test(seed: u64, carries: u32) {
 }
 
 /// Play `carries` carries under `policy`, returning what happened.
-fn play(seed: u64, carries: u32, policy: Aggression, trace: bool, narrate: bool) -> Tally {
+///
+/// The loop itself lives in [`axiom_end_zone::agent::drive`] — it has to, because
+/// the reaction delay line cannot be named outside `axiom-agent`'s facade and so
+/// must share a scope with the tick loop. What is left here is what belongs in a
+/// binary: watching, tallying and printing.
+fn play(
+    seed: u64,
+    carries: u32,
+    policy: Aggression,
+    reaction_millis: u32,
+    trace: bool,
+    narrate: bool,
+) -> Tally {
     let config = RunConfig::new(seed);
     let mut run = ShowcaseRun::new_run(&config);
     let mut tally = Tally::default();
-    let mut start_downfield = None;
+    let mut start_downfield: Option<f32> = None;
     let mut last_phase = None;
+    let mut counted = 0u32;
 
-    for _ in 0..(carries as u64 * 900) {
-        let Some(step) = run.attempt() else { break };
-        let seen = observe(&run.sim, &step);
-        let decision = decide_one_step(&run.sim, &step, policy, run.sim.tick);
-
-        if narrate && last_phase != Some(step.phase) {
+    agent::drive(&mut run, policy, reaction_millis, carries, &mut |report| {
+        let seen = report.observation;
+        if narrate && last_phase != Some(report.phase) {
             println!(
                 "  t{:>5}  [{}]  carry {}  {}",
                 seen.tick, seen.phase, seen.carry, seen.concept
             );
-            last_phase = Some(step.phase);
+            last_phase = Some(report.phase);
         }
-
-        // Lower the agent's intents into the game's real inputs.
-        if let Some(play) = decision.call_play {
-            run.select_concept(play);
-            if narrate {
+        if narrate {
+            if let Some(play) = report.decision.call_play {
                 println!(
                     "  t{:>5}  agent -> CALL PLAY {}  (reason {}, {} intent)",
                     seen.tick,
                     play + 1,
-                    decision.reason_code,
-                    decision.emitted
+                    report.decision.reason_code,
+                    report.decision.emitted
                 );
             }
-        }
-        if trace {
-            if let Some(enc) = autopilot::encounter(&run.sim, &step) {
-                if enc.gap <= 4.0 && step.runback.move_ready {
-                    let c = enc.predicted_charge;
-                    println!(
-                        "         charge? gap {:.2} closing {:.2} align {:.2} timing {:.2} \
-                         brace {:.2} -> {:.2} vs {:.2} = {}",
-                        enc.gap,
-                        c.closing_speed,
-                        c.alignment,
-                        c.timing,
-                        c.brace,
-                        c.impulse,
-                        c.resistance,
-                        c.describe()
-                    );
-                }
-            }
-        }
-        if let Some(wanted) = decision.wanted {
-            run.command(wanted);
-            if narrate {
+            if let Some(wanted) = report.decision.wanted {
                 println!(
                     "  t{:>5}  agent -> {:<11} | speed {:.1} yd/s, nearest {:.1} yd, jump {}",
                     seen.tick,
@@ -240,55 +230,54 @@ fn play(seed: u64, carries: u32, policy: Aggression, trace: bool, narrate: bool)
                 );
             }
         }
+        if trace {
+            if let Some(target) = seen.charge_target {
+                println!(
+                    "         TELL: defender {} can be run through (overload {:.2})",
+                    target.0, seen.charge_overload
+                );
+            }
+        }
 
         // Forward progress is measured, not assumed.
         if seen.carrying {
-            if let Some(back) = step.runback.back {
-                let downfield = run
-                    .sim
-                    .frame
-                    .from_world(run.sim.players[back.index()].pos)
-                    .downfield;
-                match start_downfield {
-                    None => start_downfield = Some(downfield),
-                    Some(start) => tally.ran_forward |= downfield > start + 3.0,
+            match start_downfield {
+                None => start_downfield = Some(seen.position.2),
+                Some(start) => {
+                    tally.ran_forward |= (seen.position.2 - start).abs() > 3.0;
                 }
             }
         }
 
-        let out = run.step(&[]);
-        for stamped in &out.events {
+        for stamped in report.events {
             record(&mut tally, stamped.tick, stamped.event, narrate);
             if matches!(stamped.event, SimEvent::PlayEnded { .. }) {
                 start_downfield = None;
             }
         }
 
-        if let Some(ledger) = run.ledger() {
-            if ledger.attempts > tally.carries {
-                tally.carries = ledger.attempts;
-                if let Some(last) = ledger.last {
-                    tally.touchdowns += u32::from(last.outcome == AttemptOutcome::Touchdown);
-                    tally.tackled += u32::from(last.outcome == AttemptOutcome::Tackled);
-                    tally.yards += last.yards;
-                    if narrate {
-                        println!(
-                            "  ---- carry {} : {} {:+.1} yd   {} dodge / {} broke / {} over ----\n",
-                            last.index,
-                            last.outcome.label(),
-                            last.yards,
-                            last.dodges,
-                            last.broken,
-                            last.hurdled
-                        );
-                    }
-                }
-                if tally.carries >= carries {
-                    break;
+        if report.ledger.attempts > counted {
+            counted = report.ledger.attempts;
+            tally.carries = counted;
+            if let Some(last) = report.ledger.last {
+                tally.touchdowns += u32::from(last.outcome == AttemptOutcome::Touchdown);
+                tally.tackled += u32::from(last.outcome == AttemptOutcome::Tackled);
+                tally.yards += last.yards;
+                if narrate {
+                    println!(
+                        "  ---- carry {} : {} {:+.1} yd   {} dodge / {} broke / {} over ----
+",
+                        last.index,
+                        last.outcome.label(),
+                        last.yards,
+                        last.dodges,
+                        last.broken,
+                        last.hurdled
+                    );
                 }
             }
         }
-    }
+    });
     tally
 }
 

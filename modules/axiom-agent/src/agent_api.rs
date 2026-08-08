@@ -18,6 +18,7 @@ use crate::decision_report::DecisionReport;
 use crate::hold_set_brain::HoldSetBrain;
 use crate::observation::{Observation, ObservationFact};
 use crate::observation_builder::ObservationBuilder;
+use crate::reaction_buffer::{self, ReactionBuffer};
 use crate::observation_channel::ObservationChannel;
 use crate::replay_brain::ReplayBrain;
 use crate::scripted_brain::{ScriptRule, ScriptedBrain};
@@ -95,6 +96,55 @@ impl AgentApi {
     /// An empty memory bounded to `capacity` entries.
     pub fn empty_memory(capacity: usize) -> AgentMemory {
         AgentMemory::empty_with_capacity(capacity)
+    }
+
+    /// A copy of `profile` reacting `ticks` ticks late.
+    pub fn profile_with_reaction_ticks(profile: AgentProfile, ticks: u32) -> AgentProfile {
+        profile.with_reaction_delay_ticks(ticks)
+    }
+
+    /// A copy of `profile` reacting `millis` milliseconds late at a fixed step
+    /// of `step_delta_nanos`.
+    ///
+    /// The convenience that matters: reaction time is discussed in milliseconds
+    /// — a person is "about 250 ms on a visual cue", not "about fifteen ticks" —
+    /// while the module counts ticks, and the conversion depends on a step rate
+    /// that belongs to the runtime rather than to the human.
+    pub fn profile_with_reaction_millis(
+        profile: AgentProfile,
+        millis: u32,
+        step_delta_nanos: u64,
+    ) -> AgentProfile {
+        profile.with_reaction_delay_ticks(reaction_buffer::ticks_for_millis(
+            millis,
+            step_delta_nanos,
+        ))
+    }
+
+    /// How many ticks `millis` milliseconds is at a step of `step_delta_nanos`.
+    pub fn reaction_ticks_for_millis(millis: u32, step_delta_nanos: u64) -> u32 {
+        reaction_buffer::ticks_for_millis(millis, step_delta_nanos)
+    }
+
+    /// A **reaction delay line** of `capacity` frames, seeded with an empty
+    /// observation for `agent_id` at `tick`.
+    ///
+    /// Push what the agent can see each tick with [`Self::perceive`], and hand
+    /// the brain what it may act on with [`Self::reacted`]. An agent stepped
+    /// straight from a fresh observation has the reflexes of a machine; one
+    /// stepped from this has the reflexes its profile says it has.
+    pub fn reaction_buffer(agent_id: AgentId, tick: Tick, capacity: usize) -> ReactionBuffer {
+        ReactionBuffer::seeded(capacity, Observation::empty(agent_id, tick))
+    }
+
+    /// Record what the agent can see this tick.
+    pub fn perceive(buffer: &mut ReactionBuffer, observation: Observation) {
+        buffer.perceive(observation);
+    }
+
+    /// What the agent may act on now, under `profile`'s reaction delay.
+    pub fn reacted(buffer: &ReactionBuffer, profile: AgentProfile) -> &Observation {
+        buffer.reacted(profile)
     }
 
     /// An empty observation for `agent_id` at `tick`.

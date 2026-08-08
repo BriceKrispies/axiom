@@ -47,13 +47,7 @@ impl SimState {
                 && self.runback.back.is_some(),
             jump_cooldown_left: self.runback.jump_cooldown_left(self.tick),
             move_ready: self.runback.move_available(self.tick) && self.back_is_carrying(),
-            charge_window: self.runback.back.and_then(|back| {
-                read::charge_window(
-                    self,
-                    back,
-                    self.runback.move_available(self.tick) && self.back_is_carrying(),
-                )
-            }),
+            charge_window: self.runback.charge_window,
             dodges: self.runback.dodges,
             hurdled: self.runback.hurdled,
             broken: self.runback.broken,
@@ -73,12 +67,26 @@ impl SimState {
         // pre-snap throw press: it is dropped rather than banked.
         let Some(back) = self.runback.back.filter(|_| self.back_is_carrying()) else {
             self.runback.pending = None;
+            self.runback.charge_window = None;
             self.clear_move_state();
             return;
         };
         self.commit_move(back);
         self.carry_move(back);
         self.judge_threats(back);
+        self.advance_charge_window(back);
+    }
+
+    /// Advance the charge tell. Last, so it reflects the field as this tick
+    /// leaves it — the same field the player will be looking at when they decide
+    /// whether to press.
+    fn advance_charge_window(&mut self, back: PlayerId) {
+        self.runback.charge_window = read::advance_charge_window(
+            self,
+            back,
+            self.runback.move_available(self.tick) && self.back_is_carrying(),
+            self.runback.charge_window,
+        );
     }
 
     /// A move in progress when possession or the play is lost simply stops; the

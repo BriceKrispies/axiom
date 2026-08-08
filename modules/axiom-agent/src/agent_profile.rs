@@ -52,6 +52,18 @@ impl AgentProfile {
         }
     }
 
+    /// A copy of this profile with its reaction delay overridden, in **ticks**.
+    ///
+    /// The delay is honored by [`crate::AgentApi::reaction_buffer`]: an agent
+    /// decides on the observation it could see this many ticks ago. Every other
+    /// field is preserved.
+    pub const fn with_reaction_delay_ticks(self, reaction_delay_ticks: u32) -> Self {
+        AgentProfile {
+            reaction_delay_ticks,
+            ..self
+        }
+    }
+
     /// A copy of this profile with its action budget overridden. An app uses
     /// this to throttle (or, at `0`, freeze) a *deciding* agent — the scripted
     /// brain honors the budget; the replay brain reproduces its recording

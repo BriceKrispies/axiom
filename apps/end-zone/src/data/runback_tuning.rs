@@ -82,6 +82,13 @@ pub struct RunbackTuning {
     /// before the contest even started.
     pub charge_ideal_gap: f32,
     /// How far either side of the ideal gap timing decays to its floor, yd.
+    ///
+    /// Wide, and deliberately. The skill the charge is meant to test is *which
+    /// defender you take on* — reading whether he is squared up and whether you
+    /// have the speed — not whether you pressed inside a narrow band of
+    /// distance. At a span of 3.0 the winnable band was so tight that the tell
+    /// lit for about a tenth of a second at a time, which is a flicker rather
+    /// than a cue, and no amount of indicator work fixes a window that small.
     pub charge_timing_span: f32,
     /// How much of the charge is lost at the worst possible timing, `0..1`.
     pub charge_timing_penalty: f32,
@@ -144,8 +151,8 @@ impl Default for RunbackTuning {
             shoulder_reach: 0.4,
             charge_drive: 2.2,
             charge_ideal_gap: 3.4,
-            charge_timing_span: 3.0,
-            charge_timing_penalty: 0.6,
+            charge_timing_span: 4.6,
+            charge_timing_penalty: 0.42,
             charge_resist_speed: 5.6,
             charge_brace_floor: 0.55,
             charge_knock_speed: 5.5,

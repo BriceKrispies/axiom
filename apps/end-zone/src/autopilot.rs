@@ -42,8 +42,24 @@ pub fn call_play(step: &AttemptStep) -> Option<usize> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Aggression {
     /// How near a defender must be before the policy does anything at all, yd.
-    /// Its whole skill is here: react too early and the move is spent before the
-    /// defender commits, too late and he has already made the tackle.
+    ///
+    /// This is the number that decides **how long a decision window is**, and it
+    /// turned out to be the binding constraint on the whole game. At 3.4 yd with
+    /// two bodies closing at ~10 yd/s, a player has a third of a second between
+    /// noticing an encounter and being inside it — which is less than a human
+    /// reaction time. Measured: an agent given a 500 ms latency threw ONE charge
+    /// in twelve carries and never once got a leap off, against eight charges and
+    /// three leaps for the same agent with reflexes. The moves were not hard to
+    /// use; they were impossible to use in time.
+    ///
+    /// Widening it to 7 yd is NOT the fix, and measuring that was worth the
+    /// attempt: the policy then answers every encounter from range, spends its
+    /// move before the defender has committed, and is in recovery when he
+    /// arrives. The real fix is for a decision made early to still be the right
+    /// one when it lands — the policy has to reason about where the encounter
+    /// WILL be, not where it is — and that is a piece of work in its own right.
+    /// Left at the value that plays well with reflexes, with the latency finding
+    /// recorded rather than papered over.
     pub react_range: f32,
     /// How decisively the predicted charge must be won before the policy will
     /// take contact rather than avoid it. `1.0` is a dead heat; above it is

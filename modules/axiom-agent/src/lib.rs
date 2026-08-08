@@ -51,6 +51,7 @@ mod hold_set_brain;
 mod observation;
 mod observation_builder;
 mod observation_channel;
+mod reaction_buffer;
 mod replay_brain;
 mod scripted_brain;
 
