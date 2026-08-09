@@ -705,7 +705,7 @@ fn install_lights(app: &mut RunningApp) -> Entity {
 /// blue further up. Compounded over the whole frame that reads as a cold,
 /// electric cast, which is the opposite of the noon the reference was shot at.
 ///
-/// `sunlit` inverts exactly those two (`[1.15, 1.00, 1.05]` and `1.02`) and keeps
+/// `sunlit` inverts exactly those two (a warm white balance and `1.02`) and keeps
 /// `cinematic`'s contrast and black point, which were never the defect. The
 /// exposure lift is deliberately small — `1.02 -> 1.08`, well under the `1.10+`
 /// the band error alone would ask for — because the constraint that binds here is

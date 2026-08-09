@@ -303,16 +303,24 @@ pub const SKY_HAZE_HEIGHT: f32 = 0.234;
 /// not a colour someone liked; it is a *solution* to "what linear triple does the
 /// installed grade turn into the reference's horizon band", so a new grade is a
 /// new equation. `[0.35, 0.53, 0.49]` was that solution for `cinematic`; under
-/// `FramePostProcess::sunlit` — which warms the white balance to
-/// `[1.15, 1.00, 1.05]` and drops saturation to `1.02` — the same target inverts
-/// to `[0.2043, 0.4695, 0.4470]`. The red falls the furthest, and that is the
-/// point rather than a surprise: the grade now supplies the warmth that this
-/// constant used to have to carry on its own, so the haze can go back to being
-/// the pale, nearly-neutral scatter it is described as above instead of a colour
-/// pre-compensated for a grade that was pulling red out from under it. Displayed,
-/// the far road, the receding palm rank, the headland and the skyline all land
-/// where they did — that is what the round-trip test pins — but they now get
-/// there with the frame's light rather than against it.
+/// `FramePostProcess::sunlit` — which warms the white balance and drops saturation
+/// to `1.02` — the same target inverts to this triple. The red falls furthest from
+/// `cinematic`'s solution, and that is the point rather than a surprise: the grade
+/// supplies warmth this constant used to have to carry on its own, so the haze can
+/// go back to being the pale, nearly-neutral scatter it is described as above
+/// instead of a colour pre-compensated for a grade that was pulling red out from
+/// under it. Displayed, the far road, the receding palm rank, the headland and the
+/// skyline all land where they did — that is what the round-trip test pins — but
+/// they now get there with the frame's light rather than against it.
+///
+/// **And it just moved again, for the same reason.** `sunlit`'s white balance eased
+/// its red `1.15 -> 1.04` (see that preset: the key light was re-gelled golden, and
+/// the grade had gone on stacking a second, unmeasured 15% of red on top of it). A
+/// smaller red gain in the grade means a *larger* authored red is needed to land the
+/// same measured band, so the solution moves `0.2043 -> 0.2541` on red alone. Green
+/// and blue are untouched, because their gains are. The displayed band is identical
+/// — `(157, 204, 210)` — which is the whole property this constant exists to hold:
+/// the grade changed, the atmosphere did not.
 ///
 /// ## The one thing this costs, and who owns it
 ///
@@ -328,7 +336,7 @@ pub const SKY_HAZE_HEIGHT: f32 = 0.234;
 /// The trade is not close. The seam is one row. The surfaces the fog actually
 /// paints — the far road, the receding palm rank, the headland, the skyline — are
 /// hundreds of rows, and they are the ones the reference measures against.
-pub const HAZE: [f32; 3] = [0.2043, 0.4695, 0.4470];
+pub const HAZE: [f32; 3] = [0.2541, 0.4695, 0.4470];
 
 /// The sun's disc colour — **deliberately far above `1.0`**.
 ///
