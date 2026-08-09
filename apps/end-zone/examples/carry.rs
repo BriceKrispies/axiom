@@ -17,6 +17,22 @@ use axiom_end_zone::events::SimEvent;
 use axiom_end_zone::launch::RunConfig;
 use axiom_end_zone::showcase::ShowcaseRun;
 
+/// A defender moving AWAY from the ball carrier while standing between him and
+/// the end zone is doing the one thing a defender must never do. This counts it.
+///
+/// Reported per defender rather than in aggregate, because "the defense is bad"
+/// is not a bug report and "player 13 retreats for 40 ticks a carry while
+/// goal-side of the runner" is.
+#[derive(Debug, Default, Clone, Copy)]
+struct Retreat {
+    /// Ticks spent in front of the carrier (between him and the end zone).
+    ahead_ticks: u32,
+    /// Of those, ticks spent moving away from him.
+    retreat_ticks: u32,
+    /// The worst single tick's retreat speed, yd/s.
+    worst: f32,
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let value = |flag: &str, default: u64| -> u64 {
@@ -29,11 +45,13 @@ fn main() {
     let seed = value("--seed", 7);
     let carries = value("--carries", 3);
     let verbose = args.iter().any(|a| a == "--verbose");
+    let watch_defense = args.iter().any(|a| a == "--defense");
 
     let config = RunConfig::new(seed);
     let mut run = ShowcaseRun::new_run(&config);
     let mut resolved = 0u64;
     let mut last_phase = None;
+    let mut retreats: Vec<Retreat> = vec![Retreat::default(); 14];
 
     println!("== End Zone carry inspector  seed {seed} ==");
     for _ in 0..(carries * 900) {
@@ -47,6 +65,9 @@ fn main() {
         if last_phase != Some(step.phase) {
             println!("t{:>5}  phase {}", run.sim.tick, step.phase.label());
             last_phase = Some(step.phase);
+        }
+        if watch_defense {
+            watch(&run, &mut retreats, verbose);
         }
         let out = run.step(&[]);
         for stamped in &out.events {
@@ -137,6 +158,21 @@ fn main() {
             }
         }
     }
+    if watch_defense {
+        println!("
+== defenders that RETREAT while goal-side of the carrier ==");
+        println!("  {:>6} {:>12} {:>12} {:>8}", "player", "ahead ticks", "retreating", "worst");
+        for (index, r) in retreats.iter().enumerate() {
+            if r.ahead_ticks == 0 {
+                continue;
+            }
+            let pct = 100.0 * r.retreat_ticks as f32 / r.ahead_ticks as f32;
+            println!(
+                "  {index:>6} {:>12} {:>9} ({:.0}%) {:>7.1}",
+                r.ahead_ticks, r.retreat_ticks, pct, r.worst
+            );
+        }
+    }
     if let Some(ledger) = run.ledger() {
         println!(
             "== {} carries, {:.1} yd/carry, {} TD, {} moves ==",
@@ -145,5 +181,53 @@ fn main() {
             ledger.touchdowns,
             ledger.moves()
         );
+    }
+}
+
+/// Record, for every defender, whether he is goal-side of the carrier and
+/// whether he is moving away from him this tick.
+fn watch(run: &ShowcaseRun, out: &mut [Retreat], verbose: bool) {
+    let sim = &run.sim;
+    let Some(back) = sim.runback.back else { return };
+    if sim.possession != Some(back) {
+        return;
+    }
+    let runner = sim.players[back.index()];
+    let forward = sim.frame.forward();
+    for defender in sim.players.iter().filter(|p| p.team != runner.team) {
+        if !defender.anim.can_act() {
+            continue;
+        }
+        let to_runner = axiom::prelude::Vec3::new(
+            runner.pos.x - defender.pos.x,
+            0.0,
+            runner.pos.z - defender.pos.z,
+        );
+        let gap = to_runner.length().max(1.0e-4);
+        // Goal-side: the defender is downfield of the carrier, i.e. between him
+        // and the end zone. That is the ONE place a defender must not retreat
+        // from, because there is nobody behind him to clean up.
+        let goal_side = -to_runner.dot(forward) > 0.5;
+        if !goal_side {
+            continue;
+        }
+        let approach = defender.vel.dot(to_runner.mul_scalar(1.0 / gap));
+        let record = &mut out[defender.id.index()];
+        record.ahead_ticks += 1;
+        if approach < -0.5 {
+            record.retreat_ticks += 1;
+            record.worst = record.worst.max(-approach);
+            if verbose && record.retreat_ticks % 20 == 1 {
+                println!(
+                    "t{:>5}  player {} RETREATS at {:.1} yd/s while {:.1} yd goal-side | resp {:?} | {:?}",
+                    sim.tick,
+                    defender.id.0,
+                    -approach,
+                    gap,
+                    sim.responsibility(defender.id).label(),
+                    sim.intents[defender.id.index()],
+                );
+            }
+        }
     }
 }
