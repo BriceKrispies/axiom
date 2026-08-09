@@ -505,20 +505,14 @@ fn install_lights(app: &mut RunningApp) -> Entity {
     app.add_light(
         DirectionalLight {
             direction: KEY_DIRECTION,
-            // **Sunlight.** The cool `(0.72, 0.80, 1.0)` this replaces was
-            // moonlight — sunlight reflected off bare rock — and a cool key is
-            // the single most night-signalling term a rig has, because the eye
-            // reads warm-key-against-cool-fill as *day* and the reverse as
-            // *night* before it reads anything else in the frame.
-            //
-            // The reference is a high coastal sun: near-white, warm only by the
-            // slight red-over-blue a short atmospheric path leaves. Pairing it
-            // with the blue sky ambient above is what produces the reference's
-            // defining split — warm sunlit tarmac against blue-grey shadow.
+            // **Sunlight** — see [`KEY_COLOR`], which is measured off the
+            // reference's own road rather than argued from a colour-temperature
+            // intuition. This is the term that decides whether the frame has a
+            // sunlit surface in it at all.
             color: Color::linear_rgb(
-                palette::ratio(1.0),
-                palette::ratio(0.955),
-                palette::ratio(0.88),
+                palette::ratio(KEY_COLOR[0]),
+                palette::ratio(KEY_COLOR[1]),
+                palette::ratio(KEY_COLOR[2]),
             ),
             // NOT `palette::ratio`, which clamps to `0..=1`. That helper is a
             // sanitizer for *colour channels*, where above-one is meaningless,
@@ -730,8 +724,16 @@ const CLOUD_SCALE: f32 = 0.5;
 
 /// The key light's intensity — **the frame's exposure**.
 ///
-/// `1.45`, and the number is measured off the reference rather than argued from
-/// it. The previous `2.6` was derived twice by arithmetic — once through
+/// `2.15`, and the number is measured off the reference rather than argued from
+/// it. **It is a gain, not a brightness**: what the frame actually receives is
+/// `intensity · N·L · `[`KEY_COLOR_LUMA`], and this constant only ever moves in
+/// company with that gel. It was `1.45` against a near-white key of luma
+/// `0.959`; [`KEY_COLOR`] re-gels the sun to the reference's measured golden
+/// `(1.0, 0.58, 0.27)`, luma `0.647`, and `1.45 · 0.959 / 0.647 = 2.15` is the
+/// intensity that keeps every word below true. Flat road is unchanged at luma
+/// `0.725`. Read the two constants as one decision.
+///
+/// The `2.6` before that was derived twice by arithmetic — once through
 /// [`FramePostProcess::low_key`]'s `0.16` black point, then re-derived when the
 /// colorist retired that black point — and never once checked against a render.
 /// This pass has both frames in hand and inverts the pipeline instead.
@@ -757,33 +759,109 @@ const CLOUD_SCALE: f32 = 0.5;
 /// all*. No reduction of the sky fill and no grade can bring that back: a term
 /// that on its own overshoots the finished value is over-strength, full stop.
 /// That is what makes this the light's defect and not the colourist's. Solving
-/// `I · 0.345 · 0.959 = 0.444` gives `1.34`; carried through the test's own
-/// (slightly different, luma-averaged) model the road lands at `0.289` encoded
-/// against the reference's `0.288`, and `1.45` is the value that hits it.
+/// `I · 0.345 · keyLuma = 0.444` is what sizes the key, and the answer moves with
+/// the gel: at the old near-white `keyLuma` of `0.959` it gave `1.34`, and `1.45`
+/// was the value that carried the test's own (slightly different, luma-averaged)
+/// model onto the reference's `0.288` encoded. At [`KEY_COLOR_LUMA`]'s `0.647`
+/// the identical solve gives `2.15`, and lands the identical `0.285` encoded —
+/// same light, same exposure, differently coloured.
 ///
 /// **What the over-key was costing, beyond level.** Globals of `1.16` on an
 /// up-facing surface mean every albedo over `0.86` clips: the lane paint, the
 /// car's white stripes and the sunlit sand all pinned at `255`, and all of it
 /// then handed to the bloom — which is the milky wash over the champion, not a
-/// haze setting. At `1.45` the up-facing globals are `0.77`: the paint renders
-/// near byte 195, still comfortably the brightest thing on the road, with
-/// headroom above it instead of a bloom smear.
+/// haze setting. Today the up-facing globals are `(0.932, 0.680, 0.560)`, a luma
+/// of `0.725`: the paint renders near byte 195, still comfortably the brightest
+/// thing on the road, with headroom above it instead of a bloom smear.
 ///
 /// It also restores the terminator on vertical surfaces. A car flank facing the
 /// sun went from `2.44` (clipped to a flat orange slab) to `1.36`; its shaded
 /// flank still gets the sky fill and nothing else, so the two now differ by a
 /// readable stop instead of both sitting at the top of the range.
 ///
-/// **The one thing this cannot fix**, and the reason the road stays flat even
-/// at the right level: the reference's road is 51% warm sunlit and 43% cool
-/// shadow, and the champion's is 0.1% warm and has no cast shadow anywhere.
-/// That is not a level — `axiom_render_pipeline`'s shadow camera is a fixed
+/// **The one thing this cannot fix.** The reference's road is 57% warm sunlit
+/// and 42% cool shadow. Two separate things have to be true for that, and only
+/// one of them is a level: the sun-struck road has to *be warm* (that is
+/// [`KEY_COLOR`], which this pass fixes — the old near-white key made it
+/// arithmetically impossible), and something has to *occlude* the sun to make
+/// the cool half. The second is out of an app's reach —
+/// `axiom_render_pipeline`'s shadow camera is a fixed
 /// 20 m orthographic box anchored at the **world origin** (its own module docs
 /// say so), and this moment is ~1.9 km down a 9 km course. Every cast shadow in
-/// this frame is geometrically out of the map. Sizing the key is the half of
-/// the axis an app can reach; the other half is a frame-contract change and
-/// belongs to the engine architect.
-const KEY_INTENSITY: f32 = 1.45;
+/// this frame is geometrically out of the map. Sizing and colouring the key is
+/// the half of the axis an app can reach; the other half is a frame-contract
+/// change and belongs to the engine architect.
+const KEY_INTENSITY: f32 = 2.15;
+
+/// The key light's **colour** — the sun's gel, and the frame's single largest
+/// remaining lighting defect.
+///
+/// This replaces `(1.0, 0.955, 0.88)`: a near-white key, authored as "the
+/// reference is a high coastal sun, warm only by the slight red-over-blue a
+/// short atmospheric path leaves." That sentence is a colour-temperature
+/// intuition, and the reference disagrees with it by a factor of three.
+///
+/// **The measurement.** The road is the calibration surface, exactly as in
+/// [`KEY_INTENSITY`]. Take the reference's road plane alone (a trapezoid from
+/// the mid-field down to the HUD, excluding the sand verge and the lane paint)
+/// and split it on chroma — warm `R > B` is sun-struck, cool `B > R` is
+/// sky-fill-only. Linearise both means and *subtract*. What is left is the sun
+/// and nothing else, because the sky term is common to both and the asphalt's
+/// albedo is the same pixel-for-pixel:
+///
+/// | reference road   | sRGB               | linear                       |
+/// |------------------|--------------------|------------------------------|
+/// | sunlit (warm)    | `(91.0,76.5,67.5)` | `(0.1045, 0.0733, 0.0569)`   |
+/// | shaded (cool)    | `(27.2,40.5,53.1)` | `(0.0111, 0.0217, 0.0357)`   |
+/// | **sun** (lit−shaded) |                | `(0.0934, 0.0516, 0.0212)`   |
+///
+/// Normalised to red, the reference's sun is **`(1.00, 0.55, 0.23)`** — a deeply
+/// golden low sun, not a white one. (The same inversion run over the wider road
+/// band, `n = 278k`, returns `(1.00, 0.59, 0.26)`; the two agree.) The shaded
+/// road normalises to `(1.00, 1.96, 3.22)`, which is the blue sky dome the
+/// ambient above is already authored as — that term needs nothing and is left
+/// alone.
+///
+/// **Why this, and not the level, is what the road is missing.** The champion's
+/// road measures **0% warm pixels**; the reference's is **57% warm**. Not "a bit
+/// cool" — *not one pixel of road in the frame reads as sun-struck.* The
+/// arithmetic says why, and it is not a shadow-map problem. On flat road the old
+/// rig laid `1.45 · N·L(0.345) · (1.0, 0.955, 0.88) = (0.500, 0.478, 0.440)` of
+/// key onto `(0.19, 0.25, 0.36)` of sky, summing to `(0.690, 0.728, 0.800)`.
+/// **Blue is the largest channel.** A near-white key carries almost as much blue
+/// as red, so it can never out-run a deliberately blue fill: under that rig the
+/// road is cool *in full sun*, and the frame's defining warm-lit-against-cool-
+/// shadow split is arithmetically unreachable at any intensity. The measured
+/// champion road, `(62.3, 63.4, 69.0)`, is that prediction to within a level.
+///
+/// With this gel the same road takes `2.15 · 0.345 · (1.0, 0.58, 0.27) =
+/// (0.742, 0.430, 0.200)`, summing to `(0.932, 0.680, 0.560)` — red largest,
+/// `B/R = 0.60`, against the reference's own `0.54`. The road becomes warm where
+/// the sun reaches it and stays the untouched blue-grey `(0.19, 0.25, 0.36)`
+/// where it does not.
+///
+/// **This move is exposure-neutral by construction, and that is the point.** A
+/// gel costs luma: this one is `0.647` against the old key's `0.959`, so
+/// [`KEY_INTENSITY`] rises `1.45 → 2.15` in exactly that inverse ratio. Flat
+/// road goes from luma `0.725` to luma `0.725` — the frame's measured exposure,
+/// which [`KEY_INTENSITY`] derives at length and which this pass has no argument
+/// with, does not move. Only the *hue* of the light moves. Nor can it clip: the
+/// largest up-facing global becomes red at `0.932` (green and blue both *fall*,
+/// to `0.680` and `0.560`), and the brightest albedo in shot is the lane paint's
+/// `0.72`, which lands at `0.671` linear — still under one, still well under
+/// [`FrameBloom::highlights`]'s `1.0` threshold, so nothing new spills.
+const KEY_COLOR: [f32; 3] = [1.0, 0.58, 0.27];
+
+/// [`KEY_COLOR`]'s Rec. 709 luma — how much *brightness*, as opposed to hue, the
+/// gel actually delivers.
+///
+/// A rig's exposure is `intensity · N·L · this`, never `intensity · N·L`: two
+/// keys at the same intensity but different gels light the frame to different
+/// levels, and dropping the term is how a re-gel silently becomes a re-exposure.
+/// Named so `the_sun_out_lights_every_other_term_in_the_frame` can hold the
+/// road against the reference's measured byte through a *complete* model.
+const KEY_COLOR_LUMA: f32 =
+    0.2126 * KEY_COLOR[0] + 0.7152 * KEY_COLOR[1] + 0.0722 * KEY_COLOR[2];
 
 /// How high above the road the car's pool light hangs (m).
 ///
@@ -1049,13 +1127,39 @@ mod tests {
     /// one every term lands on hardest.
     #[test]
     fn the_sun_out_lights_every_other_term_in_the_frame() {
-        // The key on flat ground is `intensity * N·L`, with N = +Y.
+        // The key on flat ground is `intensity * N·L * keyLuma`, with N = +Y.
+        //
+        // The `keyLuma` factor is not decoration. This model used to be
+        // `KEY_INTENSITY * n_dot_l`, which is *colour-blind*, and a colour-blind
+        // exposure model cannot tell a re-gel from a re-exposure: swap the sun's
+        // hue and every number below silently reports the frame's old
+        // brightness. That is the exact failure [`KEY_COLOR`] would have walked
+        // into — its gel drops the key's luma from `0.959` to `0.647`, a third of
+        // the frame's light, and this model would have shrugged. With the term
+        // present the model is complete, and it is worth noting it changes
+        // nothing about the rig it was written against: the near-white key's
+        // `1.45 * 0.345 * 0.959` and today's `2.15 * 0.345 * 0.647` are the same
+        // `0.480` to four places, which is the whole claim [`KEY_INTENSITY`]
+        // makes about that pairing.
         let len = (KEY_DIRECTION.x * KEY_DIRECTION.x
             + KEY_DIRECTION.y * KEY_DIRECTION.y
             + KEY_DIRECTION.z * KEY_DIRECTION.z)
             .sqrt();
         let n_dot_l = -KEY_DIRECTION.y / len;
-        let key = KEY_INTENSITY * n_dot_l;
+        let key = KEY_INTENSITY * n_dot_l * KEY_COLOR_LUMA;
+
+        // The gel itself: the reference's sun is warm, and "warm" is a hard
+        // inequality, not a taste. A key whose blue equals its red cannot make a
+        // warm surface against the blue sky fill above no matter how strong it
+        // is — the frame's entire sunlit/shadowed split is unreachable — and that
+        // is precisely the state the measured champion road was in (0% warm
+        // pixels against the reference's 57%). Pinned as a floor, not a value, so
+        // the gel can be re-measured without re-litigating the direction.
+        assert!(
+            KEY_COLOR[2] < KEY_COLOR[0] * 0.6,
+            "the key has drifted back toward white ({KEY_COLOR:?}) — against the \
+             blue sky fill it cannot put a warm pixel on the road at any intensity"
+        );
 
         // A daylight key is a gain past one, and `palette::ratio` clamps to
         // `0..=1`. Routing the intensity through that helper — the obvious thing
