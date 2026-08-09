@@ -29,6 +29,7 @@ pub mod perception;
 pub mod personnel;
 pub mod playcall;
 pub mod protection;
+pub mod pursuit;
 pub mod stage;
 pub mod steering;
 pub mod tactics;

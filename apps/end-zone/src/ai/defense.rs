@@ -16,10 +16,14 @@ use super::assignment::{AssignmentKind, ResolvedAssignment};
 use super::brain::{BrainCtx, PerceptionFrame, RoleState};
 use super::engagement;
 use super::perception::Responsibility;
-use super::{steering, PlayerIntent};
+use super::{pursuit, steering, PlayerIntent};
 
 /// A loose ball inside this range is worth chasing, yards.
 const LOOSE_ALERT: f32 = 16.0;
+
+/// How far off the interception point a leverage responsibility sets up, yards.
+/// Small: it is a shoulder, not a different destination.
+const LEVERAGE: f32 = 2.0;
 
 /// Push a defensive player's candidate actions.
 pub fn candidates(
@@ -71,31 +75,30 @@ fn runner(
     let seen_pos = seen.positions[target.index()];
     let seen_vel = seen.velocities[target.index()];
     let side = escape_side(seen_pos, seen_vel);
-    let dist = flat_dist(player.pos, seen_pos);
-    let lead = steering::pursuit_lead_seconds(dist, &player.archetype);
-    let aim = steering::predict(seen_pos, seen_vel, lead);
-    // Every defender pursues the carrier, but his responsibility biases the
-    // ANGLE he takes so the team converges from different leverages instead of
-    // stacking one pursuit path (spec §4, §8) — nobody hangs back off the ball.
+    // ONE objective for everybody: cut the carrier off before the end zone.
+    // Every defender solves the same interception (see [`super::pursuit`]); the
+    // responsibility only decides which SHOULDER he takes it from, as a lateral
+    // nudge to that one point.
+    //
+    // It is deliberately not a set of separate aim formulas any more. That is
+    // what it was, and with nothing tying the formulas to a shared objective one
+    // of them could — and did — contradict it: the deep safety's aim point grew
+    // with his own distance from the ball, so backing away made him back away
+    // further, and he spent 59% of his goal-side ticks sprinting the wrong way.
+    // A defender cannot do that here, because an interception point is by
+    // construction somewhere the carrier has not reached yet.
+    let aim = pursuit::intercept(player, seen_pos, seen_vel, ctx.per.drive_sign);
+    let bias = |lateral: f32| Vec3::new(aim.x + lateral, 0.0, aim.z);
     let (point, urgency, reason) = match resp {
-        Responsibility::PrimaryTackler => (aim, primary_urgency(player, seen_pos, ctx), "attack-runner"),
-        Responsibility::OutsideContain => (
-            Vec3::new(aim.x + side * 2.0, 0.0, aim.z),
-            0.85,
-            "contain",
-        ),
-        Responsibility::Cutback => (
-            Vec3::new(aim.x - side * 2.0, 0.0, aim.z),
-            0.8,
-            "cutback",
-        ),
-        // The last line of defense meets the carrier further downfield (a longer
-        // lead) so he is goal-side, then attacks.
-        Responsibility::DeepHelp => (
-            steering::predict(seen_pos, seen_vel, lead * 1.6),
-            0.8,
-            "deep-help",
-        ),
+        Responsibility::PrimaryTackler => {
+            (aim, primary_urgency(player, seen_pos, ctx), "attack-runner")
+        }
+        Responsibility::OutsideContain => (bias(side * LEVERAGE), 0.85, "contain"),
+        Responsibility::Cutback => (bias(-side * LEVERAGE), 0.8, "cutback"),
+        // The last line of defense takes the SAME interception as everyone
+        // else — he is simply the one furthest from it. His old longer lead was
+        // the bug.
+        Responsibility::DeepHelp => (aim, 0.85, "deep-help"),
         _ => (aim, 0.6, "backside"),
     };
     pursue_or_tackle(player, target, seen_pos, point, Priority::BallThreat, urgency, reason, ctx, out);
