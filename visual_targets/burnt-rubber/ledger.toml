@@ -1938,3 +1938,143 @@ atmosphere = 2
 scale_and_proportion = 2
 detail_density = 2
 artifact_level = 2
+
+[[iteration]]
+iteration = 17
+attacked_axis = "none — scoring recalibration"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/champions/INDEX.md",
+  "visual_targets/burnt-rubber/champions/0011-2026-08-09-ffd4334e.png",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic audit of the era-C re-baseline. EIGHT axes lowered, final_score 2.00 ->
+1.10, on an image the scorecard had never described. The next-attack axis is
+CONFIRMED unchanged.
+
+THE FINDING IS THE ONE THE RE-BASELINE COMMIT ANNOUNCED AND LEFT OPEN.
+ffd4334e replaced champion.png with a fresh WebGL2 capture of main at the era-C
+moment, because the course-authoring rework had moved the road under the
+recipe's placement, and stated in its own message: "The scorecard is NOT touched
+here: it still describes d054860b's image ... this pass's critic re-scores
+against this baseline." Until this entry, the campaign was carrying a 2.00 that
+was measured on a frame no longer on disk. That is the stale-champion failure in
+its cleanest form — declared honestly by the capture, and still a false record
+for as long as it stood.
+
+NINE OF TWELVE PASS-3 CREDITS DO NOT REPRODUCE on the image that is there now.
+Re-derived from the two PNGs, nothing inherited:
+
+  scene-band median   139.7 ref | 96.4 claimed | 78.4 on disk   (WORSE by 18)
+  pixels above L=250  1.43% ref | 0.27% claimed | 1.54% on disk (clip returned)
+  road, 7 taps        (95,82,73)..(236,211,152) ref, a 140-level warm ramp
+                    | (132,97,93) claimed
+                    | (68,69,74) FLAT at every tap, b > r everywhere
+  sky "cloud" frac    12.1% ref | "~18 vs ~19%" claimed | 2.2% on disk
+  painted-body w/h    1.14 ref (1.13 at iteration 15) | 1.79 claimed | 2.10
+  sky median luma     124.1 ref | -- | 170.5   (+46)
+  ground median luma  114.9 ref | -- |  69.1   (-46)
+
+THE EXPOSURE MATCH IS TWO ERRORS CANCELLING. Whole-frame mean luma 115.6 against
+114.4, and clipping 1.54% against 1.43%, both read like convergence. They are a
+sky 46 levels too bright sitting over a ground 46 levels too dark: a hot pale sky
+over a dark road, where the reference is a deep cobalt sky over a sun-struck one.
+A global single-number match assembled from an inverted tonal balance is not
+evidence of convergence on contrast_and_exposure and is not credited as such.
+
+THE ROAD IS BLUE AGAIN. The clearest single retraction. pass 3 recorded the road
+hue as "nearly exact ... where pass 2 was blue-tilted at (113,105,122)". The road
+on disk is (68,69,74) at seven taps from bumper to horizon — achromatic, blue-
+tilted at every tap, and with no luminance ramp at all. Both halves of
+material_and_texture_detail's rise are gone, and the axis returns to 1.
+
+WHAT SURVIVED, stated as plainly as what did not: the car still casts a shadow
+and it still falls consistently with an upper-right key (lighting_and_shadow
+HELD at 2 — its pass-3 headline is the one that reproduces); the glazed rear
+aperture is genuinely in the mesh; the aerial haze and the receding palm
+colonnade still separate near from far (depth_and_separation HELD); and the
+iteration-15 width finding reproduces exactly — the champion's body spans 0.306
+of frame width against the reference's ~0.30, so the pulled-back rig still costs
+scale_and_proportion nothing (HELD). Four axes were checked and left alone.
+
+TWO AXES SHOULD HAVE BEEN LOWER BEFORE THE RE-BASELINE, independent of it.
+detail_density has been held at 2 for four passes while the frame carries a palm
+line, a guardrail, a shrub tuft and some distant boxes against a reference with
+sea, beach, sailboats, stilt houses, parasols, headland, mountains, roofs, rocks
+and surf. artifact_level was called "largely gone" while the BOOST row prints
+across both steering pads, the hint row prints across them too AND is flush-
+clipped to x=0, and the gear disc reads "R" at 148 km/h. Those are three
+overlapping HUD defects, not one, and they are now in their sixth pass.
+
+RIGHT-AXIS CHECK: composition_and_framing is CONFIRMED as the next flaw, but for
+a different reason than the record gave. It is not winning a twelve-way tie among
+equals at 2; eight axes are at 1 and the fixed order breaks the tie at its first
+entry. The axis also acquired a second, structural divergence that no lens put
+there: the course rework made the moment a right-hand sweeper with an off-centre
+vanishing point and a guardrail wall, against the reference's dead-straight
+symmetric avenue, and the horizon dropped from 0.384h to 0.484h.
+
+ABSTRACTION GATE — a NEW failure mode, and the opposite of the last eight.
+Iteration 16 sets `abstraction_introduced = true` and names none, which is the
+defect 0005-0008 were each written to repair. This time the honest ruling is not
+"missing record": the only spine commit in the pass-3 stack is a2f86d91, and its
+own message says "No new API surface, no app change" — it moves the shadow
+volume's centre from Vec3::ZERO onto the resolved view camera inside an existing
+module. That is a DEFECT FIX, and the gate does not ask for a record for one. So
+the flag is CEREMONIAL: it claims a gate event that did not happen. No
+abstractions/0009.toml is written here, deliberately — filing a record for an
+abstraction that does not exist would be the same ceremony in the other
+direction, and would leave the next pass hunting a phantom. The correction is
+this paragraph: iteration 16 introduced no abstraction.
+
+PARITY LANGUAGE: clean. Nothing in this campaign claims the render matches, is
+done, or has reached the reference; nothing on the recalibrated scorecard is
+above 2. The word "fixed" appears in axis notes only against named engine
+defects, never against the reference.
+
+THE GUARDED ARM IS CLEAN. No score, axis note or ledger reason in this campaign
+credits or blames canvas2d. campaign.toml scopes the guard correctly
+("legibility, not parity"), the re-baseline re-captured canvas-guard.png at the
+same moment, and the recalibration above touches the judged WebGL2 arm only.
+
+BOOKKEEPING ALSO REPAIRED HERE: ffd4334e landed a new champion on main and added
+no champions/INDEX.md row and no archive, breaking that file's "one row per
+landing" invariant (rows 0004 and 0007 are the precedent for a no-pass
+re-capture). Row 0011 and the archived PNG are added. contact-sheet.png is now
+one image behind and is OWED — it is not regenerated here because that is a
+render step and this lens does not render.
+"""
+next_attacked_axis = "composition_and_framing"
+abstraction_introduced = false
+
+[iteration.scorecard_before]
+composition_and_framing = 2
+subject_fidelity = 2
+silhouette_readability = 2
+material_and_texture_detail = 2
+lighting_and_shadow = 2
+color_palette = 2
+contrast_and_exposure = 2
+depth_and_separation = 2
+atmosphere = 2
+scale_and_proportion = 2
+detail_density = 2
+artifact_level = 2
+
+[iteration.scorecard_after]
+composition_and_framing = 1
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 2
+color_palette = 2
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 2
+detail_density = 1
+artifact_level = 1
