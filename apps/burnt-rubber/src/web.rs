@@ -673,18 +673,25 @@ fn update_touch_pad(touch: &TouchControls, hidden: bool) {
     let mut html = String::with_capacity(1_024);
     for slot in &layout.slots {
         let held = touch.is_held(slot.button);
+        // Idle, the disc is a bright ring in the button's own accent over a
+        // barely-there dark fill, so the road reads *through* the cluster and
+        // the rings are the only thing drawn on top of it. Held, the accent
+        // floods the disc and the label inverts — the same colour saying the
+        // same thing louder, rather than a second, unrelated highlight colour.
+        let accent = slot.button.accent();
         let (fill, border, text) = if held {
             ("rgba(255,209,102,.34)", "rgba(255,209,102,.95)", "#12161f")
         } else {
-            ("rgba(12,18,28,.34)", "rgba(226,236,255,.42)", "#e6eeff")
+            ("rgba(8,14,24,.20)", accent, accent)
         };
         let size = slot.radius * 2.0;
         let font = (slot.radius * 0.36).clamp(10.0, 20.0);
         html.push_str(&format!(
             "<div style=\"position:absolute;left:{left}px;top:{top}px;width:{size}px;\
-             height:{size}px;border-radius:50%;background:{fill};border:2px solid {border};\
+             height:{size}px;border-radius:50%;background:{fill};border:2.5px solid {border};\
              color:{text};display:flex;align-items:center;justify-content:center;\
              font:700 {font}px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.08em;\
+             text-shadow:0 2px 6px rgba(0,0,0,.8),0 0 2px rgba(0,0,0,.9);\
              box-shadow:0 6px 22px rgba(0,0,0,.45)\">{label}</div>",
             left = slot.centre.x - slot.radius,
             top = slot.centre.y - slot.radius,
@@ -917,11 +924,15 @@ fn update_hud(hud: &HudModel, hidden: bool, telemetry: &str, bottom_strip: f32) 
                      font-weight:800;letter-spacing:.06em;text-shadow:0 0 24px #000\">{banner}</div>\
          <div style=\"position:fixed;left:0;right:0;bottom:{meter_bottom:.1}px;text-align:center;\
                      font-size:{meter_font:.1}px;line-height:1.2;\
-                     letter-spacing:.08em;opacity:.55\">BOOST [{boost_bar}]</div>\
+                     letter-spacing:.08em;color:{boost_accent};opacity:.92\">\
+                     BOOST [{boost_bar}]</div>\
          <div style=\"position:fixed;left:0;right:0;bottom:{legend_bottom:.1}px;padding:0 10px;\
                      box-sizing:border-box;text-align:center;\
                      font-size:{legend_font:.1}px;line-height:1.45;opacity:.65\">{hint}</div>",
         SPEEDO_ID = SPEEDO_ID,
+        // The meter and the BOOST button are one readout in two places, so they
+        // are one colour from one constant.
+        boost_accent = crate::touch::BOOST_ACCENT,
         meter_bottom = meter_bottom,
         meter_font = meter_font,
         legend_bottom = legend_bottom,

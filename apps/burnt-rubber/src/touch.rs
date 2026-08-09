@@ -85,7 +85,45 @@ impl PadButton {
             PadButton::LaneRight => "▶",
         }
     }
+
+    /// The accent the button is ringed and lettered in.
+    ///
+    /// The control cluster is the bottom third of a phone frame, sitting over a
+    /// road that is the brightest thing on screen. Drawn in one grey it reads as
+    /// a wash of identical discs and the eye has to *read* five words to find
+    /// the one it wants; drawn in its own colour, GAS is found by its green and
+    /// BOOST by its cyan before either word resolves. That is a composition
+    /// decision — it is what gives the bottom of the frame a shape — not a
+    /// styling flourish.
+    ///
+    /// It belongs on the button rather than in the painter because the accent is
+    /// part of what the button *means*: the boost meter above the cluster is
+    /// drawn in [`BOOST_ACCENT`] too, and the meter and the button agreeing is
+    /// the whole reason the colour is a constant and not a literal in one
+    /// `format!`.
+    pub const fn accent(self) -> &'static str {
+        match self {
+            PadButton::Accelerate => GAS_ACCENT,
+            PadButton::Boost => BOOST_ACCENT,
+            PadButton::Handbrake => DRIFT_ACCENT,
+            // Braking, resetting and hopping lanes are not modes you hold the
+            // car in, so they stay neutral and let the two coloured buttons be
+            // the ones the eye lands on.
+            PadButton::Brake | PadButton::Reset | PadButton::LaneLeft | PadButton::LaneRight => {
+                NEUTRAL_ACCENT
+            }
+        }
+    }
 }
+
+/// The accelerator's green.
+pub const GAS_ACCENT: &str = "#5ade7c";
+/// The boost's cyan — shared with the boost meter, which is the same idea.
+pub const BOOST_ACCENT: &str = "#5ac2ee";
+/// The handbrake's amber.
+pub const DRIFT_ACCENT: &str = "#ffd166";
+/// Everything that is a one-shot action rather than a mode.
+pub const NEUTRAL_ACCENT: &str = "#e9f2ff";
 
 /// One button's position and size, in viewport pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -594,6 +632,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The cluster's colour-coding is the thing that gives the bottom of the
+    /// frame a shape, so it is asserted rather than left to a stylesheet nobody
+    /// tests: every button has an accent, and the two *modes* — the accelerator
+    /// and the boost — do not share one with each other or with the neutrals.
+    #[test]
+    fn the_two_modal_buttons_are_colour_coded_apart_from_everything_else() {
+        for button in PadButton::ALL {
+            let accent = button.accent();
+            assert!(accent.starts_with('#'), "{button:?} has no accent");
+            assert_eq!(accent.len(), 7, "{button:?} accent is not a hex triplet");
+        }
+        let gas = PadButton::Accelerate.accent();
+        let boost = PadButton::Boost.accent();
+        assert_ne!(gas, boost, "GAS and BOOST must not read as the same button");
+        for neutral in [PadButton::Brake, PadButton::Reset, PadButton::LaneLeft] {
+            assert_eq!(neutral.accent(), NEUTRAL_ACCENT);
+            assert_ne!(neutral.accent(), gas);
+            assert_ne!(neutral.accent(), boost);
+        }
+        // The boost meter is painted from the same constant the button is, so a
+        // future edit cannot drift the two apart.
+        assert_eq!(boost, BOOST_ACCENT);
     }
 
     #[test]
