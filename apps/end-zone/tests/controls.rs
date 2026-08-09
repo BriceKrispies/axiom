@@ -3,7 +3,6 @@
 //! autonomous showcase exactly, and the contextual primary action snaps,
 //! throws, and restarts.
 
-use axiom::prelude::Vec2;
 use axiom_end_zone::config::EndZoneConfig;
 use axiom_end_zone::events::SimEvent;
 use axiom_end_zone::showcase::{run_trace, DiagnosticCommand, ShowcaseRun, TRACE_THROW_TICK};
@@ -15,7 +14,6 @@ fn a_zero_stick_reproduces_the_scripted_showcase_exactly() {
     let mut run = ShowcaseRun::new(EndZoneConfig::default());
     let mut events = Vec::new();
     for tick in 0..700u64 {
-        run.sim.user_stick = Vec2::ZERO;
         // The trace's one scripted input (the throw press), same tick.
         let commands: &[DiagnosticCommand] = if tick == TRACE_THROW_TICK {
             &[DiagnosticCommand::PrimaryAction]
@@ -39,7 +37,6 @@ fn the_stick_steers_only_the_offensive_ball_holder() {
     let mut run = ShowcaseRun::new(EndZoneConfig::default());
     let mut qb_held_at = None;
     for t in 0..260u64 {
-        run.sim.user_stick = Vec2::new(1.0, 0.0);
         let out = run.step(&[]);
         if qb_held_at.is_none() && out.snapshot.possession == Some(out.snapshot.quarterback) {
             qb_held_at = Some(t);
@@ -70,7 +67,6 @@ fn the_stick_respects_the_controller_limits() {
     let mut run = ShowcaseRun::new(EndZoneConfig::default());
     let mut max_speed = 0.0f32;
     for _ in 0..500u64 {
-        run.sim.user_stick = Vec2::new(1.0, 0.0);
         let out = run.step(&[]);
         if let Some(carrier) = out.snapshot.possession {
             let view = out.snapshot.player(carrier);

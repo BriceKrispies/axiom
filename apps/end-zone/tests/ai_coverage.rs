@@ -2,7 +2,7 @@
 //! responsibilities don't duplicate, deep help is preserved, and airborne
 //! reactions are predictive (spec scenarios 1, 2, 3, 9, 10, 11, 14).
 
-use axiom::prelude::{Vec2, Vec3};
+use axiom::prelude::Vec3;
 use axiom_end_zone::ai::{PlayerIntent, Responsibility};
 use axiom_end_zone::config::{EndZoneConfig, PLAYER_COUNT};
 use axiom_end_zone::football::{BallSituation, BallState};
@@ -39,7 +39,11 @@ fn flat_dist(a: Vec3, b: Vec3) -> f32 {
 #[test]
 fn a_nearby_defender_prioritizes_a_scrambling_quarterback() {
     let mut sim = snapped();
-    sim.user_stick = Vec2::new(0.0, 1.0);
+    // Declare the scramble rather than steering him into one: the movement
+    // stick is gone (the run game's carrier is driven by the AI), and
+    // `SimCommand::Scramble` is the explicit declaration the game itself uses —
+    // it tells the defense he is a runner from the instant the decision is made.
+    sim.step(&[SimCommand::Scramble]);
     for _ in 0..160 {
         sim.step(&[]);
         if sim.ball_situation() == BallSituation::QbScramble {
@@ -71,7 +75,11 @@ fn a_nearby_defender_prioritizes_a_scrambling_quarterback() {
 #[test]
 fn exactly_one_defender_is_the_primary_tackler_on_a_runner() {
     let mut sim = snapped();
-    sim.user_stick = Vec2::new(0.4, 1.0);
+    // Declare the scramble rather than steering him into one: the movement
+    // stick is gone (the run game's carrier is driven by the AI), and
+    // `SimCommand::Scramble` is the explicit declaration the game itself uses —
+    // it tells the defense he is a runner from the instant the decision is made.
+    sim.step(&[SimCommand::Scramble]);
     for _ in 0..160 {
         sim.step(&[]);
         if sim.ball_situation() == BallSituation::QbScramble {
@@ -89,7 +97,11 @@ fn exactly_one_defender_is_the_primary_tackler_on_a_runner() {
 #[test]
 fn a_deeper_defender_preserves_leverage_instead_of_duplicating() {
     let mut sim = snapped();
-    sim.user_stick = Vec2::new(0.0, 1.0);
+    // Declare the scramble rather than steering him into one: the movement
+    // stick is gone (the run game's carrier is driven by the AI), and
+    // `SimCommand::Scramble` is the explicit declaration the game itself uses —
+    // it tells the defense he is a runner from the instant the decision is made.
+    sim.step(&[SimCommand::Scramble]);
     for _ in 0..160 {
         sim.step(&[]);
         if sim.ball_situation() == BallSituation::QbScramble {

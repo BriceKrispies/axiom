@@ -206,12 +206,12 @@ fn the_charge_calculation_responds_to_speed_alignment_and_timing() {
     let runner = staged.run.sim.players[staged.back.index()];
     let defender = staged.run.sim.players[staged.defender.index()];
 
-    let base = charge::resolve(&runner, &defender, tuning.charge_ideal_gap, &tuning);
+    let base = charge::resolve(&runner, &defender, tuning.charge_ideal_lead_ticks, &tuning);
 
     // SPEED: halve the runner's velocity and the impulse falls.
     let mut slow = runner;
     slow.vel = slow.vel.mul_scalar(0.5);
-    let slower = charge::resolve(&slow, &defender, tuning.charge_ideal_gap, &tuning);
+    let slower = charge::resolve(&slow, &defender, tuning.charge_ideal_lead_ticks, &tuning);
     assert!(
         slower.impulse < base.impulse,
         "less speed delivers less: {:.2} < {:.2}",
@@ -222,7 +222,7 @@ fn the_charge_calculation_responds_to_speed_alignment_and_timing() {
     // ALIGNMENT: send him sideways past the defender and the impulse falls again.
     let mut askew = runner;
     askew.vel = axiom::prelude::Vec3::new(runner.vel.z, 0.0, -runner.vel.x);
-    let glancing = charge::resolve(&askew, &defender, tuning.charge_ideal_gap, &tuning);
+    let glancing = charge::resolve(&askew, &defender, tuning.charge_ideal_lead_ticks, &tuning);
     assert!(
         glancing.alignment < base.alignment,
         "a sideways run is less aligned"
@@ -231,8 +231,8 @@ fn the_charge_calculation_responds_to_speed_alignment_and_timing() {
 
     // TIMING: the same charge committed on top of the man, or from far out, is
     // worth strictly less than the same charge committed at the right distance.
-    let early = charge::resolve(&runner, &defender, tuning.charge_ideal_gap * 3.0, &tuning);
-    let late = charge::resolve(&runner, &defender, 0.0, &tuning);
+    let early = charge::resolve(&runner, &defender, tuning.charge_ideal_lead_ticks * 3, &tuning);
+    let late = charge::resolve(&runner, &defender, 0, &tuning);
     assert!(base.timing > early.timing, "too early is mistimed");
     assert!(base.timing > late.timing, "so is too late");
     assert!(early.impulse < base.impulse && late.impulse < base.impulse);
@@ -240,7 +240,7 @@ fn the_charge_calculation_responds_to_speed_alignment_and_timing() {
     // BRACE: a defender squared up resists more than one caught turned around.
     let mut turned = defender;
     turned.facing += core::f32::consts::PI;
-    let caught_out = charge::resolve(&runner, &turned, tuning.charge_ideal_gap, &tuning);
+    let caught_out = charge::resolve(&runner, &turned, tuning.charge_ideal_lead_ticks, &tuning);
     assert!(
         caught_out.resistance < base.resistance,
         "an unsquared defender anchors less: {:.2} < {:.2}",

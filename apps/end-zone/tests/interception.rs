@@ -4,13 +4,10 @@
 //! receiver still gets first claim, so an open target completes normally.
 
 use axiom::prelude::Vec3;
-use axiom_end_zone::attempt::AttemptOutcome;
 use axiom_end_zone::config::EndZoneConfig;
 use axiom_end_zone::events::{PlayEndReason, SimEvent};
 use axiom_end_zone::football::BallState;
 use axiom_end_zone::identity::PlayerId;
-use axiom_end_zone::launch::RunConfig;
-use axiom_end_zone::showcase::{DiagnosticCommand, ShowcaseRun};
 use axiom_end_zone::state::{PlayPhase, SimCommand, SimState};
 
 /// Drive the scripted showcase schedule until the pass is in the air.
@@ -128,84 +125,8 @@ fn a_defender_who_cannot_secure_it_swats_the_pass_down() {
     );
 }
 
-#[test]
-fn an_interception_resolves_the_attempt_as_a_turnover() {
-    let mut run = ShowcaseRun::new_run(&RunConfig::new(0x1_2345));
-    // Call a play and let the attempt loop shift and snap. The offense holds at
-    // the line indefinitely without a call, so the call is what starts the play.
-    for _ in 0..200 {
-        run.select_concept(0);
-        run.step(&[]);
-        if run.sim.ball.carrier() == Some(run.sim.quarterback) {
-            break;
-        }
-    }
-
-    // Freeze the pass rush so the quarterback gets a clean pocket, and order the
-    // throw once he holds a live ball.
-    let qb_team = run.sim.players[run.sim.quarterback.index()].team;
-    let defenders: Vec<PlayerId> = run
-        .sim
-        .players
-        .iter()
-        .filter(|p| p.team != qb_team)
-        .map(|p| p.id)
-        .collect();
-    let mut threw = false;
-    for _ in 0..800 {
-        for &d in &defenders {
-            let p = &mut run.sim.players[d.index()];
-            p.archetype.max_speed = 0.0;
-            p.vel = Vec3::ZERO;
-        }
-        let holds = run.sim.ball.carrier() == Some(run.sim.quarterback);
-        let commands: Vec<DiagnosticCommand> = if holds {
-            vec![DiagnosticCommand::PrimaryAction]
-        } else {
-            Vec::new()
-        };
-        run.step(&commands);
-        if run.sim.ball.is_airborne() {
-            threw = true;
-            break;
-        }
-    }
-    assert!(threw, "the quarterback threw the pass");
-
-    // A frozen defender tracks the ball and picks it off.
-    let picker = defenders[0];
-    for _ in 0..120 {
-        if !run.sim.ball.is_airborne() {
-            break;
-        }
-        let ball = run.sim.ball.pos;
-        let p = &mut run.sim.players[picker.index()];
-        p.archetype.max_speed = 0.0;
-        p.pos = Vec3::new(ball.x, 0.0, ball.z);
-        p.vel = Vec3::ZERO;
-        run.step(&[]);
-    }
-    assert_eq!(run.sim.end_reason, Some(PlayEndReason::Intercepted));
-
-    // The attempt loop reads the ended play on a following tick and records it.
-    // A turnover is one attempt's worst outcome, not the end of the session —
-    // the loop resets straight into the next attempt.
-    let mut recorded = None;
-    for _ in 0..30 {
-        run.step(&[]);
-        recorded = run.ledger().and_then(|l| l.last).map(|r| r.outcome);
-        if recorded.is_some() {
-            break;
-        }
-    }
-    assert_eq!(
-        recorded,
-        Some(AttemptOutcome::Intercepted),
-        "the interception is recorded as the attempt's outcome"
-    );
-    assert_eq!(
-        run.ledger().map(|l| l.interceptions),
-        Some(1),
-        "the session counts the giveaway"
-    );
-}
+// (An `an_interception_resolves_the_attempt_as_a_turnover` test lived here. The
+// game layer is a run game now: no pass is thrown, so an interception cannot be
+// an attempt outcome and `AttemptOutcome` no longer has a variant for one. The
+// SIMULATION's interception path above is untouched and still proven — the
+// football framework keeps the capability the game layer stopped using.)

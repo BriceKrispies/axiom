@@ -47,10 +47,10 @@ fn to_game_over(fe: &mut FrontendApp) {
 fn summary() -> SessionSummary {
     SessionSummary {
         attempts: 12,
-        completions: 5,
         touchdowns: 2,
-        interceptions: 1,
-        sacks: 3,
+        dodges: 0,
+        broken: 0,
+        hurdled: 0,
         best_yards: 38,
         yards_per_attempt: 7.5,
     }

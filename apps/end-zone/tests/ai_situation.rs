@@ -1,7 +1,7 @@
 //! AI foundation proofs — the derived ball situation, decision determinism, and
 //! commitment locking (spec scenarios 12, 13, plus the situation machine).
 
-use axiom::prelude::{Vec2, Vec3};
+use axiom::prelude::Vec3;
 use axiom_end_zone::ai::action::{Priority, ScoredAction};
 use axiom_end_zone::ai::commitment::{arbitrate, Commitment};
 use axiom_end_zone::ai::PlayerIntent;
@@ -41,8 +41,11 @@ fn a_quarterback_holding_in_the_pocket_reads_as_held_by_qb() {
 #[test]
 fn a_committed_scrambling_quarterback_registers_as_a_scramble() {
     let mut sim = snapped();
-    // Steer the quarterback straight downfield out of the pocket.
-    sim.user_stick = Vec2::new(0.0, 1.0);
+    // Declare the run rather than steering it: the movement stick is gone, and
+    // `Scramble` is the command the game itself issues to take the quarterback
+    // out of the pocket — the explicit half of the two ways a scramble is
+    // detected (the other being the observational downfield-speed counter).
+    sim.step(&[SimCommand::Scramble]);
     let mut scrambled = false;
     for _ in 0..160 {
         sim.step(&[]);
@@ -58,7 +61,6 @@ fn a_committed_scrambling_quarterback_registers_as_a_scramble() {
 fn identical_inputs_produce_identical_ai_decisions() {
     let run = || {
         let mut sim = snapped();
-        sim.user_stick = Vec2::new(0.3, 0.9);
         let mut intents = Vec::new();
         for _ in 0..150 {
             sim.step(&[]);

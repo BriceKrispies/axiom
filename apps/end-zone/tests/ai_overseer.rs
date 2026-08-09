@@ -2,7 +2,6 @@
 //! directive carries no movement command, decisions are deterministic, and
 //! possession memory resets (spec scenarios 1, 2, 3, 7, 8, 15, 16, 17, 19).
 
-use axiom::prelude::Vec2;
 use axiom_end_zone::ai::field_read::{DefensiveRead, PocketState};
 use axiom_end_zone::ai::overseer::PossessionMemory;
 use axiom_end_zone::ai::tactics::score;
@@ -128,7 +127,6 @@ fn the_directive_carries_no_movement_command_and_defenders_never_teleport() {
     let mut sim = SimState::new(EndZoneConfig::default());
     sim.step(&[SimCommand::BeginPlay]);
     sim.step(&[SimCommand::Snap]);
-    sim.user_stick = Vec2::new(0.3, 0.9);
     let offense = sim.play.possession;
     let mut prev: Vec<_> = sim.players.iter().map(|p| p.pos).collect();
     for _ in 0..200 {
@@ -173,8 +171,10 @@ fn possession_memory_resets_at_the_possession_boundary() {
     let mut sim = SimState::new(EndZoneConfig::default());
     sim.step(&[SimCommand::BeginPlay]);
     sim.step(&[SimCommand::Snap]);
-    // Make the quarterback scramble to accumulate a tendency.
-    sim.user_stick = Vec2::new(0.0, 1.0);
+    // Make the quarterback scramble to accumulate a tendency. Declared rather
+    // than steered: the movement stick is gone (the run game's carrier is driven
+    // by the AI), and this is the command the game itself issues.
+    sim.step(&[SimCommand::Scramble]);
     for _ in 0..160 {
         sim.step(&[]);
         if sim.overseer_memory().scramble_events > 0 {

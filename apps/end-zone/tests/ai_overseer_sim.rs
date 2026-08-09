@@ -2,7 +2,6 @@
 //! transitions, coordinated responsibilities, the emergency override, hysteresis,
 //! and the readable tradeoff (spec scenarios 4, 5, 6, 10, 11, 12, 13, 14, 18, 20).
 
-use axiom::prelude::Vec2;
 use axiom_end_zone::ai::directive::ExposedRegion;
 use axiom_end_zone::ai::{Responsibility, TacticalMode};
 use axiom_end_zone::config::{EndZoneConfig, PLAYER_COUNT};
@@ -84,30 +83,19 @@ fn the_catch_point_collapse_assigns_ball_responsibilities() {
     );
 }
 
-#[test]
-fn a_rollout_draws_contain_then_a_run_response_on_commitment() {
-    let mut sim = dropback();
-    // Roll the quarterback toward the right edge, then let him break downfield.
-    sim.user_stick = Vec2::new(0.85, 0.55);
-    let mut contain_at = None;
-    let mut run_at = None;
-    for t in 0..220u64 {
-        sim.step(&[]);
-        match sim.directive().mode {
-            TacticalMode::ContainQb if contain_at.is_none() => contain_at = Some(t),
-            TacticalMode::QbRunResponse if run_at.is_none() => run_at = Some(t),
-            _ => {}
-        }
-    }
-    let contain = contain_at.expect("a rollout draws a contain call");
-    let run = run_at.expect("a committed run draws the run response");
-    assert!(contain < run, "contain precedes the run response ({contain} < {run})");
-}
+// A `a_rollout_draws_contain_then_a_run_response_on_commitment` test lived here.
+// A rollout is a quarterback STEERED laterally toward the edge, and the movement
+// stick that steered him is gone: the run game's carrier is driven by the AI and
+// the quarterback hands off rather than escaping. Neither loop produces a
+// rollout any more, so the test was asserting a behaviour the game cannot
+// exhibit. The QbRunResponse half of what it covered is proven by
+// `the_run_response_assigns_distinct_pursuit_roles` below, which declares the
+// run through `SimCommand::Scramble` the way the game does.
 
 #[test]
 fn the_run_response_assigns_distinct_pursuit_roles() {
     let mut sim = dropback();
-    sim.user_stick = Vec2::new(0.0, 1.0);
+    sim.step(&[SimCommand::Scramble]);
     for _ in 0..200 {
         sim.step(&[]);
         if sim.directive().mode == TacticalMode::QbRunResponse {
@@ -137,7 +125,6 @@ fn an_imminent_touchdown_overrides_ordinary_commitment() {
     let goal_z = GOAL_LINE_Z * sim.frame.direction.sign();
     sim.players[qb.index()].pos.z = goal_z - 5.0 * sim.frame.direction.sign();
     sim.players[qb.index()].pos.x = 3.0;
-    sim.user_stick = Vec2::new(1.0, 0.0); // hold him near the goal laterally
     let mut emergency = false;
     for _ in 0..8 {
         sim.step(&[]);

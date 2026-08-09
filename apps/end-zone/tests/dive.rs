@@ -103,7 +103,8 @@ fn a_committed_dive_lands_a_tackle_on_real_body_contact() {
     let mut collision = CollisionRig::new(&players);
     collision.resolve(&mut players, 0);
     let outcome =
-        contact::resolve_tackle(&mut players, &intents, Some(PlayerId(0)), &tuning, &collision)
+        contact::resolve_tackle(&mut players, &intents, Some(PlayerId(0)), false, &tuning, &collision)
+            .landed
             .expect("the dive landed on real body contact");
     assert_eq!(outcome.tackler, PlayerId(1));
     assert_eq!(outcome.target, PlayerId(0));
@@ -131,7 +132,8 @@ fn a_dive_that_never_reaches_the_body_does_not_land() {
     let mut collision = CollisionRig::new(&players);
     collision.resolve(&mut players, 0);
     assert!(
-        contact::resolve_tackle(&mut players, &intents, Some(PlayerId(0)), &tuning, &collision)
+        contact::resolve_tackle(&mut players, &intents, Some(PlayerId(0)), false, &tuning, &collision)
+            .landed
             .is_none(),
         "a dive whose body never reaches the carrier registers no tackle"
     );
@@ -153,7 +155,8 @@ fn a_standing_tackle_cannot_land_from_beyond_its_range() {
     ];
     let collision = CollisionRig::new(&players);
     assert!(
-        contact::resolve_tackle(&mut players, &intents, Some(PlayerId(0)), &tuning, &collision)
+        contact::resolve_tackle(&mut players, &intents, Some(PlayerId(0)), false, &tuning, &collision)
+            .landed
             .is_none(),
         "a standing tackle cannot land from 2.0 yd"
     );

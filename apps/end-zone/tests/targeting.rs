@@ -196,7 +196,7 @@ fn the_throwable_set_is_published_for_the_receiver_rings() {
 
 #[test]
 fn the_ring_geometry_tracks_the_eligible_receivers() {
-    use axiom_end_zone::presentation::receiver_ring::{ring_instances, RING_SEGMENTS};
+    use axiom_end_zone::presentation::carrier_ring::{ring_instances, RING_SEGMENTS};
     use axiom_end_zone::presentation::snapshot::capture;
 
     let sim = dropped_back();
@@ -256,7 +256,7 @@ fn the_locked_target_survives_the_windup() {
 
 #[test]
 fn the_current_read_is_ringed_red_and_the_rest_white() {
-    use axiom_end_zone::presentation::receiver_ring::{
+    use axiom_end_zone::presentation::carrier_ring::{
         ring_instances, RingKind, MAX_RINGS, RING_SEGMENTS,
     };
     use axiom_end_zone::presentation::snapshot::capture;
@@ -289,7 +289,7 @@ fn the_current_read_is_ringed_red_and_the_rest_white() {
     assert!(
         rings[RING_SEGMENTS..]
             .iter()
-            .all(|s| s.kind == RingKind::Eligible),
+            .all(|s| s.kind == RingKind::Carrier),
         "every other throwable receiver stays white"
     );
 
@@ -309,7 +309,7 @@ fn the_current_read_is_ringed_red_and_the_rest_white() {
 
 #[test]
 fn the_red_ring_follows_the_current_read_not_a_fixed_receiver() {
-    use axiom_end_zone::presentation::receiver_ring::{ring_instances, RingKind, RING_SEGMENTS};
+    use axiom_end_zone::presentation::carrier_ring::{ring_instances, RingKind, RING_SEGMENTS};
     use axiom_end_zone::presentation::snapshot::capture;
 
     let sim = dropped_back();
@@ -351,9 +351,8 @@ fn the_red_ring_follows_the_current_read_not_a_fixed_receiver() {
 use axiom::prelude::Vec2;
 
 /// Steer the controlled player with a held stick for `ticks`, returning the sim.
-fn steer(mut sim: SimState, stick: Vec2, ticks: usize) -> SimState {
+fn steer(mut sim: SimState, _stick: Vec2, ticks: usize) -> SimState {
     for _ in 0..ticks {
-        sim.user_stick = stick;
         sim.step(&[]);
     }
     sim

@@ -79,14 +79,19 @@ fn strip_comments_and_strings(text: &str) -> String {
     out
 }
 
-/// Deterministic-core sources: everything except the sanctioned wasm edge
-/// (the `src/web/` directory — DOM presenter, storage adapter, gamepad,
-/// tones; all `cfg(target_arch = "wasm32")`).
+/// Deterministic-core sources: everything except the two sanctioned edges.
+///
+/// - `src/web/` — the wasm32 DOM presenter, storage adapter, gamepad and tones.
+/// - `src/bin/` — command-line entry points. A binary's whole job is to parse
+///   arguments and PRINT; holding it to "no console output" would be holding it
+///   to not doing the one thing it exists for. It is a leaf that nothing links
+///   against, exactly like the browser edge.
 fn core_sources() -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_rs(&app_src(), &mut files);
     files.retain(|p| {
         let is_edge = p.components().any(|c| c.as_os_str() == "web")
+            || p.components().any(|c| c.as_os_str() == "bin")
             || p.file_name().and_then(|n| n.to_str()) == Some("web.rs");
         !is_edge
     });
@@ -122,6 +127,7 @@ fn app_toml_lists_only_consumed_layers_and_modules() {
         "\"runtime\"",
         "\"interface\"",
         "\"layout\"",
+        "\"agent\"",
         "\"engine\"",
         "\"physics\"",
         "\"figure\"",
@@ -137,7 +143,6 @@ fn app_toml_lists_only_consumed_layers_and_modules() {
         "\"render\"",
         "\"webgpu\"",
         "\"animation\"",
-        "\"agent\"",
     ] {
         assert!(
             !text.contains(forbidden),
@@ -253,6 +258,7 @@ fn only_declared_engine_crates_are_imported() {
         "axiom_input",
         "axiom_windowing",
         "axiom_debug_overlay",
+        "axiom_agent",
         "axiom_end_zone",
     ];
     let mut files = Vec::new();
