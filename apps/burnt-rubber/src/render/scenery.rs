@@ -110,9 +110,11 @@ impl PropKind {
             PropKind::Sign => Vec3::new(1.8, 1.6, 0.2),
             PropKind::TunnelLight => Vec3::new(0.7, 0.2, 0.25),
             PropKind::Building => Vec3::new(9.0, 5.0, 9.0),
-            // A palm is mostly stem: 11 m of it, 0.44 m thick, so the crown
-            // clears the car's roofline and the road is seen *through* the
-            // avenue rather than behind a hedge.
+            // The *unit* palm: mostly stem, 11.2 m of it, 0.44 m thick, so the
+            // crown clears the car's roofline and the road is seen *through*
+            // the avenue rather than behind a hedge. What is actually planted
+            // is this box times a rank's size draw — see [`PALM_RANKS`], where
+            // the avenue's real height is set.
             PropKind::PalmTrunk => Vec3::new(0.22, 5.6, 0.22),
             PropKind::PalmCrown => Vec3::new(3.0, 1.7, 3.0),
             // Knee-to-waist high and wider than it is tall — a plant, not a
@@ -358,6 +360,53 @@ struct PalmRank {
 
 /// The two ranks the coast is planted in: the avenue at the barrier line, and
 /// the back rank showing through the gaps in it.
+///
+/// ## The sizes are a **framing** decision, and they are forced by arithmetic
+///
+/// A roadside tree's job in this shot is not to be scenery, it is to be the
+/// **proscenium**: the pair of verticals at the frame edges that turn an open
+/// plain into a corridor. Whether it can do that job is not a matter of taste —
+/// it is a single ratio, and the ratio is decided here.
+///
+/// A palm of height `H` standing `x` metres off the centreline, seen by an eye
+/// at height `h`, reaches its greatest height in frame at the moment it crosses
+/// the frame edge, and there it stands exactly
+///
+/// ```text
+///     y_above_horizon = 0.5 · (H − h) · aspect / x     (fractions of frame)
+/// ```
+///
+/// above the horizon — **at every field of view**, because both the palm's
+/// height and its lateral offset are magnified by the same lens. No camera
+/// change can lift it: only the height-to-offset ratio can.
+///
+/// Measured on the judged arm against the era-C reference, on a 0.562 phone
+/// frame with the horizon at 0.47:
+///
+/// | | reference | champion (0.80…1.52) |
+/// |---|---|---|
+/// | topmost roadside foliage | **0.17** of frame | **0.35** of frame |
+/// | foliage as a share of the frame | 4.45% | 0.73% |
+/// | implied `(H − h) / x` | ~1.4 | 0.43 |
+///
+/// The champion was not missing palms and was not framed wrong — the horizon,
+/// the car's width and the car's contact point are all already at parity. It
+/// was planting **young** palms: a 9–14 m stem standing 20 m off the road can
+/// only ever reach 0.12 of frame above the horizon, which is precisely the 0.35
+/// that was measured. Every pixel above that was sky, so the top third of the
+/// picture carried nothing at all.
+///
+/// The offset is not free to change — a prop must stand outside
+/// [`crate::track::Track::barrier_offset`], and on this road that is 17.8 m of
+/// tarmac, shoulder and verge before a palm may be planted. So the avenue is
+/// grown into the mature coastal palm the reference is plainly drawing: stems of
+/// 16–21 m in the avenue and 18–25 m behind it, which are ordinary heights for
+/// a coconut or royal palm and take the crowns to ~0.27 of frame — about half
+/// the gap closed, honestly, without a tree that could not exist.
+///
+/// The crowns still clear the road: a crown's fan is 3.0 m of unit half-extent,
+/// so even at 1.90 it reaches 5.7 m from its stem and stops ~2 m short of the
+/// tarmac edge, eighteen metres up. The avenue is still seen *through*.
 const PALM_RANKS: [PalmRank; 2] = [
     // The avenue. Close enough to the barrier to sweep past the camera, and the
     // rank that carries the corridor's beat.
@@ -365,19 +414,21 @@ const PALM_RANKS: [PalmRank; 2] = [
         phase: 0.0,
         inset: PALM_INSET,
         spread: PALM_DEPTH_JITTER,
-        smallest: 0.80,
-        largest: 1.24,
+        smallest: 1.45,
+        largest: 1.90,
     },
     // The back rank, half a spacing out of step. Set far enough back that it is
     // plainly *behind* the avenue rather than beside it, jittered across a much
     // deeper band so it never lines up, and drawn from a taller size range so
-    // its crowns clear the near rank's instead of vanishing under them.
+    // its crowns clear the near rank's instead of vanishing under them. Standing
+    // 13–27 m further out, it needs the extra height twice over: to clear the
+    // avenue, and to hold the same ratio at its own larger offset.
     PalmRank {
         phase: 0.5,
         inset: PALM_BACK_INSET,
         spread: PALM_BACK_BAND,
-        smallest: 1.00,
-        largest: 1.52,
+        smallest: 1.62,
+        largest: 2.25,
     },
 ];
 
@@ -839,6 +890,74 @@ mod tests {
             typical < PALM_SPACING * 0.75,
             "the ranks interleave: palms every {typical} m, spacing {PALM_SPACING}"
         );
+    }
+
+    /// **The avenue is tall enough to frame the shot.** The composition claim
+    /// [`PALM_RANKS`] is authored against, pinned as arithmetic rather than left
+    /// in prose: a palm crossing the frame edge stands
+    /// `0.5 · (H − h) · aspect / x` of frame above the horizon, so the avenue is
+    /// a proscenium only if its height-to-offset ratio is large enough. At the
+    /// 9–14 m stems this replaced the ratio was 0.43 and the crowns could not
+    /// reach past 0.12 of frame above the horizon — the top third of a phone
+    /// frame was sky by construction.
+    #[test]
+    fn the_palm_avenue_stands_tall_enough_against_its_own_stand_off() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        let eye = crate::tuning::CameraTuning::DEFAULT
+            .framed_for_aspect(470.0 / 836.0)
+            .height;
+        let mut out = Vec::new();
+        let mut ratios: Vec<f32> = Vec::new();
+        let mut shortest = f32::MAX;
+        for index in 0..60 {
+            props_for_chunk(crate::DEFAULT_SEED, &track, index, &t, &mut out);
+            let origin = chunk_reference(&track, index).distance;
+            for stem in out.iter().filter(|p| p.kind == PropKind::PalmTrunk) {
+                let (_, lateral) = track.localise(stem.position, origin, 240.0);
+                let height = PropKind::PalmTrunk.half_extents().y * 2.0 * stem.scale.y;
+                shortest = shortest.min(height);
+                ratios.push((height - eye) / lateral.abs().max(1.0));
+            }
+        }
+        assert!(ratios.len() > 100, "the coast was reached: {}", ratios.len());
+        assert!(
+            shortest >= 15.0,
+            "the shortest planted palm is {shortest} m — a sapling, not an avenue"
+        );
+        ratios.sort_by(f32::total_cmp);
+        let typical = ratios[ratios.len() / 2];
+        assert!(
+            typical > 0.60,
+            "the avenue's height-to-offset ratio is {typical}; below 0.6 its crowns \
+             cannot break the skyline and the frame's upper half is sky"
+        );
+    }
+
+    /// And it is still an avenue you see *through*, not a hedge: however tall a
+    /// palm is drawn, its crown must stop short of the tarmac it stands beside.
+    #[test]
+    fn no_crown_however_large_reaches_over_the_road() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        let mut out = Vec::new();
+        let mut checked = 0usize;
+        for index in 0..60 {
+            props_for_chunk(crate::DEFAULT_SEED, &track, index, &t, &mut out);
+            let origin = chunk_reference(&track, index).distance;
+            for crown in out.iter().filter(|p| p.kind == PropKind::PalmCrown) {
+                let (distance, lateral) = track.localise(crown.position, origin, 240.0);
+                let sample = track.sample_at(distance);
+                let reach = lateral.abs() - PropKind::PalmCrown.half_extents().x * crown.scale.x;
+                assert!(
+                    reach > sample.half_width + track.shoulder(),
+                    "a crown reaches to {reach} m over a {} m carriageway",
+                    sample.half_width + track.shoulder()
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 100, "the coast was reached: {checked}");
     }
 
     /// The verge is *covered*, not decorated. This is the count test: ground
