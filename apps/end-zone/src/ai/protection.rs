@@ -27,7 +27,7 @@ pub fn pass_block(
         .possession
         .map(|id| ctx.players[id.index()].pos)
         .unwrap_or(player.pos);
-    if let Some((threat, threat_pos)) = nearest_opponent(player, ctx) {
+    if let Some((threat, threat_pos)) = assigned_opponent(player, ctx) {
         out.push(block_action(player, threat, threat_pos, protect, "pass-block"));
     } else {
         out.push(ScoredAction::new(
@@ -52,7 +52,7 @@ pub fn lead_block(
         .possession
         .map(|id| ctx.players[id.index()].pos)
         .unwrap_or(ctx.end_zone_target);
-    match nearest_opponent(player, ctx) {
+    match assigned_opponent(player, ctx) {
         Some((threat, threat_pos)) => {
             out.push(block_action(player, threat, threat_pos, protect, "lead-block"))
         }
@@ -94,6 +94,20 @@ fn block_action(
         reason,
         5,
     )
+}
+
+/// The man this blocker has been given, falling back to the nearest opponent
+/// when the coordination pass had nobody left to hand him.
+///
+/// The fallback is deliberately still "nearest": a blocker with no assignment is
+/// a spare, and a spare should help with whoever is closest. What it must never
+/// be is the rule for EVERYONE, which is what it used to be — see
+/// [`crate::ai::blocking`].
+fn assigned_opponent(player: &PlayerSim, ctx: &BrainCtx<'_>) -> Option<(PlayerId, Vec3)> {
+    ctx.per.blocks[player.id.index()]
+        .filter(|id| ctx.players[id.index()].anim.can_act())
+        .map(|id| (id, ctx.players[id.index()].pos))
+        .or_else(|| nearest_opponent(player, ctx))
 }
 
 /// The nearest standing opponent (true positions — offense reads the field

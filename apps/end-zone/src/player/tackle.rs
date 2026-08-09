@@ -15,7 +15,7 @@
 //!   hit        = closing_speed · squareness
 //!   wrap       = grip · tackle_strength
 //!   impulse    = mass · (hit + wrap) · wrap_power  (· dive bonus)
-//!   resistance = mass · break_speed  · leg_drive · drive · footing
+//!   resistance = mass · break_speed  · leg_drive(hit share) · drive · footing
 //!   the tackle lands  ⇔  impulse >= resistance
 //! ```
 //!
@@ -42,9 +42,11 @@
 //!   speed's worth. Floored at `0.35` rather than zero: a stationary defender the
 //!   runner runs straight into still gets a piece of him.
 //! * **wrap_power** — the archetype's existing `tackle_strength`.
-//! * **leg_drive** — a carrier at speed is *harder* to bring down, not easier.
-//!   This is why breaking into the open field matters: the same defender who
-//!   would have stopped you at the line cannot stop you at full stride.
+//! * **leg_drive** — a carrier at speed is harder to *hit*, and it scales with
+//!   how much of the tackle is a hit rather than a wrap. Momentum helps you run
+//!   through a man who runs into you; it does nothing against a man who has
+//!   caught up and grabbed hold. Applying it flat made breakaways uncatchable
+//!   and split the game into two — see the note at the term itself.
 //! * **drive** — the carrier's `block_strength`, the same "how well does this
 //!   body deal with contact" number the shoulder charge reads as power.
 //! * **footing** — his `balance`, the existing `0..=1` the contact framework
@@ -158,8 +160,28 @@ pub fn contest(
 
     // The resistance.
     let carrier_speed = flat(carrier.vel).length();
-    let leg_drive =
-        1.0 + LEG_DRIVE_SLOPE * carrier_speed / tuning.tackle_full_strength_speed.max(1.0e-3);
+    // **Leg drive resists a HIT, not a WRAP**, and weighting it by the hit's
+    // share of the tackle is the structural fix for a game that was two games.
+    //
+    // Applied flat, it made a breakaway mathematically uncatchable. A defender
+    // chasing a full-speed carrier has, by the time he arrives, matched his pace
+    // — so his closing speed is ~0 and his whole tackle is wrap. Against that,
+    // the carrier's momentum bonus was still applying at full strength, and a
+    // pure wrap could never clear it. Nobody could ever bring down a runner from
+    // behind, so every carry that beat the front seven was a touchdown: measured
+    // over 200 carries, 45% losses and 37.5% touchdowns with almost nothing in
+    // between.
+    //
+    // Physically it was just wrong. Momentum helps you run THROUGH a man hitting
+    // you; it does nothing to help you shake off a man running alongside who has
+    // hold of you. So it now scales with how much of the tackle is actually a
+    // collision.
+    let hit_share = hit / (hit + wrap).max(1.0e-3);
+    let leg_drive = 1.0
+        + LEG_DRIVE_SLOPE
+            * hit_share
+            * carrier_speed
+            / tuning.tackle_full_strength_speed.max(1.0e-3);
     let drive = 0.5 + 0.5 * carrier.archetype.block_strength;
     // Footing never reaches zero: a spent runner resists a little, so a man on
     // his last legs is easy to bring down rather than mathematically certain to

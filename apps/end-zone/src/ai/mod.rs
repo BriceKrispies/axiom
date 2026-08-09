@@ -13,6 +13,7 @@
 
 pub mod action;
 pub mod assignment;
+pub mod blocking;
 pub mod brain;
 pub mod carry;
 pub mod commitment;

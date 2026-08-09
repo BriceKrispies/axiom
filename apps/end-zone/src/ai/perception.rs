@@ -126,6 +126,10 @@ pub struct PlayPerception {
     pub offense_team: TeamId,
     /// Per-player coordinated responsibility, indexed by [`PlayerId`].
     pub responsibilities: [Responsibility; PLAYER_COUNT],
+    /// Per-blocker assigned rusher, indexed by [`PlayerId`] — the offensive
+    /// counterpart of `responsibilities`, so nobody is double-teamed while
+    /// somebody else runs free (see [`super::blocking`]).
+    pub blocks: super::blocking::BlockAssignments,
     /// The overseer's team-level directive for this tick (set by the AI stage
     /// after the base perception is built).
     pub directive: DefensiveDirective,
@@ -238,9 +242,40 @@ impl SimState {
             drive_sign: self.frame.direction.sign(),
             offense_team: self.play.possession,
             responsibilities: [Responsibility::None; PLAYER_COUNT],
+            blocks: [None; PLAYER_COUNT],
             directive: DefensiveDirective::base(self.tick),
         };
         coordination::assign_responsibilities(&mut per, &self.players, &self.tuning);
+        // Who blocks whom. The point protected is the ball carrier if there is
+        // one, else the ball — the same rule the contact stage uses.
+        let offense = self.play.possession;
+        let blockers: Vec<PlayerId> = self
+            .assignments
+            .iter()
+            .enumerate()
+            .filter(|(index, a)| {
+                self.players[*index].team == offense
+                    && matches!(
+                        a.kind,
+                        super::AssignmentKind::PassBlock
+                            | super::AssignmentKind::LeadBlock
+                            | super::AssignmentKind::Snapper
+                    )
+                    && self.players[*index].anim.can_act()
+            })
+            .map(|(index, _)| PlayerId(index as u8))
+            .collect();
+        let threats: Vec<PlayerId> = self
+            .players
+            .iter()
+            .filter(|p| p.team != offense && p.anim.can_act())
+            .map(|p| p.id)
+            .collect();
+        let protect = per
+            .carrier
+            .map(|id| self.players[id.index()].pos)
+            .unwrap_or(per.ball_pos);
+        per.blocks = super::blocking::assign_blocks(&blockers, &threats, &self.players, protect);
         per
     }
 
