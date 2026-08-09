@@ -354,12 +354,23 @@ impl Canvas2dBackendApi {
         let bloom_degraded = packet.bloom().is_some() & !profile.contains(RenderCapability::Bloom);
         let specular_degraded =
             packet.uses_specular() & !profile.contains(RenderCapability::Specular);
+        // The second *substitute*, alongside the directional shadow: a frame that
+        // authored a per-metre extinction rate gets the normalized-depth ramp of
+        // the same fog here, because this backend's fog is a post-pass holding a
+        // z-buffer and no world position. Keyed on the frame having authored a
+        // non-zero rate, so a fog with only a depth window reports nothing —
+        // there is nothing it did not honour.
+        let aerial_degraded = packet
+            .depth_fog()
+            .is_some_and(|fog| fog.extinction().get() != 0.0)
+            & !profile.contains(RenderCapability::AerialPerspective);
         let degraded_features: Vec<FrameFeature> = [
             textures_degraded.then_some(FrameFeature::AlbedoSampling),
             shadows_degraded.then_some(FrameFeature::Shadows),
             sky_degraded.then_some(FrameFeature::Sky),
             specular_degraded.then_some(FrameFeature::SpecularHighlight),
             bloom_degraded.then_some(FrameFeature::Bloom),
+            aerial_degraded.then_some(FrameFeature::AerialPerspective),
         ]
         .into_iter()
         .flatten()
@@ -931,6 +942,46 @@ mod tests {
         assert!(quiet
             .degraded_features()
             .contains(&FrameFeature::SpecularHighlight));
+    }
+
+    /// The *substitute* half of the same mechanism, which the drop half above
+    /// does not exercise: a fog authored with a per-metre extinction rate is
+    /// still rendered here — as its normalized-depth ramp — and that
+    /// substitution is declared rather than silent. A fog carrying only a depth
+    /// window declares nothing, because there is nothing this backend failed to
+    /// honour about it.
+    #[test]
+    fn reports_the_distance_fog_it_substitutes_with_the_depth_ramp() {
+        use axiom_host::{FrameDepthFog, FrameDrawItem, FrameFeatureSet};
+        use axiom_kernel::Ratio;
+        let mut backend = Canvas2dBackendApi::new(&request(320, 180));
+        backend.load_meshes(&[ground(7)]);
+        let draws = vec![FrameDrawItem::new(
+            1, 7, 13, IDENTITY, IDENTITY, [1.0; 4], false,
+        )];
+        let window = FrameDepthFog::new(
+            Ratio::finite_or_zero(0.9),
+            Ratio::finite_or_zero(1.0),
+            Ratio::finite_or_zero(0.8),
+            [0.7, 0.75, 0.8],
+        );
+        let ramp_only = backend.present_packet(
+            &packet(draws.clone(), FrameFeatureSet::new(false, false, 0, 0))
+                .with_depth_fog(window),
+        );
+        assert!(!ramp_only
+            .degraded_features()
+            .contains(&FrameFeature::AerialPerspective));
+
+        let with_air = backend.present_packet(
+            &packet(draws, FrameFeatureSet::new(false, false, 0, 0))
+                .with_depth_fog(window.with_extinction(Ratio::finite_or_zero(0.004))),
+        );
+        let degraded = with_air.degraded_features();
+        assert!(
+            degraded.contains(&FrameFeature::AerialPerspective),
+            "{degraded:?}"
+        );
     }
 
     #[test]

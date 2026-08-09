@@ -54,7 +54,9 @@ struct Lights {
     // carries no fog packs w = 0, so `fog_factor` is 0 for every fragment and the
     // whole term is an exact no-op.
     fog_color: vec4<f32>,
-    // x = fog start, y = fog full-density depth (both normalized device depth); zw unused.
+    // x = fog start, y = fog full-density depth (both normalized device depth);
+    // z = the Beer-Lambert extinction rate per world metre (0 = no air term, the
+    // default, which makes this an exact no-op); w unused.
     fog_range: vec4<f32>,
     // xyz = the camera's world position, recovered on the CPU from the frame's
     // view-projection; w unused. Specular is view-dependent — that is the whole
@@ -65,26 +67,45 @@ struct Lights {
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
 
-// The frame's depth-fog mix fraction for a fragment's normalized device depth.
-// This is the *same* arithmetic the Canvas 2D backend's `fog_mix` applies, on the
-// *same* quantity — that backend reads its z-buffer, this one reads
-// `@builtin(position).z` — which is what keeps the two backends' horizons in
-// parity instead of one fogging and the other not. A degenerate or inverted range
-// is safe: the span is floored before the divide and the result is clamped.
-fn fog_factor(ndc_depth: f32) -> f32 {
-    let span = max(abs(lights.fog_range.y - lights.fog_range.x), 1e-6);
-    let t = clamp((ndc_depth - lights.fog_range.x) / span, 0.0, 1.0);
-    return t * clamp(lights.fog_color.w, 0.0, 1.0);
-}
-
 // Capability bits mirrored from axiom_host::RenderCapability (pinned by the host's
-// `capability_bits_are_the_gpu_shader_contract` test): the four per-fragment features
+// `capability_bits_are_the_gpu_shader_contract` test): the per-fragment features
 // this main pass gates.
 const CAP_TEXTURES: u32 = 1u;
 const CAP_ALPHAMASK: u32 = 2u;
 const CAP_NORMALMAP: u32 = 4u;
 const CAP_SHADOWS: u32 = 8u;
 const CAP_SPECULAR: u32 = 512u;
+const CAP_AERIAL: u32 = 2048u;
+
+// `axiom_host::FrameDepthFog::mix_fraction`, mirrored. That function is the
+// definition and this is the copy; the Rust side is the one with tests.
+//
+// Two terms, composed as independent extinction (`1 - (1-a)*(1-b)`):
+//
+// * the **screen ramp** on normalized device depth, which the Canvas 2D
+//   post-pass also runs on its z-buffer — the part that keeps the two backends'
+//   horizons in parity;
+// * the **air term**, Beer-Lambert on the fragment's world distance from the
+//   camera. NDC depth is hyperbolic in distance, so a ramp linear in it spends
+//   its whole range on the near field and switches at one screen row; this term
+//   is the one that can grade a ground plane running to the horizon.
+//
+// The air term is `axiom_host::RenderCapability::AerialPerspective`, which this
+// backend has (it holds `world_pos` and the camera) and Canvas 2D does not. The
+// gate is expressed as *zeroing the rate*, so a profile without the capability
+// evaluates the screen ramp alone — bit-identical to the declared substitute —
+// rather than taking a second code path.
+//
+// Degenerate inputs are safe: the span is floored before the divide, the rate
+// and the distance are floored at zero, and the result is clamped.
+fn fog_factor(ndc_depth: f32, view_distance: f32) -> f32 {
+    let span = max(abs(lights.fog_range.y - lights.fog_range.x), 1e-6);
+    let screen = clamp((ndc_depth - lights.fog_range.x) / span, 0.0, 1.0);
+    let rate = max(lights.fog_range.z, 0.0) * f32((lights.caps & CAP_AERIAL) != 0u);
+    let air = 1.0 - exp2(-rate * max(view_distance, 0.0));
+    let combined = 1.0 - (1.0 - screen) * (1.0 - air);
+    return combined * clamp(lights.fog_color.w, 0.0, 1.0);
+}
 
 // How tight a specular highlight is. One engine gloss profile, because the
 // instance payload has exactly one free lane and it is spent on *strength*: how
@@ -358,7 +379,12 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // This is applied AFTER lighting on purpose — fog replaces the surface's radiance,
     // it does not tint the light — which is also where the Canvas 2D backend's fog
     // post-pass sits (on the composited image), so the two agree.
-    let fogged = mix(emitted, lights.fog_color.rgb, fog_factor(in.clip.z));
+    //
+    // The metres of air are measured, not inferred from depth: this stage already
+    // interpolates a world position and already knows where the camera is (it
+    // needed both for the specular term), so the true distance is one `length`.
+    let air_metres = length(in.world_pos - lights.camera.xyz);
+    let fogged = mix(emitted, lights.fog_color.rgb, fog_factor(in.clip.z, air_metres));
     return vec4<f32>(fogged, base.a);
 }
 "#;
@@ -746,7 +772,9 @@ struct Light {
 };
 struct Lights {
     count: u32,
-    _pad0: u32,
+    // The frame's backend capability mask, the same lane the mesh pass reads as
+    // `caps` (it was `_pad0` here while nothing in this pass needed it).
+    caps: u32,
     _pad1: u32,
     _pad2: u32,
     // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
@@ -754,7 +782,8 @@ struct Lights {
     ground: vec4<f32>,
     // The frame's depth fog — this pass binds the SAME lights UBO as the mesh pass,
     // so its `Lights` declaration must stay layout-identical. rgb = fog colour,
-    // w = maximum mix fraction; `fog_range.xy` = start / full-density NDC depth.
+    // w = maximum mix fraction; `fog_range.xy` = start / full-density NDC depth,
+    // `fog_range.z` = the extinction rate per world metre.
     fog_color: vec4<f32>,
     fog_range: vec4<f32>,
     // Layout parity with the mesh pass's `camera` lane (unread here — the SDF
@@ -764,12 +793,20 @@ struct Lights {
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
 
-// The marched hit's depth fog: the mesh pass's `fog_factor`, applied to the hit's
-// NDC depth so a raymarched surface recedes into the same atmosphere the triangles do.
-fn fog_factor(ndc_depth: f32) -> f32 {
+const CAP_AERIAL: u32 = 2048u;
+
+// The marched hit's atmosphere: the mesh pass's `fog_factor`, unchanged, so a
+// raymarched surface and a triangle at the same depth AND the same distance
+// recede by exactly the same amount. The march gives the distance for free —
+// `t` is the metres of ray already travelled — so this pass needs no extra data
+// to evaluate the air term.
+fn fog_factor(ndc_depth: f32, view_distance: f32) -> f32 {
     let span = max(abs(lights.fog_range.y - lights.fog_range.x), 1e-6);
-    let t = clamp((ndc_depth - lights.fog_range.x) / span, 0.0, 1.0);
-    return t * clamp(lights.fog_color.w, 0.0, 1.0);
+    let screen = clamp((ndc_depth - lights.fog_range.x) / span, 0.0, 1.0);
+    let rate = max(lights.fog_range.z, 0.0) * f32((lights.caps & CAP_AERIAL) != 0u);
+    let air = 1.0 - exp2(-rate * max(view_distance, 0.0));
+    let combined = 1.0 - (1.0 - screen) * (1.0 - air);
+    return combined * clamp(lights.fog_color.w, 0.0, 1.0);
 }
 
 struct SdfPrim {
@@ -936,10 +973,11 @@ fn fs(in: VsOut) -> FsOut {
     var out: FsOut;
     let shaded = shade(surface, n, p);
     let ndc_depth = clip.z / clip.w;
-    // Same atmosphere as the mesh pass, keyed on the hit's own NDC depth, so a
-    // marched surface and a triangle at the same distance recede by the same amount.
+    // Same atmosphere as the mesh pass, keyed on the hit's own NDC depth and on
+    // `t` — the metres the ray marched to reach it — so a marched surface and a
+    // triangle at the same distance recede by the same amount.
     out.color = vec4<f32>(
-        mix(shaded.rgb, lights.fog_color.rgb, fog_factor(ndc_depth)),
+        mix(shaded.rgb, lights.fog_color.rgb, fog_factor(ndc_depth, t)),
         shaded.a,
     );
     out.depth = ndc_depth;
@@ -2334,7 +2372,8 @@ fn upload_texture(
 /// Pack the frame's lights into the std140 lighting-uniform byte layout: an
 /// 80-byte header — light count `u32` + capability mask `u32` + 8 bytes padding, the hemisphere-ambient
 /// `sky` + `ground` `vec4`s (rgb, w unused), then the depth-fog `fog_color`
-/// (rgb + max mix fraction) and `fog_range` (start, full-density, 0, 0) `vec4`s —
+/// (rgb + max mix fraction) and `fog_range` (start, full-density, extinction rate
+/// per metre, 0) `vec4`s —
 /// then `MAX_LIGHTS` entries of two
 /// `vec4`s — `v = (vec.xyz, kind)` and `col = (colour.rgb, intensity)`. Entries past
 /// the count stay zero. Capped at `MAX_LIGHTS`.
@@ -2374,7 +2413,10 @@ fn pack_lights(
         depth_fog.strength().get(),
         depth_fog.near().get(),
         depth_fog.far().get(),
-        0.0,
+        // The Beer-Lambert extinction rate per world metre, in what used to be a
+        // pad lane — so the distance term costs the uniform nothing and both
+        // WGSL `Lights` declarations stay byte-identical to what they were.
+        depth_fog.extinction().get(),
         0.0,
         eye[0],
         eye[1],

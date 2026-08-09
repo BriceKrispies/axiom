@@ -279,12 +279,52 @@ impl RaceScene {
         // The colour is [`palette::HAZE`], not [`palette::SKY`] — see that
         // constant for why turning a fitted clear-sky primary up to `0.96` takes
         // the frame's red the wrong way, and for the horizon seam it costs.
-        app.set_depth_fog(FrameDepthFog::new(
-            Ratio::finite_or_zero(0.9836),
-            Ratio::finite_or_zero(0.9970),
-            Ratio::finite_or_zero(0.96),
-            palette::HAZE,
-        ));
+        //
+        // **What re-sizing the window could not fix, and what the extinction rate
+        // is here for.** A window authored in normalized depth ends in a *ceiling*:
+        // at `far` the ramp clamps, and every surface beyond it — the whole
+        // distant palm rank, the buildings, the headland — is mixed toward
+        // `palette::HAZE` by exactly the same fraction whatever its range. That is
+        // measurable on the champion: sampled across the full width of the band
+        // just above the horizon, the frame reads `(141,176,178)` at the left edge
+        // and `(150,194,198)` at the right, and essentially that same value
+        // everywhere between. Nine levels of variation across the entire distance
+        // of a nine-kilometre coastline. The reference's same band runs turquoise
+        // sea, white cumulus, green headland and a warm sun-side glow — 200 levels
+        // — because real air never saturates; it keeps taking the same *fraction*
+        // per metre forever, so two things a kilometre apart are never the same
+        // colour. No `[near, far]` pair can express that, which is why the engine
+        // now carries the Beer–Lambert term (`FrameDepthFog::with_extinction`,
+        // gated by `RenderCapability::AerialPerspective` and substituted by this
+        // very window on the software arm).
+        //
+        // Sized so the near and mid field stay where the last passes measured
+        // them and only the saturated tail changes. `far` moves `0.9970 -> 0.99955`
+        // (`322 m -> 1018 m`), which stops the ramp clamping inside the shot, and
+        // `0.001 /m` extinction — a `1000 m` half-distance — supplies the grade the
+        // window no longer does. Composed as `1 - (1-screen)*(1-air)` and scaled
+        // by the same `0.96` ceiling, that is:
+        //
+        // | range  | before | after | note                                      |
+        // |--------|--------|-------|-------------------------------------------|
+        // |  20 m  | 0.000  | 0.013 | the subject and its shadow stay untouched |
+        // |  70 m  | 0.000  | 0.045 |                                           |
+        // | 150 m  | 0.654  | 0.590 | the receding palm rank, within 6%         |
+        // | 322 m  | 0.960  | 0.837 | *was* the ceiling; now still resolving    |
+        // | 800 m  | 0.960  | 0.949 | separated from 322 m for the first time   |
+        //
+        // The near field moves by at most a hundredth and the mid field by six —
+        // this is deliberately not a re-grade. What it buys is that the far band
+        // stops being one flat value.
+        app.set_depth_fog(
+            FrameDepthFog::new(
+                Ratio::finite_or_zero(0.9836),
+                Ratio::finite_or_zero(0.99955),
+                Ratio::finite_or_zero(0.96),
+                palette::HAZE,
+            )
+            .with_extinction(Ratio::finite_or_zero(0.001)),
+        );
 
         // The grade. See [`GRADE`] for why a daylight frame takes the opposite
         // one from the night frame this scene used to be.
