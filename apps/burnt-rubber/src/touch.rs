@@ -114,6 +114,11 @@ pub struct PadLayout {
     pub viewport: Vec2,
     pub unit: f32,
     pub slots: Vec<PadSlot>,
+    /// Height (px) of the clear strip the pad leaves along the bottom edge of
+    /// the frame. See [`BOTTOM_STRIP_UNITS`]: the boost meter and the controls
+    /// legend are laid out inside it, so it is part of the pad's contract with
+    /// the HUD rather than an incidental margin.
+    pub bottom_strip: f32,
     /// Radius of the joystick ring once it appears.
     pub stick_radius: f32,
     /// Whether this layout has a joystick at all. False on rails, where lateral
@@ -143,8 +148,9 @@ impl PadLayout {
         let viewport = Vec2::new(width.max(1.0), height.max(1.0));
         let unit = (viewport.x.min(viewport.y) * UNIT_FRACTION).clamp(UNIT_MIN, UNIT_MAX);
         let margin = unit * 0.55;
+        let bottom_strip = (unit * BOTTOM_STRIP_UNITS).max(BOTTOM_STRIP_MIN);
         let right = viewport.x - margin;
-        let bottom = viewport.y - margin;
+        let bottom = viewport.y - bottom_strip;
         let left = margin;
         // The lane buttons are the primary control and are sized like the
         // accelerator, side by side so a thumb can roll between them without
@@ -185,6 +191,7 @@ impl PadLayout {
             viewport,
             unit,
             slots,
+            bottom_strip,
             stick_radius: unit * 1.3,
             stick_enabled: false,
         }
@@ -196,8 +203,9 @@ impl PadLayout {
         let viewport = Vec2::new(width.max(1.0), height.max(1.0));
         let unit = (viewport.x.min(viewport.y) * UNIT_FRACTION).clamp(UNIT_MIN, UNIT_MAX);
         let margin = unit * 0.55;
+        let bottom_strip = (unit * BOTTOM_STRIP_UNITS).max(BOTTOM_STRIP_MIN);
         let right = viewport.x - margin;
-        let bottom = viewport.y - margin;
+        let bottom = viewport.y - bottom_strip;
         // The accelerator is the largest and sits under the thumb; everything
         // else is arranged around it, further from the resting position in
         // rough order of how often it is used.
@@ -232,6 +240,7 @@ impl PadLayout {
             viewport,
             unit,
             slots,
+            bottom_strip,
             stick_radius: unit * 1.3,
             stick_enabled: true,
         }
@@ -261,6 +270,38 @@ impl PadLayout {
 
 /// Fraction of the smaller viewport dimension one layout unit takes.
 const UNIT_FRACTION: f32 = 0.115;
+/// How far, in layout units, the pad stops short of the bottom edge.
+///
+/// This is deliberately deeper than the side/top `margin` of `0.55` units, and
+/// it is a **composition** number rather than a comfort one. The bottom of the
+/// frame is a stack read from the edge upward — controls legend, boost meter,
+/// then the pad — and until this constant existed there was nothing reserving
+/// room for the first two. The pad simply sat `margin` off the bottom edge and
+/// the HUD placed its meter at a fixed `bottom: 92px`, a number true of no
+/// frame in particular: on the 470x836 phone frame the campaign captures, the
+/// pad's bottom row spans 30..138 px off the edge and the meter landed at 92,
+/// i.e. printed straight through the lane buttons and into the accelerator.
+///
+/// Reserving the strip here rather than nudging that `92` is what makes the fix
+/// hold at other frame sizes: the strip scales with the pad, so the meter and
+/// the legend are positioned against the space the pad actually left rather
+/// than against a pixel count someone measured once.
+///
+/// `1.15` is the smallest strip that clears a two-line legend and the meter
+/// above it. It also moves the pad *toward* the reference rather than away: on
+/// the capture frame the bottom row's centres go to 719.8 px against the
+/// reference's ~727.5, where `0.55` put them at 752.2 — a 25 px error becomes
+/// an 8 px one, and in the direction that opens the bottom of the frame up
+/// instead of crowding it.
+const BOTTOM_STRIP_UNITS: f32 = 1.15;
+/// The strip never gets shorter than this (px), whatever the unit clamps do.
+///
+/// The strip holds *type*, and type does not scale below legibility: two legend
+/// lines and the meter above them need about this much height however small the
+/// frame is. Without the floor a 320x240 window drives the unit to `UNIT_MIN`
+/// and the strip to 46 px, at which point the meter sits back on top of the
+/// legend — the same class of collision one layer down.
+const BOTTOM_STRIP_MIN: f32 = 52.0;
 /// Smallest a layout unit may get (px). Set so that even the smallest button on
 /// the smallest viewport clears [`MIN_TOUCH_RADIUS`].
 const UNIT_MIN: f32 = 40.0;
@@ -482,6 +523,47 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The bottom band's contract: whatever the frame, the pad leaves a strip
+    /// along the bottom edge and no button reaches into it. The HUD's boost
+    /// meter and controls legend are laid out inside that strip, so a pad that
+    /// stopped honouring it would put the meter back through the buttons —
+    /// which is exactly the defect `BOTTOM_STRIP_UNITS` was introduced to end.
+    #[test]
+    fn the_pad_leaves_the_bottom_strip_clear_on_every_frame() {
+        for (w, h) in [(470.0, 836.0), (390.0, 844.0), (844.0, 390.0), (320.0, 240.0)] {
+            for profile in [PlayProfile::Wheel, PlayProfile::Rails] {
+                let layout = PadLayout::for_profile(w, h, profile);
+                assert!(
+                    layout.bottom_strip > layout.unit * 0.55,
+                    "the strip must be deeper than the side margin, or it reserves nothing"
+                );
+                let floor = h - layout.bottom_strip;
+                for slot in &layout.slots {
+                    assert!(
+                        slot.centre.y + slot.radius <= floor + 1.0e-3,
+                        "{:?} reaches {} px into the strip the meter lives in on {w}x{h}",
+                        slot.button,
+                        slot.centre.y + slot.radius - floor
+                    );
+                }
+            }
+        }
+    }
+
+    /// The strip has to be tall enough to actually hold the two things it was
+    /// reserved for: a two-line legend and the boost meter above it. `web.rs`
+    /// places them at 0.06 and 0.66 of the strip; at the smallest unit the
+    /// clamps allow, that must still leave the meter under the pad.
+    #[test]
+    fn the_bottom_strip_has_room_for_the_meter_and_the_legend() {
+        let layout = PadLayout::for_viewport(320.0, 240.0);
+        let strip = layout.bottom_strip;
+        let legend_top = strip * 0.06 + (strip * 0.19).clamp(10.0, 13.0) * 1.45 * 2.0;
+        let meter_top = strip * 0.66 + (strip * 0.24).clamp(12.0, 16.0) * 1.2;
+        assert!(strip * 0.66 >= legend_top, "the meter would print on the legend");
+        assert!(meter_top <= strip, "the meter would print on the pad");
     }
 
     #[test]

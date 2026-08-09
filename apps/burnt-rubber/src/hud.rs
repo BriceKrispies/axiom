@@ -134,9 +134,20 @@ pub const GO_BANNER_STEPS: u32 = 60;
 /// How long the first-run controls hint stays up (steps).
 pub const CONTROLS_HINT_STEPS: u64 = 600;
 
-/// The controls hint, as one line.
-pub const CONTROLS_HINT: &str =
-    "W/S drive · A/D steer · SPACE handbrake · SHIFT boost · R reset · ESC pause";
+/// The controls hint, as the two lines it is read on.
+///
+/// Two lines rather than one string left to wrap, because a wrap is decided by
+/// the frame and the font and the hint is therefore a different shape on every
+/// device — on the narrow phone frame the campaign captures, the single 75
+/// character line ran past both edges of the picture before the browser broke
+/// it. Breaking it here makes the shape of the bottom of the frame a decision
+/// this file makes rather than one the viewport makes, and the break is placed
+/// where it groups: driving inputs on the first line, session keys on the
+/// second.
+pub const CONTROLS_HINT: [&str; 2] = [
+    "W/S drive · A/D steer · SPACE handbrake · SHIFT boost",
+    "R reset · ESC pause",
+];
 
 #[cfg(test)]
 mod tests {
@@ -248,7 +259,10 @@ mod tests {
     fn the_controls_hint_shows_early_and_then_stops() {
         let mut sim = racing();
         assert!(HudModel::of(&sim).show_controls_hint);
-        assert!(!CONTROLS_HINT.is_empty());
+        assert!(CONTROLS_HINT.iter().all(|line| !line.is_empty()));
+        // Each line has to fit a phone frame on its own, which is the whole
+        // reason the hint is two lines rather than one left to wrap.
+        assert!(CONTROLS_HINT.iter().all(|line| line.chars().count() <= 56));
         for _ in 0..CONTROLS_HINT_STEPS {
             sim.step(DriveCommand::FLAT_OUT);
         }
