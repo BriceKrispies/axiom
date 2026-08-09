@@ -150,18 +150,6 @@ impl RaceScene {
             [0.19, 0.25, 0.36],
             [0.078, 0.068, 0.049],
         ));
-        // The air. Everything recedes into the sky colour rather than staying
-        // fully lit out to the far plane, which is what gives the road, the trees and
-        // the skyline their depth instead of a hard cut-out horizon. On a daylight
-        // stage this is the *dominant* atmospheric cue rather than a finishing
-        // touch: the reference's road, palms and headland all wash toward the pale
-        // haze at the vanishing point long before they reach it.
-        //
-        // The range is normalized device depth, which is strongly non-linear over a
-        // `NEAR_PLANE`..`FAR_PLANE` frustum: 0.990 is ~110 m out (the fog just starts
-        // to bite past the near traffic) and 0.9993 is ~900 m (the skyline is almost
-        // fully atmosphere). Reaching 0.9 rather than 1.0 keeps a faint silhouette at
-        // the vanishing point instead of erasing it.
         // Bloom: what turns the emissive cues — reflector posts, tail lights,
         // tunnel lamps, the lane paint catching the sun — from bright patches of
         // paint into things that read as lights. Gated by the backend's `Bloom`
@@ -206,9 +194,12 @@ impl RaceScene {
         // light comes from, so the disc and the thing it lights agree. (The name
         // still says moon; the *geometry* constants belong to the light rig and
         // are left for the pass that re-aims the key, but the colour it hands the
-        // sky is now `palette::SUN`.) The horizon colour is `palette::SKY` — the
-        // exact colour the depth fog below fades into — so the road dissolves into
-        // the sky it is standing under instead of into an unrelated grey. The
+        // sky is now `palette::SUN`.) The horizon colour is `palette::SKY`, the
+        // dome's own pale end; the depth fog below fades into `palette::HAZE`
+        // instead, which is a *different* colour for the reason that constant
+        // documents — a fitted clear-sky primary is not what suspended water and
+        // dust look like, and the reference measures the two 145 red levels
+        // apart. The
         // zenith is the deeper, bluer end and the horizon the pale hazy one, which
         // is how a clear day sits: you are looking through the most air at the
         // ground line and the least of it overhead.
@@ -250,11 +241,40 @@ impl RaceScene {
                 ),
         );
 
+        // The haze, at the strength the reference actually carries.
+        //
+        // Normalized device depth is hyperbolic, so a range authored in it is a
+        // ramp that is **linear in `1/z`**: with this frustum,
+        // `z = 1.20087 / (1.00073 - ndc)`. The old `0.990 .. 0.9993` is therefore
+        // `112 m .. 841 m`, and that is the whole defect — the visible road runs
+        // from under the bumper to roughly `250 m`, where perspective packs
+        // everything beyond into the last few rows above the horizon. More than
+        // half the road the camera shows was outside the fog's start entirely,
+        // and the far half only ever reached `0.4` of a maximum that was itself
+        // capped at `0.9`. Measured down the centre column, the champion's road
+        // runs `(82, 63, 54)` at the vanishing point to `(75, 60, 53)` at
+        // mid-frame: seven levels of atmosphere across the entire depth of the
+        // shot. The reference's same column ramps continuously into a pale band.
+        // A fog authored past the geometry is a fog that does not exist.
+        //
+        // So the ramp is re-sized against the road that is actually in shot:
+        // `0.9836` is `70 m` (the fog starts a few car-lengths past the near
+        // traffic, so the subject and its shadow stay untouched) and `0.9970` is
+        // `322 m` (full density at the vanishing point rather than four times
+        // past it). Half-strength lands at `~120 m` and `0.8` at `~200 m`, which
+        // is the aerial perspective the reference shows over the receding palm
+        // rank. The maximum goes `0.9` -> `0.96`: the reference's vanishing point
+        // has *become* atmosphere, and a silhouette held back at a tenth is what
+        // read as a dark smudge under a bright sky.
+        //
+        // The colour is [`palette::HAZE`], not [`palette::SKY`] — see that
+        // constant for why turning a fitted clear-sky primary up to `0.96` takes
+        // the frame's red the wrong way, and for the horizon seam it costs.
         app.set_depth_fog(FrameDepthFog::new(
-            Ratio::finite_or_zero(0.990),
-            Ratio::finite_or_zero(0.9993),
-            Ratio::finite_or_zero(0.9),
-            palette::SKY,
+            Ratio::finite_or_zero(0.9836),
+            Ratio::finite_or_zero(0.9970),
+            Ratio::finite_or_zero(0.96),
+            palette::HAZE,
         ));
 
         // The grade. See [`GRADE`] for why a daylight frame takes the opposite

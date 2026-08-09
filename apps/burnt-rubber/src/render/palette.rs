@@ -116,11 +116,13 @@ pub fn ratio(v: f32) -> Ratio {
 /// error over the visible band falls from `12781` to `1340` per sample.
 ///
 /// It stays the frame's **white level** in every other respect — it is still the
-/// clear colour, still the horizon stop, and still the colour
-/// [`super::FrameDepthFog`] fades every distant surface into, so the far road
-/// still dissolves into the sky it is standing under with no seam. It is simply
-/// 18% less bright and no longer red, which is the correction the measurement
-/// asks for.
+/// clear colour and still the horizon stop of the dome. It is simply 18% less
+/// bright and no longer red, which is the correction the measurement asks for.
+///
+/// It is **no longer the depth fog's colour**. That was true when this was
+/// authored and it is the reason the red above had to go: a stop fitted to a
+/// clear sky is a near-pure blue-green primary, and a haze is neither. See
+/// [`HAZE`] for the split and for the horizon seam it costs.
 ///
 /// What this pair still **cannot** express is the thin pale haze strip the
 /// reference has hugging the horizon line itself (`~(158, 210, 232)`, below about
@@ -133,21 +135,17 @@ pub fn ratio(v: f32) -> Ratio {
 ///
 /// This constant is the **white level of the whole frame**, not just the colour
 /// of the empty top of it, and that is why it is authored this far down. It is
-/// three things at once: the clear colour (`set_clear_color`), the horizon stop
-/// of the sky gradient, and — decisively — the colour [`super::FrameDepthFog`]
-/// fades every distant surface into. Whatever value sits here is therefore the
-/// tone the vanishing point, the far road and the distant scenery all converge
-/// on, and every receding thing is dragged toward it.
+/// the clear colour (`set_clear_color`) and the horizon stop of the sky gradient,
+/// so it is the tone the top 40% of the frame is made of and the tone the
+/// vanishing point is seen *against*. What the receding surfaces themselves
+/// converge on is [`HAZE`].
 ///
 /// The previous `[0.0009, 0.0012, 0.0021]` was authored for a moonlit stage: a
 /// near-black floor, so that the emissive cues were the only light in shot. The
 /// reference is now a **daylight** coastal highway — a blue sky with a sun in it,
 /// a turquoise sea and sunlit sand — and against that reference a near-black
-/// horizon is not a dark grade, it is the wrong time of day. Every downstream
-/// term inherits it: the fog fades the far road into the sky it is standing
-/// under, so a black sky fades a sunlit road into a black tunnel mouth, and no
-/// key light or exposure can add daylight back to a frame whose atmosphere is
-/// night.
+/// horizon is not a dark grade, it is the wrong time of day, and no key light or
+/// exposure can add daylight back to a frame whose atmosphere is night.
 ///
 /// Held *below* the reference's whitest cloud on purpose: this is haze, not
 /// highlight. Pushing it to white would blow the vanishing point out and take the
@@ -171,9 +169,8 @@ pub const GHOST_OPACITY: f32 = 1.0;
 /// because that is where the atmosphere is thickest and scatters the most, and
 /// the deepest, bluest part is overhead where you are looking through the least
 /// air. Getting this the wrong way round is what makes a clear noon read as
-/// overcast. [`SKY`] stays the *horizon* colour precisely because it is also the
-/// colour the depth fog fades into — so the far road dissolves into the sky it
-/// is standing under, with no seam between the two.
+/// overcast. [`SKY`] stays the *horizon* colour because that is where the dome
+/// is palest, which is the same aerial-perspective fact stated twice.
 ///
 /// Displayed, this is roughly `(7, 48, 111)` before the grade. Note how *little*
 /// red it holds — a daylight zenith is nearly a pure blue primary, and the usual
@@ -199,6 +196,70 @@ pub const GHOST_OPACITY: f32 = 1.0;
 /// reference's own measured sky, inverted through [`super::GRADE`] — see [`SKY`]
 /// for the measurement and for the one thing the two stops still cannot express.
 pub const SKY_ZENITH: [f32; 3] = [0.002, 0.03, 0.16];
+
+/// The **depth fog's own colour** — the tone every distant surface recedes into,
+/// and no longer the same number as [`SKY`].
+///
+/// ## Why the haze stopped being the sky
+///
+/// Binding the fog to [`SKY`] is the standard trick and it was the right default
+/// while the two agreed. They do not agree here, and the champion frame measures
+/// exactly how far apart they are. Sampling the road's centre column at the
+/// vanishing point:
+///
+/// | | champion | reference |
+/// |---|---|---|
+/// | horizon band | `(87, 119, 129)` | `(157, 204, 210)` |
+///
+/// Two independent defects sit in that one triple, and **neither can be fixed
+/// without the other**:
+///
+/// * **Not enough of it.** Solving the mix at that band gives a fog fraction of
+///   roughly `0.4` where the reference's is `~0.9` — its vanishing point has
+///   essentially *become* atmosphere, ours is still more than half tarmac. See
+///   the range authored at the [`super::FrameDepthFog`] call site for the pull-in
+///   that fixes the strength.
+/// * **The wrong colour to have more of.** [`SKY`] displays, through
+///   [`super::GRADE`], at `(12, 191, 248)` — a saturated cyan primary with the
+///   red driven to nothing, which is correct for the *clear sky* it was
+///   least-squares fitted to and wrong for haze. Pushing the density to `0.9`
+///   against that colour lands the far road at `(18, 178, 228)`: the green and
+///   blue arrive, and the red goes the wrong way, from `87` to `18`, against a
+///   reference that wants `157`. The frame's largest single colour deficit is red
+///   (the 3D band's mean red is `49` against the reference's `105`), and turning
+///   the sky-coloured fog up makes it worse.
+///
+/// Haze is suspended water and dust lit by the whole sky *and* by sunlit ground.
+/// It is pale and very nearly neutral. A clear zenith-to-horizon dome is a
+/// near-pure blue-green primary. Those are two different colours and this app was
+/// spending one number on both.
+///
+/// ## Derivation
+///
+/// Not authored by eye. The reference's own horizon band, `(157, 204, 210)`, is
+/// inverted through [`super::GRADE`]'s exact chain — saturation about Rec.709
+/// luma, then the contrast S-curve about `0.5`, then exposure × white balance,
+/// then the sRGB transfer the backend's render target writes with — which lands
+/// on this linear triple. Forward through the same chain it returns
+/// `(157, 205, 211)`, within a display level on every channel.
+/// [`tests::the_haze_is_the_reference_s_own_horizon_band_and_it_is_not_the_sky`]
+/// is that round trip, asserted.
+///
+/// ## The one thing this costs, and who owns it
+///
+/// The dome and the fog now meet at the horizon line carrying different colours —
+/// a pale warm haze below, a cyan sky above — so there is a step across that row
+/// where there used to be none. That step is the **two-stop dome's** limitation,
+/// not this constant's: [`SKY`] already documents that `smoothstep` is flattest
+/// near zero and therefore cannot hold the thin pale band the reference has
+/// hugging its own horizon (`~(158, 210, 232)`, below about 5° of elevation).
+/// Closing it takes a third stop or a horizon-hugging exponent in the sky shader,
+/// which is an engine change.
+///
+/// The trade is not close. The seam is one row. The surfaces the fog actually
+/// paints — the far road, the receding palm rank, the headland, the skyline — are
+/// hundreds of rows, and they are the ones the reference measures against.
+pub const HAZE: [f32; 3] = [0.35, 0.53, 0.49];
 
 /// The sun's disc colour — **deliberately far above `1.0`**.
 ///
@@ -230,8 +291,8 @@ pub const SUN: [f32; 3] = [2.4, 2.25, 1.95];
 /// It was `[0.085, 0.088, 0.105]`: a deliberate blue tilt, blue a quarter above
 /// red. That reads as a reasonable choice in isolation and is wrong in context,
 /// because it is the *third* blue-weighted term stacked on the same pixels. The
-/// hemisphere ambient's sky colour is blue by 1.9× red, the depth fog fades into
-/// a [`SKY`] blue by 2.3×, and the moon and its key light are cool by authorship.
+/// hemisphere ambient's sky colour is blue by 1.9× red, the depth fog fades the
+/// far road toward a cool [`HAZE`], and the key light is cool by authorship.
 /// Multiply a blue albedo by a blue light under a blue fog and the road does not
 /// read as *lit coolly* — it reads as **navy**, which is what the champion's
 /// lower half is and what the reference's is not. Measured against the reference,
@@ -736,9 +797,9 @@ mod tests {
 
     /// The **time of day**, pinned where it is actually decided.
     ///
-    /// [`SKY`] is not just the empty top of the frame: it is the clear colour,
-    /// the horizon stop of the gradient, and the colour the depth fog fades every
-    /// distant surface into. A frame whose atmosphere is authored at night is a
+    /// [`SKY`] is not just the empty top of the frame: it is the clear colour and
+    /// the horizon stop of the gradient, and it sets the level [`HAZE`] is
+    /// authored against. A frame whose atmosphere is authored at night is a
     /// night frame however it is lit and however it is graded — the fog adds its
     /// colour after the lighting, and the three grade knobs (exposure, contrast,
     /// saturation) are global multiplies that cannot put daylight into a black
@@ -860,6 +921,84 @@ mod tests {
             span > 30.0,
             "the visible sky spans only {span:.0} display levels of blue between \
              its horizon and the top of the frame: that is a wash, not a dome"
+        );
+    }
+
+    /// **The haze is not the sky**, and it is the reference's own horizon band.
+    ///
+    /// Both halves are the assertion. A fog colour bound to a clear-sky stop is
+    /// the default every renderer reaches for, and it is why the champion frame's
+    /// vanishing point measured `(87, 119, 129)` against the reference's
+    /// `(157, 204, 210)`: turning that fog *up* — which the range at the
+    /// [`super::FrameDepthFog`] call site now does — drives the far road's red
+    /// from `87` toward the sky stop's `12` when the reference wants `157`. So
+    /// the round trip is pinned here. If [`super::GRADE`] moves, or if someone
+    /// re-binds the fog to [`SKY`], this fires.
+    #[test]
+    fn the_haze_is_the_reference_s_own_horizon_band_and_it_is_not_the_sky() {
+        let grade_cfg = super::super::GRADE;
+        let (exposure, wb, contrast, saturation) = (
+            grade_cfg.exposure().get(),
+            grade_cfg.white_balance(),
+            grade_cfg.contrast().get(),
+            grade_cfg.saturation().get(),
+        );
+        let encode = |v: f32| {
+            if v <= 0.003_130_8 {
+                12.92 * v
+            } else {
+                1.055 * v.powf(1.0 / 2.4) - 0.055
+            }
+        };
+        let graded = |lin: [f32; 3]| {
+            let curve = |i: usize| ((encode(lin[i]) * exposure * wb[i]) - 0.5) * contrast + 0.5;
+            let v = [curve(0), curve(1), curve(2)];
+            let luma = 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+            [0, 1, 2].map(|i| ((luma + (v[i] - luma) * saturation) * 255.0).clamp(0.0, 255.0))
+        };
+
+        // The reference's measured horizon band, which is what this constant was
+        // inverted out of. Two display levels of tolerance: the round trip is
+        // through a power transfer, and the constant is authored to two decimals.
+        const REFERENCE_HORIZON_BAND: [f32; 3] = [157.0, 204.0, 210.0];
+        let haze = graded(HAZE);
+        for (i, channel) in ["red", "green", "blue"].iter().enumerate() {
+            assert!(
+                (haze[i] - REFERENCE_HORIZON_BAND[i]).abs() <= 2.0,
+                "the haze's {channel} lands at {:.0}, not the reference's {:.0}",
+                haze[i],
+                REFERENCE_HORIZON_BAND[i]
+            );
+        }
+
+        // ...and it is a haze, not the dome. The clear sky is a near-pure
+        // blue-green primary by assertion two tests up; suspended water and dust
+        // lit by the whole sky plus sunlit ground is pale and very nearly
+        // neutral, and the whole point of splitting the two constants is that the
+        // frame's red survives the fog being turned up.
+        let sky = graded(SKY);
+        assert!(
+            haze[0] > sky[0] + 100.0,
+            "the haze carries no more red than the clear sky ({:.0} vs {:.0}): it \
+             is the sky again under another name, and every distant surface will \
+             recede into a cyan primary",
+            haze[0],
+            sky[0]
+        );
+        let spread = |c: [f32; 3]| {
+            (c[0].max(c[1]).max(c[2]) - c[0].min(c[1]).min(c[2])) / c[0].max(c[1]).max(c[2]).max(1.0)
+        };
+        assert!(
+            spread(haze) < spread(sky) * 0.5,
+            "the haze is as saturated as the dome ({:.2} vs {:.2}) — haze is pale",
+            spread(haze),
+            spread(sky)
+        );
+        // Pale, but still below the whitest thing in shot: this is atmosphere,
+        // not a highlight, and a haze at white erases the vanishing point.
+        assert!(
+            haze.iter().all(|c| *c < 235.0),
+            "the haze blows out the vanishing point: {haze:?}"
         );
     }
 
