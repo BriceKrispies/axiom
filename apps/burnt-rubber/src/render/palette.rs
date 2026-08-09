@@ -357,36 +357,79 @@ pub const SUN: [f32; 3] = [2.4, 2.25, 1.95];
 /// The tarmac's own colour — the largest surface in any frame, and therefore the
 /// one that decides the **colour temperature of the whole shot**.
 ///
-/// It was `[0.085, 0.088, 0.105]`: a deliberate blue tilt, blue a quarter above
-/// red. That reads as a reasonable choice in isolation and is wrong in context,
-/// because it is the *third* blue-weighted term stacked on the same pixels. The
-/// hemisphere ambient's sky colour is blue by 1.9× red, the depth fog fades the
-/// far road toward a cool [`HAZE`], and the key light is cool by authorship.
-/// Multiply a blue albedo by a blue light under a blue fog and the road does not
-/// read as *lit coolly* — it reads as **navy**, which is what the champion's
-/// lower half is and what the reference's is not. Measured against the reference,
-/// the champion's near tarmac carries a blue excess of roughly a third over red
-/// where the reference's is neutral-to-warm.
+/// ## The rule, and why it has now pointed both ways
 ///
-/// The physical fact the old value contradicted: bitumen is a warm near-black.
-/// Real asphalt is neutral with a brown tilt, and every cool cast a night road
-/// carries is the *moon's*, not the road's. Putting the cool in the light and
-/// keeping it out of the surface is exactly what gives the reference its
-/// warm-neutral near lane under a cold sky, instead of one flat blue wash — the
-/// near road is where the car's own warm pool light wins, and the far road, lit
-/// by nothing but ambient and fog, stays cold. A blue albedo erases that split.
+/// The rule this constant exists to enforce has never changed: **the road's
+/// albedo sits on the opposite side of neutral from the rig that lights it**, so
+/// the frame's colour temperature comes from the light and the surface stays a
+/// near-black. What has changed twice is which side that is.
 ///
-/// So this is a **pure hue rotation, not an exposure change**: red and blue swap
-/// roles at the same magnitude (blue was 1.24× red; red is now 1.19× blue), and
-/// the Rec.709 luminance is held at `0.0889` against the old `0.0886` — a 0.3%
-/// difference, below a display level. Nothing here lifts or crushes the frame,
-/// so it cannot disturb the black point the grade is spending on the floor, and
-/// the software arm — which sees the same albedo through a different shader —
-/// changes colour without changing brightness.
+/// It was `[0.085, 0.088, 0.105]`, a blue tilt authored for the *moonlit* stage,
+/// and against that stage it was the wrong sign: the hemisphere ambient was blue
+/// by 1.9× red, the fog faded the far road into a cool [`SKY`], and the key was a
+/// cool moon. Blue albedo × blue light × blue fog is not "lit coolly", it is
+/// navy. Rotating it warm to `[0.095, 0.088, 0.080]` was the correct fix **for
+/// that rig**.
+///
+/// Era C replaced every one of those three terms with its opposite and the warm
+/// albedo was left standing. The key is now a warm sun ([`SUN`], red over blue by
+/// 1.23); the fog is [`HAZE`], no longer the cyan dome; and [`super::GRADE`] is
+/// `FramePostProcess::sunlit`, whose white balance is `[1.15, 1.00, 1.05]`. Three
+/// warm terms, and a warm albedo underneath them — the identical mistake, sign
+/// flipped, and this time on the surface that fills half the frame.
+///
+/// ## What that costs, measured on the champion frame
+///
+/// Split the road trapezoid on chroma (`R > B` is sunlit, `R <= B` is in palm
+/// shadow) and take the mean of each side, on both images:
+///
+/// | road plane | reference | champion |
+/// |---|---|---|
+/// | sunlit mean | `(101, 79, 65)`, R/B `1.55` | `(131, 88, 72)`, R/B `1.82` |
+/// | shadowed mean | `(34, 43, 52)`, R/B **`0.65`** | `(72, 72, 77)`, R/B **`0.92`** |
+/// | shadowed share of the plane | 42% | 20% |
+///
+/// The shadow column is the whole finding. **The reference's shaded asphalt is
+/// the coolest thing on its ground plane** — strongly blue, because with the sun
+/// subtracted the only light left on it is sky. The champion's shaded asphalt is
+/// a neutral grey. The road therefore renders at very nearly *the same hue in sun
+/// and in shade*, and a surface whose colour does not change across a terminator
+/// does not read as lit at all — it reads as painted. That warm/cool split is the
+/// single strongest "sunlit" cue available to this frame and the albedo is
+/// currently cancelling it.
+///
+/// It is also why this is a **material** defect and not an exposure or grade one.
+/// A key change moves the sunlit endpoint only. A grade change moves both, and
+/// takes the sky, the sand and the car with it. The albedo multiplies the sun
+/// term *and* the sky-fill term and touches nothing but the road — which is
+/// exactly the shape of the error above, where both endpoints are warm by a
+/// common factor.
+///
+/// ## Derivation
+///
+/// Per endpoint, the correction is the reference's chroma over the champion's:
+/// the sunlit lane wants R/B × `0.854` and R/G × `0.863`; the shadow wants R/B ×
+/// `0.702` and R/G × `0.794`. They disagree because our sky fill is less blue
+/// than the reference's — that residual belongs to the ambient rig, not here — so
+/// this takes the common part, weighted 2:1 toward the sunlit endpoint (57% of
+/// the reference's road plane and roughly three times its luminance): R/B ×
+/// `0.800`, R/G × `0.839`. Applied to the old ratios that is R/G `0.906` and R/B
+/// `0.950` — a *faintly* cool near-black, which is what aggregate-heavy bitumen
+/// actually is. Every warm road anyone has ever photographed was warm because of
+/// the sun on it, and the reference's own shadow proves it at R/B `0.65`.
+///
+/// This is a **pure hue rotation, not an exposure change**, exactly as the last
+/// one was: Rec.709 luminance holds at `0.08889` against the old `0.08891`, a
+/// 0.02% difference and far under a display level. Nothing here lifts or crushes
+/// the frame, so it cannot disturb the black point the grade spends on the floor,
+/// it cannot disturb the specular budget [`TARMAC_ROUGHNESS`] is sized against,
+/// and it leaves whatever the exposure is doing free to move independently. The
+/// software arm — which sees the same albedo through a different shader — changes
+/// colour without changing brightness.
 ///
 /// Named once because it was written out four times (two material arms and two
 /// tests) and a colour authored in four places is a colour that drifts.
-pub const TARMAC: [f32; 3] = [0.095, 0.088, 0.080];
+pub const TARMAC: [f32; 3] = [0.0825, 0.0910, 0.0868];
 
 /// ## The gloss set, and why every value in it moved with the era
 ///
@@ -488,12 +531,13 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
         .add_texture_data(VERGE_RES, VERGE_RES, verge_albedo())
         .ok();
     RoadMaterials {
-        // Asphalt: dark, and neutral-warm — see [`TARMAC`] for why the hue is
-        // the road's single most consequential number and why it is no longer
-        // blue. It still separates from the verge, which is green and half a
-        // stop brighter. The grain multiplies this base colour (the shader
-        // computes `albedo * colour`), so the hue lives here and only the
-        // shading is sampled.
+        // Asphalt: dark, and a *whisper* cool of neutral — see [`TARMAC`] for
+        // why the hue is the road's single most consequential number and why it
+        // sits on the opposite side of neutral from the sun that lights it. It
+        // still separates from the verge, which is green and half a stop
+        // brighter. The grain multiplies this base colour (the shader computes
+        // `albedo * colour`), so the hue lives here and only the shading is
+        // sampled.
         // `roughness` is [`TARMAC_ROUGHNESS`], and that constant carries the
         // whole argument: the value here was sized against a moonlit key three
         // times dimmer than the era-C sun, and left unchanged it turns the
@@ -1146,29 +1190,57 @@ mod tests {
         );
     }
 
-    /// The colour-temperature rule, pinned: **the cool on this stage belongs to
-    /// the light, not to the road.**
+    /// The colour-temperature rule, pinned: **the road's albedo sits on the
+    /// opposite side of neutral from the rig that lights it.**
     ///
-    /// Three terms already tint the tarmac blue — the hemisphere ambient's sky
-    /// colour, the depth fog's [`SKY`], and the moon key. A blue albedo under all
-    /// three is what turns a moonlit road into a navy wash, and it is the one of
-    /// the four that is a *surface* property and therefore simply wrong: bitumen
-    /// is a warm near-black. So the tarmac is asserted warm-side-of-neutral, and
-    /// asserted to have been rotated in hue *without* being re-exposed — a future
-    /// edit that "fixes" the road by brightening it is not this rule.
+    /// This is the rule the previous version of this test got right in substance
+    /// and wrong in direction. It asserted a literal `TARMAC[0] > TARMAC[2]` —
+    /// "bitumen is a warm near-black" — which was the correct correction to a
+    /// *moonlit* stage whose key, fog and ambient were all cool. Era C inverted
+    /// all three (a warm [`SUN`], a warm-neutral [`HAZE`], and
+    /// [`super::super::GRADE`]'s `[1.15, 1.00, 1.05]` white balance) and a
+    /// hardcoded "warm" then enforced the original defect with the sign flipped:
+    /// a warm surface under warm light, which is the terracotta road
+    /// [`TARMAC`] measures on the champion frame.
+    ///
+    /// So the assertion is derived from the rig rather than frozen against one
+    /// era of it. It reads the sun and the grade's white balance, computes which
+    /// way they tint this surface, and requires the albedo to lean the other way.
+    /// It fires the next time the stage's colour temperature moves without the
+    /// road moving with it — in either direction.
     #[test]
-    fn the_tarmac_is_warm_neutral_and_the_night_gets_its_cool_from_the_light() {
+    fn the_road_leans_against_the_light_so_the_stage_gets_its_colour_from_the_sun() {
         let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
+        // Which way the rig tints this surface: the key's own colour times the
+        // grade's white balance. Above 1 is a warm stage, below 1 a cool one.
+        let wb = super::super::GRADE.white_balance();
+        let rig_warmth = (SUN[0] * wb[0]) / (SUN[2] * wb[2]);
         assert!(
-            TARMAC[0] > TARMAC[2],
-            "the road is bitumen, not water: it may not be authored blue ({TARMAC:?})"
+            rig_warmth > 1.0,
+            "era C is a midday sun; a rig that no longer runs warm needs this \
+             test's direction re-derived, not its road re-tinted: {rig_warmth:.3}"
         );
-        // Warm, but asphalt — not terracotta. A red/blue ratio past ~1.4 stops
-        // reading as a road surface and starts reading as a tinted one.
-        assert!(TARMAC[0] / TARMAC[2] < 1.4, "the tarmac is warm-neutral, not orange");
+        // The albedo leans the other way, so the frame's warmth is the sun's and
+        // the shadowed lane — lit by sky alone — goes cool. The reference's own
+        // shaded asphalt is its coolest ground pixel, at R/B 0.65.
+        let albedo_warmth = TARMAC[0] / TARMAC[2];
+        assert!(
+            albedo_warmth < 1.0,
+            "the road is authored warm under a warm sun ({albedo_warmth:.3}): it \
+             will render the same hue in sun and in shade, which is paint, not \
+             tarmac ({TARMAC:?})"
+        );
+        // A near-black, not a tinted one. Asphalt is *faintly* off-neutral in
+        // either direction; a lean past ~15% is a coloured road, and that is the
+        // failure this whole rule exists to catch.
+        assert!(
+            albedo_warmth > 0.85,
+            "the tarmac is over-corrected into a blue road: {albedo_warmth:.3}"
+        );
         // A hue rotation, not an exposure change: the grade's black point is
-        // spending its whole budget on the frame's floor, and a brighter road
-        // would take that back. Held within 2% of the value this replaced.
+        // spending its whole budget on the frame's floor, a brighter road would
+        // take that back, and [`TARMAC_ROUGHNESS`]'s specular budget is sized
+        // against this luminance. Held within 2% of the value this replaced.
         assert!(
             (luminance(TARMAC) - 0.0886).abs() < 0.002,
             "the tarmac changed brightness, not just hue: {:?}",

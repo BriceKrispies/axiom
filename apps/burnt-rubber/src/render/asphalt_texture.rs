@@ -424,7 +424,10 @@ mod tests {
     /// The tarmac's linear base colour (`super::super::palette::road_materials`),
     /// green channel. The grain only ever multiplies this, so every claim about
     /// how the grain *looks* has to be evaluated after it.
-    const TARMAC: f32 = 0.088;
+    ///
+    /// A mirror, and mirrors drift: it tracks `palette::TARMAC[1]`, which moved
+    /// with the hue rotation documented on that constant.
+    const TARMAC: f32 = 0.0910;
 
     /// A linear value as the 0..255 display level it lands on, so the tests can
     /// speak in the same units the reference was measured in.
