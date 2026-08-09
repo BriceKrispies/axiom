@@ -137,18 +137,58 @@ impl RaceScene {
         // verticals drop ~29% and regain a terminator against the sunlit
         // horizontals; the sky/ground span goes 1.15:1 -> 1.6:1, which is form.
         //
-        // **The sky term is deliberately untouched.** It is the reference's own
-        // measured shadowed-road level (0.302 incident — see [`KEY_INTENSITY`]'s
-        // table), and it alone lights the road, the calibration surface every
-        // exposure number in this file is derived against. An up-facing pixel is
-        // bit-for-bit what it was; this change cannot move the frame's exposure.
+        // **The level, re-solved against the rendered champion rather than
+        // against the reference alone.** The previous pass held the sky term at
+        // mean `0.267` on the argument that it *is* the reference's measured
+        // shadowed-road level (`0.302` incident — see [`KEY_INTENSITY`]'s table)
+        // and therefore needed nothing. That argument checks the input and never
+        // checked the output, and the output falsifies it. Measured on the two
+        // frames over the same near-field road patch (left of the car, the band
+        // the reference fills with palm shadow):
         //
-        // Level: the sky term (mean 0.267) is ~21% of what the key lays on flat
-        // road (1.242), so it fills without becoming a second key — see the
-        // ceiling `the_sun_out_lights_every_other_term_in_the_frame` pins.
+        // | road, near field        | reference | champion |
+        // |-------------------------|-----------|----------|
+        // | sunlit (p50, right lane)| byte 114  | byte 128 |
+        // | deepest shadow (p5)     | byte  33  | byte  65 |
+        // | sun : shadow, linear    | ~12 : 1   | ~4 : 1   |
+        //
+        // The sunlit road is within 13% — the exposure this file spends most of
+        // its length deriving is *right*. The shadow is 3.6x too bright in linear,
+        // and that single error is the frame's flatness: the champion's road never
+        // goes dark anywhere. Across the mid-field band it runs p5 116 / p50 119 /
+        // p95 124 — **eight levels of tonal range on the largest surface in shot**,
+        // where the reference's same band runs 58 / 105 / 246.
+        //
+        // Under one directional key a shadowed fragment receives the ambient and
+        // nothing else, so the ambient *is* the shadow level and the sun:shadow
+        // ratio is `(key + ambient) / ambient` — nothing else in the rig can set
+        // it. At `0.267` that ratio is `6.8:1` before the backend's shadow floor
+        // and the grade lift it further; the reference measures `~12:1` rendered.
+        // Solving for the reference's ratio through the same model puts the sky
+        // term at **`0.160`**, which is this scale: both hemisphere ends multiplied
+        // by `0.60`.
+        //
+        // **Level, not colour, and not shape.** Both terms are scaled by the same
+        // factor, so the sky stays blue by 1.9x red, the ground stays the warm
+        // bounce the last pass made it, and the sky:ground span stays `4.1:1` —
+        // every bit of hemisphere modelling that pass bought survives intact. This
+        // is one number: how much open sky there is, not what colour it is.
+        //
+        // What it costs the exposure is `0.437 -> 0.425` encoded on sunlit road
+        // (2.8%, and still inside the band
+        // `the_sun_out_lights_every_other_term_in_the_frame` pins), because the key
+        // is 90% of what a sunlit horizontal receives. What it buys is the shadowed
+        // road at model byte `32` against the reference's measured `33` — the darks
+        // arriving where the reference puts them for the first time.
+        //
+        // The floor the same test pins (`ambient > 0.15`, "not a night residual")
+        // is deliberately left where it is and deliberately not approached
+        // further: `0.160` sits just inside it, the reference's own shadowed road
+        // is a lifted blue-grey and not a hole, and the next pass to want darks
+        // should take them from the backend's shadow floor, not from here.
         app.set_ambient(FrameAmbient::new(
-            [0.19, 0.25, 0.36],
-            [0.078, 0.068, 0.049],
+            [0.114, 0.150, 0.216],
+            [0.047, 0.041, 0.029],
         ));
         // Bloom: what turns the emissive cues — reflector posts, tail lights,
         // tunnel lamps, the lane paint catching the sun — from bright patches of
@@ -1406,8 +1446,13 @@ mod tests {
              comment at the `add_light` call site is stale"
         );
 
-        // The hemisphere ambient's sky term is what an up-facing surface gets.
-        let ambient = (0.19 + 0.25 + 0.36) / 3.0;
+        // The hemisphere ambient's sky term is what an up-facing surface gets —
+        // and, under one directional key, it is exactly what a *shadowed*
+        // up-facing surface gets, which is why the ratio below is the frame's
+        // shadow contrast and not merely a fill check. Mirrors the sky end of the
+        // `set_ambient` call above; see that call site for the measurement that
+        // scaled both hemisphere ends by 0.60.
+        let ambient = (0.114 + 0.150 + 0.216) / 3.0;
 
         // The backend's point-light falloff, mirrored: 1/(1 + 0.09d + 0.032d²),
         // times the pool's own intensity.
