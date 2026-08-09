@@ -226,8 +226,17 @@ impl RaceScene {
         // body already are: the Canvas 2D arm drops the whole sky and reports it,
         // so the software arm gains nothing to go wrong with and this app never
         // has to ask which arm it is on.
+        // The gradient's *shape*, authored separately from its two colours. The
+        // engine's default midpoint is 30° of elevation, which is a fine default
+        // for a camera that looks at the sky and wrong for one that looks at a
+        // road: the whole visible sky here is the band from the horizon to 32°,
+        // so a 30° midpoint shows only the flat bottom of the curve and the dome
+        // arrives as a wash however far apart the two stops are authored. See
+        // [`palette::SKY_HAZE_HEIGHT`] — this is the number that made
+        // [`palette::SKY_ZENITH`] a colour again instead of a slope hack.
         app.set_sky(
             FrameSky::gradient(palette::SKY_ZENITH, palette::SKY)
+                .with_haze_height(Ratio::finite_or_zero(palette::SKY_HAZE_HEIGHT))
                 .with_body(
                     [MOON_DIRECTION.x, MOON_DIRECTION.y, MOON_DIRECTION.z],
                     axiom_kernel::Radians::finite_or_zero(MOON_ANGULAR_RADIUS),

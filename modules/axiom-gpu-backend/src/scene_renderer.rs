@@ -368,8 +368,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
 ///
 /// This is the arithmetic of [`axiom_host::FrameSky::radiance`], mirrored. That
 /// function is the definition and this is the copy; the Rust side is the one
-/// with tests, and every constant here (`MIN_ANGULAR_RADIUS`, `LIMB_SOFTNESS`)
-/// is pinned to its value by `sky_shader_constants_match_the_host_definition`.
+/// with tests, and every constant here (`MIN_ANGULAR_RADIUS`, `LIMB_SOFTNESS`,
+/// `HAZE_HEIGHT_MIN`/`HAZE_HEIGHT_MAX`) is pinned to its value by
+/// `sky_shader_constants_match_the_host_definition`.
 ///
 /// Why a pass and not a clear colour: a flat clear cannot be a light. A night
 /// scene whose only light is a directional lamp plus a hemisphere ambient reads
@@ -388,7 +389,9 @@ struct SkyU {
     inv_view_proj: mat4x4<f32>,
     // rgb = zenith colour; w unused.
     zenith: vec4<f32>,
-    // rgb = horizon colour; w unused.
+    // rgb = horizon colour; w = the gradient's haze height (the up-component at
+    // which it stands halfway to the zenith). Carried with the horizon stop
+    // because it is that stop's reach: it says how far up the haze holds.
     horizon: vec4<f32>,
     // xyz = unit direction toward the body; w = its angular radius (radians).
     body: vec4<f32>,
@@ -453,8 +456,22 @@ fn fs(in: SkyOut) -> @location(0) vec4<f32> {
     // The vertical gradient, smoothstepped so the horizon band is soft rather
     // than a seam. Below the horizon it holds the horizon colour: there is no
     // ground hemisphere here, because the ground is geometry.
+    //
+    // `FrameSky::haze_lift`, mirrored: the up-component is first reshaped so the
+    // gradient's midpoint lands at the authored haze height instead of at a fixed
+    // 0.5, which is what lets a near-level camera see more than the bottom of the
+    // curve. HAZE_HEIGHT_MIN/MAX = 0.02/0.98 clamp away the two degenerate ends.
+    //
+    // Four arithmetic operations, and deliberately not `pow`: at the default
+    // height of 0.5 the coefficient is 1 and this collapses to `up / (up + 1 - up)`
+    // — exactly `up`, on this side as on the host's, so a sky that authors no haze
+    // height is bit-for-bit the plain smoothstep this was. `pow(x, 1.0)` is
+    // `exp2(1.0 * log2(x))` in WGSL and carries no such guarantee.
     let up = clamp(dir.y, 0.0, 1.0);
-    let blend = up * up * (3.0 - 2.0 * up);
+    let haze_h = clamp(sky.horizon.w, 0.02, 0.98);
+    let haze_k = haze_h / (1.0 - haze_h);
+    let lifted = up / (up + (1.0 - up) * haze_k);
+    let blend = lifted * lifted * (3.0 - 2.0 * lifted);
     let gradient = sky.horizon.rgb * (1.0 - blend) + sky.zenith.rgb * blend;
 
     let cos_angle = dot(dir, sky.body.xyz);
@@ -666,7 +683,7 @@ fn pack_sky(sky: &axiom_host::FrameSky, camera_view_proj: [f32; 16]) -> Vec<u8> 
                 horizon[0],
                 horizon[1],
                 horizon[2],
-                0.0,
+                sky.haze_height().get(),
                 dir[0],
                 dir[1],
                 dir[2],

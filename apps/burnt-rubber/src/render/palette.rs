@@ -124,14 +124,19 @@ pub fn ratio(v: f32) -> Ratio {
 /// clear sky is a near-pure blue-green primary, and a haze is neither. See
 /// [`HAZE`] for the split and for the horizon seam it costs.
 ///
-/// What this pair still **cannot** express is the thin pale haze strip the
-/// reference has hugging the horizon line itself (`~(158, 210, 232)`, below about
-/// 5° of elevation) before the sky collapses to blue. `smoothstep` is *flattest*
-/// near zero, so a two-stop dome holds its horizon colour over a wide band —
-/// exactly the wrong shape for a tight haze layer. Getting that would take a
-/// third stop or a horizon-hugging exponent in the sky shader, which is an engine
-/// change, not a palette one. The band is a few dozen rows; the sky above it is
-/// 40% of the frame, and this is the fit that serves the frame.
+/// The thin pale haze strip the reference has hugging the horizon line itself
+/// (`~(158, 210, 232)`, below about 5° of elevation) before the sky collapses to
+/// blue is **no longer this pair's problem**. It was, and the note that used to
+/// stand here said so: `smoothstep` is flattest near zero, so a two-stop dome
+/// parameterised on the raw up-component holds its horizon colour over a wide
+/// band — exactly the wrong shape for a tight haze layer — and getting it right
+/// "would take a third stop or a horizon-hugging exponent in the sky shader,
+/// which is an engine change, not a palette one."
+///
+/// That was the correct diagnosis, and the engine change is the one that landed:
+/// the gradient's *shape* is now authored separately from its two colours, as
+/// [`SKY_HAZE_HEIGHT`]. This stop is free to go back to being the horizon
+/// colour, and [`SKY_ZENITH`] free to go back to being the sky overhead.
 ///
 /// This constant is the **white level of the whole frame**, not just the colour
 /// of the empty top of it, and that is why it is authored this far down. It is
@@ -177,25 +182,74 @@ pub const GHOST_OPACITY: f32 = 1.0;
 /// mistake is to author it as a light grey-blue, which is a hazy sky, not a clear
 /// one.
 ///
-/// **This stop is off-screen, and that is why it moved so far.** The chase camera
-/// looks down; the top row of the frame is a `smoothstep(dir.y)` blend of about
-/// `0.57`, so nothing in shot is ever more than 57% of this value. It is not the
-/// colour of the top of the frame — it is the *slope control* that decides how
-/// fast the visible sky darkens away from [`SKY`], and it has to be authored well
-/// past the darkest pixel it is meant to produce or the gradient arrives flat.
+/// **This stop is once again a colour rather than a slope control**, and that is
+/// why it moved.
 ///
-/// The old `[0.012, 0.13, 0.68]` failed on exactly that count twice over. Its
-/// blue clipped after the grade (`0.68` linear → `215` display → past `1.0` once
-/// the white balance, contrast and saturation had run), so it contributed *no*
-/// blue slope at all — the sky's blue was a constant `255` from the horizon to
-/// the top of the frame. And it was far too bright to steepen the visible band:
-/// the reference darkens from `(1, 181, 242)` at 5° to `(1, 95, 200)` at 32°, a
-/// fall this stop has to overshoot to reach within the 0.57 the camera gives it.
+/// It used to be neither. The chase camera looks down: the top row of the frame
+/// sits ~32° up, `dir.y ≈ 0.53`, and the fixed `smoothstep(dir.y)` gradient the
+/// sky shader used to evaluate reached a blend of only **0.545** there. Nothing
+/// in shot was ever more than 54% of this value, so this constant was authored as
+/// the *overshoot* needed to drag the visible band down — a number chosen for
+/// where it lands at 54%, not for what the sky overhead is.
 ///
-/// The value is the least-squares fit of the shader's two-stop mix to the
-/// reference's own measured sky, inverted through [`super::GRADE`] — see [`SKY`]
-/// for the measurement and for the one thing the two stops still cannot express.
-pub const SKY_ZENITH: [f32; 3] = [0.002, 0.03, 0.16];
+/// That approach had a hard ceiling and the champion frame hit it. Matching the
+/// reference's top-of-frame green (`85` display, `0.093` linear) through
+/// [`super::GRADE`] needs a blend of `0.88`; at the `0.545` the camera supplied,
+/// the green here would have had to be **negative**. There was no value that
+/// worked. The wall was the gradient's fixed shape, not either colour, which is
+/// why the fix is [`SKY_HAZE_HEIGHT`] and not another guess at this stop.
+///
+/// With the haze band pulled down to `0.234`, the top row now blends at `0.88`
+/// and this stop is *nearly all* of what shows there. So it is re-derived as what
+/// it says it is — the sky straight overhead — by inverting the reference's own
+/// measured top-of-frame colour through the grade and solving the two-stop mix at
+/// the blend the camera actually delivers:
+///
+/// | at 32° up | reference | this pair, before | this pair, now |
+/// |---|---|---|---|
+/// | red | 0 | 3 | 0 |
+/// | green | 85 | 139 | 85 |
+/// | blue | 184 | 199 | 185 |
+///
+/// Every channel rose in *linear* terms while the displayed result got darker,
+/// and that is not a contradiction — it is the whole point. The old numbers were
+/// overshoots sized for 54% reach; at 88% reach an overshoot renders as a hole,
+/// so each one moves back toward the colour it actually names. The blue moves
+/// furthest (`0.16` → `0.27`) because it had the furthest to fall. It still
+/// clears the clipping check in [`self::tests`] with room to spare — it grades to
+/// `0.69`, against the `1.0` that destroyed the `0.68` before it.
+pub const SKY_ZENITH: [f32; 3] = [0.0, 0.045, 0.27];
+
+/// **The shape of the sky's gradient**, authored separately from its two colours:
+/// the up-component (the sine of the elevation angle) at which the dome stands
+/// halfway between [`SKY`] and [`SKY_ZENITH`].
+///
+/// `0.234` is 13.5° of elevation. The engine's default is `0.5` — 30° — which is
+/// the plain `smoothstep(dir.y)` the sky shader evaluated before the parameter
+/// existed, and which is wrong twice over for this frame:
+///
+/// * **It is not what air does.** Optical depth along a ray goes as roughly
+///   `1 / sin(elevation)`, so a clear day's haze band is *tight*: the sky
+///   collapses to its zenith blue within the first 15–20° and holds it the rest
+///   of the way up. The reference shows exactly that — it falls from
+///   `(1, 181, 242)` at 5° to `(1, 95, 200)` at 32°, most of that drop happening
+///   in the first third of the span.
+/// * **It is not what this camera shows.** A midpoint at 30° is a reasonable
+///   default for a camera that looks at the sky. This one looks at a road: the
+///   entire visible sky is the band from the horizon to 32°, so a 30° midpoint
+///   means the frame shows only the flat bottom of the curve and the gradient
+///   arrives as a wash however far apart the two stops are authored.
+///
+/// Pulling the midpoint to 13.5° fixes both at once, and — because the lift is
+/// exact at both ends — it moves neither thing that is matched to this gradient:
+/// the horizon still returns [`SKY`] exactly, which is what [`super::FrameDepthFog`]
+/// fades every distant surface into, so the far road still dissolves into the sky
+/// with no seam; and the zenith still returns [`SKY_ZENITH`] exactly.
+///
+/// Derived, not eyeballed: the reference's top-of-frame green inverted through
+/// [`super::GRADE`] needs a blend of `0.88` at `dir.y = 0.53`, which is
+/// `smoothstep` of a lifted `0.787`, which is a midpoint of `0.234`.
+pub const SKY_HAZE_HEIGHT: f32 = 0.234;
 
 /// The **depth fog's own colour** — the tone every distant surface recedes into,
 /// and no longer the same number as [`SKY`].
@@ -905,15 +959,30 @@ mod tests {
         }
 
         // ...and the two stops produce a real slope across the band the camera
-        // shows. The chase camera looks *down*, so the top row of the frame is a
-        // `smoothstep(dir.y)` blend of only ~0.57 — the zenith stop is never
-        // reached on screen, and a pair that agrees over that range renders as one
-        // flat wash however different the two numbers look.
-        const VISIBLE_TOP_BLEND: f32 = 0.57;
+        // shows. The chase camera looks *down*, so the top row of the frame is
+        // only ~32° up (`dir.y = 0.53`) — a pair that agrees over that range
+        // renders as one flat wash however different the two numbers look.
+        //
+        // The blend it reaches there is no longer a fixed `smoothstep(dir.y)`:
+        // it is `smoothstep` of the haze lift, mirroring
+        // `axiom_host::frame_sky::haze_lift`, so this test tracks
+        // [`SKY_HAZE_HEIGHT`] rather than pinning a number that silently goes
+        // stale the moment the gradient's shape is re-authored. At the default
+        // height of `0.5` the lift is the identity and this is the old `0.545`;
+        // at the authored `0.234` it is `0.88`.
+        const VISIBLE_TOP_UP: f32 = 0.53;
+        let k = SKY_HAZE_HEIGHT / (1.0 - SKY_HAZE_HEIGHT);
+        let lifted = VISIBLE_TOP_UP / (VISIBLE_TOP_UP + (1.0 - VISIBLE_TOP_UP) * k);
+        let visible_top_blend = lifted * lifted * (3.0 - 2.0 * lifted);
+        assert!(
+            visible_top_blend > 0.8,
+            "the top of the frame reaches only {visible_top_blend:.2} of the zenith \
+             stop: the haze band is too wide for the band this camera shows"
+        );
         let top = graded([
-            SKY[0] * (1.0 - VISIBLE_TOP_BLEND) + SKY_ZENITH[0] * VISIBLE_TOP_BLEND,
-            SKY[1] * (1.0 - VISIBLE_TOP_BLEND) + SKY_ZENITH[1] * VISIBLE_TOP_BLEND,
-            SKY[2] * (1.0 - VISIBLE_TOP_BLEND) + SKY_ZENITH[2] * VISIBLE_TOP_BLEND,
+            SKY[0] * (1.0 - visible_top_blend) + SKY_ZENITH[0] * visible_top_blend,
+            SKY[1] * (1.0 - visible_top_blend) + SKY_ZENITH[1] * visible_top_blend,
+            SKY[2] * (1.0 - visible_top_blend) + SKY_ZENITH[2] * visible_top_blend,
         ]);
         let horizon = graded(SKY);
         let span = (horizon[2] - top[2]) * 255.0;
