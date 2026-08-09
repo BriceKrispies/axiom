@@ -210,9 +210,15 @@ impl Session {
             // The keeper's clock runs through the run-up as well as the flight,
             // so a dive called while the taker is still walking in has genuinely
             // been travelling by the time the ball leaves.
+            // Taking, this is a beat: the line fades and the kicker sets off.
+            // Keeping, it is the set — the rival stands over the ball and the
+            // player has time to read them and decide.
             Phase::ShotReady => {
                 self.keep_step();
-                self.after(t.commit, Phase::Kicking);
+                self.after(
+                    [t.commit, t.rival_set][usize::from(self.keeping())],
+                    Phase::Kicking,
+                );
             }
             Phase::Kicking => {
                 self.keep_step();
@@ -258,6 +264,7 @@ mod tests {
     use crate::play::ball::BallMotion;
     use crate::play::phase::Phase;
     use axiom::prelude::Vec3;
+    use crate::tuning::DT;
     use crate::shot::{BendCurve, GoalTarget};
 
     /// The shot a drawing would have been read as.
@@ -576,6 +583,56 @@ mod tests {
             height: -1.0,
         })]);
         assert_eq!(dived.keeper().read(), before, "it re-decided");
+    }
+
+    #[test]
+    fn keeping_gives_a_person_long_enough_to_look_and_decide() {
+        // Measured, because "it feels rushed" is the kind of thing that only
+        // becomes fixable once it is a number.
+        //
+        // It was 1.15 s, and 0.12 s of that was after the camera had cut to a
+        // view the player had never seen — so nearly all of it went on working
+        // out what was on screen, and the mode read as a cutscene with a
+        // quick-time event bolted on. The set beat is what a real penalty has
+        // and this did not: the taker stands over the ball and waits, and that
+        // pause IS the decision.
+        let mut session = keeping_now_from_the_top();
+        let mut window = 0;
+        let mut spent = 0;
+        while session.result().is_none() && spent < 900 {
+            session.phase().accepts_dive().then(|| window += 1);
+            session.step(&[]);
+            spent += 1;
+        }
+        let seconds = window as f32 * DT;
+        assert!(
+            seconds > 2.0,
+            "only {seconds:.2}s to read a run-up, decide, and draw a line"
+        );
+        // And most of it is the rival standing still, not the ball already
+        // moving: a window made of run-up and flight is a reaction test.
+        let set = session.tuning().transitions.rival_set as f32 * DT;
+        assert!(
+            set > seconds * 0.45,
+            "only {set:.2}s of the {seconds:.2}s window is the set"
+        );
+    }
+
+    /// Get to the keeper''s turn from the very start, so the window measured is
+    /// the one a player actually meets.
+    fn keeping_now_from_the_top() -> Session {
+        let mut session = Session::steady(Tuning::DEFAULT);
+        while !session.phase().accepts_drawing() {
+            session.step(&[]);
+        }
+        session.step(&[PlayCommand::Kick(shot(0.0, 0.25, 0.0, 0.5, 0.5, 0.5))]);
+        resolve(&mut session, |_| Vec::new());
+        let mut spent = 0;
+        while !session.keeping() && spent < 600 {
+            session.step(&[]);
+            spent += 1;
+        }
+        session
     }
 
     #[test]

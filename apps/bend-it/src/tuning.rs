@@ -298,6 +298,23 @@ pub struct TransitionTuning {
     /// The commit beat between the last edit and the run-up: the editor fades,
     /// the preview brightens.
     pub commit: u32,
+    /// How long the rival stands over the ball before running up, when the
+    /// player is the one in the goal.
+    ///
+    /// The **set beat**, and the mode does not work without it. Keeping used to
+    /// begin with the camera cutting to first person and the run-up already
+    /// underway: a tenth of a second to work out what you were looking at, and
+    /// then a jog, a strike and a ball in the net. There was technically over a
+    /// second to draw in and it felt like none, because all of it was spent
+    /// orienting.
+    ///
+    /// A real penalty has the taker place the ball, step back, and *wait* — and
+    /// that pause is the whole of what a keeper does. It is when you look at
+    /// their hips, decide, and either go now on a guess with a full dive behind
+    /// it or hold and take what is left. The dive window is open throughout it,
+    /// so the pause is not dead time being given to the player: it is the
+    /// decision.
+    pub rival_set: u32,
     /// How long the result banner holds.
     pub resolution: u32,
     /// The wipe back to a fresh attempt.
@@ -454,6 +471,7 @@ impl Tuning {
         transitions: TransitionTuning {
             ready: 6,
             commit: 7,
+            rival_set: 78,
             resolution: 74,
             reset: 14,
         },
