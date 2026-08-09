@@ -40,7 +40,7 @@ pub fn paint(view: &GameView) {
             .map(|s| stroke(s, view.short))
             .unwrap_or_default(),
         hint(view),
-        tally(view),
+        board(view),
         speed(view),
         banner(view),
     ]
@@ -111,16 +111,81 @@ fn hint(view: &GameView) -> String {
         .unwrap_or_default()
 }
 
-/// Goals and attempts.
-fn tally(view: &GameView) -> String {
-    text(
-        view.viewport.x * 0.5,
-        view.short * 0.085,
-        &format!("{} / {}", view.tally.0, view.tally.1),
-        view.short * 0.040,
-        INK,
-        0.62,
-    )
+/// The shootout, as two rows of marks.
+///
+/// A filled circle is a goal, a hollow one a miss, a faint one still to come.
+/// Two rows rather than a pair of numbers, because a shootout is not a score —
+/// it is a *sequence*, and what a player needs to know at a glance is not "3-2"
+/// but "they have one left and I have two". A number cannot say that.
+fn board(view: &GameView) -> String {
+    let row = |marks: &[Option<bool>], y: f32, mine: bool| {
+        let gap = view.short * 0.052;
+        let left = view.viewport.x * 0.5 - gap * (marks.len() as f32 - 1.0) * 0.5;
+        marks
+            .iter()
+            .enumerate()
+            .map(|(i, mark)| {
+                let x = left + gap * i as f32;
+                let r = view.short * 0.017;
+                match mark {
+                    // Scored: a solid disc, in your colour or theirs.
+                    Some(true) => format!(
+                        "<circle cx=\"{x:.1}\" cy=\"{y:.1}\" r=\"{r:.1}\" fill=\"{}\"                          fill-opacity=\"0.95\"/>",
+                        [INK, ACCENT][usize::from(mine)]
+                    ),
+                    // Missed: an empty ring. It reads as a hole, which is what it is.
+                    Some(false) => format!(
+                        "<circle cx=\"{x:.1}\" cy=\"{y:.1}\" r=\"{r:.1}\" fill=\"none\"                          stroke=\"{INK}\" stroke-opacity=\"0.55\" stroke-width=\"{:.1}\"/>",
+                        r * 0.34
+                    ),
+                    // Still to come.
+                    None => format!(
+                        "<circle cx=\"{x:.1}\" cy=\"{y:.1}\" r=\"{:.1}\" fill=\"{INK}\"                          fill-opacity=\"0.18\"/>",
+                        r * 0.45
+                    ),
+                }
+            })
+            .collect::<String>()
+    };
+    let top = view.short * 0.062;
+    let apart = view.short * 0.072;
+    [
+        // Yours on top in the colour of your own line, theirs below in plain
+        // ink. Two rows and a gap, because at a glance the shape of the gap IS
+        // the score: a row with a hole in it is a row you are losing.
+        text(
+            view.viewport.x * 0.5 - view.short * 0.30,
+            top + view.short * 0.012,
+            "YOU",
+            view.short * 0.030,
+            ACCENT,
+            0.70,
+        ),
+        text(
+            view.viewport.x * 0.5 - view.short * 0.30,
+            top + apart + view.short * 0.012,
+            "THEM",
+            view.short * 0.030,
+            INK,
+            0.55,
+        ),
+        row(&view.board.yours, top, true),
+        row(&view.board.theirs, top + apart, false),
+        // Sudden death says itself. Nothing else needs saying.
+        [
+            String::new(),
+            text(
+                view.viewport.x * 0.5,
+                top + apart + view.short * 0.075,
+                "SUDDEN DEATH",
+                view.short * 0.032,
+                ACCENT,
+                0.80,
+            ),
+        ][usize::from(view.board.sudden_death & view.board.outcome.is_none())]
+        .clone(),
+    ]
+    .concat()
 }
 
 /// How hard the ball is being hit, under the score.
@@ -145,7 +210,7 @@ fn speed(view: &GameView) -> String {
             let settled = usize::from(speed.struck);
             text(
                 view.viewport.x * 0.5,
-                view.short * 0.150,
+                view.short * 0.235,
                 &format!("{} KM/H", speed.kmh),
                 view.short * [0.040, 0.045][settled],
                 ACCENT,
@@ -155,9 +220,11 @@ fn speed(view: &GameView) -> String {
         .unwrap_or_default()
 }
 
-/// The result banner.
+/// The result banner — the shootout's own verdict outranks one penalty's.
 fn banner(view: &GameView) -> String {
-    view.banner
+    view.board
+        .outcome
+        .or(view.banner)
         .map(|word| {
             text(
                 view.viewport.x * 0.5,

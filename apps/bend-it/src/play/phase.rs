@@ -29,6 +29,17 @@ impl Phase {
         matches!(self, Phase::Aiming)
     }
 
+    /// Whether a **dive** is accepted right now.
+    ///
+    /// From the moment the rival starts moving to the instant the ball crosses
+    /// the line. The window is deliberately wide, because its width *is* the
+    /// decision: go early and you are guessing with a whole dive behind you, wait
+    /// and you know more with less than a third of a second to use it. Narrowing
+    /// it to "after the strike" would delete the bet and leave a reaction test.
+    pub fn accepts_dive(self) -> bool {
+        matches!(self, Phase::ShotReady | Phase::Kicking | Phase::BallInFlight)
+    }
+
     /// Whether the authored path is drawn in the world this phase.
     ///
     /// Only during the commit beat: while the player is still drawing there is
@@ -63,6 +74,29 @@ mod tests {
         ]
         .iter()
         .for_each(|p| assert!(!p.accepts_drawing(), "{p:?} must not take a drawing"));
+    }
+
+    #[test]
+    fn a_dive_may_be_called_from_the_run_up_until_the_ball_crosses() {
+        [Phase::ShotReady, Phase::Kicking, Phase::BallInFlight]
+            .iter()
+            .for_each(|p| assert!(p.accepts_dive(), "{p:?} must take a dive"));
+        [Phase::Ready, Phase::Aiming, Phase::Resolution, Phase::Reset]
+            .iter()
+            .for_each(|p| assert!(!p.accepts_dive(), "{p:?} must not take a dive"));
+        // The two windows never overlap: at any moment the player is either
+        // drawing a shot or calling a dive, never both.
+        [
+            Phase::Ready,
+            Phase::Aiming,
+            Phase::ShotReady,
+            Phase::Kicking,
+            Phase::BallInFlight,
+            Phase::Resolution,
+            Phase::Reset,
+        ]
+        .iter()
+        .for_each(|p| assert!(!(p.accepts_dive() & p.accepts_drawing()), "{p:?}"));
     }
 
     #[test]

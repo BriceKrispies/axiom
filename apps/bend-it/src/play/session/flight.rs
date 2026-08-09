@@ -33,6 +33,10 @@ impl Session {
         self.advance_swing();
         self.swing.struck_at().map(|_| {
             self.ball.launch(&self.shot.trajectory);
+            // The keeper's clock does not restart here; it is simply told when
+            // the ball left, so its reaction is measured from that moment while
+            // the body it drives has been on one clock throughout.
+            self.keeper.ball_struck(self.keep_clock);
             self.struck = Some(self.ball.velocity.length());
             self.phase = Phase::BallInFlight;
         });
@@ -54,10 +58,20 @@ impl Session {
     /// what happened. In that order, so the keeper is where it is *this* tick
     /// when the ball's swept segment is tested against it.
     pub(super) fn in_flight(&mut self) {
-        let elapsed = self.ball.elapsed().unwrap_or(f32::INFINITY);
         let from = self.ball.advance(&self.shot.trajectory, DT, &self.tuning.flight);
-        self.keeper
-            .advance(&self.shot.trajectory, elapsed, &self.tuning.keeper);
+        // Keeping, the keeper does not think — it only executes what the player
+        // called. The same body, the same momentum, the same capsules, the same
+        // clock; the only difference is where the commitment came from.
+        self.keep_clock += DT;
+        let clock = self.keep_clock;
+        match self.keeping() {
+            true => self
+                .keeper
+                .advance_called(&self.shot.trajectory, clock, &self.tuning.keeper),
+            false => self
+                .keeper
+                .advance(&self.shot.trajectory, clock, &self.tuning.keeper),
+        }
 
         let radius = self.tuning.flight.ball_radius;
         let to = self.ball.position;
@@ -106,10 +120,14 @@ impl Session {
     }
 
     pub(super) fn finish(&mut self, result: ShotResult) {
-        // The keeper watches where this one finished.
-        self.remember(self.shot.world_target);
+        // The keeper watches where this one finished. Only the shots the player
+        // TAKES, though: its memory is a memory of the person in front of it, and
+        // shading toward its own team-mate's corners would be a keeper learning
+        // the wrong opponent.
+        (!self.keeping()).then(|| self.remember(self.shot.world_target));
         self.result = Some(result);
         self.tally.record(result);
+        self.shootout.record(self.side, result);
         self.phase = Phase::Resolution;
         self.phase_tick = 0;
     }

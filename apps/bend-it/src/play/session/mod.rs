@@ -20,11 +20,18 @@ use crate::tuning::{Tuning, DT};
 use super::ball::Ball;
 use super::keeper::Keeper;
 use super::nerve::KeeperNerve;
+use super::dive_call::DiveCall;
 use super::phase::Phase;
 use super::resolution::{ShotResult, Tally};
+use super::shootout::{Shootout, Side};
+
+pub use start::DEFAULT_SEED;
 
 mod flight;
 mod memory;
+mod start;
+mod tournament;
+mod view;
 
 /// What the drawing layer asks the session to do.
 ///
@@ -37,6 +44,9 @@ pub enum PlayCommand {
     /// Take this shot. The intent is read from the drawing; the session bounds
     /// it and commits.
     Kick(ShotIntent),
+    /// Dive **now**, there. Only meaningful on the kicks the player is keeping,
+    /// and only once — the whole of the decision is when it arrives.
+    Dive(DiveCall),
     /// Abandon this attempt and set up another.
     Restart,
 }
@@ -73,113 +83,24 @@ pub struct Session {
     rng: DeterministicRng,
     /// Whether this session faces the average keeper rather than a rolled one.
     steady: bool,
+    /// The keeper's own clock, seconds, running from the moment the taker steps
+    /// up rather than from the strike.
+    ///
+    /// The AI keeper's clock starts at the strike, because its reaction time is
+    /// measured from seeing the ball leave. The **player's** cannot: the whole of
+    /// keeping is that you may commit before the ball moves, and a clock that
+    /// only starts at the strike would quietly make every early dive begin at the
+    /// same instant as a late one — which is to say, would delete the decision.
+    keep_clock: f32,
+    /// The shootout this attempt belongs to: the score, the order, the rules.
+    shootout: Shootout,
+    /// Whose kick this one is. On [`Side::Them`] the rival takes it and the
+    /// player is the body in the goal.
+    side: Side,
 }
 
-/// The seed a session uses when none is named.
-pub const DEFAULT_SEED: u64 = 0x0BE4_D17_5EED;
 
 impl Session {
-    /// A fresh session at the default seed.
-    pub fn new(tuning: Tuning) -> Session {
-        Session::seeded(tuning, DEFAULT_SEED)
-    }
-
-    /// A session facing the **average** keeper: no jitter, no guesses, always
-    /// corrects.
-    ///
-    /// This is what the mechanic tests play against, so that "a bent shot beats a
-    /// keeper that read it straight" is a claim about the mechanic rather than
-    /// about a lucky roll. Nothing a player ever meets is steady.
-    pub fn steady(tuning: Tuning) -> Session {
-        Session {
-            steady: true,
-            keeper: Keeper::set(KeeperNerve::steady(&tuning.keeper)),
-            ..Session::seeded(tuning, DEFAULT_SEED)
-        }
-    }
-
-    /// A fresh session on an explicit seed. The same seed is the same shootout.
-    pub fn seeded(tuning: Tuning, seed: u64) -> Session {
-        let mouth = GoalMouth::new(tuning.goal.inset);
-        let origin = ball_spot(tuning.flight.ball_radius);
-        let intent = ShotIntent::default();
-        let shot = ResolvedShot::build(origin, intent, &mouth, &tuning);
-        Session {
-            phase: Phase::Ready,
-            phase_tick: 0,
-            tick: 0,
-            intent,
-            shot,
-            ball: Ball::placed(origin),
-            keeper: Keeper::set(KeeperNerve::steady(&tuning.keeper)),
-            kick: KickPlan::for_shot(origin, KickDrive::for_shot(&intent, &tuning), &tuning.kick),
-            swing: Swing::cocked(&tuning.kick),
-            kick_tick: 0,
-            struck: None,
-            result: None,
-            tally: Tally::default(),
-            net: None,
-            seen: Vec::new(),
-            rng: DeterministicRng::seeded(seed),
-            steady: false,
-            mouth,
-            tuning,
-        }
-        .with_first_nerve()
-    }
-
-    pub fn phase(&self) -> Phase {
-        self.phase
-    }
-    pub fn phase_tick(&self) -> u32 {
-        self.phase_tick
-    }
-    pub fn tick(&self) -> u64 {
-        self.tick
-    }
-    pub fn intent(&self) -> &ShotIntent {
-        &self.intent
-    }
-    pub fn shot(&self) -> &ResolvedShot {
-        &self.shot
-    }
-    pub fn ball(&self) -> &Ball {
-        &self.ball
-    }
-    pub fn keeper(&self) -> &Keeper {
-        &self.keeper
-    }
-    pub fn kick(&self) -> &KickPlan {
-        &self.kick
-    }
-    pub fn swing(&self) -> &Swing {
-        &self.swing
-    }
-    /// Ticks since the run-up began — the kick's own clock, which keeps running
-    /// through the flight so the follow-through never restarts.
-    pub fn kick_tick(&self) -> u32 {
-        self.kick_tick
-    }
-    pub fn result(&self) -> Option<ShotResult> {
-        self.result
-    }
-    /// The speed the ball left at, metres per second, once it has.
-    pub fn struck_speed(&self) -> Option<f32> {
-        self.struck
-    }
-    pub fn tally(&self) -> Tally {
-        self.tally
-    }
-    pub fn tuning(&self) -> &Tuning {
-        &self.tuning
-    }
-    pub fn mouth(&self) -> &GoalMouth {
-        &self.mouth
-    }
-    pub fn net_impulse(&self) -> Option<NetImpulse> {
-        self.net
-    }
-
     /// Advance one fixed tick.
     pub fn step(&mut self, commands: &[PlayCommand]) {
         commands.iter().for_each(|c| self.apply(*c));
@@ -218,8 +139,15 @@ impl Session {
                 self.phase = Phase::ShotReady;
                 self.phase_tick = 0;
             }
+            // The dive the player called. Accepted from the moment the rival
+            // starts moving right up to the instant the ball crosses the line —
+            // early is a guess with a full dive behind it, late is knowledge with
+            // no time left to use it, and choosing between those two IS keeping.
+            PlayCommand::Dive(call) if self.keeping() & self.phase.accepts_dive() => {
+                self.keeper.called(call, self.keep_clock, &self.tuning.keeper);
+            }
             PlayCommand::Restart => self.reset(),
-            PlayCommand::Kick(_) => {}
+            PlayCommand::Kick(_) | PlayCommand::Dive(_) => {}
         }
     }
 
@@ -237,18 +165,34 @@ impl Session {
     /// The shot itself starts blank: the next drawing is the next instruction.
     fn reset(&mut self) {
         let origin = ball_spot(self.tuning.flight.ball_radius);
+        self.side = self.shootout.turn();
         self.intent = ShotIntent::default();
         self.ball = Ball::placed(origin);
+        // Keeping, the body in the goal is the player's: no reaction jitter, no
+        // guess, no mid-flight correction. The player IS the reaction, and a
+        // keeper that also had nerves would be taking decisions out of their
+        // hands and then blaming them for the result.
+        let nerve = match self.keeping() {
+            true => KeeperNerve::steady(&self.tuning.keeper),
+            false => self.next_nerve(),
+        };
         let (across, up, weight) = self.shade();
-        let nerve = self.next_nerve();
-        self.keeper = Keeper::shaded(across, up, weight, nerve);
+        self.keeper = match self.keeping() {
+            true => Keeper::set(nerve),
+            false => Keeper::shaded(across, up, weight, nerve),
+        };
+        // The keeper is watching a run-up, not a flight: its clock starts now.
+        self.keeper.waiting();
         self.result = None;
         self.struck = None;
         self.net = None;
         self.phase = Phase::Ready;
         self.phase_tick = 0;
+        self.keep_clock = 0.0;
         self.rebuild();
     }
+
+
 
     /// The phase machine: every transition, in one place.
     fn advance_phase(&mut self) {
@@ -257,9 +201,23 @@ impl Session {
             Phase::Ready => self.after(t.ready, Phase::Aiming),
             // Aiming ends only when a drawing does, which is a command, not a
             // timer: the player takes as long as they like over the line.
-            Phase::Aiming => {}
-            Phase::ShotReady => self.after(t.commit, Phase::Kicking),
-            Phase::Kicking => self.kicking(),
+            //
+            // Unless it is not their kick. The rival does not wait to be told —
+            // it steps up, and the player's decision starts when the run-up does.
+            Phase::Aiming => {
+                (self.keeping() & self.outcome().is_none()).then(|| self.take_for_rival());
+            }
+            // The keeper's clock runs through the run-up as well as the flight,
+            // so a dive called while the taker is still walking in has genuinely
+            // been travelling by the time the ball leaves.
+            Phase::ShotReady => {
+                self.keep_step();
+                self.after(t.commit, Phase::Kicking);
+            }
+            Phase::Kicking => {
+                self.keep_step();
+                self.kicking();
+            }
             Phase::BallInFlight => {
                 self.advance_swing();
                 self.in_flight();
@@ -271,9 +229,13 @@ impl Session {
                 self.after(t.resolution, Phase::Reset);
             }
             Phase::Reset => {
-                self.after(t.reset, Phase::Ready);
-                // Entering Ready through a reset rebuilds the attempt.
-                self.phase_is(Phase::Ready).then(|| self.reset());
+                // A decided shootout stops here. There is nothing left to take,
+                // and rolling straight into the next penalty would throw away the
+                // only moment the game has that is worth sitting still for.
+                (self.outcome().is_none()).then(|| {
+                    self.after(t.reset, Phase::Ready);
+                    self.phase_is(Phase::Ready).then(|| self.reset());
+                });
             }
         }
     }
@@ -295,6 +257,7 @@ mod tests {
     use super::*;
     use crate::play::ball::BallMotion;
     use crate::play::phase::Phase;
+    use axiom::prelude::Vec3;
     use crate::shot::{BendCurve, GoalTarget};
 
     /// The shot a drawing would have been read as.
@@ -446,8 +409,8 @@ mod tests {
     fn the_same_endpoint_can_be_saved_or_scored_depending_on_the_shape() {
         // One point in the goal — low, left of centre, well inside the keeper's
         // range — reached two ways.
-        let plain = take(shot(-0.60, 0.75, 0.0, 0.5, 0.9, 0.5));
-        let sculpted = take(shot(-0.60, 0.75, 2.0, 0.28, 0.9, 0.5));
+        let plain = take(shot(-0.25, 0.70, 0.0, 0.5, 0.9, 0.5));
+        let sculpted = take(shot(-0.25, 0.70, 2.0, 0.28, 0.9, 0.5));
         assert_eq!(
             plain.shot().world_target,
             sculpted.shot().world_target,
@@ -466,21 +429,181 @@ mod tests {
     }
 
     #[test]
-    fn an_attempt_resets_cleanly_and_quickly() {
+    fn an_attempt_resets_cleanly_and_hands_over() {
         let mut session = take(shot(-0.95, 0.92, 0.0, 0.5, 0.2, 0.5));
         let hold = session.tuning().transitions.resolution
             + session.tuning().transitions.reset
             + session.tuning().transitions.ready
             + 3;
         (0..hold).for_each(|_| session.step(&[]));
-        assert_eq!(session.phase(), Phase::Aiming, "straight back to drawing");
+        // The attempt is gone and the ball is back on the spot — but it is not
+        // back to drawing, because it is not the player's kick any more. The
+        // rival steps up on its own.
         assert_eq!(session.result(), None);
         assert_eq!(session.ball().motion, BallMotion::Placed);
-        assert_eq!(session.keeper().read(), None);
+        assert_eq!(session.side(), Side::Them);
+        assert!(session.keeping(), "the player is in the goal now");
         assert_eq!(session.tally().attempts, 1, "the tally survives the reset");
-        // A restart mid-draw does the same thing.
+        assert_eq!(session.shootout().score(), (1, 0));
+        // A restart mid-attempt still sets up a fresh one.
         session.step(&[PlayCommand::Restart]);
         assert_eq!(session.phase(), Phase::Ready);
+    }
+
+    /// Run whatever attempt is up to a result, issuing whatever `on_tick` says.
+    fn resolve(session: &mut Session, mut on_tick: impl FnMut(&Session) -> Vec<PlayCommand>) {
+        let mut spent = 0;
+        while session.result().is_none() && spent < 1200 {
+            let commands = on_tick(session);
+            session.step(&commands);
+            spent += 1;
+        }
+        assert!(spent < 1200, "the attempt must resolve");
+    }
+
+    /// One call, issued the first tick `when` says it is due.
+    fn call_once(
+        call: DiveCall,
+        when: impl Fn(&Session) -> bool,
+    ) -> impl FnMut(&Session) -> Vec<PlayCommand> {
+        let mut sent = false;
+        move |s: &Session| {
+            let due = when(s) & !sent;
+            sent |= due;
+            [Vec::new(), vec![PlayCommand::Dive(call)]][usize::from(due)].clone()
+        }
+    }
+
+    /// Get to the point where the player is the one in the goal.
+    fn keeping_now() -> Session {
+        let mut session = Session::steady(Tuning::DEFAULT);
+        while !session.phase().accepts_drawing() {
+            session.step(&[]);
+        }
+        session.step(&[PlayCommand::Kick(shot(0.0, 0.25, 0.0, 0.5, 0.5, 0.5))]);
+        resolve(&mut session, |_| Vec::new());
+        let mut spent = 0;
+        while !session.keeping() && spent < 600 {
+            session.step(&[]);
+            spent += 1;
+        }
+        assert!(session.keeping(), "it should be their kick by now");
+        // And past the beat where the rival is still stepping up.
+        while !session.phase().accepts_dive() {
+            session.step(&[]);
+        }
+        session
+    }
+
+    #[test]
+    fn a_whole_shootout_plays_itself_out_and_ends_decided() {
+        let mut session = Session::steady(Tuning::DEFAULT);
+        let dive = Vec3::new(-2.4, 1.0, 0.76);
+        let mut guard = 0;
+        while session.outcome().is_none() && guard < 60 {
+            guard += 1;
+            // Get to a moment where this attempt can be acted on.
+            let mut settle = 0;
+            while !session.phase().accepts_drawing()
+                && !session.phase().accepts_dive()
+                && session.outcome().is_none()
+                && settle < 400
+            {
+                session.step(&[]);
+                settle += 1;
+            }
+            (session.outcome().is_some()).then(|| ());
+            match session.keeping() {
+                true => resolve(
+                    &mut session,
+                    call_once(
+                        DiveCall { hands: dive, lean: -0.6, height: 0.0 },
+                        |s| s.phase().accepts_dive(),
+                    ),
+                ),
+                false => {
+                    session.step(&[PlayCommand::Kick(shot(-0.95, 0.35, 0.0, 0.5, 0.6, 0.5))]);
+                    resolve(&mut session, |_| Vec::new());
+                }
+            }
+        }
+        let outcome = session.outcome().expect("a shootout ends");
+        let (you, them) = session.shootout().score();
+        assert_ne!(you, them, "{outcome:?} at {you}-{them} is not a result");
+        assert!(session.shootout().taken_by(Side::You) > 0);
+        assert!(session.shootout().taken_by(Side::Them) > 0);
+        // Once decided, nothing else is taken however long it is left running.
+        let settled = session.shootout().taken().len();
+        (0..900).for_each(|_| session.step(&[]));
+        assert_eq!(session.shootout().taken().len(), settled, "it kept playing");
+        assert_eq!(session.outcome(), Some(outcome));
+    }
+
+    #[test]
+    fn a_keeper_that_is_not_called_never_moves() {
+        let mut standing = keeping_now();
+        resolve(&mut standing, |_| Vec::new());
+        assert_eq!(standing.keeper().read(), None, "it dived on its own");
+        assert!(standing.keeper().motion().hips.x.abs() < 0.05, "it drifted");
+    }
+
+    #[test]
+    fn a_called_dive_goes_exactly_where_it_was_called_and_nowhere_else() {
+        let call = DiveCall {
+            hands: Vec3::new(2.2, 1.1, 0.76),
+            lean: 0.8,
+            height: 0.2,
+        };
+        let mut dived = keeping_now();
+        resolve(&mut dived, call_once(call, |s| s.phase().accepts_dive()));
+        let read = dived.keeper().read().expect("it committed");
+        // The HIPS stop an arm short of where the hands were called to — the same
+        // rule the rival keeper lives under, so the player is not handed a longer
+        // body than the one that beats them at the other end.
+        let stretch = crate::figure::stretch_from_hips(&dived.tuning().keeper);
+        assert!(
+            ((call.hands.x - read.aim.x) - stretch).abs() < 0.15,
+            "the hips went to {} for hands called at {}",
+            read.aim.x,
+            call.hands.x
+        );
+        assert!(dived.keeper().motion().hips.x > 0.3, "and it actually moved");
+        // One dive. A second call after it has gone changes nothing.
+        let before = dived.keeper().read();
+        dived.step(&[PlayCommand::Dive(DiveCall {
+            hands: Vec3::new(-3.0, 0.4, 0.76),
+            lean: -1.0,
+            height: -1.0,
+        })]);
+        assert_eq!(dived.keeper().read(), before, "it re-decided");
+    }
+
+    #[test]
+    fn diving_early_reaches_further_than_diving_late() {
+        // The whole of keeping, as one assertion. The same call, released at the
+        // top of the run-up and released once the ball is already in the air.
+        let session = keeping_now();
+        let call = DiveCall {
+            hands: Vec3::new(3.30, 1.0, 0.76),
+            lean: 1.0,
+            height: 0.0,
+        };
+        let reach = |wait_for_flight: bool| {
+            let mut s = session.clone();
+            resolve(
+                &mut s,
+                call_once(call, move |s: &Session| match wait_for_flight {
+                    true => s.phase() == Phase::BallInFlight,
+                    false => s.phase().accepts_dive(),
+                }),
+            );
+            s.keeper().motion().hips.x
+        };
+        let (early, late) = (reach(false), reach(true));
+        assert!(
+            early > late + 0.4,
+            "early got {early:.2} m and late got {late:.2} m — the bet is not a bet"
+        );
     }
 
     #[test]

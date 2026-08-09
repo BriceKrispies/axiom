@@ -17,7 +17,7 @@
 
 use axiom::prelude::{Vec2, Vec3};
 
-use crate::pitch::{GoalMouth, GOAL_HEIGHT};
+use crate::pitch::{GoalMouth, GOAL_HEIGHT, KEEPER_LINE_Z};
 use crate::tuning::CameraTuning;
 
 /// Where the camera is and what it is looking at.
@@ -112,6 +112,47 @@ pub fn must_see(mouth: &GoalMouth, ball: Vec3, kicker: Vec3, tuning: &CameraTuni
     // padding carry the rest.
     points.push(Vec3::new(kicker.x, 1.35, kicker.z));
     points
+}
+
+/// The framing from inside the goal: the keeper's own eyes.
+///
+/// The other half of the game gets a different camera because it is a different
+/// job. Taking a penalty you are looking *at* a goal and drawing a line into it,
+/// so the goal has to be framed. Keeping one you are looking *out* at a person
+/// walking toward a ball, and the only thing worth seeing is them — which run-up
+/// angle they have taken, how fast they are coming, which way their hips are
+/// open. First person, because a keeper does not watch themselves dive; and
+/// because it puts the player where the decision is, which is the whole reason
+/// for the mode existing.
+///
+/// The eye rides the keeper's own head, so a dive genuinely throws the view
+/// sideways and down. That is not a flourish: it is the honest consequence of
+/// having committed, and it is what makes going early *feel* like the gamble it
+/// is — you commit, the world tips, and you watch the ball from wherever you
+/// have put yourself.
+pub fn keeper_eye(_viewport: Vec2, hips: Vec3, lean: f32, ball: Vec3, tuning: &CameraTuning) -> CameraPose {
+    // Head height above the hips, banked with the dive.
+    let bank = lean.clamp(-1.0, 1.0);
+    let eye = Vec3::new(
+        hips.x + bank * tuning.keeper_head_swing,
+        hips.y + tuning.keeper_head_rise,
+        hips.z + 0.12,
+    );
+    // Watching the ball while it is in front — but only while it is in front. A
+    // ball that has gone past is a ball in the net behind your own head, and a
+    // camera that kept following it would spin the view through 180 degrees at
+    // the exact moment the player is trying to read what just happened.
+    let spot = Vec3::new(0.0, 0.6, KEEPER_LINE_Z + 6.0);
+    let watching = [spot, Vec3::new(ball.x, ball.y + 0.25, ball.z)]
+        [usize::from(ball.z > hips.z + 0.5)];
+    CameraPose {
+        eye,
+        target: watching,
+        // A person's field of view, not a fisheye. Dividing this by a portrait
+        // aspect turned 88 degrees into 160 and bent the whole pitch round the
+        // edges of the phone.
+        fov_degrees: tuning.keeper_fov,
+    }
 }
 
 /// The framing for this viewport.

@@ -85,6 +85,16 @@ pub struct FlightTuning {
 pub struct KeeperTuning {
     /// How long after the strike the keeper is still frozen, seconds.
     pub reaction: f32,
+    /// How long **before** the strike a keeper that has already guessed commits,
+    /// seconds — on the clock that starts when the taker steps up.
+    ///
+    /// This is why anybody guesses. A dive is a body at under five metres a
+    /// second and a penalty is in the net in a third of one: wait for the ball
+    /// and you cover the middle, go before it moves and you can reach a corner.
+    /// Without it the game could not represent the bet at all, and `dive_speed`
+    /// had to be inflated to a figure no person reaches so that a keeper starting
+    /// late could still cover a goal.
+    pub guess_lead: f32,
     /// How long after the first read the keeper takes its ONE correction,
     /// seconds. This is what turns *where* the player puts the peak of a curve
     /// into the central decision of the game: movement that happens before the
@@ -298,6 +308,14 @@ pub struct TransitionTuning {
 /// same numbers compose a 9:19.5 phone and a 16:9 desktop.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraTuning {
+    /// The keeper's eye above its own hips, metres, and how far the head swings
+    /// out over a full dive.
+    pub keeper_head_rise: f32,
+    pub keeper_head_swing: f32,
+    /// How wide the view is from inside the goal, degrees. Wide, because a
+    /// keeper's useful vision is peripheral and because a narrow one turns
+    /// "which way is he going" into a guess about the edge of the screen.
+    pub keeper_fov: f32,
     /// Eye height and how far behind the ball the eye sits, metres.
     pub eye_height: f32,
     pub eye_back: f32,
@@ -370,12 +388,13 @@ impl Tuning {
         },
         keeper: KeeperTuning {
             reaction: 0.09,
+            guess_lead: 0.18,
             adjust_delay: 0.13,
             read_fidelity: 0.30,
             adjust_fidelity: 0.60,
             read_gravity: 4.4,
             vertical_trust: 0.95,
-            dive_speed: 9.0,
+            dive_speed: 4.8,
             dive_distance: 2.80,
             vertical_reach: 0.85,
             reach_radius: 0.19,
@@ -439,6 +458,9 @@ impl Tuning {
             reset: 14,
         },
         camera: CameraTuning {
+            keeper_head_rise: 0.62,
+            keeper_head_swing: 0.30,
+            keeper_fov: 62.0,
             eye_height: 4.15,
             eye_back: 8.8,
             look_height: 1.55,

@@ -32,9 +32,10 @@ use crate::pitch::{GOAL_HALF_WIDTH, GOAL_HEIGHT, KEEPER_LINE_Z};
 use crate::shot::Trajectory;
 use crate::tuning::KeeperTuning;
 
+mod adjust;
 mod dive;
 
-use super::keeper_read::{take_read, take_read_with, KeeperRead};
+use super::keeper_read::{take_read, KeeperRead};
 use super::nerve::KeeperNerve;
 
 /// Standing hip height, metres. Matches the figure the pose module draws.
@@ -58,9 +59,22 @@ pub struct Keeper {
     /// The hips' velocity. This is what makes a corrected dive one continuous
     /// movement instead of two.
     velocity: Vec3,
-    /// The flight time this keeper was last advanced to, so a step knows how much
-    /// time it is integrating.
+    /// The clock this keeper was last advanced to, so a step knows how much time
+    /// it is integrating.
     at: f32,
+    /// When the ball was struck, on the keeper's own clock.
+    ///
+    /// The keeper runs on **one** clock, and the session starts it when the taker
+    /// steps up rather than when the ball leaves — because the most important
+    /// thing a keeper can do happens before the ball moves, and a clock that
+    /// began at the strike could not express "committed during the run-up" at
+    /// all. That is the difference between a keeper and a reaction test.
+    ///
+    /// It begins as `Some(0)` — a keeper handed a flight with no run-up in front
+    /// of it is a keeper whose clock *is* flight time, which is what every test
+    /// of the dive itself wants. The session calls [`Keeper::waiting`] to say
+    /// there is a run-up coming.
+    struck: Option<f32>,
 }
 
 impl Keeper {
@@ -90,6 +104,7 @@ impl Keeper {
             },
             velocity: Vec3::ZERO,
             at: 0.0,
+            struck: Some(0.0),
         }
     }
 
@@ -118,17 +133,95 @@ impl Keeper {
         (self.expects, self.memory_weight)
     }
 
-    /// Advance the keeper to flight time `t`.
+    /// Commit to a dive the **player** called, rather than to one it read.
+    ///
+    /// The one place the keeper is not its own agent. It takes the call, and from
+    /// that instant it is the same body under the same momentum — which is what
+    /// makes the two halves of the game the same game rather than two games that
+    /// happen to share a pitch.
+    ///
+    /// It commits once. A second call is ignored, exactly as the keeper's own
+    /// read is: you get one dive, and you get it when you let go.
+    pub fn called(&mut self, call: crate::play::DiveCall, t: f32, tuning: &KeeperTuning) {
+        self.read.is_none().then(|| {
+            // The hips go an arm's stretch short and the arm covers the rest —
+            // the same rule the keeper's own reads live under. Sending the player
+            // keeper's HIPS to the ball would hand them a body a metre longer
+            // than the one they are about to be beaten by at the other end.
+            let reach = crate::figure::stretch_from_hips(tuning);
+            let want = call.hands.x - self.home.x;
+            let short = want.signum() * (want.abs() - reach).max(0.0);
+            self.read = Some(KeeperRead {
+                predicted: call.hands,
+                aim: Vec3::new(
+                    (self.home.x + short).clamp(-tuning.dive_distance, tuning.dive_distance),
+                    call.hands.y.clamp(0.10, HIP_HEIGHT + 1.2),
+                    self.home.z,
+                ),
+                lean: call.lean,
+                height_bias: call.height,
+                extend_time: 0.0,
+                at: t,
+            });
+            // A called dive gets no mid-flight correction. The player has had
+            // theirs: it was the choice of when to let go.
+            self.adjusted = true;
+        });
+    }
+
+    /// There is a run-up to watch: the ball has not been struck yet.
+    pub fn waiting(&mut self) {
+        self.struck = None;
+    }
+
+    /// Note the moment the ball left, on the keeper's own clock.
+    pub fn ball_struck(&mut self, at: f32) {
+        self.struck = self.struck.or(Some(at));
+    }
+
+    /// When this keeper commits, on its own clock.
+    ///
+    /// A keeper that has **read** the ball commits its reaction time after the
+    /// strike — it cannot commit to something it has not seen. A keeper that has
+    /// **guessed** has nothing to see and everything to gain by going early, and
+    /// goes before the ball moves. That is not a cheat: it is the entire reason
+    /// anybody guesses, and until the clock ran through the run-up the game could
+    /// not represent it.
+    fn commits_at(&self, tuning: &KeeperTuning) -> f32 {
+        match self.nerve.guess {
+            Some(_) => tuning.guess_lead,
+            None => self.struck.map(|s| s + self.nerve.reaction).unwrap_or(f32::INFINITY),
+        }
+    }
+
+    /// Advance the keeper to `t` on its own clock.
     ///
     /// Three things happen, once each: it is still until its reaction has
     /// elapsed; then it reads and commits; then — once, a beat later — it takes
     /// the one correction a real keeper gets. After that it is executing, and
     /// whatever the ball does next it does unopposed.
     pub fn advance(&mut self, trajectory: &Trajectory, t: f32, tuning: &KeeperTuning) {
+        self.advance_with(trajectory, t, tuning, true)
+    }
+
+    /// The same, with the keeper's own judgement switched off: the body still
+    /// moves, but it only ever goes where it was told.
+    pub fn advance_called(&mut self, trajectory: &Trajectory, t: f32, tuning: &KeeperTuning) {
+        self.advance_with(trajectory, t, tuning, false)
+    }
+
+    fn advance_with(
+        &mut self,
+        trajectory: &Trajectory,
+        t: f32,
+        tuning: &KeeperTuning,
+        thinks: bool,
+    ) {
         self.read = self
             .read
             .or_else(|| {
-                (t >= self.nerve.reaction).then(|| {
+                thinks.then_some(())?;
+                (t >= self.commits_at(tuning)).then(|| {
                     take_read(
                         self.home,
                         self.expectation(),
@@ -139,69 +232,13 @@ impl Keeper {
                     )
                 })
             });
-        self.adjust(trajectory, t, tuning);
+        thinks.then(|| self.adjust(trajectory, t, tuning));
         let dt = (t - self.at).max(0.0);
         self.at = t;
         self.motion = match self.read {
             None => self.set_stance(t),
             Some(read) => self.dive_step(read, dt, tuning),
         };
-    }
-
-    /// The single mid-flight correction.
-    ///
-    /// This is the pressure that makes *where* a curve breaks the whole
-    /// decision. A shot that does its moving early is still moving in front of a
-    /// keeper who has not committed yet, and the correction answers it. A shot
-    /// that holds its line and breaks late is corrected onto a path it is about
-    /// to leave — and the keeper has no second correction left.
-    ///
-    /// It is bounded by physics, not by generosity: the keeper can only redirect
-    /// as far as its own speed carries it in the time the ball has left, and
-    /// never past the reach it had to begin with.
-    fn adjust(&mut self, trajectory: &Trajectory, t: f32, tuning: &KeeperTuning) {
-        let due = self
-            .read
-            .filter(|_| !self.adjusted)
-            // A keeper who guessed has nothing to correct, and some attempts it
-            // simply does not get a second look in.
-            .filter(|_| self.nerve.corrects)
-            .filter(|read| t >= read.at + tuning.adjust_delay);
-        let Some(previous) = due else {
-            return;
-        };
-        self.adjusted = true;
-        let fresh = take_read_with(
-            self.home,
-            self.expectation(),
-            &self.nerve,
-            trajectory,
-            t,
-            tuning,
-            tuning.adjust_fidelity,
-        );
-        // How much further it can still get, from where its hips are now.
-        let remaining = (trajectory.duration() - t).max(0.0);
-        let budget = tuning.dive_speed * remaining;
-        let from = self.motion.hips.x;
-        let aim_x = fresh
-            .aim
-            .x
-            .clamp(from - budget, from + budget)
-            .clamp(-tuning.dive_distance, tuning.dive_distance);
-        // The correction is LATERAL ONLY, and that asymmetry is deliberate: a
-        // keeper already in the air can still adjust its line, but it cannot
-        // un-commit its height. Whatever the first read decided about how high to
-        // throw its hands, it now has to live with — which is what makes the
-        // vertical editor a real commitment rather than a second bend.
-        self.read = Some(KeeperRead {
-            predicted: Vec3::new(fresh.predicted.x, previous.predicted.y, 0.0),
-            aim: Vec3::new(aim_x, previous.aim.y, previous.aim.z),
-            lean: ((aim_x - self.home.x) / tuning.dive_distance.max(1.0e-3)).clamp(-1.0, 1.0),
-            height_bias: previous.height_bias,
-            extend_time: previous.extend_time,
-            at: t,
-        });
     }
 
 }

@@ -343,8 +343,11 @@ mod tests {
 
     #[test]
     fn the_agent_scores() {
+        // It asks for twelve and gets however many the shootout has room for:
+        // the game stops the moment it is decided, and an agent that insisted on
+        // taking penalties after that would be playing a different game.
         let (goals, attempts) = play_through(1, 12, Tuning::DEFAULT);
-        assert_eq!(attempts, 12, "it finished every attempt");
+        assert!(attempts > 0 && attempts <= 12, "took {attempts}");
         assert!(goals > 0, "the agent scored nothing in {attempts} attempts");
     }
 

@@ -17,21 +17,22 @@
 //! last time.
 
 use axiom::prelude::{FrameOutcome, RunningApp, Vec2};
-use axiom_input::{ActionId, DeviceFrame, InputState, KeyToken, Pointer};
+use axiom_input::{ActionId, DeviceFrame, InputState, KeyToken};
 use axiom_kernel::Tick;
 
 use crate::camera::{self, CameraPose};
 use crate::debug::{self, DebugMarker};
 use crate::pitch::GoalMouth;
+mod gesture;
 mod screen;
 
 use crate::play::{Phase, PlayCommand, Session};
 use crate::projection::ScreenProjection;
 use crate::scene::BendItScene;
 use crate::stroke::{
-    interpret, Drawing, GameView, Reading, Stroke, StrokeCapture,
+    GameView, Reading, Stroke, StrokeCapture,
 };
-use crate::tuning::{Tuning, DT};
+use crate::tuning::Tuning;
 
 /// Actions the keyboard can fire. Touch never needs them — the whole interface
 /// is the drawing — but a desktop player expects a keyboard to work, and routing
@@ -123,6 +124,25 @@ impl BendIt {
     /// The camera this frame is framed with.
     pub fn camera(&self) -> CameraPose {
         let tuning = self.session.tuning();
+        // Keeping, the view is the keeper's own eyes. It is a different job and
+        // it wants a different camera: taking a penalty you look AT a goal and
+        // draw into it, keeping one you look OUT at a person walking toward a
+        // ball and the only thing worth seeing is them.
+        let motion = self.session.keeper().motion();
+        return match self.session.keeping() {
+            true => camera::keeper_eye(
+                self.surface,
+                motion.hips,
+                motion.lean,
+                self.session.ball().position,
+                &tuning.camera,
+            ),
+            false => self.kicking_camera(),
+        };
+    }
+
+    fn kicking_camera(&self) -> CameraPose {
+        let tuning = self.session.tuning();
         camera::frame(
             self.surface,
             &GoalMouth::new(tuning.goal.inset),
@@ -171,81 +191,6 @@ impl BendIt {
         self.view = self.compose();
     }
 
-    /// Fold this tick's contact into the drawing, and — if it finished — read it.
-    fn draw(
-        &mut self,
-        pointer: Option<Pointer>,
-        projection: &ScreenProjection,
-    ) -> Vec<PlayCommand> {
-        let tuning = *self.session.tuning();
-        let short = self.surface.x.min(self.surface.y);
-        // A phase change under the player's finger abandons the line rather than
-        // letting it fire into the next attempt.
-        (self.session.phase() != self.last_phase).then(|| self.capture.cancel());
-        self.last_phase = self.session.phase();
-
-        let accepting = self.session.phase().accepts_drawing();
-        let sample = pointer.filter(|_| accepting);
-        match self
-            .capture
-            .update(sample, self.frame_n, short * tuning.stroke.spacing, short)
-        {
-            Drawing::Idle => {
-                self.preview = None;
-                Vec::new()
-            }
-            // What the line would be struck at if it were let go now.
-            //
-            // Read with exactly the same call the finished line gets, not an
-            // approximation of it — a preview that could disagree with the kick
-            // is worse than no preview, because it teaches the player something
-            // untrue about their own hand. Below the length that counts as a shot
-            // there is nothing honest to say yet, so it says nothing.
-            Drawing::Drawing => {
-                self.preview = (self.capture.stroke().length()
-                    >= short * tuning.stroke.min_length)
-                    .then(|| {
-                        interpret(
-                            self.capture.stroke(),
-                            projection,
-                            self.session.shot().origin,
-                            self.session.mouth(),
-                            &tuning,
-                        )
-                    })
-                    .flatten()
-                    .map(|r| r.intent.launch_speed(&tuning));
-                Vec::new()
-            }
-            Drawing::Finished(line) => {
-                // The line leaves the screen the moment it is let go, whether or
-                // not it was long enough to mean anything.
-                self.ghost = Some((line.clone(), 1.0));
-                let reading = interpret(
-                    &line,
-                    projection,
-                    self.session.shot().origin,
-                    self.session.mouth(),
-                    &tuning,
-                );
-                self.reading = reading.clone();
-                reading
-                    .map(|r| vec![PlayCommand::Kick(r.intent)])
-                    .unwrap_or_default()
-            }
-        }
-    }
-
-    /// Advance the released line's flick-away.
-    fn fade(&mut self) {
-        let rate = DT / self.session.tuning().stroke.fade.max(1.0e-3);
-        self.ghost = self
-            .ghost
-            .take()
-            .map(|(line, life)| (line, life - rate))
-            .filter(|(_, life)| *life > 0.0);
-    }
-
     /// Pose the scene and hand the frame to the renderer.
     pub fn present(&mut self) -> FrameOutcome {
         self.pose();
@@ -284,6 +229,7 @@ pub fn build_bend_it() -> RunningApp {
 mod tests {
     use super::*;
     use crate::shot::ResolvedShot;
+    use crate::tuning::DT;
 
     /// Run frames until the game is ready for a drawing.
     fn armed(w: u32, h: u32) -> BendIt {

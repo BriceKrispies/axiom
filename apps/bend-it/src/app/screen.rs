@@ -7,7 +7,8 @@
 //! painter in `web/overlay.rs` turns into SVG and the tests assert against
 //! without a browser anywhere near them.
 
-use crate::stroke::{hint_for, speed_readout, GameView, Speed, StrokeView};
+use crate::play::{Outcome, Side};
+use crate::stroke::{hint_for, speed_readout, Board, GameView, Speed, StrokeView};
 
 use super::BendIt;
 
@@ -22,7 +23,22 @@ impl BendIt {
             (self.session.tally().goals, self.session.tally().attempts),
         );
         view.banner = self.session.result().map(|r| r.banner());
-        view.hint = hint_for(self.session.phase(), self.session.tally().attempts);
+        let shootout = self.session.shootout();
+        view.hint = hint_for(
+            self.session.phase(),
+            self.session.tally().attempts,
+            self.session.keeping(),
+        );
+        view.board = Board {
+            yours: shootout.marks(Side::You),
+            theirs: shootout.marks(Side::Them),
+            keeping: self.session.keeping(),
+            sudden_death: shootout.sudden_death(),
+            outcome: self.session.outcome().map(|o| match o {
+                Outcome::Won => "YOU WIN",
+                Outcome::Lost => "YOU LOSE",
+            }),
+        };
         // The struck speed wins the moment there is one: a fact replaces a
         // promise, in the same place on the screen, so the player can see whether
         // the kicker delivered what their line asked for.

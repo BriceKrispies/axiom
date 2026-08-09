@@ -34,6 +34,26 @@ pub struct Speed {
     pub struck: bool,
 }
 
+/// The shootout, as the screen needs it.
+///
+/// Five marks a side, filled in as they are taken, plus whose kick it is. It is
+/// the one piece of state the player must be able to read without thinking,
+/// because it is the reason the kick they are about to take matters — and a
+/// scoreboard that has to be worked out is a scoreboard nobody looks at while
+/// their thumb is on the glass.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Board {
+    /// `Some(true)` scored, `Some(false)` missed, `None` still to come.
+    pub yours: Vec<Option<bool>>,
+    pub theirs: Vec<Option<bool>>,
+    /// Whether the player is in the goal for this one.
+    pub keeping: bool,
+    /// Sudden death: every kick is the last one.
+    pub sudden_death: bool,
+    /// How it finished, once it has.
+    pub outcome: Option<&'static str>,
+}
+
 /// Everything the screen draws.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameView {
@@ -45,6 +65,8 @@ pub struct GameView {
     pub banner: Option<&'static str>,
     /// Goals and attempts.
     pub tally: (u32, u32),
+    /// The shootout: your marks, theirs, and whether you are the one in the goal.
+    pub board: Board,
     /// How hard the shot is being hit — previewed while the line is drawn, then
     /// held from contact until the next attempt is set up.
     pub speed: Option<Speed>,
@@ -59,6 +81,7 @@ impl GameView {
             stroke: None,
             hint: None,
             banner: None,
+            board: Board::default(),
             speed: None,
             tally,
             viewport,
@@ -82,9 +105,14 @@ pub fn speed_readout(metres_per_second: f32) -> u32 {
 ///
 /// Two attempts is the whole tutorial. The gesture teaches the mechanic; a line
 /// of text that never goes away is just clutter that outlived its usefulness.
-pub fn hint_for(phase: Phase, attempts: u32) -> Option<&'static str> {
-    (matches!(phase, Phase::Aiming | Phase::Ready) & (attempts < 2))
-        .then_some("DRAW THE SHOT")
+pub fn hint_for(phase: Phase, attempts: u32, keeping: bool) -> Option<&'static str> {
+    // Keeping, the instruction never goes away, because the instruction is not
+    // "here is how to play" — it is "the decision is yours and it is happening
+    // now". A keeper with no prompt is a player watching a cutscene.
+    let taking = matches!(phase, Phase::Aiming | Phase::Ready) & (attempts < 2) & !keeping;
+    let saving = keeping & phase.accepts_dive();
+    [None, Some("DRAW THE SHOT")][usize::from(taking)]
+        .or([None, Some("DIVE")][usize::from(saving)])
 }
 
 #[cfg(test)]
@@ -124,11 +152,16 @@ mod tests {
 
     #[test]
     fn the_instruction_appears_early_and_then_gets_out_of_the_way() {
-        assert_eq!(hint_for(Phase::Aiming, 0), Some("DRAW THE SHOT"));
-        assert_eq!(hint_for(Phase::Aiming, 1), Some("DRAW THE SHOT"));
-        assert_eq!(hint_for(Phase::Aiming, 2), None, "two shots is the tutorial");
-        assert_eq!(hint_for(Phase::BallInFlight, 0), None);
-        assert_eq!(hint_for(Phase::Resolution, 0), None);
-        assert_eq!(hint_for(Phase::Ready, 0), Some("DRAW THE SHOT"));
+        assert_eq!(hint_for(Phase::Aiming, 0, false), Some("DRAW THE SHOT"));
+        assert_eq!(hint_for(Phase::Aiming, 1, false), Some("DRAW THE SHOT"));
+        assert_eq!(hint_for(Phase::Aiming, 2, false), None, "two shots is the tutorial");
+        assert_eq!(hint_for(Phase::BallInFlight, 0, false), None);
+        assert_eq!(hint_for(Phase::Resolution, 0, false), None);
+        assert_eq!(hint_for(Phase::Ready, 0, false), Some("DRAW THE SHOT"));
+        // Keeping, the prompt is there every single time and never times out.
+        assert_eq!(hint_for(Phase::Kicking, 40, true), Some("DIVE"));
+        assert_eq!(hint_for(Phase::BallInFlight, 40, true), Some("DIVE"));
+        assert_eq!(hint_for(Phase::Aiming, 0, true), None, "nothing to do yet");
+        assert_eq!(hint_for(Phase::Resolution, 0, true), None);
     }
 }
