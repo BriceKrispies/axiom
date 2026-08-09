@@ -730,7 +730,27 @@ impl ScenePalette {
             // windscreen looks like. [`CAR_GLASS_ROUGHNESS`] keeps it the frame's
             // glossiest surface while holding the glint to the mirror point
             // instead of flooding the whole screen white.
-            car_glass: glossy(app, [0.07, 0.09, 0.13], CAR_GLASS_ROUGHNESS),
+            //
+            // It was `[0.07, 0.09, 0.13]` — blue by 1.86x red — and that is the
+            // last authored blue albedo left on the hero, repeating on the car
+            // the exact mistake [`TARMAC`] documents for the road: a blue surface
+            // multiplied by a blue hemisphere fill under a blue haze does not
+            // read as *lit coolly*, it reads as blue plastic. Measured, the
+            // champion's rear screen displays `(47, 52, 71)` — blue over red by
+            // **+25 levels** — where the reference's is a neutral dark charcoal
+            // at `(57, 55, 54)`, blue *under* red by 3. That is the difference
+            // between a moulded toy canopy and tinted glass, and it is the second
+            // thing the eye lands on after the lamps.
+            //
+            // So this is the same **pure hue rotation** the tarmac took, and for
+            // the same reason: keep the cool in the light and out of the surface.
+            // The rendered frame puts a factor 1.35 of blue over red into this
+            // pixel from the rig alone, so the albedo is authored at `R/B = 1.35`
+            // to cancel exactly that and land neutral. Rec.709 luminance moves
+            // `0.0887` -> `0.0905`, +2% — under a display level at this value, so
+            // nothing here re-exposes the glazing or disturbs the gloss budget
+            // [`CAR_GLASS_ROUGHNESS`] is sized against.
+            car_glass: glossy(app, [0.098, 0.090, 0.073], CAR_GLASS_ROUGHNESS),
             tyre: lit(app, [0.045, 0.045, 0.05]),
             // Stripe and plate trim: pale, slightly warm, and with a whisper of
             // self-luminance. It is the only *light* value on the car, so it has
@@ -743,7 +763,27 @@ impl ScenePalette {
             // lens actually is — and every bit of their separation comes from the
             // emissive, so they read as two hot strips at any angle, in shadow,
             // and with the sun behind the car.
-            brake_light: glowing(app, [0.20, 0.02, 0.01], [1.0, 0.18, 0.10]),
+            //
+            // The emissive was `[1.0, 0.18, 0.10]`, and nothing in the shader
+            // scales an emissive, so that triple *is* what reaches the frame:
+            // measured, the champion's lit lens displays `(249, 111, 81)` sRGB —
+            // linear `(0.930, 0.154, 0.084)`, within a few percent of the
+            // authored value. Its saturation is **0.67**. The reference's lamp
+            // measures `(240, 53, 21)` — linear `(0.871, 0.034, 0.008)`, a
+            // saturation of **0.91**. Same brightness in the red channel; four
+            // and a half times the green and eleven times the blue. That gap is
+            // not exposure and no grade reaches it: the off-hue channels are
+            // authored here and only here, and at `0.18 / 0.10` they turn the
+            // brightest, most-looked-at detail on the hero object into coral
+            // plastic instead of a red lens with a lamp behind it.
+            //
+            // A lens is a *narrow-band* filter — that is the whole of what it
+            // does — so the emitted light is nearly monochromatic red, and the
+            // reference is simply showing what one looks like. The red channel
+            // does not move (it is already at full scale, which is what makes it
+            // over-exposed and therefore a lamp); only the leak either side of it
+            // closes, onto the reference's own measurement.
+            brake_light: glowing(app, [0.20, 0.02, 0.01], [1.0, 0.040, 0.008]),
             boost_flame: glowing(app, [0.10, 0.16, 0.22], [0.70, 0.95, 1.0]),
             traffic: [
                 lit(app, [0.30, 0.44, 0.66]),
@@ -1141,7 +1181,7 @@ mod tests {
         let glowing: [(&str, [f32; 3], [f32; 3]); 7] = [
             ("post", [0.34, 0.26, 0.06], [1.0, 0.66, 0.10]),
             ("lamp", [0.30, 0.28, 0.24], [1.0, 0.86, 0.52]),
-            ("brake light", [0.20, 0.02, 0.01], [1.0, 0.18, 0.10]),
+            ("brake light", [0.20, 0.02, 0.01], [1.0, 0.040, 0.008]),
             ("boost flame", [0.10, 0.16, 0.22], [0.70, 0.95, 1.0]),
             ("traffic light", [0.16, 0.02, 0.01], [1.0, 0.14, 0.06]),
             ("spark", [0.24, 0.18, 0.06], [1.0, 0.78, 0.28]),
@@ -1191,7 +1231,7 @@ mod tests {
         // the lamp is darker than the body it sits in, exactly like the real part.
         let car_body = [0.86, 0.16, 0.07];
         let brake_albedo = [0.20, 0.02, 0.01];
-        let brake_emissive = [1.0, 0.18, 0.10];
+        let brake_emissive = [1.0, 0.040, 0.008];
         assert!(
             brake_albedo[0] < car_body[0],
             "the tail lens should be darker than the paint when it is switched off"
@@ -1213,6 +1253,27 @@ mod tests {
         assert!(
             brake_emissive[1] < 0.30 && brake_emissive[2] < 0.30,
             "the tail lamp has washed out to white: {brake_emissive:?}"
+        );
+        // **And it is a lens, measured against the reference's own.** The bound
+        // above is a ceiling on *washing out to white*, and at `0.30` it is far
+        // too loose to see the defect that actually shipped: `[1.0, 0.18, 0.10]`
+        // passed it comfortably and still displayed as coral. Nothing scales an
+        // emissive, so the authored triple is the displayed colour and the two
+        // are directly comparable — the champion's lens measured a saturation of
+        // 0.67 against the reference's 0.91. A tail lens is a narrow-band filter;
+        // near-monochromatic red is what one looks like, and this is the floor
+        // that keeps the leak either side of the red channel closed.
+        let saturation = |c: [f32; 3]| {
+            let hi = c[0].max(c[1]).max(c[2]);
+            let lo = c[0].min(c[1]).min(c[2]);
+            (hi - lo) / hi
+        };
+        assert!(
+            saturation(brake_emissive) > 0.88,
+            "the tail lamp emits at {:.2} saturation against the reference's 0.91 \
+             — a lens that leaks this much off-hue reads as coral plastic, not as \
+             a lamp: {brake_emissive:?}",
+            saturation(brake_emissive)
         );
 
         // Traffic lamps sit on bodies of four different hues; the emitted red has
