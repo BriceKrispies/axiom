@@ -23,6 +23,7 @@ pub mod road_mesh;
 pub mod scenery;
 pub mod scenery_pool;
 pub mod surface_builder;
+pub mod verge_texture;
 
 use axiom::prelude::{
     Angle, Camera, Color, DirectionalLight, Entity, FrameAmbient, FrameBloom, FrameDepthFog,

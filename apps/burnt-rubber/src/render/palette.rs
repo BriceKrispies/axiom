@@ -50,6 +50,7 @@ use crate::track::Zone;
 
 use super::asphalt_texture::{asphalt_albedo, RES as ASPHALT_RES};
 use super::chunks::RoadMaterials;
+use super::verge_texture::{verge_albedo, BASE as VERGE_BASE, RES as VERGE_RES};
 
 /// A colour from linear RGB components.
 pub fn rgb(r: f32, g: f32, b: f32) -> Color {
@@ -254,6 +255,9 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
     let asphalt = app
         .add_texture_data(ASPHALT_RES, ASPHALT_RES, asphalt_albedo())
         .ok();
+    let ground = app
+        .add_texture_data(VERGE_RES, VERGE_RES, verge_albedo())
+        .ok();
     RoadMaterials {
         // Asphalt: dark, and neutral-warm — see [`TARMAC`] for why the hue is
         // the road's single most consequential number and why it is no longer
@@ -300,8 +304,36 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
         ),
         // Guardrail and tunnel wall: mid grey, matte.
         rail: app.add_material(Material::lit(rgb(0.38, 0.40, 0.44))),
-        // The verge: a neutral base, since one mesh spans zone boundaries.
-        verge: app.add_material(Material::lit(rgb(0.115, 0.145, 0.105))),
+        // The verge — the roadside ground, and until now the frame's last
+        // genuine flat fill. It is the second-largest ground plane in any shot
+        // (the quad reaches `VERGE_REACH` past the barrier, forty-odd metres
+        // either side, from the bumper to the horizon) and it rendered *exactly*
+        // one RGB triple across all of it: sampling the champion frame's verge
+        // returns a standard deviation of `0.00` over thousands of pixels, where
+        // the reference's cleanest roadside still measures ~1-2 levels and reads
+        // as dry earth breaking through low cover.
+        //
+        // [`super::verge_texture`] authors that mix. The base colour here is not
+        // a new colour — it is the channel-wise maximum of the texture's two
+        // targets, because a custom albedo can only darken, and the module holds
+        // the *textured mean* on the flat fill's own luminance so adding a
+        // surface is not also a grade. The colour still spans zone boundaries
+        // neutrally, which is why one mesh can carry it.
+        //
+        // Sampled `Crisp`, unlike the tarmac: `Crisp` still minifies linearly
+        // across a real mip chain, and the verge has no lane-width lateral
+        // feature that has to survive at the vanishing point, so it does not
+        // need — or want — the tarmac's 16x anisotropy.
+        verge: app.add_material(
+            ground
+                .map(|t| {
+                    Material::lit(rgb(VERGE_BASE[0], VERGE_BASE[1], VERGE_BASE[2]))
+                        .with_custom_texture(t.id())
+                })
+                .unwrap_or_else(|| {
+                    Material::lit(rgb(VERGE_BASE[0], VERGE_BASE[1], VERGE_BASE[2]))
+                }),
+        ),
     }
 }
 
@@ -844,18 +876,22 @@ mod tests {
         }
     }
 
-    /// The tarmac carries the aggregate grain, and **nothing else does**.
+    /// **The two ground planes carry a surface; the paint and the rail do not.**
     ///
-    /// Both halves matter. Without a texture the largest surface in the frame is
-    /// a flat fill that renders identically at eight metres and at sixty. With
-    /// the texture on the *paint*, the lane markings — the app's whole speed cue,
-    /// and the brightest thing on the road — would come out mottled instead of
-    /// solid white. `material_textures` is the same resolution the backends read,
-    /// so this asserts what actually reaches the GPU rather than what was
+    /// Every half matters. Without a texture the tarmac — the largest surface in
+    /// the frame — is a flat fill that renders identically at eight metres and at
+    /// sixty, and the verge, the second largest, was measurably worse than that:
+    /// exactly one RGB triple across thousands of pixels of the champion frame.
+    /// With a texture on the *paint*, the lane markings — the app's whole speed
+    /// cue, and the brightest thing on the road — would come out mottled instead
+    /// of solid white, and the rail is a metre-tall strip seen edge-on that has
+    /// nothing to gain. `material_textures` is the same resolution the backends
+    /// read, so this asserts what actually reaches the GPU rather than what was
     /// authored.
     #[test]
-    fn only_the_tarmac_carries_the_asphalt_grain() {
+    fn the_ground_planes_carry_a_surface_and_the_paint_and_rail_do_not() {
         use super::super::asphalt_texture::RES;
+        use super::super::verge_texture::RES as VERGE;
 
         let mut app = app();
         let m = road_materials(&mut app);
@@ -867,22 +903,24 @@ mod tests {
                 .expect("every road material resolves a texture entry")
         };
 
-        let tarmac = of(m.surface);
-        let (w, h, pixels) = (tarmac.width(), tarmac.height(), tarmac.pixels().to_vec());
-        assert_eq!((w, h), (RES, RES), "the tarmac samples the authored grain");
-        assert_eq!(pixels.len(), (RES * RES * 4) as usize);
-        assert!(
-            pixels.chunks(4).map(|t| t[0]).collect::<Vec<_>>().windows(2).any(|p| p[0] != p[1]),
-            "a grain that is one flat value is not a texture"
-        );
+        for (name, handle, res) in [("tarmac", m.surface, RES), ("verge", m.verge, VERGE)] {
+            let entry = of(handle);
+            let (w, h, pixels) = (entry.width(), entry.height(), entry.pixels().to_vec());
+            assert_eq!((w, h), (res, res), "the {name} samples its authored texture");
+            assert_eq!(pixels.len(), (res * res * 4) as usize);
+            assert!(
+                pixels.chunks(4).map(|t| t[0]).collect::<Vec<_>>().windows(2).any(|p| p[0] != p[1]),
+                "a {name} texture that is one flat value is not a texture"
+            );
+        }
 
         // The 1x1 opaque-white fallback: an untextured material, unchanged.
-        for other in [m.paint, m.rail, m.verge] {
+        for other in [m.paint, m.rail] {
             let entry = of(other);
             assert_eq!(
                 (entry.width(), entry.height(), entry.pixels()),
                 (1, 1, [255, 255, 255, 255].as_slice()),
-                "only the tarmac is textured"
+                "only the ground planes are textured"
             );
         }
     }
