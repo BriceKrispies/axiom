@@ -792,6 +792,75 @@ const CLOUD_SCALE: f32 = 0.5;
 
 /// The key light's intensity — **the frame's exposure**.
 ///
+/// # `5.9`, and why `1.84` was not the reference's sunlit road
+///
+/// Every derivation below this section is sound arithmetic run on **the wrong
+/// statistic**, and this section replaces the statistic rather than the method.
+///
+/// The reference's road plane is *bimodal*: 61% of it reads warm (sun-struck),
+/// 39% cool (sky-fill-only palm shadow), and the two modes are more than two
+/// stops apart. Every level below was solved against "the warm **median**",
+/// which sampled at byte 68 — and a median taken over a distribution whose warm
+/// half is itself smeared through the penumbra of the frame's biggest shadows is
+/// not the sunlit mode, it is the *penumbra*. Re-measured over the same
+/// trapezoid (`n = 313k`), the warm half runs median 75, p75 102, **p90 113**;
+/// sampled where the road is unambiguously in full sun — the mid-field band
+/// between the two shadow ranks, and the near carriageway right of the car — it
+/// is `(125, 107, 90)` and `(141, 110, 87)`, luma **110–115**. That is the level
+/// the sun lays on flat tarmac in the reference; 68 is the level it lays on the
+/// half-shadowed tarmac either side of it.
+///
+/// The champion measures luma **65.6** on the same near carriageway (model:
+/// 67 — the model below is trustworthy to two levels, which is what makes this
+/// re-solve worth doing at all). Linearised, the reference's sunlit road is
+/// **2.4× brighter**, and its road carries `std 19` of tonal range against the
+/// champion's `std 1.5`. The champion's road is not a dark road, it is a *flat
+/// slab sitting at the reference's penumbra level* — the frame was exposed for
+/// its own shadows.
+///
+/// Solving the identical model against the sunlit mode instead:
+///
+/// ```text
+/// encoded 0.431 (byte 110, post-grade) -> 0.437 pre-grade (undo cinematic 1.10)
+///   -> linear 0.1605 -> /albedo 0.0886 -> key + ambient = 1.812
+///   -> key = 1.545 -> intensity = 1.545 / (N·L 0.404 · keyLuma 0.647) = 5.91
+/// ```
+///
+/// **Three independent surfaces agree on it**, which is why it is trusted over a
+/// 3.2× jump's face value. At `5.9` the up-facing globals are
+/// `(2.58, 1.64, 1.01)`, and:
+///
+/// | surface | rendered | reference measures |
+/// |---------|----------|--------------------|
+/// | flat tarmac (albedo `.085/.088/.105`) | `(130, 109, 95)` | `(125, 107, 90)` |
+/// | sunlit car flank (`N·L 0.255`, red livery) | `(244, 80, 49)` | `(221..250, 82..99, 43..46)` |
+/// | lane paint (albedo `0.72`) | red/green clipped, blue `223` | `(253, 242, 204)` |
+///
+/// Three different albedos at two different orientations landing on the
+/// reference from one gain is the check a single-surface solve cannot give you.
+///
+/// **What it does not touch.** The sky and the clouds are [`FrameSky`], not lit
+/// by this; the car's *camera-facing* rear panel — the subject, and already at
+/// the reference's level — has `N·L < 0` against a key travelling toward the
+/// camera and receives only the fill. So this is not an exposure lift: it lands
+/// on exactly the up-facing and sun-facing surfaces that measure short, and
+/// nowhere else. Nothing new spills that the reference does not also blow: the
+/// road's own radiance peaks at `0.22`, five times under
+/// [`FrameBloom::highlights`]'s `1.0`, and what does clear it is the lane paint
+/// and the car's stripes, which the reference blows too (it carries 4.84% of
+/// pixels above `L=235`; the champion carries 2.93%).
+///
+/// **And it is the contrast fix, not only the level fix.** The key:fill ratio on
+/// flat road goes `1.80:1 -> 5.79:1` against the reference's own measured
+/// sunlit:shaded road of `10.4:1`. The remaining gap is the sky fill's, not the
+/// key's, and is left for a pass that measures it — one knob per change.
+///
+/// ---
+///
+/// The rest of this comment is the `1.84` derivation, kept intact because
+/// everything in it except the target level is still the live argument: the gel,
+/// the `N·L` bookkeeping, and why the key rather than the grade owns this.
+///
 /// `1.84`, and the number is measured off the reference rather than argued from
 /// it. **It is a gain, not a brightness**: what the frame actually receives is
 /// `intensity · N·L · `[`KEY_COLOR_LUMA`], and this constant only ever moves in
@@ -871,7 +940,7 @@ const CLOUD_SCALE: f32 = 0.5;
 /// this frame is geometrically out of the map. Sizing and colouring the key is
 /// the half of the axis an app can reach; the other half is a frame-contract
 /// change and belongs to the engine architect.
-const KEY_INTENSITY: f32 = 1.84;
+const KEY_INTENSITY: f32 = 5.9;
 
 /// The key light's **colour** — the sun's gel, and the frame's single largest
 /// remaining lighting defect.
@@ -1216,13 +1285,18 @@ mod tests {
         // brightness. That is the exact failure [`KEY_COLOR`] would have walked
         // into — its gel drops the key's luma from `0.959` to `0.647`, a third of
         // the frame's light, and this model would have shrugged. With the term
-        // present the model is complete, and it is worth noting it changes
+        // present the model is complete, and it is worth noting it changed
         // nothing about the rig it was written against: the near-white key's
         // `1.45 * 0.345 * 0.959`, the golden re-gel's `2.15 * 0.345 * 0.647` and
-        // today's re-aimed `1.84 * 0.404 * 0.647` are the same `0.480` to three
-        // places, which is the whole claim [`KEY_INTENSITY`] makes about that
-        // pairing — a re-gel and a re-aim are both exposure-neutral here, by
+        // the re-aimed `1.84 * 0.404 * 0.647` are the same `0.480` to three
+        // places — a re-gel and a re-aim are both exposure-neutral here, by
         // construction, and this product is what says so.
+        //
+        // Today's `5.9 * 0.404 * 0.647 = 1.542` is deliberately *not* one of
+        // them. It is the one move in this constant's history that is a genuine
+        // re-exposure, because the target it was solved against was wrong rather
+        // than the arithmetic — see [`KEY_INTENSITY`], and the band at the foot
+        // of this test, which is the assertion that carried the bad target.
         let len = (KEY_DIRECTION.x * KEY_DIRECTION.x
             + KEY_DIRECTION.y * KEY_DIRECTION.y
             + KEY_DIRECTION.z * KEY_DIRECTION.z)
@@ -1302,11 +1376,8 @@ mod tests {
         );
 
         // The tarmac's luma albedo, and the sRGB transfer the backend writes it
-        // through — the road as the display receives it, before grading.
-        //
-        // The band is the reference's own sunlit tarmac (~byte 65) with the
-        // low-key grade's `0.16` subtract added back, since that stage still
-        // sits downstream of this one: byte 87..=128 pre-grade.
+        // through — the road as the display receives it, before grading. The
+        // band this feeds is set below, against the reference's sunlit mode.
         let road = 0.2126 * 0.085 + 0.7152 * 0.088 + 0.0722 * 0.105;
         let linear = road * (key + ambient);
         let encoded = 1.055 * linear.powf(1.0 / 2.4) - 0.055;
@@ -1317,24 +1388,30 @@ mod tests {
              black point of {black_point:.3} — the subtract clips the whole \
              ground plane to zero instead of deepening it"
         );
-        // The band is the reference's own **measured** sunlit tarmac, read back
-        // through the grade that is actually installed. Sampling the reference's
-        // road plane and taking the warm (`R > B`, i.e. sun-struck) median gives
-        // byte 68.0; undoing `GRADE`'s 1.10 contrast about its mid pivot puts the
-        // pre-grade road at 0.288 encoded. The band is that value with ~8 levels
-        // of latitude either side.
+        // The band is the reference's **sunlit mode**, read back through the
+        // grade that is actually installed.
         //
-        // It replaces 0.34..=0.50, which was byte 87..=128 — the reference's
-        // tarmac with `FramePostProcess::low_key`'s 0.16 subtract *added back*,
-        // because that grade sat downstream when the band was written. It does
-        // not any more: `GRADE` is `cinematic()` and its black point is zero, so
-        // the added-back subtract was inflating the target by 41 levels and the
-        // band was quietly demanding a road twice as bright as the reference's.
+        // It replaces `0.26..=0.32`, and that band is the whole reason the frame
+        // was a stop and a half dark: it was solved against the *warm median* of
+        // the reference's road plane (byte 68). The reference's road is bimodal —
+        // 61% warm, 39% cool palm shadow — and the warm half is itself smeared
+        // through those shadows' penumbra, so its median measures the penumbra,
+        // not the sun. Re-measured over the same trapezoid (`n = 313k`) the warm
+        // half runs median 75 / p75 102 / **p90 113**, and the unambiguously
+        // sunlit tarmac (the mid-field band between the shadow ranks, and the
+        // carriageway right of the car) is byte **110..115**. Undoing `GRADE`'s
+        // 1.10 contrast about its mid pivot puts the pre-grade sunlit road at
+        // **0.437** encoded. The band is that value with ~8 levels either side.
+        //
+        // A statistic, not a level, was the defect — see [`KEY_INTENSITY`], which
+        // records the same correction and the three independent surfaces that
+        // agree on the gain it implies.
         assert!(
-            (0.26..=0.32).contains(&encoded),
+            (0.41..=0.47).contains(&encoded),
             "the road renders at {encoded:.3} encoded, outside the band that \
-             lands it on the reference's measured sunlit tarmac (0.288) under \
-             the grade that is actually installed"
+             lands it on the reference's measured *sunlit* tarmac (0.437) under \
+             the grade that is actually installed — a road that sits below this \
+             band is exposed for the reference's shadows, not for its sun"
         );
     }
 

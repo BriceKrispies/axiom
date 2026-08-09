@@ -418,23 +418,43 @@ pub const TARMAC: [f32; 3] = [0.095, 0.088, 0.080];
 /// assertion that keeps the two in step, and it is the one this module was
 /// missing: it fires the next time the key moves without the gloss moving.
 ///
-/// Tarmac: `0.06 × 2.6 = 0.156` linear at the exact mirror point, roughly
-/// two-fifths of the way up the display range over a `0.08` diffuse base. A
+/// **The key has been re-exposed `1.84 → 5.9`, and this set moves with it —
+/// holding every peak byte-identical.** [`super::KEY_INTENSITY`] was solved
+/// against the wrong statistic (the warm *median* of a road that is 39% palm
+/// shadow, i.e. the penumbra) and is now solved against the reference's sunlit
+/// mode. A re-exposure that does not carry the gloss with it is the exact defect
+/// this whole comment was written about, one era later and three times worse: at
+/// the old `(1 - roughness)` the tarmac would throw `0.06 × 5.9 = 0.354` linear —
+/// past the `0.25` wall below, the blown white sheet again.
+///
+/// So every `(1 - roughness)` is scaled by `1.84 / 5.9 = 0.3119`, which leaves
+/// each surface's peak radiance exactly where the paragraphs above put it. The
+/// products are unchanged to three places, the ordering is unchanged, and no
+/// pixel of specular in the frame moves. **This move is specular-neutral by
+/// construction** — the diffuse exposure rises, the highlights do not, which is
+/// the only shape a re-exposure of a Lambert-plus-lobe rig may take.
+///
+/// Tarmac: `0.0187 × 5.9 = 0.110` linear at the exact mirror point (was
+/// `0.06 × 1.84 = 0.110`) over a diffuse base that has itself risen to ~0.22. A
 /// whisper of directionality down the sun line, so the road is not one flat fill
-/// across its length — and nothing the eye reads as a highlight.
-pub const TARMAC_ROUGHNESS: f32 = 0.94;
+/// across its length — and nothing the eye reads as a highlight; against the
+/// brighter diffuse it is now *less* of a highlight than it was, which is what
+/// the reference's matte noon tarmac wants.
+pub const TARMAC_ROUGHNESS: f32 = 0.9813;
 
-/// Automotive clear-coat. `0.16 × 2.6 = 0.416` linear — a real, visible
-/// highlight riding the crown of the bonnet and the shoulder line, about a stop
-/// under clipping, so the stripes and the panel breaks stay legible underneath
-/// it. See [`TARMAC_ROUGHNESS`] for the budget this is drawn from.
-pub const CAR_PAINT_ROUGHNESS: f32 = 0.84;
+/// Automotive clear-coat. `0.0499 × 5.9 = 0.294` linear (was `0.16 × 1.84 =
+/// 0.294`) — a real, visible highlight riding the crown of the bonnet and the
+/// shoulder line, about a stop under clipping, so the stripes and the panel
+/// breaks stay legible underneath it. See [`TARMAC_ROUGHNESS`] for the budget
+/// this is drawn from and for why the number moved while the product did not.
+pub const CAR_PAINT_ROUGHNESS: f32 = 0.9501;
 
 /// Glazing — still the glossiest surface in the frame, as it must be.
-/// `0.32 × 2.6 = 0.832` linear: the windscreen holds a hot sun glint at the
-/// mirror point and stays a dark near-black trapezoid everywhere else, which is
-/// what a raked screen at noon actually looks like. See [`TARMAC_ROUGHNESS`].
-pub const CAR_GLASS_ROUGHNESS: f32 = 0.68;
+/// `0.0998 × 5.9 = 0.589` linear (was `0.32 × 1.84 = 0.589`): the windscreen
+/// holds a hot sun glint at the mirror point and stays a dark near-black
+/// trapezoid everywhere else, which is what a raked screen at noon actually
+/// looks like. See [`TARMAC_ROUGHNESS`].
+pub const CAR_GLASS_ROUGHNESS: f32 = 0.9002;
 
 /// Register the four road materials.
 ///
@@ -1246,7 +1266,7 @@ mod tests {
         let peak = |roughness: f32| (1.0 - roughness) * key;
 
         // The road. Its own diffuse under this key is about
-        // `TARMAC_g * key * N·L ≈ 0.088 * 2.6 * 0.35 ≈ 0.08`; a specular peak
+        // `TARMAC_g * key * N·L ≈ 0.088 * 5.9 * 0.40 ≈ 0.21`; a specular peak
         // that runs away from that is the blown streak, not a damp sheen.
         let tarmac = peak(TARMAC_ROUGHNESS);
         assert!(
