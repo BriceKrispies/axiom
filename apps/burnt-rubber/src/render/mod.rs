@@ -17,6 +17,7 @@ pub mod asphalt_texture;
 pub mod car_model;
 pub mod chunks;
 pub mod effects;
+pub mod foliage_texture;
 pub mod palette;
 pub mod prop_meshes;
 pub mod road_mesh;

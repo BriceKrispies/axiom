@@ -50,6 +50,7 @@ use crate::track::Zone;
 
 use super::asphalt_texture::{asphalt_albedo, RES as ASPHALT_RES};
 use super::chunks::RoadMaterials;
+use super::foliage_texture::{base_colour as foliage_base, foliage_albedo, FOLIAGE, RES as FOLIAGE_RES};
 use super::verge_texture::{verge_albedo, BASE as VERGE_BASE, RES as VERGE_RES};
 
 /// A colour from linear RGB components.
@@ -539,7 +540,43 @@ impl ScenePalette {
             // light. The albedo is what the post looks like switched off.
             post: glowing(app, [0.34, 0.26, 0.06], [1.0, 0.66, 0.10]),
             timber: lit(app, [0.16, 0.12, 0.09]),
-            foliage: lit(app, [0.13, 0.27, 0.15]),
+            // Every leaf surface in the game — the palm crowns that line the
+            // coast, the shrub clumps on the verge, the conifer cones inland —
+            // and until now the frame's largest remaining flat fill after the two
+            // ground planes. A palm crown rendered as exactly two RGB triples:
+            // one on the up-facing blades, one on the down-facing ones. The
+            // reference's crowns measure a **13.2%** median within-frond
+            // variation, entirely inside one lit blade, and most of it is
+            // chromatic — its green channel barely moves while red and blue swing
+            // in opposition across every leaflet.
+            //
+            // [`super::foliage_texture`] authors that comb. `quad` stretches the
+            // texture once across each blade with `u` across its width and `v`
+            // along its length, so the leaflets, the rachis at `u = 0.5` and the
+            // bright silhouette edges are all the real parts of the leaf rather
+            // than a pattern laid over it.
+            //
+            // The base colour is `foliage_base()`, not [`FOLIAGE`]: a custom
+            // albedo can only darken, this pattern's mean multiplier is ~0.56,
+            // and the module divides that back out per channel so the textured
+            // crown displays the same colour the flat fill did. Adding a surface
+            // is not also a grade. The untextured arm keeps [`FOLIAGE`] itself,
+            // because without the texture there is nothing to compensate for.
+            foliage: {
+                let base = foliage_base();
+                let leaf = app
+                    .add_texture_data(FOLIAGE_RES, FOLIAGE_RES, foliage_albedo())
+                    .ok();
+                app.add_material(
+                    leaf.map(|t| {
+                        Material::lit(rgb(base[0], base[1], base[2]))
+                            .with_custom_texture(t.id())
+                    })
+                    .unwrap_or_else(|| {
+                        Material::lit(rgb(FOLIAGE[0], FOLIAGE[1], FOLIAGE[2]))
+                    }),
+                )
+            },
             stone: lit(app, [0.28, 0.26, 0.24]),
             sign: glowing(app, [0.62, 0.64, 0.60], [0.22, 0.22, 0.20]),
             lamp: glowing(app, [0.30, 0.28, 0.24], [1.0, 0.86, 0.52]),
