@@ -1,0 +1,112 @@
+# BACKFILLED by the critic pass (ledger iteration 20).
+#
+# Round 3 of the era-C stack landed six lens commits and a promote (f1d722b3).
+# Like round 2 before it, it wrote NO `scorecard.candidate.toml`, NO
+# `[[iteration]]`, and therefore not even the `abstraction_introduced` flag
+# that iterations 7, 9, 12 and 14 each set and then left unnamed. 0009.toml
+# said, of round 2, "the first pass on this campaign's line where the gate was
+# not so much skipped as never reached". It is no longer the first. Two rounds
+# running, the gate has had nothing to be skipped in.
+#
+# Round 3 landed TWO spine commits, not one. This record covers the larger;
+# 0011.toml covers the other. Splitting them is deliberate: they are separate
+# abstractions on separate host files with separate justifications, and one
+# record naming two changes is the same defect as a flag naming none.
+#
+# The abstraction this record backfills is `a1190a20`
+# ("convergence(architect): axiom-host — aerial perspective is metres of air,
+# not a depth window"):
+#
+#   crates/axiom-host/src/frame_depth_fog.rs           +213 lines
+#   crates/axiom-host/src/frame_capability.rs           +60 lines
+#     (a new `RenderCapability::AerialPerspective` bit)
+#   crates/axiom-host/src/frame_submission_report.rs     +6 lines
+#   modules/axiom-gpu-backend/src/scene_renderer.rs     +96/-43 (WGSL mirror)
+#   modules/axiom-canvas2d-backend/src/canvas2d_backend_api.rs  +51 lines
+#   apps/burnt-rubber/src/render/mod.rs                 +52 lines (the authoring)
+#
+# New public surface on a LAYER, a new capability bit, and mirrored read paths
+# in BOTH backend modules, inside a convergence pass, with no gate record. That
+# is the tenth consecutive spine change on this campaign's line to land without
+# one, and the count is the finding — not this file.
+#
+# IT IS ALSO UNVERIFIED. `f1d722b3` says so itself: "Architect's spine commit
+# (a1190a20) is unrendered-verified: two WGSL edits and a new
+# RenderCapability::AerialPerspective. It needs a GPU verify and the four gates
+# before any landing, neither of which has been run for any of the ten spine
+# commits now on this line." A shader edit that has never been rendered is not
+# a scored improvement, and no axis in `scorecard.champion.toml` credits it.
+# `depth_and_separation` explicitly declines to.
+
+[abstraction]
+id = 10
+commit = "a1190a20"
+introduced_by_pass = "era-C round 3 (architect lens)"
+axis = "depth_and_separation"
+recorded_by = "critic (backfill)"
+recorded_in_ledger_iteration = 20
+
+# The gate opens on EITHER >= 3 failed bounded attempts on the axis OR genuine
+# inexpressibility. This one takes the second branch, and cleanly.
+inexpressible = true
+failed_attempts = []
+
+inexpressibility_argument = """
+The pre-existing `FrameDepthFog` expressed distance haze as a NORMALISED DEPTH
+WINDOW: a `near`/`far` pair in clip-depth units, with the ramp clamped flat
+past `far`. Two consequences follow from the units alone, and neither is
+reachable from an app.
+
+First, clip depth is non-linear in metres, so a single pair cannot hold both a
+near band and a far band apart: at the app's previous `far` = 0.9970 the ramp
+saturated at 322 m, and every object from 322 m to the horizon received the
+identical haze value. The reference's distance is layered — surf, sea,
+sailboats, village, headland, mountain — and a flat far band collapses all of
+them onto one plane no matter what colour it is graded.
+
+Second, the window is expressed in the CAMERA's depth range, so its meaning
+changes when the projection changes. An app cannot compensate: it does not own
+the projection at the point it authors the look, and it cannot convert metres
+to clip depth without duplicating the camera's arithmetic in app code — which
+is the app re-deriving a layer's own transform, i.e. the shortcut the
+No-Shortcuts rule bans.
+
+The only app-tier route left was to keep hand-tuning the two clip-depth
+scalars per camera, which is a slope hack whose ceiling is arithmetic rather
+than a matter of effort. Expressing the ramp in METRES OF AIR (a per-metre
+density plus a far distance) is the smallest change that removes both
+consequences at once, and metres are the layer's own vocabulary — the kernel
+already carries `Meters`.
+"""
+
+smallest_api_note = """
+The API added is a per-metre density term and a far distance on the existing
+`FrameDepthFog`, plus one capability bit. It did NOT add a new frame part, a
+new uniform buffer, or a new pass. The capability bit is the right shape and
+is correctly scoped: `RenderCapability::AerialPerspective` is evaluated on the
+GPU arm and DROPPED BY DECLARATION on the Canvas 2D profile, which is exactly
+the degradation contract in `crates/axiom-host/src/frame_capability.rs` and
+exactly what the campaign's judged/guarded split asks for — richness that
+lands on the judged arm and degrades on the guarded one by declaration, not by
+a lens quietly authoring around the software rasterizer.
+
+ONE RESERVATION, recorded rather than ruled on. The `canvas2d_backend_api.rs`
++51 lines mean the guarded arm gained code in the same commit. The campaign's
+rule is "legibility, not parity" for that arm, and code that keeps it legible
+under a new capability is legitimate; code that TUNES it would not be. This
+pass has not rendered either arm, so the distinction cannot be checked here.
+The next pass that captures the guard should confirm that nothing in this
+commit is guarded-arm tuning dressed as degradation.
+"""
+
+ruling = "missing-record, backfilled"
+gate_cleared = true
+gate_cleared_on = "inexpressibility"
+verified_on_judged_arm = false
+verification_note = """
+Never rendered. Two WGSL edits and a new capability bit, promoted onto the
+champion line unverified, by the promote's own admission. No axis credits it.
+Nor has any of the four spine gates (coverage 100%, xtask check-architecture,
+dylint, ts-gate) been run for it or for any of the ten spine commits now
+stacked on this line.
+"""

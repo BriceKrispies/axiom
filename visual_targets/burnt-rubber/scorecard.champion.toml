@@ -1,266 +1,335 @@
 # Champion scorecard — burnt-rubber
 #
 # ############################################################################
-# THE PREVIOUS BANNER ON THIS FILE WAS FALSE BY THE TIME IT WAS READ.
+# THIS FILE IS RE-DERIVED FROM THE PNG ON DISK AT THIS COMMIT: the ROUND-3
+# render (998,034 bytes, md5 c2ab203f…), judged arm (WebGL2 / backend `Gl`),
+# captured at the arithmetic moment 1966.118 m / 43.157 m/s.
 # ############################################################################
-# It opened "THIS FILE NOW DESCRIBES THE IMAGE ON DISK. The offset is
-# discharged." That was true when `845e6beb` wrote it. It stopped being true
-# one commit later: `7f33fca4` overwrote `champion.png` with the ROUND-2
-# render (829,972 -> 840,496 bytes; md5 now 70f3fd2e...) and did not touch this
-# file. From that commit until this one the campaign carried a scorecard whose
-# first sentence asserted it described an image it did not describe.
+# The file this replaces described the ROUND-2 render (840,496 bytes). It was
+# not lying about it: `f1d722b3` promoted round 3 and said in its first
+# paragraph "THE SCORECARD IN THIS STACK DESCRIBES THE PREVIOUS IMAGE, NOT THIS
+# ONE." That is the correct way to leave an offset, and it is why this pass
+# could find it in one read. It is also the FOURTH consecutive promote to leave
+# one. A declared-stale score is recoverable and an undeclared one is not, but
+# four passes of recoverable is still a campaign that has never once scored the
+# image it promoted in the same commit.
 #
-# That is worse than the plain one-pass offset it replaced, and the reason is in
-# `7f33fca4`'s own message: "the scorecard header it wrote already says so in
-# its own words." The header said the OPPOSITE. A promote that believes the
-# scorecard is disclosing an offset, and a scorecard that is declaring the
-# offset discharged, together produce a record in which nobody is lying and
-# nothing is true. A declared-stale score is recoverable; a declared-current
-# stale score is not, because it stops the next reader from checking.
-#
-# EVERY NUMBER BELOW IS RE-DERIVED FROM THE PNG NOW ON DISK — the round-2
-# render, judged arm (WebGL2), captured at the arithmetic moment 1966.118 m /
-# 43.157 m/s. Nothing is inherited from the round-1 read.
+# Nothing below is inherited from the round-2 read. Where a number moved, it
+# moved because THE IMAGE CHANGED, not because the same image is being read
+# more or less harshly — and the two must never be added together.
 #
 # ============================================================================
 # ERA C — measured, whole frame, one detector across all three images
 # ============================================================================
-# The detector is this critic's own (grid sample, step = W/300; "hazy sky" =
-# sat < 0.25 AND L > 150 within 0.05h..0.40h). It is NOT the detector the
-# previous three scorecards used, and its reference readings differ from theirs
-# by a few levels and by several points of cloud fraction. Stated here so that
-# no one reads a detector difference as a movement. All three columns below are
-# measured with the SAME code in the same run, so the columns are comparable to
-# each other and to nothing else.
+# Detector: grid sample at step = W/300; "hazy sky" = sat < 0.25 AND L > 150
+# within 0.05h..0.40h. It is the SAME code the previous scorecard used, re-run
+# in one pass over all three images, so the reference column below reproduces
+# that file's reference column to the tenth of a level. The round-2 column is
+# carried across only because it was measured with this same detector.
 #
-#                            reference   round-1 (SCORED)   ON DISK NOW
-#   mean luma                  114.3        101.0              97.0
-#   scene-band median (.30-.72h) 139.8        72.3              95.2
-#   p95 luma                     235         174               191
-#   max luma                     255         249               254
-#   pixels above L=235          5.03%       2.10%             3.01%
-#   pixels above L=250          1.44%       0.00%             0.34%
-#   whole-frame saturation      0.522       0.574             0.566
-#   zenith RGB               (2,101,204) (7,139,199)       (7,90,187)
-#   road r-b at 0.56h            +43         +22               +23
-#   hazy/bright sky fraction    13.4%        1.5%              3.1%
+#                            reference   round-2 (prev score)   ON DISK NOW (r3)
+#   mean luma                  114.3        97.0                 119.0
+#   scene-band median (.30-.72h) 139.6        95.2                 132.2
+#   p95 luma                     235         191                   200
+#   pixels above L=235          5.03%       3.01%                 3.56%
+#   pixels above L=250          1.44%       0.34%                 2.35%
+#   whole-frame saturation      0.522       0.566                 0.566
+#   zenith RGB               (1,99,204)  (7,90,187)            (4,90,179)
+#   road patch (.60-.66h, .12-.28w)
+#                            (85,76,70)  (79,63,56)          (165,109,85)
+#     -> r-b                     +15.8       +23.0                 +79.9
+#   hazy/bright sky fraction    13.3%        3.1%                  6.3%
+#   carriageway pixels < 0.65x band median
+#                               20.5%      ~0 (car blob)          14.6%
+#   foreground trunk width @ .46h   37/33 px                     13/12 px
+#   canopy fraction, rows .20-.35h  13.3%                        15.0%
 #
-# WHAT ROUND 2 GENUINELY MOVED TOWARD THE REFERENCE, and the record should say
-# it as plainly as it says the loss:
+# WHAT ROUND 3 GENUINELY MOVED TOWARD THE REFERENCE:
 #
-#   * SCENE BAND 72.3 -> 95.2 against 139.8. The largest single move on any
-#     luminance statistic in era C. The mid-frame is no longer 67 levels down;
-#     it is 45 down.
-#   * HIGHLIGHT END. p95 174 -> 191, >L=235 2.10% -> 3.01%, >L=250 0.00% ->
-#     0.34%, against 235 / 5.03% / 1.44%. The frame has a highlight end for the
-#     first time in era C. The sun disc is in frame.
-#   * ZENITH green 139 -> 90 against 101. Off by 38, now off by 11 — and now
-#     slightly PAST the reference rather than short of it, which is a different
-#     error and is not reported as a smaller one.
-#   * HAZY SKY 1.5% -> 3.1% against 13.4%. Still a near-empty sky; still a real
-#     move, from a horizon haze band that did not exist before.
-#   * THE HUD BOTTOM BAND. The BOOST row and the two legend rows no longer
-#     print across the steering pads, and neither legend row overflows a frame
-#     edge. Verified on a crop of the band, not by eye at full size.
+#   * THE PALM SHADOWS ARE BACK, and this is the axis-defining feature round 2
+#     lost. Measured, not eyeballed: 14.6% of the carriageway (rows .50-.72h)
+#     now sits below 0.65x the band median, against the reference's 20.5% and
+#     round 2's essentially-nothing-but-the-car's-own-blob. The raking bars
+#     across the right lanes are real geometry, not a grade.
+#   * MEAN LUMA 97.0 -> 119.0 against 114.3. Seventeen levels under becomes
+#     five levels OVER. This is the first capture in era C to land this number,
+#     and being past it is a different error, not a smaller one.
+#   * SCENE BAND 95.2 -> 132.2 against 139.6. Forty-five under becomes seven
+#     under. Together with the line above, the two statistics this campaign has
+#     tracked longest are, for the first time, close.
+#   * HAZY SKY 3.1% -> 6.3% against 13.3%. Half way, from a fifth of the way.
+#   * PALM HEIGHT. `scale_and_proportion`'s first stated defect — "the roadside
+#     palms stand at roughly half the reference's height relative to the
+#     carriageway" — is discharged and slightly overshot: canopy occupancy in
+#     rows .20-.35h is 15.0% against the reference's 13.3%.
 #
-# WHAT ROUND 2 LOST, and it is the axis-defining feature of the whole era:
+# WHAT ROUND 3 LOST, and it is on the largest surface in the frame:
 #
-#   * THE PALM SHADOWS ARE GONE. Round 1 put raking palm shadows across the
-#     carriageway — the reference's single most distinctive lighting event, and
-#     the credit every scorecard since has rested `lighting_and_shadow` = 2 on.
-#     Verified here independently of the promote message, by cropping the
-#     IDENTICAL road band (0.50h..0.72h, same pixel rows, same moment) from both
-#     frames and stacking them: round 1 carries four hard shadow bars across the
-#     right lanes; the image on disk carries none. The only shadow in the road
-#     band is the car's own contact blob.
-#   * MEAN LUMA 101.0 -> 97.0 against 114.3. Third consecutive capture in which
-#     the frame's overall exposure moves away, and the third in which no lens
-#     attacks the axis that owns it.
+#   * THE ROAD IS ORANGE. Same patch, same rows, same moment: the carriageway
+#     goes (79,63,56) r-b +23.0 to (165,109,85) r-b +79.9, against a reference
+#     asphalt of (85,76,70) r-b +15.8. FIVE TIMES the reference's warm bias, on
+#     the single biggest colour area in the image, and round 2 was nearer. The
+#     promote flagged the cause before rendering — KEY_INTENSITY 1.84 -> 5.9
+#     under a key already gelled warm in round 1, multiplied by a new
+#     `sunlit()` grade carrying wb_r 1.15 and exposure 1.08. Each is defensible
+#     alone; the product is clay.
+#   * THE TONE CURVE IS THE WRONG SHAPE. p95 200 against 235 (35 levels short)
+#     while pixels above L=250 run 2.35% against 1.44% (over). A handful of
+#     blown pixels — the sun disc and the white dashes — standing in for a
+#     broad bright field is not the reference's exposure, however well the mean
+#     matches.
+#   * THE ROAD'S LIGHT FALLS IN THE WRONG PLACE. Reference road band darkens
+#     monotonically toward the viewer: 152.8 / 121.2 / 99.4 / 75.1 across
+#     .50-.56 / .56-.62 / .62-.68 / .68-.74h. The champion is non-monotone:
+#     118.7 / 136.0 / 119.9 / 84.1. The frame's brightest road row is in the
+#     wrong band.
+#   * THE PALMS GOT TALLER WITHOUT GETTING THICKER. At the comparable row
+#     (.46h) the reference's two foreground trunks measure 37 and 33 px; the
+#     champion's measure 13 and 12. One `scale_and_proportion` defect was
+#     traded for another, which is why that axis does not move.
 #
-# ONE AXIS IS LOWERED HERE: lighting_and_shadow 2 -> 1. It is lowered because
-# THE IMAGE CHANGED UNDER THE SCORE, not because the same image is re-read more
-# harshly. `7f33fca4` named the regression itself and promoted anyway with the
-# human's reasoning attached — that is the human's call to make and this file
-# does not second-guess it. What it does is the part the promote explicitly
-# deferred: score it. A regression that is named in a commit message and not
-# carried into the scorecard is a regression the next pass will not see.
+# A NINE-PASS PHANTOM DEFECT IS STRUCK. Every scorecard since era B has charged
+# `artifact_level` with "the gear disc still reads 'R' at 155 km/h", named it
+# the campaign's longest-standing unfixed item, and diagnosed it as a
+# capture-recipe fault (the probe placing the car without engaging a forward
+# gear). It is none of those things. `burnt-rubber` has no gear model and no
+# gear readout — `grep -rn gear apps/burnt-rubber/` returns nothing — and the
+# top-right ring is the touch RESET button: `apps/burnt-rubber/src/touch.rs:83`
+# is `PadButton::Reset => "R"`, with line 749 stating "The reset button sits
+# top-right". Nine passes of lenses were pointed at a fix that could not exist,
+# and an axis was held down on it. Struck at `artifact_level`; the true fact
+# underneath (the reference puts a gear numeral where this game puts a reset
+# button) is HUD furniture differing in kind and is already charged once, at
+# `composition_and_framing`.
 #
-# THE REJECT RULE COULD NOT FIRE, AND THAT IS A STANDING HOLE. The loop rejects
-# a candidate when a non-attacked axis falls >= 2. `lighting_and_shadow` fell by
-# 1, from 2, because 1 is the floor for anything legible. Iteration 18 recorded
-# the same hole one pass ago in the same words. With eleven of twelve axes at or
-# below 2, the reject rule is arithmetically unreachable on this campaign for
-# any single-step regression, and it will stay unreachable until several axes
-# clear 3. Noted so that "no reject fired" is never read as "nothing regressed".
+# THREE AXES CHANGE HERE, ALL BECAUSE THE IMAGE CHANGED UNDER THE SCORE:
+#   lighting_and_shadow   1 -> 2   (the feature that caused the 1 came back)
+#   color_palette         2 -> 1   (LOWERED: the road hue, measured above)
+#   contrast_and_exposure 1 -> 2   (two headline statistics landed)
+#
+# A NOTE THE NEXT READER IS OWED, because two of those three go UP and a critic
+# raising numbers should have to say why it is not inflation. `lighting_and_
+# shadow` was 2 for six passes, was lowered to 1 one pass ago for exactly one
+# reason — the palm shadows vanished — and that reason is measurably gone. To
+# refuse the 2 back would be the same offence as inflating: scoring the record
+# instead of the image. It is NOT reported as progress over round 2: it is the
+# same feature going away and coming back, and any lens that quotes "1 -> 2"
+# across those two passes as a gain is misreading this file. `contrast_and_
+# exposure`'s 2 is likewise fragile and coupled: the exposure was hit BY the
+# colour defect (a warm 3.2x key plus a warm grade), so the colour fix will
+# cost some of it back. That coupling is the finding, not the score.
 #
 # final_score = lowest_axis * 0.7 + average_axis * 0.3
-#             = 1 * 0.7 + (14/12) * 0.3 = 1.05
-# (The previous 1.075 was measured on the round-1 image. Different images. The
-#  0.025 is not a movement and is not reported as one.)
+#             = 1 * 0.7 + (15/12) * 0.3 = 1.075
+# The previous 1.05 was measured on a DIFFERENT IMAGE. The 0.025 is not a
+# movement, is not progress, and must not be quoted as either.
 #
-# NEXT FLAW = composition_and_framing. Ten axes now sit at 1 and the fixed axis
-# order breaks the tie at its first entry. UNCHANGED and CORRECT.
+# NEXT FLAW = composition_and_framing. Nine axes sit at 1 and the fixed axis
+# order breaks the tie at its first entry. UNCHANGED and CORRECT — and, for the
+# first time in this era, the axis was actually attacked (`b3e4fbed`, the
+# art-director's palm avenue). It did not move; see that axis's note.
 #
-# GUARDED ARM. `canvas-guard.png` was re-captured by the same promote; it reads
-# mean luma 61.5 over a 9..246 range with the subject, road, palm line, bollards
-# and full HUD present — legible, not black, not errored. It is not scored,
-# credited or blamed anywhere in this file, and `campaign.toml` scopes it
-# correctly ("legibility, not parity").
+# HUMAN OVERRIDE ON RECORD. The modeler lens was DIRECTED by the human onto the
+# player car's geometry (`subject_fidelity`) rather than choosing its own flaw,
+# and its commit `0bbc65b9` was then dropped by the promote. That is the
+# human's call and this file does not argue it. What the file must not let
+# happen is the counter drifting: work aimed at `subject_fidelity` by
+# instruction is NOT an attempt on `composition_and_framing`, and the
+# abstraction gate's ">= 3 failed bounded attempts" count for the next-flaw
+# axis stands at ONE (`b3e4fbed`), not more.
 #
-# PARITY LANGUAGE: clean. Nothing in round 2's seven commits, the promote, or
+# GUARDED ARM. `canvas-guard.png` reads mean luma 67.3 over a 0..246 range with
+# the subject, road, palm line, bollards and full HUD present — legible, not
+# black, not errored. It is NOT scored, credited or blamed anywhere in this
+# file, and `campaign.toml` scopes it correctly ("legibility, not parity"). Its
+# numbers appear nowhere in the table above.
+#
+# PARITY LANGUAGE: clean. Nothing in round 3's six commits, the promote, or
 # this file claims the render matches, is done, or has reached the reference.
-# `a17c44ad` reports a top-of-frame stop landing one level off the reference's;
-# that is one sub-metric of one gradient stop, stated as measured, generalised
-# to nothing. It is not a parity claim and is not struck.
+# `440eac5b` reports its haze constant "round-tripping to the reference's
+# measured (157,204,210) exactly" — that is a source-verified arithmetic
+# identity about one authored constant, not a claim about the rendered frame,
+# and it is not struck. `f1d722b3`'s "the exposure target was hit" is
+# immediately qualified "by the wrong means" and is a measurement of one
+# statistic, not a parity claim.
 
 [scores]
-# 1 - HELD. The one composition change round 2 made — the bottom band stacking
-# instead of colliding — is a HUD-overlap fix and is credited at
-# artifact_level, where the previous file charged it. The three divergences of
-# KIND that hold this axis at 1 are all untouched: (a) the road is a right-hand
-# sweeper with a left guardrail and an off-centre vanishing point against a
-# dead-straight, symmetrically colonnaded avenue to a centred one; (b) the
-# horizon sits well below the reference's, leaving empty sky where the reference
-# has beach, sea, village and headland; (c) the HUD furniture differs in kind
-# for a seventh pass — a mono ASCII `[####------]` track against a graphic
-# progress rail with a car token riding it, grey rings against cyan/green, and
-# no gear numeral. The subject's vertical placement remains close, and a subject
-# placed right inside a frame composed wrong is still a 1.
+# 1 - HELD, and this is the axis that WAS attacked (`b3e4fbed` grew the palm
+# avenue into a proscenium, on an FOV-invariant ratio). It is a real
+# compositional change and it did not move the axis, because none of the three
+# divergences of KIND that hold the axis at 1 is about palm height: (a) the
+# road is a right-hand sweeper with a left guardrail and an off-centre
+# vanishing point against a dead-straight, symmetrically colonnaded avenue to a
+# centred one; (b) the horizon sits well below the reference's, leaving empty
+# sky where the reference has beach, sea, village and headland; (c) the HUD
+# furniture differs in kind for an eighth pass — a mono ASCII `[####------]`
+# track against a graphic progress rail with a car token riding it, grey rings
+# against cyan/green, and no gear numeral. A taller colonnade inside a frame
+# whose road, horizon and furniture are all the wrong kind is still a 1. The
+# attempt is logged as attempt 1 of the gate's three, not written off.
 composition_and_framing = 1
 
-# 1 - HELD, and no lens attacked it this round. Against the reference's
-# fastback the car still has: no wheels in frame, no exhaust tips, no emissive
-# in the tail bars (flat salmon slats where the reference's lamps glow through
-# dark bezels), a grey circular badge and a grey plate that together read as a
-# FRONT grille, stripes that break and step across the rear deck, and a
-# greenhouse that reads as a separate stacked box rather than a fastback
-# roofline. The painted body is still markedly wider-than-tall against a
-# reference body that is very nearly square in its painted extent. One
-# sub-feature — the glazed rear aperture — survives from `3456e56e`.
+# 1 - HELD. The lens the human directed at this axis had its commit dropped by
+# the promote, so nothing in the frame changed here and nothing should. Against
+# the reference's fastback the car still has: no wheels in frame, no exhaust
+# tips, no emissive in the tail bars (flat salmon slats where the reference's
+# lamps glow through dark bezels), a grey circular badge and a grey plate that
+# together read as a FRONT grille, stripes that break and step across the rear
+# deck, and a greenhouse that reads as a separate stacked box rather than a
+# fastback roofline. The painted body is still markedly wider-than-tall against
+# a reference body very nearly square in its painted extent.
 subject_fidelity = 1
 
-# 1 - HELD, and its stated support has WEAKENED without changing the score. The
-# previous file justified this partly on "the palm shadows now crossing the road
-# behind it give the ground plane something to read the silhouette against."
-# That is gone. What grounds the outline now is the car's own contact shadow
-# alone. The shape itself — two stacked boxes against a wedge — is unchanged, so
-# the axis was never going to move on that account; the point of recording it is
-# that the reasoning under a held number went stale and the number did not.
+# 1 - HELD. The support that went stale last pass is restored — the raking
+# shadows are back and the ground plane reads under the car again — but the
+# shape itself, two stacked boxes against a wedge, is what the axis scores and
+# it is untouched. Recorded so the next pass does not read a restored support
+# as a restored number.
 silhouette_readability = 1
 
-# 1 - HELD. Round 2's surfacing lens combed leaflets into the foliage albedo and
-# that is visible: the palm crowns are ranked fronds rather than flat slabs.
-# It does not move the axis, because the axis is scored on the surfaces that
-# occupy the frame. The road still carries no legible aggregate at capture
-# resolution — it reads as smooth fill with a haze ramp — and nothing in frame
-# carries sand grain, surf foam, roof tile or bark. The reference's asphalt runs
-# a long warm ramp from shadowed foreground to sun-struck mid-distance; the
-# champion's mid-frame sits 45 levels under it and flat.
+# 1 - HELD, and one sub-reading got WORSE. The axis is scored on the surfaces
+# that occupy the frame, and the road is most of them. It now carries less
+# tonal information than it did: road-band standard deviation runs 42.4 / 41.2
+# / 36.0 / 44.8 across the four bands against the reference's 58.2 / 57.1 /
+# 49.8 / 56.7, i.e. a flatter fill than round 2's, in a new hue. No legible
+# aggregate at capture resolution; nothing in frame carries sand grain, surf
+# foam, roof tile or bark. The combed foliage leaflets from round 2 survive and
+# still do not reach the axis.
 material_and_texture_detail = 1
 
-# 2 -> 1. LOWERED, on the image that is now on disk.
+# 1 -> 2. RESTORED, on the image now on disk, for the single reason the 2 was
+# taken away one pass ago.
 #
-# The 2 rested, in the previous file's own words, on "three checkable
-# sub-features": palm shadows raking the carriageway, the car's cast shadow, and
-# a single consistent upper-right key. The first of those — named there and in
-# the ledger as "the reference's defining lighting event" — is ABSENT from this
-# frame. Verified by stacking the identical road band (rows 0.50h..0.72h) from
-# the round-1 and on-disk frames: four hard shadow bars across the right lanes
-# become none. Cause is documented in `7f33fca4`: round 2's key moved from
-# 28.8 deg right / 20.2 up to 16.2 / 23.8, and a higher, less lateral key drops
-# the palms' shadows onto the verge behind them.
+# The 2 rested on three checkable sub-features: palm shadows raking the
+# carriageway, the car's cast shadow, and one internally consistent key. Round
+# 2 lost the first; round 3 has it back, measured on the identical band —
+# 14.6% of rows .50-.72h below 0.65x the band median, against the reference's
+# 20.5% and round 2's car-blob-only. Sub-features two and three are present.
 #
-# The sun disc IS now in frame, which is a genuine reference feature and the
-# deficit the last critic named. It does not restore the 2, for two reasons.
-# First, it was cited in the previous file as a CEILING argument ("the sun
-# itself is not in frame" — a reason the axis could not reach 3), not as part of
-# the floor; removing a ceiling argument does not raise a floor. Second, it is
-# rendered as a hard-edged white circle clipped by the right frame edge with a
-# tight halo and no rays, against a reference sun that is a blown core throwing
-# wide multi-ray flare across the upper quadrant — a divergence of kind, not a
-# match.
+# It goes back to 2 and no further, and the ceiling is now a DIFFERENT defect
+# from the one that used to cap it. The key is over-driven: KEY_INTENSITY 1.84
+# -> 5.9 puts the lit carriageway at (165,109,85) where the reference's is
+# (85,76,70), and the road band's luminance profile inverts against the
+# reference's monotone near-dark-to-far-bright ramp (118.7/136.0/119.9/84.1
+# against 152.8/121.2/99.4/75.1). The sun disc is in frame but renders as a
+# hard-edged white circle clipped by the right frame edge with no rays, against
+# a reference sun that throws wide multi-ray flare across the upper quadrant.
+# Correct event, wrong intensity, wrong falloff, pasted disc: 2, not 3.
+lighting_and_shadow = 2
+
+# 2 -> 1. LOWERED. This is the pass's real regression and it is on the largest
+# surface in the frame.
 #
-# What is left in frame: one contact shadow under the subject, and a key whose
-# direction is internally consistent. The lit road still shows no sun-strike
-# ramp — the reference climbs to near-cream where the sun hits the asphalt; this
-# frame's mid-band median is 95.2 against 139.8. One cast shadow plus a pasted
-# disc is a 1, and "when unsure, take the lower" resolves the rest.
-lighting_and_shadow = 1
+# The carriageway is (165,109,85), r-b +79.9, against a reference asphalt of
+# (85,76,70), r-b +15.8 — five times the warm bias, and round 2's +23.0 was
+# nearer. That is not a magnitude error on a small area; it is an orange clay
+# roadway where the reference has warm grey tarmac, occupying roughly the lower
+# third of the frame. A hue with no counterpart anywhere in the reference,
+# covering the frame's dominant surface, is a divergence of KIND, and the
+# previous 2 was explicitly justified on "hue FAMILIES are all right … warm
+# grey road". That justification no longer holds.
+#
+# Compounding, not carrying the lowering on their own: the saturation overshoot
+# is unimproved at 0.566 against 0.522; the zenith moved slightly AWAY, from
+# (7,90,187) to (4,90,179) against (1,99,204), so the blue channel is now 25
+# short where it was 17; and of the four reference colours with no
+# representative in frame (turquoise sea, cream sand, painted village roofs,
+# sun-struck cream road) the last has gone further away, because the lit road
+# is now orange rather than merely dark.
+color_palette = 1
 
-# 2 - HELD, and better supported than last pass. The zenith is now (7,90,187)
-# against the reference's (2,101,204): the red wash is gone and the blue channel
-# no longer clips, which is the closest this era's sky has been. Hue FAMILIES
-# are all right — orange car, blue sky, green verge, warm grey road, and the
-# road's warm tilt holds at r-b +23 against +43. Two things pin it at 2. The
-# saturation is still crossed over, 0.566 against 0.522, and an overshoot is a
-# different error rather than a smaller one. And four of the reference's
-# defining colours still have no representative anywhere in frame: the turquoise
-# sea, the cream sand, the painted village roofs, and the sun-struck cream of
-# the lit road.
-color_palette = 2
+# 1 -> 2. RAISED, on measurement, and flagged as coupled.
+#
+# The two statistics this axis has been scored on for four passes both landed.
+# Mean luma 97.0 -> 119.0 against 114.3: seventeen under becomes five over.
+# Scene-band median 95.2 -> 132.2 against 139.6: forty-five under becomes seven
+# under. Those are not nudges; they are the axis's headline numbers arriving.
+#
+# It is a 2 and not a 3 because the tone CURVE is still the wrong shape at both
+# ends at once: p95 sits at 200 against 235, thirty-five levels short, while
+# the population above L=250 runs 2.35% against 1.44%, over. A few blown
+# pixels — the clipped sun disc, the lane dashes — carrying the top end of a
+# frame that has no broad bright field is a different distribution from the
+# reference's, not a closer one.
+#
+# THE COUPLING IS THE FINDING. This exposure was produced by the same two
+# changes that broke `color_palette`: a 3.2x key gelled warm, and a `sunlit()`
+# grade at wb_r 1.15 / exposure 1.08. The frame is bright because it is orange.
+# A lens that fixes the road hue will take some of this back, and that must be
+# read as the cost of the fix, not as a fresh regression to reject on.
+contrast_and_exposure = 2
 
-# 1 - HELD, and for the first time in era C its evidence is SPLIT rather than
-# uniformly worse. Toward: the scene band went 72.3 -> 95.2 (reference 139.8),
-# and the frame acquired a highlight end — p95 174 -> 191, >L=235 2.10% ->
-# 3.01%, >L=250 0.00% -> 0.34%, against 235 / 5.03% / 1.44%. Away: mean luma
-# 101.0 -> 97.0 against 114.3, so the frame overall is 17 levels dark and has
-# now moved away on this statistic three captures running. A mid-band 45 levels
-# under the reference and a highlight population at three fifths of it is a 1
-# on both ends at once. It is not the next flaw only because the fixed axis
-# order puts composition first among the ten axes tied at 1, and this is the
-# fourth consecutive pass in which no lens has attacked it.
-contrast_and_exposure = 1
-
-# 2 - HELD. Aerial haze is real and now graded through its own colour, the palm
-# grove is two-rank and recedes, the sweeper's guardrail carries the eye into
-# depth, and the horizon carries a haze band that did not previously exist.
-# Several correct sub-features, so not 1 — though one of last pass's stated
-# supports (the palm shadows separating subject from road plane) is gone and the
-# subject now separates on its own contact shadow alone. Not 3: the reference
-# layers near palms, beach, surf, sea, sailboats, village, headland, mountain
-# and sky, and five of those planes do not exist in this frame — the distance
-# resolves into a cyan wash with two ghosted grey blocks in it.
+# 2 - HELD. Aerial haze is real and now graded through its own colour, the
+# grove is two-rank and recedes, the guardrail carries the eye into depth, and
+# the taller avenue adds a genuine near plane the frame did not have. Several
+# correct sub-features, so not 1. Not 3: the reference layers near palms,
+# beach, surf, sea, sailboats, village, headland, mountain and sky, and five of
+# those planes do not exist in this frame — the distance still resolves into a
+# wash with two ghosted grey blocks in it. The architect's new aerial-
+# perspective ramp (`a1190a20`) is on this line but unverified on GPU; whatever
+# it is worth is not claimed here.
 depth_and_separation = 2
 
-# 1 - HELD, on better evidence than last pass and still nowhere near the axis.
-# Hazy/bright sky is 3.1% against the reference's 13.4%, up from 1.5%: the
-# horizon haze band and the sun's halo are real atmosphere and they are the
-# reason this moved at all. What the axis is scored against is still absent —
-# the reference's cumulus bank across the whole horizon, the multi-ray lens
-# flare, and the haze layer over the sea. Distance haze plus a sun halo against
-# four fifths of the reference's sky content missing is a 1.
+# 1 - HELD, on a real move that does not reach the axis. Hazy/bright sky is
+# 6.3% against the reference's 13.3%, up from 3.1% — half way, from a fifth.
+# Still absent: the cumulus bank across the whole horizon, the multi-ray lens
+# flare, and the haze layer over the sea. Half the sky content, none of its
+# three named features, is a 1.
 atmosphere = 1
 
-# 1 - HELD at the value the previous critic pass lowered it to, and the two
-# reasons it was lowered both reproduce on this frame. The car's painted width
-# is still right, which is the one correct sub-measurement. Against it: the
-# roadside palms still stand at roughly half the reference's height relative to
-# the carriageway they line — the reference's two foreground palms leave the top
-# of the frame and none of the champion's comes close to it, and round 2's
-# second rank of palms adds count without adding height — and the carriageway is
-# still markedly wider in frame at the comparable row, five dash columns against
-# three.
+# 1 - HELD, and the reason is a SWAP, which is exactly the thing a scorecard
+# exists to catch. Defect one is discharged: the palms now reach the
+# reference's height and slightly past it (canopy occupancy 15.0% in rows
+# .20-.35h against 13.3%). Defect two is untouched: the carriageway is still
+# markedly wider in frame at the comparable row, five dash columns against
+# three. Defect three is NEW and was introduced by the same change that
+# discharged the first: the stems were scaled in height without being scaled in
+# girth, so at row .46h the two foreground trunks measure 13 and 12 px against
+# the reference's 37 and 33 — roughly a third the width at comparable height,
+# which reads as poles rather than palms. One in, one out, one standing is not
+# a move.
 scale_and_proportion = 1
 
-# 1 - HELD. Round 2's modeler planted a second rank of palms, which is a real
-# gain in count and does not move an axis scored against what the reference
-# contains. Counted against it, still: no sea, no beach, no surf, no sailboats,
-# no stilt houses, no parasols, no headland, no mountains, no village roofs, no
-# rocks, and 3.1% hazy sky against 13.4%. What is in frame is a two-rank palm
-# grove, a guardrail, a bollard file, a shrub band, and two grey blocks in the
-# haze. That is a small fraction of the reference's object count.
+# 1 - HELD. Round 3 added height, not objects. Still counted against it: no
+# sea, no beach, no surf, no sailboats, no stilt houses, no parasols, no
+# headland, no mountains, no village roofs, no rocks, and 6.3% hazy sky against
+# 13.3%. What is in frame is a two-rank palm grove, a guardrail, a bollard
+# file, a shrub band, and two grey blocks in the haze.
 detail_density = 1
 
-# 1 - HELD, and this is the axis round 2 actually improved. TWO of the four
-# standing defects are DISCHARGED, verified on a crop of the bottom band: the
-# BOOST row no longer prints across both steering pads, and neither legend row
-# runs through a pad or overflows a frame edge. Two remain, and one of them is
-# glaring. (a) Two hard white lane-dash wedges still cut across the left
-# steering pad and straight through the GAS ring — the brightest thing in the
-# lower third of a frame whose reference has nothing of the kind. (b) The gear
-# disc still reads "R" at 155 km/h: eight passes old, the longest-standing
-# unfixed item in this campaign, and a capture-recipe defect rather than a
-# render one. Added this pass: the sun disc's hard clipped edge against the
-# sky, which reads as a pasted circle. Two discharged, two standing, one new is
-# not yet a 2.
+# 1 - HELD, and ONE OF ITS THREE CHARGES IS STRUCK AS FACTUALLY WRONG.
+#
+# (a) STANDS. Two hard white lane-dash wedges still cut across the left
+# steering pad and straight through the GAS ring — still the brightest thing in
+# the lower third of a frame whose reference has nothing of the kind, and now
+# part of why the above-L=250 population overshoots.
+#
+# (b) STRUCK, and it has been wrong for nine passes. Every scorecard since era
+# B has charged "the gear disc still reads 'R' at 155 km/h", calling it "the
+# longest-standing unfixed item in this campaign" and "a capture-recipe defect
+# rather than a render one" — i.e. that the probe places the car without
+# putting the box into a forward gear. There is no gear disc. `burnt-rubber`
+# has no gear model and no gear readout anywhere in its source
+# (`grep -rn gear apps/burnt-rubber/` returns nothing). The top-right ring is
+# the touch RESET button: `apps/burnt-rubber/src/touch.rs:83` reads
+# `PadButton::Reset => "R"`, and line 749 says in as many words "The reset
+# button sits top-right". It renders "R" at every speed, in every gear the car
+# does not have, and no capture recipe can change it.
+#
+# What is actually true is a different fact on a different axis: the reference
+# puts a gear numeral in that corner and this game puts a reset button there.
+# That is HUD furniture differing in kind, it is already charged at
+# `composition_and_framing` (divergence (c)), and charging it twice held
+# `artifact_level` down on a defect that does not exist while pointing nine
+# passes of lenses at a fix that could never land. Struck here, not re-scored
+# elsewhere — composition already counts it.
+#
+# (c) AGGRAVATED. The sun disc's hard clipped edge is worse than last pass, not
+# better: round 2 at least carried a tight halo; this frame's disc is a flat
+# white circle cut by the frame edge.
+#
+# One standing, one aggravated, one struck. The score does not move: (a) alone
+# — the brightest object in the lower third of the frame being a HUD collision
+# artifact the reference has no counterpart for — holds the axis at 1 on its
+# own.
 artifact_level = 1

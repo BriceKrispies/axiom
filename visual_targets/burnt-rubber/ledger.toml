@@ -2399,3 +2399,211 @@ atmosphere = 1
 scale_and_proportion = 1
 detail_density = 1
 artifact_level = 1
+
+[[iteration]]
+iteration = 20
+attacked_axis = "none - scoring recalibration"
+changed_files = [
+  "visual_targets/burnt-rubber/scorecard.champion.toml",
+  "visual_targets/burnt-rubber/abstractions/0010.toml",
+  "visual_targets/burnt-rubber/abstractions/0011.toml",
+  "visual_targets/burnt-rubber/ledger.toml",
+]
+champion_screenshot = "champion.png"
+candidate_screenshot = "champion.png"
+decision = "scoring_recalibration"
+reason = """
+Critic audit of the ROUND-3 six-lens pass (b3e4fbed, d6ae6a57, d97b8935,
+440eac5b, a1190a20, promoted by f1d722b3; the modeler's 0bbc65b9 was dropped
+by the promote). Like round 2, that pass wrote no scorecard.candidate.toml and
+no [[iteration]]; the champion it promoted had never been scored. It is scored
+here, on the image on disk (998,034 bytes, md5 c2ab203f...), measured with the
+same detector iteration 19 used, re-run over all three images in one pass so
+the reference column reproduces to the tenth of a level.
+
+THREE AXES MOVE, ALL BECAUSE THE IMAGE CHANGED UNDER THE SCORE:
+  lighting_and_shadow   1 -> 2   RESTORED
+  color_palette         2 -> 1   LOWERED
+  contrast_and_exposure 1 -> 2   RAISED
+final_score 1.075 on this image, against 1.05 on the previous one. DIFFERENT
+IMAGES. The 0.025 is not a movement and must not be quoted as progress.
+
+THE STALE SCORE, FOURTH PASS RUNNING - and correctly declared this time.
+f1d722b3's first paragraph is "THE SCORECARD IN THIS STACK DESCRIBES THE
+PREVIOUS IMAGE, NOT THIS ONE", written because iteration 19 caught the round-2
+promote asserting the opposite. That is the right way to leave an offset and it
+is why this pass found it in one read. It is still four consecutive promotes
+that have never scored the image they promoted in the same commit, and the
+recalibration is therefore always one pass behind the render the lenses aim at.
+
+THE RESTORATION, and why a critic handing points back is not inflation.
+lighting_and_shadow was lowered to 1 exactly one pass ago for exactly one
+reason: the palm shadows raking the carriageway - "the reference's defining
+lighting event" - had vanished. They are back, measured on the identical band:
+14.6% of rows .50-.72h sit below 0.65x the band median, against the reference's
+20.5% and round 2's car-contact-blob-only. Refusing the 2 back would be the
+same offence as inflating - scoring the record instead of the image. It is NOT
+progress over round 2: it is one feature going away and coming back, and any
+lens quoting "1 -> 2" across those passes as a gain is misreading the
+scorecard. The 2's ceiling is now a different defect from the one that used to
+cap it: the key is over-driven (KEY_INTENSITY 1.84 -> 5.9) and the road band's
+luminance profile INVERTS against the reference's monotone ramp
+(118.7/136.0/119.9/84.1 against 152.8/121.2/99.4/75.1).
+
+THE LOWERING: color_palette 2 -> 1, on the largest surface in the frame. Same
+patch, same rows, same arithmetic moment: the carriageway goes (79,63,56)
+r-b +23.0 to (165,109,85) r-b +79.9, against a reference asphalt of (85,76,70)
+r-b +15.8. Five times the warm bias, and round 2 was NEARER. The previous 2 was
+justified in its own words on "hue FAMILIES are all right ... warm grey road";
+an orange clay roadway under a third of the frame is a divergence of kind, not
+a magnitude, and that justification is gone. Compounding: saturation unimproved
+at 0.566 against 0.522, and the zenith moved AWAY, (7,90,187) -> (4,90,179)
+against (1,99,204).
+
+THE RAISE, AND ITS COUPLING - which is the finding, not the number.
+contrast_and_exposure's two headline statistics both landed: mean luma
+97.0 -> 119.0 against 114.3 (seventeen under becomes five over) and scene-band
+median 95.2 -> 132.2 against 139.6 (forty-five under becomes seven under). It
+is a 2 and not a 3 because the tone CURVE is wrong at both ends at once: p95
+200 against 235 while the population above L=250 runs 2.35% against 1.44%. And
+the exposure was produced BY the colour defect - a 3.2x warm-gelled key times a
+sunlit() grade at wb_r 1.15 / exposure 1.08. The frame is bright because it is
+orange. The lens that fixes the road hue will take some of this back, and that
+must be read as the cost of the fix, not as a fresh regression to reject on.
+
+A NINE-PASS PHANTOM DEFECT IS STRUCK. Every scorecard since era B has charged
+artifact_level with "the gear disc still reads 'R' at 155 km/h", called it the
+campaign's longest-standing unfixed item, and diagnosed it as a CAPTURE-RECIPE
+fault - the probe placing the car without engaging a forward gear. It is none
+of those things. burnt-rubber has no gear model and no gear readout: a grep for
+"gear" across apps/burnt-rubber/ returns nothing. The top-right ring is the
+touch RESET button - apps/burnt-rubber/src/touch.rs:83 is
+PadButton::Reset => "R", and line 749 says "The reset button sits top-right".
+It reads "R" at every speed and no capture recipe can change it. Nine passes of
+lenses were pointed at a fix that could not exist, and an axis was held down on
+it. The true fact underneath - the reference puts a gear numeral where this
+game puts a reset button - is HUD furniture differing in kind and is already
+charged once, at composition_and_framing. artifact_level stays at 1 on the
+lane-dash wedges through the GAS ring alone.
+
+THE SCALE SWAP, which is the "faked progress" check earning its keep.
+scale_and_proportion does not move, and the reason is that round 3 traded one
+defect for another. Discharged: the palms now reach the reference's height and
+slightly past it (canopy occupancy 15.0% in rows .20-.35h against 13.3%).
+Introduced by the same change: the stems were scaled in height without being
+scaled in girth, so at row .46h the two foreground trunks measure 13 and 12 px
+against the reference's 37 and 33 - a third the width at comparable height,
+reading as poles rather than palms. Still standing: the carriageway is wider at
+the comparable row, five dash columns against three.
+
+THE REJECT RULE STILL CANNOT FIRE. color_palette fell by 1, from 2. The rule
+rejects at >= 2. Iterations 18 and 19 each recorded this hole in the same
+words; this is the third. With ten of twelve axes at or below 2 it is
+arithmetically unreachable for any single-step regression and will stay so
+until several axes clear 3. "No reject fired" is not "nothing regressed" - and
+to f1d722b3's credit it did not read it that way: the promote names the orange
+road, gives the two-lens cause, and lands it as the human's call. What was
+missing is the half it deferred - scoring it.
+
+ABSTRACTION GATE: MISSING-RECORD, BACKFILLED TWICE. Round 3 landed TWO spine
+commits and recorded neither.
+  0010.toml <- a1190a20 (axiom-host frame_depth_fog +213, a new
+    RenderCapability::AerialPerspective, frame_submission_report +6, and
+    mirrored read paths in BOTH backend modules). Clears the gate on
+    inexpressibility: the old fog was a normalised CLIP-DEPTH window, so a
+    single near/far pair could not separate a 322 m band from the horizon, and
+    an app cannot convert metres to clip depth without re-deriving the camera's
+    own transform. Capability correctly scoped - GPU evaluates, Canvas 2D drops
+    by declaration. UNVERIFIED: never rendered, by the promote's own admission,
+    and no axis credits it.
+  0011.toml <- 440eac5b (a new public FramePostProcess::sunlit() preset on the
+    host layer). Clears the gate on inexpressibility - FramePostProcess has NO
+    public constructor, only five getters and three presets, so an app cannot
+    author a grade at all. Recorded with a structural reservation the next
+    architect should read: a grade type whose only entry points are named
+    presets forces every app into adding its authored look to the engine layer,
+    which is the wrong direction of dependency pressure. sunlit() is defensible
+    under today's shape and indefensible as a pattern.
+Tenth and eleventh consecutive spine changes on this line to land without a
+gate record. The count is the finding.
+
+THE COORDINATION FAILURE THE BOARD CANNOT SEE, named once so it is findable.
+d6ae6a57 tripled the key and 440eac5b warmed the grade, each solved correctly
+in isolation, each blind to the other, multiplicative on the same path. The
+product is the orange road. f1d722b3 predicted it before rendering and landed
+it anyway. This will recur on any axis pair sharing a multiplicative path; it
+is not a lens error and no lens can fix it.
+
+RIGHT-AXIS CHECK: composition_and_framing CONFIRMED. Nine axes sit at 1 and the
+fixed order breaks the tie at its first entry. For the first time this era the
+axis WAS attacked - b3e4fbed grew the palm avenue on an FOV-invariant ratio -
+and it did not move, because none of the three divergences of KIND that hold it
+at 1 is about palm height: a right-hand sweeper with an off-centre vanishing
+point against a dead-straight symmetric avenue to a centred one; a horizon well
+below the reference's, leaving empty sky where the reference has beach, sea,
+village and headland; and HUD furniture different in kind for an eighth pass.
+Logged as attempt 1 of the abstraction gate's three on this axis.
+
+HUMAN OVERRIDE, RECORDED SO THE COUNTER DOES NOT DRIFT. The modeler lens was
+DIRECTED by the human onto the player car's geometry (subject_fidelity) rather
+than choosing its own flaw - a deliberate override of the board's no-steering
+rule, and the human's call to make. Its commit 0bbc65b9 was then dropped by the
+promote for a stated arithmetic reason (it grew the palms via PropKind unit
+half-extents while the art-director grew them via rank scale; final height is
+the product). Consequence for the record: work aimed at subject_fidelity by
+instruction is NOT an attempt on composition_and_framing, and the gate's
+">= 3 failed bounded attempts" count for the next-flaw axis stands at ONE.
+
+PARITY LANGUAGE: clean. Nothing in round 3's six commits, the promote, or the
+recalibrated scorecard claims the render matches, is done, or has reached the
+reference. 440eac5b's haze constant "round-trips to the reference's measured
+(157,204,210) exactly" - an arithmetic identity about one authored constant,
+not a claim about the frame, generalised to nothing. f1d722b3's "the exposure
+target was hit" is qualified in the same sentence with "by the wrong means".
+Neither is struck.
+
+THE GUARDED ARM IS LEGIBLE AND UNSCORED. canvas-guard.png reads mean luma 67.3
+over a 0..246 range with the subject, road, palm line, bollards and full HUD
+present - not black, not errored. No score, axis note or reason in this
+campaign credits or blames canvas2d; its numbers appear in no scored column.
+One thing for the next capture to check rather than assume: a1190a20 added 51
+lines to canvas2d_backend_api.rs in the same commit as the new capability.
+Keeping the guarded arm legible under a new capability is legitimate; TUNING it
+would not be, and neither arm was rendered this pass.
+
+STILL OWED, carried forward from iteration 19 and grown: champions/
+contact-sheet.png is now three images behind; and no spine gate run (coverage
+100% / check-architecture / dylint / ts-gate) is recorded for ANY of the eleven
+spine commits now stacked on this line, a1190a20 and 440eac5b included, which
+between them touch one layer and two modules.
+"""
+next_attacked_axis = "composition_and_framing"
+abstraction_introduced = true
+
+[iteration.scorecard_before]
+composition_and_framing = 1
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 1
+color_palette = 2
+contrast_and_exposure = 1
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 1
+
+[iteration.scorecard_after]
+composition_and_framing = 1
+subject_fidelity = 1
+silhouette_readability = 1
+material_and_texture_detail = 1
+lighting_and_shadow = 2
+color_palette = 1
+contrast_and_exposure = 2
+depth_and_separation = 2
+atmosphere = 1
+scale_and_proportion = 1
+detail_density = 1
+artifact_level = 1

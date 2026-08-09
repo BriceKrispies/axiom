@@ -1,0 +1,94 @@
+# BACKFILLED by the critic pass (ledger iteration 20).
+#
+# The SECOND spine change in era-C round 3, and the one whose consequence the
+# recalibrated scorecard charges as this pass's regression. See 0010.toml for
+# the round's missing-ledger context; it is not repeated here.
+#
+# The abstraction this record backfills is `440eac5b`
+# ("convergence(colorist): color_palette — the grade was cooling and
+# over-saturating a frame already short on red"):
+#
+#   crates/axiom-host/src/frame_postprocess.rs   +67 lines
+#     (a new public preset, `FramePostProcess::sunlit()`)
+#   apps/burnt-rubber/src/render/mod.rs          +53 lines (the authoring)
+#   apps/burnt-rubber/src/render/palette.rs      +19 lines
+#
+# New public surface on the `host` LAYER, inside a convergence pass, with no
+# gate record. Eleventh consecutive.
+
+[abstraction]
+id = 11
+commit = "440eac5b"
+introduced_by_pass = "era-C round 3 (colorist lens)"
+axis = "color_palette"
+recorded_by = "critic (backfill)"
+recorded_in_ledger_iteration = 20
+
+inexpressible = true
+failed_attempts = []
+
+inexpressibility_argument = """
+`FramePostProcess` has no public constructor. Its whole public surface is five
+`const fn` getters (`exposure`, `white_balance`, `contrast`, `saturation`,
+`black_point`) and three `const fn` PRESETS (`cinematic`, `sunlit`,
+`low_key`) — verified by reading `crates/axiom-host/src/frame_postprocess.rs`
+at this commit. An app therefore cannot author a grade at all; it can only
+pick one of the presets the layer ships.
+
+So the diagnosis the commit makes — that `cinematic` is authored to rescue a
+warm-brown flat raster (red eased to 0.98, blue lifted to 1.06, saturation
+pushed to 1.18 to put colour back) and that applying those two corrections to
+a midday exterior drives an already-red-starved frame further down and an
+already-dominant blue further up — is a defect an app genuinely cannot route
+around. Its only options were to accept the wrong grade or to add a preset.
+That is inexpressibility in the strict sense, and the gate opens.
+"""
+
+smallest_api_note = """
+Given the shape of `FramePostProcess` today, a fourth preset IS the smallest
+change: it adds one `const fn`, touches no other type, changes no existing
+preset, and rides the existing post chain on both arms.
+
+BUT THE SHAPE IS THE REAL FINDING, and this record exists partly to say so
+where the next architect will read it. A grade type whose only entry points
+are named presets forces every app that wants a look the engine did not
+anticipate to add a preset TO THE ENGINE LAYER. That is the wrong direction of
+dependency pressure: the layer accumulates one app's authored look per
+campaign, named after that look, and the vocabulary drifts from "what a grade
+IS" toward "what burnt-rubber needed in round 3". `sunlit()` is defensible
+under the current shape and indefensible as a pattern. The structurally
+correct fix is a constructor (or builder) on `FramePostProcess` so that a look
+is authored where looks belong — in the app — and the presets stay as the two
+or three genuinely general starting points. Flagged, not demanded: it is a
+spine change and belongs to an architect pass with the four gates behind it,
+not to a bookkeeping commit.
+
+CAPABILITY SCOPING: correct by inheritance. The preset rides the existing post
+chain, so the GPU arm evaluates it and the Canvas 2D profile degrades it by
+declaration. Nothing here was authored at the guarded arm.
+"""
+
+ruling = "missing-record, backfilled"
+gate_cleared = true
+gate_cleared_on = "inexpressibility"
+
+verified_on_judged_arm = true
+verification_note = """
+Rendered, and its effect is MEASURED and charged as a regression. The grade
+carries wb_r 1.15 and exposure 1.08, and it landed in the same round as a key
+raised from KEY_INTENSITY 1.84 to 5.9 by a different lens (`d6ae6a57`). The
+product put the carriageway at (165,109,85), r-b +79.9, against a reference
+asphalt of (85,76,70), r-b +15.8 — five times the reference's warm bias on the
+frame's largest surface. `scorecard.champion.toml` lowers `color_palette`
+2 -> 1 on it.
+
+The reason this is recorded against the ABSTRACTION and not only against the
+lens: the commit's own arithmetic is sound in isolation (it solves three bands
+under a sky-clipping constraint and reports total per-channel error falling
+272 -> 186 display levels), and it was measured against a raster produced by
+the OLD key. A grade solved against one exposure and then multiplied by
+another lens's 3.2x key in the same round is a coordination failure the board
+structurally cannot see — seven blind lenses, one frame — and it will recur on
+any axis pair that shares a multiplicative path. Naming it here is the only
+place the next round will find it.
+"""
