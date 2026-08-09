@@ -295,9 +295,24 @@ pub const SKY_HAZE_HEIGHT: f32 = 0.234;
 /// luma, then the contrast S-curve about `0.5`, then exposure × white balance,
 /// then the sRGB transfer the backend's render target writes with — which lands
 /// on this linear triple. Forward through the same chain it returns
-/// `(157, 205, 211)`, within a display level on every channel.
+/// `(157, 204, 210)`, within a display level on every channel.
 /// [`tests::the_haze_is_the_reference_s_own_horizon_band_and_it_is_not_the_sky`]
 /// is that round trip, asserted.
+///
+/// **It moves whenever [`super::GRADE`] moves, and it just did.** This constant is
+/// not a colour someone liked; it is a *solution* to "what linear triple does the
+/// installed grade turn into the reference's horizon band", so a new grade is a
+/// new equation. `[0.35, 0.53, 0.49]` was that solution for `cinematic`; under
+/// `FramePostProcess::sunlit` — which warms the white balance to
+/// `[1.15, 1.00, 1.05]` and drops saturation to `1.02` — the same target inverts
+/// to `[0.2043, 0.4695, 0.4470]`. The red falls the furthest, and that is the
+/// point rather than a surprise: the grade now supplies the warmth that this
+/// constant used to have to carry on its own, so the haze can go back to being
+/// the pale, nearly-neutral scatter it is described as above instead of a colour
+/// pre-compensated for a grade that was pulling red out from under it. Displayed,
+/// the far road, the receding palm rank, the headland and the skyline all land
+/// where they did — that is what the round-trip test pins — but they now get
+/// there with the frame's light rather than against it.
 ///
 /// ## The one thing this costs, and who owns it
 ///
@@ -313,7 +328,7 @@ pub const SKY_HAZE_HEIGHT: f32 = 0.234;
 /// The trade is not close. The seam is one row. The surfaces the fog actually
 /// paints — the far road, the receding palm rank, the headland, the skyline — are
 /// hundreds of rows, and they are the ones the reference measures against.
-pub const HAZE: [f32; 3] = [0.35, 0.53, 0.49];
+pub const HAZE: [f32; 3] = [0.2043, 0.4695, 0.4470];
 
 /// The sun's disc colour — **deliberately far above `1.0`**.
 ///

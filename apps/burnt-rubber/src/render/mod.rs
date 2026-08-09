@@ -594,14 +594,51 @@ fn install_lights(app: &mut RunningApp) -> Entity {
 /// the tarmac — is *full of information* in the reference, and low-key deletes
 /// all of it while dragging the sky and the sea down by the same 41 levels.
 ///
-/// So the frame takes the daylight preset instead: exposure held near neutral so
-/// the sky reads at the level it is authored at, a slight cool white balance
-/// (the shade on a sunny day is lit by the blue sky, not by the sun), a gentle
-/// contrast that separates the midtones without clipping the shadows, and a
-/// saturation lift for the reference's vivid sea, foliage and paint. The black
-/// point goes to zero: with a bright sky and a bright sea there is no lifted
-/// floor left to remove, and removing one anyway would only mud the frame.
-const GRADE: FramePostProcess = FramePostProcess::cinematic();
+/// So the frame takes a daylight preset instead, and the black point goes to
+/// zero: with a bright sky and a bright sea there is no lifted floor left to
+/// remove, and removing one anyway would only mud the frame.
+///
+/// ## Why it is [`FramePostProcess::sunlit`] and no longer `cinematic`
+///
+/// `cinematic` was the right *family* and the wrong *sign*. It is authored to
+/// rescue a raster that arrives warm-brown and flat, so two of its four knobs are
+/// corrections: it eases red (`0.98`), lifts blue (`1.06`), and then pushes
+/// saturation to `1.18` to put colour back. This frame is not that raster, and it
+/// got the correction anyway.
+///
+/// Measured, band by band, on the champion against the reference — the sky
+/// (`y 0.02..0.24`), the atmosphere band (`0.24..0.46`) and the near road
+/// (`0.50..0.66`), each as a mean over every pixel in it:
+///
+/// | | sky | haze band | near road |
+/// |---|---|---|---|
+/// | champion red | 24 | 29 | 106 |
+/// | reference red | 43 | 93 | 151 |
+/// | champion saturation | 0.89 | 0.85 | 0.34 |
+/// | reference saturation | 0.82 | 0.62 | 0.40 |
+///
+/// **Red is short in every band and saturation is long in the two that carry the
+/// sky and the haze.** Those are not two defects; they are one, and this grade is
+/// it. The white balance takes red out of a frame that has almost none to spare,
+/// and the `1.18` saturation then scales each channel's *distance from luma* —
+/// which drives the deficient red further down and lifts the already-dominant
+/// blue further up. Compounded over the whole frame that reads as a cold,
+/// electric cast, which is the opposite of the noon the reference was shot at.
+///
+/// `sunlit` inverts exactly those two (`[1.15, 1.00, 1.05]` and `1.02`) and keeps
+/// `cinematic`'s contrast and black point, which were never the defect. The
+/// exposure lift is deliberately small — `1.02 -> 1.08`, well under the `1.10+`
+/// the band error alone would ask for — because the constraint that binds here is
+/// not the mean, it is the **dome**: [`palette::SKY`] grades to a blue of `0.973`
+/// under this preset, and anything past `1.0` clips the sky's own colour to a
+/// constant and flattens the gradient (see that constant, and the clipping test
+/// beside it, for what that costs). Solved against the three bands under that
+/// constraint, the total per-channel error falls from 272 display levels to 186.
+///
+/// One consequence is mandatory and lands next door: [`palette::HAZE`] is *defined*
+/// as the reference's own horizon band inverted through this grade, so it is
+/// re-derived here rather than left to drift.
+const GRADE: FramePostProcess = FramePostProcess::sunlit();
 
 /// The direction the key light **travels** (world space, un-normalized).
 ///
