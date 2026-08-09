@@ -607,9 +607,11 @@ const GRADE: FramePostProcess = FramePostProcess::cinematic();
 /// **The key is now the moon.** It is exactly `-`[`MOON_DIRECTION`], so the thing
 /// lighting the scene and the thing you can see in the sky are the same object —
 /// which is the whole point of putting a sky in the frame. The horizontal
-/// component above is preserved unchanged (that is the shadow-placement result,
-/// and it was right); only the elevation moves, and it moves *down*, because a
-/// moon you can see down the road is by definition near the horizon.
+/// component's *sign* is what the shadow-placement result above pinned, and it
+/// survives untouched: the key still travels toward `+X`, so the shadow still
+/// spills screen-left and toward the camera. Its magnitude and the elevation are
+/// then set by where the reference's disc actually is — see
+/// [`MOON_DIRECTION`], which measures it.
 const KEY_DIRECTION: Vec3 = Vec3::new(
     -MOON_DIRECTION.x,
     -MOON_DIRECTION.y,
@@ -619,12 +621,49 @@ const KEY_DIRECTION: Vec3 = Vec3::new(
 /// The direction **toward the light body in the sky** (world space,
 /// un-normalized).
 ///
-/// The name still says moon; the body is now the **daylight sun**, and the
-/// direction survived the change unaltered because it was already right: the
-/// reference's sun sits ~20° above the horizon and ~29° off the vanishing point
-/// toward the road's right, which is exactly what this vector encodes. Only the
-/// key's level and colour moved. The rename — and the disc's own colour, which
-/// is `palette::MOON` and still cool — belong with the palette, not here.
+/// The name still says moon; the body is now the **daylight sun**, and this pass
+/// re-aims it, because "~20° up and ~29° right" was asserted of the reference and
+/// never measured against it. **Measured, the sun is not in the champion frame at
+/// all.**
+///
+/// **The measurement.** Both frames are shot on the same chase camera, so the
+/// road's vanishing point is a shared origin: reference `(490, 775)`, champion
+/// `(500, 745)`. The reference's disc centres at `(870, 250)` — `+380 px` right
+/// and `525 px` up. The camera's vertical field of view rides its speed band
+/// (`fov_low 65°` … `fov_high 88°`), so a pixel offset converts to an angle
+/// through `half_height / tan(fov/2)`, giving a *range* rather than a point:
+///
+/// | reference sun | at `fov 65°` | at `fov 81°` (the champion's speed) |
+/// |---------------|--------------|--------------------------------------|
+/// | azimuth right | 16.2°        | 20.9°                                |
+/// | elevation     | 21.8°        | 26.9°                                |
+///
+/// The old `(-0.55, 0.42, 1.0)` is `28.8°` right and `20.2°` up: **too far right
+/// at every fov in the band, and low.** Projected back through the same
+/// arithmetic the disc lands at `x ≈ 1030..1210` on a `939 px` frame — off the
+/// right edge, at both ends of the band. That is the whole reason the champion's
+/// sky is an empty gradient while the reference's upper right is dominated by a
+/// sun and the flare `FrameBloom::highlights` exists to spend on it. The frame
+/// was *lit by* a sun with no source in shot — the exact defect the sky body was
+/// added to cure, defeated by eight degrees of azimuth.
+///
+/// `16.2°` right is the narrow-fov end of the measured range rather than its
+/// middle, and deliberately so: azimuth is the axis that decides *in shot or
+/// not*, the disc has to clear the right edge at **both** ends of a live fov
+/// band, and a sun a few degrees too central is a sun you can see. It lands the
+/// disc at `x ≈ 770..865` against the reference's `870`. Elevation takes the
+/// middle, `23.8°`, which is inside the `12°..28°` visibility band
+/// `the_key_throws_its_shadow_toward_the_camera_and_not_out_of_shot` pins.
+///
+/// **What the elevation buys beyond the disc.** Shadow length is
+/// `height / tan(elevation)`: `20.2° → 2.7` caster-heights, `23.8° → 2.3`. The
+/// champion's palm shadows are the largest dark shapes in the frame and they
+/// read as formless smears across the lower right; 15% off their length is 15%
+/// less smear for the same shadow. And `N·L` on the road rises `0.345 → 0.404`,
+/// so the key stops throwing away two thirds of itself on the largest surface in
+/// shot — which is why [`KEY_INTENSITY`] falls in the same breath. **Read the two
+/// constants as one decision: this move is exposure-neutral by construction and
+/// the road does not shift by a level.**
 ///
 /// The reasoning below is written for a moon and holds verbatim for a low sun:
 /// every argument in it is about elevation, visibility and shadow length.
@@ -636,22 +675,20 @@ const KEY_DIRECTION: Vec3 = Vec3::new(
 /// app's camera basis renders as screen-**right** — off the vanishing point, so
 /// it is not permanently hidden behind the car.
 ///
-/// The elevation is **20°**, down from the old key's 50°. That is a real trade,
+/// The elevation is **low**, down from the old key's 50°. That is a real trade,
 /// made deliberately:
 ///
 /// * A moon at 50° is above the top of the frame from a chase camera. There is
 ///   no elevation at which a light is both "overhead" and "in shot"; the ask was
 ///   for a visible moon, so it comes down to where the camera can see it.
 /// * A shadow's length is `height / tan(elevation)`: 50° → 0.84 car-heights,
-///   20° → 2.7. The car's shadow stops being a smear under the bumper and
-///   becomes a long raking shape thrown back toward the camera. (It lands only
-///   near the world origin — the engine's one directional shadow map is a fixed
-///   20 m box there — but where it lands, it now reads.)
-/// * The cost is `N·L` on the horizontal road: 0.77 → 0.34, less than half. That
-///   is why [`KEY_INTENSITY`] rises to compensate. The verticals — car flanks,
+///   23.8° → 2.3. The car's shadow stops being a smear under the bumper and
+///   becomes a long raking shape thrown back toward the camera.
+/// * The cost is `N·L` on the horizontal road: 0.77 → 0.40. That is why
+///   [`KEY_INTENSITY`] rises above one to compensate. The verticals — car flanks,
 ///   reflector posts, tree cones — gain what the road loses, which is exactly
-///   the raking, side-lit look a low moon produces and a high one cannot.
-const MOON_DIRECTION: Vec3 = Vec3::new(-0.55, 0.42, 1.0);
+///   the raking, side-lit look a low sun produces and a high one cannot.
+const MOON_DIRECTION: Vec3 = Vec3::new(-0.29, 0.46, 1.0);
 
 /// The moon's angular radius (radians).
 ///
@@ -725,14 +762,26 @@ const CLOUD_SCALE: f32 = 0.5;
 
 /// The key light's intensity — **the frame's exposure**.
 ///
-/// `2.15`, and the number is measured off the reference rather than argued from
+/// `1.84`, and the number is measured off the reference rather than argued from
 /// it. **It is a gain, not a brightness**: what the frame actually receives is
 /// `intensity · N·L · `[`KEY_COLOR_LUMA`], and this constant only ever moves in
-/// company with that gel. It was `1.45` against a near-white key of luma
-/// `0.959`; [`KEY_COLOR`] re-gels the sun to the reference's measured golden
+/// company with the other two factors. It was `1.45` against a near-white key of
+/// luma `0.959`; [`KEY_COLOR`] re-gels the sun to the reference's measured golden
 /// `(1.0, 0.58, 0.27)`, luma `0.647`, and `1.45 · 0.959 / 0.647 = 2.15` is the
 /// intensity that keeps every word below true. Flat road is unchanged at luma
-/// `0.725`. Read the two constants as one decision.
+/// `0.725`. Read the constants as one decision.
+///
+/// **And `N·L` is the third factor, which is why `2.15` is now `1.84`.**
+/// [`MOON_DIRECTION`] re-aims the sun to where the reference actually puts it —
+/// `23.8°` up rather than `20.2°` — and a horizontal surface takes
+/// `N·L = 0.404` from that instead of `0.345`. The road would gain 17% of a stop
+/// for free, so the gain gives back exactly what the geometry hands it:
+/// `2.15 · 0.345 / 0.404 = 1.84`. The product this whole comment sizes,
+/// `intensity · N·L · keyLuma`, goes `0.4804 → 0.4810` — the same light, from a
+/// visible source, at the same exposure. **Every derivation below is stated
+/// against the old `2.15 · 0.345` pairing and is unchanged by the swap**, because
+/// the swap holds their product fixed; that is the point of writing it this way
+/// rather than re-deriving the exposure a fourth time.
 ///
 /// The `2.6` before that was derived twice by arithmetic — once through
 /// [`FramePostProcess::low_key`]'s `0.16` black point, then re-derived when the
@@ -792,7 +841,7 @@ const CLOUD_SCALE: f32 = 0.5;
 /// this frame is geometrically out of the map. Sizing and colouring the key is
 /// the half of the axis an app can reach; the other half is a frame-contract
 /// change and belongs to the engine architect.
-const KEY_INTENSITY: f32 = 2.15;
+const KEY_INTENSITY: f32 = 1.84;
 
 /// The key light's **colour** — the sun's gel, and the frame's single largest
 /// remaining lighting defect.
@@ -1139,9 +1188,11 @@ mod tests {
         // the frame's light, and this model would have shrugged. With the term
         // present the model is complete, and it is worth noting it changes
         // nothing about the rig it was written against: the near-white key's
-        // `1.45 * 0.345 * 0.959` and today's `2.15 * 0.345 * 0.647` are the same
-        // `0.480` to four places, which is the whole claim [`KEY_INTENSITY`]
-        // makes about that pairing.
+        // `1.45 * 0.345 * 0.959`, the golden re-gel's `2.15 * 0.345 * 0.647` and
+        // today's re-aimed `1.84 * 0.404 * 0.647` are the same `0.480` to three
+        // places, which is the whole claim [`KEY_INTENSITY`] makes about that
+        // pairing — a re-gel and a re-aim are both exposure-neutral here, by
+        // construction, and this product is what says so.
         let len = (KEY_DIRECTION.x * KEY_DIRECTION.x
             + KEY_DIRECTION.y * KEY_DIRECTION.y
             + KEY_DIRECTION.z * KEY_DIRECTION.z)
@@ -1196,8 +1247,8 @@ mod tests {
         // intuition put it. Measured off the reference's own road plane, the sky
         // fill is `0.302` and the sun on flat road is `0.444` — a ratio of
         // **0.68**. That is far above the 0.30 this used to demand, and the
-        // reason is geometric rather than stylistic: the sun sits at 20°, so
-        // `N·L` of 0.345 throws away two thirds of the key on a horizontal while
+        // reason is geometric rather than stylistic: the sun sits at 23.8°, so
+        // `N·L` of 0.404 throws away 60% of the key on a horizontal while
         // the sky dome arrives on it whole. A guard calibrated for an overhead
         // sun is simply the wrong guard for a raking one, and holding 0.30
         // against this ambient pinned the key at 2.6 — i.e. it was the assertion,
