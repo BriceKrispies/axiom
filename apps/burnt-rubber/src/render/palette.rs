@@ -68,8 +68,67 @@ pub fn ratio(v: f32) -> Ratio {
 ///
 /// Authored in **linear** light, which is not what it looks like: the backend
 /// converts to sRGB for display, so this lands on screen at roughly
-/// `(129, 184, 231)` — the pale blue band a coastal noon has just above the sea,
-/// not the saturated blue overhead ([`SKY_ZENITH`] carries that).
+/// `(43, 177, 208)` before the grade, and — after [`super::GRADE`] runs its
+/// exposure, cool white balance, contrast and `1.18` saturation over it — at
+/// `(11, 185, 242)` in the finished frame.
+///
+/// ## Why the old `[0.22, 0.48, 0.80]` painted a milky sky, and this does not
+///
+/// **This constant, not [`SKY_ZENITH`], is the colour of the sky you can
+/// actually see.** The GPU sky shader mixes the two stops on
+/// `smoothstep(dir.y)`, and this app's chase camera looks slightly *down*: the
+/// top row of the frame sits about 32° up, which is `dir.y ≈ 0.53` and therefore
+/// a blend of only **0.57**. The zenith stop is never reached anywhere on
+/// screen — every sky pixel in the frame is at least 43% this value, and the
+/// band just above the horizon is essentially all of it.
+///
+/// That is what made the previous pair read as pale cyan milk. Measured on the
+/// champion frame against the reference, sampling the clear sky column by
+/// column and mapping screen row to blend:
+///
+/// | | champion sky | reference sky |
+/// |---|---|---|
+/// | red, horizon → top | 115 → 78 | **1 → 1** |
+/// | green, horizon → top | 190 → 150 | 181 → 95 |
+/// | blue, horizon → top | **255 → 255** | 242 → 200 |
+///
+/// Two separate defects, both of them authored here:
+///
+/// * **Red.** A daylight sky is very nearly a pure blue-green primary — the
+///   reference carries a red channel of `0`–`1` across its entire sky. The old
+///   horizon red of `0.22` put ~110 display levels of red under every sky pixel
+///   in the frame, and red under blue is exactly the definition of a wash. That
+///   single number is most of the distance between "coastal noon" and "overcast".
+/// * **Blue clipping.** `0.80` linear displays at `231`, and the grade then
+///   multiplies it by the white balance's `1.06`, the contrast's `1.1` and pushes
+///   it *away* from luma at `1.18` saturation — it leaves the range. So did the
+///   old zenith's `0.68`. **Both stops clipped**, which means the sky's blue
+///   channel was a flat `255` from the horizon to the top of the frame: the
+///   gradient, the sun's halo and the clouds' separation all existed only in red
+///   and green, and the one thing a clear sky is made of was a constant.
+///
+/// So both stops are re-derived *through* the grade rather than authored by eye:
+/// the reference's own sky is sampled per row, inverted through
+/// [`super::GRADE`]'s exact chain (the saturation step preserves Rec.709 luma, so
+/// it inverts exactly), and the two stops are the least-squares fit of the
+/// shader's `mix(horizon, zenith, smoothstep(dir.y))` to that curve. Mean squared
+/// error over the visible band falls from `12781` to `1340` per sample.
+///
+/// It stays the frame's **white level** in every other respect — it is still the
+/// clear colour, still the horizon stop, and still the colour
+/// [`super::FrameDepthFog`] fades every distant surface into, so the far road
+/// still dissolves into the sky it is standing under with no seam. It is simply
+/// 18% less bright and no longer red, which is the correction the measurement
+/// asks for.
+///
+/// What this pair still **cannot** express is the thin pale haze strip the
+/// reference has hugging the horizon line itself (`~(158, 210, 232)`, below about
+/// 5° of elevation) before the sky collapses to blue. `smoothstep` is *flattest*
+/// near zero, so a two-stop dome holds its horizon colour over a wide band —
+/// exactly the wrong shape for a tight haze layer. Getting that would take a
+/// third stop or a horizon-hugging exponent in the sky shader, which is an engine
+/// change, not a palette one. The band is a few dozen rows; the sky above it is
+/// 40% of the frame, and this is the fit that serves the frame.
 ///
 /// This constant is the **white level of the whole frame**, not just the colour
 /// of the empty top of it, and that is why it is authored this far down. It is
@@ -93,7 +152,7 @@ pub fn ratio(v: f32) -> Ratio {
 /// highlight. Pushing it to white would blow the vanishing point out and take the
 /// far lane markings with it, and there would be no headroom left for the sun
 /// disc ([`SUN`]) or the clouds to read as brighter than the sky they sit in.
-pub const SKY: [f32; 3] = [0.22, 0.48, 0.80];
+pub const SKY: [f32; 3] = [0.024, 0.44, 0.63];
 
 /// How solid the ghost car is, `0` invisible … `1` opaque.
 ///
@@ -115,11 +174,30 @@ pub const GHOST_OPACITY: f32 = 1.0;
 /// colour the depth fog fades into — so the far road dissolves into the sky it
 /// is standing under, with no seam between the two.
 ///
-/// Displayed, this is roughly `(29, 101, 215)`: the strong blue the reference
-/// carries across the top of the frame. Note how *little* red it holds — a
-/// daylight zenith is nearly a pure blue primary, and the usual mistake is to
-/// author it as a light grey-blue, which is a hazy sky, not a clear one.
-pub const SKY_ZENITH: [f32; 3] = [0.012, 0.13, 0.68];
+/// Displayed, this is roughly `(7, 48, 111)` before the grade. Note how *little*
+/// red it holds — a daylight zenith is nearly a pure blue primary, and the usual
+/// mistake is to author it as a light grey-blue, which is a hazy sky, not a clear
+/// one.
+///
+/// **This stop is off-screen, and that is why it moved so far.** The chase camera
+/// looks down; the top row of the frame is a `smoothstep(dir.y)` blend of about
+/// `0.57`, so nothing in shot is ever more than 57% of this value. It is not the
+/// colour of the top of the frame — it is the *slope control* that decides how
+/// fast the visible sky darkens away from [`SKY`], and it has to be authored well
+/// past the darkest pixel it is meant to produce or the gradient arrives flat.
+///
+/// The old `[0.012, 0.13, 0.68]` failed on exactly that count twice over. Its
+/// blue clipped after the grade (`0.68` linear → `215` display → past `1.0` once
+/// the white balance, contrast and saturation had run), so it contributed *no*
+/// blue slope at all — the sky's blue was a constant `255` from the horizon to
+/// the top of the frame. And it was far too bright to steepen the visible band:
+/// the reference darkens from `(1, 181, 242)` at 5° to `(1, 95, 200)` at 32°, a
+/// fall this stop has to overshoot to reach within the 0.57 the camera gives it.
+///
+/// The value is the least-squares fit of the shader's two-stop mix to the
+/// reference's own measured sky, inverted through [`super::GRADE`] — see [`SKY`]
+/// for the measurement and for the one thing the two stops still cannot express.
+pub const SKY_ZENITH: [f32; 3] = [0.002, 0.03, 0.16];
 
 /// The sun's disc colour — **deliberately far above `1.0`**.
 ///
@@ -654,6 +732,98 @@ mod tests {
         // bloom has something above threshold to spread.
         assert!(SUN.iter().all(|c| *c > 1.0), "the sun is paint, not light: {SUN:?}");
         assert!(SUN[0] > SUN[2], "a midday sun is warm; its sky took the blue out of it");
+    }
+
+    /// **A sky colour is only meaningful through the grade it is displayed
+    /// under**, and the champion frame's sky proved it: both stops were authored
+    /// as sensible-looking linear blues and both left the range once
+    /// [`super::super::GRADE`] had run, so the finished frame's blue channel was a
+    /// flat `255` from the horizon to the top of the image. A gradient whose
+    /// dominant channel is a constant is not a gradient — the sun's halo, the
+    /// clouds' separation and the dome's own depth all disappeared into it, and no
+    /// exposure, bloom or saturation move could bring them back, because the
+    /// information was destroyed at the clamp.
+    ///
+    /// This is the assertion the module was missing. It mirrors the host's grade
+    /// chain (`axiom_host::frame_postprocess::grade_pixel`) over each authored
+    /// stop and fails the moment either one clips, or the sky picks up a red cast,
+    /// or the two stops stop producing a visible slope across the band the chase
+    /// camera actually shows.
+    #[test]
+    fn the_sky_gradient_survives_the_grade_without_clipping_or_going_grey() {
+        let grade_cfg = super::super::GRADE;
+        let (exposure, wb, contrast, saturation) = (
+            grade_cfg.exposure().get(),
+            grade_cfg.white_balance(),
+            grade_cfg.contrast().get(),
+            grade_cfg.saturation().get(),
+        );
+        // The mirror below omits the black-point floor removal, which this preset
+        // does not use. If that ever changes, the mirror is wrong, not the sky.
+        assert_eq!(
+            grade_cfg.black_point().get(),
+            0.0,
+            "the grade grew a black point; this mirror no longer models it"
+        );
+        // Linear -> sRGB, the transfer the backend's render target writes with.
+        let encode = |v: f32| {
+            if v <= 0.003_130_8 {
+                12.92 * v
+            } else {
+                1.055 * v.powf(1.0 / 2.4) - 0.055
+            }
+        };
+        // (exposure x white balance) -> contrast S-curve about 0.5 -> saturation
+        // about Rec.709 luma. Returned unclamped on purpose: the whole point is to
+        // see whether a channel leaves `0..1` before the hardware clamps it.
+        let graded = |lin: [f32; 3]| {
+            let curve = |i: usize| ((encode(lin[i]) * exposure * wb[i]) - 0.5) * contrast + 0.5;
+            let v = [curve(0), curve(1), curve(2)];
+            let luma = 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+            [
+                luma + (v[0] - luma) * saturation,
+                luma + (v[1] - luma) * saturation,
+                luma + (v[2] - luma) * saturation,
+            ]
+        };
+
+        for (name, stop) in [("horizon", SKY), ("zenith", SKY_ZENITH)] {
+            let out = graded(stop);
+            assert!(
+                out[2] < 1.0,
+                "the {name} stop's blue clips at {:.3} after the grade: the sky's \
+                 own colour becomes a constant and the dome goes flat",
+                out[2]
+            );
+            // A clear daylight sky is very nearly a pure blue-green primary. The
+            // reference's carries a red channel of 0..1 across its whole span; red
+            // under blue is the definition of a milky sky, and it is authored
+            // here, never graded in.
+            assert!(
+                stop[0] < stop[2] * 0.08,
+                "the {name} stop carries a red cast ({stop:?}) — that is haze, not \
+                 a clear noon sky"
+            );
+        }
+
+        // ...and the two stops produce a real slope across the band the camera
+        // shows. The chase camera looks *down*, so the top row of the frame is a
+        // `smoothstep(dir.y)` blend of only ~0.57 — the zenith stop is never
+        // reached on screen, and a pair that agrees over that range renders as one
+        // flat wash however different the two numbers look.
+        const VISIBLE_TOP_BLEND: f32 = 0.57;
+        let top = graded([
+            SKY[0] * (1.0 - VISIBLE_TOP_BLEND) + SKY_ZENITH[0] * VISIBLE_TOP_BLEND,
+            SKY[1] * (1.0 - VISIBLE_TOP_BLEND) + SKY_ZENITH[1] * VISIBLE_TOP_BLEND,
+            SKY[2] * (1.0 - VISIBLE_TOP_BLEND) + SKY_ZENITH[2] * VISIBLE_TOP_BLEND,
+        ]);
+        let horizon = graded(SKY);
+        let span = (horizon[2] - top[2]) * 255.0;
+        assert!(
+            span > 30.0,
+            "the visible sky spans only {span:.0} display levels of blue between \
+             its horizon and the top of the frame: that is a wash, not a dome"
+        );
     }
 
     /// The colour-temperature rule, pinned: **the cool on this stage belongs to
