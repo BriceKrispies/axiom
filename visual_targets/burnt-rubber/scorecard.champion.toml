@@ -1,5 +1,23 @@
 # Champion scorecard — burnt-rubber
 #
+# ############################################################################
+# READ FIRST — THESE SCORES DESCRIBE THE PRE-PASS IMAGE, NOT THE ONE ON DISK
+# ############################################################################
+# `champion.png` beside this file is the render of the FULL stacked pass (all
+# seven lenses, tip `bd008b14`). The scores below were measured by the critic
+# on the pre-pass baseline `ffd4334e` — the frame the seven lenses were given
+# and attacked. That is the correct and intended order: a lens is scored on
+# what it was shown, not on what it produced. But it means the numbers here
+# and the image here are one pass apart, and NOTHING in this file is evidence
+# about the promoted render.
+#
+# This note exists because the critic caught this exact failure twice in this
+# campaign's history — a scorecard outliving the image it was measured on —
+# and a promote commit that silently swapped the PNG under an unchanged
+# scorecard is precisely how that happened. The next pass re-scores this
+# image first; until it does, `final_score = 1.10` is the score of the frame
+# in `champions/0011-2026-08-09-ffd4334e.png`, not of `champion.png`.
+#
 # ============================================================================
 # ERA C — RECALIBRATED against the RE-BASELINED champion (ffd4334e)
 # ============================================================================
