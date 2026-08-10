@@ -97,17 +97,35 @@ pub const TILE_METRES: f32 = 3.0;
 /// blade and not a field.
 const CLUMPS: u32 = 8;
 
-/// The living-cover end of the field, in linear RGB — the green the verge is
-/// today (`[0.115, 0.145, 0.105]`, held exactly, so the cover reads as the same
-/// material this replaces rather than as a new one).
-const COVER: [f32; 3] = [0.115, 0.145, 0.105];
+/// The living-cover end of the field, in linear RGB.
+///
+/// **Era-C retune, 2026-08-09.** This was `[0.115, 0.145, 0.105]` — a green so
+/// desaturated (`G` only 26% over `R`) that under a strong warm key it rendered
+/// as the same colour as the road. Measured on the round-4 champion: road
+/// `(140,113,89)` and verge `(136,108,82)` — an RGB distance of **9**, on the
+/// frame's two largest surfaces. A driver could not tell where the tarmac ended.
+/// The surfacing lens diagnosed the collapse and could only fix the road half
+/// inside one bounded change; this is the other half.
+///
+/// The cover is now properly green (`G` 76% over `R`, `B` pulled well under
+/// both), which is what separates it from a near-neutral tarmac under any light
+/// warm enough to matter.
+const COVER: [f32; 3] = [0.085, 0.150, 0.075];
 
 /// The bare-earth end, in linear RGB. Warm and a little darker than the cover:
 /// dry roadside soil is a red-shifted near-neutral, and the reference's roadside
 /// shows exactly this between its scrub. Deliberately not sand-bright — the
 /// verge's *exposure* belongs to the lighting and grade, and this module's job is
 /// to give it a surface without moving it.
-const DUST: [f32; 3] = [0.155, 0.128, 0.076];
+///
+/// **Era-C retune, 2026-08-09:** `[0.155, 0.128, 0.076]` → `[0.185, 0.150, 0.090]`.
+/// The reasoning above ("deliberately not sand-bright — the verge's exposure
+/// belongs to the lighting") was right when the verge was the only warm thing
+/// out there and wrong once the road went orange: holding the earth dark is what
+/// let the tarmac catch up to it. The reference's roadside is measurably sand,
+/// so this is brighter and warmer, and it now has a green cover to sit against
+/// rather than a grey-green one.
+const DUST: [f32; 3] = [0.185, 0.150, 0.090];
 
 /// The material base colour this texture multiplies — the verge material's
 /// authored colour, and what the software arm shows on its own.
@@ -120,7 +138,7 @@ const DUST: [f32; 3] = [0.155, 0.128, 0.076];
 /// [`tests::base_is_the_channel_wise_maximum_of_the_two_targets`] recomputes it
 /// from the two targets, so an edit to either that leaves this behind fails
 /// rather than silently flattening the field.
-pub const BASE: [f32; 3] = [0.155, 0.145, 0.105];
+pub const BASE: [f32; 3] = [0.185, 0.150, 0.090];
 
 /// The tiling ground-cover albedo, as `RES * RES` RGBA8 texels ready for
 /// `RunningApp::add_texture_data`.

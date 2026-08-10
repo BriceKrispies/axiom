@@ -186,10 +186,7 @@ impl RaceScene {
         // further: `0.160` sits just inside it, the reference's own shadowed road
         // is a lifted blue-grey and not a hole, and the next pass to want darks
         // should take them from the backend's shadow floor, not from here.
-        app.set_ambient(FrameAmbient::new(
-            [0.114, 0.150, 0.216],
-            [0.047, 0.041, 0.029],
-        ));
+        app.set_ambient(FrameAmbient::new(AMBIENT_SKY, AMBIENT_GROUND));
         // Bloom: what turns the emissive cues — reflector posts, tail lights,
         // tunnel lamps, the lane paint catching the sun — from bright patches of
         // paint into things that read as lights. Gated by the backend's `Bloom`
@@ -1057,7 +1054,13 @@ const CLOUD_SCALE: f32 = 0.5;
 /// this frame is geometrically out of the map. Sizing and colouring the key is
 /// the half of the axis an app can reach; the other half is a frame-contract
 /// change and belongs to the engine architect.
-const KEY_INTENSITY: f32 = 5.9;
+///
+/// **Era-C retune, 2026-08-09:** `5.9 → 4.65`, which is *not* an exposure
+/// decision. It is the inverse of the luma the de-orangeing of [`KEY_COLOR`]
+/// gained (`0.647 → 0.821`), applied so that re-gelling the sun does not
+/// silently re-expose the frame. `intensity · N·L · KEY_COLOR_LUMA` is
+/// unchanged to three figures.
+const KEY_INTENSITY: f32 = 4.65;
 
 /// The key light's **colour** — the sun's gel, and the frame's single largest
 /// remaining lighting defect.
@@ -1116,7 +1119,46 @@ const KEY_INTENSITY: f32 = 5.9;
 /// to `0.680` and `0.560`), and the brightest albedo in shot is the lane paint's
 /// `0.72`, which lands at `0.671` linear — still under one, still well under
 /// [`FrameBloom::highlights`]'s `1.0` threshold, so nothing new spills.
-const KEY_COLOR: [f32; 3] = [1.0, 0.58, 0.27];
+/// The hemisphere ambient's sky end — the fill an up-facing surface gets when
+/// the sun is not on it, and therefore the *shadow* level of the whole frame
+/// under a single directional key.
+///
+/// A named constant rather than a literal at the `set_ambient` call because it
+/// is read in two places: the rig, and the exposure model in
+/// [`tests::the_sun_out_lights_every_other_term_in_the_frame`]. It was a literal
+/// in both until 2026-08-09, and the copy in the test had already gone stale
+/// once — a guard asserting against a fill the frame no longer used.
+const AMBIENT_SKY: [f32; 3] = [0.114, 0.150, 0.216];
+
+/// The hemisphere ambient's ground end — bounce off the road and verge, warm and
+/// much weaker than [`AMBIENT_SKY`]. Named for the same reason.
+const AMBIENT_GROUND: [f32; 3] = [0.047, 0.041, 0.029];
+
+/// **Era-C retune, 2026-08-09.** The gel above was solved against a *night* rig
+/// and it is the term the round-4 architect advisory named as the root of the
+/// orange road: forward-modelling the app's own constants gave a pre-grade road
+/// of `(136,106,80)` and inverting the measured champion through the grade gave
+/// `(129,103,80)` — agreement to within seven levels, which is the proof the
+/// backend is faithfully rendering an authored `1 : 0.58 : 0.27` orange rather
+/// than a defect. Two lenses then corrected *downstream* of it — the tarmac
+/// albedo was rotated cool and the grade's red gain eased 1.15 → 1.04 — and took
+/// the road's `r−b` from `+79.9` to `+53.9` against the reference's `+15.8`.
+/// About a third. The remaining two thirds are this constant, exactly as the
+/// advisory predicted, and no albedo or grade move can reach them without
+/// tinting everything else in frame to compensate.
+///
+/// So the gel's *chroma* is cut to 40% of its excursion from its own luma,
+/// renormalised so red stays the unit channel: `R−B` goes `0.73 → 0.37`. The
+/// sun stays warm — the reference's sunlit tarmac really is warm — it stops
+/// being orange.
+///
+/// **Exposure-neutral by construction, on the file's own rule.** A gel costs
+/// luma; this one delivers `0.821` against the old `0.647`, so [`KEY_INTENSITY`]
+/// falls in exactly that inverse ratio (`5.9 → 4.65`, i.e. `× 0.647/0.821`) and
+/// the frame's measured level does not move. Only the hue of the light does —
+/// the same discipline the previous two gels were solved under, and the reason
+/// this can be reasoned about at all.
+const KEY_COLOR: [f32; 3] = [1.0, 0.787, 0.630];
 
 /// [`KEY_COLOR`]'s Rec. 709 luma — how much *brightness*, as opposed to hue, the
 /// gel actually delivers.
@@ -1421,17 +1463,40 @@ mod tests {
         let n_dot_l = -KEY_DIRECTION.y / len;
         let key = KEY_INTENSITY * n_dot_l * KEY_COLOR_LUMA;
 
-        // The gel itself: the reference's sun is warm, and "warm" is a hard
-        // inequality, not a taste. A key whose blue equals its red cannot make a
-        // warm surface against the blue sky fill above no matter how strong it
-        // is — the frame's entire sunlit/shadowed split is unreachable — and that
-        // is precisely the state the measured champion road was in (0% warm
-        // pixels against the reference's 57%). Pinned as a floor, not a value, so
-        // the gel can be re-measured without re-litigating the direction.
+        // The gel: the reference's sun is warm, and "warm" is a hard inequality,
+        // not a taste. But it has a CEILING as well as a floor, and this guard
+        // used to have only the floor — as `KEY_COLOR[2] < KEY_COLOR[0] * 0.6`.
+        //
+        // That form was wrong in two ways and cost the campaign two passes.
+        // First it asserted a raw channel ratio while *justifying* itself with an
+        // outcome ("cannot put a warm pixel on the road against the blue sky
+        // fill"), and the outcome depends on the ambient, which has since been
+        // cut 40% — so the constant kept enforcing a conclusion drawn under a
+        // sky fill the frame no longer has. Second, and worse, a floor alone
+        // says a gel can never be too warm. It can: at `[1.0, 0.58, 0.27]` this
+        // road rendered `r−b +79.9` against the reference's `+15.8`, the tarmac
+        // read as orange clay, and it became indistinguishable from the sand
+        // verge beside it. The guard was satisfied throughout.
+        //
+        // So it is re-litigated as what it always claimed to be — a statement
+        // about the lit road — through the same complete model the rest of this
+        // test uses, and it is now two-sided. Both bounds are failures this
+        // campaign actually shipped, in both directions.
+        let lit = |c: usize| {
+            palette::TARMAC[c] * (KEY_INTENSITY * n_dot_l * KEY_COLOR[c] + AMBIENT_SKY[c])
+        };
+        let (warm, cool) = (lit(0), lit(2));
         assert!(
-            KEY_COLOR[2] < KEY_COLOR[0] * 0.6,
-            "the key has drifted back toward white ({KEY_COLOR:?}) — against the \
-             blue sky fill it cannot put a warm pixel on the road at any intensity"
+            warm > cool * 1.05,
+            "the key has drifted back toward white ({KEY_COLOR:?}) — the lit road \
+             comes out {warm:.4} red against {cool:.4} blue, and the frame's \
+             sunlit/shadowed split is unreachable at any intensity"
+        );
+        assert!(
+            warm < cool * 2.0,
+            "the key has drifted into orange ({KEY_COLOR:?}) — the lit road comes \
+             out {warm:.4} red against {cool:.4} blue, which is the tarmac-as-clay \
+             state that also erased the road/verge boundary"
         );
 
         // A daylight key is a gain past one, and `palette::ratio` clamps to
@@ -1452,7 +1517,7 @@ mod tests {
         // shadow contrast and not merely a fill check. Mirrors the sky end of the
         // `set_ambient` call above; see that call site for the measurement that
         // scaled both hemisphere ends by 0.60.
-        let ambient = (0.114 + 0.150 + 0.216) / 3.0;
+        let ambient = (AMBIENT_SKY[0] + AMBIENT_SKY[1] + AMBIENT_SKY[2]) / 3.0;
 
         // The backend's point-light falloff, mirrored: 1/(1 + 0.09d + 0.032d²),
         // times the pool's own intensity.
