@@ -473,45 +473,16 @@ impl LiveGpuBinding {
     /// and walk the target away from the tier it is supposed to be a fraction of.
     pub fn set_render_scale(&mut self, scale: axiom_host::RenderScale) {
         let (want_w, want_h) = scale.apply(self.render_base.0, self.render_base.1);
-        let unchanged = (want_w, want_h) == self.render_size;
-        // Zero-or-one rebuild, over the Option iterator — no branch.
-        (!unchanged).then_some(()).into_iter().for_each(|()| {
-            let intermediate = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("axiom-render-target"),
-                size: wgpu::Extent3d {
-                    width: want_w,
-                    height: want_h,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: self.format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
-            let view = intermediate.create_view(&wgpu::TextureViewDescriptor::default());
-            self.depth_view = create_depth_view(&self.device, want_w, want_h);
-            self.upscale = UpscaleBlit::new(
-                &self.device,
-                self.format,
-                &view,
-                wgpu::FilterMode::Nearest,
-            );
-            self.post = self.wants_post.then(|| {
-                crate::post_chain::PostChain::new(
-                    &self.device,
-                    self.format,
-                    self.format,
-                    &view,
-                    (want_w, want_h),
-                )
-            });
-            self.intermediate_view = view;
-            self.render_size = (want_w, want_h);
-            self.render_scale = scale;
-        });
+        self.render_size = (want_w.min(self.render_base.0), want_h.min(self.render_base.1));
+        self.render_scale = scale;
+    }
+
+    /// The fraction of the full-size render targets the frame currently occupies.
+    fn live_fraction(&self) -> (f32, f32) {
+        (
+            (self.render_size.0 as f32) / (self.render_base.0.max(1) as f32),
+            (self.render_size.1 as f32) / (self.render_base.1.max(1) as f32),
+        )
     }
 
     /// The scale the scene is currently rendered at.
@@ -580,11 +551,18 @@ impl LiveGpuBinding {
         // Render the scene at tier resolution into the intermediate target
         // (renderer owns its own encoder + submit), gating each per-fragment feature
         // on the caller's capability mask.
+        // The scene draws into the live sub-rect of a target that stays allocated
+        // at full tier size — so a render-scale change is a viewport, not a
+        // reallocation. Reallocating the colour target, its depth buffer and the
+        // bloom chain mid-frame is tens of milliseconds on a mobile GPU, i.e. a
+        // visible hitch every time the loop adapted; adapting must not itself be
+        // the thing that makes the frame late.
         self.renderer.record(
             &self.device,
             &self.queue,
             &self.intermediate_view,
             &self.depth_view,
+            self.render_size,
             lights,
             light_view_proj,
             batches,
@@ -613,11 +591,16 @@ impl LiveGpuBinding {
                 &view,
                 self.bloom.as_ref(),
                 self.grade.as_ref(),
+                self.live_fraction(),
+                (self.width, self.height),
             )
         });
         bloomed
             .is_none()
-            .then(|| self.upscale.record(&mut encoder, &view));
+            .then(|| {
+                self.upscale
+                    .record(&self.queue, &mut encoder, &view, self.live_fraction())
+            });
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         Ok(())

@@ -138,6 +138,8 @@ pub(crate) fn render_to_rgba(
                     &queue,
                     &color_view,
                     &depth_view,
+                    // The capture arm never scales: it renders the whole target.
+                    (width, height),
                     lights,
                     light_view_proj,
                     batches,
@@ -175,6 +177,7 @@ pub(crate) fn render_to_rgba(
                 &queue,
                 &scene_view,
                 &depth_view,
+                (iw, ih),
                 lights,
                 light_view_proj,
                 batches,
@@ -193,7 +196,7 @@ pub(crate) fn render_to_rgba(
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("axiom-offscreen-upscale"),
             });
-            blit.record(&mut encoder, &color_view);
+            blit.record(&queue, &mut encoder, &color_view, (1.0, 1.0));
             queue.submit(std::iter::once(encoder.finish()));
         }
     }
@@ -238,7 +241,17 @@ pub(crate) fn render_to_rgba(
             // No grade here: this arm reads the frame back and runs
             // `apply_frame_postprocess` over the bytes below, which is the same
             // arithmetic. Passing it twice would grade the frame twice.
-            chain.record(&queue, &mut encoder, &post_view, Some(&bloom), None);
+            // The capture arm renders the whole target, so the live fraction is
+            // the identity and the present extent is the target itself.
+            chain.record(
+                &queue,
+                &mut encoder,
+                &post_view,
+                Some(&bloom),
+                None,
+                (1.0, 1.0),
+                (width, height),
+            );
             queue.submit(std::iter::once(encoder.finish()));
             post_texture
         });

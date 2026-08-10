@@ -41,10 +41,18 @@ fn vs(@builtin(vertex_index) vi: u32) -> VsOut {
 
 @group(0) @binding(0) var src_tex: texture_2d<f32>;
 @group(0) @binding(1) var src_sampler: sampler;
+// xy = the LIVE FRACTION of the source: a frame rendered at a reduced scale
+// occupies only the lower-left sub-rect of a target that stays allocated at full
+// size, so a fullscreen uv must be mapped into it. `1,1` is the no-op.
+@group(0) @binding(2) var<uniform> live: vec4<f32>;
 
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
-    return textureSample(src_tex, src_sampler, in.uv);
+    // A plain scale: at full scale `live` is `1,1` and this is the exact
+    // identity, so an unscaled frame blits bit-for-bit as it always did. The
+    // scene pass clears the whole attachment, so the margin outside a reduced
+    // frame is the clear colour rather than a stale larger frame.
+    return textureSample(src_tex, src_sampler, in.uv * live.xy);
 }
 "#;
 
@@ -53,6 +61,10 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
 pub(crate) struct UpscaleBlit {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
+    /// The live-fraction uniform, rewritten per present. Holding it (rather than
+    /// rebuilding the bind group) is the whole point: a render-scale change must
+    /// cost a buffer write, not a reallocation.
+    live: wgpu::Buffer,
 }
 
 impl UpscaleBlit {
@@ -104,7 +116,23 @@ impl UpscaleBlit {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
+        });
+        let live = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("axiom-upscale-live"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("axiom-upscale-bind-group"),
@@ -117,6 +145,10 @@ impl UpscaleBlit {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: live.as_entire_binding(),
                 },
             ],
         });
@@ -161,15 +193,25 @@ impl UpscaleBlit {
         UpscaleBlit {
             pipeline,
             bind_group,
+            live,
         }
     }
 
     /// Record the upscale pass into `target_view` (the acquired swapchain view).
     pub(crate) fn record(
         &self,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
+        // The fraction of the source target the frame occupies; `(1.0, 1.0)` at
+        // full scale. See the `live` uniform in `BLIT_WGSL`.
+        live: (f32, f32),
     ) {
+        queue.write_buffer(
+            &self.live,
+            0,
+            bytemuck::cast_slice(&[live.0, live.1, 0.0, 0.0]),
+        );
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("axiom-upscale-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {

@@ -93,7 +93,11 @@ fn vs(@builtin(vertex_index) vi: u32) -> VsOut {
 struct Params {
     // x = threshold, y = knee, z = intensity, w = rolloff knee.
     tune: vec4<f32>,
-    // xy = the blur step in UV (radius * texel, along one axis), zw unused.
+    // xy = the blur step in UV (radius * texel, along one axis).
+    // zw = the LIVE FRACTION of every source texture: when the frame is rendered
+    // at a reduced scale it occupies only the lower-left sub-rect of a
+    // full-size target, so a fullscreen `uv` in 0..1 must be mapped into
+    // 0..live before it is sampled. `1,1` is the full-scale no-op.
     step: vec4<f32>,
     // The frame's colour grade: x = exposure, y = contrast, z = saturation,
     // w = black point. The identity (1, 1, 1, 0) is packed when the app
@@ -110,6 +114,23 @@ struct Params {
 
 // Rec.709 luminance — the same weighting `axiom_host::luminance` uses, so
 // "bright" means one thing on both sides of the boundary.
+// Map a fullscreen UV into the live sub-rect of the source.
+//
+// A plain scale, with no clamp, and that is deliberate on both counts. At full
+// scale `live` is `1,1` and this is the exact identity — the property that keeps
+// a full-resolution frame bit-for-bit what it was before any of this existed,
+// which is the only way to be sure the scaling path is inert when unused.
+//
+// No clamp is needed at reduced scale either: every pass in this chain begins
+// with `LoadOp::Clear` over the WHOLE attachment, not just its viewport, so the
+// margin outside the live sub-rect is cleared each frame rather than holding a
+// stale larger frame. A linear tap that reaches half a texel past the edge pulls
+// in the clear colour, not last frame's image. Clamping instead cost exactness at
+// full scale, which is a far worse trade than half a texel of edge blend.
+fn live_uv(uv: vec2<f32>) -> vec2<f32> {
+    return uv * params.step.zw;
+}
+
 fn luma(c: vec3<f32>) -> f32 {
     return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
@@ -137,7 +158,7 @@ fn rolloff(x: f32) -> f32 {
 
 @fragment
 fn fs_bright(in: VsOut) -> @location(0) vec4<f32> {
-    let c = textureSample(src_tex, src_sampler, in.uv).rgb;
+    let c = textureSample(src_tex, src_sampler, live_uv(in.uv)).rgb;
     // Scale the pixel by how much of it blooms, so a bloomed highlight keeps its
     // own hue instead of turning white.
     return vec4<f32>(c * contribution(luma(c)), 1.0);
@@ -148,11 +169,12 @@ fn fs_bright(in: VsOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_blur(in: VsOut) -> @location(0) vec4<f32> {
     let w = array<f32, 5>(0.2270270270, 0.1945945946, 0.1216216216, 0.0540540541, 0.0162162162);
-    var sum = textureSample(src_tex, src_sampler, in.uv).rgb * w[0];
+    let base = live_uv(in.uv);
+    var sum = textureSample(src_tex, src_sampler, base).rgb * w[0];
     for (var i: i32 = 1; i < 5; i = i + 1) {
         let o = params.step.xy * f32(i);
-        sum = sum + textureSample(src_tex, src_sampler, in.uv + o).rgb * w[i];
-        sum = sum + textureSample(src_tex, src_sampler, in.uv - o).rgb * w[i];
+        sum = sum + textureSample(src_tex, src_sampler, base + o).rgb * w[i];
+        sum = sum + textureSample(src_tex, src_sampler, base - o).rgb * w[i];
     }
     return vec4<f32>(sum, 1.0);
 }
@@ -193,8 +215,8 @@ fn graded(linear: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
-    let scene = textureSample(src_tex, src_sampler, in.uv).rgb;
-    let glow = textureSample(bloom_tex, bloom_sampler, in.uv).rgb * params.tune.z;
+    let scene = textureSample(src_tex, src_sampler, live_uv(in.uv)).rgb;
+    let glow = textureSample(bloom_tex, bloom_sampler, live_uv(in.uv)).rgb * params.tune.z;
     let sum = scene + glow;
     // Rolled off per channel rather than on luminance: a saturated light that
     // blows one channel should desaturate toward white as it gets brighter,
@@ -440,6 +462,13 @@ impl PostChain {
         target: &wgpu::TextureView,
         bloom: Option<&FrameBloom>,
         grade: Option<&FramePostProcess>,
+        // The fraction of each target the frame actually occupies, and the
+        // present target's own live size in pixels. Every target in the chain is
+        // allocated at full tier size and only the lower-left sub-rect is used,
+        // so a render-scale change costs a viewport instead of a reallocation.
+        // `(1.0, 1.0)` is the full-scale no-op.
+        live: (f32, f32),
+        present_size: (u32, u32),
     ) {
         let tune = bloom.map_or(
             // No bloom: a threshold above any possible luminance means the bright
@@ -478,7 +507,8 @@ impl PostChain {
         let mut pass = |pipeline: &wgpu::RenderPipeline,
                         group: &wgpu::BindGroup,
                         view: &wgpu::TextureView,
-                        second: Option<&wgpu::BindGroup>| {
+                        second: Option<&wgpu::BindGroup>,
+                        size: (u32, u32)| {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("axiom-post-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -493,6 +523,10 @@ impl PostChain {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            // Draw only into the live sub-rect. The fullscreen triangle still
+            // covers clip space; the viewport is what maps it onto the used
+            // corner of a target that stays allocated at full size.
+            rp.set_viewport(0.0, 0.0, size.0.max(1) as f32, size.1.max(1) as f32, 0.0, 1.0);
             rp.set_pipeline(pipeline);
             rp.set_bind_group(0, group, &[]);
             second.into_iter().for_each(|g| rp.set_bind_group(1, g, &[]));
@@ -506,21 +540,30 @@ impl PostChain {
         // reach that buffer; it is written to both so the two stay one layout.
         let pack = |step: [f32; 2]| {
             [
-                tune[0], tune[1], tune[2], tune[3], step[0], step[1], 0.0, 0.0, tone[0], tone[1],
+                tune[0], tune[1], tune[2], tune[3], step[0], step[1], live.0, live.1, tone[0], tone[1],
                 tone[2], tone[3], balance[0], balance[1], balance[2], balance[3],
             ]
         };
         queue.write_buffer(&self.params_h, 0, bytemuck::cast_slice(&pack([texel.0, 0.0])));
         queue.write_buffer(&self.params_v, 0, bytemuck::cast_slice(&pack([0.0, texel.1])));
         // scene → ping (bright) → pong (blur H) → ping (blur V) → target.
-        pass(&self.bright, &self.scene_group, &self.ping_view, None);
-        pass(&self.blur, &self.ping_group, &self.pong_view, None);
-        pass(&self.blur, &self.pong_group, &self.ping_view, None);
+        //
+        // The bloom targets are half-resolution, so their live sub-rect is the
+        // same FRACTION of a half-size target — which is why one `live` serves
+        // the whole chain. Only the pixel extents differ per stage.
+        let bloom_live = (
+            ((self.bloom_size.0 as f32) * live.0) as u32,
+            ((self.bloom_size.1 as f32) * live.1) as u32,
+        );
+        pass(&self.bright, &self.scene_group, &self.ping_view, None, bloom_live);
+        pass(&self.blur, &self.ping_group, &self.pong_view, None, bloom_live);
+        pass(&self.blur, &self.pong_group, &self.ping_view, None, bloom_live);
         pass(
             &self.composite,
             &self.scene_group,
             target,
             Some(&self.bloom_group),
+            present_size,
         );
     }
 }

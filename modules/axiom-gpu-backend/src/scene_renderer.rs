@@ -1517,6 +1517,11 @@ impl SceneRenderer {
         queue: &wgpu::Queue,
         color_view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
+        // The sub-rect of the colour/depth targets this frame draws into. The
+        // targets are allocated at full tier size and a reduced render scale uses
+        // only the lower-left corner, so adapting the scale costs a viewport
+        // rather than a reallocation.
+        viewport: (u32, u32),
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
@@ -1718,6 +1723,14 @@ impl SceneRenderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            pass.set_viewport(
+                0.0,
+                0.0,
+                viewport.0.max(1) as f32,
+                viewport.1.max(1) as f32,
+                0.0,
+                1.0,
+            );
             // The sky first, filling every pixel behind the scene. It writes no
             // depth and compares `Always`, so it neither occludes the geometry
             // drawn after it nor disturbs the depth buffer they test against —
