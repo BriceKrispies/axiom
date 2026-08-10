@@ -1,7 +1,7 @@
 //! Scene-independent render input.
 
 use axiom_kernel::Ratio;
-use axiom_math::{Mat4, Vec2, Vec3, Vec4};
+use axiom_math::{Mat4, Vec3, Vec4};
 
 use crate::render_camera::RenderCamera;
 use crate::render_light::RenderLight;

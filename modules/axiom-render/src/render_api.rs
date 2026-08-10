@@ -5,7 +5,7 @@ use axiom_host::{
     SdfPrimitive, SdfScene,
 };
 use axiom_kernel::{FrameIndex, Ratio, Tick};
-use axiom_math::{Mat4, Vec2, Vec3, Vec4};
+use axiom_math::{Mat4, Vec3, Vec4};
 
 use crate::render_camera::RenderCamera;
 use crate::render_command::RenderCommand;
