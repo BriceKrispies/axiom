@@ -1007,15 +1007,19 @@ fn telemetry_panel(
     // is about what the *player* is owed, not what the loop has settled for.
     const BUDGET_MS: f32 = 1000.0 / 60.0;
     let (over, of) = frames.over_budget(BUDGET_MS);
-    // Red the moment stutter is measurable at all. One bad frame in four seconds
-    // is already visible, and the entire point of this line is that the median
-    // above cannot show it.
+    // The threshold actually applied, printed rather than the bare budget — a
+    // line reading "over 16.7ms" next to a count that ignores 16.8 ms frames is
+    // a line that lies about its own rule. See `FrameTimes::over_budget`.
+    let dropped_ms = BUDGET_MS * crate::telemetry::DROPPED_FRAME_FACTOR;
+    // Red the moment stutter is measurable at all. One genuinely dropped frame
+    // in four seconds is already visible, and the entire point of this line is
+    // that the median above cannot show it.
     let low_colour = ["#8ef", "#ff6b6b"][usize::from(over > 0)];
     format!(
         "<div style=\"margin-top:14px;font-size:13px;line-height:1.5;opacity:.85;\
                     white-space:pre\">\
          <div style=\"color:#8ef\">{fps:.0} FPS median · {median:.1}ms</div>\
-         <div style=\"color:{low_colour}\">{low:.0} FPS 1% low · {over}/{of} over {budget:.1}ms</div>\
+         <div style=\"color:{low_colour}\">{low:.0} FPS 1% low · {over}/{of} dropped &gt;{dropped:.1}ms</div>\
          <div style=\"color:{low_colour}\">worst {worst:.1}ms</div>\
          {rows}\
          <div style=\"color:#8ef;margin-top:8px\">course</div>{authored}</div>",
@@ -1025,7 +1029,7 @@ fn telemetry_panel(
         low_colour = low_colour,
         over = over,
         of = of,
-        budget = BUDGET_MS,
+        dropped = dropped_ms,
         worst = frames.worst_ms(),
         rows = rows,
         authored = authored,

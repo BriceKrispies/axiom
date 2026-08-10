@@ -111,16 +111,43 @@ impl FrameTimes {
         (slow > 0.0).then(|| 1000.0 / slow).unwrap_or(0.0)
     }
 
-    /// How many frames in the window ran over `budget_ms`, and how many frames
-    /// the window holds — a *rate* of stutter rather than a single worst sample.
+    /// How many frames in the window **dropped** against a `budget_ms` frame
+    /// budget, and how many frames the window holds — a *rate* of stutter rather
+    /// than a single worst sample.
+    ///
+    /// "Dropped" is not "over the budget by any amount", and the difference is
+    /// the whole usefulness of this number. On a vsync-locked display, frame
+    /// deltas **quantise to multiples of the refresh period**: a frame that hits
+    /// every scanout measures one period, a frame that misses one measures two,
+    /// and nothing lands in between. What does land in between is *jitter* — a
+    /// 60 Hz display is not exactly 60.000 Hz and `performance.now()` is coarse,
+    /// so a perfect frame reads 16.7–16.8 ms against a 16.667 ms budget.
+    ///
+    /// Compared with `>` against the bare budget, that made a **flawless** run
+    /// report stutter: measured on an unthrottled desktop, 138 of 399 frames
+    /// counted as over budget in a window whose worst frame was 16.8 ms. The
+    /// panel's warning colour was therefore always on, which is the same as
+    /// having no warning colour.
+    ///
+    /// So the threshold sits at [`DROPPED_FRAME_FACTOR`] of the budget — halfway
+    /// between one refresh period and two. Below it the frame hit its scanout;
+    /// above it, it certainly missed one.
     pub fn over_budget(&self, budget_ms: f32) -> (usize, usize) {
+        let threshold = budget_ms * DROPPED_FRAME_FACTOR;
         let count = self.samples[..self.filled]
             .iter()
-            .filter(|ms| **ms > budget_ms)
+            .filter(|ms| **ms > threshold)
             .count();
         (count, self.filled)
     }
 }
+
+/// How much longer than the frame budget a frame must take before it counts as
+/// having dropped a scanout.
+///
+/// Halfway between one refresh period and two. See [`FrameTimes::over_budget`]
+/// for why anything tighter counts jitter as stutter.
+pub const DROPPED_FRAME_FACTOR: f32 = 1.5;
 
 impl Default for FrameTimes {
     fn default() -> Self {
@@ -225,6 +252,67 @@ mod tests {
         assert!((t.median_ms() - 16.7).abs() < 0.01, "{}", t.median_ms());
         assert!((t.worst_ms() - 220.0).abs() < 0.01);
         assert!((t.fps() - 59.88).abs() < 0.5, "{}", t.fps());
+    }
+
+    /// **A flawless run must report zero dropped frames.** This is the case the
+    /// bare `> budget` comparison got wrong: a real 60 Hz display delivers
+    /// 16.7–16.8 ms against a 16.667 ms budget, so a perfect window counted as
+    /// a third stutter and the panel's warning colour was permanently on.
+    #[test]
+    fn vsync_jitter_is_not_stutter() {
+        const BUDGET: f32 = 1000.0 / 60.0;
+        let mut t = FrameTimes::new();
+        // The real distribution, sampled off an unthrottled desktop: every frame
+        // hit its scanout, and every one of them measures a hair over 16.667.
+        (0..WINDOW).for_each(|i| t.push([16.7, 16.8, 16.7, 16.75][i % 4]));
+        let (over, of) = t.over_budget(BUDGET);
+        assert_eq!(of, WINDOW);
+        assert_eq!(over, 0, "a flawless 60 Hz run reported {over} dropped frames");
+    }
+
+    /// And a frame that genuinely missed a scanout is still counted — the
+    /// tolerance must not be so wide that it hides real stutter.
+    #[test]
+    fn a_missed_scanout_is_still_counted() {
+        const BUDGET: f32 = 1000.0 / 60.0;
+        let mut t = FrameTimes::new();
+        (0..WINDOW - 3).for_each(|_| t.push(16.7));
+        // Two frames' worth, and four — one and three missed scanouts.
+        t.push(33.4);
+        t.push(66.8);
+        t.push(50.0);
+        let (over, _) = t.over_budget(BUDGET);
+        assert_eq!(over, 3, "a dropped scanout went unreported");
+        // The threshold sits between the two, so nothing at one period counts
+        // and everything at two periods does.
+        assert!(BUDGET * DROPPED_FRAME_FACTOR > 16.8);
+        assert!(BUDGET * DROPPED_FRAME_FACTOR < 33.3);
+    }
+
+    /// A sustained slow run is *not* stutter, and the two readings say so
+    /// differently: every frame is dropped, and the median agrees with the 1%
+    /// low instead of contradicting it.
+    #[test]
+    fn a_uniformly_slow_run_reads_slow_on_both_numbers() {
+        const BUDGET: f32 = 1000.0 / 60.0;
+        let mut t = FrameTimes::new();
+        (0..WINDOW).for_each(|_| t.push(50.0));
+        assert!((t.fps() - 20.0).abs() < 0.1, "median fps {}", t.fps());
+        assert!((t.low_fps() - 20.0).abs() < 0.1, "1% low {}", t.low_fps());
+        assert_eq!(t.over_budget(BUDGET), (WINDOW, WINDOW));
+    }
+
+    /// The case the two numbers exist to tell apart: a *typical* frame that is
+    /// fine and a tail that is not. The median cannot see it; the 1% low can.
+    #[test]
+    fn stutter_splits_the_median_from_the_one_percent_low() {
+        const BUDGET: f32 = 1000.0 / 60.0;
+        let mut t = FrameTimes::new();
+        (0..WINDOW).for_each(|i| t.push([16.7, 50.0][usize::from(i % 100 == 0)]));
+        assert!((t.fps() - 59.9).abs() < 0.5, "median fps {}", t.fps());
+        assert!(t.low_fps() < 25.0, "1% low {}", t.low_fps());
+        let (over, _) = t.over_budget(BUDGET);
+        assert!((1..=4).contains(&over), "{over} dropped");
     }
 
     #[test]
