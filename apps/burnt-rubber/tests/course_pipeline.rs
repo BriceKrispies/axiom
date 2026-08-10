@@ -102,7 +102,7 @@ fn the_shipping_game_runs_on_the_compiled_plan() {
     assert!(sim.car().distance > 2_000.0, "{} m", sim.car().distance);
     assert!(sim.near_miss_count() > 0, "near misses still score");
     assert!(sim.traffic().active_count() > 0, "traffic is live");
-    assert!(app.diagnostics().scene.active_chunks > 0, "the road renders");
+    assert!(app.diagnostics().scene.road_draws > 0, "the road renders");
     // Boost is being earned and can be spent.
     assert!(sim.boost().charge() > 0.0);
 

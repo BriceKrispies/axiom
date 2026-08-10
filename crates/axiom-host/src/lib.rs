@@ -58,6 +58,7 @@ mod host_api;
 mod host_boundary_config;
 mod host_color_format;
 mod host_device_profile;
+mod render_scale;
 mod host_device_request;
 mod host_error;
 mod host_error_code;
@@ -113,6 +114,8 @@ pub use host_step_driver::HostStepDriver;
 pub use host_step_plan::HostStepPlan;
 pub use host_viewport::HostViewport;
 pub use pixels::Pixels;
+pub use render_scale::RenderScale;
+pub use render_scale::RenderScaleController;
 
 // Embed-seam boundary data types (SPEC-12). `Score` is the single sanctioned
 // f64 boundary (a quantity newtype, like `Pixels`); no naked float appears

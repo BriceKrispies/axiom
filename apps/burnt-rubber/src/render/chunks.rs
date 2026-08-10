@@ -24,17 +24,45 @@ use crate::track::Track;
 use crate::tuning::CourseTuning;
 
 use super::road_mesh::{
-    build_chunk, build_paint_chunk, chunk_count, paint_chunk_count, CHUNK_LENGTH,
+    build_draw_mesh, build_paint_chunk, draw_count, paint_chunk_count, DRAW_SPAN,
     PAINT_CHUNK_LENGTH,
 };
 
-/// Chunks drawn ahead of the car. At 100 m each this is 1.4 km of road — beyond
-/// the far plane's useful range, so nothing pops in even at boosted speed.
+/// **Scenery** cells drawn ahead of the car, in
+/// [`super::road_mesh::CHUNK_LENGTH`] units. At 100 m each this is 1.4 km —
+/// beyond the far plane's useful range, so nothing pops in even at boosted speed.
+///
+/// This pair sizes the roadside: which cells the generator populates and how deep
+/// [`super::scenery_pool`] makes its instance pools. It is deliberately *not* the
+/// road's own window (see [`DRAWS_AHEAD`]). The road batches several cells into
+/// one mesh to save draw calls, and if the scenery simply followed that window it
+/// would widen with it — the same props, generated over a third more course,
+/// overflowing pools that were sized correctly. How the road is batched and how
+/// much roadside is alive are two questions, and only one of them was ever about
+/// draw calls.
 pub const CHUNKS_AHEAD: usize = 14;
 
-/// Chunks kept behind the car. Two is enough to cover the chase camera's
+/// Scenery cells kept behind the car. Two is enough to cover the chase camera's
 /// pull-back and a moment of looking backwards after a spin.
 pub const CHUNKS_BEHIND: usize = 2;
+
+/// **Road meshes** drawn ahead of the car, in [`DRAW_SPAN`] units — 1.6-2.0 km,
+/// past [`crate::render::FAR_PLANE`].
+///
+/// Counted in drawn meshes rather than cells, which is the point of the split:
+/// this covers *more* road than the old 14-cell window did, in five draws instead
+/// of fifteen. See [`super::road_mesh::MESHES_PER_DRAW`] for the measurement.
+pub const DRAWS_AHEAD: usize = 4;
+
+/// Road meshes kept behind the car. One [`DRAW_SPAN`] is 400-800 m, which covers
+/// the chase camera's pull-back and a look backwards after a spin several times
+/// over.
+///
+/// This is the coarse batch's one genuine waste: most frames draw a few hundred
+/// metres of road nobody can see, because the granularity that would make the
+/// window tight is exactly the granularity that made it expensive. It costs four
+/// draw calls and it buys the rest.
+pub const DRAWS_BEHIND: usize = 1;
 
 /// How far ahead of the car road **paint** is drawn once the near-field paint
 /// window is engaged, metres.
@@ -144,11 +172,11 @@ impl RoadChunks {
         camera: &crate::tuning::CameraTuning,
         materials: RoadMaterials,
     ) -> RoadChunks {
-        let count = chunk_count(track);
+        let count = draw_count(track);
         let mut chunks = Vec::with_capacity(count);
         let mut per_chunk = Vec::with_capacity(count);
         for index in 0..count {
-            let meshes = build_chunk(track, index, tuning);
+            let meshes = build_draw_mesh(track, index, tuning);
             let chunk_triangles = (meshes.surface.indices().len()
                 + meshes.paint.indices().len()
                 + meshes.rail.indices().len()
@@ -255,28 +283,54 @@ impl RoadChunks {
         })
     }
 
-    /// The currently active `[first, last]` chunk range, if any.
+    /// The currently active `[first, last]` **drawn-mesh** range, if any.
     pub const fn active_range(&self) -> Option<(usize, usize)> {
         self.active
     }
 
-    /// How many chunks are currently drawn.
+    /// The **scenery** cell window for a car at `distance`, in
+    /// [`super::road_mesh::CHUNK_LENGTH`] units — or `None` before the road has
+    /// any drawn mesh active at all, which is the signal that there is nothing to
+    /// dress.
+    ///
+    /// Derived from the distance directly rather than from the road's own window,
+    /// because the two windows answer different questions and have different
+    /// units. Keying the roadside off the road's batching would make how many
+    /// shrubs exist a consequence of how many draw calls the road spends, which is
+    /// how a batching change turns into a pool overflow.
+    ///
+    /// Bounded to the course's cell count so the generator is never handed a cell
+    /// that does not exist — the road's own window is clamped the same way, and
+    /// the last drawn mesh reaches past the last cell whenever the course does not
+    /// divide evenly by [`super::road_mesh::MESHES_PER_DRAW`].
+    pub fn scenery_range_for(&self, track: &Track, distance: f32) -> Option<(usize, usize)> {
+        self.active?;
+        let last = super::road_mesh::chunk_count(track).saturating_sub(1);
+        let centre = ((distance / super::road_mesh::CHUNK_LENGTH).floor().max(0.0) as usize)
+            .min(last);
+        Some((
+            centre.saturating_sub(CHUNKS_BEHIND),
+            (centre + CHUNKS_AHEAD).min(last),
+        ))
+    }
+
+    /// How many meshes the road is currently drawing.
     pub fn active_count(&self) -> usize {
         self.active.map_or(0, |(a, b)| b - a + 1)
     }
 
-    /// The chunk index containing `distance`.
+    /// The drawn-mesh index containing `distance`.
     pub fn chunk_at(&self, distance: f32) -> usize {
-        ((distance / CHUNK_LENGTH).floor().max(0.0) as usize).min(self.chunks.len().saturating_sub(1))
+        ((distance / DRAW_SPAN).floor().max(0.0) as usize).min(self.chunks.len().saturating_sub(1))
     }
 
-    /// The range that *should* be active for a car at `distance`.
+    /// The drawn-mesh range that *should* be active for a car at `distance`.
     pub fn range_for(&self, distance: f32) -> (usize, usize) {
         let centre = self.chunk_at(distance);
         let last = self.chunks.len().saturating_sub(1);
         (
-            centre.saturating_sub(CHUNKS_BEHIND),
-            (centre + CHUNKS_AHEAD).min(last),
+            centre.saturating_sub(DRAWS_BEHIND),
+            (centre + DRAWS_AHEAD).min(last),
         )
     }
 
@@ -426,6 +480,7 @@ fn spawn_retired(
 mod tests {
     use super::*;
     use crate::render::palette;
+    use crate::render::road_mesh::{chunk_count, draw_count};
     use axiom::prelude::{App, DefaultPlugins, Window};
 
     fn fixture() -> (RunningApp, Track, RoadChunks) {
@@ -449,7 +504,13 @@ mod tests {
     #[test]
     fn installing_creates_one_entity_set_per_chunk_all_retired() {
         let (app, track, chunks) = fixture();
-        assert_eq!(chunks.len(), chunk_count(&track));
+        assert_eq!(chunks.len(), draw_count(&track));
+        // The split this file exists to keep: the road is spawned per *drawn
+        // mesh*, and there are strictly fewer of those than authoring cells.
+        assert!(
+            draw_count(&track) < chunk_count(&track),
+            "the road is batching several cells per draw"
+        );
         assert!(!chunks.is_empty());
         assert_eq!(chunks.active_count(), 0, "nothing is drawn until the first update");
         assert_eq!(
@@ -599,7 +660,7 @@ mod tests {
         // chunks, so it can only ever be as sharp as one of them.
         let slack = PAINT_CHUNK_LENGTH;
         for offset in [0.0, 3.0, 17.0, 49.0, 83.0, 99.0] {
-            let distance = CHUNK_LENGTH * 3.0 + offset;
+            let distance = DRAW_SPAN * 3.0 + offset;
             let (first, last) = road.fine_paint_range_for(distance);
             let starts = first as f32 * PAINT_CHUNK_LENGTH;
             let ends = (last + 1) as f32 * PAINT_CHUNK_LENGTH;
@@ -625,7 +686,7 @@ mod tests {
     #[test]
     fn only_one_of_the_two_paint_sets_is_ever_visible() {
         let (mut app, _track, mut road) = fixture();
-        let distance = CHUNK_LENGTH * 3.0;
+        let distance = DRAW_SPAN * 3.0;
         road.update(&mut app, distance);
 
         let coarse_on = |app: &RunningApp, road: &RoadChunks| {
@@ -660,7 +721,7 @@ mod tests {
     #[test]
     fn engaging_the_paint_window_hides_paint_the_road_still_draws() {
         let (mut app, _track, mut road) = fixture();
-        let distance = CHUNK_LENGTH * 3.0;
+        let distance = DRAW_SPAN * 3.0;
         road.update(&mut app, distance);
         let far = road.range_for(distance).1;
         let far_paint = road.chunks[far].paint;
@@ -701,7 +762,7 @@ mod tests {
         // window the same answer every frame — which is exactly what an app
         // polling the bound backend does — must not defeat it.
         let (mut app, _track, mut road) = fixture();
-        let distance = CHUNK_LENGTH * 3.0;
+        let distance = DRAW_SPAN * 3.0;
         road.set_paint_near_field_only(true);
         assert!(road.update(&mut app, distance), "the first update places");
 
@@ -717,7 +778,7 @@ mod tests {
         let (_, track, chunks) = fixture();
         assert_eq!(chunks.chunk_at(-100.0), 0);
         assert_eq!(chunks.chunk_at(0.0), 0);
-        assert_eq!(chunks.chunk_at(CHUNK_LENGTH * 1.5), 1);
+        assert_eq!(chunks.chunk_at(DRAW_SPAN * 1.5), 1);
         assert_eq!(chunks.chunk_at(track.length() * 5.0), chunks.len() - 1);
     }
 }

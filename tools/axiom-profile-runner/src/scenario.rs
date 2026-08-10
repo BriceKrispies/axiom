@@ -485,15 +485,18 @@ fn render_command_build_workload(
     churn.render_inputs_created += 1;
     phase.record_subphase(RC_CREATE, t.elapsed().as_nanos());
 
-    // render_mesh_data_clone_or_reference — the per-frame cube data clones this
-    // pass measures (and deliberately does not remove).
+    // render_mesh_data_clone_or_reference — this subphase used to clone the
+    // cube's four vertex arrays per frame, because that is what the render input
+    // took. It no longer does: a frame packet references an uploaded mesh by id
+    // and index count (`axiom_render::RenderMesh`), so there is nothing here to
+    // clone and `mesh_vec_clones` stays at zero.
+    //
+    // The counter and the subphase are deliberately kept rather than deleted.
+    // This scenario exists to detect per-frame mesh churn, and a zero it still
+    // measures is evidence; a counter that was removed once it read zero could
+    // not report the regression coming back.
     let t = Instant::now();
-    let positions = cube.positions.clone();
-    let normals = cube.normals.clone();
-    let uvs = cube.uvs.clone();
-    let indices = cube.indices.clone();
-    churn.mesh_vec_clones += 4;
-    render_api.add_input_mesh(&mut input, CUBE_MESH_ID, positions, normals, uvs, indices);
+    render_api.add_input_mesh(&mut input, CUBE_MESH_ID, cube.indices.len() as u32);
     render_api.add_input_basic_lit_material(&mut input, CUBE_MATERIAL_ID, base_color);
     phase.record_subphase(RC_CLONE, t.elapsed().as_nanos());
 
@@ -726,9 +729,14 @@ mod tests {
         // ran (the one-shot stable-visible pass uses a throwaway counter).
         assert_eq!(out.churn.transform_scratch_maps_allocated, 0);
         assert_eq!(out.churn.transform_parent_lookups, 0);
-        // Render churn reflects the measured frames: 3 frames * 4 clones.
+        // Render churn reflects the measured frames.
         assert_eq!(out.churn.render_command_lists_built, 3);
-        assert_eq!(out.churn.mesh_vec_clones, 12);
+        // Zero, and that is the result rather than the absence of one: the render
+        // input references an uploaded mesh by id and index count, so building a
+        // frame's commands copies no vertex data at all. This used to read 12
+        // (3 frames × 4 vertex arrays). If it is ever non-zero again, per-frame
+        // mesh geometry has crept back into the frame packet.
+        assert_eq!(out.churn.mesh_vec_clones, 0);
     }
 
     #[test]

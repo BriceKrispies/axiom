@@ -10,7 +10,7 @@ use axiom_math::Quat;
 use crate::camera::CameraPose;
 use crate::debug::DebugMarker;
 use crate::figure::{body_transform, kick_frame, world_parts, JointPose};
-use crate::pitch::{NetImpulse, NetStrand};
+use crate::pitch::NetStrand;
 use crate::play::{Phase, Session};
 
 use super::{hidden, BendItScene, PREVIEW_SEGMENTS};
@@ -53,12 +53,13 @@ impl BendItScene {
         session: &Session,
         camera: &CameraPose,
         markers: &[DebugMarker],
+        dive: Option<crate::play::DiveCall>,
     ) {
         self.sync_camera(app, camera);
         self.sync_figures(app, session);
         self.sync_ball(app, session);
-        self.sync_net(app, session.net_impulse());
-        self.sync_preview(app, session);
+        self.sync_net(app, session);
+        self.sync_preview(app, session, dive);
         self.sync_debug(app, markers);
     }
 
@@ -161,17 +162,44 @@ impl BendItScene {
         );
     }
 
-    fn sync_net(&self, app: &mut RunningApp, impulse: Option<NetImpulse>) {
+    /// The netting — and, while the player is keeping, the absence of it.
+    ///
+    /// The camera for keeping sits *behind* the goal, so every strand of net is
+    /// between the player and the body they are steering. Two hundred white
+    /// strands over a white-shirted keeper is not a view of a keeper; it is a
+    /// view of a net. The goal's **frame** stays — the posts and the bar are what
+    /// tell you where the corners are, and they are the whole reason the shot is
+    /// worth judging — but the mesh comes out.
+    ///
+    /// It is a presentation decision and it is made here, in presentation. The
+    /// net's geometry, its ripple and the ball's collision with the frame are all
+    /// untouched: a shot into the top corner still hits the same post it always
+    /// did, whether or not anyone can see the strings behind it.
+    fn sync_net(&self, app: &mut RunningApp, session: &Session) {
+        let show = !session.keeping();
+        let impulse = session.net_impulse();
         self.net.iter().for_each(|(entity, strand)| {
             let displacement = impulse.map(|i| i.displacement(strand)).unwrap_or(0.0);
-            app.set(*entity, strand_transform(strand, displacement));
+            app.set(*entity, Visible(show));
+            app.set(
+                *entity,
+                match show {
+                    true => strand_transform(strand, displacement),
+                    false => hidden(),
+                },
+            );
         });
     }
 
     /// The authored path, drawn in the world as a tapering dotted ribbon, plus a
     /// marker on the point it finishes.
-    fn sync_preview(&self, app: &mut RunningApp, session: &Session) {
-        let show = session.phase().shows_preview();
+    fn sync_preview(
+        &self,
+        app: &mut RunningApp,
+        session: &Session,
+        dive: Option<crate::play::DiveCall>,
+    ) {
+        let show = session.phase().shows_preview() & !session.keeping();
         let trajectory = &session.shot().trajectory;
         self.preview.iter().enumerate().for_each(|(i, entity)| {
             let u = (i as f32 + 0.5) / PREVIEW_SEGMENTS as f32;
@@ -189,18 +217,24 @@ impl BendItScene {
                 },
             );
         });
-        let target = session.shot().world_target;
-        app.set(self.target_marker, Visible(show));
+        // The one marker does two jobs, because the player is never doing both:
+        // taking, it is the point the shot finishes on; keeping, it is where the
+        // hands are about to go, following the finger until it lifts.
+        let spot = dive
+            .filter(|_| session.keeping())
+            .map(|call| (call.hands, Vec3::new(0.34, 0.34, 0.34)))
+            .or_else(|| {
+                let target = session.shot().world_target;
+                show.then_some((
+                    Vec3::new(target.x, target.y, target.z + 0.03),
+                    Vec3::new(0.30, 0.30, 0.04),
+                ))
+            });
+        app.set(self.target_marker, Visible(spot.is_some()));
         app.set(
             self.target_marker,
-            match show {
-                true => Transform::new(
-                    Vec3::new(target.x, target.y, target.z + 0.03),
-                    Quat::IDENTITY,
-                    Vec3::new(0.30, 0.30, 0.04),
-                ),
-                false => hidden(),
-            },
+            spot.map(|(at, size)| Transform::new(at, Quat::IDENTITY, size))
+                .unwrap_or_else(hidden),
         );
     }
 

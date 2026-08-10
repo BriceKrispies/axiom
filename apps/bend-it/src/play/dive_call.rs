@@ -25,8 +25,21 @@
 //! a few centimetres from the camera.
 //!
 //! So the screen is read as the body, which is also how a keeper thinks: left of
-//! centre is dive left, high on the screen is throw the hands up. No unprojection,
-//! nothing to misread, and it stays true whichever way the camera is pointed.
+//! centre is dive left, high on the screen is throw the hands up. No unprojection
+//! and nothing to misread.
+//!
+//! # Which way is left
+//!
+//! It has to be **asked**, not assumed. Taking a penalty the camera stands behind
+//! the ball looking down `-Z`, and screen-right resolves to world `+X`; keeping
+//! one it stands behind the goal looking down `+Z`, and screen-right resolves to
+//! world `−X`. The same gesture means opposite things at the two ends of the
+//! pitch, and a reading that hard-codes either of them is inverted at the other —
+//! which is exactly what happened: drawing left dived right.
+//!
+//! So the camera's own right axis comes in as an argument. The mapping is then
+//! derived from where the player is actually looking from, and stays correct if
+//! the framing ever moves again.
 
 use axiom::prelude::{Vec2, Vec3};
 
@@ -52,10 +65,20 @@ impl DiveCall {
     /// a corner, not a path the body follows, and asking a player to draw an
     /// accurate arc under this much time pressure would be asking for precision
     /// nobody has at the moment they need it.
-    pub fn read(finish: Vec2, viewport: Vec2, standing: Vec3, tuning: &KeeperTuning) -> DiveCall {
+    pub fn read(
+        finish: Vec2,
+        viewport: Vec2,
+        standing: Vec3,
+        screen_right: Vec3,
+        tuning: &KeeperTuning,
+    ) -> DiveCall {
         let half = Vec2::new(viewport.x * 0.5, viewport.y * 0.5);
-        // Screen-relative, so the gesture means the same on any size of glass.
-        let across = ((finish.x - half.x) / half.x.max(1.0)).clamp(-1.0, 1.0);
+        // Screen-relative, so the gesture means the same on any size of glass —
+        // and turned into world space through the camera's own right axis, so
+        // "the way I drew" is the way the body goes from where the player is
+        // watching.
+        let drawn = ((finish.x - half.x) / half.x.max(1.0)).clamp(-1.0, 1.0);
+        let across = drawn * screen_right.x.signum();
         // Up the screen is up in the goal, so the sign flips.
         let up = ((half.y - finish.y) / half.y.max(1.0)).clamp(-1.0, 1.0);
         // How far a body can throw its hands: everything the dive covers, which
@@ -94,22 +117,56 @@ mod tests {
         Vec3::new(0.0, 0.92, KEEPER_LINE_Z)
     }
 
+    /// The keeper's own camera: behind the goal, looking down the pitch — where
+    /// screen-right is world `-X`.
+    fn keeping_right() -> Vec3 {
+        crate::camera::basis(
+            Vec3::new(0.0, 4.0, KEEPER_LINE_Z - 6.0),
+            Vec3::new(0.0, 0.5, KEEPER_LINE_Z + 5.0),
+        )
+        .1
+    }
+
     fn call(x: f32, y: f32) -> DiveCall {
         DiveCall::read(
             Vec2::new(x, y),
             Vec2::new(390.0, 844.0),
             stood(),
+            keeping_right(),
             &Tuning::DEFAULT.keeper,
         )
     }
 
     #[test]
-    fn the_screen_is_the_body() {
-        // Left of centre dives left, right dives right, and dead centre does
-        // neither.
-        assert!(call(40.0, 422.0).hands.x < -1.0);
-        assert!(call(350.0, 422.0).hands.x > 1.0);
+    fn the_screen_is_the_body_from_where_the_player_is_watching() {
+        // The regression that made keeping unplayable: drawing left dived right.
+        //
+        // From behind the goal the camera looks down `+Z`, so screen-right is
+        // world `-X`. Drawing to the left of the screen must send the hands to
+        // world `+X`, because that is what is on the left of THIS view.
+        let right = keeping_right();
+        assert!(right.x < 0.0, "this camera's screen-right is world -X");
+        assert!(call(40.0, 422.0).hands.x > 1.0, "drawn left, dives screen-left");
+        assert!(call(350.0, 422.0).hands.x < -1.0, "drawn right, dives screen-right");
         assert!(call(195.0, 422.0).hands.x.abs() < 1.0e-4);
+
+        // And with the taker's camera — behind the ball, looking down `-Z` — the
+        // very same gesture resolves the other way, because "left" is a fact
+        // about the view rather than about the world.
+        let taking = crate::camera::basis(
+            Vec3::new(0.0, 4.0, 18.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        )
+        .1;
+        assert!(taking.x > 0.0, "the taker's screen-right is world +X");
+        let mirrored = DiveCall::read(
+            Vec2::new(40.0, 422.0),
+            Vec2::new(390.0, 844.0),
+            stood(),
+            taking,
+            &Tuning::DEFAULT.keeper,
+        );
+        assert!(mirrored.hands.x < -1.0, "the same draw, the other way round");
         // High on the screen throws the hands up, low throws them down.
         assert!(call(195.0, 60.0).hands.y > call(195.0, 780.0).hands.y + 1.0);
         // And the hands are always thrown in FRONT of the line, toward the ball.
@@ -122,12 +179,14 @@ mod tests {
             Vec2::new(900.0, 300.0),
             Vec2::new(1000.0, 1000.0),
             stood(),
+            keeping_right(),
             &Tuning::DEFAULT.keeper,
         );
         let small = DiveCall::read(
             Vec2::new(360.0, 120.0),
             Vec2::new(400.0, 400.0),
             stood(),
+            keeping_right(),
             &Tuning::DEFAULT.keeper,
         );
         assert!((big.hands.x - small.hands.x).abs() < 1.0e-3);

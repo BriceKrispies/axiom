@@ -131,6 +131,17 @@ pub struct RaceSim {
     events: Vec<RaceEvent>,
     previous_car_pose: CarPose,
     car_pose: CarPose,
+    /// Each traffic pool slot's `(distance, lateral)` as of the *previous* fixed
+    /// step, or `None` where the slot was not in play.
+    ///
+    /// The player's car, the camera and the ghost have all interpolated between
+    /// fixed steps since they existed; traffic did not, and at 60 Hz on a 60 Hz
+    /// display nobody could see the difference because there was none to see. It
+    /// becomes visible the moment the display refreshes faster than the
+    /// simulation ticks: every other frame would repeat a traffic car's position
+    /// while the player's own car moved, so the cars ahead judder at 60 Hz
+    /// against a smooth 120 Hz world. See [`RaceSim::traffic_pose`].
+    previous_traffic: Vec<Option<(f32, f32)>>,
     previous_camera_pose: CameraPose,
     camera_pose: CameraPose,
     last_forward_accel: f32,
@@ -210,6 +221,7 @@ impl RaceSim {
             impact_count: 0,
             top_speed_seen: 0.0,
             events: Vec::new(),
+            previous_traffic: Vec::new(),
             previous_car_pose: car_pose,
             car_pose,
             previous_camera_pose: camera_pose,
@@ -371,12 +383,49 @@ impl RaceSim {
         CameraPose::lerp(self.previous_camera_pose, self.camera_pose, alpha)
     }
 
+    /// Traffic slot `index`'s `(distance, lateral)` for a render frame `alpha` of
+    /// the way through the current step, or `None` when the slot is not in play.
+    ///
+    /// Interpolated on the same terms as the player's car, so a display refreshing
+    /// faster than the simulation ticks shows traffic moving as smoothly as
+    /// everything else.
+    ///
+    /// A slot that was **not** active last step reports its current position
+    /// un-interpolated: a car that has just entered play has no previous position
+    /// to come from, and lerping it out of a stale one would fling it across the
+    /// road on its first visible frame. The same guard covers a slot recycled onto
+    /// a new plan, which is the other way a pool entry's distance can jump.
+    pub fn traffic_pose(&self, index: usize, alpha: f32) -> Option<(f32, f32)> {
+        let car = self.traffic.cars().get(index).filter(|c| c.active)?;
+        let now = (car.distance, car.lateral);
+        let was = self
+            .previous_traffic
+            .get(index)
+            .copied()
+            .flatten()
+            .filter(|(d, _)| (now.0 - d).abs() < TRAFFIC_TELEPORT_METRES);
+        Some(was.map_or(now, |(d, l)| {
+            (d + (now.0 - d) * alpha, l + (now.1 - l) * alpha)
+        }))
+    }
+
+    /// Record where every traffic car is, before the step that moves them.
+    fn capture_traffic(&mut self) {
+        let cars = self.traffic.cars();
+        self.previous_traffic.clear();
+        self.previous_traffic.extend(
+            cars.iter()
+                .map(|c| c.active.then_some((c.distance, c.lateral))),
+        );
+    }
+
     /// Advance one fixed step.
     pub fn step(&mut self, command: DriveCommand) {
         self.events.clear();
         let command = command.sanitised();
         self.previous_car_pose = self.car_pose;
         self.previous_camera_pose = self.camera_pose;
+        self.capture_traffic();
 
         if command.restart {
             self.restart();
@@ -767,6 +816,15 @@ pub const COUNTDOWN_NUMBERS: u32 = 3;
 /// How close to the end of the course counts as the finish line (m).
 pub const FINISH_MARGIN: f32 = 12.0;
 
+/// How far a traffic car's arc distance may move in one fixed step and still be
+/// treated as having *travelled* there rather than been teleported (m).
+///
+/// Traffic tops out well under 100 m/s, so a fixed step moves a car under 2 m.
+/// Anything past this is a pool slot being recycled onto a different plan
+/// somewhere else on the course, and interpolating across it would drag a car
+/// through the intervening kilometre in a sixtieth of a second.
+const TRAFFIC_TELEPORT_METRES: f32 = 25.0;
+
 /// Forward speed (m/s) below which the finished car stops braking itself, so it
 /// rolls to a halt rather than reversing back down the course.
 pub const FINISH_ROLL_SPEED: f32 = 1.5;
@@ -824,6 +882,74 @@ mod tests {
             sim.step(DriveCommand::IDLE);
         }
         sim
+    }
+
+    /// Traffic interpolates between fixed steps like everything else the player
+    /// can see. This is what makes a display faster than the 60 Hz simulation
+    /// look smooth rather than showing traffic stepping against a fluid world.
+    #[test]
+    fn traffic_interpolates_between_fixed_steps() {
+        let mut sim = racing();
+        (0..120).for_each(|_| sim.step(DriveCommand::FLAT_OUT));
+        let live = (0..sim.traffic().cars().len())
+            .find(|i| sim.traffic().cars()[*i].active)
+            .expect("the shipping course has traffic in play");
+
+        // `alpha = 1` is the pose as of the step just taken; after one more step
+        // that same pose is what `alpha = 0` interpolates *from*.
+        let settled = sim.traffic_pose(live, 1.0).expect("an active slot has a pose");
+        sim.step(DriveCommand::FLAT_OUT);
+        let start = sim.traffic_pose(live, 0.0).expect("still in play");
+        let half = sim.traffic_pose(live, 0.5).expect("still in play");
+        let end = sim.traffic_pose(live, 1.0).expect("still in play");
+
+        // `alpha = 0` is where it was, `alpha = 1` is where it now is, and the
+        // midpoint is genuinely between them rather than snapped to either end.
+        assert!(
+            (start.0 - settled.0).abs() < 1.0e-3,
+            "alpha 0 continues from the previous step's settled pose"
+        );
+        assert!(end.0 > start.0, "the car moved down the course");
+        let midpoint = (start.0 + end.0) * 0.5;
+        assert!(
+            (half.0 - midpoint).abs() < 1.0e-3,
+            "alpha 0.5 should be halfway: {} vs {midpoint}",
+            half.0
+        );
+    }
+
+    /// A slot that has just entered play has no previous position to come from,
+    /// and a recycled slot's previous position is somewhere else entirely. Either
+    /// one, interpolated, flings a car across the course on its first visible
+    /// frame — so both report their current pose exactly.
+    #[test]
+    fn a_car_entering_play_is_not_smeared_out_of_a_stale_position() {
+        let mut sim = racing();
+        (0..120).for_each(|_| sim.step(DriveCommand::FLAT_OUT));
+        let live = (0..sim.traffic().cars().len())
+            .find(|i| sim.traffic().cars()[*i].active)
+            .expect("traffic is in play");
+
+        // Forge the teleport: the slot's remembered position is a kilometre back.
+        let now = sim.traffic().cars()[live].distance;
+        sim.previous_traffic[live] = Some((now - 1_000.0, 0.0));
+        let posed = sim.traffic_pose(live, 0.5).expect("still in play");
+        assert!(
+            (posed.0 - now).abs() < 1.0e-3,
+            "a jump past TRAFFIC_TELEPORT_METRES must not be interpolated"
+        );
+    }
+
+    #[test]
+    fn an_inactive_traffic_slot_has_no_pose_at_any_alpha() {
+        let sim = RaceSim::shipping();
+        let idle = (0..sim.traffic().cars().len())
+            .find(|i| !sim.traffic().cars()[*i].active)
+            .expect("the pool starts with spare slots");
+        assert!(sim.traffic_pose(idle, 0.0).is_none());
+        assert!(sim.traffic_pose(idle, 0.5).is_none());
+        // ...and an index past the pool is not a panic.
+        assert!(sim.traffic_pose(usize::MAX, 0.5).is_none());
     }
 
     #[test]

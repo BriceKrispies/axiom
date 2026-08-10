@@ -19,7 +19,7 @@ fn one_object_input() -> RenderInput {
         Vec3::ONE,
         Ratio::new(1.0).unwrap(),
     );
-    let mesh = api().add_input_mesh(&mut input, 42, vec![], vec![], vec![], vec![0, 1, 2]);
+    let mesh = api().add_input_mesh(&mut input, 42, 3);
     let mat = api().add_input_basic_lit_material(&mut input, 99, Vec4::new(0.5, 0.5, 0.5, 1.0));
     api().add_input_object(&mut input, 7, Mat4::IDENTITY, mesh, mat, true);
     input
@@ -80,7 +80,7 @@ fn packet_draw_count_equals_draw_indexed_command_count() {
 #[test]
 fn packet_object_ids_and_order_match_the_command_list() {
     let mut input = api().new_input(100, 100);
-    let mesh = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+    let mesh = api().add_input_mesh(&mut input, 1, 3);
     let mat = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
     api().add_input_object(&mut input, 100, Mat4::IDENTITY, mesh, mat, true);
     api().add_input_object(&mut input, 200, Mat4::IDENTITY, mesh, mat, true);
@@ -199,7 +199,7 @@ fn features_count_both_light_kinds_and_detect_textures() {
         Ratio::new(1.0).unwrap(),
     );
     api().add_input_point_light(&mut input, Vec3::ZERO, Vec3::ONE, Ratio::new(0.5).unwrap());
-    let mesh = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+    let mesh = api().add_input_mesh(&mut input, 1, 3);
     // A textured material flips uses_textures on.
     let mat = api().add_input_textured_material(&mut input, 5, Vec4::ONE, 77);
     api().add_input_object(&mut input, 1, Mat4::IDENTITY, mesh, mat, true);

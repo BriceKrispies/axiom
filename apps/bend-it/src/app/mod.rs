@@ -55,6 +55,14 @@ pub struct BendIt {
     view: GameView,
     /// What the line under the finger would be struck at, metres per second.
     preview: Option<f32>,
+    /// Keeping: where the hands would go if the finger came up now.
+    ///
+    /// The dive is a *commitment* and it happens once, so without this the whole
+    /// gesture is invisible until it is too late to change — you draw, nothing in
+    /// the world moves, and then a body throws itself somewhere. Showing the
+    /// point live is not a hint; it is the difference between aiming and guessing
+    /// what you aimed.
+    dive: Option<crate::play::DiveCall>,
     /// The line left over from the last release, flicking away.
     ghost: Option<(Stroke, f32)>,
     /// The most recent reading, kept for the debug view.
@@ -85,6 +93,7 @@ impl BendIt {
             markers: Vec::new(),
             view: GameView::empty(Phase::Ready, surface, (0, 0)),
             preview: None,
+            dive: None,
             ghost: None,
             reading: None,
             last_phase: Phase::Ready,
@@ -130,10 +139,10 @@ impl BendIt {
         // ball and the only thing worth seeing is them.
         let motion = self.session.keeper().motion();
         return match self.session.keeping() {
-            true => camera::keeper_eye(
+            true => camera::keeper_view(
                 self.surface,
+                &GoalMouth::new(tuning.goal.inset),
                 motion.hips,
-                motion.lean,
                 self.session.ball().position,
                 &tuning.camera,
             ),
@@ -208,7 +217,13 @@ impl BendIt {
         }
         let camera = self.camera();
         self.scene
-            .update(&mut self.running, &self.session, &camera, &self.markers);
+            .update(
+                &mut self.running,
+                &self.session,
+                &camera,
+                &self.markers,
+                self.dive,
+            );
     }
 
     /// Consume into the engine app (the repo's capture-harness convention).

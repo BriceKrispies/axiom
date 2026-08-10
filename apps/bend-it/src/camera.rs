@@ -114,6 +114,73 @@ pub fn must_see(mouth: &GoalMouth, ball: Vec3, kicker: Vec3, tuning: &CameraTuni
     points
 }
 
+/// The framing for keeping: over the keeper's shoulder, from behind the goal.
+///
+/// It was first person, and first person was wrong for the same reason it is
+/// wrong in most sports games — **you cannot see yourself**. The player drew a
+/// line, the body they were steering was the one thing not on screen, and the
+/// only evidence anything had happened was the world tipping slightly. There was
+/// no way to learn what a gesture did, so there was no way to get better at it,
+/// and a mode you cannot get better at is a mode that is over the first time.
+///
+/// So: behind and above, looking down the pitch past your own keeper at the
+/// taker. Your body is in frame, the goal is in frame, and a dive is a thing you
+/// watch yourself do — which is the only feedback the mechanic actually needs.
+///
+/// The eye follows the keeper laterally, but only part way. Following completely
+/// would pin the keeper to the middle of the screen and make a dive look like the
+/// *world* sliding; hanging back leaves the goalmouth still and lets the body
+/// move across it, which is what reads as having dived.
+pub fn keeper_view(
+    viewport: Vec2,
+    mouth: &GoalMouth,
+    hips: Vec3,
+    ball: Vec3,
+    tuning: &CameraTuning,
+) -> CameraPose {
+    let aspect = (viewport.x / viewport.y.max(1.0)).max(0.05);
+    let follow = hips.x * tuning.keeper_follow;
+    let eye = Vec3::new(
+        follow,
+        tuning.keeper_eye_height,
+        KEEPER_LINE_Z - tuning.keeper_eye_back,
+    );
+    // Look between the keeper and the ball: far enough forward that the taker is
+    // in shot, near enough that the goalmouth is not a sliver at the bottom.
+    let target = Vec3::new(
+        follow * 0.5,
+        tuning.keeper_look_height,
+        KEEPER_LINE_Z + tuning.keeper_look_ahead,
+    );
+    CameraPose {
+        eye,
+        target,
+        fov_degrees: fit_fov(
+            eye,
+            target,
+            aspect,
+            &[
+                // Most of the goalmouth, not all of it. Fitting the full width
+                // is what wrecked this in portrait: a phone's narrow axis is the
+                // horizontal, so demanding seven metres of goal across it pushed
+                // the camera into a fisheye and left the keeper a thumbnail in a
+                // frame that was half sky. The posts may sit at the very edge —
+                // they are a reference, not the subject.
+                Vec3::new(-mouth.half_width() * tuning.keeper_frame_goal, 0.0, 0.0),
+                Vec3::new(
+                    mouth.half_width() * tuning.keeper_frame_goal,
+                    mouth.ceiling(),
+                    0.0,
+                ),
+                // And the taker, who must never walk out of shot: reading them is
+                // the job.
+                Vec3::new(ball.x, ball.y + 1.8, ball.z),
+            ],
+            tuning,
+        ),
+    }
+}
+
 /// The framing from inside the goal: the keeper's own eyes.
 ///
 /// The other half of the game gets a different camera because it is a different

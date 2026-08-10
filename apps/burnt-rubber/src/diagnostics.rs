@@ -51,8 +51,8 @@ impl Diagnostics {
     pub const fn new() -> Diagnostics {
         Diagnostics {
             scene: SceneCounters {
-                active_chunks: 0,
-                total_chunks: 0,
+                road_draws: 0,
+                total_road_draws: 0,
                 road_triangles: 0,
                 scenery_instances: 0,
                 cached_scenery_chunks: 0,
@@ -109,7 +109,7 @@ impl Diagnostics {
             ("steps".into(), self.simulation_steps.to_string()),
             (
                 "chunks".into(),
-                format!("{}/{}", self.scene.active_chunks, self.scene.total_chunks),
+                format!("{}/{}", self.scene.road_draws, self.scene.total_road_draws),
             ),
             (
                 "road tris".into(),
@@ -159,7 +159,7 @@ mod tests {
     fn fresh_diagnostics_are_empty() {
         let d = Diagnostics::new();
         assert_eq!(d.simulation_steps, 0);
-        assert_eq!(d.scene.active_chunks, 0);
+        assert_eq!(d.scene.road_draws, 0);
         assert_eq!(d, Diagnostics::default());
     }
 
@@ -178,7 +178,7 @@ mod tests {
         assert!((d.progress - app.sim().progress()).abs() < 1.0e-6);
         assert_eq!(d.phase, app.sim().phase());
         assert_eq!(d.near_misses, app.sim().near_miss_count());
-        assert!(d.scene.active_chunks > 0);
+        assert!(d.scene.road_draws > 0);
         assert!(d.scene.road_triangles > 0);
         assert!(d.active_traffic > 0, "the traffic is counted");
     }

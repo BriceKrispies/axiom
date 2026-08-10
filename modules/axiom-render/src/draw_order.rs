@@ -84,7 +84,7 @@ pub(crate) fn ordered_draws_into(input: &RenderInput, out: &mut Vec<OrderedDraw>
                     pipeline: object.pipeline(),
                     object_id: object.id(),
                     object_tag: object.tag(),
-                    index_count: mesh.indices().len() as u32,
+                    index_count: mesh.index_count(),
                     world: object.world(),
                     translucent,
                     // Opaque draws carry depth key `0` so the stable sort
@@ -143,7 +143,7 @@ mod tests {
         let mut input = api.new_input(64, 64);
         // Identity view → world z is the view-space depth (more negative = farther).
         api.set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
-        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
         let opaque = api.add_input_basic_lit_material(&mut input, 10, Vec4::ONE);
         let glass =
             api.add_input_lit_material(&mut input, 20, Vec4::ONE, Vec3::ZERO, one(), half(), 0);
@@ -160,7 +160,7 @@ mod tests {
         let api = api();
         let mut input = api.new_input(64, 64);
         api.set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
-        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
         let glass =
             api.add_input_lit_material(&mut input, 20, Vec4::ONE, Vec3::ZERO, one(), half(), 0);
         // Two translucent draws at the SAME depth → the stable sort keeps order.
@@ -174,7 +174,7 @@ mod tests {
         let api = api();
         let mut input = api.new_input(64, 64);
         // No camera → every depth resolves to 0, so the stable sort is a no-op.
-        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
         let glass =
             api.add_input_lit_material(&mut input, 20, Vec4::ONE, Vec3::ZERO, one(), half(), 0);
         api.add_input_object(&mut input, 200, at_z(-2.0), mesh, glass, true);
@@ -187,7 +187,7 @@ mod tests {
         let api = api();
         let mut input = api.new_input(64, 64);
         api.set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
-        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
         let opaque = api.add_input_basic_lit_material(&mut input, 10, Vec4::ONE);
         // Opaque draws at varying depth keep submission order (front-to-back is
         // fine, depth-tested) — the depth key stays 0 for every opaque draw.
@@ -200,7 +200,7 @@ mod tests {
     fn per_object_texture_override_pipeline_and_tag_are_carried() {
         let api = api();
         let mut input = api.new_input(64, 64);
-        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
         // A material carrying its own albedo texture (id 5).
         let mat = api.add_input_textured_material(&mut input, 10, Vec4::ONE, 5);
         // Object A inherits the material's texture (override 0); object B overrides
@@ -243,7 +243,7 @@ mod tests {
     fn gates_drop_invisible_and_unresolved_objects() {
         let api = api();
         let mut input = api.new_input(64, 64);
-        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
         let mat = api.add_input_basic_lit_material(&mut input, 10, Vec4::ONE);
         // Invisible, out-of-range mesh, and out-of-range material are all dropped;
         // only the fully-resolved visible object survives.

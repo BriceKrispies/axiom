@@ -975,6 +975,11 @@ struct MeshBuffers {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    /// The mesh's local-space bounds, for the shadow pass's volume cull (see
+    /// [`crate::shadow_cull`]). Computed once here because geometry never
+    /// changes after upload; `None` for a degenerate stream, which the cull
+    /// reads as "cannot be tested, so always submit".
+    bounds: Option<axiom_math::Aabb>,
 }
 
 /// The shared, surface-free renderer: pipelines + caches + per-frame buffers +
@@ -1527,6 +1532,42 @@ impl SceneRenderer {
         }
         queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&packed));
 
+        // Which of those draws can actually reach the shadow map.
+        //
+        // The shadow camera is a fixed ~40 m box that follows the view, while the
+        // frame it is rendering reaches to the far plane — 1,650 m in a racing
+        // course. Everything past the box was being submitted and clipped: a full
+        // draw call and a full vertex load per batch, for zero texels, over EVERY
+        // batch in the frame. On the WebGL2 path a draw costs ~52 GL calls
+        // whether or not it contributes, so this was roughly half the frame's
+        // submission cost.
+        //
+        // A batch survives if ANY of its instances can reach the volume — the
+        // instances of one batch share a contiguous run of the buffer and are
+        // drawn as one call, so the batch is the unit that can be dropped. A
+        // frame with no usable light volume (degenerate shadow camera) keeps
+        // every draw, exactly as before this existed: dropping a caster is
+        // visible, keeping a redundant one is not.
+        let volume = crate::shadow_cull::light_volume(&light_view_proj);
+        let shadow_draws: Vec<&(u64, u64, u64, u32)> = draws
+            .iter()
+            .filter(|(mesh_id, _, byte_offset, count)| {
+                volume.as_ref().map_or(true, |frustum| {
+                    let bounds = self.meshes.get(mesh_id).and_then(|m| m.bounds.as_ref());
+                    bounds.map_or(true, |bounds| {
+                        let first = (*byte_offset / INSTANCE_STRIDE) as usize;
+                        (first..first + *count as usize).any(|i| {
+                            packed
+                                .get(i * INSTANCE_FLOATS + 16..i * INSTANCE_FLOATS + 32)
+                                .map_or(true, |world| {
+                                    crate::shadow_cull::casts_into(bounds, world, frustum)
+                                })
+                        })
+                    })
+                })
+            })
+            .collect();
+
         // Pack every skinned draw's palette back-to-back (recording each draw's base
         // matrix index) and its instance (mvp + world + colour + joint_base), bounded
         // by the palette capacity. Skipped entirely on a device with no skinned pass,
@@ -1584,7 +1625,7 @@ impl SceneRenderer {
             });
             pass.set_pipeline(&self.shadow_pipeline);
             pass.set_bind_group(0, &self.shadow_pass_bind_group, &[]);
-            for (mesh_id, _material_id, byte_offset, count) in &draws {
+            for (mesh_id, _material_id, byte_offset, count) in &shadow_draws {
                 if let Some(mesh) = self.meshes.get(mesh_id) {
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, self.instance_buffer.slice(*byte_offset..));
@@ -2147,8 +2188,14 @@ fn upload_mesh(device: &wgpu::Device, vertices: &[f32], indices: &[u32]) -> Mesh
         vertex_buffer,
         index_buffer,
         index_count: indices.len() as u32,
+        bounds: crate::shadow_cull::local_bounds(vertices, MESH_VERTEX_FLOATS),
     }
 }
+
+/// Floats per uploaded mesh vertex: position(3) + normal(3) + uv(2) + colour(4).
+/// The same layout [`vertex_layout`] declares, named here because the bounds
+/// scan walks the stream by it.
+const MESH_VERTEX_FLOATS: usize = 12;
 
 /// Build a material's albedo bind group from RGBA8 pixels (sRGB texture + a
 /// repeat sampler resolved from the material's own sampling mode), bound at

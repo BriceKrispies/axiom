@@ -189,6 +189,111 @@ fn main() {
         return;
     }
 
+    // `--profile-sizes WxH,WxH,... --profile-frames N`: measure ONE slice at
+    // several render sizes, INTERLEAVED IN ONE PROCESS, and report medians.
+    //
+    // `--profile-compare` answers "which section is expensive"; this answers the
+    // orthogonal and, for a phone, more decisive question: **is this frame's cost
+    // proportional to the pixels it covers?** That is the difference between a
+    // fill-bound frame — where render resolution is the only lever that matters,
+    // and halving it halves the cost — and a draw-call or vertex-bound one, where
+    // resolution buys nothing and the fix is somewhere else entirely. Guessing
+    // wrong here means optimising the wrong half of the renderer.
+    //
+    // It has to interleave for the same reason `--profile-compare` does: this
+    // machine's GPU clocks drift several-fold between processes, so sizes
+    // measured in separate runs cannot be divided by each other. Interleaved in
+    // one process the drift is common-mode and cancels in the ratio.
+    //
+    // The ratio column is the answer: cost per megapixel, normalised to the first
+    // size. Flat across sizes means fill-bound (cost tracks area); falling means
+    // a fixed per-frame cost the resolution never touches.
+    // What the frame is MADE of, printed alongside every profile run.
+    //
+    // Same discipline as the in-game telemetry panel: a measured time is only
+    // interpretable next to counted contents. A frame whose cost does not move
+    // with resolution is bound by one of these numbers, and which one it is
+    // cannot be guessed from the millisecond alone.
+    let contents = |outcome: &FrameOutcome, meshes: &[(u64, Vec<f32>, Vec<u32>)]| -> String {
+        let draws = outcome.draws();
+        let batches = outcome.mesh_batches();
+        let triangles: usize = batches
+            .iter()
+            .filter_map(|(mesh_id, _, _, count)| {
+                meshes
+                    .iter()
+                    .find(|(id, ..)| id == mesh_id)
+                    .map(|(_, _, indices)| indices.len() / 3 * *count as usize)
+            })
+            .sum();
+        format!(
+            "  contents: {} draws in {} batches ({} meshes, {} lights, {} tris)",
+            draws.len(),
+            batches.len(),
+            meshes.len(),
+            outcome.lights().len(),
+            triangles,
+        )
+    };
+
+    let sizes = flag(&args, "--profile-sizes").unwrap_or_default();
+    if !sizes.is_empty() {
+        println!("{}", contents(&outcome, &meshes));
+        let parsed: Vec<(u32, u32)> = sizes
+            .split(',')
+            .filter_map(|s| {
+                let (w, h) = s.trim().split_once(['x', 'X'])?;
+                Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+            })
+            .collect();
+        let n = profile_frames.max(2);
+        let trials = flag(&args, "--profile-trials")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(5);
+
+        let mut samples: Vec<Vec<f64>> = vec![Vec::new(); parsed.len()];
+        for _ in 0..trials {
+            for (i, (w, h)) in parsed.iter().enumerate() {
+                let a = Instant::now();
+                let (p1, _, _) = render(
+                    &backend, &meshes, &skinned_meshes, &materials, &outcome, quality,
+                    retro_32bit, postprocess, 1, *w, *h,
+                );
+                let t1 = a.elapsed().as_secs_f64() * 1000.0;
+                std::hint::black_box(p1.len());
+                let b = Instant::now();
+                let (pn, _, _) = render(
+                    &backend, &meshes, &skinned_meshes, &materials, &outcome, quality,
+                    retro_32bit, postprocess, n, *w, *h,
+                );
+                let tn = b.elapsed().as_secs_f64() * 1000.0;
+                std::hint::black_box(pn.len());
+                samples[i].push((tn - t1) / f64::from(n - 1));
+            }
+        }
+
+        println!("axiom-shot: app={app} backend={backend} frames={n} trials={trials}");
+        let mut per_mpix_base = 0.0f64;
+        for (i, (w, h)) in parsed.iter().enumerate() {
+            samples[i].sort_by(f64::total_cmp);
+            let med = samples[i][samples[i].len() / 2];
+            let lo = samples[i][0];
+            let hi = samples[i][samples[i].len() - 1];
+            let mpix = f64::from(*w) * f64::from(*h) / 1.0e6;
+            let per_mpix = med / mpix.max(1.0e-9);
+            (i == 0).then(|| per_mpix_base = per_mpix);
+            let rel = per_mpix / per_mpix_base.max(1.0e-9);
+            let size = format!("{w}x{h}");
+            println!(
+                "  {size:12} {mpix:6.2} Mpix  median {med:7.3}ms  \
+                 (spread {lo:6.3}..{hi:6.3})  {per_mpix:6.3}ms/Mpix  x{rel:.2}  \
+                 [{:5.1} fps]",
+                1000.0 / med.max(1.0e-6)
+            );
+        }
+        return;
+    }
+
     if profile_frames > 0 {
         // Two runs, differenced. `render` pays full device+pipeline setup on
         // every call — instance, adapter, device, every pipeline, every buffer —

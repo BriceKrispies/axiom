@@ -124,15 +124,13 @@ impl RunningApp {
                 self.pipeline
                     .new_frame(width, height, self.clear_color, self.light_direction);
             let pipeline = &mut self.pipeline;
+            // Identity only. The geometry these ids name was uploaded to the
+            // backend once at bind (`RunningApp::mesh_set` reads this same
+            // registry); re-sending it every frame copied the whole world twice
+            // per frame to deliver an id and an index count. See
+            // `axiom_render::RenderMesh`.
             self.meshes.iter().for_each(|(id, geometry)| {
-                pipeline.frame_add_mesh(
-                    &mut frame,
-                    *id,
-                    geometry.positions.clone(),
-                    geometry.normals.clone(),
-                    geometry.uvs.clone(),
-                    geometry.indices.clone(),
-                )
+                pipeline.frame_add_mesh(&mut frame, *id, geometry.indices.len() as u32)
             });
             self.materials.iter().for_each(|(id, material)| {
                 // `0` = untextured; live albedo pixels are uploaded separately via

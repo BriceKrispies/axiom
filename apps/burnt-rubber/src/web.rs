@@ -171,6 +171,23 @@ pub fn burnt_rubber_start() {
     // no parameter that landed on Canvas 2D because the GPU refused a device is
     // exactly the case that needs the window.
     let bound_backend = windowing.observe_bound_backend();
+    // The adaptive render scale. Taken here for the same reason `bound_backend`
+    // is: `run_web_multi` below consumes the driver, so a control that is not
+    // held from before that move cannot be reached again.
+    //
+    // Why this game needs one at all. The tier above is `ExtendedLimits`, which
+    // supersamples 2x per axis — on a DPR-3 phone that is a 1889x4096 render
+    // target, 7.5 Mpix, against a 3.4 Mpix display. That is the right ask for
+    // this frame's thin receding geometry and the wrong one for a GPU that
+    // cannot hold 60 Hz at it, and nothing authored at startup can tell those
+    // two devices apart. So the tier keeps asking for the quality and this pays
+    // only what the measured frame can afford.
+    let set_render_scale = windowing.render_scale_control();
+    // Targeted at the DISPLAY, not at the simulation's fixed step. Those are two
+    // different clocks: the sim ticks at 60 Hz for determinism, and the panel
+    // refreshes at whatever it refreshes at. Handing the controller the tick rate
+    // would have it hold 16 ms frames on a 120 Hz phone and call that a success.
+    let mut render_scale = axiom_host::RenderScaleController::for_display();
 
     let frame_state = state.clone();
     let frame_held = held.clone();
@@ -182,6 +199,11 @@ pub fn burnt_rubber_start() {
         guard.app.set_paint_near_field_only(software_raster);
         let elapsed = guard.elapsed_nanos();
         guard.frames.push(elapsed as f32 / 1.0e6);
+        // The one clock reading this app takes, spent twice: it drives the fixed
+        // step, and it tells the renderer whether the last frame fit in its
+        // budget. Handed over unconditionally — an unchanged scale is a
+        // comparison in the backend, not a rebuild.
+        set_render_scale(render_scale.observe(elapsed));
         // Keyboard, gamepad and the on-screen pad all feed the same action
         // table: the pad's buttons and the gamepad's face buttons both arrive as
         // synthetic key tokens, so there is exactly one binding table and one

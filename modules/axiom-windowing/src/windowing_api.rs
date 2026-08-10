@@ -85,6 +85,12 @@ pub struct WindowingApi {
     // Which live backend the cascade actually selected, reported by every arm that
     // binds one (and re-reported by a device-loss rebuild). See `bound_backend`.
     bound_backend: BackendReport,
+    // The adaptive render scale the live loop applies before each present.
+    // Written by the app through `render_scale_control`, read once per frame by
+    // the run loop. Shared for the same reason `bound_backend` is: every
+    // `run_web_*` consumes the driver, so a caller can only reach it through a
+    // view taken before that move.
+    render_scale: std::rc::Rc<std::cell::Cell<axiom_host::RenderScale>>,
 }
 
 /// The shared cell a bound backend reports its identity into.
@@ -108,6 +114,9 @@ impl WindowingApi {
             #[cfg(target_arch = "wasm32")]
             presenter: std::rc::Rc::new(std::cell::RefCell::new(None)),
             bound_backend: std::rc::Rc::new(std::cell::Cell::new(None)),
+            render_scale: std::rc::Rc::new(std::cell::Cell::new(
+                axiom_host::RenderScale::FULL,
+            )),
         }
     }
 
@@ -375,6 +384,25 @@ impl WindowingApi {
     pub fn observe_bound_backend(&self) -> impl Fn() -> Option<axiom_host::BackendKind> + 'static {
         let bound = self.bound_backend.clone();
         move || bound.get()
+    }
+
+    /// A control the app calls per frame to set the **render scale**: the
+    /// fraction of the device tier's render size the 3D scene is rendered at
+    /// before the present resolve.
+    ///
+    /// Taken *before* the driver is consumed by a run loop, for exactly the
+    /// reason [`Self::observe_bound_backend`] is: after `run_web_*` there is no
+    /// driver left to ask. Pair it with [`axiom_host::RenderScaleController`],
+    /// which turns measured frame durations into a scale without reading a clock
+    /// of its own — the app's platform edge already measures the frame, and this
+    /// is where that measurement earns its keep.
+    ///
+    /// Setting the same scale repeatedly is free (the backend compares against
+    /// the size in use), so the intended shape is to call it unconditionally
+    /// every frame rather than tracking changes in the app.
+    pub fn render_scale_control(&self) -> impl Fn(axiom_host::RenderScale) + 'static {
+        let cell = self.render_scale.clone();
+        move |scale| cell.set(scale)
     }
 
     /// The validated presentation request, once a surface is configured. This

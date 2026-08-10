@@ -73,15 +73,12 @@ impl RenderInput {
     pub fn push_camera(&mut self, view: Mat4, projection: Mat4) {
         self.set_camera(RenderCamera::new(view, projection));
     }
-    pub fn push_mesh(
-        &mut self,
-        id: u64,
-        positions: Vec<Vec3>,
-        normals: Vec<Vec3>,
-        uvs: Vec<Vec2>,
-        indices: Vec<u32>,
-    ) -> u32 {
-        self.add_mesh(RenderMesh::new(id, positions, normals, uvs, indices))
+    /// Reference an uploaded mesh by `id`, spanning `index_count` indices.
+    ///
+    /// Takes the mesh's identity rather than its geometry — see [`RenderMesh`]
+    /// for why the vertex arrays do not belong in a frame packet.
+    pub fn push_mesh(&mut self, id: u64, index_count: u32) -> u32 {
+        self.add_mesh(RenderMesh::new(id, index_count))
     }
     #[allow(clippy::too_many_arguments)]
     pub fn push_lit_material(
@@ -198,13 +195,7 @@ mod tests {
         let mut i = RenderInput::new(100, 100);
         i.set_clear_color([0.1, 0.2, 0.3, 1.0]);
         i.set_camera(RenderCamera::new(Mat4::IDENTITY, Mat4::IDENTITY));
-        let m = i.add_mesh(RenderMesh::new(
-            7,
-            vec![Vec3::ZERO],
-            vec![Vec3::UNIT_Y],
-            vec![Vec2::ZERO],
-            vec![0],
-        ));
+        let m = i.add_mesh(RenderMesh::new(7, 1));
         let mat = i.add_material(RenderMaterial::new(3, Vec4::ONE));
         i.add_object(RenderObject::new(1, Mat4::IDENTITY, m, mat, true));
         i.add_sdf_shape(RenderSdf::new(0, Mat4::IDENTITY, Vec3::ONE, Vec4::ONE));

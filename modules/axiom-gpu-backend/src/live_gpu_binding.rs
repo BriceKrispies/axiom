@@ -72,6 +72,23 @@ pub struct LiveGpuBinding {
     /// `render_*` resolution and upscaled.
     width: u32,
     height: u32,
+    /// The swapchain colour format, held so the scene targets can be rebuilt at a
+    /// new size without re-reading the surface capabilities.
+    format: wgpu::TextureFormat,
+    /// The device tier's render size at [`axiom_host::RenderScale::FULL`] — what
+    /// the app asked for, after the device's own texture-dimension clamp. Every
+    /// adaptive size is derived from this rather than from the previous one, so
+    /// repeated scale changes cannot drift the target away from the tier.
+    render_base: (u32, u32),
+    /// The size the scene currently renders at.
+    render_size: (u32, u32),
+    /// The scale currently applied to [`Self::render_base`].
+    render_scale: axiom_host::RenderScale,
+    /// Whether the app's look wants a post chain, so a rebuilt target knows
+    /// whether to rebuild one. Held rather than re-derived because the look's
+    /// bloom/grade can be `None` per frame while the chain's existence is a
+    /// bind-time property.
+    wants_post: bool,
 }
 
 /// Translate a `wgpu` surface acquisition failure into the engine's
@@ -429,7 +446,83 @@ impl LiveGpuBinding {
             draw2d_format,
             width,
             height,
+            format,
+            render_base: (render_width, render_height),
+            render_size: (render_width, render_height),
+            render_scale: axiom_host::RenderScale::FULL,
+            wants_post,
         })
+    }
+
+    /// Re-render the scene at `scale` of the device tier's render size.
+    ///
+    /// This is the live arm of [`axiom_host::RenderScaleController`]: the tier
+    /// decides the resolution the frame would like, and this applies what the
+    /// device can actually afford. Fragment cost is very nearly linear in pixels,
+    /// so it is the one quality dial that trades smoothly against frame time.
+    ///
+    /// Rebuilding is not free — it reallocates the scene colour target, its depth
+    /// buffer, the upscale blit's bind group and the whole bloom chain — which is
+    /// exactly why the controller moves in a few held steps rather than on a
+    /// continuous gradient. A scale that resolves to the size already in use is a
+    /// no-op, so calling this every frame with an unchanged scale costs one
+    /// comparison.
+    ///
+    /// The new size is derived from [`Self::render_base`], never from the current
+    /// size: scaling the previous result would compound rounding on every change
+    /// and walk the target away from the tier it is supposed to be a fraction of.
+    pub fn set_render_scale(&mut self, scale: axiom_host::RenderScale) {
+        let (want_w, want_h) = scale.apply(self.render_base.0, self.render_base.1);
+        let unchanged = (want_w, want_h) == self.render_size;
+        // Zero-or-one rebuild, over the Option iterator — no branch.
+        (!unchanged).then_some(()).into_iter().for_each(|()| {
+            let intermediate = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("axiom-render-target"),
+                size: wgpu::Extent3d {
+                    width: want_w,
+                    height: want_h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = intermediate.create_view(&wgpu::TextureViewDescriptor::default());
+            self.depth_view = create_depth_view(&self.device, want_w, want_h);
+            self.upscale = UpscaleBlit::new(
+                &self.device,
+                self.format,
+                &view,
+                wgpu::FilterMode::Nearest,
+            );
+            self.post = self.wants_post.then(|| {
+                crate::post_chain::PostChain::new(
+                    &self.device,
+                    self.format,
+                    self.format,
+                    &view,
+                    (want_w, want_h),
+                )
+            });
+            self.intermediate_view = view;
+            self.render_size = (want_w, want_h);
+            self.render_scale = scale;
+        });
+    }
+
+    /// The scale the scene is currently rendered at.
+    pub const fn render_scale(&self) -> axiom_host::RenderScale {
+        self.render_scale
+    }
+
+    /// The device pixels the scene currently renders into, before the present
+    /// resolve to the swapchain.
+    pub const fn render_size(&self) -> (u32, u32) {
+        self.render_size
     }
 
     /// Acquire the next swap-chain texture, **recovering a dropped context** when

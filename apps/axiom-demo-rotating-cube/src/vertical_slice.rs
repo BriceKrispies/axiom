@@ -356,26 +356,12 @@ pub(crate) fn run_vertical_slice(
             Ratio::new(light.intensity).expect("light intensity is finite"),
         );
     });
+    // Identity only: the render input names an uploaded mesh, it does not carry
+    // its geometry (see `axiom_render::RenderMesh`). The artifact's vertex arrays
+    // stay where they are — this slice's own boundary evidence.
     render_input_artifact.meshes.iter().for_each(|mesh| {
-        let positions = mesh
-            .positions
-            .iter()
-            .map(|p| Vec3::new(p[0], p[1], p[2]))
-            .collect();
-        let normals = mesh
-            .normals
-            .iter()
-            .map(|n| Vec3::new(n[0], n[1], n[2]))
-            .collect();
-        let uvs = mesh.uvs.iter().map(|u| Vec2::new(u[0], u[1])).collect();
-        api.render_api.add_input_mesh(
-            &mut render_input,
-            mesh.id,
-            positions,
-            normals,
-            uvs,
-            mesh.indices.clone(),
-        );
+        api.render_api
+            .add_input_mesh(&mut render_input, mesh.id, mesh.indices.len() as u32);
     });
     render_input_artifact.materials.iter().for_each(|material| {
         let c = material.base_color;

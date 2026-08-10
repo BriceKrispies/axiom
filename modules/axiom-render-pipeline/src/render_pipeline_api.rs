@@ -42,15 +42,13 @@ pub(crate) const GL_TO_WGPU_DEPTH: [f32; 16] = [
 ];
 
 
-/// One mesh asset supplied to a frame: the resolved CPU geometry the renderer
-/// uploads, keyed by the same id the scene's renderables reference.
+/// One mesh asset referenced by a frame: the id an uploaded mesh was keyed
+/// under, and how many indices a draw over it spans. Carries no geometry — see
+/// `RenderPipelineApi::frame_add_mesh`.
 #[derive(Debug)]
 struct MeshAsset {
     id: u64,
-    positions: Vec<Vec3>,
-    normals: Vec<Vec3>,
-    uvs: Vec<Vec2>,
-    indices: Vec<u32>,
+    index_count: u32,
 }
 
 /// One material asset supplied to a frame: a linear-RGBA base colour, its
@@ -175,23 +173,19 @@ impl RenderPipelineApi {
         }
     }
 
-    /// Register a mesh asset (resolved CPU geometry) for this frame.
-    pub fn frame_add_mesh(
-        &self,
-        frame: &mut RenderFrame,
-        id: u64,
-        positions: Vec<Vec3>,
-        normals: Vec<Vec3>,
-        uvs: Vec<Vec2>,
-        indices: Vec<u32>,
-    ) {
-        frame.meshes.push(MeshAsset {
-            id,
-            positions,
-            normals,
-            uvs,
-            indices,
-        });
+    /// Reference an uploaded mesh for this frame: its `id` and the
+    /// `index_count` a draw over it spans.
+    ///
+    /// **Identity, not geometry.** Mesh vertex data is bind-time resident state —
+    /// uploaded to the backend once when the surface binds, never re-sent — so a
+    /// frame packet naming it needs only the id the backend keyed it under. This
+    /// used to take the four vertex arrays by value, which meant a caller had to
+    /// clone every registered mesh's geometry into every frame, and `submit` then
+    /// cloned it again into the render input. For a scene with ~1,000 registered
+    /// meshes that measured as about a third of the browser's main thread, all of
+    /// it to carry two scalars. See `axiom_render::RenderMesh`.
+    pub fn frame_add_mesh(&self, frame: &mut RenderFrame, id: u64, index_count: u32) {
+        frame.meshes.push(MeshAsset { id, index_count });
     }
 
     /// Register a material asset (base colour) for this frame. Untextured, no
@@ -325,13 +319,7 @@ impl RenderPipelineApi {
         // refilled each frame (not rebuilt) so no fresh hashmap is allocated.
         mesh_index.clear();
         frame.meshes.iter().for_each(|mesh| {
-            let idx = input.push_mesh(
-                mesh.id,
-                mesh.positions.clone(),
-                mesh.normals.clone(),
-                mesh.uvs.clone(),
-                mesh.indices.clone(),
-            );
+            let idx = input.push_mesh(mesh.id, mesh.index_count);
             mesh_index.insert(mesh.id, idx);
         });
         material_index.clear();
@@ -609,14 +597,7 @@ mod tests {
 
     fn frame_with_assets(api: &RenderPipelineApi) -> RenderFrame {
         let mut frame = api.new_frame(800, 600, [0.05, 0.06, 0.08, 1.0], Vec3::new(0.3, -1.0, 0.4));
-        api.frame_add_mesh(
-            &mut frame,
-            1,
-            vec![Vec3::new(0.5, 0.5, 0.5); 24],
-            vec![Vec3::new(0.0, 1.0, 0.0); 24],
-            vec![Vec2::new(0.0, 0.0); 24],
-            (0..36).collect(),
-        );
+        api.frame_add_mesh(&mut frame, 1, 36);
         api.frame_add_material(&mut frame, 2, [0.8, 0.4, 0.2, 1.0]);
         frame
     }
@@ -811,14 +792,7 @@ mod tests {
         let mut scene = cube_scene();
         let mut webgpu = WebGpuApi::new_recording();
         let mut frame = api.new_frame(800, 600, [0.0, 0.0, 0.0, 1.0], Vec3::new(0.3, -1.0, 0.4));
-        api.frame_add_mesh(
-            &mut frame,
-            1,
-            vec![Vec3::new(0.5, 0.5, 0.5); 24],
-            vec![Vec3::new(0.0, 1.0, 0.0); 24],
-            vec![Vec2::new(0.0, 0.0); 24],
-            (0..36).collect(),
-        );
+        api.frame_add_mesh(&mut frame, 1, 36);
         // The scene's material id 2, authored translucent (opacity 0.5) + emissive
         // + rough. Base alpha 1.0 × opacity 0.5 ⇒ a report draw alpha of 0.5.
         api.frame_add_lit_material(

@@ -130,14 +130,7 @@ fn measure(n: usize) -> (Duration, Duration) {
         [0.05, 0.06, 0.08, 1.0],
         Vec3::new(0.3, -1.0, 0.4),
     );
-    pipeline.frame_add_mesh(
-        &mut render_frame,
-        MESH_ID,
-        vec![Vec3::new(0.5, 0.5, 0.5); 24],
-        vec![Vec3::new(0.0, 1.0, 0.0); 24],
-        vec![Vec2::new(0.0, 0.0); 24],
-        (0..36).collect(),
-    );
+    pipeline.frame_add_mesh(&mut render_frame, MESH_ID, 36);
     pipeline.frame_add_material(&mut render_frame, MATERIAL_ID, [0.8, 0.4, 0.2, 1.0]);
 
     let mut advance_times = Vec::with_capacity(TRIALS);

@@ -862,7 +862,7 @@ mod tests {
         assert!(hud.speed_kmh > 100, "moving: {} km/h", hud.speed_kmh);
         assert!(hud.progress > 0.0);
         let d = app.diagnostics();
-        assert!(d.scene.active_chunks > 0);
+        assert!(d.scene.road_draws > 0);
         assert_eq!(d.simulation_steps, app.sim().step_count());
         assert!((d.speed_ms - app.sim().car().speed()).abs() < 1.0e-4);
     }
@@ -1055,6 +1055,6 @@ mod tests {
         app.sim_mut().place_at(4_000.0);
         assert!((app.sim().car().distance - 4_000.0).abs() < 5.0);
         app.pose();
-        assert!(app.diagnostics().scene.active_chunks > 0);
+        assert!(app.diagnostics().scene.road_draws > 0);
     }
 }

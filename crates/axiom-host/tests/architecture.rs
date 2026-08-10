@@ -317,6 +317,8 @@ fn lib_exports_are_curated_set() {
         "pub use host_result::HostResult;",
         "pub use host_safe_area_insets::HostSafeAreaInsets;",
         "pub use pixels::Pixels;",
+        "pub use render_scale::RenderScale;",
+        "pub use render_scale::RenderScaleController;",
         "pub use host_skip_reason::HostSkipReason;",
         "pub use host_step_driver::HostStepDriver;",
         "pub use host_step_plan::HostStepPlan;",

@@ -8,10 +8,13 @@
 //! - **TS kinds** — `tsgo -p <app>/web/tsconfig.json`, the same compiler the
 //!   Makefile and `scripts/axiom_dev_server.mjs` use, borrowed from
 //!   `packages/axiom-game`'s node_modules (a build-time toolchain, exactly as
-//!   `scripts/package_gallery.py` borrows it). One-time
-//!   prerequisites run only when their outputs are missing: the `@axiom/game`
-//!   dist (TsSdkHosted), the shared `axiom-game-runtime` wasm pkg
-//!   (TsSdkHosted), and the `@axiom/web-engine` dist (TsWebEngine).
+//!   `scripts/package_gallery.py` borrows it). Prerequisites run when their
+//!   outputs are missing: the `@axiom/game` dist (TsSdkHosted) and the
+//!   `@axiom/web-engine` dist (TsWebEngine). The shared `axiom-game-runtime`
+//!   wasm pkg (TsSdkHosted) is the exception — it is checked for STALENESS on
+//!   every start, not just for existence, because it embeds the whole Rust
+//!   engine and a missing-only check silently served months-old engine code.
+//!   See [`BuildPlan::ensure_game_runtime_pkg`].
 //!
 //! All children stream stdio to the terminal (inherited), so compiler errors
 //! land where the developer is looking.
@@ -131,8 +134,20 @@ impl BuildPlan {
         npm(&engine, &["run", "build"])
     }
 
-    /// TsSdkHosted pages load the shared game-agnostic wasm engine from
-    /// `/pkg/` — build `axiom-game-runtime`'s pkg once if missing.
+    /// TsSdkHosted pages load the shared game-agnostic wasm engine from `/pkg/` —
+    /// keep that pkg UP TO DATE with the engine sources, not merely present.
+    ///
+    /// This used to return early whenever `axiom_game_runtime.js` existed. That made
+    /// the pkg a write-once artifact: every later engine fix compiled fine, passed
+    /// its tests, and then never reached the browser, because the served wasm was
+    /// whatever had been built months earlier. It cost a full debugging session —
+    /// a WebGL2 crash and a stray shadow artifact were both chased into engine source
+    /// that had *already been fixed*, in a binary predating both fixes by weeks.
+    ///
+    /// The staleness question is genuinely hard (the runtime transitively depends on
+    /// most of the workspace), so it is not answered here — `cargo` is asked instead,
+    /// since it is the only thing that actually knows. An up-to-date check costs about
+    /// a second; serving a months-stale engine costs an afternoon.
     fn ensure_game_runtime_pkg(&self) -> Result<(), String> {
         let pkg = self
             .root
@@ -140,10 +155,8 @@ impl BuildPlan {
             .join("axiom-game-runtime")
             .join("web")
             .join("pkg");
-        if pkg.join("axiom_game_runtime.js").is_file() {
-            return Ok(());
-        }
-        println!("axiom-serve: axiom-game-runtime wasm pkg missing — building it (once)");
+        let generated = pkg.join("axiom_game_runtime.js");
+        println!("axiom-serve: checking the axiom-game-runtime wasm pkg is up to date…");
         preflight_wasm_bindgen(&self.root)?;
         let mut cargo = Command::new("cargo");
         cargo
@@ -166,7 +179,22 @@ impl BuildPlan {
             .join(WASM_TARGET)
             .join("release")
             .join("axiom_game_runtime.wasm");
-        wasm_bindgen(&self.root, &wasm, &pkg)
+        // Cargo rebuilt (or confirmed) the wasm; only regenerate the JS glue when the
+        // binary is actually newer, so the common up-to-date path stays quiet.
+        newer_than(&wasm, &generated)
+            .then(|| wasm_bindgen(&self.root, &wasm, &pkg))
+            .unwrap_or(Ok(()))
+    }
+}
+
+/// Whether `candidate` is strictly newer than `reference` — true when either
+/// timestamp is unreadable, so an unknown state rebuilds rather than silently
+/// serving something stale.
+fn newer_than(candidate: &Path, reference: &Path) -> bool {
+    let stamp = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    match (stamp(candidate), stamp(reference)) {
+        (Some(a), Some(b)) => a > b,
+        _ => true,
     }
 }
 

@@ -325,6 +325,16 @@ pub struct TransitionTuning {
 /// same numbers compose a 9:19.5 phone and a 16:9 desktop.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraTuning {
+    /// Keeping, seen from behind the goal: how high the eye sits, how far behind
+    /// the line it stands, how far ahead it looks, and how much of the keeper's
+    /// own sideways movement it follows (`0` fixed, `1` pinned to the body).
+    pub keeper_eye_height: f32,
+    pub keeper_eye_back: f32,
+    pub keeper_look_height: f32,
+    pub keeper_look_ahead: f32,
+    pub keeper_follow: f32,
+    /// How much of the goal's half-width the frame is obliged to contain.
+    pub keeper_frame_goal: f32,
     /// The keeper's eye above its own hips, metres, and how far the head swings
     /// out over a full dive.
     pub keeper_head_rise: f32,
@@ -476,6 +486,12 @@ impl Tuning {
             reset: 14,
         },
         camera: CameraTuning {
+            keeper_eye_height: 4.20,
+            keeper_eye_back: 12.0,
+            keeper_look_height: 0.55,
+            keeper_look_ahead: 5.0,
+            keeper_follow: 0.30,
+            keeper_frame_goal: 1.0,
             keeper_head_rise: 0.62,
             keeper_head_swing: 0.30,
             keeper_fov: 62.0,

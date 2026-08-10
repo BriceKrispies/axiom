@@ -29,8 +29,51 @@ use crate::tuning::CourseTuning;
 use super::asphalt_texture::TILE_METRES;
 use super::surface_builder::SurfaceBuilder;
 
-/// The span of course one rendered chunk covers (m).
+/// The span of course one **authoring** chunk covers (m).
+///
+/// This is the course's cell, not the renderer's batch — the two were the same
+/// number until the draw-call work below, and separating them is what let the
+/// batch move without moving the game. A cell is the unit the roadside generator
+/// seeds its RNG per (`crate::render::scenery`), the unit its instance pools are
+/// sized against, and the unit the seam and road-width tests are written in.
+/// Changing *it* changes where every shrub, post and tunnel light in the course
+/// stands. See [`MESHES_PER_DRAW`] for the number that was actually too small.
 pub const CHUNK_LENGTH: f32 = 100.0;
+
+/// How many consecutive [`CHUNK_LENGTH`] cells are concatenated into **one drawn
+/// mesh**.
+///
+/// **This is the draw-call knob**, and it exists because the previous design had
+/// no such knob at all: one cell was one mesh, so the only way to spend fewer draw
+/// calls on the road was to author a coarser course.
+///
+/// The measurement that sized it. A chunk's four parts are four pieces of *unique*
+/// geometry — no two chunks share a mesh, so nothing about them can ever be
+/// instanced — and each therefore costs a full draw call in the shadow pre-pass
+/// and again in the main pass. At one mesh per cell the active window was 17
+/// meshes × 4 parts = **68 un-instanceable draws for the road alone**, the largest
+/// single contributor to a browser frame measured issuing **8,186 WebGL calls**.
+/// The cost there is not the draw itself: wgpu's WebGL2 path re-specifies the
+/// whole vertex layout on every draw (~52 GL calls each), so the road's draw count
+/// is most of the frame's submission cost.
+///
+/// Four is the trade taken, and what it trades is worth naming: a coarser window
+/// over-draws at its edges, so the road carries roughly 40% more triangles than
+/// the tight per-cell window did. That is the right way round for this frame.
+/// Triangles are not the constraint — the whole visible road is ~36k of them,
+/// which nothing in the target range notices — while draw calls demonstrably are.
+/// Batching finer optimises the resource this game has in surplus by spending the
+/// one it has run out of.
+///
+/// Merging is exact, not approximate: consecutive cells already *share* their
+/// boundary sample index (see the module docs), so concatenating their strips
+/// produces the same vertices in the same places. A merged mesh is the geometry
+/// of its cells, not a resampling of them, and the crack-free guarantee is
+/// untouched.
+pub const MESHES_PER_DRAW: usize = 4;
+
+/// The span of course one **drawn** mesh covers (m).
+pub const DRAW_SPAN: f32 = CHUNK_LENGTH * MESHES_PER_DRAW as f32;
 
 /// How far past the barrier the ground strip extends (m). Enough to frame the
 /// road and hide the horizon gap; nowhere near an open world.
@@ -92,6 +135,27 @@ pub fn chunk_count(track: &Track) -> usize {
     span_count(track, CHUNK_LENGTH)
 }
 
+/// How many **drawn meshes** cover `track` — one per [`DRAW_SPAN`].
+pub fn draw_count(track: &Track) -> usize {
+    span_count(track, DRAW_SPAN)
+}
+
+/// The inclusive sample index range drawn mesh `index` is built from.
+pub fn draw_sample_range(track: &Track, index: usize) -> (usize, usize) {
+    span_sample_range(track, index, DRAW_SPAN)
+}
+
+/// Build drawn mesh `index` of `track`: the geometry of its [`MESHES_PER_DRAW`]
+/// cells, concatenated.
+///
+/// Identical in output to building each cell and appending them — the cells share
+/// their boundary samples, so this walks one unbroken sample run and emits the
+/// same strips [`build_chunk`] would.
+pub fn build_draw_mesh(track: &Track, index: usize, tuning: &CourseTuning) -> ChunkMeshes {
+    let (start, end) = draw_sample_range(track, index);
+    build_over_samples(track, start, end, tuning)
+}
+
 /// The inclusive sample index range chunk `index` is built from.
 pub fn chunk_sample_range(track: &Track, index: usize) -> (usize, usize) {
     span_sample_range(track, index, CHUNK_LENGTH)
@@ -121,6 +185,21 @@ pub fn build_paint_chunk(track: &Track, index: usize, tuning: &CourseTuning) -> 
 /// Build chunk `index` of `track`.
 pub fn build_chunk(track: &Track, index: usize, tuning: &CourseTuning) -> ChunkMeshes {
     let (start, end) = chunk_sample_range(track, index);
+    build_over_samples(track, start, end, tuning)
+}
+
+/// Build the four material-separated meshes over an inclusive sample range.
+///
+/// The one place the road's strips are emitted. Both the authoring cell
+/// ([`build_chunk`]) and the drawn mesh ([`build_draw_mesh`]) are just different
+/// sample ranges handed to this, which is what makes "a merged mesh is exactly its
+/// cells" true by construction rather than by two implementations agreeing.
+fn build_over_samples(
+    track: &Track,
+    start: usize,
+    end: usize,
+    tuning: &CourseTuning,
+) -> ChunkMeshes {
     let samples = &track.samples()[start..=end];
     let rows = samples.len();
 

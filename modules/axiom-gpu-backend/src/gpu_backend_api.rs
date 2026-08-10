@@ -78,6 +78,25 @@ impl GpuBackendApi {
             .for_each(|live| live.set_draw2d_textures(&self.draw2d_textures));
     }
 
+    /// Render the 3D scene at `scale` of the device tier's render size — the
+    /// live arm of [`axiom_host::RenderScaleController`].
+    ///
+    /// The tier ([`axiom_host::HostDeviceProfile`]) decides the resolution the
+    /// frame would like; this decides what the device can afford, which is not a
+    /// question an app can answer at authoring time. Fragment cost is very nearly
+    /// linear in pixels, so it is the one quality dial that trades smoothly
+    /// against frame time rather than falling off a cliff.
+    ///
+    /// A no-op before the surface binds and on a scale that resolves to the size
+    /// already in use, so a caller may hand it the same value every frame.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+    pub fn set_render_scale(&mut self, scale: axiom_host::RenderScale) {
+        #[cfg(target_arch = "wasm32")]
+        self.live
+            .iter_mut()
+            .for_each(|live| live.set_render_scale(scale));
+    }
+
     /// The physical surface width the backend will bind.
     pub fn width(&self) -> u32 {
         self.width

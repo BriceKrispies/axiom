@@ -612,6 +612,10 @@ impl WindowingApi {
                 None => return,
             };
 
+            // The app's adaptive render-scale request, read once per frame below.
+            // Cloned out before `windowing` moves into the loop, exactly as
+            // `bound_backend` is.
+            let render_scale = windowing.render_scale.clone();
             let windowing = Rc::new(RefCell::new(windowing));
             // The shared dev frame-scrubber overlay (records each presented frame;
             // re-presents it while scrubbing; forks when hooks are present).
@@ -701,6 +705,13 @@ impl WindowingApi {
                     };
                     presenter.set_skinned(live_skinned);
                 }
+                // Apply the app's requested render scale before presenting. The
+                // cell is written by whatever the app drives its adaptive loop
+                // with (`WindowingApi::render_scale_control`); a scale equal to
+                // the one in use costs a comparison, so reading it every frame is
+                // the cheap path and there is no separate "did it change" signal
+                // for the app to get wrong.
+                presenter.set_render_scale(render_scale.get());
                 presenter.present(
                     tick, clear, &lights, light_vp, &batches, camera_vp, &casters, sdf,
                 );
@@ -1217,6 +1228,16 @@ impl LivePresenter {
         *self.pending_skinned.borrow_mut() = skinned;
     }
 
+    /// Render the scene at `scale` of the device tier's render size.
+    ///
+    /// A no-op on the software Canvas 2D arm, which owns no render target to
+    /// resize: that arm's cost is per-triangle rather than per-fragment, so
+    /// resolution is not its dial and pretending otherwise would report a change
+    /// that did nothing.
+    pub(crate) fn set_render_scale(&self, scale: axiom_host::RenderScale) {
+        self.backend.borrow_mut().set_render_scale(scale);
+    }
+
     /// Bind a presenter to `canvas`: select the backend from `?backend=` (else the
     /// WebGPU → WebGL2 → Canvas 2D cascade), upload the mesh set `meshes` and
     /// material set `materials` once, and mount the scrub-only dev overlay so a
@@ -1567,6 +1588,18 @@ enum LiveBackend {
 
 #[cfg(target_arch = "wasm32")]
 impl LiveBackend {
+    /// Render the 3D scene at `scale` of the device tier's render size.
+    ///
+    /// Only the GPU arm has a resizable off-swapchain target; the Canvas 2D
+    /// software rasterizer draws straight into its framebuffer and its cost is
+    /// per-triangle, not per-fragment, so a render scale means nothing there.
+    fn set_render_scale(&mut self, scale: axiom_host::RenderScale) {
+        match self {
+            LiveBackend::Gpu(binding) => binding.set_render_scale(scale),
+            LiveBackend::Canvas(_) => {}
+        }
+    }
+
     /// Which backend this actually is, as the neutral
     /// [`axiom_host::BackendKind`].
     ///

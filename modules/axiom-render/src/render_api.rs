@@ -103,16 +103,11 @@ impl RenderApi {
         ));
     }
 
-    pub fn add_input_mesh(
-        &self,
-        input: &mut RenderInput,
-        id: u64,
-        positions: Vec<Vec3>,
-        normals: Vec<Vec3>,
-        uvs: Vec<Vec2>,
-        indices: Vec<u32>,
-    ) -> u32 {
-        input.add_mesh(RenderMesh::new(id, positions, normals, uvs, indices))
+    /// Reference an uploaded mesh by `id`, spanning `index_count` indices.
+    ///
+    /// Identity, not geometry — see [`RenderMesh`].
+    pub fn add_input_mesh(&self, input: &mut RenderInput, id: u64, index_count: u32) -> u32 {
+        input.add_mesh(RenderMesh::new(id, index_count))
     }
 
     pub fn add_input_basic_lit_material(
@@ -642,14 +637,7 @@ mod tests {
             Vec3::ONE,
             Ratio::new(1.0).unwrap(),
         );
-        let mesh_idx = api().add_input_mesh(
-            &mut input,
-            42,
-            vec![Vec3::ZERO; 24],
-            vec![Vec3::UNIT_Y; 24],
-            vec![Vec2::ZERO; 24],
-            (0..36).collect(),
-        );
+        let mesh_idx = api().add_input_mesh(&mut input, 42, 36);
         let mat_idx =
             api().add_input_basic_lit_material(&mut input, 99, Vec4::new(0.5, 0.5, 0.5, 1.0));
         api().add_input_object(&mut input, 7, Mat4::IDENTITY, mesh_idx, mat_idx, true);
@@ -718,13 +706,7 @@ mod tests {
         let input = r.reset_input(800, 600);
         input.set_clear_color([0.1, 0.2, 0.3, 1.0]);
         input.push_camera(Mat4::IDENTITY, Mat4::IDENTITY);
-        let mesh = input.push_mesh(
-            42,
-            vec![Vec3::ZERO; 24],
-            vec![Vec3::UNIT_Y; 24],
-            vec![Vec2::ZERO; 24],
-            (0..36).collect(),
-        );
+        let mesh = input.push_mesh(42, 36);
         let mat = input.push_lit_material(
             99,
             Vec4::new(0.5, 0.5, 0.5, 1.0),
@@ -788,7 +770,7 @@ mod tests {
     #[test]
     fn invisible_objects_are_skipped() {
         let mut input = api().new_input(100, 100);
-        let mesh_idx = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh_idx = api().add_input_mesh(&mut input, 1, 3);
         let mat_idx = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
         api().add_input_object(&mut input, 1, Mat4::IDENTITY, mesh_idx, mat_idx, false);
         let list = api().build_command_list(&input);
@@ -825,7 +807,7 @@ mod tests {
         // single-pipeline slice — Clear + SetPipeline + 2×(Mesh, Mat, Draw) = 8
         // (no camera). This covers the run-length `prev == Some(pipeline)` arm.
         let mut input = api().new_input(64, 64);
-        let mesh = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api().add_input_mesh(&mut input, 1, 3);
         let mat = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
         api().add_input_object(&mut input, 10, Mat4::IDENTITY, mesh, mat, true);
         api().add_input_object(&mut input, 20, Mat4::IDENTITY, mesh, mat, true);
@@ -842,7 +824,7 @@ mod tests {
         // Two objects with distinct pipelines and tags: each draw is preceded by
         // its own SetPipeline, and its tag rides on the DrawIndexed command.
         let mut input = api().new_input(64, 64);
-        let mesh = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api().add_input_mesh(&mut input, 1, 3);
         let mat = api().add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
         api().add_input_bound_object(
             &mut input,
@@ -899,7 +881,7 @@ mod cov {
         // Valid mesh idx but out-of-range material idx exercises the
         // material `None => continue` arm specifically.
         let mut input = api().new_input(100, 100);
-        let mesh_idx = api().add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh_idx = api().add_input_mesh(&mut input, 1, 3);
         api().add_input_object(&mut input, 1, Mat4::IDENTITY, mesh_idx, 99, true);
         let list = api().build_command_list(&input);
         // ClearFrame only; the object was dropped at material lookup.
@@ -924,7 +906,7 @@ mod cov {
         // hits its `_ => None` arm.
         let mut input = api.new_input(10, 10);
         api.set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
-        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
         let mat = api.add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
         api.add_input_object(&mut input, 1, Mat4::IDENTITY, mesh, mat, true);
         let list = api.build_command_list(&input);
@@ -941,7 +923,7 @@ mod cov {
     fn textured_material_threads_its_texture_into_the_set_material_command() {
         let api = api();
         let mut input = api.new_input(100, 100);
-        let mesh_idx = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh_idx = api.add_input_mesh(&mut input, 1, 3);
         let mat_idx = api.add_input_textured_material(&mut input, 5, Vec4::ONE, 77);
         api.add_input_object(&mut input, 1, Mat4::IDENTITY, mesh_idx, mat_idx, true);
         let list = api.build_command_list(&input);
@@ -977,7 +959,7 @@ mod translucency_cov {
         let api = api();
         let mut input = api.new_input(64, 64);
         api.set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
-        let mesh = api.add_input_mesh(&mut input, 1, vec![], vec![], vec![], vec![0, 1, 2]);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
         // base-colour alpha 1.0 × opacity 0.5 → folded draw alpha 0.5.
         let mat = api.add_input_lit_material(
             &mut input,

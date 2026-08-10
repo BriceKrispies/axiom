@@ -115,6 +115,8 @@ def log(line: str) -> None:
 class Daemon:
     def __init__(self) -> None:
         self._pw = None
+        self._throttle_cdp = None
+        self._throttle_rate = None
         self.browser = None
         self.context = None
         self.page = None
@@ -161,6 +163,7 @@ class Daemon:
             **MOBILE,
         )
         self.page = self.context.new_page()
+        self._apply_cpu_throttle()
         self.console = []
         self.page.on(
             "console",
@@ -170,6 +173,55 @@ class Daemon:
             "pageerror",
             lambda e: self.console.append({"type": "pageerror", "text": str(e)}),
         )
+
+    def _apply_cpu_throttle(self):
+        """Slow the page's main thread by AXIOM_PW_CPU_THROTTLE (a multiplier).
+
+        A desktop renders these apps with so much headroom that vsync flattens
+        every difference — measured, every section of a course reports an
+        identical 16.7 ms — so a desktop browser cannot tell a frame that costs
+        2 ms from one that costs 14 ms, and neither can it tell whether a change
+        helped. Throttling the main thread reproduces the one thing a phone has
+        that a desktop does not: no slack. A mid-range Android is roughly 4-6x
+        slower than a desktop on single-threaded work, which is what this dial
+        is for.
+
+        It throttles the CPU only — the GPU is untouched, so this measures
+        main-thread and driver-submission cost (which is what a WebGL2 draw call
+        mostly is) and NOT fragment/fill cost. Read a result from it as "how
+        expensive is this frame to *submit*", never as a whole-frame budget.
+        """
+        rate = os.environ.get("AXIOM_PW_CPU_THROTTLE", "")
+        if not rate:
+            return
+        try:
+            factor = float(rate)
+        except ValueError:
+            return
+        try:
+            # HELD on the daemon, deliberately. An emulation override belongs to
+            # the CDP session that set it, so a session dropped on the floor here
+            # takes the throttle with it whenever it is collected or detached —
+            # and the page then quietly runs at full speed while every reading
+            # still claims to be throttled. That failure is invisible and it
+            # produces exactly the result you were hoping for (a fast frame), so
+            # keep the session alive for the page's lifetime.
+            self._throttle_cdp = self.context.new_cdp_session(self.page)
+            self._throttle_cdp.send("Emulation.setCPUThrottlingRate", {"rate": factor})
+            self._throttle_rate = factor
+            log(f"daemon: CPU throttled {factor}x")
+        except Exception as exc:  # pragma: no cover - depends on the browser
+            log(f"daemon: CPU throttle failed ({exc})")
+
+    def _reassert_cpu_throttle(self) -> None:
+        """Re-apply the throttle after anything that may have reset it."""
+        rate = getattr(self, "_throttle_rate", None)
+        if rate is None:
+            return
+        try:
+            self._throttle_cdp.send("Emulation.setCPUThrottlingRate", {"rate": rate})
+        except Exception:
+            self._apply_cpu_throttle()
 
     def handle(self, action: str, args: list[str]) -> dict:
         if action == "stop":
@@ -194,6 +246,7 @@ class Daemon:
                 return {"ok": False, "error": "goto needs a URL"}
             self.console = []
             resp = self.page.goto(args[0], wait_until="load", timeout=30000)
+            self._reassert_cpu_throttle()
             return {
                 "ok": True,
                 "url": self.page.url,
@@ -222,6 +275,44 @@ class Daemon:
             return {"ok": True, "result": result}
         if action == "console":
             return {"ok": True, "messages": self.console}
+        if action == "profile":
+            # Sample the main thread for N ms and return the heaviest functions
+            # by SELF time, wasm included.
+            #
+            # The frame-time and GL-census evals answer "how slow" and "how many
+            # calls"; neither can say *which function*. For a wasm app that
+            # matters more than usual, because the expensive work is inside one
+            # opaque rAF callback and no amount of JS-side wrapping can see into
+            # it. The V8 sampling profiler can: wasm frames carry their names
+            # into the profile as long as the module keeps its name section.
+            ms = int(args[0]) if args else 4000
+            cdp = self.context.new_cdp_session(self.page)
+            cdp.send("Profiler.enable")
+            cdp.send("Profiler.setSamplingInterval", {"interval": 100})
+            cdp.send("Profiler.start")
+            self.page.wait_for_timeout(ms)
+            profile = cdp.send("Profiler.stop")["profile"]
+            self._reassert_cpu_throttle()
+            nodes = {n["id"]: n for n in profile["nodes"]}
+            self_hits: dict[int, int] = {}
+            for sample in profile.get("samples", []):
+                self_hits[sample] = self_hits.get(sample, 0) + 1
+            total = max(sum(self_hits.values()), 1)
+            rows = []
+            for node_id, hits in sorted(
+                self_hits.items(), key=lambda kv: -kv[1]
+            )[:25]:
+                frame = nodes.get(node_id, {}).get("callFrame", {})
+                name = frame.get("functionName") or "(anonymous)"
+                url = (frame.get("url") or "").rsplit("/", 1)[-1]
+                rows.append(
+                    {
+                        "fn": name[:90],
+                        "at": url[:40],
+                        "pct": round(100.0 * hits / total, 1),
+                    }
+                )
+            return {"ok": True, "samples": total, "top": rows}
 
         return {"ok": False, "error": f"unknown action: {action}"}
 

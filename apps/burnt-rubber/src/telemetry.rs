@@ -132,7 +132,7 @@ pub struct Contributor {
 
 /// The three biggest contributors to this frame, largest first.
 ///
-/// The candidates are the four systems that actually issue draws. `active_chunks`
+/// The candidates are the four systems that actually issue draws. `road_draws`
 /// is deliberately not among them: a chunk is a subdivision of the road, not a
 /// separate consumer, and listing it meant the road was counted twice and pushed
 /// a real system off the bottom of a three-line panel.
@@ -226,8 +226,8 @@ mod tests {
     #[test]
     fn the_panel_ranks_the_biggest_three_and_keeps_their_units() {
         let counters = crate::render::SceneCounters {
-            active_chunks: 14,
-            total_chunks: 93,
+            road_draws: 14,
+            total_road_draws: 93,
             road_triangles: 48_320,
             scenery_instances: 136,
             cached_scenery_chunks: 17,

@@ -21,6 +21,13 @@ use crate::tuning::DT;
 use super::BendIt;
 
 impl BendIt {
+    /// Which way world space runs when the player swipes right, for whichever
+    /// camera they are watching through.
+    fn screen_right(&self) -> axiom::prelude::Vec3 {
+        let pose = self.camera();
+        crate::camera::basis(pose.eye, pose.target).1
+    }
+
     /// Fold this tick's contact into the drawing, and — if it finished — read it.
     pub(super) fn draw(
         &mut self,
@@ -47,6 +54,7 @@ impl BendIt {
         {
             Drawing::Idle => {
                 self.preview = None;
+                self.dive = None;
                 Vec::new()
             }
             // What the line would be struck at if it were let go now.
@@ -56,6 +64,20 @@ impl BendIt {
             // is worse than no preview, because it teaches the player something
             // untrue about their own hand. Below the length that counts as a shot
             // there is nothing honest to say yet, so it says nothing.
+            // Keeping: the hands follow the finger, live and in the world.
+            Drawing::Drawing if self.session.keeping() => {
+                let right = self.screen_right();
+                self.dive = self.capture.stroke().points().last().map(|finish| {
+                    DiveCall::read(
+                        *finish,
+                        self.surface,
+                        self.session.keeper().motion().hips,
+                        right,
+                        &tuning.keeper,
+                    )
+                });
+                Vec::new()
+            }
             Drawing::Drawing => {
                 self.preview = (self.capture.stroke().length()
                     >= short * tuning.stroke.min_length)
@@ -75,11 +97,13 @@ impl BendIt {
             Drawing::Finished(line) if self.session.keeping() => {
                 self.ghost = Some((line.clone(), 1.0));
                 self.preview = None;
+                self.dive = None;
                 // Where the finger finished is where the hands go. Only the
                 // finish, because a keeper's line is a gesture toward a corner
                 // rather than a path a body follows — and asking for an accurate
                 // arc in the third of a second somebody has would be asking for
                 // precision nobody has when they need it.
+                let right = self.screen_right();
                 line.points()
                     .last()
                     .map(|finish| {
@@ -87,6 +111,7 @@ impl BendIt {
                             *finish,
                             self.surface,
                             self.session.keeper().motion().hips,
+                            right,
                             &tuning.keeper,
                         ))]
                     })

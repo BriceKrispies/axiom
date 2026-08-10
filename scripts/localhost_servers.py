@@ -329,6 +329,22 @@ def app_command(app: str, port: int, *, name: str | None = None) -> tuple[str, l
 # ── CLI ──────────────────────────────────────────────────────────────────────────
 
 def main(argv: list[str]) -> int:
+    # Split the command-to-run off BEFORE argparse sees it.
+    #
+    # `start` used to collect it with `nargs=REMAINDER` declared after the `name`
+    # positional, which swallows everything from the first following token —
+    # including this parser's own `--port` and `--cwd`. The documented usage
+    #   start docs --port 9000 --cwd site -- python -m http.server 9000
+    # therefore could not work: `cwd` came back None and the spawned argv[0] was
+    # the literal string "--port", so Popen raised FileNotFoundError. Splitting
+    # on the first bare `--` here leaves the flags for argparse and hands the
+    # tail over untouched — including any inner `--`, which `cargo run -p X --
+    # <app args>` needs.
+    cmd_tail: list[str] | None = None
+    if "--" in argv:
+        cut = argv.index("--")
+        argv, cmd_tail = argv[:cut], argv[cut + 1:]
+
     parser = argparse.ArgumentParser(description="Manage background localhost servers.")
     sub = parser.add_subparsers(dest="cmd")
 
@@ -345,7 +361,7 @@ def main(argv: list[str]) -> int:
     p_start.add_argument("name")
     p_start.add_argument("--port", type=int, default=None)
     p_start.add_argument("--cwd", default=None)
-    p_start.add_argument("rest", nargs=argparse.REMAINDER,
+    p_start.add_argument("rest", nargs="*",
                          help="-- then the command to run, e.g. -- python -m http.server 9000")
 
     for cname in ("stop", "restart", "url"):
@@ -368,7 +384,7 @@ def main(argv: list[str]) -> int:
     if cmd == "start-app":
         return do_start(*app_command(args.app, args.port, name=args.name))
     if cmd == "start":
-        rest = args.rest
+        rest = cmd_tail if cmd_tail is not None else args.rest
         if rest and rest[0] == "--":
             rest = rest[1:]
         if not rest:

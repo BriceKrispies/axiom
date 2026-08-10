@@ -40,14 +40,7 @@ fn cube_capture(api: &RenderApi, frame: u64, tick: u64, world: Mat4) -> (Vec<u8>
         Vec3::ONE,
         Ratio::new(1.0).unwrap(),
     );
-    let mesh = api.add_input_mesh(
-        &mut input,
-        1,
-        vec![Vec3::ZERO; 24],
-        vec![Vec3::UNIT_Y; 24],
-        vec![Vec2::ZERO; 24],
-        (0..36).collect(),
-    );
+    let mesh = api.add_input_mesh(&mut input, 1, 36);
     let material = api.add_input_basic_lit_material(&mut input, 1, Vec4::new(0.8, 0.4, 0.2, 1.0));
     api.add_input_object(&mut input, 1, world, mesh, material, true);
 
@@ -64,22 +57,8 @@ fn cube_capture(api: &RenderApi, frame: u64, tick: u64, world: Mat4) -> (Vec<u8>
 fn two_object_capture(api: &RenderApi, swap: bool) -> Vec<u8> {
     let mut input = api.new_input(VIEWPORT_W, VIEWPORT_H);
     api.set_input_clear_color(&mut input, [0.0, 0.0, 0.0, 1.0]);
-    let mesh_a = api.add_input_mesh(
-        &mut input,
-        1,
-        vec![Vec3::ZERO; 3],
-        vec![Vec3::UNIT_Y; 3],
-        vec![Vec2::ZERO; 3],
-        (0..3).collect(),
-    );
-    let mesh_b = api.add_input_mesh(
-        &mut input,
-        2,
-        vec![Vec3::ZERO; 3],
-        vec![Vec3::UNIT_Y; 3],
-        vec![Vec2::ZERO; 3],
-        (0..3).collect(),
-    );
+    let mesh_a = api.add_input_mesh(&mut input, 1, 3);
+    let mesh_b = api.add_input_mesh(&mut input, 2, 3);
     let mat_a = api.add_input_basic_lit_material(&mut input, 1, Vec4::ONE);
     let mat_b = api.add_input_basic_lit_material(&mut input, 2, Vec4::new(0.1, 0.2, 0.3, 1.0));
     if swap {

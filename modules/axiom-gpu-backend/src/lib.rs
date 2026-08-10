@@ -66,6 +66,11 @@ mod surface_recovery;
 #[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod scene_renderer;
 
+// Which draws can actually reach the directional shadow map. Pure geometry over
+// plain arrays, compiled everywhere (and covered natively) precisely because the
+// rule is impossible to debug from inside a render pass.
+mod shadow_cull;
+
 // Upscale-blit pipeline presenting a reduced-resolution render target: the live
 // binding's mobile-first render-scale path, and the offscreen retro 32-bit low-res +
 // nearest upscale. Available wherever a real GPU renders (wasm32 / offscreen).

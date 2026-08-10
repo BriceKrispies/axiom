@@ -335,12 +335,15 @@ impl RaceScene {
         self.last_view_proj = view_projection(&camera, self.aspect);
 
         self.road.update(app, sim.car().distance);
-        if let Some(range) = self.road.active_range() {
+        if let Some(range) = self
+            .road
+            .scenery_range_for(sim.track(), sim.car().distance)
+        {
             self.scenery.refresh(sim.track(), &tuning.course, range);
         }
         self.scenery.pose(app, camera.eye, self.last_view_proj);
 
-        self.pose_traffic(app, sim);
+        self.pose_traffic(app, sim, alpha);
 
         let braking = brake_intensity(sim);
         let boost = if sim.boost().active() { 1.0 } else { 0.0 };
@@ -385,15 +388,19 @@ impl RaceScene {
     }
 
     /// Place every live traffic car and retire the rest.
-    fn pose_traffic(&self, app: &mut RunningApp, sim: &RaceSim) {
+    fn pose_traffic(&self, app: &mut RunningApp, sim: &RaceSim, alpha: f32) {
         let track = sim.track();
-        for (index, car) in sim.traffic().cars().iter().enumerate() {
-            if !car.active {
+        for index in 0..sim.traffic().cars().len() {
+            // Interpolated between fixed steps, exactly as the player's car and
+            // the camera are — otherwise traffic steps at the simulation rate
+            // while everything around it moves at the display's, which is a
+            // 60 Hz judder on a 120 Hz screen.
+            let Some((distance, lateral)) = sim.traffic_pose(index, alpha) else {
                 self.traffic.pose(app, index, None);
                 continue;
-            }
-            let sample = track.interpolated_at(car.distance);
-            let position = sample.at_lateral(car.lateral);
+            };
+            let sample = track.interpolated_at(distance);
+            let position = sample.at_lateral(lateral);
             let forward = sample.flat_forward();
             self.traffic.pose(
                 app,
@@ -406,8 +413,8 @@ impl RaceScene {
     /// Diagnostics counters for this frame.
     pub fn counters(&self) -> SceneCounters {
         SceneCounters {
-            active_chunks: self.road.active_count(),
-            total_chunks: self.road.len(),
+            road_draws: self.road.active_count(),
+            total_road_draws: self.road.len(),
             road_triangles: self.road.active_triangles(),
             scenery_instances: self.scenery.drawn_count(),
             cached_scenery_chunks: self.scenery.cached_chunks(),
@@ -435,8 +442,8 @@ impl RaceScene {
 /// What the scene drew this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SceneCounters {
-    pub active_chunks: usize,
-    pub total_chunks: usize,
+    pub road_draws: usize,
+    pub total_road_draws: usize,
     pub road_triangles: usize,
     pub scenery_instances: usize,
     pub cached_scenery_chunks: usize,
@@ -1157,9 +1164,15 @@ mod tests {
     /// keep the road's layers apart.
     #[test]
     fn the_depth_range_covers_the_drawn_road_and_no_more() {
-        let drawn = chunks::CHUNKS_AHEAD as f32 * road_mesh::CHUNK_LENGTH;
-        assert!(FAR_PLANE > drawn, "the far plane reaches the furthest chunk");
-        assert!(FAR_PLANE < drawn + 400.0, "and does not waste precision beyond it");
+        // The *guaranteed* reach: a car sitting at the far end of its current
+        // drawn mesh still has this much road in front of it. The worst case is
+        // what the far plane has to cover, not the best.
+        let drawn = chunks::DRAWS_AHEAD as f32 * road_mesh::DRAW_SPAN;
+        assert!(FAR_PLANE > drawn, "the far plane reaches the furthest road mesh");
+        assert!(
+            FAR_PLANE < drawn + road_mesh::DRAW_SPAN,
+            "and does not waste precision beyond the road that exists"
+        );
         assert!(NEAR_PLANE >= 1.0, "the near plane keeps depth precision");
         assert!(
             NEAR_PLANE < crate::tuning::CameraTuning::DEFAULT.distance_low,
@@ -1177,15 +1190,23 @@ mod tests {
         }
         scene.pose(&mut app, &sim, None, 0.5);
         let c = scene.counters();
-        assert!(c.active_chunks > 0);
+        assert!(c.road_draws > 0);
         assert!(
-            c.active_chunks <= chunks::CHUNKS_AHEAD + chunks::CHUNKS_BEHIND + 1,
-            "{} chunks drawn",
-            c.active_chunks
+            c.road_draws <= chunks::DRAWS_AHEAD + chunks::DRAWS_BEHIND + 1,
+            "{} road meshes drawn",
+            c.road_draws
         );
-        assert!(c.total_chunks > c.active_chunks, "the course is streamed, not all drawn");
+        assert!(c.total_road_draws > c.road_draws, "the course is streamed, not all drawn");
         assert!(c.road_triangles > 10_000);
-        assert!(c.cached_scenery_chunks <= c.active_chunks + 1);
+        // Scenery is counted in authoring cells and the road in drawn meshes, so
+        // these two are bounded against *their own* windows. Comparing them to
+        // each other is what the old counter names invited, and it silently
+        // stopped meaning anything the moment the road started batching cells.
+        assert!(
+            c.cached_scenery_chunks <= chunks::CHUNKS_AHEAD + chunks::CHUNKS_BEHIND + 2,
+            "{} scenery cells cached",
+            c.cached_scenery_chunks
+        );
         assert_eq!(c.traffic_slots, sim.tuning().race.traffic_active);
     }
 
@@ -1201,7 +1222,7 @@ mod tests {
             if step % 30 == 0 {
                 scene.pose(&mut app, &sim, None, 0.0);
                 let c = scene.counters();
-                assert!(c.active_chunks <= ceiling, "step {step}: {} chunks", c.active_chunks);
+                assert!(c.road_draws <= ceiling, "step {step}: {} chunks", c.road_draws);
                 assert!(
                     c.scenery_instances < 1_400,
                     "step {step}: {} scenery instances",
