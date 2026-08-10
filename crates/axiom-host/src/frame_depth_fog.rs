@@ -71,7 +71,7 @@
 //!
 //! Normalized scalars are [`Ratio`] — no naked `f32` on the public surface.
 
-use axiom_kernel::Ratio;
+use axiom_kernel::{Meters, Ratio};
 
 /// A frame's atmospheric depth fog: pixels are mixed toward `color` by their
 /// normalized depth, from `0` at `near` to `strength` at `far` and beyond.
@@ -151,10 +151,16 @@ impl FrameDepthFog {
     /// `0.0` for `view_distance`, which zeroes the air term and leaves the ramp —
     /// the declared substitute, expressed as an argument rather than as a second
     /// code path.
-    pub fn mix_fraction(&self, ndc_depth: f32, view_distance: f32) -> Ratio {
+    /// `ndc_depth` is a normalized device depth and `view_distance` is a world
+    /// distance, so they are a [`Ratio`] and [`Meters`] rather than two bare
+    /// `f32`s: at this boundary a naked float says nothing about which of the two
+    /// it is, and swapping them silently produces a plausible-looking fog instead
+    /// of an error.
+    pub fn mix_fraction(&self, ndc_depth: Ratio, view_distance: Meters) -> Ratio {
         let span = (self.far.get() - self.near.get()).abs().max(1.0e-6);
-        let screen = ((ndc_depth - self.near.get()) / span).clamp(0.0, 1.0);
-        let air = 1.0 - (-self.extinction.get().max(0.0) * view_distance.max(0.0)).exp2();
+        let screen = ((ndc_depth.get() - self.near.get()) / span).clamp(0.0, 1.0);
+        let air =
+            1.0 - (-self.extinction.get().max(0.0) * view_distance.get().max(0.0)).exp2();
         let combined = 1.0 - (1.0 - screen) * (1.0 - air);
         Ratio::finite_or_zero(combined * self.strength.get().clamp(0.0, 1.0))
     }
@@ -196,6 +202,16 @@ impl FrameDepthFog {
 mod tests {
     use super::*;
 
+    /// A normalized device depth as the `Ratio` the API now takes.
+    fn nd(v: f32) -> Ratio {
+        Ratio::finite_or_zero(v)
+    }
+
+    /// A world distance as the `Meters` the API now takes.
+    fn me(v: f32) -> Meters {
+        Meters::finite_or_zero(v)
+    }
+
     fn r(v: f32) -> Ratio {
         Ratio::finite_or_zero(v)
     }
@@ -227,7 +243,7 @@ mod tests {
         // different fogs.
         assert_ne!(off, off.with_extinction(r(0.01)));
         // Zero strength is a no-op whatever else is authored, air included.
-        assert_eq!(off.with_extinction(r(1.0)).mix_fraction(1.0, 900.0).get(), 0.0);
+        assert_eq!(off.with_extinction(r(1.0)).mix_fraction(nd(1.0), me(900.0)).get(), 0.0);
     }
 
     /// The screen-space ramp on its own, unchanged by the arrival of the air
@@ -236,22 +252,22 @@ mod tests {
     #[test]
     fn the_normalized_depth_ramp_alone_is_what_it_always_was() {
         let fog = FrameDepthFog::new(r(0.5), r(1.0), r(0.8), [0.5; 3]);
-        assert_eq!(fog.mix_fraction(0.0, 0.0).get(), 0.0, "before near: clear");
-        assert_eq!(fog.mix_fraction(0.5, 0.0).get(), 0.0, "at near: clear");
-        assert!((fog.mix_fraction(0.75, 0.0).get() - 0.4).abs() < 1.0e-6, "halfway");
-        assert!((fog.mix_fraction(1.0, 0.0).get() - 0.8).abs() < 1.0e-6, "at far");
-        assert!((fog.mix_fraction(9.0, 0.0).get() - 0.8).abs() < 1.0e-6, "past far");
+        assert_eq!(fog.mix_fraction(nd(0.0), me(0.0)).get(), 0.0, "before near: clear");
+        assert_eq!(fog.mix_fraction(nd(0.5), me(0.0)).get(), 0.0, "at near: clear");
+        assert!((fog.mix_fraction(nd(0.75), me(0.0)).get() - 0.4).abs() < 1.0e-6, "halfway");
+        assert!((fog.mix_fraction(nd(1.0), me(0.0)).get() - 0.8).abs() < 1.0e-6, "at far");
+        assert!((fog.mix_fraction(nd(9.0), me(0.0)).get() - 0.8).abs() < 1.0e-6, "past far");
         // An inverted (and a zero-width) range is floored, not divided by zero.
         let inverted = FrameDepthFog::new(r(1.0), r(0.5), r(1.0), [0.0; 3]);
-        assert!(inverted.mix_fraction(0.75, 0.0).get().is_finite());
+        assert!(inverted.mix_fraction(nd(0.75), me(0.0)).get().is_finite());
         let degenerate = FrameDepthFog::new(r(0.5), r(0.5), r(1.0), [0.0; 3]);
-        assert_eq!(degenerate.mix_fraction(0.75, 0.0).get(), 1.0);
-        assert_eq!(degenerate.mix_fraction(0.25, 0.0).get(), 0.0);
+        assert_eq!(degenerate.mix_fraction(nd(0.75), me(0.0)).get(), 1.0);
+        assert_eq!(degenerate.mix_fraction(nd(0.25), me(0.0)).get(), 0.0);
         // A strength outside 0..1 is a ceiling, clamped rather than trusted.
         let hot = FrameDepthFog::new(r(0.0), r(1.0), r(4.0), [0.0; 3]);
-        assert_eq!(hot.mix_fraction(1.0, 0.0).get(), 1.0);
+        assert_eq!(hot.mix_fraction(nd(1.0), me(0.0)).get(), 1.0);
         let cold = FrameDepthFog::new(r(0.0), r(1.0), r(-2.0), [0.0; 3]);
-        assert_eq!(cold.mix_fraction(1.0, 0.0).get(), 0.0);
+        assert_eq!(cold.mix_fraction(nd(1.0), me(0.0)).get(), 0.0);
     }
 
     /// The defect this parameter exists to remove, measured rather than asserted
@@ -268,7 +284,7 @@ mod tests {
             f * (metres - n) / (metres * (f - n))
         };
         let share = |f: &FrameDepthFog, air: bool| {
-            let at = |m: f32| f.mix_fraction(ndc(m), m * f32::from(air)).get();
+            let at = |d: f32| f.mix_fraction(nd(ndc(d)), me(d * f32::from(air))).get();
             (at(100.0) - at(25.0)) / (at(1200.0) - at(25.0))
         };
         // The widest window that still reaches full density inside the scene —
@@ -295,20 +311,20 @@ mod tests {
             .windows(2)
             .for_each(|w| {
                 let (a, b) = (
-                    air.mix_fraction(0.0, w[0]).get(),
-                    air.mix_fraction(0.0, w[1]).get(),
+                    air.mix_fraction(nd(0.0), me(w[0])).get(),
+                    air.mix_fraction(nd(0.0), me(w[1])).get(),
                 );
                 assert!(b - a > 0.05, "{a} -> {b} at {w:?} is not a ramp");
             });
         // Checked against Beer-Lambert's own definition: half in at the
         // half-distance, three quarters at twice it.
-        assert!((air.mix_fraction(0.0, 250.0).get() - 0.5).abs() < 1.0e-5);
-        assert!((air.mix_fraction(0.0, 500.0).get() - 0.75).abs() < 1.0e-5);
+        assert!((air.mix_fraction(nd(0.0), me(250.0)).get() - 0.5).abs() < 1.0e-5);
+        assert!((air.mix_fraction(nd(0.0), me(500.0)).get() - 0.75).abs() < 1.0e-5);
         // Behind the camera is not negative air, and neither is a negative rate.
-        assert_eq!(air.mix_fraction(0.0, -40.0).get(), 0.0);
+        assert_eq!(air.mix_fraction(nd(0.0), me(-40.0)).get(), 0.0);
         let backwards =
             FrameDepthFog::new(r(1.0), r(1.0), r(1.0), [0.7; 3]).with_extinction(r(-0.004));
-        assert_eq!(backwards.mix_fraction(0.0, 400.0).get(), 0.0);
+        assert_eq!(backwards.mix_fraction(nd(0.0), me(400.0)).get(), 0.0);
     }
 
     /// The two terms compose as independent extinction, and a backend that
@@ -320,16 +336,16 @@ mod tests {
             .with_extinction(r(0.004));
         // screen = 0.5 at ndc 0.75; air = 1 - 2^-1 = 0.5 at 250 m.
         // combined = 1 - 0.5*0.5 = 0.75.
-        assert!((fog.mix_fraction(0.75, 250.0).get() - 0.75).abs() < 1.0e-5);
+        assert!((fog.mix_fraction(nd(0.75), me(250.0)).get() - 0.75).abs() < 1.0e-5);
         // Either term alone reaches the ceiling on its own.
-        assert!((fog.mix_fraction(1.0, 0.0).get() - 1.0).abs() < 1.0e-6);
+        assert!((fog.mix_fraction(nd(1.0), me(0.0)).get() - 1.0).abs() < 1.0e-6);
         // The declared substitute: distance 0 kills the air term and leaves the
         // ramp identical to the same fog with no rate authored at all.
         let ramp_only = FrameDepthFog::new(r(0.5), r(1.0), r(1.0), [0.5; 3]);
         [0.0_f32, 0.4, 0.6, 0.9, 1.0].into_iter().for_each(|z| {
             assert_eq!(
-                fog.mix_fraction(z, 0.0).get(),
-                ramp_only.mix_fraction(z, 0.0).get(),
+                fog.mix_fraction(nd(z), me(0.0)).get(),
+                ramp_only.mix_fraction(nd(z), me(0.0)).get(),
                 "the substitute must be bit-identical at ndc {z}"
             );
         });
