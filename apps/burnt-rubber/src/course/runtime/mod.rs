@@ -22,7 +22,8 @@ pub mod activation;
 pub mod inspect;
 
 use crate::course::geometry::CompiledSection;
-use crate::course::specification::{EncounterId, VehicleId};
+use crate::course::pickups::BoostPickup;
+use crate::course::specification::{EncounterId, PickupId, VehicleId};
 use crate::course::traffic::{CompiledEncounter, NearMissWindow, TrafficPlan};
 use crate::course::validation::ValidationReport;
 use crate::track::Track;
@@ -42,14 +43,17 @@ pub struct CoursePlan {
     encounters: Vec<CompiledEncounter>,
     windows: Vec<NearMissWindow>,
     window_index: DistanceIndex,
+    pickups: Vec<BoostPickup>,
+    pickup_index: DistanceIndex,
     report: ValidationReport,
 }
 
 impl CoursePlan {
     /// Assemble a plan from its compiled parts, building the runtime indexes.
     ///
-    /// `traffic` and `windows` must already be in ascending distance order —
-    /// the compiler sorts them, and the indexes assume it.
+    /// `traffic`, `windows` and `pickups` must already be in ascending distance
+    /// order — the compiler sorts them, and the indexes assume it.
+    #[allow(clippy::too_many_arguments)]
     pub fn assemble(
         name: String,
         seed: u64,
@@ -58,6 +62,7 @@ impl CoursePlan {
         traffic: Vec<TrafficPlan>,
         encounters: Vec<CompiledEncounter>,
         windows: Vec<NearMissWindow>,
+        pickups: Vec<BoostPickup>,
         report: ValidationReport,
     ) -> CoursePlan {
         let length = track.length();
@@ -65,6 +70,7 @@ impl CoursePlan {
             DistanceIndex::build(length, sections.iter().map(|s| s.start_m));
         let traffic_index = DistanceIndex::build(length, traffic.iter().map(|p| p.spawn_m));
         let window_index = DistanceIndex::build(length, windows.iter().map(|w| w.start_m));
+        let pickup_index = DistanceIndex::build(length, pickups.iter().map(|p| p.at_m));
         CoursePlan {
             name,
             seed,
@@ -76,6 +82,8 @@ impl CoursePlan {
             encounters,
             windows,
             window_index,
+            pickups,
+            pickup_index,
             report,
         }
     }
@@ -178,6 +186,41 @@ impl CoursePlan {
             .iter()
             .take_while(move |w| w.start_m <= limit)
             .filter(move |w| w.end_m >= from_m)
+    }
+
+    /// Every compiled boost pickup, in ascending course order.
+    pub fn pickups(&self) -> &[BoostPickup] {
+        &self.pickups
+    }
+
+    /// The index of the first pickup at or past `distance_m`. `O(1)` plus a
+    /// bounded walk inside one bucket — the same shape as
+    /// [`Self::first_vehicle_at`], and the entry point the runtime's collector
+    /// uses so a swept collect test never scans the whole course.
+    pub fn first_pickup_at(&self, distance_m: f32) -> usize {
+        let from = self.pickup_index.first_at(distance_m);
+        from + self.pickups[from..]
+            .iter()
+            .position(|p| p.at_m >= distance_m)
+            .unwrap_or(self.pickups.len() - from)
+    }
+
+    /// A pickup by its stable identity.
+    pub fn pickup(&self, id: PickupId) -> Option<&BoostPickup> {
+        // Identities are minted densely, so the id is very nearly the index;
+        // confirm rather than search.
+        self.pickups
+            .get(id.0 as usize)
+            .filter(|p| p.id == id)
+            .or_else(|| self.pickups.iter().find(|p| p.id == id))
+    }
+
+    /// The pickups standing in `[from_m, from_m + span_m]`.
+    pub fn pickups_ahead(&self, from_m: f32, span_m: f32) -> impl Iterator<Item = &BoostPickup> {
+        let limit = from_m + span_m;
+        self.pickups[self.first_pickup_at(from_m)..]
+            .iter()
+            .take_while(move |p| p.at_m <= limit)
     }
 
     /// The validation report this course compiled with.

@@ -64,6 +64,20 @@ impl std::fmt::Display for EncounterId {
     }
 }
 
+/// The stable identity of a compiled boost pickup.
+///
+/// Dense and ordered by course distance, like [`VehicleId`] — which is what lets
+/// the runtime's "have I taken this one" ledger be a flat array indexed by it
+/// rather than a set that has to hash something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PickupId(pub u32);
+
+impl std::fmt::Display for PickupId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "p{}", self.0)
+    }
+}
+
 /// Reject a duplicated stable identifier, naming both the id and where the
 /// clash is.
 pub fn reject_duplicates(ids: &[SectionId]) -> CourseResult<()> {
@@ -115,7 +129,9 @@ mod tests {
     fn generated_identities_print_compactly() {
         assert_eq!(VehicleId(12).to_string(), "v12");
         assert_eq!(EncounterId(3).to_string(), "e3");
+        assert_eq!(PickupId(7).to_string(), "p7");
         assert!(VehicleId(1) < VehicleId(2));
         assert!(EncounterId(1) < EncounterId(2));
+        assert!(PickupId(1) < PickupId(2));
     }
 }

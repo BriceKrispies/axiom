@@ -21,11 +21,11 @@
 
 use crate::course::error::{CourseError, CourseErrorCode, CourseResult, SourceLocation};
 use crate::course::specification::{
-    BankingMode, CountRange, CourseDefaults, CourseItem, CourseSpec, EncounterSpec, LaneWeight,
-    MotifInvocation, MotifKind, MotifParams, NearMissWindowSpec, PassingSide, RoadModifierSpec,
-    RoadPrimitiveSpec, RollingWallSpec, ScalarRange, SectionGroupSpec, SectionId, SectionKind,
-    SectionSpec, SlalomSpec, TrafficFlowSpec, TrafficZoneSpec, TurnDirection, ValidationThresholds,
-    VehicleArchetype, ZipperSpec,
+    BankingMode, BoostPickupSpec, BoostTier, CountRange, CourseDefaults, CourseItem, CourseSpec,
+    EncounterSpec, LaneWeight, MotifInvocation, MotifKind, MotifParams, NearMissWindowSpec,
+    PassingSide, RoadModifierSpec, RoadPrimitiveSpec, RollingWallSpec, ScalarRange,
+    SectionGroupSpec, SectionId, SectionKind, SectionSpec, SlalomSpec, TrafficFlowSpec,
+    TrafficZoneSpec, TurnDirection, ValidationThresholds, VehicleArchetype, ZipperSpec,
 };
 
 use super::lexer::{tokenise, Token, TokenKind};
@@ -392,6 +392,7 @@ impl<'a> Parser<'a> {
                 "expected_speed" => group.expected_speed_mps = Some(p.scalar()?),
                 "environment" => group.environment = Some(p.environment()?),
                 "traffic" => group.traffic = Some(p.traffic()?),
+                "pickups" => group.pickups.extend(p.pickups()?),
                 other => group.parts.push(p.primitive_section(other, at)?),
             }
             Ok(())
@@ -417,6 +418,7 @@ impl<'a> Parser<'a> {
         let mut environment: Option<SectionKind> = None;
         let mut modifiers: Vec<RoadModifierSpec> = Vec::new();
         let mut traffic: Option<TrafficZoneSpec> = None;
+        let mut pickups: Vec<BoostPickupSpec> = Vec::new();
         let keyword_owned = keyword.to_string();
 
         self.block(|p, field, field_at| {
@@ -451,6 +453,7 @@ impl<'a> Parser<'a> {
                 "width_profile" => modifiers.push(p.width_profile()?),
                 "lane_profile" => modifiers.push(p.lane_profile()?),
                 "traffic" => traffic = Some(p.traffic()?),
+                "pickups" => pickups.extend(p.pickups()?),
                 other => return Err(p.unknown_field(field_at, &keyword_owned, other)),
             }
             Ok(())
@@ -512,6 +515,7 @@ impl<'a> Parser<'a> {
             expected_speed_mps: expected,
             environment,
             traffic,
+            pickups,
         })
     }
 
@@ -622,6 +626,7 @@ impl<'a> Parser<'a> {
         let mut environment: Option<SectionKind> = None;
         let mut expected: Option<f32> = None;
         let mut traffic: Option<TrafficZoneSpec> = None;
+        let mut pickups: Vec<BoostPickupSpec> = Vec::new();
         self.block(|p, field, field_at| {
             match field.as_str() {
                 "id" => {
@@ -641,6 +646,7 @@ impl<'a> Parser<'a> {
                 "environment" => environment = Some(p.environment()?),
                 "expected_speed" => expected = Some(p.scalar()?),
                 "traffic" => traffic = Some(p.traffic()?),
+                "pickups" => pickups.extend(p.pickups()?),
                 other => return Err(p.unknown_field(field_at, "motif", other)),
             }
             Ok(())
@@ -652,7 +658,52 @@ impl<'a> Parser<'a> {
             environment,
             expected_speed_mps: expected,
             traffic,
+            pickups,
         })
+    }
+
+    /// `pickups { boost <tier> { … } }`
+    ///
+    /// A sibling of `traffic`, not a field inside it: traffic is a description
+    /// the compiler generates vehicles from, and a pickup is a placement the
+    /// author wrote out. The only thing a `pickups` block can contain is a
+    /// `boost` entry, and that is deliberate — the block exists so that "what
+    /// this stretch of road hands out" is one readable list, and an unrelated
+    /// field appearing in it would make the name a lie.
+    fn pickups(&mut self) -> CourseResult<Vec<BoostPickupSpec>> {
+        let mut placed: Vec<BoostPickupSpec> = Vec::new();
+        self.block(|p, field, at| {
+            match field.as_str() {
+                "boost" => placed.push(p.boost_pickup()?),
+                other => return Err(p.unknown_field(at, "pickups", other)),
+            }
+            Ok(())
+        })?;
+        Ok(placed)
+    }
+
+    /// `boost <tier> { at = 120m lane = -1 count = 3 spacing = 40m }`
+    ///
+    /// The tier is a **word after the keyword**, the same shape `encounter
+    /// zipper { … }` uses, rather than a field inside the block. It is what the
+    /// entry *is*, not one of its settings, and putting it in the header means a
+    /// pickup block cannot be written without one.
+    fn boost_pickup(&mut self) -> CourseResult<BoostPickupSpec> {
+        let at = self.here();
+        let word = self.ident()?;
+        let tier = BoostTier::parse(&word).map_err(|e| e.at(at))?;
+        let mut spec = BoostPickupSpec::single(0.0, 0, tier);
+        self.block(|p, field, at| {
+            match field.as_str() {
+                "at" => spec.start_offset_m = p.scalar()?,
+                "lane" => spec.lane = p.integer()?,
+                "count" => spec.count = p.count()?,
+                "spacing" => spec.spacing_m = p.scalar()?,
+                other => return Err(p.unknown_field(at, "boost", other)),
+            }
+            Ok(())
+        })?;
+        Ok(spec)
     }
 
     /// `traffic { flow { … } encounter <kind> { … } near_miss { … } }`
@@ -887,6 +938,7 @@ fn flip(item: &CourseItem) -> CourseItem {
     match item {
         CourseItem::Section(section) => CourseItem::Section(SectionSpec {
             primitive: flip_primitive(section.primitive),
+            pickups: flip_pickups(&section.pickups),
             ..section.clone()
         }),
         CourseItem::Group(group) => CourseItem::Group(SectionGroupSpec {
@@ -895,15 +947,31 @@ fn flip(item: &CourseItem) -> CourseItem {
                 .iter()
                 .map(|part| SectionSpec {
                     primitive: flip_primitive(part.primitive),
+                    pickups: flip_pickups(&part.pickups),
                     ..part.clone()
                 })
                 .collect(),
+            pickups: flip_pickups(&group.pickups),
             ..group.clone()
         }),
         // A motif already alternates internally; flipping it would undo its own
         // figure, so it is left alone.
         CourseItem::Motif(motif) => CourseItem::Motif(motif.clone()),
     }
+}
+
+/// Mirror which side of the road a span's pickups sit on.
+///
+/// A flipped copy is the same corner the other way round, and a pickup was
+/// authored against that corner — on the inside of it, on the outside of it, on
+/// the racing line through it. Carrying the lane across unchanged would put the
+/// bait on the outside of every mirrored bend, which is the one place the line
+/// does not go.
+fn flip_pickups(pickups: &[BoostPickupSpec]) -> Vec<BoostPickupSpec> {
+    pickups
+        .iter()
+        .map(|p| BoostPickupSpec { lane: -p.lane, ..*p })
+        .collect()
 }
 
 fn flip_primitive(primitive: RoadPrimitiveSpec) -> RoadPrimitiveSpec {
@@ -1190,6 +1258,143 @@ mod tests {
         assert_eq!(window.side, PassingSide::Right);
         assert_eq!(window.intended_opportunities, 3);
         assert_eq!(window.clearance_m, ScalarRange::new(0.4, 1.4));
+    }
+
+    /// Every place a `pickups` block may appear — on a bare primitive, on a
+    /// section group, and on a motif — plus both entry shapes (a single and a
+    /// row) and all three tiers.
+    #[test]
+    fn pickups_parse_on_every_kind_of_item() {
+        let spec = parse(
+            "test.brc",
+            r#"
+            course "charged" {
+                seed = 5
+                straight {
+                    id = "run"
+                    length = 900m
+                    lanes = 5
+                    pickups {
+                        boost small  { at = 100m lane = -1 }
+                        boost medium { at = 300m lane = 2 count = 3 spacing = 40m }
+                    }
+                }
+                section "group" {
+                    lanes = 3
+                    straight { length = 400m }
+                    pickups { boost large { at = 200m lane = 1 } }
+                }
+                motif high_speed_sweeps {
+                    id = "sweeps"
+                    count = 2
+                    pickups { boost medium { at = 150m lane = 0 } }
+                }
+            }
+            "#,
+        )
+        .expect("parses");
+
+        let on_section = match &spec.items[0] {
+            CourseItem::Section(s) => &s.pickups,
+            other => panic!("expected a section, got {other:?}"),
+        };
+        assert_eq!(on_section.len(), 2, "two authored entries, not four pickups");
+        assert_eq!(on_section[0].tier, BoostTier::Small);
+        assert_eq!(on_section[0].lane, -1);
+        assert_eq!(on_section[0].count, 1, "a single defaults to one");
+        assert_eq!(on_section[1].tier, BoostTier::Medium);
+        assert_eq!(on_section[1].count, 3);
+        assert_eq!(on_section[1].spacing_m, 40.0);
+        assert_eq!(on_section[1].start_offset_m, 300.0);
+
+        match &spec.items[1] {
+            CourseItem::Group(g) => {
+                assert_eq!(g.pickups.len(), 1);
+                assert_eq!(g.pickups[0].tier, BoostTier::Large);
+            }
+            other => panic!("expected a group, got {other:?}"),
+        }
+        match &spec.items[2] {
+            CourseItem::Motif(m) => {
+                assert_eq!(m.pickups.len(), 1);
+                assert_eq!(m.pickups[0].tier, BoostTier::Medium);
+            }
+            other => panic!("expected a motif, got {other:?}"),
+        }
+        assert!(spec.validate().is_ok(), "{:?}", spec.validate());
+    }
+
+    #[test]
+    fn a_bad_pickup_is_rejected_with_a_line_and_a_column() {
+        // An unknown tier.
+        let err = parse(
+            "test.brc",
+            r#"course "x" { seed = 1
+                straight { id = "a" length = 100m
+                    pickups { boost enormous { at = 10m } } } }"#,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, CourseErrorCode::UnknownField);
+        assert!(err.message.contains("enormous"), "{}", err.message);
+        assert!(err.at.is_some(), "no source location");
+
+        // An unknown field inside a `boost` entry.
+        let err = parse(
+            "test.brc",
+            r#"course "x" { seed = 1
+                straight { id = "a" length = 100m
+                    pickups { boost small { at = 10m sparkle = 3 } } } }"#,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, CourseErrorCode::UnknownField);
+        assert_eq!(err.field.as_deref(), Some("sparkle"));
+
+        // A `pickups` block only holds `boost` entries.
+        let err = parse(
+            "test.brc",
+            r#"course "x" { seed = 1
+                straight { id = "a" length = 100m
+                    pickups { flow { vehicles_per_km = 3 } } } }"#,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, CourseErrorCode::UnknownField);
+        assert_eq!(err.field.as_deref(), Some("flow"));
+    }
+
+    /// **`alternate` mirrors the road, so it has to mirror the bait.** A pickup
+    /// authored on the inside of a bend is on the inside of the mirrored copy
+    /// too, which means its lane flips with the turn.
+    #[test]
+    fn alternation_mirrors_a_pickups_lane_with_its_bend() {
+        let spec = parse(
+            "test.brc",
+            r#"
+            course "mirrored" {
+                seed = 1
+                alternate 2 {
+                    turn {
+                        id = "bend"
+                        length = 200m
+                        radius = 150m
+                        direction = right
+                        lanes = 3
+                        pickups { boost medium { at = 80m lane = 1 } }
+                    }
+                }
+            }
+            "#,
+        )
+        .expect("parses");
+        let lane_of = |item: &CourseItem| match item {
+            CourseItem::Section(s) => s.pickups[0].lane,
+            other => panic!("expected a section, got {other:?}"),
+        };
+        assert_eq!(lane_of(&spec.items[0]), 1);
+        assert_eq!(
+            lane_of(&spec.items[1]),
+            -1,
+            "the mirrored copy kept its bait on the outside"
+        );
     }
 
     #[test]

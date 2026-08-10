@@ -45,6 +45,14 @@ pub enum CourseErrorCode {
     InvalidLaneWeights,
     /// An encounter referred to a lane the road does not have.
     InvalidEncounterLane,
+    /// A boost pickup was authored in a lane the road does not have where it
+    /// stands.
+    InvalidPickupLane,
+    /// Two boost pickups occupy the same stretch of the same lane, so one of
+    /// them can never be taken.
+    OverlappingPickups,
+    /// A boost pickup stands in a lane no route reaches — bait nobody can take.
+    UnreachablePickup,
     /// An encounter's spacing and speed leave less than the reaction time it
     /// demands.
     ImpossibleReactionTime,
@@ -86,6 +94,9 @@ impl CourseErrorCode {
             CourseErrorCode::InvalidSpeedRange => "invalid-speed-range",
             CourseErrorCode::InvalidLaneWeights => "invalid-lane-weights",
             CourseErrorCode::InvalidEncounterLane => "invalid-encounter-lane",
+            CourseErrorCode::InvalidPickupLane => "invalid-pickup-lane",
+            CourseErrorCode::OverlappingPickups => "overlapping-pickups",
+            CourseErrorCode::UnreachablePickup => "unreachable-pickup",
             CourseErrorCode::ImpossibleReactionTime => "impossible-reaction-time",
             CourseErrorCode::ImpossibleLateralClearance => "impossible-lateral-clearance",
             CourseErrorCode::NonContinuousCourse => "non-continuous-course",
@@ -297,6 +308,9 @@ mod tests {
             CourseErrorCode::InvalidSpeedRange,
             CourseErrorCode::InvalidLaneWeights,
             CourseErrorCode::InvalidEncounterLane,
+            CourseErrorCode::InvalidPickupLane,
+            CourseErrorCode::OverlappingPickups,
+            CourseErrorCode::UnreachablePickup,
             CourseErrorCode::ImpossibleReactionTime,
             CourseErrorCode::ImpossibleLateralClearance,
             CourseErrorCode::NonContinuousCourse,

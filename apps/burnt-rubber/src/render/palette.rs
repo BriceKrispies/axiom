@@ -694,6 +694,15 @@ pub struct ScenePalette {
     pub spark: Handle<Material>,
     /// The finish arch.
     pub finish: Handle<Material>,
+    /// Boost pickups, one material per tier, indexed by
+    /// [`crate::course::specification::BoostTier::index`] — green, blue, red.
+    ///
+    /// **Three materials, not one that changes colour.** A node's material is
+    /// bound when it is spawned and there is no material component to set
+    /// afterwards, so the tier a pickup body can display is fixed at install.
+    /// That is what makes [`crate::render::pickups::PickupVisuals`] three pools
+    /// rather than one — see there for why that is the right shape anyway.
+    pub pickup: [Handle<Material>; 3],
     /// The ghost car's translucent livery.
     pub ghost: CarLivery,
 }
@@ -865,6 +874,44 @@ impl ScenePalette {
             streak: glowing(app, [0.14, 0.16, 0.20], [0.55, 0.66, 0.85]),
             spark: glowing(app, [0.24, 0.18, 0.06], [1.0, 0.78, 0.28]),
             finish: glowing(app, [0.08, 0.22, 0.16], [0.26, 1.0, 0.66]),
+            // The three boost tiers, and the brightest things on the road after
+            // the reflector posts. Every one is authored the way this palette
+            // authors a lamp: a **dark, saturated albedo** carrying the hue, and
+            // an emissive doing all the work. The albedo is what the object looks
+            // like switched off, and a pickup switched off is a small dark plastic
+            // marker — if the albedo were bright as well, the tunnel's ambient
+            // would light it to a pale wash and the three tiers would converge on
+            // white exactly where the frame is darkest and they matter most.
+            //
+            // Emissive above 1.0 on purpose. These are the one class of object
+            // that must be identifiable *by colour alone* at two hundred metres
+            // through haze, at a glance, with the eye on the traffic. The
+            // aerial-perspective term (`FrameDepthFog`) washes everything toward
+            // `HAZE` with distance, and a pickup that reads correctly at 20 m and
+            // as a grey speck at 200 m is a pickup nobody plans a line around.
+            //
+            // The off-hue channels are held **low**, and that is the whole trick.
+            // Emissive is added to the shaded colour and the result is tone-mapped,
+            // so the dominant channel clips at 1.0 while the other two survive at
+            // whatever they were — which means the off-hues, not the dominant one,
+            // decide the saturation. Authored at `0.36` of red and blue against
+            // `1.55` of green (an intuitive-looking 4:1) the diamond displayed as
+            // `(0.63, 1.0, 0.68)`: pale mint, because sRGB lifts a linear 0.36 to
+            // 0.63. Held near `0.06` instead it displays as a green that is
+            // actually green. Measured on the running page, not reasoned about.
+            //
+            // Green carries a little yellow, because a pure green and a pure red
+            // are the two hues an eye separates worst under motion. `large` is
+            // warm rather than pure — pushed toward orange, not toward magenta:
+            // authored at `0.34` of blue it displayed as `(1.0, 0.29, 0.62)`,
+            // which is hot pink and not the colour anybody asked for. Its
+            // separation from the tail lamps is carried by brightness and by
+            // being a metre-wide diamond in the air, which is plenty.
+            pickup: [
+                glowing(app, [0.02, 0.13, 0.03], [0.07, 1.50, 0.14]),
+                glowing(app, [0.02, 0.06, 0.20], [0.05, 0.30, 1.80]),
+                glowing(app, [0.19, 0.03, 0.02], [1.90, 0.11, 0.05]),
+            ],
             // The ghost. Cold cyan-white against the player's hot orange, so at a
             // glance you always know which car is yours, and translucent through
             // the engine's real alpha path (`Material::with_opacity` — folded

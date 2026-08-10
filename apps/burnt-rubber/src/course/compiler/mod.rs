@@ -23,9 +23,10 @@ use crate::course::error::{CourseError, CourseErrorCode, CourseResult};
 use crate::course::geometry;
 use crate::course::motifs;
 use crate::course::runtime::CoursePlan;
+use crate::course::pickups::{self, BoostPickup};
 use crate::course::specification::{
-    CourseItem, CourseSpec, RoadModifierSpec, RoadPrimitiveSpec, SectionId, SectionKind,
-    SectionSpec, TrafficZoneSpec,
+    BoostPickupSpec, CourseItem, CourseSpec, RoadModifierSpec, RoadPrimitiveSpec, SectionId,
+    SectionKind, SectionSpec, TrafficZoneSpec,
 };
 use crate::course::traffic::{
     encounters, flow, CompiledEncounter, NearMissWindow, TrafficPlan,
@@ -57,18 +58,25 @@ pub struct ExpandedSection {
     pub environment: SectionKind,
 }
 
-/// A traffic zone after expansion: which sections it covers, and what it asks
-/// for.
+/// One authored item's **span**, after expansion: which sections it covers, and
+/// everything it asked to be placed over them.
+///
+/// One zone per authored item, holding both placement lists, rather than a
+/// traffic-zone list and a parallel pickup-zone list. The two would be describing
+/// the same span twice, and two descriptions of one span are two things that can
+/// disagree — a section whose traffic moved but whose pickups did not.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExpandedTrafficZone {
+pub struct ExpandedZone {
     /// The stable name the zone's seed streams are anchored on.
     pub id: SectionId,
     /// The index of the first section it covers.
     pub first_section: usize,
     /// The index one past the last section it covers.
     pub last_section: usize,
-    /// What it asks for.
+    /// The traffic it asks for, if any.
     pub spec: TrafficZoneSpec,
+    /// The boost pickups placed over it, in authored order.
+    pub pickups: Vec<BoostPickupSpec>,
 }
 
 /// The whole course, expanded.
@@ -76,8 +84,8 @@ pub struct ExpandedTrafficZone {
 pub struct ExpandedCourse {
     /// The sections, in course order.
     pub sections: Vec<ExpandedSection>,
-    /// The traffic zones, in course order.
-    pub zones: Vec<ExpandedTrafficZone>,
+    /// The placement zones, in course order.
+    pub zones: Vec<ExpandedZone>,
 }
 
 /// Expand motifs and groups into ordinary sections and traffic zones.
@@ -88,41 +96,49 @@ pub struct ExpandedCourse {
 pub fn expand(spec: &CourseSpec) -> CourseResult<ExpandedCourse> {
     spec.validate()?;
     let mut sections: Vec<ExpandedSection> = Vec::new();
-    let mut zones: Vec<ExpandedTrafficZone> = Vec::new();
+    let mut zones: Vec<ExpandedZone> = Vec::new();
 
     for item in &spec.items {
         let first_section = sections.len();
-        let (produced, id, traffic): (Vec<SectionSpec>, SectionId, Option<TrafficZoneSpec>) =
-            match item {
-                CourseItem::Section(section) => (
-                    vec![section.clone()],
-                    section.id.clone(),
-                    section.traffic.clone(),
-                ),
-                CourseItem::Group(group) => (
-                    group
-                        .parts
-                        .iter()
-                        .enumerate()
-                        .map(|(i, part)| SectionSpec {
-                            id: group.id.child(i),
-                            lanes: part.lanes.or(group.lanes),
-                            expected_speed_mps: part
-                                .expected_speed_mps
-                                .or(group.expected_speed_mps),
-                            environment: part.environment.or(group.environment),
-                            ..part.clone()
-                        })
-                        .collect(),
-                    group.id.clone(),
-                    group.traffic.clone(),
-                ),
-                CourseItem::Motif(motif) => (
-                    motifs::expand(spec.seed, motif)?,
-                    motif.id.clone(),
-                    motif.traffic.clone(),
-                ),
-            };
+        type Placed = (
+            Vec<SectionSpec>,
+            SectionId,
+            Option<TrafficZoneSpec>,
+            Vec<BoostPickupSpec>,
+        );
+        let (produced, id, traffic, pickups): Placed = match item {
+            CourseItem::Section(section) => (
+                vec![section.clone()],
+                section.id.clone(),
+                section.traffic.clone(),
+                section.pickups.clone(),
+            ),
+            CourseItem::Group(group) => (
+                group
+                    .parts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, part)| SectionSpec {
+                        id: group.id.child(i),
+                        lanes: part.lanes.or(group.lanes),
+                        expected_speed_mps: part
+                            .expected_speed_mps
+                            .or(group.expected_speed_mps),
+                        environment: part.environment.or(group.environment),
+                        ..part.clone()
+                    })
+                    .collect(),
+                group.id.clone(),
+                group.traffic.clone(),
+                group.pickups.clone(),
+            ),
+            CourseItem::Motif(motif) => (
+                motifs::expand(spec.seed, motif)?,
+                motif.id.clone(),
+                motif.traffic.clone(),
+                motif.pickups.clone(),
+            ),
+        };
 
         produced.into_iter().for_each(|section| {
             sections.push(ExpandedSection {
@@ -136,12 +152,19 @@ pub fn expand(spec: &CourseSpec) -> CourseResult<ExpandedCourse> {
                 modifiers: section.modifiers,
             });
         });
-        traffic.filter(|t| !t.is_empty()).map(|spec| {
-            zones.push(ExpandedTrafficZone {
+        // A zone exists for an item that placed **anything** over its span, not
+        // only for one that asked for traffic. An item with pickups and no
+        // traffic is an ordinary thing to author (a clear straight lined with
+        // charge), and before pickups existed the traffic zone was the only
+        // reason to record a span at all.
+        let traffic = traffic.filter(|t| !t.is_empty());
+        ((traffic.is_some()) | (!pickups.is_empty())).then(|| {
+            zones.push(ExpandedZone {
                 id,
                 first_section,
                 last_section: sections.len(),
-                spec,
+                spec: traffic.unwrap_or_default(),
+                pickups,
             })
         });
     }
@@ -186,8 +209,40 @@ pub fn compile(spec: &CourseSpec, tuning: &Tuning) -> CourseResult<CoursePlan> {
     let mut plans: Vec<TrafficPlan> = Vec::new();
     let mut compiled_encounters: Vec<CompiledEncounter> = Vec::new();
     let mut windows: Vec<NearMissWindow> = Vec::new();
+    let mut compiled_pickups: Vec<BoostPickup> = Vec::new();
     let mut next_vehicle = 0u32;
     let mut next_encounter = 0u32;
+    let mut next_pickup = 0u32;
+
+    // **Pickups first, and the whole course's worth of them.**
+    //
+    // Two reasons, and the second was a bug before it was a rule. Pickups are
+    // placed, not generated: they depend on the road and on nothing else, so
+    // there is no ordering constraint pulling them later. And the traffic pass
+    // below needs *every* pickup, not the ones in the zone it happens to be
+    // compiling: an ambient car is kept out of a pickup's lane at the point the
+    // player **meets** it, and that projection routinely carries a car hundreds
+    // of metres past the zone it spawned in. A per-zone keep-out silently misses
+    // exactly those cars, which are the ones a player travelling at speed
+    // actually arrives alongside.
+    for zone in &expanded.zones {
+        let start_m = geometry.sections[zone.first_section].start_m;
+        for row in &zone.pickups {
+            compiled_pickups.extend(pickups::expand_row(
+                row,
+                start_m,
+                &mut next_pickup,
+                &section_of,
+            ));
+        }
+    }
+    // `(where, which lane)` for every pickup on the course — what ambient
+    // traffic keeps out of. Built once rather than per zone, for the reason
+    // above.
+    let pickup_keep_out: Vec<(f32, i32)> = compiled_pickups
+        .iter()
+        .map(|p| (p.at_m, p.lane))
+        .collect();
 
     for zone in &expanded.zones {
         let start_m = geometry.sections[zone.first_section].start_m;
@@ -223,24 +278,54 @@ pub fn compile(spec: &CourseSpec, tuning: &Tuning) -> CourseResult<CoursePlan> {
             // Dropped *after* generation rather than skipped during it, so the
             // flow's own stream is untouched: moving an encounter must not
             // re-roll the ambient traffic around it.
-            let ambient: Vec<TrafficPlan> = ambient
+            //
+            // The meeting projection is computed once, here, and reused by both
+            // the pickup keep-out and the opportunity window below — they have
+            // to agree about where the player meets a car, and the surest way
+            // for two things to agree is for there to be one of them.
+            let ambient: Vec<(TrafficPlan, f32)> = ambient
                 .into_iter()
-                .filter(|plan| {
+                .map(|plan| {
+                    let meet = crate::course::traffic::meeting_distance(
+                        plan.spawn_m,
+                        plan.speed_mps,
+                        tuning.race.traffic_ahead,
+                        expected,
+                        track.length(),
+                    );
+                    (plan, meet)
+                })
+                .filter(|(plan, _)| {
                     !figures
                         .iter()
                         .any(|(from, to)| (plan.spawn_m >= *from) & (plan.spawn_m <= *to))
                 })
+                // The pickup keep-out, for the identical reason the encounter
+                // keep-out above exists: a random car that happens to be *in a
+                // pickup's own lane at the point the player meets it* turns
+                // authored charge into a wall, and a reward that cannot be taken
+                // without a collision is worse than no reward.
+                //
+                // Two differences from the encounter keep-out, both load-bearing.
+                // It is measured at the **meeting point** rather than the spawn
+                // point, because where a car is when the player arrives is the
+                // only place it can block anything — the traversability grid
+                // projects the same way, so clearing this also clears the cell
+                // the validator judges. And it is **per lane**, not across the
+                // road: a pickup that swept the whole road clear around itself
+                // would punch a hole in the traffic and remove the near misses
+                // that are the rest of the economy. Threading a car in the next
+                // lane on the way to a pickup is the good case, not the bad one.
+                .filter(|(plan, meet)| {
+                    !pickup_keep_out.iter().any(|(at, lane)| {
+                        (plan.lane == *lane) & ((meet - at).abs() < PICKUP_KEEP_OUT_M)
+                    })
+                })
                 .collect();
             // Every ambient car is an opportunity where the player actually
             // meets it, which is not where it spawns.
-            ambient.iter().for_each(|plan| {
-                let meet = crate::course::traffic::meeting_distance(
-                    plan.spawn_m,
-                    plan.speed_mps,
-                    tuning.race.traffic_ahead,
-                    expected,
-                    track.length(),
-                );
+            ambient.iter().for_each(|(plan, meet)| {
+                let meet = *meet;
                 windows.push(NearMissWindow {
                     encounter: None,
                     start_m: (meet - crate::course::traffic::MEETING_WINDOW_M).max(0.0),
@@ -258,7 +343,7 @@ pub fn compile(spec: &CourseSpec, tuning: &Tuning) -> CourseResult<CoursePlan> {
                     section: plan.section,
                 });
             });
-            plans.extend(ambient);
+            plans.extend(ambient.into_iter().map(|(plan, _)| plan));
         }
 
         for encounter in &zone.spec.encounters {
@@ -301,6 +386,7 @@ pub fn compile(spec: &CourseSpec, tuning: &Tuning) -> CourseResult<CoursePlan> {
                 section: section_of(at),
             });
         }
+
     }
 
     // The runtime's indexes assume ascending order, and identities are minted
@@ -313,6 +399,7 @@ pub fn compile(spec: &CourseSpec, tuning: &Tuning) -> CourseResult<CoursePlan> {
             .then(a.end_m.total_cmp(&b.end_m))
     });
     compiled_encounters.sort_by(|a, b| a.start_m.total_cmp(&b.start_m).then(a.id.cmp(&b.id)));
+    compiled_pickups.sort_by(|a, b| a.at_m.total_cmp(&b.at_m).then(a.id.cmp(&b.id)));
 
     let report = validation::validate(ValidationInput {
         track: &track,
@@ -321,6 +408,7 @@ pub fn compile(spec: &CourseSpec, tuning: &Tuning) -> CourseResult<CoursePlan> {
         plans: &plans,
         encounters: &compiled_encounters,
         windows: &windows,
+        pickups: &compiled_pickups,
         thresholds: &spec.thresholds,
         vehicle: &tuning.vehicle,
         race: &tuning.race,
@@ -334,6 +422,7 @@ pub fn compile(spec: &CourseSpec, tuning: &Tuning) -> CourseResult<CoursePlan> {
         plans,
         compiled_encounters,
         windows,
+        compiled_pickups,
         report,
     ))
 }
@@ -367,6 +456,18 @@ pub fn compile_valid(spec: &CourseSpec, tuning: &Tuning) -> CourseResult<CourseP
 
 /// How much clear road an authored figure is given either side of itself (m).
 const ENCOUNTER_KEEP_OUT_M: f32 = 140.0;
+
+/// How much clear road an authored pickup is given **in its own lane**, either
+/// side of the point the player meets a car (m).
+///
+/// Far smaller than [`ENCOUNTER_KEEP_OUT_M`], and deliberately so. An encounter
+/// is a composition that a stray car ruins from a long way off; a pickup is a
+/// point, and the only cars that matter are the ones a player would have to
+/// drive through to reach it. Sized a little over the traversability grid's
+/// column (`traversal_step_m`, 30 m) so that clearing the lane also clears the
+/// grid cell the pickup stands in — otherwise the compiler would be removing
+/// the car and the validator would still be calling the pickup unreachable.
+const PICKUP_KEEP_OUT_M: f32 = 36.0;
 
 /// The clearance band an ambient pass is meant to happen in (m).
 ///

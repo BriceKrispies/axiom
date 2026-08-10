@@ -54,6 +54,17 @@ pub fn dump(plan: &CoursePlan) -> String {
             e.requires_route.then_some(", route required").unwrap_or(""),
         ));
     });
+    out.push_str("--- pickups ---\n");
+    plan.pickups().iter().for_each(|p| {
+        out.push_str(&format!(
+            "{:<6} {:>7.0}m lane {:>2} {:<6} section {}\n",
+            p.id.to_string(),
+            p.at_m,
+            p.lane,
+            p.tier.token(),
+            p.section,
+        ));
+    });
     out.push_str("--- near-miss windows ---\n");
     plan.near_miss_windows().iter().for_each(|w| {
         out.push_str(&format!(
@@ -172,6 +183,25 @@ pub fn rows(plan: &CoursePlan, distance_m: f32, ahead_m: f32) -> Vec<(String, St
             format!("{chances} within {ahead_m:.0} m"),
         ),
         (
+            "pickups ahead".into(),
+            {
+                let ahead: Vec<&crate::course::pickups::BoostPickup> =
+                    plan.pickups_ahead(distance_m, ahead_m).collect();
+                ahead
+                    .first()
+                    .map(|next| {
+                        format!(
+                            "{} within {ahead_m:.0} m, next {} in lane {} at {:.0} m",
+                            ahead.len(),
+                            next.tier.token(),
+                            next.lane,
+                            next.at_m - distance_m
+                        )
+                    })
+                    .unwrap_or_else(|| "none".to_string())
+            },
+        ),
+        (
             "boost economy".into(),
             verdict
                 .map(|v| {
@@ -214,7 +244,18 @@ mod tests {
         assert_eq!(dump, plan.dump(), "the dump is not stable");
         assert!(dump.contains("--- traffic ---"));
         assert!(dump.contains("--- encounters ---"));
+        assert!(dump.contains("--- pickups ---"));
         assert!(dump.contains("--- near-miss windows ---"));
+        // Every pickup appears exactly once, by its own identity.
+        assert!(!plan.pickups().is_empty(), "the shipping course has pickups");
+        plan.pickups().iter().for_each(|p| {
+            assert_eq!(
+                dump.matches(&format!("{:<6} ", p.id.to_string())).count(),
+                1,
+                "pickup {} is not in the dump exactly once",
+                p.id
+            );
+        });
         assert!(dump.contains(&format!("{:#018x}", crate::DEFAULT_SEED)));
         // Every vehicle appears exactly once.
         plan.traffic().iter().take(8).for_each(|p| {
@@ -255,6 +296,7 @@ mod tests {
             "nearest headway",
             "traversability",
             "near-miss chances",
+            "pickups ahead",
             "boost economy",
             "validation",
         ] {

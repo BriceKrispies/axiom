@@ -38,6 +38,15 @@ pub struct ValidationThresholds {
     /// The fraction of compiled near-miss opportunities a skilled route is
     /// assumed to convert, `0..1`.
     pub near_miss_conversion: f32,
+    /// The fraction of the boost pickups on a section a skilled route is
+    /// assumed to actually take, `0..1`.
+    ///
+    /// Higher than [`Self::near_miss_conversion`] and it should be: a pickup is
+    /// stationary, visible from a long way off, and taking it is a lane choice
+    /// rather than a judgement of a closing speed. It is not `1.0` either —
+    /// pickups get authored on lines that cost something, and a route that takes
+    /// every one of them is not the fastest route.
+    pub pickup_conversion: f32,
     /// The fraction of a section a skilled player intends to spend boosting,
     /// `0..1` — what the boost budget is measured against.
     ///
@@ -74,6 +83,7 @@ impl ValidationThresholds {
         lateral_margin_m: 0.35,
         min_reaction_time_s: 0.6,
         near_miss_conversion: 0.72,
+        pickup_conversion: 0.85,
         target_boost_duty: 0.35,
         high_speed_share: 0.8,
         starved_ratio: 1.0,
@@ -120,6 +130,7 @@ impl ValidationThresholds {
             CourseErrorCode::ImpossibleReactionTime,
         )?;
         finite(self.near_miss_conversion, "near_miss_conversion")?;
+        finite(self.pickup_conversion, "pickup_conversion")?;
         finite(self.target_boost_duty, "target_boost_duty")?;
         finite(self.high_speed_share, "high_speed_share")?;
         positive(
@@ -156,7 +167,12 @@ mod tests {
             "excellent has to be a higher bar than starved"
         );
         assert!((0.0..=1.0).contains(&t.near_miss_conversion));
+        assert!((0.0..=1.0).contains(&t.pickup_conversion));
         assert!((0.0..=1.0).contains(&t.target_boost_duty));
+        assert!(
+            t.pickup_conversion > t.near_miss_conversion,
+            "a stationary pickup is easier to take than a moving car is to thread"
+        );
     }
 
     #[test]
@@ -172,6 +188,7 @@ mod tests {
             ValidationThresholds { lateral_margin_m: f32::NAN, ..base },
             ValidationThresholds { min_reaction_time_s: 0.0, ..base },
             ValidationThresholds { near_miss_conversion: f32::NAN, ..base },
+            ValidationThresholds { pickup_conversion: f32::NAN, ..base },
             ValidationThresholds { target_boost_duty: f32::INFINITY, ..base },
             ValidationThresholds { high_speed_share: f32::NAN, ..base },
             ValidationThresholds { starved_ratio: 0.0, ..base },

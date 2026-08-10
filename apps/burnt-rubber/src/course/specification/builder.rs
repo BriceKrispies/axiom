@@ -82,6 +82,7 @@ impl CourseBuilder {
             environment,
             expected_speed_mps: None,
             traffic,
+            pickups: Vec::new(),
         })
     }
 

@@ -27,6 +27,7 @@ pub mod traversal;
 
 use crate::course::error::{CourseError, CourseErrorCode};
 use crate::course::geometry::{CompiledSection, GeometryClamps};
+use crate::course::pickups::{BoostPickup, PICKUP_FOOTPRINT_M};
 use crate::course::specification::ValidationThresholds;
 use crate::course::traffic::{CompiledEncounter, NearMissWindow, TrafficPlan};
 use crate::track::Track;
@@ -52,6 +53,8 @@ pub struct ValidationInput<'a> {
     pub encounters: &'a [CompiledEncounter],
     /// The compiled near-miss opportunity windows.
     pub windows: &'a [NearMissWindow],
+    /// The compiled boost pickups, in ascending course order.
+    pub pickups: &'a [BoostPickup],
     /// What the course is judged against.
     pub thresholds: &'a ValidationThresholds,
     /// The car's collision box.
@@ -72,6 +75,9 @@ pub fn validate(input: ValidationInput<'_>) -> ValidationReport {
     let model = OccupancyModel::resolve(input.vehicle, input.race, input.thresholds);
     let grid = traversal::analyse(input.track, input.plans, input.thresholds, &model);
     check_traversal(&input, &grid, &mut findings);
+    // After the grid, because "is this pickup reachable" is a question only the
+    // grid can answer.
+    check_pickups(&input, &grid, &mut findings);
 
     let sections: Vec<SectionVerdict> = input
         .sections
@@ -81,6 +87,7 @@ pub fn validate(input: ValidationInput<'_>) -> ValidationReport {
             boost::classify(
                 section,
                 input.windows,
+                input.pickups,
                 corridor > 0,
                 corridor,
                 input.thresholds,
@@ -102,6 +109,7 @@ pub fn validate(input: ValidationInput<'_>) -> ValidationReport {
             vehicles: input.plans.len(),
             encounters: input.encounters.len(),
             near_miss_windows: input.windows.len(),
+            pickups: input.pickups.len(),
             traversal_cells: grid.cells(),
             blocked_cells: grid.blocked_cells(),
             tightest_corridor_m: grid.tightest_corridor_m,
@@ -443,6 +451,94 @@ fn check_windows(input: &ValidationInput<'_>, findings: &mut Vec<Finding>) {
     });
 }
 
+/// Every boost pickup stands somewhere a car could actually be.
+///
+/// Three questions, in increasing order of how much has to be known to answer
+/// them, and deliberately not all the same severity:
+///
+/// * **the lane exists here** — an error. A pickup in lane `+2` where the road
+///   has three lanes is off the tarmac, and no line takes it.
+/// * **no two occupy the same spot** — an error. Two pickups within a footprint
+///   of each other in one lane are one pickup that pays twice, which is not what
+///   was authored either way.
+/// * **a route reaches the lane** — a *warning*. The grid assumes a player
+///   holding the expected speed and models no braking, so a lane it cannot reach
+///   may still be reachable by someone who lifts. Bait a route cannot take is
+///   worth saying out loud; refusing to build the course over it would be the
+///   grid overstating what it knows.
+fn check_pickups(
+    input: &ValidationInput<'_>,
+    grid: &TraversalGrid,
+    findings: &mut Vec<Finding>,
+) {
+    input.pickups.iter().for_each(|pickup| {
+        let sample = input.track.sample_at(pickup.at_m);
+        let reach = input.track.lane_reach(&sample);
+        (pickup.lane.abs() <= reach)
+            .then_some(())
+            .unwrap_or_else(|| {
+                findings.push(Finding::error(
+                    pickup.at_m,
+                    CourseError::new(
+                        CourseErrorCode::InvalidPickupLane,
+                        format!(
+                            "{} pickup {} stands in lane {} where the road reaches {reach}",
+                            pickup.tier.token(),
+                            pickup.id,
+                            pickup.lane
+                        ),
+                    ),
+                ));
+            });
+
+        let column = grid.column_at(pickup.at_m);
+        // Only worth asking about a lane that exists — an off-road pickup has
+        // already been reported, and saying it is also unreachable is noise.
+        ((pickup.lane.abs() > reach) | grid.is_reachable(column, pickup.lane))
+            .then_some(())
+            .unwrap_or_else(|| {
+                findings.push(Finding::warning(
+                    pickup.at_m,
+                    CourseError::new(
+                        CourseErrorCode::UnreachablePickup,
+                        format!(
+                            "{} pickup {} stands in lane {}, which no route at the expected \
+                             speed reaches — a player who brakes may still take it",
+                            pickup.tier.token(),
+                            pickup.id,
+                            pickup.lane
+                        ),
+                    ),
+                ));
+            });
+    });
+
+    // Overlap: pickups are in ascending distance order, so a bounded forward
+    // scan sees every pair that could possibly coincide.
+    input.pickups.iter().enumerate().for_each(|(i, pickup)| {
+        input.pickups[i + 1..]
+            .iter()
+            .take_while(|other| other.at_m - pickup.at_m < PICKUP_FOOTPRINT_M)
+            .filter(|other| other.lane == pickup.lane)
+            .for_each(|other| {
+                findings.push(Finding::error(
+                    pickup.at_m,
+                    CourseError::new(
+                        CourseErrorCode::OverlappingPickups,
+                        format!(
+                            "pickups {} and {} are {:.1} m apart in lane {} — taking one takes \
+                             the other",
+                            pickup.id,
+                            other.id,
+                            other.at_m - pickup.at_m,
+                            pickup.lane
+                        ),
+                    ),
+                ));
+            });
+    });
+}
+
 /// A route exists wherever one is required.
 fn check_traversal(
     input: &ValidationInput<'_>,
@@ -501,7 +597,8 @@ fn check_traversal(
 mod tests {
     use super::*;
     use crate::course::specification::{
-        EncounterId, PassingSide, ScalarRange, SectionId, SectionKind, VehicleArchetype, VehicleId,
+        BoostTier, EncounterId, PassingSide, ScalarRange, SectionId, SectionKind,
+        VehicleArchetype, VehicleId,
     };
     use crate::course::traffic::PLAN_LIFETIME_M;
     use crate::track::MAX_LANE_REACH;
@@ -553,6 +650,19 @@ mod tests {
         encounters: &'a [CompiledEncounter],
         windows: &'a [NearMissWindow],
     ) -> ValidationReport {
+        run_with_pickups(track, sections, clamps, plans, encounters, windows, &[])
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_with_pickups<'a>(
+        track: &'a Track,
+        sections: &'a [CompiledSection],
+        clamps: &'a [GeometryClamps],
+        plans: &'a [TrafficPlan],
+        encounters: &'a [CompiledEncounter],
+        windows: &'a [NearMissWindow],
+        pickups: &'a [BoostPickup],
+    ) -> ValidationReport {
         validate(ValidationInput {
             track,
             sections,
@@ -560,10 +670,21 @@ mod tests {
             plans,
             encounters,
             windows,
+            pickups,
             thresholds: &ValidationThresholds::DEFAULT,
             vehicle: &VehicleTuning::DEFAULT,
             race: &RaceTuning::DEFAULT,
         })
+    }
+
+    fn pickup(id: u32, at_m: f32, lane: i32, tier: BoostTier) -> BoostPickup {
+        BoostPickup {
+            id: crate::course::specification::PickupId(id),
+            at_m,
+            lane,
+            tier,
+            section: 0,
+        }
     }
 
     #[test]
@@ -784,9 +905,159 @@ mod tests {
         let track = track();
         let (sections, clamps) = sections(&track);
         let plans = vec![blocker(0, 3_000.0, 0), blocker(1, 4_000.0, 1)];
-        let a = run(&track, &sections, &clamps, &plans, &[], &[]);
-        let b = run(&track, &sections, &clamps, &plans, &[], &[]);
+        let pickups = vec![
+            pickup(0, 2_000.0, 0, BoostTier::Small),
+            pickup(1, 5_000.0, 1, BoostTier::Large),
+        ];
+        let a = run_with_pickups(&track, &sections, &clamps, &plans, &[], &[], &pickups);
+        let b = run_with_pickups(&track, &sections, &clamps, &plans, &[], &[], &pickups);
         assert_eq!(a, b);
         assert_eq!(a.dump(), b.dump());
+    }
+
+    #[test]
+    fn a_pickup_on_the_road_in_a_reachable_lane_is_clean() {
+        let track = track();
+        let (sections, clamps) = sections(&track);
+        let report = run_with_pickups(
+            &track,
+            &sections,
+            &clamps,
+            &[],
+            &[],
+            &[],
+            &[pickup(0, 2_000.0, 0, BoostTier::Medium)],
+        );
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| matches!(
+                    f.error.code,
+                    CourseErrorCode::InvalidPickupLane
+                        | CourseErrorCode::UnreachablePickup
+                        | CourseErrorCode::OverlappingPickups
+                )),
+            "a clean pickup was reported: {}",
+            report.dump()
+        );
+        assert_eq!(report.metrics.pickups, 1);
+        assert_eq!(report.sections[0].pickups, 1);
+    }
+
+    #[test]
+    fn a_pickup_in_a_lane_the_road_does_not_have_is_an_error() {
+        let track = track();
+        let (sections, clamps) = sections(&track);
+        let report = run_with_pickups(
+            &track,
+            &sections,
+            &clamps,
+            &[],
+            &[],
+            &[],
+            &[pickup(0, 2_000.0, MAX_LANE_REACH + 1, BoostTier::Large)],
+        );
+        let found = report
+            .errors()
+            .find(|f| f.error.code == CourseErrorCode::InvalidPickupLane)
+            .expect("an off-road pickup is an error");
+        assert!(found.error.message.contains("large"), "{}", found.error);
+        assert!(found.error.message.contains("p0"), "{}", found.error);
+    }
+
+    /// An off-road pickup is one mistake, not two: reporting it as unreachable
+    /// as well would be the validator restating a fact it has already given.
+    #[test]
+    fn an_off_road_pickup_is_not_also_reported_unreachable() {
+        let track = track();
+        let (sections, clamps) = sections(&track);
+        let report = run_with_pickups(
+            &track,
+            &sections,
+            &clamps,
+            &[],
+            &[],
+            &[],
+            &[pickup(0, 2_000.0, MAX_LANE_REACH + 1, BoostTier::Large)],
+        );
+        assert_eq!(
+            report
+                .warnings()
+                .filter(|f| f.error.code == CourseErrorCode::UnreachablePickup)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn two_pickups_on_the_same_spot_in_one_lane_are_an_error() {
+        let track = track();
+        let (sections, clamps) = sections(&track);
+        let report = run_with_pickups(
+            &track,
+            &sections,
+            &clamps,
+            &[],
+            &[],
+            &[],
+            &[
+                pickup(0, 2_000.0, 1, BoostTier::Small),
+                pickup(1, 2_002.0, 1, BoostTier::Large),
+            ],
+        );
+        assert!(report
+            .errors()
+            .any(|f| f.error.code == CourseErrorCode::OverlappingPickups));
+
+        // Two metres apart in *different* lanes is two pickups, not one.
+        let apart = run_with_pickups(
+            &track,
+            &sections,
+            &clamps,
+            &[],
+            &[],
+            &[],
+            &[
+                pickup(0, 2_000.0, 1, BoostTier::Small),
+                pickup(1, 2_002.0, -1, BoostTier::Large),
+            ],
+        );
+        assert!(!apart
+            .errors()
+            .any(|f| f.error.code == CourseErrorCode::OverlappingPickups));
+    }
+
+    /// A lane the grid cannot route to is a **warning**, because the grid models
+    /// a player holding the expected speed and never braking — it is entitled to
+    /// say "no route I can see", not "impossible".
+    #[test]
+    fn a_pickup_behind_a_wall_of_traffic_is_a_warning_not_an_error() {
+        let track = track();
+        let (sections, clamps) = sections(&track);
+        // Block every lane the road has, right where the pickup stands.
+        let wall: Vec<TrafficPlan> = (-MAX_LANE_REACH..=MAX_LANE_REACH)
+            .enumerate()
+            .map(|(i, lane)| blocker(i as u32, 3_000.0, lane))
+            .collect();
+        let report = run_with_pickups(
+            &track,
+            &sections,
+            &clamps,
+            &wall,
+            &[],
+            &[],
+            &[pickup(0, 3_000.0, 0, BoostTier::Large)],
+        );
+        assert!(
+            report
+                .warnings()
+                .any(|f| f.error.code == CourseErrorCode::UnreachablePickup),
+            "no unreachable warning: {}",
+            report.dump()
+        );
+        assert!(!report
+            .errors()
+            .any(|f| f.error.code == CourseErrorCode::UnreachablePickup));
     }
 }

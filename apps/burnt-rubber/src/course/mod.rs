@@ -51,6 +51,7 @@ pub mod compiler;
 pub mod error;
 pub mod geometry;
 pub mod motifs;
+pub mod pickups;
 pub mod procedural;
 pub mod runtime;
 pub mod specification;

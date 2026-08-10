@@ -81,6 +81,24 @@ mod tests {
             !plan.near_miss_windows().is_empty(),
             "and compiled opportunities"
         );
+        // The worked example uses every construct the grammar has, and `pickups`
+        // is one of them. All three tiers appear, so a change that broke one
+        // tier's parsing could not pass this.
+        let tiers: Vec<crate::course::specification::BoostTier> = {
+            let mut t: Vec<_> = plan.pickups().iter().map(|p| p.tier).collect();
+            t.sort_unstable();
+            t.dedup();
+            t
+        };
+        assert_eq!(
+            tiers,
+            crate::course::specification::BoostTier::ALL.to_vec(),
+            "the example course does not author every tier"
+        );
+        assert!(
+            plan.pickups().len() > tiers.len(),
+            "and at least one of them is a row rather than a single"
+        );
         // Compiling it twice is byte-identical.
         assert_eq!(
             plan.dump(),
@@ -159,6 +177,7 @@ mod tests {
                 environment: None,
                 expected_speed_mps: None,
                 traffic: None,
+                pickups: Vec::new(),
             })
             .push_section(SectionSpec::new(
                 SectionId::new("blind_crest"),

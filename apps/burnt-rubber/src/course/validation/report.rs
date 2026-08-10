@@ -123,6 +123,8 @@ pub struct SectionVerdict {
     pub narrowest_corridor_lanes: u32,
     /// Compiled near-miss opportunities inside it.
     pub opportunities: u32,
+    /// Boost pickups standing inside it.
+    pub pickups: u32,
     /// Boost the intended route is expected to earn here (fraction of meter).
     pub boost_earned: f32,
     /// Boost the intended route is expected to spend here.
@@ -155,6 +157,8 @@ pub struct CourseMetrics {
     pub encounters: usize,
     /// Compiled near-miss opportunity windows.
     pub near_miss_windows: usize,
+    /// Compiled boost pickups.
+    pub pickups: usize,
     /// Cells in the traversability grid.
     pub traversal_cells: usize,
     /// Cells the grid found blocked.
@@ -174,6 +178,7 @@ impl CourseMetrics {
         vehicles: 0,
         encounters: 0,
         near_miss_windows: 0,
+        pickups: 0,
         traversal_cells: 0,
         blocked_cells: 0,
         tightest_corridor_m: 0.0,
@@ -245,8 +250,8 @@ impl ValidationReport {
         let mut out = String::new();
         out.push_str(&format!(
             "status {}\nlength {:.0} m, {} samples, {} sections, {} vehicles, {} encounters, \
-             {} near-miss windows\ngrid {} cells ({} blocked), tightest corridor {:.2} m, \
-             {:.1} vehicles/km\n",
+             {} near-miss windows, {} pickups\ngrid {} cells ({} blocked), tightest corridor \
+             {:.2} m, {:.1} vehicles/km\n",
             self.status.token(),
             self.metrics.length_m,
             self.metrics.samples,
@@ -254,6 +259,7 @@ impl ValidationReport {
             self.metrics.vehicles,
             self.metrics.encounters,
             self.metrics.near_miss_windows,
+            self.metrics.pickups,
             self.metrics.traversal_cells,
             self.metrics.blocked_cells,
             self.metrics.tightest_corridor_m,
@@ -265,13 +271,14 @@ impl ValidationReport {
         self.sections.iter().for_each(|s| {
             out.push_str(&format!(
                 "section {:<28} {:>7.0}..{:<7.0} {:<10} corridor {} lanes, {} chances, \
-                 earn {:.2} spend {:.2}\n",
+                 {} pickups, earn {:.2} spend {:.2}\n",
                 s.id,
                 s.start_m,
                 s.end_m,
                 s.status.token(),
                 s.narrowest_corridor_lanes,
                 s.opportunities,
+                s.pickups,
                 s.boost_earned,
                 s.boost_spent,
             ));
@@ -390,6 +397,7 @@ mod tests {
             traversable: true,
             narrowest_corridor_lanes: 2,
             opportunities: 3,
+            pickups: 1,
             boost_earned: 0.6,
             boost_spent: 0.3,
             status: BoostStatus::Excellent,
@@ -409,6 +417,7 @@ mod tests {
             vehicles: 110,
             encounters: 2,
             near_miss_windows: 112,
+            pickups: 14,
             traversal_cells: 2_250,
             blocked_cells: 300,
             tightest_corridor_m: 1.85,
@@ -428,6 +437,7 @@ mod tests {
             traversable: true,
             narrowest_corridor_lanes: 3,
             opportunities: 4,
+            pickups: 2,
             boost_earned: 0.4,
             boost_spent: 0.3,
             status: BoostStatus::Acceptable,
@@ -435,6 +445,7 @@ mod tests {
         let dump = report.dump();
         assert!(dump.contains("4501 samples"), "{dump}");
         assert!(dump.contains("110 vehicles"), "{dump}");
+        assert!(dump.contains("14 pickups"), "{dump}");
         assert!(dump.contains("2250 cells"), "{dump}");
         assert!(dump.contains("non-continuous-course"), "{dump}");
         assert!(dump.contains("opening"), "{dump}");

@@ -8,14 +8,18 @@
 //! seconds = section_length / expected_speed
 //! earned  = chances · near_miss_boost · conversion · conversion_weight
 //!         + seconds · high_speed_boost_rate · high_speed_share
+//!         + Σ pickup_boost(tier) · pickup_conversion
 //! spent   = seconds · boost_drain_rate · target_boost_duty
 //! ratio   = earned / spent
 //! ```
 //!
-//! Both halves of `earned` are real: threading traffic is the *interesting*
-//! source of boost, and simply holding a high speed is the other one (see
-//! `BoostMeter::step`). Leaving the second out is what made an early version of
-//! this analysis call every section of the shipping course starved.
+//! All three parts of `earned` are real. Threading traffic is the *interesting*
+//! source of boost; simply holding a high speed is the passive one (see
+//! `BoostMeter::step`); and a boost pickup is charge the course hands over for
+//! driving a line. Leaving the second out is what made an early version of this
+//! analysis call every section of the shipping course starved, and leaving the
+//! third out would do the same to any section balanced around its pickups —
+//! the validator would be measuring an economy the game does not have.
 //!
 //! and classifies the section by the ratio against the authored thresholds.
 //!
@@ -36,6 +40,7 @@
 //! source.
 
 use crate::course::geometry::CompiledSection;
+use crate::course::pickups::BoostPickup;
 use crate::course::specification::ValidationThresholds;
 use crate::course::traffic::NearMissWindow;
 use crate::tuning::RaceTuning;
@@ -43,9 +48,11 @@ use crate::tuning::RaceTuning;
 use super::report::{BoostStatus, SectionVerdict};
 
 /// Classify one section's boost economy.
+#[allow(clippy::too_many_arguments)]
 pub fn classify(
     section: &CompiledSection,
     windows: &[NearMissWindow],
+    pickups: &[BoostPickup],
     traversable: bool,
     narrowest_corridor_lanes: u32,
     thresholds: &ValidationThresholds,
@@ -68,11 +75,25 @@ pub fn classify(
             )
         });
 
+    // The authored half: charge the course simply hands over, weighted by how
+    // much of it a route is expected to be on the right line for. Unlike a near
+    // miss there is no difficulty per pickup — the difficulty of a pickup is
+    // *where it is*, and a course that wants a pickup to be hard puts it
+    // somewhere hard.
+    let (collected, pickup_boost) = pickups
+        .iter()
+        .filter(|p| inside(p.at_m, section))
+        .fold((0u32, 0.0f32), |(count, boost), p| {
+            (count + 1, boost + race.pickup_boost(p.tier))
+        });
+    let pickup_boost = pickup_boost * thresholds.pickup_conversion.clamp(0.0, 1.0);
+
     let seconds = section.length_m() / section.expected_speed_mps.max(1.0);
     // The passive half: the meter fills on its own above the high-speed
     // threshold, and a skilled route is above it most of the time.
     let earned = earned
-        + seconds * race.high_speed_boost_rate * thresholds.high_speed_share.clamp(0.0, 1.0);
+        + seconds * race.high_speed_boost_rate * thresholds.high_speed_share.clamp(0.0, 1.0)
+        + pickup_boost;
     let spent = seconds * race.boost_drain_rate * thresholds.target_boost_duty.clamp(0.0, 1.0);
     let ratio = (spent > 1.0e-6)
         .then(|| earned / spent)
@@ -99,6 +120,7 @@ pub fn classify(
         traversable,
         narrowest_corridor_lanes,
         opportunities,
+        pickups: collected,
         boost_earned: earned,
         boost_spent: spent,
         status,
@@ -148,6 +170,12 @@ fn overlaps(window: &NearMissWindow, section: &CompiledSection) -> bool {
     (window.end_m > section.start_m) & (window.start_m < section.end_m)
 }
 
+/// Whether a point stands inside a section. Half-open at the top, so a pickup
+/// exactly on a boundary is counted by the section it starts, once.
+fn inside(distance_m: f32, section: &CompiledSection) -> bool {
+    (distance_m >= section.start_m) & (distance_m < section.end_m)
+}
+
 /// Fold a ghost run's measured boost into a course-level verdict.
 ///
 /// A ghost that genuinely held boost for the target duty proves the estimate
@@ -179,7 +207,8 @@ pub const GHOST_STARVED_MARGIN: f32 = 0.6;
 mod tests {
     use super::*;
     use crate::course::specification::{
-        EncounterId, PassingSide, ScalarRange, SectionId, SectionKind, VehicleId,
+        BoostTier, EncounterId, PassingSide, PickupId, ScalarRange, SectionId, SectionKind,
+        VehicleId,
     };
 
     fn section(length_m: f32) -> CompiledSection {
@@ -192,6 +221,16 @@ mod tests {
             expected_speed_mps: 80.0,
             lanes: 5,
             primitive: "straight",
+        }
+    }
+
+    fn pickup(at_m: f32, tier: BoostTier) -> BoostPickup {
+        BoostPickup {
+            id: PickupId(0),
+            at_m,
+            lane: 0,
+            tier,
+            section: 0,
         }
     }
 
@@ -215,6 +254,7 @@ mod tests {
         let verdict = classify(
             &section(1_000.0),
             &[],
+            &[],
             true,
             3,
             &ValidationThresholds::DEFAULT,
@@ -234,6 +274,7 @@ mod tests {
         let verdict = classify(
             &section(1_000.0),
             &[window(0.0, 1_000.0, 50, 1.0)],
+            &[],
             false,
             0,
             &ValidationThresholds::DEFAULT,
@@ -253,7 +294,7 @@ mod tests {
         // 0.13, converted at 0.72, so each chance adds 0.0936 — about nine
         // chances to break even, and about nineteen to reach the excellent bar.
         let status_for = |chances: u32, corridor: u32| {
-            classify(&s, &[window(0.0, 1_000.0, chances, 1.0)], true, corridor, &t, &r).status
+            classify(&s, &[window(0.0, 1_000.0, chances, 1.0)], &[], true, corridor, &t, &r).status
         };
         assert_eq!(status_for(4, 3), BoostStatus::Starved);
         assert_eq!(status_for(12, 3), BoostStatus::Acceptable);
@@ -267,8 +308,8 @@ mod tests {
         let s = section(1_000.0);
         let t = ValidationThresholds::DEFAULT;
         let r = RaceTuning::DEFAULT;
-        let easy = classify(&s, &[window(0.0, 1_000.0, 20, 1.0)], true, 3, &t, &r);
-        let hard = classify(&s, &[window(0.0, 1_000.0, 20, 0.4)], true, 3, &t, &r);
+        let easy = classify(&s, &[window(0.0, 1_000.0, 20, 1.0)], &[], true, 3, &t, &r);
+        let hard = classify(&s, &[window(0.0, 1_000.0, 20, 0.4)], &[], true, 3, &t, &r);
         assert_eq!(easy.opportunities, hard.opportunities);
         assert!(hard.boost_earned < easy.boost_earned);
     }
@@ -282,14 +323,14 @@ mod tests {
         };
         let t = ValidationThresholds::DEFAULT;
         let r = RaceTuning::DEFAULT;
-        let inside = classify(&s, &[window(1_400.0, 1_500.0, 5, 1.0)], true, 3, &t, &r);
+        let inside = classify(&s, &[window(1_400.0, 1_500.0, 5, 1.0)], &[], true, 3, &t, &r);
         assert_eq!(inside.opportunities, 5);
-        let before = classify(&s, &[window(0.0, 999.0, 5, 1.0)], true, 3, &t, &r);
+        let before = classify(&s, &[window(0.0, 999.0, 5, 1.0)], &[], true, 3, &t, &r);
         assert_eq!(before.opportunities, 0);
-        let after = classify(&s, &[window(2_001.0, 2_500.0, 5, 1.0)], true, 3, &t, &r);
+        let after = classify(&s, &[window(2_001.0, 2_500.0, 5, 1.0)], &[], true, 3, &t, &r);
         assert_eq!(after.opportunities, 0);
         // A window that straddles the boundary does count.
-        let straddling = classify(&s, &[window(900.0, 1_100.0, 5, 1.0)], true, 3, &t, &r);
+        let straddling = classify(&s, &[window(900.0, 1_100.0, 5, 1.0)], &[], true, 3, &t, &r);
         assert_eq!(straddling.opportunities, 5);
     }
 
@@ -302,6 +343,7 @@ mod tests {
         };
         let verdict = classify(
             &s,
+            &[],
             &[],
             true,
             3,
@@ -343,8 +385,70 @@ mod tests {
         let w = [window(0.0, 1_000.0, 25, 0.8)];
         let t = ValidationThresholds::DEFAULT;
         let r = RaceTuning::DEFAULT;
-        let a = classify(&s, &w, true, 3, &t, &r);
-        let b = classify(&s, &w, true, 3, &t, &r);
+        let p = [pickup(500.0, BoostTier::Medium)];
+        let a = classify(&s, &w, &p, true, 3, &t, &r);
+        let b = classify(&s, &w, &p, true, 3, &t, &r);
         assert_eq!(a, b);
+    }
+
+    /// **The reason pickups are in this analysis at all.** A section starved on
+    /// its traffic alone is funded once the charge it hands out is counted, and
+    /// a validator that could not see that would condemn a course that plays
+    /// fine.
+    #[test]
+    fn pickups_are_income_and_can_lift_a_starved_section() {
+        let s = section(1_000.0);
+        let t = ValidationThresholds::DEFAULT;
+        let r = RaceTuning::DEFAULT;
+        let thin = [window(0.0, 1_000.0, 4, 1.0)];
+        let without = classify(&s, &thin, &[], true, 3, &t, &r);
+        assert_eq!(without.status, BoostStatus::Starved);
+        assert_eq!(without.pickups, 0);
+
+        // Spent is 1.575; the four chances and the passive term leave a shortfall
+        // of about 0.45, which three large pickups at 0.55 · 0.85 cover twice
+        // over.
+        let charged = [
+            pickup(200.0, BoostTier::Large),
+            pickup(500.0, BoostTier::Large),
+            pickup(800.0, BoostTier::Large),
+        ];
+        let with = classify(&s, &thin, &charged, true, 3, &t, &r);
+        assert_eq!(with.pickups, 3);
+        assert!(with.boost_earned > without.boost_earned);
+        assert_ne!(with.status, BoostStatus::Starved);
+    }
+
+    #[test]
+    fn a_bigger_tier_is_worth_more_to_the_budget() {
+        let s = section(1_000.0);
+        let t = ValidationThresholds::DEFAULT;
+        let r = RaceTuning::DEFAULT;
+        let earned = |tier| {
+            classify(&s, &[], &[pickup(500.0, tier)], true, 3, &t, &r).boost_earned
+        };
+        assert!(earned(BoostTier::Small) < earned(BoostTier::Medium));
+        assert!(earned(BoostTier::Medium) < earned(BoostTier::Large));
+    }
+
+    #[test]
+    fn only_pickups_standing_inside_the_section_count() {
+        let s = CompiledSection {
+            start_m: 1_000.0,
+            end_m: 2_000.0,
+            ..section(1_000.0)
+        };
+        let t = ValidationThresholds::DEFAULT;
+        let r = RaceTuning::DEFAULT;
+        let count = |at| {
+            classify(&s, &[], &[pickup(at, BoostTier::Small)], true, 3, &t, &r).pickups
+        };
+        assert_eq!(count(1_500.0), 1);
+        assert_eq!(count(999.0), 0);
+        assert_eq!(count(2_100.0), 0);
+        // Half-open: the start belongs to this section, the end to the next, so
+        // a pickup on a boundary is counted exactly once across the course.
+        assert_eq!(count(1_000.0), 1);
+        assert_eq!(count(2_000.0), 0);
     }
 }

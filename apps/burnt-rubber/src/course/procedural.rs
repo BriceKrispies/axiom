@@ -34,9 +34,10 @@ use crate::course::compiler;
 use crate::course::error::CourseResult;
 use crate::course::runtime::CoursePlan;
 use crate::course::specification::{
-    BankingMode, CountRange, CourseBuilder, CourseDefaults, MotifInvocation, MotifKind,
-    MotifParams, RoadModifierSpec, RoadPrimitiveSpec, ScalarRange, SectionId, SectionKind,
-    SectionSpec, SlalomSpec, TrafficFlowSpec, TrafficZoneSpec, ValidationThresholds,
+    BankingMode, BoostPickupSpec, BoostTier, CountRange, CourseBuilder, CourseDefaults,
+    MotifInvocation, MotifKind, MotifParams, RoadModifierSpec, RoadPrimitiveSpec, ScalarRange,
+    SectionId, SectionKind, SectionSpec, SlalomSpec, TrafficFlowSpec, TrafficZoneSpec,
+    ValidationThresholds,
 };
 use crate::course::specification::{EncounterSpec, RollingWallSpec};
 use crate::tuning::{CourseTuning, Tuning};
@@ -73,6 +74,16 @@ struct Pacing {
     pieces: u32,
     /// Vehicles per kilometre of ambient traffic, or zero for clear road.
     vehicles_per_km: f32,
+    /// The boost pickups this section offers, at offsets from its own start.
+    ///
+    /// Authored per section rather than scattered by a rule, because *where* a
+    /// pickup is is the whole of its difficulty. A rule that placed one every
+    /// 400 m would produce charge nobody had to drive for; every row below is
+    /// on a line that costs something — the outside of a banked sweeper, the
+    /// far side of a crest you cannot see over, a committed lane in the tunnel's
+    /// traffic. See [`crate::sim::boost`] for why that constraint is the whole
+    /// point of the feature.
+    pickups: &'static [BoostPickupSpec],
 }
 
 /// The shipping pacing plan, in course order.
@@ -94,6 +105,10 @@ const PACING: [Pacing; 9] = [
         // happen on empty tarmac, exactly as `traffic_clear_start` used to
         // guarantee.
         vehicles_per_km: 0.0,
+        // The teaching row: three green pickups down the centre of an empty
+        // straight, where the only thing to learn is that driving over one
+        // fills the bar.
+        pickups: &[BoostPickupSpec::row(360.0, 0, BoostTier::Small, 3, 45.0)],
     },
     Pacing {
         environment: SectionKind::SweepingBends,
@@ -103,6 +118,14 @@ const PACING: [Pacing; 9] = [
         lanes: 5,
         pieces: 5,
         vehicles_per_km: 11.8,
+        // The sweepers alternate direction, so a fixed outer lane is the
+        // *wide* line through half of them and the apex through the other
+        // half. That is the intended cost: taking every one of these means
+        // giving up the tightest line twice.
+        pickups: &[
+            BoostPickupSpec::row(300.0, 2, BoostTier::Medium, 2, 60.0),
+            BoostPickupSpec::row(1_000.0, -2, BoostTier::Medium, 2, 60.0),
+        ],
     },
     Pacing {
         environment: SectionKind::RollingHills,
@@ -112,6 +135,10 @@ const PACING: [Pacing; 9] = [
         lanes: 3,
         pieces: 5,
         vehicles_per_km: 11.0,
+        // Over the back of a crest, in the middle of a three-lane road: the
+        // one large pickup on the course you cannot see before you commit to
+        // it.
+        pickups: &[BoostPickupSpec::single(620.0, 0, BoostTier::Large)],
     },
     Pacing {
         environment: SectionKind::TechnicalBends,
@@ -121,6 +148,10 @@ const PACING: [Pacing; 9] = [
         lanes: 3,
         pieces: 6,
         vehicles_per_km: 10.5,
+        pickups: &[
+            BoostPickupSpec::row(240.0, -1, BoostTier::Small, 2, 50.0),
+            BoostPickupSpec::row(760.0, 1, BoostTier::Medium, 2, 50.0),
+        ],
     },
     Pacing {
         environment: SectionKind::Tunnel,
@@ -130,6 +161,12 @@ const PACING: [Pacing; 9] = [
         lanes: 3,
         pieces: 3,
         vehicles_per_km: 12.5,
+        // The densest traffic on the course. Holding an outer lane long
+        // enough to take these is a commitment made among cars.
+        pickups: &[
+            BoostPickupSpec::single(300.0, 1, BoostTier::Large),
+            BoostPickupSpec::row(560.0, -1, BoostTier::Small, 2, 40.0),
+        ],
     },
     Pacing {
         environment: SectionKind::HighSpeedStraight,
@@ -140,6 +177,13 @@ const PACING: [Pacing; 9] = [
         pieces: 5,
         // "Wide, flat, flat-out — and full of traffic to thread."
         vehicles_per_km: 15.5,
+        // Before the rolling wall and after it, never inside it: the wall's
+        // opening walks across the road and a pickup standing in it would be
+        // bait that is sometimes a car.
+        pickups: &[
+            BoostPickupSpec::row(180.0, 0, BoostTier::Medium, 3, 55.0),
+            BoostPickupSpec::single(1_260.0, -2, BoostTier::Large),
+        ],
     },
     Pacing {
         environment: SectionKind::Canyon,
@@ -149,6 +193,10 @@ const PACING: [Pacing; 9] = [
         lanes: 3,
         pieces: 5,
         vehicles_per_km: 11.0,
+        pickups: &[
+            BoostPickupSpec::row(120.0, 1, BoostTier::Small, 2, 45.0),
+            BoostPickupSpec::single(900.0, -1, BoostTier::Large),
+        ],
     },
     Pacing {
         environment: SectionKind::FinalSweeps,
@@ -158,6 +206,10 @@ const PACING: [Pacing; 9] = [
         lanes: 5,
         pieces: 3,
         vehicles_per_km: 12.0,
+        pickups: &[
+            BoostPickupSpec::row(200.0, 2, BoostTier::Medium, 2, 60.0),
+            BoostPickupSpec::single(640.0, -2, BoostTier::Large),
+        ],
     },
     Pacing {
         environment: SectionKind::Finish,
@@ -167,6 +219,9 @@ const PACING: [Pacing; 9] = [
         lanes: 5,
         pieces: 1,
         vehicles_per_km: 0.0,
+        // Nothing on the run to the line. The last three hundred metres are
+        // about whatever the player has left, not about topping it up.
+        pickups: &[],
     },
 ];
 
@@ -285,6 +340,7 @@ pub fn shipping_spec(seed: u64, tuning: &Tuning) -> crate::course::specification
             if let Some(zone) = traffic {
                 section = section.with_traffic(zone);
             }
+            section.pickups.extend_from_slice(pacing.pickups);
             builder = builder.push_section(section);
         } else {
             // Everything else is a motif: sweepers where the old profile wanted
@@ -318,6 +374,7 @@ pub fn shipping_spec(seed: u64, tuning: &Tuning) -> crate::course::specification
                 environment: Some(pacing.environment),
                 expected_speed_mps: Some(EXPECTED_SPEED_MPS),
                 traffic,
+                pickups: pacing.pickups.to_vec(),
             });
         }
     }
@@ -420,6 +477,111 @@ mod tests {
         assert_ne!(plan.report().status, BoostStatus::Invalid);
         assert!(plan.report().metrics.vehicles > 60, "the road has traffic");
         assert!(!plan.encounters().is_empty(), "and authored figures on it");
+        assert!(!plan.pickups().is_empty(), "and boost to pick up on it");
+    }
+
+    /// Every section that authored pickups got them, on the road, in a lane the
+    /// road has — and the whole course still validates.
+    #[test]
+    fn the_shipping_course_places_its_pickups_on_the_road() {
+        let plan = shipping_plan(crate::DEFAULT_SEED).expect("compiles");
+        let authored: usize = PACING
+            .iter()
+            .flat_map(|p| p.pickups.iter())
+            .map(|row| row.count.max(1) as usize)
+            .sum();
+        assert_eq!(
+            plan.pickups().len(),
+            authored,
+            "every authored pickup compiles into exactly one"
+        );
+        assert_eq!(plan.report().metrics.pickups, authored);
+
+        let track = plan.track();
+        for pickup in plan.pickups() {
+            let sample = track.sample_at(pickup.at_m);
+            assert!(
+                pickup.lane.abs() <= track.lane_reach(&sample),
+                "{} is in lane {} where the road reaches {}",
+                pickup.id,
+                pickup.lane,
+                track.lane_reach(&sample)
+            );
+            // On the tarmac, not on the verge.
+            let lateral = track.lane_lateral(&sample, pickup.lane);
+            assert!(
+                lateral.abs() < sample.half_width,
+                "{} is {:.1} m off centre on a {:.1} m half-width road",
+                pickup.id,
+                lateral,
+                sample.half_width
+            );
+        }
+        // Ascending, which the runtime's index and the collector both assume.
+        assert!(plan
+            .pickups()
+            .windows(2)
+            .all(|w| w[0].at_m <= w[1].at_m));
+    }
+
+    /// **Why an unreachable pickup is a warning and not an error.** A pickup is
+    /// authored against the *road*, and the road's ambient traffic is drawn per
+    /// seed. The compiler clears the cars that would sit on top of one
+    /// (`PICKUP_KEEP_OUT_M`), which is what it can do without moving what the
+    /// author wrote; whether every remaining lane is reachable at the expected
+    /// speed then depends on the draw, and varies from seed to seed.
+    ///
+    /// So: **never an error, at any seed**. That is the property worth pinning —
+    /// a warning count is a property of one traffic draw and would be a test
+    /// that fails whenever the flow generator is touched.
+    #[test]
+    fn no_seed_produces_an_unplaceable_pickup() {
+        for seed in [crate::DEFAULT_SEED, 1, 2, 7, 99, 12_345] {
+            let plan = shipping_plan(seed).expect("compiles");
+            assert!(!plan.pickups().is_empty(), "seed {seed} placed no pickups");
+            let bad: Vec<String> = plan
+                .report()
+                .errors()
+                .filter(|f| {
+                    matches!(
+                        f.error.code,
+                        crate::course::CourseErrorCode::InvalidPickupLane
+                            | crate::course::CourseErrorCode::OverlappingPickups
+                    )
+                })
+                .map(|f| f.line())
+                .collect();
+            assert!(bad.is_empty(), "seed {seed}: {}", bad.join("\n"));
+        }
+    }
+
+    /// The keep-out earns its place: an ambient car may not be parked in a
+    /// pickup's own lane at the point the player meets it, because taking the
+    /// pickup would then mean driving through the car.
+    #[test]
+    fn ambient_traffic_keeps_out_of_a_pickups_own_lane() {
+        let plan = shipping_plan(crate::DEFAULT_SEED).expect("compiles");
+        let tuning = Tuning::DEFAULT;
+        let length = plan.length();
+        for pickup in plan.pickups() {
+            for vehicle in plan.traffic().iter().filter(|v| v.encounter.is_none()) {
+                let meet = crate::course::traffic::meeting_distance(
+                    vehicle.spawn_m,
+                    vehicle.speed_mps,
+                    tuning.race.traffic_ahead,
+                    plan.track().sample_at(vehicle.spawn_m).expected_speed,
+                    length,
+                );
+                assert!(
+                    (vehicle.lane != pickup.lane) | ((meet - pickup.at_m).abs() >= 30.0),
+                    "vehicle {} meets the player {:.0} m from {} in the same lane {}",
+                    vehicle.id,
+                    (meet - pickup.at_m).abs(),
+                    pickup.id,
+                    pickup.lane
+                );
+            }
+        }
     }
 
     #[test]
@@ -450,3 +612,4 @@ mod tests {
         );
     }
 }
+

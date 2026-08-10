@@ -3,9 +3,9 @@
 How a Burnt Rubber course is authored, compiled, validated and driven.
 
 Everything described here lives in `src/course/` and is **app-local**. A course
-motif, a racing encounter, a near-miss opportunity and a boost budget are this
-game's opinions, not engine capabilities, and nothing in this system was added to
-a layer or a module to support it.
+motif, a racing encounter, a near-miss opportunity, a boost pickup and a boost
+budget are this game's opinions, not engine capabilities, and nothing in this
+system was added to a layer or a module to support it.
 
 ---
 
@@ -40,11 +40,13 @@ questions everything asks of it.
                    compiler::expand      motifs and groups become sections
                            ▼
                      ExpandedCourse                       compiler/
-                    ┌──────┴───────┐
-          geometry::compile     traffic::flow / traffic::encounters
-        Track + CompiledSection    TrafficPlan / CompiledEncounter /
-                    │              NearMissWindow
-                    └──────┬───────┘
+                    ┌──────┼───────┐
+          geometry::compile │    traffic::flow / traffic::encounters
+        Track + CompiledSection   TrafficPlan / CompiledEncounter /
+                    │      │       NearMissWindow
+                    │  pickups::expand_row
+                    │      │       BoostPickup
+                    └──────┼───────┘
                            ▼
                  validation::validate                     validation/
               grid + budget (+ ghost, offline)
@@ -92,6 +94,7 @@ At any `s` the compiled course resolves:
 | traffic ahead | `CoursePlan::first_vehicle_at` |
 | the encounter here | `CoursePlan::encounter_at` |
 | near-miss opportunities ahead | `CoursePlan::windows_ahead` |
+| boost pickups ahead | `CoursePlan::pickups_ahead` |
 
 Lane width is **constant for the whole course** (`CourseDefaults::lane_width_m`),
 because `Track::lane_lateral` puts lane `n` at `n · lane_width` everywhere and
@@ -274,6 +277,128 @@ grid uses the same one — there is one model of where the player meets a car.
 
 ---
 
+## 9a. Boost pickups
+
+The one thing on a course that is **placed** rather than generated. Traffic is a
+density description, an encounter is a figure, a near-miss window is a
+projection — none of those is written out item by item. A pickup is:
+
+```text
+pickups {
+    boost small  { at = 120m lane = -1 }
+    boost medium { at = 400m lane =  0 count = 3 spacing = 40m }
+    boost large  { at = 900m lane =  2 }
+}
+```
+
+`pickups` is a **sibling of `traffic`**, available on a primitive section, a
+section group and a motif, with `at` measured from the start of that item's span
+exactly like an encounter's. `count` + `spacing` is a bounded row (`MAX_PICKUP_ROW`
+= 16) — one authored intention rather than three entries to keep in step.
+
+### The tier is the identity
+
+A pickup carries a **tier** (`small` / `medium` / `large`), never an amount. The
+amount (`RaceTuning::pickup_boost`) and the colour (green / blue / red, in
+`render::palette`) are both derived from it, in one place each. If the amount
+were authored per pickup, two pickups the same colour could pay differently and
+the colour would stop being information — and the colour is the entire interface:
+a player learns the ladder in the first thirty seconds and then reads the road
+with it.
+
+| | Tier | Pays | Colour |
+|---|---|---|---|
+| | `small` | 0.15 | green |
+| | `medium` | 0.30 | blue |
+| | `large` | 0.55 | red |
+
+Sized against the rest of the economy: the meter drains at 0.36/s and a near miss
+pays 0.13, so `small` is about one pass and `large` about four. **None of them
+fills the bar.** A pickup tops up a run that is already threading traffic; it
+cannot replace one that is not. See `sim::boost` for why that constraint is the
+feature rather than a limitation of it.
+
+### It is not traffic, and it must not be in the traffic list
+
+Tempting to reuse `TrafficPlan` with a "static, harmless" flag. That would be
+wrong for a specific reason: the traffic list is what the collision resolver
+scans every step and what `validation::traversal` treats as **blocking**. A
+pickup in it would make the grid report the lane it stands in as impassable, and
+good courses would fail validation because of the reward on them.
+
+So `BoostPickup` is its own compiled contract, in its own list, with its own
+`DistanceIndex` — the same lifecycle as traffic, and none of the same meaning.
+It stores a **lane**, not a lateral offset, for the same reason `TrafficPlan`
+does: a road that widens has to take the pickup with its lane, not leave it where
+the centreline used to be.
+
+### No seed stream
+
+Pickups are fully authored, so nothing is drawn for them and
+`SeedDomain` gains no variant. Two compilations of the same source place the same
+charge in the same metre, and a re-seed cannot move one.
+
+### Ambient traffic keeps out of a pickup's lane
+
+The compiler drops any ambient vehicle that would be **in a pickup's own lane at
+the point the player meets it** (`PICKUP_KEEP_OUT_M`, 36 m). This is the same
+mechanism, and the same argument, as the encounter keep-out: a random car parked
+on authored charge turns a designed reward into a wall, and a reward that cannot
+be taken without a collision is worse than no reward.
+
+Two differences from the encounter keep-out, both load-bearing:
+
+* it is measured at the **meeting point**, not the spawn point — which is where
+  the car actually is when the player arrives, and the projection
+  `traffic::meeting_distance` routinely carries a car hundreds of metres past the
+  zone it spawned in (which is why the keep-out is built from the *whole course's*
+  pickups, before the traffic pass, and not per zone);
+* it is **per lane**, not across the road. A pickup that swept the whole road
+  clear around itself would punch a hole in the traffic and remove the near
+  misses that are the rest of the economy. Threading a car in the next lane on
+  the way to a pickup is the good case.
+
+### What validation says about them
+
+| Finding | Severity | When |
+|---|---|---|
+| `invalid-pickup-lane` | error | the road has no such lane where it stands |
+| `overlapping-pickups` | error | two within 6 m in one lane — taking one takes both |
+| `unreachable-pickup` | **warning** | no route at the expected speed reaches its lane |
+
+The last is a warning on purpose, and the reason is worth stating: the
+traversability grid models a player holding the expected speed and never braking,
+so a lane it cannot route to may still be reachable by someone who lifts. It is
+also a property of *one traffic draw* — the shipping course is generated per seed,
+so the same authored placement is clean at one seed and warned at another. What
+is pinned by test is that **no seed produces an error**.
+
+Pickups are also income in the boost budget (§12): leaving them out of `earned`
+would have the validator condemning any section balanced around its charge.
+
+### Collecting one
+
+`sim::pickups::PickupField` holds the compiled list plus one flag per pickup for
+*this run* — deliberately not on the plan, which is shared by `Arc` between the
+live race, the ghost and any replay, and which a mutable flag would let one run
+spend on another's behalf.
+
+The test is **swept**, not a proximity check: `(at > from) & (at <= to)` over the
+interval the car travelled this step, the same `crossed` idiom the traffic
+advance uses for scheduled changes. At the boosted top speed the car covers about
+1.6 m per fixed step, and a point test wide enough to reliably catch a pickup is
+also wide enough to collect one the car has not reached. The sweep cannot be
+tunnelled through at any speed and cannot double-collect at any frame rate. The
+lateral half is an ordinary proximity test, because the car does not sweep
+sideways within one step.
+
+Collection happens **before** traffic resolution and is independent of it. A near
+miss and a collision are two readings of one event and have to be ordered against
+each other; a pickup is neither — driving over one is a fact about where the car
+went, and a car clipped in the same step does not un-drive it.
+
+---
+
 ## 10. Deterministic seed partitioning
 
 One course seed, six independent streams, and a per-section stream inside each:
@@ -337,6 +462,8 @@ same compilation produce byte-identical reports.
 
 ```text
 earned = Σ chances · near_miss_boost · near_miss_conversion · difficulty
+       + seconds · high_speed_boost_rate · high_speed_share
+       + Σ pickup_boost(tier) · pickup_conversion
 spent  = (section_length / expected_speed) · boost_drain_rate · target_boost_duty
 ratio  = earned / spent
 ```
@@ -348,11 +475,17 @@ ratio  = earned / spent
 | `acceptable` | between the two |
 | `excellent` | `ratio ≥ excellent_ratio` **and** ≥ `excellent_route_width` lanes stay reachable |
 
+All three income terms are real, and each was added because leaving it out made
+the analysis lie. Threading traffic is the *interesting* source of boost; holding
+a high speed is the passive one; and a boost pickup (§9a) is charge the course
+simply hands over. An early version had only the first, and called every section
+of the shipping course starved.
+
 It is a **reproducible approximation and says so**. It uses the game's own
-numbers (`RaceTuning::near_miss_boost`, `boost_drain_rate`) rather than invented
-ones, and every threshold is authored in `ValidationThresholds` — a course that
-wants a harsher economy says so in its own source, rather than the number being
-buried in the analysis.
+numbers (`RaceTuning::near_miss_boost`, `pickup_boost`, `boost_drain_rate`)
+rather than invented ones, and every threshold is authored in
+`ValidationThresholds` — a course that wants a harsher economy says so in its own
+source, rather than the number being buried in the analysis.
 
 Where a ghost run is available its measured boost duty is folded in
 (`boost::fold_ghost`), which turns the estimate into a measurement for the one
@@ -429,17 +562,24 @@ course "<name>" {
                  min_reaction_time near_miss_conversion target_boost_duty
                  starved_ratio excellent_ratio excellent_route_width }
 
-    <primitive> { id length … <modifier blocks> traffic { … } }
+    <primitive> { id length … <modifier blocks> traffic { … } pickups { … } }
 
     section "<name>" { lanes environment expected_speed
-                       <primitive blocks> traffic { … } }
+                       <primitive blocks> traffic { … } pickups { … } }
 
     motif <kind> { id count length radius bank elevation_amplitude
                    lateral_amplitude wavelength height lanes narrow_lanes
-                   environment expected_speed traffic { … } }
+                   environment expected_speed traffic { … } pickups { … } }
 
     repeat <n>    { <items> }
-    alternate <n> { <items> }        # every other copy is mirrored
+    alternate <n> { <items> }        # every other copy is mirrored — including
+                                     # which side of the road its pickups are on
+}
+
+pickups {
+    boost small  { at lane }
+    boost medium { at lane count spacing }
+    boost large  { at lane }
 }
 
 traffic {
@@ -498,6 +638,13 @@ validated by the real pipeline in the test suite.
   struct and `validate`, a `*_rows` function in `traffic::encounters`, and a
   keyword arm in `parser::encounter`. It compiles into ordinary `TrafficPlan`s
   like the others.
+* **A new pickup tier** — a variant in `BoostTier` (with its token and dense
+  index), an entry in `RaceTuning::pickup_boost`, and a material in
+  `ScenePalette::pickup`. The three arrays are length-3 on purpose: widening them
+  is the change, and the compiler will point at every place that has to agree.
+  Think twice, though — three tiers is about as many colours as a player can
+  separate at 300 km/h through a windscreen, and a fourth is a colour nobody can
+  name under motion blur.
 
 ---
 
@@ -522,4 +669,14 @@ validated by the real pipeline in the test suite.
   and 78 m/s that is one lane per column; a finer grid reports a zero shift and
   the validator raises it as a configuration error rather than silently deciding
   nothing is passable.
+* **A pickup's reachability is a property of one traffic draw.** The shipping
+  course is generated per seed, so an authored lane that a route reaches at one
+  seed may be blocked at another. The compiler clears the cars that would sit *on*
+  a pickup (§9a); everything past that is reported as a warning rather than fixed,
+  because fixing it would mean the compiler moving what the author wrote.
+* **The agent does not seek pickups.** It drives its own line and collects
+  whatever happens to be on it — worth 3.5 s over nine kilometres, measured. That
+  makes ghost-folded boost verdicts (§12, §13) a **lower bound** on a course whose
+  economy leans on its pickups, since the one route measured is a route that
+  ignored them.
 * **No editor.** Courses are text and Rust; there is no authoring UI.

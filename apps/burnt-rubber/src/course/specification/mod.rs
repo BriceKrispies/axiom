@@ -21,12 +21,22 @@
 //!        └── Motif(MotifInvocation)       expands into the above
 //! ```
 //!
+//! Each of those three carries the same two placement lists over its own span:
+//! a traffic zone ([`TrafficZoneSpec`]) and a set of boost pickups
+//! ([`BoostPickupSpec`]). They are deliberately separate lists rather than one:
+//! traffic is a *density description* the compiler generates vehicles from, and
+//! a pickup is a *placement* the author wrote out. Folding a pickup into the
+//! traffic zone would also put it in the list the collision resolver scans and
+//! the traversability grid treats as blocking, which is the one thing a pickup
+//! must never be.
+//!
 //! [`CourseErrorCode::UnknownField`]: crate::course::error::CourseErrorCode::UnknownField
 
 pub mod builder;
 pub mod environment;
 pub mod ids;
 pub mod motif;
+pub mod pickup;
 pub mod road;
 pub mod thresholds;
 pub mod traffic;
@@ -36,8 +46,9 @@ use crate::course::error::{finite, positive, CourseError, CourseErrorCode, Cours
 
 pub use builder::CourseBuilder;
 pub use environment::{SectionKind, Zone};
-pub use ids::{EncounterId, SectionId, VehicleId};
+pub use ids::{EncounterId, PickupId, SectionId, VehicleId};
 pub use motif::{MotifInvocation, MotifKind, MotifParams, MAX_MOTIF_COUNT};
+pub use pickup::{BoostPickupSpec, BoostTier, MAX_PICKUP_ROW};
 pub use road::{
     BankingMode, RoadModifierSpec, RoadPrimitiveSpec, TurnDirection,
 };
@@ -134,6 +145,8 @@ pub struct SectionSpec {
     /// Traffic authored directly on this section. A section inside a group
     /// leaves this empty and the group's zone covers it.
     pub traffic: Option<TrafficZoneSpec>,
+    /// Boost pickups placed on this section, at offsets from its start.
+    pub pickups: Vec<BoostPickupSpec>,
 }
 
 impl SectionSpec {
@@ -147,6 +160,7 @@ impl SectionSpec {
             expected_speed_mps: None,
             environment: None,
             traffic: None,
+            pickups: Vec::new(),
         }
     }
 
@@ -179,6 +193,12 @@ impl SectionSpec {
         self.traffic = Some(traffic);
         self
     }
+
+    /// Place a boost pickup, or a row of them.
+    pub fn with_pickup(mut self, pickup: BoostPickupSpec) -> SectionSpec {
+        self.pickups.push(pickup);
+        self
+    }
 }
 
 /// Several primitives that share an id, an environment and one traffic zone.
@@ -203,6 +223,9 @@ pub struct SectionGroupSpec {
     pub environment: Option<SectionKind>,
     /// Traffic across the whole group.
     pub traffic: Option<TrafficZoneSpec>,
+    /// Boost pickups across the whole group, at offsets from the *group's*
+    /// start — the parts are one span as far as placement is concerned.
+    pub pickups: Vec<BoostPickupSpec>,
 }
 
 impl SectionGroupSpec {
@@ -215,6 +238,7 @@ impl SectionGroupSpec {
             expected_speed_mps: None,
             environment: None,
             traffic: None,
+            pickups: Vec::new(),
         }
     }
 }
@@ -303,6 +327,7 @@ impl CourseSpec {
                     .map(|t| t.validate(reach))
                     .transpose()
                     .map(|_| ())
+                    .and_then(|()| validate_pickups(&group.pickups, reach))
                     .map_err(|e| e.in_section(group.id.as_str()))
             }
             CourseItem::Motif(motif) => motif
@@ -316,6 +341,7 @@ impl CourseSpec {
                         .transpose()
                         .map(|_| ())
                 })
+                .and_then(|()| validate_pickups(&motif.pickups, reach))
                 .map_err(|e| e.in_section(motif.id.as_str())),
         })
     }
@@ -352,7 +378,15 @@ fn validate_section(
         .map(|t| t.validate(lane_reach))
         .transpose()
         .map_err(|e| e.in_section(name))?;
+    validate_pickups(&section.pickups, lane_reach).map_err(|e| e.in_section(name))?;
     Ok(())
+}
+
+/// Structural checks on a span's pickups. Whether the road has the authored lane
+/// *at the compiled distance* is a question about geometry, and belongs to
+/// `validation::check_pickups`, not here.
+fn validate_pickups(pickups: &[BoostPickupSpec], lane_reach: i32) -> CourseResult<()> {
+    pickups.iter().try_for_each(|p| p.validate(lane_reach))
 }
 
 #[cfg(test)]

@@ -19,6 +19,7 @@ pub mod chunks;
 pub mod effects;
 pub mod foliage_texture;
 pub mod palette;
+pub mod pickups;
 pub mod prop_meshes;
 pub mod road_mesh;
 pub mod scenery;
@@ -41,6 +42,7 @@ use car_model::{PlayerCar, TrafficVisuals};
 use chunks::RoadChunks;
 use effects::Effects;
 use palette::ScenePalette;
+use pickups::PickupVisuals;
 use scenery_pool::SceneryField;
 
 /// The near plane (m).
@@ -63,6 +65,9 @@ pub struct RaceScene {
     road: RoadChunks,
     scenery: SceneryField,
     traffic: TrafficVisuals,
+    /// The boost pickups standing on the road ahead — three pools, one per
+    /// tier, because a body's material is fixed when it is spawned.
+    pickups: PickupVisuals,
     car: PlayerCar,
     /// The agent's car. The same model in a translucent livery, posed from a
     /// simulation this scene never steps — see [`crate::ghost`].
@@ -370,6 +375,7 @@ impl RaceScene {
         let road = RoadChunks::install(app, track, &tuning.course, &tuning.camera, palette.road);
         let scenery = SceneryField::install(app, &palette, track, track.seed());
         let traffic = TrafficVisuals::install(app, &palette, tuning.race.traffic_active);
+        let pickups = PickupVisuals::install(app, &palette);
         let car = PlayerCar::install(app, &palette.player_livery());
         // Installed unconditionally at startup, even though a race may never
         // show it: the live browser backend sizes its vertex and instance
@@ -386,6 +392,7 @@ impl RaceScene {
             road,
             scenery,
             traffic,
+            pickups,
             car,
             ghost_car,
             effects,
@@ -452,6 +459,7 @@ impl RaceScene {
         self.scenery.pose(app, camera.eye, self.last_view_proj);
 
         self.pose_traffic(app, sim, alpha);
+        self.pose_pickups(app, sim, alpha);
 
         let braking = brake_intensity(sim);
         let boost = if sim.boost().active() { 1.0 } else { 0.0 };
@@ -518,6 +526,24 @@ impl RaceScene {
         }
     }
 
+    /// Place every uncollected pickup in range.
+    ///
+    /// Unlike the traffic, nothing here is interpolated: a pickup does not move,
+    /// so there is nothing between two fixed steps to interpolate *between*. The
+    /// only thing `alpha` is used for is the diamond's spin, which is
+    /// presentation and has no simulation state behind it at all.
+    fn pose_pickups(&self, app: &mut RunningApp, sim: &RaceSim, alpha: f32) {
+        let field = sim.pickups();
+        self.pickups.pose(
+            app,
+            sim.track(),
+            sim.plan().pickups(),
+            sim.car().distance,
+            pickups::spin_phase(sim.step_count(), alpha),
+            &|pickup| field.is_taken(pickup),
+        );
+    }
+
     /// Diagnostics counters for this frame.
     pub fn counters(&self) -> SceneCounters {
         SceneCounters {
@@ -528,6 +554,7 @@ impl RaceScene {
             cached_scenery_chunks: self.scenery.cached_chunks(),
             effect_instances: self.effects.visible_count(),
             traffic_slots: self.traffic.len(),
+            pickup_bodies: self.pickups.len(),
         }
     }
 
@@ -557,6 +584,9 @@ pub struct SceneCounters {
     pub cached_scenery_chunks: usize,
     pub effect_instances: usize,
     pub traffic_slots: usize,
+    /// Bodies in the pickup pools — three tiers' worth, all installed at
+    /// startup whether or not the course has any pickups.
+    pub pickup_bodies: usize,
 }
 
 /// How lit the brake lights should be.

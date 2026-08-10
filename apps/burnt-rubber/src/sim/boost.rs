@@ -1,16 +1,44 @@
 //! The boost meter — the game's entire reward loop in one number.
 //!
-//! Boost is the only resource in Burnt Rubber, and it is deliberately earned by
-//! doing the risky thing rather than by collecting anything:
+//! Boost is the only resource in Burnt Rubber. Three of its four sources are
+//! *earned by driving dangerously*, and are read from simulation state that
+//! already exists:
 //!
 //! * **near misses** — threading traffic at a real closing speed;
 //! * **drifting** — holding a slide rather than tidying it up;
 //! * **speed** — simply staying above a high threshold.
 //!
-//! All three are read from simulation state that already exists, which is the
-//! point: there is no separate "combo system" to keep in sync with the driving,
-//! and there is no timer anywhere. If the car is not doing something dangerous,
-//! the meter is not filling.
+//! There is no separate "combo system" to keep in sync with the driving, and
+//! there is no timer anywhere. If the car is not doing something dangerous,
+//! those three are not filling the meter.
+//!
+//! # The fourth source: authored pickups
+//!
+//! The fourth is different in kind, and this module used to say the game had no
+//! such thing. It does: a **boost pickup** ([`crate::course::pickups`]) is
+//! charge the *course* hands over, placed by an author at a distance and a lane
+//! and collected by driving over it. It is income the driving does not have to
+//! generate.
+//!
+//! That is a real change to the shape of the loop, and it is worth being honest
+//! about what keeps it from undoing the other three. Two things, and neither is
+//! in this file:
+//!
+//! * **Where a pickup is *is* its difficulty.** The tier ladder says what one
+//!   pays; nothing says what it costs, because the cost is the line you have to
+//!   take. The shipping course puts them on the outside of banked sweepers, over
+//!   blind crests and in the tunnel's traffic (see
+//!   [`crate::course::procedural`]), and a course that scattered them down the
+//!   racing line would have removed the loop rather than fed it.
+//! * **The ladder is sized against a pass, not against the bar.** The largest
+//!   tier is worth about four near misses and still under a second and a half of
+//!   boost; none of them fills the meter. A pickup tops up a run that is already
+//!   threading traffic — it cannot replace one that is not.
+//!
+//! The meter itself does not know any of this. [`BoostMeter::award`] is the same
+//! door a near miss comes through, which is deliberate: the meter's job is to
+//! hold a number and answer a held button, not to have opinions about where
+//! charge came from.
 //!
 //! # Holding the button *is* the request
 //!

@@ -15,13 +15,17 @@
 //! 1. resolve the one-shot commands (restart, reset, pause);
 //! 2. ask the boost meter whether boost may be spent;
 //! 3. drive the car (which resolves barriers inside its own sub-moves);
-//! 4. advance the traffic;
-//! 5. resolve traffic contacts, then award near misses on what is left;
-//! 6. update progress, the finish, and the stuck detector;
-//! 7. advance the camera over the settled state.
+//! 4. award every boost pickup the car drove over on the way;
+//! 5. advance the traffic;
+//! 6. resolve traffic contacts, then award near misses on what is left;
+//! 7. update progress, the finish, and the stuck detector;
+//! 8. advance the camera over the settled state.
 //!
 //! Traffic contacts are resolved *before* near misses are awarded so a car you
-//! actually hit can never also pay out as a near miss.
+//! actually hit can never also pay out as a near miss. Pickups sit outside that
+//! ordering entirely, because they are not in competition with either: a pickup
+//! is collected by having driven over it, and nothing that happens to the car
+//! afterwards changes whether it did.
 
 pub mod boost;
 pub mod car;
@@ -29,6 +33,7 @@ pub mod chassis;
 pub mod collision;
 pub mod contact;
 pub mod controller;
+pub mod pickups;
 pub mod rails;
 pub mod traffic;
 
@@ -45,7 +50,10 @@ use crate::tuning::{Tuning, DT};
 use boost::BoostMeter;
 use car::{CarPose, CarState};
 use contact::{ContactState, Severity};
+use pickups::PickupField;
 use traffic::Traffic;
+
+use crate::course::specification::BoostTier;
 
 /// What the run is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +95,13 @@ pub enum RaceEvent {
     },
     /// A traffic car was threaded.
     NearMiss { boost_awarded: f32 },
+    /// A boost pickup was collected.
+    ///
+    /// Carries the tier as well as the amount, because the cue is pitched by
+    /// tier: a player who hears the difference between a green and a red without
+    /// looking at the bar has learned the ladder, and that is the whole reason
+    /// the tiers are named rather than numeric.
+    PickupCollected { tier: BoostTier, boost_awarded: f32 },
     /// A drift began.
     DriftStarted,
     /// Boost was engaged.
@@ -115,6 +130,8 @@ pub struct RaceSim {
     /// car is under recovery assistance. See [`contact`].
     contact: ContactState,
     traffic: Traffic,
+    /// The course's boost pickups, and which of them this run has taken.
+    pickups: PickupField,
     boost: BoostMeter,
     camera: ChaseCamera,
     tuning: Tuning,
@@ -208,6 +225,7 @@ impl RaceSim {
             rails,
             contact: ContactState::new(),
             traffic: Traffic::new(plan.clone(), &tuning.race),
+            pickups: PickupField::new(plan.clone()),
             boost: BoostMeter::new(),
             camera,
             phase: RacePhase::Countdown,
@@ -260,6 +278,11 @@ impl RaceSim {
     /// The traffic pool.
     pub const fn traffic(&self) -> &Traffic {
         &self.traffic
+    }
+
+    /// The course's boost pickups and what this run has taken of them.
+    pub const fn pickups(&self) -> &PickupField {
+        &self.pickups
     }
 
     /// The boost meter.
@@ -563,6 +586,10 @@ impl RaceSim {
         }
         self.was_boosting = self.boost.active();
 
+        // Where the car was before it moved. The pickup sweep needs the interval
+        // the car travelled, not the point it ended at — see [`pickups`].
+        let was_at = self.car.distance;
+
         let report = controller::step(
             &mut self.car,
             command,
@@ -580,6 +607,7 @@ impl RaceSim {
             self.report_impact(impact);
         }
 
+        self.collect_pickups(was_at);
         self.resolve_traffic();
         self.note_surface();
 
@@ -592,6 +620,36 @@ impl RaceSim {
         self.top_speed_seen = self.top_speed_seen.max(self.car.speed());
         self.near_miss_notice = self.near_miss_notice.saturating_sub(1);
         self.go_banner = self.go_banner.saturating_sub(1);
+    }
+
+    /// Award every pickup the car drove over between `was_at` and here.
+    ///
+    /// Placed **before** traffic resolution and deliberately independent of it.
+    /// A near miss and a collision are two readings of one event and have to be
+    /// ordered against each other; a pickup is neither. Driving over one is a
+    /// fact about where the car went, and a car you clipped in the same step
+    /// does not un-drive it.
+    fn collect_pickups(&mut self, was_at: f32) {
+        let race = self.tuning.race;
+        let vehicle = self.tuning.vehicle;
+        let taken = self.pickups.collect(
+            was_at,
+            &self.car,
+            self.plan.track(),
+            &race,
+            &vehicle,
+        );
+        for collected in taken {
+            self.boost.award(collected.boost);
+            // The same notification a near miss raises: the reward is the bar
+            // moving, and the HUD's "+" flash reads `BoostMeter::recent_gain`,
+            // which `award` has just fed.
+            self.near_miss_notice = race.notify_steps;
+            self.events.push(RaceEvent::PickupCollected {
+                tier: collected.tier,
+                boost_awarded: collected.boost,
+            });
+        }
     }
 
     /// Traffic contacts first, then near misses on whatever was not hit.
@@ -882,6 +940,23 @@ mod tests {
             sim.step(DriveCommand::IDLE);
         }
         sim
+    }
+
+    /// A pickup with no other pickup near it, for the tests that want to observe
+    /// exactly one collection.
+    ///
+    /// Picking "the first one past 400 m" instead is a trap the shipping course
+    /// walks straight into: its pickups come in **rows**, so a test that drives
+    /// sixty metres onto one collects three and reports a bug that is not there.
+    /// The isolation radius is comfortably over any authored row's span.
+    fn isolated_pickup(sim: &RaceSim) -> crate::course::pickups::BoostPickup {
+        let all = sim.plan().pickups();
+        *all.iter()
+            .find(|p| {
+                all.iter()
+                    .all(|other| (other.id == p.id) | ((other.at_m - p.at_m).abs() > 250.0))
+            })
+            .expect("the shipping course has a pickup standing on its own")
     }
 
     /// Traffic interpolates between fixed steps like everything else the player
@@ -1869,6 +1944,143 @@ mod tests {
             !sim.events().contains(&RaceEvent::BoostStarted),
             "not every step it is held"
         );
+    }
+
+    /// **The feature, end to end.** Put the car on a pickup's lane, drive
+    /// through it, and the meter goes up by exactly what the tier pays, once.
+    #[test]
+    fn driving_over_a_pickup_fills_the_meter_and_reports_it() {
+        let mut sim = racing();
+        let target = isolated_pickup(&sim);
+        let expected = sim.tuning().race.pickup_boost(target.tier);
+
+        // Line the car up on the pickup's lane, a little short of it.
+        sim.place_at(target.at_m - 60.0);
+        let sample = sim.track().sample_at(target.at_m);
+        sim.car.lateral = sim.track().lane_lateral(&sample, target.lane);
+        sim.launch_at(50.0);
+
+        let before = sim.boost().charge();
+        let mut collected = 0u32;
+        for _ in 0..180 {
+            // Coast: no throttle steering the car off its lane, no boost
+            // draining the meter, so the only thing that can move the charge is
+            // the pickup.
+            sim.step(DriveCommand::default());
+            collected += sim
+                .events()
+                .iter()
+                .filter(|e| matches!(e, RaceEvent::PickupCollected { .. }))
+                .count() as u32;
+        }
+        assert_eq!(collected, 1, "the pickup was not collected exactly once");
+        assert_eq!(sim.pickups().collected(), 1);
+        assert!(
+            (sim.boost().charge() - before - expected).abs() < 1.0e-4,
+            "the meter moved by {} rather than {expected}",
+            sim.boost().charge() - before
+        );
+    }
+
+    /// The event carries the tier, because the cue and the notification are
+    /// pitched by it.
+    #[test]
+    fn the_collection_event_names_the_tier_it_paid() {
+        let mut sim = racing();
+        let target = isolated_pickup(&sim);
+        sim.place_at(target.at_m - 40.0);
+        let sample = sim.track().sample_at(target.at_m);
+        sim.car.lateral = sim.track().lane_lateral(&sample, target.lane);
+        sim.launch_at(50.0);
+
+        let mut seen = None;
+        for _ in 0..180 {
+            sim.step(DriveCommand::default());
+            seen = seen.or_else(|| {
+                sim.events().iter().find_map(|e| match e {
+                    RaceEvent::PickupCollected { tier, boost_awarded } => {
+                        Some((*tier, *boost_awarded))
+                    }
+                    _ => None,
+                })
+            });
+        }
+        let (tier, awarded) = seen.expect("no collection event");
+        assert_eq!(tier, target.tier);
+        assert_eq!(awarded, sim.tuning().race.pickup_boost(target.tier));
+    }
+
+    /// A restart puts every pickup back. It is a new run, and the point of the
+    /// ledger living on the *run* rather than on the plan is that the plan is
+    /// shared and cannot be spent.
+    #[test]
+    fn a_restart_puts_every_pickup_back() {
+        let mut sim = racing();
+        let target = isolated_pickup(&sim);
+        sim.place_at(target.at_m - 40.0);
+        let sample = sim.track().sample_at(target.at_m);
+        sim.car.lateral = sim.track().lane_lateral(&sample, target.lane);
+        sim.launch_at(50.0);
+        for _ in 0..180 {
+            sim.step(DriveCommand::default());
+        }
+        assert_eq!(sim.pickups().collected(), 1);
+
+        sim.step(DriveCommand { restart: true, ..DriveCommand::default() });
+        assert_eq!(sim.pickups().collected(), 0);
+        assert!(!sim.pickups().is_taken(&target));
+        assert_eq!(sim.pickups().total(), sim.plan().pickups().len());
+    }
+
+    /// A pickup pays once per run, however many times the car crosses it. The
+    /// ledger, not the sweep, is what guarantees that — the sweep has no memory.
+    #[test]
+    fn a_pickup_cannot_be_farmed_by_crossing_it_twice() {
+        let mut sim = racing();
+        let target = isolated_pickup(&sim);
+        // One approach: onto the pickup's lane, short of it, and drive through.
+        let approach = |sim: &mut RaceSim| {
+            sim.place_at(target.at_m - 50.0);
+            let sample = sim.track().sample_at(target.at_m);
+            // `place_at` puts the car on the centreline, so the lane has to be
+            // taken *after* it — a detail that silently made an earlier version
+            // of this test pass for the wrong reason.
+            sim.car.lateral = sim.track().lane_lateral(&sample, target.lane);
+            sim.launch_at(40.0);
+            (0..180).for_each(|_| sim.step(DriveCommand::default()));
+        };
+
+        approach(&mut sim);
+        assert_eq!(sim.pickups().collected(), 1, "the first pass paid");
+        assert!(sim.pickups().is_taken(&target));
+
+        approach(&mut sim);
+        assert_eq!(sim.pickups().collected(), 1, "a pickup paid twice");
+    }
+
+    /// Collection is part of the deterministic step, so the same commands
+    /// produce the same collections — which is what a replay and the ghost both
+    /// depend on.
+    #[test]
+    fn pickup_collection_replays_identically() {
+        let run = || {
+            let mut sim = racing();
+            let mut taken = Vec::new();
+            for _ in 0..900 {
+                sim.step(DriveCommand::FLAT_OUT);
+                taken.extend(sim.events().iter().filter_map(|e| match e {
+                    RaceEvent::PickupCollected { tier, boost_awarded } => {
+                        Some((*tier, *boost_awarded))
+                    }
+                    _ => None,
+                }));
+            }
+            (taken, sim.pickups().collected(), sim.boost().charge())
+        };
+        let a = run();
+        let b = run();
+        assert_eq!(a, b);
+        assert!(a.1 > 0, "the run crossed no pickups at all");
     }
 
     #[test]

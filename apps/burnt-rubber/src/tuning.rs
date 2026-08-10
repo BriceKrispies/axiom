@@ -900,6 +900,28 @@ pub struct RaceTuning {
     pub traffic_half_width: f32,
     /// Boost awarded by one near miss (fraction of the meter).
     pub near_miss_boost: f32,
+    /// Boost awarded by each pickup tier, weakest first (fraction of the
+    /// meter) — indexed by [`crate::course::specification::BoostTier::index`].
+    ///
+    /// One table rather than three named fields, because the tiers are an
+    /// ordered ladder and every consumer of them (the award, the validator's
+    /// income term, the dump) wants to look one up by tier rather than to name
+    /// a particular rung. `the_pickup_ladder_climbs` pins that it is ordered.
+    ///
+    /// Sized against the rest of the economy: the meter drains at
+    /// [`Self::boost_drain_rate`] and a near miss pays
+    /// [`Self::near_miss_boost`], so `small` is worth about one pass, `medium`
+    /// a little over two, and `large` four — a shove of roughly a second and a
+    /// half. Deliberately none of them fills the bar: a pickup is a top-up on
+    /// a loop that is still fundamentally about threading traffic.
+    pub pickup_boost: [f32; 3],
+    /// How far either side of a pickup's lane centre the car may be and still
+    /// collect it (m), on top of the car's own half-width.
+    ///
+    /// Generous on purpose. A pickup is a reward for choosing a line, not a
+    /// test of centimetre placement, and one that reads as "on the racing line"
+    /// but does not collect is worse than no pickup at all.
+    pub pickup_reach_m: f32,
     /// Boost awarded per second of sustained drift (fraction of the meter).
     pub drift_boost_rate: f32,
     /// Boost awarded per second above [`Self::high_speed_threshold`].
@@ -952,6 +974,8 @@ impl RaceTuning {
         traffic_half_length: 2.3,
         traffic_half_width: 1.05,
         near_miss_boost: 0.13,
+        pickup_boost: [0.15, 0.30, 0.55],
+        pickup_reach_m: 1.6,
         drift_boost_rate: 0.22,
         high_speed_boost_rate: 0.075,
         high_speed_threshold: 74.0,
@@ -962,6 +986,15 @@ impl RaceTuning {
         stuck_seconds: 2.5,
         stuck_speed: 4.0,
     };
+
+    /// What one pickup of `tier` pays (fraction of the meter).
+    ///
+    /// The one place the tier ladder is read. Everything that needs to know what
+    /// a pickup is worth — the award, the validator's income term, the debug
+    /// overlay — comes through here, so the ladder cannot be half-changed.
+    pub fn pickup_boost(&self, tier: crate::course::specification::BoostTier) -> f32 {
+        self.pickup_boost[tier.index()]
+    }
 }
 
 impl Default for RaceTuning {

@@ -58,6 +58,7 @@ impl Diagnostics {
                 cached_scenery_chunks: 0,
                 effect_instances: 0,
                 traffic_slots: 0,
+                pickup_bodies: 0,
             },
             active_traffic: 0,
             simulation_steps: 0,

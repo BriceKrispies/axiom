@@ -278,6 +278,7 @@ mod tests {
             cached_scenery_chunks: 17,
             effect_instances: 28,
             traffic_slots: 9,
+            pickup_bodies: 18,
         };
         let top = top_three(&counters);
         assert_eq!(top[0].label, "road");

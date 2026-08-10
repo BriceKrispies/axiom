@@ -188,6 +188,14 @@ pub struct MotifInvocation {
     pub expected_speed_mps: Option<f32>,
     /// Traffic for the whole span the motif produces.
     pub traffic: Option<super::traffic::TrafficZoneSpec>,
+    /// Boost pickups over the whole span the motif produces, at offsets from
+    /// where the motif starts.
+    ///
+    /// Placed against the *span*, not against the repetitions: a motif's
+    /// expansion is an implementation detail (`<id>/bend0`, `<id>/link0`, …) and
+    /// an author who had to name one would be writing against a shape that the
+    /// motif is free to change.
+    pub pickups: Vec<super::pickup::BoostPickupSpec>,
 }
 
 impl MotifInvocation {
@@ -200,6 +208,7 @@ impl MotifInvocation {
             environment: None,
             expected_speed_mps: None,
             traffic: None,
+            pickups: Vec::new(),
         }
     }
 }

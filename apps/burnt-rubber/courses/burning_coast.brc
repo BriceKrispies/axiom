@@ -35,6 +35,17 @@ course "burning_coast" {
         id     = "opening"
         length = 500m
         lanes  = 5
+
+        # Boost pickups. A sibling of `traffic`, because traffic is a density
+        # the compiler generates cars from and a pickup is a placement written
+        # out here: this tier, this lane, this far into the section.
+        #
+        # `at` is an offset from the start of the section, exactly like an
+        # encounter's. A row (`count` + `spacing`) is one authored intention,
+        # not three entries to keep in step.
+        pickups {
+            boost small { at = 300m lane = 0 count = 3 spacing = 45m }
+        }
     }
 
     # ---- the coast -------------------------------------------------------
@@ -66,6 +77,14 @@ course "burning_coast" {
                 lane  2 = 1.0
             }
         }
+
+        # On the outside of the sweepers, where the fast line is not. The
+        # sweepers alternate, so a fixed outer lane is the wide way round half
+        # of them — which is the price of the charge.
+        pickups {
+            boost medium { at = 420m  lane = 2  count = 2 spacing = 60m }
+            boost medium { at = 1050m lane = -2 count = 2 spacing = 60m }
+        }
     }
 
     # ---- the blind crest -------------------------------------------------
@@ -79,6 +98,13 @@ course "burning_coast" {
         height      = 5m
         lanes       = 5
         environment = rolling_hills
+
+        # Over the back of the rise, so it is not visible until the car is
+        # committed. The largest tier the game has, for the one place on this
+        # course where taking it is a decision made blind.
+        pickups {
+            boost large { at = 120m lane = 0 }
+        }
     }
 
     # ---- the esses -------------------------------------------------------
@@ -147,6 +173,16 @@ course "burning_coast" {
                 opportunities          = 3
                 difficulty             = 0.8
             }
+        }
+
+        # Bait in the tunnel's outside lane, past the zipper. Committing to an
+        # outer lane in the densest traffic on the course is the cost; the
+        # compiler keeps ambient cars out of a pickup's own lane where the
+        # player meets it, so the commitment is a hard line rather than an
+        # unavoidable collision.
+        pickups {
+            boost large { at = 520m lane = 1 }
+            boost small { at = 660m lane = -1 count = 2 spacing = 40m }
         }
     }
 

@@ -182,8 +182,18 @@ mod tests {
         // one), and again when a held boost button stopped latching off
         // (`sim::boost`) — the meter is the thing lap time is made of, so any
         // change to when it fires moves this.
+        //
+        // It moved again, 93.90 s -> 90.30 s, when the course gained boost
+        // pickups (`course::pickups`). Worth reading twice, because it is a
+        // measurement rather than a tuning: the agent does **not** seek pickups
+        // and has no idea they exist — it drives its own line and happens to
+        // cross the ones that are on it. Three and a half seconds is what
+        // *incidental* collection is worth over nine kilometres, which is the
+        // honest scale of what was added to the economy. (A fraction of it is
+        // the pickup keep-out thinning the ambient traffic in a few lanes:
+        // fewer cars is also a faster lap.)
         assert!(
-            (g.elapsed_seconds() - 93.90).abs() < 0.05,
+            (g.elapsed_seconds() - 90.30).abs() < 0.05,
             "ghost time {:.2}s",
             g.elapsed_seconds()
         );

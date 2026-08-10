@@ -24,6 +24,7 @@
 use axiom_audio::{AudioApi, AudioSeconds, Envelope, Hertz, Lfo, ToneSpec, Wave};
 use axiom_kernel::Ratio;
 
+use crate::course::specification::BoostTier;
 use crate::sim::car::CarState;
 use crate::sim::contact::Severity;
 use crate::sim::{RaceEvent, RaceSim};
@@ -182,6 +183,22 @@ impl RaceAudio {
         match event {
             RaceEvent::Impact { severity, strength, .. } => self.impact(*severity, *strength),
             RaceEvent::NearMiss { .. } => self.blip(1_180.0, 0.16, 0.35),
+            // Pitched **up** the tier ladder, and longer with it. A player who
+            // can hear which colour they just took has not had to look away
+            // from the road to read the bar, which is the whole reason the
+            // event carries the tier at all.
+            RaceEvent::PickupCollected { tier, .. } => {
+                let (hz, seconds) = match tier {
+                    BoostTier::Small => (784.0, 0.16),
+                    BoostTier::Medium => (988.0, 0.22),
+                    BoostTier::Large => (1_318.0, 0.34),
+                };
+                self.blip(hz, seconds, 0.42);
+                // The upper octave, softer: two tones read as a *chime* rather
+                // than as the same blip a near miss uses, and the ear separates
+                // "the course gave me this" from "I earned this".
+                self.blip(hz * 2.0, seconds * 0.7, 0.20);
+            }
             RaceEvent::BoostStarted => self.blip(220.0, 0.5, 0.45),
             RaceEvent::CountdownTick(_) => self.blip(660.0, 0.28, 0.5),
             RaceEvent::Go => self.blip(990.0, 0.6, 0.6),
