@@ -1,4 +1,4 @@
-//! The shootout: five each, alternating, then sudden death.
+//! The shootout: your five, then their five, then sudden death.
 //!
 //! # Why the game needed a frame
 //!
@@ -11,25 +11,38 @@
 //! feel about penalty seven.
 //!
 //! Tension and release is the whole emotional engine of a sport, and neither is
-//! available without stakes. So: **five kicks each**. You take, they take. Miss
-//! and you are behind. Every mechanic underneath suddenly means something it did
-//! not mean before — the keeper's memory becomes frightening, because it is
-//! learning your corners and you only have five; the choice between placing a
-//! shot and hitting it hard becomes a decision rather than a slider.
+//! available without stakes. So: **five kicks each**. Every mechanic underneath
+//! suddenly means something it did not mean before — the keeper's memory becomes
+//! frightening, because it is learning your corners and you only have five; the
+//! choice between placing a shot and hitting it hard becomes a decision rather
+//! than a slider.
 //!
 //! Nothing new is simulated here. This is a *frame* around the attempt machine,
 //! and it is deliberately the whole of the rules and none of the play.
 //!
 //! # The rules, exactly
 //!
-//! Real shootout rules, including the part everyone forgets: it stops the moment
-//! it is **decided**, not when the ten kicks have been taken. If you are three up
-//! with two to come, nobody takes them. That early finish is not an optimisation,
-//! it is where the tension lives — every kick is checked against "can they still
-//! catch me", which is what makes the fourth one unbearable.
+//! **Two halves, not ten alternating kicks.** The player takes all five of their
+//! penalties first, and only then goes in goal for all five of the rival's. The
+//! real-life order alternates, and this deliberately does not, because the two
+//! ends of this game are two different *skills* — drawing a line and reading a
+//! run-up — and swapping between them every ninety seconds means never settling
+//! into either. Taking five in a row is a set: the keeper's memory has five kicks
+//! to learn your corners and you can feel it closing in on you. Keeping five in a
+//! row is a second set, played against a number you already know you have to
+//! defend. It also puts the game's shape where a player can hold it: score five,
+//! *then* find out what five has to survive.
 //!
-//! After five each, sudden death: one apiece, and the first pair that differ ends
-//! it.
+//! It still stops the moment it is **decided**, not when the ten kicks have been
+//! taken. If the rival cannot catch you with two still to come, nobody takes
+//! them. That early finish is not an optimisation, it is where the tension lives.
+//! Note what the halves do to it: nothing can be decided while the player is
+//! taking — the rival has all five in hand — so the player always gets their
+//! whole set, and every early finish happens with the player in the goal, which
+//! is exactly where it should be felt.
+//!
+//! After five each, sudden death: back to one apiece, the player first, and the
+//! first pair that differ ends it.
 
 use super::resolution::ShotResult;
 
@@ -93,14 +106,17 @@ impl Shootout {
 
     /// Whose kick is next.
     ///
-    /// The player always goes first, and the sides strictly alternate — so it is
-    /// simply whoever has taken fewer, and the player on a tie.
+    /// In regulation the sides come in whole sets: the player takes until their
+    /// five are gone, then the rival takes until theirs are. In sudden death
+    /// there is no set left to take, so it falls back to one apiece with the
+    /// player first — whoever has taken fewer, and the player on a tie.
     pub fn turn(&self) -> Side {
-        [Side::You, Side::Them]
-            [usize::from(self.taken_by(Side::You) > self.taken_by(Side::Them))]
+        let (you, them) = (self.taken_by(Side::You), self.taken_by(Side::Them));
+        let theirs = ((you >= ROUNDS) & (them < ROUNDS)) | (self.sudden_death() & (you > them));
+        [Side::You, Side::Them][usize::from(theirs)]
     }
 
-    /// Which kick of the shootout this is, from 1 — what the scoreboard counts.
+    /// Which kick of this side's set it is, from 1 — what the scoreboard counts.
     pub fn round(&self) -> usize {
         self.taken_by(self.turn()) + 1
     }
@@ -171,16 +187,20 @@ mod tests {
     }
 
     #[test]
-    fn the_player_goes_first_and_the_sides_alternate() {
+    fn the_player_takes_their_whole_set_before_the_rival_takes_any() {
         let mut s = Shootout::new();
         assert_eq!(s.turn(), Side::You);
         assert_eq!(s.round(), 1);
+        // Four kicks in, it is still the player's ball.
+        (0..4).for_each(|_| s.record(Side::You, ShotResult::Goal));
+        assert_eq!(s.turn(), Side::You, "the set is not finished");
+        assert_eq!(s.round(), 5, "the fifth of five");
+        // The fifth ends the set, and only then do the ends change.
         s.record(Side::You, ShotResult::Goal);
         assert_eq!(s.turn(), Side::Them);
-        assert_eq!(s.round(), 1, "still the first round until they have answered");
-        s.record(Side::Them, ShotResult::Goal);
-        assert_eq!(s.turn(), Side::You);
-        assert_eq!(s.round(), 2);
+        assert_eq!(s.round(), 1, "their set counts from one again");
+        (0..4).for_each(|_| s.record(Side::Them, ShotResult::Goal));
+        assert_eq!(s.turn(), Side::Them, "still theirs, four in");
         assert_eq!(Side::You.other(), Side::Them);
         assert_eq!(Side::Them.other(), Side::You);
     }
@@ -188,24 +208,36 @@ mod tests {
     #[test]
     fn a_shootout_in_progress_has_no_outcome() {
         assert_eq!(Shootout::new().outcome(), None);
-        // 3-3 with two each to come is wide open.
-        let s = play(&[true, true, true, true, true, true]);
-        assert_eq!(s.score(), (3, 3));
+        // 5-3 with two of theirs to come is wide open: they can still tie it.
+        let s = play(&[true, true, true, true, true, true, true, true]);
+        assert_eq!(s.score(), (5, 3));
         assert_eq!(s.outcome(), None);
     }
 
     #[test]
+    fn nothing_can_be_decided_while_the_player_is_still_taking() {
+        // The worst possible set — five misses — and it is still not over,
+        // because the rival has not taken a kick yet. The player always gets
+        // their whole five.
+        let s = play(&[false; 5]);
+        assert_eq!(s.score(), (0, 0));
+        assert_eq!(s.outcome(), None);
+        assert_eq!(s.turn(), Side::Them, "and now they answer it");
+    }
+
+    #[test]
     fn it_ends_the_moment_it_is_decided_and_not_a_kick_later() {
-        // You score three, they miss three: after your fourth you are 4-0 with
-        // two of theirs left. Uncatchable. Nobody takes the rest.
-        let s = play(&[true, false, true, false, true, false, true]);
-        assert_eq!(s.score(), (4, 0));
+        // Five out of five, and they miss the first: 5-0 with four to come is
+        // uncatchable. Nobody takes the rest.
+        let s = play(&[true, true, true, true, true, false]);
+        assert_eq!(s.score(), (5, 0));
         assert_eq!(s.outcome(), Some(Outcome::Won));
-        assert!(s.taken_by(Side::You) < ROUNDS, "it stopped early");
-        // The mirror: they are uncatchable.
-        let s = play(&[false, true, false, true, false, true, false, true]);
-        assert_eq!(s.score(), (0, 4));
+        assert!(s.taken_by(Side::Them) < ROUNDS, "it stopped early");
+        // The mirror: nought from five, and their first kick settles it.
+        let s = play(&[false, false, false, false, false, true]);
+        assert_eq!(s.score(), (0, 1));
         assert_eq!(s.outcome(), Some(Outcome::Lost));
+        assert_eq!(s.taken_by(Side::Them), 1);
     }
 
     #[test]
@@ -241,23 +273,19 @@ mod tests {
         let s = play(&[true, false, false]);
         assert_eq!(
             s.marks(Side::You),
-            vec![Some(true), Some(false), None, None, None]
+            vec![Some(true), Some(false), Some(false), None, None]
         );
-        assert_eq!(
-            s.marks(Side::Them),
-            vec![Some(false), None, None, None, None]
-        );
+        assert_eq!(s.marks(Side::Them), vec![None; 5], "they have not been up yet");
         assert_eq!(s.taken().len(), 3);
     }
 
     #[test]
     fn a_shootout_can_be_lost_without_the_last_kicks_being_taken() {
-        // 5 rounds: you miss your first three, they score theirs. After their
-        // third it is 0-3 with two of yours left — still alive. After their
-        // fourth, 0-4 with one left, and it is gone.
-        let s = play(&[false, true, false, true, false, true, false, true]);
-        assert_eq!(s.score(), (0, 4));
+        // Two from five, and they answer with three: 2-3 with two still in hand
+        // is uncatchable, and their last two are never taken.
+        let s = play(&[true, true, false, false, false, true, true, true]);
+        assert_eq!(s.score(), (2, 3));
         assert_eq!(s.outcome(), Some(Outcome::Lost));
-        assert_eq!(s.taken_by(Side::You), 4);
+        assert_eq!(s.taken_by(Side::Them), 3);
     }
 }

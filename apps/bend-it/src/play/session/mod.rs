@@ -120,9 +120,16 @@ impl Session {
     /// Apply one command. A kick that arrives outside the aiming stage is
     /// ignored rather than queued — a drawing finished by a phase change beneath
     /// the player's finger must not fire into the next attempt.
+    ///
+    /// And a kick that arrives when it is not the player's kick is ignored too.
+    /// The rival's penalties are the rival's: whoever is calling `step` does not
+    /// get to author them by drawing during a set they are supposed to be keeping
+    /// in. That rule belongs *here*, because this is what knows whose kick it is
+    /// — the gesture layer also refuses to send one, but a second caller (the
+    /// agent) proved that a guard living only in the caller is not a rule.
     fn apply(&mut self, command: PlayCommand) {
         match command {
-            PlayCommand::Kick(intent) if self.phase.accepts_drawing() => {
+            PlayCommand::Kick(intent) if self.phase.accepts_drawing() & !self.keeping() => {
                 // The session bounds what it was handed. The reading is the
                 // player's instruction; staying inside the shapes a kicker can
                 // actually strike is the game's business, and it happens here,
@@ -262,6 +269,7 @@ impl Session {
 mod tests {
     use super::*;
     use crate::play::ball::BallMotion;
+    use crate::play::shootout::ROUNDS;
     use crate::play::phase::Phase;
     use axiom::prelude::Vec3;
     use crate::tuning::DT;
@@ -436,20 +444,20 @@ mod tests {
     }
 
     #[test]
-    fn an_attempt_resets_cleanly_and_hands_over() {
+    fn an_attempt_resets_cleanly_and_the_ball_stays_the_players() {
         let mut session = take(shot(-0.95, 0.92, 0.0, 0.5, 0.2, 0.5));
         let hold = session.tuning().transitions.resolution
             + session.tuning().transitions.reset
             + session.tuning().transitions.ready
             + 3;
         (0..hold).for_each(|_| session.step(&[]));
-        // The attempt is gone and the ball is back on the spot — but it is not
-        // back to drawing, because it is not the player's kick any more. The
-        // rival steps up on its own.
+        // The attempt is gone and the ball is back on the spot, ready to be
+        // drawn again: one kick of five is taken, and the set is the player's
+        // until all five of them are.
         assert_eq!(session.result(), None);
         assert_eq!(session.ball().motion, BallMotion::Placed);
-        assert_eq!(session.side(), Side::Them);
-        assert!(session.keeping(), "the player is in the goal now");
+        assert_eq!(session.side(), Side::You);
+        assert!(!session.keeping(), "the goal does not change ends mid-set");
         assert_eq!(session.tally().attempts, 1, "the tally survives the reset");
         assert_eq!(session.shootout().score(), (1, 0));
         // A restart mid-attempt still sets up a fresh one.
@@ -481,21 +489,37 @@ mod tests {
         }
     }
 
-    /// Get to the point where the player is the one in the goal.
-    fn keeping_now() -> Session {
+    /// Get to the point where the player is the one in the goal, and no further:
+    /// the window a keeper actually meets starts here, at the top of the rival's
+    /// set beat.
+    ///
+    /// Reaching it means taking the player's whole set of five, because the ends
+    /// only change when a set is finished.
+    fn keeping_now_from_the_top() -> Session {
         let mut session = Session::steady(Tuning::DEFAULT);
-        while !session.phase().accepts_drawing() {
-            session.step(&[]);
-        }
-        session.step(&[PlayCommand::Kick(shot(0.0, 0.25, 0.0, 0.5, 0.5, 0.5))]);
-        resolve(&mut session, |_| Vec::new());
+        (0..ROUNDS).for_each(|_| {
+            let mut settle = 0;
+            while !session.phase().accepts_drawing() && settle < 600 {
+                session.step(&[]);
+                settle += 1;
+            }
+            assert!(session.phase().accepts_drawing(), "the next kick should come up");
+            session.step(&[PlayCommand::Kick(shot(0.0, 0.25, 0.0, 0.5, 0.5, 0.5))]);
+            resolve(&mut session, |_| Vec::new());
+        });
         let mut spent = 0;
         while !session.keeping() && spent < 600 {
             session.step(&[]);
             spent += 1;
         }
         assert!(session.keeping(), "it should be their kick by now");
-        // And past the beat where the rival is still stepping up.
+        session
+    }
+
+    /// The same, advanced past the beat where the rival is still stepping up —
+    /// so a dive can actually be called.
+    fn keeping_now() -> Session {
+        let mut session = keeping_now_from_the_top();
         while !session.phase().accepts_dive() {
             session.step(&[]);
         }
@@ -544,6 +568,33 @@ mod tests {
         (0..900).for_each(|_| session.step(&[]));
         assert_eq!(session.shootout().taken().len(), settled, "it kept playing");
         assert_eq!(session.outcome(), Some(outcome));
+    }
+
+    #[test]
+    fn a_drawing_cannot_author_the_rivals_penalty() {
+        // In the goal, with the rival standing over the ball. A kick command —
+        // which the gesture layer would never send, but the agent does — must not
+        // reach the shot: the rival's five are the rival's.
+        let mut ignored = keeping_now_from_the_top();
+        let mut settle = 0;
+        while !ignored.phase().accepts_drawing() && settle < 600 {
+            ignored.step(&[]);
+            settle += 1;
+        }
+        assert!(ignored.keeping(), "still the rival's set");
+        // The one tick where the stage would take a drawing. Two identical
+        // sessions, one of them handed a kick: they must not diverge.
+        let mut hijacked = ignored.clone();
+        ignored.step(&[]);
+        hijacked.step(&[PlayCommand::Kick(shot(-0.95, 0.92, 0.0, 0.5, 0.2, 0.5))]);
+        assert_eq!(
+            hijacked.intent(),
+            ignored.intent(),
+            "a drawing authored the rival's penalty"
+        );
+        assert_eq!(hijacked.phase(), ignored.phase());
+        // And what it stepped into is the rival's own roll, not a stale shot.
+        assert_eq!(ignored.phase(), Phase::ShotReady, "the rival stepped up");
     }
 
     #[test]
@@ -616,23 +667,6 @@ mod tests {
             set > seconds * 0.45,
             "only {set:.2}s of the {seconds:.2}s window is the set"
         );
-    }
-
-    /// Get to the keeper''s turn from the very start, so the window measured is
-    /// the one a player actually meets.
-    fn keeping_now_from_the_top() -> Session {
-        let mut session = Session::steady(Tuning::DEFAULT);
-        while !session.phase().accepts_drawing() {
-            session.step(&[]);
-        }
-        session.step(&[PlayCommand::Kick(shot(0.0, 0.25, 0.0, 0.5, 0.5, 0.5))]);
-        resolve(&mut session, |_| Vec::new());
-        let mut spent = 0;
-        while !session.keeping() && spent < 600 {
-            session.step(&[]);
-            spent += 1;
-        }
-        session
     }
 
     #[test]

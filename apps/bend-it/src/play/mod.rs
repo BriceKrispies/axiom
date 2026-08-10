@@ -9,8 +9,8 @@
 //! * [`resolution`] — what happened, and the tally.
 //! * [`rival`] — the other team's taker, for the five kicks that are not yours.
 //! * [`session`] — the machine that owns all four.
-//! * [`shootout`] — five each, alternating, then sudden death: the frame that
-//!   makes a penalty matter.
+//! * [`shootout`] — your five, then their five, then sudden death: the frame
+//!   that makes a penalty matter.
 
 pub mod ball;
 pub mod dive_call;
