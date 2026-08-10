@@ -44,6 +44,43 @@ use axiom_kernel::Ratio;
 /// which is enough to matter and small enough not to be a jolt.
 const LADDER: [f32; 5] = [0.50, 0.62, 0.75, 0.87, 1.0];
 
+/// How far over budget a frame must run to count as too slow, in percent.
+const DROP_ABOVE_PCT: u64 = 108;
+
+/// How far *under* budget a frame must run to count as comfortable, in percent.
+///
+/// **This number is not a taste setting, it is a stability condition**, and the
+/// first version of this file got it wrong. Climbing a rung multiplies the
+/// fragment count by the square of the rung ratio, and a fill-bound frame's cost
+/// moves with it. So a frame that was just barely "comfortable" at rung *n*
+/// becomes `RAISE_BELOW_PCT × ratio²` of budget at rung *n+1* — and if that lands
+/// above [`DROP_ABOVE_PCT`], the loop immediately drops back and has built itself
+/// a limit cycle.
+///
+/// At 78% it did exactly that on the two lowest rungs (0.50→0.62 is 1.54× the
+/// pixels, so 0.78 × 1.54 = **1.20× budget**, well past the 1.08 drop line), which
+/// is the worst possible place for it: those are the rungs a *struggling* device
+/// settles on, so the phones this feature exists to help were the ones it put into
+/// a climb-drop cycle roughly every 98 frames — and each transition reallocates
+/// the render target and the whole bloom chain. That is a stutter the loop
+/// manufactures on a device that would otherwise have been merely slow.
+///
+/// The bound is `DROP_ABOVE_PCT / max(ratio²)` = 108 / 1.54 = **70%**. This sits
+/// under it with margin, and `the_ladder_cannot_build_a_limit_cycle` pins the
+/// relationship against the ladder rather than against these numbers, so a future
+/// re-spacing of the rungs cannot silently reintroduce the cycle.
+const RAISE_BELOW_PCT: u64 = 62;
+
+/// How many frames after any rung change before another may be considered.
+///
+/// A scale change is not free: it reallocates the scene colour target, its depth
+/// buffer and the bloom chain, which on a mobile GPU is tens of milliseconds —
+/// a visible hitch. The dead band above makes an oscillation impossible in
+/// steady state; this bounds how often even *legitimate* changes can happen, so
+/// a device wandering across a threshold cannot hitch its way through a race.
+/// Ten seconds at 60 Hz.
+const CHANGE_COOLDOWN: u32 = 600;
+
 /// How many consecutive over-budget frames it takes to drop a rung.
 ///
 /// Short: a frame that is too slow is a problem the player is feeling right now,
@@ -141,6 +178,10 @@ pub struct RenderScaleController {
     met: [u32; CANDIDATE_PERIODS_NANOS.len()],
     /// Frames left before the refresh estimate is recomputed.
     window_left: u32,
+    /// Frames left before another rung change may be considered. A change costs
+    /// a render-target reallocation, so they are rate-limited on top of the
+    /// dead band — see [`CHANGE_COOLDOWN`].
+    cooldown_left: u32,
 }
 
 impl RenderScaleController {
@@ -163,6 +204,7 @@ impl RenderScaleController {
             raise_below_nanos: 0,
             met: [0; CANDIDATE_PERIODS_NANOS.len()],
             window_left: REFRESH_WINDOW,
+            cooldown_left: 0,
         };
         c.retarget(frame_budget_nanos);
         c
@@ -187,8 +229,8 @@ impl RenderScaleController {
             .max(FASTEST_BUDGET_NANOS)
             .min(SLOWEST_BUDGET_NANOS);
         self.budget_nanos = budget;
-        self.drop_above_nanos = budget.saturating_mul(108) / 100;
-        self.raise_below_nanos = budget.saturating_mul(78) / 100;
+        self.drop_above_nanos = budget.saturating_mul(DROP_ABOVE_PCT) / 100;
+        self.raise_below_nanos = budget.saturating_mul(RAISE_BELOW_PCT) / 100;
     }
 
     /// The frame budget currently being defended, in nanoseconds.
@@ -241,8 +283,14 @@ impl RenderScaleController {
         self.over_run = (self.over_run + 1) * over;
         self.under_run = (self.under_run + 1) * under;
 
-        let drop = u32::from(self.over_run >= DROP_RUN);
-        let raise = u32::from(self.under_run >= RAISE_RUN);
+        // A change is only *considered* once the previous one has settled. The
+        // cooldown gates the decision rather than the runs, so a device that is
+        // genuinely too slow keeps accumulating evidence while it waits and acts
+        // the moment it is allowed to.
+        self.cooldown_left = self.cooldown_left.saturating_sub(1);
+        let ready = u32::from(self.cooldown_left == 0);
+        let drop = u32::from(self.over_run >= DROP_RUN) * ready;
+        let raise = u32::from(self.under_run >= RAISE_RUN) * ready;
         // At most one rung per frame, clamped at both ends of the ladder. The two
         // can never both fire: `drop_above > raise_below`, so a single duration
         // cannot satisfy both conditions, and a run cannot be full on both sides.
@@ -255,6 +303,9 @@ impl RenderScaleController {
         // loop is allowed to act again.
         self.over_run *= 1 - drop;
         self.under_run *= 1 - raise;
+        // Any actual movement re-arms the cooldown (table pick, no branch).
+        let moved = drop | raise;
+        self.cooldown_left = [self.cooldown_left, CHANGE_COOLDOWN][moved as usize];
         self.scale()
     }
 }
@@ -268,6 +319,16 @@ mod tests {
 
     fn controller() -> RenderScaleController {
         RenderScaleController::new(BUDGET)
+    }
+
+    /// Frames to feed for one rung change to be *considered* and then settle:
+    /// the run itself plus the post-change cooldown.
+    const PER_CHANGE: u32 = DROP_RUN + RAISE_RUN + CHANGE_COOLDOWN + 1;
+
+    fn feed(c: &mut RenderScaleController, nanos: u64, frames: u32) {
+        (0..frames).for_each(|_| {
+            c.observe(nanos);
+        });
     }
 
     #[test]
@@ -306,14 +367,10 @@ mod tests {
     fn sustained_slowness_walks_down_to_the_floor_and_stops_there() {
         let mut c = controller();
         let slow = BUDGET * 4;
-        (0..DROP_RUN * 20).for_each(|_| {
-            c.observe(slow);
-        });
+        feed(&mut c, slow, PER_CHANGE * LADDER.len() as u32);
         assert_eq!(c.scale().ratio().get(), LADDER[0], "pinned at the floor");
         // The floor holds — the rung cannot underflow.
-        (0..DROP_RUN * 4).for_each(|_| {
-            c.observe(slow);
-        });
+        feed(&mut c, slow, PER_CHANGE * 2);
         assert_eq!(c.scale().ratio().get(), LADDER[0]);
     }
 
@@ -331,44 +388,39 @@ mod tests {
     #[test]
     fn headroom_climbs_back_but_only_after_a_much_longer_run() {
         let mut c = controller();
-        (0..DROP_RUN).for_each(|_| {
-            c.observe(BUDGET * 2);
-        });
+        feed(&mut c, BUDGET * 2, DROP_RUN);
         let dropped = c.scale().ratio().get();
         assert!(dropped < 1.0);
 
-        let fast = BUDGET / 4;
+        // Comfortably inside even the fastest budget the loop will chase, so the
+        // climb is not blocked by the refresh retargeting itself.
+        let fast = FASTEST_BUDGET_NANOS / 4;
         // A drop-length run of fast frames is nowhere near enough to climb.
-        (0..DROP_RUN * 2).for_each(|_| {
-            c.observe(fast);
-        });
+        feed(&mut c, fast, DROP_RUN * 2);
         assert_eq!(c.scale().ratio().get(), dropped, "climbing is not symmetric");
 
-        // The full raise run does it, one rung.
-        (0..RAISE_RUN).for_each(|_| {
-            c.observe(fast);
-        });
+        // Nor is a full raise run on its own — the cooldown after the drop has
+        // to expire first, which is the whole point of rate-limiting a change
+        // that costs a render-target reallocation.
+        feed(&mut c, fast, RAISE_RUN);
+        assert_eq!(c.scale().ratio().get(), dropped, "the cooldown still holds");
+
+        feed(&mut c, fast, PER_CHANGE);
         assert!(c.scale().ratio().get() > dropped);
     }
 
     #[test]
     fn sustained_headroom_climbs_to_the_ceiling_and_stops_there() {
         let mut c = controller();
-        (0..DROP_RUN * 20).for_each(|_| {
-            c.observe(BUDGET * 4);
-        });
+        feed(&mut c, BUDGET * 4, PER_CHANGE * LADDER.len() as u32);
         assert_eq!(c.scale().ratio().get(), LADDER[0]);
         // Comfortably inside even the fastest budget the loop will ever chase, so
         // the climb survives the loop retargeting itself to a higher refresh.
         let very_fast = FASTEST_BUDGET_NANOS / 4;
-        (0..RAISE_RUN * 20).for_each(|_| {
-            c.observe(very_fast);
-        });
+        feed(&mut c, very_fast, PER_CHANGE * LADDER.len() as u32);
         assert_eq!(c.scale(), RenderScale::FULL, "pinned at the ceiling");
         // The ceiling holds — the rung cannot overflow past the ladder.
-        (0..RAISE_RUN * 4).for_each(|_| {
-            c.observe(very_fast);
-        });
+        feed(&mut c, very_fast, PER_CHANGE * 2);
         assert_eq!(c.scale(), RenderScale::FULL);
     }
 
@@ -415,9 +467,7 @@ mod tests {
     #[test]
     fn a_device_that_never_reaches_60_still_has_60_as_its_target() {
         let mut c = RenderScaleController::for_display();
-        (0..REFRESH_WINDOW * 3).for_each(|_| {
-            c.observe(50_000_000);
-        });
+        feed(&mut c, 50_000_000, PER_CHANGE * LADDER.len() as u32);
         assert_eq!(c.budget_nanos(), SLOWEST_BUDGET_NANOS);
         assert_eq!(c.scale().ratio().get(), LADDER[0], "and it is still pushing");
     }
@@ -442,6 +492,74 @@ mod tests {
             RenderScale::FULL,
             "two partial runs must not add up to a drop"
         );
+    }
+
+    /// **The invariant the first version of this file violated**, and the reason
+    /// a phone reported a steady 60 fps median with 80 ms worst frames and stuttered
+    /// badly: the loop was manufacturing the stutter.
+    ///
+    /// Climbing a rung multiplies the fragment count by the square of the rung
+    /// ratio, so a fill-bound frame that was just barely comfortable at rung *n*
+    /// costs `RAISE_BELOW_PCT × ratio²` at rung *n+1*. If that exceeds
+    /// [`DROP_ABOVE_PCT`] the loop drops straight back, climbs again, and cycles —
+    /// reallocating the render target and the whole bloom chain every time.
+    ///
+    /// Pinned against the LADDER rather than against the constants, so re-spacing
+    /// the rungs closer together (which is the tempting way to make the scale
+    /// changes less visible) cannot silently reintroduce the cycle.
+    #[test]
+    fn the_ladder_cannot_build_a_limit_cycle() {
+        LADDER.windows(2).for_each(|pair| {
+            let (from, to) = (pair[0], pair[1]);
+            let ratio = (to / from) * (to / from);
+            let after_climbing = (RAISE_BELOW_PCT as f32) * ratio;
+            // Every value the message needs is bound here rather than passed as a
+            // trailing argument: a trailing argument is evaluated only when the
+            // assertion fails, which leaves an uncovered region on the path this
+            // test is supposed to take.
+            assert!(
+                after_climbing < DROP_ABOVE_PCT as f32,
+                "climbing {from:.2} -> {to:.2} multiplies the fragments by \
+                 {ratio:.2}, so a frame at the {RAISE_BELOW_PCT}% raise line lands \
+                 at {after_climbing:.0}% of budget — past the {DROP_ABOVE_PCT}% \
+                 drop line. The loop would drop straight back and cycle, \
+                 reallocating the render target each time."
+            );
+        });
+    }
+
+    /// The same property end-to-end: a fill-bound device is simulated (frame cost
+    /// moves with the pixel count) and the loop must come to rest, not oscillate.
+    #[test]
+    fn a_fill_bound_device_settles_instead_of_oscillating() {
+        let mut c = controller();
+        // Cost at full scale: 1.9x budget. The device can afford some rung.
+        let cost_at_full = (BUDGET as f32) * 1.9;
+        let cost = |scale: f32| (cost_at_full * scale * scale) as u64;
+
+        let mut changes = 0;
+        let mut last = c.scale().ratio().get();
+        (0..PER_CHANGE * 12).for_each(|_| {
+            let now = c.observe(cost(last)).ratio().get();
+            changes += u32::from(now != last);
+            last = now;
+        });
+        // It must have moved (it could not hold full scale) and then stopped.
+        assert!(changes > 0, "the loop never adapted at all");
+        assert!(
+            changes < LADDER.len() as u32,
+            "the loop changed rung {changes} times over the run — it is oscillating,              and every change reallocates the render target"
+        );
+
+        // ...and from here it is stable: no further change, however long it runs.
+        let settled = last;
+        (0..PER_CHANGE * 6).for_each(|_| {
+            assert_eq!(
+                c.observe(cost(settled)).ratio().get(),
+                settled,
+                "a settled fill-bound device must never move again"
+            );
+        });
     }
 
     #[test]
