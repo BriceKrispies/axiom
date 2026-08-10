@@ -309,6 +309,7 @@ name = "axiom-end-zone"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-agent",
  "axiom-debug-overlay",
  "axiom-figure",
  "axiom-host",
