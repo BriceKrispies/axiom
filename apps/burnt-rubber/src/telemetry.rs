@@ -34,9 +34,14 @@ pub struct FrameTimes {
     filled: usize,
 }
 
-/// How many frames the window holds — about a second at 60 Hz, so the readout
-/// settles fast enough to be watched while driving.
-pub const WINDOW: usize = 60;
+/// How many frames the window holds — about four seconds at 60 Hz.
+///
+/// Sixty was too short to say anything about stutter. A hitch that happens once
+/// every couple of seconds appears in a one-second window as either nothing at
+/// all or as the single worst sample, so the panel could only ever report "there
+/// was one bad frame recently", never *how often*. Four seconds is long enough
+/// for a rate to mean something and short enough to still respond while driving.
+pub const WINDOW: usize = 240;
 
 impl FrameTimes {
     /// An empty window.
@@ -71,9 +76,49 @@ impl FrameTimes {
     }
 
     /// Frames per second implied by the median. `0` before any frame.
+    ///
+    /// **This number cannot see stutter, by construction.** A median is precisely
+    /// the statistic that discards outliers, and stutter *is* the outliers: a
+    /// window of 230 good frames and 10 catastrophic ones has exactly the same
+    /// median as a window of 240 good ones, so this reports a confident, steady
+    /// 60 through a game that is hitching badly. It answers "is the steady state
+    /// fast enough", which is a real question, and NOT "does this feel smooth",
+    /// which is the one a player is asking. Read it next to [`Self::low_fps`],
+    /// never on its own.
     pub fn fps(&self) -> f32 {
         let median = self.median_ms();
         (median > 0.0).then(|| 1000.0 / median).unwrap_or(0.0)
+    }
+
+    /// The frame time at `fraction` through the sorted window (`0.5` is the
+    /// median, `0.99` the worst percent). `0` before any frame.
+    pub fn percentile_ms(&self, fraction: f32) -> f32 {
+        let mut held: Vec<f32> = self.samples[..self.filled].to_vec();
+        held.sort_by(f32::total_cmp);
+        let last = held.len().saturating_sub(1);
+        let at = ((held.len() as f32) * fraction.clamp(0.0, 1.0)) as usize;
+        held.get(at.min(last)).copied().unwrap_or(0.0)
+    }
+
+    /// The **1% low**: the frame rate implied by the 99th-percentile frame time.
+    ///
+    /// The number that corresponds to what a player actually feels. A game whose
+    /// median says 60 and whose 1% low says 12 is a game that stutters, and the
+    /// gap between the two is the size of the problem. Reported alongside the
+    /// median precisely so neither can be read alone.
+    pub fn low_fps(&self) -> f32 {
+        let slow = self.percentile_ms(0.99);
+        (slow > 0.0).then(|| 1000.0 / slow).unwrap_or(0.0)
+    }
+
+    /// How many frames in the window ran over `budget_ms`, and how many frames
+    /// the window holds — a *rate* of stutter rather than a single worst sample.
+    pub fn over_budget(&self, budget_ms: f32) -> (usize, usize) {
+        let count = self.samples[..self.filled]
+            .iter()
+            .filter(|ms| **ms > budget_ms)
+            .count();
+        (count, self.filled)
     }
 }
 
