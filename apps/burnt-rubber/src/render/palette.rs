@@ -50,6 +50,8 @@ use crate::track::Zone;
 
 use super::asphalt_texture::{asphalt_albedo, RES as ASPHALT_RES};
 use super::chunks::RoadMaterials;
+use super::foliage_texture::{base_colour as foliage_base, foliage_albedo, FOLIAGE, RES as FOLIAGE_RES};
+use super::verge_texture::{verge_albedo, BASE as VERGE_BASE, RES as VERGE_RES};
 
 /// A colour from linear RGB components.
 pub fn rgb(r: f32, g: f32, b: f32) -> Color {
@@ -67,32 +69,94 @@ pub fn ratio(v: f32) -> Ratio {
 ///
 /// Authored in **linear** light, which is not what it looks like: the backend
 /// converts to sRGB for display, so this lands on screen at roughly
-/// `(129, 184, 231)` — the pale blue band a coastal noon has just above the sea,
-/// not the saturated blue overhead ([`SKY_ZENITH`] carries that).
+/// `(43, 177, 208)` before the grade, and — after [`super::GRADE`] runs its
+/// exposure, cool white balance, contrast and `1.18` saturation over it — at
+/// `(11, 185, 242)` in the finished frame.
+///
+/// ## Why the old `[0.22, 0.48, 0.80]` painted a milky sky, and this does not
+///
+/// **This constant, not [`SKY_ZENITH`], is the colour of the sky you can
+/// actually see.** The GPU sky shader mixes the two stops on
+/// `smoothstep(dir.y)`, and this app's chase camera looks slightly *down*: the
+/// top row of the frame sits about 32° up, which is `dir.y ≈ 0.53` and therefore
+/// a blend of only **0.57**. The zenith stop is never reached anywhere on
+/// screen — every sky pixel in the frame is at least 43% this value, and the
+/// band just above the horizon is essentially all of it.
+///
+/// That is what made the previous pair read as pale cyan milk. Measured on the
+/// champion frame against the reference, sampling the clear sky column by
+/// column and mapping screen row to blend:
+///
+/// | | champion sky | reference sky |
+/// |---|---|---|
+/// | red, horizon → top | 115 → 78 | **1 → 1** |
+/// | green, horizon → top | 190 → 150 | 181 → 95 |
+/// | blue, horizon → top | **255 → 255** | 242 → 200 |
+///
+/// Two separate defects, both of them authored here:
+///
+/// * **Red.** A daylight sky is very nearly a pure blue-green primary — the
+///   reference carries a red channel of `0`–`1` across its entire sky. The old
+///   horizon red of `0.22` put ~110 display levels of red under every sky pixel
+///   in the frame, and red under blue is exactly the definition of a wash. That
+///   single number is most of the distance between "coastal noon" and "overcast".
+/// * **Blue clipping.** `0.80` linear displays at `231`, and the grade then
+///   multiplies it by the white balance's `1.06`, the contrast's `1.1` and pushes
+///   it *away* from luma at `1.18` saturation — it leaves the range. So did the
+///   old zenith's `0.68`. **Both stops clipped**, which means the sky's blue
+///   channel was a flat `255` from the horizon to the top of the frame: the
+///   gradient, the sun's halo and the clouds' separation all existed only in red
+///   and green, and the one thing a clear sky is made of was a constant.
+///
+/// So both stops are re-derived *through* the grade rather than authored by eye:
+/// the reference's own sky is sampled per row, inverted through
+/// [`super::GRADE`]'s exact chain (the saturation step preserves Rec.709 luma, so
+/// it inverts exactly), and the two stops are the least-squares fit of the
+/// shader's `mix(horizon, zenith, smoothstep(dir.y))` to that curve. Mean squared
+/// error over the visible band falls from `12781` to `1340` per sample.
+///
+/// It stays the frame's **white level** in every other respect — it is still the
+/// clear colour and still the horizon stop of the dome. It is simply 18% less
+/// bright and no longer red, which is the correction the measurement asks for.
+///
+/// It is **no longer the depth fog's colour**. That was true when this was
+/// authored and it is the reason the red above had to go: a stop fitted to a
+/// clear sky is a near-pure blue-green primary, and a haze is neither. See
+/// [`HAZE`] for the split and for the horizon seam it costs.
+///
+/// The thin pale haze strip the reference has hugging the horizon line itself
+/// (`~(158, 210, 232)`, below about 5° of elevation) before the sky collapses to
+/// blue is **no longer this pair's problem**. It was, and the note that used to
+/// stand here said so: `smoothstep` is flattest near zero, so a two-stop dome
+/// parameterised on the raw up-component holds its horizon colour over a wide
+/// band — exactly the wrong shape for a tight haze layer — and getting it right
+/// "would take a third stop or a horizon-hugging exponent in the sky shader,
+/// which is an engine change, not a palette one."
+///
+/// That was the correct diagnosis, and the engine change is the one that landed:
+/// the gradient's *shape* is now authored separately from its two colours, as
+/// [`SKY_HAZE_HEIGHT`]. This stop is free to go back to being the horizon
+/// colour, and [`SKY_ZENITH`] free to go back to being the sky overhead.
 ///
 /// This constant is the **white level of the whole frame**, not just the colour
 /// of the empty top of it, and that is why it is authored this far down. It is
-/// three things at once: the clear colour (`set_clear_color`), the horizon stop
-/// of the sky gradient, and — decisively — the colour [`super::FrameDepthFog`]
-/// fades every distant surface into. Whatever value sits here is therefore the
-/// tone the vanishing point, the far road and the distant scenery all converge
-/// on, and every receding thing is dragged toward it.
+/// the clear colour (`set_clear_color`) and the horizon stop of the sky gradient,
+/// so it is the tone the top 40% of the frame is made of and the tone the
+/// vanishing point is seen *against*. What the receding surfaces themselves
+/// converge on is [`HAZE`].
 ///
 /// The previous `[0.0009, 0.0012, 0.0021]` was authored for a moonlit stage: a
 /// near-black floor, so that the emissive cues were the only light in shot. The
 /// reference is now a **daylight** coastal highway — a blue sky with a sun in it,
 /// a turquoise sea and sunlit sand — and against that reference a near-black
-/// horizon is not a dark grade, it is the wrong time of day. Every downstream
-/// term inherits it: the fog fades the far road into the sky it is standing
-/// under, so a black sky fades a sunlit road into a black tunnel mouth, and no
-/// key light or exposure can add daylight back to a frame whose atmosphere is
-/// night.
+/// horizon is not a dark grade, it is the wrong time of day, and no key light or
+/// exposure can add daylight back to a frame whose atmosphere is night.
 ///
 /// Held *below* the reference's whitest cloud on purpose: this is haze, not
 /// highlight. Pushing it to white would blow the vanishing point out and take the
 /// far lane markings with it, and there would be no headroom left for the sun
 /// disc ([`SUN`]) or the clouds to read as brighter than the sky they sit in.
-pub const SKY: [f32; 3] = [0.22, 0.48, 0.80];
+pub const SKY: [f32; 3] = [0.024, 0.44, 0.63];
 
 /// How solid the ghost car is, `0` invisible … `1` opaque.
 ///
@@ -110,15 +174,169 @@ pub const GHOST_OPACITY: f32 = 1.0;
 /// because that is where the atmosphere is thickest and scatters the most, and
 /// the deepest, bluest part is overhead where you are looking through the least
 /// air. Getting this the wrong way round is what makes a clear noon read as
-/// overcast. [`SKY`] stays the *horizon* colour precisely because it is also the
-/// colour the depth fog fades into — so the far road dissolves into the sky it
-/// is standing under, with no seam between the two.
+/// overcast. [`SKY`] stays the *horizon* colour because that is where the dome
+/// is palest, which is the same aerial-perspective fact stated twice.
 ///
-/// Displayed, this is roughly `(29, 101, 215)`: the strong blue the reference
-/// carries across the top of the frame. Note how *little* red it holds — a
-/// daylight zenith is nearly a pure blue primary, and the usual mistake is to
-/// author it as a light grey-blue, which is a hazy sky, not a clear one.
-pub const SKY_ZENITH: [f32; 3] = [0.012, 0.13, 0.68];
+/// Displayed, this is roughly `(7, 48, 111)` before the grade. Note how *little*
+/// red it holds — a daylight zenith is nearly a pure blue primary, and the usual
+/// mistake is to author it as a light grey-blue, which is a hazy sky, not a clear
+/// one.
+///
+/// **This stop is once again a colour rather than a slope control**, and that is
+/// why it moved.
+///
+/// It used to be neither. The chase camera looks down: the top row of the frame
+/// sits ~32° up, `dir.y ≈ 0.53`, and the fixed `smoothstep(dir.y)` gradient the
+/// sky shader used to evaluate reached a blend of only **0.545** there. Nothing
+/// in shot was ever more than 54% of this value, so this constant was authored as
+/// the *overshoot* needed to drag the visible band down — a number chosen for
+/// where it lands at 54%, not for what the sky overhead is.
+///
+/// That approach had a hard ceiling and the champion frame hit it. Matching the
+/// reference's top-of-frame green (`85` display, `0.093` linear) through
+/// [`super::GRADE`] needs a blend of `0.88`; at the `0.545` the camera supplied,
+/// the green here would have had to be **negative**. There was no value that
+/// worked. The wall was the gradient's fixed shape, not either colour, which is
+/// why the fix is [`SKY_HAZE_HEIGHT`] and not another guess at this stop.
+///
+/// With the haze band pulled down to `0.234`, the top row now blends at `0.88`
+/// and this stop is *nearly all* of what shows there. So it is re-derived as what
+/// it says it is — the sky straight overhead — by inverting the reference's own
+/// measured top-of-frame colour through the grade and solving the two-stop mix at
+/// the blend the camera actually delivers:
+///
+/// | at 32° up | reference | this pair, before | this pair, now |
+/// |---|---|---|---|
+/// | red | 0 | 3 | 0 |
+/// | green | 85 | 139 | 85 |
+/// | blue | 184 | 199 | 185 |
+///
+/// Every channel rose in *linear* terms while the displayed result got darker,
+/// and that is not a contradiction — it is the whole point. The old numbers were
+/// overshoots sized for 54% reach; at 88% reach an overshoot renders as a hole,
+/// so each one moves back toward the colour it actually names. The blue moves
+/// furthest (`0.16` → `0.27`) because it had the furthest to fall. It still
+/// clears the clipping check in [`self::tests`] with room to spare — it grades to
+/// `0.69`, against the `1.0` that destroyed the `0.68` before it.
+pub const SKY_ZENITH: [f32; 3] = [0.0, 0.045, 0.27];
+
+/// **The shape of the sky's gradient**, authored separately from its two colours:
+/// the up-component (the sine of the elevation angle) at which the dome stands
+/// halfway between [`SKY`] and [`SKY_ZENITH`].
+///
+/// `0.234` is 13.5° of elevation. The engine's default is `0.5` — 30° — which is
+/// the plain `smoothstep(dir.y)` the sky shader evaluated before the parameter
+/// existed, and which is wrong twice over for this frame:
+///
+/// * **It is not what air does.** Optical depth along a ray goes as roughly
+///   `1 / sin(elevation)`, so a clear day's haze band is *tight*: the sky
+///   collapses to its zenith blue within the first 15–20° and holds it the rest
+///   of the way up. The reference shows exactly that — it falls from
+///   `(1, 181, 242)` at 5° to `(1, 95, 200)` at 32°, most of that drop happening
+///   in the first third of the span.
+/// * **It is not what this camera shows.** A midpoint at 30° is a reasonable
+///   default for a camera that looks at the sky. This one looks at a road: the
+///   entire visible sky is the band from the horizon to 32°, so a 30° midpoint
+///   means the frame shows only the flat bottom of the curve and the gradient
+///   arrives as a wash however far apart the two stops are authored.
+///
+/// Pulling the midpoint to 13.5° fixes both at once, and — because the lift is
+/// exact at both ends — it moves neither thing that is matched to this gradient:
+/// the horizon still returns [`SKY`] exactly, which is what [`super::FrameDepthFog`]
+/// fades every distant surface into, so the far road still dissolves into the sky
+/// with no seam; and the zenith still returns [`SKY_ZENITH`] exactly.
+///
+/// Derived, not eyeballed: the reference's top-of-frame green inverted through
+/// [`super::GRADE`] needs a blend of `0.88` at `dir.y = 0.53`, which is
+/// `smoothstep` of a lifted `0.787`, which is a midpoint of `0.234`.
+pub const SKY_HAZE_HEIGHT: f32 = 0.234;
+
+/// The **depth fog's own colour** — the tone every distant surface recedes into,
+/// and no longer the same number as [`SKY`].
+///
+/// ## Why the haze stopped being the sky
+///
+/// Binding the fog to [`SKY`] is the standard trick and it was the right default
+/// while the two agreed. They do not agree here, and the champion frame measures
+/// exactly how far apart they are. Sampling the road's centre column at the
+/// vanishing point:
+///
+/// | | champion | reference |
+/// |---|---|---|
+/// | horizon band | `(87, 119, 129)` | `(157, 204, 210)` |
+///
+/// Two independent defects sit in that one triple, and **neither can be fixed
+/// without the other**:
+///
+/// * **Not enough of it.** Solving the mix at that band gives a fog fraction of
+///   roughly `0.4` where the reference's is `~0.9` — its vanishing point has
+///   essentially *become* atmosphere, ours is still more than half tarmac. See
+///   the range authored at the [`super::FrameDepthFog`] call site for the pull-in
+///   that fixes the strength.
+/// * **The wrong colour to have more of.** [`SKY`] displays, through
+///   [`super::GRADE`], at `(12, 191, 248)` — a saturated cyan primary with the
+///   red driven to nothing, which is correct for the *clear sky* it was
+///   least-squares fitted to and wrong for haze. Pushing the density to `0.9`
+///   against that colour lands the far road at `(18, 178, 228)`: the green and
+///   blue arrive, and the red goes the wrong way, from `87` to `18`, against a
+///   reference that wants `157`. The frame's largest single colour deficit is red
+///   (the 3D band's mean red is `49` against the reference's `105`), and turning
+///   the sky-coloured fog up makes it worse.
+///
+/// Haze is suspended water and dust lit by the whole sky *and* by sunlit ground.
+/// It is pale and very nearly neutral. A clear zenith-to-horizon dome is a
+/// near-pure blue-green primary. Those are two different colours and this app was
+/// spending one number on both.
+///
+/// ## Derivation
+///
+/// Not authored by eye. The reference's own horizon band, `(157, 204, 210)`, is
+/// inverted through [`super::GRADE`]'s exact chain — saturation about Rec.709
+/// luma, then the contrast S-curve about `0.5`, then exposure × white balance,
+/// then the sRGB transfer the backend's render target writes with — which lands
+/// on this linear triple. Forward through the same chain it returns
+/// `(157, 204, 210)`, within a display level on every channel.
+/// [`tests::the_haze_is_the_reference_s_own_horizon_band_and_it_is_not_the_sky`]
+/// is that round trip, asserted.
+///
+/// **It moves whenever [`super::GRADE`] moves, and it just did.** This constant is
+/// not a colour someone liked; it is a *solution* to "what linear triple does the
+/// installed grade turn into the reference's horizon band", so a new grade is a
+/// new equation. `[0.35, 0.53, 0.49]` was that solution for `cinematic`; under
+/// `FramePostProcess::sunlit` — which warms the white balance and drops saturation
+/// to `1.02` — the same target inverts to this triple. The red falls furthest from
+/// `cinematic`'s solution, and that is the point rather than a surprise: the grade
+/// supplies warmth this constant used to have to carry on its own, so the haze can
+/// go back to being the pale, nearly-neutral scatter it is described as above
+/// instead of a colour pre-compensated for a grade that was pulling red out from
+/// under it. Displayed, the far road, the receding palm rank, the headland and the
+/// skyline all land where they did — that is what the round-trip test pins — but
+/// they now get there with the frame's light rather than against it.
+///
+/// **And it just moved again, for the same reason.** `sunlit`'s white balance eased
+/// its red `1.15 -> 1.04` (see that preset: the key light was re-gelled golden, and
+/// the grade had gone on stacking a second, unmeasured 15% of red on top of it). A
+/// smaller red gain in the grade means a *larger* authored red is needed to land the
+/// same measured band, so the solution moves `0.2043 -> 0.2541` on red alone. Green
+/// and blue are untouched, because their gains are. The displayed band is identical
+/// — `(157, 204, 210)` — which is the whole property this constant exists to hold:
+/// the grade changed, the atmosphere did not.
+///
+/// ## The one thing this costs, and who owns it
+///
+/// The dome and the fog now meet at the horizon line carrying different colours —
+/// a pale warm haze below, a cyan sky above — so there is a step across that row
+/// where there used to be none. That step is the **two-stop dome's** limitation,
+/// not this constant's: [`SKY`] already documents that `smoothstep` is flattest
+/// near zero and therefore cannot hold the thin pale band the reference has
+/// hugging its own horizon (`~(158, 210, 232)`, below about 5° of elevation).
+/// Closing it takes a third stop or a horizon-hugging exponent in the sky shader,
+/// which is an engine change.
+///
+/// The trade is not close. The seam is one row. The surfaces the fog actually
+/// paints — the far road, the receding palm rank, the headland, the skyline — are
+/// hundreds of rows, and they are the ones the reference measures against.
+pub const HAZE: [f32; 3] = [0.2541, 0.4695, 0.4470];
 
 /// The sun's disc colour — **deliberately far above `1.0`**.
 ///
@@ -147,36 +365,79 @@ pub const SUN: [f32; 3] = [2.4, 2.25, 1.95];
 /// The tarmac's own colour — the largest surface in any frame, and therefore the
 /// one that decides the **colour temperature of the whole shot**.
 ///
-/// It was `[0.085, 0.088, 0.105]`: a deliberate blue tilt, blue a quarter above
-/// red. That reads as a reasonable choice in isolation and is wrong in context,
-/// because it is the *third* blue-weighted term stacked on the same pixels. The
-/// hemisphere ambient's sky colour is blue by 1.9× red, the depth fog fades into
-/// a [`SKY`] blue by 2.3×, and the moon and its key light are cool by authorship.
-/// Multiply a blue albedo by a blue light under a blue fog and the road does not
-/// read as *lit coolly* — it reads as **navy**, which is what the champion's
-/// lower half is and what the reference's is not. Measured against the reference,
-/// the champion's near tarmac carries a blue excess of roughly a third over red
-/// where the reference's is neutral-to-warm.
+/// ## The rule, and why it has now pointed both ways
 ///
-/// The physical fact the old value contradicted: bitumen is a warm near-black.
-/// Real asphalt is neutral with a brown tilt, and every cool cast a night road
-/// carries is the *moon's*, not the road's. Putting the cool in the light and
-/// keeping it out of the surface is exactly what gives the reference its
-/// warm-neutral near lane under a cold sky, instead of one flat blue wash — the
-/// near road is where the car's own warm pool light wins, and the far road, lit
-/// by nothing but ambient and fog, stays cold. A blue albedo erases that split.
+/// The rule this constant exists to enforce has never changed: **the road's
+/// albedo sits on the opposite side of neutral from the rig that lights it**, so
+/// the frame's colour temperature comes from the light and the surface stays a
+/// near-black. What has changed twice is which side that is.
 ///
-/// So this is a **pure hue rotation, not an exposure change**: red and blue swap
-/// roles at the same magnitude (blue was 1.24× red; red is now 1.19× blue), and
-/// the Rec.709 luminance is held at `0.0889` against the old `0.0886` — a 0.3%
-/// difference, below a display level. Nothing here lifts or crushes the frame,
-/// so it cannot disturb the black point the grade is spending on the floor, and
-/// the software arm — which sees the same albedo through a different shader —
-/// changes colour without changing brightness.
+/// It was `[0.085, 0.088, 0.105]`, a blue tilt authored for the *moonlit* stage,
+/// and against that stage it was the wrong sign: the hemisphere ambient was blue
+/// by 1.9× red, the fog faded the far road into a cool [`SKY`], and the key was a
+/// cool moon. Blue albedo × blue light × blue fog is not "lit coolly", it is
+/// navy. Rotating it warm to `[0.095, 0.088, 0.080]` was the correct fix **for
+/// that rig**.
+///
+/// Era C replaced every one of those three terms with its opposite and the warm
+/// albedo was left standing. The key is now a warm sun ([`SUN`], red over blue by
+/// 1.23); the fog is [`HAZE`], no longer the cyan dome; and [`super::GRADE`] is
+/// `FramePostProcess::sunlit`, whose white balance is `[1.15, 1.00, 1.05]`. Three
+/// warm terms, and a warm albedo underneath them — the identical mistake, sign
+/// flipped, and this time on the surface that fills half the frame.
+///
+/// ## What that costs, measured on the champion frame
+///
+/// Split the road trapezoid on chroma (`R > B` is sunlit, `R <= B` is in palm
+/// shadow) and take the mean of each side, on both images:
+///
+/// | road plane | reference | champion |
+/// |---|---|---|
+/// | sunlit mean | `(101, 79, 65)`, R/B `1.55` | `(131, 88, 72)`, R/B `1.82` |
+/// | shadowed mean | `(34, 43, 52)`, R/B **`0.65`** | `(72, 72, 77)`, R/B **`0.92`** |
+/// | shadowed share of the plane | 42% | 20% |
+///
+/// The shadow column is the whole finding. **The reference's shaded asphalt is
+/// the coolest thing on its ground plane** — strongly blue, because with the sun
+/// subtracted the only light left on it is sky. The champion's shaded asphalt is
+/// a neutral grey. The road therefore renders at very nearly *the same hue in sun
+/// and in shade*, and a surface whose colour does not change across a terminator
+/// does not read as lit at all — it reads as painted. That warm/cool split is the
+/// single strongest "sunlit" cue available to this frame and the albedo is
+/// currently cancelling it.
+///
+/// It is also why this is a **material** defect and not an exposure or grade one.
+/// A key change moves the sunlit endpoint only. A grade change moves both, and
+/// takes the sky, the sand and the car with it. The albedo multiplies the sun
+/// term *and* the sky-fill term and touches nothing but the road — which is
+/// exactly the shape of the error above, where both endpoints are warm by a
+/// common factor.
+///
+/// ## Derivation
+///
+/// Per endpoint, the correction is the reference's chroma over the champion's:
+/// the sunlit lane wants R/B × `0.854` and R/G × `0.863`; the shadow wants R/B ×
+/// `0.702` and R/G × `0.794`. They disagree because our sky fill is less blue
+/// than the reference's — that residual belongs to the ambient rig, not here — so
+/// this takes the common part, weighted 2:1 toward the sunlit endpoint (57% of
+/// the reference's road plane and roughly three times its luminance): R/B ×
+/// `0.800`, R/G × `0.839`. Applied to the old ratios that is R/G `0.906` and R/B
+/// `0.950` — a *faintly* cool near-black, which is what aggregate-heavy bitumen
+/// actually is. Every warm road anyone has ever photographed was warm because of
+/// the sun on it, and the reference's own shadow proves it at R/B `0.65`.
+///
+/// This is a **pure hue rotation, not an exposure change**, exactly as the last
+/// one was: Rec.709 luminance holds at `0.08889` against the old `0.08891`, a
+/// 0.02% difference and far under a display level. Nothing here lifts or crushes
+/// the frame, so it cannot disturb the black point the grade spends on the floor,
+/// it cannot disturb the specular budget [`TARMAC_ROUGHNESS`] is sized against,
+/// and it leaves whatever the exposure is doing free to move independently. The
+/// software arm — which sees the same albedo through a different shader — changes
+/// colour without changing brightness.
 ///
 /// Named once because it was written out four times (two material arms and two
 /// tests) and a colour authored in four places is a colour that drifts.
-pub const TARMAC: [f32; 3] = [0.095, 0.088, 0.080];
+pub const TARMAC: [f32; 3] = [0.0825, 0.0910, 0.0868];
 
 /// ## The gloss set, and why every value in it moved with the era
 ///
@@ -223,23 +484,43 @@ pub const TARMAC: [f32; 3] = [0.095, 0.088, 0.080];
 /// assertion that keeps the two in step, and it is the one this module was
 /// missing: it fires the next time the key moves without the gloss moving.
 ///
-/// Tarmac: `0.06 × 2.6 = 0.156` linear at the exact mirror point, roughly
-/// two-fifths of the way up the display range over a `0.08` diffuse base. A
+/// **The key has been re-exposed `1.84 → 5.9`, and this set moves with it —
+/// holding every peak byte-identical.** [`super::KEY_INTENSITY`] was solved
+/// against the wrong statistic (the warm *median* of a road that is 39% palm
+/// shadow, i.e. the penumbra) and is now solved against the reference's sunlit
+/// mode. A re-exposure that does not carry the gloss with it is the exact defect
+/// this whole comment was written about, one era later and three times worse: at
+/// the old `(1 - roughness)` the tarmac would throw `0.06 × 5.9 = 0.354` linear —
+/// past the `0.25` wall below, the blown white sheet again.
+///
+/// So every `(1 - roughness)` is scaled by `1.84 / 5.9 = 0.3119`, which leaves
+/// each surface's peak radiance exactly where the paragraphs above put it. The
+/// products are unchanged to three places, the ordering is unchanged, and no
+/// pixel of specular in the frame moves. **This move is specular-neutral by
+/// construction** — the diffuse exposure rises, the highlights do not, which is
+/// the only shape a re-exposure of a Lambert-plus-lobe rig may take.
+///
+/// Tarmac: `0.0187 × 5.9 = 0.110` linear at the exact mirror point (was
+/// `0.06 × 1.84 = 0.110`) over a diffuse base that has itself risen to ~0.22. A
 /// whisper of directionality down the sun line, so the road is not one flat fill
-/// across its length — and nothing the eye reads as a highlight.
-pub const TARMAC_ROUGHNESS: f32 = 0.94;
+/// across its length — and nothing the eye reads as a highlight; against the
+/// brighter diffuse it is now *less* of a highlight than it was, which is what
+/// the reference's matte noon tarmac wants.
+pub const TARMAC_ROUGHNESS: f32 = 0.9813;
 
-/// Automotive clear-coat. `0.16 × 2.6 = 0.416` linear — a real, visible
-/// highlight riding the crown of the bonnet and the shoulder line, about a stop
-/// under clipping, so the stripes and the panel breaks stay legible underneath
-/// it. See [`TARMAC_ROUGHNESS`] for the budget this is drawn from.
-pub const CAR_PAINT_ROUGHNESS: f32 = 0.84;
+/// Automotive clear-coat. `0.0499 × 5.9 = 0.294` linear (was `0.16 × 1.84 =
+/// 0.294`) — a real, visible highlight riding the crown of the bonnet and the
+/// shoulder line, about a stop under clipping, so the stripes and the panel
+/// breaks stay legible underneath it. See [`TARMAC_ROUGHNESS`] for the budget
+/// this is drawn from and for why the number moved while the product did not.
+pub const CAR_PAINT_ROUGHNESS: f32 = 0.9501;
 
 /// Glazing — still the glossiest surface in the frame, as it must be.
-/// `0.32 × 2.6 = 0.832` linear: the windscreen holds a hot sun glint at the
-/// mirror point and stays a dark near-black trapezoid everywhere else, which is
-/// what a raked screen at noon actually looks like. See [`TARMAC_ROUGHNESS`].
-pub const CAR_GLASS_ROUGHNESS: f32 = 0.68;
+/// `0.0998 × 5.9 = 0.589` linear (was `0.32 × 1.84 = 0.589`): the windscreen
+/// holds a hot sun glint at the mirror point and stays a dark near-black
+/// trapezoid everywhere else, which is what a raked screen at noon actually
+/// looks like. See [`TARMAC_ROUGHNESS`].
+pub const CAR_GLASS_ROUGHNESS: f32 = 0.9002;
 
 /// Register the four road materials.
 ///
@@ -254,13 +535,17 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
     let asphalt = app
         .add_texture_data(ASPHALT_RES, ASPHALT_RES, asphalt_albedo())
         .ok();
+    let ground = app
+        .add_texture_data(VERGE_RES, VERGE_RES, verge_albedo())
+        .ok();
     RoadMaterials {
-        // Asphalt: dark, and neutral-warm — see [`TARMAC`] for why the hue is
-        // the road's single most consequential number and why it is no longer
-        // blue. It still separates from the verge, which is green and half a
-        // stop brighter. The grain multiplies this base colour (the shader
-        // computes `albedo * colour`), so the hue lives here and only the
-        // shading is sampled.
+        // Asphalt: dark, and a *whisper* cool of neutral — see [`TARMAC`] for
+        // why the hue is the road's single most consequential number and why it
+        // sits on the opposite side of neutral from the sun that lights it. It
+        // still separates from the verge, which is green and half a stop
+        // brighter. The grain multiplies this base colour (the shader computes
+        // `albedo * colour`), so the hue lives here and only the shading is
+        // sampled.
         // `roughness` is [`TARMAC_ROUGHNESS`], and that constant carries the
         // whole argument: the value here was sized against a moonlit key three
         // times dimmer than the era-C sun, and left unchanged it turns the
@@ -300,8 +585,36 @@ pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
         ),
         // Guardrail and tunnel wall: mid grey, matte.
         rail: app.add_material(Material::lit(rgb(0.38, 0.40, 0.44))),
-        // The verge: a neutral base, since one mesh spans zone boundaries.
-        verge: app.add_material(Material::lit(rgb(0.115, 0.145, 0.105))),
+        // The verge — the roadside ground, and until now the frame's last
+        // genuine flat fill. It is the second-largest ground plane in any shot
+        // (the quad reaches `VERGE_REACH` past the barrier, forty-odd metres
+        // either side, from the bumper to the horizon) and it rendered *exactly*
+        // one RGB triple across all of it: sampling the champion frame's verge
+        // returns a standard deviation of `0.00` over thousands of pixels, where
+        // the reference's cleanest roadside still measures ~1-2 levels and reads
+        // as dry earth breaking through low cover.
+        //
+        // [`super::verge_texture`] authors that mix. The base colour here is not
+        // a new colour — it is the channel-wise maximum of the texture's two
+        // targets, because a custom albedo can only darken, and the module holds
+        // the *textured mean* on the flat fill's own luminance so adding a
+        // surface is not also a grade. The colour still spans zone boundaries
+        // neutrally, which is why one mesh can carry it.
+        //
+        // Sampled `Crisp`, unlike the tarmac: `Crisp` still minifies linearly
+        // across a real mip chain, and the verge has no lane-width lateral
+        // feature that has to survive at the vanishing point, so it does not
+        // need — or want — the tarmac's 16x anisotropy.
+        verge: app.add_material(
+            ground
+                .map(|t| {
+                    Material::lit(rgb(VERGE_BASE[0], VERGE_BASE[1], VERGE_BASE[2]))
+                        .with_custom_texture(t.id())
+                })
+                .unwrap_or_else(|| {
+                    Material::lit(rgb(VERGE_BASE[0], VERGE_BASE[1], VERGE_BASE[2]))
+                }),
+        ),
     }
 }
 
@@ -429,7 +742,43 @@ impl ScenePalette {
             // light. The albedo is what the post looks like switched off.
             post: glowing(app, [0.34, 0.26, 0.06], [1.0, 0.66, 0.10]),
             timber: lit(app, [0.16, 0.12, 0.09]),
-            foliage: lit(app, [0.13, 0.27, 0.15]),
+            // Every leaf surface in the game — the palm crowns that line the
+            // coast, the shrub clumps on the verge, the conifer cones inland —
+            // and until now the frame's largest remaining flat fill after the two
+            // ground planes. A palm crown rendered as exactly two RGB triples:
+            // one on the up-facing blades, one on the down-facing ones. The
+            // reference's crowns measure a **13.2%** median within-frond
+            // variation, entirely inside one lit blade, and most of it is
+            // chromatic — its green channel barely moves while red and blue swing
+            // in opposition across every leaflet.
+            //
+            // [`super::foliage_texture`] authors that comb. `quad` stretches the
+            // texture once across each blade with `u` across its width and `v`
+            // along its length, so the leaflets, the rachis at `u = 0.5` and the
+            // bright silhouette edges are all the real parts of the leaf rather
+            // than a pattern laid over it.
+            //
+            // The base colour is `foliage_base()`, not [`FOLIAGE`]: a custom
+            // albedo can only darken, this pattern's mean multiplier is ~0.56,
+            // and the module divides that back out per channel so the textured
+            // crown displays the same colour the flat fill did. Adding a surface
+            // is not also a grade. The untextured arm keeps [`FOLIAGE`] itself,
+            // because without the texture there is nothing to compensate for.
+            foliage: {
+                let base = foliage_base();
+                let leaf = app
+                    .add_texture_data(FOLIAGE_RES, FOLIAGE_RES, foliage_albedo())
+                    .ok();
+                app.add_material(
+                    leaf.map(|t| {
+                        Material::lit(rgb(base[0], base[1], base[2]))
+                            .with_custom_texture(t.id())
+                    })
+                    .unwrap_or_else(|| {
+                        Material::lit(rgb(FOLIAGE[0], FOLIAGE[1], FOLIAGE[2]))
+                    }),
+                )
+            },
             stone: lit(app, [0.28, 0.26, 0.24]),
             sign: glowing(app, [0.62, 0.64, 0.60], [0.22, 0.22, 0.20]),
             lamp: glowing(app, [0.30, 0.28, 0.24], [1.0, 0.86, 0.52]),
@@ -448,7 +797,27 @@ impl ScenePalette {
             // windscreen looks like. [`CAR_GLASS_ROUGHNESS`] keeps it the frame's
             // glossiest surface while holding the glint to the mirror point
             // instead of flooding the whole screen white.
-            car_glass: glossy(app, [0.07, 0.09, 0.13], CAR_GLASS_ROUGHNESS),
+            //
+            // It was `[0.07, 0.09, 0.13]` — blue by 1.86x red — and that is the
+            // last authored blue albedo left on the hero, repeating on the car
+            // the exact mistake [`TARMAC`] documents for the road: a blue surface
+            // multiplied by a blue hemisphere fill under a blue haze does not
+            // read as *lit coolly*, it reads as blue plastic. Measured, the
+            // champion's rear screen displays `(47, 52, 71)` — blue over red by
+            // **+25 levels** — where the reference's is a neutral dark charcoal
+            // at `(57, 55, 54)`, blue *under* red by 3. That is the difference
+            // between a moulded toy canopy and tinted glass, and it is the second
+            // thing the eye lands on after the lamps.
+            //
+            // So this is the same **pure hue rotation** the tarmac took, and for
+            // the same reason: keep the cool in the light and out of the surface.
+            // The rendered frame puts a factor 1.35 of blue over red into this
+            // pixel from the rig alone, so the albedo is authored at `R/B = 1.35`
+            // to cancel exactly that and land neutral. Rec.709 luminance moves
+            // `0.0887` -> `0.0905`, +2% — under a display level at this value, so
+            // nothing here re-exposes the glazing or disturbs the gloss budget
+            // [`CAR_GLASS_ROUGHNESS`] is sized against.
+            car_glass: glossy(app, [0.098, 0.090, 0.073], CAR_GLASS_ROUGHNESS),
             tyre: lit(app, [0.045, 0.045, 0.05]),
             // Stripe and plate trim: pale, slightly warm, and with a whisper of
             // self-luminance. It is the only *light* value on the car, so it has
@@ -461,7 +830,27 @@ impl ScenePalette {
             // lens actually is — and every bit of their separation comes from the
             // emissive, so they read as two hot strips at any angle, in shadow,
             // and with the sun behind the car.
-            brake_light: glowing(app, [0.20, 0.02, 0.01], [1.0, 0.18, 0.10]),
+            //
+            // The emissive was `[1.0, 0.18, 0.10]`, and nothing in the shader
+            // scales an emissive, so that triple *is* what reaches the frame:
+            // measured, the champion's lit lens displays `(249, 111, 81)` sRGB —
+            // linear `(0.930, 0.154, 0.084)`, within a few percent of the
+            // authored value. Its saturation is **0.67**. The reference's lamp
+            // measures `(240, 53, 21)` — linear `(0.871, 0.034, 0.008)`, a
+            // saturation of **0.91**. Same brightness in the red channel; four
+            // and a half times the green and eleven times the blue. That gap is
+            // not exposure and no grade reaches it: the off-hue channels are
+            // authored here and only here, and at `0.18 / 0.10` they turn the
+            // brightest, most-looked-at detail on the hero object into coral
+            // plastic instead of a red lens with a lamp behind it.
+            //
+            // A lens is a *narrow-band* filter — that is the whole of what it
+            // does — so the emitted light is nearly monochromatic red, and the
+            // reference is simply showing what one looks like. The red channel
+            // does not move (it is already at full scale, which is what makes it
+            // over-exposed and therefore a lamp); only the leak either side of it
+            // closes, onto the reference's own measurement.
+            brake_light: glowing(app, [0.20, 0.02, 0.01], [1.0, 0.040, 0.008]),
             boost_flame: glowing(app, [0.10, 0.16, 0.22], [0.70, 0.95, 1.0]),
             traffic: [
                 lit(app, [0.30, 0.44, 0.66]),
@@ -589,9 +978,9 @@ mod tests {
 
     /// The **time of day**, pinned where it is actually decided.
     ///
-    /// [`SKY`] is not just the empty top of the frame: it is the clear colour,
-    /// the horizon stop of the gradient, and the colour the depth fog fades every
-    /// distant surface into. A frame whose atmosphere is authored at night is a
+    /// [`SKY`] is not just the empty top of the frame: it is the clear colour and
+    /// the horizon stop of the gradient, and it sets the level [`HAZE`] is
+    /// authored against. A frame whose atmosphere is authored at night is a
     /// night frame however it is lit and however it is graded — the fog adds its
     /// colour after the lighting, and the three grade knobs (exposure, contrast,
     /// saturation) are global multiplies that cannot put daylight into a black
@@ -624,29 +1013,242 @@ mod tests {
         assert!(SUN[0] > SUN[2], "a midday sun is warm; its sky took the blue out of it");
     }
 
-    /// The colour-temperature rule, pinned: **the cool on this stage belongs to
-    /// the light, not to the road.**
+    /// **A sky colour is only meaningful through the grade it is displayed
+    /// under**, and the champion frame's sky proved it: both stops were authored
+    /// as sensible-looking linear blues and both left the range once
+    /// [`super::super::GRADE`] had run, so the finished frame's blue channel was a
+    /// flat `255` from the horizon to the top of the image. A gradient whose
+    /// dominant channel is a constant is not a gradient — the sun's halo, the
+    /// clouds' separation and the dome's own depth all disappeared into it, and no
+    /// exposure, bloom or saturation move could bring them back, because the
+    /// information was destroyed at the clamp.
     ///
-    /// Three terms already tint the tarmac blue — the hemisphere ambient's sky
-    /// colour, the depth fog's [`SKY`], and the moon key. A blue albedo under all
-    /// three is what turns a moonlit road into a navy wash, and it is the one of
-    /// the four that is a *surface* property and therefore simply wrong: bitumen
-    /// is a warm near-black. So the tarmac is asserted warm-side-of-neutral, and
-    /// asserted to have been rotated in hue *without* being re-exposed — a future
-    /// edit that "fixes" the road by brightening it is not this rule.
+    /// This is the assertion the module was missing. It mirrors the host's grade
+    /// chain (`axiom_host::frame_postprocess::grade_pixel`) over each authored
+    /// stop and fails the moment either one clips, or the sky picks up a red cast,
+    /// or the two stops stop producing a visible slope across the band the chase
+    /// camera actually shows.
     #[test]
-    fn the_tarmac_is_warm_neutral_and_the_night_gets_its_cool_from_the_light() {
-        let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
-        assert!(
-            TARMAC[0] > TARMAC[2],
-            "the road is bitumen, not water: it may not be authored blue ({TARMAC:?})"
+    fn the_sky_gradient_survives_the_grade_without_clipping_or_going_grey() {
+        let grade_cfg = super::super::GRADE;
+        let (exposure, wb, contrast, saturation) = (
+            grade_cfg.exposure().get(),
+            grade_cfg.white_balance(),
+            grade_cfg.contrast().get(),
+            grade_cfg.saturation().get(),
         );
-        // Warm, but asphalt — not terracotta. A red/blue ratio past ~1.4 stops
-        // reading as a road surface and starts reading as a tinted one.
-        assert!(TARMAC[0] / TARMAC[2] < 1.4, "the tarmac is warm-neutral, not orange");
+        // The mirror below omits the black-point floor removal, which this preset
+        // does not use. If that ever changes, the mirror is wrong, not the sky.
+        assert_eq!(
+            grade_cfg.black_point().get(),
+            0.0,
+            "the grade grew a black point; this mirror no longer models it"
+        );
+        // Linear -> sRGB, the transfer the backend's render target writes with.
+        let encode = |v: f32| {
+            if v <= 0.003_130_8 {
+                12.92 * v
+            } else {
+                1.055 * v.powf(1.0 / 2.4) - 0.055
+            }
+        };
+        // (exposure x white balance) -> contrast S-curve about 0.5 -> saturation
+        // about Rec.709 luma. Returned unclamped on purpose: the whole point is to
+        // see whether a channel leaves `0..1` before the hardware clamps it.
+        let graded = |lin: [f32; 3]| {
+            let curve = |i: usize| ((encode(lin[i]) * exposure * wb[i]) - 0.5) * contrast + 0.5;
+            let v = [curve(0), curve(1), curve(2)];
+            let luma = 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+            [
+                luma + (v[0] - luma) * saturation,
+                luma + (v[1] - luma) * saturation,
+                luma + (v[2] - luma) * saturation,
+            ]
+        };
+
+        for (name, stop) in [("horizon", SKY), ("zenith", SKY_ZENITH)] {
+            let out = graded(stop);
+            assert!(
+                out[2] < 1.0,
+                "the {name} stop's blue clips at {:.3} after the grade: the sky's \
+                 own colour becomes a constant and the dome goes flat",
+                out[2]
+            );
+            // A clear daylight sky is very nearly a pure blue-green primary. The
+            // reference's carries a red channel of 0..1 across its whole span; red
+            // under blue is the definition of a milky sky, and it is authored
+            // here, never graded in.
+            assert!(
+                stop[0] < stop[2] * 0.08,
+                "the {name} stop carries a red cast ({stop:?}) — that is haze, not \
+                 a clear noon sky"
+            );
+        }
+
+        // ...and the two stops produce a real slope across the band the camera
+        // shows. The chase camera looks *down*, so the top row of the frame is
+        // only ~32° up (`dir.y = 0.53`) — a pair that agrees over that range
+        // renders as one flat wash however different the two numbers look.
+        //
+        // The blend it reaches there is no longer a fixed `smoothstep(dir.y)`:
+        // it is `smoothstep` of the haze lift, mirroring
+        // `axiom_host::frame_sky::haze_lift`, so this test tracks
+        // [`SKY_HAZE_HEIGHT`] rather than pinning a number that silently goes
+        // stale the moment the gradient's shape is re-authored. At the default
+        // height of `0.5` the lift is the identity and this is the old `0.545`;
+        // at the authored `0.234` it is `0.88`.
+        const VISIBLE_TOP_UP: f32 = 0.53;
+        let k = SKY_HAZE_HEIGHT / (1.0 - SKY_HAZE_HEIGHT);
+        let lifted = VISIBLE_TOP_UP / (VISIBLE_TOP_UP + (1.0 - VISIBLE_TOP_UP) * k);
+        let visible_top_blend = lifted * lifted * (3.0 - 2.0 * lifted);
+        assert!(
+            visible_top_blend > 0.8,
+            "the top of the frame reaches only {visible_top_blend:.2} of the zenith \
+             stop: the haze band is too wide for the band this camera shows"
+        );
+        let top = graded([
+            SKY[0] * (1.0 - visible_top_blend) + SKY_ZENITH[0] * visible_top_blend,
+            SKY[1] * (1.0 - visible_top_blend) + SKY_ZENITH[1] * visible_top_blend,
+            SKY[2] * (1.0 - visible_top_blend) + SKY_ZENITH[2] * visible_top_blend,
+        ]);
+        let horizon = graded(SKY);
+        let span = (horizon[2] - top[2]) * 255.0;
+        assert!(
+            span > 30.0,
+            "the visible sky spans only {span:.0} display levels of blue between \
+             its horizon and the top of the frame: that is a wash, not a dome"
+        );
+    }
+
+    /// **The haze is not the sky**, and it is the reference's own horizon band.
+    ///
+    /// Both halves are the assertion. A fog colour bound to a clear-sky stop is
+    /// the default every renderer reaches for, and it is why the champion frame's
+    /// vanishing point measured `(87, 119, 129)` against the reference's
+    /// `(157, 204, 210)`: turning that fog *up* — which the range at the
+    /// [`super::FrameDepthFog`] call site now does — drives the far road's red
+    /// from `87` toward the sky stop's `12` when the reference wants `157`. So
+    /// the round trip is pinned here. If [`super::GRADE`] moves, or if someone
+    /// re-binds the fog to [`SKY`], this fires.
+    #[test]
+    fn the_haze_is_the_reference_s_own_horizon_band_and_it_is_not_the_sky() {
+        let grade_cfg = super::super::GRADE;
+        let (exposure, wb, contrast, saturation) = (
+            grade_cfg.exposure().get(),
+            grade_cfg.white_balance(),
+            grade_cfg.contrast().get(),
+            grade_cfg.saturation().get(),
+        );
+        let encode = |v: f32| {
+            if v <= 0.003_130_8 {
+                12.92 * v
+            } else {
+                1.055 * v.powf(1.0 / 2.4) - 0.055
+            }
+        };
+        let graded = |lin: [f32; 3]| {
+            let curve = |i: usize| ((encode(lin[i]) * exposure * wb[i]) - 0.5) * contrast + 0.5;
+            let v = [curve(0), curve(1), curve(2)];
+            let luma = 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+            [0, 1, 2].map(|i| ((luma + (v[i] - luma) * saturation) * 255.0).clamp(0.0, 255.0))
+        };
+
+        // The reference's measured horizon band, which is what this constant was
+        // inverted out of. Two display levels of tolerance: the round trip is
+        // through a power transfer, and the constant is authored to two decimals.
+        const REFERENCE_HORIZON_BAND: [f32; 3] = [157.0, 204.0, 210.0];
+        let haze = graded(HAZE);
+        for (i, channel) in ["red", "green", "blue"].iter().enumerate() {
+            assert!(
+                (haze[i] - REFERENCE_HORIZON_BAND[i]).abs() <= 2.0,
+                "the haze's {channel} lands at {:.0}, not the reference's {:.0}",
+                haze[i],
+                REFERENCE_HORIZON_BAND[i]
+            );
+        }
+
+        // ...and it is a haze, not the dome. The clear sky is a near-pure
+        // blue-green primary by assertion two tests up; suspended water and dust
+        // lit by the whole sky plus sunlit ground is pale and very nearly
+        // neutral, and the whole point of splitting the two constants is that the
+        // frame's red survives the fog being turned up.
+        let sky = graded(SKY);
+        assert!(
+            haze[0] > sky[0] + 100.0,
+            "the haze carries no more red than the clear sky ({:.0} vs {:.0}): it \
+             is the sky again under another name, and every distant surface will \
+             recede into a cyan primary",
+            haze[0],
+            sky[0]
+        );
+        let spread = |c: [f32; 3]| {
+            (c[0].max(c[1]).max(c[2]) - c[0].min(c[1]).min(c[2])) / c[0].max(c[1]).max(c[2]).max(1.0)
+        };
+        assert!(
+            spread(haze) < spread(sky) * 0.5,
+            "the haze is as saturated as the dome ({:.2} vs {:.2}) — haze is pale",
+            spread(haze),
+            spread(sky)
+        );
+        // Pale, but still below the whitest thing in shot: this is atmosphere,
+        // not a highlight, and a haze at white erases the vanishing point.
+        assert!(
+            haze.iter().all(|c| *c < 235.0),
+            "the haze blows out the vanishing point: {haze:?}"
+        );
+    }
+
+    /// The colour-temperature rule, pinned: **the road's albedo sits on the
+    /// opposite side of neutral from the rig that lights it.**
+    ///
+    /// This is the rule the previous version of this test got right in substance
+    /// and wrong in direction. It asserted a literal `TARMAC[0] > TARMAC[2]` —
+    /// "bitumen is a warm near-black" — which was the correct correction to a
+    /// *moonlit* stage whose key, fog and ambient were all cool. Era C inverted
+    /// all three (a warm [`SUN`], a warm-neutral [`HAZE`], and
+    /// [`super::super::GRADE`]'s `[1.15, 1.00, 1.05]` white balance) and a
+    /// hardcoded "warm" then enforced the original defect with the sign flipped:
+    /// a warm surface under warm light, which is the terracotta road
+    /// [`TARMAC`] measures on the champion frame.
+    ///
+    /// So the assertion is derived from the rig rather than frozen against one
+    /// era of it. It reads the sun and the grade's white balance, computes which
+    /// way they tint this surface, and requires the albedo to lean the other way.
+    /// It fires the next time the stage's colour temperature moves without the
+    /// road moving with it — in either direction.
+    #[test]
+    fn the_road_leans_against_the_light_so_the_stage_gets_its_colour_from_the_sun() {
+        let luminance = |c: [f32; 3]| c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
+        // Which way the rig tints this surface: the key's own colour times the
+        // grade's white balance. Above 1 is a warm stage, below 1 a cool one.
+        let wb = super::super::GRADE.white_balance();
+        let rig_warmth = (SUN[0] * wb[0]) / (SUN[2] * wb[2]);
+        assert!(
+            rig_warmth > 1.0,
+            "era C is a midday sun; a rig that no longer runs warm needs this \
+             test's direction re-derived, not its road re-tinted: {rig_warmth:.3}"
+        );
+        // The albedo leans the other way, so the frame's warmth is the sun's and
+        // the shadowed lane — lit by sky alone — goes cool. The reference's own
+        // shaded asphalt is its coolest ground pixel, at R/B 0.65.
+        let albedo_warmth = TARMAC[0] / TARMAC[2];
+        assert!(
+            albedo_warmth < 1.0,
+            "the road is authored warm under a warm sun ({albedo_warmth:.3}): it \
+             will render the same hue in sun and in shade, which is paint, not \
+             tarmac ({TARMAC:?})"
+        );
+        // A near-black, not a tinted one. Asphalt is *faintly* off-neutral in
+        // either direction; a lean past ~15% is a coloured road, and that is the
+        // failure this whole rule exists to catch.
+        assert!(
+            albedo_warmth > 0.85,
+            "the tarmac is over-corrected into a blue road: {albedo_warmth:.3}"
+        );
         // A hue rotation, not an exposure change: the grade's black point is
-        // spending its whole budget on the frame's floor, and a brighter road
-        // would take that back. Held within 2% of the value this replaced.
+        // spending its whole budget on the frame's floor, a brighter road would
+        // take that back, and [`TARMAC_ROUGHNESS`]'s specular budget is sized
+        // against this luminance. Held within 2% of the value this replaced.
         assert!(
             (luminance(TARMAC) - 0.0886).abs() < 0.002,
             "the tarmac changed brightness, not just hue: {:?}",
@@ -674,7 +1276,7 @@ mod tests {
         let glowing: [(&str, [f32; 3], [f32; 3]); 7] = [
             ("post", [0.34, 0.26, 0.06], [1.0, 0.66, 0.10]),
             ("lamp", [0.30, 0.28, 0.24], [1.0, 0.86, 0.52]),
-            ("brake light", [0.20, 0.02, 0.01], [1.0, 0.18, 0.10]),
+            ("brake light", [0.20, 0.02, 0.01], [1.0, 0.040, 0.008]),
             ("boost flame", [0.10, 0.16, 0.22], [0.70, 0.95, 1.0]),
             ("traffic light", [0.16, 0.02, 0.01], [1.0, 0.14, 0.06]),
             ("spark", [0.24, 0.18, 0.06], [1.0, 0.78, 0.28]),
@@ -724,7 +1326,7 @@ mod tests {
         // the lamp is darker than the body it sits in, exactly like the real part.
         let car_body = [0.86, 0.16, 0.07];
         let brake_albedo = [0.20, 0.02, 0.01];
-        let brake_emissive = [1.0, 0.18, 0.10];
+        let brake_emissive = [1.0, 0.040, 0.008];
         assert!(
             brake_albedo[0] < car_body[0],
             "the tail lens should be darker than the paint when it is switched off"
@@ -746,6 +1348,27 @@ mod tests {
         assert!(
             brake_emissive[1] < 0.30 && brake_emissive[2] < 0.30,
             "the tail lamp has washed out to white: {brake_emissive:?}"
+        );
+        // **And it is a lens, measured against the reference's own.** The bound
+        // above is a ceiling on *washing out to white*, and at `0.30` it is far
+        // too loose to see the defect that actually shipped: `[1.0, 0.18, 0.10]`
+        // passed it comfortably and still displayed as coral. Nothing scales an
+        // emissive, so the authored triple is the displayed colour and the two
+        // are directly comparable — the champion's lens measured a saturation of
+        // 0.67 against the reference's 0.91. A tail lens is a narrow-band filter;
+        // near-monochromatic red is what one looks like, and this is the floor
+        // that keeps the leak either side of the red channel closed.
+        let saturation = |c: [f32; 3]| {
+            let hi = c[0].max(c[1]).max(c[2]);
+            let lo = c[0].min(c[1]).min(c[2]);
+            (hi - lo) / hi
+        };
+        assert!(
+            saturation(brake_emissive) > 0.88,
+            "the tail lamp emits at {:.2} saturation against the reference's 0.91 \
+             — a lens that leaks this much off-hue reads as coral plastic, not as \
+             a lamp: {brake_emissive:?}",
+            saturation(brake_emissive)
         );
 
         // Traffic lamps sit on bodies of four different hues; the emitted red has
@@ -799,7 +1422,7 @@ mod tests {
         let peak = |roughness: f32| (1.0 - roughness) * key;
 
         // The road. Its own diffuse under this key is about
-        // `TARMAC_g * key * N·L ≈ 0.088 * 2.6 * 0.35 ≈ 0.08`; a specular peak
+        // `TARMAC_g * key * N·L ≈ 0.088 * 5.9 * 0.40 ≈ 0.21`; a specular peak
         // that runs away from that is the blown streak, not a damp sheen.
         let tarmac = peak(TARMAC_ROUGHNESS);
         assert!(
@@ -844,18 +1467,22 @@ mod tests {
         }
     }
 
-    /// The tarmac carries the aggregate grain, and **nothing else does**.
+    /// **The two ground planes carry a surface; the paint and the rail do not.**
     ///
-    /// Both halves matter. Without a texture the largest surface in the frame is
-    /// a flat fill that renders identically at eight metres and at sixty. With
-    /// the texture on the *paint*, the lane markings — the app's whole speed cue,
-    /// and the brightest thing on the road — would come out mottled instead of
-    /// solid white. `material_textures` is the same resolution the backends read,
-    /// so this asserts what actually reaches the GPU rather than what was
+    /// Every half matters. Without a texture the tarmac — the largest surface in
+    /// the frame — is a flat fill that renders identically at eight metres and at
+    /// sixty, and the verge, the second largest, was measurably worse than that:
+    /// exactly one RGB triple across thousands of pixels of the champion frame.
+    /// With a texture on the *paint*, the lane markings — the app's whole speed
+    /// cue, and the brightest thing on the road — would come out mottled instead
+    /// of solid white, and the rail is a metre-tall strip seen edge-on that has
+    /// nothing to gain. `material_textures` is the same resolution the backends
+    /// read, so this asserts what actually reaches the GPU rather than what was
     /// authored.
     #[test]
-    fn only_the_tarmac_carries_the_asphalt_grain() {
+    fn the_ground_planes_carry_a_surface_and_the_paint_and_rail_do_not() {
         use super::super::asphalt_texture::RES;
+        use super::super::verge_texture::RES as VERGE;
 
         let mut app = app();
         let m = road_materials(&mut app);
@@ -867,22 +1494,24 @@ mod tests {
                 .expect("every road material resolves a texture entry")
         };
 
-        let tarmac = of(m.surface);
-        let (w, h, pixels) = (tarmac.width(), tarmac.height(), tarmac.pixels().to_vec());
-        assert_eq!((w, h), (RES, RES), "the tarmac samples the authored grain");
-        assert_eq!(pixels.len(), (RES * RES * 4) as usize);
-        assert!(
-            pixels.chunks(4).map(|t| t[0]).collect::<Vec<_>>().windows(2).any(|p| p[0] != p[1]),
-            "a grain that is one flat value is not a texture"
-        );
+        for (name, handle, res) in [("tarmac", m.surface, RES), ("verge", m.verge, VERGE)] {
+            let entry = of(handle);
+            let (w, h, pixels) = (entry.width(), entry.height(), entry.pixels().to_vec());
+            assert_eq!((w, h), (res, res), "the {name} samples its authored texture");
+            assert_eq!(pixels.len(), (res * res * 4) as usize);
+            assert!(
+                pixels.chunks(4).map(|t| t[0]).collect::<Vec<_>>().windows(2).any(|p| p[0] != p[1]),
+                "a {name} texture that is one flat value is not a texture"
+            );
+        }
 
         // The 1x1 opaque-white fallback: an untextured material, unchanged.
-        for other in [m.paint, m.rail, m.verge] {
+        for other in [m.paint, m.rail] {
             let entry = of(other);
             assert_eq!(
                 (entry.width(), entry.height(), entry.pixels()),
                 (1, 1, [255, 255, 255, 255].as_slice()),
-                "only the tarmac is textured"
+                "only the ground planes are textured"
             );
         }
     }

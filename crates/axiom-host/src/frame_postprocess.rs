@@ -121,6 +121,72 @@ impl FramePostProcess {
         FramePostProcess::new(1.02, [0.98, 1.0, 1.06], 1.10, 1.18, 0.0)
     }
 
+    /// The **sunlit** preset: [`FramePostProcess::cinematic`]'s sibling for a frame whose
+    /// light source is *in shot*, where `cinematic`'s two signature moves are backwards.
+    ///
+    /// `cinematic` is authored for a raster that arrives warm-brown and flat: it eases red
+    /// down, lifts blue, and pushes saturation to `1.18` to put colour back. Both moves are
+    /// corrections, and a raster that does **not** arrive warm-brown gets the correction
+    /// anyway. A midday exterior is exactly that raster. Its sky and its haze are already
+    /// the most saturated things in frame — a blue-green primary and a pale scatter — so the
+    /// cool white balance takes red out of a frame that has almost none to spare, and the
+    /// saturation lift then multiplies each channel's *distance from luma*, driving the
+    /// deficient red further down while pushing the already-dominant blue up. The two
+    /// compound: the frame ends up red-starved and over-saturated at once, which reads as
+    /// a cold, electric cast rather than as sunlight.
+    ///
+    /// So this preset inverts both and leaves the rest alone:
+    ///
+    /// * **White balance `[1.04, 1.00, 1.05]`** — warm, not cool, but only just. Sunlight *is*
+    ///   warm; the sky is blue precisely because the air took that red out of the beam, so the
+    ///   red belongs in the light and the blue stays in the sky. Blue keeps a slight lift
+    ///   because the shade on a clear day genuinely is sky-lit.
+    ///
+    ///   This eases red from `1.15`, and the reason is a **double count**, not a change of
+    ///   mind about the direction. The clause above — "the red belongs in the light" — is the
+    ///   preset's own argument for why the *key* should carry the warmth, and it was written
+    ///   when the one frame on this preset still ran a near-white key of `(1.0, 0.955, 0.88)`.
+    ///   That key has since been re-gelled, off a measured sunlit-minus-shaded inversion of
+    ///   the reference road, to a golden `(1.0, 0.58, 0.27)`. The light now carries the warmth
+    ///   the preset said it should — and this grade went on multiplying another 15% of red on
+    ///   top of it. Two warm terms stacked, and only one of them was ever measured.
+    ///
+    ///   The stack is visible as clipping, which is the tell that separates a grade defect
+    ///   from a lighting one. Sampling the frame's largest surface: the near road reads
+    ///   `(255, 150, 80)` — red pinned at the ceiling while green sits at `150`. Its raw
+    ///   raster value inverts to `195`, comfortably unclipped; the `1.08 x 1.15 = 1.242` red
+    ///   gain is what drove it over. Across the road plane the graded ratio is `R/G = 1.50`,
+    ///   against a reference road that measures a flat neutral `(88, 88, 88)`, `R/G = 1.00`.
+    ///   At `1.04` the same pixels land `(229, 150, 85)` and `R/G = 1.36` — the near road
+    ///   un-clips and recovers real surface detail, and a third of the excess warmth goes.
+    ///
+    ///   **Only red moves.** Blue stays at `1.05` rather than being lifted to meet it, because
+    ///   the headroom is not there: [`FramePostProcess::sunlit`]'s one caller authors a sky
+    ///   dome whose blue already grades to `0.967` pre-clamp, and the `1.10` that would have
+    ///   balanced this correction from the other side takes it to `1.016` — clipping the dome
+    ///   to a constant and flattening the very gradient the `1.08` exposure is held down to
+    ///   protect. A correction that costs the sky its gradient is not a correction.
+    ///
+    ///   Green is the anchor and does not move either, which makes this **exposure-neutral by
+    ///   construction** — the whole point, because the frame's level is the key's decision and
+    ///   not this stage's. Rec. 709 luma on a neutral costs `0.2126 x -0.11 = -0.023`, i.e. a
+    ///   mid-grey of `128` renders at `125`. Three levels is not a re-exposure. And the preset
+    ///   stays a *warm* one — red still leads green, which is the invariant that keeps it
+    ///   distinct from `cinematic` rather than collapsing into it.
+    /// * **Saturation `1.02`** — essentially the identity. A daylight exterior's colour comes
+    ///   from its albedo and its atmosphere, both authored; a global push away from luma only
+    ///   exaggerates whichever channel already won.
+    /// * **Exposure `1.08`** — a modest lift, held down deliberately. An exterior's sky sits
+    ///   near the top of the range already, and the display target is 8-bit: a bigger lift
+    ///   clips the dome's blue and flattens the gradient into a constant, which costs more
+    ///   than the stop is worth.
+    /// * **Contrast `1.10` and black point `0.0`** are `cinematic`'s, unchanged. Neither was
+    ///   ever the defect — a sunlit frame's tonal range comes from its cast shadows, and
+    ///   there is no lifted floor under a bright sky to subtract away.
+    pub const fn sunlit() -> Self {
+        FramePostProcess::new(1.08, [1.04, 1.0, 1.05], 1.10, 1.02, 0.0)
+    }
+
     /// The **low-key** preset: a pure black-point lift-removal, everything else neutral.
     ///
     /// A night raster's problem is never its highlights — a moon, a headlamp and a lane
@@ -233,6 +299,39 @@ mod tests {
         assert_eq!(c, FramePostProcess::cinematic());
         assert_ne!(c, n);
         assert!(format!("{c:?}").contains("FramePostProcess"));
+    }
+
+    /// The **sunlit** preset is `cinematic`'s inverse on the two knobs that decide
+    /// whether a daylight raster reads as sunlight or as a cold electric cast, and the
+    /// same as it on the two that were never the defect. Asserted as a *relationship*
+    /// rather than as four literals, because that relationship is the whole reason the
+    /// preset exists: the day either preset is re-tuned into agreeing with the other on
+    /// warmth or on saturation, one of them is redundant and this fires.
+    #[test]
+    fn sunlit_warms_and_de_saturates_where_cinematic_cools_and_enriches() {
+        let (s, c) = (FramePostProcess::sunlit(), FramePostProcess::cinematic());
+        assert_eq!(s.exposure, 1.08);
+        assert_eq!(s.white_balance, [1.04, 1.0, 1.05]);
+        assert_eq!(s.contrast, 1.10);
+        assert_eq!(s.saturation, 1.02);
+
+        // Warm, where cinematic is cool: red gains on green, and it is cinematic's red
+        // that loses. A sunlit frame's warmth cannot come from exposure — that scales
+        // every channel — so it has to live in this ratio or nowhere.
+        assert!(s.white_balance[0] > s.white_balance[1], "sunlit is warm");
+        assert!(c.white_balance[0] < c.white_balance[1], "cinematic is cool");
+
+        // Near-identity saturation, where cinematic pushes hard. A push away from luma
+        // exaggerates whichever channel already dominates, which is the wrong operation
+        // on a frame whose sky is already the most saturated thing in it.
+        assert!((s.saturation - 1.0).abs() < 0.1, "sunlit trusts the authored albedo");
+        assert!(c.saturation > s.saturation, "cinematic enriches, sunlit does not");
+
+        // ...and the two knobs that were never the defect are shared exactly, so a frame
+        // can move between the presets without its tonal range or its floor moving.
+        assert_eq!(s.contrast, c.contrast);
+        assert_eq!(s.black_point, c.black_point);
+        assert_ne!(s, c);
     }
 
     #[test]

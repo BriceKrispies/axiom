@@ -186,7 +186,7 @@ impl ChaseCamera {
         let target = car
             .position
             .add(car.heading_of_travel().mul_scalar(look_ahead))
-            .add(Vec3::new(0.0, TARGET_HEIGHT, 0.0));
+            .add(Vec3::new(0.0, tuning.target_height, 0.0));
 
         CameraPose {
             eye,
@@ -356,23 +356,6 @@ impl Default for ChaseCamera {
         ChaseCamera::new()
     }
 }
-
-/// Height above the car the look target sits at (m) — aiming a little above the
-/// bonnet rather than at the road keeps the horizon in frame.
-///
-/// Crate-visible because it is the **pivot the whole rig pitches about**: the
-/// eye is above it and the target is on it, so the angle the view sits below
-/// horizontal is `atan((height - TARGET_HEIGHT) / reach)` — which is what slides
-/// the horizon up and down the frame.
-///
-/// It is deliberately *not* what
-/// [`crate::tuning::CameraTuning::framed_for_aspect`] solves the eye height
-/// against. The target sits well beyond the car, so holding this angle across a
-/// stretched arm holds the horizon while letting `height / distance` — the angle
-/// the rig looks down at the car itself — fall away, which flattens the shot onto
-/// the road plane. Pinning the horizon is worth about 2% of frame height; the
-/// depression is the whole read of the ground.
-pub(crate) const TARGET_HEIGHT: f32 = 0.9;
 
 /// Radians of camera lead per unit of steering input.
 const STEER_LEAD: f32 = 0.14;

@@ -88,7 +88,11 @@ impl PropKind {
             PropKind::Sign => 24,
             PropKind::TunnelLight => 220,
             PropKind::Building => 60,
-            PropKind::PalmTrunk | PropKind::PalmCrown => 200,
+            // Two ranks on two shoulders at [`PALM_SPACING`] across the whole
+            // active window, with headroom. A pool that runs out does not fail
+            // loudly — it silently stops drawing palms partway down the road,
+            // which is the one thing an avenue must never do.
+            PropKind::PalmTrunk | PropKind::PalmCrown => 380,
             // The densest kind on the course, because ground cover is the one
             // thing that only works in quantity. Sized to the whole active
             // window at [`SHRUB_SPACING`] on both shoulders, with headroom.
@@ -106,9 +110,11 @@ impl PropKind {
             PropKind::Sign => Vec3::new(1.8, 1.6, 0.2),
             PropKind::TunnelLight => Vec3::new(0.7, 0.2, 0.25),
             PropKind::Building => Vec3::new(9.0, 5.0, 9.0),
-            // A palm is mostly stem: 11 m of it, 0.44 m thick, so the crown
-            // clears the car's roofline and the road is seen *through* the
-            // avenue rather than behind a hedge.
+            // The *unit* palm: mostly stem, 11.2 m of it, 0.44 m thick, so the
+            // crown clears the car's roofline and the road is seen *through*
+            // the avenue rather than behind a hedge. What is actually planted
+            // is this box times a rank's size draw — see [`PALM_RANKS`], where
+            // the avenue's real height is set.
             PropKind::PalmTrunk => Vec3::new(0.22, 5.6, 0.22),
             PropKind::PalmCrown => Vec3::new(3.0, 1.7, 3.0),
             // Knee-to-waist high and wider than it is tall — a plant, not a
@@ -248,7 +254,8 @@ fn tunnel_lights(track: &Track, from: f32, to: f32, out: &mut Vec<PropInstance>)
 /// Spacing of tunnel ceiling lights (m).
 const TUNNEL_LIGHT_SPACING: f32 = 11.0;
 
-/// The palm avenue: a colonnade down both shoulders of every coastal section.
+/// The coastal grove: **two** ranks of palms down both shoulders of every
+/// coastal section.
 ///
 /// This is placed **by distance**, like the reflector posts and unlike the
 /// random zone scatter, and that is the whole point. A coast road is not a
@@ -256,9 +263,24 @@ const TUNNEL_LIGHT_SPACING: f32 = 11.0;
 /// regular repetition marching to the vanishing point. Scattering the same
 /// number of palms at random would cost the same and read as a swamp.
 ///
+/// But a *single* file of stems at the barrier line is not a coast either — it
+/// is a colonnade, and a colonnade has no depth. Every palm sits at the same
+/// distance from the road, so they all subtend the same angle, all cross the
+/// horizon at the same height, and the eye reads one thin picket fence of
+/// aerials with empty ground behind it. What makes a coast road look planted is
+/// that the trees stand at *several* depths: a near rank you drive past and a
+/// further rank showing through the gaps between them, so the verge has a back
+/// wall instead of a sky-coloured hole.
+///
+/// So the grove is authored as [`PALM_RANKS`] — a near avenue and a back rank
+/// half a spacing out of step with it, set well back and drawn from a larger
+/// size range so it reads *over* the avenue rather than hiding inside it. The
+/// half-spacing phase is what stops the two ranks pairing up into one thick
+/// row: along the road the palms now beat past at half the old interval.
+///
 /// Each palm is emitted as two instances — a stem and a crown seated on its top
 /// — so a palm's two materials are two pools and therefore still two draw calls
-/// for the whole avenue.
+/// for the whole grove, however many ranks it is planted in.
 fn coastal_palms(
     seed: u64,
     track: &Track,
@@ -271,58 +293,160 @@ fn coastal_palms(
     let first = (from / PALM_SPACING).ceil();
     let count = ((to - from) / PALM_SPACING).ceil().max(0.0) as usize;
     for i in 0..count {
-        let distance = (first + i as f32) * PALM_SPACING;
-        if distance > to {
+        let slot = (first + i as f32) * PALM_SPACING;
+        if slot > to {
             break;
         }
-        let sample = track.interpolated_at(distance);
-        if sample.section.zone() != Zone::Coast {
-            continue;
-        }
-        for side in [-1.0f32, 1.0] {
-            // Drawn unconditionally, before the side is known to be used, so the
-            // stream advances the same way for both shoulders.
-            let size = draw.range(0.80, 1.24);
-            let depth = PALM_INSET + draw.range(0.0, PALM_DEPTH_JITTER);
-            let spin = draw.range(0.0, std::f32::consts::TAU);
-            let scale = Vec3::ONE.mul_scalar(size);
-            let base = sample
-                .at_lateral(side * (track.barrier_offset(&sample) + depth))
-                .add(Vec3::new(0.0, -PROP_SINK, 0.0));
-            let trunk_top = base.y + PropKind::PalmTrunk.half_extents().y * 2.0 * size;
-            let crown_height = PropKind::PalmCrown.half_extents().y * 2.0 * size;
-            out.push(PropInstance {
-                kind: PropKind::PalmTrunk,
-                position: base,
-                yaw: sample.heading,
-                scale,
-            });
-            out.push(PropInstance {
-                kind: PropKind::PalmCrown,
-                // Seated so the fronds *leave the stem at its top*: the crown
-                // box's root height is where the blades meet, and it is the same
-                // constant the mesh is authored around.
-                position: Vec3::new(
-                    base.x,
-                    trunk_top - crown_height * CROWN_ROOT_HEIGHT,
-                    base.z,
-                ),
-                yaw: spin,
-                scale,
-            });
+        // Each rank owns the same slot index, so a rank's palms belong to
+        // exactly one chunk however far past the chunk's own end its phase
+        // carries them — no seam duplicates, no seam gaps.
+        for rank in PALM_RANKS {
+            let sample = track.interpolated_at(slot + rank.phase * PALM_SPACING);
+            if sample.section.zone() != Zone::Coast {
+                continue;
+            }
+            for side in [-1.0f32, 1.0] {
+                // Drawn unconditionally, before the side is known to be used, so
+                // the stream advances the same way for both shoulders.
+                let size = draw.range(rank.smallest, rank.largest);
+                let depth = rank.inset + draw.range(0.0, rank.spread);
+                let spin = draw.range(0.0, std::f32::consts::TAU);
+                let scale = Vec3::ONE.mul_scalar(size);
+                let base = sample
+                    .at_lateral(side * (track.barrier_offset(&sample) + depth))
+                    .add(Vec3::new(0.0, -PROP_SINK, 0.0));
+                let trunk_top = base.y + PropKind::PalmTrunk.half_extents().y * 2.0 * size;
+                let crown_height = PropKind::PalmCrown.half_extents().y * 2.0 * size;
+                out.push(PropInstance {
+                    kind: PropKind::PalmTrunk,
+                    position: base,
+                    yaw: sample.heading,
+                    scale,
+                });
+                out.push(PropInstance {
+                    kind: PropKind::PalmCrown,
+                    // Seated so the fronds *leave the stem at its top*: the crown
+                    // box's root height is where the blades meet, and it is the same
+                    // constant the mesh is authored around.
+                    position: Vec3::new(
+                        base.x,
+                        trunk_top - crown_height * CROWN_ROOT_HEIGHT,
+                        base.z,
+                    ),
+                    yaw: spin,
+                    scale,
+                });
+            }
         }
     }
 }
 
+/// One rank of the coastal grove — a row of palms at its own depth, its own
+/// phase along the road and its own size range.
+struct PalmRank {
+    /// Where this rank stands along the road relative to the slot, as a
+    /// fraction of [`PALM_SPACING`]. Two ranks at different phases interleave
+    /// instead of standing in pairs, which is what halves the visible interval.
+    phase: f32,
+    /// How far beyond the barrier this rank's nearest palm stands (m).
+    inset: f32,
+    /// How much further out a palm in this rank may be set (m), so the rank is
+    /// a rank and not a ruler.
+    spread: f32,
+    /// The smallest and largest a palm in this rank may be drawn.
+    smallest: f32,
+    largest: f32,
+}
+
+/// The two ranks the coast is planted in: the avenue at the barrier line, and
+/// the back rank showing through the gaps in it.
+///
+/// ## The sizes are a **framing** decision, and they are forced by arithmetic
+///
+/// A roadside tree's job in this shot is not to be scenery, it is to be the
+/// **proscenium**: the pair of verticals at the frame edges that turn an open
+/// plain into a corridor. Whether it can do that job is not a matter of taste —
+/// it is a single ratio, and the ratio is decided here.
+///
+/// A palm of height `H` standing `x` metres off the centreline, seen by an eye
+/// at height `h`, reaches its greatest height in frame at the moment it crosses
+/// the frame edge, and there it stands exactly
+///
+/// ```text
+///     y_above_horizon = 0.5 · (H − h) · aspect / x     (fractions of frame)
+/// ```
+///
+/// above the horizon — **at every field of view**, because both the palm's
+/// height and its lateral offset are magnified by the same lens. No camera
+/// change can lift it: only the height-to-offset ratio can.
+///
+/// Measured on the judged arm against the era-C reference, on a 0.562 phone
+/// frame with the horizon at 0.47:
+///
+/// | | reference | champion (0.80…1.52) |
+/// |---|---|---|
+/// | topmost roadside foliage | **0.17** of frame | **0.35** of frame |
+/// | foliage as a share of the frame | 4.45% | 0.73% |
+/// | implied `(H − h) / x` | ~1.4 | 0.43 |
+///
+/// The champion was not missing palms and was not framed wrong — the horizon,
+/// the car's width and the car's contact point are all already at parity. It
+/// was planting **young** palms: a 9–14 m stem standing 20 m off the road can
+/// only ever reach 0.12 of frame above the horizon, which is precisely the 0.35
+/// that was measured. Every pixel above that was sky, so the top third of the
+/// picture carried nothing at all.
+///
+/// The offset is not free to change — a prop must stand outside
+/// [`crate::track::Track::barrier_offset`], and on this road that is 17.8 m of
+/// tarmac, shoulder and verge before a palm may be planted. So the avenue is
+/// grown into the mature coastal palm the reference is plainly drawing: stems of
+/// 16–21 m in the avenue and 18–25 m behind it, which are ordinary heights for
+/// a coconut or royal palm and take the crowns to ~0.27 of frame — about half
+/// the gap closed, honestly, without a tree that could not exist.
+///
+/// The crowns still clear the road: a crown's fan is 3.0 m of unit half-extent,
+/// so even at 1.90 it reaches 5.7 m from its stem and stops ~2 m short of the
+/// tarmac edge, eighteen metres up. The avenue is still seen *through*.
+const PALM_RANKS: [PalmRank; 2] = [
+    // The avenue. Close enough to the barrier to sweep past the camera, and the
+    // rank that carries the corridor's beat.
+    PalmRank {
+        phase: 0.0,
+        inset: PALM_INSET,
+        spread: PALM_DEPTH_JITTER,
+        smallest: 1.45,
+        largest: 1.90,
+    },
+    // The back rank, half a spacing out of step. Set far enough back that it is
+    // plainly *behind* the avenue rather than beside it, jittered across a much
+    // deeper band so it never lines up, and drawn from a taller size range so
+    // its crowns clear the near rank's instead of vanishing under them. Standing
+    // 13–27 m further out, it needs the extra height twice over: to clear the
+    // avenue, and to hold the same ratio at its own larger offset.
+    PalmRank {
+        phase: 0.5,
+        inset: PALM_BACK_INSET,
+        spread: PALM_BACK_BAND,
+        smallest: 1.62,
+        largest: 2.25,
+    },
+];
+
 /// Salt separating the palm stream from the rest of the scenery.
 const PALM_SALT: u64 = 0x7A19_C4E0_2B85_D33F;
-/// Along-course spacing of a palm pair (m). Wide enough that the avenue is seen
-/// through rather than along a wall, tight enough to beat past at racing speed.
+/// Along-course spacing of a rank's palm pair (m). Wide enough that the avenue
+/// is seen through rather than along a wall; with two ranks half a spacing out
+/// of step, a palm beats past every twelve metres.
 const PALM_SPACING: f32 = 24.0;
 /// How far beyond the barrier the nearest palm stands (m).
 const PALM_INSET: f32 = 2.6;
 /// How much further out a palm may be set, so the row is a row and not a ruler.
 const PALM_DEPTH_JITTER: f32 = 3.4;
+/// How far beyond the barrier the back rank starts (m). Past the undergrowth
+/// band, so the grove reads as three receding layers — plants, avenue, grove.
+const PALM_BACK_INSET: f32 = 13.0;
+/// How deep the back rank's band runs beyond its inset (m).
+const PALM_BACK_BAND: f32 = 14.0;
 
 /// The undergrowth band: ground cover crowding the verge through every green
 /// zone, from the barrier line out into the middle distance.
@@ -711,6 +835,129 @@ mod tests {
             sides.0 > 0 && sides.1 > 0 && sides.0.abs_diff(sides.1) < stems / 4,
             "both shoulders are planted: {sides:?}"
         );
+    }
+
+    /// The grove has *depth*. This is the property a single-file avenue cannot
+    /// have and the reason the second rank exists: palms stand at plainly
+    /// different distances from the road, so the verge has a back wall showing
+    /// through the gaps in the near row rather than open sky behind it.
+    #[test]
+    fn the_coastal_grove_stands_in_two_distinct_ranks() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        let mut out = Vec::new();
+        let mut near = 0usize;
+        let mut back = 0usize;
+        let mut alongs: Vec<f32> = Vec::new();
+        for index in 0..60 {
+            props_for_chunk(crate::DEFAULT_SEED, &track, index, &t, &mut out);
+            let origin = chunk_reference(&track, index).distance;
+            for stem in out.iter().filter(|p| p.kind == PropKind::PalmTrunk) {
+                let (distance, lateral) = track.localise(stem.position, origin, 240.0);
+                let beyond = lateral.abs() - track.barrier_offset(&track.sample_at(distance));
+                // The two bands do not overlap: the avenue ends well inside
+                // where the back rank begins.
+                let in_near = beyond < PALM_INSET + PALM_DEPTH_JITTER + 0.01;
+                near += usize::from(in_near);
+                back += usize::from(beyond >= PALM_BACK_INSET - 0.01);
+                assert!(
+                    in_near || beyond >= PALM_BACK_INSET - 0.01,
+                    "a palm at {beyond} m sits between the ranks"
+                );
+                alongs.push(distance);
+            }
+        }
+        assert!(near > 100, "the avenue is still planted: {near} palms");
+        assert!(back > 100, "and a back rank stands behind it: {back} palms");
+        assert!(
+            near.abs_diff(back) < near / 3,
+            "neither rank dominates: {near} near, {back} back"
+        );
+        // Out of step, not paired: consecutive palms along the road are about
+        // half a spacing apart, which is the interval the driver actually sees.
+        alongs.sort_by(f32::total_cmp);
+        let mut steps: Vec<f32> = alongs
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .filter(|d| *d > 0.5)
+            .collect();
+        // The *median* step, not the mean: the course leaves the coast and comes
+        // back, and one inland stretch is a single enormous gap that would drag
+        // an average anywhere. The middle step is what the driver sees.
+        steps.sort_by(f32::total_cmp);
+        let typical = steps[steps.len() / 2];
+        assert!(
+            typical < PALM_SPACING * 0.75,
+            "the ranks interleave: palms every {typical} m, spacing {PALM_SPACING}"
+        );
+    }
+
+    /// **The avenue is tall enough to frame the shot.** The composition claim
+    /// [`PALM_RANKS`] is authored against, pinned as arithmetic rather than left
+    /// in prose: a palm crossing the frame edge stands
+    /// `0.5 · (H − h) · aspect / x` of frame above the horizon, so the avenue is
+    /// a proscenium only if its height-to-offset ratio is large enough. At the
+    /// 9–14 m stems this replaced the ratio was 0.43 and the crowns could not
+    /// reach past 0.12 of frame above the horizon — the top third of a phone
+    /// frame was sky by construction.
+    #[test]
+    fn the_palm_avenue_stands_tall_enough_against_its_own_stand_off() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        let eye = crate::tuning::CameraTuning::DEFAULT
+            .framed_for_aspect(470.0 / 836.0)
+            .height;
+        let mut out = Vec::new();
+        let mut ratios: Vec<f32> = Vec::new();
+        let mut shortest = f32::MAX;
+        for index in 0..60 {
+            props_for_chunk(crate::DEFAULT_SEED, &track, index, &t, &mut out);
+            let origin = chunk_reference(&track, index).distance;
+            for stem in out.iter().filter(|p| p.kind == PropKind::PalmTrunk) {
+                let (_, lateral) = track.localise(stem.position, origin, 240.0);
+                let height = PropKind::PalmTrunk.half_extents().y * 2.0 * stem.scale.y;
+                shortest = shortest.min(height);
+                ratios.push((height - eye) / lateral.abs().max(1.0));
+            }
+        }
+        assert!(ratios.len() > 100, "the coast was reached: {}", ratios.len());
+        assert!(
+            shortest >= 15.0,
+            "the shortest planted palm is {shortest} m — a sapling, not an avenue"
+        );
+        ratios.sort_by(f32::total_cmp);
+        let typical = ratios[ratios.len() / 2];
+        assert!(
+            typical > 0.60,
+            "the avenue's height-to-offset ratio is {typical}; below 0.6 its crowns \
+             cannot break the skyline and the frame's upper half is sky"
+        );
+    }
+
+    /// And it is still an avenue you see *through*, not a hedge: however tall a
+    /// palm is drawn, its crown must stop short of the tarmac it stands beside.
+    #[test]
+    fn no_crown_however_large_reaches_over_the_road() {
+        let track = track();
+        let t = CourseTuning::DEFAULT;
+        let mut out = Vec::new();
+        let mut checked = 0usize;
+        for index in 0..60 {
+            props_for_chunk(crate::DEFAULT_SEED, &track, index, &t, &mut out);
+            let origin = chunk_reference(&track, index).distance;
+            for crown in out.iter().filter(|p| p.kind == PropKind::PalmCrown) {
+                let (distance, lateral) = track.localise(crown.position, origin, 240.0);
+                let sample = track.sample_at(distance);
+                let reach = lateral.abs() - PropKind::PalmCrown.half_extents().x * crown.scale.x;
+                assert!(
+                    reach > sample.half_width + track.shoulder(),
+                    "a crown reaches to {reach} m over a {} m carriageway",
+                    sample.half_width + track.shoulder()
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 100, "the coast was reached: {checked}");
     }
 
     /// The verge is *covered*, not decorated. This is the count test: ground

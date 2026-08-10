@@ -17,12 +17,14 @@ pub mod asphalt_texture;
 pub mod car_model;
 pub mod chunks;
 pub mod effects;
+pub mod foliage_texture;
 pub mod palette;
 pub mod prop_meshes;
 pub mod road_mesh;
 pub mod scenery;
 pub mod scenery_pool;
 pub mod surface_builder;
+pub mod verge_texture;
 
 use axiom::prelude::{
     Angle, Camera, Color, DirectionalLight, Entity, FrameAmbient, FrameBloom, FrameDepthFog,
@@ -135,31 +137,56 @@ impl RaceScene {
         // verticals drop ~29% and regain a terminator against the sunlit
         // horizontals; the sky/ground span goes 1.15:1 -> 1.6:1, which is form.
         //
-        // **The sky term is deliberately untouched.** It is the reference's own
-        // measured shadowed-road level (0.302 incident — see [`KEY_INTENSITY`]'s
-        // table), and it alone lights the road, the calibration surface every
-        // exposure number in this file is derived against. An up-facing pixel is
-        // bit-for-bit what it was; this change cannot move the frame's exposure.
+        // **The level, re-solved against the rendered champion rather than
+        // against the reference alone.** The previous pass held the sky term at
+        // mean `0.267` on the argument that it *is* the reference's measured
+        // shadowed-road level (`0.302` incident — see [`KEY_INTENSITY`]'s table)
+        // and therefore needed nothing. That argument checks the input and never
+        // checked the output, and the output falsifies it. Measured on the two
+        // frames over the same near-field road patch (left of the car, the band
+        // the reference fills with palm shadow):
         //
-        // Level: the sky term (mean 0.267) is ~21% of what the key lays on flat
-        // road (1.242), so it fills without becoming a second key — see the
-        // ceiling `the_sun_out_lights_every_other_term_in_the_frame` pins.
-        app.set_ambient(FrameAmbient::new(
-            [0.19, 0.25, 0.36],
-            [0.078, 0.068, 0.049],
-        ));
-        // The air. Everything recedes into the sky colour rather than staying
-        // fully lit out to the far plane, which is what gives the road, the trees and
-        // the skyline their depth instead of a hard cut-out horizon. On a daylight
-        // stage this is the *dominant* atmospheric cue rather than a finishing
-        // touch: the reference's road, palms and headland all wash toward the pale
-        // haze at the vanishing point long before they reach it.
+        // | road, near field        | reference | champion |
+        // |-------------------------|-----------|----------|
+        // | sunlit (p50, right lane)| byte 114  | byte 128 |
+        // | deepest shadow (p5)     | byte  33  | byte  65 |
+        // | sun : shadow, linear    | ~12 : 1   | ~4 : 1   |
         //
-        // The range is normalized device depth, which is strongly non-linear over a
-        // `NEAR_PLANE`..`FAR_PLANE` frustum: 0.990 is ~110 m out (the fog just starts
-        // to bite past the near traffic) and 0.9993 is ~900 m (the skyline is almost
-        // fully atmosphere). Reaching 0.9 rather than 1.0 keeps a faint silhouette at
-        // the vanishing point instead of erasing it.
+        // The sunlit road is within 13% — the exposure this file spends most of
+        // its length deriving is *right*. The shadow is 3.6x too bright in linear,
+        // and that single error is the frame's flatness: the champion's road never
+        // goes dark anywhere. Across the mid-field band it runs p5 116 / p50 119 /
+        // p95 124 — **eight levels of tonal range on the largest surface in shot**,
+        // where the reference's same band runs 58 / 105 / 246.
+        //
+        // Under one directional key a shadowed fragment receives the ambient and
+        // nothing else, so the ambient *is* the shadow level and the sun:shadow
+        // ratio is `(key + ambient) / ambient` — nothing else in the rig can set
+        // it. At `0.267` that ratio is `6.8:1` before the backend's shadow floor
+        // and the grade lift it further; the reference measures `~12:1` rendered.
+        // Solving for the reference's ratio through the same model puts the sky
+        // term at **`0.160`**, which is this scale: both hemisphere ends multiplied
+        // by `0.60`.
+        //
+        // **Level, not colour, and not shape.** Both terms are scaled by the same
+        // factor, so the sky stays blue by 1.9x red, the ground stays the warm
+        // bounce the last pass made it, and the sky:ground span stays `4.1:1` —
+        // every bit of hemisphere modelling that pass bought survives intact. This
+        // is one number: how much open sky there is, not what colour it is.
+        //
+        // What it costs the exposure is `0.437 -> 0.425` encoded on sunlit road
+        // (2.8%, and still inside the band
+        // `the_sun_out_lights_every_other_term_in_the_frame` pins), because the key
+        // is 90% of what a sunlit horizontal receives. What it buys is the shadowed
+        // road at model byte `32` against the reference's measured `33` — the darks
+        // arriving where the reference puts them for the first time.
+        //
+        // The floor the same test pins (`ambient > 0.15`, "not a night residual")
+        // is deliberately left where it is and deliberately not approached
+        // further: `0.160` sits just inside it, the reference's own shadowed road
+        // is a lifted blue-grey and not a hole, and the next pass to want darks
+        // should take them from the backend's shadow floor, not from here.
+        app.set_ambient(FrameAmbient::new(AMBIENT_SKY, AMBIENT_GROUND));
         // Bloom: what turns the emissive cues — reflector posts, tail lights,
         // tunnel lamps, the lane paint catching the sun — from bright patches of
         // paint into things that read as lights. Gated by the backend's `Bloom`
@@ -204,9 +231,12 @@ impl RaceScene {
         // light comes from, so the disc and the thing it lights agree. (The name
         // still says moon; the *geometry* constants belong to the light rig and
         // are left for the pass that re-aims the key, but the colour it hands the
-        // sky is now `palette::SUN`.) The horizon colour is `palette::SKY` — the
-        // exact colour the depth fog below fades into — so the road dissolves into
-        // the sky it is standing under instead of into an unrelated grey. The
+        // sky is now `palette::SUN`.) The horizon colour is `palette::SKY`, the
+        // dome's own pale end; the depth fog below fades into `palette::HAZE`
+        // instead, which is a *different* colour for the reason that constant
+        // documents — a fitted clear-sky primary is not what suspended water and
+        // dust look like, and the reference measures the two 145 red levels
+        // apart. The
         // zenith is the deeper, bluer end and the horizon the pale hazy one, which
         // is how a clear day sits: you are looking through the most air at the
         // ground line and the least of it overhead.
@@ -233,8 +263,17 @@ impl RaceScene {
         // body already are: the Canvas 2D arm drops the whole sky and reports it,
         // so the software arm gains nothing to go wrong with and this app never
         // has to ask which arm it is on.
+        // The gradient's *shape*, authored separately from its two colours. The
+        // engine's default midpoint is 30° of elevation, which is a fine default
+        // for a camera that looks at the sky and wrong for one that looks at a
+        // road: the whole visible sky here is the band from the horizon to 32°,
+        // so a 30° midpoint shows only the flat bottom of the curve and the dome
+        // arrives as a wash however far apart the two stops are authored. See
+        // [`palette::SKY_HAZE_HEIGHT`] — this is the number that made
+        // [`palette::SKY_ZENITH`] a colour again instead of a slope hack.
         app.set_sky(
             FrameSky::gradient(palette::SKY_ZENITH, palette::SKY)
+                .with_haze_height(Ratio::finite_or_zero(palette::SKY_HAZE_HEIGHT))
                 .with_body(
                     [MOON_DIRECTION.x, MOON_DIRECTION.y, MOON_DIRECTION.z],
                     axiom_kernel::Radians::finite_or_zero(MOON_ANGULAR_RADIUS),
@@ -248,12 +287,81 @@ impl RaceScene {
                 ),
         );
 
-        app.set_depth_fog(FrameDepthFog::new(
-            Ratio::finite_or_zero(0.990),
-            Ratio::finite_or_zero(0.9993),
-            Ratio::finite_or_zero(0.9),
-            palette::SKY,
-        ));
+        // The haze, at the strength the reference actually carries.
+        //
+        // Normalized device depth is hyperbolic, so a range authored in it is a
+        // ramp that is **linear in `1/z`**: with this frustum,
+        // `z = 1.20087 / (1.00073 - ndc)`. The old `0.990 .. 0.9993` is therefore
+        // `112 m .. 841 m`, and that is the whole defect — the visible road runs
+        // from under the bumper to roughly `250 m`, where perspective packs
+        // everything beyond into the last few rows above the horizon. More than
+        // half the road the camera shows was outside the fog's start entirely,
+        // and the far half only ever reached `0.4` of a maximum that was itself
+        // capped at `0.9`. Measured down the centre column, the champion's road
+        // runs `(82, 63, 54)` at the vanishing point to `(75, 60, 53)` at
+        // mid-frame: seven levels of atmosphere across the entire depth of the
+        // shot. The reference's same column ramps continuously into a pale band.
+        // A fog authored past the geometry is a fog that does not exist.
+        //
+        // So the ramp is re-sized against the road that is actually in shot:
+        // `0.9836` is `70 m` (the fog starts a few car-lengths past the near
+        // traffic, so the subject and its shadow stay untouched) and `0.9970` is
+        // `322 m` (full density at the vanishing point rather than four times
+        // past it). Half-strength lands at `~120 m` and `0.8` at `~200 m`, which
+        // is the aerial perspective the reference shows over the receding palm
+        // rank. The maximum goes `0.9` -> `0.96`: the reference's vanishing point
+        // has *become* atmosphere, and a silhouette held back at a tenth is what
+        // read as a dark smudge under a bright sky.
+        //
+        // The colour is [`palette::HAZE`], not [`palette::SKY`] — see that
+        // constant for why turning a fitted clear-sky primary up to `0.96` takes
+        // the frame's red the wrong way, and for the horizon seam it costs.
+        //
+        // **What re-sizing the window could not fix, and what the extinction rate
+        // is here for.** A window authored in normalized depth ends in a *ceiling*:
+        // at `far` the ramp clamps, and every surface beyond it — the whole
+        // distant palm rank, the buildings, the headland — is mixed toward
+        // `palette::HAZE` by exactly the same fraction whatever its range. That is
+        // measurable on the champion: sampled across the full width of the band
+        // just above the horizon, the frame reads `(141,176,178)` at the left edge
+        // and `(150,194,198)` at the right, and essentially that same value
+        // everywhere between. Nine levels of variation across the entire distance
+        // of a nine-kilometre coastline. The reference's same band runs turquoise
+        // sea, white cumulus, green headland and a warm sun-side glow — 200 levels
+        // — because real air never saturates; it keeps taking the same *fraction*
+        // per metre forever, so two things a kilometre apart are never the same
+        // colour. No `[near, far]` pair can express that, which is why the engine
+        // now carries the Beer–Lambert term (`FrameDepthFog::with_extinction`,
+        // gated by `RenderCapability::AerialPerspective` and substituted by this
+        // very window on the software arm).
+        //
+        // Sized so the near and mid field stay where the last passes measured
+        // them and only the saturated tail changes. `far` moves `0.9970 -> 0.99955`
+        // (`322 m -> 1018 m`), which stops the ramp clamping inside the shot, and
+        // `0.001 /m` extinction — a `1000 m` half-distance — supplies the grade the
+        // window no longer does. Composed as `1 - (1-screen)*(1-air)` and scaled
+        // by the same `0.96` ceiling, that is:
+        //
+        // | range  | before | after | note                                      |
+        // |--------|--------|-------|-------------------------------------------|
+        // |  20 m  | 0.000  | 0.013 | the subject and its shadow stay untouched |
+        // |  70 m  | 0.000  | 0.045 |                                           |
+        // | 150 m  | 0.654  | 0.590 | the receding palm rank, within 6%         |
+        // | 322 m  | 0.960  | 0.837 | *was* the ceiling; now still resolving    |
+        // | 800 m  | 0.960  | 0.949 | separated from 322 m for the first time   |
+        //
+        // The near field moves by at most a hundredth and the mid field by six —
+        // this is deliberately not a re-grade. What it buys is that the far band
+        // stops being one flat value.
+        app.set_depth_fog(
+            FrameDepthFog::new(
+                Ratio::finite_or_zero(0.9836),
+                Ratio::finite_or_zero(0.99955),
+                Ratio::finite_or_zero(0.96),
+                palette::HAZE,
+            )
+            .with_extinction(Ratio::finite_or_zero(0.001)),
+        );
 
         // The grade. See [`GRADE`] for why a daylight frame takes the opposite
         // one from the night frame this scene used to be.
@@ -512,20 +620,14 @@ fn install_lights(app: &mut RunningApp) -> Entity {
     app.add_light(
         DirectionalLight {
             direction: KEY_DIRECTION,
-            // **Sunlight.** The cool `(0.72, 0.80, 1.0)` this replaces was
-            // moonlight — sunlight reflected off bare rock — and a cool key is
-            // the single most night-signalling term a rig has, because the eye
-            // reads warm-key-against-cool-fill as *day* and the reverse as
-            // *night* before it reads anything else in the frame.
-            //
-            // The reference is a high coastal sun: near-white, warm only by the
-            // slight red-over-blue a short atmospheric path leaves. Pairing it
-            // with the blue sky ambient above is what produces the reference's
-            // defining split — warm sunlit tarmac against blue-grey shadow.
+            // **Sunlight** — see [`KEY_COLOR`], which is measured off the
+            // reference's own road rather than argued from a colour-temperature
+            // intuition. This is the term that decides whether the frame has a
+            // sunlit surface in it at all.
             color: Color::linear_rgb(
-                palette::ratio(1.0),
-                palette::ratio(0.955),
-                palette::ratio(0.88),
+                palette::ratio(KEY_COLOR[0]),
+                palette::ratio(KEY_COLOR[1]),
+                palette::ratio(KEY_COLOR[2]),
             ),
             // NOT `palette::ratio`, which clamps to `0..=1`. That helper is a
             // sanitizer for *colour channels*, where above-one is meaningless,
@@ -576,14 +678,51 @@ fn install_lights(app: &mut RunningApp) -> Entity {
 /// the tarmac — is *full of information* in the reference, and low-key deletes
 /// all of it while dragging the sky and the sea down by the same 41 levels.
 ///
-/// So the frame takes the daylight preset instead: exposure held near neutral so
-/// the sky reads at the level it is authored at, a slight cool white balance
-/// (the shade on a sunny day is lit by the blue sky, not by the sun), a gentle
-/// contrast that separates the midtones without clipping the shadows, and a
-/// saturation lift for the reference's vivid sea, foliage and paint. The black
-/// point goes to zero: with a bright sky and a bright sea there is no lifted
-/// floor left to remove, and removing one anyway would only mud the frame.
-const GRADE: FramePostProcess = FramePostProcess::cinematic();
+/// So the frame takes a daylight preset instead, and the black point goes to
+/// zero: with a bright sky and a bright sea there is no lifted floor left to
+/// remove, and removing one anyway would only mud the frame.
+///
+/// ## Why it is [`FramePostProcess::sunlit`] and no longer `cinematic`
+///
+/// `cinematic` was the right *family* and the wrong *sign*. It is authored to
+/// rescue a raster that arrives warm-brown and flat, so two of its four knobs are
+/// corrections: it eases red (`0.98`), lifts blue (`1.06`), and then pushes
+/// saturation to `1.18` to put colour back. This frame is not that raster, and it
+/// got the correction anyway.
+///
+/// Measured, band by band, on the champion against the reference — the sky
+/// (`y 0.02..0.24`), the atmosphere band (`0.24..0.46`) and the near road
+/// (`0.50..0.66`), each as a mean over every pixel in it:
+///
+/// | | sky | haze band | near road |
+/// |---|---|---|---|
+/// | champion red | 24 | 29 | 106 |
+/// | reference red | 43 | 93 | 151 |
+/// | champion saturation | 0.89 | 0.85 | 0.34 |
+/// | reference saturation | 0.82 | 0.62 | 0.40 |
+///
+/// **Red is short in every band and saturation is long in the two that carry the
+/// sky and the haze.** Those are not two defects; they are one, and this grade is
+/// it. The white balance takes red out of a frame that has almost none to spare,
+/// and the `1.18` saturation then scales each channel's *distance from luma* —
+/// which drives the deficient red further down and lifts the already-dominant
+/// blue further up. Compounded over the whole frame that reads as a cold,
+/// electric cast, which is the opposite of the noon the reference was shot at.
+///
+/// `sunlit` inverts exactly those two (a warm white balance and `1.02`) and keeps
+/// `cinematic`'s contrast and black point, which were never the defect. The
+/// exposure lift is deliberately small — `1.02 -> 1.08`, well under the `1.10+`
+/// the band error alone would ask for — because the constraint that binds here is
+/// not the mean, it is the **dome**: [`palette::SKY`] grades to a blue of `0.973`
+/// under this preset, and anything past `1.0` clips the sky's own colour to a
+/// constant and flattens the gradient (see that constant, and the clipping test
+/// beside it, for what that costs). Solved against the three bands under that
+/// constraint, the total per-channel error falls from 272 display levels to 186.
+///
+/// One consequence is mandatory and lands next door: [`palette::HAZE`] is *defined*
+/// as the reference's own horizon band inverted through this grade, so it is
+/// re-derived here rather than left to drift.
+const GRADE: FramePostProcess = FramePostProcess::sunlit();
 
 /// The direction the key light **travels** (world space, un-normalized).
 ///
@@ -619,9 +758,11 @@ const GRADE: FramePostProcess = FramePostProcess::cinematic();
 /// **The key is now the moon.** It is exactly `-`[`MOON_DIRECTION`], so the thing
 /// lighting the scene and the thing you can see in the sky are the same object —
 /// which is the whole point of putting a sky in the frame. The horizontal
-/// component above is preserved unchanged (that is the shadow-placement result,
-/// and it was right); only the elevation moves, and it moves *down*, because a
-/// moon you can see down the road is by definition near the horizon.
+/// component's *sign* is what the shadow-placement result above pinned, and it
+/// survives untouched: the key still travels toward `+X`, so the shadow still
+/// spills screen-left and toward the camera. Its magnitude and the elevation are
+/// then set by where the reference's disc actually is — see
+/// [`MOON_DIRECTION`], which measures it.
 const KEY_DIRECTION: Vec3 = Vec3::new(
     -MOON_DIRECTION.x,
     -MOON_DIRECTION.y,
@@ -631,12 +772,49 @@ const KEY_DIRECTION: Vec3 = Vec3::new(
 /// The direction **toward the light body in the sky** (world space,
 /// un-normalized).
 ///
-/// The name still says moon; the body is now the **daylight sun**, and the
-/// direction survived the change unaltered because it was already right: the
-/// reference's sun sits ~20° above the horizon and ~29° off the vanishing point
-/// toward the road's right, which is exactly what this vector encodes. Only the
-/// key's level and colour moved. The rename — and the disc's own colour, which
-/// is `palette::MOON` and still cool — belong with the palette, not here.
+/// The name still says moon; the body is now the **daylight sun**, and this pass
+/// re-aims it, because "~20° up and ~29° right" was asserted of the reference and
+/// never measured against it. **Measured, the sun is not in the champion frame at
+/// all.**
+///
+/// **The measurement.** Both frames are shot on the same chase camera, so the
+/// road's vanishing point is a shared origin: reference `(490, 775)`, champion
+/// `(500, 745)`. The reference's disc centres at `(870, 250)` — `+380 px` right
+/// and `525 px` up. The camera's vertical field of view rides its speed band
+/// (`fov_low 65°` … `fov_high 88°`), so a pixel offset converts to an angle
+/// through `half_height / tan(fov/2)`, giving a *range* rather than a point:
+///
+/// | reference sun | at `fov 65°` | at `fov 81°` (the champion's speed) |
+/// |---------------|--------------|--------------------------------------|
+/// | azimuth right | 16.2°        | 20.9°                                |
+/// | elevation     | 21.8°        | 26.9°                                |
+///
+/// The old `(-0.55, 0.42, 1.0)` is `28.8°` right and `20.2°` up: **too far right
+/// at every fov in the band, and low.** Projected back through the same
+/// arithmetic the disc lands at `x ≈ 1030..1210` on a `939 px` frame — off the
+/// right edge, at both ends of the band. That is the whole reason the champion's
+/// sky is an empty gradient while the reference's upper right is dominated by a
+/// sun and the flare `FrameBloom::highlights` exists to spend on it. The frame
+/// was *lit by* a sun with no source in shot — the exact defect the sky body was
+/// added to cure, defeated by eight degrees of azimuth.
+///
+/// `16.2°` right is the narrow-fov end of the measured range rather than its
+/// middle, and deliberately so: azimuth is the axis that decides *in shot or
+/// not*, the disc has to clear the right edge at **both** ends of a live fov
+/// band, and a sun a few degrees too central is a sun you can see. It lands the
+/// disc at `x ≈ 770..865` against the reference's `870`. Elevation takes the
+/// middle, `23.8°`, which is inside the `12°..28°` visibility band
+/// `the_key_throws_its_shadow_toward_the_camera_and_not_out_of_shot` pins.
+///
+/// **What the elevation buys beyond the disc.** Shadow length is
+/// `height / tan(elevation)`: `20.2° → 2.7` caster-heights, `23.8° → 2.3`. The
+/// champion's palm shadows are the largest dark shapes in the frame and they
+/// read as formless smears across the lower right; 15% off their length is 15%
+/// less smear for the same shadow. And `N·L` on the road rises `0.345 → 0.404`,
+/// so the key stops throwing away two thirds of itself on the largest surface in
+/// shot — which is why [`KEY_INTENSITY`] falls in the same breath. **Read the two
+/// constants as one decision: this move is exposure-neutral by construction and
+/// the road does not shift by a level.**
 ///
 /// The reasoning below is written for a moon and holds verbatim for a low sun:
 /// every argument in it is about elevation, visibility and shadow length.
@@ -648,22 +826,20 @@ const KEY_DIRECTION: Vec3 = Vec3::new(
 /// app's camera basis renders as screen-**right** — off the vanishing point, so
 /// it is not permanently hidden behind the car.
 ///
-/// The elevation is **20°**, down from the old key's 50°. That is a real trade,
+/// The elevation is **low**, down from the old key's 50°. That is a real trade,
 /// made deliberately:
 ///
 /// * A moon at 50° is above the top of the frame from a chase camera. There is
 ///   no elevation at which a light is both "overhead" and "in shot"; the ask was
 ///   for a visible moon, so it comes down to where the camera can see it.
 /// * A shadow's length is `height / tan(elevation)`: 50° → 0.84 car-heights,
-///   20° → 2.7. The car's shadow stops being a smear under the bumper and
-///   becomes a long raking shape thrown back toward the camera. (It lands only
-///   near the world origin — the engine's one directional shadow map is a fixed
-///   20 m box there — but where it lands, it now reads.)
-/// * The cost is `N·L` on the horizontal road: 0.77 → 0.34, less than half. That
-///   is why [`KEY_INTENSITY`] rises to compensate. The verticals — car flanks,
+///   23.8° → 2.3. The car's shadow stops being a smear under the bumper and
+///   becomes a long raking shape thrown back toward the camera.
+/// * The cost is `N·L` on the horizontal road: 0.77 → 0.40. That is why
+///   [`KEY_INTENSITY`] rises above one to compensate. The verticals — car flanks,
 ///   reflector posts, tree cones — gain what the road loses, which is exactly
-///   the raking, side-lit look a low moon produces and a high one cannot.
-const MOON_DIRECTION: Vec3 = Vec3::new(-0.55, 0.42, 1.0);
+///   the raking, side-lit look a low sun produces and a high one cannot.
+const MOON_DIRECTION: Vec3 = Vec3::new(-0.29, 0.46, 1.0);
 
 /// The moon's angular radius (radians).
 ///
@@ -737,8 +913,97 @@ const CLOUD_SCALE: f32 = 0.5;
 
 /// The key light's intensity — **the frame's exposure**.
 ///
-/// `1.45`, and the number is measured off the reference rather than argued from
-/// it. The previous `2.6` was derived twice by arithmetic — once through
+/// # `5.9`, and why `1.84` was not the reference's sunlit road
+///
+/// Every derivation below this section is sound arithmetic run on **the wrong
+/// statistic**, and this section replaces the statistic rather than the method.
+///
+/// The reference's road plane is *bimodal*: 61% of it reads warm (sun-struck),
+/// 39% cool (sky-fill-only palm shadow), and the two modes are more than two
+/// stops apart. Every level below was solved against "the warm **median**",
+/// which sampled at byte 68 — and a median taken over a distribution whose warm
+/// half is itself smeared through the penumbra of the frame's biggest shadows is
+/// not the sunlit mode, it is the *penumbra*. Re-measured over the same
+/// trapezoid (`n = 313k`), the warm half runs median 75, p75 102, **p90 113**;
+/// sampled where the road is unambiguously in full sun — the mid-field band
+/// between the two shadow ranks, and the near carriageway right of the car — it
+/// is `(125, 107, 90)` and `(141, 110, 87)`, luma **110–115**. That is the level
+/// the sun lays on flat tarmac in the reference; 68 is the level it lays on the
+/// half-shadowed tarmac either side of it.
+///
+/// The champion measures luma **65.6** on the same near carriageway (model:
+/// 67 — the model below is trustworthy to two levels, which is what makes this
+/// re-solve worth doing at all). Linearised, the reference's sunlit road is
+/// **2.4× brighter**, and its road carries `std 19` of tonal range against the
+/// champion's `std 1.5`. The champion's road is not a dark road, it is a *flat
+/// slab sitting at the reference's penumbra level* — the frame was exposed for
+/// its own shadows.
+///
+/// Solving the identical model against the sunlit mode instead:
+///
+/// ```text
+/// encoded 0.431 (byte 110, post-grade) -> 0.437 pre-grade (undo cinematic 1.10)
+///   -> linear 0.1605 -> /albedo 0.0886 -> key + ambient = 1.812
+///   -> key = 1.545 -> intensity = 1.545 / (N·L 0.404 · keyLuma 0.647) = 5.91
+/// ```
+///
+/// **Three independent surfaces agree on it**, which is why it is trusted over a
+/// 3.2× jump's face value. At `5.9` the up-facing globals are
+/// `(2.58, 1.64, 1.01)`, and:
+///
+/// | surface | rendered | reference measures |
+/// |---------|----------|--------------------|
+/// | flat tarmac (albedo `.085/.088/.105`) | `(130, 109, 95)` | `(125, 107, 90)` |
+/// | sunlit car flank (`N·L 0.255`, red livery) | `(244, 80, 49)` | `(221..250, 82..99, 43..46)` |
+/// | lane paint (albedo `0.72`) | red/green clipped, blue `223` | `(253, 242, 204)` |
+///
+/// Three different albedos at two different orientations landing on the
+/// reference from one gain is the check a single-surface solve cannot give you.
+///
+/// **What it does not touch.** The sky and the clouds are [`FrameSky`], not lit
+/// by this; the car's *camera-facing* rear panel — the subject, and already at
+/// the reference's level — has `N·L < 0` against a key travelling toward the
+/// camera and receives only the fill. So this is not an exposure lift: it lands
+/// on exactly the up-facing and sun-facing surfaces that measure short, and
+/// nowhere else. Nothing new spills that the reference does not also blow: the
+/// road's own radiance peaks at `0.22`, five times under
+/// [`FrameBloom::highlights`]'s `1.0`, and what does clear it is the lane paint
+/// and the car's stripes, which the reference blows too (it carries 4.84% of
+/// pixels above `L=235`; the champion carries 2.93%).
+///
+/// **And it is the contrast fix, not only the level fix.** The key:fill ratio on
+/// flat road goes `1.80:1 -> 5.79:1` against the reference's own measured
+/// sunlit:shaded road of `10.4:1`. The remaining gap is the sky fill's, not the
+/// key's, and is left for a pass that measures it — one knob per change.
+///
+/// ---
+///
+/// The rest of this comment is the `1.84` derivation, kept intact because
+/// everything in it except the target level is still the live argument: the gel,
+/// the `N·L` bookkeeping, and why the key rather than the grade owns this.
+///
+/// `1.84`, and the number is measured off the reference rather than argued from
+/// it. **It is a gain, not a brightness**: what the frame actually receives is
+/// `intensity · N·L · `[`KEY_COLOR_LUMA`], and this constant only ever moves in
+/// company with the other two factors. It was `1.45` against a near-white key of
+/// luma `0.959`; [`KEY_COLOR`] re-gels the sun to the reference's measured golden
+/// `(1.0, 0.58, 0.27)`, luma `0.647`, and `1.45 · 0.959 / 0.647 = 2.15` is the
+/// intensity that keeps every word below true. Flat road is unchanged at luma
+/// `0.725`. Read the constants as one decision.
+///
+/// **And `N·L` is the third factor, which is why `2.15` is now `1.84`.**
+/// [`MOON_DIRECTION`] re-aims the sun to where the reference actually puts it —
+/// `23.8°` up rather than `20.2°` — and a horizontal surface takes
+/// `N·L = 0.404` from that instead of `0.345`. The road would gain 17% of a stop
+/// for free, so the gain gives back exactly what the geometry hands it:
+/// `2.15 · 0.345 / 0.404 = 1.84`. The product this whole comment sizes,
+/// `intensity · N·L · keyLuma`, goes `0.4804 → 0.4810` — the same light, from a
+/// visible source, at the same exposure. **Every derivation below is stated
+/// against the old `2.15 · 0.345` pairing and is unchanged by the swap**, because
+/// the swap holds their product fixed; that is the point of writing it this way
+/// rather than re-deriving the exposure a fourth time.
+///
+/// The `2.6` before that was derived twice by arithmetic — once through
 /// [`FramePostProcess::low_key`]'s `0.16` black point, then re-derived when the
 /// colorist retired that black point — and never once checked against a render.
 /// This pass has both frames in hand and inverts the pipeline instead.
@@ -764,33 +1029,154 @@ const CLOUD_SCALE: f32 = 0.5;
 /// all*. No reduction of the sky fill and no grade can bring that back: a term
 /// that on its own overshoots the finished value is over-strength, full stop.
 /// That is what makes this the light's defect and not the colourist's. Solving
-/// `I · 0.345 · 0.959 = 0.444` gives `1.34`; carried through the test's own
-/// (slightly different, luma-averaged) model the road lands at `0.289` encoded
-/// against the reference's `0.288`, and `1.45` is the value that hits it.
+/// `I · 0.345 · keyLuma = 0.444` is what sizes the key, and the answer moves with
+/// the gel: at the old near-white `keyLuma` of `0.959` it gave `1.34`, and `1.45`
+/// was the value that carried the test's own (slightly different, luma-averaged)
+/// model onto the reference's `0.288` encoded. At [`KEY_COLOR_LUMA`]'s `0.647`
+/// the identical solve gives `2.15`, and lands the identical `0.285` encoded —
+/// same light, same exposure, differently coloured.
 ///
 /// **What the over-key was costing, beyond level.** Globals of `1.16` on an
 /// up-facing surface mean every albedo over `0.86` clips: the lane paint, the
 /// car's white stripes and the sunlit sand all pinned at `255`, and all of it
 /// then handed to the bloom — which is the milky wash over the champion, not a
-/// haze setting. At `1.45` the up-facing globals are `0.77`: the paint renders
-/// near byte 195, still comfortably the brightest thing on the road, with
-/// headroom above it instead of a bloom smear.
+/// haze setting. Today the up-facing globals are `(0.932, 0.680, 0.560)`, a luma
+/// of `0.725`: the paint renders near byte 195, still comfortably the brightest
+/// thing on the road, with headroom above it instead of a bloom smear.
 ///
 /// It also restores the terminator on vertical surfaces. A car flank facing the
 /// sun went from `2.44` (clipped to a flat orange slab) to `1.36`; its shaded
 /// flank still gets the sky fill and nothing else, so the two now differ by a
 /// readable stop instead of both sitting at the top of the range.
 ///
-/// **The one thing this cannot fix**, and the reason the road stays flat even
-/// at the right level: the reference's road is 51% warm sunlit and 43% cool
-/// shadow, and the champion's is 0.1% warm and has no cast shadow anywhere.
-/// That is not a level — `axiom_render_pipeline`'s shadow camera is a fixed
+/// **The one thing this cannot fix.** The reference's road is 57% warm sunlit
+/// and 42% cool shadow. Two separate things have to be true for that, and only
+/// one of them is a level: the sun-struck road has to *be warm* (that is
+/// [`KEY_COLOR`], which this pass fixes — the old near-white key made it
+/// arithmetically impossible), and something has to *occlude* the sun to make
+/// the cool half. The second is out of an app's reach —
+/// `axiom_render_pipeline`'s shadow camera is a fixed
 /// 20 m orthographic box anchored at the **world origin** (its own module docs
 /// say so), and this moment is ~1.9 km down a 9 km course. Every cast shadow in
-/// this frame is geometrically out of the map. Sizing the key is the half of
-/// the axis an app can reach; the other half is a frame-contract change and
-/// belongs to the engine architect.
-const KEY_INTENSITY: f32 = 1.45;
+/// this frame is geometrically out of the map. Sizing and colouring the key is
+/// the half of the axis an app can reach; the other half is a frame-contract
+/// change and belongs to the engine architect.
+///
+/// **Era-C retune, 2026-08-09:** `5.9 → 4.65`, which is *not* an exposure
+/// decision. It is the inverse of the luma the de-orangeing of [`KEY_COLOR`]
+/// gained (`0.647 → 0.821`), applied so that re-gelling the sun does not
+/// silently re-expose the frame. `intensity · N·L · KEY_COLOR_LUMA` is
+/// unchanged to three figures.
+const KEY_INTENSITY: f32 = 4.65;
+
+/// The key light's **colour** — the sun's gel, and the frame's single largest
+/// remaining lighting defect.
+///
+/// This replaces `(1.0, 0.955, 0.88)`: a near-white key, authored as "the
+/// reference is a high coastal sun, warm only by the slight red-over-blue a
+/// short atmospheric path leaves." That sentence is a colour-temperature
+/// intuition, and the reference disagrees with it by a factor of three.
+///
+/// **The measurement.** The road is the calibration surface, exactly as in
+/// [`KEY_INTENSITY`]. Take the reference's road plane alone (a trapezoid from
+/// the mid-field down to the HUD, excluding the sand verge and the lane paint)
+/// and split it on chroma — warm `R > B` is sun-struck, cool `B > R` is
+/// sky-fill-only. Linearise both means and *subtract*. What is left is the sun
+/// and nothing else, because the sky term is common to both and the asphalt's
+/// albedo is the same pixel-for-pixel:
+///
+/// | reference road   | sRGB               | linear                       |
+/// |------------------|--------------------|------------------------------|
+/// | sunlit (warm)    | `(91.0,76.5,67.5)` | `(0.1045, 0.0733, 0.0569)`   |
+/// | shaded (cool)    | `(27.2,40.5,53.1)` | `(0.0111, 0.0217, 0.0357)`   |
+/// | **sun** (lit−shaded) |                | `(0.0934, 0.0516, 0.0212)`   |
+///
+/// Normalised to red, the reference's sun is **`(1.00, 0.55, 0.23)`** — a deeply
+/// golden low sun, not a white one. (The same inversion run over the wider road
+/// band, `n = 278k`, returns `(1.00, 0.59, 0.26)`; the two agree.) The shaded
+/// road normalises to `(1.00, 1.96, 3.22)`, which is the blue sky dome the
+/// ambient above is already authored as — that term needs nothing and is left
+/// alone.
+///
+/// **Why this, and not the level, is what the road is missing.** The champion's
+/// road measures **0% warm pixels**; the reference's is **57% warm**. Not "a bit
+/// cool" — *not one pixel of road in the frame reads as sun-struck.* The
+/// arithmetic says why, and it is not a shadow-map problem. On flat road the old
+/// rig laid `1.45 · N·L(0.345) · (1.0, 0.955, 0.88) = (0.500, 0.478, 0.440)` of
+/// key onto `(0.19, 0.25, 0.36)` of sky, summing to `(0.690, 0.728, 0.800)`.
+/// **Blue is the largest channel.** A near-white key carries almost as much blue
+/// as red, so it can never out-run a deliberately blue fill: under that rig the
+/// road is cool *in full sun*, and the frame's defining warm-lit-against-cool-
+/// shadow split is arithmetically unreachable at any intensity. The measured
+/// champion road, `(62.3, 63.4, 69.0)`, is that prediction to within a level.
+///
+/// With this gel the same road takes `2.15 · 0.345 · (1.0, 0.58, 0.27) =
+/// (0.742, 0.430, 0.200)`, summing to `(0.932, 0.680, 0.560)` — red largest,
+/// `B/R = 0.60`, against the reference's own `0.54`. The road becomes warm where
+/// the sun reaches it and stays the untouched blue-grey `(0.19, 0.25, 0.36)`
+/// where it does not.
+///
+/// **This move is exposure-neutral by construction, and that is the point.** A
+/// gel costs luma: this one is `0.647` against the old key's `0.959`, so
+/// [`KEY_INTENSITY`] rises `1.45 → 2.15` in exactly that inverse ratio. Flat
+/// road goes from luma `0.725` to luma `0.725` — the frame's measured exposure,
+/// which [`KEY_INTENSITY`] derives at length and which this pass has no argument
+/// with, does not move. Only the *hue* of the light moves. Nor can it clip: the
+/// largest up-facing global becomes red at `0.932` (green and blue both *fall*,
+/// to `0.680` and `0.560`), and the brightest albedo in shot is the lane paint's
+/// `0.72`, which lands at `0.671` linear — still under one, still well under
+/// [`FrameBloom::highlights`]'s `1.0` threshold, so nothing new spills.
+/// The hemisphere ambient's sky end — the fill an up-facing surface gets when
+/// the sun is not on it, and therefore the *shadow* level of the whole frame
+/// under a single directional key.
+///
+/// A named constant rather than a literal at the `set_ambient` call because it
+/// is read in two places: the rig, and the exposure model in
+/// [`tests::the_sun_out_lights_every_other_term_in_the_frame`]. It was a literal
+/// in both until 2026-08-09, and the copy in the test had already gone stale
+/// once — a guard asserting against a fill the frame no longer used.
+const AMBIENT_SKY: [f32; 3] = [0.114, 0.150, 0.216];
+
+/// The hemisphere ambient's ground end — bounce off the road and verge, warm and
+/// much weaker than [`AMBIENT_SKY`]. Named for the same reason.
+const AMBIENT_GROUND: [f32; 3] = [0.047, 0.041, 0.029];
+
+/// **Era-C retune, 2026-08-09.** The gel above was solved against a *night* rig
+/// and it is the term the round-4 architect advisory named as the root of the
+/// orange road: forward-modelling the app's own constants gave a pre-grade road
+/// of `(136,106,80)` and inverting the measured champion through the grade gave
+/// `(129,103,80)` — agreement to within seven levels, which is the proof the
+/// backend is faithfully rendering an authored `1 : 0.58 : 0.27` orange rather
+/// than a defect. Two lenses then corrected *downstream* of it — the tarmac
+/// albedo was rotated cool and the grade's red gain eased 1.15 → 1.04 — and took
+/// the road's `r−b` from `+79.9` to `+53.9` against the reference's `+15.8`.
+/// About a third. The remaining two thirds are this constant, exactly as the
+/// advisory predicted, and no albedo or grade move can reach them without
+/// tinting everything else in frame to compensate.
+///
+/// So the gel's *chroma* is cut to 40% of its excursion from its own luma,
+/// renormalised so red stays the unit channel: `R−B` goes `0.73 → 0.37`. The
+/// sun stays warm — the reference's sunlit tarmac really is warm — it stops
+/// being orange.
+///
+/// **Exposure-neutral by construction, on the file's own rule.** A gel costs
+/// luma; this one delivers `0.821` against the old `0.647`, so [`KEY_INTENSITY`]
+/// falls in exactly that inverse ratio (`5.9 → 4.65`, i.e. `× 0.647/0.821`) and
+/// the frame's measured level does not move. Only the hue of the light does —
+/// the same discipline the previous two gels were solved under, and the reason
+/// this can be reasoned about at all.
+const KEY_COLOR: [f32; 3] = [1.0, 0.787, 0.630];
+
+/// [`KEY_COLOR`]'s Rec. 709 luma — how much *brightness*, as opposed to hue, the
+/// gel actually delivers.
+///
+/// A rig's exposure is `intensity · N·L · this`, never `intensity · N·L`: two
+/// keys at the same intensity but different gels light the frame to different
+/// levels, and dropping the term is how a re-gel silently becomes a re-exposure.
+/// Named so `the_sun_out_lights_every_other_term_in_the_frame` can hold the
+/// road against the reference's measured byte through a *complete* model.
+const KEY_COLOR_LUMA: f32 =
+    0.2126 * KEY_COLOR[0] + 0.7152 * KEY_COLOR[1] + 0.0722 * KEY_COLOR[2];
 
 /// How high above the road the car's pool light hangs (m).
 ///
@@ -1056,13 +1442,69 @@ mod tests {
     /// one every term lands on hardest.
     #[test]
     fn the_sun_out_lights_every_other_term_in_the_frame() {
-        // The key on flat ground is `intensity * N·L`, with N = +Y.
+        // The key on flat ground is `intensity * N·L * keyLuma`, with N = +Y.
+        //
+        // The `keyLuma` factor is not decoration. This model used to be
+        // `KEY_INTENSITY * n_dot_l`, which is *colour-blind*, and a colour-blind
+        // exposure model cannot tell a re-gel from a re-exposure: swap the sun's
+        // hue and every number below silently reports the frame's old
+        // brightness. That is the exact failure [`KEY_COLOR`] would have walked
+        // into — its gel drops the key's luma from `0.959` to `0.647`, a third of
+        // the frame's light, and this model would have shrugged. With the term
+        // present the model is complete, and it is worth noting it changed
+        // nothing about the rig it was written against: the near-white key's
+        // `1.45 * 0.345 * 0.959`, the golden re-gel's `2.15 * 0.345 * 0.647` and
+        // the re-aimed `1.84 * 0.404 * 0.647` are the same `0.480` to three
+        // places — a re-gel and a re-aim are both exposure-neutral here, by
+        // construction, and this product is what says so.
+        //
+        // Today's `5.9 * 0.404 * 0.647 = 1.542` is deliberately *not* one of
+        // them. It is the one move in this constant's history that is a genuine
+        // re-exposure, because the target it was solved against was wrong rather
+        // than the arithmetic — see [`KEY_INTENSITY`], and the band at the foot
+        // of this test, which is the assertion that carried the bad target.
         let len = (KEY_DIRECTION.x * KEY_DIRECTION.x
             + KEY_DIRECTION.y * KEY_DIRECTION.y
             + KEY_DIRECTION.z * KEY_DIRECTION.z)
             .sqrt();
         let n_dot_l = -KEY_DIRECTION.y / len;
-        let key = KEY_INTENSITY * n_dot_l;
+        let key = KEY_INTENSITY * n_dot_l * KEY_COLOR_LUMA;
+
+        // The gel: the reference's sun is warm, and "warm" is a hard inequality,
+        // not a taste. But it has a CEILING as well as a floor, and this guard
+        // used to have only the floor — as `KEY_COLOR[2] < KEY_COLOR[0] * 0.6`.
+        //
+        // That form was wrong in two ways and cost the campaign two passes.
+        // First it asserted a raw channel ratio while *justifying* itself with an
+        // outcome ("cannot put a warm pixel on the road against the blue sky
+        // fill"), and the outcome depends on the ambient, which has since been
+        // cut 40% — so the constant kept enforcing a conclusion drawn under a
+        // sky fill the frame no longer has. Second, and worse, a floor alone
+        // says a gel can never be too warm. It can: at `[1.0, 0.58, 0.27]` this
+        // road rendered `r−b +79.9` against the reference's `+15.8`, the tarmac
+        // read as orange clay, and it became indistinguishable from the sand
+        // verge beside it. The guard was satisfied throughout.
+        //
+        // So it is re-litigated as what it always claimed to be — a statement
+        // about the lit road — through the same complete model the rest of this
+        // test uses, and it is now two-sided. Both bounds are failures this
+        // campaign actually shipped, in both directions.
+        let lit = |c: usize| {
+            palette::TARMAC[c] * (KEY_INTENSITY * n_dot_l * KEY_COLOR[c] + AMBIENT_SKY[c])
+        };
+        let (warm, cool) = (lit(0), lit(2));
+        assert!(
+            warm > cool * 1.05,
+            "the key has drifted back toward white ({KEY_COLOR:?}) — the lit road \
+             comes out {warm:.4} red against {cool:.4} blue, and the frame's \
+             sunlit/shadowed split is unreachable at any intensity"
+        );
+        assert!(
+            warm < cool * 2.0,
+            "the key has drifted into orange ({KEY_COLOR:?}) — the lit road comes \
+             out {warm:.4} red against {cool:.4} blue, which is the tarmac-as-clay \
+             state that also erased the road/verge boundary"
+        );
 
         // A daylight key is a gain past one, and `palette::ratio` clamps to
         // `0..=1`. Routing the intensity through that helper — the obvious thing
@@ -1076,8 +1518,13 @@ mod tests {
              comment at the `add_light` call site is stale"
         );
 
-        // The hemisphere ambient's sky term is what an up-facing surface gets.
-        let ambient = (0.19 + 0.25 + 0.36) / 3.0;
+        // The hemisphere ambient's sky term is what an up-facing surface gets —
+        // and, under one directional key, it is exactly what a *shadowed*
+        // up-facing surface gets, which is why the ratio below is the frame's
+        // shadow contrast and not merely a fill check. Mirrors the sky end of the
+        // `set_ambient` call above; see that call site for the measurement that
+        // scaled both hemisphere ends by 0.60.
+        let ambient = (AMBIENT_SKY[0] + AMBIENT_SKY[1] + AMBIENT_SKY[2]) / 3.0;
 
         // The backend's point-light falloff, mirrored: 1/(1 + 0.09d + 0.032d²),
         // times the pool's own intensity.
@@ -1098,8 +1545,8 @@ mod tests {
         // intuition put it. Measured off the reference's own road plane, the sky
         // fill is `0.302` and the sun on flat road is `0.444` — a ratio of
         // **0.68**. That is far above the 0.30 this used to demand, and the
-        // reason is geometric rather than stylistic: the sun sits at 20°, so
-        // `N·L` of 0.345 throws away two thirds of the key on a horizontal while
+        // reason is geometric rather than stylistic: the sun sits at 23.8°, so
+        // `N·L` of 0.404 throws away 60% of the key on a horizontal while
         // the sky dome arrives on it whole. A guard calibrated for an overhead
         // sun is simply the wrong guard for a raking one, and holding 0.30
         // against this ambient pinned the key at 2.6 — i.e. it was the assertion,
@@ -1123,11 +1570,8 @@ mod tests {
         );
 
         // The tarmac's luma albedo, and the sRGB transfer the backend writes it
-        // through — the road as the display receives it, before grading.
-        //
-        // The band is the reference's own sunlit tarmac (~byte 65) with the
-        // low-key grade's `0.16` subtract added back, since that stage still
-        // sits downstream of this one: byte 87..=128 pre-grade.
+        // through — the road as the display receives it, before grading. The
+        // band this feeds is set below, against the reference's sunlit mode.
         let road = 0.2126 * 0.085 + 0.7152 * 0.088 + 0.0722 * 0.105;
         let linear = road * (key + ambient);
         let encoded = 1.055 * linear.powf(1.0 / 2.4) - 0.055;
@@ -1138,24 +1582,30 @@ mod tests {
              black point of {black_point:.3} — the subtract clips the whole \
              ground plane to zero instead of deepening it"
         );
-        // The band is the reference's own **measured** sunlit tarmac, read back
-        // through the grade that is actually installed. Sampling the reference's
-        // road plane and taking the warm (`R > B`, i.e. sun-struck) median gives
-        // byte 68.0; undoing `GRADE`'s 1.10 contrast about its mid pivot puts the
-        // pre-grade road at 0.288 encoded. The band is that value with ~8 levels
-        // of latitude either side.
+        // The band is the reference's **sunlit mode**, read back through the
+        // grade that is actually installed.
         //
-        // It replaces 0.34..=0.50, which was byte 87..=128 — the reference's
-        // tarmac with `FramePostProcess::low_key`'s 0.16 subtract *added back*,
-        // because that grade sat downstream when the band was written. It does
-        // not any more: `GRADE` is `cinematic()` and its black point is zero, so
-        // the added-back subtract was inflating the target by 41 levels and the
-        // band was quietly demanding a road twice as bright as the reference's.
+        // It replaces `0.26..=0.32`, and that band is the whole reason the frame
+        // was a stop and a half dark: it was solved against the *warm median* of
+        // the reference's road plane (byte 68). The reference's road is bimodal —
+        // 61% warm, 39% cool palm shadow — and the warm half is itself smeared
+        // through those shadows' penumbra, so its median measures the penumbra,
+        // not the sun. Re-measured over the same trapezoid (`n = 313k`) the warm
+        // half runs median 75 / p75 102 / **p90 113**, and the unambiguously
+        // sunlit tarmac (the mid-field band between the shadow ranks, and the
+        // carriageway right of the car) is byte **110..115**. Undoing `GRADE`'s
+        // 1.10 contrast about its mid pivot puts the pre-grade sunlit road at
+        // **0.437** encoded. The band is that value with ~8 levels either side.
+        //
+        // A statistic, not a level, was the defect — see [`KEY_INTENSITY`], which
+        // records the same correction and the three independent surfaces that
+        // agree on the gain it implies.
         assert!(
-            (0.26..=0.32).contains(&encoded),
+            (0.41..=0.47).contains(&encoded),
             "the road renders at {encoded:.3} encoded, outside the band that \
-             lands it on the reference's measured sunlit tarmac (0.288) under \
-             the grade that is actually installed"
+             lands it on the reference's measured *sunlit* tarmac (0.437) under \
+             the grade that is actually installed — a road that sits below this \
+             band is exposed for the reference's shadows, not for its sun"
         );
     }
 

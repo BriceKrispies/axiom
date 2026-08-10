@@ -50,6 +50,7 @@ pub struct FrameSky {
     halo_strength: f32,
     cloud_coverage: f32,
     cloud_scale: f32,
+    haze_height: f32,
 }
 
 impl FrameSky {
@@ -71,6 +72,10 @@ impl FrameSky {
             // separate representation — the same posture the body takes.
             cloud_coverage: 0.0,
             cloud_scale: 1.0,
+            // The identity haze height: `haze_lift` collapses to `up` exactly at
+            // this value, so a sky that never mentions the parameter evaluates
+            // bit-for-bit as it did before the parameter existed.
+            haze_height: DEFAULT_HAZE_HEIGHT,
         }
     }
 
@@ -113,6 +118,58 @@ impl FrameSky {
         self.cloud_coverage = coverage.get();
         self.cloud_scale = scale.get();
         self
+    }
+
+    /// Set how high the **horizon haze** reaches — the gradient's *shape*, as
+    /// distinct from the two colours it runs between.
+    ///
+    /// `half_height` is the up-component (the sine of the elevation angle) at
+    /// which the gradient stands exactly halfway between [`Self::horizon`] and
+    /// [`Self::zenith`]. The default is `0.5` — 30° of elevation — which is
+    /// precisely the plain `smoothstep(dir.y)` this evaluated before the
+    /// parameter existed, so an existing sky is unchanged to the bit.
+    ///
+    /// ## Why the two stops were not enough on their own
+    ///
+    /// A two-stop dome parameterised on the raw up-component puts its midpoint
+    /// at 30° and cannot be moved. That is fine for a camera that looks at the
+    /// sky and wrong for every camera that does not: a chase camera on a road,
+    /// a third-person camera behind a runner, anything shot near eye level sees
+    /// only the *bottom* of the curve. Concretely, a frame whose top row sits
+    /// 32° up reaches a blend of `0.57` and no further — the authored zenith is
+    /// never reached anywhere on screen, and more than half of what the frame
+    /// shows is the horizon stop.
+    ///
+    /// The app-side workaround is to stop authoring the zenith as a colour and
+    /// start authoring it as a slope: push it far past the darkest pixel it is
+    /// meant to produce so that 57% of it lands somewhere near right. That is a
+    /// lie with two costs. It runs out — a channel cannot be pushed below zero,
+    /// so once the zenith stop bottoms out the gradient simply cannot be made
+    /// any steeper, whatever the frame needs. And it makes the sky wrong for
+    /// any camera that ever looks up, and wrong for anything matched to it (the
+    /// depth-fog target, the hemisphere ambient), because the number in the
+    /// zenith slot is no longer the colour of the sky overhead.
+    ///
+    /// Real air does not have its midpoint at 30° either. Optical depth along a
+    /// ray goes as roughly `1 / sin(elevation)`, so the haze band is *tight*:
+    /// a clear day collapses to its zenith blue within the first 15–20° and
+    /// holds it the rest of the way up. Carrying the band's height here — one
+    /// authored number, with the shape it implies evaluated in one place — is
+    /// what lets the zenith stop go back to meaning the sky overhead.
+    pub const fn with_haze_height(mut self, half_height: Ratio) -> Self {
+        self.haze_height = half_height.get();
+        self
+    }
+
+    /// The up-component at which the gradient stands halfway between the
+    /// horizon and the zenith. See [`Self::with_haze_height`].
+    ///
+    /// Returned as authored; both this crate's [`Self::radiance`] and a
+    /// backend's mirror clamp it to the interior band they can evaluate, the
+    /// same posture [`Self::cloud_coverage`] and [`Self::body_angular_radius`]
+    /// already take.
+    pub const fn haze_height(&self) -> Ratio {
+        Ratio::finite_or_zero(self.haze_height)
     }
 
     /// The overhead tint (linear RGB).
@@ -172,14 +229,15 @@ impl FrameSky {
     /// (this is a layer) and is also exactly what makes it portable to a shader
     /// unchanged.
     ///
-    /// The gradient uses the *raw* up-component rather than an angle, so it costs
-    /// no trigonometry, and is smoothstepped so the horizon band is soft rather
-    /// than a visible seam. Below the horizon it holds the horizon colour: there
-    /// is no ground hemisphere here, because the ground is geometry.
+    /// The gradient uses the up-component rather than an angle, so it costs no
+    /// trigonometry: [`haze_lift`] reshapes it by the authored haze height, and
+    /// the result is smoothstepped so the horizon band is soft rather than a
+    /// visible seam. Below the horizon it holds the horizon colour: there is no
+    /// ground hemisphere here, because the ground is geometry.
     pub fn radiance(&self, view: [f32; 3]) -> [f32; 3] {
         let dir = normalize_or(view, [0.0, 1.0, 0.0]);
         let up = dir[1].clamp(0.0, 1.0);
-        let blend = smoothstep(up);
+        let blend = smoothstep(haze_lift(up, self.haze_height));
 
         let cos_angle = dot(dir, self.body_direction());
         // The disc: a smooth step across the limb rather than a hard cut, so the
@@ -233,6 +291,52 @@ impl FrameSky {
         let threshold = 1.0 - self.cloud_coverage.clamp(0.0, 1.0) * (1.0 + CLOUD_EDGE);
         smoothstep((field - threshold) / CLOUD_EDGE) * smoothstep(dir[1] / CLOUD_HORIZON_FADE)
     }
+}
+
+/// The haze height that reproduces a plain `smoothstep(dir.y)` gradient exactly:
+/// the midpoint at an up-component of `0.5`, which is [`haze_lift`]'s identity.
+const DEFAULT_HAZE_HEIGHT: f32 = 0.5;
+
+/// The interior band a haze height is evaluated in.
+///
+/// Both ends are excluded because both are degenerate: at `0` the bias
+/// coefficient is `0` and the lift reads `0 / 0` looking straight at the
+/// horizon; at `1` the coefficient is unbounded. Clamping rather than rejecting
+/// is what keeps this branch-free, and it keeps a mis-authored sky a *usable*
+/// sky rather than a frame of NaN — the same posture the body's radius and the
+/// cloud coverage take.
+const HAZE_HEIGHT_MIN: f32 = 0.02;
+const HAZE_HEIGHT_MAX: f32 = 0.98;
+
+/// Reshape the raw up-component so the gradient's midpoint lands at
+/// `half_height` instead of at a fixed `0.5`.
+///
+/// The curve is `up / (up + (1 - up) * k)` with `k = h / (1 - h)`: a rational
+/// bias, deliberately **not** `up.powf(p)`. Three properties earn it that shape,
+/// and all three matter here rather than being taste:
+///
+/// * **The default is the identity, to the bit.** At `h = 0.5` the coefficient
+///   is `k = 1` and the expression collapses to `up / (up + 1 - up)`, which is
+///   `up` exactly. That is what lets a haze height be *added to the definition*
+///   of the sky rather than forked around it: every sky authored before this
+///   parameter existed evaluates to the same bits it always did.
+/// * **Both ends stay exact for every `h`.** `0` maps to `0` and `1` maps to
+///   `1`, so looking straight up still returns the zenith colour exactly and the
+///   horizon still returns the horizon colour exactly. The second of those is
+///   load-bearing: depth fog fades distant geometry into the horizon colour, and
+///   a gradient that returned *almost* that colour at eye level would draw a
+///   seam along the horizon of every outdoor frame.
+/// * **It is four arithmetic operations**, so a shader mirror is the same four
+///   and cannot drift. A `pow` mirror can: WGSL defines `pow(x, y)` as
+///   `exp2(y * log2(x))`, which for `y = 1` is not required to return `x`.
+///
+/// `half_height` is clamped into [`HAZE_HEIGHT_MIN`]..=[`HAZE_HEIGHT_MAX`], so
+/// the denominator is bounded below by `min(k, 1) > 0` for every `up` in
+/// `0..=1` and the result is always finite.
+fn haze_lift(up: f32, half_height: f32) -> f32 {
+    let h = half_height.clamp(HAZE_HEIGHT_MIN, HAZE_HEIGHT_MAX);
+    let k = h / (1.0 - h);
+    up / (up + (1.0 - up) * k)
 }
 
 /// The smallest angular radius a body is evaluated at, so a zero-radius body
@@ -652,6 +756,121 @@ mod tests {
         // cloud layer sees only usable rays and the frame stays finite.
         assert!(daylit().radiance([f32::NAN, 1.0, 0.0]).iter().all(|v| v.is_finite()));
         assert!(daylit().radiance([0.0, 0.0, 0.0]).iter().all(|v| v.is_finite()));
+    }
+
+    /// The property that lets a haze height be added to the *definition* of the
+    /// sky rather than forked around it: at the default, the lift is the
+    /// identity and every sky authored before the parameter existed evaluates to
+    /// the bits it always did.
+    #[test]
+    fn the_default_haze_height_is_the_identity_to_the_bit() {
+        let plain = FrameSky::gradient([0.1, 0.2, 0.4], [0.5, 0.4, 0.3]);
+        assert_eq!(plain.haze_height().get(), DEFAULT_HAZE_HEIGHT);
+        // Not "close to" `up` — exactly `up`, for every representable input.
+        (0..=64).for_each(|i| {
+            let up = i as f32 / 64.0;
+            assert_eq!(haze_lift(up, DEFAULT_HAZE_HEIGHT), up, "at up={up}");
+        });
+        // ...and therefore the whole gradient is the plain smoothstep it was.
+        [[0.0, 1.0, 0.0], [0.3, 0.6, 0.7], [0.0, -1.0, 0.0], [1.0, 0.05, 0.0]]
+            .into_iter()
+            .for_each(|view| {
+                let blend = smoothstep(normalize_or(view, [0.0, 1.0, 0.0])[1].clamp(0.0, 1.0));
+                let expected =
+                    [0, 1, 2].map(|c| lerp([0.5, 0.4, 0.3][c], [0.1, 0.2, 0.4][c], blend));
+                assert_eq!(plain.radiance(view), expected, "at {view:?}");
+            });
+    }
+
+    /// What the parameter is *for*: pulling the gradient's midpoint down to the
+    /// elevation a near-level camera actually shows, without touching either
+    /// stop — and without moving the two ends the rest of the frame is matched
+    /// to.
+    #[test]
+    fn a_lower_haze_height_moves_the_midpoint_and_leaves_both_ends_exact() {
+        let (horizon, zenith) = ([0.5, 0.4, 0.3], [0.1, 0.2, 0.4]);
+        let tight = FrameSky::gradient(zenith, horizon).with_haze_height(q(0.2));
+        assert_eq!(tight.haze_height().get(), 0.2);
+
+        // The midpoint is where it says it is: at `up == h` the lift is exactly
+        // 0.5, and `smoothstep(0.5)` is exactly 0.5, so the gradient stands
+        // exactly halfway between the two stops.
+        assert_eq!(haze_lift(0.2, 0.2), 0.5);
+        assert_eq!(smoothstep(haze_lift(0.2, 0.2)), 0.5);
+
+        // Both ends survive untouched. The horizon end is load-bearing: depth fog
+        // fades distant geometry into exactly this colour, so anything less than
+        // exact draws a seam along the horizon.
+        assert_eq!(tight.radiance([0.0, 0.0, 1.0]), horizon, "the horizon is exact");
+        assert_eq!(tight.radiance([0.0, 1.0, 0.0]), zenith, "the zenith is exact");
+        assert_eq!(tight.radiance([0.0, -1.0, 0.0]), horizon, "and below it too");
+
+        // In between, a tighter haze is strictly nearer the zenith than the
+        // default is — that is the whole point — and the lift stays monotone.
+        let plain = FrameSky::gradient(zenith, horizon);
+        let ramp: Vec<f32> = (0..=20).map(|i| haze_lift(i as f32 / 20.0, 0.2)).collect();
+        assert!(ramp.windows(2).all(|w| w[1] > w[0]), "monotone: {ramp:?}");
+        (1..20).for_each(|i| {
+            let up = i as f32 / 20.0;
+            assert!(
+                haze_lift(up, 0.2) > up,
+                "a tighter band lifts the blend at up={up}"
+            );
+        });
+        // Sampled where this app's camera actually looks — 32 degrees up, the top
+        // row of a chase-camera frame — the tighter band reaches far more of the
+        // zenith stop than the default can. This is the number the two stops
+        // alone could not reach: 0.57 of the way, against 0.88.
+        let top = [0.0, 0.53, 0.848];
+        assert!((smoothstep(haze_lift(0.53, DEFAULT_HAZE_HEIGHT)) - 0.545).abs() < 0.005);
+        assert!((smoothstep(haze_lift(0.53, 0.2)) - 0.913).abs() < 0.005);
+        // Measured as distance still to travel to the zenith stop, which is what
+        // "the authored zenith is never reached on screen" actually means. The
+        // default leaves 45% of the way to go at the top of frame; the tighter
+        // band leaves under a tenth of it.
+        let togo = |sky: &FrameSky| sky.radiance(top)[1] - zenith[1];
+        assert!(
+            togo(&tight) < togo(&plain) * 0.25,
+            "the visible top of frame is now most of the way to the zenith: {} vs {}",
+            togo(&tight),
+            togo(&plain)
+        );
+
+        // And it reaches in the other direction too: a *higher* midpoint holds
+        // the horizon colour further up, which is what a hazy or dusty day is.
+        let wide = FrameSky::gradient(zenith, horizon).with_haze_height(q(0.8));
+        assert!(haze_lift(0.5, 0.8) < 0.5, "a high midpoint holds the haze");
+        assert!(wide.radiance(top)[1] > plain.radiance(top)[1]);
+    }
+
+    /// A mis-authored haze height must produce a usable sky, not a frame of NaN.
+    /// Both ends of the range are genuinely degenerate — `0` divides `0` by `0`
+    /// at the horizon, `1` is unbounded — so both are clamped away, branchlessly.
+    #[test]
+    fn a_degenerate_haze_height_is_clamped_rather_than_poisoning_the_frame() {
+        let finite = |c: [f32; 3]| c.iter().all(|v| v.is_finite());
+        [0.0, 1.0, -4.0, 9.0, f32::NAN, f32::INFINITY]
+            .into_iter()
+            .for_each(|h| {
+                let sky = FrameSky::gradient([0.1, 0.2, 0.4], [0.5, 0.4, 0.3])
+                    .with_haze_height(Ratio::finite_or_zero(h));
+                [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.3, 0.6, 0.7], [0.0, -1.0, 0.0]]
+                    .into_iter()
+                    .for_each(|view| {
+                        assert!(finite(sky.radiance(view)), "h={h} view={view:?}");
+                    });
+                // Clamped, so the ends are still exact whatever was authored.
+                assert_eq!(sky.radiance([0.0, 0.0, 1.0]), [0.5, 0.4, 0.3], "h={h}");
+                assert_eq!(sky.radiance([0.0, 1.0, 0.0]), [0.1, 0.2, 0.4], "h={h}");
+            });
+        assert_eq!(haze_lift(0.0, 0.0), 0.0, "the horizon is not 0/0");
+        assert_eq!(haze_lift(1.0, 1.0), 1.0);
+        assert_eq!(haze_lift(0.5, -4.0), haze_lift(0.5, HAZE_HEIGHT_MIN));
+        assert_eq!(haze_lift(0.5, 9.0), haze_lift(0.5, HAZE_HEIGHT_MAX));
+        // It participates in identity like every other authored field.
+        let base = FrameSky::gradient([0.1; 3], [0.2; 3]);
+        assert_ne!(base, base.with_haze_height(q(0.2)));
+        assert_eq!(base.with_haze_height(q(0.2)), base.with_haze_height(q(0.2)));
     }
 
     #[test]

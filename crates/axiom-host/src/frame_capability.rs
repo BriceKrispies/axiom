@@ -61,6 +61,20 @@ pub enum RenderCapability {
     /// covering both would force a backend that does one and not the other to
     /// either lie or drop the one it can do.
     Bloom = 1 << 10,
+    /// Aerial perspective evaluated on the fragment's **world distance** from the
+    /// camera — the Beer–Lambert extinction term of [`crate::FrameDepthFog`] —
+    /// rather than on its normalized device depth alone.
+    ///
+    /// The split is not taste, it is what each backend physically holds. The GPU
+    /// mesh pass interpolates a world position and the SDF pass marches one, so
+    /// both can measure the metres of air a fragment is seen through. The Canvas
+    /// 2D fog is a **post-pass over the finished image**, and all it has at that
+    /// point is the z-buffer — a normalized depth, hyperbolic in distance, with
+    /// no frustum constants beside it to invert. It therefore keeps the
+    /// normalized-depth ramp it has always run, which is why this is the second
+    /// [`CapabilityDegradation::Substitute`] and not a drop: nothing is missing
+    /// from that arm, the same fog is evaluated in a coarser parameterization.
+    AerialPerspective = 1 << 11,
 }
 
 /// How a backend that lacks a [`RenderCapability`] degrades it. A capability is
@@ -77,12 +91,20 @@ pub enum CapabilityDegradation {
     Drop,
 }
 
+/// The capabilities that have a cheaper stand-in rather than an omission: the
+/// directional [`RenderCapability::Shadows`] (a planar contact shadow) and
+/// [`RenderCapability::AerialPerspective`] (the normalized-depth fog ramp). A
+/// mask rather than a chain of comparisons, so the set grows without the test
+/// growing a branch.
+const SUBSTITUTED_CAPABILITY_BITS: u32 =
+    RenderCapability::Shadows as u32 | RenderCapability::AerialPerspective as u32;
+
 impl RenderCapability {
-    /// The declared degradation for a backend that lacks this capability. Only the
-    /// directional [`Self::Shadows`] has a cheaper stand-in (a planar contact
-    /// shadow); every other capability degrades to an explicit, reported drop.
+    /// The declared degradation for a backend that lacks this capability. The two
+    /// capabilities in [`SUBSTITUTED_CAPABILITY_BITS`] have a cheaper stand-in;
+    /// every other capability degrades to an explicit, reported drop.
     pub const fn degradation(self) -> CapabilityDegradation {
-        let is_substitutable = (self as u32) == (RenderCapability::Shadows as u32);
+        let is_substitutable = (self as u32) & SUBSTITUTED_CAPABILITY_BITS != 0;
         [
             CapabilityDegradation::Drop,
             CapabilityDegradation::Substitute,
@@ -101,7 +123,8 @@ const ALL_CAPABILITY_BITS: u32 = RenderCapability::Textures as u32
     | RenderCapability::Retro32Bit as u32
     | RenderCapability::Sky as u32
     | RenderCapability::Specular as u32
-    | RenderCapability::Bloom as u32;
+    | RenderCapability::Bloom as u32
+    | RenderCapability::AerialPerspective as u32;
 
 /// The set of render capabilities a backend will attempt. The hardware GPU backends
 /// use [`Self::all`]; the Canvas 2D software backend uses [`Self::canvas2d`]. Restrict
@@ -145,6 +168,13 @@ impl BackendCapabilityProfile {
     /// through extra render targets). Each is a *declared, reported* drop — the
     /// frame still carries all three, and the Canvas 2D report enumerates what it
     /// could not honour.
+    ///
+    /// It also drops [`RenderCapability::AerialPerspective`] — the *second*
+    /// substitute alongside the directional shadow. Its fog is a post-pass over
+    /// the finished image with only a z-buffer to read, so it evaluates the
+    /// frame's [`crate::FrameDepthFog`] in normalized depth exactly as it always
+    /// has, while the GPU arms additionally evaluate the extinction term on the
+    /// world distance they have. Same authored fog, coarser parameterization.
     pub const fn canvas2d() -> Self {
         Self::all()
             .without(RenderCapability::Textures)
@@ -154,6 +184,7 @@ impl BackendCapabilityProfile {
             .without(RenderCapability::Sky)
             .without(RenderCapability::Specular)
             .without(RenderCapability::Bloom)
+            .without(RenderCapability::AerialPerspective)
     }
 
     /// Whether this profile will attempt `cap`.
@@ -188,7 +219,7 @@ impl BackendCapabilityProfile {
 mod tests {
     use super::*;
 
-    const CAPS: [RenderCapability; 11] = [
+    const CAPS: [RenderCapability; 12] = [
         RenderCapability::Textures,
         RenderCapability::AlphaMask,
         RenderCapability::NormalMapping,
@@ -200,6 +231,7 @@ mod tests {
         RenderCapability::Sky,
         RenderCapability::Specular,
         RenderCapability::Bloom,
+        RenderCapability::AerialPerspective,
     ];
 
     #[test]
@@ -212,7 +244,7 @@ mod tests {
         });
         assert_ne!(all, none);
         assert_eq!(none.bits(), 0);
-        assert_eq!(all.bits(), 0b111_1111_1111);
+        assert_eq!(all.bits(), 0b1111_1111_1111);
         assert!(format!("{all:?}").contains("BackendCapabilityProfile"));
         assert!(format!("{:?}", RenderCapability::Textures).contains("Textures"));
     }
@@ -249,6 +281,10 @@ mod tests {
         assert!(!c.contains(RenderCapability::Sky));
         assert!(!c.contains(RenderCapability::Specular));
         assert!(!c.contains(RenderCapability::Bloom));
+        // Nor can its post-pass fog measure world distance — it has a z-buffer
+        // and nothing else — so the extinction term is substituted by the
+        // normalized-depth ramp it already ran.
+        assert!(!c.contains(RenderCapability::AerialPerspective));
         // It still runs the CPU SDF march and the neutral CPU post effects. In
         // particular the whole-image colour grade survives: `PostProcess` is the
         // grade, not the bloom, which is exactly why they are separate bits.
@@ -262,15 +298,20 @@ mod tests {
     }
 
     #[test]
-    fn degradation_policy_is_substitute_only_for_shadows() {
+    fn degradation_policy_is_substitute_only_for_shadows_and_aerial_perspective() {
         // The directional shadow degrades to a cheaper planar contact-shadow stand-in.
         assert_eq!(
             RenderCapability::Shadows.degradation(),
             CapabilityDegradation::Substitute
         );
+        // The distance-based fog term degrades to the normalized-depth ramp.
+        assert_eq!(
+            RenderCapability::AerialPerspective.degradation(),
+            CapabilityDegradation::Substitute
+        );
         // Every other capability degrades to an explicit, reported drop.
         CAPS.iter()
-            .filter(|&&c| (c as u32) != (RenderCapability::Shadows as u32))
+            .filter(|&&c| (c as u32) & SUBSTITUTED_CAPABILITY_BITS == 0)
             .for_each(|&c| assert_eq!(c.degradation(), CapabilityDegradation::Drop));
         assert_ne!(
             CapabilityDegradation::Substitute,
@@ -293,6 +334,7 @@ mod tests {
         assert_eq!(RenderCapability::Sky as u32, 256);
         assert_eq!(RenderCapability::Specular as u32, 512);
         assert_eq!(RenderCapability::Bloom as u32, 1024);
+        assert_eq!(RenderCapability::AerialPerspective as u32, 2048);
         // Every bit is distinct: the OR of all of them has as many set bits as
         // there are capabilities, which a duplicated discriminant would break.
         assert_eq!(

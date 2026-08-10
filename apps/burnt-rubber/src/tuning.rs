@@ -404,6 +404,20 @@ pub struct CameraTuning {
     pub distance_boost: f32,
     /// Eye height above the car (m).
     pub height: f32,
+    /// Height above the road the look-at target sits at (m).
+    ///
+    /// This is the **pivot the whole rig pitches about**: the eye is above it and
+    /// the target is on it, so the angle the view sits below horizontal is
+    /// `atan((height - target_height) / reach)` — which is what slides the
+    /// horizon up and down the frame.
+    ///
+    /// It travels with the eye through
+    /// [`CameraTuning::framed_for_aspect`]'s lift, and only through the lift: a
+    /// lift applied to the eye alone would pitch the view further down and drag
+    /// the horizon up the frame, which is the one anchor a phone frame already
+    /// gets right. Lifting the target by the same absolute amount holds the
+    /// pitch exactly and spends the whole lift on **depression** instead.
+    pub target_height: f32,
     /// Look-ahead ahead of the car at a standstill (m).
     pub look_ahead_low: f32,
     /// Look-ahead at top speed (m).
@@ -480,11 +494,13 @@ impl CameraTuning {
     /// `height` 1.02 m → 1.55 m. Both matter and they do different jobs.
     ///
     /// **Height is what actually buys road.** The look-at target is pinned at a
-    /// fixed 0.9 m above the road a set distance ahead of the car (`TARGET_HEIGHT`
-    /// in `camera.rs`), and it does *not* rise with the eye — so lifting the eye
+    /// fixed [`CameraTuning::target_height`] above the road a set distance ahead
+    /// of the car, and *here* it does not rise with the eye — so lifting the eye
     /// pitches the whole view down, which lifts the horizon in frame and hands
     /// the freed space to road surface. Pulling back alone would not do this: it
-    /// shows more of everything at once, the sky included.
+    /// shows more of everything at once, the sky included. (The aspect re-solve
+    /// below lifts the two *together* on purpose, for the opposite reason: there
+    /// the horizon is already right and only the depression is wanted.)
     ///
     /// **Distance is what stops the car eating the middle of the shot.** For
     /// anything standing on the road, on-screen width goes as `1/d` and its drop
@@ -530,6 +546,7 @@ impl CameraTuning {
         distance_high: 7.31,
         distance_boost: 1.05,
         height: 1.55,
+        target_height: 0.9,
         look_ahead_low: 5.0,
         look_ahead_high: 14.0,
         fov_low: 65.0,
@@ -604,6 +621,42 @@ impl CameraTuning {
     ///   Note this is *not* the pull-in that was proposed and declined. The arm
     ///   is untouched; how far the car sits from the eye, and therefore how much
     ///   road is ahead of it to read a corner in, is exactly as set here.
+    /// * **A lift on top of that stretch**, and the look target lifts with it.
+    ///
+    ///   Holding `height / distance` is the right law for the *arm* and it is
+    ///   not, on its own, a composition. `fov_y` is deliberately untouched by
+    ///   this re-solve, so the frame's vertical half-field in radians is exactly
+    ///   what it was in landscape — but the arm is 1.59x longer, so everything
+    ///   standing on the road is 1.59x smaller inside that unchanged field. The
+    ///   angle the rig looks *down* at the car survives; the angle the car's
+    ///   contact patch sits *below the optical axis* does not, and that angle is
+    ///   the composition. Measured on the judged arm it collapses from 17.9° to
+    ///   12.6°: the car climbs from the lower third of the picture toward the
+    ///   middle, and the bottom **35%** of a phone frame is left as bare road
+    ///   behind the car — no lane paint, no contact shadow, no ground-plane read
+    ///   at all. The reference puts the car's tail at 73% of frame height with
+    ///   27% of foreground under it; the stretched rig puts it at 65%.
+    ///
+    ///   So the lift is solved against exactly that: **restore the authored
+    ///   drop of the car's contact patch below the optical axis**. It is not a
+    ///   taste knob and not a magnitude — it is whatever angle the stretch took
+    ///   away, converted back into metres of eye at the stretched arm. At the
+    ///   phone aspect that is 0.85 m, taking the eye to 3.31 m over a 10.27 m
+    ///   arm: a depression of 0.32, still comfortably inside the
+    ///   `PLAN_VIEW_DEPRESSION` ceiling that keeps this a view down a road.
+    ///
+    ///   The **target lifts by the same absolute amount**, which is what makes
+    ///   this cheap. The target is the pitch pivot, so an equal lift on both
+    ///   leaves `height - target_height` — and therefore the pitch, and
+    ///   therefore the horizon — bit-for-bit where the stretch put it. The whole
+    ///   lift is spent on depression: the car drops back down the frame where it
+    ///   was authored to sit, the foreground band closes from 35% to 28%, and
+    ///   the near field widens from ±1.28 m to ±1.72 m of road at the bottom
+    ///   edge, which is what brings the lane lines back into the bottom corners.
+    ///
+    ///   The arm is *still* untouched, so this is not the declined pull-in
+    ///   wearing a hat: the car is no bigger on screen, it is in the right place
+    ///   on screen, and how much road is ahead of it only grows.
     /// * The **accel pull** travels with the arm, because it is a fraction of
     ///   an arm and a fixed 0.99 m of pull on a 9 m arm is not the gesture that
     ///   was authored on a 5.6 m one.
@@ -621,6 +674,7 @@ impl CameraTuning {
         // The frame's lateral half-extent per metre of depth.
         let half_field = frame_aspect.max(0.05) * (reference_fov * 0.5).to_radians().tan();
         let stretch = (FRAMING_HALF_WIDTH / (half_field * reference_distance)).max(1.0);
+        let lift = self.composition_lift(reference_distance, stretch);
         CameraTuning {
             distance_low: self.distance_low * stretch,
             distance_high: self.distance_high * stretch,
@@ -628,12 +682,59 @@ impl CameraTuning {
             accel_pullback: self.accel_pullback * stretch,
             accel_pullback_limit: self.accel_pullback_limit * stretch,
             // The eye rises with the arm, so `height / distance` — the angle the
-            // rig looks down at the car — is the one it was authored at.
-            height: self.height * stretch,
+            // rig looks down at the car — is the one it was authored at; and
+            // then it rises a little further, so the angle the car sits *below
+            // the optical axis* — the composition — is the one it was authored
+            // at too.
+            height: self.height * stretch + lift,
+            // The pivot travels with the eye, so the pitch, and with it the
+            // horizon, do not move at all.
+            target_height: self.target_height + lift,
             ..self
         }
     }
+
+    /// Metres of extra eye height that put the car's contact patch back where
+    /// the authored rig drops it below the optical axis.
+    ///
+    /// Zero at the authored aspect, by construction *and* by the guard: at
+    /// `stretch == 1` nothing has been taken away, and multiplying by the
+    /// boolean keeps the landscape rig — and the 960x600 capture — bit-identical
+    /// rather than merely nearly so.
+    fn composition_lift(self, reference_distance: f32, stretch: f32) -> f32 {
+        let arm = reference_distance * stretch;
+        let stretched_height = self.height * stretch;
+        // The angle the car's contact patch sits below the optical axis: the
+        // depression onto its tail, less the pitch of the axis itself. This is
+        // the composition — where in the frame the subject lands.
+        let drop = |distance: f32, height: f32| {
+            self.depression(distance, height) - self.pitch(distance, height)
+        };
+        // Lifting the target with the eye leaves the pitch alone, so the eye the
+        // authored drop asks for is a straight solve at the stretched arm.
+        let wanted = (drop(reference_distance, self.height)
+            + self.pitch(arm, stretched_height))
+        .tan()
+            * (arm - SUBJECT_TAIL);
+        (wanted - stretched_height).max(0.0) * f32::from(stretch > 1.0)
+    }
+
+    /// The angle the line from the eye to the car's tail sits below horizontal.
+    fn depression(self, arm: f32, height: f32) -> f32 {
+        (height / (arm - SUBJECT_TAIL)).atan()
+    }
+
+    /// The angle the optical axis sits below horizontal, for an arm and an eye.
+    fn pitch(self, arm: f32, height: f32) -> f32 {
+        let reach = (self.look_ahead_low + self.look_ahead_high) * 0.5;
+        ((height - self.target_height) / (arm + reach)).atan()
+    }
 }
+
+/// How far behind its own origin the car's tail panel stands (m) — the point the
+/// framing is composed around, because it is the part of the car nearest the
+/// lens and the lowest thing in frame that is still the subject.
+const SUBJECT_TAIL: f32 = crate::render::car_model::CAR_LENGTH * 0.5;
 
 /// The lateral half-width (m), measured at the player's own car, that the frame
 /// must contain.
@@ -931,8 +1032,9 @@ mod tests {
     }
 
     /// A phone frame stretches the arm exactly as far as it takes to hold the
-    /// neighbouring lane in shot, and lifts the eye in step so the view keeps
-    /// the depression it was authored with.
+    /// neighbouring lane in shot, and lifts the eye in step (plus the
+    /// composition lift, which
+    /// `the_stretched_rig_keeps_the_composition_it_was_authored_with` owns).
     #[test]
     fn a_portrait_frame_stretches_the_arm_to_hold_the_lane_beside_you() {
         let authored = CameraTuning::DEFAULT;
@@ -966,29 +1068,68 @@ mod tests {
         );
     }
 
-    /// The lift is not a taste knob: it is whatever holds the *depression* the
-    /// rig was authored at — `height / distance`, the angle the rig looks down
-    /// at the car — so a stretched arm is the same shot at a longer reach and
-    /// not a flatter one.
+    /// The lift is not a taste knob: it is whatever puts the car's contact patch
+    /// back at the angle below the optical axis the authored rig drops it to —
+    /// i.e. back at the height in frame it was composed to sit at.
+    ///
+    /// Holding `height / distance` alone, which is what this used to assert, is
+    /// the right law for the *arm* and is not a composition: `fov_y` does not
+    /// change with the aspect, so a 1.59x arm makes everything on the road 1.59x
+    /// smaller inside an unchanged vertical field, the subject climbs toward the
+    /// middle of the picture, and the bottom third of a phone frame is left as
+    /// bare road behind the car. The angle that says where the subject *lands*
+    /// is the one to hold, and it is strictly stronger: holding it necessarily
+    /// keeps the depression at or above what it was authored at.
     #[test]
-    fn the_stretched_rig_keeps_the_depression_it_was_authored_with() {
+    fn the_stretched_rig_keeps_the_composition_it_was_authored_with() {
         let authored = CameraTuning::DEFAULT;
         let phone = authored.framed_for_aspect(470.0 / 836.0);
-        let depression = |c: &CameraTuning| {
-            c.height / ((c.distance_low + c.distance_high) * 0.5)
+        let arm = |c: &CameraTuning| (c.distance_low + c.distance_high) * 0.5;
+        let drop = |c: &CameraTuning| {
+            c.depression(arm(c), c.height) - c.pitch(arm(c), c.height)
         };
         assert!(
-            (depression(&phone) - depression(&authored)).abs() < 1.0e-5,
-            "{} vs {}",
-            depression(&phone),
-            depression(&authored)
+            (drop(&phone) - drop(&authored)).abs() < 1.0e-4,
+            "the subject moved in frame: {} vs {} rad",
+            drop(&phone),
+            drop(&authored)
         );
-        // Which means the eye rises with the arm — and the ceiling that keeps
-        // this a view down a road rides with the arm too. An absolute ceiling in
-        // metres said nothing once the arm could stretch, which is exactly how
-        // the old lift law got away with flattening the only frame anyone plays
-        // in; a limit on the *angle* is the thing that was actually meant.
-        assert!(phone.height > authored.height);
+
+        // The pitch is the horizon, and the horizon is the one anchor a phone
+        // frame already agrees with its reference on. Lifting the target with
+        // the eye is what leaves it exactly alone — an eye-only lift would drag
+        // it up the frame, which is what makes this cheap.
+        let stretch = phone.distance_low / authored.distance_low;
+        let stretched_only = CameraTuning { height: authored.height * stretch, ..authored };
+        assert!(
+            (phone.pitch(arm(&phone), phone.height)
+                - stretched_only.pitch(arm(&phone), stretched_only.height))
+            .abs()
+                < 1.0e-6,
+            "the lift moved the horizon"
+        );
+        assert!(
+            phone.target_height > authored.target_height,
+            "the pivot travels with the eye"
+        );
+        assert!(
+            (phone.height - authored.height * stretch
+                - (phone.target_height - authored.target_height))
+                .abs()
+                < 1.0e-4,
+            "and by exactly the same metres, or it is not a pivot"
+        );
+
+        // The eye therefore rises past the arm's own share — and the ceiling
+        // that keeps this a view down a road rather than a plan view of a car
+        // rides with the arm. An absolute ceiling in metres says nothing once
+        // the arm can stretch; a limit on the *angle* is the thing meant.
+        let depression = |c: &CameraTuning| c.height / arm(c);
+        assert!(phone.height > authored.height * stretch, "the lift is real");
+        assert!(
+            depression(&phone) > depression(&authored),
+            "and it buys depression, which is what the stretch spent"
+        );
         for rig in [authored, phone] {
             assert!(
                 depression(&rig) < PLAN_VIEW_DEPRESSION,

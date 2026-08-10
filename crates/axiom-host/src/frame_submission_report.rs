@@ -49,6 +49,11 @@ pub enum FrameFeature {
     /// Bright pixels spilling into their neighbours. Distinct from
     /// [`Self::PostProcessing`]: a backend can grade a frame it cannot bloom.
     Bloom,
+    /// The depth fog's Beer–Lambert term, evaluated on the fragment's world
+    /// distance. A backend without it substitutes the same fog's
+    /// normalized-depth ramp (see
+    /// [`RenderCapability::AerialPerspective`](crate::RenderCapability)).
+    AerialPerspective,
 }
 
 /// The uniform result of presenting one frame through any backend: which backend
@@ -186,6 +191,7 @@ mod tests {
             FrameFeature::Sky,
             FrameFeature::SpecularHighlight,
             FrameFeature::Bloom,
+            FrameFeature::AerialPerspective,
         ];
         // Bloom is its own feature, not a spelling of PostProcessing: a backend
         // that grades but cannot bloom must be able to report exactly that.

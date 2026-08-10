@@ -9,7 +9,7 @@ use axiom_render::RenderApi;
 use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
 
-use crate::shadow_view::{shadow_focus, shadow_light_view_proj};
+use crate::shadow_view::{shadow_light_view_proj, shadow_volume, ORIGIN_VOLUME};
 
 /// The report accessors — see `render_pipeline_api/report.rs`.
 mod report;
@@ -295,15 +295,26 @@ impl RenderPipelineApi {
             let depth_fix = Mat4::from_cols_array(GL_TO_WGPU_DEPTH);
             let view_projection = depth_fix.multiply(projection).multiply(view);
             // The whole world transform travels, not just the position: the SDF
-            // marcher wants the position, `shadow_focus` wants the forward axis.
-            (view, projection, view_projection, cam_world)
+            // marcher wants the position.
+            //
+            // The shadow volume is fitted HERE rather than downstream because
+            // this is the only place the camera's *intrinsics* are in scope —
+            // the fit needs the fov and aspect, not just the pose, and a volume
+            // sized without them is the fixed-cube defect `shadow_view` documents.
+            let shadow = shadow_volume(
+                cam_world,
+                cam.fovy_radians().get(),
+                cam.aspect().get(),
+                cam.near().get(),
+            );
+            (view, projection, view_projection, cam_world, shadow)
         });
         // Set the input camera and read the wgpu-ready view-projection (0-or-1
         // over the Option — no branch; absent yields identity, no camera command).
         camera
             .iter()
-            .for_each(|&(view, projection, _, _)| input.push_camera(view, projection));
-        let view_projection = camera.map_or(Mat4::IDENTITY, |(_, _, vp, _)| vp);
+            .for_each(|&(view, projection, _, _, _)| input.push_camera(view, projection));
+        let view_projection = camera.map_or(Mat4::IDENTITY, |(_, _, vp, _, _)| vp);
 
         // Lights are resolved into the report below (a frame-uniform set), not
         // collapsed into one global direction: each scene light keeps its own kind
@@ -499,19 +510,20 @@ impl RenderPipelineApi {
 
         // The directional shadow caster's light view-projection (identity when
         // there is no usable sun direction → shadows are a no-op). Its volume is
-        // centred on what this frame's camera looks at, so the map covers the
-        // action wherever in the world it happens; a camera-less scene has no
-        // view to follow and keeps the origin (`map_or`, no branch).
-        let focus = camera.map_or(Vec3::ZERO, |(_, _, _, cam)| shadow_focus(cam));
+        // the bounding sphere of this frame's own view frustum, so the map covers
+        // the action wherever in the world it happens AND at whatever field of
+        // view and aspect the frame is actually being watched at; a camera-less
+        // scene has no view to fit to and keeps the origin (`map_or`, no branch).
+        let volume = camera.map_or(ORIGIN_VOLUME, |(_, _, _, _, v)| v);
         let light_view_proj =
-            shadow_light_view_proj(frame.light_direction, focus).unwrap_or(Mat4::IDENTITY);
+            shadow_light_view_proj(frame.light_direction, volume).unwrap_or(Mat4::IDENTITY);
 
         // SDF shapes: translate each into the backend-neutral scene the live /
         // canvas path marches, reusing render's shared SDF-scene assembly. Built
         // only with a camera (the marcher needs the inverse view-projection), and
         // from the *same* wgpu-ready view-projection the meshes use, so the
         // marched SDF depth composites correctly against the rasterized meshes.
-        let sdf = camera.and_then(|(_, _, view_proj, cam_world)| {
+        let sdf = camera.and_then(|(_, _, view_proj, cam_world, _)| {
             let shapes: Vec<(u32, Mat4, Vec3, Vec4)> = snapshot
                 .sdf_shapes()
                 .iter()

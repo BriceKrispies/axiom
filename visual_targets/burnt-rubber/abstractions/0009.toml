@@ -1,0 +1,125 @@
+# BACKFILLED by the critic pass (ledger iteration 19).
+#
+# Round 2 of the era-C stack landed seven lens commits and a promote. It wrote
+# NO `scorecard.candidate.toml`, NO `[[iteration]]`, and therefore not even the
+# `abstraction_introduced` flag that iterations 7, 9, 12 and 14 each set and
+# then left unnamed. This is the first pass on this campaign's line where the
+# gate was not so much skipped as never reached: there is no ledger entry for it
+# to be skipped in.
+#
+# The abstraction it did not record is `a17c44ad` ("convergence(architect):
+# axiom-host/frame_sky — the sky gradient's shape, authored apart from its two
+# colours"):
+#
+#   crates/axiom-host/src/frame_sky.rs               +229 lines, new public
+#                                                    `FrameSky::with_haze_height`
+#   modules/axiom-gpu-backend/src/scene_renderer.rs  +27 lines, the WGSL mirror
+#                                                    and the new read out of
+#                                                    horizon.w
+#   apps/burnt-rubber/src/render/{mod,palette}.rs    the adopting call sites
+#
+# New public surface on a LAYER, mirrored into a MODULE's shader, landed inside
+# a convergence pass, with no gate record.
+#
+# This is the NINTH consecutive spine change on this campaign's line to land
+# without its record (0001..0008, and now this). Eight previous critic passes
+# have each written down that the repetition is the finding and not the
+# paperwork, and the pass after each one did it again. The diagnosis those
+# passes converged on — nothing in the loop makes the gate record a
+# precondition of landing — is now confirmed from the other side: this pass
+# dropped the ledger entry too, and the gate record went with it. The two
+# failures are the same failure. Until a promote refuses to land without an
+# `[[iteration]]`, the record will keep being written by whoever audits it
+# afterwards, which is exactly the arrangement that makes it worthless as a
+# control.
+
+axis = "color_palette"
+
+# The ">= 3 failed bounded attempts" branch does not apply on the count, and the
+# commit explains why it could not: the bounded attempts were not merely
+# unsuccessful, they were arithmetically impossible past a known point. The app
+# had been authoring its zenith stop as a slope hack for several passes — a
+# colour chosen for where it lands at 54% blend rather than for what the sky
+# overhead is — and that hack hit a hard wall: reaching the reference's
+# top-of-frame green required a blend of 0.88, and the camera's 32-degree
+# ceiling supplied 0.545, at which the required green is NEGATIVE. No value of
+# either authored stop could have converged, because the wall was the gradient's
+# SHAPE and the app could only author its two ends.
+failed_attempts = []
+
+inexpressible = true
+
+# Why nothing at the app tier could reach it:
+#
+#   `FrameSky` ran its two stops over a fixed smoothstep of the raw
+#   up-component, fixing the gradient's midpoint at 30 degrees of elevation.
+#   That is a reasonable default for a camera that looks at the sky and wrong
+#   for every camera that does not. A chase camera pinned near the horizon never
+#   evaluates the upper half of its own sky, so the authored zenith is a colour
+#   the frame never contains. An app may author the two stops; it may not author
+#   the curve between them, and the curve was the defect.
+#
+# CAPABILITY SCOPING — CORRECT, AND CHECKED. The change rides the EXISTING `Sky`
+# capability rather than introducing a new bit: the GPU arm evaluates it and the
+# Canvas 2D profile drops the whole sky and reports that it did
+# (`crates/axiom-host/src/frame_capability.rs`). The richness therefore lands on
+# the judged arm and degrades on the guarded one BY DECLARATION, which is the
+# disposition the brief asks for. The uniform layout is unchanged — the height
+# rides in `horizon.w`, which was padding — so no backend contract widened.
+#
+# Ruling: MISSING-RECORD, backfilled — not too-early, not ceremonial.
+
+smallest_api = """
+One method on one existing layer type, plus the mirror that makes it real on the
+judged arm.
+
+  `FrameSky::with_haze_height(h)` names the up-component at which the dome
+  stands halfway between its two stops. It is one scalar on a type that already
+  owns both stops, so the concept lands where the concept is defined rather than
+  being smuggled through an app-tier fudge of one of the colours.
+
+  The reshaping curve is a rational bias, `up / (up + (1 - up))` generalised by
+  the height, and NOT a power. Three consequences, all of which are why this is
+  the right size rather than merely a small one: at the default 0.5 it collapses
+  to `up` exactly, so every sky authored before the parameter existed evaluates
+  to identical bits and the pre-existing exactness test passes untouched; both
+  ends stay exact at every height, so a gradient cannot return almost-horizon
+  colour at eye level and draw a seam along every outdoor horizon; and it is
+  four arithmetic ops, so the WGSL mirror cannot drift the way `pow` against
+  `exp2(log2(x))` can across backends.
+
+Smaller was available and would have been wrong. A burnt-rubber-side remap of
+the zenith stop is what the app was ALREADY doing, and its ceiling is the whole
+reason this commit exists — it is the bounded attempt, and it is exhausted.
+Larger was also available and was correctly declined: no new capability bit, no
+new uniform slot, no second sky type.
+"""
+
+# ---------------------------------------------------------------------------
+# CONCERN 1 — THE VERIFICATION IS A SOURCE FACT AGAIN
+# ---------------------------------------------------------------------------
+# 0008.toml's generalisable finding was that an abstraction verifiable at the
+# source is the kind whose source proof is most likely to be substituted for the
+# scoring measurement it is not. This commit repeats the pattern and should be
+# read with that warning attached: "top of frame moves from (3, 139, 199) to
+# (0, 85, 185) against the reference's (0, 85, 184)" is a true, checkable,
+# single-pixel-row fact about one gradient stop. It is not evidence about
+# `color_palette`, which is scored on the whole frame's hue families,
+# saturation and missing colours — and on that measurement the axis HELDS at 2
+# in this pass's scorecard, with whole-frame saturation still crossed over at
+# 0.566 against 0.522.
+#
+# ---------------------------------------------------------------------------
+# CONCERN 2 — THE STANDING DEBTS, NOW OWED NINE TIMES
+# ---------------------------------------------------------------------------
+# No spine gate run (coverage / check-architecture / dylint) is recorded for any
+# of the nine spine commits on this campaign's line, this one included — and it
+# touches BOTH a layer and a module, so it sits inside the Coverage Law's and
+# the Branchless Law's scope at once. The commit message asserts the exactness
+# test still passes; the record contains no run that confirms it, and no run of
+# the other three gates at all.
+#
+# Also standing, and now one pass older: `champions/contact-sheet.png` was last
+# regenerated at `bcc79aaf` and is missing rows 0011 and later. Iteration 18
+# corrected iteration 17's refusal (it is PIL tiling of PNGs already on disk,
+# not a render step) and it still has not been done.

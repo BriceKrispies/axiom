@@ -7,6 +7,33 @@
 //! a wedge nose, a raked cabin set back, four wheels that visibly turn and
 //! steer, brake lights that come on, and boost exhaust that does not.
 //!
+//! ## The proportion is a long bonnet, and that is the first thing you read
+//!
+//! Before any panel or lamp, a car is a *plan proportion*: where the cabin sits
+//! along the length. A cab-forward car with the windscreen over the front axle
+//! is a hatchback; a car with the cabin set well aft behind a long bonnet is a
+//! muscle fastback, and it is a fastback from any angle, including the one angle
+//! this game ever uses. This car was cab-forward — a 1.55 m cabin sitting almost
+//! amidships with a short stub of nose beyond it — and from the chase camera it
+//! read as short and tall rather than long and low, because the only cue the
+//! camera has for length is *how much car there is ahead of the roof*.
+//!
+//! So the car is built in three volumes along its length, not two:
+//!
+//! * the **tub** — flanks, floor and decklid — which now stops at the **cowl**,
+//!   the shut line at the base of the windscreen, instead of running most of the
+//!   way to the nose;
+//! * the **bonnet** — a long, slightly narrower and slightly lower panel from the
+//!   cowl forward, which is the surface the whole long-nose read lives on;
+//! * the **prow** — narrower and lower again, the last half-metre.
+//!
+//! Bonnet and prow are what a chamfered wedge nose is when the vocabulary is
+//! boxes: each tier steps in *and* down, so the silhouette narrows toward the
+//! vanishing point instead of ending in one flat slab the width of the body. The
+//! flat roof shortens to pay for it — which is also what a fastback's roof does,
+//! since its roofline is mostly backlight — and the roof's *rear* edge does not
+//! move, so the rear screen, the sails and the whole tail are untouched.
+//!
 //! ## The car is seen from behind, so the rear is where the parts go
 //!
 //! The chase camera looks at the player's tail for the entire race: the rear
@@ -59,9 +86,9 @@
 //! planes. Two things break them up, and both are the things a muscle car is
 //! recognised by from directly behind:
 //!
-//! * **twin centre stripes**, in three segments that follow the surfaces they
-//!   cross — over the roof skin, across the decklid, and out to the tail over
-//!   the decklid lip. Painted stripes are not a texture here: the engine's
+//! * **twin centre stripes**, in four segments that follow the surfaces they
+//!   cross — down the bonnet, over the roof skin, across the decklid, and out to
+//!   the tail over the decklid lip. Painted stripes are not a texture here: the engine's
 //!   material vocabulary has no decals, so a stripe is a shallow box laid a
 //!   centimetre proud of the panel it sits on. That is also why they are
 //!   segmented — one straight box cannot follow a roof and a deck at two
@@ -99,6 +126,45 @@ pub const WHEEL_WIDTH: f32 = 0.30;
 pub const WHEELBASE_HALF: f32 = 1.42;
 /// Half the track width between wheel centres (m).
 pub const TRACK_HALF: f32 = 0.86;
+
+/// Where the outer face of the tail panel sits along the car (m).
+///
+/// The back of the car, and the one end of it that is pinned: the chase camera
+/// is framed on the tail, so lengthening the car has to happen at the nose.
+pub const BODY_TAIL_Z: f32 = -1.905;
+
+/// Where the cowl sits along the car (m) — the base of the windscreen, and the
+/// shut line between the tub and the bonnet.
+///
+/// This is the number the whole proportion turns on. Everything aft of it is
+/// cabin and deck; everything ahead of it is bonnet. Push it forward and the car
+/// becomes cab-forward — a hatchback with a spoiler.
+pub const COWL_Z: f32 = 0.53;
+
+/// Where the bonnet ends and the prow begins (m).
+pub const PROW_Z: f32 = 2.00;
+
+/// Where the very front of the car is (m).
+pub const NOSE_Z: f32 = 2.66;
+
+/// How high the bonnet's top surface stands above the car's floor (m).
+///
+/// A shade under the tub's shoulder at 0.72, so the cowl reads as a shut line
+/// and the front tyres crown just proud of the bonnet — which is what a wheel
+/// arch looks like on a car whose fenders stand above its bonnet.
+pub const BONNET_HEIGHT: f32 = 0.68;
+
+/// How high the prow's top surface stands above the car's floor (m).
+pub const PROW_HEIGHT: f32 = 0.52;
+
+/// How wide the bonnet is, as a fraction of the car's full width.
+pub const BONNET_WIDTH_FRACTION: f32 = 0.80;
+
+/// How wide the prow is, as a fraction of the car's full width.
+///
+/// Narrower than the bonnet, which is narrower than the tub: three tiers is what
+/// a chamfered wedge nose is when the vocabulary is boxes.
+pub const PROW_WIDTH_FRACTION: f32 = 0.65;
 
 /// How far the rear window lies back from horizontal (rad).
 ///
@@ -145,6 +211,20 @@ pub const ROOF_HEIGHT: f32 = 0.98;
 /// whether the car reads as a coupe or as a pickup cab. The painted
 /// [`ROOF_SKIN`] takes the top slice of it, so what is left showing is a band.
 pub const GREENHOUSE_HEIGHT: f32 = 0.20;
+
+/// Where the back of the cabin sits along the car (m).
+///
+/// Pinned: the rear screen hangs off the back of the roof, so this is the one
+/// end of the cabin that cannot move without moving the whole tail with it.
+pub const CABIN_REAR_Z: f32 = -0.535;
+
+/// How long the cabin is, fore and aft (m).
+///
+/// Short, because a fastback's roofline is mostly backlight and because every
+/// centimetre the cabin does not spend is a centimetre of bonnet. Its back edge
+/// is pinned at [`CABIN_REAR_Z`], so shortening it moves the *windscreen* aft —
+/// which is exactly the edit that turns a cab-forward car into a long-nosed one.
+pub const CABIN_LENGTH: f32 = 1.05;
 
 /// How wide the body box is, as a fraction of the car's full width.
 ///
@@ -212,8 +292,13 @@ pub const TRIM_PROUD: f32 = 0.015;
 /// The player car's parts.
 #[derive(Debug, Clone)]
 pub struct PlayerCar {
+    /// The tub: flanks, floor and decklid, from the tail forward to the cowl.
     body: Entity,
-    nose: Entity,
+    /// The long panel from the cowl forward — the surface the long-nose read
+    /// lives on, and the second tier of the wedge.
+    bonnet: Entity,
+    /// The last half-metre: narrower and lower again, the third tier.
+    prow: Entity,
     cabin: Entity,
     /// The painted panel capping the cabin — the roof, as opposed to the glass.
     roof: Entity,
@@ -223,9 +308,9 @@ pub struct PlayerCar {
     wing: Entity,
     haunches: [Entity; 2],
     valance: Entity,
-    /// The twin centre stripes, in surface order: roof pair, backlight pair,
-    /// decklid pair.
-    stripes: [Entity; 6],
+    /// The twin centre stripes, front to back: bonnet pair, roof pair, decklid
+    /// pair, lip pair.
+    stripes: [Entity; 8],
     plate: Entity,
     /// The round centre badge, between the two lamp clusters.
     badge: Entity,
@@ -252,7 +337,8 @@ impl PlayerCar {
         };
         PlayerCar {
             body: part(app, cube, livery.body),
-            nose: part(app, cube, livery.body),
+            bonnet: part(app, cube, livery.body),
+            prow: part(app, cube, livery.body),
             cabin: part(app, cube, livery.glass),
             // The roof skin and the sail panels are paint, not glass: they are
             // the frame the rear screen is an aperture in.
@@ -266,6 +352,8 @@ impl PlayerCar {
             // rear panel reading as one tall coloured slab.
             valance: part(app, cube, livery.tyre),
             stripes: [
+                part(app, cube, livery.trim),
+                part(app, cube, livery.trim),
                 part(app, cube, livery.trim),
                 part(app, cube, livery.trim),
                 part(app, cube, livery.trim),
@@ -318,40 +406,81 @@ impl PlayerCar {
                 app.set(entity, Visible(true));
             });
 
-        // Body: the main mass, sitting low — and narrower than the wheel track,
-        // so the tyres and the arches, not the flanks, are the widest thing.
+        // Tub: the main mass, sitting low — narrower than the wheel track, so the
+        // tyres and the arches, not the flanks, are the widest thing — and
+        // stopping at the *cowl* rather than running on toward the nose. The tub
+        // is cabin and deck; the bonnet ahead of it is its own volume, and that
+        // separation is what buys the car a long nose.
         app.set(
             self.body,
             Transform::new(
-                basis.at(Vec3::new(0.0, 0.46, -0.15)),
+                basis.at(Vec3::new(0.0, 0.46, (COWL_Z + BODY_TAIL_Z) * 0.5)),
                 rotation,
-                Vec3::new(CAR_WIDTH * BODY_WIDTH_FRACTION, 0.52, CAR_LENGTH * 0.78),
+                Vec3::new(
+                    CAR_WIDTH * BODY_WIDTH_FRACTION,
+                    0.52,
+                    COWL_Z - BODY_TAIL_Z,
+                ),
             ),
         );
-        // Nose: narrower and lower still, so the silhouette is a wedge.
+        // Bonnet: the long panel from the cowl to the prow, a step narrower and a
+        // step lower than the tub. It shares the tub's floor so nothing hangs in
+        // the air, and its top face is what the front stripes are painted on.
         app.set(
-            self.nose,
+            self.bonnet,
             Transform::new(
-                basis.at(Vec3::new(0.0, 0.34, 1.90)),
+                basis.at(Vec3::new(
+                    0.0,
+                    (BONNET_HEIGHT + 0.20) * 0.5,
+                    (PROW_Z + COWL_Z) * 0.5,
+                )),
                 rotation,
-                Vec3::new(CAR_WIDTH * 0.72, 0.34, 1.20),
+                Vec3::new(
+                    CAR_WIDTH * BONNET_WIDTH_FRACTION,
+                    BONNET_HEIGHT - 0.20,
+                    PROW_Z - COWL_Z,
+                ),
             ),
         );
-        // Cabin: a narrow, *chopped* greenhouse — long fore-and-aft and barely
-        // taller than the decklid lip, sitting straight on the body's shoulder
-        // line at 0.72. A cabin as wide as the body is a van roof; a cabin as
-        // tall as it is wide is a pickup cab. This box is the *glazing*; the
-        // painted skin below caps it, so what shows down each flank is a band.
+        // Prow: narrower and lower again — the third tier of the wedge, and the
+        // one that makes the car taper toward the vanishing point instead of
+        // ending in a slab the width of its own flanks.
+        app.set(
+            self.prow,
+            Transform::new(
+                basis.at(Vec3::new(
+                    0.0,
+                    (PROW_HEIGHT + 0.22) * 0.5,
+                    (NOSE_Z + PROW_Z) * 0.5,
+                )),
+                rotation,
+                Vec3::new(
+                    CAR_WIDTH * PROW_WIDTH_FRACTION,
+                    PROW_HEIGHT - 0.22,
+                    NOSE_Z - PROW_Z,
+                ),
+            ),
+        );
+        // Cabin: a narrow, *chopped* greenhouse — barely taller than the decklid
+        // lip, sitting straight on the body's shoulder line at 0.72, and set well
+        // aft: its back edge is pinned at CABIN_REAR_Z and it is only
+        // CABIN_LENGTH long, so its windscreen lands near the cowl and the whole
+        // metre and a half in front of that is bonnet. A cabin as wide as the
+        // body is a van roof; a cabin as tall as it is wide is a pickup cab; a
+        // cabin that runs on toward the front axle is a hatchback. This box is
+        // the *glazing*; the painted skin below caps it, so what shows down each
+        // flank is a band.
+        let cabin_centre_z = CABIN_REAR_Z + CABIN_LENGTH * 0.5;
         app.set(
             self.cabin,
             Transform::new(
                 basis.at(Vec3::new(
                     0.0,
                     ROOF_HEIGHT - ROOF_SKIN - GREENHOUSE_HEIGHT * 0.5,
-                    0.24,
+                    cabin_centre_z,
                 )),
                 rotation,
-                Vec3::new(CAR_WIDTH * 0.64, GREENHOUSE_HEIGHT, 1.55),
+                Vec3::new(CAR_WIDTH * 0.64, GREENHOUSE_HEIGHT, CABIN_LENGTH),
             ),
         );
         // Roof skin: the painted panel over the cabin, a shade wider and longer
@@ -360,9 +489,9 @@ impl PlayerCar {
         app.set(
             self.roof,
             Transform::new(
-                basis.at(Vec3::new(0.0, ROOF_HEIGHT - ROOF_SKIN * 0.5, 0.24)),
+                basis.at(Vec3::new(0.0, ROOF_HEIGHT - ROOF_SKIN * 0.5, cabin_centre_z)),
                 rotation,
-                Vec3::new(CAR_WIDTH * 0.66, ROOF_SKIN, 1.57),
+                Vec3::new(CAR_WIDTH * 0.66, ROOF_SKIN, CABIN_LENGTH + 0.02),
             ),
         );
         // Backlight: the raked rear window running from the back of the roof
@@ -437,19 +566,30 @@ impl PlayerCar {
             ),
         );
 
-        // Twin centre stripes, in three segments that each lie on the painted
-        // panel they belong to. All three are square to the chassis, because all
-        // three surfaces are: the stripes stop at the foot of the roof and pick
-        // up again at the foot of the glass, exactly as paint does.
+        // Twin centre stripes, in four segments that each lie on the painted
+        // panel they belong to, running front to back. All four are square to the
+        // chassis, because all four surfaces are: the stripes stop at the foot of
+        // the windscreen and of the roof and pick up again beyond, exactly as
+        // paint does. The bonnet pair is not decoration — a metre and a half of
+        // blank paint ahead of the roof reads as a gap in the car, and the
+        // stripes running away up it are what makes the length legible from the
+        // one camera that ever sees this car.
         let stripe_thickness = 0.02;
         // (height, along-track centre, orientation, length) per surface.
-        let segments: [(f32, f32, Quat, f32); 3] = [
+        let segments: [(f32, f32, Quat, f32); 4] = [
+            // Bonnet: from the cowl forward to just short of the prow step.
+            (
+                BONNET_HEIGHT + stripe_thickness * 0.5 + TRIM_PROUD,
+                (PROW_Z + COWL_Z) * 0.5,
+                rotation,
+                PROW_Z - COWL_Z - 0.06,
+            ),
             // Roof skin: the full length of the cabin, sitting on its top face.
             (
                 ROOF_HEIGHT + stripe_thickness * 0.5 + TRIM_PROUD,
-                0.24,
+                cabin_centre_z,
                 rotation,
-                1.55,
+                CABIN_LENGTH,
             ),
             // Decklid: the flat deck between the foot of the backlight
             // (z = -1.24) and the front of the lip (z = -1.56), on the body's
@@ -596,7 +736,8 @@ impl PlayerCar {
     fn always_on(&self) -> Vec<Entity> {
         let mut all = vec![
             self.body,
-            self.nose,
+            self.bonnet,
+            self.prow,
             self.cabin,
             self.roof,
             self.backlight,
@@ -617,7 +758,8 @@ impl PlayerCar {
     pub fn entities(&self) -> Vec<Entity> {
         let mut all = vec![
             self.body,
-            self.nose,
+            self.bonnet,
+            self.prow,
             self.cabin,
             self.roof,
             self.backlight,
@@ -955,6 +1097,88 @@ mod tests {
         );
     }
 
+    /// The car is a long-bonnet fastback: there is more car ahead of the
+    /// windscreen than behind the rear screen, and the nose tapers in plan and in
+    /// elevation over three tiers rather than ending in one slab.
+    ///
+    /// Pushing the cabin forward, or collapsing the bonnet and the prow back into
+    /// a single stub, is exactly the edit that turns this car back into the
+    /// stubby cab-forward hatchback it was — so it fails here.
+    #[test]
+    fn the_bonnet_is_longer_than_the_deck_and_the_nose_tapers_over_three_tiers() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let car = PlayerCar::install(&mut app, &palette.player_livery());
+        let pose = pose_at(0.0, 0.0, 0.0);
+        car.pose(&mut app, &pose, 0.0, 0.0);
+
+        let body = app.get::<Transform>(car.body).unwrap();
+        let bonnet = app.get::<Transform>(car.bonnet).unwrap();
+        let prow = app.get::<Transform>(car.prow).unwrap();
+        let cabin = app.get::<Transform>(car.cabin).unwrap();
+        // At zero yaw the chassis is world-aligned, so +Z is the nose.
+        let along = |t: &Transform| {
+            (
+                t.translation.z - pose.position.z - t.scale.z * 0.5,
+                t.translation.z - pose.position.z + t.scale.z * 0.5,
+            )
+        };
+        let (cabin_back, cabin_front) = along(&cabin);
+        let (bonnet_back, bonnet_front) = along(&bonnet);
+        let (prow_back, prow_front) = along(&prow);
+        let (tail, cowl) = along(&body);
+
+        // The tub stops at the cowl, and the bonnet takes over from there.
+        assert!(
+            (cowl - COWL_Z).abs() < 1.0e-4 && (tail - BODY_TAIL_Z).abs() < 1.0e-4,
+            "the tub does not span tail to cowl: {tail}..{cowl}"
+        );
+        assert!(
+            bonnet_back <= cowl + 1.0e-3 && prow_back <= bonnet_front + 1.0e-3,
+            "the three volumes leave a gap: {tail}..{cowl}..{bonnet_front}..{prow_front}"
+        );
+        // The cabin is set aft of the cowl, not forward over the front axle.
+        assert!(
+            cabin_front < COWL_Z + 1.0e-3 && cabin_front < WHEELBASE_HALF,
+            "the windscreen sits ahead of the cowl: {cabin_front}"
+        );
+        // And the long-nose read itself: more bonnet than deck, by a margin.
+        let bonnet_run = prow_front - cabin_front;
+        let deck_run = cabin_back - tail;
+        assert!(
+            bonnet_run > deck_run * 1.4,
+            "the car is cab-forward: {bonnet_run} m of bonnet against {deck_run} m of deck"
+        );
+
+        // The wedge: each tier steps in *and* down toward the nose.
+        assert!(
+            body.scale.x > bonnet.scale.x && bonnet.scale.x > prow.scale.x,
+            "the nose does not taper in plan: {} {} {}",
+            body.scale.x,
+            bonnet.scale.x,
+            prow.scale.x
+        );
+        let top = |t: &Transform| t.translation.y - pose.position.y + t.scale.y * 0.5;
+        assert!(
+            top(&body) > top(&bonnet) && top(&bonnet) > top(&prow),
+            "the nose does not drop toward the front: {} {} {}",
+            top(&body),
+            top(&bonnet),
+            top(&prow)
+        );
+        // Nothing hangs in the air: the front tiers share the tub's floor.
+        let floor = |t: &Transform| t.translation.y - pose.position.y - t.scale.y * 0.5;
+        assert!(
+            floor(&bonnet) <= floor(&body) + 0.05 && floor(&prow) <= floor(&body) + 0.05,
+            "a front volume floats above the floor"
+        );
+        // The front tyres still crown at or above the bonnet, as fenders do.
+        assert!(
+            WHEEL_RADIUS * 2.0 >= top(&bonnet) - 0.05,
+            "the bonnet has swallowed the front wheels"
+        );
+    }
+
     /// The greenhouse is a chopped slot, not a cab.
     ///
     /// This is the edit that turns the car back into a pickup: raise the roof,
@@ -1211,7 +1435,7 @@ mod tests {
     /// segment sits *on* the painted panel it belongs to rather than inside it —
     /// and none of them is painted on the glass.
     #[test]
-    fn the_twin_stripes_lie_on_the_roof_the_decklid_and_the_lip() {
+    fn the_twin_stripes_lie_on_the_bonnet_the_roof_the_decklid_and_the_lip() {
         let mut app = app();
         let palette = ScenePalette::install(&mut app);
         let car = PlayerCar::install(&mut app, &palette.player_livery());
@@ -1244,32 +1468,50 @@ mod tests {
                 "the two stripes have run into each other"
             );
         }
+        // Bonnet pair: on the bonnet's top face, and lying wholly on it — a
+        // stripe that overruns the cowl is painted on thin air.
+        let bonnet = app.get::<Transform>(car.bonnet).unwrap();
+        let bonnet_top = bonnet.translation.y + bonnet.scale.y * 0.5;
+        assert!(
+            stripes[0].translation.y - stripes[0].scale.y * 0.5 > bonnet_top
+                && stripes[0].translation.y - stripes[0].scale.y * 0.5 < bonnet_top + 0.05,
+            "the bonnet stripe floats or sinks: {}",
+            stripes[0].translation.y
+        );
+        assert!(
+            stripes[0].translation.z - stripes[0].scale.z * 0.5
+                >= bonnet.translation.z - bonnet.scale.z * 0.5 - 1.0e-3
+                && stripes[0].translation.z + stripes[0].scale.z * 0.5
+                    <= bonnet.translation.z + bonnet.scale.z * 0.5 + 1.0e-3,
+            "the bonnet stripe runs off the end of the bonnet: {:?}",
+            stripes[0].translation
+        );
         // Roof pair: resting on the painted skin's top face, not on the glazing.
         let roof = skin.translation.y + skin.scale.y * 0.5;
         assert!(
-            stripes[0].translation.y - stripes[0].scale.y * 0.5 > roof
-                && stripes[0].translation.y - stripes[0].scale.y * 0.5 < roof + 0.05,
+            stripes[2].translation.y - stripes[2].scale.y * 0.5 > roof
+                && stripes[2].translation.y - stripes[2].scale.y * 0.5 < roof + 0.05,
             "the roof stripe floats or sinks: {}",
-            stripes[0].translation.y
+            stripes[2].translation.y
         );
         // Decklid pair: on the body's own top face, in the gap the backlight
         // leaves between its foot and the lip.
         let deck = body.translation.y + body.scale.y * 0.5;
         assert!(
-            stripes[2].translation.y - stripes[2].scale.y * 0.5 > deck
-                && stripes[2].translation.y - stripes[2].scale.y * 0.5 < deck + 0.05,
+            stripes[4].translation.y - stripes[4].scale.y * 0.5 > deck
+                && stripes[4].translation.y - stripes[4].scale.y * 0.5 < deck + 0.05,
             "the deck stripe floats or sinks: {}",
-            stripes[2].translation.y
+            stripes[4].translation.y
         );
         let glass_foot = glass
             .translation
             .subtract(glass.rotation.rotate(Vec3::UNIT_Z).mul_scalar(glass.scale.z * 0.5));
         assert!(
-            stripes[2].translation.z + stripes[2].scale.z * 0.5 <= glass_foot.z + 1.0e-3
-                && stripes[2].translation.z - stripes[2].scale.z * 0.5
+            stripes[4].translation.z + stripes[4].scale.z * 0.5 <= glass_foot.z + 1.0e-3
+                && stripes[4].translation.z - stripes[4].scale.z * 0.5
                     >= wing.translation.z + wing.scale.z * 0.5 - 1.0e-3,
             "the deck stripe runs under the glass or over the lip: {:?}",
-            stripes[2].translation
+            stripes[4].translation
         );
         // No segment is painted on the glass, and none carries its rake.
         let square = ChassisBasis::of(&pose).rotation();

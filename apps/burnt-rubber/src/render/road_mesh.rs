@@ -28,6 +28,7 @@ use crate::tuning::CourseTuning;
 
 use super::asphalt_texture::TILE_METRES;
 use super::surface_builder::SurfaceBuilder;
+use super::verge_texture::TILE_METRES as VERGE_TILE;
 
 /// The span of course one **authoring** chunk covers (m).
 ///
@@ -302,19 +303,50 @@ const SHOULDER_DROP: f32 = 0.09;
 /// leaves that strip with no geometry at all - a hole either side of the road
 /// that the player sees straight through, worst exactly when they are off-line
 /// and looking at it.
+///
+/// ## The ground is UV-mapped in metres too, and here it matters more
+///
+/// The paving learned this lesson first (see [`paving_uvs`]), but the verge is
+/// the worse offender by an order of magnitude: a verge quad spans from the
+/// shoulder edge out past the barrier by [`VERGE_REACH`] — roughly **47 m**
+/// laterally — by a single 2 m sample step. The builder's default `0..1`-per-quad
+/// UVs stretch one copy of [`super::verge_texture`]'s ground cover across all of
+/// that, at 23:1, and then repeat that same smeared copy in lock-step every two
+/// metres down the course. Whatever the texture is authored as, that mapping
+/// renders it as transverse banding running to the horizon.
+///
+/// Deriving each corner's UV from its own world position fixes both at the root,
+/// exactly as it did for the paving: `u` is the lateral offset in metres and `v`
+/// the absolute course distance, each over the ground texture's own
+/// [`VERGE_TILE`]. Adjacent chunks share their boundary sample, so they share its
+/// `distance` exactly and the mapping cannot crack; `Repeat` plus the texture's
+/// toroidal clump field means the resulting non-integer tile counts leave no seam.
 fn strip_verge(out: &mut SurfaceBuilder, track: &Track, a: &TrackSample, b: &TrackSample) {
     let inner_a = a.half_width + track.shoulder();
     let inner_b = b.half_width + track.shoulder();
     let outer_a = track.barrier_offset(a) + VERGE_REACH;
     let outer_b = track.barrier_offset(b) + VERGE_REACH;
     for side in [-1.0f32, 1.0] {
-        out.ground_quad(
+        out.ground_quad_with_uvs(
             a.at_lateral(side * inner_a).add(a.up.mul_scalar(-VERGE_DROP)),
             b.at_lateral(side * inner_b).add(b.up.mul_scalar(-VERGE_DROP)),
             b.at_lateral(side * outer_b).add(b.up.mul_scalar(-VERGE_FALL)),
             a.at_lateral(side * outer_a).add(a.up.mul_scalar(-VERGE_FALL)),
+            ground_uvs([
+                (side * inner_a, a.distance),
+                (side * inner_b, b.distance),
+                (side * outer_b, b.distance),
+                (side * outer_a, a.distance),
+            ]),
         );
     }
+}
+
+/// Corner UVs for a verge quad, from each corner's `(lateral, along)` position on
+/// the course in metres. The ground texture's tile, not the paving's — roadside
+/// cover is an order coarser than road aggregate.
+fn ground_uvs(corners: [(f32, f32); 4]) -> [Vec2; 4] {
+    corners.map(|(lateral, along)| Vec2::new(lateral / VERGE_TILE, along / VERGE_TILE))
 }
 
 /// Drop at the inner edge of the verge (m). Large enough that the verge and the
@@ -942,6 +974,45 @@ mod tests {
         let touches = |data: &MeshData| data.uvs().iter().any(|uv| (uv.y - seam).abs() < 1.0e-3);
         assert!(touches(&here.surface), "chunk 7 reaches the seam's v");
         assert!(touches(&next.surface), "and chunk 8 starts at the same v");
+    }
+
+    /// **The verge's ground cover is mapped in metres, not once per quad.**
+    ///
+    /// Without this the whole of [`super::verge_texture`] is wasted: a verge quad
+    /// is ~47 m across by one 2 m sample step, so the builder's default unit UVs
+    /// stretch a single tile over it at 23:1 and repeat that same smeared copy
+    /// every two metres to the horizon. The failure looks like transverse
+    /// banding, not like a missing texture, which is exactly the kind of defect
+    /// that survives a glance at the frame — so it is asserted here rather than
+    /// left to the mapping's own good intentions.
+    #[test]
+    fn the_verge_is_uv_mapped_in_metres_of_ground() {
+        let track = track();
+        let chunk = build_chunk(&track, 0, &CourseTuning::DEFAULT);
+        let uvs = chunk.verge.uvs();
+        let (u_lo, u_hi) = uvs
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), uv| (lo.min(uv.x), hi.max(uv.x)));
+        let (v_lo, v_hi) = uvs
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), uv| (lo.min(uv.y), hi.max(uv.y)));
+        // Across: both verges together span well past one tile — the ground is
+        // dozens of tiles wide, not one stretched copy.
+        assert!(
+            u_hi - u_lo > 20.0,
+            "the ground cover spans only {:.1} tiles across both verges",
+            u_hi - u_lo
+        );
+        // Along: a 100 m chunk is many tiles, and anchored to absolute course
+        // distance so chunk 30 does not restart the pattern chunk 0 drew.
+        assert!(
+            v_hi - v_lo > CHUNK_LENGTH / VERGE_TILE - 2.0,
+            "the ground cover repeats only {:.1} times over a {CHUNK_LENGTH} m chunk",
+            v_hi - v_lo
+        );
+        let later = build_chunk(&track, 30, &CourseTuning::DEFAULT);
+        let later_v = later.verge.uvs().iter().map(|uv| uv.y).fold(f32::MIN, f32::max);
+        assert!(later_v > v_hi, "the ground mapping restarts at every chunk");
     }
 
     #[test]

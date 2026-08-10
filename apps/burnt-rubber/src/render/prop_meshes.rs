@@ -49,10 +49,26 @@ pub fn install_cone(app: &mut RunningApp) -> Handle<Mesh> {
 
 /// How many fronds a palm crown carries.
 ///
-/// Seven is the smallest count that still reads as a *star* from behind the car
-/// rather than as a cross, and it is odd, so the fan is never symmetric about
-/// the view axis however the crown is yawed.
-pub const FRONDS: u32 = 7;
+/// Seven is the smallest count that reads as a *star* rather than as a cross,
+/// but a star is not what a palm is. Seven blades leave visible sky between
+/// every pair, so an avenue of them reads as a row of aerials: the eye counts
+/// the spokes. Thirteen is the count at which the blades stop being countable
+/// and the crown becomes a *mass* with a ragged edge, which is what a palm is
+/// from a car. It is still odd, so the fan is never symmetric about the view
+/// axis however the crown is yawed, and it is coprime with `FROND_RANKS`, so
+/// the three ranks interleave all the way round instead of clumping.
+pub const FRONDS: u32 = 13;
+
+/// The three ranks a crown's fronds cycle through, as `(reach, droop)`
+/// fractions of the longest, deepest-hanging blade.
+///
+/// A crown whose blades are all one length and all fall the same distance is a
+/// flat pinwheel: it has an outline but no body, and it flickers as the yaw
+/// changes because every blade crosses the silhouette at once. A real crown has
+/// old blades hanging near-vertically under young ones still holding their arch,
+/// so the shape has depth from any angle. Three ranks is the fewest that gives
+/// a hanging skirt, a mid tier and a raised crest.
+const FROND_RANKS: [(f32, f32); 3] = [(1.00, 1.00), (0.78, 0.42), (0.90, 0.72)];
 
 /// The height, as a fraction of the crown's own box, at which the fronds meet
 /// the trunk. Everything above it is the arch of the frond; everything below is
@@ -60,8 +76,9 @@ pub const FRONDS: u32 = 7;
 /// the two numbers can never disagree.
 pub const CROWN_ROOT_HEIGHT: f32 = 0.80;
 
-/// Register the unit palm crown: a fan of `FRONDS` drooping blades, authored
-/// centred on the origin inside the unit box like the engine's own primitives.
+/// Register the unit palm crown: a fan of `FRONDS` drooping blades in the three
+/// `FROND_RANKS`, authored centred on the origin inside the unit box like the
+/// engine's own primitives.
 ///
 /// A frond is two flat quads — root to arch, arch to drooping tip — emitted
 /// twice with opposite facing so a blade is visible from underneath as well as
@@ -78,15 +95,22 @@ pub fn install_palm_crown(app: &mut RunningApp) -> Handle<Mesh> {
 /// be asserted on directly rather than through a mesh handle.
 fn palm_crown_surface() -> SurfaceBuilder {
     let mut builder = SurfaceBuilder::with_quad_capacity(FRONDS as usize * 4);
-    // (radius from the stem, height, half-width of the blade) at the three
-    // points that define a frond: where it leaves the trunk, the top of its
-    // arch, and the tip it droops to.
-    let root = (0.04f32, 0.30f32, 0.030f32);
-    let arch = (0.24f32, 0.50f32, 0.075f32);
-    let tip = (0.46f32, -0.50f32, 0.012f32);
     let sides = FRONDS.max(3);
     for i in 0..sides {
         let angle = i as f32 / sides as f32 * std::f32::consts::TAU;
+        let (reach, droop) = FROND_RANKS[i as usize % FROND_RANKS.len()];
+        // (radius from the stem, height, half-width of the blade) at the three
+        // points that define a frond: where it leaves the trunk, the top of its
+        // arch, and the tip it droops to.
+        //
+        // The half-widths are the other half of the fix that the frond count is:
+        // a blade that tapers to a hair by mid-span is a rib, not a leaf, and
+        // thirteen ribs are still thirteen ribs. These stay broad to the arch
+        // and only narrow over the hanging half, so the fronds overlap each
+        // other near the stem — which is exactly where a palm's crown is solid.
+        let root = (0.05f32, 0.30f32, 0.048f32);
+        let arch = (0.24 * reach, 0.30 + 0.19 * reach, 0.105 * reach);
+        let tip = (0.48 * reach, arch.1 - 0.98 * droop, 0.030 * reach);
         let out = Vec3::new(angle.cos(), 0.0, angle.sin());
         let across = Vec3::new(-angle.sin(), 0.0, angle.cos());
         let point = |(radius, height, _): (f32, f32, f32)| {
@@ -258,6 +282,32 @@ mod tests {
             FRONDS as usize * 8,
             "each frond is two segments, each double-sided"
         );
+    }
+
+    /// A crown is a mass, not a pinwheel. Two properties carry that, and both
+    /// are easy to lose to a well-meaning simplification: the blades hang at
+    /// **more than one depth** (three ranks, so the silhouette has a body), and
+    /// they are **broad enough at the arch to overlap their neighbours**, which
+    /// is what closes the sky between them and makes the centre solid.
+    #[test]
+    fn the_crown_hangs_in_ranks_and_its_blades_overlap_at_the_arch() {
+        let data = palm_crown_surface().build();
+        let mut depths: Vec<i32> = data
+            .positions()
+            .iter()
+            .filter(|p| p.y < 0.0)
+            .map(|p| (p.y * 100.0) as i32)
+            .collect();
+        depths.sort_unstable();
+        depths.dedup();
+        assert!(depths.len() >= 2, "the fronds hang at several depths: {depths:?}");
+        // The widest rank's arch: its blade is wider than the gap the fan
+        // leaves between two neighbouring blades at that radius.
+        let (reach, _) = FROND_RANKS[0];
+        let arch_radius = 0.24 * reach;
+        let gap = std::f32::consts::TAU * arch_radius / FRONDS as f32;
+        let width = 2.0 * 0.105 * reach;
+        assert!(width > gap, "blades overlap at the arch: {width} vs {gap}");
     }
 
     /// A blade with only one face is invisible from underneath, which at this
