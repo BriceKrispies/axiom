@@ -1,12 +1,16 @@
 //! # Axiom Runtime
 //!
 //! The runtime is the deterministic engine substrate that adapts the kernel
-//! into lifecycle, fixed-timestep stepping, ordered scheduling, FIFO
-//! command/event queues, and replay-ready step records. It depends on the
-//! `kernel` layer and is the foundation many other engine layers build on.
+//! into lifecycle — construction, startup preparation, then fixed-timestep
+//! stepping — plus ordered scheduling, FIFO command/event queues, and
+//! replay-ready step records. It depends on the `kernel` layer and is the
+//! foundation many other engine layers build on.
 //!
 //! ## What this layer owns
 //! - [`Runtime`] — owns runtime state and drives deterministic stepping.
+//! - [`PreparationTask`] / [`PreparationSchedule`] — startup-only work,
+//!   declared from above and run to completion in push order before the
+//!   simulation may begin stepping.
 //! - [`RuntimeTimeline`] — wraps the kernel [`axiom_kernel::SimulationClock`]
 //!   into a frame/tick/sequence identity.
 //! - [`RuntimeScheduler`] — registers ordered systems with stable IDs.
@@ -26,6 +30,8 @@
 //! or any game-specific concept. Those belong to higher layers built on this
 //! one.
 
+mod preparation_schedule;
+mod preparation_task;
 mod runtime;
 mod runtime_command;
 mod runtime_command_queue;
@@ -45,6 +51,8 @@ mod runtime_system;
 mod runtime_timeline;
 mod system_outcome;
 
+pub use preparation_schedule::PreparationSchedule;
+pub use preparation_task::PreparationTask;
 pub use runtime::Runtime;
 pub use runtime_command::RuntimeCommand;
 pub use runtime_command_queue::RuntimeCommandQueue;
