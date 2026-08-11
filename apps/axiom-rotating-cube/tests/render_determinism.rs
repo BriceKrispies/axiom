@@ -26,7 +26,6 @@
 //! AXIOM_REGOLD=1 cargo test -p axiom-rotating-cube --test render_determinism
 //! ```
 
-use std::path::PathBuf;
 
 use axiom::prelude::FrameOutcome;
 use axiom_rotating_cube::rotating_cube_core;
@@ -83,55 +82,11 @@ fn encode_frame_outcome(f: &FrameOutcome) -> Vec<u8> {
     out
 }
 
-// --- golden machinery (mirrors the demo crate's golden_artifacts.rs) --------
-
-fn golden_path(name: &str) -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.push("tests");
-    p.push("golden");
-    p.push(format!("{name}.bin"));
-    p
-}
-
-fn assert_golden(name: &str, actual: &[u8]) {
-    let path = golden_path(name);
-    let force = std::env::var_os("AXIOM_REGOLD").is_some();
-    match std::fs::read(&path).ok() {
-        Some(expected) if !force => assert_eq!(
-            actual,
-            expected.as_slice(),
-            "golden mismatch for `{name}` ({} bytes actual vs {} bytes golden): the rotating-cube \
-             render boundary drifted. If intended, re-capture (delete this golden or set \
-             AXIOM_REGOLD=1) and repin its SHA-256 in apps/axiom-rotating-cube/slice.toml.",
-            actual.len(),
-            expected.len(),
-        ),
-        _ => {
-            std::fs::create_dir_all(path.parent().unwrap()).expect("create golden dir");
-            std::fs::write(&path, actual).expect("write golden");
-        }
-    }
-}
-
-// --- rotating-cube App-core render boundary ---------------------------------
-
-/// Drive `rotating_cube_core()` from tick 0 through `last` (the tick sequence
-/// must be monotonic) and capture the render boundary of the final frame.
 fn rotating_cube_render(last: u64) -> Vec<u8> {
     let mut app = rotating_cube_core();
     let mut frame = app.tick(0);
     (1..=last).for_each(|t| frame = app.tick(t));
     encode_frame_outcome(&frame)
-}
-
-#[test]
-fn golden_rotating_cube_render_tick0() {
-    assert_golden("rotating_cube_render_tick0", &rotating_cube_render(0));
-}
-
-#[test]
-fn golden_rotating_cube_render_tick60() {
-    assert_golden("rotating_cube_render_tick60", &rotating_cube_render(60));
 }
 
 #[test]

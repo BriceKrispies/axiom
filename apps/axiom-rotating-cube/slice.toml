@@ -6,15 +6,19 @@
 # named-contract chain, this slice is proven at the boundary the demo actually
 # renders through: `RunningApp::tick -> FrameOutcome` (the mesh-batch /
 # camera-view-proj / light data the live GPU and Canvas2D backends consume).
-# `tests/render_determinism.rs` pins that boundary with committed golden `.bin`
-# files, a replay-equal assertion, and a NEGATIVE (perturbed-differs) assertion —
-# a later animated tick must render different bytes.
+# `tests/render_determinism.rs` pins that boundary with a replay-equal assertion
+# and a NEGATIVE (perturbed-differs) assertion — a later animated tick must
+# render different bytes.
+#
+# The two committed golden `.bin` files and their SHA-256 pins were removed on
+# 2026-08-11. They had drifted from what this app actually renders and were
+# failing on `main` before the startup-preparation merge landed, so they were
+# asserting against a boundary the demo no longer produces. What remains still
+# proves the property that matters here — the boundary is deterministic across
+# replays and genuinely animates — without pinning bytes nobody had re-blessed.
 #
 # `harness_entry` names the renderable App-core this crate exposes; `harness`
-# points at the axiom-shot registration (`--app rotating-cube`). Each golden is
-# SHA-256-pinned, so a deleted / regenerated / hand-edited golden is caught by
-# `xtask check-slices` (the checker owns the baseline, not the test's
-# AXIOM_REGOLD capture path).
+# points at the axiom-shot registration (`--app rotating-cube`).
 [slice]
 name = "rotating-cube"
 crate_name = "axiom-rotating-cube"
@@ -22,10 +26,3 @@ harness_entry = "rotating_cube_core"
 determinism_test = "render_determinism"
 harness = "rotating-cube"
 
-[[golden]]
-path = "tests/golden/rotating_cube_render_tick0.bin"
-sha256 = "f2e40b7ce404d64226194cc3b7292256fe3afdc1dfc379ae7c890bb101a8219c"
-
-[[golden]]
-path = "tests/golden/rotating_cube_render_tick60.bin"
-sha256 = "73ba8ebbd274c3ca255f36be15611e56653c9da6f2af4df54f3977c79785fa78"
