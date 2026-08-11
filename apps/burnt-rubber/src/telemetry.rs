@@ -21,6 +21,20 @@
 //! the conclusion: if the frame time rises where a count rises, that count is
 //! the suspect. That is precisely how the tunnel question gets answered.
 
+/// The commit this binary was built from — the first thing the panel says,
+/// because it is what makes everything below it attributable.
+///
+/// Every other line here is a measurement of *some* build. Without this one you
+/// cannot tell which, and in a repo developed across several worktrees served
+/// side by side that is a real ambiguity, not a pedantic one: two ports, two
+/// bundles, one browser, and no way to tell them apart by looking. A stale
+/// `axiom-serve` bundle produces the same confusion from a single port.
+///
+/// Set by `build.rs`. Reads `<12-hex>`, `<12-hex>+dirty` when the tree carried
+/// uncommitted changes, or `unknown` outside a git checkout — never a hash the
+/// build did not actually come from.
+pub const BUILD: &str = env!("BURNT_RUBBER_BUILD");
+
 /// A rolling window of frame times, in milliseconds.
 ///
 /// Median rather than mean: a single 200 ms hitch (a tab restore, a GC pause)
@@ -374,5 +388,24 @@ mod tests {
         assert_eq!(top[1].label, "scenery");
         assert_eq!(top[2].label, "effects");
         assert!(top[0].count >= top[1].count && top[1].count >= top[2].count);
+    }
+
+    /// The build stamp is only worth showing if it is a real commit. This test
+    /// is what stops it degrading into decoration: `build.rs` falling back to
+    /// `unknown` inside a checkout would be invisible in the panel — the line
+    /// would still render, just meaninglessly — and this is the only place that
+    /// notices.
+    #[test]
+    fn the_build_stamp_names_a_real_commit() {
+        assert!(!BUILD.is_empty());
+        let hash = BUILD.trim_end_matches("+dirty");
+        assert_eq!(hash.len(), 12, "a short commit hash: {BUILD}");
+        assert!(
+            hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "hex, not a fallback: {BUILD}"
+        );
+        // The repo builds these tests, so this is a checkout and the fallback
+        // must not have fired.
+        assert_ne!(BUILD, "unknown");
     }
 }

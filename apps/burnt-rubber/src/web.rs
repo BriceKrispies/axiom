@@ -1015,14 +1015,21 @@ fn telemetry_panel(
     // in four seconds is already visible, and the entire point of this line is
     // that the median above cannot show it.
     let low_colour = ["#8ef", "#ff6b6b"][usize::from(over > 0)];
+    // Amber when the tree was modified, so a build that is *not* the commit it
+    // names cannot be misread as one that is.
+    let build_colour = ["#7a8a95", "#ffb454"]
+        [usize::from(crate::telemetry::BUILD.ends_with("+dirty"))];
     format!(
         "<div style=\"margin-top:14px;font-size:13px;line-height:1.5;opacity:.85;\
                     white-space:pre\">\
+         <div style=\"color:{build_colour}\">build {build}</div>\
          <div style=\"color:#8ef\">{fps:.0} FPS median · {median:.1}ms</div>\
          <div style=\"color:{low_colour}\">{low:.0} FPS 1% low · {over}/{of} dropped &gt;{dropped:.1}ms</div>\
          <div style=\"color:{low_colour}\">worst {worst:.1}ms</div>\
          {rows}\
          <div style=\"color:#8ef;margin-top:8px\">course</div>{authored}</div>",
+        build_colour = build_colour,
+        build = crate::telemetry::BUILD,
         fps = frames.fps(),
         median = frames.median_ms(),
         low = frames.low_fps(),
