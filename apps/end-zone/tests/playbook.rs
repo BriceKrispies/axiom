@@ -66,12 +66,17 @@ fn call_weights_make_football_sense() {
 #[test]
 fn a_session_always_lines_up_in_the_one_prototype_concept() {
     let mut run = ShowcaseRun::new_run(&RunConfig::new(0x0FFE_0001));
-    // No play call exists: the offense runs TRIPLE READ every attempt, and the
-    // only thing that varies between attempts is the defensive answer.
+    // No play call exists: the offense runs its one concept every attempt, and
+    // the only thing that varies between attempts is the defensive answer.
+    //
+    // That concept is DIVE. The passing TRIPLE READ this once named went away
+    // when the game became a run game; `data::concept` now declares three run
+    // concepts (DIVE, OFF TACKLE, SWEEP) and the prototype always lines up in
+    // the first. What this test pins is that it never *drifts* between them.
     for _ in 0..400 {
         run.step(&[]);
         assert_eq!(
-            run.sim.play.name, "TRIPLE READ",
+            run.sim.play.name, "DIVE",
             "the prototype never changes offensive concept"
         );
     }
