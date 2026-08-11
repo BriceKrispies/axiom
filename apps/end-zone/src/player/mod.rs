@@ -5,6 +5,8 @@
 //! procedural poses).
 
 pub mod animation;
+pub mod falls;
+pub mod pose_overlay;
 pub mod contact;
 pub mod contact_stage;
 pub mod controller;

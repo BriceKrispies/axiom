@@ -31,6 +31,7 @@
 pub mod charge;
 pub mod evade;
 pub mod read;
+pub mod carry;
 pub mod stage;
 
 pub use charge::ChargeResolution;

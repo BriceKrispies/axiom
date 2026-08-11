@@ -21,6 +21,8 @@
 //! seed in [`config::EndZoneConfig`] — no wall clock, no ambient randomness.
 
 pub mod agent;
+pub mod agent_drive;
+pub mod agent_report;
 pub mod ai;
 pub mod app;
 pub mod attempt;

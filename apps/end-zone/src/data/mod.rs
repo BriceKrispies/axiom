@@ -4,6 +4,7 @@
 //! or an archetype never means changing AI code.
 
 pub mod biomech_tuning;
+pub mod camera_tuning;
 pub mod concept;
 pub mod emblem;
 pub mod formation;
@@ -33,4 +34,5 @@ pub use player::{
 pub use team::{TeamDefinition, TeamPalette};
 pub use juice_tuning::JuiceTuning;
 pub use runback_tuning::RunbackTuning;
-pub use tuning::{BehaviorTuning, CameraTuning};
+pub use camera_tuning::CameraTuning;
+pub use tuning::BehaviorTuning;
