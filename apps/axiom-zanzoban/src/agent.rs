@@ -206,13 +206,23 @@ fn plan_step(state: &PuzzleGameState, target: GridCoord) -> Option<Direction> {
 }
 
 /// A record of an agent playthrough: the emitted move sequence, the milestone
-/// events, and the outcome. Enough to assert a win and to print the run.
+/// events, and the outcome. Enough to assert a win, to print the run, and to
+/// replay it byte-for-byte.
 #[derive(Debug, Clone)]
 pub struct Playthrough {
     /// Whether the live player ended on the exit.
     pub solved: bool,
     /// Every grid move the agent emitted, in order.
     pub moves: Vec<Direction>,
+    /// **Every** command the driver applied to the game core, in order —
+    /// including the `Tick`s and the `q` that `moves` omits, and including the
+    /// moves the core rejected.
+    ///
+    /// This is the run's replayable transcript: feeding this exact sequence to a
+    /// fresh `PuzzleGameState` reproduces the run without the agent, which is
+    /// what lets a regression test replay a *recorded* run rather than asking
+    /// the agent to improvise a new one. Recording only; it changes no decision.
+    pub commands: Vec<PuzzleCommand>,
     /// Human-readable milestones (reached button, pressed q, gate opened, solved).
     pub events: Vec<String>,
     /// How many ghosts existed at the end.
@@ -227,6 +237,20 @@ pub fn play_first_level() -> Playthrough {
     play(level)
 }
 
+/// Apply one command to the core and record it in the transcript.
+///
+/// Every command the driver issues goes through here, so the transcript is
+/// complete by construction rather than by remembering to push at six call
+/// sites. Pure bookkeeping: the returned result is the core's, untouched.
+fn issue(
+    state: &mut PuzzleGameState,
+    commands: &mut Vec<PuzzleCommand>,
+    command: PuzzleCommand,
+) -> crate::game_command::PuzzleStepResult {
+    commands.push(command);
+    game_step::step(state, command)
+}
+
 /// Play a single-button/door level: the agent walks a ghost onto the button, then
 /// walks the live player through the opened door to the exit. Every move is
 /// emitted through `axiom-agent`; ghost cadence advances via `Tick` commands.
@@ -236,6 +260,7 @@ pub fn play(level: LevelDefinition) -> Playthrough {
     let exit = level.exit;
     let mut state = PuzzleGameState::new(level);
     let mut moves = Vec::new();
+    let mut commands = Vec::new();
     let mut events = Vec::new();
     let mut tick = 0u64;
 
@@ -250,7 +275,7 @@ pub fn play(level: LevelDefinition) -> Playthrough {
             };
             let mv = decide_move(&state, planned, button, tick);
             tick += 1;
-            if game_step::step(&mut state, PuzzleCommand::Move(mv)).player_moved() {
+            if issue(&mut state, &mut commands, PuzzleCommand::Move(mv)).player_moved() {
                 moves.push(mv);
             } else {
                 break;
@@ -264,7 +289,11 @@ pub fn play(level: LevelDefinition) -> Playthrough {
         ));
 
         // Phase 2 — press q: the recorded life becomes a ghost from the entrance.
-        game_step::step(&mut state, PuzzleCommand::ResetLifeFromRecording);
+        issue(
+            &mut state,
+            &mut commands,
+            PuzzleCommand::ResetLifeFromRecording,
+        );
         events.push(format!(
             "pressed q — ghost #{} will replay that path",
             state.ghost_count()
@@ -274,7 +303,7 @@ pub fn play(level: LevelDefinition) -> Playthrough {
         // the gate opens (the ghost holds it forever once finished).
         let mut waited = 0;
         while !state.is_group_open(&group) && waited < 1000 {
-            game_step::step(&mut state, PuzzleCommand::Tick);
+            issue(&mut state, &mut commands, PuzzleCommand::Tick);
             tick += 1;
             waited += 1;
         }
@@ -294,17 +323,17 @@ pub fn play(level: LevelDefinition) -> Playthrough {
             Some(planned) => {
                 let mv = decide_move(&state, planned, exit, tick);
                 tick += 1;
-                let result = game_step::step(&mut state, PuzzleCommand::Move(mv));
+                let result = issue(&mut state, &mut commands, PuzzleCommand::Move(mv));
                 if result.player_moved() {
                     moves.push(mv);
                 } else {
                     // Blocked (e.g. a door not yet open): let the sim advance and retry.
-                    game_step::step(&mut state, PuzzleCommand::Tick);
+                    issue(&mut state, &mut commands, PuzzleCommand::Tick);
                     tick += 1;
                 }
             }
             None => {
-                game_step::step(&mut state, PuzzleCommand::Tick);
+                issue(&mut state, &mut commands, PuzzleCommand::Tick);
                 tick += 1;
             }
         }
@@ -315,6 +344,7 @@ pub fn play(level: LevelDefinition) -> Playthrough {
     Playthrough {
         solved: state.is_solved(),
         moves,
+        commands,
         events,
         ghosts: state.ghost_count(),
         ticks: tick,
