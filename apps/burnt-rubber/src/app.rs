@@ -25,6 +25,8 @@
 //! from a command list, and it is why the accumulator lives at the app root
 //! rather than inside the simulation.
 
+use std::sync::Arc;
+
 use axiom::prelude::{App, DefaultPlugins, FrameAccumulator, FrameOutcome, RunningApp, Window};
 
 use crate::audio_cues::RaceAudio;
@@ -120,6 +122,10 @@ pub struct BurntRubber {
     /// without the app having to be rebuilt around it.
     seed: u64,
     profile: crate::PlayProfile,
+    /// The course compiled by the startup preparation phase, retained so a
+    /// restart and the ghost reuse it instead of recompiling. Before this the
+    /// course was compiled four times per construction-plus-restart cycle.
+    plan: Arc<crate::course::runtime::CoursePlan>,
     /// The viewport the start screen is laid out for.
     viewport: (f32, f32),
 }
@@ -181,8 +187,15 @@ impl BurntRubber {
                 .framed_for_aspect(width.max(1) as f32 / height.max(1) as f32),
             ..tuning
         };
-        let sim = RaceSim::with_profile(seed, tuning, profile);
-        let mut running = App::new()
+        // ── the startup preparation phase ──
+        //
+        // The course, the three albedos and the whole road's geometry are
+        // produced here, inside `App::build()`'s `Runtime::prepare`, before the
+        // runtime is allowed to reach `Running`. Nothing below re-generates any
+        // of it: the sim, the ghost, a restart and the scene all read what came
+        // out of the barrier.
+        let prepared = crate::preparation::RacePreparation::new();
+        let mut builder = App::new()
             .window(
                 Window::new(width, height)
                     .with_surface_id(CANVAS_ID)
@@ -194,9 +207,35 @@ impl BurntRubber {
             )
             .add_plugins(DefaultPlugins)
             .fixed_timestep_nanos(FIXED_STEP_NANOS)
-            .setup(|_world, _meshes, _materials| {})
-            .build();
-        let scene = RaceScene::install(&mut running, &sim, width, height);
+            .setup(|_world, _meshes, _materials| {});
+        builder = prepared
+            .tasks(seed, &tuning)
+            .into_iter()
+            .fold(builder, |builder, (name, task)| builder.prepare_with(name, task));
+        // `build()` runs the phase and crosses the barrier. Past this line the
+        // runtime is `Running`, which it could not be if any task had failed.
+        let mut running = builder.build();
+
+        let course = prepared
+            .course
+            .borrow_mut()
+            .take()
+            .expect("preparation compiled the course");
+        let textures = prepared
+            .textures
+            .borrow_mut()
+            .take()
+            .expect("preparation synthesised the albedos");
+        let meshes = prepared
+            .meshes
+            .borrow_mut()
+            .take()
+            .expect("preparation cut the road");
+
+        let plan = course.plan();
+        let sim = RaceSim::from_plan(Arc::clone(&plan), tuning, profile);
+        let scene =
+            RaceScene::install_prepared(&mut running, &sim, width, height, &textures, meshes);
         let debug = DebugView::install(&mut running);
         let accumulator = FrameAccumulator::new(FIXED_STEP_NANOS)
             .expect("the fixed step is a valid, non-zero duration");
@@ -205,7 +244,10 @@ impl BurntRubber {
             // Every race has a ghost, however it was built — the constructors
             // that skip the title screen (the tests and the capture slices) are
             // still races. `open_start_screen` clears it again.
-            ghost: Some(crate::ghost::GhostRun::new(seed, tuning, profile)),
+            ghost: Some(crate::ghost::GhostRun::from_plan(
+                RaceSim::from_plan(Arc::clone(&plan), tuning, profile),
+                profile,
+            )),
             scene,
             running,
             accumulator,
@@ -218,6 +260,7 @@ impl BurntRubber {
             stage: Stage::Racing,
             seed,
             profile,
+            plan,
             viewport: (width as f32, height as f32),
         }
     }
@@ -282,7 +325,13 @@ impl BurntRubber {
     /// "go", and the cleanest way to honour it is the same one the constructor
     /// already takes.
     pub fn start_race(&mut self) {
-        self.sim = RaceSim::with_profile(self.seed, *self.sim.tuning(), self.profile);
+        // The prepared course, reused. A restart rebuilds the *race*, not the
+        // road: the road is the same nine kilometres it was a moment ago.
+        self.sim = RaceSim::from_plan(
+            Arc::clone(&self.plan),
+            *self.sim.tuning(),
+            self.profile,
+        );
         self.restart_ghost();
         self.scene.reset();
         self.stage = Stage::Racing;
@@ -316,9 +365,8 @@ impl BurntRubber {
     /// the player's, which is what makes the two runs comparable: the same
     /// course, the same traffic stream, the same car.
     fn restart_ghost(&mut self) {
-        self.ghost = Some(crate::ghost::GhostRun::new(
-            self.seed,
-            *self.sim.tuning(),
+        self.ghost = Some(crate::ghost::GhostRun::from_plan(
+            RaceSim::from_plan(Arc::clone(&self.plan), *self.sim.tuning(), self.profile),
             self.profile,
         ));
     }
