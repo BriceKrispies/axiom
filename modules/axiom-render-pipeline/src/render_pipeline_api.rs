@@ -1,6 +1,5 @@
 //! The single public facade of the `axiom-render-pipeline` feature module.
 
-use std::collections::HashMap;
 
 use axiom_host::SdfScene;
 use axiom_kernel::Ratio;
@@ -125,18 +124,60 @@ pub struct RenderPipelineApi {
     /// each frame — the per-frame wasm-memory-churn fix. (This is why the facade
     /// is no longer `Copy`.)
     render: RenderApi,
-    /// The frame's mesh-id → render-index, material-id → render-index,
-    /// material-id → per-draw colour, and material-id → per-draw emissive maps,
-    /// RETAINED and cleared+refilled each frame (not rebuilt), so a steady-state
-    /// frame allocates no fresh hashmaps.
-    mesh_index: HashMap<u64, u32>,
-    material_index: HashMap<u64, u32>,
-    material_color: HashMap<u64, [f32; 4]>,
-    material_emissive: HashMap<u64, [f32; 3]>,
-    // material-id → specular strength, derived from the material's authored
-    // `roughness`. Cached per frame beside the colour and emissive maps for the
-    // same reason: the per-draw pass below resolves it once per renderable.
-    material_specular: HashMap<u64, f32>,
+    /// The frame's mesh-id → render-index, RETAINED and refilled each frame.
+    ///
+    /// Indexed by id, not hashed by it. Asset ids are minted as `len() + 1`, so
+    /// they are small dense integers and a plain vector is the natural map —
+    /// a lookup becomes one load, and the per-frame reset becomes a memset.
+    ///
+    /// This was five `HashMap`s until 2026-08-11. A throttled profile put ~10%
+    /// of the frame in `hashbrown`'s bucket walk, most of it inside `clear()`:
+    /// emptying five maps of ~1000 entries every frame costs more than the
+    /// lookups they exist to serve.
+    mesh_index: Vec<u32>,
+    /// material id → everything the per-draw pass needs, in ONE entry rather
+    /// than the four parallel maps this replaced.
+    materials: Vec<MaterialSlot>,
+}
+
+/// The index of a mesh or material the frame did not supply.
+const ABSENT: u32 = u32::MAX;
+
+/// One material's per-frame render data, resolved once and read per draw.
+///
+/// The four values used to live in four separate maps keyed by the same id, so
+/// assembling one material for one draw cost four independent lookups. They
+/// travel together, so they are stored together.
+///
+/// [`MaterialSlot::MISSING`] doubles as the *fallback*: the vector is refilled
+/// with it each frame, so a renderable whose material the frame never supplied
+/// reads flat-white-and-matte by construction — the absent case is data, not a
+/// branch, and matches the fallback the four `unwrap_or`s used to spell out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MaterialSlot {
+    index: u32,
+    color: [f32; 4],
+    emissive: [f32; 3],
+    specular: f32,
+}
+
+impl MaterialSlot {
+    const MISSING: MaterialSlot = MaterialSlot {
+        index: ABSENT,
+        color: [1.0; 4],
+        emissive: [0.0; 3],
+        specular: 0.0,
+    };
+}
+
+/// Reset an id-indexed table to `fill`, sized to hold every id in `ids`.
+///
+/// `clear` then `resize` rather than a per-entry walk: the reset is a memset
+/// over one contiguous allocation, and the capacity is retained across frames.
+fn reset_table<T: Clone>(table: &mut Vec<T>, ids: impl Iterator<Item = u64>, fill: T) {
+    let needed = ids.map(|id| id as usize + 1).max().unwrap_or(0);
+    table.clear();
+    table.resize(needed, fill);
 }
 
 impl RenderPipelineApi {
@@ -144,11 +185,8 @@ impl RenderPipelineApi {
     pub fn new() -> Self {
         RenderPipelineApi {
             render: RenderApi::new(),
-            mesh_index: HashMap::new(),
-            material_index: HashMap::new(),
-            material_color: HashMap::new(),
-            material_emissive: HashMap::new(),
-            material_specular: HashMap::new(),
+            mesh_index: Vec::new(),
+            materials: Vec::new(),
         }
     }
 
@@ -258,10 +296,7 @@ impl RenderPipelineApi {
         let Self {
             render,
             mesh_index,
-            material_index,
-            material_color,
-            material_emissive,
-            material_specular,
+            materials,
         } = self;
         // Fill the RETAINED render input (reset + refill, no fresh alloc) via its
         // public primitive builders on the `&mut` handle — this module never names
@@ -328,15 +363,16 @@ impl RenderPipelineApi {
         // O(1) (the lists carry no duplicate ids), and `material_color` lets the
         // per-draw pass below recover a command's colour without a scan. Cleared +
         // refilled each frame (not rebuilt) so no fresh hashmap is allocated.
-        mesh_index.clear();
+        reset_table(mesh_index, frame.meshes.iter().map(|m| m.id), ABSENT);
         frame.meshes.iter().for_each(|mesh| {
             let idx = input.push_mesh(mesh.id, mesh.index_count);
-            mesh_index.insert(mesh.id, idx);
+            mesh_index[mesh.id as usize] = idx;
         });
-        material_index.clear();
-        material_color.clear();
-        material_emissive.clear();
-        material_specular.clear();
+        reset_table(
+            materials,
+            frame.materials.iter().map(|m| m.id),
+            MaterialSlot::MISSING,
+        );
         frame.materials.iter().for_each(|material| {
             let c = material.color;
             let e = material.emissive;
@@ -352,14 +388,14 @@ impl RenderPipelineApi {
             // exactly as the render layer's neutral packet does, so the report's
             // per-draw colour — and the live/canvas instance colour built from it
             // — carries the translucency a `createMaterial`-authored material set.
-            material_color.insert(material.id, [c[0], c[1], c[2], c[3] * material.opacity]);
+            let color = [c[0], c[1], c[2], c[3] * material.opacity];
             // Emissive rides the report as its OWN per-draw term rather than being
             // folded into the colour like opacity is. Opacity may fold because alpha
             // is not light-modulated; emissive may not, because the colour is a
             // reflectance every backend multiplies by N·L, ambient and shadow —
             // folding self-illumination in there would make a tail light dim when it
             // faces away from the sun, which is exactly the bug this route removes.
-            material_emissive.insert(material.id, e);
+            // (Recorded on the slot below, alongside the colour and specular.)
             // Specular strength IS the authored roughness, inverted.
             //
             // `roughness` has been on every material since the catalog existed —
@@ -370,8 +406,12 @@ impl RenderPipelineApi {
             // engine simply stops discarding a value apps were already setting,
             // and every material in every existing app becomes as glossy as it
             // always said it was.
-            material_specular.insert(material.id, 1.0 - material.roughness.clamp(0.0, 1.0));
-            material_index.insert(material.id, idx);
+            materials[material.id as usize] = MaterialSlot {
+                index: idx,
+                color,
+                emissive: e,
+                specular: 1.0 - material.roughness.clamp(0.0, 1.0),
+            };
         });
 
         // Objects: one per renderable, resolving its mesh/material ids to the
@@ -384,12 +424,14 @@ impl RenderPipelineApi {
                 .world()
                 .to_matrix();
             let mesh_idx = mesh_index
-                .get(&renderable.mesh().raw())
+                .get(renderable.mesh().raw() as usize)
                 .copied()
+                .filter(|&index| index != ABSENT)
                 .expect("frame supplies a mesh asset for every renderable");
-            let material_idx = material_index
-                .get(&renderable.material().raw())
-                .copied()
+            let material_idx = materials
+                .get(renderable.material().raw() as usize)
+                .map(|slot| slot.index)
+                .filter(|&index| index != ABSENT)
                 .expect("frame supplies a material asset for every renderable");
             input.push_object(
                 renderable.node().raw(),
@@ -461,22 +503,18 @@ impl RenderPipelineApi {
                     .to_matrix();
                 let mesh_id = renderable.mesh().raw();
                 let material_id = renderable.material().raw();
-                let color = material_color
-                    .get(&material_id)
+                // One lookup for all three. A renderable whose material the frame
+                // never supplied reads `MISSING` — flat white, unlit, fully matte
+                // — because that is what the table was refilled with.
+                let slot = materials
+                    .get(material_id as usize)
                     .copied()
-                    .unwrap_or([1.0; 4]);
-                let emissive = material_emissive
-                    .get(&material_id)
-                    .copied()
-                    .unwrap_or([0.0; 3]);
-                // A renderable whose material the frame never supplied falls back
-                // to fully matte, matching the flat-white colour fallback above.
-                let specular = material_specular.get(&material_id).copied().unwrap_or(0.0);
+                    .unwrap_or(MaterialSlot::MISSING);
                 (
                     world,
-                    color,
-                    emissive,
-                    specular,
+                    slot.color,
+                    slot.emissive,
+                    slot.specular,
                     mesh_id,
                     material_id,
                     renderable.casts_contact_shadow(),

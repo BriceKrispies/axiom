@@ -120,6 +120,8 @@ pub fn burnt_rubber_start() {
         frames: FrameTimes::new(),
         speedo_taps: TripleTap::new(),
         telemetry: false,
+        telemetry_html: String::new(),
+        telemetry_age: 0,
     }));
     install_pointer_listeners(&state);
     install_focus_listeners(&state, &held);
@@ -283,15 +285,23 @@ pub fn burnt_rubber_start() {
 
         let waiting = guard.app.waiting();
         update_start_screen(guard.app.start_screen());
+        // Rebuild the panel a few times a second, not every frame. `age` counts
+        // frames since the last build; the panel is otherwise served from the
+        // cached string, so a frame with the panel open costs one DOM write of
+        // an unchanged value rather than twenty fresh `String`s and a reparse.
+        guard.telemetry_age += 1;
+        let stale = guard.telemetry_age >= TELEMETRY_PERIOD;
+        (guard.telemetry & stale).then(|| {
+            guard.telemetry_age = 0;
+            guard.telemetry_html = telemetry_panel(
+                &guard.frames,
+                &guard.app.diagnostics().scene,
+                &guard.app.course_rows(),
+            );
+        });
         let readout = guard
             .telemetry
-            .then(|| {
-                telemetry_panel(
-                    &guard.frames,
-                    &guard.app.diagnostics().scene,
-                    &guard.app.course_rows(),
-                )
-            })
+            .then(|| guard.telemetry_html.clone())
             .unwrap_or_default();
         // The pad decides how much of the bottom edge is free; the HUD's meter
         // and legend are laid out inside exactly that, so the two cannot collide
@@ -352,6 +362,16 @@ struct LiveState {
     /// Whether the telemetry panel is showing. Off until asked for — this is an
     /// instrument, not chrome.
     telemetry: bool,
+    /// The panel's last rendered markup, and how many frames ago it was built.
+    ///
+    /// The panel is a diagnostic readout a human reads; rebuilding it at 60 Hz
+    /// formats ~20 course rows and reparses a DOM subtree every frame to publish
+    /// numbers nobody can follow faster than a few times a second. A throttled
+    /// profile put ~4% of the frame in `set_innerHTML` with this open. Held at
+    /// [`TELEMETRY_PERIOD`] instead — still comfortably live to read, and the
+    /// frame it is measuring stops being distorted by the act of measuring it.
+    telemetry_html: String,
+    telemetry_age: u32,
 }
 
 impl LiveState {
@@ -973,6 +993,12 @@ fn update_hud(hud: &HudModel, hidden: bool, telemetry: &str, bottom_strip: f32) 
         hint = hint,
     ));
 }
+
+/// How many frames the telemetry panel's markup is reused before it is rebuilt.
+///
+/// Six frames is ten rebuilds a second at 60 Hz — faster than a human reads a
+/// twenty-row table, and a tenth of the formatting cost.
+const TELEMETRY_PERIOD: u32 = 6;
 
 /// The telemetry panel's markup, or the empty string when it is off.
 ///
