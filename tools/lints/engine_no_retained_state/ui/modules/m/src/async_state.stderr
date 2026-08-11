@@ -1,0 +1,63 @@
+warning: [retained-execution-state] `async fn` compiles to a state machine
+  --> $DIR/async_state.rs:10:1
+   |
+LL | / pub async fn load() -> u32 {
+LL | |     1
+LL | | }
+   | |_^
+   |
+   = help: the generated future holds its locals and resume point across every `.await`, which is retained execution state by construction; a future retains its execution state between polls; express the work as a pure step over explicit data (`fn step(state: &State, input: &Input) -> State`) and let the app own the asynchronous driver
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [retained-execution-state] `async fn` compiles to a state machine
+  --> $DIR/async_state.rs:15:1
+   |
+LL | / async fn load_private() -> u32 {
+LL | |     2
+LL | | }
+   | |_^
+   |
+   = help: the generated future holds its locals and resume point across every `.await`, which is retained execution state by construction; a future retains its execution state between polls; express the work as a pure step over explicit data (`fn step(state: &State, input: &Input) -> State`) and let the app own the asynchronous driver
+
+warning: [retained-execution-state] return type exposes `impl std::future::Future<Output = u32>` on a public engine boundary
+  --> $DIR/async_state.rs:21:23
+   |
+LL | pub fn make_work() -> impl Future<Output = u32> {
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a future retains its execution state between polls; express the work as a pure step over explicit data (`fn step(state: &State, input: &Input) -> State`) and let the app own the asynchronous driver
+
+warning: [retained-execution-state] `async` block compiles to a state machine
+  --> $DIR/async_state.rs:22:5
+   |
+LL |     async { 3 }
+   |     ^^^^^^^^^^^
+   |
+   = help: the generated future holds its captured environment and resume point across every `.await`, which is retained execution state by construction; a future retains its execution state between polls; express the work as a pure step over explicit data (`fn step(state: &State, input: &Input) -> State`) and let the app own the asynchronous driver
+
+warning: [retained-execution-state] return type exposes `(dyn std::future::Future<Output = u32> + 'static)` on a public engine boundary
+  --> $DIR/async_state.rs:27:24
+   |
+LL | pub fn boxed_work() -> Pin<Box<dyn Future<Output = u32>>> {
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a future retains its execution state between polls; express the work as a pure step over explicit data (`fn step(state: &State, input: &Input) -> State`) and let the app own the asynchronous driver
+
+warning: [retained-execution-state] `async` block compiles to a state machine
+  --> $DIR/async_state.rs:28:14
+   |
+LL |     Box::pin(async { 4 })
+   |              ^^^^^^^^^^^
+   |
+   = help: the generated future holds its captured environment and resume point across every `.await`, which is retained execution state by construction; a future retains its execution state between polls; express the work as a pure step over explicit data (`fn step(state: &State, input: &Input) -> State`) and let the app own the asynchronous driver
+
+warning: [retained-execution-state] parameter type exposes `(dyn std::future::Future<Output = u32> + 'static)` on a public engine boundary
+  --> $DIR/async_state.rs:33:22
+   |
+LL | pub fn consume(work: Pin<Box<dyn Future<Output = u32>>>) {}
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a future retains its execution state between polls; express the work as a pure step over explicit data (`fn step(state: &State, input: &Input) -> State`) and let the app own the asynchronous driver
+
+warning: 7 warnings emitted
+

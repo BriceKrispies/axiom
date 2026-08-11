@@ -1,0 +1,59 @@
+warning: [shared-state-ownership] field type contains `std::sync::Arc<World>`
+  --> $DIR/shared_ownership.rs:15:5
+   |
+LL |     value: Arc<World>,
+   |     ^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; shared ownership hides who may mutate and when the value dies; own the data outright (`Box<T>`, `Vec<T>`, a plain field) or pass it by reference for the duration of one call
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [shared-state-ownership] field type contains `std::rc::Rc<World>`
+  --> $DIR/shared_ownership.rs:19:5
+   |
+LL |     value: Rc<World>,
+   |     ^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; shared ownership hides who may mutate and when the value dies; own the data outright (`Box<T>`, `Vec<T>`, a plain field) or pass it by reference for the duration of one call
+
+warning: [shared-state-ownership] field type contains `std::rc::Weak<World>`
+  --> $DIR/shared_ownership.rs:23:5
+   |
+LL |     value: RcWeak<World>,
+   |     ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; shared ownership hides who may mutate and when the value dies; own the data outright (`Box<T>`, `Vec<T>`, a plain field) or pass it by reference for the duration of one call
+
+warning: [shared-state-ownership] field type contains `std::sync::Weak<World>`
+  --> $DIR/shared_ownership.rs:27:5
+   |
+LL |     value: ArcWeak<World>,
+   |     ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; shared ownership hides who may mutate and when the value dies; own the data outright (`Box<T>`, `Vec<T>`, a plain field) or pass it by reference for the duration of one call
+
+warning: [shared-state-ownership] type alias contains `std::sync::Arc<T>`
+  --> $DIR/shared_ownership.rs:30:1
+   |
+LL | type Shared<T> = Arc<T>;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; shared ownership hides who may mutate and when the value dies; own the data outright (`Box<T>`, `Vec<T>`, a plain field) or pass it by reference for the duration of one call
+
+warning: [shared-state-ownership] field type contains `std::sync::Arc<World>`
+  --> $DIR/shared_ownership.rs:33:5
+   |
+LL |     value: Shared<World>,
+   |     ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; shared ownership hides who may mutate and when the value dies; own the data outright (`Box<T>`, `Vec<T>`, a plain field) or pass it by reference for the duration of one call
+
+warning: [shared-state-ownership] return type contains `std::sync::Arc<World>`
+  --> $DIR/shared_ownership.rs:36:29
+   |
+LL | pub fn hand_out_shared() -> Arc<World> {
+   |                             ^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; shared ownership hides who may mutate and when the value dies; own the data outright (`Box<T>`, `Vec<T>`, a plain field) or pass it by reference for the duration of one call
+
+warning: 7 warnings emitted
+

@@ -1,0 +1,45 @@
+warning: [static-storage] `static` item declares process-wide storage
+  --> $DIR/statics.rs:15:1
+   |
+LL | static VALUE: u32 = 1;
+   | ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a static outlives every call, so information written into it is remembered across invocations without appearing in any signature; use `const` for a compile-time value, or pass the datum in as an explicit parameter and return the updated copy: `fn step(state: &State, input: &Input) -> State`
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [static-storage] `static` item declares process-wide storage
+  --> $DIR/statics.rs:18:1
+   |
+LL | static NAME: &str = "foo";
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a static outlives every call, so information written into it is remembered across invocations without appearing in any signature; use `const` for a compile-time value, or pass the datum in as an explicit parameter and return the updated copy: `fn step(state: &State, input: &Input) -> State`
+
+warning: [static-storage] `static` item declares process-wide storage
+  --> $DIR/statics.rs:21:1
+   |
+LL | static CACHE: OnceLock<Cache> = OnceLock::new();
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a static outlives every call, so information written into it is remembered across invocations without appearing in any signature; use `const` for a compile-time value, or pass the datum in as an explicit parameter and return the updated copy: `fn step(state: &State, input: &Input) -> State`
+
+warning: [static-storage] `static` item declares process-wide storage
+  --> $DIR/statics.rs:24:1
+   |
+LL | static mut COUNTER: u32 = 0;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a static outlives every call, so information written into it is remembered across invocations without appearing in any signature; use `const` for a compile-time value, or pass the datum in as an explicit parameter and return the updated copy: `fn step(state: &State, input: &Input) -> State`
+
+warning: [thread-local-storage] `thread_local!` declares ambient per-thread storage
+  --> $DIR/statics.rs:28:1
+   |
+LL | / thread_local! {
+LL | |     static TICK: Cell<u32> = const { Cell::new(0) };
+LL | | }
+   | |_^
+   |
+   = help: a thread-local slot is read and written by code that never names it in a signature, so the same call can observe different values on different threads; thread-local storage is ambient per-thread state the caller cannot see; thread the datum through the call as `fn step(state: &State, input: &Input) -> State`
+
+warning: 5 warnings emitted
+

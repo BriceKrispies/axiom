@@ -1,0 +1,75 @@
+warning: [mutable-engine-api] parameter type takes or returns `&mut GameState`
+  --> $DIR/mutable_api.rs:16:22
+   |
+LL | pub fn update(state: &mut GameState) {}
+   |                      ^^^^^^^^^^^^^^
+   |
+   = help: a public API that writes through a mutable reference mutates caller-owned state in place, so the new state never appears as a value; replace `fn step(&mut self, input: Input)` with `fn step(state: &State, input: &Input) -> State` so the new state is an explicit return value, not an invisible edit to the caller's memory
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [mutable-engine-api] parameter type takes or returns `&mut GameState`
+  --> $DIR/mutable_api.rs:20:28
+   |
+LL | pub fn maybe_update(state: Option<&mut GameState>) {}
+   |                            ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a public API that writes through a mutable reference mutates caller-owned state in place, so the new state never appears as a value; replace `fn step(&mut self, input: Input)` with `fn step(state: &State, input: &Input) -> State` so the new state is an explicit return value, not an invisible edit to the caller's memory
+
+warning: [mutable-engine-api] parameter type takes or returns `&mut [GameState]`
+  --> $DIR/mutable_api.rs:22:29
+   |
+LL | pub fn update_slice(states: &mut [GameState]) {}
+   |                             ^^^^^^^^^^^^^^^^
+   |
+   = help: a public API that writes through a mutable reference mutates caller-owned state in place, so the new state never appears as a value; replace `fn step(&mut self, input: Input)` with `fn step(state: &State, input: &Input) -> State` so the new state is an explicit return value, not an invisible edit to the caller's memory
+
+warning: [mutable-engine-api] parameter type takes or returns `&'static mut GameState`
+  --> $DIR/mutable_api.rs:26:25
+   |
+LL | pub fn world_mut(state: &'static mut GameState) -> &'static mut World {
+   |                         ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a public API that writes through a mutable reference mutates caller-owned state in place, so the new state never appears as a value; replace `fn step(&mut self, input: Input)` with `fn step(state: &State, input: &Input) -> State` so the new state is an explicit return value, not an invisible edit to the caller's memory
+
+warning: [mutable-engine-api] return type takes or returns `&'static mut World`
+  --> $DIR/mutable_api.rs:26:52
+   |
+LL | pub fn world_mut(state: &'static mut GameState) -> &'static mut World {
+   |                                                    ^^^^^^^^^^^^^^^^^^
+   |
+   = help: a public API that writes through a mutable reference mutates caller-owned state in place, so the new state never appears as a value; replace `fn step(&mut self, input: Input)` with `fn step(state: &State, input: &Input) -> State` so the new state is an explicit return value, not an invisible edit to the caller's memory
+
+warning: [mutable-engine-api] parameter type takes or returns `&mut Engine`
+  --> $DIR/mutable_api.rs:36:17
+   |
+LL |     pub fn step(&mut self, input: u32) {}
+   |                 ^^^^^^^^^
+   |
+   = help: a public API that writes through a mutable reference mutates caller-owned state in place, so the new state never appears as a value; replace `fn step(&mut self, input: Input)` with `fn step(state: &State, input: &Input) -> State` so the new state is an explicit return value, not an invisible edit to the caller's memory
+
+warning: [mutable-engine-api] parameter type takes or returns `&mut Engine`
+  --> $DIR/mutable_api.rs:39:20
+   |
+LL |     pub fn get_mut(&mut self) -> &mut World {
+   |                    ^^^^^^^^^
+   |
+   = help: a public API that writes through a mutable reference mutates caller-owned state in place, so the new state never appears as a value; replace `fn step(&mut self, input: Input)` with `fn step(state: &State, input: &Input) -> State` so the new state is an explicit return value, not an invisible edit to the caller's memory
+
+warning: [mutable-engine-api] return type takes or returns `&mut World`
+  --> $DIR/mutable_api.rs:39:34
+   |
+LL |     pub fn get_mut(&mut self) -> &mut World {
+   |                                  ^^^^^^^^^^
+   |
+   = help: a public API that writes through a mutable reference mutates caller-owned state in place, so the new state never appears as a value; replace `fn step(&mut self, input: Input)` with `fn step(state: &State, input: &Input) -> State` so the new state is an explicit return value, not an invisible edit to the caller's memory
+
+warning: [mutable-engine-api] parameter type takes or returns `&mut Self`
+  --> $DIR/mutable_api.rs:52:13
+   |
+LL |     fn step(&mut self, input: u32);
+   |             ^^^^^^^^^
+   |
+   = help: a public API that writes through a mutable reference mutates caller-owned state in place, so the new state never appears as a value; replace `fn step(&mut self, input: Input)` with `fn step(state: &State, input: &Input) -> State` so the new state is an explicit return value, not an invisible edit to the caller's memory
+
+warning: 9 warnings emitted
+

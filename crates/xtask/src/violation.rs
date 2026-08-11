@@ -106,6 +106,11 @@ pub enum ViolationKind {
     /// the `coverage_attribute` feature to exclude code from coverage. Banned:
     /// coverage is earned by reachable tests, not by silencing the tool.
     SourceHygieneCoverageOff,
+    /// A layer or module source file attempts to suppress the State Law
+    /// (`engine_no_retained_state`) — by naming the lint at all, or by a blanket
+    /// `allow`/`expect` of `warnings` that would silence it. The State Law is a
+    /// zero-tolerance architectural law; there is no `#[allow]` for it.
+    SourceHygieneStateLawSuppression,
 
     /// The coverage gate's sanctioned `--ignore-filename-regex` matches a layer
     /// or module source path. The 100% gate may exclude only apps and tooling;
@@ -147,7 +152,7 @@ impl ViolationKind {
     /// The stable, greppable tokens, one per variant, in declaration order.
     /// `ViolationKind` is fieldless, so `self as usize` is its discriminant and
     /// indexes straight into this table — no per-variant match arm to maintain.
-    const TOKENS: [&'static str; 50] = [
+    const TOKENS: [&'static str; 51] = [
         "ManifestInvalid",
         "UnknownDependency",
         "DependencyCycle",
@@ -186,6 +191,7 @@ impl ViolationKind {
         "SourceHygieneJunkDrawerModule",
         "SourceHygieneBrowserApi",
         "SourceHygieneCoverageOff",
+        "SourceHygieneStateLawSuppression",
         "CoverageIgnoreExcludesEngine",
         "CoverageIgnoreScriptDrift",
         "SliceManifestInvalid",

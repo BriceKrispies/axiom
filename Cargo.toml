@@ -164,6 +164,9 @@ libraries = [
     { path = "tools/lints/engine_no_large_enums" },
     { path = "tools/lints/engine_no_large_impl_blocks" },
     { path = "tools/lints/engine_require_module_docs" },
+    # The Axiom State Law. Zero-tolerance, deliberately NOT in
+    # tools/lints/dylint-baseline.txt — see tools/lints/engine_no_retained_state/README.md.
+    { path = "tools/lints/engine_no_retained_state" },
 ]
 
 # Deterministic, size-conscious release profile suitable for a future wasm build.

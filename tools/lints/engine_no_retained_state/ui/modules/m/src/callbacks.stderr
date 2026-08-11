@@ -1,0 +1,75 @@
+warning: [stateful-callback-boundary] parameter type exposes `(dyn std::ops::Fn(Input) -> Output + 'static)` on a public engine boundary
+  --> $DIR/callbacks.rs:14:31
+   |
+LL | pub fn with_boxed_callback(f: Box<dyn Fn(Input) -> Output>) {}
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a closure can capture arbitrary hidden state; take a plain function pointer (`fn(Input) -> Output`) or, better, take the data the callback would have produced as an explicit input
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [stateful-callback-boundary] parameter type exposes `dyn std::ops::FnMut(Input)` on a public engine boundary
+  --> $DIR/callbacks.rs:16:29
+   |
+LL | pub fn with_callback_ref(f: &dyn FnMut(Input)) {}
+   |                             ^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a closure can capture arbitrary hidden state; take a plain function pointer (`fn(Input) -> Output`) or, better, take the data the callback would have produced as an explicit input
+
+warning: [stateful-callback-boundary] parameter type exposes `(dyn std::ops::FnOnce() + 'static)` on a public engine boundary
+  --> $DIR/callbacks.rs:18:30
+   |
+LL | pub fn with_once_callback(f: Box<dyn FnOnce()>) {}
+   |                              ^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a closure can capture arbitrary hidden state; take a plain function pointer (`fn(Input) -> Output`) or, better, take the data the callback would have produced as an explicit input
+
+warning: [stateful-callback-boundary] return type exposes `(dyn std::ops::Fn(Input) -> Output + 'static)` on a public engine boundary
+  --> $DIR/callbacks.rs:20:31
+   |
+LL | pub fn return_a_callback() -> Box<dyn Fn(Input) -> Output> {
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a closure can capture arbitrary hidden state; take a plain function pointer (`fn(Input) -> Output`) or, better, take the data the callback would have produced as an explicit input
+
+warning: [stateful-callback-boundary] field type exposes `(dyn std::ops::Fn(Input) + 'static)` on a public engine boundary
+  --> $DIR/callbacks.rs:27:5
+   |
+LL |     pub on_tick: Box<dyn Fn(Input)>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a closure can capture arbitrary hidden state; take a plain function pointer (`fn(Input) -> Output`) or, better, take the data the callback would have produced as an explicit input
+
+warning: [generic-behavior-state] public generic parameter is bound by `std::ops::Fn`
+  --> $DIR/callbacks.rs:32:17
+   |
+LL | pub fn apply<F: Fn(Input) -> Output>(f: F) {}
+   |                 ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a caller-supplied closure can capture and mutate arbitrary hidden state inside engine computation; a behavioral bound lets a caller smuggle arbitrary executable state into engine computation; keep data generics (`StateTable<K, V>`) and drop the behavioral bound in favor of an explicit data parameter
+
+warning: [generic-behavior-state] public generic parameter is bound by `std::ops::FnMut`
+  --> $DIR/callbacks.rs:36:8
+   |
+LL |     F: FnMut(Input),
+   |        ^^^^^^^^^^^^
+   |
+   = help: a caller-supplied closure can capture and mutate arbitrary hidden state inside engine computation; a behavioral bound lets a caller smuggle arbitrary executable state into engine computation; keep data generics (`StateTable<K, V>`) and drop the behavioral bound in favor of an explicit data parameter
+
+warning: [generic-behavior-state] public generic parameter is bound by `std::ops::Fn`
+  --> $DIR/callbacks.rs:40:27
+   |
+LL | pub fn apply_impl(f: impl Fn(Input) -> Output) {}
+   |                           ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a caller-supplied closure can capture and mutate arbitrary hidden state inside engine computation; a behavioral bound lets a caller smuggle arbitrary executable state into engine computation; keep data generics (`StateTable<K, V>`) and drop the behavioral bound in favor of an explicit data parameter
+
+warning: [generic-behavior-state] public generic parameter is bound by `std::future::Future`
+  --> $DIR/callbacks.rs:42:20
+   |
+LL | pub fn await_it<F: Future<Output = u32>>(f: F) {}
+   |                    ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a caller-supplied future retains execution state between polls, inside engine computation; a behavioral bound lets a caller smuggle arbitrary executable state into engine computation; keep data generics (`StateTable<K, V>`) and drop the behavioral bound in favor of an explicit data parameter
+
+warning: 9 warnings emitted
+

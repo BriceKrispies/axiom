@@ -1,0 +1,51 @@
+warning: [stateful-trait-implementation] engine-defined `Iterator` impl is a resumable state machine
+  --> $DIR/stateful_traits.rs:15:1
+   |
+LL | / impl Iterator for Counter {
+LL | |     type Item = u32;
+LL | |
+LL | |     fn next(&mut self) -> Option<u32> {
+...  |
+LL | | }
+   | |_^
+   |
+   = help: each call to this trait's method advances progression stored in `self`, which is retained state by definition; these traits are state machines by definition — each call advances hidden progression; return the finished explicit data (a `Vec<T>` or a state snapshot) instead of a resumable object
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [stateful-trait-implementation] engine-defined `DoubleEndedIterator` impl is a resumable state machine
+  --> $DIR/stateful_traits.rs:24:1
+   |
+LL | / impl DoubleEndedIterator for Counter {
+LL | |     fn next_back(&mut self) -> Option<u32> {
+LL | |         self.next()
+LL | |     }
+LL | | }
+   | |_^
+   |
+   = help: each call to this trait's method advances progression stored in `self`, which is retained state by definition; these traits are state machines by definition — each call advances hidden progression; return the finished explicit data (a `Vec<T>` or a state snapshot) instead of a resumable object
+
+warning: [stateful-trait-implementation] engine-defined `Future` impl is a resumable state machine
+  --> $DIR/stateful_traits.rs:34:1
+   |
+LL | / impl Future for Pending {
+LL | |     type Output = u32;
+LL | |
+LL | |     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<u32> {
+...  |
+LL | | }
+   | |_^
+   |
+   = help: each call to this trait's method advances progression stored in `self`, which is retained state by definition; these traits are state machines by definition — each call advances hidden progression; return the finished explicit data (a `Vec<T>` or a state snapshot) instead of a resumable object
+
+warning: [drop-side-effect-hole] custom `Drop` impl runs engine behavior at an invisible moment
+  --> $DIR/stateful_traits.rs:48:1
+   |
+LL | / impl Drop for Session {
+LL | |     fn drop(&mut self) {}
+LL | | }
+   | |_^
+   |
+   = help: destruction is scheduled by the compiler, so anything this body commits, flushes, or records happens at a point no caller wrote; `Drop` runs behavior the caller never wrote and cannot see; make the teardown an explicit call that consumes the value and returns the resulting data
+
+warning: 4 warnings emitted
+
