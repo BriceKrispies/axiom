@@ -127,6 +127,12 @@ def main() -> int:
     ap.add_argument("--settle", type=int, default=25)
     ap.add_argument("--measure", type=int, default=45)
     ap.add_argument("--profile-ms", type=int, default=6000)
+    ap.add_argument(
+        "--attribute",
+        default=None,
+        help="substring of the function to attribute back to its callers "
+        "(default: the heaviest self-time frame)",
+    )
     ap.add_argument("--out", default=str(STATE / "profile.json"))
     args = ap.parse_args()
 
@@ -257,6 +263,108 @@ def open_telemetry_panel(page) -> None:
     )
 
 
+def frame_name(node: dict) -> str:
+    """A node's function name, or a readable stand-in."""
+    frame = node.get("callFrame", {})
+    return frame.get("functionName") or "(anonymous)"
+
+
+def index_profile(profile: dict) -> tuple[dict, dict]:
+    """`(nodes by id, child id -> parent id)`.
+
+    V8 hands back a *call tree* — each node lists its children — but the sample
+    array only names leaves. Inverting the child links is what lets a leaf be
+    walked back up to whoever called it, which is the entire difference between
+    "`hashbrown` costs 10%" and "*this function* is spending 10% in `hashbrown`".
+    """
+    nodes = {n["id"]: n for n in profile["nodes"]}
+    parents = {
+        child: n["id"] for n in profile["nodes"] for child in n.get("children", [])
+    }
+    return nodes, parents
+
+
+def stack_of(node_id: int, nodes: dict, parents: dict, limit: int = 128) -> list[str]:
+    """Leaf-first call stack for a sampled node.
+
+    Guards against a cycle in the parent links (malformed profiles exist) and
+    against unbounded depth, because a profiler that hangs on its own data is
+    worse than one that reports a truncated stack.
+    """
+    out: list[str] = []
+    seen: set[int] = set()
+    current = node_id
+    while current is not None and current not in seen and len(out) < limit:
+        seen.add(current)
+        node = nodes.get(current)
+        if node is None:
+            break
+        out.append(frame_name(node))
+        current = parents.get(current)
+    return out
+
+
+def attribute(profile: dict, target: str, top: int = 12) -> list[str]:
+    """Who is spending time in `target`, by share of `target`'s own samples.
+
+    Self time answers "what is hot". It cannot answer "whose fault is it", and
+    for a shared leaf — an allocator, a hash table, a memcpy — the second
+    question is the only actionable one. Guessing the caller from a flat self
+    time profile is how three plausible-looking `HashMap`s got optimised without
+    moving the number.
+    """
+    nodes, parents = index_profile(profile)
+    direct: dict[str, int] = {}
+    chains: dict[str, int] = {}
+    total = 0
+    for sample in profile.get("samples", []):
+        node = nodes.get(sample)
+        if node is None or target not in frame_name(node):
+            continue
+        total += 1
+        stack = stack_of(sample, nodes, parents)
+        caller = stack[1] if len(stack) > 1 else "(root)"
+        direct[caller] = direct.get(caller, 0) + 1
+        # A few frames of context, so a caller that is itself generic (an
+        # iterator adapter, a `collect`) still resolves to something nameable.
+        chains[" <- ".join(stack[1:5])] = chains.get(" <- ".join(stack[1:5]), 0) + 1
+
+    rows = [f"  target {target!r}: {total} samples"]
+    rows.append("  -- immediate callers --")
+    rows += [
+        f"  {100.0 * n / max(total, 1):5.1f}%  {name[:100]}"
+        for name, n in sorted(direct.items(), key=lambda kv: -kv[1])[:top]
+    ]
+    rows.append("  -- call chains (leaf -> up) --")
+    rows += [
+        f"  {100.0 * n / max(total, 1):5.1f}%  {chain[:150]}"
+        for chain, n in sorted(chains.items(), key=lambda kv: -kv[1])[:top]
+    ]
+    return rows
+
+
+def inclusive(profile: dict, top: int = 15) -> list[str]:
+    """Total time per function: every sample where it appears anywhere on the
+    stack, not just as the leaf.
+
+    This is the column that says who *owns* the frame. A function that dispatches
+    all its work to callees has near-zero self time and can dominate inclusive
+    time, which is exactly the shape of a render submit or a snapshot refresh.
+    """
+    nodes, parents = index_profile(profile)
+    totals: dict[str, int] = {}
+    samples = profile.get("samples", [])
+    for sample in samples:
+        # `set`: a recursive function must not be counted once per stack frame.
+        for name in set(stack_of(sample, nodes, parents)):
+            totals[name] = totals.get(name, 0) + 1
+    count = max(len(samples), 1)
+    return [
+        f"  {100.0 * n / count:5.1f}%  {name[:90]}"
+        for name, n in sorted(totals.items(), key=lambda kv: -kv[1])[:top]
+    ]
+
+
 def sample_profile(page, cdp, distance: float, args) -> list[str]:
     """Park at one station and sample the main thread there.
 
@@ -286,12 +394,25 @@ def sample_profile(page, cdp, distance: float, args) -> list[str]:
     for s in profile.get("samples", []):
         hits[s] = hits.get(s, 0) + 1
     total = max(sum(hits.values()), 1)
-    rows = []
-    for node_id, count in sorted(hits.items(), key=lambda kv: -kv[1])[:20]:
+    ranked = sorted(hits.items(), key=lambda kv: -kv[1])
+    rows = ["  -- self time --"]
+    for node_id, count in ranked[:15]:
         frame = nodes.get(node_id, {}).get("callFrame", {})
         name = frame.get("functionName") or "(anonymous)"
         url = (frame.get("url") or "").rsplit("/", 1)[-1]
         rows.append(f"  {100.0*count/total:5.1f}%  {name[:70]:<70} {url}")
+
+    rows.append("")
+    rows.append("  -- inclusive time (who OWNS the frame) --")
+    rows += inclusive(profile)
+
+    # Attribute the heaviest *shared* leaf back to its callers. Defaults to the
+    # top self-time frame, which is precisely the one a flat profile leaves
+    # unexplained.
+    target = args.attribute or frame_name(nodes[ranked[0][0]])
+    rows.append("")
+    rows.append(f"  -- attribution --")
+    rows += attribute(profile, target)
     return rows
 
 
