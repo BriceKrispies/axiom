@@ -10,8 +10,6 @@
 //! `colour[4]`, then `emissive[3]` + `specular[1]` — grouped by
 //! `(mesh_id, material_id)` in first-appearance order.
 
-use std::collections::HashMap;
-
 use axiom_host::FramePacket;
 
 /// Floats one packed instance occupies: `mvp(16) + world(16) + colour(4) +
@@ -29,32 +27,62 @@ pub(crate) const INSTANCE_FLOATS: usize = 40;
 /// per instance, count)`, one entry per distinct `(mesh, material)` pair in
 /// first-appearance order. Byte-identical to the `mesh_batches` layout the live
 /// renderer consumes.
+/// Grouped by *sorting*, not by hashing.
+///
+/// This built a `HashMap<(u64, u64), Vec<f32>>` per frame until 2026-08-11, and
+/// a throttled profile put ~10% of the frame inside `hashbrown` because of it.
+/// The map was doing badly-paid work: in a scene like Burnt Rubber's road almost
+/// every draw carries its *own* mesh, so nearly every key is distinct and the
+/// per-frame cost was a fresh map allocation, one hash probe to insert and a
+/// second to remove for ~1000 groups that mostly hold a single instance each —
+/// all to discover that there was nothing to batch.
+///
+/// Sorting an index permutation makes equal keys contiguous, so `chunk_by` reads
+/// the groups straight off in one pass with no hashing and no map. It also makes
+/// each group's length known *before* its buffer is filled, so the instance
+/// floats go into a `with_capacity` allocation instead of growing 40 floats at a
+/// time.
+///
+/// The sort key carries the draw's original index, so a run's first element is
+/// always its earliest draw — which is what restores **first-appearance order**
+/// at the end, the ordering the renderer's batch contract requires and the one
+/// property a sort would otherwise destroy.
 pub(crate) fn frame_packet_to_batches(packet: &FramePacket) -> Vec<(u64, u64, Vec<f32>, u32)> {
-    let mut order: Vec<(u64, u64)> = Vec::new();
-    let mut packed: HashMap<(u64, u64), Vec<f32>> = HashMap::new();
-    packet.draws().iter().for_each(|draw| {
-        let key = (draw.mesh_id(), draw.material_id());
-        let floats = packed.entry(key).or_insert_with(|| {
-            order.push(key);
-            Vec::new()
-        });
-        floats.extend_from_slice(&draw.mvp());
-        floats.extend_from_slice(&draw.world());
-        floats.extend_from_slice(&draw.color());
-        // The emissive lane, filled out to a `vec4` — the vertex-attribute
-        // granularity the instance buffer is described in — by the material's
-        // specular strength, which is what that fourth lane carries now that the
-        // shader has a highlight term to spend it on.
-        let e = draw.emissive();
-        floats.extend_from_slice(&[e[0], e[1], e[2], draw.specular().get()]);
-    });
-    order
-        .into_iter()
-        .map(|(mesh_id, material_id)| {
-            let floats = packed.remove(&(mesh_id, material_id)).unwrap_or_default();
-            let count = (floats.len() / INSTANCE_FLOATS) as u32;
-            (mesh_id, material_id, floats, count)
+    let draws = packet.draws();
+    let key = |index: &u32| {
+        let draw = &draws[*index as usize];
+        (draw.mesh_id(), draw.material_id())
+    };
+
+    let mut order: Vec<u32> = (0..draws.len() as u32).collect();
+    order.sort_unstable_by_key(|index| (key(index), *index));
+
+    // `(mesh, material, floats, instance count, earliest draw index)`.
+    let mut batches: Vec<(u64, u64, Vec<f32>, u32, u32)> = order
+        .chunk_by(|a, b| key(a) == key(b))
+        .map(|run| {
+            let (mesh_id, material_id) = key(&run[0]);
+            let mut floats = Vec::with_capacity(run.len() * INSTANCE_FLOATS);
+            run.iter().for_each(|index| {
+                let draw = &draws[*index as usize];
+                floats.extend_from_slice(&draw.mvp());
+                floats.extend_from_slice(&draw.world());
+                floats.extend_from_slice(&draw.color());
+                // The emissive lane, filled out to a `vec4` — the vertex-attribute
+                // granularity the instance buffer is described in — by the material's
+                // specular strength, which is what that fourth lane carries now that the
+                // shader has a highlight term to spend it on.
+                let e = draw.emissive();
+                floats.extend_from_slice(&[e[0], e[1], e[2], draw.specular().get()]);
+            });
+            (mesh_id, material_id, floats, run.len() as u32, run[0])
         })
+        .collect();
+
+    batches.sort_unstable_by_key(|batch| batch.4);
+    batches
+        .into_iter()
+        .map(|(mesh_id, material_id, floats, count, _)| (mesh_id, material_id, floats, count))
         .collect()
 }
 
@@ -127,6 +155,28 @@ mod tests {
         assert_eq!(batches[1].3, 1);
         assert_eq!(&batches[1].2[0..16], &[2.0; 16]);
         assert_eq!(&batches[1].2[16..32], &[8.0; 16]);
+    }
+
+    /// Groups come back in **first-appearance** order, not key order.
+    ///
+    /// The distinction is invisible until a later key sorts before an earlier
+    /// one, which is exactly what grouping-by-sorting would get wrong: mesh 9
+    /// is drawn first but sorts last. Without the final reordering this test
+    /// reports `[2, 5, 9]` and the renderer draws the scene in a different
+    /// order than the packet asked for.
+    #[test]
+    fn groups_keep_first_appearance_order_even_when_keys_sort_the_other_way() {
+        let draws = vec![
+            FrameDrawItem::new(0, 9, 1, [0.0; 16], [0.0; 16], [1.0; 4], false),
+            FrameDrawItem::new(1, 5, 1, [0.0; 16], [0.0; 16], [1.0; 4], false),
+            FrameDrawItem::new(2, 2, 1, [0.0; 16], [0.0; 16], [1.0; 4], false),
+            // A second instance of the mesh drawn first: it must join mesh 9's
+            // batch without promoting that batch, which already leads.
+            FrameDrawItem::new(3, 9, 1, [0.0; 16], [0.0; 16], [1.0; 4], false),
+        ];
+        let batches = frame_packet_to_batches(&packet(draws, Vec::new()));
+        let order: Vec<(u64, u32)> = batches.iter().map(|b| (b.0, b.3)).collect();
+        assert_eq!(order, vec![(9, 2), (5, 1), (2, 1)]);
     }
 
     #[test]
