@@ -9,6 +9,7 @@ allowed_layers = [
     "host",
     "layout",
     "runtime",
+    "state",
 ]
 
 allowed_modules = [

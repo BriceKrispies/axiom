@@ -28,6 +28,9 @@ axiom = { path = "../../modules/axiom" }
 # Deterministic time primitives: the puzzle sim advances one `FixedStep` per
 # `Tick` on the kernel's `SimulationClock`; ghost cadence uses `TickDivider`.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
+# The explicit-persistent-state substrate. The app owns the current snapshot and
+# hands it in; the layer transforms values and retains nothing.
+axiom-state = { path = "../../crates/axiom-state" }
 # `Mat4`/`Vec3` camera + per-instance transforms for the 3D board (scene3d).
 axiom-math = { path = "../../crates/axiom-math" }
 # The keymap contract (`Keymap`/`KeyBinding`) input_mapping routes DOM keys through.
