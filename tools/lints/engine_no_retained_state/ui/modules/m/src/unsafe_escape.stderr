@@ -1,0 +1,78 @@
+warning: [unsafe-state-escape] `unsafe` block suspends the guarantees the state law rests on
+  --> $DIR/unsafe_escape.rs:7:5
+   |
+LL |     unsafe { *value }
+   |     ^^^^^^^^^^^^^^^^^
+   |
+   = help: inside it, aliasing and initialization are unchecked, so retention and mutation through a shared reference become possible and unprovable; unsafe code can retain and mutate state behind the compiler's back, so the state law cannot be proven around it; express the operation in safe Rust over explicit data, or move the imperative resource out to the app tier
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [unsafe-state-escape] `unsafe fn` opens an escape from the state law
+  --> $DIR/unsafe_escape.rs:12:1
+   |
+LL | pub unsafe fn trust_me() {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: inside an unsafe fn the compiler stops proving aliasing and initialization, so retention and mutation become unprovable; unsafe code can retain and mutate state behind the compiler's back, so the state law cannot be proven around it; express the operation in safe Rust over explicit data, or move the imperative resource out to the app tier
+
+warning: [unsafe-state-escape] `unsafe trait` declares an unchecked contract
+  --> $DIR/unsafe_escape.rs:16:1
+   |
+LL | pub unsafe trait Contiguous {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: implementors assert invariants no compiler check enforces, which is where hidden mutation hides; unsafe code can retain and mutate state behind the compiler's back, so the state law cannot be proven around it; express the operation in safe Rust over explicit data, or move the imperative resource out to the app tier
+
+warning: [unsafe-state-escape] `unsafe impl` asserts a property the compiler cannot check
+  --> $DIR/unsafe_escape.rs:20:1
+   |
+LL | unsafe impl Contiguous for Buffer {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: an unsafe impl vouches for invariants (often about shared mutation) that nothing verifies; unsafe code can retain and mutate state behind the compiler's back, so the state law cannot be proven around it; express the operation in safe Rust over explicit data, or move the imperative resource out to the app tier
+
+warning: [unsafe-state-escape] parameter type contains the raw pointer `*const u32`
+  --> $DIR/unsafe_escape.rs:24:22
+   |
+LL | pub fn from_raw(ptr: *const u32) -> u32 {
+   |                      ^^^^^^^^^^
+   |
+   = help: a raw pointer aliases memory the compiler cannot track, so nothing proves the pointee is not retained and mutated behind the API; unsafe code can retain and mutate state behind the compiler's back, so the state law cannot be proven around it; express the operation in safe Rust over explicit data, or move the imperative resource out to the app tier
+
+warning: [unsafe-state-escape] return type contains the raw pointer `*mut u32`
+  --> $DIR/unsafe_escape.rs:28:20
+   |
+LL | pub fn to_raw() -> *mut u32 {
+   |                    ^^^^^^^^
+   |
+   = help: a raw pointer aliases memory the compiler cannot track, so nothing proves the pointee is not retained and mutated behind the API; unsafe code can retain and mutate state behind the compiler's back, so the state law cannot be proven around it; express the operation in safe Rust over explicit data, or move the imperative resource out to the app tier
+
+warning: [unsafe-state-escape] field type contains the raw pointer `*mut u32`
+  --> $DIR/unsafe_escape.rs:35:5
+   |
+LL |     ptr: *mut u32,
+   |     ^^^^^^^^^^^^^
+   |
+   = help: a raw pointer aliases memory the compiler cannot track, so nothing proves the pointee is not retained and mutated behind the API; unsafe code can retain and mutate state behind the compiler's back, so the state law cannot be proven around it; express the operation in safe Rust over explicit data, or move the imperative resource out to the app tier
+
+warning: [unsafe-state-escape] `extern` block imports foreign machinery
+  --> $DIR/unsafe_escape.rs:40:1
+   |
+LL | / unsafe extern "C" {
+LL | |     pub fn host_now() -> u64;
+LL | |     pub static HOST_EPOCH: u64;
+LL | | }
+   | |_^
+   |
+   = help: foreign code is entirely outside the compiler's model, so it may retain and mutate anything with no evidence available to the engine; unsafe code can retain and mutate state behind the compiler's back, so the state law cannot be proven around it; express the operation in safe Rust over explicit data, or move the imperative resource out to the app tier
+
+warning: [static-storage] `extern` static declares process-wide storage owned outside Rust
+  --> $DIR/unsafe_escape.rs:42:5
+   |
+LL |     pub static HOST_EPOCH: u64;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: a foreign static outlives every call and is mutable by code the compiler never sees; use `const` for a compile-time value, or pass the datum in as an explicit parameter and return the updated copy: `fn step(state: &State, input: &Input) -> State`
+
+warning: 9 warnings emitted
+

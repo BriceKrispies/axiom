@@ -368,6 +368,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine_no_retained_state"
+version = "0.1.0"
+dependencies = [
+ "clippy_utils",
+ "dylint_linting",
+ "dylint_testing",
+ "engine_lint_helpers",
+]
+
+[[package]]
 name = "engine_no_runtime_type_branch"
 version = "0.1.0"
 dependencies = [

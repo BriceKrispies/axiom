@@ -1,0 +1,107 @@
+warning: [interior-mutability] field type contains `std::cell::RefCell<u32>`
+  --> $DIR/interior_mutability.rs:16:5
+   |
+LL |     value: RefCell<u32>,
+   |     ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [interior-mutability] field type contains `std::sync::Mutex<World>`
+  --> $DIR/interior_mutability.rs:20:5
+   |
+LL |     value: Mutex<World>,
+   |     ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::sync::RwLock<World>`
+  --> $DIR/interior_mutability.rs:24:5
+   |
+LL |     value: RwLock<World>,
+   |     ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::sync::atomic::Atomic<u32>`
+  --> $DIR/interior_mutability.rs:28:5
+   |
+LL |     value: AtomicU32,
+   |     ^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::sync::atomic::Atomic<bool>`
+  --> $DIR/interior_mutability.rs:32:5
+   |
+LL |     value: AtomicBool,
+   |     ^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::cell::Cell<u32>`
+  --> $DIR/interior_mutability.rs:36:5
+   |
+LL |     value: Cell<u32>,
+   |     ^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::cell::UnsafeCell<u32>`
+  --> $DIR/interior_mutability.rs:40:5
+   |
+LL |     value: UnsafeCell<u32>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] type alias contains `std::cell::RefCell<World>`
+  --> $DIR/interior_mutability.rs:45:1
+   |
+LL | type Hidden = RefCell<World>;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::cell::RefCell<World>`
+  --> $DIR/interior_mutability.rs:48:5
+   |
+LL |     value: Hidden,
+   |     ^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::cell::RefCell<World>`
+  --> $DIR/interior_mutability.rs:57:5
+   |
+LL |     value: Option<Box<Hidden>>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::sync::Mutex<World>`
+  --> $DIR/interior_mutability.rs:63:5
+   |
+LL |     value: Vec<(u32, Result<Mutex<World>, ()>)>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] return type contains `std::cell::RefCell<World>`
+  --> $DIR/interior_mutability.rs:68:29
+   |
+LL | pub fn hand_out_a_cell() -> RefCell<World> {
+   |                             ^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::cell::Cell<u32>`
+  --> $DIR/interior_mutability.rs:76:5
+   |
+LL |     slot: Cell<u32>,
+   |     ^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: 13 warnings emitted
+

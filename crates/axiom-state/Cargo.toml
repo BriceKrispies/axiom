@@ -1,0 +1,22 @@
+[package]
+name = "axiom-state"
+description = "Axiom layer: the explicit-persistent-state substrate. Typed schemas with stable declared identities, immutable snapshots, patches with deterministic conflict detection, cells/tables/sequences, typed views with declared read/write access, deterministic hashing, diffing, little-endian serialization, and sequential schema migration. It is itself stateless: every entry point takes values and returns values, and no engine object ever holds 'the current state'. Branchless and 100% covered."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# State is expressed purely in kernel primitives: the Reflect value contract and
+# TypeSchema shape description, BinaryWriter/BinaryReader for the canonical
+# little-endian codec, SchemaVersion for the version stamp and compatibility
+# rule, StableHash for digests, and KernelResult/KernelError for failure
+# identity. No math, no ticks, no domain content.
+axiom-kernel = { path = "../axiom-kernel" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

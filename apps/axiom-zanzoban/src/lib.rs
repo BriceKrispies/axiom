@@ -45,6 +45,7 @@ pub mod ghost_replay;
 pub mod game_command;
 pub mod game_state;
 pub mod game_step;
+pub mod puzzle_state;
 
 pub mod app;
 pub mod editor_model;

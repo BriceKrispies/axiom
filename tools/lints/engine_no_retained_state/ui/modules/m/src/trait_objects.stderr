@@ -1,0 +1,35 @@
+warning: [opaque-behavior-state] parameter type exposes `dyn Renderer` on a public engine boundary
+  --> $DIR/trait_objects.rs:19:25
+   |
+LL | pub fn render(renderer: &dyn Renderer) -> u32 {
+   |                         ^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a trait object hides an implementation that may retain state the engine cannot prove; dispatch statically through a concrete type, or replace the behavior with the explicit data it yields
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [opaque-behavior-state] return type exposes `(dyn Renderer + 'static)` on a public engine boundary
+  --> $DIR/trait_objects.rs:25:27
+   |
+LL | pub fn pick_renderer() -> Box<dyn Renderer> {
+   |                           ^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a trait object hides an implementation that may retain state the engine cannot prove; dispatch statically through a concrete type, or replace the behavior with the explicit data it yields
+
+warning: [opaque-behavior-state] field type exposes `(dyn Renderer + 'static)` on a public engine boundary
+  --> $DIR/trait_objects.rs:32:5
+   |
+LL |     pub renderer: Box<dyn Renderer>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this hands executable behavior across the boundary, and that behavior may capture and retain state the engine cannot see; a trait object hides an implementation that may retain state the engine cannot prove; dispatch statically through a concrete type, or replace the behavior with the explicit data it yields
+
+warning: [opaque-behavior-state] public type alias exposes `(dyn Renderer + 'static)`
+  --> $DIR/trait_objects.rs:37:1
+   |
+LL | pub type AnyRenderer = Box<dyn Renderer>;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: an alias published from the engine is part of its boundary, and this one names executable behavior whose captured state is invisible; a trait object hides an implementation that may retain state the engine cannot prove; dispatch statically through a concrete type, or replace the behavior with the explicit data it yields
+
+warning: 4 warnings emitted
+

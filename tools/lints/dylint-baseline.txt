@@ -20,6 +20,15 @@
 # `engine_no_unitless_float_public_api` is FrameOutcome's render-float intensity
 # multiplier (GPU output data).
 #
+# `engine_no_retained_state` (the Axiom State Law) is DELIBERATELY ABSENT from this
+# file. It is a zero-tolerance architectural law, not a ratchet: a missing entry
+# means the gate allows zero findings, so the gate FAILS on this lint today, on
+# purpose. The engine currently has 787 violations, inventoried in
+# docs/audits/retained-state-audit.md — that is a migration work list, NOT an allowed
+# baseline. Do not add an `engine_no_retained_state=N` line here to make the gate
+# pass; remove the retained state instead. See
+# tools/lints/engine_no_retained_state/README.md.
+#
 # History (pre-CI, when this gate ran as .git/hooks/pre-commit):
 #   2026-06-26: engine_no_large_files 2 -> 0 (six over-budget spine files split
 #     into private submodules — pure relocation, facade/coverage/branchless kept).

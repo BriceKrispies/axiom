@@ -207,6 +207,12 @@ impl PuzzleGameState {
         self.recording.len()
     }
 
+    /// The moves recorded in the current life, in order — the path the next
+    /// ghost will replay. Read-only; recording happens through the commands.
+    pub fn recorded_path(&self) -> &[Direction] {
+        self.recording.recorded()
+    }
+
     /// The current simulation tick (kernel time).
     pub fn current_tick(&self) -> u64 {
         self.clock.tick().raw()

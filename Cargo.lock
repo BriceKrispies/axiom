@@ -990,6 +990,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-state"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-streaming"
 version = "0.1.0"
 
@@ -1124,6 +1131,7 @@ dependencies = [
  "axiom-layout",
  "axiom-math",
  "axiom-runtime",
+ "axiom-state",
  "axiom-windowing",
  "console_error_panic_hook",
  "serde",

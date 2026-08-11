@@ -1,0 +1,43 @@
+warning: [interior-mutability] field type contains `std::cell::RefCell<u32>`
+  --> $DIR/composed_types.rs:16:5
+   |
+LL |     slot: RefCell<u32>,
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+   = note: `#[warn(engine_no_retained_state)]` on by default
+
+warning: [interior-mutability] `const` item type contains `std::cell::RefCell<u32>`
+  --> $DIR/composed_types.rs:35:1
+   |
+LL | pub const EMPTY: Option<Outer> = None;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] field type contains `std::cell::Cell<u32>`
+  --> $DIR/composed_types.rs:44:5
+   |
+LL |     slot: Cell<u32>,
+   |     ^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [interior-mutability] `const` item type contains `std::cell::Cell<u32>`
+  --> $DIR/composed_types.rs:47:1
+   |
+LL | pub const NO_CHAIN: Option<Chain> = None;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; make the mutation explicit: take the value as `&State` and return the next `State`, or move the imperative resource outside the stateless engine boundary (into the app) and pass the data it produces in as an input
+
+warning: [thread-local-storage] field type contains `std::thread::LocalKey<u32>`
+  --> $DIR/composed_types.rs:53:5
+   |
+LL |     key: &'static LocalKey<u32>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this type exists to hold information that outlives, or mutates outside of, the call that touches it; thread-local storage is ambient per-thread state the caller cannot see; thread the datum through the call as `fn step(state: &State, input: &Input) -> State`
+
+warning: 5 warnings emitted
+

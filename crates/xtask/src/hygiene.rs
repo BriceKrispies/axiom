@@ -35,6 +35,30 @@ const JUNK_DRAWER_NAMES: &[&str] = &["utils", "helpers", "common", "misc"];
 /// Coverage-suppression tokens, banned everywhere in layers and modules.
 const COVERAGE_OFF_NEEDLES: &[&str] = &["coverage(off)", "coverage(on)", "coverage_attribute"];
 
+/// State-Law suppression tokens, banned everywhere in layers and modules.
+///
+/// The `engine_no_retained_state` dylint cannot stop engine code from writing
+/// `#[allow(engine_no_retained_state)]` above the very item it would flag — a
+/// lint's own level attribute is applied by rustc before the pass ever runs, and
+/// an unknown-lint name is at most a warning in a plain `cargo build`. So this
+/// narrow scan is the enforcement: **naming the lint at all** inside a layer or
+/// module is a violation. Engine code has no legitimate reason to write the
+/// name — not in an `allow`, an `expect`, a `warn`, or a `cfg_attr(..., allow(...))`
+/// wrapper — so a bare identifier match closes every spelling of the escape at
+/// once, including forms a targeted `allow(` matcher would miss.
+///
+/// The blanket entries cover the indirect route: `#![allow(warnings)]` silences
+/// every warn-level lint, this one included, without ever naming it.
+///
+/// This is deliberately the *only* source-scanning rule the State Law adds. Every
+/// other rule is a semantic dylint over resolved HIR/type information; this one
+/// exists solely because self-suppression is not something a lint can refuse.
+const STATE_LAW_SUPPRESSION_NEEDLES: &[&str] = &[
+    "engine_no_retained_state",
+    "allow(warnings)",
+    "expect(warnings)",
+];
+
 /// Browser / platform API substrings. The scanner uses substring matches
 /// so it catches references regardless of casing of the surrounding code.
 const BROWSER_API_NEEDLES: &[&str] = &[
@@ -140,6 +164,30 @@ fn scan_one(
                                 format!(
                                     "{kind_label} `{name}` uses banned coverage-suppression `{needle}` in {}; \
                                      cover the code with a reachable test or refactor the dead branch away",
+                                    path.display()
+                                ),
+                            );
+                            let v = first_line_containing(&text, needle)
+                                .map_or(v.clone(), |line| v.at(path.clone(), line));
+                            report.push(v);
+                        });
+
+                    // Scanned against the RAW text for the same reason as the
+                    // coverage tokens: a commented-out suppression is still a
+                    // sign the law is being worked around, and the identifier
+                    // has no legitimate place in engine source at all.
+                    STATE_LAW_SUPPRESSION_NEEDLES
+                        .iter()
+                        .filter(|needle| text.contains(*needle))
+                        .filter(|needle| reported.insert((needle, "state-law")))
+                        .for_each(|needle| {
+                            let v = Violation::new(
+                                ViolationKind::SourceHygieneStateLawSuppression,
+                                name.to_string(),
+                                format!(
+                                    "{kind_label} `{name}` attempts to suppress the State Law via `{needle}` in {}; \
+                                     `engine_no_retained_state` is a zero-tolerance law with no `#[allow]` — \
+                                     remove the retained state instead (pass the datum in and return it)",
                                     path.display()
                                 ),
                             );
@@ -259,6 +307,82 @@ mod tests {
         let mut report = CheckReport::default();
         check(&[("test".into(), dir)], &[], &mut report);
         assert!(report.has_kind(ViolationKind::SourceHygieneCoverageOff));
+    }
+
+    #[test]
+    fn state_law_allow_attribute_is_banned() {
+        let tmp = std::env::temp_dir().join("axiom_xtask_hygiene_statelaw_allow");
+        let _ = fs::remove_dir_all(&tmp);
+        let dir = make_src(
+            &tmp,
+            "lib.rs",
+            "#[allow(engine_no_retained_state)]\nstatic X: u32 = 0;",
+        );
+        let mut report = CheckReport::default();
+        check(&[("test".into(), dir)], &[], &mut report);
+        assert!(report.has_kind(ViolationKind::SourceHygieneStateLawSuppression));
+    }
+
+    #[test]
+    fn state_law_expect_attribute_is_banned() {
+        let tmp = std::env::temp_dir().join("axiom_xtask_hygiene_statelaw_expect");
+        let _ = fs::remove_dir_all(&tmp);
+        let dir = make_src(
+            &tmp,
+            "lib.rs",
+            "#[expect(engine_no_retained_state)]\nstatic X: u32 = 0;",
+        );
+        let mut report = CheckReport::default();
+        check(&[("test".into(), dir)], &[], &mut report);
+        assert!(report.has_kind(ViolationKind::SourceHygieneStateLawSuppression));
+    }
+
+    #[test]
+    fn state_law_crate_level_allow_is_banned() {
+        let tmp = std::env::temp_dir().join("axiom_xtask_hygiene_statelaw_crate");
+        let _ = fs::remove_dir_all(&tmp);
+        let dir = make_src(&tmp, "lib.rs", "#![allow(engine_no_retained_state)]\n");
+        let mut report = CheckReport::default();
+        check(&[("test".into(), dir)], &[], &mut report);
+        assert!(report.has_kind(ViolationKind::SourceHygieneStateLawSuppression));
+    }
+
+    #[test]
+    fn state_law_cfg_attr_suppression_is_banned() {
+        let tmp = std::env::temp_dir().join("axiom_xtask_hygiene_statelaw_cfgattr");
+        let _ = fs::remove_dir_all(&tmp);
+        let dir = make_src(
+            &tmp,
+            "lib.rs",
+            "#[cfg_attr(feature = \"x\", allow(engine_no_retained_state))]\nstatic X: u32 = 0;",
+        );
+        let mut report = CheckReport::default();
+        check(&[("test".into(), dir)], &[], &mut report);
+        assert!(report.has_kind(ViolationKind::SourceHygieneStateLawSuppression));
+    }
+
+    #[test]
+    fn blanket_allow_warnings_is_banned() {
+        let tmp = std::env::temp_dir().join("axiom_xtask_hygiene_statelaw_blanket");
+        let _ = fs::remove_dir_all(&tmp);
+        let dir = make_src(&tmp, "lib.rs", "#![allow(warnings)]\n");
+        let mut report = CheckReport::default();
+        check(&[("test".into(), dir)], &[], &mut report);
+        assert!(report.has_kind(ViolationKind::SourceHygieneStateLawSuppression));
+    }
+
+    #[test]
+    fn clean_engine_source_does_not_trip_the_state_law_scan() {
+        let tmp = std::env::temp_dir().join("axiom_xtask_hygiene_statelaw_clean");
+        let _ = fs::remove_dir_all(&tmp);
+        let dir = make_src(
+            &tmp,
+            "lib.rs",
+            "pub fn step(state: &u32, input: &u32) -> u32 { state + input }",
+        );
+        let mut report = CheckReport::default();
+        check(&[("test".into(), dir)], &[], &mut report);
+        assert!(!report.has_kind(ViolationKind::SourceHygieneStateLawSuppression));
     }
 
     #[test]
