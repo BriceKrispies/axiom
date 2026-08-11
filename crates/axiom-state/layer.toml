@@ -1,0 +1,88 @@
+# Axiom layer manifest — axiom-state.
+#
+# The explicit-persistent-state layer: typed schemas, immutable snapshots,
+# patches, cells/tables/sequences, typed views with declared read/write access,
+# deterministic hashing/serialization/diffing, and sequential schema migration.
+#
+# NOTE ON depends_on — the refusals are deliberate and gate-driven:
+#   * `ecs` is NOT declared. The dependency runs the other way: axiom-ecs's
+#     column codec and World::write_snapshot are the intended future consumers
+#     of this layer. Declaring ecs would also drag frame -> host (the
+#     platform-facing layer) underneath a pure data substrate.
+#   * `runtime` / `frame` are NOT declared. This layer reads no tick and no
+#     frame. A tick is data a caller stores in a cell, not something this layer
+#     observes.
+#   * `math` is NOT declared: there is no vector/matrix arithmetic here. A
+#     declared-but-unused edge is the ceremonial dependency the Layer Law
+#     forbids, and the engine_genuine_dependency dylint (which has real type
+#     information) would reject it.
+#   * `space` is NOT declared. `Address` is content-generation naming; a state
+#     path is its own vocabulary. Revisit only if a real call site appears.
+
+[layer]
+name = "state"
+crate_name = "axiom-state"
+depends_on = ["kernel"]
+
+meaningful_dependency = """
+State adapts the kernel's Reflect value contract, TypeSchema shape description,
+BinaryWriter/BinaryReader canonical little-endian codec, SchemaVersion stamp and
+compatibility rule, StableHash digest, and KernelResult/KernelError identities
+into an engine-wide substrate for explicit persistent state. The kernel
+describes and round-trips ONE value of ONE type; this layer turns that into a
+versioned COLLECTION of many independently-identified values that can be
+snapshotted, digested, diffed, patched forward with deterministic conflict
+detection, migrated across a schema version, and described to tooling. Every
+declared state is stored as its Reflect bytes under a stable declared identity,
+so the whole substrate is type-agnostic without runtime type erasure: no
+TypeId, no downcast, no trait objects. It owns no domain meaning, no entity
+model, no tick and no scheduling - what a cell means is the caller's job. It
+retains nothing: every entry point takes values and returns values, and the
+current snapshot is always owned by the caller.
+"""
+
+introduced_capabilities = [
+    "StateId",
+    "StateKind",
+    "StateSchema",
+    "StateSnapshot",
+    "StatePatch",
+    "StateTable",
+    "StateSequence",
+    "StateView",
+    "StateAccess",
+    "StateError",
+]
+
+consumed_capabilities = [
+    "Reflect",
+    "TypeSchema",
+    "BinaryWriter",
+    "BinaryReader",
+    "SchemaVersion",
+    "StableHash",
+    "KernelResult",
+    "KernelError",
+]
+
+# Proof the kernel dependency is genuine, at the sites that actually carry it.
+[[proof_exports]]
+export = "StateSnapshot"
+must_reference = ["BinaryWriter", "StableHash", "SchemaVersion"]
+
+[[proof_exports]]
+export = "StatePatch"
+must_reference = ["BinaryReader", "KernelError"]
+
+[[proof_exports]]
+export = "StateSchema"
+must_reference = ["SchemaVersion", "StableHash"]
+
+# `StateShapeId` rather than `StateView` carries the Reflect/TypeSchema proof.
+# StateView depends on Reflect only transitively, through the key traits' value
+# types; the file that genuinely names both is the one that digests a type's
+# shape. Pointing the proof at StateView would have been a reference the code
+# does not actually make.
+[[proof_exports]]
+export = "StateShapeId"
+must_reference = ["Reflect", "TypeSchema"]

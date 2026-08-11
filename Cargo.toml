@@ -27,6 +27,7 @@ members = [
     "crates/axiom-proc",
     "crates/axiom-proc-validate",
     "crates/axiom-recipe",
+    "crates/axiom-state",
     "crates/axiom-proc-core",
     "crates/axiom-proc-texture",
     "crates/axiom-proc-mesh",
