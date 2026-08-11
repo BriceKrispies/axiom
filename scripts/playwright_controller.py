@@ -213,6 +213,27 @@ class Daemon:
         except Exception as exc:  # pragma: no cover - depends on the browser
             log(f"daemon: CPU throttle failed ({exc})")
 
+    def _throttle_status(self) -> dict:
+        """What throttle was asked for, and whether the session holding it is
+        still alive.
+
+        The liveness probe is a real round-trip on the *same* session that owns
+        the override, not a cached flag: a flag would keep reporting the rate it
+        was set to long after the session carrying it had gone.
+        """
+        requested = getattr(self, "_throttle_rate", None)
+        if requested is None:
+            return {"requested": None, "live": False, "note": "no throttle requested"}
+        try:
+            # Re-sending the same rate is idempotent, and it fails loudly if the
+            # session is detached — which is the whole question being asked.
+            self._throttle_cdp.send(
+                "Emulation.setCPUThrottlingRate", {"rate": requested}
+            )
+            return {"requested": requested, "live": True}
+        except Exception as exc:  # pragma: no cover - depends on the browser
+            return {"requested": requested, "live": False, "error": str(exc)}
+
     def _reassert_cpu_throttle(self) -> None:
         """Re-apply the throttle after anything that may have reset it."""
         rate = getattr(self, "_throttle_rate", None)
@@ -240,6 +261,14 @@ class Daemon:
                 "title": self.page.title(),
                 "headless": HEADLESS,
                 "pid": os.getpid(),
+                # Reported so a measurement run can *verify* the throttle rather
+                # than assume it. An emulation override dies with the CDP session
+                # that set it, and when it dies the page silently returns to full
+                # speed while every reading still claims to be throttled — a
+                # failure that is invisible and that produces exactly the fast
+                # frame you were hoping for. `requested` is what was asked for;
+                # `live` is what the browser says it is holding right now.
+                "cpu_throttle": self._throttle_status(),
             }
         if action == "goto":
             if not args:
