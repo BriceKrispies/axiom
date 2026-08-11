@@ -2,7 +2,7 @@
 name = "runtime"
 crate_name = "axiom-runtime"
 depends_on = ["kernel"]
-meaningful_dependency = "Runtime consumes kernel primitives — `KernelApi` for emission, `SimulationClock`/`FixedStep`/`Tick`/`FrameIndex` for deterministic time, `KernelResult`/`KernelError` for failure identity, `HandleId` for stable system identity, and `LogRecord`/`TelemetryMetric` (with their sinks) for structured observability — to provide deterministic engine lifecycle, fixed-timestep stepping, ordered system scheduling, FIFO command/event queues, and replay-ready step records that all later engine layers will build on."
+meaningful_dependency = "Runtime consumes kernel primitives — `KernelApi` for emission, `SimulationClock`/`FixedStep`/`Tick`/`FrameIndex` for deterministic time, `KernelResult`/`KernelError` for failure identity, `HandleId` for stable system identity, and `LogRecord`/`TelemetryMetric` (with their sinks) for structured observability — to provide deterministic engine lifecycle, a startup preparation phase that must run to completion before the lifecycle may reach `Running`, fixed-timestep stepping, ordered system scheduling, FIFO command/event queues, and replay-ready step records that all later engine layers will build on."
 
 introduced_capabilities = [
     "Runtime",
@@ -23,6 +23,8 @@ introduced_capabilities = [
     "RuntimeContext",
     "RuntimeDiagnostics",
     "RuntimeStepRecord",
+    "PreparationTask",
+    "PreparationSchedule",
 ]
 
 consumed_capabilities = [
