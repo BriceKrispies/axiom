@@ -120,7 +120,6 @@ pub struct BurntRubber {
     stage: Stage,
     /// The build parameters, so starting a race can rebuild the simulation
     /// without the app having to be rebuilt around it.
-    seed: u64,
     profile: crate::PlayProfile,
     /// The course compiled by the startup preparation phase, retained so a
     /// restart and the ghost reuse it instead of recompiling. Before this the
@@ -258,7 +257,6 @@ impl BurntRubber {
             frame: 0,
             events: Vec::new(),
             stage: Stage::Racing,
-            seed,
             profile,
             plan,
             viewport: (width as f32, height as f32),
