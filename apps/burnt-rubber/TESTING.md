@@ -9,10 +9,105 @@ plain `cargo test` on the native target; the `wasm32` browser edge
 cargo test -p axiom-burnt-rubber           # this app
 cargo test --workspace                     # everything
 cargo run -p xtask -- check-architecture   # Layer + Module Law
+cargo run -p xtask -- check-slices         # the golden run's SHA-256 pins
 bash scripts/coverage.sh                   # the 100% engine-spine gate
 cargo dylint --all -- --all-targets        # the lint rulebook
 bash scripts/ts-gate.sh                    # the TypeScript SDK gate
 ```
+
+---
+
+## 0. The golden run — the regression baseline
+
+Everything in §1 proves the game agrees **with itself, inside one process**. Both
+sides of those `assert_eq!`s are rebuilt from the current code, so a change that
+alters the game *across commits* passes them silently. The golden run closes
+that: it pins the game as **committed bytes**.
+
+```sh
+cargo test -p axiom-burnt-rubber --test agent_golden -- --nocapture
+```
+
+It is one continuous race. The real `axiom-agent` driver (`src/agent.rs`) plays
+the shipping course from the grid to the finish arch, and five checkpoints are
+read out of that single run — nothing is teleported, nothing is hand-driven, so
+each captured frame is evidence about the whole preceding race rather than about
+a pose. The run's identity (seed, profile, tuning, framebuffer, driver technique,
+step limit, checkpoint stops) is entirely constants in `src/golden.rs`:
+
+| Checkpoint | Stop | Where the agent is |
+|---|---|---|
+| `grid` | step 0 | Held on the grid, counting in — before any driving |
+| `opening` | step 700 | Off the line, at speed on the coastal sweepers |
+| `esses` | step 2200 | Mid-run, the ridge crests and the technical bends |
+| `canyon` | step 3800 | Late, flat out, deep into the boost meter's spend |
+| `finish` | `RacePhase::Finished` | The step it crosses the line (measured: 5419) |
+
+**Three artifacts per checkpoint**, compared independently so a diff *localizes*:
+
+| Artifact | Pins |
+|---|---|
+| `agent_<name>_state.bin` | The simulation: position, speed, boost, near misses, impacts, camera, ghost delta |
+| `agent_<name>_render.bin` | The render boundary: every draw (mvp, world, colour, **emissive, specular**, mesh/material id, shadow flag), camera matrix, clear colour, lights, and the authored **look** (ambient, fog, sky, bloom, grade) |
+| `agent_<name>_resources.bin` | A content fingerprint of every uploaded mesh (vertex/index hashes) and texture (pixel hash, size, sampling) |
+
+The third is the one this app most needs. `FrameOutcome` carries a mesh *id*,
+never its vertices — geometry and texels upload once at bind (see
+`render/chunks.rs:1-14` for why). So a road chunk built from a stale track, an
+off-by-one sample range, a seam that stops being bit-identical
+(`render/road_mesh.rs:126`), or a moved constant inside `asphalt_albedo` all
+render a visibly different game while leaving the draw list byte-identical.
+
+All five `resources` goldens hash identically to each other, which is the correct
+result: nothing is generated after the scene is installed.
+
+Every golden is **SHA-256-pinned in `slice.toml`** and enforced by
+`cargo run -p xtask -- check-slices`, so a deleted or quietly regenerated golden
+is caught by the checker rather than silently re-blessed.
+
+Five assertions guard it against being vacuous: the run **replays byte-equal**,
+the five checkpoints are **all different frames**, a **different course seed
+moves all three artifacts**, a **different driver moves state and render but not
+resources**, and the run is a **completed race** (finishes inside its cap, >99%
+progress, >60 near misses).
+
+Two things the fixture taught us while it was being built, both worth knowing:
+
+* **`DriverTuning::grip_usage` does not bind on this course.** Perturbing it by
+  0.01 moved not one byte. The course is flat out end to end, so `plan_speed`
+  saturates against top speed everywhere and the cornering-limit term never
+  applies. The sensitivity test perturbs `steer_gain_milli` instead, which is
+  emitted on every one of the 5 419 steps.
+* **What it does *not* catch:** anything about *when* work runs. A course
+  compiled twice instead of once, or a new per-frame allocation with no visual
+  change, moves zero bytes. The goldens prove nothing broke; they cannot prove a
+  performance change worked.
+
+### Rendering the checkpoints as real pixels
+
+The same five moments are registered in `axiom-shot` and render through the same
+`scene_renderer` the browser runs:
+
+```sh
+cargo run -p axiom-shot --features offscreen -- --backend gpu \
+  --app burnt-rubber-golden-canyon --out screenshots/golden/canyon.gpu.png
+# also: -grid  -opening  -esses  -finish ;  --backend canvas2d for the CPU arm
+```
+
+Measured on 2026-08-10: capturing all five twice, in separate processes, produced
+**byte-identical PNGs on both backends** — comfortably inside the repository's
+GPU tolerance (`mean ≤ 2 / max ≤ 40`) and exactly meeting the Canvas 2D one
+(byte-exact).
+
+### Regenerating (the only sanctioned update path)
+
+```sh
+AXIOM_REGOLD=1 cargo test -p axiom-burnt-rubber --test agent_golden
+cargo run -p xtask -- check-slices     # then repin the reported SHA-256s
+```
+
+An unexplained golden diff with no corresponding intended change is a
+determinism bug, exactly as a coverage drop is.
 
 ---
 

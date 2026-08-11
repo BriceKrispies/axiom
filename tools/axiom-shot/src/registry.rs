@@ -145,6 +145,39 @@ pub fn registry() -> Vec<SliceEntry> {
             name: "burnt-rubber-ghost",
             build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_ghost(),
         },
+        // The five checkpoints of the Burnt Rubber **golden run** — one
+        // continuous race driven grid-to-finish by the real `axiom-agent`
+        // driver, photographed at five points along it. Unlike the slices
+        // above, none of these teleports the car: each is where the agent
+        // actually got to after that many fixed steps, so the frame is evidence
+        // about the whole preceding race. The same five checkpoints are pinned
+        // as committed golden bytes by
+        // `apps/burnt-rubber/tests/agent_golden.rs` and hash-pinned in
+        // `apps/burnt-rubber/slice.toml`.
+        //
+        // They are correspondingly expensive to build (the last one drives the
+        // full ~5 400-step race through the scene and the ghost), which is why
+        // they are separate entries rather than the default burnt-rubber slice.
+        SliceEntry {
+            name: "burnt-rubber-golden-grid",
+            build: |_| axiom_burnt_rubber::golden::build_golden_grid(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-golden-opening",
+            build: |_| axiom_burnt_rubber::golden::build_golden_opening(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-golden-esses",
+            build: |_| axiom_burnt_rubber::golden::build_golden_esses(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-golden-canyon",
+            build: |_| axiom_burnt_rubber::golden::build_golden_canyon(),
+        },
+        SliceEntry {
+            name: "burnt-rubber-golden-finish",
+            build: |_| axiom_burnt_rubber::golden::build_golden_finish(),
+        },
         SliceEntry {
             name: "sports-physics-lab",
             // `--frame 1` photographs the third-person view (the player's body).

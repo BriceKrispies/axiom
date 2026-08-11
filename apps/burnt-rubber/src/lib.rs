@@ -70,6 +70,8 @@ pub mod render;
 
 pub mod app;
 pub mod capture;
+/// The canonical agent-played golden run — the app's regression baseline.
+pub mod golden;
 // A deterministic, steppable control surface over the live browser session —
 // how a motion-only defect (crawl, shimmer) is diagnosed, since a still cannot
 // show one. Inert unless a probe command is issued.

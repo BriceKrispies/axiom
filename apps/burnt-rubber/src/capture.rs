@@ -243,6 +243,14 @@ mod tests {
             ("burnt-rubber-tunnel", build_burnt_rubber_tunnel),
             ("burnt-rubber-traffic", build_burnt_rubber_traffic),
             ("burnt-rubber-boost", build_burnt_rubber_boost),
+            // The ghost slice is registered in `axiom-shot` like the rest and
+            // was missing here, which left the one slice that frames the
+            // *agent* as the only slice whose determinism nothing proved. It is
+            // also the slice with the most to prove: the ghost is a live
+            // `axiom-agent` run, so this is the assertion that the agent's own
+            // driving is reproducible frame-for-frame — the property
+            // `golden.rs`'s whole baseline rests on.
+            ("burnt-rubber-ghost", build_burnt_rubber_ghost),
         ]
     }
 

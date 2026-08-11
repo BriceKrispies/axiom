@@ -1,0 +1,115 @@
+# Semantic vertical-slice contract for **Burnt Rubber's agent-played golden run**.
+#
+# Where `app.toml` describes this package's *structural* place in the dependency
+# graph, this file describes its *semantic* contract: the determinism test that
+# proves the slice, and the committed golden `.bin` artifacts it pins.
+#
+# What is pinned here is not a posed still. It is **one continuous race**, driven
+# grid-to-finish by the real `axiom-agent` driver (`src/agent.rs`) through the
+# real app, with five checkpoints read out of that single run. See
+# `src/golden.rs` for the run definition (seed, profile, tuning, framebuffer,
+# driver technique, checkpoint stops) and `tests/agent_golden.rs` for the
+# encoders and the assertions.
+#
+# Three artifacts per checkpoint, compared independently so a diff localizes:
+#
+#   * `agent_<name>_state.bin`     - the simulation at that checkpoint: where the
+#     car is, how fast, how much boost, how many cars threaded, the camera, and
+#     the delta to the agent's ghost.
+#   * `agent_<name>_render.bin`    - the render boundary: every draw (including
+#     its emissive and specular lanes), the camera matrix, the clear colour, the
+#     lights, and the authored render look (ambient, fog, sky, bloom, grade).
+#     This is the deterministic ancestor of the pixels.
+#   * `agent_<name>_resources.bin` - a content fingerprint of every uploaded mesh
+#     and every uploaded texture.
+#
+# The third exists because `FrameOutcome` carries a mesh *id*, never its
+# vertices: geometry and texels are uploaded once at bind. Without it a road
+# chunk built from a stale track, or a moved constant inside `asphalt_albedo`,
+# would render a visibly different game while leaving the draw list byte-
+# identical. Note that all five `resources` goldens are expected to hash
+# identically to each other - the resource set is installed once at construction
+# and nothing is generated during a race. Five files rather than one, so that a
+# future change which made resources checkpoint-dependent shows up as a diff.
+#
+# Each golden is SHA-256-pinned, so a deleted / regenerated / hand-edited golden
+# is caught by `cargo run -p xtask -- check-slices` - the CHECKER owns the
+# baseline, not the test's `AXIOM_REGOLD` capture path.
+#
+# `harness` names the axiom-shot registration for the first checkpoint. The
+# schema carries one harness name; all five checkpoints are registered
+# (`burnt-rubber-golden-{grid,opening,esses,canyon,finish}`) and renderable:
+#
+#   cargo run -p axiom-shot --features offscreen -- \
+#     --backend gpu --app burnt-rubber-golden-canyon --out screenshots/br.png
+[slice]
+name = "burnt-rubber"
+crate_name = "axiom-burnt-rubber"
+harness_entry = "build_golden_grid"
+determinism_test = "agent_golden"
+harness = "burnt-rubber-golden-grid"
+
+# --- checkpoint 1: grid (step 0) - held on the grid, counting in -------------
+[[golden]]
+path = "tests/golden/agent_grid_state.bin"
+sha256 = "1be607a91edef52f017a6f55fdc224a29cd8408c2a88ffb9fc22297b402c7249"
+
+[[golden]]
+path = "tests/golden/agent_grid_render.bin"
+sha256 = "d904b88196268083738f8024710104c335355bfc7f5e2867ee26d9eb0db02b2f"
+
+[[golden]]
+path = "tests/golden/agent_grid_resources.bin"
+sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
+
+# --- checkpoint 2: opening (step 700) - off the line, on the sweepers --------
+[[golden]]
+path = "tests/golden/agent_opening_state.bin"
+sha256 = "dc07389e59d2a93ae13cecd1cb3714724b159b2bfb83e574709ba69b19312cba"
+
+[[golden]]
+path = "tests/golden/agent_opening_render.bin"
+sha256 = "c84853aeca05564d9509c118bd1cef4da2055b6e468a1bb19150e574e33cc390"
+
+[[golden]]
+path = "tests/golden/agent_opening_resources.bin"
+sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
+
+# --- checkpoint 3: esses (step 2200) - mid-run, ridge crests and bends -------
+[[golden]]
+path = "tests/golden/agent_esses_state.bin"
+sha256 = "900ba9ce04039c404f7ab473d352d87ec695caeee858e2b451df84316316f3c8"
+
+[[golden]]
+path = "tests/golden/agent_esses_render.bin"
+sha256 = "01c86efff31f5b08a440642c2b21e62261e715e4f24f153208fd27a80d76257c"
+
+[[golden]]
+path = "tests/golden/agent_esses_resources.bin"
+sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
+
+# --- checkpoint 4: canyon (step 3800) - late, flat out, deep in the boost ----
+[[golden]]
+path = "tests/golden/agent_canyon_state.bin"
+sha256 = "94d4f2509b25db1a94177e14c76b172f9510af62ed46fe6e839186af1e22d1a3"
+
+[[golden]]
+path = "tests/golden/agent_canyon_render.bin"
+sha256 = "e87ef963a18574566f9c439a596ae57f0a96220bb70d77dadda5d8d89187accf"
+
+[[golden]]
+path = "tests/golden/agent_canyon_resources.bin"
+sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
+
+# --- checkpoint 5: finish (the step it crosses the line) ---------------------
+[[golden]]
+path = "tests/golden/agent_finish_state.bin"
+sha256 = "1144e6e0571f270ce5a50cf48328ced59f93237c1c0902f3de3b78bc43e1f080"
+
+[[golden]]
+path = "tests/golden/agent_finish_render.bin"
+sha256 = "80d79feb992785f99f52b55c297cca52e976a76a87bd2b76434cc125a07a6c22"
+
+[[golden]]
+path = "tests/golden/agent_finish_resources.bin"
+sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
