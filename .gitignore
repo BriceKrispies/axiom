@@ -92,6 +92,8 @@ mutants-out*/
 # Playwright controller daemon state (browser logs, screenshots, command log)
 scripts/.playwright-controller/
 scripts/.localhost-servers/
+# Course-sweep profiles + V8 samples from scripts/burnt_rubber_profile.py.
+scripts/.burnt-rubber-profile/
 
 # tools/axiom-sound cache: gitignored lossless WAV render intermediates
 tools/axiom-sound/.axiom-cache/
