@@ -7,7 +7,9 @@ use axiom_kernel::{HandleId, MetricValue, Ratio, TelemetryMetric, TypeSchema};
 use axiom_math::MathApi;
 use axiom_render::RenderApi;
 use axiom_resources::ResourcesApi;
-use axiom_runtime::{Runtime, RuntimeConfig, RuntimeContext, RuntimeResult, RuntimeSystem};
+use axiom_runtime::{
+    PreparationSchedule, Runtime, RuntimeConfig, RuntimeContext, RuntimeResult, RuntimeSystem,
+};
 use axiom_webgpu::WebGpuApi;
 
 use crate::scene_to_render_input::{VIEWPORT_HEIGHT, VIEWPORT_WIDTH};
@@ -93,6 +95,9 @@ impl DemoRotatingCubeApi {
         runtime
             .initialize()
             .expect("demo runtime initialize cannot fail");
+        runtime
+            .prepare(PreparationSchedule::new())
+            .expect("demo runtime has no preparation tasks");
         runtime.start().expect("demo runtime start cannot fail");
         runtime
             .scheduler_mut()

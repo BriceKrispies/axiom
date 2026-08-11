@@ -379,6 +379,7 @@ mod tests {
 #[cfg(test)]
 mod cov {
     use super::*;
+    use crate::preparation_schedule::PreparationSchedule;
     use crate::runtime::Runtime;
     use crate::runtime_config::RuntimeConfig;
     use axiom_kernel::HandleId;
@@ -402,6 +403,7 @@ mod cov {
     fn registered_system_runs_through_a_runtime() {
         let mut rt = Runtime::new(RuntimeConfig::new(1_000)).unwrap();
         rt.initialize().unwrap();
+        rt.prepare(PreparationSchedule::new()).unwrap();
         rt.start().unwrap();
         rt.scheduler_mut()
             .register(HandleId::from_raw(1), "noop", 1, Box::new(Noop))
