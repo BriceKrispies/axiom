@@ -7,7 +7,7 @@
 //! world transforms — the engine embodiment of "a transform hierarchy is just a
 //! system over the world."
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use axiom_ecs::{
     ColumnSet, ComponentColumn, DynamicComponents, EntityRegistry, ErasedColumn, WorldStep,
@@ -85,16 +85,28 @@ pub struct SceneStorage {
     /// moving N nodes then reading once costs ONE whole-scene propagation instead of N
     /// (the difference between O(N·nodes) and O(nodes) per frame). Transient, never serialized.
     pub world_dirty: bool,
-    /// Retained accumulator for [`propagate`]: each whole-scene propagation
-    /// clears + refills this map instead of allocating a fresh `BTreeMap` (one
-    /// heap node per entity) every frame. Reusing its buckets across frames is
-    /// what stops transform propagation from being the engine's largest per-frame
-    /// *allocation-count* source — the churn that fragments wasm linear memory and
-    /// slowly degrades a long-running session. Presence in the map means "world
-    /// already computed this pass" (a child reads its parent's fresh world from
-    /// here); iteration order never escapes, so the `HashMap` is deterministic at
-    /// the boundary. Transient, never serialized.
-    pub(crate) world_scratch: HashMap<EntityId, Transform>,
+    /// Retained accumulator for [`propagate`], indexed by entity slot.
+    ///
+    /// `Some` means "world already computed this pass", so a child reads its
+    /// parent's fresh world from here; `None` means not yet, and the child falls
+    /// back to its local transform exactly as an absent map entry used to.
+    ///
+    /// This was a `HashMap<EntityId, Transform>` until 2026-08-11 (and a
+    /// `BTreeMap` before that). Reusing its buckets across frames did fix the
+    /// allocation churn it was introduced for, but left the *access* cost, and a
+    /// caller-attributed profile then found this one function responsible for
+    /// **100%** of the engine's `hashbrown` time — around 10% of the whole
+    /// frame. Propagating ~1000 entities cost two complete bucket walks (the
+    /// `clear`, then the copy-out `iter`) plus a hash per parent lookup and per
+    /// insert, every frame.
+    ///
+    /// Entity ids are dense slot indices, so a vector answers all of it by
+    /// indexing: the reset is a memset, a parent lookup is one load, and the
+    /// copy-out walks a contiguous slice. It is also *more* deterministic than
+    /// what it replaced — the copy-out now runs in ascending slot order by
+    /// construction rather than in whatever order the map's buckets happened to
+    /// be in. Transient, never serialized.
+    pub(crate) world_scratch: Vec<Option<Transform>>,
 }
 
 /// A first-person controller node's persistent orientation: the index it answers
@@ -375,24 +387,35 @@ pub(crate) fn propagate(ids: impl Iterator<Item = EntityId>, storage: &mut Scene
         world_scratch,
         ..
     } = storage;
-    // Clear (retaining buckets) rather than allocate a fresh map each frame; an
-    // entity present in `world_scratch` has had its world computed this pass, so a
-    // child reads its parent's fresh world from here.
+    // Clear (retaining the allocation) rather than allocate fresh each frame.
+    // `Transform` has no destructor, so this is a length reset, not a walk.
     world_scratch.clear();
     ids.for_each(|id| {
         locals.get(id).copied().into_iter().for_each(|local| {
+            // A parent whose slot is past the end, or still `None`, has not been
+            // computed this pass — the same "absent" case the map had, and it
+            // falls back to the local transform exactly as before.
             let world = parents
                 .get(id)
-                .and_then(|p| world_scratch.get(p).copied())
+                .and_then(|parent| world_scratch.get(parent.raw() as usize).copied().flatten())
                 .map_or(local, |parent_world| {
                     Transform::combine(parent_world, local)
                 });
-            world_scratch.insert(id, world);
+            let slot = id.raw() as usize;
+            world_scratch.resize(world_scratch.len().max(slot + 1), None);
+            world_scratch[slot] = Some(world);
         });
     });
-    world_scratch.iter().for_each(|(&id, &world)| {
-        worlds.insert(id, world);
-    });
+    // Ascending slot order by construction — the copy-out no longer depends on
+    // a map's internal bucket order for its sequence.
+    world_scratch
+        .iter()
+        .enumerate()
+        .for_each(|(slot, computed)| {
+            computed.iter().for_each(|world| {
+                worlds.insert(EntityId::from_raw(slot as u64), *world);
+            });
+        });
 }
 
 #[cfg(test)]
