@@ -1017,7 +1017,11 @@ fn telemetry_panel(
     let low_colour = ["#8ef", "#ff6b6b"][usize::from(over > 0)];
     // Amber when the tree was modified, so a build that is *not* the commit it
     // names cannot be misread as one that is.
-    let build_colour = ["#7a8a95", "#ffb454"]
+    //
+    // Both are light: this panel is read over whatever the car is driving past,
+    // and a dim "informational" grey vanishes entirely against sky — which is
+    // most of the frame. A stamp nobody can read is a stamp that is not there.
+    let build_colour = ["#cfe3ef", "#ffb454"]
         [usize::from(crate::telemetry::BUILD.ends_with("+dirty"))];
     format!(
         "<div style=\"margin-top:14px;font-size:13px;line-height:1.5;opacity:.85;\
