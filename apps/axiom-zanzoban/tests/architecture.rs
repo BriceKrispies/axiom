@@ -174,8 +174,8 @@ fn no_placeholder_macros() {
 #[test]
 fn no_illegal_engine_imports() {
     // The app may import only the layers/modules its app.toml declares: the
-    // kernel/math/interface/host/layout/runtime layers and the input/engine/
-    // windowing/debug-overlay/agent modules (plus its own crate name).
+    // kernel/math/interface/host/layout/runtime/state layers and the input/
+    // engine/windowing/debug-overlay/agent modules (plus its own crate name).
     let allowed = [
         "axiom_kernel",
         "axiom_math",
@@ -183,6 +183,9 @@ fn no_illegal_engine_imports() {
         "axiom_host",
         "axiom_layout",
         "axiom_runtime",
+        // The explicit-persistent-state substrate: `puzzle_state` declares the
+        // puzzle's persistent truth as a schema and carries it as snapshots.
+        "axiom_state",
         "axiom_input",
         "axiom_windowing",
         "axiom_debug_overlay",
