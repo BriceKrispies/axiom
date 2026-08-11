@@ -192,11 +192,11 @@ pub fn compile(spec: &CourseSpec, tuning: &Tuning) -> CourseResult<CoursePlan> {
         ..tuning.course
     };
     let geometry = geometry::compile(&expanded.sections, &course_tuning, &spec.thresholds)?;
-    let track = Track::from_samples(
-        spec.seed,
-        geometry.samples.clone(),
-        &course_tuning,
-    );
+    // Moved, not cloned. `from_samples` takes the vector by value and nothing
+    // below reads `geometry.samples` again (only `.sections` and `.clamps`,
+    // and `.sections` is itself moved out further down), so the clone was
+    // copying ~371 KB of sample table for nothing.
+    let track = Track::from_samples(spec.seed, geometry.samples, &course_tuning);
 
     let section_of = |distance_m: f32| -> u16 {
         geometry

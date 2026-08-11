@@ -14,6 +14,11 @@ pub use axiom_scene::SceneNodeId as Entity;
 // An app driving its own variable-dt run loop (a wasm `requestAnimationFrame`
 // host) banks real elapsed time into whole fixed steps through these.
 pub use axiom_frame::{FrameAccumulator, StepBudget};
+// The startup preparation contract: the trait an app implements for launch-only
+// work and hands to `App::prepare_with`. Re-exported here because most apps do
+// not Cargo-depend on `axiom-runtime`, and adding that dependency purely to name
+// a trait would be a ceremonial dependency.
+pub use axiom_runtime::PreparationTask;
 // The embed seam (SPEC-12): `HostSessionConfig` (seed + opaque params) an app
 // decodes before tick 0, and the outbound `HostOutcome` it reports once.
 // `Score` is the single sanctioned f64 boundary. The browser channel that

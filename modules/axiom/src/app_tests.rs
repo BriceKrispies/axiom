@@ -13,10 +13,72 @@ use crate::renderable::Renderable;
 use crate::spin::Spin;
 use axiom_kernel::Meters;
 use axiom_math::Transform;
+use axiom_runtime::{RuntimeError, RuntimeErrorCode, RuntimeResult, RuntimeState};
 
 /// A linear colour channel from a known-finite authored literal.
 fn ch(value: f32) -> Ratio {
     Ratio::new(value).expect("authored colour channel is finite")
+}
+
+/// A shared log of what ran, in the order it ran — the only way to observe the
+/// preparation phase from outside, since a task is handed no engine state.
+type Trace = Rc<RefCell<Vec<&'static str>>>;
+
+fn trace() -> Trace {
+    Rc::new(RefCell::new(Vec::new()))
+}
+
+/// A preparation task that appends its name to a shared trace.
+struct TraceTask {
+    name: &'static str,
+    trace: Trace,
+}
+
+impl PreparationTask for TraceTask {
+    fn prepare(&mut self) -> RuntimeResult<()> {
+        self.trace.borrow_mut().push(self.name);
+        Ok(())
+    }
+}
+
+fn trace_task(name: &'static str, trace: &Trace) -> Box<dyn PreparationTask> {
+    Box::new(TraceTask {
+        name,
+        trace: Rc::clone(trace),
+    })
+}
+
+/// A preparation task that always fails, so the phase aborts before `start()`.
+struct FailingTask;
+
+impl PreparationTask for FailingTask {
+    fn prepare(&mut self) -> RuntimeResult<()> {
+        Err(RuntimeError::new(
+            RuntimeErrorCode::PreparationFailed,
+            "intentional test failure",
+        ))
+    }
+}
+
+/// An app whose setup records `"author"` into `trace`, so the engine's own
+/// authoring shows up in the same log the app's preparation tasks write to.
+fn traced_app(trace: &Trace) -> App {
+    let recorder = Rc::clone(trace);
+    App::new()
+        .window(Window::new(800, 600))
+        .add_plugins(DefaultPlugins)
+        .setup(move |world, meshes, materials| {
+            recorder.borrow_mut().push("author");
+            let cube = meshes.add(Mesh::cube());
+            let material = materials.add(Material::lit(Color::WHITE));
+            world.spawn((
+                Transform::IDENTITY,
+                Renderable {
+                    mesh: cube,
+                    material,
+                },
+            ));
+        })
 }
 
 /// The three-cube demo scene authored against the public App surface.
@@ -312,6 +374,10 @@ fn tick_with_is_deterministic_and_accumulates() {
 fn app_builder_is_debug_and_default() {
     let app = App::default().fixed_timestep_nanos(2_000_000);
     assert!(format!("{app:?}").contains("App"));
+    // A boxed task is not `Debug`, so the builder shows the names it was given —
+    // which is exactly the schedule a reader wants to check by eye.
+    let named = app.prepare_with("demo/generate", trace_task("demo", &trace()));
+    assert!(format!("{named:?}").contains("demo/generate"));
 }
 
 #[test]
@@ -563,4 +629,125 @@ fn an_app_with_no_mesh_has_empty_geometry() {
     let (vertices, indices) = app.mesh_vertex_stream();
     assert!(vertices.is_empty());
     assert!(indices.is_empty());
+}
+
+#[test]
+fn realize_leaves_the_runtime_running_with_an_authored_scene() {
+    let app = three_cube_app().build();
+    assert_eq!(
+        app.runtime.state(),
+        RuntimeState::Running,
+        "a realized app is running"
+    );
+    // …and it is running over a world that actually exists: the whole point of
+    // the reorder is that `Running` and "the meshes exist" became inseparable.
+    assert_eq!(app.renderable_count(), 3);
+    assert_eq!(app.meshes.len(), 1, "the cube mesh was registered");
+    assert_eq!(app.materials.len(), 3, "one material per cube");
+}
+
+#[test]
+fn the_author_task_runs_before_start() {
+    // A failing task aborts the phase, so the runtime never becomes `Prepared`
+    // and `start()` is never reached — `realize` panics instead of returning.
+    // The trace still shows the engine's own authoring ran, which is precisely
+    // the claim: authoring happens strictly before `start()`.
+    let log = trace();
+    let app = traced_app(&log).prepare_with("test/fails", Box::new(FailingTask));
+    let realized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.build()));
+    assert!(
+        realized.is_err(),
+        "a failed preparation must never yield a running app"
+    );
+    assert_eq!(
+        *log.borrow(),
+        vec!["author"],
+        "authoring had already run when the phase aborted before start()"
+    );
+}
+
+#[test]
+fn an_app_preparation_task_runs_after_authoring() {
+    let log = trace();
+    let app = traced_app(&log)
+        .prepare_with("test/after", trace_task("app", &log))
+        .build();
+    assert_eq!(*log.borrow(), vec!["author", "app"]);
+    assert_eq!(app.runtime.state(), RuntimeState::Running);
+}
+
+#[test]
+fn app_preparation_tasks_run_in_the_order_they_were_added() {
+    let log = trace();
+    let app = traced_app(&log)
+        .prepare_with("a", trace_task("a", &log))
+        .prepare_with("b", trace_task("b", &log))
+        .prepare_with("c", trace_task("c", &log))
+        .build();
+    assert_eq!(*log.borrow(), vec!["author", "a", "b", "c"]);
+    assert_eq!(app.renderable_count(), 1);
+}
+
+#[test]
+fn an_app_task_cannot_run_before_the_author_task() {
+    // `prepare_with` is called *before* `setup` here. Push order on the builder
+    // is irrelevant: `realize` pushes the author task first, so there is no
+    // call sequence that puts an app task in front of the engine's own work.
+    let log = trace();
+    let recorder = Rc::clone(&log);
+    let _running = App::new()
+        .window(Window::new(800, 600))
+        .prepare_with("early", trace_task("early", &log))
+        .setup(move |_world, _meshes, _materials| {
+            recorder.borrow_mut().push("author");
+        })
+        .build();
+    assert_eq!(*log.borrow(), vec!["author", "early"]);
+}
+
+#[test]
+fn reauthor_still_works_after_running() {
+    // Preparation is a launch-time phase, not a rebuild mechanism: a live
+    // re-author replaces the world in place and the runtime stays `Running`
+    // without a second preparation phase (which the runtime would reject).
+    let mut app = player_app().build();
+    assert_eq!(app.runtime.state(), RuntimeState::Running);
+    app.reauthor(|world, meshes, materials| {
+        let cube = meshes.add(Mesh::cube());
+        for offset_x in [-2.0_f32, 2.0] {
+            let material = materials.add(Material::lit(Color::WHITE));
+            world.spawn((
+                Transform::from_translation(Vec3::new(offset_x, 0.0, 0.0)),
+                Renderable {
+                    mesh: cube,
+                    material,
+                },
+            ));
+        }
+        world.spawn((
+            Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+            Camera::perspective(PerspectiveProjection {
+                fov_y: Angle::degrees(60.0),
+                near: Meters::new(0.1).expect("near plane is finite"),
+                far: Meters::new(100.0).expect("far plane is finite"),
+            }),
+        ));
+    });
+    assert_eq!(app.renderable_count(), 2);
+    assert_eq!(
+        app.runtime.state(),
+        RuntimeState::Running,
+        "reauthoring does not disturb the lifecycle"
+    );
+    assert_eq!(app.tick(1).draws().len(), 2);
+}
+
+#[test]
+fn an_app_with_no_preparation_tasks_still_realizes() {
+    // The schedule holds only the engine's own author task — a bare `App` never
+    // touches `prepare_with` and still reaches `Running`.
+    let mut app = App::new().build();
+    assert_eq!(app.runtime.state(), RuntimeState::Running);
+    assert_eq!(app.renderable_count(), 0);
+    assert!(app.tick(0).draws().is_empty());
 }

@@ -269,7 +269,7 @@ mod tests {
     use super::*;
     use crate::host_error_code::HostErrorCode;
     use crate::host_skip_reason::HostSkipReason;
-    use axiom_runtime::{Runtime, RuntimeConfig};
+    use axiom_runtime::{PreparationSchedule, Runtime, RuntimeConfig};
 
     const STEP_NANOS: u64 = 1_000;
 
@@ -569,6 +569,7 @@ mod tests {
 
         let mut runtime = Runtime::new(RuntimeConfig::new(STEP_NANOS)).unwrap();
         runtime.initialize().unwrap();
+        runtime.prepare(PreparationSchedule::new()).unwrap();
         runtime.start().unwrap();
 
         let report = driver

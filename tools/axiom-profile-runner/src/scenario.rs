@@ -31,7 +31,9 @@ use std::time::Instant;
 use axiom_kernel::{HandleId, MetricValue, Ratio, TelemetryMetric};
 use axiom_math::{Aabb, Frustum, Mat4, Quat, Transform, Vec2, Vec3, Vec4};
 use axiom_render::RenderApi;
-use axiom_runtime::{Runtime, RuntimeConfig, RuntimeContext, RuntimeResult, RuntimeSystem};
+use axiom_runtime::{
+    PreparationSchedule, Runtime, RuntimeConfig, RuntimeContext, RuntimeResult, RuntimeSystem,
+};
 use axiom_scene::SceneApi;
 
 use crate::report::{kind, ChurnCounters, FrameTimings, Phase};
@@ -154,6 +156,9 @@ pub fn run(config: ScenarioConfig) -> ScenarioOutput {
     runtime
         .initialize()
         .expect("runtime initialize cannot fail");
+    runtime
+        .prepare(PreparationSchedule::new())
+        .expect("the profile scenario has no preparation tasks");
     runtime.start().expect("runtime start cannot fail");
     runtime
         .scheduler_mut()

@@ -95,7 +95,7 @@ mod tests {
         HostStepDriver, HostViewport,
     };
     use axiom_kernel::Ratio;
-    use axiom_runtime::{Runtime, RuntimeConfig};
+    use axiom_runtime::{PreparationSchedule, Runtime, RuntimeConfig};
 
     const STEP_NANOS: u64 = 1_000;
 
@@ -108,6 +108,7 @@ mod tests {
         driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
         let mut runtime = Runtime::new(RuntimeConfig::new(STEP_NANOS)).unwrap();
         runtime.initialize().unwrap();
+        runtime.prepare(PreparationSchedule::new()).unwrap();
         runtime.start().unwrap();
         let _ = HostLifecycleState::initial();
         (driver, runtime)
@@ -182,6 +183,7 @@ mod tests {
         let mut runtime =
             Runtime::new(RuntimeConfig::new(STEP_NANOS).with_fail_on_system_error(false)).unwrap();
         runtime.initialize().unwrap();
+        runtime.prepare(PreparationSchedule::new()).unwrap();
         runtime.start().unwrap();
         runtime
             .scheduler_mut()
@@ -241,6 +243,7 @@ mod tests {
         driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
         let mut runtime = Runtime::new(RuntimeConfig::new(STEP_NANOS)).unwrap();
         runtime.initialize().unwrap();
+        runtime.prepare(PreparationSchedule::new()).unwrap();
         runtime.start().unwrap();
         runtime
             .scheduler_mut()

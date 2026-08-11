@@ -81,9 +81,37 @@ pub struct RaceScene {
 }
 
 impl RaceScene {
-    /// Install the scene for `sim` into `app`.
+    /// Install the scene for `sim` into `app`, generating its textures and road
+    /// geometry inline.
+    ///
+    /// Kept for the test fixtures and capture slices that build a scene with no
+    /// preparation phase. It delegates, so the prepared and inline paths cannot
+    /// drift.
     pub fn install(app: &mut RunningApp, sim: &RaceSim, width: u32, height: u32) -> RaceScene {
-        let palette = ScenePalette::install(app);
+        let textures = crate::preparation::textures::PreparedTextures::generate();
+        let meshes = crate::preparation::meshes::PreparedMeshes::cut(
+            sim.track(),
+            &sim.tuning().course,
+        );
+        RaceScene::install_prepared(app, sim, width, height, &textures, meshes)
+    }
+
+    /// Install the scene from products the startup preparation phase already
+    /// produced.
+    ///
+    /// **The install order below is frozen.** Materials are registered before
+    /// the meshes that cite them, ids are `Vec::len() + 1` minted at
+    /// registration, and those ids are encoded in the committed golden
+    /// artifacts. Reordering anything here moves them.
+    pub fn install_prepared(
+        app: &mut RunningApp,
+        sim: &RaceSim,
+        width: u32,
+        height: u32,
+        textures: &crate::preparation::textures::PreparedTextures,
+        meshes: crate::preparation::meshes::PreparedMeshes,
+    ) -> RaceScene {
+        let palette = ScenePalette::install_prepared(app, textures);
         let track = sim.track();
         let tuning = sim.tuning();
 
@@ -372,7 +400,7 @@ impl RaceScene {
         // one from the night frame this scene used to be.
         app.set_postprocess(GRADE);
 
-        let road = RoadChunks::install(app, track, &tuning.course, &tuning.camera, palette.road);
+        let road = RoadChunks::install_prepared(app, meshes, &tuning.camera, palette.road);
         let scenery = SceneryField::install(app, &palette, track, track.seed());
         let traffic = TrafficVisuals::install(app, &palette, tuning.race.traffic_active);
         let pickups = PickupVisuals::install(app, &palette);

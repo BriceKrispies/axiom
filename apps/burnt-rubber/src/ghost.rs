@@ -51,8 +51,26 @@ pub struct GhostRun {
 impl GhostRun {
     /// Put the ghost on the grid, on the same course as the player.
     pub fn new(seed: u64, tuning: Tuning, profile: PlayProfile) -> GhostRun {
+        GhostRun::from_plan(
+            RaceSim::with_profile(seed, tuning, profile),
+            profile,
+        )
+    }
+
+    /// The ghost on an **already-compiled** course.
+    ///
+    /// This is the door the shipping app goes through. The ghost drives the
+    /// same road the player does, so it should read the same compiled plan
+    /// rather than generate a second identical one — which is what
+    /// `GhostRun::new` did, and why the course used to compile twice for every
+    /// race and twice again on every restart.
+    ///
+    /// Sharing is safe because `CoursePlan` exposes no `&mut self` method and
+    /// holds no interior mutability: the ghost owns its own `RaceSim` and
+    /// cannot reach the player's.
+    pub fn from_plan(sim: RaceSim, profile: PlayProfile) -> GhostRun {
         GhostRun {
-            sim: RaceSim::with_profile(seed, tuning, profile),
+            sim,
             // The technique has to match the control scheme the profile gives
             // the car — see `DriverTuning::for_profile`.
             driver: DriverTuning::for_profile(profile),

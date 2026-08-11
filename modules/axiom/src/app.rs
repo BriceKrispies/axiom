@@ -19,11 +19,13 @@ use axiom_kernel::{
 };
 use axiom_math::{MathApi, Vec3};
 use axiom_render_pipeline::RenderPipelineApi;
-use axiom_runtime::{Runtime, RuntimeConfig};
+use axiom_runtime::{PreparationSchedule, PreparationTask, Runtime, RuntimeConfig};
 use axiom_scene::SceneApi;
 use axiom_webgpu::WebGpuApi;
 #[cfg(target_arch = "wasm32")]
 use axiom_windowing::WindowingApi;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// The presentation-target element id the live backend binds to when a
 /// [`Window`] does not name one.
@@ -66,6 +68,11 @@ mod render_look;
 /// The live-backend resource exports (mesh streams, material albedos).
 mod resources;
 
+/// Scene authoring expressed as the engine's own startup preparation task — the
+/// structural reason `realize` cannot reach `Running` before the world exists.
+mod preparation;
+use preparation::{AuthorTask, AuthoredCell};
+
 /// The default fixed simulation step: 1 ms, matching the engine's slices.
 const DEFAULT_STEP_NANOS: u64 = 1_000_000;
 
@@ -77,6 +84,11 @@ const SESSION_SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 /// A user setup callback: populates the asset collections and authors the scene.
 type SetupFn = Box<dyn FnOnce(&mut SceneCommands, &mut Assets<Mesh>, &mut Assets<Material>)>;
 
+/// The name the engine's own scene-authoring preparation task is pushed under.
+/// It is the first entry in every schedule, so it is also the name a preparation
+/// failure would report if authoring itself ever became fallible.
+const AUTHOR_TASK_NAME: &str = "axiom/author";
+
 /// The engine entry point. Configure it with `window`, `fixed_timestep_nanos`,
 /// `add_plugins`, and `setup`, then `run` it.
 pub struct App {
@@ -84,6 +96,10 @@ pub struct App {
     step_nanos: u64,
     render: bool,
     setup: Option<SetupFn>,
+    // The app's own startup preparation work, in the order `prepare_with` was
+    // called. `realize` drains this onto the schedule *after* the engine's own
+    // `AuthorTask`, so an app task can never observe an unauthored world.
+    preparation: Vec<(&'static str, Box<dyn PreparationTask>)>,
 }
 
 impl App {
@@ -95,6 +111,7 @@ impl App {
             step_nanos: DEFAULT_STEP_NANOS,
             render: false,
             setup: None,
+            preparation: Vec::new(),
         }
     }
 
@@ -123,6 +140,29 @@ impl App {
         F: FnOnce(&mut SceneCommands, &mut Assets<Mesh>, &mut Assets<Material>) + 'static,
     {
         self.setup = Some(Box::new(setup));
+        self
+    }
+
+    /// Contribute one startup **preparation task** — expensive, launch-only work
+    /// (procedural generation, texture synthesis, mesh construction) that must
+    /// run to completion before the simulation is allowed to step.
+    ///
+    /// Tasks run in the order they are added, and always **after** the engine's
+    /// own scene-authoring task: [`RunningApp::realize`] pushes that one first,
+    /// so an app task cannot get in front of it. There is deliberately no order
+    /// key and no reserved band — a band would rest on every caller honouring a
+    /// convention, whereas push order makes precedence structural.
+    ///
+    /// A task produces data, not entities: `PreparationTask::prepare` takes no
+    /// arguments and so can never touch the `RunningApp`. Write the product into
+    /// storage the task's own constructor captured (an `Rc<RefCell<Option<_>>>`),
+    /// then register it into the scene after [`App::build`] returns.
+    ///
+    /// If any task returns `Err`, the phase aborts, the runtime becomes
+    /// terminally failed, and `build()` panics: a world that was never built is
+    /// a composition-time programming error, not a recoverable frame condition.
+    pub fn prepare_with(mut self, name: &'static str, task: Box<dyn PreparationTask>) -> Self {
+        self.preparation.push((name, task));
         self
     }
 
@@ -255,6 +295,16 @@ impl std::fmt::Debug for App {
             .field("step_nanos", &self.step_nanos)
             .field("render", &self.render)
             .field("has_setup", &self.setup.is_some())
+            // `Box<dyn PreparationTask>` is not `Debug`; the names are the only
+            // part of a task the builder can honestly show.
+            .field(
+                "preparation",
+                &self
+                    .preparation
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -321,6 +371,18 @@ pub(crate) struct PendingSkinned {
 }
 
 impl RunningApp {
+    /// Realize a built [`App`] into a running one: construct the engine
+    /// machinery, run the startup **preparation phase**, and only then start the
+    /// runtime.
+    ///
+    /// The lifecycle here is `initialize → prepare → start`, and the ordering is
+    /// structural rather than incidental. Scene authoring is not a step that
+    /// happens to sit before `start()`; it *is* the first task on the
+    /// preparation schedule. Because `Runtime::start` accepts only `Prepared`,
+    /// a `realize` that tried to start before authoring could not reach
+    /// `Running` at all — it would panic on the `start` expectation. This
+    /// replaces an earlier shape in which `start()` ran first and the runtime
+    /// reported `Running` for an application whose meshes did not yet exist.
     fn realize(app: App) -> Self {
         let host_api = HostApi::new();
         let frame_api = FrameApi::new();
@@ -331,7 +393,6 @@ impl RunningApp {
         runtime
             .initialize()
             .expect("runtime initialize cannot fail");
-        runtime.start().expect("runtime start cannot fail");
 
         let boundary_config = host_api
             .boundary_config(app.step_nanos, 1)
@@ -350,7 +411,34 @@ impl RunningApp {
             .expect("surface dimensions are valid");
         let aspect = surface.width() as f32 / surface.height() as f32;
 
-        let authored = Self::author(app.setup, aspect);
+        // The preparation phase. The engine's own authoring goes on first, then
+        // the app's contributed tasks in the order `prepare_with` was called —
+        // so no app task can observe a world that has not been authored yet.
+        let authored_cell: AuthoredCell = Rc::new(RefCell::new(None));
+        let mut schedule = PreparationSchedule::new();
+        schedule.push(
+            AUTHOR_TASK_NAME,
+            Box::new(AuthorTask::new(
+                app.setup,
+                aspect,
+                Rc::clone(&authored_cell),
+            )),
+        );
+        app.preparation
+            .into_iter()
+            .for_each(|(name, task)| schedule.push(name, task));
+
+        // A preparation failure is a composition-time programming error — the
+        // world was never built — so it is not swallowed and stepped over. The
+        // runtime is terminally `Failed` here and `start` could not succeed
+        // anyway; panicking names the failing task instead of hiding it.
+        runtime.prepare(schedule).expect("app preparation succeeds");
+        runtime.start().expect("a prepared runtime starts");
+
+        let authored = authored_cell
+            .borrow_mut()
+            .take()
+            .expect("preparation authored the scene");
 
         RunningApp {
             frame_api,

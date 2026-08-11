@@ -56,6 +56,7 @@ pub mod controls;
 pub mod diagnostics;
 pub mod draw;
 pub mod hud;
+pub mod preparation;
 pub mod profile;
 pub mod sim;
 pub mod start_screen;

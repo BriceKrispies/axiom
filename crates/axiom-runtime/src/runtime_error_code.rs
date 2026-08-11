@@ -23,6 +23,16 @@ pub enum RuntimeErrorCode {
     /// A kernel call inside the runtime returned a `KernelError` (which is
     /// preserved on the wrapping [`crate::runtime_error::RuntimeError`]).
     KernelFailure = 7,
+    /// A startup [`crate::preparation_task::PreparationTask`] could not complete
+    /// its work.
+    ///
+    /// This is the vocabulary a **task** uses when it has no more specific code
+    /// of its own — for example when a task finds the product cell an earlier
+    /// task should have filled still empty. The runtime itself never
+    /// manufactures it: [`crate::runtime::Runtime::prepare`] propagates whatever
+    /// code the failing task returned, so a task with a better diagnosis keeps
+    /// it.
+    PreparationFailed = 8,
 }
 
 impl RuntimeErrorCode {
@@ -40,6 +50,7 @@ mod tests {
     fn discriminants_are_stable() {
         assert_eq!(RuntimeErrorCode::InvalidLifecycleTransition.raw(), 1);
         assert_eq!(RuntimeErrorCode::KernelFailure.raw(), 7);
+        assert_eq!(RuntimeErrorCode::PreparationFailed.raw(), 8);
     }
 
     #[test]

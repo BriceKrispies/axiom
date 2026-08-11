@@ -12,8 +12,8 @@ use axiom_host::{
 };
 use axiom_kernel::{HandleId, MetricValue, Ratio, TelemetryMetric};
 use axiom_runtime::{
-    Runtime, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode, RuntimeResult,
-    RuntimeSystem,
+    PreparationSchedule, Runtime, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode,
+    RuntimeResult, RuntimeSystem,
 };
 
 const STEP_NANOS: u64 = 1_000;
@@ -30,6 +30,7 @@ pub(crate) fn active_engine_frames(n: u64) -> Vec<EngineFrame> {
     driver.apply_lifecycle_signal(HostLifecycleSignal::Started);
     let mut runtime = Runtime::new(RuntimeConfig::new(STEP_NANOS)).unwrap();
     runtime.initialize().unwrap();
+    runtime.prepare(PreparationSchedule::new()).unwrap();
     runtime.start().unwrap();
     let mut builder = FrameBuilder::new(STEP_NANOS);
     let mut frames = Vec::new();
@@ -68,6 +69,7 @@ pub(crate) fn failing_engine_frame() -> EngineFrame {
     let mut runtime =
         Runtime::new(RuntimeConfig::new(STEP_NANOS).with_fail_on_system_error(false)).unwrap();
     runtime.initialize().unwrap();
+    runtime.prepare(PreparationSchedule::new()).unwrap();
     runtime.start().unwrap();
     runtime
         .scheduler_mut()

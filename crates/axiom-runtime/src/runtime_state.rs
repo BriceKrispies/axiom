@@ -4,12 +4,20 @@
 ///
 /// Transitions are enforced by [`crate::runtime::Runtime`]; any illegal one
 /// returns [`crate::runtime_error_code::RuntimeErrorCode::InvalidLifecycleTransition`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// Discriminants are **appended, never renumbered**, because
+/// [`RuntimeState::raw`] is a stable identity byte surfaced through
+/// [`crate::runtime_step_record::RuntimeStepRecord::state_after`]. That makes
+/// the numbering an insertion history, not a lifecycle ranking — which is why
+/// this enum deliberately does **not** derive `PartialOrd`/`Ord`. Nothing in
+/// the engine orders or sorts a `RuntimeState`; comparing two of them for
+/// progression would read a total order that does not exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum RuntimeState {
     /// The runtime exists but has not been initialized.
     Created = 0,
-    /// `initialize` succeeded; ready to start.
+    /// `initialize` succeeded; ready to prepare.
     Initialized = 1,
     /// `start` succeeded; `step` is allowed.
     Running = 2,
@@ -19,6 +27,10 @@ pub enum RuntimeState {
     Stopped = 4,
     /// Terminal state reached via a system failure or unrecoverable error.
     Failed = 5,
+    /// Every task in the startup preparation phase completed successfully;
+    /// ready to start. Reached from `Initialized`, and — despite its higher
+    /// discriminant — sits *before* `Running` in the lifecycle.
+    Prepared = 6,
 }
 
 impl RuntimeState {
@@ -29,6 +41,11 @@ impl RuntimeState {
     }
 
     /// The stable numeric discriminant.
+    ///
+    /// This byte is an **identity**, not a rank. Variants are numbered in the
+    /// order they were added to the enum, so a larger `raw()` says nothing
+    /// about lifecycle progression — `Prepared` is `6` yet precedes `Running`
+    /// (`2`). Compare states with `==`; never with `<`.
     pub const fn raw(self) -> u8 {
         self as u8
     }
@@ -39,10 +56,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn discriminants_are_stable_and_ordered() {
+    fn discriminants_are_stable() {
         assert_eq!(RuntimeState::Created.raw(), 0);
+        assert_eq!(RuntimeState::Initialized.raw(), 1);
+        assert_eq!(RuntimeState::Running.raw(), 2);
+        assert_eq!(RuntimeState::Paused.raw(), 3);
+        assert_eq!(RuntimeState::Stopped.raw(), 4);
         assert_eq!(RuntimeState::Failed.raw(), 5);
-        assert!(RuntimeState::Created < RuntimeState::Running);
+        assert_eq!(RuntimeState::Prepared.raw(), 6);
     }
 
     #[test]
@@ -52,6 +73,7 @@ mod tests {
         for s in [
             RuntimeState::Created,
             RuntimeState::Initialized,
+            RuntimeState::Prepared,
             RuntimeState::Running,
             RuntimeState::Paused,
         ] {

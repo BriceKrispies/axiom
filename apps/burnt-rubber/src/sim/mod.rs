@@ -204,7 +204,12 @@ impl RaceSim {
         tuning: Tuning,
         profile: crate::PlayProfile,
     ) -> RaceSim {
-        let track = plan.track().clone();
+        // Borrowed, not cloned. `RaceSim` has no `track` field — it reads
+        // `self.plan.track()` — so this local existed only to be handed to the
+        // four calls below, and cloning it copied the whole ~4 600-entry sample
+        // table (~371 KB) to be dropped a few lines later. The borrow ends
+        // before `plan` is moved into the struct.
+        let track = plan.track();
         let mut car = CarState::parked(Vec3::ZERO, 0.0);
         controller::place_on_track(&mut car, &track.sample_at(GRID_DISTANCE), 0.0);
         let mut camera = ChaseCamera::new();

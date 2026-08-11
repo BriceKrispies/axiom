@@ -33,8 +33,8 @@ use axiom_introspect::{FrameReport, IntrospectApi};
 use axiom_kernel::{BinaryReader, BinaryWriter, EntityId, HandleId, Ratio};
 use axiom_math::{Transform, Vec3};
 use axiom_runtime::{
-    Runtime, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode, RuntimeResult,
-    RuntimeSystem,
+    PreparationSchedule, Runtime, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode,
+    RuntimeResult, RuntimeSystem,
 };
 
 const TICKS: u64 = 120;
@@ -234,6 +234,7 @@ fn failing_system_frame() -> axiom_frame::EngineFrame {
     let mut runtime =
         Runtime::new(RuntimeConfig::new(STEP).with_fail_on_system_error(false)).unwrap();
     runtime.initialize().unwrap();
+    runtime.prepare(PreparationSchedule::new()).unwrap();
     runtime.start().unwrap();
     runtime
         .scheduler_mut()

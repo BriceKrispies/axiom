@@ -2,6 +2,7 @@
 
 use axiom_kernel::{InMemoryLogSink, InMemoryTelemetrySink, KernelApi};
 
+use crate::preparation_schedule::PreparationSchedule;
 use crate::runtime_command_queue::RuntimeCommandQueue;
 use crate::runtime_config::RuntimeConfig;
 use crate::runtime_context::RuntimeContext;
@@ -88,12 +89,62 @@ impl Runtime {
             )
     }
 
-    /// Transition `Initialized` or `Paused` → `Running`.
+    /// Run the startup preparation phase: `Initialized` → `Prepared` (every
+    /// task returned `Ok`) or `Failed` (any task returned `Err`).
+    ///
+    /// This is the **preparation barrier**. `start` is reachable only from
+    /// `Prepared`, so a simulation cannot begin stepping until every task in
+    /// `schedule` has run to completion. Preparation runs exactly once per
+    /// launch: calling `prepare` from any state other than `Initialized` —
+    /// including `Prepared` itself — returns
+    /// [`RuntimeErrorCode::InvalidLifecycleTransition`].
+    ///
+    /// The schedule is taken **by value** and dropped before this returns. That
+    /// is what makes "temporary startup work dies at the barrier" a guarantee
+    /// rather than a convention: no task survives the phase, so none can be
+    /// re-run, inspected, or accidentally driven from the frame loop.
+    ///
+    /// On failure the returned error keeps **both** facts about what went wrong:
+    /// its message is the failing task's name, and its code is the code that
+    /// task itself returned. The runtime does not overwrite a task's diagnosis
+    /// with [`RuntimeErrorCode::PreparationFailed`]; that code exists for a
+    /// *task* to use when it has nothing more specific to say.
+    #[axiom_zones::sim]
+    pub fn prepare(&mut self, schedule: PreparationSchedule) -> RuntimeResult<()> {
+        (self.state == RuntimeState::Initialized)
+            .then_some(schedule)
+            .map_or(
+                Err(invalid_transition("prepare requires Initialized")),
+                |s| self.run_preparation(s),
+            )
+    }
+
+    /// The body of the preparation phase: run every task in push order, settle
+    /// the lifecycle on the outcome, and drop the schedule.
+    ///
+    /// Taking `schedule` by value is deliberate — it dies here, at the barrier.
+    #[axiom_zones::sim]
+    fn run_preparation(&mut self, mut schedule: PreparationSchedule) -> RuntimeResult<()> {
+        let failure = schedule.execute();
+        self.state = [RuntimeState::Prepared, RuntimeState::Failed][usize::from(failure.is_some())];
+        failure.map_or(Ok(()), |(name, cause)| {
+            Err(RuntimeError::new(cause.code(), name))
+        })
+    }
+
+    /// Transition `Prepared` or `Paused` → `Running`.
+    ///
+    /// `Initialized` is deliberately **not** accepted: an initialized runtime
+    /// has not yet run its preparation phase, and starting one would let a
+    /// simulation step over a world that was never built. Reaching `Running`
+    /// from a fresh runtime is `initialize()`, then
+    /// [`Runtime::prepare`], then `start()`. Resuming from `Paused` needs no
+    /// second preparation — the phase already ran for this launch.
     pub fn start(&mut self) -> RuntimeResult<()> {
-        ((self.state == RuntimeState::Initialized) | (self.state == RuntimeState::Paused))
+        ((self.state == RuntimeState::Prepared) | (self.state == RuntimeState::Paused))
             .then_some(RuntimeState::Running)
             .map_or(
-                Err(invalid_transition("start requires Initialized or Paused")),
+                Err(invalid_transition("start requires Prepared or Paused")),
                 |next| {
                     self.state = next;
                     Ok(())
@@ -111,16 +162,20 @@ impl Runtime {
             })
     }
 
-    /// Transition `Running`, `Paused`, or `Initialized` → `Stopped`.
+    /// Transition `Running`, `Paused`, `Initialized`, or `Prepared` → `Stopped`.
     /// Terminal states (`Stopped`, `Failed`) are rejected.
+    ///
+    /// A runtime that has completed preparation but never started is still a
+    /// live runtime holding prepared products, so shutting it down is legal.
     pub fn stop(&mut self) -> RuntimeResult<()> {
         ((self.state == RuntimeState::Running)
             | (self.state == RuntimeState::Paused)
-            | (self.state == RuntimeState::Initialized))
+            | (self.state == RuntimeState::Initialized)
+            | (self.state == RuntimeState::Prepared))
             .then_some(RuntimeState::Stopped)
             .map_or(
                 Err(invalid_transition(
-                    "stop requires Running, Paused, or Initialized",
+                    "stop requires Running, Paused, Initialized, or Prepared",
                 )),
                 |next| {
                     self.state = next;
@@ -155,6 +210,10 @@ impl Runtime {
 
     /// The body of one `Running` step: advance the timeline, run the scheduler,
     /// drain the queues, and record the result.
+    ///
+    /// Carries its own `#[sim]` marker: the zone lint matches a marker only on
+    /// the function it is attached to, so `step`'s marker does not reach here.
+    #[axiom_zones::sim]
     fn run_one_step(&mut self) -> RuntimeResult<RuntimeStepRecord> {
         let commands_before = self.commands.len();
         let events_before = self.events.len();
@@ -291,20 +350,59 @@ fn invalid_transition(message: &'static str) -> RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::preparation_task::PreparationTask;
     use crate::runtime_command::RuntimeCommand;
     use crate::runtime_event::RuntimeEvent;
     use crate::runtime_system::RuntimeSystem;
     use axiom_kernel::{HandleId, Tick};
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     fn cfg() -> RuntimeConfig {
         RuntimeConfig::new(1_000)
     }
 
+    /// Drive a fresh runtime all the way to `Running` through the barrier.
     fn started() -> Runtime {
         let mut rt = Runtime::new(cfg()).unwrap();
         rt.initialize().unwrap();
+        rt.prepare(PreparationSchedule::new()).unwrap();
         rt.start().unwrap();
         rt
+    }
+
+    /// Counts its runs into a cell the caller keeps, so a test can assert how
+    /// many times preparation actually executed it.
+    struct Counting {
+        runs: Rc<Cell<u32>>,
+    }
+
+    impl PreparationTask for Counting {
+        fn prepare(&mut self) -> RuntimeResult<()> {
+            self.runs.set(self.runs.get() + 1);
+            Ok(())
+        }
+    }
+
+    /// Fails with a code of its own choosing, after recording that it ran.
+    struct Failing {
+        runs: Rc<Cell<u32>>,
+        code: RuntimeErrorCode,
+    }
+
+    impl PreparationTask for Failing {
+        fn prepare(&mut self) -> RuntimeResult<()> {
+            self.runs.set(self.runs.get() + 1);
+            Err(RuntimeError::new(self.code, "intentional"))
+        }
+    }
+
+    fn counter() -> Rc<Cell<u32>> {
+        Rc::new(Cell::new(0))
+    }
+
+    fn counting(runs: &Rc<Cell<u32>>) -> Box<dyn PreparationTask> {
+        Box::new(Counting { runs: runs.clone() })
     }
 
     #[test]
@@ -318,6 +416,8 @@ mod tests {
         let mut rt = Runtime::new(cfg()).unwrap();
         rt.initialize().unwrap();
         assert_eq!(rt.state(), RuntimeState::Initialized);
+        rt.prepare(PreparationSchedule::new()).unwrap();
+        assert_eq!(rt.state(), RuntimeState::Prepared);
         rt.start().unwrap();
         assert_eq!(rt.state(), RuntimeState::Running);
         rt.pause().unwrap();
@@ -336,8 +436,30 @@ mod tests {
         assert_eq!(err.code(), RuntimeErrorCode::InvalidLifecycleTransition);
     }
 
+    /// **The barrier.** An initialized runtime has not prepared, so it cannot
+    /// start — and therefore cannot step. This is the whole point of the phase:
+    /// the transition that used to be legal is now the one that is refused.
     #[test]
-    fn start_without_initialize_is_rejected() {
+    fn start_without_preparation_is_rejected() {
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+
+        let err = rt.start().unwrap_err();
+        assert_eq!(err.code(), RuntimeErrorCode::InvalidLifecycleTransition);
+        assert_eq!(
+            rt.state(),
+            RuntimeState::Initialized,
+            "the refused transition left the state untouched"
+        );
+        assert_eq!(
+            rt.step().unwrap_err().code(),
+            RuntimeErrorCode::StepWhileNotRunning,
+            "and the simulation cannot advance behind start()'s back"
+        );
+    }
+
+    #[test]
+    fn start_from_created_is_rejected() {
         let mut rt = Runtime::new(cfg()).unwrap();
         let err = rt.start().unwrap_err();
         assert_eq!(err.code(), RuntimeErrorCode::InvalidLifecycleTransition);
@@ -354,6 +476,7 @@ mod tests {
     fn stop_in_failed_state_is_rejected() {
         let mut rt = Runtime::new(cfg()).unwrap();
         rt.initialize().unwrap();
+        rt.prepare(PreparationSchedule::new()).unwrap();
         rt.start().unwrap();
         struct F;
         impl RuntimeSystem for F {
@@ -504,6 +627,7 @@ mod tests {
         }
         let mut rt = Runtime::new(cfg().with_fail_on_system_error(false)).unwrap();
         rt.initialize().unwrap();
+        rt.prepare(PreparationSchedule::new()).unwrap();
         rt.start().unwrap();
         rt.scheduler_mut()
             .register(HandleId::from_raw(1), "f", 1, Box::new(F))
@@ -564,10 +688,279 @@ mod tests {
     fn diagnostics_disabled_emits_nothing() {
         let mut rt = Runtime::new(cfg().with_diagnostics_enabled(false)).unwrap();
         rt.initialize().unwrap();
+        rt.prepare(PreparationSchedule::new()).unwrap();
         rt.start().unwrap();
         rt.step().unwrap();
         assert_eq!(rt.log_sink().len(), 0);
         assert_eq!(rt.telemetry_sink().len(), 0);
+    }
+
+    #[test]
+    fn preparation_runs_before_running() {
+        let runs = counter();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push("work", counting(&runs));
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        assert_eq!(runs.get(), 0, "nothing ran before prepare()");
+
+        rt.prepare(schedule).unwrap();
+        assert_eq!(runs.get(), 1, "the task ran during prepare()");
+        assert_eq!(
+            rt.state(),
+            RuntimeState::Prepared,
+            "and completed work leaves the runtime prepared, not running"
+        );
+    }
+
+    #[test]
+    fn successful_preparation_permits_the_transition() {
+        let runs = counter();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push("work", counting(&runs));
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        rt.prepare(schedule).unwrap();
+        rt.start().unwrap();
+
+        assert_eq!(rt.state(), RuntimeState::Running);
+        assert!(rt.step().is_ok(), "and stepping is now permitted");
+    }
+
+    #[test]
+    fn failed_preparation_blocks_the_transition() {
+        let runs = counter();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push(
+            "boom",
+            Box::new(Failing {
+                runs: runs.clone(),
+                code: RuntimeErrorCode::PreparationFailed,
+            }),
+        );
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        assert!(rt.prepare(schedule).is_err());
+
+        assert_eq!(rt.state(), RuntimeState::Failed, "Failed is terminal");
+        assert_eq!(
+            rt.start().unwrap_err().code(),
+            RuntimeErrorCode::InvalidLifecycleTransition
+        );
+    }
+
+    #[test]
+    fn a_failing_task_stops_the_remaining_tasks() {
+        let before = counter();
+        let failed = counter();
+        let after = counter();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push("before", counting(&before));
+        schedule.push(
+            "boom",
+            Box::new(Failing {
+                runs: failed.clone(),
+                code: RuntimeErrorCode::SystemFailed,
+            }),
+        );
+        schedule.push("after", counting(&after));
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        assert!(rt.prepare(schedule).is_err());
+
+        assert_eq!(before.get(), 1, "the task before the failure ran");
+        assert_eq!(failed.get(), 1, "the failing task ran");
+        assert_eq!(after.get(), 0, "the task after the failure did not");
+    }
+
+    #[test]
+    fn the_error_names_the_failing_task_and_keeps_its_code() {
+        let runs = counter();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push("first", counting(&runs));
+        schedule.push(
+            "course-compile",
+            Box::new(Failing {
+                runs: counter(),
+                // A code of the task's own choosing, deliberately *not*
+                // PreparationFailed — the runtime must not overwrite it.
+                code: RuntimeErrorCode::KernelFailure,
+            }),
+        );
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        let err = rt.prepare(schedule).unwrap_err();
+
+        assert_eq!(
+            err.message(),
+            "course-compile",
+            "the message identifies which task failed"
+        );
+        assert_eq!(
+            err.code(),
+            RuntimeErrorCode::KernelFailure,
+            "the task's own diagnosis survives the barrier"
+        );
+    }
+
+    #[test]
+    fn preparation_runs_exactly_once_per_launch() {
+        let runs = counter();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push("work", counting(&runs));
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        rt.prepare(schedule).unwrap();
+
+        assert_eq!(
+            rt.prepare(PreparationSchedule::new()).unwrap_err().code(),
+            RuntimeErrorCode::InvalidLifecycleTransition,
+            "a second phase is refused from Prepared"
+        );
+
+        rt.start().unwrap();
+        assert_eq!(
+            rt.prepare(PreparationSchedule::new()).unwrap_err().code(),
+            RuntimeErrorCode::InvalidLifecycleTransition,
+            "and from Running"
+        );
+
+        rt.pause().unwrap();
+        assert_eq!(
+            rt.prepare(PreparationSchedule::new()).unwrap_err().code(),
+            RuntimeErrorCode::InvalidLifecycleTransition,
+            "and from Paused"
+        );
+
+        assert_eq!(runs.get(), 1, "the task ran exactly once");
+    }
+
+    #[test]
+    fn an_empty_schedule_prepares_immediately() {
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+
+        assert!(rt.prepare(PreparationSchedule::new()).is_ok());
+        assert_eq!(rt.state(), RuntimeState::Prepared);
+    }
+
+    #[test]
+    fn stepping_does_not_rerun_preparation() {
+        let runs = counter();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push("work", counting(&runs));
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        rt.prepare(schedule).unwrap();
+        rt.start().unwrap();
+        (0..100).for_each(|_| {
+            rt.step().unwrap();
+        });
+
+        assert_eq!(runs.get(), 1, "100 steps re-ran no preparation task");
+    }
+
+    #[test]
+    fn preparation_is_rejected_before_initialize() {
+        let runs = counter();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push("work", counting(&runs));
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        let err = rt.prepare(schedule).unwrap_err();
+
+        assert_eq!(err.code(), RuntimeErrorCode::InvalidLifecycleTransition);
+        assert_eq!(rt.state(), RuntimeState::Created, "state is untouched");
+        assert_eq!(runs.get(), 0, "and a refused phase runs no task");
+    }
+
+    #[test]
+    fn preparation_is_rejected_from_terminal_states() {
+        let mut stopped = Runtime::new(cfg()).unwrap();
+        stopped.initialize().unwrap();
+        stopped.stop().unwrap();
+        assert_eq!(
+            stopped
+                .prepare(PreparationSchedule::new())
+                .unwrap_err()
+                .code(),
+            RuntimeErrorCode::InvalidLifecycleTransition
+        );
+
+        let mut failed = Runtime::new(cfg()).unwrap();
+        failed.initialize().unwrap();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push(
+            "boom",
+            Box::new(Failing {
+                runs: counter(),
+                code: RuntimeErrorCode::PreparationFailed,
+            }),
+        );
+        assert!(failed.prepare(schedule).is_err());
+        assert_eq!(
+            failed
+                .prepare(PreparationSchedule::new())
+                .unwrap_err()
+                .code(),
+            RuntimeErrorCode::InvalidLifecycleTransition,
+            "a failed phase cannot be retried"
+        );
+    }
+
+    #[test]
+    fn stop_is_legal_from_prepared() {
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        rt.prepare(PreparationSchedule::new()).unwrap();
+
+        rt.stop().unwrap();
+        assert_eq!(rt.state(), RuntimeState::Stopped);
+    }
+
+    #[test]
+    fn pause_and_resume_do_not_reenter_preparation() {
+        let runs = counter();
+        let mut schedule = PreparationSchedule::new();
+        schedule.push("work", counting(&runs));
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        rt.prepare(schedule).unwrap();
+        rt.start().unwrap();
+        rt.pause().unwrap();
+        rt.start().unwrap();
+
+        assert_eq!(rt.state(), RuntimeState::Running);
+        assert_eq!(runs.get(), 1, "resuming needs no second phase");
+    }
+
+    #[test]
+    fn a_failed_preparation_leaves_the_step_gate_closed() {
+        let mut schedule = PreparationSchedule::new();
+        schedule.push(
+            "boom",
+            Box::new(Failing {
+                runs: counter(),
+                code: RuntimeErrorCode::PreparationFailed,
+            }),
+        );
+
+        let mut rt = Runtime::new(cfg()).unwrap();
+        rt.initialize().unwrap();
+        assert!(rt.prepare(schedule).is_err());
+
+        assert_eq!(
+            rt.step().unwrap_err().code(),
+            RuntimeErrorCode::StepWhileNotRunning
+        );
     }
 }
 
@@ -598,6 +991,7 @@ mod cov {
     fn started(cfg: RuntimeConfig) -> Runtime {
         let mut rt = Runtime::new(cfg).unwrap();
         rt.initialize().unwrap();
+        rt.prepare(PreparationSchedule::new()).unwrap();
         rt.start().unwrap();
         rt
     }

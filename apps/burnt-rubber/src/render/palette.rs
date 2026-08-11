@@ -48,10 +48,12 @@ use axiom::prelude::{Color, Handle, Material, Ratio, RunningApp, TextureSampling
 
 use crate::track::Zone;
 
-use super::asphalt_texture::{asphalt_albedo, RES as ASPHALT_RES};
+use crate::preparation::textures::PreparedTextures;
+
+use super::asphalt_texture::RES as ASPHALT_RES;
 use super::chunks::RoadMaterials;
-use super::foliage_texture::{base_colour as foliage_base, foliage_albedo, FOLIAGE, RES as FOLIAGE_RES};
-use super::verge_texture::{verge_albedo, BASE as VERGE_BASE, RES as VERGE_RES};
+use super::foliage_texture::{base_colour as foliage_base, FOLIAGE, RES as FOLIAGE_RES};
+use super::verge_texture::{BASE as VERGE_BASE, RES as VERGE_RES};
 
 /// A colour from linear RGB components.
 pub fn rgb(r: f32, g: f32, b: f32) -> Color {
@@ -531,12 +533,32 @@ pub const CAR_GLASS_ROUGHNESS: f32 = 0.9002;
 /// A malformed buffer would be a bug in that module rather than a condition to
 /// handle at runtime, so an unexpected rejection simply leaves the tarmac
 /// untextured — exactly what it was before, never a missing road.
+/// As [`road_materials_prepared`], generating the albedos inline.
+///
+/// Kept so the ~30 test fixtures across `render/` that build a palette without
+/// a preparation phase continue to work unchanged. The shipping path goes
+/// through the prepared variant; this one simply synthesises the pixels first
+/// and hands them to the same implementation, so the two cannot drift.
 pub fn road_materials(app: &mut RunningApp) -> RoadMaterials {
+    road_materials_prepared(app, &PreparedTextures::generate())
+}
+
+/// Register the road's textures and materials from albedos the startup
+/// preparation phase already synthesised.
+///
+/// **Registration order is load-bearing and must not move.** `add_texture_data`
+/// mints `id = custom_textures.len() + 1`, so asphalt-then-verge is what makes
+/// those ids what they are, and the ids ride into material contents via
+/// `with_custom_texture`. Both are encoded in the committed golden artifacts.
+pub fn road_materials_prepared(
+    app: &mut RunningApp,
+    prepared: &PreparedTextures,
+) -> RoadMaterials {
     let asphalt = app
-        .add_texture_data(ASPHALT_RES, ASPHALT_RES, asphalt_albedo())
+        .add_texture_data(ASPHALT_RES, ASPHALT_RES, prepared.asphalt().to_vec())
         .ok();
     let ground = app
-        .add_texture_data(VERGE_RES, VERGE_RES, verge_albedo())
+        .add_texture_data(VERGE_RES, VERGE_RES, prepared.verge().to_vec())
         .ok();
     RoadMaterials {
         // Asphalt: dark, and a *whisper* cool of neutral — see [`TARMAC`] for
@@ -722,8 +744,23 @@ impl ScenePalette {
 }
 
 impl ScenePalette {
-    /// Register every material. Called once, at install.
+    /// As [`ScenePalette::install_prepared`], generating the foliage albedo
+    /// inline. Kept for the test fixtures that build a palette with no
+    /// preparation phase; it delegates, so the two cannot drift.
     pub fn install(app: &mut RunningApp) -> ScenePalette {
+        ScenePalette::install_prepared(app, &PreparedTextures::generate())
+    }
+
+    /// Register every material, taking the foliage albedo from the startup
+    /// preparation phase. Called once, at install.
+    ///
+    /// The foliage texture is registered at exactly the point it always was —
+    /// see the note on [`road_materials_prepared`] for why the position of an
+    /// `add_texture_data` call is not free to move.
+    pub fn install_prepared(
+        app: &mut RunningApp,
+        prepared: &PreparedTextures,
+    ) -> ScenePalette {
         let lit = |app: &mut RunningApp, c: [f32; 3]| app.add_material(Material::lit(rgb(c[0], c[1], c[2])));
         // A lit material with an authored surface roughness (`0` mirror-smooth …
         // `1` matte), which the backends turn into a specular highlight strength.
@@ -776,7 +813,7 @@ impl ScenePalette {
             foliage: {
                 let base = foliage_base();
                 let leaf = app
-                    .add_texture_data(FOLIAGE_RES, FOLIAGE_RES, foliage_albedo())
+                    .add_texture_data(FOLIAGE_RES, FOLIAGE_RES, prepared.foliage().to_vec())
                     .ok();
                 app.add_material(
                     leaf.map(|t| {

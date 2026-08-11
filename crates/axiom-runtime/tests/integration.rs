@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use axiom_kernel::{HandleId, Tick};
 use axiom_runtime::{
-    Runtime, RuntimeCommand, RuntimeConfig, RuntimeContext, RuntimeError, RuntimeErrorCode,
-    RuntimeEvent, RuntimeResult, RuntimeState, RuntimeSystem,
+    PreparationSchedule, Runtime, RuntimeCommand, RuntimeConfig, RuntimeContext, RuntimeError,
+    RuntimeErrorCode, RuntimeEvent, RuntimeResult, RuntimeState, RuntimeSystem,
 };
 
 /// A trace system that records (step sequence, name) into a shared buffer and
@@ -43,6 +43,7 @@ impl RuntimeSystem for Trace {
 fn started(config: RuntimeConfig) -> Runtime {
     let mut rt = Runtime::new(config).unwrap();
     rt.initialize().unwrap();
+    rt.prepare(PreparationSchedule::new()).unwrap();
     rt.start().unwrap();
     rt
 }
