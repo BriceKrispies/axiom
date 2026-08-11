@@ -23,10 +23,9 @@ use axiom::prelude::{Entity, Handle, Material, Mesh, RunningApp, Spawn, Transfor
 use crate::track::Track;
 use crate::tuning::CourseTuning;
 
-use super::road_mesh::{
-    build_draw_mesh, build_paint_chunk, draw_count, paint_chunk_count, DRAW_SPAN,
-    PAINT_CHUNK_LENGTH,
-};
+use crate::preparation::meshes::PreparedMeshes;
+
+use super::road_mesh::{DRAW_SPAN, PAINT_CHUNK_LENGTH};
 
 /// **Scenery** cells drawn ahead of the car, in
 /// [`super::road_mesh::CHUNK_LENGTH`] units. At 100 m each this is 1.4 km —
@@ -165,6 +164,10 @@ pub struct RoadMaterials {
 
 impl RoadChunks {
     /// Build and spawn every chunk of `track`, all retired.
+    /// As [`RoadChunks::install_prepared`], cutting the geometry inline.
+    ///
+    /// Kept for the test fixtures that build a road without a preparation
+    /// phase. It delegates, so the prepared and inline paths cannot drift.
     pub fn install(
         app: &mut RunningApp,
         track: &Track,
@@ -172,11 +175,37 @@ impl RoadChunks {
         camera: &crate::tuning::CameraTuning,
         materials: RoadMaterials,
     ) -> RoadChunks {
-        let count = draw_count(track);
+        RoadChunks::install_prepared(
+            app,
+            PreparedMeshes::cut(track, tuning),
+            camera,
+            materials,
+        )
+    }
+
+    /// Register road geometry the startup preparation phase already cut.
+    ///
+    /// Takes the meshes **by value**: `add_mesh_data` consumes its `MeshData`,
+    /// so registering from a borrow would clone all ~951 of them and hold the
+    /// whole road twice at the seam.
+    ///
+    /// **Registration order is load-bearing.** Four parts per span in
+    /// surface/paint/rail/verge order, then every fine paint chunk in ascending
+    /// index — `add_mesh_data` mints `id = meshes.len() + 1`, and those ids are
+    /// encoded in the committed golden artifacts. Note also that the
+    /// `unwrap_or_else` fallback inside `spawn_retired` mints an id *too*, so
+    /// which arm runs must not change either.
+    pub fn install_prepared(
+        app: &mut RunningApp,
+        prepared: PreparedMeshes,
+        camera: &crate::tuning::CameraTuning,
+        materials: RoadMaterials,
+    ) -> RoadChunks {
+        let (draw_chunks, paint_chunks) = prepared.into_parts();
+        let count = draw_chunks.len();
         let mut chunks = Vec::with_capacity(count);
         let mut per_chunk = Vec::with_capacity(count);
-        for index in 0..count {
-            let meshes = build_draw_mesh(track, index, tuning);
+        for meshes in draw_chunks {
             let chunk_triangles = (meshes.surface.indices().len()
                 + meshes.paint.indices().len()
                 + meshes.rail.indices().len()
@@ -196,11 +225,9 @@ impl RoadChunks {
         // The fine paint set. Retired like everything else, and never touched at
         // all until an arm asks for the window — a GPU-only session pays for the
         // meshes and not a draw call more.
-        let fine_paint = (0..paint_chunk_count(track))
-            .map(|index| {
-                let data = build_paint_chunk(track, index, tuning);
-                spawn_retired(app, data, materials.paint)
-            })
+        let fine_paint = paint_chunks
+            .into_iter()
+            .map(|data| spawn_retired(app, data, materials.paint))
             .collect();
 
         RoadChunks {
