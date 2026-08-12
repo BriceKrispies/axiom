@@ -377,7 +377,7 @@ mod tests {
     fn the_instance_count_is_bounded_by_the_pools() {
         let (mut app, mut effects) = fixture();
         let t = VehicleTuning::DEFAULT;
-        let mut car = car_at(t.top_speed + t.boost_top_speed_bonus);
+        let mut car = car_at(t.boost_reference_speed);
         car.boosting = true;
         car.drifting = true;
         car.grounded = true;

@@ -892,7 +892,20 @@ impl TrafficVisuals {
     }
 
     /// Pose pool entry `index` at `position` facing `yaw`, or retire it.
-    pub fn pose(&self, app: &mut RunningApp, index: usize, placement: Option<(Vec3, f32, Vec3)>) {
+    ///
+    /// `tumble` rolls the car about its own length. It is zero for every car
+    /// driving normally and non-zero only for a **wreck** — one the player has
+    /// gone through the back of under boost — which is leaving the road on its
+    /// side. The parts are still laid out in the car's own frame; it is the
+    /// frame itself that is rotating, which is why one angle is enough to make
+    /// a box car read as barrel-rolling.
+    pub fn pose(
+        &self,
+        app: &mut RunningApp,
+        index: usize,
+        placement: Option<(Vec3, f32, Vec3)>,
+        tumble: f32,
+    ) {
         let Some(parts) = self.cars.get(index) else {
             return;
         };
@@ -904,8 +917,14 @@ impl TrafficVisuals {
         };
         let (sy, cy) = yaw.sin_cos();
         let forward = Vec3::new(sy, 0.0, cy);
-        let right = Vec3::new(cy, 0.0, -sy);
-        let rotation = Quat::from_euler_xyz(0.0, yaw, 0.0);
+        // The roll axis is the car's own length, so the right vector tips with
+        // it and every part above the floor swings with the body rather than
+        // staying stubbornly level.
+        let (st, ct) = tumble.sin_cos();
+        let level_right = Vec3::new(cy, 0.0, -sy);
+        let right = level_right.mul_scalar(ct).add(up.mul_scalar(st));
+        let up = up.mul_scalar(ct).subtract(level_right.mul_scalar(st));
+        let rotation = Quat::from_euler_xyz(0.0, yaw, tumble);
         let at = |local: Vec3| {
             position
                 .add(right.mul_scalar(local.x))
@@ -1623,17 +1642,40 @@ mod tests {
         assert_eq!(traffic.len(), 6);
         assert!(!traffic.is_empty());
 
-        traffic.pose(&mut app, 0, Some((Vec3::new(3.0, 1.0, 9.0), 0.4, Vec3::UNIT_Y)));
+        traffic.pose(&mut app, 0, Some((Vec3::new(3.0, 1.0, 9.0), 0.4, Vec3::UNIT_Y)), 0.0);
         assert_eq!(app.get::<Visible>(traffic.cars[0].body), Some(Visible(true)));
         let body = app.get::<Transform>(traffic.cars[0].body).unwrap();
         assert!(body.translation.distance(Vec3::new(3.0, 1.0, 9.0)) < 2.0);
 
-        traffic.pose(&mut app, 0, None);
+        traffic.pose(&mut app, 0, None, 0.0);
         assert_eq!(app.get::<Visible>(traffic.cars[0].body), Some(Visible(false)));
         assert_eq!(app.get::<Visible>(traffic.cars[0].lights), Some(Visible(false)));
 
         // An out-of-range index is a no-op rather than a panic.
-        traffic.pose(&mut app, 99, None);
+        traffic.pose(&mut app, 99, None, 0.0);
+    }
+
+    /// A tumbling wreck rolls about its own length, so the parts that sit above
+    /// the floor swing out sideways instead of staying stubbornly level.
+    #[test]
+    fn a_tumbling_wreck_rolls_its_body_rather_than_sliding_it() {
+        let mut app = app();
+        let palette = ScenePalette::install(&mut app);
+        let traffic = TrafficVisuals::install(&mut app, &palette, 2);
+        let place = |app: &mut RunningApp, tumble: f32| {
+            traffic.pose(app, 0, Some((Vec3::ZERO, 0.0, Vec3::UNIT_Y)), tumble);
+            app.get::<Transform>(traffic.cars[0].cabin).unwrap().translation
+        };
+        let upright = place(&mut app, 0.0);
+        let rolled = place(&mut app, std::f32::consts::FRAC_PI_2);
+        assert!(
+            upright.y > rolled.y + 0.3,
+            "a quarter roll must drop the cabin off the top: {upright:?} vs {rolled:?}"
+        );
+        assert!(
+            rolled.x.abs() > upright.x.abs() + 0.3,
+            "and swing it out to the side: {upright:?} vs {rolled:?}"
+        );
     }
 
     #[test]

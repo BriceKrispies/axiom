@@ -95,6 +95,9 @@ pub enum RaceEvent {
     },
     /// A traffic car was threaded.
     NearMiss { boost_awarded: f32 },
+    /// A boosting player went through the back of a traffic car and put it off
+    /// the road.
+    SmashedThrough { boost_awarded: f32 },
     /// A boost pickup was collected.
     ///
     /// Carries the tier as well as the amount, because the cue is pitched by
@@ -219,7 +222,10 @@ impl RaceSim {
             &track,
             &tuning.camera,
             &tuning.vehicle,
-            crate::camera::CameraDrive::default(),
+            crate::camera::CameraDrive {
+                lane_locked: profile.is_rails(),
+                ..crate::camera::CameraDrive::default()
+            },
         );
         let car_pose = pose_of(&car, &track, 0.0);
         // Lane 0 is the centreline lane, and it exists for the whole course, so
@@ -259,7 +265,14 @@ impl RaceSim {
         }
     }
 
-    /// Build the shipping race: the default seed and the default tuning.
+    /// Build the shipping race: the default seed and the default tuning, on the
+    /// **wheel** game.
+    ///
+    /// The profile is worth spelling out now that the browser ships
+    /// [`crate::PlayProfile::Rails`] on every device: this is the shipping
+    /// *course*, not the shipping *control scheme*, and it stays on the wheel
+    /// game because that is the car most of these tests are about. A rails race
+    /// is [`RaceSim::with_profile`].
     pub fn shipping() -> RaceSim {
         RaceSim::new(crate::DEFAULT_SEED, Tuning::DEFAULT)
     }
@@ -437,6 +450,22 @@ impl RaceSim {
         }))
     }
 
+    /// Traffic slot `index`'s wreck arc — its height above the road (m) and how
+    /// far it has tumbled (rad) — or `None` when the car is not a wreck.
+    ///
+    /// Separate from [`Self::traffic_pose`] rather than folded into it because
+    /// it answers a different question. `traffic_pose` is where a car *is*, and
+    /// every car has an answer; this is the arc a wreck is on, and almost no car
+    /// ever has one. Returning `None` is what lets the renderer keep posing the
+    /// other fifteen cars through the cheap path.
+    pub fn traffic_wreck(&self, index: usize, alpha: f32) -> Option<(f32, f32)> {
+        self.traffic
+            .cars()
+            .get(index)
+            .filter(|c| c.active & c.is_wreck())
+            .map(|c| c.wreck_arc(alpha))
+    }
+
     /// Record where every traffic car is, before the step that moves them.
     fn capture_traffic(&mut self) {
         let cars = self.traffic.cars();
@@ -543,9 +572,12 @@ impl RaceSim {
         };
     }
 
-    /// The command the car actually receives, given the phase. The countdown and
-    /// the finish take the wheel; everything else passes through.
+    /// The command the car actually receives, given the profile and the phase.
+    ///
+    /// The countdown and the finish take the wheel; everything else passes
+    /// through — after the lane game has held the throttle down for the player.
     fn phase_command(&self, command: DriveCommand) -> DriveCommand {
+        let command = self.held_throttle(command);
         match self.phase {
             // Held on the line. The hold is NOT expressed as a brake — see
             // `drive`, which holds the car explicitly.
@@ -573,6 +605,35 @@ impl RaceSim {
         }
     }
 
+    /// **The lane game holds its own throttle.**
+    ///
+    /// A racing game asks the player for two things: how fast, and which line.
+    /// The lane game already answered the first one — there is no cornering
+    /// speed to judge, because the car cannot leave its lane by going too fast,
+    /// and the only reason to lift is a car ahead, which is what changing lane
+    /// is *for*. Leaving the throttle to the player therefore asks them to hold
+    /// a button down for nine kilometres and punishes exactly one thing: letting
+    /// go by accident.
+    ///
+    /// So it is held here rather than by a GAS button, and the button is gone
+    /// (`touch::PadLayout::rails_for_viewport`). This is the same reasoning that
+    /// removed the lane buttons — a control whose right answer never changes is
+    /// not a decision, and the pad should only carry decisions.
+    ///
+    /// Applied **before** the phase rewrite above, so the countdown still holds
+    /// the car on the line and the finish still brings it to a stop: those are
+    /// the two moments the game genuinely does take the throttle away, and they
+    /// keep the last word.
+    ///
+    /// The wheel game is untouched. There, throttle control *is* the game.
+    fn held_throttle(&self, command: DriveCommand) -> DriveCommand {
+        let held = f32::from(self.rails.is_some());
+        DriveCommand {
+            throttle: command.throttle.max(held),
+            ..command
+        }
+    }
+
     /// Boost, car, traffic, contacts, near misses.
     fn drive(&mut self, command: DriveCommand) {
         // The countdown holds the car outright. Doing this with the brake — the
@@ -581,7 +642,8 @@ impl RaceSim {
         if self.phase == RacePhase::Countdown {
             controller::settle_steering(&mut self.car, command, &self.tuning.vehicle);
             self.last_forward_accel = 0.0;
-            self.resolve_traffic();
+            // A held car swept nothing: it is where it was.
+            self.resolve_traffic(self.car.distance);
             self.contact.advance(&mut self.car, &self.tuning.collision);
             return;
         }
@@ -591,8 +653,12 @@ impl RaceSim {
         }
         self.was_boosting = self.boost.active();
 
-        // Where the car was before it moved. The pickup sweep needs the interval
-        // the car travelled, not the point it ended at — see [`pickups`].
+        // Where the car was before it moved. Two things downstream need the
+        // interval the car travelled rather than the point it ended at: the
+        // pickup sweep (see [`pickups`]) and the near-miss test (see
+        // [`collision::is_near_miss`]). Both are questions about what the car
+        // went *past*, and a boosting car can go past something entirely
+        // between two samples.
         let was_at = self.car.distance;
 
         let report = controller::step(
@@ -613,7 +679,7 @@ impl RaceSim {
         }
 
         self.collect_pickups(was_at);
-        self.resolve_traffic();
+        self.resolve_traffic(was_at);
         self.note_surface();
 
         // One call, at the very end of the step, ages every episode and fades
@@ -664,7 +730,7 @@ impl RaceSim {
     /// of two bodies not occupying one space, and suppressing it would leave the
     /// player interpenetrated. The *response* — momentum, sound, camera — is
     /// gated by the episode ledger, and runs once per collision.
-    fn resolve_traffic(&mut self) {
+    fn resolve_traffic(&mut self, was_at: f32) {
         self.traffic.step(
             self.car.distance,
             self.plan.track(),
@@ -705,6 +771,7 @@ impl RaceSim {
                 if !near_missed
                     && collision::is_near_miss(
                         &self.car,
+                        was_at,
                         player_lane,
                         distance,
                         lane,
@@ -731,6 +798,20 @@ impl RaceSim {
             let escape = escape_side(self.car.lateral, lateral, &sample);
             let facts =
                 collision::traffic_facts(&self.car, &overlap, speed, slot, &sample, escape);
+
+            // **Going through the back of it.** Handled before the contact
+            // response and instead of it, not after: the point of a smash is
+            // that none of the crash happens. No momentum exchange, no recovery
+            // assist, no separation — the player's line is not disturbed at all,
+            // because a boost that gets bounced off a hatchback is not a boost.
+            //
+            // The traffic car takes the entire event. It is wrecked, thrown to
+            // whichever side has more room, and shoved forward by the hit.
+            if collision::is_smash_through(&self.car, &facts) {
+                self.smash_through(index, escape);
+                continue;
+            }
+
             let responded = self.contact.respond(&mut self.car, &facts, &collision);
             let length = self.plan.track().length();
             collision::separate_from_traffic(
@@ -748,6 +829,54 @@ impl RaceSim {
             if let Some(impact) = responded {
                 self.report_impact(impact);
             }
+        }
+    }
+
+    /// Wreck the traffic car at `index`, pay the player for it, and kick the
+    /// camera.
+    ///
+    /// # Why this pays less than a near miss
+    ///
+    /// [`RaceTuning::smash_boost`] is under half of
+    /// [`RaceTuning::near_miss_boost`], and that ordering is the whole design of
+    /// the mechanic rather than a number someone liked.
+    ///
+    /// A smash costs the player nothing — no speed, no line, no contact — so if
+    /// it paid as well as threading did, the optimal race would be to hold boost
+    /// and aim at the nearest bumper, and the game the boost economy exists to
+    /// reward would be strictly worse than ignoring it. Paying *less* keeps the
+    /// ordering the loop needs: threading traffic is the way to earn boost, and
+    /// smashing through is what a boost you already have does to whatever is in
+    /// the way. It is a spectacle with a tip attached, not an income.
+    ///
+    /// It is deliberately **not** an impact: it does not touch `impact_count`,
+    /// does not open a contact episode, and raises no recovery assist. The only
+    /// thing it borrows from a crash is the camera pulse, which is presentation
+    /// and which a hit like this has plainly earned.
+    fn smash_through(&mut self, index: usize, escape: f32) {
+        let race = self.tuning.race;
+        let shove = self.tuning.collision.traffic_yield_speed * SMASH_SHOVE_SHARE;
+        // Thrown toward whichever side of the road has more room, the same
+        // question a shunt already asks so a car is never punted into the
+        // barrier the player is about to arrive at.
+        self.traffic.wreck(index, escape, shove);
+
+        self.boost.award(race.smash_boost);
+        // The same "+" flash a near miss and a pickup raise: the reward is the
+        // bar moving, and the HUD reads it from `BoostMeter::recent_gain`.
+        self.near_miss_notice = race.notify_steps;
+        self.events.push(RaceEvent::SmashedThrough {
+            boost_awarded: race.smash_boost,
+        });
+        let direction = self.car.forward();
+        let stronger = self
+            .pending_impulse
+            .is_none_or(|held| SMASH_CAMERA_PULSE > held.amplitude);
+        if stronger {
+            self.pending_impulse = Some(ImpactImpulse {
+                direction,
+                amplitude: SMASH_CAMERA_PULSE,
+            });
         }
     }
 
@@ -838,6 +967,7 @@ impl RaceSim {
                 forward_accel: self.last_forward_accel,
                 boosting: self.boost.active(),
                 impact: self.pending_impulse.take(),
+                lane_locked: self.rails.is_some(),
             },
         );
     }
@@ -934,6 +1064,19 @@ const ROLL_LIMIT: f32 = 0.11;
 /// Front-wheel steering angle at full lock (radians).
 const VISUAL_STEER_ANGLE: f32 = 0.52;
 
+/// How much of a shunt's speed budget a smash puts into the car it went
+/// through. Most of it: the hit is the player's whole closing speed arriving at
+/// once, and a wreck that ambles away reads as a car changing lane.
+const SMASH_SHOVE_SHARE: f32 = 0.8;
+
+/// The camera pulse a smash delivers, `0..1`.
+///
+/// Firm rather than violent. The kick is the only feedback the *player's* car
+/// gives — nothing else about their state changes — so it has to sell the hit;
+/// but a full-strength shake is the vocabulary of a crash, and this is
+/// emphatically not one.
+const SMASH_CAMERA_PULSE: f32 = 0.45;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -945,6 +1088,199 @@ mod tests {
             sim.step(DriveCommand::IDLE);
         }
         sim
+    }
+
+    /// The lane game, past the countdown.
+    fn railed() -> RaceSim {
+        let mut sim =
+            RaceSim::with_profile(crate::DEFAULT_SEED, Tuning::DEFAULT, crate::PlayProfile::Rails);
+        while sim.phase() == RacePhase::Countdown {
+            sim.step(DriveCommand::IDLE);
+        }
+        sim
+    }
+
+    /// Put a traffic car directly in front of the player, **just** touching it
+    /// nose-to-tail.
+    ///
+    /// The depth matters and is the whole reason this is a helper. A contact is
+    /// classified along whichever axis is least penetrated
+    /// ([`collision::traffic_overlap`]), so a car planted deep inside the player
+    /// is a car overlapping them more along the road than across it — which is
+    /// a *side-swipe*, correctly, however much it looks like a rear-end when you
+    /// write the fixture. The moment a real rear-end happens is the moment the
+    /// bumpers first touch, and that is what this builds.
+    fn car_planted_ahead(sim: &mut RaceSim) {
+        let touching =
+            sim.tuning().vehicle.half_length + sim.tuning().race.traffic_half_length - 0.2;
+        let ahead = sim.car().distance + touching;
+        let lateral = sim.car().lateral;
+        let cars = sim.traffic.cars_mut();
+        cars[0].active = true;
+        cars[0].distance = ahead;
+        cars[0].lateral = lateral;
+        cars[0].lane = 0;
+        cars[0].speed = 20.0;
+        cars[0].near_missed = false;
+        cars[0].wreck_steps = 0;
+    }
+
+    /// **Going through the back of a car under boost.** The player keeps
+    /// everything — line, speed, momentum — and the car does not.
+    #[test]
+    fn smashing_through_a_car_wrecks_it_and_pays_without_costing_anything() {
+        let mut sim = racing();
+        sim.car.forward_speed = 80.0;
+        sim.car.boosting = true;
+        car_planted_ahead(&mut sim);
+
+        let before_speed = sim.car().forward_speed;
+        let before_lateral = sim.car().lateral;
+        let before_impacts = sim.impact_count();
+        let before_boost = sim.boost().charge();
+
+        sim.drive(DriveCommand { boost: true, ..DriveCommand::FLAT_OUT });
+
+        assert!(
+            sim.events()
+                .iter()
+                .any(|e| matches!(e, RaceEvent::SmashedThrough { .. })),
+            "the smash was not reported: {:?}",
+            sim.events()
+        );
+        assert!(sim.traffic.cars()[0].is_wreck(), "the car was not wrecked");
+        assert_eq!(
+            sim.impact_count(),
+            before_impacts,
+            "a smash is not a crash and must not be counted as one"
+        );
+        assert!(
+            sim.car().forward_speed >= before_speed,
+            "the player was slowed by going through it: {before_speed} -> {}",
+            sim.car().forward_speed
+        );
+        assert!(
+            (sim.car().lateral - before_lateral).abs() < 0.05,
+            "the player was pushed off their line: {before_lateral} -> {}",
+            sim.car().lateral
+        );
+        assert!(
+            sim.boost().charge() > before_boost - sim.tuning().race.boost_drain_rate * DT,
+            "the smash paid nothing"
+        );
+    }
+
+    /// The wreck genuinely leaves the road, which is the part the bounded yields
+    /// exist to prevent for ordinary contact.
+    #[test]
+    fn a_wreck_leaves_the_road_and_then_leaves_the_world() {
+        let mut sim = racing();
+        sim.car.forward_speed = 80.0;
+        sim.car.boosting = true;
+        car_planted_ahead(&mut sim);
+        sim.drive(DriveCommand { boost: true, ..DriveCommand::FLAT_OUT });
+        assert!(sim.traffic.cars()[0].is_wreck());
+
+        let start_lateral = sim.traffic.cars()[0].lateral;
+        let mut widest = 0.0f32;
+        let mut airborne = false;
+        (0..200).for_each(|_| {
+            sim.step(DriveCommand::FLAT_OUT);
+            let car = sim.traffic.cars()[0];
+            widest = widest.max((car.lateral - start_lateral).abs());
+            airborne |= car.is_wreck() && car.wreck_arc(0.0).0 > 0.5;
+        });
+        assert!(
+            widest > 6.0,
+            "the wreck only moved {widest} m sideways — it is still on the road"
+        );
+        assert!(airborne, "and it never left the ground");
+        assert!(
+            !sim.traffic.cars()[0].active || !sim.traffic.cars()[0].is_wreck(),
+            "the wreck is still in the world two seconds later"
+        );
+    }
+
+    /// The rule is a *rear* hit under boost, and both halves matter. A
+    /// side-swipe is still a crash however fast you were going, and a rear-end
+    /// off boost is still a rear-end.
+    #[test]
+    fn a_smash_needs_both_the_boost_and_the_back_of_the_car() {
+        let mut coasting = racing();
+        coasting.car.forward_speed = 80.0;
+        coasting.car.boosting = false;
+        car_planted_ahead(&mut coasting);
+        coasting.drive(DriveCommand::FLAT_OUT);
+        assert!(
+            !coasting.traffic.cars()[0].is_wreck(),
+            "a rear-end without boost wrecked the car"
+        );
+        assert!(
+            coasting
+                .events()
+                .iter()
+                .all(|e| !matches!(e, RaceEvent::SmashedThrough { .. })),
+            "and it must not have paid"
+        );
+
+        // Alongside rather than in front: the same speed, the same boost, and a
+        // contact that is the player's mistake.
+        let mut sideways = racing();
+        sideways.car.forward_speed = 80.0;
+        sideways.car.boosting = true;
+        let index = 0;
+        {
+            // Level with the player and just touching across the road — the
+            // mirror of the fixture above, and the axis that makes it a crash.
+            let here = sideways.car().distance;
+            let lateral = sideways.car().lateral;
+            let touching = sideways.tuning.vehicle.half_width
+                + sideways.tuning.race.traffic_half_width
+                - 0.2;
+            let cars = sideways.traffic.cars_mut();
+            cars[index].active = true;
+            cars[index].distance = here;
+            cars[index].lateral = lateral + touching;
+            cars[index].speed = 20.0;
+            cars[index].near_missed = false;
+        }
+        sideways.drive(DriveCommand { boost: true, ..DriveCommand::FLAT_OUT });
+        assert!(
+            !sideways.traffic.cars()[index].is_wreck(),
+            "a side-swipe under boost must still be a crash"
+        );
+    }
+
+    /// **A lane change is not a drift**, and the difference is worth real money.
+    ///
+    /// The crossing runs the lateral channel far past `drift_threshold` for its
+    /// few frames, so a detector that only measures sideways speed calls every
+    /// dodge a drift — which raises the DRIFT banner on a car that cannot drift,
+    /// and pays `drift_boost_rate` for tapping a lane button. Left alone, "tap
+    /// left, tap right" is an infinite boost supply and the whole earn-it
+    /// economy is optional.
+    #[test]
+    fn hopping_lanes_is_never_a_drift_and_never_pays_drift_boost() {
+        let mut sim = railed();
+        let hop = |step: i8| DriveCommand { lane_step: step, ..DriveCommand::FLAT_OUT };
+
+        // Drive it into a wall of lane changes: left, right, left, right.
+        let mut hops = 0;
+        (0..600).for_each(|i| {
+            let step = [0, 1, 0, -1][(i / 8) % 4] as i8;
+            hops += i32::from(step != 0);
+            sim.step(hop(step));
+            assert!(
+                !sim.car().drifting,
+                "step {i}: a railed car reported a drift (lateral {} m/s)",
+                sim.car().lateral_speed
+            );
+        });
+        assert!(hops > 20, "the fixture really did keep changing lane: {hops}");
+        assert!(
+            !sim.events().iter().any(|e| matches!(e, RaceEvent::DriftStarted)),
+            "and no drift was ever announced"
+        );
     }
 
     /// A pickup with no other pickup near it, for the tests that want to observe
@@ -2178,7 +2514,21 @@ mod tests {
                 "step {i}: lateral {} escaped the barriers",
                 car.lateral
             );
-            assert!(car.speed() <= 200.0, "step {i}: speed {} ran away", car.speed());
+            // The runaway guard. It used to be a flat 200 m/s, which was really
+            // "the boosted ceiling, with room to spare"; there is no boosted
+            // ceiling now, so the bound is derived from what one boost phase of
+            // this script can actually add — full acceleration for the 300 steps
+            // the phase lasts, on top of the clamp that still applies off boost.
+            // Past that is the integrator running away, which is what this
+            // watches for, rather than the car simply being fast.
+            let v = sim.tuning().vehicle;
+            let reachable = v.top_speed * controller::SPEED_HEADROOM
+                + (v.accel + v.boost_accel_bonus) * 300.0 * DT;
+            assert!(
+                car.speed() <= reachable,
+                "step {i}: speed {} ran away past the {reachable} m/s a boost phase can reach",
+                car.speed()
+            );
             let boost = sim.boost().charge();
             assert!((0.0..=1.0).contains(&boost), "step {i}: boost {boost}");
             let pose = sim.camera_pose(1.0);

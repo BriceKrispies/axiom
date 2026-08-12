@@ -60,6 +60,13 @@ pub struct ProbeControls {
     distance: f32,
     /// The last frame's reported speed (m/s).
     speed: f32,
+    /// The last frame's reported offset from the road centre (m), positive to
+    /// the driver's right.
+    lateral: f32,
+    /// The last frame's reported lane, or `None` off the rails game.
+    lane: Option<i32>,
+    /// The last frame's camera eye height above the road under the car (m).
+    camera_height: f32,
 }
 
 impl ProbeControls {
@@ -115,9 +122,33 @@ impl ProbeControls {
     }
 
     /// Record what the frame observed, for [`Self::state_json`] to report.
-    pub fn report(&mut self, distance: f32, speed: f32) {
+    ///
+    /// `lateral` and `lane` are here for the same reason `distance` is: they are
+    /// facts about the car that a screenshot cannot carry. The chase camera
+    /// follows the car, so a car in the left lane and a car in the right lane
+    /// produce very nearly the same picture — which makes "did that lane hop
+    /// happen?" exactly the kind of question the probe exists to answer.
+    /// `lane` is `None` on the wheel game, where there are no lanes to be in.
+    ///
+    /// `camera_height` is the eye's clearance above the road under the car, and
+    /// it is here because it is the one number that decides whether the rig
+    /// fits inside the course. A camera that has risen through a tunnel roof
+    /// produces a screenshot of a black slab and a patch of sky, from which the
+    /// height it actually reached is not recoverable — which is exactly when a
+    /// probe is worth having.
+    pub fn report(
+        &mut self,
+        distance: f32,
+        speed: f32,
+        lateral: f32,
+        lane: Option<i32>,
+        camera_height: f32,
+    ) {
         self.distance = distance;
         self.speed = speed;
+        self.lateral = lateral;
+        self.lane = lane;
+        self.camera_height = camera_height;
     }
 
     /// The probe's state as a JSON object, for the driving script to read back
@@ -125,8 +156,18 @@ impl ProbeControls {
     /// is four numbers and two flags on a diagnosis path.
     pub fn state_json(&self) -> String {
         format!(
-            "{{\"distance\":{:.3},\"speed\":{:.3},\"paused\":{},\"autopilot\":{},\"pendingSteps\":{}}}",
-            self.distance, self.speed, self.paused, self.autopilot, self.pending_steps
+            "{{\"distance\":{:.3},\"speed\":{:.3},\"lateral\":{:.3},\"lane\":{},\
+             \"cameraHeight\":{:.3},\"paused\":{},\"autopilot\":{},\"pendingSteps\":{}}}",
+            self.distance,
+            self.speed,
+            self.lateral,
+            self.lane
+                .map(|lane| lane.to_string())
+                .unwrap_or_else(|| "null".to_string()),
+            self.camera_height,
+            self.paused,
+            self.autopilot,
+            self.pending_steps
         )
     }
 }
@@ -142,6 +183,9 @@ thread_local! {
         autopilot: false,
         distance: 0.0,
         speed: 0.0,
+        lateral: 0.0,
+        lane: None,
+        camera_height: 0.0,
     }) };
 }
 
@@ -255,13 +299,24 @@ mod tests {
         p.set_paused(true);
         p.set_autopilot(true);
         p.request_steps(2);
-        p.report(1_234.5, 86.25);
+        p.report(1_234.5, 86.25, -3.5, Some(-1), 4.25);
         let json = p.state_json();
         assert!(json.contains("\"distance\":1234.500"), "{json}");
         assert!(json.contains("\"speed\":86.250"), "{json}");
+        assert!(json.contains("\"lateral\":-3.500"), "{json}");
+        assert!(json.contains("\"lane\":-1"), "{json}");
         assert!(json.contains("\"paused\":true"), "{json}");
         assert!(json.contains("\"autopilot\":true"), "{json}");
         assert!(json.contains("\"pendingSteps\":2"), "{json}");
+    }
+
+    /// The wheel game has no lanes, and the probe has to say so rather than
+    /// report a lane the car is not in.
+    #[test]
+    fn a_car_that_is_not_on_rails_reports_a_null_lane() {
+        let mut p = ProbeControls::default();
+        p.report(10.0, 20.0, 0.25, None, 1.55);
+        assert!(p.state_json().contains("\"lane\":null"), "{}", p.state_json());
     }
 
     #[test]

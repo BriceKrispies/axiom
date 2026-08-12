@@ -32,16 +32,33 @@ pub struct VehicleTuning {
     pub accel: f32,
     /// The speed (m/s) at which forward acceleration has fallen to half.
     pub accel_falloff_speed: f32,
-    /// Natural top speed off boost (m/s).
+    /// Natural top speed off boost (m/s). **Boost has no top speed at all** —
+    /// see [`Self::boost_reference_speed`] for why there is no boosted one here.
     pub top_speed: f32,
-    /// Extra top speed while boosting (m/s).
-    pub boost_top_speed_bonus: f32,
+    /// The speed (m/s) a boost ramps the car *to* — the knee of the boost curve,
+    /// and a *reference* rather than a limit.
+    ///
+    /// This field used to be the boosted top speed, and the distinction is the
+    /// whole of what changed. A boost still climbs to this speed exactly as it
+    /// always did, with the same taper and the same shape; what is different is
+    /// what happens on arrival. It used to be the end. Now it is the point where
+    /// the pull stops being a ramp and becomes a long logarithmic tail — thinner
+    /// and thinner, but never zero, so the car keeps gaining for as long as the
+    /// meter pays for it (`sim::controller::boost_headroom`).
+    ///
+    /// Being a knee rather than a cap is also what lets two presentation-side
+    /// consumers keep using it as "how fast is fast while boosting": the engine
+    /// note, which has to redline somewhere ([`crate::audio_cues`]), and the
+    /// traffic spawn guard, which has to keep a newly-spawned car a real warning
+    /// away. Exceeding it is expected and ordinary — that is the difference
+    /// between a reference and a cap.
+    pub boost_reference_speed: f32,
     /// Extra acceleration while boosting (m/s²).
     ///
     /// Deliberately absurd. Boost is not a 10% bonus, it is the moment the game
     /// stops pretending to be a car: on top of [`Self::accel`] this is well over
     /// ten g, and combined with the throttle it presses for you, the dirt it
-    /// ignores and the traffic it goes through, holding it should feel like
+    /// ignores and the ceiling it does not have, holding it should feel like
     /// cheating. Everything that makes it *fair* lives in the meter, not here.
     pub boost_accel_bonus: f32,
     /// Braking deceleration (m/s²).
@@ -130,7 +147,7 @@ impl VehicleTuning {
         accel: 38.0,
         accel_falloff_speed: 46.0,
         top_speed: 92.0,
-        boost_top_speed_bonus: 22.0,
+        boost_reference_speed: 114.0,
         boost_accel_bonus: 95.0,
         brake_decel: 52.0,
         reverse_accel: 9.0,
@@ -900,6 +917,16 @@ pub struct RaceTuning {
     pub traffic_half_width: f32,
     /// Boost awarded by one near miss (fraction of the meter).
     pub near_miss_boost: f32,
+    /// Boost awarded for smashing through the back of a car while boosting
+    /// (fraction of the meter).
+    ///
+    /// **Must stay well under [`Self::near_miss_boost`]**, and
+    /// `a_smash_pays_less_than_a_pass` pins it. A smash costs the player
+    /// nothing — no speed, no line, no contact — so paying it as well as a
+    /// thread would make "hold boost and aim at a bumper" strictly better than
+    /// the driving the whole economy exists to reward. See
+    /// [`crate::sim::RaceSim::smash_through`].
+    pub smash_boost: f32,
     /// Boost awarded by each pickup tier, weakest first (fraction of the
     /// meter) — indexed by [`crate::course::specification::BoostTier::index`].
     ///
@@ -974,6 +1001,7 @@ impl RaceTuning {
         traffic_half_length: 2.3,
         traffic_half_width: 1.05,
         near_miss_boost: 0.13,
+        smash_boost: 0.05,
         pickup_boost: [0.15, 0.30, 0.55],
         pickup_reach_m: 1.6,
         drift_boost_rate: 0.22,
@@ -1238,13 +1266,17 @@ mod tests {
 
     /// The car's headline behaviour is an ordering between numbers, and the
     /// ordering is the design: braking beats acceleration, reverse is a crawl,
-    /// boost genuinely raises the ceiling.
+    /// boost genuinely removes the ceiling.
     #[test]
     fn the_vehicle_numbers_encode_the_intended_arcade_feel() {
         let v = VehicleTuning::DEFAULT;
         assert!(v.brake_decel > v.accel, "braking is more forceful than throttle");
         assert!(v.reverse_top_speed < v.top_speed * 0.2, "reverse is limited");
-        assert!(v.boost_top_speed_bonus > 0.0 && v.boost_accel_bonus > 0.0);
+        assert!(v.boost_accel_bonus > 0.0);
+        assert!(
+            v.boost_reference_speed > v.top_speed,
+            "the reference a boosted pass is sized against has to be a boosted speed"
+        );
         assert!(
             v.boost_accel_bonus > v.accel * 2.0,
             "boost is a different order of thing from the throttle, not a bonus on it"
@@ -1397,6 +1429,16 @@ mod tests {
     fn the_boost_economy_can_actually_be_sustained() {
         let r = RaceTuning::DEFAULT;
         assert!(r.near_miss_boost > 0.0);
+        // **Threading beats smashing.** A smash costs the player nothing, so if
+        // it paid as well as a pass did, the fastest race would be to hold boost
+        // and aim at bumpers and the whole earn-it economy would be optional.
+        // The ordering is the mechanic; the numbers are just how it is spelled.
+        assert!(
+            r.smash_boost > 0.0 && r.smash_boost < r.near_miss_boost * 0.5,
+            "a smash pays {} against a pass's {}",
+            r.smash_boost,
+            r.near_miss_boost
+        );
         assert!(r.drift_boost_rate > 0.0);
         assert!(r.high_speed_boost_rate > 0.0);
         assert!(r.boost_drain_rate > r.high_speed_boost_rate, "boost is spent faster than it trickles in");
@@ -1428,13 +1470,20 @@ mod tests {
             "traffic arrives every {} s at top speed, which is scenery",
             r.traffic_spacing / closing
         );
-        // A newly spawned car is always more than a second of warning away, even
-        // at the boosted top speed and even against the slowest traffic.
-        let worst_closing = v.top_speed + v.boost_top_speed_bonus - r.traffic_speed_min;
+        // A newly spawned car is always more than a second of warning away at a
+        // representative boosted speed, even against the slowest traffic.
+        //
+        // "Representative", not "worst": boost is uncapped, so there is no worst
+        // closing speed to size against, and a run that has spent a long boost
+        // outruns this guard. That is the deal the uncapped boost makes — the
+        // warning a spawn gives shrinks as the speed climbs — and the guard is
+        // sized so that ordinary boosting, which is what nearly all boosting is,
+        // stays fair.
+        let closing_on_boost = v.boost_reference_speed - r.traffic_speed_min;
         assert!(
-            r.traffic_safe_ahead / worst_closing > 1.0,
-            "only {} s of warning at the worst closing speed",
-            r.traffic_safe_ahead / worst_closing
+            r.traffic_safe_ahead / closing_on_boost > 1.0,
+            "only {} s of warning at a boosted closing speed",
+            r.traffic_safe_ahead / closing_on_boost
         );
         assert!(r.traffic_safe_behind > 0.0 && r.traffic_safe_behind < r.traffic_safe_ahead);
         assert!(

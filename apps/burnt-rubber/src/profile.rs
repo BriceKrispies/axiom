@@ -1,21 +1,41 @@
-//! [`PlayProfile`] — the one decision that makes Burnt Rubber a different game
-//! on a phone.
+//! [`PlayProfile`] — which lateral control model a session is playing.
 //!
-//! Burnt Rubber ships two games from one codebase. On a desktop it is the
-//! driving game this app was built as: continuous analogue steering, a chassis
-//! that oversteers, a handbrake that breaks traction. On a phone that game is
-//! not playable — a thumb on a dynamic joystick cannot hold a racing line, and
-//! the interesting part of the car model (catching a slide) is exactly the part
-//! a touchscreen cannot express. So the phone gets a *lane* game: the car is on
-//! rails, you pick a lane, and the skill is threading traffic at speed.
+//! Burnt Rubber has two, and they are genuinely different games. [`Wheel`] is
+//! the driving game this app was built as: continuous analogue steering, a
+//! chassis that oversteers, a handbrake that breaks traction, and a lateral
+//! position that is *emergent* from all three. [`Rails`] inverts that — lateral
+//! position is *driven*, you name a lane and the car goes to it, and the skill
+//! moves from holding a line to picking the right gap at speed.
+//!
+//! # The shipping game is Rails, on every device
+//!
+//! It was not always. Rails existed because the wheel game is unplayable with a
+//! thumb, so a phone got the lane game and a desktop kept the driving game, and
+//! this type existed to ask "is this a phone?" exactly once. **That split is
+//! gone.** Both surfaces now play Rails, and the profile is chosen by the
+//! composition root ([`crate::web`]) rather than derived from the device.
+//!
+//! The device predicate that used to make the choice — a `for_presentation`
+//! mirroring the stylesheet's `@media (pointer: coarse), (max-width: 820px)` —
+//! is deleted rather than left returning a constant. A function whose arguments
+//! no longer affect its answer is a lie with a test suite attached, and the
+//! lockstep it had to keep with the stylesheet was a maintenance obligation
+//! bought for a decision nothing makes any more. The stylesheet still switches
+//! *layout* at that width; layout is all it ever decided on its own.
+//!
+//! What remains device-shaped is not the game but the **input**: a phone drives
+//! Rails with lane buttons and swipes, a desktop drives the same Rails with
+//! `A`/`D`. Both arrive as [`crate::DriveCommand::lane_step`] and the simulation
+//! cannot tell them apart — which is exactly the property that let the desktop
+//! move onto rails without the sim learning a new word.
 //!
 //! # Why this is one value and not a scatter of `is_mobile` checks
 //!
 //! The temptation is to test "am I on a phone?" wherever it matters — in the
 //! controller, in the pad layout, in the HUD. That is how a codebase acquires
 //! six subtly different definitions of "mobile" that disagree on a tablet. This
-//! type exists so the question is asked **once**, at the platform edge, and
-//! every consequence is derived from the answer.
+//! type exists so the question is asked **once** and every consequence is
+//! derived from the answer.
 //!
 //! Everything the profile decides is listed here, and this list is the contract:
 //!
@@ -24,7 +44,7 @@
 //! | Lateral control | analogue steer, `-1..1` | discrete lane hops |
 //! | Chassis yaw | integrated from steering | derived from lane motion |
 //! | Handbrake / drifting | yes | no — there is no slide to catch |
-//! | On-screen controls | dynamic joystick + GAS/BRAKE/DRIFT/BOOST | LEFT/RIGHT + GAS/BOOST |
+//! | On-screen controls | dynamic joystick + GAS/BRAKE/DRIFT/BOOST | LEFT/RIGHT + GAS/BOOST, and swipe |
 //! | Off-road / traffic contact | arcade bump, run continues | arcade bump, run continues |
 //!
 //! The course, the traffic, the boost economy, the near-miss reward and the
@@ -32,15 +52,8 @@
 //! they are the same game on both. The profile changes how you steer, not what
 //! you are steering through.
 //!
-//! # The platform predicate lives with the profile
-//!
-//! [`PlayProfile::for_presentation`] is the single definition of "this is a
-//! phone", and it is deliberately the same condition the stylesheet uses to go
-//! full-screen (`@media (pointer: coarse), (max-width: 820px)` in `web/index.html`).
-//! If the two ever disagree you get the worst outcome available: a full-screen
-//! phone layout driving the desktop game, or a desktop layout with lane buttons.
-//! Keeping the predicate here — as a pure function of values the browser edge
-//! passes in — is what lets a native test assert the boundary without a browser.
+//! [`Wheel`]: PlayProfile::Wheel
+//! [`Rails`]: PlayProfile::Rails
 
 /// Which of the two games this session is playing.
 ///
@@ -55,24 +68,13 @@ pub enum PlayProfile {
     Rails,
 }
 
-/// The viewport width (CSS px) at or below which the page switches to its
-/// full-screen phone layout. Must stay in lockstep with the `max-width` in
-/// `web/index.html`'s media query — see the module docs.
-pub const PHONE_MAX_WIDTH: f32 = 820.0;
-
 impl PlayProfile {
-    /// The profile for a presentation of `viewport_width` CSS pixels on a device
-    /// whose primary pointer is `coarse` (a finger rather than a mouse).
+    /// The profile every shipping session plays, on every device.
     ///
-    /// Mirrors `@media (pointer: coarse), (max-width: 820px)` exactly, including
-    /// its `or`: a phone qualifies on the pointer alone even held in landscape
-    /// past 820 px, and a narrow desktop window qualifies on width alone, which
-    /// is what makes the lane game reachable on a development machine without a
-    /// phone in hand.
-    pub fn for_presentation(viewport_width: f32, coarse_pointer: bool) -> PlayProfile {
-        let narrow = viewport_width.is_finite() && viewport_width <= PHONE_MAX_WIDTH;
-        [PlayProfile::Wheel, PlayProfile::Rails][usize::from(coarse_pointer | narrow)]
-    }
+    /// Named rather than written inline at the one call site so that "what game
+    /// does the browser start?" is answerable from this file — the same reason
+    /// the device predicate it replaced lived here.
+    pub const SHIPPING: PlayProfile = PlayProfile::Rails;
 
     /// Whether the car is lane-locked rather than freely steered.
     pub const fn is_rails(self) -> bool {
@@ -90,47 +92,13 @@ impl PlayProfile {
 mod tests {
     use super::*;
 
+    /// The desktop and the phone play the same game. There is no viewport, no
+    /// pointer type and no device to consult — which is the whole content of
+    /// this change, so it is worth one assertion rather than none.
     #[test]
-    fn a_wide_mouse_driven_window_is_the_wheel_game() {
-        assert_eq!(
-            PlayProfile::for_presentation(1440.0, false),
-            PlayProfile::Wheel
-        );
-    }
-
-    #[test]
-    fn a_coarse_pointer_is_rails_even_when_the_window_is_wide() {
-        // A phone in landscape, or a tablet: wider than the width cut-off, but a
-        // finger cannot drive the wheel game. The media query's `or` is why this
-        // is Rails, and this test is what keeps the two in step.
-        assert_eq!(
-            PlayProfile::for_presentation(1180.0, true),
-            PlayProfile::Rails
-        );
-    }
-
-    #[test]
-    fn a_narrow_window_is_rails_even_with_a_mouse() {
-        // The development path: drag a desktop window narrow and you get the
-        // phone game, no device required.
-        assert_eq!(
-            PlayProfile::for_presentation(PHONE_MAX_WIDTH, false),
-            PlayProfile::Rails
-        );
-        assert_eq!(
-            PlayProfile::for_presentation(PHONE_MAX_WIDTH + 1.0, false),
-            PlayProfile::Wheel
-        );
-    }
-
-    #[test]
-    fn a_non_finite_width_is_not_treated_as_narrow() {
-        // `viewport()` falls back to a NaN-free default, but a browser that
-        // hands back a garbage width must not silently switch the game.
-        assert_eq!(
-            PlayProfile::for_presentation(f32::NAN, false),
-            PlayProfile::Wheel
-        );
+    fn every_device_ships_the_lane_game() {
+        assert_eq!(PlayProfile::SHIPPING, PlayProfile::Rails);
+        assert!(PlayProfile::SHIPPING.is_rails());
     }
 
     #[test]

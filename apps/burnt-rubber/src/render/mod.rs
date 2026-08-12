@@ -540,16 +540,23 @@ impl RaceScene {
             // while everything around it moves at the display's, which is a
             // 60 Hz judder on a 120 Hz screen.
             let Some((distance, lateral)) = sim.traffic_pose(index, alpha) else {
-                self.traffic.pose(app, index, None);
+                self.traffic.pose(app, index, None, 0.0);
                 continue;
             };
             let sample = track.interpolated_at(distance);
-            let position = sample.at_lateral(lateral);
+            // A wreck is off its wheels: lifted onto the arc it was thrown along
+            // and rolling about its own length. Everything else is flat on the
+            // road and takes the zero.
+            let (lift, tumble) = sim.traffic_wreck(index, alpha).unwrap_or((0.0, 0.0));
+            let position = sample
+                .at_lateral(lateral)
+                .add(sample.up.mul_scalar(lift));
             let forward = sample.flat_forward();
             self.traffic.pose(
                 app,
                 index,
                 Some((position, forward.x.atan2(forward.z), sample.up)),
+                tumble,
             );
         }
     }

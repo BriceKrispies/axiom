@@ -24,18 +24,42 @@ use crate::tuning::{CollisionTuning, Tuning, VehicleTuning, DT};
 use super::car::{CarState, Surface};
 use super::contact::ContactState;
 
-/// Position is integrated in this many equal sub-moves per fixed step, each with
-/// its own boundary check. Two sub-moves at the boosted top speed is under a
-/// metre of travel per check — far shorter than the car, the traffic, or the
-/// barrier's thickness, so nothing can pass through anything.
+/// The fewest sub-moves a fixed step is ever integrated in, each with its own
+/// boundary check.
 ///
-/// It is a **constant**, not a speed- or frame-rate-derived count: the number of
-/// substeps is part of the simulation's definition, so replay is exact.
+/// Off boost this is the whole answer: two sub-moves at the natural top speed is
+/// under a metre of travel per check — far shorter than the car, the traffic, or
+/// the barrier's thickness, so nothing can pass through anything.
 pub const POSITION_SUBSTEPS: u32 = 2;
 
+/// The furthest the car may travel in one sub-move (m).
+///
+/// A floor of two sub-moves stopped being enough the moment **boost stopped
+/// having a top speed** (see [`longitudinal`]): a fixed two-way split is under a
+/// metre each at the natural top speed and several metres each at the speed a
+/// long boost actually reaches, and a sub-move longer than the barrier is thick
+/// is a sub-move that can step straight over it. So the split is sized to the
+/// distance rather than to the clock, and this is the size.
+///
+/// It is derived from the car's own speed and **nothing else** — not the frame
+/// rate, not the wall clock — so the substep count remains part of the
+/// simulation's definition and replay is still exact.
+pub const MAX_SUB_MOVE: f32 = 1.1;
+
+/// The most sub-moves one step is ever split into, so that an absurd speed costs
+/// bounded work rather than an unbounded loop.
+pub const MAX_POSITION_SUBSTEPS: u32 = 32;
+
+/// How many sub-moves this step's planar travel needs.
+fn position_substeps(car: &CarState) -> u32 {
+    let needed = (car.speed() * DT / MAX_SUB_MOVE).ceil() as u32;
+    needed.clamp(POSITION_SUBSTEPS, MAX_POSITION_SUBSTEPS)
+}
+
 /// How far either side of the previous progress the re-localisation searches.
-/// One boosted step covers under 2 m; 80 m is a fifty-fold margin, which is what
-/// makes the bounded search safe rather than merely fast.
+/// A sub-move covers at most [`MAX_SUB_MOVE`] until the substep cap bites; 80 m
+/// is a wide margin either way, which is what makes the bounded search safe
+/// rather than merely fast.
 pub const LOCALISE_WINDOW: f32 = 80.0;
 
 /// Speed (m/s) below which steering authority is scaled down so a stationary car
@@ -136,7 +160,20 @@ pub fn step(
     let barrier_impact = integrate(car, track, vehicle, collision, contact);
     settle_onto_the_road(car, track, vehicle);
     classify_surface(car, track);
-    update_drift(car, vehicle);
+    // **A railed car never drifts**, and that is the profile's contract rather
+    // than a special case invented here: the lane game has no slide to catch, no
+    // handbrake to provoke one with, and no drift button on its pad.
+    //
+    // It has to be said explicitly because the detector cannot tell the two
+    // apart. `update_drift` asks one question — is the car moving sideways hard?
+    // — and a lane change is *nothing but* moving sideways hard: the crossing
+    // runs the lateral channel far above `drift_threshold` for its few frames.
+    // So every dodge raised the DRIFT banner and, worse, paid
+    // `drift_boost_rate` into the meter, quietly turning "tap left, tap right"
+    // into a boost printing press. The detector is right about the number and
+    // wrong about the car; the profile is what knows the difference.
+    (!on_rails).then(|| update_drift(car, vehicle));
+    car.drifting &= !on_rails;
     decay_impact(car);
 
     car.wheel_spin = (car.wheel_spin + car.forward_speed * DT / WHEEL_RADIUS)
@@ -328,12 +365,17 @@ fn longitudinal(
     // Airborne wheels drive nothing.
     let traction = if car.grounded { 1.0 } else { 0.0 };
 
-    let ceiling = tuning.top_speed
-        + if car.boosting {
-            tuning.boost_top_speed_bonus
-        } else {
-            0.0
-        };
+    // **Boost has no top speed.** Off boost the car has a ceiling and the taper
+    // below holds it there; on boost the ceiling is not raised, it is removed.
+    //
+    // That is a deliberate change of kind, and it is the same change of kind the
+    // rest of the power-up already makes: boost presses the throttle for you, it
+    // ignores the dirt, and now it ignores the speedometer too. What ends a boost
+    // is the meter emptying, not the car sliding up against a number — so how
+    // fast a run goes is decided by how much charge the driving earned, which is
+    // the loop the whole game is made of. Raising a bonus would have been a
+    // bigger number; removing the ceiling makes the meter the limit.
+    let ceiling = tuning.top_speed;
     let accel = tuning.accel
         + if car.boosting {
             tuning.boost_accel_bonus
@@ -360,7 +402,11 @@ fn longitudinal(
     // a car must never be a way to earn or spend boost, and it must never look
     // like one either (no widened field of view, no boost cue, no streaks).
     let recovered = 1.0 + collision.recovery_accel_gain * assist;
-    let headroom = (1.0 - (car.forward_speed.max(0.0) / ceiling).clamp(0.0, 1.0)).powf(ACCEL_CURVE);
+    let headroom = if car.boosting {
+        boost_headroom(car.forward_speed, tuning)
+    } else {
+        speed_taper(car.forward_speed, ceiling)
+    };
     car.forward_speed += accel * throttle * headroom * surface_scale * traction * recovered * DT;
 
     // Braking bleeds forward motion; once stopped, the same input reverses.
@@ -390,13 +436,74 @@ fn longitudinal(
     let resistance = tuning.rolling_resistance * DT * traction;
     car.forward_speed -= car.forward_speed.signum() * resistance.min(car.forward_speed.abs());
 
-    // A hard ceiling above the boosted top speed catches anything a collision or
-    // a downhill could otherwise add without bound.
-    let hard_ceiling = ceiling * SPEED_HEADROOM;
+    // A hard ceiling above the natural top speed catches anything a collision or
+    // a downhill could otherwise add without bound. It is a backstop on the
+    // *unintended*, so it is lifted for the one case that is intended: while
+    // boost is held there is no upper bound at all, and only the reverse limit
+    // underneath still applies.
+    let hard_ceiling = if car.boosting {
+        f32::INFINITY
+    } else {
+        ceiling * SPEED_HEADROOM
+    };
     car.forward_speed = car
         .forward_speed
         .clamp(-tuning.reverse_top_speed, hard_ceiling);
 }
+
+/// The fraction of full acceleration still available at `speed`, for a car with
+/// a top speed of `ceiling`.
+///
+/// This is what a ceiling *is*: not a clamp, but the pull fading out as the car
+/// approaches it. It reaches zero exactly at the ceiling, which is why an
+/// un-boosted car asymptotes there rather than arriving.
+fn speed_taper(speed: f32, ceiling: f32) -> f32 {
+    (1.0 - (speed.max(0.0) / ceiling).clamp(0.0, 1.0)).powf(ACCEL_CURVE)
+}
+
+/// The fraction of full acceleration available to a **boosting** car at `speed`.
+///
+/// Two regimes, and the join between them is the whole design.
+///
+/// * **Up to [`VehicleTuning::boost_reference_speed`]** it is the ordinary
+///   taper against that speed — so a boost still ramps the car to the speed it
+///   used to top out at, with the shape it always had. Nothing about the first
+///   part of a boost changed.
+/// * **Past it** the pull does not stop, it *thins*: what survives is
+///   [`BOOST_TAIL_PULL`] of the car's acceleration, decaying by a factor of `e`
+///   for every [`BOOST_TAIL_EFOLD`] m/s of excess.
+///
+/// An exponential decay in speed is precisely the law whose solution is
+/// logarithmic in time — `v(t) = reference + efold · ln(1 + kt)` — which is the
+/// intent stated as an equation rather than as a feel: the car keeps gaining,
+/// visibly, forever, and each successive 10 m/s costs more than the last. A
+/// constant surplus (which is what "no taper at all" is) would instead grow the
+/// speed *linearly* in time, and a held boost would leave the road behind.
+///
+/// The two regimes are joined with `max` rather than with a branch on speed, so
+/// the result is continuous and monotonically non-increasing by construction:
+/// the tail is flat until the reference and the taper is above it until they
+/// cross, a little before. There is no step in the acceleration for the player
+/// to feel, and no speed at which the pull momentarily vanishes.
+///
+/// This does not reinstate a cap. It does mean there is a speed at which this
+/// thinning pull is balanced by drag — which grows linearly and therefore always
+/// wins eventually — and that speed, not a clamp, is where a very long boost
+/// tops out.
+fn boost_headroom(speed: f32, tuning: &VehicleTuning) -> f32 {
+    let ramp = speed_taper(speed, tuning.boost_reference_speed);
+    let excess = (speed - tuning.boost_reference_speed).max(0.0);
+    let tail = BOOST_TAIL_PULL * (-excess / BOOST_TAIL_EFOLD).exp();
+    ramp.max(tail)
+}
+
+/// The share of a boosting car's acceleration that survives past
+/// [`VehicleTuning::boost_reference_speed`]. See [`boost_headroom`].
+const BOOST_TAIL_PULL: f32 = 0.30;
+
+/// How many m/s past [`VehicleTuning::boost_reference_speed`] it takes for the
+/// surviving pull to fall by a factor of `e`. See [`boost_headroom`].
+const BOOST_TAIL_EFOLD: f32 = 40.0;
 
 /// Exponent on the acceleration taper. Below 1 keeps real pull at high speed.
 const ACCEL_CURVE: f32 = 0.6;
@@ -404,8 +511,9 @@ const ACCEL_CURVE: f32 = 0.6;
 /// Forward speed below which the brake input becomes reverse (m/s).
 const REVERSE_THRESHOLD: f32 = 0.6;
 
-/// How far above the boosted top speed the hard clamp sits.
-const SPEED_HEADROOM: f32 = 1.12;
+/// How far above the natural top speed the hard clamp sits. It does not apply
+/// while boosting, which has no top speed for it to sit above.
+pub const SPEED_HEADROOM: f32 = 1.12;
 
 /// Bleed the lateral velocity according to the current grip.
 fn lateral_grip(car: &mut CarState, command: DriveCommand, tuning: &VehicleTuning) {
@@ -473,9 +581,10 @@ fn integrate(
     collision: &CollisionTuning,
     contact: &mut ContactState,
 ) -> Option<super::contact::Impact> {
-    let sub_dt = DT / POSITION_SUBSTEPS as f32;
+    let substeps = position_substeps(car);
+    let sub_dt = DT / substeps as f32;
     let mut strongest: Option<super::contact::Impact> = None;
-    for _ in 0..POSITION_SUBSTEPS {
+    for _ in 0..substeps {
         // The planar velocity is re-read each sub-move, so a barrier resolved in
         // the first one actually changes where the second one goes — which is
         // what stops a fast car from being pushed out of a wall and straight
@@ -1369,7 +1478,7 @@ mod tests {
     }
 
     #[test]
-    fn boost_accelerates_harder_and_raises_the_ceiling() {
+    fn boost_accelerates_harder_and_removes_the_ceiling() {
         let (track, car, t) = fixture();
         // Straight-line pull, off the line.
         let launch = |boost: bool| {
@@ -1402,6 +1511,165 @@ mod tests {
             best > t.top_speed,
             "boost exceeds the natural top speed: {best} vs {}",
             t.top_speed
+        );
+        // And it is genuinely *uncapped*, not raised: a long hold carries the car
+        // well past the speed it ramps to, and past the hard clamp that still
+        // applies off boost.
+        assert!(
+            best > t.boost_reference_speed * 1.4,
+            "boost is still capped near its reference: {best} m/s"
+        );
+        assert!(c.is_finite(), "and nothing ran away to infinity");
+    }
+
+    /// **The shape of the tail**, which is the point of it: past the reference
+    /// speed the car keeps gaining forever, and each successive gain is smaller
+    /// than the last. That is what makes it a curve rather than a ramp.
+    ///
+    /// Asserted on the acceleration law rather than on a lap, because a lap
+    /// measures the driver too.
+    #[test]
+    fn past_its_reference_speed_boost_thins_out_instead_of_stopping() {
+        let t = VehicleTuning::DEFAULT;
+        let at = |speed: f32| boost_headroom(speed, &t);
+
+        // The ramp up to the reference is the old ceiling's, unchanged.
+        assert!((at(0.0) - 1.0).abs() < 1.0e-6, "full pull off the line");
+        assert!(at(60.0) < at(20.0), "and it tapers on the way up");
+
+        // Past the reference it is never zero — a boost that reached its
+        // reference speed and stopped pulling would be the old ceiling wearing
+        // a different name.
+        let over = [0.0f32, 20.0, 60.0, 200.0, 1_000.0];
+        over.iter().for_each(|excess| {
+            assert!(
+                at(t.boost_reference_speed + excess) > 0.0,
+                "the pull died {excess} m/s past the reference"
+            );
+        });
+
+        // And it decays: every `BOOST_TAIL_EFOLD` m/s costs a factor of e.
+        let knee = at(t.boost_reference_speed);
+        let one_efold = at(t.boost_reference_speed + BOOST_TAIL_EFOLD);
+        assert!(
+            (one_efold - knee / std::f32::consts::E).abs() < 1.0e-4,
+            "one e-fold should be {} , got {one_efold}",
+            knee / std::f32::consts::E
+        );
+
+        // Continuity across the join, which is what stops the player feeling a
+        // step in the throttle: sample densely either side and require no jump.
+        let samples: Vec<f32> = (0..400).map(|i| at(i as f32)).collect();
+        samples.windows(2).for_each(|w| {
+            assert!(w[1] <= w[0] + 1.0e-6, "the pull rose with speed: {w:?}");
+            assert!(w[0] - w[1] < 0.05, "a step in the pull: {w:?}");
+        });
+    }
+
+    /// Logarithmic in *time*, stated the way a player would notice it: hold
+    /// boost from the reference speed and the second ten seconds must add
+    /// meaningfully less than the first. A constant surplus — the shape this
+    /// replaced — would add exactly the same amount each time.
+    #[test]
+    fn a_held_boost_gains_speed_logarithmically_not_linearly() {
+        let t = VehicleTuning::DEFAULT;
+        let collision = CollisionTuning::DEFAULT;
+        // The speed law on its own, with no track under it: a lap would measure
+        // the driver and the corners as well, and the claim here is about the
+        // curve.
+        let mut c = CarState::parked(Vec3::ZERO, 0.0);
+        c.boosting = true;
+        c.forward_speed = t.boost_reference_speed;
+        let boost = DriveCommand { boost: true, ..DriveCommand::FLAT_OUT };
+
+        let mut run = |steps: u32| {
+            let before = c.forward_speed;
+            (0..steps).for_each(|_| {
+                longitudinal(&mut c, boost, &t, &collision, 0.0);
+            });
+            c.forward_speed - before
+        };
+        let first = run(600);
+        let second = run(600);
+        let third = run(600);
+
+        assert!(first > 5.0, "the first ten seconds are a real gain: {first} m/s");
+        assert!(
+            second < first * 0.6,
+            "the gain barely slowed: {first} then {second} m/s"
+        );
+        assert!(
+            third < second,
+            "and it keeps slowing: {second} then {third} m/s"
+        );
+        assert!(third > 0.0, "but it never stops: {third} m/s");
+    }
+
+    /// The clamp that *does* still apply, and the one that no longer does.
+    ///
+    /// A car pushed absurdly fast is dragged back under the hard ceiling within
+    /// a step off boost, and left exactly where it is on boost. This is the
+    /// whole of the change stated as two steps.
+    #[test]
+    fn the_hard_ceiling_applies_off_boost_and_not_on_it() {
+        let (track, car, t) = fixture();
+        let absurd = t.top_speed * 10.0;
+
+        let mut braked = car;
+        braked.forward_speed = absurd;
+        once(&mut braked, DriveCommand::FLAT_OUT, &track, &t, false);
+        assert!(
+            braked.forward_speed <= t.top_speed * SPEED_HEADROOM,
+            "off boost the clamp still catches it: {}",
+            braked.forward_speed
+        );
+
+        let mut boosting = car;
+        boosting.forward_speed = absurd;
+        once(
+            &mut boosting,
+            DriveCommand { boost: true, ..DriveCommand::FLAT_OUT },
+            &track,
+            &t,
+            true,
+        );
+        // Not yanked back to the clamp — left where it is, for drag to bleed off
+        // in its own time. This is the difference between "no ceiling" and "a
+        // higher ceiling", and one step is nowhere near enough drag to hide it.
+        assert!(
+            boosting.forward_speed > absurd * 0.99,
+            "on boost there is no clamp: {} vs {absurd}",
+            boosting.forward_speed
+        );
+    }
+
+    /// The sub-move split has to grow with the speed, or the boundary checks the
+    /// integrator exists for get further apart exactly as the car gets faster.
+    #[test]
+    fn the_position_split_bounds_the_distance_not_the_time() {
+        let mut car = CarState::parked(Vec3::ZERO, 0.0);
+        assert_eq!(position_substeps(&car), POSITION_SUBSTEPS, "a floor at rest");
+
+        car.forward_speed = VehicleTuning::DEFAULT.top_speed;
+        assert_eq!(
+            position_substeps(&car),
+            POSITION_SUBSTEPS,
+            "the natural top speed still fits in the floor, so replay is unchanged"
+        );
+
+        car.forward_speed = 400.0;
+        let many = position_substeps(&car);
+        assert!(many > POSITION_SUBSTEPS, "a boosted speed splits further: {many}");
+        assert!(
+            400.0 * DT / many as f32 <= MAX_SUB_MOVE,
+            "and each sub-move stays under {MAX_SUB_MOVE} m"
+        );
+
+        car.forward_speed = 1.0e6;
+        assert_eq!(
+            position_substeps(&car),
+            MAX_POSITION_SUBSTEPS,
+            "an absurd speed costs bounded work, not an unbounded loop"
         );
     }
 

@@ -38,9 +38,14 @@ pub enum PadButton {
     Boost,
     /// Reset to the last safe point.
     Reset,
-    /// Hop one lane left. Rails only — the wheel game steers with the stick.
+    /// Hop one lane left.
+    ///
+    /// No layout places this any more — it is the name the **swipe** presents
+    /// itself under, and nothing else. Keeping it in this vocabulary rather than
+    /// hard-coding `"KeyA"` at the gesture is what keeps [`PadButton::key`] the
+    /// single table mapping a touch intent to the action bindings.
     LaneLeft,
-    /// Hop one lane right. Rails only.
+    /// Hop one lane right. Gesture-only, exactly as [`PadButton::LaneLeft`].
     LaneRight,
 }
 
@@ -175,13 +180,32 @@ impl PadLayout {
         ][usize::from(profile.is_rails())](width, height)
     }
 
-    /// The rails pad: lane buttons under the left thumb, GAS/BOOST/BRAKE under
-    /// the right, and no joystick.
+    /// The rails pad: **one button**. BOOST, under the left thumb.
     ///
-    /// DRIFT is absent on purpose rather than disabled — a railed car has no
-    /// slide to provoke, so a handbrake button would be a control that visibly
-    /// does nothing. BRAKE stays: longitudinal force is shared between the two
-    /// games, so it still slows the car exactly as it always did.
+    /// Everything else went, and each one for its own reason rather than for
+    /// tidiness:
+    ///
+    /// * **LEFT / RIGHT** — replaced outright by the swipe. Two buttons and a
+    ///   gesture doing the same job is two ways to ask for one thing, and the
+    ///   buttons were the worse one: they sat in a fixed corner while the swipe
+    ///   works wherever the thumb already is.
+    /// * **GAS** — a button whose correct state is "held" for the entire race is
+    ///   not a control, it is a tax. The lane game holds the throttle itself
+    ///   (`RaceSim::for_profile`), so there is nothing left for the button to say.
+    /// * **BRAKE** — with the throttle held, braking is the one input that makes
+    ///   the game strictly harder to win at: the race is a time, and the boost
+    ///   economy is earned by threading traffic at speed. Slowing down was never
+    ///   an answer to anything the lane game asks.
+    /// * **DRIFT** — already absent; a railed car has no slide to provoke.
+    ///
+    /// What is left is the shape the game actually has: **the road decides
+    /// where you can go, the swipe decides which lane, and BOOST decides how
+    /// fast.** One button, and it is the one the whole reward loop feeds.
+    ///
+    /// It sits bottom-**left** because the swipe is now the busy hand's job and
+    /// the two should not be the same thumb. It is drawn a full unit — the size
+    /// GAS used to be — because a lone control on a phone screen should be the
+    /// thing you cannot miss.
     pub fn rails_for_viewport(width: f32, height: f32) -> PadLayout {
         let viewport = Vec2::new(width.max(1.0), height.max(1.0));
         let unit = (viewport.x.min(viewport.y) * UNIT_FRACTION).clamp(UNIT_MIN, UNIT_MAX);
@@ -190,35 +214,15 @@ impl PadLayout {
         let right = viewport.x - margin;
         let bottom = viewport.y - bottom_strip;
         let left = margin;
-        // The lane buttons are the primary control and are sized like the
-        // accelerator, side by side so a thumb can roll between them without
-        // looking. They sit at the bottom-left, mirroring GAS at bottom-right.
         let slots = vec![
             PadSlot {
-                button: PadButton::LaneLeft,
+                button: PadButton::Boost,
                 centre: Vec2::new(left + unit, bottom - unit),
                 radius: unit,
             },
-            PadSlot {
-                button: PadButton::LaneRight,
-                centre: Vec2::new(left + unit * 3.15, bottom - unit),
-                radius: unit,
-            },
-            PadSlot {
-                button: PadButton::Accelerate,
-                centre: Vec2::new(right - unit, bottom - unit),
-                radius: unit,
-            },
-            PadSlot {
-                button: PadButton::Boost,
-                centre: Vec2::new(right - unit * 1.05, bottom - unit * 2.90),
-                radius: unit * 0.74,
-            },
-            PadSlot {
-                button: PadButton::Brake,
-                centre: Vec2::new(right - unit * 2.95, bottom - unit * 2.60),
-                radius: unit * 0.66,
-            },
+            // RESET stays, on the far side from BOOST. It is not a driving
+            // control — it is the way out of a car wedged against a barrier —
+            // and a run with no way to un-stick itself is a run that ends there.
             PadSlot {
                 button: PadButton::Reset,
                 centre: Vec2::new(right - unit * 0.6, margin + unit * 0.6),
@@ -356,6 +360,49 @@ const STEER_ZONE_TOP: f32 = 0.28;
 /// Fraction of the stick radius inside which steering reads as centred.
 const STICK_DEADZONE: f32 = 0.14;
 
+/// How far across the screen a finger must travel to hop one lane, in layout
+/// units. See [`TouchControls::drag_swipe`].
+///
+/// Sized in units rather than pixels for the same reason every other distance
+/// here is: a swipe has to feel the same on a 4-inch phone and a tablet, and a
+/// unit is already "one thumb's worth" on both. At the unit's clamps this is a
+/// 16..31 px flick — far enough that the jitter of a tap (a few px) cannot
+/// reach it, short enough that the lane changes near the *start* of the flick
+/// rather than at the end of it.
+///
+/// It used to be twice this, and lowering it is not a taste change — it is what
+/// one-lane-per-gesture bought. While a held finger could keep hopping, a
+/// too-eager threshold was dangerous: it did not cost you a lane, it cost you
+/// however many lanes the rest of the drag crossed, which at racing speed is a
+/// barrier. Now the worst a false positive can do is one lane, and the gesture
+/// is spent. A cheaper mistake is allowed to be a more sensitive one.
+const SWIPE_UNITS: f32 = 0.4;
+
+/// How much more horizontal than vertical a drag must be to read as a lane
+/// swipe. Anything flatter than this is someone dragging up or down the screen
+/// and is not asking for a lane.
+const SWIPE_HORIZONTAL_BIAS: f32 = 1.2;
+
+/// A finger that is not on a button and not on the stick, tracked in case it
+/// turns into a lane swipe.
+///
+/// It is **consumed** by the hop it fires: one finger down is one lane, however
+/// far it goes afterwards, and the next lane costs a lift and a new flick.
+///
+/// That is the whole gesture, and it is deliberately not the obvious one. The
+/// obvious one re-measures from wherever the last hop fired, so a long drag
+/// pays a lane per threshold — which reads well on paper and badly in the hand:
+/// a flick does not stop at the moment the player stopped meaning it, so a
+/// single decisive swipe slides the car across two or three lanes and into
+/// whatever is in the third. "One flick, one lane" is a gesture the player can
+/// aim; "one lane per 16 px of follow-through" is one they can only approximate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SwipeTrack {
+    pointer: i32,
+    /// Where the finger landed. Fixed for the life of the gesture.
+    origin: Vec2,
+}
+
 /// The live joystick.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VirtualStick {
@@ -375,6 +422,20 @@ pub struct TouchControls {
     stick: Option<VirtualStick>,
     /// Held buttons, each with the pointer holding it.
     held: Vec<(PadButton, i32)>,
+    /// The finger that might be swiping, if one is down off the buttons.
+    swipe: Option<SwipeTrack>,
+    /// Lane hops a swipe has asked for and no frame has taken yet.
+    ///
+    /// A swipe fires from a pointer event, which happens whenever the browser
+    /// feels like it; a command is built once a frame. Queueing the hops here
+    /// rather than steering directly is what stops a flick between two frames
+    /// from being dropped, and what stops a flick that spans four frames from
+    /// being counted four times.
+    pending_swipe: Vec<PadButton>,
+    /// Whether the previous frame delivered a swipe token, so this one must not.
+    /// See [`TouchControls::frame_keys`] — a token on two consecutive frames is
+    /// one held key, not two presses.
+    swipe_emitted: bool,
     /// Set by the first touch, and never cleared: once a device has been touched
     /// it is a touch device, and the controls stay up.
     engaged: bool,
@@ -393,6 +454,9 @@ impl TouchControls {
             layout: PadLayout::for_profile(width, height, profile),
             stick: None,
             held: Vec::new(),
+            swipe: None,
+            pending_swipe: Vec::new(),
+            swipe_emitted: false,
             engaged: false,
         }
     }
@@ -406,6 +470,9 @@ impl TouchControls {
             self.layout = layout;
             self.stick = None;
             self.held.clear();
+            // A swipe measured against the old viewport means nothing against
+            // the new one; the hops it already earned are still owed.
+            self.swipe = None;
         }
     }
 
@@ -452,11 +519,33 @@ impl TouchControls {
                 knob: point,
                 pointer,
             });
+            return;
+        }
+        // Anywhere else on a rails screen, a finger is a potential lane swipe.
+        //
+        // Deliberately the *whole* screen rather than a gesture zone. The lane
+        // buttons are still there and still the precise control; a swipe is the
+        // one you reach for without looking, mid-corner, with the hand that is
+        // not on the accelerator — and a swipe that only works in a rectangle
+        // the player cannot see is a swipe that reads as broken half the time.
+        // Buttons win where they overlap, because `press` has already returned
+        // by the time this runs.
+        if self.profile.is_rails() {
+            self.swipe = Some(SwipeTrack {
+                pointer,
+                origin: point,
+            });
         }
     }
 
     /// A pointer moved to `point`.
+    ///
+    /// Drives whichever of the two lateral gestures this pointer owns: the
+    /// joystick on the wheel game, the lane swipe on rails. They are mutually
+    /// exclusive by construction — [`Self::press`] starts exactly one — so
+    /// there is no precedence rule to get wrong.
     pub fn drag(&mut self, pointer: i32, point: Vec2) {
+        self.drag_swipe(pointer, point);
         let Some(stick) = self.stick.as_mut() else {
             return;
         };
@@ -479,11 +568,54 @@ impl TouchControls {
         );
     }
 
+    /// Advance the lane swipe: the moment the finger has travelled far enough
+    /// sideways, queue **one** hop and end the gesture.
+    ///
+    /// The two conditions are the whole recogniser. **Distance** keeps a tap
+    /// from hopping a lane — a thumb moves a few pixels just being lifted, and a
+    /// game where a mis-registered tap changes lane at 600 km/h is a game that
+    /// feels possessed. **Horizontal dominance** keeps a drag up or down the
+    /// screen from being read as a lateral intent it plainly is not.
+    ///
+    /// Firing on the *first* move that clears the threshold, rather than on the
+    /// finger lifting, is what makes the lane change land while the flick is
+    /// still happening instead of after it. The rest of the gesture — the
+    /// follow-through, the finger coming to rest, the lift — is already
+    /// irrelevant by then, which is exactly the point: the player has committed
+    /// and the car has already gone.
+    fn drag_swipe(&mut self, pointer: i32, point: Vec2) {
+        let threshold = self.layout.unit * SWIPE_UNITS;
+        let Some(swipe) = self.swipe else {
+            return;
+        };
+        if swipe.pointer != pointer {
+            return;
+        }
+        let dx = point.x - swipe.origin.x;
+        let dy = point.y - swipe.origin.y;
+        if dx.abs() < threshold || dx.abs() < dy.abs() * SWIPE_HORIZONTAL_BIAS {
+            return;
+        }
+        self.pending_swipe.push(if dx > 0.0 {
+            PadButton::LaneRight
+        } else {
+            PadButton::LaneLeft
+        });
+        // Spent. Everything this finger does from here is follow-through, and
+        // the next lane costs a lift and a new flick.
+        self.swipe = None;
+    }
+
     /// A pointer lifted.
     pub fn release(&mut self, pointer: i32) {
         self.held.retain(|(_, p)| *p != pointer);
         if self.stick.map(|s| s.pointer) == Some(pointer) {
             self.stick = None;
+        }
+        // The hops it already earned survive: they are owed to the player, not
+        // to the finger. Only the tracking stops.
+        if self.swipe.map(|s| s.pointer) == Some(pointer) {
+            self.swipe = None;
         }
     }
 
@@ -491,6 +623,7 @@ impl TouchControls {
     pub fn release_all(&mut self) {
         self.held.clear();
         self.stick = None;
+        self.swipe = None;
     }
 
     /// The steering value, `-1..1`.
@@ -520,6 +653,55 @@ impl TouchControls {
             .map(|button| button.key())
             .collect()
     }
+
+    /// One frame's key tokens: the held buttons, plus **one** queued swipe hop.
+    ///
+    /// Call exactly once per frame — it consumes what it reports.
+    ///
+    /// A swipe arrives as the same `KeyA`/`KeyD` token the lane buttons and the
+    /// keyboard present, which is what keeps the promise this module opens with:
+    /// there is one binding table and one command path, and the simulation
+    /// cannot tell a thumb from a keyboard. [`crate::controls::Controls`] reads
+    /// the token's *press edge* as a lane hop, so the token has to appear for a
+    /// frame and then be gone — which is precisely what "consume one queued hop
+    /// per frame" produces.
+    ///
+    /// Draining one at a time rather than all of them is the same requirement
+    /// read from the other end: two hops emitted in one frame would be one press
+    /// edge and the second lane change would be silently eaten.
+    ///
+    /// **And one frame of silence between them, for exactly the same reason.**
+    /// A token present on two consecutive frames is a key being *held*, not a
+    /// key pressed twice — so a queue drained on every frame would deliver two
+    /// flicks as one lane change and look like a dropped input. The gap frame is
+    /// what makes the second press a press.
+    ///
+    /// A gesture only ever queues one hop ([`Self::drag_swipe`]), so in practice
+    /// the queue holds one and this costs nothing: the flick's lane change goes
+    /// out on the very next frame. The queue earns its keep when two flicks land
+    /// inside 16 ms — the second waits a frame rather than being swallowed.
+    ///
+    /// Nothing can contend for the token: the lane buttons that used to share
+    /// it are gone from the pad, so a swipe is the only thing that presses
+    /// `KeyA`/`KeyD` on a touchscreen.
+    pub fn frame_keys(&mut self) -> Vec<&'static str> {
+        let mut keys = self.keys();
+        let hop = (!self.swipe_emitted)
+            .then(|| self.pending_swipe.first().copied())
+            .flatten();
+        hop.iter().for_each(|_| {
+            self.pending_swipe.remove(0);
+        });
+        self.swipe_emitted = hop.is_some();
+        keys.extend(hop.map(PadButton::key));
+        keys
+    }
+
+    /// How many swipe hops are waiting to be taken. Diagnostics and tests; the
+    /// game reads them through [`Self::frame_keys`].
+    pub fn pending_swipes(&self) -> usize {
+        self.pending_swipe.len()
+    }
 }
 
 #[cfg(test)]
@@ -535,6 +717,227 @@ mod tests {
     /// in, and the one the layout has to work in.
     fn landscape() -> TouchControls {
         TouchControls::new(844.0, 390.0)
+    }
+
+    /// A landscape phone playing the shipping game.
+    fn rails_phone() -> TouchControls {
+        TouchControls::for_profile(844.0, 390.0, PlayProfile::Rails)
+    }
+
+    /// A point in open road — no button under it, and clear of the pad.
+    fn open_road(touch: &TouchControls) -> Vec2 {
+        let point = Vec2::new(touch.layout().viewport.x * 0.5, touch.layout().viewport.y * 0.35);
+        assert!(touch.layout().hit(point).is_none(), "the fixture must be clear of the pad");
+        point
+    }
+
+    /// One flick of `dx` pixels from `from`, delivered as a press, a move and a
+    /// lift — the three events a browser actually sends.
+    fn flick(touch: &mut TouchControls, from: Vec2, dx: f32, dy: f32) {
+        touch.press(1, from);
+        touch.drag(1, Vec2::new(from.x + dx, from.y + dy));
+        touch.release(1);
+    }
+
+    #[test]
+    fn a_swipe_right_hops_a_lane_right_and_a_swipe_left_hops_left() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        let far = touch.layout().unit * SWIPE_UNITS + 4.0;
+
+        flick(&mut touch, from, far, 0.0);
+        assert_eq!(touch.frame_keys(), vec![PadButton::LaneRight.key()]);
+        assert_eq!(touch.pending_swipes(), 0, "and it is spent");
+
+        flick(&mut touch, from, -far, 0.0);
+        // The gap frame that lets the last token go up — see `frame_keys`.
+        assert!(touch.frame_keys().is_empty());
+        assert_eq!(touch.frame_keys(), vec![PadButton::LaneLeft.key()]);
+    }
+
+    /// The token has to be there for exactly one frame, or the press edge the
+    /// action table reads never happens — see [`TouchControls::frame_keys`].
+    #[test]
+    fn a_swipes_key_lasts_exactly_one_frame() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        let far = touch.layout().unit * SWIPE_UNITS + 4.0;
+        flick(&mut touch, from, far, 0.0);
+        assert_eq!(touch.frame_keys().len(), 1, "down on this frame");
+        assert!(touch.frame_keys().is_empty(), "and up on the next");
+    }
+
+    /// A tap is not a swipe. A thumb moves a few pixels just being lifted, and a
+    /// game that changes lane at 600 km/h because of that is a game that feels
+    /// possessed.
+    #[test]
+    fn a_tap_and_a_short_drag_ask_for_nothing() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        let just_short = touch.layout().unit * SWIPE_UNITS - 2.0;
+        flick(&mut touch, from, 0.0, 0.0);
+        flick(&mut touch, from, just_short, 0.0);
+        assert_eq!(touch.pending_swipes(), 0);
+        assert!(touch.frame_keys().is_empty());
+    }
+
+    /// Dragging up or down the screen is not a lateral intent, however far it
+    /// happens to wander sideways on the way.
+    #[test]
+    fn a_mostly_vertical_drag_is_not_a_lane_swipe() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        let far = touch.layout().unit * SWIPE_UNITS + 4.0;
+        flick(&mut touch, from, far, far * SWIPE_HORIZONTAL_BIAS + 8.0);
+        assert_eq!(touch.pending_swipes(), 0, "that was a drag, not a flick");
+    }
+
+    /// **One flick, one lane.** A finger dragged clean across the screen is
+    /// still a single lane change: the gesture is spent the moment it fires, and
+    /// the follow-through — which is most of a real flick — asks for nothing.
+    #[test]
+    fn one_swipe_is_one_lane_however_far_the_finger_goes() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        let step = touch.layout().unit * SWIPE_UNITS + 2.0;
+        touch.press(1, from);
+        // Six thresholds' worth of travel, in six separate moves, without ever
+        // lifting. Under the gesture this replaced that was six lanes.
+        (1..=6).for_each(|n| {
+            touch.drag(1, Vec2::new(from.x + step * n as f32, from.y));
+        });
+        assert_eq!(touch.pending_swipes(), 1, "a held swipe is still one lane");
+
+        assert_eq!(touch.frame_keys(), vec![PadButton::LaneRight.key()]);
+        assert!(touch.frame_keys().is_empty());
+        assert!(touch.frame_keys().is_empty(), "and nothing more is owed");
+    }
+
+    /// Dragging back the other way without lifting does not get a second lane
+    /// either — in either direction, the finger is done.
+    #[test]
+    fn a_swipe_back_the_other_way_needs_a_new_finger() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        let step = touch.layout().unit * SWIPE_UNITS + 2.0;
+        touch.press(1, from);
+        touch.drag(1, Vec2::new(from.x + step, from.y));
+        touch.drag(1, Vec2::new(from.x - step * 3.0, from.y));
+        assert_eq!(touch.pending_swipes(), 1);
+
+        // Lift, flick again: now it counts.
+        touch.release(1);
+        touch.press(1, from);
+        touch.drag(1, Vec2::new(from.x - step, from.y));
+        assert_eq!(touch.pending_swipes(), 2);
+    }
+
+    /// The lane has to change while the flick is still happening. The recogniser
+    /// fires on the first move that clears the threshold, not on the lift, so
+    /// the hop is already queued before the finger comes off the glass.
+    #[test]
+    fn the_lane_is_asked_for_mid_flick_rather_than_on_release() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        touch.press(1, from);
+        touch.drag(1, Vec2::new(from.x + touch.layout().unit * SWIPE_UNITS + 1.0, from.y));
+        assert_eq!(touch.pending_swipes(), 1, "queued before the lift");
+        // And it is out on the very next frame — no queue to wait behind.
+        assert_eq!(touch.frame_keys(), vec![PadButton::LaneRight.key()]);
+    }
+
+    /// The gap frame is the press-edge contract, so it is asserted as a property
+    /// rather than as one hand-counted sequence: however many flicks land, no
+    /// two consecutive frames may both carry the token, and none is lost.
+    #[test]
+    fn no_two_consecutive_frames_carry_a_swipe_token() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        let far = touch.layout().unit * SWIPE_UNITS + 2.0;
+        // Five separate flicks, all landing before a single frame is drawn.
+        (0..5).for_each(|_| flick(&mut touch, from, far, 0.0));
+        assert_eq!(touch.pending_swipes(), 5);
+
+        let frames: Vec<bool> = (0..12).map(|_| !touch.frame_keys().is_empty()).collect();
+        assert!(
+            frames.windows(2).all(|w| !(w[0] && w[1])),
+            "a token was held across two frames: {frames:?}"
+        );
+        assert_eq!(
+            frames.iter().filter(|carried| **carried).count(),
+            5,
+            "every queued hop is delivered, and none twice: {frames:?}"
+        );
+    }
+
+    /// Lifting the finger does not cancel what it already earned: the hop is
+    /// owed to the player, not to the pointer.
+    #[test]
+    fn a_hop_survives_the_finger_lifting_before_the_next_frame() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        let far = touch.layout().unit * SWIPE_UNITS + 4.0;
+        touch.press(1, from);
+        touch.drag(1, Vec2::new(from.x + far, from.y));
+        touch.release(1);
+        assert_eq!(touch.pending_swipes(), 1);
+        assert_eq!(touch.frame_keys(), vec![PadButton::LaneRight.key()]);
+    }
+
+    /// A finger that starts on a button is operating that button. BOOST is a
+    /// *held* control and the swipe covers the whole screen, so a thumb that
+    /// slides while holding boost must not also be changing lane.
+    #[test]
+    fn a_drag_that_starts_on_a_button_holds_the_button_rather_than_swiping() {
+        let mut touch = rails_phone();
+        let boost = touch
+            .layout()
+            .slot(PadButton::Boost)
+            .expect("the rails pad has a boost button")
+            .centre;
+        touch.press(1, boost);
+        touch.drag(1, Vec2::new(boost.x + 400.0, boost.y));
+        assert_eq!(touch.pending_swipes(), 0);
+        assert!(touch.is_held(PadButton::Boost), "and it is still boosting");
+    }
+
+    /// The wheel game's lateral intent is the stick. A swipe there would be a
+    /// second, contradictory way to ask for the same thing — and `lane_step` is
+    /// not even read, so it would be a control that silently does nothing.
+    #[test]
+    fn the_wheel_game_has_no_swipe() {
+        let mut touch = landscape();
+        // The right half of the screen, so the steering zone does not claim it.
+        let from = Vec2::new(touch.layout().viewport.x * 0.8, touch.layout().viewport.y * 0.35);
+        assert!(touch.layout().hit(from).is_none());
+        let far = touch.layout().unit * SWIPE_UNITS + 40.0;
+        flick(&mut touch, from, far, 0.0);
+        assert_eq!(touch.pending_swipes(), 0);
+    }
+
+    /// The stick and the swipe never both run: a rails screen has no stick, and
+    /// a wheel screen never starts a swipe.
+    #[test]
+    fn the_two_lateral_gestures_are_mutually_exclusive() {
+        let mut rails = rails_phone();
+        let from = open_road(&rails);
+        rails.press(1, from);
+        assert!(rails.stick().is_none(), "no stick on rails");
+        rails.drag(1, Vec2::new(from.x + 200.0, from.y));
+        assert!(rails.stick().is_none());
+        assert!(rails.pending_swipes() > 0);
+    }
+
+    /// A rotated phone has moved every button; a swipe measured against the old
+    /// frame means nothing against the new one.
+    #[test]
+    fn resizing_drops_a_swipe_in_progress() {
+        let mut touch = rails_phone();
+        let from = open_road(&touch);
+        touch.press(1, from);
+        touch.resize(390.0, 844.0);
+        touch.drag(1, Vec2::new(from.x + 400.0, from.y));
+        assert_eq!(touch.pending_swipes(), 0);
     }
 
     #[test]
@@ -824,27 +1227,42 @@ mod tests {
         touch.release_all();
     }
 
+    /// **The rails pad is one driving control.** Every absence below is a
+    /// decision the game makes for the player rather than a control it forgot.
     #[test]
-    fn the_rails_pad_swaps_the_stick_for_lane_buttons() {
+    fn the_rails_pad_is_boost_and_nothing_else() {
         let layout = PadLayout::for_profile(390.0, 844.0, PlayProfile::Rails);
+        assert!(!layout.stick_enabled, "rails has no joystick");
+
+        let boost = layout.slot(PadButton::Boost).expect("BOOST is the control");
         assert!(
-            !layout.stick_enabled,
-            "rails has no joystick to contradict the lane buttons"
+            boost.centre.x < layout.viewport.x * 0.5,
+            "BOOST lives on the left, clear of the hand that swipes: {}",
+            boost.centre.x
         );
-        assert!(layout.slot(PadButton::LaneLeft).is_some());
-        assert!(layout.slot(PadButton::LaneRight).is_some());
-        // The two controls the brief keeps.
-        assert!(layout.slot(PadButton::Accelerate).is_some());
-        assert!(layout.slot(PadButton::Boost).is_some());
-        // A railed car cannot slide, so a drift button would do nothing.
-        assert!(
-            layout.slot(PadButton::Handbrake).is_none(),
-            "DRIFT is absent on rails, not merely inert"
-        );
+
+        // Lane hops are the swipe's job, the throttle is held for the player,
+        // braking is not an answer to anything the lane game asks, and a railed
+        // car has no slide to provoke.
+        [
+            PadButton::LaneLeft,
+            PadButton::LaneRight,
+            PadButton::Accelerate,
+            PadButton::Brake,
+            PadButton::Handbrake,
+        ]
+        .iter()
+        .for_each(|gone| {
+            assert!(
+                layout.slot(*gone).is_none(),
+                "{gone:?} is absent from the rails pad, not merely inert"
+            );
+        });
+
         // No stick means no steering zone, so a stray finger on the left of the
         // screen cannot start one.
         assert!(!layout.in_steering_zone(Vec2::new(10.0, 800.0)));
-        // The lane buttons must not overlap each other or anything else.
+        // Nothing overlaps anything.
         layout.slots.iter().enumerate().for_each(|(i, a)| {
             layout.slots.iter().skip(i + 1).for_each(|b| {
                 let gap = (a.centre.x - b.centre.x).hypot(a.centre.y - b.centre.y);

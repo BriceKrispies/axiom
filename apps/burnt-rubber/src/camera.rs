@@ -85,6 +85,14 @@ pub struct CameraDrive {
     pub boosting: bool,
     /// A collision resolved this step, if there was one.
     pub impact: Option<ImpactImpulse>,
+    /// Whether the car's lateral position is *chosen* rather than driven — the
+    /// lane game.
+    ///
+    /// It changes what the camera is framing. Chasing the car is right when the
+    /// car's line is the thing the player is producing; on rails the line is
+    /// picked from three options and the interesting picture is **the road with
+    /// the car somewhere in it**. See [`ChaseCamera::framed_position`].
+    pub lane_locked: bool,
 }
 
 /// A one-shot camera kick from a collision resolved this fixed step.
@@ -139,7 +147,11 @@ impl ChaseCamera {
     pub fn snap_to(&mut self, car: &CarState, track: &Track, tuning: &CameraTuning) {
         let forward = car.forward();
         self.heading = forward.x.atan2(forward.z);
-        self.eye = ideal_eye(car, self.heading, tuning.distance_low, tuning);
+        // Snapped onto the car rather than onto the framed subject, and that is
+        // correct for both games: a snap only happens at the line or after a
+        // reset, and both of those put the car on the centreline, where the two
+        // are the same point.
+        self.eye = ideal_eye(car.position, self.heading, tuning.distance_low, tuning.height);
         self.eye_velocity = Vec3::ZERO;
         self.fov = tuning.fov_low;
         self.roll = 0.0;
@@ -166,16 +178,37 @@ impl ChaseCamera {
         vehicle: &VehicleTuning,
         drive: CameraDrive,
     ) -> CameraPose {
-        let speed_t = (car.speed() / vehicle.top_speed.max(1.0)).clamp(0.0, 1.0);
         let CameraDrive {
             forward_accel,
             boosting,
             impact,
+            lane_locked,
         } = drive;
 
-        self.advance_heading(car, track, tuning);
-        let distance = self.chase_distance(tuning, speed_t, forward_accel, boosting);
-        self.advance_position(car, distance, tuning);
+        // How fast the camera thinks the car is going, which drives the chase
+        // distance, the field of view, the look-ahead and the shake.
+        //
+        // `car.speed()` is the magnitude of the *whole* planar velocity, lateral
+        // included — right for a drifting car, which genuinely is travelling
+        // that fast in that direction, and badly wrong for a crossing one. A
+        // lane change now runs the lateral channel at up to
+        // `sim::rails::LANE_CROSS_SPEED`, which on its own is most of the car's
+        // top speed: a stationary car dodging read as a car at 92 m/s, and the
+        // rig pulled back, the field of view opened and the shake came on for
+        // three frames every time the player touched a lane button.
+        let framed_speed = [car.speed(), car.forward_speed.abs()][usize::from(lane_locked)];
+        let speed_t = (framed_speed / vehicle.top_speed.max(1.0)).clamp(0.0, 1.0);
+
+        // What the camera is watching, and how fast that thing is moving. On
+        // rails both are the *road*, which is what keeps a lane change out of
+        // the camera entirely — see `framed_position`.
+        let framed = Self::framed_position(car, track, lane_locked);
+        let framed_velocity = Self::framed_velocity(car, lane_locked);
+
+        self.advance_heading(car, track, tuning, lane_locked);
+        let distance =
+            self.chase_distance(tuning, speed_t, forward_accel, boosting) * pullback(lane_locked);
+        self.advance_position(framed, framed_velocity, distance, tuning, lane_locked);
         self.advance_fov(tuning, speed_t, boosting);
         self.advance_roll(car, tuning);
         let shake = self.advance_shake(impact, tuning, speed_t, boosting);
@@ -183,9 +216,14 @@ impl ChaseCamera {
         let eye = self.clear_of_the_road(self.eye.add(shake), car, track, tuning);
         let look_ahead = tuning.look_ahead_low
             + (tuning.look_ahead_high - tuning.look_ahead_low) * speed_t;
-        let target = car
-            .position
-            .add(car.heading_of_travel().mul_scalar(look_ahead))
+        // The look-at follows the framed subject too. Using the car's direction
+        // of *travel* here is right for a drifting car and catastrophic for a
+        // crossing one: mid-lane-change the lateral component is most of the
+        // velocity, so the aim point swings tens of degrees off the road and
+        // back inside three frames.
+        let ahead = Self::framed_heading(car, track, lane_locked);
+        let target = framed
+            .add(ahead.mul_scalar(look_ahead))
             .add(Vec3::new(0.0, tuning.target_height, 0.0));
 
         CameraPose {
@@ -196,21 +234,86 @@ impl ChaseCamera {
         }
     }
 
+    /// The point the camera is framing.
+    ///
+    /// The wheel game frames the car, because where the car is across the road
+    /// is the thing the player is producing and the camera's job is to show it.
+    ///
+    /// **The lane game frames the road.** The car's lateral position there is
+    /// not a result, it is a choice out of three, and it now changes in about
+    /// three frames — so a camera rigidly bolted to it is a camera yanked 3.5 m
+    /// sideways every time the player dodges. Pinning the rig to the centreline
+    /// puts the lane change back where it belongs: the car moves *within* the
+    /// frame, the road stays put, and the picture reads as the car dodging
+    /// rather than as the world lurching.
+    ///
+    /// The height stays the car's, so crests and dips still move the camera —
+    /// it is the *lateral* channel that is being taken away from it, and nothing
+    /// else.
+    fn framed_position(car: &CarState, track: &Track, lane_locked: bool) -> Vec3 {
+        let centre = track.interpolated_at(car.distance).position;
+        [
+            car.position,
+            Vec3::new(centre.x, car.position.y, centre.z),
+        ][usize::from(lane_locked)]
+    }
+
+    /// The velocity of whatever [`Self::framed_position`] is following.
+    ///
+    /// This is fed forward into the position spring, and it is the single most
+    /// violent term if it is wrong: the spring damps against *relative*
+    /// velocity, so handing it 85 m/s of lateral during a lane change tells it
+    /// the subject has just launched sideways at 300 km/h and it accelerates the
+    /// eye to match. On rails the framed subject is a point sliding along the
+    /// centreline, and its velocity is the forward component alone.
+    fn framed_velocity(car: &CarState, lane_locked: bool) -> Vec3 {
+        let along = car
+            .forward()
+            .mul_scalar(car.forward_speed)
+            .add(Vec3::new(0.0, car.vertical_speed, 0.0));
+        [car.velocity(), along][usize::from(lane_locked)]
+    }
+
+    /// The direction the framed subject is heading, for the look-at lead.
+    fn framed_heading(car: &CarState, track: &Track, lane_locked: bool) -> Vec3 {
+        let road = track.interpolated_at(car.distance).flat_forward();
+        [car.heading_of_travel(), road][usize::from(lane_locked)]
+    }
+
     /// The blended heading, sprung toward its target.
-    fn advance_heading(&mut self, car: &CarState, track: &Track, tuning: &CameraTuning) {
+    fn advance_heading(
+        &mut self,
+        car: &CarState,
+        track: &Track,
+        tuning: &CameraTuning,
+        lane_locked: bool,
+    ) {
         let chassis = car.yaw;
         let travel = {
             let t = car.heading_of_travel();
             t.x.atan2(t.z)
         };
         // Start at the nose, lean toward where the car is actually going.
-        let mut wanted = chassis + shortest_angle(travel - chassis) * tuning.velocity_heading_blend;
+        //
+        // Both of those inputs are lane-change noise on rails. `travel` swings
+        // toward the crossing direction — the lateral speed is comparable to the
+        // forward one for a few frames, so this is tens of degrees — and
+        // `chassis` carries the cosmetic lean the lane solver paints on the nose.
+        // Neither is a fact about where the road goes, and a camera that yaws to
+        // follow them is a camera that whips sideways and back on every dodge.
+        // So on rails the blend is simply switched off, leaving the road below.
+        let blend = tuning.velocity_heading_blend * f32::from(!lane_locked);
+        let mut wanted = chassis + shortest_angle(travel - chassis) * blend;
         // Then lean toward the road ahead, so a corner opens up slightly early.
         let ahead = track.sample_at(car.distance + tuning.anticipation_distance);
         let track_heading = ahead.heading;
-        wanted += shortest_angle(track_heading - wanted) * tuning.track_anticipation;
-        // And finally a touch of lead from the steering itself.
-        wanted += car.steer * STEER_LEAD;
+        // On rails this is the *whole* heading rather than a lean on top of the
+        // nose: `anticipation` of 1 pulls `wanted` all the way onto the road.
+        let anticipation = [tuning.track_anticipation, 1.0][usize::from(lane_locked)];
+        wanted += shortest_angle(track_heading - wanted) * anticipation;
+        // And finally a touch of lead from the steering itself — which on rails
+        // is the lean again, so it is dropped for the same reason.
+        wanted += car.steer * STEER_LEAD * f32::from(!lane_locked);
 
         if !self.settled {
             self.heading = wanted;
@@ -248,10 +351,17 @@ impl ChaseCamera {
     /// between how fast the camera is moving and how fast the car is - leaves
     /// the spring only the residual to correct, so the chase distance at
     /// 320 km/h is the chase distance that was authored.
-    fn advance_position(&mut self, car: &CarState, distance: f32, tuning: &CameraTuning) {
-        let wanted = ideal_eye(car, self.heading, distance, tuning);
+    fn advance_position(
+        &mut self,
+        framed: Vec3,
+        framed_velocity: Vec3,
+        distance: f32,
+        tuning: &CameraTuning,
+        lane_locked: bool,
+    ) {
+        let wanted = ideal_eye(framed, self.heading, distance, rig_height(tuning, lane_locked));
         let omega = tuning.position_spring;
-        let relative = self.eye_velocity.subtract(car.velocity());
+        let relative = self.eye_velocity.subtract(framed_velocity);
         let accel = wanted
             .subtract(self.eye)
             .mul_scalar(omega * omega)
@@ -366,13 +476,70 @@ const ROLL_RATE: f32 = 6.0;
 /// Angular rate the shake phase advances at (rad/s).
 const SHAKE_RATE: f32 = 41.0;
 
-/// The ideal eye position for a car, a heading and a chase distance.
-fn ideal_eye(car: &CarState, heading: f32, distance: f32, tuning: &CameraTuning) -> Vec3 {
+/// How much further back the lane game's rig sits than the wheel game's.
+///
+/// This is a **framing** number, not a preference, and it follows directly from
+/// what the rig is now pointed at. A camera bolted to the car only ever has to
+/// hold one car; a camera bolted to the centreline has to hold the whole band of
+/// road the car can be anywhere in — up to two lanes either side of the point it
+/// is aimed at, which is 7 m of lateral spread that simply did not exist before.
+/// At the old distance the outer lanes sit at the very edge of the frame, and
+/// the traffic you are about to thread is off-screen until it is too late.
+///
+/// Applied to the chase *height* as well as the distance, so the rig keeps the
+/// `height / distance` ratio — the angle it looks down at the road — that the
+/// composition was authored at. `CameraTuning::stretched` does the same thing
+/// for the same reason.
+const LANE_FRAME_PULLBACK: f32 = 1.75;
+
+/// The pullback factor for a profile: [`LANE_FRAME_PULLBACK`] on rails, none on
+/// the wheel game.
+fn pullback(lane_locked: bool) -> f32 {
+    [1.0, LANE_FRAME_PULLBACK][usize::from(lane_locked)]
+}
+
+/// The highest the eye may ever sit above the road (m).
+///
+/// **The rig has to fit inside the course.** The course has a roof — the tunnel
+/// (`crate::render::road_mesh::TUNNEL_HEIGHT`) — and a camera above it is not a
+/// high camera, it is a camera *outside the level*, looking down at the back of
+/// a slab while the car it is framing is hidden underneath.
+///
+/// That is not hypothetical. The portrait rig already lifts the eye to hold the
+/// neighbouring lane in a tall thin frame, and multiplying that by
+/// [`LANE_FRAME_PULLBACK`] took a phone's eye to a measured **7.75 m** against a
+/// 7 m ceiling: the tunnel rendered as a black lid with a strip of sky over it.
+/// Nothing in the rig knew the course had a ceiling, so nothing stopped it.
+///
+/// Expressed as a bound on the *rig* rather than as a clamp applied inside
+/// tunnels, deliberately. A per-frame clamp would drop the camera 1.7 m at the
+/// tunnel mouth and lift it again at the exit — a lurch at exactly the two
+/// moments the road is most enclosed, and one that only ever fires on a phone,
+/// which is the hardest kind of bug to see coming. A bound on the rig is the
+/// same shot everywhere, and it costs the phone nothing it had before: capped,
+/// the eye still sits well above the height it used pre-pullback, because the
+/// zoom-out is carried by the *arm* and only incidentally by the lift.
+///
+/// The clearance under the roof is for the tunnel's ceiling lights, which hang
+/// below it.
+const RIG_HEIGHT_CEILING: f32 =
+    crate::render::road_mesh::TUNNEL_HEIGHT - TUNNEL_EYE_CLEARANCE;
+
+/// How far under a tunnel roof the eye must stay (m).
+const TUNNEL_EYE_CLEARANCE: f32 = 1.0;
+
+/// The eye height for a profile, bounded by [`RIG_HEIGHT_CEILING`].
+fn rig_height(tuning: &CameraTuning, lane_locked: bool) -> f32 {
+    (tuning.height * pullback(lane_locked)).min(RIG_HEIGHT_CEILING)
+}
+
+/// The ideal eye position for a framed subject, a heading and a chase distance.
+fn ideal_eye(framed: Vec3, heading: f32, distance: f32, height: f32) -> Vec3 {
     let (s, c) = heading.sin_cos();
     let back = Vec3::new(-s, 0.0, -c);
-    car.position
+    framed
         .add(back.mul_scalar(distance))
-        .add(Vec3::new(0.0, tuning.height, 0.0))
+        .add(Vec3::new(0.0, height, 0.0))
 }
 
 #[cfg(test)]
@@ -562,13 +729,161 @@ mod tests {
             frame(&mut camera, &car, &track, &t, 0.0, false);
             let error = camera
                 .eye
-                .subtract(ideal_eye(&car, camera.heading, t.distance_low, &t))
+                .subtract(ideal_eye(car.position, camera.heading, t.distance_low, t.height))
                 .length();
             // A critically damped spring never overshoots into a growing error.
             assert!(error < previous + 1.0e-3 || i < 4, "step {i}: {previous} -> {error}");
             previous = error;
         }
         assert!(previous < 0.5, "and it actually arrives: {previous}");
+    }
+
+    /// **The lane game's camera does not move when the car changes lane.**
+    ///
+    /// This is the defect it was written for: with the crossing sped up to three
+    /// frames, a rig bolted to the car was yanked 3.5 m sideways — and worse,
+    /// was told by the velocity feed-forward that its subject had launched
+    /// sideways at 300 km/h — so a dodge threw the whole frame. Framing the road
+    /// instead leaves the camera still and lets the car move inside the picture.
+    #[test]
+    fn a_lane_change_moves_the_car_in_the_frame_rather_than_the_frame() {
+        let track = Track::fixture(crate::DEFAULT_SEED);
+        let t = CameraTuning::DEFAULT;
+        let vehicle = VehicleTuning::DEFAULT;
+
+        // A car parked on the centreline, with a settled camera behind it.
+        let mut car = CarState::parked(Vec3::ZERO, 0.0);
+        place_on_track(&mut car, &track.sample_at(120.0), 0.0);
+        car.distance = 120.0;
+        let mut camera = ChaseCamera::new();
+        camera.snap_to(&car, &track, &t);
+        let rails = CameraDrive { lane_locked: true, ..CameraDrive::default() };
+        (0..30).for_each(|_| {
+            camera.step(&car, &track, &t, &vehicle, rails);
+        });
+        let settled = camera.eye;
+
+        // Now put the car two lanes over, as a fast crossing does, and keep the
+        // lateral speed a crossing would have.
+        let sample = track.sample_at(car.distance);
+        car.lateral = track.lane_lateral(&sample, 2);
+        car.position = car.position.add(sample.right.mul_scalar(car.lateral));
+        car.lateral_speed = 85.0;
+        let mut moved = f32::NEG_INFINITY;
+        (0..30).for_each(|_| {
+            camera.step(&car, &track, &t, &vehicle, rails);
+            moved = moved.max(camera.eye.subtract(settled).length());
+        });
+        assert!(
+            moved < 0.5,
+            "the camera chased the lane change {moved} m — the frame is supposed to hold still"
+        );
+    }
+
+    /// And the wheel game's camera still does follow the car across the road,
+    /// because there the line the car is on is the thing being shown.
+    #[test]
+    fn the_wheel_cameras_frame_still_follows_the_car_sideways() {
+        let track = Track::fixture(crate::DEFAULT_SEED);
+        let t = CameraTuning::DEFAULT;
+        let vehicle = VehicleTuning::DEFAULT;
+        let mut car = CarState::parked(Vec3::ZERO, 0.0);
+        place_on_track(&mut car, &track.sample_at(120.0), 0.0);
+        car.distance = 120.0;
+        let mut camera = ChaseCamera::new();
+        camera.snap_to(&car, &track, &t);
+        (0..30).for_each(|_| {
+            camera.step(&car, &track, &t, &vehicle, CameraDrive::default());
+        });
+        let settled = camera.eye;
+
+        let sample = track.sample_at(car.distance);
+        car.position = car.position.add(sample.right.mul_scalar(7.0));
+        (0..90).for_each(|_| {
+            camera.step(&car, &track, &t, &vehicle, CameraDrive::default());
+        });
+        assert!(
+            camera.eye.subtract(settled).length() > 3.0,
+            "the wheel game's camera must still track the car across the road"
+        );
+    }
+
+    /// **The rig fits inside the course, on every frame shape.**
+    ///
+    /// The bug this exists for was invisible on a desktop and total on a phone:
+    /// the portrait rig lifts the eye to hold the neighbouring lane, the lane
+    /// game's pullback multiplied that lift, and the result — a measured 7.75 m
+    /// — cleared the 7 m tunnel roof, so the whole section rendered as a black
+    /// lid seen from above with the car hidden under it.
+    ///
+    /// Swept across real frame shapes rather than asserted on the authored
+    /// tuning, because the authored tuning is exactly the one shape where it was
+    /// never wrong.
+    #[test]
+    fn the_eye_stays_under_the_tunnel_roof_on_every_frame_shape() {
+        let roof = crate::render::road_mesh::TUNNEL_HEIGHT;
+        // Desktop wide, laptop, square-ish, tall phone, very tall phone.
+        [(1920.0, 1080.0), (1280.0, 800.0), (900.0, 900.0), (390.0, 844.0), (360.0, 900.0)]
+            .into_iter()
+            .for_each(|(w, h)| {
+                let tuning = CameraTuning::DEFAULT.framed_for_aspect(w / h);
+                [false, true].into_iter().for_each(|lane_locked| {
+                    let eye = rig_height(&tuning, lane_locked);
+                    assert!(
+                        eye < roof,
+                        "{w}x{h} lane_locked={lane_locked}: the eye sits at {eye} m, \
+                         through a {roof} m tunnel roof"
+                    );
+                    assert!(
+                        eye > 0.0,
+                        "{w}x{h}: the eye must still be above the road: {eye}"
+                    );
+                });
+            });
+    }
+
+    /// The cap is a bound, not a replacement: where it does not bite, the
+    /// pullback still lifts the eye with the arm, which is what keeps the rails
+    /// shot the angle it was authored at.
+    #[test]
+    fn the_height_cap_only_bites_where_the_rig_would_not_fit() {
+        let desktop = CameraTuning::DEFAULT.framed_for_aspect(16.0 / 9.0);
+        assert!(
+            rig_height(&desktop, true) > rig_height(&desktop, false),
+            "a wide frame is nowhere near the roof, so the pullback lifts freely"
+        );
+        assert!(
+            (rig_height(&desktop, true) - desktop.height * LANE_FRAME_PULLBACK).abs() < 1.0e-5,
+            "and it lifts by exactly the pullback"
+        );
+    }
+
+    /// The rails rig sits further back, because it is holding a band of road
+    /// rather than a car. Asserted against the wheel rig rather than against a
+    /// number, so it survives a re-tune of the shared composition.
+    #[test]
+    fn the_lane_games_rig_is_pulled_back_from_the_wheel_games() {
+        let track = Track::fixture(crate::DEFAULT_SEED);
+        let t = CameraTuning::DEFAULT;
+        let vehicle = VehicleTuning::DEFAULT;
+        let settle = |lane_locked: bool| {
+            let mut car = CarState::parked(Vec3::ZERO, 0.0);
+            place_on_track(&mut car, &track.sample_at(120.0), 0.0);
+            car.distance = 120.0;
+            let mut camera = ChaseCamera::new();
+            camera.snap_to(&car, &track, &t);
+            let drive = CameraDrive { lane_locked, ..CameraDrive::default() };
+            (0..120).for_each(|_| {
+                camera.step(&car, &track, &t, &vehicle, drive);
+            });
+            camera.eye.subtract(car.position).length()
+        };
+        let wheel = settle(false);
+        let rails = settle(true);
+        assert!(
+            rails > wheel * 1.2,
+            "the lane rig is not pulled back: {rails} m vs {wheel} m"
+        );
     }
 
     #[test]

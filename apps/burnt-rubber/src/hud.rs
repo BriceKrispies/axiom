@@ -50,6 +50,11 @@ pub struct HudModel {
     pub phase: RacePhase,
     /// Whether this is early enough in the run to still show the controls hint.
     pub show_controls_hint: bool,
+    /// Whether the car is lane-locked, which decides which controls the hint
+    /// names. Read from the simulation rather than passed alongside it, because
+    /// a HUD that describes a different control scheme from the one the car is
+    /// actually using is worse than no hint at all.
+    pub rails: bool,
     /// How far ahead of the agent's ghost the player is, in metres — negative
     /// when the ghost is winning. `None` when no ghost is running.
     pub ghost_delta_metres: Option<f32>,
@@ -75,6 +80,7 @@ impl HudModel {
             stuck: sim.is_stuck(),
             phase: sim.phase(),
             show_controls_hint: sim.step_count() < CONTROLS_HINT_STEPS,
+            rails: sim.rails_lane().is_some(),
             // Filled in by `with_ghost_delta` — the ghost is not in this sim.
             ghost_delta_metres: None,
         }
@@ -144,8 +150,32 @@ pub const CONTROLS_HINT_STEPS: u64 = 600;
 /// this file makes rather than one the viewport makes, and the break is placed
 /// where it groups: driving inputs on the first line, session keys on the
 /// second.
-pub const CONTROLS_HINT: [&str; 2] = [
+///
+/// It is also **per control scheme**, which is the other half of why it is a
+/// value here rather than a literal in the painter. The two games do not share
+/// a first line: on rails `A`/`D` hop a lane and there is no handbrake at all,
+/// so printing the wheel game's legend over a railed car would teach the player
+/// a control that does nothing and hide the one that does.
+pub fn controls_hint(rails: bool) -> [&'static str; 2] {
+    [WHEEL_CONTROLS_HINT, RAILS_CONTROLS_HINT][usize::from(rails)]
+}
+
+/// The wheel game's legend: an analogue car with a handbrake.
+pub const WHEEL_CONTROLS_HINT: [&str; 2] = [
     "W/S drive · A/D steer · SPACE handbrake · SHIFT boost",
+    "R reset · ESC pause",
+];
+
+/// The lane game's legend.
+///
+/// "shift lane" rather than "steer", because the difference is the whole
+/// control scheme: a tap moves the car one lane and holding the key does
+/// nothing at all, and a player who reads "steer" will hold it and conclude the
+/// game is broken. The swipe is named on the same line as the keys it is the
+/// alternative to — the phone and the desktop are playing the same game with
+/// two ways of saying the same thing.
+pub const RAILS_CONTROLS_HINT: [&str; 2] = [
+    "A/D or swipe · shift lane · W/S drive · SHIFT boost",
     "R reset · ESC pause",
 ];
 
@@ -259,14 +289,41 @@ mod tests {
     fn the_controls_hint_shows_early_and_then_stops() {
         let mut sim = racing();
         assert!(HudModel::of(&sim).show_controls_hint);
-        assert!(CONTROLS_HINT.iter().all(|line| !line.is_empty()));
-        // Each line has to fit a phone frame on its own, which is the whole
-        // reason the hint is two lines rather than one left to wrap.
-        assert!(CONTROLS_HINT.iter().all(|line| line.chars().count() <= 56));
+        for hint in [controls_hint(false), controls_hint(true)] {
+            assert!(hint.iter().all(|line| !line.is_empty()));
+            // Each line has to fit a phone frame on its own, which is the whole
+            // reason the hint is two lines rather than one left to wrap.
+            assert!(hint.iter().all(|line| line.chars().count() <= 56));
+        }
         for _ in 0..CONTROLS_HINT_STEPS {
             sim.step(DriveCommand::FLAT_OUT);
         }
         assert!(!HudModel::of(&sim).show_controls_hint);
+    }
+
+    /// The hint has to describe the car the player is actually driving. A railed
+    /// car has no handbrake, so naming one is worse than saying nothing.
+    #[test]
+    fn the_hint_names_the_control_scheme_in_use() {
+        let rails = controls_hint(true).join(" ");
+        let wheel = controls_hint(false).join(" ");
+        assert!(rails.contains("swipe"), "the phone's gesture is named: {rails}");
+        assert!(
+            !rails.to_lowercase().contains("handbrake"),
+            "rails has no handbrake to offer: {rails}"
+        );
+        assert!(wheel.to_lowercase().contains("handbrake"), "{wheel}");
+        assert!(!wheel.contains("swipe"), "{wheel}");
+
+        // And the model picks between them from the simulation, not from a
+        // guess about the device.
+        let sim = RaceSim::with_profile(
+            crate::DEFAULT_SEED,
+            crate::Tuning::DEFAULT,
+            crate::PlayProfile::Rails,
+        );
+        assert!(HudModel::of(&sim).rails);
+        assert!(!HudModel::of(&RaceSim::shipping()).rails);
     }
 
     #[test]

@@ -104,7 +104,12 @@ impl RaceAudio {
     /// little vibrato so it does not sound like a test tone, and a hard shift up
     /// while boosting.
     fn engine_grain(&mut self, car: &CarState, tuning: &VehicleTuning) {
-        let ceiling = tuning.top_speed + tuning.boost_top_speed_bonus;
+        // The note redlines at a representative boosted speed rather than at a
+        // boosted top speed, because there is no longer such a thing: boost is
+        // uncapped, and a pitch normalised against an unbounded ceiling would
+        // never reach the redline at all. Past it the `clamp` holds the note at
+        // the redline, which is what a redline means.
+        let ceiling = tuning.boost_reference_speed;
         let revs = (car.speed() / ceiling.max(1.0)).clamp(0.0, 1.0);
         let boost_shift = if car.boosting { BOOST_SHIFT } else { 1.0 };
         let hz = (IDLE_HZ + (REDLINE_HZ - IDLE_HZ) * revs) * boost_shift;
@@ -183,6 +188,16 @@ impl RaceAudio {
         match event {
             RaceEvent::Impact { severity, strength, .. } => self.impact(*severity, *strength),
             RaceEvent::NearMiss { .. } => self.blip(1_180.0, 0.16, 0.35),
+            // A smash is the only cue in the game that is two voices at once,
+            // because it is two things at once: something broke, and you were
+            // paid. The low tone is the hit — under everything else in the mix,
+            // which is where an impact lives — and the bright one on top is the
+            // same currency the near miss speaks in, a fifth below it so the ear
+            // files it as "that, but less".
+            RaceEvent::SmashedThrough { .. } => {
+                self.blip(96.0, 0.26, 0.55);
+                self.blip(786.0, 0.13, 0.30);
+            }
             // Pitched **up** the tier ladder, and longer with it. A player who
             // can hear which colour they just took has not had to look away
             // from the road to read the bar, which is the whole reason the
@@ -461,7 +476,7 @@ mod tests {
     #[test]
     fn the_engine_note_rises_with_speed_and_shifts_on_boost() {
         let tuning = VehicleTuning::DEFAULT;
-        let ceiling = tuning.top_speed + tuning.boost_top_speed_bonus;
+        let ceiling = tuning.boost_reference_speed;
         let note = |speed: f32, boosting: bool| {
             let revs = (speed / ceiling).clamp(0.0, 1.0);
             let shift = if boosting { BOOST_SHIFT } else { 1.0 };

@@ -210,8 +210,23 @@ mod tests {
         // honest scale of what was added to the economy. (A fraction of it is
         // the pickup keep-out thinning the ambient traffic in a few lanes:
         // fewer cars is also a faster lap.)
+        //
+        // And it moved again, 90.30 s -> 84.05 s, when boost lost its top speed
+        // (`sim::controller::boost_headroom`). Six seconds over nine kilometres
+        // is the honest size of that change: the ghost is not boosting for much
+        // more of the lap than it was — the meter still decides that — it is
+        // simply no longer held at 114 m/s while it does. The top speed seen went
+        // 113.9 -> 168.2 m/s.
+        //
+        // And once more, 84.05 s -> 83.65 s, when a boosting player started going
+        // *through* the back of traffic instead of into it
+        // (`sim::RaceSim::smash_through`). Four tenths, and the small size is the
+        // interesting part: the ghost does not aim for cars — it is still trying
+        // to thread them — so this is only the handful of rear-ends a lap that
+        // used to scrub speed and now do not. Contacts fell 16 -> 14 for the same
+        // reason, since a smash is not counted as one.
         assert!(
-            (g.elapsed_seconds() - 90.30).abs() < 0.05,
+            (g.elapsed_seconds() - 83.65).abs() < 0.05,
             "ghost time {:.2}s",
             g.elapsed_seconds()
         );
@@ -239,10 +254,23 @@ mod tests {
     /// 0.3 s slower average lap.) A bar tight enough to pin one seed's contact
     /// count would be pinning noise, and would fail on the next unrelated change.
     ///
-    /// So: under 105 seconds, at most fifteen contacts, and more than sixty near
+    /// So: under 105 seconds, at most twenty contacts, and more than sixty near
     /// misses. The last of those is the one that actually says the ghost is
     /// playing the game rather than bulldozing it, and it is the one that has not
     /// moved through any of this.
+    ///
+    /// The contact bar moved from fifteen to twenty when boost lost its top speed
+    /// (`sim::controller::boost_headroom`), and the shape of that move is worth
+    /// keeping, because it is the whole argument for the curve that shipped. With
+    /// boost simply *uncapped* — full acceleration however fast the car already
+    /// was — the wheel ghost hit 431 m/s and the run stopped being a drive: 22
+    /// contacts and only 50 near misses, because a car doing 1550 km/h has almost
+    /// no steering authority left ([`super::sim::controller::steering_authority`]
+    /// falls off with speed) and cannot thread anything. With the logarithmic
+    /// tail it tops out at 168 m/s and scores 65 near misses against 16 contacts —
+    /// still the same drive, played faster. Sixteen is inside the noise band
+    /// described above; twenty is that band with the same margin the old fifteen
+    /// had over thirteen.
     ///
     /// What has not moved is the part that says the ghost is playing the game
     /// rather than bulldozing it: it still scores more than sixty near misses a
@@ -277,7 +305,7 @@ mod tests {
                     g.sim().near_miss_count()
                 );
                 assert!(
-                    g.sim().impact_count() <= 15,
+                    g.sim().impact_count() <= 20,
                     "{profile:?} ghost hit {} things",
                     g.sim().impact_count()
                 );

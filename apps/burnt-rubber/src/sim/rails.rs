@@ -31,18 +31,29 @@ use crate::track::Track;
 use crate::tuning::DT;
 
 /// How quickly the car crosses to a newly chosen lane (m/s of lateral travel).
-/// A lane is ~3.5 m, so this is a little under a third of a second per lane —
-/// fast enough to dodge, slow enough that the move is legible and committing.
-const LANE_CROSS_SPEED: f32 = 12.0;
-
-/// Lateral acceleration (m/s²) toward the crossing speed. Finite so a lane
-/// change eases in rather than snapping the car sideways on the first frame.
-const LANE_ACCEL: f32 = 90.0;
-
-/// Proportional gain on the remaining lateral error. Above this distance the car
-/// crosses at the full [`LANE_CROSS_SPEED`]; inside it, it eases to a stop on the
-/// lane centre instead of oscillating around it.
-const LANE_SETTLE: f32 = 6.0;
+///
+/// This is now the **only** number that decides how a lane change feels, and at
+/// 85 m/s a 3.5 m lane is crossed in under three frames — about 40 ms, which is
+/// under the threshold at which a hand reads a response as delayed at all. The
+/// lane change is meant to land while the flick is still happening.
+///
+/// # Why there is a cap at all
+///
+/// Because the alternative — putting the car in the lane in a single step — is
+/// not "instant", it is **teleporting**, and the collision test is what pays for
+/// it. Traffic overlap is sampled once per step against a lateral window of
+/// `half_width + traffic_half_width` (1.0 + 1.05 = 2.05 m). A car that moves
+/// further sideways than that window in one step can be on one side of a
+/// vehicle before the step and the other side after it, with no sample in
+/// between — it passes *through* the car it should have hit. So the honest
+/// ceiling is `2.05 / DT` ≈ 123 m/s, and 85 sits comfortably under it at
+/// 1.42 m of lateral travel per step.
+///
+/// That is the whole trade, stated plainly: the last 30% of the speed buys
+/// about half a frame and costs the guarantee that a lane change cannot dodge
+/// through a car. Below the cap, "as fast as possible" and "collisions are
+/// real" are not in tension, so the cap is where they stop agreeing.
+const LANE_CROSS_SPEED: f32 = 85.0;
 
 /// Peak visual lean (radians) at full crossing speed. The chassis is not
 /// steering — it is on rails — but a car that changes lane with its nose rigidly
@@ -115,13 +126,29 @@ pub fn guide(car: &mut CarState, command: DriveCommand, track: &Track, state: &m
     let target = track.lane_lateral(&sample, state.lane);
     let error = target - car.lateral;
 
-    // Cross at a fixed speed while far away, easing to zero over the last few
-    // metres. A pure proportional term would crawl the last stretch forever; a
-    // pure fixed speed would buzz around the centre.
-    let desired = (error * (LANE_CROSS_SPEED / LANE_SETTLE))
-        .clamp(-LANE_CROSS_SPEED, LANE_CROSS_SPEED);
-    let step = LANE_ACCEL * DT;
-    car.lateral_speed += (desired - car.lateral_speed).clamp(-step, step);
+    // Ask for exactly the speed that lands on the lane centre **this step**, and
+    // take as much of it as [`LANE_CROSS_SPEED`] allows.
+    //
+    // `error / DT` is the deadbeat gain, and choosing it rather than tuning one
+    // is what collapsed three numbers into one. The three it replaced were a
+    // crossing speed, a proportional gain and an acceleration ramp, and between
+    // them they made a lane change an exponential approach with a half-second
+    // time constant: the car left immediately, arrived slowly, and spent most of
+    // the move visibly *drifting* toward a lane it had already been told to be
+    // in. Every one of those numbers was a way of trading arrival time against
+    // overshoot.
+    //
+    // There is no trade to make. A gain of `1/DT` asks for the speed that ends
+    // the move now, so the crossing runs at the cap until the last step and then
+    // lands exactly — no crawl, because the gain is as high as a fixed step can
+    // use; no overshoot, because a step that would pass the centre is precisely
+    // the step whose request falls under the cap.
+    //
+    // There is likewise no acceleration ramp. A ramp is the thing that makes a
+    // lane change read as a lean rather than as a dodge, and this game wants the
+    // dodge; the lean is drawn below, from the speed, where it is cosmetic and
+    // cannot slow the car down.
+    car.lateral_speed = (error / DT).clamp(-LANE_CROSS_SPEED, LANE_CROSS_SPEED);
 
     // The nose follows the road, turned into the lane change by the lean.
     //
@@ -231,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn the_car_accelerates_toward_the_chosen_lane_and_settles_on_it() {
+    fn the_car_crosses_to_the_chosen_lane_and_stops_dead_on_it() {
         let track = track();
         let mut car = car_on(&track, 1);
         let mut state = RailsState::in_lane(1);
@@ -260,17 +287,80 @@ mod tests {
         );
     }
 
+    /// **The lane change has to be over before the player can notice it.** This
+    /// is the assertion the whole lateral law exists to satisfy, so it counts
+    /// frames rather than trusting the constants to stay put.
+    #[test]
+    fn a_lane_change_completes_in_a_handful_of_frames() {
+        let track = track();
+        let mut car = car_on(&track, 0);
+        let mut state = RailsState::in_lane(0);
+        let mut frames = 0;
+
+        guide(&mut car, hop(1), &track, &mut state);
+        car.lateral += car.lateral_speed * DT;
+        let target = track.lane_lateral(&track.sample_at(car.distance), state.lane());
+        while (car.lateral - target).abs() > 0.01 && frames < 60 {
+            guide(&mut car, hop(0), &track, &mut state);
+            car.lateral += car.lateral_speed * DT;
+            frames += 1;
+        }
+        assert!(
+            frames <= 4,
+            "a lane took {frames} frames — the old easing law took about thirty"
+        );
+    }
+
+    /// Deadbeat means *dead* beat: the step that would carry the car past the
+    /// lane centre is the step that lands on it. Nothing overshoots, so nothing
+    /// has to be damped back.
+    #[test]
+    fn the_crossing_never_overshoots_the_lane_centre() {
+        let track = track();
+        let mut car = car_on(&track, -2);
+        let mut state = RailsState::in_lane(-2);
+        guide(&mut car, hop(-1), &track, &mut state);
+        car.lateral += car.lateral_speed * DT;
+        let target = track.lane_lateral(&track.sample_at(car.distance), state.lane());
+        let approach = (car.lateral - target).signum();
+        (0..30).for_each(|_| {
+            guide(&mut car, hop(0), &track, &mut state);
+            car.lateral += car.lateral_speed * DT;
+            let side = (car.lateral - target).signum();
+            assert!(
+                side == approach || (car.lateral - target).abs() < 1.0e-4,
+                "the car crossed to the far side of the lane centre: {} vs {target}",
+                car.lateral
+            );
+        });
+    }
+
+    /// The cap is a collision guarantee, not a taste: a step longer than the
+    /// traffic overlap window can dodge straight through a car. See
+    /// [`LANE_CROSS_SPEED`].
+    #[test]
+    fn one_step_of_crossing_stays_inside_the_traffic_overlap_window() {
+        let vehicle = crate::tuning::VehicleTuning::DEFAULT;
+        let race = crate::tuning::RaceTuning::DEFAULT;
+        let window = vehicle.half_width + race.traffic_half_width;
+        let step = LANE_CROSS_SPEED * DT;
+        assert!(
+            step < window,
+            "a lane change moves {step} m per step through a {window} m window — \
+             it can pass through a car without ever being sampled inside it"
+        );
+    }
+
     #[test]
     fn the_nose_leans_into_the_move_and_returns_to_the_road_heading() {
         let track = track();
         let mut car = car_on(&track, 2);
         let mut state = RailsState::in_lane(2);
         let heading = road_yaw(&track, car.distance);
+        // Sampled on the crossing frame itself. The whole move is now over in
+        // three or four frames, so a lean read six frames in is a lean read
+        // after the car has already arrived and straightened up.
         guide(&mut car, hop(1), &track, &mut state);
-        (0..6).for_each(|_| {
-            guide(&mut car, hop(0), &track, &mut state);
-            car.lateral += car.lateral_speed * DT;
-        });
         let leaning = car.yaw;
         // Compared as a shortest arc: `yaw` is stored wrapped into `[0, TAU)`,
         // so a small negative lean reads as ~6.2 against a heading of 0.
@@ -317,16 +407,19 @@ mod tests {
         let mut straight = car_on(&track, 2);
         let mut lane = RailsState::in_lane(2);
         guide(&mut straight, hop(1), &track, &mut lane);
+        // Checked on the crossing frame, because the crossing is only a few
+        // frames long — and then asserted for every frame of it rather than once
+        // at the end, which is the claim actually being made.
+        assert!(straight.lateral_speed.abs() > 0.5, "it is changing lane");
         (0..8).for_each(|_| {
             guide(&mut straight, hop(0), &track, &mut lane);
             straight.lateral += straight.lateral_speed * DT;
+            assert!(
+                straight.yaw_rate.abs() < 1.0e-3,
+                "a stationary car dodging on a straight is not cornering: {}",
+                straight.yaw_rate
+            );
         });
-        assert!(straight.lateral_speed.abs() > 0.5, "it is changing lane");
-        assert!(
-            straight.yaw_rate.abs() < 1.0e-3,
-            "a stationary car dodging on a straight is not cornering: {}",
-            straight.yaw_rate
-        );
     }
 
     #[test]

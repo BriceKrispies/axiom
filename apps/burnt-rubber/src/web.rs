@@ -25,7 +25,7 @@ use web_sys::{KeyboardEvent, PointerEvent};
 
 use crate::app::BurntRubber;
 use crate::controls::{AnalogueInput, Controls, HeldKeys};
-use crate::hud::{HudModel, CONTROLS_HINT};
+use crate::hud::{controls_hint, HudModel};
 use crate::profile::PlayProfile;
 use crate::start_screen::{
     StartCommand, StartScreen, START_HINT, START_LABEL, START_SUBTITLE, START_TITLE,
@@ -90,12 +90,18 @@ pub fn burnt_rubber_start() {
         windowing.surface_height().expect("a configured surface"),
     );
 
-    // THE seam. "Is this a phone?" is asked exactly once, here, and everything
-    // that follows from the answer — the lane game vs the driving game, lane
-    // buttons vs a joystick — is derived from this one value. See
-    // `crate::PlayProfile` for the full contract.
+    // The game, chosen once, here. It used to be a question about the device —
+    // a phone got the lane game and a desktop got the driving game — and it is
+    // now the same answer for both: everyone plays rails. See
+    // `crate::PlayProfile` for the full contract and for why the device
+    // predicate that used to make this choice is gone rather than pinned.
+    //
+    // The *device* still decides how a lane is asked for — lane buttons and
+    // swipes under a thumb, `A`/`D` under a keyboard — but that is an input
+    // question, settled downstream in `touch` and `controls`, and the
+    // simulation sees one `lane_step` either way.
     let (view_w, view_h) = viewport();
-    let profile = PlayProfile::for_presentation(view_w, coarse_pointer());
+    let profile = PlayProfile::SHIPPING;
     let mut app =
         BurntRubber::with_profile(DEFAULT_SEED, Tuning::DEFAULT, surface.0, surface.1, profile);
     // The shipping flow: the night road is up, the race is frozen on the grid,
@@ -215,7 +221,9 @@ pub fn burnt_rubber_start() {
         guard.app.set_viewport(view_w, view_h);
         let mut keys = frame_held.borrow().tokens();
         keys.extend(gamepad_keys().into_iter().map(KeyToken::new));
-        keys.extend(guard.touch.keys().into_iter().map(KeyToken::new));
+        // `frame_keys`, not `keys`: it also delivers a queued lane swipe, and it
+        // consumes what it delivers, so it must be called exactly once a frame.
+        keys.extend(guard.touch.frame_keys().into_iter().map(KeyToken::new));
 
         let pad_steer = guard.touch.steer();
         let mut analogue = read_gamepad();
@@ -279,7 +287,15 @@ pub fn burnt_rubber_start() {
             guard.app.advance(elapsed, command);
         }
         crate::probe::with_probe(|p| {
-            p.report(guard.app.sim().car().distance, guard.app.sim().car().speed())
+            let sim = guard.app.sim();
+            let car = sim.car();
+            p.report(
+                car.distance,
+                car.speed(),
+                car.lateral,
+                sim.rails_lane(),
+                sim.camera_pose(1.0).eye.y - car.position.y,
+            )
         });
         guard.realize_audio();
 
@@ -589,21 +605,13 @@ fn viewport() -> (f32, f32) {
 }
 
 /// Whether the device reports any touch points.
-/// Whether the device's primary pointer is coarse (a finger), the `pointer:
-/// coarse` half of the media query in `web/index.html`.
 ///
-/// Distinct from [`touch_capable`], deliberately: a laptop with a touchscreen
-/// reports touch points but has a mouse as its *primary* pointer, so it gets the
-/// on-screen pad if it wants one but keeps the driving game. `matchMedia` is the
-/// browser's own answer to the same question the stylesheet asks, which is what
-/// keeps layout and gameplay from disagreeing.
-fn coarse_pointer() -> bool {
-    web_sys::window()
-        .and_then(|w| w.match_media("(pointer: coarse)").ok().flatten())
-        .map(|m| m.matches())
-        .unwrap_or(false)
-}
-
+/// This is now the *only* device question the app asks, and it decides one
+/// thing: whether to put the on-screen pad up before the first tap. It used to
+/// have a sibling — a `pointer: coarse` media query that chose the *game* — and
+/// that sibling went when both surfaces moved onto rails. A laptop with a
+/// touchscreen therefore gets the pad if it wants one, and plays exactly the
+/// same game it would with the lid closed.
 fn touch_capable() -> bool {
     web_sys::window()
         .map(|w| w.navigator().max_touch_points() > 0)
@@ -913,7 +921,7 @@ fn update_hud(hud: &HudModel, hidden: bool, telemetry: &str, bottom_strip: f32) 
     let progress_bar = bar(hud.progress, 20);
     let banner = hud.banner().unwrap_or_default();
     let hint = if hud.show_controls_hint {
-        CONTROLS_HINT.join("<br>")
+        controls_hint(hud.rails).join("<br>")
     } else {
         String::new()
     };

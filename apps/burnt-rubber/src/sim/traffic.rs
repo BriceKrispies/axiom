@@ -74,6 +74,18 @@ pub struct TrafficCar {
     /// A temporary addition to this car's speed (m/s) from being shunted, which
     /// bleeds off.
     pub yield_speed: f32,
+    /// Fixed steps this car has spent as a **wreck**, or `0` while it is still
+    /// traffic.
+    ///
+    /// A wreck is what a car becomes when a boosting player goes through the
+    /// back of it ([`crate::sim::collision::is_smash_through`]). It is a
+    /// genuinely different state rather than a large [`Self::yield_offset`],
+    /// and it has to be: the yields are bounded *precisely so* that traffic can
+    /// never be pushed off the road, which is the one thing a wreck must do.
+    pub wreck_steps: u32,
+    /// The lateral speed the wreck is leaving the road at (m/s), signed toward
+    /// whichever side it was thrown.
+    pub wreck_lateral_speed: f32,
     /// Phase of the in-lane wander (radians).
     wander_phase: f32,
     /// Amplitude of the in-lane wander (m).
@@ -93,9 +105,44 @@ impl TrafficCar {
         near_missed: false,
         yield_offset: 0.0,
         yield_speed: 0.0,
+        wreck_steps: 0,
+        wreck_lateral_speed: 0.0,
         wander_phase: 0.0,
         wander_amount: 0.0,
     };
+
+    /// Whether this car has been smashed through and is leaving the road.
+    pub const fn is_wreck(&self) -> bool {
+        self.wreck_steps > 0
+    }
+
+    /// Turn this car into a wreck, thrown toward `away` (`-1` or `+1` across the
+    /// road) and shoved forward by the hit.
+    ///
+    /// The forward shove goes into [`Self::yield_speed`] — the channel a shunt
+    /// already uses — rather than into a new one, because that is exactly what
+    /// it is: the player's momentum arriving through the back bumper. What is
+    /// new is only the part the yields refuse to do, which is leave the lane.
+    pub fn wreck(&mut self, away: f32, shove: f32) {
+        self.wreck_steps = 1;
+        self.wreck_lateral_speed = away.signum() * WRECK_LATERAL_SPEED;
+        self.yield_speed += shove;
+        // A wreck is not traffic any more: it cannot pay a near miss, and
+        // nothing should try to thread it.
+        self.near_missed = true;
+    }
+
+    /// The wreck's height above the road (m) and how far it has tumbled (rad).
+    ///
+    /// Derived from the step count rather than integrated, so a wreck's arc is a
+    /// pure function of how long it has been one — it cannot drift, and it
+    /// replays exactly. `alpha` interpolates between fixed steps for the
+    /// renderer, the same way every other moving thing in the frame does.
+    pub fn wreck_arc(&self, alpha: f32) -> (f32, f32) {
+        let t = (self.wreck_steps as f32 + alpha.clamp(0.0, 1.0)) * DT;
+        let height = (WRECK_LAUNCH_SPEED * t - 0.5 * WRECK_GRAVITY * t * t).max(0.0);
+        (height, t * WRECK_TUMBLE_RATE)
+    }
 
     /// Yield sideways by up to `amount` metres, returning how much was actually
     /// taken. Bounded by [`CollisionTuning::traffic_yield_lateral`], so a car
@@ -139,6 +186,30 @@ impl TrafficCar {
 /// being refused. Below one, so a shunt reads as a nudge the car drives out of
 /// rather than as the player's whole closing speed transferring across.
 const SHUNT_TRANSFER: f32 = 0.35;
+
+/// How fast a wreck leaves the road sideways (m/s).
+///
+/// A lane is 3.5 m and the barrier is a few metres past the outer one, so this
+/// clears the tarmac in well under a second: the car is *gone*, not drifting
+/// wide. It is deliberately far past
+/// [`CollisionTuning::traffic_yield_lateral`], which is the bound that stops
+/// ordinary contact doing this.
+const WRECK_LATERAL_SPEED: f32 = 14.0;
+
+/// Vertical speed a wreck is launched at (m/s).
+const WRECK_LAUNCH_SPEED: f32 = 6.5;
+
+/// Gravity the wreck's arc falls under (m/s²). The car model's own arcade
+/// gravity, not `9.81` — a wreck that hangs is a wreck that reads as floating.
+const WRECK_GRAVITY: f32 = 26.0;
+
+/// How fast a wreck tumbles (rad/s).
+const WRECK_TUMBLE_RATE: f32 = 5.2;
+
+/// How long a wreck stays in the world (fixed steps). Long enough to watch it
+/// leave — about two seconds — and short enough that a run through heavy
+/// traffic does not fill the pool with debris the player has driven past.
+const WRECK_LIFETIME_STEPS: u32 = 120;
 
 /// Yield magnitude below which a car counts as back in its lane.
 const YIELD_EPSILON: f32 = 1.0e-3;
@@ -233,6 +304,19 @@ impl Traffic {
     fn advance(&mut self, track: &Track, collision: &CollisionTuning) {
         let plans = self.plan.traffic();
         for car in self.cars.iter_mut().filter(|c| c.active) {
+            // A wreck has stopped being traffic. It no longer holds a lane, no
+            // longer reads its plan's scheduled changes, and no longer relaxes
+            // back toward anything — it carries the momentum it was given until
+            // it is gone. Running it through the lane solver below would drag it
+            // straight back onto the road, which is the whole thing it is not
+            // doing any more.
+            if car.is_wreck() {
+                car.wreck_steps += 1;
+                car.distance += (car.speed + car.yield_speed) * DT;
+                car.lateral += car.wreck_lateral_speed * DT;
+                car.active &= car.wreck_steps <= WRECK_LIFETIME_STEPS;
+                continue;
+            }
             let plan = &plans[car.plan_index];
             let from = car.distance;
             car.distance += (car.speed + car.yield_speed) * DT;
@@ -307,6 +391,14 @@ impl Traffic {
         }
     }
 
+    /// Wreck the car at `index`, throwing it toward `away` and shoving it
+    /// forward by `shove` m/s.
+    pub fn wreck(&mut self, index: usize, away: f32, shove: f32) {
+        if let Some(car) = self.cars.get_mut(index) {
+            car.wreck(away, shove);
+        }
+    }
+
     /// Mark a car as having awarded its near miss, by pool index.
     pub fn mark_near_missed(&mut self, index: usize) {
         if let Some(car) = self.cars.get_mut(index) {
@@ -362,6 +454,8 @@ pub fn activate(plan: &TrafficPlan, plan_index: usize, track: &Track) -> Traffic
         near_missed: false,
         yield_offset: 0.0,
         yield_speed: 0.0,
+        wreck_steps: 0,
+        wreck_lateral_speed: 0.0,
         wander_phase,
         wander_amount,
     }

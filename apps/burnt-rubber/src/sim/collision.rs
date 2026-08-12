@@ -17,7 +17,7 @@
 use axiom_math::Vec3;
 
 use crate::track::{Track, TrackSample};
-use crate::tuning::{CollisionTuning, RaceTuning, VehicleTuning};
+use crate::tuning::{CollisionTuning, RaceTuning, VehicleTuning, DT};
 
 use super::car::CarState;
 use super::contact::{ContactFacts, ContactState, Impact, Obstacle};
@@ -250,6 +250,30 @@ pub fn traffic_facts(
     }
 }
 
+/// Whether this contact is the player **going through the back** of a car under
+/// boost, rather than crashing into it.
+///
+/// Two facts, and both are already established elsewhere rather than measured
+/// again here:
+///
+/// * **`car.boosting`** — the whole conceit of boost is that it suspends the
+///   rules the rest of the game plays by. It already ignores the dirt, presses
+///   its own throttle and has no top speed; going through the car in front is
+///   the same promise applied to the one obstacle that was still absolute.
+/// * **[`ContactFacts::rear_hit`]** — the player is *behind* the car and the
+///   contact resolved along the road rather than across it. This is the
+///   distinction that keeps the mechanic honest: a side-swipe at the same speed
+///   is still a crash, because it is still the player's mistake. Only the
+///   deliberate act — lining up behind a car and going through it — pays.
+///
+/// Note what is **not** here: a speed threshold. Boost already has a floor on
+/// what it costs (the meter must be worth spending to start), and adding a
+/// second, invisible one would produce the worst outcome a rule can have — the
+/// same-looking hit paying out sometimes and not others.
+pub fn is_smash_through(car: &CarState, facts: &ContactFacts) -> bool {
+    car.boosting & facts.rear_hit
+}
+
 /// Push an overlapping player and traffic car apart, over as many fixed steps as
 /// it takes, without teleporting either of them.
 ///
@@ -378,8 +402,27 @@ fn squareness(velocity: Vec3, normal: Vec3) -> f32 {
 /// Not touching is not tested here because it cannot be false: this is only ever
 /// reached on the no-overlap branch of the caller, which handles contact itself
 /// and marks the car as spent either way.
+///
+/// # Being alongside is swept, not sampled
+///
+/// `car_was_at` is where the player was before this step moved it, and it is
+/// what makes the rule survive speed. Asking only "is the player beside the car
+/// *now*" quietly assumes a step is shorter than the window it is testing
+/// against, and that assumption died with the boost ceiling: at a boosted speed
+/// one 60 Hz step is several metres, so a pass that plainly happened — the
+/// player was behind the car, then ahead of it — could fall entirely between two
+/// samples and pay nothing. The player would watch cars flash past in the next
+/// lane with the meter refusing to move, at exactly the moment they are driving
+/// most dangerously.
+///
+/// So the along-course test is over the *interval* the pair swept relative to
+/// each other, and a pass counts if that interval came within the window at any
+/// point in it — including passing clean through, which is what a sign change in
+/// the relative gap means. At ordinary speeds this is the same test as before,
+/// because the start of one step's interval is the end of the last one's.
 pub fn is_near_miss(
     car: &CarState,
+    car_was_at: f32,
     player_lane: i32,
     traffic_distance: f32,
     traffic_lane: i32,
@@ -387,8 +430,18 @@ pub fn is_near_miss(
     race: &RaceTuning,
     tuning: &VehicleTuning,
 ) -> bool {
-    let along = (car.distance - traffic_distance).abs();
-    let alongside = along < tuning.half_length + race.traffic_half_length + NEAR_MISS_ALONG;
+    // The relative along-course gap at each end of the step. Both bodies move,
+    // so the traffic car is rewound by its own travel rather than held still.
+    let gap_before = car_was_at - (traffic_distance - traffic_speed * DT);
+    let gap_after = car.distance - traffic_distance;
+    // The gap closes linearly across the step, so its closest approach is either
+    // an endpoint or — if the sign flipped, meaning the player went from behind
+    // to ahead — zero.
+    let crossed = gap_before.signum() != gap_after.signum();
+    let closest = crossed
+        .then_some(0.0)
+        .unwrap_or_else(|| gap_before.abs().min(gap_after.abs()));
+    let alongside = closest < tuning.half_length + race.traffic_half_length + NEAR_MISS_ALONG;
     let adjacent = (player_lane - traffic_lane).abs() == 1;
     let passing = car.forward_speed > traffic_speed;
     alongside & adjacent & passing
@@ -748,30 +801,67 @@ mod tests {
         let v = t.vehicle;
         car.forward_speed = 80.0;
         car.distance = 500.0;
+        let was_at = car.distance - car.forward_speed * DT;
 
         assert!(
-            is_near_miss(&car, 0, 500.0, 1, 30.0, &r, &v),
+            is_near_miss(&car, was_at, 0, 500.0, 1, 30.0, &r, &v),
             "the next lane over, alongside, and going past it"
         );
         assert!(
-            is_near_miss(&car, 1, 500.0, 0, 30.0, &r, &v),
+            is_near_miss(&car, was_at, 1, 500.0, 0, 30.0, &r, &v),
             "and it reads the same from the other side"
         );
         assert!(
-            !is_near_miss(&car, 1, 500.0, 1, 30.0, &r, &v),
+            !is_near_miss(&car, was_at, 1, 500.0, 1, 30.0, &r, &v),
             "the same lane is a car you are about to hit, not one you threaded"
         );
         assert!(
-            !is_near_miss(&car, -1, 500.0, 1, 30.0, &r, &v),
+            !is_near_miss(&car, was_at, -1, 500.0, 1, 30.0, &r, &v),
             "two lanes away is just traffic on the far side of the road"
         );
         assert!(
-            !is_near_miss(&car, 0, 560.0, 1, 30.0, &r, &v),
+            !is_near_miss(&car, was_at, 0, 560.0, 1, 30.0, &r, &v),
             "60 m up the road is not a pass"
         );
         assert!(
-            !is_near_miss(&car, 0, 500.0, 1, 95.0, &r, &v),
+            !is_near_miss(&car, was_at, 0, 500.0, 1, 95.0, &r, &v),
             "being overtaken is not passing — otherwise parking pays out"
+        );
+    }
+
+    /// **The assumption the boost ceiling used to guarantee.** A pass that
+    /// begins and ends inside a single step still counts; the point-sampled test
+    /// that preceded this paid nothing for it.
+    ///
+    /// The speed here is derived from the window rather than picked, and it is
+    /// deliberately past what the boost tail actually reaches today. That is the
+    /// point: point-sampling was only ever correct *because* a hard ceiling kept
+    /// a step shorter than the window, and there is no hard ceiling any more —
+    /// the speed a long boost tops out at is now an emergent balance between a
+    /// thinning pull and drag (`sim::controller::boost_headroom`), not a bound
+    /// anything enforces. A test that only exercised today's balance would be
+    /// testing the tuning; this one tests the rule.
+    #[test]
+    fn a_pass_completed_inside_one_step_still_counts() {
+        let (_, mut car, t, _) = fixture();
+        let (r, v) = (t.race, t.vehicle);
+        let window = v.half_length + r.traffic_half_length + NEAR_MISS_ALONG;
+
+        // Fast enough that one step is two and a half windows wide — the
+        // condition under which a point sample provably misses.
+        car.forward_speed = window * 2.5 / DT;
+        car.distance = 512.0;
+        let was_at = car.distance - car.forward_speed * DT;
+        // The traffic car sits between the two samples: ahead of the player a
+        // step ago, behind them now, and outside the window at both ends.
+        let traffic = car.distance - window * 1.25;
+        assert!(
+            (car.distance - traffic).abs() > window && (was_at - traffic).abs() > window,
+            "the fixture must actually straddle the window, or it proves nothing"
+        );
+        assert!(
+            is_near_miss(&car, was_at, 0, traffic, 1, 30.0, &r, &v),
+            "a pass that happened between two samples is still a pass"
         );
     }
 
@@ -785,7 +875,8 @@ mod tests {
         let (r, v) = (t.race, t.vehicle);
         car.forward_speed = 31.0;
         car.distance = 500.0;
-        assert!(is_near_miss(&car, 0, 500.0, 1, 30.0, &r, &v));
+        let was_at = car.distance - car.forward_speed * DT;
+        assert!(is_near_miss(&car, was_at, 0, 500.0, 1, 30.0, &r, &v));
     }
 
     /// Build a traffic car overlapping the player by construction.
