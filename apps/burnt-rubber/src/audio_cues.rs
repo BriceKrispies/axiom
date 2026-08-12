@@ -187,13 +187,10 @@ impl RaceAudio {
         }
         match event {
             RaceEvent::Impact { severity, strength, .. } => self.impact(*severity, *strength),
-            RaceEvent::NearMiss { .. } => self.blip(1_180.0, 0.16, 0.35),
-            // A smash is the only cue in the game that is two voices at once,
-            // because it is two things at once: something broke, and you were
-            // paid. The low tone is the hit — under everything else in the mix,
-            // which is where an impact lives — and the bright one on top is the
-            // same currency the near miss speaks in, a fifth below it so the ear
-            // files it as "that, but less".
+            // A smash is two voices at once, because it is two things at once:
+            // something broke, and you were paid. The low tone is the hit —
+            // under everything else in the mix, which is where an impact lives —
+            // and the bright one on top is the payout.
             RaceEvent::SmashedThrough { .. } => {
                 self.blip(96.0, 0.26, 0.55);
                 self.blip(786.0, 0.13, 0.30);
@@ -219,7 +216,20 @@ impl RaceAudio {
             RaceEvent::Go => self.blip(990.0, 0.6, 0.6),
             RaceEvent::Finished { .. } => self.blip(1_320.0, 1.1, 0.6),
             RaceEvent::Reset => self.blip(300.0, 0.22, 0.3),
-            RaceEvent::DriftStarted | RaceEvent::WentOffRoad => {}
+            // Silent on purpose.
+            //
+            // A near miss is the most frequent event in the game — sixty-odd a
+            // lap, and they arrive in bursts through dense traffic — so its blip
+            // was the one sound the mix could not hold: a run through the tunnel
+            // machine-gunned it. What it was announcing is already on screen and
+            // already better said, by the meter jumping and the "+" flash the
+            // award raises. The reward is the bar moving; it does not need a
+            // second voice agreeing with it sixty times a lap.
+            //
+            // The drift and the off-road are silent for the neighbouring reason:
+            // the tyre scrub already covers them continuously, and a one-shot on
+            // top of a sound that is already playing reads as a glitch.
+            RaceEvent::NearMiss { .. } | RaceEvent::DriftStarted | RaceEvent::WentOffRoad => {}
         }
     }
 
@@ -498,7 +508,7 @@ mod tests {
                 traffic: false,
                 fresh: true,
             },
-            RaceEvent::NearMiss { boost_awarded: 0.13 },
+            RaceEvent::SmashedThrough { boost_awarded: 0.05 },
             RaceEvent::BoostStarted,
             RaceEvent::CountdownTick(2),
             RaceEvent::Go,
@@ -511,15 +521,22 @@ mod tests {
             audio.on_event(&event);
             assert_ne!(drained(&mut audio), silence(), "{event:?} made no sound");
         }
-        // And the two that are deliberately silent stay silent.
-        for event in [RaceEvent::DriftStarted, RaceEvent::WentOffRoad] {
+        // And the three that are deliberately silent stay silent. The near miss
+        // is the newest of them and the one most likely to be "restored" by
+        // someone reading the award and assuming a missing cue: it is silent
+        // because the meter already says it, sixty-odd times a lap.
+        for event in [
+            RaceEvent::NearMiss { boost_awarded: 0.13 },
+            RaceEvent::DriftStarted,
+            RaceEvent::WentOffRoad,
+        ] {
             let mut audio = RaceAudio::new();
             audio.enable(true);
             audio.on_event(&event);
             assert_eq!(
                 drained(&mut audio),
                 silence(),
-                "{event:?} should be silent (the tyre scrub covers it)"
+                "{event:?} should be silent"
             );
         }
     }
