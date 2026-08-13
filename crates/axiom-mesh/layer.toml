@@ -1,0 +1,59 @@
+[layer]
+name = "mesh"
+crate_name = "axiom-mesh"
+depends_on = ["kernel", "math"]
+
+meaningful_dependency = """
+Mesh adapts math's analytic geometry (Vec2/Vec3/Vec4 attribute values, Mat4
+transforms, Aabb/Sphere bounding volumes) and the kernel's determinism
+primitives (StableHash for a canonical digest, BinaryWriter/BinaryReader and
+SchemaVersion for versioned little-endian serialization, KernelError as a
+deserialization cause, Meters/Ratio to keep naked floats off the boundary) into
+the engine's one canonical topological artifact: a validated indexed triangle
+mesh. Math owns points and volumes but no connectivity; this layer adds the
+index buffer, the attribute-stream alignment contract, and the operations that
+are intrinsic to that contract - deriving bounds from positions, generating
+vertex normals from triangle topology, generating tangents from UV space,
+transforming positions/normals/tangents consistently, combining meshes, welding
+vertices, and digesting the whole thing to a stable hash. It owns no generator:
+producing geometry from a description is the mesh-ops layer's job.
+"""
+
+introduced_capabilities = [
+    "Mesh",
+    "MeshStreams",
+    "MeshError",
+    "MeshErrorCode",
+    "MeshResult",
+    "MESH_SCHEMA_VERSION",
+]
+
+consumed_capabilities = [
+    "Vec2",
+    "Vec3",
+    "Vec4",
+    "Mat4",
+    "Aabb",
+    "Sphere",
+    "StableHash",
+    "BinaryWriter",
+    "BinaryReader",
+    "SchemaVersion",
+    "KernelError",
+    "Meters",
+]
+
+# The mesh value type is expressed entirely in math attribute values.
+[[proof_exports]]
+export = "Mesh"
+must_reference = ["Vec2", "Vec3", "Vec4"]
+
+# Construction carries the same math value streams across the boundary.
+[[proof_exports]]
+export = "MeshStreams"
+must_reference = ["Vec2", "Vec3", "Vec4"]
+
+# The error model wraps a kernel error as its deserialization cause.
+[[proof_exports]]
+export = "MeshError"
+must_reference = ["KernelError"]

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- An inline empty icon. Without it the browser probes /favicon.ico, gets a
+       404, and logs a console error — which makes "the console must be clean"
+       a useless check for anyone verifying this page. -->
+  <link rel="icon" href="data:," />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Axiom — Procedural Mesh Crucible</title>
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #070a0f; color: #d8e8f6;
+                 font-family: ui-monospace, Menlo, Consolas, monospace;
+                 /* The canvas owns every gesture inside its box; the page must
+                    still never scroll sideways because of what is below it. */
+                 overflow-x: hidden; -webkit-text-size-adjust: 100%; }
+    main { display: flex; flex-direction: column; align-items: center; gap: 14px;
+           padding: 16px 12px 48px; padding-left: max(12px, env(safe-area-inset-left));
+           padding-right: max(12px, env(safe-area-inset-right)); box-sizing: border-box; width: 100%; }
+    h1 { font-size: clamp(15px, 4.4vw, 20px); letter-spacing: .16em; margin: 4px 0 0;
+         text-transform: uppercase; text-align: center; }
+    p.lede { max-width: min(94vw, 1180px); margin: 0; font-size: clamp(12px, 3.2vw, 13px);
+             line-height: 1.6; opacity: .72; }
+    canvas { width: min(94vw, 1180px); max-width: 100%; height: auto; aspect-ratio: 16 / 9;
+             display: block; background: #000; border: 1px solid #1b2634;
+             /* Required, and not sufficient on its own — the Rust side also
+                calls preventDefault() on every pointer and wheel event. */
+             touch-action: none; }
+    p.hint { margin: 0; font-size: clamp(11px, 3vw, 12.5px); letter-spacing: .04em;
+             text-align: center; color: #9fd4ff; opacity: .82; max-width: min(94vw, 1180px); }
+    p.hint b { color: #ffd79a; font-weight: 600; }
+    nav { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: min(94vw, 1180px); }
+    nav a { font-size: 12px; letter-spacing: .08em; padding: 7px 12px; border-radius: 4px;
+            border: 1px solid #24384c; color: #9fd4ff; text-decoration: none; }
+    nav a:hover { background: #0f1a26; }
+    section { width: min(94vw, 1180px); max-width: 100%; }
+    h2 { font-size: 13px; letter-spacing: .18em; text-transform: uppercase; opacity: .6;
+         margin: 18px 0 8px; }
+    /* The legend is genuinely wide. It scrolls inside its own box rather than
+       widening the page — a narrow screen must never scroll horizontally. */
+    .scroller { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 12.5px; }
+    th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #14202c; vertical-align: top; }
+    th { opacity: .55; font-weight: 600; letter-spacing: .06em; }
+    td.op { color: #8fd8b0; }
+    td.name { color: #ffd79a; white-space: nowrap; }
+    .note { font-size: 12px; line-height: 1.6; opacity: .6; margin-top: 10px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Procedural Mesh Crucible</h1>
+  <p class="lede">
+    Every visible triangle below was produced by an <code>axiom-mesh-ops</code> operator and validated by
+    <code>axiom-mesh</code>. There is no imported geometry in this app and no hand-typed vertex array —
+    the road is a swept profile, the wheels are lathes, the terrain is a meshed height array, and the
+    blob is a marching-cubes extraction of a signed-distance blend.
+  </p>
+
+  <canvas id="axiom-crucible-canvas"></canvas>
+
+  <p class="hint">
+    <b>drag</b> to orbit · <b>pinch</b> or <b>wheel</b> to zoom · <b>two fingers</b> or <b>right-drag</b> to pan
+  </p>
+
+  <nav>
+    <a href="?">shaded · base</a>
+    <a href="?detail=dense">dense</a>
+    <a href="?detail=coarse">coarse</a>
+    <a href="?view=flat">flat normals</a>
+    <a href="?view=smooth">smooth normals</a>
+    <a href="?view=normals">normal chart</a>
+    <a href="?detail=coarse&view=flat">coarse + flat</a>
+  </nav>
+
+  <section>
+    <h2>Legend — object → operator</h2>
+    <div class="scroller">
+    <table>
+      <thead><tr><th>Object</th><th>Operator chain</th></tr></thead>
+      <tbody>
+        <tr><td class="name">terrain</td><td class="op">heightfield_mesh over an analytic sine sum, with a border skirt</td></tr>
+        <tr><td class="name">road</td><td class="op">sweep — slab profile along Curve::catmull_rom, banked by SweepOptions::twist</td></tr>
+        <tr><td class="name">tunnel</td><td class="op">sweep — closed arch profile along a path derived from the road, CapPolicy::None</td></tr>
+        <tr><td class="name">vehicle</td><td class="op">loft (5 sections) + revolve (4 wheels) + box_mesh / cube details, mesh::combine</td></tr>
+        <tr><td class="name">tree-0 … tree-3</td><td class="op">sweep with start_scale &gt; end_scale (tapered trunk) + icosphere / capsule crown</td></tr>
+        <tr><td class="name">building</td><td class="op">extrude of a concave L-shaped footprint, stacked into floors, mesh::combine</td></tr>
+        <tr><td class="name">sculpture</td><td class="op">implicit_surface_mesh — marching cubes over a smooth-min blend of 5 sphere SDFs</td></tr>
+        <tr><td class="name">prim-cube … prim-triangle</td><td class="op">cube, box_mesh, rounded_box, uv_sphere, icosphere, cylinder, cone, frustum, capsule, torus, disk, annulus, quad, grid, triangle</td></tr>
+        <tr><td class="name">lod-icosphere-0…3</td><td class="op">icosphere at subdivisions 0, 1, 2, 3 — same silhouette, four densities</td></tr>
+        <tr><td class="name">lod-uv-sphere-base</td><td class="op">uv_sphere — the reference the pair below is measured against</td></tr>
+        <tr><td class="name">lod-loop-subdivided</td><td class="op">subdivide_loop over that sphere (refines and smooths)</td></tr>
+        <tr><td class="name">lod-quadric-simplified</td><td class="op">simplify_quadric over that sphere (collapses by error, keeps silhouette)</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2>Camera</h2>
+    <div class="scroller">
+    <table>
+      <thead><tr><th>Gesture</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td class="name">drag (1 finger / left mouse)</td><td>Orbit. Yaw is unbounded; pitch stops ~6.9° short of each pole, so the horizon never flips.</td></tr>
+        <tr><td class="name">pinch (2 fingers)</td><td>Zoom, from the change in the contacts' separation. The same move also pans by their midpoint's travel.</td></tr>
+        <tr><td class="name">wheel</td><td>Zoom, exponentially — a sixth of the distance per notch, so it feels the same at 4 units out and at 400.</td></tr>
+        <tr><td class="name">two-finger drag · right-drag · shift-drag</td><td>Pan. The world distance scales with the orbit distance, so a point under the pointer stays under it.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2>Debug views</h2>
+    <div class="scroller">
+    <table>
+      <thead><tr><th>Query</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td class="name">?detail=base|dense|coarse</td><td>Re-tessellates the whole scene. Only tessellation counts change — the authoring is identical.</td></tr>
+        <tr><td class="name">?view=flat</td><td>Every mesh re-normalled with generate_flat_normals: unwelded, one normal per triangle. Facets appear on the swept and lathed surfaces.</td></tr>
+        <tr><td class="name">?view=smooth</td><td>Every mesh re-normalled with generate_normals (area-weighted). Compare against the operators' own normals in the default view.</td></tr>
+        <tr><td class="name">?view=normals</td><td>Colour by normal. Each vertex's UV is replaced by its normal's (x, y) mapped into 0..1 and sampled from an app-authored chart texture: red rises with +X, green with +Y, blue falls off toward the rim. The two z-hemispheres share a chart cell.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p class="note">
+      Wireframe and a per-object UV checker are <em>not</em> available: the renderer has one triangle-list
+      pipeline with no line topology, and a checker overlay would need a second UV set alongside the
+      operator-authored one. Both are recorded as limitations in the app's NOTES.md rather than worked
+      around in the renderer. The presentation surface is sized once, to the device, at startup — a
+      rotation or window resize reloads the page, for the reason recorded there too.
+    </p>
+  </section>
+</main>
+<script type="module">
+  import init, { crucible_start } from "./pkg/axiom_procedural_mesh_crucible.js";
+  await init();
+  crucible_start();
+</script>
+</body>
+</html>

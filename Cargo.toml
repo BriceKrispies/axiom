@@ -31,6 +31,12 @@ members = [
     "crates/axiom-proc-core",
     "crates/axiom-proc-texture",
     "crates/axiom-proc-mesh",
+    # The canonical neutral triangle-mesh representation, and the deterministic
+    # geometry library that constructs it. Both are layers: seven engine modules
+    # need to name mesh geometry, and an engine module may never depend on
+    # another module.
+    "crates/axiom-mesh",
+    "crates/axiom-mesh-ops",
     "crates/axiom-zones",
     "modules/axiom-scene",
     "modules/axiom-assets",
@@ -108,6 +114,9 @@ members = [
     # Bend It: the mobile-first penalty-kick trajectory sculptor (composition
     # leaf; every soccer concept stays app-local).
     "apps/bend-it",
+    # The procedural mesh crucible: the browser proof that every visible shape in
+    # a coherent scene comes out of axiom-mesh-ops (composition leaf).
+    "apps/procedural-mesh-crucible",
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",

@@ -75,6 +75,11 @@ impl MathError {
         MathError::new(MathErrorCode::InvalidMatrixOperation, message)
     }
 
+    /// Shorthand for [`MathErrorCode::InvalidCurve`].
+    pub const fn invalid_curve(message: &'static str) -> Self {
+        MathError::new(MathErrorCode::InvalidCurve, message)
+    }
+
     /// Shorthand for [`MathErrorCode::DeserializationFailed`] that preserves
     /// the kernel binary-reader cause.
     pub const fn deserialization_failed(message: &'static str, cause: KernelError) -> Self {

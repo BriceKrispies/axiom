@@ -1,0 +1,7 @@
+[app]
+name = "procedural-mesh-crucible"
+crate_name = "axiom-procedural-mesh-crucible"
+
+allowed_layers = ["kernel", "math", "mesh", "mesh-ops"]
+
+allowed_modules = ["engine", "windowing"]

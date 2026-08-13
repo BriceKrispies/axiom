@@ -48,6 +48,10 @@ mod plane_side;
 mod ray;
 mod sphere;
 
+mod curve;
+mod curve_kind;
+mod curve_sample;
+
 mod geo;
 
 mod math_api;
@@ -76,6 +80,10 @@ pub use plane::Plane;
 pub use plane_side::PlaneSide;
 pub use ray::Ray;
 pub use sphere::Sphere;
+
+pub use curve::Curve;
+pub use curve_kind::CurveKind;
+pub use curve_sample::CurveSample;
 
 pub use geo::great_circle_distance;
 pub use geo::latitude;

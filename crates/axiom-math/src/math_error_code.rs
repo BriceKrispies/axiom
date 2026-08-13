@@ -30,6 +30,11 @@ pub enum MathErrorCode {
     /// A scalar operation was given an inverted range (e.g. `clamp` with
     /// `lo > hi`); the layer rejects it rather than silently swapping bounds.
     InvalidScalarRange = 9,
+    /// A curve was constructed from points that cannot define one (too few for
+    /// its kind, non-finite, or two coincident consecutive points — which would
+    /// make the span's derivative undefined), or sampled with fewer than the
+    /// two samples a span needs.
+    InvalidCurve = 10,
 }
 
 impl MathErrorCode {
@@ -48,6 +53,7 @@ mod tests {
         assert_eq!(MathErrorCode::DivideByZero.raw(), 1);
         assert_eq!(MathErrorCode::DeserializationFailed.raw(), 8);
         assert_eq!(MathErrorCode::InvalidScalarRange.raw(), 9);
+        assert_eq!(MathErrorCode::InvalidCurve.raw(), 10);
     }
 
     #[test]

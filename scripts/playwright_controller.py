@@ -89,6 +89,20 @@ SCREENSHOT_DIR = STATE_DIR / "screenshots"
 
 # Chromium flags that make WebGPU/WebGL usable (the rotating-cube slice needs a
 # real GPU adapter). Harmless on pages that do not use the GPU.
+# Launch the FULL Chromium build, not Playwright's `chromium_headless_shell`.
+#
+# The headless shell ships only `vk_swiftshader.dll` — it carries no `dxil.dll`
+# and no `dxcompiler.dll`. Dawn's D3D12 backend loads those two to compile
+# shaders (`EnsureDXCLibraries`, PlatformFunctionsD3D12.cpp), so on the shell
+# `requestDevice` fails with `DynamicLib.Open: dxil.dll Windows Error: 87` and
+# every WebGPU page silently drops to the WebGL2 fallback — which, among other
+# things, cannot draw skinned geometry. `channel="chromium"` selects the full
+# `chrome-win64` build, which does ship both DLLs, and it still runs headless.
+#
+# Override with AXIOM_PW_CHANNEL (e.g. "chrome" for the installed Google Chrome,
+# or "" to fall back to the bundled default) if a future Playwright changes this.
+BROWSER_CHANNEL = os.environ.get("AXIOM_PW_CHANNEL", "chromium") or None
+
 BROWSER_ARGS = [
     "--enable-unsafe-webgpu",
     "--enable-features=Vulkan",
@@ -135,7 +149,9 @@ class Daemon:
 
         pw = self._start_playwright()
         try:
-            return pw.chromium.launch(headless=HEADLESS, args=BROWSER_ARGS)
+            return pw.chromium.launch(
+                headless=HEADLESS, args=BROWSER_ARGS, channel=BROWSER_CHANNEL
+            )
         except Error as exc:
             # First run: the Chromium binary is not installed yet.
             if "install" in str(exc).lower() or "executable" in str(exc).lower():
@@ -144,7 +160,9 @@ class Daemon:
                     [sys.executable, "-m", "playwright", "install", "chromium"],
                     check=True,
                 )
-                return pw.chromium.launch(headless=HEADLESS, args=BROWSER_ARGS)
+                return pw.chromium.launch(
+                    headless=HEADLESS, args=BROWSER_ARGS, channel=BROWSER_CHANNEL
+                )
             raise
 
     def ensure_browser(self) -> None:

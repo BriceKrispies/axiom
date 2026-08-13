@@ -1,0 +1,62 @@
+[package]
+name = "axiom-procedural-mesh-crucible"
+description = "Axiom app: the procedural mesh crucible. A composition-leaf browser/WASM proof that every visible shape in a coherent scene — a banked road, a tunnel, a vehicle, trees, a building, terrain, an implicit sculpture, the primitive catalogue and a detail ladder — is produced by axiom-mesh-ops operators and validated by axiom-mesh. No imported geometry, no hand-typed vertex arrays."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# `cdylib` for the app's own wasm bundle (the `crucible_start` entry); `rlib` so
+# native integration tests can call the pure `crucible_meshes` scene builder
+# without a browser.
+[lib]
+name = "axiom_procedural_mesh_crucible"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+# The engine umbrella (module `engine`): App/RunningApp, MeshData registration,
+# materials, camera, lights, spawning.
+axiom = { path = "../../modules/axiom" }
+# The unit-safe scalar quantities every mesh operator speaks.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+# Vectors, transforms, matrices, and the `Curve` a sweep rides.
+axiom-math = { path = "../../crates/axiom-math" }
+# The canonical validated mesh + its bounds/normals/transform/combine/digest ops.
+axiom-mesh = { path = "../../crates/axiom-mesh" }
+# The deterministic geometry library: every shape in this app comes from here.
+axiom-mesh-ops = { path = "../../crates/axiom-mesh-ops" }
+
+# Browser/live arm only: the wasm-bindgen glue, the panic hook, the live
+# windowing presentation loop, and the query-string read that selects a debug
+# view. Confined to wasm32, so native `cargo test` compiles none of it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+axiom-windowing = { path = "../../modules/axiom-windowing" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+# Window/Location: the query-string read and the resize-settled reload.
+# Document/Element/HtmlElement/HtmlCanvasElement/CssStyleDeclaration: finding the
+# canvas, capturing pointers on it, and pinning `touch-action: none`.
+# EventTarget/Event/MouseEvent/PointerEvent/WheelEvent/AddEventListenerOptions:
+# the orbit camera's gestures — one pointer path for mouse, touch and pen, plus a
+# non-passive wheel listener so `preventDefault()` is honoured.
+web-sys = { version = "0.3", features = [
+    "AddEventListenerOptions",
+    "CssStyleDeclaration",
+    "Document",
+    "DomRect",
+    "Element",
+    "Event",
+    "EventTarget",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "Location",
+    "MouseEvent",
+    "PointerEvent",
+    "WheelEvent",
+    "Window",
+] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

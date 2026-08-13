@@ -1,0 +1,22 @@
+[package]
+name = "axiom-mesh-ops"
+description = "Axiom layer: the deterministic geometry library that constructs axiom-mesh Mesh values. Primitive generators (triangle, quad, box, cube, UV sphere, icosphere, cylinder, cone, frustum, capsule, torus, disk, annulus, grid, rounded box), constructive operators (ear-clipping polygon triangulation, profile extrusion, parallel-transport sweep along a math Curve, multi-section loft, revolution/lathe), sampled-data surface operators (parametric surface tessellation, heightfield-to-mesh with skirts, marching-cubes implicit-field extraction), and refinement (midpoint + Loop subdivision, quadric-error simplification). Every operator is a pure function from explicit input data to a validated Mesh: no ambient state, no wall clock, no unseeded randomness, no callbacks. depends_on = kernel, math, mesh."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Unit-safe scalar quantities (Meters, Radians, Ratio) keep naked floats off
+# every operator's public boundary.
+axiom-kernel = { path = "../axiom-kernel" }
+# Vec2/Vec3/Vec4 attribute values, Mat4/Transform for section placement, Curve
+# for sweep paths, Aabb for derived extents.
+axiom-math = { path = "../axiom-math" }
+# The output type of every operator, plus the shared MeshError vocabulary and
+# the weld/combine mechanics the generators reuse rather than re-implement.
+axiom-mesh = { path = "../axiom-mesh" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

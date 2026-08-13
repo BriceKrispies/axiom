@@ -1,0 +1,59 @@
+[layer]
+name = "mesh-ops"
+crate_name = "axiom-mesh-ops"
+depends_on = ["kernel", "math", "mesh"]
+
+meaningful_dependency = """
+Mesh-ops adapts the mesh layer's canonical representation (Mesh, MeshStreams,
+MeshError, and its weld/combine/normal-generation mechanics), math's analytic
+geometry (Vec2/Vec3/Vec4, Mat4, Transform, and the Curve primitive that gives a
+sweep its path), and the kernel's unit-safe quantities (Meters, Radians, Ratio)
+into the engine's deterministic geometry library. The mesh layer can only
+validate and manipulate geometry it is handed; this layer is what produces it -
+turning explicit descriptions (a radius and a segment count, a 2D profile and an
+extrusion distance, a profile and a curve, a sampled height grid, a sampled
+scalar field) into validated meshes. Every operator is a pure function of its
+inputs: it owns no state, reads no clock, takes no callback, and never reaches
+for a renderer, a scene, or a resource table. Semantic generators - roads,
+trees, buildings, vehicles - are compositions of these operators and belong to
+an app or module, never here.
+"""
+
+introduced_capabilities = [
+    "Segments",
+    "Rings",
+    "Subdivisions",
+    "Samples",
+    "DetailBudget",
+    "Profile",
+    "ProfileWinding",
+    "CapPolicy",
+]
+
+consumed_capabilities = [
+    "Mesh",
+    "MeshStreams",
+    "MeshError",
+    "MeshResult",
+    "Vec2",
+    "Vec3",
+    "Vec4",
+    "Mat4",
+    "Transform",
+    "Curve",
+    "Meters",
+    "Radians",
+    "Ratio",
+]
+
+# A profile is a polygon of math Vec2 points; validating it is the gate every
+# constructive operator passes through.
+[[proof_exports]]
+export = "Profile"
+must_reference = ["Vec2", "MeshError"]
+
+# The detail vocabulary reports failures in the mesh layer's error type rather
+# than inventing a second one.
+[[proof_exports]]
+export = "Segments"
+must_reference = ["MeshError", "MeshResult"]

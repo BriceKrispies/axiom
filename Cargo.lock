@@ -567,6 +567,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-mesh"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+]
+
+[[package]]
+name = "axiom-mesh-ops"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-mesh",
+]
+
+[[package]]
 name = "axiom-net-protocol"
 version = "0.1.0"
 dependencies = [
@@ -793,6 +810,21 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-proc",
+]
+
+[[package]]
+name = "axiom-procedural-mesh-crucible"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-mesh",
+ "axiom-mesh-ops",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

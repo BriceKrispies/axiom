@@ -1,0 +1,20 @@
+[package]
+name = "axiom-mesh"
+description = "Axiom layer: the canonical neutral CPU-side representation of indexed triangle geometry. Owns the Mesh value type (parallel position/index/normal/uv/tangent/color/skin attribute streams), its structural + finite-value validation, and the operations intrinsic to the representation itself — derived AABB and bounding-sphere bounds, area-weighted vertex normals, UV-space tangents, Mat4 transform with correct normal/tangent handling, mesh combination, deterministic vertex welding and degenerate-triangle removal, a canonical StableHash digest, and versioned little-endian binary serialization. It knows nothing of rendering, GPU layouts, materials, scenes, resources, or assets: an imported mesh and a procedurally generated mesh converge on this one type. depends_on = kernel, math."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Determinism + serialization primitives (StableHash, BinaryWriter/BinaryReader,
+# SchemaVersion, KernelError) and the unit-safe scalar quantities (Meters, Ratio)
+# that keep naked floats off the public boundary.
+axiom-kernel = { path = "../axiom-kernel" }
+# Every attribute stream is expressed in math value types (Vec2/Vec3/Vec4), and
+# the derived bounds are math's Aabb/Sphere; transforms are math's Mat4.
+axiom-math = { path = "../axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
