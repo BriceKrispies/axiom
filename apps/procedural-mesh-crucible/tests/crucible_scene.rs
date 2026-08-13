@@ -1,8 +1,9 @@
-//! The crucible's proof suite.
+//! The crucible's geometry proof suite.
 //!
 //! This app *is* the proof that the mesh layers work, so its integration tests
-//! are not smoke tests. They assert four properties, on every generated object,
-//! at every variant:
+//! are not smoke tests. They assert four properties, on every **distinct**
+//! generated mesh in the scene — the terrain and the dog's 23 bones — at every
+//! variant:
 //!
 //! 1. **Validity** — every object is a real `Mesh`: triangles, finite positions,
 //!    in-range indices, one normal per vertex, sane bounds.
@@ -12,19 +13,26 @@
 //!    differ in vertex and index count, and the concrete numbers are printed.
 //! 4. **Digest sensitivity** — changing a generator parameter changes the
 //!    digest, and restoring it restores the original digest exactly.
+//!
+//! The *crowd* — which dog walks where, in what colour, which way round — is
+//! proved separately, in `tests/rings.rs`. The split is the same one the code
+//! makes: this file is about geometry, and there is exactly one dog's worth of
+//! it no matter how many dogs are on screen.
 
 use axiom_mesh::{aabb, bounding_sphere, digest, Mesh};
 use axiom_procedural_mesh_crucible::{crucible_meshes, CrucibleObject, CrucibleVariant};
 
 /// The objects the topology proof names explicitly. Each must change vertex and
-/// index count between `Base`, `Dense` and `Coarse`.
+/// index count between `Base`, `Dense` and `Coarse` — one of every operator the
+/// scene still uses: a heightfield, a loft, three different sweeps and an
+/// icosphere.
 const TOPOLOGY_WITNESSES: [&str; 6] = [
-    "road",
-    "tunnel",
     "terrain",
-    "sculpture",
-    "building",
-    "prim-uv-sphere",
+    "dog-pelvis",
+    "dog-neck",
+    "dog-head",
+    "dog-fore-l-upper",
+    "dog-tail-base",
 ];
 
 fn scene(variant: CrucibleVariant) -> Vec<CrucibleObject> {
@@ -47,9 +55,12 @@ fn counts(mesh: &Mesh) -> (usize, usize) {
 fn every_generated_object_is_valid_renderable_geometry() {
     for variant in CrucibleVariant::ALL {
         let objects = scene(variant);
-        assert!(
-            objects.len() >= 28,
-            "{} scene only produced {} objects",
+        // The terrain plus one dog's 23 bones. Not one per dog: the rings are
+        // instances of this set, and `tests/rings.rs` holds that claim.
+        assert_eq!(
+            objects.len(),
+            24,
+            "{} scene produced {} distinct meshes",
             variant.label(),
             objects.len()
         );
@@ -90,23 +101,15 @@ fn every_generated_object_is_valid_renderable_geometry() {
                     .all(|n| n.length_squared() > 0.25 && n.length_squared() < 4.0),
                 "{label} has a degenerate normal"
             );
-            // Every operator that has a natural parameterization emits UVs. The
-            // marching-cubes extraction genuinely has none — an isosurface has
-            // no authored parameter domain — so it is the one documented
-            // exception, and the app registers it with the engine's
-            // default-to-origin UVs. Asserting the exception BY NAME is what
-            // stops a future operator quietly dropping its UVs.
-            match mesh.has_uvs() {
-                true => assert_eq!(
-                    mesh.uvs().len(),
-                    mesh.vertex_count(),
-                    "{label} UV count does not match its vertex count"
-                ),
-                false => assert_eq!(
-                    object.name, "sculpture",
-                    "{label} carries no UVs and is not the implicit surface"
-                ),
-            }
+            // Every operator left in the scene has a natural parameterization,
+            // so every object carries UVs. (The one documented exception used to
+            // be the marching-cubes sculpture, which no longer stands here.)
+            assert!(mesh.has_uvs(), "{label} carries no UVs");
+            assert_eq!(
+                mesh.uvs().len(),
+                mesh.vertex_count(),
+                "{label} UV count does not match its vertex count"
+            );
 
             let bounds = aabb(mesh).unwrap_or_else(|e| panic!("{label} has bounds: {e:?}"));
             let sphere =
@@ -130,7 +133,12 @@ fn every_generated_object_is_valid_renderable_geometry() {
         names.sort_unstable();
         let count = names.len();
         names.dedup();
-        assert_eq!(names.len(), count, "{} has duplicate object names", variant.label());
+        assert_eq!(
+            names.len(),
+            count,
+            "{} has duplicate object names",
+            variant.label()
+        );
     }
 }
 
@@ -147,7 +155,12 @@ fn building_the_same_variant_twice_is_byte_identical() {
         );
 
         for (a, b) in first.iter().zip(second.iter()) {
-            assert_eq!(a.name, b.name, "{} object order is not stable", variant.label());
+            assert_eq!(
+                a.name,
+                b.name,
+                "{} object order is not stable",
+                variant.label()
+            );
             assert_eq!(
                 digest(&a.mesh),
                 digest(&b.mesh),
@@ -155,26 +168,31 @@ fn building_the_same_variant_twice_is_byte_identical() {
                 variant.label(),
                 a.name
             );
-            assert_eq!(a.mesh, b.mesh, "{}/{} differs stream-wise", variant.label(), a.name);
+            assert_eq!(
+                a.mesh,
+                b.mesh,
+                "{}/{} differs stream-wise",
+                variant.label(),
+                a.name
+            );
         }
 
         // The whole-scene fingerprint: the ordered digest vector.
         let fingerprint: Vec<u64> = first.iter().map(|o| digest(&o.mesh).raw()).collect();
         let replay: Vec<u64> = second.iter().map(|o| digest(&o.mesh).raw()).collect();
         assert_eq!(
-            fingerprint,
-            replay,
+            fingerprint, replay,
             "{} whole-scene digest vector is not deterministic",
             variant.label()
         );
         println!(
-            "[determinism] {:>6}: {} objects, scene digest {:016x}",
+            "[determinism] {:>6}: {} distinct meshes, scene digest {:016x}",
             variant.label(),
             first.len(),
-            axiom_mesh::digest(&axiom_mesh::combine(
-                &first.iter().map(|o| o.mesh.clone()).collect::<Vec<Mesh>>()
+            axiom_mesh::digest(
+                &axiom_mesh::combine(&first.iter().map(|o| o.mesh.clone()).collect::<Vec<Mesh>>())
+                    .expect("the whole scene combines")
             )
-            .expect("the whole scene combines"))
             .raw()
         );
     }
@@ -212,19 +230,14 @@ fn the_variants_really_re_tessellate() {
     }
 
     // Whole-scene totals, as one headline number per variant.
-    for (label, objects) in [
-        ("base", &base),
-        ("dense", &dense),
-        ("coarse", &coarse),
-    ] {
+    for (label, objects) in [("base", &base), ("dense", &dense), ("coarse", &coarse)] {
         let vertices: usize = objects.iter().map(|o| o.mesh.vertex_count()).sum();
         let triangles: usize = objects.iter().map(|o| o.mesh.triangle_count()).sum();
-        println!("[totals] {label:>6}: {vertices} vertices, {triangles} triangles");
+        println!("[totals] {label:>6}: {vertices} vertices, {triangles} triangles (uploaded once)");
     }
 
-    let total = |objects: &[CrucibleObject]| -> usize {
-        objects.iter().map(|o| o.mesh.triangle_count()).sum()
-    };
+    let total =
+        |objects: &[CrucibleObject]| -> usize { objects.iter().map(|o| o.mesh.triangle_count()).sum() };
     assert!(total(&dense) > total(&base));
     assert!(total(&base) > total(&coarse));
 }
@@ -260,34 +273,13 @@ fn a_parameter_change_moves_the_digest_and_restoring_it_moves_it_back() {
         .zip(changed.iter())
         .filter(|(a, b)| a != b)
         .count();
-    println!("[digest] {moved} of {} objects moved base -> dense", original.len());
+    println!(
+        "[digest] {moved} of {} objects moved base -> dense",
+        original.len()
+    );
     assert!(
         moved * 2 > original.len(),
         "only {moved} of {} digests moved",
         original.len()
     );
-}
-
-#[test]
-fn the_detail_ladder_refines_and_reduces_the_same_sphere() {
-    let objects = scene(CrucibleVariant::Base);
-    let base = find(&objects, "lod-uv-sphere-base").mesh.triangle_count();
-    let refined = find(&objects, "lod-loop-subdivided").mesh.triangle_count();
-    let reduced = find(&objects, "lod-quadric-simplified")
-        .mesh
-        .triangle_count();
-    println!("[ladder] uv-sphere {base} tris -> loop {refined} -> quadric {reduced}");
-    assert!(refined > base, "subdivide_loop did not refine");
-    assert!(reduced < base, "simplify_quadric did not reduce");
-
-    // And the four generated rungs strictly increase in density.
-    let rungs: Vec<usize> = (0..4)
-        .map(|level| {
-            find(&objects, ["lod-icosphere-0", "lod-icosphere-1", "lod-icosphere-2", "lod-icosphere-3"][level])
-                .mesh
-                .triangle_count()
-        })
-        .collect();
-    println!("[ladder] icosphere rungs: {rungs:?}");
-    assert!(rungs.windows(2).all(|w| w[1] > w[0]));
 }

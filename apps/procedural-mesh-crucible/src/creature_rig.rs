@@ -1,11 +1,10 @@
 //! [`CreatureRig`]: a creature's geometry cut into **named bones**, and the
 //! forward pass that resolves them into world transforms.
 //!
-//! The two creatures in this scene exist twice over. `dog()` / `human()` hand
-//! back one welded mesh — the honest answer to "can these operators compose into
-//! an articulated body?", and what the geometry tests digest. `dog_parts()` /
-//! `human_parts()` hand back the *same geometry* cut at its joints, so the app
-//! can move it.
+//! The dog in this scene exists twice over. `dog()` hands back one welded mesh —
+//! the honest answer to "can these operators compose into an articulated body?",
+//! and what the geometry tests digest. `dog_parts()` hands back the *same
+//! geometry* cut at its joints, so the app can move it.
 //!
 //! Both come from one authoring pass, and that is the point: a rig whose bones
 //! were authored separately from the combined mesh would drift, silently, the
@@ -148,7 +147,7 @@ impl CreatureRig {
     }
 
     /// The whole creature as **one** mesh, posed at rest under `root` — the
-    /// combined shape `dog()` / `human()` return.
+    /// combined shape `dog()` returns.
     ///
     /// Normals are regenerated after the combine, not carried through it: the
     /// head and the dog's skull are non-uniformly scaled, and a scaled normal is
@@ -208,9 +207,6 @@ pub struct LimbChain {
     /// From `contact` to the extra bone's own far end, in creature space.
     /// Meaningless when `extra` is `None`.
     pub ankle_offset: Vec3,
-    /// Whether this limb's contact is planted on the ground (a leg) or carried
-    /// in the air by the body (an arm).
-    pub grounded: bool,
     /// The upper bone's length, in creature-local units.
     pub len_upper: f32,
     /// The lower bone's length, in creature-local units.
@@ -313,7 +309,7 @@ pub fn swept(
 ) -> MeshResult<Mesh> {
     let segments = Segments::new(params.ring_segments.max(3))?;
     let profile = Profile::circle(meters(radius), segments)?;
-    let samples = Samples::new(params.trunk_samples.max(2))?;
+    let samples = Samples::new(params.sweep_samples.max(2))?;
     generate_normals(&sweep(
         &profile,
         path,

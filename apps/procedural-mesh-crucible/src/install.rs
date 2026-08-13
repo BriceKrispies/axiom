@@ -7,6 +7,17 @@
 //! ever stops being true it is a signal that the umbrella and the mesh layer
 //! have drifted, and the fix belongs at that boundary rather than here.
 //!
+//! ## Geometry is registered once, and instanced
+//!
+//! The scene holds two rings of dogs, and every one of them is the **same**
+//! 23 bone meshes. Those meshes are uploaded once, here, and each dog is then
+//! `bone_count` more *instances* of them — a transform and a material apiece.
+//! Registering a mesh per dog would multiply the vertex upload and the GPU
+//! memory by the crowd size for no visible difference whatsoever, so this
+//! function is written to make that mistake hard: it registers from
+//! `scene.objects` (which is the distinct-mesh set, by construction) and spawns
+//! from `scene.dogs` (which carries no geometry at all).
+//!
 //! The same function serves the browser arm and the native harness, so what a
 //! native test builds is byte-for-byte what the page presents.
 
@@ -22,17 +33,23 @@ use crate::variant::CrucibleVariant;
 /// This pair is the app's *one* authored framing. `src/orbit.rs` derives the
 /// interactive camera's opening yaw/pitch/distance from it rather than typing a
 /// second copy of the same shot, so moving these numbers moves both.
-pub(crate) const CAMERA_EYE: [f32; 3] = [0.0, 30.0, -112.0];
-pub(crate) const CAMERA_TARGET: [f32; 3] = [0.0, 3.0, -22.0];
+///
+/// It is set to frame **both rings**: the outer ring is 46 units across the
+/// origin and the inner one 26, so the shot has to hold a 92-unit disc with
+/// 11-unit-tall animals standing on it. The eye is high and well back, looking
+/// down at the middle of the disc, which is also the angle at which the two
+/// windings read as opposite rather than as one blur.
+pub(crate) const CAMERA_EYE: [f32; 3] = [0.0, 54.0, -90.0];
+pub(crate) const CAMERA_TARGET: [f32; 3] = [0.0, 0.0, 2.0];
 
 /// The camera's vertical field of view, in degrees. Shared with `src/orbit.rs`,
 /// which needs it to make a pan track the pointer at exactly 1:1.
 pub(crate) const CAMERA_FOV_DEGREES: f32 = 58.0;
 
-/// An installed crucible: the scene node each generated object was spawned as,
-/// and the animation that moves the two creatures through them.
+/// An installed crucible: the scene node each spawned instance was created as,
+/// and the animation that walks the two rings through them.
 ///
-/// The entity list is what makes the creatures animatable at all. Geometry is
+/// The entity list is what makes the dogs animatable at all. Geometry is
 /// uploaded once, at bind; from then on the only thing a frame may change is an
 /// **instance transform**, and an instance transform is addressed by the entity
 /// that carries it. Handing them back here — rather than counting objects and
@@ -40,16 +57,17 @@ pub(crate) const CAMERA_FOV_DEGREES: f32 = 58.0;
 /// was built from.
 #[derive(Debug)]
 pub struct InstalledCrucible {
-    /// One entity per generated object, in `crucible_meshes` order.
+    /// Every spawned instance: the static objects first, then every dog's bones
+    /// in [`CrucibleAnimation::transforms`] order.
     pub entities: Vec<Entity>,
-    /// Where the creature bones start in `entities`.
+    /// Where the dogs' bones start in `entities`.
     pub creatures_first: usize,
-    /// The dog's and the human's locomotion.
+    /// The two rings' locomotion.
     pub animation: CrucibleAnimation,
 }
 
 impl InstalledCrucible {
-    /// Re-author every creature bone's instance transform for `tick`.
+    /// Re-author every dog bone's instance transform for `tick`.
     ///
     /// This is the whole per-frame animation cost: no geometry, no allocation
     /// beyond the transform vector, no scene rebuild. Everything static in the
@@ -65,7 +83,8 @@ impl InstalledCrucible {
     }
 }
 
-/// Install every generated object, a light rig, and the framing camera.
+/// Install every generated mesh, both rings of dogs, a light rig and the framing
+/// camera.
 ///
 /// `chart_texture` is the id of the app-authored normal chart, present only in
 /// the view that samples it.
@@ -76,37 +95,63 @@ pub fn install_crucible(
     chart_texture: Option<u64>,
 ) -> InstalledCrucible {
     let scene = crucible_scene(variant).expect("the authored crucible scene is valid geometry");
-    let entities = scene
+    // One registration per distinct mesh — the terrain, then the dog's bones.
+    let meshes: Vec<Handle<Mesh>> = scene
         .objects
         .iter()
         .map(|object| {
             let drawn = view
                 .apply(&object.mesh)
                 .expect("a debug view re-normals valid geometry into valid geometry");
-            let mesh = running
+            running
                 .add_mesh_data(MeshData::new(
                     drawn.positions().to_vec(),
                     drawn.normals().to_vec(),
                     drawn.uvs().to_vec(),
                     drawn.indices().to_vec(),
                 ))
-                .expect("generated geometry registers as engine mesh data");
-            let material = running.add_material(material_for(object.color, chart_texture));
-            running.spawn(Spawn::new(object.placement, mesh, material))
+                .expect("generated geometry registers as engine mesh data")
         })
         .collect();
+
+    // The static half of the scene: one instance each, where it was authored.
+    let mut entities: Vec<Entity> = scene.objects[..scene.dog_first]
+        .iter()
+        .zip(meshes.iter())
+        .map(|(object, mesh)| {
+            let material = running.add_material(material_for(object.color, chart_texture));
+            running.spawn(Spawn::new(object.placement, *mesh, material))
+        })
+        .collect();
+    let creatures_first = entities.len();
+
+    // The crowd: every dog is `bone_count` more instances of the bone meshes
+    // already registered above, in one coat of its own.
+    let bones = &meshes[scene.dog_first..];
+    scene.dogs.iter().for_each(|dog| {
+        let material = running.add_material(material_for(dog.color, chart_texture));
+        bones.iter().for_each(|mesh| {
+            entities.push(running.spawn(Spawn::new(Transform::IDENTITY, *mesh, material)));
+        });
+    });
+
     install_lights(running);
     install_camera(running);
-    InstalledCrucible {
+    let installed = InstalledCrucible {
         entities,
-        creatures_first: scene.dog_first,
-        animation: CrucibleAnimation::new(scene.dog, scene.human)
-            .expect("the authored perimeter loop is a valid closed path"),
-    }
+        creatures_first,
+        animation: CrucibleAnimation::new(scene.dog)
+            .expect("the authored rings are valid closed paths"),
+    };
+    // Stand the crowd on its first frame straight away, so a headless build that
+    // never calls `animate` still presents the scene the page opens on rather
+    // than 19 dogs collapsed onto the origin.
+    installed.animate(running, 0);
+    installed
 }
 
-/// The material for one object: its authored colour, or the shared normal chart
-/// over white when the chart view is up.
+/// The material for one instance: its authored colour, or the shared normal
+/// chart over white when the chart view is up.
 fn material_for(color: [f32; 3], chart_texture: Option<u64>) -> Material {
     let base = Color::linear_rgb(chan(color[0]), chan(color[1]), chan(color[2]));
     chart_texture
@@ -114,8 +159,8 @@ fn material_for(color: [f32; 3], chart_texture: Option<u64>) -> Material {
         .unwrap_or_else(|| Material::lit(base))
 }
 
-/// A key sun plus two fill lights, so a swept surface's curvature and a lathed
-/// wheel's round both read instead of flattening into one tone.
+/// A key sun plus two fill lights, so a swept limb's curvature and a lofted
+/// torso's round both read instead of flattening into one tone.
 ///
 /// The point-light intensities are deliberately modest. A point light falls off
 /// with the square of distance, and these sit tens of metres from the geometry
@@ -159,8 +204,8 @@ pub(crate) fn crucible_camera() -> Camera {
     })
 }
 
-/// The framing camera: high, pulled back, looking down the scene so the
-/// reference row is in front and the road runs away into the distance.
+/// The framing camera: high and pulled back, looking down at the middle of the
+/// two rings.
 fn install_camera(running: &mut RunningApp) {
     let eye = Vec3::new(CAMERA_EYE[0], CAMERA_EYE[1], CAMERA_EYE[2]);
     let target = Vec3::new(CAMERA_TARGET[0], CAMERA_TARGET[1], CAMERA_TARGET[2]);

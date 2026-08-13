@@ -1,8 +1,8 @@
 //! Posing one creature: the frame where the path, the gait and the inverse
 //! kinematics meet.
 //!
-//! Given a rig, its limb chains, the loop and how far along it the creature is,
-//! this produces one **world transform per bone**. Nothing here is stateful and
+//! Given a rig, its limb chains, a ring and how far along it the dog is, this
+//! produces one **world transform per bone**. Nothing here is stateful and
 //! nothing here reads a clock — the same travel distance always yields the same
 //! pose, which is what makes `tick → pose` a pure function all the way down.
 //!
@@ -11,9 +11,9 @@
 //! 1. **The body.** The root sits on the terrain at the path point, turned to
 //!    face the tangent, dropped by a crouch, and bobbed and pitched by the gait
 //!    cycle. Every non-limb bone then resolves from it by plain forward
-//!    kinematics, with a handful of named bones (the dog's tail and ears, the
-//!    human's waist) given a small extra rotation from the same cycle.
-//! 2. **The feet.** Each grounded limb's contact is *planted*: during stance its
+//!    kinematics, with a handful of named bones (the tail, the ears, the spine)
+//!    given a small extra rotation from the same cycle.
+//! 2. **The feet.** Each limb's contact is *planted*: during stance its
 //!    world position is a function of the **step number** alone, so it does not
 //!    move by so much as a float while the body travels over it. During swing it
 //!    eases forward exactly one stride and arcs up on the way. This is the
@@ -27,12 +27,11 @@
 //!
 //! ## Why the body drops
 //!
-//! Both creatures are authored standing, with their legs very nearly straight —
-//! which is anatomically right and animationally useless: a straight leg has no
-//! reach left to swing a foot forward with, so every stride would clamp. The
-//! crouch buys that reach back. It is not a fudge; it is what a running animal
-//! actually does, and the stride lengths below are sized against the reach it
-//! leaves (`√(reach² − hip_height²)` is the furthest a foot can be from under
+//! The dog is authored standing, with its legs very nearly straight — which is
+//! anatomically right and animationally useless: a straight leg has no reach
+//! left to swing a paw forward with, so every stride would clamp. The crouch
+//! buys that reach back. It is not a fudge; it is what a trotting animal
+//! actually does, and the stride below is sized against the reach it leaves (`√(reach² − hip_height²)` is the furthest a foot can be from under
 //! its own hip, and each stride's half-excursion sits comfortably inside it).
 
 use axiom_math::{Quat, Transform, Vec3};
@@ -67,20 +66,14 @@ pub struct CreaturePose {
     pub crouch: f32,
     /// Peak vertical bob, in world units. Twice per stride: once per foot.
     pub bob: f32,
-    /// How far above or below the body's own support height a foot may follow
+    /// How far above or below the ground under its own path a foot may follow
     /// the terrain, in world units — the relief this creature's legs can
-    /// actually absorb. See [`Plant::levelled`].
+    /// actually absorb. See [`CreaturePose::plant`].
     pub relief: f32,
     /// Steady forward pitch, in radians. Negative drops the nose.
     pub lean: f32,
     /// How far the pitch oscillates with the gait, in radians.
     pub pitch_swing: f32,
-    /// Where a carried hand rests, in creature-local units, `+x` side.
-    pub arm_carry: Vec3,
-    /// Fore/aft hand swing, in creature-local units.
-    pub arm_swing: f32,
-    /// Vertical hand swing, in creature-local units.
-    pub arm_rise: f32,
     /// Bones given an extra gait-driven rotation on top of their rest pose.
     pub flex: &'static [Flex],
 }
@@ -92,55 +85,33 @@ pub struct CreaturePose {
 /// 6.2 above the ground, so a *standing* dog has no spare reach at all. The
 /// crouch is what buys it — and the stride is then sized against what is left,
 /// with the worst hip-to-paw distance over a full lap staying comfortably under
-/// the leg's length (`tests/locomotion.rs` measures exactly that, so a tuning
-/// change that over-reaches a leg fails the suite rather than quietly skating).
+/// the leg's length (`tests/locomotion.rs` measures exactly that, over every dog
+/// on both rings, so a tuning change that over-reaches a leg fails the suite
+/// rather than quietly skating).
+///
+/// The stride and crouch are sized for the **tighter** of the two rings. A
+/// 21-unit rigid body walking a 26-unit radius plants its outside paws a fifth
+/// of a unit wide of where a straight-line body would put them — small, and
+/// exactly the margin a leg tuned on a near-straight path did not have. Shorter
+/// steps and a deeper crouch are also what a real animal does on a tight turn,
+/// so the fix and the anatomy agree.
 pub const DOG_GAIT: CreaturePose = CreaturePose {
     scale: 10.0,
-    stride: 9.0,
+    stride: 8.2,
     duty: 0.52,
     lead: 0.26,
     lift: 0.9,
-    crouch: 2.3,
+    crouch: 2.6,
     bob: 0.22,
     relief: 1.1,
     lean: -0.05,
     pitch_swing: 0.020,
-    arm_carry: Vec3::ZERO,
-    arm_swing: 0.0,
-    arm_rise: 0.0,
     flex: &[
         ("dog-tail-base", Vec3::UNIT_Y, 0.26, 1.0),
         ("dog-tail-tip", Vec3::UNIT_Y, 0.34, 1.0),
         ("dog-ear-l", Vec3::UNIT_X, 0.20, 2.0),
         ("dog-ear-r", Vec3::UNIT_X, 0.20, 2.0),
         ("dog-spine", Vec3::UNIT_X, 0.03, 2.0),
-    ],
-};
-
-/// The human's run: a longer stride off longer legs, arms carried bent and
-/// swung counter to them (see the offsets in `creature_human`).
-///
-/// The legs are 8.61 long against a 9.4 hip, so — as with the dog — the crouch
-/// is what makes a stride possible at all rather than a stylistic choice.
-pub const HUMAN_GAIT: CreaturePose = CreaturePose {
-    scale: 10.0,
-    stride: 15.0,
-    duty: 0.45,
-    lead: 0.225,
-    lift: 1.4,
-    crouch: 2.7,
-    bob: 0.30,
-    relief: 1.0,
-    lean: -0.10,
-    pitch_swing: 0.020,
-    arm_carry: Vec3::new(0.24, 1.02, -0.22),
-    arm_swing: 0.20,
-    arm_rise: 0.05,
-    flex: &[
-        // Shoulders counter-rotate against the hips — the thing that stops a
-        // running figure reading as a marching one.
-        ("human-pelvis", Vec3::UNIT_Y, -0.08, 1.0),
-        ("human-torso", Vec3::UNIT_Y, 0.14, 1.0),
     ],
 };
 
@@ -157,18 +128,11 @@ impl CreaturePose {
         // The feet first: their plant points depend only on the path and the
         // travel distance, never on the body — so they can be resolved before
         // it, and the body can then be stood on the ground they are actually on.
-        let plants: Vec<Option<Plant>> = limbs
+        let plants: Vec<Plant> = limbs
             .iter()
-            .map(|limb| limb.grounded.then(|| self.plant(limb, path, travel)))
+            .map(|limb| self.plant(limb, path, travel))
             .collect();
-        let support = support(&plants);
-        // Now that the body's own ground is known, hold each foot within the
-        // relief its legs can absorb (see `Plant::levelled`).
-        let plants: Vec<Option<Plant>> = plants
-            .into_iter()
-            .map(|plant| plant.map(|p| p.levelled(support, self.relief)))
-            .collect();
-        let root = self.body(path, travel, support);
+        let root = self.body(path, travel, support(&plants));
         let cycle = travel / self.stride;
         let locals: Vec<Transform> = rig
             .parts()
@@ -190,13 +154,13 @@ impl CreaturePose {
         limbs
             .iter()
             .zip(plants)
-            .for_each(|(limb, plant)| self.solve_limb(rig, limb, plant, cycle, root, &mut world));
+            .for_each(|(limb, plant)| self.solve_limb(rig, limb, plant, root, &mut world));
         world
     }
 
     /// The body root: standing on `support`, facing down the path, crouched,
     /// bobbing and pitching with the gait.
-    fn body(&self, path: &LoopPath, travel: f32, support: Option<f32>) -> Transform {
+    fn body(&self, path: &LoopPath, travel: f32, support: f32) -> Transform {
         let here = path.at(travel);
         let cycle = travel / self.stride;
         // Twice per stride, because there are two ground contacts in one: the
@@ -211,7 +175,7 @@ impl CreaturePose {
         Transform::new(
             Vec3::new(
                 here.position.x,
-                support.unwrap_or(here.position.y) - self.crouch + bob,
+                support - self.crouch + bob,
                 here.position.z,
             ),
             facing,
@@ -224,8 +188,7 @@ impl CreaturePose {
         &self,
         rig: &CreatureRig,
         limb: &LimbChain,
-        plant: Option<Plant>,
-        cycle: f32,
+        plant: Plant,
         root: Transform,
         world: &mut [Transform],
     ) {
@@ -237,7 +200,7 @@ impl CreaturePose {
         let hip = world[upper].translation;
         let bones = Vec3::new(self.scale, self.scale, self.scale);
         let pole = root.rotation.rotate(limb.pole);
-        let contact = plant.map_or_else(|| self.carried_hand(limb, root, cycle), |p| p.contact);
+        let contact = plant.contact;
         let target = contact.add(root.rotation.rotate(limb.tip_offset.mul_scalar(self.scale)));
         let solved = solve_two_bone(
             hip,
@@ -283,11 +246,35 @@ impl CreaturePose {
         );
     }
 
-    /// Where a grounded limb's contact is this instant.
+    /// Where a limb's contact is this instant.
     ///
     /// **During stance the answer depends only on the step number** — not on the
-    /// phase within the step, not on the travel distance, not on the speed. That
-    /// is the whole anti-skate guarantee, and it is one line: `arc_of(step)`.
+    /// phase within the step, not on the travel distance, not on the speed, and
+    /// not on anything else the frame is doing. That is the whole anti-skate
+    /// guarantee, and every term below obeys it: the arc is `arc_of(step)`, and
+    /// the relief cap is measured against the ground under the *path* at that
+    /// same arc.
+    ///
+    /// ## Why the relief cap is measured against the path and not against the body
+    ///
+    /// A leg has a fixed length, and the fore and hind paws of a trotting dog
+    /// are seven units apart on terrain that rolls by more than that in places.
+    /// Letting each paw follow its own ground without bound is what puts a plant
+    /// outside the leg that has to reach it — and a leg that cannot reach its
+    /// plant is a leg that slides off it. Capping the relief is not a fudge: it
+    /// is the statement that an animal steps *short of* a hole rather than
+    /// dislocating a hip, and the cap is sized from the reach the legs have.
+    ///
+    /// The reference it is capped *toward* has to be constant across a stance,
+    /// or the cap itself becomes a skate. Capping toward the body's own support
+    /// height — the mean ground under all four feet — fails exactly that test:
+    /// the other three feet move every tick, so the mean moves, so a planted paw
+    /// held at the cap creeps vertically while it is supposed to be nailed down.
+    /// The ground under the path at the plant's own arc is a function of the arc
+    /// alone, which makes the cap as constant as the plant it is capping.
+    ///
+    /// The cap applies to the *ground* term only. The swing arc rides on top of
+    /// it untouched, so a lifted paw still clears the bump it is stepping over.
     fn plant(&self, limb: &LimbChain, path: &LoopPath, travel: f32) -> Plant {
         // Local `-Z` is forward, so a contact behind the origin in local `z` is
         // that far back along the path.
@@ -307,62 +294,24 @@ impl CreaturePose {
         };
         let there = path.at(arc);
         let flat = there.position.add(there.right.mul_scalar(across));
-        let ground = ground_y(flat.x, flat.z);
+        // `path.at` already stands its point on the terrain, so this is the
+        // ground under the animal's own line at this plant's arc.
+        let line = there.position.y;
+        let ground = line + (ground_y(flat.x, flat.z) - line).clamp(-self.relief, self.relief);
         Plant {
             contact: Vec3::new(flat.x, ground + limb.contact.y * self.scale + lift, flat.z),
             ground,
         }
     }
-
-    /// Where a carried limb's hand is this instant: held in front of the body
-    /// and swung fore and aft on its own share of the cycle.
-    fn carried_hand(&self, limb: &LimbChain, root: Transform, cycle: f32) -> Vec3 {
-        let angle = (cycle + limb.offset) * TAU;
-        let side = limb.contact.x.signum();
-        root.transform_point(Vec3::new(
-            side * self.arm_carry.x,
-            self.arm_carry.y + self.arm_rise * angle.cos(),
-            self.arm_carry.z + self.arm_swing * angle.sin(),
-        ))
-    }
 }
 
-/// Where one foot is this instant, and the height of the ground it is over.
+/// Where one foot is this instant, and the height of the ground it stands on.
 #[derive(Debug, Clone, Copy)]
 struct Plant {
     /// The foot's world contact point, arced up if it is mid-swing.
     contact: Vec3,
-    /// The terrain height under it, with no swing arc in it.
+    /// The height the foot stands at, relief-capped and with no swing arc in it.
     ground: f32,
-}
-
-impl Plant {
-    /// Hold the foot within `relief` of the body's own support height.
-    ///
-    /// A leg has a fixed length, and the fore and hind feet of a trotting dog
-    /// are seven units apart on terrain that rolls by more than that in places.
-    /// Letting each foot follow its own ground without bound is what puts a
-    /// plant outside the leg that has to reach it — and a leg that cannot reach
-    /// its plant is a leg that slides off it, which is the skate this whole
-    /// design exists to avoid. Capping the relief is not a fudge: it is the
-    /// statement that a creature steps *short of* a hole rather than dislocating
-    /// a hip, and the cap is sized from the reach each creature actually has.
-    ///
-    /// The cap applies to the *ground* term only. The swing arc rides on top of
-    /// it untouched, so a lifted foot still clears the bump it is stepping over.
-    fn levelled(self, support: Option<f32>, relief: f32) -> Plant {
-        support.map_or(self, |support| {
-            let held = support + (self.ground - support).clamp(-relief, relief);
-            Plant {
-                contact: Vec3::new(
-                    self.contact.x,
-                    self.contact.y + held - self.ground,
-                    self.contact.z,
-                ),
-                ground: held,
-            }
-        })
-    }
 }
 
 /// The ground the body rides: the mean terrain height under every one of the
@@ -374,12 +323,13 @@ impl Plant {
 /// foot and the leg reaching for it runs out of length exactly when the stride
 /// needs it most. Averaging the ground under the feet keeps every leg inside its
 /// reach, and is what a real animal does with its own body.
-fn support(plants: &[Option<Plant>]) -> Option<f32> {
-    let feet: Vec<f32> = plants
-        .iter()
-        .filter_map(|plant| plant.map(|p| p.ground))
-        .collect();
-    (!feet.is_empty()).then(|| feet.iter().sum::<f32>() / feet.len() as f32)
+///
+/// Every one of the dog's four limbs is a leg, so there is always at least one
+/// foot to average and the answer is always a height — an empty chain would be a
+/// creature with no legs, which is not a thing this app can build.
+fn support(plants: &[Plant]) -> f32 {
+    let total: f32 = plants.iter().map(|plant| plant.ground).sum();
+    total / (plants.len().max(1)) as f32
 }
 
 /// Write one bone's world transform, at the creature's presentation scale.

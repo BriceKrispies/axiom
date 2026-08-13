@@ -71,8 +71,9 @@ pub fn ground_y(x: f32, z: f32) -> f32 {
 ///
 /// Three sine products at decreasing wavelength and amplitude give rolling
 /// ground with some fine relief; the radial term scoops a shallow basin out of
-/// the middle so the road and the buildings sit in a valley rather than on a
-/// featureless plate.
+/// the middle so the two rings walk the wall of a shallow valley rather than a
+/// featureless plate — which is what makes "the chain rises and falls with the
+/// ground" something a viewer can actually see.
 pub fn height_at(x: f32, z: f32) -> f32 {
     let broad = 5.6 * (x * 0.021).sin() * (z * 0.017).cos();
     let medium = 2.1 * (x * 0.058 + 1.3).sin() * (z * 0.049).sin();

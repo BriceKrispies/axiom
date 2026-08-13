@@ -67,73 +67,49 @@ impl CrucibleVariant {
 /// value fails loudly at construction instead of silently producing a sliver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DetailParams {
-    /// Arc-length-uniform stations the road sweep is sampled at.
-    pub road_samples: u32,
-    /// Stations the tunnel sweep is sampled at.
-    pub tunnel_samples: u32,
-    /// Stations a tree trunk sweep is sampled at.
-    pub trunk_samples: u32,
+    /// Stations a swept bone (a leg, the neck, the muzzle, an ear, the tail) is
+    /// sampled at along its own path.
+    pub sweep_samples: u32,
     /// Radial divisions for circular profiles, lathes and cylinders.
     pub ring_segments: u32,
     /// Latitudinal rings on a UV sphere / capsule.
     pub sphere_rings: u32,
     /// Radial divisions on a UV sphere.
     pub sphere_segments: u32,
-    /// Recursive refinement of an icosphere crown / reference sphere.
+    /// Recursive refinement of the icosphere the dog's skull is built from.
     pub icosphere_subdivisions: u32,
-    /// Extruded floors the building stacks.
-    pub building_floors: u32,
     /// Heightfield cells along each axis (the grid is `cells + 1` samples wide).
     pub terrain_cells: u32,
-    /// Scalar-field resolution along each axis of the implicit sculpture.
-    pub field_resolution: u32,
-    /// Loop-subdivision levels applied in the detail ladder.
-    pub ladder_levels: u32,
 }
 
 /// The three variants' counts, indexed by [`CrucibleVariant`]'s discriminant.
 const DETAIL_TABLE: [DetailParams; 3] = [
     // Base
     DetailParams {
-        road_samples: 96,
-        tunnel_samples: 40,
-        trunk_samples: 10,
+        sweep_samples: 10,
         ring_segments: 20,
         sphere_rings: 14,
         sphere_segments: 22,
         icosphere_subdivisions: 2,
-        building_floors: 4,
         terrain_cells: 44,
-        field_resolution: 26,
-        ladder_levels: 1,
     },
     // Dense
     DetailParams {
-        road_samples: 192,
-        tunnel_samples: 88,
-        trunk_samples: 18,
+        sweep_samples: 18,
         ring_segments: 40,
         sphere_rings: 28,
         sphere_segments: 44,
         icosphere_subdivisions: 3,
-        building_floors: 7,
         terrain_cells: 88,
-        field_resolution: 38,
-        ladder_levels: 2,
     },
     // Coarse
     DetailParams {
-        road_samples: 24,
-        tunnel_samples: 8,
-        trunk_samples: 4,
+        sweep_samples: 4,
         ring_segments: 6,
         sphere_rings: 4,
         sphere_segments: 6,
         icosphere_subdivisions: 0,
-        building_floors: 2,
         terrain_cells: 12,
-        field_resolution: 14,
-        ladder_levels: 0,
     },
 ];
 
@@ -154,10 +130,11 @@ mod tests {
         let base = CrucibleVariant::Base.params();
         let dense = CrucibleVariant::Dense.params();
         let coarse = CrucibleVariant::Coarse.params();
-        assert!(dense.road_samples > base.road_samples);
-        assert!(coarse.road_samples < base.road_samples);
+        assert!(dense.sweep_samples > base.sweep_samples);
+        assert!(coarse.sweep_samples < base.sweep_samples);
         assert!(dense.terrain_cells > base.terrain_cells);
-        assert!(coarse.field_resolution < base.field_resolution);
-        assert!(dense.building_floors > base.building_floors);
+        assert!(coarse.terrain_cells < base.terrain_cells);
+        assert!(dense.ring_segments > base.ring_segments);
+        assert!(coarse.icosphere_subdivisions < base.icosphere_subdivisions);
     }
 }

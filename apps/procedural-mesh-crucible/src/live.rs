@@ -24,9 +24,16 @@ use crate::orbit::OrbitState;
 use crate::variant::CrucibleVariant;
 use crate::{CANVAS_ID, HEIGHT, WIDTH};
 
-/// The live backend's per-instance buffer capacity. Comfortably above the ~30
-/// objects the crucible spawns.
-const LIVE_CAPACITY: u32 = 256;
+/// The live backend's instance-buffer capacity, in **total instances across all
+/// batches** — the renderer packs every batch back-to-back into one buffer and
+/// silently drops whatever will not fit (see `SceneRenderer::record`), so a
+/// capacity below the scene's instance count does not error, it just stops
+/// drawing dogs partway round the ring.
+///
+/// The crucible spawns 1 terrain + 19 dogs × 23 bones = 438 instances. 2048
+/// leaves room for a wider ring or a third one without another silent truncation
+/// hunt, at a cost of one 2048-slot vertex buffer.
+const LIVE_CAPACITY: u32 = 2048;
 
 /// The fraction of the viewport width the page's stylesheet gives the canvas,
 /// and the widest it will ever lay it out. These mirror the `width: min(94vw,

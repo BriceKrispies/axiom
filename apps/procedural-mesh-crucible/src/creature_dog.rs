@@ -222,7 +222,6 @@ pub fn dog_limbs() -> [LimbChain; 4] {
             contact,
             tip_offset: bone_tip(&LEG_BONES[1]).subtract(contact),
             ankle_offset: Vec3::ZERO,
-            grounded: true,
             len_upper: bone_length(&LEG_BONES[0]),
             len_lower: bone_length(&LEG_BONES[1]),
             len_extra: 0.0,
@@ -246,7 +245,6 @@ pub fn dog_limbs() -> [LimbChain; 4] {
             // the solver's business.
             tip_offset: bone_tip(&LEG_BONES[3]).subtract(contact),
             ankle_offset: bone_tip(&LEG_BONES[4]).subtract(contact),
-            grounded: true,
             len_upper: bone_length(&LEG_BONES[2]),
             len_lower: bone_length(&LEG_BONES[3]),
             len_extra: bone_length(&LEG_BONES[4]),

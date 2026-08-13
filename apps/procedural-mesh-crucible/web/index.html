@@ -51,10 +51,15 @@
 <main>
   <h1>Procedural Mesh Crucible</h1>
   <p class="lede">
-    Every visible triangle below was produced by an <code>axiom-mesh-ops</code> operator and validated by
-    <code>axiom-mesh</code>. There is no imported geometry in this app and no hand-typed vertex array —
-    the road is a swept profile, the wheels are lathes, the terrain is a meshed height array, and the
-    blob is a marching-cubes extraction of a signed-distance blend.
+    Two counter-rotating rings of walking dogs, on generated ground. Every visible triangle below was
+    produced by an <code>axiom-mesh-ops</code> operator and validated by <code>axiom-mesh</code>: there is
+    no imported geometry in this app and no hand-typed vertex array. The ground is a meshed height array;
+    each dog is a lofted torso, tapered swept limbs, an icosphere skull and rounded-box paws, cut at the
+    joints into a 23-bone rig and walked by distance-driven inverse kinematics.
+    <br /><br />
+    The outer ring holds <b>12</b> dogs walking anticlockwise; the inner ring holds <b>7</b> walking the
+    other way. All 19 are the <em>same 23 meshes</em> &mdash; the geometry is uploaded once and drawn 437
+    times as instances, so a longer chain costs transforms and colours, never vertices.
   </p>
 
   <canvas id="axiom-crucible-canvas"></canvas>
@@ -79,18 +84,26 @@
     <table>
       <thead><tr><th>Object</th><th>Operator chain</th></tr></thead>
       <tbody>
-        <tr><td class="name">terrain</td><td class="op">heightfield_mesh over an analytic sine sum, with a border skirt</td></tr>
-        <tr><td class="name">road</td><td class="op">sweep — slab profile along Curve::catmull_rom, banked by SweepOptions::twist</td></tr>
-        <tr><td class="name">tunnel</td><td class="op">sweep — closed arch profile along a path derived from the road, CapPolicy::None</td></tr>
-        <tr><td class="name">vehicle</td><td class="op">loft (5 sections) + revolve (4 wheels) + box_mesh / cube details, mesh::combine</td></tr>
-        <tr><td class="name">tree-0 … tree-3</td><td class="op">sweep with start_scale &gt; end_scale (tapered trunk) + icosphere / capsule crown</td></tr>
-        <tr><td class="name">building</td><td class="op">extrude of a concave L-shaped footprint, stacked into floors, mesh::combine</td></tr>
-        <tr><td class="name">sculpture</td><td class="op">implicit_surface_mesh — marching cubes over a smooth-min blend of 5 sphere SDFs</td></tr>
-        <tr><td class="name">prim-cube … prim-triangle</td><td class="op">cube, box_mesh, rounded_box, uv_sphere, icosphere, cylinder, cone, frustum, capsule, torus, disk, annulus, quad, grid, triangle</td></tr>
-        <tr><td class="name">lod-icosphere-0…3</td><td class="op">icosphere at subdivisions 0, 1, 2, 3 — same silhouette, four densities</td></tr>
-        <tr><td class="name">lod-uv-sphere-base</td><td class="op">uv_sphere — the reference the pair below is measured against</td></tr>
-        <tr><td class="name">lod-loop-subdivided</td><td class="op">subdivide_loop over that sphere (refines and smooths)</td></tr>
-        <tr><td class="name">lod-quadric-simplified</td><td class="op">simplify_quadric over that sphere (collapses by error, keeps silhouette)</td></tr>
+        <tr><td class="name">terrain</td><td class="op">heightfield_mesh over an analytic sine sum, with a border skirt. The rings walk the wall of its basin, so each chain rises and falls with the ground.</td></tr>
+        <tr><td class="name">dog-pelvis &middot; dog-spine</td><td class="op">loft &mdash; two halves of the same six placed circle sections, each non-uniformly scaled by its LoftSection::placement (deep chest, narrow waist)</td></tr>
+        <tr><td class="name">dog-neck &middot; dog-muzzle &middot; dog-ear-l/r</td><td class="op">tapered sweep of a circle along a Curve::polyline (start_scale &gt; end_scale), with the muzzle's uv_sphere nose combined in</td></tr>
+        <tr><td class="name">dog-head</td><td class="op">icosphere, non-uniformly scaled by mesh::transform into an egg elongated along &minus;Z</td></tr>
+        <tr><td class="name">dog-tail-base &middot; dog-tail-tip</td><td class="op">two tapered sweeps along the two halves of one Curve::catmull_rom &mdash; Catmull-Rom is local, so the pair reproduces the single spline span for span</td></tr>
+        <tr><td class="name">dog-fore-* &middot; dog-hind-*</td><td class="op">tapered sweeps: two bones per front leg, three per hind leg (femur / tibia / metatarsus), so the hind stance is angled rather than a table leg</td></tr>
+        <tr><td class="name">dog-*-paw &times;4</td><td class="op">rounded_box, resting exactly on the sole plane</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2>The two rings</h2>
+    <div class="scroller">
+    <table>
+      <thead><tr><th>Ring</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td class="name">outer &mdash; 12 dogs</td><td>Radius 46, walked <b>anticlockwise</b> seen from above. 289 units of ring &divide; (a 21-unit dog + a 3-unit gap) = 12 walkers, nose to tail.</td></tr>
+        <tr><td class="name">inner &mdash; 7 dogs</td><td>Radius 26, walked <b>clockwise</b> &mdash; the opposite way round. 163 units &divide; 24 = 7 walkers.</td></tr>
+        <tr><td class="name">colour</td><td>Each ring sweeps the full hue circle once, the inner one half a turn out of phase, so no two neighbours anywhere share a colour.</td></tr>
+        <tr><td class="name">gait</td><td>One trot, one rig, one set of legs. A dog's place in its chain is a fixed arc-length offset, which spaces the ring <em>and</em> puts every dog at a different point in the stride &mdash; the legs run as a wave rather than stamping in lockstep. Every paw is planted: during stance its world position is a function of the step number alone, so it does not slide while the body travels over it.</td></tr>
       </tbody>
     </table>
     </div>
@@ -113,7 +126,7 @@
     <table>
       <thead><tr><th>Query</th><th>What it shows</th></tr></thead>
       <tbody>
-        <tr><td class="name">?detail=base|dense|coarse</td><td>Re-tessellates the whole scene. Only tessellation counts change — the authoring is identical.</td></tr>
+        <tr><td class="name">?detail=base|dense|coarse</td><td>Re-tessellates the whole scene &mdash; the terrain grid, every swept limb's stations and rings, the skull's subdivisions. Only tessellation counts change; the authoring is identical, and so is the layout of both rings.</td></tr>
         <tr><td class="name">?view=flat</td><td>Every mesh re-normalled with generate_flat_normals: unwelded, one normal per triangle. Facets appear on the swept and lathed surfaces.</td></tr>
         <tr><td class="name">?view=smooth</td><td>Every mesh re-normalled with generate_normals (area-weighted). Compare against the operators' own normals in the default view.</td></tr>
         <tr><td class="name">?view=normals</td><td>Colour by normal. Each vertex's UV is replaced by its normal's (x, y) mapped into 0..1 and sampled from an app-authored chart texture: red rises with +X, green with +Y, blue falls off toward the rim. The two z-hemispheres share a chart cell.</td></tr>
@@ -122,11 +135,14 @@
     </div>
 
     <p class="note">
-      Wireframe and a per-object UV checker are <em>not</em> available: the renderer has one triangle-list
-      pipeline with no line topology, and a checker overlay would need a second UV set alongside the
-      operator-authored one. Both are recorded as limitations in the app's NOTES.md rather than worked
-      around in the renderer. The presentation surface is sized once, to the device, at startup — a
-      rotation or window resize reloads the page, for the reason recorded there too.
+      The dogs are drawn as rigid bones rather than skinned geometry on purpose: the WebGL2 fallback this
+      page must survive on has no vertex-stage storage buffers and draws no skinned geometry at all,
+      whereas a re-authored instance transform is an ordinary instanced draw. Wireframe and a per-object
+      UV checker are <em>not</em> available: the renderer has one triangle-list pipeline with no line
+      topology, and a checker overlay would need a second UV set alongside the operator-authored one. Both
+      are recorded as limitations in the app's NOTES.md rather than worked around in the renderer. The
+      presentation surface is sized once, to the device, at startup &mdash; a rotation or window resize
+      reloads the page, for the reason recorded there too.
     </p>
   </section>
 </main>

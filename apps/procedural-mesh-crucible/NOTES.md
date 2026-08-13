@@ -7,6 +7,11 @@ layers know what a debug view is, which is exactly the shape the No-Shortcuts
 rule bans. All three views that *are* implemented live in `src/debug_view.rs` and
 use nothing but the shipped mesh and material vocabulary.
 
+The scene itself is two counter-rotating rings of walking dogs on generated
+terrain. Every dog is the same 23 registered bone meshes at another transform —
+see `src/rings.rs` for the layout and `src/install.rs` for the one place that
+registration happens.
+
 ## What is implemented, and how
 
 | View | Query | Mechanism |
@@ -60,17 +65,20 @@ obvious `colors = normal * 0.5 + 0.5`.
 `+Z` and `-Z` normals with the same `(x, y)` land on the same chart texel; the
 page legend says so.
 
-### 4. The implicit surface has no UVs
+### 4. One instance buffer for the whole scene
 
-`implicit_surface_mesh` emits positions, normals and indices but **no UVs** — an
-isosurface has no authored parameter domain to unwrap, and inventing a
-triplanar/spherical one inside the operator would be a policy the caller should
-own. The app registers the sculpture with the engine's default-to-origin UVs, and
-`tests/crucible_scene.rs` asserts this exception **by name** so a future operator
-cannot quietly drop its UVs and hide behind the same allowance.
+The live backend packs **every** batch's instances back-to-back into one buffer
+sized by the `max_instances` argument, and `SceneRenderer::record` silently
+`min`s each batch's count against the room left. A capacity below the scene's
+instance count therefore does not error: it just stops drawing partway round the
+ring, which looks like a scene bug rather than a budget one.
 
-**Verdict:** correct behaviour of the operator. Documented, asserted, not
-worked around.
+The crucible spawns 1 + 19 × 23 = 438 instances and asks for 2048. That is an app
+choosing its own budget, which is right — but the *silence* is a sharp edge for
+the next app that grows past its number.
+
+**Verdict:** the app sizes its own buffer, and `src/live.rs` says out loud what
+overflow looks like. Reporting truncation is the backend's design to make.
 
 ### 5. `renderable_count()` reads zero
 

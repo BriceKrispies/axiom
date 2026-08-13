@@ -6,31 +6,40 @@
 //! mesh operator**. There is no imported geometry in this crate, no hand-typed
 //! vertex array, and no engine primitive standing in for a generated one.
 //!
-//! ## What is in the scene, and what made it
+//! ## What is on screen
+//!
+//! Two counter-rotating rings of walking dogs, on generated ground.
 //!
 //! | Object | Operator chain |
 //! |---|---|
 //! | terrain | `heightfield_mesh` over an analytic sine sum, with a skirt |
-//! | road | `sweep` of a slab profile along a `Curve::catmull_rom`, banked with `SweepOptions::twist` |
-//! | tunnel | `sweep` of a closed arch profile along a path derived from the road, `CapPolicy::None` |
-//! | vehicle | `loft` through five sections + `revolve` wheels + `box_mesh`/`cube` details, `combine`d |
-//! | trees ×4 | tapered `sweep` trunk (`start_scale` > `end_scale`) + `icosphere`/`capsule` crown |
-//! | building | `extrude` of a **concave L** footprint, stacked into floors |
-//! | sculpture | `implicit_surface_mesh` over a smooth-min blend of five sphere SDFs |
-//! | reference row | every primitive the library ships, once each, in a line |
-//! | detail ladder | one shape at four densities, plus `subdivide_loop` vs `simplify_quadric` |
-//! | dog + human | the same operators cut into a **bone rig** and run around the scene |
+//! | dog ×19 | `loft` torso halves + tapered `sweep` neck/muzzle/ears/legs/tail + `icosphere` skull + `uv_sphere` nose + `rounded_box` paws, cut at the joints into a 23-bone rig |
 //!
-//! ## The two runners
+//! The outer ring (radius 46) holds 12 dogs walking anticlockwise seen from
+//! above; the inner ring (radius 26) holds 7 walking the other way. Each ring is
+//! painted across the full hue circle, half a turn apart, so no two neighbours
+//! anywhere share a colour.
 //!
-//! The dog and the human are not statues. Each is spawned one scene object **per
-//! bone**, and every frame the app re-authors those bones' instance transforms
-//! from a pose that is a pure function of the engine tick: a closed
-//! `Curve::catmull_rom` loop around the perimeter, a distance-driven gait whose
-//! planted feet do not move while the body travels over them, and two-bone
-//! analytic inverse kinematics from each hip to each foot. The dog trots a
-//! diagonal pattern; the human runs a fixed arc-length behind it on the same
-//! track, arms counter-swinging its legs.
+//! ## One dog's geometry, nineteen dogs on screen
+//!
+//! Every dog in both rings is the **same 23 registered meshes**. `crucible_scene`
+//! returns the distinct mesh set (`objects`) and the crowd (`dogs`) as two
+//! separate things precisely so they cannot be conflated: adding a dog costs a
+//! transform and a colour, never a vertex. `install.rs` registers the mesh set
+//! once and spawns `dogs.len() × 23` instances of it — `tests/rings.rs` asserts
+//! that distinct-mesh count directly, because "the geometry is shared" is a
+//! claim, and a claim in this app is something a test holds.
+//!
+//! ## The walkers
+//!
+//! Each dog is spawned one scene object **per bone**, and every frame the app
+//! re-authors those bones' instance transforms from a pose that is a pure
+//! function of the engine tick: a closed `Curve::catmull_rom` ring, a
+//! distance-driven gait whose planted paws do not move while the body travels
+//! over them, and two-bone analytic inverse kinematics from each hip to each paw.
+//! A dog's place in its chain is a fixed arc-length offset, which spaces the ring
+//! evenly *and* puts every dog at a different point in the trot — the legs run as
+//! a wave around the ring instead of stamping in lockstep.
 //!
 //! Rigid bones rather than GPU skinning is a deliberate constraint, not a
 //! shortcut: the WebGL2 fallback this app must survive on has no vertex-stage
@@ -52,24 +61,20 @@
 //! the `engine` and `windowing` modules — and on nothing else. It never names
 //! `axiom-proc-mesh`, `axiom-resources`, `axiom-render` or any backend: geometry
 //! comes from the mesh layers, and everything downstream of that is the engine
-//! umbrella's business.
+//! umbrella's business. The ring layout, the rainbow and the crowd are **app
+//! composition** and live here; no ring, colour or crowd vocabulary was added to
+//! a mesh layer, and none should be.
 
-mod building;
-mod curves;
 mod debug_view;
-mod detail_ladder;
-mod flora;
 mod install;
 mod object;
 mod orbit;
-mod primitive_row;
 mod quantities;
-mod road;
+mod rainbow;
+mod rings;
 mod scene;
-mod sculpture;
 mod terrain;
 mod variant;
-mod vehicle;
 
 /// The browser edge: the `#[wasm_bindgen]` entry, the query-string read, the
 /// device-sized surface, and the live present loop. Compiled only for `wasm32`.
@@ -86,8 +91,12 @@ pub use debug_view::{chart_rgba, DebugView, CHART_SIZE};
 pub use install::{install_crucible, InstalledCrucible};
 pub use object::CrucibleObject;
 pub use orbit::OrbitState;
+pub use rainbow::{hsv_to_rgb, hue_to_rgb, RING_SATURATION, RING_VALUE};
+pub use rings::{
+    ring_dogs, Ring, RingDog, Winding, DOG_BODY_LENGTH, DOG_GAP, DOG_LENGTH, DOG_SCALE,
+    DOG_SPACING, INNER, OUTER, RINGS,
+};
 pub use scene::{crucible_meshes, crucible_scene, CrucibleScene};
-pub use curves::road_curve;
 pub use terrain::ground_y;
 pub use variant::{CrucibleVariant, DetailParams};
 
@@ -105,27 +114,15 @@ pub const HEIGHT: u32 = 720;
 /// integration tests and any capture harness use. Identical to what the browser
 /// entry presents, minus the surface.
 pub fn crucible_core(variant: CrucibleVariant, view: DebugView) -> RunningApp {
-    use axiom::prelude::{App, Color, DefaultPlugins, Ratio, Window};
-    let mut running = App::new()
-        .window(
-            Window::new(WIDTH, HEIGHT)
-                .with_surface_id(CANVAS_ID)
-                .with_clear_color(Color::linear_rgb(
-                    Ratio::finite_or_zero(0.05),
-                    Ratio::finite_or_zero(0.07),
-                    Ratio::finite_or_zero(0.11),
-                )),
-        )
-        .add_plugins(DefaultPlugins)
-        .setup(|_world, _meshes, _materials| {})
-        .build();
-    install_crucible(&mut running, variant, view, None);
-    running
+    crucible_animated(variant, view).0
 }
 
 /// Build the crucible headlessly *and* keep the handle that animates it — the
 /// native path a locomotion test drives.
-pub fn crucible_animated(variant: CrucibleVariant, view: DebugView) -> (RunningApp, InstalledCrucible) {
+pub fn crucible_animated(
+    variant: CrucibleVariant,
+    view: DebugView,
+) -> (RunningApp, InstalledCrucible) {
     use axiom::prelude::{App, Color, DefaultPlugins, Ratio, Window};
     let mut running = App::new()
         .window(
@@ -149,17 +146,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_native_core_renders_every_generated_object() {
-        let objects =
-            crucible_meshes(CrucibleVariant::Base).expect("the base scene is valid geometry");
+    fn the_native_core_renders_every_spawned_instance() {
+        let scene = crucible_scene(CrucibleVariant::Base).expect("the base scene is valid geometry");
+        let statics = scene.dog_first;
+        let bones = scene.objects.len() - statics;
+        let instances = statics + bones * scene.dogs.len();
         let mut app = crucible_core(CrucibleVariant::Base, DebugView::Shaded);
         let outcome = app.tick(0);
-        // One draw per generated object, each with its own mesh and material —
-        // `renderable_count` is the *authoring* count and stays zero here,
-        // because the crucible installs everything through the runtime
-        // `spawn`/`add_mesh_data` path rather than through `setup`.
-        assert_eq!(outcome.draws().len(), objects.len());
-        assert_eq!(outcome.mesh_batches().len(), objects.len());
+        // One draw per spawned instance — the terrain plus every bone of every
+        // dog — off `scene.objects.len()` registered meshes and no more.
+        assert_eq!(outcome.draws().len(), instances);
+        assert_eq!(outcome.mesh_batches().len(), instances);
         // Three lights: the sun and two fills.
         assert_eq!(outcome.lights().len(), 3);
         assert_eq!(outcome.clear_color(), [0.05, 0.07, 0.11, 1.0]);
@@ -175,29 +172,22 @@ mod tests {
     }
 }
 
-/// The two articulated creatures. A dog and a human are **semantic** shapes, so
-/// they are compositions of the generic operators authored here in the app —
-/// `axiom-mesh-ops` has no anatomy in it and must never acquire any.
+/// The articulated dog. A dog is a **semantic** shape, so it is a composition of
+/// the generic operators authored here in the app — `axiom-mesh-ops` has no
+/// anatomy in it and must never acquire any.
 mod creature_dog;
-mod creature_human;
 mod creature_rig;
 
-pub use creature_dog::{dog, dog_parts};
-pub use creature_human::{human, human_parts};
+pub use creature_dog::{dog, dog_limbs, dog_parts};
 pub use creature_rig::{CreatureRig, LimbChain, RigPart};
 
-/// The locomotion the two creatures run: the closed path around the scene, the
-/// distance-driven gait, the two-bone inverse kinematics that plant their feet,
-/// and the per-tick pose that composes the three.
+/// The locomotion the dogs walk: the two closed rings, the distance-driven gait,
+/// the two-bone inverse kinematics that plant their paws, and the per-tick pose
+/// that composes the three.
 mod creature_pose;
 mod leg_ik;
 mod locomotion;
 
-pub use creature_pose::{CreaturePose, DOG_GAIT, HUMAN_GAIT};
+pub use creature_pose::{CreaturePose, DOG_GAIT};
 pub use leg_ik::{ease, solve_two_bone, stride_phase, swing_lift, StridePhase, TwoBone};
-pub use creature_dog::dog_limbs;
-pub use creature_human::human_limbs;
-pub use locomotion::{
-    dog_travel, human_travel, CrucibleAnimation, LoopPath, PathPoint, HUMAN_LAG, LOOP_RADIUS,
-    TRAVEL_PER_TICK,
-};
+pub use locomotion::{dog_travel, CrucibleAnimation, LoopPath, PathPoint, TRAVEL_PER_TICK};

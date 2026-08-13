@@ -1,6 +1,6 @@
 [package]
 name = "axiom-procedural-mesh-crucible"
-description = "Axiom app: the procedural mesh crucible. A composition-leaf browser/WASM proof that every visible shape in a coherent scene — a banked road, a tunnel, a vehicle, trees, a building, terrain, an implicit sculpture, the primitive catalogue and a detail ladder — is produced by axiom-mesh-ops operators and validated by axiom-mesh. No imported geometry, no hand-typed vertex arrays."
+description = "Axiom app: the procedural mesh crucible. A composition-leaf browser/WASM proof that every visible shape in a coherent scene — generated terrain, and two counter-rotating rings of walking rigged dogs sharing one dog's worth of geometry — is produced by axiom-mesh-ops operators and validated by axiom-mesh. No imported geometry, no hand-typed vertex arrays."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true

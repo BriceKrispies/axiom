@@ -1,70 +1,66 @@
-//! The closed loop the two creatures run, and how far along it they are on a
-//! given tick.
+//! The two closed rings the dogs walk, and how far round its own ring each dog
+//! is on a given tick.
 //!
 //! ## The path
 //!
-//! One `Curve::catmull_rom` around the scene at [`LOOP_RADIUS`], sampled once
-//! into an **arc-length table** and never re-sampled. A spline's parameter is
-//! not proportional to its length, so a runner advanced by parameter would
-//! speed up and slow down for no reason a viewer could see; `sample_uniform`
-//! inverts that once, at startup, and every later lookup is two table reads and
-//! a lerp.
+//! One `Curve::catmull_rom` per ring, sampled once into an **arc-length table**
+//! and never re-sampled. A spline's parameter is not proportional to its length,
+//! so a walker advanced by parameter would speed up and slow down for no reason
+//! a viewer could see; `sample_uniform` inverts that once, at startup, and every
+//! later lookup is two table reads and a lerp.
 //!
-//! Catmull-Rom reaches only its *interior* control points, so a closed loop is
+//! Catmull-Rom reaches only its *interior* control points, so a closed ring is
 //! authored by walking one full revolution and then repeating a point at each
 //! end as a shaping handle. The seam is therefore interpolated by the same rule
-//! as every other span — the loop joins smoothly rather than meeting at a
+//! as every other span — the ring joins smoothly rather than meeting at a
 //! corner.
 //!
-//! ## Where the loop is, and why there
+//! ## Which way each ring is walked
 //!
-//! It rings the whole scene at a radius that clears everything standing in it:
-//! the road spans `z = -66 .. 72` and never leaves `|x| < 30`; the primitive row
-//! sits at `z = -74` inside `|x| < 38`; the LOD ladder at `z = -60`; the
-//! building at `(-44, -16)` and the sculpture at `(44, 8)` are both under 47
-//! from the origin; the trees stand within 15.5 of the road. A loop at 86 clears
-//! the lot — its nearest approach to the road is the road's far end at
-//! `(-2, 72)`, 14 units away — and still sits 10 inside the terrain's 96
-//! half-extent, so the runners are on ground the heightfield actually covers on
-//! every span. `tests/locomotion.rs` measures both clearances against the real
-//! road curve rather than a bounding box.
+//! The control points are laid out at `sign · index / N` of a turn, where the
+//! sign is the ring's [`Winding`]. Reversing the sign reverses the authored
+//! parameter direction, which reverses the tangent, which reverses the facing —
+//! there is no separate "turn the dog around" step anywhere, and so no second
+//! place for the two to disagree. See `rings.rs` for which sign is which way.
+//!
+//! ## Spacing, and why it is measured rather than authored
+//!
+//! A dog's start offset is `slot · total / count`, where `total` is the ring's
+//! **measured** length. Deriving it from the ideal circumference instead would
+//! leave the last gap short by whatever the terrain's relief and the spline's
+//! sampling added, and that error would sit at the seam where it is most
+//! visible. Measured, the chain closes exactly.
 //!
 //! ## Determinism
 //!
-//! Travel is `tick × TRAVEL_PER_TICK`. Not elapsed time, not an accumulator, not
-//! a wall clock: a pure function of the engine tick the frame closure is handed.
-//! Tick `N` therefore produces exactly one pose, in this process and the next
-//! one, and the whole animation is replayable by counting.
+//! Travel is `tick × TRAVEL_PER_TICK` plus the dog's own fixed offset. Not
+//! elapsed time, not an accumulator, not a wall clock: a pure function of the
+//! engine tick the frame closure is handed. Tick `N` therefore produces exactly
+//! one pose per dog, in this process and the next one, and the whole animation
+//! is replayable by counting.
 
 use axiom_math::{Curve, Transform, Vec3};
 use axiom_mesh::{MeshError, MeshErrorCode, MeshResult};
 
 use crate::creature_dog::dog_limbs;
-use crate::creature_human::human_limbs;
-use crate::creature_pose::{CreaturePose, DOG_GAIT, HUMAN_GAIT};
+use crate::creature_pose::{CreaturePose, DOG_GAIT};
 use crate::creature_rig::{CreatureRig, LimbChain};
+use crate::rings::{ring_dogs, Ring, RingDog, Winding, RINGS};
 use crate::terrain::ground_y;
-
-/// How far from the scene origin the loop runs.
-pub const LOOP_RADIUS: f32 = 86.0;
 
 /// How many control points one revolution is authored from, and how many
 /// arc-length samples the table holds. 16 controls give a circle no viewer can
-/// tell from round; 768 samples put the table's steps ~0.67 units apart, well
-/// under the length of anything that rides it.
+/// tell from round; 768 samples put the table's steps well under a fifth of a
+/// unit on either ring, far under the length of anything that rides it.
 const LOOP_CONTROLS: u32 = 16;
 const LOOP_SAMPLES: u32 = 768;
 
-/// World units the dog covers per engine tick. At 60 Hz that is ~37 units a
-/// second, or roughly 15 seconds a lap.
+/// World units a dog covers per engine tick. At 60 Hz that is ~37 units a
+/// second, or a shade under two body lengths — a trot, not a sprint.
 pub const TRAVEL_PER_TICK: f32 = 0.62;
 
-/// How far behind the dog the human runs, measured **along the loop** rather
-/// than as a straight line — so the human genuinely tracks the same path
-/// through every bend instead of cutting the corners.
-pub const HUMAN_LAG: f32 = 34.1;
-
-/// A point on the loop: where it is, which way it runs, and which way is right.
+/// A point on a ring: where it is, which way the walk runs, and which way is
+/// right.
 #[derive(Debug, Clone, Copy)]
 pub struct PathPoint {
     /// The point on the terrain, at ground height.
@@ -75,37 +71,42 @@ pub struct PathPoint {
     pub right: Vec3,
 }
 
-/// The closed loop, pre-inverted into an arc-length table.
+/// One closed ring, pre-inverted into an arc-length table.
 #[derive(Debug, Clone)]
 pub struct LoopPath {
     /// Horizontal positions, equally spaced by arc length.
     positions: Vec<Vec3>,
     /// The unit tangent at each position.
     tangents: Vec<Vec3>,
-    /// The loop's measured length.
+    /// The ring's measured length.
     total: f32,
 }
 
 impl LoopPath {
-    /// The scene-perimeter loop.
-    pub fn perimeter() -> MeshResult<LoopPath> {
+    /// The walk around one [`Ring`], at its radius and in its winding.
+    pub fn ring(ring: Ring) -> MeshResult<LoopPath> {
+        LoopPath::circle(ring.radius, ring.winding)
+    }
+
+    /// A closed circular walk of `radius`, authored in the given winding.
+    pub fn circle(radius: f32, winding: Winding) -> MeshResult<LoopPath> {
         let controls: Vec<Vec3> = (-1..=(LOOP_CONTROLS as i32 + 1))
             .map(|index| {
-                let angle =
-                    index as f32 / LOOP_CONTROLS as f32 * core::f32::consts::TAU;
-                Vec3::new(LOOP_RADIUS * angle.cos(), 0.0, LOOP_RADIUS * angle.sin())
+                let angle = winding.sign() * index as f32 / LOOP_CONTROLS as f32
+                    * core::f32::consts::TAU;
+                Vec3::new(radius * angle.cos(), 0.0, radius * angle.sin())
             })
             .collect();
         let curve = Curve::catmull_rom(controls).map_err(|_| {
             MeshError::new(
                 MeshErrorCode::InvalidPath,
-                "the authored perimeter loop is a valid Catmull-Rom curve",
+                "the authored ring is a valid Catmull-Rom curve",
             )
         })?;
         let samples = curve.sample_uniform(LOOP_SAMPLES).map_err(|_| {
             MeshError::new(
                 MeshErrorCode::InvalidPath,
-                "the perimeter loop admits a uniform arc-length sampling",
+                "the ring admits a uniform arc-length sampling",
             )
         })?;
         let total = samples
@@ -115,7 +116,7 @@ impl LoopPath {
             .ok_or_else(|| {
                 MeshError::new(
                     MeshErrorCode::InvalidPath,
-                    "the perimeter loop has a measurable length",
+                    "the ring has a measurable length",
                 )
             })?;
         Ok(LoopPath {
@@ -125,12 +126,12 @@ impl LoopPath {
         })
     }
 
-    /// The loop's measured length.
+    /// The ring's measured length.
     pub fn total(&self) -> f32 {
         self.total
     }
 
-    /// The point `arc` units along the loop, wrapping — the loop is closed, so
+    /// The point `arc` units along the ring, wrapping — the ring is closed, so
     /// there is no end to fall off.
     pub fn at(&self, arc: f32) -> PathPoint {
         let steps = (self.positions.len() - 1) as f32;
@@ -156,87 +157,104 @@ fn lerp(a: Vec3, b: Vec3, t: f32) -> Vec3 {
     a.add(b.subtract(a).mul_scalar(t))
 }
 
-/// How far along the loop the dog is at `tick`.
+/// How far the lead dog of a ring has walked at `tick`.
 pub fn dog_travel(tick: u64) -> f32 {
     tick as f32 * TRAVEL_PER_TICK
 }
 
-/// How far along the loop the human is at `tick` — the dog's position, one
-/// fixed arc-length lag back.
-pub fn human_travel(tick: u64) -> f32 {
-    dog_travel(tick) - HUMAN_LAG
-}
-
-/// One creature's animation: the bones, the limb chains, and the gait dials.
-#[derive(Debug, Clone)]
-struct Runner {
-    rig: CreatureRig,
-    limbs: [LimbChain; 4],
-    gait: CreaturePose,
-}
-
-/// The dog and the human running the loop.
+/// Both rings of dogs, walking.
 ///
 /// Engine-free on purpose: this produces **transforms**, and the app's install
 /// step is what knows which scene node each one belongs to. That is what lets
-/// the whole animation — path, gait, inverse kinematics, determinism — be
+/// the whole animation — paths, gait, inverse kinematics, determinism — be
 /// tested natively without a browser or a GPU.
+///
+/// One rig, one set of limb chains, one gait — for every dog in the crowd. The
+/// animation is exactly as parameterised as the geometry is: a dog differs from
+/// its neighbour by *where on which ring it is*, and by nothing else.
 #[derive(Debug, Clone)]
 pub struct CrucibleAnimation {
-    path: LoopPath,
-    dog: Runner,
-    human: Runner,
+    /// One walk per entry in [`RINGS`], in that order.
+    paths: Vec<LoopPath>,
+    /// Every dog, in the order [`Self::transforms`] emits them.
+    dogs: Vec<RingDog>,
+    /// The single rig every dog instances.
+    rig: CreatureRig,
+    /// Its four solvable legs.
+    limbs: [LimbChain; 4],
+    /// The trot they all walk.
+    gait: CreaturePose,
 }
 
 impl CrucibleAnimation {
-    /// Bind an animation to the two rigs the scene spawned.
-    pub fn new(dog: CreatureRig, human: CreatureRig) -> MeshResult<CrucibleAnimation> {
+    /// Bind an animation to the rig the scene registered.
+    pub fn new(dog: CreatureRig) -> MeshResult<CrucibleAnimation> {
         Ok(CrucibleAnimation {
-            path: LoopPath::perimeter()?,
-            dog: Runner {
-                rig: dog,
-                limbs: dog_limbs(),
-                gait: DOG_GAIT,
-            },
-            human: Runner {
-                rig: human,
-                limbs: human_limbs(),
-                gait: HUMAN_GAIT,
-            },
+            paths: RINGS
+                .iter()
+                .map(|ring| LoopPath::ring(*ring))
+                .collect::<MeshResult<Vec<LoopPath>>>()?,
+            dogs: ring_dogs(),
+            rig: dog,
+            limbs: dog_limbs(),
+            gait: DOG_GAIT,
         })
     }
 
-    /// The loop both creatures run.
-    pub fn path(&self) -> &LoopPath {
-        &self.path
+    /// Every dog, in the order their bones come back from
+    /// [`Self::transforms`].
+    pub fn dogs(&self) -> &[RingDog] {
+        &self.dogs
     }
 
-    /// How many bones the dog has — the first `dog_bone_count()` transforms
-    /// [`Self::transforms`] returns are its.
-    pub fn dog_bone_count(&self) -> usize {
-        self.dog.rig.len()
+    /// The walk around one ring, indexed as [`RINGS`] is.
+    pub fn path(&self, ring: usize) -> &LoopPath {
+        &self.paths[ring.min(self.paths.len() - 1)]
     }
 
-    /// How many bones the human has.
-    pub fn human_bone_count(&self) -> usize {
-        self.human.rig.len()
+    /// How many bones one dog has — every dog has the same ones, in the same
+    /// order, because there is only one rig.
+    pub fn bone_count(&self) -> usize {
+        self.rig.len()
     }
 
-    /// Every bone's world transform at `tick`: the dog's bones in rig order,
-    /// then the human's.
+    /// How many dogs are walking.
+    pub fn dog_count(&self) -> usize {
+        self.dogs.len()
+    }
+
+    /// How far round its own ring dog `index` is at `tick`: the shared travel
+    /// plus its own fixed place in the chain.
+    ///
+    /// The offset is a whole number of *slots* of the ring's measured length, so
+    /// the chain is evenly spaced and closes exactly at the seam. It also gives
+    /// every dog a different point in the gait cycle for free — the stride is
+    /// 9 units and the slots are 24 apart, so the legs run as a wave around the
+    /// ring instead of stamping in lockstep.
+    pub fn travel(&self, index: usize, tick: u64) -> f32 {
+        self.dogs
+            .get(index)
+            .map(|dog| {
+                let ring = RINGS[dog.ring];
+                dog_travel(tick) + dog.slot as f32 * self.path(dog.ring).total() / ring.count() as f32
+            })
+            .unwrap_or_else(|| dog_travel(tick))
+    }
+
+    /// Every bone of every dog at `tick`: dog by dog in [`Self::dogs`] order,
+    /// each dog's bones in rig order.
     pub fn transforms(&self, tick: u64) -> Vec<Transform> {
-        let mut all = self.dog.gait.pose(
-            &self.dog.rig,
-            &self.dog.limbs,
-            &self.path,
-            dog_travel(tick),
-        );
-        all.extend(self.human.gait.pose(
-            &self.human.rig,
-            &self.human.limbs,
-            &self.path,
-            human_travel(tick),
-        ));
-        all
+        self.dogs
+            .iter()
+            .enumerate()
+            .flat_map(|(index, dog)| {
+                self.gait.pose(
+                    &self.rig,
+                    &self.limbs,
+                    self.path(dog.ring),
+                    self.travel(index, tick),
+                )
+            })
+            .collect()
     }
 }
