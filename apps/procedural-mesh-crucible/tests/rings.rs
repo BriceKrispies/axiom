@@ -193,17 +193,20 @@ fn every_dog_stands_on_the_terrain_on_its_own_ring() {
     }
 }
 
-/// The direction test that actually distinguishes the rings.
+/// The direction test that keeps the whole field's traffic honest.
 ///
 /// A dog's *heading* is taken two ways, and both must agree with its ring: the
 /// way its body genuinely travelled between two consecutive ticks, and the way
 /// its root bone is facing (local `-Z`, the axis every bone is authored down).
 /// A sign error anywhere between the authored winding, the spline
-/// parameterization and `aim` shows up here rather than on the page — and it is
-/// then asserted for **every adjacent pair**, so no two neighbouring rings can
-/// end up turning the same way.
+/// parameterization and `aim` shows up here rather than on the page.
+///
+/// Every ring now turns the same way, so the closing assertion is that they
+/// genuinely *agree* — measured on real posed bones rather than read back off
+/// the constant that set them, which is what makes this a test of the spline
+/// and `aim` rather than a tautology.
 #[test]
-fn every_ring_turns_against_both_its_neighbours() {
+fn every_ring_turns_the_same_way_as_its_neighbours() {
     let animation = animation();
     let bones = animation.bone_count();
     for tick in [0u64, 61, 349, 1_004] {
@@ -243,8 +246,9 @@ fn every_ring_turns_against_both_its_neighbours() {
                 ring.index
             );
         }
-        // And every adjacent pair of rings genuinely disagrees: the signs are
-        // opposite, not merely "each consistent with itself".
+        // And every adjacent pair of rings genuinely agrees, measured on the
+        // posed bones: a stray sign in the spline or in `aim` would show up as
+        // one band shearing against the rest.
         let lead: Vec<usize> = (0..RING_COUNT)
             .map(|ring| {
                 animation
@@ -256,8 +260,8 @@ fn every_ring_turns_against_both_its_neighbours() {
             .collect();
         lead.windows(2).enumerate().for_each(|(index, pair)| {
             assert!(
-                turn(pair[0]) * turn(pair[1]) < 0.0,
-                "rings {index} and {} turn the same way at tick {tick}",
+                turn(pair[0]) * turn(pair[1]) > 0.0,
+                "rings {index} and {} turn against each other at tick {tick}",
                 index + 1
             );
         });

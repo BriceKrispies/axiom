@@ -109,13 +109,13 @@
       <thead><tr><th>Ring</th><th>Radius</th><th>Turns</th><th>Dogs</th><th>Ring length &divide; dogs</th><th>Nose-to-tail gap</th></tr></thead>
       <tbody>
         <tr><td class="name">0 &mdash; innermost</td><td>26</td><td>anticlockwise</td><td>6</td><td>163.3 &divide; 6 = 27.22</td><td>3.22</td></tr>
-        <tr><td class="name">1</td><td>33.75</td><td>clockwise</td><td>8</td><td>212.0 &divide; 8 = 26.50</td><td>2.50</td></tr>
+        <tr><td class="name">1</td><td>33.75</td><td>anticlockwise</td><td>8</td><td>212.0 &divide; 8 = 26.50</td><td>2.50</td></tr>
         <tr><td class="name">2</td><td>41.5</td><td>anticlockwise</td><td>10</td><td>260.7 &divide; 10 = 26.07</td><td>2.07</td></tr>
-        <tr><td class="name">3</td><td>49.25</td><td>clockwise</td><td>12</td><td>309.4 &divide; 12 = 25.78</td><td>1.78</td></tr>
+        <tr><td class="name">3</td><td>49.25</td><td>anticlockwise</td><td>12</td><td>309.4 &divide; 12 = 25.78</td><td>1.78</td></tr>
         <tr><td class="name">4</td><td>57</td><td>anticlockwise</td><td>14</td><td>358.0 &divide; 14 = 25.57</td><td>1.57</td></tr>
-        <tr><td class="name">5</td><td>64.75</td><td>clockwise</td><td>16</td><td>406.7 &divide; 16 = 25.42</td><td>1.42</td></tr>
+        <tr><td class="name">5</td><td>64.75</td><td>anticlockwise</td><td>16</td><td>406.7 &divide; 16 = 25.42</td><td>1.42</td></tr>
         <tr><td class="name">6</td><td>72.5</td><td>anticlockwise</td><td>18</td><td>455.4 &divide; 18 = 25.30</td><td>1.30</td></tr>
-        <tr><td class="name">7 &mdash; outermost</td><td>80.25</td><td>clockwise</td><td>20</td><td>504.1 &divide; 20 = 25.20</td><td>1.20</td></tr>
+        <tr><td class="name">7 &mdash; outermost</td><td>80.25</td><td>anticlockwise</td><td>20</td><td>504.1 &divide; 20 = 25.20</td><td>1.20</td></tr>
       </tbody>
     </table>
     </div>
@@ -151,7 +151,7 @@
       <tbody>
         <tr><td class="name">the constraint</td><td>Draws batch on the <code>(mesh, material)</code> pair, and a draw's colour reaches the GPU only through its <em>material</em> &mdash; the per-instance <code>colour[4]</code> in the instance stream is filled from the material the draw names. One coat per dog would therefore be 23 &times; 104 = <b>2392 single-instance draw calls</b>, which is instancing thrown away. (The engine-tier fix &mdash; a per-renderable tint excluded from the batch key &mdash; is described in the app's NOTES.md; it was recorded, not made.)</td></tr>
         <tr><td class="name">the palette</td><td><b>18 hues</b>, registered once and shared by the whole field, so the draw-call count is at most 23 &times; 18 + 1 = <b>415</b> for <em>any</em> crowd size. The eight rings as laid out wear every one of the 18, so the real number is exactly <b>415</b> &mdash; and it would still be 415 with ten times the dogs.</td></tr>
-        <tr><td class="name">readability</td><td>The palette is two interleaved combs of 9 hues; a ring uses the comb its index parity names. Two dogs adjacent <em>along</em> a ring are therefore at least 40&deg; apart in hue, and a dog on one ring and <em>any</em> dog on a neighbouring ring at least 20&deg; &mdash; which matters because neighbouring rings counter-rotate, so every relative alignment happens.</td></tr>
+        <tr><td class="name">readability</td><td>The palette is two interleaved combs of 9 hues; a ring uses the comb its index parity names. Two dogs adjacent <em>along</em> a ring are therefore at least 40&deg; apart in hue, and a dog on one ring and <em>any</em> dog on a neighbouring ring at least 20&deg; &mdash; which matters more now that every ring turns the same way: neighbouring dogs hold their relative alignment instead of sliding past each other, so a shared hue would sit side by side indefinitely.</td></tr>
         <tr><td class="name">gait</td><td>One trot, one rig, one set of legs. A dog's place in its chain is a fixed arc-length offset, which spaces the ring <em>and</em> puts every dog at a different point in the stride &mdash; the legs run as a wave rather than stamping in lockstep. Every paw is planted: during stance its world position is a function of the step number alone, so it does not slide while the body travels over it.</td></tr>
       </tbody>
     </table>

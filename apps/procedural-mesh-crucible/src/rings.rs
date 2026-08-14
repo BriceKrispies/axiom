@@ -122,10 +122,17 @@ pub struct Ring {
 }
 
 impl Ring {
-    /// Which way round the dogs walk: alternating with the index, so no ring
-    /// ever turns the same way as a neighbour.
+    /// Which way round the dogs walk. Every ring turns the same way, so the
+    /// whole field reads as one body of traffic rather than as counter-shearing
+    /// bands.
+    ///
+    /// The index is still what the palette combs off (see [`RING_COMB`]), so
+    /// neighbouring rings stay far apart in hue even though they no longer
+    /// differ in direction — which matters *more* now, not less: dogs on
+    /// adjacent rings hold their relative alignment instead of sliding past
+    /// each other, so a shared hue would sit side by side indefinitely.
     pub const fn winding(self) -> Winding {
-        [Winding::CounterClockwise, Winding::Clockwise][self.index % 2]
+        Winding::CounterClockwise
     }
 
     /// The ring's circumference — the length of the walk, before the terrain's
@@ -455,13 +462,27 @@ mod tests {
     }
 
     #[test]
-    fn every_ring_turns_against_both_its_neighbours() {
+    fn every_ring_turns_the_same_way() {
         RINGS.windows(2).for_each(|pair| {
-            assert_ne!(pair[0].winding(), pair[1].winding());
-            assert_eq!(pair[0].winding().sign(), -pair[1].winding().sign());
-            assert_eq!(pair[0].winding().cross_sign(), -pair[0].winding().sign());
+            assert_eq!(pair[0].winding(), pair[1].winding());
         });
-        assert_eq!(RINGS[0].winding(), Winding::CounterClockwise);
+        assert!(RINGS
+            .iter()
+            .all(|ring| ring.winding() == Winding::CounterClockwise));
+    }
+
+    #[test]
+    fn the_cross_sign_still_opposes_the_turn_sign() {
+        // The relationship between the authored winding and the observable
+        // (position x heading) sign is what the posed-bone direction test in
+        // tests/rings.rs leans on. It is a property of Winding itself, not of
+        // how the rings happen to be assigned, so it must keep holding now that
+        // every ring shares one winding.
+        assert_eq!(
+            Winding::CounterClockwise.cross_sign(),
+            -Winding::CounterClockwise.sign()
+        );
+        assert_eq!(Winding::Clockwise.cross_sign(), -Winding::Clockwise.sign());
     }
 
     #[test]
