@@ -23,17 +23,31 @@
 //!
 //! ## The split torso
 //!
-//! The torso is two lofts rather than one, sharing the station at `z = 0.22`, so
+//! The torso is two lofts rather than one, sharing the station at `z = 0.24`, so
 //! that `pelvis` and `spine` are real bones with a real joint between them. The
 //! shared station makes the seam watertight and the interior caps are never
 //! seen. Front legs hang off the spine and hind legs off the pelvis, which is
 //! what lets the back flex under the gait.
 //!
-//! ## Pose and frame
+//! ## Pose and frame — the dog is a **dachshund**
 //!
-//! Facing `-Z`, feet on `y = 0`, roughly 0.9 units at the shoulder. Every number
-//! below is an authored literal or arithmetic over authored literals — there is
-//! no randomness here, so two builds of the same variant are byte-identical.
+//! Facing `-Z`, feet on `y = 0`, roughly 0.48 units at the withers and 2.4 units
+//! nose to tail: **long and low**, a body a shade over three times its own
+//! overall height, where the previous figure was 1.85 times. The re-proportioning
+//! is four coupled decisions and no new operators:
+//!
+//! * the torso is stretched from 1.12 to 1.66 units and its depth carried much
+//!   further back before the rump tapers;
+//! * the legs are halved and, because they are halved, **bent** — see
+//!   [`LEG_BONES`];
+//! * the neck is cut from 0.297 to 0.196 units, thickened, and laid down at 45°
+//!   so the head is carried forward rather than up;
+//! * the head keeps its size and gains muzzle, and the ears are turned over to
+//!   hang down the cheeks instead of standing up.
+//!
+//! Every number below is an authored literal or arithmetic over authored
+//! literals — there is no randomness here, so two builds of the same variant are
+//! byte-identical.
 //!
 //! ## Normals: generated per bone, and deliberately **not** welded first
 //!
@@ -61,15 +75,21 @@ use crate::quantities::meters;
 use crate::variant::{CrucibleVariant, DetailParams};
 
 /// The torso's stations along the spine: `z`, centre height, half-width,
-/// half-depth. The deep chest at `z = -0.28` and the narrow waist at `z = 0.22`
-/// are the whole reason this is a loft and not a swept tube.
+/// half-depth. The deep chest at `z = -0.52` is the whole reason this is a loft
+/// and not a swept tube — and on this animal the depth is carried a long way
+/// back before the rump tapers, which is what a dachshund's topline does.
+///
+/// The torso spans `z = -0.80 .. 0.86` — **1.66 units of body over a 0.48-unit
+/// back height**. That single ratio is the breed: everything else here (the
+/// short neck, the low-slung head, the halved legs) follows from standing a long
+/// deep barrel very close to the ground.
 const TORSO_STATIONS: [[f32; 4]; 6] = [
-    [-0.50, 0.66, 0.150, 0.160],
-    [-0.28, 0.64, 0.210, 0.230],
-    [-0.05, 0.65, 0.190, 0.200],
-    [0.22, 0.67, 0.170, 0.175],
-    [0.45, 0.69, 0.190, 0.190],
-    [0.62, 0.70, 0.130, 0.130],
+    [-0.80, 0.315, 0.112, 0.140],
+    [-0.52, 0.305, 0.163, 0.174],
+    [-0.14, 0.308, 0.158, 0.168],
+    [0.24, 0.312, 0.150, 0.158],
+    [0.58, 0.322, 0.156, 0.152],
+    [0.86, 0.335, 0.102, 0.100],
 ];
 
 /// Which stations each half of the torso skins. They share station 3, so the
@@ -78,64 +98,91 @@ const SPINE_STATIONS: (usize, usize) = (0, 4);
 const PELVIS_STATIONS: (usize, usize) = (3, 6);
 
 /// The two torso bones' pivots in creature space.
-const PELVIS_PIVOT: Vec3 = Vec3::new(0.0, 0.670, 0.400);
-const SPINE_PIVOT: Vec3 = Vec3::new(0.0, 0.650, -0.050);
+const PELVIS_PIVOT: Vec3 = Vec3::new(0.0, 0.316, 0.480);
+const SPINE_PIVOT: Vec3 = Vec3::new(0.0, 0.305, -0.140);
 
 /// The neck, muzzle and ear bones: pivot, tip, base radius, tip ratio.
-const NECK_BONE: [f32; 8] = [0.000, 0.700, -0.440, 0.000, 0.900, -0.660, 0.115, 0.80];
-const MUZZLE_BONE: [f32; 8] = [0.000, 0.905, -0.800, 0.000, 0.875, -1.000, 0.072, 0.72];
-const EAR_BONE: [f32; 8] = [0.062, 1.000, -0.700, 0.108, 1.130, -0.665, 0.048, 0.30];
+///
+/// The neck is **short and thick and carried low**: 0.196 units long against a
+/// 0.112 base radius, rising 45° out of the withers rather than standing the
+/// head up over them. The muzzle is the opposite — 0.202 units of taper off a
+/// 0.068 base, the long tapered snout the breed is drawn with. The ears **hang**:
+/// the bone runs from the top of the skull *down* the cheek, which is why a
+/// dachshund's silhouette has no upright ear triangle in it.
+const NECK_BONE: [f32; 8] = [0.000, 0.425, -0.740, 0.000, 0.580, -0.860, 0.112, 0.86];
+const MUZZLE_BONE: [f32; 8] = [0.000, 0.670, -1.000, 0.000, 0.640, -1.200, 0.068, 0.68];
+const EAR_BONE: [f32; 8] = [0.070, 0.715, -0.930, 0.100, 0.545, -0.905, 0.060, 0.55];
 
 /// The skull's centre and its non-uniform scale — an egg elongated along `-Z`.
-const SKULL_CENTRE: Vec3 = Vec3::new(0.0, 0.930, -0.720);
-const SKULL_SCALE: Vec3 = Vec3::new(0.105, 0.100, 0.140);
+/// It is deliberately **not** shrunk with the legs: a dachshund's head stays
+/// proportionally large on a body that has dropped to half its standing height.
+const SKULL_CENTRE: Vec3 = Vec3::new(0.0, 0.690, -0.940);
+const SKULL_SCALE: Vec3 = Vec3::new(0.100, 0.098, 0.132);
 
 /// The nose ball capping the muzzle.
-const NOSE_CENTRE: Vec3 = Vec3::new(0.0, 0.872, -1.012);
-const NOSE_RADIUS: f32 = 0.036;
+const NOSE_CENTRE: Vec3 = Vec3::new(0.0, 0.638, -1.212);
+const NOSE_RADIUS: f32 = 0.033;
 
 /// One side's leg bones: `from(x, y, z)`, `to(x, y, z)`, base radius, tip
-/// ratio. Each is emitted at `+x` and `-x`. The first two are the front leg
-/// (near vertical, sloping slightly back); the last three are the hind leg,
-/// whose femur runs forward-and-down, tibia back-and-down to the hock, and
-/// metatarsus down to the paw.
+/// ratio. Each is emitted at `+x` and `-x`. The first two are the front leg;
+/// the last three are the hind leg, whose femur runs forward-and-down, tibia
+/// back-and-down to the hock, and metatarsus down to the paw.
+///
+/// ## Short, and therefore *crooked* — the two are one decision
+///
+/// A dachshund's legs are half the relative length of a standard dog's, and they
+/// are also famously **bent**: the foreleg wraps a chest it is barely taller
+/// than, so the elbow carries well back and the pastern forward again. That is
+/// not decoration here, it is what makes the animal walkable. The front chain is
+/// 0.370 units of bone spanning a 0.271-unit shoulder-to-paw drop — it stands at
+/// **73% of its own reach**, where the previous near-straight leg stood at 105%
+/// and had to be crouched 47% of its length to buy back any swing at all. The
+/// spare 27% is the whole stride budget, and it is bought by the bend rather
+/// than by folding the animal into the ground.
 const LEG_BONES: [[f32; 8]; 5] = [
-    [0.135, 0.620, -0.300, 0.145, 0.360, -0.270, 0.070, 0.79],
-    [0.145, 0.360, -0.270, 0.148, 0.070, -0.280, 0.055, 0.76],
-    [0.130, 0.660, 0.400, 0.145, 0.420, 0.280, 0.082, 0.76],
-    [0.145, 0.420, 0.280, 0.150, 0.220, 0.450, 0.062, 0.73],
-    [0.150, 0.220, 0.450, 0.150, 0.065, 0.430, 0.045, 0.85],
+    [0.122, 0.300, -0.450, 0.130, 0.170, -0.310, 0.068, 0.82],
+    [0.130, 0.170, -0.310, 0.146, 0.058, -0.445, 0.056, 0.80],
+    [0.118, 0.325, 0.470, 0.126, 0.205, 0.355, 0.074, 0.78],
+    [0.126, 0.205, 0.355, 0.140, 0.120, 0.545, 0.060, 0.76],
+    [0.140, 0.120, 0.545, 0.146, 0.058, 0.512, 0.046, 0.86],
 ];
 
 /// Where the four paws sit: `(x, z)`. `y` is the paw's own half-height, so the
-/// box's underside lands exactly on the ground plane.
+/// box's underside lands exactly on the ground plane. The pairs are a full
+/// 1.004 units apart fore-and-aft — the long body's whole point, and the reason
+/// the ring arithmetic in `rings.rs` had to be re-derived around it.
 const PAW_MOUNTS: [[f32; 2]; 4] = [
-    [0.148, -0.310],
-    [-0.148, -0.310],
-    [0.150, 0.420],
-    [-0.150, 0.420],
+    [0.146, -0.452],
+    [-0.146, -0.452],
+    [0.146, 0.520],
+    [-0.146, 0.520],
 ];
 
-/// The paw block's half-extents.
-const PAW_HALF_EXTENTS: [f32; 3] = [0.055, 0.038, 0.078];
+/// The paw block's half-extents. Broad and shallow: a dachshund's foot stays
+/// proportionally large (it is a digging breed) while its leg halves.
+const PAW_HALF_EXTENTS: [f32; 3] = [0.046, 0.030, 0.070];
 
 /// The tail's control points. Catmull-Rom reaches only its interior points, so
-/// the first and last are shaping handles: the tail runs from `(0, 0.74, 0.66)`
-/// up and back to `(0, 1.02, 1.06)`.
+/// the first and last are shaping handles: the tail runs from `(0, 0.38, 0.90)`
+/// back to `(0, 0.482, 1.155)`.
+///
+/// It is carried almost **level**, continuing the topline instead of curling up
+/// over the rump — which is both what the breed does and what keeps the animal's
+/// tallest point the crown of its head rather than the tip of its tail.
 const TAIL_CONTROLS: [[f32; 3]; 6] = [
-    [0.00, 0.700, 0.550],
-    [0.00, 0.740, 0.660],
-    [0.00, 0.880, 0.850],
-    [0.00, 1.000, 0.980],
-    [0.00, 1.020, 1.060],
-    [0.00, 1.000, 1.140],
+    [0.00, 0.345, 0.780],
+    [0.00, 0.380, 0.900],
+    [0.00, 0.435, 1.020],
+    [0.00, 0.470, 1.110],
+    [0.00, 0.482, 1.155],
+    [0.00, 0.482, 1.190],
 ];
 
 /// Where the split falls in the tail's taper. The base bone covers one of the
 /// spline's three spans, so it carries a third of the shrink.
 const TAIL_MID_SCALE: f32 = 0.7667;
 const TAIL_TIP_SCALE: f32 = 0.30;
-const TAIL_RADIUS: f32 = 0.055;
+const TAIL_RADIUS: f32 = 0.050;
 
 /// The bone names, in rig order. Public so the pose pass and the scene can
 /// address a bone without re-deriving the anatomy.
@@ -429,7 +476,7 @@ fn paw(
     );
     Ok(RigPart {
         name,
-        mesh: generate_normals(&rounded_box(half, meters(0.026), segments)?)?,
+        mesh: generate_normals(&rounded_box(half, meters(0.020), segments)?)?,
         parent: Some(parent),
         rest: Transform::from_translation(paw_centre(slot)),
     })

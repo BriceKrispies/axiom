@@ -9,7 +9,7 @@
 //!
 //! ## Geometry is registered once, and instanced
 //!
-//! The scene holds eight concentric rings of dogs, and every one of them is the
+//! The scene holds eight concentric rings of dachshunds, and every one of them is the
 //! **same** 23 bone meshes. Those meshes are uploaded once, here, and each dog is
 //! then `bone_count` more *instances* of them — a transform and a material
 //! apiece. Registering a mesh per dog would multiply the vertex upload and the
@@ -23,11 +23,12 @@
 //! The same argument applies a second time, for a less obvious reason. The live
 //! backend batches draws on the `(mesh_id, material_id)` pair, and a draw's
 //! colour reaches the GPU only through its material — so a material per dog
-//! would mean `23 × dogs` single-instance batches (2760 draw calls here), which
+//! would mean `23 × dogs` single-instance batches (2392 draw calls here), which
 //! is instancing thrown away. The palette in `rings.rs` is therefore registered
 //! **once**, `PALETTE_SIZE` materials in total, and every dog names one of them:
-//! the draw-call count is at most `23 × PALETTE_SIZE + 1 = 415` — 392 for the
-//! field as laid out, which wears 17 of the 18 coats — whatever the crowd size.
+//! the draw-call count is at most `23 × PALETTE_SIZE + 1 = 415` — which the field
+//! as laid out reaches exactly, wearing every one of the 18 coats — whatever the
+//! crowd size.
 //!
 //! The same function serves the browser arm and the native harness, so what a
 //! native test builds is byte-for-byte what the page presents.
@@ -46,14 +47,17 @@ use crate::variant::CrucibleVariant;
 /// interactive camera's opening yaw/pitch/distance from it rather than typing a
 /// second copy of the same shot, so moving these numbers moves both.
 ///
-/// It is set to frame **the whole filled field**: the outermost ring is 82 units
-/// from the origin and its dogs bulge to ~85, so the shot has to hold a
-/// 170-unit disc of 11-unit-tall animals. Three numbers decide it:
+/// It is set to frame **the whole filled field**: the outermost ring is 80.25
+/// units from the origin and its dogs bulge to ~83, so the shot has to hold a
+/// 166-unit disc of 8-unit-tall animals. The disc barely moved when the dogs
+/// became dachshunds — a longer body pushed the rim clearance in by as much as
+/// the bulge pushed it out — so the framing did not, and the animals are simply
+/// lower in it. Three numbers decide it:
 ///
 /// * **Distance (195 units).** At a 58° vertical field the binding constraint is
 ///   the *near* rim — the edge of the disc closest to the camera, which
 ///   perspective magnifies most. Holding it inside the frustum needs at least
-///   159 units at this elevation; the rest is margin, so the front rank is not
+///   156 units at this elevation; the rest is margin, so the front rank is not
 ///   jammed against the bottom of the frame and the whole 192-unit terrain plate
 ///   comes into shot with it.
 /// * **Elevation (37°).** Steeper than the two-ring shot's 30°, because eight

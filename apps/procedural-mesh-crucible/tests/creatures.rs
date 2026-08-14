@@ -11,15 +11,16 @@
 //! 2. **Topology change** — the variant really re-tessellates it, with the
 //!    concrete vertex and index counts printed.
 //! 3. **Determinism** — two builds of the same variant have the same digest.
-//! 4. **Proportion** — longer than it is tall, standing on `y = 0`, and the
-//!    length the ring spacing is derived from.
+//! 4. **Proportion** — a dachshund's length-to-height band, legs a small
+//!    fraction of that length, standing on `y = 0`, and the length the ring
+//!    spacing is derived from.
 //! 5. **The rig is the scene's geometry** — every bone the rig declares is a
 //!    registered scene object, and dropping those objects through their own
 //!    placements reassembles one whole dog rather than 23 scattered parts.
 
 use axiom_mesh::{aabb, digest, Mesh};
 use axiom_procedural_mesh_crucible::{
-    crucible_meshes, dog, dog_parts, CrucibleObject, CrucibleVariant, DOG_BODY_LENGTH,
+    crucible_meshes, dog, dog_limbs, dog_parts, CrucibleObject, CrucibleVariant, DOG_BODY_LENGTH,
 };
 
 /// How far above or below zero a sole may sit and still be "standing on the
@@ -145,23 +146,54 @@ fn building_the_dog_twice_is_byte_identical() {
     }
 }
 
+/// The proportion test, and the reason it is worth having.
+///
+/// "Longer than it is tall" is true of every dog ever drawn and proves nothing.
+/// What distinguishes a **dachshund** is a number: its body is between 2.6 and
+/// 3.4 times its overall height, where an ordinary dog is under two. Assert the
+/// band, and a re-proportioning that stops halfway — or one that later drifts
+/// back toward a labrador — fails here rather than on the page.
+///
+/// The leg is held the same way. Halving it is the other half of the silhouette,
+/// so it is measured as a fraction of the body's length: a dachshund's foreleg is
+/// a small part of the animal it carries, and 10-18% is the band that reads.
 #[test]
-fn the_dogs_proportions_read_as_a_dog_and_match_the_ring_spacing() {
+fn the_dog_is_proportioned_as_a_dachshund_and_matches_the_ring_spacing() {
     let mesh = build(CrucibleVariant::Base);
     let (width, height, depth, floor) = extents(&mesh);
-    println!("[aabb] dog w {width:.3} h {height:.3} d {depth:.3} floor {floor:.4}");
+    let ratio = depth / height;
+    let limbs = dog_limbs();
+    let front = limbs[0].len_upper + limbs[0].len_lower;
+    let hind = limbs[2].len_upper + limbs[2].len_lower + limbs[2].len_extra;
+    println!(
+        "[aabb] dog w {width:.3} h {height:.3} d {depth:.3} floor {floor:.4} \
+         length:height {ratio:.2}  fore leg {front:.3} ({:.1}% of length)  hind leg {hind:.3}",
+        100.0 * front / depth
+    );
 
-    // A dog is longer than it is tall and than it is wide.
+    // Long and low: the whole point of the breed, stated as the band it lives in.
     assert!(
-        depth > height,
-        "the dog is not longer (z {depth}) than it is tall ({height})"
+        (2.6..=3.4).contains(&ratio),
+        "the dog is {ratio:.2}× as long as it is tall — a dachshund is 2.6 to 3.4, \
+         an ordinary dog under 2"
     );
     assert!(depth > width, "the dog is not longer than it is wide");
     assert!(floor.abs() < GROUND_TOLERANCE);
-    // The authored figure: ~0.9 at the shoulder, a little more at the ear tips.
-    assert!(height > 0.85 && height < 1.3, "the dog is {height} tall");
-    // And the nose-to-tail length the two rings space their chains by is the
-    // length of the animal actually being drawn, not a number that drifted.
+    // Dramatically short legs. The front chain carries the animal, so it is the
+    // one held: a small fraction of the body it stands under.
+    assert!(
+        front / depth > 0.10 && front / depth < 0.18,
+        "the foreleg is {front} against a {depth}-unit body — a dachshund's is a \
+         tenth to a sixth of its length"
+    );
+    // The hind chain has a third bone, so it is longer end to end; it must still
+    // be a short leg rather than a normal one hidden behind the front pair.
+    assert!(
+        hind / depth < 0.22,
+        "the hind leg is {hind} against a {depth}-unit body"
+    );
+    // And the nose-to-tail length the rings space their chains by is the length
+    // of the animal actually being drawn, not a number that drifted.
     assert!(
         (depth - DOG_BODY_LENGTH).abs() < 0.15,
         "the ring spacing is built on a {DOG_BODY_LENGTH}-unit dog, but the dog measures {depth}"

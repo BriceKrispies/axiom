@@ -51,15 +51,21 @@
 <main>
   <h1>Procedural Mesh Crucible</h1>
   <p class="lede">
-    <b>Eight</b> concentric rings of walking dogs &mdash; <b>120</b> of them, packed nose to tail, each ring
-    turning against both of its neighbours &mdash; on generated ground. Every visible triangle below was
-    produced by an <code>axiom-mesh-ops</code> operator and validated by <code>axiom-mesh</code>: there is
+    <b>Eight</b> concentric rings of walking <b>dachshunds</b> &mdash; <b>104</b> of them, packed nose to tail,
+    each ring turning against both of its neighbours &mdash; on generated ground. Every visible triangle below
+    was produced by an <code>axiom-mesh-ops</code> operator and validated by <code>axiom-mesh</code>: there is
     no imported geometry in this app and no hand-typed vertex array. The ground is a meshed height array;
     each dog is a lofted torso, tapered swept limbs, an icosphere skull and rounded-box paws, cut at the
     joints into a 23-bone rig and walked by distance-driven inverse kinematics.
     <br /><br />
-    All 120 are the <em>same 23 meshes</em> in one of <em>18 shared coats</em>. The geometry is uploaded once
-    and drawn <b>2761</b> times as instances, and those instances collapse into <b>392</b> draw calls &mdash;
+    The animal is <b>3.05&times; as long as it is tall</b> (2.40 units nose to tail on a 0.79-unit height) with
+    forelegs a sixth of its length &mdash; and that one ratio sizes the rest of the app. A longer body bulges
+    further off a curve, so the radial pitch and the innermost radius fall out of it; shorter legs have less
+    absolute reach, so the stride, the crouch and the terrain the feet may follow fall out of it too. The
+    tables below are all downstream of the dog.
+    <br /><br />
+    All 104 are the <em>same 23 meshes</em> in one of <em>18 shared coats</em>. The geometry is uploaded once
+    and drawn <b>2393</b> times as instances, and those instances collapse into <b>415</b> draw calls &mdash;
     one per (bone mesh, coat) pair, plus the terrain. Both numbers are the point: adding a dog costs a
     transform and a palette index, never a vertex and never a draw call.
   </p>
@@ -86,43 +92,53 @@
     <table>
       <thead><tr><th>Object</th><th>Operator chain</th></tr></thead>
       <tbody>
-        <tr><td class="name">terrain</td><td class="op">heightfield_mesh over an analytic sine sum, with a border skirt. A 192&times;192 plate with a shallow basin scooped out of the middle; the eight rings walk its wall, so every chain rises and falls with the ground.</td></tr>
-        <tr><td class="name">dog-pelvis &middot; dog-spine</td><td class="op">loft &mdash; two halves of the same six placed circle sections, each non-uniformly scaled by its LoftSection::placement (deep chest, narrow waist)</td></tr>
-        <tr><td class="name">dog-neck &middot; dog-muzzle &middot; dog-ear-l/r</td><td class="op">tapered sweep of a circle along a Curve::polyline (start_scale &gt; end_scale), with the muzzle's uv_sphere nose combined in</td></tr>
+        <tr><td class="name">terrain</td><td class="op">heightfield_mesh over an analytic sine sum, with a border skirt. A 192&times;192 plate with a shallow basin scooped out of the middle; the eight rings walk its wall, so every chain rises and falls with the ground &mdash; and each dog pitches along the slope under its own wheelbase, which is what lets a short-legged animal keep four feet on it.</td></tr>
+        <tr><td class="name">dog-pelvis &middot; dog-spine</td><td class="op">loft &mdash; two halves of the same six placed circle sections, each non-uniformly scaled by its LoftSection::placement. 1.66 units of barrel over a 0.48-unit back: a deep chest whose depth is carried a long way back before the rump tapers.</td></tr>
+        <tr><td class="name">dog-neck &middot; dog-muzzle &middot; dog-ear-l/r</td><td class="op">tapered sweep of a circle along a Curve::polyline (start_scale &gt; end_scale), with the muzzle's uv_sphere nose combined in. The neck is short, thick and laid at 45&deg;; the muzzle is long and finely tapered; the ears run <em>downward</em> from the crown, so the silhouette carries no upright ear.</td></tr>
         <tr><td class="name">dog-head</td><td class="op">icosphere, non-uniformly scaled by mesh::transform into an egg elongated along &minus;Z</td></tr>
         <tr><td class="name">dog-tail-base &middot; dog-tail-tip</td><td class="op">two tapered sweeps along the two halves of one Curve::catmull_rom &mdash; Catmull-Rom is local, so the pair reproduces the single spline span for span</td></tr>
-        <tr><td class="name">dog-fore-* &middot; dog-hind-*</td><td class="op">tapered sweeps: two bones per front leg, three per hind leg (femur / tibia / metatarsus), so the hind stance is angled rather than a table leg</td></tr>
+        <tr><td class="name">dog-fore-* &middot; dog-hind-*</td><td class="op">tapered sweeps: two bones per front leg, three per hind leg (femur / tibia / metatarsus). Both are authored <b>bent</b> &mdash; the foreleg's elbow carries well back and its pastern forward again, which is both what a dachshund's crooked front does and what leaves the halved leg any swing budget at all.</td></tr>
         <tr><td class="name">dog-*-paw &times;4</td><td class="op">rounded_box, resting exactly on the sole plane</td></tr>
       </tbody>
     </table>
     </div>
 
-    <h2>The eight rings &mdash; 120 dogs</h2>
+    <h2>The eight rings &mdash; 104 dachshunds</h2>
     <div class="scroller">
     <table>
       <thead><tr><th>Ring</th><th>Radius</th><th>Turns</th><th>Dogs</th><th>Ring length &divide; dogs</th><th>Nose-to-tail gap</th></tr></thead>
       <tbody>
-        <tr><td class="name">0 &mdash; innermost</td><td>26</td><td>anticlockwise</td><td>7</td><td>163.3 &divide; 7 = 23.33</td><td>2.33</td></tr>
-        <tr><td class="name">1</td><td>34</td><td>clockwise</td><td>9</td><td>213.6 &divide; 9 = 23.73</td><td>2.73</td></tr>
-        <tr><td class="name">2</td><td>42</td><td>anticlockwise</td><td>12</td><td>263.8 &divide; 12 = 21.98</td><td>0.98</td></tr>
-        <tr><td class="name">3</td><td>50</td><td>clockwise</td><td>14</td><td>314.1 &divide; 14 = 22.43</td><td>1.43</td></tr>
-        <tr><td class="name">4</td><td>58</td><td>anticlockwise</td><td>16</td><td>364.3 &divide; 16 = 22.77</td><td>1.77</td></tr>
-        <tr><td class="name">5</td><td>66</td><td>clockwise</td><td>18</td><td>414.6 &divide; 18 = 23.03</td><td>2.03</td></tr>
-        <tr><td class="name">6</td><td>74</td><td>anticlockwise</td><td>21</td><td>464.8 &divide; 21 = 22.13</td><td>1.13</td></tr>
-        <tr><td class="name">7 &mdash; outermost</td><td>82</td><td>clockwise</td><td>23</td><td>515.1 &divide; 23 = 22.39</td><td>1.39</td></tr>
+        <tr><td class="name">0 &mdash; innermost</td><td>26</td><td>anticlockwise</td><td>6</td><td>163.3 &divide; 6 = 27.22</td><td>3.22</td></tr>
+        <tr><td class="name">1</td><td>33.75</td><td>clockwise</td><td>8</td><td>212.0 &divide; 8 = 26.50</td><td>2.50</td></tr>
+        <tr><td class="name">2</td><td>41.5</td><td>anticlockwise</td><td>10</td><td>260.7 &divide; 10 = 26.07</td><td>2.07</td></tr>
+        <tr><td class="name">3</td><td>49.25</td><td>clockwise</td><td>12</td><td>309.4 &divide; 12 = 25.78</td><td>1.78</td></tr>
+        <tr><td class="name">4</td><td>57</td><td>anticlockwise</td><td>14</td><td>358.0 &divide; 14 = 25.57</td><td>1.57</td></tr>
+        <tr><td class="name">5</td><td>64.75</td><td>clockwise</td><td>16</td><td>406.7 &divide; 16 = 25.42</td><td>1.42</td></tr>
+        <tr><td class="name">6</td><td>72.5</td><td>anticlockwise</td><td>18</td><td>455.4 &divide; 18 = 25.30</td><td>1.30</td></tr>
+        <tr><td class="name">7 &mdash; outermost</td><td>80.25</td><td>clockwise</td><td>20</td><td>504.1 &divide; 20 = 25.20</td><td>1.20</td></tr>
       </tbody>
     </table>
     </div>
+    <p class="note">
+      Six rings and sixteen dogs fewer than the standard-proportioned dog this field used to hold, and both
+      losses are the same arithmetic: a 24-unit body needs 25.5 units of arc apiece where a 21-unit one needed
+      22.5, and it bulges further off every curve, so the radial pitch had to widen too. Tightening the
+      nose-to-tail gap does not buy them back &mdash; at a 1.2-unit gap the rounding lands on the same 104
+      dogs, and at 1.0 the innermost ring rounds up to seven animals with only 23.3 units of arc each, which
+      is less than the dog is long.
+    </p>
 
     <h2>How the field is derived</h2>
     <div class="scroller">
     <table>
       <thead><tr><th>Quantity</th><th>Where it comes from</th></tr></thead>
       <tbody>
-        <tr><td class="name">dogs per ring</td><td>The ring's circumference divided by the room one dog needs &mdash; a 21.0-unit body plus a 1.5-unit gap = <b>22.5 units</b> &mdash; rounded to a whole animal. Nothing is typed; move a radius and the ring re-populates itself.</td></tr>
-        <tr><td class="name">radial pitch &mdash; 8.0</td><td>Bounded by the dog's <b>width</b> (4.24), not its length: a dog lies <em>along</em> its ring. The one correction is that a rigid 21-unit body standing on a circle has its nose and tail <em>outside</em> it, by <code>&radic;(R&sup2; + 10.5&sup2;) &minus; R</code> &mdash; 2.12 units at radius 26, 0.74 at radius 74. So <code>8.0 &ge; 4.24 + 2.12</code> everywhere, leaving 1.7 to 3.0 units of clear air between neighbouring chains.</td></tr>
-        <tr><td class="name">innermost &mdash; 26</td><td>A floor, not a preference. The bulge above grows as the curve tightens (3.06 at radius 18, 5.51 at 10) and at radius 10.5 the body is longer than the circle it stands on. 26 is where the gait is <em>tuned</em> &mdash; the shortened stride and deepened crouch were sized for exactly this curve, and the test suite measures every limb of every dog over more than a lap (worst reach: 92% of the leg's length). A tighter ring is a re-tuned gait, not a smaller constant.</td></tr>
-        <tr><td class="name">outermost &mdash; 82</td><td>The terrain's top surface is a 192&times;192 square (half-extent 96) with the skirt hanging straight down from its border, so the usable ground is the inscribed disc of radius 96. An outermost dog reaches ~84.9 from the origin, leaving <b>11.2 units</b> &mdash; half a dog's length &mdash; of clear ground before the rim.</td></tr>
+        <tr><td class="name">dogs per ring</td><td>The ring's circumference divided by the room one dog needs &mdash; a 24.0-unit body plus a 1.5-unit gap = <b>25.5 units</b> &mdash; rounded to a whole animal. Nothing is typed; move a radius and the ring re-populates itself.</td></tr>
+        <tr><td class="name">radial pitch &mdash; 7.75</td><td>Bounded by the dog's <b>width</b> (3.84), not its length: a dog lies <em>along</em> its ring. The one correction is that a rigid 24-unit body standing on a circle has its nose and tail <em>outside</em> it, by <code>&radic;(R&sup2; + 12&sup2;) &minus; R</code> &mdash; 2.64 units at radius 26, 0.99 at radius 72.5. So <code>7.75 &ge; 3.84 + 2.64</code> everywhere, leaving 1.27 to 2.92 units of clear air between neighbouring chains. Stretching the dog made the bulge worse (it was 2.12) and narrowing it paid for that: a long low dog is a narrow one, even with stouter leg tubes than before.</td></tr>
+        <tr><td class="name">innermost &mdash; 26</td><td>A floor, not a preference. The bulge above grows as the curve tightens (3.63 at radius 18, 5.62 at 10) and at radius 12 the body is longer than the circle it stands on. 26 is where the gait is <em>tuned</em>, and it had to be re-earned: the longer body pushed the shoulder further outside the circle its own paw is planted on, while the leg absorbing that offset <em>halved</em>. What pays for both is that a dachshund's leg is authored <b>bent</b>, so it stands at 74% of its own reach instead of 105% and has real swing budget without being folded into the ground. The suite measures every limb of every dog over more than a lap &mdash; worst reach <b>86%</b>.</td></tr>
+        <tr><td class="name">outermost &mdash; 80.25</td><td>The terrain's top surface is a 192&times;192 square (half-extent 96) with the skirt hanging straight down from its border, so the usable ground is the inscribed disc of radius 96. An outermost dog reaches ~83.1 from the origin, leaving <b>12.9 units</b> &mdash; half a dog's length &mdash; of clear ground before the rim. It came <em>in</em> from 82: the rule is stated in dog-lengths, so a longer dog demands a wider verge at the same moment its bulge pushes it outward.</td></tr>
+        <tr><td class="name">stride &mdash; 4.8&hellip;5.2</td><td>Short legs have less absolute reach, so the stride came down with them &mdash; 5.2 units against the old 8.2, on a body that is <em>longer</em>. Relative to its own length the dachshund's step is 56% of what the standard dog's was, and the travel per tick did not change, so the cycle runs 1.6&times; faster over the ground: a step every 8.4 ticks rather than 13.2. Short, quick, busy steps are not a separate styling choice; they are what falls out of halving the legs.</td></tr>
+        <tr><td class="name">body pitch</td><td>The one genuinely new mechanism. A rigid body held <em>level</em> makes every leg span the whole of the terrain's roll across the wheelbase &mdash; affordable on a 7-unit wheelbase with 5.5-unit legs, and not on a 10-unit wheelbase with 3.7-unit ones: it clamped every front leg at 108% of its length, on the widest rings as badly as the tightest. The body now lies along the slope measured at &plusmn;&frac12; wheelbase, which lifts each hip by very nearly what the ground under its own foot has risen, leaving the legs only the terrain's <em>curvature</em> to absorb.</td></tr>
         <tr><td class="name">winding</td><td>The ring's <b>index parity</b>, and nothing else: reversing the authored parameter direction reverses the tangent, which reverses the facing. There is no separate "turn the dogs around" step, so neighbouring rings cannot accidentally agree.</td></tr>
       </tbody>
     </table>
@@ -133,8 +149,8 @@
     <table>
       <thead><tr><th>Concern</th><th>What is done</th></tr></thead>
       <tbody>
-        <tr><td class="name">the constraint</td><td>Draws batch on the <code>(mesh, material)</code> pair, and a draw's colour reaches the GPU only through its <em>material</em> &mdash; the per-instance <code>colour[4]</code> in the instance stream is filled from the material the draw names. One coat per dog would therefore be 23 &times; 120 = <b>2760 single-instance draw calls</b>, which is instancing thrown away. (The engine-tier fix &mdash; a per-renderable tint excluded from the batch key &mdash; is described in the app's NOTES.md; it was recorded, not made.)</td></tr>
-        <tr><td class="name">the palette</td><td><b>18 hues</b>, registered once and shared by the whole field, so the draw-call count is at most 23 &times; 18 + 1 = <b>415</b> for <em>any</em> crowd size. The field as laid out wears 17 of the 18, so the real number is <b>392</b> &mdash; fewer draw calls than the two-ring version it replaced, with six times the dogs.</td></tr>
+        <tr><td class="name">the constraint</td><td>Draws batch on the <code>(mesh, material)</code> pair, and a draw's colour reaches the GPU only through its <em>material</em> &mdash; the per-instance <code>colour[4]</code> in the instance stream is filled from the material the draw names. One coat per dog would therefore be 23 &times; 104 = <b>2392 single-instance draw calls</b>, which is instancing thrown away. (The engine-tier fix &mdash; a per-renderable tint excluded from the batch key &mdash; is described in the app's NOTES.md; it was recorded, not made.)</td></tr>
+        <tr><td class="name">the palette</td><td><b>18 hues</b>, registered once and shared by the whole field, so the draw-call count is at most 23 &times; 18 + 1 = <b>415</b> for <em>any</em> crowd size. The eight rings as laid out wear every one of the 18, so the real number is exactly <b>415</b> &mdash; and it would still be 415 with ten times the dogs.</td></tr>
         <tr><td class="name">readability</td><td>The palette is two interleaved combs of 9 hues; a ring uses the comb its index parity names. Two dogs adjacent <em>along</em> a ring are therefore at least 40&deg; apart in hue, and a dog on one ring and <em>any</em> dog on a neighbouring ring at least 20&deg; &mdash; which matters because neighbouring rings counter-rotate, so every relative alignment happens.</td></tr>
         <tr><td class="name">gait</td><td>One trot, one rig, one set of legs. A dog's place in its chain is a fixed arc-length offset, which spaces the ring <em>and</em> puts every dog at a different point in the stride &mdash; the legs run as a wave rather than stamping in lockstep. Every paw is planted: during stance its world position is a function of the step number alone, so it does not slide while the body travels over it.</td></tr>
       </tbody>

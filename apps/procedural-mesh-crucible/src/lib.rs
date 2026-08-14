@@ -8,21 +8,29 @@
 //!
 //! ## What is on screen
 //!
-//! Eight concentric, alternately counter-rotating rings of walking dogs — 120 of
-//! them, packed nose to tail — on generated ground.
+//! Eight concentric, alternately counter-rotating rings of walking
+//! **dachshunds** — 104 of them, packed nose to tail — on generated ground.
 //!
 //! | Object | Operator chain |
 //! |---|---|
 //! | terrain | `heightfield_mesh` over an analytic sine sum, with a skirt |
-//! | dog ×120 | `loft` torso halves + tapered `sweep` neck/muzzle/ears/legs/tail + `icosphere` skull + `uv_sphere` nose + `rounded_box` paws, cut at the joints into a 23-bone rig |
+//! | dachshund ×104 | `loft` torso halves + tapered `sweep` neck/muzzle/ears/legs/tail + `icosphere` skull + `uv_sphere` nose + `rounded_box` paws, cut at the joints into a 23-bone rig |
 //!
 //! The rings run from radius 26 (the tightest curve the gait is tuned for) out to
-//! radius 82 (the widest circle that still leaves half a dog's length of clear
-//! ground before the terrain's rim), 8 units apart — a pitch set by the dog's
+//! radius 80.25 (the widest circle that still leaves half a dog's length of clear
+//! ground before the terrain's rim), 7.75 units apart — a pitch set by the dog's
 //! **width**, not its length. Each successive ring reverses direction, so every
 //! ring turns against both of its neighbours.
 //!
-//! ## One dog's geometry, 120 dogs on screen — and 392 draw calls
+//! The dog is 2.40 units long and 0.79 tall in its own space — **three times as
+//! long as it is high**, on legs a sixth of its length. That single ratio is
+//! what sizes the rest of the app: a longer body bulges further off a curve, so
+//! the radial pitch and the innermost radius are re-derived from it, and shorter
+//! legs have less absolute reach, so the stride, the crouch and the terrain the
+//! feet may follow are re-derived from it too. `tests/creatures.rs` holds the
+//! proportion band and `tests/locomotion.rs` holds the reach.
+//!
+//! ## One dog's geometry, 104 dogs on screen — and 415 draw calls
 //!
 //! Every dog in the field is the **same 23 registered meshes**, wearing one of
 //! **18 shared coats**. `crucible_scene` returns the distinct mesh set
@@ -32,10 +40,10 @@
 //!
 //! The material half of that is not decoration. The live backend batches draws on
 //! the `(mesh_id, material_id)` pair and a draw's colour reaches the GPU only
-//! through its material, so one material per dog would be `23 × 120 = 2760`
+//! through its material, so one material per dog would be `23 × 104 = 2392`
 //! single-instance batches. A bounded palette caps the draw-call count at
-//! `23 × 18 + 1 = 415` for **any** crowd size — the field as laid out wears 17
-//! of the 18 coats, so the real number is **392** — and `tests/rings.rs` holds
+//! `23 × 18 + 1 = 415` for **any** crowd size — the field as laid out wears every
+//! one of the 18 coats, so it reaches exactly that — and `tests/rings.rs` holds
 //! both that bound and the distinct-mesh count directly.
 //!
 //! ## The walkers

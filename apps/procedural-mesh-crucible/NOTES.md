@@ -8,7 +8,7 @@ rule bans. All three views that *are* implemented live in `src/debug_view.rs` an
 use nothing but the shipped mesh and material vocabulary.
 
 The scene itself is eight concentric, alternately counter-rotating rings of
-walking dogs — 120 of them — on generated terrain. Every dog is the same 23
+walking dachshunds — 104 of them — on generated terrain. Every dog is the same 23
 registered bone meshes at another transform, wearing one of 18 shared coats — see
 `src/rings.rs` for the layout and `src/install.rs` for the one place that
 registration happens.
@@ -74,7 +74,7 @@ sized by the `max_instances` argument, and `SceneRenderer::record` silently
 instance count therefore does not error: it just stops drawing partway round the
 ring, which looks like a scene bug rather than a budget one.
 
-The crucible spawns 1 + 120 × 23 = 2761 instances and asks for 4096. That is an
+The crucible spawns 1 + 104 × 23 = 2393 instances and asks for 4096. That is an
 app choosing its own budget, which is right — but the *silence* is a sharp edge
 for the next app that grows past its number: this app has already been bitten
 once, when the crowd grew from 19 dogs to 120 and the old 2048 would have stopped
@@ -95,8 +95,8 @@ there is no per-entity colour component anywhere on the path, so two instances
 can differ in colour only by differing in material — and two instances that
 differ in material cannot share a batch.
 
-For this app that is the difference between 2760 single-instance draw calls (one
-material per dog) and 392 (a bounded 18-coat palette shared by the whole field).
+For this app that is the difference between 2392 single-instance draw calls (one
+material per dog) and 415 (a bounded 18-coat palette shared by the whole field).
 The palette is the right app-tier answer and it is what shipped.
 
 The engine-tier fix, if it is ever wanted, is a small and well-shaped one: an

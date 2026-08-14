@@ -16,7 +16,7 @@
 //!    the **real posed bones** and on the direction the body actually travels
 //!    between two ticks.
 //! 4. **The rainbow is bounded and readable** — the whole field is painted from
-//!    a fixed palette of 18 coats, no dog shares a coat with the dog in front of
+//!    a fixed palette of 18 coats (every one of which is worn), no dog shares a coat with the dog in front of
 //!    it or behind it, and adjacent rings draw from disjoint hue combs so a
 //!    cross-ring neighbour is never a near-match either.
 //! 5. **It is deterministic** — tick `N` posed twice is byte-equal; tick `N` and
@@ -61,15 +61,15 @@ fn coat_distance(a: [f32; 3], b: [f32; 3]) -> f32 {
 
 #[test]
 fn the_field_fills_the_ground_from_the_gait_floor_to_the_terrain_rim() {
-    // Eight rings, 8 units apart, from the tightest curve the gait is tuned for
-    // out to the widest circle that still leaves clear ground before the rim.
+    // Eight rings, 7.75 units apart, from the tightest curve the gait is tuned
+    // for out to the widest circle that still leaves clear ground before the rim.
     assert_eq!(RING_COUNT, 8);
     assert_eq!(RINGS.len(), RING_COUNT);
     assert_eq!(RINGS[0].radius, RING_MIN_RADIUS);
     assert_eq!(RINGS[RING_COUNT - 1].radius, RING_MAX_RADIUS);
     assert_eq!(
         RINGS.map(|ring| ring.radius),
-        [26.0, 34.0, 42.0, 50.0, 58.0, 66.0, 74.0, 82.0]
+        [26.0, 33.75, 41.5, 49.25, 57.0, 64.75, 72.5, 80.25]
     );
     // The pitch is bounded by the dog's WIDTH plus its bulge on a curve, not by
     // its length — which is the whole reason eight rings fit at all.
@@ -92,10 +92,10 @@ fn each_ring_holds_the_number_of_dogs_its_circumference_pays_for() {
     let animation = animation();
     assert_eq!(
         RINGS.map(|ring| ring.count()),
-        [7, 9, 12, 14, 16, 18, 21, 23]
+        [6, 8, 10, 12, 14, 16, 18, 20]
     );
-    assert_eq!(dog_total(), 120);
-    assert_eq!(animation.dog_count(), 120);
+    assert_eq!(dog_total(), 104);
+    assert_eq!(animation.dog_count(), 104);
     assert_eq!(animation.bone_count(), BONES);
 
     for (index, ring) in RINGS.iter().enumerate() {
@@ -403,7 +403,7 @@ fn the_whole_crowd_shares_one_dogs_geometry_and_one_palette() {
 
     // ...and the frame the engine actually produces batches the way the palette
     // promises: one batch per (bone mesh, worn coat) pair plus the terrain — at
-    // most 23 × 18 + 1 = 415, NOT 23 × 120 = 2760.
+    // most 23 × 18 + 1 = 415, NOT 23 × 104 = 2392.
     let instances = 1 + bones * scene.dogs.len();
     let mut worn: Vec<usize> = scene.dogs.iter().map(|dog| dog.palette).collect();
     worn.sort_unstable();

@@ -229,7 +229,7 @@ impl CrucibleAnimation {
     /// The offset is a whole number of *slots* of the ring's measured length, so
     /// the chain is evenly spaced and closes exactly at the seam. It also gives
     /// every dog a different point in the gait cycle for free — the stride is
-    /// 8.2 units and the slots are ~22.5 apart, so the legs run as a wave around
+    /// 5.2 units and the slots are ~25.5 apart, so the legs run as a wave around
     /// the ring instead of stamping in lockstep.
     pub fn travel(&self, index: usize, tick: u64) -> f32 {
         self.dogs

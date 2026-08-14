@@ -30,10 +30,13 @@ use crate::{CANVAS_ID, HEIGHT, WIDTH};
 /// capacity below the scene's instance count does not error, it just stops
 /// drawing dogs partway round the ring.
 ///
-/// The crucible spawns 1 terrain + 120 dogs × 23 bones = **2761 instances**.
-/// 4096 leaves room for another ring or two — a ninth ring would add ~25 dogs,
-/// 575 instances — without another silent truncation hunt, at a cost of one
+/// The crucible spawns 1 terrain + 104 dogs × 23 bones = **2393 instances**.
+/// 4096 leaves room for another ring or two — a ninth ring would add ~22 dogs,
+/// 506 instances — without another silent truncation hunt, at a cost of one
 /// 4096-slot instance buffer (4096 × 40 floats × 4 bytes ≈ 655 KB).
+///
+/// The count came *down* when the dogs became dachshunds: a longer body needs
+/// more arc apiece, so 120 walkers became 104 without a ring being lost.
 const LIVE_CAPACITY: u32 = 4096;
 
 /// The fraction of the viewport width the page's stylesheet gives the canvas,

@@ -23,7 +23,7 @@
 //!
 //! ## The radial pitch: bounded by width, not length
 //!
-//! A dog is [`DOG_WIDTH`] (4.24) across and [`DOG_LENGTH`] (21.0) long, and it is
+//! A dog is [`DOG_WIDTH`] (3.84) across and [`DOG_LENGTH`] (24.0) long, and it is
 //! laid **along** its ring — so what separates two rings is the width, plus one
 //! correction. A rigid body of length `L` standing on a circle of radius `R` has
 //! its centre on the circle and its nose and tail *outside* it, by
@@ -34,10 +34,17 @@
 //! RING_SPACING  ≥  DOG_WIDTH  +  body_bulge(inner radius)
 //! ```
 //!
-//! At the tightest pair (26 → 34) that is `4.24 + 2.12 = 6.36`, and
-//! [`RING_SPACING`] is `8.0`: **1.64 units of clear air** between the outermost
-//! point of one ring's dogs and the innermost point of the next ring's. At the
-//! widest pair (74 → 82) the bulge is `0.74` and the air is `3.02`.
+//! **The dachshund re-proportioning is felt here first.** The bulge is
+//! quadratic in the body's length: stretching the dog from 21.0 to 24.0 units
+//! took the worst-case bulge from 2.12 to 2.64, and it is the *narrowing* that
+//! paid for it — a long low dog is a narrow one, so [`DOG_WIDTH`] fell from 4.24
+//! to 3.84 at the same time, even as the leg tubes themselves got *thicker*
+//! (short legs are stout ones, and pulling them inboard of a deep chest is what a
+//! real foreleg does). At the tightest pair (26 → 33.75) the requirement is
+//! `3.84 + 2.64 = 6.48`, and [`RING_SPACING`] is `7.75`: **1.27 units of clear
+//! air** between the outermost point of one ring's dogs and the innermost point
+//! of the next ring's. At the widest pair (72.5 → 80.25) the bulge is `0.99` and
+//! the air is `2.92`.
 //!
 //! ## Which way is which
 //!
@@ -61,13 +68,13 @@
 //! `colour[4]` in the instance stream is filled from the material the draw names
 //! (`axiom-render-pipeline`'s `MaterialSlot`), and draws batch on the
 //! `(mesh_id, material_id)` pair. One material per dog would therefore mean
-//! `23 bones × dogs` single-instance batches — 2760 draw calls at this crowd
+//! `23 bones × dogs` single-instance batches — 2392 draw calls at this crowd
 //! size, which throws instancing away entirely.
 //!
 //! So the field is painted from a fixed [`PALETTE_SIZE`]-entry palette that every
 //! dog shares, and the batch count is `23 × PALETTE_SIZE + 1` **whatever the
-//! crowd size** (at most 415; 392 for the field as laid out, which wears 17 of
-//! the 18 coats). The palette is split into two interleaved combs of
+//! crowd size** — 415, and the field as laid out wears all 18 coats, so it is
+//! exactly 415. The palette is split into two interleaved combs of
 //! [`RING_COMB`] hues; a ring uses the comb its index parity names, so a dog and
 //! any dog on an adjacent ring are at least `1/PALETTE_SIZE` of a turn apart in
 //! hue, and two dogs adjacent *along* a ring are at least `2/PALETTE_SIZE` apart.
@@ -185,18 +192,28 @@ pub fn body_bulge(radius: f32) -> f32 {
 
 /// The tightest ring in the field, in world units.
 ///
-/// **This is a floor, not a preference.** A dog is a rigid 21-unit body whose
-/// paws are planted on the ring itself, and the mismatch between the two grows
-/// as the curve tightens: [`body_bulge`] is 2.12 units here, 3.06 at radius 18
-/// and 5.51 at radius 10 — and at radius 10.5 the body is longer than the circle
-/// it is standing on and the geometry stops existing at all.
+/// **This is a floor, not a preference**, and the dachshund made it a harder
+/// one. A dog is a rigid 24-unit body whose paws are planted on the ring itself,
+/// and the mismatch between the two grows as the curve tightens: [`body_bulge`]
+/// is 2.64 units here, 3.63 at radius 18 and 5.62 at radius 10 — and at radius 12
+/// the body is longer than the circle it is standing on and the geometry stops
+/// existing at all.
 ///
-/// 26 is where the gait is *tuned*: [`DOG_GAIT`]'s shortened stride and deepened
-/// crouch were sized for exactly this curve (see `creature_pose.rs`), and
-/// `tests/locomotion.rs` measures every limb of every dog on every ring over
-/// more than a lap and fails if one is asked to reach further than it is long.
-/// A tighter innermost ring is not a constant change: it is a re-tuned gait with
-/// that measurement re-run, and until that work is done the field stops here.
+/// 26 is where the gait is *tuned*, and it survived the re-proportioning by a
+/// margin that had to be re-earned rather than assumed. Two things moved against
+/// each other:
+///
+/// * the longer body pushed the shoulder further outside the circle its own paw
+///   is planted on — 0.39 units at this radius, up from 0.34;
+/// * the leg absorbing that offset **halved**, from 5.52 units of reach to 3.68.
+///
+/// What paid for both is that the dachshund's leg is authored *bent* rather than
+/// straight (see `creature_dog.rs`), so it stands at 73% of its reach instead of
+/// 105% and has real swing budget without being folded into the ground.
+/// `tests/locomotion.rs` measures every limb of every dog on every ring over more
+/// than a lap and fails if one is asked to reach further than it is long; a
+/// tighter innermost ring is not a constant change but a re-tuned gait with that
+/// measurement re-run.
 pub const RING_MIN_RADIUS: f32 = 26.0;
 
 /// The widest ring in the field, in world units.
@@ -204,16 +221,24 @@ pub const RING_MIN_RADIUS: f32 = 26.0;
 /// The terrain's top surface is a square of half-extent [`TERRAIN_HALF_EXTENT`]
 /// (96) — the skirt hangs straight down from that border, so the usable ground is
 /// the inscribed disc of radius 96 and nothing beyond it. A dog on the outermost
-/// ring reaches `radius + bulge + half a width` ≈ 84.9 from the origin, which
-/// leaves **11.1 units — half a dog's length — of clear ground** between the
+/// ring reaches `radius + bulge + half a width` ≈ 83.1 from the origin, which
+/// leaves **12.9 units — half a dog's length — of clear ground** between the
 /// outermost paw and the rim. That margin is the point: the field has to read as
 /// standing *on* a plain, not balanced on its lip.
-pub const RING_MAX_RADIUS: f32 = 82.0;
+///
+/// It came *in* from 82.0 when the dog was stretched: the rule is stated in
+/// dog-lengths, so a longer dog demands a wider verge at the same time as its
+/// bulge pushes it outward.
+pub const RING_MAX_RADIUS: f32 = 80.25;
 
 /// The radial pitch between neighbouring rings, in world units. See the module
 /// note for the arithmetic: it is the dog's **width** plus the worst-case rigid
 /// body bulge, plus air.
-pub const RING_SPACING: f32 = 8.0;
+///
+/// `26.0`, `7.75` and `80.25` are all exact binary fractions, so the ring count
+/// derived from them — `(max − min) / spacing + 1` — is exactly 8 rather than a
+/// rounding away from it.
+pub const RING_SPACING: f32 = 7.75;
 
 /// How many concentric rings the field holds: the innermost, the outermost, and
 /// every pitch in between. Asserted against the radii themselves in the tests
@@ -241,17 +266,20 @@ const fn concentric_rings() -> [Ring; RING_COUNT] {
 }
 
 /// The dog's nose-to-tail length in its own authored units, before the
-/// presentation scale. The authored figure is a ~1.05-unit muzzle reach in front
-/// of the origin and a ~1.14-unit tail behind it; `tests/creatures.rs` measures
+/// presentation scale. The authored figure is a ~1.25-unit muzzle reach in front
+/// of the origin and a ~1.16-unit tail behind it; `tests/creatures.rs` measures
 /// the real assembled bounds against this number, so it cannot drift away from
 /// the animal it is supposed to describe.
-pub const DOG_BODY_LENGTH: f32 = 2.1;
+pub const DOG_BODY_LENGTH: f32 = 2.40;
 
 /// The dog's flank-to-flank width in its own authored units — measured, like the
 /// length, off the assembled bounds. This is the number [`RING_SPACING`] is
 /// built on, because a dog laid along its ring separates two rings by its width
 /// and not by its length.
-pub const DOG_BODY_WIDTH: f32 = 0.424;
+///
+/// It is the elbow, not the flank, that sets it: a dachshund's foreleg wraps a
+/// chest barely taller than the leg, so the bend carries wide of the ribs.
+pub const DOG_BODY_WIDTH: f32 = 0.384;
 
 /// The scale the dogs are presented at. Read from the gait rather than typed
 /// again: the stride, the crouch and the leg reach are all sized against this
@@ -259,17 +287,25 @@ pub const DOG_BODY_WIDTH: f32 = 0.424;
 /// that is not the dog being drawn.
 pub const DOG_SCALE: f32 = DOG_GAIT.scale;
 
-/// The dog's world-space length: 21 units.
+/// The dog's world-space length: 24 units.
 pub const DOG_LENGTH: f32 = DOG_BODY_LENGTH * DOG_SCALE;
 
-/// The dog's world-space width: 4.24 units.
+/// The dog's world-space width: 3.84 units.
 pub const DOG_WIDTH: f32 = DOG_BODY_WIDTH * DOG_SCALE;
 
 /// The clear air between one dog's tail and the next dog's nose, in world units.
 /// Small enough that the chain reads as one packed queue, wide enough that a
 /// stride's worth of gait never closes it — a paw's fore-aft excursion is
-/// ±2.13 units about its own neutral, and every paw's neutral sits well inside
+/// ±1.46 units about its own neutral, and every paw's neutral sits well inside
 /// the nose-to-tail envelope, so the gap is never eaten by a swinging leg.
+///
+/// It **stayed at 1.5** through the re-proportioning, and that is a measured
+/// answer rather than an untouched constant. A lower body could plausibly be
+/// packed tighter, so it was tried: at 1.2 the field still holds exactly 104
+/// dogs (every ring's rounding lands in the same place) with *worse* spacing
+/// uniformity, and at 1.0 the innermost ring rounds up to 7 dogs on 23.3 units
+/// of arc apiece — less than the 24-unit animal, i.e. overlapping. 1.5 is where
+/// the arithmetic is both fullest and honest.
 pub const DOG_GAP: f32 = 1.5;
 
 /// The arc one dog occupies on its ring: its own length plus the gap behind it.
@@ -280,7 +316,8 @@ pub const DOG_SPACING: f32 = DOG_LENGTH + DOG_GAP;
 /// This is the app's answer to the batching constraint in the module note: the
 /// live backend draws one batch per `(mesh, material)` pair, so the palette size
 /// — not the crowd size — sets the draw-call count, at no more than
-/// `23 bones × PALETTE_SIZE + 1 terrain = 415` (392 as laid out). Eighteen is
+/// `23 bones × PALETTE_SIZE + 1 terrain = 415`, which the eight rings as laid out
+/// reach exactly (every coat is worn). Eighteen is
 /// chosen so each of the
 /// two interleaved combs is nine hues (40° apart along a ring) and the combs are
 /// 20° apart from each other, which is comfortably past the point where two
@@ -362,10 +399,10 @@ mod tests {
 
     #[test]
     fn the_field_is_laid_out_from_three_measured_numbers() {
-        // The dog, stated: 21 units long, 4.24 wide, needing 22.5 units of ring.
-        assert_eq!(DOG_LENGTH, 21.0);
-        assert!((DOG_WIDTH - 4.24).abs() < 1.0e-4, "{DOG_WIDTH}");
-        assert_eq!(DOG_SPACING, 22.5);
+        // The dachshund, stated: 24 units long, 3.84 wide, needing 25.5 of ring.
+        assert_eq!(DOG_LENGTH, 24.0);
+        assert!((DOG_WIDTH - 3.84).abs() < 1.0e-4, "{DOG_WIDTH}");
+        assert_eq!(DOG_SPACING, 25.5);
 
         // The ring count is the pitch stepped from the floor to the ceiling.
         let derived = ((RING_MAX_RADIUS - RING_MIN_RADIUS) / RING_SPACING) as usize + 1;
@@ -403,9 +440,9 @@ mod tests {
     fn each_ring_is_populated_from_its_own_circumference() {
         assert_eq!(
             RINGS.map(|ring| ring.count()),
-            [7, 9, 12, 14, 16, 18, 21, 23]
+            [6, 8, 10, 12, 14, 16, 18, 20]
         );
-        assert_eq!(dog_total(), 120);
+        assert_eq!(dog_total(), 104);
         RINGS.iter().for_each(|ring| {
             let spacing = ring.circumference() / ring.count() as f32;
             assert!(
