@@ -1,0 +1,12 @@
+{
+  "title": "Dog",
+  "blurb": "Rings of procedurally generated dachshunds, walking on dials you can drag.",
+  "description": "Every triangle on screen came out of an axiom-mesh-ops operator and was validated by axiom-mesh: the ground is a meshed height array, and each dog is a lofted torso, tapered swept limbs, an icosphere skull and rounded-box paws, cut at the joints into a 23-bone rig and walked by distance-driven inverse kinematics. There is no imported geometry and no hand-typed vertex array. All of the dogs share one set of 23 meshes, uploaded once and drawn as instances, so a longer chain costs transforms and colours rather than vertices. Fifteen sliders drive the scene live — walk speed, gait, limb proportions, ring layout — and the one parameter that cannot be live says so on its own label.",
+  "kind": "rust-wasm",
+  "tags": [
+    "demo",
+    "procedural",
+    "geometry",
+    "animation"
+  ]
+}
