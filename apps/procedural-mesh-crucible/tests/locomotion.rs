@@ -12,8 +12,9 @@
 //!    lands every bone at a finite world transform.
 //! 3. **The paws do not skate** — a planted paw's world position is *constant*
 //!    for the whole of its stance while the body travels over it.
-//! 4. **No leg over-reaches** — on either ring, over more than a full lap.
-//! 5. **The rings are closed, uniform and inside the terrain.**
+//! 4. **No leg over-reaches** — on any ring, over more than a full lap.
+//! 5. **Every ring is closed, uniform, clear of its neighbours and inside the
+//!    terrain.**
 //!
 //! Which way round each ring turns, and how the crowd is laid out along it, is
 //! `tests/rings.rs`.
@@ -21,11 +22,8 @@
 use axiom_math::{Transform, Vec3};
 use axiom_procedural_mesh_crucible::{
     dog_limbs, dog_parts, dog_travel, solve_two_bone, stride_phase, CrucibleAnimation,
-    CrucibleVariant, LoopPath, DOG_GAIT, INNER, OUTER, RINGS, TRAVEL_PER_TICK,
+    CrucibleVariant, LoopPath, DOG_GAIT, DOG_WIDTH, RINGS, TERRAIN_HALF_EXTENT, TRAVEL_PER_TICK,
 };
-
-/// The terrain's half-extent — nothing may walk off it.
-const TERRAIN_HALF_EXTENT: f32 = 96.0;
 
 fn animation() -> CrucibleAnimation {
     CrucibleAnimation::new(dog_parts(CrucibleVariant::Base).expect("the dog rigs"))
@@ -207,9 +205,9 @@ fn no_limb_is_ever_asked_to_reach_further_than_it_is_long() {
     let rig = dog_parts(CrucibleVariant::Base).expect("the dog rigs");
     let animation = CrucibleAnimation::new(rig.clone()).expect("the rings build");
     let bones = animation.bone_count();
-    // 900 ticks is 558 units of travel — nearly two laps of the outer ring and
-    // more than three of the inner one, so every dog crosses every part of the
-    // terrain its own ring runs over.
+    // 900 ticks is 558 units of travel — more than a lap of the outermost ring
+    // and more than three of the innermost, so every dog crosses every part of
+    // the terrain its own ring runs over.
     let samples: Vec<Vec<Transform>> = (0u64..900)
         .step_by(3)
         .map(|tick| animation.transforms(tick))
@@ -246,7 +244,7 @@ fn no_limb_is_ever_asked_to_reach_further_than_it_is_long() {
 }
 
 #[test]
-fn both_rings_are_closed_uniform_and_inside_the_terrain() {
+fn every_ring_is_closed_uniform_and_inside_the_terrain() {
     for ring in RINGS {
         let path = LoopPath::ring(ring).expect("the ring builds");
         let total = path.total();
@@ -254,12 +252,12 @@ fn both_rings_are_closed_uniform_and_inside_the_terrain() {
         let circumference = ring.circumference();
         assert!(
             (total - circumference).abs() / circumference < 0.02,
-            "the {} ring measures {total}, not ~{circumference}",
-            ring.name
+            "ring {} measures {total}, not ~{circumference}",
+            ring.index
         );
         println!(
-            "[ring] {:<6} radius {}, length {total:.1}, lap {:.1} s",
-            ring.name,
+            "[ring] {} radius {}, length {total:.1}, lap {:.1} s",
+            ring.index,
             ring.radius,
             total / (TRAVEL_PER_TICK * 60.0)
         );
@@ -269,13 +267,13 @@ fn both_rings_are_closed_uniform_and_inside_the_terrain() {
         let lap = path.at(total);
         assert!(
             start.position.distance(lap.position) < 1.0e-2,
-            "the {} ring does not close",
-            ring.name
+            "ring {} does not close",
+            ring.index
         );
         assert!(
             start.forward.distance(lap.forward) < 1.0e-2,
-            "the {} ring kinks at its seam",
-            ring.name
+            "ring {} kinks at its seam",
+            ring.index
         );
 
         // Uniform: equal arc-length steps really are equal distances on the
@@ -292,8 +290,8 @@ fn both_rings_are_closed_uniform_and_inside_the_terrain() {
         let longest = spans.iter().copied().fold(0.0f32, f32::max);
         assert!(
             longest / shortest < 1.05,
-            "the {} ring's arc-length sampling is not uniform: spans run {shortest} to {longest}",
-            ring.name
+            "ring {}'s arc-length sampling is not uniform: spans run {shortest} to {longest}",
+            ring.index
         );
 
         // On the terrain, at the authored radius, all the way round.
@@ -301,20 +299,27 @@ fn both_rings_are_closed_uniform_and_inside_the_terrain() {
             let point = path.at(i as f32 * total / 512.0).position;
             assert!(
                 point.x.abs() < TERRAIN_HALF_EXTENT && point.z.abs() < TERRAIN_HALF_EXTENT,
-                "the {} ring leaves the terrain at {point:?}",
-                ring.name
+                "ring {} leaves the terrain at {point:?}",
+                ring.index
             );
             let radius = Vec3::new(point.x, 0.0, point.z).length();
             assert!(
                 (radius - ring.radius).abs() < 0.5,
-                "the {} ring wanders to radius {radius}",
-                ring.name
+                "ring {} wanders to radius {radius}",
+                ring.index
             );
         }
     }
 
-    // The two rings clear each other by more than a dog is wide, so the inner
-    // chain never walks through the outer one.
-    let gap = OUTER.radius - INNER.radius;
-    assert!(gap > 12.0, "the rings are only {gap} apart");
+    // Every adjacent pair clears the next by more than a dog is wide, so no
+    // chain ever walks through the one outside it.
+    RINGS.windows(2).for_each(|pair| {
+        let gap = pair[1].radius - pair[0].radius;
+        assert!(
+            gap > DOG_WIDTH + pair[0].bulge(),
+            "rings {} and {} are only {gap} apart",
+            pair[0].index,
+            pair[1].index
+        );
+    });
 }

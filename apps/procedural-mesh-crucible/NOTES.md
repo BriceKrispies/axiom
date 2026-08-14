@@ -7,9 +7,10 @@ layers know what a debug view is, which is exactly the shape the No-Shortcuts
 rule bans. All three views that *are* implemented live in `src/debug_view.rs` and
 use nothing but the shipped mesh and material vocabulary.
 
-The scene itself is two counter-rotating rings of walking dogs on generated
-terrain. Every dog is the same 23 registered bone meshes at another transform —
-see `src/rings.rs` for the layout and `src/install.rs` for the one place that
+The scene itself is eight concentric, alternately counter-rotating rings of
+walking dogs — 120 of them — on generated terrain. Every dog is the same 23
+registered bone meshes at another transform, wearing one of 18 shared coats — see
+`src/rings.rs` for the layout and `src/install.rs` for the one place that
 registration happens.
 
 ## What is implemented, and how
@@ -73,14 +74,43 @@ sized by the `max_instances` argument, and `SceneRenderer::record` silently
 instance count therefore does not error: it just stops drawing partway round the
 ring, which looks like a scene bug rather than a budget one.
 
-The crucible spawns 1 + 19 × 23 = 438 instances and asks for 2048. That is an app
-choosing its own budget, which is right — but the *silence* is a sharp edge for
-the next app that grows past its number.
+The crucible spawns 1 + 120 × 23 = 2761 instances and asks for 4096. That is an
+app choosing its own budget, which is right — but the *silence* is a sharp edge
+for the next app that grows past its number: this app has already been bitten
+once, when the crowd grew from 19 dogs to 120 and the old 2048 would have stopped
+drawing at dog 89 without a word.
 
 **Verdict:** the app sizes its own buffer, and `src/live.rs` says out loud what
 overflow looks like. Reporting truncation is the backend's design to make.
 
-### 5. `renderable_count()` reads zero
+### 5. A per-instance colour needs a per-instance material
+
+`FrameDrawItem` carries a per-instance `color[4]` and the packed instance stream
+is 40 floats wide, so the *wire format* already varies colour per instance. The
+value, however, has exactly one source: `axiom-render-pipeline` looks a draw's
+colour up in its `MaterialSlot` table by the renderable's **material id**, and
+`axiom-gpu-backend`'s `frame_packet_adapter` then keys each batch on the
+`(mesh_id, material_id)` pair. `axiom_scene::Renderable` has no tint field and
+there is no per-entity colour component anywhere on the path, so two instances
+can differ in colour only by differing in material — and two instances that
+differ in material cannot share a batch.
+
+For this app that is the difference between 2760 single-instance draw calls (one
+material per dog) and 392 (a bounded 18-coat palette shared by the whole field).
+The palette is the right app-tier answer and it is what shipped.
+
+The engine-tier fix, if it is ever wanted, is a small and well-shaped one: an
+optional per-renderable tint carried on `Renderable`, threaded through
+`RenderReport`'s per-draw tuple into `DrawData::color`, and *excluded* from the
+batch key. That is a change to `axiom-scene`, `axiom-render-pipeline` and
+`axiom` — three modules, a data contract and a coverage burden — and it is not an
+app's errand. It is recorded here rather than made.
+
+**Verdict:** a real engine limitation with a real engine-shaped fix, worked
+around in the app the honest way (fewer distinct colours), not by reaching into a
+module.
+
+### 6. `renderable_count()` reads zero
 
 The crucible installs every object through the runtime path
 (`add_mesh_data` / `add_material` / `spawn`) rather than through `App::setup`,
@@ -93,7 +123,7 @@ outcome, which is the number that actually matters.
 **Verdict:** a known shape of the umbrella's two authoring paths, not a defect
 this app should paper over.
 
-### 6. No live surface resize — the page reloads instead
+### 7. No live surface resize — the page reloads instead
 
 The app sizes its presentation surface to the device it landed on: it measures
 the canvas's laid-out CSS box (falling back to `innerWidth` × the stylesheet's

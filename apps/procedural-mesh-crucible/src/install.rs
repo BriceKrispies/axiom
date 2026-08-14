@@ -9,14 +9,25 @@
 //!
 //! ## Geometry is registered once, and instanced
 //!
-//! The scene holds two rings of dogs, and every one of them is the **same**
-//! 23 bone meshes. Those meshes are uploaded once, here, and each dog is then
-//! `bone_count` more *instances* of them — a transform and a material apiece.
-//! Registering a mesh per dog would multiply the vertex upload and the GPU
-//! memory by the crowd size for no visible difference whatsoever, so this
+//! The scene holds eight concentric rings of dogs, and every one of them is the
+//! **same** 23 bone meshes. Those meshes are uploaded once, here, and each dog is
+//! then `bone_count` more *instances* of them — a transform and a material
+//! apiece. Registering a mesh per dog would multiply the vertex upload and the
+//! GPU memory by the crowd size for no visible difference whatsoever, so this
 //! function is written to make that mistake hard: it registers from
 //! `scene.objects` (which is the distinct-mesh set, by construction) and spawns
 //! from `scene.dogs` (which carries no geometry at all).
+//!
+//! ## Materials are registered once too, and *shared*
+//!
+//! The same argument applies a second time, for a less obvious reason. The live
+//! backend batches draws on the `(mesh_id, material_id)` pair, and a draw's
+//! colour reaches the GPU only through its material — so a material per dog
+//! would mean `23 × dogs` single-instance batches (2760 draw calls here), which
+//! is instancing thrown away. The palette in `rings.rs` is therefore registered
+//! **once**, `PALETTE_SIZE` materials in total, and every dog names one of them:
+//! the draw-call count is at most `23 × PALETTE_SIZE + 1 = 415` — 392 for the
+//! field as laid out, which wears 17 of the 18 coats — whatever the crowd size.
 //!
 //! The same function serves the browser arm and the native harness, so what a
 //! native test builds is byte-for-byte what the page presents.
@@ -25,6 +36,7 @@ use axiom::prelude::*;
 
 use crate::debug_view::DebugView;
 use crate::locomotion::CrucibleAnimation;
+use crate::rings::palette;
 use crate::scene::crucible_scene;
 use crate::variant::CrucibleVariant;
 
@@ -34,20 +46,35 @@ use crate::variant::CrucibleVariant;
 /// interactive camera's opening yaw/pitch/distance from it rather than typing a
 /// second copy of the same shot, so moving these numbers moves both.
 ///
-/// It is set to frame **both rings**: the outer ring is 46 units across the
-/// origin and the inner one 26, so the shot has to hold a 92-unit disc with
-/// 11-unit-tall animals standing on it. The eye is high and well back, looking
-/// down at the middle of the disc, which is also the angle at which the two
-/// windings read as opposite rather than as one blur.
-pub(crate) const CAMERA_EYE: [f32; 3] = [0.0, 54.0, -90.0];
-pub(crate) const CAMERA_TARGET: [f32; 3] = [0.0, 0.0, 2.0];
+/// It is set to frame **the whole filled field**: the outermost ring is 82 units
+/// from the origin and its dogs bulge to ~85, so the shot has to hold a
+/// 170-unit disc of 11-unit-tall animals. Three numbers decide it:
+///
+/// * **Distance (195 units).** At a 58° vertical field the binding constraint is
+///   the *near* rim — the edge of the disc closest to the camera, which
+///   perspective magnifies most. Holding it inside the frustum needs at least
+///   159 units at this elevation; the rest is margin, so the front rank is not
+///   jammed against the bottom of the frame and the whole 192-unit terrain plate
+///   comes into shot with it.
+/// * **Elevation (37°).** Steeper than the two-ring shot's 30°, because eight
+///   nested rings need enough plan view to be read *as* nested — and a steeper
+///   look also squares up the disc, which is what stops the near half from
+///   sprawling across the bottom of the frame while the far half shrinks to a
+///   band. It is still shallow enough that the dogs are seen in profile and the
+///   alternating windings read as opposite rather than as one blur.
+/// * **Target (the basin floor, `y = −6`).** The terrain scoops a shallow bowl
+///   whose middle sits ~8 units below zero, so this is the actual centre of the
+///   thing being framed rather than an arbitrary origin — and aiming at it lifts
+///   the field off the bottom edge into the middle of the frame.
+pub(crate) const CAMERA_EYE: [f32; 3] = [0.0, 112.0, -155.0];
+pub(crate) const CAMERA_TARGET: [f32; 3] = [0.0, -6.0, 0.0];
 
 /// The camera's vertical field of view, in degrees. Shared with `src/orbit.rs`,
 /// which needs it to make a pan track the pointer at exactly 1:1.
 pub(crate) const CAMERA_FOV_DEGREES: f32 = 58.0;
 
 /// An installed crucible: the scene node each spawned instance was created as,
-/// and the animation that walks the two rings through them.
+/// and the animation that walks the whole field through them.
 ///
 /// The entity list is what makes the dogs animatable at all. Geometry is
 /// uploaded once, at bind; from then on the only thing a frame may change is an
@@ -62,7 +89,7 @@ pub struct InstalledCrucible {
     pub entities: Vec<Entity>,
     /// Where the dogs' bones start in `entities`.
     pub creatures_first: usize,
-    /// The two rings' locomotion.
+    /// The field's locomotion.
     pub animation: CrucibleAnimation,
 }
 
@@ -83,7 +110,7 @@ impl InstalledCrucible {
     }
 }
 
-/// Install every generated mesh, both rings of dogs, a light rig and the framing
+/// Install every generated mesh, every ring of dogs, a light rig and the framing
 /// camera.
 ///
 /// `chart_texture` is the id of the app-authored normal chart, present only in
@@ -125,11 +152,19 @@ pub fn install_crucible(
         .collect();
     let creatures_first = entities.len();
 
+    // The shared coats: one material per palette entry, registered once for the
+    // whole field. This is the batching contract — see the module note.
+    let coats: Vec<Handle<Material>> = palette()
+        .into_iter()
+        .map(|color| running.add_material(material_for(color, chart_texture)))
+        .collect();
+
     // The crowd: every dog is `bone_count` more instances of the bone meshes
-    // already registered above, in one coat of its own.
+    // already registered above, wearing one of the coats already registered
+    // above. Adding a dog costs neither a vertex nor a material.
     let bones = &meshes[scene.dog_first..];
     scene.dogs.iter().for_each(|dog| {
-        let material = running.add_material(material_for(dog.color, chart_texture));
+        let material = coats[dog.palette.min(coats.len() - 1)];
         bones.iter().for_each(|mesh| {
             entities.push(running.spawn(Spawn::new(Transform::IDENTITY, *mesh, material)));
         });
@@ -145,7 +180,7 @@ pub fn install_crucible(
     };
     // Stand the crowd on its first frame straight away, so a headless build that
     // never calls `animate` still presents the scene the page opens on rather
-    // than 19 dogs collapsed onto the origin.
+    // than the whole field collapsed onto the origin.
     installed.animate(running, 0);
     installed
 }
@@ -205,7 +240,7 @@ pub(crate) fn crucible_camera() -> Camera {
 }
 
 /// The framing camera: high and pulled back, looking down at the middle of the
-/// two rings.
+/// field.
 fn install_camera(running: &mut RunningApp) {
     let eye = Vec3::new(CAMERA_EYE[0], CAMERA_EYE[1], CAMERA_EYE[2]);
     let target = Vec3::new(CAMERA_TARGET[0], CAMERA_TARGET[1], CAMERA_TARGET[2]);

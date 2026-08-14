@@ -8,27 +8,35 @@
 //!
 //! ## What is on screen
 //!
-//! Two counter-rotating rings of walking dogs, on generated ground.
+//! Eight concentric, alternately counter-rotating rings of walking dogs — 120 of
+//! them, packed nose to tail — on generated ground.
 //!
 //! | Object | Operator chain |
 //! |---|---|
 //! | terrain | `heightfield_mesh` over an analytic sine sum, with a skirt |
-//! | dog ×19 | `loft` torso halves + tapered `sweep` neck/muzzle/ears/legs/tail + `icosphere` skull + `uv_sphere` nose + `rounded_box` paws, cut at the joints into a 23-bone rig |
+//! | dog ×120 | `loft` torso halves + tapered `sweep` neck/muzzle/ears/legs/tail + `icosphere` skull + `uv_sphere` nose + `rounded_box` paws, cut at the joints into a 23-bone rig |
 //!
-//! The outer ring (radius 46) holds 12 dogs walking anticlockwise seen from
-//! above; the inner ring (radius 26) holds 7 walking the other way. Each ring is
-//! painted across the full hue circle, half a turn apart, so no two neighbours
-//! anywhere share a colour.
+//! The rings run from radius 26 (the tightest curve the gait is tuned for) out to
+//! radius 82 (the widest circle that still leaves half a dog's length of clear
+//! ground before the terrain's rim), 8 units apart — a pitch set by the dog's
+//! **width**, not its length. Each successive ring reverses direction, so every
+//! ring turns against both of its neighbours.
 //!
-//! ## One dog's geometry, nineteen dogs on screen
+//! ## One dog's geometry, 120 dogs on screen — and 392 draw calls
 //!
-//! Every dog in both rings is the **same 23 registered meshes**. `crucible_scene`
-//! returns the distinct mesh set (`objects`) and the crowd (`dogs`) as two
-//! separate things precisely so they cannot be conflated: adding a dog costs a
-//! transform and a colour, never a vertex. `install.rs` registers the mesh set
-//! once and spawns `dogs.len() × 23` instances of it — `tests/rings.rs` asserts
-//! that distinct-mesh count directly, because "the geometry is shared" is a
-//! claim, and a claim in this app is something a test holds.
+//! Every dog in the field is the **same 23 registered meshes**, wearing one of
+//! **18 shared coats**. `crucible_scene` returns the distinct mesh set
+//! (`objects`) and the crowd (`dogs`) as two separate things precisely so they
+//! cannot be conflated: adding a dog costs a transform and a palette index, never
+//! a vertex and never a material.
+//!
+//! The material half of that is not decoration. The live backend batches draws on
+//! the `(mesh_id, material_id)` pair and a draw's colour reaches the GPU only
+//! through its material, so one material per dog would be `23 × 120 = 2760`
+//! single-instance batches. A bounded palette caps the draw-call count at
+//! `23 × 18 + 1 = 415` for **any** crowd size — the field as laid out wears 17
+//! of the 18 coats, so the real number is **392** — and `tests/rings.rs` holds
+//! both that bound and the distinct-mesh count directly.
 //!
 //! ## The walkers
 //!
@@ -93,11 +101,13 @@ pub use object::CrucibleObject;
 pub use orbit::OrbitState;
 pub use rainbow::{hsv_to_rgb, hue_to_rgb, RING_SATURATION, RING_VALUE};
 pub use rings::{
-    ring_dogs, Ring, RingDog, Winding, DOG_BODY_LENGTH, DOG_GAP, DOG_LENGTH, DOG_SCALE,
-    DOG_SPACING, INNER, OUTER, RINGS,
+    body_bulge, dog_total, outer_clearance, palette, palette_color, ring_dogs, Ring, RingDog,
+    Winding, DOG_BODY_LENGTH, DOG_BODY_WIDTH, DOG_GAP, DOG_LENGTH, DOG_SCALE, DOG_SPACING,
+    DOG_WIDTH, PALETTE_SIZE, RINGS, RING_COMB, RING_COUNT, RING_MAX_RADIUS, RING_MIN_RADIUS,
+    RING_SPACING,
 };
 pub use scene::{crucible_meshes, crucible_scene, CrucibleScene};
-pub use terrain::ground_y;
+pub use terrain::{ground_y, TERRAIN_HALF_EXTENT};
 pub use variant::{CrucibleVariant, DetailParams};
 
 use axiom::prelude::RunningApp;
@@ -156,7 +166,15 @@ mod tests {
         // One draw per spawned instance — the terrain plus every bone of every
         // dog — off `scene.objects.len()` registered meshes and no more.
         assert_eq!(outcome.draws().len(), instances);
-        assert_eq!(outcome.mesh_batches().len(), instances);
+        // ...and those instances collapse into at most `bones × PALETTE_SIZE + 1`
+        // batches, because the coats are shared. This is the number that decides
+        // the frame rate, and it does not grow with the crowd.
+        let batches = outcome.mesh_batches().len();
+        assert!(
+            batches <= bones * PALETTE_SIZE + statics,
+            "{batches} batches for a {PALETTE_SIZE}-entry palette"
+        );
+        assert!(batches * 4 < instances, "{batches} batches, {instances} instances");
         // Three lights: the sun and two fills.
         assert_eq!(outcome.lights().len(), 3);
         assert_eq!(outcome.clear_color(), [0.05, 0.07, 0.11, 1.0]);

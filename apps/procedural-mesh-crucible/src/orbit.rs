@@ -31,12 +31,13 @@ const PITCH_LIMIT: f32 = 1.45;
 
 /// The orbit distance band, in world units.
 ///
-/// The scene spans roughly 100 units end to end (the terrain plate) and the
+/// The scene spans 192 units end to end (the terrain plate) and the
 /// smallest thing worth inspecting is a single primitive in the reference row, a
 /// couple of units across. `4.0` puts the eye just outside one of those without
-/// letting the near plane (0.4) clip through it; `400.0` frames the whole
-/// crucible with room to spare while staying far inside the 700-unit far plane,
-/// so the user can neither fly to infinity nor invert through the target.
+/// letting the near plane (0.4) clip through it; `400.0` is twice the authored
+/// framing distance, so it pulls back well past the whole crucible while staying
+/// far inside the 700-unit far plane, so the user can neither fly to infinity
+/// nor invert through the target.
 const MIN_DISTANCE: f32 = 4.0;
 const MAX_DISTANCE: f32 = 400.0;
 

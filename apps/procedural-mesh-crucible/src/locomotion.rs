@@ -1,5 +1,5 @@
-//! The two closed rings the dogs walk, and how far round its own ring each dog
-//! is on a given tick.
+//! The concentric closed rings the dogs walk, and how far round its own ring
+//! each dog is on a given tick.
 //!
 //! ## The path
 //!
@@ -85,7 +85,7 @@ pub struct LoopPath {
 impl LoopPath {
     /// The walk around one [`Ring`], at its radius and in its winding.
     pub fn ring(ring: Ring) -> MeshResult<LoopPath> {
-        LoopPath::circle(ring.radius, ring.winding)
+        LoopPath::circle(ring.radius, ring.winding())
     }
 
     /// A closed circular walk of `radius`, authored in the given winding.
@@ -162,7 +162,7 @@ pub fn dog_travel(tick: u64) -> f32 {
     tick as f32 * TRAVEL_PER_TICK
 }
 
-/// Both rings of dogs, walking.
+/// Every ring of dogs, walking.
 ///
 /// Engine-free on purpose: this produces **transforms**, and the app's install
 /// step is what knows which scene node each one belongs to. That is what lets
@@ -174,7 +174,7 @@ pub fn dog_travel(tick: u64) -> f32 {
 /// its neighbour by *where on which ring it is*, and by nothing else.
 #[derive(Debug, Clone)]
 pub struct CrucibleAnimation {
-    /// One walk per entry in [`RINGS`], in that order.
+    /// One walk per entry in [`RINGS`], innermost first.
     paths: Vec<LoopPath>,
     /// Every dog, in the order [`Self::transforms`] emits them.
     dogs: Vec<RingDog>,
@@ -229,8 +229,8 @@ impl CrucibleAnimation {
     /// The offset is a whole number of *slots* of the ring's measured length, so
     /// the chain is evenly spaced and closes exactly at the seam. It also gives
     /// every dog a different point in the gait cycle for free — the stride is
-    /// 9 units and the slots are 24 apart, so the legs run as a wave around the
-    /// ring instead of stamping in lockstep.
+    /// 8.2 units and the slots are ~22.5 apart, so the legs run as a wave around
+    /// the ring instead of stamping in lockstep.
     pub fn travel(&self, index: usize, tick: u64) -> f32 {
         self.dogs
             .get(index)

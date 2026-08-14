@@ -3,7 +3,7 @@
 //!
 //! This is the one place that knows the crucible is a *place* rather than a list
 //! of meshes. There are exactly two things in it: the terrain, and one dog. The
-//! two rings of walking dogs are not more geometry — they are the same 23 bone
+//! concentric rings of walking dogs are not more geometry — they are the same 23 bone
 //! meshes drawn again at other transforms, and the whole of what makes one dog
 //! different from the next lives in [`crate::rings::RingDog`].
 //!
@@ -37,7 +37,7 @@ pub fn crucible_meshes(variant: CrucibleVariant) -> MeshResult<Vec<CrucibleObjec
 }
 
 /// The whole crucible: the distinct meshes to register, the rig those meshes are
-/// the bones of, and every dog walking the two rings.
+/// the bones of, and every dog walking the field.
 ///
 /// The rig is handed back rather than rebuilt because the animation needs the
 /// *same* bones the scene registered — the parent indices, the rest transforms
@@ -52,9 +52,9 @@ pub struct CrucibleScene {
     /// The index in `objects` of the dog's first bone. Its bones run
     /// contiguously from there, in rig order, to the end of the vector.
     pub dog_first: usize,
-    /// The dog's rig — the one skeleton every walker in both rings wears.
+    /// The dog's rig — the one skeleton every walker in the field wears.
     pub dog: CreatureRig,
-    /// Every dog in the two rings, in spawn order.
+    /// Every dog in the field, in spawn order.
     pub dogs: Vec<RingDog>,
 }
 
