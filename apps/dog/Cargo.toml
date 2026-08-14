@@ -1,16 +1,16 @@
 [package]
-name = "axiom-procedural-mesh-crucible"
-description = "Axiom app: the procedural mesh crucible. A composition-leaf browser/WASM proof that every visible shape in a coherent scene — generated terrain, and two counter-rotating rings of walking rigged dogs sharing one dog's worth of geometry — is produced by axiom-mesh-ops operators and validated by axiom-mesh. No imported geometry, no hand-typed vertex arrays."
+name = "axiom-dog"
+description = "Axiom app: dog. A composition-leaf browser/WASM scene of concentric rings of walking rigged dachshunds on generated terrain, in which every visible shape is produced by axiom-mesh-ops operators and validated by axiom-mesh, driven live from a generated slider panel. No imported geometry, no hand-typed vertex arrays."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-# `cdylib` for the app's own wasm bundle (the `crucible_start` entry); `rlib` so
-# native integration tests can call the pure `crucible_meshes` scene builder
+# `cdylib` for the app's own wasm bundle (the `dog_start` entry); `rlib` so
+# native integration tests can call the pure `scene_meshes` scene builder
 # without a browser.
 [lib]
-name = "axiom_procedural_mesh_crucible"
+name = "axiom_dog"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
@@ -35,8 +35,12 @@ axiom-windowing = { path = "../../modules/axiom-windowing" }
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 # Window/Location: the query-string read and the resize-settled reload.
-# Document/Element/HtmlElement/HtmlCanvasElement/CssStyleDeclaration: finding the
-# canvas, capturing pointers on it, and pinning `touch-action: none`.
+# History: `replaceState`, so every dial move is in the address bar and the one
+# non-live dial (detail) can answer with a reload that restores the whole scene.
+# Document/Element/Node/HtmlElement/HtmlCanvasElement/HtmlInputElement/
+# CssStyleDeclaration: finding the canvas, capturing pointers on it, pinning
+# `touch-action: none`, and BUILDING the dial panel — every slider on the page is
+# created from the dial table in `src/config.rs`.
 # EventTarget/Event/MouseEvent/PointerEvent/WheelEvent/AddEventListenerOptions:
 # the orbit camera's gestures — one pointer path for mouse, touch and pen, plus a
 # non-passive wheel listener so `preventDefault()` is honoured.
@@ -48,9 +52,12 @@ web-sys = { version = "0.3", features = [
     "Element",
     "Event",
     "EventTarget",
+    "History",
     "HtmlCanvasElement",
     "HtmlElement",
+    "HtmlInputElement",
     "Location",
+    "Node",
     "MouseEvent",
     "PointerEvent",
     "WheelEvent",

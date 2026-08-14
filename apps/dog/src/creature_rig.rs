@@ -213,6 +213,15 @@ pub struct LimbChain {
     pub len_lower: f32,
     /// The extra bone's length, in creature-local units (`0.0` when absent).
     pub len_extra: f32,
+    /// How far the hip/shoulder pivot stands above this limb's own contact at
+    /// rest, in creature-local units.
+    ///
+    /// This is the number the leg-length dial lifts the body by: a leg scaled to
+    /// `k` puts its hip `k · hip_drop` above the paw, so the body has to rise by
+    /// `(k − 1) · hip_drop` or a longer leg simply folds further instead of
+    /// standing the animal taller. Derived from the same authored bone rows the
+    /// geometry is built from, so a moved joint moves it too.
+    pub hip_drop: f32,
     /// The bend hint in creature space: `-Z` bends the joint forward (a knee),
     /// `+Z` backward (an elbow, or a dog's front leg).
     pub pole: Vec3,

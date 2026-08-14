@@ -1,6 +1,6 @@
 //! The articulated dog's proof suite.
 //!
-//! The dog is the crucible's answer to "can these operators be composed into
+//! The dog is this app's answer to "can these operators be composed into
 //! something *articulated*?" — a shape with limbs, joints and a pose, rather
 //! than a hull or a tube. Nothing anatomical exists in `axiom-mesh-ops`; the dog
 //! is a composition authored in the app, and these tests hold it to exactly the
@@ -19,8 +19,8 @@
 //!    placements reassembles one whole dog rather than 23 scattered parts.
 
 use axiom_mesh::{aabb, digest, Mesh};
-use axiom_procedural_mesh_crucible::{
-    crucible_meshes, dog, dog_limbs, dog_parts, CrucibleObject, CrucibleVariant, DOG_BODY_LENGTH,
+use axiom_dog::{
+    scene_meshes, dog, dog_limbs, dog_parts, SceneObject, SceneVariant, DOG_BODY_LENGTH,
 };
 
 /// How far above or below zero a sole may sit and still be "standing on the
@@ -28,7 +28,7 @@ use axiom_procedural_mesh_crucible::{
 /// so the only error here is the fillet's own arc sampling.
 const GROUND_TOLERANCE: f32 = 0.005;
 
-fn build(variant: CrucibleVariant) -> Mesh {
+fn build(variant: SceneVariant) -> Mesh {
     dog(variant)
         .unwrap_or_else(|error| panic!("the dog must build at {}: {error:?}", variant.label()))
 }
@@ -46,7 +46,7 @@ fn extents(mesh: &Mesh) -> (f32, f32, f32, f32) {
 
 #[test]
 fn the_dog_is_valid_geometry_at_every_variant() {
-    for variant in CrucibleVariant::ALL {
+    for variant in SceneVariant::ALL {
         let mesh = build(variant);
         let label = variant.label();
 
@@ -92,9 +92,9 @@ fn the_dog_is_valid_geometry_at_every_variant() {
 
 #[test]
 fn the_variant_really_re_tessellates_the_dog() {
-    let b = counts(&build(CrucibleVariant::Base));
-    let d = counts(&build(CrucibleVariant::Dense));
-    let c = counts(&build(CrucibleVariant::Coarse));
+    let b = counts(&build(SceneVariant::Base));
+    let d = counts(&build(SceneVariant::Dense));
+    let c = counts(&build(SceneVariant::Coarse));
     println!(
         "\n{:<8} {:>20} {:>20} {:>20}\n{:<8} {:>9}/{:<10} {:>9}/{:<10} {:>9}/{:<10}",
         "creature",
@@ -117,7 +117,7 @@ fn the_variant_really_re_tessellates_the_dog() {
         d.1 > b.1 && b.1 > c.1,
         "index counts are not ordered coarse < base < dense: {c:?} {b:?} {d:?}"
     );
-    for variant in CrucibleVariant::ALL {
+    for variant in SceneVariant::ALL {
         println!(
             "[triangles] {:>6}: {} triangles",
             variant.label(),
@@ -128,7 +128,7 @@ fn the_variant_really_re_tessellates_the_dog() {
 
 #[test]
 fn building_the_dog_twice_is_byte_identical() {
-    for variant in CrucibleVariant::ALL {
+    for variant in SceneVariant::ALL {
         let first = build(variant);
         let second = build(variant);
         assert_eq!(
@@ -159,7 +159,7 @@ fn building_the_dog_twice_is_byte_identical() {
 /// a small part of the animal it carries, and 10-18% is the band that reads.
 #[test]
 fn the_dog_is_proportioned_as_a_dachshund_and_matches_the_ring_spacing() {
-    let mesh = build(CrucibleVariant::Base);
+    let mesh = build(SceneVariant::Base);
     let (width, height, depth, floor) = extents(&mesh);
     let ratio = depth / height;
     let limbs = dog_limbs();
@@ -206,8 +206,8 @@ fn the_dog_is_proportioned_as_a_dachshund_and_matches_the_ring_spacing() {
 /// geometry proof; this is the registration one.
 #[test]
 fn every_bone_the_rig_declares_is_a_registered_scene_object() {
-    for variant in CrucibleVariant::ALL {
-        let objects = crucible_meshes(variant).expect("the scene builds");
+    for variant in SceneVariant::ALL {
+        let objects = scene_meshes(variant).expect("the scene builds");
         let rig = dog_parts(variant).expect("the dog rigs");
         for part in rig.parts() {
             let object = objects
@@ -243,9 +243,9 @@ fn every_bone_the_rig_declares_is_a_registered_scene_object() {
 /// animal across the map.
 #[test]
 fn the_registered_bones_reassemble_into_one_standing_dog() {
-    let objects = crucible_meshes(CrucibleVariant::Base).expect("the scene builds");
-    let rig = dog_parts(CrucibleVariant::Base).expect("the dog rigs");
-    let bones: Vec<&CrucibleObject> = rig
+    let objects = scene_meshes(SceneVariant::Base).expect("the scene builds");
+    let rig = dog_parts(SceneVariant::Base).expect("the dog rigs");
+    let bones: Vec<&SceneObject> = rig
         .parts()
         .iter()
         .map(|part| {
@@ -264,7 +264,7 @@ fn the_registered_bones_reassemble_into_one_standing_dog() {
         .collect();
     let whole = axiom_mesh::combine(&placed).expect("the bones combine");
     let assembled = aabb(&whole).expect("the assembled dog has bounds");
-    let solo = aabb(&build(CrucibleVariant::Base)).expect("the combined dog has bounds");
+    let solo = aabb(&build(SceneVariant::Base)).expect("the combined dog has bounds");
     println!(
         "[assembled] min {:?} max {:?}",
         assembled.min(),

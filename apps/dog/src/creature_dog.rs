@@ -72,7 +72,7 @@ use crate::creature_rig::{
     bone, bone_length, bone_tip, swept, CreatureRig, LimbChain, RigPart,
 };
 use crate::quantities::meters;
-use crate::variant::{CrucibleVariant, DetailParams};
+use crate::variant::{SceneVariant, DetailParams};
 
 /// The torso's stations along the spine: `z`, centre height, half-width,
 /// half-depth. The deep chest at `z = -0.52` is the whole reason this is a loft
@@ -217,13 +217,13 @@ const LEG_OFFSETS: [f32; 4] = [0.0, 0.5, 0.5, 0.0];
 ///
 /// Derived from [`dog_parts`] rather than authored separately, so the combined
 /// shape and the rigged one can never disagree about where a shoulder is.
-pub fn dog(variant: CrucibleVariant) -> MeshResult<Mesh> {
+pub fn dog(variant: SceneVariant) -> MeshResult<Mesh> {
     dog_parts(variant)?.assembled(Transform::IDENTITY)
 }
 
 /// The dog as named bones, each authored in its own local space with the origin
 /// at its joint pivot.
-pub fn dog_parts(variant: CrucibleVariant) -> MeshResult<CreatureRig> {
+pub fn dog_parts(variant: SceneVariant) -> MeshResult<CreatureRig> {
     let params = variant.params();
     let mut parts: Vec<RigPart> = Vec::new();
 
@@ -272,6 +272,7 @@ pub fn dog_limbs() -> [LimbChain; 4] {
             len_upper: bone_length(&LEG_BONES[0]),
             len_lower: bone_length(&LEG_BONES[1]),
             len_extra: 0.0,
+            hip_drop: LEG_BONES[0][1] - contact.y,
             // A dog's elbow points BACKWARD — the front leg folds the opposite
             // way to the hind one, and a forward-bending elbow is the single
             // most obvious way to make a quadruped look wrong.
@@ -295,6 +296,7 @@ pub fn dog_limbs() -> [LimbChain; 4] {
             len_upper: bone_length(&LEG_BONES[2]),
             len_lower: bone_length(&LEG_BONES[3]),
             len_extra: bone_length(&LEG_BONES[4]),
+            hip_drop: LEG_BONES[2][1] - contact.y,
             // The stifle leads FORWARD; the hock below it then folds back,
             // which is the metatarsus's job rather than the solver's.
             pole: Vec3::new(0.0, 0.0, -1.0),
@@ -303,6 +305,29 @@ pub fn dog_limbs() -> [LimbChain; 4] {
         .mirrored(side)
     };
     [front(0, 1.0), front(1, -1.0), hind(2, 1.0), hind(3, -1.0)]
+}
+
+/// The front chain's total bone length, in creature-local units.
+///
+/// The front leg is the one that carries the animal and the shorter of the two,
+/// so it is the one every reach budget in [`crate::config::SceneConfig`] is
+/// measured against. Derived from the authored bone rows rather than typed
+/// again, so re-drawing a foreleg re-derives the gait's ceiling with it.
+pub fn front_leg_reach() -> f32 {
+    bone_length(&LEG_BONES[0]) + bone_length(&LEG_BONES[1])
+}
+
+/// How far the front shoulder pivot stands above its own paw's contact, in
+/// creature-local units — the height the leg-length dial lifts the body by.
+pub fn front_hip_drop() -> f32 {
+    LEG_BONES[0][1] - PAW_HALF_EXTENTS[1]
+}
+
+/// The fore-aft span between the front and hind contacts, in creature-local
+/// units — the baseline the body's terrain pitch is measured over, and the arm
+/// the tight-ring curve correction acts on.
+pub fn wheelbase_local() -> f32 {
+    PAW_MOUNTS[2][1] - PAW_MOUNTS[0][1]
 }
 
 /// A paw's contact centre in creature space.

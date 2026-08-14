@@ -1,5 +1,5 @@
-//! [`CrucibleVariant`]: the scene's detail dial, and the only thing that changes
-//! between two builds of the crucible.
+//! [`SceneVariant`]: the scene's detail dial, and the only thing that changes
+//! between two builds of the geometry.
 //!
 //! The point of the variant is the **topology-change proof**. A procedural
 //! geometry library earns its keep only if the same authored scene can be
@@ -14,9 +14,9 @@
 //! Nothing here is random and nothing here is measured. A variant is a pure
 //! value; `params()` is a pure function of it.
 
-/// Which detail level the crucible scene is built at.
+/// Which detail level the scene's geometry is built at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CrucibleVariant {
+pub enum SceneVariant {
     /// The shipping density — what the browser page builds by default.
     Base,
     /// Everything refined: more path stations, more rings, more floors, a finer
@@ -26,12 +26,12 @@ pub enum CrucibleVariant {
     Coarse,
 }
 
-impl CrucibleVariant {
+impl SceneVariant {
     /// Every variant, in a fixed order — the list a test sweeps.
-    pub const ALL: [CrucibleVariant; 3] = [
-        CrucibleVariant::Base,
-        CrucibleVariant::Dense,
-        CrucibleVariant::Coarse,
+    pub const ALL: [SceneVariant; 3] = [
+        SceneVariant::Base,
+        SceneVariant::Dense,
+        SceneVariant::Coarse,
     ];
 
     /// The tessellation counts this variant builds every object at.
@@ -39,19 +39,26 @@ impl CrucibleVariant {
         DETAIL_TABLE[self.index()]
     }
 
-    /// A stable lowercase name — the value the page's `?detail=` query accepts
-    /// and the label the legend prints.
+    /// A stable lowercase name — the label the detail slider's read-out prints
+    /// and the one the tests report by.
     pub fn label(self) -> &'static str {
         ["base", "dense", "coarse"][self.index()]
     }
 
-    /// Parse a `?detail=` value; anything unrecognised (including an absent
-    /// parameter) is [`CrucibleVariant::Base`].
-    pub fn from_label(label: &str) -> CrucibleVariant {
-        CrucibleVariant::ALL
-            .into_iter()
-            .find(|variant| variant.label() == label)
-            .unwrap_or(CrucibleVariant::Base)
+    /// The variant the detail **dial** names, ordered coarse → base → dense so
+    /// the slider runs the way a density slider should. Anything out of range is
+    /// [`SceneVariant::Base`], the shipping density.
+    pub fn from_index(index: usize) -> SceneVariant {
+        [SceneVariant::Coarse, SceneVariant::Base, SceneVariant::Dense]
+            .get(index)
+            .copied()
+            .unwrap_or(SceneVariant::Base)
+    }
+
+    /// This variant's position on the detail dial — the inverse of
+    /// [`SceneVariant::from_index`].
+    pub fn dial_index(self) -> usize {
+        [1, 2, 0][self.index()]
     }
 
     /// The variant's index into the parameter table.
@@ -82,7 +89,7 @@ pub struct DetailParams {
     pub terrain_cells: u32,
 }
 
-/// The three variants' counts, indexed by [`CrucibleVariant`]'s discriminant.
+/// The three variants' counts, indexed by [`SceneVariant`]'s discriminant.
 const DETAIL_TABLE: [DetailParams; 3] = [
     // Base
     DetailParams {
@@ -118,18 +125,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_variant_round_trips_through_its_label() {
-        CrucibleVariant::ALL.into_iter().for_each(|variant| {
-            assert_eq!(CrucibleVariant::from_label(variant.label()), variant);
+    fn every_variant_round_trips_through_its_dial_position() {
+        SceneVariant::ALL.into_iter().for_each(|variant| {
+            assert_eq!(SceneVariant::from_index(variant.dial_index()), variant);
+            assert!(!variant.label().is_empty());
         });
-        assert_eq!(CrucibleVariant::from_label("nonsense"), CrucibleVariant::Base);
+        // The dial runs coarse → base → dense, and out-of-range is the shipping
+        // density rather than a panic.
+        assert_eq!(SceneVariant::from_index(0), SceneVariant::Coarse);
+        assert_eq!(SceneVariant::from_index(1), SceneVariant::Base);
+        assert_eq!(SceneVariant::from_index(2), SceneVariant::Dense);
+        assert_eq!(SceneVariant::from_index(9), SceneVariant::Base);
     }
 
     #[test]
     fn dense_refines_and_coarse_coarsens_every_count() {
-        let base = CrucibleVariant::Base.params();
-        let dense = CrucibleVariant::Dense.params();
-        let coarse = CrucibleVariant::Coarse.params();
+        let base = SceneVariant::Base.params();
+        let dense = SceneVariant::Dense.params();
+        let coarse = SceneVariant::Coarse.params();
         assert!(dense.sweep_samples > base.sweep_samples);
         assert!(coarse.sweep_samples < base.sweep_samples);
         assert!(dense.terrain_cells > base.terrain_cells);

@@ -495,7 +495,7 @@ depend on another app:
   locomotion animator — NOT a general IK engine."* Carries
   `pub struct LegDims { pub thigh: f32, pub shin: f32 }` reading bone lengths
   from `crate::player::model::PARTS`.
-- `apps/procedural-mesh-crucible/src/leg_ik.rs` — 289 lines. Header: *"Two-bone
+- `apps/dog/src/leg_ik.rs` — 289 lines. Header: *"Two-bone
   analytic inverse kinematics, and the distance-driven stride cycle that feeds
   it."* Law of cosines, `cos A = (a² + d² − b²) / (2 a d)`, with `d` clamped into
   `[|a − b| + ε, (a + b) − ε]`.

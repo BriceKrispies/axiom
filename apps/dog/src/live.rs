@@ -1,15 +1,17 @@
 //! The `wasm32` live arm: the browser edge, and nothing else.
 //!
-//! It reads two query parameters (`?detail=` and `?view=`), sizes the surface to
-//! the device it actually landed on, builds the scene those two values name,
-//! registers every generated mesh through the engine's ordinary `add_mesh_data`
-//! path, spawns one node per object, sets a light rig, installs the orbit
-//! camera's pointer gestures, and hands the per-frame closure to
-//! `axiom-windowing`.
+//! It reads the dial panel's configuration out of the query string (plus the one
+//! parameter that is not a dial, `?view=`), sizes the surface to the device it
+//! actually landed on, builds the scene those values name, registers every
+//! generated mesh through the engine's ordinary `add_mesh_data` path, spawns the
+//! instance pool, sets a light rig, installs the orbit camera's pointer gestures
+//! and the slider panel, and hands the per-frame closure to `axiom-windowing`.
 //!
-//! Nothing here decides anything about geometry. Every mesh it registers came
-//! out of [`crate::crucible_meshes`], which is native-testable and browser-free
-//! — the browser's whole contribution is a canvas, a frame clock and a finger.
+//! Nothing here decides anything about geometry or about what a dial *means*.
+//! Every mesh it registers came out of [`crate::scene_meshes`] and every dial is
+//! resolved by [`crate::SceneConfig`], both native-testable and browser-free —
+//! the browser's whole contribution is a canvas, a frame clock, a finger and a
+//! slider position.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -19,10 +21,16 @@ use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+use crate::config::SceneConfig;
 use crate::debug_view::{chart_rgba, DebugView, CHART_SIZE};
 use crate::orbit::OrbitState;
-use crate::variant::CrucibleVariant;
+use crate::rings::MAX_DOGS;
+use crate::variant::SceneVariant;
 use crate::{CANVAS_ID, HEIGHT, WIDTH};
+
+/// The element the dial panel is built inside. The page supplies it empty; every
+/// control in it comes from `src/slider_input.rs`.
+const CONTROLS_ID: &str = "dog-controls";
 
 /// The live backend's instance-buffer capacity, in **total instances across all
 /// batches** — the renderer packs every batch back-to-back into one buffer and
@@ -30,14 +38,22 @@ use crate::{CANVAS_ID, HEIGHT, WIDTH};
 /// capacity below the scene's instance count does not error, it just stops
 /// drawing dogs partway round the ring.
 ///
-/// The crucible spawns 1 terrain + 104 dogs × 23 bones = **2393 instances**.
-/// 4096 leaves room for another ring or two — a ninth ring would add ~22 dogs,
-/// 506 instances — without another silent truncation hunt, at a cost of one
-/// 4096-slot instance buffer (4096 × 40 floats × 4 bytes ≈ 655 KB).
+/// The app spawns 1 terrain + [`MAX_DOGS`] × 23 bones = **3727 instances** —
+/// the whole pool, because the ring dials move the crowd live and a dog that
+/// might be shown at frame 400 has to have been spawned at frame 0. Retired pool
+/// slots carry `Visible(false)` and are dropped at submission, so the *drawn*
+/// count is only ever the crowd the layout asked for; the buffer, however, has to
+/// be sized for the pool's ceiling.
 ///
-/// The count came *down* when the dogs became dachshunds: a longer body needs
-/// more arc apiece, so 120 walkers became 104 without a ring being lost.
+/// 4096 slots is 3727 plus headroom, at a cost of one instance buffer
+/// (4096 × 40 floats × 4 bytes ≈ 655 KB). The relationship is asserted below
+/// rather than left as a comment that can rot.
 const LIVE_CAPACITY: u32 = 4096;
+
+const _: () = assert!(
+    (MAX_DOGS * 23 + 1) as u32 <= LIVE_CAPACITY,
+    "the instance pool does not fit the buffer the live backend is bound with"
+);
 
 /// The fraction of the viewport width the page's stylesheet gives the canvas,
 /// and the widest it will ever lay it out. These mirror the `width: min(94vw,
@@ -67,12 +83,15 @@ const MAX_DEVICE_PIXEL_RATIO: f64 = 2.0;
 /// Delay before a settled resize/orientation change reloads the page.
 const RESIZE_SETTLE_MS: i32 = 350;
 
-/// Browser entry: build the crucible and present it.
+/// Browser entry: build the scene and present it.
 #[wasm_bindgen]
-pub fn crucible_start() {
+pub fn dog_start() {
     console_error_panic_hook::set_once();
 
-    let variant = CrucibleVariant::from_label(&query_value("detail"));
+    // The whole dial panel round-trips through the query string, so a reload —
+    // the detail dial's, or a device rotation's — comes back to the scene the
+    // user had built rather than to the defaults.
+    let opening = SceneConfig::from_query(&query_string());
     let view = DebugView::from_label(&query_value("view"));
     let (width, height) = surface_pixels();
 
@@ -81,9 +100,14 @@ pub fn crucible_start() {
         .configure_surface(width, height)
         .expect("surface dimensions are valid");
 
-    let (mut running, installed) = build_running(variant, view, width, height);
+    let (mut running, mut installed) = build_running(opening.variant(), view, width, height, &opening);
     let meshes = running.mesh_set();
     let materials = running.material_textures();
+
+    // The live configuration the panel writes and the frame closure reads. One
+    // cell, at the browser edge; everything downstream takes it as an argument.
+    let config: Rc<RefCell<SceneConfig>> = Rc::new(RefCell::new(opening));
+    crate::slider_input::install(CONTROLS_ID, config.clone());
 
     // The camera the page drives. `OrbitState::framed` seeds itself from the
     // authored eye/target in `install.rs`, so the first frame is the shot the
@@ -98,10 +122,11 @@ pub fn crucible_start() {
         // reuses the existing camera node in place, so a moving camera costs no
         // allocation and leaks no scene nodes.
         orbit.borrow().apply(&mut running);
-        // Re-author the two creatures' bones for this tick. The pose is a pure
-        // function of `tick` — the browser supplies a frame number and nothing
-        // else, so the same frame number always draws the same pose.
-        installed.animate(&mut running, tick);
+        // Re-author every bone for this tick, at whatever the panel now says.
+        // The pose is a pure function of `(tick, config)` — the browser supplies
+        // a frame number and a slider position and nothing else, so the same
+        // pair always draws the same pose.
+        installed.animate(&mut running, tick, &config.borrow());
         let outcome = running.tick(tick);
         let lights = outcome
             .lights()
@@ -120,13 +145,14 @@ pub fn crucible_start() {
     });
 }
 
-/// Realize the app and install the whole crucible into it.
+/// Realize the app and install the whole scene into it.
 fn build_running(
-    variant: CrucibleVariant,
+    variant: SceneVariant,
     view: DebugView,
     width: u32,
     height: u32,
-) -> (RunningApp, crate::InstalledCrucible) {
+    config: &SceneConfig,
+) -> (RunningApp, crate::InstalledScene) {
     let mut running = App::new()
         .window(
             Window::new(width, height)
@@ -144,7 +170,7 @@ fn build_running(
             .expect("the authored normal chart is a well-formed RGBA8 image")
             .id()
     });
-    let installed = crate::install_crucible(&mut running, variant, view, chart);
+    let installed = crate::install_scene(&mut running, variant, view, chart, config);
     (running, installed)
 }
 
@@ -219,7 +245,7 @@ fn number(value: Result<JsValue, JsValue>) -> Option<f64> {
 /// Rather than reach into the module to add one — the presentation surface is
 /// the engine's to own, and a resize path there is a real design with a real
 /// coverage burden, not an app's errand — the app does the one honest thing an
-/// app can: it starts over. `reload()` re-runs `crucible_start` with the query
+/// app can: it starts over. `reload()` re-runs `dog_start` with the query
 /// string (and so the `?detail=`/`?view=` selection) intact. The debounce keeps
 /// a desktop window-drag from reloading on every intermediate pixel, and the
 /// size comparison keeps a soft-keyboard or URL-bar reflow — which changes
@@ -263,23 +289,25 @@ fn chan(value: f32) -> Ratio {
     Ratio::finite_or_zero(value)
 }
 
-/// One query-string value from the page URL, or the empty string.
-///
-/// This is the app's only read of the browser environment at *scene-build* time,
-/// and it happens once at startup — the scene it selects is then fixed for the
-/// session, which is what keeps a "debug view" from being a piece of per-frame
-/// state.
-fn query_value(key: &str) -> String {
+/// The page URL's query string, or the empty string.
+fn query_string() -> String {
     web_sys::window()
         .and_then(|window| window.location().search().ok())
-        .map(|search| {
-            search
-                .trim_start_matches('?')
-                .split('&')
-                .filter_map(|pair| pair.split_once('='))
-                .find(|(name, _)| *name == key)
-                .map(|(_, value)| value.to_string())
-                .unwrap_or_default()
-        })
+        .unwrap_or_default()
+}
+
+/// One query-string value from the page URL, or the empty string.
+///
+/// This is the app's only read of the browser environment at *scene-build* time
+/// that the dial panel does not own, and it happens once at startup — the debug
+/// view it selects re-normals geometry, which the live backend uploads once at
+/// bind, so it is fixed for the session exactly as the detail dial is.
+fn query_value(key: &str) -> String {
+    query_string()
+        .trim_start_matches('?')
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(name, _)| *name == key)
+        .map(|(_, value)| value.to_string())
         .unwrap_or_default()
 }

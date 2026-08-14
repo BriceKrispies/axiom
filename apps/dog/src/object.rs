@@ -1,4 +1,4 @@
-//! [`CrucibleObject`]: one generated thing in the scene, and the record of which
+//! [`SceneObject`]: one generated thing in the scene, and the record of which
 //! operator generated it.
 //!
 //! The `operator` field is not decoration. This app exists to prove that every
@@ -18,7 +18,7 @@ use axiom_mesh::Mesh;
 /// One generated object: its geometry, the operator chain that built it, where
 /// it sits, and the linear colour that makes it read apart from its neighbours.
 #[derive(Debug, Clone)]
-pub struct CrucibleObject {
+pub struct SceneObject {
     /// A stable identifier, unique within the scene. Tests address objects by it.
     pub name: &'static str,
     /// The `axiom-mesh-ops` / `axiom-mesh` chain that produced `mesh`.
@@ -31,7 +31,7 @@ pub struct CrucibleObject {
     pub color: [f32; 3],
 }
 
-impl CrucibleObject {
+impl SceneObject {
     /// Record a generated mesh with its provenance, placement and colour.
     pub fn new(
         name: &'static str,
@@ -40,7 +40,7 @@ impl CrucibleObject {
         placement: Transform,
         color: [f32; 3],
     ) -> Self {
-        CrucibleObject {
+        SceneObject {
             name,
             operator,
             mesh,

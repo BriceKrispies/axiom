@@ -42,10 +42,11 @@
 use axiom_math::{Curve, Transform, Vec3};
 use axiom_mesh::{MeshError, MeshErrorCode, MeshResult};
 
+use crate::config::SceneConfig;
 use crate::creature_dog::dog_limbs;
-use crate::creature_pose::{CreaturePose, DOG_GAIT};
+use crate::creature_pose::Gait;
 use crate::creature_rig::{CreatureRig, LimbChain};
-use crate::rings::{ring_dogs, Ring, RingDog, Winding, RINGS};
+use crate::rings::{ring_dogs, rings, Ring, RingDog, Winding};
 use crate::terrain::ground_y;
 
 /// How many control points one revolution is authored from, and how many
@@ -55,19 +56,21 @@ use crate::terrain::ground_y;
 const LOOP_CONTROLS: u32 = 16;
 const LOOP_SAMPLES: u32 = 768;
 
-/// World units a dog covers per engine tick.
+/// World units a dog covers per engine tick, at the walk-speed dial's default.
 ///
 /// This is set by the STEP RATE it implies, not by the ground speed it looks
-/// like. A leg completes one cycle every `DOG_GAIT.stride / TRAVEL_PER_TICK`
-/// ticks, so at 60 Hz the step frequency is `60 · TRAVEL_PER_TICK / stride`.
-/// With the dachshund's 5.2 stride, 0.21 gives ~2.4 steps a second per leg,
-/// which is a real dog's trot; the previous 0.62 implied 7.2 Hz, and a leg
-/// cycling seven times a second reads as vibration rather than walking.
+/// like. A leg completes one cycle every `stride / speed` ticks, so at 60 Hz the
+/// step frequency is `60 · speed / stride`. With the dachshund's 5.2 stride, 0.21
+/// gives ~2.4 steps a second per leg, which is a real dog's trot; an earlier 0.62
+/// implied 7.2 Hz, and a leg cycling seven times a second reads as vibration
+/// rather than walking.
 ///
 /// Ground speed follows from that at ~12.6 units a second, close to half a body
-/// length — an unhurried walk. Changing this does NOT change the stride, so the
-/// limb-reach budget is untouched: it rescales time, not geometry.
-pub const TRAVEL_PER_TICK: f32 = 0.21;
+/// length — an unhurried walk. Moving the dial does NOT change the stride, so the
+/// limb-reach budget is untouched: it rescales time, not geometry, which is
+/// exactly why it is the cheapest dial on the panel and the one that reads
+/// instantly.
+pub const DEFAULT_TRAVEL_PER_TICK: f32 = 0.21;
 
 /// A point on a ring: where it is, which way the walk runs, and which way is
 /// right.
@@ -93,9 +96,9 @@ pub struct LoopPath {
 }
 
 impl LoopPath {
-    /// The walk around one [`Ring`], at its radius and in its winding.
-    pub fn ring(ring: Ring) -> MeshResult<LoopPath> {
-        LoopPath::circle(ring.radius, ring.winding())
+    /// The walk around one [`Ring`], at its radius and in the field's winding.
+    pub fn ring(ring: Ring, winding: Winding) -> MeshResult<LoopPath> {
+        LoopPath::circle(ring.radius, winding)
     }
 
     /// A closed circular walk of `radius`, authored in the given winding.
@@ -167,9 +170,9 @@ fn lerp(a: Vec3, b: Vec3, t: f32) -> Vec3 {
     a.add(b.subtract(a).mul_scalar(t))
 }
 
-/// How far the lead dog of a ring has walked at `tick`.
-pub fn dog_travel(tick: u64) -> f32 {
-    tick as f32 * TRAVEL_PER_TICK
+/// How far the lead dog of a ring has walked at `tick`, at `speed` units a tick.
+pub fn dog_travel(tick: u64, speed: f32) -> f32 {
+    tick as f32 * speed
 }
 
 /// Every ring of dogs, walking.
@@ -183,32 +186,70 @@ pub fn dog_travel(tick: u64) -> f32 {
 /// animation is exactly as parameterised as the geometry is: a dog differs from
 /// its neighbour by *where on which ring it is*, and by nothing else.
 #[derive(Debug, Clone)]
-pub struct CrucibleAnimation {
-    /// One walk per entry in [`RINGS`], innermost first.
+pub struct Animation {
+    /// One walk per ring the configuration lays out, innermost first.
     paths: Vec<LoopPath>,
+    /// The rings those walks were built from — so a dog's ring index resolves to
+    /// the same circle the path was sampled off.
+    rings: Vec<Ring>,
     /// Every dog, in the order [`Self::transforms`] emits them.
     dogs: Vec<RingDog>,
+    /// How many dogs each ring's chain holds — the divisor that spaces the chain
+    /// evenly and closes it exactly at the seam. Counted off the crowd rather
+    /// than re-derived, so a ring truncated by the instance pool still spaces the
+    /// dogs it kept.
+    chain: Vec<usize>,
     /// The single rig every dog instances.
     rig: CreatureRig,
     /// Its four solvable legs.
     limbs: [LimbChain; 4],
-    /// The trot they all walk.
-    gait: CreaturePose,
+    /// The trot they all walk, with every dial resolved.
+    gait: Gait,
+    /// World units a dog covers per tick.
+    speed: f32,
 }
 
-impl CrucibleAnimation {
-    /// Bind an animation to the rig the scene registered.
-    pub fn new(dog: CreatureRig) -> MeshResult<CrucibleAnimation> {
-        Ok(CrucibleAnimation {
-            paths: RINGS
+impl Animation {
+    /// Bind an animation to the rig the scene registered, at `config`.
+    ///
+    /// This is where the layout dials are paid for: the arc-length tables are
+    /// inverted once, here, and every later lookup is two table reads and a lerp.
+    /// Moving a *layout* dial rebuilds this value; moving a gait dial does not
+    /// (see [`Animation::follows`]).
+    pub fn new(dog: CreatureRig, config: &SceneConfig) -> MeshResult<Animation> {
+        let laid = rings(config);
+        let dogs = ring_dogs(config);
+        Ok(Animation {
+            paths: laid
                 .iter()
-                .map(|ring| LoopPath::ring(*ring))
+                .map(|ring| LoopPath::ring(*ring, config.winding()))
                 .collect::<MeshResult<Vec<LoopPath>>>()?,
-            dogs: ring_dogs(),
+            chain: laid
+                .iter()
+                .map(|ring| dogs.iter().filter(|dog| dog.ring == ring.index).count().max(1))
+                .collect(),
+            rings: laid,
+            dogs,
             rig: dog,
             limbs: dog_limbs(),
-            gait: DOG_GAIT,
+            gait: config.gait(),
+            speed: config.travel_per_tick(),
         })
+    }
+
+    /// Re-resolve the dials that do **not** move a ring: the gait and the walking
+    /// speed. Everything here is read per pose, so it costs nothing to change —
+    /// which is the difference between a dial that reads instantly and one that
+    /// re-inverts eight arc-length tables.
+    pub fn retune(&mut self, config: &SceneConfig) {
+        self.gait = config.gait();
+        self.speed = config.travel_per_tick();
+    }
+
+    /// Whether this animation's rings are the ones `config` asks for. False means
+    /// the paths have to be rebuilt; true means [`Animation::retune`] is enough.
+    pub fn follows(&self, config: &SceneConfig) -> bool {
+        (self.rings == rings(config)) & (self.dogs == ring_dogs(config))
     }
 
     /// Every dog, in the order their bones come back from
@@ -217,9 +258,30 @@ impl CrucibleAnimation {
         &self.dogs
     }
 
-    /// The walk around one ring, indexed as [`RINGS`] is.
+    /// The walk around one ring, indexed as [`Animation::rings`] is.
     pub fn path(&self, ring: usize) -> &LoopPath {
         &self.paths[ring.min(self.paths.len() - 1)]
+    }
+
+    /// The one rig every dog instances — handed back so a layout rebuild reuses
+    /// the bones the scene registered instead of re-deriving them.
+    pub fn rig(&self) -> &CreatureRig {
+        &self.rig
+    }
+
+    /// The rings this animation walks.
+    pub fn rings(&self) -> &[Ring] {
+        &self.rings
+    }
+
+    /// The trot every dog walks, with every gait dial resolved.
+    pub fn gait(&self) -> Gait {
+        self.gait
+    }
+
+    /// World units a dog covers per tick.
+    pub fn speed(&self) -> f32 {
+        self.speed
     }
 
     /// How many bones one dog has — every dog has the same ones, in the same
@@ -245,10 +307,11 @@ impl CrucibleAnimation {
         self.dogs
             .get(index)
             .map(|dog| {
-                let ring = RINGS[dog.ring];
-                dog_travel(tick) + dog.slot as f32 * self.path(dog.ring).total() / ring.count() as f32
+                let chain = self.chain.get(dog.ring).copied().unwrap_or(1);
+                dog_travel(tick, self.speed)
+                    + dog.slot as f32 * self.path(dog.ring).total() / chain as f32
             })
-            .unwrap_or_else(|| dog_travel(tick))
+            .unwrap_or_else(|| dog_travel(tick, self.speed))
     }
 
     /// Every bone of every dog at `tick`: dog by dog in [`Self::dogs`] order,

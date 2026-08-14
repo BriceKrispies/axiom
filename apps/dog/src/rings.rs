@@ -1,50 +1,47 @@
-//! The concentric field of counter-rotating rings: how many rings there are, how
-//! many dogs walk each one, where each dog starts, which way round it faces, and
-//! which entry of the shared colour palette it is painted from.
+//! The concentric field of rings: how many rings there are, how many dogs walk
+//! each one, where each dog starts, which way round it faces, and which entry of
+//! the shared colour palette it is painted from.
 //!
 //! ## The layout is derived, not typed
 //!
-//! Nothing here is a hand-tuned ring list or dog count. Three measured facts —
-//! how long a dog is, how wide it is, and how far the terrain reaches — produce
-//! the whole field:
+//! Nothing here is a hand-tuned ring list or dog count. Four measured facts —
+//! how long a dog is, how wide it is, how much air is left behind it, and how far
+//! the terrain reaches — produce the whole field from the four ring dials in
+//! [`crate::config::SceneConfig`]:
 //!
 //! * a ring knows its radius, and its dog count is its circumference divided by
-//!   the room one dog needs ([`DOG_SPACING`]), rounded to a whole animal;
-//! * the rings are a fixed radial pitch apart ([`RING_SPACING`]), and that pitch
-//!   is set by the dog's **width** plus the outward bulge a rigid body makes on a
+//!   the room one dog needs ([`SceneConfig::dog_spacing`]), rounded to a whole
+//!   animal;
+//! * the rings sit a fixed radial pitch apart, and that pitch has a **floor**
+//!   set by the dog's width plus the outward bulge a rigid body makes on a
 //!   curve — not by its length;
-//! * the innermost radius is the tightest curve the gait is tuned for, and the
-//!   outermost is the largest circle that still leaves clear ground before the
-//!   terrain's rim.
+//! * the innermost radius has a floor of one dog's length, below which the body
+//!   is longer than the arc it is standing on;
+//! * the ring count has two ceilings: the outermost ring must leave half a dog's
+//!   length of clear ground before the terrain's rim, and the whole crowd must
+//!   fit the instance pool the live backend was bound with.
 //!
-//! Move [`RING_MAX_RADIUS`] and the field re-populates itself with the right
+//! Move any of those dials and the field re-populates itself with the right
 //! number of rings, each holding the right number of dogs, because none of those
 //! numbers was ever authored.
 //!
 //! ## The radial pitch: bounded by width, not length
 //!
-//! A dog is [`DOG_WIDTH`] (3.84) across and [`DOG_LENGTH`] (24.0) long, and it is
-//! laid **along** its ring — so what separates two rings is the width, plus one
-//! correction. A rigid body of length `L` standing on a circle of radius `R` has
-//! its centre on the circle and its nose and tail *outside* it, by
-//! `sqrt(R² + (L/2)²) − R ≈ (L/2)² / (2R)` — see [`body_bulge`]. Two rings
-//! therefore clear each other when
+//! A dog is laid **along** its ring, so what separates two rings is its width,
+//! plus one correction. A rigid body of length `L` standing on a circle of
+//! radius `R` has its centre on the circle and its nose and tail *outside* it, by
+//! `sqrt(R² + (L/2)²) − R` — see [`body_bulge`]. Two rings therefore clear each
+//! other when
 //!
 //! ```text
-//! RING_SPACING  ≥  DOG_WIDTH  +  body_bulge(inner radius)
+//! ring_spacing  ≥  dog_width  +  body_bulge(inner radius)  +  air
 //! ```
 //!
-//! **The dachshund re-proportioning is felt here first.** The bulge is
-//! quadratic in the body's length: stretching the dog from 21.0 to 24.0 units
-//! took the worst-case bulge from 2.12 to 2.64, and it is the *narrowing* that
-//! paid for it — a long low dog is a narrow one, so [`DOG_WIDTH`] fell from 4.24
-//! to 3.84 at the same time, even as the leg tubes themselves got *thicker*
-//! (short legs are stout ones, and pulling them inboard of a deep chest is what a
-//! real foreleg does). At the tightest pair (26 → 33.75) the requirement is
-//! `3.84 + 2.64 = 6.48`, and [`RING_SPACING`] is `7.75`: **1.27 units of clear
-//! air** between the outermost point of one ring's dogs and the innermost point
-//! of the next ring's. At the widest pair (72.5 → 80.25) the bulge is `0.99` and
-//! the air is `2.92`.
+//! and [`ring_spacing`] enforces exactly that, whatever the pitch dial says. At
+//! the authored dachshund (24.0 long, 3.84 wide) on a 26-unit innermost ring the
+//! requirement is `3.84 + 2.64 + 1.0 = 7.48`, and the pitch dial's default is
+//! `7.75`: the opening scene is the scene it has always been, and the floor is
+//! only felt when the pitch is dragged under it.
 //!
 //! ## Which way is which
 //!
@@ -53,42 +50,59 @@
 //! goes **clockwise**. (Take screen-right as `+X` and screen-up as `-Z`, the
 //! ordinary map orientation: the point's screen angle is `-θ`, so advancing `θ`
 //! turns the short way round the clock.) That single fact is what
-//! [`Winding::sign`] encodes, and the ring's **index parity** is the whole of
-//! what picks one — so every ring necessarily turns against both its neighbours.
+//! [`Winding::sign`] encodes, and the direction dial is the whole of what picks
+//! one — so reversing it reverses the authored parameter direction, which
+//! reverses the tangent, which reverses the facing, with no separate "turn the
+//! dogs around" step anywhere.
 //!
 //! The direction is then testable without trusting any of this prose: for a
 //! position `p` measured from the ring centre and a heading `h`, the `y`
 //! component of `p × h` is `p.z·h.x − p.x·h.z`, which is `−R²` for a clockwise
 //! walk and `+R²` for a counter-clockwise one. `tests/rings.rs` asserts exactly
-//! that sign on the real posed bones, for every adjacent pair.
+//! that sign on the real posed bones, at both ends of the direction dial.
 //!
 //! ## Why the colours come from a bounded palette
 //!
 //! A dog's colour reaches the GPU **only** through its material: the per-instance
-//! `colour[4]` in the instance stream is filled from the material the draw names
-//! (`axiom-render-pipeline`'s `MaterialSlot`), and draws batch on the
-//! `(mesh_id, material_id)` pair. One material per dog would therefore mean
-//! `23 bones × dogs` single-instance batches — 2392 draw calls at this crowd
-//! size, which throws instancing away entirely.
+//! `colour[4]` in the instance stream is filled from the material the draw names,
+//! and draws batch on the `(mesh_id, material_id)` pair. One material per dog
+//! would therefore mean `23 bones × dogs` single-instance batches, which throws
+//! instancing away entirely.
 //!
 //! So the field is painted from a fixed [`PALETTE_SIZE`]-entry palette that every
 //! dog shares, and the batch count is `23 × PALETTE_SIZE + 1` **whatever the
-//! crowd size** — 415, and the field as laid out wears all 18 coats, so it is
-//! exactly 415. The palette is split into two interleaved combs of
-//! [`RING_COMB`] hues; a ring uses the comb its index parity names, so a dog and
-//! any dog on an adjacent ring are at least `1/PALETTE_SIZE` of a turn apart in
-//! hue, and two dogs adjacent *along* a ring are at least `2/PALETTE_SIZE` apart.
+//! crowd size**.
+//!
+//! ## Why a coat is the dog's place in the crowd, and nothing cleverer
+//!
+//! A dog wears palette entry `crowd index % PALETTE_SIZE` — so the hue advances
+//! one twentieth of a turn per dog and each ring reads as a rainbow running
+//! round it, with no two dogs adjacent *along* a ring ever sharing a coat
+//! (consecutive indices cannot be congruent).
+//!
+//! That is a deliberately dull rule, and the dullness is the point. The ring
+//! dials move the crowd size **live**, which the app pays for by spawning
+//! [`MAX_DOGS`] pool slots at bind and retiring the unused ones (see
+//! `install.rs`) — and a pool slot's coat is fixed at spawn, because `Material`
+//! has no runtime mutation and `Renderable` is not a settable component, so an
+//! installed instance can never be repainted. The coats a layout may use are
+//! therefore exactly the coats the pool already carries: `slot % PALETTE_SIZE`.
+//! Any assignment that is not that balanced sequence — the parity-split hue comb
+//! this field used to carry, which gave adjacent *rings* disjoint hue sets —
+//! cannot be honoured by a fixed pool, and asking for it would mean either
+//! respawning the crowd on every ring-dial tick or an engine-tier per-renderable
+//! tint. Both are recorded in `NOTES.md`; neither is an app's errand.
 
-use crate::creature_pose::DOG_GAIT;
+use crate::config::SceneConfig;
 use crate::rainbow::hue_to_rgb;
 use crate::terrain::TERRAIN_HALF_EXTENT;
 
 /// Which way round a ring is walked, seen from `+Y` looking down.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Winding {
-    /// Anticlockwise from above — every even-indexed ring.
+    /// Anticlockwise from above.
     CounterClockwise,
-    /// Clockwise from above — every odd-indexed ring.
+    /// Clockwise from above.
     Clockwise,
 }
 
@@ -111,30 +125,17 @@ impl Winding {
 
 /// One ring of dogs: where it sits in the field, and how wide it is.
 ///
-/// Everything else about it — which way it is walked, how many dogs it holds,
-/// which palette entries they wear — is derived from those two numbers.
+/// Everything else about it — how many dogs it holds, which palette entries they
+/// wear — is derived from those two numbers and the configuration.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ring {
-    /// Its place in [`RINGS`], counting outward from the innermost ring.
+    /// Its place in the field, counting outward from the innermost ring.
     pub index: usize,
     /// Its radius about the scene origin, in world units.
     pub radius: f32,
 }
 
 impl Ring {
-    /// Which way round the dogs walk. Every ring turns the same way, so the
-    /// whole field reads as one body of traffic rather than as counter-shearing
-    /// bands.
-    ///
-    /// The index is still what the palette combs off (see [`RING_COMB`]), so
-    /// neighbouring rings stay far apart in hue even though they no longer
-    /// differ in direction — which matters *more* now, not less: dogs on
-    /// adjacent rings hold their relative alignment instead of sliding past
-    /// each other, so a shared hue would sit side by side indefinitely.
-    pub const fn winding(self) -> Winding {
-        Winding::CounterClockwise
-    }
-
     /// The ring's circumference — the length of the walk, before the terrain's
     /// relief adds its own fraction of a percent.
     pub fn circumference(self) -> f32 {
@@ -146,194 +147,180 @@ impl Ring {
     ///
     /// Rounding rather than flooring is deliberate — the leftover is shared out
     /// between every gap instead of being dropped into one, so the chain stays
-    /// evenly spaced either way. The floor of three is not a real case at any
-    /// derived radius; it is there so the arithmetic cannot produce a "ring"
-    /// of one dog chasing itself.
-    pub fn count(self) -> usize {
-        (self.circumference() / DOG_SPACING).round().max(3.0) as usize
+    /// evenly spaced either way. The floor of three keeps the arithmetic from
+    /// producing a "ring" of one dog chasing itself; the *ceiling* is that a
+    /// rounded-up count must never space the chain tighter than the dog is long,
+    /// which is what would make the queue overlap itself.
+    pub fn count(self, config: &SceneConfig) -> usize {
+        let spacing = config.dog_spacing().max(1.0e-3);
+        let rounded = (self.circumference() / spacing).round().max(3.0) as usize;
+        let fits = (self.circumference() / config.dog_length().max(1.0e-3)).floor() as usize;
+        rounded.min(fits.max(1)).max(1)
     }
 
     /// How far outside its own circle this ring's dogs reach, in world units:
     /// the nose-and-tail bulge of a rigid body standing on a curve.
-    pub fn bulge(self) -> f32 {
-        body_bulge(self.radius)
+    pub fn bulge(self, config: &SceneConfig) -> f32 {
+        body_bulge(self.radius, config.dog_length())
     }
 
     /// The radial band this ring's dogs occupy: `(inner, outer)` world radii,
     /// from the inside flank of a dog to the tip of its outward-bulging nose.
-    pub fn band(self) -> (f32, f32) {
+    pub fn band(self, config: &SceneConfig) -> (f32, f32) {
+        let half_width = config.dog_width() * 0.5;
         (
-            self.radius - DOG_WIDTH * 0.5,
-            self.radius + self.bulge() + DOG_WIDTH * 0.5,
+            self.radius - half_width,
+            self.radius + self.bulge(config) + half_width,
         )
     }
 
-    /// Which palette entry the dog in `slot` wears.
-    ///
-    /// The ring walks its own comb of [`RING_COMB`] hues, sweeping it as many
-    /// whole times as it takes for the step between neighbours to be at least
-    /// one comb entry — so however many dogs a ring holds, **no two adjacent
-    /// dogs share a colour**, and the seam where the chain closes is no
-    /// different from any other gap. The comb is then interleaved into the full
-    /// palette by the ring's parity, which is also its winding: a ring and its
-    /// neighbours are drawn from disjoint hue sets.
-    pub fn palette_at(self, slot: usize) -> usize {
-        let count = self.count();
-        let sweeps = count.div_ceil(RING_COMB).max(1);
-        let step = (slot * RING_COMB * sweeps / count) % RING_COMB;
-        step * 2 + self.index % 2
-    }
 }
 
-/// How far outside a circle of `radius` the ends of a rigid [`DOG_LENGTH`] body
+/// How far outside a circle of `radius` the ends of a rigid `length` body
 /// standing on it reach.
 ///
-/// The body's centre is on the circle and its nose is `DOG_LENGTH / 2` along the
-/// tangent, so the nose sits at `sqrt(radius² + (L/2)²)`. This is the correction
-/// that makes a tight ring take more radial room than a wide one, and it is what
-/// [`RING_SPACING`] is sized against.
-pub fn body_bulge(radius: f32) -> f32 {
-    let half = DOG_LENGTH * 0.5;
+/// The body's centre is on the circle and its nose is `length / 2` along the
+/// tangent, so the nose sits at `sqrt(radius² + (length/2)²)`. This is the
+/// correction that makes a tight ring take more radial room than a wide one, and
+/// it is what the ring pitch's floor is sized against.
+pub fn body_bulge(radius: f32, length: f32) -> f32 {
+    let half = length * 0.5;
     (radius * radius + half * half).sqrt() - radius
 }
 
-/// The tightest ring in the field, in world units.
-///
-/// **This is a floor, not a preference**, and the dachshund made it a harder
-/// one. A dog is a rigid 24-unit body whose paws are planted on the ring itself,
-/// and the mismatch between the two grows as the curve tightens: [`body_bulge`]
-/// is 2.64 units here, 3.63 at radius 18 and 5.62 at radius 10 — and at radius 12
-/// the body is longer than the circle it is standing on and the geometry stops
-/// existing at all.
-///
-/// 26 is where the gait is *tuned*, and it survived the re-proportioning by a
-/// margin that had to be re-earned rather than assumed. Two things moved against
-/// each other:
-///
-/// * the longer body pushed the shoulder further outside the circle its own paw
-///   is planted on — 0.39 units at this radius, up from 0.34;
-/// * the leg absorbing that offset **halved**, from 5.52 units of reach to 3.68.
-///
-/// What paid for both is that the dachshund's leg is authored *bent* rather than
-/// straight (see `creature_dog.rs`), so it stands at 73% of its reach instead of
-/// 105% and has real swing budget without being folded into the ground.
-/// `tests/locomotion.rs` measures every limb of every dog on every ring over more
-/// than a lap and fails if one is asked to reach further than it is long; a
-/// tighter innermost ring is not a constant change but a re-tuned gait with that
-/// measurement re-run.
-pub const RING_MIN_RADIUS: f32 = 26.0;
-
-/// The widest ring in the field, in world units.
-///
-/// The terrain's top surface is a square of half-extent [`TERRAIN_HALF_EXTENT`]
-/// (96) — the skirt hangs straight down from that border, so the usable ground is
-/// the inscribed disc of radius 96 and nothing beyond it. A dog on the outermost
-/// ring reaches `radius + bulge + half a width` ≈ 83.1 from the origin, which
-/// leaves **12.9 units — half a dog's length — of clear ground** between the
-/// outermost paw and the rim. That margin is the point: the field has to read as
-/// standing *on* a plain, not balanced on its lip.
-///
-/// It came *in* from 82.0 when the dog was stretched: the rule is stated in
-/// dog-lengths, so a longer dog demands a wider verge at the same time as its
-/// bulge pushes it outward.
-pub const RING_MAX_RADIUS: f32 = 80.25;
-
-/// The radial pitch between neighbouring rings, in world units. See the module
-/// note for the arithmetic: it is the dog's **width** plus the worst-case rigid
-/// body bulge, plus air.
-///
-/// `26.0`, `7.75` and `80.25` are all exact binary fractions, so the ring count
-/// derived from them — `(max − min) / spacing + 1` — is exactly 8 rather than a
-/// rounding away from it.
-pub const RING_SPACING: f32 = 7.75;
-
-/// How many concentric rings the field holds: the innermost, the outermost, and
-/// every pitch in between. Asserted against the radii themselves in the tests
-/// below, so it cannot drift away from the three constants that produce it.
-pub const RING_COUNT: usize = 8;
-
-/// Every ring, innermost first. A dog's identity is `(ring index, slot)`.
-pub const RINGS: [Ring; RING_COUNT] = concentric_rings();
-
-/// Lay the rings out from [`RING_MIN_RADIUS`] outward at [`RING_SPACING`].
-const fn concentric_rings() -> [Ring; RING_COUNT] {
-    let mut rings = [Ring {
-        index: 0,
-        radius: 0.0,
-    }; RING_COUNT];
-    let mut index = 0;
-    while index < RING_COUNT {
-        rings[index] = Ring {
-            index,
-            radius: RING_MIN_RADIUS + index as f32 * RING_SPACING,
-        };
-        index += 1;
-    }
-    rings
-}
-
 /// The dog's nose-to-tail length in its own authored units, before the
-/// presentation scale. The authored figure is a ~1.25-unit muzzle reach in front
-/// of the origin and a ~1.16-unit tail behind it; `tests/creatures.rs` measures
-/// the real assembled bounds against this number, so it cannot drift away from
-/// the animal it is supposed to describe.
+/// presentation scale. `tests/creatures.rs` measures the real assembled bounds
+/// against this number, so it cannot drift away from the animal it describes.
 pub const DOG_BODY_LENGTH: f32 = 2.40;
 
 /// The dog's flank-to-flank width in its own authored units — measured, like the
-/// length, off the assembled bounds. This is the number [`RING_SPACING`] is
+/// length, off the assembled bounds. This is the number the ring pitch's floor is
 /// built on, because a dog laid along its ring separates two rings by its width
 /// and not by its length.
-///
-/// It is the elbow, not the flank, that sets it: a dachshund's foreleg wraps a
-/// chest barely taller than the leg, so the bend carries wide of the ribs.
 pub const DOG_BODY_WIDTH: f32 = 0.384;
 
-/// The scale the dogs are presented at. Read from the gait rather than typed
-/// again: the stride, the crouch and the leg reach are all sized against this
-/// number, and a spacing that disagreed with it would space the field by a dog
-/// that is not the dog being drawn.
-pub const DOG_SCALE: f32 = DOG_GAIT.scale;
+/// The clear air held between one ring's outermost paw and the next ring's
+/// innermost flank, in world units. Below this the chains read as touching even
+/// though the arithmetic still clears.
+pub const RING_AIR: f32 = 1.0;
 
-/// The dog's world-space length: 24 units.
-pub const DOG_LENGTH: f32 = DOG_BODY_LENGTH * DOG_SCALE;
+/// The most rings the field will lay out — the ceiling the ring-count dial
+/// declares, restated here because the layout is what has to honour it.
+pub const MAX_RINGS: usize = 10;
 
-/// The dog's world-space width: 3.84 units.
-pub const DOG_WIDTH: f32 = DOG_BODY_WIDTH * DOG_SCALE;
-
-/// The clear air between one dog's tail and the next dog's nose, in world units.
-/// Small enough that the chain reads as one packed queue, wide enough that a
-/// stride's worth of gait never closes it — a paw's fore-aft excursion is
-/// ±1.46 units about its own neutral, and every paw's neutral sits well inside
-/// the nose-to-tail envelope, so the gap is never eaten by a swinging leg.
+/// The most dogs the field will ever hold.
 ///
-/// It **stayed at 1.5** through the re-proportioning, and that is a measured
-/// answer rather than an untouched constant. A lower body could plausibly be
-/// packed tighter, so it was tried: at 1.2 the field still holds exactly 104
-/// dogs (every ring's rounding lands in the same place) with *worse* spacing
-/// uniformity, and at 1.0 the innermost ring rounds up to 7 dogs on 23.3 units
-/// of arc apiece — less than the 24-unit animal, i.e. overlapping. 1.5 is where
-/// the arithmetic is both fullest and honest.
-pub const DOG_GAP: f32 = 1.5;
+/// This is not a taste judgement, it is the **instance pool**. The live backend
+/// packs every batch into one buffer sized at bind and silently drops whatever
+/// will not fit, so the crowd is capped at a number the app has actually
+/// budgeted for: `MAX_DOGS × 23 bones + 1 terrain = 3727` instances, inside the
+/// 4096-slot buffer `src/live.rs` asks for. Every scene node is spawned up front
+/// and retired with `Visible(false)` rather than despawned, so moving a ring dial
+/// costs a visibility write per dog and never a scene rebuild.
+///
+/// It is a whole number of palettes (`9 × 18`), so the pool carries exactly as
+/// many of each coat as of every other — which is what makes "a dog wears the
+/// coat of its own crowd index" a rule the pool can always honour.
+pub const MAX_DOGS: usize = 9 * PALETTE_SIZE;
 
-/// The arc one dog occupies on its ring: its own length plus the gap behind it.
-pub const DOG_SPACING: f32 = DOG_LENGTH + DOG_GAP;
+/// The innermost ring's radius, in world units — the dial, floored.
+///
+/// **The floor is a floor, not a preference.** A dog is a rigid body whose paws
+/// are planted on the ring itself, and the mismatch between the two grows as the
+/// curve tightens: at a radius under one dog's length the body is longer than the
+/// arc it is standing on and the geometry stops being meaningful. The second term
+/// is the same statement from the crowd's side — a ring has to hold three dogs
+/// without them overlapping.
+pub fn inner_radius(config: &SceneConfig) -> f32 {
+    let by_body = config.dog_length();
+    let by_crowd = 3.0 * config.dog_spacing() / core::f32::consts::TAU;
+    config.raw(crate::config::Dial::InnerRadius).max(by_body.max(by_crowd))
+}
+
+/// The radial pitch between neighbouring rings, in world units — the dial,
+/// floored by the width of the animal plus its bulge on the tightest curve plus
+/// [`RING_AIR`]. See the module note.
+pub fn ring_spacing(config: &SceneConfig) -> f32 {
+    config
+        .raw(crate::config::Dial::RingSpacing)
+        .max(min_ring_spacing(config))
+}
+
+/// The tightest pitch two rings may sit at without their dogs intersecting.
+pub fn min_ring_spacing(config: &SceneConfig) -> f32 {
+    config.dog_width() + body_bulge(inner_radius(config), config.dog_length()) + RING_AIR
+}
+
+/// The radius of ring `index`.
+pub fn ring_radius(config: &SceneConfig, index: usize) -> f32 {
+    inner_radius(config) + index as f32 * ring_spacing(config)
+}
+
+/// How many concentric rings the field holds — the dial, capped by the ground
+/// there is to stand on and by the instance pool there is to draw with.
+pub fn ring_count(config: &SceneConfig) -> usize {
+    let asked = (config.raw(crate::config::Dial::RingCount) as usize).clamp(1, MAX_RINGS);
+    asked.min(rings_on_the_ground(config)).min(rings_in_the_pool(config)).max(1)
+}
+
+/// How many rings fit inside the terrain, leaving half a dog's length of clear
+/// ground between the outermost dog's furthest reach and the rim.
+///
+/// The terrain's top surface is a square of half-extent [`TERRAIN_HALF_EXTENT`]
+/// and the skirt hangs straight down from that border, so the usable ground is
+/// the inscribed disc — the field has to read as standing *on* a plain, not
+/// balanced on its lip.
+fn rings_on_the_ground(config: &SceneConfig) -> usize {
+    (1..=MAX_RINGS)
+        .take_while(|count| {
+            let outermost = Ring {
+                index: count - 1,
+                radius: ring_radius(config, count - 1),
+            };
+            outermost.band(config).1 + config.dog_length() * 0.5 <= TERRAIN_HALF_EXTENT
+        })
+        .count()
+        .max(1)
+}
+
+/// How many rings the instance pool can draw. Rings are counted outward and the
+/// first one that would push the crowd past [`MAX_DOGS`] ends the field, so what
+/// is drawn is always a whole number of complete rings.
+fn rings_in_the_pool(config: &SceneConfig) -> usize {
+    (1..=MAX_RINGS)
+        .scan(0usize, |total, count| {
+            *total += Ring {
+                index: count - 1,
+                radius: ring_radius(config, count - 1),
+            }
+            .count(config);
+            Some((count, *total))
+        })
+        .take_while(|(_, total)| *total <= MAX_DOGS)
+        .count()
+        .max(1)
+}
+
+/// Every ring, innermost first.
+pub fn rings(config: &SceneConfig) -> Vec<Ring> {
+    (0..ring_count(config))
+        .map(|index| Ring {
+            index,
+            radius: ring_radius(config, index),
+        })
+        .collect()
+}
 
 /// How many hue materials the whole field shares.
 ///
 /// This is the app's answer to the batching constraint in the module note: the
 /// live backend draws one batch per `(mesh, material)` pair, so the palette size
 /// — not the crowd size — sets the draw-call count, at no more than
-/// `23 bones × PALETTE_SIZE + 1 terrain = 415`, which the eight rings as laid out
-/// reach exactly (every coat is worn). Eighteen is
-/// chosen so each of the
+/// `23 bones × PALETTE_SIZE + 1 terrain = 415`. Eighteen is chosen so each of the
 /// two interleaved combs is nine hues (40° apart along a ring) and the combs are
-/// 20° apart from each other, which is comfortably past the point where two
-/// coats read as the same colour.
+/// 20° apart from each other, which is comfortably past the point where two coats
+/// read as the same colour.
 pub const PALETTE_SIZE: usize = 18;
-
-/// How many hues one ring's comb holds: half the palette, because neighbouring
-/// rings take alternate entries.
-pub const RING_COMB: usize = PALETTE_SIZE / 2;
 
 /// The linear-RGB coat colour of palette entry `index`.
 pub fn palette_color(index: usize) -> [f32; 3] {
@@ -355,9 +342,9 @@ pub fn palette() -> Vec<[f32; 3]> {
 /// of what makes one dog different from the next.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RingDog {
-    /// Which ring this dog walks: an index into [`RINGS`].
+    /// Which ring this dog walks: an index into [`rings`].
     pub ring: usize,
-    /// Its place in the chain, `0..ring.count()`.
+    /// Its place in the chain, `0..ring.count(config)`.
     pub slot: usize,
     /// Its coat: an index into the shared palette, `0..PALETTE_SIZE`.
     pub palette: usize,
@@ -373,137 +360,183 @@ impl RingDog {
 /// Every dog in the field, in spawn order: the innermost ring's chain first,
 /// then each ring outward.
 ///
-/// A pure function of the authored constants above — no clock, no randomness, no
-/// environment — so the crowd is byte-identical in every process.
-pub fn ring_dogs() -> Vec<RingDog> {
-    RINGS
-        .iter()
+/// A pure function of the configuration — no clock, no randomness, no
+/// environment — so the crowd is byte-identical in every process at a given
+/// setting. The final `take` is belt-and-braces on the pool bound the ring count
+/// already honours.
+pub fn ring_dogs(config: &SceneConfig) -> Vec<RingDog> {
+    rings(config)
+        .into_iter()
         .flat_map(|ring| {
-            (0..ring.count()).map(move |slot| RingDog {
-                ring: ring.index,
-                slot,
-                palette: ring.palette_at(slot),
-            })
+            (0..ring.count(config)).map(move |slot| (ring.index, slot))
+        })
+        .take(MAX_DOGS)
+        .enumerate()
+        .map(|(index, (ring, slot))| RingDog {
+            ring,
+            slot,
+            palette: index % PALETTE_SIZE,
         })
         .collect()
 }
 
 /// How many dogs the whole field holds.
-pub fn dog_total() -> usize {
-    RINGS.iter().map(|ring| ring.count()).sum()
+pub fn dog_total(config: &SceneConfig) -> usize {
+    ring_dogs(config).len()
 }
 
 /// The clear ground between the outermost dog's furthest reach and the terrain's
-/// rim, in world units. Positive by construction — [`RING_MAX_RADIUS`] is chosen
-/// against this number, and the test below holds it to half a dog's length.
-pub fn outer_clearance() -> f32 {
-    TERRAIN_HALF_EXTENT - RINGS[RING_COUNT - 1].band().1
+/// rim, in world units. Positive by construction — see [`rings_on_the_ground`].
+pub fn outer_clearance(config: &SceneConfig) -> f32 {
+    let outer = rings(config);
+    let last = outer.last().copied().unwrap_or(Ring {
+        index: 0,
+        radius: inner_radius(config),
+    });
+    TERRAIN_HALF_EXTENT - last.band(config).1
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Dial;
 
     #[test]
-    fn the_field_is_laid_out_from_three_measured_numbers() {
-        // The dachshund, stated: 24 units long, 3.84 wide, needing 25.5 of ring.
-        assert_eq!(DOG_LENGTH, 24.0);
-        assert!((DOG_WIDTH - 3.84).abs() < 1.0e-4, "{DOG_WIDTH}");
-        assert_eq!(DOG_SPACING, 25.5);
-
-        // The ring count is the pitch stepped from the floor to the ceiling.
-        let derived = ((RING_MAX_RADIUS - RING_MIN_RADIUS) / RING_SPACING) as usize + 1;
-        assert_eq!(RING_COUNT, derived);
-        assert_eq!(RINGS[0].radius, RING_MIN_RADIUS);
-        assert_eq!(RINGS[RING_COUNT - 1].radius, RING_MAX_RADIUS);
-        RINGS.iter().enumerate().for_each(|(index, ring)| {
-            assert_eq!(ring.index, index);
-            assert_eq!(ring.radius, RING_MIN_RADIUS + index as f32 * RING_SPACING);
-        });
-    }
-
-    #[test]
-    fn no_two_rings_intersect_and_the_outermost_stays_on_the_ground() {
-        RINGS.windows(2).for_each(|pair| {
-            let (_, outer_edge) = pair[0].band();
-            let (inner_edge, _) = pair[1].band();
-            let air = inner_edge - outer_edge;
-            assert!(
-                air > 1.0,
-                "rings {} and {} clear each other by only {air}",
-                pair[0].index,
-                pair[1].index
-            );
-        });
-        // ...and the widest ring's dogs stay well inside the terrain's rim.
-        let clear = outer_clearance();
-        assert!(
-            clear > DOG_LENGTH * 0.5,
-            "the outer ring leaves only {clear} units of ground before the rim"
-        );
-    }
-
-    #[test]
-    fn each_ring_is_populated_from_its_own_circumference() {
+    fn the_authored_field_is_the_field_this_app_has_always_shown() {
+        let config = SceneConfig::defaults();
+        assert_eq!(config.dog_length(), 24.0);
+        assert!((config.dog_width() - 3.84).abs() < 1.0e-4);
+        assert_eq!(config.dog_spacing(), 25.5);
+        assert_eq!(ring_count(&config), 8);
+        assert_eq!(inner_radius(&config), 26.0);
+        assert_eq!(ring_spacing(&config), 7.75);
         assert_eq!(
-            RINGS.map(|ring| ring.count()),
-            [6, 8, 10, 12, 14, 16, 18, 20]
+            rings(&config)
+                .iter()
+                .map(|ring| ring.count(&config))
+                .collect::<Vec<usize>>(),
+            vec![6, 8, 10, 12, 14, 16, 18, 20]
         );
-        assert_eq!(dog_total(), 104);
-        RINGS.iter().for_each(|ring| {
-            let spacing = ring.circumference() / ring.count() as f32;
-            assert!(
-                (spacing - DOG_SPACING).abs() < 0.1 * DOG_SPACING,
-                "ring {} spaces its dogs {spacing} apart",
-                ring.index
-            );
-            assert!(spacing > DOG_LENGTH, "ring {} dogs overlap", ring.index);
-        });
+        assert_eq!(dog_total(&config), 104);
     }
 
     #[test]
-    fn every_ring_turns_the_same_way() {
-        RINGS.windows(2).for_each(|pair| {
-            assert_eq!(pair[0].winding(), pair[1].winding());
-        });
-        assert!(RINGS
-            .iter()
-            .all(|ring| ring.winding() == Winding::CounterClockwise));
+    fn no_two_rings_intersect_at_any_setting_of_the_ring_dials() {
+        // Both ends of every ring dial, and the dog-size dial that scales them
+        // all, in every combination — the pitch floor has to hold across the lot.
+        for size in [6.0, 10.0, 16.0] {
+            for inner in [18.0, 26.0, 60.0] {
+                for pitch in [3.0, 7.75, 20.0] {
+                    for gap in [0.5, 1.5, 20.0] {
+                        let config = SceneConfig::defaults()
+                            .with(Dial::DogSize, size)
+                            .with(Dial::InnerRadius, inner)
+                            .with(Dial::RingSpacing, pitch)
+                            .with(Dial::RingCount, MAX_RINGS as f32)
+                            .with(Dial::DogGap, gap);
+                        let laid = rings(&config);
+                        assert!(!laid.is_empty());
+                        laid.windows(2).for_each(|pair| {
+                            let air = pair[1].band(&config).0 - pair[0].band(&config).1;
+                            assert!(
+                                air > 0.0,
+                                "size {size} inner {inner} pitch {pitch} gap {gap}: \
+                                 rings {} and {} overlap by {air}",
+                                pair[0].index,
+                                pair[1].index
+                            );
+                        });
+                        // ...and the outermost stays on the ground.
+                        assert!(
+                            outer_clearance(&config) >= 0.0,
+                            "size {size} inner {inner} pitch {pitch}: the field leaves the terrain"
+                        );
+                        // ...and the crowd never outgrows the pool.
+                        assert!(dog_total(&config) <= MAX_DOGS);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
-    fn the_cross_sign_still_opposes_the_turn_sign() {
-        // The relationship between the authored winding and the observable
-        // (position x heading) sign is what the posed-bone direction test in
-        // tests/rings.rs leans on. It is a property of Winding itself, not of
-        // how the rings happen to be assigned, so it must keep holding now that
-        // every ring shares one winding.
+    fn no_ring_ever_packs_its_dogs_closer_than_the_dog_is_long() {
+        for size in [6.0, 10.0, 16.0] {
+            for gap in [0.5, 1.5, 20.0] {
+                for inner in [18.0, 26.0, 60.0] {
+                    let config = SceneConfig::defaults()
+                        .with(Dial::DogSize, size)
+                        .with(Dial::DogGap, gap)
+                        .with(Dial::InnerRadius, inner)
+                        .with(Dial::RingCount, MAX_RINGS as f32);
+                    for ring in rings(&config) {
+                        let count = ring.count(&config);
+                        let arc = ring.circumference() / count as f32;
+                        assert!(
+                            arc >= config.dog_length(),
+                            "size {size} gap {gap} inner {inner}: ring {} gives each of its \
+                             {count} dogs {arc} units of arc for a {}-unit body",
+                            ring.index,
+                            config.dog_length()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_palette_is_bounded_balanced_and_no_neighbour_shares_a_coat() {
+        for rings_asked in 1..=MAX_RINGS {
+            for gap in [0.5, 1.5, 12.0] {
+                let config = SceneConfig::defaults()
+                    .with(Dial::RingCount, rings_asked as f32)
+                    .with(Dial::DogGap, gap);
+                let dogs = ring_dogs(&config);
+                assert!(dogs.iter().all(|dog| dog.palette < PALETTE_SIZE));
+                // Balanced: every coat is worn within one dog of every other,
+                // which is exactly what the fixed-coat instance pool carries.
+                let worn: Vec<usize> = (0..PALETTE_SIZE)
+                    .map(|coat| dogs.iter().filter(|dog| dog.palette == coat).count())
+                    .collect();
+                let most = worn.iter().copied().max().unwrap_or(0);
+                let least = worn.iter().copied().min().unwrap_or(0);
+                assert!(most - least <= 1, "{worn:?} is not a balanced palette");
+                // No two dogs adjacent along a ring share a coat, including the
+                // pair that closes the chain.
+                rings(&config).iter().for_each(|ring| {
+                    let chain: Vec<usize> = dogs
+                        .iter()
+                        .filter(|dog| dog.ring == ring.index)
+                        .map(|dog| dog.palette)
+                        .collect();
+                    // A ring reduced to a single dog has no neighbouring pair.
+                    (0..chain.len() * usize::from(chain.len() > 1)).for_each(|slot| {
+                        assert_ne!(
+                            chain[slot],
+                            chain[(slot + 1) % chain.len()],
+                            "ring {} repeats a coat at slot {slot}",
+                            ring.index
+                        );
+                    });
+                });
+                assert_eq!(dogs, ring_dogs(&config));
+            }
+        }
+    }
+
+    #[test]
+    fn the_direction_dial_is_the_only_thing_that_picks_a_winding() {
+        let config = SceneConfig::defaults();
+        assert_eq!(config.winding(), Winding::CounterClockwise);
+        assert_eq!(
+            config.with(Dial::Direction, -1.0).winding(),
+            Winding::Clockwise
+        );
         assert_eq!(
             Winding::CounterClockwise.cross_sign(),
             -Winding::CounterClockwise.sign()
         );
         assert_eq!(Winding::Clockwise.cross_sign(), -Winding::Clockwise.sign());
-    }
-
-    #[test]
-    fn the_palette_is_bounded_and_no_neighbour_shares_a_coat() {
-        let dogs = ring_dogs();
-        assert_eq!(dogs.len(), dog_total());
-        assert!(dogs.iter().all(|dog| dog.palette < PALETTE_SIZE));
-        // Adjacent rings draw from disjoint combs — a dog and *any* dog on a
-        // neighbouring ring differ, whatever the two chains' alignment.
-        RINGS.iter().for_each(|ring| {
-            let chain: Vec<usize> = (0..ring.count()).map(|s| ring.palette_at(s)).collect();
-            assert!(chain.iter().all(|entry| entry % 2 == ring.index % 2));
-            (0..chain.len()).for_each(|slot| {
-                assert_ne!(
-                    chain[slot],
-                    chain[(slot + 1) % chain.len()],
-                    "ring {} repeats a coat at slot {slot}",
-                    ring.index
-                );
-            });
-        });
-        assert_eq!(dogs, ring_dogs());
     }
 }

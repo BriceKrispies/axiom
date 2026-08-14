@@ -2,7 +2,7 @@
 //! kinematics, all held natively and without a browser.
 //!
 //! Every claim the animation makes is checkable off-GPU, because the pose is a
-//! pure function of the tick. These are the claims:
+//! pure function of `(tick, config)`. These are the claims:
 //!
 //! 1. **The solver is exact and total** — it reaches a reachable target with the
 //!    bones at their authored lengths, clamps an unreachable one without ever
@@ -12,7 +12,11 @@
 //!    lands every bone at a finite world transform.
 //! 3. **The paws do not skate** — a planted paw's world position is *constant*
 //!    for the whole of its stance while the body travels over it.
-//! 4. **No leg over-reaches** — on any ring, over more than a full lap.
+//! 4. **No leg over-reaches** — on any ring, over more than a full lap, **at
+//!    every extreme of every dial that touches the leg**. This is the test the
+//!    stride ceiling in `src/config.rs` exists to pass: a dial combination that
+//!    asks a leg for more than it has fails here, with the limb and the number,
+//!    instead of shipping a sliding dog.
 //! 5. **Every ring is closed, uniform, clear of its neighbours and inside the
 //!    terrain.**
 //!
@@ -20,13 +24,25 @@
 //! `tests/rings.rs`.
 
 use axiom_math::{Transform, Vec3};
-use axiom_procedural_mesh_crucible::{
-    dog_limbs, dog_parts, dog_travel, solve_two_bone, stride_phase, CrucibleAnimation,
-    CrucibleVariant, LoopPath, DOG_GAIT, DOG_WIDTH, RINGS, TERRAIN_HALF_EXTENT, TRAVEL_PER_TICK,
+use axiom_dog::{
+    dog_limbs, dog_parts, dog_travel, rings, solve_two_bone, stride_phase, Animation, Dial,
+    LoopPath, SceneConfig, SceneVariant, TERRAIN_HALF_EXTENT,
 };
 
-fn animation() -> CrucibleAnimation {
-    CrucibleAnimation::new(dog_parts(CrucibleVariant::Base).expect("the dog rigs"))
+/// The fraction of its own bone length a limb may be extended to, measured hip to
+/// paw over the whole three-bone chain.
+///
+/// It is not `1.0` because the metric does not saturate there: the paw block sits
+/// off the metatarsus's far end by the limb's own ankle offset, so a *fully
+/// extended* hind leg reads about `1.065`. The authored dog — the scene this app
+/// has always shipped — peaks at `0.970` over a lap of real terrain, and this bar
+/// is the smallest round number above it. Every dial position must meet the same
+/// bar the authored dog does; anything looser would let the panel ship a scene
+/// whose paws slide.
+const REACH_BAR: f32 = 0.98;
+
+fn animation(config: &SceneConfig) -> Animation {
+    Animation::new(dog_parts(config.variant()).expect("the dog rigs"), config)
         .expect("the rings build")
 }
 
@@ -74,21 +90,13 @@ fn the_solver_reaches_clamps_and_bends_where_it_is_told() {
     let straight_down = Vec3::new(0.0, 1.2, 0.0);
     let knee = solve_two_bone(root, straight_down, Vec3::new(0.0, 0.0, -1.0), upper, lower);
     let elbow = solve_two_bone(root, straight_down, Vec3::new(0.0, 0.0, 1.0), upper, lower);
-    assert!(
-        knee.joint.z < -0.4,
-        "the knee did not lead forward: {:?}",
-        knee.joint
-    );
-    assert!(
-        elbow.joint.z > 0.4,
-        "the elbow did not lead back: {:?}",
-        elbow.joint
-    );
+    assert!(knee.joint.z < -0.4, "the knee did not lead forward: {:?}", knee.joint);
+    assert!(elbow.joint.z > 0.4, "the elbow did not lead back: {:?}", elbow.joint);
 }
 
 #[test]
 fn the_rig_resolves_in_one_forward_pass() {
-    for variant in CrucibleVariant::ALL {
+    for variant in SceneVariant::ALL {
         let rig = dog_parts(variant).expect("the dog rigs");
         // Parents precede children — the invariant the single pass rests on.
         for (index, part) in rig.parts().iter().enumerate() {
@@ -117,7 +125,8 @@ fn the_rig_resolves_in_one_forward_pass() {
 
 #[test]
 fn every_bone_of_every_dog_stays_finite_for_a_long_run() {
-    let animation = animation();
+    let config = SceneConfig::defaults();
+    let animation = animation(&config);
     for tick in (0u64..3_000).step_by(53) {
         assert!(
             animation.transforms(tick).iter().all(finite),
@@ -128,31 +137,32 @@ fn every_bone_of_every_dog_stays_finite_for_a_long_run() {
 
 #[test]
 fn a_planted_paw_does_not_skate_while_the_body_travels_over_it() {
-    let animation = animation();
-    let rig = dog_parts(CrucibleVariant::Base).expect("the dog rigs");
-    // The lead dog's front-left leg: phase offset 0, contact 0.310 behind the
-    // origin. It is dog 0, so its bones are the first block of transforms.
+    let config = SceneConfig::defaults();
+    let animation = animation(&config);
+    let rig = dog_parts(SceneVariant::Base).expect("the dog rigs");
+    // The lead dog's front-left leg: phase offset 0. It is dog 0, so its bones
+    // are the first block of transforms.
     let limb = dog_limbs()[0];
+    let gait = animation.gait();
     let paw = rig.index_of(limb.tip).expect("the dog has a front-left paw");
-    let fore = -limb.contact.z * DOG_GAIT.scale;
+    let fore = -limb.contact.z * gait.scale;
 
     // Walk several strides and collect, per stance, how far the paw moved.
     //
     // The window is derived from the gait rather than hardcoded: one cycle takes
-    // `stride / TRAVEL_PER_TICK` ticks, so six cycles is six stances whatever the
-    // walking speed is retuned to. A fixed tick count silently stops covering the
-    // gait the moment the speed changes — which is exactly what it did when the
-    // walk was slowed from 0.62 to 0.21 units a tick.
-    let cycle_ticks = (DOG_GAIT.stride / TRAVEL_PER_TICK).ceil() as u64;
+    // `stride / speed` ticks, so six cycles is six stances whatever the walk
+    // speed is set to. A fixed tick count silently stops covering the gait the
+    // moment the speed dial moves.
+    let cycle_ticks = (gait.stride / animation.speed()).ceil() as u64;
     let window = cycle_ticks * 6;
     let mut stances: Vec<(f32, usize)> = Vec::new();
     let mut current: Option<(f32, Vec3, f32, usize)> = None;
     for tick in 0u64..window {
         let phase = stride_phase(
-            dog_travel(tick) + fore,
-            DOG_GAIT.stride,
+            dog_travel(tick, animation.speed()) + fore,
+            gait.stride,
             limb.offset,
-            DOG_GAIT.duty,
+            gait.duty,
         );
         let here = animation.transforms(tick)[paw].translation;
         current = match (phase.planted, current) {
@@ -193,68 +203,115 @@ fn a_planted_paw_does_not_skate_while_the_body_travels_over_it() {
         );
     }
     // Meanwhile the body genuinely moved: this is not a frozen scene.
-    let travelled = dog_travel(90) - dog_travel(0);
-    assert!(travelled > 2.0 * DOG_GAIT.stride, "the dog barely moved");
+    let travelled = dog_travel(90, animation.speed()) - dog_travel(0, animation.speed());
+    assert!(travelled > 2.0 * gait.stride, "the dog barely moved");
 }
 
-/// The tuning check that keeps the gait honest.
+/// The tuning check that keeps the gait honest, run over the whole dial space.
 ///
 /// The two-bone solver *cannot* stretch a bone: handed a target beyond reach it
 /// clamps, and the paw then comes off its plant. So "no leg is ever asked to
-/// reach further than it is long" is exactly equivalent to "no paw ever skates",
-/// and it is far easier to measure — one distance per limb per tick, across
-/// every dog on both rings, over more than a full lap of real terrain.
+/// reach further than it is long" is exactly equivalent to "no paw ever skates".
 ///
-/// A tuning edit that lengthens a stride, shallows a crouch or widens the
-/// terrain relief cap past what the legs can absorb fails HERE, with the
-/// offending limb and the number, instead of shipping a sliding dog.
+/// What is measured is the span the **solver** is responsible for: hip to the
+/// pivot the two-bone chain actually solves down to — the ankle on a front leg,
+/// the hock on the dog's three-bone hind one, which is the `extra` bone's own
+/// origin — against `(len_upper + len_lower)`. Measuring hip-to-*paw* against all
+/// three bones instead, as this suite used to, is a far weaker statement: a hind
+/// leg carrying a metatarsus reads at 97% of that sum whenever it is simply
+/// standing straight, so the number is saturated at rest and proves nothing about
+/// whether the solve clamped.
+///
+/// It is measured at **both extremes** of every dial that moves the leg or what
+/// the leg has to do: the leg length itself, the dog's size, the stride, the
+/// crouch, and the innermost radius (whose curve correction the shoulder pays
+/// for). The stride ceiling derived in `src/config.rs` is what makes those pass;
+/// a ceiling that is too generous fails here.
 #[test]
-fn no_limb_is_ever_asked_to_reach_further_than_it_is_long() {
-    let rig = dog_parts(CrucibleVariant::Base).expect("the dog rigs");
-    let animation = CrucibleAnimation::new(rig.clone()).expect("the rings build");
-    let bones = animation.bone_count();
-    // 900 ticks is 558 units of travel — more than a lap of the outermost ring
-    // and more than three of the innermost, so every dog crosses every part of
-    // the terrain its own ring runs over.
-    let samples: Vec<Vec<Transform>> = (0u64..900)
-        .step_by(3)
-        .map(|tick| animation.transforms(tick))
-        .collect();
+fn no_limb_is_ever_asked_to_reach_further_than_it_is_long_at_any_dial_setting() {
+    let corners: Vec<(&str, SceneConfig)> = vec![
+        ("defaults", SceneConfig::defaults()),
+        ("short legs", SceneConfig::defaults().with(Dial::LegLength, 0.70)),
+        ("long legs", SceneConfig::defaults().with(Dial::LegLength, 1.80)),
+        ("tiny dog", SceneConfig::defaults().with(Dial::DogSize, 6.0)),
+        ("huge dog", SceneConfig::defaults().with(Dial::DogSize, 16.0)),
+        ("max stride", SceneConfig::defaults().with(Dial::Stride, 9.0)),
+        ("min stride", SceneConfig::defaults().with(Dial::Stride, 1.5)),
+        ("no crouch", SceneConfig::defaults().with(Dial::Crouch, 0.0)),
+        ("deep crouch", SceneConfig::defaults().with(Dial::Crouch, 2.5)),
+        ("tight rings", SceneConfig::defaults().with(Dial::InnerRadius, 18.0)),
+        ("max lift", SceneConfig::defaults().with(Dial::Lift, 1.5)),
+        ("min duty", SceneConfig::defaults().with(Dial::Duty, 0.30)),
+        ("max duty", SceneConfig::defaults().with(Dial::Duty, 0.90)),
+        (
+            "worst case",
+            SceneConfig::defaults()
+                .with(Dial::LegLength, 0.70)
+                .with(Dial::DogSize, 6.0)
+                .with(Dial::Stride, 9.0)
+                .with(Dial::Crouch, 0.0)
+                .with(Dial::Lift, 1.5)
+                .with(Dial::InnerRadius, 18.0)
+                .with(Dial::RingCount, 10.0),
+        ),
+        (
+            "long-legged giant",
+            SceneConfig::defaults()
+                .with(Dial::LegLength, 1.80)
+                .with(Dial::DogSize, 16.0)
+                .with(Dial::Stride, 9.0)
+                .with(Dial::Crouch, 2.5)
+                .with(Dial::InnerRadius, 60.0),
+        ),
+    ];
 
-    for limb in dog_limbs().iter() {
-        let hip = rig.index_of(limb.upper).expect("the limb's upper bone");
-        let tip = rig.index_of(limb.tip).expect("the limb's terminating block");
-        let reach = (limb.len_upper + limb.len_lower + limb.len_extra) * DOG_GAIT.scale;
-        let worst = animation
-            .dogs()
-            .iter()
-            .enumerate()
-            .flat_map(|(dog, _)| {
-                samples.iter().map(move |all| {
-                    all[dog * bones + hip]
-                        .translation
-                        .distance(all[dog * bones + tip].translation)
+    for (label, config) in corners {
+        let rig = dog_parts(SceneVariant::Base).expect("the dog rigs");
+        let animation = Animation::new(rig.clone(), &config).expect("the rings build");
+        let bones = animation.bone_count();
+        let span = config.dog_scale() * config.leg_scale();
+        // 900 ticks at the default speed is 558 units of travel — more than a lap
+        // of the outermost ring. Sampled every third tick.
+        let samples: Vec<Vec<Transform>> = (0u64..900)
+            .step_by(3)
+            .map(|tick| animation.transforms(tick))
+            .collect();
+
+        for limb in dog_limbs().iter() {
+            let hip = rig.index_of(limb.upper).expect("the limb's upper bone");
+            // The pivot the two-bone solve targets: the hock on a three-bone
+            // hind leg, the terminating block on a two-bone front one.
+            let solved = rig.index_of(limb.tip).expect("the limb's terminating block");
+            let reach = (limb.len_upper + limb.len_lower + limb.len_extra) * span;
+            let worst = (0..animation.dog_count())
+                .flat_map(|dog| {
+                    samples.iter().map(move |all| {
+                        all[dog * bones + hip]
+                            .translation
+                            .distance(all[dog * bones + solved].translation)
+                    })
                 })
-            })
-            .fold(0.0f32, f32::max);
-        println!(
-            "[reach] {:<22} reach {reach:6.3}  worst {worst:6.3}  ({:.0}%)",
-            limb.upper,
-            100.0 * worst / reach
-        );
-        assert!(
-            worst < reach * 0.97,
-            "the dog's {} is stretched to {worst} of its {reach} reach — the gait is \
-             over-striding and the paw will come off its plant",
-            limb.upper
-        );
+                .fold(0.0f32, f32::max);
+            println!(
+                "[reach] {label:<18} {:<22} reach {reach:6.3}  worst {worst:6.3}  ({:.0}%)",
+                limb.upper,
+                100.0 * worst / reach
+            );
+            assert!(
+                worst < reach * REACH_BAR,
+                "at {label} the dog's {} is stretched to {worst} of its {reach} reach — the \
+                 gait is over-striding and the paw will come off its plant",
+                limb.upper
+            );
+        }
     }
 }
 
 #[test]
 fn every_ring_is_closed_uniform_and_inside_the_terrain() {
-    for ring in RINGS {
-        let path = LoopPath::ring(ring).expect("the ring builds");
+    let config = SceneConfig::defaults();
+    for ring in rings(&config) {
+        let path = LoopPath::ring(ring, config.winding()).expect("the ring builds");
         let total = path.total();
         // A circle of this radius, so the sampled length is within a percent.
         let circumference = ring.circumference();
@@ -267,7 +324,7 @@ fn every_ring_is_closed_uniform_and_inside_the_terrain() {
             "[ring] {} radius {}, length {total:.1}, lap {:.1} s",
             ring.index,
             ring.radius,
-            total / (TRAVEL_PER_TICK * 60.0)
+            total / (config.travel_per_tick() * 60.0)
         );
 
         // Closed: one full lap returns to the start, in position and in heading.
@@ -321,10 +378,10 @@ fn every_ring_is_closed_uniform_and_inside_the_terrain() {
 
     // Every adjacent pair clears the next by more than a dog is wide, so no
     // chain ever walks through the one outside it.
-    RINGS.windows(2).for_each(|pair| {
+    rings(&config).windows(2).for_each(|pair| {
         let gap = pair[1].radius - pair[0].radius;
         assert!(
-            gap > DOG_WIDTH + pair[0].bulge(),
+            gap > config.dog_width() + pair[0].bulge(&config),
             "rings {} and {} are only {gap} apart",
             pair[0].index,
             pair[1].index

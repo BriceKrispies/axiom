@@ -1,7 +1,7 @@
 //! The scene: every **distinct** generated mesh, and the crowd that instances
 //! them.
 //!
-//! This is the one place that knows the crucible is a *place* rather than a list
+//! This is the one place that knows the app is a *place* rather than a list
 //! of meshes. There are exactly two things in it: the terrain, and one dog. The
 //! concentric rings of walking dogs are not more geometry — they are the same 23 bone
 //! meshes drawn again at other transforms, and the whole of what makes one dog
@@ -21,22 +21,28 @@
 use axiom_math::Transform;
 use axiom_mesh::MeshResult;
 
+use crate::config::SceneConfig;
 use crate::creature_rig::CreatureRig;
-use crate::object::CrucibleObject;
+use crate::object::SceneObject;
 use crate::rings::{ring_dogs, RingDog};
 use crate::terrain::terrain_mesh;
-use crate::variant::CrucibleVariant;
+use crate::variant::SceneVariant;
 
-/// The whole crucible's distinct geometry, built at `variant`.
+/// The whole scene's distinct geometry, built at `variant`.
 ///
 /// Every object in the returned vector was produced by an `axiom-mesh-ops`
 /// operator and validated by `axiom-mesh` on the way out of it; nothing here
 /// hand-writes a vertex.
-pub fn crucible_meshes(variant: CrucibleVariant) -> MeshResult<Vec<CrucibleObject>> {
-    crucible_scene(variant).map(|scene| scene.objects)
+///
+/// The distinct geometry is a pure function of the **variant alone**: no live
+/// dial moves a vertex, because the live backend uploads geometry once at bind
+/// (see `NOTES.md`). That is why the mesh set is reachable without a
+/// configuration at all.
+pub fn scene_meshes(variant: SceneVariant) -> MeshResult<Vec<SceneObject>> {
+    build_scene(variant, &SceneConfig::defaults()).map(|scene| scene.objects)
 }
 
-/// The whole crucible: the distinct meshes to register, the rig those meshes are
+/// The whole scene: the distinct meshes to register, the rig those meshes are
 /// the bones of, and every dog walking the field.
 ///
 /// The rig is handed back rather than rebuilt because the animation needs the
@@ -45,10 +51,10 @@ pub fn crucible_meshes(variant: CrucibleVariant) -> MeshResult<Vec<CrucibleObjec
 /// and re-deriving them is exactly the kind of quiet drift this app exists to
 /// prevent.
 #[derive(Debug, Clone)]
-pub struct CrucibleScene {
+pub struct Scene {
     /// Every distinct generated mesh, in registration order: the terrain, then
     /// the dog's bones in rig order.
-    pub objects: Vec<CrucibleObject>,
+    pub objects: Vec<SceneObject>,
     /// The index in `objects` of the dog's first bone. Its bones run
     /// contiguously from there, in rig order, to the end of the vector.
     pub dog_first: usize,
@@ -58,16 +64,17 @@ pub struct CrucibleScene {
     pub dogs: Vec<RingDog>,
 }
 
-impl CrucibleScene {
+impl Scene {
     /// The dog's bones, as registered geometry.
-    pub fn bones(&self) -> &[CrucibleObject] {
+    pub fn bones(&self) -> &[SceneObject] {
         &self.objects[self.dog_first..]
     }
 }
 
-/// Build the whole crucible.
-pub fn crucible_scene(variant: CrucibleVariant) -> MeshResult<CrucibleScene> {
-    let mut objects: Vec<CrucibleObject> = vec![CrucibleObject::new(
+/// Build the whole scene: the distinct geometry at `variant`, and the crowd
+/// `config` lays out over it.
+pub fn build_scene(variant: SceneVariant, config: &SceneConfig) -> MeshResult<Scene> {
+    let mut objects: Vec<SceneObject> = vec![SceneObject::new(
         "terrain",
         "mesh_ops::heightfield_mesh (analytic sine sum + skirt)",
         terrain_mesh(variant.params())?,
@@ -77,11 +84,11 @@ pub fn crucible_scene(variant: CrucibleVariant) -> MeshResult<CrucibleScene> {
     let dog_first = objects.len();
     let dog = crate::creature_dog::dog_parts(variant)?;
     push_rig(&dog, &mut objects);
-    Ok(CrucibleScene {
+    Ok(Scene {
         objects,
         dog_first,
         dog,
-        dogs: ring_dogs(),
+        dogs: ring_dogs(config),
     })
 }
 
@@ -111,12 +118,12 @@ const DOG_REFERENCE_COAT: [f32; 3] = [0.66, 0.44, 0.22];
 /// *geometry*, and the rings place their instances themselves, every frame, from
 /// the tick. A headless build that never animates therefore shows one whole,
 /// coherent dog rather than 23 bones at the origin.
-fn push_rig(rig: &CreatureRig, objects: &mut Vec<CrucibleObject>) {
+fn push_rig(rig: &CreatureRig, objects: &mut Vec<SceneObject>) {
     rig.parts()
         .iter()
         .zip(rig.rest_world(Transform::IDENTITY))
         .for_each(|(part, placement)| {
-            objects.push(CrucibleObject::new(
+            objects.push(SceneObject::new(
                 part.name,
                 DOG_OPERATORS,
                 part.mesh.clone(),

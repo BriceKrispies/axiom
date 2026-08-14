@@ -1,4 +1,4 @@
-//! The crucible's geometry proof suite.
+//! The scene's geometry proof suite.
 //!
 //! This app *is* the proof that the mesh layers work, so its integration tests
 //! are not smoke tests. They assert four properties, on every **distinct**
@@ -20,7 +20,7 @@
 //! it no matter how many dogs are on screen.
 
 use axiom_mesh::{aabb, bounding_sphere, digest, Mesh};
-use axiom_procedural_mesh_crucible::{crucible_meshes, CrucibleObject, CrucibleVariant};
+use axiom_dog::{scene_meshes, SceneObject, SceneVariant};
 
 /// The objects the topology proof names explicitly. Each must change vertex and
 /// index count between `Base`, `Dense` and `Coarse` — one of every operator the
@@ -35,12 +35,12 @@ const TOPOLOGY_WITNESSES: [&str; 6] = [
     "dog-tail-base",
 ];
 
-fn scene(variant: CrucibleVariant) -> Vec<CrucibleObject> {
-    crucible_meshes(variant)
+fn scene(variant: SceneVariant) -> Vec<SceneObject> {
+    scene_meshes(variant)
         .unwrap_or_else(|error| panic!("the {} scene must build: {error:?}", variant.label()))
 }
 
-fn find<'a>(objects: &'a [CrucibleObject], name: &str) -> &'a CrucibleObject {
+fn find<'a>(objects: &'a [SceneObject], name: &str) -> &'a SceneObject {
     objects
         .iter()
         .find(|object| object.name == name)
@@ -53,7 +53,7 @@ fn counts(mesh: &Mesh) -> (usize, usize) {
 
 #[test]
 fn every_generated_object_is_valid_renderable_geometry() {
-    for variant in CrucibleVariant::ALL {
+    for variant in SceneVariant::ALL {
         let objects = scene(variant);
         // The terrain plus one dog's 23 bones. Not one per dog: the rings are
         // instances of this set, and `tests/rings.rs` holds that claim.
@@ -144,7 +144,7 @@ fn every_generated_object_is_valid_renderable_geometry() {
 
 #[test]
 fn building_the_same_variant_twice_is_byte_identical() {
-    for variant in CrucibleVariant::ALL {
+    for variant in SceneVariant::ALL {
         let first = scene(variant);
         let second = scene(variant);
         assert_eq!(
@@ -200,9 +200,9 @@ fn building_the_same_variant_twice_is_byte_identical() {
 
 #[test]
 fn the_variants_really_re_tessellate() {
-    let base = scene(CrucibleVariant::Base);
-    let dense = scene(CrucibleVariant::Dense);
-    let coarse = scene(CrucibleVariant::Coarse);
+    let base = scene(SceneVariant::Base);
+    let dense = scene(SceneVariant::Dense);
+    let coarse = scene(SceneVariant::Coarse);
 
     println!(
         "\n{:<24} {:>20} {:>20} {:>20}",
@@ -237,18 +237,18 @@ fn the_variants_really_re_tessellate() {
     }
 
     let total =
-        |objects: &[CrucibleObject]| -> usize { objects.iter().map(|o| o.mesh.triangle_count()).sum() };
+        |objects: &[SceneObject]| -> usize { objects.iter().map(|o| o.mesh.triangle_count()).sum() };
     assert!(total(&dense) > total(&base));
     assert!(total(&base) > total(&coarse));
 }
 
 #[test]
 fn a_parameter_change_moves_the_digest_and_restoring_it_moves_it_back() {
-    let original: Vec<u64> = scene(CrucibleVariant::Base)
+    let original: Vec<u64> = scene(SceneVariant::Base)
         .iter()
         .map(|o| digest(&o.mesh).raw())
         .collect();
-    let changed: Vec<u64> = scene(CrucibleVariant::Dense)
+    let changed: Vec<u64> = scene(SceneVariant::Dense)
         .iter()
         .map(|o| digest(&o.mesh).raw())
         .collect();
@@ -258,7 +258,7 @@ fn a_parameter_change_moves_the_digest_and_restoring_it_moves_it_back() {
         "changing the detail parameters left every digest unmoved"
     );
 
-    let restored: Vec<u64> = scene(CrucibleVariant::Base)
+    let restored: Vec<u64> = scene(SceneVariant::Base)
         .iter()
         .map(|o| digest(&o.mesh).raw())
         .collect();

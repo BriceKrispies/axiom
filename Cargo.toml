@@ -114,9 +114,9 @@ members = [
     # Bend It: the mobile-first penalty-kick trajectory sculptor (composition
     # leaf; every soccer concept stays app-local).
     "apps/bend-it",
-    # The procedural mesh crucible: the browser proof that every visible shape in
-    # a coherent scene comes out of axiom-mesh-ops (composition leaf).
-    "apps/procedural-mesh-crucible",
+    # Dog: a field of walking dachshunds whose every visible shape comes out of
+    # axiom-mesh-ops, driven live from a slider panel (composition leaf).
+    "apps/dog",
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",

@@ -1,6 +1,6 @@
 //! The interactive orbit camera — **app policy**, not an engine capability.
 //!
-//! A crucible whose whole point is that every triangle came out of an operator
+//! A scene whose whole point is that every triangle came out of an operator
 //! is only half a proof if you cannot walk around the geometry and look at it.
 //! This module owns that: a target-relative spherical camera (`yaw`, `pitch`,
 //! `distance` about a `target`) that the page's pointer gestures drive and the
@@ -19,7 +19,7 @@
 
 use axiom::prelude::*;
 
-use crate::install::{crucible_camera, CAMERA_EYE, CAMERA_FOV_DEGREES, CAMERA_TARGET};
+use crate::install::{scene_camera, CAMERA_EYE, CAMERA_FOV_DEGREES, CAMERA_TARGET};
 
 /// How far the camera may tip above or below the horizon, in radians (~83.1°).
 ///
@@ -35,7 +35,7 @@ const PITCH_LIMIT: f32 = 1.45;
 /// smallest thing worth inspecting is a single primitive in the reference row, a
 /// couple of units across. `4.0` puts the eye just outside one of those without
 /// letting the near plane (0.4) clip through it; `400.0` is twice the authored
-/// framing distance, so it pulls back well past the whole crucible while staying
+/// framing distance, so it pulls back well past the whole field while staying
 /// far inside the 700-unit far plane, so the user can neither fly to infinity
 /// nor invert through the target.
 const MIN_DISTANCE: f32 = 4.0;
@@ -155,7 +155,7 @@ impl OrbitState {
     /// Re-author the running app's camera from this state. Cheap enough to call
     /// every frame: `set_camera` reuses the existing camera node in place.
     pub fn apply(&self, running: &mut RunningApp) {
-        running.set_camera(crucible_camera(), self.transform);
+        running.set_camera(scene_camera(), self.transform);
     }
 
     /// The current orbit distance, in world units.
@@ -356,9 +356,10 @@ mod tests {
         let mut state = OrbitState::framed();
         state.orbit(0.3, -0.1);
         state.zoom_by(0.6);
-        let mut app = crate::crucible_core(
-            crate::CrucibleVariant::Coarse,
+        let mut app = crate::headless_app(
+            crate::SceneVariant::Coarse,
             crate::DebugView::Shaded,
+            &crate::SceneConfig::defaults(),
         );
         state.apply(&mut app);
         let before = app.tick(0).camera_view_proj();

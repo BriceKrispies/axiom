@@ -30,7 +30,7 @@
 //! A creature authored with near-straight legs has no reach left to swing a paw
 //! forward with, so every stride clamps — and the only cure available to a pose
 //! pass is to fold the animal down until the legs have somewhere to go. That is
-//! what [`CreaturePose::crouch`] is for, and on the straight-legged dog this
+//! what [`Gait::crouch`] is for, and on the straight-legged dog this
 //! scene used to carry it was worth 47% of a leg.
 //!
 //! The dachshund does not need it, because the *geometry* is already bent: its
@@ -58,9 +58,22 @@ pub type Flex = (&'static str, Vec3, f32, f32);
 /// Everything about how one creature runs. Every field is a dial with a
 /// physical meaning; none of them is a magic number standing in for another.
 #[derive(Debug, Clone, Copy)]
-pub struct CreaturePose {
+pub struct Gait {
     /// The uniform world scale the creature is presented at.
     pub scale: f32,
+    /// The leg's length as a multiple of the authored one.
+    ///
+    /// **One number does three jobs, and it has to do all three or the limb is a
+    /// lie.** It scales the leg bone's own geometry along its length (a bone is
+    /// authored down local `-Z`, so a `z` scale of `scale · leg_scale` is exactly
+    /// "this bone is that much longer"); it scales the bone lengths handed to
+    /// [`crate::leg_ik::solve_two_bone`] and the contact offsets measured from
+    /// the paw, so the solver plants the foot at the end of the leg it is
+    /// actually drawing; and it lifts the body by `(leg_scale − 1) · hip_drop`,
+    /// so a longer leg stands the animal taller instead of folding further under
+    /// an unmoved barrel. `tests/dials.rs` measures the standing height and the
+    /// solved bone lengths at both ends of the dial.
+    pub leg_scale: f32,
     /// One full step, in world units. Sized against the leg's spare reach.
     pub stride: f32,
     /// The fraction of a step a foot spends on the ground.
@@ -76,7 +89,7 @@ pub struct CreaturePose {
     pub bob: f32,
     /// How far above or below **its own body's line** a foot may be set down, in
     /// world units — the relief this creature's legs can actually absorb, which
-    /// is a property of leg length against wheelbase. See [`CreaturePose::plant`].
+    /// is a property of leg length against wheelbase. See [`Gait::plant`].
     pub relief: f32,
     /// Steady forward pitch, in radians. Negative drops the nose.
     pub lean: f32,
@@ -141,14 +154,15 @@ pub struct CreaturePose {
 ///   unchanged trot *is* the busy dachshund gait; it did not have to be dialled
 ///   in separately.
 /// * **The relief cap fell from 1.1 to 0.70**, and it stopped being the thing
-///   holding the animal together — see [`CreaturePose::terrain_pitch`], which is
+///   holding the animal together — see [`Gait::terrain_pitch`], which is
 ///   the dial that actually pays for a 10-unit wheelbase on a 3.7-unit leg.
 ///
 /// `RING_MIN_RADIUS` and these dials were therefore re-derived **together**: the
 /// curve correction grew with the body at the same moment the leg absorbing it
 /// halved, so neither number is meaningful without the other.
-pub const DOG_GAIT: CreaturePose = CreaturePose {
+pub const DOG_GAIT: Gait = Gait {
     scale: 10.0,
+    leg_scale: 1.0,
     stride: 5.2,
     duty: 0.52,
     lead: 0.26,
@@ -168,7 +182,7 @@ pub const DOG_GAIT: CreaturePose = CreaturePose {
     ],
 };
 
-impl CreaturePose {
+impl Gait {
     /// Every bone's world transform, in rig order, for a creature `travel`
     /// units along `path`.
     pub fn pose(
@@ -185,7 +199,12 @@ impl CreaturePose {
             .iter()
             .map(|limb| self.plant(limb, path, travel))
             .collect();
-        let root = self.body(path, travel, support(&plants), wheelbase(limbs, self.scale));
+        let root = self.body(
+            path,
+            travel,
+            support(&plants) + self.hip_lift(limbs),
+            wheelbase(limbs, self.scale),
+        );
         let cycle = travel / self.stride;
         let locals: Vec<Transform> = rig
             .parts()
@@ -209,6 +228,22 @@ impl CreaturePose {
             .zip(plants)
             .for_each(|(limb, plant)| self.solve_limb(rig, limb, plant, root, &mut world));
         world
+    }
+
+    /// How far the leg dial lifts the whole animal off its own feet, in world
+    /// units.
+    ///
+    /// A leg scaled to `k` puts its hip `k · hip_drop` above the paw it is
+    /// planted on; the body's rest pose puts that hip a fixed height above the
+    /// root. So unless the root rises by `(k − 1) · hip_drop · scale`, a longer
+    /// leg does not make a taller dog — it makes the same dog with a deeper bend,
+    /// and a shorter one leaves the paws dangling. Averaged over the limbs,
+    /// because the front and hind shoulders sit at (slightly) different heights
+    /// and the body is one rigid piece.
+    fn hip_lift(&self, limbs: &[LimbChain]) -> f32 {
+        let total: f32 = limbs.iter().map(|limb| limb.hip_drop).sum();
+        let mean = total / (limbs.len().max(1)) as f32;
+        (self.leg_scale - 1.0) * mean * self.scale
     }
 
     /// The body root: standing on `support`, facing down the path, crouched,
@@ -258,16 +293,22 @@ impl CreaturePose {
         // The forward pass already put the hip/shoulder pivot in the world; the
         // solve only replaces the rotations below it.
         let hip = world[upper].translation;
-        let bones = Vec3::new(self.scale, self.scale, self.scale);
+        // The paw block is drawn at the animal's own scale; a leg bone is drawn
+        // at that scale along `x`/`y` (its thickness) and at `span` along its own
+        // `-Z` axis (its length). That `z` term is the leg dial made visible, and
+        // it is the SAME number the solve below is handed.
+        let span = self.scale * self.leg_scale;
+        let block = Vec3::new(self.scale, self.scale, self.scale);
+        let bones = Vec3::new(self.scale, self.scale, span);
         let pole = root.rotation.rotate(limb.pole);
         let contact = plant.contact;
-        let target = contact.add(root.rotation.rotate(limb.tip_offset.mul_scalar(self.scale)));
+        let target = contact.add(root.rotation.rotate(limb.tip_offset.mul_scalar(span)));
         let solved = solve_two_bone(
             hip,
             target,
             pole,
-            limb.len_upper * self.scale,
-            limb.len_lower * self.scale,
+            limb.len_upper * span,
+            limb.len_lower * span,
         );
         write(rig, world, limb.upper, solved.upper, bones);
         write(rig, world, limb.lower, solved.lower, bones);
@@ -277,11 +318,11 @@ impl CreaturePose {
         // block against *that* rather than against the requested contact keeps a
         // clamped limb whole: a foot that could not quite be reached stays on
         // the end of its leg instead of detaching from it.
-        let block = match limb.extra {
-            None => solved.end.subtract(root.rotation.rotate(limb.tip_offset.mul_scalar(self.scale))),
+        let paw = match limb.extra {
+            None => solved.end.subtract(root.rotation.rotate(limb.tip_offset.mul_scalar(span))),
             Some(extra) => {
                 let toward = contact
-                    .add(root.rotation.rotate(limb.ankle_offset.mul_scalar(self.scale)))
+                    .add(root.rotation.rotate(limb.ankle_offset.mul_scalar(span)))
                     .subtract(solved.end);
                 let direction = toward.normalize().unwrap_or(Vec3::new(0.0, -1.0, 0.0));
                 write(
@@ -293,16 +334,16 @@ impl CreaturePose {
                 );
                 solved
                     .end
-                    .add(direction.mul_scalar(limb.len_extra * self.scale))
-                    .subtract(root.rotation.rotate(limb.ankle_offset.mul_scalar(self.scale)))
+                    .add(direction.mul_scalar(limb.len_extra * span))
+                    .subtract(root.rotation.rotate(limb.ankle_offset.mul_scalar(span)))
             }
         };
         write(
             rig,
             world,
             limb.tip,
-            Transform::new(block, root.rotation, Vec3::ONE),
-            bones,
+            Transform::new(paw, root.rotation, Vec3::ONE),
+            block,
         );
     }
 
@@ -340,7 +381,7 @@ impl CreaturePose {
     /// leg at 108% of its length on every ring at once. The fix is not to move the
     /// cap's reference (which merely trades a leg that cannot reach for a paw
     /// hanging two units over its own ground); it is that the body must lie along
-    /// the slope its feet are standing on. See [`CreaturePose::terrain_pitch`] —
+    /// the slope its feet are standing on. See [`Gait::terrain_pitch`] —
     /// with the body pitched over its own wheelbase, each hip rises with the
     /// ground its own foot is on, and this cap is left bounding what it was always
     /// meant to bound: the *lateral* excursion a foot makes off the ring line.

@@ -369,12 +369,11 @@ drawer every future domain reaches into, and the first argument about what a
 "road" is would be an argument about an engine layer.
 
 The claim that the generic set is *sufficient* is not an assertion; it is
-demonstrated. **`apps/procedural-mesh-crucible`** builds a road and a tunnel
-(`road.rs`), a vehicle (`vehicle.rs`), trees (`flora.rs`), a building
-(`building.rs`), terrain (`terrain.rs`), a sculpture (`sculpture.rs`), a dog
-(`creature_dog.rs`) and a human (`creature_human.rs`) — assembled by
-`crucible_scene` in `scene.rs` — **without a single operator being added to this
-layer**. That app's own scene doc states the invariant it is proving:
+demonstrated. **`apps/dog`** builds generated terrain (`terrain.rs`) and a whole
+articulated dachshund — a lofted torso, tapered swept limbs, an icosphere skull,
+a `uv_sphere` nose and `rounded_box` paws, cut at the joints into a 23-bone rig
+(`creature_dog.rs`, `creature_rig.rs`) — assembled by `build_scene` in `scene.rs`
+— **without a single operator being added to this layer**. That app's own scene doc states the invariant it is proving:
 
 > Every object in the returned vector was produced by an `axiom-mesh-ops`
 > operator and validated by `axiom-mesh` on the way out of it; nothing here

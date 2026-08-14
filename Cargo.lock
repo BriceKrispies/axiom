@@ -285,6 +285,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-dog"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-mesh",
+ "axiom-mesh-ops",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-draw2d"
 version = "0.1.0"
 dependencies = [
@@ -810,21 +825,6 @@ version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-proc",
-]
-
-[[package]]
-name = "axiom-procedural-mesh-crucible"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-kernel",
- "axiom-math",
- "axiom-mesh",
- "axiom-mesh-ops",
- "axiom-windowing",
- "console_error_panic_hook",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]

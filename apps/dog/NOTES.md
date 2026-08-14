@@ -1,17 +1,22 @@
-# Procedural Mesh Crucible — notes and limitations
+# Dog — notes and limitations
 
-This file records what the crucible **could not** show, and why the answer was to
+This file records what this app **could not** show, and why the answer was to
 write it down rather than to hack the renderer. Adding a debug concept to
 `axiom-mesh` / `axiom-mesh-ops` to make a picture easier would make the geometry
 layers know what a debug view is, which is exactly the shape the No-Shortcuts
 rule bans. All three views that *are* implemented live in `src/debug_view.rs` and
 use nothing but the shipped mesh and material vocabulary.
 
-The scene itself is eight concentric, alternately counter-rotating rings of
-walking dachshunds — 104 of them — on generated terrain. Every dog is the same 23
+The scene itself is concentric rings of walking dachshunds on generated terrain —
+eight rings and 104 dogs at the panel's defaults. Every dog is the same 23
 registered bone meshes at another transform, wearing one of 18 shared coats — see
 `src/rings.rs` for the layout and `src/install.rs` for the one place that
 registration happens.
+
+Fifteen sliders drive it, generated from the dial table in `src/config.rs`.
+Fourteen re-pose the running scene; one (`detail`) reloads. **Why that boundary
+falls where it does, and which sliders the engine will not let this app have, is
+sections 8 and 9 below.**
 
 ## What is implemented, and how
 
@@ -21,7 +26,8 @@ registration happens.
 | Flat normals | `?view=flat` | `axiom_mesh::generate_flat_normals` per object — unwelds to three vertices per triangle. |
 | Smooth normals | `?view=smooth` | `axiom_mesh::generate_normals` per object — area-weighted per vertex. |
 | Normal chart | `?view=normals` | Each vertex's UV is replaced by its normal's `(x, y)` mapped into `0..1`, and every object shares one 64×64 app-authored RGBA chart registered with `RunningApp::add_texture_data`. The sampled colour is then a direct picture of the surface normal. |
-| Detail switch | `?detail=base\|dense\|coarse` | `CrucibleVariant` — re-tessellates the whole scene from the same authoring. |
+| Detail switch | `detail` dial / `?detail=0\|1\|2` | `SceneVariant` — re-tessellates the whole scene from the same authoring. Reloads; see section 8. |
+| Dial panel | the sliders under the canvas | `src/config.rs` owns every dial's meaning, range and clamp; `src/slider_input.rs` (wasm32 only) *builds* the panel from that table and writes one shared `SceneConfig`. Every dial round-trips through the query string, so a reload restores the scene. |
 | Orbit camera | drag / pinch / wheel / right-drag | `src/orbit.rs` holds `target`/`yaw`/`pitch`/`distance` and re-authors the camera every frame through `RunningApp::set_camera`; `src/pointer_input.rs` (wasm32 only) measures the gestures. |
 
 ## Limitations found, and why nothing was hacked
@@ -35,7 +41,7 @@ primitive topology through `axiom-render` / `axiom-webgpu` / the live backends, 
 an app-side barycentric-edge shader hook that does not exist.
 
 Rejected alternative: generating a separate "edge cage" mesh of thin boxes per
-triangle in the app. At the crucible's base density that is ~31k triangles ×
+triangle in the app. At the base density that is ~31k triangles ×
 3 edges — a six-figure box explosion whose only purpose is to make a picture.
 It would have been geometry theatre, not a wireframe.
 
@@ -44,7 +50,7 @@ It would have been geometry theatre, not a wireframe.
 ### 2. No per-object UV checker *alongside* the normal chart
 
 `Texture::Checker` and `Texture::UvGrid` exist and would visualise the
-operator-authored UV parameterization directly — and the crucible could switch
+operator-authored UV parameterization directly — and this app could switch
 every material to them in one line. What it cannot do is show the UV checker *and*
 the normal chart at once, because both are driven by the **same single UV set**:
 the chart view overwrites the operator's UVs with normal-derived ones. A mesh
@@ -74,11 +80,13 @@ sized by the `max_instances` argument, and `SceneRenderer::record` silently
 instance count therefore does not error: it just stops drawing partway round the
 ring, which looks like a scene bug rather than a budget one.
 
-The crucible spawns 1 + 104 × 23 = 2393 instances and asks for 4096. That is an
-app choosing its own budget, which is right — but the *silence* is a sharp edge
-for the next app that grows past its number: this app has already been bitten
-once, when the crowd grew from 19 dogs to 120 and the old 2048 would have stopped
-drawing at dog 89 without a word.
+The app spawns 1 + 162 × 23 = 3727 instances (the whole pool — see section 8) and
+asks for 4096, with a `const` assertion in `src/live.rs` tying the two together so
+the relationship cannot rot into a stale comment. That is an app choosing its own
+budget, which is right — but the *silence* is a sharp edge for the next app that
+grows past its number: this app has already been bitten once, when the crowd grew
+from 19 dogs to 120 and the old 2048 would have stopped drawing at dog 89 without
+a word.
 
 **Verdict:** the app sizes its own buffer, and `src/live.rs` says out loud what
 overflow looks like. Reporting truncation is the backend's design to make.
@@ -112,7 +120,7 @@ module.
 
 ### 6. `renderable_count()` reads zero
 
-The crucible installs every object through the runtime path
+The app installs every object through the runtime path
 (`add_mesh_data` / `add_material` / `spawn`) rather than through `App::setup`,
 because `setup` only hands out the built-in `Mesh` catalogue enum and cannot
 register author geometry. `RunningApp::renderable_count()` reports the *authoring*
@@ -150,7 +158,7 @@ reach in and bolt on because it wants to look right in landscape.
 What the app does instead is the one honest thing an app can do: on a `resize` or
 `orientationchange` that **settles** (350 ms debounce) on a surface size
 different from the one it started with, it calls `location.reload()`. The reload
-re-runs `crucible_start` against the new viewport, and because it is a reload
+re-runs `dog_start` against the new viewport, and because it is a reload
 rather than a navigation the `?detail=`/`?view=` selection survives untouched.
 The debounce keeps a desktop window-drag from reloading on every intermediate
 pixel; the size comparison keeps a URL-bar or soft-keyboard reflow — which moves
@@ -158,3 +166,73 @@ pixel; the size comparison keeps a URL-bar or soft-keyboard reflow — which mov
 
 **Verdict:** a missing engine capability, named here rather than hacked around.
 The app degrades to a reload; nothing was added to a module to avoid one.
+
+### 8. Geometry is uploaded once at bind, so one dial reloads and the crowd is pooled
+
+`WindowingApi::run_web_multi` takes the driver **by value** and consumes it into
+the animation-frame loop. From that moment the only things a frame may change are
+what the per-frame closure returns: the clear colour, the lights, the camera and
+the *instance* stream. `GpuBackendApi::replace_geometry` and
+`WindowingApi::update_present_meshes` both exist — but the second is a method on a
+`WindowingApi` the app no longer owns, and the first is behind the module boundary
+entirely. There is no seam by which an app driving `run_web_multi` can put a new
+vertex on the GPU.
+
+Two consequences, and both are shaped by that one fact rather than worked around
+it:
+
+* **The `detail` dial reloads.** Re-tessellating is a geometry change, so it
+  cannot be a re-pose. The panel therefore writes the whole configuration into the
+  address bar on *every* dial move (`history.replaceState`), and the detail dial
+  calls `location.reload()` — which comes back to exactly the scene the user had
+  built. The same mechanism is what makes the pre-existing resize reload
+  (section 7) non-destructive now that there is state worth keeping.
+* **The crowd is a pool, not a spawn.** The ring dials move the number of dogs on
+  screen, and a dog that might be shown at frame 400 has to have been spawned at
+  frame 0. `install_scene` therefore spawns `MAX_DOGS` dogs' worth of bone nodes
+  up front and retires the unused ones with `Visible(false)` — the engine's own
+  sanctioned pooling primitive, which drops a renderable at submission so it costs
+  no projection, no shading and no draw. `tests/dials.rs` drives the ring dial
+  through the real engine and asserts the *drawn* instance count follows it.
+
+Rejected alternative: despawning and respawning the crowd on every ring-dial tick.
+`RunningApp::spawn` propagates world transforms per call, so rebuilding ~2400
+nodes is quadratic and turns a slider drag into a series of hitches. Pooling is
+both cheaper and the thing the engine documents for exactly this case.
+
+**Verdict:** a real engine boundary, honoured rather than reached through. The
+live dials stop precisely where geometry begins.
+
+### 9. There is no colour dial, and there cannot be one at the app tier
+
+The panel has no saturation, value or hue-spread slider. Not an oversight — a
+repaint is unreachable from an app:
+
+* `Material` has no runtime mutation. `RunningApp::add_material` appends to a
+  private store and hands back a `Handle`; nothing takes one back.
+* `Renderable` is **not** a `Component`. `RunningApp::set::<T>` covers `Transform`,
+  `Bounds` and `Visible`, so an installed instance cannot be re-pointed at a
+  different material either.
+
+So the only way to change an instance's colour is to give it a different
+material, and the only way to give it a different material is to despawn and
+respawn it — which is the quadratic scene rebuild section 8 rejects, for a slider
+that would be dragged continuously.
+
+This is section 5 hit from the other side, and it has the same engine-tier fix: an
+optional per-renderable tint carried on `Renderable`, threaded through
+`RenderReport`'s per-draw tuple into `DrawData::color`, and **excluded** from the
+batch key. A cheaper half-measure would be to make `Renderable` a `Component` so
+an app can at least re-point an instance at another registered material; that
+alone would buy this panel a hue dial over a pre-registered bank.
+
+The knock-on inside the app is recorded where it bites: because a pool slot's coat
+is fixed at spawn, the layout may only ask for coats the pool already carries, so
+a dog wears palette entry `crowd index % 18`. The parity-split hue comb this field
+used to carry — which gave *adjacent rings* disjoint hue sets — is not a balanced
+assignment and a fixed pool cannot honour it. What survives is the property that
+mattered most and that `tests/rings.rs` still holds: no two dogs adjacent along a
+ring share a coat, and the palette stays bounded at 18 whatever the crowd size.
+
+**Verdict:** an engine limitation with a well-shaped engine fix, recorded rather
+than made. The app does the honest thing an app can: it stops offering the dial.
