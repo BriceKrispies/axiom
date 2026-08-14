@@ -16,7 +16,9 @@
 //!
 //! # The 8-bit ceiling, stated plainly
 //!
-//! The intermediate colour target is 8-bit sRGB (it matches the surface), so a
+//! The intermediate colour target is 8-bit sRGB (see
+//! [`crate::surface_encode::scene_target_format`] — sRGB by choice on every arm,
+//! not by whatever the surface happened to offer), so a
 //! fragment that emitted `4.0` was already clamped to white *before* this chain
 //! samples it. The headroom that a bloom would ideally spend is therefore gone:
 //! everything above white blooms by the same amount, rather than a 4× light
@@ -47,11 +49,13 @@
 //! rather than a lookalike:
 //!
 //! - **Space.** The CPU stage grades display-encoded bytes (`byte / 255`). The
-//!   render targets here are sRGB, so `textureSample` hands the shader *linear*
-//!   values and the store re-encodes. `graded` therefore encodes to sRGB, applies
-//!   the identical arithmetic, and decodes back — the round trip is what keeps
-//!   the two arms the same picture instead of the same formula on different
-//!   numbers.
+//!   working targets here are sRGB, so `textureSample` hands the shader *linear*
+//!   values. `graded` therefore encodes to sRGB, applies the identical
+//!   arithmetic, and decodes back — the round trip is what keeps the two arms the
+//!   same picture instead of the same formula on different numbers. The composite
+//!   then re-encodes for the display, either through the swap chain's own sRGB
+//!   store or, when the browser offered no sRGB surface, in the shader; which of
+//!   the two is decided by [`crate::surface_encode`], never by a backend name.
 //! - **Order.** It runs last, after the bloom composite and its rolloff, exactly
 //!   as the CPU stage runs on the composited frame.
 //!
@@ -103,7 +107,10 @@ struct Params {
     // w = black point. The identity (1, 1, 1, 0) is packed when the app
     // authored none, so the composite's grade is then an exact no-op.
     grade: vec4<f32>,
-    // rgb = the grade's per-channel white-balance gain; w unused.
+    // rgb = the grade's per-channel white-balance gain.
+    // w = the sRGB ENCODE FLAG the composite presents through: 1 when the swap
+    // chain will not encode this store for us, 0 when it will. See
+    // `crate::surface_encode` for why that is a per-browser accident.
     balance: vec4<f32>,
 };
 @group(0) @binding(0) var src_tex: texture_2d<f32>;
@@ -179,23 +186,13 @@ fn fs_blur(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(sum, 1.0);
 }
 
-// Linear <-> sRGB, so the grade below runs on the same display-encoded numbers
-// `axiom_host::apply_frame_postprocess` reads out of a byte buffer. The render
-// targets are sRGB, so what this shader samples and stores is linear; grading
-// there instead would be a different curve wearing the same parameters.
-fn srgb_encode(c: vec3<f32>) -> vec3<f32> {
-    let v = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
-    let lo = v * 12.92;
-    let hi = 1.055 * pow(v, vec3<f32>(1.0 / 2.4)) - 0.055;
-    return select(hi, lo, v <= vec3<f32>(0.0031308));
-}
-
-fn srgb_decode(c: vec3<f32>) -> vec3<f32> {
-    let v = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
-    let lo = v / 12.92;
-    let hi = pow((v + 0.055) / 1.055, vec3<f32>(2.4));
-    return select(hi, lo, v <= vec3<f32>(0.04045));
-}
+// `srgb_encode` / `srgb_decode` are prepended from `crate::surface_encode`, so
+// the curve the grade round-trips through is the same one the composite may have
+// to present through and the same one a hardware sRGB attachment applies. The
+// grade needs them because `axiom_host::apply_frame_postprocess` reads
+// display-encoded bytes out of a buffer; what this shader samples and stores is
+// linear, and grading there instead would be a different curve wearing the same
+// parameters.
 
 // The frame's colour grade, term for term the same chain as the CPU
 // `grade_pixel`: black-point floor removal, then exposure x white balance, then
@@ -224,7 +221,12 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     let rolled = vec3<f32>(rolloff(sum.r), rolloff(sum.g), rolloff(sum.b));
     // The grade runs last, on the composited image — the same place, and the
     // same arithmetic, as the CPU stage the read-back arms run.
-    return vec4<f32>(graded(rolled), 1.0);
+    let out = graded(rolled);
+    // Then the display encode, but only when the swap chain will not do it on
+    // store. `mix`, not a branch: one composite pipeline serves both kinds of
+    // surface. At `balance.w == 0` this is the exact identity, so the
+    // sRGB-surface arm composites bit-for-bit as it always did.
+    return vec4<f32>(mix(out, srgb_encode(out), params.balance.w), 1.0);
 }
 "#;
 
@@ -259,6 +261,13 @@ pub(crate) struct PostChain {
     ping_view: wgpu::TextureView,
     pong_view: wgpu::TextureView,
     bloom_size: (u32, u32),
+    /// Whether the composite must apply the sRGB encode itself, decided once from
+    /// the present target's format at build (see
+    /// [`crate::surface_encode::present_encode_flag`]) and packed into the params'
+    /// `balance.w` on every record — the same reasoning as
+    /// [`crate::upscale::UpscaleBlit`]'s flag, since the two are alternative
+    /// present passes to the same swap chain and must agree.
+    encode: f32,
 }
 
 impl std::fmt::Debug for PostChain {
@@ -284,7 +293,9 @@ impl PostChain {
         );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("axiom-post-chain"),
-            source: wgpu::ShaderSource::Wgsl(POST_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                crate::surface_encode::shader_source(POST_WGSL).into(),
+            ),
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("axiom-post-sampler"),
@@ -439,6 +450,7 @@ impl PostChain {
             bloom_size,
             params_h,
             params_v,
+            encode: crate::surface_encode::present_encode_flag(target_format),
         }
     }
 
@@ -491,7 +503,7 @@ impl PostChain {
         );
         // The grade identity when the app authored none: unit exposure, unit
         // contrast, unit saturation, zero black point, neutral balance.
-        let (tone, balance) = grade.map_or(([1.0, 1.0, 1.0, 0.0], [1.0, 1.0, 1.0, 0.0]), |g| {
+        let (tone, balance) = grade.map_or(([1.0, 1.0, 1.0, 0.0], [1.0, 1.0, 1.0]), |g| {
             let wb = g.white_balance();
             (
                 [
@@ -500,7 +512,7 @@ impl PostChain {
                     g.saturation().get(),
                     g.black_point().get(),
                 ],
-                [wb[0], wb[1], wb[2], 0.0],
+                [wb[0], wb[1], wb[2]],
             )
         });
 
@@ -538,10 +550,14 @@ impl PostChain {
         // ordering that would break a single shared buffer is irrelevant here.
         // The composite reads `params_h` (via `scene_group`), so the grade must
         // reach that buffer; it is written to both so the two stay one layout.
+        // `balance.w` carries the present encode flag rather than a fourth balance
+        // channel: white balance is a three-channel gain, so the slot was already
+        // there and the composite needs no second uniform, no wider layout and no
+        // extra bind group to learn what kind of surface it is presenting to.
         let pack = |step: [f32; 2]| {
             [
                 tune[0], tune[1], tune[2], tune[3], step[0], step[1], live.0, live.1, tone[0], tone[1],
-                tone[2], tone[3], balance[0], balance[1], balance[2], balance[3],
+                tone[2], tone[3], balance[0], balance[1], balance[2], self.encode,
             ]
         };
         queue.write_buffer(&self.params_h, 0, bytemuck::cast_slice(&pack([texel.0, 0.0])));

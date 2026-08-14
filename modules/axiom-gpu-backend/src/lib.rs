@@ -71,6 +71,13 @@ mod scene_renderer;
 // rule is impossible to debug from inside a render pass.
 mod shadow_cull;
 
+// Which attachment performs the linear -> sRGB encode, and the crate's single
+// WGSL definition of that curve. Pure format arithmetic: a browser surface may or
+// may not offer an sRGB format, and this is where that accident is absorbed so
+// exactly one encode reaches the display on every arm.
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
+mod surface_encode;
+
 // Upscale-blit pipeline presenting a reduced-resolution render target: the live
 // binding's mobile-first render-scale path, and the offscreen retro 32-bit low-res +
 // nearest upscale. Available wherever a real GPU renders (wasm32 / offscreen).

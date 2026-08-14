@@ -72,8 +72,11 @@ pub struct LiveGpuBinding {
     /// `render_*` resolution and upscaled.
     width: u32,
     height: u32,
-    /// The swapchain colour format, held so the scene targets can be rebuilt at a
-    /// new size without re-reading the surface capabilities.
+    /// The swapchain colour format — what the *surface* was configured with, and
+    /// so what decides whether the present pass encodes sRGB itself (see
+    /// [`crate::surface_encode`]). Not the format the scene renders into: that is
+    /// `scene_format`, derived from this one and generally sRGB even when this is
+    /// not, so it is deliberately not reusable as a scene-target format.
     format: wgpu::TextureFormat,
     /// The device tier's render size at [`axiom_host::RenderScale::FULL`] — what
     /// the app asked for, after the device's own texture-dimension clamp. Every
@@ -254,13 +257,6 @@ impl LiveGpuBinding {
             }
         };
 
-        // Record which backend won, so the browser console (and Playwright) can
-        // confirm whether the WebGPU path or the WebGL2 fallback is live.
-        web_sys::console::log_1(&JsValue::from_str(&format!(
-            "axiom: render backend = {:?}",
-            adapter.get_info().backend
-        )));
-
         let caps = surface.get_capabilities(&adapter);
         let format = caps
             .formats
@@ -293,6 +289,24 @@ impl LiveGpuBinding {
         let view_formats = (draw2d_format != format)
             .then(|| vec![draw2d_format])
             .unwrap_or_default();
+        // Record which backend won AND the colour contract it committed to, so the
+        // browser console (and Playwright) can confirm both at a glance. The
+        // format is not cosmetic bookkeeping: the whole render chain writes
+        // *linear* values and depends on the attachment's sRGB store to encode
+        // them for display, so `srgb = false` means this surface needs the
+        // composite's own encode (see [`crate::surface_encode`]) and `srgb = true`
+        // means it must not get one. Printing the offered set beside the choice is
+        // what makes a fallback legible rather than mysterious — the chosen format
+        // alone cannot tell you whether an sRGB surface was available and passed
+        // over, or never offered at all.
+        web_sys::console::log_1(&JsValue::from_str(&format!(
+            "axiom: render backend = {:?}, surface = {:?} (srgb = {}), draw2d view = {:?}, offered = {:?}",
+            adapter.get_info().backend,
+            format,
+            format.is_srgb(),
+            draw2d_format,
+            caps.formats,
+        )));
         // The swapchain is a texture, and it has the same ceiling every other
         // texture does. Until the surface was *measured* this could not bite: the
         // size was a compile-time constant every app picked small enough. Now the
@@ -330,10 +344,23 @@ impl LiveGpuBinding {
         };
         surface.configure(&device, &config);
 
+        // The colour format the SCENE renders into. Unlike the swap chain this is
+        // our own texture, so it is sRGB whenever the device can render to and
+        // sample that format — the scene is then *stored* display-encoded on every
+        // arm, which is both what the shading chain assumes and what stops a dark
+        // gradient banding under 8-bit linear storage. On a surface that already
+        // offers sRGB (the WebGL2 arm) this is the surface format unchanged.
+        let scene_format = crate::surface_encode::scene_target_format(
+            format,
+            adapter
+                .get_texture_format_features(format.add_srgb_suffix())
+                .allowed_usages,
+        );
+
         let renderer = SceneRenderer::new(
             &device,
             &queue,
-            format,
+            scene_format,
             meshes,
             skinned_meshes,
             materials,
@@ -376,8 +403,9 @@ impl LiveGpuBinding {
         let render_height = hold(render_height);
 
         // The intermediate colour target the scene renders into (then resolved to
-        // the swapchain). Same format as the surface, plus `TEXTURE_BINDING` so the
-        // blit can sample it. Its depth view matches it, not the swapchain.
+        // the swapchain), in the sRGB-preferring `scene_format`, plus
+        // `TEXTURE_BINDING` so the blit can sample it. Its depth view matches it,
+        // not the swapchain.
         let intermediate = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("axiom-render-target"),
             size: wgpu::Extent3d {
@@ -388,7 +416,7 @@ impl LiveGpuBinding {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format,
+            format: scene_format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -416,8 +444,10 @@ impl LiveGpuBinding {
         let post = wants_post.then(|| {
             crate::post_chain::PostChain::new(
                 &device,
+                // Present target = the swap chain (which decides whether the
+                // composite encodes); working targets = the scene format.
                 format,
-                format,
+                scene_format,
                 &intermediate_view,
                 (render_width, render_height),
             )

@@ -44,6 +44,8 @@ fn vs(@builtin(vertex_index) vi: u32) -> VsOut {
 // xy = the LIVE FRACTION of the source: a frame rendered at a reduced scale
 // occupies only the lower-left sub-rect of a target that stays allocated at full
 // size, so a fullscreen uv must be mapped into it. `1,1` is the no-op.
+// z  = the sRGB ENCODE FLAG: 1 when the swap chain will not encode this store
+// for us (see `crate::surface_encode`), 0 when it will. w unused.
 @group(0) @binding(2) var<uniform> live: vec4<f32>;
 
 @fragment
@@ -52,7 +54,12 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // identity, so an unscaled frame blits bit-for-bit as it always did. The
     // scene pass clears the whole attachment, so the margin outside a reduced
     // frame is the clear colour rather than a stale larger frame.
-    return textureSample(src_tex, src_sampler, in.uv * live.xy);
+    let c = textureSample(src_tex, src_sampler, in.uv * live.xy);
+    // `mix`, not a branch: one pipeline serves both kinds of surface, so the
+    // flag can never select a pipeline the driver has not compiled yet. At
+    // `live.z == 0` this is the exact identity — the sRGB-surface arm blits
+    // bit-for-bit as it always did.
+    return vec4<f32>(mix(c.rgb, srgb_encode(c.rgb), live.z), c.a);
 }
 "#;
 
@@ -65,6 +72,12 @@ pub(crate) struct UpscaleBlit {
     /// rebuilding the bind group) is the whole point: a render-scale change must
     /// cost a buffer write, not a reallocation.
     live: wgpu::Buffer,
+    /// Whether this blit must apply the sRGB encode itself, decided once from the
+    /// target format at build (see [`crate::surface_encode::present_encode_flag`])
+    /// and packed into the `live` uniform's `z` on every present. Held here rather
+    /// than passed per frame because it is a property of the surface the blit was
+    /// built for, and the surface cannot change without rebuilding the blit.
+    encode: f32,
 }
 
 impl UpscaleBlit {
@@ -154,7 +167,9 @@ impl UpscaleBlit {
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("axiom-upscale-shader"),
-            source: wgpu::ShaderSource::Wgsl(BLIT_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                crate::surface_encode::shader_source(BLIT_WGSL).into(),
+            ),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("axiom-upscale-pl"),
@@ -194,6 +209,7 @@ impl UpscaleBlit {
             pipeline,
             bind_group,
             live,
+            encode: crate::surface_encode::present_encode_flag(target_format),
         }
     }
 
@@ -210,7 +226,7 @@ impl UpscaleBlit {
         queue.write_buffer(
             &self.live,
             0,
-            bytemuck::cast_slice(&[live.0, live.1, 0.0, 0.0]),
+            bytemuck::cast_slice(&[live.0, live.1, self.encode, 0.0]),
         );
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("axiom-upscale-pass"),
