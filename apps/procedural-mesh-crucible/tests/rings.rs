@@ -31,7 +31,7 @@ use axiom_procedural_mesh_crucible::{
     crucible_core, crucible_scene, dog_parts, dog_total, ground_y, outer_clearance, palette_color,
     CrucibleAnimation, CrucibleVariant, DebugView, DOG_LENGTH, DOG_SPACING, DOG_WIDTH,
     PALETTE_SIZE, RINGS, RING_COUNT, RING_MAX_RADIUS, RING_MIN_RADIUS, RING_SPACING,
-    TERRAIN_HALF_EXTENT,
+    TERRAIN_HALF_EXTENT, TRAVEL_PER_TICK,
 };
 
 /// The bone count the whole field instances.
@@ -224,7 +224,10 @@ fn every_ring_turns_the_same_way_as_its_neighbours() {
             let body = now[index * bones];
             let travelled = flat(next[index * bones].translation.subtract(body.translation));
             assert!(
-                travelled.length() > 0.2,
+                // Derived from the travel constant, not a magic number: this
+                // asserts the dog moved essentially a full tick's worth, so it
+                // keeps its meaning if the walking speed is retuned again.
+                travelled.length() > TRAVEL_PER_TICK * 0.8,
                 "dog {index} barely moved between ticks: {travelled:?}"
             );
             assert!(

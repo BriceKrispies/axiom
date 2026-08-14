@@ -55,9 +55,19 @@ use crate::terrain::ground_y;
 const LOOP_CONTROLS: u32 = 16;
 const LOOP_SAMPLES: u32 = 768;
 
-/// World units a dog covers per engine tick. At 60 Hz that is ~37 units a
-/// second, or a shade under two body lengths — a trot, not a sprint.
-pub const TRAVEL_PER_TICK: f32 = 0.62;
+/// World units a dog covers per engine tick.
+///
+/// This is set by the STEP RATE it implies, not by the ground speed it looks
+/// like. A leg completes one cycle every `DOG_GAIT.stride / TRAVEL_PER_TICK`
+/// ticks, so at 60 Hz the step frequency is `60 · TRAVEL_PER_TICK / stride`.
+/// With the dachshund's 5.2 stride, 0.21 gives ~2.4 steps a second per leg,
+/// which is a real dog's trot; the previous 0.62 implied 7.2 Hz, and a leg
+/// cycling seven times a second reads as vibration rather than walking.
+///
+/// Ground speed follows from that at ~12.6 units a second, close to half a body
+/// length — an unhurried walk. Changing this does NOT change the stride, so the
+/// limb-reach budget is untouched: it rescales time, not geometry.
+pub const TRAVEL_PER_TICK: f32 = 0.21;
 
 /// A point on a ring: where it is, which way the walk runs, and which way is
 /// right.

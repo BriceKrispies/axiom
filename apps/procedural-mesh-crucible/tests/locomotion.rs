@@ -136,10 +136,18 @@ fn a_planted_paw_does_not_skate_while_the_body_travels_over_it() {
     let paw = rig.index_of(limb.tip).expect("the dog has a front-left paw");
     let fore = -limb.contact.z * DOG_GAIT.scale;
 
-    // Walk a couple of strides and collect, per stance, how far the paw moved.
+    // Walk several strides and collect, per stance, how far the paw moved.
+    //
+    // The window is derived from the gait rather than hardcoded: one cycle takes
+    // `stride / TRAVEL_PER_TICK` ticks, so six cycles is six stances whatever the
+    // walking speed is retuned to. A fixed tick count silently stops covering the
+    // gait the moment the speed changes — which is exactly what it did when the
+    // walk was slowed from 0.62 to 0.21 units a tick.
+    let cycle_ticks = (DOG_GAIT.stride / TRAVEL_PER_TICK).ceil() as u64;
+    let window = cycle_ticks * 6;
     let mut stances: Vec<(f32, usize)> = Vec::new();
     let mut current: Option<(f32, Vec3, f32, usize)> = None;
-    for tick in 0u64..90 {
+    for tick in 0u64..window {
         let phase = stride_phase(
             dog_travel(tick) + fore,
             DOG_GAIT.stride,
@@ -164,7 +172,7 @@ fn a_planted_paw_does_not_skate_while_the_body_travels_over_it() {
 
     assert!(
         stances.len() >= 4,
-        "only {} stances observed in 90 ticks — the gait is not cycling",
+        "only {} stances observed in {window} ticks ({cycle_ticks} a cycle) — the gait is not cycling",
         stances.len()
     );
     // The first entry began before tick 0, so it is a fragment of a stance
