@@ -41,6 +41,8 @@ console_error_panic_hook = "0.1"
 # CssStyleDeclaration: finding the canvas, capturing pointers on it, pinning
 # `touch-action: none`, and BUILDING the dial panel — every slider on the page is
 # created from the dial table in `src/config.rs`.
+# HtmlButtonElement: the stage switch — both buttons on the page are created from
+# the `Stage` enum in `src/stage.rs`.
 # EventTarget/Event/MouseEvent/PointerEvent/WheelEvent/AddEventListenerOptions:
 # the orbit camera's gestures — one pointer path for mouse, touch and pen, plus a
 # non-passive wheel listener so `preventDefault()` is honoured.
@@ -53,6 +55,7 @@ web-sys = { version = "0.3", features = [
     "Event",
     "EventTarget",
     "History",
+    "HtmlButtonElement",
     "HtmlCanvasElement",
     "HtmlElement",
     "HtmlInputElement",

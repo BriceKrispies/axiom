@@ -38,6 +38,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::config::{Dial, SceneConfig};
+use crate::page_url;
 
 /// The live configuration, shared between the DOM's event handlers and the
 /// render loop.
@@ -116,11 +117,13 @@ fn listen(input: &web_sys::HtmlInputElement, dial: Dial, config: SharedConfig) {
         // The read-out shows the *taken* value, not the raw event value, so a
         // clamp or a snap is visible rather than silent.
         show(dial, updated.raw(dial));
-        remember(&updated);
+        // The whole configuration goes into the address bar, *merged* with the
+        // view and the stage already there, so a reload restores all three.
+        page_url::remember(&updated);
         // Geometry is uploaded once at bind, so the detail dial cannot be
         // answered by a re-pose. The scene has just been written into the URL,
         // so the reload comes back to exactly this configuration.
-        (!dial.spec().live).then(reload);
+        (!dial.spec().live).then(page_url::reload);
     }) as Box<dyn FnMut()>);
     let _ = input
         .add_event_listener_with_callback("input", handler.as_ref().unchecked_ref());
@@ -153,18 +156,3 @@ fn printed(dial: Dial, value: f32) -> String {
     }
 }
 
-/// Put the whole configuration in the address bar without navigating, so a
-/// reload — whether the detail dial's or a device rotation's — restores it.
-fn remember(config: &SceneConfig) {
-    let query = config.to_query();
-    let target = format!("?{query}");
-    let url = [".", target.as_str()][usize::from(!query.is_empty())];
-    let _ = web_sys::window()
-        .and_then(|window| window.history().ok())
-        .map(|history| history.replace_state_with_url(&JsValue::NULL, "", Some(url)));
-}
-
-/// Re-run the app against the configuration now in the address bar.
-fn reload() {
-    let _ = web_sys::window().map(|window| window.location().reload());
-}

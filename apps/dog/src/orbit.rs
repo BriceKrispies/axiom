@@ -19,7 +19,8 @@
 
 use axiom::prelude::*;
 
-use crate::install::{scene_camera, CAMERA_EYE, CAMERA_FOV_DEGREES, CAMERA_TARGET};
+use crate::install::{scene_camera, CAMERA_FOV_DEGREES};
+use crate::stage::Stage;
 
 /// How far the camera may tip above or below the horizon, in radians (~83.1°).
 ///
@@ -75,8 +76,21 @@ impl OrbitState {
     /// again — there is one authored camera, and this is a different coordinate
     /// system for it, not a second copy of it.
     pub fn framed() -> OrbitState {
-        let eye = Vec3::new(CAMERA_EYE[0], CAMERA_EYE[1], CAMERA_EYE[2]);
-        let target = Vec3::new(CAMERA_TARGET[0], CAMERA_TARGET[1], CAMERA_TARGET[2]);
+        OrbitState::for_stage(Stage::Field)
+    }
+
+    /// Seed the orbit from `stage`'s own authored framing — the wide shot over
+    /// the whole field, or the close one on the single still dog.
+    ///
+    /// This is the whole of what a stage button does to the camera: the two
+    /// framings are authored once each (`install.rs` and `study.rs`) and named
+    /// by [`Stage::framing`], and switching stage re-seeds the orbit from the
+    /// other one. Everything after that is the user's gestures, on both stages
+    /// alike — the study is inspected with exactly the camera the field is.
+    pub fn for_stage(stage: Stage) -> OrbitState {
+        let (eye, target) = stage.framing();
+        let eye = Vec3::new(eye[0], eye[1], eye[2]);
+        let target = Vec3::new(target[0], target[1], target[2]);
         let offset = eye.subtract(target);
         let distance = offset.length().clamp(MIN_DISTANCE, MAX_DISTANCE);
         let mut state = OrbitState {
@@ -225,6 +239,8 @@ fn pan_units_per_drag() -> f32 {
 mod tests {
     use super::*;
 
+    use crate::install::{CAMERA_EYE, CAMERA_TARGET};
+
     /// A finite-precision comparison for derived angles/positions.
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1.0e-3
@@ -257,6 +273,28 @@ mod tests {
         assert!(close(live.rotation.y, authored.rotation.y));
         assert!(close(live.rotation.z, authored.rotation.z));
         assert!(close(live.rotation.w, authored.rotation.w));
+    }
+
+    #[test]
+    fn each_stage_seeds_its_own_framing_and_the_study_is_the_close_one() {
+        let field = OrbitState::for_stage(Stage::Field);
+        let study = OrbitState::for_stage(Stage::Study);
+        // `framed()` is the field stage, not a second copy of it.
+        assert!(close(field.distance(), OrbitState::framed().distance()));
+        let (eye, target) = Stage::Study.framing();
+        assert!(close(study.eye().x, eye[0]), "{:?}", study.eye());
+        assert!(close(study.eye().y, eye[1]), "{:?}", study.eye());
+        assert!(close(study.eye().z, eye[2]), "{:?}", study.eye());
+        assert_eq!(study.target(), Vec3::new(target[0], target[1], target[2]));
+        // Close enough to inspect one animal, and still outside it — a full
+        // orbit at this distance never puts the eye inside the dog.
+        assert!(study.distance() > 12.0 && study.distance() < 30.0);
+        assert!(study.distance() * 4.0 < field.distance());
+        // ...and it is still an ordinary orbit: the user can pull all the way
+        // back out to the field's own distance from it.
+        let mut opened = study.clone();
+        (0..300).for_each(|_| opened.zoom_by_wheel(100.0));
+        assert!(opened.distance() > field.distance());
     }
 
     #[test]

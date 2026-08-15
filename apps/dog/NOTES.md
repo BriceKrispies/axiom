@@ -18,6 +18,9 @@ Fourteen re-pose the running scene; one (`detail`) reloads. **Why that boundary
 falls where it does, and which sliders the engine will not let this app have, is
 sections 8 and 9 below.**
 
+Two buttons above those sliders switch the *stage*: the field, or one still dog
+close up. Both are presentations of the same bound geometry — section 10.
+
 ## What is implemented, and how
 
 | View | Query | Mechanism |
@@ -27,6 +30,8 @@ sections 8 and 9 below.**
 | Smooth normals | `?view=smooth` | `axiom_mesh::generate_normals` per object — area-weighted per vertex. |
 | Normal chart | `?view=normals` | Each vertex's UV is replaced by its normal's `(x, y)` mapped into `0..1`, and every object shares one 64×64 app-authored RGBA chart registered with `RunningApp::add_texture_data`. The sampled colour is then a direct picture of the surface normal. |
 | Detail switch | `detail` dial / `?detail=0\|1\|2` | `SceneVariant` — re-tessellates the whole scene from the same authoring. Reloads; see section 8. |
+| The field (default) | `?stage=field` | Every ring walking on the terrain — the scene this app opens on. |
+| One dog | `?stage=study` | `src/study.rs` — one pool slot, the terrain and the rest of the crowd retired with `Visible(false)`, the dog posed **without a tick** and translated to the origin, and the camera re-seeded to a 19-unit close-up. A *presentation* of the geometry already bound, not a second scene: see section 10. |
 | Dial panel | the sliders under the canvas | `src/config.rs` owns every dial's meaning, range and clamp; `src/slider_input.rs` (wasm32 only) *builds* the panel from that table and writes one shared `SceneConfig`. Every dial round-trips through the query string, so a reload restores the scene. |
 | Orbit camera | drag / pinch / wheel / right-drag | `src/orbit.rs` holds `target`/`yaw`/`pitch`/`distance` and re-authors the camera every frame through `RunningApp::set_camera`; `src/pointer_input.rs` (wasm32 only) measures the gestures. |
 
@@ -236,3 +241,45 @@ ring share a coat, and the palette stays bounded at 18 whatever the crowd size.
 
 **Verdict:** an engine limitation with a well-shaped engine fix, recorded rather
 than made. The app does the honest thing an app can: it stops offering the dial.
+
+### 10. The single-dog study is a presentation, not a second scene — and that is the same limitation from a third side
+
+The stage switch under the canvas offers two views of the *same bound scene*: the
+walking field, and one still dog close up. It could not offer anything else,
+because sections 8 and 9 between them say what a live frame is allowed to change
+— an instance transform and a visibility flag, and nothing more.
+
+That constraint turned out to be the right shape rather than a cost, and it is
+worth naming why. A study built the obvious way — its own registered geometry, so
+it can be posed and lit independently — would be a **second dog**, free to drift
+from the one the field is made of the first time either is touched. What the
+engine allows instead is the honest thing: the study is one of the pool's own
+slots, wearing the pool's own coat, drawn from the same 23 registered meshes,
+posed by the same `Gait::pose` from the same rig and the same resolved dials. It
+is the field's animal by construction, and `tests/stages.rs` holds the claim at
+the frame: the study draws exactly `bone_count` instances and the field comes
+back whole afterwards, out of a pool that was never rebuilt.
+
+Three consequences the switch inherits rather than works around:
+
+* **No ground under the study.** The terrain is one of the static instances, so
+  retiring it is a visibility write. The dog is still *posed* against the real
+  heightfield — the plants, the relief cap and the terrain pitch are all in play
+  — and then translated by the ground point it was standing on. What is missing
+  is the drawing of the ground, not the ground.
+* **The study cannot be repainted.** It wears the coat pool slot 0 was spawned
+  with, for exactly the reason section 9 gives. A "study in a neutral grey"
+  would need the same per-renderable tint the colour dial needs.
+* **It is still by construction, not by pausing.** `Study::pose` takes no tick.
+  A paused clock would be a second kind of state to keep in step with the frame
+  loop; an expression with no clock in it cannot fall out of step with anything.
+
+The one thing the study does change about the gait is the swing *height*, which
+it holds at zero — a still animal has no swing, and the dachshund's four contacts
+are spread nearly a quarter-cycle apart, so no instant of its walk has all four
+paws down. That is recorded in `src/study.rs` next to the scan that picks the
+instant, not smuggled in as a magic travel constant.
+
+**Verdict:** not a limitation this time — the engine's boundary named the right
+design. Recorded here because the *reason* the study is shaped this way is the
+same fact sections 8 and 9 are about.

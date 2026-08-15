@@ -58,6 +58,8 @@ use crate::debug_view::DebugView;
 use crate::locomotion::Animation;
 use crate::rings::{palette, MAX_DOGS, PALETTE_SIZE};
 use crate::scene::build_scene;
+use crate::stage::Stage;
+use crate::study::Study;
 use crate::variant::SceneVariant;
 
 /// Where the camera sits and what it looks at.
@@ -113,14 +115,19 @@ pub struct InstalledScene {
     pub bone_count: usize,
     /// The field's locomotion, at the configuration it was last built for.
     pub animation: Animation,
+    /// The still dog the [`Stage::Study`] stage draws — the same rig, posed
+    /// without a tick and re-seated at the origin.
+    study: Study,
     /// The configuration `animation` and the pool's visibility currently reflect.
     applied: SceneConfig,
     /// How many pool slots are currently visible.
     shown: usize,
+    /// Whether the static half of the scene — the terrain — is currently drawn.
+    ground: bool,
 }
 
 impl InstalledScene {
-    /// Re-author the scene for `tick` at `config`.
+    /// Re-author the scene for `tick` at `config`, on `stage`.
     ///
     /// Three tiers of work, and which tier runs is decided by what actually
     /// moved:
@@ -129,13 +136,24 @@ impl InstalledScene {
     ///    no allocation beyond the transform vector, no scene rebuild.
     /// 2. **When a gait or speed dial moves** — the resolved gait is re-read.
     ///    Free: it is a `Copy` struct on the animation.
-    /// 3. **When a ring dial moves** — the arc-length tables are re-inverted and
-    ///    the pool's visibility is re-written for the delta. This is the only
-    ///    expensive path, and it is the one the page's ring sliders drag through.
-    pub fn animate(&mut self, running: &mut RunningApp, tick: u64, config: &SceneConfig) {
-        self.resettle(running, config);
-        self.animation
-            .transforms(tick)
+    /// 3. **When a ring dial moves, or the stage changes** — the arc-length
+    ///    tables are re-inverted and the pool's visibility is re-written for the
+    ///    delta. This is the only expensive path, and it is the one the page's
+    ///    ring sliders drag through.
+    ///
+    /// The stage decides *what is drawn*, never *what exists*: both stages are
+    /// the same pool, the same registered meshes and the same rig, so switching
+    /// between them is a handful of visibility writes and one dog's worth of
+    /// transforms. See `src/stage.rs`.
+    pub fn animate(
+        &mut self,
+        running: &mut RunningApp,
+        tick: u64,
+        config: &SceneConfig,
+        stage: Stage,
+    ) {
+        self.resettle(running, config, stage);
+        self.placements(tick, config, stage)
             .into_iter()
             .zip(self.entities.iter().skip(self.creatures_first))
             .for_each(|(placement, entity)| {
@@ -143,39 +161,72 @@ impl InstalledScene {
             });
     }
 
-    /// Bring the animation and the pool's visibility into line with `config`.
-    fn resettle(&mut self, running: &mut RunningApp, config: &SceneConfig) {
-        if !self.applied.live_differs(config) {
-            return;
+    /// Every bone this stage draws, in pool order: the whole walking field, or
+    /// the one still dog that fills the first pool slot.
+    fn placements(&self, tick: u64, config: &SceneConfig, stage: Stage) -> Vec<Transform> {
+        match stage {
+            Stage::Field => self.animation.transforms(tick),
+            Stage::Study => self.study.pose(self.animation.rig(), config.gait()),
         }
+    }
+
+    /// Bring the animation and the pool's visibility into line with `config` and
+    /// `stage`.
+    fn resettle(&mut self, running: &mut RunningApp, config: &SceneConfig, stage: Stage) {
+        self.applied
+            .live_differs(config)
+            .then(|| self.rewalk(config));
+        // The pool's own visibility is the state being reconciled — there is no
+        // separate record of "which stage we were on" to fall out of step with
+        // what is actually drawn.
+        self.show_dogs(running, stage.crowd(self.animation.dog_count()));
+        self.show_ground(running, stage.shows_ground());
+    }
+
+    /// Re-resolve the walk for a moved dial: a retune when the rings are the
+    /// same, a rebuild when they are not.
+    fn rewalk(&mut self, config: &SceneConfig) {
         self.applied = *config;
-        if self.animation.follows(config) {
-            self.animation.retune(config);
-            return;
-        }
-        // A ring dial moved: rebuild the walks, then show exactly the dogs the
-        // new layout asks for. A path that will not build (it cannot, at any
-        // dial position the config clamps to) leaves the previous one standing
-        // rather than emptying the field.
-        Animation::new(self.animation.rig().clone(), config)
-            .into_iter()
-            .for_each(|rebuilt| self.animation = rebuilt);
+        // A ring dial moved: rebuild the walks. A path that will not build (it
+        // cannot, at any dial position the config clamps to) leaves the previous
+        // one standing rather than emptying the field.
+        (!self.animation.follows(config))
+            .then(|| {
+                Animation::new(self.animation.rig().clone(), config)
+                    .into_iter()
+                    .for_each(|rebuilt| self.animation = rebuilt);
+            });
         self.animation.retune(config);
-        let wanted = self.animation.dog_count();
+    }
+
+    /// Show exactly `wanted` dogs, by writing the difference between that and
+    /// the crowd currently standing. A stage or a layout that asks for the crowd
+    /// already on screen costs nothing at all.
+    fn show_dogs(&mut self, running: &mut RunningApp, wanted: usize) {
         let (from, to) = (self.shown.min(wanted), self.shown.max(wanted));
         let visible = wanted > self.shown;
         (from..to).for_each(|dog| {
             (0..self.bone_count).for_each(|bone| {
                 let slot = self.creatures_first + dog * self.bone_count + bone;
-                self.entities
-                    .get(slot)
-                    .into_iter()
-                    .for_each(|entity| {
-                        running.set::<Visible>(*entity, Visible(visible));
-                    });
+                self.entities.get(slot).into_iter().for_each(|entity| {
+                    running.set::<Visible>(*entity, Visible(visible));
+                });
             });
         });
         self.shown = wanted;
+    }
+
+    /// Draw or retire the static half of the scene — the terrain the field walks
+    /// on, which the study suspends its dog above.
+    fn show_ground(&mut self, running: &mut RunningApp, wanted: bool) {
+        (self.ground != wanted).then(|| {
+            self.entities[..self.creatures_first]
+                .iter()
+                .for_each(|entity| {
+                    running.set::<Visible>(*entity, Visible(wanted));
+                });
+            self.ground = wanted;
+        });
     }
 }
 
@@ -247,32 +298,18 @@ pub fn install_scene(
         creatures_first,
         bone_count: bones.len(),
         animation: Animation::new(scene.dog, config).expect("the authored rings are valid paths"),
+        study: Study::new().expect("the authored study circle is a valid path"),
         applied: *config,
         shown: MAX_DOGS,
+        ground: true,
     };
     // Retire every pool slot the opening layout does not use, then stand the
     // crowd on its first frame — so a headless build that never calls `animate`
     // again still presents the scene the page opens on rather than the whole pool
-    // collapsed onto the origin.
-    installed.retire_unused(running);
-    installed.animate(running, 0, config);
+    // collapsed onto the origin. Both happen inside `animate`, which reconciles
+    // the pool against the stage it is handed.
+    installed.animate(running, 0, config, Stage::Field);
     installed
-}
-
-impl InstalledScene {
-    /// Hide every pool slot beyond the opening layout's crowd.
-    fn retire_unused(&mut self, running: &mut RunningApp) {
-        let wanted = self.animation.dog_count();
-        (wanted..MAX_DOGS).for_each(|dog| {
-            (0..self.bone_count).for_each(|bone| {
-                let slot = self.creatures_first + dog * self.bone_count + bone;
-                self.entities.get(slot).into_iter().for_each(|entity| {
-                    running.set::<Visible>(*entity, Visible(false));
-                });
-            });
-        });
-        self.shown = wanted;
-    }
 }
 
 /// The material for one instance: its authored colour, or the shared normal

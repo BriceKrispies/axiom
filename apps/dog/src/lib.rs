@@ -24,9 +24,26 @@
 //! feet may follow are re-derived from it too. `tests/creatures.rs` holds the
 //! proportion band and `tests/locomotion.rs` holds the reach.
 //!
+//! ## Two stages, one bound scene
+//!
+//! Under the canvas are two buttons, and they are the whole of what the page
+//! can present: **the field** (above) and **one dog** — a single still
+//! dachshund, suspended at the origin with no ground under it, framed close
+//! enough to inspect and orbited with the same camera the field is.
+//!
+//! A [`Stage`] is *not* a second scene. Geometry is uploaded once at bind, so
+//! there is exactly one registered mesh set and exactly one instance pool for
+//! the session; a stage decides how many pool slots are drawn, whether they
+//! walk, and where the camera opens. Switching is a handful of visibility writes
+//! and one dog's worth of transforms, and the study is provably the same animal
+//! as the field rather than a second model that could drift from it — it is
+//! posed by the same [`Gait::pose`] from the same rig and the same resolved
+//! dials. See [`Stage`] and [`Study`].
+//!
 //! ## The panel: fifteen dials, one value
 //!
-//! The page is a canvas and a slider panel. Every slider is a [`Dial`], every
+//! The page is a canvas, a stage switch and a slider panel. Every slider is a
+//! [`Dial`], every
 //! dial is a field of the one [`SceneConfig`] value the whole scene is a pure
 //! function of, and the panel itself is *generated* from [`Dial::ALL`] — so a
 //! slider cannot exist without a dial behind it and a dial cannot exist without
@@ -103,6 +120,8 @@ mod quantities;
 mod rainbow;
 mod rings;
 mod scene;
+mod stage;
+mod study;
 mod terrain;
 mod variant;
 
@@ -124,6 +143,19 @@ mod pointer_input;
 #[cfg(target_arch = "wasm32")]
 mod slider_input;
 
+/// The DOM half of the stage switch: the two buttons are *built* from
+/// [`Stage::ALL`] and write the shared [`Stage`] the frame closure reads.
+/// Compiled only for `wasm32`; what a stage means is browser-free and lives in
+/// `src/stage.rs`.
+#[cfg(target_arch = "wasm32")]
+mod stage_input;
+
+/// The address bar, the app's one piece of persistent page state: the dials, the
+/// debug view and the stage, merged rather than overwriting one another.
+/// Compiled only for `wasm32`.
+#[cfg(target_arch = "wasm32")]
+mod page_url;
+
 pub use config::{Dial, DialSpec, SceneConfig, DIAL_COUNT};
 pub use debug_view::{chart_rgba, DebugView, CHART_SIZE};
 pub use install::{install_scene, InstalledScene};
@@ -136,6 +168,8 @@ pub use rings::{
     DOG_BODY_LENGTH, DOG_BODY_WIDTH, MAX_DOGS, MAX_RINGS, PALETTE_SIZE, RING_AIR,
 };
 pub use scene::{build_scene, scene_meshes, Scene};
+pub use stage::{Stage, STAGE_COUNT};
+pub use study::{Study, STUDY_EYE, STUDY_TARGET};
 pub use terrain::{ground_y, TERRAIN_HALF_EXTENT};
 pub use variant::{SceneVariant, DetailParams};
 

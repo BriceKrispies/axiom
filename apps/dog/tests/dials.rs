@@ -23,7 +23,7 @@
 
 use axiom_dog::{
     dog_limbs, dog_parts, dog_total, headless_animated, rings, Animation, DebugView, Dial,
-    SceneConfig, MAX_DOGS,
+    SceneConfig, Stage, MAX_DOGS,
 };
 
 fn animation(config: &SceneConfig) -> Animation {
@@ -292,7 +292,7 @@ fn re_authoring_at_a_new_layout_moves_the_drawn_instance_count() {
 
     // Fewer rings: the retired slots leave the frame entirely.
     let fewer = opening.with(Dial::RingCount, 3.0);
-    installed.animate(&mut app, 1, &fewer);
+    installed.animate(&mut app, 1, &fewer, Stage::Field);
     assert_eq!(drawn(&mut app, 1), 1 + bones * dog_total(&fewer));
     assert!(dog_total(&fewer) < dog_total(&opening));
 
@@ -302,12 +302,12 @@ fn re_authoring_at_a_new_layout_moves_the_drawn_instance_count() {
     let more = opening
         .with(Dial::DogSize, 8.0)
         .with(Dial::RingCount, 10.0);
-    installed.animate(&mut app, 2, &more);
+    installed.animate(&mut app, 2, &more, Stage::Field);
     assert_eq!(drawn(&mut app, 2), 1 + bones * dog_total(&more));
     assert!(dog_total(&more) > dog_total(&opening));
 
     // And back to where it started, exactly.
-    installed.animate(&mut app, 3, &opening);
+    installed.animate(&mut app, 3, &opening, Stage::Field);
     assert_eq!(drawn(&mut app, 3), 1 + bones * dog_total(&opening));
     println!(
         "[pool] {} -> {} -> {} -> {} dogs of a {MAX_DOGS}-slot pool",

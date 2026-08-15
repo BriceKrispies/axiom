@@ -24,13 +24,20 @@ use wasm_bindgen::JsCast;
 use crate::config::SceneConfig;
 use crate::debug_view::{chart_rgba, DebugView, CHART_SIZE};
 use crate::orbit::OrbitState;
+use crate::page_url;
 use crate::rings::MAX_DOGS;
+use crate::stage::Stage;
+use crate::stage_input::STAGE_KEY;
 use crate::variant::SceneVariant;
 use crate::{CANVAS_ID, HEIGHT, WIDTH};
 
 /// The element the dial panel is built inside. The page supplies it empty; every
 /// control in it comes from `src/slider_input.rs`.
 const CONTROLS_ID: &str = "dog-controls";
+
+/// The element the stage switch is built inside. The page supplies it empty;
+/// both buttons in it come from `src/stage_input.rs`.
+const STAGES_ID: &str = "dog-stages";
 
 /// The live backend's instance-buffer capacity, in **total instances across all
 /// batches** — the renderer packs every batch back-to-back into one buffer and
@@ -91,8 +98,8 @@ pub fn dog_start() {
     // The whole dial panel round-trips through the query string, so a reload —
     // the detail dial's, or a device rotation's — comes back to the scene the
     // user had built rather than to the defaults.
-    let opening = SceneConfig::from_query(&query_string());
-    let view = DebugView::from_label(&query_value("view"));
+    let opening = SceneConfig::from_query(&page_url::query());
+    let view = DebugView::from_label(&page_url::param("view"));
     let (width, height) = surface_pixels();
 
     let mut windowing = WindowingApi::new();
@@ -109,12 +116,18 @@ pub fn dog_start() {
     let config: Rc<RefCell<SceneConfig>> = Rc::new(RefCell::new(opening));
     crate::slider_input::install(CONTROLS_ID, config.clone());
 
-    // The camera the page drives. `OrbitState::framed` seeds itself from the
-    // authored eye/target in `install.rs`, so the first frame is the shot the
-    // app has always opened on; every later frame is whatever the user's
-    // gestures have made of it.
-    let orbit: Rc<RefCell<OrbitState>> = Rc::new(RefCell::new(OrbitState::framed()));
+    // Which of the two stages the page is showing — the walking field, or the
+    // one still dog. It is a *presentation* of the geometry already bound, so it
+    // is a live value like the dials rather than a rebuild like the detail dial.
+    let stage: Rc<Cell<Stage>> = Rc::new(Cell::new(Stage::from_key(&page_url::param(STAGE_KEY))));
+
+    // The camera the page drives. `OrbitState::for_stage` seeds itself from the
+    // stage's own authored eye/target, so the first frame is the shot that stage
+    // has always opened on; every later frame is whatever the user's gestures
+    // have made of it.
+    let orbit: Rc<RefCell<OrbitState>> = Rc::new(RefCell::new(OrbitState::for_stage(stage.get())));
     crate::pointer_input::install(CANVAS_ID, orbit.clone());
+    crate::stage_input::install(STAGES_ID, stage.clone(), orbit.clone());
     install_resize_reload(width, height);
 
     let _ = windowing.run_web_multi(CANVAS_ID, meshes, materials, LIVE_CAPACITY, move |tick| {
@@ -122,11 +135,13 @@ pub fn dog_start() {
         // reuses the existing camera node in place, so a moving camera costs no
         // allocation and leaks no scene nodes.
         orbit.borrow().apply(&mut running);
-        // Re-author every bone for this tick, at whatever the panel now says.
-        // The pose is a pure function of `(tick, config)` — the browser supplies
-        // a frame number and a slider position and nothing else, so the same
-        // pair always draws the same pose.
-        installed.animate(&mut running, tick, &config.borrow());
+        // Re-author every bone for this tick, at whatever the panel now says, on
+        // whichever stage the switch is on. The pose is a pure function of
+        // `(tick, config, stage)` — the browser supplies a frame number, a
+        // slider position and a button, and nothing else, so the same triple
+        // always draws the same pose. (On the study stage the tick is not read
+        // at all: see `src/study.rs`.)
+        installed.animate(&mut running, tick, &config.borrow(), stage.get());
         let outcome = running.tick(tick);
         let lights = outcome
             .lights()
@@ -287,27 +302,4 @@ fn install_resize_reload(width: u32, height: u32) {
 /// A `0..1` intensity as a validated ratio.
 fn chan(value: f32) -> Ratio {
     Ratio::finite_or_zero(value)
-}
-
-/// The page URL's query string, or the empty string.
-fn query_string() -> String {
-    web_sys::window()
-        .and_then(|window| window.location().search().ok())
-        .unwrap_or_default()
-}
-
-/// One query-string value from the page URL, or the empty string.
-///
-/// This is the app's only read of the browser environment at *scene-build* time
-/// that the dial panel does not own, and it happens once at startup — the debug
-/// view it selects re-normals geometry, which the live backend uploads once at
-/// bind, so it is fixed for the session exactly as the detail dial is.
-fn query_value(key: &str) -> String {
-    query_string()
-        .trim_start_matches('?')
-        .split('&')
-        .filter_map(|pair| pair.split_once('='))
-        .find(|(name, _)| *name == key)
-        .map(|(_, value)| value.to_string())
-        .unwrap_or_default()
 }
