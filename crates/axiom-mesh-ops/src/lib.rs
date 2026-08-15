@@ -56,6 +56,7 @@ pub use tessellation::{
 mod heightfield;
 mod implicit_surface;
 mod marching_cubes_tables;
+mod solid_field;
 mod surface_tessellation;
 
 pub use heightfield::{
@@ -64,6 +65,7 @@ pub use heightfield::{
 pub use implicit_surface::{
     implicit_surface_mesh, ImplicitSurfaceOptions, IsoValue, ScalarField,
 };
+pub use solid_field::{Solid, SolidField, SolidLattice, SKIN_INFLUENCES};
 pub use surface_tessellation::{tessellate_surface, SurfaceGrid};
 
 mod primitive_box;
