@@ -12,7 +12,7 @@ into the engine's deterministic geometry library. The mesh layer can only
 validate and manipulate geometry it is handed; this layer is what produces it -
 turning explicit descriptions (a radius and a segment count, a 2D profile and an
 extrusion distance, a profile and a curve, a sampled height grid, a sampled
-scalar field, a set of posed solids) into validated meshes. Every operator is a pure function of its
+scalar field) into validated meshes. Every operator is a pure function of its
 inputs: it owns no state, reads no clock, takes no callback, and never reaches
 for a renderer, a scene, or a resource table. Semantic generators - roads,
 trees, buildings, vehicles - are compositions of these operators and belong to
@@ -28,9 +28,6 @@ introduced_capabilities = [
     "Profile",
     "ProfileWinding",
     "CapPolicy",
-    "Solid",
-    "SolidField",
-    "SolidLattice",
 ]
 
 consumed_capabilities = [
@@ -60,9 +57,3 @@ must_reference = ["Vec2", "MeshError"]
 [[proof_exports]]
 export = "Segments"
 must_reference = ["MeshError", "MeshResult"]
-
-# A solid field is posed in math's Vec3 space, measured in the kernel's Meters,
-# and reports its failures in the mesh layer's result type.
-[[proof_exports]]
-export = "SolidField"
-must_reference = ["Vec3", "Meters", "MeshResult"]
