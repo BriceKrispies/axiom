@@ -194,7 +194,8 @@ impl WindowingApi {
     /// is a shared cell the caller's frame closure writes this frame's skinned draws
     /// into (each `(mesh_id, material_id, mvp, world, colour, joint palette)`) — the
     /// driver reads it just before each present and hands it to the GPU skinning
-    /// pass. The frame closure returns the SAME 7-tuple as [`Self::run_web_multi`]
+    /// pass. `ambient` overrides the authored hemisphere ambient for callers that
+    /// have their own; `None` keeps the look the app already bound. The frame closure returns the SAME 7-tuple as [`Self::run_web_multi`]
     /// (the skinned draws ride the shared cell, not the tuple), so the nine other
     /// `run_web_multi` callers stay untouched. wasm32 only; consumes the driver.
     #[cfg(target_arch = "wasm32")]
@@ -206,7 +207,7 @@ impl WindowingApi {
         materials: Vec<axiom_host::MaterialTexture>,
         skinned_meshes: Vec<(u64, Vec<f32>, Vec<u32>)>,
         max_instances: u32,
-        ambient: axiom_host::FrameAmbient,
+        ambient: Option<axiom_host::FrameAmbient>,
         skinned_source: std::rc::Rc<std::cell::RefCell<Vec<SkinnedDrawTuple>>>,
         mut frame_fn: F,
     ) -> Result<(), wasm_bindgen::JsValue>
@@ -223,10 +224,16 @@ impl WindowingApi {
                 Option<axiom_host::SdfScene>,
             ) + 'static,
     {
-        // The explicit `ambient` argument still wins for this entry (the soccer arm
-        // passes its pitch daylight directly); every other part of the look — fog,
-        // sky, bloom — comes from the driver.
-        let look = self.render_look().with_ambient(ambient);
+        // An explicit `ambient` still wins for this entry (an app with its own
+        // daylight passes it directly); every other part of the look — fog, sky,
+        // bloom — comes from the driver. It is an `Option` because most callers
+        // want exactly the look they authored: forcing an ambient on everyone
+        // would make one app's need every app's argument, and an app that has to
+        // name `FrameAmbient` to say "the one I already set" is being asked to
+        // depend on the host layer for a no-op.
+        let look = ambient
+            .into_iter()
+            .fold(self.render_look(), |look, ambient| look.with_ambient(ambient));
         self.drive_web_multi(
             canvas_id,
             meshes,

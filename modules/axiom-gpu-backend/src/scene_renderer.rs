@@ -123,7 +123,30 @@ struct ShadowU { light_vp: mat4x4<f32> };
 // Skinning: the joint-matrix palette for the skinned pass (group 3). All skinned
 // draws' palettes are concatenated; each draw's per-instance `joint_base` indexes
 // the start of its own palette. Bound only by the skinned pipeline.
-@group(3) @binding(0) var<storage, read> joint_palette: array<mat4x4<f32>>;
+// The joint palette lives in a TEXTURE, not a storage buffer, and that is a
+// portability decision rather than a stylistic one: a vertex-stage storage
+// buffer is a WebGPU-class capability that WebGL2 does not have at all, so a
+// storage palette means no skinned geometry on the fallback arm - a browser
+// showing the rigid half of a scene and silently dropping every character in
+// it. Vertex texture fetch, by contrast, is guaranteed by GLES 3.0 (>= 16
+// vertex texture units), so this reads on every backend the engine targets.
+//
+// One matrix is four consecutive RGBA32F texels - its four columns - laid out
+// row-major across `PALETTE_ROW_TEXELS` texels per row. `textureLoad` takes an
+// exact texel, so no filtering (and no float-linear extension) is involved.
+@group(3) @binding(0) var joint_palette: texture_2d<f32>;
+
+// Joint matrix `index`, unpacked from its four texels.
+fn joint_matrix(index: u32) -> mat4x4<f32> {
+    let width = textureDimensions(joint_palette).x;
+    let base = index * 4u;
+    return mat4x4<f32>(
+        textureLoad(joint_palette, vec2<u32>((base + 0u) % width, (base + 0u) / width), 0),
+        textureLoad(joint_palette, vec2<u32>((base + 1u) % width, (base + 1u) / width), 0),
+        textureLoad(joint_palette, vec2<u32>((base + 2u) % width, (base + 2u) / width), 0),
+        textureLoad(joint_palette, vec2<u32>((base + 3u) % width, (base + 3u) / width), 0),
+    );
+}
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -207,10 +230,10 @@ fn vs_skinned(
     let mvp = mat4x4<f32>(m0, m1, m2, m3);
     let world = mat4x4<f32>(w0, w1, w2, w3);
     let base = u32(joint_base.x);
-    let skin = weights.x * joint_palette[base + u32(joints.x)]
-             + weights.y * joint_palette[base + u32(joints.y)]
-             + weights.z * joint_palette[base + u32(joints.z)]
-             + weights.w * joint_palette[base + u32(joints.w)];
+    let skin = weights.x * joint_matrix(base + u32(joints.x))
+             + weights.y * joint_matrix(base + u32(joints.y))
+             + weights.z * joint_matrix(base + u32(joints.z))
+             + weights.w * joint_matrix(base + u32(joints.w));
     let sp = skin * vec4<f32>(position, 1.0);
     let sn = skin * vec4<f32>(normal, 0.0);
     var out: VsOut;
@@ -1019,9 +1042,63 @@ const SKINNED_VERTEX_STRIDE: u64 = 20 * 4;
 /// Floats per **skinned** instance: mvp(16) + world(16) + colour(4) + joint_base(4).
 const SKINNED_INSTANCE_FLOATS: usize = 40;
 const SKINNED_INSTANCE_STRIDE: u64 = (SKINNED_INSTANCE_FLOATS as u64) * 4;
-/// Max joint matrices across all skinned draws in one frame (the palette storage
-/// buffer capacity). A soccer frame uses ~65; 1024 is a generous, bounded cap.
-const PALETTE_CAP: usize = 1024;
+/// How many RGBA32F texels wide the joint-palette texture is. One matrix is four
+/// texels, so a row holds 64 matrices; 256 texels is a 4 KiB row, which is
+/// already a multiple of the 256-byte row alignment `write_texture` requires.
+const PALETTE_ROW_TEXELS: u32 = 256;
+
+/// How many rows the palette texture needs to hold [`PALETTE_CAP`] matrices.
+const fn palette_rows() -> u32 {
+    ((PALETTE_CAP as u32) * 4).div_ceil(PALETTE_ROW_TEXELS)
+}
+
+/// Upload this frame's packed palette into the top rows of the palette texture.
+///
+/// Only the rows the frame actually uses are written - a crowd of ten bodies
+/// costs ten bodies' worth of upload, not the whole capacity - so padding to a
+/// whole row is the only waste.
+fn write_palette(queue: &wgpu::Queue, texture: &wgpu::Texture, floats: &[f32]) {
+    let row_floats = (PALETTE_ROW_TEXELS * 4) as usize;
+    let rows = floats.len().div_ceil(row_floats);
+    let mut padded = floats.to_vec();
+    padded.resize(rows * row_floats, 0.0);
+    (rows > 0).then(|| {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&padded),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(PALETTE_ROW_TEXELS * 16),
+                rows_per_image: Some(rows as u32),
+            },
+            wgpu::Extent3d {
+                width: PALETTE_ROW_TEXELS,
+                height: rows as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+    });
+}
+
+/// Max joint matrices across all skinned draws in one frame (the palette
+/// texture's capacity).
+///
+/// This is a **crowd** bound, not a character bound: a skinned draw cannot be
+/// instanced — each carries its own palette — so a frame drawing `n` bodies of
+/// `b` bones needs `n · b` matrices. One articulated character is ~65; a scene
+/// full of them is three figures times that, which is why the old 1024 was a
+/// character's number standing in for a crowd's.
+///
+/// At 4096 the texture is 4096 × 64 B = 256 KB, a rounding error against a
+/// frame's vertex traffic, and it is allocated only for a scene that actually
+/// registers skinned meshes. A crowd past it stops drawing rather than
+/// misdrawing (see the `break` below).
+const PALETTE_CAP: usize = 4096;
 
 /// One uploaded mesh's GPU buffers: its interleaved vertex stream and triangle
 /// index buffer, plus the index count to draw.
@@ -1109,31 +1186,29 @@ struct Skinning {
     meshes: HashMap<u64, MeshBuffers>,
     /// Per-skinned-draw instance data (mvp + world + colour + joint_base).
     instance_buffer: wgpu::Buffer,
-    /// The concatenated joint-matrix palette for every skinned draw this frame.
-    palette_buffer: wgpu::Buffer,
-    /// Group 3 of the skinned pass: the joint palette storage buffer.
+    /// The concatenated joint-matrix palette for every skinned draw this frame,
+    /// four RGBA32F texels per matrix.
+    palette_texture: wgpu::Texture,
+    /// Group 3 of the skinned pass: the joint palette texture.
     palette_bind_group: wgpu::BindGroup,
 }
 
 impl Skinning {
-    /// Build the skinned pass, or [`None`] when this device cannot run it.
+    /// Build the skinned pass, or [`None`] when the scene has no skinned meshes.
     ///
-    /// The gate is `max_storage_buffers_per_shader_stage`, read from the DEVICE.
-    /// That single number is the honest test for all three of the ways this can
-    /// be unavailable:
+    /// This used to be gated on `max_storage_buffers_per_shader_stage`, because
+    /// the palette was a vertex-stage storage buffer — a WebGPU-class
+    /// capability. That gate meant **every WebGL2 browser silently drew no
+    /// skinned geometry at all**; and because the live arm requests
+    /// `downlevel_webgl2_defaults` on its WebGPU path too so the two backends
+    /// agree, it meant no live browser arm could draw a skinned body on *any*
+    /// backend. A whole engine capability was unreachable from the browser, and
+    /// nothing said so — the characters simply were not there.
     ///
-    /// - WebGL2 (wgpu's GL backend) has no storage buffers, and its devices are
-    ///   created with `downlevel_webgl2_defaults` limits, which pin it to 0;
-    /// - the live browser arm requests those same limits on its **WebGPU** path
-    ///   too (so the two backends render identically), so a "is this WebGPU?"
-    ///   check would wrongly allow a device that had been told to refuse;
-    /// - native/offscreen devices ask for `Limits::default()` and get the real
-    ///   ceiling, so skinning stays fully enabled there.
-    ///
-    /// A device that cannot host the palette simply does not get a skinned pass;
-    /// rigid geometry is unaffected. That is a real capability reduction, not a
-    /// papered-over failure — and it is confined to backends that never had the
-    /// capability to begin with.
+    /// The palette is a texture now (see the WGSL above) and vertex texture
+    /// fetch is guaranteed by GLES 3.0, so there is nothing left to gate on and
+    /// nothing left to be quietly missing. The `Option` remains only so a scene
+    /// with no skinned meshes skips building the pass at all.
     fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -1143,33 +1218,43 @@ impl Skinning {
         skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
         max_instances: u32,
     ) -> Option<Skinning> {
-        (device.limits().max_storage_buffers_per_shader_stage >= 1).then(|| {
+        (!skinned_mesh_set.is_empty()).then(|| {
             let palette_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("axiom-palette-layout"),
                     entries: &[wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
                         },
                         count: None,
                     }],
                 });
-            let palette_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            let palette_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("axiom-joint-palette"),
-                size: (PALETTE_CAP as u64) * 64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
+                size: wgpu::Extent3d {
+                    width: PALETTE_ROW_TEXELS,
+                    height: palette_rows(),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             });
             let palette_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("axiom-palette-bind-group"),
                 layout: &palette_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: palette_buffer.as_entire_binding(),
+                    resource: wgpu::BindingResource::TextureView(
+                        &palette_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                    ),
                 }],
             });
             Skinning {
@@ -1191,7 +1276,7 @@ impl Skinning {
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 }),
-                palette_buffer,
+                palette_texture,
                 palette_bind_group,
             }
         })
@@ -1651,11 +1736,7 @@ impl SceneRenderer {
                 skinned_instances.extend_from_slice(&[base as f32, 0.0, 0.0, 0.0]);
                 skinned_draws.push((d.mesh_id, d.material_id, byte_offset));
             }
-            queue.write_buffer(
-                &skinning.palette_buffer,
-                0,
-                bytemuck::cast_slice(&palette_floats),
-            );
+            write_palette(queue, &skinning.palette_texture, &palette_floats);
             queue.write_buffer(
                 &skinning.instance_buffer,
                 0,
