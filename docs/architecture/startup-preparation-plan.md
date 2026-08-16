@@ -1,5 +1,19 @@
 # Startup Procedural Preparation — Work Manifest
 
+> **CORRECTION (superseded in part): `crates/axiom-proc` no longer exists.**
+> The legacy v1 recipe stack was retired by
+> `docs/work-manifests/shader-material-field-system/P1-retire-legacy-proc-stack.md`,
+> which migrated `proc-validate`, `placement` and four leaf consumers onto
+> `axiom-recipe` + `axiom-proc-core` and deleted the crate. **`ProcTrace` and the
+> resumable `Evaluation::{is_done, step(budget), into_output}` were dropped with
+> it** — nothing in the repo drove `step` with a real budget.
+>
+> Every reference below to `axiom_proc::Evaluation` as "the engine already has a
+> resumable primitive" or "the future answer" (§9.3, R4, and the capability table)
+> is therefore **false as written**. Incremental, budgeted preparation is now an
+> unsolved problem with no existing primitive behind it; it would have to be built.
+> Nothing else in this plan is affected — the barrier itself never depended on it.
+
 > **Status: design complete, implementation NOT started.** The regression
 > baseline this plan is measured against **is** implemented and green (§4).
 >
@@ -978,11 +992,13 @@ reopening §10.** Say that, rather than implying it is additive.
 
 ### 9.3 No budgeting or resumption in v1
 
-`prepare()` runs to completion. The engine already has a resumable primitive for
+`prepare()` runs to completion. ~~The engine already has a resumable primitive for
 callers that need to spread generation across frames —
 `axiom_proc::Evaluation::{is_done, step(budget), into_output}` — and it sits
 *above* runtime in the DAG. A task that wants incremental generation drives an
-`Evaluation` to completion inside its own `prepare`.
+`Evaluation` to completion inside its own `prepare`.~~ **No longer true**: that
+crate and that primitive were deleted (see the correction at the top). There is
+no resumable generation primitive in the engine today.
 
 Known consequence: on `wasm32` a long synchronous `prepare()` blocks the main
 thread and the page cannot repaint. That is **exactly what happens today**
@@ -1756,7 +1772,7 @@ when:* all green.
 | **R1** | **The barrier does not gate `RunningApp::render`.** An app that owns its own loop can present unprepared. | `modules/axiom/src/app/frame.rs:102` — public, "safe to call standalone", zero `runtime` references. Also `HostStepDriver::drive` returns `Ok` without stepping when `steps() == 0` | §1.1 states the guarantee honestly. Burnt Rubber presents via `tick` (`app.rs:532`) so the vertical proof is unaffected. If presentation gating is later wanted it is a **second consumer** of `RuntimeState::Prepared`, not a relocation of the phase |
 | **R2** | **`Prepared` means "someone called prepare", not "the right work was declared".** A zero-task schedule satisfies it, and T7 mandates exactly that at 23 sites. | §7.4, §14.1 | Accepted and documented (§1.1). The mandatory contract is `modules/axiom`'s `AuthorTask`, in the composition root. Do not describe the runtime as the guarantor |
 | **R3** | **Mesh registration order changes during M4, moving render *and* resource goldens.** | Mesh ids are assigned in registration order and encoded in both artifacts | T12 preserves order explicitly; the golden run is the detector; re-blessing is forbidden |
-| **R4** | **A long synchronous `prepare()` blocks the browser main thread.** | `src/web.rs:52` is one synchronous wasm entry; every app ships a `loading…` div the browser cannot animate | **Status quo, not a regression** (§2.4). T17 quantifies it. A budgeted model (`axiom_proc::Evaluation`) is the future answer, out of scope (§9.3) |
+| **R4** | **A long synchronous `prepare()` blocks the browser main thread.** | `src/web.rs:52` is one synchronous wasm entry; every app ships a `loading…` div the browser cannot animate | **Status quo, not a regression** (§2.4). T17 quantifies it. A budgeted model would be the answer, but the primitive that was cited here (`axiom_proc::Evaluation`) has since been **deleted** — so this is now an open problem with nothing behind it, out of scope (§9.3) |
 | **R5** | **No peak-memory infrastructure exists.** | Only End Zone's `leakcheck`, which measures per-frame growth | Record the gap. It becomes load-bearing only for the deferred P6 |
 | **R6** | **CI is `workflow_dispatch`-only since 2026-07-14** — none of these gates run automatically. | `.github/workflows/ci.yml` | Run all gates locally before pushing. **The implementing agent must not assume CI will catch anything** |
 | **R7** | **Two gates run concurrently exhaust memory on this machine**, after which dylint reports a *fake* `cargo metadata` error that masks the real finding. | `link.exe 0xc0000142` is the OOM signature | Run gates strictly one at a time |
