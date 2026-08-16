@@ -717,3 +717,111 @@ fn a_surfaces_emission_is_added_after_the_cues_like_the_draws_own_emissive() {
     assert!((colour[1] - 1.25).abs() < 1e-6, "{colour:?}");
     assert!((colour[0] - 1.0).abs() < 1e-6, "{colour:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Lighting models: two honoured exactly, one degraded to the nearest.
+// ---------------------------------------------------------------------------
+
+/// A depth-cue profile with **lighting on and every other cue off**, so a
+/// triangle's colour is exactly its base times the light factor — which is the
+/// only thing a lighting model changes here.
+fn lighting_only() -> CanvasDepthCueProfile {
+    let mut profile = cues_off();
+    profile.lighting.enabled = true;
+    profile
+}
+
+/// A surface with one constant base colour under `model`.
+fn model_surface(model: LightingModel) -> axiom_surface::Surface {
+    axiom_surface::SurfaceBuilder::new()
+        .lighting(model)
+        .constant(
+            axiom_surface::SurfaceChannel::BaseColor,
+            axiom_field::FieldValue::vec4(axiom_math::Vec4::new(0.2, 0.4, 0.6, 1.0)),
+        )
+        .build()
+        .expect("a vec4 constant is a legal base colour under every model")
+}
+
+/// Rasterize one full-screen quad carrying `model`'s surface, under a profile
+/// whose only active cue is lighting.
+fn model_colour(model: LightingModel) -> [f32; 4] {
+    let surface = model_surface(model);
+    let cache = MeshCache::load(&[ground(1, [1.0, 1.0, 1.0, 1.0])]);
+    let frame = convert_surfaced(
+        &packet(vec![draw(0, 1).with_surface_program(surface.digest().raw())]),
+        &cache,
+        &opts_cued(lighting_only()),
+        &SurfaceCache::build(
+            std::slice::from_ref(&surface),
+            axiom_kernel::Seconds::finite_or_zero(0.0),
+        ),
+    );
+    assert_eq!(frame.triangles.len(), 2);
+    frame.triangles[0].color()
+}
+
+/// **`Unlit` is implemented, not approximated.** An unlit surface's authored
+/// base colour reaches the framebuffer unmodified by ambient or diffuse — the
+/// light factor is exactly one, not merely close to one — while the same surface
+/// under a lit model is darkened by the same profile.
+#[test]
+fn an_unlit_surface_keeps_its_authored_colour_through_the_lit_shade() {
+    let unlit = model_colour(LightingModel::Unlit);
+    assert_eq!(
+        unlit,
+        [0.2, 0.4, 0.6, 1.0],
+        "the light factor must be EXACTLY one for an unlit surface"
+    );
+    // The same surface, lit, is a different colour — so the profile really is
+    // shading and the assertion above is not vacuous.
+    assert_ne!(unlit, model_colour(LightingModel::Lambert));
+    // And with lighting switched off at the profile, a LIT surface reaches the
+    // same colour by the other route: the two gates agree.
+    let surface = model_surface(LightingModel::Lambert);
+    let cache = MeshCache::load(&[ground(1, [1.0, 1.0, 1.0, 1.0])]);
+    let dark = convert_surfaced(
+        &packet(vec![draw(0, 1).with_surface_program(surface.digest().raw())]),
+        &cache,
+        &opts(),
+        &SurfaceCache::build(
+            std::slice::from_ref(&surface),
+            axiom_kernel::Seconds::finite_or_zero(0.0),
+        ),
+    );
+    assert_eq!(dark.triangles[0].color(), unlit);
+}
+
+/// **`Lambert` is this backend's native model, and `LambertSpecular` degrades to
+/// it exactly.** `shade_triangle` is `ambient + brightness * light_colour` with
+/// no view vector anywhere in it, so the two lit models can only differ by the
+/// term this path has never had — and they render the identical pixel.
+#[test]
+fn lambert_is_native_here_and_lambert_specular_degrades_to_it_exactly() {
+    let lambert = model_colour(LightingModel::Lambert);
+    let specular = model_colour(LightingModel::LambertSpecular);
+    assert_eq!(
+        lambert, specular,
+        "the degrade must be exact — Lambert, not an approximation of specular"
+    );
+    // A surface authoring no model at all is `LambertSpecular`, so every
+    // existing frame takes this same path and is unchanged.
+    assert_eq!(LightingModel::default(), LightingModel::LambertSpecular);
+    // The lit models really are lit: the shade darkened the authored colour.
+    assert!(lambert[0] < 0.2, "{lambert:?}");
+}
+
+/// A draw that authored **no** surface is lit exactly as it always was — the
+/// model only reaches the shade through a surface, so the default path cannot
+/// have moved.
+#[test]
+fn a_draw_with_no_surface_is_lit_exactly_as_before() {
+    let cache = MeshCache::load(&[ground(1, [0.2, 0.4, 0.6, 1.0])]);
+    let plain = convert(&packet(vec![draw(0, 1)]), &cache, &opts_cued(lighting_only()));
+    // The mesh colour under the lit profile — the same pixel a `LambertSpecular`
+    // surface of the same colour produces, because that is the default model.
+    assert_eq!(
+        plain.triangles[0].color(),
+        model_colour(LightingModel::LambertSpecular)
+    );
+}

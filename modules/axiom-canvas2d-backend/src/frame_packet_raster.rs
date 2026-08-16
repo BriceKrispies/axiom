@@ -36,6 +36,7 @@
 use std::collections::HashSet;
 
 use axiom_host::{FrameDrawItem, FramePacket};
+use axiom_surface::LightingModel;
 
 use crate::canvas_depth_cue::{
     face_normal_model, face_normal_world, height_factor, hemisphere_ambient, lighting_brightness,
@@ -607,10 +608,32 @@ fn project_triangle_cued(
     });
     // Flat per-triangle cue inputs (shared by every clipped piece).
     let normal = face_normal_world(&model, &draw.world);
-    let brightness = lighting_brightness(normal, light.dir, light.intensity, cues);
+    // HOW the surface participates in lighting. A draw that authored no surface
+    // is `LambertSpecular`, the engine default — so every existing frame keeps
+    // exactly the inputs it had.
+    //
+    // `Lambert` and `LambertSpecular` are the same thing on this backend, and
+    // that is not a shortcut: `shade_triangle` is `ambient + brightness *
+    // light_colour` with no view vector, which IS the Lambert model. The
+    // specular term is what the two differ by and this path has never had one;
+    // the drop rides `RenderCapability::Specular`, which
+    // `BackendCapabilityProfile::canvas2d` has never contained.
+    //
+    // `Unlit` is the same arithmetic with the light factor held at exactly one:
+    // a unit ambient and a zero brightness make `ambient + brightness * colour`
+    // exactly `1.0`, so the authored base colour survives the shade unmodified.
+    // Expressing the model by choosing the INPUTS rather than by taking a second
+    // code path is the same technique `fog_factor` uses for its capability gate
+    // on the GPU arm, and it keeps one shading function for all three models.
+    let gathers = shaded.map_or(LightingModel::default(), ShadedChannels::lighting)
+        != LightingModel::Unlit;
+    let brightness = [
+        0.0,
+        lighting_brightness(normal, light.dir, light.intensity, cues),
+    ][usize::from(gathers)];
     // Hemisphere ambient (sky/ground by the face normal), shared by every
     // clipped piece of this triangle.
-    let ambient = hemisphere_ambient(normal, cues);
+    let ambient = [[1.0, 1.0, 1.0], hemisphere_ambient(normal, cues)][usize::from(gathers)];
     let elevation = world_y(mean_model, &draw.world);
 
     // Fan-triangulate the clipped convex polygon (0/3/4 verts) from vertex 0, and

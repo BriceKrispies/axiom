@@ -11,6 +11,10 @@ allowed_layers = [
     # build_frame_packet returns host::FramePacket, consumed by both the GPU
     # and (later) Canvas 2D backends.
     "host",
+    # RenderMaterial names the LightingModel of the surface it describes; a
+    # draw's RenderPipelineKind (BASIC_LIT / UNLIT) is derived from it rather
+    # than hand-set, which is what finally puts something behind UNLIT.
+    "surface",
 ]
 
 allowed_modules = []

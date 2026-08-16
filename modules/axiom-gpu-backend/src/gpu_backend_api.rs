@@ -417,6 +417,33 @@ impl GpuBackendApi {
         .degradations()
     }
 
+    /// Which pipeline a draw naming `program_id` selects, given the frame's
+    /// authored `surfaces`: `axiom_render::RenderPipelineKind::UNLIT` (`2`) for a
+    /// surface whose [`axiom_surface::LightingModel`] is `Unlit`, and
+    /// `BASIC_LIT` (`1`) for every other surface, for a program this backend was
+    /// never handed, and for the `0` every draw that authored no surface carries.
+    ///
+    /// The render module has emitted that marker per object since it was
+    /// written — and it has always died at the `axiom_host::FramePacket`
+    /// boundary, which carries no pipeline lane. This answers it from the
+    /// **surface** instead, which the packet already names by digest: the packet
+    /// stays primitive-only, nothing is duplicated into a second lane that could
+    /// disagree with the surface, and a caller holding both a packet and its
+    /// surfaces can recover the selection. A preparation-time query, exactly like
+    /// [`Self::surface_degradations`] and [`Self::surface_parameter_bytes`].
+    ///
+    /// This backend itself still runs **one** lit pipeline: the model is a value
+    /// inside its single program, not a second module (see
+    /// `crate::surface_program::emit_lighting`).
+    pub fn surface_pipeline_kind(
+        &self,
+        surfaces: &[axiom_surface::Surface],
+        program_id: u64,
+    ) -> u32 {
+        crate::surface_program::SurfaceProgramSet::build(surfaces, self.capability)
+            .pipeline_kind(program_id)
+    }
+
     /// The bytes this backend uploads into the shared surface-parameter buffer
     /// for `surfaces`: one fixed-size region per program, at
     /// `index * 512` — a 256-byte-aligned dynamic offset.

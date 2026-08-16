@@ -16,7 +16,9 @@
 //! of the surface, so two identical surfaces plan identically — which is what
 //! makes [`SurfaceProgramPlan::program_id`] a usable program-cache key.
 
-use axiom_surface::{Surface, SurfaceChannel, SurfaceInput, SurfaceRequirements};
+use axiom_surface::{
+    LightingModel, Surface, SurfaceChannel, SurfaceInput, SurfaceRequirements,
+};
 
 use crate::surface_program::params::ParamLayout;
 
@@ -129,6 +131,7 @@ pub(crate) struct SurfaceProgramPlan {
     param_layout: ParamLayout,
     inputs: SurfaceInput,
     requirements: SurfaceRequirements,
+    lighting: LightingModel,
 }
 
 impl SurfaceProgramPlan {
@@ -146,7 +149,21 @@ impl SurfaceProgramPlan {
             param_layout: ParamLayout::of(requirements.param_count()),
             inputs: requirements.inputs(),
             requirements,
+            lighting: surface.lighting(),
         }
+    }
+
+    /// How this surface participates in lighting.
+    ///
+    /// A **plan** fact rather than a separate lookup, because it is decided at
+    /// the same moment and from the same surface as the stage split, and because
+    /// both of the things this backend does with it — emitting the program's
+    /// `axiom_lighting_model` and deriving the draw's pipeline marker — are
+    /// preparation-time answers keyed by the same `program_id`. It costs the plan
+    /// two bytes and no pipeline: see
+    /// [`crate::surface_program::emit_lighting`].
+    pub(crate) const fn lighting(self) -> LightingModel {
+        self.lighting
     }
 
     /// The program-cache key — the draw's `surface_program`.
@@ -231,6 +248,29 @@ mod tests {
         assert_eq!(plan.requirements(), surface.requirements());
         assert_eq!(plan, SurfaceProgramPlan::of(&surface));
         assert!(format!("{plan:?}").contains("SurfaceProgramPlan"));
+        // Saying nothing about lighting plans the model the engine already
+        // computes, so a plan changes no pixel on its own.
+        assert_eq!(plan.lighting(), LightingModel::LambertSpecular);
+    }
+
+    /// The plan carries the authored model verbatim — all three of them, and
+    /// nothing about the rest of the plan moves with it.
+    #[test]
+    fn the_plan_carries_the_surfaces_own_lighting_model() {
+        LightingModel::ALL.iter().for_each(|model| {
+            let surface = SurfaceBuilder::new()
+                .lighting(*model)
+                .field(SurfaceChannel::BaseColor, uv_color())
+                .build()
+                .expect("every model is legal on a uv colour");
+            let plan = SurfaceProgramPlan::of(&surface);
+            assert_eq!(plan.lighting(), *model);
+            assert_eq!(plan.param_layout(), ParamLayout::of(0));
+            assert_eq!(
+                plan.stage_split().fragment_channels(),
+                SurfaceChannel::BaseColor.bit()
+            );
+        });
     }
 
     #[test]

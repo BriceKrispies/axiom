@@ -2,6 +2,7 @@
 
 use axiom_kernel::Ratio;
 use axiom_math::{Mat4, Vec3, Vec4};
+use axiom_surface::LightingModel;
 
 use crate::render_camera::RenderCamera;
 use crate::render_light::RenderLight;
@@ -98,6 +99,28 @@ impl RenderInput {
         self.add_material(
             RenderMaterial::new_lit(id, base_color, emissive, roughness, opacity, texture_id)
                 .with_surface_program(surface_program),
+        )
+    }
+    /// Register a material naming an authored surface **and how that surface
+    /// participates in lighting**.
+    ///
+    /// The catalog scalars take their defaults — a caller who needs them uses
+    /// [`Self::push_lit_material`] and [`RenderMaterial::with_lighting`]. What
+    /// this builder exists for is the pair that travels together: the surface a
+    /// material names, and the model that decides which pipeline draws it.
+    /// [`axiom_surface::LightingModel::Unlit`] is what selects
+    /// [`crate::RenderPipelineKind::UNLIT`].
+    pub fn push_surface_material(
+        &mut self,
+        id: u64,
+        base_color: Vec4,
+        surface_program: u64,
+        lighting: LightingModel,
+    ) -> u32 {
+        self.add_material(
+            RenderMaterial::new(id, base_color)
+                .with_surface_program(surface_program)
+                .with_lighting(lighting),
         )
     }
     pub fn push_object(

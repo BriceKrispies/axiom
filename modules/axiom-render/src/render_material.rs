@@ -2,6 +2,7 @@
 
 use axiom_kernel::Ratio;
 use axiom_math::{Vec3, Vec4};
+use axiom_surface::LightingModel;
 
 /// A const `Ratio` from a literal, built in const context. The `match` lives in a
 /// macro expansion, so the branchless lint skips it and the fallible conversion
@@ -32,6 +33,16 @@ macro_rules! ratio_lit {
 /// hands it to `axiom_host::FrameDrawItem`; it never interprets it, because
 /// what a surface *means* is not this layer's vocabulary. Every constructor
 /// here produces `0`, so no existing material changes.
+///
+/// `lighting` is **how** that surface participates in lighting — an
+/// [`axiom_surface::LightingModel`], the three-valued discriminant the surface
+/// layer owns. This layer does not interpret it either, with one exception it is
+/// the right place for: a draw's [`crate::RenderPipelineKind`] is *derived* from
+/// it ([`crate::draw_order`]), because "which pipeline draws this" is exactly the
+/// question this layer's command stream already answers and `UNLIT` is exactly
+/// the answer an unlit surface needs. Every constructor here produces
+/// [`LightingModel::LambertSpecular`], the engine default, so no existing
+/// material changes pipeline.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderMaterial {
     id: u64,
@@ -41,6 +52,7 @@ pub struct RenderMaterial {
     opacity: Ratio,
     texture_id: u64,
     surface_program: u64,
+    lighting: LightingModel,
 }
 
 impl RenderMaterial {
@@ -79,6 +91,10 @@ impl RenderMaterial {
             opacity,
             texture_id,
             surface_program: 0,
+            // The engine default: what the one lit shader already computes, so a
+            // material that says nothing about lighting draws on the pipeline it
+            // has always drawn on.
+            lighting: LightingModel::LambertSpecular,
         }
     }
 
@@ -87,6 +103,22 @@ impl RenderMaterial {
     pub const fn with_surface_program(mut self, surface_program: u64) -> Self {
         self.surface_program = surface_program;
         self
+    }
+
+    /// This material with the lighting model of the surface it describes.
+    ///
+    /// [`LightingModel::Unlit`] is the one value that changes anything at this
+    /// layer: it selects [`crate::RenderPipelineKind::UNLIT`] for every draw of
+    /// this material. The other two select `BASIC_LIT`, which is what every
+    /// constructor already produces.
+    pub const fn with_lighting(mut self, lighting: LightingModel) -> Self {
+        self.lighting = lighting;
+        self
+    }
+
+    /// How the surface this material describes participates in lighting.
+    pub const fn lighting(&self) -> LightingModel {
+        self.lighting
     }
 
     /// The appearance program this material names; `0` = the built-in fixed
@@ -194,5 +226,30 @@ mod tests {
         assert_eq!(authored.texture_id(), plain.texture_id());
         assert_ne!(authored, plain);
         assert_eq!(plain.with_surface_program(0), plain);
+    }
+
+    /// Every constructor produces the engine default, so no existing material
+    /// changes pipeline; choosing a model moves that one field and identity.
+    #[test]
+    fn a_material_defaults_to_the_lighting_model_the_engine_already_computes() {
+        let plain = RenderMaterial::new(1, Vec4::ONE);
+        assert_eq!(plain.lighting(), LightingModel::LambertSpecular);
+        assert_eq!(
+            RenderMaterial::new_textured(1, Vec4::ONE, 7).lighting(),
+            LightingModel::LambertSpecular
+        );
+        let half = Ratio::new(0.5).expect("finite");
+        assert_eq!(
+            RenderMaterial::new_lit(1, Vec4::ONE, Vec3::ONE, half, half, 3).lighting(),
+            LightingModel::LambertSpecular
+        );
+        LightingModel::ALL.iter().for_each(|model| {
+            let chosen = plain.with_lighting(*model);
+            assert_eq!(chosen.lighting(), *model);
+            assert_eq!(chosen.base_color(), plain.base_color());
+            assert_eq!(chosen.surface_program(), plain.surface_program());
+        });
+        assert_eq!(plain.with_lighting(LightingModel::LambertSpecular), plain);
+        assert_ne!(plain.with_lighting(LightingModel::Unlit), plain);
     }
 }

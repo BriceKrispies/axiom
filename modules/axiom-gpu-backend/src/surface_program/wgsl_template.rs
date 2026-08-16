@@ -260,6 +260,25 @@ fn axiom_fbm(
     }
     return axiom_signal(sum / total);
 }
+
+// ---------------------------------------------------------------------------
+// The lighting-model discriminant: `axiom_surface::LightingModel`, mirrored.
+// Its wire code IS its table index there, and these are the same three codes,
+// pinned by `the_wgsl_lighting_codes_are_the_surface_layers_discriminants`.
+//
+// A generated program RETURNS one of these from `axiom_lighting_model`, and the
+// main pass's `fs` spends it on `select`s and multiplies — never on a branch and
+// never on a second module. Three models times N surfaces is N programs.
+// ---------------------------------------------------------------------------
+
+// Base colour and emission presented as-is: no ambient, no light, no shadow and
+// no specular. Fog still applies — it is a depth effect, not a lighting one.
+const AXIOM_LIGHT_UNLIT: u32 = 0u;
+// Diffuse gathering only: hemisphere ambient plus the sum of N.L, no highlight.
+const AXIOM_LIGHT_LAMBERT: u32 = 1u;
+// Diffuse gathering plus the Blinn-Phong term this pass has always computed.
+// The DEFAULT, so every existing draw is unchanged.
+const AXIOM_LIGHT_LAMBERT_SPECULAR: u32 = 2u;
 "#;
 
 /// The program a draw naming `surface_program == 0` runs.
@@ -268,13 +287,38 @@ fn axiom_fbm(
 /// already resolved, so the frame the main pass produces with this spliced in is
 /// the frame it produced before there was a splice at all. The unbound-channel
 /// values (`roughness`, `metallic`, `normal`) are
-/// `axiom_surface::SurfaceChannel::default_value`'s, which nothing in the
-/// lighting model reads yet.
+/// `axiom_surface::SurfaceChannel::default_value`'s; `metallic` is read by no
+/// lighting model, deliberately — see
+/// [`crate::surface_program::emit_lighting`].
+///
+/// A fragment program is **two** functions, and this is both of them:
+/// `axiom_lighting_model`, which says how the surface participates in lighting,
+/// and `axiom_surface`, which says what its six channels are. The default model
+/// is `axiom_surface::LightingModel::LambertSpecular`
+/// ([`AXIOM_LIGHT_LAMBERT_SPECULAR`], code `2`), which is exactly what this pass
+/// has always computed — so a draw naming no surface, and a surface authoring no
+/// model, both render pixel-identically to the frame before this existed.
+///
+/// **This is why the model is a value the PROGRAM returns rather than a lane in
+/// the parameter buffer.** This pass binds no parameter buffer yet and hands
+/// every program the zero value, and a zero lane would decode as
+/// [`AXIOM_LIGHT_UNLIT`] — unlighting every frame in the engine. A value stated
+/// by the program cannot default to zero by accident. It costs no pipeline
+/// either way: a lighting model is a per-surface constant of the same authored
+/// surface the six channels come from, generated with them and keyed by the same
+/// digest.
 ///
 /// `params` is unread here, and is unread by *every* program the main pass runs
 /// today: this backend binds no parameter buffer yet, so the main pass hands the
 /// zero value. Binding it is pipeline work.
+///
+/// [`AXIOM_LIGHT_UNLIT`]: SURFACE_PRELUDE_WGSL
+/// [`AXIOM_LIGHT_LAMBERT_SPECULAR`]: SURFACE_PRELUDE_WGSL
 pub(crate) const DEFAULT_SURFACE_WGSL: &str = r#"
+fn axiom_lighting_model() -> u32 {
+    return 2u;
+}
+
 fn axiom_surface(in: SurfaceIn, params: SurfaceParams) -> SurfaceOut {
     var out: SurfaceOut;
     out.base_color = in.albedo;

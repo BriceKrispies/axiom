@@ -38,6 +38,7 @@
 
 pub(crate) mod capability;
 pub(crate) mod emit;
+pub(crate) mod emit_lighting;
 pub(crate) mod emit_ops;
 pub(crate) mod emit_vertex;
 // The CPU/GPU parity proof: every operator driven through both the reference
@@ -54,6 +55,13 @@ mod parity;
 // different stages.
 #[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
 mod parity_vertex;
+// The same proof for the three LIGHTING MODELS, driven through the main pass's
+// real `fs` — the whole shader, not a restatement of it — on a real device. Its
+// own file for the same reason `parity_vertex` is: `parity` is already near the
+// engine file-size budget, and this proves a third thing (how much of the
+// lighting maths a model takes) rather than a third operator.
+#[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
+mod parity_lighting;
 
 pub(crate) mod params;
 pub(crate) mod plan;
@@ -70,7 +78,7 @@ use axiom_kernel::Seconds;
 use axiom_surface::{Surface, SurfaceChannel};
 
 use crate::surface_program::capability::GeometryPath;
-use crate::surface_program::emit::surface_function;
+use crate::surface_program::emit_lighting::{fragment_program, pipeline_kind, PIPELINE_BASIC_LIT};
 use crate::surface_program::emit_vertex::displace_function;
 use crate::surface_program::params::{pack, program_region_offset, SURFACE_PARAM_REGION_BYTES};
 use crate::surface_program::plan::SurfaceProgramPlan;
@@ -112,7 +120,7 @@ impl SurfaceProgramEntry {
         // BOTH stages are attempted, and they are attempted together: the vertex
         // and fragment halves of one surface compile into one module keyed by one
         // digest, so either half failing is the whole program failing.
-        let program = surface_function(surface);
+        let program = fragment_program(surface);
         let vertex_program = displace_function(surface);
         SurfaceProgramEntry {
             plan,
@@ -238,6 +246,33 @@ impl SurfaceProgramSet {
                 .map(|region| region.copy_from_slice(&entry.params));
         });
         buffer
+    }
+
+    /// The pipeline marker a draw naming `program_id` selects: the mirror of
+    /// `axiom_render::RenderPipelineKind`, **derived** from the surface rather
+    /// than carried on the draw.
+    ///
+    /// The render module has emitted `BASIC_LIT`/`UNLIT` per object since it was
+    /// written, run-length-encoded into its `SetPipeline` stream — and the value
+    /// died at the `axiom_host::FramePacket` boundary, which carries no pipeline
+    /// lane. This is the other end of that seam, and deriving it is the right
+    /// end to fix: the packet exists to stay primitive-only, the surface digest
+    /// it *already* carries names the surface, and a surface knows how it is lit.
+    /// A program this backend was never handed, and the `program_id == 0` every
+    /// draw that authored no surface carries, are lit — which is what the engine
+    /// has always done.
+    ///
+    /// It selects no second pipeline **here**: this backend runs one lit program
+    /// and the model is a value inside it. The marker is what a composing tier
+    /// asks for when it is translating a packet into a submission for a backend
+    /// that does keep two.
+    pub(crate) fn pipeline_kind(&self, program_id: u64) -> u32 {
+        self.entries
+            .iter()
+            .find(|entry| entry.plan.program_id() == program_id)
+            .map_or(PIPELINE_BASIC_LIT, |entry| {
+                pipeline_kind(entry.plan.lighting())
+            })
     }
 
     /// The constant colour and emission a draw naming `program_id` should be
@@ -509,6 +544,97 @@ mod tests {
             GeometryPath::Skinned,
         );
         assert_eq!(skinned.degradations(), vec![FrameFeature::ProceduralSurface]);
+    }
+
+    /// **The no-new-variants proof, at the set.** A scene's program count is the
+    /// number of distinct surfaces in it, whichever lighting model they use — N,
+    /// never 3N — because the model is a value inside the one program a surface
+    /// already has, not an axis a program is specialised along.
+    ///
+    /// The parameter buffer is the observable size of the set (one fixed region
+    /// per program), so it is what the assertion reads: it is the number a cache
+    /// or a bind-group allocator would be sized from.
+    #[test]
+    fn the_program_count_of_a_scene_is_independent_of_its_lighting_models() {
+        let scene = |model: axiom_surface::LightingModel| {
+            [0_u16, 1, 2]
+                .iter()
+                .map(|index| {
+                    SurfaceBuilder::new()
+                        .lighting(model)
+                        .field(SurfaceChannel::Opacity, chain("gpu/set/count", *index))
+                        .build()
+                        .expect("legal")
+                })
+                .collect::<Vec<_>>()
+        };
+        let counts: Vec<usize> = axiom_surface::LightingModel::ALL
+            .iter()
+            .map(|model| {
+                let surfaces = scene(*model);
+                let set = SurfaceProgramSet::build(&surfaces, gpu_profile());
+                assert_eq!(set.entries.len(), surfaces.len());
+                set.parameter_bytes().len() / SURFACE_PARAM_REGION_BYTES as usize
+            })
+            .collect();
+        assert_eq!(counts, vec![3, 3, 3], "a lighting model must cost 0 programs");
+        // And mixing all three models in ONE scene is still one program each —
+        // the case a variant-keyed design would have paid three times over.
+        let mixed: Vec<axiom_surface::Surface> = axiom_surface::LightingModel::ALL
+            .iter()
+            .map(|model| {
+                SurfaceBuilder::new()
+                    .lighting(*model)
+                    .field(SurfaceChannel::BaseColor, uv_color())
+                    .build()
+                    .expect("legal")
+            })
+            .collect();
+        let set = SurfaceProgramSet::build(&mixed, gpu_profile());
+        assert_eq!(set.entries.len(), 3);
+        assert_eq!(
+            set.parameter_bytes().len(),
+            3 * SURFACE_PARAM_REGION_BYTES as usize
+        );
+    }
+
+    /// **`RenderPipelineKind::UNLIT` reaches a backend.** The marker is derived
+    /// from the surface a draw's `surface_program` names — the first time in the
+    /// repository's history that the render module's second pipeline marker is
+    /// answered by a backend rather than dropped at the packet boundary.
+    #[test]
+    fn an_unlit_surface_selects_the_unlit_pipeline_marker_and_everything_else_is_lit() {
+        let surfaces: Vec<axiom_surface::Surface> = axiom_surface::LightingModel::ALL
+            .iter()
+            .map(|model| {
+                SurfaceBuilder::new()
+                    .lighting(*model)
+                    .field(SurfaceChannel::BaseColor, uv_color())
+                    .build()
+                    .expect("legal")
+            })
+            .collect();
+        let set = SurfaceProgramSet::build(&surfaces, gpu_profile());
+        assert_eq!(
+            set.pipeline_kind(surfaces[0].digest().raw()),
+            emit_lighting::PIPELINE_UNLIT
+        );
+        assert_eq!(
+            set.pipeline_kind(surfaces[1].digest().raw()),
+            emit_lighting::PIPELINE_BASIC_LIT
+        );
+        assert_eq!(
+            set.pipeline_kind(surfaces[2].digest().raw()),
+            emit_lighting::PIPELINE_BASIC_LIT
+        );
+        // The draw that authored no surface, and a digest this backend was never
+        // handed, are both lit — the engine's behaviour before models existed.
+        assert_eq!(set.pipeline_kind(0), emit_lighting::PIPELINE_BASIC_LIT);
+        assert_eq!(set.pipeline_kind(0xDEAD), emit_lighting::PIPELINE_BASIC_LIT);
+        assert_eq!(
+            SurfaceProgramSet::default().pipeline_kind(0),
+            emit_lighting::PIPELINE_BASIC_LIT
+        );
     }
 
     #[test]

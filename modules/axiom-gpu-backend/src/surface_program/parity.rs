@@ -134,8 +134,12 @@ fn parity_hash_fs(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f
 
 /// A real GPU: the device and queue every run in this module shares.
 pub(super) struct ParityGpu {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    // Reachable from the sibling parity modules: `parity_vertex` proves the
+    // vertex stage through this module's own `render`, while `parity_lighting`
+    // has to drive the MAIN PASS's real pipeline — four vertex-stage inputs,
+    // three bind groups and a light rig — which needs the device itself.
+    pub(super) device: wgpu::Device,
+    pub(super) queue: wgpu::Queue,
     pub(super) backend: wgpu::Backend,
 }
 

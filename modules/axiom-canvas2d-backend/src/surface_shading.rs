@@ -34,6 +34,17 @@
 //! reported degraded through the existing `SpecularHighlight` feature, which is
 //! precisely the term that is missing.
 //!
+//! **Two of the three lighting models are honoured exactly, and the third
+//! degrades to the nearest one.** [`crate::canvas_depth_cue::shade_triangle`]
+//! composes `ambient + brightness * light_colour` onto a base colour with no
+//! view vector anywhere in it — which is *precisely*
+//! `axiom_surface::LightingModel::Lambert`. So `Lambert` is this backend's
+//! native model rather than an approximation of one, and `Unlit` is the same
+//! path with that factor held at exactly one, which is a value the arithmetic
+//! already produces. `LambertSpecular` is shaded as `Lambert`: the term it adds
+//! is the view-dependent one, the same term `RenderCapability::Specular` names
+//! and that `BackendCapabilityProfile::canvas2d` has never contained.
+//!
 //! **Displacement is not honoured either, and it is reported dropped.** This
 //! path shades geometry; it does not move it, however finely it samples. The
 //! reason is cost, not principle: this backend already CPU-skins, allocating a
@@ -55,15 +66,17 @@
 use axiom_field::{EvalContext, FieldValue};
 use axiom_kernel::Seconds;
 use axiom_math::{Vec2, Vec3};
-use axiom_surface::{Surface, SurfaceChannel};
+use axiom_surface::{LightingModel, Surface, SurfaceChannel};
 
 /// The channels one CPU evaluation produced, in the form the flat-colour path
-/// consumes: a linear RGBA whose alpha already folds in the opacity channel, and
-/// a linear RGB radiance added after the depth cues.
+/// consumes: a linear RGBA whose alpha already folds in the opacity channel, a
+/// linear RGB radiance added after the depth cues, and how the surface
+/// participates in lighting at all.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ShadedChannels {
     base_color: [f32; 4],
     emission: [f32; 3],
+    lighting: LightingModel,
 }
 
 impl ShadedChannels {
@@ -76,6 +89,26 @@ impl ShadedChannels {
     /// place the draw's own emissive lands, because both are radiance.
     pub(crate) const fn emission(self) -> [f32; 3] {
         self.emission
+    }
+
+    /// How this surface participates in lighting.
+    ///
+    /// **Two of the three models are exactly expressible here, and they are
+    /// implemented rather than approximated.**
+    /// [`crate::canvas_depth_cue::shade_triangle`] multiplies a base colour by
+    /// `ambient + brightness * light_colour` and has no view vector at all, so
+    /// [`LightingModel::Lambert`] *is* this backend's native model and
+    /// [`LightingModel::Unlit`] is that factor held at exactly one. Neither is a
+    /// substitute; both are the thing itself.
+    ///
+    /// [`LightingModel::LambertSpecular`] — the default — is shaded as
+    /// `Lambert`, because the term it adds is view-dependent and this path is
+    /// view-independent by construction. That drop is reported through
+    /// `axiom_host::FrameFeature::SpecularHighlight`, which
+    /// `crate::Canvas2dBackendApi` already raises for exactly the frames that
+    /// have a highlight to lose (see the report's specular arm).
+    pub(crate) const fn lighting(self) -> LightingModel {
+        self.lighting
     }
 }
 
@@ -101,6 +134,11 @@ pub(crate) fn shade_surface(
     ShadedChannels {
         base_color: [base.x, base.y, base.z, base.w * opacity],
         emission: [emission.x, emission.y, emission.z],
+        // Read from the surface as authored — not evaluated, because a lighting
+        // model is a discriminant and not a field. A layered surface keeps its
+        // ROOT's model through flattening, which is what makes one draw have one
+        // way of being lit.
+        lighting: surface.lighting(),
     }
 }
 
@@ -464,6 +502,46 @@ mod tests {
                     [1.0, 1.0, 1.0, 1.0]
                 );
             });
+    }
+
+    /// The shade carries the surface's own lighting model, unevaluated — and a
+    /// surface that says nothing about lighting carries the engine default, so
+    /// every existing frame takes the path it always took.
+    #[test]
+    fn a_shade_carries_the_surfaces_lighting_model_verbatim() {
+        assert_eq!(
+            shade_surface(
+                &SurfaceBuilder::new().build().expect("legal"),
+                Vec3::ZERO,
+                Vec2::ZERO,
+                Vec3::UNIT_Y,
+                zero()
+            )
+            .lighting(),
+            LightingModel::LambertSpecular
+        );
+        [
+            LightingModel::Unlit,
+            LightingModel::Lambert,
+            LightingModel::LambertSpecular,
+        ]
+        .iter()
+        .for_each(|model| {
+            let surface = SurfaceBuilder::new()
+                .lighting(*model)
+                .field(SurfaceChannel::BaseColor, uv_x_color())
+                .build()
+                .expect("legal");
+            let cache = SurfaceCache::build(std::slice::from_ref(&surface), zero());
+            let shaded = cache
+                .shade(surface.digest().raw(), [0.0; 3], [0.5, 0.0], [0.0, 1.0, 0.0])
+                .expect("the cache holds it");
+            assert_eq!(shaded.lighting(), *model);
+            // The model changes NO channel value: it decides how the channels are
+            // lit, never what they are.
+            assert_eq!(shaded.base_color(), [0.5, 0.5, 0.5, 0.5]);
+            assert_eq!(shaded.emission(), [0.0; 3]);
+        });
     }
 
     #[test]

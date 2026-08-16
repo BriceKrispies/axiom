@@ -439,6 +439,20 @@ impl Canvas2dBackendApi {
         // per-triangle shade, so a surface that binds either loses exactly the
         // specular term — the feature this report already has a name for. Not
         // faked, not silently ignored: named.
+        //
+        // **This is also where a `LightingModel::LambertSpecular` surface's drop
+        // is reported, and there is deliberately no fourth term for it.** Of the
+        // three models this backend HONOURS `Unlit` and `Lambert` exactly
+        // (`crate::surface_shading`), and shades `LambertSpecular` as `Lambert`;
+        // what is lost is the Blinn-Phong highlight, which is exactly what these
+        // two arms already name. Adding a term keyed on the model alone would
+        // fire for every surface in the engine, because `LambertSpecular` is the
+        // DEFAULT — and `axiom_host::FramePacket::uses_specular` states the rule
+        // that forbids it in so many words: a backend must not "report a drop for
+        // a frame with no highlights in it". A frame that has a highlight to lose
+        // says so either through a draw's specular strength (`specular_degraded`)
+        // or through a surface binding roughness/metallic (below), and both are
+        // already here.
         let surface_specular_degraded = surfaces.has_view_dependent_channels()
             & !profile.contains(RenderCapability::Specular);
         let degraded_features: Vec<FrameFeature> = [

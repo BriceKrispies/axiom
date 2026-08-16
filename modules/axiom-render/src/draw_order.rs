@@ -10,8 +10,10 @@
 //! Without a camera every depth is `0`, so translucent draws keep submission order.
 
 use axiom_math::Mat4;
+use axiom_surface::LightingModel;
 
 use crate::render_input::RenderInput;
+use crate::render_pipeline_kind::RenderPipelineKind;
 
 /// A resolved, ready-to-emit draw: the mesh/material/object identities and world
 /// the command builder needs, plus its translucency class and the view-space
@@ -81,7 +83,23 @@ pub(crate) fn ordered_draws_into(input: &RenderInput, out: &mut Vec<OrderedDraw>
                     // the material's own texture — a branchless table select.
                     texture_id: [material.texture_id(), object.texture_id()]
                         [usize::from(object.texture_id() != 0)],
-                    pipeline: object.pipeline(),
+                    // **The pipeline marker, derived rather than merely carried.**
+                    // An unlit MATERIAL selects `UNLIT`; anything else keeps the
+                    // object's own selection (which defaults to `BASIC_LIT`).
+                    // Same branchless table select as the texture override above,
+                    // and the same precedence rule: what the material says about
+                    // its own appearance wins, because the object's marker is a
+                    // per-instance override of a per-material fact and only the
+                    // material knows how its surface is lit.
+                    //
+                    // This is the seam `RenderPipelineKind::UNLIT` has been
+                    // waiting on since it was written: the marker was emitted,
+                    // run-length-encoded into `SetPipeline`, and never selected by
+                    // anything. Now an `axiom_surface::LightingModel::Unlit`
+                    // material selects it, and the GPU backend derives the same
+                    // marker from the same discriminant on its own side.
+                    pipeline: [object.pipeline(), RenderPipelineKind::UNLIT]
+                        [usize::from(material.lighting() == LightingModel::Unlit)],
                     object_id: object.id(),
                     object_tag: object.tag(),
                     index_count: mesh.index_count(),
@@ -237,6 +255,68 @@ mod tests {
         assert_eq!(draws[1].texture_id, 9);
         assert_eq!(draws[1].pipeline, RenderApi::PIPELINE_UNLIT);
         assert_eq!(draws[1].object_tag, 3);
+    }
+
+    /// **`RenderPipelineKind::UNLIT` is selected by a material for the first
+    /// time.** An unlit surface's material puts every draw of it on the unlit
+    /// marker whatever the object asked for, and a lit material leaves the
+    /// object's own selection exactly as it was — so no existing content moves.
+    #[test]
+    fn an_unlit_materials_draws_select_the_unlit_pipeline_marker() {
+        let api = api();
+        let mut input = api.new_input(64, 64);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
+        let unlit = input.push_surface_material(
+            10,
+            Vec4::ONE,
+            0xFEED,
+            axiom_surface::LightingModel::Unlit,
+        );
+        let lambert = input.push_surface_material(
+            11,
+            Vec4::ONE,
+            0xBEEF,
+            axiom_surface::LightingModel::Lambert,
+        );
+        let plain = api.add_input_basic_lit_material(&mut input, 12, Vec4::ONE);
+        // Every object asks for BASIC_LIT; only the material decides otherwise.
+        [unlit, lambert, plain]
+            .iter()
+            .enumerate()
+            .for_each(|(index, material)| {
+                api.add_input_bound_object(
+                    &mut input,
+                    100 + index as u64,
+                    Mat4::IDENTITY,
+                    mesh,
+                    *material,
+                    0,
+                    RenderApi::PIPELINE_BASIC_LIT,
+                    0,
+                    true,
+                );
+            });
+        let draws = ordered_draws(&input);
+        assert_eq!(draws[0].pipeline, RenderApi::PIPELINE_UNLIT);
+        assert_eq!(draws[1].pipeline, RenderApi::PIPELINE_BASIC_LIT);
+        assert_eq!(draws[2].pipeline, RenderApi::PIPELINE_BASIC_LIT);
+        // And an object that asked for UNLIT under a LIT material keeps its own
+        // selection: the derivation adds a reason to be unlit, it removes none.
+        let mut kept = api.new_input(64, 64);
+        let mesh = api.add_input_mesh(&mut kept, 1, 3);
+        let lit = api.add_input_basic_lit_material(&mut kept, 13, Vec4::ONE);
+        api.add_input_bound_object(
+            &mut kept,
+            1,
+            Mat4::IDENTITY,
+            mesh,
+            lit,
+            0,
+            RenderApi::PIPELINE_UNLIT,
+            0,
+            true,
+        );
+        assert_eq!(ordered_draws(&kept)[0].pipeline, RenderApi::PIPELINE_UNLIT);
     }
 
     #[test]

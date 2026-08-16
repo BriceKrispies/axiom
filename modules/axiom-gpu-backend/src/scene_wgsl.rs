@@ -9,10 +9,15 @@
 //! [`crate::surface_program::wgsl_template::scene_shader`] fills it by
 //! concatenation — never by a preprocessor, never by textual substitution.
 //!
-//! **Nothing about how a fragment is lit moved.** The Blinn-Phong model, the 5x5
-//! PCF shadow lookup, the hemisphere ambient, the distance fog and the capability
-//! gates are byte-for-byte what they were; the only change is where the six
-//! channel values come from. A program supplies values, never a way of being lit.
+//! **The lighting MATHS did not move.** The Blinn-Phong model, the 5x5 PCF
+//! shadow lookup, the hemisphere ambient, the distance fog and the capability
+//! gates are byte-for-byte what they were. What a generated program now also
+//! supplies is a three-valued `axiom_surface::LightingModel` saying *how much of
+//! that maths this surface takes* — the whole model is present in this one
+//! shader and the discriminant selects between its terms with `select` and two
+//! multipliers, so three models cost zero additional pipelines. The default is
+//! `LambertSpecular`, whose gates are exactly one, so an existing frame is
+//! unchanged to the bit.
 
 /// The **first half** of the WGSL for the lit/textured/shadowed main pass:
 /// per-vertex position+normal+uv+colour, per-instance MVP + world matrix +
@@ -392,6 +397,26 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         SurfaceParams(),
     );
     let base = vec4<f32>(surface.base_color.rgb, surface.opacity);
+    // HOW this surface participates in lighting: `axiom_surface::LightingModel`,
+    // stated by the same generated program that supplied the six channels above.
+    //
+    // All three models are in THIS shader, selected by these two numbers — never
+    // by a second pipeline. That is the same trade the twelve capability bits
+    // already make, and it is what keeps three models times N surfaces at N
+    // programs instead of 3N. Both gates are plain multipliers rather than
+    // branches, so control flow stays uniform for the derivative-dependent
+    // texture work above, exactly as `fog_factor` expresses its capability gate
+    // by zeroing a rate.
+    //
+    // `LambertSpecular` (the default, and what every existing draw carries)
+    // makes `diffuse_gate` and `specular_gate` exactly 1.0 and takes the
+    // `ambient_lit` arm — an IEEE multiply by one is the identity on every
+    // input, so this frame is bit-for-bit the frame this pass drew before the
+    // model existed.
+    let model = axiom_lighting_model();
+    let gathers = model != AXIOM_LIGHT_UNLIT;
+    let diffuse_gate = f32(gathers);
+    let specular_gate = f32(model == AXIOM_LIGHT_LAMBERT_SPECULAR);
     // Perturb the geometric normal by the material's tangent-space normal map. There is
     // no per-vertex tangent, so build the cotangent frame from screen-space derivatives
     // of world position + uv (Mikkelsen). Normal-mapping capability off → a flat
@@ -444,11 +469,19 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // Shadowed ground receives less SKY ambient too, not just less sun, so the sun's cast
     // shadows read with real contrast instead of being washed flat by full ambient.
     let ambient_shade = mix(SHADOW_AMBIENT, 1.0, shade);
-    var lit = base.rgb * hemi * ambient_shade;
+    let ambient_lit = base.rgb * hemi * ambient_shade;
+    // An UNLIT surface gathers nothing: its base colour is presented as authored,
+    // with no ambient, no sun, no shadow and no highlight. `select` takes the
+    // VALUE, so nothing the unused arm computed can reach the result, and both
+    // arms are evaluated so control flow stays uniform.
+    var lit = select(base.rgb, ambient_lit, gathers);
     // Specular capability off, or a matte material → strength 0, which zeroes the
     // whole term below. Evaluated (not branched around) so control flow stays
     // uniform, exactly as the other capability gates in this shader do.
-    let gloss = select(0.0, in.specular, (caps & CAP_SPECULAR) != 0u);
+    // ... and a surface whose model is not `LambertSpecular` zeroes it too: the
+    // model gate multiplies the capability gate rather than replacing it, so a
+    // highlight needs BOTH the backend able to draw one and the surface asking.
+    let gloss = select(0.0, in.specular, (caps & CAP_SPECULAR) != 0u) * specular_gate;
     // Toward the eye. Blinn-Phong uses the half-vector between this and the light,
     // which is why the camera position has to reach the fragment stage at all.
     let V = normalize(lights.camera.xyz - in.world_pos);
@@ -466,7 +499,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             // Directional light: cast shadows from the shadow map.
             atten = shade;
         }
-        let diffuse = max(dot(N, L), 0.0) * atten;
+        let diffuse = max(dot(N, L), 0.0) * atten * diffuse_gate;
         lit = lit + base.rgb * lt.col.rgb * lt.col.w * diffuse;
         // The highlight. NOT multiplied by `base.rgb`: a specular reflection is
         // light bouncing off the surface without being absorbed, so it takes the
@@ -482,6 +515,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // the surface emits, so no N.L, no ambient and no shadow attenuates it — but the
     // air between it and the camera still does. A non-emissive material contributes
     // exactly zero here, so every existing frame is byte-identical.
+    //
+    // This line is model-independent on purpose: emission is what the surface
+    // RADIATES, and an UNLIT surface radiates the same. With every light term
+    // gated to zero above, an unlit fragment is exactly `base_color.rgb +
+    // emission` — which is the whole definition of the model.
     let emitted = lit + surface.emission;
     // Atmospheric perspective, last: distance recedes toward the frame's fog colour.
     // This is applied AFTER lighting on purpose — fog replaces the surface's radiance,
@@ -491,6 +529,15 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // The metres of air are measured, not inferred from depth: this stage already
     // interpolates a world position and already knows where the camera is (it
     // needed both for the specular term), so the true distance is one `length`.
+    //
+    // **FOG APPLIES TO EVERY LIGHTING MODEL, UNLIT INCLUDED.** That is a decision,
+    // not an oversight: fog is a property of the AIR BETWEEN the surface and the
+    // camera, not of how the surface responds to light. A flat-shaded unlit
+    // marker or a hologram sitting a kilometre away is still seen through a
+    // kilometre of atmosphere, and an unfogged unlit object in a fogged scene
+    // reads as a hole punched through the world. Emission is treated the same way
+    // one line above, for the same reason. An author who wants a surface exempt
+    // from the air authors a frame with no fog in it.
     let air_metres = length(in.world_pos - lights.camera.xyz);
     let fogged = mix(emitted, lights.fog_color.rgb, fog_factor(in.clip.z, air_metres));
     return vec4<f32>(fogged, base.a);

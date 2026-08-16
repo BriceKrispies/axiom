@@ -17,6 +17,10 @@ axiom-frame = { path = "../../crates/axiom-frame" }
 # build_frame_packet compiles a RenderCommandList into host::FramePacket, the
 # single artifact every render backend consumes.
 axiom-host = { path = "../../crates/axiom-host" }
+# RenderMaterial names the LightingModel of the surface it describes, and
+# draw_order derives each draw's RenderPipelineKind from it — the seam that made
+# `UNLIT` mean something. Named directly in non-test code.
+axiom-surface = { path = "../../crates/axiom-surface" }
 
 [lints.rust]
 unsafe_code = "forbid"
