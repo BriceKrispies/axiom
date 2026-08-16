@@ -72,6 +72,68 @@ impl HostDeviceProfile {
         [1, 2][self as usize]
     }
 
+    /// The highest anisotropy this tier will ask a material sampler for.
+    ///
+    /// Anisotropic filtering costs **taps**: a sampler at 16× fetches up to
+    /// sixteen texels per pixel instead of one, and it spends the full budget
+    /// exactly where the footprint ratio is most extreme — a road surface
+    /// receding to the horizon, which is most of the screen in a driving game.
+    /// That is affordable on a desktop GPU and is not affordable on a phone, so
+    /// it is a **tier budget**, sitting here beside the shadow atlas and the
+    /// supersample rate rather than being inferred somewhere downstream.
+    ///
+    /// It used to be inferred, and the inference was the bug. The GPU backend
+    /// resolved anisotropy from `DownlevelFlags::ANISOTROPIC_FILTERING` — a
+    /// *compliance* question — and wgpu answers that flag for the WebGPU backend
+    /// with `DownlevelCapabilities::default()` on the stated assumption that
+    /// "WebGPU is assumed to be fully compliant". It is never measured, so it is
+    /// `true` on the weakest phone as readily as on a workstation. The WebGL2
+    /// arm, which genuinely queries `EXT_texture_filter_anisotropic`, could
+    /// answer `false` on the very same device — so one browser arm took 16 taps
+    /// per road pixel and the other took one, on identical hardware, for a
+    /// visually near-identical frame.
+    ///
+    /// Capability says what a device *may* do. Only the tier says what it should
+    /// be asked to *afford*. The backend now takes the smaller of the two.
+    ///
+    /// Branchless: a fieldless enum's discriminant indexes the per-tier table.
+    pub const fn max_anisotropy(self) -> u16 {
+        [4, 16][self as usize]
+    }
+
+    /// This tier, lowered to what a surface at `scale` device pixels per CSS
+    /// pixel can afford — never raised.
+    ///
+    /// [`Self::render_supersample`] exists to resolve a *CSS-pixel* artifact:
+    /// thin near-vertical edges stair-step because the scene is rendered at one
+    /// sample per pixel. A high-DPR display has already fixed that. A phone at
+    /// `scale = 3` puts three physical pixels behind every CSS pixel, so the
+    /// panel is already oversampling by more than the tier was going to buy —
+    /// and stacking a 2× supersample on top pays **four times the fill rate** for
+    /// antialiasing the display is doing for free.
+    ///
+    /// Left unchecked the intent inverted completely. An upright phone (a 915 pt
+    /// viewport at `scale = 3`) measures 2745 physical pixels on its long edge;
+    /// [`ExtendedLimits`](Self::ExtendedLimits) doubles that to 5490 and its own
+    /// 4096 cap takes it to 4096. A desktop canvas capped at 1180 CSS px at
+    /// `scale = 1` doubles to 2360 and is under the cap. **The phone was
+    /// rendering a target 3× the area of the desktop's** — on the tier documented
+    /// as the one you opt into when you have the headroom.
+    ///
+    /// So the opt-up is honoured where it is affordable and withdrawn where the
+    /// display has already paid for it. This only ever lowers a tier, so an app
+    /// that asked for [`Baseline`](Self::Baseline) is unaffected and no app can
+    /// be handed more than it requested.
+    ///
+    /// Branchless: the two outcomes are a two-element table indexed by the
+    /// comparison.
+    pub const fn afforded_at_scale(self, scale: axiom_kernel::Ratio) -> HostDeviceProfile {
+        // 2.0 is the point at which the display's own oversampling meets what
+        // `render_supersample` would add, so anything at or above it is paying
+        // twice for the same edge.
+        [self, HostDeviceProfile::Baseline][(scale.get() >= 2.0) as usize]
+    }
+
     /// The render-target size for a `physical_width × physical_height` surface
     /// under this tier: the surface scaled by [`Self::render_supersample`], then
     /// clamped so its longest edge is within [`Self::max_render_dimension`],
@@ -132,6 +194,63 @@ mod tests {
     fn baseline_renders_one_sample_per_pixel_extended_supersamples() {
         assert_eq!(HostDeviceProfile::Baseline.render_supersample(), 1);
         assert_eq!(HostDeviceProfile::ExtendedLimits.render_supersample(), 2);
+    }
+
+    #[test]
+    fn baseline_asks_for_less_anisotropy_than_the_opt_up_tier() {
+        // The mobile tier still gets anisotropic filtering — a road that recedes
+        // needs it or the grain washes to flat grey — it just does not get to
+        // spend sixteen taps a pixel on it.
+        assert_eq!(HostDeviceProfile::Baseline.max_anisotropy(), 4);
+        assert_eq!(HostDeviceProfile::ExtendedLimits.max_anisotropy(), 16);
+        assert!(
+            HostDeviceProfile::Baseline.max_anisotropy()
+                < HostDeviceProfile::ExtendedLimits.max_anisotropy(),
+            "the mobile-first tier must never ask for more taps than the opt-up"
+        );
+    }
+
+    /// The whole point of the affordability rule: a dense display has already
+    /// bought the antialiasing the supersample was going to add.
+    #[test]
+    fn a_dense_display_withdraws_the_supersampling_opt_up() {
+        let phone = axiom_kernel::Ratio::new(3.0).expect("finite");
+        assert_eq!(
+            HostDeviceProfile::ExtendedLimits.afforded_at_scale(phone),
+            HostDeviceProfile::Baseline,
+            "a 3x phone panel already oversamples; a 2x supersample on top is 4x fill for nothing"
+        );
+        // Exactly at the threshold the display's oversampling equals what the
+        // tier would add, so the tier stops paying for it.
+        let retina = axiom_kernel::Ratio::new(2.0).expect("finite");
+        assert_eq!(
+            HostDeviceProfile::ExtendedLimits.afforded_at_scale(retina),
+            HostDeviceProfile::Baseline
+        );
+    }
+
+    #[test]
+    fn a_one_to_one_display_keeps_the_tier_it_asked_for() {
+        let desktop = axiom_kernel::Ratio::new(1.0).expect("finite");
+        assert_eq!(
+            HostDeviceProfile::ExtendedLimits.afforded_at_scale(desktop),
+            HostDeviceProfile::ExtendedLimits,
+            "nothing has oversampled for this display, so the opt-up still earns its cost"
+        );
+    }
+
+    /// The rule only ever lowers. An app on the mobile tier cannot be silently
+    /// promoted by a display that happens to be dense or sparse.
+    #[test]
+    fn affordability_never_raises_a_tier() {
+        [0.5f32, 1.0, 1.5, 2.0, 3.0, 4.0].iter().for_each(|&s| {
+            let scale = axiom_kernel::Ratio::new(s).expect("finite");
+            assert_eq!(
+                HostDeviceProfile::Baseline.afforded_at_scale(scale),
+                HostDeviceProfile::Baseline,
+                "baseline stayed baseline at scale {s}"
+            );
+        });
     }
 
     #[test]

@@ -30,6 +30,14 @@ pub struct GpuBackendApi {
     // Shadow-atlas edge length from the device tier
     // (`HostDeviceProfile::shadow_map_size`), handed to the renderer on initialise.
     shadow_size: u32,
+    // The most anisotropy the device tier will let a material sampler ask for
+    // (`HostDeviceProfile::max_anisotropy`). The live binding takes the SMALLER of
+    // this and what the adapter reports it can do: capability says what the device
+    // may do, the tier says what it should be asked to afford. Without the tier
+    // half, the WebGPU arm — whose downlevel flags wgpu fills in from an assumption
+    // of compliance rather than from the hardware — asks every phone for 16 taps a
+    // pixel on the surfaces that opt in.
+    max_anisotropy: u16,
     // Which optional render capabilities this backend attempts. Defaults to
     // `BackendCapabilityProfile::all()` (the hardware GPU attempts everything); a host
     // may restrict it (an fps/legibility lever) and the per-frame present consults it.
@@ -58,6 +66,7 @@ impl GpuBackendApi {
             render_width,
             render_height,
             shadow_size: request.device().profile().shadow_map_size(),
+            max_anisotropy: request.device().profile().max_anisotropy(),
             capability: axiom_host::BackendCapabilityProfile::all(),
             draw2d_textures: Vec::new(),
             #[cfg(target_arch = "wasm32")]
@@ -112,6 +121,18 @@ impl GpuBackendApi {
     /// from the presentation request to the renderer at initialise time.
     pub fn shadow_size(&self) -> u32 {
         self.shadow_size
+    }
+
+    /// The anisotropy ceiling the backend's device tier selected — the tier's
+    /// [`axiom_host::HostDeviceProfile::max_anisotropy`], carried from the
+    /// presentation request to the sampler resolution at initialise time.
+    ///
+    /// This is a *budget*, not a capability: the live binding resolves the actual
+    /// clamp as the smaller of this and what the adapter reports, so a device that
+    /// cannot filter anisotropically still gets `1` and a device that can is still
+    /// held to what its tier can afford.
+    pub fn max_anisotropy(&self) -> u16 {
+        self.max_anisotropy
     }
 
     /// Restrict which optional render capabilities this backend attempts. The default
@@ -458,6 +479,7 @@ impl GpuBackendApi {
             materials,
             max_instances,
             self.shadow_size,
+            self.max_anisotropy,
             look,
             preference,
         )
@@ -545,6 +567,22 @@ mod tests {
             HostDeviceProfile::ExtendedLimits,
         ));
         assert_eq!(extended.shadow_size(), 2048);
+    }
+
+    #[test]
+    fn new_carries_the_device_tier_anisotropy_budget() {
+        // The mobile-first tier spends a quarter of the taps the opt-up does. The
+        // live binding then takes the smaller of this and what the adapter reports,
+        // so this is a ceiling on the ask, never a promise the device can meet it.
+        let baseline =
+            GpuBackendApi::new(&request_with_profile(800, 600, HostDeviceProfile::Baseline));
+        assert_eq!(baseline.max_anisotropy(), 4);
+        let extended = GpuBackendApi::new(&request_with_profile(
+            800,
+            600,
+            HostDeviceProfile::ExtendedLimits,
+        ));
+        assert_eq!(extended.max_anisotropy(), 16);
     }
 
     #[test]

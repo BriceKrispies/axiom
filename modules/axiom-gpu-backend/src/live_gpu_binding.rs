@@ -145,6 +145,7 @@ impl LiveGpuBinding {
         materials: &[axiom_host::MaterialTexture],
         max_instances: u32,
         shadow_size: u32,
+        tier_max_anisotropy: u16,
         look: axiom_host::FrameRenderLook,
         preference: Option<axiom_host::BackendKind>,
     ) -> Result<LiveGpuBinding, JsValue> {
@@ -377,11 +378,23 @@ impl LiveGpuBinding {
             // have; asking the adapter here is what lets `texture_sampling`
             // resolve a clamp that is already legal for this device rather than
             // one wgpu has to silently correct behind our back.
+            //
+            // The adapter answers *capability*; `tier_max_anisotropy` answers
+            // *affordability*, and the sampler is held to the smaller. Capability
+            // alone was not enough and the reason is specific: wgpu fills the
+            // WebGPU backend's downlevel flags from `DownlevelCapabilities::default()`
+            // on the stated assumption that "WebGPU is assumed to be fully
+            // compliant", so `ANISOTROPIC_FILTERING` is `true` on every WebGPU
+            // device including the weakest phone — it is never measured. The WebGL2
+            // arm genuinely queries the extension and can answer `false` on that
+            // same handset. One arm therefore took 16 taps per road pixel and the
+            // other took one, on identical hardware, for a near-identical frame.
             crate::texture_sampling::device_max_anisotropy(
                 adapter
                     .get_downlevel_capabilities()
                     .flags
                     .contains(wgpu::DownlevelFlags::ANISOTROPIC_FILTERING),
+                tier_max_anisotropy,
             ),
         );
 

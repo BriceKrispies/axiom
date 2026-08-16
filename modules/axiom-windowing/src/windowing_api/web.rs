@@ -62,11 +62,20 @@ impl WindowingApi {
                 // rejects a non-finite reading here, so a browser that reported
                 // NaN can never reach the surface request at all.
                 axiom_kernel::Ratio::new(ratio as f32).and_then(|scale| {
+                    // The tier is what the app *asked for*; what it gets is what
+                    // this display can afford. `devicePixelRatio` is measured one
+                    // line above and is exactly the reading that decides it — a
+                    // dense panel has already done the oversampling the opt-up
+                    // tier was going to pay 4× the fill rate to add. The rule
+                    // itself is a pure function in `axiom_host` so it is tested
+                    // natively; this line is only where the measurement meets it.
+                    // It can only ever lower a tier, so no app is handed more than
+                    // it requested.
                     self.configure_surface_with_scale(
                         width as u32,
                         height as u32,
                         scale,
-                        profile,
+                        profile.afforded_at_scale(scale),
                     )
                 })
             })

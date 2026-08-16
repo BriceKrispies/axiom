@@ -95,13 +95,24 @@ pub(crate) fn sampler_config(sampling: TextureSampling, device_max: u16) -> Samp
     }
 }
 
-/// The device's usable maximum anisotropy from whether it reports the feature.
+/// The device's usable maximum anisotropy: what it *can* do, held to what its
+/// device tier says it should be asked to *afford*.
 ///
 /// A device either supports anisotropic filtering — in which case `wgpu`'s
 /// interface exposes it up to [`MAX_ANISOTROPY`] — or it does not, in which case
 /// the only legal clamp is `1`. There is no third answer to translate.
-pub(crate) fn device_max_anisotropy(supported: bool) -> u16 {
-    [1, MAX_ANISOTROPY][usize::from(supported)]
+///
+/// `tier_max` is the second half, and it is not redundant. `supported` is a
+/// *capability* answer, and on the WebGPU arm it is not even a measured one: wgpu
+/// fills that backend's downlevel flags from `DownlevelCapabilities::default()`
+/// because "WebGPU is assumed to be fully compliant", so it reads `true` on a
+/// phone exactly as on a workstation. Sixteen taps per pixel across a road that
+/// recedes to the horizon is affordable on one and not on the other, and no
+/// capability flag will ever say so. The tier does
+/// ([`axiom_host::HostDeviceProfile::max_anisotropy`]), so the resolved clamp is
+/// the smaller of the two.
+pub(crate) fn device_max_anisotropy(supported: bool, tier_max: u16) -> u16 {
+    [1, MAX_ANISOTROPY.min(tier_max)][usize::from(supported)]
 }
 
 #[cfg(test)]
@@ -174,7 +185,34 @@ mod tests {
 
     #[test]
     fn the_device_maximum_follows_whether_the_feature_is_reported() {
-        assert_eq!(device_max_anisotropy(true), MAX_ANISOTROPY);
-        assert_eq!(device_max_anisotropy(false), 1);
+        assert_eq!(device_max_anisotropy(true, MAX_ANISOTROPY), MAX_ANISOTROPY);
+        assert_eq!(device_max_anisotropy(false, MAX_ANISOTROPY), 1);
+    }
+
+    /// **The regression this pair of arguments exists to prevent.** A supported
+    /// device on the mobile tier must not be handed the desktop tap budget — that
+    /// is exactly what the WebGPU arm did on every phone, because its `supported`
+    /// flag is an assumption of compliance rather than a measurement.
+    #[test]
+    fn the_tier_budget_caps_a_device_that_reports_full_support() {
+        assert_eq!(
+            device_max_anisotropy(true, 4),
+            4,
+            "a capable device on the mobile tier still only spends the tier's taps"
+        );
+        assert_eq!(
+            sampler_config(TextureSampling::Anisotropic, device_max_anisotropy(true, 4)).anisotropy,
+            4
+        );
+    }
+
+    /// The two limits compose in both directions: neither can raise the other.
+    #[test]
+    fn the_resolved_clamp_is_the_smaller_of_capability_and_tier() {
+        // A tier asking for more than the interface allows is still capped.
+        assert_eq!(device_max_anisotropy(true, 64), MAX_ANISOTROPY);
+        // An unsupported device is `1` no matter how generous the tier is.
+        assert_eq!(device_max_anisotropy(false, 16), 1);
+        assert_eq!(device_max_anisotropy(false, 4), 1);
     }
 }
