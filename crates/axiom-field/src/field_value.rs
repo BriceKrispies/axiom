@@ -2,7 +2,7 @@
 //! data-carrying enum.
 
 use axiom_math::{Vec2, Vec3, Vec4};
-use axiom_recipe::Scalar;
+use axiom_recipe::{Param, Scalar};
 
 use crate::field_type::FieldType;
 
@@ -129,6 +129,26 @@ impl FieldValue {
         ]
     }
 
+    /// The five canonical parameter words of a [`crate::FieldOp::Const`] node
+    /// carrying this value: the declared type code, then the four lanes.
+    ///
+    /// Stated once, here, because both the authoring surface
+    /// ([`crate::FieldBuilder::push_const`]) and the constant folder mint `Const`
+    /// nodes, and two spellings of the same encoding would be two ways for a
+    /// folded graph and a hand-built one to differ in bytes.
+    pub(crate) fn const_params(self) -> Vec<Param> {
+        let mut params = Vec::with_capacity(5);
+        params.push(Param::int(u32::from(self.ty.code())));
+        params.extend(self.words().iter().map(|word| Param::from_bits(*word)));
+        params
+    }
+
+    /// Whether every lane is a finite number.
+    pub(crate) fn is_finite(self) -> bool {
+        let lanes = self.as_vec4();
+        lanes.x.is_finite() & lanes.y.is_finite() & lanes.z.is_finite() & lanes.w.is_finite()
+    }
+
     /// Rebuild a value from a type and four lane words.
     ///
     /// Lanes past `ty`'s width are forced back to [`FieldValue::UNUSED_LANE`]
@@ -227,6 +247,41 @@ mod tests {
         );
         assert_eq!(hostile, FieldValue::vec2(Vec2::new(1.0, 2.0)));
         assert_eq!(hostile.as_vec4(), Vec4::new(1.0, 2.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn a_const_nodes_parameter_words_are_the_type_then_the_four_lanes() {
+        let words: Vec<u32> = FieldValue::vec2(Vec2::new(0.5, 1.5))
+            .const_params()
+            .iter()
+            .map(|param| param.bits())
+            .collect();
+        assert_eq!(
+            words,
+            vec![u32::from(FieldType::Vec2.code()), 0.5_f32.to_bits(), 1.5_f32.to_bits(), 0, 0]
+        );
+    }
+
+    #[test]
+    fn finiteness_covers_every_lane() {
+        assert!(FieldValue::vec4(Vec4::new(1.0, 2.0, 3.0, 4.0)).is_finite());
+        assert!(FieldValue::scalar(Scalar::new(0.0)).is_finite());
+        // A lane past the declared width is scrubbed, so it can never be the
+        // reason a value is non-finite.
+        assert!(FieldValue::from_words(
+            FieldType::Scalar,
+            [1.0_f32.to_bits(), f32::NAN.to_bits(), 0, 0]
+        )
+        .is_finite());
+        let bad_lanes = [
+            [f32::NAN.to_bits(), 0, 0, 0],
+            [0, f32::INFINITY.to_bits(), 0, 0],
+            [0, 0, f32::NEG_INFINITY.to_bits(), 0],
+            [0, 0, 0, f32::NAN.to_bits()],
+        ];
+        bad_lanes.iter().for_each(|words| {
+            assert!(!FieldValue::from_words(FieldType::Vec4, *words).is_finite());
+        });
     }
 
     #[test]

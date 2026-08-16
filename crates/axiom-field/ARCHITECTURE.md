@@ -5,9 +5,10 @@
 > value, represented as a closed-algebra, id-ordered, acyclic typed expression
 > graph.
 
-This crate owns the **representation**. It carries no evaluator, no
-canonicalisation pass and no type checker; those land separately, on top of the
-vocabulary and the bytes fixed here.
+This crate owns the **representation**, the **type rules**, and the **canonical
+form**. It carries no evaluator; evaluating a field against an `EvalContext` is a
+separate concern that lands on top of the vocabulary, the bytes and the types
+fixed here.
 
 ## Placement
 
@@ -68,6 +69,101 @@ FieldBuilder  ──push/declare──>  FieldBuilder  ──build(output)──
   ids and the canonical node encoding come from the container for free. What
   this layer adds is the declared `output` node (a container has no notion of a
   *result*), the parameter table, and the meaning of the operator codes.
+
+## Validation: one forward fold, and no second cycle check
+
+`FieldGraph::validate` is a **single forward fold in node id order**. Because a
+node's inputs may reference only strictly-earlier nodes, every input's derived
+type is already known when the fold reaches a node, so one pass accumulating a
+`Vec<FieldType>` indexed by node id is the whole type checker — no recursion
+(`engine_no_recursion` is at 0), no worklist, no second pass.
+`FieldGraph::type_of` is the same fold, read at one index.
+
+**Cycles are not re-checked here.** `RecipeGraph::validate` already proves every
+input id is strictly smaller than its node's index, and for an id-ordered append
+graph that *is* the complete cycle argument. `validate` calls the container's
+check first and lifts its diagnostic.
+
+**Scalar-broadcasts-to-vector is the language's only implicit conversion.**
+`Add(Vec3, Scalar)` is legal and yields `Vec3`; `Add(Vec3, Vec2)` is a
+`TypeMismatch`.
+
+Every rejection names the offending `NodeId`:
+
+| Code | Condition |
+|---|---|
+| `NodeLimitExceeded` | lifted from the container |
+| `CyclicInput` | lifted from the container |
+| `MalformedData` | lifted from the container / decode |
+| `UnknownType` | a `Const` or `Param` node, or a parameter slot, declares a type code that names no `FieldType` |
+| `OutputNodeMissing` | a node id names no node — the declared output, or the id `type_of` was asked about |
+| `UnknownOperator` | the operator code names no `FieldOp` |
+| `WrongInputCount` | arity disagrees with the signature row |
+| `WrongParamCount` | parameter-word count disagrees with the signature row |
+| `TypeMismatch` | a width-generic operator whose non-scalar inputs disagree in width, **or** a `Param` node whose declared type is not the type its slot holds |
+| `ComponentOutOfRange` | a `Component` lane index ≥ its input's width |
+| `ComposeWidthInvalid` | a `Compose` width outside `2..=4`, or an input count ≠ that width |
+| `UnknownParamSlot` | a `Param` node reads a slot the table does not have |
+| `NonFiniteConstant` | a `Const` parameter word decodes to NaN or ±∞ |
+
+`NonFiniteConstant` matters more than it looks: a NaN that enters a graph
+propagates silently to every consumer, and `ScalarField::new` already refuses
+such a value downstream. Reject it at the door.
+
+`OutputNodeMissing` is deliberately **one** code covering both the decode-time
+and the validation-time form of "this id names no node". Two codes for one
+condition would make the stable numeric discriminant useless for the thing it
+exists for.
+
+## The canonical form
+
+`FieldGraph::canonicalize` runs four passes, in this order:
+
+1. **Constant folding** — a node all of whose inputs are known constants becomes
+   a `Const`. Arithmetic and shaping only. `Point`/`Uv`/`Normal`/`Time` have no
+   value until evaluation; `Param` and `Transform` read the *parameter table*, so
+   folding them would move a value into structure and start moving the digest;
+   `Noise`/`Fbm` are not folded until a CPU evaluator is the semantic reference
+   for what the backend will compute. A fold that would produce a non-finite lane
+   is refused, so a degenerate `Smoothstep` or a zero-length `Normalize` simply
+   stays a node.
+2. **Common-subexpression elimination** — nodes are keyed by
+   `(op, params, canonical input ids)` and the first node with a key is reused.
+   `Add`, `Mul`, `Min` and `Max` sort their input ids first, so `a+b` and `b+a`
+   are one node.
+3. **Dead-node elimination** — nodes the output cannot reach are dropped,
+   computed as a **reverse fold over the id-ordered node list**. Every input id is
+   strictly smaller than its node's id, so one descending pass is complete. The
+   obvious recursive walk is banned and would be worse anyway.
+4. **Deterministic relabelling** — the survivors are emitted in ascending
+   original id order into a fresh dense `0..n`. That order is already a valid
+   topological order, so no sort is involved and no tie-break rule can drift.
+
+Passes 1 and 2 are one forward walk. `canonicalize` is a **pure function** —
+nothing is memoised, because a cache is retained state — and it is idempotent.
+
+**What canonicalisation deliberately does not do:** algebraic rewriting
+(`x*1 -> x`, `x+0 -> x`), reassociation, strength reduction, or any transform
+whose result differs in the last `f32` bit. Those would break the CPU/GPU parity
+contract the backend lowering depends on. `mul_add` is likewise not used: a fused
+multiply-add rounds once where a shader rounds twice.
+
+**Where the normalisation stops.** Pass 4 normalises *within* the authoring's
+topological order; it does not re-sort independent nodes into a canonical one. So
+two graphs that differ only by dead nodes, duplicated subexpressions, foldable
+constants and commuted operands canonicalise to identical bytes — the case that
+matters — but two graphs that genuinely interleave independent subtrees in
+different orders still can differ. Fixing that would need a content-keyed
+topological sort, which is a deliberate future decision, not an accident here.
+
+**CSE's key map is a `BTreeMap`,** not a hash map: ordering is by the key's own
+bytes, so nothing depends on a hasher. **Canonicalisation is a preparation-time
+operation. Never call it from a frame path.**
+
+**The parameter table is never touched.** Dead-node elimination may drop the last
+`Param` node reading a slot; the slot stays. Shrinking the table would move the
+digest for a reason that is not structural, which is exactly what the table
+exists to prevent.
 
 ## Sharing is free
 

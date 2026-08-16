@@ -3,8 +3,8 @@
 //!
 //! One `const` row per [`FieldOp`], in discriminant order. The row says how many
 //! inputs and how many raw parameter words the operator carries, and by which
-//! rule its output type is derived. Type *checking* against these rows is a
-//! later manifest's job; this file lands the table and the accessor.
+//! rule its output type is derived. This file lands the table and the accessor;
+//! [`crate::type_check`] is the single forward fold that reads it.
 
 use core::mem::size_of;
 

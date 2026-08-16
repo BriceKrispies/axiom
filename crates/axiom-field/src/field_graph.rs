@@ -4,8 +4,11 @@
 use axiom_kernel::{BinaryReader, BinaryWriter, SchemaVersion, StableHash};
 use axiom_recipe::{NodeId, RecipeGraph};
 
+use crate::canonical;
 use crate::field_error::{FieldError, FieldErrorCode, FieldResult};
 use crate::field_params::FieldParams;
+use crate::field_type::FieldType;
+use crate::type_check;
 
 /// The wire-format version stamped into every serialized field. Bumping it
 /// deliberately changes the bytes (and therefore every digest and golden), so a
@@ -19,12 +22,14 @@ const MALFORMED_DATA: FieldError = FieldError::at(
     "the serialized field could not be decoded from its bytes",
 );
 
-/// The declared output is a property of the whole graph, so the rule names no
-/// node until [`FieldGraph::deserialize`] stamps the offending id on it.
-const OUTPUT_OUT_OF_RANGE: FieldError = FieldError::at(
-    FieldErrorCode::OutputOutOfRange,
+/// A node id that names no node of the graph. The rule names no node until the
+/// caller stamps the offending id on it — the declared output for
+/// [`FieldGraph::deserialize`] and [`FieldGraph::validate`], the queried id for
+/// [`FieldGraph::type_of`].
+const OUTPUT_NODE_MISSING: FieldError = FieldError::at(
+    FieldErrorCode::OutputNodeMissing,
     NodeId::NULL,
-    "the declared output does not reference a node of the graph",
+    "the node id does not reference a node of the graph",
 );
 
 /// A field: a pure function from an explicitly supplied [`crate::EvalContext`]
@@ -135,12 +140,74 @@ impl FieldGraph {
                     .map_err(FieldError::from_recipe)
                     .map(|()| FieldGraph::new(recipe, output, params))
             })
-            .and_then(|graph| {
-                ((graph.output.raw() as usize) < graph.node_count())
-                    .then_some(())
-                    .ok_or_else(|| OUTPUT_OUT_OF_RANGE.about(graph.output))
-                    .map(|()| graph)
-            })
+            .and_then(|graph| graph.check_output().map(|()| graph))
+    }
+
+    /// The type the field's expression at `node` evaluates to.
+    ///
+    /// The whole graph is type-checked to answer this: the derived type of a
+    /// node is a function of everything before it, so there is no cheaper honest
+    /// answer, and a graph that does not type has no types to report. Every
+    /// failure names the node that caused it, which is not necessarily `node`.
+    ///
+    /// Preparation-time only — it is `O(nodes)` per call by construction.
+    pub fn type_of(&self, node: NodeId) -> FieldResult<FieldType> {
+        self.node_types().and_then(|types| {
+            types
+                .get(node.raw() as usize)
+                .copied()
+                .ok_or_else(|| OUTPUT_NODE_MISSING.about(node))
+        })
+    }
+
+    /// Prove the field is a well-formed, well-typed program.
+    ///
+    /// The container's structural rules first (budget, and the strictly-earlier
+    /// input rule that *is* the acyclicity proof), then one forward fold in id
+    /// order that checks every node against its signature row and derives its
+    /// type, then the declared output. Every rejection names its node.
+    pub fn validate(&self) -> FieldResult<()> {
+        self.node_types().and_then(|_types| self.check_output())
+    }
+
+    /// The field's canonical form: constants folded, common subexpressions
+    /// shared, dead nodes dropped, ids relabelled into a fresh dense `0..n`.
+    ///
+    /// A pure function of the graph — nothing is memoised, because a cache is
+    /// retained state — and idempotent: canonicalising a canonical graph returns
+    /// it unchanged. Two graphs that compute the same thing, authored in
+    /// different orders, canonicalise to **byte-identical** bytes and therefore
+    /// to the same [`FieldGraph::digest`]. That is the property a program cache
+    /// and a graph diff both rest on.
+    ///
+    /// Fails exactly when [`FieldGraph::validate`] fails: there is no canonical
+    /// form of a graph that does not type.
+    pub fn canonicalize(&self) -> FieldResult<FieldGraph> {
+        self.node_types()
+            .and_then(|types| self.check_output().map(|()| types))
+            .map(|types| canonical::canonicalize(self, &types))
+    }
+
+    /// Whether the field already **is** its canonical form.
+    ///
+    /// Answered by canonicalising and comparing bytes rather than by a second,
+    /// drift-prone description of what canonical means. A graph that does not
+    /// validate is not canonical.
+    pub fn is_canonical(&self) -> bool {
+        self.canonicalize()
+            .is_ok_and(|canonical| canonical.serialize() == self.serialize())
+    }
+
+    /// The derived type of every node, in id order.
+    fn node_types(&self) -> FieldResult<Vec<FieldType>> {
+        type_check::node_types(&self.recipe, &self.params)
+    }
+
+    /// The declared output must name a node of the graph.
+    fn check_output(&self) -> FieldResult<()> {
+        ((self.output.raw() as usize) < self.node_count())
+            .then_some(())
+            .ok_or_else(|| OUTPUT_NODE_MISSING.about(self.output))
     }
 }
 
@@ -227,7 +294,7 @@ mod tests {
     fn an_output_naming_no_node_is_rejected_and_names_the_id() {
         let bytes = graph_with(7, 0.5).serialize();
         let error = FieldGraph::deserialize(&bytes).expect_err("node 7 does not exist");
-        assert_eq!(error.kind(), FieldErrorCode::OutputOutOfRange);
+        assert_eq!(error.kind(), FieldErrorCode::OutputNodeMissing);
         assert_eq!(error.code(), 5);
         assert_eq!(error.node(), NodeId::from_raw(7));
     }

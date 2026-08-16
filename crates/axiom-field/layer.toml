@@ -3,8 +3,15 @@
 # The typed pointwise field IR. `recipe` owns a domain-free operator DAG whose
 # operator codes are opaque; `field` assigns meaning to those codes through a
 # closed 23-operator algebra and a const signature table, gives every value one
-# of four types, and states the evaluation contract. It is the engine's missing
-# *function-as-a-value*, and it has nothing to do with rendering.
+# of four types, type-checks the whole graph in one forward fold, and reduces it
+# to a canonical form whose bytes are the same for any two graphs that compute
+# the same thing. It is the engine's missing *function-as-a-value*, and it has
+# nothing to do with rendering.
+#
+# Nothing is added to `introduced_capabilities` by validation and
+# canonicalisation: they are methods on the already-declared `FieldGraph`, not
+# new public exports, and the checker validates capabilities against the crate's
+# root exports.
 #
 # Why a LAYER and not a module: three engine layers (`mesh-ops`, `proc-texture`,
 # `proc-mesh`) must be able to name a field, and a layer may never depend on a
@@ -31,7 +38,11 @@ context's time input. It builds noise's FbmConfig into the Fbm operator's
 signature row, whose knob arity is derived from the config type so the operator
 and the noise layer it will be evaluated against can never drift. Recipe owns the
 container and proves it acyclic; this layer adds the type lattice, the operator
-algebra, and the evaluation contract that make the container a language.
+algebra, the evaluation contract and the canonical form that make the container a
+language. Because recipe already proves every input names a strictly-earlier
+node, this layer's type checker is a single forward fold rather than a graph
+walk, and its dead-node pass is a single reverse fold — both are direct
+consequences of the container's invariant, not reimplementations of it.
 """
 
 introduced_capabilities = [

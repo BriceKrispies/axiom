@@ -2,16 +2,23 @@
 
 use axiom_recipe::{NodeId, RecipeError};
 
-/// Why a byte stream is not a valid field graph.
+/// Why a byte stream is not a valid field graph, or why a graph does not type.
 ///
 /// Deterministic, fieldless and `Copy`. The first three are the container's own
 /// failures, inherited from [`axiom_recipe::RecipeErrorCode`] one-for-one so a
-/// caller never has to unwrap two error vocabularies; the last two are the
-/// field-level structure `recipe` cannot know about.
+/// caller never has to unwrap two error vocabularies; the rest are the
+/// field-level structure and typing `recipe` cannot know about.
 ///
 /// This is the *kind* only. The node a failure concerns is a field on
 /// [`FieldError`], never an enum payload — a data-carrying variant would force a
 /// `match` on read and violate the Branchless Law.
+///
+/// **There is deliberately no `Cycle` code of this layer's own.** A cycle is
+/// structurally impossible in an id-ordered append graph — every input must
+/// name a strictly-earlier node — and [`axiom_recipe::RecipeGraph::validate`]
+/// already proves exactly that. Re-checking it here would be duplicated logic
+/// with no new guarantee, so [`crate::FieldGraph::validate`] calls the
+/// container's check and lifts [`FieldErrorCode::CyclicInput`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FieldErrorCode {
     /// The graph has more nodes than the recipe budget allows.
@@ -20,10 +27,33 @@ pub enum FieldErrorCode {
     CyclicInput,
     /// The bytes could not be decoded.
     MalformedData,
-    /// A type code in the parameter table names no [`crate::FieldType`].
+    /// A type code — in the parameter table, in a `Const` node's declared type,
+    /// or in a `Param` node's declared type — names no [`crate::FieldType`].
     UnknownType,
-    /// The declared output node is not a node of the graph.
-    OutputOutOfRange,
+    /// A node id names no node of the graph: the declared output, or the node
+    /// [`crate::FieldGraph::type_of`] was asked about.
+    OutputNodeMissing,
+    /// A node's operator code names no [`crate::FieldOp`].
+    UnknownOperator,
+    /// A node carries a different number of inputs than its
+    /// [`crate::FieldSignature`] declares.
+    WrongInputCount,
+    /// A node carries a different number of raw parameter words than its
+    /// [`crate::FieldSignature`] declares.
+    WrongParamCount,
+    /// Types do not compose: a width-generic operator whose non-scalar inputs
+    /// disagree in width, or a `Param` node whose declared type is not the type
+    /// its parameter slot holds.
+    TypeMismatch,
+    /// A `Component` node selects a lane its input does not have.
+    ComponentOutOfRange,
+    /// A `Compose` node declares a width outside `2..=4`, or carries a number of
+    /// inputs other than that width.
+    ComposeWidthInvalid,
+    /// A `Param` node reads a slot the parameter table does not have.
+    UnknownParamSlot,
+    /// A `Const` node's parameter word decodes to NaN or ±∞.
+    NonFiniteConstant,
 }
 
 impl FieldErrorCode {
@@ -31,7 +61,7 @@ impl FieldErrorCode {
     /// without depending on the variant layout. Table-indexed by the fieldless
     /// discriminant, so it is branch-free.
     pub const fn code(self) -> u16 {
-        [1_u16, 2, 3, 4, 5][self as usize]
+        [1_u16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13][self as usize]
     }
 }
 
@@ -124,13 +154,43 @@ mod tests {
     use super::*;
     use axiom_recipe::RecipeErrorCode;
 
+    /// Every code, in discriminant order. A test-only roster: production code
+    /// never enumerates the codes, it only reports one.
+    const EVERY_CODE: [FieldErrorCode; 13] = [
+        FieldErrorCode::NodeLimitExceeded,
+        FieldErrorCode::CyclicInput,
+        FieldErrorCode::MalformedData,
+        FieldErrorCode::UnknownType,
+        FieldErrorCode::OutputNodeMissing,
+        FieldErrorCode::UnknownOperator,
+        FieldErrorCode::WrongInputCount,
+        FieldErrorCode::WrongParamCount,
+        FieldErrorCode::TypeMismatch,
+        FieldErrorCode::ComponentOutOfRange,
+        FieldErrorCode::ComposeWidthInvalid,
+        FieldErrorCode::UnknownParamSlot,
+        FieldErrorCode::NonFiniteConstant,
+    ];
+
     #[test]
     fn codes_are_stable_and_distinct() {
         assert_eq!(FieldErrorCode::NodeLimitExceeded.code(), 1);
         assert_eq!(FieldErrorCode::CyclicInput.code(), 2);
         assert_eq!(FieldErrorCode::MalformedData.code(), 3);
         assert_eq!(FieldErrorCode::UnknownType.code(), 4);
-        assert_eq!(FieldErrorCode::OutputOutOfRange.code(), 5);
+        assert_eq!(FieldErrorCode::OutputNodeMissing.code(), 5);
+        assert_eq!(FieldErrorCode::UnknownOperator.code(), 6);
+        assert_eq!(FieldErrorCode::WrongInputCount.code(), 7);
+        assert_eq!(FieldErrorCode::WrongParamCount.code(), 8);
+        assert_eq!(FieldErrorCode::TypeMismatch.code(), 9);
+        assert_eq!(FieldErrorCode::ComponentOutOfRange.code(), 10);
+        assert_eq!(FieldErrorCode::ComposeWidthInvalid.code(), 11);
+        assert_eq!(FieldErrorCode::UnknownParamSlot.code(), 12);
+        assert_eq!(FieldErrorCode::NonFiniteConstant.code(), 13);
+        EVERY_CODE
+            .iter()
+            .enumerate()
+            .for_each(|(index, code)| assert_eq!(code.code() as usize, index + 1));
     }
 
     #[test]
@@ -149,14 +209,14 @@ mod tests {
     #[test]
     fn a_failure_can_be_located_at_a_node_after_the_fact() {
         let rule = FieldError::at(
-            FieldErrorCode::OutputOutOfRange,
+            FieldErrorCode::OutputNodeMissing,
             NodeId::NULL,
             "no such output",
         );
         assert_eq!(rule.node(), NodeId::NULL);
         let located = rule.about(NodeId::from_raw(7));
         assert_eq!(located.node(), NodeId::from_raw(7));
-        assert_eq!(located.kind(), FieldErrorCode::OutputOutOfRange);
+        assert_eq!(located.kind(), FieldErrorCode::OutputNodeMissing);
         assert_eq!(located.message(), "no such output");
     }
 

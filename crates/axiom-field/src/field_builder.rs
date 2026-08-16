@@ -73,10 +73,7 @@ impl FieldBuilder {
     /// Append a `Const` node carrying `value`, encoding the canonical five
     /// parameter words: the declared type, then the four lanes.
     pub fn push_const(self, value: FieldValue) -> (Self, NodeId) {
-        let mut params = Vec::with_capacity(5);
-        params.push(Param::int(u32::from(value.ty().code())));
-        params.extend(value.words().iter().map(|word| Param::from_bits(*word)));
-        self.push(FieldOp::Const, params, Vec::new())
+        self.push(FieldOp::Const, value.const_params(), Vec::new())
     }
 
     /// Append a `Param` node reading `slot`, declared to carry `ty`.

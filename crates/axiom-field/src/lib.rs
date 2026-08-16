@@ -29,9 +29,14 @@
 //!   the canonical node encoding are the container's, for free. What this layer
 //!   adds is the type lattice, the operator meanings, the declared output node
 //!   and the parameter table.
-//! - **It carries no evaluator and no type checker.** Evaluating a field, and
-//!   checking that its types compose, are later, separate concerns. This crate
-//!   lands the vocabulary and the bytes.
+//! - **It carries no evaluator.** Evaluating a field against an
+//!   [`EvalContext`] is a later, separate concern. This crate lands the
+//!   vocabulary, the bytes, the type rules, and the canonical form.
+//! - **It type-checks and canonicalises.** [`FieldGraph::validate`] proves a
+//!   graph is a well-formed, well-typed program in one forward fold;
+//!   [`FieldGraph::canonicalize`] folds constants, shares common
+//!   subexpressions, drops dead nodes and relabels ids, so that **two graphs
+//!   computing the same thing produce identical bytes and identical digests**.
 //! - **It is not a shader graph VM.** The algebra is *closed* — 23 operators
 //!   fixed in Rust, no registry, no runtime-extensible verb, no dynamic
 //!   dispatch. A new visual effect is a new *graph*, never a new Rust function.
@@ -60,6 +65,8 @@
 //! iteration order or a `TypeId`. There is no `f64` anywhere. **The bytes are
 //! the determinism proof; the digest is the label.**
 
+mod canonical;
+mod const_fold;
 mod eval_context;
 mod field_builder;
 mod field_error;
@@ -70,6 +77,7 @@ mod field_type;
 mod field_value;
 mod ids;
 mod signature;
+mod type_check;
 
 pub use eval_context::EvalContext;
 pub use field_builder::FieldBuilder;
