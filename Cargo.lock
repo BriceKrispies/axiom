@@ -718,7 +718,8 @@ name = "axiom-placement"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
- "axiom-proc",
+ "axiom-proc-core",
+ "axiom-recipe",
  "axiom-space",
 ]
 
@@ -733,15 +734,6 @@ dependencies = [
  "axiom-kernel",
  "axiom-math",
  "axiom-noise",
- "axiom-space",
-]
-
-[[package]]
-name = "axiom-proc"
-version = "0.1.0"
-dependencies = [
- "axiom-entropy",
- "axiom-kernel",
  "axiom-space",
 ]
 
@@ -762,7 +754,8 @@ dependencies = [
  "axiom-kernel",
  "axiom-levelgen",
  "axiom-placement",
- "axiom-proc",
+ "axiom-proc-core",
+ "axiom-recipe",
  "axiom-space",
  "axiom-terrain",
 ]
@@ -771,8 +764,9 @@ dependencies = [
 name = "axiom-proc-inspect"
 version = "0.1.0"
 dependencies = [
- "axiom-proc",
+ "axiom-proc-core",
  "axiom-proc-validate",
+ "axiom-recipe",
  "axiom-space",
 ]
 
@@ -802,9 +796,9 @@ dependencies = [
 name = "axiom-proc-playground"
 version = "0.1.0"
 dependencies = [
- "axiom-kernel",
- "axiom-proc",
+ "axiom-proc-core",
  "axiom-proc-validate",
+ "axiom-recipe",
  "axiom-space",
 ]
 
@@ -824,7 +818,6 @@ name = "axiom-proc-validate"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
- "axiom-proc",
 ]
 
 [[package]]
@@ -846,7 +839,8 @@ dependencies = [
  "axiom-host",
  "axiom-kernel",
  "axiom-layout",
- "axiom-proc",
+ "axiom-proc-core",
+ "axiom-recipe",
  "axiom-space",
  "console_error_panic_hook",
  "wasm-bindgen",
