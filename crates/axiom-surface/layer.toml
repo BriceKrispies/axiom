@@ -1,0 +1,120 @@
+# Axiom layer manifest — axiom-surface.
+#
+# The engine's neutral appearance artifact. `field` owns a typed pointwise
+# expression language with no notion of what an expression is FOR; `surface`
+# names the closed set of shading channels a renderer consumes, binds each to a
+# constant or to a field evaluated in object space, composes surfaces through
+# mask fields that are themselves scalar expressions, and derives from that
+# graph the requirements a backend must satisfy before it lowers anything.
+#
+# Why a LAYER and not a module: seven engine modules must be able to name a
+# material description (resources, render, render-pipeline, gpu-backend,
+# canvas2d-backend, assets, and the axiom facade), and a module may never depend
+# on another module. The `axiom-mesh` precedent verbatim.
+#
+# Why `recipe` is in depends_on, where the plan named only kernel/math/field:
+# `field`'s own public API traffics in recipe's value vocabulary. A channel
+# constant is a `FieldValue` built from `axiom_recipe::Scalar`; a graph node is
+# named by `axiom_recipe::NodeId`; and composing two graphs — which is exactly
+# what layer flattening is — copies and rebases `axiom_recipe::Param` words
+# through `FieldBuilder::push`. Those are real, non-ceremonial references in
+# non-test code, so the dependency is declared rather than smuggled in through
+# type inference.
+
+[layer]
+name = "surface"
+crate_name = "axiom-surface"
+depends_on = ["kernel", "math", "field", "recipe"]
+
+meaningful_dependency = """
+Surface adapts field's typed pointwise expressions into the engine's one neutral
+appearance artifact: it names the closed set of shading channels a renderer
+consumes (base colour, roughness, metallic, normal, emission, opacity,
+displacement), fixes the FieldType each one must carry, binds each to either a
+constant FieldValue or a FieldGraph evaluated in object space, and composes
+surfaces through mask fields that are themselves scalar field expressions. Layer
+flattening is FieldGraph composition and nothing else: a layer's channel is
+folded into the channel under it as a Mix, an Add or a masked Mul built with
+FieldBuilder, so a layered surface resolves to one graph per channel and needs no
+new primitive to express painted, scratched and dirtied metal. The requirements
+summary is derived by reading FieldOp codes out of the bound graphs, so a backend
+learns exactly which evaluation-context inputs a surface needs before it attempts
+to lower it. Field owns expressions but no notion of what an expression is FOR;
+math supplies the Vec3/Vec4 lanes a channel value carries and the finite
+differences the height-to-normal derivation composes; recipe supplies the Scalar
+every channel constant is built from, the NodeId that names a node of a bound
+graph, and the raw Param words graph composition copies and rebases; the kernel
+supplies the canonical bytes, the SchemaVersion stamp, the StableHash that gives
+a surface a stable program identity, and the Meters and Ratio quantities that
+keep naked floats off the height-to-normal boundary. This layer adds the channel
+vocabulary, the layering algebra, the lighting discriminant and the capability
+contract.
+"""
+
+introduced_capabilities = [
+    "Surface",
+    "SurfaceBuilder",
+    "SurfaceChannel",
+    "SURFACE_CHANNEL_COUNT",
+    "ChannelBinding",
+    "SurfaceLayer",
+    "LayerBlend",
+    "MAX_LAYERS",
+    "LightingModel",
+    "SurfaceRequirements",
+    "SurfaceInput",
+    "SurfaceError",
+    "SurfaceErrorCode",
+    "SurfaceResult",
+    "SURFACE_SCHEMA_VERSION",
+]
+
+consumed_capabilities = [
+    "FieldGraph",
+    "FieldBuilder",
+    "FieldId",
+    "FieldType",
+    "FieldValue",
+    "FieldOp",
+    "FieldError",
+    "EvalContext",
+    "Vec2",
+    "Vec3",
+    "Vec4",
+    "NodeId",
+    "Param",
+    "Scalar",
+    "StableHash",
+    "BinaryWriter",
+    "BinaryReader",
+    "SchemaVersion",
+    "Meters",
+    "Ratio",
+]
+
+# Proof the dependencies are genuine. Surface digests its structural bytes with
+# the kernel's StableHash and stamps them with a SchemaVersion. ChannelBinding is
+# the tagged struct a FieldGraph or a FieldValue rides in. SurfaceRequirements is
+# derived by reading FieldOp codes out of a FieldGraph. SurfaceLayer's opaque
+# mask is a FieldValue built from a recipe Scalar. SurfaceBuilder derives a
+# normal from a FieldGraph height at a kernel Meters offset and a Ratio strength.
+
+[[proof_exports]]
+export = "Surface"
+must_reference = ["StableHash", "SchemaVersion"]
+
+[[proof_exports]]
+export = "ChannelBinding"
+must_reference = ["FieldGraph", "FieldValue", "Scalar"]
+
+[[proof_exports]]
+export = "SurfaceRequirements"
+must_reference = ["FieldGraph", "FieldOp"]
+
+[[proof_exports]]
+export = "SurfaceLayer"
+must_reference = ["FieldValue", "Scalar"]
+
+[[proof_exports]]
+export = "SurfaceBuilder"
+must_reference = ["FieldGraph", "Meters", "Ratio"]

@@ -1,0 +1,32 @@
+[package]
+name = "axiom-surface"
+description = "Axiom layer: the engine's neutral appearance artifact. A surface is a closed record of seven named shading channels — base colour, roughness, metallic, normal, emission, opacity, displacement — each bound to a constant value or to an axiom-field expression evaluated in object space, plus a lighting-model discriminant, mask-driven layering that flattens into one field graph per channel, a derived requirements summary a backend checks before it lowers anything, canonical little-endian bytes and a structural digest that a parameter retune cannot move. It names no shader, stage, binding, pipeline or backend. Branchless and 100% covered."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# The kernel supplies the serialization primitives (BinaryWriter/BinaryReader),
+# the SchemaVersion stamp, the StableHash the structural digest is minted with,
+# and the Meters/Ratio quantity newtypes that keep naked floats off the
+# authoring boundary.
+axiom-kernel = { path = "../axiom-kernel" }
+# Math supplies the Vec2/Vec3/Vec4 a channel value carries and the finite
+# differences of the height-to-normal derivation are composed from.
+axiom-math = { path = "../axiom-math" }
+# Field supplies the expression language every channel binding is written in:
+# FieldGraph, FieldBuilder, FieldOp, FieldValue, FieldType, EvalContext, and the
+# structural digest a surface's own digest is folded from.
+axiom-field = { path = "../axiom-field" }
+# Recipe supplies the value vocabulary field's own public API traffics in — the
+# Scalar quantity of every channel constant, the NodeId that names a node of a
+# bound graph, and the raw Param words a graph is composed out of.
+axiom-recipe = { path = "../axiom-recipe" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

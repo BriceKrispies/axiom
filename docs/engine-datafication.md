@@ -257,12 +257,25 @@ accidental parallel implementation), **cap** (flattens future growth), or
 
 ### Frontier — flagged, not scheduled
 
-- **Data-described render graph + material/lighting model (cap).** Materials
-  already carry `roughness` / `emissive` the shader ignores, and an `UNLIT`
-  pipeline marker is emitted but unwired. Parameterize the fixed model by data
-  and select from a small closed set of variants by discriminant — **not** a
+- **Data-described render graph + material/lighting model (cap).** **IN
+  PROGRESS** — being executed as the work-manifest set
+  [`work-manifests/shader-material-field-system/`](work-manifests/shader-material-field-system/).
+  Materials already carry `roughness` / `emissive` the shader ignores, and an
+  `UNLIT` pipeline marker is emitted but unwired. Parameterize the fixed model by
+  data and select from a small closed set of variants by discriminant — **not** a
   data-described shader-graph VM (that is over the §3 line). Pays off as the
   engine grows past one model.
+
+  What has landed so far: `crates/axiom-field`, a **closed** 23-operator typed
+  pointwise expression algebra fixed in Rust with a CPU reference evaluator; and
+  `crates/axiom-surface`, the neutral appearance artifact — seven named channels
+  each bound to a constant or a field, a three-variant `LightingModel`
+  discriminant (which is what finally gives `RenderPipelineKind::UNLIT`
+  something behind it), bounded mask-driven layering that flattens to one field
+  graph per channel, and a structural digest that a parameter retune cannot move.
+  Backend lowering, WGSL emission and program caching are the remaining
+  manifests, and all of them happen at the `RuntimeState::Prepared` barrier, not
+  at frame time. The compliance reading is in §10.
 - **sim-core rule layer (deferred).** `axiom-sim-core` is the deepest data
   substrate (facts / relations / processes / effects / definitions), but its
   behavior slot is a deliberate stub — `ProcessHandler` is a Rust trait and only
@@ -313,7 +326,15 @@ Non-goals (each would violate a law in §5):
 - A runtime `TypeId`/`Any` dispatch registry or reflective op invocation.
 - An open/extensible op vocabulary that data can add verbs to at runtime.
 - A data-described shader-graph VM (parameterizing a closed model is fine; an
-  open graph is not).
+  open graph is not). **What the ban is on, stated precisely:** an **open,
+  runtime-extensible op vocabulary interpreted at frame time** — a registry data
+  can add verbs to, dynamic dispatch, a per-frame interpreter loop. A **closed**
+  algebra fixed in Rust (`crates/axiom-field`'s 23 operators, with no registry
+  and no runtime-extensible verb) whose graphs are validated, canonicalized and
+  lowered at the existing `RuntimeState::Prepared` preparation barrier is
+  *"parameterizing a closed model"* and is therefore **in scope**, not a
+  violation. The distinction is the §5 ceiling exactly: the vocabulary is fixed
+  engine code, and only the composition of it is data.
 - Moving spine logic into an app to "become data" by dodging a gate.
 
 Open decisions a human must ratify before the corresponding stage:

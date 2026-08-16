@@ -1037,6 +1037,16 @@ name = "axiom-streaming"
 version = "0.1.0"
 
 [[package]]
+name = "axiom-surface"
+version = "0.1.0"
+dependencies = [
+ "axiom-field",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-recipe",
+]
+
+[[package]]
 name = "axiom-terrain"
 version = "0.1.0"
 dependencies = [
