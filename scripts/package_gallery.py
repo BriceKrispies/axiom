@@ -457,6 +457,7 @@ def build_rust_apps(
     fast: bool,
     target_dir: Path,
     debug: bool = False,
+    tuning: package_app.Tuning = package_app.SHIPPING,
 ) -> None:
     """Build every Rust app's wasm bundle into ``dist/<id>/``. Unchanged in substance
     from before: a Rust app statically links the engine into its own wasm, so there is
@@ -468,19 +469,27 @@ def build_rust_apps(
 
     def finish(app_id: str, app_dir: Path) -> None:
         out = dist / app_id
-        print(f"[{app_id}] finishing wasm bundle into {out}{' (fast: wasm-only)' if fast else ''}", flush=True)
+        print(
+            f"[{app_id}] finishing wasm bundle into {out} "
+            f"[{tuning.label}]{' (fast: wasm-only)' if fast else ''}",
+            flush=True,
+        )
         snake = package_app.build_bundle(
-            app_dir, out, fast=fast, target_dir=target_dir, debug=debug, prebuilt=prebuilt
+            app_dir, out, fast=fast, target_dir=target_dir, debug=debug, prebuilt=prebuilt, tuning=tuning
         )
         package_app.emit_index_html(app_dir, out, snake, sdk_hosted=False)
 
-    # fast: compile every wasm in ONE cargo invocation up front (engine deps build
-    # once, no fat LTO so they LINK into each app), THEN finish each bundle
-    # CONCURRENTLY — the per-app `wasm-opt -Oz` dominates and the runs are independent.
+    # fast: compile every wasm in ONE cargo invocation up front, THEN finish each
+    # bundle CONCURRENTLY — the per-app `wasm-opt` dominates and the runs are
+    # independent. Under the `shipping` tuning the shared cargo build is where the
+    # time goes instead (fat LTO re-runs whole-program optimization per app), which is
+    # the price of the bundle being fast to RUN rather than fast to BUILD.
     # The slow MVP build-std path stays serial: each app runs its own cargo build,
     # which would contend on the shared target dir's build lock if parallelized.
     if prebuilt:
-        package_app.prebuild_wasm_crates([d for _, d in app_dirs], target_dir=target_dir, debug=debug)
+        package_app.prebuild_wasm_crates(
+            [d for _, d in app_dirs], target_dir=target_dir, debug=debug, tuning=tuning
+        )
         workers = min(len(app_dirs), os.cpu_count() or 4)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             list(pool.map(lambda pair: finish(*pair), app_dirs))
@@ -496,6 +505,7 @@ def build_apps(
     target_dir: Path,
     debug: bool = False,
     only: list[str] | None = None,
+    tuning: package_app.Tuning = package_app.SHIPPING,
 ) -> list[AppSpec]:
     """Discover every registered app, build the shared engine, and lay each app under
     ``dist/<id>/``. Returns the specs that were built."""
@@ -515,7 +525,7 @@ def build_apps(
         for spec in ts_specs:
             build_ts_app(spec, dist, version)
 
-    build_rust_apps(rust_specs, dist, fast=fast, target_dir=target_dir, debug=debug)
+    build_rust_apps(rust_specs, dist, fast=fast, target_dir=target_dir, debug=debug, tuning=tuning)
     return specs
 
 
@@ -539,7 +549,15 @@ def main() -> int:
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="quick wasm-only bundles (no-LTO release-preview profile, no wasm2js fallback) for iteration",
+        help="quick wasm-only bundles (stable toolchain, no wasm2js fallback) for iteration",
+    )
+    parser.add_argument(
+        "--tuning",
+        choices=sorted(package_app.TUNINGS),
+        default=package_app.SHIPPING.label,
+        help="how hard to optimize: 'shipping' (fat LTO + opt-level 3 + wasm-opt -O3 — "
+        "what the deploy publishes and what a phone actually runs; the default) or "
+        "'preview' (thin LTO + wasm-opt -Oz — builds fast, runs slow)",
     )
     parser.add_argument(
         "--debug",
@@ -580,7 +598,14 @@ def main() -> int:
 
     # 2. The shared engine + one directory per registered app.
     target_dir = (REPO_ROOT / "target") if args.fast else (REPO_ROOT / "target" / "package-mvp")
-    specs = build_apps(dist, fast=args.fast, target_dir=target_dir, debug=args.debug, only=args.only)
+    specs = build_apps(
+        dist,
+        fast=args.fast,
+        target_dir=target_dir,
+        debug=args.debug,
+        only=args.only,
+        tuning=package_app.TUNINGS[args.tuning],
+    )
 
     # 3. Re-lay the static shell (it is cheap and idempotent, and the landing grid may
     #    have changed while the slow wasm builds ran). App directories are untouched.

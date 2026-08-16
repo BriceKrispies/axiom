@@ -144,10 +144,11 @@ help:
 # --- Mobile-first demo gallery (deployed by .github/workflows/deploy-pages.yml) ---
 
 # PACKAGE the demo gallery into dist/ via scripts/package_gallery.py: every demo app's
-# own wasm bundle (wasm-opt -Oz fast-path PLUS a Binaryen wasm2js fallback for browsers
-# with no WebAssembly) into dist/<id>/ behind its capability-detecting loader, with the
-# static landing grid laid over it. First it installs the pinned Binaryen toolchain and
-# builds + vendors the @axiom/client SDK the netplay demo needs.
+# own wasm bundle (the shipping tuning's wasm-opt -O3 fast-path PLUS a Binaryen wasm2js
+# fallback for browsers with no WebAssembly) into dist/<id>/ behind its
+# capability-detecting loader, with the static landing grid laid over it. First it
+# installs the pinned Binaryen toolchain and builds + vendors the @axiom/client SDK the
+# netplay demo needs.
 #
 # This is the build half of `make gallery`. Because the app is rebuilt MVP via nightly
 # `-Z build-std` (so the wasm2js fallback is possible), the FIRST run is slow — it
@@ -181,9 +182,12 @@ gallery-serve:
 # build through the same loader, NO MVP/build-std rebuild and NO wasm2js fallback), then
 # serves dist/. Seconds, not minutes — use this while iterating; use `make gallery` for
 # the deploy-grade bundle with the fallback.
+# `--tuning preview` is what makes this the "seconds" target: thin LTO + wasm-opt -Oz.
+# The bundles it produces are for LOOKING at, not for measuring frame rate on — the
+# deployed/shipping tuning is `make gallery` (and the Pages workflow).
 gallery-fast-build:
 	npm --prefix scripts/packaging install --no-audit --no-fund
-	uv run --no-project python scripts/package_gallery.py --fast
+	uv run --no-project python scripts/package_gallery.py --fast --tuning preview
 
 gallery-fast: gallery-fast-build
 	@echo Fast gallery (wasm-only) built into $(DIST_DIR)/. Serving at http://localhost:$(GALLERY_PORT) - Ctrl+C to stop.

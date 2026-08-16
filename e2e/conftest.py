@@ -55,7 +55,14 @@ def gallery_base_url():
     # stdlib + subprocess, and crucially the http.server Popen must BE the real
     # process so terminate() reaches it on teardown (a `uv run python` wrapper would
     # be killed while the child server orphaned, leaving :8000 held on Windows).
-    subprocess.run([sys.executable, "scripts/package_gallery.py", "--fast"], cwd=REPO_ROOT, check=True)
+    # `--tuning preview` on purpose: these tests exercise the loader and the page boot
+    # path, never frame rate, so they want the fastest build that boots — not the
+    # fat-LTO shipping bundle the deploy publishes.
+    subprocess.run(
+        [sys.executable, "scripts/package_gallery.py", "--fast", "--tuning", "preview"],
+        cwd=REPO_ROOT,
+        check=True,
+    )
     server = subprocess.Popen(  # noqa: S603
         [sys.executable, "-m", "http.server", str(PORT), "--directory", "dist"], cwd=REPO_ROOT
     )

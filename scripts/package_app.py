@@ -6,7 +6,8 @@ engine dependency graph. It turns one ``apps/<app>`` crate into a directory you 
 serve from any static host, with a built-in capability ladder:
 
   * **wasm fast path** — real WebAssembly where the browser supports it, run through
-    Binaryen ``wasm-opt -Oz`` for size.
+    Binaryen ``wasm-opt`` at the chosen tuning's level (``-O3`` for speed by default,
+    ``-Oz`` for size under ``--tuning preview``). See ``Tuning``.
   * **wasm2js fallback** — for a browser with no WebAssembly at all, Binaryen
     ``wasm2js`` compiles the same module to plain JS. The loader prints exactly one
     ``console.warn`` line and runs it. (The engine's own WebGPU -> WebGL2 -> Canvas2D
@@ -59,18 +60,50 @@ import sys
 import tempfile
 import tomllib
 from pathlib import Path
+from typing import NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BINARYEN_BIN = REPO_ROOT / "scripts" / "packaging" / "node_modules" / "binaryen" / "bin"
 WASM_TARGET = "wasm32-unknown-unknown"
 
-# The fast/preview cargo profile for browser-demo bundles (defined in the root
-# Cargo.toml). It inherits `release` but turns fat LTO OFF, so the engine's object code
-# is codegen'd ONCE (cached in the shared target dir) and merely LINKED into each demo
-# app, instead of re-running whole-program LTO over the whole engine per app — the fix
-# for the ~10-min 9-app Pages build. wasm-opt -Oz (below) recovers most of the size.
-# `make package` still ships via `[profile.release]` (fat LTO).
-PREVIEW_PROFILE = "release-preview"
+# How hard the wasm is optimized, and for WHAT.
+#
+# These are two knobs — which cargo profile compiles the crate, and which Binaryen
+# level finishes it — and they used to be welded to `--fast`, which is really a
+# question about the TOOLCHAIN (stable + no wasm2js, vs nightly `-Z build-std` + the
+# wasm2js fallback). Conflating them is how the GitHub Pages deploy came to ship a
+# build tuned for build latency: `--fast` was chosen to keep the deploy quick, and it
+# silently brought size-first codegen along with it. A phone saw ~20fps on a bundle
+# that runs ~56fps from the local dev server, which builds plain `--release`.
+#
+# So the axis is now named and explicit. `--fast` still means "stable toolchain, no
+# wasm2js"; the tuning below independently decides whether the artifact is built to
+# ITERATE on or to be PLAYED.
+class Tuning(NamedTuple):
+    """A named (cargo profile, Binaryen level) pair — see `PREVIEW` / `SHIPPING`."""
+
+    #: Cargo profile for the fast/stable path. (The MVP `build-std` path is always
+    #: `release`: it exists for wasm2js compatibility, not as a speed choice.)
+    profile: str
+    #: Binaryen `wasm-opt` level applied to the finished module, on either path.
+    wasm_opt: str
+    label: str
+
+
+#: Build to ITERATE on: thin LTO, `opt-level = "s"`, size-first Binaryen. Cheap to
+#: build and small, and correspondingly slow at runtime. Never the default anywhere —
+#: it has to be asked for by name (`--tuning preview`), because the failure this whole
+#: distinction exists to prevent was a preview build being published by accident.
+PREVIEW = Tuning("release-preview", "-Oz", "preview")
+
+#: Build to BE PLAYED: fat LTO + `opt-level = 3`, speed-first Binaryen. What the
+#: deploy uses. Costs real build time — every app re-runs whole-program optimization
+#: over the engine's bitcode at its own final link — and produces a larger bundle.
+#: Both are paid deliberately: this is the artifact a player's phone runs.
+SHIPPING = Tuning("release", "-O3", "shipping")
+
+#: Tunings by CLI name, so `--tuning` stays a single source of truth.
+TUNINGS = {t.label: t for t in (PREVIEW, SHIPPING)}
 
 # An "SDK-hosted" browser app (axiom-game-runtime, axiom-retro-fps-ts-browser) is authored
 # in TypeScript over the `@axiom/game` SDK. Its index.html does NOT wire the wasm glue
@@ -385,13 +418,14 @@ def _compile_wasm_bundle(
     target_dir: Path | None,
     debug: bool = False,
     prebuilt: bool = False,
+    tuning: Tuning = SHIPPING,
 ) -> tuple[str, str, Path, Path | None]:
     """Build the crate's wasm and produce the bundle artifacts in ``tmp``.
 
     Steps 1-4 of the pipeline, shared by ``package`` (single app) and
     ``build_bundle`` (the multi-page gallery): cargo build (fast incremental or MVP
-    ``-Z build-std``), wasm-bindgen *bundler* glue, ``wasm-opt -Oz`` fast wasm, and
-    the optional wasm2js fallback. Returns ``(snake, glue_js, fast_wasm_path,
+    ``-Z build-std``), wasm-bindgen *bundler* glue, ``wasm-opt`` at ``tuning.wasm_opt``,
+    and the optional wasm2js fallback. Returns ``(snake, glue_js, fast_wasm_path,
     wasm2js_path_or_None)``.
 
     ``prebuilt=True`` means this crate's wasm has already been produced in
@@ -409,8 +443,8 @@ def _compile_wasm_bundle(
         target_dir = target_dir or (REPO_ROOT / "target")
         env["CARGO_TARGET_DIR"] = str(target_dir)
         # A --debug bundle keeps `debug_assertions` on (for the Canvas2D deep
-        # profiler); the render benchmark uses it. Otherwise the no-LTO preview profile.
-        profile = [] if debug else ["--profile", PREVIEW_PROFILE]
+        # profiler); the render benchmark uses it. Otherwise the tuning's profile.
+        profile = [] if debug else ["--profile", tuning.profile]
         if not prebuilt:
             run(["cargo", "build", "-p", name, "--target", WASM_TARGET, *profile], env=env)
     else:
@@ -424,7 +458,7 @@ def _compile_wasm_bundle(
                  "-Z", "build-std=std,panic_abort"],
                 env=env,
             )
-    profile_subdir = "debug" if (fast and debug) else (PREVIEW_PROFILE if fast else "release")
+    profile_subdir = "debug" if (fast and debug) else (tuning.profile if fast else "release")
     built = target_dir / WASM_TARGET / profile_subdir / f"{snake}.wasm"
     if not built.is_file():
         sys.exit(f"error: expected wasm not produced at {built}")
@@ -434,9 +468,13 @@ def _compile_wasm_bundle(
     run(["wasm-bindgen", "--target", "bundler", "--out-dir", str(pkg), str(built)])
     bg_wasm = pkg / f"{snake}_bg.wasm"
 
-    # 3. Fast-path wasm: size-optimized.
+    # 3. Fast-path wasm, finished at the tuning's Binaryen level: `-Oz` (size) for a
+    # preview bundle, `-O3` (speed) for a shipping one. This is not a rounding
+    # difference — `-Oz` declines to inline by design, which on the spine's
+    # per-element combinator chains is the difference between straight-line code and
+    # an indirect call per element per frame.
     fast_wasm = tmp / f"{snake}_bg.opt.wasm"
-    run(binaryen("wasm-opt", "-Oz", str(bg_wasm), "-o", str(fast_wasm)))
+    run(binaryen("wasm-opt", tuning.wasm_opt, str(bg_wasm), "-o", str(fast_wasm)))
 
     # 4. wasm2js fallback: lower remaining post-MVP ops, then compile to JS, then
     # inline the bare-`env` i64 scratch so the module resolves in a static bundle.
@@ -454,7 +492,9 @@ def _compile_wasm_bundle(
     return snake, glue_js, fast_wasm, wasm2js_path
 
 
-def prebuild_wasm_crates(app_dirs: list[Path], *, target_dir: Path, debug: bool = False) -> None:
+def prebuild_wasm_crates(
+    app_dirs: list[Path], *, target_dir: Path, debug: bool = False, tuning: Tuning = SHIPPING
+) -> None:
     """Compile several apps' wasm cdylibs in ONE ``cargo build`` invocation (the
     fast/preview path only), so the shared engine dependency graph builds once and the
     per-app leaf codegens run together across cores — instead of N serial cargo
@@ -464,11 +504,11 @@ def prebuild_wasm_crates(app_dirs: list[Path], *, target_dir: Path, debug: bool 
     names = [crate_name(d) for d in app_dirs]
     env = os.environ.copy()
     env["CARGO_TARGET_DIR"] = str(target_dir)
-    profile = [] if debug else ["--profile", PREVIEW_PROFILE]
+    profile = [] if debug else ["--profile", tuning.profile]
     pkg_flags = [flag for name in names for flag in ("-p", name)]
     print(
         f"  pre-building {len(names)} demo wasm crate(s) in one cargo invocation "
-        f"({'debug' if debug else PREVIEW_PROFILE})",
+        f"({'debug' if debug else tuning.profile})",
         flush=True,
     )
     run(["cargo", "build", *pkg_flags, "--target", WASM_TARGET, *profile], env=env)
@@ -484,6 +524,7 @@ def build_bundle(
     keep_temp: bool = False,
     debug: bool = False,
     prebuilt: bool = False,
+    tuning: Tuning = SHIPPING,
 ) -> str:
     """Build ONE crate's wasm bundle and drop the loader + companions into ``out/``
     (native root layout: ``axiom-loader.js`` + ``<snake>_bg.{wasm,js[,wasm2js.js]}``).
@@ -499,7 +540,14 @@ def build_bundle(
     tmp = Path(tempfile.mkdtemp(prefix=f"axiom-bundle-{crate_name(app_dir).removeprefix('axiom-')}-"))
     try:
         snake, glue_js, fast_wasm, wasm2js_path = _compile_wasm_bundle(
-            app_dir, tmp, fast=fast, has_fallback=has_fallback, target_dir=target_dir, debug=debug, prebuilt=prebuilt
+            app_dir,
+            tmp,
+            fast=fast,
+            has_fallback=has_fallback,
+            target_dir=target_dir,
+            debug=debug,
+            prebuilt=prebuilt,
+            tuning=tuning,
         )
         shutil.copy2(fast_wasm, out / f"{snake}_bg.wasm")
         if wasm2js_path is not None:
@@ -523,14 +571,17 @@ def package(
     fast: bool = False,
     target_dir: Path | None = None,
     keep_temp: bool = False,
+    tuning: Tuning = SHIPPING,
 ) -> Path:
     """Package one app crate into ``out``. Reusable from package_gallery.py too.
 
-    ``fast=True`` skips the wasm2js fallback and the slow MVP/``build-std`` rebuild:
-    it does a no-LTO ``release-preview`` build (reference-types and all), so the engine
-    compiles once and links into the app — wasm-only but quick, for tight gallery
-    iteration. The output still goes through the same loader, so the page boot path is
-    identical.
+    ``fast=True`` skips the wasm2js fallback and the slow MVP/``build-std`` rebuild
+    (reference-types and all), so the engine compiles once and links into the app —
+    wasm-only but quick. The output still goes through the same loader, so the page
+    boot path is identical.
+
+    ``tuning`` is the separate question of how hard to optimize — ``PREVIEW`` to
+    iterate, ``SHIPPING`` for anything a player will actually run. See ``Tuning``.
 
     The default (``fast=False``) path needs the genuinely-MVP module for wasm2js, so
     it rebuilds std MVP via nightly ``-Z build-std`` into ``target_dir`` (default
@@ -550,17 +601,17 @@ def package(
         )
     tmp = Path(tempfile.mkdtemp(prefix=f"axiom-pkg-{name.removeprefix('axiom-')}-"))
 
-    print(f"Packaging {name} -> {out}{'  (fast: wasm-only)' if fast else ''}")
+    print(f"Packaging {name} -> {out}  [{tuning.label}]{'  (fast: wasm-only)' if fast else ''}")
     try:
         # 0. An SDK-hosted app's TypeScript host edge (harness + author module) and its
         # vendored SDK are compiled/built here so the baked bundle matches the dev loop.
         if sdk_hosted:
             prepare_sdk_hosted(app_dir)
         # 1-4. Build the wasm + bundle artifacts (shared with the gallery's
-        # build_bundle): cargo build, wasm-bindgen bundler glue, wasm-opt -Oz, and the
-        # optional wasm2js fallback.
+        # build_bundle): cargo build, wasm-bindgen bundler glue, wasm-opt at the
+        # tuning's level, and the optional wasm2js fallback.
         snake, glue_js, fast_wasm, wasm2js_path = _compile_wasm_bundle(
-            app_dir, tmp, fast=fast, has_fallback=has_fallback, target_dir=target_dir
+            app_dir, tmp, fast=fast, has_fallback=has_fallback, target_dir=target_dir, tuning=tuning
         )
         wasm2js_js = wasm2js_path.read_text(encoding="utf-8") if wasm2js_path is not None else None
 
@@ -603,7 +654,15 @@ def main() -> int:
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="quick wasm-only build: no-LTO release-preview profile, no MVP/build-std, no wasm2js",
+        help="quick wasm-only build: stable toolchain, no MVP/build-std, no wasm2js",
+    )
+    parser.add_argument(
+        "--tuning",
+        choices=sorted(TUNINGS),
+        default=SHIPPING.label,
+        help="how hard to optimize: 'shipping' (fat LTO + opt-level 3 + wasm-opt -O3 — "
+        "what a player runs; the default, because a bundle handed to someone should be "
+        "fast) or 'preview' (thin LTO + wasm-opt -Oz — quick to build, slow to run)",
     )
     parser.add_argument(
         "--target-dir",
@@ -625,6 +684,7 @@ def main() -> int:
         fast=args.fast,
         target_dir=Path(args.target_dir).resolve() if args.target_dir else None,
         keep_temp=args.keep_temp,
+        tuning=TUNINGS[args.tuning],
     )
 
     snake = crate_name(app_dir).replace("-", "_")

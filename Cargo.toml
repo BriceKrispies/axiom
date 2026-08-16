@@ -180,27 +180,40 @@ libraries = [
 ]
 
 # Deterministic, size-conscious release profile suitable for a future wasm build.
+# The shipping profile — what `make package` and the GitHub Pages deploy build with,
+# and therefore what a player's browser actually runs.
+#
+# `opt-level = 3` (speed), not `"s"` (size). The spine is branchless by law: iterator
+# adapters and combinator chains whose closures cross crate boundaries once per
+# element. That style is only fast if the optimizer inlines those closures away — at
+# `"s"` it declines to, and a chain that should compile to straight-line code stays a
+# per-element indirect call. Paired with fat LTO (`lto = true`) and a single codegen
+# unit, so the inlining can happen across the whole engine rather than within one
+# crate. The bundle is larger for it; that is the trade, and it is deliberate.
 [profile.release]
-opt-level = "s"
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
 
-# Fast PREVIEW profile for the browser-demo gallery / GitHub Pages deploy — repo
-# tooling ONLY (scripts/package_app.py --fast). The shipping `[profile.release]` uses
-# fat LTO (`lto = true`, `codegen-units = 1`): every demo app re-runs whole-program
-# optimization over the ENTIRE engine's bitcode at its own final link, serially —
-# which is what made the Pages build ~10 minutes. THIN LTO instead does cross-module
-# optimization via cheap, parallel per-module summaries (no serial whole-program
-# merge), so the engine's shared crates are compiled once and each app's thin link is
-# fast and runs across cores — avoiding the fat-LTO per-app blowup while keeping
-# cross-crate inlining (better codegen than `lto = false`, which drops it entirely).
-# Note: final bundle SIZE is set by the packager's `wasm-opt -Oz`, so it is ~the same
-# as `lto = false`; thin is chosen for the better codegen at equal build cost, not to
-# shrink the deploy. The real shipping bundles (`make package`) still go through
-# `[profile.release]` with fat LTO — this profile never touches them.
+# Fast PREVIEW profile for LOCAL gallery iteration — repo tooling ONLY
+# (scripts/package_app.py, the `preview` tuning). It trades runtime speed for build
+# time: thin LTO does cross-module optimization via cheap, parallel per-module
+# summaries instead of the serial whole-program merge fat LTO runs at every app's
+# final link, so the engine's shared crates compile once and each app's link runs
+# across cores. `opt-level = "s"` is pinned here rather than inherited, so raising
+# the shipping profile to `3` does not silently slow this one down.
+#
+# **This profile is not deployed.** It used to be what GitHub Pages shipped, which is
+# how a phone ended up seeing ~20fps on a build that runs ~56fps locally: thin LTO at
+# 16 codegen units leaves most of the branchless spine's per-element closures
+# un-inlined, and the packager then finished it with `wasm-opt -Oz`, which declines
+# to inline on purpose. The deploy now uses the `shipping` tuning (`[profile.release]`
+# + `wasm-opt -O3`); this profile is for iteration, where build latency is the thing
+# that actually hurts.
 [profile.release-preview]
 inherits = "release"
+opt-level = "s"
 lto = "thin"
 codegen-units = 16
 
