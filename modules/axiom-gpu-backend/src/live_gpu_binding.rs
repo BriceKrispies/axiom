@@ -415,6 +415,31 @@ impl LiveGpuBinding {
         let render_width = hold(render_width);
         let render_height = hold(render_height);
 
+        // **What this device actually resolved to**, beside the backend line above.
+        //
+        // The backend line reports the arm and its colour contract; it says nothing
+        // about the two numbers that decide what the frame costs — how many pixels
+        // are rendered, and how many taps each textured one takes. Both are settled
+        // by negotiation (a tier, a device pixel ratio, an adapter limit, a
+        // downlevel flag), so neither can be read off the source, and until now
+        // neither was observable from the page at all. That gap turned "the WebGPU
+        // arm is slow on this phone" into archaeology across wgpu's backends when it
+        // should have been one glance at a console line.
+        //
+        // Printed for the same reason the offered-format set is: a negotiated
+        // outcome nobody can see is a negotiated outcome nobody can check.
+        web_sys::console::log_1(&JsValue::from_str(&format!(
+            "axiom: surface = {width}x{height}, render target = {render_width}x{render_height} \
+             (device max {device_max}), anisotropy = {aniso} (tier cap {tier_max_anisotropy})",
+            aniso = crate::texture_sampling::device_max_anisotropy(
+                adapter
+                    .get_downlevel_capabilities()
+                    .flags
+                    .contains(wgpu::DownlevelFlags::ANISOTROPIC_FILTERING),
+                tier_max_anisotropy,
+            ),
+        )));
+
         // The intermediate colour target the scene renders into (then resolved to
         // the swapchain), in the sRGB-preferring `scene_format`, plus
         // `TEXTURE_BINDING` so the blit can sample it. Its depth view matches it,
