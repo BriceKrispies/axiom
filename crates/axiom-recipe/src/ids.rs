@@ -24,6 +24,15 @@ impl RecipeId {
 pub struct NodeId(u32);
 
 impl NodeId {
+    /// The absence of a node — what a diagnostic reports when the failure is a
+    /// property of the whole graph rather than of one node.
+    ///
+    /// `u32::MAX`, not `0`: node ids are dense insertion indices starting at
+    /// `0`, so `0` is a real node here and the kernel's reserve-zero convention
+    /// does not transfer. `u32::MAX` is unreachable because a graph is capped at
+    /// `MAX_NODES` nodes.
+    pub const NULL: NodeId = NodeId(u32::MAX);
+
     /// Construct from a raw index.
     pub const fn from_raw(raw: u32) -> Self {
         Self(raw)
@@ -45,5 +54,12 @@ mod tests {
         assert_eq!(NodeId::from_raw(3).raw(), 3);
         assert!(NodeId::from_raw(1) < NodeId::from_raw(2));
         assert!(RecipeId::from_raw(1) < RecipeId::from_raw(2));
+    }
+
+    #[test]
+    fn the_null_node_is_not_a_reachable_index() {
+        assert_eq!(NodeId::NULL.raw(), u32::MAX);
+        assert_ne!(NodeId::NULL, NodeId::from_raw(0));
+        assert!(NodeId::from_raw(crate::MAX_NODES as u32) < NodeId::NULL);
     }
 }

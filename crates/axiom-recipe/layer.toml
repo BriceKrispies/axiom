@@ -14,7 +14,7 @@ carrying a StableHash digest. It owns the container only - operator meaning and
 node evaluation belong to a higher generation layer.
 """
 
-introduced_capabilities = ["RecipeGraph", "Node", "Param", "RecipeError"]
+introduced_capabilities = ["RecipeGraph", "Node", "Param", "RecipeError", "RecipeErrorCode"]
 consumed_capabilities = ["BinaryWriter", "BinaryReader", "SchemaVersion", "StableHash"]
 
 [[proof_exports]]

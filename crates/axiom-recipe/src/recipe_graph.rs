@@ -4,7 +4,7 @@ use axiom_kernel::{BinaryReader, BinaryWriter, KernelResult, SchemaVersion, Stab
 
 use crate::ids::{NodeId, RecipeId};
 use crate::node::Node;
-use crate::recipe_error::{RecipeError, RecipeResult};
+use crate::recipe_error::{RecipeError, RecipeErrorCode, RecipeResult};
 use crate::value::Param;
 
 /// The wire-format version stamped into every serialized recipe. Bumping it
@@ -16,6 +16,28 @@ const SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 /// tiny "how to make it" description; anything larger is rejected as invalid
 /// input, keeping evaluation bounded.
 pub const MAX_NODES: usize = 256;
+
+/// The node budget is a property of the whole graph, so it names no node.
+const NODE_LIMIT_EXCEEDED: RecipeError = RecipeError::at(
+    RecipeErrorCode::NodeLimitExceeded,
+    NodeId::NULL,
+    "the recipe has more nodes than the budget allows",
+);
+
+/// The acyclicity rule, stated once. [`RecipeGraph::validate`] stamps the
+/// offending node onto it on the way out.
+const CYCLIC_INPUT: RecipeError = RecipeError::at(
+    RecipeErrorCode::CyclicInput,
+    NodeId::NULL,
+    "a node input does not reference a strictly-earlier node",
+);
+
+/// Undecodable bytes have no node: decoding stopped before one was formed.
+const MALFORMED_DATA: RecipeError = RecipeError::at(
+    RecipeErrorCode::MalformedData,
+    NodeId::NULL,
+    "the serialized recipe could not be decoded from its bytes",
+);
 
 /// A procedural recipe: a stable [`RecipeId`], a content `version`, and an
 /// append-only list of operator [`Node`]s. A node's inputs reference only
@@ -73,17 +95,17 @@ impl RecipeGraph {
 
     /// Validate the graph: within the node budget, and every node's inputs
     /// reference strictly-earlier nodes (acyclic, in-range). Returns the first
-    /// violation.
+    /// violation, naming the offending node.
     pub fn validate(&self) -> RecipeResult<()> {
         let within_budget = (self.nodes.len() <= MAX_NODES)
             .then_some(())
-            .ok_or(RecipeError::NodeLimitExceeded);
+            .ok_or(NODE_LIMIT_EXCEEDED);
         let acyclic = self.nodes.iter().enumerate().try_for_each(|(index, node)| {
             node.inputs()
                 .iter()
                 .all(|input| (input.raw() as usize) < index)
                 .then_some(())
-                .ok_or(RecipeError::CyclicInput)
+                .ok_or_else(|| CYCLIC_INPUT.about(NodeId::from_raw(index as u32)))
         });
         within_budget.and(acyclic)
     }
@@ -126,7 +148,7 @@ impl RecipeGraph {
     /// decodable-but-illegal graph.
     pub fn deserialize(bytes: &[u8]) -> RecipeResult<RecipeGraph> {
         RecipeGraph::read_from(&mut BinaryReader::new(bytes))
-            .map_err(|_| RecipeError::MalformedData)
+            .map_err(|_| MALFORMED_DATA)
             .and_then(|graph| graph.validate().map(|()| graph))
     }
 
@@ -183,23 +205,42 @@ mod tests {
         let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
         g.add(0, vec![], vec![NodeId::from_raw(1)]); // references a later node
         g.add(1, vec![], vec![]);
-        assert_eq!(g.validate(), Err(RecipeError::CyclicInput));
+        let error = g.validate().expect_err("a forward reference is cyclic");
+        assert_eq!(error.kind(), RecipeErrorCode::CyclicInput);
+        assert_eq!(error.node(), NodeId::from_raw(0));
     }
 
     #[test]
     fn self_reference_is_cyclic() {
         let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
         g.add(0, vec![], vec![NodeId::from_raw(0)]); // references itself
-        assert_eq!(g.validate(), Err(RecipeError::CyclicInput));
+        let error = g.validate().expect_err("a self reference is cyclic");
+        assert_eq!(error.kind(), RecipeErrorCode::CyclicInput);
+        assert_eq!(error.node(), NodeId::from_raw(0));
     }
 
     #[test]
-    fn over_budget_is_rejected() {
+    fn the_reported_node_is_the_real_index_of_the_offender() {
+        let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
+        let a = g.add(0, vec![], vec![]);
+        let b = g.add(0, vec![], vec![a]);
+        let c = g.add(0, vec![], vec![b]);
+        g.add(0, vec![], vec![c]);
+        g.add(0, vec![], vec![NodeId::from_raw(4)]); // the 5th node references itself
+        let error = g.validate().expect_err("the fifth node is cyclic");
+        assert_eq!(error.node(), NodeId::from_raw(4));
+    }
+
+    #[test]
+    fn over_budget_is_rejected_and_names_no_node() {
         let mut g = RecipeGraph::new(RecipeId::from_raw(1), 1);
         (0..=MAX_NODES).for_each(|_| {
             g.add(0, vec![], vec![]);
         });
-        assert_eq!(g.validate(), Err(RecipeError::NodeLimitExceeded));
+        let error = g.validate().expect_err("one past the budget is rejected");
+        assert_eq!(error.kind(), RecipeErrorCode::NodeLimitExceeded);
+        assert_eq!(error.code(), 1);
+        assert_eq!(error.node(), NodeId::NULL);
     }
 
     #[test]
@@ -212,17 +253,24 @@ mod tests {
 
     #[test]
     fn deserialize_rejects_garbage_and_illegal_graphs() {
+        let garbage = RecipeGraph::deserialize(&[0xFF]).expect_err("one byte cannot decode");
+        assert_eq!(garbage.kind(), RecipeErrorCode::MalformedData);
+        assert_eq!(garbage.code(), 3);
+        assert_eq!(garbage.node(), NodeId::NULL);
         assert_eq!(
-            RecipeGraph::deserialize(&[0xFF]),
-            Err(RecipeError::MalformedData)
+            garbage.message(),
+            "the serialized recipe could not be decoded from its bytes"
         );
-        // A structurally-decodable but cyclic graph is rejected on validate.
+
+        // A structurally-decodable but cyclic graph is rejected on validate, and
+        // the decoded graph's own node index survives the round trip.
         let mut bad = RecipeGraph::new(RecipeId::from_raw(1), 1);
+        bad.add(0, vec![], vec![]);
         bad.add(0, vec![], vec![NodeId::from_raw(5)]);
         let bytes = bad.serialize();
-        assert_eq!(
-            RecipeGraph::deserialize(&bytes),
-            Err(RecipeError::CyclicInput)
-        );
+        let cyclic = RecipeGraph::deserialize(&bytes).expect_err("node 1 is cyclic");
+        assert_eq!(cyclic.kind(), RecipeErrorCode::CyclicInput);
+        assert_eq!(cyclic.code(), 2);
+        assert_eq!(cyclic.node(), NodeId::from_raw(1));
     }
 }

@@ -10,7 +10,9 @@
 //! - [`Node`] / [`NodeId`] / [`RecipeId`] — the graph's identity and structure.
 //! - [`Param`] + its typed views [`Scalar`] / [`Color`] — how an operator reads
 //!   a raw parameter word without any per-value branch.
-//! - [`RecipeError`] / [`RecipeResult`] — stable validation/decode failures.
+//! - [`RecipeError`] / [`RecipeErrorCode`] / [`RecipeResult`] — stable
+//!   validation/decode failures, each naming the [`NodeId`] it concerns (or
+//!   [`NodeId::NULL`] for a whole-graph property).
 //!
 //! ## What it is, and is not
 //! - **Domain-free.** An operator code is an opaque `u16`; a parameter is an
@@ -31,6 +33,6 @@ mod value;
 
 pub use ids::{NodeId, RecipeId};
 pub use node::Node;
-pub use recipe_error::{RecipeError, RecipeResult};
+pub use recipe_error::{RecipeError, RecipeErrorCode, RecipeResult};
 pub use recipe_graph::{RecipeGraph, MAX_NODES};
 pub use value::{Color, Param, Scalar};

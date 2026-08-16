@@ -9,7 +9,7 @@ use axiom::prelude::App;
 use axiom_proc_mesh::{MeshOp, ProcMeshApi};
 use axiom_proc_player::{expand, DemoRecipes};
 use axiom_proc_texture::{ProcTextureApi, TextureOp};
-use axiom_recipe::{NodeId, Param, RecipeError, RecipeGraph, RecipeId, Scalar};
+use axiom_recipe::{NodeId, Param, RecipeErrorCode, RecipeGraph, RecipeId, Scalar};
 
 const SEED: u64 = 0xA11CE;
 
@@ -113,7 +113,9 @@ fn cycles_are_detected() {
         vec![Param::scalar(Scalar::new(0.1))],
         vec![NodeId::from_raw(5)],
     );
-    assert_eq!(forward.validate(), Err(RecipeError::CyclicInput));
+    let forward_error = forward.validate().expect_err("a forward reference is cyclic");
+    assert_eq!(forward_error.kind(), RecipeErrorCode::CyclicInput);
+    assert_eq!(forward_error.node(), NodeId::from_raw(0));
     assert!(ProcMeshApi::new().bake(&forward, SEED).is_err());
 
     let mut selfref = RecipeGraph::new(RecipeId::from_raw(1), 1);
@@ -122,7 +124,9 @@ fn cycles_are_detected() {
         vec![Param::scalar(Scalar::new(0.1))],
         vec![NodeId::from_raw(0)],
     );
-    assert_eq!(selfref.validate(), Err(RecipeError::CyclicInput));
+    let selfref_error = selfref.validate().expect_err("a self reference is cyclic");
+    assert_eq!(selfref_error.kind(), RecipeErrorCode::CyclicInput);
+    assert_eq!(selfref_error.node(), NodeId::from_raw(0));
 }
 
 // 5. Invalid input is rejected as data — never a panic.
@@ -139,10 +143,10 @@ fn invalid_input_is_rejected_as_data() {
     assert!(ProcMeshApi::new().bake(&unknown, SEED).is_err());
 
     // Malformed serialized bytes decode to an error, not a panic.
-    assert_eq!(
-        RecipeGraph::deserialize(&[0x00, 0x01, 0x02]),
-        Err(RecipeError::MalformedData)
-    );
+    let malformed = RecipeGraph::deserialize(&[0x00, 0x01, 0x02])
+        .expect_err("three bytes are not a recipe");
+    assert_eq!(malformed.kind(), RecipeErrorCode::MalformedData);
+    assert_eq!(malformed.node(), NodeId::NULL);
 }
 
 // 6. No runtime dependency on editor-only data: expanding from recipes that were
