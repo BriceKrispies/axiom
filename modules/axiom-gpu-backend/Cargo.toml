@@ -23,6 +23,12 @@ axiom-math = { path = "../../crates/axiom-math" }
 axiom-surface = { path = "../../crates/axiom-surface" }
 axiom-field = { path = "../../crates/axiom-field" }
 
+# The operator DAG a FieldGraph wraps. `surface_program::emit` walks it node by
+# node — the `Node`'s operator code, its raw `Param` words and its `NodeId`
+# inputs are exactly what an emitter reads — so the container is named directly
+# rather than reached for through inference.
+axiom-recipe = { path = "../../crates/axiom-recipe" }
+
 # wgpu/bytemuck are optional: pulled in on native only by the `offscreen`
 # feature; required unconditionally on wasm32 via the target table below.
 # pollster drives the native off-screen device/readback (block_on).
@@ -38,10 +44,6 @@ offscreen = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
 [dev-dependencies]
 # Test-only: builds a HostPresentationRequest, which needs a kernel handle source.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
-
-# Test-only: `Scalar` and `Param`, the quantity and the raw parameter word a
-# hand-built FieldGraph is authored from.
-axiom-recipe = { path = "../../crates/axiom-recipe" }
 
 # The live presentation arm (real wgpu + web-sys), pulled in only for wasm32.
 # The `webgl` feature adds wgpu's WebGL2 backend alongside WebGPU so

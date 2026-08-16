@@ -38,22 +38,31 @@ const VARYING_INPUT_BITS: u16 =
 
 /// What a surface's fragment stage needs the vertex stage to hand it.
 ///
-/// This is a *budget* type, not a description: the main pass's interstage struct
-/// already interpolates a uv and a normal, and [`VaryingSet::AVAILABLE`] says so.
-/// It does **not** interpolate an object-space position — the lane it carries is
-/// `world_pos`, and a surface's expressions are evaluated in object space, so a
-/// surface that reads [`SurfaceInput::POINT`] needs a lane the vertex stage does
-/// not emit yet. Adding it belongs to WGSL generation; until then such a surface
-/// fails validation honestly rather than being lowered into a world-space
-/// pattern that swims when the object moves.
+/// This is a *budget* type, not a description: it says which lanes the main
+/// pass's interstage struct carries **in the space a surface is evaluated in**,
+/// and [`VaryingSet::AVAILABLE`] is that list.
+///
+/// All three are carried. The uv always was. The other two are the lanes WGSL
+/// generation added: a surface's expressions are evaluated in *object* space
+/// (see `crates/axiom-surface/ARCHITECTURE.md`) — a world-space pattern swims
+/// when the object moves — and the pass's pre-existing `world_pos` and `normal`
+/// lanes are both world-space, so neither could stand in. The vertex stage now
+/// emits `object_pos` and `object_normal` alongside them, which is what makes
+/// [`SurfaceInput::POINT`] and [`SurfaceInput::NORMAL`] honest here rather than
+/// merely present.
+///
+/// [`SurfaceInput::TIME`] is deliberately absent from this set: it is a
+/// *uniform*, not a varying, and the main pass has no frame-time uniform to read
+/// — so it is gated in [`crate::surface_program::capability`] instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct VaryingSet(u16);
 
 impl VaryingSet {
     /// The lanes the main pass's vertex→fragment interface already carries in a
     /// form a surface can be evaluated against.
-    pub(crate) const AVAILABLE: VaryingSet =
-        VaryingSet(SurfaceInput::UV.bits() | SurfaceInput::NORMAL.bits());
+    pub(crate) const AVAILABLE: VaryingSet = VaryingSet(
+        SurfaceInput::POINT.bits() | SurfaceInput::UV.bits() | SurfaceInput::NORMAL.bits(),
+    );
 
     /// The lanes a surface reading `inputs` needs interpolated.
     pub(crate) const fn of(inputs: SurfaceInput) -> VaryingSet {
@@ -221,18 +230,33 @@ mod tests {
     }
 
     #[test]
-    fn an_object_space_point_needs_a_lane_the_interface_does_not_carry_yet() {
+    fn the_object_space_point_is_a_lane_the_interface_now_carries() {
         let surface = SurfaceBuilder::new()
             .field(SurfaceChannel::Displacement, point_offset())
             .build()
             .expect("a vec3 field is a legal displacement");
         let plan = SurfaceProgramPlan::of(&surface);
-        assert!(!plan.varyings().is_available());
+        // The vertex stage emits `object_pos`, so a surface reading the point is
+        // no longer refused for want of a lane.
+        assert!(plan.varyings().is_available());
         assert_eq!(VaryingSet::AVAILABLE.is_available(), true);
+        assert_eq!(plan.varyings(), VaryingSet::of(SurfaceInput::POINT));
         assert_ne!(plan.varyings(), VaryingSet::AVAILABLE);
         // Displacement is the one vertex-stage channel.
         assert!(plan.stage_split().has_vertex_stage());
         assert_eq!(plan.stage_split().fragment_channels(), 0);
+    }
+
+    #[test]
+    fn every_interpolatable_input_is_a_lane_the_interface_carries() {
+        assert!(VaryingSet::of(SurfaceInput::POINT).is_available());
+        assert!(VaryingSet::of(SurfaceInput::UV).is_available());
+        assert!(VaryingSet::of(SurfaceInput::NORMAL).is_available());
+        assert_eq!(
+            VaryingSet::AVAILABLE,
+            VaryingSet(VARYING_INPUT_BITS),
+            "every input that can be interpolated at all now has a lane"
+        );
     }
 
     #[test]

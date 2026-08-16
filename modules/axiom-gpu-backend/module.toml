@@ -13,6 +13,9 @@ allowed_layers = [
     # channel values are, and both are named directly in non-test code.
     "surface",
     "field",
+    # emit walks the operator DAG a FieldGraph wraps: a Node's operator code,
+    # its raw Param words and its NodeId inputs are what an emitter reads.
+    "recipe",
 ]
 
 allowed_modules = []

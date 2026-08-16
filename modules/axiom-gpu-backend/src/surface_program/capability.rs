@@ -15,6 +15,7 @@
 //! stage split. Re-deriving those here would be a second definition of them.
 
 use axiom_host::{BackendCapabilityProfile, FrameFeature, RenderCapability};
+use axiom_surface::SurfaceInput;
 
 use crate::surface_program::plan::SurfaceProgramPlan;
 
@@ -42,6 +43,13 @@ pub(crate) const MAX_SURFACE_NODES: u16 = 256;
 ///   over-cap surface is rejected rather than truncated.
 /// * **The surface needs an interstage lane the main pass does not carry**, or
 ///   more nodes than the shader budget allows.
+/// * **The surface reads the clock.** `SurfaceInput::TIME` is a uniform, not a
+///   varying, and this pass has no frame-time uniform to bind one to — the
+///   `SurfaceIn::time` lane the emitter writes against is filled with zero. A
+///   time-reading surface is therefore refused rather than lowered against a
+///   frozen clock, which would be a silently wrong answer instead of an absent
+///   one. Wiring a frame time through `SceneRenderer::record` is a change to the
+///   frame contract, not to the emitter.
 ///
 /// Every rejection reports the same [`FrameFeature::ProceduralSurface`], because
 /// that is what the frame did not get. The *reason* is a property of the plan,
@@ -62,6 +70,7 @@ pub(crate) fn validate(
         & !split.has_vertex_stage()
         & plan.param_layout().fits()
         & plan.varyings().is_available()
+        & !plan.requirements().inputs().contains(SurfaceInput::TIME)
         & (plan.requirements().node_count() <= MAX_SURFACE_NODES);
     (!needs_program | lowerable)
         .then_some(())
@@ -156,20 +165,34 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_surface_needing_an_object_space_position_lane_is_rejected() {
-        let (builder, point) = FieldBuilder::new(FieldId::of_name("gpu/cap/pt"), 1).push(
-            FieldOp::Point,
-            Vec::new(),
-            Vec::new(),
-        );
-        let (builder, lane) = builder.push(FieldOp::Component, vec![Param::int(0)], vec![point]);
-        let surface = SurfaceBuilder::new()
+    /// A scalar opacity driven by lane 0 of the context source `op`.
+    fn source_opacity(name: &str, op: FieldOp) -> Surface {
+        let (builder, source) =
+            FieldBuilder::new(FieldId::of_name(name), 1).push(op, Vec::new(), Vec::new());
+        let (builder, lane) = builder.push(FieldOp::Component, vec![Param::int(0)], vec![source]);
+        SurfaceBuilder::new()
             .field(SurfaceChannel::Opacity, builder.build(lane))
             .build()
-            .expect("a scalar point lane is a legal opacity");
+            .expect("a scalar lane is a legal opacity")
+    }
+
+    #[test]
+    fn a_surface_reading_the_object_space_position_is_admitted() {
+        // The vertex stage emits `object_pos`, so the lane a point-reading
+        // surface needs is one the interface carries.
+        let plan = SurfaceProgramPlan::of(&source_opacity("gpu/cap/pt", FieldOp::Point));
+        assert!(plan.varyings().is_available());
+        assert_eq!(validate(&plan, attempting()), Ok(()));
+    }
+
+    #[test]
+    fn a_surface_reading_the_clock_is_rejected_because_no_frame_time_reaches_the_pass() {
+        let surface = source_opacity("gpu/cap/time", FieldOp::Time);
         let plan = SurfaceProgramPlan::of(&surface);
-        assert!(!plan.varyings().is_available());
+        // Time is a uniform, never a varying, so the lane budget says nothing
+        // about it — the gate is what refuses it.
+        assert!(plan.varyings().is_available());
+        assert!(plan.requirements().inputs().contains(SurfaceInput::TIME));
         assert_eq!(
             validate(&plan, attempting()),
             Err(FrameFeature::ProceduralSurface)

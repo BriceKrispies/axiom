@@ -74,6 +74,13 @@ mod surface_recovery;
 #[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod scene_renderer;
 
+// The main pass's WGSL, in the two halves a generated surface program sits
+// between. Split out of `scene_renderer` so the shader text and the pipeline
+// that compiles it are separately readable, and so the splice point is a
+// greppable file rather than a line number in a 2600-line module.
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
+mod scene_wgsl;
+
 // Which draws can actually reach the directional shadow map. Pure geometry over
 // plain arrays, compiled everywhere (and covered natively) precisely because the
 // rule is impossible to debug from inside a render pass.

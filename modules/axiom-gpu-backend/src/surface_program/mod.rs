@@ -1,6 +1,6 @@
 //! What an authored [`axiom_surface::Surface`] means to **this** backend.
 //!
-//! Three pieces, one per file, and a set that binds them:
+//! Six pieces, one per file, and a set that binds them:
 //!
 //! * [`plan`] — the backend-shaped program plan (stage split, interstage lanes,
 //!   parameter layout, program identity).
@@ -8,23 +8,53 @@
 //!   the offset scheme that keeps two draws in one pass from reading each
 //!   other's parameters.
 //! * [`capability`] — the gate, checked once per surface at preparation time.
+//! * [`emit_ops`] — one WGSL emitter per field operator, in a `const` table
+//!   indexed by the operator code.
+//! * [`emit`] — the flat forward pass that turns a surface's channel graphs into
+//!   one `axiom_surface` function.
+//! * [`wgsl_template`] — the fixed WGSL that function is written against, the
+//!   default program, and the concatenation that splices one into the main pass.
+//! * [`program_error`] — why a surface produced no runnable program.
 //!
-//! **There is no WGSL here.** Generating a program from a plan is separate work.
-//! Until it lands, this backend's profile clears
-//! [`RenderCapability::ProceduralSurface`], every authored surface fails
-//! validation, and each one is reported as
-//! [`FrameFeature::ProceduralSurface`] while its **constant** channels are still
-//! honoured through the lanes the instance stream already has. A surface whose
-//! base colour is a plain colour therefore renders exactly right today; only the
-//! field-bound channels are the thing that is missing, and the frame says so.
+//! **Generating a program is not the same as binding one.** The emitter runs at
+//! preparation time and its output is proven — it compiles, and it agrees with
+//! `axiom-field`'s CPU evaluator to within the documented tolerance. What this
+//! backend does not yet do is *bind* a generated program to a pipeline and a
+//! parameter buffer, which is pipeline-and-cache work. So the main pass runs
+//! [`wgsl_template::DEFAULT_SURFACE_WGSL`] — the identity over the instance
+//! lanes, which reproduces today's frame exactly — this backend's profile still
+//! clears [`RenderCapability::ProceduralSurface`], and an authored surface is
+//! reported as [`FrameFeature::ProceduralSurface`] while its **constant**
+//! channels are honoured through the lanes the instance stream already has. A
+//! surface whose base colour is a plain colour therefore renders exactly right
+//! today; only the field-bound channels are the thing that is missing, and the
+//! frame says so.
 
 pub(crate) mod capability;
+pub(crate) mod emit;
+pub(crate) mod emit_ops;
+// The CPU/GPU parity proof: every operator driven through both the reference
+// evaluator and the emitted shader on a real device. Compiled only with the
+// `offscreen` feature, which is what makes a real adapter available — and it
+// asserts one was acquired rather than skipping, because a parity test that
+// passes when nothing ran proves nothing.
+#[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
+mod parity;
+
 pub(crate) mod params;
 pub(crate) mod plan;
+pub(crate) mod program_error;
+
+// The fixed WGSL a generated program is spliced into. Needed only where a real
+// shader is compiled — the live wasm arm, the off-screen arm, and tests — which
+// is the same gate `mip_chain` and `texture_sampling` carry.
+#[cfg(any(test, target_arch = "wasm32", feature = "offscreen"))]
+pub(crate) mod wgsl_template;
 
 use axiom_host::{BackendCapabilityProfile, FrameFeature};
 use axiom_surface::{Surface, SurfaceChannel};
 
+use crate::surface_program::emit::surface_function;
 use crate::surface_program::params::{pack, program_region_offset, SURFACE_PARAM_REGION_BYTES};
 use crate::surface_program::plan::SurfaceProgramPlan;
 
@@ -51,9 +81,18 @@ impl SurfaceProgramEntry {
         let plan = SurfaceProgramPlan::of(surface);
         let programmed = plan.stage_split().fragment_channels();
         let emission = constant_lanes(surface, SurfaceChannel::Emission, programmed, [0.0; 4]);
+        // Generating the program is part of BINDING, never part of a frame: this
+        // is the one place the emitter is driven, and it runs once per surface at
+        // preparation time. The text is not kept — a program cache is separate
+        // work — but the attempt is what proves the surface lowers at all, and a
+        // surface that will not lower is a degraded feature for the same reason a
+        // surface the capability gate refuses is.
+        let program = surface_function(surface);
         SurfaceProgramEntry {
             plan,
-            degraded: capability::validate(&plan, profile).err(),
+            degraded: capability::validate(&plan, profile)
+                .err()
+                .or_else(|| program.err().map(|_| FrameFeature::ProceduralSurface)),
             color: constant_lanes(surface, SurfaceChannel::BaseColor, programmed, [1.0; 4]),
             emissive: [emission[0], emission[1], emission[2]],
             // Packed from the surface's FLATTENED form: flattening is what
@@ -275,6 +314,52 @@ mod tests {
             SURFACE_PARAM_REGION_BYTES as usize
         );
         assert_eq!(set.degradations(), vec![FrameFeature::ProceduralSurface]);
+    }
+
+    #[test]
+    fn a_surface_whose_program_will_not_emit_is_reported_dropped_even_by_a_full_profile() {
+        // Two 127-node chains total 254 nodes, which is INSIDE the 256-node
+        // shader budget the capability gate checks — but composing them through a
+        // masked layer does not fit the field node budget, so the surface will
+        // not flatten into one program. Nothing
+        // about its CAPABILITIES is wrong — a profile that attempts procedural
+        // surfaces still admits it — so the emission attempt is the only thing
+        // that can catch it, and it must.
+        let over = SurfaceBuilder::new()
+            .field(SurfaceChannel::Opacity, chain("gpu/set/under", 63))
+            .layer(SurfaceLayer::new(
+                SurfaceBuilder::new()
+                    .field(SurfaceChannel::Opacity, chain("gpu/set/over", 63))
+                    .build()
+                    .expect("legal"),
+                SurfaceLayer::opaque_mask(),
+                LayerBlend::Over,
+            ))
+            .build()
+            .expect("one layer is within budget");
+        let attempting =
+            BackendCapabilityProfile::all().with(RenderCapability::ProceduralSurface);
+        assert_eq!(
+            capability::validate(&SurfaceProgramPlan::of(&over), attempting),
+            Ok(())
+        );
+        let set = SurfaceProgramSet::build(std::slice::from_ref(&over), attempting);
+        assert_eq!(set.degradations(), vec![FrameFeature::ProceduralSurface]);
+    }
+
+    /// A scalar chain of `steps` `Add`s over fresh constants: `2 * steps + 1`
+    /// nodes.
+    fn chain(name: &str, steps: u16) -> axiom_field::FieldGraph {
+        let (builder, node) = (0..steps).fold(
+            FieldBuilder::new(FieldId::of_name(name), 1)
+                .push_const(FieldValue::scalar(axiom_recipe::Scalar::new(1.0))),
+            |(builder, acc), _| {
+                let (builder, one) =
+                    builder.push_const(FieldValue::scalar(axiom_recipe::Scalar::new(1.0)));
+                builder.push(FieldOp::Add, Vec::new(), vec![acc, one])
+            },
+        );
+        builder.build(node)
     }
 
     #[test]
