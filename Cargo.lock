@@ -224,9 +224,12 @@ dependencies = [
 name = "axiom-canvas2d-backend"
 version = "0.1.0"
 dependencies = [
+ "axiom-field",
  "axiom-host",
  "axiom-kernel",
  "axiom-math",
+ "axiom-recipe",
+ "axiom-surface",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -444,9 +447,12 @@ dependencies = [
 name = "axiom-gpu-backend"
 version = "0.1.0"
 dependencies = [
+ "axiom-field",
  "axiom-host",
  "axiom-kernel",
  "axiom-math",
+ "axiom-recipe",
+ "axiom-surface",
  "bytemuck",
  "pollster",
  "wasm-bindgen",

@@ -12,6 +12,8 @@
 
 use axiom_host::FramePacket;
 
+use crate::surface_program::SurfaceProgramSet;
+
 /// Floats one packed instance occupies: `mvp(16) + world(16) + colour(4) +
 /// emissive(3) + specular(1)`. This module owns the number because it owns the
 /// packing; the renderer's vertex layout is derived from it, and it must stay
@@ -47,7 +49,20 @@ pub(crate) const INSTANCE_FLOATS: usize = 40;
 /// always its earliest draw — which is what restores **first-appearance order**
 /// at the end, the ordering the renderer's batch contract requires and the one
 /// property a sort would otherwise destroy.
-pub(crate) fn frame_packet_to_batches(packet: &FramePacket) -> Vec<(u64, u64, Vec<f32>, u32)> {
+///
+/// `surfaces` is this frame's authored surface set. A draw naming a surface
+/// program this backend could not lower still renders that surface's **constant**
+/// channels: its constant base colour multiplies the instance colour and its
+/// constant emission adds to the instance emissive, both through lanes the
+/// stream already has. A draw carrying `surface_program = 0` — every draw in
+/// every app that authors no surface — folds in the identity `(white, black)`,
+/// which is an exact IEEE no-op, so the packed bytes are unchanged. The batch
+/// key is deliberately still `(mesh_id, material_id)`: a surface is a per-instance
+/// colour here, not a pipeline, so nothing fragments.
+pub(crate) fn frame_packet_to_batches(
+    packet: &FramePacket,
+    surfaces: &SurfaceProgramSet,
+) -> Vec<(u64, u64, Vec<f32>, u32)> {
     let draws = packet.draws();
     let key = |index: &u32| {
         let draw = &draws[*index as usize];
@@ -65,15 +80,27 @@ pub(crate) fn frame_packet_to_batches(packet: &FramePacket) -> Vec<(u64, u64, Ve
             let mut floats = Vec::with_capacity(run.len() * INSTANCE_FLOATS);
             run.iter().for_each(|index| {
                 let draw = &draws[*index as usize];
+                let (tint, glow) = surfaces.constant_fallback(draw.surface_program());
+                let c = draw.color();
                 floats.extend_from_slice(&draw.mvp());
                 floats.extend_from_slice(&draw.world());
-                floats.extend_from_slice(&draw.color());
+                floats.extend_from_slice(&[
+                    c[0] * tint[0],
+                    c[1] * tint[1],
+                    c[2] * tint[2],
+                    c[3] * tint[3],
+                ]);
                 // The emissive lane, filled out to a `vec4` — the vertex-attribute
                 // granularity the instance buffer is described in — by the material's
                 // specular strength, which is what that fourth lane carries now that the
                 // shader has a highlight term to spend it on.
                 let e = draw.emissive();
-                floats.extend_from_slice(&[e[0], e[1], e[2], draw.specular().get()]);
+                floats.extend_from_slice(&[
+                    e[0] + glow[0],
+                    e[1] + glow[1],
+                    e[2] + glow[2],
+                    draw.specular().get(),
+                ]);
             });
             (mesh_id, material_id, floats, run.len() as u32, run[0])
         })
@@ -132,7 +159,7 @@ mod tests {
                 .with_emissive([2.0, 0.5, 0.0])
                 .with_specular(axiom_kernel::Ratio::finite_or_zero(0.6)),
         ];
-        let batches = frame_packet_to_batches(&packet(draws, Vec::new()));
+        let batches = frame_packet_to_batches(&packet(draws, Vec::new()), &SurfaceProgramSet::default());
 
         assert_eq!(batches.len(), 2);
         // First-appearance order: (7,5) first with 2 instances, then (7,6) with 1.
@@ -174,7 +201,7 @@ mod tests {
             // batch without promoting that batch, which already leads.
             FrameDrawItem::new(3, 9, 1, [0.0; 16], [0.0; 16], [1.0; 4], false),
         ];
-        let batches = frame_packet_to_batches(&packet(draws, Vec::new()));
+        let batches = frame_packet_to_batches(&packet(draws, Vec::new()), &SurfaceProgramSet::default());
         let order: Vec<(u64, u32)> = batches.iter().map(|b| (b.0, b.3)).collect();
         assert_eq!(order, vec![(9, 2), (5, 1), (2, 1)]);
     }
@@ -182,8 +209,49 @@ mod tests {
     #[test]
     fn empty_packet_yields_no_batches_and_no_lights() {
         let p = packet(Vec::new(), Vec::new());
-        assert!(frame_packet_to_batches(&p).is_empty());
+        assert!(frame_packet_to_batches(&p, &SurfaceProgramSet::default()).is_empty());
         assert!(frame_packet_lights(&p).is_empty());
+    }
+
+    /// A draw naming an unlowerable surface still gets that surface's constant
+    /// channels, and a draw naming no surface is byte-identical to before.
+    #[test]
+    fn an_unlowerable_surfaces_constants_still_reach_the_instance_stream() {
+        let surface = axiom_surface::SurfaceBuilder::new()
+            .constant(
+                axiom_surface::SurfaceChannel::BaseColor,
+                axiom_field::FieldValue::vec4(axiom_math::Vec4::new(0.5, 0.25, 1.0, 1.0)),
+            )
+            .constant(
+                axiom_surface::SurfaceChannel::Emission,
+                axiom_field::FieldValue::vec4(axiom_math::Vec4::new(0.0, 0.125, 0.0, 0.0)),
+            )
+            .build()
+            .expect("two vec4 constants are legal channels");
+        let program = surface.digest().raw();
+        let set = SurfaceProgramSet::build(
+            std::slice::from_ref(&surface),
+            axiom_host::BackendCapabilityProfile::all()
+                .without(axiom_host::RenderCapability::ProceduralSurface),
+        );
+        let draws = vec![
+            FrameDrawItem::new(0, 1, 1, [0.0; 16], [0.0; 16], [1.0, 1.0, 1.0, 1.0], false)
+                .with_surface_program(program),
+            // A plain draw, in the same batch, must be untouched.
+            FrameDrawItem::new(1, 1, 1, [0.0; 16], [0.0; 16], [0.4, 0.4, 0.4, 1.0], false)
+                .with_emissive([0.75, 0.0, 0.0]),
+        ];
+        let batches = frame_packet_to_batches(&packet(draws, Vec::new()), &set);
+        assert_eq!(batches.len(), 1);
+        let floats = &batches[0].2;
+        // Instance 0: the surface's constant base colour multiplied in, its
+        // constant emission added.
+        assert_eq!(&floats[32..36], &[0.5, 0.25, 1.0, 1.0]);
+        assert_eq!(&floats[36..40], &[0.0, 0.125, 0.0, 0.0]);
+        // Instance 1 carries `surface_program = 0` and is bit-identical to the
+        // stream this module packed before surfaces existed.
+        assert_eq!(&floats[72..76], &[0.4, 0.4, 0.4, 1.0]);
+        assert_eq!(&floats[76..80], &[0.75, 0.0, 0.0, 0.0]);
     }
 
     #[test]

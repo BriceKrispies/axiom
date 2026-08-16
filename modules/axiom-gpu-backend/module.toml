@@ -7,10 +7,17 @@ allowed_layers = [
     "host",
     # draw2d_geometry uses the Mat3/Vec2 from math to transform quad corners.
     "math",
+    # surface_program plans an authored Surface into this backend's shape and
+    # packs the FieldParams of its bound FieldGraphs into the shared uniform
+    # region. Surface names the channels; field is the expression language the
+    # channel values are, and both are named directly in non-test code.
+    "surface",
+    "field",
 ]
 
 allowed_modules = []
 
 introduced_capabilities = [
     "live-gpu-presentation",
+    "surface-program-lowering",
 ]

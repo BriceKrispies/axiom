@@ -1,5 +1,6 @@
 use super::*;
 use crate::canvas_depth_cue_profile::CanvasDepthCueProfile;
+use crate::surface_shading::SurfaceCache;
 use crate::raster_vertex::RasterVertex;
 use axiom_host::{FrameCamera, FrameDrawItem, FrameFeatureSet, FrameViewport};
 
@@ -202,6 +203,7 @@ fn enabling_fog_in_options_runs_the_post_pass() {
         &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 1.0, 1.0]),
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     // Centre pixel: red mixed halfway toward blue fog → ~[128,0,128].
     let p = px(result.rgba_bytes(), 16, 8, 8);
@@ -300,6 +302,7 @@ fn packet_rasterizes_and_reports_full_stats() {
         ),
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     assert_eq!(result.conversion().projected_draws, 1);
     assert_eq!(result.conversion().skipped_draws, 0);
@@ -330,6 +333,7 @@ fn overlapping_grounds_reject_occluded_fragments() {
         ),
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     assert!(result.depth_rejected_pixels() > 0);
     assert_eq!(result.conversion().rasterized_objects, 2);
@@ -343,6 +347,7 @@ fn invalid_projection_does_not_create_nans() {
         &packet(vec![d], [0.1, 0.1, 0.1, 1.0]),
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     assert_eq!(result.conversion().skipped_invalid_projection_triangles, 2);
     assert_eq!(result.rasterized_triangles(), 0);
@@ -368,6 +373,7 @@ fn depth_buffer_overlay_is_grayscale_mid_for_centre_depth() {
         &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]),
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     let p = px(result.rgba_bytes(), 32, 16, 16);
     assert_eq!(p[0], p[1]);
@@ -391,6 +397,7 @@ fn triangle_edges_overlay_paints_only_edges() {
         &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]),
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     let painted = result
         .rgba_bytes()
@@ -417,6 +424,7 @@ fn bounds_overlay_strokes_a_border() {
         &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]),
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     let white = result
         .rgba_bytes()
@@ -430,8 +438,8 @@ fn bounds_overlay_strokes_a_border() {
 fn same_packet_is_byte_identical_every_run() {
     let cache = MeshCache::load(&[ground(7, [0.3, 0.7, 0.2, 1.0])]);
     let p = packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]);
-    let a = SoftwareRasterizer::new(opts(48, 48)).rasterize_packet(&p, &cache, &[]);
-    let b = SoftwareRasterizer::new(opts(48, 48)).rasterize_packet(&p, &cache, &[]);
+    let a = SoftwareRasterizer::new(opts(48, 48)).rasterize_packet(&p, &cache, &[], &SurfaceCache::default());
+    let b = SoftwareRasterizer::new(opts(48, 48)).rasterize_packet(&p, &cache, &[], &SurfaceCache::default());
     assert_eq!(a, b);
 }
 
@@ -460,13 +468,13 @@ fn phase_clock_and_sink_report_the_convert_rasterize_post_split() {
     let p = packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]);
     // Default clock (0.0) + discarding sink: the deterministic native path still
     // rasterizes and reports a zero split to the discard sink.
-    let _ = SoftwareRasterizer::new(opts(32, 32)).rasterize_packet(&p, &cache, &[]);
+    let _ = SoftwareRasterizer::new(opts(32, 32)).rasterize_packet(&p, &cache, &[], &SurfaceCache::default());
     // An injected clock advancing 1 ms per boundary read (0,1,2,3) + a recording
     // sink: the sink receives a 1/1/1 split, proving both hooks feed the phases.
     let _ = SoftwareRasterizer::new(opts(32, 32))
         .with_clock(ticking_clock)
         .with_phase_sink(record_phases)
-        .rasterize_packet(&p, &cache, &[]);
+        .rasterize_packet(&p, &cache, &[], &SurfaceCache::default());
     assert_eq!(RECORDED_PHASES.with(std::cell::Cell::get), (1.0, 1.0, 1.0));
 }
 
@@ -479,6 +487,7 @@ fn vertical_grade_darkens_lower_screen_more_than_top() {
         &packet(vec![draw(1, 7, [1.0; 4])], [0.0, 0.0, 0.0, 1.0]),
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     let top = px(result.rgba_bytes(), 8, 4, 0)[0];
     let bottom = px(result.rgba_bytes(), 8, 4, 15)[0];
@@ -524,12 +533,12 @@ fn marked_caster_gets_a_planar_shadow_unmarked_draw_does_not() {
     };
     // A marked caster casts a planar ground shadow...
     let r =
-        SoftwareRasterizer::new(opts_cued(64, 64, c)).rasterize_packet(&build(true), &cache, &[]);
+        SoftwareRasterizer::new(opts_cued(64, 64, c)).rasterize_packet(&build(true), &cache, &[], &SurfaceCache::default());
     assert_eq!(r.contact_shadows_drawn(), 1);
     assert!(r.contact_shadow_pixels() > 0);
     // ...an unmarked draw (e.g. a wall) casts none.
     let r0 =
-        SoftwareRasterizer::new(opts_cued(64, 64, c)).rasterize_packet(&build(false), &cache, &[]);
+        SoftwareRasterizer::new(opts_cued(64, 64, c)).rasterize_packet(&build(false), &cache, &[], &SurfaceCache::default());
     assert_eq!(r0.contact_shadows_drawn(), 0);
     assert_eq!(r0.contact_shadow_pixels(), 0);
 }
@@ -561,9 +570,9 @@ fn frame_volumetrics_reach_the_canvas_output() {
     );
     let lit = base.clone().with_volumetrics(FrameVolumetrics::low_poly());
     let off =
-        SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&base, &cache, &[]);
+        SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&base, &cache, &[], &SurfaceCache::default());
     let on =
-        SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache, &[]);
+        SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache, &[], &SurfaceCache::default());
     assert_ne!(
         off.rgba_bytes(),
         on.rgba_bytes(),
@@ -590,13 +599,13 @@ fn capability_profile_gates_the_volumetric_pass() {
     .with_volumetrics(FrameVolumetrics::low_poly());
     // Default profile (all) applies the god-ray pass...
     let with =
-        SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache, &[]);
+        SoftwareRasterizer::new(opts_cued(48, 48, cues_off())).rasterize_packet(&lit, &cache, &[], &SurfaceCache::default());
     // ...but a profile WITHOUT Volumetrics skips it (the Canvas 2D fps lever) — even
     // though the frame carries volumetrics, the gated backend never runs the pass.
     let restricted = opts_cued(48, 48, cues_off()).with_capability_profile(
         BackendCapabilityProfile::all().without(RenderCapability::Volumetrics),
     );
-    let without = SoftwareRasterizer::new(restricted).rasterize_packet(&lit, &cache, &[]);
+    let without = SoftwareRasterizer::new(restricted).rasterize_packet(&lit, &cache, &[], &SurfaceCache::default());
     assert_ne!(
         with.rgba_bytes(),
         without.rgba_bytes(),
@@ -627,12 +636,13 @@ fn capability_profile_gates_the_postprocess_pass() {
         &graded,
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     // ...but a profile WITHOUT PostProcess skips it, so the finished frame is ungraded.
     let restricted = opts_cued(48, 48, cues_off()).with_capability_profile(
         BackendCapabilityProfile::all().without(RenderCapability::PostProcess),
     );
-    let without = SoftwareRasterizer::new(restricted).rasterize_packet(&graded, &cache, &[]);
+    let without = SoftwareRasterizer::new(restricted).rasterize_packet(&graded, &cache, &[], &SurfaceCache::default());
     assert_ne!(
         with.rgba_bytes(),
         without.rgba_bytes(),
@@ -666,13 +676,14 @@ fn capability_profile_gates_the_retro_32bit_pass() {
         &retro,
         &cache,
         &[],
+        &SurfaceCache::default(),
     );
     // ...but a profile WITHOUT Retro32Bit skips it — the same neutral post the GPU
     // backend gates, now gated (and applied) on Canvas 2D too.
     let restricted = opts_cued(48, 48, cues_off()).with_capability_profile(
         BackendCapabilityProfile::all().without(RenderCapability::Retro32Bit),
     );
-    let without = SoftwareRasterizer::new(restricted).rasterize_packet(&retro, &cache, &[]);
+    let without = SoftwareRasterizer::new(restricted).rasterize_packet(&retro, &cache, &[], &SurfaceCache::default());
     assert_ne!(
         with.rgba_bytes(),
         without.rgba_bytes(),
@@ -687,6 +698,7 @@ fn disabling_contact_shadows_draws_none() {
         &packet(vec![draw(42, 8, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]),
         &obj,
         &[],
+        &SurfaceCache::default(),
     );
     assert_eq!(r.contact_shadows_drawn(), 0);
     assert_eq!(r.contact_shadow_pixels(), 0);
@@ -703,6 +715,7 @@ fn outline_drawn_for_caster_marked_gameplay_object_via_packet() {
         &packet(vec![marked], [0.3, 0.3, 0.3, 1.0]),
         &obj,
         &[],
+        &SurfaceCache::default(),
     );
     assert_eq!(r.outlined_objects(), 1);
     assert!(r.outline_pixels() > 0);
@@ -714,6 +727,7 @@ fn outline_drawn_for_caster_marked_gameplay_object_via_packet() {
         &packet(vec![draw(42, 8, [1.0; 4])], [0.3, 0.3, 0.3, 1.0]),
         &obj,
         &[],
+        &SurfaceCache::default(),
     );
     assert_eq!(u.outlined_objects(), 0);
     assert_eq!(u.outline_pixels(), 0);
@@ -724,8 +738,8 @@ fn all_cues_change_the_image_but_preserve_draw_and_object_counts() {
     let cache = MeshCache::load(&[ground(7, [0.5, 0.6, 0.4, 1.0])]);
     let p = packet(vec![draw(1, 7, [1.0; 4])], [0.4, 0.6, 0.9, 1.0]);
     let on =
-        SoftwareRasterizer::new(opts_cued(48, 48, cues_on())).rasterize_packet(&p, &cache, &[]);
-    let off = SoftwareRasterizer::new(opts(48, 48)).rasterize_packet(&p, &cache, &[]);
+        SoftwareRasterizer::new(opts_cued(48, 48, cues_on())).rasterize_packet(&p, &cache, &[], &SurfaceCache::default());
+    let off = SoftwareRasterizer::new(opts(48, 48)).rasterize_packet(&p, &cache, &[], &SurfaceCache::default());
     assert_ne!(
         on.rgba_bytes(),
         off.rgba_bytes(),

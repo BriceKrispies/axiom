@@ -4,8 +4,18 @@
 //! Meshes are uploaded in the same `(mesh_id, 12-float interleaved vertices,
 //! indices)` form the GPU backend takes, so windowing hands both backends the
 //! identical geometry. Of each 12-float vertex (position, normal, uv, colour)
-//! the rasterizer keeps only the position (floats 0..3) and the colour
-//! (floats 8..12) — v1 does no lighting or texturing.
+//! the rasterizer keeps the position (floats 0..3), the **uv** (floats 6..8) and
+//! the colour (floats 8..12).
+//!
+//! **The positions are object-space**, exactly as uploaded: the draw's `mvp`
+//! transforms them at projection time and the draw's `world` rotates the face
+//! normal. That is what lets a CPU-evaluated surface be sampled in the object's
+//! own frame — the space `axiom_surface` declares its channel expressions to be
+//! evaluated in — with no matrix inversion anywhere, per frame or otherwise.
+//!
+//! The uv is kept for the same reason and only that reason: it is the second of
+//! the two evaluation-context inputs a surface reads that geometry can supply.
+//! It costs one `[f32; 2]` per vertex, once, at upload.
 
 use std::collections::HashMap;
 
@@ -17,20 +27,29 @@ const VERTEX_STRIDE: usize = 12;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct MeshGeometry {
     positions: Vec<[f32; 3]>,
+    uvs: Vec<[f32; 2]>,
     colors: Vec<[f32; 4]>,
     indices: Vec<u32>,
 }
 
 impl MeshGeometry {
-    /// Split a 12-float interleaved vertex stream into parallel position/colour
-    /// arrays (positions = floats 0..3, colours = floats 8..12).
+    /// Split a 12-float interleaved vertex stream into parallel
+    /// position/uv/colour arrays (positions = floats 0..3, uvs = floats 6..8,
+    /// colours = floats 8..12).
     fn from_interleaved(verts: &[f32], indices: &[u32]) -> Self {
-        let (positions, colors): (Vec<[f32; 3]>, Vec<[f32; 4]>) = verts
+        let (positions, rest): (Vec<[f32; 3]>, Vec<([f32; 2], [f32; 4])>) = verts
             .chunks_exact(VERTEX_STRIDE)
-            .map(|v| ([v[0], v[1], v[2]], [v[8], v[9], v[10], v[11]]))
+            .map(|v| {
+                (
+                    [v[0], v[1], v[2]],
+                    ([v[6], v[7]], [v[8], v[9], v[10], v[11]]),
+                )
+            })
             .unzip();
+        let (uvs, colors): (Vec<[f32; 2]>, Vec<[f32; 4]>) = rest.into_iter().unzip();
         MeshGeometry {
             positions,
+            uvs,
             colors,
             indices: indices.to_vec(),
         }
@@ -38,15 +57,20 @@ impl MeshGeometry {
 
     /// Build geometry directly from parallel posed position/colour arrays plus
     /// indices — the output shape of CPU skinning (see [`crate::mesh_skinning`]),
-    /// which produces world-posed positions per frame rather than an interleaved
-    /// upload. Colours ride through from the skinned mesh; normals/uvs are unused
-    /// by the flat-shading rasterizer, so they are not carried.
+    /// which produces **already-posed** positions per frame rather than an
+    /// interleaved upload. Colours ride through from the skinned mesh; normals
+    /// and uvs are not carried, so a skinned draw's uv reads as the origin and a
+    /// surface evaluated on one samples at its posed position rather than at a
+    /// rest-pose object position. Skinned bodies are outside this manifest's
+    /// surface path for exactly that reason, and the zero uv makes that visible
+    /// rather than silently wrong.
     pub(crate) fn from_posed(
         positions: Vec<[f32; 3]>,
         colors: Vec<[f32; 4]>,
         indices: Vec<u32>,
     ) -> Self {
         MeshGeometry {
+            uvs: vec![[0.0; 2]; positions.len()],
             positions,
             colors,
             indices,
@@ -65,6 +89,12 @@ impl MeshGeometry {
             .get(idx as usize)
             .copied()
             .unwrap_or([0.0; 3])
+    }
+
+    /// The uv of vertex `idx`, or the origin when `idx` is out of range or the
+    /// geometry carries no uvs (a CPU-skinned pose).
+    pub(crate) fn uv(&self, idx: u32) -> [f32; 2] {
+        self.uvs.get(idx as usize).copied().unwrap_or([0.0; 2])
     }
 
     /// The linear RGBA colour of vertex `idx`, or opaque white when out of range.
@@ -112,7 +142,7 @@ mod tests {
         [
             pos[0], pos[1], pos[2], // position
             0.0, 1.0, 0.0, // normal (ignored)
-            0.0, 0.0, // uv (ignored)
+            pos[0], pos[2], // uv
             color[0], color[1], color[2], color[3], // colour
         ]
     }
@@ -134,6 +164,11 @@ mod tests {
         assert_eq!(m.position(2), [0.0, 1.0, 0.0]);
         assert_eq!(m.color(0), [1.0, 0.0, 0.0, 1.0]);
         assert_eq!(m.color(2), [0.0, 0.0, 1.0, 1.0]);
+        // Floats 6..8 are the uv, kept so a CPU-evaluated surface has the second
+        // of the two geometry-supplied evaluation-context inputs.
+        assert_eq!(m.uv(0), [0.0, 0.0]);
+        assert_eq!(m.uv(1), [1.0, 0.0]);
+        assert_eq!(m.uv(2), [0.0, 0.0]);
     }
 
     #[test]
@@ -141,6 +176,19 @@ mod tests {
         let m = tri_mesh();
         assert_eq!(m.position(99), [0.0, 0.0, 0.0]);
         assert_eq!(m.color(99), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(m.uv(99), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_posed_mesh_carries_one_origin_uv_per_vertex() {
+        let posed = MeshGeometry::from_posed(
+            vec![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+            vec![[1.0; 4], [1.0; 4]],
+            vec![0, 1, 0],
+        );
+        assert_eq!(posed.uv(0), [0.0, 0.0]);
+        assert_eq!(posed.uv(1), [0.0, 0.0]);
+        assert_eq!(posed.position(1), [4.0, 5.0, 6.0]);
     }
 
     #[test]

@@ -38,8 +38,8 @@ use std::collections::HashSet;
 use axiom_host::{FrameDrawItem, FramePacket};
 
 use crate::canvas_depth_cue::{
-    face_normal_world, height_factor, hemisphere_ambient, lighting_brightness, normalize3,
-    shade_triangle, world_y,
+    face_normal_model, face_normal_world, height_factor, hemisphere_ambient, lighting_brightness,
+    normalize3, shade_triangle, world_y,
 };
 use crate::canvas_depth_cue_profile::CanvasDepthCueProfile;
 use crate::canvas_policy::{classify, CanvasFallbackImportance};
@@ -48,6 +48,7 @@ use crate::mesh_cache::{MeshCache, MeshGeometry};
 use crate::projection::{clip_coords, clip_to_screen};
 use crate::raster_triangle::RasterTriangle;
 use crate::raster_vertex::RasterVertex;
+use crate::surface_shading::{ShadedChannels, SurfaceCache};
 
 /// Signed area below which a triangle is degenerate (zero/near-zero) and dropped.
 const AREA_EPS: f32 = 1e-6;
@@ -195,6 +196,7 @@ struct Candidate {
     verts: [RasterVertex; 3],
     brightness: f32,
     ambient: [f32; 3],
+    emission: [f32; 3],
     world_y: f32,
     mean_depth: f32,
 }
@@ -327,11 +329,13 @@ mod deep {
 /// `clock` + `deep_sink` are the injected browser profiler hooks — a zero clock and
 /// the [`discard_deep`] sink on native/tests, the wasm `performance.now()` clock and
 /// console sink in the browser (see [`deep`]).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn convert(
     packet: &FramePacket,
     cache: &MeshCache,
     skinned: &[(MeshGeometry, FrameDrawItem)],
     options: &LowPolyRasterOptions,
+    surfaces: &SurfaceCache,
     clock: fn() -> f64,
     deep_sink: fn(f64, f64, u32, usize),
 ) -> ConvertedFrame {
@@ -362,7 +366,9 @@ pub(crate) fn convert(
         ),
         |(mut frame, spent), (geo, draw)| {
             let drawn =
-                geo.map(|geo| convert_draw(geo, draw, w, h, screen_px2, cap, &cues, &light, clock));
+                geo.map(|geo| {
+                    convert_draw(geo, draw, w, h, screen_px2, cap, &cues, &light, surfaces, clock)
+                });
             frame.stats.skipped_draws += u32::from(drawn.is_none());
             let next = drawn.into_iter().fold(spent, |spent, dc| {
                 frame.stats.projected_draws += 1;
@@ -415,52 +421,12 @@ fn convert_draw(
     cap: u32,
     cues: &CanvasDepthCueProfile,
     light: &SceneLight,
+    surfaces: &SurfaceCache,
     clock: fn() -> f64,
 ) -> DrawConversion {
-    let mvp = draw.mvp();
-    let world = draw.world();
-    let color = draw.color();
     let object_id = draw.object_id();
-
-    // Single pass: project, compute the per-triangle cue inputs (brightness,
-    // world-Y, depth), area, and cull (invalid / degenerate / off-screen) into
-    // one pre-reserved candidates `Vec`, tracking the draw's world-Y extent.
-    let tri_count = geo.indices().len() / 3;
     deep::enter(clock);
-    let mut acc = geo.indices().chunks_exact(3).fold(
-        DrawAcc {
-            candidates: Vec::with_capacity(tri_count),
-            ..DrawAcc::default()
-        },
-        |mut acc, tri| {
-            // 0, 1, or 2 screen triangles after the near-plane clip; empty means the
-            // whole triangle was at/behind the near plane (counted invalid).
-            let tris =
-                project_triangle_cued(geo, tri, &mvp, &world, color, object_id, cues, light, w, h);
-            acc.invalid += u32::from(tris.is_empty());
-            tris.into_iter().for_each(|pt| {
-                acc.projected += 1;
-                let area = triangle_area(&pt.verts);
-                let degenerate = area < AREA_EPS;
-                let onscr = on_screen(&pt.verts, w, h);
-                acc.degenerate += u32::from(degenerate);
-                acc.offscreen += u32::from((!degenerate) & !onscr);
-                ((!degenerate) & onscr).then(|| {
-                    acc.y_min = acc.y_min.min(pt.world_y);
-                    acc.y_max = acc.y_max.max(pt.world_y);
-                    acc.candidates.push(Candidate {
-                        area,
-                        verts: pt.verts,
-                        brightness: pt.brightness,
-                        ambient: pt.ambient,
-                        world_y: pt.world_y,
-                        mean_depth: pt.mean_depth,
-                    });
-                });
-            });
-            acc
-        },
-    );
+    let mut acc = project_draw(geo, draw, cues, light, surfaces, w, h);
     deep::exit_project(clock);
 
     let coverage: f32 = acc.candidates.iter().map(|c| c.area).sum();
@@ -554,9 +520,9 @@ fn shade_candidates(
                 cues,
             );
             let emitted = [
-                shaded[0] + emissive[0],
-                shaded[1] + emissive[1],
-                shaded[2] + emissive[2],
+                shaded[0] + emissive[0] + c.emission[0],
+                shaded[1] + emissive[1] + c.emission[1],
+                shaded[2] + emissive[2] + c.emission[2],
                 shaded[3],
             ];
             RasterTriangle::shaded(c.verts, emitted)
@@ -571,6 +537,7 @@ struct ProjectedTriangle {
     verts: [RasterVertex; 3],
     brightness: f32,
     ambient: [f32; 3],
+    emission: [f32; 3],
     world_y: f32,
     mean_depth: f32,
 }
@@ -587,12 +554,10 @@ struct ProjectedTriangle {
 fn project_triangle_cued(
     geo: &MeshGeometry,
     tri: &[u32],
-    mvp: &[f32; 16],
-    world: &[f32; 16],
-    draw_color: [f32; 4],
-    object_id: u64,
+    draw: &Transforms,
     cues: &CanvasDepthCueProfile,
     light: &SceneLight,
+    surfaces: &SurfaceCache,
     w: u32,
     h: u32,
 ) -> Vec<ProjectedTriangle> {
@@ -601,12 +566,37 @@ fn project_triangle_cued(
         geo.position(tri[1]),
         geo.position(tri[2]),
     ];
+    let draw_color = draw.color;
+    // The OBJECT-SPACE centroid — the point an authored surface is evaluated at.
+    // The mesh cache keeps positions exactly as uploaded, so this is the mean of
+    // three numbers rather than an inverted world matrix, per frame or at all.
+    // It is also already the point the elevation cue is measured from.
+    let mean_model = [
+        (model[0][0] + model[1][0] + model[2][0]) / 3.0,
+        (model[0][1] + model[1][1] + model[2][1]) / 3.0,
+        (model[0][2] + model[1][2] + model[2][2]) / 3.0,
+    ];
+    // The surface, CPU-evaluated once per triangle at that centroid: this
+    // backend's per-triangle substitute for the per-fragment program it cannot
+    // run. `None` for a draw that authored no surface — which is every draw in
+    // every app that authors none, and then nothing below this line changes.
+    let shaded = surfaces.shade(
+        draw.surface_program,
+        mean_model,
+        mean_uv(geo, tri),
+        face_normal_model(&model),
+    );
+    let surface_color = shaded.map(ShadedChannels::base_color);
+    let emission = shaded.map_or([0.0; 3], ShadedChannels::emission);
     // Resolve each vertex to clip space + its flat colour, then clip the triangle
     // against the near plane (still homogeneous — no divide yet).
     let clip_verts: [ClipVertex; 3] = [0, 1, 2].map(|k| {
-        let mc = geo.color(tri[k]);
+        // A shaded surface REPLACES the mesh's vertex colour — it is the authored
+        // appearance, not a tint of it — and is still modulated by the draw's own
+        // colour, so a per-draw tint keeps working.
+        let mc = surface_color.unwrap_or_else(|| geo.color(tri[k]));
         ClipVertex {
-            clip: clip_coords(mvp, model[k]),
+            clip: clip_coords(&draw.mvp, model[k]),
             color: [
                 mc[0] * draw_color[0],
                 mc[1] * draw_color[1],
@@ -616,17 +606,12 @@ fn project_triangle_cued(
         }
     });
     // Flat per-triangle cue inputs (shared by every clipped piece).
-    let normal = face_normal_world(&model, world);
+    let normal = face_normal_world(&model, &draw.world);
     let brightness = lighting_brightness(normal, light.dir, light.intensity, cues);
     // Hemisphere ambient (sky/ground by the face normal), shared by every
     // clipped piece of this triangle.
     let ambient = hemisphere_ambient(normal, cues);
-    let mean_model = [
-        (model[0][0] + model[1][0] + model[2][0]) / 3.0,
-        (model[0][1] + model[1][1] + model[2][1]) / 3.0,
-        (model[0][2] + model[1][2] + model[2][2]) / 3.0,
-    ];
-    let elevation = world_y(mean_model, world);
+    let elevation = world_y(mean_model, &draw.world);
 
     // Fan-triangulate the clipped convex polygon (0/3/4 verts) from vertex 0, and
     // only now perspective-divide each surviving (cw >= W_NEAR) vertex to screen.
@@ -635,17 +620,97 @@ fn project_triangle_cued(
     fan.map(|i| {
         let verts = [poly[0], poly[i], poly[i + 1]].map(|cv| {
             let p = clip_to_screen(cv.clip, w, h);
-            RasterVertex::new(p[0], p[1], p[2], cv.color, object_id)
+            RasterVertex::new(p[0], p[1], p[2], cv.color, draw.object_id)
         });
         ProjectedTriangle {
             verts,
             brightness,
             ambient,
+            emission,
             world_y: elevation,
             mean_depth: (verts[0].depth() + verts[1].depth() + verts[2].depth()) / 3.0,
         }
     })
     .collect()
+}
+
+/// Project, cue and cull every triangle of one draw into a pre-reserved
+/// candidate `Vec`, tracking the draw's world-Y extent and its cull counts.
+///
+/// Split out of [`convert_draw`] so each stays inside the engine's per-function
+/// budget: this is the *projection* half (transform, near-clip, cull) and
+/// `convert_draw` is the *selection* half (importance, LOD, budget, shade).
+fn project_draw(
+    geo: &MeshGeometry,
+    draw: &FrameDrawItem,
+    cues: &CanvasDepthCueProfile,
+    light: &SceneLight,
+    surfaces: &SurfaceCache,
+    w: u32,
+    h: u32,
+) -> DrawAcc {
+    let transforms = Transforms {
+        mvp: draw.mvp(),
+        world: draw.world(),
+        color: draw.color(),
+        object_id: draw.object_id(),
+        surface_program: draw.surface_program(),
+    };
+    let tri_count = geo.indices().len() / 3;
+    geo.indices().chunks_exact(3).fold(
+        DrawAcc {
+            candidates: Vec::with_capacity(tri_count),
+            ..DrawAcc::default()
+        },
+        |mut acc, tri| {
+            // 0, 1, or 2 screen triangles after the near-plane clip; empty means the
+            // whole triangle was at/behind the near plane (counted invalid).
+            let tris = project_triangle_cued(geo, tri, &transforms, cues, light, surfaces, w, h);
+            acc.invalid += u32::from(tris.is_empty());
+            tris.into_iter().for_each(|pt| {
+                acc.projected += 1;
+                let area = triangle_area(&pt.verts);
+                let degenerate = area < AREA_EPS;
+                let onscr = on_screen(&pt.verts, w, h);
+                acc.degenerate += u32::from(degenerate);
+                acc.offscreen += u32::from((!degenerate) & !onscr);
+                ((!degenerate) & onscr).then(|| {
+                    acc.y_min = acc.y_min.min(pt.world_y);
+                    acc.y_max = acc.y_max.max(pt.world_y);
+                    acc.candidates.push(Candidate {
+                        area,
+                        verts: pt.verts,
+                        brightness: pt.brightness,
+                        ambient: pt.ambient,
+                        emission: pt.emission,
+                        world_y: pt.world_y,
+                        mean_depth: pt.mean_depth,
+                    });
+                });
+            });
+            acc
+        },
+    )
+}
+
+/// One draw's per-triangle-invariant inputs, gathered so the projection
+/// function takes one draw rather than six loose values.
+struct Transforms {
+    mvp: [f32; 16],
+    world: [f32; 16],
+    color: [f32; 4],
+    object_id: u64,
+    surface_program: u64,
+}
+
+/// The mean of a triangle's three vertex uvs — the surface parameterisation at
+/// the same point the object-space centroid is taken at.
+fn mean_uv(geo: &MeshGeometry, tri: &[u32]) -> [f32; 2] {
+    let uv = [geo.uv(tri[0]), geo.uv(tri[1]), geo.uv(tri[2])];
+    [
+        (uv[0][0] + uv[1][0] + uv[2][0]) / 3.0,
+        (uv[0][1] + uv[1][1] + uv[2][1]) / 3.0,
+    ]
 }
 
 /// A gameplay object's screen footprint (bbox + mean depth) from its triangles.

@@ -28,6 +28,14 @@ mod gpu_backend_api;
 // instance-batch + light shape.
 mod frame_packet_adapter;
 
+// What an authored axiom_surface::Surface means to THIS backend: the program
+// plan (stage split, interstage lanes, parameter layout), the uniform parameter
+// channel and its offset scheme, and the capability gate that decides — once, at
+// preparation time — whether a surface can be lowered at all. Pure and
+// native-testable; it contains no shader text, because generating one is
+// separate work.
+mod surface_program;
+
 // Walks a layer-sorted host::Draw2dList into backend-neutral quad geometry
 // (positions, UVs, alpha-folded colours, per-quad texture). Pure and
 // branchless — the 2D peer of `frame_packet_adapter`.

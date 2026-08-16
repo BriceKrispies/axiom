@@ -165,6 +165,16 @@ Two things this needs and does not have:
   transform is on the draw item. Compute the centroid in object space per triangle
   from the inverse world matrix, or pre-store object-space positions. Prefer the
   latter — it is one extra `Vec3` per vertex at upload, not per frame.
+
+  > **CORRECTION — the premise is wrong.** `MeshGeometry::from_interleaved`
+  > stores positions exactly as uploaded, i.e. already in **object space**; the
+  > draw's `mvp` is what transforms them, and `world_y()` applies `world` to them
+  > separately. So the object-space centroid is the mean of three numbers the
+  > rasteriser already reads for projection, and **no matrix is inverted, per
+  > frame or at all**. What was genuinely missing is the **uv** — `MeshGeometry`
+  > now keeps interleaved floats 6..8 as one `[f32; 2]` per vertex at upload.
+  > The normal comes from a new `face_normal_model`, kept separate from
+  > `face_normal_world` whose normalize-after-rotate order must stay bit-exact.
 * **The normal.** Already computed by `face_normal_world`; use it.
 
 Roughness/metallic have no Canvas2D expression today (there is no view vector in

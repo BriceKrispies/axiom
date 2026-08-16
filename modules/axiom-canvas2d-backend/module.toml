@@ -10,10 +10,18 @@ kind = "engine-module"
 allowed_layers = [
     "host",
     "math",
+    # surface_shading CPU-evaluates an authored Surface's channel FieldGraphs
+    # once per triangle, through an EvalContext carrying a kernel Seconds. This
+    # backend runs no shader, so the reference evaluator IS its shading path —
+    # all three are named directly in non-test code.
+    "surface",
+    "field",
+    "kernel",
 ]
 
 allowed_modules = []
 
 introduced_capabilities = [
     "canvas2d-fallback-presentation",
+    "cpu-surface-evaluation",
 ]

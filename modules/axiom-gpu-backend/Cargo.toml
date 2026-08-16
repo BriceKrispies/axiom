@@ -16,6 +16,13 @@ axiom-host = { path = "../../crates/axiom-host" }
 # draw2d_geometry uses them directly to transform quad corners.
 axiom-math = { path = "../../crates/axiom-math" }
 
+# The engine's neutral appearance artifact and the expression language under it.
+# `surface_program` plans a Surface into this backend's own shape (stage split,
+# interstage lanes, parameter layout) and packs a FieldGraph's FieldParams into
+# the shared uniform region.
+axiom-surface = { path = "../../crates/axiom-surface" }
+axiom-field = { path = "../../crates/axiom-field" }
+
 # wgpu/bytemuck are optional: pulled in on native only by the `offscreen`
 # feature; required unconditionally on wasm32 via the target table below.
 # pollster drives the native off-screen device/readback (block_on).
@@ -31,6 +38,10 @@ offscreen = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
 [dev-dependencies]
 # Test-only: builds a HostPresentationRequest, which needs a kernel handle source.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+# Test-only: `Scalar` and `Param`, the quantity and the raw parameter word a
+# hand-built FieldGraph is authored from.
+axiom-recipe = { path = "../../crates/axiom-recipe" }
 
 # The live presentation arm (real wgpu + web-sys), pulled in only for wasm32.
 # The `webgl` feature adds wgpu's WebGL2 backend alongside WebGPU so

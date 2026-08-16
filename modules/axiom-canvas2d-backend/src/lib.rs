@@ -55,6 +55,13 @@ mod sdf_raymarch;
 mod software_framebuffer;
 mod software_raster_result;
 
+// CPU evaluation of an authored axiom_surface::Surface, once per triangle at its
+// object-space centroid. This backend executes no shader, but a surface's
+// channels are fields — pure functions with a reference evaluator — so it
+// renders one for real, at a per-triangle sampling rate. That is what makes
+// RenderCapability::ProceduralSurface a substitute here rather than a drop.
+mod surface_shading;
+
 // Per-frame console telemetry (gated on `?profile=1`) and the clock that
 // times it. Its own module because it is the crate's densest cluster of
 // platform `#[cfg]` arms and it reports on the render rather than doing it.

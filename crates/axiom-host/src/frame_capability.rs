@@ -75,6 +75,24 @@ pub enum RenderCapability {
     /// [`CapabilityDegradation::Substitute`] and not a drop: nothing is missing
     /// from that arm, the same fog is evaluated in a coarser parameterization.
     AerialPerspective = 1 << 11,
+    /// Shading a draw through an authored **procedural surface** — an
+    /// [`crate::FrameDrawItem::surface_program`] naming a field-authored
+    /// appearance description whose channels are expressions rather than
+    /// constants.
+    ///
+    /// Appended, never renumbered: the eleven bits above are hardcoded as the
+    /// same masks in the GPU main-pass WGSL, which is what
+    /// `capability_bits_are_the_gpu_shader_contract` pins.
+    ///
+    /// Its degradation is a [`CapabilityDegradation::Substitute`], and the
+    /// substitution is **per-triangle instead of per-fragment**. The Canvas 2D
+    /// software backend genuinely renders a procedural surface: it cannot
+    /// execute a program, but it can evaluate the surface's channel expressions
+    /// on the CPU at each triangle's object-space centroid, which is the same
+    /// fidelity relationship every other capability has on that backend. A
+    /// backend that has neither a program nor a CPU evaluator omits it and
+    /// reports [`crate::FrameFeature::ProceduralSurface`].
+    ProceduralSurface = 1 << 12,
 }
 
 /// How a backend that lacks a [`RenderCapability`] degrades it. A capability is
@@ -92,12 +110,14 @@ pub enum CapabilityDegradation {
 }
 
 /// The capabilities that have a cheaper stand-in rather than an omission: the
-/// directional [`RenderCapability::Shadows`] (a planar contact shadow) and
-/// [`RenderCapability::AerialPerspective`] (the normalized-depth fog ramp). A
-/// mask rather than a chain of comparisons, so the set grows without the test
-/// growing a branch.
-const SUBSTITUTED_CAPABILITY_BITS: u32 =
-    RenderCapability::Shadows as u32 | RenderCapability::AerialPerspective as u32;
+/// directional [`RenderCapability::Shadows`] (a planar contact shadow),
+/// [`RenderCapability::AerialPerspective`] (the normalized-depth fog ramp) and
+/// [`RenderCapability::ProceduralSurface`] (the surface's channels evaluated per
+/// triangle rather than per fragment). A mask rather than a chain of
+/// comparisons, so the set grows without the test growing a branch.
+const SUBSTITUTED_CAPABILITY_BITS: u32 = RenderCapability::Shadows as u32
+    | RenderCapability::AerialPerspective as u32
+    | RenderCapability::ProceduralSurface as u32;
 
 impl RenderCapability {
     /// The declared degradation for a backend that lacks this capability. The two
@@ -124,7 +144,8 @@ const ALL_CAPABILITY_BITS: u32 = RenderCapability::Textures as u32
     | RenderCapability::Sky as u32
     | RenderCapability::Specular as u32
     | RenderCapability::Bloom as u32
-    | RenderCapability::AerialPerspective as u32;
+    | RenderCapability::AerialPerspective as u32
+    | RenderCapability::ProceduralSurface as u32;
 
 /// The set of render capabilities a backend will attempt. The hardware GPU backends
 /// use [`Self::all`]; the Canvas 2D software backend uses [`Self::canvas2d`]. Restrict
@@ -175,6 +196,14 @@ impl BackendCapabilityProfile {
     /// frame's [`crate::FrameDepthFog`] in normalized depth exactly as it always
     /// has, while the GPU arms additionally evaluate the extinction term on the
     /// world distance they have. Same authored fog, coarser parameterization.
+    ///
+    /// It **keeps** [`RenderCapability::ProceduralSurface`], the third
+    /// substitute. The flat rasterizer cannot execute a program, but a surface's
+    /// channels are field expressions and a field is a pure function the CPU can
+    /// evaluate — so this backend shades an authored surface at each triangle's
+    /// object-space centroid instead of at each fragment. That is a coarser
+    /// sampling of the same authored appearance, not a missing one, which is
+    /// exactly what a substitute is.
     pub const fn canvas2d() -> Self {
         Self::all()
             .without(RenderCapability::Textures)
@@ -219,7 +248,7 @@ impl BackendCapabilityProfile {
 mod tests {
     use super::*;
 
-    const CAPS: [RenderCapability; 12] = [
+    const CAPS: [RenderCapability; 13] = [
         RenderCapability::Textures,
         RenderCapability::AlphaMask,
         RenderCapability::NormalMapping,
@@ -232,6 +261,7 @@ mod tests {
         RenderCapability::Specular,
         RenderCapability::Bloom,
         RenderCapability::AerialPerspective,
+        RenderCapability::ProceduralSurface,
     ];
 
     #[test]
@@ -244,7 +274,7 @@ mod tests {
         });
         assert_ne!(all, none);
         assert_eq!(none.bits(), 0);
-        assert_eq!(all.bits(), 0b1111_1111_1111);
+        assert_eq!(all.bits(), 0b1_1111_1111_1111);
         assert!(format!("{all:?}").contains("BackendCapabilityProfile"));
         assert!(format!("{:?}", RenderCapability::Textures).contains("Textures"));
     }
@@ -285,6 +315,15 @@ mod tests {
         // and nothing else — so the extinction term is substituted by the
         // normalized-depth ramp it already ran.
         assert!(!c.contains(RenderCapability::AerialPerspective));
+        // It DOES attempt a procedural surface: it evaluates the surface's field
+        // expressions on the CPU, once per triangle at the object-space centroid,
+        // instead of per fragment. Coarser sampling of the same authored
+        // appearance — the third substitute, not a fourth drop.
+        assert!(c.contains(RenderCapability::ProceduralSurface));
+        assert_eq!(
+            RenderCapability::ProceduralSurface.degradation(),
+            CapabilityDegradation::Substitute
+        );
         // It still runs the CPU SDF march and the neutral CPU post effects. In
         // particular the whole-image colour grade survives: `PostProcess` is the
         // grade, not the bloom, which is exactly why they are separate bits.
@@ -298,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn degradation_policy_is_substitute_only_for_shadows_and_aerial_perspective() {
+    fn degradation_policy_is_substitute_only_for_the_three_declared_stand_ins() {
         // The directional shadow degrades to a cheaper planar contact-shadow stand-in.
         assert_eq!(
             RenderCapability::Shadows.degradation(),
@@ -307,6 +346,12 @@ mod tests {
         // The distance-based fog term degrades to the normalized-depth ramp.
         assert_eq!(
             RenderCapability::AerialPerspective.degradation(),
+            CapabilityDegradation::Substitute
+        );
+        // An authored procedural surface degrades to a per-triangle CPU
+        // evaluation of the same channels.
+        assert_eq!(
+            RenderCapability::ProceduralSurface.degradation(),
             CapabilityDegradation::Substitute
         );
         // Every other capability degrades to an explicit, reported drop.
@@ -335,6 +380,9 @@ mod tests {
         assert_eq!(RenderCapability::Specular as u32, 512);
         assert_eq!(RenderCapability::Bloom as u32, 1024);
         assert_eq!(RenderCapability::AerialPerspective as u32, 2048);
+        // Appended in 07-backend-lowering, above every bit the WGSL reads, so no
+        // existing mask moved and the cross-language contract above still holds.
+        assert_eq!(RenderCapability::ProceduralSurface as u32, 4096);
         // Every bit is distinct: the OR of all of them has as many set bits as
         // there are capabilities, which a duplicated discriminant would break.
         assert_eq!(

@@ -13,8 +13,20 @@ crate-type = ["rlib"]
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-math = { path = "../../crates/axiom-math" }
 
-[dev-dependencies]
+# The engine's neutral appearance artifact and the expression language under it.
+# `surface_shading` evaluates a Surface's channel FieldGraphs on the CPU, once
+# per triangle, through an axiom_field::EvalContext.
+axiom-surface = { path = "../../crates/axiom-surface" }
+axiom-field = { path = "../../crates/axiom-field" }
+
+# `Seconds` — the presentation time an EvalContext carries, and the reason no
+# naked f32 crosses this backend's surface boundary.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+[dev-dependencies]
+# Test-only: `Scalar` and `Param`, the quantity and the raw parameter word a
+# hand-built FieldGraph is authored from.
+axiom-recipe = { path = "../../crates/axiom-recipe" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

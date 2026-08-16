@@ -42,6 +42,7 @@
 use axiom_host::{FrameDrawItem, FramePacket};
 
 use crate::canvas_depth_cue::to_byte;
+use crate::surface_shading::SurfaceCache;
 use crate::canvas_depth_cue_profile::CanvasDepthCueProfile;
 use crate::canvas_policy::CanvasDebugOverlay;
 use crate::canvas_post_pass::{apply_fog, apply_outlines, apply_vertical_grade, clamp_axis};
@@ -160,12 +161,13 @@ impl SoftwareRasterizer {
         packet: &FramePacket,
         cache: &MeshCache,
         skinned: &[(MeshGeometry, FrameDrawItem)],
+        surfaces: &SurfaceCache,
     ) -> SoftwareRasterResult {
         let clock = self.clock;
         let phase_sink = self.phase_sink;
         let deep_sink = self.deep_sink;
         let t_convert0 = clock();
-        let converted = convert(packet, cache, skinned, &self.options, clock, deep_sink);
+        let converted = convert(packet, cache, skinned, &self.options, surfaces, clock, deep_sink);
         let t_convert1 = clock();
         let clear = packet.clear_color();
         let overlay = self.options.debug_overlay();

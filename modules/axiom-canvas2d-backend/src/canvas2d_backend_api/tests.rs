@@ -552,3 +552,199 @@ fn renders_a_draw2d_list_with_a_sprite_at_the_canvas_size() {
     let untouched = ((3 * 4 + 3) * 4) as usize;
     assert_eq!(&rgba[untouched..untouched + 4], &[0, 0, 0, 0]);
 }
+
+// ---------------------------------------------------------------------------
+// Authored surfaces: what this backend honours, and what it reports.
+// ---------------------------------------------------------------------------
+
+/// A vec4 base colour that is `Uv.x` in every lane.
+fn uv_x_color() -> axiom_field::FieldGraph {
+    let (builder, uv) =
+        axiom_field::FieldBuilder::new(axiom_field::FieldId::of_name("c2d/api/uv"), 1).push(
+            axiom_field::FieldOp::Uv,
+            Vec::new(),
+            Vec::new(),
+        );
+    let (builder, lane) = builder.push(
+        axiom_field::FieldOp::Component,
+        vec![axiom_recipe::Param::int(0)],
+        vec![uv],
+    );
+    let (builder, splat) = builder.push(
+        axiom_field::FieldOp::Compose,
+        vec![axiom_recipe::Param::int(4)],
+        vec![lane, lane, lane, lane],
+    );
+    builder.build(splat)
+}
+
+fn zero_time() -> axiom_kernel::Seconds {
+    axiom_kernel::Seconds::finite_or_zero(0.0)
+}
+
+fn surfaced_draw(program: u64) -> axiom_host::FrameDrawItem {
+    axiom_host::FrameDrawItem::new(1, 7, 13, IDENTITY, IDENTITY, [1.0; 4], false)
+        .with_surface_program(program)
+}
+
+/// A frame whose surface this backend was handed is **honoured**, not degraded:
+/// the channels are evaluated per triangle instead of per fragment, which is a
+/// substitute, and a substitute the backend actually performed is not a drop.
+#[test]
+fn a_surface_this_backend_was_handed_is_honoured_and_not_reported() {
+    use axiom_host::FrameFeatureSet;
+    let mut backend = Canvas2dBackendApi::new(&request(320, 180));
+    backend.load_meshes(&[ground(7)]);
+    let surface = axiom_surface::SurfaceBuilder::new()
+        .field(axiom_surface::SurfaceChannel::BaseColor, uv_x_color())
+        .build()
+        .expect("a vec4 uv field is a legal base colour");
+    let report = backend.present_packet_with_surfaces(
+        &packet(
+            vec![surfaced_draw(surface.digest().raw())],
+            FrameFeatureSet::new(false, false, 0, 0),
+        ),
+        std::slice::from_ref(&surface),
+        zero_time(),
+    );
+    assert!(
+        !report
+            .degraded_features()
+            .contains(&FrameFeature::ProceduralSurface),
+        "{:?}",
+        report.degraded_features()
+    );
+    assert_eq!(report.submitted_draws(), 1);
+    // And the pixels moved: the surface really was evaluated, not skipped.
+    let (surfaced, _, _) = backend.render_offscreen_rgba_with_surfaces(
+        &packet(
+            vec![surfaced_draw(surface.digest().raw())],
+            FrameFeatureSet::new(false, false, 0, 0),
+        ),
+        std::slice::from_ref(&surface),
+        zero_time(),
+    );
+    let (plain, _, _) = backend.render_offscreen_rgba(&packet(
+        vec![surfaced_draw(surface.digest().raw())],
+        FrameFeatureSet::new(false, false, 0, 0),
+    ));
+    assert_ne!(surfaced, plain);
+}
+
+/// A draw naming a surface this backend was never handed is a real drop, and it
+/// says so — the one thing that must never be a silent no-op.
+#[test]
+fn a_draw_naming_an_unhandled_surface_is_reported_dropped() {
+    use axiom_host::FrameFeatureSet;
+    let mut backend = Canvas2dBackendApi::new(&request(320, 180));
+    backend.load_meshes(&[ground(7)]);
+    let report = backend.present_packet_with_surfaces(
+        &packet(
+            vec![surfaced_draw(0xFEED_FACE)],
+            FrameFeatureSet::new(false, false, 0, 0),
+        ),
+        &[],
+        zero_time(),
+    );
+    assert!(report
+        .degraded_features()
+        .contains(&FrameFeature::ProceduralSurface));
+    // A frame with no authored surface at all reports nothing — the drop is
+    // keyed on what the frame asked for, not on the backend's shape.
+    let quiet = backend.present_packet(&packet(
+        vec![axiom_host::FrameDrawItem::new(
+            1, 7, 13, IDENTITY, IDENTITY, [1.0; 4], false,
+        )],
+        FrameFeatureSet::new(false, false, 0, 0),
+    ));
+    assert!(!quiet
+        .degraded_features()
+        .contains(&FrameFeature::ProceduralSurface));
+}
+
+/// A surface that displaces geometry is reported: this path shades triangles,
+/// it never moves them, however finely it samples.
+#[test]
+fn a_displacing_surface_is_reported_because_shading_cannot_move_geometry() {
+    use axiom_host::FrameFeatureSet;
+    let mut backend = Canvas2dBackendApi::new(&request(320, 180));
+    backend.load_meshes(&[ground(7)]);
+    let surface = axiom_surface::SurfaceBuilder::new()
+        .constant(
+            axiom_surface::SurfaceChannel::Displacement,
+            axiom_field::FieldValue::vec3(axiom_math::Vec3::new(0.0, 1.0, 0.0)),
+        )
+        .build()
+        .expect("a vec3 constant is a legal displacement");
+    let report = backend.present_packet_with_surfaces(
+        &packet(
+            vec![surfaced_draw(surface.digest().raw())],
+            FrameFeatureSet::new(false, false, 0, 0),
+        ),
+        std::slice::from_ref(&surface),
+        zero_time(),
+    );
+    assert!(report
+        .degraded_features()
+        .contains(&FrameFeature::ProceduralSurface));
+}
+
+/// Roughness and metallic are **not faked**. A view-independent per-triangle
+/// shade has no highlight for a roughness to tighten, so a surface that binds
+/// either loses exactly the specular term — and the report names it.
+#[test]
+fn a_surface_binding_roughness_reports_the_specular_term_it_cannot_express() {
+    use axiom_host::FrameFeatureSet;
+    let mut backend = Canvas2dBackendApi::new(&request(320, 180));
+    backend.load_meshes(&[ground(7)]);
+    let rough = axiom_surface::SurfaceBuilder::new()
+        .constant(
+            axiom_surface::SurfaceChannel::Roughness,
+            axiom_field::FieldValue::scalar(axiom_recipe::Scalar::new(0.1)),
+        )
+        .build()
+        .expect("a scalar constant is a legal roughness");
+    let report = backend.present_packet_with_surfaces(
+        &packet(
+            vec![surfaced_draw(rough.digest().raw())],
+            FrameFeatureSet::new(false, false, 0, 0),
+        ),
+        std::slice::from_ref(&rough),
+        zero_time(),
+    );
+    assert!(report
+        .degraded_features()
+        .contains(&FrameFeature::SpecularHighlight));
+    // It is not a procedural-surface drop: the colour channels WERE honoured.
+    assert!(!report
+        .degraded_features()
+        .contains(&FrameFeature::ProceduralSurface));
+}
+
+/// The capability lever still governs: a profile that clears the bit makes this
+/// backend report the surface rather than evaluate it.
+#[test]
+fn a_profile_without_the_capability_reports_the_surface_it_declines_to_evaluate() {
+    use axiom_host::FrameFeatureSet;
+    let mut backend = Canvas2dBackendApi::new(&request(320, 180));
+    backend.load_meshes(&[ground(7)]);
+    backend.set_capability_profile(
+        axiom_host::BackendCapabilityProfile::canvas2d()
+            .without(RenderCapability::ProceduralSurface),
+    );
+    let surface = axiom_surface::SurfaceBuilder::new()
+        .field(axiom_surface::SurfaceChannel::BaseColor, uv_x_color())
+        .build()
+        .expect("legal");
+    let report = backend.present_packet_with_surfaces(
+        &packet(
+            vec![surfaced_draw(surface.digest().raw())],
+            FrameFeatureSet::new(false, false, 0, 0),
+        ),
+        std::slice::from_ref(&surface),
+        zero_time(),
+    );
+    assert!(report
+        .degraded_features()
+        .contains(&FrameFeature::ProceduralSurface));
+}

@@ -10,7 +10,15 @@ fn convert(
     cache: &MeshCache,
     options: &LowPolyRasterOptions,
 ) -> ConvertedFrame {
-    super::convert(packet, cache, &[], options, || 0.0, super::discard_deep)
+    super::convert(
+        packet,
+        cache,
+        &[],
+        options,
+        &SurfaceCache::default(),
+        || 0.0,
+        super::discard_deep,
+    )
 }
 
 const IDENTITY: [f32; 16] = [
@@ -532,4 +540,180 @@ fn straddling_triangle_is_clipped_not_exploded() {
         .flat_map(|t| t.vertices().iter())
         .flat_map(|v| [v.x(), v.y()]);
     assert!(coords.all(|c| c.is_finite() && c.abs() < 1.0e5));
+}
+
+// ---------------------------------------------------------------------------
+// Authored surfaces, CPU-evaluated once per triangle.
+// ---------------------------------------------------------------------------
+
+/// One vertex with an explicit uv, so a uv-driven surface has something to read.
+fn uv_vertex(pos: [f32; 3], uv: [f32; 2], color: [f32; 4]) -> [f32; 12] {
+    [
+        pos[0], pos[1], pos[2], 0.0, 1.0, 0.0, uv[0], uv[1], color[0], color[1], color[2],
+        color[3],
+    ]
+}
+
+/// One big screen-filling triangle whose three uvs are `(0,0)`, `(0.9,0)` and
+/// `(0,0.9)` — so its centroid uv is exactly `(0.3, 0.3)`, a value with an exact
+/// `f32` product against the colours below.
+fn uv_triangle(id: u64) -> (u64, Vec<f32>, Vec<u32>) {
+    let c = [1.0, 1.0, 1.0, 1.0];
+    let mut v = Vec::new();
+    v.extend_from_slice(&uv_vertex([-1.0, -1.0, 0.0], [0.0, 0.0], c));
+    v.extend_from_slice(&uv_vertex([1.0, -1.0, 0.0], [0.9, 0.0], c));
+    v.extend_from_slice(&uv_vertex([-1.0, 1.0, 0.0], [0.0, 0.9], c));
+    (id, v, vec![0, 1, 2])
+}
+
+/// A vec4 base colour that is `Uv.x` in every lane.
+fn uv_x_color() -> axiom_field::FieldGraph {
+    let (builder, uv) = axiom_field::FieldBuilder::new(
+        axiom_field::FieldId::of_name("c2d/raster/uv"),
+        1,
+    )
+    .push(axiom_field::FieldOp::Uv, Vec::new(), Vec::new());
+    let (builder, lane) = builder.push(
+        axiom_field::FieldOp::Component,
+        vec![axiom_recipe::Param::int(0)],
+        vec![uv],
+    );
+    let (builder, splat) = builder.push(
+        axiom_field::FieldOp::Compose,
+        vec![axiom_recipe::Param::int(4)],
+        vec![lane, lane, lane, lane],
+    );
+    builder.build(splat)
+}
+
+fn convert_surfaced(
+    packet: &FramePacket,
+    cache: &MeshCache,
+    options: &LowPolyRasterOptions,
+    surfaces: &SurfaceCache,
+) -> ConvertedFrame {
+    super::convert(
+        packet,
+        cache,
+        &[],
+        options,
+        surfaces,
+        || 0.0,
+        super::discard_deep,
+    )
+}
+
+/// **The proof the whole Canvas 2D surface path exists for**: a field-authored
+/// base colour renders as the CPU evaluation of that field at the triangle's
+/// object-space centroid — asserted as a number, not looked at.
+#[test]
+fn a_uv_driven_surface_renders_the_cpu_evaluation_at_the_triangles_centroid() {
+    let surface = axiom_surface::SurfaceBuilder::new()
+        .field(axiom_surface::SurfaceChannel::BaseColor, uv_x_color())
+        .build()
+        .expect("a vec4 uv field is a legal base colour");
+    let program = surface.digest().raw();
+    let cache = MeshCache::load(&[uv_triangle(1)]);
+    let surfaces = SurfaceCache::build(
+        std::slice::from_ref(&surface),
+        axiom_kernel::Seconds::finite_or_zero(0.0),
+    );
+    let frame = convert_surfaced(
+        &packet(vec![draw(0, 1).with_surface_program(program)]),
+        &cache,
+        &opts(),
+        &surfaces,
+    );
+    assert_eq!(frame.triangles.len(), 1);
+    // The centroid uv is (0 + 0.9 + 0) / 3 = 0.3 in x. `Uv.x` splatted into
+    // every lane is therefore (0.3, 0.3, 0.3, 0.3), and the opacity channel is
+    // its default 1.0, so alpha stays 0.3. The mesh's own white vertex colour is
+    // REPLACED — the surface is the authored appearance, not a tint of it.
+    let expected = 0.9_f32 / 3.0;
+    let colour = frame.triangles[0].color();
+    colour
+        .iter()
+        .for_each(|lane| assert!((lane - expected).abs() < 1e-6, "{colour:?}"));
+    // And it is the same number the evaluator answers with directly.
+    let direct = surfaces
+        .shade(program, [0.0; 3], [expected, 0.3], [0.0, 0.0, 1.0])
+        .expect("the cache holds it");
+    assert!((direct.base_color()[0] - expected).abs() < 1e-6);
+}
+
+/// The compatibility proof: a surface whose channels are all constants renders
+/// exactly what the plain `Material` path renders, to the bit.
+#[test]
+fn a_constant_only_surface_renders_the_same_pixels_as_the_plain_material_path() {
+    let colour = [0.25, 0.5, 0.75, 1.0];
+    let surface = axiom_surface::SurfaceBuilder::new()
+        .constant(
+            axiom_surface::SurfaceChannel::BaseColor,
+            axiom_field::FieldValue::vec4(axiom_math::Vec4::new(
+                colour[0], colour[1], colour[2], colour[3],
+            )),
+        )
+        .build()
+        .expect("a vec4 constant is a legal base colour");
+    let cache = MeshCache::load(&[ground(1, colour)]);
+    // The plain path: the mesh carries the colour, no surface anywhere.
+    let plain = convert(&packet(vec![draw(0, 1)]), &cache, &opts());
+    // The surfaced path: the same colour, authored as a surface instead.
+    let surfaced = convert_surfaced(
+        &packet(vec![draw(0, 1).with_surface_program(surface.digest().raw())]),
+        &cache,
+        &opts(),
+        &SurfaceCache::build(
+            std::slice::from_ref(&surface),
+            axiom_kernel::Seconds::finite_or_zero(0.0),
+        ),
+    );
+    assert_eq!(plain.triangles.len(), surfaced.triangles.len());
+    plain
+        .triangles
+        .iter()
+        .zip(surfaced.triangles.iter())
+        .for_each(|(a, b)| assert_eq!(a.color(), b.color()));
+}
+
+/// A draw naming a surface the backend was never handed keeps its plain colour —
+/// it is not blanked, and the report is what says the surface was missed.
+#[test]
+fn a_draw_naming_an_unknown_surface_keeps_its_plain_colour() {
+    let cache = MeshCache::load(&[ground(1, [0.2, 0.4, 0.8, 1.0])]);
+    let with_unknown = convert_surfaced(
+        &packet(vec![draw(0, 1).with_surface_program(0xDEAD_BEEF)]),
+        &cache,
+        &opts(),
+        &SurfaceCache::default(),
+    );
+    let plain = convert(&packet(vec![draw(0, 1)]), &cache, &opts());
+    assert_eq!(with_unknown.triangles[0].color(), plain.triangles[0].color());
+}
+
+/// A surface's constant emission lands where the draw's own emissive lands:
+/// after every depth cue, added to the flat colour.
+#[test]
+fn a_surfaces_emission_is_added_after_the_cues_like_the_draws_own_emissive() {
+    let surface = axiom_surface::SurfaceBuilder::new()
+        .constant(
+            axiom_surface::SurfaceChannel::Emission,
+            axiom_field::FieldValue::vec4(axiom_math::Vec4::new(0.0, 0.25, 0.0, 0.0)),
+        )
+        .build()
+        .expect("a vec4 constant is a legal emission");
+    let cache = MeshCache::load(&[ground(1, [0.0, 0.0, 0.0, 1.0])]);
+    let frame = convert_surfaced(
+        &packet(vec![draw(0, 1).with_surface_program(surface.digest().raw())]),
+        &cache,
+        &opts(),
+        &SurfaceCache::build(
+            std::slice::from_ref(&surface),
+            axiom_kernel::Seconds::finite_or_zero(0.0),
+        ),
+    );
+    // Base colour is the surface's default white; the emission adds to green.
+    let colour = frame.triangles[0].color();
+    assert!((colour[1] - 1.25).abs() < 1e-6, "{colour:?}");
+    assert!((colour[0] - 1.0).abs() < 1e-6, "{colour:?}");
 }

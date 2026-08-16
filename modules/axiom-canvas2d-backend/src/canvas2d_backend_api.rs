@@ -6,6 +6,7 @@ use axiom_host::{
     BackendKind, Draw2dList, FrameDepthCueStats, FrameDrawItem, FrameFeature, FramePacket,
     FrameRasterStats, FrameSubmissionReport, HostPresentationRequest, RenderCapability,
 };
+use axiom_kernel::Seconds;
 
 use crate::canvas_policy::{CanvasQualityPreset, CanvasVisualProfile};
 use crate::draw2d_raster::Draw2dTextures;
@@ -13,6 +14,7 @@ use crate::low_poly_raster_options::LowPolyRasterOptions;
 use crate::mesh_cache::{MeshCache, MeshGeometry};
 use crate::mesh_skinning::SkinnedMeshCache;
 use crate::software_rasterizer::{SoftwareRasterResult, SoftwareRasterizer};
+use crate::surface_shading::SurfaceCache;
 // The per-frame console telemetry sinks and their clock (no-ops on native).
 use crate::frame_telemetry::{deep_log, log_phases, log_timing, now_ms};
 
@@ -231,6 +233,49 @@ impl Canvas2dBackendApi {
         self.present_packet_skinned(packet, &[])
     }
 
+    /// Like [`Self::present_packet`], but with the frame's authored
+    /// [`axiom_surface::Surface`] set and the presentation `time` its
+    /// `Time`-reading channels sample.
+    ///
+    /// **This backend renders an authored surface for real.** It executes no
+    /// shader, but a surface's channels are fields — pure functions with a
+    /// reference evaluator — so each triangle's base colour, emission and
+    /// opacity are evaluated on the CPU at that triangle's object-space
+    /// centroid. The substitution is the sampling rate, not the appearance,
+    /// which is why [`RenderCapability::ProceduralSurface`] is a substitute here
+    /// and not a drop.
+    ///
+    /// Passing an empty slice is what [`Self::present_packet`] does, and it
+    /// leaves every rasterized pixel identical to the pre-surface path.
+    pub fn present_packet_with_surfaces(
+        &self,
+        packet: &FramePacket,
+        surfaces: &[axiom_surface::Surface],
+        time: Seconds,
+    ) -> FrameSubmissionReport {
+        let cache = SurfaceCache::build(surfaces, time);
+        let result = self.rasterize(packet, &[], &cache);
+        self.blit(result.rgba_bytes(), result.width(), result.height());
+        self.report(packet, &result, &cache)
+    }
+
+    /// Like [`Self::render_offscreen_rgba`], but with the frame's authored
+    /// surface set — the headless capture peer of
+    /// [`Self::present_packet_with_surfaces`].
+    pub fn render_offscreen_rgba_with_surfaces(
+        &self,
+        packet: &FramePacket,
+        surfaces: &[axiom_surface::Surface],
+        time: Seconds,
+    ) -> (Vec<u8>, u32, u32) {
+        let result = self.rasterize(packet, &[], &SurfaceCache::build(surfaces, time));
+        (
+            result.rgba_bytes().to_vec(),
+            result.width(),
+            result.height(),
+        )
+    }
+
     /// Like [`Self::present_packet`], but also CPU-skins `skinned` — this frame's
     /// bake-once skinned bodies (each with its own joint palette) — against the set
     /// uploaded by [`Self::load_skinned_meshes`], so the software backend renders
@@ -244,12 +289,13 @@ impl Canvas2dBackendApi {
         // the native path stays deterministic and timer-free); the pure
         // rasterizer never reads a clock.
         let t0 = now_ms();
-        let result = self.rasterize(packet, skinned);
+        let surfaces = SurfaceCache::default();
+        let result = self.rasterize(packet, skinned, &surfaces);
         let t1 = now_ms();
         self.blit(result.rgba_bytes(), result.width(), result.height());
         let t2 = now_ms();
         log_timing(&result, t1 - t0, t2 - t1);
-        self.report(packet, &result)
+        self.report(packet, &result, &surfaces)
     }
 
     /// Rasterize one [`FramePacket`] into the low-poly framebuffer and return the
@@ -272,7 +318,7 @@ impl Canvas2dBackendApi {
         packet: &FramePacket,
         skinned: &[SkinnedDraw],
     ) -> (Vec<u8>, u32, u32) {
-        let result = self.rasterize(packet, skinned);
+        let result = self.rasterize(packet, skinned, &SurfaceCache::default());
         (
             result.rgba_bytes().to_vec(),
             result.width(),
@@ -284,7 +330,12 @@ impl Canvas2dBackendApi {
     /// [`Self::render_offscreen_rgba`]: build the per-frame cue options (the fog
     /// and hemisphere ambient come from the frame, leaving every other knob as
     /// configured) and run the pure software z-buffer rasterizer.
-    fn rasterize(&self, packet: &FramePacket, skinned: &[SkinnedDraw]) -> SoftwareRasterResult {
+    fn rasterize(
+        &self,
+        packet: &FramePacket,
+        skinned: &[SkinnedDraw],
+        surfaces: &SurfaceCache,
+    ) -> SoftwareRasterResult {
         // Only one visual profile exists; this avoids an unused-field warning.
         let _ = self.profile;
         let mut cues = self.options.depth_cues();
@@ -324,12 +375,17 @@ impl Canvas2dBackendApi {
             .with_clock(now_ms)
             .with_phase_sink(log_phases)
             .with_deep_sink(deep_log)
-            .rasterize_packet(packet, &self.meshes, &posed)
+            .rasterize_packet(packet, &self.meshes, &posed, surfaces)
     }
 
     /// Build the uniform host report from the rasterizer result and the packet's
     /// feature metadata.
-    fn report(&self, packet: &FramePacket, result: &SoftwareRasterResult) -> FrameSubmissionReport {
+    fn report(
+        &self,
+        packet: &FramePacket,
+        result: &SoftwareRasterResult,
+        surfaces: &SurfaceCache,
+    ) -> FrameSubmissionReport {
         let features = packet.features();
         // A feature is degraded iff the frame relies on it AND this backend's capability
         // profile does not provide it — the declared policy, not blanket telemetry.
@@ -364,51 +420,44 @@ impl Canvas2dBackendApi {
             .depth_fog()
             .is_some_and(|fog| fog.extinction().get() != 0.0)
             & !profile.contains(RenderCapability::AerialPerspective);
+        // The authored-surface arm. This backend HONOURS a procedural surface it
+        // was handed — per triangle rather than per fragment — so the drop is
+        // keyed on the two things it genuinely could not do: a draw naming a
+        // surface it was never given (or a profile that clears the capability),
+        // and a surface that displaces geometry, which a shading path cannot
+        // honour however finely it samples.
+        let surface_capable = profile.contains(RenderCapability::ProceduralSurface);
+        let unknown_surface = packet
+            .draws()
+            .iter()
+            .any(|draw| (draw.surface_program() != 0) & !surfaces.knows(draw.surface_program()));
+        let surface_degraded = unknown_surface | surfaces.displaces() | !surface_capable;
+        let authored_surface = packet
+            .draws()
+            .iter()
+            .any(|draw| draw.surface_program() != 0);
+        // Roughness and metallic have no expression in a view-INDEPENDENT
+        // per-triangle shade, so a surface that binds either loses exactly the
+        // specular term — the feature this report already has a name for. Not
+        // faked, not silently ignored: named.
+        let surface_specular_degraded = surfaces.has_view_dependent_channels()
+            & !profile.contains(RenderCapability::Specular);
         let degraded_features: Vec<FrameFeature> = [
             textures_degraded.then_some(FrameFeature::AlbedoSampling),
             shadows_degraded.then_some(FrameFeature::Shadows),
             sky_degraded.then_some(FrameFeature::Sky),
-            specular_degraded.then_some(FrameFeature::SpecularHighlight),
+            (specular_degraded | surface_specular_degraded)
+                .then_some(FrameFeature::SpecularHighlight),
             bloom_degraded.then_some(FrameFeature::Bloom),
             aerial_degraded.then_some(FrameFeature::AerialPerspective),
+            (authored_surface & surface_degraded).then_some(FrameFeature::ProceduralSurface),
         ]
         .into_iter()
         .flatten()
         .collect();
 
         let c = result.conversion();
-        let raster = FrameRasterStats {
-            framebuffer_width: result.width(),
-            framebuffer_height: result.height(),
-            projected_draws: c.projected_draws,
-            projected_triangles: c.projected_triangles,
-            culled_triangles: c.culled_triangles,
-            rasterized_triangles: result.rasterized_triangles(),
-            skipped_degenerate_triangles: c.skipped_degenerate_triangles,
-            skipped_invalid_projection_triangles: c.skipped_invalid_projection_triangles,
-            candidate_pixels: result.candidate_pixels(),
-            depth_tested_pixels: result.depth_tested_pixels(),
-            depth_written_pixels: result.depth_written_pixels(),
-            depth_rejected_pixels: result.depth_rejected_pixels(),
-            terrain_draws_preserved: c.terrain_draws_preserved,
-            terrain_triangles_decimated: c.terrain_triangles_decimated,
-            rasterized_objects: c.rasterized_objects,
-            skipped_decorative_draws: c.skipped_decorative_draws,
-            budget_exhausted: c.budget_exhausted,
-            depth_cues: FrameDepthCueStats {
-                lit_triangles: c.lit_triangles,
-                height_tinted_triangles: c.height_tinted_triangles,
-                distance_falloff_applied_triangles: c.distance_falloff_applied_triangles,
-                depth_fog_applied_pixels: result.depth_fog_applied_pixels(),
-                vertical_grade_applied_pixels: result.vertical_grade_applied_pixels(),
-                contact_shadows_drawn: result.contact_shadows_drawn(),
-                contact_shadow_pixels: result.contact_shadow_pixels(),
-                outlined_objects: result.outlined_objects(),
-                outline_pixels: result.outline_pixels(),
-                horizon_silhouette_drawn: result.horizon_silhouette_drawn(),
-                depth_cue_profile_name: self.options.depth_cues().name(),
-            },
-        };
+        let raster = raster_stats(result, self.options.depth_cues().name());
 
         FrameSubmissionReport::new(
             BackendKind::Canvas2d,
@@ -459,6 +508,45 @@ impl Canvas2dBackendApi {
     /// The target (canvas display) height in device pixels.
     pub fn height(&self) -> u32 {
         self.height
+    }
+}
+
+/// The neutral per-frame rasterization block, read off the rasterizer result.
+/// Split out of `Canvas2dBackendApi::report` so that function stays inside the
+/// engine's per-function budget; it is a pure field-for-field transcription.
+fn raster_stats(result: &SoftwareRasterResult, profile_name: &'static str) -> FrameRasterStats {
+    let c = result.conversion();
+    FrameRasterStats {
+        framebuffer_width: result.width(),
+        framebuffer_height: result.height(),
+        projected_draws: c.projected_draws,
+        projected_triangles: c.projected_triangles,
+        culled_triangles: c.culled_triangles,
+        rasterized_triangles: result.rasterized_triangles(),
+        skipped_degenerate_triangles: c.skipped_degenerate_triangles,
+        skipped_invalid_projection_triangles: c.skipped_invalid_projection_triangles,
+        candidate_pixels: result.candidate_pixels(),
+        depth_tested_pixels: result.depth_tested_pixels(),
+        depth_written_pixels: result.depth_written_pixels(),
+        depth_rejected_pixels: result.depth_rejected_pixels(),
+        terrain_draws_preserved: c.terrain_draws_preserved,
+        terrain_triangles_decimated: c.terrain_triangles_decimated,
+        rasterized_objects: c.rasterized_objects,
+        skipped_decorative_draws: c.skipped_decorative_draws,
+        budget_exhausted: c.budget_exhausted,
+        depth_cues: FrameDepthCueStats {
+            lit_triangles: c.lit_triangles,
+            height_tinted_triangles: c.height_tinted_triangles,
+            distance_falloff_applied_triangles: c.distance_falloff_applied_triangles,
+            depth_fog_applied_pixels: result.depth_fog_applied_pixels(),
+            vertical_grade_applied_pixels: result.vertical_grade_applied_pixels(),
+            contact_shadows_drawn: result.contact_shadows_drawn(),
+            contact_shadow_pixels: result.contact_shadow_pixels(),
+            outlined_objects: result.outlined_objects(),
+            outline_pixels: result.outline_pixels(),
+            horizon_silhouette_drawn: result.horizon_silhouette_drawn(),
+            depth_cue_profile_name: profile_name,
+        },
     }
 }
 

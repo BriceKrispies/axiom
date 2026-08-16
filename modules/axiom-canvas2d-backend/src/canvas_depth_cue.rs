@@ -42,6 +42,22 @@ pub(crate) fn face_normal_world(model: &[[f32; 3]; 3], world: &[f32; 16]) -> [f3
     normalize3([nx, ny, nz])
 }
 
+/// The **object-space** face normal of a triangle: the model-space edge cross
+/// product, normalized, with no world rotation applied.
+///
+/// Deliberately a second function rather than a factoring-out of
+/// [`face_normal_world`]'s first half: that one normalizes *after* rotating the
+/// un-normalized cross product, and normalizing twice is not bit-identical in
+/// `f32`. Every existing frame's shading must stay byte-exact, so the two
+/// derivations stay separate.
+///
+/// This is the normal a CPU-evaluated surface is sampled with, because a
+/// surface's channel expressions are evaluated in the object's own frame — the
+/// same frame [`crate::mesh_cache::MeshGeometry::position`] returns.
+pub(crate) fn face_normal_model(model: &[[f32; 3]; 3]) -> [f32; 3] {
+    normalize3(cross3(sub3(model[1], model[0]), sub3(model[2], model[0])))
+}
+
 /// The world-space Y (elevation) of a model point under the `world` matrix
 /// (column-major row-1 dot point) — used for the height/elevation tint.
 pub(crate) fn world_y(point: [f32; 3], world: &[f32; 16]) -> f32 {

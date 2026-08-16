@@ -54,6 +54,14 @@ pub enum FrameFeature {
     /// normalized-depth ramp (see
     /// [`RenderCapability::AerialPerspective`](crate::RenderCapability)).
     AerialPerspective,
+    /// An authored procedural surface (a draw's
+    /// [`FrameDrawItem::surface_program`](crate::FrameDrawItem)) that this
+    /// backend could not honour. A backend that has neither a program nor a CPU
+    /// evaluator for the surface's channels renders its constant fallback colour
+    /// and reports this; a backend that evaluates the channels per triangle
+    /// instead of per fragment reports nothing, because it honoured them (see
+    /// [`RenderCapability::ProceduralSurface`](crate::RenderCapability)).
+    ProceduralSurface,
 }
 
 /// The uniform result of presenting one frame through any backend: which backend
@@ -192,6 +200,7 @@ mod tests {
             FrameFeature::SpecularHighlight,
             FrameFeature::Bloom,
             FrameFeature::AerialPerspective,
+            FrameFeature::ProceduralSurface,
         ];
         // Bloom is its own feature, not a spelling of PostProcessing: a backend
         // that grades but cannot bloom must be able to report exactly that.
