@@ -1,8 +1,8 @@
-//! [`ValidationReport`] — the deterministic verdict of validating an artifact.
+//! [`ValidationReport`] — the deterministic verdict of validating a word list.
 
 use axiom_kernel::{BinaryWriter, StableHash};
 
-/// The outcome of validating an artifact against a constraint list: a verdict per
+/// The outcome of validating a word list against a constraint list: a verdict per
 /// constraint (`(kind_code, satisfied, score)`), whether all passed, and the total
 /// score. Deterministic and serializable, so reports golden-compare.
 #[derive(Debug, PartialEq, Eq)]

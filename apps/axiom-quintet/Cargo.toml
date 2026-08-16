@@ -20,7 +20,8 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 # The proc/space content substrate: the piece generator is a recipe evaluated at
 # a space address, so the "next quintet" is durable, addressed content.
 axiom-space = { path = "../../crates/axiom-space" }
-axiom-proc = { path = "../../crates/axiom-proc" }
+axiom-recipe = { path = "../../crates/axiom-recipe" }
+axiom-proc-core = { path = "../../crates/axiom-proc-core" }
 
 # Browser/live arm only: the wasm-bindgen glue, panic hook, the debug overlay,
 # and the DOM surface `web.rs` actually touches. The engine-solved on-screen

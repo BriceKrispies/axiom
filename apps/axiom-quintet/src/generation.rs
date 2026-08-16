@@ -3,10 +3,10 @@
 //! Generation is a pure function of `(board, score, move-count)`, routed through
 //! the engine's procedural-generation substrate (Phase 8 of the procgen roadmap:
 //! this app's content is now recipe-driven). The game state is encoded into a
-//! content [`Address`], a single-`draw` [`Recipe`] is evaluated at that address
-//! under a fixed root seed ([`ProcApi`]), and the artifact's drawn word selects
-//! one of the shapes that fit. So a given game state always produces the same next
-//! piece and a whole game is replayable — now on `space`/`entropy`/`proc` rather
+//! content [`Address`], a single-`draw` [`RecipeGraph`] is executed at that
+//! address under a fixed root seed ([`ProcCore`]), and the drawn word selects one
+//! of the shapes that fit. So a given game state always produces the same next
+//! piece and a whole game is replayable — now on `space`/`entropy`/`recipe` rather
 //! than a hand-rolled seed fed to a raw RNG.
 //!
 //! The shape pool is the [`catalog`] of every distinct *fixed* pentomino (all
@@ -19,7 +19,8 @@
 use std::collections::BTreeSet;
 
 use axiom_kernel::StableHash;
-use axiom_proc::{ProcApi, Recipe};
+use axiom_proc_core::{NodeEval, ProcCore};
+use axiom_recipe::{RecipeGraph, RecipeId};
 use axiom_space::{Address, SpaceApi};
 
 use crate::board::{Board, BOARD_SIZE};
@@ -68,16 +69,27 @@ pub fn placeable_shapes(board: &Board) -> Vec<QuintetMask> {
 /// the constant seed they are keyed under.
 const GENERATION_SEED: u64 = 0x0051_7569_6e74_6574;
 /// The piece-selection recipe version. Bump it to deliberately re-key generation
-/// (and re-golden) — versioning is a first-class input.
-const PIECE_RECIPE_VERSION: u32 = 1;
+/// (and re-golden) — versioning is a first-class input. `2` is the
+/// `axiom-recipe`/`axiom-proc-core` substrate (manifest P1 retired the v1
+/// `axiom-proc` evaluator this app used at version 1).
+const PIECE_RECIPE_VERSION: u32 = 2;
+/// The piece-selection recipe's stable identity.
+const PIECE_RECIPE_ID: RecipeId = RecipeId::from_raw(1);
+/// Operator code: draw one word from the node's entropy stream.
+const OP_DRAW: u16 = 0;
 
 /// The piece-selection recipe: a single entropy draw whose value selects a shape.
 /// Trivial by design — the substrate, not the recipe, is what this migration
 /// proves; a richer recipe slots in here without touching the call site.
-fn piece_recipe() -> Recipe {
-    let mut recipe = Recipe::new(PIECE_RECIPE_VERSION);
-    recipe.draw();
+fn piece_recipe() -> RecipeGraph {
+    let mut recipe = RecipeGraph::new(PIECE_RECIPE_ID, PIECE_RECIPE_VERSION);
+    recipe.add(OP_DRAW, vec![], vec![]);
     recipe
+}
+
+/// The recipe's one operator: draw a word from the node's deterministic stream.
+fn draw_word(mut ctx: NodeEval<'_, u64>) -> Option<u64> {
+    (ctx.op() == OP_DRAW).then(|| ctx.stream().next_u64())
 }
 
 /// Encode the game state `(board, score, moves)` into a content address: the
@@ -98,15 +110,15 @@ fn site(board: &Board, score: u64, moves: u64) -> Address {
 
 /// The next quintet for this board, or `None` when the board is stuck (no shape
 /// fits anywhere). The choice is deterministic in `(board, score, moves)`,
-/// produced by evaluating [`piece_recipe`] at the state's [`site`] and reducing
-/// the artifact's drawn word over the placeable shapes.
+/// produced by executing [`piece_recipe`] at the state's [`site`] and reducing
+/// the drawn word over the placeable shapes.
 pub fn generate(board: &Board, score: u64, moves: u64) -> Option<QuintetMask> {
     let placeable = placeable_shapes(board);
     (!placeable.is_empty()).then(|| {
         let address = site(board, score, moves);
-        let (artifact, _trace) = ProcApi::evaluate(&piece_recipe(), GENERATION_SEED, &address)
-            .expect("the single-draw piece recipe is a valid DAG");
-        let draw = artifact.words()[0];
+        let draw = ProcCore::new()
+            .execute(&piece_recipe(), GENERATION_SEED, &address, draw_word)
+            .expect("the single-draw piece recipe is a valid one-node graph");
         let index = (draw % placeable.len() as u64) as usize;
         placeable[index].clone()
     })

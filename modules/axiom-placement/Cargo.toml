@@ -1,6 +1,6 @@
 [package]
 name = "axiom-placement"
-description = "Axiom engine module: deterministic object placement on the procedural-generation substrate. PlacementApi::scatter evaluates a draw-recipe at a content address and reduces each artifact word into an integer grid position, producing a reproducible Placement (a list of (x, y) cells) - the same (seed, address, count, bounds) always yields the same scatter. The first domain generator built ON the proc layers (Phase 9): a reusable capability, not app-local. Integer-only (no naked floats), branchless, one facade."
+description = "Axiom engine module: deterministic object placement on the procedural-generation substrate. PlacementApi::scatter bakes a two-node scatter recipe (draw N words, reduce each to a grid cell) through the shared proc-core executor at a content address, producing a reproducible Placement (a list of (x, y) cells) - the same (seed, address, count, bounds) always yields the same scatter. The first domain generator built ON the recipe layers (Phase 9): a reusable capability, not app-local. Integer-only (no naked floats), branchless, one facade."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,12 @@ rust-version.workspace = true
 [dependencies]
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-space = { path = "../../crates/axiom-space" }
-axiom-proc = { path = "../../crates/axiom-proc" }
+# The scatter is a recipe graph (axiom-recipe) run through the shared executor
+# (axiom-proc-core). The per-node entropy stream the draw operator pulls from
+# arrives through proc-core's NodeEval, so axiom-entropy is proc-core's
+# dependency, not a direct one here.
+axiom-recipe = { path = "../../crates/axiom-recipe" }
+axiom-proc-core = { path = "../../crates/axiom-proc-core" }
 
 [lints.rust]
 unsafe_code = "forbid"

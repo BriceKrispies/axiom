@@ -147,10 +147,16 @@ mod tests {
 
     #[test]
     fn golden_save_and_world_digests_are_stable() {
+        // The world digest was re-goldened by manifest P1: a restored world is a
+        // regenerated levelgen world, which carries a placement, and placement
+        // moved from the retired v1 `axiom-proc` evaluator (one entropy stream per
+        // recipe) to `axiom-proc-core` (one stream per node). The *save* digest is
+        // unchanged — a save is the seed/address/bounds/overrides recipe, not the
+        // regenerated content, which is exactly the property this module claims.
         let save = WorldSaveApi::save(7, &site(&[1, 2]), 16, 16, &[(5, FOREST)]);
         let world = WorldSaveApi::restore(&save);
         assert_eq!(save.digest().raw(), 10_540_502_306_818_545_085);
-        assert_eq!(world.digest().raw(), 8_248_762_692_994_712_636);
+        assert_eq!(world.digest().raw(), 17_080_111_214_593_193_315);
     }
 
     #[test]

@@ -1,25 +1,22 @@
 [layer]
 name = "proc-validate"
 crate_name = "axiom-proc-validate"
-depends_on = ["kernel", "proc"]
+depends_on = ["kernel"]
 
 meaningful_dependency = """
-Proc-validate adapts proc's Artifact and the kernel's serialization + digest into
-deterministic validation and bounded repair. ProcValidateApi reads an Artifact's
-neutral words, evaluates generic Constraints (min-count / max-value / non-zero)
+Proc-validate adapts the kernel's serialization + digest into deterministic
+validation and bounded repair of a generation's neutral output words.
+ProcValidateApi evaluates generic Constraints (min-count / max-value / non-zero)
 branchlessly into a ValidationReport whose canonical bytes (BinaryWriter) carry a
-StableHash digest, and repairs a failing artifact by a single bounded pass of
-word-level fixes, returning a new Artifact (built via Artifact::from_words). It
-owns no domain rules and never loops to a fixpoint.
+StableHash digest, and repairs a failing word list by a single bounded pass of
+word-level fixes. It owns no domain rules, never loops to a fixpoint, and - since
+the recipe stack is generic over its output type and owns no artifact container -
+names no generation type at all, so the kernel is its only genuine dependency.
 """
 
 introduced_capabilities = ["ProcValidateApi", "ValidationReport", "Constraint", "sample_until_valid"]
-consumed_capabilities = ["Artifact", "StableHash", "BinaryWriter"]
-
-[[proof_exports]]
-export = "ProcValidateApi"
-must_reference = ["Artifact"]
+consumed_capabilities = ["StableHash", "BinaryWriter"]
 
 [[proof_exports]]
 export = "ValidationReport"
-must_reference = ["StableHash"]
+must_reference = ["StableHash", "BinaryWriter"]

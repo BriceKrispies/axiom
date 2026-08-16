@@ -6,7 +6,7 @@ name = "placement"
 crate_name = "axiom-placement"
 kind = "engine-module"
 
-allowed_layers = ["kernel", "space", "proc"]
+allowed_layers = ["kernel", "space", "recipe", "proc-core"]
 
 allowed_modules = []
 

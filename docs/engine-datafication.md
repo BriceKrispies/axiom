@@ -196,15 +196,40 @@ accidental parallel implementation), **cap** (flattens future growth), or
 
 ### Dedup — real spine code removed
 
-- **#2A Converge the two recipe cores (dedup, ≈ −1,087 LOC).** `axiom-proc` +
-  `axiom-proc-validate` (a 4-op `u64`-word interpreter) and
-  `axiom-recipe` + `axiom-proc-core` (the typed-`Param` interpreter) are fully
-  disjoint parallel stacks. The old one's 4 ops are trivially expressible in the
-  new `RecipeGraph` model (a test already does it in ~8 lines). But it is a
-  **migration, not a delete** — the old stack still ships on two golden'd paths
-  (`axiom-placement` → `axiom-levelgen`, gallery quintet) via `evaluate → words`.
-  Gated on human calls: keep or drop `ProcTrace` / resumable `Evaluation` /
-  `Constraint`/`repair` (only demo-tooling uses them). Scope separately.
+- **#2A Converge the two recipe cores (dedup, ≈ −1,087 LOC).** **DONE** —
+  executed as work manifest
+  [`P1-retire-legacy-proc-stack`](work-manifests/shader-material-field-system/P1-retire-legacy-proc-stack.md).
+  `axiom-proc` + `axiom-proc-validate` (a 4-op `u64`-word interpreter) and
+  `axiom-recipe` + `axiom-proc-core` (the typed-`Param` interpreter) were fully
+  disjoint parallel stacks. The ratified call was: **preserve content `digest`,
+  drop `ProcTrace` and the resumable `Evaluation::step(n)`, keep
+  `Constraint`/`repair`** — `RecipeGraph::digest()` already covers recipe
+  identity, nothing in the repo ever called `step` with a real budget, and
+  `ProcTrace`'s only consumer (`tools/axiom-proc-inspect`) is re-expressed as a
+  per-node output dump collected from `ProcCore` as it runs. Landed:
+
+  - `axiom-proc-validate` no longer names any generation container. It validates
+    a plain `&[u64]` of neutral output words and returns a `Vec<u64>` from
+    `repair`, which drops its `proc` edge entirely — it is now a `kernel`-only
+    layer, because the surviving stack is generic over its output type and owns
+    no artifact struct to name (declaring `recipe`/`proc-core` there would have
+    been a ceremonial dependency).
+  - `axiom-placement` bakes a **two-node** recipe (`draw N words` →
+    `reduce each to a grid cell`) through `ProcCore`. The object count is a
+    parameter word, not a node count, so a large scatter stays inside
+    `axiom-recipe`'s `MAX_NODES` budget.
+  - The four word ops (`const`/`draw`/`add`/`xor`) were v1's *closed built-in*
+    op set; on the v2 stack an operator table belongs to the domain, so each of
+    the three leaf consumers (`apps/axiom-proc-playground`,
+    `tools/axiom-proc-inspect`, `tools/axiom-proc-fuzz`) carries its own — the
+    Module Law's "apps translate between contracts" rule, not duplication that
+    wants a shared crate.
+  - Re-goldened deliberately, because `proc-core` keys **one entropy stream per
+    node** where v1 keyed one per recipe: `axiom-placement` (`SCATTER_VERSION`
+    `1 -> 2`), `axiom-levelgen`, `axiom-worldsave`'s restored world, the quintet
+    trajectory (`PIECE_RECIPE_VERSION` `1 -> 2`), and the playground's recipe
+    digest. `axiom-proc-fuzz`'s 2,000-seed byte-identity sweep passes unchanged
+    in intent.
 
 ### The backbone — the keystone the collapse hangs off
 
@@ -297,9 +322,11 @@ Open decisions a human must ratify before the corresponding stage:
   mirroring `axiom-runtime`, not a new kernel code); keep the two phases
   (recommended: yes, to preserve the snapshot wire format); order-source shape
   (recommended: a named `SceneSystemOrder` enum beside the systems).
-- **#2A:** whether to preserve or drop `ProcTrace` / resumable `Evaluation` /
+- ~~**#2A:** whether to preserve or drop `ProcTrace` / resumable `Evaluation` /
   `Constraint`/`repair`; whether re-goldening two shipping generators is worth
-  the 4→2 crate merge.
+  the 4→2 crate merge.~~ **Ratified and executed** — see #2A above: `digest`
+  and `Constraint`/`repair` preserved, `ProcTrace` + resumability dropped, the
+  goldens re-recorded.
 - **#4 / app-datafication:** the capability-catalog schema shape, and the
   `.axpkg` + compiler/runner contract — the subject of their own design pass.
 

@@ -1,4 +1,5 @@
-//! Generic, domain-free constraints over an artifact's neutral words, plus their
+//! Generic, domain-free constraints over a generation's neutral output words,
+//! plus their
 //! evaluation and bounded repair.
 //!
 //! A constraint checks a generic numeric property of the opaque `u64` words — a
@@ -15,7 +16,7 @@ use crate::report::ValidationReport;
 /// meaning never lives here.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ConstraintKind {
-    /// The artifact has at least `threshold` words.
+    /// There are at least `threshold` words.
     MinCount = 0,
     /// Every word is `<= threshold`.
     MaxValue = 1,

@@ -54,7 +54,7 @@ surface, plus filling the gaps.
 | 2 | **Spatial reasoning** | raycast, overlap, nearest, containment | **the gap** — being built here |
 | 3 | **Time & lifecycle** | deterministic tick, spawn/despawn, lifecycle hooks | runtime / frame / scene `advance` |
 | 4 | **Input** | mapped actions, axes, pointer | `axiom-input` |
-| 5 | **Variation** | seeded RNG, procedural generation | `axiom-proc` / `axiom-entropy` |
+| 5 | **Variation** | seeded RNG, procedural generation | `axiom-recipe` + `axiom-proc-core` / `axiom-entropy` |
 | 6 | **Persistence** | snapshot / restore of opaque state | scene `snapshot_state`, `axiom-worldsave` |
 | 7 | **Composition** | spawn-from-prototype, parenting, static content | `App` / `SceneCommands` / level docs |
 
@@ -195,7 +195,7 @@ primitive only under a real game wall). Most already sit at the host surface:
 | 2 spatial reasoning | `RunningApp::raycast` / `overlap_box` (landed) |
 | 3 time & lifecycle | deterministic `tick`; **runtime `despawn` (landed)** |
 | 4 input | deltas via `tick_with_controls`; *mapped bindings* are the scripting tier |
-| 5 variation | `axiom-proc`/`axiom-entropy` exist; **deferred** — no in-repo game uses RNG, so wiring it now would be speculative surface the Law forbids |
+| 5 variation | `axiom-recipe`/`axiom-proc-core`/`axiom-entropy` exist; **deferred** — no in-repo game uses RNG, so wiring it now would be speculative surface the Law forbids |
 | 6 persistence | `snapshot_sim` / `restore_sim` (already there) |
 | 7 composition | `App::setup` / `reauthor` / prototypes (already there) |
 

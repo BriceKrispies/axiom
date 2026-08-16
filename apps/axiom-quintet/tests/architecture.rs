@@ -124,7 +124,8 @@ fn app_toml_exists_and_lists_only_consumed_layers_and_modules() {
     for required in [
         "\"kernel\"",
         "\"space\"",
-        "\"proc\"",
+        "\"recipe\"",
+        "\"proc-core\"",
         "\"host\"",
         "\"layout\"",
     ] {
@@ -212,7 +213,8 @@ fn no_illegal_engine_imports() {
     let allowed = [
         "axiom_kernel",
         "axiom_space",
-        "axiom_proc",
+        "axiom_recipe",
+        "axiom_proc_core",
         "axiom_host",
         "axiom_layout",
         "axiom_debug_overlay",

@@ -100,8 +100,12 @@ mod tests {
 
     #[test]
     fn golden_world_digest_is_stable() {
+        // Re-goldened by manifest P1: the composed world carries a placement, and
+        // placement moved from the retired v1 `axiom-proc` evaluator (one entropy
+        // stream per recipe) to `axiom-proc-core` (one stream per node), re-keying
+        // every scattered object. Terrain and biome are unchanged.
         let w = LevelGenApi::generate(7, &site(&[1, 2]), 16, 16);
-        assert_eq!(w.digest().raw(), 18_209_658_541_754_841_967);
+        assert_eq!(w.digest().raw(), 14_261_765_483_009_632_688);
     }
 
     #[test]

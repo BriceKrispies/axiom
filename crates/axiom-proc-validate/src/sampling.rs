@@ -1,6 +1,6 @@
 //! [`sample_until_valid`] — the generative counterpart to validation.
 //!
-//! Validation asks "is this artifact good?"; generation under constraints asks
+//! Validation asks "is this output good?"; generation under constraints asks
 //! "keep drawing until one is." That rejection-sampling loop — *draw a candidate,
 //! test it, keep the first that passes, else fall back to the last drawn* — is a
 //! generic, domain-free combinator: it knows nothing about what a candidate is or
