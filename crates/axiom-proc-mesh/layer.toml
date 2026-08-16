@@ -1,22 +1,52 @@
 [layer]
 name = "proc-mesh"
 crate_name = "axiom-proc-mesh"
-depends_on = ["recipe", "proc-core", "space", "noise", "math"]
+depends_on = ["recipe", "proc-core", "space", "math", "field", "kernel"]
 
 meaningful_dependency = """
 Proc-mesh adapts recipe parameter words (axiom-recipe Param), the shared graph
 executor (axiom-proc-core ProcCore/NodeEval), a root address (axiom-space
-SpaceApi), value noise (axiom-noise value_noise) and math vectors (axiom-math
-Vec3/Vec2) into a small set of mesh operators. ProcMeshApi bakes a mesh recipe
+SpaceApi) and math vectors (axiom-math Vec3/Vec2) into a small set of mesh
+operators. ProcMeshApi bakes a mesh recipe
 through ProcCore with a branchless const-table evaluator into a neutral
 position/normal/uv/index MeshBuffer. The per-node entropy stream that seeds the
 Displace operator is proc-core's contract, delivered through NodeEval -
 axiom-entropy is a transitive dependency of proc-core, not a direct one here.
+
+It adapts the field layer's FieldGraph into what a Displace node's height now is.
+The operator used to compute one hardcoded expression - value noise at the vertex
+position - inline in Rust, which meant a new displacement pattern needed a new
+Rust function. It now evaluates a field graph per vertex under an EvalContext this
+layer builds from the vertex position, the vertex normal, and a kernel Seconds of
+zero (a baked mesh is not animated). The graph is either one the caller supplies
+in the table bake_with_fields takes, or - when a recipe names none - the two-node
+Noise(seed, Point) graph the field layer's own builder mints, which is that same
+hardcoded expression restated in the field language and is therefore bit-for-bit
+identical to what every existing recipe already produced.
+
+That retargeting is also why this layer no longer declares the noise layer.
+Value noise was the one thing it used axiom-noise for; it now reaches a vertex
+only as a Noise node inside a field graph, which is axiom-field's dependency and
+not this layer's. A declared dependency nothing uses is a ceremonial dependency,
+and the Layer Law forbids one.
 """
 
 introduced_capabilities = ["ProcMeshApi", "MeshBuffer", "MeshOp"]
-consumed_capabilities = ["Param", "ProcCore", "NodeEval", "SpaceApi", "value_noise", "Vec3"]
+consumed_capabilities = [
+    "Param",
+    "ProcCore",
+    "NodeEval",
+    "SpaceApi",
+    "Vec3",
+    "Vec2",
+    "FieldGraph",
+    "FieldBuilder",
+    "EvalContext",
+    "FieldOp",
+    "FieldId",
+    "Seconds",
+]
 
 [[proof_exports]]
 export = "ProcMeshApi"
-must_reference = ["ProcCore", "SpaceApi"]
+must_reference = ["ProcCore", "SpaceApi", "FieldGraph"]

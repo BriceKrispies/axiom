@@ -1,6 +1,6 @@
 [package]
 name = "axiom-proc-mesh"
-description = "Axiom layer: a tiny set of mesh operators baked from a recipe. Three sources (Cube, Cylinder, Grid) and seven transforms (Transform, Extrude, Bevel, Bend, Displace, UVProject, Triangulate), dispatched branchlessly by a const table over the operator code and evaluated through the shared proc-core executor into a neutral position/normal/uv/index MeshBuffer. Deterministic (Displace draws its noise seed from the per-node entropy stream), bounded (subdivision is clamped and a max vertex count enforced), branchless, and 100% covered."
+description = "Axiom layer: a tiny set of mesh operators baked from a recipe. Three sources (Cube, Cylinder, Grid) and seven transforms (Transform, Extrude, Bevel, Bend, Displace, UVProject, Triangulate), dispatched branchlessly by a const table over the operator code and evaluated through the shared proc-core executor into a neutral position/normal/uv/index MeshBuffer. Deterministic (a Displace node naming no field draws its noise seed from the per-node entropy stream), bounded (subdivision is clamped and a max vertex count enforced), branchless, and 100% covered."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -11,14 +11,23 @@ crate-type = ["rlib"]
 
 [dependencies]
 # Read parameter words (recipe), run the graph (proc-core), root the address
-# (space), sample value noise (noise) over math vectors (math). The Displace
-# operator's per-node entropy stream arrives through proc-core's NodeEval, so
-# axiom-entropy is proc-core's dependency, not a direct one here.
+# (space), build geometry out of math vectors (math). The Displace operator's
+# per-node entropy stream arrives through proc-core's NodeEval, so axiom-entropy
+# is proc-core's dependency, not a direct one here.
+#
+# There is deliberately no axiom-noise here any more: noise used to be baked into
+# Displace as one hardcoded expression, and it now reaches this layer only as a
+# Noise node inside a field graph — axiom-field's dependency, not this layer's.
 axiom-recipe = { path = "../axiom-recipe" }
 axiom-proc-core = { path = "../axiom-proc-core" }
 axiom-space = { path = "../axiom-space" }
-axiom-noise = { path = "../axiom-noise" }
 axiom-math = { path = "../axiom-math" }
+# The FieldGraph a Displace node's height is, and the EvalContext each vertex is
+# evaluated under.
+axiom-field = { path = "../axiom-field" }
+# Seconds - the evaluation context's time input, supplied explicitly (zero: a
+# baked mesh is not animated).
+axiom-kernel = { path = "../axiom-kernel" }
 
 [lints.rust]
 unsafe_code = "forbid"

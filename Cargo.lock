@@ -603,6 +603,7 @@ dependencies = [
 name = "axiom-mesh-ops"
 version = "0.1.0"
 dependencies = [
+ "axiom-field",
  "axiom-kernel",
  "axiom-math",
  "axiom-mesh",
@@ -784,8 +785,9 @@ dependencies = [
 name = "axiom-proc-mesh"
 version = "0.1.0"
 dependencies = [
+ "axiom-field",
+ "axiom-kernel",
  "axiom-math",
- "axiom-noise",
  "axiom-proc-core",
  "axiom-recipe",
  "axiom-space",
@@ -816,6 +818,8 @@ dependencies = [
 name = "axiom-proc-texture"
 version = "0.1.0"
 dependencies = [
+ "axiom-field",
+ "axiom-kernel",
  "axiom-math",
  "axiom-noise",
  "axiom-proc-core",

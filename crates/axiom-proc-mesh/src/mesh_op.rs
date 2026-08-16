@@ -20,7 +20,16 @@ pub enum MeshOp {
     Bevel = 5,
     /// Rotate about Z by `angle × x`. Params: `[angle]`.
     Bend = 6,
-    /// Push vertices along their normals by noise. Params: `[amount]`.
+    /// Push vertices along their normals by a **field**. Params: `[amount]` or
+    /// `[amount, field_index]`.
+    ///
+    /// The height is the [`axiom_field::FieldGraph`] the table entry
+    /// `field_index` names — see [`crate::ProcMeshApi::bake_with_fields`] —
+    /// evaluated with the field's `point` set to the vertex position and its
+    /// `normal` to the vertex normal. With no `field_index` the height is the
+    /// equivalent two-node `Noise(seed, Point)` graph, seeded from the node's
+    /// entropy stream, which is bit-for-bit the value noise this operator has
+    /// always applied.
     Displace = 7,
     /// Planar XZ UV projection. Params: `[scale]`.
     UVProject = 8,

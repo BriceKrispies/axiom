@@ -10,6 +10,7 @@
 //! its own units — the op assumes nothing about scale. Every step is a data
 //! transform (iterator adapters + `const`-table lookups): no control-flow branch.
 
+use axiom_field::FieldGraph;
 use axiom_math::{Vec2, Vec3};
 use axiom_proc_core::NodeEval;
 
@@ -214,7 +215,10 @@ fn skin_of(p: Vec3, caps: &[Capsule], k: f32) -> ([u16; 4], [f32; 4]) {
 }
 
 /// **MetaSurface** operator — see [`crate::MeshOp::MetaSurface`].
-pub(crate) fn meta_surface(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
+pub(crate) fn meta_surface(
+    ctx: NodeEval<'_, MeshBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<MeshBuffer> {
     parse(ctx.params()).and_then(|(iso, res, k, caps)| {
         let (lo, hi) = bounds(&caps, res);
         let span = hi.subtract(lo);

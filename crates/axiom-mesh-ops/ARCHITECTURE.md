@@ -6,9 +6,11 @@
 engine's **deterministic geometry library**. It constructs
 [`axiom_mesh::Mesh`](../axiom-mesh/src/mesh.rs) values and nothing else.
 
-It declares `depends_on = ["kernel", "math", "mesh"]`
+It declares `depends_on = ["kernel", "math", "mesh", "field"]`
 ([`layer.toml`](layer.toml)). The `mesh` layer can only validate and manipulate
-geometry it is handed; this layer is what *produces* it.
+geometry it is handed; this layer is what *produces* it. The `field` layer is
+what produces the *sampled data* one family of those operators consumes — see
+"Where the samples come from" below.
 
 ## The operator contract
 
@@ -90,7 +92,7 @@ and risking disagreeing with the sweep about either.
 |---|---|---|
 | `tessellate_surface` | [`surface_tessellation.rs`](src/surface_tessellation.rs) | `SurfaceGrid` — a row-major lattice of already-sampled `Vec3` |
 | `heightfield_mesh` | [`heightfield.rs`](src/heightfield.rs) | `HeightfieldSamples` — a row-major grid of `Meters` |
-| `implicit_surface_mesh` | [`implicit_surface.rs`](src/implicit_surface.rs) | `ScalarField` — a sampled 3D lattice of `f32` |
+| `implicit_surface_mesh` | [`implicit_surface.rs`](src/implicit_surface.rs) | `ScalarField` — a sampled 3D lattice of `f32`, produced by hand or by `ScalarField::sample` from an `axiom_field::FieldGraph` |
 
 ### Refinement
 
@@ -135,6 +137,35 @@ pub fn tessellate_surface(grid: &SurfaceGrid, wrap_u: bool, wrap_v: bool) -> Mes
 construction, so the operator needs no finiteness check on the heights at all.
 `ScalarField` carries `Vec<f32>` and validates finiteness itself. Evaluation
 policy is the caller's; geometry is ours.
+
+### Where the samples come from: `ScalarField::sample`
+
+Banning the callback left a real gap: for years the only way to *produce* a
+`ScalarField` was a hand-written loop at the call site, and the type was
+constructed nowhere in the engine but its own tests. The `field` layer closes it.
+
+```rust
+pub fn sample(graph: &FieldGraph, origin: Vec3, spacing: Meters,
+              cols: u32, rows: u32, depth: u32) -> MeshResult<ScalarField>
+```
+
+An `axiom_field::FieldGraph` is a **pointwise expression carried as a value** —
+a closed 23-operator, acyclic, canonically serializable graph with a structural
+digest. It satisfies every property the section above demanded of a lattice and
+that a closure cannot supply: it is hashable, diffable, replayable, and it has
+no capability to read a clock or a global, because every external input it may
+read arrives in the `EvalContext` this layer hands it, node by node. That is why
+a graph is the correct fix here and a callback is not — the two are not
+equivalent shapes with different ergonomics, they differ exactly on the property
+the ban is about.
+
+`sample` evaluates the graph at `origin + (x, y, z) * spacing` for every lattice
+node, in this module's `+X`-fastest order, and hands the result through the same
+`ScalarField::new` validation as any other lattice. A graph intended for
+`implicit_surface_mesh` should be **signed-distance-like** — rising going
+outward — because the extraction reads the sampled gradient as the outward
+normal directly. `length(point) - radius` is the canonical shape; its negation
+extracts the same surface inside out.
 
 ### The shape this deliberately does not copy
 

@@ -135,7 +135,26 @@ With `ScalarField::sample` and marching cubes both available in `mesh-ops`,
 
 **Consequence, and it is a good one:** `crates/axiom-proc-mesh/src/mc_tables.rs`
 (301 lines, duplicated from `mesh-ops`' 305-line copy, with the duplication
-admitted in its own header) becomes deletable. `docs/mesh-convergence-migration.md`
+admitted in its own header) becomes deletable.
+
+> **OUTCOME — this paragraph was wrong, and the rewrite was refused.** The
+> implementing agent verified the `smin` question empirically first and found it
+> is *not* the blocker: a 3-capsule skeleton built entirely from the 23 ops
+> matches the reference to `2.4e-7` over a 12³ probe grid in 73 nodes. The
+> rewrite fails on four other grounds. (1) **Auto-skinning cannot be a field at
+> all** — `implicit.rs:197 skin_of` emits per-vertex `[u16;4]` joints and
+> `[f32;4]` weights from `exp(-capsule_sdf/k)` *per capsule*, and a `FieldGraph`
+> yields one ≤4-lane value with no notion of which capsule; `exp` is excluded
+> from the algebra by design. (2) **The node budget caps the skeleton at 11
+> capsules** (7 shared + 22 each against `MAX_NODES = 256`), where MetaSurface
+> accepts any count today. (3) **Normals would change** — MetaSurface central-
+> differences the *continuous* field at `GRAD_H = 1e-3`, `implicit_surface_mesh`
+> interpolates the *lattice* gradient along a cell edge, so every existing
+> golden would move. (4) **The output contracts differ** — `implicit_surface_mesh`
+> welds and returns `axiom_mesh::Mesh`, MetaSurface must return an unwelded
+> skinned `MeshBuffer`, so proc-mesh keeps its own emission path and
+> `mc_tables.rs` **does not** become deletable. `MetaSurface` and `mc_tables.rs`
+> are retained deliberately. Wirings 1–3 are the complete scope of this manifest. `docs/mesh-convergence-migration.md`
 already lists this exact consolidation as item #1 and records that *"nothing in
 this document has been done."* Doing it here is the No-Shortcuts fix.
 

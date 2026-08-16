@@ -1,7 +1,7 @@
 [layer]
 name = "mesh-ops"
 crate_name = "axiom-mesh-ops"
-depends_on = ["kernel", "math", "mesh"]
+depends_on = ["kernel", "math", "mesh", "field"]
 
 meaningful_dependency = """
 Mesh-ops adapts the mesh layer's canonical representation (Mesh, MeshStreams,
@@ -12,7 +12,12 @@ into the engine's deterministic geometry library. The mesh layer can only
 validate and manipulate geometry it is handed; this layer is what produces it -
 turning explicit descriptions (a radius and a segment count, a 2D profile and an
 extrusion distance, a profile and a curve, a sampled height grid, a sampled
-scalar field) into validated meshes. Every operator is a pure function of its
+scalar field) into validated meshes. It adapts the field layer's FieldGraph and
+EvalContext into the one thing this layer could not previously express: the
+producer of that sampled scalar field. ScalarField::sample evaluates a field
+graph onto a regular lattice, which is what finally gives implicit_surface_mesh
+a source of values that is itself a value - hashable, diffable and replayable -
+rather than the callback the operator bans on principle. Every operator is a pure function of its
 inputs: it owns no state, reads no clock, takes no callback, and never reaches
 for a renderer, a scene, or a resource table. Semantic generators - roads,
 trees, buildings, vehicles - are compositions of these operators and belong to
@@ -44,6 +49,10 @@ consumed_capabilities = [
     "Meters",
     "Radians",
     "Ratio",
+    "Seconds",
+    "FieldGraph",
+    "EvalContext",
+    "FieldValue",
 ]
 
 # A profile is a polygon of math Vec2 points; validating it is the gate every
@@ -57,3 +66,10 @@ must_reference = ["Vec2", "MeshError"]
 [[proof_exports]]
 export = "Segments"
 must_reference = ["MeshError", "MeshResult"]
+
+# A sampled lattice is produced by evaluating a field graph under an explicit
+# evaluation context - the layer's only use of the field layer, and the reason
+# it is declared.
+[[proof_exports]]
+export = "ScalarField"
+must_reference = ["FieldGraph", "EvalContext"]

@@ -12,9 +12,14 @@
 //! ## What it is, and is not
 //! - **Neutral output.** A [`MeshBuffer`] is plain geometry — the shape an app
 //!   translates into `axiom::MeshData`. It names no engine type.
-//! - **Deterministic.** The same recipe and seed produce identical geometry; the
-//!   Displace operator draws its noise seed from the node's `axiom-entropy`
-//!   stream.
+//! - **Deterministic.** The same recipe and seed produce identical geometry; a
+//!   Displace node that names no field draws its noise seed from the node's
+//!   `axiom-entropy` stream, exactly as it always has.
+//! - **The one authored operator.** [`MeshOp::Displace`] takes its height from an
+//!   [`axiom_field::FieldGraph`] — a pointwise expression carried as a value —
+//!   supplied in the table [`ProcMeshApi::bake_with_fields`] takes. A recipe that
+//!   names no field gets the equivalent two-node `Noise(seed, Point)` graph, so
+//!   nothing written before the field table changed meaning.
 //! - **Branchless + bounded.** Dispatch is a table index; subdivision clamps and
 //!   [`MAX_VERTS`] caps output, so a recipe can never ask for an unbounded mesh.
 //!   The transform/deform operators are deliberately simple v0 forms.

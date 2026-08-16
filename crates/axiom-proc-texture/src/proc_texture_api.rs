@@ -1,10 +1,11 @@
 //! [`ProcTextureApi`]: bake a texture recipe into a [`TextureBuffer`].
 
+use axiom_field::FieldGraph;
 use axiom_proc_core::{ProcCore, ProcResult};
 use axiom_recipe::RecipeGraph;
 use axiom_space::SpaceApi;
 
-use crate::dispatch::texture_eval;
+use crate::dispatch::{texture_eval, texture_eval_with_fields};
 use crate::texture_buffer::TextureBuffer;
 
 /// The texture generation facade. It bakes a validated texture recipe by running
@@ -21,8 +22,32 @@ impl ProcTextureApi {
     /// Bake `recipe` at `seed` into the texture its final node produces. Fails
     /// with the executor's stable error (invalid recipe, operator failure, or
     /// an empty recipe).
+    ///
+    /// The field table is empty, so a recipe containing a
+    /// [`crate::TextureOp::Field`] node fails here; bake it with
+    /// [`ProcTextureApi::bake_with_fields`] instead.
     pub fn bake(&self, recipe: &RecipeGraph, seed: u64) -> ProcResult<TextureBuffer> {
         ProcCore::new().execute(recipe, seed, &SpaceApi::root(), texture_eval)
+    }
+
+    /// Bake `recipe` at `seed` with `fields` available to its
+    /// [`crate::TextureOp::Field`] nodes, each of which names one entry of the
+    /// table by index.
+    ///
+    /// The field table travels **beside** the recipe rather than inside it: a
+    /// [`axiom_recipe::Param`] is one `u32` word, so inlining a graph's bytes
+    /// would spend the node budget on a single operator. Everything else is
+    /// exactly [`ProcTextureApi::bake`] — same executor, same seed, same
+    /// operator table, and the same byte-identical output for the same inputs.
+    pub fn bake_with_fields(
+        &self,
+        recipe: &RecipeGraph,
+        seed: u64,
+        fields: &[FieldGraph],
+    ) -> ProcResult<TextureBuffer> {
+        ProcCore::new().execute(recipe, seed, &SpaceApi::root(), |ctx| {
+            texture_eval_with_fields(ctx, fields)
+        })
     }
 }
 

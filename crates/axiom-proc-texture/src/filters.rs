@@ -1,6 +1,7 @@
 //! The transform texture operators (1..2 inputs): Blur, Blend, ColorRamp,
 //! HeightToNormal.
 
+use axiom_field::FieldGraph;
 use axiom_proc_core::NodeEval;
 
 use crate::color_math::{lerp_rgba, luminance, rgba};
@@ -11,7 +12,10 @@ pub(crate) const MAX_BLUR: u32 = 8;
 
 /// **Blur** — a box blur of `radius` pixels (clamped to [`MAX_BLUR`]) over one
 /// input. Params: `[radius]`.
-pub(crate) fn blur(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn blur(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let radius = ctx.params().first().map(|p| p.as_int().min(MAX_BLUR));
     ctx.inputs().first().zip(radius).map(|(src, r)| {
         TextureBuffer::from_fn(src.width(), src.height(), |x, y| {
@@ -46,7 +50,10 @@ fn box_blur_pixel(src: &TextureBuffer, x: u32, y: u32, r: u32) -> [u8; 4] {
 
 /// **Blend** — per-pixel mix of two equally-sized inputs by `factor` (0 = input
 /// A, 1 = input B). Params: `[factor]`. Fails if the inputs differ in size.
-pub(crate) fn blend(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn blend(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let a = ctx.inputs().first();
     let b = ctx.inputs().get(1);
     let factor = ctx.params().first().map(|p| p.as_scalar().get());
@@ -62,7 +69,10 @@ pub(crate) fn blend(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
 
 /// **ColorRamp** — remap one input's luminance across `color_lo`..`color_hi`.
 /// Params: `[color_lo, color_hi]`.
-pub(crate) fn color_ramp(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn color_ramp(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let p = ctx.params();
     let colors = (p.len() >= 2).then(|| (rgba(p[0].as_color()), rgba(p[1].as_color())));
     ctx.inputs().first().zip(colors).map(|(src, (lo, hi))| {
@@ -74,7 +84,10 @@ pub(crate) fn color_ramp(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuff
 
 /// **HeightToNormal** — derive a tangent-space normal map from one input's
 /// luminance (central differences × `strength`). Params: `[strength]`.
-pub(crate) fn height_to_normal(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn height_to_normal(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let strength = ctx.params().first().map(|p| p.as_scalar().get());
     ctx.inputs().first().zip(strength).map(|(src, s)| {
         TextureBuffer::from_fn(src.width(), src.height(), |x, y| normal_pixel(src, x, y, s))

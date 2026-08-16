@@ -10,6 +10,7 @@
 //! looks its row up in a `const` font table by a computed glyph index, tests the
 //! bit, and picks `fg`/`bg` by a table index — no control flow.
 
+use axiom_field::FieldGraph;
 use axiom_proc_core::NodeEval;
 
 use crate::color_math::rgba;
@@ -78,7 +79,10 @@ fn glyph_index(ch: u8) -> usize {
 /// `[width, height, fg, bg, scale, char_count, packed_0, …]`, each `packed_i`
 /// carrying four ASCII bytes. Dimensions clamp into `1..=MAX_DIM`; `scale` and
 /// the packed-word count are validated so a recipe can never read past its params.
-pub(crate) fn text(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn text(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let p = ctx.params();
     (p.len() >= 6).then_some(()).and_then(|()| {
         let fg = rgba(p[2].as_color());

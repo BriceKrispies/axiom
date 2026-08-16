@@ -1,10 +1,11 @@
 //! [`ProcMeshApi`]: bake a mesh recipe into a [`MeshBuffer`].
 
+use axiom_field::FieldGraph;
 use axiom_proc_core::{ProcCore, ProcResult};
 use axiom_recipe::RecipeGraph;
 use axiom_space::SpaceApi;
 
-use crate::dispatch::mesh_eval;
+use crate::dispatch::{mesh_eval, mesh_eval_with_fields};
 use crate::mesh_buffer::MeshBuffer;
 
 /// The mesh generation facade. It bakes a validated mesh recipe by running it
@@ -23,6 +24,27 @@ impl ProcMeshApi {
     /// empty recipe).
     pub fn bake(&self, recipe: &RecipeGraph, seed: u64) -> ProcResult<MeshBuffer> {
         ProcCore::new().execute(recipe, seed, &SpaceApi::root(), mesh_eval)
+    }
+
+    /// Bake `recipe` at `seed` with `fields` available to its
+    /// [`crate::MeshOp::Displace`] nodes, each of which may name one entry of the
+    /// table by index.
+    ///
+    /// The field table travels **beside** the recipe rather than inside it: a
+    /// [`axiom_recipe::Param`] is one `u32` word, so inlining a graph's bytes
+    /// would spend the node budget on a single operator. A `Displace` node that
+    /// names no field is unaffected and displaces by the value noise it always
+    /// did, so [`ProcMeshApi::bake`] and this method agree byte-for-byte on every
+    /// recipe written before the field table existed.
+    pub fn bake_with_fields(
+        &self,
+        recipe: &RecipeGraph,
+        seed: u64,
+        fields: &[FieldGraph],
+    ) -> ProcResult<MeshBuffer> {
+        ProcCore::new().execute(recipe, seed, &SpaceApi::root(), |ctx| {
+            mesh_eval_with_fields(ctx, fields)
+        })
     }
 }
 

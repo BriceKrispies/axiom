@@ -2,6 +2,7 @@
 
 use core::f32::consts::{PI, TAU};
 
+use axiom_field::FieldGraph;
 use axiom_math::{Vec2, Vec3};
 use axiom_proc_core::NodeEval;
 
@@ -39,7 +40,10 @@ const FACE_UVS: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
 
 /// **Cube** — an axis-aligned box with per-face normals and UVs. Params:
 /// `[size]` (full edge length).
-pub(crate) fn cube(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
+pub(crate) fn cube(
+    ctx: NodeEval<'_, MeshBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<MeshBuffer> {
     ctx.params()
         .first()
         .map(|p| p.as_scalar().get())
@@ -72,7 +76,10 @@ pub(crate) fn cube(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
 /// **Grid** — a flat `cols`×`rows` plane in the XZ plane, +Y up. Params:
 /// `[cols, rows, size]` (full edge length). Subdivision is clamped to
 /// [`MAX_GRID`].
-pub(crate) fn grid(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
+pub(crate) fn grid(
+    ctx: NodeEval<'_, MeshBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<MeshBuffer> {
     let p = ctx.params();
     (p.len() >= 3).then_some(()).and_then(|()| {
         let cols = p[0].as_int().clamp(1, MAX_GRID);
@@ -105,7 +112,10 @@ pub(crate) fn grid(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
 /// vertices (their normals are radial, so cap shading is approximate — a v0
 /// simplification). Params: `[radius, height, segments]`. Segments clamp to
 /// `3..=MAX_SEGMENTS`.
-pub(crate) fn cylinder(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
+pub(crate) fn cylinder(
+    ctx: NodeEval<'_, MeshBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<MeshBuffer> {
     let p = ctx.params();
     (p.len() >= 3).then_some(()).and_then(|()| {
         let radius = p[0].as_scalar().get();
@@ -151,7 +161,10 @@ pub(crate) fn cylinder(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
 /// (`Bevel` only shrinks a mesh toward its centroid). Params: `[radius, rings,
 /// segments]`; `rings` clamps to `2..=MAX_SEGMENTS`, `segments` to
 /// `3..=MAX_SEGMENTS`.
-pub(crate) fn sphere(ctx: NodeEval<'_, MeshBuffer>) -> Option<MeshBuffer> {
+pub(crate) fn sphere(
+    ctx: NodeEval<'_, MeshBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<MeshBuffer> {
     let p = ctx.params();
     (p.len() >= 3).then_some(()).and_then(|()| {
         let radius = p[0].as_scalar().get();

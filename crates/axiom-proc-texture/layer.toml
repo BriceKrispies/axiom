@@ -1,7 +1,7 @@
 [layer]
 name = "proc-texture"
 crate_name = "axiom-proc-texture"
-depends_on = ["recipe", "proc-core", "space", "noise", "math"]
+depends_on = ["recipe", "proc-core", "space", "noise", "math", "field", "kernel"]
 
 meaningful_dependency = """
 Proc-texture adapts recipe parameter words (axiom-recipe Param), the shared graph
@@ -12,11 +12,35 @@ through ProcCore with a branchless const-table evaluator into a neutral RGBA8
 TextureBuffer. The per-node entropy stream that seeds the Noise operator is
 proc-core's contract, delivered through NodeEval - axiom-entropy is a transitive
 dependency of proc-core, not a direct one here.
+
+Beside those eleven fixed operators it adapts the field layer's FieldGraph into
+the one operator whose pattern is authored rather than fixed: TextureOp::Field
+evaluates a pointwise field expression once per texel, at the texel centre, under
+an EvalContext this layer builds from the texel's uv and a kernel Seconds of zero
+(a baked texture is not animated), and maps the resulting FieldValue's declared
+FieldType onto RGBA8 - Vec4 to four channels, Scalar to greyscale, anything else
+to a failed node. The graph travels beside the recipe in the table
+bake_with_fields takes, because a recipe Param is one u32 word and inlining a
+graph's bytes would spend the whole node budget on one operator. The field layer
+is what turns "a texture is one of eleven fixed patterns" into "a texture is an
+expression", without the layer needing a new Rust function per visual effect.
 """
 
 introduced_capabilities = ["ProcTextureApi", "TextureBuffer", "TextureOp"]
-consumed_capabilities = ["Param", "ProcCore", "NodeEval", "SpaceApi", "value_noise", "Vec3"]
+consumed_capabilities = [
+    "Param",
+    "ProcCore",
+    "NodeEval",
+    "SpaceApi",
+    "value_noise",
+    "Vec3",
+    "Vec2",
+    "FieldGraph",
+    "EvalContext",
+    "FieldValue",
+    "Seconds",
+]
 
 [[proof_exports]]
 export = "ProcTextureApi"
-must_reference = ["ProcCore", "SpaceApi"]
+must_reference = ["ProcCore", "SpaceApi", "FieldGraph"]

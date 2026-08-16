@@ -16,6 +16,10 @@ axiom-math = { path = "../axiom-math" }
 # The output type of every operator, plus the shared MeshError vocabulary and
 # the weld/combine mechanics the generators reuse rather than re-implement.
 axiom-mesh = { path = "../axiom-mesh" }
+# The FieldGraph/EvalContext pair ScalarField::sample evaluates onto a lattice -
+# the value-shaped producer this layer's implicit-surface operator was written
+# to wait for, in place of the callback it bans.
+axiom-field = { path = "../axiom-field" }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -1,6 +1,6 @@
 //! The texture operator codes, as an authoring-friendly enum.
 
-/// The nine texture operators. The discriminant **is** the operator code stored
+/// The twelve texture operators. The discriminant **is** the operator code stored
 /// in a recipe node, and it indexes the dispatch table, so this order is the
 /// dispatch order and must not be reshuffled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +35,19 @@ pub enum TextureOp {
     /// `base_color`. The general dotted/panelled-surface primitive — polka, hide,
     /// and the soccer ball's dark pentagon rosette baked onto the sphere's UVs.
     Spots = 10,
+    /// **Field** — bake a pointwise [`axiom_field::FieldGraph`] into RGBA8, one
+    /// evaluation per texel at the texel centre. Params:
+    /// `[width, height, field_index]`, where `field_index` names an entry of the
+    /// field table [`crate::ProcTextureApi::bake_with_fields`] is given — the
+    /// graph travels beside the recipe, never inlined into its parameter words.
+    /// A `Vec4` field writes RGBA; a `Scalar` field writes greyscale at full
+    /// alpha; any other output type fails the node.
+    ///
+    /// This is the one operator whose *pattern* is authored rather than fixed.
+    /// The eleven above it stay: `Blur` is a neighbourhood operator a pointwise
+    /// field cannot express, and the fixed generators are already baked into
+    /// shipping recipes.
+    Field = 11,
 }
 
 #[cfg(test)]
@@ -48,5 +61,6 @@ mod tests {
         assert_eq!(TextureOp::Checker as u16, 8);
         assert_eq!(TextureOp::Text as u16, 9);
         assert_eq!(TextureOp::Spots as u16, 10);
+        assert_eq!(TextureOp::Field as u16, 11);
     }
 }

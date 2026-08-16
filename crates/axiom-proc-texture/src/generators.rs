@@ -1,6 +1,7 @@
 //! The source texture operators (no inputs): Solid, Gradient, Noise, Bricks,
 //! Checker, Spots.
 
+use axiom_field::FieldGraph;
 use axiom_math::Vec3;
 use axiom_noise::value_noise;
 use axiom_proc_core::NodeEval;
@@ -10,7 +11,10 @@ use crate::texture_buffer::{TextureBuffer, MAX_DIM};
 
 /// **Solid** — fill the whole texture with one color. Params: `[width, height,
 /// color]`.
-pub(crate) fn solid(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn solid(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let p = ctx.params();
     (p.len() >= 3).then(|| {
         let color = rgba(p[2].as_color());
@@ -20,7 +24,10 @@ pub(crate) fn solid(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
 
 /// **Gradient** — a horizontal ramp from `color_a` (left) to `color_b` (right).
 /// Params: `[width, height, color_a, color_b]`.
-pub(crate) fn gradient(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn gradient(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let p = ctx.params();
     (p.len() >= 4).then(|| {
         let a = rgba(p[2].as_color());
@@ -37,7 +44,10 @@ pub(crate) fn gradient(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer
 /// `scale` cells across the texture. The noise seed is drawn from the node's
 /// deterministic entropy stream. Params: `[width, height, scale, color_lo,
 /// color_hi]`.
-pub(crate) fn noise(mut ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn noise(
+    mut ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     // Draw the seed first so the mutable stream borrow ends before the parameter
     // words are read (a purely deterministic draw, keyed by the node's address).
     let seed = ctx.stream().next_u64();
@@ -60,7 +70,10 @@ pub(crate) fn noise(mut ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffe
 /// **Bricks** — a staggered brick pattern: `rows`×`cols` bricks separated by a
 /// `mortar`-pixel gap. Params: `[width, height, rows, cols, mortar, brick_color,
 /// mortar_color]`.
-pub(crate) fn bricks(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn bricks(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let p = ctx.params();
     (p.len() >= 7).then(|| {
         let rows = p[2].as_int().max(1);
@@ -86,7 +99,10 @@ pub(crate) fn bricks(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> 
 /// **Checker** — an alternating 2-color grid of `cell`-pixel squares, the classic
 /// tile / calibration primitive. Params: `[width, height, cell, color_a,
 /// color_b]`.
-pub(crate) fn checker(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn checker(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let p = ctx.params();
     (p.len() >= 5).then(|| {
         let cell = p[2].as_int().max(1);
@@ -108,7 +124,10 @@ pub(crate) fn checker(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer>
 /// large spots survives a mip cleanly — the primitive for painting the soccer
 /// ball's dark pentagon rosette directly onto the sphere's UVs so the panels are
 /// part of the surface and move with it.
-pub(crate) fn spots(ctx: NodeEval<'_, TextureBuffer>) -> Option<TextureBuffer> {
+pub(crate) fn spots(
+    ctx: NodeEval<'_, TextureBuffer>,
+    _fields: &[FieldGraph],
+) -> Option<TextureBuffer> {
     let p = ctx.params();
     (p.len() >= 5).then(|| {
         let base = rgba(p[2].as_color());

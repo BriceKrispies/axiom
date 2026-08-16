@@ -13,6 +13,14 @@
 //! unreplayable. A sampled lattice is a value — hashable, diffable, and
 //! reproducible — which is the whole reason this layer exists.
 //!
+//! **Where the numbers come from.** [`ScalarField::sample`] is the producer that
+//! sentence was waiting for: an [`axiom_field::FieldGraph`] is *also* a value —
+//! hashable, diffable, canonically serializable — and it has no capability to
+//! read a clock, because every external input it may read arrives in the
+//! [`axiom_field::EvalContext`] the caller hands it. Evaluating one onto a
+//! lattice therefore satisfies this operator's stated requirement exactly, where
+//! a callback does not.
+//!
 //! # Lattice layout
 //!
 //! Value `(x, y, z)` lives at `values[(z * rows + y) * cols + x]`: `cols` indexes
@@ -32,8 +40,9 @@
 //! gradient vanishes (a flat plateau exactly at the iso value) the normal falls
 //! back to `+Y`, the layer's deterministic default.
 
-use axiom_kernel::Meters;
-use axiom_math::Vec3;
+use axiom_field::{EvalContext, FieldGraph};
+use axiom_kernel::{Meters, Seconds};
+use axiom_math::{Vec2, Vec3};
 use axiom_mesh::{weld, Mesh, MeshError, MeshErrorCode, MeshResult, MeshStreams};
 
 use crate::marching_cubes_tables::{MC_CORNER_OFFSET, MC_EDGE_CORNERS, MC_TRI_TABLE};
@@ -114,6 +123,74 @@ impl ScalarField {
                 rows,
                 depth,
             })
+    }
+
+    /// Evaluate `graph` onto a `cols x rows x depth` lattice.
+    ///
+    /// Lattice node `(x, y, z)` is evaluated with the field's
+    /// [`EvalContext::point`] set to `origin + (x, y, z) * spacing`, a zero `uv`,
+    /// a `+Y` normal and zero time — a lattice has no surface parameterization
+    /// and a baked volume is not animated, so those three inputs are the
+    /// [`EvalContext::ORIGIN`] defaults. The result keeps the layout the rest of
+    /// this module reads (`+X` fastest, then `+Y`, then `+Z`) and passes through
+    /// the same dimension and finiteness validation as [`ScalarField::new`].
+    ///
+    /// **The field should be signed-distance-like.** This module's normals are
+    /// the sampled field's gradient, taken as the *outward* normal directly (see
+    /// the module docs), so a graph intended for this consumer must rise going
+    /// outward — `length(point) - radius`, not `radius - length(point)`. A field
+    /// with the opposite sign extracts the same surface with inverted normals.
+    ///
+    /// A graph whose value is a vector yields its first lane, which is
+    /// [`axiom_field::FieldValue`]'s documented narrowing.
+    ///
+    /// Fails with [`MeshErrorCode::InvalidGridDimensions`] when the requested
+    /// lattice would hold more nodes than the `u32` index arithmetic this module
+    /// addresses it with can express, or when the dimensions are otherwise
+    /// invalid, and with [`MeshErrorCode::InvalidParameter`] carrying the field
+    /// layer's own message when the graph does not evaluate.
+    pub fn sample(
+        graph: &FieldGraph,
+        origin: Vec3,
+        spacing: Meters,
+        cols: u32,
+        rows: u32,
+        depth: u32,
+    ) -> MeshResult<ScalarField> {
+        let count = u64::from(cols) * u64::from(rows) * u64::from(depth);
+        (count <= u64::from(u32::MAX))
+            .then_some(())
+            .ok_or_else(|| {
+                MeshError::new(
+                    MeshErrorCode::InvalidGridDimensions,
+                    "a sampled lattice may hold at most u32::MAX nodes, the width of the index \
+                     arithmetic that addresses it",
+                )
+            })
+            .and_then(|()| {
+                (0..count as u32)
+                    .map(|index| {
+                        let step = spacing.get();
+                        let point = origin.add(Vec3::new(
+                            (index % cols) as f32 * step,
+                            ((index / cols) % rows) as f32 * step,
+                            (index / (cols * rows)) as f32 * step,
+                        ));
+                        graph
+                            .evaluate(&EvalContext::new(
+                                point,
+                                Vec2::ZERO,
+                                Vec3::UNIT_Y,
+                                Seconds::finite_or_zero(0.0),
+                            ))
+                            .map(|value| value.as_scalar().get())
+                    })
+                    .collect::<Result<Vec<f32>, _>>()
+                    .map_err(|error| {
+                        MeshError::new(MeshErrorCode::InvalidParameter, error.message())
+                    })
+            })
+            .and_then(|values| ScalarField::new(values, cols, rows, depth))
     }
 
     /// The number of samples along `+X`.
@@ -348,6 +425,28 @@ fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_field::{FieldBuilder, FieldId, FieldOp};
+
+    /// `length(point)` — the field whose `r` level set is the sphere of radius
+    /// `r`. Signed-distance-like in this module's sense: it rises going outward,
+    /// so its gradient is the outward normal.
+    fn radius_field() -> FieldGraph {
+        let (builder, point) = FieldBuilder::new(FieldId::of_name("mesh-ops/test/radius"), 1)
+            .push(FieldOp::Point, Vec::new(), Vec::new());
+        let (builder, length) = builder.push(FieldOp::Length, Vec::new(), vec![point]);
+        builder.build(length)
+    }
+
+    /// A graph whose declared output names a node it does not contain (the id
+    /// comes from a different builder), so every evaluation of it fails.
+    fn dangling_field() -> FieldGraph {
+        let (_, node) = FieldBuilder::new(FieldId::of_name("mesh-ops/test/other"), 1).push(
+            FieldOp::Point,
+            Vec::new(),
+            Vec::new(),
+        );
+        FieldBuilder::new(FieldId::of_name("mesh-ops/test/dangling"), 1).build(node)
+    }
 
     const SPHERE_RADIUS: f32 = 1.0;
     const SPHERE_STEPS: u32 = 17;
@@ -393,6 +492,135 @@ mod tests {
             IsoValue::new(f32::INFINITY).unwrap_err().code(),
             MeshErrorCode::InvalidParameter
         );
+    }
+
+    #[test]
+    fn sampling_a_field_reproduces_hand_computed_lattice_values() {
+        let origin = Vec3::new(-2.0, -2.0, -2.0);
+        let spacing = Meters::finite_or_zero(SPHERE_SPACING);
+        let n = SPHERE_STEPS;
+        let sampled =
+            ScalarField::sample(&radius_field(), origin, spacing, n, n, n).unwrap();
+        assert_eq!((sampled.cols(), sampled.rows(), sampled.depth()), (n, n, n));
+
+        // The layout is X-fastest, then Y, then Z, and node (x, y, z) sits at
+        // origin + (x, y, z) * spacing — checked against the value computed here.
+        let node_at = |x: u32, y: u32, z: u32| {
+            origin
+                .add(Vec3::new(
+                    x as f32 * SPHERE_SPACING,
+                    y as f32 * SPHERE_SPACING,
+                    z as f32 * SPHERE_SPACING,
+                ))
+                .length()
+        };
+        assert_eq!(sampled.at(0, 0, 0), node_at(0, 0, 0));
+        assert_eq!(sampled.at(0, 0, 0), 12.0_f32.sqrt());
+        assert_eq!(sampled.at(8, 8, 8), 0.0); // the lattice centre is the origin
+        assert_eq!(sampled.at(16, 8, 8), 2.0); // +X extreme, on the axis
+        assert_eq!(sampled.at(1, 2, 3), node_at(1, 2, 3));
+        assert_eq!(sampled.at(16, 16, 16), node_at(16, 16, 16));
+
+        // Every node, not just the named ones: the whole lattice is the field.
+        let expected: Vec<f32> = (0..n * n * n)
+            .map(|k| node_at(k % n, (k / n) % n, k / (n * n)))
+            .collect();
+        assert_eq!(sampled, ScalarField::new(expected, n, n, n).unwrap());
+    }
+
+    #[test]
+    fn sampling_is_deterministic_and_reads_a_vector_fields_first_lane() {
+        let spacing = Meters::finite_or_zero(0.5);
+        let once = ScalarField::sample(&radius_field(), Vec3::ZERO, spacing, 2, 2, 2).unwrap();
+        let twice = ScalarField::sample(&radius_field(), Vec3::ZERO, spacing, 2, 2, 2).unwrap();
+        assert_eq!(once, twice);
+
+        // A vector-valued field narrows to its first lane — `point.x` here.
+        let (builder, point) = FieldBuilder::new(FieldId::of_name("mesh-ops/test/point"), 1)
+            .push(FieldOp::Point, Vec::new(), Vec::new());
+        let vector = builder.build(point);
+        let lanes = ScalarField::sample(&vector, Vec3::ZERO, spacing, 2, 2, 2).unwrap();
+        assert_eq!(lanes.at(0, 1, 1), 0.0);
+        assert_eq!(lanes.at(1, 0, 1), 0.5);
+    }
+
+    #[test]
+    fn a_lattice_wider_than_its_own_index_arithmetic_is_refused() {
+        // 65536 * 65536 * 2 exceeds u32::MAX nodes: refused before anything is
+        // evaluated or allocated.
+        assert_eq!(
+            ScalarField::sample(
+                &radius_field(),
+                Vec3::ZERO,
+                Meters::finite_or_zero(1.0),
+                65_536,
+                65_536,
+                2,
+            )
+            .unwrap_err()
+            .code(),
+            MeshErrorCode::InvalidGridDimensions
+        );
+        // A too-thin lattice fails the same validation `ScalarField::new` applies.
+        assert_eq!(
+            ScalarField::sample(
+                &radius_field(),
+                Vec3::ZERO,
+                Meters::finite_or_zero(1.0),
+                1,
+                2,
+                2,
+            )
+            .unwrap_err()
+            .code(),
+            MeshErrorCode::InvalidGridDimensions
+        );
+    }
+
+    #[test]
+    fn a_field_that_does_not_evaluate_fails_the_sampling() {
+        let error = ScalarField::sample(
+            &dangling_field(),
+            Vec3::ZERO,
+            Meters::finite_or_zero(1.0),
+            2,
+            2,
+            2,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), MeshErrorCode::InvalidParameter);
+        assert!(!error.message().is_empty());
+    }
+
+    #[test]
+    fn a_sampled_field_drives_the_extraction_it_was_written_for() {
+        // The golden: `length(point)` sampled over [-2, 2]^3 at 0.25, extracted
+        // at iso = 1, is the unit sphere — the same surface the hand-written
+        // `length(point) - 1` lattice extracts at iso = 0.
+        let n = SPHERE_STEPS;
+        let sampled = ScalarField::sample(
+            &radius_field(),
+            Vec3::new(-2.0, -2.0, -2.0),
+            Meters::finite_or_zero(SPHERE_SPACING),
+            n,
+            n,
+            n,
+        )
+        .unwrap();
+        let mesh = implicit_surface_mesh(&sampled, IsoValue::new(1.0).unwrap(), sphere_options())
+            .unwrap();
+        assert_eq!(mesh.positions().len(), 270);
+        assert_eq!(mesh.indices().len(), 1608);
+        assert!(mesh
+            .positions()
+            .iter()
+            .all(|p| (p.length() - SPHERE_RADIUS).abs() < 0.03));
+        // Outward normals, the convention a rising-outward field produces.
+        assert!(mesh
+            .normals()
+            .iter()
+            .zip(mesh.positions())
+            .all(|(n, p)| n.dot(*p) > 0.0));
     }
 
     #[test]
