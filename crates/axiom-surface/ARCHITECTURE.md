@@ -14,7 +14,7 @@ for the first time.
 ## Placement
 
 `Layer: surface` — `crates/axiom-surface`, `depends_on = ["kernel", "math",
-"field", "recipe"]`.
+"field", "host"]`.
 
 It is a **layer, not a module**, and that is forced rather than preferred: seven
 engine *modules* must be able to name a material description — `resources`,
@@ -41,25 +41,50 @@ on a crate that knows about emission.
 |---|---|
 | `field` | The expression language. `FieldGraph` is what a channel binds to, `FieldValue`/`FieldType` are the values and the type lattice a channel declares, `FieldBuilder`/`FieldOp` are how layer flattening *composes* graphs, `EvalContext` is what a constant-folded composition is read against, and `FieldGraph::digest` is the half of a surface's digest that already excludes parameter values. |
 | `math` | `Vec3`/`Vec4` are the lanes a channel constant carries, and `Vec3` is what the four finite-difference offsets of the height-to-normal derivation are expressed in. |
-| `recipe` | The value vocabulary `field`'s own public API traffics in: `Scalar` is the lane type inside every `FieldValue`, `NodeId` names a node of a bound graph (and the node an error concerns), and `Param` carries the raw operator words that graph composition copies and rebases. |
 | `kernel` | `BinaryWriter`/`BinaryReader` and `SchemaVersion` are the canonical byte format; `StableHash` is the structural digest; `Meters` and `Ratio` are the quantities `normal_from_height` is authored in, so no naked float reaches the boundary. |
+| `host` | `BackendCapabilityProfile` and `RenderCapability` are what `supported_by` checks a surface's derived requirements against — the pure "will this render there?" query. |
 
-### A note on `recipe`, which the plan did not list
+### `recipe` was a dependency, and is no longer — because `field` fixed it
 
-The work manifest specified `depends_on = ["kernel", "math", "field"]`. That
-turned out to be under-specified once `field` actually landed: **`field`'s public
-API traffics in `recipe`'s value types.** `FieldValue::scalar` takes an
-`axiom_recipe::Scalar`, `FieldBuilder::push` takes `Vec<axiom_recipe::Param>` and
-`Vec<axiom_recipe::NodeId>`, and `FieldGraph::output`/`recipe` hand `NodeId`s and
-`Node`s back. A layer that composes field graphs — which is exactly what layer
-flattening is — cannot avoid naming them.
+This layer used to declare `recipe`, and the reason was honest: **`field`'s public
+API traffics in `recipe`'s value types.** `FieldValue::scalar` takes a `Scalar`,
+`FieldBuilder::push` takes `Vec<Param>` and `Vec<NodeId>`, and `FieldGraph::output`
+hands a `NodeId` back. A layer that composes field graphs — which is exactly what
+layer flattening is — cannot avoid naming them, and naming them only through type
+inference to dodge the text scan would have been a dependency satisfied by
+coincidence, which `CLAUDE.md` names as the thing not to do.
 
-It *could* have avoided naming them **textually**, by taking every one of those
-values through type inference and never writing `axiom_recipe::`. That would have
-passed the architecture checker, because rule 3 is a text scan. It would also
-have been a dependency satisfied by coincidence, which `CLAUDE.md` names as the
-thing not to do. The edge is real, non-ceremonial and acyclic, so it is
-**declared**.
+The edge was real. It was also a symptom: **it existed because `field` leaked its
+substrate.** The fix belonged at the lowest correct layer, and it landed there —
+`axiom-field` now re-exports `NodeId`, `Param`, `Scalar` and `MAX_NODES`, so this
+layer names `axiom_field::NodeId` and the edge simply stopped being real. Nothing
+changed about the types: `axiom_field::NodeId` **is** `axiom_recipe::NodeId`.
+
+The same fix removed the `kernel` edge from `axiom-proc-texture` and
+`axiom-proc-mesh`: both declared it solely to write `Seconds::finite_or_zero(0.0)`
+for a bake, and `EvalContext::at` now states that convention once, in `field`.
+This layer keeps `kernel`, which it genuinely uses for the byte format, the
+digest and the `Meters`/`Ratio` quantities.
+
+### `host` is a dependency, and the plan did not list it either
+
+`supported_by(reqs, profile)` answers *"will a backend with this capability
+profile render this surface, or fall back to its constants?"* — as a pure query,
+with no device, no program and no frame. The profile type is
+`axiom_host::BackendCapabilityProfile`, so the edge is real and non-ceremonial.
+
+It is acyclic and precedented: `host` depends only on `kernel`, `runtime` and
+`math`, and `frame` and `layout` already build on it. The alternative — restating
+which capability bit a procedural surface occupies — would have been a second,
+drifting definition of a backend contract this layer does not own.
+
+**What the query is not.** It answers the *capability* half and only that. A
+backend's own gate additionally checks ceilings that are properties of that
+backend: how many parameters its shared uniform region holds, which interstage
+lanes its main pass carries, its shader node budget, and which vertex stage a
+particular draw uses. None of those are derivable from a backend-neutral
+requirements summary. So a `false` is final, and a `true` means the surface
+clears the capability gate with the backend's own ceilings still to come.
 
 ## The shape of the thing
 
@@ -219,6 +244,46 @@ repository has one lit shader, no variant machinery, and a second backend that
 cannot execute a program at all. The backend-shaped half of a shader IR — stage
 assignment, varyings, bind-group indices, uniform packing — is inherently
 backend-shaped and belongs beside the emitter.
+
+## Displacement is a general field consumer, not a material concept
+
+Read this before concluding that a GPU executing something makes it an appearance
+feature. **A displacement is a `Vec3` field of position and time; it has no more
+to do with materials than a heightfield does**, and the engine already proves it:
+`axiom_proc_mesh`'s `MeshOp::Displace` is bake-time deformation with no material
+anywhere near it, and `axiom_mesh_ops` transforms geometry with no material
+either.
+
+`Surface` carries a `Displacement` channel **only because that is the binding
+site for the vertex stage of the program its fragment channels already compile
+into**. It is a wiring convenience — one authored artifact, one digest, one
+pipeline — and *not* a claim that deformation is appearance.
+
+This note was written where the vertex emitter lives, because this layer was out
+of that manifest's scope. It belongs here, where the channel is declared, and
+this is now its home.
+
+## Reading a surface: `inspect`, and the diagnostics that name a node
+
+`Surface::inspect()` is the agent-facing read: per channel, what it is bound to,
+the type it produces, how large the bound graph is, how many knobs it carries,
+and that graph's own structural digest — plus the lighting model, the whole
+tree's layer count, the derived requirements and the surface's digest. From a
+channel an agent drills into the `FieldGraph` itself, where `axiom_field`'s own
+`describe`/`explain`/`dependents_of`/`diff` take over. This layer adds the
+channel vocabulary and nothing else.
+
+Only the **root** surface's channels are reported. A layer's own channels are
+read by inspecting that layer's surface; the resolved single binding per channel
+is `flatten()` followed by `inspect()`.
+
+**Every failure names both the channel and the node.** `SurfaceError` carries a
+`SurfaceChannel`, a layer index within the linearised tree, and the `NodeId` of
+the field graph the failure concerns — lifted one-for-one from the field layer's
+own diagnostic, wording and stable code included. That is the brief's
+*"diagnostics pointing to semantic graph nodes rather than generated WGSL lines"*,
+satisfied end to end: an agent is told *"opacity, node 0, `Dot` has no inputs"*,
+never *"line 214 of a shader you did not write."*
 
 ## Normal from height — a derivation, not a derivative operator
 

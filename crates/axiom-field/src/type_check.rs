@@ -583,8 +583,8 @@ mod tests {
             2,
         );
         assert_eq!(broadcast.validate(), Ok(()));
-        assert_eq!(broadcast.type_of(NodeId::from_raw(2)), Ok(FieldType::Vec3));
-        assert_eq!(broadcast.type_of(NodeId::from_raw(1)), Ok(FieldType::Scalar));
+        assert_eq!(broadcast.type_at(NodeId::from_raw(2)), Ok(FieldType::Vec3));
+        assert_eq!(broadcast.type_at(NodeId::from_raw(1)), Ok(FieldType::Scalar));
     }
 
     #[test]
@@ -612,7 +612,7 @@ mod tests {
         let derived: Vec<FieldType> = (0..10)
             .map(|id| {
                 field
-                    .type_of(NodeId::from_raw(id))
+                    .type_at(NodeId::from_raw(id))
                     .expect("the graph type-checks")
             })
             .collect();
@@ -649,7 +649,7 @@ mod tests {
                 ],
                 1,
             );
-            assert_eq!(field.type_of(NodeId::from_raw(1)), Ok(*ty));
+            assert_eq!(field.type_at(NodeId::from_raw(1)), Ok(*ty));
         });
     }
 
@@ -657,7 +657,7 @@ mod tests {
     fn asking_about_a_node_the_graph_does_not_have_names_that_id() {
         let field = graph(vec![node(FieldOp::Point, &[], &[])], 0);
         let error = field
-            .type_of(NodeId::from_raw(9))
+            .type_at(NodeId::from_raw(9))
             .expect_err("node 9 does not exist");
         assert_eq!(error.kind(), FieldErrorCode::OutputNodeMissing);
         assert_eq!(error.node(), NodeId::from_raw(9));
@@ -674,7 +674,7 @@ mod tests {
             2,
         );
         let error = field
-            .type_of(NodeId::from_raw(0))
+            .type_at(NodeId::from_raw(0))
             .expect_err("a graph that does not type has no types to report");
         assert_eq!(error.kind(), FieldErrorCode::TypeMismatch);
         assert_eq!(error.node(), NodeId::from_raw(2));

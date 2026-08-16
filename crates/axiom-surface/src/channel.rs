@@ -1,8 +1,7 @@
 //! The closed seven-channel appearance vocabulary.
 
-use axiom_field::{FieldType, FieldValue};
+use axiom_field::{FieldType, FieldValue, Scalar};
 use axiom_math::{Vec3, Vec4};
-use axiom_recipe::Scalar;
 
 /// How many channels a surface has. Closedness is the whole point: the model is
 /// fixed in Rust and parameterised by data, never extended at runtime.

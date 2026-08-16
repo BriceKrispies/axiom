@@ -25,9 +25,6 @@ axiom-math = { path = "../axiom-math" }
 # The FieldGraph a Displace node's height is, and the EvalContext each vertex is
 # evaluated under.
 axiom-field = { path = "../axiom-field" }
-# Seconds - the evaluation context's time input, supplied explicitly (zero: a
-# baked mesh is not animated).
-axiom-kernel = { path = "../axiom-kernel" }
 
 [lints.rust]
 unsafe_code = "forbid"

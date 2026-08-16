@@ -421,8 +421,8 @@ mod tests {
     fn a_canonical_graph_still_validates_and_still_type_checks() {
         let kept = canonical(&messy());
         assert_eq!(kept.validate(), Ok(()));
-        assert_eq!(kept.type_of(kept.output()), Ok(FieldType::Scalar));
-        assert_eq!(kept.type_of(NodeId::from_raw(0)), Ok(FieldType::Vec3));
+        assert_eq!(kept.type_at(kept.output()), Ok(FieldType::Scalar));
+        assert_eq!(kept.type_at(NodeId::from_raw(0)), Ok(FieldType::Vec3));
     }
 
     #[test]

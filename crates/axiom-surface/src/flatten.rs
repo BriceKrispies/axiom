@@ -106,9 +106,8 @@ mod tests {
     use crate::layer::SurfaceLayer;
     use crate::lighting_model::LightingModel;
     use crate::surface_builder::SurfaceBuilder;
-    use axiom_field::{EvalContext, FieldBuilder, FieldGraph, FieldId, FieldOp, FieldValue};
+    use axiom_field::{EvalContext, FieldBuilder, FieldGraph, FieldId, FieldOp, FieldValue, Param, Scalar};
     use axiom_math::{Vec2, Vec3};
-    use axiom_recipe::{Param, Scalar};
 
     fn scalar(value: f32) -> FieldValue {
         FieldValue::scalar(Scalar::new(value))
@@ -137,12 +136,7 @@ mod tests {
     }
 
     fn at(u: f32) -> EvalContext {
-        EvalContext::new(
-            Vec3::ZERO,
-            Vec2::new(u, 0.0),
-            Vec3::UNIT_Y,
-            axiom_kernel::Seconds::finite_or_zero(0.0),
-        )
+        EvalContext::at(Vec3::ZERO, Vec2::new(u, 0.0), Vec3::UNIT_Y)
     }
 
     #[test]
@@ -280,9 +274,9 @@ mod tests {
         let (builder, _node) = FieldBuilder::new(FieldId::from_raw(4), 1).push(
             FieldOp::Abs,
             Vec::new(),
-            vec![axiom_recipe::NodeId::from_raw(9)],
+            vec![axiom_field::NodeId::from_raw(9)],
         );
-        let broken = ChannelBinding::field(builder.build(axiom_recipe::NodeId::from_raw(0)));
+        let broken = ChannelBinding::field(builder.build(axiom_field::NodeId::from_raw(0)));
         let surface = Surface::new(
             own_bindings(&SurfaceBuilder::new().build().expect("legal")),
             LightingModel::Lambert,

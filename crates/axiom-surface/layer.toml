@@ -12,19 +12,26 @@
 # canvas2d-backend, assets, and the axiom facade), and a module may never depend
 # on another module. The `axiom-mesh` precedent verbatim.
 #
-# Why `recipe` is in depends_on, where the plan named only kernel/math/field:
-# `field`'s own public API traffics in recipe's value vocabulary. A channel
-# constant is a `FieldValue` built from `axiom_recipe::Scalar`; a graph node is
-# named by `axiom_recipe::NodeId`; and composing two graphs — which is exactly
-# what layer flattening is — copies and rebases `axiom_recipe::Param` words
-# through `FieldBuilder::push`. Those are real, non-ceremonial references in
-# non-test code, so the dependency is declared rather than smuggled in through
-# type inference.
+# Why `recipe` is NOT in depends_on, though this layer names NodeId, Param and
+# Scalar constantly: `field` publishes that vocabulary itself. Every one of those
+# types appears on `field`'s own public boundary, so `field` re-exports them and
+# a consumer names `axiom_field::NodeId` rather than reaching past `field` to the
+# container underneath it. The edge was real while it lasted — it was declared,
+# not smuggled in through type inference — and it stopped being real the moment
+# the layer that hands the values out started publishing their names.
+#
+# Why `host` IS in depends_on: `supported_by` checks a surface's derived
+# SurfaceRequirements against a backend's BackendCapabilityProfile, so an agent
+# can be told "that backend will fall back to your constants" before a frame is
+# ever drawn. That is a real adaptation of host's capability vocabulary by this
+# layer's own requirements summary, in non-test code, and it is acyclic: `host`
+# depends only on kernel/runtime/math, exactly as `frame` and `layout` — the two
+# layers that already build on it — do.
 
 [layer]
 name = "surface"
 crate_name = "axiom-surface"
-depends_on = ["kernel", "math", "field", "recipe"]
+depends_on = ["kernel", "math", "field", "host"]
 
 meaningful_dependency = """
 Surface adapts field's typed pointwise expressions into the engine's one neutral
@@ -41,9 +48,7 @@ summary is derived by reading FieldOp codes out of the bound graphs, so a backen
 learns exactly which evaluation-context inputs a surface needs before it attempts
 to lower it. Field owns expressions but no notion of what an expression is FOR;
 math supplies the Vec3/Vec4 lanes a channel value carries and the finite
-differences the height-to-normal derivation composes; recipe supplies the Scalar
-every channel constant is built from, the NodeId that names a node of a bound
-graph, and the raw Param words graph composition copies and rebases; the kernel
+differences the height-to-normal derivation composes; the kernel
 supplies the canonical bytes, the SchemaVersion stamp, the StableHash that gives
 a surface a stable program identity, and the Meters and Ratio quantities that
 keep naked floats off the height-to-normal boundary. This layer adds the channel
@@ -63,6 +68,9 @@ introduced_capabilities = [
     "LightingModel",
     "SurfaceRequirements",
     "SurfaceInput",
+    "SurfaceInspection",
+    "ChannelInspection",
+    "supported_by",
     "SurfaceError",
     "SurfaceErrorCode",
     "SurfaceResult",
@@ -84,6 +92,8 @@ consumed_capabilities = [
     "NodeId",
     "Param",
     "Scalar",
+    "BackendCapabilityProfile",
+    "RenderCapability",
     "StableHash",
     "BinaryWriter",
     "BinaryReader",
@@ -96,8 +106,10 @@ consumed_capabilities = [
 # the kernel's StableHash and stamps them with a SchemaVersion. ChannelBinding is
 # the tagged struct a FieldGraph or a FieldValue rides in. SurfaceRequirements is
 # derived by reading FieldOp codes out of a FieldGraph. SurfaceLayer's opaque
-# mask is a FieldValue built from a recipe Scalar. SurfaceBuilder derives a
-# normal from a FieldGraph height at a kernel Meters offset and a Ratio strength.
+# mask is a FieldValue built from a field-published Scalar. SurfaceBuilder
+# derives a normal from a FieldGraph height at a kernel Meters offset and a Ratio
+# strength. SurfaceInspection reads every channel's FieldGraph and answers
+# supported_by against host's BackendCapabilityProfile.
 
 [[proof_exports]]
 export = "Surface"
@@ -118,3 +130,11 @@ must_reference = ["FieldValue", "Scalar"]
 [[proof_exports]]
 export = "SurfaceBuilder"
 must_reference = ["FieldGraph", "Meters", "Ratio"]
+
+[[proof_exports]]
+export = "SurfaceInspection"
+must_reference = ["FieldGraph", "StableHash"]
+
+[[proof_exports]]
+export = "supported_by"
+must_reference = ["BackendCapabilityProfile", "RenderCapability"]

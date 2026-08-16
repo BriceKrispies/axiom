@@ -51,6 +51,26 @@ impl EvalContext {
         }
     }
 
+    /// A context at a place, with **time held at zero** — the shape a bake reads.
+    ///
+    /// A baked artifact (a texture, a displaced mesh, a lattice sample) is not
+    /// animated: it is evaluated once, at one instant, and the instant it is
+    /// evaluated at is zero. Stating that here rather than at each call site is
+    /// what keeps a consumer that owns **no clock** from having to name one: it
+    /// spells its sample position and reads a value, and never mentions
+    /// [`Seconds`] at all.
+    ///
+    /// That is not a convenience. A bake-time consumer that had to write
+    /// `Seconds::finite_or_zero(0.0)` was forced to declare the whole `kernel`
+    /// layer for one zero — a dependency the Layer Law calls ceremonial. This
+    /// constructor is the structural fix, and
+    /// [`crate::FieldGraph::evaluate`]'s contract is unchanged: every external
+    /// input is still explicit, and zero is still a value the caller chose by
+    /// choosing this constructor over [`EvalContext::new`].
+    pub const fn at(point: Vec3, uv: Vec2, normal: Vec3) -> Self {
+        EvalContext::new(point, uv, normal, Seconds::finite_or_zero(0.0))
+    }
+
     /// The sample position, in whatever space the caller supplied.
     pub const fn point(self) -> Vec3 {
         self.point
@@ -104,6 +124,28 @@ mod tests {
                 Vec3::UNIT_Y,
                 Seconds::finite_or_zero(0.0)
             )
+        );
+    }
+
+    #[test]
+    fn a_context_at_a_place_holds_time_at_zero_without_the_caller_naming_it() {
+        let baked = EvalContext::at(Vec3::new(1.0, 2.0, 3.0), Vec2::new(0.5, 0.5), Vec3::UNIT_Z);
+        assert_eq!(baked.point(), Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(baked.uv(), Vec2::new(0.5, 0.5));
+        assert_eq!(baked.normal(), Vec3::UNIT_Z);
+        assert_eq!(baked.time().get(), 0.0);
+        assert_eq!(
+            baked,
+            EvalContext::new(
+                Vec3::new(1.0, 2.0, 3.0),
+                Vec2::new(0.5, 0.5),
+                Vec3::UNIT_Z,
+                Seconds::finite_or_zero(0.0)
+            )
+        );
+        assert_eq!(
+            EvalContext::at(Vec3::ZERO, Vec2::ZERO, Vec3::UNIT_Y),
+            EvalContext::ORIGIN
         );
     }
 

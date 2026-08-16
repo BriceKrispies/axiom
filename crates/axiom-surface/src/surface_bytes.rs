@@ -255,8 +255,7 @@ mod tests {
     use super::*;
     use crate::channel::SurfaceChannel;
     use crate::surface_builder::SurfaceBuilder;
-    use axiom_field::{FieldBuilder, FieldId, FieldOp, FieldType, FieldValue};
-    use axiom_recipe::{Param, Scalar};
+    use axiom_field::{FieldBuilder, FieldId, FieldOp, FieldType, FieldValue, Param, Scalar};
 
     fn uv_scalar() -> axiom_field::FieldGraph {
         let (builder, uv) = FieldBuilder::new(FieldId::of_name("surface/bytes/uv"), 1).push(

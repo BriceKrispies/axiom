@@ -40,6 +40,37 @@ are all the same value here.
 | `kernel` | `BinaryWriter`/`BinaryReader` and `SchemaVersion` are the canonical byte format; `StableHash` mints `FieldId` and parameter-slot identity from a name and labels the structural bytes; `Seconds` is the evaluation context's time input. |
 | `noise` | `FbmConfig`'s knob set fixes the `Fbm` operator's parameter arity, pinned by an exhaustive destructuring so the operator and the noise layer can never drift apart; `value_noise` and `Fbm::sample` are what the `Noise` and `Fbm` operators *mean*. |
 
+## This layer publishes the vocabulary its own API traffics in
+
+`NodeId`, `Param`, `Scalar` and `MAX_NODES` are `recipe`'s types, and this crate
+**re-exports** all four. That is a structural decision, not a convenience.
+
+Every one of them is on this layer's own public boundary: a node is named by a
+`NodeId`, `FieldBuilder::push` takes `Vec<Param>`, a `FieldValue` lane is a
+`Scalar`, and the budget a rewrite is checked against is `MAX_NODES`. A consumer
+that could not name them could not call this layer at all — so before they were
+published here, every consumer had to declare `recipe` in its own `depends_on`
+merely to spell a type `field` had handed it. `axiom-surface` did exactly that,
+and said so in its own manifest.
+
+That is a dependency for a reason that has nothing to do with what `recipe`
+*does*, which is the shape the Layer Law calls ceremonial. The fix belongs at the
+lowest correct layer — here, in the layer that hands the values out — and the rule
+it establishes is:
+
+> **The layer that hands you a value is the layer you name it through.**
+
+Nothing is invented and nothing is wrapped: `axiom_field::NodeId` **is**
+`axiom_recipe::NodeId`, so the two spellings can never drift, and `recipe`
+remains the one definition. `field` still declares `recipe` because it genuinely
+builds on the container; its consumers no longer have to.
+
+The same reasoning produced `EvalContext::at(point, uv, normal)`. A bake-time
+consumer — `proc-texture`, `proc-mesh` — owns no clock and wants time held at
+zero, but `EvalContext::new` made it name `axiom_kernel::Seconds` to say so,
+which cost each of them the whole `kernel` layer for one zero. `at` states the
+bake convention once, here, and both layers dropped the edge.
+
 ## The shape of the thing
 
 ```text
@@ -307,6 +338,112 @@ makes the obvious optimisations impossible:
    an indexed register file — never a recursive descent.
 2. **Parameters are separate from structure**, so a value change never touches
    the digest.
+
+## The agent-facing half: inspect, rewrite, diff, explain
+
+A field is only *mechanically editable* if an agent can identify a node, read its
+type, walk its dependencies, rewrite it, and be told exactly what changed. All of
+that is here, and all of it is a pure read or a pure value transform.
+
+| Operation | What it answers |
+|---|---|
+| `node_count` / `output` | how big is it, and what is the result |
+| `op_at` / `type_at` / `inputs_at` | what is this node, what does it produce, what does it read |
+| `dependents_of` | who reads this node |
+| `describe` | the whole graph as a schema-stamped, byte-serializable record |
+| `explain` | the whole graph as deterministic text, one line per node |
+| `replace_subgraph` / `insert_before` / `inline` | rewrite it |
+| `diff` | what changed between two graphs |
+| `validate` / `canonicalize` / `serialize` / `digest` | prove, normalise, store, label |
+
+Four properties are load-bearing:
+
+1. **Every rewrite returns a new graph.** No `&mut self` on a public boundary
+   (the Axiom State Law), and immutability is what makes a rewrite **diffable and
+   revertible** — the property an agent needs most. Nothing is mutated, so
+   nothing has to be undone.
+2. **`dependents_of` is a forward scan, never a stored reverse index.** An index
+   is retained state; it would need invalidating on every rewrite, and every
+   rewrite here returns a new graph precisely so that nothing needs invalidating.
+   `O(nodes × inputs)`, bounded by `MAX_NODES` and an arity of at most three.
+   **Authoring-time only — never call it from a frame path**, and the same goes
+   for `describe`, `explain`, `diff` and the three rewrites.
+3. **`diff` canonicalises both sides first.** Without that, a diff is dominated
+   by authoring-order noise — a dead branch, a duplicated subexpression, an
+   unfolded constant, `a + b` written `b + a` — none of which is a change in what
+   the field computes. Canonicalisation was built for the program-cache key; this
+   is its second consumer.
+4. **A rewrite does not validate, and the caller must.** A splice can produce a
+   graph whose types do not compose. `validate` after every rewrite. The one
+   thing a rewrite *does* enforce is the node budget, because a graph past it
+   cannot even be evaluated.
+
+**`explain` is output-only.** Deterministic text, one line per node in id order
+(`n7: Mul(Scalar) <- n5, n6`), for a human or a log. It has no reader, nothing
+downstream may parse it, and it is not a golden-able contract —
+`FieldDescription::encode` is the machine-readable form. There is deliberately
+**no textual authoring format** in this layer: `recipe`, and this crate, contain
+zero parsing code and no `serde`/`toml` dependency, and introducing a text
+*format* is a separate decision with a wire-compatibility cost.
+
+### Reusable material functions: `inline`, and nothing else
+
+A library effect is a `FieldGraph` whose **leaf** `Point`, `Uv` and `Param` nodes
+stand for its free variables. `inline(other, bind)` binds those leaves,
+positionally in node id order, to nodes of the host graph and appends the rest.
+
+**There is no function type, no call node, no linker and no symbol table.** A
+library of a hundred effects costs this crate nothing at all — which is the
+single most important simplification in the design.
+
+`Normal` and `Time` are deliberately *not* bindable: they are ambient facts about
+where and when a sample is taken, identical in host and library, and rebinding
+them is not a composition an author has asked for. `Const` is not bindable
+because a literal is not a free variable.
+
+Inlining multiplies node count against `MAX_NODES = 256`, so a composition that
+does not fit is rejected with `InlineBudgetExceeded`. **That is a design signal
+to compose fewer layers. It is not a reason to raise the cap.**
+
+## The library tier — a visual effect is an authored graph, not an engine primitive
+
+> **Marble, wood grain, scratches, rust, dirt, skin pores, asphalt, water
+> ripples, brushed metal and fabric weave are all compositions of the 23
+> operators. The engine must never gain a Rust function per effect.** If an
+> effect cannot be expressed, the question is whether the *algebra* is missing
+> something universal — and the answer is usually no.
+
+The engine has already run this experiment and won it:
+`examples/recipes/generated_micro_fps/` produces ~0.29 MB of textures from
+**1,796 bytes** of packed recipe, and its own notes say *"ship the recipe, not the
+resources."* `apps/arena-forge/EFFECT_LANGUAGE.md` is the same idea at the app
+tier: *"Cards carry data, never code."*
+
+### The operator admission test, applied strictly
+
+A proposed operator must pass **all four**:
+
+1. It cannot be composed from existing operators without unbounded node growth.
+2. It is implementable identically on the CPU and in WGSL within the parity
+   tolerance.
+3. At least two unrelated consumers need it.
+4. It fits under the 24-variant `engine_no_large_enums` cap — **one slot
+   remains**.
+
+`smin`, `triplanar`, `checker`, `bricks`, `gradient` and `voronoi` all fail test
+1 or test 3 and are therefore **library graphs**. Voronoi is worth naming
+explicitly: it is expressible as a bounded fold over neighbour cells but not
+compactly, so if it ever proves genuinely necessary it is the strongest candidate
+for the one free slot — and it needs its own decision record before it takes it.
+
+### Where the library lives is deliberately not decided
+
+Candidate homes are a `library/` module of `const fn` builders in this crate
+(cheap, but every entry costs coverage), an app-tier module, or authored graph
+assets. **Pick it when the first three real effects exist, not before.** Building
+a library *mechanism* before there is a library is the kind of speculative
+structure this repository has already reverted once (`a5a9472f`), and `inline`
+means the mechanism costs nothing to defer.
 
 ## Determinism
 

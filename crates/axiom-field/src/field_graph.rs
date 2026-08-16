@@ -36,8 +36,8 @@ const NODE_BUDGET_EXCEEDED: FieldError = FieldError::at(
 /// A node id that names no node of the graph. The rule names no node until the
 /// caller stamps the offending id on it — the declared output for
 /// [`FieldGraph::deserialize`] and [`FieldGraph::validate`], the queried id for
-/// [`FieldGraph::type_of`].
-const OUTPUT_NODE_MISSING: FieldError = FieldError::at(
+/// [`FieldGraph::type_at`].
+pub(crate) const OUTPUT_NODE_MISSING: FieldError = FieldError::at(
     FieldErrorCode::OutputNodeMissing,
     NodeId::NULL,
     "the node id does not reference a node of the graph",
@@ -162,7 +162,7 @@ impl FieldGraph {
     /// failure names the node that caused it, which is not necessarily `node`.
     ///
     /// Preparation-time only — it is `O(nodes)` per call by construction.
-    pub fn type_of(&self, node: NodeId) -> FieldResult<FieldType> {
+    pub fn type_at(&self, node: NodeId) -> FieldResult<FieldType> {
         self.node_types().and_then(|types| {
             types
                 .get(node.raw() as usize)
@@ -241,7 +241,7 @@ impl FieldGraph {
     }
 
     /// The derived type of every node, in id order.
-    fn node_types(&self) -> FieldResult<Vec<FieldType>> {
+    pub(crate) fn node_types(&self) -> FieldResult<Vec<FieldType>> {
         type_check::node_types(&self.recipe, &self.params)
     }
 
@@ -251,7 +251,7 @@ impl FieldGraph {
     }
 
     /// `node` must name a node of the graph.
-    fn check_node(&self, node: NodeId) -> FieldResult<()> {
+    pub(crate) fn check_node(&self, node: NodeId) -> FieldResult<()> {
         ((node.raw() as usize) < self.node_count())
             .then_some(())
             .ok_or_else(|| OUTPUT_NODE_MISSING.about(node))

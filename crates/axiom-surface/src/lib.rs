@@ -83,6 +83,7 @@ mod binding;
 mod channel;
 mod compose;
 mod flatten;
+mod inspect;
 mod layer;
 mod layer_tree;
 mod lighting_model;
@@ -94,6 +95,7 @@ mod surface_error;
 
 pub use binding::ChannelBinding;
 pub use channel::{SurfaceChannel, SURFACE_CHANNEL_COUNT};
+pub use inspect::{supported_by, ChannelInspection, SurfaceInspection};
 pub use layer::{LayerBlend, SurfaceLayer, MAX_LAYERS};
 pub use lighting_model::LightingModel;
 pub use requirements::{SurfaceInput, SurfaceRequirements};

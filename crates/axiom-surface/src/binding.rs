@@ -1,9 +1,8 @@
 //! What one channel is bound to: a constant value, or a field expression.
 
-use axiom_field::{FieldBuilder, FieldGraph, FieldId, FieldType, FieldValue};
+use axiom_field::{FieldBuilder, FieldGraph, FieldId, FieldType, FieldValue, Scalar};
 use axiom_kernel::{BinaryReader, BinaryWriter};
 use axiom_math::{Vec2, Vec3, Vec4};
-use axiom_recipe::Scalar;
 
 use crate::surface_error::{SurfaceError, SurfaceErrorCode, SurfaceResult};
 
@@ -131,7 +130,7 @@ impl ChannelBinding {
     pub fn ty(&self) -> SurfaceResult<FieldType> {
         self.as_field().map_or(Ok(self.value.ty()), |graph| {
             graph
-                .type_of(graph.output())
+                .type_at(graph.output())
                 .map_err(SurfaceError::from_field)
         })
     }
@@ -231,8 +230,7 @@ fn placeholder_graph() -> FieldGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_field::{EvalContext, FieldOp};
-    use axiom_recipe::{NodeId, Param};
+    use axiom_field::{EvalContext, FieldOp, NodeId, Param};
 
     fn uv_field() -> FieldGraph {
         let (builder, uv) = FieldBuilder::new(FieldId::of_name("surface/test/uv"), 1).push(

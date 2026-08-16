@@ -13,10 +13,9 @@
 //! length plus a content hash fails exactly as loudly and stays legible. Both
 //! forms make a silent format change impossible, which is the whole job.
 
-use axiom_field::{FieldBuilder, FieldGraph, FieldId, FieldOp, FieldType, FieldValue};
+use axiom_field::{FieldBuilder, FieldGraph, FieldId, FieldOp, FieldType, FieldValue, Param, Scalar};
 use axiom_kernel::{Meters, Ratio, StableHash};
 use axiom_math::Vec4;
-use axiom_recipe::{Param, Scalar};
 use axiom_surface::{
     ChannelBinding, LayerBlend, LightingModel, Surface, SurfaceBuilder, SurfaceChannel,
     SurfaceLayer,

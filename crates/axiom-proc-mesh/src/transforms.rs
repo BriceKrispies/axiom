@@ -2,7 +2,6 @@
 //! UVProject, Triangulate.
 
 use axiom_field::{EvalContext, FieldBuilder, FieldGraph, FieldId, FieldOp};
-use axiom_kernel::Seconds;
 use axiom_math::{Vec2, Vec3};
 use axiom_proc_core::NodeEval;
 
@@ -196,12 +195,7 @@ pub(crate) fn displace(
                 .zip(src.normals())
                 .map(|(pos, nrm)| {
                     graph
-                        .evaluate(&EvalContext::new(
-                            *pos,
-                            Vec2::ZERO,
-                            *nrm,
-                            Seconds::finite_or_zero(0.0),
-                        ))
+                        .evaluate(&EvalContext::at(*pos, Vec2::ZERO, *nrm))
                         .ok()
                         .map(|height| {
                             let n = height.as_scalar().get() * amt;

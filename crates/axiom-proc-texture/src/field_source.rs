@@ -34,7 +34,6 @@
 //! `ProcError::OpFailed`.
 
 use axiom_field::{EvalContext, FieldGraph, FieldValue};
-use axiom_kernel::Seconds;
 use axiom_math::{Vec2, Vec3};
 use axiom_proc_core::NodeEval;
 
@@ -83,11 +82,10 @@ fn texels(graph: &FieldGraph, width: u32, height: u32) -> Option<Vec<[u8; 4]>> {
                 ((index / width) as f32 + 0.5) / height as f32,
             );
             graph
-                .evaluate(&EvalContext::new(
+                .evaluate(&EvalContext::at(
                     Vec3::new(uv.x, uv.y, 0.0),
                     uv,
                     Vec3::UNIT_Y,
-                    Seconds::finite_or_zero(0.0),
                 ))
                 .ok()
                 .and_then(pixel)

@@ -113,6 +113,24 @@ impl SurfaceRequirements {
         self.node_count
     }
 
+    /// Whether rendering this surface needs a **program** at all, rather than
+    /// the constants an ordinary material already carries.
+    ///
+    /// Two independent reasons, and both are needed. A varying channel other
+    /// than displacement is a *fragment*-stage expression; a displacement is a
+    /// *vertex*-stage one — and a displacement counts even when it is a plain
+    /// constant, because a constant non-zero offset still moves vertices and
+    /// still needs a stage to move them in. Keying only on the varying-channel
+    /// bitset would miss exactly that case.
+    ///
+    /// This is the one half of "can a backend render this" that is genuinely
+    /// backend-**neutral**, which is why it lives on the requirements summary
+    /// and why [`crate::supported_by`] is the whole of the neutral query.
+    pub const fn needs_program(self) -> bool {
+        let fragment = self.varying_channels & !SurfaceChannel::Displacement.bit();
+        self.has_displacement | (fragment != 0)
+    }
+
     /// Absorb a graph's inputs and its node and parameter counts. A constant
     /// binding contributes nothing: it is not a graph a backend has to lower.
     fn absorb_graph(self, graph: Option<&FieldGraph>) -> SurfaceRequirements {
@@ -180,9 +198,8 @@ mod tests {
     use crate::binding::ChannelBinding;
     use crate::layer::{LayerBlend, SurfaceLayer};
     use crate::surface_builder::SurfaceBuilder;
-    use axiom_field::{FieldBuilder, FieldId, FieldType, FieldValue};
+    use axiom_field::{FieldBuilder, FieldId, FieldType, FieldValue, Param, Scalar};
     use axiom_math::Vec3;
-    use axiom_recipe::{Param, Scalar};
 
     fn uv_scalar() -> FieldGraph {
         let (builder, uv) = FieldBuilder::new(FieldId::of_name("surface/req/uv"), 1).push(

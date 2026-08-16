@@ -46,7 +46,31 @@
 //! - **It knows nothing of scenes, materials, textures, backends or GPUs.** A
 //!   coordinate space is a property of the [`EvalContext`] the caller supplies,
 //!   not of any type here.
+//! - **It is mechanically editable.** [`FieldGraph::describe`],
+//!   [`FieldGraph::explain`], [`FieldGraph::dependents_of`],
+//!   [`FieldGraph::replace_subgraph`], [`FieldGraph::insert_before`],
+//!   [`FieldGraph::inline`] and [`FieldGraph::diff`] are the agent-facing half:
+//!   identify, inspect, walk, rewrite, validate, serialize, diff, hash, explain.
+//!   Every rewrite returns a **new** graph.
 //!
+//! ## This layer publishes the vocabulary its own API traffics in
+//!
+//! [`NodeId`], [`Param`], [`Scalar`] and [`MAX_NODES`] are `recipe`'s types, and
+//! they are **re-exported here on purpose**. Every one of them appears on this
+//! layer's own public boundary — a node is named by a `NodeId`,
+//! [`FieldBuilder::push`] takes `Vec<Param>`, a [`FieldValue`] lane is a
+//! `Scalar`, and the node budget a rewrite is checked against is `MAX_NODES` —
+//! so a consumer that could not name them could not call this layer at all.
+//!
+//! Before they were published here, a consumer had to declare `recipe` itself to
+//! spell a type `field` had handed it, which put a layer in a `depends_on` for a
+//! reason that had nothing to do with what that layer *does*. Republishing them
+//! is the structural fix: **the layer that hands you a value is the layer you
+//! name it through.**
+//!
+//! It is not a widening of the surface. Nothing new is invented, nothing is
+//! wrapped, and `recipe` remains the one definition — `axiom_field::NodeId`
+//! **is** `axiom_recipe::NodeId`, so the two spellings can never drift.
 //! ## Why a layer, depending on kernel + math + recipe + noise
 //!
 //! Three engine **layers** (`mesh-ops`, `proc-texture`, `proc-mesh`) must be
@@ -70,6 +94,7 @@
 
 mod canonical;
 mod const_fold;
+mod diff;
 mod dispatch;
 mod eval;
 mod eval_context;
@@ -81,12 +106,17 @@ mod field_params;
 mod field_type;
 mod field_value;
 mod ids;
+mod inspect;
 mod noise_words;
 mod ops;
+mod rewrite;
 mod signature;
 mod type_check;
 
+pub use axiom_recipe::{NodeId, Param, Scalar, MAX_NODES};
+pub use diff::FieldDiff;
 pub use eval_context::EvalContext;
+pub use inspect::{FieldDescription, FieldExplanation, FieldNodeDescription, FIELD_DESCRIPTION_SCHEMA_VERSION};
 pub use field_builder::FieldBuilder;
 pub use field_error::{FieldError, FieldErrorCode, FieldResult};
 pub use field_graph::{FieldGraph, FIELD_SCHEMA_VERSION};

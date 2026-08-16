@@ -1,9 +1,8 @@
 //! The authoring surface for a [`Surface`].
 
-use axiom_field::{FieldGraph, FieldId, FieldOp, FieldType, FieldValue};
+use axiom_field::{FieldGraph, FieldId, FieldOp, FieldType, FieldValue, NodeId, Param, Scalar};
 use axiom_kernel::{Meters, Ratio};
 use axiom_math::Vec3;
-use axiom_recipe::{NodeId, Param, Scalar};
 
 use crate::binding::ChannelBinding;
 use crate::channel::{SurfaceChannel, SURFACE_CHANNEL_COUNT};
@@ -125,7 +124,7 @@ impl SurfaceBuilder {
         strength: Ratio,
     ) -> SurfaceResult<Self> {
         height
-            .type_of(height.output())
+            .type_at(height.output())
             .map_err(SurfaceError::from_field)
             .and_then(|ty| {
                 (ty == FieldType::Scalar)
@@ -320,11 +319,10 @@ mod tests {
             .binding(SurfaceChannel::Normal)
             .as_field()
             .expect("the derived normal is a field")
-            .evaluate(&EvalContext::new(
+            .evaluate(&EvalContext::at(
                 Vec3::new(3.0, 0.0, -2.0),
                 Vec2::ZERO,
                 Vec3::UNIT_Y,
-                axiom_kernel::Seconds::finite_or_zero(0.0),
             ))
             .expect("the derived normal evaluates");
         // dx = (x + 0.5) - (x - 0.5) = 1, dy = 0, so the vector is
@@ -400,11 +398,10 @@ mod tests {
             .binding(SurfaceChannel::Normal)
             .as_field()
             .expect("a field")
-            .evaluate(&EvalContext::new(
+            .evaluate(&EvalContext::at(
                 Vec3::new(2.0, 3.0, 4.0),
                 Vec2::new(0.25, 0.75),
                 Vec3::UNIT_Y,
-                axiom_kernel::Seconds::finite_or_zero(0.0),
             ))
             .expect("evaluates")
             .as_vec3();

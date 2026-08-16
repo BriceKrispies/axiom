@@ -1,8 +1,7 @@
 //! Stable, deterministic surface failures that name the channel, the layer and
 //! the field node they concern.
 
-use axiom_field::FieldError;
-use axiom_recipe::NodeId;
+use axiom_field::{FieldError, NodeId};
 
 use crate::channel::SurfaceChannel;
 
@@ -57,7 +56,7 @@ impl SurfaceErrorCode {
 const NO_LOCATION: u16 = u16::MAX;
 
 /// The [`SurfaceError::field_code`] of a failure that did not come from the
-/// field layer. Field codes are `1..=13`, so zero can never collide with one.
+/// field layer. Field codes start at `1`, so zero can never collide with one.
 const NO_FIELD_CODE: u16 = 0;
 
 /// One surface failure: what went wrong, **where** it went wrong — the channel,
@@ -149,7 +148,7 @@ impl SurfaceError {
         self.node
     }
 
-    /// The lifted field error code (`1..=13`), or `0` when this failure did not
+    /// The lifted field error code (nonzero), or `0` when this failure did not
     /// come from the field layer.
     pub const fn field_code(self) -> u16 {
         self.field_code

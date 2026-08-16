@@ -31,7 +31,7 @@ pub enum FieldErrorCode {
     /// or in a `Param` node's declared type — names no [`crate::FieldType`].
     UnknownType,
     /// A node id names no node of the graph: the declared output, or the node
-    /// [`crate::FieldGraph::type_of`] was asked about.
+    /// [`crate::FieldGraph::type_at`] was asked about.
     OutputNodeMissing,
     /// A node's operator code names no [`crate::FieldOp`].
     UnknownOperator,
@@ -54,6 +54,19 @@ pub enum FieldErrorCode {
     UnknownParamSlot,
     /// A `Const` node's parameter word decodes to NaN or ±∞.
     NonFiniteConstant,
+    /// A rewrite ([`crate::FieldGraph::inline`],
+    /// [`crate::FieldGraph::replace_subgraph`],
+    /// [`crate::FieldGraph::insert_before`]) would produce a graph with more
+    /// nodes than the budget allows.
+    ///
+    /// Deliberately **not** [`FieldErrorCode::NodeLimitExceeded`]: that one says
+    /// *the graph you handed me is illegal*, this one says *the composition you
+    /// asked for does not fit*, and the two have different remedies. This is a
+    /// design signal to compose fewer layers — never a reason to raise the cap.
+    InlineBudgetExceeded,
+    /// An [`crate::FieldGraph::inline`] supplied a different number of bindings
+    /// than the inlined graph has bindable leaves.
+    BindingCountMismatch,
 }
 
 impl FieldErrorCode {
@@ -61,7 +74,7 @@ impl FieldErrorCode {
     /// without depending on the variant layout. Table-indexed by the fieldless
     /// discriminant, so it is branch-free.
     pub const fn code(self) -> u16 {
-        [1_u16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13][self as usize]
+        [1_u16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15][self as usize]
     }
 }
 
@@ -156,7 +169,7 @@ mod tests {
 
     /// Every code, in discriminant order. A test-only roster: production code
     /// never enumerates the codes, it only reports one.
-    const EVERY_CODE: [FieldErrorCode; 13] = [
+    const EVERY_CODE: [FieldErrorCode; 15] = [
         FieldErrorCode::NodeLimitExceeded,
         FieldErrorCode::CyclicInput,
         FieldErrorCode::MalformedData,
@@ -170,6 +183,8 @@ mod tests {
         FieldErrorCode::ComposeWidthInvalid,
         FieldErrorCode::UnknownParamSlot,
         FieldErrorCode::NonFiniteConstant,
+        FieldErrorCode::InlineBudgetExceeded,
+        FieldErrorCode::BindingCountMismatch,
     ];
 
     #[test]
@@ -187,6 +202,8 @@ mod tests {
         assert_eq!(FieldErrorCode::ComposeWidthInvalid.code(), 11);
         assert_eq!(FieldErrorCode::UnknownParamSlot.code(), 12);
         assert_eq!(FieldErrorCode::NonFiniteConstant.code(), 13);
+        assert_eq!(FieldErrorCode::InlineBudgetExceeded.code(), 14);
+        assert_eq!(FieldErrorCode::BindingCountMismatch.code(), 15);
         EVERY_CODE
             .iter()
             .enumerate()

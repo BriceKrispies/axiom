@@ -19,13 +19,16 @@ axiom-kernel = { path = "../axiom-kernel" }
 # differences of the height-to-normal derivation are composed from.
 axiom-math = { path = "../axiom-math" }
 # Field supplies the expression language every channel binding is written in:
-# FieldGraph, FieldBuilder, FieldOp, FieldValue, FieldType, EvalContext, and the
-# structural digest a surface's own digest is folded from.
+# FieldGraph, FieldBuilder, FieldOp, FieldValue, FieldType, EvalContext, the
+# structural digest a surface's own digest is folded from, and the NodeId/Param/
+# Scalar vocabulary that language traffics in — which `field` publishes itself,
+# so composing field graphs no longer costs this layer a second dependency on
+# the container underneath it.
 axiom-field = { path = "../axiom-field" }
-# Recipe supplies the value vocabulary field's own public API traffics in — the
-# Scalar quantity of every channel constant, the NodeId that names a node of a
-# bound graph, and the raw Param words a graph is composed out of.
-axiom-recipe = { path = "../axiom-recipe" }
+# Host supplies the BackendCapabilityProfile and RenderCapability a surface's
+# derived requirements are checked against, so an agent can ask "will this
+# render on that backend?" without attempting a render.
+axiom-host = { path = "../axiom-host" }
 
 [lints.rust]
 unsafe_code = "forbid"

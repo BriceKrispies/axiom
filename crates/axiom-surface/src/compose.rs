@@ -9,8 +9,7 @@
 //! `point + offset` is the same graph read against a different point node, not a
 //! new operator.
 
-use axiom_field::{EvalContext, FieldBuilder, FieldGraph, FieldId, FieldOp, FieldValue};
-use axiom_recipe::{NodeId, Param};
+use axiom_field::{EvalContext, FieldBuilder, FieldGraph, FieldId, FieldOp, FieldValue, NodeId, Param};
 
 use crate::binding::ChannelBinding;
 use crate::channel::SurfaceChannel;
@@ -228,7 +227,7 @@ fn constant_of(graph: &FieldGraph) -> Option<FieldValue> {
 mod tests {
     use super::*;
     use axiom_kernel::BinaryWriter;
-    use axiom_recipe::Scalar;
+    use axiom_field::Scalar;
 
     fn constant(value: f32) -> ChannelBinding {
         ChannelBinding::constant(FieldValue::scalar(Scalar::new(value)))

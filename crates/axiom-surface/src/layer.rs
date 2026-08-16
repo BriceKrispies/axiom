@@ -1,7 +1,6 @@
 //! Mask-driven layering: one surface composed over another.
 
-use axiom_field::FieldValue;
-use axiom_recipe::Scalar;
+use axiom_field::{FieldValue, Scalar};
 
 use crate::binding::ChannelBinding;
 use crate::surface::Surface;
@@ -9,7 +8,7 @@ use crate::surface::Surface;
 /// How many layers a whole surface tree may hold, counting nested ones.
 ///
 /// Four, because a layered surface **flattens into one field graph per channel**
-/// and `axiom_recipe::MAX_NODES` (256) is the real budget the flattened graph
+/// and `axiom_field::MAX_NODES` (256) is the real budget the flattened graph
 /// must fit. Exceeding this is a
 /// [`crate::SurfaceErrorCode::LayerBudgetExceeded`], never a silent truncation,
 /// and the answer to a scene that does not fit is a simpler surface — not a

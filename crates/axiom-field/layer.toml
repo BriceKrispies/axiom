@@ -8,10 +8,21 @@
 # the same thing. It is the engine's missing *function-as-a-value*, and it has
 # nothing to do with rendering.
 #
-# Nothing is added to `introduced_capabilities` by validation, canonicalisation
-# or evaluation: they are methods on the already-declared `FieldGraph`, not new
-# public exports, and the checker validates capabilities against the crate's
-# root exports.
+# Nothing is added to `introduced_capabilities` by validation, canonicalisation,
+# evaluation or the rewrite operations: they are methods on the already-declared
+# `FieldGraph`, not new public exports, and the checker validates capabilities
+# against the crate's root exports. The report *shapes* those methods return —
+# FieldDescription, FieldNodeDescription, FieldExplanation, FieldDiff — are new
+# exports and are declared.
+#
+# NodeId, Param, Scalar and MAX_NODES are recipe's types, re-exported here and
+# deliberately NOT listed as introduced: this layer publishes them, it does not
+# invent them. They are on this layer's own public boundary (a node is named by a
+# NodeId, FieldBuilder::push takes Vec<Param>, a FieldValue lane is a Scalar, and
+# a rewrite is checked against MAX_NODES), so a consumer that could not name them
+# could not call this layer — and before they were published here, every consumer
+# had to declare `recipe` itself merely to spell a type `field` handed it. The
+# rule: the layer that hands you a value is the layer you name it through.
 #
 # Why a LAYER and not a module: three engine layers (`mesh-ops`, `proc-texture`,
 # `proc-mesh`) must be able to name a field, and a layer may never depend on a
@@ -67,6 +78,11 @@ introduced_capabilities = [
     "FieldErrorCode",
     "FieldResult",
     "FIELD_SCHEMA_VERSION",
+    "FieldDescription",
+    "FieldNodeDescription",
+    "FieldExplanation",
+    "FieldDiff",
+    "FIELD_DESCRIPTION_SCHEMA_VERSION",
 ]
 
 consumed_capabilities = [
@@ -102,6 +118,11 @@ consumed_capabilities = [
 # FieldBuilder writes an Fbm node's knob words straight out of an FbmConfig,
 # which is what pins that operator's arity to the noise layer's own knob set.
 #
+# The agentic half deepens the same dependencies rather than adding any:
+# FieldDescription is a schema-stamped record of recipe NodeIds written through
+# the kernel's BinaryWriter and labelled with a StableHash, and the three rewrites
+# splice recipe RecipeGraphs together against recipe's own MAX_NODES budget.
+#
 # The evaluator deepens all four dependencies rather than adding any: it samples
 # noise's value_noise and Fbm, applies math's Mat4 and reads its Epsilon floor,
 # folds over recipe's MAX_NODES-bounded id-ordered nodes, and reads the kernel
@@ -126,3 +147,7 @@ must_reference = ["Mat4", "Vec4"]
 [[proof_exports]]
 export = "FieldBuilder"
 must_reference = ["RecipeGraph", "Param", "RecipeId", "FbmConfig"]
+
+[[proof_exports]]
+export = "FieldDescription"
+must_reference = ["NodeId", "StableHash", "BinaryWriter", "SchemaVersion"]

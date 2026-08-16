@@ -212,9 +212,8 @@ mod tests {
     use super::*;
     use crate::layer::LayerBlend;
     use crate::surface_builder::SurfaceBuilder;
-    use axiom_field::{FieldBuilder, FieldId, FieldOp, FieldValue};
+    use axiom_field::{FieldBuilder, FieldId, FieldOp, FieldValue, NodeId, Scalar};
     use axiom_math::{Vec3, Vec4};
-    use axiom_recipe::{NodeId, Scalar};
 
     fn plain() -> Surface {
         SurfaceBuilder::new().build().expect("a default surface is legal")

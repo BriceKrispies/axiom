@@ -22,9 +22,6 @@ axiom-math = { path = "../axiom-math" }
 # The FieldGraph the Field operator bakes, and the EvalContext it evaluates each
 # texel under.
 axiom-field = { path = "../axiom-field" }
-# Seconds - the evaluation context's time input, supplied explicitly (zero: a
-# baked texture is not animated).
-axiom-kernel = { path = "../axiom-kernel" }
 
 [lints.rust]
 unsafe_code = "forbid"

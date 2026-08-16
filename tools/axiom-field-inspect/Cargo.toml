@@ -1,0 +1,16 @@
+[package]
+name = "axiom-field-inspect"
+description = "Axiom tool: a CLI that dumps a field graph or a surface as JSON. Given serialized bytes (or a built-in sample), it prints every node's operator, derived type, parameter words and dependents, the graph's structural digest and its deterministic explanation, and for a surface every channel's binding, the derived backend requirements, and whether each backend capability profile will run its program or fall back to constants. Machine-readable by default - the existing axiom-proc-inspect is text only, which makes it unusable to a program - with an opt-in plain-text mode for humans. Repo tooling, outside the engine dependency graph and outside the coverage and branchless gates."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axiom-field = { path = "../../crates/axiom-field" }
+axiom-surface = { path = "../../crates/axiom-surface" }
+axiom-host = { path = "../../crates/axiom-host" }
+axiom-math = { path = "../../crates/axiom-math" }
+
+[lints.rust]
+unsafe_code = "forbid"
