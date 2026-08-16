@@ -608,6 +608,9 @@ impl LiveGpuBinding {
         caps: u32,
         // The camera view-projection, read only by the sky pass.
         camera_view_proj: [f32; 16],
+        // The frame's surface time in seconds — explicitly supplied engine time,
+        // zero for a frame whose surfaces read no clock.
+        surface_time: f32,
     ) -> Result<(), JsValue> {
         let frame = match self.acquire_texture()? {
             Some(frame) => frame,
@@ -639,6 +642,7 @@ impl LiveGpuBinding {
             sdf,
             caps,
             camera_view_proj,
+            surface_time,
         );
         // ... then upscale-blit it across the full swapchain view and present.
         let mut encoder = self

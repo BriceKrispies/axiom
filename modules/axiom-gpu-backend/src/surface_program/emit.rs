@@ -111,12 +111,34 @@ fn function_text(flat: &Surface) -> String {
     )
 }
 
+/// Where the **vertex** stage's parameters begin in the shared uniform region:
+/// the running total of every fragment channel's slot count.
+///
+/// `params::pack` writes the seven channels' slots end to end in
+/// `SurfaceChannel::ALL` order, and displacement is last — so the vertex stage's
+/// base is exactly the sum of the six that precede it. Derived from the same
+/// `params()` lengths the fragment fold accumulates, so the two cannot disagree.
+pub(crate) fn vertex_param_base(flat: &Surface) -> u32 {
+    (0..FRAGMENT_CHANNEL_COUNT).fold(0_u32, |base, index| {
+        base + flat
+            .binding(SurfaceChannel::ALL[index])
+            .as_graph()
+            .params()
+            .len() as u32
+    })
+}
+
 /// One channel's `let` lines and the SSA name holding its result.
 ///
 /// `param_base` is where this channel's parameters begin in the shared uniform
 /// region — the running total of every earlier channel's slot count, which is
 /// exactly the order `params::pack` writes them in.
-fn channel_text(graph: &FieldGraph, channel: usize, param_base: u32) -> (String, String) {
+///
+/// Shared with [`crate::surface_program::emit_vertex`]: the vertex stage's
+/// displacement channel is the same SSA fold over the same operator table, with
+/// a different channel index and a different result type. Writing it twice would
+/// be two definitions of one language.
+pub(crate) fn channel_text(graph: &FieldGraph, channel: usize, param_base: u32) -> (String, String) {
     let types = node_types(graph);
     let param_count = graph.params().len() as u32;
     let body = graph

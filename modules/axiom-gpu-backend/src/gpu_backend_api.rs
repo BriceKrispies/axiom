@@ -205,6 +205,41 @@ impl GpuBackendApi {
         batches: &[(u64, u64, Vec<f32>, u32)],
         sdf: Option<&SdfScene>,
     ) -> bool {
+        // A caller that names no surface set has no time-reading surface either,
+        // so its surface-time lane is an exact zero and its packed lighting
+        // uniform is byte-identical to what it was before there was a lane.
+        self.present_frame_at(
+            clear_color,
+            lights,
+            light_view_proj,
+            camera_view_proj,
+            batches,
+            sdf,
+            0.0,
+        )
+    }
+
+    /// [`Self::present_frame`] with the frame's **surface time** — the seconds a
+    /// time-varying authored surface samples, in both the vertex and the
+    /// fragment stage.
+    ///
+    /// It is a separate entry rather than a parameter on `present_frame` because
+    /// the number is not the caller's to invent: it is
+    /// `axiom_surface`-gated engine time, decided by
+    /// [`crate::surface_program::SurfaceProgramSet::surface_time`] from what the
+    /// packet supplied and from whether anything in the frame actually reads a
+    /// clock. `present_frame` therefore passes zero, which is what it always
+    /// effectively wrote.
+    fn present_frame_at(
+        &self,
+        clear_color: [f32; 4],
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_view_proj: [f32; 16],
+        camera_view_proj: [f32; 16],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+        sdf: Option<&SdfScene>,
+        surface_time: f32,
+    ) -> bool {
         #[cfg(target_arch = "wasm32")]
         {
             return self
@@ -220,6 +255,7 @@ impl GpuBackendApi {
                         sdf,
                         self.capability.bits(),
                         camera_view_proj,
+                        surface_time,
                     )
                     .is_ok()
                 })
@@ -227,7 +263,15 @@ impl GpuBackendApi {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let _ = (clear_color, lights, light_view_proj, batches, sdf);
+            let _ = (
+                clear_color,
+                lights,
+                light_view_proj,
+                camera_view_proj,
+                batches,
+                sdf,
+                surface_time,
+            );
             false
         }
     }
@@ -277,6 +321,11 @@ impl GpuBackendApi {
                     sdf,
                     self.capability.bits(),
                     camera_view_proj,
+                    // This entry takes skinned draws, never an authored surface
+                    // set — and the skinned vertex stage runs no displacement
+                    // program at all (the 16-attribute ceiling) — so its
+                    // surface-time lane is an exact zero.
+                    0.0,
                 )
             })
             .unwrap_or(Ok(()))
@@ -310,7 +359,7 @@ impl GpuBackendApi {
         let set = crate::surface_program::SurfaceProgramSet::build(surfaces, self.capability);
         let batches = crate::frame_packet_adapter::frame_packet_to_batches(packet, &set);
         let lights = crate::frame_packet_adapter::frame_packet_lights(packet);
-        self.present_frame(
+        self.present_frame_at(
             packet.clear_color(),
             &lights,
             packet.light_view_proj(),
@@ -322,6 +371,10 @@ impl GpuBackendApi {
                 .map_or(IDENTITY_MATRIX, |camera| camera.view_proj()),
             &batches,
             packet.sdf(),
+            // The frame's surface time: the packet's own supplied engine time
+            // when something in the set reads a clock, and an exact zero when
+            // nothing does.
+            set.surface_time(packet.time()),
         )
     }
 
@@ -338,6 +391,30 @@ impl GpuBackendApi {
         surfaces: &[axiom_surface::Surface],
     ) -> Vec<axiom_host::FrameFeature> {
         crate::surface_program::SurfaceProgramSet::build(surfaces, self.capability).degradations()
+    }
+
+    /// Which features this backend cannot honour for `surfaces` **when they are
+    /// drawn on skinned geometry**.
+    ///
+    /// The skinned vertex stage binds all 16 vertex attributes a WebGL2
+    /// downlevel target guarantees — the ceiling that already costs a skinned
+    /// material its emissive and its specular — and the vertex it receives has
+    /// already been deformed once, by the joint palette. So it runs **no**
+    /// displacement program, and a displacing surface bound to a skinned draw is
+    /// reported here rather than silently rendering the right colour on an
+    /// undeformed shape. Everything else about a surface lowers identically on
+    /// both paths, which is why this is a second query and not a second
+    /// pipeline's worth of rules.
+    pub fn skinned_surface_degradations(
+        &self,
+        surfaces: &[axiom_surface::Surface],
+    ) -> Vec<axiom_host::FrameFeature> {
+        crate::surface_program::SurfaceProgramSet::build_for(
+            surfaces,
+            self.capability,
+            crate::surface_program::capability::GeometryPath::Skinned,
+        )
+        .degradations()
     }
 
     /// The bytes this backend uploads into the shared surface-parameter buffer
@@ -752,6 +829,42 @@ mod tests {
             1024
         );
         assert!(backend.surface_parameter_bytes(&[]).is_empty());
+    }
+
+    /// A displacing surface bound to a **skinned** draw is reported, because the
+    /// skinned vertex stage runs no displacement program — the 16-attribute
+    /// ceiling. Not a silent no-op: a character bound to a wind surface that did
+    /// not move would be a wrong shape nobody was told about.
+    #[test]
+    fn a_displacing_surface_is_reported_dropped_for_the_skinned_vertex_path() {
+        use axiom_field::FieldValue;
+        use axiom_surface::{SurfaceBuilder, SurfaceChannel};
+
+        let backend = GpuBackendApi::new(&request(320, 240));
+        let displacing = SurfaceBuilder::new()
+            .constant(
+                SurfaceChannel::Displacement,
+                FieldValue::vec3(axiom_math::Vec3::new(0.0, 0.5, 0.0)),
+            )
+            .build()
+            .expect("a vec3 constant is a legal displacement");
+        assert_eq!(
+            backend.skinned_surface_degradations(std::slice::from_ref(&displacing)),
+            vec![axiom_host::FrameFeature::ProceduralSurface]
+        );
+        // A surface that does not displace is fine on both paths — the ceiling
+        // is about the vertex stage, not about skinning per se.
+        let constant_only = SurfaceBuilder::new()
+            .constant(
+                SurfaceChannel::BaseColor,
+                FieldValue::vec4(axiom_math::Vec4::new(0.25, 0.5, 0.75, 1.0)),
+            )
+            .build()
+            .expect("a vec4 constant is a legal base colour");
+        assert!(backend
+            .skinned_surface_degradations(std::slice::from_ref(&constant_only))
+            .is_empty());
+        assert!(backend.skinned_surface_degradations(&[]).is_empty());
     }
 
     #[test]

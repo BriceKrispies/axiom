@@ -148,6 +148,10 @@ pub(crate) fn render_to_rgba(
                     sdf,
                     caps,
                     camera_view_proj,
+                    // The capture path is handed batches, never an authored
+                    // surface set, so no program of any kind runs here and its
+                    // surface time is an exact zero.
+                    0.0,
                 );
             });
             // Wait for the last submission before the caller stops its clock,
@@ -186,6 +190,7 @@ pub(crate) fn render_to_rgba(
                 sdf,
                 caps,
                 camera_view_proj,
+                0.0,
             );
             let blit = UpscaleBlit::new(
                 &device,

@@ -52,8 +52,10 @@ const VARYING_INPUT_BITS: u16 =
 /// merely present.
 ///
 /// [`SurfaceInput::TIME`] is deliberately absent from this set: it is a
-/// *uniform*, not a varying, and the main pass has no frame-time uniform to read
-/// — so it is gated in [`crate::surface_program::capability`] instead.
+/// *uniform*, not a varying: the frame writes it once, into the lighting
+/// uniform's `camera.w` lane, and both stages read the same word. Whether a
+/// surface needs it at all is [`SurfaceProgramPlan::reads_time`], not a lane
+/// budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct VaryingSet(u16);
 
@@ -108,6 +110,13 @@ impl StageSplit {
     /// carry, which is what makes the fallback partial rather than total.
     pub(crate) const fn fragment_channels(self) -> u16 {
         self.fragment
+    }
+
+    /// The vertex-stage channels this surface programs — displacement, or
+    /// nothing. Named separately from [`Self::has_vertex_stage`] because a
+    /// report says *which* channels a failing program covered.
+    pub(crate) const fn vertex_channels(self) -> u16 {
+        self.vertex
     }
 }
 
@@ -164,6 +173,18 @@ impl SurfaceProgramPlan {
     /// The neutral requirements the plan was derived from.
     pub(crate) const fn requirements(self) -> SurfaceRequirements {
         self.requirements
+    }
+
+    /// Whether any of this surface's channels reads the clock.
+    ///
+    /// The one thing the frame has to *supply* rather than derive: every other
+    /// input to a program is either a varying the vertex stage already writes or
+    /// a parameter the surface itself declares. A surface that answers `false`
+    /// here is a static surface, and the pass writes it no time at all — which
+    /// is what keeps a static surface exactly as free as it was before there was
+    /// a clock (see [`crate::surface_program::SurfaceProgramSet::surface_time`]).
+    pub(crate) const fn reads_time(self) -> bool {
+        self.inputs.contains(SurfaceInput::TIME)
     }
 }
 
@@ -283,5 +304,29 @@ mod tests {
         // Time is never a varying, however many channels read it.
         assert_eq!(VARYING_INPUT_BITS & SurfaceInput::TIME.bits(), 0);
         assert!(VaryingSet::of(SurfaceInput::TIME).is_available());
+    }
+
+    #[test]
+    fn only_a_clock_reading_surface_plans_as_reading_the_clock() {
+        let (builder, clock) = FieldBuilder::new(FieldId::of_name("gpu/plan/time"), 1).push(
+            FieldOp::Time,
+            Vec::new(),
+            Vec::new(),
+        );
+        let (builder, splat) = builder.push(
+            FieldOp::Compose,
+            vec![Param::int(3)],
+            vec![clock, clock, clock],
+        );
+        let timed = SurfaceBuilder::new()
+            .field(SurfaceChannel::Displacement, builder.build(splat))
+            .build()
+            .expect("a vec3 field is a legal displacement");
+        assert!(SurfaceProgramPlan::of(&timed).reads_time());
+        let still = SurfaceBuilder::new()
+            .field(SurfaceChannel::Displacement, point_offset())
+            .build()
+            .expect("a vec3 field is a legal displacement");
+        assert!(!SurfaceProgramPlan::of(&still).reads_time());
     }
 }

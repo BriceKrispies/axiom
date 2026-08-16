@@ -628,6 +628,7 @@ fn fs(in: VsOut) -> FsOut {
 fn scene_shader_source() -> String {
     wgsl_template::scene_shader(
         SCENE_WGSL_PREFIX,
+        wgsl_template::DEFAULT_DISPLACE_WGSL,
         wgsl_template::DEFAULT_SURFACE_WGSL,
         SCENE_WGSL_SUFFIX,
     )
@@ -1019,9 +1020,13 @@ impl SceneRenderer {
             .collect();
 
         // Lighting uniform (group 1): the frame's lights, rewritten each frame.
+        // Visible to the VERTEX stage as well as the fragment stage, because its
+        // `camera.w` lane carries the frame's surface time and `vs` reads it to
+        // run a displacement program (`crate::scene_wgsl`). One uniform, one
+        // per-frame write, both stages.
         let lights_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("axiom-lights-layout"),
-            entries: &[uniform_entry(0, wgpu::ShaderStages::FRAGMENT)],
+            entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT)],
         });
         let lights_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("axiom-lights-ubo"),
@@ -1243,6 +1248,13 @@ impl SceneRenderer {
         // recover each pixel's world ray); the mesh pass gets its transforms
         // pre-multiplied per instance.
         camera_view_proj: [f32; 16],
+        // The frame's SURFACE TIME in seconds — what a time-varying authored
+        // surface samples in both the vertex and the fragment stage. Explicitly
+        // supplied engine time (`axiom_host::FramePacket::time`), never a wall
+        // clock, and an exact zero for a frame whose surfaces read no clock, so
+        // such a frame's packed lighting uniform is byte-identical to what it
+        // was before there was a clock at all.
+        surface_time: f32,
     ) {
         // Gate the SDF raymarch pass on the frame's Sdf capability bit; a profile that
         // drops SDF renders meshes only (the same policy the Canvas 2D backend applies).
@@ -1260,6 +1272,7 @@ impl SceneRenderer {
                     .unwrap_or_else(axiom_host::FrameDepthFog::none),
                 caps,
                 camera_view_proj,
+                surface_time,
             ),
         );
         queue.write_buffer(
@@ -2153,6 +2166,10 @@ fn pack_lights(
     depth_fog: axiom_host::FrameDepthFog,
     caps: u32,
     camera_view_proj: [f32; 16],
+    // The frame's surface time, packed into the `camera` vec4's fourth lane —
+    // an unread pad until now, so a time-varying surface costs this uniform
+    // nothing and a frame with none packs the exact zero the lane always held.
+    surface_time: f32,
 ) -> Vec<u8> {
     let count = lights.len().min(MAX_LIGHTS);
     let mut bytes = Vec::with_capacity(LIGHTS_UBO_BYTES as usize);
@@ -2187,7 +2204,7 @@ fn pack_lights(
         eye[0],
         eye[1],
         eye[2],
-        0.0,
+        surface_time,
     ]
     .iter()
     .for_each(|f| bytes.extend_from_slice(&f.to_le_bytes()));

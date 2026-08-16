@@ -64,9 +64,16 @@ struct Lights {
     // default, which makes this an exact no-op); w unused.
     fog_range: vec4<f32>,
     // xyz = the camera's world position, recovered on the CPU from the frame's
-    // view-projection; w unused. Specular is view-dependent — that is the whole
+    // view-projection. Specular is view-dependent — that is the whole
     // difference between it and the Lambert term — so the fragment stage cannot
     // compute one without knowing where the frame is being watched from.
+    //
+    // w = the frame's SURFACE TIME in seconds: `axiom_host::FramePacket::time`,
+    // explicitly supplied engine time and never a wall clock, in what used to be
+    // a pad lane. It rides this uniform rather than one of its own because this
+    // uniform is already written once per frame, so a time-varying surface costs
+    // no extra write at all — and a frame whose surfaces read no clock packs an
+    // exact zero here, which is the byte the lane always held.
     camera: vec4<f32>,
     items: array<Light, 16>,
 };
@@ -203,9 +210,31 @@ fn vs(
 ) -> VsOut {
     let mvp = mat4x4<f32>(m0, m1, m2, m3);
     let world = mat4x4<f32>(w0, w1, w2, w3);
+    // The VERTEX half of the surface program. Object-space offset in object
+    // space, added BEFORE the MVP multiply — a displacement is a change to the
+    // shape, not to where the shape is looked at from.
+    //
+    // Every argument is something this stage already had: three of the four
+    // per-vertex attributes it has always bound, the frame's surface time from
+    // the lighting uniform, and the shared parameter region. No new vertex
+    // attribute — the rigid pipeline binds 14 of the 16 a WebGL2 downlevel
+    // target guarantees, and a 17th would fail pipeline creation there.
+    //
+    // `surface_program == 0` runs the DEFAULT program, which returns an exact
+    // zero, so the vertex this transforms is the vertex it was handed and every
+    // existing frame is unchanged.
+    //
+    // The NORMAL is deliberately NOT recomputed. A displaced vertex's true
+    // normal needs its neighbours' displaced positions, which this stage cannot
+    // see; an author who needs a correct shading normal derives one analytically
+    // from the same field and binds it to the `Normal` channel
+    // (`axiom_surface::SurfaceBuilder::normal_from_height`). What reaches the
+    // fragment stage below is the undisplaced surface's normal, which is correct
+    // for small displacement and honest for large.
+    let displaced = position + axiom_displace(position, normal, uv, lights.camera.w, SurfaceParams());
     var out: VsOut;
-    out.clip = mvp * vec4<f32>(position, 1.0);
-    out.world_pos = (world * vec4<f32>(position, 1.0)).xyz;
+    out.clip = mvp * vec4<f32>(displaced, 1.0);
+    out.world_pos = (world * vec4<f32>(displaced, 1.0)).xyz;
     out.normal = (world * vec4<f32>(normal, 0.0)).xyz;
     out.uv = uv;
     out.color = vertex_color * instance_color;
@@ -214,7 +243,11 @@ fn vs(
     // all three. It is added after lighting, before fog.
     out.emissive = instance_emissive.rgb;
     out.specular = instance_emissive.w;
-    out.object_pos = position;
+    // The DISPLACED object-space position: that is where the surface actually
+    // is, so a pattern authored over it rides the deformation instead of sliding
+    // through it — the same reasoning `vs_skinned` applies to its post-skin
+    // position below.
+    out.object_pos = displaced;
     out.object_normal = normal;
     return out;
 }
@@ -250,6 +283,15 @@ fn vs_skinned(
              + weights.y * joint_matrix(base + u32(joints.y))
              + weights.z * joint_matrix(base + u32(joints.z))
              + weights.w * joint_matrix(base + u32(joints.w));
+    // The skinned stage does NOT call `axiom_displace`, and that is a reported
+    // limit rather than an oversight. This pipeline binds all 16 vertex
+    // attributes the WebGL2 downlevel target guarantees (6 per-vertex + 10
+    // per-instance) — the same ceiling that already costs a skinned material its
+    // emissive and specular below — and the vertex is already deformed once,
+    // through the joint palette. A surface that displaces is refused for this
+    // path by `crate::surface_program::capability::validate` and reported as
+    // `axiom_host::FrameFeature::ProceduralSurface`, so a skinned character
+    // bound to a wind surface is a stated drop, never a silent no-op.
     let sp = skin * vec4<f32>(position, 1.0);
     let sn = skin * vec4<f32>(normal, 0.0);
     var out: VsOut;
@@ -342,9 +384,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // is what makes every existing frame pixel-identical.
     //
     // `params` is the zero value: this pass binds no parameter buffer yet, and
-    // the only program it runs reads none.
+    // the only program it runs reads none. The time lane is the frame's own
+    // surface time (`lights.camera.w`), which is an exact zero on a frame whose
+    // surfaces read no clock.
     let surface = axiom_surface(
-        SurfaceIn(in.object_pos, in.uv, in.object_normal, 0.0, albedo * in.color, in.emissive),
+        SurfaceIn(in.object_pos, in.uv, in.object_normal, lights.camera.w, albedo * in.color, in.emissive),
         SurfaceParams(),
     );
     let base = vec4<f32>(surface.base_color.rgb, surface.opacity);

@@ -16,6 +16,11 @@ allowed_layers = [
     # emit walks the operator DAG a FieldGraph wraps: a Node's operator code,
     # its raw Param words and its NodeId inputs are what an emitter reads.
     "recipe",
+    # The frame's presentation time is a kernel `Seconds`: surface_program reads
+    # it to decide what the pass writes into its surface-time lane, so the
+    # quantity is named directly in non-test code rather than flattened to a
+    # bare float at the boundary.
+    "kernel",
 ]
 
 allowed_modules = []

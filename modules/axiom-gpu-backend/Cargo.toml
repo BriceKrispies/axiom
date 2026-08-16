@@ -29,6 +29,12 @@ axiom-field = { path = "../../crates/axiom-field" }
 # rather than reached for through inference.
 axiom-recipe = { path = "../../crates/axiom-recipe" }
 
+# The frame's presentation time is a kernel `Seconds` — explicitly supplied
+# engine time, never a wall clock. `surface_program` decides from it what the
+# pass writes into its surface-time lane, and names the quantity directly rather
+# than degrading it to a bare float at the module boundary.
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+
 # wgpu/bytemuck are optional: pulled in on native only by the `offscreen`
 # feature; required unconditionally on wasm32 via the target table below.
 # pollster drives the native off-screen device/readback (block_on).
@@ -40,10 +46,6 @@ pollster = { version = "0.4", optional = true }
 # Native off-screen rendering (the `axiom-shot` screenshot tool); off by
 # default so the default native build/coverage/lint never compile this arm.
 offscreen = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
-
-[dev-dependencies]
-# Test-only: builds a HostPresentationRequest, which needs a kernel handle source.
-axiom-kernel = { path = "../../crates/axiom-kernel" }
 
 # The live presentation arm (real wgpu + web-sys), pulled in only for wasm32.
 # The `webgl` feature adds wgpu's WebGL2 backend alongside WebGPU so

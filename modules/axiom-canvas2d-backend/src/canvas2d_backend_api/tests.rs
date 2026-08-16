@@ -578,8 +578,54 @@ fn uv_x_color() -> axiom_field::FieldGraph {
     builder.build(splat)
 }
 
-fn zero_time() -> axiom_kernel::Seconds {
-    axiom_kernel::Seconds::finite_or_zero(0.0)
+/// A vec4 base colour that is the presentation `Time` in every lane — the
+/// smallest thing whose rendered pixels are a function of the clock.
+fn clock_color() -> axiom_field::FieldGraph {
+    let (builder, clock) =
+        axiom_field::FieldBuilder::new(axiom_field::FieldId::of_name("c2d/api/clock"), 1).push(
+            axiom_field::FieldOp::Time,
+            Vec::new(),
+            Vec::new(),
+        );
+    let (builder, splat) = builder.push(
+        axiom_field::FieldOp::Compose,
+        vec![axiom_recipe::Param::int(4)],
+        vec![clock, clock, clock, clock],
+    );
+    builder.build(splat)
+}
+
+/// **The presentation time is the packet's, on this backend too.** It used to be
+/// a loose parameter on these two entries, which meant the software arm and the
+/// GPU arm each had their own idea of what second it was; both now read
+/// `FramePacket::time`, so a frame handed to either produces the same clock.
+///
+/// The test is the observable one: the same packet at two times rasterizes
+/// different pixels, and the same packet at the same time rasterizes identical
+/// ones — replayable, because the time is supplied and never sampled.
+#[test]
+fn a_clock_reading_surface_samples_the_packets_own_time_and_replays_exactly() {
+    use axiom_host::FrameFeatureSet;
+    let mut backend = Canvas2dBackendApi::new(&request(64, 48));
+    backend.load_meshes(&[ground(7)]);
+    let surface = axiom_surface::SurfaceBuilder::new()
+        .field(axiom_surface::SurfaceChannel::BaseColor, clock_color())
+        .build()
+        .expect("a vec4 time field is a legal base colour");
+    let at = |seconds: f32| {
+        let frame = packet(
+            vec![surfaced_draw(surface.digest().raw())],
+            FrameFeatureSet::new(false, false, 0, 0),
+        )
+        .with_time(axiom_kernel::Seconds::finite_or_zero(seconds));
+        backend
+            .render_offscreen_rgba_with_surfaces(&frame, std::slice::from_ref(&surface))
+            .0
+    };
+    let dark = at(0.05);
+    let bright = at(0.8);
+    assert_ne!(dark, bright, "the rasterized pixels must follow the clock");
+    assert_eq!(dark, at(0.05), "the same tick must replay exactly");
 }
 
 fn surfaced_draw(program: u64) -> axiom_host::FrameDrawItem {
@@ -605,7 +651,6 @@ fn a_surface_this_backend_was_handed_is_honoured_and_not_reported() {
             FrameFeatureSet::new(false, false, 0, 0),
         ),
         std::slice::from_ref(&surface),
-        zero_time(),
     );
     assert!(
         !report
@@ -622,7 +667,6 @@ fn a_surface_this_backend_was_handed_is_honoured_and_not_reported() {
             FrameFeatureSet::new(false, false, 0, 0),
         ),
         std::slice::from_ref(&surface),
-        zero_time(),
     );
     let (plain, _, _) = backend.render_offscreen_rgba(&packet(
         vec![surfaced_draw(surface.digest().raw())],
@@ -644,7 +688,6 @@ fn a_draw_naming_an_unhandled_surface_is_reported_dropped() {
             FrameFeatureSet::new(false, false, 0, 0),
         ),
         &[],
-        zero_time(),
     );
     assert!(report
         .degraded_features()
@@ -682,7 +725,6 @@ fn a_displacing_surface_is_reported_because_shading_cannot_move_geometry() {
             FrameFeatureSet::new(false, false, 0, 0),
         ),
         std::slice::from_ref(&surface),
-        zero_time(),
     );
     assert!(report
         .degraded_features()
@@ -710,7 +752,6 @@ fn a_surface_binding_roughness_reports_the_specular_term_it_cannot_express() {
             FrameFeatureSet::new(false, false, 0, 0),
         ),
         std::slice::from_ref(&rough),
-        zero_time(),
     );
     assert!(report
         .degraded_features()
@@ -742,7 +783,6 @@ fn a_profile_without_the_capability_reports_the_surface_it_declines_to_evaluate(
             FrameFeatureSet::new(false, false, 0, 0),
         ),
         std::slice::from_ref(&surface),
-        zero_time(),
     );
     assert!(report
         .degraded_features()

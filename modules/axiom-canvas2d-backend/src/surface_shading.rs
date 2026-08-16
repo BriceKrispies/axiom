@@ -34,8 +34,23 @@
 //! reported degraded through the existing `SpecularHighlight` feature, which is
 //! precisely the term that is missing.
 //!
-//! Displacement is not honoured either: this path shades geometry, it does not
-//! move it.
+//! **Displacement is not honoured either, and it is reported dropped.** This
+//! path shades geometry; it does not move it, however finely it samples. The
+//! reason is cost, not principle: this backend already CPU-skins, allocating a
+//! fresh [`crate::mesh_cache::MeshGeometry`] per skinned draw per frame, and
+//! evaluating a field per *vertex* on top of that would multiply that cost on
+//! the arm least able to pay it — while the GPU arm gets the same deformation
+//! for free in a stage it already runs.
+//!
+//! So the two backends' silhouettes differ for a displacing surface, and the
+//! frame is told: [`Self::displaces`] feeds the
+//! `axiom_host::FrameFeature::ProceduralSurface` drop in
+//! [`crate::Canvas2dBackendApi`]'s report. That divergence is consistent with
+//! the software arm's declared policy — burnt-rubber's own convergence campaign
+//! sets `guard_rule = "legibility, not parity"` for it — and a *stated* drop is
+//! the whole difference between a degrade and a bug.
+//!
+//! [`Self::displaces`]: SurfaceCache::displaces
 
 use axiom_field::{EvalContext, FieldValue};
 use axiom_kernel::Seconds;

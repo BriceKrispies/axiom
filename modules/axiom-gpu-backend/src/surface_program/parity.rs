@@ -51,15 +51,15 @@ use crate::surface_program::emit::surface_function;
 use crate::surface_program::params::{pack, ParamLayout};
 use crate::surface_program::program_error::{SurfaceProgramError, SurfaceProgramFault};
 use crate::surface_program::wgsl_template::{
-    scene_shader, DEFAULT_SURFACE_WGSL, SURFACE_PRELUDE_WGSL,
+    scene_shader, DEFAULT_DISPLACE_WGSL, DEFAULT_SURFACE_WGSL, SURFACE_PRELUDE_WGSL,
 };
 
 /// How many evaluation contexts one run compares. Also the target's width, and
 /// one fragment per context.
-const SAMPLES: usize = 24;
+pub(super) const SAMPLES: usize = 24;
 
 /// The absolute tolerance, documented in this module's header. Never zero.
-const TOLERANCE: f32 = 1.0e-4;
+pub(super) const TOLERANCE: f32 = 1.0e-4;
 
 /// `copy_texture_to_buffer` requires each row aligned to this many bytes.
 const ROW_ALIGN: u32 = 256;
@@ -67,7 +67,7 @@ const ROW_ALIGN: u32 = 256;
 /// The harness shader: a fullscreen triangle whose fragment stage evaluates the
 /// generated `axiom_surface` at the context its pixel column names, plus a second
 /// entry point that renders the lattice hash itself.
-const PARITY_HARNESS_WGSL: &str = r#"
+pub(super) const PARITY_HARNESS_WGSL: &str = r#"
 struct ParityContexts { items: array<vec4<f32>, 72> };
 struct ParityCells { items: array<vec4<u32>, 48> };
 
@@ -98,6 +98,19 @@ fn parity_fs(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     return result.base_color;
 }
 
+// The VERTEX stage's program, evaluated at the context its pixel column names.
+// It is the same `axiom_displace` the main pass's `vs` calls, with the same five
+// arguments in the same order — so what this compares is the function the frame
+// actually runs, not a restatement of it.
+@fragment
+fn parity_displace_fs(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let index = u32(position.x);
+    let a = contexts.items[index * 3u + 0u];
+    let b = contexts.items[index * 3u + 1u];
+    let c = contexts.items[index * 3u + 2u];
+    return vec4<f32>(axiom_displace(a.xyz, c.xyz, b.xy, a.w, parity_params), 0.0);
+}
+
 // The lattice hash, rendered as four 16-bit halves. Every half is below 65536
 // and therefore exact in an f32, so this comparison is bit-for-bit despite
 // travelling through a float target.
@@ -120,15 +133,15 @@ fn parity_hash_fs(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f
 "#;
 
 /// A real GPU: the device and queue every run in this module shares.
-struct ParityGpu {
+pub(super) struct ParityGpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    backend: wgpu::Backend,
+    pub(super) backend: wgpu::Backend,
 }
 
 impl ParityGpu {
     /// Acquire a native adapter, or fail the test loudly.
-    fn acquire() -> ParityGpu {
+    pub(super) fn acquire() -> ParityGpu {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -153,7 +166,7 @@ impl ParityGpu {
 
     /// Compile `source`, capturing a validation failure as a structured error
     /// naming `program_id` and the channels the program covered.
-    fn compile(
+    pub(super) fn compile(
         &self,
         source: &str,
         program_id: u64,
@@ -178,7 +191,7 @@ impl ParityGpu {
 
     /// Render `entry_point` over a `SAMPLES x 1` `Rgba32Float` target and read
     /// the four lanes of every pixel back.
-    fn render(
+    pub(super) fn render(
         &self,
         module: &wgpu::ShaderModule,
         entry_point: &str,
@@ -350,7 +363,7 @@ impl ParityGpu {
 /// sign-extends them), non-integer coordinates (gradient noise is exactly zero
 /// at a lattice node, so an integer grid would hide every hash error), several
 /// lattice cells, and a moving clock.
-fn contexts() -> Vec<EvalContext> {
+pub(super) fn contexts() -> Vec<EvalContext> {
     (0..SAMPLES)
         .map(|index| {
             let t = index as f32;
@@ -366,7 +379,7 @@ fn contexts() -> Vec<EvalContext> {
 
 /// The context uniform's bytes: three `vec4` per sample — `(point, time)`,
 /// `(uv, 0, 0)`, `(normal, 0)` — matching what `parity_fs` unpacks.
-fn context_bytes(contexts: &[EvalContext]) -> Vec<u8> {
+pub(super) fn context_bytes(contexts: &[EvalContext]) -> Vec<u8> {
     let mut bytes: Vec<u8> = contexts
         .iter()
         .flat_map(|context| {
@@ -401,7 +414,7 @@ struct Case {
 }
 
 /// A fresh builder for a named graph.
-fn builder(name: &str) -> FieldBuilder {
+pub(super) fn builder(name: &str) -> FieldBuilder {
     FieldBuilder::new(FieldId::of_name(name), 1)
 }
 
@@ -648,7 +661,13 @@ fn compare(gpu: &ParityGpu, case: &Case, contexts: &[EvalContext]) -> (Vec<[f32;
     let program = surface_function(&surface).expect("every parity case emits");
     let module = gpu
         .compile(
-            &[SURFACE_PRELUDE_WGSL, &program, PARITY_HARNESS_WGSL].concat(),
+            &[
+                SURFACE_PRELUDE_WGSL,
+                DEFAULT_DISPLACE_WGSL,
+                &program,
+                PARITY_HARNESS_WGSL,
+            ]
+            .concat(),
             surface.digest().raw(),
             SurfaceChannel::BaseColor.bit(),
         )
@@ -682,7 +701,7 @@ fn compare(gpu: &ParityGpu, case: &Case, contexts: &[EvalContext]) -> (Vec<[f32;
 }
 
 /// Assert two lane sets agree to [`TOLERANCE`], naming the operator.
-fn assert_parity(operator: &str, cpu: &[[f32; 4]], gpu: &[[f32; 4]]) {
+pub(super) fn assert_parity(operator: &str, cpu: &[[f32; 4]], gpu: &[[f32; 4]]) {
     cpu.iter()
         .zip(gpu.iter())
         .enumerate()
@@ -746,7 +765,13 @@ fn the_wgsl_lattice_hash_is_the_kernels_stable_hash_bit_for_bit() {
     padded.resize(48 * 16, 0);
     let module = gpu
         .compile(
-            &[SURFACE_PRELUDE_WGSL, DEFAULT_SURFACE_WGSL, PARITY_HARNESS_WGSL].concat(),
+            &[
+                SURFACE_PRELUDE_WGSL,
+                DEFAULT_DISPLACE_WGSL,
+                DEFAULT_SURFACE_WGSL,
+                PARITY_HARNESS_WGSL,
+            ]
+            .concat(),
             0,
             SurfaceChannel::BaseColor.bit(),
         )
@@ -833,6 +858,7 @@ fn the_main_pass_shader_compiles_with_the_default_program_spliced_in() {
     let gpu = ParityGpu::acquire();
     let source = scene_shader(
         crate::scene_wgsl::SCENE_WGSL_PREFIX,
+        DEFAULT_DISPLACE_WGSL,
         DEFAULT_SURFACE_WGSL,
         crate::scene_wgsl::SCENE_WGSL_SUFFIX,
     );

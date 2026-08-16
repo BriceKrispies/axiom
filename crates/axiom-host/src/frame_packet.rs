@@ -13,6 +13,8 @@
 //! remap baked in — applying that (e.g. the wgpu z∈[0,1] fix) is a backend
 //! concern handled where the packet is consumed.
 
+use axiom_kernel::Seconds;
+
 use crate::sdf_scene::SdfScene;
 
 /// The pixel dimensions of the frame's render target.
@@ -364,6 +366,7 @@ pub struct FramePacket {
     sky: Option<crate::frame_sky::FrameSky>,
     bloom: Option<crate::frame_bloom::FrameBloom>,
     retro_32bit: Option<crate::frame_retro_32bit::FrameRetro32BitProfile>,
+    time: Seconds,
 }
 
 impl FramePacket {
@@ -400,7 +403,34 @@ impl FramePacket {
             sky: None,
             bloom: None,
             retro_32bit: None,
+            // The default is exactly zero, not "absent": a frame that supplies
+            // no time still has one, and it is the same one every replay of it
+            // has. See [`Self::with_time`].
+            time: Seconds::finite_or_zero(0.0),
         }
+    }
+
+    /// Supply this frame's **presentation time** — the clock a time-varying
+    /// authored surface samples.
+    ///
+    /// This is explicitly supplied engine time, never a wall clock. It is the
+    /// only sanctioned route by which time enters an
+    /// `axiom_field::FieldGraph`, and it is what makes wind and ripple
+    /// replayable: the same tick presented twice produces the same displaced
+    /// geometry, byte for byte.
+    ///
+    /// A packet that never calls this carries [`Seconds`] zero, which is why
+    /// every existing frame is unchanged.
+    #[must_use]
+    pub const fn with_time(mut self, time: Seconds) -> Self {
+        self.time = time;
+        self
+    }
+
+    /// The frame's presentation time. Zero unless [`Self::with_time`] supplied
+    /// one.
+    pub const fn time(&self) -> Seconds {
+        self.time
     }
 
     /// Attach an SDF raymarch scene to this packet. The raymarch pass is the
@@ -763,6 +793,21 @@ mod tests {
         assert_eq!(p.features(), FrameFeatureSet::new(false, true, 1, 0));
         assert!(p.sdf().is_none());
         assert!(format!("{p:?}").contains("FramePacket"));
+    }
+
+    /// A frame that supplies no time carries exactly zero, and one that supplies
+    /// a time carries that one — the lane a time-varying authored surface reads,
+    /// and the reason wind replays identically.
+    #[test]
+    fn a_packet_carries_the_presentation_time_it_was_supplied_and_zero_otherwise() {
+        let quiet = sample_packet();
+        assert_eq!(quiet.time(), Seconds::finite_or_zero(0.0));
+        let timed = sample_packet().with_time(Seconds::finite_or_zero(2.75));
+        assert_eq!(timed.time(), Seconds::finite_or_zero(2.75));
+        // The time is part of the packet's identity: two frames of the same
+        // draws at different times are different frames.
+        assert_ne!(timed, quiet);
+        assert_eq!(timed, sample_packet().with_time(Seconds::finite_or_zero(2.75)));
     }
 
     /// A backend without the Specular capability decides whether it has a drop

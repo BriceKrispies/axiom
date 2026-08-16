@@ -6,8 +6,6 @@ use axiom_host::{
     BackendKind, Draw2dList, FrameDepthCueStats, FrameDrawItem, FrameFeature, FramePacket,
     FrameRasterStats, FrameSubmissionReport, HostPresentationRequest, RenderCapability,
 };
-use axiom_kernel::Seconds;
-
 use crate::canvas_policy::{CanvasQualityPreset, CanvasVisualProfile};
 use crate::draw2d_raster::Draw2dTextures;
 use crate::low_poly_raster_options::LowPolyRasterOptions;
@@ -234,8 +232,11 @@ impl Canvas2dBackendApi {
     }
 
     /// Like [`Self::present_packet`], but with the frame's authored
-    /// [`axiom_surface::Surface`] set and the presentation `time` its
-    /// `Time`-reading channels sample.
+    /// [`axiom_surface::Surface`] set. The presentation time its `Time`-reading
+    /// channels sample is the **packet's own** `axiom_host::FramePacket::time` —
+    /// explicitly supplied engine time, never a wall clock, and the same lane
+    /// the GPU arm lowers into its surface-time uniform, so the two backends
+    /// cannot disagree about what second it is.
     ///
     /// **This backend renders an authored surface for real.** It executes no
     /// shader, but a surface's channels are fields — pure functions with a
@@ -251,9 +252,8 @@ impl Canvas2dBackendApi {
         &self,
         packet: &FramePacket,
         surfaces: &[axiom_surface::Surface],
-        time: Seconds,
     ) -> FrameSubmissionReport {
-        let cache = SurfaceCache::build(surfaces, time);
+        let cache = SurfaceCache::build(surfaces, packet.time());
         let result = self.rasterize(packet, &[], &cache);
         self.blit(result.rgba_bytes(), result.width(), result.height());
         self.report(packet, &result, &cache)
@@ -266,9 +266,8 @@ impl Canvas2dBackendApi {
         &self,
         packet: &FramePacket,
         surfaces: &[axiom_surface::Surface],
-        time: Seconds,
     ) -> (Vec<u8>, u32, u32) {
-        let result = self.rasterize(packet, &[], &SurfaceCache::build(surfaces, time));
+        let result = self.rasterize(packet, &[], &SurfaceCache::build(surfaces, packet.time()));
         (
             result.rgba_bytes().to_vec(),
             result.width(),

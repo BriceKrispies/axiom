@@ -65,9 +65,10 @@ struct SurfaceIn {
     uv: vec2<f32>,
     // The OBJECT-space normal, for the same reason as `object_pos`.
     object_normal: vec3<f32>,
-    // Presentation time in seconds. No frame time reaches this pass yet, so the
-    // main pass fills it with zero and a surface reading it fails the capability
-    // gate rather than being lowered against a frozen clock.
+    // Presentation time in seconds — the frame's `axiom_host::FramePacket::time`,
+    // explicitly supplied engine time and never a wall clock. It is zero for a
+    // frame whose surfaces read no clock, so a static surface costs exactly what
+    // it did before there was one.
     time: f32,
     // What the existing pipeline already resolved for this fragment: the sampled
     // albedo times the per-vertex and per-instance colour. The DEFAULT program
@@ -286,15 +287,37 @@ fn axiom_surface(in: SurfaceIn, params: SurfaceParams) -> SurfaceOut {
 }
 "#;
 
-/// The main pass's whole shader source: the scene WGSL's first half, the fixed
-/// surface vocabulary, one generated program, then the scene WGSL's second half.
+/// The program the **vertex** stage runs for a draw that displaces nothing: the
+/// zero offset.
+///
+/// `vs` adds this to the object-space position before the MVP multiply, so with
+/// the default spliced in the vertex it transforms is the vertex it was handed —
+/// bit for bit, because adding an exact zero to an IEEE float is the identity on
+/// every input including infinities and negative zero. That is what keeps every
+/// existing frame pixel-identical now that the splice exists.
+pub(crate) const DEFAULT_DISPLACE_WGSL: &str = r#"
+fn axiom_displace(pos: vec3<f32>, nrm: vec3<f32>, uv: vec2<f32>, t: f32, params: SurfaceParams) -> vec3<f32> {
+    return vec3<f32>(0.0, 0.0, 0.0);
+}
+"#;
+
+/// The main pass's whole shader source: the fixed surface vocabulary, one
+/// generated **vertex** program, the scene WGSL's first half, one generated
+/// **fragment** program, then the scene WGSL's second half.
 ///
 /// Concatenation, never substitution — the precedent is
 /// [`crate::surface_encode::shader_source`], and the property that matters is
-/// that the same `program` always yields the same bytes, which is what makes the
-/// string cacheable by the surface's digest.
-pub(crate) fn scene_shader(prefix: &str, program: &str, suffix: &str) -> String {
-    [prefix, SURFACE_PRELUDE_WGSL, program, suffix].concat()
+/// that the same `(displace, program)` pair always yields the same bytes, which
+/// is what makes the string cacheable by the surface's digest.
+///
+/// **The order is forced, not stylistic.** WGSL requires a declaration before
+/// its use, `vs` lives in `prefix` and calls `axiom_displace`, and `fs` lives in
+/// `suffix` and calls `axiom_surface` — so the vertex program has to precede the
+/// scene's first half while the fragment program has to follow it. Both halves
+/// of one surface land in **one** module keyed by one digest: a displacing
+/// surface must never force a second pipeline for the same material.
+pub(crate) fn scene_shader(prefix: &str, displace: &str, program: &str, suffix: &str) -> String {
+    [SURFACE_PRELUDE_WGSL, displace, prefix, program, suffix].concat()
 }
 
 #[cfg(test)]
@@ -358,21 +381,40 @@ mod tests {
 
     #[test]
     fn the_splice_is_concatenation_in_order_and_is_byte_stable() {
-        let spliced = scene_shader("PREFIX\n", "PROGRAM\n", "SUFFIX\n");
-        assert!(spliced.starts_with("PREFIX\n"));
+        let spliced = scene_shader("PREFIX\n", "DISPLACE\n", "PROGRAM\n", "SUFFIX\n");
         assert!(spliced.ends_with("SUFFIX\n"));
-        let program_at = spliced.find("PROGRAM\n").expect("the program is spliced in");
         let prelude_at = spliced
             .find("struct SurfaceIn")
             .expect("the prelude is spliced in");
-        assert!(
-            prelude_at < program_at,
-            "a program is written against the vocabulary, so the vocabulary comes first"
+        let displace_at = spliced.find("DISPLACE\n").expect("the vertex program");
+        let prefix_at = spliced.find("PREFIX\n").expect("the scene's first half");
+        let program_at = spliced.find("PROGRAM\n").expect("the fragment program");
+        // The order WGSL's declaration-before-use rule forces: vocabulary,
+        // then the vertex program `vs` calls, then `vs` itself, then the
+        // fragment program `fs` calls, then `fs`.
+        assert!(prelude_at < displace_at);
+        assert!(displace_at < prefix_at);
+        assert!(prefix_at < program_at);
+        assert_eq!(
+            spliced,
+            scene_shader("PREFIX\n", "DISPLACE\n", "PROGRAM\n", "SUFFIX\n")
         );
-        assert_eq!(spliced, scene_shader("PREFIX\n", "PROGRAM\n", "SUFFIX\n"));
         assert_eq!(
             spliced.len(),
-            "PREFIX\n".len() + SURFACE_PRELUDE_WGSL.len() + "PROGRAM\n".len() + "SUFFIX\n".len()
+            SURFACE_PRELUDE_WGSL.len()
+                + "DISPLACE\n".len()
+                + "PREFIX\n".len()
+                + "PROGRAM\n".len()
+                + "SUFFIX\n".len()
         );
+    }
+
+    #[test]
+    fn the_default_vertex_program_is_the_exact_zero_offset() {
+        assert!(DEFAULT_DISPLACE_WGSL.contains(
+            "fn axiom_displace(pos: vec3<f32>, nrm: vec3<f32>, uv: vec2<f32>, t: f32, \
+             params: SurfaceParams) -> vec3<f32>"
+        ));
+        assert!(DEFAULT_DISPLACE_WGSL.contains("return vec3<f32>(0.0, 0.0, 0.0);"));
     }
 }

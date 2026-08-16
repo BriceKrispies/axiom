@@ -1,6 +1,6 @@
 //! What an authored [`axiom_surface::Surface`] means to **this** backend.
 //!
-//! Six pieces, one per file, and a set that binds them:
+//! Seven pieces, one per file, and a set that binds them:
 //!
 //! * [`plan`] — the backend-shaped program plan (stage split, interstage lanes,
 //!   parameter layout, program identity).
@@ -12,6 +12,10 @@
 //!   indexed by the operator code.
 //! * [`emit`] — the flat forward pass that turns a surface's channel graphs into
 //!   one `axiom_surface` function.
+//! * [`emit_vertex`] — the same fold over the one **vertex-stage** channel,
+//!   `Displacement`, into one `axiom_displace` function. Both stages compile into
+//!   ONE module keyed by ONE digest: a displacing surface must never force a
+//!   second pipeline for the same material.
 //! * [`wgsl_template`] — the fixed WGSL that function is written against, the
 //!   default program, and the concatenation that splices one into the main pass.
 //! * [`program_error`] — why a surface produced no runnable program.
@@ -21,8 +25,10 @@
 //! `axiom-field`'s CPU evaluator to within the documented tolerance. What this
 //! backend does not yet do is *bind* a generated program to a pipeline and a
 //! parameter buffer, which is pipeline-and-cache work. So the main pass runs
-//! [`wgsl_template::DEFAULT_SURFACE_WGSL`] — the identity over the instance
-//! lanes, which reproduces today's frame exactly — this backend's profile still
+//! [`wgsl_template::DEFAULT_SURFACE_WGSL`] and
+//! [`wgsl_template::DEFAULT_DISPLACE_WGSL`] — the identity over the instance
+//! lanes and the exact zero offset, which together reproduce today's frame
+//! vertex for vertex and pixel for pixel — this backend's profile still
 //! clears [`RenderCapability::ProceduralSurface`], and an authored surface is
 //! reported as [`FrameFeature::ProceduralSurface`] while its **constant**
 //! channels are honoured through the lanes the instance stream already has. A
@@ -33,6 +39,7 @@
 pub(crate) mod capability;
 pub(crate) mod emit;
 pub(crate) mod emit_ops;
+pub(crate) mod emit_vertex;
 // The CPU/GPU parity proof: every operator driven through both the reference
 // evaluator and the emitted shader on a real device. Compiled only with the
 // `offscreen` feature, which is what makes a real adapter available — and it
@@ -40,6 +47,13 @@ pub(crate) mod emit_ops;
 // passes when nothing ran proves nothing.
 #[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
 mod parity;
+// The same proof for the VERTEX stage — a displacement graph sampled at vertex
+// positions — plus the wind/ripple/bend/squash library graphs, which exist to
+// show that deformation needed no new Rust operator. Its own file because
+// `parity` is already near the engine file-size budget and because the two prove
+// different stages.
+#[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
+mod parity_vertex;
 
 pub(crate) mod params;
 pub(crate) mod plan;
@@ -52,9 +66,12 @@ pub(crate) mod program_error;
 pub(crate) mod wgsl_template;
 
 use axiom_host::{BackendCapabilityProfile, FrameFeature};
+use axiom_kernel::Seconds;
 use axiom_surface::{Surface, SurfaceChannel};
 
+use crate::surface_program::capability::GeometryPath;
 use crate::surface_program::emit::surface_function;
+use crate::surface_program::emit_vertex::displace_function;
 use crate::surface_program::params::{pack, program_region_offset, SURFACE_PARAM_REGION_BYTES};
 use crate::surface_program::plan::SurfaceProgramPlan;
 
@@ -77,22 +94,33 @@ impl SurfaceProgramEntry {
     /// is the number the draw carries — while the parameters are packed from its
     /// **flattened** form, because flattening is what composes a layered
     /// surface's per-channel graphs (and therefore its parameter table) into one.
-    fn build(surface: &Surface, profile: BackendCapabilityProfile) -> SurfaceProgramEntry {
+    fn build(
+        surface: &Surface,
+        profile: BackendCapabilityProfile,
+        geometry: GeometryPath,
+    ) -> SurfaceProgramEntry {
         let plan = SurfaceProgramPlan::of(surface);
         let programmed = plan.stage_split().fragment_channels();
         let emission = constant_lanes(surface, SurfaceChannel::Emission, programmed, [0.0; 4]);
         // Generating the program is part of BINDING, never part of a frame: this
-        // is the one place the emitter is driven, and it runs once per surface at
-        // preparation time. The text is not kept — a program cache is separate
+        // is the one place the emitters are driven, and they run once per surface
+        // at preparation time. The text is not kept — a program cache is separate
         // work — but the attempt is what proves the surface lowers at all, and a
         // surface that will not lower is a degraded feature for the same reason a
         // surface the capability gate refuses is.
+        //
+        // BOTH stages are attempted, and they are attempted together: the vertex
+        // and fragment halves of one surface compile into one module keyed by one
+        // digest, so either half failing is the whole program failing.
         let program = surface_function(surface);
+        let vertex_program = displace_function(surface);
         SurfaceProgramEntry {
             plan,
-            degraded: capability::validate(&plan, profile)
+            degraded: capability::validate(&plan, profile, geometry)
                 .err()
-                .or_else(|| program.err().map(|_| FrameFeature::ProceduralSurface)),
+                .map(|_| FrameFeature::ProceduralSurface)
+                .or_else(|| program.err().map(|_| FrameFeature::ProceduralSurface))
+                .or_else(|| vertex_program.err().map(|_| FrameFeature::ProceduralSurface)),
             color: constant_lanes(surface, SurfaceChannel::BaseColor, programmed, [1.0; 4]),
             emissive: [emission[0], emission[1], emission[2]],
             // Packed from the surface's FLATTENED form: flattening is what
@@ -138,17 +166,52 @@ pub(crate) struct SurfaceProgramSet {
 }
 
 impl SurfaceProgramSet {
-    /// Plan and validate `surfaces` against `profile`.
+    /// Plan and validate `surfaces` against `profile` for the **rigid** vertex
+    /// path — the one every `axiom_host::FramePacket` draw takes.
     pub(crate) fn build(
         surfaces: &[Surface],
         profile: BackendCapabilityProfile,
     ) -> SurfaceProgramSet {
+        SurfaceProgramSet::build_for(surfaces, profile, GeometryPath::Rigid)
+    }
+
+    /// Plan and validate `surfaces` against `profile` for `geometry`.
+    ///
+    /// The path is a parameter because exactly one ceiling depends on it: the
+    /// skinned vertex stage is at the 16-attribute limit and cannot run a
+    /// displacement program (see [`GeometryPath`]). Everything else about a
+    /// surface is the same on both.
+    pub(crate) fn build_for(
+        surfaces: &[Surface],
+        profile: BackendCapabilityProfile,
+        geometry: GeometryPath,
+    ) -> SurfaceProgramSet {
         SurfaceProgramSet {
             entries: surfaces
                 .iter()
-                .map(|surface| SurfaceProgramEntry::build(surface, profile))
+                .map(|surface| SurfaceProgramEntry::build(surface, profile, geometry))
                 .collect(),
         }
+    }
+
+    /// The seconds the pass writes into its surface-time lane for this set,
+    /// given the time the frame supplied.
+    ///
+    /// **A set whose surfaces read no clock is written an exact zero**, whatever
+    /// the frame supplied — so a static surface's frame is byte-identical to the
+    /// frame it produced before there was a clock at all, and the packed
+    /// lighting uniform it rides in is unchanged to the bit. A set holding one
+    /// clock-reading surface is written the frame's own time; the lane sits in a
+    /// uniform that is already written once per frame, so that costs no extra
+    /// write.
+    ///
+    /// Time is the one input the frame has to *supply* — every other input to a
+    /// program is a varying the vertex stage already writes or a parameter the
+    /// surface itself declares — which is why the decision lives here, with the
+    /// set that knows whether anything asked.
+    pub(crate) fn surface_time(&self, supplied: Seconds) -> f32 {
+        let reads = self.entries.iter().any(|entry| entry.plan.reads_time());
+        [0.0, supplied.get()][usize::from(reads)]
     }
 
     /// The features this backend could not honour, deduplicated: one
@@ -340,7 +403,11 @@ mod tests {
         let attempting =
             BackendCapabilityProfile::all().with(RenderCapability::ProceduralSurface);
         assert_eq!(
-            capability::validate(&SurfaceProgramPlan::of(&over), attempting),
+            capability::validate(
+                &SurfaceProgramPlan::of(&over),
+                attempting,
+                GeometryPath::Rigid
+            ),
             Ok(())
         );
         let set = SurfaceProgramSet::build(std::slice::from_ref(&over), attempting);
@@ -360,6 +427,88 @@ mod tests {
             },
         );
         builder.build(node)
+    }
+
+    /// A time-varying displacement — wind, ripple — and a static one, so the
+    /// difference between "reads the clock" and "does not" is a real pair.
+    fn clock_displacement() -> axiom_field::FieldGraph {
+        let (builder, clock) = FieldBuilder::new(FieldId::of_name("gpu/set/wind"), 1).push(
+            FieldOp::Time,
+            Vec::new(),
+            Vec::new(),
+        );
+        let (builder, node) = builder.push(
+            FieldOp::Compose,
+            vec![Param::int(3)],
+            vec![clock, clock, clock],
+        );
+        builder.build(node)
+    }
+
+    /// **A surface that reads no clock is written no time.** The lane it would
+    /// ride in holds an exact zero whatever the frame supplied, which is what
+    /// makes a static surface cost precisely what it did before there was a
+    /// clock — the packed lighting uniform is unchanged to the bit.
+    #[test]
+    fn a_set_with_no_clock_reading_surface_is_written_an_exact_zero() {
+        let supplied = Seconds::finite_or_zero(12.5);
+        // The empty set: every app that authors no surface at all.
+        assert_eq!(SurfaceProgramSet::default().surface_time(supplied), 0.0);
+        // A field-authored but static surface.
+        let still = SurfaceBuilder::new()
+            .field(SurfaceChannel::BaseColor, uv_color())
+            .build()
+            .expect("legal");
+        let set = SurfaceProgramSet::build(std::slice::from_ref(&still), gpu_profile());
+        assert_eq!(set.surface_time(supplied), 0.0);
+        assert_eq!(set.surface_time(Seconds::finite_or_zero(0.0)), 0.0);
+    }
+
+    /// One clock-reading surface in the set is what turns the lane on, and it is
+    /// written the frame's own supplied time — never a wall clock, so the same
+    /// tick replays to the same displacement.
+    #[test]
+    fn a_set_holding_one_clock_reading_surface_is_written_the_frames_own_time() {
+        let windy = SurfaceBuilder::new()
+            .field(SurfaceChannel::Displacement, clock_displacement())
+            .build()
+            .expect("a vec3 field is a legal displacement");
+        let still = SurfaceBuilder::new()
+            .field(SurfaceChannel::BaseColor, uv_color())
+            .build()
+            .expect("legal");
+        let set = SurfaceProgramSet::build(&[still, windy], gpu_profile());
+        assert_eq!(set.surface_time(Seconds::finite_or_zero(12.5)), 12.5);
+        // Replay: the same supplied time yields the same lane, exactly.
+        assert_eq!(set.surface_time(Seconds::finite_or_zero(12.5)), 12.5);
+        assert_ne!(
+            set.surface_time(Seconds::finite_or_zero(13.5)),
+            set.surface_time(Seconds::finite_or_zero(12.5))
+        );
+    }
+
+    /// A displacing surface lowers on the rigid path and is a **reported** drop
+    /// on the skinned one — the attribute ceiling, stated, never a silent no-op.
+    #[test]
+    fn a_displacing_surface_is_dropped_on_the_skinned_path_and_kept_on_the_rigid_one() {
+        let attempting =
+            BackendCapabilityProfile::all().with(RenderCapability::ProceduralSurface);
+        let windy = SurfaceBuilder::new()
+            .field(SurfaceChannel::Displacement, clock_displacement())
+            .build()
+            .expect("a vec3 field is a legal displacement");
+        let rigid = SurfaceProgramSet::build_for(
+            std::slice::from_ref(&windy),
+            attempting,
+            GeometryPath::Rigid,
+        );
+        assert!(rigid.degradations().is_empty());
+        let skinned = SurfaceProgramSet::build_for(
+            std::slice::from_ref(&windy),
+            attempting,
+            GeometryPath::Skinned,
+        );
+        assert_eq!(skinned.degradations(), vec![FrameFeature::ProceduralSurface]);
     }
 
     #[test]

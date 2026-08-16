@@ -43,12 +43,16 @@ pub(crate) enum SurfaceProgramFault {
     Flatten = 0,
     /// The generated WGSL was rejected by the device's shader compiler.
     Compilation = 1,
+    /// The surface asks for something this backend's pipelines cannot give it —
+    /// a ceiling, not a bug. The detail names which ceiling.
+    Capability = 2,
 }
 
 /// One sentence per fault, indexed by its discriminant.
-const FAULT_MESSAGES: [&str; 2] = [
+const FAULT_MESSAGES: [&str; 3] = [
     "the layer tree would not flatten into one program",
     "the generated shader would not compile",
+    "this backend cannot lower the surface",
 ];
 
 /// A surface that produced no runnable program, and everything known about why.
@@ -170,9 +174,13 @@ mod tests {
         let failure = error(0, SurfaceProgramFault::Flatten);
         assert!(failure.channel_names().is_empty());
         assert!(failure.to_string().contains("[]"));
-        // The two fault rows are distinct sentences, so a report cannot be
+        // The three fault rows are distinct sentences, so a report cannot be
         // ambiguous about which stage failed.
         assert_ne!(FAULT_MESSAGES[0], FAULT_MESSAGES[1]);
+        assert_ne!(FAULT_MESSAGES[1], FAULT_MESSAGES[2]);
         assert_eq!(CHANNEL_NAMES.len(), SurfaceChannel::ALL.len());
+        assert!(error(0, SurfaceProgramFault::Capability)
+            .to_string()
+            .contains("this backend cannot lower the surface"));
     }
 }
