@@ -78,7 +78,10 @@ impl RenderPipelineApi {
     /// The mesh id of the `i`-th drawn object, if present. Lets a caller group
     /// draws by mesh for per-mesh instance batching.
     pub fn report_draw_mesh_id(&self, report: &RenderReport, i: usize) -> Option<u64> {
-        report.draws.get(i).map(|(_, _, _, _, mesh_id, _, _)| *mesh_id)
+        report
+            .draws
+            .get(i)
+            .map(|(_, _, _, _, mesh_id, _, _, _)| *mesh_id)
     }
 
     /// The material id of the `i`-th drawn object, if present. Lets a caller
@@ -87,14 +90,29 @@ impl RenderPipelineApi {
         report
             .draws
             .get(i)
-            .map(|(_, _, _, _, _, material_id, _)| *material_id)
+            .map(|(_, _, _, _, _, material_id, _, _)| *material_id)
     }
 
     /// Whether the `i`-th drawn object is a contact-shadow caster (a discrete
     /// dynamic object the scene marked), if present. A grounding backend shadows
     /// only the `true` draws; level geometry is `false`.
     pub fn report_draw_casts_shadow(&self, report: &RenderReport, i: usize) -> Option<bool> {
-        report.draws.get(i).map(|(_, _, _, _, _, _, casts)| *casts)
+        report
+            .draws
+            .get(i)
+            .map(|(_, _, _, _, _, _, _, casts)| *casts)
+    }
+
+    /// The appearance program the `i`-th drawn object's material names, if
+    /// present — the content digest of an authored surface description, or `0`
+    /// for the engine's built-in fixed material path. Carried per draw for the
+    /// same reason as the mesh and material ids: it is a batching key a
+    /// consumer groups by, never a per-instance value.
+    pub fn report_draw_surface_program(&self, report: &RenderReport, i: usize) -> Option<u64> {
+        report
+            .draws
+            .get(i)
+            .map(|(_, _, _, _, _, _, program, _)| *program)
     }
 
     /// The directional shadow caster's wgpu-ready light view-projection

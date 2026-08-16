@@ -56,7 +56,7 @@ sha256 = "1be607a91edef52f017a6f55fdc224a29cd8408c2a88ffb9fc22297b402c7249"
 
 [[golden]]
 path = "tests/golden/agent_grid_render.bin"
-sha256 = "d904b88196268083738f8024710104c335355bfc7f5e2867ee26d9eb0db02b2f"
+sha256 = "02aacc4180e9740c7f13ff174a9da5728aff920ffeda4981bc799406e2778856"
 
 [[golden]]
 path = "tests/golden/agent_grid_resources.bin"
@@ -69,7 +69,7 @@ sha256 = "8212b88652132fc58f4e22850494bf8ffc9f710a9f6e1133e0ec5d35a64ab2bb"
 
 [[golden]]
 path = "tests/golden/agent_opening_render.bin"
-sha256 = "ac2136e2d5f812820bbb653548e6bfb4755b1123b25b4544dafd8a3c855244f9"
+sha256 = "c6369ab93a05e93ec708ad13ba8437991b2e456a62a847276de6bec0b25dd469"
 
 [[golden]]
 path = "tests/golden/agent_opening_resources.bin"
@@ -82,7 +82,7 @@ sha256 = "29a99fb4180d66de1a55c4dd02812d976a425c0147745f8b74d48748e4a6a1df"
 
 [[golden]]
 path = "tests/golden/agent_esses_render.bin"
-sha256 = "96e9324d2b7b8f59b1f47db470f80115773c3158cdba4539be9d3378c512494e"
+sha256 = "a2f9c2c3dfeaf9c6f7054cb39e1a9a6eccfd229047c7a74621d6c7a8bcf1a21d"
 
 [[golden]]
 path = "tests/golden/agent_esses_resources.bin"
@@ -95,7 +95,7 @@ sha256 = "c2e291f36c5a4e1b8580d10dbbb6b7268fbf4410e307a6f66f9f34b148795898"
 
 [[golden]]
 path = "tests/golden/agent_canyon_render.bin"
-sha256 = "e116d68161e9c9523a824e8dcab51080e9e80b5122712a54ebf2ecf61a988e38"
+sha256 = "53aed159105b83fc564ed17574398ef5e2ab67a4ac8493f5bb47939473a34391"
 
 [[golden]]
 path = "tests/golden/agent_canyon_resources.bin"
@@ -108,7 +108,7 @@ sha256 = "12a9204c052fcba0e2a59c6c161cec5b9df2c2b86685ee6e168cc057b7fdde28"
 
 [[golden]]
 path = "tests/golden/agent_finish_render.bin"
-sha256 = "4d51d213f971f43b7baa057ea69b66a8e6e85d1d962e025e74828483469dd4a1"
+sha256 = "803a4fe2577f2d78f1d77818f54a5ef905ac0651d1d4b3b02ac533559d7458c2"
 
 [[golden]]
 path = "tests/golden/agent_finish_resources.bin"

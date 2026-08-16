@@ -16,6 +16,9 @@ allowed_layers = [
     "host",
     "frame",
     "ecs",
+    # `Material::from_surface` names the neutral appearance artifact and reduces
+    # it to its content digest here, once, at the app-facing authoring boundary.
+    "surface",
 ]
 
 allowed_modules = [

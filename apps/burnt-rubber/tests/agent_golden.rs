@@ -23,7 +23,7 @@
 //! * `..._state.bin` — the **simulation**: where the car is, how fast, how much
 //!   boost it has, how many cars it threaded, where the camera is.
 //! * `..._render.bin` — the **render boundary**: the draws (including their
-//!   emissive and specular lanes), the camera matrix, the clear colour, the
+//!   emissive, specular and surface-program lanes), the camera matrix, the clear colour, the
 //!   lights, and the authored render *look* (ambient, fog, sky, bloom, grade)
 //!   that the GPU and Canvas 2D backends both consume.
 //! * `..._resources.bin` — the **generated resources**: a content fingerprint of
@@ -153,6 +153,7 @@ fn encode_frame_outcome(f: &FrameOutcome) -> Vec<u8> {
     // a golden that omitted them would call a green pickup and a blue one the
     // same frame. Encoding them here makes this artifact a strict superset of
     // what `capture.rs`'s `every_slice_renders_identically_twice` compares.
+    // `surface_program` joins them for the same reason — see below.
     push_u32(&mut out, f.draws().len() as u32);
     f.draws().iter().for_each(|d| {
         push_f32s(&mut out, &d.mvp());
@@ -162,6 +163,14 @@ fn encode_frame_outcome(f: &FrameOutcome) -> Vec<u8> {
         push_f32(&mut out, d.specular().get());
         push_u64(&mut out, d.mesh_id());
         push_u64(&mut out, d.material_id());
+        // The appearance program the draw's material names. Encoded for the same
+        // reason emissive and specular are: it is a per-draw shading identity the
+        // colour lane cannot carry, and two frames whose draws name different
+        // programs are different frames. Today every value here is `0` — the
+        // built-in fixed material path — and pinning that is the point: this game
+        // renders exactly as it did before surfaces existed, and the golden is
+        // what says so.
+        push_u64(&mut out, d.surface_program());
         out.push(u8::from(d.casts_contact_shadow()));
     });
     // Lights, in scene order.

@@ -35,6 +35,15 @@ macro_rules! ratio_lit {
 /// two modules never name each other's type — the app is the single owner that
 /// bridges them — but the `u64` is the same on both sides, so a renderable's
 /// material ref resolves to this material by equal raw id.
+///
+/// ## The appearance program (`surface_program`)
+/// A material may name an authored **surface** description instead of the
+/// engine's one built-in fixed material path. It is carried here as the
+/// surface's content digest — a bare `u64` — because this tier owns CPU-side
+/// resource *descriptions* and transports identity, not appearance semantics;
+/// deriving the digest from a surface is the authoring tier's job (see
+/// `axiom::Material::from_surface`). `0` means the built-in path, which is what
+/// every constructor here produces, so no existing material changes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MaterialData {
     id: ResourceId,
@@ -44,6 +53,7 @@ pub struct MaterialData {
     emissive: Vec3,
     roughness: Ratio,
     opacity: Ratio,
+    surface_program: u64,
 }
 
 impl MaterialData {
@@ -85,7 +95,22 @@ impl MaterialData {
             emissive,
             roughness,
             opacity,
+            surface_program: 0,
         }
+    }
+
+    /// This material with the **appearance program** it names — the content
+    /// digest of an authored surface description. `0` (what every constructor
+    /// produces) is the built-in fixed material path.
+    pub const fn with_surface_program(mut self, surface_program: u64) -> Self {
+        self.surface_program = surface_program;
+        self
+    }
+
+    /// The appearance program this material names, or `0` for the built-in
+    /// fixed material path.
+    pub const fn surface_program(&self) -> u64 {
+        self.surface_program
     }
 
     pub const fn id(&self) -> ResourceId {
@@ -165,6 +190,38 @@ mod tests {
         assert_eq!(m.roughness().get(), 0.5);
         assert_eq!(m.opacity().get(), 0.5);
         assert_eq!(m.texture(), Some(ResourceId::from_raw(3)));
+    }
+
+    /// **Seam 1 of 4 — the CPU resource description.** Every constructor here
+    /// produces the built-in path, and naming a program moves that one field
+    /// and nothing else.
+    #[test]
+    fn material_data_defaults_to_the_builtin_surface_program_and_carries_an_authored_one() {
+        let plain = MaterialData::new(ResourceId::from_raw(1), "basic", Vec4::ONE, None);
+        assert_eq!(plain.surface_program(), 0);
+        assert_eq!(
+            MaterialData::new_lit(
+                ResourceId::from_raw(1),
+                "lit",
+                Vec4::ONE,
+                None,
+                Vec3::ONE,
+                half(),
+                half(),
+            )
+            .surface_program(),
+            0
+        );
+
+        let authored = plain.with_surface_program(0x1234_5678_9ABC_DEF0);
+        assert_eq!(authored.surface_program(), 0x1234_5678_9ABC_DEF0);
+        assert_eq!(authored.base_color(), plain.base_color());
+        assert_eq!(authored.emissive(), plain.emissive());
+        assert_eq!(authored.roughness(), plain.roughness());
+        assert_eq!(authored.opacity(), plain.opacity());
+        assert_eq!(authored.texture(), plain.texture());
+        assert_ne!(authored, plain, "the program is part of identity");
+        assert_eq!(plain.with_surface_program(0), plain);
     }
 
     #[test]

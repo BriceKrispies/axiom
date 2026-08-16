@@ -80,6 +80,10 @@ impl RenderInput {
     pub fn push_mesh(&mut self, id: u64, index_count: u32) -> u32 {
         self.add_mesh(RenderMesh::new(id, index_count))
     }
+    /// Register a fully-specified lit material. `surface_program` is the
+    /// appearance program it names — the content digest of an authored surface
+    /// description — and `0` is the built-in fixed material path, i.e. exactly
+    /// what the engine did before surfaces existed.
     #[allow(clippy::too_many_arguments)]
     pub fn push_lit_material(
         &mut self,
@@ -89,10 +93,12 @@ impl RenderInput {
         roughness: Ratio,
         opacity: Ratio,
         texture_id: u64,
+        surface_program: u64,
     ) -> u32 {
-        self.add_material(RenderMaterial::new_lit(
-            id, base_color, emissive, roughness, opacity, texture_id,
-        ))
+        self.add_material(
+            RenderMaterial::new_lit(id, base_color, emissive, roughness, opacity, texture_id)
+                .with_surface_program(surface_program),
+        )
     }
     pub fn push_object(
         &mut self,

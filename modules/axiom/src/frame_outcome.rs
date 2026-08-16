@@ -27,6 +27,7 @@ pub struct DrawData {
     specular: f32,
     mesh_id: u64,
     material_id: u64,
+    surface_program: u64,
     casts_contact_shadow: bool,
 }
 
@@ -47,8 +48,17 @@ impl DrawData {
             specular: 0.0,
             mesh_id,
             material_id,
+            surface_program: 0,
             casts_contact_shadow,
         }
+    }
+
+    /// This draw with the appearance program its material names — an authored
+    /// `axiom_surface::Surface`'s content digest. `0` (the default) is the
+    /// engine's built-in fixed material path, an exact no-op.
+    pub(crate) const fn with_surface_program(mut self, surface_program: u64) -> Self {
+        self.surface_program = surface_program;
+        self
     }
 
     /// This draw with its material's linear-RGB self-illumination. `[0, 0, 0]`
@@ -101,6 +111,14 @@ impl DrawData {
     /// The id of the material this object uses (selects its albedo texture).
     pub const fn material_id(&self) -> u64 {
         self.material_id
+    }
+
+    /// The appearance program this draw's material names — an authored
+    /// `axiom_surface::Surface`'s content digest, or `0` for the engine's
+    /// built-in fixed material path. A backend batches on it alongside the mesh
+    /// and material ids; it is not a per-instance value.
+    pub const fn surface_program(&self) -> u64 {
+        self.surface_program
     }
 
     /// Whether this draw is a discrete dynamic object the scene marked as a

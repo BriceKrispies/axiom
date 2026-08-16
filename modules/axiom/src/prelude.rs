@@ -30,6 +30,11 @@ pub use axiom_host::{
     Score,
 };
 pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
+// The neutral appearance artifact `Material::from_surface` takes, and the
+// builder that authors one. Re-exported here for the same reason
+// `PreparationTask` is: an app should not Cargo-depend on a layer purely to name
+// the argument of a prelude method.
+pub use axiom_surface::{LightingModel, Surface, SurfaceBuilder, SurfaceChannel};
 // `Reflect` is the trait an app implements to declare its own dynamic
 // component vocabulary; the rest are the (de)serialization primitives its
 // hand-written impls call.

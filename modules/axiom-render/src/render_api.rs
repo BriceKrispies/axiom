@@ -409,7 +409,15 @@ impl RenderApi {
                             // grounds objects builds its packet from the per-draw
                             // scene data instead. This producer defaults to `false`.
                             false,
-                        ));
+                        )
+                        // The material's appearance program travels with the
+                        // draw, exactly as its colour does. `0` — every material
+                        // that never named a surface — is the built-in fixed
+                        // material path, an exact no-op at the boundary.
+                        .with_surface_program(material_surface_program(
+                            input,
+                            next_material,
+                        )));
                     });
                 (next_mesh, next_material, acc)
             },
@@ -614,6 +622,19 @@ fn material_base_color(input: &RenderInput, material_id: u64) -> [f32; 4] {
         .unwrap_or([1.0; 4])
 }
 
+/// The appearance program named by the material with `material_id` in `input`,
+/// or `0` — the built-in fixed material path — when no such material exists.
+/// Resolved here, beside the base colour, because both are per-material values
+/// the neutral `FrameDrawItem` carries per *draw*: the command stream threads a
+/// material id, and the packet is where that id is spent.
+fn material_surface_program(input: &RenderInput, material_id: u64) -> u64 {
+    input
+        .materials()
+        .iter()
+        .find(|m| m.id() == material_id)
+        .map_or(0, RenderMaterial::surface_program)
+}
+
 /// The maximum world-space distance the SDF marcher walks before giving up.
 const SDF_MAX_DISTANCE: f32 = 100.0;
 /// The surface-hit threshold for the SDF marcher, in world units.
@@ -713,6 +734,7 @@ mod tests {
             Vec3::ZERO,
             Ratio::new(0.5).unwrap(),
             Ratio::new(1.0).unwrap(),
+            0,
             0,
         );
         // Two objects sharing a pipeline: the 2nd draw must NOT re-emit SetPipeline
@@ -974,5 +996,37 @@ mod translucency_cov {
         assert_eq!(material_base_color(&input, 7), [0.2, 0.4, 0.6, 0.5]);
         let packet = api.build_frame_packet(&input, 0, 0, [0.0; 16]);
         assert_eq!(packet.draws()[0].color(), [0.2, 0.4, 0.6, 0.5]);
+    }
+
+    /// **Seam 2→4 — the render material's appearance program reaches the neutral
+    /// packet.** This is the seam `RenderPipelineKind::UNLIT` already fails at:
+    /// it is emitted by this layer and dies at the `FramePacket` boundary. The
+    /// program must not.
+    #[test]
+    fn a_materials_surface_program_reaches_the_frame_draw_item() {
+        const PROGRAM: u64 = 0xFEED_FACE_CAFE_B00D;
+        let api = api();
+        let mut input = api.new_input(64, 64);
+        api.set_input_camera(&mut input, Mat4::IDENTITY, Mat4::IDENTITY);
+        let mesh = api.add_input_mesh(&mut input, 1, 3);
+        // Two materials: one naming a program, one on the built-in path.
+        let authored = input.push_lit_material(7, Vec4::ONE, Vec3::ZERO, one(), one(), 0, PROGRAM);
+        let builtin = input.push_lit_material(8, Vec4::ONE, Vec3::ZERO, one(), one(), 0, 0);
+        api.add_input_object(&mut input, 1, Mat4::IDENTITY, mesh, authored, true);
+        api.add_input_object(&mut input, 2, Mat4::IDENTITY, mesh, builtin, true);
+
+        assert_eq!(material_surface_program(&input, 7), PROGRAM);
+        assert_eq!(material_surface_program(&input, 8), 0);
+        // A material id the input never registered is the built-in path, the
+        // same fallback `material_base_color` takes.
+        assert_eq!(material_surface_program(&input, 4242), 0);
+
+        let packet = api.build_frame_packet(&input, 0, 0, [0.0; 16]);
+        let programs: Vec<u64> = packet
+            .draws()
+            .iter()
+            .map(axiom_host::FrameDrawItem::surface_program)
+            .collect();
+        assert_eq!(programs, vec![PROGRAM, 0]);
     }
 }

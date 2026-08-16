@@ -147,6 +147,23 @@ impl FrameLight {
 /// therefore has one gloss profile and materials differ in *how much* they
 /// catch it, which is the axis that actually separates tarmac from paint from
 /// chrome.
+///
+/// **Why `surface_program` is a bare `u64`, and why `0` is load-bearing.** A
+/// draw may name an *appearance program* — an authored surface description —
+/// instead of relying on the engine's one built-in fixed material path. The
+/// packet cannot name the surface type itself: this contract is primitive-only
+/// on purpose (see this module's header), and a backend must be able to store
+/// and compare the identity without depending on the layer that defines it. So
+/// the draw carries the surface's **content digest**, and `0` — the value
+/// [`Self::new`] gives every draw — means *"the built-in fixed material path"*,
+/// i.e. exactly what the engine did before surfaces existed. Every existing draw
+/// therefore renders unchanged.
+///
+/// It is a *content* hash rather than a caller-assigned slot, so two identical
+/// surfaces authored independently collapse to one program rather than
+/// compiling twice. And it is a **batching key**, not an instance lane: the
+/// per-draw instance payload has no free floats, so a consumer groups draws by
+/// `(mesh_id, material_id, surface_program)` and leaves the stride alone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameDrawItem {
     object_id: u64,
@@ -157,6 +174,7 @@ pub struct FrameDrawItem {
     color: [f32; 4],
     emissive: [f32; 3],
     specular: axiom_kernel::Ratio,
+    surface_program: u64,
     casts_contact_shadow: bool,
 }
 
@@ -183,6 +201,7 @@ impl FrameDrawItem {
             color,
             emissive: [0.0; 3],
             specular: axiom_kernel::Ratio::finite_or_zero(0.0),
+            surface_program: 0,
             casts_contact_shadow,
         }
     }
@@ -201,6 +220,15 @@ impl FrameDrawItem {
     /// Gated by [`crate::RenderCapability::Specular`].
     pub const fn with_specular(mut self, specular: axiom_kernel::Ratio) -> Self {
         self.specular = specular;
+        self
+    }
+
+    /// This draw item with the **appearance program** its material names — the
+    /// content digest of an authored surface description. `0` (the default) is
+    /// the built-in fixed material path, so a draw that never calls this renders
+    /// exactly as it did before surfaces existed.
+    pub const fn with_surface_program(mut self, surface_program: u64) -> Self {
+        self.surface_program = surface_program;
         self
     }
 
@@ -244,6 +272,14 @@ impl FrameDrawItem {
     /// Zero = matte.
     pub const fn specular(&self) -> axiom_kernel::Ratio {
         self.specular
+    }
+
+    /// The appearance program this draw's material names — the content digest of
+    /// an authored surface description, or `0` for the built-in fixed material
+    /// path. A consumer treats it as a batching key alongside the mesh and
+    /// material ids.
+    pub const fn surface_program(&self) -> u64 {
+        self.surface_program
     }
 
     /// Whether this draw is a discrete, dynamic object the scene marked as a
@@ -632,6 +668,7 @@ mod tests {
             d,
             FrameDrawItem::new(8, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], true)
         );
+        assert_eq!(d.surface_program(), 0, "a plain draw takes the built-in path");
         assert_ne!(
             d,
             FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [0.1, 0.2, 0.3, 1.0], false)
@@ -641,6 +678,36 @@ mod tests {
                 .casts_contact_shadow()
         );
         assert!(format!("{d:?}").contains("FrameDrawItem"));
+    }
+
+    /// **Seam 4 of 4 — the presentation boundary.** `0` is the built-in fixed
+    /// material path, so every draw the engine has ever produced keeps taking
+    /// it; naming a program changes only that one lane and only that draw's
+    /// equality.
+    #[test]
+    fn draw_item_defaults_to_the_builtin_surface_program_and_carries_an_authored_one() {
+        let plain = FrameDrawItem::new(7, 11, 13, mat(9.0), mat(5.0), [1.0; 4], false);
+        assert_eq!(plain.surface_program(), 0);
+
+        let authored = plain.with_surface_program(0xABCD_1234_5678_9001);
+        assert_eq!(authored.surface_program(), 0xABCD_1234_5678_9001);
+        // Nothing else moved.
+        assert_eq!(authored.object_id(), plain.object_id());
+        assert_eq!(authored.mesh_id(), plain.mesh_id());
+        assert_eq!(authored.material_id(), plain.material_id());
+        assert_eq!(authored.world(), plain.world());
+        assert_eq!(authored.mvp(), plain.mvp());
+        assert_eq!(authored.color(), plain.color());
+        assert_eq!(authored.emissive(), plain.emissive());
+        assert_eq!(authored.specular(), plain.specular());
+        assert_eq!(
+            authored.casts_contact_shadow(),
+            plain.casts_contact_shadow()
+        );
+        // ...but the program is part of identity, so two draws that differ only
+        // in their program are different draws.
+        assert_ne!(authored, plain);
+        assert_eq!(plain.with_surface_program(0), plain);
     }
 
     #[test]

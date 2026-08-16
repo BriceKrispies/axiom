@@ -150,6 +150,10 @@ impl RunningApp {
                     material.roughness(),
                     material.opacity(),
                     texture_id,
+                    // The appearance program the material names (`0` = the
+                    // built-in fixed material path, which is every material an
+                    // app authored with `Material::lit`).
+                    material.surface_program(),
                 )
             });
             let report = pipeline.submit(&frame, &mut self.scene, &mut self.webgpu);
@@ -192,6 +196,14 @@ impl RunningApp {
                     .with_specular(
                         pipeline
                             .report_draw_specular(&report, i)
+                            .expect("draw in range"),
+                    )
+                    // ...and the appearance program its material names, from the
+                    // same place. `0` — every material that never named a
+                    // surface — is the built-in fixed material path.
+                    .with_surface_program(
+                        pipeline
+                            .report_draw_surface_program(&report, i)
                             .expect("draw in range"),
                     )
                 })
@@ -351,6 +363,59 @@ mod tests {
         assert_eq!(
             again.mesh_batches().iter().map(|(_, _, _, n)| n).sum::<u32>(),
             shown_instances
+        );
+    }
+
+    /// **End to end.** An app authors two materials the two available ways —
+    /// `Material::lit`, the one-liner every existing app uses, and
+    /// `Material::from_surface` — and the appearance program each names has to
+    /// arrive on that object's draw. `0` for the plain one is the compatibility
+    /// guarantee: it is the built-in fixed material path, i.e. exactly today's
+    /// engine.
+    #[test]
+    fn a_materials_surface_program_reaches_its_draw() {
+        use crate::color::Color;
+        use crate::material::Material;
+        use crate::mesh::Mesh;
+        use crate::spawn::Spawn;
+
+        let surface = || {
+            axiom_surface::SurfaceBuilder::new()
+                .lighting(axiom_surface::LightingModel::Unlit)
+                .build()
+                .expect("an unlit surface is legal")
+        };
+
+        let mut app = render_app();
+        app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+        );
+        let mesh = app.add_mesh(Mesh::cube());
+        let plain = app.add_material(Material::lit(Color::WHITE));
+        let authored = app.add_material(Material::from_surface(surface()));
+        app.spawn(Spawn::new(
+            Transform::from_translation(Vec3::new(-2.0, 0.0, -3.0)),
+            mesh,
+            plain,
+        ));
+        app.spawn(Spawn::new(
+            Transform::from_translation(Vec3::new(2.0, 0.0, -3.0)),
+            mesh,
+            authored,
+        ));
+
+        let outcome = app.render(0);
+        let programs: Vec<u64> = outcome
+            .draws()
+            .iter()
+            .map(crate::frame_outcome::DrawData::surface_program)
+            .collect();
+        assert_eq!(
+            programs,
+            vec![0, surface().digest().raw()],
+            "the plain material takes the built-in path; the surface-backed one \
+             carries its surface's content digest"
         );
     }
 

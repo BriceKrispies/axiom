@@ -147,6 +147,24 @@ expected and correct; regold them in this manifest, with the slice checker's
 hashes updated in the same commit, and say in the commit message that the delta
 is the new `surface_program: 0` lane.
 
+> **CORRECTION — the paragraph above is wrong on its central claim.** Adding a
+> field to `FrameDrawItem` does **not** move any burnt-rubber golden. Verified
+> empirically during implementation: with the whole engine change in place and
+> the encoder untouched, `cargo test -p axiom-burnt-rubber --test agent_golden`
+> passed against the committed baselines. `apps/burnt-rubber/tests/agent_golden.rs`
+> encodes `FrameOutcome`/`DrawData` **field by explicit field** and never names
+> `FramePacket` or `FrameDrawItem` at all.
+>
+> The goldens were therefore moved **deliberately**, by adding
+> `push_u64(&mut out, d.surface_program())` to the render encoder — for the same
+> reason emissive and specular are already encoded: it is a per-draw shading
+> identity the colour lane cannot carry, and the artifact is documented as "the
+> render boundary". **5 files moved, not 15**: each `*_render.bin` grew by
+> exactly `8 × draw_count` bytes (grid 449, opening 744, esses 499, canyon 433,
+> finish 220), and every decoded `surface_program` is `0` — so the goldens now
+> *pin* that burnt-rubber renders exactly as it did before surfaces existed.
+> `agent_*_state.bin` and `agent_*_resources.bin` are byte-identical to `HEAD`.
+
 ## Testing requirements (100%)
 
 * `FrameDrawItem::new` defaults `surface_program` to `0`; `with_surface_program`

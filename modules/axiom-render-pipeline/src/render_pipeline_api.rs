@@ -57,6 +57,10 @@ struct MeshAsset {
 /// (`0` = untextured), keyed by the id the scene's renderables reference. The
 /// scalar catalog fields stay primitive `f32` at this boundary (matching the
 /// `[f32; 4]` colour); `submit` sanitizes them into the render layer's `Ratio`.
+///
+/// `surface_program` is the appearance program the material names — the content
+/// digest of an authored surface description, `0` for the built-in fixed
+/// material path. Like the ids around it, it is transported, never interpreted.
 #[derive(Debug)]
 struct MaterialAsset {
     id: u64,
@@ -65,6 +69,7 @@ struct MaterialAsset {
     roughness: f32,
     opacity: f32,
     texture_id: u64,
+    surface_program: u64,
 }
 
 /// A frame's caller-supplied inputs: viewport, clear colour, the world-space
@@ -92,11 +97,13 @@ pub struct RenderReport {
     clear_color: [f32; 4],
     view_projection: Mat4,
     /// One `(world, colour, emissive, specular, mesh_id, material_id,
-    /// casts_contact_shadow)` per drawn (visible) object, in submission order.
-    /// The caster flag is the scene's per-renderable contact-shadow mark,
-    /// carried so a grounding backend (the software canvas) knows which objects
-    /// to shadow.
-    draws: Vec<(Mat4, [f32; 4], [f32; 3], f32, u64, u64, bool)>,
+    /// surface_program, casts_contact_shadow)` per drawn (visible) object, in
+    /// submission order. The caster flag is the scene's per-renderable
+    /// contact-shadow mark, carried so a grounding backend (the software canvas)
+    /// knows which objects to shadow; `surface_program` is the material's
+    /// appearance program (`0` = the built-in fixed material path).
+    #[allow(clippy::type_complexity)]
+    draws: Vec<(Mat4, [f32; 4], [f32; 3], f32, u64, u64, u64, bool)>,
     /// The frame's resolved lights: `(kind, vec, colour, intensity)` where
     /// `kind` is `0` directional / `1` point, and `vec` is the world-space
     /// to-light direction (directional) or the light's world position (point).
@@ -159,6 +166,7 @@ struct MaterialSlot {
     color: [f32; 4],
     emissive: [f32; 3],
     specular: f32,
+    surface_program: u64,
 }
 
 impl MaterialSlot {
@@ -167,6 +175,7 @@ impl MaterialSlot {
         color: [1.0; 4],
         emissive: [0.0; 3],
         specular: 0.0,
+        surface_program: 0,
     };
 }
 
@@ -243,15 +252,17 @@ impl RenderPipelineApi {
         texture_id: u64,
     ) {
         let one = Ratio::finite_or_zero(1.0);
-        self.frame_add_lit_material(frame, id, color, [0.0; 3], one, one, texture_id);
+        self.frame_add_lit_material(frame, id, color, [0.0; 3], one, one, texture_id, 0);
     }
 
     /// Register a fully-specified lit material asset for this frame: `color`
     /// base, `emissive` self-illumination (linear RGB), `roughness`, `opacity`
     /// (`1` opaque — folded into the per-draw alpha so a translucent material
-    /// blends), and an albedo `texture_id` (`0` = untextured). This is the
-    /// boundary that threads the umbrella `Material`'s full catalog surface to
-    /// the renderer, no longer dropping emissive / roughness / opacity.
+    /// blends), an albedo `texture_id` (`0` = untextured), and the
+    /// `surface_program` it names (`0` = the engine's built-in fixed material
+    /// path). This is the boundary that threads the umbrella `Material`'s full
+    /// catalog surface to the renderer, no longer dropping emissive / roughness
+    /// / opacity.
     #[allow(clippy::too_many_arguments)]
     pub fn frame_add_lit_material(
         &self,
@@ -262,6 +273,7 @@ impl RenderPipelineApi {
         roughness: Ratio,
         opacity: Ratio,
         texture_id: u64,
+        surface_program: u64,
     ) {
         frame.materials.push(MaterialAsset {
             id,
@@ -270,6 +282,7 @@ impl RenderPipelineApi {
             roughness: roughness.get(),
             opacity: opacity.get(),
             texture_id,
+            surface_program,
         });
     }
 
@@ -383,6 +396,7 @@ impl RenderPipelineApi {
                 Ratio::finite_or_zero(material.roughness),
                 Ratio::finite_or_zero(material.opacity),
                 material.texture_id,
+                material.surface_program,
             );
             // Fold opacity into the per-draw alpha (`alpha = base.a × opacity`),
             // exactly as the render layer's neutral packet does, so the report's
@@ -411,6 +425,7 @@ impl RenderPipelineApi {
                 color,
                 emissive: e,
                 specular: 1.0 - material.roughness.clamp(0.0, 1.0),
+                surface_program: material.surface_program,
             };
         });
 
@@ -491,7 +506,8 @@ impl RenderPipelineApi {
         // Sourcing it straight from the snapshot (rather than re-folding the GPU
         // command stream) is what lets each draw carry the renderable's
         // `casts_contact_shadow` mark, which the command stream does not encode.
-        let draws: Vec<(Mat4, [f32; 4], [f32; 3], f32, u64, u64, bool)> = snapshot
+        #[allow(clippy::type_complexity)]
+        let draws: Vec<(Mat4, [f32; 4], [f32; 3], f32, u64, u64, u64, bool)> = snapshot
             .renderables()
             .iter()
             .filter(|renderable| renderable.visible())
@@ -517,6 +533,7 @@ impl RenderPipelineApi {
                     slot.specular,
                     mesh_id,
                     material_id,
+                    slot.surface_program,
                     renderable.casts_contact_shadow(),
                 )
             })
@@ -853,6 +870,7 @@ mod tests {
             Ratio::finite_or_zero(0.25),
             Ratio::finite_or_zero(0.5),
             0,
+            0,
         );
         let report = api.submit(&frame, &mut scene, &mut webgpu);
         assert_eq!(
@@ -871,6 +889,32 @@ mod tests {
         // inverted, so 0.25 rough is 0.75 smooth.
         assert_eq!(api.report_draw_specular(&report, 0), Some(0.75));
         assert_eq!(api.report_draw_specular(&report, 9), None);
+    }
+
+    /// **Seam 3 of 4 — the composition tier.** The appearance program has to
+    /// survive `MaterialAsset` → `MaterialSlot` → the report's per-draw record.
+    /// It is a separate seam from the colour because the slot table is refilled
+    /// per frame from a *fallback*, and a field added to the asset but forgotten
+    /// on the fallback would read as "built-in" for the first frame only.
+    #[test]
+    fn frame_add_lit_material_threads_the_surface_program_to_the_report_draw() {
+        const PROGRAM: u64 = 0x00C0_FFEE_0BAD_F00D;
+        let mut api = RenderPipelineApi::new();
+        let mut scene = cube_scene();
+        let mut webgpu = WebGpuApi::new_recording();
+        let mut frame = api.new_frame(800, 600, [0.0; 4], Vec3::new(0.3, -1.0, 0.4));
+        api.frame_add_mesh(&mut frame, 1, 36);
+        let one = Ratio::finite_or_zero(1.0);
+        api.frame_add_lit_material(&mut frame, 2, [1.0; 4], [0.0; 3], one, one, 0, PROGRAM);
+        let report = api.submit(&frame, &mut scene, &mut webgpu);
+        assert_eq!(api.report_draw_surface_program(&report, 0), Some(PROGRAM));
+        assert_eq!(api.report_draw_surface_program(&report, 9), None);
+        // The same pipeline reused for a frame whose material names no program
+        // reports the built-in path, so the retained slot table cannot leak the
+        // previous frame's program.
+        let plain = frame_with_assets(&api);
+        let report = api.submit(&plain, &mut scene, &mut webgpu);
+        assert_eq!(api.report_draw_surface_program(&report, 0), Some(0));
     }
 
     #[test]

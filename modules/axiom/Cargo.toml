@@ -16,6 +16,10 @@ axiom-ecs = { path = "../../crates/axiom-ecs" }
 axiom-runtime = { path = "../../crates/axiom-runtime" }
 axiom-host = { path = "../../crates/axiom-host" }
 axiom-frame = { path = "../../crates/axiom-frame" }
+# The neutral appearance artifact an app names with `Material::from_surface`.
+# This is the ONE tier that reduces a Surface to its content digest; every tier
+# below transports the resulting u64 and never names this layer.
+axiom-surface = { path = "../../crates/axiom-surface" }
 axiom-scene = { path = "../axiom-scene" }
 axiom-resources = { path = "../axiom-resources" }
 axiom-render-pipeline = { path = "../axiom-render-pipeline" }

@@ -25,6 +25,13 @@ macro_rules! ratio_lit {
 /// binding so the command stream and its receipt capture which texture a draw
 /// samples. `opacity` is carried now and blends visually only once SPEC-04 lands
 /// the alpha-blend state (until then a translucent material renders REPLACE).
+///
+/// `surface_program` is the **appearance program** the material names: the
+/// content digest of an authored surface description, or `0` for the engine's
+/// built-in fixed material path. The render layer transports the identity and
+/// hands it to `axiom_host::FrameDrawItem`; it never interprets it, because
+/// what a surface *means* is not this layer's vocabulary. Every constructor
+/// here produces `0`, so no existing material changes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderMaterial {
     id: u64,
@@ -33,6 +40,7 @@ pub struct RenderMaterial {
     roughness: Ratio,
     opacity: Ratio,
     texture_id: u64,
+    surface_program: u64,
 }
 
 impl RenderMaterial {
@@ -70,7 +78,21 @@ impl RenderMaterial {
             roughness,
             opacity,
             texture_id,
+            surface_program: 0,
         }
+    }
+
+    /// This material with the appearance program it names (`0` = the built-in
+    /// fixed material path, which is what every constructor produces).
+    pub const fn with_surface_program(mut self, surface_program: u64) -> Self {
+        self.surface_program = surface_program;
+        self
+    }
+
+    /// The appearance program this material names; `0` = the built-in fixed
+    /// material path.
+    pub const fn surface_program(&self) -> u64 {
+        self.surface_program
     }
 
     pub const fn id(&self) -> u64 {
@@ -146,5 +168,31 @@ mod tests {
         assert_eq!(lit.texture_id(), 9);
         let other = RenderMaterial::new_lit(2, Vec4::ONE, Vec3::ZERO, half, half, 9);
         assert_ne!(lit, other);
+    }
+
+    /// **Seam 2 of 4 — the render-facing material.** Every constructor takes the
+    /// built-in path; naming a program moves that one field and identity, and
+    /// nothing else.
+    #[test]
+    fn render_material_defaults_to_the_builtin_surface_program_and_carries_an_authored_one() {
+        let plain = RenderMaterial::new(1, Vec4::ONE);
+        assert_eq!(plain.surface_program(), 0);
+        assert_eq!(RenderMaterial::new_textured(1, Vec4::ONE, 7).surface_program(), 0);
+        let half = Ratio::new(0.5).expect("finite");
+        assert_eq!(
+            RenderMaterial::new_lit(1, Vec4::ONE, Vec3::ONE, half, half, 3).surface_program(),
+            0
+        );
+
+        let authored = plain.with_surface_program(0x0FED_CBA9_8765_4321);
+        assert_eq!(authored.surface_program(), 0x0FED_CBA9_8765_4321);
+        assert_eq!(authored.id(), plain.id());
+        assert_eq!(authored.base_color(), plain.base_color());
+        assert_eq!(authored.emissive(), plain.emissive());
+        assert_eq!(authored.roughness(), plain.roughness());
+        assert_eq!(authored.opacity(), plain.opacity());
+        assert_eq!(authored.texture_id(), plain.texture_id());
+        assert_ne!(authored, plain);
+        assert_eq!(plain.with_surface_program(0), plain);
     }
 }
