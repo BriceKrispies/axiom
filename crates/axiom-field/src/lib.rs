@@ -29,9 +29,12 @@
 //!   the canonical node encoding are the container's, for free. What this layer
 //!   adds is the type lattice, the operator meanings, the declared output node
 //!   and the parameter table.
-//! - **It carries no evaluator.** Evaluating a field against an
-//!   [`EvalContext`] is a later, separate concern. This crate lands the
-//!   vocabulary, the bytes, the type rules, and the canonical form.
+//! - **It carries the semantic reference evaluator.**
+//!   [`FieldGraph::evaluate`] is a flat fold in id order over a fixed-size
+//!   register file — no allocation, no recursion, and a `const` table of
+//!   function pointers in place of a `match`. **What those operator functions
+//!   compute *is* what the language means**; a shader emitted for a GPU backend
+//!   is a mirror checked against them, never a second definition.
 //! - **It type-checks and canonicalises.** [`FieldGraph::validate`] proves a
 //!   graph is a well-formed, well-typed program in one forward fold;
 //!   [`FieldGraph::canonicalize`] folds constants, shares common
@@ -67,6 +70,8 @@
 
 mod canonical;
 mod const_fold;
+mod dispatch;
+mod eval;
 mod eval_context;
 mod field_builder;
 mod field_error;
@@ -76,6 +81,8 @@ mod field_params;
 mod field_type;
 mod field_value;
 mod ids;
+mod noise_words;
+mod ops;
 mod signature;
 mod type_check;
 

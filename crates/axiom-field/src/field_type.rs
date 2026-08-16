@@ -55,6 +55,26 @@ impl FieldType {
     pub fn from_code(code: u16) -> Option<FieldType> {
         FieldType::ALL.get(code as usize).copied()
     }
+
+    /// The type a declared **lane width** names — the rule
+    /// [`crate::FieldOp::Compose`] is read by, stated once so the type checker
+    /// and the evaluator cannot disagree about what a width word means.
+    ///
+    /// Total by table: a width of `0` or `1` reads as [`FieldType::Scalar`] and
+    /// anything past `4` reads as [`FieldType::Vec4`]. Validation
+    /// (`ComposeWidthInvalid`) has already confined a real node's width to
+    /// `2..=4`, so the clamped ends exist to keep both readers free of an
+    /// unreachable error arm.
+    pub(crate) fn of_width(width: u32) -> FieldType {
+        const WIDTH_TYPE: [FieldType; 5] = [
+            FieldType::Scalar,
+            FieldType::Scalar,
+            FieldType::Vec2,
+            FieldType::Vec3,
+            FieldType::Vec4,
+        ];
+        WIDTH_TYPE[(width as usize).min(4)]
+    }
 }
 
 #[cfg(test)]
@@ -87,6 +107,17 @@ mod tests {
         assert_eq!(FieldType::from_code(3), Some(FieldType::Vec4));
         assert_eq!(FieldType::from_code(4), None);
         assert_eq!(FieldType::from_code(u16::MAX), None);
+    }
+
+    #[test]
+    fn a_declared_width_names_the_vector_type_it_builds() {
+        assert_eq!(FieldType::of_width(2), FieldType::Vec2);
+        assert_eq!(FieldType::of_width(3), FieldType::Vec3);
+        assert_eq!(FieldType::of_width(4), FieldType::Vec4);
+        // The clamped ends: validation never lets these reach a real node.
+        assert_eq!(FieldType::of_width(0), FieldType::Scalar);
+        assert_eq!(FieldType::of_width(1), FieldType::Scalar);
+        assert_eq!(FieldType::of_width(u32::MAX), FieldType::Vec4);
     }
 
     #[test]

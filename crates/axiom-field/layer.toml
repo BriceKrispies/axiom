@@ -8,9 +8,9 @@
 # the same thing. It is the engine's missing *function-as-a-value*, and it has
 # nothing to do with rendering.
 #
-# Nothing is added to `introduced_capabilities` by validation and
-# canonicalisation: they are methods on the already-declared `FieldGraph`, not
-# new public exports, and the checker validates capabilities against the crate's
+# Nothing is added to `introduced_capabilities` by validation, canonicalisation
+# or evaluation: they are methods on the already-declared `FieldGraph`, not new
+# public exports, and the checker validates capabilities against the crate's
 # root exports.
 #
 # Why a LAYER and not a module: three engine layers (`mesh-ops`, `proc-texture`,
@@ -42,7 +42,12 @@ algebra, the evaluation contract and the canonical form that make the container 
 language. Because recipe already proves every input names a strictly-earlier
 node, this layer's type checker is a single forward fold rather than a graph
 walk, and its dead-node pass is a single reverse fold — both are direct
-consequences of the container's invariant, not reimplementations of it.
+consequences of the container's invariant, not reimplementations of it. The
+evaluator is the third such consequence: a flat fold over a MAX_NODES-sized
+register file, in which noise's value_noise and Fbm are what the Noise and Fbm
+operators mean, math's Mat4 is what Transform means and its Epsilon is the floor
+below which a Normalize falls back to +Y, and kernel's Seconds is what Time
+reads.
 """
 
 introduced_capabilities = [
@@ -76,6 +81,12 @@ consumed_capabilities = [
     "Vec4",
     "Mat4",
     "FbmConfig",
+    "value_noise",
+    "Fbm",
+    "Frequency",
+    "Lacunarity",
+    "Epsilon",
+    "MAX_NODES",
     "StableHash",
     "BinaryWriter",
     "BinaryReader",
@@ -87,7 +98,14 @@ consumed_capabilities = [
 # output NodeId recipe has no notion of, and digests its structural bytes with
 # StableHash. FieldValue is the four-lane union math's vectors enter and leave
 # through. EvalContext carries a math Vec3 point and a kernel Seconds time.
-# FieldSignature derives Transform's arity from Mat4 and Fbm's from FbmConfig.
+# FieldSignature derives Transform's arity from the Mat4/Vec4 column count.
+# FieldBuilder writes an Fbm node's knob words straight out of an FbmConfig,
+# which is what pins that operator's arity to the noise layer's own knob set.
+#
+# The evaluator deepens all four dependencies rather than adding any: it samples
+# noise's value_noise and Fbm, applies math's Mat4 and reads its Epsilon floor,
+# folds over recipe's MAX_NODES-bounded id-ordered nodes, and reads the kernel
+# Seconds the context carries.
 
 [[proof_exports]]
 export = "FieldGraph"
@@ -103,8 +121,8 @@ must_reference = ["Vec3", "Seconds"]
 
 [[proof_exports]]
 export = "FieldSignature"
-must_reference = ["Mat4", "FbmConfig"]
+must_reference = ["Mat4", "Vec4"]
 
 [[proof_exports]]
 export = "FieldBuilder"
-must_reference = ["RecipeGraph", "Param", "RecipeId"]
+must_reference = ["RecipeGraph", "Param", "RecipeId", "FbmConfig"]

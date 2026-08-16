@@ -2,12 +2,15 @@
 //! the parameter table.
 
 use axiom_kernel::{BinaryReader, BinaryWriter, SchemaVersion, StableHash};
-use axiom_recipe::{NodeId, RecipeGraph};
+use axiom_recipe::{NodeId, RecipeGraph, MAX_NODES};
 
 use crate::canonical;
+use crate::eval;
+use crate::eval_context::EvalContext;
 use crate::field_error::{FieldError, FieldErrorCode, FieldResult};
 use crate::field_params::FieldParams;
 use crate::field_type::FieldType;
+use crate::field_value::FieldValue;
 use crate::type_check;
 
 /// The wire-format version stamped into every serialized field. Bumping it
@@ -20,6 +23,14 @@ const MALFORMED_DATA: FieldError = FieldError::at(
     FieldErrorCode::MalformedData,
     NodeId::NULL,
     "the serialized field could not be decoded from its bytes",
+);
+
+/// A graph too big for the evaluator's register file. The container's own
+/// budget is the same number, so a validated graph can never trip this.
+const NODE_BUDGET_EXCEEDED: FieldError = FieldError::at(
+    FieldErrorCode::NodeLimitExceeded,
+    NodeId::NULL,
+    "the field has more nodes than the evaluator's register file holds",
 );
 
 /// A node id that names no node of the graph. The rule names no node until the
@@ -183,9 +194,40 @@ impl FieldGraph {
     /// Fails exactly when [`FieldGraph::validate`] fails: there is no canonical
     /// form of a graph that does not type.
     pub fn canonicalize(&self) -> FieldResult<FieldGraph> {
-        self.node_types()
-            .and_then(|types| self.check_output().map(|()| types))
-            .map(|types| canonical::canonicalize(self, &types))
+        self.validate().map(|()| canonical::canonicalize(self))
+    }
+
+    /// The value of the field's declared output under `context`.
+    ///
+    /// This call **is the definition of what the field means**. Every other
+    /// realisation of the same graph — a shader emitted for a GPU backend, a
+    /// per-triangle CPU shading path — is a mirror checked against it.
+    ///
+    /// **Determinism:** same graph, same context → bit-identical `f32` on every
+    /// target including `wasm32`.
+    ///
+    /// **Allocation:** none. The evaluator folds over a fixed-size register file
+    /// on the stack, so this is safe to call once per texel, per lattice node or
+    /// per vertex.
+    ///
+    /// **Contract:** the graph is expected to have been validated once, at
+    /// preparation time — [`FieldGraph::validate`] is `O(nodes)` and allocates,
+    /// so re-proving it per sample would be the whole cost of a bake. Evaluating
+    /// an unvalidated graph is still **total**: every operator returns a value
+    /// and every lookup falls back to [`FieldValue::ZERO`], so nothing panics —
+    /// the value is simply only *meaningful* for a graph that type-checks.
+    pub fn evaluate(&self, context: &EvalContext) -> FieldResult<FieldValue> {
+        self.evaluate_at(context, self.output)
+    }
+
+    /// The value of one node of the field under `context` — the same evaluation
+    /// as [`FieldGraph::evaluate`], read at `node` instead of at the declared
+    /// output. Nodes after `node` are not evaluated, because no node can depend
+    /// on a later one.
+    pub fn evaluate_at(&self, context: &EvalContext, node: NodeId) -> FieldResult<FieldValue> {
+        self.check_budget()
+            .and_then(|()| self.check_node(node))
+            .map(|()| eval::evaluate(self.recipe.nodes(), node, context, &self.params))
     }
 
     /// Whether the field already **is** its canonical form.
@@ -205,9 +247,23 @@ impl FieldGraph {
 
     /// The declared output must name a node of the graph.
     fn check_output(&self) -> FieldResult<()> {
-        ((self.output.raw() as usize) < self.node_count())
+        self.check_node(self.output)
+    }
+
+    /// `node` must name a node of the graph.
+    fn check_node(&self, node: NodeId) -> FieldResult<()> {
+        ((node.raw() as usize) < self.node_count())
             .then_some(())
-            .ok_or_else(|| OUTPUT_NODE_MISSING.about(self.output))
+            .ok_or_else(|| OUTPUT_NODE_MISSING.about(node))
+    }
+
+    /// The graph must fit the evaluator's register file. The container's budget
+    /// is the same number, so this can only fail for a graph
+    /// [`FieldGraph::validate`] would already reject.
+    fn check_budget(&self) -> FieldResult<()> {
+        (self.node_count() <= MAX_NODES)
+            .then_some(())
+            .ok_or(NODE_BUDGET_EXCEEDED)
     }
 }
 
@@ -387,6 +443,64 @@ mod tests {
             FieldGraph::deserialize(&GOLDEN_BYTES),
             Ok(sample()),
             "the golden bytes must still decode to the graph that produced them"
+        );
+    }
+
+    #[test]
+    fn a_graph_evaluates_its_declared_output_and_any_node_of_it() {
+        let field = sample();
+        let context = EvalContext::new(
+            axiom_math::Vec3::new(3.0, 4.0, 0.0),
+            axiom_math::Vec2::ZERO,
+            axiom_math::Vec3::UNIT_Y,
+            axiom_kernel::Seconds::finite_or_zero(0.0),
+        );
+        assert_eq!(
+            field.evaluate(&context),
+            Ok(FieldValue::scalar(Scalar::new(5.0)))
+        );
+        assert_eq!(
+            field.evaluate_at(&context, NodeId::from_raw(0)),
+            Ok(FieldValue::vec3(axiom_math::Vec3::new(3.0, 4.0, 0.0)))
+        );
+    }
+
+    #[test]
+    fn evaluating_a_node_the_graph_does_not_have_names_that_id() {
+        let error = sample()
+            .evaluate_at(&EvalContext::ORIGIN, NodeId::from_raw(9))
+            .expect_err("node 9 does not exist");
+        assert_eq!(error.kind(), FieldErrorCode::OutputNodeMissing);
+        assert_eq!(error.node(), NodeId::from_raw(9));
+
+        let orphaned = graph_with(7, 0.5);
+        assert_eq!(
+            orphaned
+                .evaluate(&EvalContext::ORIGIN)
+                .expect_err("the declared output does not exist")
+                .node(),
+            NodeId::from_raw(7)
+        );
+    }
+
+    #[test]
+    fn a_graph_too_big_for_the_register_file_is_refused_rather_than_evaluated() {
+        let mut recipe = RecipeGraph::new(RecipeId::from_raw(1), 1);
+        (0..=axiom_recipe::MAX_NODES).for_each(|_| {
+            recipe.add(FieldOp::Point.code(), Vec::new(), Vec::new());
+        });
+        let field = FieldGraph::new(recipe, NodeId::from_raw(0), FieldParams::new());
+        assert_eq!(field.node_count(), axiom_recipe::MAX_NODES + 1);
+        let error = field
+            .evaluate(&EvalContext::ORIGIN)
+            .expect_err("the graph is over the container's budget");
+        assert_eq!(error.kind(), FieldErrorCode::NodeLimitExceeded);
+        assert_eq!(error.node(), NodeId::NULL);
+        // The same graph is already illegal by the container's own rule, so this
+        // guard can only ever fire for a graph `validate` would reject too.
+        assert_eq!(
+            field.validate().expect_err("over budget").kind(),
+            FieldErrorCode::NodeLimitExceeded
         );
     }
 

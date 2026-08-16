@@ -39,7 +39,6 @@ use crate::const_fold::fold_value;
 use crate::field_graph::FieldGraph;
 use crate::field_op::{FieldOp, FIELD_OP_COUNT};
 use crate::field_params::FieldParams;
-use crate::field_type::FieldType;
 use crate::field_value::FieldValue;
 
 /// Which operators may have their input ids sorted before keying and emitting.
@@ -63,10 +62,9 @@ const COMMUTATIVE: [bool; FIELD_OP_COUNT] = [
     false,                              // Transform
 ];
 
-/// The canonical form of `source`, whose node types the caller has already
-/// derived.
-pub(crate) fn canonicalize(source: &FieldGraph, types: &[FieldType]) -> FieldGraph {
-    let shared = fold_and_share(source.recipe(), types);
+/// The canonical form of `source`, which the caller has already validated.
+pub(crate) fn canonicalize(source: &FieldGraph) -> FieldGraph {
+    let shared = fold_and_share(source.recipe());
     let output = shared.remap[source.output().raw() as usize];
     let live = live_nodes(&shared.recipe, output);
     relabel(&shared.recipe, &live, output, source.params())
@@ -130,7 +128,7 @@ impl Shared {
     }
 
     /// Fold, share and record one original node.
-    fn absorb(mut self, node: &Node, ty: FieldType) -> Self {
+    fn absorb(mut self, node: &Node) -> Self {
         let op = FieldOp::from_code(node.op())
             .expect("canonicalisation runs only on a graph that has already type-checked");
         let inputs = order(op, node.inputs(), &self.remap);
@@ -138,7 +136,7 @@ impl Shared {
             .iter()
             .map(|input| self.values[input.raw() as usize])
             .collect();
-        let folded = fold_value(op, &known, node.params(), ty);
+        let folded = fold_value(op, &known, node.params());
         let (code, params, links) = folded
             .map(|value| (FieldOp::Const.code(), value.const_params(), Vec::new()))
             .unwrap_or_else(|| (node.op(), node.params().to_vec(), inputs));
@@ -149,14 +147,11 @@ impl Shared {
 }
 
 /// Passes 1 and 2, as one forward walk in id order.
-fn fold_and_share(source: &RecipeGraph, types: &[FieldType]) -> Shared {
+fn fold_and_share(source: &RecipeGraph) -> Shared {
     source
         .nodes()
         .iter()
-        .enumerate()
-        .fold(Shared::new(source), |shared, (index, node)| {
-            shared.absorb(node, types[index])
-        })
+        .fold(Shared::new(source), Shared::absorb)
 }
 
 /// A node's inputs, remapped into the emitted graph and put in canonical order.
@@ -227,10 +222,12 @@ fn relabel(
 mod tests {
     use super::*;
     use axiom_kernel::StableHash;
+    use axiom_math::Vec3;
     use axiom_recipe::Scalar;
 
     use crate::field_builder::FieldBuilder;
     use crate::field_error::FieldErrorCode;
+    use crate::field_type::FieldType;
     use crate::ids::FieldId;
 
     fn builder() -> FieldBuilder {
@@ -454,7 +451,23 @@ mod tests {
     }
 
     #[test]
-    fn the_operators_canonicalisation_cannot_fold_survive_untouched() {
+    fn a_spatial_sampler_over_a_constant_point_folds_to_its_value() {
+        let (build, origin) = builder().push_const(FieldValue::vec3(Vec3::new(0.5, 0.25, 0.0)));
+        let (build, grain) = build.push_noise(99, origin);
+        let field = build.build(grain);
+
+        assert_eq!(field.validate(), Ok(()));
+        let folded = canonical(&field);
+        assert_eq!(folded.node_count(), 1);
+        assert_eq!(ops_of(&folded), vec![FieldOp::Const.code()]);
+        assert_eq!(
+            const_lane(&folded, 0),
+            axiom_noise::value_noise(99, Vec3::new(0.5, 0.25, 0.0)).get()
+        );
+    }
+
+    #[test]
+    fn the_operators_that_read_the_context_or_the_table_survive_untouched() {
         let (build, slot) = builder().declare("knob", constant(0.5));
         let (build, knob) = build.push_param(slot, FieldType::Scalar);
         let (build, point) = build.push(FieldOp::Point, Vec::new(), Vec::new());

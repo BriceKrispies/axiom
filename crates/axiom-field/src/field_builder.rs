@@ -1,6 +1,7 @@
 //! The append-only authoring surface for a field graph.
 
 use axiom_kernel::StableHash;
+use axiom_noise::FbmConfig;
 use axiom_recipe::{NodeId, Param, RecipeGraph, RecipeId};
 
 use crate::field_graph::FieldGraph;
@@ -9,6 +10,7 @@ use crate::field_params::FieldParams;
 use crate::field_type::FieldType;
 use crate::field_value::FieldValue;
 use crate::ids::{FieldId, FieldParamSlot};
+use crate::noise_words::{fbm_words, seed_words};
 
 /// Builds a [`FieldGraph`] by appending operator nodes.
 ///
@@ -83,6 +85,38 @@ impl FieldBuilder {
             vec![Param::int(u32::from(slot.raw())), Param::int(u32::from(ty.code()))],
             Vec::new(),
         )
+    }
+
+    /// Append a `Noise` node sampling single-octave coherent noise at `input`,
+    /// encoding the seed's two canonical words.
+    ///
+    /// The encoding is [`crate::noise_words`]'s, the same one the evaluator
+    /// decodes, so an authored node and an evaluated one can never disagree
+    /// about which half of the seed is which.
+    pub fn push_noise(self, seed: u64, input: NodeId) -> (Self, NodeId) {
+        self.push(
+            FieldOp::Noise,
+            seed_words(seed).iter().copied().map(Param::from_bits).collect(),
+            vec![input],
+        )
+    }
+
+    /// Append an `Fbm` node sampling fractal Brownian motion at `input`,
+    /// encoding the seed's two words followed by the four
+    /// [`axiom_noise::FbmConfig`] knob words.
+    ///
+    /// Taking the typed config rather than four loose numbers is what pins the
+    /// operator's parameter arity to the noise layer's own knob set: adding a
+    /// knob to `FbmConfig` fails to compile in [`crate::noise_words`] rather than
+    /// silently changing what an `Fbm` node carries.
+    pub fn push_fbm(self, seed: u64, config: FbmConfig, input: NodeId) -> (Self, NodeId) {
+        let words: Vec<Param> = seed_words(seed)
+            .iter()
+            .copied()
+            .chain(fbm_words(config))
+            .map(Param::from_bits)
+            .collect();
+        self.push(FieldOp::Fbm, words, vec![input])
     }
 
     /// Declare the parameter named `name` with an initial `value`, returning its
@@ -259,6 +293,50 @@ mod tests {
         );
         let empty = FieldBuilder::new(FieldId::from_raw(1), 1).build(NodeId::NULL);
         assert_ne!(field.digest(), empty.digest());
+    }
+
+    #[test]
+    fn a_spatial_node_encodes_the_words_the_evaluator_decodes() {
+        use axiom_noise::{FbmConfig, Frequency};
+
+        let config = FbmConfig::new(3, Frequency::finite_or_zero(2.5));
+        let (builder, point) = FieldBuilder::new(FieldId::from_raw(1), 1).push(
+            FieldOp::Point,
+            Vec::new(),
+            Vec::new(),
+        );
+        let (builder, grain) = builder.push_noise(0x0123_4567_89AB_CDEF, point);
+        let (builder, fractal) = builder.push_fbm(7, config, point);
+        let field = builder.build(fractal);
+        assert_eq!(field.validate(), Ok(()));
+
+        let words = |node: NodeId| -> Vec<u32> {
+            field
+                .recipe()
+                .node(node)
+                .expect("the node exists")
+                .params()
+                .iter()
+                .map(|p| p.bits())
+                .collect()
+        };
+        assert_eq!(words(grain), vec![0x89AB_CDEF, 0x0123_4567]);
+        assert_eq!(words(grain).len() as u8, FieldOp::Noise.signature().params());
+        assert_eq!(
+            words(fractal),
+            vec![
+                7,
+                0,
+                3,
+                2.5_f32.to_bits(),
+                config.lacunarity.get().to_bits(),
+                config.gain.get().to_bits(),
+            ]
+        );
+        assert_eq!(
+            words(fractal).len() as u8,
+            FieldOp::Fbm.signature().params()
+        );
     }
 
     #[test]

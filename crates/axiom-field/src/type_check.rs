@@ -295,18 +295,10 @@ fn explicit(cx: NodeCheck<'_>) -> FieldResult<FieldType> {
     [component_type(cx), Ok(compose_type(cx))][usize::from(cx.op == FieldOp::Compose)]
 }
 
-/// The type a declared `Compose` width names. Total by table: the width has
-/// already been proved to be `2..=4` by [`NodeCheck::check_input_count`], and
-/// the clamped lookup keeps this function free of an unreachable error arm.
+/// The type a declared `Compose` width names — [`FieldType::of_width`], the one
+/// statement of that rule, which the evaluator's `Compose` reads too.
 fn compose_type(cx: NodeCheck<'_>) -> FieldType {
-    const WIDTH_TYPE: [FieldType; 5] = [
-        FieldType::Scalar,
-        FieldType::Scalar,
-        FieldType::Vec2,
-        FieldType::Vec3,
-        FieldType::Vec4,
-    ];
-    WIDTH_TYPE[(cx.word(0) as usize).min(4)]
+    FieldType::of_width(cx.word(0))
 }
 
 /// A `Component` selects one lane of its input and yields a scalar.

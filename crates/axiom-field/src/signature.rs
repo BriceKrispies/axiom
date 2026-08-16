@@ -9,20 +9,25 @@
 use core::mem::size_of;
 
 use axiom_math::{Mat4, Vec4};
-use axiom_noise::FbmConfig;
 
 use crate::field_op::{FieldOp, FIELD_OP_COUNT};
 use crate::field_type::FieldType;
+use crate::noise_words::{FBM_KNOB_WORDS, SEED_WORDS};
 
 /// The two words of the `u64` seed a spatial operator carries.
-const SEED_PARAMS: u8 = (size_of::<u64>() / size_of::<u32>()) as u8;
+const SEED_PARAMS: u8 = SEED_WORDS as u8;
 
-/// The knob words an `Fbm` node carries, derived from
-/// [`axiom_noise::FbmConfig`] itself — `octaves`, `frequency`, `lacunarity`,
-/// `gain`, one 32-bit word each. Deriving it from the config type is what keeps
-/// the operator's arity and the noise layer it will be evaluated against from
-/// ever drifting apart.
-const FBM_KNOB_PARAMS: u8 = (size_of::<FbmConfig>() / size_of::<u32>()) as u8;
+/// The knob words an `Fbm` node carries: `octaves`, `frequency`, `lacunarity`,
+/// `gain`, one 32-bit word each.
+///
+/// The count comes from [`crate::noise_words`], where it is pinned by an
+/// encoder that destructures an [`axiom_noise::FbmConfig`] **exhaustively** — so
+/// adding a knob to the config fails to compile there. It deliberately no longer
+/// comes from `size_of::<FbmConfig>() / size_of::<u32>()`: a memory-layout
+/// quotient is not a parameter count, and it would keep happening to equal
+/// *something* after a knob was added, removed or repadded, silently changing
+/// this operator's arity and every graph's bytes.
+const FBM_KNOB_PARAMS: u8 = FBM_KNOB_WORDS as u8;
 
 /// The parameter slots a `Transform` node carries: one [`axiom_math::Vec4`]
 /// column per column of the [`axiom_math::Mat4`] it applies, derived from the
@@ -283,6 +288,8 @@ mod tests {
     #[test]
     fn the_spatial_arities_are_derived_from_the_layers_they_lower_to() {
         assert_eq!(SEED_PARAMS, 2);
+        // Pinned by the exhaustive `FbmConfig` destructuring in `noise_words`,
+        // not by the config's memory layout.
         assert_eq!(FBM_KNOB_PARAMS, 4);
         assert_eq!(TRANSFORM_PARAMS, 4);
         assert_eq!(FieldOp::Noise.signature().params(), 2);

@@ -1,6 +1,6 @@
 [package]
 name = "axiom-field"
-description = "Axiom layer: the typed pointwise field IR. A field is a deterministic, hashable, canonically-serializable pure function from an explicitly supplied evaluation context to a typed value, represented as a closed 23-operator, id-ordered, acyclic expression graph built on axiom-recipe's container. This crate owns the representation only: the four-type lattice, the operator algebra and its const signature table, the typed graph and its append-only builder, the parameter table, the evaluation-context description, canonical bytes and the structural digest. Branchless and 100% covered."
+description = "Axiom layer: the typed pointwise field IR and its semantic reference evaluator. A field is a deterministic, hashable, canonically-serializable pure function from an explicitly supplied evaluation context to a typed value, represented as a closed 23-operator, id-ordered, acyclic expression graph built on axiom-recipe's container. This crate owns the four-type lattice, the operator algebra and its const signature table, the typed graph and its append-only builder, the parameter table, canonical bytes and the structural digest, and the evaluator that defines what every operator means: a flat fold in id order over a fixed-size register file, allocation-free and bit-deterministic, against which every backend's realisation of a field is checked. Branchless and 100% covered."
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
