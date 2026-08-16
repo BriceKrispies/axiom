@@ -622,9 +622,13 @@ fn fs(in: VsOut) -> FsOut {
 
 /// The main pass's whole shader source: the two halves of [`SCENE_WGSL_PREFIX`]
 /// / [`SCENE_WGSL_SUFFIX`] with the **default** surface program spliced between
-/// them. Generating a program for an authored surface is
-/// `crate::surface_program::emit`'s job; binding one to this pipeline is
-/// pipeline-and-cache work, so what this pass compiles today is the identity.
+/// them — the identity over the instance lanes and the exact zero offset.
+///
+/// This is the pipeline a draw naming `surface_program == 0` runs, and the one a
+/// draw naming a program the preparation barrier never prepared falls back to. A
+/// draw naming a **prepared** program runs a pipeline built from the same two
+/// halves with that surface's generated program spliced in instead — see
+/// `crate::surface_program::compile`.
 fn scene_shader_source() -> String {
     wgsl_template::scene_shader(
         SCENE_WGSL_PREFIX,
@@ -783,6 +787,33 @@ pub(crate) struct SceneRenderer {
     /// The linear-blend-skinning resources, when the device can support them.
     /// [`None`] on a device without vertex-stage storage buffers — see [`Skinning`].
     skinning: Option<Skinning>,
+    /// What every main-pass pipeline is built from, kept so a program compiled at
+    /// the preparation barrier gets **the same** layout the default pipeline has.
+    layouts: MainPassLayouts,
+    /// The compiled surface programs, filled at the **preparation barrier** by
+    /// [`Self::prepare_surfaces`] and never during a frame. Empty until an app
+    /// prepares one, which is what every existing app does.
+    surfaces: crate::surface_program::compile::SurfaceProgramCache,
+}
+
+/// The colour format and the four bind group layouts every main-pass pipeline —
+/// the default one and every compiled surface program — is built from.
+///
+/// Retained as one field rather than four so that "the layout a surface program
+/// is compiled against" is literally the same value as "the layout the default
+/// pipeline was built against". A surface program built against its own layout
+/// would make groups 1 (`lights`) and 2 (`shadow_sample`) invalid across a
+/// pipeline switch, forcing them back inside the batch loop — the expensive
+/// mistake this design exists to avoid.
+#[derive(Debug)]
+struct MainPassLayouts {
+    format: wgpu::TextureFormat,
+    material: wgpu::BindGroupLayout,
+    lights: wgpu::BindGroupLayout,
+    shadow_sample: wgpu::BindGroupLayout,
+    /// The **one** layout every surface program's parameter group is built
+    /// against (group 3, binding 1).
+    surface: wgpu::BindGroupLayout,
 }
 
 /// Everything the skinned pass needs, grouped so it can be **absent**.
@@ -845,20 +876,46 @@ impl Skinning {
         max_instances: u32,
     ) -> Option<Skinning> {
         (!skinned_mesh_set.is_empty()).then(|| {
+            // Group 3 of the SKINNED pass carries two things: the joint palette
+            // at binding 0, and the surface parameter region at binding 1 —
+            // because the shared `fs` reads `surface_params` on both pipelines
+            // and `downlevel_webgl2_defaults` guarantees only four bind groups,
+            // so there is no fifth to move it to. The skinned pass binds the
+            // ZERO region: it always runs the default program (its vertex stage
+            // is at the 16-attribute ceiling and its draws carry no surface
+            // program), and the default program reads no parameter.
             let palette_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("axiom-palette-layout"),
-                    entries: &[wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    }],
+                        wgpu::BindGroupLayoutEntry {
+                            binding: crate::surface_program::compile::SURFACE_PARAMS_BINDING,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
                 });
+            let skinned_params = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("axiom-skinned-surface-params"),
+                size: crate::surface_program::params::SURFACE_PARAM_REGION_BYTES,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
             let palette_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("axiom-joint-palette"),
                 size: wgpu::Extent3d {
@@ -876,12 +933,18 @@ impl Skinning {
             let palette_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("axiom-palette-bind-group"),
                 layout: &palette_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &palette_texture.create_view(&wgpu::TextureViewDescriptor::default()),
-                    ),
-                }],
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &palette_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: crate::surface_program::compile::SURFACE_PARAMS_BINDING,
+                        resource: skinned_params.as_entire_binding(),
+                    },
+                ],
             });
             Skinning {
                 pipeline: build_skinned_pipeline(
@@ -1145,12 +1208,17 @@ impl SceneRenderer {
             mapped_at_creation: false,
         });
 
+        // The ONE surface-parameter bind group layout, shared by the default
+        // pipeline and by every program the preparation barrier compiles.
+        let surface_layout = crate::surface_program::compile::surface_bind_group_layout(device);
         let pipeline = build_main_pipeline(
             device,
             format,
             &material_layout,
             &lights_layout,
             &shadow_sample_layout,
+            &surface_layout,
+            &scene_shader_source(),
         );
         let shadow_pipeline = build_shadow_pipeline(device, &shadow_pass_layout);
 
@@ -1214,7 +1282,68 @@ impl SceneRenderer {
                 .map(|sky| SkyPass::new(device, format, sky)),
             look,
             skinning,
+            // No surface program until an app prepares one at the barrier. Every
+            // existing app stays here, paying one shared zero bind group per pass
+            // and not one draw call more.
+            surfaces: crate::surface_program::compile::SurfaceProgramCache::empty(
+                device,
+                &surface_layout,
+            ),
+            layouts: MainPassLayouts {
+                format,
+                material: material_layout,
+                lights: lights_layout,
+                shadow_sample: shadow_sample_layout,
+                surface: surface_layout,
+            },
         }
+    }
+
+    /// **Compile every authored surface's program. At the barrier, and only
+    /// here.**
+    ///
+    /// Driven from an app's `axiom_runtime::PreparationTask`, before
+    /// `RuntimeState::Prepared` — the phase whose stated invariant is that the
+    /// deterministic simulation cannot advance until preparation has completed.
+    /// Shader compilation is exactly the shape of work that phase exists for:
+    /// expensive, startup-only, producing runtime-ready in-memory data.
+    ///
+    /// Every program in `catalog` is compiled here, in the catalog's ascending
+    /// digest order, and the draw loop below never compiles anything. A draw
+    /// naming a program this call did not produce renders the default pipeline
+    /// and the constant fallback while the frame reports
+    /// `axiom_host::FrameFeature::ProceduralSurface`. That is the rule that keeps
+    /// the doctrine `crate::post_chain` states at its render-target comment true:
+    /// the set of pipelines a session holds is fixed before its first frame, so
+    /// no frame can stutter compiling one.
+    ///
+    /// Calling it again replaces the cache wholesale — a second preparation, not
+    /// an incremental one. There is no eviction and nothing is persisted.
+    pub(crate) fn prepare_surfaces(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        catalog: &crate::surface_program::cache::SurfaceProgramCatalog,
+    ) {
+        self.surfaces = crate::surface_program::compile::SurfaceProgramCache::compile(
+            device,
+            queue,
+            catalog,
+            crate::surface_program::compile::SurfacePipelineInputs {
+                format: self.layouts.format,
+                material: &self.layouts.material,
+                lights: &self.layouts.lights,
+                shadow_sample: &self.layouts.shadow_sample,
+                surface: &self.layouts.surface,
+            },
+        );
+    }
+
+    /// How many surface programs this renderer holds — the number a scene test
+    /// asserts against so a variant explosion is a failing test rather than a
+    /// slow frame.
+    pub(crate) fn surface_program_count(&self) -> u32 {
+        self.surfaces.len()
     }
 
     /// Record + submit one frame: a directional **shadow depth pre-pass** (the
@@ -1240,6 +1369,18 @@ impl SceneRenderer {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        // The **surface program** each batch draws with, in `batches` order —
+        // `axiom_host::FrameDrawItem::surface_program`, which is the authored
+        // surface's own digest. A batch with no entry here, and every entry that
+        // is `0`, draws the default pipeline: that is the whole of what an app
+        // authoring no surface does, and it costs it nothing.
+        //
+        // A parallel slice rather than a fifth tuple lane because the tuple is
+        // the batch shape `GpuBackendApi::present_frame` publishes and
+        // `axiom-shot` consumes; a program id is one `u64` per *batch*, so
+        // carrying it beside them allocates a handful of words rather than
+        // rewriting every instance stream.
+        programs: &[u64],
         skinned: &[SkinnedGpuDraw],
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
@@ -1302,15 +1443,21 @@ impl SceneRenderer {
         // Pack instances back-to-back; record each batch's (mesh, material, byte
         // offset, count), capped at the instance-buffer capacity.
         let mut packed: Vec<f32> = Vec::new();
-        let mut draws: Vec<(u64, u64, u64, u32)> = Vec::new();
+        let mut draws: Vec<(u64, u64, u64, u32, u64)> = Vec::new();
         let mut written: u32 = 0;
-        for (mesh_id, material_id, instances, count) in batches {
+        for (index, (mesh_id, material_id, instances, count)) in batches.iter().enumerate() {
             let room = self.max_instances.saturating_sub(written);
             let count = (*count).min(room);
             let floats = (count as usize) * INSTANCE_FLOATS;
             let byte_offset = u64::from(written) * INSTANCE_STRIDE;
             packed.extend_from_slice(&instances[..floats.min(instances.len())]);
-            draws.push((*mesh_id, *material_id, byte_offset, count));
+            draws.push((
+                *mesh_id,
+                *material_id,
+                byte_offset,
+                count,
+                programs.get(index).copied().unwrap_or_default(),
+            ));
             written += count;
         }
         queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&packed));
@@ -1332,9 +1479,9 @@ impl SceneRenderer {
         // every draw, exactly as before this existed: dropping a caster is
         // visible, keeping a redundant one is not.
         let volume = crate::shadow_cull::light_volume(&light_view_proj);
-        let shadow_draws: Vec<&(u64, u64, u64, u32)> = draws
+        let shadow_draws: Vec<&(u64, u64, u64, u32, u64)> = draws
             .iter()
-            .filter(|(mesh_id, _, byte_offset, count)| {
+            .filter(|(mesh_id, _, byte_offset, count, _)| {
                 volume.as_ref().map_or(true, |frustum| {
                     let bounds = self.meshes.get(mesh_id).and_then(|m| m.bounds.as_ref());
                     bounds.map_or(true, |bounds| {
@@ -1404,7 +1551,12 @@ impl SceneRenderer {
             });
             pass.set_pipeline(&self.shadow_pipeline);
             pass.set_bind_group(0, &self.shadow_pass_bind_group, &[]);
-            for (mesh_id, _material_id, byte_offset, count) in &shadow_draws {
+            // The shadow pass runs its own depth-only shader and no surface
+            // program: a displaced vertex therefore casts its UNdisplaced
+            // shadow. That is a stated limit — `SHADOW_WGSL` is a separate
+            // module with no `axiom_displace` in it, and threading one through
+            // is its own change to the shadow pipeline — not a silent omission.
+            for (mesh_id, _material_id, byte_offset, count, _program) in &shadow_draws {
                 if let Some(mesh) = self.meshes.get(mesh_id) {
                     pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, self.instance_buffer.slice(*byte_offset..));
@@ -1460,10 +1612,49 @@ impl SceneRenderer {
                 pass.set_bind_group(0, &sky.bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
+            // The DEFAULT program's pipeline and the shared zero parameter group,
+            // set once — the state every draw carrying `surface_program == 0`
+            // runs under, which is every draw in every app that authors no
+            // surface. Groups 1 and 2 are set exactly once per pass, as they
+            // always have been: every surface pipeline shares this one's bind
+            // group layouts, so switching pipelines below does not invalidate
+            // them.
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(1, &self.lights_bind_group, &[]);
             pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-            for (mesh_id, material_id, byte_offset, count) in &draws {
+            pass.set_bind_group(3, self.surfaces.default_bind_group(), &[]);
+            // The program the pass is currently in. `draws` arrives GROUPED BY
+            // PROGRAM (`crate::frame_packet_adapter` sorts on it), so this
+            // changes once per distinct program in the frame — not once per
+            // batch — and a frame with one program changes it zero times.
+            let mut bound: u64 = 0;
+            for (mesh_id, material_id, byte_offset, count, program) in &draws {
+                if *program != bound {
+                    bound = *program;
+                    // A LOOKUP, never a compile. `None` means the preparation
+                    // barrier never prepared this program: the draw falls back to
+                    // the default pipeline and the constant channels
+                    // `crate::frame_packet_adapter` folded into its instance
+                    // stream, and the frame reports the drop through
+                    // `axiom_host::FrameFeature::ProceduralSurface` (see
+                    // `crate::GpuBackendApi::frame_degradations`). Compiling here
+                    // would be the mid-session stutter `crate::post_chain`'s
+                    // render-target comment exists to forbid — on the WebGL2
+                    // fallback path `wgpu` cross-compiles WGSL to GLSL at
+                    // pipeline creation, so a first-use compile is a guaranteed
+                    // hitch.
+                    let compiled = self.surfaces.program(*program);
+                    pass.set_pipeline(
+                        compiled.map_or(&self.pipeline, |program| program.pipeline()),
+                    );
+                    pass.set_bind_group(
+                        3,
+                        compiled.map_or(self.surfaces.default_bind_group(), |program| {
+                            program.bind_group()
+                        }),
+                        &[],
+                    );
+                }
                 if let (Some(mesh), Some(material)) =
                     (self.meshes.get(mesh_id), self.materials.get(material_id))
                 {
@@ -1631,21 +1822,37 @@ fn blend_state(additive: bool) -> wgpu::BlendState {
     [alpha, add][additive as usize]
 }
 
-/// Build the main (lit/textured/shadowed) pipeline for colour target `format`.
-fn build_main_pipeline(
+/// Build the main (lit/textured/shadowed) pipeline for colour target `format`,
+/// from `source` — the whole WGSL, with **some** surface program already spliced
+/// into it.
+///
+/// `source` is a parameter rather than a call to [`scene_shader_source`] because
+/// this is also how a *generated* program becomes a pipeline
+/// (`crate::surface_program::compile::SurfaceProgramCache::compile` calls it,
+/// once per prepared surface, at the preparation barrier). Every pipeline it
+/// builds shares the same four bind group layouts, which is what lets the draw
+/// loop switch pipelines mid-pass without re-setting groups 1 and 2.
+pub(crate) fn build_main_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
     material_layout: &wgpu::BindGroupLayout,
     lights_layout: &wgpu::BindGroupLayout,
     shadow_sample_layout: &wgpu::BindGroupLayout,
+    surface_layout: &wgpu::BindGroupLayout,
+    source: &str,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("axiom-scene-shader"),
-        source: wgpu::ShaderSource::Wgsl(scene_shader_source().into()),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
     });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("axiom-scene-pl"),
-        bind_group_layouts: &[material_layout, lights_layout, shadow_sample_layout],
+        bind_group_layouts: &[
+            material_layout,
+            lights_layout,
+            shadow_sample_layout,
+            surface_layout,
+        ],
         push_constant_ranges: &[],
     });
     // Per-instance attributes: mvp columns (loc 4-7), world columns (loc 8-11),

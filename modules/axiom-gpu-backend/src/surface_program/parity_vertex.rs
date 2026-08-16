@@ -371,11 +371,14 @@ fn the_main_pass_shader_compiles_with_a_generated_displacement_program_spliced_i
     )
     .expect("the main pass must compile with a generated displacement program");
     // `vs` calls it, with the arguments it already had in hand — no new vertex
-    // attribute, and the frame's own surface time.
+    // attribute, the frame's own surface time, and the program's BOUND parameter
+    // region (group 3, binding 1) rather than the zero value the pass used to
+    // hand every program.
     assert!(source.contains(
         "let displaced = position + axiom_displace(position, normal, uv, lights.camera.w, \
-         SurfaceParams());"
+         surface_params);"
     ));
+    assert!(source.contains("@group(3) @binding(1) var<uniform> surface_params: SurfaceParams;"));
     assert!(source.contains("out.clip = mvp * vec4<f32>(displaced, 1.0);"));
     // And `vs_skinned` does NOT: the 16-attribute ceiling, stated in the shader.
     let skinned_at = source.find("fn vs_skinned").expect("the skinned stage");

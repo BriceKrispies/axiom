@@ -1,4 +1,13 @@
 //! The single GPU-backend facade: own the real wgpu binding and present frames.
+//!
+//! Split in two by *when* a method runs. Everything here is bind-time or
+//! frame-time — construct the backend, initialise the live binding, present a
+//! packet. The **preparation barrier** — where every surface program is compiled,
+//! and the preparation-time queries a caller builds a frame's degraded-feature
+//! report from — lives in [`surfaces`], because a shader compile has no business
+//! sitting in the same file as a per-frame present.
+
+mod surfaces;
 
 use axiom_host::{Draw2dList, FramePacket, HostPresentationRequest, SdfScene};
 
@@ -46,6 +55,12 @@ pub struct GpuBackendApi {
     // `(texture_id, width, height, RGBA8)` — same upload shape as the 3D
     // material set.
     draw2d_textures: Vec<(u64, u32, u32, Vec<u8>)>,
+    // What the PREPARATION BARRIER compiled: every authored surface this backend
+    // was handed, in sorted digest order, with the program each one lowers to.
+    // Filled once by `prepare_surfaces` and read (never written) by every frame.
+    // A frame naming a program that is not in here is a reported degradation,
+    // never a compile — see `Self::frame_degradations`.
+    catalog: crate::surface_program::cache::SurfaceProgramCatalog,
     // Present only once initialised on wasm32; its absence means "not ready".
     #[cfg(target_arch = "wasm32")]
     live: Option<crate::live_gpu_binding::LiveGpuBinding>,
@@ -67,20 +82,22 @@ impl GpuBackendApi {
             render_height,
             shadow_size: request.device().profile().shadow_map_size(),
             max_anisotropy: request.device().profile().max_anisotropy(),
-            // Everything except procedural surfaces. The bit is cleared, not
-            // absent: this backend *will* attempt them once it can generate a
-            // program for one, and until then every authored surface fails
-            // capability validation and is reported rather than silently
-            // half-rendered. Clearing bit 12 leaves the capability word the main
-            // pass WGSL reads bit-identical, because that shader reads no bit
-            // above 2048.
-            capability: axiom_host::BackendCapabilityProfile::all()
-                .without(axiom_host::RenderCapability::ProceduralSurface),
+            // **Everything, procedural surfaces included.** The bit was cleared
+            // for as long as this backend could generate a program but not bind
+            // one; it can bind one now — a prepared surface's program is a real
+            // pipeline with a real parameter buffer behind it
+            // (`crate::surface_program::compile`) — so the capability is on and
+            // an authored surface is rendered rather than reported. Setting bit
+            // 12 leaves the capability word the main-pass WGSL reads
+            // bit-identical, because that shader reads no bit above 2048.
+            capability: axiom_host::BackendCapabilityProfile::all(),
             draw2d_textures: Vec::new(),
+            catalog: crate::surface_program::cache::SurfaceProgramCatalog::default(),
             #[cfg(target_arch = "wasm32")]
             live: None,
         }
     }
+
 
     /// Upload the CPU sprite/atlas textures the 2D [`Draw2dList`] sprite path
     /// samples, as `(texture_id, width, height, RGBA8 pixels)` — the same upload
@@ -214,6 +231,9 @@ impl GpuBackendApi {
             light_view_proj,
             camera_view_proj,
             batches,
+            // No batch names a surface program, so every one of them draws the
+            // default pipeline — this entry's whole behaviour, unchanged.
+            &[],
             sdf,
             0.0,
         )
@@ -237,6 +257,10 @@ impl GpuBackendApi {
         light_view_proj: [f32; 16],
         camera_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        // The surface program each batch draws with, in `batches` order. Empty
+        // for every caller that names no surface, which draws them all with the
+        // default pipeline.
+        programs: &[u64],
         sdf: Option<&SdfScene>,
         surface_time: f32,
     ) -> bool {
@@ -250,6 +274,7 @@ impl GpuBackendApi {
                         lights,
                         light_view_proj,
                         batches,
+                        programs,
                         &[],
                         clear_color,
                         sdf,
@@ -269,6 +294,7 @@ impl GpuBackendApi {
                 light_view_proj,
                 camera_view_proj,
                 batches,
+                programs,
                 sdf,
                 surface_time,
             );
@@ -316,6 +342,9 @@ impl GpuBackendApi {
                     lights,
                     light_view_proj,
                     batches,
+                    // This entry takes explicit batches, never a packet, so no
+                    // batch names a surface program.
+                    &[],
                     &skinned,
                     clear_color,
                     sdf,
@@ -344,20 +373,25 @@ impl GpuBackendApi {
     /// Like [`Self::present_packet`], but with the frame's authored
     /// [`axiom_surface::Surface`] set.
     ///
-    /// This backend cannot yet lower a surface into a program, so every surface
-    /// that fails [`Self::surface_degradations`] renders its **constant**
-    /// channels through the instance lanes the stream already has — a constant
-    /// base colour and a constant emission are honoured exactly, and only the
-    /// field-bound channels are missing. Passing an empty slice is what
-    /// [`Self::present_packet`] does, and it makes every packed byte identical
-    /// to the pre-surface stream.
+    /// A draw whose surface was **prepared** at the barrier
+    /// ([`Self::prepare_surfaces`]) is drawn with that surface's own compiled
+    /// program. A draw whose surface was not — or whose surface needs no program,
+    /// because every channel of it is a plain constant — renders its **constant**
+    /// channels through the instance lanes the stream already has: a constant
+    /// base colour multiplies the instance colour and a constant emission adds to
+    /// the instance emissive. Nothing is compiled here; a miss is reported through
+    /// [`Self::frame_degradations`].
+    ///
+    /// Passing an empty slice is what [`Self::present_packet`] does, and it makes
+    /// every packed byte identical to the pre-surface stream.
     pub fn present_packet_with_surfaces(
         &self,
         packet: &FramePacket,
         surfaces: &[axiom_surface::Surface],
     ) -> bool {
         let set = crate::surface_program::SurfaceProgramSet::build(surfaces, self.capability);
-        let batches = crate::frame_packet_adapter::frame_packet_to_batches(packet, &set);
+        let (batches, programs) =
+            crate::frame_packet_adapter::frame_packet_to_batches(packet, &set);
         let lights = crate::frame_packet_adapter::frame_packet_lights(packet);
         self.present_frame_at(
             packet.clear_color(),
@@ -370,6 +404,7 @@ impl GpuBackendApi {
                 .camera()
                 .map_or(IDENTITY_MATRIX, |camera| camera.view_proj()),
             &batches,
+            &programs,
             packet.sdf(),
             // The frame's surface time: the packet's own supplied engine time
             // when something in the set reads a clock, and an exact zero when
@@ -378,85 +413,6 @@ impl GpuBackendApi {
         )
     }
 
-    /// Which features this backend cannot honour for `surfaces`, checked once
-    /// against its capability profile at preparation time rather than per frame.
-    ///
-    /// The result is what a caller puts in the frame's
-    /// [`axiom_host::FrameSubmissionReport`] degraded-features list, so a surface
-    /// this backend drops is *reported*, never silently skipped. It is empty for
-    /// a surface whose every channel is a constant: such a surface needs no
-    /// program, and this backend renders it exactly.
-    pub fn surface_degradations(
-        &self,
-        surfaces: &[axiom_surface::Surface],
-    ) -> Vec<axiom_host::FrameFeature> {
-        crate::surface_program::SurfaceProgramSet::build(surfaces, self.capability).degradations()
-    }
-
-    /// Which features this backend cannot honour for `surfaces` **when they are
-    /// drawn on skinned geometry**.
-    ///
-    /// The skinned vertex stage binds all 16 vertex attributes a WebGL2
-    /// downlevel target guarantees — the ceiling that already costs a skinned
-    /// material its emissive and its specular — and the vertex it receives has
-    /// already been deformed once, by the joint palette. So it runs **no**
-    /// displacement program, and a displacing surface bound to a skinned draw is
-    /// reported here rather than silently rendering the right colour on an
-    /// undeformed shape. Everything else about a surface lowers identically on
-    /// both paths, which is why this is a second query and not a second
-    /// pipeline's worth of rules.
-    pub fn skinned_surface_degradations(
-        &self,
-        surfaces: &[axiom_surface::Surface],
-    ) -> Vec<axiom_host::FrameFeature> {
-        crate::surface_program::SurfaceProgramSet::build_for(
-            surfaces,
-            self.capability,
-            crate::surface_program::capability::GeometryPath::Skinned,
-        )
-        .degradations()
-    }
-
-    /// Which pipeline a draw naming `program_id` selects, given the frame's
-    /// authored `surfaces`: `axiom_render::RenderPipelineKind::UNLIT` (`2`) for a
-    /// surface whose [`axiom_surface::LightingModel`] is `Unlit`, and
-    /// `BASIC_LIT` (`1`) for every other surface, for a program this backend was
-    /// never handed, and for the `0` every draw that authored no surface carries.
-    ///
-    /// The render module has emitted that marker per object since it was
-    /// written — and it has always died at the `axiom_host::FramePacket`
-    /// boundary, which carries no pipeline lane. This answers it from the
-    /// **surface** instead, which the packet already names by digest: the packet
-    /// stays primitive-only, nothing is duplicated into a second lane that could
-    /// disagree with the surface, and a caller holding both a packet and its
-    /// surfaces can recover the selection. A preparation-time query, exactly like
-    /// [`Self::surface_degradations`] and [`Self::surface_parameter_bytes`].
-    ///
-    /// This backend itself still runs **one** lit pipeline: the model is a value
-    /// inside its single program, not a second module (see
-    /// `crate::surface_program::emit_lighting`).
-    pub fn surface_pipeline_kind(
-        &self,
-        surfaces: &[axiom_surface::Surface],
-        program_id: u64,
-    ) -> u32 {
-        crate::surface_program::SurfaceProgramSet::build(surfaces, self.capability)
-            .pipeline_kind(program_id)
-    }
-
-    /// The bytes this backend uploads into the shared surface-parameter buffer
-    /// for `surfaces`: one fixed-size region per program, at
-    /// `index * 512` — a 256-byte-aligned dynamic offset.
-    ///
-    /// Produced at the preparation barrier, not per frame, and produced as one
-    /// buffer with per-program regions rather than one buffer rewritten between
-    /// draws: a `queue.write_buffer` is ordered against submission, not against
-    /// the passes inside an encoder, so N writes to one buffer would leave every
-    /// draw in a pass reading the last of them (see `crate::post_chain`).
-    pub fn surface_parameter_bytes(&self, surfaces: &[axiom_surface::Surface]) -> Vec<u8> {
-        crate::surface_program::SurfaceProgramSet::build(surfaces, self.capability)
-            .parameter_bytes()
-    }
 
     /// Present a host-neutral [`Draw2dList`] through the GPU backend — the 2D
     /// peer of [`Self::present_packet`]. It walks the layer-sorted list into
@@ -683,7 +639,7 @@ mod tests {
 
     /// Build a validated presentation request the way windowing does, so the
     /// native backend can be constructed and exercised end-to-end.
-    fn request(width: u32, height: u32) -> HostPresentationRequest {
+    pub(super) fn request(width: u32, height: u32) -> HostPresentationRequest {
         request_with_profile(width, height, HostDeviceProfile::Baseline)
     }
 
@@ -774,6 +730,17 @@ mod tests {
         assert!(extended.render_width() > 3000);
     }
 
+    /// The render scale is a **live-binding** dial: with no binding there is
+    /// nothing to resize, so the tier's render size is exactly what it was and a
+    /// caller may hand it the same value every frame without consequence.
+    #[test]
+    fn setting_a_render_scale_without_a_live_binding_changes_no_size() {
+        let mut backend = GpuBackendApi::new(&request(960, 600));
+        let before = (backend.render_width(), backend.render_height());
+        backend.set_render_scale(axiom_host::RenderScale::FULL);
+        assert_eq!((backend.render_width(), backend.render_height()), before);
+    }
+
     #[test]
     fn new_reads_surface_size_from_the_request() {
         let backend = GpuBackendApi::new(&request(800, 600));
@@ -783,22 +750,23 @@ mod tests {
     }
 
     #[test]
-    fn capability_profile_defaults_to_all_but_procedural_surfaces_and_is_settable() {
-        // The hardware GPU attempts everything it can execute. The one bit it
-        // clears is ProceduralSurface: it has no program to bind for one yet, so
-        // an authored surface is reported degraded rather than half-rendered.
+    fn capability_profile_defaults_to_everything_including_procedural_surfaces() {
+        // The hardware GPU attempts everything it can execute — and it can
+        // execute a procedural surface now that a prepared surface's program is a
+        // real pipeline with a real parameter buffer behind it. The bit was
+        // cleared for exactly as long as this backend could generate a program
+        // but not bind one.
         let mut backend = GpuBackendApi::new(&request(320, 240));
         assert_eq!(
             backend.capability_profile(),
             axiom_host::BackendCapabilityProfile::all()
-                .without(axiom_host::RenderCapability::ProceduralSurface)
         );
-        assert!(!backend
+        assert!(backend
             .capability_profile()
             .contains(axiom_host::RenderCapability::ProceduralSurface));
-        // Every other capability is on — the word the main-pass WGSL reads is
-        // unchanged, because that shader reads no bit above 2048.
-        assert_eq!(backend.capability_profile().bits(), 0b1111_1111_1111);
+        // Bit 12 is now set; the word the main-pass WGSL reads is unchanged,
+        // because that shader reads no bit above 2048.
+        assert_eq!(backend.capability_profile().bits(), 0b1_1111_1111_1111);
         // A host can restrict it; the present path then consults the narrowed profile.
         let restricted = axiom_host::BackendCapabilityProfile::all()
             .without(axiom_host::RenderCapability::Shadows);
@@ -809,90 +777,6 @@ mod tests {
             .contains(axiom_host::RenderCapability::Shadows));
     }
 
-    /// The GPU arm's whole surface story today: it reports a field-authored
-    /// surface as dropped, honours a constant-only one silently, and hands back
-    /// one aligned parameter region per program.
-    #[test]
-    fn a_field_authored_surface_is_reported_dropped_and_a_constant_one_is_not() {
-        use axiom_field::{FieldBuilder, FieldId, FieldOp, FieldValue};
-        use axiom_surface::{SurfaceBuilder, SurfaceChannel};
-
-        let backend = GpuBackendApi::new(&request(320, 240));
-        let (builder, uv) = FieldBuilder::new(FieldId::of_name("gpu/api/uv"), 1).push(
-            FieldOp::Uv,
-            Vec::new(),
-            Vec::new(),
-        );
-        let (builder, lane) = builder.push(
-            FieldOp::Component,
-            vec![axiom_recipe::Param::int(0)],
-            vec![uv],
-        );
-        let field_authored = SurfaceBuilder::new()
-            .field(SurfaceChannel::Opacity, builder.build(lane))
-            .build()
-            .expect("a scalar uv field is a legal opacity");
-        let constant_only = SurfaceBuilder::new()
-            .constant(
-                SurfaceChannel::BaseColor,
-                FieldValue::vec4(axiom_math::Vec4::new(0.25, 0.5, 0.75, 1.0)),
-            )
-            .build()
-            .expect("a vec4 constant is a legal base colour");
-
-        assert_eq!(
-            backend.surface_degradations(std::slice::from_ref(&field_authored)),
-            vec![axiom_host::FrameFeature::ProceduralSurface]
-        );
-        assert!(backend
-            .surface_degradations(std::slice::from_ref(&constant_only))
-            .is_empty());
-        assert!(backend.surface_degradations(&[]).is_empty());
-        // One 512-byte region per program, and nothing at all for no surfaces.
-        assert_eq!(
-            backend
-                .surface_parameter_bytes(&[field_authored, constant_only])
-                .len(),
-            1024
-        );
-        assert!(backend.surface_parameter_bytes(&[]).is_empty());
-    }
-
-    /// A displacing surface bound to a **skinned** draw is reported, because the
-    /// skinned vertex stage runs no displacement program — the 16-attribute
-    /// ceiling. Not a silent no-op: a character bound to a wind surface that did
-    /// not move would be a wrong shape nobody was told about.
-    #[test]
-    fn a_displacing_surface_is_reported_dropped_for_the_skinned_vertex_path() {
-        use axiom_field::FieldValue;
-        use axiom_surface::{SurfaceBuilder, SurfaceChannel};
-
-        let backend = GpuBackendApi::new(&request(320, 240));
-        let displacing = SurfaceBuilder::new()
-            .constant(
-                SurfaceChannel::Displacement,
-                FieldValue::vec3(axiom_math::Vec3::new(0.0, 0.5, 0.0)),
-            )
-            .build()
-            .expect("a vec3 constant is a legal displacement");
-        assert_eq!(
-            backend.skinned_surface_degradations(std::slice::from_ref(&displacing)),
-            vec![axiom_host::FrameFeature::ProceduralSurface]
-        );
-        // A surface that does not displace is fine on both paths — the ceiling
-        // is about the vertex stage, not about skinning per se.
-        let constant_only = SurfaceBuilder::new()
-            .constant(
-                SurfaceChannel::BaseColor,
-                FieldValue::vec4(axiom_math::Vec4::new(0.25, 0.5, 0.75, 1.0)),
-            )
-            .build()
-            .expect("a vec4 constant is a legal base colour");
-        assert!(backend
-            .skinned_surface_degradations(std::slice::from_ref(&constant_only))
-            .is_empty());
-        assert!(backend.skinned_surface_degradations(&[]).is_empty());
-    }
 
     #[test]
     fn native_is_never_ready_and_present_is_a_no_op() {

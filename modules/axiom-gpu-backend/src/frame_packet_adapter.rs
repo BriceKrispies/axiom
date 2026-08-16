@@ -56,27 +56,48 @@ pub(crate) const INSTANCE_FLOATS: usize = 40;
 /// constant emission adds to the instance emissive, both through lanes the
 /// stream already has. A draw carrying `surface_program = 0` — every draw in
 /// every app that authors no surface — folds in the identity `(white, black)`,
-/// which is an exact IEEE no-op, so the packed bytes are unchanged. The batch
-/// key is deliberately still `(mesh_id, material_id)`: a surface is a per-instance
-/// colour here, not a pipeline, so nothing fragments.
+/// which is an exact IEEE no-op, so the packed bytes are unchanged.
+///
+/// ## The key carries the SURFACE PROGRAM, and that is a draw-order decision
+///
+/// A surface program is a *pipeline*, so a batch cannot straddle two of them.
+/// Extending the existing sort key to `(surface_program, mesh_id, material_id)`
+/// makes every draw sharing a program contiguous, which is what lets the renderer
+/// set each pipeline **once per frame** instead of once per batch — on the WebGL2
+/// path a `set_pipeline` is not free and a draw already costs ~52 GL calls.
+///
+/// The key is *extended*, never replaced by a map. This function built a
+/// `HashMap<(u64, u64), Vec<f32>>` per frame until 2026-08-11 and a throttled
+/// profile put ~10% of the frame inside `hashbrown`; the sort is the fix and a
+/// third key lane costs it nothing.
+///
+/// Within one program, first-appearance order is preserved exactly as before —
+/// so a frame in which **every** draw carries `surface_program = 0` (every
+/// existing app) produces byte-identical batches in an identical order. Across
+/// programs the groups are ordered by program id, with `0` first because no
+/// digest is zero: a scene mixing surfaced and unsurfaced geometry draws the
+/// unsurfaced half first.
+///
+/// The second returned vector is each batch's program id, in batch order — what
+/// `crate::scene_renderer::SceneRenderer::record` selects a pipeline with.
 pub(crate) fn frame_packet_to_batches(
     packet: &FramePacket,
     surfaces: &SurfaceProgramSet,
-) -> Vec<(u64, u64, Vec<f32>, u32)> {
+) -> (Vec<(u64, u64, Vec<f32>, u32)>, Vec<u64>) {
     let draws = packet.draws();
     let key = |index: &u32| {
         let draw = &draws[*index as usize];
-        (draw.mesh_id(), draw.material_id())
+        (draw.surface_program(), draw.mesh_id(), draw.material_id())
     };
 
     let mut order: Vec<u32> = (0..draws.len() as u32).collect();
     order.sort_unstable_by_key(|index| (key(index), *index));
 
-    // `(mesh, material, floats, instance count, earliest draw index)`.
-    let mut batches: Vec<(u64, u64, Vec<f32>, u32, u32)> = order
+    // `(mesh, material, floats, instance count, earliest draw index, program)`.
+    let mut batches: Vec<(u64, u64, Vec<f32>, u32, u32, u64)> = order
         .chunk_by(|a, b| key(a) == key(b))
         .map(|run| {
-            let (mesh_id, material_id) = key(&run[0]);
+            let (program_id, mesh_id, material_id) = key(&run[0]);
             let mut floats = Vec::with_capacity(run.len() * INSTANCE_FLOATS);
             run.iter().for_each(|index| {
                 let draw = &draws[*index as usize];
@@ -102,15 +123,49 @@ pub(crate) fn frame_packet_to_batches(
                     draw.specular().get(),
                 ]);
             });
-            (mesh_id, material_id, floats, run.len() as u32, run[0])
+            (
+                mesh_id,
+                material_id,
+                floats,
+                run.len() as u32,
+                run[0],
+                program_id,
+            )
         })
         .collect();
 
-    batches.sort_unstable_by_key(|batch| batch.4);
-    batches
-        .into_iter()
-        .map(|(mesh_id, material_id, floats, count, _)| (mesh_id, material_id, floats, count))
-        .collect()
+    // Grouped by program, and inside a program by first appearance: the first key
+    // is what keeps one `set_pipeline` per program, the second is the ordering
+    // the renderer's batch contract has always required.
+    batches.sort_unstable_by_key(|batch| (batch.5, batch.4));
+    let programs: Vec<u64> = batches.iter().map(|batch| batch.5).collect();
+    (
+        batches
+            .into_iter()
+            .map(|(mesh_id, material_id, floats, count, _, _)| {
+                (mesh_id, material_id, floats, count)
+            })
+            .collect(),
+        programs,
+    )
+}
+
+/// Every distinct surface program a packet's draws name, ascending.
+///
+/// What `crate::GpuBackendApi::frame_degradations` asks the prepared catalog
+/// about: a program in this list that the preparation barrier did not prepare is
+/// a frame-time cache miss, which is reported and rendered with the constant
+/// fallback — never compiled. Deduplicated so a thousand draws of one unprepared
+/// surface is one question, not a thousand.
+pub(crate) fn frame_packet_programs(packet: &FramePacket) -> Vec<u64> {
+    let mut programs: Vec<u64> = packet
+        .draws()
+        .iter()
+        .map(axiom_host::FrameDrawItem::surface_program)
+        .collect();
+    programs.sort_unstable();
+    programs.dedup();
+    programs
 }
 
 /// Flatten a packet's lights into the live path's light tuples
@@ -159,9 +214,12 @@ mod tests {
                 .with_emissive([2.0, 0.5, 0.0])
                 .with_specular(axiom_kernel::Ratio::finite_or_zero(0.6)),
         ];
-        let batches = frame_packet_to_batches(&packet(draws, Vec::new()), &SurfaceProgramSet::default());
+        let (batches, programs) =
+            frame_packet_to_batches(&packet(draws, Vec::new()), &SurfaceProgramSet::default());
 
         assert_eq!(batches.len(), 2);
+        // Nothing authored a surface, so every batch draws the default program.
+        assert_eq!(programs, vec![0, 0]);
         // First-appearance order: (7,5) first with 2 instances, then (7,6) with 1.
         assert_eq!((batches[0].0, batches[0].1), (7, 5));
         assert_eq!(batches[0].3, 2);
@@ -201,16 +259,21 @@ mod tests {
             // batch without promoting that batch, which already leads.
             FrameDrawItem::new(3, 9, 1, [0.0; 16], [0.0; 16], [1.0; 4], false),
         ];
-        let batches = frame_packet_to_batches(&packet(draws, Vec::new()), &SurfaceProgramSet::default());
+        let (batches, programs) =
+            frame_packet_to_batches(&packet(draws, Vec::new()), &SurfaceProgramSet::default());
         let order: Vec<(u64, u32)> = batches.iter().map(|b| (b.0, b.3)).collect();
         assert_eq!(order, vec![(9, 2), (5, 1), (2, 1)]);
+        assert_eq!(programs, vec![0, 0, 0]);
     }
 
     #[test]
     fn empty_packet_yields_no_batches_and_no_lights() {
         let p = packet(Vec::new(), Vec::new());
-        assert!(frame_packet_to_batches(&p, &SurfaceProgramSet::default()).is_empty());
+        let (batches, programs) = frame_packet_to_batches(&p, &SurfaceProgramSet::default());
+        assert!(batches.is_empty());
+        assert!(programs.is_empty());
         assert!(frame_packet_lights(&p).is_empty());
+        assert!(frame_packet_programs(&p).is_empty());
     }
 
     /// A draw naming an unlowerable surface still gets that surface's constant
@@ -241,17 +304,117 @@ mod tests {
             FrameDrawItem::new(1, 1, 1, [0.0; 16], [0.0; 16], [0.4, 0.4, 0.4, 1.0], false)
                 .with_emissive([0.75, 0.0, 0.0]),
         ];
-        let batches = frame_packet_to_batches(&packet(draws, Vec::new()), &set);
-        assert_eq!(batches.len(), 1);
-        let floats = &batches[0].2;
-        // Instance 0: the surface's constant base colour multiplied in, its
-        // constant emission added.
-        assert_eq!(&floats[32..36], &[0.5, 0.25, 1.0, 1.0]);
-        assert_eq!(&floats[36..40], &[0.0, 0.125, 0.0, 0.0]);
-        // Instance 1 carries `surface_program = 0` and is bit-identical to the
-        // stream this module packed before surfaces existed.
-        assert_eq!(&floats[72..76], &[0.4, 0.4, 0.4, 1.0]);
-        assert_eq!(&floats[76..80], &[0.75, 0.0, 0.0, 0.0]);
+        let p = packet(draws, Vec::new());
+        let (batches, programs) = frame_packet_to_batches(&p, &set);
+        // TWO batches now, not one: a surface program is a pipeline, so a draw
+        // that names one cannot share a batch with a draw that does not — even
+        // on the same mesh and material. The unsurfaced draw leads, because no
+        // digest is zero.
+        assert_eq!(batches.len(), 2);
+        assert_eq!(programs, vec![0, program]);
+        // The plain draw: bit-identical to the stream this module packed before
+        // surfaces existed.
+        assert_eq!(&batches[0].2[32..36], &[0.4, 0.4, 0.4, 1.0]);
+        assert_eq!(&batches[0].2[36..40], &[0.75, 0.0, 0.0, 0.0]);
+        // The surfaced draw: the surface's constant base colour multiplied in,
+        // its constant emission added.
+        assert_eq!(&batches[1].2[32..36], &[0.5, 0.25, 1.0, 1.0]);
+        assert_eq!(&batches[1].2[36..40], &[0.0, 0.125, 0.0, 0.0]);
+        // And the packet's distinct programs, deduplicated and ascending — what
+        // the prepared catalog is asked about.
+        assert_eq!(frame_packet_programs(&p), vec![0, program]);
+    }
+
+    /// **Draws are grouped by program, and one program is one contiguous run.**
+    ///
+    /// Four draws alternating between two surfaces on one mesh/material come back
+    /// as two batches, not four — which is what lets the renderer issue one
+    /// `set_pipeline` per program per frame instead of one per batch.
+    #[test]
+    fn draws_are_grouped_by_surface_program_so_each_pipeline_is_set_once() {
+        let draws = (0..4_u64)
+            .map(|index| {
+                FrameDrawItem::new(index, 1, 1, [0.0; 16], [0.0; 16], [1.0; 4], false)
+                    .with_surface_program(7 + index % 2)
+            })
+            .collect();
+        let (batches, programs) =
+            frame_packet_to_batches(&packet(draws, Vec::new()), &SurfaceProgramSet::default());
+        assert_eq!(batches.len(), 2);
+        assert_eq!(programs, vec![7, 8]);
+        assert_eq!(batches[0].3, 2, "both draws of program 7 in one batch");
+        assert_eq!(batches[1].3, 2, "both draws of program 8 in one batch");
+        // A run's instances keep the order the packet drew them in.
+        assert_eq!(frame_packet_programs(&packet(
+            (0..4_u64)
+                .map(|index| FrameDrawItem::new(index, 1, 1, [0.0; 16], [0.0; 16], [1.0; 4], false)
+                    .with_surface_program(7 + index % 2))
+                .collect(),
+            Vec::new(),
+        )), vec![7, 8]);
+    }
+
+    /// How many `set_pipeline` calls the renderer's draw loop makes for a batch
+    /// list, counting from the default program it starts bound to.
+    ///
+    /// A mirror of the loop's own condition (`*program != bound`, starting at
+    /// `0`) — the one number the surface-program work could have made worse, so
+    /// it is counted here rather than asserted about in prose.
+    fn pipeline_switches(programs: &[u64]) -> usize {
+        programs
+            .iter()
+            .fold((0_usize, 0_u64), |(count, bound), program| {
+                (count + usize::from(*program != bound), *program)
+            })
+            .0
+    }
+
+    /// **A surface-free scene costs zero pipeline switches, whatever it draws.**
+    ///
+    /// The draw loop begins bound to the default pipeline, and a frame in which
+    /// every draw carries `surface_program = 0` never leaves it — so the number
+    /// of `set_pipeline` calls in the main pass is exactly the one it always was,
+    /// and the number of draw calls is exactly the batch count it always was.
+    /// The only thing the surface work adds to such a frame is one
+    /// `set_bind_group(3, …)` per pass, which is the price of binding the
+    /// parameter region at all.
+    #[test]
+    fn a_surface_free_scene_costs_no_pipeline_switch_and_no_extra_draw() {
+        let draws: Vec<FrameDrawItem> = (0..12_u64)
+            .map(|index| {
+                FrameDrawItem::new(
+                    index,
+                    index % 4,
+                    index % 3,
+                    [0.0; 16],
+                    [0.0; 16],
+                    [1.0; 4],
+                    false,
+                )
+            })
+            .collect();
+        let (batches, programs) =
+            frame_packet_to_batches(&packet(draws, Vec::new()), &SurfaceProgramSet::default());
+        // 12 draws over 4 meshes x 3 materials, each pair distinct: 12 batches,
+        // one draw call each — the count before surfaces existed.
+        assert_eq!(batches.len(), 12);
+        assert_eq!(programs.len(), batches.len());
+        assert!(programs.iter().all(|program| *program == 0));
+        assert_eq!(pipeline_switches(&programs), 0);
+
+        // And with surfaces in the frame, the count is the number of distinct
+        // PROGRAMS, not of batches: two programs over six batches is two
+        // switches, not six.
+        let mixed: Vec<FrameDrawItem> = (0..6_u64)
+            .map(|index| {
+                FrameDrawItem::new(index, index, 0, [0.0; 16], [0.0; 16], [1.0; 4], false)
+                    .with_surface_program(100 + index % 2)
+            })
+            .collect();
+        let (mixed_batches, mixed_programs) =
+            frame_packet_to_batches(&packet(mixed, Vec::new()), &SurfaceProgramSet::default());
+        assert_eq!(mixed_batches.len(), 6);
+        assert_eq!(pipeline_switches(&mixed_programs), 2);
     }
 
     #[test]

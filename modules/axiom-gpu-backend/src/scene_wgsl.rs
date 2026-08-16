@@ -153,6 +153,33 @@ struct ShadowU { light_vp: mat4x4<f32> };
 // exact texel, so no filtering (and no float-linear extension) is involved.
 @group(3) @binding(0) var joint_palette: texture_2d<f32>;
 
+// The SURFACE PARAMETER REGION (group 3, binding 1): the tunable numbers an
+// authored surface declares, as `crate::surface_program::params` lays them out.
+//
+// It is a real binding now. It used to be the zero value `SurfaceParams()`
+// passed by both stages, which is why a lighting model had to be a value the
+// program STATES rather than a lane it reads — a zero lane decodes as `Unlit`
+// and would have unlit every frame in the engine. The model stays a stated value
+// (it costs nothing and it cannot default to zero by accident); what the binding
+// buys is that a `Param`-driven graph finally reads the number its author
+// declared, and that animating that number is a `write_buffer` rather than a
+// pipeline compile.
+//
+// **One buffer per program, never one buffer rewritten between draws.**
+// `crate::post_chain` records why: a `queue.write_buffer` is ordered against
+// *submission*, not against the passes inside an encoder, so N writes to one
+// buffer leave every draw in that pass reading the last of them. Each compiled
+// program therefore owns its own 512-byte buffer and its own bind group, all
+// built against ONE shared layout — which is what keeps groups 1 (`lights`) and
+// 2 (`shadow_sample`) set exactly once per pass even when the pipeline changes.
+//
+// Group 3 is shared with the joint palette above rather than taking a fourth
+// group of its own: `wgpu::Limits::downlevel_webgl2_defaults` guarantees only
+// four bind groups, and the skinned pass already spends the last one. The two
+// bindings are disjoint, the rigid pass uses only this one, and naga resolves
+// per entry point — so neither pipeline is asked for a resource it does not read.
+@group(3) @binding(1) var<uniform> surface_params: SurfaceParams;
+
 // Joint matrix `index`, unpacked from its four texels.
 fn joint_matrix(index: u32) -> mat4x4<f32> {
     let width = textureDimensions(joint_palette).x;
@@ -236,7 +263,7 @@ fn vs(
     // (`axiom_surface::SurfaceBuilder::normal_from_height`). What reaches the
     // fragment stage below is the undisplaced surface's normal, which is correct
     // for small displacement and honest for large.
-    let displaced = position + axiom_displace(position, normal, uv, lights.camera.w, SurfaceParams());
+    let displaced = position + axiom_displace(position, normal, uv, lights.camera.w, surface_params);
     var out: VsOut;
     out.clip = mvp * vec4<f32>(displaced, 1.0);
     out.world_pos = (world * vec4<f32>(displaced, 1.0)).xyz;
@@ -388,13 +415,15 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // instance colour, the instance emissive, a flat tangent-space normal. That
     // is what makes every existing frame pixel-identical.
     //
-    // `params` is the zero value: this pass binds no parameter buffer yet, and
-    // the only program it runs reads none. The time lane is the frame's own
-    // surface time (`lights.camera.w`), which is an exact zero on a frame whose
-    // surfaces read no clock.
+    // `params` is the program's own bound parameter region (group 3, binding 1) —
+    // the draw's compiled program and its buffer are selected together, so a
+    // program can never read another program's numbers. The time lane is the
+    // frame's own surface time (`lights.camera.w`), which is an exact zero on a
+    // frame whose surfaces read no clock. The DEFAULT program reads neither, so a
+    // draw naming no surface is bit-identical whatever this buffer holds.
     let surface = axiom_surface(
         SurfaceIn(in.object_pos, in.uv, in.object_normal, lights.camera.w, albedo * in.color, in.emissive),
-        SurfaceParams(),
+        surface_params,
     );
     let base = vec4<f32>(surface.base_color.rgb, surface.opacity);
     // HOW this surface participates in lighting: `axiom_surface::LightingModel`,

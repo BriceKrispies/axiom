@@ -345,6 +345,25 @@ fn render_lit(
             },
         ],
     });
+    // Group 3: the surface parameter region the pass binds now that a generated
+    // program can read one. These rigs declare no parameter, so the region is the
+    // zero one — but it has to be BOUND, because `fs` names it and the pipeline
+    // layout derived from the shader therefore demands it. That the pipeline
+    // demands it at all is the proof the binding is live rather than decorative.
+    let params = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("axiom-lighting-parity-params"),
+        size: crate::surface_program::params::SURFACE_PARAM_REGION_BYTES,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let params_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("axiom-lighting-parity-params-group"),
+        layout: &pipeline.get_bind_group_layout(3),
+        entries: &[wgpu::BindGroupEntry {
+            binding: crate::surface_program::compile::SURFACE_PARAMS_BINDING,
+            resource: params.as_entire_binding(),
+        }],
+    });
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("axiom-lighting-parity-target"),
         size: wgpu::Extent3d {
@@ -406,6 +425,7 @@ fn render_lit(
         pass.set_bind_group(0, &material_group, &[]);
         pass.set_bind_group(1, &lights_group, &[]);
         pass.set_bind_group(2, &shadow_group, &[]);
+        pass.set_bind_group(3, &params_group, &[]);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.set_vertex_buffer(1, instance_buffer.slice(..));
         pass.draw(0..3, 0..1);

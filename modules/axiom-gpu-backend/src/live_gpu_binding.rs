@@ -602,6 +602,9 @@ impl LiveGpuBinding {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        // The surface program each batch draws with, in `batches` order. Empty
+        // for a frame that names no authored surface.
+        programs: &[u64],
         skinned: &[crate::scene_renderer::SkinnedGpuDraw],
         clear: [f32; 4],
         sdf: Option<&axiom_host::SdfScene>,
@@ -637,6 +640,7 @@ impl LiveGpuBinding {
             lights,
             light_view_proj,
             batches,
+            programs,
             skinned,
             clear,
             sdf,
@@ -736,6 +740,19 @@ impl LiveGpuBinding {
     /// after bind has them all on the GPU (see [`crate::scene_renderer::SceneRenderer::load_meshes`]).
     pub fn load_meshes(&mut self, meshes: &[(u64, Vec<f32>, Vec<u32>)]) {
         self.renderer.load_meshes(&self.device, meshes);
+    }
+
+    /// Compile every prepared surface program onto this device — the **only**
+    /// place this binding compiles a pipeline after `initialize`, and it is
+    /// driven from the app's preparation task before the simulation is allowed to
+    /// advance. See
+    /// [`crate::scene_renderer::SceneRenderer::prepare_surfaces`].
+    pub fn prepare_surfaces(
+        &mut self,
+        catalog: &crate::surface_program::cache::SurfaceProgramCatalog,
+    ) {
+        self.renderer
+            .prepare_surfaces(&self.device, &self.queue, catalog);
     }
 }
 

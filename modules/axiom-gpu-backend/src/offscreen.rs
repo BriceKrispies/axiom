@@ -143,6 +143,10 @@ pub(crate) fn render_to_rgba(
                     lights,
                     light_view_proj,
                     batches,
+                    // The capture arm is handed batches, never a packet, so no
+                    // batch names a surface program and every one of them draws
+                    // the default pipeline.
+                    &[],
                     skinned,
                     clear,
                     sdf,
@@ -185,6 +189,7 @@ pub(crate) fn render_to_rgba(
                 lights,
                 light_view_proj,
                 batches,
+                &[],
                 skinned,
                 clear,
                 sdf,

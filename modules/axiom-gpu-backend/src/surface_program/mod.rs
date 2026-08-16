@@ -20,23 +20,39 @@
 //!   default program, and the concatenation that splices one into the main pass.
 //! * [`program_error`] — why a surface produced no runnable program.
 //!
-//! **Generating a program is not the same as binding one.** The emitter runs at
-//! preparation time and its output is proven — it compiles, and it agrees with
-//! `axiom-field`'s CPU evaluator to within the documented tolerance. What this
-//! backend does not yet do is *bind* a generated program to a pipeline and a
-//! parameter buffer, which is pipeline-and-cache work. So the main pass runs
-//! [`wgsl_template::DEFAULT_SURFACE_WGSL`] and
-//! [`wgsl_template::DEFAULT_DISPLACE_WGSL`] — the identity over the instance
-//! lanes and the exact zero offset, which together reproduce today's frame
-//! vertex for vertex and pixel for pixel — this backend's profile still
-//! clears [`RenderCapability::ProceduralSurface`], and an authored surface is
-//! reported as [`FrameFeature::ProceduralSurface`] while its **constant**
-//! channels are honoured through the lanes the instance stream already has. A
-//! surface whose base colour is a plain colour therefore renders exactly right
-//! today; only the field-bound channels are the thing that is missing, and the
-//! frame says so.
+//! * [`cache`] — the content-addressed program catalog: the key, the bound, the
+//!   deterministic compile order, and the *prepared-or-not* answer a frame needs.
+//! * [`compile`] — the same catalog bound to real pipelines, parameter buffers
+//!   and bind groups. Device-only, which is why it is a separate file.
+//!
+//! **Generating a program is not the same as binding one, and both happen at the
+//! preparation barrier.** [`cache::SurfaceProgramCatalog::prepare`] runs the
+//! emitters once per distinct surface and [`compile::SurfaceProgramCache`] turns
+//! each into a pipeline — before `axiom_runtime::RuntimeState::Prepared`, never
+//! inside a frame. A frame naming a program the barrier did not prepare renders
+//! the constant fallback and reports [`FrameFeature::ProceduralSurface`]; it does
+//! **not** compile one, because a lazily compiled variant is exactly the
+//! mid-session stutter `crate::post_chain` and `crate::surface_encode` both warn
+//! about in writing.
+//!
+//! A [`SurfaceProgramSet`] is the other half of that story: the **per-frame
+//! view**. It generates no text and compiles nothing. It answers what a frame
+//! needs to pack its instance stream — a surface's constant channels, its
+//! surface-time lane, its pipeline marker — and it is deliberately cheap enough
+//! to build every frame. A surface whose channels are all constants needs no
+//! program at all: the existing pipeline renders it exactly through the lanes the
+//! instance stream already has, and [`RenderCapability::ProceduralSurface`] is
+//! now ON in this backend's profile because a surface that does need one can
+//! finally be bound.
 
+pub(crate) mod cache;
 pub(crate) mod capability;
+// Binding a compiled program to a real pipeline, a real parameter buffer and a
+// real bind group. Compiled only where a device exists — the same gate
+// `mip_chain` and `texture_sampling` carry — which is exactly why the cache's
+// SEMANTICS live in `cache` instead, where every platform can test them.
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
+pub(crate) mod compile;
 pub(crate) mod emit;
 pub(crate) mod emit_lighting;
 pub(crate) mod emit_ops;
@@ -62,6 +78,13 @@ mod parity_vertex;
 // lighting maths a model takes) rather than a third operator.
 #[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
 mod parity_lighting;
+// **The picture.** A prepared program, bound to the real `SceneRenderer`, and the
+// pixels it produced: a displacing surface deforms a captured silhouette, a
+// field-authored colour renders the field's ramp rather than the constant
+// fallback, and a replayed tick is byte-identical. The debt manifests 10 and 11
+// left, which only a bound program could pay.
+#[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
+mod bound_image;
 
 pub(crate) mod params;
 pub(crate) mod plan;
@@ -78,8 +101,7 @@ use axiom_kernel::Seconds;
 use axiom_surface::{Surface, SurfaceChannel};
 
 use crate::surface_program::capability::GeometryPath;
-use crate::surface_program::emit_lighting::{fragment_program, pipeline_kind, PIPELINE_BASIC_LIT};
-use crate::surface_program::emit_vertex::displace_function;
+use crate::surface_program::emit_lighting::{pipeline_kind, PIPELINE_BASIC_LIT};
 use crate::surface_program::params::{pack, program_region_offset, SURFACE_PARAM_REGION_BYTES};
 use crate::surface_program::plan::SurfaceProgramPlan;
 
@@ -110,25 +132,23 @@ impl SurfaceProgramEntry {
         let plan = SurfaceProgramPlan::of(surface);
         let programmed = plan.stage_split().fragment_channels();
         let emission = constant_lanes(surface, SurfaceChannel::Emission, programmed, [0.0; 4]);
-        // Generating the program is part of BINDING, never part of a frame: this
-        // is the one place the emitters are driven, and they run once per surface
-        // at preparation time. The text is not kept — a program cache is separate
-        // work — but the attempt is what proves the surface lowers at all, and a
-        // surface that will not lower is a degraded feature for the same reason a
-        // surface the capability gate refuses is.
+        // **A set is a per-frame VIEW; it generates no shader text.** Flattening
+        // is the one thing both emitters can fail at — each of them starts by
+        // flattening and maps that error — so asking the surface directly is the
+        // same fact for a fraction of the work, and it is asked ONCE here for both
+        // the degradation and the parameter pack.
         //
-        // BOTH stages are attempted, and they are attempted together: the vertex
-        // and fragment halves of one surface compile into one module keyed by one
-        // digest, so either half failing is the whole program failing.
-        let program = fragment_program(surface);
-        let vertex_program = displace_function(surface);
+        // The emitters themselves run in `crate::surface_program::cache`, at the
+        // preparation barrier, exactly once per distinct surface. They used to run
+        // here, which meant a frame carrying N surfaces generated 2N WGSL
+        // functions and threw them away — per frame.
+        let flat = surface.flatten();
         SurfaceProgramEntry {
             plan,
             degraded: capability::validate(&plan, profile, geometry)
                 .err()
                 .map(|_| FrameFeature::ProceduralSurface)
-                .or_else(|| program.err().map(|_| FrameFeature::ProceduralSurface))
-                .or_else(|| vertex_program.err().map(|_| FrameFeature::ProceduralSurface)),
+                .or_else(|| flat.as_ref().err().map(|_| FrameFeature::ProceduralSurface)),
             color: constant_lanes(surface, SurfaceChannel::BaseColor, programmed, [1.0; 4]),
             emissive: [emission[0], emission[1], emission[2]],
             // Packed from the surface's FLATTENED form: flattening is what
@@ -136,9 +156,9 @@ impl SurfaceProgramEntry {
             // parameter table, into one. A surface that does not flatten packs no
             // parameters rather than half of them — it cannot happen for a
             // validated `Surface`, whose every constructor validates.
-            params: surface
-                .flatten()
-                .map(|flat| pack(plan.param_layout(), &flat))
+            params: flat
+                .as_ref()
+                .map(|flat| pack(plan.param_layout(), flat))
                 .unwrap_or_default(),
         }
     }
