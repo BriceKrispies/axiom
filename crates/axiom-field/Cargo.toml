@@ -1,0 +1,29 @@
+[package]
+name = "axiom-field"
+description = "Axiom layer: the typed pointwise field IR. A field is a deterministic, hashable, canonically-serializable pure function from an explicitly supplied evaluation context to a typed value, represented as a closed 23-operator, id-ordered, acyclic expression graph built on axiom-recipe's container. This crate owns the representation only: the four-type lattice, the operator algebra and its const signature table, the typed graph and its append-only builder, the parameter table, the evaluation-context description, canonical bytes and the structural digest. Branchless and 100% covered."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# The kernel supplies the serialization primitives (BinaryWriter/BinaryReader),
+# the SchemaVersion stamp, the StableHash digest that mints slot/graph identity,
+# and the Seconds quantity the evaluation context carries.
+axiom-kernel = { path = "../axiom-kernel" }
+# Math supplies the value union's Vec2/Vec3/Vec4 lanes and the Mat4 whose four
+# columns fix the Transform operator's parameter arity.
+axiom-math = { path = "../axiom-math" }
+# Recipe supplies the container: the acyclic-by-construction operator DAG, its
+# NodeId/RecipeId identity, its raw Param words, and its Scalar quantity newtype.
+axiom-recipe = { path = "../axiom-recipe" }
+# Noise supplies FbmConfig, whose knob set fixes the Fbm operator's parameter
+# arity in the signature table, so the two can never drift apart.
+axiom-noise = { path = "../axiom-noise" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"

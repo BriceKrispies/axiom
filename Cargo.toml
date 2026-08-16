@@ -26,6 +26,7 @@ members = [
     "crates/axiom-entropy",
     "crates/axiom-proc-validate",
     "crates/axiom-recipe",
+    "crates/axiom-field",
     "crates/axiom-state",
     "crates/axiom-proc-core",
     "crates/axiom-proc-texture",

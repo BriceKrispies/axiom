@@ -1,0 +1,99 @@
+# Axiom layer manifest — axiom-field.
+#
+# The typed pointwise field IR. `recipe` owns a domain-free operator DAG whose
+# operator codes are opaque; `field` assigns meaning to those codes through a
+# closed 23-operator algebra and a const signature table, gives every value one
+# of four types, and states the evaluation contract. It is the engine's missing
+# *function-as-a-value*, and it has nothing to do with rendering.
+#
+# Why a LAYER and not a module: three engine layers (`mesh-ops`, `proc-texture`,
+# `proc-mesh`) must be able to name a field, and a layer may never depend on a
+# module. The `axiom-mesh` precedent verbatim.
+
+[layer]
+name = "field"
+crate_name = "axiom-field"
+depends_on = ["kernel", "math", "recipe", "noise"]
+
+meaningful_dependency = """
+Field adapts recipe's domain-free operator DAG (RecipeGraph, NodeId, Param, the
+append-only acyclic-by-construction invariant, canonical little-endian bytes and
+StableHash digest) into a typed pointwise expression language: it assigns meaning
+to the opaque u16 operator code through a const signature table, fixes the four
+types a value may carry, and states the evaluation contract those expressions are
+read under. It builds math's Vec2/Vec3/Vec4 into the value union those
+expressions carry and Mat4 into the coordinate-transform operator, whose four
+column parameters are derived from the matrix itself. It builds kernel's
+BinaryWriter/BinaryReader and SchemaVersion into the field's own canonical byte
+layout, StableHash into the structural digest and the deterministic minting of
+parameter-slot and graph identity from a name, and Seconds into the evaluation
+context's time input. It builds noise's FbmConfig into the Fbm operator's
+signature row, whose knob arity is derived from the config type so the operator
+and the noise layer it will be evaluated against can never drift. Recipe owns the
+container and proves it acyclic; this layer adds the type lattice, the operator
+algebra, and the evaluation contract that make the container a language.
+"""
+
+introduced_capabilities = [
+    "FieldGraph",
+    "FieldBuilder",
+    "FieldId",
+    "FieldType",
+    "FieldValue",
+    "FieldOp",
+    "FIELD_OP_COUNT",
+    "FieldSignature",
+    "SignatureKind",
+    "FieldParams",
+    "FieldParamSlot",
+    "EvalContext",
+    "FieldError",
+    "FieldErrorCode",
+    "FieldResult",
+    "FIELD_SCHEMA_VERSION",
+]
+
+consumed_capabilities = [
+    "RecipeGraph",
+    "NodeId",
+    "RecipeId",
+    "Param",
+    "Scalar",
+    "RecipeError",
+    "Vec2",
+    "Vec3",
+    "Vec4",
+    "Mat4",
+    "FbmConfig",
+    "StableHash",
+    "BinaryWriter",
+    "BinaryReader",
+    "SchemaVersion",
+    "Seconds",
+]
+
+# Proof the dependencies are genuine. FieldGraph wraps a RecipeGraph, names the
+# output NodeId recipe has no notion of, and digests its structural bytes with
+# StableHash. FieldValue is the four-lane union math's vectors enter and leave
+# through. EvalContext carries a math Vec3 point and a kernel Seconds time.
+# FieldSignature derives Transform's arity from Mat4 and Fbm's from FbmConfig.
+
+[[proof_exports]]
+export = "FieldGraph"
+must_reference = ["RecipeGraph", "NodeId", "StableHash"]
+
+[[proof_exports]]
+export = "FieldValue"
+must_reference = ["Vec2", "Vec3", "Vec4"]
+
+[[proof_exports]]
+export = "EvalContext"
+must_reference = ["Vec3", "Seconds"]
+
+[[proof_exports]]
+export = "FieldSignature"
+must_reference = ["Mat4", "FbmConfig"]
+
+[[proof_exports]]
+export = "FieldBuilder"
+must_reference = ["RecipeGraph", "Param", "RecipeId"]
