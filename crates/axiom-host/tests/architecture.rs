@@ -362,6 +362,13 @@ fn lib_exports_are_curated_set() {
         "pub use frame_packet::FrameLight;",
         "pub use frame_packet::FramePacket;",
         "pub use frame_packet::FrameViewport;",
+        // The redraw ledger: "can this frame differ from the one already on the
+        // screen?", answered against the packet itself so no input can be
+        // forgotten, plus the revision naming what the packet cannot carry.
+        "pub use frame_packet::FrameRevision;",
+        "pub use frame_packet::PresentationLedger;",
+        "pub use frame_packet::RedrawDecision;",
+        "pub use frame_packet::RedrawVerdict;",
         "pub use frame_postprocess::apply_frame_postprocess;",
         "pub use frame_postprocess::FramePostProcess;",
         // The app-authored render look (ambient + fog + sky + bloom), bound as

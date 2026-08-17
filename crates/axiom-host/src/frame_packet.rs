@@ -17,6 +17,16 @@ use axiom_kernel::Seconds;
 
 use crate::sdf_scene::SdfScene;
 
+/// "Can this frame differ from the one already on the screen?" — the redraw
+/// ledger, living next to the packet it compares because it needs the packet's
+/// private fields to rebase the two bookkeeping lanes away.
+mod redraw;
+
+pub use redraw::FrameRevision;
+pub use redraw::PresentationLedger;
+pub use redraw::RedrawDecision;
+pub use redraw::RedrawVerdict;
+
 /// The pixel dimensions of the frame's render target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameViewport {

@@ -646,6 +646,37 @@ impl WindowingApi {
             // don't pollute the measured fps), it produces the smoothed read-out
             // handed to the app closure.
             let mut frame_clock = super::FrameClock::default();
+            // The record of what is currently on the screen. A frame whose packet
+            // and outside revision both match it cannot differ from the picture
+            // already displayed, so it is not submitted — and the fragment bill
+            // for redrawing an identical image is not paid. Held here, as one
+            // frame of loop-local memory, and threaded through the presenter by
+            // value each frame.
+            let mut ledger = axiom_host::PresentationLedger::new();
+            // How many frames in a row have gone unpresented, and the cap on that.
+            //
+            // The ledger's judgement is only as complete as the facts it is shown,
+            // and one fact no frame identity can express is the *browser* throwing
+            // the drawn image away: a mobile tab that is backgrounded long enough
+            // can come back to a destroyed GPU context, and the only way the loop
+            // learns that is by trying to present and being told the surface is
+            // lost. A page that idles forever would never try, and would sit black
+            // forever.
+            //
+            // So an idle run is bounded. Once a second the frame is presented
+            // regardless, which surfaces a lost context, repaints anything a
+            // compositor discarded, and costs a still page one frame in sixty —
+            // i.e. it keeps 98% of the saving and none of the failure mode. It is
+            // deliberately a backstop for the *unknown* unknowns, not a substitute
+            // for enumerating the known ones.
+            const MAX_IDLE_RUN: u32 = 60;
+            let mut idle_run: u32 = 0;
+            // Whether the previous callback was a focus/visibility pause. Coming
+            // back from one is the other way the drawn image can go stale without
+            // the frame moving — a page that was away may return to a discarded
+            // swapchain — so the first live frame after a pause always draws
+            // rather than waiting out the idle cap.
+            let mut was_paused = false;
             *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
                 let scrubbing = scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
                 let paused = scrubber.as_ref().map(|s| !s.is_active()).unwrap_or(false);
@@ -654,6 +685,7 @@ impl WindowingApi {
                 // screen until focus returns. (Scrubbing keeps presenting recorded
                 // frames; it ignores the pause.)
                 if paused && !scrubbing {
+                    was_paused = true;
                     let next = f.borrow();
                     next.as_ref().into_iter().for_each(|cb| {
                         let _ = request_animation_frame(cb);
@@ -727,10 +759,36 @@ impl WindowingApi {
                 // the one in use costs a comparison, so reading it every frame is
                 // the cheap path and there is no separate "did it change" signal
                 // for the app to get wrong.
-                presenter.set_render_scale(render_scale.get());
-                presenter.present(
-                    tick, clear, &lights, light_vp, &batches, camera_vp, &casters, sdf,
+                let scale = render_scale.get();
+                presenter.set_render_scale(scale);
+                // Present only a frame that can differ from the one already on
+                // the screen. The decision is made against the frame packet
+                // itself — so no input can be left off a checklist — plus the
+                // presenter's reading of what a packet cannot carry. The tick
+                // above already advanced and is unaffected either way: what a
+                // skipped frame skips is the presentation of a tick, not the
+                // tick.
+                //
+                // The ledger is `take`n rather than cloned (it owns the last
+                // presented packet, and copying that every frame would be the
+                // wrong side of the very trade this mechanism exists to win),
+                // and it is dropped entirely — forcing the next decision to
+                // draw — when either backstop fires: an idle run that has hit
+                // its cap, or the first live frame after a pause.
+                let forget = idle_run >= MAX_IDLE_RUN || std::mem::replace(&mut was_paused, false);
+                let carried = match forget {
+                    true => axiom_host::PresentationLedger::new(),
+                    false => std::mem::take(&mut ledger),
+                };
+                let (next_ledger, presented) = presenter.present_if_changed(
+                    carried, scale, tick, clear, &lights, light_vp, &batches, camera_vp,
+                    &casters, sdf,
                 );
+                ledger = next_ledger;
+                idle_run = match presented {
+                    true => 0,
+                    false => idle_run + 1,
+                };
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {
                     let _ = request_animation_frame(cb);
@@ -1252,6 +1310,129 @@ impl LivePresenter {
     /// that did nothing.
     pub(crate) fn set_render_scale(&self, scale: axiom_host::RenderScale) {
         self.backend.borrow_mut().set_render_scale(scale);
+    }
+
+    /// **The version of everything that decides a pixel but cannot ride on a
+    /// frame packet** — the argument
+    /// [`axiom_host::PresentationLedger::admit`] needs to be honest.
+    ///
+    /// A packet names its meshes and materials by id, and describes a frame
+    /// rather than the device that draws it. Four facts therefore live out here
+    /// and are folded into one counter:
+    ///
+    /// - the **uploaded mesh set** (`load_meshes` re-uploads geometry under ids
+    ///   the packet already carries — same packet, different pixels);
+    /// - the **uploaded 2D sprite/atlas textures**, for the same reason;
+    /// - the **render scale**, which resizes the off-swapchain target the frame
+    ///   is drawn into without touching the frame;
+    /// - the **canvas backbuffer size**, which an app may change mid-run (a
+    ///   responsive resize, a device-pixel-ratio change) and which reconfigures
+    ///   the surface underneath an otherwise identical frame.
+    ///
+    /// Mixed with odd multipliers rather than packed into bit fields, so two
+    /// different combinations cannot alias into the same reading through a
+    /// shifted-carry coincidence.
+    #[cfg(target_arch = "wasm32")]
+    fn outside_revision(&self, scale: axiom_host::RenderScale) -> axiom_host::FrameRevision {
+        axiom_host::FrameRevision::new(
+            u64::from(self.applied_mesh_generation.get()).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                ^ u64::from(self.applied_texture_generation.get())
+                    .wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
+                ^ u64::from(scale.ratio().get().to_bits()).wrapping_mul(0x1656_67B1_9E37_79F9)
+                ^ u64::from(self.canvas.width()).wrapping_mul(0xD6E8_FEB8_6659_FD93)
+                ^ u64::from(self.canvas.height()).wrapping_mul(0xA076_1D64_78BD_642F),
+        )
+    }
+
+    /// **Present this frame only if it can differ from the one already on the
+    /// screen**, carrying the caller's [`axiom_host::PresentationLedger`]
+    /// through and handing back the one to use next frame.
+    ///
+    /// The frame's identity is the [`axiom_host::FramePacket`] the software arm
+    /// would rasterize — assembled from exactly the arguments
+    /// [`Self::present`] is about to consume, so nothing that reaches a pixel is
+    /// left out of the comparison — plus [`Self::outside_revision`] for what a
+    /// packet cannot carry.
+    ///
+    /// Three conditions hold the loop open regardless, because each is a way for
+    /// the image to move without the packet moving:
+    ///
+    /// - **any skinned draw.** Joint palettes ride alongside the packet, not in
+    ///   it, so a character animating in place has a still packet and a moving
+    ///   silhouette. An app that submits skinned bodies never idles.
+    /// - **a rebuild in flight.** The surface under the recorded packet is being
+    ///   replaced; nothing about the old frame describes the new one.
+    /// - **the dev scrubber, while scrubbing.** It owns the image then, and its
+    ///   own overlay repaints independently of the frame.
+    ///
+    /// The tick is untouched: this decides whether a frame is *presented*, never
+    /// whether it is stepped, so `tick` N still means what it always meant and a
+    /// replay that presents every tick is unaffected.
+    ///
+    /// ## What it costs, stated plainly
+    ///
+    /// Assembling the packet is an allocation of `196 × instances` bytes and a
+    /// pass over the instance stream the app just produced — paid on every live
+    /// frame, including the ones that go on to draw. It buys the entire fragment
+    /// bill of every frame that does not. That is a good trade on any app that
+    /// ever holds still and a small, bounded tax on one that never does, and it
+    /// is the price of an *exact* comparison rather than a hashed guess at one:
+    /// a hash collision here would be a stale image on a user's screen.
+    ///
+    /// The software arm assembles the same packet again inside
+    /// [`LiveBackend::present`] to rasterize it. That arm is CPU-bound at tens of
+    /// milliseconds per frame, so a second assembly is noise there; the GPU arm,
+    /// where it would not be, builds it exactly once — here.
+    ///
+    /// Returns the ledger for the next frame and whether this frame was actually
+    /// handed to a backend — the caller needs the second value to keep its own
+    /// idle-run watchdog (see the run loop).
+    #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn present_if_changed(
+        &self,
+        ledger: axiom_host::PresentationLedger,
+        scale: axiom_host::RenderScale,
+        tick: u64,
+        clear: [f32; 4],
+        lights: &[(u32, [f32; 3], [f32; 3], f32)],
+        light_vp: [f32; 16],
+        batches: &[(u64, u64, Vec<f32>, u32)],
+        camera_view_proj: [f32; 16],
+        casters: &[bool],
+        sdf: Option<axiom_host::SdfScene>,
+    ) -> (axiom_host::PresentationLedger, bool) {
+        let packet = frame_packet_from_batches(
+            tick,
+            self.width,
+            self.height,
+            clear,
+            lights,
+            light_vp,
+            batches,
+            camera_view_proj,
+            casters,
+            sdf.clone(),
+            self.look,
+        );
+        let decision = ledger.admit(&packet, self.outside_revision(scale));
+        let held_open = !self.pending_skinned.borrow().is_empty()
+            || self.reinitializing.get()
+            || self.scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
+        let presents = decision.draws() || held_open;
+        if presents {
+            self.present(
+                tick,
+                clear,
+                lights,
+                light_vp,
+                batches,
+                camera_view_proj,
+                casters,
+                sdf,
+            );
+        }
+        (decision.into_ledger(), presents)
     }
 
     /// Bind a presenter to `canvas`: select the backend from `?backend=` (else the
@@ -1807,7 +1988,14 @@ fn frame_packet_from_batches(
     use axiom_host::{
         FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FramePacket, FrameViewport,
     };
-    let mut draws = Vec::new();
+    // Sized up front from the instance counts. This packet is now built on every
+    // live frame — the software arm rasterizes it, and the redraw ledger compares
+    // it — so the handful of doubling reallocations a growing `Vec` would pay per
+    // frame is exactly the per-frame churn this engine has already been bitten by
+    // once. One allocation of the right size, or none at all when the frame is
+    // empty.
+    let mut draws =
+        Vec::with_capacity(batches.iter().map(|(.., count)| *count as usize).sum::<usize>());
     let mut object_id: u64 = 0;
     for (mesh_id, material_id, floats, count) in batches {
         for i in 0..*count {

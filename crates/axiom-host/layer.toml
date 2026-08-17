@@ -30,6 +30,13 @@ introduced_capabilities = [
     "FontHandle",
     "TextureId",
     "TransformDepth",
+    # "Can this frame differ from the one already on the screen?" — answered
+    # against the presentation contract this layer owns, so no frame input can
+    # be forgotten, and the frame that cannot have changed is never redrawn.
+    "PresentationLedger",
+    "RedrawVerdict",
+    "RedrawDecision",
+    "FrameRevision",
 ]
 
 consumed_capabilities = [
