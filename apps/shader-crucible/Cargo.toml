@@ -81,7 +81,15 @@ web-sys = { version = "0.3", features = [
     "EventTarget",
     "HtmlCanvasElement",
     "HtmlElement",
+    # `location.search` — the diagnostic A/B levers (`?back=`, `?surfaces=`)
+    # the performance investigation is driven with. See `src/web.rs::Levers`.
+    "Location",
     "MouseEvent",
+    # `performance.now()` — the diagnostics panel's clock, and the only wall
+    # clock in this app. It is read in `src/web.rs` around the frame's three
+    # spans and never reaches `EvalContext::time`, which comes from the tick
+    # counter alone (`src/frame.rs::time_at`).
+    "Performance",
     "PointerEvent",
     "WheelEvent",
     "Window",

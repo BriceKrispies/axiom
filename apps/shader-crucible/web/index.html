@@ -19,14 +19,210 @@
     canvas { width: min(96vw, 1280px); aspect-ratio: 2 / 1; background: #070810;
              border: 1px solid #1a2333; border-radius: 3px; touch-action: none;
              box-shadow: 0 18px 60px rgba(0,0,0,.7); }
+
+    /* ---- the diagnostics panel -------------------------------------------
+       The skeleton below is written ONCE, by the page. Rust never touches this
+       markup: a flush sets `textContent` on the ids and `points` on the two
+       sparkline polygons, and skips any value that has not changed. It used to
+       rebuild the body from an innerHTML string five times a second, and an A/B
+       of the page's own rAF cadence measured what that cost — p95 33.3 ms with
+       the panel on against 16.8 ms with it off. A diagnostics panel that
+       manufactures the hitches it is looking for is not a diagnostics panel. */
+    #diag { width: min(96vw, 1280px); font-size: 11px; contain: layout style; }
+    #diag[data-on="0"] #diag-body, #diag[data-on="0"] #diag-legend { display: none; }
+    #diag-head { display: flex; align-items: baseline; gap: 10px;
+                 border-bottom: 1px solid #1a2333; padding-bottom: 6px; }
+    #diag-head h2 { margin: 0; font-size: 11px; letter-spacing: .22em;
+                    font-weight: 700; color: #7fd4ff; }
+    #diag-head .who { color: #4d6076; flex: 1; }
+    #diag-toggle { background: #0b0e18; color: #7fd4ff; border: 1px solid #1a2333;
+                   border-radius: 3px; font: inherit; padding: 2px 9px;
+                   cursor: pointer; letter-spacing: .12em; }
+    #diag-toggle:hover { border-color: #7fd4ff; }
+    #diag-body { display: grid; gap: 8px; margin-top: 8px; align-items: start;
+                 grid-template-columns: repeat(auto-fit, minmax(255px, 1fr)); }
+    #diag-legend { color: #4d6076; margin: 8px 0 0; line-height: 1.6; }
+
+    .card { background: #0b0e18; border: 1px solid #1a2333; border-radius: 3px;
+            padding: 9px 11px 10px; contain: layout style; }
+    .card h2 { margin: 0 0 6px; font-size: 10px; letter-spacing: .20em;
+               font-weight: 700; color: #7fd4ff; }
+    .card .big { margin: 0 0 6px; font-size: 26px; font-weight: 700;
+                 color: #e6ecf7; line-height: 1; }
+    .card .big em { font-style: normal; font-size: 10px; color: #4d6076;
+                    margin-left: 6px; letter-spacing: .12em; }
+    .card dl { margin: 0; display: grid; grid-template-columns: auto 1fr;
+               gap: 1px 10px; }
+    .card dt { color: #4d6076; }
+    .card dd { margin: 0; text-align: right; color: #e6ecf7; }
+    .card .note { margin: 7px 0 0; color: #4d6076; line-height: 1.45; }
+    .card .verdict { margin: 6px 0 0; color: #ffd08a; letter-spacing: .04em;
+                     min-height: 1.2em; }
+
+    /* provenance tags: measured / derived / static */
+    .t { display: inline-block; margin-left: 5px; padding: 0 3px; border-radius: 2px;
+         font-size: 9px; vertical-align: 1px; }
+    .t.m { background: #12303f; color: #7fd4ff; }
+    .t.d { background: #2b2438; color: #c39bff; }
+    .t.s { background: #1e2a1c; color: #96c98a; }
+
+    .spans { margin: 8px 0; display: grid; gap: 3px; }
+    .span { display: grid; grid-template-columns: 60px 1fr 54px;
+            align-items: center; gap: 6px; }
+    .span .k { color: #9fb2c9; }
+    .span .bar { background: #101828; height: 7px; border-radius: 1px; }
+    .span .bar i { display: block; height: 7px; background: #7fd4ff;
+                   border-radius: 1px; width: 0; }
+    .span .v { text-align: right; }
+    .span.head { color: #4d6076; font-size: 10px; }
+    .span.head .k { color: #4d6076; }
+
+    .spark { display: block; width: 100%; height: 34px; margin: 8px 0 2px;
+             background: #080b14; border-radius: 2px; }
+    .spark .gap { fill: #24405c; }
+    .spark .main { fill: #7fd4ff; }
+    .scale { margin: 0; display: flex; justify-content: space-between;
+             color: #4d6076; }
   </style>
 </head>
 <body>
 <main>
   <h1>THE SHADER CRUCIBLE</h1>
   <canvas id="shader-crucible-canvas"></canvas>
+
+  <!-- The panel. `data-on` is the toggle the Rust loop reads before paying for a
+       DOM write, so hiding it really does stop it costing anything. Every `id`
+       below is a slot the Rust side fills; the labels and the prose are the
+       page's. -->
+  <section id="diag" data-on="1">
+    <div id="diag-head">
+      <h2>FRAME DIAGNOSTICS</h2>
+      <span class="who">backend <b id="diag-backend">—</b></span>
+      <button id="diag-toggle" type="button">hide (d)</button>
+    </div>
+
+    <div id="diag-body">
+      <section class="card">
+        <h2>FRAME <span class="t m">m</span></h2>
+        <p class="big"><span id="d-fps">—</span><em>fps</em></p>
+        <dl>
+          <dt>p50</dt><dd><span id="d-gap50">—</span><span class="t m">m</span></dd>
+          <dt>p95</dt><dd><span id="d-gap95">—</span><span class="t m">m</span></dd>
+          <dt>worst</dt><dd><span id="d-gapmax">—</span><span class="t m">m</span></dd>
+          <dt>p05</dt><dd><span id="d-gap05">—</span><span class="t m">m</span></dd>
+        </dl>
+        <svg class="spark" viewBox="0 0 240 34" preserveAspectRatio="none">
+          <polygon id="d-spark-gap" class="gap" points="" />
+          <polygon id="d-spark-main" class="main" points="" />
+        </svg>
+        <p class="scale"><span>0</span><span>frame · fill = main thread</span>
+          <span id="d-scale">—</span></p>
+        <p class="note" id="d-note-gap"></p>
+      </section>
+
+      <section class="card">
+        <h2>MAIN THREAD <span class="t m">m</span></h2>
+        <p class="big"><span id="d-cpu50">—</span><em>ms p50</em></p>
+        <dl>
+          <dt>p95</dt><dd><span id="d-cpu95">—</span><span class="t m">m</span></dd>
+          <dt>of frame</dt><dd><span id="d-share">—</span><span class="t d">d</span></dd>
+        </dl>
+        <div class="spans">
+          <!-- The bar is a share of the MAIN THREAD, not of the frame. Without
+               this header a span reading 99% is read as "99% of the frame",
+               which is a different and much more alarming claim — the frame's
+               own share is the "of frame" row above. -->
+          <div class="span head"><span class="k">span</span>
+            <span>share of main thread</span><span class="v">p50</span></div>
+          <div class="span"><span class="k">app.render</span>
+            <span class="bar"><i id="d-bar-render"></i></span>
+            <span class="v" id="d-render">—</span></div>
+          <div class="span"><span class="k">packet_of</span>
+            <span class="bar"><i id="d-bar-packet"></i></span>
+            <span class="v" id="d-packet">—</span></div>
+          <div class="span"><span class="k">present</span>
+            <span class="bar"><i id="d-bar-present"></i></span>
+            <span class="v" id="d-present">—</span></div>
+        </div>
+        <dl>
+          <dt>panel itself</dt><dd><span id="d-panel50">—</span><span class="t m">m</span></dd>
+          <dt>panel worst</dt><dd><span id="d-panelmax">—</span><span class="t m">m</span></dd>
+        </dl>
+        <p class="note" id="d-note-spans"></p>
+        <p class="note" id="d-panelnote"></p>
+      </section>
+
+      <section class="card">
+        <h2>NOT ON THE MAIN THREAD <span class="t d">d</span></h2>
+        <p class="big"><span id="d-res50">—</span><em>ms p50</em></p>
+        <dl>
+          <dt>p95</dt><dd><span id="d-res95">—</span><span class="t d">d</span></dd>
+          <dt>gap p50</dt><dd><span id="d-vgap">—</span><span class="t m">m</span></dd>
+          <dt>cpu p50</dt><dd><span id="d-vcpu">—</span><span class="t m">m</span></dd>
+        </dl>
+        <p class="verdict" id="d-verdict"></p>
+        <p class="note" id="d-note-residual"></p>
+        <p class="note" id="d-note-gpu"></p>
+      </section>
+
+      <section class="card">
+        <h2>WORKLOAD <span class="t s">s</span></h2>
+        <dl>
+          <dt>backend</dt><dd><span id="d-backend">—</span><span class="t m">m</span></dd>
+          <dt>draws</dt><dd><span id="d-draws">—</span><span class="t d">d</span></dd>
+          <dt>batches</dt><dd><span id="d-batches">—</span><span class="t d">d</span></dd>
+          <dt>pipelines</dt><dd><span id="d-pipes">—</span><span class="t d">d</span></dd>
+          <dt>triangles</dt><dd><span id="d-tris">—</span><span class="t s">s</span></dd>
+          <dt>lights</dt><dd><span id="d-lights">—</span><span class="t d">d</span></dd>
+          <dt>backbuffer</dt><dd><span id="d-back">—</span><span class="t s">s</span></dd>
+          <dt>render target</dt><dd><span id="d-target">—</span><span class="t s">s</span></dd>
+          <dt>css x dpr</dt><dd><span id="d-css">—</span><span class="t s">s</span></dd>
+          <dt>sample</dt><dd><span id="d-sample">—</span><span class="t d">d</span></dd>
+          <dt>barrier</dt><dd><span id="d-barrier">—</span><span class="t s">s</span></dd>
+          <dt>profile</dt><dd><span id="d-profile">—</span><span class="t s">s</span></dd>
+          <dt>degraded</dt><dd><span id="d-degraded">—</span><span class="t s">s</span></dd>
+        </dl>
+        <p class="note" id="d-note-workload"></p>
+      </section>
+    </div>
+
+    <p id="diag-legend">
+      <span class="t m">m</span> measured — a performance.now() delta ·
+      <span class="t d">d</span> derived — arithmetic over measurements or over the frame's packet ·
+      <span class="t s">s</span> static — a size or a count, not a timing.
+      GPU time is absent because this engine has no timer queries, not because it is zero.
+    </p>
+  </section>
 </main>
 <script type="module">
+  // The engine reports which GPU backend `wgpu` actually bound — WebGPU, or the
+  // WebGL2 fallback, which is a materially different cost profile — by printing
+  // it once at initialisation (`live_gpu_binding.rs:302`). It keeps no accessor
+  // for it, so the only way the page can show it is to read the line as it goes
+  // past. This wrapper is that reader, and nothing else: it forwards every call
+  // untouched. When `GpuBackendApi` grows a `bound_backend()`, delete it.
+  const passthrough = console.log.bind(console);
+  console.log = (...args) => {
+    const line = args.length === 1 && typeof args[0] === "string" ? args[0] : "";
+    const found = /render backend = (\w+)/.exec(line);
+    if (found) { document.getElementById("diag-backend").textContent = found[1]; }
+    passthrough(...args);
+  };
+
+  // The toggle: a button, and `d` for the same thing.
+  const panel = document.getElementById("diag");
+  const button = document.getElementById("diag-toggle");
+  const setPanel = (on) => {
+    panel.dataset.on = on ? "1" : "0";
+    button.textContent = on ? "hide (d)" : "show (d)";
+  };
+  button.addEventListener("click", () => setPanel(panel.dataset.on !== "1"));
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "d" || event.key === "D") {
+      setPanel(panel.dataset.on !== "1");
+    }
+  });
+
   import init, { shader_crucible_start } from "./pkg/axiom_shader_crucible.js";
   await init();
   shader_crucible_start();

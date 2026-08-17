@@ -46,6 +46,7 @@
 //! | [`limitations`] | the four things this does not do |
 //! | [`orbit`] | the interactive camera the page drags the stations around with |
 //! | [`report`] | the one assembled report the page, the console and the README share |
+//! | [`diagnostics`] | the frame-performance panel under the canvas, and what it refuses to invent |
 //!
 //! ## Determinism
 //!
@@ -56,6 +57,7 @@
 
 pub mod authoring;
 pub mod backends;
+pub mod diagnostics;
 pub mod frame;
 pub mod glyphs;
 pub mod introspection;
