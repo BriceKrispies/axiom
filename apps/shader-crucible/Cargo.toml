@@ -64,14 +64,26 @@ wasm-bindgen = "0.2"
 # half runs the moment it resolves.
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
-# The canvas the live binding draws into, the requestAnimationFrame loop, and
-# the console the report is printed to. An app is outside the Module Law's
-# layer/module platform-API ban, which is exactly why the platform edge of a
-# demonstration belongs here rather than in an engine crate.
+# The canvas the live binding draws into, the requestAnimationFrame loop, the
+# console the report is printed to, and the pointer/wheel gestures the orbit
+# camera is driven by (`AddEventListenerOptions` for the non-passive wheel
+# listener, `CssStyleDeclaration` for `touch-action`, `DomRect` for the canvas's
+# laid-out height). An app is outside the Module Law's layer/module platform-API
+# ban, which is exactly why the platform edge of a demonstration belongs here
+# rather than in an engine crate.
 web-sys = { version = "0.3", features = [
-    "Window",
+    "AddEventListenerOptions",
+    "CssStyleDeclaration",
     "Document",
+    "DomRect",
     "Element",
+    "Event",
+    "EventTarget",
     "HtmlCanvasElement",
+    "HtmlElement",
+    "MouseEvent",
+    "PointerEvent",
+    "WheelEvent",
+    "Window",
     "console",
 ] }

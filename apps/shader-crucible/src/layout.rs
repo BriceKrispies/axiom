@@ -26,6 +26,8 @@ pub const HEIGHT: u32 = 640;
 
 /// How many bodies stand in the front row; the rest go behind it.
 const ROW_LENGTH: usize = 6;
+/// How many bodies the plan places in all — two rows of [`ROW_LENGTH`].
+pub const SLOT_COUNT: usize = ROW_LENGTH * 2;
 /// How far apart the bodies stand.
 const SPACING: f32 = 2.55;
 /// The `x` of the **first** body of a row — the leftmost on screen.
@@ -48,6 +50,18 @@ pub fn slot_position(slot: usize) -> Vec3 {
         ROW_Y + row as f32 * BACK_ROW_LIFT,
         ROW_Z[row.min(1)],
     )
+}
+
+/// **The middle of the stand** — the mean of the twelve slot positions.
+///
+/// This exists so the orbit camera has something to pivot about that is *derived
+/// from the plan* rather than a second, typed-out opinion about where the
+/// subjects are: move a row and the pivot moves with it. See
+/// [`crate::scene::camera_target`].
+pub fn stand_center() -> Vec3 {
+    (0..SLOT_COUNT)
+        .fold(Vec3::ZERO, |sum, slot| sum.add(slot_position(slot)))
+        .mul_scalar(1.0 / SLOT_COUNT as f32)
 }
 
 /// A linear colour channel from a known-finite authored literal.
@@ -74,6 +88,18 @@ mod tests {
     #[test]
     fn every_body_stands_above_the_ground() {
         (0..12).for_each(|slot| assert!(slot_position(slot).y > GROUND_Y));
+    }
+
+    /// The stand's centre sits between the two rows in depth and between the two
+    /// row heights, and is (very nearly) on the middle of the row in `x` — which
+    /// is what makes it a legal orbit pivot for a camera authored on the axis.
+    #[test]
+    fn the_stand_center_sits_between_the_two_rows() {
+        let center = stand_center();
+        assert!(center.z < slot_position(0).z && center.z > slot_position(6).z);
+        assert!(center.y > slot_position(0).y && center.y < slot_position(6).y);
+        assert!(center.x.abs() < 0.1, "{center:?}");
+        assert_eq!(SLOT_COUNT, 12);
     }
 
     #[test]

@@ -13,8 +13,13 @@
          color: #7fd4ff; }
     .sub { margin: 0; font-size: 12px; opacity: .62; text-align: center;
            max-width: 900px; line-height: 1.6; }
+    /* `touch-action: none` hands the orbit camera raw pointer streams: without
+       it the compositor claims a drag as a scroll or a pinch as a page zoom
+       before the listener ever sees it. `src/pointer_input.rs` sets the same
+       property in code — see its module docs for why both, and why
+       `preventDefault()` on top of them. */
     canvas { width: min(96vw, 1280px); aspect-ratio: 2 / 1; background: #070810;
-             border: 1px solid #1a2333; border-radius: 3px;
+             border: 1px solid #1a2333; border-radius: 3px; touch-action: none;
              box-shadow: 0 18px 60px rgba(0,0,0,.7); }
     .legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
               gap: 10px; width: min(96vw, 1280px); }
@@ -44,7 +49,8 @@
     Every pattern, mask, blend, displacement and density below is an authored
     <code>FieldGraph</code> over the 27-operator algebra — <b>there is no WGSL in
     this app and no Rust in it that computes a colour</b>. The stations stand in
-    two rows of six, front row left to right first. Open the console for the
+    two rows of six, front row left to right first — <b>drag to orbit them,
+    scroll or pinch to zoom, shift-drag or right-drag to pan</b>. Open the console for the
     full report: the barrier's program count, <code>supported_by</code> for both
     backend profiles, and each station's <code>explain</code> / <code>digest</code>
     / <code>diff</code>.

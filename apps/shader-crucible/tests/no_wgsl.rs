@@ -27,6 +27,21 @@
 
 use std::path::{Path, PathBuf};
 
+/// The two files of the interactive camera — the one part of this app that does
+/// arithmetic on purpose. See [`the_app_computes_no_colour_in_rust`] for why
+/// they are exempt from the shading-maths scan, and
+/// [`the_camera_is_outside_the_appearance_pipeline_entirely`] for what keeps
+/// that exemption honest.
+const CAMERA_FILES: [&str; 2] = ["orbit.rs", "pointer_input.rs"];
+
+/// Whether `path` is one of [`CAMERA_FILES`].
+fn is_camera_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| CAMERA_FILES.contains(&name))
+        .unwrap_or(false)
+}
+
 /// Tokens that appear only in WGSL source or in the wgpu call that compiles it.
 const SHADER_TOKENS: [&str; 9] = [
     "@vertex",
@@ -104,12 +119,23 @@ fn the_app_authors_no_wgsl() {
 ///
 /// Tests are exempt — they legitimately recompute a reference value to check a
 /// graph against — so the scan stops at the first `#[cfg(test)]` of each file.
+///
+/// **The camera is exempt too, and named** ([`CAMERA_FILES`]). A turntable is
+/// spherical coordinates, so it is trigonometry — but it is not *shading*: it
+/// produces an eye position, never a pixel value, and there is no `FieldGraph`
+/// that could express it, because a graph is a pointwise appearance IR and a
+/// camera is not appearance. The exemption is two named files rather than a
+/// directory, and
+/// [`the_camera_is_outside_the_appearance_pipeline_entirely`] holds it honest by
+/// proving those two files touch nothing the appearance system is made of — so
+/// the exemption cannot quietly become somewhere to hide a shading function.
 #[test]
 fn the_app_computes_no_colour_in_rust() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let banned = ["powf(", ".sin()", ".cos()", ".exp()", ".sqrt()", ".ln()"];
     let offenders: Vec<String> = sources(&src)
         .iter()
+        .filter(|path| !is_camera_file(path))
         .flat_map(|path| {
             let text = strip_line_comments(
                 &std::fs::read_to_string(path).expect("a readable source file"),
@@ -125,6 +151,61 @@ fn the_app_computes_no_colour_in_rust() {
     assert!(
         offenders.is_empty(),
         "shading maths in Rust, outside a graph:\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// **The camera's exemption cannot become a hiding place.**
+///
+/// [`the_app_computes_no_colour_in_rust`] lets [`CAMERA_FILES`] do trigonometry,
+/// on the grounds that an orbit is spherical coordinates and not shading. That
+/// claim is only true while those files stay *outside the appearance pipeline* —
+/// so this proves it directly: neither file may name any of the types the
+/// appearance system is built out of. A shading function smuggled in there would
+/// have to author a graph, bind a surface, or set a program to be worth anything,
+/// and each of those is a token below.
+///
+/// The two tests are therefore a pair: one says "not here", the other says "and
+/// the place it is allowed cannot be used for it".
+#[test]
+fn the_camera_is_outside_the_appearance_pipeline_entirely() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    // Every vocabulary a colour could actually be produced through in this app.
+    let appearance = [
+        "FieldGraph",
+        "FieldBuilder",
+        "FieldOp",
+        "Surface",
+        "surface_program",
+        "Material",
+        "Color",
+        "Texture",
+    ];
+    let camera: Vec<PathBuf> = sources(&src)
+        .into_iter()
+        .filter(|path| is_camera_file(path))
+        .collect();
+    assert_eq!(
+        camera.len(),
+        CAMERA_FILES.len(),
+        "the exemption names a file the scan cannot find: {camera:?}"
+    );
+    let offenders: Vec<String> = camera
+        .iter()
+        .flat_map(|path| {
+            let text =
+                strip_line_comments(&std::fs::read_to_string(path).expect("a readable source file"));
+            appearance
+                .iter()
+                .filter(|token| text.contains(**token))
+                .map(|token| format!("{}: `{token}`", path.display()))
+                .collect::<Vec<String>>()
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "the camera is exempt from the shading-maths scan only because it is not \
+         part of the appearance pipeline — and these references say otherwise:\n{}",
         offenders.join("\n")
     );
 }

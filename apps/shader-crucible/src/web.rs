@@ -45,6 +45,8 @@ use wasm_bindgen::prelude::*;
 
 use crate::frame::packet_of;
 use crate::layout::{HEIGHT, WIDTH};
+use crate::orbit::OrbitState;
+use crate::pointer_input::{self, SharedOrbit};
 use crate::preparation::presentation_request;
 use crate::report::report;
 use crate::scene::crucible_core;
@@ -77,6 +79,14 @@ pub fn start() {
     // this is a constant rather than a growing allocation.
     let max_instances = 64;
 
+    // The camera the page drives. `OrbitState::framed` seeds itself from the
+    // scene's own authored eye/target, so the first frame is the shot this app
+    // has always opened on; every later frame is whatever the user's gestures
+    // have made of it. The listeners go on now — before the async device
+    // handshake — so a drag during the wait is not silently dropped.
+    let orbit: SharedOrbit = std::rc::Rc::new(std::cell::RefCell::new(OrbitState::framed()));
+    pointer_input::install(CANVAS_ID, std::rc::Rc::clone(&orbit));
+
     let mut backend = GpuBackendApi::new(&presentation_request(WIDTH, HEIGHT));
     wasm_bindgen_futures::spawn_local(async move {
         match backend
@@ -103,13 +113,18 @@ pub fn start() {
                 return;
             }
         }
-        drive(app, backend, surfaces);
+        drive(app, backend, surfaces, orbit);
     });
 }
 
 /// The frame loop: one deterministic tick, one packet carrying every draw's
 /// `surface_program` and the frame's engine time, one present.
-fn drive(mut app: RunningApp, backend: GpuBackendApi, surfaces: Vec<Surface>) {
+fn drive(
+    mut app: RunningApp,
+    backend: GpuBackendApi,
+    surfaces: Vec<Surface>,
+    orbit: SharedOrbit,
+) {
     let held: std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut()>>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
     let scheduler = std::rc::Rc::clone(&held);
@@ -119,6 +134,12 @@ fn drive(mut app: RunningApp, backend: GpuBackendApi, surfaces: Vec<Surface>) {
     *held.borrow_mut() = Some(Closure::wrap(Box::new(move || {
         let now = tick.get();
         tick.set(now + 1);
+        // Re-author the camera before the tick that reads it. `set_camera`
+        // reuses the existing camera node in place, so a moving camera costs no
+        // allocation and leaks no scene nodes. Nothing else about the frame
+        // changes: the same twelve bodies, the same surfaces, seen from
+        // wherever the user's last gesture left the eye.
+        orbit.borrow().apply(&mut app);
         let outcome = app.render(now);
         let packet = packet_of(&outcome, WIDTH, HEIGHT);
         let drew = backend.present_packet_with_surfaces(&packet, &surfaces);

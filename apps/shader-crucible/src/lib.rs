@@ -42,6 +42,7 @@
 //! | [`backends`] | station 9: `supported_by` for both real profiles |
 //! | [`introspection`] | station 10: `explain` / `digest` / `diff` |
 //! | [`limitations`] | the four things this does not do |
+//! | [`orbit`] | the interactive camera the page drags the stations around with |
 //! | [`report`] | the one assembled report the page, the console and the README share |
 //!
 //! ## Determinism
@@ -57,6 +58,7 @@ pub mod frame;
 pub mod introspection;
 pub mod layout;
 pub mod limitations;
+pub mod orbit;
 pub mod preparation;
 pub mod report;
 pub mod scene;
@@ -66,7 +68,14 @@ pub mod stations;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 
+/// The DOM half of the orbit camera: pointer/wheel gestures measured and handed
+/// to [`orbit::OrbitState`]. Compiled only for `wasm32`; the camera policy it
+/// drives is browser-free and lives in `src/orbit.rs`.
+#[cfg(target_arch = "wasm32")]
+mod pointer_input;
+
 pub use layout::{HEIGHT, WIDTH};
+pub use orbit::OrbitState;
 pub use scene::{crucible_app, crucible_core, shader_crucible_core};
 
 /// **The committed digest of every station surface**, in `stations::all_surfaces`

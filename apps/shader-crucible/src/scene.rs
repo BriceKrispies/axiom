@@ -34,9 +34,51 @@
 
 use axiom::prelude::*;
 
-use crate::layout::{ch, HEIGHT, WIDTH};
+use crate::layout::{ch, stand_center, HEIGHT, WIDTH};
 use crate::stand::populate;
 use crate::preparation::{PreparedCell, SurfaceProgramTask, TASK_NAME};
+
+/// **The authored eye.** Head-height in front of the stand, on its axis, far
+/// enough back that all twelve bodies and the ground under them are in frame.
+///
+/// Named here rather than typed inline because it is not only the opening shot:
+/// `src/orbit.rs` seeds the interactive camera from it, and there must be exactly
+/// one authored framing for the two to be the same framing.
+pub(crate) const CAMERA_EYE: [f32; 3] = [0.0, 1.30, 10.4];
+
+/// The camera's vertical field of view, in degrees. Shared with `src/orbit.rs`,
+/// which needs it to make a pan track the pointer at exactly 1:1.
+pub(crate) const CAMERA_FOV_DEGREES: f32 = 58.0;
+
+/// **The point the authored camera looks at**, and the point the orbit camera
+/// pivots about.
+///
+/// It is the middle of the stand *in depth* — [`stand_center`], so it follows the
+/// plan — taken on the authored camera's own axis: the same `x` and `y` as the
+/// eye. That is what keeps the opening shot dead level and square on, exactly as
+/// the app has always presented it, while still pivoting about the subjects
+/// rather than about an arbitrary origin.
+pub(crate) fn camera_target() -> Vec3 {
+    Vec3::new(CAMERA_EYE[0], CAMERA_EYE[1], stand_center().z)
+}
+
+/// The scene's camera intrinsics. One definition, used by the authored framing
+/// below and re-applied every frame by the orbit camera — the lens does not
+/// change when the user drags, only the transform does.
+pub(crate) fn scene_camera() -> Camera {
+    Camera::perspective(PerspectiveProjection {
+        fov_y: Angle::degrees(CAMERA_FOV_DEGREES),
+        near: Meters::new(0.1).expect("an authored near plane is finite"),
+        far: Meters::new(240.0).expect("an authored far plane is finite"),
+    })
+}
+
+/// The authored camera transform: [`CAMERA_EYE`], looking at [`camera_target`].
+pub(crate) fn camera_transform() -> Transform {
+    Transform::from_translation(Vec3::new(CAMERA_EYE[0], CAMERA_EYE[1], CAMERA_EYE[2]))
+        .looking_at(camera_target(), Vec3::UNIT_Y)
+        .expect("the authored camera does not look straight up its own axis")
+}
 
 /// The crucible's `App`: window, camera, light rig, ground, and the startup
 /// preparation barrier that compiles every station's program.
@@ -62,14 +104,7 @@ pub fn crucible_app() -> (App, PreparedCell) {
             )),
         )
         .setup(|world, _meshes, _materials| {
-            world.spawn((
-                Transform::from_translation(Vec3::new(0.0, 1.30, 10.4)),
-                Camera::perspective(PerspectiveProjection {
-                    fov_y: Angle::degrees(58.0),
-                    near: Meters::new(0.1).expect("an authored near plane is finite"),
-                    far: Meters::new(240.0).expect("an authored far plane is finite"),
-                }),
-            ));
+            world.spawn((camera_transform(), scene_camera()));
             // A low key light: limitation 1 is only visible if station 5's
             // shadow is long enough to compare against its body.
             world.spawn((
@@ -187,6 +222,28 @@ mod tests {
         let (mut b, _) = crucible_core();
         assert_eq!(b.render(0), first);
         assert_eq!(a.render(0), first, "render must be a pure function of a tick");
+    }
+
+    /// **Naming the camera's target did not turn the camera.** The authored
+    /// framing is head-on down `-z` — [`camera_target`] is [`CAMERA_EYE`]'s own
+    /// axis at the depth of the stand — so `looking_at` resolves to the identity
+    /// rotation the app presented before the target had a name, and the opening
+    /// shot is unchanged.
+    #[test]
+    fn the_authored_camera_is_the_level_head_on_shot_it_has_always_been() {
+        let authored = camera_transform();
+        assert_eq!(
+            authored.translation,
+            Vec3::new(CAMERA_EYE[0], CAMERA_EYE[1], CAMERA_EYE[2])
+        );
+        let r = authored.rotation;
+        assert!(r.x.abs() + r.y.abs() + r.z.abs() < 1.0e-4, "{r:?}");
+        assert!((r.w.abs() - 1.0).abs() < 1.0e-4, "{r:?}");
+        // The pivot is in front of the eye and between the rows, not at the
+        // origin and not behind the camera.
+        let target = camera_target();
+        assert!(target.z < CAMERA_EYE[2] && target.z > -3.4, "{target:?}");
+        assert_eq!(target.y, CAMERA_EYE[1]);
     }
 
     /// The barrier ran before the scene could be built, and deposited its
