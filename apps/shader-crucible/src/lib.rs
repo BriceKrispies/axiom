@@ -47,6 +47,8 @@
 //! | [`orbit`] | the interactive camera the page drags the stations around with |
 //! | [`report`] | the one assembled report the page, the console and the README share |
 //! | [`diagnostics`] | the frame-performance panel under the canvas, and what it refuses to invent |
+//! | [`levers`] | the kill-switches under the panel: what each one removes from a frame |
+//! | [`export`] | the whole reading as one JSON object, so a phone's numbers can reach an engineer |
 //!
 //! ## Determinism
 //!
@@ -58,11 +60,13 @@
 pub mod authoring;
 pub mod backends;
 pub mod diagnostics;
+pub mod export;
 pub mod frame;
 pub mod glyphs;
 pub mod introspection;
 pub mod label;
 pub mod layout;
+pub mod levers;
 pub mod limitations;
 pub mod orbit;
 pub mod preparation;

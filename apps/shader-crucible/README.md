@@ -196,6 +196,89 @@ graph; the crucible does not, because hiding the seam would hide the finding.
 | `screenshots/crucible-c2d-fallback.png` | the identical frame with the surface set **withheld** — the same bodies, uniformly grey. The bin prints the difference: the surface set changes **3.2%** of the frame's bytes. |
 | `screenshots/crucible-gpu.png` | `axiom-shot`'s GPU capture: twelve **blank white** bodies and one correctly-textured baked tile. The wind cube is un-leaned and the ripple body is a plain sphere, because that path drops the fragment *and* the vertex programs. The control image. |
 
+## The levers under the canvas
+
+A row of buttons sits between the canvas and the diagnostics panel. Every one of
+them removes exactly one thing from the frame and holds the rest, so the
+difference between two panel readings is attributable to it. They were query
+parameters until this row existed, which in practice meant they were never run
+on a phone — and the phone is the only device whose numbers here are real,
+because Chrome's device emulation does not emulate a phone GPU.
+
+| Button | What it removes | Reload |
+|---|---|---|
+| `CAPTIONS` | the twelve caption meshes — 12 of the frame's 25 draws |  |
+| `SHADOWS` | the shadow pass's draws, and the PCF result | |
+| `SURFACES n/11` | the generated program on the bodies past *n*, which then take the constant fallback pipeline | |
+| `SOLO` | every body but one, at a **fixed framing** shared by all twelve | |
+| `HALF RES` | three quarters of the fragments (the render-scale ladder's floor) | |
+| `ADAPTIVE` | nothing — it hands the resolution to `RenderScaleController` | |
+| `DEVICE PX` | the backbuffer↔screen match | yes |
+| `RESET` | every lever, back to the shipping configuration | if needed |
+| `COPY DIAGNOSTICS` | — | |
+
+`SOLO` frames every body from the same offset, so two solo readings differ only
+in which shader is on the pixels. That is what makes it a measurement rather
+than a viewer: on a desktop WebGPU adapter, solo'ing body 1 (station 1's layered
+metal + paint) measures **2.43 ms** in the main GPU pass against **0.05 ms** for
+body 7 at identical screen coverage — a factor of ~49 for one material, which is
+the whole answer to "why does station 1 halve the frame rate when it fills the
+screen".
+
+`COPY DIAGNOSTICS` puts the entire panel — the frame distribution, the CPU
+spans, the workload, the per-pass GPU times, the capability profile, which levers
+are pulled, and every station's flattened node count per channel — on the
+clipboard **and** in the console as one JSON object. It is how a phone's numbers
+reach somebody who cannot see the phone. The clipboard path falls back to a
+`textarea` copy, because `navigator.clipboard` does not exist in a non-secure
+context and a phone on `http://192.168.x.x` is exactly that.
+
+Each button is also a query parameter, so a configuration can be handed over as a
+link: `?captions=0`, `?shadows=0`, `?surfaces=3`, `?solo=1`, `?half=1`,
+`?adapt=1`, `?dpr=0`, `?back=WxH`.
+
+### Two things the levers measured that nobody had measured before
+
+* **The `surfaces` lever used to be inert.** It narrowed the `Surface` slice
+  handed to `present_packet_with_surfaces`, on the belief that a draw whose
+  surface was missing would take the fallback. It does not: the startup barrier
+  has already bound all eleven programs to the device, and a draw finds its
+  program by digest whatever slice the present is given. At `SURFACES 0/11` every
+  body still wore its own shader — visible on screen, and measurable as no
+  change at all. The lever now cuts the packet's own `surface_program` lane,
+  which is what the backend really keys on, and the eleven generated shaders
+  then account for roughly **85–90% of the main pass's GPU time**.
+* **Clearing `RenderCapability::Shadows` does not make the frame faster.** Across
+  five A/B pairs the main pass was never quicker with the bit cleared and was
+  usually a little slower. The shader computes `shadow_factor` and then
+  `select`s on the result, and `select` evaluates both arms — so the 25
+  `textureSampleCompare` taps run either way. See "What this cannot do from the
+  app" below.
+
+### What this cannot do from the app
+
+Two shadow costs are unreachable from app code and are named here rather than
+worked around:
+
+1. **The shadow depth pre-pass always runs.** `scene_renderer.rs` begins
+   `"axiom-shadow-pass"` unconditionally — there is no `caps & Shadows` filter
+   around it, unlike the SDF and sky passes in the same function — so a
+   full-size depth clear happens on every frame whatever the profile says. What
+   the app *can* do, and does, is hand the packet an identity `light_view_proj`,
+   which makes the light's culling frustum the world cube `[-1, 1]³`; every body
+   on this stand is outside it, so the pass submits no draws.
+2. **The 25 PCF taps always run.** `shadow_factor` is called outside the
+   capability test because `textureSampleCompare` needs uniform control flow.
+   Making the bit a real saving means restructuring the fragment stage, not
+   flipping a flag.
+
+The render scale has a smaller one: `RenderScale` exposes no constructor but
+`FULL`, so `HALF RES` reaches the ladder's floor by driving a throwaway
+`RenderScaleController` down it. A `RenderScale::of(Ratio)` would retire that.
+And `GpuBackendApi::render_width()` is the device *tier's* size, not the live
+one, so the panel prints the scale it **asked** for and lets the GPU pass times
+say whether it took.
+
 ## Determinism
 
 Fixed seeds; no wall clock anywhere. Station 5's displacement reads

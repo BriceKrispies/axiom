@@ -47,13 +47,15 @@ use wasm_bindgen::prelude::*;
 use crate::diagnostics::{
     bars, readings, spark, static_readings, FrameHistory, FrameSample, Workload, FLUSH_MS,
 };
-use crate::frame::packet_of;
+use crate::export::diagnostics_json;
+use crate::frame::packet_of_plan;
 use crate::layout::{HEIGHT, WIDTH};
+use crate::levers::{solo_camera, Levers};
 use crate::orbit::OrbitState;
 use crate::pointer_input::{self, SharedOrbit};
 use crate::preparation::presentation_request;
 use crate::report::report;
-use crate::scene::crucible_core;
+use crate::scene::{crucible_core, scene_camera};
 use crate::stations::all_surfaces;
 
 /// The id of the canvas the page provides.
@@ -63,62 +65,82 @@ const CANVAS_ID: &str = "shader-crucible-canvas";
 /// flips, and which the loop reads before paying for a DOM write.
 const PANEL_ID: &str = "diag";
 
-/// The element the page's console interceptor deposits the engine's own
-/// `render backend = …` line into. See [`Panel::flush`].
-const PANEL_BACKEND_ID: &str = "diag-backend";
+// **The live lever state**, shared between the page's buttons and the frame
+// loop.
+//
+// The buttons under the canvas call the `crucible_*` exports at the bottom of
+// this file, which write here; the frame loop reads it once per frame and
+// applies whatever changed. A `Cell` rather than a `RefCell` because `Levers`
+// is `Copy` and a frame must never be able to observe a half-written
+// configuration.
+//
+// `PANEL` is the live panel, so the export button reads the same window the
+// page is showing rather than a copy taken at some earlier flush.
+//
+// The seed is the query string, so a link still carries a configuration — see
+// `Levers::from_query`.
+thread_local! {
+    static LEVERS: std::cell::Cell<Levers> = const { std::cell::Cell::new(Levers::SHIPPING) };
 
-/// **The page's diagnostic levers**, read once from the query string.
-///
-/// These exist because "the phone is slow" is not a finding, it is a symptom,
-/// and the only way to turn one into the other is a controlled A/B: change one
-/// input, hold the rest, and read the panel. Each lever changes *pixels* or
-/// *programs* and nothing else, so a difference between two runs is attributable
-/// to one of them.
-///
-/// * `?back=WxH` — pin the backbuffer to an explicit size. The fill-rate probe:
-///   halve it and the fragment stage does a quarter of the work while every
-///   draw, batch and command stays identical.
-/// * `?surfaces=N` — present with only the first `N` authored surfaces. The
-///   shader-cost probe: the frame draws the same geometry at the same
-///   resolution, but the draws whose surface is missing take the constant
-///   fallback instead of a generated program.
-/// * `?adapt=1` — turn the adaptive render scale ON (it is **off by default**;
-///   see the section below for why), so a run does not hold one
-///   resolution for its whole window.
-/// * `?dpr=0` — pin the legacy fixed backbuffer instead of matching the device.
-struct Levers {
-    back: Option<(u32, u32)>,
-    surfaces: Option<usize>,
-    adapt: bool,
-    device_pixels: bool,
+    static PANEL: std::cell::RefCell<Option<std::rc::Rc<std::cell::RefCell<Panel>>>> =
+        const { std::cell::RefCell::new(None) };
+
+    // The render scale the loop last handed the backend. Held here because the
+    // backend will not tell it back: `render_width()` is the device *tier's*
+    // size, decided at initialisation, and the live binding's own `render_size`
+    // is not on the facade. So the panel prints what was asked for, labelled as
+    // that, and the GPU pass times are what say whether it took.
+    static RENDER_SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
 }
 
-impl Levers {
-    /// The levers this page load asked for.
-    fn from_query() -> Self {
-        let query = web_sys::window()
-            .map(|window| window.location())
-            .and_then(|location| location.search().ok())
-            .unwrap_or_default();
-        let value = |key: &str| {
-            query
-                .trim_start_matches('?')
-                .split('&')
-                .filter_map(|pair| pair.split_once('='))
-                .find(|(name, _)| *name == key)
-                .map(|(_, value)| value.to_string())
-        };
-        Levers {
-            back: value("back").and_then(|raw| {
-                raw.split_once('x').and_then(|(w, h)| {
-                    w.parse::<u32>().ok().zip(h.parse::<u32>().ok())
-                })
-            }),
-            surfaces: value("surfaces").and_then(|raw| raw.parse().ok()),
-            adapt: value("adapt").as_deref() == Some("1"),
-            device_pixels: value("dpr").as_deref() != Some("0"),
-        }
-    }
+/// Hand `scale` to the backend and remember what was asked for.
+fn apply_scale(backend: &mut GpuBackendApi, scale: axiom_host::RenderScale) {
+    backend.set_render_scale(scale);
+    RENDER_SCALE.with(|cell| cell.set(scale.ratio().get()));
+}
+
+/// The levers the page currently has pulled.
+fn levers() -> Levers {
+    LEVERS.with(std::cell::Cell::get)
+}
+
+/// Move the levers, and hand the page back the new state to draw its buttons
+/// from.
+fn set_levers(next: Levers) -> String {
+    LEVERS.with(|cell| cell.set(next));
+    next.state_json()
+}
+
+/// **The backend capability profile a shadow setting implies.**
+///
+/// Clearing `RenderCapability::Shadows` zeroes the `CAP_SHADOWS` bit the
+/// fragment stage tests before it uses the PCF result. See [`crate::levers`] for
+/// what this does and does not remove — notably it does *not* remove the 25
+/// `textureSampleCompare` taps, because the shader selects on the result and
+/// `select` evaluates both arms.
+fn profile_for(shadows: bool) -> axiom_host::BackendCapabilityProfile {
+    let all = axiom_host::BackendCapabilityProfile::all();
+    shadows
+        .then_some(all)
+        .unwrap_or_else(|| all.without(axiom_host::RenderCapability::Shadows))
+}
+
+/// **The render-scale ladder's floor** — 0.50 linear, a quarter of the
+/// fragments.
+///
+/// Obtained by driving a throwaway `RenderScaleController` down its ladder,
+/// because `RenderScale` exposes no constructor but `FULL` and the ladder's
+/// rungs are private. `observe` is a pure function of the durations it is shown,
+/// so feeding it a run of hopeless frames is arithmetic, not a simulation of
+/// one — but it is a workaround, and the engine change that would retire it is
+/// `RenderScale::of(Ratio)` (or a named `HALF`). This is called once, at
+/// startup, and the result is held.
+fn floor_scale() -> axiom_host::RenderScale {
+    let mut controller = axiom_host::RenderScaleController::for_display();
+    (0..4096).for_each(|_| {
+        controller.observe(1_000_000_000);
+    });
+    controller.scale()
 }
 
 /// **The backbuffer this page should render into.**
@@ -163,7 +185,12 @@ pub fn start() {
     let (app, prepared) = crucible_core();
     log(&report(prepared.borrow().as_ref()));
 
-    let levers = Levers::from_query();
+    let query = web_sys::window()
+        .map(|window| window.location())
+        .and_then(|location| location.search().ok())
+        .unwrap_or_default();
+    let levers = Levers::from_query(&query);
+    LEVERS.with(|cell| cell.set(levers));
     let (width, height) = backbuffer(&levers);
     let canvas = match canvas(width, height) {
         Some(canvas) => canvas,
@@ -192,11 +219,6 @@ pub fn start() {
     // present, so the A/B changes which draws get a generated program and
     // nothing else about the frame.
     let surfaces = all_surfaces();
-    let presented: Vec<Surface> = surfaces
-        .iter()
-        .take(levers.surfaces.unwrap_or(usize::MAX))
-        .cloned()
-        .collect();
     // One instance per body plus headroom; the crucible's scene is fixed, so
     // this is a constant rather than a growing allocation.
     let max_instances = 64;
@@ -212,9 +234,9 @@ pub fn start() {
     log(&format!(
         "shader-crucible: backbuffer {width}x{height} (authored {WIDTH}x{HEIGHT}), \
          presenting {} of {} surfaces, adaptive scale {}",
-        presented.len(),
+        levers.presented_surfaces(),
         surfaces.len(),
-        levers.adapt
+        levers.adaptive
     ));
     let mut backend = GpuBackendApi::new(&presentation_request(width, height));
     wasm_bindgen_futures::spawn_local(async move {
@@ -242,15 +264,9 @@ pub fn start() {
                 return;
             }
         }
-        drive(
-            app,
-            backend,
-            presented,
-            orbit,
-            Panel::new(mesh_triangles),
-            (width, height),
-            levers.adapt,
-        );
+        let panel = std::rc::Rc::new(std::cell::RefCell::new(Panel::new(mesh_triangles)));
+        PANEL.with(|slot| slot.borrow_mut().replace(std::rc::Rc::clone(&panel)));
+        drive(app, backend, surfaces, orbit, panel, (width, height));
     });
 }
 
@@ -297,14 +313,21 @@ pub fn start() {
 /// controller defends a presentation interval, and the interval is what the
 /// display and the GPU jointly decide. Feeding it the CPU span would tell it the
 /// frame is comfortable at 2 ms while the page renders at 12 fps.
+/// ## The levers, applied on change and never per frame
+///
+/// The loop reads the shared lever state once a frame and pushes only what
+/// moved. That is not a micro-optimisation: `set_render_scale` reallocates the
+/// scene colour target, its depth buffer and the bloom chain, and
+/// `set_capability_profile` re-derives the shader's capability word — paying
+/// either every frame would put the instrument's own cost inside the
+/// measurement, which is the one thing this panel may not do.
 fn drive(
     mut app: RunningApp,
     mut backend: GpuBackendApi,
     surfaces: Vec<Surface>,
     orbit: SharedOrbit,
-    mut panel: Panel,
+    panel: std::rc::Rc<std::cell::RefCell<Panel>>,
     backbuffer: (u32, u32),
-    adapt: bool,
 ) {
     let held: std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut()>>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -312,30 +335,69 @@ fn drive(
     let tick = std::cell::Cell::new(0_u64);
     let reported = std::cell::Cell::new(false);
     let mut scale = axiom_host::RenderScaleController::for_display();
+    let floor = floor_scale();
+    // What the backend has actually been told, so a lever that has not moved
+    // costs nothing. Seeded from the page's opening configuration, which
+    // `start` has already applied by construction.
+    let mut applied = levers();
+    backend.set_capability_profile(profile_for(applied.shadows));
+    applied
+        .half_res
+        .then(|| apply_scale(&mut backend, floor));
 
     *held.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+        let mut panel = panel.borrow_mut();
         let now = tick.get();
         tick.set(now + 1);
         let entered = panel.now();
+        let current = levers();
+        // Only what moved. Each of these is a reallocation or a re-derivation;
+        // neither belongs in a steady frame. (The `surfaces` lever needs nothing
+        // here: it cuts the packet's own `surface_program` lane, which
+        // `packet_of_plan` does per frame for free. See
+        // `PacketPlan::program_of` for why narrowing the presented slice — what
+        // this app did before — measured nothing at all.)
+        (current.shadows != applied.shadows).then(|| {
+            backend.set_capability_profile(profile_for(current.shadows));
+        });
+        ((current.half_res, current.adaptive) != (applied.half_res, applied.adaptive)).then(|| {
+            apply_scale(
+                &mut backend,
+                current
+                    .half_res
+                    .then_some(floor)
+                    .unwrap_or(axiom_host::RenderScale::FULL),
+            );
+        });
+        applied = current;
         // The previous frame's measured interval decides this frame's
         // resolution. Diagnostics-clock in, pixels out — nothing the simulation
-        // reads is touched.
-        adapt.then(|| {
+        // reads is touched. The adaptive controller owns the scale while it is
+        // on, so the half-res lever is inert alongside it and the panel's
+        // `render target` row shows which of the two is speaking.
+        current.adaptive.then(|| {
             let observed = scale.observe((panel.last_gap_ms() * 1.0e6) as u64);
-            backend.set_render_scale(observed);
+            apply_scale(&mut backend, observed);
         });
         // Re-author the camera before the tick that reads it. `set_camera`
         // reuses the existing camera node in place, so a moving camera costs no
         // allocation and leaks no scene nodes. Nothing else about the frame
         // changes: the same twelve bodies, the same surfaces, seen from
-        // wherever the user's last gesture left the eye.
-        orbit.borrow().apply(&mut app);
+        // wherever the user's last gesture left the eye — unless a station is
+        // solo'd, in which case the framing is the fixed one every solo shares,
+        // so two solo readings differ only in which shader is on the pixels.
+        current
+            .solo
+            .map(|body| {
+                app.set_camera(scene_camera(), solo_camera(body));
+            })
+            .unwrap_or_else(|| orbit.borrow().apply(&mut app));
         let outcome = app.render(now);
         let rendered = panel.now();
-        let packet = packet_of(&outcome, backbuffer.0, backbuffer.1);
+        let packet = packet_of_plan(&outcome, backbuffer.0, backbuffer.1, current.plan());
         let packed = panel.now();
         let drew = backend.present_packet_with_surfaces(&packet, &surfaces);
-        let presented = panel.now();
+        let presented_at = panel.now();
         // Report what the FIRST frame could not honour, once — a draw naming a
         // program the barrier did not prepare renders the constant fallback and
         // is reported here rather than silently looking wrong.
@@ -349,11 +411,10 @@ fn drive(
                 backend.prepared_surface_count()
             ));
         });
-        panel.record(
-            [entered, rendered, packed, presented],
-            &packet,
-            &backend,
-        );
+        panel.record([entered, rendered, packed, presented_at], &packet, &backend);
+        // Dropped before the next frame is asked for, so nothing holds the
+        // panel's borrow across a callback the export button could land in.
+        drop(panel);
         schedule(&scheduler);
     }) as Box<dyn FnMut()>));
     schedule(&held);
@@ -387,6 +448,14 @@ struct Panel {
     carried_panel_ms: f64,
     /// Triangles per registered mesh id, read once at startup.
     mesh_triangles: std::collections::BTreeMap<u64, u64>,
+    /// **The workload of the most recent flushed frame.**
+    ///
+    /// Held rather than recomputed because the export button has no packet and
+    /// no backend of its own, and because a reading taken from the same frame
+    /// the page is showing is the only one that can be compared with it. It is
+    /// refreshed on the flush cadence — five times a second — whether or not the
+    /// panel is visible, so hiding the panel does not blind the export.
+    last_workload: Workload,
     /// Whether the panel's fixed prose has been written yet.
     stated: bool,
     /// What each element currently displays, so a value that has not moved is
@@ -404,6 +473,7 @@ impl Panel {
             last_flush: 0.0,
             carried_panel_ms: 0.0,
             mesh_triangles,
+            last_workload: Workload::default(),
             stated: false,
             shown: std::collections::BTreeMap::new(),
         }
@@ -443,9 +513,20 @@ impl Panel {
         });
         (presented - self.last_flush >= FLUSH_MS).then(|| {
             self.last_flush = presented;
-            self.flush(packet, backend);
+            self.last_workload = self.workload(packet, backend);
+            self.flush();
         });
         self.carried_panel_ms = self.now() - presented;
+    }
+
+    /// The window the panel is showing — what the export reports.
+    fn history(&self) -> &FrameHistory {
+        &self.history
+    }
+
+    /// The workload of the most recently flushed frame.
+    fn workload_snapshot(&self) -> &Workload {
+        &self.last_workload
     }
 
     /// Write the panel into the page — unless the page has toggled it off, in
@@ -460,7 +541,7 @@ impl Panel {
     /// [`crate::diagnostics::Reading`]'s docs. A value whose text has not
     /// changed since the last flush is not written at all, so a still panel
     /// dirties nothing.
-    fn flush(&mut self, packet: &FramePacket, backend: &GpuBackendApi) {
+    fn flush(&mut self) {
         let document = web_sys::window().and_then(|window| window.document());
         let on = document
             .as_ref()
@@ -489,7 +570,7 @@ impl Panel {
                 // updated — and so only the values that actually moved cost a
                 // DOM write.
                 let changed: Vec<(&'static str, String)> =
-                    readings(&self.history, &self.workload(packet, backend))
+                    readings(&self.history, &self.last_workload)
                         .into_iter()
                         .filter(|(id, value)| self.shown.get(id) != Some(value))
                         .collect();
@@ -516,21 +597,11 @@ impl Panel {
     /// What this frame asked the GPU to do, read off the packet the backend was
     /// just handed.
     fn workload(&self, packet: &FramePacket, backend: &GpuBackendApi) -> Workload {
-        // Exactly the key `frame_packet_adapter::frame_packet_to_batches` sorts
-        // on. Recomputing it here rather than asking the backend is app-side
-        // arithmetic over the same packet, and it is why the count is labelled
-        // derived; the backend has the real number and does not expose it.
-        let batches: std::collections::BTreeSet<(u64, u64, u64)> = packet
-            .draws()
-            .iter()
-            .map(|draw| (draw.surface_program(), draw.mesh_id(), draw.material_id()))
-            .collect();
-        let programs: std::collections::BTreeSet<u64> = packet
-            .draws()
-            .iter()
-            .map(|draw| draw.surface_program())
-            .filter(|program| *program != 0)
-            .collect();
+        // **The backend's own counts.** This app used to re-derive them by
+        // rebuilding `frame_packet_adapter`'s sort key from the packet by hand,
+        // which was correct only for as long as nobody changed the grouping.
+        // `packet_batch_counts` is the adapter answering for itself.
+        let (batches, pipelines) = backend.packet_batch_counts(packet);
         let triangles = packet
             .draws()
             .iter()
@@ -553,43 +624,57 @@ impl Panel {
             })
             .unwrap_or((0.0, 0.0));
         let degradations = backend.frame_degradations(packet);
+        // **The per-pass GPU time, when the adapter can give one.** Never this
+        // frame's — resolving a timestamp query set completes on a later task —
+        // so the reading carries the frame it belongs to.
+        let timing = backend.gpu_pass_timing();
+        let gpu_passes: Vec<(String, f64)> = timing
+            .passes()
+            .into_iter()
+            .map(|(name, seconds)| (name.to_string(), f64::from(seconds.get()) * 1000.0))
+            .collect();
         Workload {
             draws: packet.draws().len(),
-            batches: batches.len(),
-            programs_used: programs.len(),
+            batches: batches as usize,
+            programs_used: pipelines as usize,
             triangles,
             lights: packet.lights().len(),
             backbuffer: (backend.width(), backend.height()),
             render_target: (backend.render_width(), backend.render_height()),
+            render_scale: f64::from(RENDER_SCALE.with(std::cell::Cell::get)),
             css,
             dpr,
             prepared_programs: backend.prepared_program_count(),
             prepared_surfaces: backend.prepared_surface_count(),
-            profile: [
-                "restricted",
-                "gpu/all",
-            ][usize::from(
-                backend.capability_profile() == axiom_host::BackendCapabilityProfile::all(),
-            )]
-            .to_string(),
+            // Named rather than merely "restricted": the shadows lever is the
+            // one thing in this app that clears a capability bit, and a reading
+            // that says only "restricted" cannot be told apart from a device
+            // whose backend dropped something on its own.
+            profile: {
+                let profile = backend.capability_profile();
+                (profile == axiom_host::BackendCapabilityProfile::all())
+                    .then(|| "gpu/all".to_string())
+                    .unwrap_or_else(|| format!("gpu/no-shadows (0x{:x})", profile.bits()))
+            },
             degraded: degradations
                 .is_empty()
                 .then(|| "none".to_string())
                 .unwrap_or_else(|| format!("{degradations:?}")),
-            // **The one fact this app cannot ask the engine for.** `wgpu` picks
-            // WebGPU or falls back to WebGL2 inside
-            // `live_gpu_binding.rs:302`, which *prints* the answer to the console
-            // and keeps no accessor for it. The page intercepts that line and
-            // parks it in an element; the panel reads it back from there. It is
-            // still the engine's own report of what it bound — see the module
-            // docs for the accessor that would make this indirection
-            // unnecessary.
-            backend: document
-                .as_ref()
-                .and_then(|document| document.get_element_by_id(PANEL_BACKEND_ID))
-                .and_then(|element| element.text_content())
-                .filter(|text| !text.is_empty())
-                .unwrap_or_else(|| "unreported".to_string()),
+            // **Which graphics API `wgpu` actually bound.** This was the one
+            // fact the app could not ask the engine for: the binding printed it
+            // to the console and kept no accessor, so the page wrapped
+            // `console.log` and scraped the line back out of it.
+            // `GpuBackendApi::bound_backend()` now reports it, and the wrapper
+            // is gone from `web/index.html`.
+            backend: backend
+                .bound_backend()
+                .map(|kind| format!("{kind:?}"))
+                .unwrap_or_else(|| "unbound".to_string()),
+            gpu_available: timing.is_available(),
+            gpu_reason: timing.unavailable_reason().to_string(),
+            gpu_total_ms: f64::from(timing.total().get()) * 1000.0,
+            gpu_frame: timing.frame().raw(),
+            gpu_passes,
         }
     }
 }
@@ -613,6 +698,131 @@ fn canvas(width: u32, height: u32) -> Option<web_sys::HtmlCanvasElement> {
             canvas.set_width(width);
             canvas.set_height(height);
             canvas
+        })
+}
+
+// ---------------------------------------------------------------------------
+// The buttons under the canvas.
+//
+// Every lever is a function here, and the page's job is only to call one and
+// paint the state it hands back. That split is deliberate: the *meaning* of a
+// lever — what it removes, whether it needs a reload, what the button should say
+// — is app logic and lives in `crate::levers` where native tests can reach it.
+// The page owns markup and a click handler and nothing else, so the two can
+// never disagree about what a button does.
+//
+// Each of these returns `Levers::state_json()`, so a click is one call and the
+// page never has to ask a second time.
+// ---------------------------------------------------------------------------
+
+/// The current lever state, for the page's first paint.
+#[wasm_bindgen]
+pub fn crucible_levers() -> String {
+    levers().state_json()
+}
+
+/// **Return every runtime lever to the shipping configuration.**
+///
+/// The one button the user asked for by name. The two backbuffer levers cannot
+/// move without a reload, so `reload_required` in the returned state tells the
+/// page whether to reload itself as well — it does, so nobody ever has to edit
+/// a URL to get back to normal.
+#[wasm_bindgen]
+pub fn crucible_reset() -> String {
+    set_levers(Levers {
+        // The backbuffer levers are held: this call cannot change them, and
+        // reporting them as reset when they are not would be a lie the page
+        // would then act on.
+        device_pixels: levers().device_pixels,
+        back: levers().back,
+        ..Levers::SHIPPING
+    })
+}
+
+/// Draw the twelve caption meshes, or not — 12 of the frame's 25 draws.
+#[wasm_bindgen]
+pub fn crucible_toggle_captions() -> String {
+    let current = levers();
+    set_levers(Levers {
+        captions: !current.captions,
+        ..current
+    })
+}
+
+/// Carry the scene's light projection, or the identity — see [`crate::levers`].
+#[wasm_bindgen]
+pub fn crucible_toggle_shadows() -> String {
+    let current = levers();
+    set_levers(Levers {
+        shadows: !current.shadows,
+        ..current
+    })
+}
+
+/// Step the `surfaces` lever to its next stop: all, none, 3, 6.
+#[wasm_bindgen]
+pub fn crucible_cycle_surfaces() -> String {
+    set_levers(levers().cycled_surfaces())
+}
+
+/// Step the solo control through `ALL, body 1 .. body 12`.
+#[wasm_bindgen]
+pub fn crucible_step_solo(delta: i32) -> String {
+    set_levers(levers().stepped_solo(delta))
+}
+
+/// Render at the scale ladder's floor — a quarter of the fragments, every draw
+/// and every command identical.
+#[wasm_bindgen]
+pub fn crucible_toggle_half_res() -> String {
+    let current = levers();
+    set_levers(Levers {
+        half_res: !current.half_res,
+        ..current
+    })
+}
+
+/// Hand the resolution to the adaptive controller, or take it back.
+#[wasm_bindgen]
+pub fn crucible_toggle_adaptive() -> String {
+    let current = levers();
+    set_levers(Levers {
+        adaptive: !current.adaptive,
+        ..current
+    })
+}
+
+/// **The whole reading, as one JSON object** — see [`crate::export`].
+///
+/// Returned to the page, which puts it on the clipboard *and* prints it to the
+/// console, because the clipboard needs a permission a phone may not grant and a
+/// reading that cannot leave the device is not a reading anybody can act on.
+///
+/// Before the first flush there is no workload to report; the object still comes
+/// back, carrying the lever state and an empty window, rather than nothing.
+#[wasm_bindgen]
+pub fn crucible_diagnostics() -> String {
+    let captured = web_sys::window()
+        .and_then(|window| window.performance())
+        .map_or(0.0, |clock| clock.now());
+    PANEL
+        .with(|slot| slot.borrow().clone())
+        .map(|panel| {
+            let panel = panel.borrow();
+            diagnostics_json(
+                panel.history(),
+                panel.workload_snapshot(),
+                &levers(),
+                captured,
+            )
+        })
+        .unwrap_or_else(|| {
+            diagnostics_json(
+                &FrameHistory::new(),
+                &Workload::default(),
+                &levers(),
+                captured,
+            )
         })
 }
 

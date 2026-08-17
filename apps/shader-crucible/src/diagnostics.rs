@@ -38,16 +38,20 @@
 //! * **`s` — static.** A fact about the workload that does not change per
 //!   frame: triangle count, backbuffer size, the barrier's program count.
 //!
-//! **There is no GPU time on this panel, and there cannot be.** Every render
-//! pass in `axiom-gpu-backend` passes `timestamp_writes: None`
-//! (`scene_renderer.rs:1549`, `:1594`, `:1720`, `post_chain.rs:535`,
-//! `draw2d_renderer.rs:316`), and the browser's WebGL2 downlevel — the path this
-//! app actually runs on for most visitors — has no timestamp queries at all. So
-//! the panel prints the residual, labelled as what it really is: time this frame
-//! spent *not on the main thread*, which is GPU **plus** compositor **plus**
-//! whatever the browser waited before the next vsync. A single one of those
-//! three cannot be recovered from the sum, and the panel says so rather than
-//! picking one and calling it "GPU".
+//! **The GPU time is the engine's, or it is absent — it is never this app's
+//! guess.** Every render pass in `axiom-gpu-backend` used to pass
+//! `timestamp_writes: None`, so the panel could print nothing but the residual.
+//! The backend now resolves real per-pass timestamps and reports them through
+//! `GpuBackendApi::gpu_pass_timing`, and this panel prints them **as measured**.
+//! Where the adapter cannot do it — notably the browser's WebGL2 downlevel, the
+//! path this app actually runs on for most visitors, which has no timestamp
+//! queries at all — the card prints the engine's own reason and no number.
+//!
+//! The residual stays either way, because it answers a different question: frame
+//! gap minus main-thread time is GPU **plus** compositor **plus** whatever the
+//! browser waited before the next vsync. With a GPU number beside it, the *gap*
+//! between the two is the compositor and the wait — which is a thing this panel
+//! could not previously separate at all.
 
 /// How many frames the rolling window holds — two seconds at 60 Hz.
 ///
@@ -226,8 +230,20 @@ pub struct Workload {
     pub lights: usize,
     /// The backbuffer the app renders into, in device pixels.
     pub backbuffer: (u32, u32),
-    /// What the backend's render scale makes of that.
+    /// **The device tier's** render size — `GpuBackendApi::render_width/height`.
+    ///
+    /// Not the live render scale: the tier size is decided once, at
+    /// initialisation, and the backend exposes no accessor for the size the live
+    /// binding is currently rendering at (`LiveGpuBinding::render_size` exists
+    /// and is unreachable from the facade). So [`Workload::render_scale`] below
+    /// carries what the app *asked* for, and the two are printed as the separate
+    /// facts they are.
     pub render_target: (u32, u32),
+    /// The render scale the app last handed the backend — 1.0 at full, 0.50 at
+    /// the ladder's floor, or whatever the adaptive controller chose. Labelled
+    /// "asked" on the panel, because the engine will not report back what it
+    /// actually rendered at.
+    pub render_scale: f64,
     /// The canvas's laid-out CSS size, and the page's device pixel ratio — the
     /// pair that says whether the backbuffer is being up- or down-scaled to
     /// reach the screen.
@@ -253,6 +269,26 @@ pub struct Workload {
     pub profile: String,
     /// What the first frame could not honour — empty is the healthy answer.
     pub degraded: String,
+    /// **Whether the engine resolved real per-pass GPU times for a recent
+    /// frame.**
+    ///
+    /// `false` is the normal answer on the WebGL2 fallback, which has no
+    /// timestamp queries at all, and on any adapter that does not offer
+    /// `TIMESTAMP_QUERY`.
+    pub gpu_available: bool,
+    /// Why there is no GPU timing, when there is none. Printed verbatim: a
+    /// missing measurement is reported with its reason, never as a zero.
+    pub gpu_reason: String,
+    /// The measured passes of the last frame that finished resolving, in
+    /// milliseconds — `("shadow", 19.2)`, `("main", 8.4)`, and so on. A pass the
+    /// frame did not run is **absent**, not zero.
+    pub gpu_passes: Vec<(String, f64)>,
+    /// Every measured pass, summed.
+    pub gpu_total_ms: f64,
+    /// Which frame those passes belong to. Never the frame on screen: resolving
+    /// a timestamp query set completes on a later task, so this lags, and saying
+    /// which frame it is is the difference between a measurement and a number.
+    pub gpu_frame: u64,
 }
 
 /// Which resource the frame is up against, stated only when the measurements
@@ -369,20 +405,17 @@ pub fn static_readings() -> Vec<Reading> {
                 .to_string(),
         ),
         (
-            "d-note-gpu",
-            "GPU time: unavailable. Every render pass in axiom-gpu-backend \
-             passes timestamp_writes: None (scene_renderer.rs:1549/1594/1720, \
-             post_chain.rs:535, draw2d_renderer.rs:316), and WebGL2 has no \
-             timestamp queries at all. A number here would be invented."
-                .to_string(),
-        ),
-        (
             "d-note-workload",
-            "batches are grouped on the backend's own sort key (surface_program, \
-             mesh, material); draws are pre-sorted by program, so distinct \
-             programs = pipeline switches. sample is backbuffer pixels per \
-             device pixel: above 1.0 the frame is shaded larger than the screen \
-             and the compositor throws the rest away."
+            "batches and pipelines are the backend's OWN counts, read off the \
+             packet through GpuBackendApi::packet_batch_counts — the app used to \
+             re-derive them by duplicating the adapter's sort key by hand. \
+             sample is backbuffer pixels per device pixel: above 1.0 the frame \
+             is shaded larger than the screen and the compositor throws the rest \
+             away. render target is the DEVICE TIER's size, fixed at \
+             initialisation; render scale is what the app last asked the live \
+             binding for, and the backend exposes no way to read back what it \
+             rendered at — so the GPU pass times are the evidence that a scale \
+             took effect."
                 .to_string(),
         ),
     ]
@@ -448,6 +481,7 @@ pub fn readings(history: &FrameHistory, workload: &Workload) -> Vec<Reading> {
             "d-target",
             format!("{}x{}", workload.render_target.0, workload.render_target.1),
         ),
+        ("d-rscale", format!("{:.2}x asked", workload.render_scale)),
         (
             "d-css",
             format!(
@@ -465,7 +499,74 @@ pub fn readings(history: &FrameHistory, workload: &Workload) -> Vec<Reading> {
         ),
         ("d-profile", workload.profile.clone()),
         ("d-degraded", workload.degraded.clone()),
+        // The header's backend badge, written by Rust now that
+        // `GpuBackendApi::bound_backend()` exists. The page used to wrap
+        // `console.log` and scrape the engine's own initialisation line for it.
+        ("diag-backend", workload.backend.clone()),
+        // GPU — a real measurement when the adapter offers timestamp queries,
+        // and a named absence when it does not.
+        ("d-gpu-total", gpu_total(workload)),
+        ("d-gpu-shadow", gpu_pass(workload, "shadow")),
+        ("d-gpu-main", gpu_pass(workload, "main")),
+        ("d-gpu-sdf", gpu_pass(workload, "sdf")),
+        ("d-gpu-post", gpu_pass(workload, "post")),
+        ("d-gpu-draw2d", gpu_pass(workload, "draw2d")),
+        ("d-gpu-frame", gpu_frame(workload)),
+        ("d-note-gpu", gpu_note(workload)),
     ]
+}
+
+/// One GPU pass's measured time, or an em dash when this frame did not run it —
+/// **never a zero**, which would read as "it ran and cost nothing".
+fn gpu_pass(workload: &Workload, name: &str) -> String {
+    workload
+        .gpu_passes
+        .iter()
+        .find(|(pass, _)| pass == name)
+        .map(|(_, measured)| ms(*measured))
+        .unwrap_or_else(|| "—".to_string())
+}
+
+/// Every measured pass, summed — or the absence, stated.
+fn gpu_total(workload: &Workload) -> String {
+    workload
+        .gpu_available
+        .then(|| format!("{:.2}", workload.gpu_total_ms))
+        .unwrap_or_else(|| "—".to_string())
+}
+
+/// Which frame the GPU reading belongs to. It is never the one on screen.
+fn gpu_frame(workload: &Workload) -> String {
+    workload
+        .gpu_available
+        .then(|| format!("frame {}", workload.gpu_frame))
+        .unwrap_or_else(|| "no frame".to_string())
+}
+
+/// **The GPU card's prose**, which is the honesty contract in one sentence.
+///
+/// The panel could not print a GPU time at all until `axiom-gpu-backend` grew
+/// timestamp queries; before that this note named the exact lines that passed
+/// `timestamp_writes: None`, because a panel that leaves a gap where a number
+/// should be teaches the reader nothing. Now the number exists on adapters that
+/// support it — and where it does not, the *engine's own reason* is printed
+/// rather than an app-side guess at one.
+fn gpu_note(workload: &Workload) -> String {
+    workload
+        .gpu_available
+        .then(|| {
+            "Measured by the engine's timestamp queries, resolved off the frame — \
+             so this is the last frame that FINISHED resolving, not the one on \
+             screen. A pass this frame did not run is absent, never zero."
+                .to_string()
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "GPU time: unavailable — {}. The browser's WebGL2 fallback has no \
+                 timestamp queries at all. A number here would be invented.",
+                workload.gpu_reason
+            )
+        })
 }
 
 /// The panel's own honesty line: it states its cost, and says so out loud when
@@ -706,24 +807,71 @@ mod tests {
         assert_eq!(Verdict::of(&filled(5, 16.7, 0.5)), Verdict::Warming);
     }
 
-    /// **The panel states the unmeasurable as unmeasurable**, at the site, with
-    /// the reason — and no fabricated GPU millisecond anywhere in what it
-    /// writes.
+    /// **An unmeasurable GPU is reported as unmeasurable**, with the engine's own
+    /// reason, and with no number anywhere near it.
+    ///
+    /// This is the WebGL2 case — the path most visitors are actually on — and it
+    /// is the one where a plausible-looking zero would do the most damage: a
+    /// shadow pass reading `0.00 ms` is an instruction to go and optimise
+    /// something else.
     #[test]
-    fn the_panel_refuses_to_print_a_gpu_time() {
+    fn an_unmeasurable_gpu_prints_the_reason_and_no_number() {
+        let absent = Workload {
+            gpu_available: false,
+            gpu_reason: "the adapter offers no timestamp query".to_string(),
+            ..Workload::default()
+        };
+        let values = readings(&filled(60, 16.7, 0.5), &absent);
+        assert_eq!(shown(&values, "d-gpu-total"), "—");
+        assert_eq!(shown(&values, "d-gpu-shadow"), "—");
+        assert_eq!(shown(&values, "d-gpu-frame"), "no frame");
+        let note = shown(&values, "d-note-gpu");
+        assert!(note.contains("GPU time: unavailable"));
+        assert!(note.contains("the adapter offers no timestamp query"));
+        assert!(note.contains("would be invented"));
+        // The residual is still named for what it is, whether or not there is a
+        // GPU number beside it.
         let notes: String = static_readings()
             .iter()
             .map(|(_, text)| text.clone())
             .collect::<Vec<String>>()
             .join(" ");
-        assert!(notes.contains("GPU time: unavailable"));
-        assert!(notes.contains("timestamp_writes: None"));
         assert!(notes.contains("This is not GPU time"));
-        let values = readings(&filled(60, 16.7, 0.5), &Workload::default());
-        assert!(
-            !values.iter().any(|(id, _)| id.contains("gpu")),
-            "no reading may claim to be a GPU duration"
+    }
+
+    /// **A measured GPU is printed as measured, pass by pass** — and a pass the
+    /// frame did not run is an em dash rather than a zero.
+    #[test]
+    fn a_measured_gpu_prints_each_pass_and_omits_the_ones_that_did_not_run() {
+        let measured = Workload {
+            gpu_available: true,
+            gpu_passes: vec![("shadow".to_string(), 19.25), ("main".to_string(), 8.4)],
+            gpu_total_ms: 27.65,
+            gpu_frame: 412,
+            ..Workload::default()
+        };
+        let values = readings(&filled(60, 33.3, 0.5), &measured);
+        assert_eq!(shown(&values, "d-gpu-shadow"), "19.25 ms");
+        assert_eq!(shown(&values, "d-gpu-main"), "8.40 ms");
+        assert_eq!(shown(&values, "d-gpu-sdf"), "—", "an unrun pass is not a zero");
+        assert_eq!(shown(&values, "d-gpu-total"), "27.65");
+        assert_eq!(shown(&values, "d-gpu-frame"), "frame 412");
+        assert!(shown(&values, "d-note-gpu").contains("not the one on screen"));
+    }
+
+    /// The backend badge in the panel's header is written by Rust, from the
+    /// engine's own `bound_backend()` — the page no longer wraps `console.log`
+    /// to scrape it out of an initialisation line.
+    #[test]
+    fn the_header_badge_is_a_reading_and_not_a_scraped_console_line() {
+        let values = readings(
+            &filled(60, 16.7, 0.5),
+            &Workload {
+                backend: "GpuFallback".to_string(),
+                ..Workload::default()
+            },
         );
+        assert_eq!(shown(&values, "diag-backend"), "GpuFallback");
     }
 
     /// Every reading the page has a slot for is produced, and the numbers are
@@ -745,6 +893,7 @@ mod tests {
             profile: "gpu/all".to_string(),
             degraded: "none".to_string(),
             backend: "BrowserWebGpu".to_string(),
+            ..Workload::default()
         };
         let values = readings(&filled(60, 16.7, 0.5), &workload);
         assert_eq!(shown(&values, "d-fps"), "59.9");

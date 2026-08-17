@@ -32,6 +32,8 @@ use axiom_host::{
 };
 use axiom_kernel::{Ratio, Seconds};
 
+use crate::levers::PacketPlan;
+
 /// The fixed simulation rate the crucible's engine time is derived from. A
 /// **tick count**, never a wall clock: tick *N* replayed twice produces the same
 /// `Seconds`, so station 5 deforms identically on a replay.
@@ -131,13 +133,39 @@ fn billboard_of(
 }
 
 /// One tick's `FramePacket`, carrying every draw's `surface_program` and the
-/// frame's engine time.
+/// frame's engine time — the whole frame, exactly as the app ships it.
 pub fn packet_of(outcome: &FrameOutcome, width: u32, height: u32) -> FramePacket {
+    packet_of_plan(outcome, width, height, PacketPlan::EVERYTHING)
+}
+
+/// One tick's `FramePacket`, cut down to what `plan` keeps.
+///
+/// **The cut happens here and nowhere else.** A diagnostic lever that removed a
+/// body from the *scene* would change the simulation, and then two runs would
+/// not be two readings of one experiment — they would be two experiments. The
+/// scene walk is identical for every lever position; what differs is which of
+/// its draws reach the backend, which is exactly what "12 of 25 draws are
+/// captions" is a claim about.
+///
+/// `plan.shadows` is the same idea applied to the light: a frame with shadows
+/// off carries the **identity** light projection rather than the scene's. That
+/// makes the light's culling frustum the world cube `[-1, 1]³`, which every body
+/// on the stand is outside of, so the shadow pass submits no draws and every
+/// fragment's shadow lookup lands off the map and reads a hard 1.0. See
+/// [`crate::levers`] for what that does *not* remove.
+pub fn packet_of_plan(
+    outcome: &FrameOutcome,
+    width: u32,
+    height: u32,
+    plan: PacketPlan,
+) -> FramePacket {
     let (basis, first_caption, view_proj) = billboard_of(outcome);
+    let total = outcome.draws().len();
     let draws: Vec<FrameDrawItem> = outcome
         .draws()
         .iter()
         .enumerate()
+        .filter(|(index, _)| plan.keeps(*index, total))
         .map(|(index, draw)| {
             let (world, mvp) = basis
                 .filter(|_| index >= first_caption)
@@ -164,8 +192,10 @@ pub fn packet_of(outcome: &FrameOutcome, width: u32, height: u32) -> FramePacket
             .with_specular(draw.specular())
             // **The lane this whole app is about.** Without it, every station
             // renders the neutral constant fallback and the demonstration is of
-            // nothing.
-            .with_surface_program(draw.surface_program())
+            // nothing — which is exactly what the `surfaces` lever asks for,
+            // body by body, so the cost of a generated shader can be measured
+            // against the cost of not having one.
+            .with_surface_program(plan.program_of(index, total, draw.surface_program()))
         })
         .collect();
     let lights: Vec<FrameLight> = outcome
@@ -190,7 +220,15 @@ pub fn packet_of(outcome: &FrameOutcome, width: u32, height: u32) -> FramePacket
         )),
         draws,
         lights,
-        outcome.light_view_proj(),
+        // Shadows off hands the backend the identity here — see this function's
+        // docs. It is the one app-reachable lever that removes shadow *draws*.
+        plan.shadows
+            .then(|| outcome.light_view_proj())
+            .unwrap_or(IDENTITY),
+        // The `uses_shadows` flag stays `false` whatever the lever says: no GPU
+        // route reads it (only the Canvas2D arm does, to report a degradation),
+        // so setting it would move a *readout* without moving a pixel — the one
+        // thing a diagnostic must never do.
         FrameFeatureSet::new(false, directional > 0, directional, point),
     )
     .with_ambient(outcome.ambient())
