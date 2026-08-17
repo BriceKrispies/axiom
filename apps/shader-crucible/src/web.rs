@@ -82,7 +82,8 @@ const PANEL_BACKEND_ID: &str = "diag-backend";
 ///   shader-cost probe: the frame draws the same geometry at the same
 ///   resolution, but the draws whose surface is missing take the constant
 ///   fallback instead of a generated program.
-/// * `?adapt=0` — turn the adaptive render scale off, so a run holds one
+/// * `?adapt=1` — turn the adaptive render scale ON (it is **off by default**;
+///   see the section below for why), so a run does not hold one
 ///   resolution for its whole window.
 /// * `?dpr=0` — pin the legacy fixed backbuffer instead of matching the device.
 struct Levers {
@@ -114,7 +115,7 @@ impl Levers {
                 })
             }),
             surfaces: value("surfaces").and_then(|raw| raw.parse().ok()),
-            adapt: value("adapt").as_deref() != Some("0"),
+            adapt: value("adapt").as_deref() == Some("1"),
             device_pixels: value("dpr").as_deref() != Some("0"),
         }
     }
@@ -272,18 +273,25 @@ pub fn start() {
 /// [`crate::frame::time_at`] derives `EvalContext::time` from that tick alone.
 /// A frame replayed at any wall-clock speed produces the same pixels; the
 /// measurements are a side channel that the deterministic path cannot read.
-/// ## The adaptive render scale, and why this app is the reason it exists
+/// ## The adaptive render scale is wired, and deliberately OFF by default
 ///
 /// `axiom_host::RenderScaleController` is the engine's answer to "the GPU cannot
-/// keep up": it is handed each frame's measured duration and returns a
-/// resolution to render the next one at, dropping a rung after eight
-/// consecutive over-budget frames and climbing back when there is headroom.
-/// `axiom-windowing`'s loop wires it for every app that presents through
-/// windowing. This app cannot present through windowing (see the module docs),
-/// so it hand-rolled the loop — and hand-rolled it without the controller. On a
-/// device with fragment headroom that omission is invisible; on one without it,
-/// it is the difference between a frame that adapts and a frame that is simply
-/// late, forever.
+/// keep up": handed each frame's measured duration, it returns a resolution to
+/// render the next one at, dropping a rung after eight consecutive over-budget
+/// frames and climbing back when there is headroom. `axiom-windowing`'s loop
+/// wires it for every app that presents through windowing; this app cannot
+/// present through windowing (see the module docs), so it hand-rolls the loop.
+///
+/// **It defaults to off here because this app is a diagnostic instrument, and on
+/// an instrument an adaptive resolution is a lie.** Its whole job is to make the
+/// cost of a procedural surface visible; a controller that quietly renders fewer
+/// pixels until the frame fits converts a measurable per-pixel cost into a
+/// number that looks fine and says nothing. It masks precisely the signal the
+/// panel exists to show — and it did: with it on, a heavy layered material read
+/// as a comfortable frame at a resolution nobody had asked for.
+///
+/// A shipping game should turn it on. `?adapt=1` does, so the two behaviours can
+/// be compared side by side, which is itself a thing worth being able to see.
 ///
 /// The duration fed in is the **frame gap**, not the main-thread time: the
 /// controller defends a presentation interval, and the interval is what the
