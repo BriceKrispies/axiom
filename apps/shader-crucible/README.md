@@ -39,7 +39,7 @@ cargo run --release -p axiom-shot --features offscreen -- \
 
 | # | Station | Proves | Measured |
 |---|---------|--------|----------|
-| 1 | Layered material | metal + paint + scratch + dirt, each masked; mask-driven layering flattening to `Mix` | 71 authored nodes; flattened **58 / 50 / 39 / 39 / 39 / 38 / 39** per channel |
+| 1 | Layered material | metal + paint + scratch + dirt, each masked; mask-driven layering flattening to `Mix` | 71 authored nodes; flattened **58 / 49 / 39** per varying channel, four channels constant |
 | 2 | Live procedural surface | graph → `Surface` → `surface_program` → WGSL, per pixel | 32-node colour, 33-node roughness |
 | 3 | Baked texture | the *same* graph through `TextureOp::Field` | agrees with the live evaluation to **0.5 byte levels** worst texel |
 | 4 | Parameter retune | nine tunings → one digest → **one program** | 3 slots, 22 nodes |
@@ -63,21 +63,79 @@ flattens into **one graph per channel**. Station 1 was built first for exactly
 that reason. It fits, comfortably:
 
 ```
-BaseColor    58 nodes      Normal       39 nodes
-Roughness    50 nodes      Emission     39 nodes
-Metallic     39 nodes      Opacity      38 nodes
-                           Displacement 39 nodes
+BaseColor    58 nodes      Normal       constant
+Roughness    49 nodes      Emission     constant
+Metallic     39 nodes      Opacity      constant
+                           Displacement constant
 ```
 
-**The interesting number is not the 58; it is the 39.** Five of the seven
-channels are bound to plain constants in every surface of the tree, and they
-flatten to ~39-node graphs anyway — because the three layer masks are *fields*,
-and `Mix(const, const, mask_field)` has a non-constant input, so it cannot fold
-back to a constant. Roughly 195 of station 1's ~302 flattened nodes compute
-values that never change. That is the real shape of the `MAX_LAYERS` ×
-`MAX_NODES` tension: it is not the number of layers, it is that a field mask
-promotes **every** channel to a graph at once. A fourth layer would add ~13
-nodes per channel; the ceiling is still far away, and neither cap needs raising.
+**The interesting number is the four "constant"s, and they were not always
+there.** Five of the seven channels are bound to plain constants in every
+surface of the tree, and they used to flatten to ~39-node graphs anyway —
+because the three layer masks are *fields*, and `Mix(const, const, mask_field)`
+has a non-constant input, so constant folding could not reach it. Roughly 195 of
+station 1's ~302 flattened nodes computed values that never changed.
+
+`axiom_field` now carries the one exact identity that reaches that node —
+`Mix(x, x, t) -> x` — and four of the five fold back to constant *bindings*,
+taking the station from 262 fragment nodes to 149. `Metallic` is not among them:
+its four surfaces bind `0.0`, `1.0`, `0.0` and `1.0`, so it genuinely varies with
+the masks. What survives is exactly what this material actually computes.
+
+The `MAX_LAYERS` × `MAX_NODES` tension is real but not close: a fourth layer
+would add ~13 nodes per varying channel, and neither cap needs raising.
+
+## Where station 1's GPU time actually goes — and why the octaves stay
+
+`SOLO BODY 1` measures **0.86 ms** in the main pass on a desktop WebGPU adapter,
+against 0.05 ms for a plain body at identical screen coverage. Three A/B
+campaigns took that number apart, each one a *sibling-body interleaved* run —
+bodies 1, 2 and 4 are the same sphere at the same scale, framed identically by
+`solo_camera`, so three variants can be measured side by side in one page load
+rather than across three rebuilds that drift.
+
+* **The fragment program is 94% of it** (0.82 of 0.87 ms).
+* **Cross-channel duplication costs nothing.** Removing it entirely moved the
+  number 0.00 ms: all six channels land in one WGSL function and the shader
+  compiler already CSEs them. The "no cross-channel sharing" cost noted on
+  `brushed_metal_roughness` is an authoring cost, not a GPU one.
+* **The cost is the noise octaves, and only them.** Station 1 evaluates 11 noise
+  octaves per pixel — two brushed-metal streak reads, the scratch mask's domain
+  warp, and three fbm masks at 3 / 3 / 2. Cutting those budgets:
+
+  | fbm budget (paint / dirt / paint-colour) | octaves per pixel | main pass | vs shipped |
+  |---|---|---|---|
+  | **3 / 3 / 2 — shipped** | 11 | **0.86 ms** | — |
+  | 2 / 2 / 1 | 8 | 0.56 ms | −34% |
+  | 1 / 1 / 1 | 6 | 0.42 ms | −51% |
+
+  Note what this means for reading a graph: **`Fbm` is one node whatever its
+  octave count**, so node count is not a cost model for this algebra. The 58-node
+  base colour and the 39-node metallic cost wildly different amounts.
+
+**The octaves stay at 3 / 3 / 2, and the saving is declined on purpose.** The
+0.86 ms exists only in `SOLO`, a diagnostic framing built to make one material's
+cost measurable by filling the screen with it. In the frame the app ships —
+twelve bodies, the authored camera — the whole main pass is 0.16–0.21 ms, of
+which all eleven generated shaders together account for ~0.1 ms; station 1's
+share is on the order of 0.01 ms. Halving its octaves would buy ~0.005 ms of a
+16.7 ms frame. On the WebGL2 fallback the phone actually runs, this app's own
+A/B established the frame is per-draw *submission* bound and invariant to the
+number of generated surface programs, so the cut buys nothing there either.
+
+Against that, the visual cost is real and it lands on the one station whose whole
+job is to look rich. At 2 / 2 / 1 the paint still reads as weathered blotches but
+half the body's pixels move by more than 8 levels — the coverage boundary
+redraws, because dropping octaves changes the mask's *statistics* and the fixed
+`Smoothstep(0.42, 0.72)` therefore cuts it in a different place. At 1 / 1 / 1 the
+material flattens outright: the paint becomes one solid red field with a smooth
+simple edge and the dirt becomes a single soft smudge, mean absolute difference
+31 levels. The scratches and the brushed streak survive every budget unchanged —
+they are single-octave `Noise` and no budget touches them.
+
+A material demo that is twice as fast and visibly plainer has optimised away its
+own subject. The measurement is recorded here so the next agent does not have to
+re-run it to reach the same conclusion.
 
 ## What this does NOT do
 
@@ -220,10 +278,12 @@ because Chrome's device emulation does not emulate a phone GPU.
 `SOLO` frames every body from the same offset, so two solo readings differ only
 in which shader is on the pixels. That is what makes it a measurement rather
 than a viewer: on a desktop WebGPU adapter, solo'ing body 1 (station 1's layered
-metal + paint) measures **2.43 ms** in the main GPU pass against **0.05 ms** for
-body 7 at identical screen coverage — a factor of ~49 for one material, which is
+metal + paint) measures **0.86 ms** in the main GPU pass against **0.05 ms** for
+body 7 at identical screen coverage — a factor of ~17 for one material, which is
 the whole answer to "why does station 1 halve the frame rate when it fills the
-screen".
+screen". It read 2.43 ms before `Mix(x, x, t) -> x` folded four of its seven
+channels back to constants; what the remaining 0.86 ms is made of is taken apart
+under "Where station 1's GPU time actually goes" above.
 
 `COPY DIAGNOSTICS` puts the entire panel — the frame distribution, the CPU
 spans, the workload, the per-pass GPU times, the capability profile, which levers
