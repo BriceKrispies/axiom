@@ -124,11 +124,18 @@ pub(crate) fn render_to_rgba(
         // The capture path renders on a real native adapter, so it gets the same
         // anisotropy the browser arm does — which is what keeps a still usable as
         // evidence about how the live frame samples its ground surfaces.
+        //
+        // The second argument is the *tier* budget the live arm uses to hold a
+        // weak handset below what its adapter claims (a WebGPU device reports
+        // `ANISOTROPIC_FILTERING` without ever measuring it). A capture has no
+        // device tier to answer for, so it takes the full budget and the
+        // adapter's own answer is the only limit.
         crate::texture_sampling::device_max_anisotropy(
             adapter
                 .get_downlevel_capabilities()
                 .flags
                 .contains(wgpu::DownlevelFlags::ANISOTROPIC_FILTERING),
+            crate::texture_sampling::MAX_ANISOTROPY,
         ),
     );
 

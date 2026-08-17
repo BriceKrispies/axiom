@@ -1,0 +1,13 @@
+{
+  "title": "Shader Crucible",
+  "blurb": "Twelve bodies, every pattern an authored expression graph — and a panel that measures what each one costs.",
+  "description": "Nothing on screen is a hand-written shader. Every pattern, mask, blend, displacement and density is a FieldGraph over a closed 27-operator algebra, validated and canonicalised on the CPU, then lowered to WGSL at the startup barrier — the app authors no WGSL and contains no Rust that computes a colour. The twelve stations each isolate one capability: a four-layer masked material, the same graph evaluated live per pixel and baked to a texture, a parameter retune that provably cannot recompile a program, time-varying vertex displacement, three lighting models sharing one pipeline, an implicit surface marched from a sampled field, and marble and wood built from sin and pow. Four limitations are demonstrated rather than hidden, including the undisplaced shadow a displaced vertex casts. Underneath sits a diagnostics panel with real per-pass GPU timings, and a row of levers that isolate a single station, drop the captions, disable shadows or halve the resolution — so the cost of a procedural surface is a number you can read, not a number you have to trust.",
+  "kind": "rust-wasm",
+  "tags": [
+    "demo",
+    "procedural",
+    "shaders",
+    "materials",
+    "diagnostics"
+  ]
+}
