@@ -331,36 +331,44 @@ mod tests {
         });
     }
 
-    /// **The finding this export exists to carry.** Body 1 — the layered
-    /// metal+paint that halves the frame rate when it fills the screen —
-    /// evaluates hundreds of nodes per pixel, and most of its channels are bound
-    /// to plain constants that were never folded away.
+    /// **The finding this export exists to carry, and the fix it drove.**
+    ///
+    /// Body 1 — the layered metal+paint that halved the frame rate when it
+    /// filled the screen — used to flatten to **262 fragment + 39 vertex**
+    /// nodes, and four of its seven channels were full composition trees
+    /// computing a value that never varied: every surface in the tree bound them
+    /// to the *same* plain constant, but the layer masks are fields, so
+    /// `Mix(c, c, mask)` had a non-constant input and constant folding could not
+    /// reach it.
+    ///
+    /// `axiom_field`'s exact algebraic identity `Mix(x, x, t) -> x` reaches
+    /// exactly that node. The four channels are constant **bindings** again and
+    /// the pins below are the measurement. `metallic` is deliberately not among
+    /// them: its four surfaces bind `0.0 / 1.0 / 0.0 / 1.0`, so it genuinely
+    /// varies with the masks and its graph is real work.
     #[test]
-    fn the_layered_body_costs_hundreds_of_nodes_most_of_them_constant() {
+    fn the_layered_body_costs_only_the_channels_that_genuinely_vary() {
         let costs = station_costs();
         let layered = &costs[0];
         assert_eq!(layered.body, 1);
         assert_eq!(layered.station, 1);
-        assert!(
-            layered.fragment_nodes > 200,
-            "body 1 flattens to {} fragment nodes",
-            layered.fragment_nodes
+        assert_eq!(
+            layered.channels,
+            vec![
+                ("base_color", 58, false),
+                ("roughness", 49, false),
+                ("metallic", 39, false),
+                ("normal", 1, true),
+                ("emission", 1, true),
+                ("opacity", 1, true),
+                ("displacement", 1, true),
+            ],
+            "station 1's flattened per-channel cost moved"
         );
-        // The channels a viewer would call "constant" are not constant *bindings*
-        // — they are full composition trees whose value happens to be constant.
-        let unfolded: Vec<&(&str, usize, bool)> = layered
-            .channels
-            .iter()
-            .filter(|(name, nodes, constant)| {
-                (*name != "base_color") & (*nodes > 10) & !*constant
-            })
-            .collect();
-        assert!(
-            unfolded.len() >= 4,
-            "expected several unfolded constant channels, got {unfolded:?}"
-        );
-        // ...and body 1 is genuinely the most expensive body on the stand, which
-        // is why solo-ing it is the experiment.
+        assert_eq!(layered.fragment_nodes, 149, "was 262 before the identity");
+        assert_eq!(layered.vertex_nodes, 1, "was 39 before the identity");
+        // ...and body 1 is still genuinely the most expensive body on the stand,
+        // which is why solo-ing it is the experiment.
         let heaviest = costs
             .iter()
             .max_by_key(|cost| cost.fragment_nodes)

@@ -2,7 +2,12 @@
 //! thing produce the same bytes, and therefore the same digest.
 //!
 //! 1. **Constant folding** — a node all of whose inputs are known constants
-//!    becomes a `Const`. Exact only; see [`crate::const_fold`].
+//!    becomes a `Const`. Exact only; see [`crate::const_fold`]. A node that
+//!    cannot fold is then offered to the one **exact** algebraic identity —
+//!    `Mix(x, x, t) -> x`, see [`crate::algebraic_identity`] — which reaches the
+//!    case folding cannot: a node whose value does not depend on the input that
+//!    stopped the fold. Folding wins where both could fire, so a graph that
+//!    folded before this rule existed folds to the same bytes still.
 //! 2. **Common-subexpression elimination** — nodes are keyed by
 //!    `(op, params, canonical input ids)` and the first node with a key is
 //!    reused. `Add`, `Mul`, `Min` and `Max` sort their input ids first, so `a+b`
@@ -35,10 +40,12 @@ use std::collections::BTreeMap;
 
 use axiom_recipe::{Node, NodeId, Param, RecipeGraph};
 
+use crate::algebraic_identity::identity_input;
 use crate::const_fold::fold_value;
 use crate::field_graph::FieldGraph;
 use crate::field_op::{FieldOp, FIELD_OP_COUNT};
 use crate::field_params::FieldParams;
+use crate::field_type::FieldType;
 use crate::field_value::FieldValue;
 
 /// Which operators may have their input ids sorted before keying and emitting.
@@ -65,7 +72,10 @@ const COMMUTATIVE: [bool; FIELD_OP_COUNT] = [
 
 /// The canonical form of `source`, which the caller has already validated.
 pub(crate) fn canonicalize(source: &FieldGraph) -> FieldGraph {
-    let shared = fold_and_share(source.recipe());
+    let types = source
+        .node_types()
+        .expect("canonicalisation runs only on a graph that has already type-checked");
+    let shared = fold_and_share(source.recipe(), types);
     let output = shared.remap[source.output().raw() as usize];
     let live = live_nodes(&shared.recipe, output);
     relabel(&shared.recipe, &live, output, source.params())
@@ -80,6 +90,13 @@ struct Shared {
     values: Vec<Option<FieldValue>>,
     /// Original id -> emitted id.
     remap: Vec<NodeId>,
+    /// The derived type of each **original** node, in original id order.
+    ///
+    /// Folding mints a `Const` of the value the evaluator computes, and sharing
+    /// merges nodes with identical keys, so neither pass can change a node's
+    /// derived type — the source's table reads correctly for the emitted graph
+    /// too, and the checker is not re-run per node.
+    types: Vec<FieldType>,
 }
 
 /// A node's structural identity: its operator, its parameter words, and its
@@ -93,12 +110,13 @@ struct NodeKey {
 }
 
 impl Shared {
-    fn new(source: &RecipeGraph) -> Self {
+    fn new(source: &RecipeGraph, types: Vec<FieldType>) -> Self {
         Shared {
             recipe: RecipeGraph::new(source.id(), source.version()),
             keys: BTreeMap::new(),
             values: Vec::new(),
             remap: Vec::with_capacity(source.node_count()),
+            types,
         }
     }
 
@@ -129,6 +147,13 @@ impl Shared {
     }
 
     /// Fold, share and record one original node.
+    ///
+    /// The three outcomes are ordered, and the order is the compatibility
+    /// argument: a node that **folds** becomes a `Const`, exactly as before this
+    /// rule existed; only a node that could not fold is offered to the exact
+    /// identity, and a node that is neither is emitted as itself. A node the
+    /// identity claims emits **nothing** — its original id simply remaps onto the
+    /// input it was proven to be.
     fn absorb(mut self, node: &Node) -> Self {
         let op = FieldOp::from_code(node.op())
             .expect("canonicalisation runs only on a graph that has already type-checked");
@@ -137,22 +162,31 @@ impl Shared {
             .iter()
             .map(|input| self.values[input.raw() as usize])
             .collect();
+        let widths: Vec<FieldType> = node
+            .inputs()
+            .iter()
+            .map(|input| self.types[input.raw() as usize])
+            .collect();
         let folded = fold_value(op, &known, node.params());
+        let selected = folded
+            .is_none()
+            .then(|| identity_input(op, &inputs, &widths))
+            .flatten();
         let (code, params, links) = folded
             .map(|value| (FieldOp::Const.code(), value.const_params(), Vec::new()))
             .unwrap_or_else(|| (node.op(), node.params().to_vec(), inputs));
-        let id = self.emit(code, params, links, folded);
+        let id = selected.unwrap_or_else(|| self.emit(code, params, links, folded));
         self.remap.push(id);
         self
     }
 }
 
 /// Passes 1 and 2, as one forward walk in id order.
-fn fold_and_share(source: &RecipeGraph) -> Shared {
+fn fold_and_share(source: &RecipeGraph, types: Vec<FieldType>) -> Shared {
     source
         .nodes()
         .iter()
-        .fold(Shared::new(source), Shared::absorb)
+        .fold(Shared::new(source, types), Shared::absorb)
 }
 
 /// A node's inputs, remapped into the emitted graph and put in canonical order.
@@ -224,8 +258,9 @@ mod tests {
     use super::*;
     use axiom_kernel::StableHash;
     use axiom_math::Vec3;
-    use axiom_recipe::Scalar;
+    use axiom_recipe::{RecipeId, Scalar};
 
+    use crate::eval_context::EvalContext;
     use crate::field_builder::FieldBuilder;
     use crate::field_error::FieldErrorCode;
     use crate::field_type::FieldType;
@@ -539,4 +574,179 @@ mod tests {
 
     /// The digest of the canonical form above.
     const GOLDEN_CANONICAL_DIGEST: u64 = 17_273_213_141_671_979_415;
+
+    // ----- the exact algebraic identity, end to end --------------------------
+
+    /// [`order`] sorts a commutative operator's input ids, and
+    /// [`identity_input`] reads its inputs by **slot**. An operator in both
+    /// tables would let the sort decide which slot the rule reads, so the two
+    /// tables must never intersect.
+    #[test]
+    fn the_two_operator_tables_do_not_overlap() {
+        let both: Vec<usize> = (0..FIELD_OP_COUNT)
+            .filter(|code| COMMUTATIVE[*code] & crate::algebraic_identity::SELECTS_AN_INPUT[*code])
+            .collect();
+        assert_eq!(both, Vec::<usize>::new());
+    }
+
+    /// Ten sample points spanning the mask's range, including the ends and
+    /// outside them — `Mix` does not clamp its selector.
+    fn mask_sweep() -> Vec<EvalContext> {
+        (-2..=7)
+            .map(|step| {
+                EvalContext::new(
+                    Vec3::new(0.5, 0.25, 0.125),
+                    axiom_math::Vec2::new(0.75, 0.5),
+                    Vec3::new(0.0, 1.0, 0.0),
+                    axiom_kernel::Seconds::new(step as f32 * 0.25).expect("a finite time"),
+                )
+            })
+            .collect()
+    }
+
+    /// Every sample of `before` and `after` is **bit-identical**. A fold that
+    /// moved a value would be a bug, not a smaller graph.
+    fn values_are_unchanged(before: &FieldGraph, after: &FieldGraph) {
+        mask_sweep().iter().for_each(|context| {
+            let at = context.time();
+            let original = before.evaluate(context).expect("the graph evaluates");
+            let canonical = after.evaluate(context).expect("the graph evaluates");
+            assert_eq!(original, canonical, "the identity moved a value at time {at:?}");
+        });
+    }
+
+    #[test]
+    fn a_mix_of_one_constant_with_itself_collapses_even_though_its_mask_is_a_field() {
+        // Exactly the shape layer composition emits: two surfaces binding the
+        // same plain constant, blended through a mask that is a field. Folding
+        // cannot reach it — the mask is not constant — and every channel of a
+        // layered material paid for that before this rule existed.
+        let (build, base) = builder().push_const(constant(0.25));
+        let (build, over) = build.push_const(constant(0.25));
+        let (build, mask) = build.push(FieldOp::Time, Vec::new(), Vec::new());
+        let (build, mixed) = build.push(FieldOp::Mix, Vec::new(), vec![base, over, mask]);
+        let field = build.build(mixed);
+
+        assert_eq!(field.validate(), Ok(()));
+        assert_eq!(field.node_count(), 4);
+        let kept = canonical(&field);
+        assert_eq!(kept.node_count(), 1);
+        assert_eq!(ops_of(&kept), vec![FieldOp::Const.code()]);
+        assert_eq!(const_lane(&kept, 0), 0.25);
+        values_are_unchanged(&field, &kept);
+    }
+
+    #[test]
+    fn two_constants_written_with_different_junk_lanes_are_still_one_node() {
+        // The identity compares its endpoints by **id**, so it rests on CSE
+        // actually collapsing two separately-authored constants of the same
+        // value. Every `Const` is re-minted from the value the evaluator reads,
+        // which normalises the lanes a scalar does not use — so even these two,
+        // which do not share a byte pattern as written, share a key.
+        let mut recipe = RecipeGraph::new(RecipeId::from_raw(7), 1);
+        let scalar_const = |x: f32, junk: f32| {
+            vec![
+                Param::int(u32::from(FieldType::Scalar.code())),
+                Param::from_bits(x.to_bits()),
+                Param::from_bits(junk.to_bits()),
+                Param::int(0),
+                Param::int(0),
+            ]
+        };
+        recipe.add(FieldOp::Const.code(), scalar_const(0.25, 7.0), Vec::new());
+        recipe.add(FieldOp::Const.code(), scalar_const(0.25, -3.5), Vec::new());
+        recipe.add(FieldOp::Time.code(), Vec::new(), Vec::new());
+        recipe.add(
+            FieldOp::Mix.code(),
+            Vec::new(),
+            vec![NodeId::from_raw(0), NodeId::from_raw(1), NodeId::from_raw(2)],
+        );
+        let field = FieldGraph::new(recipe, NodeId::from_raw(3), FieldParams::new());
+
+        assert_eq!(field.validate(), Ok(()));
+        let kept = canonical(&field);
+        assert_eq!(kept.node_count(), 1);
+        assert_eq!(const_lane(&kept, 0), 0.25);
+        values_are_unchanged(&field, &kept);
+    }
+
+    #[test]
+    fn a_mix_of_one_shared_expression_with_itself_collapses_to_that_expression() {
+        let (build, point) = builder().push(FieldOp::Point, Vec::new(), Vec::new());
+        let (build, first) = build.push(FieldOp::Length, Vec::new(), vec![point]);
+        let (build, second) = build.push(FieldOp::Length, Vec::new(), vec![point]);
+        let (build, mask) = build.push(FieldOp::Time, Vec::new(), Vec::new());
+        let (build, mixed) = build.push(FieldOp::Mix, Vec::new(), vec![first, second, mask]);
+        let field = build.build(mixed);
+
+        assert_eq!(field.validate(), Ok(()));
+        let kept = canonical(&field);
+        assert_eq!(
+            ops_of(&kept),
+            vec![FieldOp::Point.code(), FieldOp::Length.code()],
+            "the mix is gone and its now-unread mask went with it"
+        );
+        assert_eq!(kept.output(), NodeId::from_raw(1));
+        values_are_unchanged(&field, &kept);
+    }
+
+    #[test]
+    fn a_mix_of_two_different_expressions_survives_untouched() {
+        let (build, point) = builder().push(FieldOp::Point, Vec::new(), Vec::new());
+        let (build, first) = build.push(FieldOp::Length, Vec::new(), vec![point]);
+        let (build, mask) = build.push(FieldOp::Time, Vec::new(), Vec::new());
+        let (build, mixed) = build.push(FieldOp::Mix, Vec::new(), vec![first, mask, mask]);
+        let field = build.build(mixed);
+
+        let kept = canonical(&field);
+        assert_eq!(kept.node_count(), 4);
+        assert_eq!(
+            ops_of(&kept),
+            vec![
+                FieldOp::Point.code(),
+                FieldOp::Length.code(),
+                FieldOp::Time.code(),
+                FieldOp::Mix.code(),
+            ]
+        );
+        values_are_unchanged(&field, &kept);
+    }
+
+    #[test]
+    fn a_mask_wider_than_its_endpoints_keeps_the_mix_that_widens_the_node() {
+        // `Mix(Scalar, Scalar, Vec2)` is a `Vec2` node. Collapsing it to its
+        // scalar endpoint would narrow the node's type and every type derived
+        // from it, so the rule declines.
+        let (build, value) = builder().push_const(constant(0.25));
+        let (build, again) = build.push_const(constant(0.25));
+        let (build, mask) = build.push(FieldOp::Uv, Vec::new(), Vec::new());
+        let (build, mixed) = build.push(FieldOp::Mix, Vec::new(), vec![value, again, mask]);
+        let field = build.build(mixed);
+
+        assert_eq!(field.type_at(mixed), Ok(FieldType::Vec2));
+        let kept = canonical(&field);
+        assert_eq!(kept.type_at(kept.output()), Ok(FieldType::Vec2));
+        assert_eq!(
+            ops_of(&kept),
+            vec![FieldOp::Const.code(), FieldOp::Uv.code(), FieldOp::Mix.code()]
+        );
+        values_are_unchanged(&field, &kept);
+    }
+
+    #[test]
+    fn a_mix_whose_every_input_is_constant_still_folds_rather_than_selecting() {
+        // Folding wins where both could fire, which is why no graph that folded
+        // before this rule existed changed a byte because of it.
+        let (build, value) = builder().push_const(constant(0.25));
+        let (build, again) = build.push_const(constant(0.25));
+        let (build, mask) = build.push_const(constant(0.75));
+        let (build, mixed) = build.push(FieldOp::Mix, Vec::new(), vec![value, again, mask]);
+        let field = build.build(mixed);
+
+        let kept = canonical(&field);
+        assert_eq!(kept.node_count(), 1);
+        assert_eq!(ops_of(&kept), vec![FieldOp::Const.code()]);
+        assert_eq!(const_lane(&kept, 0), 0.25);
+        values_are_unchanged(&field, &kept);
+    }
 }

@@ -10,18 +10,26 @@
 //! measured number so a future edit that blows the budget fails a test rather
 //! than a frame.
 //!
-//! ## Why every one of the seven channels ends up a graph
+//! ## Why only three of the seven channels end up a graph
 //!
 //! The three layer masks are *fields*. `axiom_surface`'s requirements rule says
 //! a channel varies when some surface binds it to a field **or when some layer's
 //! mask is a field** — because every blend expression makes each channel a
-//! function of the mask. So `Metallic`, `Normal`, `Opacity` and `Displacement`
-//! flatten into graphs here too, even though every surface in the tree binds
-//! them to plain constants: `Mix(const, const, mask_field)` has a non-constant
-//! input, so it cannot fold back to a constant. **Four of the seven channels of
-//! this station cost their node budget for a value that never changes.** That is
-//! not a defect in the authoring; it is the price of mask-driven layering, and
-//! it is what makes the budget tight.
+//! function of the mask. That rule is conservative, and it used to be paid for
+//! literally: `Normal`, `Emission`, `Opacity` and `Displacement` flattened into
+//! ~39-node graphs each, even though every surface in the tree binds them to the
+//! *same* plain constant, because `Mix(c, c, mask_field)` has a non-constant
+//! input and constant folding could not reach it. **Four of the seven channels
+//! cost their node budget for a value that never changed.**
+//!
+//! `axiom_field` now carries the one exact algebraic identity that reaches that
+//! node — `Mix(x, x, t) -> x`, which is exact because `Mix` is `a + (b - a) * t`
+//! and `x + (x - x) * t` is `x` for every `t`. Those four channels fold back to
+//! constant *bindings*, and this station's fragment cost fell from 262 nodes to
+//! 149. `Metallic` is **not** among them: its four surfaces bind `0.0`, `1.0`,
+//! `0.0` and `1.0`, so it genuinely varies with the masks and its 39 nodes are
+//! real work. What remains — base colour, roughness, metallic — is exactly what
+//! this material actually computes.
 //!
 //! ## `metallic` changes no pixel
 //!
@@ -276,6 +284,23 @@ mod tests {
         assert!(
             (worst as usize) < axiom_field::MAX_NODES,
             "the flattened layered material does not fit the node budget: {worst} nodes"
+        );
+        // Re-recorded when `axiom_field` gained the exact identity
+        // `Mix(x, x, t) -> x`. Before it, every one of the seven channels was a
+        // graph and the row read 58 / 49 / 39 / 39 / 39 / 38 / 39. The four whose
+        // every surface binds the *same* constant are constant bindings again;
+        // the three that survive are the three that genuinely vary.
+        assert_eq!(
+            counts,
+            vec![
+                (SurfaceChannel::BaseColor, 58, false),
+                (SurfaceChannel::Roughness, 49, false),
+                (SurfaceChannel::Metallic, 39, false),
+                (SurfaceChannel::Normal, 0, true),
+                (SurfaceChannel::Emission, 0, true),
+                (SurfaceChannel::Opacity, 0, true),
+                (SurfaceChannel::Displacement, 0, true),
+            ]
         );
     }
 

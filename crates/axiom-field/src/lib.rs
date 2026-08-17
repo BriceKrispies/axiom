@@ -38,9 +38,10 @@
 //!   is a mirror checked against them, never a second definition.
 //! - **It type-checks and canonicalises.** [`FieldGraph::validate`] proves a
 //!   graph is a well-formed, well-typed program in one forward fold;
-//!   [`FieldGraph::canonicalize`] folds constants, shares common
-//!   subexpressions, drops dead nodes and relabels ids, so that **two graphs
-//!   computing the same thing produce identical bytes and identical digests**.
+//!   [`FieldGraph::canonicalize`] folds constants, applies the one **exact**
+//!   algebraic identity (`Mix(x, x, t) -> x`), shares common subexpressions,
+//!   drops dead nodes and relabels ids, so that **two graphs computing the same
+//!   thing produce identical bytes and identical digests**.
 //! - **It is not a shader graph VM.** The algebra is *closed* — 27 operators
 //!   fixed in Rust, no registry, no runtime-extensible verb, no dynamic
 //!   dispatch. A new visual effect is a new *graph*, never a new Rust function.
@@ -96,6 +97,7 @@
 //! iteration order or a `TypeId`. There is no `f64` anywhere. **The bytes are
 //! the determinism proof; the digest is the label.**
 
+mod algebraic_identity;
 mod canonical;
 mod const_fold;
 mod diff;

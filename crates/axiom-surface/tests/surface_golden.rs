@@ -13,9 +13,11 @@
 //! length plus a content hash fails exactly as loudly and stays legible. Both
 //! forms make a silent format change impossible, which is the whole job.
 
-use axiom_field::{FieldBuilder, FieldGraph, FieldId, FieldOp, FieldType, FieldValue, Param, Scalar};
-use axiom_kernel::{Meters, Ratio, StableHash};
-use axiom_math::Vec4;
+use axiom_field::{
+    EvalContext, FieldBuilder, FieldGraph, FieldId, FieldOp, FieldType, FieldValue, Param, Scalar,
+};
+use axiom_kernel::{Meters, Ratio, Seconds, StableHash};
+use axiom_math::{Vec2, Vec3, Vec4};
 use axiom_surface::{
     ChannelBinding, LayerBlend, LightingModel, Surface, SurfaceBuilder, SurfaceChannel,
     SurfaceLayer,
@@ -150,7 +152,17 @@ const LAYERED_DIGEST: u64 = 17_552_574_593_001_653_655;
 
 /// The structural digest of [`layered`] once flattened. Flattening is a pure
 /// function, so this is a fact about the blend rules, not about a run.
-const FLATTENED_DIGEST: u64 = 5_603_923_885_759_528_144;
+///
+/// **Re-recorded when `axiom_field` gained the exact identity
+/// `Mix(x, x, t) -> x`** (was `5_603_923_885_759_528_144`). This digest is
+/// *structural*: the flattened `Emission` and `Displacement` channels — whose
+/// every surface binds the same constant, blended through a field mask — went
+/// from 7-node graphs to 1, so the graph is a different graph and its digest is
+/// a different digest. **No value moved**: every channel of this surface
+/// evaluates to the bit-identical `f32` it did before, which
+/// [`flattening_the_layered_golden_moves_no_value`] proves against the
+/// hand-written blend expression rather than against a recorded number.
+const FLATTENED_DIGEST: u64 = 1_136_840_360_449_215_726;
 
 #[test]
 fn the_plain_golden_bytes_and_digest_are_unchanged() {
@@ -194,6 +206,80 @@ fn flattening_the_layered_golden_is_reproducible() {
         flat.serialize()
     );
     assert_eq!(Surface::deserialize(&flat.serialize()), Ok(flat));
+}
+
+/// Three sample points, spanning the object-space ramp and the UV the masks
+/// ride on.
+fn samples() -> [EvalContext; 3] {
+    [(-0.4_f32, -0.5_f32), (-0.17, -0.19), (0.29, 0.43)].map(|(a, b)| {
+        EvalContext::new(
+            Vec3::new(a, b, a - b),
+            Vec2::new(a.abs(), b.abs()),
+            Vec3::new(0.0, 1.0, 0.0),
+            Seconds::new(a.abs()).expect("a finite time"),
+        )
+    })
+}
+
+/// Every lane of every flattened channel at [`samples`], as raw `f32` bits.
+///
+/// **A value golden, not a structural one.** `FLATTENED_DIGEST` above says what
+/// the flattened *graphs* are; this says what they *compute*, and only one of
+/// the two is allowed to move when canonicalisation gets smarter. A rewrite that
+/// makes a graph smaller is a win; a rewrite that moves one of these bits is a
+/// bug, and without this table the digest is the only witness and it cannot tell
+/// the two apart.
+///
+/// Recorded when `axiom_field` gained the exact identity `Mix(x, x, t) -> x`,
+/// and verified **bit-identical with that identity disabled** — which is the
+/// whole claim the identity makes.
+#[rustfmt::skip]
+const FLATTENED_VALUES: [[[u32; 4]; 3]; 7] = [
+    // BaseColor (Vec4)
+    [[0x3f24_dd30, 0x3edf_3b64, 0x3ed9_1687, 0x3f80_0000],
+     [0x3f2d_1b72, 0x3f13_b780, 0x3f0f_a6b5, 0x3f80_0000],
+     [0x3f28_ce71, 0x3f00_e1b1, 0x3efa_ab37, 0x3f80_0000]],
+    // Roughness (Scalar)
+    [[0x3e8d_70a4, 0, 0, 0], [0x3e18_c155, 0, 0, 0], [0x3e67_a0f9, 0, 0, 0]],
+    // Metallic (Scalar)
+    [[0x3ec0_0000, 0, 0, 0], [0x3f04_cccc, 0, 0, 0], [0x3ee3_3334, 0, 0, 0]],
+    // Normal (Vec3)
+    [[0xbeab_bae4, 0, 0x3f2b_178e, 0],
+     [0xbeed_8f52, 0, 0x3f0a_8b40, 0],
+     [0xbecb_36c1, 0, 0x3f1b_868a, 0]],
+    // Emission (Vec4) — every surface in the tree binds the same constant.
+    [[0; 4]; 3],
+    // Opacity (Scalar)
+    [[0x3f33_3333, 0, 0, 0], [0x3f15_c28f, 0, 0, 0], [0x3f25_1eb8, 0, 0, 0]],
+    // Displacement (Vec3) — likewise.
+    [[0; 4]; 3],
+];
+
+#[test]
+fn flattening_the_layered_golden_moves_no_value() {
+    let flat = layered().flatten().expect("two layers compose");
+    SurfaceChannel::ALL.iter().enumerate().for_each(|(index, channel)| {
+        let graph = flat.binding(*channel).as_graph();
+        samples().iter().enumerate().for_each(|(sample, context)| {
+            let lanes = graph.evaluate(context).expect("evaluates").as_vec4();
+            assert_eq!(
+                [lanes.x.to_bits(), lanes.y.to_bits(), lanes.z.to_bits(), lanes.w.to_bits()],
+                FLATTENED_VALUES[index][sample],
+                "{channel:?} moved at sample {sample}"
+            );
+        });
+    });
+    // The two channels every surface in the tree binds identically must be the
+    // channel default itself — a fact known without consulting the table above,
+    // because blending a value with itself under any mask is that value.
+    [SurfaceChannel::Emission, SurfaceChannel::Displacement]
+        .iter()
+        .for_each(|channel| {
+            assert!(
+                flat.binding(*channel).is_constant(),
+                "{channel:?} is the same constant everywhere and must flatten back to one"
+            );
+        });
 }
 
 #[test]
