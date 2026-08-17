@@ -279,6 +279,10 @@ impl Draw2dRenderer {
         view: &wgpu::TextureView,
         clear: [f32; 4],
         geo: &Draw2dGeometry,
+        // The frame's GPU timestamp clock. A 2D present is its own frame — it
+        // acquires and presents the swap chain by itself — so this pass is the
+        // only one it records. `None` leaves it exactly as it has always been.
+        clock: Option<&crate::gpu_pass_clock::GpuPassClock>,
     ) {
         let quad_count = geo.quad_count();
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -313,7 +317,8 @@ impl Draw2dRenderer {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: clock
+                    .map(|clock| clock.writes(crate::gpu_pass_clock::PASS_DRAW2D)),
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.pipeline);
@@ -330,6 +335,9 @@ impl Draw2dRenderer {
                 pass.draw_indexed(start..start + INDICES_PER_QUAD as u32, 0, 0..1);
             });
         }
+        // This encoder is the whole 2D frame, so the resolve belongs here rather
+        // than in the caller: there is no later pass for it to wait on.
+        clock.map(|clock| clock.resolve(&mut encoder));
         queue.submit(std::iter::once(encoder.finish()));
     }
 }

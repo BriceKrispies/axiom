@@ -172,6 +172,11 @@ fn capture(gpu: &ParityGpu, surfaces: &[Surface], program: u64, time: f32) -> Ve
         BackendCapabilityProfile::all().bits(),
         [0.0; 16],
         time,
+        // No GPU pass clock. This rig is about pixels, and an untimed frame is
+        // exactly the command stream this backend recorded before timing existed
+        // — which is what makes these captures the proof that timing costs a
+        // frame that does not use it nothing at all.
+        None,
     );
     readback(gpu, &color)
 }
@@ -554,6 +559,7 @@ fn the_skinned_pass_still_draws_with_the_surface_parameter_group_bound() {
         BackendCapabilityProfile::all().bits(),
         [0.0; 16],
         0.0,
+        None,
     );
     let image = readback(gpu, &color);
     let area = covered(&image);

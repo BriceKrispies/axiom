@@ -73,7 +73,17 @@ pub(crate) fn render_draw2d_to_rgba(
     let renderer = Draw2dRenderer::new(&device, &queue, COLOR_FORMAT, width, height, textures);
     // Clear to fully transparent (matching the software backend's fresh
     // transparent-black framebuffer), then composite the quads over it.
-    renderer.record(&device, &queue, &color_view, [0.0, 0.0, 0.0, 0.0], geometry);
+    // No clock: this is the 2D *parity* capture, whose whole contract is that its
+    // bytes match the software backend's. It measures nothing and records the
+    // pass exactly as it always has.
+    renderer.record(
+        &device,
+        &queue,
+        &color_view,
+        [0.0, 0.0, 0.0, 0.0],
+        geometry,
+        None,
+    );
 
     // Read the colour texture back through a row-aligned staging buffer.
     let unpadded_row = width * 4;

@@ -481,6 +481,12 @@ impl PostChain {
         // `(1.0, 1.0)` is the full-scale no-op.
         live: (f32, f32),
         present_size: (u32, u32),
+        // The frame's GPU timestamp clock. The chain is four passes and reports
+        // as **one** span: the bright pass opens it and the composite closes it,
+        // so the number is the whole present-side cost rather than four
+        // fragments a caller would have to add up. `None` leaves every
+        // `timestamp_writes` below the `None` it has always been.
+        clock: Option<&crate::gpu_pass_clock::GpuPassClock>,
     ) {
         let tune = bloom.map_or(
             // No bloom: a threshold above any possible luminance means the bright
@@ -520,7 +526,8 @@ impl PostChain {
                         group: &wgpu::BindGroup,
                         view: &wgpu::TextureView,
                         second: Option<&wgpu::BindGroup>,
-                        size: (u32, u32)| {
+                        size: (u32, u32),
+                        stamps: Option<wgpu::RenderPassTimestampWrites<'_>>| {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("axiom-post-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -532,7 +539,7 @@ impl PostChain {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: stamps,
                 occlusion_query_set: None,
             });
             // Draw only into the live sub-rect. The fullscreen triangle still
@@ -571,15 +578,23 @@ impl PostChain {
             ((self.bloom_size.0 as f32) * live.0) as u32,
             ((self.bloom_size.1 as f32) * live.1) as u32,
         );
-        pass(&self.bright, &self.scene_group, &self.ping_view, None, bloom_live);
-        pass(&self.blur, &self.ping_group, &self.pong_view, None, bloom_live);
-        pass(&self.blur, &self.pong_group, &self.ping_view, None, bloom_live);
+        pass(
+            &self.bright,
+            &self.scene_group,
+            &self.ping_view,
+            None,
+            bloom_live,
+            clock.map(|clock| clock.opens(crate::gpu_pass_clock::PASS_POST)),
+        );
+        pass(&self.blur, &self.ping_group, &self.pong_view, None, bloom_live, None);
+        pass(&self.blur, &self.pong_group, &self.ping_view, None, bloom_live, None);
         pass(
             &self.composite,
             &self.scene_group,
             target,
             Some(&self.bloom_group),
             present_size,
+            clock.map(|clock| clock.closes(crate::gpu_pass_clock::PASS_POST)),
         );
     }
 }

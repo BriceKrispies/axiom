@@ -1396,6 +1396,12 @@ impl SceneRenderer {
         // such a frame's packed lighting uniform is byte-identical to what it
         // was before there was a clock at all.
         surface_time: f32,
+        // The frame's GPU timestamp clock, when the device can time passes at
+        // all. `None` — every device without `TIMESTAMP_QUERY`, every WebGL2
+        // browser, and every caller that is not measuring — leaves each
+        // `timestamp_writes` below exactly the `None` it has always been, so the
+        // recorded command stream is bit-identical to the untimed one.
+        clock: Option<&crate::gpu_pass_clock::GpuPassClock>,
     ) {
         // Gate the SDF raymarch pass on the frame's Sdf capability bit; a profile that
         // drops SDF renders meshes only (the same policy the Canvas 2D backend applies).
@@ -1546,7 +1552,8 @@ impl SceneRenderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: clock
+                    .map(|clock| clock.writes(crate::gpu_pass_clock::PASS_SHADOW)),
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.shadow_pipeline);
@@ -1591,7 +1598,7 @@ impl SceneRenderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: clock.map(|clock| clock.writes(crate::gpu_pass_clock::PASS_MAIN)),
                 occlusion_query_set: None,
             });
             pass.set_viewport(
@@ -1717,7 +1724,7 @@ impl SceneRenderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: clock.map(|clock| clock.writes(crate::gpu_pass_clock::PASS_SDF)),
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.sdf_pipeline);

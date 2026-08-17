@@ -222,6 +222,12 @@ impl UpscaleBlit {
         // The fraction of the source target the frame occupies; `(1.0, 1.0)` at
         // full scale. See the `live` uniform in `BLIT_WGSL`.
         live: (f32, f32),
+        // The frame's GPU timestamp clock. This blit is what stands in for the
+        // post chain on a frame that authored neither bloom nor a grade, so it
+        // reports under the same `post` name — that slot is "the present-side
+        // fullscreen work", whichever pipeline performed it. `None` leaves the
+        // pass exactly as it has always been recorded.
+        clock: Option<&crate::gpu_pass_clock::GpuPassClock>,
     ) {
         queue.write_buffer(
             &self.live,
@@ -239,7 +245,7 @@ impl UpscaleBlit {
                 },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
+            timestamp_writes: clock.map(|clock| clock.writes(crate::gpu_pass_clock::PASS_POST)),
             occlusion_query_set: None,
         });
         pass.set_pipeline(&self.pipeline);

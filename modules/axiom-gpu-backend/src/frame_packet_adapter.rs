@@ -150,6 +150,38 @@ pub(crate) fn frame_packet_to_batches(
     )
 }
 
+/// **What a packet lowers to**: `(instance batches, pipeline switches)`.
+///
+/// Read off exactly the key [`frame_packet_to_batches`] groups on
+/// (`(surface_program, mesh_id, material_id)`), so the two numbers describe the
+/// draw loop this backend will actually run rather than an approximation of it.
+///
+/// * **Batches** — distinct keys. Each is one `draw_indexed`, however many
+///   instances it carries.
+/// * **Pipeline switches** — distinct *non-zero* programs. The renderer binds the
+///   default pipeline once before the loop and tracks `bound`, so every draw
+///   carrying `surface_program = 0` (every draw in every app that authors no
+///   surface) costs no switch at all, and each authored program costs exactly one
+///   because the batches arrive grouped by program.
+///
+/// It is a separate walk rather than a second return value of the batching
+/// because the present path is `&self` and throws its batches away at the end of
+/// the frame; asking this is a question about a packet, answerable without
+/// packing a single instance float.
+pub(crate) fn frame_packet_batch_counts(packet: &FramePacket) -> (u32, u32) {
+    let mut keys: Vec<(u64, u64, u64)> = packet
+        .draws()
+        .iter()
+        .map(|draw| (draw.surface_program(), draw.mesh_id(), draw.material_id()))
+        .collect();
+    keys.sort_unstable();
+    keys.dedup();
+    // Sorted on the program first, so the programs are already grouped.
+    let mut programs: Vec<u64> = keys.iter().map(|key| key.0).filter(|id| *id != 0).collect();
+    programs.dedup();
+    (keys.len() as u32, programs.len() as u32)
+}
+
 /// Every distinct surface program a packet's draws name, ascending.
 ///
 /// What `crate::GpuBackendApi::frame_degradations` asks the prepared catalog

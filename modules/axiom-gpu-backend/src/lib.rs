@@ -28,6 +28,20 @@ mod gpu_backend_api;
 // instance-batch + light shape.
 mod frame_packet_adapter;
 
+// What one GPU frame cost, pass by pass: the vocabulary a caller reads and the
+// tick -> duration arithmetic behind it. Pure and compiled everywhere, so the
+// rules that decide whether a number is real (a pass the frame never ran, an
+// adapter that cannot time at all) are measured by the coverage gate rather than
+// hidden behind the GPU arm's `cfg`.
+mod gpu_pass_timing;
+
+// The real wgpu timestamp query set that feeds it: one query per pass boundary,
+// resolved asynchronously so no frame ever blocks for a number. Compiled only
+// where a GPU exists, and built only on a device that actually has
+// `TIMESTAMP_QUERY` — absent, every pass records exactly what it always did.
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
+mod gpu_pass_clock;
+
 // What an authored axiom_surface::Surface means to THIS backend: the program
 // plan (stage split, interstage lanes, parameter layout), the uniform parameter
 // channel and its offset scheme, and the capability gate that decides — once, at

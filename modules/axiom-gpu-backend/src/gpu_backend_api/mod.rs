@@ -6,8 +6,14 @@
 //! and the preparation-time queries a caller builds a frame's degraded-feature
 //! report from — lives in [`surfaces`], because a shader compile has no business
 //! sitting in the same file as a per-frame present.
+//!
+//! A third file, [`timing`], holds the queries that answer *what the frame
+//! cost and what it ran on* — per-pass GPU time, the bound graphics API, and the
+//! batching a packet lowers to. They are neither bind-time nor frame-time work:
+//! they read back facts the other two produced.
 
 mod surfaces;
+mod timing;
 
 use axiom_host::{Draw2dList, FramePacket, HostPresentationRequest, SdfScene};
 
@@ -563,6 +569,15 @@ impl GpuBackendApi {
             postprocess,
             repeat,
         )
+        // This entry is the **screenshot**: its contract is bytes, and its
+        // callers (`axiom-shot`, the parity proofs) compare them. The frame's
+        // per-pass GPU timings come back from the same call and are the native
+        // proof that the resolve path works — asserted on directly in this
+        // crate's `offscreen_timing` test rather than widened into a second
+        // twenty-argument public entry nobody asked for. The *live* arm, which
+        // is where a 30 fps frame actually needs explaining, publishes them
+        // through `Self::gpu_pass_timing`.
+        .map(|(pixels, _timing)| pixels)
     }
 
     /// Initialise the real wgpu binding from a canvas, the engine's distinct mesh

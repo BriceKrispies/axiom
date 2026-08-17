@@ -92,6 +92,18 @@ pub struct LiveGpuBinding {
     /// bloom/grade can be `None` per frame while the chain's existence is a
     /// bind-time property.
     wants_post: bool,
+    /// **The GPU frame's own stopwatch**, present only on a device that really
+    /// has `wgpu::Features::TIMESTAMP_QUERY`. The binding owns it because the
+    /// measured frame spans three recorders — the scene renderer, the post
+    /// chain / upscale blit, and the 2D pass — and only this type owns all of
+    /// them. `None` on every WebGL2 browser and on any adapter without the
+    /// feature, and then every pass records exactly what it recorded before this
+    /// existed.
+    clock: Option<crate::gpu_pass_clock::GpuPassClock>,
+    /// Which graphics API the canvas actually committed to. Reported through
+    /// [`Self::bound_backend`]: the choice used to reach an app only as a
+    /// console line it had to intercept.
+    backend: axiom_host::BackendKind,
 }
 
 /// Translate a `wgpu` surface acquisition failure into the engine's
@@ -496,6 +508,22 @@ impl LiveGpuBinding {
         // resolves them (see [`Self::set_draw2d_textures`]).
         let draw2d = Draw2dRenderer::new(&device, &queue, draw2d_format, width, height, &[]);
 
+        // The per-pass stopwatch, built only when the device actually carries
+        // `TIMESTAMP_QUERY` — which the request above asked for only because the
+        // adapter already advertised it. A browser on the WebGL2 fallback gets
+        // `None` here and records an untimed frame, which is what every frame in
+        // this engine was before now.
+        let clock = crate::gpu_pass_clock::GpuPassClock::try_new(&device, &queue);
+        // The graphics API this canvas committed to, in the host's own
+        // vocabulary: `GpuPrimary` is WebGPU, `GpuFallback` is WebGL2.
+        let backend = [
+            axiom_host::BackendKind::GpuFallback,
+            axiom_host::BackendKind::GpuPrimary,
+        ][usize::from(matches!(
+            adapter.get_info().backend,
+            wgpu::Backend::BrowserWebGpu
+        ))];
+
         Ok(LiveGpuBinding {
             surface,
             device,
@@ -519,7 +547,29 @@ impl LiveGpuBinding {
             render_size: (render_width, render_height),
             render_scale: axiom_host::RenderScale::FULL,
             wants_post,
+            clock,
+            backend,
         })
+    }
+
+    /// Which graphics API this binding actually bound. Answered from
+    /// `adapter.get_info().backend`, the same fact the bind-time console line
+    /// prints — so an app no longer has to intercept that line to display it.
+    pub fn bound_backend(&self) -> axiom_host::BackendKind {
+        self.backend
+    }
+
+    /// The most recent **resolved** per-pass GPU timings, or the reason there
+    /// are none. See [`crate::gpu_pass_timing`].
+    pub fn pass_timing(&self) -> crate::gpu_pass_timing::GpuFrameTiming {
+        self.clock.as_ref().map_or_else(
+            || {
+                crate::gpu_pass_timing::GpuFrameTiming::unavailable(
+                    crate::gpu_pass_clock::ADAPTER_HAS_NO_TIMESTAMP_QUERY,
+                )
+            },
+            crate::gpu_pass_clock::GpuPassClock::timing,
+        )
     }
 
     /// Re-render the scene at `scale` of the device tier's render size.
@@ -622,6 +672,12 @@ impl LiveGpuBinding {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        // Open the measured frame. Every pass recorded below reports under this
+        // index, and the index is what a caller compares against its own to see
+        // how stale a (necessarily asynchronous) reading is.
+        self.clock
+            .as_ref()
+            .map(crate::gpu_pass_clock::GpuPassClock::begin_frame);
         // Render the scene at tier resolution into the intermediate target
         // (renderer owns its own encoder + submit), gating each per-fragment feature
         // on the caller's capability mask.
@@ -647,6 +703,7 @@ impl LiveGpuBinding {
             caps,
             camera_view_proj,
             surface_time,
+            self.clock.as_ref(),
         );
         // ... then upscale-blit it across the full swapchain view and present.
         let mut encoder = self
@@ -669,16 +726,32 @@ impl LiveGpuBinding {
                 self.grade.as_ref(),
                 self.live_fraction(),
                 (self.width, self.height),
+                self.clock.as_ref(),
             )
         });
-        bloomed
-            .is_none()
-            .then(|| {
-                self.upscale
-                    .record(&self.queue, &mut encoder, &view, self.live_fraction())
-            });
+        bloomed.is_none().then(|| {
+            self.upscale.record(
+                &self.queue,
+                &mut encoder,
+                &view,
+                self.live_fraction(),
+                self.clock.as_ref(),
+            )
+        });
+        // Every pass of this frame is now encoded (the scene renderer submitted
+        // its own encoder first, and submissions are ordered), so the resolve
+        // goes last, on this encoder.
+        self.clock
+            .as_ref()
+            .map(|clock| clock.resolve(&mut encoder));
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
+        // Publish whatever finished resolving and ask for the next map. Never
+        // blocks: a frame that finds nothing ready simply reports the previous
+        // reading again.
+        self.clock
+            .as_ref()
+            .map(|clock| clock.pump(&self.device));
         Ok(())
     }
 
@@ -724,9 +797,24 @@ impl LiveGpuBinding {
         });
         let sizes = Draw2dTextureSizes::from_textures(textures);
         let geometry = build_geometry(list, self.width, self.height, &sizes);
-        self.draw2d
-            .record(&self.device, &self.queue, &view, clear, &geometry);
+        // A 2D present is a whole frame of its own: it opens the measured frame,
+        // records its one pass, and resolves inside `record` (that encoder is the
+        // frame).
+        self.clock
+            .as_ref()
+            .map(crate::gpu_pass_clock::GpuPassClock::begin_frame);
+        self.draw2d.record(
+            &self.device,
+            &self.queue,
+            &view,
+            clear,
+            &geometry,
+            self.clock.as_ref(),
+        );
         frame.present();
+        self.clock
+            .as_ref()
+            .map(|clock| clock.pump(&self.device));
         Ok(())
     }
 
@@ -779,6 +867,14 @@ const MAX_LIVE_TEXTURE_DIMENSION: u32 = 4096;
 /// i.e. it cannot turn a working device into a failed one. Every other limit
 /// stays at the downlevel value, so WebGPU and WebGL2 still agree on what the
 /// renderer may use.
+///
+/// **One optional feature is requested, and only when the adapter already
+/// advertises it**: `TIMESTAMP_QUERY`, which is what lets
+/// [`crate::gpu_pass_clock`] measure per-pass GPU time. Intersecting the wanted
+/// bit with `adapter.features()` is what makes that safe — on an adapter without
+/// it (every WebGL2 device) the intersection is empty and this request is
+/// bit-identical to the `Features::empty()` one it has always made, so asking can
+/// never turn a working device into a failed one.
 async fn request_render_device(
     adapter: &wgpu::Adapter,
 ) -> Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError> {
@@ -791,7 +887,7 @@ async fn request_render_device(
     adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: Some("axiom-live-device"),
-            required_features: wgpu::Features::empty(),
+            required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
             required_limits: limits,
             memory_hints: wgpu::MemoryHints::default(),
             trace: wgpu::Trace::Off,
