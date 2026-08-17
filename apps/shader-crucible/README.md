@@ -113,29 +113,90 @@ rather than across three rebuilds that drift.
   octave count**, so node count is not a cost model for this algebra. The 58-node
   base colour and the 39-node metallic cost wildly different amounts.
 
-**The octaves stay at 3 / 3 / 2, and the saving is declined on purpose.** The
-0.86 ms exists only in `SOLO`, a diagnostic framing built to make one material's
-cost measurable by filling the screen with it. In the frame the app ships —
-twelve bodies, the authored camera — the whole main pass is 0.16–0.21 ms, of
-which all eleven generated shaders together account for ~0.1 ms; station 1's
-share is on the order of 0.01 ms. Halving its octaves would buy ~0.005 ms of a
-16.7 ms frame. On the WebGL2 fallback the phone actually runs, this app's own
-A/B established the frame is per-draw *submission* bound and invariant to the
-number of generated surface programs, so the cut buys nothing there either.
+### The cost is proportional to the pixels the body covers
 
-Against that, the visual cost is real and it lands on the one station whose whole
-job is to look rich. At 2 / 2 / 1 the paint still reads as weathered blotches but
-half the body's pixels move by more than 8 levels — the coverage boundary
-redraws, because dropping octaves changes the mask's *statistics* and the fixed
-`Smoothstep(0.42, 0.72)` therefore cuts it in a different place. At 1 / 1 / 1 the
-material flattens outright: the paint becomes one solid red field with a smooth
-simple edge and the dirt becomes a single soft smudge, mean absolute difference
-31 levels. The scratches and the brushed streak survive every budget unchanged —
-they are single-octave `Noise` and no budget touches them.
+That is the fact that makes the octave table mean something, and it is why the
+app is smooth zoomed out and stalls when you come in close. It was measured two
+independent ways, with the material held fixed:
 
-A material demo that is twice as fast and visibly plainer has optimised away its
-own subject. The measurement is recorded here so the next agent does not have to
-re-run it to reach the same conclusion.
+* **Quarter the fragments, in one session.** `HALF RES` at `SOLO BODY 1`:
+  0.86 → **0.26 ms**.
+* **Sweep the backbuffer** with `?solo=1&back=WxH`, which changes the covered
+  pixel count and nothing else:
+
+  | backbuffer | pixels | main pass |
+  |---|---|---|
+  | 640x320 | 0.20 MP | 0.34 ms |
+  | 906x453 | 0.41 MP | 0.61 ms |
+  | 1280x640 | 0.82 MP | 0.91 / 1.15 ms |
+  | 1600x800 | 1.28 MP | 1.72 ms |
+
+  Two things to read off that table. `?back=2560x1280` renders at **1600x800**
+  anyway and reads the same 1.72 ms — the device *tier* caps the render target,
+  so the sweep tops out there. And the 1280x640 row is two separate page loads of
+  an identical configuration reading 0.91 and 1.15: that spread is the page-load
+  drift that makes in-session interleaving mandatory for everything above.
+
+Both fits give the same law — **main pass ≈ 0.045 ms + ~3 ms per megapixel of
+covered body**, the 0.045 being the pass's own fixed cost, which is also what a
+plain body reads. Station 1's sphere covers a measured **26.8%** of the canvas at
+`SOLO`'s 1.25-unit standoff.
+
+Coverage falls as 1 / distance², so that one anchor gives the whole curve:
+
+| camera distance | station 1's share of the canvas | its fragment cost |
+|---|---|---|
+| 1.25 — `SOLO`, nearer than a user can orbit | 26.8% | 0.82 ms |
+| 2.0 — `orbit.rs` `MIN_DISTANCE`, the closest a user can get | 10.5% | 0.32 ms |
+| 3.0 | 4.7% | 0.14 ms |
+| 11.15 — the authored framing | 0.34% | 0.01 ms |
+
+Nothing about the material changes with distance. Only the number of pixels
+running it does — which is the definition of fill-rate bound, and it means the
+lever with real authority over this cost is **resolution**, not the graph.
+
+### Why the octaves still stay
+
+Not because the saving is small. Up close it is the largest single saving
+available: at `MIN_DISTANCE` the cut is worth up to 0.16 ms of station 1's
+0.32 ms, and on a weak mobile GPU — where this app has been reported at ~176 ms
+per frame with the layered body large in view — the same proportions apply, since
+fill rate is what both machines are short of.
+
+It stays for two reasons, and they are about *sufficiency* and *alternatives*:
+
+1. **The cut does not fix the case it is aimed at.** The fragment program is 94%
+   of the pass, so the aggressive 1 / 1 / 1 budget removes ~48% of it. A 176 ms
+   frame becomes ~92 ms. That is 5.7 fps becoming 10.9 fps: still broken, and now
+   the material is visibly plainer as well. Buying half of an unusable frame with
+   the demo's entire subject is a bad trade at any price.
+2. **Resolution buys more and costs the material nothing.** `HALF RES` measured
+   0.86 → 0.26 ms — a 3.3× reduction against the octave cut's 2×, and it takes
+   every octave, every scratch and every blotch with it intact; the image is
+   merely softer. The app already carries the mechanism (`ADAPTIVE`, driving
+   `RenderScaleController`), switched **off** by deliberate policy, because an
+   instrument whose resolution moves under it cannot be read. A visitor who hits
+   this on a phone should pull `ADAPTIVE` or `HALF RES`; that is what those
+   buttons are for. Whether the *shipping default* should adapt is a live product
+   question — it trades comparable panel readings for a playable phone — and it
+   is a bigger decision than this material.
+
+The visual cost the cut would incur is real, and it lands on the one station
+whose whole job is to look rich. At 2 / 2 / 1 the paint still reads as weathered
+blotches but half the body's pixels move by more than 8 levels — the coverage
+boundary redraws, because dropping octaves changes the mask's *statistics* and
+the fixed `Smoothstep(0.42, 0.72)` therefore cuts it in a different place. At
+1 / 1 / 1 the material flattens outright: the paint becomes one solid red field
+with a smooth simple edge and the dirt a single soft smudge, mean absolute
+difference 31 levels. The scratches and the brushed streak survive every budget
+unchanged — they are single-octave `Noise`, which no budget touches.
+
+Distance-based detail — authoring station 1 at two octave budgets and swapping by
+camera distance — was weighed and rejected for the same reason stated backwards:
+it would degrade the material precisely when the user has come close to inspect
+it, which is when this demo is doing its job.
+
+The measurement is recorded here so the next agent does not have to re-run it.
 
 ## What this does NOT do
 
