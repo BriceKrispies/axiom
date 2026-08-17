@@ -8,11 +8,9 @@
     html, body { margin: 0; background: #070810; color: #e6ecf7;
                  font-family: ui-monospace, Menlo, Consolas, monospace; }
     main { display: flex; flex-direction: column; align-items: center;
-           gap: 14px; padding: 16px 16px 48px; }
+           gap: 14px; padding: 16px; }
     h1 { margin: 0; font-size: 18px; letter-spacing: .30em; font-weight: 800;
          color: #7fd4ff; }
-    .sub { margin: 0; font-size: 12px; opacity: .62; text-align: center;
-           max-width: 900px; line-height: 1.6; }
     /* `touch-action: none` hands the orbit camera raw pointer streams: without
        it the compositor claims a drag as a scroll or a pinch as a page zoom
        before the listener ever sees it. `src/pointer_input.rs` sets the same
@@ -21,136 +19,12 @@
     canvas { width: min(96vw, 1280px); aspect-ratio: 2 / 1; background: #070810;
              border: 1px solid #1a2333; border-radius: 3px; touch-action: none;
              box-shadow: 0 18px 60px rgba(0,0,0,.7); }
-    .legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-              gap: 10px; width: min(96vw, 1280px); }
-    .station { border: 1px solid #17202e; border-radius: 3px; padding: 9px 11px;
-               background: #0b0e18; }
-    .station .n { color: #7fd4ff; font-weight: 800; }
-    .station .name { font-weight: 700; }
-    .station .proves { display: block; margin-top: 4px; font-size: 11px;
-                       opacity: .70; line-height: 1.5; }
-    .station .caveat { display: block; margin-top: 6px; font-size: 11px;
-                       line-height: 1.5; color: #ffb35c;
-                       border-left: 2px solid #ffb35c; padding-left: 7px; }
-    .limits { width: min(96vw, 1280px); border: 1px solid #46220f;
-              background: #170c06; border-radius: 3px; padding: 12px 14px; }
-    .limits h2 { margin: 0 0 8px; font-size: 13px; letter-spacing: .16em;
-                 color: #ff8b3d; }
-    .limits li { font-size: 11.5px; line-height: 1.65; margin-bottom: 7px; }
-    .limits b { color: #ffb35c; }
-    code { color: #9fe6c0; }
   </style>
 </head>
 <body>
 <main>
   <h1>THE SHADER CRUCIBLE</h1>
-  <p class="sub">
-    Ten labelled stations demonstrating Axiom's procedural appearance system.
-    Every pattern, mask, blend, displacement and density below is an authored
-    <code>FieldGraph</code> over the 27-operator algebra — <b>there is no WGSL in
-    this app and no Rust in it that computes a colour</b>. The stations stand in
-    two rows of six, front row left to right first — <b>drag to orbit them,
-    scroll or pinch to zoom, shift-drag or right-drag to pan</b>. Open the console for the
-    full report: the barrier's program count, <code>supported_by</code> for both
-    backend profiles, and each station's <code>explain</code> / <code>digest</code>
-    / <code>diff</code>.
-  </p>
   <canvas id="shader-crucible-canvas"></canvas>
-
-  <div class="legend">
-    <div class="station"><span class="n">1</span> <span class="name">Layered material</span>
-      <span class="proves">Brushed metal + paint + scratches + dirt, each masked. Mask-driven
-        layering flattening to <code>Mix</code> composition — the case the whole
-        <code>Surface</code> design exists to serve. Flattened: 58 nodes on base colour,
-        50 on roughness, 38–39 on each of the other five.</span>
-      <span class="caveat">LIMITATION 4 — <b>metallic changes no pixel.</b> This body binds
-        <code>Metallic</code> to 1.0 on the metal and 0.0 on the paint and dirt. The channel is
-        carried, digested and reported, and <b>no lighting model reads it</b>. It is labelled
-        rather than omitted.</span></div>
-
-    <div class="station"><span class="n">2</span> <span class="name">Live procedural surface</span>
-      <span class="proves">A field-authored base colour and roughness, evaluated <b>per pixel</b>:
-        graph → <code>Surface</code> → <code>surface_program</code> → WGSL. This is the half of the
-        system no shipping app had proven.</span></div>
-
-    <div class="station"><span class="n">3</span> <span class="name">Baked texture</span>
-      <span class="proves">The <i>same</i> graph as station 2, baked once through
-        <code>TextureOp::Field</code> to a 128² tile. One graph, two realisations; they agree to
-        within one byte level at every texel.</span>
-      <span class="caveat"><b>The bake writes LINEAR bytes and the albedo upload path binds them
-        as <code>Rgba8UnormSrgb</code></b>, so the sampler decodes them through the sRGB curve and
-        the baked tile reads darker than the live surface beside it. The graphs agree; the two
-        upload conventions do not.</span></div>
-
-    <div class="station"><span class="n">4</span> <span class="name">Parameter retune</span>
-      <span class="proves">Three knobs on parameter slots. Nine different tunings handed to the
-        preparation barrier compile <b>one</b> program, because all nine have the same digest —
-        a retune is a uniform write, never a recompile.</span></div>
-
-    <div class="station"><span class="n">5</span> <span class="name">Time-varying displacement</span>
-      <span class="proves">Wind (the cube) and ripple (the ball beside it) as authored
-        <code>Vec3</code> displacement graphs over <code>Point</code> and <code>Time</code>. The
-        clock is the engine's frame time, never a wall clock.</span>
-      <span class="caveat">LIMITATION 1 — <b>a displaced vertex casts an UNDISPLACED shadow.</b>
-        The shadow depth pre-pass is a separate WGSL module and runs no displacement program.
-        Watch the wind cube lean and its shadow stay standing.<br /><br />
-        LIMITATION 2 — <b>skinned geometry always gets the default program.</b>
-        <code>SkinnedGpuDraw</code> carries no <code>surface_program</code> lane, and the skinned
-        vertex stage is at the 16-attribute ceiling so it runs no displacement program either.
-        <b>The crucible therefore shows no skinned body at all</b> — there is no such thing as a
-        surfaced one. The console report prints the backend's own answer:
-        <code>skinned degradations: [ProceduralSurface]</code>.</span></div>
-
-    <div class="station"><span class="n">6</span> <span class="name">Three lighting models</span>
-      <span class="proves">The identical appearance graph under <code>Unlit</code>,
-        <code>Lambert</code> and <code>LambertSpecular</code> — the closed discriminant, and
-        <b>zero extra pipelines</b>. Three digests, two pipeline markers, one lit program.</span></div>
-
-    <div class="station"><span class="n">7</span> <span class="name">Implicit surface</span>
-      <span class="proves">A metaball body whose <i>shape</i> is a <code>FieldGraph</code>:
-        sampled onto a 40³ lattice as a <code>ScalarField</code> and marched by
-        <code>implicit_surface_mesh</code> into 2,816 triangles. Its colour reads the same density
-        its silhouette came from.</span>
-      <span class="caveat">The blobs are <code>exp(-k·d²)</code>, not the textbook
-        <code>k/d²</code>: <b>the algebra has no <code>Div</code></b>, deliberately, and
-        <code>Pow(x,-1)</code> is documented to yield 0 at and below zero — which at a blob's
-        centre is exactly the wrong answer. The reciprocal turned out not to be needed.</span></div>
-
-    <div class="station"><span class="n">8</span> <span class="name">Transcendental patterns</span>
-      <span class="proves">Marble veining (22 nodes) and wood grain (26 nodes), both authored over
-        <code>Sin</code> and <code>Pow</code>. A visual effect is a graph, never a Rust
-        function.</span></div>
-
-    <div class="station"><span class="n">9</span> <span class="name">Both backends</span>
-      <span class="proves">Per-pixel on the GPU arm; per-triangle-centroid on Canvas2D.
-        <code>supported_by</code> returns <code>true</code> for every station on both real
-        profiles — the software arm <i>substitutes</i>, it does not drop.</span>
-      <span class="caveat">LIMITATION 3 — <b>Canvas2D shades ONE sample per triangle.</b> A mask
-        finer than a triangle is not sampled at all, so station 1's scratch lines can vanish there
-        entirely. <b>The meshes are deliberately not tessellated to hide it</b>: subdividing until
-        the software arm resolved them would be measuring a mesh instead of a backend.</span></div>
-
-    <div class="station"><span class="n">10</span> <span class="name">Introspection</span>
-      <span class="proves">The graph is machine-readable data. The console prints station 4's
-        <code>digest</code>, its <code>explain</code> text one line per node, and two
-        <code>diff</code>s: a retune (empty — nothing structural changed) and marble against wood
-        (+3 −0 ~20).</span></div>
-  </div>
-
-  <div class="limits">
-    <h2>WHAT THIS DOES NOT DO</h2>
-    <ol>
-      <li><b>A displaced vertex casts an undisplaced shadow.</b> The shadow pass runs no
-        displacement program. Visible at station 5. Fixing it is an engine change.</li>
-      <li><b>Skinned geometry always gets the default program.</b> <code>SkinnedGpuDraw</code>
-        has no <code>surface_program</code> lane. No skinned body is shown, because a surfaced one
-        does not exist; the backend's report says so instead.</li>
-      <li><b>Canvas2D shades per triangle.</b> Station 1's scratch mask can disappear entirely on
-        the software arm. Not tessellated around.</li>
-      <li><b><code>metallic</code> changes no pixel.</b> Carried and inert by design. Labelled,
-        not omitted.</li>
-    </ol>
-  </div>
 </main>
 <script type="module">
   import init, { shader_crucible_start } from "./pkg/axiom_shader_crucible.js";
