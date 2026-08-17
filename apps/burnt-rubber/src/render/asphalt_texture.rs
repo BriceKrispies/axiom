@@ -189,7 +189,7 @@ pub const TILE_METRES: f32 = 1.5;
 /// [`tests::the_grain_sits_at_the_physical_scale_of_aggregate`] pins the metres
 /// the result covers rather than the texels, which is the unit the defect was
 /// ever visible in.
-const LATTICE: u32 = 32;
+pub(super) const LATTICE: u32 = 32;
 
 /// The darkest linear multiplier a texel may apply to the tarmac's base colour —
 /// and therefore, on its own, **the grain's strength**.
@@ -211,7 +211,7 @@ const LATTICE: u32 = 32;
 /// distinct sRGB byte levels and neighbouring texels still differ, so the road
 /// still renders differently at eight metres and at sixty — which was, and
 /// remains, the entire reason this module exists.
-const MIN_MULTIPLIER: f32 = 0.86;
+pub(super) const MIN_MULTIPLIER: f32 = 0.86;
 
 /// Share of the amplitude carried by the smooth octave. The remainder is
 /// per-texel hash.
@@ -229,7 +229,7 @@ const MIN_MULTIPLIER: f32 = 0.86;
 /// is 4.7 cm, far too coarse to be a chipping, so every unit of amplitude spent
 /// there is spent on a feature asphalt does not have. It gives up a little to
 /// [`CROSS_SHARE`], which is the only octave the sampler delivers at depth.
-const SMOOTH_SHARE: f32 = 0.25;
+pub(super) const SMOOTH_SHARE: f32 = 0.25;
 
 /// Share of the amplitude carried by the **cross-road** octave — the one the
 /// anisotropic sampler cannot average away.
@@ -250,7 +250,7 @@ const SMOOTH_SHARE: f32 = 0.25;
 /// is speckled aggregate), and this one keeps the *mid and far* road from reading
 /// as nothing at all. Push it much past here and the near tarmac loses its
 /// stones; pull it back and the far tarmac loses its surface.
-const CROSS_SHARE: f32 = 0.55;
+pub(super) const CROSS_SHARE: f32 = 0.55;
 
 /// The cross-road octave's band count across one tile, so a band is
 /// `TILE_METRES / CROSS_BANDS` = **18.8 cm** wide.
@@ -262,7 +262,7 @@ const CROSS_SHARE: f32 = 0.55;
 /// this frame's near road a pixel spans roughly 1.6 cm, so an 18.8 cm band is a
 /// dozen pixels across and plainly resolvable, where the 1.2 cm texels of the fine
 /// octave are already at or below Nyquist before the sampler touches them.
-const CROSS_BANDS: u32 = 8;
+pub(super) const CROSS_BANDS: u32 = 8;
 
 /// Contrast applied about the field's midpoint before it is mapped to a
 /// multiplier. Two independent `0..=1` sources summed give a triangular
@@ -293,7 +293,19 @@ const CROSS_BANDS: u32 = 8;
 /// against 1.87%, inside a band that has not moved — so introducing the
 /// cross-road octave is again a pure move along the frequency axis with the
 /// strength held fixed. [`MIN_MULTIPLIER`] is untouched, so the exposure is too.
-const CONTRAST: f32 = 1.6;
+pub(super) const CONTRAST: f32 = 1.6;
+
+/// The cross-road octave's hash salt. Named because [`super::asphalt_field`]
+/// seeds the field graph's equivalent octave from it — the two implementations
+/// of the same feature have no business drawing from different streams, and a
+/// literal repeated in two files is a drift waiting to happen.
+pub(super) const CROSS_SALT: u32 = 0xC2B2_AE35;
+
+/// The smooth octave's hash salt. See [`CROSS_SALT`].
+pub(super) const SMOOTH_SALT: u32 = 0x85EB_CA6B;
+
+/// The fine, per-texel octave's hash salt. See [`CROSS_SALT`].
+pub(super) const FINE_SALT: u32 = 0x9E37_79B9;
 
 /// The tiling asphalt albedo, as `RES * RES` RGBA8 texels ready for
 /// `RunningApp::add_texture_data`.
@@ -318,7 +330,7 @@ pub fn asphalt_albedo() -> Vec<u8> {
 fn grain(x: u32, y: u32) -> f32 {
     let smooth = smooth_octave(x, y);
     let cross = cross_octave(x);
-    let fine = hash_unit(x, y, 0x9E37_79B9);
+    let fine = hash_unit(x, y, FINE_SALT);
     let mixed = smooth * SMOOTH_SHARE
         + cross * CROSS_SHARE
         + fine * (1.0 - SMOOTH_SHARE - CROSS_SHARE);
@@ -338,12 +350,12 @@ fn grain(x: u32, y: u32) -> f32 {
 /// Toroidal for the same reason [`smooth_octave`] is: band `CROSS_BANDS` *is*
 /// band `0`, so the field is continuous across the tile wrap and the repeat
 /// leaves no stripe down the road.
-fn cross_octave(x: u32) -> f32 {
+pub(super) fn cross_octave(x: u32) -> f32 {
     let per_band = (RES / CROSS_BANDS) as f32;
     let fx = x as f32 / per_band;
     let bx = fx.floor();
     let t = smoothstep(fx - bx);
-    let band = |o: u32| hash_unit((bx as u32 + o) % CROSS_BANDS, 0, 0xC2B2_AE35);
+    let band = |o: u32| hash_unit((bx as u32 + o) % CROSS_BANDS, 0, CROSS_SALT);
     lerp(band(0), band(1), t)
 }
 
@@ -351,7 +363,7 @@ fn cross_octave(x: u32) -> f32 {
 ///
 /// Toroidal because the texture repeats: cell `LATTICE` *is* cell `0`, so the
 /// field is continuous across the tile boundary and the repeat leaves no seam.
-fn smooth_octave(x: u32, y: u32) -> f32 {
+pub(super) fn smooth_octave(x: u32, y: u32) -> f32 {
     let per_cell = (RES / LATTICE) as f32;
     let (fx, fy) = (x as f32 / per_cell, y as f32 / per_cell);
     let (cx, cy) = (fx.floor(), fy.floor());
@@ -360,7 +372,7 @@ fn smooth_octave(x: u32, y: u32) -> f32 {
         hash_unit(
             (cx as u32 + ox) % LATTICE,
             (cy as u32 + oy) % LATTICE,
-            0x85EB_CA6B,
+            SMOOTH_SALT,
         )
     };
     let top = lerp(corner(0, 0), corner(1, 0), tx);
@@ -382,7 +394,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 /// A deterministic `0..=1` hash of a texel/cell coordinate. Integer-only, so the
 /// texture is byte-identical on every platform and every run — a race that
 /// replays identically deserves a road that does too.
-fn hash_unit(x: u32, y: u32, salt: u32) -> f32 {
+pub(super) fn hash_unit(x: u32, y: u32, salt: u32) -> f32 {
     let mut h = x.wrapping_mul(0x27D4_EB2D) ^ y.wrapping_mul(0x1656_67B1) ^ salt;
     h ^= h >> 15;
     h = h.wrapping_mul(0x2C1B_3C6D);
@@ -398,7 +410,7 @@ fn hash_unit(x: u32, y: u32, salt: u32) -> f32 {
 /// *decoded* value. Authoring the byte directly would make the grain roughly
 /// twice as strong as intended near white, where the sRGB curve is steepest, so
 /// the transfer function is inverted here rather than guessed at.
-fn byte_for_multiplier(multiplier: f32) -> u8 {
+pub(super) fn byte_for_multiplier(multiplier: f32) -> u8 {
     let m = multiplier.clamp(0.0, 1.0);
     let encoded = if m <= 0.003_130_8 {
         m * 12.92

@@ -33,6 +33,14 @@ axiom-visibility = { path = "../../modules/axiom-visibility" }
 # as data from simulation state (the wasm arm realizes the batch).
 axiom-audio = { path = "../../modules/axiom-audio" }
 
+# The typed pointwise field IR: the asphalt grain is an authored `FieldGraph`
+# (`render/asphalt_field.rs`), not a hand-written pixel loop.
+axiom-field = { path = "../../crates/axiom-field" }
+# `TextureOp::Field` — the operator that bakes that graph to RGBA8 at startup.
+axiom-proc-texture = { path = "../../crates/axiom-proc-texture" }
+# `RecipeGraph`/`RecipeId` — the one-node bake recipe the field travels beside.
+axiom-recipe = { path = "../../crates/axiom-recipe" }
+
 # The deterministic embodied-agent substrate the ghost runs every control input
 # through: the axis-map brain turns perceived scalars into `move_axis` intents.
 # Not optional — the ghost is part of the game, so it ships in the wasm bundle.

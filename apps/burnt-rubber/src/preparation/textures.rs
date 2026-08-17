@@ -3,10 +3,17 @@
 //!
 //! The road's asphalt, the verge's grass and the palm foliage are generated
 //! pixel by pixel on the CPU. All three are argument-free deterministic
-//! constants: `asphalt_albedo()` and its siblings take nothing and return the
-//! same bytes on every call, on every machine. That is exactly the shape that
-//! belongs in a startup phase — there is no gameplay state to wait for, and
-//! nothing about them can change once the race is running.
+//! constants: they take nothing and return the same bytes on every call, on
+//! every machine. That is exactly the shape that belongs in a startup phase —
+//! there is no gameplay state to wait for, and nothing about them can change
+//! once the race is running.
+//!
+//! **The asphalt is the one produced from an authored field graph.** Verge and
+//! foliage are still hand-written pixel loops; the road's grain is a 58-node
+//! [`crate::render::asphalt_field::asphalt_field`] baked through
+//! `TextureOp::Field`. The hand-written generator it replaced is deliberately
+//! kept beside it as the fallback below, and as the reference its equivalence
+//! test measures against.
 //!
 //! # What this task does NOT do
 //!
@@ -31,6 +38,7 @@ use std::rc::Rc;
 
 use axiom_runtime::{PreparationTask, RuntimeResult};
 
+use crate::render::asphalt_field::asphalt_field_albedo;
 use crate::render::asphalt_texture::asphalt_albedo;
 use crate::render::foliage_texture::foliage_albedo;
 use crate::render::verge_texture::verge_albedo;
@@ -50,9 +58,18 @@ pub struct PreparedTextures {
 impl PreparedTextures {
     /// Run all three generators. This is the expensive half of texture setup,
     /// and the only thing [`TextureTask`] does.
+    ///
+    /// The asphalt is baked from its field graph. That bake is fallible in
+    /// signature only — the graph is authored in Rust and
+    /// `asphalt_field::tests` proves the shipped one validates and bakes — so
+    /// the arm below can only be taken by a defect, and the fallback it takes is
+    /// the hand-written generator the field graph replaced. A defect there is
+    /// therefore a road that looks very slightly different, never a missing one:
+    /// the same shape `palette::road_materials_prepared` already uses for a
+    /// rejected upload.
     pub fn generate() -> PreparedTextures {
         PreparedTextures {
-            asphalt: asphalt_albedo(),
+            asphalt: asphalt_field_albedo().unwrap_or_else(asphalt_albedo),
             verge: verge_albedo(),
             foliage: foliage_albedo(),
         }
@@ -121,9 +138,22 @@ mod tests {
     #[test]
     fn the_prepared_albedos_match_the_generators() {
         let t = prepared();
-        assert_eq!(t.asphalt(), asphalt_albedo().as_slice());
+        assert_eq!(
+            t.asphalt(),
+            asphalt_field_albedo().expect("the shipped graph bakes").as_slice()
+        );
         assert_eq!(t.verge(), verge_albedo().as_slice());
         assert_eq!(t.foliage(), foliage_albedo().as_slice());
+    }
+
+    /// **The fallback arm is provably unreachable in the shipped configuration.**
+    /// The prepared asphalt is the *field* bake, not the hand-written generator
+    /// — so if the bake ever started failing silently, this is the assertion
+    /// that would notice rather than the road quietly reverting.
+    #[test]
+    fn the_prepared_asphalt_is_the_field_bake_and_not_the_fallback() {
+        let t = prepared();
+        assert_ne!(t.asphalt(), asphalt_albedo().as_slice());
     }
 
     /// Deterministic, as the generators' own `f() == f()` tests already imply —

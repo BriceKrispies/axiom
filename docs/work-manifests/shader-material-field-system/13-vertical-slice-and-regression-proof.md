@@ -34,6 +34,18 @@ And its `app.toml` **already declares `recipe` and `proc-mesh`** in
 `allowed_layers` — so adding `field`, `surface` and `proc-texture` is an
 extension of an existing, precedented arrangement rather than a new one.
 
+> **CORRECTION.** That was read from the main checkout, where
+> `src/render/rock_mesh.rs` and the matching `app.toml` entries were *uncommitted
+> WIP belonging to another session*. Neither is in this branch. At `HEAD`,
+> `apps/burnt-rubber/app.toml` declares `allowed_layers = ["kernel", "math",
+> "frame", "host", "runtime"]` — no `recipe`, no `proc-mesh` — and there is no
+> `rock_mesh.rs`. The app therefore has **no** existing procedural-graph
+> precedent, and this manifest adds `field`, `surface` and `proc-texture` from
+> nothing. `src/render/asphalt_texture.rs` (759 lines) is present and unchanged,
+> so the slice target itself is intact. Note also `src/render/surface_builder.rs`
+> is an app-local *road* surface builder and is unrelated to
+> `axiom_surface::SurfaceBuilder`.
+
 **Asphalt, not verge or foliage**, because it is the largest, the most tuned, the
 one sampled at `Anisotropic` with a real mip chain, and the one whose
 `cross_octave` immediately exposes a genuine vocabulary question (below).

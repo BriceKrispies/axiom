@@ -175,7 +175,7 @@ pub(crate) fn channel_text(graph: &FieldGraph, channel: usize, param_base: u32) 
 
 /// The derived type of every node, in id order.
 ///
-/// Preparation-time only. `FieldGraph::type_of` type-checks the whole graph to
+/// Preparation-time only. `FieldGraph::type_at` type-checks the whole graph to
 /// answer for one node, so this is `O(nodes^2)` — which is 65 536 steps at the
 /// 256-node budget, paid once per surface at bind, and the honest cost of the
 /// layer not publishing its whole type vector.
@@ -189,7 +189,7 @@ fn node_types(graph: &FieldGraph) -> Vec<FieldType> {
     (0..graph.node_count() as u32)
         .map(|index| {
             graph
-                .type_of(NodeId::from_raw(index))
+                .type_at(NodeId::from_raw(index))
                 .unwrap_or_else(|_error| FieldType::Scalar)
         })
         .collect()
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn a_graph_that_does_not_type_still_emits_the_zero_default_rather_than_faulting() {
         let graph = untypeable();
-        assert!(graph.type_of(graph.output()).is_err());
+        assert!(graph.type_at(graph.output()).is_err());
         assert_eq!(node_types(&graph), vec![FieldType::Scalar]);
         let (body, output) = channel_text(&graph, 0, 0);
         assert_eq!(

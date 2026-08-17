@@ -9,6 +9,12 @@ allowed_layers = [
     "host",
     # `RuntimeStep` — stamps each agent decision (the `agent` feature).
     "runtime",
+    # The asphalt grain is an authored `FieldGraph` (`render/asphalt_field.rs`)
+    # baked to RGBA8 through `TextureOp::Field`; `recipe` is the container that
+    # one-node bake recipe is written in.
+    "field",
+    "proc-texture",
+    "recipe",
 ]
 
 allowed_modules = [

@@ -27,7 +27,16 @@
 # vertices: geometry and texels are uploaded once at bind. Without it a road
 # chunk built from a stale track, or a moved constant inside `asphalt_albedo`,
 # would render a visibly different game while leaving the draw list byte-
-# identical. Note that all five `resources` goldens are expected to hash
+# identical.
+#
+# That sentence was written about a hazard, and on 2026-08-16 it caught the real
+# thing. Replacing the hand-written asphalt generator with an authored field
+# graph (`render/asphalt_field.rs`, baked through `TextureOp::Field`) moved all
+# five `resources` goldens and **nothing else** — every `state` and every
+# `render` golden is byte-identical, because the simulation is untouched and the
+# draw list still names the same texture id at the same registration index. The
+# resources artifact was the only thing in the repository that could see the
+# change, which is exactly what it exists for. Note that all five `resources` goldens are expected to hash
 # identically to each other - the resource set is installed once at construction
 # and nothing is generated during a race. Five files rather than one, so that a
 # future change which made resources checkpoint-dependent shows up as a diff.
@@ -60,7 +69,7 @@ sha256 = "02aacc4180e9740c7f13ff174a9da5728aff920ffeda4981bc799406e2778856"
 
 [[golden]]
 path = "tests/golden/agent_grid_resources.bin"
-sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
+sha256 = "c103d2070ae8f7683a7cac426ac12139f5f410fadff183140ba25899b7674756"
 
 # --- checkpoint 2: opening (step 700) - off the line, on the sweepers --------
 [[golden]]
@@ -73,7 +82,7 @@ sha256 = "c6369ab93a05e93ec708ad13ba8437991b2e456a62a847276de6bec0b25dd469"
 
 [[golden]]
 path = "tests/golden/agent_opening_resources.bin"
-sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
+sha256 = "c103d2070ae8f7683a7cac426ac12139f5f410fadff183140ba25899b7674756"
 
 # --- checkpoint 3: esses (step 2200) - mid-run, ridge crests and bends -------
 [[golden]]
@@ -86,7 +95,7 @@ sha256 = "a2f9c2c3dfeaf9c6f7054cb39e1a9a6eccfd229047c7a74621d6c7a8bcf1a21d"
 
 [[golden]]
 path = "tests/golden/agent_esses_resources.bin"
-sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
+sha256 = "c103d2070ae8f7683a7cac426ac12139f5f410fadff183140ba25899b7674756"
 
 # --- checkpoint 4: canyon (step 3800) - late, flat out, deep in the boost ----
 [[golden]]
@@ -99,7 +108,7 @@ sha256 = "53aed159105b83fc564ed17574398ef5e2ab67a4ac8493f5bb47939473a34391"
 
 [[golden]]
 path = "tests/golden/agent_canyon_resources.bin"
-sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
+sha256 = "c103d2070ae8f7683a7cac426ac12139f5f410fadff183140ba25899b7674756"
 
 # --- checkpoint 5: finish (the step it crosses the line) ---------------------
 [[golden]]
@@ -112,4 +121,4 @@ sha256 = "803a4fe2577f2d78f1d77818f54a5ef905ac0651d1d4b3b02ac533559d7458c2"
 
 [[golden]]
 path = "tests/golden/agent_finish_resources.bin"
-sha256 = "81c4cbd7c8db92b4047f99b1b08a79d83a7415f781ec3f94a0c7756495a48aaf"
+sha256 = "c103d2070ae8f7683a7cac426ac12139f5f410fadff183140ba25899b7674756"

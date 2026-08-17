@@ -100,3 +100,72 @@ fn rotating_cube_render_differs_across_animated_ticks() {
     // must render different bytes.
     assert_ne!(rotating_cube_render(0), rotating_cube_render(60));
 }
+
+// --- committed byte goldens -------------------------------------------------
+//
+// **The regression control for the shader/material field system.** Nothing else
+// in the repository pinned what *trivial* rendering looks like: this app's two
+// `.bin` artifacts were deleted on 2026-08-11 as drifted, and what was left
+// asserted only that the boundary replays equal to itself — a property a
+// completely broken renderer also has.
+//
+// It matters specifically here because this app is the control against the field
+// system making the simple case expensive. Its material is still one line —
+//
+//     Material::lit(color).with_texture(Texture::Checker)
+//
+// — and these bytes are the proof that the line still produces the same draw
+// list, the same camera, the same lights and the same mesh/material ids it did
+// before a field graph existed anywhere in the engine.
+
+use std::path::PathBuf;
+
+fn golden_path(name: &str) -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("tests");
+    p.push("golden");
+    p.push(format!("{name}.bin"));
+    p
+}
+
+/// Compare `actual` against the committed golden, or capture it when there is
+/// none.
+///
+/// `AXIOM_REGOLD` is compared against `"1"`, not merely tested for presence:
+/// `AXIOM_REGOLD=0` reading as "yes, re-bless everything" is the kind of footgun
+/// that silently destroys a baseline.
+fn assert_golden(name: &str, actual: &[u8]) {
+    let path = golden_path(name);
+    let force = std::env::var("AXIOM_REGOLD").as_deref() == Ok("1");
+    match std::fs::read(&path).ok() {
+        Some(expected) if !force => assert_eq!(
+            actual,
+            expected.as_slice(),
+            "golden mismatch for `{name}` ({} bytes actual vs {} bytes golden): the \
+             rotating-cube render boundary drifted. This app is the control that trivial \
+             rendering did not get more expensive or less correct, so a diff here is a \
+             finding, not a chore. If intended, re-capture (AXIOM_REGOLD=1) and repin its \
+             SHA-256 in apps/axiom-rotating-cube/slice.toml.",
+            actual.len(),
+            expected.len(),
+        ),
+        _ => {
+            std::fs::create_dir_all(path.parent().expect("golden dir has a parent"))
+                .expect("create golden dir");
+            std::fs::write(&path, actual).expect("write golden");
+        }
+    }
+}
+
+#[test]
+fn rotating_cube_render_matches_the_committed_goldens() {
+    let first = rotating_cube_render(0);
+    let later = rotating_cube_render(60);
+    // NEGATIVE, asserted before the goldens so a pair of accidentally-identical
+    // captures can never be blessed: the cubes spin and the point lights orbit.
+    assert_ne!(first, later);
+    // Non-vacuous: a boundary that encoded nothing would also replay equal.
+    assert!(first.len() > 256, "the encoded boundary is {} bytes", first.len());
+    assert_golden("rotating_cube_tick0_render", &first);
+    assert_golden("rotating_cube_tick60_render", &later);
+}
