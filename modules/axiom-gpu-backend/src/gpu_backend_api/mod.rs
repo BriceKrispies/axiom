@@ -61,6 +61,15 @@ pub struct GpuBackendApi {
     // A frame naming a program that is not in here is a reported degradation,
     // never a compile — see `Self::frame_degradations`.
     catalog: crate::surface_program::cache::SurfaceProgramCatalog,
+    // The **per-frame view** of the same surfaces, planned once by
+    // `prepare_surfaces` alongside the catalog. `None` until the barrier has run.
+    //
+    // It lives here for exactly the reason the catalog does: building it
+    // linearises every layer tree and composes every channel graph
+    // (`axiom_surface::Surface::flatten`), and that is preparation work, not
+    // frame work. It was rebuilt on every present until 2026-08-17, which a
+    // throttled browser profile measured at 5.4 ms of an 8.1 ms frame.
+    surface_set: Option<crate::surface_program::SurfaceProgramSet>,
     // Present only once initialised on wasm32; its absence means "not ready".
     #[cfg(target_arch = "wasm32")]
     live: Option<crate::live_gpu_binding::LiveGpuBinding>,
@@ -93,6 +102,7 @@ impl GpuBackendApi {
             capability: axiom_host::BackendCapabilityProfile::all(),
             draw2d_textures: Vec::new(),
             catalog: crate::surface_program::cache::SurfaceProgramCatalog::default(),
+            surface_set: None,
             #[cfg(target_arch = "wasm32")]
             live: None,
         }
@@ -379,17 +389,19 @@ impl GpuBackendApi {
     /// because every channel of it is a plain constant — renders its **constant**
     /// channels through the instance lanes the stream already has: a constant
     /// base colour multiplies the instance colour and a constant emission adds to
-    /// the instance emissive. Nothing is compiled here; a miss is reported through
-    /// [`Self::frame_degradations`].
+    /// the instance emissive. Nothing is compiled here, and nothing is
+    /// *flattened* here either (see `Self::frame_surface_set`); a miss is
+    /// reported through [`Self::frame_degradations`].
     ///
-    /// Passing an empty slice is what [`Self::present_packet`] does, and it makes
-    /// every packed byte identical to the pre-surface stream.
+    /// Passing an empty slice is what [`Self::present_packet`] does, and on a
+    /// backend that never prepared it makes every packed byte identical to the
+    /// pre-surface stream.
     pub fn present_packet_with_surfaces(
         &self,
         packet: &FramePacket,
         surfaces: &[axiom_surface::Surface],
     ) -> bool {
-        let set = crate::surface_program::SurfaceProgramSet::build(surfaces, self.capability);
+        let set = self.frame_surface_set(surfaces);
         let (batches, programs) =
             crate::frame_packet_adapter::frame_packet_to_batches(packet, &set);
         let lights = crate::frame_packet_adapter::frame_packet_lights(packet);

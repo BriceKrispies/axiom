@@ -5,15 +5,22 @@
 //! gives this crate exactly one facade, and these are that facade's methods. What
 //! separates them from [`super`] is *when* they run: every one of them is a
 //! **startup** call, driven from the app's `axiom_runtime::PreparationTask`
-//! before `RuntimeState::Prepared`, and none of them belongs in a frame.
+//! before `RuntimeState::Prepared` — except the single lookup a frame makes
+//! against what they produced, which is the last item below.
 //!
 //! [`GpuBackendApi::prepare_surfaces`] is the only place in this backend a shader
-//! is ever compiled. Everything else here is a pure question about what it
-//! produced.
+//! is ever compiled, and the only place a surface is ever **flattened**.
+//! Everything else here is a pure question about what it produced — including
+//! [`GpuBackendApi::frame_surface_set`], the one member of this file a frame does
+//! call, which exists precisely to hand a present the answer the barrier already
+//! computed instead of recomputing it.
+
+use std::borrow::Cow;
 
 use axiom_host::FramePacket;
 
 use crate::gpu_backend_api::GpuBackendApi;
+use crate::surface_program::SurfaceProgramSet;
 
 impl GpuBackendApi {
     /// **Compile every authored surface's program, at the preparation barrier.**
@@ -43,11 +50,22 @@ impl GpuBackendApi {
     ///
     /// An app that authors no surface never calls this and is entirely
     /// unaffected — that is the compatibility contract.
+    ///
+    /// **It also plans the per-frame view.** A present needs a second, much
+    /// cheaper answer about the same surfaces — each one's constant channels, its
+    /// packed parameter region, its pipeline marker, and whether anything in the
+    /// set reads a clock — and producing that answer *also* flattens every
+    /// surface, because flattening is what composes a layered surface's
+    /// per-channel graphs into one. So it is produced here, once, next to the
+    /// catalog, and kept: the two halves depend on exactly the same
+    /// `(surfaces, capability profile)` pair, and both of those are fixed by the
+    /// time this returns.
     pub fn prepare_surfaces(
         &mut self,
         surfaces: &[axiom_surface::Surface],
     ) -> Result<u32, axiom_kernel::KernelError> {
         let profile = self.capability;
+        let set = SurfaceProgramSet::build(surfaces, profile);
         crate::surface_program::cache::SurfaceProgramCatalog::prepare(surfaces, profile).map(
             |catalog| {
                 #[cfg(target_arch = "wasm32")]
@@ -56,8 +74,46 @@ impl GpuBackendApi {
                     .for_each(|live| live.prepare_surfaces(&catalog));
                 let count = catalog.program_count();
                 self.catalog = catalog;
+                self.surface_set = Some(set);
                 count
             },
+        )
+    }
+
+    /// **The surface view one frame presents with — never rebuilt when the
+    /// barrier already built it.**
+    ///
+    /// Two paths, and which one a caller is on is decided entirely by whether
+    /// [`Self::prepare_surfaces`] has run:
+    ///
+    /// * **The prepared path** — the one every app takes. The set planned at the
+    ///   barrier is **authoritative**: it is borrowed as-is and the `surfaces`
+    ///   slice the frame passed is not read at all. A frame that hands over a
+    ///   surface the barrier never saw therefore renders the neutral
+    ///   `(white, black)` constant fallback for it, exactly as a draw naming an
+    ///   unprepared program already did, and
+    ///   [`Self::frame_degradations`] reports it through
+    ///   `axiom_host::FrameSubmissionReport::degraded_features`. That is the
+    ///   existing rule, not a new one: *a cache miss is a hard error rather than
+    ///   a lazy compile*, and it would be incoherent for the miss to be a hard
+    ///   error for the program and a silent re-derivation for the view.
+    /// * **The unprepared path** — a caller that presents surfaces without ever
+    ///   running the barrier, which is what this backend's own tests and
+    ///   [`Self::present_packet`]'s empty slice do. It builds the view from the
+    ///   passed slice, which is what every present did before 2026-08-17. It is
+    ///   correct and it is not what an app should be on: it flattens every
+    ///   surface, per frame.
+    ///
+    /// The borrow is why this returns a [`Cow`] rather than a `SurfaceProgramSet`
+    /// — the prepared path must cost no allocation and no copy, or it has not
+    /// fixed anything.
+    pub(crate) fn frame_surface_set(
+        &self,
+        surfaces: &[axiom_surface::Surface],
+    ) -> Cow<'_, SurfaceProgramSet> {
+        self.surface_set.as_ref().map_or_else(
+            || Cow::Owned(SurfaceProgramSet::build(surfaces, self.capability)),
+            Cow::Borrowed,
         )
     }
 
@@ -193,6 +249,50 @@ mod tests {
             .field(SurfaceChannel::Opacity, builder.build(lane))
             .build()
             .expect("a scalar uv field is a legal opacity")
+    }
+
+    /// A surface whose base colour is the plain constant `tint` — needs no
+    /// program, and carries a *distinguishable* constant fallback, which is what
+    /// makes "which set answered" observable.
+    fn tinted(tint: [f32; 4]) -> axiom_surface::Surface {
+        use axiom_surface::{SurfaceBuilder, SurfaceChannel};
+        SurfaceBuilder::new()
+            .constant(
+                SurfaceChannel::BaseColor,
+                axiom_field::FieldValue::vec4(axiom_math::Vec4::new(
+                    tint[0], tint[1], tint[2], tint[3],
+                )),
+            )
+            .build()
+            .expect("a vec4 constant is a legal base colour")
+    }
+
+    /// A displacement driven by `Time` — the one thing that turns the frame's
+    /// surface-time lane on.
+    fn windy() -> axiom_surface::Surface {
+        use axiom_field::{FieldBuilder, FieldId, FieldOp};
+        use axiom_surface::{SurfaceBuilder, SurfaceChannel};
+        let (builder, clock) = FieldBuilder::new(FieldId::of_name("gpu/api/wind"), 1).push(
+            FieldOp::Time,
+            Vec::new(),
+            Vec::new(),
+        );
+        let (builder, node) = builder.push(
+            FieldOp::Compose,
+            vec![axiom_recipe::Param::int(3)],
+            vec![clock, clock, clock],
+        );
+        SurfaceBuilder::new()
+            .field(SurfaceChannel::Displacement, builder.build(node))
+            .build()
+            .expect("a vec3 field is a legal displacement")
+    }
+
+    /// Whether a frame's surface view was **borrowed** from the barrier (no
+    /// per-frame construction) rather than built for this call. The whole claim
+    /// of the fix, reduced to one bit a test can assert on without a timer.
+    fn borrowed(set: &Cow<'_, SurfaceProgramSet>) -> bool {
+        matches!(set, Cow::Borrowed(_))
     }
 
     /// A packet whose single draw names `program`.
@@ -381,5 +481,135 @@ mod tests {
             .skinned_surface_degradations(std::slice::from_ref(&constant_only))
             .is_empty());
         assert!(backend.skinned_surface_degradations(&[]).is_empty());
+    }
+
+    /// **A prepared backend flattens nothing per frame.**
+    ///
+    /// The claim is checkable without a timer, which is the point: a present's
+    /// surface view is a *borrow* of the one the barrier planned, so however many
+    /// frames run and however many surfaces the app authored, the per-frame
+    /// construction count is exactly zero. A timing assertion would prove the
+    /// same thing flakily; this proves it structurally.
+    ///
+    /// Building that view is what calls `axiom_surface::Surface::flatten` — it
+    /// linearises every layer tree and composes every channel graph — and a
+    /// throttled browser profile of `apps/shader-crucible` (11 surfaces) measured
+    /// it at 5.4 ms of an 8.1 ms frame before this borrow existed.
+    #[test]
+    fn a_prepared_backend_borrows_its_surface_view_instead_of_rebuilding_it_each_frame() {
+        let mut backend = GpuBackendApi::new(&request(320, 240));
+        let station = uv_opacity("gpu/api/view");
+        let surfaces = [station.clone(), windy(), tinted([0.2, 0.4, 0.6, 1.0])];
+
+        // Before the barrier there is nothing to borrow, so a present must derive
+        // the view itself — the unprepared path, per frame.
+        assert!(!borrowed(&backend.frame_surface_set(&surfaces)));
+
+        assert_eq!(
+            backend
+                .prepare_surfaces(&surfaces)
+                .expect("three surfaces are well inside the cap"),
+            2
+        );
+
+        // Sixty frames, sixty borrows, zero constructions — and the count does
+        // not move with the number of surfaces, which is the scaling the defect
+        // had.
+        (0..60).for_each(|_| {
+            assert!(borrowed(&backend.frame_surface_set(&surfaces)));
+        });
+        // The real present takes that path, not a private one.
+        assert!(!backend
+            .present_packet_with_surfaces(&packet_naming(station.digest().raw()), &surfaces));
+
+        // The two answers a frame actually reads off the view are unchanged: the
+        // surface-time lane is the packet's own supplied time because something
+        // in the set reads a clock…
+        let set = backend.frame_surface_set(&surfaces);
+        assert_eq!(
+            set.surface_time(axiom_kernel::Seconds::finite_or_zero(12.5)),
+            12.5
+        );
+        // …and the constant fallback is still the authored constant.
+        assert_eq!(
+            set.constant_fallback(tinted([0.2, 0.4, 0.6, 1.0]).digest().raw()),
+            ([0.2, 0.4, 0.6, 1.0], [0.0; 3])
+        );
+    }
+
+    /// **The prepared set is authoritative, and a mismatch is a reported miss —
+    /// never a silent re-derivation.**
+    ///
+    /// A frame that hands over a surface the barrier never saw gets the neutral
+    /// `(white, black)` constant fallback for it, exactly as a draw naming an
+    /// unprepared program already did, and the frame says so through
+    /// `axiom_host::FrameSubmissionReport::degraded_features`. Re-deriving the
+    /// view from the passed slice instead would make a cache miss a hard error
+    /// for the *program* and a free silent recovery for the *view* — two rules
+    /// for one fact.
+    #[test]
+    fn a_frame_passing_a_surface_the_barrier_never_saw_renders_the_fallback_and_reports_it() {
+        let mut backend = GpuBackendApi::new(&request(320, 240));
+        let prepared = tinted([0.9, 0.1, 0.1, 1.0]);
+        let unseen = tinted([0.1, 0.9, 0.1, 1.0]);
+        assert_ne!(prepared.digest().raw(), unseen.digest().raw());
+        assert_eq!(
+            backend
+                .prepare_surfaces(std::slice::from_ref(&prepared))
+                .expect("a constant-only surface needs no program"),
+            0
+        );
+
+        // The frame passes only the surface that was NEVER prepared.
+        let set = backend.frame_surface_set(std::slice::from_ref(&unseen));
+        assert!(borrowed(&set), "the prepared view is what a frame reads");
+        // The prepared surface still answers…
+        assert_eq!(
+            set.constant_fallback(prepared.digest().raw()),
+            ([0.9, 0.1, 0.1, 1.0], [0.0; 3])
+        );
+        // …and the passed-but-unprepared one does not: it is the neutral
+        // identity, not its own authored green.
+        assert_eq!(
+            set.constant_fallback(unseen.digest().raw()),
+            ([1.0; 4], [0.0; 3])
+        );
+        // And the miss rides out on the existing channel.
+        assert_eq!(
+            backend.frame_degradations(&packet_naming(unseen.digest().raw())),
+            vec![axiom_host::FrameFeature::ProceduralSurface]
+        );
+        assert!(backend
+            .frame_degradations(&packet_naming(prepared.digest().raw()))
+            .is_empty());
+    }
+
+    /// **The unprepared path still works, and it is the one that costs.** A
+    /// caller that presents surfaces without ever running the barrier — this
+    /// backend's own tests, and `GpuBackendApi::present_packet`'s empty slice —
+    /// derives the view from the slice it passed, which is what every present did
+    /// before the borrow existed. Correct, and not where an app belongs.
+    #[test]
+    fn a_backend_that_never_prepared_derives_its_view_from_the_slice_the_frame_passed() {
+        let backend = GpuBackendApi::new(&request(320, 240));
+        let passed = tinted([0.25, 0.5, 0.75, 1.0]);
+        let set = backend.frame_surface_set(std::slice::from_ref(&passed));
+        assert!(!borrowed(&set), "there is nothing to borrow");
+        assert_eq!(
+            set.constant_fallback(passed.digest().raw()),
+            ([0.25, 0.5, 0.75, 1.0], [0.0; 3])
+        );
+        // Nothing in the passed set reads a clock, so the lane is an exact zero —
+        // the byte-identity every surfaceless app depends on.
+        assert_eq!(
+            set.surface_time(axiom_kernel::Seconds::finite_or_zero(12.5)),
+            0.0
+        );
+        // An empty slice is `present_packet`'s own case: an empty view whose every
+        // lookup misses.
+        assert_eq!(
+            backend.frame_surface_set(&[]).constant_fallback(0),
+            ([1.0; 4], [0.0; 3])
+        );
     }
 }
