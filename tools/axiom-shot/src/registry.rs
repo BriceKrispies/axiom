@@ -109,6 +109,38 @@ pub fn registry() -> Vec<SliceEntry> {
         // Burnt Rubber: one deterministic frame per thing the game is about —
         // the start line, raw straight-line speed, a corner, a drift, the
         // tunnel, threading traffic, and full boost.
+        // The shader crucible: ten labelled stations demonstrating the
+        // procedural appearance system.
+        //
+        // **Neither arm of this harness carries an authored surface.** The GPU
+        // arm calls `GpuBackendApi::render_offscreen_rgba`, whose argument list
+        // has no surface lane; the Canvas2D arm calls
+        // `render_offscreen_rgba_skinned`, which has none either. So a capture
+        // of this slice shows every station in its CONSTANT FALLBACK — which is
+        // a useful control image, and is exactly what the crucible's frames look
+        // like when the surface lane is dropped. For the pixels the surfaces
+        // actually produce, run the app's own
+        // `cargo run -p axiom-shader-crucible --bin crucible_shot`.
+        SliceEntry {
+            name: "shader-crucible",
+            build: |_| axiom_shader_crucible::shader_crucible_core(),
+        },
+        // The shader crucible: ten labelled stations demonstrating the
+        // procedural appearance system.
+        //
+        // **Neither arm of this harness carries an authored surface.** The GPU
+        // arm calls `GpuBackendApi::render_offscreen_rgba`, whose argument list
+        // has no surface lane; the Canvas2D arm calls
+        // `render_offscreen_rgba_skinned`, which has none either. So a capture
+        // of this slice shows every station in its CONSTANT FALLBACK - which is
+        // a useful control image, and is exactly what the crucible's frames look
+        // like when the surface lane is dropped. For the pixels the surfaces
+        // actually produce, run the app's own
+        // `cargo run -p axiom-shader-crucible --bin crucible_shot`.
+        SliceEntry {
+            name: "shader-crucible",
+            build: |_| axiom_shader_crucible::shader_crucible_core(),
+        },
         SliceEntry {
             name: "burnt-rubber",
             build: |_| axiom_burnt_rubber::build_burnt_rubber(),

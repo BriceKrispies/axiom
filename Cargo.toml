@@ -121,6 +121,7 @@ members = [
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",
+    "apps/shader-crucible",
     "crates/xtask",
     "tools/axiom-asset-pack",
     "tools/axiom-font-import",

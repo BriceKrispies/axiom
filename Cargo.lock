@@ -985,6 +985,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-shader-crucible"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-canvas2d-backend",
+ "axiom-field",
+ "axiom-gpu-backend",
+ "axiom-host",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-mesh",
+ "axiom-mesh-ops",
+ "axiom-noise",
+ "axiom-proc-texture",
+ "axiom-recipe",
+ "axiom-runtime",
+ "axiom-surface",
+ "console_error_panic_hook",
+ "png",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-shot"
 version = "0.1.0"
 dependencies = [
@@ -1000,6 +1025,7 @@ dependencies = [
  "axiom-math",
  "axiom-render",
  "axiom-rotating-cube",
+ "axiom-shader-crucible",
  "axiom-sports-physics-lab",
  "png",
 ]

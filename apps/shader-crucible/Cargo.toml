@@ -1,0 +1,77 @@
+[package]
+name = "axiom-shader-crucible"
+description = "The shader crucible: ten labelled stations demonstrating the procedural appearance system end to end — authored field graphs, live surfaces taking the generated-shader path, and the four limitations the system does not yet cover, stated rather than hidden."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# `cdylib` for the app's own wasm bundle (`shader_crucible_start`); `rlib` so the
+# native test suite and the `axiom-shot` capture harness can compose the
+# deterministic core (`shader_crucible_core`).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The engine umbrella (module `engine`): App/RunningApp, the camera, the meshes
+# and the `Material::from_surface` that carries a surface's digest onto a draw.
+axiom = { path = "../../modules/axiom" }
+# The typed pointwise field IR — every station's appearance is an authored
+# `FieldGraph` over the 27 operators, and not one line of shading Rust.
+axiom-field = { path = "../../crates/axiom-field" }
+# The neutral appearance artifact the stations bind their graphs into, and whose
+# structural digest station 4 proves a parameter retune cannot move.
+axiom-surface = { path = "../../crates/axiom-surface" }
+# `FbmConfig` / `Frequency` — the knob set `FieldOp::Fbm`'s parameter words carry.
+axiom-noise = { path = "../../crates/axiom-noise" }
+# `Vec2`/`Vec3`/`Vec4` — the lanes a channel constant and an evaluation context
+# are built from.
+axiom-math = { path = "../../crates/axiom-math" }
+# `Seconds` (the evaluation context's engine clock), `Meters`/`Ratio` (the
+# quantities `normal_from_height` and the camera are authored in).
+axiom-kernel = { path = "../../crates/axiom-kernel" }
+# `PreparationTask` — the startup barrier station 2's program compilation runs
+# on. A shader is never compiled lazily inside a frame.
+axiom-runtime = { path = "../../crates/axiom-runtime" }
+# The GPU backend facade: `prepare_surfaces` (the barrier), and the
+# capability/degradation queries the on-screen honesty labels are read from.
+axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend" }
+# The software rasterizer facade: the Canvas2D arm's per-triangle surface
+# shading, which station 9 reports as a substitute rather than a drop.
+axiom-canvas2d-backend = { path = "../../modules/axiom-canvas2d-backend" }
+# `BackendCapabilityProfile` / `RenderCapability` — the two profiles
+# `supported_by` is reported against, and the `FramePacket` the Canvas2D arm
+# rasterizes.
+axiom-host = { path = "../../crates/axiom-host" }
+# `implicit_surface_mesh` — station 7's metaball body, meshed from a
+# `ScalarField` the station authors as a graph.
+axiom-mesh-ops = { path = "../../crates/axiom-mesh-ops" }
+# The neutral triangle mesh `implicit_surface_mesh` returns and the engine's
+# `Mesh` is built from.
+axiom-mesh = { path = "../../crates/axiom-mesh" }
+# `TextureOp::Field` — station 3 bakes station 2's graph to RGBA8 through it, so
+# one graph gets two realisations.
+axiom-proc-texture = { path = "../../crates/axiom-proc-texture" }
+# The container that one-node bake recipe is written in.
+axiom-recipe = { path = "../../crates/axiom-recipe" }
+
+# The PNG writer the crucible's own Canvas2D capture bin uses.
+png = "0.17"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+# `spawn_local` — the GPU device handshake is async, and the barrier's device
+# half runs the moment it resolves.
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+# The canvas the live binding draws into, the requestAnimationFrame loop, and
+# the console the report is printed to. An app is outside the Module Law's
+# layer/module platform-API ban, which is exactly why the platform edge of a
+# demonstration belongs here rather than in an engine crate.
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "console",
+] }
