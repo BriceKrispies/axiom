@@ -45,6 +45,7 @@
 //! | [`introspection`] | station 10: `explain` / `digest` / `diff` |
 //! | [`limitations`] | the four things this does not do |
 //! | [`orbit`] | the interactive camera the page drags the stations around with |
+//! | [`redraw`] | when a frame is worth drawing, and why the app idles when it is not |
 //! | [`report`] | the one assembled report the page, the console and the README share |
 //! | [`diagnostics`] | the frame-performance panel under the canvas, and what it refuses to invent |
 //! | [`levers`] | the kill-switches under the panel: what each one removes from a frame |
@@ -70,6 +71,7 @@ pub mod levers;
 pub mod limitations;
 pub mod orbit;
 pub mod preparation;
+pub mod redraw;
 pub mod report;
 pub mod scene;
 pub mod stand;

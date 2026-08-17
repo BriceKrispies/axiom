@@ -291,6 +291,52 @@ pub struct Workload {
     pub gpu_frame: u64,
 }
 
+/// **What the frame loop is doing, and whether the readings beside it are live.**
+///
+/// The crucible submits a frame only when its pixels would differ from the pixels
+/// already on the screen (the rule and its derivation are in [`crate::redraw`]), so
+/// on a still camera looking at a static station it draws **nothing** — which is
+/// correct, and which also means the FRAME and MAIN THREAD cards are showing the
+/// last run of frames rather than the current one.
+///
+/// This is the panel saying so. An instrument whose needle has stopped is only
+/// honest if it can tell you the difference between "nothing is happening" and "I
+/// am broken", and the alternative — manufacturing frames so the number keeps
+/// moving — would be an instrument reporting on work it created itself. The
+/// `FORCE` lever is the sanctioned way to get a live steady-state reading back;
+/// see [`crate::levers`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LoopState {
+    /// Why the most recent callback drew a frame, or did not —
+    /// `crate::redraw::Redraw::reason`, printed verbatim.
+    pub reason: &'static str,
+    /// Whether that callback drew. `false` means every number in the cards above
+    /// is held from an earlier frame.
+    pub drawing: bool,
+    /// How long ago the last frame was actually submitted, in milliseconds — the
+    /// age of the image on the screen, and therefore of the readings.
+    pub held_ms: f64,
+    /// Frames submitted since the page loaded.
+    pub drawn: u64,
+    /// Callbacks that decided the screen was already correct and drew nothing.
+    /// **This is the number the fix produced**: on a still crucible it climbs at
+    /// the display's refresh rate while `drawn` does not move at all.
+    pub skipped: u64,
+}
+
+impl Default for LoopState {
+    /// The state before the device has bound and the loop has run once.
+    fn default() -> Self {
+        LoopState {
+            reason: "warming up — no frame has been drawn yet",
+            drawing: false,
+            held_ms: 0.0,
+            drawn: 0,
+            skipped: 0,
+        }
+    }
+}
+
 /// Which resource the frame is up against, stated only when the measurements
 /// support it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -405,6 +451,17 @@ pub fn static_readings() -> Vec<Reading> {
                 .to_string(),
         ),
         (
+            "d-note-loop",
+            "A frame is submitted only when its pixels would differ from the ones \
+             already on screen: the camera or a lever moved, or a clock-reading \
+             station (5) is in shot. A still camera on a static station draws \
+             NOTHING, and the numbers above are then the last run of frames, not \
+             the current one — the loop row says which. FORCE holds the loop open \
+             so a steady-state cost can still be measured; it changes no pixel and \
+             no draw, only how often the identical frame is submitted."
+                .to_string(),
+        ),
+        (
             "d-note-workload",
             "batches and pipelines are the backend's OWN counts, read off the \
              packet through GpuBackendApi::packet_batch_counts — the app used to \
@@ -422,7 +479,17 @@ pub fn static_readings() -> Vec<Reading> {
 }
 
 /// Every value the panel shows this flush.
-pub fn readings(history: &FrameHistory, workload: &Workload) -> Vec<Reading> {
+///
+/// `loop_state` is read first and printed at the top of the FRAME card, because it
+/// is the qualifier on everything under it: a cadence percentile taken from a
+/// window the loop stopped filling two seconds ago is a real measurement of a run
+/// that has ended, and the reader has to be told which of the two they are looking
+/// at before they read the number.
+pub fn readings(
+    history: &FrameHistory,
+    workload: &Workload,
+    loop_state: &LoopState,
+) -> Vec<Reading> {
     let gap = history.stat(|s| s.gap_ms);
     let cpu = history.stat(FrameSample::cpu_ms);
     let main = history.stat(FrameSample::main_ms);
@@ -432,6 +499,17 @@ pub fn readings(history: &FrameHistory, workload: &Workload) -> Vec<Reading> {
     let panel = history.stat(|s| s.panel_ms);
     let residual = history.stat(FrameSample::residual_ms);
     vec![
+        // THE LOOP — whether the frame numbers below it are live or held.
+        ("d-loop", loop_state.reason.to_string()),
+        (
+            "d-frames",
+            format!(
+                "{} drawn / {} skipped · last {:.1} s ago",
+                loop_state.drawn,
+                loop_state.skipped,
+                loop_state.held_ms / 1000.0
+            ),
+        ),
         // FRAME — the cadence the browser actually gave us.
         ("d-fps", format!("{:.1}", 1000.0 / gap.p50.max(f64::MIN_POSITIVE))),
         ("d-gap50", ms(gap.p50)),
@@ -695,6 +773,18 @@ mod tests {
         history
     }
 
+    /// A loop that is drawing every frame — the state every reading below the
+    /// loop row is only a live measurement in.
+    fn drawing() -> LoopState {
+        LoopState {
+            reason: "drawing — a clock-reading station is on screen",
+            drawing: true,
+            held_ms: 16.7,
+            drawn: 240,
+            skipped: 0,
+        }
+    }
+
     /// The value shown by one element id, for asserting on a reading table.
     fn shown(readings: &[Reading], id: &str) -> String {
         readings
@@ -735,7 +825,7 @@ mod tests {
         let history = FrameHistory::new();
         assert_eq!(history.stat(|s| s.gap_ms), Stat::default());
         assert_eq!(Verdict::of(&history), Verdict::Warming);
-        assert_eq!(shown(&readings(&history, &Workload::default()), "d-fps"), "inf");
+        assert_eq!(shown(&readings(&history, &Workload::default(), &LoopState::default()), "d-fps"), "inf");
     }
 
     /// **The p95 is the point of the panel.** Sixty smooth frames and one 100 ms
@@ -821,7 +911,7 @@ mod tests {
             gpu_reason: "the adapter offers no timestamp query".to_string(),
             ..Workload::default()
         };
-        let values = readings(&filled(60, 16.7, 0.5), &absent);
+        let values = readings(&filled(60, 16.7, 0.5), &absent, &drawing());
         assert_eq!(shown(&values, "d-gpu-total"), "—");
         assert_eq!(shown(&values, "d-gpu-shadow"), "—");
         assert_eq!(shown(&values, "d-gpu-frame"), "no frame");
@@ -850,7 +940,7 @@ mod tests {
             gpu_frame: 412,
             ..Workload::default()
         };
-        let values = readings(&filled(60, 33.3, 0.5), &measured);
+        let values = readings(&filled(60, 33.3, 0.5), &measured, &drawing());
         assert_eq!(shown(&values, "d-gpu-shadow"), "19.25 ms");
         assert_eq!(shown(&values, "d-gpu-main"), "8.40 ms");
         assert_eq!(shown(&values, "d-gpu-sdf"), "—", "an unrun pass is not a zero");
@@ -870,6 +960,7 @@ mod tests {
                 backend: "GpuFallback".to_string(),
                 ..Workload::default()
             },
+            &drawing(),
         );
         assert_eq!(shown(&values, "diag-backend"), "GpuFallback");
     }
@@ -895,7 +986,7 @@ mod tests {
             backend: "BrowserWebGpu".to_string(),
             ..Workload::default()
         };
-        let values = readings(&filled(60, 16.7, 0.5), &workload);
+        let values = readings(&filled(60, 16.7, 0.5), &workload, &drawing());
         assert_eq!(shown(&values, "d-fps"), "59.9");
         assert_eq!(shown(&values, "d-gap50"), "16.70 ms");
         assert_eq!(shown(&values, "d-cpu50"), "1.50");
@@ -906,6 +997,48 @@ mod tests {
         assert_eq!(shown(&values, "d-barrier"), "11 prog / 11 surf");
         assert!(shown(&values, "d-verdict").contains("VSYNC-CAPPED"));
         assert!(shown(&values, "d-gap05").contains("Hz"));
+    }
+
+    /// **An idle loop is reported as idle, with the age of what it is showing.**
+    ///
+    /// This is the panel's half of the fix. The frame numbers do not become wrong
+    /// when the loop stops — they become *historical*, and the difference between
+    /// "59.9 fps" and "59.9 fps, measured four seconds ago" is the whole value of
+    /// the card. The skipped count is the saving, stated as a number.
+    #[test]
+    fn an_idle_loop_says_so_and_dates_the_readings_it_is_holding() {
+        let idle = LoopState {
+            reason: "IDLE — nothing that decides a pixel has moved",
+            drawing: false,
+            held_ms: 4210.0,
+            drawn: 37,
+            skipped: 253,
+        };
+        let values = readings(&filled(60, 16.7, 0.5), &Workload::default(), &idle);
+        assert_eq!(shown(&values, "d-loop"), idle.reason);
+        assert_eq!(
+            shown(&values, "d-frames"),
+            "37 drawn / 253 skipped · last 4.2 s ago"
+        );
+        // The cadence itself is untouched: it is a real measurement of a run that
+        // has ended, and the row above is what says so.
+        assert_eq!(shown(&values, "d-fps"), "59.9");
+        // A live loop reads the same row without the alarm.
+        let live = readings(&filled(60, 16.7, 0.5), &Workload::default(), &drawing());
+        assert!(!shown(&live, "d-loop").contains("IDLE"));
+        assert_eq!(shown(&live, "d-frames"), "240 drawn / 0 skipped · last 0.0 s ago");
+        // ...and before the first frame there is a state to print rather than a
+        // blank.
+        assert!(LoopState::default().reason.contains("warming up"));
+        assert!(!LoopState::default().drawing);
+        // The panel states the rule itself, once, beside the row.
+        let notes: String = static_readings()
+            .iter()
+            .map(|(_, text)| text.clone())
+            .collect::<Vec<String>>()
+            .join(" ");
+        assert!(notes.contains("draws NOTHING"), "{notes}");
+        assert!(notes.contains("FORCE holds the loop open"), "{notes}");
     }
 
     /// The bars are the spans' shares of the measured total, and they sum to

@@ -45,7 +45,8 @@ use axiom_host::FramePacket;
 use wasm_bindgen::prelude::*;
 
 use crate::diagnostics::{
-    bars, readings, spark, static_readings, FrameHistory, FrameSample, Workload, FLUSH_MS,
+    bars, readings, spark, static_readings, FrameHistory, FrameSample, LoopState, Workload,
+    FLUSH_MS,
 };
 use crate::export::diagnostics_json;
 use crate::frame::packet_of_plan;
@@ -54,6 +55,7 @@ use crate::levers::{solo_camera, Levers};
 use crate::orbit::OrbitState;
 use crate::pointer_input::{self, SharedOrbit};
 use crate::preparation::presentation_request;
+use crate::redraw::{Redraw, RedrawGate};
 use crate::report::report;
 use crate::scene::{crucible_core, scene_camera};
 use crate::stations::all_surfaces;
@@ -321,6 +323,27 @@ pub fn start() {
 /// `set_capability_profile` re-derives the shader's capability word — paying
 /// either every frame would put the instrument's own cost inside the
 /// measurement, which is the one thing this panel may not do.
+/// ## The frame is not drawn unless it would look different
+///
+/// This loop used to call `app.render` unconditionally on every callback, which on
+/// a still camera looking at a static station is the whole frame — scene walk,
+/// packet, submission and the entire fragment bill — paid sixty times a second to
+/// put an identical image on the screen. [`crate::redraw`] holds the rule and the
+/// derivation; [`RedrawGate::decide`] is asked once, before anything is built, and
+/// its answer is the only thing standing between a callback and a frame.
+///
+/// Two consequences are worth stating here, where the loop is:
+///
+/// * **The `requestAnimationFrame` chain is never broken.** A skipped callback
+///   still schedules the next one, so a gesture, a lever or a station's clock is
+///   noticed on the very next frame with no wake-up path to get wrong. What a
+///   skipped callback costs is a handful of comparisons; what it saves is
+///   everything else.
+/// * **The tick counter advances only on a frame that is drawn.** Engine time is
+///   still `tick / 60` and tick *N* still produces exactly the pixels it always
+///   did — see [`crate::frame::time_at`] — but the ticks this page reaches are now
+///   always the contiguous prefix `0..=N`, which is what makes "replay this run"
+///   mean something. `crate::redraw`'s module docs argue the alternative.
 fn drive(
     mut app: RunningApp,
     mut backend: GpuBackendApi,
@@ -336,6 +359,10 @@ fn drive(
     let reported = std::cell::Cell::new(false);
     let mut scale = axiom_host::RenderScaleController::for_display();
     let floor = floor_scale();
+    // The gate reads each authored surface's own requirements once, here, to learn
+    // which of them bind the frame clock — so "station 5 animates" is a fact the
+    // app derives from the graphs rather than a body number written down twice.
+    let mut gate = RedrawGate::new(&surfaces);
     // What the backend has actually been told, so a lever that has not moved
     // costs nothing. Seeded from the page's opening configuration, which
     // `start` has already applied by construction.
@@ -347,8 +374,6 @@ fn drive(
 
     *held.borrow_mut() = Some(Closure::wrap(Box::new(move || {
         let mut panel = panel.borrow_mut();
-        let now = tick.get();
-        tick.set(now + 1);
         let entered = panel.now();
         let current = levers();
         // Only what moved. Each of these is a reallocation or a re-derivation;
@@ -374,47 +399,70 @@ fn drive(
         // resolution. Diagnostics-clock in, pixels out — nothing the simulation
         // reads is touched. The adaptive controller owns the scale while it is
         // on, so the half-res lever is inert alongside it and the panel's
-        // `render target` row shows which of the two is speaking.
+        // `render target` row shows which of the two is speaking. Turning it on
+        // also holds the loop open (see `Redraw::Held`): it is a closed loop over
+        // the measured frame interval, and an idle page has no interval to feed
+        // it.
         current.adaptive.then(|| {
             let observed = scale.observe((panel.last_gap_ms() * 1.0e6) as u64);
             apply_scale(&mut backend, observed);
         });
-        // Re-author the camera before the tick that reads it. `set_camera`
-        // reuses the existing camera node in place, so a moving camera costs no
-        // allocation and leaks no scene nodes. Nothing else about the frame
-        // changes: the same twelve bodies, the same surfaces, seen from
-        // wherever the user's last gesture left the eye — unless a station is
-        // solo'd, in which case the framing is the fixed one every solo shares,
-        // so two solo readings differ only in which shader is on the pixels.
-        current
+        // **The framing this callback would produce**, resolved before anything
+        // is built — because it is half of the question "would this frame look
+        // different?". A solo'd station uses the fixed framing every solo shares,
+        // so two solo readings differ only in which shader is on the pixels;
+        // otherwise it is wherever the user's last gesture left the eye.
+        let camera = current
             .solo
-            .map(|body| {
-                app.set_camera(scene_camera(), solo_camera(body));
-            })
-            .unwrap_or_else(|| orbit.borrow().apply(&mut app));
-        let outcome = app.render(now);
-        let rendered = panel.now();
-        let packet = packet_of_plan(&outcome, backbuffer.0, backbuffer.1, current.plan());
-        let packed = panel.now();
-        let drew = backend.present_packet_with_surfaces(&packet, &surfaces);
-        let presented_at = panel.now();
-        // Report what the FIRST frame could not honour, once — a draw naming a
-        // program the barrier did not prepare renders the constant fallback and
-        // is reported here rather than silently looking wrong.
-        (!reported.get()).then(|| {
-            reported.set(true);
-            let degraded = backend.frame_degradations(&packet);
-            log(&format!(
-                "shader-crucible: first frame drew={drew}, degraded={degraded:?}, \
-                 programs={} for {} surfaces",
-                backend.prepared_program_count(),
-                backend.prepared_surface_count()
-            ));
-        });
-        panel.record([entered, rendered, packed, presented_at], &packet, &backend);
+            .map(solo_camera)
+            .unwrap_or_else(|| orbit.borrow().camera_transform());
+        let redraw = gate.decide(camera, current);
+        // **The frame, or the decision not to build one.** Everything below the
+        // `if` is the cost this app used to pay unconditionally.
+        if redraw.draws() {
+            let now = tick.get();
+            tick.set(now + 1);
+            // Re-author the camera before the tick that reads it. `set_camera`
+            // reuses the existing camera node in place, so a moving camera costs
+            // no allocation and leaks no scene nodes. Nothing else about the
+            // frame changes: the same twelve bodies, the same surfaces.
+            app.set_camera(scene_camera(), camera);
+            let outcome = app.render(now);
+            let rendered = panel.now();
+            let packet = packet_of_plan(&outcome, backbuffer.0, backbuffer.1, current.plan());
+            let packed = panel.now();
+            let drew = backend.present_packet_with_surfaces(&packet, &surfaces);
+            let presented_at = panel.now();
+            // Report what the FIRST frame could not honour, once — a draw naming
+            // a program the barrier did not prepare renders the constant fallback
+            // and is reported here rather than silently looking wrong.
+            (!reported.get()).then(|| {
+                reported.set(true);
+                let degraded = backend.frame_degradations(&packet);
+                log(&format!(
+                    "shader-crucible: first frame drew={drew}, degraded={degraded:?}, \
+                     programs={} for {} surfaces",
+                    backend.prepared_program_count(),
+                    backend.prepared_surface_count()
+                ));
+            });
+            panel.record(
+                [entered, rendered, packed, presented_at],
+                &packet,
+                &backend,
+                redraw,
+            );
+        } else {
+            panel.skip(entered, redraw);
+        }
         // Dropped before the next frame is asked for, so nothing holds the
         // panel's borrow across a callback the export button could land in.
         drop(panel);
+        // **Always.** The chain is what notices the next gesture; a skipped
+        // callback is a few comparisons, and stopping it would mean owning a
+        // wake-up path for the pointer listeners, the wheel, every lever button
+        // and the page's own visibility — four chances to leave the app frozen
+        // in exchange for microseconds.
         schedule(&scheduler);
     }) as Box<dyn FnMut()>));
     schedule(&held);
@@ -433,8 +481,17 @@ struct Panel {
     clock: Option<web_sys::Performance>,
     /// The window of measured frames.
     history: FrameHistory,
-    /// When the previous frame's callback was entered, for the frame gap.
-    last_entry: f64,
+    /// **When the previous frame's callback was entered — if that callback drew.**
+    ///
+    /// `None` before the first frame and after every skipped one, which is the
+    /// same condition and deliberately so: a frame gap is a *cadence*, and a
+    /// cadence exists only between two consecutive drawn frames. The interval
+    /// across an idle is however long the user sat still, and averaging that into
+    /// a frame-time distribution would report a resting page as a stalling one.
+    /// So a frame that follows a skip is presented and counted and simply
+    /// contributes no sample — which is also what the first frame, whose
+    /// predecessor is the several-second device handshake, has always needed.
+    last_entry: Option<f64>,
     /// When the DOM was last written.
     last_flush: f64,
     /// **The previous frame's panel cost.**
@@ -461,6 +518,12 @@ struct Panel {
     /// What each element currently displays, so a value that has not moved is
     /// not re-written into the DOM.
     shown: std::collections::BTreeMap<&'static str, String>,
+    /// **What the frame loop is doing**, and how old the readings beside it are.
+    /// The panel's answer to "has this needle stopped, or has it broken?".
+    loop_state: LoopState,
+    /// The page clock when the last frame was actually submitted, for the age of
+    /// the image on the screen.
+    last_present: f64,
 }
 
 impl Panel {
@@ -469,13 +532,15 @@ impl Panel {
         Panel {
             clock: web_sys::window().and_then(|window| window.performance()),
             history: FrameHistory::new(),
-            last_entry: 0.0,
+            last_entry: None,
             last_flush: 0.0,
             carried_panel_ms: 0.0,
             mesh_triangles,
             last_workload: Workload::default(),
             stated: false,
             shown: std::collections::BTreeMap::new(),
+            loop_state: LoopState::default(),
+            last_present: 0.0,
         }
     }
 
@@ -492,31 +557,73 @@ impl Panel {
         self.history.newest().map_or(0.0, |sample| sample.gap_ms)
     }
 
-    /// Record one frame's four timestamps and, at most five times a second,
+    /// Record one drawn frame's four timestamps and, at most five times a second,
     /// write the panel.
-    fn record(&mut self, marks: [f64; 4], packet: &FramePacket, backend: &GpuBackendApi) {
+    ///
+    /// A frame with no drawn predecessor — the first one, or the first after an
+    /// idle — is counted and flushed but contributes **no sample**; see
+    /// [`Panel::last_entry`] for why a gap across an idle is not a cadence.
+    fn record(
+        &mut self,
+        marks: [f64; 4],
+        packet: &FramePacket,
+        backend: &GpuBackendApi,
+        redraw: Redraw,
+    ) {
         let [entered, rendered, packed, presented] = marks;
-        // The first frame has no predecessor to measure a gap against; it
-        // reports the frame's own main-thread time so the very first bar is a
-        // real duration rather than a several-second startup interval that would
-        // dominate the sparkline's scale for two seconds.
-        let gap_ms = (self.last_entry > 0.0)
-            .then(|| entered - self.last_entry)
-            .unwrap_or(presented - entered);
-        self.last_entry = entered;
-        self.history.push(FrameSample {
-            gap_ms,
+        let spans = FrameSample {
+            gap_ms: 0.0,
             render_ms: rendered - entered,
             packet_ms: packed - rendered,
             present_ms: presented - packed,
             panel_ms: self.carried_panel_ms,
+        };
+        self.last_entry.map(|previous| {
+            self.history.push(FrameSample {
+                gap_ms: entered - previous,
+                ..spans
+            });
         });
+        self.last_entry = Some(entered);
+        self.last_present = presented;
+        self.loop_state = LoopState {
+            reason: redraw.reason(),
+            drawing: true,
+            held_ms: 0.0,
+            drawn: self.loop_state.drawn + 1,
+            skipped: self.loop_state.skipped,
+        };
         (presented - self.last_flush >= FLUSH_MS).then(|| {
             self.last_flush = presented;
             self.last_workload = self.workload(packet, backend);
             self.flush();
         });
         self.carried_panel_ms = self.now() - presented;
+    }
+
+    /// **A callback that drew nothing**, because nothing that decides a pixel had
+    /// moved.
+    ///
+    /// It records no sample — there is no frame to measure — and it keeps
+    /// [`Workload`] exactly as it was, because the workload describes the image
+    /// that is *on the screen* and that image has not changed. What it does do is
+    /// keep flushing on the panel's own 5 Hz cadence, so the loop row and the age
+    /// of the readings stay current while everything above them stands still.
+    /// A panel that froze along with the frames could not tell the reader the
+    /// difference between an idle app and a hung one.
+    fn skip(&mut self, entered: f64, redraw: Redraw) {
+        self.last_entry = None;
+        self.loop_state = LoopState {
+            reason: redraw.reason(),
+            drawing: false,
+            held_ms: entered - self.last_present,
+            drawn: self.loop_state.drawn,
+            skipped: self.loop_state.skipped + 1,
+        };
+        (entered - self.last_flush >= FLUSH_MS).then(|| {
+            self.last_flush = entered;
+            self.flush();
+        });
     }
 
     /// The window the panel is showing — what the export reports.
@@ -527,6 +634,11 @@ impl Panel {
     /// The workload of the most recently flushed frame.
     fn workload_snapshot(&self) -> &Workload {
         &self.last_workload
+    }
+
+    /// What the frame loop is doing, and how old the window above is.
+    fn loop_snapshot(&self) -> &LoopState {
+        &self.loop_state
     }
 
     /// Write the panel into the page — unless the page has toggled it off, in
@@ -570,7 +682,7 @@ impl Panel {
                 // updated — and so only the values that actually moved cost a
                 // DOM write.
                 let changed: Vec<(&'static str, String)> =
-                    readings(&self.history, &self.last_workload)
+                    readings(&self.history, &self.last_workload, &self.loop_state)
                         .into_iter()
                         .filter(|(id, value)| self.shown.get(id) != Some(value))
                         .collect();
@@ -782,6 +894,22 @@ pub fn crucible_toggle_half_res() -> String {
     })
 }
 
+/// **Hold the frame loop open**, redrawing the identical frame every callback.
+///
+/// The one lever that adds work. The app idles when nothing that decides a pixel
+/// has moved (see [`crate::redraw`]), which is right — and which also means a still
+/// camera on a static station gives the panel no frames to measure. This is how a
+/// steady-state reading is taken on that configuration. It changes no pixel and no
+/// draw; only how often the same frame is submitted.
+#[wasm_bindgen]
+pub fn crucible_toggle_force() -> String {
+    let current = levers();
+    set_levers(Levers {
+        force: !current.force,
+        ..current
+    })
+}
+
 /// Hand the resolution to the adaptive controller, or take it back.
 #[wasm_bindgen]
 pub fn crucible_toggle_adaptive() -> String {
@@ -812,6 +940,7 @@ pub fn crucible_diagnostics() -> String {
             diagnostics_json(
                 panel.history(),
                 panel.workload_snapshot(),
+                panel.loop_snapshot(),
                 &levers(),
                 captured,
             )
@@ -820,6 +949,7 @@ pub fn crucible_diagnostics() -> String {
             diagnostics_json(
                 &FrameHistory::new(),
                 &Workload::default(),
+                &LoopState::default(),
                 &levers(),
                 captured,
             )

@@ -332,6 +332,7 @@ because Chrome's device emulation does not emulate a phone GPU.
 | `SOLO` | every body but one, at a **fixed framing** shared by all twelve | |
 | `HALF RES` | three quarters of the fragments (the render-scale ladder's floor) | |
 | `ADAPTIVE` | nothing — it hands the resolution to `RenderScaleController` | |
+| `FORCE REDRAW` | nothing — it **adds** the frames the idle loop skips, so a static station has a steady-state cost to measure | |
 | `DEVICE PX` | the backbuffer↔screen match | yes |
 | `RESET` | every lever, back to the shipping configuration | if needed |
 | `COPY DIAGNOSTICS` | — | |
@@ -356,7 +357,73 @@ context and a phone on `http://192.168.x.x` is exactly that.
 
 Each button is also a query parameter, so a configuration can be handed over as a
 link: `?captions=0`, `?shadows=0`, `?surfaces=3`, `?solo=1`, `?half=1`,
-`?adapt=1`, `?dpr=0`, `?back=WxH`.
+`?adapt=1`, `?force=1`, `?dpr=0`, `?back=WxH`.
+
+### The app does not redraw a frame that would look the same
+
+Until this row grew a `FORCE REDRAW` button, the crucible called `app.render` on
+**every** `requestAnimationFrame` callback, unconditionally, forever. On a still
+camera looking at a static station that is the same image sixty times a second:
+the scene walk, the packet, the submission and the whole fragment bill, paid again
+for a picture already on the screen. Measured on a desktop WebGPU adapter at
+`SOLO BODY 1`, that was **59.9 frames a second, 0.30 ms of main thread and 0.86 ms
+of GPU each** — about 18 ms of CPU and 51 ms of GPU per wall-clock second,
+producing nothing.
+
+`src/redraw.rs` holds the rule now: **a frame is submitted only when its pixels
+would differ from the pixels already on the screen.** The crucible's pixels are a
+pure function of exactly three things — the camera transform, the lever state, and
+the frame clock *when something on screen reads it* — and the third is derived
+rather than listed: each authored `Surface` is asked for its own
+`SurfaceRequirements`, and one that names `SurfaceInput::TIME` animates. Today
+that is station 5's wind and ripple; a station that starts binding `FieldOp::Time`
+starts animating with nobody editing a list.
+
+Measured in one session, same page, no reload:
+
+| Configuration | frames submitted / s | loop row |
+|---|---|---|
+| `SOLO BODY 1` with `FORCE REDRAW` (the old behaviour) | 59.89 | drawing — held open for measurement |
+| `SOLO BODY 1` (shipping) | **0.00** over 15.5 s, 925 callbacks skipped | IDLE — nothing that decides a pixel has moved |
+| `SOLO BODY 5` / `BODY 6` — station 5 | 60.5 / 57.5 | drawing — a clock-reading station is on screen |
+| shipping, all twelve bodies | 60.2 | drawing — a clock-reading station is on screen |
+| `SOLO BODY 1` with `ADAPTIVE` | 60.4 | drawing — held open for measurement |
+
+A 60-move synthetic orbit drag on a static frame drew **exactly 60 frames**, and
+one pointermove, one wheel notch or one lever click each draw **exactly one** —
+the gate is consulted at the top of the callback, from the same orbit state the
+old code read at the same point, so there is no wake-up path and no added latency.
+
+Two consequences are deliberate:
+
+* **The `requestAnimationFrame` chain is never broken.** A skipped callback still
+  schedules the next one. Stopping it would mean owning a wake path for the
+  pointer listeners, the wheel, every lever and the page's visibility — four
+  chances to leave the app frozen, in exchange for microseconds.
+* **The tick counter advances only on a drawn frame.** `time_at` is unchanged —
+  engine time is still `tick / 60`, still a count and never a wall clock, and tick
+  *N* still produces exactly the pixels it always did. What changes is that the
+  ticks this page reaches are always the contiguous prefix `0..=N`, so "replay this
+  run" means "step ticks 0 to N". Advancing on every callback instead would make
+  the presented set a sparse subset chosen by when the user happened to touch the
+  screen, which is a wall clock in disguise. The visible effect is that station 5
+  *pauses* while the loop idles and resumes where it stopped, which is honest: the
+  app's clock is its frame counter, and while it draws nothing there is nothing to
+  count.
+
+`ADAPTIVE` also holds the loop open, for its own reason:
+`RenderScaleController` is a closed loop over the measured frame *interval*, and
+feeding it the gap across a five-second idle would drop it straight to the
+ladder's floor.
+
+The panel resolves the tension this creates rather than hiding it. The FRAME card
+leads with a loop row — `IDLE — nothing that decides a pixel has moved`, plus
+`N drawn / M skipped · last 4.3 s ago` — so a cadence percentile is never mistaken
+for a live one, and the same block travels in `COPY DIAGNOSTICS` as `"loop"`. An
+instrument that manufactured frames so its needle kept moving would be reporting
+on work it created itself; one that froze without saying so could not be told from
+a hung page. So it idles, says it is idling, dates what it is holding, and offers
+a button.
 
 ### Two things the levers measured that nobody had measured before
 

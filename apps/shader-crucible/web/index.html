@@ -138,6 +138,11 @@
       </span>
       <button class="lv" id="lv-half" type="button">HALF RES</button>
       <button class="lv" id="lv-adapt" type="button">ADAPTIVE</button>
+      <!-- The only lever that ADDS work. The app draws a frame only when its
+           pixels would differ, so a still camera on a static station idles at
+           zero frames a second — correct, and also the one configuration in
+           which the panel has nothing to measure. This holds the loop open. -->
+      <button class="lv" id="lv-force" type="button">FORCE REDRAW</button>
       <button class="lv" id="lv-dpr" type="button">DEVICE PX</button>
       <button class="lv" id="lv-copy" type="button">COPY DIAGNOSTICS</button>
     </div>
@@ -145,8 +150,10 @@
       Each lever removes one thing and holds the rest, so a difference between
       two readings is attributable to it. SOLO draws one body at a fixed framing
       — same screen coverage every time — which is how one station's per-pixel
-      cost is told apart from another's. DEVICE PX reloads the page: the
-      backbuffer is fixed when the surface is configured.
+      cost is told apart from another's. FORCE REDRAW is the exception: it
+      removes nothing and adds the frames the idle loop skips, which is how a
+      steady-state cost is measured on a station that does not animate. DEVICE PX
+      reloads the page: the backbuffer is fixed when the surface is configured.
     </p>
   </section>
 
@@ -164,8 +171,14 @@
     <div id="diag-body">
       <section class="card">
         <h2>FRAME <span class="t m">m</span></h2>
+        <!-- The qualifier on everything under it. The loop draws only when the
+             pixels would change, so these numbers can be a live cadence or the
+             last run of frames, and the reader has to know which before reading
+             one. -->
+        <p class="verdict" id="d-loop"></p>
         <p class="big"><span id="d-fps">—</span><em>fps</em></p>
         <dl>
+          <dt>loop</dt><dd><span id="d-frames">—</span><span class="t d">d</span></dd>
           <dt>p50</dt><dd><span id="d-gap50">—</span><span class="t m">m</span></dd>
           <dt>p95</dt><dd><span id="d-gap95">—</span><span class="t m">m</span></dd>
           <dt>worst</dt><dd><span id="d-gapmax">—</span><span class="t m">m</span></dd>
@@ -178,6 +191,7 @@
         <p class="scale"><span>0</span><span>frame · fill = main thread</span>
           <span id="d-scale">—</span></p>
         <p class="note" id="d-note-gap"></p>
+        <p class="note" id="d-note-loop"></p>
       </section>
 
       <section class="card">
@@ -305,6 +319,7 @@
     crucible_step_solo,
     crucible_toggle_half_res,
     crucible_toggle_adaptive,
+    crucible_toggle_force,
     crucible_diagnostics,
   } from "./pkg/axiom_shader_crucible.js";
   await init();
@@ -334,6 +349,7 @@
     set("lv-solo", "SOLO " + state.solo_label, state.solo !== null);
     set("lv-half", onOff("HALF RES", state.half_res), state.half_res);
     set("lv-adapt", onOff("ADAPTIVE", state.adaptive), state.adaptive);
+    set("lv-force", onOff("FORCE REDRAW", state.force), state.force);
     set("lv-dpr", onOff("DEVICE PX", state.device_pixels), !state.device_pixels);
     document.getElementById("lv-reset").dataset.alt = state.shipping ? "0" : "1";
   };
@@ -349,6 +365,7 @@
   wire("lv-solo-prev", () => crucible_step_solo(-1));
   wire("lv-half", crucible_toggle_half_res);
   wire("lv-adapt", crucible_toggle_adaptive);
+  wire("lv-force", crucible_toggle_force);
 
   // RESET returns every runtime lever, and reloads for the two that decide the
   // backbuffer and therefore cannot move without one — so getting back to the

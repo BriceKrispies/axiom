@@ -23,7 +23,23 @@
 //! | solo | every body but one, at a fixed framing | no |
 //! | half res | 3/4 of the fragments | no |
 //! | adaptive | nothing — it *adds* a controller | no |
+//! | force | nothing — it *adds* the frames the idle loop skips | no |
 //! | device pixels | the backbuffer↔screen match | **yes** |
+//!
+//! ### Why there is a lever whose whole job is to make the app do more work
+//!
+//! `force` is the odd one out: every other lever removes something so a difference
+//! between two readings can be attributed to it, and this one removes nothing at
+//! all. It exists because [`crate::redraw`] stopped the app redrawing an image that
+//! had not changed — which is the correct behaviour and also, on a still camera
+//! looking at a static station, exactly the configuration in which the panel has no
+//! frames to measure. The steady-state cost of a station is a real question, and an
+//! instrument that can no longer answer it has been made worse, not better.
+//!
+//! So the loop can be held open on demand. `FORCE` changes no pixel and no draw —
+//! `tests::force_changes_how_often_a_frame_is_drawn_and_nothing_about_it` pins
+//! that — it changes only *how often* the identical frame is submitted, which is
+//! precisely what a per-frame cost is measured over.
 //!
 //! ### Why "shadows off" is two mechanisms and not one
 //!
@@ -129,6 +145,14 @@ pub struct Levers {
     pub half_res: bool,
     /// Whether the adaptive render-scale controller is driving the resolution.
     pub adaptive: bool,
+    /// **Whether the frame loop is held open**, redrawing the identical frame
+    /// every callback instead of idling once nothing changes.
+    ///
+    /// The one lever that adds work rather than removing it, and the one the panel
+    /// needs pulled to measure a steady-state frame cost on a configuration that
+    /// would otherwise stop drawing. See [`crate::redraw`] for the rule it
+    /// overrides and the module docs above for why it exists.
+    pub force: bool,
     /// Whether the backbuffer matches the device's own pixels (the shipping
     /// behaviour) or is pinned at the authored 1280x640. **A reload lever**: the
     /// backbuffer is fixed when the surface is configured.
@@ -149,6 +173,10 @@ impl Levers {
         solo: None,
         half_res: false,
         adaptive: false,
+        // The app ships idling: it draws when the image would change and not
+        // otherwise. Holding the loop open is something you ask for to take a
+        // measurement, never something the app does to you.
+        force: false,
         device_pixels: true,
         back: None,
     };
@@ -183,6 +211,7 @@ impl Levers {
                 .map(|body| body - 1),
             half_res: value("half").as_deref() == Some("1"),
             adaptive: value("adapt").as_deref() == Some("1"),
+            force: value("force").as_deref() == Some("1"),
             device_pixels: value("dpr").as_deref() != Some("0"),
             back: value("back").and_then(|raw| {
                 raw.split_once('x')
@@ -260,7 +289,8 @@ impl Levers {
         format!(
             "{{\"captions\":{},\"shadows\":{},\"surfaces\":{},\"surfaces_total\":{},\
              \"solo\":{},\"solo_label\":\"{}\",\"half_res\":{},\"adaptive\":{},\
-             \"device_pixels\":{},\"back\":{},\"reload_required\":{},\"shipping\":{}}}",
+             \"force\":{},\"device_pixels\":{},\"back\":{},\"reload_required\":{},\
+             \"shipping\":{}}}",
             self.captions,
             self.shadows,
             self.presented_surfaces(),
@@ -271,6 +301,7 @@ impl Levers {
             self.solo_label(),
             self.half_res,
             self.adaptive,
+            self.force,
             self.device_pixels,
             self.back
                 .map(|(w, h)| format!("\"{w}x{h}\""))
@@ -403,7 +434,7 @@ mod tests {
     #[test]
     fn every_lever_is_reachable_from_the_query_string() {
         let levers = Levers::from_query(
-            "?captions=0&shadows=0&surfaces=3&solo=5&half=1&adapt=1&dpr=0&back=640x320",
+            "?captions=0&shadows=0&surfaces=3&solo=5&half=1&adapt=1&force=1&dpr=0&back=640x320",
         );
         assert_eq!(
             levers,
@@ -414,6 +445,7 @@ mod tests {
                 solo: Some(4),
                 half_res: true,
                 adaptive: true,
+                force: true,
                 device_pixels: false,
                 back: Some((640, 320)),
             }
@@ -429,8 +461,10 @@ mod tests {
         assert!(!Levers::SHIPPING.reload_required());
         assert!(Levers::from_query("?dpr=0").reload_required());
         assert!(Levers::from_query("?back=640x320").reload_required());
-        assert!(!Levers::from_query("?captions=0&solo=1&half=1&adapt=1&surfaces=0")
-            .reload_required());
+        assert!(
+            !Levers::from_query("?captions=0&solo=1&half=1&adapt=1&force=1&surfaces=0")
+                .reload_required()
+        );
         assert_eq!(Levers::from_query("?back=nonsense").back, None);
     }
 
@@ -585,7 +619,7 @@ mod tests {
         let json = Levers::SHIPPING.state_json();
         assert!(json.starts_with('{') && json.ends_with('}'));
         ["captions", "shadows", "surfaces", "solo_label", "half_res", "adaptive",
-         "device_pixels", "back", "reload_required", "shipping"]
+         "force", "device_pixels", "back", "reload_required", "shipping"]
             .iter()
             .for_each(|key| assert!(json.contains(&format!("\"{key}\":")), "{json}"));
         assert!(json.contains("\"shipping\":true"));
@@ -595,5 +629,26 @@ mod tests {
         }
         .state_json()
         .contains("\"shipping\":false"));
+    }
+
+    /// **`FORCE` is not a rendering lever.** It holds the frame loop open so the
+    /// panel has frames to measure; it must not change one thing about the frame
+    /// that is then measured, or the reading would be of a different app.
+    ///
+    /// The plan a forced frame is cut with is byte-identical to the plan an idle
+    /// one would have been cut with — same draws, same programs, same light
+    /// projection — and only [`Levers::is_shipping`] can tell the two apart, which
+    /// is how the page knows to light the button up.
+    #[test]
+    fn force_changes_how_often_a_frame_is_drawn_and_nothing_about_it() {
+        let forced = Levers {
+            force: true,
+            ..Levers::SHIPPING
+        };
+        assert_eq!(forced.plan(), Levers::SHIPPING.plan());
+        assert_eq!(forced.presented_surfaces(), Levers::SHIPPING.presented_surfaces());
+        assert!(!forced.is_shipping(), "the page must show FORCE as pulled");
+        assert!(!forced.reload_required(), "FORCE moves at runtime");
+        assert!(forced.state_json().contains("\"force\":true"));
     }
 }

@@ -35,7 +35,9 @@
 //! and hands the result to the page. That is what lets the tests below assert on
 //! the real export rather than on a mock of it.
 
-use crate::diagnostics::{sample_ratio, FrameHistory, FrameSample, Stat, Verdict, Workload, WINDOW};
+use crate::diagnostics::{
+    sample_ratio, FrameHistory, FrameSample, LoopState, Stat, Verdict, Workload, WINDOW,
+};
 use crate::label::{LINES, STATION_OF_SLOT};
 use crate::levers::{Levers, BODY_COUNT, BODY_SURFACE};
 use crate::stations::all_surfaces;
@@ -184,9 +186,17 @@ fn cost_json(cost: &StationCost) -> String {
 /// reading, never an input to anything. Nothing in this function can reach
 /// `EvalContext::time`; the deterministic path does not read a wall clock and
 /// this does not change that.
+///
+/// **The `loop` block is not optional decoration.** The app submits a frame only
+/// when its pixels would differ (see [`crate::redraw`]), so the `frame` block below
+/// can be a live cadence or the last run before the loop went quiet — and an export
+/// carrying "59.9 fps" with no way to tell that it was measured eleven seconds ago
+/// would be the panel inventing a number, which is the one thing this app is
+/// written not to do.
 pub fn diagnostics_json(
     history: &FrameHistory,
     workload: &Workload,
+    loop_state: &LoopState,
     levers: &Levers,
     captured_ms: f64,
 ) -> String {
@@ -199,6 +209,8 @@ pub fn diagnostics_json(
         "{{\"app\":\"shader-crucible\",\"captured_ms\":{captured_ms:.1},\
          \"frames_in_window\":{frames},\"window\":{WINDOW},\
          \"levers\":{levers_json},\
+         \"loop\":{{\"reason\":{loop_reason},\"drawing\":{loop_drawing},\
+         \"held_ms\":{loop_held:.1},\"drawn\":{loop_drawn},\"skipped\":{loop_skipped}}},\
          \"frame\":{{\"fps_p50\":{fps:.2},\"gap_ms\":{gap_json},\"main_ms\":{main_json},\
          \"cpu_ms\":{cpu_json},\"residual_ms\":{residual_json},\"verdict\":{verdict}}},\
          \"spans_p50_ms\":{{\"app_render\":{render:.3},\"packet_of\":{packet:.3},\
@@ -215,6 +227,11 @@ pub fn diagnostics_json(
          \"stations\":[{stations}]}}",
         frames = history.len(),
         levers_json = levers.state_json(),
+        loop_reason = quoted(loop_state.reason),
+        loop_drawing = loop_state.drawing,
+        loop_held = loop_state.held_ms,
+        loop_drawn = loop_state.drawn,
+        loop_skipped = loop_state.skipped,
         fps = 1000.0 / gap.p50.max(f64::MIN_POSITIVE),
         gap_json = stat_json(&gap),
         main_json = stat_json(&main),
@@ -282,6 +299,19 @@ mod tests {
             })
         });
         history
+    }
+
+    /// A loop that has gone quiet on a static station — the state this app now
+    /// spends most of its life in, and the one an export has to be able to
+    /// describe.
+    fn idling() -> LoopState {
+        LoopState {
+            reason: "IDLE — nothing that decides a pixel has moved",
+            drawing: false,
+            held_ms: 11_400.0,
+            drawn: 42,
+            skipped: 683,
+        }
     }
 
     fn a_workload() -> Workload {
@@ -406,7 +436,7 @@ mod tests {
     /// configuration rather than floating free.
     #[test]
     fn the_export_carries_everything_the_panel_knows() {
-        let json = diagnostics_json(&a_window(), &a_workload(), &Levers::SHIPPING, 1234.5);
+        let json = diagnostics_json(&a_window(), &a_workload(), &idling(), &Levers::SHIPPING, 1234.5);
         [
             "\"levers\":",
             "\"frame\":",
@@ -424,6 +454,12 @@ mod tests {
             "\"fragment_nodes\":",
             "\"constant\":",
             "\"gpu\":{\"available\":false",
+            // The loop state travels with the window, so a `frame` block that is
+            // eleven seconds old cannot be read as a live cadence.
+            "\"loop\":{\"reason\":",
+            "\"drawing\":false",
+            "\"skipped\":683",
+            "\"held_ms\":11400.0",
         ]
         .iter()
         .for_each(|needle| assert!(json.contains(needle), "missing {needle} in {json}"));
@@ -440,7 +476,7 @@ mod tests {
     /// as a zero, which downstream arithmetic would happily average.
     #[test]
     fn the_export_refuses_to_invent_a_gpu_time() {
-        let json = diagnostics_json(&a_window(), &a_workload(), &Levers::SHIPPING, 0.0);
+        let json = diagnostics_json(&a_window(), &a_workload(), &idling(), &Levers::SHIPPING, 0.0);
         assert!(json.contains("\"available\":false"));
         assert!(json.contains("\"total_ms\":null"));
         assert!(json.contains("no timestamp query"));
@@ -458,7 +494,7 @@ mod tests {
             gpu_frame: 412,
             ..a_workload()
         };
-        let json = diagnostics_json(&a_window(), &measured, &Levers::SHIPPING, 0.0);
+        let json = diagnostics_json(&a_window(), &measured, &idling(), &Levers::SHIPPING, 0.0);
         assert!(json.contains("\"available\":true"));
         assert!(json.contains("\"resolved_frame\":412"));
         assert!(json.contains("\"shadow\":19.2500"));
@@ -474,7 +510,7 @@ mod tests {
             solo: Some(0),
             ..Levers::SHIPPING
         };
-        let json = diagnostics_json(&a_window(), &a_workload(), &pulled, 0.0);
+        let json = diagnostics_json(&a_window(), &a_workload(), &idling(), &pulled, 0.0);
         assert!(json.contains("\"captions\":false"));
         assert!(json.contains("\"solo\":1"));
         assert!(json.contains("\"shipping\":false"));

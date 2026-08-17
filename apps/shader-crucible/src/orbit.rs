@@ -13,13 +13,19 @@
 //! needs: a camera you can re-author every frame for free (`set_camera` reuses
 //! the sole camera node in place) and validated math types.
 //!
+//! This type **produces a [`Transform`] and does not apply one**. The frame loop
+//! needs the transform in its own hand before it decides whether to build a frame
+//! at all — the eye is half of "would this frame look different?" (see
+//! [`crate::redraw`]) — and a state that both answered that question and
+//! separately re-authored the camera would be two paths to one framing.
+//!
 //! It is also browser-free, so it compiles and is tested on native: the geometry
 //! of an orbit has nothing to do with a DOM. `src/pointer_input.rs` is the
 //! wasm32-only half that turns real pointer events into calls on this type.
 
 use axiom::prelude::*;
 
-use crate::scene::{camera_target, scene_camera, CAMERA_EYE, CAMERA_FOV_DEGREES};
+use crate::scene::{camera_target, CAMERA_EYE, CAMERA_FOV_DEGREES};
 
 /// How far the camera may tip above or below the horizon, in radians (~83.1°).
 ///
@@ -163,12 +169,6 @@ impl OrbitState {
         self.transform
     }
 
-    /// Re-author the running app's camera from this state. Cheap enough to call
-    /// every frame: `set_camera` reuses the existing camera node in place.
-    pub fn apply(&self, running: &mut RunningApp) {
-        running.set_camera(scene_camera(), self.transform);
-    }
-
     /// The current orbit distance, in world units.
     pub fn distance(&self) -> f32 {
         self.distance
@@ -235,6 +235,7 @@ fn pan_units_per_drag() -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::scene_camera;
 
     /// A finite-precision comparison for derived angles/positions.
     fn close(a: f32, b: f32) -> bool {
@@ -359,10 +360,13 @@ mod tests {
     #[test]
     fn the_applied_camera_is_the_state_the_gestures_left_behind() {
         let (mut app, _) = crate::scene::crucible_core();
+        let apply = |app: &mut RunningApp, state: &OrbitState| {
+            app.set_camera(scene_camera(), state.camera_transform());
+        };
         // The seed changes nothing: applying it re-authors the same framing the
         // scene was built with, so the untouched page draws what it always did.
         let authored = app.render(0).camera_view_proj();
-        OrbitState::framed().apply(&mut app);
+        apply(&mut app, &OrbitState::framed());
         assert_eq!(
             app.render(0).camera_view_proj(),
             authored,
@@ -372,12 +376,35 @@ mod tests {
         let mut state = OrbitState::framed();
         state.orbit(0.3, -0.1);
         state.zoom_by(0.6);
-        state.apply(&mut app);
+        apply(&mut app, &state);
         let before = app.render(0).camera_view_proj();
         assert_ne!(before, authored, "gesturing did not move the camera");
         state.orbit(0.4, 0.0);
-        state.apply(&mut app);
+        apply(&mut app, &state);
         let after = app.render(1).camera_view_proj();
         assert_ne!(before, after, "orbiting did not change the camera matrix");
+    }
+
+    /// **A gesture moves the transform the frame loop compares.** The redraw gate
+    /// keys on `camera_transform()`, so a drag that changed the eye without
+    /// changing that value would leave a stale image on the screen — and a
+    /// "gesture" that changes nothing (a zoom already at the clamp) must correctly
+    /// leave it alone.
+    #[test]
+    fn every_gesture_that_moves_the_eye_moves_the_transform_the_loop_keys_on() {
+        let still = OrbitState::framed().camera_transform();
+        let after = |gesture: fn(&mut OrbitState)| {
+            let mut state = OrbitState::framed();
+            gesture(&mut state);
+            state.camera_transform()
+        };
+        assert_ne!(after(|s| s.orbit(0.05, 0.0)), still, "an orbit drag");
+        assert_ne!(after(|s| s.orbit(0.0, 0.05)), still, "a pitch drag");
+        assert_ne!(after(|s| s.zoom_by_wheel(-100.0)), still, "a wheel notch");
+        assert_ne!(after(|s| s.pan(0.05, 0.0)), still, "a pan");
+        // A no-op gesture is genuinely a no-op, which is what lets the loop idle
+        // through a held-still finger.
+        assert_eq!(after(|s| s.orbit(0.0, 0.0)), still);
+        assert_eq!(after(|s| s.zoom_by(1.0)), still);
     }
 }
