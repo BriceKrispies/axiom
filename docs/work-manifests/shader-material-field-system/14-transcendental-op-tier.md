@@ -123,6 +123,17 @@ real. Tests that enumerate operators use `FieldOp::ALL`.
 | `Pow` | 2 | 0 | width-generic | per lane `f32::powf(a, b)`; `a < 0` with non-integral `b` yields `0.0`, documented, not NaN |
 | `Exp` | 1 | 0 | width-generic | per lane `f32::exp` |
 
+> **CORRECTION — that `Pow` rule is necessary but not sufficient.** WGSL's
+> `pow(e1, e2)` is undefined for `e1 < 0` **including integral exponents**, and
+> for `e1 == 0` with `e2 <= 0`. A CPU rule returning `-8.0` for `Pow(-2, 3)`
+> would therefore be unmirrorable — a silent CPU/GPU divergence. The shipped rule
+> covers all three hazards in one statement: **`Pow(a, b) = f32::powf(a, b)`
+> where `a > 0`, and `0.0` everywhere else.** Total, never `NaN`, never an
+> infinity from a finite base, and it mirrors exactly as
+> `select(vec4(0.0), pow(max(a, 0.0), b), a > 0.0)` — the builtin is never asked
+> for a value it lacks. Documented consequence: a square is `Mul(x, x)`, not
+> `Pow(x, 2)`.
+
 `Div` is still **excluded** — division by zero remains a NaN source and
 `Pow(x, -1)` covers reciprocal with a documented zero behaviour.
 
@@ -140,6 +151,23 @@ table:
 const TRANSCENDENTAL_TOLERANCE: f32 = 1e-3;   // Sin, Cos, Pow, Exp
 const TOLERANCE: f32 = 1e-4;                  // everything else, unchanged
 ```
+
+> **OUTCOME — the premise was wrong, and the finding inverts it.** Measured on a
+> discrete Vulkan adapter over 24 sampled contexts: `Sin` 5.07e-7, `Cos` 4.18e-7,
+> `Exp` 2.39e-7, `Pow` 2.29e-5 (at output magnitude 103.8 — i.e. 2.2e-7
+> *relative*). All four agree to roughly **1e-6 relative, about ten f32 ulps**.
+>
+> **The transcendental tier did not need a tolerance wider than `1e-4`. It needed
+> a tighter one.** Both declared constants — `1e-6` for `Sin`/`Cos`/`Exp` and
+> `3e-5` for `Pow`, split because `Pow`'s larger absolute delta is magnitude and
+> not inaccuracy — sit *below* the exact tier's `1e-4`. The `1e-3` starting bound
+> below would have been 40× looser than the hardware needs.
+>
+> That means **manifest 01's original justification for excluding these operators
+> was false.** They were excluded on the belief that they "differ between CPU and
+> GPU `f32` by more than the parity tolerance"; they do not. The algebra was
+> capped for a hazard that measurement does not support. The real constraints on
+> `Pow` turned out to be *definedness*, not precision (see below).
 
 **Requirements on this number.** `1e-3` is a starting bound, not a finding. The
 parity test must **record the measured worst-case delta per operator** in its

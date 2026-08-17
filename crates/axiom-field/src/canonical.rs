@@ -42,7 +42,7 @@ use crate::field_params::FieldParams;
 use crate::field_value::FieldValue;
 
 /// Which operators may have their input ids sorted before keying and emitting.
-/// Indexed by the operator code, in discriminant order.
+/// Indexed by the operator code, in code order.
 ///
 /// Only true commutativity qualifies. `Sub` is absent for the obvious reason;
 /// `Dot` is absent because sorting is only sound where it changes nothing, and
@@ -60,6 +60,7 @@ const COMMUTATIVE: [bool; FIELD_OP_COUNT] = [
     false, false,                       // Compose / Component
     false, false,                       // Noise / Fbm
     false,                              // Transform
+    false, false, false, false,         // Sin / Cos / Pow / Exp
 ];
 
 /// The canonical form of `source`, which the caller has already validated.
@@ -160,7 +161,7 @@ fn fold_and_share(source: &RecipeGraph) -> Shared {
 /// permutation — and the input's *id* for a commutative one. One expression, no
 /// branch, and a non-commutative node's operand order is provably untouched.
 fn order(op: FieldOp, inputs: &[NodeId], remap: &[NodeId]) -> Vec<NodeId> {
-    let commutative = usize::from(COMMUTATIVE[op as usize]);
+    let commutative = usize::from(COMMUTATIVE[op.code() as usize]);
     let mut keyed: Vec<(u32, NodeId)> = inputs
         .iter()
         .enumerate()

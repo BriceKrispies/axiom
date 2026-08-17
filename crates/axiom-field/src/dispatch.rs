@@ -1,7 +1,7 @@
 //! Branchless operator dispatch: a `const` table of function pointers indexed by
 //! the operator code.
 //!
-//! One row per [`crate::FieldOp`], in discriminant order, so `op as usize`
+//! One row per [`crate::FieldOp`], in code order, so `op.code() as usize`
 //! selects the operator — a table index, never a `match` (the Branchless Law) and
 //! never a generic closure parameter (the Axiom State Law bans an `F: Fn(..)`
 //! bound, which is why `proc-core`'s evaluator cannot be reused here even
@@ -15,7 +15,7 @@
 use crate::eval::FieldEvalStep;
 use crate::field_op::FIELD_OP_COUNT;
 use crate::field_value::FieldValue;
-use crate::ops::{arith, shape, source, spatial, vector};
+use crate::ops::{arith, shape, source, spatial, transcendental, vector};
 
 /// A field operator: one node's step in, its value out.
 type FieldOpFn = fn(&FieldEvalStep<'_>) -> FieldValue;
@@ -33,6 +33,7 @@ const OPS: [FieldOpFn; FIELD_OP_COUNT] = [
     vector::dot, vector::length, vector::normalize,
     vector::compose, vector::component,
     spatial::noise, spatial::fbm, spatial::transform,
+    transcendental::sine, transcendental::cosine, transcendental::power, transcendental::exponential,
 ];
 
 /// Evaluate one node: select its operator by code and run it.
@@ -76,7 +77,7 @@ mod tests {
         assert_eq!(
             field_eval(FIELD_OP_COUNT as u16, &step),
             FieldValue::ZERO,
-            "code 23 names no operator"
+            "code 27 names no operator"
         );
         assert_eq!(field_eval(u16::MAX, &step), FieldValue::ZERO);
     }

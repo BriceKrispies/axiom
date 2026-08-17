@@ -78,6 +78,14 @@ mod parity_vertex;
 // lighting maths a model takes) rather than a third operator.
 #[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
 mod parity_lighting;
+// The TRANSCENDENTAL tier's four cases, and the **measurement** its per-operator
+// tolerance is set from: it commits the worst delta per operator as data,
+// re-measures it every run, and fails if the record has drifted or if a declared
+// constant is loose against it. Its own file for the same reason the two above
+// are, and because a budget that is measured rather than chosen deserves to be
+// found by the name of the thing it measures.
+#[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
+mod parity_transcendental;
 // **The picture.** A prepared program, bound to the real `SceneRenderer`, and the
 // pixels it produced: a displacing surface deforms a captured silhouette, a
 // field-authored colour renders the field's ramp rather than the constant

@@ -66,7 +66,7 @@ const BINDING_COUNT_MISMATCH: FieldError = FieldError::at(
 );
 
 /// Which operators are a graph's **bindable leaves** — the free variables an
-/// inline substitutes. Indexed by operator code, in discriminant order.
+/// inline substitutes. Indexed by operator code, in code order.
 ///
 /// `Point` and `Uv` are the domain a library effect is written over, and `Param`
 /// is its knob. `Normal` and `Time` are deliberately absent: they are ambient
@@ -85,6 +85,7 @@ const BINDABLE: [bool; FIELD_OP_COUNT] = [
     false, false,                       // Compose / Component
     false, false,                       // Noise / Fbm
     false,                              // Transform
+    false, false, false, false,         // Sin / Cos / Pow / Exp
 ];
 
 impl FieldGraph {

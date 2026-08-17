@@ -314,6 +314,7 @@ mod tests {
     use axiom_recipe::{Param, RecipeGraph, RecipeId};
 
     use crate::field_graph::FieldGraph;
+    use crate::field_op::FIELD_OP_COUNT;
     use crate::field_value::FieldValue;
 
     /// One node, spelled as raw words so a test can build shapes the typed
@@ -380,7 +381,7 @@ mod tests {
             vec![
                 node(FieldOp::Point, &[], &[]),
                 Raw {
-                    op: 23,
+                    op: FIELD_OP_COUNT as u16,
                     words: Vec::new(),
                     inputs: Vec::new(),
                 },

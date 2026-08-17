@@ -22,6 +22,15 @@
 //! * **`Transform`** — its matrix lives in the parameter table too, for the same
 //!   reason.
 //!
+//! **`Sin`, `Cos`, `Pow` and `Exp` are folded.** They are pure and total
+//! functions of their inputs, so nothing about the transcendental tier's separate
+//! CPU↔GPU tolerance argues against folding one. The consequence is worth
+//! stating: a folded `Sin` is computed **on the CPU** and baked into a `Const`,
+//! which every backend then reads verbatim — so a graph that folds is *more*
+//! CPU-exact than the same graph unfolded, where the GPU would approximate the
+//! sine itself. That is a strict improvement, never a divergence, because
+//! folding only ever happens where the input was already a constant.
+//!
 //! **`Noise` and `Fbm` are folded.** They are pure functions of their seed
 //! words, their knob words and their input point, and now that the CPU evaluator
 //! is the semantic reference for what every backend must compute, folding one is
@@ -45,7 +54,7 @@ use crate::field_params::FieldParams;
 use crate::field_value::FieldValue;
 
 /// Which operators canonicalisation may evaluate ahead of time, indexed by the
-/// operator code in discriminant order.
+/// operator code, in code order.
 ///
 /// `false` means "the value is not a function of this node alone" — it reads the
 /// evaluation context or the parameter table — never "the arithmetic is
@@ -62,6 +71,7 @@ const FOLDABLE: [bool; FIELD_OP_COUNT] = [
     true,  true,                            // Compose / Component
     true,  true,                            // Noise / Fbm
     false,                                  // Transform
+    true,  true,  true,  true,              // Sin / Cos / Pow / Exp
 ];
 
 /// The value of the node `op` computes from `inputs`, or `None` when it cannot
@@ -77,7 +87,7 @@ pub(crate) fn fold_value(
     inputs: &[Option<FieldValue>],
     params: &[Param],
 ) -> Option<FieldValue> {
-    FOLDABLE[op as usize]
+    FOLDABLE[op.code() as usize]
         .then(|| inputs.iter().copied().collect::<Option<Vec<FieldValue>>>())
         .flatten()
         .map(|values| {
@@ -253,6 +263,30 @@ mod tests {
                 .map(|value| value.ty()),
             Some(FieldType::Scalar)
         );
+    }
+
+    #[test]
+    fn the_transcendental_tier_folds_on_the_cpu_and_bakes_the_exact_value() {
+        assert_eq!(fold(FieldOp::Sin, &[scalar(0.5)]), scalar(0.5_f32.sin()));
+        assert_eq!(fold(FieldOp::Cos, &[scalar(0.5)]), scalar(0.5_f32.cos()));
+        assert_eq!(fold(FieldOp::Exp, &[scalar(2.0)]), scalar(2.0_f32.exp()));
+        assert_eq!(fold(FieldOp::Pow, &[scalar(2.0), scalar(8.0)]), scalar(256.0));
+        // The documented rule folds too — a negative base is a value, not a
+        // refusal, so the node collapses rather than surviving as a NaN source.
+        assert_eq!(fold(FieldOp::Pow, &[scalar(-2.0), scalar(0.5)]), scalar(0.0));
+        assert_eq!(
+            fold(FieldOp::Sin, &[vec3(0.0, 1.0, 2.0)]),
+            vec3(0.0, 1.0_f32.sin(), 2.0_f32.sin())
+        );
+    }
+
+    #[test]
+    fn an_exp_that_overflows_is_refused_exactly_as_any_other_non_finite_fold_is() {
+        // `NonFiniteConstant` is the validation rule this protects: a folded
+        // infinity would be minted as a `Const` the checker then rejects, so the
+        // folder refuses first and the node survives to overflow identically
+        // wherever it is evaluated.
+        assert_eq!(fold(FieldOp::Exp, &[scalar(1.0e6)]), None);
     }
 
     #[test]

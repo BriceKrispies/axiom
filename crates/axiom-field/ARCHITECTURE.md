@@ -90,11 +90,12 @@ FieldBuilder  ──push/declare──>  FieldBuilder  ──build(output)──
   `FieldType` tag plus four `Scalar` lanes, where every lane past the type's
   width holds a fixed documented default. Reading a wider accessor on a narrower
   value is *defined*, which is what makes the accessors branchless.
-* **`FieldOp`** — a closed 23-operator algebra, `#[repr(u16)]`, discriminant ==
-  table index. There is no registry, no runtime-extensible verb and no dynamic
-  dispatch: **a new visual effect is a new graph, never a new Rust function.**
-* **`FieldSignature` / `SIGNATURES`** — one `const` row per operator, in
-  discriminant order, giving its arity, its parameter-word count, and the rule
+* **`FieldOp`** — a closed 27-operator algebra: a **`u16` newtype with a `const`
+  catalog**, code == table index. There is no registry, no runtime-extensible
+  verb and no dynamic dispatch: **a new visual effect is a new graph, never a new
+  Rust function.**
+* **`FieldSignature` / `SIGNATURES`** — one `const` row per operator, in code
+  order, giving its arity, its parameter-word count, and the rule
   by which its output type is derived. `SignatureKind` is fieldless; the
   concrete type a fixed-output row yields rides in a separate field, again the
   tagged-struct discipline.
@@ -102,6 +103,48 @@ FieldBuilder  ──push/declare──>  FieldBuilder  ──build(output)──
   ids and the canonical node encoding come from the container for free. What
   this layer adds is the declared `output` node (a container has no notion of a
   *result*), the parameter table, and the meaning of the operator codes.
+
+### Why `FieldOp` is a `u16` newtype and not an enum
+
+It was an enum, `#[repr(u16)]`, with 23 variants against the
+`engine_no_large_enums` cap of 24. That cap was never a statement about the
+algebra — it is a statement about the shape carrying it, and the fix the lint
+prescribes (nested sub-enums) is exactly wrong for this design: nesting resets
+the variant count per level, while the whole dispatch technique needs **one flat
+discriminant space indexing one `const` table**. The transcendental tier would
+have spent the last slot and left the algebra frozen for a reason with no
+engineering content.
+
+A newtype with associated constants is not an enum, so the lint does not apply,
+the code stays the table index, and the shape has two precedents already:
+`RenderPipelineKind::{BASIC_LIT, UNLIT}` as `u32` consts, and
+`axiom_recipe::Node::op`, which has always been a bare `u16`. `engine_no_large_enums`
+now reports **zero** for this crate, and the ceiling on the algebra is the
+operator admission test below — a judgement — rather than a lint threshold.
+
+**The wire format did not change.** Codes 0..=22 keep the values their variants
+had; the four new operators were **appended**, never inserted. Every serialized
+graph, every committed golden and every digest minted before the conversion is
+still valid, including `apps/burnt-rubber`'s asphalt digests. `field_op.rs`'s
+`the_published_operator_codes_are_frozen` pins all 27 codes explicitly.
+
+Two things the newtype costs, and what replaced them:
+
+* **An exhaustive `match` over operators** — nothing in the spine ever had one
+  (the Branchless Law forbids it, and every dispatch is a `const` table indexed
+  by code), so nothing changed. Code that enumerates operators uses `FieldOp::ALL`.
+* **The derived `Debug`** — a newtype's derived `Debug` prints the wire code, and
+  this type's `Debug` is read by humans in `FieldGraph::explain` and in every
+  failure message. It is written by hand against a `NAMES` table, so `FieldOp::Mul`
+  still prints `Mul`.
+
+The catalog constants deliberately keep the operator's proper-noun spelling
+(`FieldOp::Uv`, not `FieldOp::UV`), against the usual constant casing. The
+spelling *is* the operator's name — it is what `Debug` prints and what seven
+crates already write — and renaming the vocabulary for a casing convention would
+have churned ~90 call sites, including 44 in one app, while making the constants
+disagree with the language they name. The `#[allow(non_upper_case_globals)]` on
+the catalog block is that decision, stated once where it applies.
 
 ## Validation: one forward fold, and no second cycle check
 
@@ -212,6 +255,9 @@ both the checker and `Compose`.
 | `Noise(seed)` | `axiom_noise::value_noise(seed, point)` |
 | `Fbm(seed, cfg…)` | `axiom_noise::Fbm::new(seed, cfg).sample(point)` |
 | `Transform` | the `Mat4` whose four columns the parameter table holds, applied to the input as a **point** (`w = 1`) via `Mat4::transform_point` |
+| `Sin` / `Cos` | component-wise `f32::sin` / `f32::cos`, in radians |
+| `Pow(a, b)` | component-wise `f32::powf(a, b)` where `a > 0`, and **`0.0` for every base at or below zero** |
+| `Exp` | component-wise `f32::exp` |
 
 Two spellings are exact and not interchangeable with the algebraically equal ones
 a mirror might reach for. `Mix` is `a + (b - a) * t`, **not** `a*(1-t) + b*t` —
@@ -233,20 +279,85 @@ statement of that wire format, which the authoring surface
 replacing the earlier `size_of::<FbmConfig>() / size_of::<u32>()`, which was a
 memory-layout coincidence standing in for a semantic parameter count.
 
+### The transcendental tier — `Sin`, `Cos`, `Pow`, `Exp`
+
+These four are the one family both the CPU and the GPU **approximate** rather
+than compute, with different polynomials. They are held to their own measured
+CPU↔GPU tolerance and are the only operators in the algebra whose CPU-to-CPU
+determinism carries a cross-target caveat. Three decisions make them safe:
+
+**1. `Pow` yields `0.0` for every base at or below zero.** Not `NaN`, and not the
+CPU's `f32::powf` answer for a negative base with an integral exponent. WGSL's
+`pow(e1, e2)` is *undefined* for `e1 < 0`, and for `e1 == 0` with `e2 <= 0`, so a
+rule that gave `Pow(-2, 3) = -8` would be a rule the shader cannot reproduce — a
+silent divergence rather than a documented one. One rule covers all three
+hazards, is total, mirrors exactly, and can never produce a `NaN` or an infinity
+from a finite base. The consequences are worth stating plainly: **a square is
+`Mul(x, x)`, not `Pow(x, 2)`**, which is `0` wherever `x` is negative; and
+`Pow(x, -1)` is a reciprocal that is `0` at and below zero, which is why the
+algebra still needs no `Div`.
+
+**2. The CPU↔GPU tolerance is a measurement, not a constant someone picked.**
+Measured on a discrete Vulkan adapter, over the 24 sampled evaluation contexts of
+`modules/axiom-gpu-backend/src/surface_program/parity_transcendental.rs`:
+
+| Op | worst absolute Δ | output magnitude | relative | declared tolerance |
+|---|---|---|---|---|
+| `Sin` | 5.07e-7 | 1.0 | 5.1e-7 | `1e-6` |
+| `Cos` | 4.18e-7 | 1.0 | 4.2e-7 | `1e-6` |
+| `Exp` | 2.39e-7 | 3.1 | 7.7e-8 | `1e-6` |
+| `Pow` | 2.29e-5 | 103.8 | 2.2e-7 | `3e-5` |
+
+The headline is the opposite of the assumption that kept these four out of the
+algebra for three manifests: **the tier did not need a wider tolerance than the
+rest of the algebra — it needed a tighter one.** All four agree to about `1e-6`
+*relative*, roughly ten `f32` ulps, so both declared budgets sit *below* the
+exact tier's `1e-4`. `Pow`'s larger absolute constant is magnitude, not accuracy:
+its parity case reaches an output near 104 where the others stay inside `[-3, 3]`.
+The numbers are committed as data in that module's `MEASURED_WORST_DELTA` and
+re-measured every run — the test fails if the live delta drifts clear of the
+record, if a tolerance is short of the delta, or if a tolerance sits more than 10x
+above it. A tolerance looser than the hardware needs hides the next regression, so
+being too generous fails there too. The remaining twenty-three operators are
+unchanged at `1e-4`, asserted by `the_exact_tier_did_not_widen`.
+
+The tolerances are a property of the adapter measured. Re-measure on new
+hardware; set a constant from the *worst* adapter measured, never the best.
+
+**3. A folded transcendental is more exact than an unfolded one.** The four are
+pure and total, so `FOLDABLE` is `true` for all of them: a `Sin` whose input is
+already constant is computed **on the CPU** and baked into a `Const`, which every
+backend then reads verbatim instead of approximating the sine itself. That is a
+strict improvement and never a divergence, because folding only ever happens
+where the input was already constant. A fold that would produce a non-finite
+value is still refused, so an `Exp` that overflows stays a node and overflows
+identically wherever it is evaluated.
+
 ### Floating-point determinism, stated precisely
 
-* **CPU-to-CPU determinism is exact and required.** Same graph, same context →
-  bit-identical `f32` on every target including `wasm32`. The algebra excludes
-  transcendentals and division, `sqrt` is IEEE-754 exact, and the one reciprocal
-  has its order fixed. `crates/axiom-field/tests/eval_golden.rs` commits a golden
-  row per operator plus the composed reference case, asserted bit-exactly.
+* **CPU-to-CPU determinism is exact and required for the twenty-three exact
+  operators.** Same graph, same context → bit-identical `f32` on every target
+  including `wasm32`. Their arithmetic excludes division, `sqrt` is IEEE-754
+  exact, and the one reciprocal has its order fixed.
+  `crates/axiom-field/tests/eval_golden.rs` commits a golden row per operator
+  plus the composed reference case, asserted bit-exactly.
+* **The transcendental tier carries one documented cross-target caveat.**
+  `f32::sin`/`cos`/`exp`/`powf` are deterministic for a given input on a given
+  target — evaluating twice always agrees, and a recorded replay on one machine
+  always reproduces — but Rust does **not** guarantee them bit-identical *across*
+  targets: they reach the platform's libm. Their four golden rows are still
+  committed bit-exactly, and a failure in one of them on a new target is a report
+  about that target's libm rather than necessarily a regression here. This caveat
+  is scoped to those four rows and **does not weaken the other twenty-three**,
+  which stay bit-exact assertions everywhere.
 * **CPU-to-GPU parity is a tolerance, not an equality.** GPUs are permitted wider
   intermediates and a lower-precision `inversesqrt`. A backend pins parity with a
-  sampled-grid test at a documented tolerance — never with byte equality.
+  sampled-grid test at a documented per-operator tolerance — never with byte
+  equality.
 
 ### Capability annotations — not yet, and here is the line
 
-Every one of the 23 operators is implementable on the CPU and in WGSL. **No
+Every one of the 27 operators is implementable on the CPU and in WGSL. **No
 operator needs a `RenderCapability` annotation today**, which is the strongest
 argument that the algebra is correctly sized. The moment an operator is proposed
 that one backend cannot express (a texture sample, a screen-space derivative), it
@@ -408,10 +519,18 @@ to compose fewer layers. It is not a reason to raise the cap.**
 ## The library tier — a visual effect is an authored graph, not an engine primitive
 
 > **Marble, wood grain, scratches, rust, dirt, skin pores, asphalt, water
-> ripples, brushed metal and fabric weave are all compositions of the 23
+> ripples, brushed metal and fabric weave are all compositions of the 27
 > operators. The engine must never gain a Rust function per effect.** If an
 > effect cannot be expressed, the question is whether the *algebra* is missing
 > something universal — and the answer is usually no.
+
+Marble is no longer hypothetical. `tests/eval_golden.rs` authors it — a sine
+along one axis for the vein family, an fbm warping its phase so the veins wander
+instead of striping, `Pow` sharpening the light bands, `Mix` between two stone
+colours — in **17 nodes and not one line of new Rust**, and asserts that it
+actually veins. Its frequency, warp and sharpness are parameters, so retuning the
+marble cannot move the structural digest. That test is the evidence for this
+whole section; the transcendental tier is what made it expressible.
 
 The engine has already run this experiment and won it:
 `examples/recipes/generated_micro_fps/` produces ~0.29 MB of textures from
@@ -424,17 +543,25 @@ tier: *"Cards carry data, never code."*
 A proposed operator must pass **all four**:
 
 1. It cannot be composed from existing operators without unbounded node growth.
-2. It is implementable identically on the CPU and in WGSL within the parity
-   tolerance.
+2. It is implementable identically on the CPU and in WGSL within a parity
+   tolerance that is **measured**, and stated per operator if it differs from the
+   algebra's `1e-4`.
 3. At least two unrelated consumers need it.
-4. It fits under the 24-variant `engine_no_large_enums` cap — **one slot
-   remains**.
+4. Its cost is paid in full in the same change: a row in each of the ten operator
+   tables, a WGSL emitter, a parity case, a golden row, and 100% coverage.
+
+Test 4 used to read "it fits under the 24-variant `engine_no_large_enums` cap".
+That clause is gone with the enum, and the transcendental tier is the reason: a
+lint threshold on a *representation* was the only thing standing between the
+algebra and four operators three manifests had asked for by name. The bar that
+remains is the one that was always doing the work — tests 1 and 3.
 
 `smin`, `triplanar`, `checker`, `bricks`, `gradient` and `voronoi` all fail test
 1 or test 3 and are therefore **library graphs**. Voronoi is worth naming
 explicitly: it is expressible as a bounded fold over neighbour cells but not
-compactly, so if it ever proves genuinely necessary it is the strongest candidate
-for the one free slot — and it needs its own decision record before it takes it.
+compactly, so if it ever proves genuinely necessary it is the strongest
+candidate — and it needs its own decision record, not a free slot, before it is
+admitted.
 
 ### Where the library lives is deliberately not decided
 
@@ -469,21 +596,33 @@ output id naming no node fails naming that id.
 
 | Excluded | Reason |
 |---|---|
-| `Div` | Division by zero is a determinism hazard and a NaN source. Multiply by a constant reciprocal, or add a guarded op later with an explicit fallback. |
-| `Pow`, `Exp`, `Log`, `Sin`, `Cos` | Transcendentals differ between CPU and GPU `f32` by more than the parity tolerance, and nothing needs one yet. |
+| `Div` | Division by zero is a determinism hazard and a NaN source. Multiply by a constant reciprocal, or use `Pow(x, -1)`, whose zero behaviour is documented. |
+| `Log`, `Atan2` | No consumer yet. The admission test needs two unrelated ones. |
+| `Sqrt` | Already reachable as `Pow(x, 0.5)` and as `Length`. |
 | `Step` | `Smoothstep` with equal edges. |
 | `Cross` | Expressible with `Compose` plus arithmetic. |
 | `dpdx` / `dpdy` | Screen-space derivatives are backend-specific, absent on the CPU, and the cause of a real past defect. |
 | `If` / `Select` / `Compare` | Selection is `Mix`. A comparison operator is the seed of control flow in a language that must stay branchless end to end. |
 | `Texture` / `Sample` | A texture is a rendering resource; sampling one from a field is a later, separate decision with real capability consequences. |
-| marble, wood, rust, dirt, asphalt | Library graphs built from the 23 operators, not engine primitives. |
+| marble, wood, rust, dirt, asphalt | Library graphs built from the 27 operators, not engine primitives. |
 
 **Not dependencies:** `entropy` and `space`, deliberately — there is no
 randomness to seed and no spatial index to consult.
 
 ## Growth budget
 
-`FieldOp` has 23 variants against the `engine_no_large_enums` cap of 24, so
-there is exactly **one** spare slot. Do not spend it casually. A 25th operator
-means moving the discriminant to a bare `u16` code with a `const` catalog — the
-`axiom-recipe` shape.
+`FieldOp` is a `u16` newtype with a `const` catalog, so **no lint bounds the
+operator count any more** — the move off `#[repr(u16)]` and the enum cap was
+made deliberately, and it is described above. That is not a licence to grow.
+
+The budget is now entirely the **operator admission test**, applied by a human,
+and the pressure it replaces was always artificial. What each new operator
+actually costs is unchanged and is the real ceiling: a signature row, a dispatch
+row, a foldability row, a commutativity row, a bindability row, a WGSL emitter, a
+tolerance row, a parity case, a golden row, and 100% coverage on all of it. Ten
+tables move for one operator, and the tables are the point — they are what keeps
+dispatch branchless.
+
+Every one of the four operators added since the conversion (`Sin`, `Cos`, `Pow`,
+`Exp`) was requested by name, in writing, by three earlier manifests that had
+worked around its absence. That is the bar.

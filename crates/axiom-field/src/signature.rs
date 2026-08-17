@@ -1,7 +1,7 @@
 //! The per-operator signature table — the whole implementation of the algebra's
 //! shape.
 //!
-//! One `const` row per [`FieldOp`], in discriminant order. The row says how many
+//! One `const` row per [`FieldOp`], in code order. The row says how many
 //! inputs and how many raw parameter words the operator carries, and by which
 //! rule its output type is derived. This file lands the table and the accessor;
 //! [`crate::type_check`] is the single forward fold that reads it.
@@ -106,7 +106,7 @@ impl FieldSignature {
     }
 }
 
-/// One row per [`FieldOp`], in discriminant order. The operator code indexes this
+/// One row per [`FieldOp`], in code order. The operator code indexes this
 /// table directly, which is what makes the `const` table safe.
 ///
 /// The rows are struct literals rather than calls to a constructor on purpose: a
@@ -155,14 +155,23 @@ const SIGNATURES: [FieldSignature; FIELD_OP_COUNT] = {
         S { inputs: 1, params: SEED_PARAMS + FBM_KNOB_PARAMS, kind: ScalarOut, fixed_type: Scalar },
         // Transform — one point through a matrix held in the parameter table.
         S { inputs: 1, params: TRANSFORM_PARAMS, kind: Vec3Out, fixed_type: Vec3 },
+        // Sin / Cos — unary, width-generic. The transcendental tier.
+        S { inputs: 1, params: 0, kind: WidthGeneric, fixed_type: Scalar },
+        S { inputs: 1, params: 0, kind: WidthGeneric, fixed_type: Scalar },
+        // Pow — binary, width-generic.
+        S { inputs: 2, params: 0, kind: WidthGeneric, fixed_type: Scalar },
+        // Exp — unary, width-generic.
+        S { inputs: 1, params: 0, kind: WidthGeneric, fixed_type: Scalar },
     ]
 };
 
 impl FieldOp {
-    /// This operator's row of the signature table. Indexed by the discriminant,
-    /// so there is no lookup and no branch.
+    /// This operator's row of the signature table. Indexed by the operator code,
+    /// so there is no lookup and no branch. Total: a `FieldOp`'s code is always
+    /// below [`FIELD_OP_COUNT`], because the newtype's field is private and both
+    /// of its constructors respect that bound.
     pub const fn signature(self) -> FieldSignature {
-        SIGNATURES[self as usize]
+        SIGNATURES[self.code() as usize]
     }
 }
 
@@ -206,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn the_width_generic_operators_are_the_nine_documented_ones() {
+    fn the_width_generic_operators_are_the_thirteen_documented_ones() {
         let generic: Vec<FieldOp> = FieldOp::ALL
             .iter()
             .copied()
@@ -224,11 +233,32 @@ mod tests {
                 FieldOp::Clamp,
                 FieldOp::Mix,
                 FieldOp::Smoothstep,
+                FieldOp::Sin,
+                FieldOp::Cos,
+                FieldOp::Pow,
+                FieldOp::Exp,
             ]
         );
         assert_eq!(FieldOp::Abs.signature().inputs(), 1);
         assert_eq!(FieldOp::Add.signature().inputs(), 2);
         assert_eq!(FieldOp::Mix.signature().inputs(), 3);
+    }
+
+    #[test]
+    fn the_transcendental_tier_is_width_generic_and_carries_no_parameters() {
+        let tier = [
+            (FieldOp::Sin, 1_u8),
+            (FieldOp::Cos, 1),
+            (FieldOp::Pow, 2),
+            (FieldOp::Exp, 1),
+        ];
+        tier.iter().for_each(|(op, inputs)| {
+            let sig = op.signature();
+            assert_eq!(sig.kind(), SignatureKind::WidthGeneric);
+            assert_eq!(sig.inputs(), *inputs);
+            assert_eq!(sig.params(), 0);
+            assert!(!sig.has_param_decided_inputs());
+        });
     }
 
     #[test]

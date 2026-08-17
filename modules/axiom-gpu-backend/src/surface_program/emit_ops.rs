@@ -13,14 +13,15 @@
 //! width held at zero, and stamps the result with a type that scrubs the lanes
 //! past *its* width. The emitter carries exactly that representation: one
 //! `let n = vec4<f32>(…)` per node, lanes past the node's type always zero. That
-//! is what lets the twenty-three emitters be one-liners with no type dispatch —
-//! the type is a property the emitter *knows*, never one the shader carries.
+//! is what lets almost every emitter be a one-liner with no type dispatch — the
+//! type is a property the emitter *knows*, never one the shader carries.
 //!
 //! The invariant every emitter must preserve: **the lanes past the node's own
-//! type are zero**. Each one below preserves it by construction (an operand
-//! broadcast to the operating width already has them zero, and an operator that
-//! narrows writes the zeroes out explicitly), which is why no generic masking
-//! step exists.
+//! type are zero**. Almost every one below preserves it by construction (an
+//! operand broadcast to the operating width already has them zero, and an
+//! operator that narrows writes the zeroes out explicitly). The two exceptions
+//! are `Cos` and `Exp`, whose value at a zeroed lane is `1`; they call
+//! [`masked`], and they are the only reason that helper exists.
 //!
 //! ## The two that are not one-liners
 //!
@@ -41,7 +42,7 @@ pub(crate) type EmitFn = fn(&EmitStep<'_>) -> String;
 /// The emission table. Its order mirrors `axiom_field::FieldOp` exactly, so the
 /// operator code **is** the row index.
 #[rustfmt::skip]
-pub(crate) const EMIT: [EmitFn; 23] = [
+pub(crate) const EMIT: [EmitFn; 27] = [
     constant,
     point, uv, normal, time,
     parameter,
@@ -51,6 +52,7 @@ pub(crate) const EMIT: [EmitFn; 23] = [
     dot, length, normalize,
     compose, component,
     noise, fbm, transform,
+    sine, cosine, power, exponential,
 ];
 
 /// The four lane selectors, indexed by lane number.
@@ -447,6 +449,69 @@ fn transform(step: &EmitStep<'_>) -> String {
     )
 }
 
+/// `Sin(a)` — **component-wise `sin(a)`**, in radians. The transcendental tier,
+/// whose CPU↔GPU agreement is its own measured tolerance rather than the rest of
+/// the algebra's shared one — the two sides approximate a sine with different
+/// polynomials.
+///
+/// No mask is needed: a lane past the operating width holds `0.0`, and `sin(0)`
+/// is `0`, so the zero-lane invariant survives.
+fn sine(step: &EmitStep<'_>) -> String {
+    format!("sin({})", step.lanes(0))
+}
+
+/// `Cos(a)` — **component-wise `cos(a)`**, in radians. Transcendental tier.
+///
+/// Masked, because `cos(0)` is `1`: without the mask the lanes past the node's
+/// own type would carry ones and the SSA register's invariant would break.
+fn cosine(step: &EmitStep<'_>) -> String {
+    masked(step, &format!("cos({})", step.lanes(0)))
+}
+
+/// `Pow(a, b)` — **component-wise `pow(a, b)` where `a > 0`, and `0.0`
+/// everywhere else**. Transcendental tier.
+///
+/// The guard is the whole operator. WGSL's `pow` is **undefined** for a negative
+/// base and for a zero base with a non-positive exponent, so the CPU evaluator
+/// defines those away — every base at or below zero yields `0.0` — and this
+/// mirror reproduces it in two parts: the base handed to `pow` is clamped up to
+/// zero so the builtin is never asked for a value it does not have, and the
+/// `select` discards the result wherever the real base was not positive.
+/// `select` picks per lane, so a discarded lane's undefined value cannot leak.
+///
+/// The zeroed arm is exactly `0.0`, so the zero-lane invariant survives without a
+/// separate mask.
+fn power(step: &EmitStep<'_>) -> String {
+    let (a, b) = (step.lanes(0), step.lanes(1));
+    format!(
+        "select(vec4<f32>(0.0), pow(max({a}, vec4<f32>(0.0)), {b}), ({a}) > vec4<f32>(0.0))"
+    )
+}
+
+/// `Exp(a)` — **component-wise `exp(a)`**. Transcendental tier.
+///
+/// Masked for the same reason `Cos` is: `exp(0)` is `1`.
+fn exponential(step: &EmitStep<'_>) -> String {
+    masked(step, &format!("exp({})", step.lanes(0)))
+}
+
+/// `expression` with every lane past the node's operating width forced to zero.
+///
+/// Almost every emitter preserves that invariant by construction — an operand
+/// broadcast to the width already has those lanes at zero, and zero is a fixed
+/// point of `+`, `*`, `abs`, `min`, `sin`. `Cos` and `Exp` are the exceptions:
+/// both answer `1` at zero. The mask multiplies by exactly `1.0` or exactly
+/// `0.0`, both exact in IEEE-754, and the lanes it zeroes were computed from a
+/// zero argument and are therefore finite — so the product can never be a `NaN`.
+fn masked(step: &EmitStep<'_>, expression: &str) -> String {
+    let width = usize::from(step.width.lanes());
+    let lanes = [0_usize, 1, 2, 3].map(|lane| ["0.0", "1.0"][usize::from(lane < width)]);
+    format!(
+        "({expression}) * vec4<f32>({}, {}, {}, {})",
+        lanes[0], lanes[1], lanes[2], lanes[3]
+    )
+}
+
 /// The four-lane sum of products of two `vec4` expressions, left-associated —
 /// `eval::dot`'s exact shape, written as plain multiply-then-add so no lane pair
 /// is folded into a single-rounding `fma`.
@@ -499,7 +564,11 @@ mod tests {
     #[test]
     fn an_unknown_operator_code_emits_the_zero_default() {
         let step = EmitStep::new(&[], &[], FieldType::Scalar, 0, 0);
-        assert_eq!(emit_node(23, &step), ZERO_VEC4, "code 23 names no operator");
+        assert_eq!(
+            emit_node(axiom_field::FIELD_OP_COUNT as u16, &step),
+            ZERO_VEC4,
+            "code 27 names no operator"
+        );
         assert_eq!(emit_node(u16::MAX, &step), ZERO_VEC4);
         // Every real code dispatches to its own row.
         FieldOp::ALL.iter().for_each(|op| {
@@ -773,6 +842,40 @@ mod tests {
         assert!(emitted.contains("params.slots[3u]"));
         assert!(emitted.contains("select(1.0,"), "an affine w never divides");
         assert!(emitted.contains("!= 1.0)"));
+    }
+
+    #[test]
+    fn sin_needs_no_mask_because_a_zeroed_lane_stays_zero() {
+        assert_eq!(
+            run(FieldOp::Sin, &vec3s(1), &[], FieldType::Vec3),
+            "sin(vec4<f32>(n0.x, n0.y, n0.z, 0.0))"
+        );
+    }
+
+    #[test]
+    fn cos_and_exp_mask_the_lanes_past_the_width_because_they_answer_one_there() {
+        assert_eq!(
+            run(FieldOp::Cos, &vec3s(1), &[], FieldType::Vec3),
+            "(cos(vec4<f32>(n0.x, n0.y, n0.z, 0.0))) * vec4<f32>(1.0, 1.0, 1.0, 0.0)"
+        );
+        assert_eq!(
+            run(FieldOp::Exp, &vec3s(1), &[], FieldType::Scalar),
+            "(exp(vec4<f32>(n0.x, 0.0, 0.0, 0.0))) * vec4<f32>(1.0, 0.0, 0.0, 0.0)"
+        );
+    }
+
+    #[test]
+    fn pow_clamps_its_base_and_discards_every_lane_whose_base_was_not_positive() {
+        let emitted = run(FieldOp::Pow, &vec3s(2), &[], FieldType::Vec3);
+        assert!(emitted.starts_with("select(vec4<f32>(0.0), pow(max("));
+        assert!(
+            emitted.contains("> vec4<f32>(0.0)"),
+            "the guard must be per lane: {emitted}"
+        );
+        assert!(
+            emitted.contains("max(vec4<f32>(n0.x, n0.y, n0.z, 0.0), vec4<f32>(0.0))"),
+            "the builtin must never be asked for a negative base: {emitted}"
+        );
     }
 
     #[test]

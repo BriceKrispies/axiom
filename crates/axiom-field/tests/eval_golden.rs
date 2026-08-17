@@ -1,13 +1,24 @@
 //! The committed evaluation goldens: `(graph, context) -> FieldValue`, asserted
 //! **bit-exactly**, through the public surface only.
 //!
-//! CPU-to-CPU determinism is an equality, not a tolerance: the same graph and the
-//! same context must produce byte-identical `f32` lanes on every target,
-//! `wasm32` included. That holds because the algebra excludes transcendentals,
-//! `sqrt` is IEEE-754 exact, and the one reciprocal (`Normalize`) has its
-//! evaluation order fixed. These tables are what makes a drift in any operator's
-//! arithmetic — or in the order of a single expression — a failing test rather
-//! than a rendering that quietly changed.
+//! CPU-to-CPU determinism is an equality, not a tolerance: for the twenty-three
+//! operators of the exact tier, the same graph and the same context must produce
+//! byte-identical `f32` lanes on every target, `wasm32` included. That holds
+//! because their arithmetic is exact — `sqrt` is IEEE-754 exact and the one
+//! reciprocal (`Normalize`) has its evaluation order fixed. These tables are what
+//! makes a drift in any operator's arithmetic — or in the order of a single
+//! expression — a failing test rather than a rendering that quietly changed.
+//!
+//! **The four transcendental rows (`Sin`, `Cos`, `Pow`, `Exp`) are committed
+//! bit-exactly too, and they carry one caveat the other twenty-three do not.**
+//! `f32::sin`/`cos`/`exp`/`powf` are deterministic for a given input on a given
+//! target, but Rust does not guarantee them bit-identical *across* targets — they
+//! reach the platform's libm. A failure in one of those four rows on a new target
+//! is therefore a report about that target's libm, not necessarily a regression
+//! in this layer; a failure in any of the other twenty-three is always a
+//! regression. `crates/axiom-field/ARCHITECTURE.md` records this as the known
+//! limit of the transcendental tier, and the tier is deliberately not allowed to
+//! weaken the assertion for anything else.
 //!
 //! A value is committed as five words: its `FieldType` code, then the four lane
 //! bit patterns.
@@ -173,6 +184,13 @@ fn probe_spec(op: FieldOp) -> (Vec<Param>, &'static [u32]) {
             vec![Param::int(1), Param::int(2), Param::int(3), Param::int(4)],
             &[0],
         ),
+        // The transcendental tier. `Pow` reads a strictly positive base — the
+        // documented rule makes every other base `0.0`, and a golden of zeroes
+        // would prove nothing about the arithmetic.
+        (Vec::new(), &[0]),
+        (Vec::new(), &[0]),
+        (Vec::new(), &[7, 5]),
+        (Vec::new(), &[6]),
     ];
     let (params, inputs) = &table[op.code() as usize];
     (params.clone(), inputs)
@@ -205,6 +223,10 @@ const GOLDEN_OPS: [[u32; 5]; FIELD_OP_COUNT] = [
     [0, 0x3EA99126, 0x00000000, 0x00000000, 0x00000000], // Noise      0.331186
     [0, 0xBD7B2F0C, 0x00000000, 0x00000000, 0x00000000], // Fbm        -0.0613242
     [2, 0x3FDEB852, 0x40975C29, 0x4007AE14, 0x00000000], // Transform  (1.74, 4.73, 2.12)
+    [2, 0x3EB925A9, 0x3F4A1CEB, 0xBE5F7796, 0x00000000], // Sin        (0.361615, 0.789504, -0.218230)
+    [2, 0x3F6EAD01, 0x3F1D1E71, 0x3F79D46A, 0x00000000], // Cos        (0.932327, 0.613117, 0.975897)
+    [2, 0x3F800000, 0x40800000, 0x41100000, 0x00000000], // Pow        (1, 4, 9) = (1, 2, 3) ^ 2
+    [0, 0x3FA45AF2, 0x00000000, 0x00000000, 0x00000000], // Exp        1.28403 = e ^ 0.25
 ];
 
 #[test]
@@ -251,6 +273,10 @@ fn the_golden_rows_carry_the_types_the_signature_table_promises() {
         FieldType::Scalar,
         FieldType::Scalar,
         FieldType::Vec3,
+        FieldType::Vec3,
+        FieldType::Vec3,
+        FieldType::Vec3,
+        FieldType::Scalar,
     ];
     GOLDEN_OPS
         .iter()
@@ -352,6 +378,127 @@ fn canonicalising_the_reference_case_does_not_change_what_it_computes() {
             .expect("the canonical form evaluates"),
         GOLDEN_REFERENCE,
         "canonicalisation must not change what a field computes"
+    );
+}
+
+/// **Marble veining — the pattern the transcendental tier exists for**, authored
+/// entirely as a graph.
+///
+/// ```text
+/// Mix(dark, light,
+///     Pow(Smoothstep(-1, 1, Sin(Add(Mul(Component(Point, 0), frequency),
+///                                   Mul(Fbm(seed, Point), warp)))),
+///         sharpness))
+/// ```
+///
+/// A sine along one axis is the vein family; the fbm warps its phase so the
+/// veins wander instead of striping; `Pow` sharpens the light bands against the
+/// dark stone. **Not one line of new Rust** — the whole look is `Sin`, `Pow` and
+/// operators that already existed, which is the property the library tier of
+/// `ARCHITECTURE.md` claims and this test is the evidence for.
+///
+/// `frequency`, `warp` and `sharpness` are *parameters*, so retuning the marble
+/// cannot move the structural digest.
+fn marble_veining(vein_frequency: f32) -> FieldGraph {
+    let (build, frequency) = FieldBuilder::new(FieldId::of_name("field/marble"), 1)
+        .declare(
+            "vein_frequency",
+            FieldValue::scalar(Scalar::new(vein_frequency)),
+        );
+    let (build, warp) = build.declare("vein_warp", FieldValue::scalar(Scalar::new(2.5)));
+    let (build, sharpness) = build.declare("vein_sharpness", FieldValue::scalar(Scalar::new(3.0)));
+
+    let (build, point) = build.push(FieldOp::Point, Vec::new(), Vec::new());
+    let (build, along) = build.push(FieldOp::Component, vec![Param::int(0)], vec![point]);
+    let (build, frequency_node) = build.push_param(frequency, FieldType::Scalar);
+    let (build, scaled) = build.push(FieldOp::Mul, Vec::new(), vec![along, frequency_node]);
+
+    let (build, grain) = build.push_fbm(SEED, fbm_config(), point);
+    let (build, warp_node) = build.push_param(warp, FieldType::Scalar);
+    let (build, warped) = build.push(FieldOp::Mul, Vec::new(), vec![grain, warp_node]);
+
+    let (build, phase) = build.push(FieldOp::Add, Vec::new(), vec![scaled, warped]);
+    let (build, wave) = build.push(FieldOp::Sin, Vec::new(), vec![phase]);
+    let (build, low) = build.push_const(FieldValue::scalar(Scalar::new(-1.0)));
+    let (build, high) = build.push_const(FieldValue::scalar(Scalar::new(1.0)));
+    let (build, mask) = build.push(FieldOp::Smoothstep, Vec::new(), vec![low, high, wave]);
+
+    let (build, sharpness_node) = build.push_param(sharpness, FieldType::Scalar);
+    let (build, vein) = build.push(FieldOp::Pow, Vec::new(), vec![mask, sharpness_node]);
+
+    let (build, stone) = build.push_const(FieldValue::vec3(Vec3::new(0.05, 0.05, 0.06)));
+    let (build, calcite) = build.push_const(FieldValue::vec3(Vec3::new(0.92, 0.90, 0.86)));
+    let (build, albedo) = build.push(FieldOp::Mix, Vec::new(), vec![stone, calcite, vein]);
+    build.build(albedo)
+}
+
+/// The marble's red channel sampled along `x` at a fixed `y`/`z`.
+fn marble_scan(field: &FieldGraph) -> Vec<f32> {
+    (0..200)
+        .map(|step| {
+            let x = step as f32 * 0.02 - 2.0;
+            field
+                .evaluate(&EvalContext::new(
+                    Vec3::new(x, 0.31, -0.17),
+                    Vec2::ZERO,
+                    Vec3::UNIT_Y,
+                    Seconds::finite_or_zero(0.0),
+                ))
+                .expect("the marble field evaluates")
+                .as_vec4()
+                .x
+        })
+        .collect()
+}
+
+/// How many times a scan crosses the midpoint between stone and calcite — the
+/// vein count, and the thing a sine is here to produce.
+fn crossings(scan: &[f32]) -> usize {
+    let midpoint = 0.5 * (0.05 + 0.92);
+    scan.windows(2)
+        .filter(|pair| (pair[0] < midpoint) != (pair[1] < midpoint))
+        .count()
+}
+
+#[test]
+fn the_marble_pattern_is_a_legal_graph_of_existing_operators_only() {
+    let field = marble_veining(9.0);
+    assert_eq!(field.validate(), Ok(()));
+    // Small enough to be a *library graph*, not an engine feature.
+    assert!(field.node_count() <= 20, "{} nodes", field.node_count());
+    let value = field
+        .evaluate(&context())
+        .expect("the marble field evaluates");
+    assert_eq!(value.ty(), FieldType::Vec3);
+}
+
+#[test]
+fn the_marble_pattern_actually_veins() {
+    let scan = marble_scan(&marble_veining(9.0));
+    let (low, high) = scan
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(low, high), sample| {
+            (low.min(*sample), high.max(*sample))
+        });
+    assert!(
+        high - low > 0.5,
+        "the veins must span most of the stone-to-calcite range: {low}..{high}"
+    );
+    assert!(
+        crossings(&scan) >= 4,
+        "a sine at this frequency must produce several veins, not one band"
+    );
+}
+
+#[test]
+fn retuning_the_marble_changes_the_look_without_moving_the_structural_digest() {
+    let field = marble_veining(9.0);
+    let denser = marble_veining(22.0);
+    assert_eq!(denser.digest(), field.digest(), "structure did not change");
+    assert_ne!(denser.params(), field.params(), "the tuning did change");
+    assert!(
+        crossings(&marble_scan(&denser)) > crossings(&marble_scan(&field)),
+        "a higher vein frequency must produce more veins"
     );
 }
 

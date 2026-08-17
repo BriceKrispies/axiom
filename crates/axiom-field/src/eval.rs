@@ -29,10 +29,18 @@
 //!
 //! ## Determinism
 //!
-//! Same graph, same context → **bit-identical** `f32` on every target including
-//! `wasm32`. The algebra excludes transcendentals, `sqrt` is IEEE-754 exact, and
-//! the one reciprocal (`Normalize`) has its evaluation order fixed and written
-//! down. Nothing here reads a clock, an address or an iteration order.
+//! Same graph, same context → **bit-identical** `f32`, on every target including
+//! `wasm32`, for the twenty-three operators of the exact tier: their arithmetic
+//! excludes division, `sqrt` is IEEE-754 exact, and the one reciprocal
+//! (`Normalize`) has its evaluation order fixed and written down. Nothing here
+//! reads a clock, an address or an iteration order.
+//!
+//! The four transcendentals ([`crate::ops::transcendental`]) carry one documented
+//! caveat and no more: they are deterministic for a given input **on a given
+//! target** — evaluating twice always agrees, and a replay on one machine always
+//! reproduces — but they reach the platform's libm, which Rust does not promise
+//! is bit-identical *across* targets. `ARCHITECTURE.md` states that limit; it is
+//! scoped to those four and weakens nothing else.
 
 use axiom_recipe::{Node, NodeId, Param, MAX_NODES};
 

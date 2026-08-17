@@ -16,7 +16,7 @@
 //! and reads the four lanes back. `Rgba32Float` because a `Rgba8Unorm` target
 //! quantises to 1/255, which is forty times coarser than the tolerance.
 //!
-//! ## Tolerance: `1e-4` absolute, never byte equality
+//! ## Tolerance: per operator, `1e-4` absolute for the exact tier
 //!
 //! A GPU is allowed to contract `a * b + c` into a single-rounding `fma`, to
 //! evaluate a reciprocal at a different precision, and to reassociate. The
@@ -26,6 +26,16 @@
 //! hardware's, not the emitter's. `1e-4` absolute on channels that live in
 //! `0..=1` is roughly 12 bits of headroom: far tighter than anything visible,
 //! and far looser than the last mantissa bit.
+//!
+//! The **transcendental tier** (`Sin`, `Cos`, `Pow`, `Exp`) is different in kind
+//! — both sides *approximate* those four, with different polynomials — so it
+//! carries its own budget. That budget, the per-operator tolerance table and
+//! [`tolerance_of`] all live in `parity_transcendental`, next to the measurement
+//! they come from, and `crates/axiom-field/ARCHITECTURE.md` records the numbers.
+//! The measurement's own headline is that the tier needed a budget *tighter* than
+//! `1e-4`, not wider. Every other operator stays at [`TOLERANCE`], and
+//! `parity_transcendental::the_exact_tier_did_not_widen` is the test that says
+//! so.
 //!
 //! ## The failure message names the OPERATOR
 //!
@@ -49,6 +59,7 @@ use axiom_surface::{Surface, SurfaceBuilder, SurfaceChannel};
 
 use crate::surface_program::emit::surface_function;
 use crate::surface_program::params::{pack, ParamLayout};
+use crate::surface_program::parity_transcendental::tolerance_of;
 use crate::surface_program::program_error::{SurfaceProgramError, SurfaceProgramFault};
 use crate::surface_program::wgsl_template::{
     scene_shader, DEFAULT_DISPLACE_WGSL, DEFAULT_SURFACE_WGSL, SURFACE_PRELUDE_WGSL,
@@ -58,7 +69,9 @@ use crate::surface_program::wgsl_template::{
 /// one fragment per context.
 pub(super) const SAMPLES: usize = 24;
 
-/// The absolute tolerance, documented in this module's header. Never zero.
+/// The absolute tolerance of the **exact tier** — every operator whose value
+/// both sides compute rather than approximate. Documented in this module's
+/// header. Never zero.
 pub(super) const TOLERANCE: f32 = 1.0e-4;
 
 /// `copy_texture_to_buffer` requires each row aligned to this many bytes.
@@ -411,10 +424,21 @@ pub(super) fn context_bytes(contexts: &[EvalContext]) -> Vec<u8> {
     bytes
 }
 
-/// One test case: an operator's name and the graph that exercises it.
-struct Case {
-    operator: &'static str,
-    graph: FieldGraph,
+/// One test case: the operator under test and the graph that exercises it.
+///
+/// The operator is carried as a [`FieldOp`], not as a name — its `Debug` **is**
+/// its name, so a case cannot be labelled as one operator while exercising
+/// another, and the tolerance it is held to is a table lookup on its code.
+pub(super) struct Case {
+    pub(super) operator: FieldOp,
+    pub(super) graph: FieldGraph,
+}
+
+impl Case {
+    /// The operator's name, for a failure message.
+    pub(super) fn name(&self) -> String {
+        format!("{:?}", self.operator)
+    }
 }
 
 /// A fresh builder for a named graph.
@@ -425,7 +449,7 @@ pub(super) fn builder(name: &str) -> FieldBuilder {
 /// Adapt a node of `ty` into a `Vec4`, so every case can bind to base colour:
 /// lanes are extracted and recomposed, which costs two more operators that are
 /// themselves under test.
-fn widen(
+pub(super) fn widen(
     from: FieldBuilder,
     node: axiom_recipe::NodeId,
     ty: FieldType,
@@ -448,12 +472,12 @@ fn widen(
 
 /// A `Vec4` graph built by pushing `op` over the given source nodes, then
 /// widening whatever it produced.
-fn case(operator: &'static str, graph: FieldGraph) -> Case {
+pub(super) fn case(operator: FieldOp, graph: FieldGraph) -> Case {
     Case { operator, graph }
 }
 
 /// One `Vec3` constant node.
-fn vec3_const(
+pub(super) fn vec3_const(
     from: FieldBuilder,
     x: f32,
     y: f32,
@@ -464,12 +488,12 @@ fn vec3_const(
 
 /// A case for a two-input arithmetic operator over `Point` and a `Vec3`
 /// constant.
-fn binary_case(operator: &'static str, name: &str, op: FieldOp) -> Case {
+fn binary_case(name: &str, op: FieldOp) -> Case {
     let (b, point) = builder(name).push(FieldOp::Point, Vec::new(), Vec::new());
     let (b, other) = vec3_const(b, 0.5, -1.5, 2.0);
     let (b, applied) = b.push(op, Vec::new(), vec![point, other]);
     let (b, wide) = widen(b, applied, FieldType::Vec3);
-    case(operator, b.build(wide))
+    case(op, b.build(wide))
 }
 
 /// Every operator in the algebra, each as one `Vec4` graph.
@@ -478,44 +502,44 @@ fn cases() -> Vec<Case> {
         {
             let (b, node) =
                 builder("p/const").push_const(FieldValue::vec4(Vec4::new(0.25, 0.5, 0.75, 1.0)));
-            case("Const", b.build(node))
+            case(FieldOp::Const, b.build(node))
         },
         {
             let (b, node) = builder("p/point").push(FieldOp::Point, Vec::new(), Vec::new());
             let (b, wide) = widen(b, node, FieldType::Vec3);
-            case("Point", b.build(wide))
+            case(FieldOp::Point, b.build(wide))
         },
         {
             let (b, node) = builder("p/uv").push(FieldOp::Uv, Vec::new(), Vec::new());
             let (b, wide) = widen(b, node, FieldType::Vec2);
-            case("Uv", b.build(wide))
+            case(FieldOp::Uv, b.build(wide))
         },
         {
             let (b, node) = builder("p/normal").push(FieldOp::Normal, Vec::new(), Vec::new());
             let (b, wide) = widen(b, node, FieldType::Vec3);
-            case("Normal", b.build(wide))
+            case(FieldOp::Normal, b.build(wide))
         },
         {
             let (b, node) = builder("p/time").push(FieldOp::Time, Vec::new(), Vec::new());
             let (b, wide) = widen(b, node, FieldType::Scalar);
-            case("Time", b.build(wide))
+            case(FieldOp::Time, b.build(wide))
         },
         {
             let (b, slot) = builder("p/param")
                 .declare("tint", FieldValue::vec4(Vec4::new(0.125, 0.375, 0.625, 0.875)));
             let (b, node) = b.push_param(slot, FieldType::Vec4);
-            case("Param", b.build(node))
+            case(FieldOp::Param, b.build(node))
         },
-        binary_case("Add", "p/add", FieldOp::Add),
-        binary_case("Sub", "p/sub", FieldOp::Sub),
-        binary_case("Mul", "p/mul", FieldOp::Mul),
-        binary_case("Min", "p/min", FieldOp::Min),
-        binary_case("Max", "p/max", FieldOp::Max),
+        binary_case("p/add", FieldOp::Add),
+        binary_case("p/sub", FieldOp::Sub),
+        binary_case("p/mul", FieldOp::Mul),
+        binary_case("p/min", FieldOp::Min),
+        binary_case("p/max", FieldOp::Max),
         {
             let (b, point) = builder("p/abs").push(FieldOp::Point, Vec::new(), Vec::new());
             let (b, applied) = b.push(FieldOp::Abs, Vec::new(), vec![point]);
             let (b, wide) = widen(b, applied, FieldType::Vec3);
-            case("Abs", b.build(wide))
+            case(FieldOp::Abs, b.build(wide))
         },
         {
             let (b, point) = builder("p/clamp").push(FieldOp::Point, Vec::new(), Vec::new());
@@ -524,7 +548,7 @@ fn cases() -> Vec<Case> {
             let (b, applied) = b.push(FieldOp::Clamp, Vec::new(), vec![point, lo, hi]);
             let (b, wide) = widen(b, applied, FieldType::Vec3);
             // The third lane has lo > hi, the documented degenerate case.
-            case("Clamp", b.build(wide))
+            case(FieldOp::Clamp, b.build(wide))
         },
         {
             let (b, point) = builder("p/mix").push(FieldOp::Point, Vec::new(), Vec::new());
@@ -533,7 +557,7 @@ fn cases() -> Vec<Case> {
             let (b, applied) = b.push(FieldOp::Mix, Vec::new(), vec![point, other, t]);
             let (b, wide) = widen(b, applied, FieldType::Vec3);
             // t is outside 0..=1: Mix extrapolates, and must do so on both sides.
-            case("Mix", b.build(wide))
+            case(FieldOp::Mix, b.build(wide))
         },
         {
             let (b, point) = builder("p/smooth").push(FieldOp::Point, Vec::new(), Vec::new());
@@ -542,26 +566,26 @@ fn cases() -> Vec<Case> {
             let (b, applied) = b.push(FieldOp::Smoothstep, Vec::new(), vec![e0, e1, point]);
             let (b, wide) = widen(b, applied, FieldType::Vec3);
             // The third lane's edges are equal, the documented degenerate case.
-            case("Smoothstep", b.build(wide))
+            case(FieldOp::Smoothstep, b.build(wide))
         },
         {
             let (b, point) = builder("p/dot").push(FieldOp::Point, Vec::new(), Vec::new());
             let (b, normal) = b.push(FieldOp::Normal, Vec::new(), Vec::new());
             let (b, applied) = b.push(FieldOp::Dot, Vec::new(), vec![point, normal]);
             let (b, wide) = widen(b, applied, FieldType::Scalar);
-            case("Dot", b.build(wide))
+            case(FieldOp::Dot, b.build(wide))
         },
         {
             let (b, point) = builder("p/length").push(FieldOp::Point, Vec::new(), Vec::new());
             let (b, applied) = b.push(FieldOp::Length, Vec::new(), vec![point]);
             let (b, wide) = widen(b, applied, FieldType::Scalar);
-            case("Length", b.build(wide))
+            case(FieldOp::Length, b.build(wide))
         },
         {
             let (b, point) = builder("p/normalize").push(FieldOp::Point, Vec::new(), Vec::new());
             let (b, applied) = b.push(FieldOp::Normalize, Vec::new(), vec![point]);
             let (b, wide) = widen(b, applied, FieldType::Vec3);
-            case("Normalize", b.build(wide))
+            case(FieldOp::Normalize, b.build(wide))
         },
         {
             let (b, uv) = builder("p/compose").push(FieldOp::Uv, Vec::new(), Vec::new());
@@ -569,18 +593,19 @@ fn cases() -> Vec<Case> {
             let (b, y) = b.push(FieldOp::Component, vec![Param::int(1)], vec![uv]);
             let (b, node) = b.push(FieldOp::Compose, vec![Param::int(3)], vec![x, y, x]);
             let (b, wide) = widen(b, node, FieldType::Vec3);
-            case("Compose", b.build(wide))
+            case(FieldOp::Compose, b.build(wide))
         },
         {
             let (b, point) = builder("p/component").push(FieldOp::Point, Vec::new(), Vec::new());
             let (b, node) = b.push(FieldOp::Component, vec![Param::int(2)], vec![point]);
             let (b, wide) = widen(b, node, FieldType::Scalar);
-            case("Component", b.build(wide))
+            case(FieldOp::Component, b.build(wide))
         },
         noise_case(),
         fbm_case(),
         transform_case(),
     ];
+    all.extend(crate::surface_program::parity_transcendental::cases());
     all.sort_by_key(|entry| entry.operator);
     all
 }
@@ -595,7 +620,7 @@ fn noise_case() -> Case {
         vec![point],
     );
     let (b, wide) = widen(b, node, FieldType::Scalar);
-    case("Noise", b.build(wide))
+    case(FieldOp::Noise, b.build(wide))
 }
 
 /// `Fbm` at the object-space point: four octaves, a non-default lacunarity and
@@ -615,7 +640,7 @@ fn fbm_case() -> Case {
         vec![point],
     );
     let (b, wide) = widen(b, node, FieldType::Scalar);
-    case("Fbm", b.build(wide))
+    case(FieldOp::Fbm, b.build(wide))
 }
 
 /// `Transform` of the object-space point through a matrix whose four columns
@@ -646,7 +671,7 @@ fn transform_case() -> Case {
         vec![point],
     );
     let (b, wide) = widen(b, node, FieldType::Vec3);
-    case("Transform", b.build(wide))
+    case(FieldOp::Transform, b.build(wide))
 }
 
 /// The surface one case's graph becomes: the graph on base colour, nothing else
@@ -659,7 +684,12 @@ fn surface_of(graph: &FieldGraph) -> Surface {
 }
 
 /// Run one case on both sides and return `(cpu, gpu)` lane sets.
-fn compare(gpu: &ParityGpu, case: &Case, contexts: &[EvalContext]) -> (Vec<[f32; 4]>, Vec<[f32; 4]>) {
+pub(super) fn compare(
+    gpu: &ParityGpu,
+    case: &Case,
+    contexts: &[EvalContext],
+) -> (Vec<[f32; 4]>, Vec<[f32; 4]>) {
+    let name = case.name();
     let surface = surface_of(&case.graph);
     let flat = surface.flatten().expect("a flat surface flattens to itself");
     let program = surface_function(&surface).expect("every parity case emits");
@@ -675,7 +705,7 @@ fn compare(gpu: &ParityGpu, case: &Case, contexts: &[EvalContext]) -> (Vec<[f32;
             surface.digest().raw(),
             SurfaceChannel::BaseColor.bit(),
         )
-        .unwrap_or_else(|error| panic!("{} must emit compiling WGSL: {error}", case.operator));
+        .unwrap_or_else(|error| panic!("{name} must emit compiling WGSL: {error}"));
     let params = pack(
         ParamLayout::of(surface.requirements().param_count()),
         &flat,
@@ -694,9 +724,7 @@ fn compare(gpu: &ParityGpu, case: &Case, contexts: &[EvalContext]) -> (Vec<[f32;
                 .binding(SurfaceChannel::BaseColor)
                 .as_graph()
                 .evaluate(context)
-                .unwrap_or_else(|error| {
-                    panic!("{} must evaluate on the CPU: {error:?}", case.operator)
-                })
+                .unwrap_or_else(|error| panic!("{name} must evaluate on the CPU: {error:?}"))
                 .as_vec4();
             [lanes.x, lanes.y, lanes.z, lanes.w]
         })
@@ -704,8 +732,20 @@ fn compare(gpu: &ParityGpu, case: &Case, contexts: &[EvalContext]) -> (Vec<[f32;
     (evaluated, rendered)
 }
 
-/// Assert two lane sets agree to [`TOLERANCE`], naming the operator.
+/// Assert two lane sets agree to the **exact tier's** [`TOLERANCE`], naming the
+/// operator. The vertex-stage and lighting parity modules hold their own cases
+/// to this same budget.
 pub(super) fn assert_parity(operator: &str, cpu: &[[f32; 4]], gpu: &[[f32; 4]]) {
+    assert_parity_within(operator, TOLERANCE, cpu, gpu);
+}
+
+/// Assert two lane sets agree to `tolerance`, naming the operator.
+pub(super) fn assert_parity_within(
+    operator: &str,
+    tolerance: f32,
+    cpu: &[[f32; 4]],
+    gpu: &[[f32; 4]],
+) {
     cpu.iter()
         .zip(gpu.iter())
         .enumerate()
@@ -713,14 +753,25 @@ pub(super) fn assert_parity(operator: &str, cpu: &[[f32; 4]], gpu: &[[f32; 4]]) 
             (0..4).for_each(|lane| {
                 let delta = (expected[lane] - actual[lane]).abs();
                 assert!(
-                    delta <= TOLERANCE,
+                    delta <= tolerance,
                     "{operator} disagrees at sample {sample} lane {lane}: \
-                     CPU {} vs GPU {} (delta {delta}, tolerance {TOLERANCE})",
+                     CPU {} vs GPU {} (delta {delta}, tolerance {tolerance})",
                     expected[lane],
                     actual[lane]
                 );
             });
         });
+}
+
+/// The **worst** absolute lane delta between two lane sets — the measurement a
+/// tolerance has to be set from.
+pub(super) fn worst_delta(cpu: &[[f32; 4]], gpu: &[[f32; 4]]) -> f32 {
+    cpu.iter()
+        .zip(gpu.iter())
+        .flat_map(|(expected, actual)| {
+            [0_usize, 1, 2, 3].map(|lane| (expected[lane] - actual[lane]).abs())
+        })
+        .fold(0.0_f32, f32::max)
 }
 
 /// **The noise hash parity test.** Written first, and the one that matters most:
@@ -825,8 +876,20 @@ fn every_operator_agrees_with_the_cpu_evaluator_within_the_documented_tolerance(
     );
     all.iter().for_each(|entry| {
         let (cpu, rendered) = compare(&gpu, entry, &contexts);
-        assert_parity(entry.operator, &cpu, &rendered);
+        assert_parity_within(
+            &entry.name(),
+            tolerance_of(entry.operator),
+            &cpu,
+            &rendered,
+        );
     });
+    // One case per operator by *code*, not merely by count: a case labelled with
+    // the operator it does not exercise is the failure mode a count cannot see.
+    let covered: Vec<u16> = all.iter().map(|entry| entry.operator.code()).collect();
+    assert_eq!(
+        covered,
+        (0..axiom_field::FIELD_OP_COUNT as u16).collect::<Vec<u16>>()
+    );
 }
 
 /// A noise-driven surface is the one whose failure would be invisible until a
@@ -838,7 +901,7 @@ fn noise_and_fbm_agree_with_the_cpu_evaluator_across_the_lattice() {
     let contexts = contexts();
     [noise_case(), fbm_case()].iter().for_each(|entry| {
         let (cpu, rendered) = compare(&gpu, entry, &contexts);
-        assert_parity(entry.operator, &cpu, &rendered);
+        assert_parity(&entry.name(), &cpu, &rendered);
         // A noise field that read as a constant would pass a tolerance check
         // against a constant CPU side, so prove the signal actually varies.
         let spread = cpu
@@ -848,7 +911,7 @@ fn noise_and_fbm_agree_with_the_cpu_evaluator_across_the_lattice() {
             });
         assert!(
             spread.1 - spread.0 > 0.05,
-            "{} must vary across the sampled lattice, or the parity is vacuous",
+            "{:?} must vary across the sampled lattice, or the parity is vacuous",
             entry.operator
         );
     });

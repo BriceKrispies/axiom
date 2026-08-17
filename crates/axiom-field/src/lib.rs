@@ -12,7 +12,8 @@
 //!
 //! - [`FieldType`] — the four-type lattice, and [`FieldValue`], the tagged
 //!   struct that carries one.
-//! - [`FieldOp`] — the closed 23-operator algebra, and [`FieldSignature`] /
+//! - [`FieldOp`] — the closed 27-operator algebra (a `u16` newtype with a
+//!   `const` catalog, not an enum), and [`FieldSignature`] /
 //!   [`SignatureKind`], the `const` table that gives each operator its shape.
 //! - [`FieldGraph`] — the typed graph, and [`FieldBuilder`], its append-only
 //!   authoring surface.
@@ -40,9 +41,12 @@
 //!   [`FieldGraph::canonicalize`] folds constants, shares common
 //!   subexpressions, drops dead nodes and relabels ids, so that **two graphs
 //!   computing the same thing produce identical bytes and identical digests**.
-//! - **It is not a shader graph VM.** The algebra is *closed* — 23 operators
+//! - **It is not a shader graph VM.** The algebra is *closed* — 27 operators
 //!   fixed in Rust, no registry, no runtime-extensible verb, no dynamic
 //!   dispatch. A new visual effect is a new *graph*, never a new Rust function.
+//!   The four transcendentals (`Sin`, `Cos`, `Pow`, `Exp`) are the one tier
+//!   whose CPU↔GPU agreement is a measured tolerance rather than exact
+//!   arithmetic; `ARCHITECTURE.md` records the numbers.
 //! - **It knows nothing of scenes, materials, textures, backends or GPUs.** A
 //!   coordinate space is a property of the [`EvalContext`] the caller supplies,
 //!   not of any type here.

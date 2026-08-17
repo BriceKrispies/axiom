@@ -2,7 +2,7 @@
 #
 # The typed pointwise field IR. `recipe` owns a domain-free operator DAG whose
 # operator codes are opaque; `field` assigns meaning to those codes through a
-# closed 23-operator algebra and a const signature table, gives every value one
+# closed 27-operator algebra and a const signature table, gives every value one
 # of four types, type-checks the whole graph in one forward fold, and reduces it
 # to a canonical form whose bytes are the same for any two graphs that compute
 # the same thing. It is the engine's missing *function-as-a-value*, and it has
