@@ -38,6 +38,8 @@
 //! | [`preparation`] | the barrier: the only place a shader is compiled |
 //! | [`scene`] | the window, the camera, the light rig, the `RunningApp` |
 //! | [`stand`] | the twelve bodies, each carrying its station's surface |
+//! | [`label`] | the caption over each body, naming the station it wears |
+//! | [`glyphs`] | the 5x7 cell font those captions are welded out of |
 //! | [`layout`] | where each station stands |
 //! | [`backends`] | station 9: `supported_by` for both real profiles |
 //! | [`introspection`] | station 10: `explain` / `digest` / `diff` |
@@ -55,7 +57,9 @@
 pub mod authoring;
 pub mod backends;
 pub mod frame;
+pub mod glyphs;
 pub mod introspection;
+pub mod label;
 pub mod layout;
 pub mod limitations;
 pub mod orbit;

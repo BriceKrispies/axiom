@@ -164,7 +164,7 @@ pub fn shader_crucible_core() -> RunningApp {
 mod tests {
     use super::*;
 
-    /// **Twelve station bodies and a ground.**
+    /// **Twelve station bodies, a ground, and a caption over each body.**
     ///
     /// Asserted on the *draws a frame emits*, not on `RunningApp::renderable_count`
     /// — which counts only what the `setup` closure authored, and this app authors
@@ -176,8 +176,9 @@ mod tests {
     #[test]
     fn the_scene_stands_up_every_station_body_plus_a_ground() {
         let (mut app, _) = crucible_core();
-        // 12 station bodies (1 + 1 + 1 + 1 + 2 + 3 + 1 + 2) + the ground.
-        assert_eq!(app.render(0).draws().len(), 13);
+        // 12 station bodies (1 + 1 + 1 + 1 + 2 + 3 + 1 + 2) + the ground, then
+        // one caption per body.
+        assert_eq!(app.render(0).draws().len(), 13 + crate::label::COUNT);
         assert_eq!(app.renderable_count(), 0, "nothing is authored in `setup`");
     }
 
@@ -208,9 +209,42 @@ mod tests {
             surfaced.iter().all(|p| authored.contains(p)),
             "a body named a program no station authored"
         );
-        // The ground and the baked tile deliberately carry `0`: the built-in
-        // fixed-material path, i.e. exactly today's engine.
-        assert_eq!(programs.iter().filter(|p| **p == 0).count(), 2);
+        // The ground, the baked tile and the twelve captions deliberately carry
+        // `0`: the built-in fixed-material path, i.e. exactly today's engine.
+        // A caption is furniture, not a subject — giving it an authored surface
+        // would make the barrier compile a twelfth program and quietly turn
+        // "eleven surfaces, eleven stations" into a lie.
+        assert_eq!(
+            programs.iter().filter(|p| **p == 0).count(),
+            2 + crate::label::COUNT
+        );
+    }
+
+    /// **The captions are the last draws of the frame, and they are the highest
+    /// mesh ids.**
+    ///
+    /// `crate::frame::packet_of` turns the tail of the draw list toward the
+    /// camera, so the partition "the last `label::COUNT` draws are the captions"
+    /// is load-bearing. It holds because `stand::populate` registers and spawns
+    /// every caption after every body; this checks it against the *registration
+    /// order* rather than restating it, so a body added after the captions fails
+    /// here instead of billboarding a sphere.
+    #[test]
+    fn the_caption_draws_are_the_tail_of_the_frame() {
+        let (mut app, _) = crucible_core();
+        let outcome = app.render(0);
+        let meshes: Vec<u64> = outcome.draws().iter().map(DrawData::mesh_id).collect();
+        let split = meshes.len() - crate::label::COUNT;
+        let (bodies, captions) = meshes.split_at(split);
+        let highest_body = bodies.iter().copied().max().expect("bodies exist");
+        assert!(
+            captions.iter().all(|mesh| *mesh > highest_body),
+            "a caption mesh is not among the last registered: {captions:?} vs {highest_body}"
+        );
+        // Each caption is its own mesh — twelve distinct strings cannot share
+        // one, and a shared handle would mean eleven bodies wearing one label.
+        let distinct: std::collections::BTreeSet<u64> = captions.iter().copied().collect();
+        assert_eq!(distinct.len(), crate::label::COUNT);
     }
 
     /// **The frame is deterministic.** Tick N replayed twice is identical, and

@@ -51,20 +51,112 @@ pub fn time_at(tick: u64) -> Seconds {
     Seconds::finite_or_zero((tick as f64 / TICK_HZ) as f32)
 }
 
+/// **The camera's world-space right and up**, recovered from the frame's
+/// view-projection.
+///
+/// Recovered by *unprojecting* three clip-space points rather than by reading
+/// the matrix elements. Reading them would mean committing to a handedness, a
+/// depth range and a row/column order all at once, and getting any of the three
+/// wrong produces captions that are mirrored or upside down rather than an
+/// error. Unprojecting assumes only what every graphics API agrees on — that
+/// clip `+x` is right and clip `+y` is up — and
+/// `tests::the_camera_basis_is_recovered_from_the_view_projection` pins the
+/// result against the app's own authored camera, so the assumption is checked
+/// rather than trusted.
+///
+/// `None` when the projection is singular, which the authored camera's is not.
+fn camera_basis(view_proj: [f32; 16]) -> Option<(Vec3, Vec3)> {
+    let inverse = Mat4::from_cols_array(view_proj).inverse()?;
+    let unproject = |x: f32, y: f32| {
+        let v = inverse.transform_vec4(Vec4::new(x, y, 0.5, 1.0));
+        (v.w.abs() > 1.0e-9).then(|| Vec3::new(v.x / v.w, v.y / v.w, v.z / v.w))
+    };
+    let origin = unproject(0.0, 0.0)?;
+    let right = unproject(0.5, 0.0)?.subtract(origin).normalize().ok()?;
+    let up = unproject(0.0, 0.5)?.subtract(origin).normalize().ok()?;
+    Some((right, up))
+}
+
+/// `world` with its rotation replaced by the camera's basis, keeping its
+/// translation and its per-axis scale.
+///
+/// `right x up` is the camera's *backward* axis, so the caption's local `+z` —
+/// the face [`crate::label::caption_mesh`] winds counter-clockwise — ends up
+/// pointing at the eye from any orbit position.
+fn faced(world: [f32; 16], right: Vec3, up: Vec3) -> [f32; 16] {
+    // Column-major: element (row r, column c) is `world[c * 4 + r]`.
+    let axis_scale = |column: usize| {
+        Vec3::new(world[column * 4], world[column * 4 + 1], world[column * 4 + 2]).length()
+    };
+    let (sx, sy, sz) = (axis_scale(0), axis_scale(1), axis_scale(2));
+    let backward = right.cross(up);
+    [
+        right.x * sx,
+        right.y * sx,
+        right.z * sx,
+        0.0,
+        up.x * sy,
+        up.y * sy,
+        up.z * sy,
+        0.0,
+        backward.x * sz,
+        backward.y * sz,
+        backward.z * sz,
+        0.0,
+        world[12],
+        world[13],
+        world[14],
+        world[15],
+    ]
+}
+
+/// **The captions, turned to face the camera.** The app's per-frame hook for
+/// anything that depends on the eye, and the reason this translation is the
+/// right place for it: `packet_of` is called once per frame with the frame's own
+/// camera already resolved, so a billboard costs no extra scene pass and no
+/// second opinion about where the eye is.
+///
+/// The captions are the **last** [`crate::label::COUNT`] draws of the frame
+/// because [`crate::stand::populate`] stands them up after every body;
+/// `tests::the_caption_draws_are_the_last_draws_of_the_frame` pins that
+/// partition against the registered mesh ids rather than trusting the order.
+fn billboard_of(
+    outcome: &FrameOutcome,
+) -> (Option<(Vec3, Vec3)>, usize, Mat4) {
+    (
+        camera_basis(outcome.camera_view_proj()),
+        outcome.draws().len().saturating_sub(crate::label::COUNT),
+        Mat4::from_cols_array(outcome.camera_view_proj()),
+    )
+}
+
 /// One tick's `FramePacket`, carrying every draw's `surface_program` and the
 /// frame's engine time.
 pub fn packet_of(outcome: &FrameOutcome, width: u32, height: u32) -> FramePacket {
+    let (basis, first_caption, view_proj) = billboard_of(outcome);
     let draws: Vec<FrameDrawItem> = outcome
         .draws()
         .iter()
         .enumerate()
         .map(|(index, draw)| {
+            let (world, mvp) = basis
+                .filter(|_| index >= first_caption)
+                .map(|(right, up)| {
+                    let world = faced(draw.world(), right, up);
+                    (
+                        world,
+                        view_proj
+                            .multiply(Mat4::from_cols_array(world))
+                            .as_cols_array(),
+                    )
+                })
+                .unwrap_or((draw.world(), draw.mvp()));
             FrameDrawItem::new(
                 index as u64,
                 draw.mesh_id(),
                 draw.material_id(),
-                draw.world(),
-                draw.mvp(),
+                world,
+                mvp,
                 draw.color(),
                 draw.casts_contact_shadow(),
             )
@@ -140,7 +232,7 @@ mod tests {
             .iter()
             .map(|draw| draw.surface_program())
             .collect();
-        assert_eq!(programs.len(), 13);
+        assert_eq!(programs.len(), 13 + crate::label::COUNT);
         assert_eq!(
             programs.iter().filter(|p| **p != 0).count(),
             11,
@@ -166,6 +258,128 @@ mod tests {
         assert_eq!(early.time().get(), 0.0);
         assert_eq!(later.time().get(), 2.0);
         assert_eq!(packet_of(&app.render(120), 640, 360), later);
+    }
+
+    /// **The recovered basis is the authored camera's own basis.**
+    ///
+    /// This is the assertion that makes [`camera_basis`] safe to write without
+    /// committing to a matrix convention. The crucible's authored camera looks
+    /// straight down `-z` with `+y` up, so its right is world `+x` and its up is
+    /// world `+y` — and if the unprojection had the handedness, the depth range
+    /// or the row/column order wrong, one of the two would come back negated and
+    /// every caption would render mirrored or upside down.
+    #[test]
+    fn the_camera_basis_is_recovered_from_the_view_projection() {
+        let (mut app, _) = crucible_core();
+        let outcome = app.render(0);
+        let (right, up) = camera_basis(outcome.camera_view_proj()).expect("a real camera");
+        assert!((right.x - 1.0).abs() < 1.0e-3, "{right:?}");
+        assert!(right.y.abs() + right.z.abs() < 1.0e-3, "{right:?}");
+        assert!((up.y - 1.0).abs() < 1.0e-3, "{up:?}");
+        assert!(up.x.abs() + up.z.abs() < 1.0e-3, "{up:?}");
+        // Right x up is backward: from the stand toward the eye, which is `+z`
+        // for this framing. That sign is what puts the caption's lit face
+        // outward instead of into the screen.
+        let backward = right.cross(up);
+        assert!((backward.z - 1.0).abs() < 1.0e-3, "{backward:?}");
+    }
+
+    /// **Every caption faces the camera, and no body is touched.**
+    ///
+    /// Asserted on the packet the backend actually receives: each caption draw's
+    /// world matrix has its `+z` column equal to the camera's backward axis, and
+    /// each body draw's world matrix is byte-identical to the one the scene
+    /// produced. A billboard that leaked onto the bodies would spin the whole
+    /// stand to face the eye.
+    ///
+    /// Taken from an **orbited** eye, deliberately. The authored framing looks
+    /// straight down `-z`, and an unrotated body's third column is already
+    /// `(0, 0, 1)` there — so from the opening shot a billboarded caption and a
+    /// perfectly still sphere are indistinguishable, and the test would pass
+    /// whatever the code did.
+    #[test]
+    fn the_captions_face_the_camera_and_the_bodies_do_not_move() {
+        let (mut app, _) = crucible_core();
+        app.set_camera(
+            crate::scene::scene_camera(),
+            Transform::from_translation(Vec3::new(9.0, 2.0, 4.0))
+                .looking_at(crate::scene::camera_target(), Vec3::UNIT_Y)
+                .expect("an orbited eye is a legal camera"),
+        );
+        let outcome = app.render(0);
+        let packet = packet_of(&outcome, 640, 360);
+        let (right, up) = camera_basis(outcome.camera_view_proj()).expect("a real camera");
+        let backward = right.cross(up);
+        let split = packet.draws().len() - crate::label::COUNT;
+        packet.draws().iter().enumerate().for_each(|(index, draw)| {
+            let world = draw.world();
+            let scene = outcome.draws()[index].world();
+            let faces_camera = (world[8] - backward.x).abs()
+                + (world[9] - backward.y).abs()
+                + (world[10] - backward.z).abs()
+                < 1.0e-3;
+            assert_eq!(
+                index >= split,
+                faces_camera,
+                "draw {index} is billboarded when it should not be, or the reverse"
+            );
+            // A body's matrix is untouched; a caption's keeps its translation.
+            assert_eq!(
+                (world[12], world[13], world[14]),
+                (scene[12], scene[13], scene[14]),
+                "draw {index} moved"
+            );
+        });
+    }
+
+    /// **The billboard follows the camera.** Two different eyes produce two
+    /// different caption orientations and the *same* body transforms — which is
+    /// what "the caption tracks the body as the camera orbits" means when it is
+    /// checked rather than claimed.
+    #[test]
+    fn a_moved_camera_turns_the_captions_and_nothing_else() {
+        let (mut app, _) = crucible_core();
+        let front = packet_of(&app.render(0), 640, 360);
+        app.set_camera(
+            crate::scene::scene_camera(),
+            Transform::from_translation(Vec3::new(9.0, 2.0, 4.0))
+                .looking_at(crate::scene::camera_target(), Vec3::UNIT_Y)
+                .expect("an orbited eye is a legal camera"),
+        );
+        let side = packet_of(&app.render(0), 640, 360);
+        let split = front.draws().len() - crate::label::COUNT;
+        // Every body's world matrix is unchanged by moving the eye.
+        (0..split).for_each(|index| {
+            assert_eq!(
+                front.draws()[index].world(),
+                side.draws()[index].world(),
+                "body {index} moved with the camera"
+            );
+        });
+        // Every caption's has turned.
+        (split..front.draws().len()).for_each(|index| {
+            assert_ne!(
+                front.draws()[index].world(),
+                side.draws()[index].world(),
+                "caption {index} did not follow the camera"
+            );
+        });
+    }
+
+    /// The billboard is a pure function of the frame: the same tick seen from
+    /// the same eye twice is the same packet, captions included.
+    #[test]
+    fn the_billboard_is_deterministic() {
+        let (mut app, _) = crucible_core();
+        let first = packet_of(&app.render(7), 640, 360);
+        assert_eq!(packet_of(&app.render(7), 640, 360), first);
+    }
+
+    /// A singular view-projection has no basis to recover, and the frame falls
+    /// back to the scene's own matrices rather than producing a NaN transform.
+    #[test]
+    fn a_singular_view_projection_leaves_every_draw_alone() {
+        assert_eq!(camera_basis([0.0; 16]), None);
     }
 
     #[test]

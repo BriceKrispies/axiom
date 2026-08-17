@@ -110,6 +110,12 @@ pub fn populate(app: &mut RunningApp) {
     patterns::pattern_surfaces()
         .into_iter()
         .for_each(|surface| place(app, slot, ball, surface, 1.05));
+
+    // The captions, last — every body is standing, so the caption draws are the
+    // tail of the frame's draw list and `crate::frame::packet_of` can turn
+    // exactly them toward the camera without carrying a second registry of
+    // which draw is which.
+    crate::label::stand_captions(app);
 }
 
 /// Stand one station's body in the next slot of the row, carrying `surface` as
