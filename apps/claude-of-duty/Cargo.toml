@@ -13,3 +13,51 @@ rust-version.workspace = true
 # quantities the ported `config.js` data is authored in, so a naked float never
 # crosses a subsystem boundary with its unit left to guesswork.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
+
+# wasm32-only: the Web Audio binding in `audio::web_audio`, which realises a
+# recorded `AudioGraph` against real nodes. Native `cargo test` never compiles
+# it, which is exactly the point — the whole synthesis path is verified natively
+# against goldens captured from the original JavaScript, and the browser edge is
+# a transcriber with no decisions of its own. Module Law #9 confines `web_sys`
+# to the `host` layer and the `windowing` module; that rule governs layers and
+# modules. This is an app — the tier that owns browser bootstrap.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "AudioBuffer",
+    "AudioBufferSourceNode",
+    "AudioContext",
+    "AudioDestinationNode",
+    "AudioNode",
+    "AudioParam",
+    "AudioScheduledSourceNode",
+    "BaseAudioContext",
+    "BiquadFilterNode",
+    "BiquadFilterType",
+    "ConvolverNode",
+    "DynamicsCompressorNode",
+    "GainNode",
+    "OscillatorNode",
+    "OscillatorType",
+    "OverSampleType",
+    "PannerNode",
+    "PanningModelType",
+    "PeriodicWave",
+    "PeriodicWaveOptions",
+    "StereoPannerNode",
+    "WaveShaperNode",
+] }
+
+[dev-dependencies]
+# Reads `tests/audio/golden.json` — the capture of the original `src/audio/*.js`
+# running under Node. Dev-only: nothing in the shipped crate parses JSON.
+#
+# `arbitrary_precision` is not decoration. serde_json 1.0.150 parses a decimal
+# through `zmij`, whose rounding is off by one ULP on some inputs — measured
+# here: the golden `0.20738044381141663` (an exact `f32` widened to `f64`) came
+# back as `0.20738044381141665`, one ULP high, where `str::parse::<f64>` gives
+# the correctly-rounded value. With this feature a `Number` keeps its source
+# text and `as_f64` goes through `str::parse`, so a golden compares as the exact
+# value the JavaScript printed. Without it the whole-graph comparisons would
+# need a tolerance they do not deserve.
+serde_json = { version = "1", features = ["arbitrary_precision"] }
