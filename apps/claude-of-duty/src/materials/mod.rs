@@ -5,6 +5,11 @@
 //! (GLSL generators) is handled separately; this module defines the data that
 //! parameterizes it.
 
+/// Tileable procedural noise library (`src/materials/glsl/noise.js`) ported
+/// as CPU-evaluable maths — the foundation every generator identified by
+/// [`LibraryEntry::generator`] builds on.
+pub mod noise;
+
 use crate::world::palette::Surface;
 
 /// Baking parameters for material texture generation.
