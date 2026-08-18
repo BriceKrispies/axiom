@@ -14,6 +14,15 @@ rust-version.workspace = true
 # crosses a subsystem boundary with its unit left to guesswork.
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 
+# `Mat4`/`Vec3`/`Quat` — the weapon geometry kit's transform primitives
+# (`weapons::geometry`). `Geo::apply` uses `Mat4`'s normal-matrix-correct
+# point/direction transform directly; the primitive builders (`box_geo`,
+# `lathe_z`, `dome`, `knurl_band`, ...) build `Mat4::translation`/`::scale`
+# and `Mat4::from_quaternion` rotations to reproduce
+# `BufferGeometry.translate`/`rotateX`/`rotateZ`/`scale` (`geometry.js`)
+# rather than hand-rolling a second, parallel transform path.
+axiom-math = { path = "../../crates/axiom-math" }
+
 # wasm32-only: the Web Audio binding in `audio::web_audio`, which realises a
 # recorded `AudioGraph` against real nodes. Native `cargo test` never compiles
 # it, which is exactly the point — the whole synthesis path is verified natively

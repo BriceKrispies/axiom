@@ -4,4 +4,5 @@
 pub mod ballistics;
 pub mod clips;
 pub mod defs;
+pub mod geometry;
 pub mod mathx;

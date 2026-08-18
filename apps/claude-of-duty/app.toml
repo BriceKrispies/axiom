@@ -21,6 +21,10 @@ allowed_layers = [
     # capsule and shadow distances) and `Ratio` (render scale, exposure, the ADS
     # scales) — the dimensioned quantities `config.js` ports into.
     "kernel",
+    # `Mat4`/`Quat`/`Vec3` — the weapon geometry kit's (`weapons::geometry`)
+    # transform composition and point/normal transforms, reused rather than
+    # re-derived. See `apps/claude-of-duty/Cargo.toml`.
+    "math",
 ]
 
 allowed_modules = []
