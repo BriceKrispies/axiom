@@ -47,10 +47,11 @@ The empty scaffolds are now real, deterministic implementations:
 - **Split integrator** — `integrate_velocities` and `integrate_positions` so the
   solver runs between them; linear only (`integrator.rs`).
 - **Exact queries** — `raycast` (exact ray/sphere, ray/AABB, ray/plane; capsule
-  excluded; nearest hit, ties by smaller body handle, triggers excluded) and
-  `overlap_sphere` (exact sphere/sphere, sphere/AABB, sphere/plane; capsule
-  excluded; sorted, de-duplicated body handles, triggers included)
-  (`physics_query.rs`).
+  excluded at the time; nearest hit, ties by smaller body handle, triggers
+  excluded) and `overlap_sphere` (exact sphere/sphere, sphere/AABB, sphere/plane;
+  capsule excluded at the time; sorted, de-duplicated body handles, triggers
+  included) (`physics_query.rs`). Phase 4 below made these rotation-aware, added
+  the capsule kinds, and widened the result into a full hit record.
 - **Honest step-record counts** — `broad_phase_pair_count`, `contact_pair_count`,
   `solved_contact_count` (real solved-contact work), and `substep_count` report
   actual pipeline work; `solver_iteration_count` is documented as configured
@@ -84,13 +85,30 @@ material friction (currently validated and stored but unresolved), so resting an
 sliding contacts behave correctly. The friction solve runs alongside the existing
 normal-impulse passes and stays branchless and deterministic.
 
-## Phase 4 — capsule and box/box contacts
+## Phase 4 — capsule and box/box contacts, and swept queries (done)
 
-Fill the remaining entries of the narrow-phase dispatch table: capsule pairings
-(capsule/sphere, capsule/plane, capsule/box, capsule/capsule) and box/box. This
-completes contact generation across the existing primitive vocabulary. (The
-contact point is already exposed via `PhysicsApi::latest_contacts()`; these new
-pairings simply extend which contacts populate it.)
+The remaining entries of the narrow-phase dispatch table are filled: capsule
+pairings (capsule/sphere, capsule/plane, capsule/box, capsule/capsule) and
+box/box, the latter by the separating-axis theorem over fifteen candidate axes.
+Contact generation is now complete across the volume vocabulary; only
+`plane/plane` (two half-spaces bound no contact region) and the heightfield row
+(generated outside the table) remain deliberately empty.
+
+Landed alongside it, on the same `axiom-math` primitives:
+
+- **Rotation-aware exact queries** — `Obb::raycast` and `Capsule::raycast` replace
+  the axis-aligned ray/AABB approximation and the capsule exclusion.
+- **A real hit record** — every cast returns a `PhysicsHit` (body, collider,
+  distance, point, surface normal, front/back face) rather than a bare handle,
+  plus `raycast_all` for the multi-layer penetration a single nearest hit cannot
+  express.
+- **`overlap_capsule`** — one overlap relation against a capsule-shaped query
+  volume, of which `overlap_sphere` is the zero-length case.
+- **`capsule_cast`** — the swept query a character controller is built on, over
+  `Capsule::sweep_capsule` / `Capsule::sweep_triangle`.
+
+Still deferred here: multi-point contact manifolds (every pairing reports one
+point), and heightfield ray/overlap/sweep queries.
 
 ## Phase 5 — collision and trigger lifecycle events
 

@@ -574,11 +574,20 @@ fn raycast_and_overlap_find_a_collidered_body_through_the_facade() {
     api.attach_sphere_collider(target, meters(1.0), material, false)
         .unwrap();
 
-    // A ray from the origin down +X strikes the sphere at x = 5.
-    assert_eq!(
-        api.raycast(Vec3::ZERO, Vec3::UNIT_X, meters(100.0)),
-        Some(target)
-    );
+    // A ray from the origin down +X strikes the sphere at x = 5, and the hit
+    // record describes the surface, not just the body.
+    let hit = api
+        .raycast(Vec3::ZERO, Vec3::UNIT_X, meters(100.0))
+        .expect("the ray strikes the sphere");
+    assert_eq!(hit.body(), target);
+    assert!((hit.distance().get() - 4.0).abs() < 1.0e-4);
+    assert!(hit.point().subtract(Vec3::new(4.0, 0.0, 0.0)).length() < 1.0e-4);
+    assert!(hit
+        .normal()
+        .subtract(Vec3::new(-1.0, 0.0, 0.0))
+        .length()
+        < 1.0e-4);
+    assert!(hit.front_face());
     // A query sphere around the body overlaps it.
     assert_eq!(
         api.overlap_sphere(Vec3::new(5.0, 0.0, 0.0), meters(0.5)),

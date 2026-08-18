@@ -29,27 +29,45 @@
 //! semi-implicit integration of both **linear and angular** motion (orientation is
 //! integrated from accumulated torque and a per-shape diagonal inverse inertia),
 //! per-world linear/angular **damping**, an `O(n²)` AABB broad phase, a narrow
-//! phase generating contacts for sphere/sphere, sphere/plane, sphere/box, and
-//! box/plane pairs, and a sequential-impulse solver with restitution, a
-//! deterministic **tangential friction** pass (Coulomb-clamped), and Baumgarte
-//! position correction, all run under deterministic substepping with atomic
-//! non-finite rollback. Spatial queries answer exact sphere/box/plane tests, and
-//! per-step diagnostic counts and lifecycle events are reported.
+//! phase generating contacts for **every pairing** of the four volume kinds
+//! (sphere, box, capsule, plane — box/box by the separating-axis theorem, the
+//! capsule pairings by the math layer's exact closest-point solves), and a
+//! sequential-impulse solver with restitution, a deterministic **tangential
+//! friction** pass (Coulomb-clamped), and Baumgarte position correction, all run
+//! under deterministic substepping with atomic non-finite rollback.
+//!
+//! Spatial queries are exact and rotation-aware for all four volume kinds:
+//! `raycast` and `raycast_all` (every layer along the ray, for a projectile that
+//! penetrates), `overlap_sphere` / `overlap_capsule`, and `capsule_cast` — the
+//! swept query a character controller is built on. Every cast answers with a full
+//! hit record (collider, body, distance, point, surface normal, front/back face),
+//! not a bare handle. Per-step diagnostic counts and lifecycle events are
+//! reported.
 //!
 //! Genuinely deferred (do not assume these exist yet — see `ARCHITECTURE.md` and
-//! `ROADMAP.md`): capsule and box/box contacts, oriented-box (rotated) contacts,
-//! collision/trigger lifecycle events, and cross-instance (cross-build) f32
-//! determinism — replay is proven **same-binary** only.
+//! `ROADMAP.md`): multi-point contact manifolds (every pairing reports one
+//! contact point), heightfield ray/overlap/sweep queries (heightfield *contacts*
+//! against a sphere do exist), plane/plane contacts, collision/trigger lifecycle
+//! events, and cross-instance (cross-build) f32 determinism — replay is proven
+//! **same-binary** only.
 //!
 //! ## Public surface
 //! `lib.rs` exposes **exactly one** behavioral facade — [`PhysicsApi`] — plus its
 //! identity vocabulary: the [`PhysicsBodyHandle`] and [`PhysicsColliderHandle`]
 //! handles the facade returns and accepts. Every other type (configs, bodies,
-//! colliders, shapes, materials, snapshots, records, events) stays reachable
-//! only through the facade.
+//! colliders, shapes, materials, snapshots, records, events, hit records) stays
+//! reachable only through the facade.
 
 mod broad_phase_pair;
 mod collider_bounds;
+mod collider_capsule;
+mod collider_obb;
+mod contact_box_box;
+mod contact_capsule_box;
+mod contact_capsule_capsule;
+mod contact_capsule_plane;
+mod contact_capsule_sphere;
+mod contact_geom;
 mod contact_manifold;
 mod contact_pair;
 mod contact_report;
@@ -72,6 +90,7 @@ mod physics_error;
 mod physics_error_code;
 mod physics_event;
 mod physics_heightfield;
+mod physics_hit;
 mod physics_material;
 mod physics_query;
 mod physics_result;
@@ -80,6 +99,10 @@ mod physics_snapshot;
 mod physics_step_record;
 mod physics_step_result;
 mod physics_world;
+mod query_hit;
+mod query_overlap;
+mod query_ray;
+mod query_sweep;
 
 pub use ids::{PhysicsBodyHandle, PhysicsColliderHandle};
 pub use physics_api::PhysicsApi;

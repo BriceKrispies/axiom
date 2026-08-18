@@ -22,4 +22,7 @@ introduced_capabilities = [
   "physics-snapshots",
   "physics-step-recording",
   "physics-queries",
+  "physics-capsule-contacts",
+  "physics-shape-casts",
+  "physics-hit-records",
 ]

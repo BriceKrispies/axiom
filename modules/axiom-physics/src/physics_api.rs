@@ -1,7 +1,7 @@
 //! The single public facade for the physics module.
 
 use axiom_kernel::{Meters, Ratio};
-use axiom_math::{Transform, Vec3};
+use axiom_math::{Quat, Transform, Vec3};
 use axiom_runtime::RuntimeStep;
 
 use crate::contact_report::ContactReport;
@@ -13,6 +13,7 @@ use crate::physics_config::PhysicsConfig;
 use crate::physics_error::PhysicsError;
 use crate::physics_event::PhysicsEvent;
 use crate::physics_heightfield::Heightfield;
+use crate::physics_hit::PhysicsHit;
 use crate::physics_material::PhysicsMaterial;
 use crate::physics_query::PhysicsQuery;
 use crate::physics_result::PhysicsResult;
@@ -296,23 +297,80 @@ impl PhysicsApi {
         self.world.drain_events()
     }
 
-    /// Cast a ray and return the nearest solid body hit within `max_distance`
-    /// (ties broken by the smaller body handle; triggers excluded). Returns
-    /// `None` for a miss, a zero-length/non-finite ray, or a non-finite origin.
+    /// Cast a ray and return the nearest solid hit within `max_distance` — the
+    /// body and collider struck, the distance travelled, the world contact point,
+    /// the surface normal facing the caster, and whether the ray began outside
+    /// that collider. Ties are broken by the smaller body handle, then the
+    /// smaller collider handle; triggers are excluded. Returns `None` for a miss,
+    /// a zero-length/non-finite direction, or a non-finite origin.
     pub fn raycast(
         &self,
         origin: Vec3,
         direction: Vec3,
         max_distance: Meters,
-    ) -> Option<PhysicsBodyHandle> {
+    ) -> Option<PhysicsHit> {
         PhysicsQuery::new(&self.world).raycast(origin, direction, max_distance)
+    }
+
+    /// Cast a ray and return **every** solid hit along it within `max_distance`,
+    /// nearest first. This is the query a projectile that penetrates several
+    /// surfaces needs: [`PhysicsApi::raycast`] answers only with the first one,
+    /// and re-casting from just past each impact costs a full extra query and
+    /// depends on an epsilon nudge past the surface. A body carrying several
+    /// colliders contributes one hit per collider struck.
+    pub fn raycast_all(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        max_distance: Meters,
+    ) -> Vec<PhysicsHit> {
+        PhysicsQuery::new(&self.world).raycast_all(origin, direction, max_distance)
     }
 
     /// Find the bodies overlapping a query sphere, as a sorted, de-duplicated
     /// handle list (triggers included). Returns an empty list for a non-finite
-    /// query centre.
+    /// query centre or a negative radius.
     pub fn overlap_sphere(&self, center: Vec3, radius: Meters) -> Vec<PhysicsBodyHandle> {
         PhysicsQuery::new(&self.world).overlap_sphere(center, radius)
+    }
+
+    /// Find the bodies overlapping a query **capsule** — the volume a character
+    /// or a limb actually occupies — as a sorted, de-duplicated handle list
+    /// (triggers included). The capsule's axis runs along the rotated local Y and
+    /// spans `half_height` either side of `center`, with hemispherical caps of
+    /// `radius` beyond each end: exactly the shape
+    /// [`PhysicsApi::attach_capsule_collider`] describes. Returns an empty list
+    /// for a non-finite centre or a negative radius.
+    pub fn overlap_capsule(
+        &self,
+        center: Vec3,
+        rotation: Quat,
+        radius: Meters,
+        half_height: Meters,
+    ) -> Vec<PhysicsBodyHandle> {
+        PhysicsQuery::new(&self.world).overlap_capsule(center, rotation, radius, half_height)
+    }
+
+    /// Sweep a capsule along `motion` and return the nearest solid contact on the
+    /// way — the query a character controller is built on, and the one a discrete
+    /// overlap test cannot answer: a fast body is on one side of a wall before the
+    /// step and the other side after it, and overlaps it at neither instant.
+    ///
+    /// The capsule is described exactly as in [`PhysicsApi::overlap_capsule`].
+    /// The returned [`PhysicsHit::distance`] is how far along `motion` the capsule
+    /// travelled before touching, in metres. A capsule that starts already
+    /// overlapping reports distance `0` with `front_face() == false` and a usable
+    /// escape normal, which is what lets a controller push itself out of geometry
+    /// it is stuck in. Triggers are excluded, as for a ray.
+    pub fn capsule_cast(
+        &self,
+        center: Vec3,
+        rotation: Quat,
+        radius: Meters,
+        half_height: Meters,
+        motion: Vec3,
+    ) -> Option<PhysicsHit> {
+        PhysicsQuery::new(&self.world).capsule_cast(center, rotation, radius, half_height, motion)
     }
 }
 

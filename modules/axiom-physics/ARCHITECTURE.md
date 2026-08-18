@@ -178,7 +178,10 @@ world state, independent of insertion or scan order.
 
 Real contact generation for the four classical pairings — **sphere/sphere,
 sphere/plane, sphere/box, box/plane** — in both collider orderings. Dispatch is a
-branchless 16-entry function table indexed by `kind_a.index() * 4 + kind_b.index()`;
+branchless function table indexed by
+`kind_a.index() * PhysicsShapeKind::COUNT + kind_b.index()`, and **sized by that
+same constant** so a new shape kind cannot be added without every dispatch site
+failing to compile;
 the reversed orderings (box/sphere, plane/sphere, plane/box) reuse the canonical
 generator with arguments swapped and the resulting normal flipped, so each
 geometry test is written once. The two box pairings are **orientation-aware**:
@@ -186,9 +189,14 @@ geometry test is written once. The two box pairings are **orientation-aware**:
 box's local frame* (via the box rotation's conjugate), and `box/plane` projects
 the half-extents onto the plane normal expressed in the box's rotated axes — so a
 tilted platform collides on its true faces. At the identity rotation both reduce
-exactly to the axis-aligned tests. **Every other pairing — box/box, any capsule
-pair, plane/plane — deterministically produces no contact** and is a documented
-later-phase item.
+exactly to the axis-aligned tests. The capsule pairings (capsule/sphere,
+capsule/capsule, capsule/plane, capsule/box) are built on the math layer's exact
+closest-point solves, on the capsule's true rotated axis; `box/box` is the
+separating-axis theorem over fifteen candidate axes, reporting the axis of minimum
+overlap. **`plane/plane` is the one volume pairing that deterministically produces
+no contact** — two infinite half-spaces bound no contact region — and heightfield
+contacts are generated outside the table (the grid lives on the collider, not the
+shape).
 
 Conventions (deterministic, documented):
 
@@ -289,28 +297,45 @@ transform **scale is ignored** (the module carries no collider scale). Rotation 
 threaded into both the bounds (`world_aabb` takes a `Quat`) and the narrow phase
 (the contact generators receive each body's rotation): a **box** bounds and
 collides as an oriented box (OBB), while a **sphere/capsule** is rotation-invariant
-and keeps its tight axis-aligned bound. Spatial queries (`physics_query.rs`) remain
-rotation-unaware by design — they pass the identity rotation so a query never
-*over*-reports a rotated box (exact ray/OBB casting is a later-phase item), whereas
-the broad phase must not *miss* a candidate and so uses the true rotation. `box/box`
-contacts remain a documented later-phase item.
+and keeps its tight axis-aligned bound. Spatial queries (`physics_query.rs`) are
+**rotation-aware too**: a collider is resolved with its body's rotation, so a ray
+strikes a turned box on its true tilted face (`Obb::raycast`) and a tipped capsule
+on its true shaft (`Capsule::raycast`). The broad phase, which must not *miss* a
+candidate, keeps its conservative oriented envelope.
 
-### Spatial queries (`physics_query.rs`)
+### Spatial queries (`physics_query.rs` + `query_ray.rs` / `query_overlap.rs` / `query_sweep.rs`)
 
-Both queries are pure reads — they take `&PhysicsWorld`, never mutate it, and both
-skip disabled bodies/colliders. Results are deterministic functions of world state
-with explicit tie-breaking and ordering.
+Every query is a pure read — it takes `&PhysicsWorld`, never mutates it, and skips
+disabled bodies/colliders. Results are deterministic functions of world state with
+explicit tie-breaking and ordering: nearest first, ties broken by the smaller body
+handle and then the smaller collider handle.
 
-- **`raycast`** returns the **nearest** body hit within `max_distance`, or `None`.
-  Queries are **exact** per shape kind: exact ray/sphere, exact ray/AABB (a box
-  *is* its axis-aligned extents), and analytic ray/plane. **Capsule is excluded**
-  (never hit) rather than approximated — a documented deferral. Among hits, the
-  smallest entry distance wins, ties broken by the **smaller body handle**.
-  Triggers are **excluded** — a ray reports solid geometry only.
-- **`overlap_sphere`** returns the bodies overlapping the query sphere as a
-  **sorted, de-duplicated** handle list. Exact per kind: exact sphere/sphere,
-  exact closest-point sphere/AABB, signed-distance sphere/plane; **capsule
-  excluded**. Triggers are **included** — overlap is a presence query.
+Each cast answers with a **`PhysicsHit`** — body, collider, distance travelled (in
+`Meters`), world contact point, unit surface normal facing the caster, and whether
+the caster began outside that collider (`front_face`). A bare body handle was not
+enough for anything built on a cast: ballistics, decals, footsteps, ground and
+ledge probing, and multi-layer penetration all need at minimum the normal.
+
+- **`raycast`** — the nearest solid hit within `max_distance`, or `None`. Exact
+  per kind: ray/sphere quadratic, `Obb::raycast` (oriented slabs), `Capsule::raycast`
+  (shaft plus caps), analytic ray/half-space. A ray beginning **inside** a shape
+  reports distance `0` with `front_face() == false`. Triggers are **excluded**.
+- **`raycast_all`** — every hit along the ray, nearest first, one per collider
+  struck. This is what a projectile penetrating several surfaces needs; the
+  nearest-only form throws the rest of the trace away.
+- **`overlap_sphere` / `overlap_capsule`** — the bodies overlapping a query volume,
+  as a **sorted, de-duplicated** handle list. There is one relation underneath: a
+  query sphere is a capsule whose axis has zero length, so the two can never
+  disagree. Triggers are **included** — overlap is a presence query.
+- **`capsule_cast`** — the nearest contact a capsule meets while travelling a
+  motion vector, built on `Capsule::sweep_capsule` / `Capsule::sweep_triangle`. A
+  capsule that starts already overlapping reports distance `0` with a usable escape
+  normal, which is how a controller pushes itself out of geometry it is stuck in.
+
+A **heightfield** collider is excluded from all three query families (never hit,
+never reported, never swept) rather than approximated by its bounding box: the grid
+is unreachable through the flat per-shape dispatch signature, and a bounding-box
+fallback would report hits in the open air above a valley.
 
 Shape handling dispatches on `kind().index()` into per-kind function tables, not a
 `match`.
@@ -398,13 +423,17 @@ app, test app, or WASM app can each drive the same world.
 Scheduled, in order, in [`ROADMAP.md`](ROADMAP.md). Each is genuinely **not**
 implemented yet (and is never claimed to be):
 
-- **capsule contacts** — every capsule pairing produces no contact, and capsule is
-  excluded from exact queries;
-- **box/box contacts** — two box colliders never contact each other (the marble
-  spine only needs a dynamic sphere against static boxes; `sphere/box` and
-  `box/plane` are orientation-aware, but box/box is unimplemented);
-- **exact ray/OBB and ray/capsule casting** — `raycast`/`overlap_sphere` treat a
-  box as axis-aligned (identity rotation) and never hit a capsule;
+- **multi-point contact manifolds** — every pairing reports a single contact
+  point, so a face-to-face or shaft-to-shaft resting contact is resolved at one
+  point and can induce a small spurious spin. `box/box` and `capsule/plane` pick
+  that point to minimise the effect (a face-centred support, a penetration-weighted
+  blend), but a genuine multi-point manifold is the structural fix and belongs to
+  `ContactManifold`;
+- **heightfield queries** — a heightfield is excluded from `raycast`,
+  `overlap_*` and `capsule_cast` (heightfield *contacts* against a sphere do
+  exist). Closing this means giving query dispatch access to the collider's grid,
+  not loosening the test;
+- **plane/plane contacts** — two infinite half-spaces bound no contact region;
 - **collision / trigger lifecycle events** — no contact persistence across steps,
   so contact enter/stay/exit and trigger overlap events are not emitted (the
   `latest_contacts()` report exposes the current step's contacts, but there is no

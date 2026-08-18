@@ -1,17 +1,20 @@
 //! The deterministic narrow phase: candidate pairs → contact manifolds.
 //! `generate_contacts` takes the broad phase's candidate pairs and produces a
-//! [`ContactManifold`] for each pair that is genuinely overlapping. The narrow
-//! phase implements the four classical pairings — sphere/sphere, sphere/plane,
-//! sphere/box, and box/plane — in both collider orderings; every other pairing
-//! (box/box, any capsule, plane/plane) deterministically produces **no** contact
-//! and is a documented deferral (see `ROADMAP.md`).
+//! [`ContactManifold`] for each pair that is genuinely overlapping. Every pairing
+//! of the four *volume* kinds — sphere, box, capsule and plane — is implemented,
+//! in both collider orderings, except plane/plane (two infinite half-spaces have
+//! no bounded contact to report). The heightfield row and column are generated
+//! alongside the table by [`heightfield_contact`], which needs the whole collider
+//! rather than just its shape.
 //! ## Branchless shape dispatch
 //! There is no `match` on shape kinds. Each ordered `(kind_a, kind_b)` pairing
-//! indexes a fixed 16-entry function table (`kind_a.index() * 4 + kind_b.index()`)
-//! of contact generators; unimplemented pairings point at `no_contact`. The
-//! reversed orderings (box/sphere, plane/sphere, plane/box) reuse the canonical
-//! generator with arguments swapped and the resulting normal flipped, so the
-//! geometry is written once.
+//! indexes a fixed function table
+//! (`kind_a.index() * PhysicsShapeKind::COUNT + kind_b.index()`) of contact
+//! generators. Sizing the table by [`PhysicsShapeKind::COUNT`] is what makes it
+//! **exhaustive by construction**: a new shape kind cannot be added without this
+//! table failing to compile. The reversed orderings reuse the canonical generator
+//! with arguments swapped and the resulting normal flipped, so each geometry is
+//! written once.
 //! ## Conventions (deterministic, documented)
 //! - The contact **normal points from collider A to collider B** (A/B in
 //!   ascending handle order — see [`ContactManifold`]).
@@ -19,25 +22,29 @@
 //!   the empty side, so a body crossing to the solid side penetrates.
 //! - Contact requires **strictly positive** penetration: a pair touching exactly
 //!   at the boundary (`depth == 0`) produces no contact. Degenerate coincident
-//!   configurations (sphere centers equal, or a sphere center inside a box) have
-//!   no defined normal and likewise produce no contact.
+//!   configurations (sphere centers equal, a sphere center inside a box, a
+//!   capsule axis inside a box) have no defined normal and likewise produce no
+//!   contact. Two coincident *boxes* are the documented exception: they do have a
+//!   well-defined shallowest escape axis, so `box_box` reports it.
+//! - Every generator that takes a rotation genuinely uses it. Sphere and plane
+//!   generators ignore the rotation arguments (a sphere is rotation-invariant; a
+//!   plane's normal lives in its shape and is treated as world-space, so a plane
+//!   body's rotation does not steer it — a documented choice).
 
 use axiom_math::{Quat, Vec3};
 
 use crate::broad_phase_pair::BroadPhasePair;
+use crate::contact_box_box::box_box;
+use crate::contact_capsule_box::{box_capsule, capsule_box};
+use crate::contact_capsule_capsule::capsule_capsule;
+use crate::contact_capsule_plane::{capsule_plane, plane_capsule};
+use crate::contact_capsule_sphere::{capsule_sphere, sphere_capsule};
+use crate::contact_geom::{flip, ContactGeom};
 use crate::contact_manifold::ContactManifold;
 use crate::physics_body::PhysicsBody;
 use crate::physics_collider::PhysicsCollider;
 use crate::physics_collider_shape::PhysicsColliderShape;
-
-/// The raw geometric result of a narrow-phase test, before it is tagged with the
-/// pair's handles: a unit normal (A→B), a positive penetration depth, and a world
-/// contact point.
-struct ContactGeom {
-    normal: Vec3,
-    depth: f32,
-    point: Vec3,
-}
+use crate::physics_shape_kind::PhysicsShapeKind;
 
 /// A contact generator for one ordered shape pairing. Each collider is given its
 /// owning body's world `center` **and** `rotation`, so an oriented box collides
@@ -48,48 +55,47 @@ struct ContactGeom {
 type ContactFn =
     fn(PhysicsColliderShape, Vec3, Quat, PhysicsColliderShape, Vec3, Quat) -> Option<ContactGeom>;
 
-/// The branchless dispatch table, indexed by `kind_a.index() * 5 + kind_b.index()`
-/// with `Sphere = 0, Box = 1, Capsule = 2, Plane = 3, Heightfield = 4`. The
-/// heightfield row/column are `no_contact` here: a heightfield's grid data is not
-/// reachable through the flat `ContactFn` signature, so sphere↔heightfield contact
-/// is generated alongside the table (which needs the whole collider) — see
-/// [`heightfield_contact`].
-const CONTACT_TABLE: [ContactFn; 25] = [
-    sphere_sphere, // (Sphere, Sphere)
-    sphere_box,    // (Sphere, Box)
-    no_contact,    // (Sphere, Capsule)
-    sphere_plane,  // (Sphere, Plane)
-    no_contact,    // (Sphere, Heightfield) — see heightfield_contact
-    box_sphere,    // (Box, Sphere)
-    no_contact,    // (Box, Box)
-    no_contact,    // (Box, Capsule)
-    box_plane,     // (Box, Plane)
-    no_contact,    // (Box, Heightfield)
-    no_contact,    // (Capsule, Sphere)
-    no_contact,    // (Capsule, Box)
-    no_contact,    // (Capsule, Capsule)
-    no_contact,    // (Capsule, Plane)
-    no_contact,    // (Capsule, Heightfield)
-    plane_sphere,  // (Plane, Sphere)
-    plane_box,     // (Plane, Box)
-    no_contact,    // (Plane, Capsule)
-    no_contact,    // (Plane, Plane)
-    no_contact,    // (Plane, Heightfield)
-    no_contact,    // (Heightfield, Sphere) — see heightfield_contact
-    no_contact,    // (Heightfield, Box)
-    no_contact,    // (Heightfield, Capsule)
-    no_contact,    // (Heightfield, Plane)
-    no_contact,    // (Heightfield, Heightfield)
+/// The branchless dispatch table, indexed by
+/// `kind_a.index() * PhysicsShapeKind::COUNT + kind_b.index()` with
+/// `Sphere = 0, Box = 1, Capsule = 2, Plane = 3, Heightfield = 4`.
+///
+/// Its length is derived from [`PhysicsShapeKind::COUNT`], so the table cannot
+/// silently fall behind the enum: adding a sixth kind makes this initializer a
+/// compile error rather than a runtime index panic.
+///
+/// Two rows are deliberately `no_contact`. **Plane/plane**: two infinite
+/// half-spaces either miss entirely or overlap in an unbounded region, and
+/// neither has a contact point to report. **Heightfield**: a heightfield's grid
+/// data is not reachable through the flat `ContactFn` signature, so its contacts
+/// are generated alongside the table by [`heightfield_contact`], which takes the
+/// whole collider.
+const CONTACT_TABLE: [ContactFn; PhysicsShapeKind::COUNT * PhysicsShapeKind::COUNT] = [
+    sphere_sphere,   // (Sphere, Sphere)
+    sphere_box,      // (Sphere, Box)
+    sphere_capsule,  // (Sphere, Capsule)
+    sphere_plane,    // (Sphere, Plane)
+    no_contact,      // (Sphere, Heightfield) — see heightfield_contact
+    box_sphere,      // (Box, Sphere)
+    box_box,         // (Box, Box)
+    box_capsule,     // (Box, Capsule)
+    box_plane,       // (Box, Plane)
+    no_contact,      // (Box, Heightfield)
+    capsule_sphere,  // (Capsule, Sphere)
+    capsule_box,     // (Capsule, Box)
+    capsule_capsule, // (Capsule, Capsule)
+    capsule_plane,   // (Capsule, Plane)
+    no_contact,      // (Capsule, Heightfield)
+    plane_sphere,    // (Plane, Sphere)
+    plane_box,       // (Plane, Box)
+    plane_capsule,   // (Plane, Capsule)
+    no_contact,      // (Plane, Plane) — two half-spaces bound no contact
+    no_contact,      // (Plane, Heightfield)
+    no_contact,      // (Heightfield, Sphere) — see heightfield_contact
+    no_contact,      // (Heightfield, Box)
+    no_contact,      // (Heightfield, Capsule)
+    no_contact,      // (Heightfield, Plane)
+    no_contact,      // (Heightfield, Heightfield)
 ];
-
-/// Reverse a contact: swapping the A/B roles flips the A→B normal.
-fn flip(geom: ContactGeom) -> ContactGeom {
-    ContactGeom {
-        normal: geom.normal.mul_scalar(-1.0),
-        depth: geom.depth,
-        point: geom.point,
-    }
-}
 
 /// An unimplemented pairing — never reports a contact.
 fn no_contact(
@@ -331,7 +337,8 @@ pub(crate) fn generate_contacts(
                 let ba = bodies.iter().find(|x| x.handle() == ca.body());
                 let bb = bodies.iter().find(|x| x.handle() == cb.body());
                 ba.zip(bb).and_then(|(ba, bb)| {
-                    let index = ca.shape().kind().index() * 5 + cb.shape().kind().index();
+                    let index = ca.shape().kind().index() * PhysicsShapeKind::COUNT
+                        + cb.shape().kind().index();
                     let (pa, ra) = (ba.transform().translation, ba.transform().rotation);
                     let (pb, rb) = (bb.transform().translation, bb.transform().rotation);
                     CONTACT_TABLE[index](ca.shape(), pa, ra, cb.shape(), pb, rb)
@@ -799,19 +806,94 @@ mod tests {
     }
 
     #[test]
-    fn generate_contacts_drops_unimplemented_and_separated_pairs() {
-        // Two overlapping boxes (box/box is unimplemented) -> no contact, and the
-        // capsule row of the table is exercised as no_contact too.
+    fn generate_contacts_drops_the_plane_plane_pairing_and_separated_pairs() {
+        // Two coincident planes: the one remaining `no_contact` volume pairing.
         let bodies = [body(1, 0.0), body(2, 0.0)];
-        let colliders = [
-            collider(10, 1, box_shape(1.0, 1.0, 1.0)),
-            collider(20, 2, capsule()),
-        ];
+        let colliders = [collider(10, 1, plane()), collider(20, 2, plane())];
         let pairs = [BroadPhasePair::new(
             PhysicsColliderHandle::from_raw(10),
             PhysicsColliderHandle::from_raw(20),
         )];
         assert!(generate_contacts(&pairs, &colliders, &bodies).is_empty());
+
+        // And a genuinely separated implemented pairing still reports nothing.
+        let apart = [body(1, 0.0), body(2, 50.0)];
+        let volumes = [
+            collider(10, 1, box_shape(1.0, 1.0, 1.0)),
+            collider(20, 2, capsule()),
+        ];
+        assert!(generate_contacts(&pairs, &volumes, &apart).is_empty());
+    }
+
+    #[test]
+    fn generate_contacts_dispatches_every_capsule_pairing_in_both_orderings() {
+        // The whole capsule row and column used to be `no_contact`; each entry
+        // must now resolve a real overlap, and the reversed entry must report the
+        // reversed normal. Capsule is r = 0.5, half-height 1 -> it spans y +/- 1.5
+        // about its body centre.
+        // Each partner sits at y = 2.2, clear of the capsule's axis (so the
+        // normal is defined) but inside the reach of its upper cap.
+        let y = 2.2;
+        let cases: [PhysicsColliderShape; 3] = [sphere(1.0), box_shape(1.0, 1.0, 1.0), capsule()];
+        cases.into_iter().for_each(|other| {
+            let bodies = [body(1, 0.0), body(2, y)];
+            let pairs = [BroadPhasePair::new(
+                PhysicsColliderHandle::from_raw(10),
+                PhysicsColliderHandle::from_raw(20),
+            )];
+            let forward = generate_contacts(
+                &pairs,
+                &[collider(10, 1, capsule()), collider(20, 2, other)],
+                &bodies,
+            );
+            let reversed = generate_contacts(
+                &pairs,
+                &[collider(10, 1, other), collider(20, 2, capsule())],
+                &[body(1, y), body(2, 0.0)],
+            );
+            assert_eq!(forward.len(), 1, "capsule vs {other:?} must contact");
+            assert_eq!(reversed.len(), 1, "{other:?} vs capsule must contact");
+            // A above B in the forward case, B above A in the reversed one, so
+            // the two normals are opposites.
+            approx(forward[0].normal(), Vec3::UNIT_Y);
+            approx(reversed[0].normal(), Vec3::new(0.0, -1.0, 0.0));
+        });
+    }
+
+    #[test]
+    fn generate_contacts_dispatches_capsule_plane_and_box_box() {
+        let pairs = [BroadPhasePair::new(
+            PhysicsColliderHandle::from_raw(10),
+            PhysicsColliderHandle::from_raw(20),
+        )];
+        // Capsule sunk into the ground plane, and the plane-first ordering.
+        let sunk = generate_contacts(
+            &pairs,
+            &[collider(10, 1, capsule()), collider(20, 2, plane())],
+            &[body(1, 1.0), body(2, 0.0)],
+        );
+        assert_eq!(sunk.len(), 1);
+        approx(sunk[0].normal(), Vec3::new(0.0, -1.0, 0.0));
+        let from_plane = generate_contacts(
+            &pairs,
+            &[collider(10, 1, plane()), collider(20, 2, capsule())],
+            &[body(1, 0.0), body(2, 1.0)],
+        );
+        assert_eq!(from_plane.len(), 1);
+        approx(from_plane[0].normal(), Vec3::UNIT_Y);
+
+        // Box on box: the other pairing that used to be `no_contact`.
+        let stacked = generate_contacts(
+            &pairs,
+            &[
+                collider(10, 1, box_shape(1.0, 1.0, 1.0)),
+                collider(20, 2, box_shape(1.0, 1.0, 1.0)),
+            ],
+            &[body(1, 0.0), body(2, 1.5)],
+        );
+        assert_eq!(stacked.len(), 1);
+        approx(stacked[0].normal(), Vec3::UNIT_Y);
+        assert!((stacked[0].depth() - 0.5).abs() < 1.0e-6);
     }
 
     #[test]

@@ -28,10 +28,11 @@ use crate::physics_shape_kind::PhysicsShapeKind;
 
 /// The geometric shape of a collider — a flat, branchless tagged value.
 /// The four classical primitives are supported. They are validated at
-/// construction and surfaced in snapshots. The broad phase and queries handle all
-/// four; the narrow-phase contact generator handles the sphere/sphere,
-/// sphere/plane, sphere/box, and box/plane pairings (capsule contacts are a
-/// documented deferral — see `ROADMAP.md`).
+/// construction and surfaced in snapshots. The broad phase, the queries and the
+/// narrow-phase contact generator handle all four, in every pairing except
+/// `plane/plane` (two infinite half-spaces bound no contact region). The fifth
+/// kind, `Heightfield`, participates in the broad phase and in sphere contacts,
+/// but is excluded from the queries — see `ARCHITECTURE.md`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PhysicsColliderShape {
     kind: PhysicsShapeKind,
