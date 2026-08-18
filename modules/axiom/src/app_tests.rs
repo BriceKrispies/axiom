@@ -880,3 +880,55 @@ fn authoring_more_surface_programs_than_the_cache_holds_fails_the_barrier() {
         .surfaces(many)
         .build();
 }
+
+#[test]
+fn install_authors_against_the_realized_world_and_counts_toward_capacity() {
+    // The `App::run` shape for an app with its own geometry: `setup` authors the
+    // camera and light, `install` registers author mesh data and spawns a node
+    // against it. Both must be in place by the time `build` returns, because
+    // that is when `run` reads `mesh_set` / `renderable_count` to size the live
+    // backend.
+    let mut app = App::new()
+        .add_plugins(DefaultPlugins)
+        .setup(|world, _meshes, _materials| {
+            world.spawn((
+                Transform::from_translation(Vec3::new(0.0, 0.0, 4.0)),
+                Camera::perspective(PerspectiveProjection {
+                    fov_y: Angle::degrees(60.0),
+                    near: Meters::new(0.1).expect("near plane is finite"),
+                    far: Meters::new(100.0).expect("far plane is finite"),
+                }),
+            ));
+        })
+        .install(|running| {
+            let mesh = running
+                .add_mesh_data(crate::mesh_data::MeshData::new(
+                    vec![
+                        Vec3::new(-0.5, -0.5, 0.0),
+                        Vec3::new(0.5, -0.5, 0.0),
+                        Vec3::new(0.0, 0.5, 0.0),
+                    ],
+                    vec![Vec3::new(0.0, 0.0, 1.0); 3],
+                    Vec::new(),
+                    vec![0, 1, 2],
+                ))
+                .expect("the authored triangle is valid geometry");
+            let material = running.add_material(Material::lit(Color::WHITE));
+            running.spawn(crate::spawn::Spawn::new(Transform::IDENTITY, mesh, material));
+        })
+        .build();
+
+    // The installed mesh reached the live backend's upload set...
+    assert_eq!(app.mesh_set().len(), 1);
+    // ...and the installed node is inside the instance capacity `run` sizes from.
+    assert_eq!(app.renderable_count(), 1);
+    assert_eq!(app.tick(0).draws().len(), 1);
+}
+
+#[test]
+fn an_app_without_install_realizes_exactly_as_before() {
+    let app = App::new().build();
+    assert_eq!(app.renderable_count(), 0);
+    assert!(format!("{:?}", App::new()).contains("has_install: false"));
+    assert!(format!("{:?}", App::new().install(|_| {})).contains("has_install: true"));
+}

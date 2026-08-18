@@ -87,6 +87,10 @@ const SESSION_SCHEMA: SchemaVersion = SchemaVersion::new(1, 0);
 /// A user setup callback: populates the asset collections and authors the scene.
 type SetupFn = Box<dyn FnOnce(&mut SceneCommands, &mut Assets<Mesh>, &mut Assets<Material>)>;
 
+/// A user installation callback: finishes authoring against the *realized*
+/// world, where the runtime-only registration surface lives. See [`App::install`].
+type InstallFn = Box<dyn FnOnce(&mut RunningApp)>;
+
 /// The name the engine's own scene-authoring preparation task is pushed under.
 /// It is the first entry in every schedule, so it is also the name a preparation
 /// failure would report if authoring itself ever became fallible.
@@ -107,6 +111,9 @@ pub struct App {
     // the engine's own barrier during preparation and carried to the presentation
     // driver by `run`; see `App::surfaces`.
     surfaces: Vec<axiom_surface::Surface>,
+    // The app's post-realization installation step, run by `build` on the
+    // realized world before anything reads it; see `App::install`.
+    install: Option<InstallFn>,
 }
 
 impl App {
@@ -120,7 +127,36 @@ impl App {
             setup: None,
             preparation: Vec::new(),
             surfaces: Vec::new(),
+            install: None,
         }
+    }
+
+    /// **Finish authoring against the realized world**, inside [`Self::build`] —
+    /// the hook that lets an app on the ordinary [`Self::run`] loop use the
+    /// registration surface that exists only on a [`RunningApp`]:
+    /// [`RunningApp::add_mesh_data`] (app-authored geometry),
+    /// [`RunningApp::add_texture_data`] (app-authored albedo pixels), and
+    /// [`RunningApp::spawn`].
+    ///
+    /// Without it those three were unreachable from `run`, because `run` calls
+    /// `build()` itself and then immediately reads `mesh_set`,
+    /// `material_textures` and `renderable_count` to size and fill the live
+    /// backend — leaving an app with its own geometry no choice but to abandon
+    /// the engine loop and drive `axiom-windowing` by hand. That is why every
+    /// author-geometry app in this repository hand-rolls its browser arm. This
+    /// closure runs after realization and *before* `build` returns, so the live
+    /// backend sees an installed mesh, texture, and node exactly as it sees a
+    /// `setup`-authored one.
+    ///
+    /// `setup` remains the right place for everything it can express; `install`
+    /// is for what only the realized world can register. Both run inside
+    /// `build`, in that order.
+    pub fn install<F>(mut self, install: F) -> Self
+    where
+        F: FnOnce(&mut RunningApp) + 'static,
+    {
+        self.install = Some(Box::new(install));
+        self
     }
 
     /// **Declare the authored [`axiom_surface::Surface`]s this app's materials
@@ -201,8 +237,13 @@ impl App {
     /// running app ready to drive frames with [`RunningApp::tick`]. This is the
     /// headless core; the terminal `run` (which owns the per-frame loop) is
     /// built on top of it.
-    pub fn build(self) -> RunningApp {
-        RunningApp::realize(self)
+    pub fn build(mut self) -> RunningApp {
+        let install = self.install.take();
+        let mut running = RunningApp::realize(self);
+        install
+            .into_iter()
+            .for_each(|install| install(&mut running));
+        running
     }
 
     /// Run the app on the web: realize the world, configure the surface, and
@@ -338,6 +379,7 @@ impl std::fmt::Debug for App {
             .field("step_nanos", &self.step_nanos)
             .field("render", &self.render)
             .field("has_setup", &self.setup.is_some())
+            .field("has_install", &self.install.is_some())
             // The surfaces themselves are graphs; the count is what a reader
             // checking a builder by eye actually wants.
             .field("surfaces", &self.surfaces.len())
@@ -605,7 +647,10 @@ impl RunningApp {
     }
 
     /// How many renderables the scene draws each frame — the live backend's
-    /// per-instance buffer capacity.
+    /// per-instance buffer capacity. Counts what `setup` authored plus every
+    /// node [`Self::spawn`] added; a [`Self::despawn`] does not shrink it,
+    /// because the GPU instance buffer this sizes is allocated once and never
+    /// reallocated mid-run.
     pub fn renderable_count(&self) -> usize {
         self.renderables
     }

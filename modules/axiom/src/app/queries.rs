@@ -100,6 +100,12 @@ impl RunningApp {
                 .ok()
         });
         self.scene.update_world_transforms();
+        // A spawned node draws like an authored one, so it counts toward the
+        // live backend's per-instance capacity (`RunningApp::renderable_count`).
+        // Before this, a node spawned from `App::install` was invisible in the
+        // browser: `App::run` sized the instance buffer from a count that only
+        // `setup` had contributed to, so the frame had nowhere to put it.
+        self.renderables += 1;
         node
     }
 

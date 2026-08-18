@@ -55,5 +55,6 @@ pub mod events;
 pub mod materials;
 pub mod registry;
 pub mod rng;
+pub mod viewer;
 pub mod weapons;
 pub mod world;

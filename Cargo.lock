@@ -244,8 +244,10 @@ dependencies = [
 name = "axiom-claude-of-duty"
 version = "0.1.0"
 dependencies = [
+ "axiom",
  "axiom-kernel",
  "axiom-math",
+ "console_error_panic_hook",
  "serde_json",
  "wasm-bindgen",
  "web-sys",

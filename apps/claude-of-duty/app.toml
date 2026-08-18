@@ -27,4 +27,13 @@ allowed_layers = [
     "math",
 ]
 
-allowed_modules = []
+allowed_modules = [
+    # The engine umbrella. `viewer` authors the weapon-parts viewer against its
+    # `App`/`setup`/`install`/`run` surface and uploads the ported
+    # `weapons::geometry::Geo` buckets through its `MeshData`. This is the port's
+    # rendering arm; a *second* app could not host it, because the Module Law
+    # makes apps leaves — nothing, app or otherwise, may depend on
+    # `axiom-claude-of-duty`, so the viewer has to live in the crate that owns
+    # the geometry.
+    "engine",
+]

@@ -6,7 +6,20 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+# `cdylib` for the browser bundle (the `claude_of_duty_parts_start` entry in
+# `viewer`); `rlib` so the native golden tests keep linking the same crate.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
+# The engine umbrella (module `engine`): the `App`/`setup`/`install`/`run`
+# authoring surface the weapon-parts viewer (`viewer`) is written against, and
+# the `MeshData` the ported `weapons::geometry::Geo` buckets are uploaded
+# through. The viewer is the port's first rendering arm — everything above it
+# (the viewmodel rig, the world, the frame graph) still lands behind this same
+# facade.
+axiom = { path = "../../modules/axiom" }
+
 # `Seconds` (the fixed step and the frame delta handed to every subsystem),
 # `Meters` (the player capsule dimensions and the shadow distance) and `Ratio`
 # (render scale, exposure, the ADS FOV/sensitivity scales) — the dimensioned
@@ -32,6 +45,9 @@ axiom-math = { path = "../../crates/axiom-math" }
 # modules. This is an app — the tier that owns browser bootstrap.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
+# The browser entries' panic hook, so a wasm panic reaches the console with a
+# Rust backtrace instead of an opaque `unreachable`.
+console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = [
     "AudioBuffer",
     "AudioBufferSourceNode",

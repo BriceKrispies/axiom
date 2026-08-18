@@ -37,6 +37,7 @@
 
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
+use web_sys::js_sys::Float32Array;
 use web_sys::{
     AudioBuffer, AudioBufferSourceNode, AudioContext, AudioNode, AudioParam, BiquadFilterNode,
     BiquadFilterType, ConvolverNode, DynamicsCompressorNode, GainNode, OscillatorNode,
@@ -201,11 +202,14 @@ impl WebAudioBridge {
 
     fn realise_waves(&mut self, graph: &AudioGraph) -> Result<(), JsValue> {
         for w in &graph.waves[self.done_waves..] {
-            let mut real = w.real.clone();
-            let mut imag = w.imag.clone();
+            // `PeriodicWaveOptions.real`/`.imag` are `&JsValue` in web-sys
+            // 0.3.99, not `&mut [f32]`: the browser reads a real JS
+            // `Float32Array`, so the samples have to cross the boundary as one.
+            let real = Float32Array::from(&w.real[..]);
+            let imag = Float32Array::from(&w.imag[..]);
             let opts = PeriodicWaveOptions::new();
-            opts.set_real(&mut real);
-            opts.set_imag(&mut imag);
+            opts.set_real(real.as_ref());
+            opts.set_imag(imag.as_ref());
             opts.set_disable_normalization(w.disable_normalization);
             self.waves
                 .push(PeriodicWave::new_with_options(&self.ctx, &opts)?);
@@ -369,7 +373,7 @@ impl WebAudioBridge {
                     p.exponential_ramp_to_value_at_time(e.value as f32, e.time)
                 }
                 Automation::SetTargetAtTime => {
-                    p.set_target_at_time(e.value as f32, e.time, e.time_constant as f32)
+                    p.set_target_at_time(e.value as f32, e.time, e.time_constant)
                 }
                 Automation::CancelScheduledValues => p.cancel_scheduled_values(e.time),
             };
