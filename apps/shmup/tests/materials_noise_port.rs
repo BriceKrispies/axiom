@@ -5,7 +5,7 @@
 //! doubles and running it under Node (v24) — the same discipline
 //! `tests/core_port.rs` and `tests/weapons_mathx_port.rs` use, applied to
 //! shader maths instead of gameplay maths. See
-//! `docs/work-manifests/claude-of-duty-port/notes/materials-noise.md` for the
+//! `docs/work-manifests/shmup-port/notes/materials-noise.md` for the
 //! capture script and the periodicity findings below.
 //!
 //! ## Periodicity: what "`f(p) == f(p + per)`" actually requires

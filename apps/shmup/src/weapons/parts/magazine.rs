@@ -4,7 +4,7 @@
 //!
 //! Every builder here bolts a real mechanical assembly onto an [`Assembly`]
 //! at a given offset, authored from published dimensions — see
-//! `docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md` for
+//! `docs/work-manifests/shmup-port/03-weapon-geometry-api.md` for
 //! the fixed Rust primitive API these are written against.
 //!
 //! This is app code (`apps/`), outside the Branchless Law and the Coverage

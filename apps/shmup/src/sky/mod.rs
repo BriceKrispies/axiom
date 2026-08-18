@@ -22,7 +22,7 @@
 //! CPU reference implementation, the same role `crate::materials::noise`
 //! plays for the surface-texture GLSL library. See [`luts`]'s module doc for
 //! exactly what that reference does and does not model (no fp16 storage
-//! quantization), and `docs/work-manifests/claude-of-duty-port/notes/sky.md`
+//! quantization), and `docs/work-manifests/shmup-port/notes/sky.md`
 //! for what a real GPU bake would still need on top of this.
 //!
 //! **Not ported, in any of these modules:** the THREE.js-side plumbing each

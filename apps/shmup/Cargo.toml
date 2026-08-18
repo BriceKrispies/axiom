@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-# `cdylib` for the browser bundle (the `claude_of_duty_parts_start` entry in
+# `cdylib` for the browser bundle (the `shmup_parts_start` entry in
 # `viewer`); `rlib` so the native golden tests keep linking the same crate.
 [lib]
 crate-type = ["cdylib", "rlib"]

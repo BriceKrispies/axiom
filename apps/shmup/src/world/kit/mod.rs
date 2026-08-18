@@ -1,6 +1,6 @@
 //! Ported from Claude-of-Duty `src/world/util.js` (the geometry toolkit) and
 //! `src/world/kit.js` (the modular building kit built on top of it) — see
-//! `docs/work-manifests/claude-of-duty-port/02-port-recipe.md`'s task for
+//! `docs/work-manifests/shmup-port/02-port-recipe.md`'s task for
 //! the split. Everything from `util.js` not already covered by
 //! [`crate::world::masks`] (the mask convention) or [`crate::world::noise`]
 //! (the noise basis these builders paint with) lives directly in this file:

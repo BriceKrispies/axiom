@@ -4,7 +4,7 @@ Supersedes the "Landed / In flight / Remaining" tables in `04-remaining-work.md`
 (its per-slice algorithmic notes remain current and are still worth reading before
 starting any slice). Update this file as slices land.
 
-Branch `port/claude-of-duty`, worktree `.claude/worktrees/claude-of-duty`, cut from
+Branch `port/shmup`, worktree `.claude/worktrees/shmup`, cut from
 `origin/main` @ `9b43ae5e`.
 
 ## Engine changes (crates/ + modules/)

@@ -3,7 +3,7 @@
 Ported `src/weapons/geometry.js:51-357` (every primitive builder between the
 `normalizeAttributes` helper and the `Assembly` class) into
 `apps/shmup/src/weapons/geometry/primitives/` per
-`docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md`. This is
+`docs/work-manifests/shmup-port/03-weapon-geometry-api.md`. This is
 the "primitives" half of the contract; `Geo`, `merge_all`, and `Assembly`
 (the other half) landed concurrently from a different agent in
 `geometry/geo.rs`, `geometry/merge.rs`, `geometry/assembly.rs`.

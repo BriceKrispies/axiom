@@ -42,7 +42,7 @@
 //! rather than tidied or reorganized, so a mistake in either the Rust port or
 //! the JS capture is a **transcription** risk on both sides, not caught by
 //! the other. See that file's header comment and
-//! `docs/work-manifests/claude-of-duty-port/notes/materials-surfaces-arch.md`
+//! `docs/work-manifests/shmup-port/notes/materials-surfaces-arch.md`
 //! for the full caveat.
 //!
 //! ## GLSL -> Rust notes specific to this file

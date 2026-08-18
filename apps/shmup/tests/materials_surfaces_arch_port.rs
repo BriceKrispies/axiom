@@ -11,7 +11,7 @@
 //! surfaces-arch.js`, independently of the Rust port in `arch.rs` (not
 //! derived from it), so this is a two-independent-transcriptions check
 //! rather than a port-checked-against-a-real-module check. See
-//! `docs/work-manifests/claude-of-duty-port/notes/materials-surfaces-arch.md`
+//! `docs/work-manifests/shmup-port/notes/materials-surfaces-arch.md`
 //! for the full caveat and `tests/materials_arch/capture.mjs`'s own header.
 //!
 //! `concrete_surface` is pinned three ways: the library's real `concrete`

@@ -49,7 +49,7 @@ fn loose(tilt: f32, sink: f32) -> Opts {
 }
 
 /// One registered prototype's full observable shape: what
-/// `docs/work-manifests/claude-of-duty-port/02-port-recipe.md`'s
+/// `docs/work-manifests/shmup-port/02-port-recipe.md`'s
 /// golden-capture method needs to check ("each prototype's vertex/triangle
 /// count and palette-key set, the per-prototype metadata table, and the
 /// mask values on a prototype with a real chamfer") without a public getter

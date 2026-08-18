@@ -129,6 +129,6 @@ the exact repro (W1, floor 1, sides 0 and 2) to chase it further.
 
 ## Commit
 
-See the commit on `port/claude-of-duty` touching `src/world/buildings.rs`,
+See the commit on `port/shmup` touching `src/world/buildings.rs`,
 `src/world/layout.rs`, `src/world/kit/mod.rs`, `src/world/mod.rs`,
 `tests/buildings_port.rs`, `tests/buildings/`.

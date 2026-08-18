@@ -1,7 +1,7 @@
 //! The hard-surface primitive kit. Ported from Claude-of-Duty
 //! `src/weapons/geometry.js:51-357` — every `export function` between the
 //! `normalizeAttributes` helper and the `Assembly` class. See
-//! `docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md` for
+//! `docs/work-manifests/shmup-port/03-weapon-geometry-api.md` for
 //! the fixed Rust API contract these are written against, and this module's
 //! own files for the Three.js algorithms each one ports (`RoundedBoxGeometry`,
 //! `LatheGeometry`, `SphereGeometry`, `TorusGeometry`, `ExtrudeGeometry` with

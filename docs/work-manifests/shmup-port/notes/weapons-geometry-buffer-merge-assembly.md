@@ -5,7 +5,7 @@ the half of the API contract owned by this pass: `Geo`, `merge_all` (plus the
 two Three.js `BufferGeometryUtils` functions it depends on), and `Assembly`.
 Primitive builders (`box_geo`, `blob`, `lathe_z`, …) are a separate,
 concurrent pass against the same fixed contract
-(`docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md`).
+(`docs/work-manifests/shmup-port/03-weapon-geometry-api.md`).
 
 Files:
 
@@ -142,6 +142,6 @@ one, since both agents needed the same crate for the same reason: `Mat4`,
   `dome`, `extrude`, `round_rect`, `ring`, `screw`, `knurl_band`,
   `serrations`, `picatinny`, `mlok_slot`) are out of scope for this pass —
   owned by the concurrent primitives agent against the same fixed contract.
-- No `docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md`
+- No `docs/work-manifests/shmup-port/03-weapon-geometry-api.md`
   divergence: every signature in the contract's `Geo`/`Assembly` sections
   was implementable as written.

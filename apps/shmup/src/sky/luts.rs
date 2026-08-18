@@ -18,7 +18,7 @@
 //! textures to half precision before the next pass reads it back. This
 //! reference stays `f64` throughout — higher precision than the eventual GPU
 //! evaluation will have — matching `crate::materials::noise`'s own precedent
-//! (see that module's doc comment). `docs/work-manifests/claude-of-duty-port/
+//! (see that module's doc comment). `docs/work-manifests/shmup-port/
 //! notes/sky.md` records what a WGSL emission workstream would still need to
 //! add on top of this.
 //!

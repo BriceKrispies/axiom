@@ -45,7 +45,7 @@ use crate::world::palette::Surface;
 
 /// `BOX`/`BOX_SOFT` (`kit.js:54,56`) — cached chamfered-box providers.
 /// `kit.js`'s modular building kit is out of this port's scope (see
-/// `docs/work-manifests/claude-of-duty-port/02-port-recipe.md`'s task), but
+/// `docs/work-manifests/shmup-port/02-port-recipe.md`'s task), but
 /// `buildGround` needs these two one-line cache wrappers around
 /// [`chamfer_box`] (already ported, `crate::world::kit`), so they are
 /// inlined here rather than pulled in through a whole unported module.

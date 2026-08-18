@@ -15,7 +15,7 @@
 //! geometry (`_push` ends `return g;`), but no call site anywhere in
 //! `props.js` ever reads that return value — every call is a bare statement.
 //! These methods return `()` rather than plumb an unused value through ~150
-//! call sites; see `docs/work-manifests/claude-of-duty-port/notes/props.md`.
+//! call sites; see `docs/work-manifests/shmup-port/notes/props.md`.
 //!
 //! **Every dimension/position/rotation argument here is `f64`, narrowed to
 //! `f32` only at the actual `chamfer_box`/`cylinder_geometry`/`trs` call** —

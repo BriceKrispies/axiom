@@ -22,7 +22,7 @@
 //! This is a pure algorithm over flat typed arrays with no rendering contact,
 //! which is what makes it checkable by golden capture rather than merely
 //! plausible — see `tests/physics_port.rs` and
-//! `docs/work-manifests/claude-of-duty-port/notes/physics.md`.
+//! `docs/work-manifests/shmup-port/notes/physics.md`.
 //!
 //! What is *not* ported here: `bakeMesh`/`StaticWorld.addMesh`
 //! (`bvh.js:104-125, 836-933`), which flatten a live `THREE.Mesh` — see

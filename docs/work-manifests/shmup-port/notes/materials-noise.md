@@ -7,7 +7,7 @@
 
 ## What was ported
 
-The tileable procedural noise library every one of the 19 surface generators (`crates/claude-of-duty/src/materials/mod.rs::LIBRARY`) is built on. It is ported as **CPU-evaluable `f64` maths**, not as a WGSL string — this is a reference implementation, produced so a later WGSL emitter can be pinned against it, mirroring how `rng.rs` is the reference `rng.js` is pinned against.
+The tileable procedural noise library every one of the 19 surface generators (`apps/shmup/src/materials/mod.rs::LIBRARY`) is built on. It is ported as **CPU-evaluable `f64` maths**, not as a WGSL string — this is a reference implementation, produced so a later WGSL emitter can be pinned against it, mirroring how `rng.rs` is the reference `rng.js` is pinned against.
 
 Every function from the source:
 

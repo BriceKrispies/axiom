@@ -16,7 +16,7 @@
 //!
 //! **Placement.** Module Law #9 confines `web_sys`/`wasm_bindgen` to the `host`
 //! layer and the `windowing` module — that rule governs layers and modules.
-//! `claude-of-duty` is an **app**: a composition leaf, and the tier that owns
+//! `shmup` is an **app**: a composition leaf, and the tier that owns
 //! browser bootstrap. Audio is not an engine capability the port is adding to
 //! Axiom; it is this game's synthesis, so it stays here, and this is the edge of
 //! it.

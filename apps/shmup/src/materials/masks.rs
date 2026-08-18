@@ -332,7 +332,7 @@ mod tests {
     /// `C:/dev/Claude-of-Duty/src/materials/masks.js`, run against a
     /// `THREE.BufferGeometry` built from exactly `corner_geo(true)`'s
     /// position/normal arrays (see
-    /// `docs/work-manifests/claude-of-duty-port/notes/materials-bake-and-masks.md`
+    /// `docs/work-manifests/shmup-port/notes/materials-bake-and-masks.md`
     /// for the capture script). Every value here is built only from `+ - *
     /// / sqrt / min / max / clamp` — no `sin`/`cos`/`pow` — so it is pinned
     /// exactly, matching `tests/materials_noise_port.rs`'s convention of

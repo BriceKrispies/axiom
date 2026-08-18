@@ -32,7 +32,7 @@
 //! strings**, the `THREE.InstancedInterleavedBuffer`/`ShaderMaterial`/`Mesh`
 //! plumbing, screen-space stretch/rotation (which needs a view matrix) — is
 //! not ported. It is presentation work belonging to a future WGSL emission
-//! pass in the render pipeline (`docs/work-manifests/claude-of-duty-port/
+//! pass in the render pipeline (`docs/work-manifests/shmup-port/
 //! 04-remaining-work.md`, "render — Opus / engine"), the same seam the audio
 //! port drew around `web_sys` in [`crate::audio::web_audio`].
 

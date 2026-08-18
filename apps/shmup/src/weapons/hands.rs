@@ -16,12 +16,12 @@
 //! `Arm::fitToCylinder`/`bakeSurfaceMasks`/`bakeContactAO` — those exist only
 //! to place and shade vertex geometry that has no consumer yet (no material
 //! binding: `materials.js` is a separate, not-yet-ported file per
-//! `docs/work-manifests/claude-of-duty-port/05-port-status.md`'s remaining-work
+//! `docs/work-manifests/shmup-port/05-port-status.md`'s remaining-work
 //! list, item 3). `weapons::viewmodel`'s support-hand pose therefore falls
 //! back to the *authored* `HAND_POSES.clamp` rather than the JS's
 //! per-weapon-solved fit — a documented simplification, not a silent
 //! divergence; see that module's doc and
-//! `docs/work-manifests/claude-of-duty-port/notes/hands.md`.
+//! `docs/work-manifests/shmup-port/notes/hands.md`.
 //!
 //! ## The three things this slice has to get right (all in [`Arm`])
 //!

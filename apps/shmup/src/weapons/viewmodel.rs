@@ -9,7 +9,7 @@
 //! meshes, `dispose`) that has no consumer in this port yet: there is no
 //! renderer wired to the viewmodel rig, and `addWeapon`'s cosmetic vertex-mask
 //! baking calls into `materials.js`'s `bakeMasks`, which is not ported (see
-//! `docs/work-manifests/claude-of-duty-port/05-port-status.md`'s remaining-work
+//! `docs/work-manifests/shmup-port/05-port-status.md`'s remaining-work
 //! list, item 3). This port carries the **rig**:
 //!
 //! - [`Viewmodel::update`] — the whole additive stack: base pose (hip/ADS/

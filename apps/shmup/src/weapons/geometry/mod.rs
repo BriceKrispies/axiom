@@ -1,6 +1,6 @@
 //! Ported from Claude-of-Duty `src/weapons/geometry.js` (447 lines) — the
 //! procedural hard-surface geometry kit for the weapons. See
-//! `docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md` for
+//! `docs/work-manifests/shmup-port/03-weapon-geometry-api.md` for
 //! the fixed Rust API contract every primitive builder and part/model builder
 //! writes against.
 //!

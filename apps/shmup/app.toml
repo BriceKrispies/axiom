@@ -5,7 +5,7 @@
 # subsystem registry, the frame loop, the weapon and world data — lives here,
 # never in a layer or a module. Engine *capability* the port needs (HDR targets,
 # capsule contacts, the frame graph) lands in `crates/` and `modules/` and is
-# consumed from here; see `docs/work-manifests/claude-of-duty-port/00-manifest.md`.
+# consumed from here; see `docs/work-manifests/shmup-port/00-manifest.md`.
 #
 # Every entry below is a layer or module this app *names in non-test code*; an
 # entry it never named would be the same ceremonial-dependency failure the Layer

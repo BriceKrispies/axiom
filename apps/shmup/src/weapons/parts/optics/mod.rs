@@ -7,7 +7,7 @@
 //! recipe requires carrying forward; one flat `optics.rs` would bury that
 //! under the other two builders.
 //!
-//! See `docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md`
+//! See `docs/work-manifests/shmup-port/03-weapon-geometry-api.md`
 //! for the fixed Rust primitive/`Assembly` API these are written against.
 
 mod mini_reflex;

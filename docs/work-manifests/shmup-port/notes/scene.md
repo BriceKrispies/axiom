@@ -2,7 +2,7 @@
 
 `apps/shmup/src/viewer.rs` (four weapon parts on a turntable) is no
 longer the app's only rendering arm. `src/scene/` is the composition tier, and
-`claude_of_duty_start` now boots the game: bare ground you can walk on, at real
+`shmup_start` now boots the game: bare ground you can walk on, at real
 scale, under the ported atmosphere, with the rifle on the road in front of you.
 
 ## What is new
@@ -91,7 +91,7 @@ still speaks only to its own trait.
 input, steps its simulation, and writes this frame's camera before the engine
 renders. The app is authored entirely on the normal path
 (`App::new().window().add_plugins().setup().install()` → `build()`), but
-`scene::app::claude_of_duty_start` then replicates `App::run`'s body — same
+`scene::app::shmup_start` then replicates `App::run`'s body — same
 surface configuration, same ambient/fog/surface/material-program carry-over, same
 seven-tuple frame closure — and adds three lines ahead of `tick`. Every
 input-driven Rust app in this repository hits the same wall

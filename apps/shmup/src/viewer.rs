@@ -326,7 +326,7 @@ fn install_rack(running: &mut RunningApp, parts: Vec<Part>) {
 /// Browser entry: author the rack and drive the engine's presentation loop.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn claude_of_duty_parts_start() {
+pub fn shmup_parts_start() {
     console_error_panic_hook::set_once();
     parts_viewer_app().run();
 }

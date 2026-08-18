@@ -82,7 +82,7 @@ declarative sentence saying what is now true. Check `git log --oneline -20` for
 the voice. Example: `weapons: the recoil pattern is a learnable snake, not noise`.
 
 **Then write your detailed notes to
-`docs/work-manifests/claude-of-duty-port/notes/<module>.md`** — what you ported,
+`docs/work-manifests/shmup-port/notes/<module>.md`** — what you ported,
 what you pinned and at what tolerance, any divergence and why, anything you could
 not port.
 

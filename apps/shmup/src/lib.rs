@@ -7,7 +7,7 @@
 //! and `modules/` under the full weight of the Layer, Module, Branchless and
 //! Coverage laws, and is consumed from here. The plan, and the placement
 //! argument for each capability, is
-//! `docs/work-manifests/claude-of-duty-port/00-manifest.md`.
+//! `docs/work-manifests/shmup-port/00-manifest.md`.
 //!
 //! ## What is ported so far: the deterministic core
 //!

@@ -4,7 +4,7 @@
 //! dimension sheet into one [`Assembly`][crate::weapons::geometry::Assembly],
 //! exactly as its source file does.
 //!
-//! See `docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md`
+//! See `docs/work-manifests/shmup-port/03-weapon-geometry-api.md`
 //! for the fixed Rust primitive/`Assembly` API these are written against, and
 //! `parts.rs`'s sibling modules for the part builders themselves.
 //!

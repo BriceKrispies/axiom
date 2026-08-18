@@ -235,7 +235,7 @@ pub fn frame(scene: &mut Scene, dt: f64, input: &mut crate::input::Input, tick: 
 /// `axiom-windowing` rather than `App::run`.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn claude_of_duty_start() {
+pub fn shmup_start() {
     console_error_panic_hook::set_once();
 
     let mut scene = build(crate::engine::CAPTURE_SEED);

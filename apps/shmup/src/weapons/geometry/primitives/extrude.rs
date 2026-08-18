@@ -150,7 +150,7 @@ pub fn extrude(pts: &[[f64; 2]], depth: f32, opts: ExtrudeOpts) -> Geo {
 /// `round_rect` cannot be `extrude`'s first argument and cannot compile
 /// against its only call site, so this returns `Vec<[f64; 2]>`, matching
 /// both the source semantics and `extrude`'s actual signature. Noted in
-/// `docs/work-manifests/claude-of-duty-port/notes/weapons-geometry-primitives.md`.
+/// `docs/work-manifests/shmup-port/notes/weapons-geometry-primitives.md`.
 ///
 /// `w`/`h`/`r` are `f64`, not `f32`, per `03-weapon-geometry-api.md`'s
 /// "Corrections" section: this is a contour producer whose output feeds

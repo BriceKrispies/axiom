@@ -3,7 +3,7 @@
 //! `THREE.InstancedMesh`es (`body`, `feet`), a `MeshBasicMaterial` pair, and a
 //! `THREE.DataTexture` uploaded to the GPU. None of the engine's rendering
 //! arm exists yet for this port to draw through (see
-//! `docs/work-manifests/claude-of-duty-port/05-port-status.md`'s "Render
+//! `docs/work-manifests/shmup-port/05-port-status.md`'s "Render
 //! frame graph" item), so nothing here creates a mesh, a material or a
 //! texture object.
 //!

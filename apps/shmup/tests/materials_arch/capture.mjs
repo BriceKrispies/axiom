@@ -11,7 +11,7 @@
  * against `apps/shmup/src/materials/surfaces/arch.rs` — so a mistake
  * made once in the Rust port is not simply re-made here and called agreement.
  * It is still a transcription, with a transcription's error rate; see
- * `docs/work-manifests/claude-of-duty-port/notes/materials-surfaces-arch.md`
+ * `docs/work-manifests/shmup-port/notes/materials-surfaces-arch.md`
  * for the caveat this recipe requires stating.
  *
  * Regenerate (from this directory):
