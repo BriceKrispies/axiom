@@ -52,6 +52,7 @@ pub mod config;
 pub mod engine;
 pub mod error;
 pub mod events;
+pub mod fx;
 pub mod materials;
 pub mod physics;
 pub mod player;
