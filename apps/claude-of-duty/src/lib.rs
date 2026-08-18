@@ -57,6 +57,7 @@ pub mod physics;
 pub mod player;
 pub mod registry;
 pub mod rng;
+pub mod sky;
 pub mod ui;
 pub mod viewer;
 pub mod weapons;
