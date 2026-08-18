@@ -8,34 +8,66 @@
 //! * `collision` → the [`StaticWorld`] BVH the character controller and every
 //!   world probe query.
 //!
-//! ## What is not here, and why
+//! ## The call order, and why it is this order
 //!
-//! `WorldSystem.init` also calls `registerProps`, `registerDressingProps`,
-//! `buildBuilding` × `BUILDINGS`, `collapseRoof`, `buildGate`, `buildPerimeter`,
-//! `dressStreet`, `dressBuildings` and `scatterDebris`. **None of those source
-//! files are ported yet** (`kit.js`'s modular building kit, `props.js`,
-//! `dressing.js`, `buildings.js`, `gate.js`). So the level is exactly what
-//! `ground.js` authors: terrain, road, kerbs, pavement slabs, alleys, sand
-//! drifts and the manhole — bare ground, with no building on it. That is an
-//! honest gap, not a stand-in; nothing here fabricates a building.
+//! `WorldSystem.init` (`world/index.js:105-127`) runs, in order:
+//! `registerProps` → `registerDressingProps` → `buildGround` →
+//! `buildBuilding` per spec (+ `collapseRoof` where flagged) → `buildGate` →
+//! `buildPerimeter` → `dressStreet` → `dressBuildings` → `scatterDebris` →
+//! `_addLights`. Prototypes come first because the level references them by id
+//! as it builds; everything after that is a draw against the same shared `rng`,
+//! so the order is part of the level's identity, not a preference.
 //!
-//! Consequently `Assembler::finalize`'s `instanced` batches are always empty
-//! (every prototype is registered by the unported prop files), and the
-//! `lights` list likewise — `_addLights` is unported. Both are carried through
-//! and asserted empty rather than silently dropped, so the day a prop file
-//! lands the omission is a test failure and not a mystery.
+//! This port runs the four of those that exist: `register_props`,
+//! `build_ground`, `build_building` × 20, and `collapse_roof` for the one spec
+//! flagged for it.
+//!
+//! ## What is still not here, and why
+//!
+//! * **`buildGate` / `buildPerimeter`** — neither name exists in
+//!   `buildings.js` (`crate::world::buildings`'s module doc records the check),
+//!   and no other file carrying them is ported. The street's far end is
+//!   therefore open rather than closed by the arched gate.
+//! * **`registerDressingProps`, `dressStreet`, `dressBuildings`,
+//!   `scatterDebris`** — all of `src/world/dressing.js`, unported. In its place
+//!   [`crate::scene::furniture`] puts a deliberately small, clearly-labelled set
+//!   of prototypes on the authored `SET_PIECES` positions so the prop library is
+//!   not dead. That file is a placeholder and says so; it is not a dressing
+//!   pass.
+//! * **`_addLights`** — unported, so `finalize`'s `lights` list is empty and the
+//!   scene's only light is the sun ([`crate::scene::sky_look`]). The practicals
+//!   (lamp lenses, window glow) are geometry with an emissive palette key and no
+//!   light behind them.
+//! * **`interiors.js`'s `furnishRoom`** — `build_interior` ports the partitions
+//!   and stairs but not the furnishing (see `crate::world::buildings`).
+//!
+//! ## Instancing is the draw-call budget, and it is honoured
+//!
+//! `finalize` returns two kinds of renderable: `statics`, one merged mesh per
+//! palette key, and `instanced`, one batch per prototype per 64 m chunk. Both
+//! are carried into [`Level::batches`] as [`LevelBatch`]es —
+//! [`LevelBatch::instances`] is what tells them apart. An instanced batch
+//! uploads its prototype geometry **once** and spawns one node per instance
+//! sharing that one mesh handle and one material handle, which is exactly the
+//! shape the engine collapses into a single draw. Uploading a per-instance copy
+//! would multiply the level's draw calls by ~150 and defeat the design.
 
 use std::rc::Rc;
 
-use axiom::prelude::{Color, MeshData, Ratio, Vec2, Vec3};
+use axiom::prelude::{Color, MeshData, Ratio, Transform, Vec2, Vec3};
+use axiom_math::{Mat4, Quat};
 
 use crate::physics::bvh::StaticWorld;
 use crate::physics::surfaces::layer;
 use crate::rng::Rng;
+use crate::scene::furniture::place_street_furniture;
 use crate::world::assembler::Assembler;
+use crate::world::buildings::{build_building, collapse_roof, CollapseHole};
 use crate::world::geo::WorldGeo;
 use crate::world::ground::build_ground;
+use crate::world::layout::BUILDINGS;
 use crate::world::palette::{Palette, Surface};
+use crate::world::props::register_props;
 
 /// `LEVEL_YAW` / `LEVEL_TX` / `LEVEL_TZ` (`world/index.js:60-62`) — LEVEL space
 /// to WORLD space. The street is authored down -Z; this yaw puts it on the axis
@@ -82,6 +114,12 @@ pub struct LevelBatch {
     pub surface: Surface,
     pub mesh: MeshData,
     pub albedo: Color,
+    /// Where to put it. A `statics` batch is already baked into world space, so
+    /// it carries exactly one identity transform. An `instanced` batch carries
+    /// one transform per placed instance of its prototype, and every one of
+    /// them shares this batch's single mesh and single material — which is what
+    /// makes the whole batch one engine draw.
+    pub instances: Vec<Transform>,
 }
 
 /// Everything one built level hands the rest of the game.
@@ -92,9 +130,16 @@ pub struct Level {
     pub world: Rc<StaticWorld>,
     /// `world.spawnPoints`, already in WORLD space.
     pub spawns: Vec<SpawnPoint>,
-    /// `A.stats.staticTris` / `collideTris` — reported so a caller can see the
-    /// level is real without walking the geometry.
+    /// `A.stats` — reported so a caller can see the level is real, and see what
+    /// it costs, without walking the geometry.
     pub static_tris: usize,
+    pub instanced_tris: usize,
+    pub instances: usize,
+    /// `A.stats.drawCalls`: the Assembler's own count of merged static meshes
+    /// plus instanced batches. The engine's own per-frame figure is
+    /// `FrameOutcome::mesh_batches().len()`, which should agree with this plus
+    /// the rifle's buckets.
+    pub draw_calls: usize,
     pub collide_tris: usize,
 }
 
@@ -107,19 +152,50 @@ impl Level {
     }
 }
 
-/// Build the level. `rng` is the world subsystem's own forked stream
-/// (`this.rng = ctx.rng.fork()`, `world/index.js:91`); `build_ground` takes a
-/// second `&mut Rng` because the source passes `rng` alongside the assembler
-/// that also holds it, which Rust's borrow rules will not allow — the two
-/// streams are forked from the same root so the split is explicit rather than
-/// aliased.
+/// Build the level. `root` is the engine's root stream; the world subsystem
+/// forks its own from it (`this.rng = ctx.rng.fork()`, `world/index.js:91`).
+///
+/// Two forks, not one: the source hands the *same* `rng` object to
+/// `new Assembler({rng})` and to every content pass, and Rust will not let a
+/// pass borrow `&mut Rng` while it also holds `&mut Assembler` that owns it. So
+/// the Assembler gets its own fork (it only ever uses it for opt-in placement
+/// jitter, which this port never enables) and the content passes share the
+/// second — which is the one that matters, because it is the one whose draw
+/// order the ground, the buildings and the prototypes all depend on.
 pub fn build_level(root: &mut Rng) -> Level {
     let assembler_rng = root.fork();
-    let mut ground_rng = root.fork();
+    let mut rng = root.fork();
 
     let mut asm = Assembler::new(assembler_rng);
     asm.set_transform(LEVEL_YAW, LEVEL_TX, LEVEL_TZ);
-    build_ground(&mut asm, &mut ground_rng);
+
+    // 1. prototypes first: the level references them by id while it builds.
+    //    The returned summaries are kept because `finalize`'s `InstancedDraw`
+    //    names its prototype by id and does *not* carry the geometry — the
+    //    Assembler drains its prototype table into the batches. This is the
+    //    only place that geometry is still reachable.
+    let protos = register_props(&mut asm, &mut rng);
+
+    // 2. ground, then the shells that stand on it.
+    build_ground(&mut asm, &mut rng);
+
+    // 3. the twenty buildings. `collapseRoof`'s hole position is chosen by the
+    //    caller, not by `buildings.js` (`world/index.js:120-125`) — two `rng`
+    //    draws, in that order, only for a spec flagged `collapse`.
+    for spec in BUILDINGS {
+        let info = build_building(&mut asm, &mut rng, spec);
+        if spec.collapse {
+            let hole = CollapseHole {
+                x: spec.x as f32 + rng.range(-2.0, 2.0) as f32,
+                z: spec.z as f32 + rng.range(-2.0, 2.0) as f32,
+            };
+            collapse_roof(&mut asm, &mut rng, spec, &info, hole);
+        }
+    }
+
+    // 4. the placeholder for `dressing.js`. Draws no random numbers, so it
+    //    cannot perturb anything above it — see `crate::scene::furniture`.
+    place_street_furniture(&mut asm);
 
     // The spawn table is authored in LEVEL space; `A.toWorld` is the same
     // transform every piece of geometry above went through.
@@ -147,24 +223,132 @@ pub fn build_level(root: &mut Rng) -> Level {
     }
     world.build();
 
-    let batches = result
-        .statics
-        .iter()
-        .map(|s| LevelBatch {
-            key: s.key.clone(),
-            surface: s.surface,
-            mesh: to_mesh_data(&s.geo),
-            albedo: key_albedo(&s.key),
-        })
-        .collect();
+    let statics = result.statics.iter().map(|s| LevelBatch {
+        key: s.key.clone(),
+        surface: s.surface,
+        mesh: to_mesh_data(&s.geo),
+        albedo: key_albedo(&s.key),
+        instances: vec![Transform::IDENTITY],
+    });
+    // One batch per *prototype*, not per prototype-per-chunk. `finalize`
+    // splits a heavily-placed prototype into 64 m chunks so a renderer can
+    // frustum- and distance-cull them separately; this port has no per-batch
+    // distance cull, so keeping the split would cost one extra draw per chunk
+    // and buy nothing. The instances are concatenated back in `finalize` order,
+    // so the level is identical — only the batching is coarser.
+    //
+    // `b.masks` (the per-instance weathering triple `instanceColor` would
+    // modulate the shader with) is dropped throughout: the engine's instance
+    // data carries no per-instance colour, and the material it would tint is
+    // the unported one. Every instance of a prototype weathers identically.
+    let mut instanced: Vec<LevelBatch> = Vec::new();
+    for b in &result.instanced {
+        let placements = b.matrices.iter().map(transform_of);
+        match instanced.iter_mut().find(|x| x.key == b.proto_id) {
+            Some(existing) => existing.instances.extend(placements),
+            None => {
+                let geo = protos
+                    .iter()
+                    .find(|p| p.id == b.proto_id)
+                    .map(|p| &p.geo)
+                    .expect("every placed prototype was registered by register_props");
+                instanced.push(LevelBatch {
+                    // Keyed on the *prototype* id so the merge above is by
+                    // prototype; the palette key drives the albedo instead.
+                    key: b.proto_id.clone(),
+                    surface: b.surface,
+                    mesh: to_mesh_data(geo),
+                    albedo: key_albedo(&b.key),
+                    instances: placements.collect(),
+                });
+            }
+        }
+    }
+    let batches: Vec<LevelBatch> = statics.chain(instanced).collect();
 
     Level {
         batches,
         world: Rc::new(world),
         spawns,
         static_tris: result.stats.static_tris,
+        instanced_tris: result.stats.inst_tris,
+        instances: result.stats.instances,
+        draw_calls: result.stats.draw_calls,
         collide_tris,
     }
+}
+
+/// Decompose one of the Assembler's placement matrices into the engine's
+/// [`Transform`].
+///
+/// The Assembler composes every placement as `translate * rotate * scale`
+/// ([`crate::world::kit::trs`]), so the decomposition is exact rather than a
+/// best fit: the translation is the fourth column, each scale is a basis
+/// column's length, and the rotation is the matrix of the normalised columns.
+/// A zero-scale column cannot occur (`put` scales by `s` and `put_s` by an
+/// authored triple, none of them zero), but it is guarded so a degenerate
+/// prototype placement yields identity rather than a NaN quaternion in a
+/// vertex buffer.
+fn transform_of(m: &Mat4) -> Transform {
+    let c = m.as_cols_array();
+    let len = |a: usize| (c[a] * c[a] + c[a + 1] * c[a + 1] + c[a + 2] * c[a + 2]).sqrt();
+    let (sx, sy, sz) = (len(0), len(4), len(8));
+    let unit = |a: usize, l: f32| {
+        let inv = if l > 1e-9 { 1.0 / l } else { 0.0 };
+        [c[a] * inv, c[a + 1] * inv, c[a + 2] * inv]
+    };
+    let r = [unit(0, sx), unit(4, sy), unit(8, sz)];
+    Transform::new(
+        Vec3::new(c[12], c[13], c[14]),
+        quat_of_basis(r),
+        Vec3::new(sx, sy, sz),
+    )
+}
+
+/// A unit quaternion from three orthonormal basis columns (`r[col][row]`).
+///
+/// Shepperd's method: take the branch whose divisor is largest, so the
+/// square root never runs near zero. A basis that is not a rotation (a
+/// degenerate placement, guarded above) falls out as the identity.
+fn quat_of_basis(r: [[f32; 3]; 3]) -> Quat {
+    let (m00, m11, m22) = (r[0][0], r[1][1], r[2][2]);
+    let trace = m00 + m11 + m22;
+    let q = if trace > 0.0 {
+        let s = (trace + 1.0).max(0.0).sqrt() * 2.0;
+        [
+            (r[1][2] - r[2][1]) / s,
+            (r[2][0] - r[0][2]) / s,
+            (r[0][1] - r[1][0]) / s,
+            0.25 * s,
+        ]
+    } else if m00 > m11 && m00 > m22 {
+        let s = (1.0 + m00 - m11 - m22).max(0.0).sqrt() * 2.0;
+        [
+            0.25 * s,
+            (r[1][0] + r[0][1]) / s,
+            (r[2][0] + r[0][2]) / s,
+            (r[1][2] - r[2][1]) / s,
+        ]
+    } else if m11 > m22 {
+        let s = (1.0 + m11 - m00 - m22).max(0.0).sqrt() * 2.0;
+        [
+            (r[1][0] + r[0][1]) / s,
+            0.25 * s,
+            (r[2][1] + r[1][2]) / s,
+            (r[2][0] - r[0][2]) / s,
+        ]
+    } else {
+        let s = (1.0 + m22 - m00 - m11).max(0.0).sqrt() * 2.0;
+        [
+            (r[2][0] + r[0][2]) / s,
+            (r[2][1] + r[1][2]) / s,
+            0.25 * s,
+            (r[0][1] - r[1][0]) / s,
+        ]
+    };
+    Quat::new(q[0], q[1], q[2], q[3])
+        .normalize()
+        .unwrap_or(Quat::IDENTITY)
 }
 
 /// Flatten an indexed (or soup) [`WorldGeo`] into the `f64` `a.xyz b.xyz c.xyz`

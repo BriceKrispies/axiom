@@ -11,11 +11,13 @@
 //! | [`sky_look`]  | `sky/index.js`'s per-frame key-light and sky terms, from the CPU atmosphere model |
 //! | [`game`]      | `player/index.js`'s `PlayerSystem` + `core/engine.js`'s frame ordering |
 //! | [`app`]       | `main.js` — the browser bootstrap, on Axiom's engine path |
+//! | [`furniture`] | **not** a port — a labelled placeholder standing in for the unported `dressing.js`, so the prop library is not dead |
 //!
 //! The dependency direction is one-way: everything here reads the ported
 //! subsystems, and no ported subsystem reads anything here.
 
 pub mod app;
+pub mod furniture;
 pub mod game;
 pub mod level;
 pub mod sky_look;

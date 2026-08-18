@@ -134,15 +134,25 @@ pub fn build(seed: u32) -> Scene {
     Scene { game, app }
 }
 
-/// Upload one mesh + one material per level batch and spawn it at the origin —
-/// the assembler already baked every vertex into world space.
+/// Upload one mesh and one material per level batch, and spawn one node per
+/// instance of it.
+///
+/// **This is the draw-call budget.** A merged static batch has exactly one
+/// instance (its vertices are already in world space, so the transform is the
+/// identity); a prototype batch has one per placement. Every node in a batch
+/// shares the batch's single mesh handle and single material handle, which is
+/// what lets the engine collapse the whole batch into one `mesh_batches` entry —
+/// one draw. Uploading a mesh per placement instead would turn ~150 props into
+/// ~150 draws.
 fn install_level(running: &mut RunningApp, batches: Vec<LevelBatch>) {
     for batch in batches {
         let mesh = running
             .add_mesh_data(batch.mesh)
             .expect("an assembler batch is valid renderable geometry");
         let material = running.add_material(Material::lit(batch.albedo));
-        running.spawn(Spawn::new(Transform::IDENTITY, mesh, material));
+        for placement in batch.instances {
+            running.spawn(Spawn::new(placement, mesh, material));
+        }
     }
 }
 
@@ -299,11 +309,32 @@ mod tests {
         let scene = build(CAPTURE_SEED);
         let rifle_buckets = rifle_buckets().len();
         assert!(rifle_buckets >= 4, "the rifle merged into {rifle_buckets} buckets");
-        // Every level batch and every rifle bucket is a renderable.
+        // Every level instance and every rifle bucket is a renderable node.
         assert!(
             scene.app.renderable_count() > rifle_buckets,
             "only {} renderables — the level did not install",
             scene.app.renderable_count()
+        );
+    }
+
+    #[test]
+    fn the_street_costs_about_a_hundred_draws_not_a_node_per_prop() {
+        let mut scene = build(CAPTURE_SEED);
+        let mut input = Input::new();
+        let outcome = frame(&mut scene, 1.0 / 60.0, &mut input, 0);
+        let draws = outcome.mesh_batches().len();
+        let nodes = scene.app.renderable_count();
+        // Instancing is the whole point: many more nodes than draws.
+        assert!(
+            nodes > draws * 2,
+            "{nodes} nodes over {draws} draws — the props are not instancing"
+        );
+        // The Assembler's own count plus the rifle's buckets is what the engine
+        // should be batching to. A hard ceiling, so a future dressing pass that
+        // places a prototype outside the instancing path fails here.
+        assert!(
+            draws < 150,
+            "{draws} draws — the level blew the draw-call budget"
         );
     }
 
