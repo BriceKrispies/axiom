@@ -55,6 +55,9 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
+mod geometry_assert;
+use geometry_assert::assert_triangle_soup_matches;
+
 use axiom_claude_of_duty::weapons::geometry::{Assembly, Geo};
 use axiom_claude_of_duty::weapons::parts::magazine::{
     add_front_sight, add_rear_sight, add_rollmark, build_magazine, MagazineDims, MagazineOpts, RollmarkOpts,
@@ -85,9 +88,10 @@ fn close_slice(name: &str, field: &str, got: &[f32], want: &[f64]) {
     });
 }
 
-/// `(case, material)` pairs held to topology-only comparison (triangle count
-/// and, when it matches, vertex count — never position/normal floats) even
-/// though their vertex count happens to land exactly on the golden's.
+/// `(case, material)` pairs whose position/normal comparison goes through
+/// the weld-invariant [`assert_triangle_soup_matches`] instead of a plain
+/// per-vertex-index comparison, because the raw welded buffer is not a
+/// reliable comparison key here (see [`assert_bucket`]).
 ///
 /// `magazine_rifle`'s `rubber` bucket is the base pad, added to its bucket
 /// exactly once (`asm.add(pad, "rubber", ...)`, `magazine.rs`), so — per
@@ -118,27 +122,44 @@ fn close_slice(name: &str, field: &str, got: &[f32], want: &[f64]) {
 /// even though the two sides welded a different pair. That is exactly the
 /// "occasionally tipping the weld's `1e-6` quantization to a different
 /// bucket" class `6af2a9c3` already accepted as an honest floor rather than
-/// papering over — it just does not show up as a vertex-count mismatch here,
-/// so the existing count-mismatch fallback below cannot catch it on its own.
+/// papering over — a plain index-order comparison would compare the wrong
+/// pair of vertices and report the gap between them as error.
 ///
-/// Confirmed with `tests/geometry_assert::assert_triangle_soup_matches`,
-/// which is invariant to vertex ordering and to weld decisions (unlike a raw
-/// buffer or vertex-count comparison), so a residual it still measures is a
-/// real per-triangle shape difference, not welding bookkeeping: this
-/// bucket's triangle count matches exactly, but the worst
-/// canonicalized-triangle corner deviation measures `0.0017932541...` at a
-/// `pos.x` corner -- past `TOL` (1e-5) by two orders of magnitude, and past
-/// even the `6.5e-4` single vertex-pair gap measured above. This confirms a
-/// genuine (if small) geometric divergence at the weld tie, not merely an
-/// index-buffer artifact a weld-invariant comparison would have absorbed.
-const TOPOLOGY_ONLY: &[(&str, &str)] = &[("magazine_rifle", "rubber")];
+/// **Re-measured with the fixed, centroid-keyed
+/// `geometry_assert::assert_triangle_soup_matches`.** An earlier version of
+/// that helper sorted every triangle on a coarse 5mm per-field grid and
+/// could mispair sub-5mm repeated features (see that module's doc); the
+/// `0.0017932541...` figure once recorded here for this bucket was measured
+/// through that broken comparator and was wrong. Re-measured with the fix:
+/// worst deviation `0.0000011622905731201172` at
+/// `triangle[71].corner[0].normal.z` — comfortably under `TOL` (1e-5), the
+/// same order as `picatinny_normal`'s documented libm-ULP residual. So the
+/// underlying *shape* is fine; what remains real is only the plain
+/// per-vertex-index comparison's dependence on which of two close points
+/// survived the weld (the `6.5e-4` `pos[165]` gap measured directly above,
+/// confirmed by re-running that plain comparison here) — a bookkeeping
+/// difference the weld-invariant triangle-soup comparison is specifically
+/// designed to absorb, not a geometric defect. This bucket therefore stays
+/// on [`assert_triangle_soup_matches`] rather than the plain per-vertex-index
+/// path (which does still fail, for that bookkeeping reason alone), but the
+/// old alarming "past tolerance by two orders of magnitude" reading no
+/// longer applies to the actual geometry.
+const SOUP_ONLY: &[(&str, &str)] = &[("magazine_rifle", "rubber")];
 
 /// One material bucket's geometry against its golden `{ pos, normal, uv,
 /// index }`: triangle count exactly; vertex count exactly if it matches,
-/// else within a small budget; position/normal floats only when the vertex
-/// count matched exactly AND the bucket is not in [`TOPOLOGY_ONLY`] (see
-/// module doc and `TOPOLOGY_ONLY`'s doc for both).
-fn assert_bucket(name: &str, g: &Geo, want: &Value, topology_only: bool) {
+/// else within a small budget; position/normal floats compared per-vertex
+/// once the vertex count matches, UNLESS the bucket is in [`SOUP_ONLY`] (see
+/// its doc), in which case they go through the weld-invariant
+/// `assert_triangle_soup_matches` instead — which is not restricted to
+/// buckets whose *vertex* count matches, since it never looks at vertex
+/// count at all.
+fn assert_bucket(name: &str, g: &Geo, want: &Value, soup_only: bool) {
+    if soup_only {
+        assert_triangle_soup_matches(name, g, want, TOL);
+        return;
+    }
+
     let want_pos = f64s(&want["pos"]);
     let want_vert_count = want_pos.len() / 3;
     // A bucket fed by exactly one `asm.add` call never goes through
@@ -153,7 +174,7 @@ fn assert_bucket(name: &str, g: &Geo, want: &Value, topology_only: bool) {
     assert_eq!(g.tri_count(), want_tri_count, "{name}: triangle count (topology) must match exactly");
 
     let got_vert_count = g.vert_count();
-    if got_vert_count == want_vert_count && !topology_only {
+    if got_vert_count == want_vert_count {
         close_slice(name, "pos", &g.pos, &want_pos);
         close_slice(name, "normal", &g.normal, &f64s(&want["normal"]));
         match &want["index"] {
@@ -187,8 +208,8 @@ fn assert_buckets_match(case: &str, built: &BTreeMap<String, Geo>, want: &Value)
     assert_eq!(got_keys, want_keys, "{case}: material bucket set must match exactly");
 
     for (mat, g) in built {
-        let topology_only = TOPOLOGY_ONLY.contains(&(case, mat.as_str()));
-        assert_bucket(&format!("{case}:{mat}"), g, &want[mat], topology_only);
+        let soup_only = SOUP_ONLY.contains(&(case, mat.as_str()));
+        assert_bucket(&format!("{case}:{mat}"), g, &want[mat], soup_only);
     }
 }
 

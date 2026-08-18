@@ -25,88 +25,54 @@
 //! between V8's libm and Rust's), so the per-vertex error compounds past the
 //! single-primitive `1e-6` bound `weapons_geometry_primitives_port.rs` uses.
 //!
-//! **The one real residual, diagnosed, not papered over.** Every bucket that
-//! merges an `extrude()` piece together with `box_geo()`/`blob()` pieces
-//! (`trigger_default`; `pistol_grip_*`'s `polymer` bucket, which holds the
-//! extruded core plus two blobs; `carbine_stock_*`'s `polymer` bucket, the
-//! extruded shell plus three blobs; `charging_handle`, which interleaves
+//! **The comparison history for the extrude+box_geo/blob buckets.** Every
+//! bucket that merges an `extrude()` piece together with `box_geo()`/`blob()`
+//! pieces (`trigger_default`; `pistol_grip_*`'s `polymer` bucket, which holds
+//! the extruded core plus two blobs; `carbine_stock_*`'s `polymer` bucket,
+//! the extruded shell plus three blobs; `charging_handle`, which interleaves
 //! `box_geo`/`rod_z`/`extrude` throughout) comes back with the **same**
-//! triangle/index topology as the golden but a **vertex count off by a
-//! handful** (measured: 2-10 vertices, well under 1%). This was verified,
-//! not assumed: every affected bucket's `tri_count()` matches the golden's
-//! `index.len() / 3` exactly (asserted below), and a bounding-box check on
-//! the raw position data (not committed — see the port recipe) landed within
-//! `1e-8` of the golden's, confirming the shape and placement are correct,
-//! not merely close. The **unaffected** buckets in the very same calls prove
-//! the cause: `carbine_stock_*`'s `alu` bucket (`tube_z`/`lathe_z`/`box_geo`
-//! only, no `extrude`) and `rubber` bucket (`blob`/`box_geo` only), and
-//! `pistol_grip_*`'s `rubber` bucket (`blob`/`box_geo` only), all match
-//! **exactly** — only a bucket that merges `extrude()`'s bevelled output with
-//! `box_geo`/`blob`'s rounded-corner output shows the residual. This is the
-//! same root cause `weapons_geometry_primitives_port.rs`'s
-//! `assert_geo_topology_matches` and `primitives::extrude`'s module doc
-//! already diagnose: `get_bevel_vec`'s corner construction divides by a
-//! near-zero denominator, which independent `f64::sin`/`f64::cos`
-//! implementations (Rust's libm vs V8's) can nudge past the `1e-6` weld
-//! quantization grid — here tipping the tie for a handful of `extrude`
-//! vertices that land close to a neighbouring `box_geo`/`blob` piece, rather
-//! than at a `round_rect`-style tangent corner within one contour. Per the
-//! port recipe ("measure the residual and state the cause; do not silently
-//! widen or drop to topology-only"), the affected buckets use
-//! [`assert_bucket_topology_matches`] (triangle count exact, vertex-count
-//! delta bounded to `max(10%, 8)`, same budget as the two existing
-//! precedents), and every other bucket keeps the strict exact-count,
-//! `1e-5`-tolerance [`assert_bucket_matches`].
+//! triangle/index topology as the golden but a welded **vertex count off by
+//! a handful** (2-10 vertices, well under 1%) — the same
+//! near-zero-denominator `get_bevel_vec` mechanism
+//! `weapons_geometry_primitives_port.rs`'s module doc diagnoses, here tipping
+//! the tie for a handful of `extrude` vertices that land close to a
+//! neighbouring `box_geo`/`blob` piece rather than at a `round_rect`-style
+//! tangent corner within one contour. These buckets were originally held to
+//! [`assert_bucket_matches`]-adjacent topology-only checking (triangle count
+//! exact, vertex-count delta bounded, no position/normal/uv comparison at
+//! all), with a *not-committed* bounding-box spot check as the only informal
+//! shape verification.
 //!
-//! **Re-verified with `tests/geometry_assert::assert_triangle_soup_matches`**,
-//! the weld/order-invariant comparison that replaced the old ad hoc,
-//! not-committed bounding-box spot check above with something that runs
-//! every time. Run at `TOL` (1e-5) against every affected bucket:
+//! **That was superseded by `tests/geometry_assert::assert_triangle_soup_matches`**,
+//! a weld/order-invariant comparison that runs every time rather than being a
+//! one-off spot check — but its FIRST version sorted triangles on a coarse
+//! (5mm) per-field grid, which (per that module's doc) mispairs sub-5mm
+//! repeated features against their neighbours. Every bucket in this file was
+//! measured through that broken comparator and came back with "worst
+//! deviations" of `0.0057`-`0.071` m position and `0.0057`-`0.093` uv —
+//! alarming numbers that turned out to be mispairing artifacts, not real
+//! geometry.
 //!
-//! | bucket | pos worst | normal worst | uv worst | pos components > 1e-3 |
-//! |---|---|---|---|---|
-//! | `trigger_default` | `0.005690` | `3.3e-6` | `0.005690` | n/a |
-//! | `pistol_grip_rifle.polymer` | `0.014174` | `3.8e-6` | `0.016000` | n/a |
-//! | `pistol_grip_smg.polymer` | `0.014324` | `2.1e-6` | `0.016000` | 24 of 6900 |
-//! | `pistol_grip_defaults.polymer` | `0.014174` | `3.8e-6` | `0.016000` | 48 of 6900 |
-//! | `carbine_stock_default.polymer` | `0.070681` | `1.5e-6` | `0.093067` | 51 of 6108 |
-//! | `carbine_stock_custom_y_break.polymer` | `0.063049` | `1.7e-6` | `0.085067` | 45 of 6108 |
-//! | `charging_handle` | `0.020000` | `0.7e-6` | `0.020000` | 8 of 3864 |
-//!
-//! Three findings out of this measurement:
-//!
-//! 1. **Normals are fine.** Every bucket's worst normal deviation is
-//!    `~1e-6`-`4e-6` -- the same order as `picatinny_normal`'s documented
-//!    libm-ULP residual (`weapons_geometry_primitives_port.rs`). Orientation
-//!    is not in question anywhere in this file.
-//! 2. **`uv` reproduces the known, already-documented projection-axis tie.**
-//!    `weapons_parts_magazine_port.rs`'s module doc already establishes that
-//!    `extrude()`'s `WorldUVGenerator`-equivalent picks its projection axis
-//!    via a discrete `<` comparison between two side-length magnitudes, so a
-//!    sub-tolerance position difference can flip that axis choice and produce
-//!    a `uv` value that differs far more than any float-noise budget while
-//!    the shape is exactly right -- consistent with `uv worst` tracking (and
-//!    twice, exactly equaling) `pos worst` above: it is the same underlying
-//!    corner, not an independent divergence.
-//! 3. **`pos` is a real, but small and localized, residual.** Unlike `uv`,
-//!    a raw position difference of 1.4-7.1 cm is not explained by an axis
-//!    tie. Dumping the actual worst-offending triangles (a scratch check, not
-//!    committed, same as the recipe's bounding-box spot check before it)
-//!    shows the mechanism directly: at a hard edge where an `extrude()` piece
-//!    meets a `box_geo`/`blob` piece, two (or more) thin triangles share the
-//!    same first two corners and differ only in a third, nearby corner --
-//!    exactly the "which of two close points does the weld keep" tie
-//!    [`primitives::extrude`]'s module doc and
-//!    `weapons_parts_magazine_port.rs`'s `TOPOLOGY_ONLY` doc already
-//!    diagnose, just with more tie opportunities per bucket (these compose
-//!    many more primitives than a single `extrude()` call). It affects a
-//!    small, consistent fraction of each bucket's triangles (`0.3%`-`2.5%` of
-//!    position components, tabulated above) -- never the bulk of the mesh --
-//!    matching the "vertex count off by a handful, well under 1%" already
-//!    measured for `tri_count`/`vert_count`. This is the same real, small,
-//!    honestly-measured residual the recipe expects to surface, not
-//!    something to widen `TOL` to hide: `assert_bucket_topology_matches`
-//!    remains the correct assertion for these buckets.
+//! **Re-measured with the fixed, centroid-keyed comparator** (used below via
+//! [`assert_bucket_soup_matches`]/[`assert_bucket_soup_matches_uv`]), every
+//! bucket's position and normal now matches fully within `TOL` (1e-5) —
+//! confirming the shape and placement really were always correct, exactly as
+//! the old not-committed bounding-box spot check suggested, just not provable
+//! by a repeatable test until now. Five of the six buckets
+//! (`trigger_default`, all three `pistol_grip_*.polymer`, `charging_handle`)
+//! match **exactly**, `uv` included, and are promoted to full comparison via
+//! [`assert_bucket_soup_matches`]. The remaining two
+//! (`carbine_stock_default`/`carbine_stock_custom_y_break`'s `polymer`
+//! bucket) have position and normal fully within `TOL` but a genuine `uv`
+//! residual — measured `0.0839497...`/`0.0759497...` respectively — a real
+//! instance of the already-documented `extrude()` projection-axis tie
+//! (`weapons_parts_magazine_port.rs`'s module doc: the projection axis is
+//! picked via a discrete `<` comparison between two side-length magnitudes,
+//! so a sub-tolerance position difference can flip it and produce a `uv`
+//! difference far larger than any float-noise budget on an otherwise
+//! perfectly correct triangle). These two use
+//! [`assert_bucket_soup_matches_uv`], which holds `uv` to the wider
+//! [`CARBINE_STOCK_UV_TOL`] while still requiring position/normal at `TOL`.
 //!
 //! **Coverage.** `selectorPart`'s dead `matSteel` parameter is exercised with
 //! both the default and a non-default `r` (`selector_wide`, catching a
@@ -125,6 +91,9 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
+mod geometry_assert;
+use geometry_assert::{assert_triangle_soup_matches, assert_triangle_soup_matches_uv};
+
 use axiom_claude_of_duty::weapons::geometry::{Assembly, Geo};
 use axiom_claude_of_duty::weapons::parts::controls::{
     add_carbine_stock, add_fore_grip, add_pistol_grip, charging_handle_part, selector_part, trigger_part,
@@ -132,6 +101,14 @@ use axiom_claude_of_duty::weapons::parts::controls::{
 };
 
 const TOL: f64 = 1e-5;
+/// `uv` tolerance for `carbine_stock_*`'s `polymer` bucket — the one
+/// remaining genuine residual in this file after re-measuring with the
+/// fixed comparator (see the module doc): a real `extrude()` projection-axis
+/// tie, measured up to `0.0839497...`. `0.15` keeps comfortable headroom
+/// above that without approaching the `~0.5` a genuinely wrong (not just
+/// axis-flipped) uv would produce — the same shape of margin
+/// `weapons_models_port.rs`'s `UV_TOL` (0.3 over a measured 0.21) uses.
+const CARBINE_STOCK_UV_TOL: f64 = 0.15;
 
 fn golden() -> &'static Value {
     static G: OnceLock<Value> = OnceLock::new();
@@ -169,32 +146,6 @@ fn assert_geo_matches(name: &str, g: &Geo, want: &Value) {
     }
 }
 
-/// See the module doc's "The one real residual" section: triangle topology
-/// is asserted exactly (fixed by each primitive's own triangulation, never
-/// touched by the weld); vertex count is asserted exactly when it happens to
-/// match, otherwise bounded to the same `max(10%, 8)` budget
-/// `weapons_geometry_primitives_port.rs`/`weapons_parts_hardware_port.rs`
-/// already use for this class of independent-libm weld tie-break.
-fn assert_geo_topology_matches(name: &str, g: &Geo, want: &Value) {
-    let want_index = want["index"].as_array().unwrap_or_else(|| panic!("{name}: expected an indexed golden"));
-    assert_eq!(g.tri_count(), want_index.len() / 3, "{name}: triangle count must match exactly");
-
-    let want_pos = f64s(&want["pos"]);
-    let want_vert_count = want_pos.len() / 3;
-    let got_vert_count = g.vert_count();
-    if got_vert_count == want_vert_count {
-        close_slice(name, "pos", &g.pos, &want_pos);
-        close_slice(name, "normal", &g.normal, &f64s(&want["normal"]));
-    } else {
-        let delta = got_vert_count.abs_diff(want_vert_count);
-        let budget = (want_vert_count / 10).max(8);
-        assert!(
-            delta <= budget,
-            "{name}: vert_count {got_vert_count} vs golden {want_vert_count} (delta {delta} > budget {budget})"
-        );
-    }
-}
-
 fn assert_bucket_matches(name: &str, built: &BTreeMap<String, Geo>, case: &str, mat: &str) {
     let g = built
         .get(mat)
@@ -202,11 +153,32 @@ fn assert_bucket_matches(name: &str, built: &BTreeMap<String, Geo>, case: &str, 
     assert_geo_matches(&format!("{name}.{mat}"), g, &golden()[case]["buckets"][mat]);
 }
 
-fn assert_bucket_topology_matches(name: &str, built: &BTreeMap<String, Geo>, case: &str, mat: &str) {
+/// The weld-invariant, full-fidelity comparison (see `geometry_assert`'s
+/// module doc): every bucket in this file that used to be held to
+/// [`assert_geo_topology_matches`]-style topology-only checking (a
+/// same-triangle-count, budgeted-vertex-count-delta concession, position and
+/// normal floats never compared) turns out, once re-measured with the fixed
+/// centroid-keyed comparator, to need no such concession at all — the old
+/// large "residual" readings were a mispairing artifact of the OLD,
+/// coarse-grid comparator, not real geometric divergences. See the module
+/// doc's "Re-measured" section for the numbers.
+fn assert_bucket_soup_matches(name: &str, built: &BTreeMap<String, Geo>, case: &str, mat: &str) {
     let g = built
         .get(mat)
         .unwrap_or_else(|| panic!("{name}: bucket {mat:?} missing from build() output"));
-    assert_geo_topology_matches(&format!("{name}.{mat}"), g, &golden()[case]["buckets"][mat]);
+    assert_triangle_soup_matches(&format!("{name}.{mat}"), g, &golden()[case]["buckets"][mat], TOL);
+}
+
+/// Same as [`assert_bucket_soup_matches`], but with `uv` held to
+/// [`CARBINE_STOCK_UV_TOL`] instead of `TOL` — the one bucket pair
+/// (`carbine_stock_default`/`carbine_stock_custom_y_break`'s `polymer`
+/// bucket) where re-measuring found position and normal fully within `TOL`
+/// but a genuine `uv` projection-axis-tie residual (see the module doc).
+fn assert_bucket_soup_matches_uv(name: &str, built: &BTreeMap<String, Geo>, case: &str, mat: &str) {
+    let g = built
+        .get(mat)
+        .unwrap_or_else(|| panic!("{name}: bucket {mat:?} missing from build() output"));
+    assert_triangle_soup_matches_uv(&format!("{name}.{mat}"), g, &golden()[case]["buckets"][mat], TOL, CARBINE_STOCK_UV_TOL);
 }
 
 // ---------------------------------------------------------------------
@@ -234,7 +206,7 @@ fn selector_part_matches_the_source_with_a_wider_radius() {
 #[test]
 fn trigger_part_matches_the_source() {
     let t = trigger_part("steel_bright");
-    assert_geo_topology_matches("trigger_default", &t.geo, &golden()["trigger_default"]);
+    assert_triangle_soup_matches("trigger_default", &t.geo, &golden()["trigger_default"], TOL);
     assert_eq!(t.mat, "steel_bright");
 }
 
@@ -259,7 +231,7 @@ fn add_pistol_grip_matches_the_source_with_rifle_dimensions() {
     );
     let built = asm.build();
     // polymer: extrude(core) + blob(beaver) + blob(cap) -> topology residual.
-    assert_bucket_topology_matches("pistol_grip_rifle", &built, "pistol_grip_rifle", "polymer");
+    assert_bucket_soup_matches("pistol_grip_rifle", &built, "pistol_grip_rifle", "polymer");
     // rubber: blob/box_geo only -> exact.
     assert_bucket_matches("pistol_grip_rifle", &built, "pistol_grip_rifle", "rubber");
 }
@@ -280,7 +252,7 @@ fn add_pistol_grip_matches_the_source_with_smg_dimensions() {
         },
     );
     let built = asm.build();
-    assert_bucket_topology_matches("pistol_grip_smg", &built, "pistol_grip_smg", "polymer");
+    assert_bucket_soup_matches("pistol_grip_smg", &built, "pistol_grip_smg", "polymer");
     assert_bucket_matches("pistol_grip_smg", &built, "pistol_grip_smg", "rubber");
 }
 
@@ -289,7 +261,7 @@ fn add_pistol_grip_matches_the_source_with_default_options() {
     let mut asm = Assembly::new("grip3");
     add_pistol_grip(&mut asm, "polymer", "rubber", PistolGripOpts::default());
     let built = asm.build();
-    assert_bucket_topology_matches("pistol_grip_defaults", &built, "pistol_grip_defaults", "polymer");
+    assert_bucket_soup_matches("pistol_grip_defaults", &built, "pistol_grip_defaults", "polymer");
     assert_bucket_matches("pistol_grip_defaults", &built, "pistol_grip_defaults", "rubber");
 }
 
@@ -316,7 +288,7 @@ fn add_carbine_stock_matches_the_source_with_default_y() {
     // alu: tube_z/lathe_z/box_geo only -> exact.
     assert_bucket_matches("carbine_stock_default", &built, "carbine_stock_default", "alu");
     // polymer: extrude(shell) + blob(cheek) + blob(scallops) -> topology residual.
-    assert_bucket_topology_matches("carbine_stock_default", &built, "carbine_stock_default", "polymer");
+    assert_bucket_soup_matches_uv("carbine_stock_default", &built, "carbine_stock_default", "polymer");
     // rubber: blob/box_geo only -> exact.
     assert_bucket_matches("carbine_stock_default", &built, "carbine_stock_default", "rubber");
 }
@@ -346,7 +318,7 @@ fn add_carbine_stock_matches_the_source_with_a_custom_y_and_the_detent_loop_brea
         "carbine_stock_custom_y_break",
         "alu",
     );
-    assert_bucket_topology_matches(
+    assert_bucket_soup_matches_uv(
         "carbine_stock_custom_y_break",
         &built,
         "carbine_stock_custom_y_break",
@@ -368,7 +340,7 @@ fn add_carbine_stock_matches_the_source_with_a_custom_y_and_the_detent_loop_brea
 #[test]
 fn charging_handle_part_matches_the_source() {
     let g = charging_handle_part();
-    assert_geo_topology_matches("charging_handle", &g, &golden()["charging_handle"]);
+    assert_triangle_soup_matches("charging_handle", &g, &golden()["charging_handle"], TOL);
 }
 
 // ---------------------------------------------------------------------

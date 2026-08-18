@@ -20,10 +20,25 @@
 //!
 //! `crate::world::kit::wall_panel` reuses `weapons::geometry::primitives::extrude`,
 //! which welds vertices at `1e-6` (see that module's doc for the full
-//! reasoning); the raw JS `wallPanel` never welds. Welding does not change
-//! **triangle count** — the invariant this file actually pins for
-//! `wall_panel` — so only `tri_count()` is compared, not per-vertex
-//! position arrays, for the three `wall_panel_*` goldens.
+//! reasoning); the raw JS `wallPanel` never welds. That once meant only
+//! `tri_count()` was compared, not per-vertex position arrays, for all three
+//! `wall_panel_*` goldens — welding changes vertex order/count, not triangle
+//! count, and there was no weld-invariant way to compare positions.
+//!
+//! **Re-assessed** with `tests/geometry_assert::assert_triangle_soup_matches_raw`
+//! (the weld-invariant, centroid-keyed comparator this suite uses elsewhere —
+//! see that module's doc), which works here too: `wall_panel` produces a
+//! `world::geo::WorldGeo`, not a `weapons::geometry::Geo`, so this file uses
+//! the raw-slice entry point rather than the `Geo`-typed one. Two of the
+//! three goldens (`wall_panel_no_holes`, `wall_panel_rect_hole`) now get a
+//! full position/normal/uv comparison at `TOL` (1e-6) and pass outright —
+//! welding was never actually a comparison obstacle once the comparator
+//! stopped depending on vertex order. `wall_panel_arch_hole` keeps the
+//! triangle-count-only check: its curved cut carries a genuine, tiny
+//! (`~2.7e-6`) libm residual from the arch's own trig, the same class
+//! already documented for `picatinny_normal`/`mlok_slot_normal`
+//! (`weapons_geometry_primitives_port.rs`) — see that test's doc for the
+//! measurement.
 //!
 //! ## `seam()` is checked only through `buildGround`
 //!
@@ -39,6 +54,9 @@
 use std::sync::OnceLock;
 
 use serde_json::Value;
+
+mod geometry_assert;
+use geometry_assert::assert_triangle_soup_matches_raw;
 
 use axiom_claude_of_duty::rng::Rng;
 use axiom_claude_of_duty::world::accum::AccumAddOpts;
@@ -136,22 +154,31 @@ fn trs_matches_the_javascript_matrix() {
 }
 
 #[test]
-fn wall_panel_no_holes_triangle_count_matches_the_javascript() {
+fn wall_panel_no_holes_matches_the_javascript() {
     let g = wall_panel(2.0, 3.0, 0.3, &[], WallPanelOpts { bevel: 0.02, top: WallTop::Flat { jag: 0.0 }, curve_segments: 6 }, None);
-    let want_pos = f64s(&golden()["wall_panel_no_holes"]["pos"]);
-    assert_eq!(g.tri_count(), want_pos.len() / 3 / 3, "wall_panel_no_holes: triangle count");
+    assert_triangle_soup_matches_raw("wall_panel_no_holes", &g.pos, &g.normal, &g.uv, &g.index, &golden()["wall_panel_no_holes"], TOL);
 }
 
 #[test]
-fn wall_panel_rect_hole_triangle_count_matches_the_javascript() {
+fn wall_panel_rect_hole_matches_the_javascript() {
     let hole = WallHole { x: 0.0, y: 1.5, w: 0.6, h: 0.8, arch: 0.0, ragged: 0.0 };
     let g = wall_panel(2.0, 3.0, 0.3, &[hole], WallPanelOpts { bevel: 0.02, top: WallTop::Flat { jag: 0.0 }, curve_segments: 6 }, None);
-    let want_pos = f64s(&golden()["wall_panel_rect_hole"]["pos"]);
-    assert_eq!(g.tri_count(), want_pos.len() / 3 / 3, "wall_panel_rect_hole: triangle count");
+    assert_triangle_soup_matches_raw("wall_panel_rect_hole", &g.pos, &g.normal, &g.uv, &g.index, &golden()["wall_panel_rect_hole"], TOL);
 }
 
 #[test]
 fn wall_panel_arch_hole_triangle_count_matches_the_javascript() {
+    // Unlike `wall_panel_no_holes`/`wall_panel_rect_hole` (now full
+    // `assert_triangle_soup_matches_raw` comparisons — see the module doc's
+    // "wallPanel's documented divergence" section), the arch's curved cut
+    // carries a genuine, tiny libm residual: re-measured with the fixed
+    // comparator, worst deviation `0.000002682209014892578` at
+    // `triangle[103].corner[0].normal.z` — `~1.7e-6` over `TOL` (1e-6), the
+    // same order as `picatinny_normal`/`mlok_slot_normal`'s documented
+    // one-ULP `f64::sin`/`f64::cos` residuals
+    // (`weapons_geometry_primitives_port.rs`), here from the arch curve's own
+    // trig. Genuine and tiny, not something to widen the tolerance to hide:
+    // stays a triangle-count-only check.
     let hole = WallHole { x: 0.0, y: 1.0, w: 0.8, h: 1.6, arch: 0.6, ragged: 0.0 };
     let g = wall_panel(2.0, 3.0, 0.3, &[hole], WallPanelOpts { bevel: 0.02, top: WallTop::Flat { jag: 0.0 }, curve_segments: 6 }, None);
     let want_pos = f64s(&golden()["wall_panel_arch_hole"]["pos"]);

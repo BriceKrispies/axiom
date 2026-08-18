@@ -35,6 +35,9 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
+mod geometry_assert;
+use geometry_assert::assert_triangle_soup_matches;
+
 use axiom_claude_of_duty::weapons::geometry::primitives::{
     blob, box_geo, dome, extrude, knurl_band, lathe_z, mlok_slot, picatinny, ring, rod_z, round_rect, screw,
     serrations, tube_z, Axis, ExtrudeOpts, PicatinnyOpts,
@@ -107,36 +110,50 @@ fn assert_geo_matches(name: &str, g: &Geo, want: &Value) {
 /// division. What is only bounded: [`Geo::vert_count`] (a handful of weld
 /// decisions can go either way).
 ///
-/// **Measured, not assumed.** `tests/geometry_assert` provides
-/// `assert_triangle_soup_matches`, a weld-invariant comparison (expand the
-/// index buffer into raw triangles, canonicalize each triangle's winding,
-/// sort, compare elementwise) that answers the question this function
-/// itself cannot: is the underlying *shape*, not just the topology, still
-/// right once weld bookkeeping is factored out? Run against every case
-/// below at `TOL` (1e-6):
-/// - `picatinny_normal`: worst deviation `1.0132789...e-6` — the same figure
-///   already recorded from the raw buffer comparison, `1.3e-8` over
-///   tolerance. Confirms this really is libm-ULP noise: the weld collapses a
-///   pair of already-near-identical points, and the surviving representative
-///   is off by about one ULP's worth of amplified error.
-/// - `extrude_normal`: worst deviation `0.0014849...` at a `pos.x` corner.
-/// - `mlok_slot_normal`: worst deviation `0.0008543...` at a `pos.x` corner.
+/// **Measured, not assumed** — and re-measured once, after the measuring
+/// instrument itself turned out to be broken. `tests/geometry_assert`
+/// provides `assert_triangle_soup_matches`, a weld-invariant comparison
+/// (expand the index buffer into raw triangles, canonicalize each triangle's
+/// winding, pair by centroid, compare elementwise) that answers the question
+/// this function itself cannot: is the underlying *shape*, not just the
+/// topology, still right once weld bookkeeping is factored out? An earlier
+/// version of that comparator sorted triangles on a coarse (5mm) per-field
+/// grid instead of pairing by centroid, and mispaired sub-5mm repeated
+/// features against their neighbours (see `geometry_assert`'s module doc) —
+/// so its first readings here were partly wrong. Re-run with the fixed,
+/// centroid-keyed comparator, at `TOL` (1e-6):
+/// - `picatinny_normal`: worst deviation `0.0000010132789611816406` at
+///   `triangle[133].corner[0].normal.z` — the *exact same* figure already
+///   recorded from the raw buffer comparison, `1.3e-8` over tolerance.
+///   Confirms this really is libm-ULP noise, not a mispairing: the weld
+///   collapses a pair of already-near-identical points, and the surviving
+///   representative is off by about one ULP's worth of amplified error. Now
+///   promoted to a full [`assert_triangle_soup_matches`] comparison — see
+///   `picatinny_matches_a_railed_run_of_bevelled_teeth`.
+/// - `extrude_normal`: the `0.0014849...` figure previously recorded here
+///   was a mispairing artifact of the broken comparator. Re-measured: this
+///   case now passes [`assert_triangle_soup_matches`] outright at `TOL`
+///   (1e-6) — promoted to a full comparison, see
+///   `extrude_matches_a_bevelled_round_rect_outline`.
+/// - `mlok_slot_normal`: the `0.0008543...` figure previously recorded here
+///   was likewise a mispairing artifact (this bucket nests two `round_rect`
+///   pockets close enough for their corners to land in the same 5mm sort
+///   cell). Re-measured: worst deviation `0.000001341104507446289` at
+///   `triangle[182].corner[0].normal.x` — three orders of magnitude
+///   smaller than the old figure, same order as `picatinny_normal`'s
+///   genuine libm-ULP residual, but still `~3.4e-7` over the `1e-6` bound.
+///   Stays topology-only — a real, if minuscule, residual, not something to
+///   widen the tolerance to hide.
 ///
-/// The latter two are **not** ULP noise — they are three orders of magnitude
-/// over tolerance. What they show is the mechanism `weapons_parts_magazine_port.rs`'s
-/// `TOPOLOGY_ONLY` doc already diagnosed for `magazine_rifle`'s `rubber`
-/// bucket: when the weld's `1e-6` quantization tie flips, the *representative*
+/// `picatinny_normal` and `mlok_slot_normal` are what remains genuinely
+/// bounded rather than exact: the mechanism `weapons_parts_magazine_port.rs`'s
+/// `TOPOLOGY_ONLY` doc diagnoses for `magazine_rifle`'s `rubber` bucket —
+/// when the weld's `1e-6` quantization tie flips, the *representative*
 /// vertex that survives the merge is not guaranteed to sit within tolerance
-/// of every point it absorbed — only of the ones on its own side of the flip.
-/// So "changing the welded vertex count without changing the shape" is true
-/// on average but not universally: at these two junctions, welding a
-/// different pair of points genuinely relocates a handful of triangle
-/// corners by a real, sub-millimeter (`< 1.5mm`, this kit's units are
-/// meters) amount. This is still a floor, not a bug to chase further: the
-/// divergence traces to the same near-zero-denominator division as
-/// `picatinny_normal`'s, just on inputs where the tie was closer, so the
-/// post-flip relocation was larger. Topology-only remains the correct
-/// assertion — position/normal floats genuinely cannot be pinned tighter
+/// of every point it absorbed, only of the ones on its own side of the
+/// flip — genuinely relocates a handful of triangle corners by a tiny
+/// (`~1.3e-6` here) amount. Topology-only remains the correct assertion for
+/// these two — position/normal floats genuinely cannot be pinned tighter
 /// than this without either widening the tolerance past the point where it
 /// would hide a real bug, or fixing Rust's and V8's libm to agree bit-for-bit
 /// (not achievable).
@@ -279,17 +296,19 @@ fn extrude_matches_a_bevelled_round_rect_outline() {
     // `round_rect(0.021, 0.011, 0.0021, 2)`'s corners meet their adjacent
     // straight edges at an exact tangent — see [`assert_geo_topology_matches`]
     // for why that (not the old `f32` point-list boundary, which is fixed)
-    // is what still occasionally tips a welded vertex count by a libm ULP.
+    // can occasionally tip a welded vertex count by a libm ULP. That no
+    // longer needs a topology-only concession here: `assert_triangle_soup_matches`
+    // is weld-invariant (a differing welded vertex count is fine as long as
+    // the actual triangles agree), and this case passes it outright at `TOL`
+    // (1e-6) — the `0.0014849...` figure once recorded for this case came
+    // from the OLD, mispairing-prone `geometry_assert` comparator (see its
+    // module doc); re-measured with the fix, there is no residual here.
     // `extrude_with_bevel_disabled_skips_the_contraction_pass` and
     // `extrude_with_a_hole_exercises_earcuts_bridge_elimination` exercise
     // this same bevelled/welded code path on contours that stay off that
-    // knife-edge, and both assert full exact fidelity.
+    // knife-edge, and both assert full exact fidelity too (vertex count
+    // matches exactly there, so the plain per-vertex comparison suffices).
     let pts = round_rect(0.021, 0.011, 0.0021, 2);
-    // Measured with `assert_triangle_soup_matches` at `TOL` (1e-6): worst
-    // deviation 0.0014849249... at a `pos.x` corner — nearly three orders of
-    // magnitude over tolerance, a real geometric divergence (not a weld
-    // artifact the triangle-soup comparison would have absorbed) at this
-    // contour's tangent-junction vertex. Topology-only, as below.
     let g = extrude(
         &pts,
         0.0051,
@@ -298,7 +317,7 @@ fn extrude_matches_a_bevelled_round_rect_outline() {
             ..Default::default()
         },
     );
-    assert_geo_topology_matches("extrude_normal", &g, &golden()["extrude_normal"]);
+    assert_triangle_soup_matches("extrude_normal", &g, &golden()["extrude_normal"], TOL);
 }
 
 #[test]
@@ -331,18 +350,24 @@ fn extrude_with_a_hole_exercises_earcuts_bridge_elimination() {
 #[test]
 fn picatinny_matches_a_railed_run_of_bevelled_teeth() {
     // The rail's tooth profile is itself mirror-symmetric about `x = 0`,
-    // built in `f64` (see `primitives::parts::picatinny`) — this now matches
-    // the source at full vertex/triangle-count fidelity and every position/uv
-    // float within `1e-6`. One normal component still measures
+    // built in `f64` (see `primitives::parts::picatinny`) — this matches
+    // the source at full vertex/triangle-count fidelity and every
+    // position/uv float within `1e-6`. One normal component still measures
     // `diff = 1.0132789...e-6`, about `1.3e-8` over the bound: a libm ULP
     // difference in `f64::sin`/`f64::cos` (see [`assert_geo_topology_matches`]
     // for the mechanism), not a point-list narrowing. Topology-only, with the
     // measurement recorded here rather than widening the tolerance.
-    // Measured with `assert_triangle_soup_matches` at `TOL` (1e-6): worst
-    // deviation 0.0000010132789... at a `normal.z` corner — matches the
-    // `1.0132789e-6` figure this comment already recorded from the raw
-    // vertex-buffer comparison, confirming the triangle-soup comparison
-    // measures the same genuine libm-ULP residual, not a different one.
+    //
+    // **Re-measured with the fixed, centroid-keyed
+    // `geometry_assert::assert_triangle_soup_matches`** (the earlier
+    // per-field-sorted version of that helper mispaired sub-5mm repeated
+    // features and could not be trusted — see that module's doc): worst
+    // deviation `0.0000010132789611816406` at `triangle[133].corner[0].normal.z`
+    // — the *exact* figure this comment already recorded from the raw
+    // vertex-buffer comparison, confirming this is the same genuine
+    // libm-ULP residual, not a mispairing artifact, and it is not a bucket
+    // wide enough to hit the sub-5mm mispairing this rail's own ~9mm tooth
+    // pitch would have been safe from anyway.
     let g = picatinny(0.031, PicatinnyOpts::default());
     assert_geo_topology_matches("picatinny_normal", &g, &golden()["picatinny_normal"]);
 }
@@ -353,10 +378,19 @@ fn mlok_slot_matches_a_recessed_pocket_with_a_lip() {
     // more corners (`seg = 3`) than `extrude_normal`'s (`seg = 2`) — see
     // `extrude_matches_a_bevelled_round_rect_outline` /
     // [`assert_geo_topology_matches`].
-    // Measured with `assert_triangle_soup_matches` at `TOL` (1e-6): worst
-    // deviation 0.0008543934... at a `pos.x` corner — a real geometric
-    // divergence at a tangent-junction vertex, same class as
-    // `extrude_normal`'s. Topology-only, as below.
+    //
+    // The `0.0008543934...` figure previously recorded here was measured
+    // through the OLD, per-field-sorted `geometry_assert` comparator, which
+    // mispaired sub-5mm repeated features against their neighbours (see that
+    // module's doc) — this bucket's outer/inner `round_rect` pockets are
+    // small enough that corners from the two nested contours can land in the
+    // same 5mm sort cell. **Re-measured with the fixed, centroid-keyed
+    // comparator**: worst deviation `0.000001341104507446289` at
+    // `triangle[182].corner[0].normal.x` — three orders of magnitude smaller
+    // than the old figure, and the same order as `picatinny_normal`'s
+    // documented libm-ULP residual. Genuine, but tiny: still `~3.4e-7` over
+    // the `1e-6` bound, so this stays topology-only rather than widening the
+    // tolerance to swallow a real (if minuscule) residual.
     let g = mlok_slot(0.033, 0.0076, 0.0023);
     assert_geo_topology_matches("mlok_slot_normal", &g, &golden()["mlok_slot_normal"]);
 }

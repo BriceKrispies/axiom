@@ -16,59 +16,74 @@
 //! **exactly**, and every position/normal/uv float within `1e-5` absolute
 //! (the same bound `weapons_parts_barrel_port.rs`/`weapons_parts_magazine_port.rs`
 //! use for a whole-part, many-primitives-merged-and-welded bucket) — for
-//! every bucket **except** the six case+bucket pairs [`assert_bucket_topology_matches`]
-//! documents below, which hit the already-known `extrude()`+`round_rect()`
-//! tangent-junction libm residual `weapons_geometry_primitives_port.rs`'s
-//! `assert_geo_topology_matches` established (`extrude_normal`,
-//! `picatinny_normal`, `mlok_slot_normal`): those get a triangle-count-exact,
-//! vertex-count-budgeted check instead, with the measured delta recorded at
-//! each call site. Every other bucket in every other case here matches the
-//! golden exactly, including every triangle count in every bucket — a
-//! differing **triangle** count would mean a different algorithm, not
-//! rounding, and none of the buckets below have one.
+//! every bucket **except** the two case/bucket pairs [`assert_bucket_topology_matches`]
+//! documents below (`slide_default`/`slide_custom`'s `steel` bucket).
 //!
-//! **Re-verified with `tests/geometry_assert::assert_triangle_soup_matches`**,
-//! the weld/order-invariant comparison used elsewhere in this suite
-//! (`weapons_geometry_primitives_port.rs`, `weapons_parts_hardware_port.rs`,
-//! `weapons_parts_magazine_port.rs`, `weapons_parts_controls_port.rs`). Run at
-//! `TOL` (1e-5) against every affected bucket:
+//! **History, and why the numbers below changed.** The buckets in this file
+//! were originally all held to topology-only checking (triangle count exact,
+//! vertex-count delta bounded, no position/normal/uv comparison at all), then
+//! re-verified with `tests/geometry_assert::assert_triangle_soup_matches` — a
+//! weld/order-invariant comparison used elsewhere in this suite. That
+//! helper's FIRST version sorted triangles on a coarse (5mm) per-field grid,
+//! which (per that module's doc) mispairs sub-5mm repeated features against
+//! their neighbours; run against this file's seven case+bucket pairs it
+//! reported "worst deviations" up to `2.0` in a normal component (two fully
+//! opposite-facing triangles matched to each other) — an obviously wrong
+//! reading given every bucket's triangle *count* already matched exactly.
 //!
-//! | bucket | worst deviation | field | affected triangles |
+//! **Re-measured with the fixed, centroid-keyed comparator** (used below via
+//! [`assert_bucket_soup_matches`]/[`assert_bucket_soup_matches_uv`]):
+//!
+//! | bucket | worst pos/normal | worst uv | verdict |
 //! |---|---|---|---|
-//! | `optic_custom.alu` | `2.0` | `normal.z` | 31 of 6408 (0.48%) |
-//! | `mini_reflex_default.alu` | `0.018726` | `uv.u` | not counted; same class as below |
-//! | `mini_reflex_default.glass` | `0.015833` | `uv.u` | not counted; same class as below |
-//! | `mini_reflex_custom.alu` | `0.036448` | `uv.u` | not counted; same class as below |
-//! | `mini_reflex_custom.glass` | `0.018613` | `uv.u` | not counted; same class as below |
-//! | `slide_default.steel` | `2.0` | `normal.z` | 98 of 2444 (4.0%) |
-//! | `slide_custom.steel` | `2.0` | `normal.x` | 9 of 2444 (0.37%) |
+//! | `optic_default.*` | exact | exact | full comparison (was already exact) |
+//! | `optic_custom.alu` | passes at `TOL` | passes at `TOL` | **promoted to full comparison** |
+//! | `mini_reflex_default.alu` | passes at `TOL` | `0.018726` | pos/normal exact; genuine `uv` residual |
+//! | `mini_reflex_default.glass` | passes at `TOL` | (not the worst; same class) | pos/normal exact; genuine `uv` residual |
+//! | `mini_reflex_custom.alu` | passes at `TOL` | `0.021506` | pos/normal exact; genuine `uv` residual |
+//! | `mini_reflex_custom.glass` | passes at `TOL` | (not the worst; same class) | pos/normal exact; genuine `uv` residual |
+//! | `slide_default.steel` | `1.0` (8 of 2604 tris, 0.31%) | n/a | **stays topology-only** |
+//! | `slide_custom.steel` | `1.0` (same 8 triangle indices) | n/a | **stays topology-only** |
 //!
-//! Two distinct, already-diagnosed mechanisms, not two new bugs:
+//! Two distinct findings, not one:
 //!
-//! - The four `mini_reflex_*` buckets are dominated by `uv`, matching
-//!   `weapons_parts_magazine_port.rs`'s documented `WorldUVGenerator`
-//!   projection-axis tie (a discrete `<` between two side-length magnitudes
-//!   that a sub-tolerance position difference can flip) — not a shape defect.
-//! - `optic_custom.alu`/`slide_default.steel`/`slide_custom.steel` show a
-//!   worst *normal* deviation of exactly `2.0` (fully opposite unit vectors)
-//!   at a small, localized fraction of triangles (`0.37%`-`4.0%`, tabulated
-//!   above — never the bulk of the mesh). Dumping the offending triangles
-//!   (a scratch check, not committed) shows the same local pattern
-//!   `weapons_parts_controls_port.rs`'s module doc diagnoses: at a hard edge
-//!   with several thin triangles sharing near-identical anchor corners (here,
-//!   `slide_default`'s 12 serration teeth are exactly this shape — many
-//!   near-duplicate thin triangles fanned around a shared edge), a
-//!   sub-tolerance weld-tie flip pairs a triangle with its neighbor across
-//!   the fan instead of its true correspondent, and that neighbor can easily
-//!   face the opposite way. `slide_default` (12 teeth, more fan opportunities)
-//!   measures the largest affected fraction of the three, consistent with
-//!   that explanation. `assert_bucket_topology_matches` remains the correct
-//!   assertion for all seven buckets.
+//! - `optic_custom.alu` and all four `mini_reflex_*` position/normal figures
+//!   turn out to have no residual at all — the old `2.0`/large readings were
+//!   entirely comparator mispairing. `mini_reflex_*`'s `uv` is the one
+//!   exception: a genuine, small `extrude()` projection-axis tie (the
+//!   already-documented mechanism from `weapons_parts_magazine_port.rs`'s
+//!   module doc: the projection axis is picked via a discrete `<` between two
+//!   side-length magnitudes, so a sub-tolerance position difference can flip
+//!   it and produce a large `uv` difference on an otherwise perfectly correct
+//!   triangle). Held to [`MINI_REFLEX_UV_TOL`] via
+//!   [`assert_bucket_soup_matches_uv`], with position/normal still at `TOL`.
+//! - `slide_default`/`slide_custom`'s `steel` bucket has a real, reproducible
+//!   (same 8 of 2604/2664 triangle indices, both dimension sets) `normal`
+//!   residual that survives the fixed comparator, traced directly (dumping
+//!   the actual matched triangle pairs) to **degenerate triangles in the
+//!   golden itself**: at these 8 correspondences the golden's three corners
+//!   are exactly collinear (zero-area, hence a computed `[0, 0, 0]` normal —
+//!   `three.js`'s own `computeVertexNormals` on a near-zero-area sliver at a
+//!   serration-tooth seam), while this port's independently-triangulated
+//!   version of the same seam produces a real, non-degenerate, correctly
+//!   oriented triangle there. A `[0,0,0]`-vs-unit-normal comparison reports a
+//!   deviation of exactly `1.0` (or `0.7071...` for a 45°-oriented tooth
+//!   face) — not evidence of a wrong orientation, but of comparing against an
+//!   ill-defined golden normal that cannot be matched by *any* correctly
+//!   oriented triangle. `assert_bucket_topology_matches` remains the correct
+//!   assertion for just these two buckets — position/normal genuinely cannot
+//!   be compared meaningfully at these 8 triangles without either widening
+//!   the tolerance to the point of hiding a real defect elsewhere, or
+//!   special-casing 8 specific triangle indices, which would be fitting the
+//!   test to the implementation rather than verifying it.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use serde_json::Value;
+
+mod geometry_assert;
+use geometry_assert::{assert_triangle_soup_matches, assert_triangle_soup_matches_uv};
 
 use axiom_claude_of_duty::weapons::geometry::{Assembly, Geo};
 use axiom_claude_of_duty::weapons::parts::optics::{
@@ -76,6 +91,13 @@ use axiom_claude_of_duty::weapons::parts::optics::{
 };
 
 const TOL: f64 = 1e-5;
+/// `uv` tolerance for `mini_reflex_*`'s `alu`/`glass` buckets — the genuine
+/// residual left after re-measuring with the fixed comparator (see the
+/// module doc): a real `extrude()` projection-axis tie, measured up to
+/// `0.0215...`. `0.05` keeps comfortable headroom above that without
+/// approaching the `~0.5` a genuinely wrong (not just axis-flipped) uv would
+/// produce.
+const MINI_REFLEX_UV_TOL: f64 = 0.05;
 
 fn golden() -> &'static Value {
     static G: OnceLock<Value> = OnceLock::new();
@@ -121,21 +143,49 @@ fn assert_bucket_matches(name: &str, built: &BTreeMap<String, Geo>, case: &str, 
     assert_geo_matches(&format!("{name}.{mat}"), g, &golden()[case]["buckets"][mat]);
 }
 
-/// The weaker check for the handful of buckets that hit the documented
-/// `extrude()`+`round_rect()` (or a hand-authored contour with a near-parallel
-/// corner) tangent-junction residual: `round_rect`'s corners are built so an
-/// arc meets its adjacent straight edge at an exact tangent, which makes
-/// `get_bevel_vec`'s cross-product denominator near zero at that vertex.
-/// Rust's `f64::sin`/`f64::cos` differ from V8's by up to one ULP, and
-/// divided by a near-zero denominator that ULP-level noise can still tip a
-/// welded vertex just past `weld_vertices`'s `1e-6` quantization grid —
-/// changing the merged **vertex count** without changing the shape. This is
-/// the exact mechanism `weapons_geometry_primitives_port.rs`'s
-/// `assert_geo_topology_matches` documents and already accepts for
-/// `extrude_normal`/`picatinny_normal`/`mlok_slot_normal`; it now also shows
-/// up at the part level, because `buildOptic`/`buildMiniReflex`/`buildSlide`
-/// each merge one or more `extrude(round_rect(...))` calls into a bucket with
-/// several other primitives.
+/// The weld-invariant, full-fidelity comparison (see `geometry_assert`'s
+/// module doc), used instead of [`assert_bucket_topology_matches`] wherever
+/// re-measuring with the fixed centroid-keyed comparator shows the bucket
+/// actually passes at `TOL` — i.e. the topology-only concession was covering
+/// for a mispairing in the OLD, coarse-grid comparator, not a real residual.
+fn assert_bucket_soup_matches(name: &str, built: &BTreeMap<String, Geo>, case: &str, mat: &str) {
+    let g = built
+        .get(mat)
+        .unwrap_or_else(|| panic!("{name}: bucket {mat:?} missing from build() output"));
+    assert_triangle_soup_matches(&format!("{name}.{mat}"), g, &golden()[case]["buckets"][mat], TOL);
+}
+
+/// Same as [`assert_bucket_soup_matches`], but with `uv` held to a wider,
+/// per-call-site tolerance — for buckets where re-measuring found position
+/// and normal fully within `TOL` but a genuine `uv` projection-axis-tie
+/// residual (see `weapons_parts_magazine_port.rs`'s module doc for the
+/// mechanism).
+fn assert_bucket_soup_matches_uv(name: &str, built: &BTreeMap<String, Geo>, case: &str, mat: &str, uv_tol: f64) {
+    let g = built
+        .get(mat)
+        .unwrap_or_else(|| panic!("{name}: bucket {mat:?} missing from build() output"));
+    assert_triangle_soup_matches_uv(&format!("{name}.{mat}"), g, &golden()[case]["buckets"][mat], TOL, uv_tol);
+}
+
+/// The remaining topology-only check, now used for exactly two buckets:
+/// `slide_default`/`slide_custom`'s `steel` bucket. Re-measuring with the
+/// fixed, centroid-keyed `assert_triangle_soup_matches` (see the module doc)
+/// found this is **not** the `extrude()`+`round_rect()` tangent-junction libm
+/// residual the other buckets in this file turned out not to have either —
+/// it is a different, smaller, and differently-caused effect: at 8 of this
+/// bucket's ~2600 triangles (a serration-tooth seam), the *golden* JS mesh's
+/// three corners are exactly collinear, so `three.js`'s own normal
+/// computation produces a degenerate `[0, 0, 0]` normal there, while this
+/// port's independently-triangulated version of the same seam produces a
+/// real, correctly oriented, non-degenerate triangle. Comparing a real unit
+/// normal against `[0, 0, 0]` reports a deviation of exactly `1.0` (or
+/// `0.7071...` for the tooth faces angled at 45°) regardless of whether the
+/// real triangle's orientation is right — there is no tolerance that makes
+/// that comparison meaningful, since the golden value itself carries no
+/// orientation information at those 8 triangles. Position and every other
+/// triangle in the bucket match fully (verified directly, not assumed); only
+/// these 8 (0.3% of the bucket, same triangle indices at both dimension
+/// sets) fall back to topology-only.
 ///
 /// What stays exact: [`Geo::tri_count`] — earcut's triangulation of the
 /// un-bevelled contour never goes through the amplifying division. What is
@@ -227,11 +277,13 @@ fn build_optic_matches_the_source_with_custom_dimensions_and_offsets() {
     );
     let built = asm.build();
     // `alu` (tube + hood + dial + dial-knurl + turret + mount base + clamp
-    // rings + clamp bar, all merged and welded together) measures a delta of
-    // 4 vertices out of 8488 — the mount base's contour hits the
-    // tangent-junction tie-break at this particular `mountH`, where the
-    // default case's `mountH` does not. Every other bucket matches exactly.
-    assert_bucket_topology_matches("optic_custom", &built, "optic_custom", "alu", 4);
+    // rings + clamp bar, all merged and welded together) welds to a vertex
+    // count off by a handful from the golden's (the mount base's contour
+    // hits the tangent-junction tie-break at this particular `mountH`, where
+    // the default case's `mountH` does not) — but the weld-invariant
+    // triangle-soup comparison shows that never mattered: this bucket
+    // matches the golden fully, position/normal/uv alike, at `TOL`.
+    assert_bucket_soup_matches("optic_custom", &built, "optic_custom", "alu");
     ["optic_tube", "glass", "lens_ring", "lens_vig", "cavity", "steel", "rubber"]
         .iter()
         .for_each(|mat| assert_bucket_matches("optic_custom", &built, "optic_custom", mat));
@@ -251,17 +303,15 @@ fn build_mini_reflex_matches_the_source_with_default_dimensions() {
     let mut asm = Assembly::new("miniReflexDefault");
     let r = build_mini_reflex(&mut asm, MiniReflexOpts::default());
     let built = asm.build();
-    // `alu` (base plate + both side walls + hood + emitter, merged) measures
-    // a delta of 10 out of 1244 vertices: the base plate's `round_rect`
-    // extrude hits the tangent-junction tie-break.
-    assert_bucket_topology_matches("mini_reflex_default", &built, "mini_reflex_default", "alu", 10);
-    // `glass` (the canted window pane alone — a single `extrude(round_rect(...))`
-    // call, no merge partner) measures a delta of 32 out of 272 vertices: a
-    // small, entirely-tangent-corner-bounded shape, so a larger fraction of
-    // its vertices sit at the exact junctions the residual affects than in a
-    // bigger merged bucket — the same mechanism as `extrude_normal` in
-    // `weapons_geometry_primitives_port.rs`, just measured larger here.
-    assert_bucket_topology_matches("mini_reflex_default", &built, "mini_reflex_default", "glass", 32);
+    // `alu` (base plate + both side walls + hood + emitter, merged) and
+    // `glass` (the canted window pane alone, a single `extrude(round_rect(...))`
+    // call) both weld to a vertex count off by a handful from the golden's —
+    // but position and normal match fully at `TOL` once compared
+    // weld-invariantly; only `uv` carries a genuine residual (the
+    // `extrude()` projection-axis tie, see the module doc), held to
+    // `MINI_REFLEX_UV_TOL`.
+    assert_bucket_soup_matches_uv("mini_reflex_default", &built, "mini_reflex_default", "alu", MINI_REFLEX_UV_TOL);
+    assert_bucket_soup_matches_uv("mini_reflex_default", &built, "mini_reflex_default", "glass", MINI_REFLEX_UV_TOL);
     ["steel_bright", "steel"]
         .iter()
         .for_each(|mat| assert_bucket_matches("mini_reflex_default", &built, "mini_reflex_default", mat));
@@ -289,16 +339,10 @@ fn build_mini_reflex_matches_the_source_with_custom_dimensions() {
         },
     );
     let built = asm.build();
-    // `alu` measures a delta of 14 out of 1218 vertices — same
-    // tangent-junction mechanism as the default case, a different `mountH`-
-    // equivalent set of corner values.
-    assert_bucket_topology_matches("mini_reflex_custom", &built, "mini_reflex_custom", "alu", 14);
-    // `glass` lands on the *same total* welded vertex count here (0 delta),
-    // but the tie-break still swaps which of two near-duplicate vertices
-    // survives the weld at one tangent junction — same mechanism, this time
-    // visible as one surviving vertex's UV differing by `2.4e-3` rather than
-    // as a count mismatch. Topology-only for the same documented reason.
-    assert_bucket_topology_matches("mini_reflex_custom", &built, "mini_reflex_custom", "glass", 0);
+    // Same as the default case (see above): position/normal match fully at
+    // `TOL`, `uv` carries the genuine projection-axis-tie residual.
+    assert_bucket_soup_matches_uv("mini_reflex_custom", &built, "mini_reflex_custom", "alu", MINI_REFLEX_UV_TOL);
+    assert_bucket_soup_matches_uv("mini_reflex_custom", &built, "mini_reflex_custom", "glass", MINI_REFLEX_UV_TOL);
     ["steel_bright", "steel"]
         .iter()
         .for_each(|mat| assert_bucket_matches("mini_reflex_custom", &built, "mini_reflex_custom", mat));
@@ -320,11 +364,12 @@ fn build_slide_matches_the_source_with_default_dimensions() {
     let r = build_slide(&mut asm, SlideOpts::default());
     let built = asm.build();
     // `steel` (body + rib + nose + 12 serration teeth + both lightening cuts
-    // + the ejection-port lip, merged) measures a delta of 44 out of 2604
-    // vertices: the lightening cuts and the port lip both extrude a
-    // `round_rect` contour, so this bucket carries more tangent-junction
-    // corners than `buildOptic`/`buildMiniReflex`'s single-`round_rect`
-    // buckets do.
+    // + the ejection-port lip, merged) welds to a vertex count off by 44 out
+    // of 2604 from the golden's. Re-measured weld-invariantly: the shape is
+    // fully correct except at 8 triangles (0.3%) where the golden itself
+    // carries a degenerate, zero-area (hence `[0,0,0]`-normal) triangle at a
+    // serration seam — see [`assert_bucket_topology_matches`]'s doc for the
+    // full diagnosis. Stays topology-only.
     assert_bucket_topology_matches("slide_default", &built, "slide_default", "steel", 44);
     ["cavity", "steel_bright"]
         .iter()
@@ -351,9 +396,10 @@ fn build_slide_matches_the_source_with_custom_dimensions() {
         },
     );
     let built = asm.build();
-    // Same bucket, different dimensions: a delta of 16 out of 2664 vertices —
-    // smaller than the default case's, because a different subset of corner
-    // junctions land on the tie-break at this aspect ratio.
+    // Same bucket, different dimensions: welds to a vertex count off by 16 of
+    // 2664. Re-measured weld-invariantly: the same 8 triangle indices as
+    // `slide_default` (same serration geometry) hit the golden's degenerate
+    // zero-normal triangle — see [`assert_bucket_topology_matches`]'s doc.
     assert_bucket_topology_matches("slide_custom", &built, "slide_custom", "steel", 16);
     ["cavity", "steel_bright"]
         .iter()
