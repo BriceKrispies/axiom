@@ -161,7 +161,14 @@ pub fn picatinny(len: f32, opts: PicatinnyOpts) -> Geo {
     xform::translate(&mut base, 0.0, base_h / 2.0, 0.0);
     parts.push(base);
 
-    let profile = [
+    // `f64` per `03-weapon-geometry-api.md`'s "Corrections" section: this
+    // tooth profile is mirror-symmetric about `x = 0`, exactly the shape
+    // `extrude`'s module doc shows amplifies `f32` contour-point rounding
+    // through `get_bevel_vec`'s division. Widening each `f32` opt field here
+    // (rather than after the subtraction) matches what the source actually
+    // computes with — JS numbers are `f64` throughout.
+    let (waist, width, top_h, ch) = (f64::from(waist), f64::from(width), f64::from(top_h), f64::from(ch));
+    let profile: [[f64; 2]; 6] = [
         [-waist / 2.0, 0.0],
         [-width / 2.0, top_h - ch],
         [-width / 2.0 + ch, top_h],
@@ -197,7 +204,7 @@ pub fn picatinny(len: f32, opts: PicatinnyOpts) -> Geo {
 /// `0.0022` (`geometry.js:350`).
 pub fn mlok_slot(len: f32, wide: f32, depth: f32) -> Geo {
     let outer = extrude(
-        &round_rect(len, wide + 0.0028, 0.0014, 3),
+        &round_rect(f64::from(len), f64::from(wide) + 0.0028, 0.0014, 3),
         0.0016,
         ExtrudeOpts {
             bevel: 0.0004,
@@ -205,7 +212,7 @@ pub fn mlok_slot(len: f32, wide: f32, depth: f32) -> Geo {
         },
     );
     let mut inner = extrude(
-        &round_rect(len - 0.0016, wide, 0.0012, 3),
+        &round_rect(f64::from(len) - 0.0016, f64::from(wide), 0.0012, 3),
         depth,
         ExtrudeOpts {
             bevel: 0.0003,

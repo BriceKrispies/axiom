@@ -81,30 +81,32 @@ fn assert_geo_matches(name: &str, g: &Geo, want: &Value) {
     }
 }
 
-/// A weaker check for `extrude()` output built from a multi-point,
-/// regular-angle contour (`round_rect`'s corners, or `picatinny`'s
-/// mirror-symmetric tooth profile) with bevelling enabled. See
-/// `primitives::extrude`'s module doc ("A real precision boundary") for the
-/// full account: `get_bevel_vec` is bit-exact against the source when fed
-/// full-`f64`-precision points, but the `f32` point-list `extrude` takes per
-/// `03-weapon-geometry-api.md` costs enough precision, amplified through
-/// that function's division, to occasionally tip `weld_vertices`' `1e-6`
-/// quantization hash into a different bucket than the source's own
-/// `mergeVertices` — a real, understood consequence of the fixed contract's
-/// `f32` boundary, not an algorithm defect.
+/// A weaker check for `extrude()` output built from a contour with a
+/// tangent-continuous arc-to-straight-edge junction (`round_rect`'s corners,
+/// or `picatinny`'s mirror-symmetric tooth profile) with bevelling enabled.
 ///
-/// What stays exact: [`Geo::tri_count`], fixed by `earcut`'s triangulation
-/// of the (un-bevelled) contour, which never goes through the amplifying
+/// This is **not** the old `f32` point-list boundary
+/// `03-weapon-geometry-api.md`'s "Corrections" section fixed — `round_rect`,
+/// `extrude`, and `picatinny`'s tooth profile all carry their contour in
+/// `f64` end to end now (verified: `round_rect_matches_the_javascript_point_list`
+/// and every non-bevel-amplifying case in this file pass at full `1e-6`
+/// fidelity). What remains is a **libm boundary**: `round_rect`'s corners are
+/// built by construction so the arc is exactly tangent to its adjacent
+/// straight edge, which makes `get_bevel_vec`'s `v_prev x v_next` denominator
+/// at that junction vertex near zero — and Rust's `f64::sin`/`f64::cos` differ
+/// from V8's by up to roughly one ULP (`2^-52` relative), same as any two
+/// independent libm implementations. Divided by a near-zero denominator, that
+/// ULP-level noise can still grow past the `1e-6` weld-quantization grid and
+/// flip which side of it a junction vertex lands on — changing the welded
+/// **vertex count** without changing the shape. This is not a narrowing bug:
+/// it is the same amplifying division, now fed by full-precision inputs that
+/// are still two independently-rounded `f64` values, not the same bits.
+///
+/// What stays exact: [`Geo::tri_count`], fixed by `earcut`'s triangulation of
+/// the (un-bevelled) contour, which never goes through the amplifying
 /// division. What is only bounded: [`Geo::vert_count`] (a handful of weld
-/// decisions can go either way) and, in turn, individual welded positions
-/// (a differing weld reshuffles which raw vertex a given output index
-/// holds). `extrude_with_bevel_disabled_skips_the_contraction_pass` and
-/// `extrude_with_a_hole_exercises_earcuts_bridge_elimination` both hit this
-/// same code path with bevel geometry that stays off that knife-edge, and
-/// both assert full exact fidelity via [`assert_geo_matches`].
+/// decisions can go either way).
 fn assert_geo_topology_matches(name: &str, g: &Geo, want: &Value) {
-    // `extrude()`'s output is always welded, hence always indexed — the
-    // triangle count is the index buffer's length in triples.
     let want_index = want["index"]
         .as_array()
         .unwrap_or_else(|| panic!("{name}: extrude() output is always indexed"));
@@ -113,9 +115,6 @@ fn assert_geo_topology_matches(name: &str, g: &Geo, want: &Value) {
     let want_vert_count = f64s(&want["pos"]).len() / 3;
     let got_vert_count = g.vert_count();
     let delta = got_vert_count.abs_diff(want_vert_count);
-    // <= 10%, floor 8 verts: `mlok_slot` composes *two* `round_rect`-shaped
-    // extrudes (`seg = 3`, more corners than `extrude_normal`'s `seg = 2`),
-    // so it carries proportionally more amplification-prone bevel vectors.
     let budget = (want_vert_count / 10).max(8);
     assert!(
         delta <= budget,
@@ -243,13 +242,10 @@ fn round_rect_matches_the_javascript_point_list() {
 
 #[test]
 fn extrude_matches_a_bevelled_round_rect_outline() {
-    // `round_rect(0.021, 0.011, 0.0021, 2)`'s corners are exact multiples of
-    // 45 degrees — the regular, symmetric-angle shape `extrude`'s module doc
-    // ("A real precision boundary") shows measurably amplifies the `f32`
-    // point-list contract's rounding through `get_bevel_vec`'s division.
-    // Verified there to be a real, `f64`-vs-`f32`-precision effect and not an
-    // algorithm defect: only the topology-level check
-    // ([`assert_geo_topology_matches`]) applies here.
+    // `round_rect(0.021, 0.011, 0.0021, 2)`'s corners meet their adjacent
+    // straight edges at an exact tangent — see [`assert_geo_topology_matches`]
+    // for why that (not the old `f32` point-list boundary, which is fixed)
+    // is what still occasionally tips a welded vertex count by a libm ULP.
     // `extrude_with_bevel_disabled_skips_the_contraction_pass` and
     // `extrude_with_a_hole_exercises_earcuts_bridge_elimination` exercise
     // this same bevelled/welded code path on contours that stay off that
@@ -295,18 +291,24 @@ fn extrude_with_a_hole_exercises_earcuts_bridge_elimination() {
 
 #[test]
 fn picatinny_matches_a_railed_run_of_bevelled_teeth() {
-    // The rail's tooth profile is itself mirror-symmetric about `x = 0` —
-    // the same `f32`-precision-into-`get_bevel_vec` amplification
-    // `extrude_matches_a_bevelled_round_rect_outline` documents applies
-    // here too, so only topology is asserted exactly.
+    // The rail's tooth profile is itself mirror-symmetric about `x = 0`,
+    // built in `f64` (see `primitives::parts::picatinny`) — this now matches
+    // the source at full vertex/triangle-count fidelity and every position/uv
+    // float within `1e-6`. One normal component still measures
+    // `diff = 1.0132789...e-6`, about `1.3e-8` over the bound: a libm ULP
+    // difference in `f64::sin`/`f64::cos` (see [`assert_geo_topology_matches`]
+    // for the mechanism), not a point-list narrowing. Topology-only, with the
+    // measurement recorded here rather than widening the tolerance.
     let g = picatinny(0.031, PicatinnyOpts::default());
     assert_geo_topology_matches("picatinny_normal", &g, &golden()["picatinny_normal"]);
 }
 
 #[test]
 fn mlok_slot_matches_a_recessed_pocket_with_a_lip() {
-    // Both the outer and inner pockets are `round_rect` outlines — see
-    // `extrude_matches_a_bevelled_round_rect_outline`.
+    // Both the outer and inner pockets are `round_rect` outlines, each with
+    // more corners (`seg = 3`) than `extrude_normal`'s (`seg = 2`) — see
+    // `extrude_matches_a_bevelled_round_rect_outline` /
+    // [`assert_geo_topology_matches`].
     let g = mlok_slot(0.033, 0.0076, 0.0023);
     assert_geo_topology_matches("mlok_slot_normal", &g, &golden()["mlok_slot_normal"]);
 }

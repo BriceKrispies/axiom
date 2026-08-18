@@ -17,41 +17,51 @@
 //! stays in [`ExtrudeOpts`] purely for signature fidelity with the source's
 //! options object; it has no effect here.
 //!
-//! ## A real precision boundary: `f32` points into a division-heavy bevel
+//! ## A real precision boundary, mostly fixed: `f32` points into a
+//! division-heavy bevel
 //!
 //! `get_bevel_vec` (`ExtrudeGeometry.js:234-355`) is provably a bit-exact
-//! port: fed the *same* full-`f64`-precision coordinates the JavaScript
-//! computes internally (`03-weapon-geometry-api.md`'s contract fixes `pts`
-//! at `&[[f32; 2]]`, but a corner computed and kept in `f64` reproduces the
-//! source's `getBevelVec` output to the last bit — verified against
-//! `roundRect(0.021, 0.011, 0.0021, 2)`'s twelve corners). The divergence
-//! that remains at the contract's actual `f32` boundary is not an algorithm
-//! bug; it is that boundary. `round_rect` (and every other `pts: &[[f32;
-//! 2]]` producer) truncates to `f32` — about 7 significant decimal digits —
-//! *before* `extrude` widens back to `f64`, where the JavaScript keeps its
-//! `roundRect`/`Shape.moveTo`/`lineTo` coordinates as plain (`f64`) numbers
-//! all the way through. `get_bevel_vec`'s shift-and-intersect construction
-//! divides by `v_prev_x*v_next_y - v_prev_y*v_next_x`
-//! (`ExtrudeGeometry.js:279`) — small for the shallow per-corner turns a
-//! multi-point rounded outline takes — which amplifies that `f32`-rounding
-//! noise from ~`1e-7` relative up past `1e-6` absolute in the emitted bevel
-//! vector, on inputs shaped exactly like `round_rect`'s regular,
-//! symmetric-angle corners.
+//! port: fed the *same* coordinates the JavaScript computes internally, a
+//! corner reproduces the source's `getBevelVec` output to the last bit. An
+//! earlier version of this contract fixed `pts` at `&[[f32; 2]]`, and
+//! `round_rect` (and every other contour producer) truncated to `f32` —
+//! about 7 significant decimal digits — *before* `extrude` widened back to
+//! `f64`, where the JavaScript keeps its `roundRect`/`Shape.moveTo`/`lineTo`
+//! coordinates as plain (`f64`) numbers all the way through. `get_bevel_vec`'s
+//! shift-and-intersect construction divides by
+//! `v_prev_x*v_next_y - v_prev_y*v_next_x` (`ExtrudeGeometry.js:279`) — near
+//! zero at a junction where an arc meets a straight edge it is exactly
+//! tangent to (`round_rect`'s corners are built to be exactly that) — which
+//! amplified that `f32`-rounding noise from ~`1e-7` relative up past `1e-6`
+//! absolute in the emitted bevel vector, on inputs shaped exactly like
+//! `round_rect`'s regular, tangent-continuous corners.
 //!
-//! That, in turn, can tip [`weld_vertices`]' `1e-6` quantization hash to a
-//! different bucket than the source's own `mergeVertices` — the same
-//! coordinate, differing by roughly the size of the grid it is being
-//! snapped to. The **triangle count** (`Geo::tri_count`) is unaffected — it
+//! `03-weapon-geometry-api.md`'s "Corrections to this contract" section
+//! fixes this at the boundary rather than widening the tolerance: `pts`,
+//! `ExtrudeOpts::holes`, and `round_rect`'s signature are all `f64` now, so
+//! no contour value ever round-trips through an `f32` narrowing between
+//! being computed and being fed to `get_bevel_vec`'s division. The
+//! **triangle count** (`Geo::tri_count`) was never affected either way — it
 //! is fixed by `earcut`'s triangulation of `contour`/`holes`, which does not
-//! go through this division, and is asserted exactly in
-//! `tests/weapons_geometry_primitives_port.rs` for every case including
-//! `round_rect`-shaped ones. The **welded vertex count** is asserted exactly
-//! only for contours that keep the resulting bevel vectors away from a hash
-//! boundary (a bevel-disabled extrude, or a hole) — see that test file's
-//! `extrude_matches_a_bevelled_round_rect_outline`,
-//! `picatinny_matches_a_railed_run_of_bevelled_teeth`, and
-//! `mlok_slot_matches_a_recessed_pocket_with_a_lip` for the exact tolerance
-//! this boundary earns each of them.
+//! go through this division.
+//!
+//! ## A smaller residual that is *not* a narrowing bug: independent libm
+//!
+//! Even at full `f64`, `round_rect`'s corners come from `f64::sin`/`f64::cos`
+//! — a different libm than V8's, which can (and measurably does, for the
+//! `round_rect`/`picatinny`-shaped goldens) differ by roughly one ULP
+//! (`2^-52` relative). Divided by the same near-zero tangent-junction
+//! denominator above, that ULP-level noise is still enough, on some inputs,
+//! to tip [`weld_vertices`]'s `1e-6` quantization hash to a different bucket
+//! than the source's own `mergeVertices`, or (when it doesn't change which
+//! bucket a vertex lands in) to land a retained normal component just past
+//! the `1e-6` tolerance. `tests/weapons_geometry_primitives_port.rs`'s
+//! `assert_geo_topology_matches` documents the exact measurements for the
+//! three goldens this still affects (`extrude_normal`, `picatinny_normal`,
+//! `mlok_slot_normal`) — this is the honest floor: the algorithm is a
+//! faithful port (verified bit-exact when both sides start from identical
+//! coordinates), and no amount of additional precision closes a gap that
+//! originates in two independent transcendental-function implementations.
 
 use super::earcut;
 use super::xform;
@@ -66,7 +76,7 @@ pub struct ExtrudeOpts {
     pub bevel_segments: u32,
     pub curve_segments: u32,
     pub steps: u32,
-    pub holes: Vec<Vec<[f32; 2]>>,
+    pub holes: Vec<Vec<[f64; 2]>>,
 }
 
 impl Default for ExtrudeOpts {
@@ -83,17 +93,17 @@ impl Default for ExtrudeOpts {
 
 /// Extrude a 2-D outline (in XY) along Z with a real bevel on both faces.
 /// `pts` is closed automatically (as `THREE.Shape.closePath()` would close
-/// it — see module docs for why that step is a no-op here).
-pub fn extrude(pts: &[[f32; 2]], depth: f32, opts: ExtrudeOpts) -> Geo {
+/// it — see module docs for why that step is a no-op here). `pts` and
+/// `opts.holes` are `f64` — see the module doc's "A real precision
+/// boundary" section: this is a contour that feeds `get_bevel_vec`'s
+/// division, and JS numbers (what the source actually computes with) are
+/// `f64` throughout.
+pub fn extrude(pts: &[[f64; 2]], depth: f32, opts: ExtrudeOpts) -> Geo {
     let bevel = opts.bevel;
     let bevel_enabled = bevel > 1e-6;
 
-    let contour: Vec<(f64, f64)> = pts.iter().map(|p| (f64::from(p[0]), f64::from(p[1]))).collect();
-    let holes: Vec<Vec<(f64, f64)>> = opts
-        .holes
-        .iter()
-        .map(|h| h.iter().map(|p| (f64::from(p[0]), f64::from(p[1]))).collect())
-        .collect();
+    let contour: Vec<(f64, f64)> = pts.iter().map(|p| (p[0], p[1])).collect();
+    let holes: Vec<Vec<(f64, f64)>> = opts.holes.iter().map(|h| h.iter().map(|p| (p[0], p[1])).collect()).collect();
 
     let depth_adjusted = (f64::from(depth) - f64::from(bevel) * 2.0).max(1e-4);
 
@@ -138,13 +148,17 @@ pub fn extrude(pts: &[[f32; 2]], depth: f32, opts: ExtrudeOpts) -> Geo {
 /// point list — `roundRect` builds an outline, not a mesh, in the source
 /// (`geometry.js:188-205`) exactly as its name says. A `Geo`-returning
 /// `round_rect` cannot be `extrude`'s first argument and cannot compile
-/// against its only call site, so this returns `Vec<[f32; 2]>`, matching
+/// against its only call site, so this returns `Vec<[f64; 2]>`, matching
 /// both the source semantics and `extrude`'s actual signature. Noted in
 /// `docs/work-manifests/claude-of-duty-port/notes/weapons-geometry-primitives.md`.
-pub fn round_rect(w: f32, h: f32, r: f32, seg: u32) -> Vec<[f32; 2]> {
-    let hw = f64::from(w) / 2.0 - f64::from(r);
-    let hh = f64::from(h) / 2.0 - f64::from(r);
-    let r = f64::from(r);
+///
+/// `w`/`h`/`r` are `f64`, not `f32`, per `03-weapon-geometry-api.md`'s
+/// "Corrections" section: this is a contour producer whose output feeds
+/// `extrude`'s division-heavy bevel path, so it stays full-precision from
+/// its own inputs onward — never narrowed to `f32` and then widened back.
+pub fn round_rect(w: f64, h: f64, r: f64, seg: u32) -> Vec<[f64; 2]> {
+    let hw = w / 2.0 - r;
+    let hh = h / 2.0 - r;
     let corners = [
         (hw, hh, 0.0),
         (-hw, hh, std::f64::consts::FRAC_PI_2),
@@ -155,7 +169,7 @@ pub fn round_rect(w: f32, h: f32, r: f32, seg: u32) -> Vec<[f32; 2]> {
     corners.iter().for_each(|&(cx, cy, a0)| {
         (0..=seg).for_each(|i| {
             let a = a0 + (f64::from(i) / f64::from(seg)) * std::f64::consts::FRAC_PI_2;
-            pts.push([(cx + a.cos() * r) as f32, (cy + a.sin() * r) as f32]);
+            pts.push([cx + a.cos() * r, cy + a.sin() * r]);
         });
     });
     pts

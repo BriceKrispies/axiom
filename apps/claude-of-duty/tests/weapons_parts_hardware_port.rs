@@ -19,13 +19,16 @@
 //! bottoms out in `lathe_z`/`dome`/`ring`/`screw`/`picatinny`, all of which
 //! run through `sin`/`cos`, not bit-guaranteed between V8's libm and Rust's.
 //! `add_rail`'s `picatinny()`-derived buckets are the one exception: they go
-//! through `assert_bucket_topology_matches` (triangle count exact, vertex
-//! count bounded), the same weaker check
-//! `weapons_geometry_primitives_port.rs` uses for `picatinny`/`mlok_slot` —
-//! seeing this once through `Assembly::build`'s extra weld pass amplifies
-//! the same documented `f32` point-list precision boundary
-//! (`03-weapon-geometry-api.md`'s "Corrections" section) enough to occasionally
-//! tip a normal past `1e-6`.
+//! through `assert_bucket_topology_matches`, which asserts triangle count
+//! exactly and then — depending on whether the vertex count matches, since
+//! `picatinny()`'s contour is welded once inside itself and a second time by
+//! `Assembly::build` — either compares positions/normals at the wider
+//! `1e-5` `MERGED_TOL` (compounding rounding across two weld passes, real
+//! and measured in `861e3cdb`) or, when even the vertex count doesn't match,
+//! bounds only that delta. See `assert_bucket_topology_matches`'s doc for why
+//! this is no longer the old `f32` point-list boundary
+//! (`03-weapon-geometry-api.md`'s "Corrections" section fixed that) but an
+//! independent-libm residual `primitives::extrude`'s module doc documents.
 //!
 //! **Axis branches.** `add_screw` and `add_qd_socket` each take a
 //! [`MountAxis`] with three variants (`X`/`Y`/`Z`) that resolve to
@@ -46,6 +49,16 @@ use axiom_claude_of_duty::weapons::parts::hardware::{
 
 const TOL: f64 = 1e-6;
 
+/// Wider tolerance for a rail bucket's position/normal floats, used only
+/// once its vertex count already matches the golden's exactly (see
+/// [`assert_bucket_topology_matches`]). `picatinny()`'s output is merged
+/// (base + N teeth, `merge_all`) and then welded a *second* time by
+/// `Assembly::build`'s own bucket merge — compounding `f32`-vs-`f64`
+/// rounding across two weld passes, the same class of effect
+/// `weapons_geometry_port.rs`'s Euler-composition test measures for
+/// sequential rotations. Real, measured (`861e3cdb`), not a shortcut.
+const MERGED_TOL: f64 = 1e-5;
+
 fn golden() -> &'static Value {
     static G: OnceLock<Value> = OnceLock::new();
     G.get_or_init(|| serde_json::from_str(include_str!("parts/hardware_golden.json")).expect("golden.json parses"))
@@ -59,12 +72,16 @@ fn f64s(v: &Value) -> Vec<f64> {
         .collect()
 }
 
-fn close_slice(name: &str, field: &str, got: &[f32], want: &[f64]) {
+fn close_slice_tol(name: &str, field: &str, got: &[f32], want: &[f64], tol: f64) {
     assert_eq!(got.len(), want.len(), "{name}: {field} length");
     got.iter().zip(want.iter()).enumerate().for_each(|(i, (a, b))| {
         let diff = (f64::from(*a) - b).abs();
-        assert!(diff < TOL, "{name}: {field}[{i}] = {a} vs golden {b} (diff {diff})");
+        assert!(diff < tol, "{name}: {field}[{i}] = {a} vs golden {b} (diff {diff})");
     });
+}
+
+fn close_slice(name: &str, field: &str, got: &[f32], want: &[f64]) {
+    close_slice_tol(name, field, got, want, TOL);
 }
 
 fn assert_geo_matches(name: &str, g: &Geo, want: &Value) {
@@ -89,16 +106,22 @@ fn assert_bucket_matches(name: &str, built: &BTreeMap<String, Geo>, golden_group
     assert_geo_matches(&format!("{name}.{mat}"), g, &golden_group[mat]);
 }
 
-/// A weaker topology-only check, ported verbatim from
-/// `weapons_geometry_primitives_port.rs`'s `assert_geo_topology_matches`: for
-/// geometry that passes through `extrude()`'s bevel path (here, every
-/// `picatinny()`-derived rail bucket), the `f32` point-list boundary
-/// documented in `03-weapon-geometry-api.md`'s "Corrections" section
-/// occasionally tips `mergeVertices`'/`weld_vertices`' `1e-6` quantization
-/// into a different bucket than the source, a real precision-boundary
-/// consequence rather than an algorithm defect. Triangle count (fixed by
-/// `earcut`, which never crosses the amplifying division) and index-derived
-/// tri count stay exact; vertex count is only bounded.
+/// A weaker check for a `picatinny()`-derived rail bucket. Triangle count
+/// (fixed by `earcut`, which never crosses `extrude`'s amplifying division)
+/// is asserted exactly. Vertex count is asserted exactly when it can be —
+/// `03-weapon-geometry-api.md`'s "Corrections" section fixed the `f32`
+/// point-list boundary this check used to exist for entirely
+/// (`round_rect`/`extrude`/`picatinny`'s tooth profile all carry `f64`
+/// contours now); what remains, on the goldens this still affects, is an
+/// independent-libm ULP difference (`f64::sin`/`f64::cos` vs V8's) amplified
+/// by the same near-zero tangent-junction division documented in
+/// `primitives::extrude`'s module doc — real, but not narrower than `f64`
+/// can fix. When the vertex count matches, position/normal floats are
+/// compared at [`MERGED_TOL`] (not the single-primitive `1e-6`): a rail
+/// bucket is `picatinny()`'s own merge-and-weld, welded a *second* time by
+/// `Assembly::build`, so it earns the wider, `861e3cdb`-measured tolerance
+/// the merged-part suite uses, not the tighter single-primitive one. When it
+/// doesn't match, only the bounded vertex-count delta is asserted.
 fn assert_bucket_topology_matches(name: &str, built: &BTreeMap<String, Geo>, golden_group: &Value, mat: &str) {
     let g = built
         .get(mat)
@@ -110,14 +133,20 @@ fn assert_bucket_topology_matches(name: &str, built: &BTreeMap<String, Geo>, gol
         .unwrap_or_else(|| panic!("{full_name}: expected an indexed golden bucket"));
     assert_eq!(g.tri_count(), want_index.len() / 3, "{full_name}: triangle count must match exactly");
 
-    let want_vert_count = f64s(&want["pos"]).len() / 3;
+    let want_pos = f64s(&want["pos"]);
+    let want_vert_count = want_pos.len() / 3;
     let got_vert_count = g.vert_count();
-    let delta = got_vert_count.abs_diff(want_vert_count);
-    let budget = (want_vert_count / 10).max(8);
-    assert!(
-        delta <= budget,
-        "{full_name}: vert_count {got_vert_count} vs golden {want_vert_count} (delta {delta} > budget {budget})"
-    );
+    if got_vert_count == want_vert_count {
+        close_slice_tol(&full_name, "pos", &g.pos, &want_pos, MERGED_TOL);
+        close_slice_tol(&full_name, "normal", &g.normal, &f64s(&want["normal"]), MERGED_TOL);
+    } else {
+        let delta = got_vert_count.abs_diff(want_vert_count);
+        let budget = (want_vert_count / 10).max(8);
+        assert!(
+            delta <= budget,
+            "{full_name}: vert_count {got_vert_count} vs golden {want_vert_count} (delta {delta} > budget {budget})"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------
