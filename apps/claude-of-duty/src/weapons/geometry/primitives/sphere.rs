@@ -28,8 +28,13 @@ pub fn dome(r: f32, seg: u32, cut: f32) -> Geo {
 /// `new THREE.SphereGeometry(radius, widthSegments, heightSegments,
 /// phiStart, phiLength, thetaStart, thetaLength)`
 /// (`SphereGeometry.js:30-147`).
+///
+/// `pub(crate)` (rather than private, [`dome`]'s original visibility) so
+/// `world::props::mesh` can build `sackGeometry`'s full Lp-ball sphere and
+/// `satDish`'s partial dish from the same faithful port, instead of a third
+/// copy of `THREE.SphereGeometry`.
 #[allow(clippy::too_many_arguments)]
-fn sphere_geometry(
+pub(crate) fn sphere_geometry(
     radius: f64,
     width_segments: u32,
     height_segments: u32,

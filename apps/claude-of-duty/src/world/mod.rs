@@ -7,3 +7,4 @@ pub mod layout;
 pub mod masks;
 pub mod noise;
 pub mod palette;
+pub mod props;

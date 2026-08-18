@@ -31,8 +31,10 @@ mod torus;
 mod xform;
 
 pub use extrude::{extrude, round_rect, ExtrudeOpts};
+pub(crate) use lathe::lathe_geometry;
 pub use lathe::{lathe_z, rod_z, tube_z};
 pub use parts::{knurl_band, mlok_slot, picatinny, screw, serrations, Axis, PicatinnyOpts};
 pub use rounded_box::{blob, box_geo};
 pub use sphere::dome;
+pub(crate) use sphere::sphere_geometry;
 pub use torus::ring;

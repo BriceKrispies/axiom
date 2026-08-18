@@ -73,7 +73,13 @@ pub fn rod_z(r0: f32, r1: f32, len: f32, seg: u32, chamfer: f32) -> Geo {
 /// (`LatheGeometry.js:35-201`). `points` are `(radius, axial)` pairs
 /// (`Vector2(x, y)` in the source, `x` = radius, `y` = the axial/height
 /// coordinate).
-fn lathe_geometry(points: &[(f64, f64)], segments: u32, phi_start: f64, phi_length: f64) -> Geo {
+///
+/// `pub(crate)` (rather than private, [`lathe_z`]'s original visibility) so
+/// `world::props::mesh` can build `tyre()`'s tread profile — which, unlike
+/// every weapon caller, revolves around `+Y` directly (no `rotate_x` to `+Z`)
+/// and needs the un-clamped radius `lathe_z` doesn't expose — from the same
+/// faithful `THREE.LatheGeometry` port, instead of a third copy of it.
+pub(crate) fn lathe_geometry(points: &[(f64, f64)], segments: u32, phi_start: f64, phi_length: f64) -> Geo {
     let phi_length = phi_length.clamp(0.0, std::f64::consts::TAU);
     let n = points.len();
 
