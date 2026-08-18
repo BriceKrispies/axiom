@@ -1248,6 +1248,21 @@ impl StaticWorld {
         [self.node_meta[i * 2], self.node_meta[i * 2 + 1]]
     }
 
+    /// The three world-space vertices of triangle `tri`, widened from the
+    /// `f32` storage — the JS reads `world.pos` directly for this
+    /// (`atlas.js:227-235`, the decal clipper). Additive: it exposes soup the
+    /// BVH already owns, so `crate::fx::decals::DecalWorld` can be bound
+    /// without a second copy of the triangles.
+    pub fn triangle_of(&self, tri: u32) -> [[f64; 3]; 3] {
+        let b = tri as usize * 9;
+        let at = |i: usize| f64::from(self.pos[b + i]);
+        [
+            [at(0), at(1), at(2)],
+            [at(3), at(4), at(5)],
+            [at(6), at(7), at(8)],
+        ]
+    }
+
     /// The triangle normal at index `tri`, widened from `f32` storage.
     pub fn normal_of(&self, tri: u32) -> [f64; 3] {
         [

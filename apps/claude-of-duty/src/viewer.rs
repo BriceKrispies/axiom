@@ -83,7 +83,7 @@ const ORBIT_HEIGHT: f32 = 0.30;
 const TURNTABLE_PERIOD: u32 = 720;
 
 /// A linear colour channel from a known-finite authored literal.
-fn ch(value: f32) -> Ratio {
+pub(crate) fn ch(value: f32) -> Ratio {
     Ratio::new(value).expect("authored colour channel is finite")
 }
 
@@ -92,7 +92,7 @@ fn ch(value: f32) -> Ratio {
 /// `"polymer"`, the optic's glass stack — and this is the viewer's own reading
 /// of them, not the game's material system (`materials/` owns that, and it
 /// speaks in shader graphs this viewer has no way to bind yet).
-fn bucket_color(bucket: &str) -> Color {
+pub(crate) fn bucket_color(bucket: &str) -> Color {
     let [r, g, b] = match bucket {
         "alu" => [0.52, 0.53, 0.56],
         "steel" => [0.34, 0.36, 0.40],
@@ -163,7 +163,7 @@ fn center_of(buckets: &BTreeMap<String, Geo>) -> Vec3 {
 /// index is a triangle *soup*, so the identity index is synthesised for it; and
 /// `normalize_attributes` fills the UV/normal a merged bucket may be missing,
 /// which `MeshData` validation requires one of per vertex.
-fn to_mesh_data(geo: &Geo) -> MeshData {
+pub(crate) fn to_mesh_data(geo: &Geo) -> MeshData {
     let mut geo = geo.clone();
     geo.normalize_attributes();
     let positions: Vec<Vec3> = geo

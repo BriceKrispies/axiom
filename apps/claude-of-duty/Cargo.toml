@@ -36,6 +36,15 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 # rather than hand-rolling a second, parallel transform path.
 axiom-math = { path = "../../crates/axiom-math" }
 
+# The live presentation arm. `scene::app`'s browser entry drives
+# `WindowingApi::run_web_multi` directly, in the exact shape `App::run` does,
+# because `run`'s per-frame closure takes no app callback and an input-driven
+# game has to read this frame's input and write this frame's camera before the
+# engine renders. See `scene::app`'s module doc comment for the engine-side fix
+# that would remove this dependency.
+[target.'cfg(target_arch = "wasm32")'.dependencies.axiom-windowing]
+path = "../../modules/axiom-windowing"
+
 # wasm32-only: the Web Audio binding in `audio::web_audio`, which realises a
 # recorded `AudioGraph` against real nodes. Native `cargo test` never compiles
 # it, which is exactly the point — the whole synthesis path is verified natively
@@ -89,6 +98,17 @@ web-sys = { version = "0.3", features = [
     "SvgElement",
     "SvggElement",
     "Window",
+
+    # Input (`input::dom` — the nine listeners `core/input.js`'s `attach()`
+    # binds, plus the pointer-lock request and the gamepad poll) and the frame
+    # clock the presentation loop measures its delta with.
+    "EventTarget",
+    "Gamepad",
+    "KeyboardEvent",
+    "MouseEvent",
+    "Navigator",
+    "Performance",
+    "WheelEvent",
 ] }
 
 [dev-dependencies]

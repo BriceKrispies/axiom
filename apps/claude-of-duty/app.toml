@@ -28,12 +28,19 @@ allowed_layers = [
 ]
 
 allowed_modules = [
-    # The engine umbrella. `viewer` authors the weapon-parts viewer against its
-    # `App`/`setup`/`install`/`run` surface and uploads the ported
-    # `weapons::geometry::Geo` buckets through its `MeshData`. This is the port's
-    # rendering arm; a *second* app could not host it, because the Module Law
-    # makes apps leaves — nothing, app or otherwise, may depend on
-    # `axiom-claude-of-duty`, so the viewer has to live in the crate that owns
-    # the geometry.
+    # The engine umbrella. `viewer` and `scene::app` author against its
+    # `App`/`setup`/`install`/`build` surface and upload the ported
+    # `world::geo::WorldGeo` batches and `weapons::geometry::Geo` buckets
+    # through its `MeshData`. This is the port's rendering arm; a *second* app
+    # could not host it, because the Module Law makes apps leaves — nothing,
+    # app or otherwise, may depend on `axiom-claude-of-duty`, so the scene has
+    # to live in the crate that owns the geometry.
     "engine",
+    # The live presentation loop, wasm32 only. `scene::app`'s browser entry
+    # drives `WindowingApi::run_web_multi` itself — the same call `App::run`
+    # makes — because `run` exposes no per-frame app hook, and an input-driven
+    # game must read this frame's input and write this frame's camera before
+    # the engine renders. `apps/burnt-rubber` and `apps/dog` do the same, for
+    # the same reason.
+    "windowing",
 ]

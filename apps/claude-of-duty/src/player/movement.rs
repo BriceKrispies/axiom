@@ -284,7 +284,10 @@ pub struct Movement {
     slide_cooldown: f64,
     slide_dir_x: f64,
     slide_dir_z: f64,
-    slide_side: f64,
+    /// `this._slideSide` — which shoulder the slide leans over. Public because
+    /// the frame driver reads it to give the camera rig its slide roll
+    /// (`player/index.js:360-363`'s `this.rig.onSlideStart(m._slideSide)`).
+    pub slide_side: f64,
     mantle_cooldown: f64,
     ledge_probe_timer: f64,
     step_distance: f64,
