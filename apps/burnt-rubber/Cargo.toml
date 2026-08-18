@@ -43,8 +43,6 @@ axiom-audio = { path = "../../modules/axiom-audio" }
 axiom-field = { path = "../../crates/axiom-field" }
 # `TextureOp::Field` — the operator that bakes that graph to RGBA8 at startup.
 axiom-proc-texture = { path = "../../crates/axiom-proc-texture" }
-# `RecipeGraph`/`RecipeId` — the one-node bake recipe the field travels beside.
-axiom-recipe = { path = "../../crates/axiom-recipe" }
 
 # The deterministic embodied-agent substrate the ghost runs every control input
 # through: the axis-map brain turns perceived scalars into `move_axis` intents.
