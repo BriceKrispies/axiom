@@ -16,9 +16,24 @@
 //! It is also browser-free, so it compiles and is tested on native: the geometry
 //! of an orbit has nothing to do with a DOM. `src/pointer_input.rs` is the
 //! wasm32-only half that turns real pointer events into calls on this type.
+//!
+//! # The lock
+//!
+//! The camera can be held still — see [`CameraLock`]. That bit lives **on this
+//! state**, not at the browser edge, and the reason is arithmetic: there are four
+//! ways a gesture reaches the camera (drag, shift/right-drag pan, wheel, pinch)
+//! and a check per path is four chances to miss one, today or the next time a
+//! gesture is added. A locked [`OrbitState`] cannot be moved by *any* caller, so
+//! the guarantee holds for callers that do not exist yet.
+//!
+//! What the browser additionally does while locked — stop calling
+//! `preventDefault()` and give the canvas's `touch-action` back, so the page
+//! scrolls normally under the finger — is in `src/pointer_input.rs`, because it
+//! is a fact about the DOM and not about a camera.
 
 use axiom::prelude::*;
 
+use crate::camera_lock::CameraLock;
 use crate::install::{scene_camera, CAMERA_FOV_DEGREES};
 use crate::stage::Stage;
 
@@ -51,6 +66,48 @@ const ORBIT_RADIANS_PER_UNIT: f32 = std::f32::consts::PI;
 /// so the zoom feels the same whether you are 4 or 400 units out.
 const WHEEL_ZOOM_PER_PIXEL: f32 = 0.0015;
 
+/// A ray into the scene, in world space — what a point on the canvas *means*.
+///
+/// This is the camera's other job. A locked camera stops being something the
+/// user moves and becomes something they reach through: the dogs are draggable
+/// (see `src/herd.rs`) and the only way a pointer position can name one is by
+/// being turned back into a ray through the same lens the frame was drawn with.
+/// It lives here because that inversion is made of the eye, the basis and the
+/// field of view, which are exactly what this type already owns.
+#[derive(Debug, Clone, Copy)]
+pub struct Ray {
+    /// Where the ray starts: the eye.
+    pub origin: Vec3,
+    /// Unit direction into the scene.
+    pub direction: Vec3,
+}
+
+impl Ray {
+    /// Where this ray crosses the horizontal plane at height `y`, if it crosses
+    /// it in front of the eye at all.
+    ///
+    /// A ray parallel to the plane (a camera at the horizon) meets it nowhere,
+    /// and one crossing it *behind* the eye is the user pointing at sky. Both
+    /// are `None` rather than a large or negative number pretending to be a
+    /// position.
+    pub fn on_plane(&self, y: f32) -> Option<Vec3> {
+        let slope = self.direction.y;
+        (slope.abs() > 1.0e-5)
+            .then(|| (y - self.origin.y) / slope)
+            .filter(|distance| *distance > 0.0)
+            .map(|distance| self.origin.add(self.direction.mul_scalar(distance)))
+    }
+
+    /// How far along the ray `point` is at its closest, and how far off the ray
+    /// it is there. A point behind the eye reports its distance at the eye, so a
+    /// caller filtering on `distance > 0` drops it.
+    pub fn approach(&self, point: Vec3) -> (f32, f32) {
+        let along = point.subtract(self.origin).dot(self.direction);
+        let nearest = self.origin.add(self.direction.mul_scalar(along.max(0.0)));
+        (along, point.distance(nearest))
+    }
+}
+
 /// The orbit camera's state: everything the framing is a pure function of.
 #[derive(Debug, Clone)]
 pub struct OrbitState {
@@ -62,6 +119,10 @@ pub struct OrbitState {
     pitch: f32,
     /// Eye-to-target distance, clamped to [`MIN_DISTANCE`]..=[`MAX_DISTANCE`].
     distance: f32,
+    /// Whether the gestures reach the camera at all. While this holds, every
+    /// mutator below is a no-op and the framing is exactly the one the lock
+    /// caught it on.
+    lock: CameraLock,
     /// The last transform that resolved successfully. `looking_at` is fallible,
     /// and the pitch clamp is what guarantees it here — but "guaranteed" is not
     /// "assumed": on the impossible error we keep the previous framing rather
@@ -98,10 +159,35 @@ impl OrbitState {
             yaw: offset.x.atan2(offset.z),
             pitch: (offset.y / distance).asin().clamp(-PITCH_LIMIT, PITCH_LIMIT),
             distance,
+            lock: CameraLock::Free,
             transform: Transform::from_translation(eye),
         };
         state.refresh();
         state
+    }
+
+    /// This orbit, seeded as it was, but locked or free as `lock` says.
+    ///
+    /// Re-seeding is how both the opening frame and the stage switch reach a new
+    /// framing, and neither of them is a *gesture* — the lock stops the user
+    /// moving the camera, it does not stop the page choosing which shot to open
+    /// on. Carrying the bit across the seed is what keeps a locked page locked
+    /// through a stage change and through the reload the detail dial triggers.
+    pub fn with_lock(mut self, lock: CameraLock) -> OrbitState {
+        self.lock = lock;
+        self
+    }
+
+    /// Whether the camera is currently answering gestures.
+    pub fn lock(&self) -> CameraLock {
+        self.lock
+    }
+
+    /// Flip the lock, and report the state the flip landed on — which is what
+    /// the button that pressed it has to relabel itself with.
+    pub fn toggle_lock(&mut self) -> CameraLock {
+        self.lock = self.lock.toggled();
+        self.lock
     }
 
     /// Orbit by a drag, in canvas-height units (a full-height drag is 1.0).
@@ -109,7 +195,12 @@ impl OrbitState {
     /// The signs implement the "grab the scene" metaphor: drag right and the
     /// scene follows your finger to the right (the camera swings left); drag
     /// down and the top of the scene tips toward you (the camera rises).
+    ///
+    /// A locked camera ignores the drag entirely.
     pub fn orbit(&mut self, dx: f32, dy: f32) {
+        if self.lock.holds() {
+            return;
+        }
         self.yaw -= dx * ORBIT_RADIANS_PER_UNIT;
         self.pitch = (self.pitch + dy * ORBIT_RADIANS_PER_UNIT).clamp(-PITCH_LIMIT, PITCH_LIMIT);
         self.refresh();
@@ -117,8 +208,12 @@ impl OrbitState {
 
     /// Multiply the orbit distance by `factor` (>1 pulls back, <1 moves in),
     /// clamped to the distance band. A non-finite or non-positive factor is
-    /// ignored rather than allowed to poison the state.
+    /// ignored rather than allowed to poison the state, and so is any factor at
+    /// all while the camera is locked.
     pub fn zoom_by(&mut self, factor: f32) {
+        if self.lock.holds() {
+            return;
+        }
         let factor = if factor.is_finite() && factor > 0.0 {
             factor
         } else {
@@ -141,7 +236,12 @@ impl OrbitState {
     /// the vertical field of view, so a drag moves the scene the same *apparent*
     /// amount at every zoom level — at the exact 1:1 rate, a point under your
     /// finger stays under your finger.
+    ///
+    /// A locked camera ignores the drag entirely.
     pub fn pan(&mut self, dx: f32, dy: f32) {
+        if self.lock.holds() {
+            return;
+        }
         let (right, up) = self.basis();
         let world_per_unit = self.distance * pan_units_per_drag();
         self.target = self
@@ -149,6 +249,27 @@ impl OrbitState {
             .add(right.mul_scalar(-dx * world_per_unit))
             .add(up.mul_scalar(dy * world_per_unit));
         self.refresh();
+    }
+
+    /// The world ray through a point on the canvas, given in **normalised
+    /// device coordinates** — `(-1, -1)` bottom-left, `(1, 1)` top-right — and
+    /// the canvas's width-over-height aspect.
+    ///
+    /// This is the exact inverse of the projection the frame was drawn with:
+    /// the same [`CAMERA_FOV_DEGREES`] lens, the same right/up basis a pan
+    /// slides along, and the same eye. Anything else would make the dog under
+    /// the pointer and the dog the app picks two different animals.
+    pub fn ray(&self, ndc_x: f32, ndc_y: f32, aspect: f32) -> Ray {
+        let extent = (CAMERA_FOV_DEGREES.to_radians() * 0.5).tan();
+        let (right, up) = self.basis();
+        let direction = self
+            .forward()
+            .add(right.mul_scalar(ndc_x * extent * aspect.max(1.0e-3)))
+            .add(up.mul_scalar(ndc_y * extent));
+        Ray {
+            origin: self.eye(),
+            direction: direction.normalize().unwrap_or(self.forward()),
+        }
     }
 
     /// The eye position this state puts the camera at.
@@ -387,6 +508,130 @@ mod tests {
         assert!(close(eye_delta.y, target_delta.y));
         assert!(close(eye_delta.z, target_delta.z));
         assert!(target_delta.length() > 1.0);
+    }
+
+    #[test]
+    fn the_pick_ray_is_the_exact_inverse_of_the_projection_the_frame_draws_with() {
+        // The one claim that decides whether dragging a dog works at all, and
+        // the one a screenshot cannot settle: the ray under a pointer has to
+        // invert the *same* matrix the GPU drew the frame with. A flipped
+        // right-hand axis, a forgotten aspect or a `y` counted the other way up
+        // all still produce a plausible ray — one that picks the wrong animal.
+        //
+        // So the loop is closed against the engine itself: take a world point,
+        // put it through the frame's own view-projection to find the pixel it
+        // lands on, and demand that the ray through that pixel comes back to the
+        // point.
+        let config = crate::SceneConfig::defaults();
+        let mut app = crate::headless_app(
+            crate::SceneVariant::Coarse,
+            crate::DebugView::Shaded,
+            &config,
+        );
+        let state = OrbitState::framed();
+        state.apply(&mut app);
+        let view_proj = Mat4::from_cols_array(app.tick(0).camera_view_proj());
+        let aspect = crate::WIDTH as f32 / crate::HEIGHT as f32;
+
+        // Points spread across the field, including well off centre where a
+        // sign or aspect error is largest.
+        for point in [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(60.0, 2.0, 0.0),
+            Vec3::new(-60.0, 2.0, 0.0),
+            Vec3::new(0.0, 2.0, 70.0),
+            Vec3::new(-45.0, 6.0, -55.0),
+        ] {
+            let clip = view_proj.transform_vec4(Vec4::new(point.x, point.y, point.z, 1.0));
+            assert!(clip.w > 0.0, "{point:?} is behind the camera");
+            let ray = state.ray(clip.x / clip.w, clip.y / clip.w, aspect);
+            let (along, off) = ray.approach(point);
+            assert!(along > 0.0, "the ray points away from {point:?}");
+            assert!(
+                off < 0.05,
+                "the ray through {point:?}'s own pixel misses it by {off}"
+            );
+        }
+
+        // ...and a pixel off to one side is *not* the middle of the screen: a
+        // ray that ignored its coordinates would pass the test above for the
+        // centre point alone.
+        let middle = state.ray(0.0, 0.0, aspect);
+        let corner = state.ray(0.9, 0.9, aspect);
+        assert!(middle.direction.distance(corner.direction) > 0.3);
+    }
+
+    #[test]
+    fn a_locked_camera_ignores_every_gesture_and_a_freed_one_takes_them_all_again() {
+        let free = OrbitState::framed();
+        let mut locked = free.clone().with_lock(CameraLock::Locked);
+        assert!(locked.lock().holds());
+        // Every path into the camera, all of them ignored: drag, pan, wheel and
+        // the raw factor a pinch calls.
+        locked.orbit(0.4, -0.25);
+        locked.pan(0.3, 0.3);
+        locked.zoom_by_wheel(-400.0);
+        locked.zoom_by(0.25);
+        assert!(close(locked.yaw(), free.yaw()));
+        assert!(close(locked.pitch(), free.pitch()));
+        assert!(close(locked.distance(), free.distance()));
+        assert_eq!(locked.target(), free.target());
+        assert_eq!(locked.eye(), free.eye());
+
+        // Unlocking is not a ratchet: the same gestures land normally after it,
+        // from exactly where the lock caught the shot.
+        assert!(!locked.toggle_lock().holds());
+        locked.orbit(0.4, -0.25);
+        locked.zoom_by(0.25);
+        assert!(!close(locked.yaw(), free.yaw()));
+        assert!(close(locked.distance(), free.distance() * 0.25));
+        // ...and locking again holds the *new* shot, not the one it opened on.
+        let held = locked.toggle_lock();
+        assert!(held.holds());
+        let eye = locked.eye();
+        locked.orbit(1.0, 0.0);
+        assert_eq!(locked.eye(), eye);
+    }
+
+    #[test]
+    fn the_lock_survives_a_stage_re_seed_but_the_framing_is_the_new_stage_s() {
+        // The stage switch re-seeds the orbit (see `stage_input.rs`). A locked
+        // page must come back locked, on the shot the new stage authored — the
+        // lock stops the *user* moving the camera, not the page choosing where
+        // to open.
+        let held = OrbitState::framed().with_lock(CameraLock::Locked).lock();
+        let locked_study = OrbitState::for_stage(Stage::Study).with_lock(held);
+        assert!(locked_study.lock().holds());
+        let (eye, _) = Stage::Study.framing();
+        assert!(close(locked_study.eye().x, eye[0]));
+        assert!(close(locked_study.eye().y, eye[1]));
+        assert!(close(locked_study.eye().z, eye[2]));
+        // A fresh orbit is free: nothing is locked unless something locked it.
+        assert!(!OrbitState::for_stage(Stage::Field).lock().holds());
+        assert!(!OrbitState::framed().lock().holds());
+    }
+
+    #[test]
+    fn a_locked_camera_holds_the_matrix_the_frame_draws_with() {
+        let mut app = crate::headless_app(
+            crate::SceneVariant::Coarse,
+            crate::DebugView::Shaded,
+            &crate::SceneConfig::defaults(),
+        );
+        let mut state = OrbitState::framed().with_lock(CameraLock::Locked);
+        state.apply(&mut app);
+        let before = app.tick(0).camera_view_proj();
+        // The gestures that moved the matrix in the test above.
+        state.orbit(0.4, 0.0);
+        state.zoom_by(0.6);
+        state.apply(&mut app);
+        assert_eq!(before, app.tick(1).camera_view_proj(), "a locked camera moved");
+        // And the lock is the only thing holding it: freed, the same gestures
+        // change the matrix the very next frame.
+        state.toggle_lock();
+        state.orbit(0.4, 0.0);
+        state.apply(&mut app);
+        assert_ne!(before, app.tick(2).camera_view_proj());
     }
 
     #[test]

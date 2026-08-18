@@ -217,11 +217,56 @@ const YIELD_EPSILON: f32 = 1.0e-3;
 /// How many distinct traffic car shapes exist.
 pub const TRAFFIC_VARIANTS: u8 = 4;
 
+/// The head of the live traffic stream: where the most recently activated car
+/// was put, and how fast it is going.
+///
+/// # Why activation needs a memory at all
+///
+/// A compiled plan gives every car a `spawn_m`, and cars used to be born exactly
+/// there. That is only correct while traffic is slow, and it fails in a way
+/// worth writing down because the failure is invisible until it is total.
+///
+/// Activation is staggered in *time* — a car appears when the player's horizon
+/// reaches its `spawn_m` — but `spawn_m` is a fixed point on the course. So the
+/// car that appeared first has been *driving* for as long as it took the player
+/// to close the authored headway, while the next one is still placed at the
+/// static position it was authored at. The gap the compiler laid down is
+/// therefore eaten at exactly the rate the traffic moves.
+///
+/// The arithmetic, on the shipping course: cars 58 m apart, a player at 80 m/s,
+/// so the second car appears 0.72 s after the first. At the old 22–38 m/s the
+/// first car had covered ~22 m in that time and the pair still stood 36 m
+/// apart. At 300 km/h it has covered **60 m** — more than the whole headway —
+/// so it arrives *level with* the car being spawned. Enough of those in a row
+/// and every lane is occupied at one cross-section, which is a wall the player
+/// cannot pass and which never opens, because with one speed nothing overtakes
+/// anything.
+///
+/// So the authored headway is treated as the gap between **consecutive
+/// arrivals**, not as two static marks on the road: a car enters that far ahead
+/// of wherever the previous one has got to. The pattern the compiler wrote is
+/// then the pattern the player meets, at any traffic speed, which is the only
+/// reading of it that survives the traffic going as fast as the player.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StreamHead {
+    /// Where the last activated car is now (m along the course).
+    position: f32,
+    /// How fast it is going (m/s), so `position` tracks it between activations.
+    speed: f32,
+    /// The `spawn_m` it was authored at, so the next plan's authored gap can be
+    /// measured against the same origin the compiler used.
+    authored: f32,
+}
+
 /// The live traffic: a bounded pool of cars, activated from a compiled plan.
 #[derive(Debug, Clone)]
 pub struct Traffic {
     plan: Arc<CoursePlan>,
     cars: Vec<TrafficCar>,
+    /// The head of the live stream — see [`StreamHead`]. `None` before the first
+    /// activation and after any jump, where there is no previous arrival to
+    /// measure a gap from and the authored position is the right answer.
+    stream: Option<StreamHead>,
     /// The next plan index that has not been considered for activation. Monotone
     /// while the player moves forward; recomputed from the plan's distance index
     /// after a jump.
@@ -234,6 +279,7 @@ impl Traffic {
         Traffic {
             plan,
             cars: vec![TrafficCar::RETIRED; race.traffic_active],
+            stream: None,
             cursor: 0,
         }
     }
@@ -268,6 +314,9 @@ impl Traffic {
     /// Retire everything and rewind the cursor — a restart, a reset or a jump.
     pub fn clear(&mut self) {
         self.cars.iter_mut().for_each(|c| *c = TrafficCar::RETIRED);
+        // The stream has no head any more: there is no previous arrival to space
+        // the next one against, so the next car goes where it was authored.
+        self.stream = None;
         self.cursor = 0;
     }
 
@@ -281,6 +330,19 @@ impl Traffic {
     ) {
         self.retire(player_distance, track, race);
         self.advance(track, collision);
+        // The head is a car like any other: it keeps driving between the
+        // activations that read it, so it has to be carried forward with them.
+        self.stream = self
+            .stream
+            .map(|head| StreamHead {
+                position: head.position + head.speed * DT,
+                ..head
+            })
+            // A head the player has driven past is not the head of anything: the
+            // stream it was anchoring is behind them. Dropping it lets the next
+            // car anchor on its authored position again, which is what a fresh
+            // stretch of road should look like.
+            .filter(|head| head.position > player_distance);
         self.activate(player_distance, track, race);
     }
 
@@ -367,26 +429,64 @@ impl Traffic {
             let Some(plan) = plans.get(self.cursor) else {
                 break;
             };
-            if plan.spawn_m > horizon {
-                break;
-            }
             let Some(index) = self.cars.iter().position(|c| !c.active) else {
                 break;
             };
+            // Where this car actually enters: the authored gap ahead of the last
+            // arrival's *current* position, never behind the position it was
+            // authored at. See [`StreamHead`] for why the authored position on
+            // its own stops being right once traffic is fast.
+            //
+            // The gap is clamped to the horizon because the cursor can jump —
+            // `first_vehicle_at` skips whole stretches of plan when the player
+            // moves — and an unclamped jump reads as one enormous authored gap
+            // and posts the next car kilometres up the road.
+            let at_m = self
+                .stream
+                .map(|head| {
+                    let authored_gap =
+                        (plan.spawn_m - head.authored).clamp(0.0, race.traffic_ahead);
+                    (head.position + authored_gap).max(plan.spawn_m)
+                })
+                .unwrap_or(plan.spawn_m);
+
+            // **Gated on where the car will actually enter, not on where it was
+            // authored.**
+            //
+            // Gating on the authored position replaced the wall with an empty
+            // road. Placement is relative to a head that is itself driving
+            // forward, so the stream advanced by the traffic's speed *and* the
+            // authored gap on every activation — near twice the player's speed —
+            // and every car was posted beyond a horizon that could never be
+            // reached. A whole lap scored nought near misses.
+            //
+            // Holding the entry at the horizon costs nothing and fixes it: the
+            // horizon closes on the stream at exactly the speed the player closes
+            // on the traffic, so a car enters precisely when the player has
+            // earned it.
+            if at_m > horizon {
+                break;
+            }
+
             // **The safety region.** A plan inside it is skipped, never
             // activated.
             //
-            // In ordinary play this never fires: plans enter the horizon
-            // `traffic_ahead` metres away and the cursor only moves forward. It
-            // fires after a *jump* — `place_at`, a capture, the finish teleport,
-            // any of which clears the pool and refills it around wherever the
-            // player now is. A car materialising inside the player is the least
-            // fair thing traffic can do.
-            if inside_safety_region(plan.spawn_m, player_distance, race) {
+            // In ordinary play this never fires: cars enter `traffic_ahead`
+            // metres away and the cursor only moves forward. It fires after a
+            // *jump* — `place_at`, a capture, the finish teleport, any of which
+            // clears the pool and refills it around wherever the player now is.
+            // A car materialising inside the player is the least fair thing
+            // traffic can do.
+            if inside_safety_region(at_m, player_distance, race) {
                 self.cursor += 1;
                 continue;
             }
-            self.cars[index] = activate(plan, self.cursor, track);
+            self.cars[index] = activate(plan, self.cursor, track, at_m);
+            self.stream = Some(StreamHead {
+                position: at_m,
+                speed: self.cars[index].speed,
+                authored: plan.spawn_m,
+            });
             self.cursor += 1;
         }
     }
@@ -427,11 +527,22 @@ pub fn inside_safety_region(distance: f32, player_distance: f32, race: &RaceTuni
     relative > -race.traffic_safe_behind && relative < race.traffic_safe_ahead
 }
 
-/// Build the live car for a compiled plan.
+/// Build the live car for a compiled plan, entering at `at_m`.
 ///
-/// A pure function of the plan and nothing else — not of when it activated, not
-/// of which pool entry it landed in, not of how the player got here.
-pub fn activate(plan: &TrafficPlan, plan_index: usize, track: &Track) -> TrafficCar {
+/// A pure function of its arguments — not of when it activated, not of which
+/// pool entry it landed in, not of how the player got here.
+///
+/// `at_m` is passed rather than read from `plan.spawn_m` because the two stopped
+/// being the same thing once traffic could move as fast as the player: the
+/// authored position is where the *pattern* says this car sits, and the entry
+/// position is where it has to appear for that pattern to survive contact with a
+/// stream that has been driving since the last car entered. See [`StreamHead`].
+pub fn activate(
+    plan: &TrafficPlan,
+    plan_index: usize,
+    track: &Track,
+    at_m: f32,
+) -> TrafficCar {
     // The cosmetic wander is derived from the plan's own variation seed, so a
     // car's drift inside its lane is as stable as everything else about it.
     let mut draw = Draw::seeded(plan.variation_seed);
@@ -441,13 +552,13 @@ pub fn activate(plan: &TrafficPlan, plan_index: usize, track: &Track) -> Traffic
         active: true,
         slot: plan.id.0,
         plan_index,
-        distance: plan.spawn_m,
+        distance: at_m,
         // **In its lane from the first step it exists.** Leaving this at zero
         // put every newly-activated car on the centreline for one step — a lane
         // it may not even be in — which is a car in the wrong place in every
         // frame that samples the pool before the next `advance`.
-        lateral: lane_lateral(track, plan.spawn_m, plan.lane)
-            + wander_amount * (wander_phase + plan.spawn_m * WANDER_RATE).sin(),
+        lateral: lane_lateral(track, at_m, plan.lane)
+            + wander_amount * (wander_phase + at_m * WANDER_RATE).sin(),
         lane: plan.lane,
         speed: plan.speed_mps,
         variant: plan.archetype.variant(),
@@ -504,8 +615,8 @@ mod tests {
         let plan = plan();
         for index in [3usize, 17, 40] {
             let compiled = &plan.traffic()[index];
-            let a = activate(compiled, index, plan.track());
-            let b = activate(compiled, index, plan.track());
+            let a = activate(compiled, index, plan.track(), compiled.spawn_m);
+            let b = activate(compiled, index, plan.track(), compiled.spawn_m);
             assert_eq!(a, b);
             assert_eq!(a.slot, compiled.id.0);
             assert_eq!(a.lane, compiled.lane);
@@ -548,15 +659,23 @@ mod tests {
             distance += 70.0 * DT;
             traffic.step(distance, &track, &r, &CollisionTuning::DEFAULT);
             for car in traffic.active() {
+                // Captured as it actually entered. Where a car enters is an
+                // activation-time fact now (see `StreamHead`) rather than a plan
+                // one, so it is the *contents* — lane, speed, variant, identity
+                // — that the plan still owns, and the assertion below re-derives
+                // them from the same entry point to say exactly that.
                 if !seen.iter().any(|(s, _)| *s == car.slot) {
-                    seen.push((car.slot, activate(&plan.traffic()[car.plan_index], car.plan_index, plan.track())));
+                    seen.push((car.slot, *car));
                 }
             }
         }
         assert!(seen.len() > 50, "the run recycled through many plans: {}", seen.len());
         for (slot, captured) in seen {
             let compiled = plan.vehicle(VehicleId(slot)).expect("the plan still has it");
-            assert_eq!(activate(compiled, captured.plan_index, plan.track()), captured);
+            assert_eq!(
+                activate(compiled, captured.plan_index, plan.track(), captured.distance),
+                captured
+            );
         }
     }
 
@@ -771,7 +890,7 @@ mod tests {
     fn a_traffic_car_yields_sideways_but_only_within_its_budget() {
         let c = CollisionTuning::DEFAULT;
         let plan = plan();
-        let mut car = activate(&plan.traffic()[5], 5, plan.track());
+        let mut car = activate(&plan.traffic()[5], 5, plan.track(), plan.traffic()[5].spawn_m);
         let taken = car.yield_lateral(0.4, &c);
         assert!((taken - 0.4).abs() < 1.0e-5, "took {taken} of 0.4");
         assert!((car.yield_offset - 0.4).abs() < 1.0e-5);
@@ -797,7 +916,7 @@ mod tests {
     fn a_traffic_car_shunts_forward_but_only_within_its_budget() {
         let c = CollisionTuning::DEFAULT;
         let plan = plan();
-        let mut car = activate(&plan.traffic()[5], 5, plan.track());
+        let mut car = activate(&plan.traffic()[5], 5, plan.track(), plan.traffic()[5].spawn_m);
         for _ in 0..200 {
             car.yield_forward(1.0, &c);
         }
@@ -989,7 +1108,7 @@ mod tests {
             speed_mps: 30.0,
             ..plan.traffic()[0].clone()
         };
-        let mut car = activate(&compiled, 0, &track);
+        let mut car = activate(&compiled, 0, &track, compiled.spawn_m);
         assert_eq!(car.lane, 1);
         assert_eq!(compiled.lane_at(car.distance), 1);
         car.distance = 1_100.0;

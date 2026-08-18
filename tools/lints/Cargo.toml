@@ -8,6 +8,7 @@ members = [
     "engine_lint_helpers",
     "test_without_assertion",
     "no_unwrap_in_engine",
+    "engine_no_unwrap_or",
     "engine_no_time_in_sim",
     "engine_genuine_dependency",
     "engine_no_transmute",

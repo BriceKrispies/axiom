@@ -310,6 +310,19 @@ const YAW_WINDOW_STEPS: u32 = 20;
 /// throttle. That is deliberately how a player hits something — not a teleport
 /// into an overlap, which would measure the collision resolver rather than the
 /// game.
+/// The speed a staged collision target is slowed to (m/s).
+///
+/// Slow enough that the player closes on it in a few seconds at any tuning,
+/// fast enough that the contact is still a *shunt* between two moving cars
+/// rather than a car hitting a parked obstacle — the closing speed is what the
+/// severity ladder is measured on, and a stationary target would flatter it.
+const STAGED_TARGET_SPEED: f32 = 30.0;
+
+/// How far ahead a staged collision target is planted (m). Far enough that the
+/// player arrives under power rather than starting inside it, close enough that
+/// the approach cannot wander off the line first.
+const STAGED_TARGET_AHEAD_M: f32 = 70.0;
+
 pub fn deliberate_collision(
     sim: &mut RaceSim,
     approach_limit: u32,
@@ -333,6 +346,36 @@ pub fn deliberate_collision(
         speed_after: 0.0,
         needed_a_reset: false,
     };
+
+    // **Stage the encounter rather than hope for one.**
+    //
+    // This helper is named `deliberate` and it has to earn the word. Shipping
+    // traffic cruises at very nearly the car's own top speed, so a driver
+    // chasing the next car ahead closes at under 9 m/s and can spend the whole
+    // approach budget without arriving — which is a fixture reporting "no
+    // collision happened" about a collision model that is working perfectly.
+    //
+    // Slowing the nearest car ahead makes the encounter certain and makes this
+    // helper independent of the road's traffic speed, which is the right
+    // coupling: what a shunt *does* is not a fact about how fast the flow
+    // happens to be tuned today.
+    // Planted outright rather than borrowed from the flow: the nearest ambient
+    // car can be retired, recycled or overtaken by a closer arrival mid-chase,
+    // and a fixture that loses its target half way through reports "no
+    // collision" about a collision model that is working.
+    let here = *sim.car();
+    let target = sim
+        .traffic_mut()
+        .cars_mut()
+        .iter_mut()
+        .min_by_key(|c| u8::from(c.active))
+        .expect("the pool is never empty");
+    target.active = true;
+    target.distance = here.distance + STAGED_TARGET_AHEAD_M;
+    target.lateral = here.lateral;
+    target.speed = STAGED_TARGET_SPEED;
+    target.near_missed = false;
+    target.wreck_steps = 0;
 
     // --- approach: chase whatever is next ahead, flat out.
     for _ in 0..approach_limit {

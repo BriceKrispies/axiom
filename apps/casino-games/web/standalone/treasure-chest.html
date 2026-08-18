@@ -1,0 +1,1232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Treasure Chest Pick — standalone</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #12161c;
+    font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  }
+  #stage { display: block; width: 100vw; height: 100vh; touch-action: manipulation; cursor: default; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script>
+"use strict";
+
+/*
+ * Treasure Chest Pick — a standalone, dependency-free canvas game.
+ *
+ * This is the INTENT of the casino-games treasure chest, drawn the way canvas
+ * is meant to be drawn: flat 2D shapes, no software rasterizer, no fake 3D.
+ * Nine chests in a grid; you click one; it comes forward, the latch drops, the
+ * lid swings open, light bursts out and a treasure rises from the mouth.
+ */
+
+// ─── canvas + logical world ──────────────────────────────────────────────────
+// Everything is authored in a fixed 960x600 logical space and letterboxed into
+// whatever window the player has, so layout math never has to care about size.
+
+const WORLD_W = 960;
+const WORLD_H = 600;
+
+const canvas = document.getElementById("stage");
+const ctx = canvas.getContext("2d");
+let view = { scale: 1, offsetX: 0, offsetY: 0 };
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cssW = window.innerWidth;
+  const cssH = window.innerHeight;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  canvas.style.width = cssW + "px";
+  canvas.style.height = cssH + "px";
+  const scale = Math.min(cssW / WORLD_W, cssH / WORLD_H);
+  view = {
+    scale: scale * dpr,
+    offsetX: (cssW - WORLD_W * scale) * 0.5 * dpr,
+    offsetY: (cssH - WORLD_H * scale) * 0.5 * dpr,
+  };
+}
+window.addEventListener("resize", resize);
+resize();
+
+/** Window pointer coords -> logical world coords. */
+function toWorld(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = canvas.width / rect.width;
+  return {
+    x: ((clientX - rect.left) * dpr - view.offsetX) / view.scale,
+    y: ((clientY - rect.top) * dpr - view.offsetY) / view.scale,
+  };
+}
+
+// ─── the prize catalog ───────────────────────────────────────────────────────
+// Same five treasures the real game ships, same ladder: a coin is what you
+// usually get, a pearl or Crabigail is a good day, the ring is worth the ritual.
+
+const PRIZES = [
+  { id: "gold-coin",    label: "a Gold Coin",  amount: 10,  weight: 34, accent: "#ffcc4d" },
+  { id: "crab-bride",   label: "Crabigail",    amount: 25,  weight: 24, accent: "#ff7a5c" },
+  { id: "pearl-clam",   label: "a Pearl",      amount: 50,  weight: 20, accent: "#ffd9ec" },
+  { id: "gold-bar",     label: "a Gold Bar",   amount: 100, weight: 16, accent: "#ffd76a" },
+  { id: "wedding-ring", label: "a Diamond Ring", amount: 500, weight: 6, accent: "#bff0ff" },
+];
+const TOTAL_WEIGHT = PRIZES.reduce((sum, p) => sum + p.weight, 0);
+
+function drawPrizeFrom(roll) {
+  let acc = 0;
+  for (const prize of PRIZES) {
+    acc += prize.weight;
+    if (roll * TOTAL_WEIGHT < acc) return prize;
+  }
+  return PRIZES[0];
+}
+
+// ─── layout ──────────────────────────────────────────────────────────────────
+
+const COLS = 3;
+const ROWS = 3;
+const CHEST_COUNT = COLS * ROWS;
+const CHEST_W = 132;          // body width
+const CHEST_H = 66;           // body height
+const LID_H = 40;             // how far the barrel lid arches above the body
+const COL_PITCH = 186;
+const ROW_PITCH = 132;
+const GRID_CX = WORLD_W / 2;
+const GRID_CY = 336;          // vertical centre of the 3x3 grid (chest bases)
+
+const HERO = { x: WORLD_W / 2, y: 430, scale: 2.35 };
+
+function slotPos(index) {
+  const col = index % COLS;
+  const row = Math.floor(index / COLS);
+  return {
+    x: GRID_CX + (col - (COLS - 1) / 2) * COL_PITCH,
+    y: GRID_CY + (row - (ROWS - 1) / 2) * ROW_PITCH,
+  };
+}
+
+// ─── game state ──────────────────────────────────────────────────────────────
+
+const PHASE = { READY: "ready", COMMIT: "commit", REVEAL: "reveal", RESULT: "result" };
+
+// The reveal ritual, in milliseconds from the start of the reveal. Same cadence
+// as the original: brace, LATCH FIRST, a pause, then the lid.
+const T = {
+  commit: 720,
+  brace: 340,
+  latch: 300,
+  pause: 200,
+  lid: 460,
+  rise: 620,
+  hold: 320,
+};
+T.latchEnd = T.brace + T.latch;
+T.lidStart = T.latchEnd + T.pause;
+T.lidEnd = T.lidStart + T.lid;
+T.riseEnd = T.lidEnd + T.rise;
+T.revealEnd = T.riseEnd + T.hold;
+
+const game = {
+  phase: PHASE.READY,
+  time: 0,          // ms since load, drives every idle animation
+  phaseTime: 0,     // ms since the current phase began
+  // The reveal ritual gets its OWN clock rather than reading `phaseTime`. It
+  // has to outlive its phase: the chest stays open through the whole result,
+  // so the pose is still being read after the phase (and `phaseTime`) has
+  // rolled over — which would otherwise replay the entire opening from the top.
+  // It stops at `T.revealEnd`, so the final pose simply holds.
+  revealTime: 0,
+  chosen: null,     // index of the picked chest
+  prize: null,
+  score: 0,
+  round: 1,
+  hover: -1,
+  sparks: [],
+};
+
+function startRound() {
+  game.phase = PHASE.READY;
+  game.phaseTime = 0;
+  game.revealTime = 0;
+  game.chosen = null;
+  game.prize = null;
+  game.sparks = [];
+  game.round += 1;
+}
+
+function pick(index) {
+  game.phase = PHASE.COMMIT;
+  game.phaseTime = 0;
+  game.chosen = index;
+  // The prize is drawn the moment the pick commits — before any of the
+  // presentation runs, so nothing in the animation can possibly know it early.
+  game.prize = drawPrizeFrom(Math.random());
+}
+
+// ─── easing ──────────────────────────────────────────────────────────────────
+
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const smoothstep = (t) => t * t * (3 - 2 * t);
+const easeOutBack = (t) => 1 + 2.2 * Math.pow(t - 1, 3) + 1.4 * Math.pow(t - 1, 2);
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+// ─── the idle "chest dance" ──────────────────────────────────────────────────
+// Time is cut into windows; each window elects one chest to perform a little
+// scoot-and-twist. Purely a function of the window index, so it can never
+// correlate with what any chest holds.
+
+const DANCE_WINDOW = 1700;
+
+function hash(n) {
+  let x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function dancePose(index) {
+  const win = Math.floor(game.time / DANCE_WINDOW);
+  const dancer = Math.floor(hash(win) * CHEST_COUNT);
+  const duet = hash(win + 0.5) < 0.25;
+  const second = Math.floor(hash(win + 0.25) * CHEST_COUNT);
+  const dancing = index === dancer || (duet && index === second);
+  if (!dancing) return { scoot: 0, twist: 0, squash: 0 };
+  const local = (game.time % DANCE_WINDOW) / DANCE_WINDOW;
+  const env = Math.sin(Math.PI * local);
+  const figure = hash(win + index);
+  return {
+    scoot: Math.sin(local * Math.PI * 4 + figure * 6) * 5 * env,
+    twist: Math.sin(local * Math.PI * 2 + figure * 4) * 0.07 * env,
+    squash: Math.abs(Math.sin(local * Math.PI * 6)) * 0.05 * env,
+  };
+}
+
+/** Gentle desynced breathing bob, always on. */
+function idleBob(index) {
+  return Math.sin(game.time * 0.0016 + index * 2.399963) * 3;
+}
+
+// ─── scene painting: the beach and the lagoon ────────────────────────────────
+
+const SAND = "#f2d193";
+const SAND_DARK = "#e3b76f";
+const SHORE = "#cfa059";
+const WATER = "#43c8da";
+const WATER_DEEP = "#2ba9c0";
+
+const LAGOON = { cx: WORLD_W / 2, cy: 330, rx: 372, ry: 246 };
+
+// Scattered shells + coins on the sand, placed once so they never crawl.
+const LITTER = Array.from({ length: 26 }, (_, i) => {
+  const a = hash(i * 3.7) * Math.PI * 2;
+  const r = 0.62 + hash(i * 9.1) * 0.55;
+  return {
+    x: LAGOON.cx + Math.cos(a) * LAGOON.rx * r * 1.22,
+    y: LAGOON.cy + Math.sin(a) * LAGOON.ry * r * 1.18,
+    kind: hash(i * 5.3) < 0.4 ? "coin" : "shell",
+    rot: hash(i * 2.1) * Math.PI,
+    size: 7 + hash(i * 7.7) * 6,
+  };
+}).filter((l) => l.x > 24 && l.x < WORLD_W - 24 && l.y > 40 && l.y < WORLD_H - 20);
+
+function paintBeach() {
+  const g = ctx.createLinearGradient(0, 0, 0, WORLD_H);
+  g.addColorStop(0, SAND);
+  g.addColorStop(1, SAND_DARK);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+
+  for (const bit of LITTER) {
+    ctx.save();
+    ctx.translate(bit.x, bit.y);
+    ctx.rotate(bit.rot);
+    if (bit.kind === "coin") {
+      ctx.fillStyle = "#e8b33c";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, bit.size * 0.55, bit.size * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "#fff6e2";
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, bit.size, Math.PI, Math.PI * 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#e6d2ac";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (let i = 1; i < 4; i += 1) {
+        const a = Math.PI + (Math.PI * i) / 4;
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * bit.size, Math.sin(a) * bit.size);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+function paintLagoon() {
+  // shore ring
+  ctx.fillStyle = SHORE;
+  ctx.beginPath();
+  ctx.ellipse(LAGOON.cx, LAGOON.cy, LAGOON.rx + 16, LAGOON.ry + 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // water
+  const g = ctx.createRadialGradient(LAGOON.cx, LAGOON.cy - 40, 40, LAGOON.cx, LAGOON.cy, LAGOON.rx);
+  g.addColorStop(0, "#63d9e6");
+  g.addColorStop(0.65, WATER);
+  g.addColorStop(1, WATER_DEEP);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(LAGOON.cx, LAGOON.cy, LAGOON.rx, LAGOON.ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ripples — a few drifting arcs, clipped to the water
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(LAGOON.cx, LAGOON.cy, LAGOON.rx, LAGOON.ry, 0, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.strokeStyle = "rgba(255,255,255,0.28)";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  for (let i = 0; i < 9; i += 1) {
+    const drift = (game.time * 0.00004 + i * 0.11) % 1;
+    const rx = LAGOON.rx * (0.24 + drift * 0.8);
+    const ry = LAGOON.ry * (0.24 + drift * 0.8);
+    const fade = Math.sin(Math.PI * drift) * 0.5;
+    ctx.globalAlpha = fade;
+    const a0 = i * 1.4 + game.time * 0.00012;
+    ctx.beginPath();
+    ctx.ellipse(LAGOON.cx, LAGOON.cy, rx, ry, 0, a0, a0 + 1.1);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(LAGOON.cx, LAGOON.cy, rx, ry, 0, a0 + 2.6, a0 + 3.4);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ── beach props: a palm, a sandcastle, and the crab ──────────────────────────
+
+function paintPalm(x, y) {
+  const sway = Math.sin(game.time * 0.0009) * 0.05 + Math.sin(game.time * 0.0004 + 1.3) * 0.03;
+  ctx.save();
+  ctx.translate(x, y);
+  // shadow
+  ctx.fillStyle = "rgba(150,105,50,0.28)";
+  ctx.beginPath();
+  ctx.ellipse(6, 4, 40, 13, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // trunk
+  ctx.strokeStyle = "#8a5c33";
+  ctx.lineWidth = 15;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.quadraticCurveTo(14 + sway * 40, -60, 34 + sway * 90, -112);
+  ctx.stroke();
+  ctx.strokeStyle = "#6f4826";
+  ctx.lineWidth = 2;
+  for (let i = 1; i <= 4; i += 1) {
+    const t = i / 5;
+    const px = 14 * t * 2 * (1 - t) + 34 * t * t + sway * 90 * t * t;
+    const py = -60 * 2 * t * (1 - t) - 112 * t * t;
+    ctx.beginPath();
+    ctx.moveTo(px - 6, py);
+    ctx.lineTo(px + 6, py + 3);
+    ctx.stroke();
+  }
+  // crown
+  const cx = 34 + sway * 90;
+  const cy = -112;
+  for (let i = 0; i < 7; i += 1) {
+    const a = -Math.PI + (i / 6) * Math.PI + sway * 0.5;
+    const flutter = Math.sin(game.time * 0.0025 + i * 1.7) * 0.07;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(a + flutter);
+    ctx.fillStyle = i % 2 === 0 ? "#3f9e46" : "#4fb356";
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(38, -16, 74, 4);
+    ctx.quadraticCurveTo(40, 10, 0, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle = "#6f4826";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function paintCastle(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = "rgba(150,105,50,0.28)";
+  ctx.beginPath();
+  ctx.ellipse(4, 4, 62, 16, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const wall = "#f0e0bb";
+  const shade = "#d6c095";
+  // The castle is a low curtain wall with three towers of DIFFERENT heights
+  // standing clear of it — a row of same-height blocks reads as a fence.
+  const tower = (tx, top, w) => {
+    ctx.fillStyle = wall;
+    ctx.fillRect(tx - w / 2, top, w, -top - 30);
+    ctx.fillStyle = shade;
+    ctx.fillRect(tx + w / 2 - 7, top, 7, -top - 30);
+    ctx.fillStyle = wall;
+    const merlons = Math.max(2, Math.round(w / 11));
+    const step = w / merlons;
+    for (let i = 0; i < merlons; i += 1) {
+      ctx.fillRect(tx - w / 2 + i * step, top - 9, step - 3, 10);
+    }
+    // a dark arrow-slit window
+    ctx.fillStyle = "#a8916a";
+    ctx.fillRect(tx - 3, top + 16, 6, 11);
+  };
+  // curtain wall, behind the towers
+  ctx.fillStyle = shade;
+  ctx.fillRect(-52, -46, 104, 46);
+  ctx.fillStyle = wall;
+  ctx.fillRect(-52, -52, 104, 9);
+  for (let i = 0; i < 7; i += 1) ctx.fillRect(-52 + i * 15, -60, 10, 10);
+  // gate
+  ctx.fillStyle = "#a8916a";
+  ctx.beginPath();
+  ctx.moveTo(-11, 0);
+  ctx.lineTo(-11, -22);
+  ctx.quadraticCurveTo(0, -34, 11, -22);
+  ctx.lineTo(11, 0);
+  ctx.closePath();
+  ctx.fill();
+  tower(-44, -74, 30);
+  tower(46, -96, 32);
+  tower(6, -60, 24);
+  // flag on the tall tower
+  ctx.strokeStyle = "#9c8a63";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(46, -104);
+  ctx.lineTo(46, -134);
+  ctx.stroke();
+  ctx.fillStyle = "#e0483f";
+  const wave = Math.sin(game.time * 0.005) * 3;
+  ctx.beginPath();
+  ctx.moveTo(46, -134);
+  ctx.lineTo(74, -128 + wave);
+  ctx.lineTo(46, -120);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function paintCrab(x, y, wave) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = "rgba(150,105,50,0.28)";
+  ctx.beginPath();
+  ctx.ellipse(2, 4, 34, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const bob = Math.sin(game.time * 0.004) * 2;
+  ctx.translate(0, bob);
+  const red = "#e2503f";
+  const redDark = "#c33b2c";
+  // legs
+  ctx.strokeStyle = redDark;
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  for (let side = -1; side <= 1; side += 2) {
+    for (let i = 0; i < 3; i += 1) {
+      const wig = Math.sin(game.time * 0.008 + i * 1.4 + side) * 3;
+      ctx.beginPath();
+      ctx.moveTo(side * 16, -10 + i * 5);
+      ctx.lineTo(side * 30, -4 + i * 5 + wig);
+      ctx.stroke();
+    }
+  }
+  // claws
+  for (let side = -1; side <= 1; side += 2) {
+    const lift = side === 1 ? wave * 16 : wave * 6;
+    ctx.save();
+    ctx.translate(side * 24, -22 - lift);
+    ctx.rotate(side * 0.4 - wave * 0.5 * side);
+    ctx.fillStyle = red;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 11, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = redDark;
+    ctx.beginPath();
+    ctx.moveTo(-2, -2);
+    ctx.lineTo(12, -7);
+    ctx.lineTo(12, 1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  // body
+  ctx.fillStyle = red;
+  ctx.beginPath();
+  ctx.ellipse(0, -18, 20, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#f06a56";
+  ctx.beginPath();
+  ctx.ellipse(0, -22, 15, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // eyes on stalks
+  for (let side = -1; side <= 1; side += 2) {
+    ctx.strokeStyle = red;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(side * 7, -28);
+    ctx.lineTo(side * 8, -38);
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(side * 8, -41, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#20242c";
+    ctx.beginPath();
+    ctx.arc(side * 8 + side * 1, -41, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ─── the chest ───────────────────────────────────────────────────────────────
+
+const WOOD = "#9a6432";
+const WOOD_DARK = "#7c4d26";
+const WOOD_LINE = "#6d4222";
+const GOLD = "#ffcc4d";
+const GOLD_DARK = "#dda528";
+const INTERIOR = "#f6e7bd";
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+/**
+ * The lid's silhouette, centred on the origin and `arch` tall.
+ *
+ * `curve` in [0,1] is how much of that height is spent on the barrel dome. A
+ * CLOSED lid is nearly all dome — that curved top is what makes it read as a
+ * treasure chest rather than a box. As it swings up the dome flattens out,
+ * because what the player is now looking at is the lid's flat inner face.
+ */
+function lidPath(w, arch, curve) {
+  const shoulder = arch * (0.16 + 0.72 * (1 - curve));
+  ctx.beginPath();
+  ctx.moveTo(-w / 2, 0);
+  ctx.lineTo(-w / 2, -shoulder);
+  ctx.quadraticCurveTo(0, -arch - arch * 0.3 * curve, w / 2, -shoulder);
+  ctx.lineTo(w / 2, 0);
+  ctx.closePath();
+}
+
+/** How tall the lid's inner face stands once it is fully open. */
+const LID_PANEL = 72;
+
+/**
+ * Draw one chest with its base at the origin, body rising in -y.
+ * `open` is the lid angle in radians (0 closed, ~1.9 wide open),
+ * `latch` in [0,1] is how far the latch has swung down, `glow` in [0,1] is the
+ * warm light spilling out of the mouth.
+ */
+function paintChest(open, latch, glow, brand) {
+  const w = CHEST_W;
+  const h = CHEST_H;
+  const lidW = w + 10;
+
+  // ground shadow
+  ctx.fillStyle = "rgba(20,60,70,0.22)";
+  ctx.beginPath();
+  ctx.ellipse(0, 6, w * 0.55, 13, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── the lid, drawn FIRST because it lives behind the body ──
+  //
+  // The hinge is the body's back edge, and that edge is horizontal — so in a
+  // straight-on 2D view the lid does not swing off to one side. It STANDS UP:
+  // its silhouette grows from a shallow arch into the tall inner face it
+  // presents once open, and it keeps the chest's own centre line throughout.
+  const openT = clamp01(open / 1.9);
+  const arch = LID_H + (LID_PANEL - LID_H) * openT;
+  const curve = 1 - openT * 0.86;
+  const faceIn = smoothstep(clamp01((openT - 0.22) / 0.5));
+  ctx.save();
+  ctx.translate(0, -h + 2);
+  ctx.rotate(-openT * 0.1);
+  // the lid's own wood — the outer shell, seen edge-on and then from behind
+  const lidGrad = ctx.createLinearGradient(0, -arch, 0, 0);
+  lidGrad.addColorStop(0, "#a86d36");
+  lidGrad.addColorStop(1, WOOD_DARK);
+  ctx.fillStyle = lidGrad;
+  lidPath(lidW, arch, curve);
+  ctx.fill();
+  ctx.save();
+  lidPath(lidW, arch, curve);
+  ctx.clip();
+  // gold straps, continuing the body's — clipped so they never overshoot the arch
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(-w / 2 + 14, -arch - 20, 13, arch + 20);
+  ctx.fillRect(w / 2 - 27, -arch - 20, 13, arch + 20);
+  // the pale inner face, fading in as the lid comes upright
+  ctx.globalAlpha = faceIn;
+  const faceGrad = ctx.createLinearGradient(0, -arch, 0, 0);
+  faceGrad.addColorStop(0, "#fff3cf");
+  faceGrad.addColorStop(1, INTERIOR);
+  ctx.fillStyle = faceGrad;
+  ctx.fillRect(-lidW / 2 + 7, -arch - 20, lidW - 14, arch + 12);
+  ctx.globalAlpha = faceIn * 0.5;
+  ctx.strokeStyle = "#d8b57a";
+  ctx.lineWidth = 2;
+  for (let i = 1; i < 4; i += 1) {
+    const x = -lidW / 2 + (lidW * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(x, -arch);
+    ctx.lineTo(x, 0);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // ── interior, visible once the lid lifts ──
+  if (open > 0.02) {
+    const mouth = Math.min(1, open / 1.2);
+    ctx.save();
+    ctx.fillStyle = "#4a2d16";
+    roundRect(-w / 2 + 6, -h - 4, w - 12, 16 + 12 * mouth, 4);
+    ctx.fill();
+    // warm light pooling in the mouth
+    const lg = ctx.createLinearGradient(0, -h - 4, 0, -h + 18);
+    lg.addColorStop(0, `rgba(255,232,150,${0.85 * glow})`);
+    lg.addColorStop(1, `rgba(255,190,80,0)`);
+    ctx.fillStyle = lg;
+    roundRect(-w / 2 + 6, -h - 8, w - 12, 30, 4);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ── body ──
+  const bodyGrad = ctx.createLinearGradient(0, -h, 0, 0);
+  bodyGrad.addColorStop(0, WOOD);
+  bodyGrad.addColorStop(1, WOOD_DARK);
+  ctx.fillStyle = bodyGrad;
+  roundRect(-w / 2, -h, w, h, 7);
+  ctx.fill();
+
+  // planks
+  ctx.strokeStyle = WOOD_LINE;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.55;
+  for (let i = 1; i < 5; i += 1) {
+    const x = -w / 2 + (w * i) / 5;
+    ctx.beginPath();
+    ctx.moveTo(x, -h + 4);
+    ctx.lineTo(x, -3);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // gold straps + rims
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(-w / 2 + 14, -h, 13, h);
+  ctx.fillRect(w / 2 - 27, -h, 13, h);
+  ctx.fillStyle = GOLD_DARK;
+  ctx.fillRect(-w / 2 + 23, -h, 4, h);
+  ctx.fillRect(w / 2 - 18, -h, 4, h);
+  ctx.fillStyle = GOLD;
+  roundRect(-w / 2, -8, w, 8, 3);
+  ctx.fill();
+
+  // brand plaque (the middle chest carries the house name)
+  if (brand) {
+    ctx.fillStyle = "#d8402f";
+    roundRect(-30, -h + 14, 60, 22, 4);
+    ctx.fill();
+    ctx.fillStyle = "#fff2d6";
+    ctx.font = "bold 15px 'Trebuchet MS', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("ACME", 0, -h + 26);
+  }
+
+  // ── latch: swings down and away first, before anything else moves ──
+  ctx.save();
+  ctx.translate(0, -h + 4);
+  ctx.rotate(latch * 1.5);
+  ctx.fillStyle = GOLD;
+  roundRect(-13, -2, 26, 22, 4);
+  ctx.fill();
+  ctx.fillStyle = GOLD_DARK;
+  roundRect(-6, 6, 12, 9, 2);
+  ctx.fill();
+  ctx.restore();
+
+}
+
+// ─── treasures, drawn flat and face-on ───────────────────────────────────────
+
+function paintGoldCoin(t) {
+  const tilt = Math.abs(Math.cos(t * 0.0018));
+  ctx.fillStyle = GOLD_DARK;
+  ctx.beginPath();
+  ctx.ellipse(0, 3, 46 * tilt + 6, 48, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = GOLD;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 46 * tilt + 6, 48, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#ffe08a";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 34 * tilt + 4, 36, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = GOLD_DARK;
+  ctx.font = `bold ${Math.round(38 * (0.35 + tilt * 0.65))}px 'Trebuchet MS', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("$", 0, 2);
+}
+
+function paintGoldBar() {
+  const draw = (dy, wTop, wBot, fill, top) => {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(-wTop, dy - 15);
+    ctx.lineTo(wTop, dy - 15);
+    ctx.lineTo(wBot, dy + 15);
+    ctx.lineTo(-wBot, dy + 15);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = top;
+    ctx.beginPath();
+    ctx.ellipse(0, dy - 15, wTop, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  draw(34, 44, 52, GOLD_DARK, "#f0b93a");
+  draw(2, 40, 47, GOLD, "#ffdd7a");
+  draw(-28, 34, 40, "#ffd76a", "#fff0b8");
+}
+
+function paintPearlClam(t) {
+  const open = 0.42 + Math.sin(t * 0.002) * 0.06;
+  ctx.save();
+  // lower shell
+  ctx.fillStyle = "#f3b9d0";
+  ctx.beginPath();
+  ctx.moveTo(-56, 18);
+  ctx.quadraticCurveTo(0, 62, 56, 18);
+  ctx.quadraticCurveTo(0, 6, -56, 18);
+  ctx.closePath();
+  ctx.fill();
+  // pearl
+  const pg = ctx.createRadialGradient(-8, -6, 3, 0, 0, 26);
+  pg.addColorStop(0, "#ffffff");
+  pg.addColorStop(0.6, "#f3e8f5");
+  pg.addColorStop(1, "#d9c6e2");
+  ctx.fillStyle = pg;
+  ctx.beginPath();
+  ctx.arc(0, -2, 23, 0, Math.PI * 2);
+  ctx.fill();
+  // upper shell, hinged open
+  ctx.save();
+  ctx.translate(0, 16);
+  ctx.rotate(-open);
+  ctx.fillStyle = "#ffd0e2";
+  ctx.beginPath();
+  ctx.moveTo(-56, 0);
+  ctx.quadraticCurveTo(0, -56, 56, 0);
+  ctx.quadraticCurveTo(0, 10, -56, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#e79bbb";
+  ctx.lineWidth = 2;
+  for (let i = -2; i <= 2; i += 1) {
+    ctx.beginPath();
+    ctx.moveTo(0, 2);
+    ctx.quadraticCurveTo(i * 18, -30, i * 26, -4);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.restore();
+}
+
+function paintCrabBride(t) {
+  const bob = Math.sin(t * 0.004) * 3;
+  ctx.save();
+  ctx.translate(0, bob);
+  ctx.scale(1.5, 1.5);
+  // The veil hangs BEHIND her and only grazes her shell — drawn over the top of
+  // her it just erased the crab, which is the one thing the prize needs to be.
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.beginPath();
+  ctx.moveTo(0, -36);
+  ctx.quadraticCurveTo(44, -20, 34, 22);
+  ctx.quadraticCurveTo(0, 34, -34, 22);
+  ctx.quadraticCurveTo(-44, -20, 0, -36);
+  ctx.closePath();
+  ctx.fill();
+  paintCrabBody();
+  ctx.fillStyle = "rgba(255,255,255,0.3)";
+  ctx.beginPath();
+  ctx.moveTo(0, -30);
+  ctx.quadraticCurveTo(26, -22, 22, 4);
+  ctx.quadraticCurveTo(0, 12, -22, 4);
+  ctx.quadraticCurveTo(-26, -22, 0, -30);
+  ctx.closePath();
+  ctx.fill();
+  // little flower crown
+  for (let i = -1; i <= 1; i += 1) {
+    ctx.fillStyle = i === 0 ? "#ffd6e6" : "#fff4b8";
+    ctx.beginPath();
+    ctx.arc(i * 10, -34, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function paintCrabBody() {
+  const red = "#e2503f";
+  const redDark = "#c33b2c";
+  ctx.strokeStyle = redDark;
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  for (let side = -1; side <= 1; side += 2) {
+    for (let i = 0; i < 3; i += 1) {
+      ctx.beginPath();
+      ctx.moveTo(side * 16, 2 + i * 5);
+      ctx.lineTo(side * 30, 8 + i * 5);
+      ctx.stroke();
+    }
+  }
+  for (let side = -1; side <= 1; side += 2) {
+    ctx.save();
+    ctx.translate(side * 26, -12);
+    ctx.rotate(side * 0.5);
+    ctx.fillStyle = red;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 11, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle = red;
+  ctx.beginPath();
+  ctx.ellipse(0, -6, 22, 15, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#f06a56";
+  ctx.beginPath();
+  ctx.ellipse(0, -10, 16, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  for (let side = -1; side <= 1; side += 2) {
+    ctx.strokeStyle = red;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(side * 7, -17);
+    ctx.lineTo(side * 8, -27);
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(side * 8, -30, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#20242c";
+    ctx.beginPath();
+    ctx.arc(side * 8, -30, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function paintWeddingRing(t) {
+  ctx.save();
+  ctx.rotate(Math.sin(t * 0.0015) * 0.18);
+  // band
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = 11;
+  ctx.beginPath();
+  ctx.ellipse(0, 16, 34, 34, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "#ffe79c";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.ellipse(0, 16, 34, 34, 0, Math.PI * 0.9, Math.PI * 1.9);
+  ctx.stroke();
+  // diamond
+  const grd = ctx.createLinearGradient(0, -46, 0, -6);
+  grd.addColorStop(0, "#ffffff");
+  grd.addColorStop(0.5, "#c9f2ff");
+  grd.addColorStop(1, "#7fd6f2");
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.moveTo(0, -8);
+  ctx.lineTo(-26, -32);
+  ctx.lineTo(-14, -46);
+  ctx.lineTo(14, -46);
+  ctx.lineTo(26, -32);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-26, -32); ctx.lineTo(26, -32);
+  ctx.moveTo(-14, -46); ctx.lineTo(-8, -32); ctx.lineTo(0, -8);
+  ctx.moveTo(14, -46); ctx.lineTo(8, -32); ctx.lineTo(0, -8);
+  ctx.stroke();
+  ctx.restore();
+}
+
+const PRIZE_PAINTERS = {
+  "gold-coin": paintGoldCoin,
+  "gold-bar": paintGoldBar,
+  "pearl-clam": paintPearlClam,
+  "crab-bride": paintCrabBride,
+  "wedding-ring": paintWeddingRing,
+};
+
+// ─── sparks (the light burst as the lid lands open) ──────────────────────────
+
+function spawnBurst(x, y, accent) {
+  for (let i = 0; i < 26; i += 1) {
+    const a = -Math.PI / 2 + (hash(i * 1.7 + game.time) - 0.5) * 2.4;
+    const speed = 0.18 + hash(i * 3.1 + game.time) * 0.34;
+    game.sparks.push({
+      x, y,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed,
+      life: 0,
+      span: 700 + hash(i * 5.9) * 600,
+      size: 3 + hash(i * 7.3) * 5,
+      accent,
+    });
+  }
+}
+
+function stepSparks(dt) {
+  for (const s of game.sparks) {
+    s.life += dt;
+    s.x += s.vx * dt;
+    s.y += s.vy * dt;
+    s.vy += 0.00042 * dt;
+  }
+  game.sparks = game.sparks.filter((s) => s.life < s.span);
+}
+
+function paintSparks() {
+  for (const s of game.sparks) {
+    const k = 1 - s.life / s.span;
+    ctx.globalAlpha = k;
+    ctx.fillStyle = s.accent;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.size * k, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ─── the reveal ritual, read off the phase clock ─────────────────────────────
+
+function revealPose() {
+  const a = game.revealTime;
+  const shake = a < T.brace ? Math.sin(a * 0.06) * 3 * (1 - a / T.brace) : 0;
+  const latch = clamp01((a - T.brace) / T.latch);
+  const open = smoothstep(clamp01((a - T.lidStart) / T.lid)) * 1.9;
+  const glow = clamp01((a - T.latchEnd) / 260);
+  const rise = clamp01((a - T.lidEnd) / T.rise);
+  return { shake, latch, open, glow, rise };
+}
+
+// ─── painting the whole frame ────────────────────────────────────────────────
+
+function paintHud() {
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "rgba(60,38,16,0.72)";
+  ctx.font = "bold 26px 'Trebuchet MS', sans-serif";
+  ctx.fillText("TREASURE CHEST PICK", 26, 44);
+  ctx.font = "16px 'Trebuchet MS', sans-serif";
+  ctx.fillStyle = "rgba(70,46,20,0.62)";
+  ctx.fillText("Nine chests. One pick. The latch tells you nothing.", 26, 68);
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(60,38,16,0.72)";
+  ctx.font = "bold 26px 'Trebuchet MS', sans-serif";
+  ctx.fillText(String(game.score), WORLD_W - 26, 44);
+  ctx.font = "14px 'Trebuchet MS', sans-serif";
+  ctx.fillStyle = "rgba(70,46,20,0.6)";
+  ctx.fillText("TREASURE", WORLD_W - 26, 64);
+}
+
+const BUTTON = { x: WORLD_W / 2 - 96, y: WORLD_H - 76, w: 192, h: 50 };
+
+function paintBanner() {
+  const t = clamp01(game.phaseTime / 260);
+  const y = WORLD_H - 190 + (1 - easeOutCubic(t)) * 40;
+  ctx.globalAlpha = t;
+
+  ctx.fillStyle = "rgba(24,32,40,0.88)";
+  roundRect(WORLD_W / 2 - 250, y, 500, 78, 14);
+  ctx.fill();
+  ctx.strokeStyle = game.prize.accent;
+  ctx.lineWidth = 3;
+  roundRect(WORLD_W / 2 - 250, y, 500, 78, 14);
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#fff3d6";
+  ctx.font = "bold 28px 'Trebuchet MS', sans-serif";
+  ctx.fillText(`You found ${game.prize.label}!`, WORLD_W / 2, y + 28);
+  ctx.fillStyle = game.prize.accent;
+  ctx.font = "bold 22px 'Trebuchet MS', sans-serif";
+  ctx.fillText(`+${game.prize.amount}`, WORLD_W / 2, y + 56);
+
+  // play again
+  const hot = game.hover === -2;
+  ctx.fillStyle = hot ? "#ffd964" : GOLD;
+  roundRect(BUTTON.x, BUTTON.y, BUTTON.w, BUTTON.h, 12);
+  ctx.fill();
+  ctx.fillStyle = "#4a3110";
+  ctx.font = "bold 20px 'Trebuchet MS', sans-serif";
+  ctx.fillText("PLAY AGAIN", WORLD_W / 2, BUTTON.y + BUTTON.h / 2 + 1);
+  ctx.globalAlpha = 1;
+}
+
+function heroTransform() {
+  // Where the chosen chest is right now: on its slot at t=0, at the hero
+  // framing at t=1, on a small arc between the two.
+  const from = slotPos(game.chosen);
+  const t = game.phase === PHASE.COMMIT ? smoothstep(clamp01(game.phaseTime / T.commit)) : 1;
+  const arc = Math.sin(Math.PI * t) * 54;
+  return {
+    x: from.x + (HERO.x - from.x) * t,
+    y: from.y + (HERO.y - from.y) * t - arc,
+    scale: 1 + (HERO.scale - 1) * t,
+    t,
+  };
+}
+
+function paintFrame() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(view.scale, 0, 0, view.scale, view.offsetX, view.offsetY);
+
+  paintBeach();
+  paintPalm(112, 236);
+  paintCastle(848, 214);
+  const revealing = game.phase === PHASE.REVEAL || game.phase === PHASE.RESULT;
+  paintCrab(96, 508, revealing ? 0 : Math.max(0, Math.sin(game.time * 0.0012)));
+  paintLagoon();
+
+  const committed = game.chosen !== null;
+  const hero = committed ? heroTransform() : null;
+  const pose = game.phase === PHASE.REVEAL || game.phase === PHASE.RESULT
+    ? revealPose()
+    : { shake: 0, latch: 0, open: 0, glow: 0, rise: 0 };
+
+  // ── the board: the eight chests that were not chosen ──
+  // They stay exactly where the player left them and simply recede as the
+  // chosen chest comes forward.
+  const recede = committed ? hero.t : 0;
+  for (let i = 0; i < CHEST_COUNT; i += 1) {
+    if (i === game.chosen) continue;
+    const at = slotPos(i);
+    const dance = dancePose(i);
+    const hovered = game.hover === i && game.phase === PHASE.READY;
+    ctx.save();
+    ctx.globalAlpha = 1 - recede * 0.82;
+    ctx.translate(at.x + dance.scoot, at.y + idleBob(i) - (hovered ? 9 : 0));
+    ctx.rotate(dance.twist);
+    ctx.scale(1 + dance.squash * 0.5 + (hovered ? 0.05 : 0), 1 - dance.squash + (hovered ? 0.05 : 0));
+    if (hovered) {
+      ctx.shadowColor = "rgba(255,225,140,0.95)";
+      ctx.shadowBlur = 26;
+    }
+    paintChest(0, 0, 0, i === 4);
+    ctx.restore();
+  }
+
+  // ── the veil: the board sinks back so the chosen chest owns the frame ──
+  if (committed) {
+    ctx.fillStyle = `rgba(10,18,26,${0.72 * hero.t})`;
+    ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  }
+
+  // ── the chosen chest ──
+  if (committed) {
+    const glowR = 150 + pose.rise * 90;
+    if (pose.glow > 0.02) {
+      const gg = ctx.createRadialGradient(hero.x, hero.y - 120, 10, hero.x, hero.y - 110, glowR);
+      gg.addColorStop(0, `rgba(255,236,170,${0.5 * pose.glow})`);
+      gg.addColorStop(1, "rgba(255,200,90,0)");
+      ctx.fillStyle = gg;
+      ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+    }
+
+    ctx.save();
+    ctx.translate(hero.x + pose.shake, hero.y);
+    ctx.scale(hero.scale, hero.scale);
+    paintChest(pose.open, pose.latch, pose.glow, false);
+    ctx.restore();
+
+    // ── the treasure, climbing clear of the mouth ──
+    if (pose.rise > 0) {
+      const climb = easeOutBack(clamp01(pose.rise));
+      const px = hero.x;
+      // The climb is budgeted against the open lid: the treasure must clear the
+      // chest's mouth and own the air above it, without ever leaving the frame.
+      const py = hero.y - CHEST_H * hero.scale - 12 - climb * 62;
+      const scale = 0.42 + climb * 0.7;
+      // halo
+      const hg = ctx.createRadialGradient(px, py, 4, px, py, 130 * scale);
+      hg.addColorStop(0, "rgba(255,248,214,0.55)");
+      hg.addColorStop(1, "rgba(255,225,150,0)");
+      ctx.fillStyle = hg;
+      ctx.beginPath();
+      ctx.arc(px, py, 130 * scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.translate(px, py + Math.sin(game.time * 0.003) * 5);
+      ctx.scale(scale, scale);
+      PRIZE_PAINTERS[game.prize.id](game.time);
+      ctx.restore();
+    }
+  }
+
+  paintSparks();
+  paintHud();
+
+  if (game.phase === PHASE.READY) {
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(50,32,12,0.7)";
+    ctx.font = "bold 20px 'Trebuchet MS', sans-serif";
+    ctx.fillText("Pick a chest", WORLD_W / 2, WORLD_H - 44);
+  }
+  if (game.phase === PHASE.RESULT) paintBanner();
+}
+
+// ─── the loop ────────────────────────────────────────────────────────────────
+
+let last = performance.now();
+let burstFired = false;
+
+function frame(now) {
+  const dt = Math.min(now - last, 50);
+  last = now;
+  game.time += dt;
+  game.phaseTime += dt;
+
+  if (game.phase === PHASE.COMMIT && game.phaseTime >= T.commit) {
+    game.phase = PHASE.REVEAL;
+    game.phaseTime = 0;
+    game.revealTime = 0;
+    burstFired = false;
+  }
+  // The reveal clock runs through the result too, and stops at the end of the
+  // ritual — so the chest holds its open pose instead of opening again.
+  if (game.phase === PHASE.REVEAL || game.phase === PHASE.RESULT) {
+    game.revealTime = Math.min(game.revealTime + dt, T.revealEnd);
+  }
+  if (game.phase === PHASE.REVEAL) {
+    if (!burstFired && game.revealTime >= T.lidEnd) {
+      burstFired = true;
+      spawnBurst(HERO.x, HERO.y - CHEST_H * HERO.scale - 20, game.prize.accent);
+    }
+    if (game.revealTime >= T.revealEnd) {
+      game.phase = PHASE.RESULT;
+      game.phaseTime = 0;
+      game.score += game.prize.amount;
+    }
+  }
+
+  stepSparks(dt);
+  paintFrame();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ─── input ───────────────────────────────────────────────────────────────────
+
+function chestAt(p) {
+  for (let i = 0; i < CHEST_COUNT; i += 1) {
+    const at = slotPos(i);
+    if (
+      p.x > at.x - CHEST_W / 2 - 6 && p.x < at.x + CHEST_W / 2 + 6 &&
+      p.y > at.y - CHEST_H - LID_H - 6 && p.y < at.y + 10
+    ) return i;
+  }
+  return -1;
+}
+
+function inButton(p) {
+  return p.x > BUTTON.x && p.x < BUTTON.x + BUTTON.w && p.y > BUTTON.y && p.y < BUTTON.y + BUTTON.h;
+}
+
+canvas.addEventListener("pointermove", (e) => {
+  const p = toWorld(e.clientX, e.clientY);
+  if (game.phase === PHASE.RESULT) {
+    game.hover = inButton(p) ? -2 : -1;
+  } else if (game.phase === PHASE.READY) {
+    game.hover = chestAt(p);
+  } else {
+    game.hover = -1;
+  }
+  canvas.style.cursor = game.hover !== -1 ? "pointer" : "default";
+});
+
+canvas.addEventListener("pointerdown", (e) => {
+  const p = toWorld(e.clientX, e.clientY);
+  if (game.phase === PHASE.READY) {
+    const hit = chestAt(p);
+    if (hit >= 0) pick(hit);
+    return;
+  }
+  if (game.phase === PHASE.RESULT && inButton(p)) {
+    game.hover = -1;
+    startRound();
+  }
+});
+
+// Keyboard: arrows move the highlight, Enter opens — the same affordance the
+// real game offers.
+let keyIndex = 4;
+window.addEventListener("keydown", (e) => {
+  if (game.phase === PHASE.RESULT && (e.key === "Enter" || e.key === " ")) {
+    startRound();
+    return;
+  }
+  if (game.phase !== PHASE.READY) return;
+  const col = keyIndex % COLS;
+  const row = Math.floor(keyIndex / COLS);
+  if (e.key === "ArrowLeft") keyIndex = row * COLS + Math.max(0, col - 1);
+  else if (e.key === "ArrowRight") keyIndex = row * COLS + Math.min(COLS - 1, col + 1);
+  else if (e.key === "ArrowUp") keyIndex = Math.max(0, row - 1) * COLS + col;
+  else if (e.key === "ArrowDown") keyIndex = Math.min(ROWS - 1, row + 1) * COLS + col;
+  else if (e.key === "Enter" || e.key === " ") { pick(keyIndex); return; }
+  else return;
+  e.preventDefault();
+  game.hover = keyIndex;
+});
+</script>
+</body>
+</html>

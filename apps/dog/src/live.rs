@@ -21,8 +21,10 @@ use axiom_windowing::WindowingApi;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+use crate::camera_lock::{CameraLock, LOCK_KEY};
 use crate::config::SceneConfig;
 use crate::debug_view::{chart_rgba, DebugView, CHART_SIZE};
+use crate::herd::Herd;
 use crate::orbit::OrbitState;
 use crate::page_url;
 use crate::rings::MAX_DOGS;
@@ -38,6 +40,10 @@ const CONTROLS_ID: &str = "dog-controls";
 /// The element the stage switch is built inside. The page supplies it empty;
 /// both buttons in it come from `src/stage_input.rs`.
 const STAGES_ID: &str = "dog-stages";
+
+/// The element the camera-lock button is built inside. The page supplies it
+/// empty; the button in it comes from `src/lock_input.rs`.
+const LOCK_ID: &str = "dog-lock";
 
 /// The live backend's instance-buffer capacity, in **total instances across all
 /// batches** — the renderer packs every batch back-to-back into one buffer and
@@ -124,10 +130,26 @@ pub fn dog_start() {
     // The camera the page drives. `OrbitState::for_stage` seeds itself from the
     // stage's own authored eye/target, so the first frame is the shot that stage
     // has always opened on; every later frame is whatever the user's gestures
-    // have made of it.
-    let orbit: Rc<RefCell<OrbitState>> = Rc::new(RefCell::new(OrbitState::for_stage(stage.get())));
-    crate::pointer_input::install(CANVAS_ID, orbit.clone());
+    // have made of it — unless the lock is on, in which case the shot is exactly
+    // this one until the button says otherwise. The lock comes out of the query
+    // string for the same reason the stage does: a reload must not undo it.
+    let orbit: Rc<RefCell<OrbitState>> = Rc::new(RefCell::new(
+        OrbitState::for_stage(stage.get())
+            .with_lock(CameraLock::from_param(&page_url::param(LOCK_KEY))),
+    ));
+    // How far each dog has been knocked off its ring, and which one is in the
+    // user's hand. Shared exactly as the configuration and the camera are: the
+    // pointer writes it, the frame reads it and advances it. An untouched field
+    // leaves it empty, and an empty herd draws precisely the walk the rings
+    // define — see `src/herd.rs`.
+    let herd: Rc<RefCell<Herd>> = Rc::new(RefCell::new(Herd::undisturbed()));
+
+    // Order matters by one step: `pointer_input` installs the canvas's
+    // `touch-action` from the lock it finds, so it runs before anything can
+    // change that lock.
+    crate::pointer_input::install(CANVAS_ID, orbit.clone(), herd.clone());
     crate::stage_input::install(STAGES_ID, stage.clone(), orbit.clone());
+    crate::lock_input::install(LOCK_ID, CANVAS_ID, orbit.clone(), herd.clone());
     install_resize_reload(width, height);
 
     let _ = windowing.run_web_multi(CANVAS_ID, meshes, materials, LIVE_CAPACITY, move |tick| {
@@ -141,7 +163,13 @@ pub fn dog_start() {
         // slider position and a button, and nothing else, so the same triple
         // always draws the same pose. (On the study stage the tick is not read
         // at all: see `src/study.rs`.)
-        installed.animate(&mut running, tick, &config.borrow(), stage.get());
+        installed.animate(
+            &mut running,
+            tick,
+            &config.borrow(),
+            stage.get(),
+            &mut herd.borrow_mut(),
+        );
         let outcome = running.tick(tick);
         let lights = outcome
             .lights()
