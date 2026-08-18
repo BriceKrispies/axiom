@@ -4,5 +4,8 @@
 //! (`docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md`).
 
 pub mod barrel;
+pub mod controls;
 pub mod hardware;
 pub mod magazine;
+pub mod optics;
+pub mod receiver;
