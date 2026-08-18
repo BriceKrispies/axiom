@@ -145,3 +145,13 @@ Each of these has already cost real time on this port. Check for them by name.
 When the source is GLSL held in JS strings there is no native oracle to call, so the
 capture script has to re-implement it. That transcription is itself a risk — say so
 in the notes, and keep the re-implementation line-by-line faithful rather than tidy.
+
+- **Float arithmetic is not associative — do not tidy an expression.** `(a + b) + c`
+  differs from `a + (b + c)` in the last bits. Folding two sequential adds, hoisting
+  a common factor, or reordering a sum to read better all change the result and
+  silently break bit-exactness. Transcribe the source's grouping and left-to-right
+  order literally, however clumsy it looks. Caught mid-draft in `b893880d`.
+- **Dead computation in the source is still part of the source.** `foliage`'s
+  generator computes a value it never uses. Port it with a comment rather than
+  dropping it — the judgement that it is dead can be wrong, and preserving it costs
+  nothing.
