@@ -22,67 +22,7 @@ use crate::audio::dsp::{
 use crate::audio::graph::{AudioGraph, FilterKind, NodeId, Wave};
 use crate::audio::weapons::Voice;
 use crate::rng::Rng;
-
-/// The twelve surfaces every impact, footstep and casing is keyed on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Surface {
-    Concrete,
-    Plaster,
-    Metal,
-    Wood,
-    Dirt,
-    Sand,
-    Glass,
-    Water,
-    Foliage,
-    Fabric,
-    Flesh,
-    Rubber,
-}
-
-impl Surface {
-    pub const ALL: [Surface; 12] = [
-        Surface::Concrete,
-        Surface::Plaster,
-        Surface::Metal,
-        Surface::Wood,
-        Surface::Dirt,
-        Surface::Sand,
-        Surface::Glass,
-        Surface::Water,
-        Surface::Foliage,
-        Surface::Fabric,
-        Surface::Flesh,
-        Surface::Rubber,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Surface::Concrete => "concrete",
-            Surface::Plaster => "plaster",
-            Surface::Metal => "metal",
-            Surface::Wood => "wood",
-            Surface::Dirt => "dirt",
-            Surface::Sand => "sand",
-            Surface::Glass => "glass",
-            Surface::Water => "water",
-            Surface::Foliage => "foliage",
-            Surface::Fabric => "fabric",
-            Surface::Flesh => "flesh",
-            Surface::Rubber => "rubber",
-        }
-    }
-
-    /// The source's `IMPACT[o.surface] ?? IMPACT.concrete` — an unknown name
-    /// falls back to concrete, which is also what every caller's own
-    /// `p.surface ?? 'concrete'` already does.
-    pub fn from_str(name: &str) -> Surface {
-        Surface::ALL
-            .into_iter()
-            .find(|s| s.as_str() == name)
-            .unwrap_or(Surface::Concrete)
-    }
-}
+pub use crate::world::palette::Surface;
 
 /// A high-Q partial in a surface's ring bank.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -180,17 +120,12 @@ static GLASS_RING: [Ring; 4] = [
 ];
 static RUBBER_RING: [Ring; 1] = [Ring { f: 260.0, q: 9.0, g: 0.2, decay: 0.06 }];
 
-/// `IMPACT`, indexed by [`Surface::ALL`].
+/// `IMPACT`, indexed by [`Surface::ALL`] (equivalently, [`Surface::index`]).
 static IMPACT: [Impact; 12] = [
     // concrete
     Impact {
         dust: Some(Dust { f: 1200.0, decay: 0.3, level: 0.16 }),
         ..impact(0.85, 180.0, 0.05, tex(NoiseKind::White, 2600.0, 0.9, 0.075, 0.75), 5.0, 0.4)
-    },
-    // plaster
-    Impact {
-        dust: Some(Dust { f: 900.0, decay: 0.42, level: 0.26 }),
-        ..impact(0.7, 220.0, 0.035, tex(NoiseKind::White, 1900.0, 0.8, 0.05, 0.6), 6.0, 0.42)
     },
     // metal
     Impact {
@@ -246,10 +181,15 @@ static IMPACT: [Impact; 12] = [
         ring: &RUBBER_RING,
         ..impact(0.3, 190.0, 0.04, tex(NoiseKind::White, 1100.0, 0.9, 0.03, 0.3), 1.0, 0.2)
     },
+    // plaster
+    Impact {
+        dust: Some(Dust { f: 900.0, decay: 0.42, level: 0.26 }),
+        ..impact(0.7, 220.0, 0.035, tex(NoiseKind::White, 1900.0, 0.8, 0.05, 0.6), 6.0, 0.42)
+    },
 ];
 
 fn impact_for(s: Surface) -> &'static Impact {
-    &IMPACT[Surface::ALL.iter().position(|&x| x == s).unwrap_or(0)]
+    &IMPACT[usize::from(s.index())]
 }
 
 /* ------------------------------------------------------------------ */
@@ -486,33 +426,45 @@ static WOOD_STEP_RING: [Ring; 2] = [
     Ring { f: 540.0, q: 9.0, g: 0.14, decay: 0.05 },
 ];
 
-/// `STEP`, indexed by [`Surface::ALL`].
+/// `STEP`, indexed by [`Surface::ALL`] (equivalently, [`Surface::index`]).
 static STEP: [Step; 12] = [
+    // concrete
     step(92.0, 0.055, NoiseKind::White, 2100.0, 0.7, 0.045, 0.5, 0.35, 4),
-    step(100.0, 0.05, NoiseKind::White, 1800.0, 0.7, 0.05, 0.45, 0.3, 4),
+    // metal
     Step {
         ring: &METAL_STEP_RING,
         ..step(120.0, 0.05, NoiseKind::White, 3200.0, 1.0, 0.04, 0.5, 0.3, 2)
     },
+    // wood
     Step {
         ring: &WOOD_STEP_RING,
         ..step(110.0, 0.06, NoiseKind::White, 1300.0, 0.8, 0.04, 0.4, 0.28, 2)
     },
+    // dirt
     step(78.0, 0.07, NoiseKind::Brown, 620.0, 0.6, 0.075, 0.62, 0.45, 6),
+    // sand
     step(70.0, 0.06, NoiseKind::White, 1500.0, 0.45, 0.14, 0.6, 0.7, 3),
+    // glass
     step(96.0, 0.04, NoiseKind::Crackle, 5200.0, 0.8, 0.2, 0.6, 0.3, 9),
+    // water
     Step {
         splash: true,
         ..step(88.0, 0.045, NoiseKind::White, 1600.0, 0.7, 0.17, 0.8, 0.5, 3)
     },
+    // foliage
     step(84.0, 0.05, NoiseKind::Crackle, 2400.0, 0.7, 0.18, 0.7, 0.5, 6),
+    // fabric
     step(82.0, 0.05, NoiseKind::White, 800.0, 0.6, 0.05, 0.3, 0.35, 0),
+    // flesh
     step(86.0, 0.055, NoiseKind::White, 520.0, 1.2, 0.05, 0.35, 0.2, 0),
+    // rubber
     step(96.0, 0.04, NoiseKind::White, 1000.0, 0.8, 0.03, 0.28, 0.2, 0),
+    // plaster
+    step(100.0, 0.05, NoiseKind::White, 1800.0, 0.7, 0.05, 0.45, 0.3, 4),
 ];
 
 fn step_for(s: Surface) -> &'static Step {
-    &STEP[Surface::ALL.iter().position(|&x| x == s).unwrap_or(0)]
+    &STEP[usize::from(s.index())]
 }
 
 /// How the foot arrived.

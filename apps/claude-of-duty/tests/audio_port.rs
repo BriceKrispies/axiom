@@ -818,8 +818,8 @@ fn whizz_and_dryfire_build_the_javascript_graph() {
 #[test]
 fn every_surface_impact_builds_the_javascript_graph() {
     for s in Surface::ALL {
-        let name = format!("impact:{}", s.as_str());
-        let seed = 0x000B_0000u32 + s.as_str().len() as u32 * 977;
+        let name = format!("impact:{}", s.name());
+        let seed = 0x000B_0000u32 + s.name().len() as u32 * 977;
         voice_case(&name, seed, |g, bank, rng| {
             surface_impact(g, bank, rng, Some(0.02), s, 1.0)
         });
