@@ -31,7 +31,7 @@ For any routine that is pure maths or pure data:
    over a fixed set of inputs, and prints the results as JSON.
    Run it: `node <script>.mjs` (Node 24 is on PATH; the source repo has its
    dependencies installed already).
-2. Paste those captured values into a Rust test as expected constants.
+2. Have that script **write a JSON file** the test reads — see "Emit goldens to a file" below. Paste values inline only when there are few enough to check by eye.
 3. Assert:
    - **exact equality** for anything integer-derived, or built only from
      `+ - * /` and comparisons;
@@ -39,7 +39,7 @@ For any routine that is pure maths or pure data:
      `cos`, `ln`, `exp`, `pow` or `sqrt` are involved — those are not
      bit-guaranteed across libm implementations. State the tolerance and why in
      the test.
-4. Delete the capture script. The committed goldens are the artifact.
+4. Commit the golden file. Commit the capture script too when it is small enough to be worth rereading.
 
 Precedent: `apps/claude-of-duty/tests/core_port.rs` (commit `16fbf5d4`) pins the
 RNG this way — the `u32` stream from three seeds, exact `f64` equality on
