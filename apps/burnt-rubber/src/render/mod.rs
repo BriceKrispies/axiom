@@ -23,6 +23,7 @@ pub mod palette;
 pub mod pickups;
 pub mod prop_meshes;
 pub mod road_mesh;
+pub mod rock_mesh;
 pub mod scenery;
 pub mod scenery_pool;
 pub mod surface_builder;

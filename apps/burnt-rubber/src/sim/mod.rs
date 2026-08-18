@@ -294,6 +294,18 @@ impl RaceSim {
     }
 
     /// The traffic pool.
+    /// The traffic pool, mutably — for **staging** an encounter.
+    ///
+    /// A scripted scenario that wants a collision has to be able to put a car
+    /// where the collision will happen, because the road on its own no longer
+    /// guarantees one: shipping traffic cruises at very nearly the car's own top
+    /// speed, so a driver who simply chases the next car ahead closes on it at
+    /// under 9 m/s and may never reach it at all. A fixture that depended on
+    /// catching ambient traffic was measuring the flow, not the collision.
+    pub fn traffic_mut(&mut self) -> &mut Traffic {
+        &mut self.traffic
+    }
+
     pub const fn traffic(&self) -> &Traffic {
         &self.traffic
     }

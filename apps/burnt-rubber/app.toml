@@ -11,10 +11,12 @@ allowed_layers = [
     "runtime",
     # The asphalt grain is an authored `FieldGraph` (`render/asphalt_field.rs`)
     # baked to RGBA8 through `TextureOp::Field`; `recipe` is the container that
-    # one-node bake recipe is written in.
+    # one-node bake recipe is written in, and `proc-mesh` evaluates the graph the
+    # boulder is baked from into neutral geometry.
     "field",
     "proc-texture",
     "recipe",
+    "proc-mesh",
 ]
 
 allowed_modules = [

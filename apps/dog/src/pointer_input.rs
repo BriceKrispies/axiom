@@ -22,6 +22,41 @@
 //! `preventDefault()` on the events themselves closes those. The CSS is applied
 //! here as well as in the page stylesheet, so the behaviour travels with the
 //! code that depends on it.
+//!
+//! # ...and why the lock has to undo both
+//!
+//! Those two mechanisms are exactly what makes a locked camera insufficient on
+//! its own. A locked [`OrbitState`] ignores the gesture (see `src/orbit.rs`), but
+//! a canvas that keeps `touch-action: none` and keeps calling `preventDefault()`
+//! is still *consuming* it: the shot would hold still and the page would still
+//! refuse to scroll under the finger, which is the worse half of the feature.
+//!
+//! So every listener here reads the lock and, while it holds, returns before
+//! `preventDefault()`, and [`set_gestures`] hands the CSS property back as well.
+//! The canvas then behaves like any other element on the page: a drag scrolls,
+//! a pinch zooms the document, a right-click opens the menu.
+//!
+//! # Locked, the same gesture reaches the dogs instead
+//!
+//! With the camera still, a pointer position means something it could not mean
+//! before: a fixed line into the scene. So a locked press is offered to the
+//! crowd first — [`crate::Herd::grab`] turns it into a world ray through the
+//! same lens the frame was drawn with and catches whichever dog it passes
+//! nearest.
+//!
+//! That gives the canvas a rule with no ambiguity in it, and it is worth stating
+//! plainly because it decides who owns each event:
+//!
+//! * **on a dog** — the gesture is a drag. Captured and `preventDefault()`-ed,
+//!   exactly as an orbit would have been, for the same reason: a drag that
+//!   scrolled the page half way through would drop the animal.
+//! * **anywhere else** — the gesture is the page's. Not captured, not
+//!   prevented, so a swipe over the empty half of the canvas scrolls to the
+//!   dials as if the canvas were a picture.
+//!
+//! The unlocked camera keeps every gesture, as it must: a drag that meant
+//! "orbit" on one part of the canvas and "drag a dog" on another would be two
+//! gestures that cannot be told apart until after the ray is cast.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -31,10 +66,16 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use web_sys::{AddEventListenerOptions, Event, HtmlCanvasElement, PointerEvent, WheelEvent};
 
-use crate::orbit::OrbitState;
+use crate::camera_lock::CameraLock;
+use crate::herd::Herd;
+use crate::orbit::{OrbitState, Ray};
 
 /// The orbit state shared between the DOM listeners and the per-frame closure.
 pub type SharedOrbit = Rc<RefCell<OrbitState>>;
+
+/// The crowd's disturbance, shared between the DOM listeners and the per-frame
+/// closure that advances it.
+pub type SharedHerd = Rc<RefCell<Herd>>;
 
 /// `WheelEvent::delta_mode` values, and how many CSS pixels each unit is worth.
 /// Chrome reports pixels, Firefox reports lines; a page-mode wheel is rare but
@@ -60,19 +101,36 @@ struct Gesture {
 /// of the page, and the page's lifetime *is* the app's lifetime here — the run
 /// loop never returns, so there is no later moment at which tearing them down
 /// would mean anything.
-pub fn install(canvas_id: &str, orbit: SharedOrbit) {
+pub fn install(canvas_id: &str, orbit: SharedOrbit, herd: SharedHerd) {
     let Some(canvas) = canvas_element(canvas_id) else {
         return;
     };
-    // Belt and braces with the page stylesheet; see the module docs.
-    let _ = canvas.style().set_property("touch-action", "none");
+    // Belt and braces with the page stylesheet; see the module docs. Read from
+    // the orbit rather than hard-coded, so a page opened at `?lock=on` starts
+    // with the gestures already handed to the document.
+    set_gestures(canvas_id, orbit.borrow().lock());
 
     let gesture: Rc<RefCell<Gesture>> = Rc::new(RefCell::new(Gesture::default()));
 
     on_pointer(&canvas, "pointerdown", {
         let canvas = canvas.clone();
         let gesture = gesture.clone();
+        let orbit = orbit.clone();
+        let herd = herd.clone();
         move |event: PointerEvent| {
+            // Locked: the press is offered to the crowd. A dog under it makes
+            // this a drag; empty ground makes it the page's own gesture, so it
+            // is neither captured nor prevented and the page scrolls.
+            if orbit.borrow().lock().holds() {
+                let caught = scene_ray(&canvas, &orbit, &event)
+                    .map(|ray| herd.borrow_mut().grab(ray))
+                    .unwrap_or(false);
+                caught.then(|| {
+                    event.prevent_default();
+                    let _ = canvas.set_pointer_capture(event.pointer_id());
+                });
+                return;
+            }
             event.prevent_default();
             // Keep receiving moves after the drag leaves the canvas box.
             let _ = canvas.set_pointer_capture(event.pointer_id());
@@ -91,7 +149,28 @@ pub fn install(canvas_id: &str, orbit: SharedOrbit) {
         let canvas = canvas.clone();
         let gesture = gesture.clone();
         let orbit = orbit.clone();
+        let herd = herd.clone();
         move |event: PointerEvent| {
+            // Locked, a move is a drag if a dog was caught by the press that
+            // opened it, and nothing at all otherwise — a lock thrown mid-orbit
+            // therefore drops the rest of that orbit rather than holding the
+            // camera still while still eating the moves.
+            if orbit.borrow().lock().holds() {
+                // The read is bound to a `bool` and finished with *before* the
+                // write below. A `herd.borrow()` left inline in the condition
+                // would still be alive when the drag asks for `borrow_mut()` —
+                // temporaries live to the end of the whole statement — and a
+                // RefCell double borrow panics, which in a wasm frame loop means
+                // the canvas simply stops.
+                let dragging = herd.borrow().holding().is_some();
+                dragging.then(|| {
+                    event.prevent_default();
+                    scene_ray(&canvas, &orbit, &event)
+                        .into_iter()
+                        .for_each(|ray| herd.borrow_mut().drag(ray));
+                });
+                return;
+            }
             let mut gesture = gesture.borrow_mut();
             if !gesture.points.contains_key(&event.pointer_id()) {
                 return;
@@ -139,8 +218,14 @@ pub fn install(canvas_id: &str, orbit: SharedOrbit) {
         on_pointer(&canvas, name, {
             let canvas = canvas.clone();
             let gesture = gesture.clone();
+            let herd = herd.clone();
             move |event: PointerEvent| {
                 let _ = canvas.release_pointer_capture(event.pointer_id());
+                // Let go of the dog on *any* end of a pointer, including the
+                // cancel a browser fires when it takes the gesture away — a dog
+                // still held by a pointer that no longer exists would follow a
+                // stale point forever and never walk home.
+                herd.borrow_mut().release();
                 let mut gesture = gesture.borrow_mut();
                 gesture.points.remove(&event.pointer_id());
                 if gesture.points.is_empty() {
@@ -156,8 +241,13 @@ pub fn install(canvas_id: &str, orbit: SharedOrbit) {
     let wheel = Closure::wrap(Box::new({
         let orbit = orbit.clone();
         move |event: WheelEvent| {
+            let mut orbit = orbit.borrow_mut();
+            // Locked, the wheel is the page's scroll again.
+            if orbit.lock().holds() {
+                return;
+            }
             event.prevent_default();
-            orbit.borrow_mut().zoom_by_wheel(wheel_pixels(&event));
+            orbit.zoom_by_wheel(wheel_pixels(&event));
         }
     }) as Box<dyn FnMut(WheelEvent)>);
     let options = AddEventListenerOptions::new();
@@ -169,10 +259,59 @@ pub fn install(canvas_id: &str, orbit: SharedOrbit) {
     );
     wheel.forget();
 
-    // Right-drag is a pan, so the context menu must not open on top of it.
-    let menu = Closure::wrap(Box::new(|event: Event| event.prevent_default()) as Box<dyn FnMut(Event)>);
+    // Right-drag is a pan, so the context menu must not open on top of it —
+    // unless the camera is locked, in which case there is no pan to protect and
+    // the menu is one more thing the page gets back.
+    let menu = Closure::wrap(Box::new({
+        let orbit = orbit.clone();
+        move |event: Event| {
+            (!orbit.borrow().lock().holds()).then(|| event.prevent_default());
+        }
+    }) as Box<dyn FnMut(Event)>);
     let _ = canvas.add_event_listener_with_callback("contextmenu", menu.as_ref().unchecked_ref());
     menu.forget();
+}
+
+/// Hand the canvas's touch gestures to the page, or take them back.
+///
+/// `touch-action` is decided by the compositor *before* a gesture is recognised,
+/// so it cannot be answered inside a listener the way `preventDefault()` is: it
+/// has to be written when the lock changes. This is the whole of that write, and
+/// it lives here rather than in the button that calls it because the property is
+/// this module's — it is the one that set it in the first place, and the one
+/// whose doc explains why.
+pub fn set_gestures(canvas_id: &str, lock: CameraLock) {
+    let Some(canvas) = canvas_element(canvas_id) else {
+        return;
+    };
+    let _ = canvas.style().set_property(
+        "touch-action",
+        ["none", "auto"][usize::from(lock.holds())],
+    );
+}
+
+/// The world ray under a pointer event, through the camera the frame is drawn
+/// with.
+///
+/// The canvas's *laid-out box* is what a client coordinate is relative to, not
+/// its framebuffer: the page scales the canvas with CSS (`min(94vw, 1180px)`)
+/// and the surface is sized in device pixels, so the two differ by the device
+/// pixel ratio on every phone. Measuring the box is therefore not a convenience
+/// — using the framebuffer's size would put the ray a fixed fraction off centre
+/// on exactly the devices this app is built for.
+///
+/// `None` for a canvas that has not been laid out, which is the one case where
+/// there is no meaningful direction to return.
+fn scene_ray(canvas: &HtmlCanvasElement, orbit: &SharedOrbit, event: &PointerEvent) -> Option<Ray> {
+    let box_ = canvas.get_bounding_client_rect();
+    let (width, height) = (box_.width() as f32, box_.height() as f32);
+    ((width > 0.0) & (height > 0.0)).then(|| {
+        // Normalised device coordinates: the origin at the centre of the canvas,
+        // `y` counted up the screen where a client coordinate counts down.
+        let x = (event.client_x() as f32 - box_.left() as f32) / width * 2.0 - 1.0;
+        let y = 1.0 - (event.client_y() as f32 - box_.top() as f32) / height * 2.0;
+        orbit.borrow().ray(x, y, width / height)
+    })
 }
 
 /// The canvas element with `id`, if the page has one.

@@ -385,6 +385,94 @@ pub fn dog_total(config: &SceneConfig) -> usize {
     ring_dogs(config).len()
 }
 
+/// The room a *disturbed* crowd moves in: how much ground one dog owns, and how
+/// far from the origin it may be pushed.
+///
+/// Both numbers are derived from the layout rather than typed, for the same
+/// reason every other number here is — and in this case for one further reason
+/// that is load-bearing. A dog knocked off its track is pulled back to it and
+/// shoved away from its neighbours at the same time (see `src/herd.rs`), and
+/// those two forces only ever come to rest if the *undisturbed* field is already
+/// out of contact. If it were not, every dog would be permanently inside someone
+/// else's radius, the push would fight the return forever, and the field would
+/// hum instead of settling. So the radius is measured off the spacing the layout
+/// actually produced, at whatever the dials say.
+/// A dog collides as the shape it is: a **capsule** laid along its own ring —
+/// a segment of `2 · half_length`, swept by a radius of `half_width`.
+///
+/// Not a circle. A dachshund is 24 units long and 3.84 wide, and a circle that
+/// fits between two rings 7.75 apart has a radius of 3.5 — so a circular dog is
+/// a seventh of its own length, and one dragged along a ring slides clean
+/// *through* its neighbours, touching only when the two centres nearly coincide.
+/// That is not a tuning problem that a bigger radius fixes: a circle big enough
+/// to be the animal is far too big to fit between the rings, and would have the
+/// whole field permanently in contact.
+///
+/// The capsule is what makes the crowd feel solid, and it costs one segment
+/// distance instead of one point distance.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrowdSpace {
+    /// Half the length of the capsule's spine, along the dog's heading.
+    pub half_length: f32,
+    /// The capsule's radius — half the dog across the flanks.
+    pub half_width: f32,
+    /// The furthest from the origin a dog may be pushed or dragged, in world
+    /// units — inside the terrain's rim, with a body's length of margin.
+    pub bounds: f32,
+}
+
+impl CrowdSpace {
+    /// The capsule's full length, nose to tail.
+    pub fn length(self) -> f32 {
+        self.half_length * 2.0 + self.half_width * 2.0
+    }
+}
+
+/// The share of a gap a body may fill. Under a half in each axis, so two dogs
+/// standing where the layout put them are always clear of one another with air
+/// to spare — the property the whole disturbance rests on.
+const CROWD_SHARE: f32 = 0.45;
+
+/// [`CrowdSpace`] for this configuration: the dog's own body, clipped by
+/// whatever room the layout actually left it.
+///
+/// Two gaps bound it, and each bounds a different axis of the capsule:
+///
+/// * **across** — the radial pitch between rings, which two roughly-parallel
+///   bodies lie either side of. It caps the *width*.
+/// * **along** — the shortest chord between neighbours on one ring (`2R·sin(π/n)`
+///   — the straight line, which is what a collider meets; the arc they were
+///   spaced along is longer than it). Two dogs on the same ring are nose to tail,
+///   so this caps the whole *length*, radius included.
+///
+/// The clip matters. `Ring::count` guarantees each dog an arc at least its own
+/// length, but a chord is shorter than its arc — so an unclipped body would
+/// overlap its neighbour at rest on a tight ring, and the push would fight the
+/// return forever. At the authored dachshund the clip is barely felt: the
+/// capsule comes out 23.8 units long against a 24-unit dog.
+pub fn crowd_space(config: &SceneConfig) -> CrowdSpace {
+    let laid = rings(config);
+    let along = laid
+        .iter()
+        .map(|ring| chord(*ring, ring.count(config)))
+        .fold(f32::INFINITY, f32::min);
+    let across = [f32::INFINITY, ring_spacing(config)][usize::from(laid.len() > 1)];
+    let half_width = (config.dog_width() * 0.5).min(CROWD_SHARE * across);
+    CrowdSpace {
+        half_width,
+        half_length: (config.dog_length() * 0.5 - half_width)
+            .min(CROWD_SHARE * along - half_width)
+            .max(0.0),
+        bounds: TERRAIN_HALF_EXTENT - config.dog_length() * 0.5,
+    }
+}
+
+/// The straight-line distance between two of `count` dogs spaced evenly around
+/// `ring` — the chord under the arc they were laid out along.
+fn chord(ring: Ring, count: usize) -> f32 {
+    2.0 * ring.radius * (core::f32::consts::PI / count.max(1) as f32).sin()
+}
+
 /// The clear ground between the outermost dog's furthest reach and the terrain's
 /// rim, in world units. Positive by construction — see [`rings_on_the_ground`].
 pub fn outer_clearance(config: &SceneConfig) -> f32 {
@@ -479,6 +567,65 @@ mod tests {
                             ring.index,
                             config.dog_length()
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_dogs_own_room_is_always_smaller_than_the_gap_the_layout_left_it() {
+        // The claim the whole disturbance rests on: at every legal dial setting,
+        // two dogs standing where the layout put them are outside each other's
+        // radius. `tests/herd.rs` makes the same check against the real posed
+        // positions; this one is the arithmetic behind it.
+        for size in [6.0, 10.0, 16.0] {
+            for inner in [18.0, 26.0, 60.0] {
+                for pitch in [3.0, 7.75, 20.0] {
+                    for count in [1.0, 4.0, MAX_RINGS as f32] {
+                        for gap in [0.5, 1.5, 20.0] {
+                            let config = SceneConfig::defaults()
+                                .with(Dial::DogSize, size)
+                                .with(Dial::InnerRadius, inner)
+                                .with(Dial::RingSpacing, pitch)
+                                .with(Dial::RingCount, count)
+                                .with(Dial::DogGap, gap);
+                            let space = crowd_space(&config);
+                            let laid = rings(&config);
+                            let along = laid
+                                .iter()
+                                .map(|ring| chord(*ring, ring.count(&config)))
+                                .fold(f32::INFINITY, f32::min);
+                            // Nose to tail along a ring: the whole capsule fits
+                            // inside the chord between two neighbours.
+                            assert!(
+                                space.length() < along,
+                                "size {size} inner {inner} pitch {pitch} rings {count} gap {gap}: \
+                                 a {} body does not fit a {along} chord",
+                                space.length()
+                            );
+                            // Flank to flank across rings: two widths fit the
+                            // pitch.
+                            assert!(
+                                space.half_width > 0.0
+                                    && (laid.len() < 2
+                                        || space.half_width * 2.0 < ring_spacing(&config)),
+                                "a {} width does not fit a {} pitch",
+                                space.half_width * 2.0,
+                                ring_spacing(&config)
+                            );
+                            // The body is never *bigger* than the animal it
+                            // stands for, whatever the field's scale.
+                            assert!(space.length() <= config.dog_length() + 1.0e-3);
+                            assert!(space.half_width * 2.0 <= config.dog_width() + 1.0e-3);
+                            // ...and the ground it may be pushed across holds
+                            // every ring the layout laid, so containment never
+                            // fights the walk itself.
+                            assert!(
+                                space.bounds > laid.last().map(|ring| ring.radius).unwrap_or(0.0),
+                                "the outermost ring is outside the room the crowd is given"
+                            );
+                        }
                     }
                 }
             }

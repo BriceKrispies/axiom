@@ -882,7 +882,7 @@ mod tests {
     /// Build a traffic car overlapping the player by construction.
     fn planted(car: &CarState, along: f32, across: f32, speed: f32) -> TrafficCar {
         let course = crate::course::procedural::shipping_plan(1).expect("compiles");
-        let mut planted = crate::sim::traffic::activate(&course.traffic()[3], 3, course.track());
+        let mut planted = crate::sim::traffic::activate(&course.traffic()[3], 3, course.track(), course.traffic()[3].spawn_m);
         planted.active = true;
         planted.distance = car.distance + along;
         planted.lateral = car.lateral + across;

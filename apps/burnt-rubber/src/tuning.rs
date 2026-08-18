@@ -880,10 +880,43 @@ impl Default for CourseTuning {
     }
 }
 
+/// The speed every car on the shipping road holds (km/h).
+///
+/// The traffic used to run 79–137 km/h — ordinary cars on a road the player tore
+/// past at 331. It is now a single motorway speed, and that changes what traffic
+/// *is*: not obstacles to be gone around, but a stream the player is inside of.
+///
+/// The consequence is worth stating plainly rather than discovering. Off boost
+/// the car tops out at 92 m/s against traffic's 83.3, so it closes at 8.7 m/s
+/// and meets a car roughly every ten seconds — at cruising speed the traffic is
+/// very nearly scenery. On boost it closes at 85 m/s or more and meets one every
+/// second. **Traffic density is now a function of the boost meter**, which is
+/// either the best thing about this change or the thing to undo, depending on
+/// whether the game wants to be dangerous only while it is fast.
+pub const TRAFFIC_CRUISE_KMH: f32 = 300.0;
+
+/// [`TRAFFIC_CRUISE_KMH`] in the unit the simulation actually works in.
+pub const TRAFFIC_CRUISE_MPS: f32 = TRAFFIC_CRUISE_KMH / 3.6;
+
 /// Traffic, boost and the near-miss rules — the "drive dangerously" economy.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RaceTuning {
     /// Traffic cars considered by the simulation at once.
+    ///
+    /// **This is a ceiling on density that no course can see.** A road can ask
+    /// for any `vehicles_per_km` it likes, but only this many cars exist around
+    /// the player at once, so across the window
+    /// [`Self::traffic_behind`]..[`Self::traffic_ahead`] the closest they can
+    /// possibly be packed is that window divided by this number. At 9 — where it
+    /// sat while traffic was slow enough not to care — that was one car per 18 m
+    /// at absolute best, and a road authored denser than that silently got 9
+    /// cars anyway.
+    ///
+    /// It matters now because the near-miss rate is the boost economy, and the
+    /// rate is `closing speed / spacing`. Raising it was necessary to make a
+    /// sustained boost reachable at all; it was not sufficient, and on its own
+    /// it moved the measured duty by one point (see `tests/road_tailoring.rs`).
+    /// 32 measured identically to 24, so 24 is where it stops buying anything.
     pub traffic_active: usize,
     /// How far ahead of the car traffic is simulated (m).
     pub traffic_ahead: f32,
@@ -910,6 +943,12 @@ pub struct RaceTuning {
     /// Slowest traffic speed (m/s).
     pub traffic_speed_min: f32,
     /// Fastest traffic speed (m/s).
+    ///
+    /// May equal [`Self::traffic_speed_min`], and on the shipping course it
+    /// does: every car on the road holds the same speed. The band is still a
+    /// band because the *machinery* is one — an authored course
+    /// (`courses/burning_coast.brc`) can still draw a spread — but the shipping
+    /// road no longer uses it. See [`TRAFFIC_CRUISE_KMH`].
     pub traffic_speed_max: f32,
     /// Traffic collision half-length (m).
     pub traffic_half_length: f32,
@@ -956,6 +995,36 @@ pub struct RaceTuning {
     /// The speed (m/s) above which simply holding it earns boost.
     pub high_speed_threshold: f32,
     /// Boost drained per second while held (fraction of the meter).
+    ///
+    /// **The number that decides whether a perfect lap can hold the boost**, and
+    /// the one that was actually in the way. Rearranged, a held boost costs
+    /// `(drain - high_speed_rate) / near_miss_boost` near misses per second, and
+    /// the road has to supply them.
+    ///
+    /// At 0.36 that was **2.19 passes a second**. Against traffic at 300 km/h,
+    /// which a 331 km/h car closes on at 8.7 m/s, no road can pay it: the cars
+    /// cannot be packed closer than [`Self::traffic_active`] allows, so the
+    /// density the budget needs does not physically fit. Three separately
+    /// authored roads — one built on threading, one on a pickup line, one on
+    /// both — all measured 30–38% duty, and quadrupling the traffic moved that
+    /// by nine points.
+    ///
+    /// At 0.16 those same three roads measure **90%, 86% and 90%**, no section
+    /// starved anywhere, and their laps land within 1.7 s of each other. That
+    /// last part is the point: it is the difference between one viable route and
+    /// three. The grid this came from is `tests/road_tailoring.rs`, which
+    /// re-runs on demand.
+    ///
+    /// **It is deliberately not the setting where the boost never drops.** 0.13
+    /// measured 100% on all three, and was passed over: a duty cycle a good
+    /// driver *cannot* break is a resource that has stopped being one, and the
+    /// meter is the only thing this game asks the player to manage. At 0.16 the
+    /// last tenth is real — perfect play holds it, ordinary play loses it in the
+    /// tight sections and buys it back in the forgiving ones, and roughly half
+    /// the road is each. That is the shape worth having.
+    ///
+    /// It must stay above [`Self::high_speed_boost_rate`], or holding a speed
+    /// pays for itself and boost is free rather than earned.
     pub boost_drain_rate: f32,
     /// Minimum meter needed to **start** a boost. Once running, it drains to
     /// nothing — the gap between those two is the whole hysteresis.
@@ -989,15 +1058,15 @@ pub struct RaceTuning {
 impl RaceTuning {
     /// The shipping race rules.
     pub const DEFAULT: RaceTuning = RaceTuning {
-        traffic_active: 9,
+        traffic_active: 24,
         traffic_ahead: 620.0,
         traffic_behind: 90.0,
         traffic_spacing: 85.0,
         traffic_clear_start: 300.0,
         traffic_safe_ahead: 140.0,
         traffic_safe_behind: 20.0,
-        traffic_speed_min: 22.0,
-        traffic_speed_max: 38.0,
+        traffic_speed_min: TRAFFIC_CRUISE_MPS,
+        traffic_speed_max: TRAFFIC_CRUISE_MPS,
         traffic_half_length: 2.3,
         traffic_half_width: 1.05,
         near_miss_boost: 0.13,
@@ -1007,7 +1076,7 @@ impl RaceTuning {
         drift_boost_rate: 0.22,
         high_speed_boost_rate: 0.075,
         high_speed_threshold: 74.0,
-        boost_drain_rate: 0.36,
+        boost_drain_rate: 0.16,
         boost_min_to_start: 0.12,
         notify_steps: 75,
         countdown_steps: 45,

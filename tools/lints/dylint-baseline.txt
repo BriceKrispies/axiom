@@ -29,6 +29,24 @@
 # pass; remove the retained state instead. See
 # tools/lints/engine_no_retained_state/README.md.
 #
+# `engine_no_unwrap_or` (added 2026-08-14) bans `.unwrap_or(..)` in non-test spine
+# code: a value-level branch `engine_no_branching` cannot see (no if/match in the
+# HIR), and an eagerly-evaluated default chosen at the USE site, which is where
+# absence gets papered over. The first full run found **211 distinct call sites
+# across 36 spine crates/modules** (native build — `axiom-windowing`'s wasm32 arm
+# and `axiom-gpu-backend`'s `offscreen` feature are compiled out, so the true
+# total is higher). Biggest holders: axiom-text 35, axiom-canvas2d-backend 24,
+# axiom-sim-core 13, axiom-planetgen 12, axiom-hydrology 11.
+#
+# The number below is 36, not 211, because of how this gate counts: it greps the
+# `#[warn(<lint>)] on by default` note, which rustc prints ONCE PER COMPILATION
+# UNIT, not once per finding. So every baseline in this file is really "units
+# emitting the lint" (for the pre-existing entries the two happen to coincide).
+# That makes this a coarse ratchet — a NEW `unwrap_or` in an already-flagged
+# crate will not trip it. Driving a crate to zero should be followed by lowering
+# this number. Fixing the gate to count findings needs a
+# `--message-format=json` rewrite of scripts/dylint-gate.sh.
+#
 # History (pre-CI, when this gate ran as .git/hooks/pre-commit):
 #   2026-06-26: engine_no_large_files 2 -> 0 (six over-budget spine files split
 #     into private submodules — pure relocation, facade/coverage/branchless kept).
@@ -36,6 +54,7 @@
 #     exempt tiers + resolves each branch to its macro call site).
 #   2026-07-04: the gate moved off the pre-commit hook into CI (scripts/dylint-gate.sh).
 engine_no_branching=0
+engine_no_unwrap_or=36
 engine_no_large_files=0
 engine_no_large_functions=2
 engine_no_large_impl_blocks=2

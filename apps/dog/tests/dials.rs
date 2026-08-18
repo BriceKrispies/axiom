@@ -287,12 +287,14 @@ fn re_authoring_at_a_new_layout_moves_the_drawn_instance_count() {
         headless_animated(opening.variant(), DebugView::Shaded, &opening);
     let bones = installed.bone_count;
     let drawn = |app: &mut axiom::prelude::RunningApp, tick: u64| app.tick(tick).draws().len();
+    // A layout change, not a disturbance: the crowd is untouched throughout.
+    let herd = &mut axiom_dog::Herd::undisturbed();
 
     assert_eq!(drawn(&mut app, 0), 1 + bones * dog_total(&opening));
 
     // Fewer rings: the retired slots leave the frame entirely.
     let fewer = opening.with(Dial::RingCount, 3.0);
-    installed.animate(&mut app, 1, &fewer, Stage::Field);
+    installed.animate(&mut app, 1, &fewer, Stage::Field, herd);
     assert_eq!(drawn(&mut app, 1), 1 + bones * dog_total(&fewer));
     assert!(dog_total(&fewer) < dog_total(&opening));
 
@@ -302,12 +304,12 @@ fn re_authoring_at_a_new_layout_moves_the_drawn_instance_count() {
     let more = opening
         .with(Dial::DogSize, 8.0)
         .with(Dial::RingCount, 10.0);
-    installed.animate(&mut app, 2, &more, Stage::Field);
+    installed.animate(&mut app, 2, &more, Stage::Field, herd);
     assert_eq!(drawn(&mut app, 2), 1 + bones * dog_total(&more));
     assert!(dog_total(&more) > dog_total(&opening));
 
     // And back to where it started, exactly.
-    installed.animate(&mut app, 3, &opening, Stage::Field);
+    installed.animate(&mut app, 3, &opening, Stage::Field, herd);
     assert_eq!(drawn(&mut app, 3), 1 + bones * dog_total(&opening));
     println!(
         "[pool] {} -> {} -> {} -> {} dogs of a {MAX_DOGS}-slot pool",

@@ -55,8 +55,9 @@ use axiom::prelude::*;
 
 use crate::config::SceneConfig;
 use crate::debug_view::DebugView;
+use crate::herd::Herd;
 use crate::locomotion::Animation;
-use crate::rings::{palette, MAX_DOGS, PALETTE_SIZE};
+use crate::rings::{crowd_space, palette, MAX_DOGS, PALETTE_SIZE};
 use crate::scene::build_scene;
 use crate::stage::Stage;
 use crate::study::Study;
@@ -151,9 +152,11 @@ impl InstalledScene {
         tick: u64,
         config: &SceneConfig,
         stage: Stage,
+        herd: &mut Herd,
     ) {
         self.resettle(running, config, stage);
-        self.placements(tick, config, stage)
+        self.disturb(tick, config, stage, herd);
+        self.placements(tick, config, stage, herd)
             .into_iter()
             .zip(self.entities.iter().skip(self.creatures_first))
             .for_each(|(placement, entity)| {
@@ -163,10 +166,37 @@ impl InstalledScene {
 
     /// Every bone this stage draws, in pool order: the whole walking field, or
     /// the one still dog that fills the first pool slot.
-    fn placements(&self, tick: u64, config: &SceneConfig, stage: Stage) -> Vec<Transform> {
+    fn placements(
+        &self,
+        tick: u64,
+        config: &SceneConfig,
+        stage: Stage,
+        herd: &Herd,
+    ) -> Vec<Transform> {
         match stage {
-            Stage::Field => self.animation.transforms(tick),
+            Stage::Field => self.animation.displaced(tick, herd),
             Stage::Study => self.study.pose(self.animation.rig(), config.gait()),
+        }
+    }
+
+    /// Advance the disturbance one frame: hand the herd this tick's anchors and
+    /// the room the layout gives a dog, and let it pull the strays home and push
+    /// the overlaps apart.
+    ///
+    /// The anchors are read *here*, from the animation, rather than cached by
+    /// the herd — the field is walking, so where a dog belongs is only true for
+    /// the tick it was asked on, and a stale anchor would be a dog being pulled
+    /// toward a place its ring has already left.
+    ///
+    /// The study has no crowd — one dog, held still and suspended at the origin
+    /// — so there is nothing to disturb and nothing to hold. It calms the field
+    /// on the way in, which is also what makes the field come back pristine.
+    fn disturb(&self, tick: u64, config: &SceneConfig, stage: Stage, herd: &mut Herd) {
+        match stage {
+            Stage::Field => {
+                herd.settle(&self.animation.anchors(tick), tick, crowd_space(config))
+            }
+            Stage::Study => herd.calm(),
         }
     }
 
@@ -308,7 +338,7 @@ pub fn install_scene(
     // again still presents the scene the page opens on rather than the whole pool
     // collapsed onto the origin. Both happen inside `animate`, which reconciles
     // the pool against the stage it is handed.
-    installed.animate(running, 0, config, Stage::Field);
+    installed.animate(running, 0, config, Stage::Field, &mut Herd::undisturbed());
     installed
 }
 

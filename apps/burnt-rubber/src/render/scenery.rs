@@ -38,7 +38,10 @@ pub enum PropKind {
     Post,
     /// A tree: trunk plus a conical crown.
     Tree,
-    /// A boulder.
+    /// A boulder — the one prop whose mesh is *baked from a recipe* rather than
+    /// authored or taken from the engine's primitives. See
+    /// [`super::rock_mesh`]. This kind also carries the distant horizon hills
+    /// ([`distant_hills`]), which are spawned statically against the cube.
     Rock,
     /// A utility pole with a crossbar.
     Pole,

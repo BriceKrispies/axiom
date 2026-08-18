@@ -1,0 +1,19 @@
+warning: `.unwrap_or(..)` is a value-level branch; it is banned in non-test engine code
+  --> $DIR/engine.rs:11:15
+   |
+LL |     let _ = v.unwrap_or(0);
+   |               ^^^^^^^^^
+   |
+   = help: make the producer total, carry the discriminant in the data contract, or push the named default down into the layer that owns it
+   = note: `#[warn(engine_no_unwrap_or)]` on by default
+
+warning: `.unwrap_or(..)` is a value-level branch; it is banned in non-test engine code
+  --> $DIR/engine.rs:16:15
+   |
+LL |     let _ = v.unwrap_or(0);
+   |               ^^^^^^^^^
+   |
+   = help: make the producer total, carry the discriminant in the data contract, or push the named default down into the layer that owns it
+
+warning: 2 warnings emitted
+

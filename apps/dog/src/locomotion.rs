@@ -46,6 +46,7 @@ use crate::config::SceneConfig;
 use crate::creature_dog::dog_limbs;
 use crate::creature_pose::Gait;
 use crate::creature_rig::{CreatureRig, LimbChain};
+use crate::herd::Herd;
 use crate::rings::{ring_dogs, rings, Ring, RingDog, Winding};
 use crate::terrain::ground_y;
 
@@ -314,19 +315,63 @@ impl Animation {
             .unwrap_or_else(|| dog_travel(tick, self.speed))
     }
 
+    /// Where the walk puts each dog at `tick`, and which way it is facing — one
+    /// [`PathPoint`] per dog, in [`Self::dogs`] order.
+    ///
+    /// This is the **anchor** the disturbance in `src/herd.rs` is measured
+    /// against: the place a dog would be standing if nobody had touched it. It
+    /// is read straight off the same arc-length tables the pose is, so a dog's
+    /// anchor and its pose can never disagree about which ring it is on.
+    ///
+    /// The heading comes with it because a dog collides as a body laid *along*
+    /// its ring, not as a circle around its middle — the capsule needs to know
+    /// which way the animal is pointing, and this is the one place that already
+    /// knows.
+    pub fn anchors(&self, tick: u64) -> Vec<PathPoint> {
+        self.dogs
+            .iter()
+            .enumerate()
+            .map(|(index, dog)| self.path(dog.ring).at(self.travel(index, tick)))
+            .collect()
+    }
+
     /// Every bone of every dog at `tick`: dog by dog in [`Self::dogs`] order,
     /// each dog's bones in rig order.
+    ///
+    /// The walk as the rings define it, with nothing on top — a pure function of
+    /// the tick and the configuration.
     pub fn transforms(&self, tick: u64) -> Vec<Transform> {
+        self.displaced(tick, &Herd::undisturbed())
+    }
+
+    /// The same walk, drawn where the crowd currently *stands*: every dog's
+    /// bones slid by whatever displacement it is carrying.
+    ///
+    /// A whole dog moves as one rigid piece, because its pose was resolved for
+    /// its anchor — planted paws, hip heights, terrain and all. Sliding the
+    /// finished bones keeps that pose internally consistent and keeps the
+    /// disturbance out of the gait entirely, which is the property that lets a
+    /// released dog come back *in step* rather than merely come back.
+    ///
+    /// An undisturbed crowd takes the fast path and returns exactly what
+    /// [`Self::transforms`] does — the same floats, not merely equal ones.
+    pub fn displaced(&self, tick: u64, herd: &Herd) -> Vec<Transform> {
+        let moved = herd.disturbed();
         self.dogs
             .iter()
             .enumerate()
             .flat_map(|(index, dog)| {
-                self.gait.pose(
+                let bones = self.gait.pose(
                     &self.rig,
                     &self.limbs,
                     self.path(dog.ring),
                     self.travel(index, tick),
-                )
+                );
+                let slide = [Vec3::ZERO, herd.displacement(index)][usize::from(moved)];
+                bones.into_iter().map(move |bone| Transform {
+                    translation: bone.translation.add(slide),
+                    ..bone
+                })
             })
             .collect()
     }

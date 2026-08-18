@@ -77,17 +77,13 @@ impl SceneryField {
         track: &Track,
         seed: u64,
     ) -> SceneryField {
-        let cube = app.add_mesh(Mesh::cube());
-        let cylinder = app.add_mesh(Mesh::cylinder());
-        let cone = super::prop_meshes::install_cone(app);
-        let frond_fan = super::prop_meshes::install_palm_crown(app);
-        let clump = super::prop_meshes::install_shrub(app);
+        let meshes = PropMeshes::install(app);
+        let cube = meshes.cube;
 
         let pools = PropKind::ALL
             .iter()
             .map(|kind| {
-                let (mesh, material) =
-                    mesh_and_material(*kind, palette, cube, cylinder, cone, frond_fan, clump);
+                let (mesh, material) = mesh_and_material(*kind, palette, &meshes);
                 KindPool {
                     kind: *kind,
                     entities: (0..kind.pool_capacity())
@@ -237,26 +233,63 @@ fn prop_transform(prop: &PropInstance, kind: PropKind, shrink: f32) -> Transform
 }
 
 /// The mesh and material a kind draws with.
+/// The one mesh each prop kind draws, registered once at install.
+///
+/// A struct rather than a widening argument list: the pool's whole economy is
+/// "one registered mesh per kind, therefore one draw call per kind", and that is
+/// easier to keep true when the set of registered meshes is a named thing rather
+/// than seven positional `Handle<Mesh>` parameters that a reader has to count.
+#[derive(Debug, Clone, Copy)]
+struct PropMeshes {
+    /// The engine's unit cube — posts, signs, tunnel lights, buildings, and the
+    /// static horizon hills.
+    cube: Handle<Mesh>,
+    /// The engine's unit cylinder — utility poles and palm stems.
+    cylinder: Handle<Mesh>,
+    /// The inland tree's conical crown.
+    cone: Handle<Mesh>,
+    /// The coastal palm's frond fan.
+    frond_fan: Handle<Mesh>,
+    /// The roadside undergrowth rosette.
+    clump: Handle<Mesh>,
+    /// The boulder, baked from a mesh recipe (`super::rock_mesh`).
+    boulder: Handle<Mesh>,
+}
+
+impl PropMeshes {
+    /// Register every prop mesh, in a fixed order.
+    ///
+    /// The order is not incidental: `add_mesh`/`add_mesh_data` mint ids in
+    /// registration order, and those ids are encoded in the committed golden
+    /// resources artifact. New meshes go on the end.
+    fn install(app: &mut RunningApp) -> PropMeshes {
+        PropMeshes {
+            cube: app.add_mesh(Mesh::cube()),
+            cylinder: app.add_mesh(Mesh::cylinder()),
+            cone: super::prop_meshes::install_cone(app),
+            frond_fan: super::prop_meshes::install_palm_crown(app),
+            clump: super::prop_meshes::install_shrub(app),
+            boulder: super::rock_mesh::install_rock(app),
+        }
+    }
+}
+
 fn mesh_and_material(
     kind: PropKind,
     palette: &ScenePalette,
-    cube: Handle<Mesh>,
-    cylinder: Handle<Mesh>,
-    cone: Handle<Mesh>,
-    frond_fan: Handle<Mesh>,
-    clump: Handle<Mesh>,
+    meshes: &PropMeshes,
 ) -> (Handle<Mesh>, Handle<Material>) {
     match kind {
-        PropKind::Post => (cube, palette.post),
-        PropKind::Tree => (cone, palette.foliage),
-        PropKind::Rock => (cube, palette.stone),
-        PropKind::Pole => (cylinder, palette.timber),
-        PropKind::Sign => (cube, palette.sign),
-        PropKind::TunnelLight => (cube, palette.lamp),
-        PropKind::Building => (cube, palette.building),
-        PropKind::PalmTrunk => (cylinder, palette.timber),
-        PropKind::PalmCrown => (frond_fan, palette.foliage),
-        PropKind::Shrub => (clump, palette.foliage),
+        PropKind::Post => (meshes.cube, palette.post),
+        PropKind::Tree => (meshes.cone, palette.foliage),
+        PropKind::Rock => (meshes.boulder, palette.stone),
+        PropKind::Pole => (meshes.cylinder, palette.timber),
+        PropKind::Sign => (meshes.cube, palette.sign),
+        PropKind::TunnelLight => (meshes.cube, palette.lamp),
+        PropKind::Building => (meshes.cube, palette.building),
+        PropKind::PalmTrunk => (meshes.cylinder, palette.timber),
+        PropKind::PalmCrown => (meshes.frond_fan, palette.foliage),
+        PropKind::Shrub => (meshes.clump, palette.foliage),
     }
 }
 
@@ -494,14 +527,9 @@ mod tests {
             .setup(|_, _, _| {})
             .build();
         let palette = ScenePalette::install(&mut app);
-        let cube = app.add_mesh(Mesh::cube());
-        let cylinder = app.add_mesh(Mesh::cylinder());
-        let cone = super::super::prop_meshes::install_cone(&mut app);
-        let frond_fan = super::super::prop_meshes::install_palm_crown(&mut app);
-        let clump = super::super::prop_meshes::install_shrub(&mut app);
+        let meshes = PropMeshes::install(&mut app);
         for kind in PropKind::ALL {
-            let (_, material) =
-                mesh_and_material(kind, &palette, cube, cylinder, cone, frond_fan, clump);
+            let (_, material) = mesh_and_material(kind, &palette, &meshes);
             // Every kind gets a real material handle rather than a default.
             assert!(
                 [
@@ -517,5 +545,26 @@ mod tests {
                 "{kind:?} has no material"
             );
         }
+    }
+
+    /// A boulder is drawn as a boulder.
+    ///
+    /// `PropKind::Rock` is documented as "a boulder" and was drawn with the
+    /// engine's unit **cube**, because a cube was the roundest mesh this app
+    /// had. It is now baked from a recipe (`super::super::rock_mesh`), and this
+    /// is the assertion that keeps it that way: the kind whose name is a
+    /// boulder must not quietly fall back to the box it used to be.
+    #[test]
+    fn a_rock_draws_the_baked_boulder_rather_than_the_cube() {
+        let mut app = App::new()
+            .window(Window::new(64, 64))
+            .add_plugins(DefaultPlugins)
+            .setup(|_, _, _| {})
+            .build();
+        let palette = ScenePalette::install(&mut app);
+        let meshes = PropMeshes::install(&mut app);
+        let (mesh, _) = mesh_and_material(PropKind::Rock, &palette, &meshes);
+        assert_eq!(mesh, meshes.boulder);
+        assert_ne!(mesh, meshes.cube, "a boulder is not a box");
     }
 }

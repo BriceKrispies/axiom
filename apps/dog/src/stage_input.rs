@@ -78,7 +78,13 @@ fn listen(
         // gestures put it: a 195-unit field shot is uselessly far away from one
         // dog, and a 20-unit close-up is inside the terrain. Each stage opens on
         // its own authored framing and is free from there.
-        *orbit.borrow_mut() = OrbitState::for_stage(choice);
+        //
+        // The lock rides across the seed. It stops the *user* moving the camera;
+        // it does not stop the page choosing which shot to open on, and a locked
+        // page that came back unlocked from a stage change would have thrown a
+        // choice away silently.
+        let lock = orbit.borrow().lock();
+        *orbit.borrow_mut() = OrbitState::for_stage(choice).with_lock(lock);
         mark(choice);
         page_url::remember_param(STAGE_KEY, choice.key());
     }) as Box<dyn FnMut()>);

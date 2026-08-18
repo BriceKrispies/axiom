@@ -29,6 +29,11 @@ axiom-frame = { path = "../../crates/axiom-frame" }
 axiom-input = { path = "../../modules/axiom-input" }
 # Frustum culling + distance-band LOD for the roadside scenery pool.
 axiom-visibility = { path = "../../modules/axiom-visibility" }
+# The procedural mesh pipeline the boulder is baked from: `axiom-recipe` is the
+# graph the shape is authored as, `axiom-proc-mesh` is the evaluator that turns
+# it into neutral position/normal/uv/index streams. See `src/render/rock_mesh.rs`.
+axiom-recipe = { path = "../../crates/axiom-recipe" }
+axiom-proc-mesh = { path = "../../crates/axiom-proc-mesh" }
 # The neutral audio mixer core: engine/wind/tyre/boost/impact cues are scheduled
 # as data from simulation state (the wasm arm realizes the batch).
 axiom-audio = { path = "../../modules/axiom-audio" }

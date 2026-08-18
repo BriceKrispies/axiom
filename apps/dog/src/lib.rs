@@ -27,7 +27,7 @@
 //! ## Two stages, one bound scene
 //!
 //! Under the canvas are two buttons, and they are the whole of what the page
-//! can present: **the field** (above) and **one dog** — a single still
+//! can *present*: **the field** (above) and **one dog** — a single still
 //! dachshund, suspended at the origin with no ground under it, framed close
 //! enough to inspect and orbited with the same camera the field is.
 //!
@@ -39,6 +39,42 @@
 //! as the field rather than a second model that could drift from it — it is
 //! posed by the same [`Gait::pose`] from the same rig and the same resolved
 //! dials. See [`Stage`] and [`Study`].
+//!
+//! ## The lock, and the canvas that owns your finger
+//!
+//! Beside the stage switch is one more button: **lock camera**. The scene is
+//! orbited with drag, pinch and wheel, which means the canvas has to claim every
+//! gesture inside its box — and on a phone that canvas is most of the screen, so
+//! a page you cannot scroll past is the price of a camera you can move.
+//!
+//! The lock is the way out, and it is deliberately *two* things at once: the
+//! camera stops answering gestures ([`OrbitState`] ignores every mutator while
+//! [`CameraLock::Locked`] holds), **and** the canvas stops claiming them — the
+//! `touch-action` comes off and the listeners stop calling `preventDefault()`.
+//! Freezing the shot without the second half would leave the page just as stuck
+//! as before, with a still picture on it. See [`CameraLock`].
+//!
+//! ## Locked, you can put your hand in the field
+//!
+//! A still camera turns a pointer position into a fixed line into the scene, and
+//! that is what makes the crowd reachable: with the lock on, **a dog can be
+//! dragged**. It shoulders the others aside as it goes, and when it is let go it
+//! walks back into its own place in the chain.
+//!
+//! The last part is the one that decides the whole design, so it is worth being
+//! exact about what it means. A dragged dog **never leaves its ring**. It is
+//! still walking its own arc-length offset at its own point in the trot; it is
+//! merely being *drawn* somewhere else, by a [`Herd`] displacement that decays to
+//! zero. So "back in sync" is not something a controller converges on — the
+//! moment the displacement reaches zero the dog is the dog the undisturbed field
+//! would have drawn, to the float. Turning the dogs into free bodies and steering
+//! them home would be a far bigger machine that is strictly worse at the one
+//! thing being asked for, because phase is what a free body loses first.
+//!
+//! Collision is the same one value: dogs hold each other off at a radius derived
+//! from the gap the layout left them ([`crowd_space`]), so a crowd standing where
+//! its rings put it is provably never in contact and the push never fights the
+//! return. See [`Herd`], whose module doc carries the full argument.
 //!
 //! ## The panel: fifteen dials, one value
 //!
@@ -111,8 +147,10 @@
 //! panel are **app composition** and live here; no ring, colour, crowd or slider
 //! vocabulary was added to a mesh layer, and none should be.
 
+mod camera_lock;
 mod config;
 mod debug_view;
+mod herd;
 mod install;
 mod object;
 mod orbit;
@@ -150,22 +188,31 @@ mod slider_input;
 #[cfg(target_arch = "wasm32")]
 mod stage_input;
 
+/// The DOM half of the camera lock: one button that flips the [`CameraLock`] on
+/// the shared orbit and hands the canvas's gestures back to the page. Compiled
+/// only for `wasm32`; what the lock means is browser-free and lives in
+/// `src/camera_lock.rs`, and what it does to the camera lives in `src/orbit.rs`.
+#[cfg(target_arch = "wasm32")]
+mod lock_input;
+
 /// The address bar, the app's one piece of persistent page state: the dials, the
 /// debug view and the stage, merged rather than overwriting one another.
 /// Compiled only for `wasm32`.
 #[cfg(target_arch = "wasm32")]
 mod page_url;
 
+pub use camera_lock::{CameraLock, LOCK_COUNT, LOCK_KEY};
 pub use config::{Dial, DialSpec, SceneConfig, DIAL_COUNT};
 pub use debug_view::{chart_rgba, DebugView, CHART_SIZE};
+pub use herd::Herd;
 pub use install::{install_scene, InstalledScene};
 pub use object::SceneObject;
-pub use orbit::OrbitState;
+pub use orbit::{OrbitState, Ray};
 pub use rainbow::{hsv_to_rgb, hue_to_rgb, RING_SATURATION, RING_VALUE};
 pub use rings::{
-    body_bulge, dog_total, inner_radius, min_ring_spacing, outer_clearance, palette, palette_color,
-    ring_count, ring_radius, ring_spacing, ring_dogs, rings, Ring, RingDog, Winding,
-    DOG_BODY_LENGTH, DOG_BODY_WIDTH, MAX_DOGS, MAX_RINGS, PALETTE_SIZE, RING_AIR,
+    body_bulge, crowd_space, dog_total, inner_radius, min_ring_spacing, outer_clearance, palette,
+    palette_color, ring_count, ring_radius, ring_spacing, ring_dogs, rings, CrowdSpace, Ring,
+    RingDog, Winding, DOG_BODY_LENGTH, DOG_BODY_WIDTH, MAX_DOGS, MAX_RINGS, PALETTE_SIZE, RING_AIR,
 };
 pub use scene::{build_scene, scene_meshes, Scene};
 pub use stage::{Stage, STAGE_COUNT};
