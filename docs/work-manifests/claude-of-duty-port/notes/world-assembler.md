@@ -9,7 +9,7 @@ Ported from `C:/dev/Claude-of-Duty/src/world/builder.js` (455 lines),
 
 ## New files
 
-- `apps/claude-of-duty/src/world/geo.rs` — `WorldGeo`: a flattened
+- `apps/shmup/src/world/geo.rs` — `WorldGeo`: a flattened
   `THREE.BufferGeometry` with position/normal/uv and an *optional* `color`
   (mask) column, plus `apply`/`translate`/`rotate_x`/`compute_vertex_normals`/
   `paint_masks`/`fill_masks`. This is deliberately a **separate** type from
@@ -17,11 +17,11 @@ Ported from `C:/dev/Claude-of-Duty/src/world/builder.js` (455 lines),
   keeps `weapons/geometry.js` and `world/util.js` as two independent files
   with two independent geometry shapes; `world` geometry always carries or
   implies a mask column, weapon geometry never does).
-- `apps/claude-of-duty/src/world/accum.rs` — `Accum`: the merge engine
+- `apps/shmup/src/world/accum.rs` — `Accum`: the merge engine
   every static batch and collision proxy funnels through. Unlike
   `weapons::geometry::merge_all` it never welds vertices (the source never
   calls `mergeVertices` here either).
-- `apps/claude-of-duty/src/world/kit.rs` — `trs` (Euler order **YXZ**, a
+- `apps/shmup/src/world/kit.rs` — `trs` (Euler order **YXZ**, a
   different composition than the weapon kit's `Assembly::add`, which uses
   XYZ — verified against a real `three@0.180` capture, see the module doc),
   `chamfer_box`, `weather_prop`, `patch_geometry`, `plane_geometry`/`quad`
@@ -30,19 +30,19 @@ Ported from `C:/dev/Claude-of-Duty/src/world/builder.js` (455 lines),
   unchamfered branch rather than a second hand-written `BoxGeometry`), and
   `wall_panel`/`holePath` (reuses `weapons::geometry::primitives::extrude`
   for the actual bevelled-extrude-with-holes machinery — see below).
-- `apps/claude-of-duty/src/world/assembler.rs` — `Assembler`: the five
+- `apps/shmup/src/world/assembler.rs` — `Assembler`: the five
   verbs (`add`/`proto`+`place`+`put`+`putS`/`box`+`collide_geo`+`slab_box`/
   `light`/`finalize`), CHUNK=64m instance bucketing, jitter/skirt logic in
   `put()`.
-- `apps/claude-of-duty/src/world/ground.rs` — `build_ground`: terrain, road
+- `apps/shmup/src/world/ground.rs` — `build_ground`: terrain, road
   (camber/wear/rut), pavement slabs with alley mouths, alley floors, the
   `seam()` material-boundary scatter (fixed-seed `0x5ea31d` stream), sand/dirt
   drifts, manholes (a ported `THREE.CylinderGeometry`) and gully gratings.
 
 ## Golden capture
 
-`apps/claude-of-duty/tests/world/capture.mjs` → `golden.json`, read by
-`apps/claude-of-duty/tests/world_port.rs`. Pins:
+`apps/shmup/tests/world/capture.mjs` → `golden.json`, read by
+`apps/shmup/tests/world_port.rs`. Pins:
 
 - `chamfer_box` (two configs) — full position/normal/uv/color arrays, exact
   arithmetic (no transcendentals in the geometry itself; `atan2` only orders
@@ -133,17 +133,17 @@ blocker below (see "Verification status").
 Everything above was **fully written, unit-tested (83 new tests, all
 passing), and golden-tested (14 new integration tests, all passing) against
 `tests/world/golden.json`** in this session — confirmed by direct `cargo
-test -p axiom-claude-of-duty --lib world::` (83/83 green) and manual
-`cargo test -p axiom-claude-of-duty --test world_port` runs against the
+test -p axiom-shmup --lib world::` (83/83 green) and manual
+`cargo test -p axiom-shmup --test world_port` runs against the
 committed goldens before the final verification pass below.
 
 **However**, at the point of the final required verification
-(`cargo test -p axiom-claude-of-duty`, per the port recipe), the crate
+(`cargo test -p axiom-shmup`, per the port recipe), the crate
 failed to build — with **zero errors in any file this port touched**. The
 six compile errors are all `E0499` (`cannot borrow fx.rng as mutable more
-than once at a time`) in `apps/claude-of-duty/src/fx/impacts.rs`, an
+than once at a time`) in `apps/shmup/src/fx/impacts.rs`, an
 **untracked, uncommitted directory from a different, concurrently-running
-agent session** (confirmed via `git status`: `apps/claude-of-duty/src/fx/`
+agent session** (confirmed via `git status`: `apps/shmup/src/fx/`
 is `??`, and `src/lib.rs`'s `pub mod fx;`/`pub mod sky;` lines were already
 present — modified, uncommitted — before this session's very first commands
 ran). Per the port recipe's concurrency note, `src/world/` is this port's
@@ -152,7 +152,7 @@ fixing another agent's uncommitted borrow-checker error is out of this
 port's scope and risks colliding with their edits.
 
 **Action for whoever picks this up next** (this agent, on resume, or the
-next one): re-run `cargo test -p axiom-claude-of-duty` once `src/fx/`'s
+next one): re-run `cargo test -p axiom-shmup` once `src/fx/`'s
 owner has fixed or committed their side. If it is still red on `fx/` alone,
 that confirms this port's own code is unaffected — every failure in this
 session's testing, up to the final gate, was in `world::*` and `world_port`

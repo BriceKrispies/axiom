@@ -1,7 +1,7 @@
 # Sky / atmospheric scattering — port notes
 
 Ported `C:/dev/Claude-of-Duty/src/sky/{atmosphere,luts,noise,celestial}.js`
-into `apps/claude-of-duty/src/sky/`. `apps/claude-of-duty/src/lib.rs` gained
+into `apps/shmup/src/sky/`. `apps/shmup/src/lib.rs` gained
 one line, `pub mod sky;`, in alphabetical order between `rng` and `ui`.
 
 ## What's here
@@ -106,7 +106,7 @@ warns about by name.
   `width`/`height`/`steps` as **parameters**, not hardcoded constants, so the
   golden/test instead bakes and fully compares a **64×32** grid (same 2:1
   aspect, same step count) — the identical code path at every texel, just
-  fewer of them. Total `cargo test -p axiom-claude-of-duty --test sky_port`
+  fewer of them. Total `cargo test -p axiom-shmup --test sky_port`
   runtime is ~1.1s; a full 384×192 bake would very likely still be fine
   (it's roughly 6x the texels) but wasn't necessary to prove the algorithm
   and I didn't want to inflate the golden file or slow the suite without a
@@ -163,8 +163,8 @@ This reference implementation is deliberately **not** what ships to a GPU:
 
 ## Verification
 
-`cargo test -p axiom-claude-of-duty --test sky_port` — 19 tests, all
-passing, ~1.1s. `cargo test -p axiom-claude-of-duty` (whole crate) — 153+ lib
+`cargo test -p axiom-shmup --test sky_port` — 19 tests, all
+passing, ~1.1s. `cargo test -p axiom-shmup` (whole crate) — 153+ lib
 tests plus every integration test file, all green. `cargo xtask
 check-architecture` — OK.
 

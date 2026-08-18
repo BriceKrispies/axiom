@@ -1,4 +1,4 @@
-# `input` — `src/core/input.js` → `apps/claude-of-duty/src/input.rs`
+# `input` — `src/core/input.js` → `apps/shmup/src/input.rs`
 
 The last unported file of `src/core/`. 253 lines of source, ported whole.
 

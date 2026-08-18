@@ -4,7 +4,7 @@ Ported from Claude-of-Duty `src/weapons/geometry.js` (447 lines). Every builder 
 `parts.js` and `models/*.js` calls only this surface, so it is fixed here **before**
 the parts are split, and agents write against it in parallel.
 
-Target module: `apps/claude-of-duty/src/weapons/geometry/`.
+Target module: `apps/shmup/src/weapons/geometry/`.
 
 ## Space convention (from geometry.js:15-18)
 

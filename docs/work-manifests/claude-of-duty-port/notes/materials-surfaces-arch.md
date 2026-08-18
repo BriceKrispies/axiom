@@ -1,8 +1,8 @@
 # Architectural surface generators (concrete, brick, plaster, tile)
 
-**File:** `apps/claude-of-duty/src/materials/surfaces/arch.rs`
+**File:** `apps/shmup/src/materials/surfaces/arch.rs`
 **Source:** `C:\dev\Claude-of-Duty\src\materials\glsl\surfaces-arch.js:1-563`
-**Tests:** `apps/claude-of-duty/tests/materials_surfaces_arch_port.rs`, 7 passed
+**Tests:** `apps/shmup/tests/materials_surfaces_arch_port.rs`, 7 passed
 **Architecture check:** pass (`cargo xtask check-architecture`, exit 0)
 
 ## What was ported
@@ -130,7 +130,7 @@ behavioral defect was found worth flagging as a preserved source quirk.
 
 ## Full crate test suite
 
-`cargo test -p axiom-claude-of-duty` passes 366/368; the 2 failures are in
+`cargo test -p axiom-shmup` passes 366/368; the 2 failures are in
 `materials::surfaces::metal::tests` (`metal.rs`), a sibling agent's
 concurrent, uncommitted work on `surfaces-metal.js` in the same directory —
 confirmed via `git status` before touching anything, and this file makes no

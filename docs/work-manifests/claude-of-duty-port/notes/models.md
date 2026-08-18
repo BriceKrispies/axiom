@@ -4,9 +4,9 @@ Source: `C:\dev\Claude-of-Duty\src\weapons\models\rifle.js` (468 lines),
 `smg.js` (~330 lines), `pistol.js` (~230 lines) — `buildRifle()`,
 `buildSmg()`, `buildPistol()`.
 
-Target: `apps/claude-of-duty/src/weapons/models/{mod,rifle,smg,pistol}.rs`.
-Tests: `apps/claude-of-duty/tests/weapons_models_port.rs`, goldens at
-`apps/claude-of-duty/tests/models/{rifle,smg,pistol}_golden.json`.
+Target: `apps/shmup/src/weapons/models/{mod,rifle,smg,pistol}.rs`.
+Tests: `apps/shmup/tests/weapons_models_port.rs`, goldens at
+`apps/shmup/tests/models/{rifle,smg,pistol}_golden.json`.
 
 ## What was ported
 
@@ -120,7 +120,7 @@ writeup and the `assert_bucket_matches` implementation.
 
 ## Verification
 
-- `cargo test -p axiom-claude-of-duty` — pass (all test binaries green,
+- `cargo test -p axiom-shmup` — pass (all test binaries green,
   including the new `weapons_models_port` with 6 tests).
 - `cargo xtask check-architecture` — pass, exit 0.
 

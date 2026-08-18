@@ -2,7 +2,7 @@
 
 ## Summary
 
-Ported 390-line JavaScript object `PALETTE` from `C:/dev/Claude-of-Duty/src/world/palette.js` to Rust const data in `apps/claude-of-duty/src/world/palette.rs`.
+Ported 390-line JavaScript object `PALETTE` from `C:/dev/Claude-of-Duty/src/world/palette.js` to Rust const data in `apps/shmup/src/world/palette.rs`.
 
 The palette maps 46 named material variants to physics surface tags and rendering options. Every entry carries exact numeric values from the source.
 

@@ -9,13 +9,13 @@ concurrent pass against the same fixed contract
 
 Files:
 
-- `apps/claude-of-duty/src/weapons/geometry/geo.rs` — `Geo`
-- `apps/claude-of-duty/src/weapons/geometry/merge.rs` — `merge_all`,
+- `apps/shmup/src/weapons/geometry/geo.rs` — `Geo`
+- `apps/shmup/src/weapons/geometry/merge.rs` — `merge_all`,
   `merge_geometries`, `merge_vertices`, `to_non_indexed`
-- `apps/claude-of-duty/src/weapons/geometry/assembly.rs` — `Assembly`, `Xform`,
+- `apps/shmup/src/weapons/geometry/assembly.rs` — `Assembly`, `Xform`,
   `Node`, `euler_xyz_quat`
-- `apps/claude-of-duty/src/weapons/geometry/mod.rs` — re-exports
-- `apps/claude-of-duty/tests/weapons_geometry_port.rs` — the golden-capture
+- `apps/shmup/src/weapons/geometry/mod.rs` — re-exports
+- `apps/shmup/tests/weapons_geometry_port.rs` — the golden-capture
   pins
 
 ## What was ported, and how it was pinned
@@ -130,7 +130,7 @@ non-trivial rotation.
 
 ## `axiom-math` dependency
 
-Added `axiom-math` to `apps/claude-of-duty/Cargo.toml` and `"math"` to
+Added `axiom-math` to `apps/shmup/Cargo.toml` and `"math"` to
 `allowed_layers` in `app.toml` (concurrently, the primitives pass added the
 same lines — the duplicate `[dependencies]` entry was resolved by keeping
 one, since both agents needed the same crate for the same reason: `Mat4`,

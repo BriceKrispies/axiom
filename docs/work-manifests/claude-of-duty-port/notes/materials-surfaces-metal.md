@@ -1,9 +1,9 @@
 # Metal surfaces port
 
-**File:** `apps/claude-of-duty/src/materials/surfaces/metal.rs`
+**File:** `apps/shmup/src/materials/surfaces/metal.rs`
 **Source:** `C:\dev\Claude-of-Duty\src\materials\glsl\surfaces-metal.js:1-323` (the whole file)
-**Tests:** `apps/claude-of-duty/tests/materials_metal_port.rs` (golden, 8 tests) + `metal.rs`'s own `#[cfg(test)]` unit tests (7 tests)
-**Golden capture:** `apps/claude-of-duty/tests/materials/metal/capture.mjs` -> `golden.json`
+**Tests:** `apps/shmup/tests/materials_metal_port.rs` (golden, 8 tests) + `metal.rs`'s own `#[cfg(test)]` unit tests (7 tests)
+**Golden capture:** `apps/shmup/tests/materials/metal/capture.mjs` -> `golden.json`
 **Architecture check:** pass
 
 ## What was ported

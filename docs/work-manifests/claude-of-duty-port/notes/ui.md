@@ -1,7 +1,7 @@
 # UI (HUD) port notes
 
 Ported `C:/dev/Claude-of-Duty/src/ui/` (3,818 lines across 15 files) into
-`apps/claude-of-duty/src/ui/` as a new module tree, wired via one
+`apps/shmup/src/ui/` as a new module tree, wired via one
 `pub mod ui;` line in `src/lib.rs`.
 
 ## What was ported
@@ -92,7 +92,7 @@ dropped — nothing outside `minimap.js` (deferred, see below) reads them.
 ## Verification
 
 99 new tests in `ui::*`, all native, all passing (`cargo test -p
-axiom-claude-of-duty` — 153 unit tests total in the lib, plus the existing
+axiom-shmup` — 153 unit tests total in the lib, plus the existing
 integration test files). Covers, per the task's explicit list:
 
 - **`--k` scale derivation** (`style::scale_factor`): exact at 1080p, clamped

@@ -1,9 +1,9 @@
 # Procedural texture forge: the bake pipeline and the curvature mask bake
 
 **Files:**
-`apps/claude-of-duty/src/materials/bake.rs`
-`apps/claude-of-duty/src/materials/masks.rs`
-(`apps/claude-of-duty/src/materials/mod.rs` gained `pub mod bake;` / `pub mod masks;`)
+`apps/shmup/src/materials/bake.rs`
+`apps/shmup/src/materials/masks.rs`
+(`apps/shmup/src/materials/mod.rs` gained `pub mod bake;` / `pub mod masks;`)
 
 **Source:**
 `C:\dev\Claude-of-Duty\src\materials\generator.js:1-393` (`TextureForge`)
@@ -109,7 +109,7 @@ Two Node scripts (`.mjs`, deleted after use per the recipe):
      own in-plane edge-offset vectors), verified in a Rust-only test rather
      than a JS capture, since it follows from the algorithm's definition, not
      from a captured number.
-   - The **rng jitter** branch: a JS transcription of `apps/claude-of-duty/
+   - The **rng jitter** branch: a JS transcription of `apps/shmup/
      src/rng.rs`'s exact xoshiro128**/SplitMix32 sequence (verified line-for-
      line against `rng.rs`'s `seed`/`u32` before use), driving `bakeMasks`
      with `rng: Rng::new(1234)` and capturing the per-**vertex** (not

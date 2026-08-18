@@ -1,8 +1,8 @@
 # `weapons/mathx.js` port notes
 
 Source: `C:/dev/Claude-of-Duty/src/weapons/mathx.js:1-230` (whole file).
-Target: `apps/claude-of-duty/src/weapons/mathx.rs`.
-Test: `apps/claude-of-duty/tests/weapons_mathx_port.rs` (16 tests).
+Target: `apps/shmup/src/weapons/mathx.rs`.
+Test: `apps/shmup/tests/weapons_mathx_port.rs` (16 tests).
 
 ## What was ported
 

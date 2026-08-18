@@ -1,8 +1,8 @@
 # Noise library port
 
-**File:** `apps/claude-of-duty/src/materials/noise.rs`
+**File:** `apps/shmup/src/materials/noise.rs`
 **Source:** `C:\dev\Claude-of-Duty\src\materials\glsl\noise.js:1-218` (the whole embedded `NOISE_GLSL` body)
-**Tests:** `apps/claude-of-duty/tests/materials_noise_port.rs`, 24 passed
+**Tests:** `apps/shmup/tests/materials_noise_port.rs`, 24 passed
 **Architecture check:** pass
 
 ## What was ported
@@ -19,7 +19,7 @@ Every function from the source:
 - Composite: `owCracks` (warped Voronoi edges, thinned + broken by an fbm mask).
 - Utilities: `owSat`, `owSat3`, `owRemap`, `owRot`, `owSRGB`, `owShear`, `owShearPer`, `owScratches`.
 
-`mod noise;` was added to `apps/claude-of-duty/src/materials/mod.rs` (re-read immediately before editing per the concurrency warning; the file was unchanged from commit `e271b214` at edit time, so the edit applied cleanly on the first try).
+`mod noise;` was added to `apps/shmup/src/materials/mod.rs` (re-read immediately before editing per the concurrency warning; the file was unchanged from commit `e271b214` at edit time, so the edit applied cleanly on the first try).
 
 ## Golden-capture method
 

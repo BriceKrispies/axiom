@@ -2,7 +2,7 @@
 
 Ported `src/weapons/geometry.js:51-357` (every primitive builder between the
 `normalizeAttributes` helper and the `Assembly` class) into
-`apps/claude-of-duty/src/weapons/geometry/primitives/` per
+`apps/shmup/src/weapons/geometry/primitives/` per
 `docs/work-manifests/claude-of-duty-port/03-weapon-geometry-api.md`. This is
 the "primitives" half of the contract; `Geo`, `merge_all`, and `Assembly`
 (the other half) landed concurrently from a different agent in
@@ -14,7 +14,7 @@ the "primitives" half of the contract; `Geo`, `merge_all`, and `Assembly`
   helpers, all thin wrappers around `Geo::apply(&Mat4)` (built from
   `axiom_math::{Mat4, Quat, Vec3}`) rather than a second hand-rolled
   transform path. `axiom-math` (`crates/axiom-math`, a real engine layer) was
-  added to `apps/claude-of-duty/Cargo.toml` for this — the other agent's
+  added to `apps/shmup/Cargo.toml` for this — the other agent's
   `Geo::apply` already depended on it, so the dependency line was shared
   rather than duplicated; both changes landed as a single addition.
 - `primitives/earcut.rs` — a full port of `mapbox/earcut` v3.0.1 (vendored
@@ -119,8 +119,8 @@ fidelity.
 
 ## Verification
 
-`apps/claude-of-duty/tests/weapons_geometry_primitives_port.rs`, 23 tests,
-golden data in `apps/claude-of-duty/tests/geometry/golden.json` (captured
+`apps/shmup/tests/weapons_geometry_primitives_port.rs`, 23 tests,
+golden data in `apps/shmup/tests/geometry/golden.json` (captured
 from the real `THREE.RoundedBoxGeometry`/`LatheGeometry`/`SphereGeometry`/
 `TorusGeometry`/`ExtrudeGeometry`/`OctahedronGeometry`/`Earcut` under Node
 v24; the capture script was not committed, per the port recipe). Covers

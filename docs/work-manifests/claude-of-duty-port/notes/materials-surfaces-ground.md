@@ -1,11 +1,11 @@
 # Ground surfaces port (asphalt / sand / dirt / gravel)
 
-**File:** `apps/claude-of-duty/src/materials/surfaces/ground.rs`
+**File:** `apps/shmup/src/materials/surfaces/ground.rs`
 **Source:** `C:\dev\Claude-of-Duty\src\materials\glsl\surfaces-ground.js:1-366` (whole file)
-**Wired up:** `apps/claude-of-duty/src/materials/surfaces/mod.rs` (`pub mod ground;`), `apps/claude-of-duty/src/materials/mod.rs` (`pub mod surfaces;`)
-**Tests:** `apps/claude-of-duty/tests/materials_surfaces_ground_port.rs` (5 tests) + `ground.rs`'s own `#[cfg(test)]` module (3 tests)
-**Golden:** `apps/claude-of-duty/tests/materials_surfaces_ground/{capture.mjs,golden.json}`
-**Full `cargo test -p axiom-claude-of-duty`:** pass. **`cargo xtask check-architecture`:** pass.
+**Wired up:** `apps/shmup/src/materials/surfaces/mod.rs` (`pub mod ground;`), `apps/shmup/src/materials/mod.rs` (`pub mod surfaces;`)
+**Tests:** `apps/shmup/tests/materials_surfaces_ground_port.rs` (5 tests) + `ground.rs`'s own `#[cfg(test)]` module (3 tests)
+**Golden:** `apps/shmup/tests/materials_surfaces_ground/{capture.mjs,golden.json}`
+**Full `cargo test -p axiom-shmup`:** pass. **`cargo xtask check-architecture`:** pass.
 
 ## What was ported
 

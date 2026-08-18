@@ -3,7 +3,7 @@
 Ported from `C:/dev/Claude-of-Duty/src/weapons/parts.js:170-381`:
 `addBarrel` (:178-222), `addGasBlock` (:228-244), `addMuzzleDevice` (:250-381).
 
-Target: `apps/claude-of-duty/src/weapons/parts/barrel.rs`.
+Target: `apps/shmup/src/weapons/parts/barrel.rs`.
 
 ## Public API
 
@@ -71,8 +71,8 @@ against a real `Assembly` (9 cases: 2 barrel, 2 gas block, 4 muzzle-kind
 variants + 1 offset/radius variant), dumped every material bucket's
 `position`/`normal`/`uv`/`index` plus each call's JS return value, and was
 deleted after capture. Committed as
-`apps/claude-of-duty/tests/parts/barrel_golden.json`, asserted against in
-`apps/claude-of-duty/tests/weapons_parts_barrel_port.rs`.
+`apps/shmup/tests/parts/barrel_golden.json`, asserted against in
+`apps/shmup/tests/weapons_parts_barrel_port.rs`.
 
 - Vertex/triangle counts and index buffers: **exact** in every case.
 - Position/normal/uv floats: **`1e-5`** absolute, not the primitives file's

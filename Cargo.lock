@@ -241,20 +241,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-claude-of-duty"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-kernel",
- "axiom-math",
- "axiom-windowing",
- "console_error_panic_hook",
- "serde_json",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "axiom-client-core"
 version = "0.1.0"
 dependencies = [
@@ -1023,6 +1009,20 @@ dependencies = [
  "png",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "axiom-shmup"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "serde_json",
+ "wasm-bindgen",
  "web-sys",
 ]
 

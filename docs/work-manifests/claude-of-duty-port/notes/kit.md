@@ -12,7 +12,7 @@ and `kit.js`'s own `mergeSimple`, `sashLeaf`, `shutterLeaf`, `doorLeaf`,
 
 ## Why `world/kit.rs` became `world/kit/`
 
-`apps/claude-of-duty/src/world/kit.rs` already existed before this session,
+`apps/shmup/src/world/kit.rs` already existed before this session,
 holding the **`util.js` geometry-toolkit** port (`trs`, `chamfer_box`,
 `weather_prop`, `patch_geometry`, `plane_geometry`/`quad`, `wall_panel`) —
 `world-assembler.md`'s own notes call this out as deliberately named ahead of
@@ -124,8 +124,8 @@ warns against silently tidying up a source quirk.
 
 ## Golden capture
 
-`apps/claude-of-duty/tests/kit/capture.mjs` → `golden.json`, read by
-`apps/claude-of-duty/tests/kit_port.rs` (15 tests, all passing). Pins:
+`apps/shmup/tests/kit/capture.mjs` → `golden.json`, read by
+`apps/shmup/tests/kit_port.rs` (15 tests, all passing). Pins:
 
 - `solidSlabs` — four opening layouts (no holes, one centred hole, two
   holes, a hole flush with the panel edge), exact `f32`-tolerance rectangle
@@ -187,15 +187,15 @@ warns against silently tidying up a source quirk.
 
 ## Verification
 
-`cargo test -p axiom-claude-of-duty --lib world::kit::` — 67/67 passing.
-`cargo test -p axiom-claude-of-duty --test kit_port` — 15/15 passing.
+`cargo test -p axiom-shmup --lib world::kit::` — 67/67 passing.
+`cargo test -p axiom-shmup --test kit_port` — 15/15 passing.
 `cargo xtask check-architecture` — OK.
 
-A full-crate `cargo test -p axiom-claude-of-duty` run intermittently showed
+A full-crate `cargo test -p axiom-shmup` run intermittently showed
 compile errors and (once compiling) 3 test failures entirely inside
 `world::props::*` — an **untracked, uncommitted directory from a different,
 concurrently-running agent session** (confirmed via `git status`:
-`apps/claude-of-duty/src/world/props/` and `apps/claude-of-duty/tests/props/`
+`apps/shmup/src/world/props/` and `apps/shmup/tests/props/`
 are both `??`, and `src/world/mod.rs`'s `pub mod props;` plus visibility
 widenings in `weapons/geometry/primitives/{lathe,sphere,mod}.rs` are
 modified-but-uncommitted, from before and after this session's own edits).

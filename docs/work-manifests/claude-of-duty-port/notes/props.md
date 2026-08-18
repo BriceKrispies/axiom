@@ -1,7 +1,7 @@
 # props.js port notes
 
 Ported `src/world/props.js` (994 lines) into
-`apps/claude-of-duty/src/world/props/` (directory — the file was well past
+`apps/shmup/src/world/props/` (directory — the file was well past
 the point where one flat file stayed readable). One submodule per registry
 section, matching the source's own banner comments:
 

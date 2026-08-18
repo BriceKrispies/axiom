@@ -2,7 +2,7 @@
 
 ## What was ported
 
-`apps/claude-of-duty/src/physics/`:
+`apps/shmup/src/physics/`:
 
 - `math.rs` — `src/physics/math.js:1-400`, the whole file. `EPS`, `clamp`,
   `Closest`/`HitRecord` (mirroring `makeClosest()`/`makeHitRecord()`),
@@ -12,7 +12,7 @@
   JS-number precision exactly.
 - `surfaces.rs` — `src/physics/surfaces.js:1-143`, the whole file, *except*
   the 12-entry `SURFACE_NAMES`/`SURFACE` taxonomy itself, which is not
-  re-declared: `apps/claude-of-duty/src/world/palette.rs` already has a
+  re-declared: `apps/shmup/src/world/palette.rs` already has a
   `Surface` enum whose declaration order matches `SURFACE_NAMES` exactly, so
   `surfaces.rs` adds `Surface::index()`/`::from_index()`/`::name()` (in
   `palette.rs`) and reuses it. Everything else — `SurfaceProps`/
@@ -74,7 +74,7 @@ computation. Fixed structurally: `StaticWorld::pos`/`nrm`/`node_bounds`/
 to `f64` at every read site and narrowed only where the source's own
 `Float32Array` assignment would narrow. This is the same "computes in f64,
 stores f32" discipline already established for the weapon geometry port
-(`apps/claude-of-duty/src/weapons/geometry`, commit `2fc45570`).
+(`apps/shmup/src/weapons/geometry`, commit `2fc45570`).
 
 `StaticObject::tris` (this port's `add_triangles` staging, before `build()`
 copies it into `pos`) is kept at full `f64` — the source's `addTriangles`
@@ -101,7 +101,7 @@ off to the side (1 triangle) — every vertex coordinate a small integer, so
 node-bounds padding (see above), which is exactly the fact the goldens now
 pin.
 
-Pinned in `apps/claude-of-duty/tests/physics_port.rs` (19 tests, all
+Pinned in `apps/shmup/tests/physics_port.rs` (19 tests, all
 passing against the port on the first run after the `f32`-storage fix):
 
 - **Exact equality** (`build()`'s binned-SAH construction is pure
@@ -164,10 +164,10 @@ Rust. Documented at the top of both files rather than at every call site.
 
 ## Verification
 
-- `cargo test -p axiom-claude-of-duty --lib --test physics_port --test core_port`:
+- `cargo test -p axiom-shmup --lib --test physics_port --test core_port`:
   pass (53 lib tests, 19 physics-port golden tests, 12 core_port tests).
 - `cargo xtask check-architecture`: pass.
-- `cargo test -p axiom-claude-of-duty` (the whole crate, every test binary)
+- `cargo test -p axiom-shmup` (the whole crate, every test binary)
   currently fails to *compile* — `tests/weapons_models_port.rs` and
   `src/weapons/models/` are untracked, in-progress work from a concurrent
   agent (per the port's concurrency assignment: `src/weapons/models/` is

@@ -1,7 +1,7 @@
 # Port notes: `world::noise` and `world::masks`
 
 Source: `C:/dev/Claude-of-Duty/src/world/util.js` (~1119 lines).
-Targets: `apps/claude-of-duty/src/world/noise.rs`, `apps/claude-of-duty/src/world/masks.rs`.
+Targets: `apps/shmup/src/world/noise.rs`, `apps/shmup/src/world/masks.rs`.
 Commit: `25dcf85c`.
 
 ## What was ported
@@ -131,12 +131,12 @@ not attempt to guess that type's final shape.
 
 ## Verification
 
-- `cargo test -p axiom-claude-of-duty --lib world::` — 28 passed (10 new noise
+- `cargo test -p axiom-shmup --lib world::` — 28 passed (10 new noise
   tests, 8 new mask tests, plus the pre-existing 10 in `layout`/`palette`).
-- `cargo test -p axiom-claude-of-duty --lib --test core_port` — 53 passed
+- `cargo test -p axiom-shmup --lib --test core_port` — 53 passed
   (unaffected, confirming no regression to the deterministic core).
-- `cargo test -p axiom-claude-of-duty --test audio_port` has 11 pre-existing
-  failures — untracked (`git status` shows `apps/claude-of-duty/src/audio/`
+- `cargo test -p axiom-shmup --test audio_port` has 11 pre-existing
+  failures — untracked (`git status` shows `apps/shmup/src/audio/`
   and `tests/audio_port.rs` as `??`), owned by a concurrent agent per this
   task's concurrency warning, and touching nothing this port changed. Left
   alone.

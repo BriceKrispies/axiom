@@ -1,6 +1,6 @@
 # `scene` — the ten ported subsystems, wired into one running game
 
-`apps/claude-of-duty/src/viewer.rs` (four weapon parts on a turntable) is no
+`apps/shmup/src/viewer.rs` (four weapon parts on a turntable) is no
 longer the app's only rendering arm. `src/scene/` is the composition tier, and
 `claude_of_duty_start` now boots the game: bare ground you can walk on, at real
 scale, under the ported atmosphere, with the rifle on the road in front of you.
@@ -126,7 +126,7 @@ path does.
 
 ## Verified
 
-* `cargo test -p axiom-claude-of-duty` — 762 tests across 22 binaries, all green
+* `cargo test -p axiom-shmup` — 762 tests across 22 binaries, all green
   (356 in the lib, up from 306).
 * `cargo xtask check-architecture` — OK.
 * In a real browser (WebGPU backend, console error-free): the street runs away

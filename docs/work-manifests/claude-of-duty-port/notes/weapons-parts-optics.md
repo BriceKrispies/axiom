@@ -2,7 +2,7 @@
 
 Ported from `C:/dev/Claude-of-Duty/src/weapons/parts.js`:
 
-- `buildOptic` (`:1215-1637`) → `build_optic`, `apps/claude-of-duty/src/weapons/parts/optics/tube_sight.rs`
+- `buildOptic` (`:1215-1637`) → `build_optic`, `apps/shmup/src/weapons/parts/optics/tube_sight.rs`
 - `buildMiniReflex` (`:1886-1971`) → `build_mini_reflex`, `.../optics/mini_reflex.rs`
 - `buildSlide` (`:1971-2072`) → `build_slide`, `.../optics/slide.rs`
 
@@ -39,8 +39,8 @@ Six cases (default + one custom-dimension variant per builder) captured by
 running the original `parts.js`/`geometry.js` under Node 24, calling each
 builder against a real `Assembly`, `build()`-ing it, and dumping every
 material bucket's `position`/`normal`/`uv`/`index` plus the return value.
-Committed as `apps/claude-of-duty/tests/parts/optics_golden.json`; asserted
-in `apps/claude-of-duty/tests/weapons_parts_optics_port.rs`. The capture
+Committed as `apps/shmup/tests/parts/optics_golden.json`; asserted
+in `apps/shmup/tests/weapons_parts_optics_port.rs`. The capture
 script was written into a scratch location under `C:/dev/Claude-of-Duty` and
 deleted after use, per the recipe.
 

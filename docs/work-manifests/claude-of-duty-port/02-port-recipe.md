@@ -1,12 +1,12 @@
 # Port recipe — follow this exactly
 
 You are porting one file from `C:\dev\Claude-of-Duty` (Three.js browser FPS, ISC
-licensed) into `apps/claude-of-duty` in this worktree. This file is the whole
+licensed) into `apps/shmup` in this worktree. This file is the whole
 procedure; your prompt names only the source file and the target module.
 
 ## Rules
 
-1. **Work only in `apps/claude-of-duty/`.** Never touch `crates/` or `modules/` —
+1. **Work only in `apps/shmup/`.** Never touch `crates/` or `modules/` —
    other agents are live there. Never touch `C:\dev\axiom` itself.
 2. **Never `git add -A`.** Stage only the paths you created or edited.
 3. **Never** run `git reset`, `checkout`, `stash`, `clean`, `pull`, or `merge`.
@@ -41,7 +41,7 @@ For any routine that is pure maths or pure data:
      the test.
 4. Commit the golden file. Commit the capture script too when it is small enough to be worth rereading.
 
-Precedent: `apps/claude-of-duty/tests/core_port.rs` (commit `16fbf5d4`) pins the
+Precedent: `apps/shmup/tests/core_port.rs` (commit `16fbf5d4`) pins the
 RNG this way — the `u32` stream from three seeds, exact `f64` equality on
 `float`/`range`/`signed`/`int`/`pick`, `1e-12` on the Box–Muller pairs.
 
@@ -54,13 +54,13 @@ editing them cannot reshuffle the level. **Preserve every `fork()` call and ever
 literal seed exactly, in the same order.** Draw order is part of the contract: an
 extra or missing draw shifts every subsequent value.
 
-`apps/claude-of-duty/src/rng.rs` is the ported generator (xoshiro128\*\* with a
+`apps/shmup/src/rng.rs` is the ported generator (xoshiro128\*\* with a
 SplitMix32 expander). Use it. Do **not** substitute the kernel's
 `DeterministicRng` — it is splitmix64 and produces a different sequence.
 
 ## Style
 
-Match `apps/claude-of-duty/src/`. One concept per module. Data tables as `const`
+Match `apps/shmup/src/`. One concept per module. Data tables as `const`
 arrays or a `struct` per entry. Prefer plain `f32`/`f64` matching the source's
 precision; reach for the kernel's `Seconds`/`Meters`/`Ratio` only at boundaries
 where they read naturally.
@@ -70,7 +70,7 @@ where they read naturally.
 Run these **sequentially, never at the same time** — two gates at once makes
 dylint report a fake `cargo metadata` error and mask the real finding:
 
-1. `cargo test -p axiom-claude-of-duty`
+1. `cargo test -p axiom-shmup`
 2. `cargo xtask check-architecture`
 
 Do **not** run the workspace coverage script; that runs centrally.
@@ -171,7 +171,7 @@ So, every time:
    but not yours.
 3. `git commit -m "..." -- <your explicit paths>` — pass the pathspec to `commit`
    too, so a stray staged file cannot ride along.
-4. `cargo check -p axiom-claude-of-duty` **after** committing, so you notice
+4. `cargo check -p axiom-shmup` **after** committing, so you notice
    immediately if your commit does not build.
 
 If you find someone else's work already staged, **do not commit it and do not

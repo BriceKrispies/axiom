@@ -50,10 +50,10 @@ real `Assembly` and `buildMagazine`/`addRollmark`/`addFrontSight`/
 `addRearSight` from the real `parts.js`, called each with fixed arguments
 against fresh `Assembly` instances, `build()`'d, and dumped every material
 bucket's `position`/`normal`/`uv`/`index`. Committed as
-`apps/claude-of-duty/tests/parts/golden_magazine.json` (~2.7 MB — see "why not
+`apps/shmup/tests/parts/golden_magazine.json` (~2.7 MB — see "why not
 bigger" below).
 
-`apps/claude-of-duty/tests/weapons_parts_magazine_port.rs` — 9 tests, 8 green
+`apps/shmup/tests/weapons_parts_magazine_port.rs` — 9 tests, 8 green
 and 1 currently failing against a live, uncommitted, in-progress dependency
 change (see "Concurrency notes" below for the full account; it is **not** a
 bug in this slice — verified 9/9 green against the stable, committed geometry
@@ -144,7 +144,7 @@ testing the actual default), `rear_sight_{up,folded}` ~304 KB each,
 
 ## Concurrency notes — the geometry primitives moved under me mid-task
 
-While this slice was in progress, `apps/claude-of-duty/src/weapons/geometry/
+While this slice was in progress, `apps/shmup/src/weapons/geometry/
 primitives/{extrude.rs,parts.rs}` were **uncommitted, in-flight WIP** from an
 unannounced fourth actor converting `extrude`/`round_rect` from `f32` to `f64`
 per `03-weapon-geometry-api.md`'s already-committed "Corrections" section
@@ -165,7 +165,7 @@ holes, both sights' profile extrudes) — the only one exposed to the churn.
    HEAD:.../extrude.rs`, `f32` at every point during this port): scoped
    `git stash push -- extrude.rs parts.rs` (only those two files, leaving
    this slice and everything else untouched), full `cargo test
-   -p axiom-claude-of-duty` (271 tests, all green) and `cargo xtask
+   -p axiom-shmup` (271 tests, all green) and `cargo xtask
    check-architecture` (pass), then `git stash pop` to restore the other
    actor's WIP exactly as found. At `f32`, every test in this slice —
    including `build_magazine_matches_the_rifle_configuration` — is green.

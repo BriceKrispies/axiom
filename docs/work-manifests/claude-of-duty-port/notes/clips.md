@@ -1,8 +1,8 @@
 # `weapons/clips.rs` — port notes
 
 Source: `C:\dev\Claude-of-Duty\src\weapons\clips.js:1-318` (whole file).
-Target: `apps/claude-of-duty/src/weapons/clips.rs` +
-`apps/claude-of-duty/tests/weapons_clips_port.rs`.
+Target: `apps/shmup/src/weapons/clips.rs` +
+`apps/shmup/tests/weapons_clips_port.rs`.
 
 ## What was ported
 

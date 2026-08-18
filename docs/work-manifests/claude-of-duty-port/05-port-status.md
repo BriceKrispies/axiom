@@ -17,7 +17,7 @@ Branch `port/claude-of-duty`, worktree `.claude/worktrees/claude-of-duty`, cut f
 | `75dbc8ff` | `axiom-physics`: capsule↔sphere/capsule/plane/box + box↔box contacts, capsule overlap, capsule cast, `PhysicsHit` with point/normal/distance/front_face, `raycast_all`. Fixed a live out-of-bounds panic by sizing every dispatch table from `PhysicsShapeKind::COUNT` |
 | `d2de35f5` | `App::install(FnOnce(&mut RunningApp))` in `modules/axiom` — author geometry on the normal app path |
 
-## Game (apps/claude-of-duty)
+## Game (apps/shmup)
 
 | area | source | commits | state |
 |---|---|---|---|

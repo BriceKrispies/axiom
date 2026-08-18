@@ -2,7 +2,7 @@
 
 Ported `addHandguard` (`parts.js:391-514`), `addUpperReceiver` (`:525-656`),
 `addBoltCarrier` (`:662-687`), and `addLowerReceiver` (`:693-792`) into
-`apps/claude-of-duty/src/weapons/parts/receiver.rs`. Registered in
+`apps/shmup/src/weapons/parts/receiver.rs`. Registered in
 `src/weapons/parts/mod.rs` alongside `barrel`/`controls`/`hardware`/`magazine`.
 
 ## API shape
@@ -87,9 +87,9 @@ synthetic all-default cases to exercise branches the real rifle never hits
 (`handguard_no_top`: `topFrom === null` continue arm + `matPanel ?? matAlu`
 fallback; `lower_receiver_defaults`: `magTop ?? bore - 0.014` / `magBottom ??
 bore - 0.062` fallback). Committed as
-`apps/claude-of-duty/tests/parts/receiver_golden.json` (6.6 MB — six cases,
+`apps/shmup/tests/parts/receiver_golden.json` (6.6 MB — six cases,
 each with several material buckets); test file
-`apps/claude-of-duty/tests/weapons_parts_receiver_port.rs`.
+`apps/shmup/tests/weapons_parts_receiver_port.rs`.
 
 Six tests, all passing exactly:
 
@@ -117,7 +117,7 @@ JS `f64` golden, same as `weapons_parts_barrel_port.rs`'s pattern for
 
 ## Verify-before-commit results
 
-- `cargo test -p axiom-claude-of-duty` — pass (ran the lib tests plus every
+- `cargo test -p axiom-shmup` — pass (ran the lib tests plus every
   `weapons_*` integration test individually; one sibling test binary
   (`weapons_parts_optics_port`, owned by a concurrent agent) hit a transient
   Windows file-lock from a simultaneous build and was excluded from this

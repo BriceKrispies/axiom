@@ -4,9 +4,9 @@ Source: `C:\dev\Claude-of-Duty\src\weapons\parts.js` — `selectorPart` (:795-82
 `triggerPart` (:838-866), `addPistolGrip` (:876-956), `addCarbineStock`
 (:962-1071), `chargingHandlePart` (:1781-1854), `addForeGrip` (:1857-1879).
 
-Target: `apps/claude-of-duty/src/weapons/parts/controls.rs`.
-Test: `apps/claude-of-duty/tests/weapons_parts_controls_port.rs`, golden at
-`apps/claude-of-duty/tests/parts/controls_golden.json`.
+Target: `apps/shmup/src/weapons/parts/controls.rs`.
+Test: `apps/shmup/tests/weapons_parts_controls_port.rs`, golden at
+`apps/shmup/tests/parts/controls_golden.json`.
 
 ## What was ported
 
@@ -99,7 +99,7 @@ exact-count, `1e-5`-tolerance comparison.
 
 ## Verification
 
-- `cargo test -p axiom-claude-of-duty` — pass (all test binaries green,
+- `cargo test -p axiom-shmup` — pass (all test binaries green,
   including the new `weapons_parts_controls_port` with 11 tests).
 - `cargo xtask check-architecture` — pass, exit 0.
 

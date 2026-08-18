@@ -41,9 +41,9 @@ running, per the port recipe) that imports the real `Assembly` from
 arguments against real `Assembly` instances, `build()`s, and dumps every
 material bucket's `position`/`normal`/`uv`/`index`. `cartridge`/`emptyCase`
 are dumped directly (they never touch an `Assembly`). Captured JSON committed
-as `apps/claude-of-duty/tests/parts/hardware_golden.json` (~918 KB).
+as `apps/shmup/tests/parts/hardware_golden.json` (~918 KB).
 
-`apps/claude-of-duty/tests/weapons_parts_hardware_port.rs` — 10 tests, all
+`apps/shmup/tests/weapons_parts_hardware_port.rs` — 10 tests, all
 green:
 
 - `muzzle_len_matches_the_source_literals` — exact equality (plain literals).
@@ -104,7 +104,7 @@ the axis dispatch, which is faithfully reproduced.
 (barrel, magazine) before this file landed; by the time this port ran, both
 already contained the `pub mod hardware;` / `pub mod parts;` lines this slice
 needs, so no edit to either was required at commit time. Did not touch
-`barrel.rs`, `magazine.rs`, or their tests. `cargo test -p axiom-claude-of-duty`
+`barrel.rs`, `magazine.rs`, or their tests. `cargo test -p axiom-shmup`
 run as a whole workspace-of-parts command shows 6 pre-existing failures in
 `weapons_parts_magazine_port.rs` (a sibling agent's in-flight file, unrelated
 to this slice) — `weapons_parts_hardware_port.rs` itself is 10/10 green, and

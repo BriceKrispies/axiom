@@ -1,6 +1,6 @@
 # fx port notes
 
-Slice: `apps/claude-of-duty/src/fx/`, ported from Claude-of-Duty `src/fx/*.js`
+Slice: `apps/shmup/src/fx/`, ported from Claude-of-Duty `src/fx/*.js`
 (all files except `ambience.js`, which is a separate, not-yet-ported slice, and
 `preview.js`/`preview.html`/`shoot.mjs`, the source's own dev harness).
 
@@ -141,6 +141,6 @@ golden-capture recipe, not an oversight.
 
 ## Verify
 
-- `cargo test -p axiom-claude-of-duty` — pass (fx unit tests: 75; golden:
+- `cargo test -p axiom-shmup` — pass (fx unit tests: 75; golden:
   5/5; no regressions in `weapons`/`world`/`physics`/`materials`/`audio`).
 - `cargo xtask check-architecture` — pass.

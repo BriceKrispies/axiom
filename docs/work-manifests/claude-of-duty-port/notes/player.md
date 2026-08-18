@@ -1,7 +1,7 @@
 # Player: movement, camera feel, springs, tuning
 
 Ported `src/player/springs.js`, `src/player/tuning.js`, `src/player/mantle.js`,
-`src/player/movement.js`, `src/player/camera.js` into `apps/claude-of-duty/src/player/`
+`src/player/movement.js`, `src/player/camera.js` into `apps/shmup/src/player/`
 (`springs.rs`, `tuning.rs`, `mantle.rs`, `movement.rs`, `camera.rs`, `mod.rs`).
 
 ## What was ported
@@ -29,7 +29,7 @@ Ported `src/player/springs.js`, `src/player/tuning.js`, `src/player/mantle.js`,
 ## The physics and input seams
 
 Neither `src/physics/`'s collision world nor `src/core/input.js` back a
-player controller yet (physics exists as `crates`... no — `apps/claude-of-duty/
+player controller yet (physics exists as `crates`... no — `apps/shmup/
 src/physics/` — a low-level BVH/raycast kernel, landed by a concurrent agent
 during this same port pass, but it has no `createCharacter()`-shaped
 controller or player-facing adapter over its `u16` masks / `HitRecord` yet;

@@ -133,9 +133,9 @@ coincidentally-matching sample.
 
 ## Verification run
 
-- `cargo test -p axiom-claude-of-duty --test materials_surfaces_organic_port`:
+- `cargo test -p axiom-shmup --test materials_surfaces_organic_port`:
   8/8 passed on first run against the golden.
-- `cargo test -p axiom-claude-of-duty` (whole crate): 367 passed, 1 failed —
+- `cargo test -p axiom-shmup` (whole crate): 367 passed, 1 failed —
   the failure is `materials::surfaces::metal::tests::
   metal_painted_is_non_metallic_somewhere_and_bare_through_a_chip_elsewhere`,
   in a sibling agent's concurrently-written `metal.rs`, unrelated to this

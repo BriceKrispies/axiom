@@ -2,13 +2,13 @@
 
 ## What was ported
 
-- `C:/dev/Claude-of-Duty/src/weapons/ballistics.js:1-166` → `apps/claude-of-duty/src/weapons/ballistics.rs`
-- `C:/dev/Claude-of-Duty/src/weapons/defs.js:1-320` → `apps/claude-of-duty/src/weapons/defs.rs`
-- `apps/claude-of-duty/src/weapons/mod.rs` gained `pub mod ballistics;` / `pub mod defs;`
+- `C:/dev/Claude-of-Duty/src/weapons/ballistics.js:1-166` → `apps/shmup/src/weapons/ballistics.rs`
+- `C:/dev/Claude-of-Duty/src/weapons/defs.js:1-320` → `apps/shmup/src/weapons/defs.rs`
+- `apps/shmup/src/weapons/mod.rs` gained `pub mod ballistics;` / `pub mod defs;`
   (merged alongside a concurrently-landing `pub mod mathx;` from another agent).
-- `apps/claude-of-duty/src/lib.rs` gained `pub mod weapons;`, inserted between the
+- `apps/shmup/src/lib.rs` gained `pub mod weapons;`, inserted between the
   concurrently-added `rng`/`world` lines without disturbing them.
-- Tests: `apps/claude-of-duty/tests/weapons_port.rs`.
+- Tests: `apps/shmup/tests/weapons_port.rs`.
 
 ## defs.rs — data tables
 
@@ -124,12 +124,12 @@ Captured with a temporary `capture_weapons_tmp.mjs` in `C:/dev/Claude-of-Duty`
   `range01` samples (35 points spanning the extremes 0.0/1.0 and the three weapons'
   real `dropoff`s) → pure `+ - *`, asserted with **exact `f64` equality**.
 
-All golden tests pass (`cargo test -p axiom-claude-of-duty`: 108 tests total across the
+All golden tests pass (`cargo test -p axiom-shmup`: 108 tests total across the
 crate, all green).
 
 ## Verification
 
-- `cargo test -p axiom-claude-of-duty` — pass (108 tests: 22 unit + 53 core_port + 16
+- `cargo test -p axiom-shmup` — pass (108 tests: 22 unit + 53 core_port + 16
   weapons_mathx_port + 17 weapons_port).
 - `cargo xtask check-architecture` — pass, no violations.
 - Coverage gate not run (per recipe — runs centrally).
