@@ -71,6 +71,24 @@ web-sys = { version = "0.3", features = [
     "PeriodicWaveOptions",
     "StereoPannerNode",
     "WaveShaperNode",
+
+    # DOM binding for `ui::dom` (the `el`/`svg`/`setStyle`/`setText`/`setClass`
+    # realiser — `src/ui/util.js:30-77`), `ui::style` (the injected stylesheet,
+    # `src/ui/style.js`), and every widget's element construction. The HUD is a
+    # DOM/CSS overlay, not a canvas draw — this is its only browser surface.
+    "CssStyleDeclaration",
+    "Document",
+    "DomTokenList",
+    "Element",
+    "HtmlBodyElement",
+    "HtmlElement",
+    "HtmlHeadElement",
+    "HtmlInputElement",
+    "HtmlStyleElement",
+    "Node",
+    "SvgElement",
+    "SvggElement",
+    "Window",
 ] }
 
 [dev-dependencies]
