@@ -89,3 +89,28 @@ not port.
 **Return at most 8 lines to the caller**: the commit hash, pass/fail for both
 commands, and anything genuinely surprising. Nothing else. Detail goes in the
 notes file, not the reply.
+
+## Emit goldens to a file — do not hand-copy them
+
+Learned in `c2f3fbb5`: an agent hand-copied a captured array into a Rust test and
+mis-grouped two values by eye. The port was correct; the *golden* was wrong. A
+hand-transcribed golden is another transcription step with its own error rate, and
+it fails in the worst direction — it makes correct code look broken, or (worse)
+broken code look correct.
+
+So, for anything beyond a handful of scalars:
+
+1. Have the Node capture script **write a JSON file** next to the test
+   (`tests/<slice>/golden.json`) and commit it.
+2. Have the Rust test **read that file** and compare.
+3. Make the capture reproducible — re-running it must produce a byte-identical
+   file. Commit the script when it is small enough to be worth rereading.
+
+Precedent: `tests/audio/capture.mjs` → `tests/audio/golden.json` (703 KB,
+byte-reproducible), read by `tests/audio_port.rs`.
+
+Pasting values inline is fine only when there are few enough to check by reading,
+and even then prefer naming them so a wrong grouping is visible.
+
+**And when a golden disagrees with the port, do not assume the port is wrong.**
+Work out what the value *should* be from the algorithm before changing either side.
