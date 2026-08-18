@@ -245,6 +245,7 @@ name = "axiom-claude-of-duty"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
+ "axiom-math",
  "serde_json",
  "wasm-bindgen",
  "web-sys",
