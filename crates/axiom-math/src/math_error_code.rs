@@ -17,7 +17,8 @@ pub enum MathErrorCode {
     NonFiniteScalar = 3,
     /// An AABB was constructed with `min > max` in some component.
     InvalidAabbBounds = 4,
-    /// A sphere was constructed with a negative or non-finite radius.
+    /// A radial volume — a sphere or a capsule — was constructed with a
+    /// negative or non-finite radius.
     InvalidSphereRadius = 5,
     /// A ray was constructed with a zero-length direction.
     InvalidRayDirection = 6,

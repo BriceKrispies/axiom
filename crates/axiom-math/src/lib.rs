@@ -4,6 +4,19 @@
 //! vectors, quaternions, 4x4 matrices, transforms, AABBs, spheres, rays,
 //! planes, and frusta that every later engine layer will build on.
 //!
+//! ## Contact queries
+//! On top of those shapes sit the primitives a character controller, a
+//! hitbox test and a navigation probe are all made of: [`Segment`],
+//! [`Capsule`], [`Triangle`] and [`Obb`], the closest-point solves between
+//! them ([`Segment::closest_points_to_segment`],
+//! [`Segment::closest_points_to_triangle`], [`Triangle::closest_point_to`]),
+//! the casts ([`Triangle::raycast`], [`Triangle::intersect_segment`],
+//! [`Capsule::raycast`], [`Obb::raycast`]) and the sweeps
+//! ([`Sphere::sweep_triangle`], [`Capsule::sweep_triangle`],
+//! [`Capsule::sweep_capsule`]). Every one of them answers with the same
+//! record, [`Hit`]: the time of impact, the contact point on the struck
+//! surface, and the normal of that surface facing the mover.
+//!
 //! ## Public surface
 //! The behavioral facade is [`MathApi`], and alongside it `lib.rs` re-exports
 //! the workhorse value types (`Vec3`, `Quat`, `Mat4`, geometry primitives, …)
@@ -43,10 +56,21 @@ mod transform;
 
 mod aabb;
 mod frustum;
+mod obb;
 mod plane;
 mod plane_side;
 mod ray;
 mod sphere;
+
+mod capsule;
+mod hit;
+mod segment;
+mod triangle;
+
+mod capsule_cast;
+mod capsule_sweep;
+mod sphere_sweep;
+mod triangle_cast;
 
 mod curve;
 mod curve_kind;
@@ -76,10 +100,16 @@ pub use vec4::Vec4;
 
 pub use aabb::Aabb;
 pub use frustum::Frustum;
+pub use obb::Obb;
 pub use plane::Plane;
 pub use plane_side::PlaneSide;
 pub use ray::Ray;
 pub use sphere::Sphere;
+
+pub use capsule::Capsule;
+pub use hit::Hit;
+pub use segment::Segment;
+pub use triangle::Triangle;
 
 pub use curve::Curve;
 pub use curve_kind::CurveKind;

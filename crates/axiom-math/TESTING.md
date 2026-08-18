@@ -57,8 +57,9 @@ layer with a silently-wrong value.
 
 ## Deterministic geometry tests
 
-Geometry primitives (`Aabb`, `Sphere`, `Ray`, `Plane`, `Frustum`) test
-both the *positive* and *negative* shape of every predicate:
+Geometry primitives (`Aabb`, `Sphere`, `Ray`, `Plane`, `Frustum`,
+`Segment`, `Capsule`, `Triangle`, `Obb`) test both the *positive* and
+*negative* shape of every predicate:
 
 - containment — point inside, point outside, point on the boundary;
 - overlap — touching, fully disjoint, partially overlapping;
@@ -66,6 +67,23 @@ both the *positive* and *negative* shape of every predicate:
   origin-inside hit;
 - frustum culling — point/AABB/sphere in front of camera, behind camera,
   beyond the far plane.
+
+The closest-point, cast and swept queries add the degeneracies the world
+actually produces, because those are exactly the cases a branchless solve
+handles by construction rather than by a special case, and a test is the
+only thing that proves it:
+
+- degenerate inputs — a zero-length segment, a collapsed triangle, a
+  zero-radius volume, a zero-length sweep;
+- parallel and coincident configurations — two parallel segments, a ray
+  parallel to a triangle's plane or a box's slab, two capsules lying on
+  the same axis;
+- boundary contacts — a hit exactly on a vertex, on an edge, at the far
+  end of a segment cast, and a sweep that starts already overlapping;
+- each contact *family* separately, so no candidate of a decomposed sweep
+  can be silently dead: a capsule that lands on a face with its cap, one
+  laid across a triangle that lands on an edge, and one whose shaft is
+  swept onto a vertex.
 
 Each test uses fixed numeric inputs so it is byte-for-byte reproducible
 across platforms.

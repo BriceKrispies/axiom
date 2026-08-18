@@ -2,9 +2,19 @@
 name = "math"
 crate_name = "axiom-math"
 depends_on = ["kernel", "runtime"]
-meaningful_dependency = "Math consumes kernel primitives (`KernelApi` for binary serialization, `KernelResult`/`KernelError` for wrapped deserialization failures) and runtime substrate (`RuntimeContext`, `TelemetryMetric`) to provide deterministic-scalar, vector, quaternion, 4x4-matrix, transform, and geometry primitives — with checked failures, approximate-equality, and binary round-trip — that every later rendering / scene / physics / animation / culling layer will build on."
+meaningful_dependency = "Math consumes kernel primitives (`KernelApi` for binary serialization, `KernelResult`/`KernelError` for wrapped deserialization failures) and runtime substrate (`RuntimeContext`, `TelemetryMetric`) to provide deterministic-scalar, vector, quaternion, 4x4-matrix, transform, and geometry primitives — with checked failures, approximate-equality, binary round-trip, and the closest-point / cast / swept-contact solves over them — that every later rendering / scene / physics / animation / culling layer will build on."
 
-introduced_capabilities = ["MathApi", "Curve", "CurveKind", "CurveSample"]
+introduced_capabilities = [
+    "MathApi",
+    "Curve",
+    "CurveKind",
+    "CurveSample",
+    "Segment",
+    "Capsule",
+    "Triangle",
+    "Obb",
+    "Hit",
+]
 
 consumed_capabilities = [
     "KernelApi",

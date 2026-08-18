@@ -39,13 +39,31 @@ and the checked operations on them:
   structure is not closed under non-uniform inverse, so that case is
   rejected explicitly).
 - **Geometry primitives** — `Aabb`, `Sphere`, `Ray`, `Plane`, `PlaneSide`,
-  and `Frustum`. Each carries the validation that keeps it sound (`min <=
-  max`, `radius >= 0`, unit ray direction, unit plane normal, six-plane
-  frustum extracted from a clip-from-world matrix), and the small set of
+  `Frustum`, `Segment`, `Capsule`, `Triangle`, and `Obb`. Each carries the
+  validation that keeps it sound (`min <= max`, `radius >= 0`, unit ray
+  direction, unit plane normal, six-plane frustum extracted from a
+  clip-from-world matrix, unit box orientation), and the small set of
   intersection/containment tests rendering and culling layers will need.
+  Degeneracy is *accepted* where the world produces it — a zero-length
+  segment, a zero-area triangle — because rejecting it at construction would
+  push a branch into every mesh loader; it surfaces at the one operation it
+  actually invalidates (`Triangle::normal`).
+- **Contact queries** — the closest-point solves (point/segment,
+  segment/segment, point/triangle in Ericson's Voronoi-region form,
+  segment/triangle), the casts (`Triangle::raycast`,
+  `Triangle::intersect_segment`, `Capsule::raycast`, `Obb::raycast`) and the
+  sweeps (`Sphere::sweep_triangle`, `Capsule::sweep_triangle`,
+  `Capsule::sweep_capsule`). Every one of them answers `Option<Hit>`: the
+  time of impact, the contact point on the struck surface, and that
+  surface's unit normal facing the mover. This is the layer a character
+  controller, a per-bone hitbox test and a navigation probe are all built
+  from; each sweep decomposes into the same point-versus-capsule entry
+  solve, so there is one quadratic in the layer, not five.
 
-The entire public surface is the single facade `MathApi`. `lib.rs` exports
-nothing else.
+The behavioral facade is the single `MathApi`; alongside it `lib.rs` exports
+the value types (`Vec3`, `Quat`, `Mat4`, the geometry primitives, `Hit`, …)
+that later layers must be able to name. That curated set is pinned by
+`tests/architecture.rs`.
 
 ## What axiom-math is not allowed to know
 
@@ -98,17 +116,22 @@ Every fallible math operation returns `MathResult<T>` (an alias for
 plays no role in comparison. Tests assert against codes, never against
 strings, so failure paths stay machine-stable across builds.
 
-The eight error codes (`MathErrorCode`) cover:
+The ten error codes (`MathErrorCode`) cover:
 
 - `DivideByZero` — checked scalar / vector / transform division by zero.
 - `NormalizeZeroLength` — normalizing a zero-length vector, quaternion, or
   plane normal.
 - `NonFiniteScalar` — any scalar argument is `NaN` or `±Inf`.
-- `InvalidAabbBounds` — `min > max` (or negative extents) for an AABB.
-- `InvalidSphereRadius` — a negative sphere radius.
+- `InvalidAabbBounds` — `min > max` (or negative extents) for an AABB, or a
+  negative half extent for an `Obb`.
+- `InvalidSphereRadius` — a negative radius on a sphere or a capsule.
 - `InvalidRayDirection` — a zero-length ray direction.
 - `InvalidMatrixOperation` — degenerate `perspective`/`orthographic`/`look_at`
   parameters, or a non-uniform-scale `Transform::inverse`.
+- `InvalidScalarRange` — an inverted range (`lo > hi`) handed to a checked
+  scalar operation.
+- `InvalidCurve` — points that cannot define a curve of the requested kind,
+  or a sample count below the two a span needs.
 - `DeserializationFailed` — wraps a kernel binary-reader error so the cause
   is preserved.
 

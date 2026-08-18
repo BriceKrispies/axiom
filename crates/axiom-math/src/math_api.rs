@@ -6,19 +6,23 @@ use axiom_runtime::RuntimeContext;
 
 use crate::aabb::Aabb;
 use crate::approx_eq::ApproxEq;
+use crate::capsule::Capsule;
 use crate::epsilon::Epsilon;
 use crate::frustum::Frustum;
 use crate::mat4::Mat4;
 use crate::math_error::MathError;
 use crate::math_error_code::MathErrorCode;
 use crate::math_result::MathResult;
+use crate::obb::Obb;
 use crate::plane::Plane;
 use crate::plane_side::PlaneSide;
 use crate::quat::Quat;
 use crate::ray::Ray;
 use crate::scalar::Scalar;
+use crate::segment::Segment;
 use crate::sphere::Sphere;
 use crate::transform::Transform;
+use crate::triangle::Triangle;
 use crate::vec2::Vec2;
 use crate::vec3::Vec3;
 use crate::vec4::Vec4;
@@ -211,6 +215,22 @@ impl MathApi {
 
     pub fn plane(&self, normal: Vec3, distance: f32) -> MathResult<Plane> {
         Plane::new(normal, distance)
+    }
+
+    pub fn segment(&self, start: Vec3, end: Vec3) -> MathResult<Segment> {
+        Segment::new(start, end)
+    }
+
+    pub fn capsule(&self, segment: Segment, radius: f32) -> MathResult<Capsule> {
+        Capsule::new(segment, radius)
+    }
+
+    pub fn triangle(&self, a: Vec3, b: Vec3, c: Vec3) -> MathResult<Triangle> {
+        Triangle::new(a, b, c)
+    }
+
+    pub fn obb(&self, center: Vec3, half_extents: Vec3, orientation: Quat) -> MathResult<Obb> {
+        Obb::new(center, half_extents, orientation)
     }
 
     pub fn frustum_from_view_projection(&self, clip_from_world: Mat4) -> MathResult<Frustum> {
@@ -518,6 +538,24 @@ mod tests {
         assert!(m.ray(m.vec3_zero(), m.vec3_zero()).is_err());
         assert!(m.plane(m.vec3_unit_z(), 0.0).is_ok());
         assert!(m.plane(m.vec3_zero(), 0.0).is_err());
+        let segment = m.segment(m.vec3_zero(), m.vec3_unit_y()).unwrap();
+        assert!(m
+            .segment(m.vec3_zero(), m.vec3(f32::NAN, 0.0, 0.0))
+            .is_err());
+        assert!(m.capsule(segment, 0.5).is_ok());
+        assert!(m.capsule(segment, -0.5).is_err());
+        assert!(m
+            .triangle(m.vec3_zero(), m.vec3_unit_x(), m.vec3_unit_z())
+            .is_ok());
+        assert!(m
+            .triangle(m.vec3_zero(), m.vec3_unit_x(), m.vec3(0.0, f32::NAN, 0.0))
+            .is_err());
+        assert!(m
+            .obb(m.vec3_zero(), m.vec3_one(), m.quat_identity())
+            .is_ok());
+        assert!(m
+            .obb(m.vec3_zero(), m.vec3(-1.0, 1.0, 1.0), m.quat_identity())
+            .is_err());
         let frustum = m
             .frustum_from_view_projection(
                 m.mat4_perspective(std::f32::consts::FRAC_PI_2, 1.0, 1.0, 100.0)
