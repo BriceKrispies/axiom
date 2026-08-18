@@ -114,3 +114,34 @@ and even then prefer naming them so a wrong grouping is visible.
 
 **And when a golden disagrees with the port, do not assume the port is wrong.**
 Work out what the value *should* be from the algorithm before changing either side.
+
+## Language traps that compile and are wrong
+
+Each of these has already cost real time on this port. Check for them by name.
+
+- **`sign` is not `signum`.** GLSL/JS `sign(0)` returns `0`; Rust `f32::signum(0.0)`
+  returns `1.0` (and `-1.0` for `-0.0`). Wherever the source relies on a zero sign
+  contributing nothing, hand-roll a three-valued sign. Hit twice: `physics`'s
+  `box_box` SAT axis selection, and `sky`'s shader bodies.
+- **Euler order is a convention, not a spelling.** Three's `'XYZ'` composes
+  `qx*qy*qz`; `axiom_math::Quat::from_euler_xyz` composes `qz*qy*qx`. Different
+  rotations. `Assembly::add` builds its own composition for this reason.
+- **Compute in `f64`, store `f32`.** JS numbers are `f64` and Three computes in
+  `f64` while storing `Float32Array`. Truncating an *angle* before `sin`/`cos` is
+  worse than computing in `f64` and rounding the result. But note the inverse also
+  bites: the physics BVH stores node bounds as `f32` with a `1e-5` pad, so an
+  all-`f64` port diverged from the source's real bounds.
+- **An enum used as a table index is order-dependent even when the lookup looks like
+  a search.** Consolidating two enums with different variant orders silently
+  reindexed every per-surface audio recipe. Compare orders before merging, and run
+  the goldens after.
+- **A matching count is not proof.** A differing vertex/triangle count is definitely
+  a different algorithm — but an equal count can still hide a different weld that
+  traded one merge for another.
+- **Your comparator can be the bug.** A triangle-sort keyed on a 5 mm grid mispairs
+  sub-5 mm repeated features (knurling, rail teeth, stipple) and reports the gap
+  between neighbours as error. Before widening a tolerance, check the instrument.
+
+When the source is GLSL held in JS strings there is no native oracle to call, so the
+capture script has to re-implement it. That transcription is itself a risk — say so
+in the notes, and keep the re-implementation line-by-line faithful rather than tidy.
