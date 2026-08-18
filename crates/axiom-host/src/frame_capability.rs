@@ -16,6 +16,8 @@
 //! content stays whole, and what a backend can't do is [`RenderCapability::degradation`]-ed
 //! (a cheaper substitute or a reported drop), never dropped in silence.
 
+use crate::HostAttachmentFormat;
+
 /// A single render capability a backend may support. The discriminant is the bit the
 /// capability occupies in a [`BackendCapabilityProfile`], so `cap as u32` is its mask
 /// (no branching needed to test membership). The bit values are a stable contract:
@@ -93,6 +95,50 @@ pub enum RenderCapability {
     /// backend that has neither a program nor a CPU evaluator omits it and
     /// reports [`crate::FrameFeature::ProceduralSurface`].
     ProceduralSurface = 1 << 12,
+    /// **High-dynamic-range render targets**: colour attachments that hold values
+    /// above `1.0` at more than eight bits a channel, so a fragment that emitted
+    /// `4.0` is still `4.0` when a later pass samples it.
+    ///
+    /// Deliberately **not** folded into [`Self::Bloom`], for exactly the reason
+    /// `Bloom` is not folded into [`Self::PostProcess`]. The GPU backend genuinely
+    /// blooms today, and it blooms an 8-bit sRGB intermediate: the bright pass,
+    /// the two blur passes and the composite all run, and the halo is real. What
+    /// it cannot do is rank two blown highlights against each other, because both
+    /// were clamped to white before the chain ever sampled them. One bit covering
+    /// "blooms" and "blooms with headroom" would force that arm to either lie
+    /// about the bloom it performs or drop the bloom it performs — the same trap
+    /// [`crate::FrameBloom`]'s own docs describe.
+    ///
+    /// This bit exists because what it replaces was a **policy, not a
+    /// measurement**. The engine requests WebGL2 downlevel limits on both browser
+    /// arms to hold them at capability parity, half-float render targets are not
+    /// guaranteed under those limits, and so the GPU post chain simply declined to
+    /// ask for one. That preserved parity by making the ceiling *invisible*:
+    /// nothing in the frame contract said the headroom was missing, no backend
+    /// could report that it was, and a device that could hold an HDR target was
+    /// held to the one that could not. Parity is kept by **declaring** a split,
+    /// not by pretending it is absent — which is the move every capability above
+    /// already made.
+    ///
+    /// Its degradation is a [`CapabilityDegradation::Substitute`], and the
+    /// substitute is a value rather than prose:
+    /// [`crate::HostAttachmentFormat::ldr_substitute`] maps every HDR attachment
+    /// to [`crate::HostAttachmentFormat::Rgba8UnormSrgb`]. Nothing is omitted —
+    /// the identical passes run into a coarser target — which is the same
+    /// relationship [`Self::AerialPerspective`] has with the normalized-depth fog
+    /// ramp.
+    ///
+    /// There is deliberately **no [`crate::FrameFeature`] peer yet.** A per-frame
+    /// degradation report is keyed on the frame having authored something the
+    /// backend could not honour, and no frame names an attachment format today —
+    /// reporting one unconditionally would fire on every frame in the engine,
+    /// which is the failure mode `FramePacket::uses_specular` exists to forbid.
+    /// The reportable signal arrives with the pass vocabulary that carries an
+    /// attachment request.
+    ///
+    /// Appended above every bit the GPU main-pass WGSL reads (that shader reads
+    /// nothing above `2048`), so no existing mask moved.
+    HdrTargets = 1 << 13,
 }
 
 /// How a backend that lacks a [`RenderCapability`] degrades it. A capability is
@@ -111,16 +157,19 @@ pub enum CapabilityDegradation {
 
 /// The capabilities that have a cheaper stand-in rather than an omission: the
 /// directional [`RenderCapability::Shadows`] (a planar contact shadow),
-/// [`RenderCapability::AerialPerspective`] (the normalized-depth fog ramp) and
+/// [`RenderCapability::AerialPerspective`] (the normalized-depth fog ramp),
 /// [`RenderCapability::ProceduralSurface`] (the surface's channels evaluated per
-/// triangle rather than per fragment). A mask rather than a chain of
-/// comparisons, so the set grows without the test growing a branch.
+/// triangle rather than per fragment) and [`RenderCapability::HdrTargets`] (the
+/// same passes rendered into [`crate::HostAttachmentFormat::Rgba8UnormSrgb`]). A
+/// mask rather than a chain of comparisons, so the set grows without the test
+/// growing a branch.
 const SUBSTITUTED_CAPABILITY_BITS: u32 = RenderCapability::Shadows as u32
     | RenderCapability::AerialPerspective as u32
-    | RenderCapability::ProceduralSurface as u32;
+    | RenderCapability::ProceduralSurface as u32
+    | RenderCapability::HdrTargets as u32;
 
 impl RenderCapability {
-    /// The declared degradation for a backend that lacks this capability. The two
+    /// The declared degradation for a backend that lacks this capability. The
     /// capabilities in [`SUBSTITUTED_CAPABILITY_BITS`] have a cheaper stand-in;
     /// every other capability degrades to an explicit, reported drop.
     pub const fn degradation(self) -> CapabilityDegradation {
@@ -145,7 +194,8 @@ const ALL_CAPABILITY_BITS: u32 = RenderCapability::Textures as u32
     | RenderCapability::Specular as u32
     | RenderCapability::Bloom as u32
     | RenderCapability::AerialPerspective as u32
-    | RenderCapability::ProceduralSurface as u32;
+    | RenderCapability::ProceduralSurface as u32
+    | RenderCapability::HdrTargets as u32;
 
 /// The set of render capabilities a backend will attempt. The hardware GPU backends
 /// use [`Self::all`]; the Canvas 2D software backend uses [`Self::canvas2d`]. Restrict
@@ -157,9 +207,16 @@ pub struct BackendCapabilityProfile {
 }
 
 impl BackendCapabilityProfile {
-    /// Every capability on — the hardware GPU backends' profile (attempt
-    /// everything: textures, cutout, normal maps, PCF shadows, SDF, volumetrics,
-    /// post-process, retro).
+    /// **Every capability on** — the full set, and the upper bound every other
+    /// profile is a subset of (textures, cutout, normal maps, PCF shadows, SDF,
+    /// volumetrics, post-process, retro, sky, specular, bloom, aerial
+    /// perspective, procedural surfaces, HDR targets).
+    ///
+    /// This is the *set*, not a backend's answer. A hardware GPU backend starts
+    /// here and clears what its device did not actually resolve —
+    /// [`RenderCapability::HdrTargets`] in particular is a property of the
+    /// adapter, not of the code path, so a backend that claimed it unconditionally
+    /// would be reporting a policy instead of a measurement.
     pub const fn all() -> Self {
         BackendCapabilityProfile {
             bits: ALL_CAPABILITY_BITS,
@@ -204,6 +261,14 @@ impl BackendCapabilityProfile {
     /// object-space centroid instead of at each fragment. That is a coarser
     /// sampling of the same authored appearance, not a missing one, which is
     /// exactly what a substitute is.
+    ///
+    /// It drops [`RenderCapability::HdrTargets`] too, and for the most literal
+    /// reason of any of these: this backend has no render targets at all. Its
+    /// framebuffer is a `Vec<u8>` of display-encoded bytes — the shape
+    /// [`crate::apply_frame_postprocess`] loops over — so a value above one has
+    /// nowhere to be stored between passes, whatever the device underneath is
+    /// capable of. The substitute is the target it already writes,
+    /// [`crate::HostAttachmentFormat::Rgba8UnormSrgb`].
     pub const fn canvas2d() -> Self {
         Self::all()
             .without(RenderCapability::Textures)
@@ -214,11 +279,27 @@ impl BackendCapabilityProfile {
             .without(RenderCapability::Specular)
             .without(RenderCapability::Bloom)
             .without(RenderCapability::AerialPerspective)
+            .without(RenderCapability::HdrTargets)
     }
 
     /// Whether this profile will attempt `cap`.
     pub const fn contains(&self, cap: RenderCapability) -> bool {
         self.bits & (cap as u32) != 0
+    }
+
+    /// **Whether this profile may render into `format`** — the gate that replaces
+    /// the GPU post chain's hardcoded refusal of a half-float intermediate.
+    ///
+    /// An HDR attachment needs [`RenderCapability::HdrTargets`]; the 8-bit colour
+    /// target and the depth attachment are available on every arm. A backend asks
+    /// its own declared profile here, so what it can hold is a fact carried in
+    /// data — set from what its device actually resolved — instead of a comment
+    /// asserting what a class of devices probably cannot do. When the answer is
+    /// `false`, the pass still runs: it renders into
+    /// [`HostAttachmentFormat::ldr_substitute`], which is the declared
+    /// [`CapabilityDegradation::Substitute`].
+    pub const fn supports_attachment(&self, format: HostAttachmentFormat) -> bool {
+        self.contains(RenderCapability::HdrTargets) | !format.requires_hdr_targets()
     }
 
     /// The raw capability mask (the OR of every attempted capability's bit). The GPU
@@ -248,7 +329,7 @@ impl BackendCapabilityProfile {
 mod tests {
     use super::*;
 
-    const CAPS: [RenderCapability; 13] = [
+    const CAPS: [RenderCapability; 14] = [
         RenderCapability::Textures,
         RenderCapability::AlphaMask,
         RenderCapability::NormalMapping,
@@ -262,6 +343,7 @@ mod tests {
         RenderCapability::Bloom,
         RenderCapability::AerialPerspective,
         RenderCapability::ProceduralSurface,
+        RenderCapability::HdrTargets,
     ];
 
     #[test]
@@ -274,7 +356,7 @@ mod tests {
         });
         assert_ne!(all, none);
         assert_eq!(none.bits(), 0);
-        assert_eq!(all.bits(), 0b1_1111_1111_1111);
+        assert_eq!(all.bits(), 0b11_1111_1111_1111);
         assert!(format!("{all:?}").contains("BackendCapabilityProfile"));
         assert!(format!("{:?}", RenderCapability::Textures).contains("Textures"));
     }
@@ -324,6 +406,9 @@ mod tests {
             RenderCapability::ProceduralSurface.degradation(),
             CapabilityDegradation::Substitute
         );
+        // And it has no render targets at all — its framebuffer is a byte
+        // vector — so an HDR attachment has nowhere to live between passes.
+        assert!(!c.contains(RenderCapability::HdrTargets));
         // It still runs the CPU SDF march and the neutral CPU post effects. In
         // particular the whole-image colour grade survives: `PostProcess` is the
         // grade, not the bloom, which is exactly why they are separate bits.
@@ -337,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn degradation_policy_is_substitute_only_for_the_three_declared_stand_ins() {
+    fn degradation_policy_is_substitute_only_for_the_declared_stand_ins() {
         // The directional shadow degrades to a cheaper planar contact-shadow stand-in.
         assert_eq!(
             RenderCapability::Shadows.degradation(),
@@ -352,6 +437,12 @@ mod tests {
         // evaluation of the same channels.
         assert_eq!(
             RenderCapability::ProceduralSurface.degradation(),
+            CapabilityDegradation::Substitute
+        );
+        // An HDR attachment degrades to the 8-bit sRGB target the whole engine
+        // already renders into: the passes still run, at coarser precision.
+        assert_eq!(
+            RenderCapability::HdrTargets.degradation(),
             CapabilityDegradation::Substitute
         );
         // Every other capability degrades to an explicit, reported drop.
@@ -383,11 +474,54 @@ mod tests {
         // Appended in 07-backend-lowering, above every bit the WGSL reads, so no
         // existing mask moved and the cross-language contract above still holds.
         assert_eq!(RenderCapability::ProceduralSurface as u32, 4096);
+        // Appended above every mask the WGSL reads, for the same reason bit 12
+        // was: the cross-language contract above is unchanged by adding it.
+        assert_eq!(RenderCapability::HdrTargets as u32, 8192);
         // Every bit is distinct: the OR of all of them has as many set bits as
         // there are capabilities, which a duplicated discriminant would break.
         assert_eq!(
             BackendCapabilityProfile::all().bits().count_ones() as usize,
             CAPS.len()
         );
+    }
+
+    /// The whole point of the bit: a backend asks its profile which attachments
+    /// it may render into, instead of a comment asserting what a class of
+    /// devices probably cannot do.
+    #[test]
+    fn the_attachment_gate_follows_the_hdr_bit_and_nothing_else() {
+        let hdr = BackendCapabilityProfile::all();
+        let ldr = hdr.without(RenderCapability::HdrTargets);
+        let formats = [
+            HostAttachmentFormat::Rgba8UnormSrgb,
+            HostAttachmentFormat::Rgba16Float,
+            HostAttachmentFormat::Rg16Float,
+            HostAttachmentFormat::R32Float,
+            HostAttachmentFormat::Rgba32Float,
+            HostAttachmentFormat::Depth32Float,
+        ];
+        // A device that resolved HDR targets may render into every attachment.
+        formats
+            .iter()
+            .for_each(|&f| assert!(hdr.supports_attachment(f), "{f:?} was refused"));
+        // Without the bit, exactly the float colour targets are refused — the
+        // 8-bit target and the depth buffer are still available, so a shadow
+        // cascade and the existing post chain are unaffected.
+        assert!(ldr.supports_attachment(HostAttachmentFormat::Rgba8UnormSrgb));
+        assert!(ldr.supports_attachment(HostAttachmentFormat::Depth32Float));
+        assert!(!ldr.supports_attachment(HostAttachmentFormat::Rgba16Float));
+        assert!(!ldr.supports_attachment(HostAttachmentFormat::R32Float));
+        // And the refusal is never a dead end: the substitute is always something
+        // the same profile accepts, which is what makes this a Substitute rather
+        // than a Drop.
+        formats.iter().for_each(|&f| {
+            assert!(
+                ldr.supports_attachment(f.ldr_substitute()),
+                "{f:?} substituted to something the same backend still refuses"
+            );
+        });
+        // The Canvas 2D software rasterizer is on the refusing side of the line.
+        assert!(!BackendCapabilityProfile::canvas2d()
+            .supports_attachment(HostAttachmentFormat::Rgba16Float));
     }
 }

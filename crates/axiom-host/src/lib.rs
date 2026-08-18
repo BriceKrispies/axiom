@@ -55,6 +55,7 @@ mod host_adapter_request;
 mod material_texture;
 mod host_alpha_mode;
 mod host_api;
+mod host_attachment_format;
 mod host_boundary_config;
 mod host_color_format;
 mod host_device_profile;
@@ -131,6 +132,10 @@ pub use score::Score;
 
 pub use host_adapter_request::HostAdapterRequest;
 pub use host_alpha_mode::HostAlphaMode;
+// The two format vocabularies, deliberately separate: one names what a *window
+// surface* presents in, the other what an *off-screen pass* renders into. See
+// `host_attachment_format` for why they are not one enum.
+pub use host_attachment_format::HostAttachmentFormat;
 pub use host_color_format::HostColorFormat;
 pub use host_device_profile::HostDeviceProfile;
 pub use host_device_request::HostDeviceRequest;

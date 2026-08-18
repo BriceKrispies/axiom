@@ -104,6 +104,16 @@ pub struct LiveGpuBinding {
     /// [`Self::bound_backend`]: the choice used to reach an app only as a
     /// console line it had to intercept.
     backend: axiom_host::BackendKind,
+    /// Whether this adapter reported the half-float colour format usable as
+    /// **both** a render attachment and a sampled texture — i.e. whether this
+    /// device can actually hold an HDR intermediate. Reported through
+    /// [`Self::has_hdr_targets`], which is what grants
+    /// `axiom_host::RenderCapability::HdrTargets` on the backend's profile.
+    ///
+    /// Held rather than re-derived because the adapter is dropped at the end of
+    /// `initialize`, and because the answer is a bind-time property: nothing about
+    /// a frame can change it.
+    hdr_targets: bool,
 }
 
 /// Translate a `wgpu` surface acquisition failure into the engine's
@@ -427,6 +437,29 @@ impl LiveGpuBinding {
         let render_width = hold(render_width);
         let render_height = hold(render_height);
 
+        // **Can this device hold a value above one between passes?**
+        //
+        // Asked of the adapter, not assumed from the arm. This engine requests
+        // WebGL2 downlevel limits on *both* browser arms to hold them at
+        // capability parity, and half-float render targets are not guaranteed
+        // under those limits — which used to be the end of the argument, and is
+        // why the post chain still tone-maps an 8-bit intermediate. But "not
+        // guaranteed for the class" is not "absent on this device", and the two
+        // were being conflated: an adapter that reports the format perfectly
+        // usable was held to the ceiling of one that does not.
+        //
+        // Both usages are required. Every pass downstream of the scene samples
+        // the previous target, so a render-attachment-only format would let the
+        // scene pass succeed and the chain that consumes it fail — the same rule
+        // `surface_encode::scene_target_format` applies to the sRGB upgrade.
+        let hdr_usages = adapter
+            .get_texture_format_features(wgpu::TextureFormat::Rgba16Float)
+            .allowed_usages;
+        let hdr_targets = crate::hdr_target::device_hdr_targets(
+            hdr_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
+            hdr_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING),
+        );
+
         // **What this device actually resolved to**, beside the backend line above.
         //
         // The backend line reports the arm and its colour contract; it says nothing
@@ -442,7 +475,8 @@ impl LiveGpuBinding {
         // outcome nobody can see is a negotiated outcome nobody can check.
         web_sys::console::log_1(&JsValue::from_str(&format!(
             "axiom: surface = {width}x{height}, render target = {render_width}x{render_height} \
-             (device max {device_max}), anisotropy = {aniso} (tier cap {tier_max_anisotropy})",
+             (device max {device_max}), anisotropy = {aniso} (tier cap {tier_max_anisotropy}), \
+             hdr targets = {hdr_targets}",
             aniso = crate::texture_sampling::device_max_anisotropy(
                 adapter
                     .get_downlevel_capabilities()
@@ -549,6 +583,7 @@ impl LiveGpuBinding {
             wants_post,
             clock,
             backend,
+            hdr_targets,
         })
     }
 
@@ -557,6 +592,15 @@ impl LiveGpuBinding {
     /// prints — so an app no longer has to intercept that line to display it.
     pub fn bound_backend(&self) -> axiom_host::BackendKind {
         self.backend
+    }
+
+    /// Whether this device can hold a high-dynamic-range colour attachment, as
+    /// the adapter reported it at bind — the same fact the bind-time console line
+    /// prints, and what grants
+    /// `axiom_host::RenderCapability::HdrTargets` on the owning backend's
+    /// capability profile.
+    pub fn has_hdr_targets(&self) -> bool {
+        self.hdr_targets
     }
 
     /// The most recent **resolved** per-pass GPU timings, or the reason there

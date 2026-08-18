@@ -24,15 +24,32 @@
 //! everything above white blooms by the same amount, rather than a 4× light
 //! blooming four times as hard as a 1× one.
 //!
-//! The full fix is an `Rgba16Float` intermediate, and it is deliberately not
-//! taken here: half-float **render targets** are not guaranteed on the WebGL2
-//! downlevel limits this engine deliberately requests on *both* browser arms
+//! The full fix is an `Rgba16Float` intermediate. It used to be refused here, and
+//! the refusal was a **policy**: half-float render targets are not guaranteed on
+//! the WebGL2 downlevel limits this engine requests on *both* browser arms
 //! (`live_gpu_binding` asks for `downlevel_webgl2_defaults` even under WebGPU, to
-//! keep the two in parity), so it would be a capability split exactly where the
-//! engine has worked hard not to have one. Thresholding the clamped buffer still
-//! produces the soft halo that is the point; it just cannot rank two blown
-//! highlights against each other. [`axiom_host::FrameBloom::tonemap`] still earns
-//! its keep on the *composite*, where source + bloom genuinely exceeds one.
+//! keep the two in parity), so asking for one looked like a capability split
+//! exactly where the engine has worked hard not to have one.
+//!
+//! That answered a question about *this device* with a fact about a *class* of
+//! devices, and it kept parity by making the ceiling invisible: nothing in the
+//! frame contract said the headroom was missing, and no backend could report that
+//! it was. The split is now declared instead of hidden.
+//! [`axiom_host::RenderCapability::HdrTargets`] is a capability like
+//! [`axiom_host::RenderCapability::Bloom`] beside it, granted at bind from what
+//! the adapter actually reported (`crate::hdr_target`), and its degradation is a
+//! *substitute*: an arm without it renders the identical passes into
+//! [`axiom_host::HostAttachmentFormat::Rgba8UnormSrgb`], which is exactly the
+//! chain described here.
+//!
+//! **This chain is still that substitute**, and nothing in it changed with the
+//! capability: allocating and threading a float intermediate through the bright
+//! pass, both blurs and the composite is the next piece of work, gated on
+//! [`axiom_host::BackendCapabilityProfile::supports_attachment`] rather than on a
+//! comment. Thresholding the clamped buffer still produces the soft halo that is
+//! the point; it just cannot rank two blown highlights against each other.
+//! [`axiom_host::FrameBloom::tonemap`] still earns its keep on the *composite*,
+//! where source + bloom genuinely exceeds one.
 //!
 //! # The colour grade rides the composite
 //!

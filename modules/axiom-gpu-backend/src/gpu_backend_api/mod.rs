@@ -53,9 +53,10 @@ pub struct GpuBackendApi {
     // of compliance rather than from the hardware — asks every phone for 16 taps a
     // pixel on the surfaces that opt in.
     max_anisotropy: u16,
-    // Which optional render capabilities this backend attempts. Defaults to
-    // `BackendCapabilityProfile::all()` (the hardware GPU attempts everything); a host
-    // may restrict it (an fps/legibility lever) and the per-frame present consults it.
+    // Which optional render capabilities this backend attempts. Defaults to every
+    // capability this crate's code can execute, minus `HdrTargets` — the one bit
+    // only a bound adapter can grant (`crate::hdr_target`). A host may restrict it
+    // further (an fps/legibility lever) and the per-frame present consults it.
     capability: axiom_host::BackendCapabilityProfile,
     // CPU sprite/atlas textures the 2D Draw2dList sprite path samples, as
     // `(texture_id, width, height, RGBA8)` — same upload shape as the 3D
@@ -97,15 +98,26 @@ impl GpuBackendApi {
             render_height,
             shadow_size: request.device().profile().shadow_map_size(),
             max_anisotropy: request.device().profile().max_anisotropy(),
-            // **Everything, procedural surfaces included.** The bit was cleared
-            // for as long as this backend could generate a program but not bind
-            // one; it can bind one now — a prepared surface's program is a real
-            // pipeline with a real parameter buffer behind it
-            // (`crate::surface_program::compile`) — so the capability is on and
-            // an authored surface is rendered rather than reported. Setting bit
-            // 12 leaves the capability word the main-pass WGSL reads
-            // bit-identical, because that shader reads no bit above 2048.
-            capability: axiom_host::BackendCapabilityProfile::all(),
+            // **Everything this crate's code can do, minus the one bit only a
+            // device can grant.** Procedural surfaces are included: that bit was
+            // cleared for as long as this backend could generate a program but
+            // not bind one, and it can bind one now — a prepared surface's
+            // program is a real pipeline with a real parameter buffer behind it
+            // (`crate::surface_program::compile`).
+            //
+            // `HdrTargets` is different in kind. Every other capability here is a
+            // property of the source: the shaders, the extra targets and the
+            // evaluators either exist or they do not. Whether a colour attachment
+            // can hold a value above one is a property of the *adapter*, and a
+            // backend that has bound no device has resolved no answer — so it
+            // claims none, and `initialize` grants the bit only when the adapter
+            // actually reported the format usable (`crate::hdr_target`). The
+            // native off-screen capture path never grants it, correctly: its
+            // target is an `Rgba8UnormSrgb` texture by construction.
+            //
+            // The capability word the main-pass WGSL reads is unaffected either
+            // way — that shader reads no bit above 2048.
+            capability: crate::hdr_target::unresolved_capability_profile(),
             draw2d_textures: Vec::new(),
             catalog: crate::surface_program::cache::SurfaceProgramCatalog::default(),
             surface_set: None,
@@ -176,9 +188,10 @@ impl GpuBackendApi {
         self.max_anisotropy
     }
 
-    /// Restrict which optional render capabilities this backend attempts. The default
-    /// is [`axiom_host::BackendCapabilityProfile::all`] (the hardware GPU attempts
-    /// everything); a host may narrow it and the per-frame present
+    /// Restrict which optional render capabilities this backend attempts. The
+    /// default is every capability this crate's code can execute, minus
+    /// [`axiom_host::RenderCapability::HdrTargets`], which only a bound device can
+    /// grant; a host may narrow it and the per-frame present
     /// ([`Self::present_frame`] / [`Self::present_packet`]) consults it, so the live GPU
     /// is no longer unconditionally full — it gates on the same profile the Canvas 2D
     /// backend does.
@@ -186,8 +199,13 @@ impl GpuBackendApi {
         self.capability = profile;
     }
 
-    /// The optional render capabilities this backend attempts (default
-    /// [`axiom_host::BackendCapabilityProfile::all`]).
+    /// The optional render capabilities this backend attempts.
+    ///
+    /// Before a bind this is [`axiom_host::BackendCapabilityProfile::all`] with
+    /// [`axiom_host::RenderCapability::HdrTargets`] cleared; after one it also
+    /// carries whatever the adapter reported about half-float colour targets,
+    /// which is the one entry in the set that is a fact about the device rather
+    /// than about this source.
     pub fn capability_profile(&self) -> axiom_host::BackendCapabilityProfile {
         self.capability
     }
@@ -627,6 +645,14 @@ impl GpuBackendApi {
             preference,
         )
         .await?;
+        // **What the device actually resolved**, folded into the profile the
+        // per-frame present consults. A bind is the first moment this backend can
+        // answer whether it has HDR colour targets, so it is the moment the bit
+        // is granted — and it is only ever *granted*: a host that narrowed the
+        // profile keeps every restriction it set, because the device can add a
+        // capability it has and can never take back one a host declined.
+        self.capability =
+            crate::hdr_target::grant_hdr_targets(self.capability, binding.has_hdr_targets());
         self.live = Some(binding);
         Ok(())
     }
@@ -777,22 +803,34 @@ mod tests {
     }
 
     #[test]
-    fn capability_profile_defaults_to_everything_including_procedural_surfaces() {
+    fn capability_profile_defaults_to_everything_the_code_can_do_but_claims_no_hdr() {
         // The hardware GPU attempts everything it can execute — and it can
         // execute a procedural surface now that a prepared surface's program is a
         // real pipeline with a real parameter buffer behind it. The bit was
         // cleared for exactly as long as this backend could generate a program
         // but not bind one.
         let mut backend = GpuBackendApi::new(&request(320, 240));
-        assert_eq!(
-            backend.capability_profile(),
-            axiom_host::BackendCapabilityProfile::all()
-        );
         assert!(backend
             .capability_profile()
             .contains(axiom_host::RenderCapability::ProceduralSurface));
-        // Bit 12 is now set; the word the main-pass WGSL reads is unchanged,
-        // because that shader reads no bit above 2048.
+        // But it does NOT claim HDR colour targets, because it has bound no
+        // device and so has resolved no answer. That bit is a property of the
+        // adapter, not of this source, and `initialize` grants it from what the
+        // adapter reported — the difference between a measurement and a policy.
+        assert!(!backend
+            .capability_profile()
+            .contains(axiom_host::RenderCapability::HdrTargets));
+        assert_eq!(
+            backend.capability_profile(),
+            axiom_host::BackendCapabilityProfile::all()
+                .without(axiom_host::RenderCapability::HdrTargets)
+        );
+        assert_ne!(
+            backend.capability_profile(),
+            axiom_host::BackendCapabilityProfile::all()
+        );
+        // Bit 12 is set; the word the main-pass WGSL reads is unchanged, because
+        // that shader reads no bit above 2048.
         assert_eq!(backend.capability_profile().bits(), 0b1_1111_1111_1111);
         // A host can restrict it; the present path then consults the narrowed profile.
         let restricted = axiom_host::BackendCapabilityProfile::all()

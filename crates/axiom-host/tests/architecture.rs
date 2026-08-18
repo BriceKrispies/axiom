@@ -333,6 +333,10 @@ fn lib_exports_are_curated_set() {
         "pub use score::Score;",
         "pub use host_adapter_request::HostAdapterRequest;",
         "pub use host_alpha_mode::HostAlphaMode;",
+        // The off-screen attachment vocabulary, sibling to the surface colour
+        // format: HDR/float/depth targets a multi-pass frame graph names, which a
+        // window surface can never present in.
+        "pub use host_attachment_format::HostAttachmentFormat;",
         "pub use host_color_format::HostColorFormat;",
         "pub use host_device_profile::HostDeviceProfile;",
         "pub use host_device_request::HostDeviceRequest;",

@@ -95,6 +95,13 @@ mod scene_renderer;
 #[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod scene_wgsl;
 
+// Whether this device can hold a high-dynamic-range colour attachment, resolved
+// from what the adapter reports rather than asserted from a policy — and the
+// capability profile that answer produces. Pure booleans, compiled everywhere and
+// covered natively, for the same reason `shadow_cull` is: a rule that decides what
+// a frame may render into is impossible to debug from inside a render pass.
+mod hdr_target;
+
 // Which draws can actually reach the directional shadow map. Pure geometry over
 // plain arrays, compiled everywhere (and covered natively) precisely because the
 // rule is impossible to debug from inside a render pass.
