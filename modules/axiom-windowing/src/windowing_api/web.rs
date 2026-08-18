@@ -320,12 +320,17 @@ impl WindowingApi {
         // slot resolves, presenting to it is a no-op — the first frames simply
         // don't paint on that pane.
         let look = self.render_look();
+        // Every pane compares the SAME authored surfaces, so the three backends
+        // are judged on the materials the app wrote rather than on three
+        // different constant fallbacks.
+        let surfaces = std::rc::Rc::new(self.surfaces.clone());
         (0..3).for_each(|i| {
             let slot = slots[i].clone();
             let canvas = canvases[i].clone();
             let backend = backends[i];
             let meshes = meshes.clone();
             let materials = materials.clone();
+            let surfaces = surfaces.clone();
             // Bound per pane (like `backend` above) so each `async move` owns its
             // own copy of the look rather than borrowing the enclosing frame.
             let look = look;
@@ -347,6 +352,7 @@ impl WindowingApi {
                     // Three panes, three pinned backends: "which backend is bound"
                     // has no single answer here, so this loop reports none.
                     None,
+                    surfaces,
                 )
                 .await;
             });
@@ -424,6 +430,10 @@ impl WindowingApi {
         let slot = self.presenter.clone();
         let report = self.bound_backend.clone();
         let look = self.render_look();
+        // A caller-owned loop gets the same surface carriage the engine's own run
+        // loops do: the set is compiled onto the device inside `bind`, and every
+        // `present_frame` resolves its batches through the same table.
+        let surfaces = std::rc::Rc::new(self.surfaces.clone());
         wasm_bindgen_futures::spawn_local(async move {
             let presenter =
                 // A caller-owned-loop host (the @axiom/game SDK) uploads no skinned
@@ -437,6 +447,7 @@ impl WindowingApi {
                     max_instances,
                     look,
                     report,
+                    surfaces,
                 )
                 .await;
             *slot.borrow_mut() = presenter;
@@ -612,6 +623,11 @@ impl WindowingApi {
             // the device-loss rebuild — the same path `present_surface` hands a
             // caller-owned loop. The rAF loop here only resolves each frame and
             // delegates the present.
+            // The authored surface set + the material->program table this driver
+            // was handed before the loop started. Read once, here, and carried
+            // into the presenter: the barrier compiles the set onto the device
+            // during the bind below, so nothing later in the loop can compile.
+            let surfaces = std::rc::Rc::new(windowing.surfaces.clone());
             let presenter = match LivePresenter::bind(
                 request,
                 canvas,
@@ -621,6 +637,7 @@ impl WindowingApi {
                 max_instances,
                 look,
                 windowing.bound_backend.clone(),
+                surfaces,
             )
             .await
             {
@@ -980,6 +997,10 @@ impl WindowingApi {
                 mat_h,
                 mat_pixels,
             )];
+            // The authored surface set + program table, read before the driver
+            // moves into the loop. `select_backend_or_report` compiles the set
+            // onto the device it binds, so this arm gets the barrier too.
+            let surfaces = Rc::new(windowing.surfaces.clone());
             let backend = match select_backend_or_report(
                 preference,
                 &request,
@@ -991,6 +1012,7 @@ impl WindowingApi {
                 max_instances,
                 // Streaming terrain binds the app-authored render look too.
                 windowing.render_look(),
+                surfaces.surfaces(),
             )
             .await
             {
@@ -1068,12 +1090,14 @@ impl WindowingApi {
                     &lights,
                     light_vp,
                     &batches,
+                    &surfaces.programs_for(&batches),
                     &[],
                     NO_CAMERA,
                     &[],
                     // Streaming terrain authors no SDF shapes.
                     None,
                     look,
+                    surfaces.time_at(tick),
                 );
                 let next = f.borrow();
                 if let Some(cb) = next.as_ref() {
@@ -1141,6 +1165,9 @@ impl WindowingApi {
             };
             let width = request.descriptor().viewport().physical_width();
             let height = request.descriptor().viewport().physical_height();
+            // As above: the authored set, read before the driver moves, compiled
+            // onto the device by the binder.
+            let surfaces = Rc::new(windowing.surfaces.clone());
             let backend = match select_backend_or_report(
                 preference,
                 &request,
@@ -1152,6 +1179,7 @@ impl WindowingApi {
                 max_instances,
                 // Streaming terrain binds the app-authored render look too.
                 windowing.render_look(),
+                surfaces.surfaces(),
             )
             .await
             {
@@ -1186,11 +1214,13 @@ impl WindowingApi {
                     &lights,
                     light_vp,
                     &batches,
+                    &surfaces.programs_for(&batches),
                     &[],
                     camera_vp,
                     &casters,
                     sdf,
                     look,
+                    surfaces.time_at(tick),
                 );
                 let next = f.borrow();
                 next.as_ref().into_iter().for_each(|cb| {
@@ -1275,6 +1305,14 @@ pub(crate) struct LivePresenter {
     // backend-comparison loop pins one backend per pane, so "the" bound backend
     // is not a question with an answer there.
     report: Option<super::BackendReport>,
+    // The driver's authored surface set, the material->program table each frame's
+    // batches are resolved through, and the cadence the surface clock runs at —
+    // read off the `WindowingApi` when this presenter bound. Reference-counted
+    // because a device-loss rebuild re-prepares the SAME set onto the fresh
+    // device, exactly as it re-uploads the same meshes: a rebuilt backend whose
+    // programs were not re-prepared would come back rendering every authored
+    // surface as its constant fallback.
+    surfaces: std::rc::Rc<super::SurfaceBinding>,
 }
 
 // The live backends hold no `Debug`; the presenter is a field of the
@@ -1418,6 +1456,11 @@ impl LivePresenter {
         let decision = ledger.admit(&packet, self.outside_revision(scale));
         let held_open = !self.pending_skinned.borrow().is_empty()
             || self.reinitializing.get()
+            // An authored surface that reads the frame clock is the fourth way
+            // for the image to move without the packet moving: the clock is a
+            // uniform the surface program samples, and no packet carries it. A
+            // wind material on a parked camera would otherwise freeze mid-gust.
+            || self.surfaces.animates()
             || self.scrubber.as_ref().map(|s| !s.is_live()).unwrap_or(false);
         let presents = decision.draws() || held_open;
         if presents {
@@ -1452,6 +1495,7 @@ impl LivePresenter {
         max_instances: u32,
         look: axiom_host::FrameRenderLook,
         report: super::BackendReport,
+        surfaces: std::rc::Rc<super::SurfaceBinding>,
     ) -> Option<LivePresenter> {
         Self::bind_with(
             request,
@@ -1464,6 +1508,7 @@ impl LivePresenter {
             max_instances,
             look,
             Some(report),
+            surfaces,
         )
         .await
     }
@@ -1489,6 +1534,7 @@ impl LivePresenter {
         max_instances: u32,
         look: axiom_host::FrameRenderLook,
         report: Option<super::BackendReport>,
+        surfaces: std::rc::Rc<super::SurfaceBinding>,
     ) -> Option<LivePresenter> {
         use std::cell::{Cell, RefCell};
         use std::rc::Rc;
@@ -1506,6 +1552,7 @@ impl LivePresenter {
             &materials[..],
             max_instances,
             look,
+            surfaces.surfaces(),
         )
         .await?;
         // Announce the cascade's answer the moment it exists. Everything after
@@ -1536,6 +1583,7 @@ impl LivePresenter {
             skinned_meshes,
             look,
             report,
+            surfaces,
         })
     }
 
@@ -1635,6 +1683,12 @@ impl LivePresenter {
         casters: &[bool],
         sdf: Option<axiom_host::SdfScene>,
     ) {
+        // **What carries the surfaces into this frame.** Both are pure functions
+        // of data the driver already holds — the material id on each batch, and
+        // the tick — so neither reads a clock and neither needs the run loop's
+        // per-frame tuple to grow a lane.
+        let programs = self.surfaces.programs_for(batches);
+        let surface_time = self.surfaces.time_at(tick);
         let lost = self
             .backend
             .borrow()
@@ -1646,11 +1700,13 @@ impl LivePresenter {
                 lights,
                 light_vp,
                 batches,
+                &programs,
                 &self.pending_skinned.borrow(),
                 camera_view_proj,
                 casters,
                 sdf,
                 self.look,
+                surface_time,
             )
             .is_err();
         if lost && !self.reinitializing.get() {
@@ -1672,6 +1728,11 @@ impl LivePresenter {
             let request = self.request;
             let preference = self.preference;
             let max_instances = self.max_instances;
+            // The rebuild re-prepares the SAME authored surface set onto the
+            // fresh device, for the same reason it re-uploads the current meshes:
+            // a rebuilt backend whose programs were never prepared comes back
+            // rendering every authored surface as its constant fallback.
+            let surfaces = self.surfaces.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let rebuilt = select_backend(
                     preference,
@@ -1682,6 +1743,7 @@ impl LivePresenter {
                     &materials[..],
                     max_instances,
                     look,
+                    surfaces.surfaces(),
                 )
                 .await;
                 rebuilt.into_iter().for_each(|backend| {
@@ -1835,6 +1897,11 @@ impl LiveBackend {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_vp: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        // The surface program each batch draws with, in `batches` order (empty
+        // for an app that authored no surface). Resolved by the deterministic
+        // core from the material id each batch already carries; see
+        // `super::SurfaceBinding::programs_for`.
+        programs: &[u64],
         skinned: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
         camera_view_proj: [f32; 16],
         casters: &[bool],
@@ -1843,6 +1910,10 @@ impl LiveBackend {
         // initialise; the Canvas arm carries them on the packet so it can report
         // the three capabilities it drops.
         look: axiom_host::FrameRenderLook,
+        // This frame's presentation time — engine time derived from the driver's
+        // own tick, never a wall clock. The GPU arm spends it on the surface
+        // clock; the software arm has no surface programs to spend it on.
+        surface_time: axiom_kernel::Seconds,
     ) -> Result<(), wasm_bindgen::JsValue> {
         match self {
             LiveBackend::Gpu(backend) => backend.present_frame_result(
@@ -1853,8 +1924,10 @@ impl LiveBackend {
                 // from. The Canvas arm gets the same matrix on its packet below.
                 camera_view_proj,
                 batches,
+                programs,
                 skinned,
                 sdf.as_ref(),
+                surface_time,
             ),
             LiveBackend::Canvas(backend) => {
                 let packet = frame_packet_from_batches(
@@ -2089,6 +2162,11 @@ async fn select_backend(
     materials: &[axiom_host::MaterialTexture],
     max_instances: u32,
     look: axiom_host::FrameRenderLook,
+    // The app's authored surface set. On the GPU arm this is compiled onto the
+    // freshly-bound device — the **device half of the preparation barrier** —
+    // strictly before the caller can record a frame with this backend. See the
+    // `Ok` arm below.
+    surfaces: &[axiom_surface::Surface],
 ) -> Option<LiveBackend> {
     use axiom_host::BackendKind;
     if matches!(preference, Some(BackendKind::Canvas2d)) {
@@ -2119,7 +2197,33 @@ async fn select_backend(
         )
         .await
     {
-        Ok(()) => return Some(LiveBackend::Gpu(gpu)),
+        Ok(()) => {
+            // **The device half of the preparation barrier.** The app's own
+            // `axiom_runtime::PreparationTask` already planned, validated and
+            // emitted WGSL for this set before `RuntimeState::Prepared`; the
+            // *device* half cannot run there, because on this target the wgpu
+            // device does not exist until the `initialize` above has resolved.
+            // It runs here instead — after the bind, and strictly before any
+            // caller can hand this backend a frame — so the invariant that
+            // matters is intact: **nothing compiles inside a frame.**
+            //
+            // A set that overflows the bounded program cache is *reported*, not
+            // retried lazily: those draws render their constant fallback, which
+            // `GpuBackendApi::program_degradations` names for whoever asks. An
+            // evicting or lazily-compiling cache would turn an authoring mistake
+            // into an unattributable mid-session stutter.
+            gpu.prepare_surfaces(surfaces)
+                .err()
+                .into_iter()
+                .for_each(|_| {
+                    web_sys::console::error_1(&wasm_bindgen::JsValue::from_str(
+                        "axiom: the authored surface set needs more distinct programs than \
+                         the bounded cache holds; those draws will render their constant \
+                         fallback",
+                    ));
+                });
+            return Some(LiveBackend::Gpu(gpu));
+        }
         Err(err) => web_sys::console::warn_2(
             &wasm_bindgen::JsValue::from_str(
                 "axiom: GPU backend init failed; falling back to Canvas2D:",
@@ -2149,6 +2253,7 @@ async fn select_backend_or_report(
     materials: &[axiom_host::MaterialTexture],
     max_instances: u32,
     look: axiom_host::FrameRenderLook,
+    surfaces: &[axiom_surface::Surface],
 ) -> Option<LiveBackend> {
     let backend = select_backend(
         preference,
@@ -2159,6 +2264,7 @@ async fn select_backend_or_report(
         materials,
         max_instances,
         look,
+        surfaces,
     )
     .await;
     if backend.is_none() {

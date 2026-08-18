@@ -18,6 +18,12 @@ allowed_layers = [
     # The neutral interface layer (panels / draw list / drag / buttons) that the
     # wasm frame-scrubber overlay is built on. Consumed only in the wasm32 arm.
     "interface",
+    # The authored appearance artifact the driver presents with. The loop holds
+    # the surface set so the live arm can run the GPU backend's preparation
+    # barrier on the bound device, resolve each batch's surface program, and
+    # decide from `Surface::requirements` whether a still scene nonetheless
+    # animates (a graph that reads the frame clock).
+    "surface",
 ]
 
 allowed_modules = [
@@ -30,4 +36,5 @@ introduced_capabilities = [
     "presentation-request-assembly",
     "fixed-tick-presentation-loop",
     "frame-scrubber-overlay",
+    "authored-surface-presentation",
 ]

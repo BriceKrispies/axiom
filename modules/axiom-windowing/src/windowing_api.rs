@@ -5,8 +5,9 @@ use axiom_host::{
     HostPresentMode, HostPresentationRequest,
 };
 use axiom_kernel::{
-    KernelApi, KernelError, KernelErrorCode, KernelErrorScope, KernelResult, Ratio,
+    KernelApi, KernelError, KernelErrorCode, KernelErrorScope, KernelResult, Ratio, Seconds,
 };
+use axiom_surface::{Surface, SurfaceInput};
 
 // The `wasm32`-only live presentation arm: the browser run loops, live backend
 // selection (WebGPU -> WebGL2 -> Canvas 2D), and DOM helpers. Gated on wasm32 so
@@ -38,6 +39,122 @@ fn host_to_kernel(_: HostError) -> KernelError {
 /// supplies a size and nothing else.
 fn unit_scale() -> Ratio {
     Ratio::new(1.0).expect("unit scale factor is finite")
+}
+
+/// **The engine's nominal presentation cadence**, in seconds per driven tick.
+///
+/// The loop here advances exactly one tick per animation frame, so a tick *is* a
+/// presented frame and this is the number that turns the driver's own monotonic
+/// counter into the frame's presentation time. It is 60 Hz because that is the
+/// cadence the engine's frame vocabulary is written in — `Spin::period_ticks` is
+/// "ticks per revolution", and every app that animates counts frames. A display
+/// running at another rate changes it with
+/// [`WindowingApi::set_tick_duration`]; it is deliberately **not** derived from
+/// a measured frame interval, because a wall clock in this number would make a
+/// replayed tick produce different pixels.
+const DEFAULT_TICK_SECONDS: f32 = 1.0 / 60.0;
+
+/// **The authored surfaces this driver presents with**, and how one frame's
+/// instance batches find the program each of them draws with.
+///
+/// This is the deterministic half of the fix for a driver that could not carry a
+/// surface at all: the live arm used to hand the GPU backend an empty program
+/// slice and a zero clock on every frame, so every authored surface rendered as
+/// its constant fallback no matter what the app wrote. Everything that decides
+/// those two values is here, on the native-testable side; the wasm arm only
+/// spends them.
+///
+/// **Nothing is compiled here.** The barrier that compiles a surface's program
+/// is `axiom_gpu_backend::GpuBackendApi::prepare_surfaces`, run by the app's
+/// `axiom_runtime::PreparationTask` before `RuntimeState::Prepared` and again on
+/// the bound device the moment the live backend resolves — strictly before the
+/// first frame is recorded. A draw naming a program neither pass prepared renders
+/// the constant fallback and is *reported*; it is never a mid-frame compile.
+#[derive(Debug, Clone)]
+pub(crate) struct SurfaceBinding {
+    /// The authored set, as the barrier receives it.
+    surfaces: Vec<Surface>,
+    /// `(material id, surface program)` for every material that names a surface,
+    /// ascending by material id. Materials that name none are absent, so an app
+    /// that authored no surface carries an empty table and pays nothing.
+    material_programs: Vec<(u64, u64)>,
+    /// Whether any authored surface reads the frame clock — derived once from
+    /// [`Surface::requirements`] when the set is stored, because a still camera
+    /// looking at an animating material is a frame that must still be drawn.
+    animates: bool,
+    /// Seconds per driven tick. See [`DEFAULT_TICK_SECONDS`].
+    tick_seconds: Seconds,
+}
+
+impl Default for SurfaceBinding {
+    fn default() -> Self {
+        SurfaceBinding {
+            surfaces: Vec::new(),
+            material_programs: Vec::new(),
+            animates: false,
+            tick_seconds: Seconds::finite_or_zero(DEFAULT_TICK_SECONDS),
+        }
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+impl SurfaceBinding {
+    /// The authored set the preparation barrier compiles — what the live arm
+    /// hands `GpuBackendApi::prepare_surfaces` on the bound device.
+    pub(crate) fn surfaces(&self) -> &[Surface] {
+        &self.surfaces
+    }
+
+    /// Whether anything in the set reads the frame clock, and so keeps moving
+    /// while every transform on screen holds still.
+    pub(crate) fn animates(&self) -> bool {
+        self.animates
+    }
+
+    /// **The surface program each of `batches` draws with**, in `batches` order —
+    /// the slice `axiom_gpu_backend::GpuBackendApi::present_frame_result` takes.
+    ///
+    /// A batch is one `(mesh, material)` pair, and a material names at most one
+    /// surface, so the program is a property of the batch rather than of an
+    /// instance inside it — which is why the lane can be recovered from the
+    /// material id the batch already carries instead of widening every run
+    /// loop's frame tuple.
+    ///
+    /// An app that authored no surface gets an **empty** slice, not a run of
+    /// zeros: the backend reads a missing entry as "no program" already, so the
+    /// empty answer is the same pixels and no per-frame allocation at all.
+    pub(crate) fn programs_for(&self, batches: &[(u64, u64, Vec<f32>, u32)]) -> Vec<u64> {
+        self.material_programs
+            .is_empty()
+            .then(Vec::new)
+            .unwrap_or_else(|| {
+                batches
+                    .iter()
+                    .map(|(_, material_id, _, _)| self.program_of(*material_id))
+                    .collect()
+            })
+    }
+
+    /// The program `material_id` names, or `0` — the engine's built-in fixed
+    /// material path — for a material that names no surface.
+    fn program_of(&self, material_id: u64) -> u64 {
+        self.material_programs
+            .binary_search_by_key(&material_id, |(id, _)| *id)
+            .ok()
+            .and_then(|index| self.material_programs.get(index))
+            .map_or(0, |(_, program)| *program)
+    }
+
+    /// **The presentation time of frame `tick`** — the clock a time-varying
+    /// authored surface samples.
+    ///
+    /// A pure function of the driver's own monotonic tick, so the same tick
+    /// presented twice produces the same displaced geometry byte for byte. The
+    /// wall clock this module *does* read (`FrameClock`) feeds the fps read-out
+    /// and the adaptive render scale and reaches nothing a pixel depends on.
+    pub(crate) fn time_at(&self, tick: u64) -> Seconds {
+        Seconds::finite_or_zero(tick as f32 * self.tick_seconds.get())
+    }
 }
 
 /// The deterministic presentation driver for one window.
@@ -91,6 +208,11 @@ pub struct WindowingApi {
     // `run_web_*` consumes the driver, so a caller can only reach it through a
     // view taken before that move.
     render_scale: std::rc::Rc<std::cell::Cell<axiom_host::RenderScale>>,
+    // The authored surfaces this driver presents with, plus the material->program
+    // table a frame's batches are resolved through and the clock a time-varying
+    // surface samples. Read once when a presenter binds and carried into the loop
+    // with it; see `SurfaceBinding`.
+    surfaces: SurfaceBinding,
 }
 
 /// The shared cell a bound backend reports its identity into.
@@ -117,7 +239,86 @@ impl WindowingApi {
             render_scale: std::rc::Rc::new(std::cell::Cell::new(
                 axiom_host::RenderScale::FULL,
             )),
+            surfaces: SurfaceBinding::default(),
         }
+    }
+
+    /// **Hand the driver the app's authored surface set** — the one it presents
+    /// with, and the one the live arm compiles onto the bound device.
+    ///
+    /// Before this existed the loop could not carry a surface at all: its GPU arm
+    /// passed an empty program slice and a zero clock on every frame, so an app
+    /// presenting through `App::run` rendered **every** authored surface as its
+    /// constant fallback whatever it had written, and no amount of app-side care
+    /// changed that. The only entry that carried surfaces to real pixels took a
+    /// packet, and nothing in the engine's own presentation stack walked it.
+    ///
+    /// The set is what a preparation barrier compiles, so hand it over **before**
+    /// a run loop starts. Nothing is compiled by this call: it stores the set,
+    /// and derives from `axiom_surface::Surface::requirements` whether anything
+    /// in it reads the frame clock — which is what stops the idle-frame gate from
+    /// holding a moving material still.
+    ///
+    /// Pair it with [`Self::set_material_programs`]: that says which material
+    /// draws with which of these, and the two are joined by the surface's own
+    /// content digest, so they cannot be put out of step by hand.
+    pub fn set_surfaces(&mut self, surfaces: Vec<Surface>) {
+        self.surfaces.animates = surfaces
+            .iter()
+            .any(|surface| surface.requirements().inputs().contains(SurfaceInput::TIME));
+        self.surfaces.surfaces = surfaces;
+    }
+
+    /// The `(material id, surface program)` table a frame's `(mesh, material)`
+    /// batches are resolved through — the appearance program each material names,
+    /// as `axiom_surface::Surface::digest`.
+    ///
+    /// A batch is one `(mesh, material)` pair and a material names at most one
+    /// surface, so the program is a per-batch value the driver can recover from
+    /// the material id the batch already carries. That is why carrying surfaces
+    /// did not have to widen every run loop's per-frame tuple.
+    ///
+    /// Materials that name no surface may be omitted (their program is `0`, the
+    /// built-in fixed material path). Order does not matter — the table is sorted
+    /// here, so a caller cannot get the lookup wrong by handing it over unsorted.
+    pub fn set_material_programs(&mut self, mut programs: Vec<(u64, u64)>) {
+        programs.sort_unstable_by_key(|(material_id, _)| *material_id);
+        self.surfaces.material_programs = programs;
+    }
+
+    /// How many authored surfaces this driver holds.
+    pub fn surface_count(&self) -> usize {
+        self.surfaces.surfaces().len()
+    }
+
+    /// Set the **seconds one driven tick represents** — the cadence that turns
+    /// this driver's monotonic tick into [`Self::surface_time`].
+    ///
+    /// The default is 1/60 s, the cadence the engine's frame vocabulary is
+    /// written in. Set it when the loop is driven at another rate, so a
+    /// time-varying surface animates at the speed the app authored rather than
+    /// at the speed the engine assumed. It is a [`Seconds`] and not a measured
+    /// interval on purpose: a wall clock here would make a replayed tick produce
+    /// different pixels.
+    pub fn set_tick_duration(&mut self, duration: Seconds) {
+        self.surfaces.tick_seconds = duration;
+    }
+
+    /// The seconds one driven tick represents.
+    pub fn tick_duration(&self) -> Seconds {
+        self.surfaces.tick_seconds
+    }
+
+    /// **The presentation time of frame `tick`** — the clock a time-varying
+    /// authored surface samples, and the only sanctioned route by which time
+    /// enters an `axiom_field::FieldGraph`.
+    ///
+    /// A pure function of the tick, so replaying a tick reproduces its pixels
+    /// exactly. The wall clock this module does read (the frame-cadence
+    /// accumulator) feeds the fps read-out and the adaptive render scale, and
+    /// reaches nothing a pixel depends on.
+    pub fn surface_time(&self, tick: u64) -> Seconds {
+        self.surfaces.time_at(tick)
     }
 
     /// Assemble and store the validated presentation request for a
@@ -527,6 +728,144 @@ impl FrameClock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A surface whose displacement is driven by `FieldOp::Time` — the one thing
+    /// that makes a scene keep moving while every transform on it holds still.
+    fn windy() -> Surface {
+        use axiom_field::{FieldBuilder, FieldId, FieldOp};
+        use axiom_surface::{SurfaceBuilder, SurfaceChannel};
+        let (builder, clock) = FieldBuilder::new(FieldId::of_name("windowing/wind"), 1).push(
+            FieldOp::Time,
+            Vec::new(),
+            Vec::new(),
+        );
+        let (builder, node) = builder.push(
+            FieldOp::Compose,
+            vec![axiom_recipe::Param::int(3)],
+            vec![clock, clock, clock],
+        );
+        SurfaceBuilder::new()
+            .field(SurfaceChannel::Displacement, builder.build(node))
+            .build()
+            .expect("a vec3 field is a legal displacement")
+    }
+
+    /// A surface whose every channel is a plain constant — authored, real, and
+    /// reading no clock.
+    fn still() -> Surface {
+        axiom_surface::SurfaceBuilder::new()
+            .build()
+            .expect("the default surface is legal")
+    }
+
+    /// One `(mesh, material)` batch of one instance.
+    fn batch(mesh_id: u64, material_id: u64) -> (u64, u64, Vec<f32>, u32) {
+        (mesh_id, material_id, vec![0.0_f32; 40], 1)
+    }
+
+    /// **A driver that has been handed no surface carries none** — and carries
+    /// them byte-identically to how it did before it could carry any: an empty
+    /// program slice, not a run of zeros, so no existing app pays an allocation
+    /// per frame for a lane it never uses.
+    #[test]
+    fn a_driver_with_no_authored_surface_resolves_no_programs_at_all() {
+        let driver = WindowingApi::new();
+        assert_eq!(driver.surface_count(), 0);
+        assert!(driver.surfaces.programs_for(&[batch(1, 1), batch(2, 2)]).is_empty());
+        assert!(!driver.surfaces.animates());
+        assert!(driver.surfaces.surfaces().is_empty());
+    }
+
+    /// **The whole of G12, in one assertion pair**: the driver now holds the
+    /// authored set the barrier compiles, and resolves each batch to the program
+    /// its material names — where before it passed an empty slice on every frame
+    /// and every authored surface rendered as its constant fallback.
+    ///
+    /// The join is by the surface's own content digest, which is what
+    /// `Material::from_surface` puts on the material, so the table and the set
+    /// cannot be put out of step by hand.
+    #[test]
+    fn a_driver_resolves_each_batch_to_the_program_its_material_names() {
+        let mut driver = WindowingApi::new();
+        let wind = windy();
+        let plain = still();
+        let wind_program = wind.digest().raw();
+        let plain_program = plain.digest().raw();
+        assert_ne!(wind_program, plain_program);
+
+        driver.set_surfaces(vec![wind, plain]);
+        // Handed unsorted and with a gap — material 2 names no surface at all.
+        driver.set_material_programs(vec![(7, plain_program), (1, wind_program)]);
+        assert_eq!(driver.surface_count(), 2);
+
+        assert_eq!(
+            driver
+                .surfaces
+                .programs_for(&[batch(10, 7), batch(11, 1), batch(12, 2)]),
+            vec![plain_program, wind_program, 0],
+            "a material that names no surface takes the built-in fixed path"
+        );
+        // The order the table was handed over in cannot change the answer.
+        assert_eq!(driver.surfaces.program_of(1), wind_program);
+        assert_eq!(driver.surfaces.program_of(7), plain_program);
+        assert_eq!(driver.surfaces.program_of(9_999), 0);
+    }
+
+    /// **A surface that reads the frame clock keeps the loop drawing.** The idle
+    /// gate compares one frame's packet against the last presented one, and a
+    /// packet cannot carry a material's internal clock — so a wind material on a
+    /// parked camera would freeze mid-gust if this were not derived from the
+    /// surface's own requirements.
+    #[test]
+    fn a_time_reading_surface_marks_the_binding_as_animating() {
+        let mut still_driver = WindowingApi::new();
+        still_driver.set_surfaces(vec![still()]);
+        assert!(
+            !still_driver.surfaces.animates(),
+            "a constant-only surface never changes on its own"
+        );
+
+        let mut windy_driver = WindowingApi::new();
+        windy_driver.set_surfaces(vec![still(), windy()]);
+        assert!(
+            windy_driver.surfaces.animates(),
+            "one clock-reading surface in the set is enough"
+        );
+
+        // And re-authoring back to a still set takes the mark away again — the
+        // flag is derived from the set, never accumulated across sets.
+        windy_driver.set_surfaces(vec![still()]);
+        assert!(!windy_driver.surfaces.animates());
+    }
+
+    /// **Surface time is the engine clock, and only the engine clock.** Tick zero
+    /// is time zero, tick N is N cadences later, and replaying a tick reproduces
+    /// its time exactly — which is what makes a wind-displaced frame replayable.
+    #[test]
+    fn surface_time_is_a_pure_function_of_the_tick_at_the_declared_cadence() {
+        let mut driver = WindowingApi::new();
+        // The default cadence is the engine's nominal 60 Hz.
+        assert_eq!(driver.tick_duration().get(), 1.0 / 60.0);
+        assert_eq!(driver.surface_time(0).get(), 0.0);
+        assert_eq!(driver.surface_time(60).get(), 1.0);
+        assert_eq!(
+            driver.surface_time(90),
+            driver.surface_time(90),
+            "the same tick is the same time, every replay"
+        );
+
+        // A loop driven at another cadence says so, and the clock follows.
+        driver.set_tick_duration(Seconds::new(0.5).expect("half a second is finite"));
+        assert_eq!(driver.tick_duration().get(), 0.5);
+        assert_eq!(driver.surface_time(4).get(), 2.0);
+        // Nothing about it reads a wall clock: driving the frame counters does
+        // not move the time of a tick that was already asked for.
+        let before = driver.surface_time(4);
+        (0..10).for_each(|_| {
+            driver.step();
+        });
+        assert_eq!(driver.surface_time(4), before);
+    }
 
     #[test]
     fn a_driver_that_has_bound_nothing_reports_no_backend() {

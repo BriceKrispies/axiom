@@ -343,6 +343,22 @@ impl GpuBackendApi {
     /// was cleanly skipped for a transient surface hiccup the binding already
     /// reconfigured around, or there is no live binding; `Err` only on an
     /// unrecoverable loss. wasm32 only.
+    ///
+    /// **It carries the frame's surfaces, exactly as [`Self::present_packet_with_surfaces`]
+    /// does.** `programs` is the surface program each batch draws with, in
+    /// `batches` order — a batch is one `(mesh, material)` pair and a material
+    /// names at most one surface, so the program is a per-batch value, not a
+    /// per-instance one. An empty slice draws every batch with the default
+    /// pipeline, which is byte-identical to what this entry did before the lane
+    /// existed. A program the preparation barrier ([`Self::prepare_surfaces`])
+    /// did not prepare renders the constant fallback and is reported through
+    /// [`Self::program_degradations`]; nothing is compiled here.
+    ///
+    /// `time` is the frame's **presentation time** — explicitly supplied engine
+    /// time, never a wall clock. It is gated through the prepared surface set
+    /// exactly as the packet path gates it, so a backend that prepared nothing,
+    /// or whose surfaces read no clock, writes an exact zero into the
+    /// surface-time lane and its packed lighting uniform is unchanged.
     #[cfg(target_arch = "wasm32")]
     #[allow(clippy::too_many_arguments)]
     pub fn present_frame_result(
@@ -353,8 +369,10 @@ impl GpuBackendApi {
         // The camera view-projection, read only by the sky pass.
         camera_view_proj: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
+        programs: &[u64],
         skinned_draws: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
         sdf: Option<&SdfScene>,
+        time: axiom_kernel::Seconds,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let skinned: Vec<crate::scene_renderer::SkinnedGpuDraw> = skinned_draws
             .iter()
@@ -369,6 +387,11 @@ impl GpuBackendApi {
                 }
             })
             .collect();
+        // The same rule the packet path applies: the barrier's own set decides
+        // whether the frame carries a clock at all. The skinned vertex stage
+        // still runs no displacement program (the 16-attribute ceiling), which
+        // `Self::skinned_surface_degradations` reports.
+        let surface_time = self.frame_surface_set(&[]).surface_time(time);
         self.live
             .as_ref()
             .map(|live| {
@@ -376,19 +399,13 @@ impl GpuBackendApi {
                     lights,
                     light_view_proj,
                     batches,
-                    // This entry takes explicit batches, never a packet, so no
-                    // batch names a surface program.
-                    &[],
+                    programs,
                     &skinned,
                     clear_color,
                     sdf,
                     self.capability.bits(),
                     camera_view_proj,
-                    // This entry takes skinned draws, never an authored surface
-                    // set — and the skinned vertex stage runs no displacement
-                    // program at all (the 16-attribute ceiling) — so its
-                    // surface-time lane is an exact zero.
-                    0.0,
+                    surface_time,
                 )
             })
             .unwrap_or(Ok(()))

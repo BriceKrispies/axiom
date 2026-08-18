@@ -24,11 +24,25 @@ axiom-scene = { path = "../axiom-scene" }
 axiom-resources = { path = "../axiom-resources" }
 axiom-render-pipeline = { path = "../axiom-render-pipeline" }
 axiom-webgpu = { path = "../axiom-webgpu" }
+# The engine's own preparation barrier for authored surfaces. This umbrella owns
+# the `axiom_runtime::PreparationSchedule` every app is realized through, so it
+# is the only tier that can put surface-program compilation *on* that schedule —
+# before `RuntimeState::Prepared`, where it belongs. The presentation driver
+# cannot: its loop starts long after preparation has completed.
+axiom-gpu-backend = { path = "../axiom-gpu-backend" }
 
 # wasm32-only: platform presentation backend for the `run` entry point; native
 # builds drive headlessly via build + tick.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axiom-windowing = { path = "../axiom-windowing" }
+
+# Test-only: authoring a surface whose channel is a *field* (rather than a plain
+# constant) — the only kind that costs a compiled program — needs the expression
+# language and the operator DAG under it. Non-test code names neither: an app
+# hands over finished `Surface` values and the engine only ever prepares them.
+[dev-dependencies]
+axiom-field = { path = "../../crates/axiom-field" }
+axiom-recipe = { path = "../../crates/axiom-recipe" }
 
 [lints.rust]
 unsafe_code = "forbid"

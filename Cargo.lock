@@ -73,10 +73,13 @@ name = "axiom"
 version = "0.1.0"
 dependencies = [
  "axiom-ecs",
+ "axiom-field",
  "axiom-frame",
+ "axiom-gpu-backend",
  "axiom-host",
  "axiom-kernel",
  "axiom-math",
+ "axiom-recipe",
  "axiom-render-pipeline",
  "axiom-resources",
  "axiom-runtime",
@@ -1169,11 +1172,14 @@ name = "axiom-windowing"
 version = "0.1.0"
 dependencies = [
  "axiom-canvas2d-backend",
+ "axiom-field",
  "axiom-gpu-backend",
  "axiom-host",
  "axiom-interface",
  "axiom-kernel",
+ "axiom-recipe",
  "axiom-recording",
+ "axiom-surface",
  "js-sys",
  "wasm-bindgen",
  "wasm-bindgen-futures",

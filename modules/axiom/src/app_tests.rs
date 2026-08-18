@@ -751,3 +751,132 @@ fn an_app_with_no_preparation_tasks_still_realizes() {
     assert_eq!(app.renderable_count(), 0);
     assert!(app.tick(0).draws().is_empty());
 }
+
+/// A surface whose opacity is the scalar field `Uv.x` — the canonical
+/// field-authored surface, and the only kind that costs a compiled program.
+fn uv_surface(name: &str) -> axiom_surface::Surface {
+    use axiom_field::{FieldBuilder, FieldId, FieldOp};
+    use axiom_surface::{SurfaceBuilder, SurfaceChannel};
+    let (builder, uv) =
+        FieldBuilder::new(FieldId::of_name(name), 1).push(FieldOp::Uv, Vec::new(), Vec::new());
+    let (builder, lane) = builder.push(
+        FieldOp::Component,
+        vec![axiom_recipe::Param::int(0)],
+        vec![uv],
+    );
+    SurfaceBuilder::new()
+        .field(SurfaceChannel::Opacity, builder.build(lane))
+        .build()
+        .expect("a scalar uv field is a legal opacity")
+}
+
+/// **The engine compiles authored surfaces at the preparation barrier**, and
+/// hands what it compiled to whoever presents.
+///
+/// This is the fix for a loop that could not carry a surface at all: `run` now
+/// has a compiled set to hand the driver and a table to resolve draws through,
+/// where before it had neither and every authored surface reached the screen as
+/// its constant fallback.
+///
+/// The counts are real assertions, not bookkeeping: two *equal* surfaces
+/// deduplicate to one program by content digest, and a constant-only surface
+/// costs none at all because the existing pipeline renders it exactly. A change
+/// that made every material its own pipeline would fail here rather than show up
+/// as a slow first frame.
+#[test]
+fn the_barrier_compiles_the_authored_surfaces_and_hands_them_on() {
+    let field = uv_surface("axiom/app/field");
+    let twin = uv_surface("axiom/app/field");
+    let constant = axiom_surface::SurfaceBuilder::new()
+        .lighting(axiom_surface::LightingModel::Unlit)
+        .build()
+        .expect("an unlit surface is legal");
+
+    let app = App::new()
+        .window(Window::new(64, 64))
+        .add_plugins(DefaultPlugins)
+        .surfaces(vec![field.clone(), twin, constant.clone()])
+        .build();
+
+    assert_eq!(app.runtime.state(), RuntimeState::Running);
+    assert_eq!(
+        app.surfaces().len(),
+        3,
+        "the driver is handed exactly what the app authored"
+    );
+    assert_eq!(
+        app.surface_program_count(),
+        1,
+        "two equal surfaces are one program, and a constant-only surface is none"
+    );
+    assert!(
+        app.surface_degradations().is_empty(),
+        "nothing about these surfaces is dropped"
+    );
+    assert_eq!(
+        app.surfaces()[0].digest().raw(),
+        field.digest().raw(),
+        "the set is carried whole, not reduced to digests"
+    );
+}
+
+/// An app that authors no surface prepares an empty set: no programs, no
+/// degradations, nothing to hand a driver. This is the compatibility contract —
+/// every app that existed before surfaces did is byte-identically unaffected.
+#[test]
+fn an_app_that_authors_no_surface_prepares_an_empty_set() {
+    let app = App::new().build();
+    assert!(app.surfaces().is_empty());
+    assert_eq!(app.surface_program_count(), 0);
+    assert!(app.surface_degradations().is_empty());
+    assert!(app.material_surface_programs().is_empty());
+}
+
+/// **The table that lets a batch find its program.**
+///
+/// A frame reaches the live backend as per-`(mesh, material)` batches carrying
+/// no appearance program, which is exactly why the engine's own loop rendered
+/// constant fallbacks. The recovery is by material id, and the join back to the
+/// authored surface is the surface's own content digest — so a material and the
+/// surface it names cannot be put out of step by hand.
+#[test]
+fn the_material_program_table_names_only_surface_backed_materials() {
+    let field = uv_surface("axiom/app/table");
+    let program = field.digest().raw();
+
+    let mut app = App::new()
+        .window(Window::new(64, 64))
+        .add_plugins(DefaultPlugins)
+        .surfaces(vec![field])
+        .build();
+    let plain = app.add_material(Material::lit(Color::linear_rgb(ch(1.0), ch(1.0), ch(1.0))));
+    let authored = app.add_material(Material::from_surface(uv_surface("axiom/app/table")));
+
+    assert_eq!(
+        app.material_surface_programs(),
+        vec![(authored.id(), program)],
+        "a material that names no surface is absent — its program is the \
+         built-in fixed path"
+    );
+    assert_ne!(plain.id(), authored.id());
+}
+
+/// **A surface set that overflows the bounded program cache fails at the
+/// barrier**, loudly, rather than becoming an unattributable mid-session
+/// stutter.
+///
+/// There is no eviction by design: a bound that fails at startup is a design
+/// signal an author can act on, and preparation failing is what stops a
+/// half-built world from reaching `Running` at all.
+#[test]
+#[should_panic(expected = "app preparation succeeds")]
+fn authoring_more_surface_programs_than_the_cache_holds_fails_the_barrier() {
+    let many: Vec<axiom_surface::Surface> = (0..65)
+        .map(|index| uv_surface(&format!("axiom/app/many/{index}")))
+        .collect();
+    let _ = App::new()
+        .window(Window::new(64, 64))
+        .add_plugins(DefaultPlugins)
+        .surfaces(many)
+        .build();
+}

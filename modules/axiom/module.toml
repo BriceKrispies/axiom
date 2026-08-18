@@ -27,6 +27,11 @@ allowed_modules = [
     "render-pipeline",
     "webgpu",
     "windowing",
+    # The preparation barrier for authored surfaces. This umbrella owns the
+    # runtime's preparation schedule, so it is the only tier that can compile a
+    # surface's program *before* `RuntimeState::Prepared`; windowing's loop does
+    # not exist until long after that phase has completed.
+    "gpu-backend",
 ]
 
 introduced_capabilities = [

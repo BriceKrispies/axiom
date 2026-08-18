@@ -13,6 +13,13 @@ crate-type = ["rlib"]
 axiom-kernel = { path = "../../crates/axiom-kernel" }
 axiom-host = { path = "../../crates/axiom-host" }
 
+# The engine's neutral appearance artifact. The driver holds the authored surface
+# set it presents with — it is what the live arm hands the GPU backend's
+# preparation barrier, and what tells the redraw ledger whether anything on
+# screen reads the frame clock. Native (not wasm32-only) because that decision
+# and that storage are deterministic core, testable without a browser.
+axiom-surface = { path = "../../crates/axiom-surface" }
+
 # wasm32-only: keeps native `cargo test`/coverage from compiling the GPU
 # backend, so the deterministic core stays browser-free. The run loop delegates
 # each frame's real GPU draw to axiom-gpu-backend.
@@ -48,6 +55,14 @@ web-sys = { version = "0.3", features = [
     "Location",
     "console",
 ] }
+
+# Test-only: building a surface whose graph reads the frame clock (the one thing
+# that makes a still scene keep animating) needs the field expression language
+# and the operator DAG under it. Non-test code names neither — the driver only
+# ever asks a finished `Surface` what it requires.
+[dev-dependencies]
+axiom-field = { path = "../../crates/axiom-field" }
+axiom-recipe = { path = "../../crates/axiom-recipe" }
 
 [lints.rust]
 unsafe_code = "forbid"

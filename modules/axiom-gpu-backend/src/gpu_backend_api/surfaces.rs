@@ -144,8 +144,22 @@ impl GpuBackendApi {
     /// stutter on a pipeline the driver compiles the first time it is used"*, and
     /// that is only true while nothing compiles inside a frame.
     pub fn frame_degradations(&self, packet: &FramePacket) -> Vec<axiom_host::FrameFeature> {
-        self.catalog
-            .degradations(&crate::frame_packet_adapter::frame_packet_programs(packet))
+        self.program_degradations(&crate::frame_packet_adapter::frame_packet_programs(packet))
+    }
+
+    /// [`Self::frame_degradations`] for a caller that holds the frame's **programs**
+    /// rather than a packet — the batch path.
+    ///
+    /// [`Self::present_frame_result`] takes explicit `(mesh, material)` batches
+    /// and a parallel program slice, never a packet, so it has no `FramePacket`
+    /// to derive the programs from. That is the *transport* differing, not the
+    /// rule: a program the barrier did not prepare renders the constant fallback
+    /// and is reported, whichever entry drew it. Both entries therefore answer
+    /// from this one query rather than each growing its own copy of the rule —
+    /// `frame_degradations` is exactly this, preceded by reading the programs
+    /// off the packet.
+    pub fn program_degradations(&self, programs: &[u64]) -> Vec<axiom_host::FrameFeature> {
+        self.catalog.degradations(programs)
     }
 
     /// Which features this backend cannot honour for `surfaces`, checked once
@@ -403,6 +417,48 @@ mod tests {
         // still compiles nothing: the program count did not move.
         assert!(!backend.present_packet(&packet_naming(never.digest().raw())));
         assert_eq!(backend.prepared_program_count(), 1);
+    }
+
+    /// **The batch path reports the same miss the packet path does.**
+    ///
+    /// `present_frame_result` carries explicit `(mesh, material)` batches and a
+    /// parallel program slice, so it has no packet to read the programs off. The
+    /// *rule* must not fork with the transport: the two entries answer from one
+    /// query, and this pins that they agree — including that a batch naming no
+    /// surface (`0`) is never a miss, and that one miss among many batches is
+    /// reported once.
+    #[test]
+    fn the_batch_path_and_the_packet_path_report_the_same_miss() {
+        let mut backend = GpuBackendApi::new(&request(320, 240));
+        let prepared = uv_opacity("gpu/api/batch/prepared");
+        let never = uv_opacity("gpu/api/batch/never");
+        assert_eq!(
+            backend
+                .prepare_surfaces(std::slice::from_ref(&prepared))
+                .expect("one program fits"),
+            1
+        );
+
+        // A frame whose batches all name prepared programs (or none at all)
+        // reports nothing.
+        assert!(backend
+            .program_degradations(&[0, prepared.digest().raw(), 0])
+            .is_empty());
+        assert!(backend.program_degradations(&[]).is_empty());
+
+        // One unprepared program among several batches is one report, and it is
+        // exactly what the packet path says about the same program.
+        let missed = backend.program_degradations(&[
+            prepared.digest().raw(),
+            never.digest().raw(),
+            never.digest().raw(),
+        ]);
+        assert_eq!(missed, vec![axiom_host::FrameFeature::ProceduralSurface]);
+        assert_eq!(
+            missed,
+            backend.frame_degradations(&packet_naming(never.digest().raw())),
+            "the two transports must not grow two rules"
+        );
     }
 
     /// **The cache is bounded and preparation fails loudly past the bound.**

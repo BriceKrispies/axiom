@@ -71,7 +71,10 @@ mod resources;
 /// Scene authoring expressed as the engine's own startup preparation task — the
 /// structural reason `realize` cannot reach `Running` before the world exists.
 mod preparation;
-use preparation::{AuthorTask, AuthoredCell};
+use preparation::{
+    AuthorTask, AuthoredCell, PreparedSurfaces, PreparedSurfacesCell, SurfaceTask,
+    SURFACE_TASK_NAME,
+};
 
 /// The default fixed simulation step: 1 ms, matching the engine's slices.
 const DEFAULT_STEP_NANOS: u64 = 1_000_000;
@@ -100,6 +103,10 @@ pub struct App {
     // called. `realize` drains this onto the schedule *after* the engine's own
     // `AuthorTask`, so an app task can never observe an unauthored world.
     preparation: Vec<(&'static str, Box<dyn PreparationTask>)>,
+    // The authored appearance surfaces this app's materials name. Compiled by
+    // the engine's own barrier during preparation and carried to the presentation
+    // driver by `run`; see `App::surfaces`.
+    surfaces: Vec<axiom_surface::Surface>,
 }
 
 impl App {
@@ -112,7 +119,31 @@ impl App {
             render: false,
             setup: None,
             preparation: Vec::new(),
+            surfaces: Vec::new(),
         }
+    }
+
+    /// **Declare the authored [`axiom_surface::Surface`]s this app's materials
+    /// name**, so the engine compiles them at the preparation barrier and the
+    /// presentation loop draws with them.
+    ///
+    /// A [`Material::from_surface`](crate::prelude::Material::from_surface)
+    /// reduces its surface to a content digest, because a `Material` is a `Copy`
+    /// per-asset description and a surface owns graphs. That digest is what
+    /// travels the whole render chain — but a digest cannot be *compiled*, so the
+    /// surfaces themselves have to reach the engine by some route, and this is
+    /// it. They are joined back to the materials that name them by the very same
+    /// digest, so there is no second list to keep in step by hand: hand over the
+    /// surfaces you authored materials from, in any order, and every material
+    /// finds its own.
+    ///
+    /// Without this an app rendering through [`App::run`] draws **every** authored
+    /// surface as its constant fallback, whatever it wrote, because the loop has
+    /// nothing to compile and nothing to name. An app that authors no surface
+    /// calls this never and is entirely unaffected.
+    pub fn surfaces(mut self, surfaces: Vec<axiom_surface::Surface>) -> Self {
+        self.surfaces = surfaces;
+        self
     }
 
     /// Set the window/viewport configuration.
@@ -206,6 +237,14 @@ impl App {
             .depth_fog()
             .into_iter()
             .for_each(|fog| windowing.set_depth_fog(fog));
+        // **The authored surfaces, carried into the loop.** The barrier above
+        // already planned and validated this set inside the preparation phase;
+        // the driver compiles it onto the device it binds and resolves every
+        // frame's batches through the material table. Before this the loop
+        // presented an empty program slice on every frame, so an authored surface
+        // could not reach a pixel through `run` at all.
+        windowing.set_surfaces(running.surfaces().to_vec());
+        windowing.set_material_programs(running.material_surface_programs());
         let _ =
             windowing.run_web_multi(&surface_id, meshes, materials, max_instances, move |tick| {
                 let outcome = running.tick(tick);
@@ -261,6 +300,10 @@ impl App {
             .depth_fog()
             .into_iter()
             .for_each(|fog| windowing.set_depth_fog(fog));
+        // Every pane compares the same authored materials, not three different
+        // constant fallbacks.
+        windowing.set_surfaces(running.surfaces().to_vec());
+        windowing.set_material_programs(running.material_surface_programs());
         let _ =
             windowing.run_web_compare(surface_ids, meshes, materials, max_instances, move |tick| {
                 let outcome = running.tick(tick);
@@ -295,6 +338,9 @@ impl std::fmt::Debug for App {
             .field("step_nanos", &self.step_nanos)
             .field("render", &self.render)
             .field("has_setup", &self.setup.is_some())
+            // The surfaces themselves are graphs; the count is what a reader
+            // checking a builder by eye actually wants.
+            .field("surfaces", &self.surfaces.len())
             // `Box<dyn PreparationTask>` is not `Debug`; the names are the only
             // part of a task the builder can honestly show.
             .field(
@@ -356,6 +402,11 @@ pub struct RunningApp {
     // palette). Filled during authoring via `submit_skinned_draw` and drained into
     // the frame outcome each render, so it never accumulates across frames.
     pending_skinned: Vec<PendingSkinned>,
+    // What the surface barrier produced during preparation: the authored surface
+    // set itself (carried to the presentation driver), the program count, and what
+    // this engine could not honour for it. Empty for the overwhelming majority of
+    // apps, which author no surface at all.
+    surfaces: PreparedSurfaces,
 }
 
 /// A skinned draw the app queued this frame: the mesh + material to draw, the tint
@@ -415,6 +466,7 @@ impl RunningApp {
         // the app's contributed tasks in the order `prepare_with` was called —
         // so no app task can observe a world that has not been authored yet.
         let authored_cell: AuthoredCell = Rc::new(RefCell::new(None));
+        let prepared_surfaces: PreparedSurfacesCell = Rc::new(RefCell::new(None));
         let mut schedule = PreparationSchedule::new();
         schedule.push(
             AUTHOR_TASK_NAME,
@@ -422,6 +474,19 @@ impl RunningApp {
                 app.setup,
                 aspect,
                 Rc::clone(&authored_cell),
+            )),
+        );
+        // The surface barrier — the one place an engine app compiles a surface
+        // program, and it is here, inside the preparation phase, rather than on
+        // the frame that first draws with it. An app that authored no surface
+        // prepares an empty set and pays nothing.
+        schedule.push(
+            SURFACE_TASK_NAME,
+            Box::new(SurfaceTask::new(
+                app.surfaces,
+                surface.width(),
+                surface.height(),
+                Rc::clone(&prepared_surfaces),
             )),
         );
         app.preparation
@@ -439,6 +504,10 @@ impl RunningApp {
             .borrow_mut()
             .take()
             .expect("preparation authored the scene");
+        let surfaces = prepared_surfaces
+            .borrow_mut()
+            .take()
+            .expect("preparation compiled the surface set");
 
         RunningApp {
             frame_api,
@@ -463,6 +532,7 @@ impl RunningApp {
             custom_textures: Vec::new(),
             renderables: authored.renderables,
             pending_skinned: Vec::new(),
+            surfaces,
         }
     }
 
@@ -538,6 +608,50 @@ impl RunningApp {
     /// per-instance buffer capacity.
     pub fn renderable_count(&self) -> usize {
         self.renderables
+    }
+
+    /// The authored surfaces the preparation barrier compiled — what
+    /// [`App::surfaces`] declared, ready to hand to a presentation driver.
+    pub fn surfaces(&self) -> &[axiom_surface::Surface] {
+        &self.surfaces.surfaces
+    }
+
+    /// How many **distinct surface programs** the barrier compiled.
+    ///
+    /// Deduplicated by content digest, so two materials authored from equal
+    /// surfaces cost one program and a surface whose every channel is a plain
+    /// constant costs none. Assert on it and a variant explosion is a failing
+    /// test rather than a slow first frame.
+    pub fn surface_program_count(&self) -> u32 {
+        self.surfaces.programs
+    }
+
+    /// What this engine could not honour for the authored surface set — empty
+    /// when everything lowered. Resolved once at the barrier, not per frame, and
+    /// reported rather than silently dropped.
+    pub fn surface_degradations(&self) -> &[axiom_host::FrameFeature] {
+        &self.surfaces.degradations
+    }
+
+    /// **The `(material id, surface program)` table a presentation driver
+    /// resolves each frame's batches through.**
+    ///
+    /// A frame reaches the live backend as per-`(mesh, material)` instance
+    /// batches, which carry no appearance program of their own — that is exactly
+    /// why the engine's own loop used to render every authored surface as its
+    /// constant fallback. It does not need one: a material names at most one
+    /// surface, so the program is recoverable from the material id the batch
+    /// already carries, and this is that recovery table.
+    ///
+    /// Only materials that name a surface appear; every other material takes the
+    /// built-in fixed material path (program `0`), so an app that authored no
+    /// surface hands over an empty table and its frames are unchanged.
+    pub fn material_surface_programs(&self) -> Vec<(u64, u64)> {
+        self.materials
+            .iter()
+            .map(|(id, material)| (*id, material.surface_program()))
+            .filter(|(_, program)| *program != 0)
+            .collect()
     }
 
     /// Serialize the durable simulation state — the scene world (entity identity,

@@ -11,22 +11,35 @@
 //! bodies *after* `build()`, because station 3 needs `add_texture_data` and
 //! station 7 needs `add_mesh_data`, both of which live on `RunningApp`.
 //!
-//! **2. `axiom-windowing`'s loop cannot carry a surface at all.** Its GPU arm
-//! calls `GpuBackendApi::present_frame_result`, which takes explicit instance
-//! batches and passes `&[]` for the program slice and `0.0` for the surface time
-//! — the entry documents this in so many words: *"This entry takes explicit
-//! batches, never a packet, so no batch names a surface program."* Windowing also
-//! never calls `prepare_surfaces`. So an app that presents through windowing
-//! renders **every authored surface as its constant fallback**, whatever it
-//! authored, and no amount of app-side care changes that.
+//! **2. This app needs a diagnostic loop, not a game loop.** The panel below
+//! times the frame at three named seams, drives its own redraw gate, and pulls
+//! levers (shadows, render scale, adaptive scale, solo) that only an instrument
+//! wants. Owning the loop is what buys all of that.
 //!
-//! The only public entry that carries surfaces to real pixels is
-//! `GpuBackendApi::present_packet_with_surfaces`, and before this app it had
-//! **no caller anywhere in the repository outside tests**. Driving it means
-//! owning the canvas, the device handshake and the frame loop, which is what
-//! this module does. That is a lot of app code for something an engine loop
-//! should do, and that imbalance *is* the report: the live path exists, it works,
-//! and nothing in the engine's own presentation stack walks it.
+//! ## The finding this app was written to surface, and its resolution
+//!
+//! Reason 2 used to be reason *one*: **`axiom-windowing`'s loop could not carry a
+//! surface at all.** Its GPU arm called `GpuBackendApi::present_frame_result`,
+//! which passed `&[]` for the program slice and `0.0` for the surface time, and
+//! windowing never called `prepare_surfaces` — so an app presenting through
+//! `App::run` rendered **every authored surface as its constant fallback**,
+//! whatever it authored, and no amount of app-side care changed that. The only
+//! entry that carried surfaces to real pixels was
+//! `GpuBackendApi::present_packet_with_surfaces`, and it had no caller anywhere
+//! in the repository outside this app and tests.
+//!
+//! That is fixed in the engine rather than worked around here.
+//! `present_frame_result` now takes the program slice and a kernel `Seconds`;
+//! `WindowingApi::set_surfaces` / `set_material_programs` hand the driver the
+//! authored set and the `(material, program)` table it resolves each frame's
+//! batches through; the driver compiles the set onto the device it binds; and
+//! `App::surfaces` puts that compilation inside the engine's own
+//! `axiom_runtime::PreparationTask`, before `RuntimeState::Prepared`. An app on
+//! the normal loop now gets its authored materials.
+//!
+//! This module is therefore no longer a *report*; it is an instrument that keeps
+//! its own loop for reason 2, and it stays the reference implementation of the
+//! packet-carrying path.
 //!
 //! ## The barrier, on a target where the device arrives late
 //!
@@ -298,7 +311,8 @@ pub fn start() {
 /// render the next one at, dropping a rung after eight consecutive over-budget
 /// frames and climbing back when there is headroom. `axiom-windowing`'s loop
 /// wires it for every app that presents through windowing; this app cannot
-/// present through windowing (see the module docs), so it hand-rolls the loop.
+/// present through windowing (see the module docs — it wants an instrument's
+/// loop, not a game's), so it hand-rolls the loop.
 ///
 /// **It defaults to off here because this app is a diagnostic instrument, and on
 /// an instrument an adaptive resolution is a lie.** Its whole job is to make the
