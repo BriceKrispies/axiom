@@ -155,3 +155,25 @@ in the notes, and keep the re-implementation line-by-line faithful rather than t
   generator computes a value it never uses. Port it with a comment rather than
   dropping it — the judgement that it is dead can be wrong, and preserving it costs
   nothing.
+
+## Committing when other agents are live
+
+"Never `git add -A`" is not enough. `git commit -m "..."` with **no pathspec**
+commits whatever is already in the index — including files a sibling agent staged
+seconds earlier. That happened in `78e06ea3`: a metal-surfaces commit swept up
+another agent's half-finished module split and put a **non-building tree on the
+branch**.
+
+So, every time:
+
+1. `git add <your explicit paths>`
+2. `git status --porcelain` — read it, and confirm nothing staged is yours-adjacent
+   but not yours.
+3. `git commit -m "..." -- <your explicit paths>` — pass the pathspec to `commit`
+   too, so a stray staged file cannot ride along.
+4. `cargo check -p axiom-claude-of-duty` **after** committing, so you notice
+   immediately if your commit does not build.
+
+If you find someone else's work already staged, **do not commit it and do not
+revert it** — they are probably mid-edit. Commit only your paths and say so in your
+report.
