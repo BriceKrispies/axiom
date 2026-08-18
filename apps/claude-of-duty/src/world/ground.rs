@@ -28,15 +28,17 @@
 //! site below passes the `Surface` variant the JS string would have resolved
 //! to — a stronger, equivalent translation, not a behavioural change.
 //!
-//! `CylinderGeometry` (the manhole ring) is ported here, not in
-//! `crate::world::kit`, because it has exactly one caller in this whole
-//! port; see [`cylinder_geometry`]'s doc.
+//! `CylinderGeometry` (the manhole ring) used to be ported here, as a
+//! private copy, because it had exactly one caller in this whole port. It is
+//! now promoted to `crate::world::kit::cylinder_geometry`: `kit.js`'s
+//! `tubeY` is the second caller that copy's own doc anticipated ("if a
+//! second caller arrives, promote it there").
 
 use crate::rng::Rng;
 use crate::world::accum::AccumAddOpts;
 use crate::world::assembler::Assembler;
 use crate::world::geo::WorldGeo;
-use crate::world::kit::{chamfer_box, patch_geometry, plane_geometry, trs};
+use crate::world::kit::{chamfer_box, cylinder_geometry, patch_geometry, plane_geometry, trs};
 use crate::world::layout::{ALLEYS, STREET};
 use crate::world::noise::fbm3;
 use crate::world::palette::Surface;
@@ -238,7 +240,7 @@ pub fn build_ground(asm: &mut Assembler, rng: &mut Rng) {
         let z = rng.range(z_min + 6.0, z_max - 6.0);
         let x = rng.range(-2.5, 2.5);
         let ring = asm.cache("manhole", || {
-            let mut g = cylinder_geometry(0.36, 0.36, 0.04, 18, 1);
+            let mut g = cylinder_geometry(0.36, 0.36, 0.04, 18, 1, false);
             g.paint_masks(|_x, _y, _z, _nx, ny, _nz, out, _i| {
                 out[0] = if ny > 0.5 { 0.95 } else { 0.4 };
                 out[1] = 0.55;
@@ -308,133 +310,6 @@ fn seam(asm: &mut Assembler, sr: &mut Rng, ax: f64, az: f64, bx: f64, bz: f64, k
     }
 }
 
-/// `new THREE.CylinderGeometry(radiusTop, radiusBottom, height,
-/// radialSegments, heightSegments)` (`three/src/geometries/CylinderGeometry.js`,
-/// MIT licensed, Three.js authors), specialized to the manhole ring's one
-/// call site: `openEnded = false`, `thetaStart = 0`, `thetaLength = 2*PI`
-/// (the source's own defaults, never overridden by `ground.js`'s single
-/// caller). Not in `crate::world::kit` because nothing else in this port
-/// needs a cylinder; if a second caller arrives, promote it there.
-fn cylinder_geometry(radius_top: f64, radius_bottom: f64, height: f64, radial_segments: u32, height_segments: u32) -> WorldGeo {
-    let mut vertices: Vec<f32> = Vec::new();
-    let mut normals: Vec<f32> = Vec::new();
-    let mut uvs: Vec<f32> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    let mut index: u32 = 0;
-    let half_height = height / 2.0;
-    let slope = (radius_bottom - radius_top) / height;
-
-    let mut index_array: Vec<Vec<u32>> = Vec::new();
-    for y in 0..=height_segments {
-        let mut index_row = Vec::new();
-        let v = f64::from(y) / f64::from(height_segments);
-        let radius = v * (radius_bottom - radius_top) + radius_top;
-        for x in 0..=radial_segments {
-            let u = f64::from(x) / f64::from(radial_segments);
-            let theta = u * std::f64::consts::TAU;
-            let (sin_t, cos_t) = theta.sin_cos();
-            vertices.push((radius * sin_t) as f32);
-            vertices.push((-v * height + half_height) as f32);
-            vertices.push((radius * cos_t) as f32);
-            let nlen = (sin_t * sin_t + slope * slope + cos_t * cos_t).sqrt();
-            normals.push((sin_t / nlen) as f32);
-            normals.push((slope / nlen) as f32);
-            normals.push((cos_t / nlen) as f32);
-            uvs.push(u as f32);
-            uvs.push((1.0 - v) as f32);
-            index_row.push(index);
-            index += 1;
-        }
-        index_array.push(index_row);
-    }
-    for x in 0..radial_segments {
-        for y in 0..height_segments {
-            let a = index_array[y as usize][x as usize];
-            let b = index_array[(y + 1) as usize][x as usize];
-            let c = index_array[(y + 1) as usize][(x + 1) as usize];
-            let d = index_array[y as usize][(x + 1) as usize];
-            if radius_top > 0.0 || y != 0 {
-                indices.extend_from_slice(&[a, b, d]);
-            }
-            if radius_bottom > 0.0 || y != height_segments - 1 {
-                indices.extend_from_slice(&[b, c, d]);
-            }
-        }
-    }
-
-    if radius_top > 0.0 {
-        cylinder_cap(true, radius_top, radius_bottom, radial_segments, half_height, &mut vertices, &mut normals, &mut uvs, &mut indices, &mut index);
-    }
-    if radius_bottom > 0.0 {
-        cylinder_cap(false, radius_top, radius_bottom, radial_segments, half_height, &mut vertices, &mut normals, &mut uvs, &mut indices, &mut index);
-    }
-
-    WorldGeo {
-        pos: vertices,
-        normal: normals,
-        uv: uvs,
-        color: Vec::new(),
-        index: indices,
-    }
-}
-
-/// `generateCap(top)` (`CylinderGeometry.js`'s inner function).
-#[allow(clippy::too_many_arguments)]
-fn cylinder_cap(
-    top: bool,
-    radius_top: f64,
-    radius_bottom: f64,
-    radial_segments: u32,
-    half_height: f64,
-    vertices: &mut Vec<f32>,
-    normals: &mut Vec<f32>,
-    uvs: &mut Vec<f32>,
-    indices: &mut Vec<u32>,
-    index: &mut u32,
-) {
-    let center_index_start = *index;
-    let radius = if top { radius_top } else { radius_bottom };
-    let sign: f64 = if top { 1.0 } else { -1.0 };
-
-    for _ in 1..=radial_segments {
-        vertices.push(0.0);
-        vertices.push((half_height * sign) as f32);
-        vertices.push(0.0);
-        normals.push(0.0);
-        normals.push(sign as f32);
-        normals.push(0.0);
-        uvs.push(0.5);
-        uvs.push(0.5);
-        *index += 1;
-    }
-    let center_index_end = *index;
-
-    for x in 0..=radial_segments {
-        let u = f64::from(x) / f64::from(radial_segments);
-        let theta = u * std::f64::consts::TAU;
-        let (sin_t, cos_t) = theta.sin_cos();
-        vertices.push((radius * sin_t) as f32);
-        vertices.push((half_height * sign) as f32);
-        vertices.push((radius * cos_t) as f32);
-        normals.push(0.0);
-        normals.push(sign as f32);
-        normals.push(0.0);
-        uvs.push((cos_t * 0.5 + 0.5) as f32);
-        uvs.push((sin_t * 0.5 * sign + 0.5) as f32);
-        *index += 1;
-    }
-
-    for x in 0..radial_segments {
-        let c = center_index_start + x;
-        let i = center_index_end + x;
-        if top {
-            indices.extend_from_slice(&[i, i + 1, c]);
-        } else {
-            indices.extend_from_slice(&[i + 1, i, c]);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,20 +333,6 @@ mod tests {
         assert!((camber(0.0) - 0.055).abs() < 1e-12);
         assert!(camber(hw).abs() < 1e-9);
         assert!(camber(0.0) > camber(hw / 2.0));
-    }
-
-    #[test]
-    fn cylinder_geometry_manhole_dimensions_match_three_cylindergeometry() {
-        let g = cylinder_geometry(0.36, 0.36, 0.04, 18, 1);
-        // Torso: (radialSegments+1)*(heightSegments+1) verts, both caps present
-        // (radius_top, radius_bottom > 0): radialSegments verts each ring of
-        // centre fans + radialSegments+1 verts of the rim.
-        let torso_verts = 19 * 2;
-        let cap_verts = (18 + 19) * 2;
-        assert_eq!(g.vert_count(), torso_verts + cap_verts);
-        // Torso: radialSegments * heightSegments * 2 tris (both radii > 0).
-        // Each cap: radialSegments tris.
-        assert_eq!(g.tri_count(), 18 * 1 * 2 + 18 + 18);
     }
 
     #[test]

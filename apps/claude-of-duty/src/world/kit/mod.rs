@@ -1,11 +1,26 @@
-//! Ported from Claude-of-Duty `src/world/util.js` — the geometry-toolkit
-//! pieces not already covered by [`crate::world::masks`] (the mask
-//! convention) or [`crate::world::noise`] (the noise basis these builders
-//! paint with): `trs` (`util.js:86-92`), `chamferBox` (`util.js:267-361`),
-//! `weatherProp` (`util.js:246-260`) and `patchGeometry` (`util.js:642-669`),
-//! plus the `THREE.PlaneGeometry`/`quad` pair (`util.js:379-384`,
+//! Ported from Claude-of-Duty `src/world/util.js` (the geometry toolkit) and
+//! `src/world/kit.js` (the modular building kit built on top of it) — see
+//! `docs/work-manifests/claude-of-duty-port/02-port-recipe.md`'s task for
+//! the split. Everything from `util.js` not already covered by
+//! [`crate::world::masks`] (the mask convention) or [`crate::world::noise`]
+//! (the noise basis these builders paint with) lives directly in this file:
+//! `trs` (`util.js:86-92`), `chamferBox` (`util.js:267-361`), `weatherProp`
+//! (`util.js:246-260`), `patchGeometry` (`util.js:642-669`), `wallPanel`
+//! (below), plus the `THREE.PlaneGeometry`/`quad` pair (`util.js:379-384`,
 //! `three/src/geometries/PlaneGeometry.js`, MIT licensed, Three.js authors)
 //! that `buildGround` needs for the terrain and road strips.
+//!
+//! Everything from `kit.js` — the actual modular building elements
+//! (`facadeWall`, `windowUnit`, `doorUnit`, `shopfront`, `balcony`,
+//! `parapet`, `stairRun`, `stripedCloth`, `awning`, `drainpipe`,
+//! `pockGeometry`, `spallPatch`, `rubbleMound`) — lives in this directory's
+//! submodules, one per element family, and is re-exported flat here so
+//! `crate::world::kit::facade_wall` etc. reads exactly like the source's
+//! single-file `kit.js` namespace: [`facade`], [`window`], [`door`],
+//! [`shopfront`], [`balcony`], [`parapet`], [`stairs`], [`canopy`],
+//! [`pipework`], [`damage`], and the shared sub-primitives
+//! (`solidSlabs`/`clothGeometry`/`tubeY`/`polyPrism`/`rockGeometry`/
+//! `mergeSimple`) in [`primitives`].
 //!
 //! `plainBox` (`util.js:369-376`) is **not** duplicated here: `chamfer=0.0`
 //! already takes `weapons::geometry::primitives::box_geo`'s unchamfered
@@ -16,8 +31,18 @@
 //! already-tested box builder instead of a second hand-written copy of
 //! `BoxGeometry`'s six-face construction.
 //!
-//! `wallPanel` and `Accum` are ported in [`crate::world::kit::wall_panel`]
-//! (this module) and [`crate::world::accum`] respectively.
+//! `wallPanel` and `Accum` are ported in [`wall_panel`] (this module) and
+//! [`crate::world::accum`] respectively.
+//!
+//! ## `L`/`LL` collapse to one function
+//!
+//! `kit.js:33-52` defines two composers, `L` (allocates a scratch `Euler`)
+//! and `LL` (reuses module-level scratch objects to dodge that allocation) —
+//! both build the *exact same* `pm * TRS(x,y,z,ry,sx,sy,sz,rx,rz)` matrix in
+//! the panel-space `'YXZ'` Euler order. That split exists only to dodge a
+//! JS garbage-collector cost; a Rust `Mat4` is returned by value with no such
+//! concern, so [`ll`] is the one function every element submodule composes
+//! through, standing in for both `L` and `LL`.
 
 use axiom_math::{Mat4, Quat, Vec3};
 
@@ -26,6 +51,113 @@ use crate::weapons::geometry::primitives::{box_geo, extrude, ExtrudeOpts};
 use crate::world::noise::fbm3;
 
 use super::geo::WorldGeo;
+
+mod balcony;
+mod canopy;
+mod damage;
+mod door;
+mod facade;
+mod parapet;
+mod pipework;
+mod primitives;
+mod shopfront;
+mod stairs;
+mod window;
+
+pub use balcony::{balcony, BalconyOpts, BalconyRailing, BalconyResult};
+pub use canopy::{awning, striped_cloth, striped_cloth_default_bands, striped_cloth_default_seg_x, AwningOpts, AwningResult, StripedClothOpts};
+pub use damage::{pock_geometry, rubble_mound, spall_patch, RubbleOpts};
+pub use door::{door_unit, DoorOpts};
+pub use facade::{facade_wall, FacadeSpec};
+pub use parapet::{parapet, ParapetOpts};
+pub use pipework::{drainpipe, DrainpipeOpts};
+pub use primitives::{
+    cloth_geometry, cylinder_geometry, merge_simple, poly_prism, rock_geometry, solid_slabs, tube_y, ClothOpts, SolidSlab,
+};
+pub use shopfront::{shopfront, ShopfrontOpts};
+pub use stairs::{stair_run, StairOpts, StairRailing, StairResult};
+pub use window::{window_state, window_unit, WindowOpts, WindowState};
+
+/// `LL(pm, x, y, z, ry=0, sx=1, sy=1, sz=1, rx=0, rz=0)` (`kit.js:41-52`,
+/// see this module's doc for why `L` collapses into the same function):
+/// compose a local `'YXZ'`-order transform onto the panel matrix `pm`. Every
+/// element builder in this directory composes its parts through this.
+#[allow(clippy::too_many_arguments)]
+pub fn ll(pm: &Mat4, x: f32, y: f32, z: f32, ry: f32, sx: f32, sy: f32, sz: f32, rx: f32, rz: f32) -> Mat4 {
+    pm.multiply(trs(x, y, z, ry, sx, sy, sz, rx, rz))
+}
+
+/// `worldOf(pm, x, y, z)` (`kit.js:1099-1105`): transform a panel-space point
+/// to level space. The source writes into a shared scratch triple to dodge
+/// an allocation; a Rust `Vec3` is returned by value instead (see this
+/// module doc's `L`/`LL` note for the same JS-GC-avoidance pattern).
+pub fn world_of(pm: &Mat4, x: f32, y: f32, z: f32) -> Vec3 {
+    pm.transform_point(Vec3::new(x, y, z))
+}
+
+/// `ryOf(pm)` (`kit.js:1108-1111`): extract the Y rotation baked into a panel
+/// matrix, reading the same two column-major elements (`e[8]`, `e[10]`) the
+/// source reads from `pm.elements`.
+pub fn ry_of(pm: &Mat4) -> f32 {
+    let c = pm.as_cols_array();
+    c[8].atan2(c[10])
+}
+
+// ------------------------------------------------------ cached box/pane kit --
+// `BOX`/`BOX_FINE`/`BOX_SOFT`/`BOX_THIN`/`PANE` (`kit.js:54-60`): each is a
+// one-line `(A) => A.cache(key, factory)` arrow in the source. Ported as
+// plain functions of the [`Assembler`] rather than closures captured once,
+// since every call site already has `asm` in scope; every element submodule
+// in this directory reaches for these instead of re-deriving the same cache
+// key.
+use crate::world::assembler::Assembler;
+
+/// `BOX` (`kit.js:54`): a 44-triangle chamfered box, `0.012` bevel.
+pub fn box_kit(asm: &mut Assembler) -> WorldGeo {
+    asm.cache("box:0.012", || chamfer_box(1.0, 1.0, 1.0, 0.012))
+}
+
+/// `BOX_FINE` (`kit.js:55`): a finer `0.004` bevel, for small props.
+pub fn box_fine_kit(asm: &mut Assembler) -> WorldGeo {
+    asm.cache("box:0.004", || chamfer_box(1.0, 1.0, 1.0, 0.004))
+}
+
+/// `BOX_SOFT` (`kit.js:56`): a softer `0.03` bevel, for weathered masonry.
+pub fn box_soft_kit(asm: &mut Assembler) -> WorldGeo {
+    asm.cache("box:0.03", || chamfer_box(1.0, 1.0, 1.0, 0.03))
+}
+
+/// `BOX_THIN` (`kit.js:57-58`): a 12-tri unchamfered box for thin repeated
+/// members (window frame rails, shutter slats, grille bars).
+pub fn box_thin_kit(asm: &mut Assembler) -> WorldGeo {
+    asm.cache("box:plain", || plain_box())
+}
+
+/// `PANE` (`kit.js:59-60`): a single quad, for window glass and thin panels.
+pub fn pane_kit(asm: &mut Assembler) -> WorldGeo {
+    asm.cache("pane", || quad(1.0, 1.0))
+}
+
+/// `slab(A, key, pm, x, y, z, sx, sy, sz, opts = null, ry = 0)` (`kit.js:63-65`):
+/// merge a unit chamfer box scaled to a slab.
+#[allow(clippy::too_many_arguments)]
+pub fn slab(
+    asm: &mut Assembler,
+    key: &str,
+    pm: &Mat4,
+    x: f32,
+    y: f32,
+    z: f32,
+    sx: f32,
+    sy: f32,
+    sz: f32,
+    opts: Option<crate::world::accum::AccumAddOpts>,
+    ry: f32,
+) {
+    let geo = box_kit(asm);
+    let m = ll(pm, x, y, z, ry, sx, sy, sz, 0.0, 0.0);
+    asm.add(key, &geo, Some(&m), opts);
+}
 
 // ------------------------------------------------------------------ trs --
 /// `trs(out, x, y, z, ry=0, sx=1, sy=sx, sz=sx, rx=0, rz=0)` (`util.js:86-92`):
@@ -372,7 +504,7 @@ pub fn patch_geometry(rng: &mut Rng, radius: f64, lobes: u32, wobble: f64, sag: 
 /// checked in that order — matching `holePath`'s `if (o.ragged) ... if
 /// (o.arch > 0) ... else` (`util.js:398-438`): a hole with both set uses
 /// `ragged`.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct WallHole {
     pub x: f32,
     pub y: f32,

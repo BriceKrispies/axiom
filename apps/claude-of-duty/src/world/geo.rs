@@ -199,6 +199,22 @@ impl WorldGeo {
         ]);
         self.apply(&m);
     }
+
+    /// `BufferGeometry.rotateY(angle)` — the same reasoning as
+    /// [`WorldGeo::rotate_x`], used by `kit.js`'s `rollerShutter`
+    /// (`kit.js:669-670`, `g2.rotateY(Math.PI)`) to build a shutter's back
+    /// face from its front.
+    pub fn rotate_y(&mut self, angle: f32) {
+        let (s, c) = angle.sin_cos();
+        // Column-major rotation-about-Y matrix.
+        let m = Mat4::from_cols_array([
+            c, 0.0, -s, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            s, 0.0, c, 0.0, //
+            0.0, 0.0, 0.0, 1.0, //
+        ]);
+        self.apply(&m);
+    }
 }
 
 fn read3(buf: &[f32], i: usize) -> [f32; 3] {
@@ -368,6 +384,22 @@ mod tests {
         let mut g = unit_triangle();
         g.fill_masks(0.4, 0.5, 0.6);
         assert_eq!(g.color, vec![0.4, 0.5, 0.6, 0.4, 0.5, 0.6, 0.4, 0.5, 0.6]);
+    }
+
+    #[test]
+    fn rotate_y_by_pi_flips_x_and_z() {
+        let mut g = WorldGeo {
+            pos: vec![1.0, 2.0, 3.0],
+            normal: vec![1.0, 0.0, 0.0],
+            uv: Vec::new(),
+            color: Vec::new(),
+            index: Vec::new(),
+        };
+        g.rotate_y(std::f32::consts::PI);
+        assert!((g.pos[0] + 1.0).abs() < 1e-5, "x flips: {}", g.pos[0]);
+        assert!((g.pos[1] - 2.0).abs() < 1e-5, "y unchanged: {}", g.pos[1]);
+        assert!((g.pos[2] + 3.0).abs() < 1e-5, "z flips: {}", g.pos[2]);
+        assert!((g.normal[0] + 1.0).abs() < 1e-5, "normal x flips: {}", g.normal[0]);
     }
 
     #[test]
