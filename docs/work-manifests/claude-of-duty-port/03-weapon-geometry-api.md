@@ -117,3 +117,31 @@ So every port here is checkable against real geometry:
 Floats may differ in the last bits (different libm, different fma), so compare
 positions with a tolerance; compare **counts and indices exactly** — a different
 count means a different algorithm, not a rounding difference.
+
+---
+
+## Corrections to this contract (learned in `e91a5eda`)
+
+**1. Compute in `f64`, store `f32`.** JS numbers are `f64`, and Three computes in
+`f64` while storing into `Float32Array`. The original version of this contract said
+`f32` everywhere, which collapsed that distinction: `get_bevel_vec` is provably
+bit-exact against the source when fed full-precision corners, but an `f32` point-list
+boundary loses enough precision — amplified through a division — to occasionally flip
+the `1e-6` weld quantization and change the hash.
+
+So: **point lists, profiles and intermediate math are `f64`. Only the final `Geo`
+buffers are `f32`.** Do not widen a golden's tolerance to paper over a precision
+boundary — narrow the boundary.
+
+**2. `round_rect` returns a point list, not geometry.**
+```rust
+pub fn round_rect(w: f64, h: f64, r: f64, seg: u32) -> Vec<[f64; 2]>;
+```
+Its only caller feeds it to `extrude`. Same for any other helper whose JS result is
+consumed as a contour rather than drawn.
+
+**3. Euler composition is NOT `axiom_math::Quat::from_euler_xyz`.** That helper
+composes `qz*qy*qx`; Three's `'XYZ'` order is `qx*qy*qz` — a different rotation, not
+the same one rewritten. `Assembly::add` builds its own composition. Never substitute
+the math-layer helper here (verified against a Three golden, pinned by a test in
+`5c504d5b`).
