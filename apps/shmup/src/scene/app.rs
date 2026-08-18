@@ -46,7 +46,7 @@ use crate::weapons::models::rifle::build_rifle;
 use wasm_bindgen::prelude::*;
 
 /// The canvas the page hands the engine.
-pub const SURFACE_ID: &str = "claude-of-duty";
+pub const SURFACE_ID: &str = "shmup";
 
 /// Metres in front of the spawn the rifle is laid down. Far enough to sit inside
 /// the 80-degree frame from a 1.66 m eye (atan(1.5 / 3.0) = 27 degrees below the

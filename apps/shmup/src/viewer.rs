@@ -60,7 +60,7 @@ use crate::weapons::parts::receiver::{add_upper_receiver, UpperReceiverOpts};
 use wasm_bindgen::prelude::*;
 
 /// The canvas the page hands the engine.
-const SURFACE_ID: &str = "claude-of-duty-parts";
+const SURFACE_ID: &str = "shmup-parts";
 
 /// Metres between two adjacent parts on the rack. The widest part here (the
 /// optic, across its clamp bar) is under 0.05 m, so this leaves daylight between
