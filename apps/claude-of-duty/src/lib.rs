@@ -42,3 +42,4 @@ pub mod error;
 pub mod events;
 pub mod registry;
 pub mod rng;
+pub mod world;
