@@ -215,6 +215,7 @@ dependencies = [
  "axiom-input",
  "axiom-kernel",
  "axiom-math",
+ "axiom-proc-mesh",
  "axiom-proc-texture",
  "axiom-recipe",
  "axiom-runtime",
