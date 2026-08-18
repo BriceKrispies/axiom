@@ -10,6 +10,15 @@
 /// [`LibraryEntry::generator`] builds on.
 pub mod noise;
 
+/// The procedural texture forge's CPU bake pipeline (`src/materials/
+/// generator.js`) — the shared detail/macro maps, the Sobel-derived normal,
+/// and the `owSurface` contract every future per-material generator
+/// implements.
+pub mod bake;
+
+/// The curvature-driven vertex wear/grime/AO bake (`src/materials/masks.js`).
+pub mod masks;
+
 use crate::world::palette::Surface;
 
 /// Baking parameters for material texture generation.
