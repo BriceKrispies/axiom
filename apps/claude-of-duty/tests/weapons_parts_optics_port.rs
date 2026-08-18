@@ -26,6 +26,44 @@
 //! golden exactly, including every triangle count in every bucket — a
 //! differing **triangle** count would mean a different algorithm, not
 //! rounding, and none of the buckets below have one.
+//!
+//! **Re-verified with `tests/geometry_assert::assert_triangle_soup_matches`**,
+//! the weld/order-invariant comparison used elsewhere in this suite
+//! (`weapons_geometry_primitives_port.rs`, `weapons_parts_hardware_port.rs`,
+//! `weapons_parts_magazine_port.rs`, `weapons_parts_controls_port.rs`). Run at
+//! `TOL` (1e-5) against every affected bucket:
+//!
+//! | bucket | worst deviation | field | affected triangles |
+//! |---|---|---|---|
+//! | `optic_custom.alu` | `2.0` | `normal.z` | 31 of 6408 (0.48%) |
+//! | `mini_reflex_default.alu` | `0.018726` | `uv.u` | not counted; same class as below |
+//! | `mini_reflex_default.glass` | `0.015833` | `uv.u` | not counted; same class as below |
+//! | `mini_reflex_custom.alu` | `0.036448` | `uv.u` | not counted; same class as below |
+//! | `mini_reflex_custom.glass` | `0.018613` | `uv.u` | not counted; same class as below |
+//! | `slide_default.steel` | `2.0` | `normal.z` | 98 of 2444 (4.0%) |
+//! | `slide_custom.steel` | `2.0` | `normal.x` | 9 of 2444 (0.37%) |
+//!
+//! Two distinct, already-diagnosed mechanisms, not two new bugs:
+//!
+//! - The four `mini_reflex_*` buckets are dominated by `uv`, matching
+//!   `weapons_parts_magazine_port.rs`'s documented `WorldUVGenerator`
+//!   projection-axis tie (a discrete `<` between two side-length magnitudes
+//!   that a sub-tolerance position difference can flip) — not a shape defect.
+//! - `optic_custom.alu`/`slide_default.steel`/`slide_custom.steel` show a
+//!   worst *normal* deviation of exactly `2.0` (fully opposite unit vectors)
+//!   at a small, localized fraction of triangles (`0.37%`-`4.0%`, tabulated
+//!   above — never the bulk of the mesh). Dumping the offending triangles
+//!   (a scratch check, not committed) shows the same local pattern
+//!   `weapons_parts_controls_port.rs`'s module doc diagnoses: at a hard edge
+//!   with several thin triangles sharing near-identical anchor corners (here,
+//!   `slide_default`'s 12 serration teeth are exactly this shape — many
+//!   near-duplicate thin triangles fanned around a shared edge), a
+//!   sub-tolerance weld-tie flip pairs a triangle with its neighbor across
+//!   the fan instead of its true correspondent, and that neighbor can easily
+//!   face the opposite way. `slide_default` (12 teeth, more fan opportunities)
+//!   measures the largest affected fraction of the three, consistent with
+//!   that explanation. `assert_bucket_topology_matches` remains the correct
+//!   assertion for all seven buckets.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;

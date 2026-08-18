@@ -18,17 +18,18 @@
 //! asserted within `1e-6` absolute: every primitive these helpers call
 //! bottoms out in `lathe_z`/`dome`/`ring`/`screw`/`picatinny`, all of which
 //! run through `sin`/`cos`, not bit-guaranteed between V8's libm and Rust's.
-//! `add_rail`'s `picatinny()`-derived buckets are the one exception: they go
-//! through `assert_bucket_topology_matches`, which asserts triangle count
-//! exactly and then — depending on whether the vertex count matches, since
-//! `picatinny()`'s contour is welded once inside itself and a second time by
-//! `Assembly::build` — either compares positions/normals at the wider
+//! `add_rail`'s `picatinny()`-derived buckets used to be the one exception,
+//! held to a weaker topology-only check because `picatinny()`'s contour is
+//! welded once inside itself and a second time by `Assembly::build`, and a
+//! welded **vertex count** is not a reliable comparison key across two
+//! independent libm implementations (see `primitives::extrude`'s module
+//! doc). `tests/geometry_assert::assert_triangle_soup_matches` sidesteps
+//! that entirely — comparing expanded, canonicalized, sorted triangles
+//! instead of the welded buffer — and all three `add_rail` buckets
+//! (`railDefault`/`railCustom`/`railNoFloor`) pass it outright at the wider
 //! `1e-5` `MERGED_TOL` (compounding rounding across two weld passes, real
-//! and measured in `861e3cdb`) or, when even the vertex count doesn't match,
-//! bounds only that delta. See `assert_bucket_topology_matches`'s doc for why
-//! this is no longer the old `f32` point-list boundary
-//! (`03-weapon-geometry-api.md`'s "Corrections" section fixed that) but an
-//! independent-libm residual `primitives::extrude`'s module doc documents.
+//! and measured in `861e3cdb`): the earlier topology-only concession was
+//! unnecessary once the comparison stopped depending on weld bookkeeping.
 //!
 //! **Axis branches.** `add_screw` and `add_qd_socket` each take a
 //! [`MountAxis`] with three variants (`X`/`Y`/`Z`) that resolve to
@@ -41,6 +42,9 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
+mod geometry_assert;
+use geometry_assert::assert_triangle_soup_matches;
+
 use axiom_claude_of_duty::weapons::geometry::{Assembly, Geo, Xform};
 use axiom_claude_of_duty::weapons::parts::hardware::{
     add_pin, add_qd_socket, add_rail, add_screw, add_sling_loop, cartridge, empty_case, MountAxis, RailOpts,
@@ -49,9 +53,8 @@ use axiom_claude_of_duty::weapons::parts::hardware::{
 
 const TOL: f64 = 1e-6;
 
-/// Wider tolerance for a rail bucket's position/normal floats, used only
-/// once its vertex count already matches the golden's exactly (see
-/// [`assert_bucket_topology_matches`]). `picatinny()`'s output is merged
+/// Wider tolerance for a rail bucket's triangle-soup position/normal floats
+/// (see [`assert_triangle_soup_matches`]). `picatinny()`'s output is merged
 /// (base + N teeth, `merge_all`) and then welded a *second* time by
 /// `Assembly::build`'s own bucket merge — compounding `f32`-vs-`f64`
 /// rounding across two weld passes, the same class of effect
@@ -104,49 +107,6 @@ fn assert_bucket_matches(name: &str, built: &BTreeMap<String, Geo>, golden_group
         .get(mat)
         .unwrap_or_else(|| panic!("{name}: bucket {mat:?} missing from build() output"));
     assert_geo_matches(&format!("{name}.{mat}"), g, &golden_group[mat]);
-}
-
-/// A weaker check for a `picatinny()`-derived rail bucket. Triangle count
-/// (fixed by `earcut`, which never crosses `extrude`'s amplifying division)
-/// is asserted exactly. Vertex count is asserted exactly when it can be —
-/// `03-weapon-geometry-api.md`'s "Corrections" section fixed the `f32`
-/// point-list boundary this check used to exist for entirely
-/// (`round_rect`/`extrude`/`picatinny`'s tooth profile all carry `f64`
-/// contours now); what remains, on the goldens this still affects, is an
-/// independent-libm ULP difference (`f64::sin`/`f64::cos` vs V8's) amplified
-/// by the same near-zero tangent-junction division documented in
-/// `primitives::extrude`'s module doc — real, but not narrower than `f64`
-/// can fix. When the vertex count matches, position/normal floats are
-/// compared at [`MERGED_TOL`] (not the single-primitive `1e-6`): a rail
-/// bucket is `picatinny()`'s own merge-and-weld, welded a *second* time by
-/// `Assembly::build`, so it earns the wider, `861e3cdb`-measured tolerance
-/// the merged-part suite uses, not the tighter single-primitive one. When it
-/// doesn't match, only the bounded vertex-count delta is asserted.
-fn assert_bucket_topology_matches(name: &str, built: &BTreeMap<String, Geo>, golden_group: &Value, mat: &str) {
-    let g = built
-        .get(mat)
-        .unwrap_or_else(|| panic!("{name}: bucket {mat:?} missing from build() output"));
-    let want = &golden_group[mat];
-    let full_name = format!("{name}.{mat}");
-    let want_index = want["index"]
-        .as_array()
-        .unwrap_or_else(|| panic!("{full_name}: expected an indexed golden bucket"));
-    assert_eq!(g.tri_count(), want_index.len() / 3, "{full_name}: triangle count must match exactly");
-
-    let want_pos = f64s(&want["pos"]);
-    let want_vert_count = want_pos.len() / 3;
-    let got_vert_count = g.vert_count();
-    if got_vert_count == want_vert_count {
-        close_slice_tol(&full_name, "pos", &g.pos, &want_pos, MERGED_TOL);
-        close_slice_tol(&full_name, "normal", &g.normal, &f64s(&want["normal"]), MERGED_TOL);
-    } else {
-        let delta = got_vert_count.abs_diff(want_vert_count);
-        let budget = (want_vert_count / 10).max(8);
-        assert!(
-            delta <= budget,
-            "{full_name}: vert_count {got_vert_count} vs golden {want_vert_count} (delta {delta} > budget {budget})"
-        );
-    }
 }
 
 // ---------------------------------------------------------------------
@@ -312,13 +272,15 @@ fn add_rail_matches_the_source_across_default_custom_and_no_floor_variants() {
     let built = asm.build();
     let want = &golden()["addRail"];
     // `railDefault`/`railCustom`/`railNoFloor` are `picatinny()` output run
-    // through a second `mergeAll` weld in `Assembly::build` — topology-only,
-    // per `assert_bucket_topology_matches`'s doc. `cavity` is a plain
-    // `box_geo` floor with no extrude in its ancestry, so it gets the exact
-    // check.
-    assert_bucket_topology_matches("addRail", &built, want, "railDefault");
-    assert_bucket_topology_matches("addRail", &built, want, "railCustom");
-    assert_bucket_topology_matches("addRail", &built, want, "railNoFloor");
+    // through a second `mergeAll` weld in `Assembly::build`, so their welded
+    // vertex count is not a reliable comparison key across independent libm
+    // implementations (see the module doc) — compared as triangle soup
+    // instead, at `MERGED_TOL`, where all three pass in full. `cavity` is a
+    // plain `box_geo` floor with no extrude in its ancestry, so it gets the
+    // exact check.
+    assert_triangle_soup_matches("addRail.railDefault", &built["railDefault"], &want["railDefault"], MERGED_TOL);
+    assert_triangle_soup_matches("addRail.railCustom", &built["railCustom"], &want["railCustom"], MERGED_TOL);
+    assert_triangle_soup_matches("addRail.railNoFloor", &built["railNoFloor"], &want["railNoFloor"], MERGED_TOL);
     assert_bucket_matches("addRail", &built, want, "cavity");
     // `railNoFloor` never touches `"cavity"`: only two floors (from
     // `railDefault` and `railCustom`) went in, so `slot_floor: false` really

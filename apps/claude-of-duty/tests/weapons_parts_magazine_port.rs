@@ -120,6 +120,17 @@ fn close_slice(name: &str, field: &str, got: &[f32], want: &[f64]) {
 /// bucket" class `6af2a9c3` already accepted as an honest floor rather than
 /// papering over — it just does not show up as a vertex-count mismatch here,
 /// so the existing count-mismatch fallback below cannot catch it on its own.
+///
+/// Confirmed with `tests/geometry_assert::assert_triangle_soup_matches`,
+/// which is invariant to vertex ordering and to weld decisions (unlike a raw
+/// buffer or vertex-count comparison), so a residual it still measures is a
+/// real per-triangle shape difference, not welding bookkeeping: this
+/// bucket's triangle count matches exactly, but the worst
+/// canonicalized-triangle corner deviation measures `0.0017932541...` at a
+/// `pos.x` corner -- past `TOL` (1e-5) by two orders of magnitude, and past
+/// even the `6.5e-4` single vertex-pair gap measured above. This confirms a
+/// genuine (if small) geometric divergence at the weld tie, not merely an
+/// index-buffer artifact a weld-invariant comparison would have absorbed.
 const TOPOLOGY_ONLY: &[(&str, &str)] = &[("magazine_rifle", "rubber")];
 
 /// One material bucket's geometry against its golden `{ pos, normal, uv,

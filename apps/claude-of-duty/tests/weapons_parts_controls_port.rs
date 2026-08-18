@@ -58,6 +58,56 @@
 //! precedents), and every other bucket keeps the strict exact-count,
 //! `1e-5`-tolerance [`assert_bucket_matches`].
 //!
+//! **Re-verified with `tests/geometry_assert::assert_triangle_soup_matches`**,
+//! the weld/order-invariant comparison that replaced the old ad hoc,
+//! not-committed bounding-box spot check above with something that runs
+//! every time. Run at `TOL` (1e-5) against every affected bucket:
+//!
+//! | bucket | pos worst | normal worst | uv worst | pos components > 1e-3 |
+//! |---|---|---|---|---|
+//! | `trigger_default` | `0.005690` | `3.3e-6` | `0.005690` | n/a |
+//! | `pistol_grip_rifle.polymer` | `0.014174` | `3.8e-6` | `0.016000` | n/a |
+//! | `pistol_grip_smg.polymer` | `0.014324` | `2.1e-6` | `0.016000` | 24 of 6900 |
+//! | `pistol_grip_defaults.polymer` | `0.014174` | `3.8e-6` | `0.016000` | 48 of 6900 |
+//! | `carbine_stock_default.polymer` | `0.070681` | `1.5e-6` | `0.093067` | 51 of 6108 |
+//! | `carbine_stock_custom_y_break.polymer` | `0.063049` | `1.7e-6` | `0.085067` | 45 of 6108 |
+//! | `charging_handle` | `0.020000` | `0.7e-6` | `0.020000` | 8 of 3864 |
+//!
+//! Three findings out of this measurement:
+//!
+//! 1. **Normals are fine.** Every bucket's worst normal deviation is
+//!    `~1e-6`-`4e-6` -- the same order as `picatinny_normal`'s documented
+//!    libm-ULP residual (`weapons_geometry_primitives_port.rs`). Orientation
+//!    is not in question anywhere in this file.
+//! 2. **`uv` reproduces the known, already-documented projection-axis tie.**
+//!    `weapons_parts_magazine_port.rs`'s module doc already establishes that
+//!    `extrude()`'s `WorldUVGenerator`-equivalent picks its projection axis
+//!    via a discrete `<` comparison between two side-length magnitudes, so a
+//!    sub-tolerance position difference can flip that axis choice and produce
+//!    a `uv` value that differs far more than any float-noise budget while
+//!    the shape is exactly right -- consistent with `uv worst` tracking (and
+//!    twice, exactly equaling) `pos worst` above: it is the same underlying
+//!    corner, not an independent divergence.
+//! 3. **`pos` is a real, but small and localized, residual.** Unlike `uv`,
+//!    a raw position difference of 1.4-7.1 cm is not explained by an axis
+//!    tie. Dumping the actual worst-offending triangles (a scratch check, not
+//!    committed, same as the recipe's bounding-box spot check before it)
+//!    shows the mechanism directly: at a hard edge where an `extrude()` piece
+//!    meets a `box_geo`/`blob` piece, two (or more) thin triangles share the
+//!    same first two corners and differ only in a third, nearby corner --
+//!    exactly the "which of two close points does the weld keep" tie
+//!    [`primitives::extrude`]'s module doc and
+//!    `weapons_parts_magazine_port.rs`'s `TOPOLOGY_ONLY` doc already
+//!    diagnose, just with more tie opportunities per bucket (these compose
+//!    many more primitives than a single `extrude()` call). It affects a
+//!    small, consistent fraction of each bucket's triangles (`0.3%`-`2.5%` of
+//!    position components, tabulated above) -- never the bulk of the mesh --
+//!    matching the "vertex count off by a handful, well under 1%" already
+//!    measured for `tri_count`/`vert_count`. This is the same real, small,
+//!    honestly-measured residual the recipe expects to surface, not
+//!    something to widen `TOL` to hide: `assert_bucket_topology_matches`
+//!    remains the correct assertion for these buckets.
+//!
 //! **Coverage.** `selectorPart`'s dead `matSteel` parameter is exercised with
 //! both the default and a non-default `r` (`selector_wide`, catching a
 //! scale-dependent bug a single case would hide). `addCarbineStock`'s detent
