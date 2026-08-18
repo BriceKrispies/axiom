@@ -21,6 +21,76 @@ pub enum Surface {
     Plaster,
 }
 
+/// The fixed twelve-entry ordering the physics BVH's per-triangle byte index
+/// packs against (`Claude-of-Duty src/physics/surfaces.js:14-27`,
+/// `SURFACE_NAMES`). This enum's declaration order already matches that list
+/// exactly, so `Surface::ALL[i as usize]` round-trips the source's
+/// `SURFACE[name] -> index -> SURFACE_NAMES[index]` chain — see
+/// `apps/claude-of-duty/src/physics/surfaces.rs`, which reuses this enum
+/// rather than defining a second surface-tag type.
+impl Surface {
+    pub const ALL: [Surface; 12] = [
+        Surface::Concrete,
+        Surface::Metal,
+        Surface::Wood,
+        Surface::Dirt,
+        Surface::Sand,
+        Surface::Glass,
+        Surface::Water,
+        Surface::Foliage,
+        Surface::Fabric,
+        Surface::Flesh,
+        Surface::Rubber,
+        Surface::Plaster,
+    ];
+
+    /// The source's `SURFACE_NAMES[i]` (`surfaces.js:14-27`).
+    pub const fn index(self) -> u8 {
+        match self {
+            Surface::Concrete => 0,
+            Surface::Metal => 1,
+            Surface::Wood => 2,
+            Surface::Dirt => 3,
+            Surface::Sand => 4,
+            Surface::Glass => 5,
+            Surface::Water => 6,
+            Surface::Foliage => 7,
+            Surface::Fabric => 8,
+            Surface::Flesh => 9,
+            Surface::Rubber => 10,
+            Surface::Plaster => 11,
+        }
+    }
+
+    /// The source's `surfaceName(i)` (`surfaces.js:104-106`), except the
+    /// out-of-range fallback is the caller's problem here: this takes an
+    /// already-valid index (`0..12`) and panics on garbage rather than
+    /// silently returning `'concrete'`, which is what `surfaceIndex` guards
+    /// against before a lookup ever reaches this table.
+    pub const fn from_index(i: u8) -> Surface {
+        Surface::ALL[i as usize]
+    }
+
+    /// The source's `SURFACE_NAMES[i]` string form, used for name-based
+    /// surface inference (`surfaces.js:14-27`).
+    pub const fn name(self) -> &'static str {
+        match self {
+            Surface::Concrete => "concrete",
+            Surface::Metal => "metal",
+            Surface::Wood => "wood",
+            Surface::Dirt => "dirt",
+            Surface::Sand => "sand",
+            Surface::Glass => "glass",
+            Surface::Water => "water",
+            Surface::Foliage => "foliage",
+            Surface::Fabric => "fabric",
+            Surface::Flesh => "flesh",
+            Surface::Rubber => "rubber",
+            Surface::Plaster => "plaster",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ThreeOptions {
     pub side: Option<u32>,

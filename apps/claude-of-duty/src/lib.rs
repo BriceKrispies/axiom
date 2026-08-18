@@ -53,6 +53,7 @@ pub mod engine;
 pub mod error;
 pub mod events;
 pub mod materials;
+pub mod physics;
 pub mod registry;
 pub mod rng;
 pub mod viewer;
