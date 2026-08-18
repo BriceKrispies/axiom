@@ -19,6 +19,9 @@ pub mod bake;
 /// The curvature-driven vertex wear/grime/AO bake (`src/materials/masks.js`).
 pub mod masks;
 
+/// Per-material `owSurface` generators (`src/materials/glsl/surfaces-*.js`).
+pub mod surfaces;
+
 use crate::world::palette::Surface;
 
 /// Baking parameters for material texture generation.
