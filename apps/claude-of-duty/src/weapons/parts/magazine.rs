@@ -25,7 +25,7 @@
 //! [`crate::weapons::parts::hardware::cartridge`] — used here, not
 //! duplicated.
 
-use axiom_math::{Mat4, Quat, Vec3};
+use axiom_math::{Mat4, Vec3};
 
 use crate::weapons::geometry::primitives::{box_geo, extrude, knurl_band, lathe_z, rod_z, round_rect, ring, ExtrudeOpts};
 use crate::weapons::geometry::{merge_all, Assembly, Geo, Xform};
@@ -42,16 +42,41 @@ fn translate(g: &mut Geo, x: f32, y: f32, z: f32) {
     g.apply(&Mat4::translation(Vec3::new(x, y, z)));
 }
 
-/// `BufferGeometry.rotateX(angle)`.
-fn rotate_x(g: &mut Geo, angle: f32) {
-    let q = Quat::from_axis_angle(Vec3::UNIT_X, angle).expect("Vec3::UNIT_X is nonzero");
-    g.apply(&Mat4::from_quaternion(q));
+/// `BufferGeometry.rotateX(angle)`. `angle` is `f64` and the rotation is
+/// built directly from `f64`-computed `sin`/`cos` (matching
+/// `THREE.Matrix4.makeRotationX`, which takes a full-precision `f64` angle
+/// throughout); only the resulting matrix elements are rounded to `f32`.
+///
+/// This does **not** go through [`axiom_math::Quat::from_axis_angle`], which only
+/// accepts `f32` and would force the angle to truncate *before* the
+/// trigonometry — a strictly worse rounding order than rounding the trig
+/// result, and the cause of a real second-weld tie-break mismatch pinned by
+/// `tests/weapons_parts_magazine_port.rs`. There is precedent for building
+/// the matrix by hand instead of reusing `axiom_math`: see
+/// `geometry/assembly.rs`'s `euler_xyz_quat` doc comment.
+fn rotate_x(g: &mut Geo, angle: f64) {
+    let (s, c) = (angle.sin() as f32, angle.cos() as f32);
+    let m = Mat4::from_cols_array([
+        1.0, 0.0, 0.0, 0.0, //
+        0.0, c, s, 0.0, //
+        0.0, -s, c, 0.0, //
+        0.0, 0.0, 0.0, 1.0, //
+    ]);
+    g.apply(&m);
 }
 
-/// `BufferGeometry.rotateY(angle)`.
-fn rotate_y(g: &mut Geo, angle: f32) {
-    let q = Quat::from_axis_angle(Vec3::UNIT_Y, angle).expect("Vec3::UNIT_Y is nonzero");
-    g.apply(&Mat4::from_quaternion(q));
+/// `BufferGeometry.rotateY(angle)`. See [`rotate_x`] for why this computes
+/// `sin`/`cos` in `f64` and builds the matrix directly rather than rounding
+/// the angle down to `f32` first.
+fn rotate_y(g: &mut Geo, angle: f64) {
+    let (s, c) = (angle.sin() as f32, angle.cos() as f32);
+    let m = Mat4::from_cols_array([
+        c, 0.0, -s, 0.0, //
+        0.0, 1.0, 0.0, 0.0, //
+        s, 0.0, c, 0.0, //
+        0.0, 0.0, 0.0, 1.0, //
+    ]);
+    g.apply(&m);
 }
 
 /// `BufferGeometry.scale(x, y, z)`.
@@ -161,7 +186,7 @@ pub fn build_magazine(asm: &mut Assembly, _mats: (), o: MagazineOpts) -> Magazin
 
         let pts = round_rect(f64::from(w * taper), f64::from(d * taper), 0.0055, 5);
         let mut seg = extrude(&pts, step * 1.06, ExtrudeOpts { bevel: 0.0008, ..Default::default() });
-        rotate_x(&mut seg, (std::f64::consts::FRAC_PI_2 + p.tilt) as f32);
+        rotate_x(&mut seg, std::f64::consts::FRAC_PI_2 + p.tilt);
         translate(&mut seg, 0.0, p.y as f32, p.z as f32);
         body_parts.push(seg);
 
@@ -169,7 +194,7 @@ pub fn build_magazine(asm: &mut Assembly, _mats: (), o: MagazineOpts) -> Magazin
         if i > 0 && i < segs - 1 {
             for sx in [-1.0f32, 1.0f32] {
                 let mut rib = box_geo(0.0018, step * 0.62, d * 0.66, 0.0005, 1);
-                rotate_x(&mut rib, p.tilt as f32);
+                rotate_x(&mut rib, p.tilt);
                 translate(&mut rib, sx * (w * taper * 0.5), p.y as f32, p.z as f32);
                 rib_parts.push(rib);
             }
@@ -179,7 +204,7 @@ pub fn build_magazine(asm: &mut Assembly, _mats: (), o: MagazineOpts) -> Magazin
     // Feed lips: two rails either side of the mouth, plus the rear catch notch.
     let lip_pts: [[f64; 2]; 4] = [[-0.0032, 0.0], [0.0032, 0.0], [0.0026, 0.009], [-0.0026, 0.009]];
     let mut lip = extrude(&lip_pts, d * 0.9, ExtrudeOpts { bevel: 0.0005, ..Default::default() });
-    rotate_y(&mut lip, std::f32::consts::FRAC_PI_2);
+    rotate_y(&mut lip, std::f64::consts::FRAC_PI_2);
     for sx in [-1.0f32, 1.0f32] {
         let mut g = lip.clone();
         translate(&mut g, sx * (w * 0.5 - 0.0032), -0.0015, 0.0);
@@ -193,19 +218,19 @@ pub fn build_magazine(asm: &mut Assembly, _mats: (), o: MagazineOpts) -> Magazin
     let end = at(1.0, len64, curve64);
     let plate_pts = round_rect(f64::from(w) + 0.0026, f64::from(d) * 0.97, 0.004, 4);
     let mut plate = extrude(&plate_pts, 0.01, ExtrudeOpts { bevel: 0.001, ..Default::default() });
-    rotate_x(&mut plate, (std::f64::consts::FRAC_PI_2 + end.tilt) as f32);
+    rotate_x(&mut plate, std::f64::consts::FRAC_PI_2 + end.tilt);
     translate(&mut plate, 0.0, (end.y - 0.0035) as f32, end.z as f32);
     body_parts.push(plate);
 
     let mut ledge = box_geo(w + 0.0034, 0.007, 0.013, 0.0016, 2);
-    rotate_x(&mut ledge, end.tilt as f32);
+    rotate_x(&mut ledge, end.tilt);
     translate(&mut ledge, 0.0, (end.y - 0.007) as f32, (end.z - f64::from(d) * 0.4) as f32);
     body_parts.push(ledge);
 
     // Base pad, a slightly different polymer batch.
     let pad_pts = round_rect(f64::from(w) + 0.003, f64::from(d) * 0.9, 0.004, 4);
     let mut pad = extrude(&pad_pts, 0.005, ExtrudeOpts { bevel: 0.0009, ..Default::default() });
-    rotate_x(&mut pad, (std::f64::consts::FRAC_PI_2 + end.tilt) as f32);
+    rotate_x(&mut pad, std::f64::consts::FRAC_PI_2 + end.tilt);
     translate(&mut pad, 0.0, (end.y - 0.0105) as f32, end.z as f32);
 
     let body = merge_all(body_parts).expect("buildMagazine always builds at least the floor plate + feed lips");
@@ -223,8 +248,8 @@ pub fn build_magazine(asm: &mut Assembly, _mats: (), o: MagazineOpts) -> Magazin
         for sx in [-1.0f32, 1.0f32] {
             let h_pts = round_rect(0.0085, 0.0044, 0.0018, 3);
             let mut h = extrude(&h_pts, 0.004, ExtrudeOpts { bevel: 0.0004, ..Default::default() });
-            rotate_y(&mut h, std::f32::consts::FRAC_PI_2);
-            rotate_x(&mut h, p.tilt as f32);
+            rotate_y(&mut h, std::f64::consts::FRAC_PI_2);
+            rotate_x(&mut h, p.tilt);
             translate(&mut h, sx * (w * 0.5 - 0.0006), p.y as f32, p.z as f32);
             asm.add(h, "cavity", Some(Xform::default()));
         }
@@ -381,7 +406,7 @@ pub fn add_front_sight(asm: &mut Assembly, mat_steel: &str, mat_alu: &str, x: f3
     }
     // the post itself
     let mut post = rod_z(0.0011, 0.0009, h * 0.72, 8, 0.0002);
-    rotate_x(&mut post, std::f32::consts::FRAC_PI_2);
+    rotate_x(&mut post, std::f64::consts::FRAC_PI_2);
     translate(&mut post, 0.0, h * 0.36 + 0.002, 0.0);
     ears.push(post);
     let mut cross = box_geo(0.019, 0.0022, 0.0055, 0.0004, 1);
@@ -445,7 +470,7 @@ pub fn add_rear_sight(asm: &mut Assembly, mat_steel: &str, mat_alu: &str, x: f32
     let mut drum_knurl = knurl_band(0.0053, 0.0042, 22, 0.000_28, 3);
     translate(&mut drum_knurl, 0.0, 0.0, 0.0055);
     let mut drum_g = merge_all(vec![drum, drum_knurl]).expect("addRearSight always builds the drum plus its knurl band");
-    rotate_y(&mut drum_g, std::f32::consts::FRAC_PI_2);
+    rotate_y(&mut drum_g, std::f64::consts::FRAC_PI_2);
     translate(&mut drum_g, 0.012, h * 0.3, 0.0);
     parts.push(drum_g);
 
