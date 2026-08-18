@@ -122,6 +122,9 @@ members = [
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",
     "apps/shader-crucible",
+    # Claude of Duty: the browser FPS at C:/dev/Claude-of-Duty ported onto Axiom
+    # (composition leaf; every FPS concept stays app-local).
+    "apps/claude-of-duty",
     "crates/xtask",
     "tools/axiom-asset-pack",
     "tools/axiom-font-import",

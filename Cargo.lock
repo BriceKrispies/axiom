@@ -238,6 +238,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-claude-of-duty"
+version = "0.1.0"
+dependencies = [
+ "axiom-kernel",
+]
+
+[[package]]
 name = "axiom-client-core"
 version = "0.1.0"
 dependencies = [
