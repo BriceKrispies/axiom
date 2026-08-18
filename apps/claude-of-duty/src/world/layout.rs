@@ -80,9 +80,109 @@ pub const ALLEYS: &[Alley] = &[
     }, // far cross street
 ];
 
+/// Per-floor setback (`spec.setback = { from, depth, side? }`,
+/// `layout.js` building entries, consumed by `buildings.js`'s `floorSpec`/
+/// `terrace`). Pulls every floor at or above `from` back from one face by
+/// `depth`, leaving a roof terrace over the floor below.
+#[derive(Debug, Clone, Copy)]
+pub struct Setback {
+    pub from: u32,
+    pub depth: f64,
+    /// `side ?? spec.streetSide` (`buildings.js:91`) — `None` means "resolve
+    /// to `street_side` at the call site", matching that fallback exactly.
+    pub side: Option<u32>,
+}
+
+/// One hand-authored `doorBays[side] = bay` entry (`buildings.js:299`):
+/// force bay `bay` of `side` to be a ground-floor door.
+#[derive(Debug, Clone, Copy)]
+pub struct DoorBay {
+    pub side: u32,
+    pub bay: i32,
+}
+
+/// One hand-authored `bayKinds[side][floor][bay] = kind | {kind, drop}`
+/// override (`buildings.js:310-318`) — a bay carrying a sightline the map
+/// depends on, forced by hand rather than by the dice. `drop` is read only
+/// when `kind == "shop"` (`buildings.js:340`, `forced?.drop`).
+#[derive(Debug, Clone, Copy)]
+pub struct BayOverride {
+    pub side: u32,
+    pub floor: u32,
+    pub bay: u32,
+    pub kind: &'static str,
+    pub drop: Option<f64>,
+}
+
+/// One `stairFlights[]` entry (`buildings.js`'s `buildInterior`).
+#[derive(Debug, Clone, Copy)]
+pub struct StairFlight {
+    pub floor: u32,
+    pub x: f64,
+    pub z: f64,
+    pub ry: f64,
+    pub w: f64,
+    /// `fl.railing ?? 'right'` (`buildings.js:712`) — every flight in
+    /// `BUILDINGS` sets this explicitly, so the fallback never actually
+    /// fires; kept as a plain string (not `kit::StairRailing`) to keep this
+    /// data module free of a dependency on the kit's element vocabulary.
+    pub railing: &'static str,
+}
+
+/// One `stairHoles[level] = {x0,x1,z0,z1}` entry: the stairwell void punched
+/// through the floor slab at `level` (`buildings.js`'s `interiorSlab`).
+#[derive(Debug, Clone, Copy)]
+pub struct StairHole {
+    pub level: u32,
+    pub x0: f64,
+    pub x1: f64,
+    pub z0: f64,
+    pub z1: f64,
+}
+
+/// One interior partition wall (`rooms[f].walls[]`, normalised 0..1 across
+/// the interior footprint, `buildings.js`'s `buildInterior`). `door_at` is
+/// the normalised position along the wall of a door opening, or `None` for
+/// a solid partition (the source's `wall[4]` being `undefined`).
+#[derive(Debug, Clone, Copy)]
+pub struct RoomWall {
+    pub ax: f64,
+    pub az: f64,
+    pub bx: f64,
+    pub bz: f64,
+    pub door_at: Option<f64>,
+}
+
+/// One `rooms[f].furnish[]` entry: a normalised rect handed to `furnishRoom`
+/// (`src/world/interiors.js`) — **not yet ported** (a concurrent slice), so
+/// `crate::world::buildings::build_interior` records this data but does not
+/// yet act on it. See that module's doc for the deferral.
+#[derive(Debug, Clone, Copy)]
+pub struct RoomFurnish {
+    pub kind: &'static str,
+    pub x0: f64,
+    pub z0: f64,
+    pub x1: f64,
+    pub z1: f64,
+}
+
+/// One `rooms[]` entry: one floor's partition plan.
+#[derive(Debug, Clone, Copy)]
+pub struct RoomPlan {
+    pub walls: &'static [RoomWall],
+    pub furnish: &'static [RoomFurnish],
+}
+
 /// Buildings. `w` is the X extent, `d` the Z extent.
 /// Interiors are described in normalised room coordinates (0..1 across the interior),
 /// so a plan survives a change of footprint.
+///
+/// Every field below `damage` is optional in the source (`buildings.js`
+/// reads each through `spec.field ?? default` or `spec.field?.`) and is
+/// carried here even where a given building never sets it, so every literal
+/// below states its defaults explicitly (`None`/`false`/`&[]`) rather than
+/// leaving them to a `Default` impl a `const` array cannot use.
+#[derive(Debug, Clone, Copy)]
 pub struct Building {
     pub id: &'static str,
     pub x: f64,
@@ -93,6 +193,43 @@ pub struct Building {
     pub wall_key: &'static str,
     pub street_side: u32,
     pub damage: f64,
+    pub setback: Option<Setback>,
+    /// `spec.trimKey` (`buildings.js:506,515`) — string-course/cornice
+    /// material, defaulting to `"concrete"` when absent.
+    pub trim_key: Option<&'static str>,
+    /// `spec.secondarySide` (`buildings.js:280`) — a second "open" facade
+    /// besides `street_side` (shops/arches/balconies roll there too).
+    pub secondary_side: Option<u32>,
+    /// `spec.balconies` (`buildings.js:305`) — per-bay balcony-door
+    /// probability on an open facade, floor >= 1. `None` resolves to the
+    /// source's default `0.35`.
+    pub balconies: Option<f64>,
+    /// `spec.arches` (`buildings.js:304`) — floor 1 rolls arched windows
+    /// instead of plain ones.
+    pub arches: bool,
+    pub door_bays: &'static [DoorBay],
+    pub bay_kinds: &'static [BayOverride],
+    /// `spec.enterable` (`buildings.js:216,370`) — builds a real partitioned
+    /// interior instead of a dark core, and lets ground-floor windows show a
+    /// lit room behind them.
+    pub enterable: bool,
+    /// `spec.roofAccess` (`buildings.js:743`) — a stair penthouse box on the
+    /// roof.
+    pub roof_access: bool,
+    pub stair_flights: &'static [StairFlight],
+    pub stair_holes: &'static [StairHole],
+    pub rooms: &'static [RoomPlan],
+    /// `spec.ruin` (`buildings.js:288,443`) — the top floor's facade top
+    /// edge is jagged rather than flat, on `ruin_side` (or `street_side`).
+    pub ruin: bool,
+    pub ruin_side: Option<u32>,
+    /// `spec.collapse` — flags this building for `collapseRoof` (a hole in
+    /// the roof slab + a rubble heap below), applied by a caller outside
+    /// `buildings.js` that decides the hole's position.
+    pub collapse: bool,
+    /// `spec.skipSides` (`buildings.js:188`) — sides never built at all
+    /// (background buildings whose far face is never seen).
+    pub skip_sides: &'static [u32],
 }
 
 pub const BUILDINGS: &[Building] = &[
@@ -107,6 +244,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_cream",
         street_side: 1,
         damage: 0.15,
+        setback: Some(Setback { from: 1, depth: 2.2, side: Some(1) }),
+        trim_key: None,
+        secondary_side: Some(0),
+        balconies: Some(0.3),
+        arches: false,
+        door_bays: &[DoorBay { side: 1, bay: 1 }],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "W1",
@@ -118,6 +271,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_cream",
         street_side: 1,
         damage: 0.25,
+        setback: Some(Setback { from: 1, depth: 2.6, side: Some(1) }),
+        trim_key: Some("concrete"),
+        secondary_side: Some(2),
+        balconies: Some(0.55),
+        arches: true,
+        door_bays: &[DoorBay { side: 1, bay: 1 }],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "W2",
@@ -129,6 +298,57 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_sand",
         street_side: 1,
         damage: 0.3,
+        setback: Some(Setback { from: 1, depth: 2.4, side: Some(1) }),
+        trim_key: None,
+        secondary_side: Some(0),
+        balconies: Some(0.6),
+        arches: false,
+        door_bays: &[DoorBay { side: 1, bay: 2 }],
+        // The interior camera stands in the shop and looks out through bay 1
+        // of the street facade, so that bay is an open shopfront by hand,
+        // not by dice (`buildings.js:89`).
+        bay_kinds: &[BayOverride { side: 1, floor: 0, bay: 1, kind: "shop", drop: Some(0.0) }],
+        enterable: true,
+        roof_access: false,
+        stair_flights: &[StairFlight { floor: 0, x: 0.14, z: 0.28, ry: 0.0, w: 1.2, railing: "right" }],
+        stair_holes: &[StairHole { level: 1, x0: -20.4, x1: -18.0, z0: -4.8, z1: 1.5 }],
+        rooms: &[
+            RoomPlan {
+                // ground floor: a shop opening onto the street, storage and a back room
+                walls: &[
+                    RoomWall { ax: 0.55, az: 0.0, bx: 0.55, bz: 1.0, door_at: Some(0.34) },
+                    RoomWall { ax: 0.0, az: 0.52, bx: 0.55, bz: 0.52, door_at: Some(0.7) },
+                ],
+                furnish: &[
+                    RoomFurnish { kind: "shop", x0: 0.55, z0: 0.0, x1: 1.0, z1: 1.0 },
+                    RoomFurnish { kind: "storage", x0: 0.0, z0: 0.0, x1: 0.55, z1: 0.52 },
+                    RoomFurnish { kind: "living", x0: 0.0, z0: 0.52, x1: 0.55, z1: 1.0 },
+                ],
+            },
+            RoomPlan {
+                // first floor: apartment
+                walls: &[
+                    RoomWall { ax: 0.48, az: 0.0, bx: 0.48, bz: 1.0, door_at: Some(0.62) },
+                    RoomWall { ax: 0.48, az: 0.45, bx: 1.0, bz: 0.45, door_at: Some(0.25) },
+                ],
+                furnish: &[
+                    RoomFurnish { kind: "living", x0: 0.48, z0: 0.45, x1: 1.0, z1: 1.0 },
+                    RoomFurnish { kind: "storage", x0: 0.48, z0: 0.0, x1: 1.0, z1: 0.45 },
+                    RoomFurnish { kind: "living", x0: 0.0, z0: 0.0, x1: 0.48, z1: 1.0 },
+                ],
+            },
+            RoomPlan {
+                walls: &[RoomWall { ax: 0.5, az: 0.0, bx: 0.5, bz: 1.0, door_at: Some(0.5) }],
+                furnish: &[
+                    RoomFurnish { kind: "ruin", x0: 0.5, z0: 0.0, x1: 1.0, z1: 1.0 },
+                    RoomFurnish { kind: "storage", x0: 0.0, z0: 0.0, x1: 0.5, z1: 1.0 },
+                ],
+            },
+        ],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "W3",
@@ -140,6 +360,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_blue",
         street_side: 1,
         damage: 0.55,
+        setback: None,
+        trim_key: None,
+        secondary_side: Some(2),
+        balconies: Some(0.3),
+        arches: false,
+        door_bays: &[DoorBay { side: 1, bay: 0 }],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: true,
+        ruin_side: Some(1),
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "W4",
@@ -151,6 +387,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_pink",
         street_side: 1,
         damage: 0.3,
+        setback: Some(Setback { from: 1, depth: 2.8, side: Some(1) }),
+        trim_key: None,
+        secondary_side: Some(0),
+        balconies: Some(0.5),
+        arches: true,
+        door_bays: &[DoorBay { side: 1, bay: 2 }],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     // ------------------------------------------------------------- east row --
     Building {
@@ -163,6 +415,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_blue",
         street_side: 3,
         damage: 0.2,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[DoorBay { side: 3, bay: 2 }],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "E1",
@@ -174,6 +442,46 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_cream",
         street_side: 3,
         damage: 0.3,
+        setback: None,
+        trim_key: None,
+        secondary_side: Some(0),
+        balconies: Some(0.45),
+        arches: false,
+        door_bays: &[DoorBay { side: 3, bay: 2 }, DoorBay { side: 0, bay: 1 }],
+        bay_kinds: &[],
+        enterable: true,
+        roof_access: true,
+        stair_flights: &[
+            StairFlight { floor: 0, x: 0.72, z: 0.12, ry: 0.0, w: 1.2, railing: "right" },
+            StairFlight { floor: 1, x: 0.72, z: 0.12, ry: 0.0, w: 1.2, railing: "right" },
+        ],
+        stair_holes: &[
+            StairHole { level: 1, x0: 16.3, x1: 18.1, z0: 9.4, z1: 16.2 },
+            StairHole { level: 2, x0: 16.3, x1: 18.1, z0: 9.4, z1: 16.2 },
+        ],
+        rooms: &[
+            RoomPlan {
+                walls: &[
+                    RoomWall { ax: 0.0, az: 0.42, bx: 0.62, bz: 0.42, door_at: Some(0.3) },
+                    RoomWall { ax: 0.62, az: 0.0, bx: 0.62, bz: 0.42, door_at: Some(0.5) },
+                ],
+                furnish: &[
+                    RoomFurnish { kind: "shop", x0: 0.0, z0: 0.42, x1: 0.62, z1: 1.0 },
+                    RoomFurnish { kind: "storage", x0: 0.0, z0: 0.0, x1: 0.62, z1: 0.42 },
+                ],
+            },
+            RoomPlan {
+                walls: &[RoomWall { ax: 0.0, az: 0.45, bx: 0.62, bz: 0.45, door_at: Some(0.72) }],
+                furnish: &[
+                    RoomFurnish { kind: "living", x0: 0.0, z0: 0.45, x1: 0.62, z1: 1.0 },
+                    RoomFurnish { kind: "ruin", x0: 0.0, z0: 0.0, x1: 0.62, z1: 0.45 },
+                ],
+            },
+        ],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "E2",
@@ -185,6 +493,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_blue",
         street_side: 3,
         damage: 0.3,
+        setback: None,
+        trim_key: None,
+        secondary_side: Some(2),
+        balconies: Some(0.7),
+        arches: false,
+        door_bays: &[DoorBay { side: 3, bay: 1 }],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "E3",
@@ -196,6 +520,35 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_sand",
         street_side: 3,
         damage: 0.75,
+        setback: None,
+        trim_key: None,
+        secondary_side: Some(0),
+        balconies: None,
+        arches: false,
+        door_bays: &[DoorBay { side: 3, bay: 1 }],
+        bay_kinds: &[],
+        enterable: true,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[
+            RoomPlan {
+                walls: &[RoomWall { ax: 0.45, az: 0.0, bx: 0.45, bz: 0.7, door_at: Some(0.4) }],
+                furnish: &[
+                    RoomFurnish { kind: "ruin", x0: 0.45, z0: 0.0, x1: 1.0, z1: 1.0 },
+                    RoomFurnish { kind: "storage", x0: 0.0, z0: 0.0, x1: 0.45, z1: 0.7 },
+                    RoomFurnish { kind: "ruin", x0: 0.0, z0: 0.7, x1: 0.45, z1: 1.0 },
+                ],
+            },
+            RoomPlan {
+                walls: &[],
+                furnish: &[RoomFurnish { kind: "ruin", x0: 0.0, z0: 0.0, x1: 1.0, z1: 1.0 }],
+            },
+        ],
+        ruin: true,
+        ruin_side: Some(3),
+        collapse: true,
+        skip_sides: &[],
     },
     Building {
         id: "E4",
@@ -207,6 +560,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_pink",
         street_side: 3,
         damage: 0.35,
+        setback: None,
+        trim_key: None,
+        secondary_side: Some(2),
+        balconies: Some(0.4),
+        arches: true,
+        door_bays: &[DoorBay { side: 3, bay: 2 }],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     // ------------------------------------------------- background / infill --
     // The mass BEHIND the gate. Only its top four metres and its roofline are
@@ -224,6 +593,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_sand",
         street_side: 2,
         damage: 0.3,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: Some(0.2),
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "BW1",
@@ -235,6 +620,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_sand",
         street_side: 1,
         damage: 0.15,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[1],
     },
     Building {
         id: "BW2",
@@ -246,6 +647,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_cream",
         street_side: 1,
         damage: 0.2,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[1],
     },
     Building {
         id: "BE1",
@@ -257,6 +674,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_pink",
         street_side: 3,
         damage: 0.15,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[3],
     },
     Building {
         id: "BE2",
@@ -268,6 +701,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_blue",
         street_side: 3,
         damage: 0.2,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[3],
     },
     Building {
         id: "BE3",
@@ -279,6 +728,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_cream",
         street_side: 3,
         damage: 0.25,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[3],
     },
     // BS1/BS2 pulled apart to make room for BS3 in the middle of the far skyline.
     Building {
@@ -291,6 +756,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_sand",
         street_side: 2,
         damage: 0.2,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "BS2",
@@ -302,6 +783,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_blue",
         street_side: 2,
         damage: 0.2,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "BN1",
@@ -313,6 +810,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_cream",
         street_side: 0,
         damage: 0.15,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
     Building {
         id: "BN2",
@@ -324,6 +837,22 @@ pub const BUILDINGS: &[Building] = &[
         wall_key: "plaster_pink",
         street_side: 0,
         damage: 0.15,
+        setback: None,
+        trim_key: None,
+        secondary_side: None,
+        balconies: None,
+        arches: false,
+        door_bays: &[],
+        bay_kinds: &[],
+        enterable: false,
+        roof_access: false,
+        stair_flights: &[],
+        stair_holes: &[],
+        rooms: &[],
+        ruin: false,
+        ruin_side: None,
+        collapse: false,
+        skip_sides: &[],
     },
 ];
 

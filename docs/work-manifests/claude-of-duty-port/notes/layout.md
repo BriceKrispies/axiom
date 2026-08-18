@@ -57,3 +57,19 @@ Doc comments on struct fields (`///`) were converted to line comments (`//`) to 
 ## Commit hash
 
 29f9dd8c (world: the hand-authored level layout is now expressed in const tables)
+
+## Addendum (buildings.rs port): the omitted fields were not procedural overlays
+
+Porting `buildings.js` (the facade programme, `src/world/buildings.rs`) found
+that `setback`, `secondarySide`, `balconies`, `arches`, `doorBays`,
+`bayKinds`, `enterable`, `roofAccess`, `stairFlights`, `stairHoles`, `rooms`,
+`ruin`, `ruinSide`, `collapse`, `skipSides` and `trimKey` are *not* runtime
+overlays applied by a WorldSystem — they are read directly, by field, inside
+`buildFacade`/`buildBuilding`/`buildInterior` in the source. Without them the
+facade programme cannot reproduce the source's bay-kind distribution, hand
+overrides, or interior partitioning at all. `Building` now carries all of
+them (see `layout.rs`'s new `Setback`/`DoorBay`/`BayOverride`/`StairFlight`/
+`StairHole`/`RoomWall`/`RoomFurnish`/`RoomPlan` types and every literal in
+`BUILDINGS`, transcribed field-for-field from `layout.js:37-284`).
+`roofProps` remains genuinely omitted: grep-confirmed unused anywhere in
+`buildings.js` (it is read only by the not-yet-ported dressing pass).

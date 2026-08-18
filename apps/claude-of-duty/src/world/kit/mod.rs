@@ -495,6 +495,77 @@ pub fn patch_geometry(rng: &mut Rng, radius: f64, lobes: u32, wobble: f64, sag: 
     }
 }
 
+// ------------------------------------------------------------ runoff streak --
+/// `runoffStreak(rng, width, len, opts = {})`'s `opts` (`util.js:540`).
+/// Defaults: `amount=0.9`, `cols=5`, `rows=7`, `wander=0.35`. Not ported
+/// alongside [`patch_geometry`]/[`wall_panel`] when the rest of `util.js`
+/// landed here — `buildings.js` (`src/world/buildings.rs`) is its only
+/// caller, so it is added directly here, in this module's established
+/// "generic `util.js` builder" spot, rather than duplicated into the
+/// buildings module.
+#[derive(Debug, Clone, Copy)]
+pub struct RunoffStreakOpts {
+    pub amount: f32,
+    pub cols: u32,
+    pub rows: u32,
+    pub wander: f32,
+}
+
+/// `runoffStreak(rng, width, len, opts = {})` (`util.js:540-577`): a rain
+/// runoff stain, as geometry — a flat strip authored in XY (x centred on the
+/// source, y running DOWN from `0` to `-len`), whose vertex GRIME mask
+/// (`color[1]`, feathered on all four edges) is what reads as a stain once
+/// merged into the same material batch as the wall it sits a centimetre
+/// proud of. `rng` is `Option` because the source itself guards a possibly-
+/// missing generator (`rng ? rng.float() * 40 : 0`); every real call site in
+/// `buildings.js` always passes one.
+pub fn runoff_streak(rng: Option<&mut Rng>, width: f32, len: f32, opts: RunoffStreakOpts) -> WorldGeo {
+    let mut rng = rng;
+    let seed = rng.as_mut().map_or(0.0, |r| r.float() as f32) * 40.0;
+    let (cols, rows) = (opts.cols, opts.rows);
+
+    let mut pos = Vec::new();
+    let mut normal = Vec::new();
+    let mut uv = Vec::new();
+    let mut color = Vec::new();
+
+    for j in 0..=rows {
+        let v = j as f32 / rows as f32;
+        let drift = (fbm3(f64::from(seed) + f64::from(v) * 2.3, 4.1, 1.7, 2) as f32 - 0.5) * opts.wander * width * v;
+        let wj = width * (1.0 - v * 0.42) * (0.85 + 0.3 * fbm3(f64::from(seed) + 9.0, f64::from(v) * 3.1, 2.2, 2) as f32);
+        for i in 0..=cols {
+            let u = i as f32 / cols as f32;
+            pos.push((u - 0.5) * wj + drift);
+            pos.push(-v * len);
+            pos.push(0.0);
+            normal.push(0.0);
+            normal.push(0.0);
+            normal.push(1.0);
+            uv.push(u);
+            uv.push(v);
+            let side = (std::f32::consts::PI * u).sin().powf(0.8);
+            let head = (v / 0.10).min(1.0);
+            let tail = 1.0 - v * v;
+            let broken = 0.55 + 0.75 * fbm3(f64::from(seed) + f64::from(u) * 4.3, f64::from(v) * 5.7, 3.3, 2) as f32;
+            let g = (opts.amount * side * head * tail * broken).min(1.0);
+            color.push(0.0);
+            color.push(g);
+            color.push(g * 0.45);
+        }
+    }
+
+    let row = cols + 1;
+    let mut index = Vec::new();
+    for j in 0..rows {
+        for i in 0..cols {
+            let a = j * row + i;
+            index.extend_from_slice(&[a, a + row, a + 1, a + 1, a + row, a + row + 1]);
+        }
+    }
+
+    WorldGeo { pos, normal, uv, color, index }
+}
+
 // ---------------------------------------------------------------- wallPanel --
 /// One `wallPanel` opening (`util.js`'s hole spec object,
 /// `{x,y,w,h,arch?,sill?,ragged?}` — `sill` is read by callers, not by
@@ -782,6 +853,36 @@ mod tests {
         let mid = quadratic_bezier_point(0.5, p0, p1, p2);
         assert!((mid[0] - 1.0).abs() < 1e-12);
         assert!((mid[1] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn runoff_streak_produces_the_expected_grid_topology() {
+        let mut rng = Rng::new(1);
+        let g = runoff_streak(Some(&mut rng), 1.0, 1.2, RunoffStreakOpts { amount: 0.9, cols: 5, rows: 7, wander: 0.35 });
+        // (cols+1) * (rows+1) vertices, cols*rows quads * 2 triangles.
+        assert_eq!(g.vert_count(), 6 * 8);
+        assert_eq!(g.tri_count(), 5 * 7 * 2);
+        assert_eq!(g.color.len(), g.vert_count() * 3);
+    }
+
+    #[test]
+    fn runoff_streak_top_row_sits_at_y_zero_and_tail_at_minus_len() {
+        let g = runoff_streak(None, 1.0, 2.0, RunoffStreakOpts { amount: 0.9, cols: 4, rows: 4, wander: 0.35 });
+        // j=0 row: y = -v*len = 0.
+        assert_eq!(g.pos[1], 0.0);
+        // Last row (j=rows): y = -len.
+        let last_row_y = g.pos[(g.vert_count() - 1) * 3 + 1];
+        assert!((last_row_y + 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn runoff_streak_is_deterministic_from_the_same_seed() {
+        let mut rng_a = Rng::new(5);
+        let mut rng_b = Rng::new(5);
+        let a = runoff_streak(Some(&mut rng_a), 0.5, 1.0, RunoffStreakOpts { amount: 0.9, cols: 3, rows: 5, wander: 0.35 });
+        let b = runoff_streak(Some(&mut rng_b), 0.5, 1.0, RunoffStreakOpts { amount: 0.9, cols: 3, rows: 5, wander: 0.35 });
+        assert_eq!(a.pos, b.pos);
+        assert_eq!(a.color, b.color);
     }
 
     #[test]
