@@ -34,4 +34,5 @@ pub mod character;
 pub mod math;
 pub mod penetration;
 pub mod probe;
+pub mod rigidbody;
 pub mod surfaces;
