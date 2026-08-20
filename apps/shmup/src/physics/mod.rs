@@ -32,5 +32,6 @@
 pub mod bvh;
 pub mod character;
 pub mod math;
+pub mod penetration;
 pub mod probe;
 pub mod surfaces;
