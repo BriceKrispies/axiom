@@ -41,6 +41,8 @@ impl Shape {
 /// A rigid body.
 /// Mirrors the `RigidBody` class in `rigidbody.js:26-170`.
 #[derive(Debug, Clone)]
+
+
 pub struct RigidBody {
     pub id: i32,
     pub shape: Shape,
@@ -166,7 +168,7 @@ impl RigidBody {
         };
         body.compute_inertia();
         body.build_probes();
-        body.bound_radius = (hx * hx + hy * hy + hz * hz).sqrt();
+        body.bound_radius = hypot3(hx, hy, hz);
         body.min_extent = hx.min(hy).min(hz);
         body
     }
@@ -238,6 +240,13 @@ impl RigidBody {
                 }
             }
         }
+        // The source builds probes into a `Float32Array` (`rigidbody.js:179`,
+        // `:183`, `:190`), so each coordinate is stored rounded to f32 and every
+        // later read — the world-space probe transform, and `probeRadius` below —
+        // sees the rounded value. A box half-extent like 0.4 is not exactly
+        // representable in f32, so keeping f64 here shifts contact points by ~1e-8.
+        self.probes.iter_mut().for_each(|v| *v = *v as f32 as f64);
+
         self.probe_count = self.probes.len() / 4;
         self.probe_radius = f64::INFINITY;
         for i in 0..self.probe_count {
@@ -332,7 +341,7 @@ fn integrate_quaternion(q: &mut [f64; 4], w: &[f64; 3], dt: f64) {
     q[1] = y + (wy * s + wz * x - wx * z);
     q[2] = z + (wz * s + wx * y - wy * x);
     q[3] = s - (wx * x + wy * y + wz * z);
-    let l = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    let l = hypot4(q[0], q[1], q[2], q[3]);
     if l > 1e-9 {
         let i = 1.0 / l;
         q[0] *= i; q[1] *= i; q[2] *= i; q[3] *= i;
@@ -728,13 +737,22 @@ impl RigidBodyWorld {
             if dtri >= 0 {
                 let k = count;
                 count += 1;
-                self.cn[k * 3] = dnx; self.cn[k * 3 + 1] = dny; self.cn[k * 3 + 2] = dnz;
-                self.cp[k * 3] = dpx; self.cp[k * 3 + 1] = dpy; self.cp[k * 3 + 2] = dpz;
-                self.cd[k] = deepest;
+                // The source's contact scratch is `Float32Array` (`rigidbody.js:223-227`),
+                // so every value written here is rounded to f32 and the solver reads
+                // the rounded value back. Storing full f64 changes the impulses by
+                // ~1e-8 from the first contact onward. `as f32 as f64` reproduces the
+                // `Float32Array` store exactly.
+                self.cn[k * 3] = dnx as f32 as f64;
+                self.cn[k * 3 + 1] = dny as f32 as f64;
+                self.cn[k * 3 + 2] = dnz as f32 as f64;
+                self.cp[k * 3] = dpx as f32 as f64;
+                self.cp[k * 3 + 1] = dpy as f32 as f64;
+                self.cp[k * 3 + 2] = dpz as f32 as f64;
+                self.cd[k] = deepest as f32 as f64;
                 let tri_surface = w.surface_of(dtri as u32);
                 let sp = surfaces::SURFACE_PROPS.get(tri_surface.index() as usize).copied().unwrap_or(surfaces::SURFACE_PROPS[0]);
-                self.cf[k] = (body.friction * sp.friction).max(0.0).sqrt();
-                self.ce[k] = (body.restitution * sp.restitution).max(0.0).sqrt();
+                self.cf[k] = (body.friction * sp.friction).max(0.0).sqrt() as f32 as f64;
+                self.ce[k] = (body.restitution * sp.restitution).max(0.0).sqrt() as f32 as f64;
                 self.cs[k] = tri_surface.index();
             }
         }
@@ -809,7 +827,7 @@ impl RigidBodyWorld {
                 let mut tx = vx - nx * vnn;
                 let mut ty = vy - ny * vnn;
                 let mut tz = vz - nz * vnn;
-                let tl = (tx * tx + ty * ty + tz * tz).sqrt();
+                let tl = hypot3(tx, ty, tz);
                 if tl > 1e-6 {
                     tx /= tl; ty /= tl; tz /= tl;
                     let rtx = ry * tz - rz * ty;
@@ -915,4 +933,31 @@ mod tests {
         let ang_vel_sq = b.angular_velocity[0].powi(2) + b.angular_velocity[1].powi(2) + b.angular_velocity[2].powi(2);
         assert!(lin_vel_sq < 0.01 && ang_vel_sq < 0.01, "velocities not near zero: lin²={lin_vel_sq}, ang²={ang_vel_sq}");
     }
+}
+
+/// `Math.hypot` — max-scaled, not a raw root of the sum of squares.
+///
+/// The source calls `Math.hypot` in three places (`rigidbody.js:85`, `:547`,
+/// `:618`). Transcribing those as `(x*x + y*y + z*z).sqrt()` is a different
+/// function: `hypot` divides through by the largest magnitude first, so it
+/// rounds differently. That is ~1 ULP in isolation, but `:618` normalises the
+/// quaternion every step and the resulting rotation builds the world inertia
+/// tensor, so the error reaches both linear and angular velocity through the
+/// contact solver and compounds from first contact onward.
+fn hypot3(x: f64, y: f64, z: f64) -> f64 {
+    let m = x.abs().max(y.abs()).max(z.abs());
+    if m == 0.0 {
+        return 0.0;
+    }
+    let (a, b, c) = (x / m, y / m, z / m);
+    m * (a * a + b * b + c * c).sqrt()
+}
+
+fn hypot4(x: f64, y: f64, z: f64, w: f64) -> f64 {
+    let m = x.abs().max(y.abs()).max(z.abs()).max(w.abs());
+    if m == 0.0 {
+        return 0.0;
+    }
+    let (a, b, c, d) = (x / m, y / m, z / m, w / m);
+    m * (a * a + b * b + c * c + d * d).sqrt()
 }
