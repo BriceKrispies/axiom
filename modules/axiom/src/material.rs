@@ -55,6 +55,27 @@ pub struct Material {
     /// is preparation-time data, addressed by identity afterwards. See
     /// [`Material::from_surface`].
     surface_program: u64,
+    /// The four **non-albedo** maps the runtime material shader binds beside the
+    /// albedo, each an id into the *same* `RunningApp::add_texture_data` store
+    /// `custom_texture` reads (`0` = none, so the backend binds its neutral).
+    ///
+    /// One store and not five. A map is RGBA8 pixels registered at runtime, which
+    /// is exactly what that store holds; a second registration API would have been
+    /// a parallel lane carrying the identical payload, differing only in which
+    /// slot the material later names it in — and *which slot* is a property of the
+    /// material, not of the pixels. Keeping them scalars is also what keeps
+    /// `Material` `Copy`, for the same reason `custom_texture` is one.
+    ///
+    /// Tangent-space normal, RGB, linear.
+    normal_texture: u64,
+    /// `(occlusion, roughness, metalness, height)`, linear.
+    orm_texture: u64,
+    /// The micro-detail tile. Linear; the channel packing is the backend's, and
+    /// is documented at `axiom_host::MaterialTexture::detail`.
+    detail_texture: u64,
+    /// The macro variation field. Linear; the backend's neutral is mid-grey, not
+    /// zero, because the layer is a variation *around* a midpoint.
+    macro_texture: u64,
 }
 
 impl Material {
@@ -71,6 +92,10 @@ impl Material {
             texture_sampling: TextureSampling::Crisp,
             metallic: ratio_lit!(0.0),
             surface_program: 0,
+            normal_texture: 0,
+            orm_texture: 0,
+            detail_texture: 0,
+            macro_texture: 0,
         }
     }
 
@@ -90,6 +115,21 @@ impl Material {
     /// material can carry a texture and an emissive exactly like any other.
     pub fn from_surface(surface: Surface) -> Self {
         Material::lit(Color::WHITE).with_surface_program(surface.digest().raw())
+    }
+
+    /// This material's own colour and textures, driven by `surface`'s program.
+    ///
+    /// [`Material::from_surface`] starts from white, which is right when the
+    /// surface authors the whole appearance. A **runtime material** does not: it
+    /// modulates the albedo it is handed — the source's shader multiplies its
+    /// tint and its macro variation into `diffuseColor`, it does not replace it
+    /// — so an app that has already chosen a per-batch colour needs to keep it.
+    ///
+    /// The surface still reduces to its content digest, so two batches naming
+    /// the same surface with different colours are still one program and one
+    /// pipeline; only the instance colour lane differs.
+    pub fn with_surface(self, surface: Surface) -> Self {
+        self.with_surface_program(surface.digest().raw())
     }
 
     /// This material with an explicit appearance program id. Private because the
@@ -122,6 +162,44 @@ impl Material {
     /// it. Takes precedence over the built-in [`Texture`] when both are set.
     pub const fn with_custom_texture(mut self, id: u64) -> Self {
         self.custom_texture = id;
+        self
+    }
+
+    /// This material with a **tangent-space normal map** attached, by the `id`
+    /// from `RunningApp::add_texture_data` (`0` clears it, and the backend then
+    /// binds a flat `+Z` normal).
+    ///
+    /// This is the map that used to reach only the off-screen renderer, through a
+    /// slice parallel to the material set that the live browser arm passed empty.
+    /// Naming it on the material is what gives the browser one at all.
+    pub const fn with_normal_texture(mut self, id: u64) -> Self {
+        self.normal_texture = id;
+        self
+    }
+
+    /// This material with an **`(occlusion, roughness, metalness, height)`** map
+    /// attached, by the `id` from `RunningApp::add_texture_data` (`0` clears it).
+    /// Its alpha channel is the height the shader's parallax-occlusion layer
+    /// marches; without it that layer is inert.
+    pub const fn with_orm_texture(mut self, id: u64) -> Self {
+        self.orm_texture = id;
+        self
+    }
+
+    /// This material with a **micro-detail tile** attached, by the `id` from
+    /// `RunningApp::add_texture_data` (`0` clears it). Feeds the shader's
+    /// micro-detail layer; the channel packing is documented at
+    /// `axiom_host::MaterialTexture::detail`.
+    pub const fn with_detail_texture(mut self, id: u64) -> Self {
+        self.detail_texture = id;
+        self
+    }
+
+    /// This material with a **macro variation field** attached, by the `id` from
+    /// `RunningApp::add_texture_data` (`0` clears it). Feeds the shader's
+    /// de-tiling and macro-variation layers; without it both are inert.
+    pub const fn with_macro_texture(mut self, id: u64) -> Self {
+        self.macro_texture = id;
         self
     }
 
@@ -173,6 +251,27 @@ impl Material {
     /// The material's app-authored raw-pixel albedo texture id (0 = none).
     pub const fn custom_texture(self) -> u64 {
         self.custom_texture
+    }
+
+    /// The material's tangent-space normal-map texture id (0 = none).
+    pub const fn normal_texture(self) -> u64 {
+        self.normal_texture
+    }
+
+    /// The material's `(occlusion, roughness, metalness, height)` texture id
+    /// (0 = none).
+    pub const fn orm_texture(self) -> u64 {
+        self.orm_texture
+    }
+
+    /// The material's micro-detail tile texture id (0 = none).
+    pub const fn detail_texture(self) -> u64 {
+        self.detail_texture
+    }
+
+    /// The material's macro variation field texture id (0 = none).
+    pub const fn macro_texture(self) -> u64 {
+        self.macro_texture
     }
 
     /// How this material's texture is filtered as it minifies.
@@ -240,6 +339,77 @@ mod tests {
         let textured = m.with_custom_texture(7);
         assert_eq!(textured.custom_texture(), 7);
         assert_ne!(textured, m, "the custom-texture id is part of equality");
+    }
+
+    /// The four non-albedo maps default to "none", each setter fills exactly its
+    /// own slot, and all five texture ids stay independent. A swapped pair here
+    /// would light a surface with its own occlusion pack — silently, since every
+    /// slot is a `u64`.
+    #[test]
+    fn the_four_map_ids_default_to_none_and_never_cross() {
+        let m = Material::lit(Color::WHITE);
+        assert_eq!(
+            (
+                m.custom_texture(),
+                m.normal_texture(),
+                m.orm_texture(),
+                m.detail_texture(),
+                m.macro_texture()
+            ),
+            (0, 0, 0, 0, 0),
+            "a material authors no maps unless asked"
+        );
+        let mapped = m
+            .with_custom_texture(1)
+            .with_normal_texture(2)
+            .with_orm_texture(3)
+            .with_detail_texture(4)
+            .with_macro_texture(5);
+        assert_eq!(
+            (
+                mapped.custom_texture(),
+                mapped.normal_texture(),
+                mapped.orm_texture(),
+                mapped.detail_texture(),
+                mapped.macro_texture()
+            ),
+            (1, 2, 3, 4, 5)
+        );
+        // Every slot is part of identity, so two materials differing only in
+        // which normal map they name are two materials.
+        assert_ne!(mapped, m);
+        assert_ne!(
+            m.with_normal_texture(2),
+            m.with_normal_texture(3),
+            "the normal-map id is part of equality"
+        );
+        // Clearing is `0`, and it clears only the slot named.
+        let cleared = mapped.with_orm_texture(0);
+        assert_eq!(cleared.orm_texture(), 0);
+        assert_eq!(cleared.normal_texture(), 2);
+        assert_eq!(cleared.macro_texture(), 5);
+        // The maps are orthogonal to everything else a material carries.
+        assert_eq!(mapped.base_color(), m.base_color());
+        assert_eq!(mapped.roughness(), m.roughness());
+        assert_eq!(mapped.surface_program(), m.surface_program());
+    }
+
+    /// `Material` is `Copy`, and the four ids are scalars precisely so it stays
+    /// that way. A `Vec` or an `Option<MapPixels>` here would have taken it away
+    /// from every app that holds materials by value.
+    #[test]
+    fn a_material_carrying_every_map_is_still_copy() {
+        fn takes_copy<T: Copy>(value: T) -> (T, T) {
+            (value, value)
+        }
+        let m = Material::lit(Color::WHITE)
+            .with_normal_texture(2)
+            .with_orm_texture(3)
+            .with_detail_texture(4)
+            .with_macro_texture(5);
+        let (a, b) = takes_copy(m);
+        assert_eq!(a, b);
+        assert_eq!(a.macro_texture(), 5);
     }
 
     #[test]

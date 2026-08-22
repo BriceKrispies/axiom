@@ -625,6 +625,17 @@ fn project_triangle_cued(
     // Expressing the model by choosing the INPUTS rather than by taking a second
     // code path is the same technique `fog_factor` uses for its capability gate
     // on the GPU arm, and it keeps one shading function for all three models.
+    //
+    // **`Physical` degrades to `Lambert` here, declared rather than
+    // approximated.** The GGX/Smith/Schlick BRDF needs a per-fragment view
+    // vector, a Fresnel term and a metal/dielectric split; this path is a
+    // per-triangle centroid sampler with no view vector at all, which is why it
+    // has no specular term to begin with. Faking one would be worse than the
+    // stated divergence: this backend's declared policy is *legibility, not
+    // parity* (`docs/work-manifests/shmup-port/01-engine-gaps.md`, G17), and
+    // `RenderCapability::Specular` is the mechanism that already says so — the
+    // Canvas 2D profile has never contained it. A physical surface therefore
+    // reads as its diffuse half here and as the full BRDF on the GPU arm.
     let gathers = shaded.map_or(LightingModel::default(), ShadedChannels::lighting)
         != LightingModel::Unlit;
     let brightness = [
