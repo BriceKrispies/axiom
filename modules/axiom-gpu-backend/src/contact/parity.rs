@@ -1,6 +1,7 @@
 //! **CPU↔GPU parity for the contact shadows**, on a real adapter.
 //!
-//! Three tiers, for the reasons [`crate::ssr::parity`] sets out:
+//! Four tiers — the first three for the reasons [`crate::ssr::parity`] sets out,
+//! the fourth because the runner that chains them landed:
 //!
 //! 1. **The arithmetic** — [`the_pure_arithmetic_agrees_with_the_cpu_reference`].
 //!    Inputs through a uniform, no sampler in the loop. This tier is doing double
@@ -16,14 +17,19 @@
 //! 3. **The bilateral** — [`the_bilateral_agrees_with_the_cpu_reference`], with a
 //!    real depth discontinuity in the buffer so the edge-stopping exponential is
 //!    actually exercised rather than sitting at `exp( 0 ) = 1`.
+//! 4. **The runner** — [`the_runner_chains_the_three_passes_in_the_sources_order`],
+//!    [`crate::contact::pass::ContactPass`] recording all three into one encoder,
+//!    against the same three steps composed on the CPU. The tiers above prove
+//!    each shader in isolation; only this one proves that the march feeds the
+//!    horizontal bilateral, that the horizontal one feeds the vertical one, and
+//!    that the two axes are not the same axis twice.
 //!
-//! # !! UNVERIFIED !!
+//! # Verified
 //!
-//! **This module has never been run.** The final wave of this port writes
-//! everything and builds nothing; the orchestrator compiles and runs it. Every
-//! tolerance below is derived from the arithmetic and stated as *expected*, and
-//! each says so at its site. A tolerance that has to be loosened after the first
-//! run is a finding, not a fix.
+//! This module has now been run on a native adapter, and every tolerance below
+//! records what it **measured** beside what it expected. One of them —
+//! [`RUNNER_TOLERANCE`] — had to be raised on its first run, and that is recorded
+//! at its site as the finding it is rather than quietly widened.
 //!
 //! # The discrete hazard
 //!
@@ -111,6 +117,27 @@ const MARCH_DEPTH_RELATIVE_TOLERANCE: f32 = 4.0e-3;
 /// step of the storage. The `exp` divergence the estimate budgeted 5x an ULP for
 /// does not survive the weight normalisation. `1e-3` is 2x the measurement.
 const BILATERAL_TOLERANCE: f32 = 1.0e-3;
+
+/// **The runner tier's tolerance.** Looser than the bilateral's alone, and the
+/// reason is the chain rather than the arithmetic: the runner's three passes
+/// quantise to `f16` **twice** before the result is read, once into the march's
+/// target and once into the horizontal bilateral's. A half-ULP disagreement at
+/// either intermediate is a whole-ULP disagreement in the value the next pass
+/// reads, and the bilateral's normalised weights carry it through rather than
+/// damping it.
+///
+/// **MEASURED: `1.46e-3`** on a native adapter, at magnitude `0.62`, where one
+/// `f16` ULP is `4.88e-4` — so three ULP, which is what two chained
+/// quantisations plus the march's own quarter-ULP predicts. `3e-3` is 2x the
+/// measurement, sized the same way [`MARCH_SHADOW_TOLERANCE`] and
+/// [`BILATERAL_TOLERANCE`] are.
+///
+/// A budget of `1e-3` stood here first, copied from the single-pass bilateral,
+/// and it failed on the first run by 1.5x. That is the case this file's own
+/// header names: *a tolerance that has to be loosened after the first run is a
+/// finding, not a fix* — and the finding is that a two-stage chain does not
+/// inherit a one-stage budget.
+const RUNNER_TOLERANCE: f32 = 3.0e-3;
 
 /// The tight tier's harness. Concatenated after [`CONTACT_COMMON_WGSL`], so what
 /// it calls are the *same* functions the real pass calls.
@@ -971,5 +998,215 @@ fn the_bilateral_agrees_with_the_cpu_reference() {
         worst * 10.0 >= BILATERAL_TOLERANCE,
         "the bilateral tolerance is more than 10x the measured delta: measured {worst}, \
          budget {BILATERAL_TOLERANCE}"
+    );
+}
+
+/// The blit the runner tier reads its result through. [`crate::contact::pass::ContactPass`]
+/// exposes a **view** — that is what the main pass binds — so the honest way to
+/// observe the resolved target is to sample it exactly as the main pass does,
+/// rather than to grow the pass a texture handle no frame needs.
+const CONTACT_RUNNER_BLIT_WGSL: &str = r#"
+@group(0) @binding(0) var runner_point: sampler;
+@group(0) @binding(1) var runner_src: texture_2d<f32>;
+
+@vertex
+fn runner_vs(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
+    var corners = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 3.0, -1.0),
+        vec2<f32>(-1.0,  3.0),
+    );
+    return vec4<f32>(corners[index], 0.0, 1.0);
+}
+
+@fragment
+fn runner_fs(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
+    let uv = frag_coord.xy / vec2<f32>(textureDimensions(runner_src));
+    return textureSampleLevel(runner_src, runner_point, uv, 0.0);
+}
+"#;
+
+/// **Tier 4: the RUNNER** — [`crate::contact::pass::ContactPass`] recording its
+/// three passes into a real command encoder, checked against the same three
+/// steps composed on the CPU.
+///
+/// The three tiers above prove the *shaders*: each entry point agrees with the
+/// reference for the inputs handed to it. None of them proves what this tier
+/// does, which is that the runner **chains them correctly** — that the march's
+/// output is what the horizontal bilateral reads, that the horizontal one's
+/// output is what the vertical one reads, and that the two axes are
+/// `( texel.x, 0 )` then `( 0, texel.y )` rather than one axis twice. A runner
+/// that blurred X into the resolved target and never ran Y would pass every tier
+/// above.
+///
+/// It matters more here than it otherwise would, because **nothing else in the
+/// native build executes this code**: `crate::offscreen` passes `None` for its
+/// scene size, so the capture path builds no G-buffer and therefore no contact
+/// chain, and the live arm that does run it is `wasm32`-only. This is the only
+/// place `record` runs on hardware.
+///
+/// The tolerance is the bilateral's, because the last step of the chain is a
+/// bilateral. Each intermediate is quantised to `f16` on both sides: the CPU
+/// composition rounds through [`to_half_bits`] between steps exactly as the
+/// `Rg16Float` targets do.
+#[test]
+fn the_runner_chains_the_three_passes_in_the_sources_order() {
+    let gpu = ContactGpu::acquire();
+    assert_ne!(
+        gpu.backend,
+        wgpu::Backend::Noop,
+        "a runner proof needs a real adapter"
+    );
+
+    let (depth, normal) = stepped_scene(FRAME, 6.0, 0.2);
+    let sun_dir = [0.94_f32, 0.0, 0.341_46];
+    let proj = projection();
+    let inv = projection_inverse();
+    let size = [FRAME as f32, FRAME as f32];
+    let depth_view = gpu.upload(&depth, wgpu::TextureFormat::R32Float, 4, encode_r32);
+    let normal_view = gpu.upload(&normal, wgpu::TextureFormat::Rgba16Float, 8, encode_rgba16);
+
+    let pass = crate::contact::pass::ContactPass::new(
+        &gpu.device,
+        (FRAME, FRAME),
+        &depth_view,
+        &normal_view,
+    );
+    // `Debug` names the size it allocated — the FULL scene size, not a halved
+    // one, which is the split this pass keeps from `crate::gtao`.
+    assert!(
+        format!("{pass:?}").contains(&format!("({FRAME}, {FRAME})")),
+        "the chain must allocate at the full scene size: {pass:?}"
+    );
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("axiom-contact-runner"),
+        });
+    pass.record(&gpu.queue, &mut encoder, proj, inv, sun_dir);
+    gpu.queue.submit(Some(encoder.finish()));
+
+    // Read the resolved target back through the same kind of fetch the main pass
+    // performs against `resolved_view`.
+    let module = gpu.compile("axiom-contact-runner-blit", CONTACT_RUNNER_BLIT_WGSL);
+    let blit_layout = gpu
+        .device
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("axiom-contact-runner-blit-bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+    let point = gpu.sampler(false);
+    let blit_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("axiom-contact-runner-blit-bg"),
+        layout: &blit_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Sampler(&point),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(pass.resolved_view()),
+            },
+        ],
+    });
+    let blit = gpu.pipeline(
+        &module,
+        "runner_vs",
+        "runner_fs",
+        &blit_layout,
+        wgpu::TextureFormat::Rgba32Float,
+    );
+    let rendered = gpu.draw_and_read(
+        &blit,
+        &blit_group,
+        FRAME,
+        FRAME,
+        wgpu::TextureFormat::Rgba32Float,
+        16,
+        decode_rgba32,
+    );
+
+    // The same three steps on the CPU, rounding to `f16` between them because
+    // each GPU step lands in an `Rg16Float` target before the next reads it.
+    let half = |value: f32| from_half_bits(to_half_bits(value));
+    let inputs = ContactInputs {
+        depth: &depth,
+        normal: &normal,
+        proj: &proj,
+        proj_inv: &inv,
+        sun_dir_view: sun_dir,
+    };
+    // The FIRST record uses frame 0 — `ContactPass` starts its dither there.
+    let params = ContactParams::at_frame(0);
+    let marched = ScreenImage::from_fn(FRAME, FRAME, |x, y| {
+        let texel = contact_pixel(&inputs, params, [x as f32 + 0.5, y as f32 + 0.5], size);
+        [half(texel[0]), half(texel[1]), 0.0, 0.0]
+    });
+    let blurred = |source: &ScreenImage, direction: [f32; 2]| {
+        ScreenImage::from_fn(FRAME, FRAME, |x, y| {
+            let uv = [(x as f32 + 0.5) / size[0], (y as f32 + 0.5) / size[1]];
+            let texel = contact_blur_pixel(source, uv, direction);
+            [half(texel[0]), half(texel[1]), 0.0, 0.0]
+        })
+    };
+    let x_only = blurred(&marched, [1.0 / size[0], 0.0]);
+    let expected = blurred(&x_only, [0.0, 1.0 / size[1]]);
+
+    let (worst, shadowed, moved_by_y) = (0..FRAME)
+        .flat_map(|y| (0..FRAME).map(move |x| (x, y)))
+        .enumerate()
+        .fold(
+            (0.0_f32, 0_u32, 0_u32),
+            |(worst, shadowed, moved), (index, (x, y))| {
+                let uv = [(x as f32 + 0.5) / size[0], (y as f32 + 0.5) / size[1]];
+                let want = expected.nearest(uv)[0];
+                let after_x = x_only.nearest(uv)[0];
+                let got = rendered[index][0];
+                let delta = (got - want).abs();
+                assert!(
+                    delta <= RUNNER_TOLERANCE,
+                    "the recorded chain disagrees at pixel ({x}, {y}): gpu {got} vs cpu {want}, \
+                     delta {delta}"
+                );
+                (
+                    worst.max(delta),
+                    shadowed + u32::from(want < 0.999),
+                    moved + u32::from((want - after_x).abs() > RUNNER_TOLERANCE),
+                )
+            },
+        );
+
+    // Without these two the test would pass on a chain that wrote 1.0 everywhere.
+    assert!(
+        shadowed > 0,
+        "the recorded chain produced no shadow anywhere; the runner is a no-op"
+    );
+    assert!(
+        moved_by_y > 0,
+        "the vertical bilateral changed nothing, so this scene cannot tell a Y pass \
+         from a second X pass and the agreement above proves nothing"
+    );
+    assert!(
+        worst * 10.0 >= RUNNER_TOLERANCE,
+        "the runner tolerance is more than 10x the measured delta: measured {worst}, \
+         budget {RUNNER_TOLERANCE}"
     );
 }

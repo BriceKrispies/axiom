@@ -1102,6 +1102,165 @@ fn fmt_int(v: f64) -> String {
     format!("{v}")
 }
 
+/// The canvas realiser for [`Minimap::draw`]'s display list — `wasm32` only.
+///
+/// This is the widget's missing half. Every other `ui/` widget splits into a
+/// pure frame and a `view` that writes it onto DOM nodes; this one is a canvas
+/// painter, so its "frame" is a [`DrawOp`] list and its view is the interpreter
+/// that replays it against a `CanvasRenderingContext2D`. There is one arm per
+/// [`DrawOp`] variant and no arithmetic anywhere in it: every number was
+/// computed by [`Minimap::draw`] on the native side and is pinned by that
+/// function's own golden.
+///
+/// Two arms are deliberately inert, and both are unreachable today:
+///
+/// * [`DrawOp::DrawBaked`] needs `this.baked` to be a real image. A bake only
+///   exists once [`Minimap::try_bake`] has been handed a [`LayoutSource`], and
+///   nothing in this port can hand it one — `scene::level::Level` keeps the
+///   `WorldSystem`'s *products* and drops the system itself, so the building
+///   footprints `_buildVectorMap` reads are not reachable from a running
+///   `Game`. Until that seam exists, `Minimap::baked` is always `None` and
+///   `draw` never emits this op. It is logged rather than approximated.
+/// * [`DrawOp::ImageSmoothingQuality`] has no `web-sys` binding in 0.3.99 and
+///   is only ever emitted immediately before `DrawBaked`, so it is skipped for
+///   the same reason.
+#[cfg(target_arch = "wasm32")]
+pub mod view {
+    use wasm_bindgen::JsCast;
+    use web_sys::{CanvasGradient, CanvasRenderingContext2d, Element, HtmlCanvasElement};
+
+    use super::super::util::dom;
+    use super::{DrawOp, Minimap};
+
+    /// The minimap's DOM: the framed root, the canvas it paints into, and the
+    /// static chrome (`minimap.js:26-33`).
+    pub struct MinimapView {
+        root: Element,
+        canvas: HtmlCanvasElement,
+        g: CanvasRenderingContext2d,
+        /// The gradient built by the last `CreateRadialGradient` + its
+        /// `AddColorStop`s, waiting for the `FillStyleGradient` that installs
+        /// it. The source builds and assigns in one expression; the display
+        /// list splits that into three ops, so the half-built object lives
+        /// here between them.
+        gradient: Option<CanvasGradient>,
+        /// The backing-store edge last written, so `resize` only touches
+        /// `canvas.width` when it changed (`minimap.js:61-64`) — assigning it
+        /// clears the canvas even when the value is unchanged.
+        px: f64,
+    }
+
+    impl MinimapView {
+        /// `constructor(parent, rng)`'s DOM half (`minimap.js:26-33`).
+        pub fn new(parent: &Element) -> MinimapView {
+            let root = dom::el("div", Some("ow-minimap"), Some(parent));
+            let canvas: HtmlCanvasElement =
+                dom::el("canvas", None, Some(&root)).unchecked_into();
+            let g: CanvasRenderingContext2d = canvas
+                .get_context("2d")
+                .expect("a 2d context request")
+                .expect("a browser that grants a 2d context")
+                .unchecked_into();
+            ["ow-mm-corner tl", "ow-mm-corner tr", "ow-mm-corner bl", "ow-mm-corner br"]
+                .into_iter()
+                .for_each(|class| {
+                    dom::el("div", Some(class), Some(&root));
+                });
+            let n = dom::el("div", Some("ow-mm-n"), Some(&root));
+            dom::set_text(&n, "N");
+            let tag = dom::el("div", Some("ow-mm-tag"), Some(&root));
+            let zone = dom::el("span", None, Some(&tag));
+            dom::set_text(&zone, "ZONE 07");
+            let scale = dom::el("span", None, Some(&tag));
+            dom::set_text(&scale, "60M");
+            MinimapView { root, canvas, g, gradient: None, px: 0.0 }
+        }
+
+        /// `resize(k)`'s DOM half (`minimap.js:58-67`). The arithmetic is
+        /// [`Minimap::resize`]'s; this only pushes the result at the backing
+        /// store, and only when it moved.
+        pub fn resize(&mut self, minimap: &Minimap) {
+            if self.px == minimap.px {
+                return;
+            }
+            self.px = minimap.px;
+            self.canvas.set_width(minimap.px as u32);
+            self.canvas.set_height(minimap.px as u32);
+        }
+
+        /// Replay one [`Minimap::draw`] display list.
+        pub fn execute(&mut self, ops: &[DrawOp]) {
+            for op in ops {
+                self.apply(op);
+            }
+        }
+
+        fn apply(&mut self, op: &DrawOp) {
+            let g = &self.g;
+            match op {
+                DrawOp::SetTransform(v) => {
+                    let _ = g.set_transform(v[0], v[1], v[2], v[3], v[4], v[5]);
+                }
+                DrawOp::ClearRect(v) => g.clear_rect(v[0], v[1], v[2], v[3]),
+                DrawOp::FillStyle(s) => g.set_fill_style_str(s),
+                DrawOp::FillStyleGradient => {
+                    if let Some(grad) = self.gradient.take() {
+                        g.set_fill_style_canvas_gradient(&grad);
+                    }
+                }
+                DrawOp::StrokeStyle(s) => g.set_stroke_style_str(s),
+                DrawOp::FillRect(v) => g.fill_rect(v[0], v[1], v[2], v[3]),
+                DrawOp::Save => g.save(),
+                DrawOp::Restore => g.restore(),
+                DrawOp::BeginPath => g.begin_path(),
+                DrawOp::ClosePath => g.close_path(),
+                DrawOp::Fill => g.fill(),
+                DrawOp::Stroke => g.stroke(),
+                DrawOp::Clip => g.clip(),
+                DrawOp::Rect(v) => g.rect(v[0], v[1], v[2], v[3]),
+                // See the module doc: unreachable while no bake can exist.
+                DrawOp::DrawBaked { .. } => {}
+                DrawOp::ImageSmoothingEnabled(b) => g.set_image_smoothing_enabled(*b),
+                DrawOp::ImageSmoothingQuality(_) => {}
+                DrawOp::LineWidth(w) => g.set_line_width(*w),
+                DrawOp::LineJoin(j) => g.set_line_join(j),
+                DrawOp::MoveTo(x, y) => g.move_to(*x, *y),
+                DrawOp::LineTo(x, y) => g.line_to(*x, *y),
+                DrawOp::Arc { x, y, r, start, end } => {
+                    let _ = g.arc(*x, *y, *r, *start, *end);
+                }
+                DrawOp::CreateRadialGradient { x0, y0, r0, x1, y1, r1 } => {
+                    self.gradient = g.create_radial_gradient(*x0, *y0, *r0, *x1, *y1, *r1).ok();
+                }
+                DrawOp::AddColorStop(offset, colour) => {
+                    if let Some(grad) = self.gradient.as_ref() {
+                        let _ = grad.add_color_stop(*offset as f32, colour);
+                    }
+                }
+                DrawOp::Font(s) => g.set_font(s),
+                DrawOp::TextAlign(s) => g.set_text_align(s),
+                DrawOp::TextBaseline(s) => g.set_text_baseline(s),
+                DrawOp::FillText(t, x, y) => {
+                    let _ = g.fill_text(t, *x, *y);
+                }
+                DrawOp::Translate(x, y) => {
+                    let _ = g.translate(*x, *y);
+                }
+                DrawOp::Rotate(t) => {
+                    let _ = g.rotate(*t);
+                }
+                DrawOp::ShadowColor(c) => g.set_shadow_color(c),
+                DrawOp::ShadowBlur(b) => g.set_shadow_blur(*b),
+            }
+        }
+
+        /// `dispose()`'s DOM half (`minimap.js:601`).
+        pub fn dispose(&self) {
+            dom::remove(&self.root);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

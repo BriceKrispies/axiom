@@ -435,6 +435,11 @@ pub(crate) fn scene_shader(prefix: &str, displace: &str, program: &str, suffix: 
         // so two of its functions live somewhere else — would put one source
         // section in two files for a benefit the compiler already provides.
         crate::material_shader::cloth::CLOTH_WGSL,
+        // The indirect-lighting composition, spliced for the same reason the
+        // cloth layer is: the LIGHTING stage calls it, and the lighting stage
+        // lives in `suffix`, which every scene shader carries. Its two-band fill
+        // is what keeps shadowed geometry from collapsing to black.
+        crate::indirect_lighting::INDIRECT_LIGHTING_WGSL,
         program,
         suffix,
     ]
@@ -524,6 +529,13 @@ mod tests {
             .expect("the cloth layer must be spliced into every scene shader");
         assert!(prefix_at < cloth_at);
         assert!(cloth_at < program_at);
+        // The indirect-lighting composition sits with cloth, and for the same
+        // reason: the suffix's lighting stage calls its two-band fill.
+        let indirect_at = spliced
+            .find("fn axiom_indirect_apply(")
+            .expect("the indirect composition must be spliced into every scene shader");
+        assert!(prefix_at < indirect_at);
+        assert!(indirect_at < program_at);
         assert_eq!(
             spliced,
             scene_shader("PREFIX\n", "DISPLACE\n", "PROGRAM\n", "SUFFIX\n")
@@ -537,6 +549,7 @@ mod tests {
                 + "DISPLACE\n".len()
                 + "PREFIX\n".len()
                 + crate::material_shader::cloth::CLOTH_WGSL.len()
+                + crate::indirect_lighting::INDIRECT_LIGHTING_WGSL.len()
                 + "PROGRAM\n".len()
                 + "SUFFIX\n".len()
         );

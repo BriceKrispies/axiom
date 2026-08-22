@@ -120,6 +120,7 @@ use crate::world::dressing::{
 use crate::world::ground::build_ground;
 use crate::world::layout::BUILDINGS;
 use crate::world::props::register_props;
+use crate::world::props::RegisteredProto;
 
 /// LEVEL -> WORLD (`index.js:60-62`). The street is authored down -Z; this yaw
 /// puts it on the axis the canonical hero/sunset cameras look along, with the
@@ -270,6 +271,16 @@ pub struct WorldSystem {
     pub interior_anchors: Vec<V3>,
     /// `A.lampAnchors`, in LEVEL space.
     pub lamp_anchors: Vec<V3>,
+
+    /// Both prototype tables, in registration order: `register_props` then
+    /// `register_dressing_props`.
+    ///
+    /// Kept because [`InstancedBatch`] names its prototype by id and does NOT
+    /// carry the geometry — `finalize` drains the Assembler's table into the
+    /// batches, so these summaries are the only place a placed prototype's mesh
+    /// is still reachable. A caller turning batches into renderable meshes
+    /// cannot do it without them.
+    pub prototypes: Vec<RegisteredProto>,
 }
 
 impl WorldSystem {
@@ -305,9 +316,9 @@ impl WorldSystem {
         checkpoint("start", rng.state());
 
         // 1. prototypes first: the level references them by id while it builds
-        register_props(&mut a, &mut rng);
+        let mut prototypes = register_props(&mut a, &mut rng);
         checkpoint("registerProps", rng.state());
-        register_dressing_props(&mut a, &mut rng);
+        prototypes.extend(register_dressing_props(&mut a, &mut rng));
         checkpoint("registerDressingProps", rng.state());
 
         // 2. ground, then the shells, then what people put in and on them
@@ -417,6 +428,7 @@ impl WorldSystem {
             lamp_lens_emissive: 0.0,
             interior_anchors,
             lamp_anchors,
+            prototypes,
         }
     }
 

@@ -695,6 +695,12 @@ fn contact_blur_fs(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec
 }
 "#;
 
+/// The pipelines, targets and bind groups that put [`CONTACT_PASS_WGSL`] and
+/// [`CONTACT_BLUR_WGSL`] in a real frame. Gated with them because it is their
+/// only consumer.
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
+pub(crate) mod pass;
+
 #[cfg(all(test, feature = "offscreen"))]
 mod parity;
 

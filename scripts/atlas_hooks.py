@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,15 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _ax_binary() -> Path | None:
+    """Prefers an installed `ax` on PATH, then this repo release build.
+
+    The PATH lookup matters: an installed copy survives `cargo clean`, and
+    without it a clean of target/ silently stops edit recording with no error,
+    because this hook returns 0 when it cannot find the binary.
+    """
+    installed = shutil.which("ax")
+    if installed:
+        return Path(installed)
     for name in ("ax.exe", "ax"):
         candidate = ROOT / "target" / "release" / name
         if candidate.exists():
@@ -45,7 +55,8 @@ def route_search() -> int:
         "  ax def <symbol>     where a symbol is defined\n"
         "  ax refs <symbol>    every mention of a symbol\n"
         "  ax file <regex>     find files by path\n\n"
-        "Run it as `scripts/ax ...` (or `target/release/ax` directly). It is "
+        "Run it as `ax ...` if installed (`make install-ax`), otherwise "
+        "`scripts/ax ...`. It is "
         "gitignore-aware and faster than raw ripgrep on this repo.\n"
     )
     return 2

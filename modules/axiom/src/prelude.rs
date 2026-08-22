@@ -29,7 +29,8 @@ pub use axiom_host::{
     // over the camera whole — view, projection and their product. An app builds
     // one from the three `FrameOutcome` accessors; it is not something only the
     // engine names.
-    FrameAmbient, FrameBloom, FrameCamera, FrameDepthFog, FramePostProcess, FrameSky, FrameTonemap,
+    FrameAmbient, FrameBloom, FrameCamera, FrameDepthFog, FrameIndirect, FramePostProcess, FrameSky,
+    FrameTonemap,
     HostApi,
     HostMetrics,
     HostOutcome, HostOutcomeSet, HostParamValue, HostSessionConfig, HostSessionParams, PlayerId,

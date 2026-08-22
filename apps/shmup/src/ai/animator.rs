@@ -78,8 +78,13 @@
 //! step. Node `0` is the actor's `THREE.Group` (`agent.js:112-118`) and bone
 //! `i` is node `i + 1`.
 //!
-//! `THREE.Skeleton` itself (`boneInverses`, the bone-matrix texture) is *not*
-//! ported: it is pure skinning state, read only by the unported `SkinnedMesh`.
+//! `THREE.Skeleton` itself used to be left out here — "pure skinning state,
+//! read only by the unported `SkinnedMesh`". That reason expired: Axiom's
+//! `RunningApp::submit_skinned_draw` **is** the `SkinnedMesh`, so the state has
+//! a reader. [`Skeleton::bind_inverses`] is `calculateInverses()` and
+//! [`Animator::joint_palette`] is `update()`. The bone-matrix *texture* is still
+//! not ported and never will be: that is a THREE upload detail, and the engine
+//! owns its own joint-palette texture behind `submit_skinned_draw`.
 
 use std::collections::HashMap;
 
@@ -194,6 +199,23 @@ impl Mat4 {
         e[11] = a41 * b13 + a42 * b23 + a43 * b33 + a44 * b43;
         e[15] = a41 * b14 + a42 * b24 + a43 * b34 + a44 * b44;
         Mat4 { e }
+    }
+
+    /// `Matrix4.invert()`.
+    ///
+    /// Delegated to [`crate::weapons::rig_math::M4::invert`], which is already
+    /// the element-for-element transcription of `three@0.180`'s cofactor
+    /// expansion — **including** its singular case (`det === 0` returns the
+    /// all-zero matrix). Both types are the same column-major `[f64; 16]`
+    /// `elements`, so the hand-off is a field copy; writing the expansion out a
+    /// second time would leave this port with two transcriptions of one source
+    /// function that could silently drift apart.
+    ///
+    /// Its one caller is [`Skeleton::bind_inverses`] — `THREE.Skeleton`'s
+    /// `boneInverses`, which the module header records as unported because
+    /// nothing read it. Something does now.
+    pub fn invert(self) -> Mat4 {
+        Mat4 { e: crate::weapons::rig_math::M4 { e: self.e }.invert().e }
     }
 
     /// `Matrix4.determinant()` — needed only by [`Mat4::decompose`]'s
@@ -449,6 +471,38 @@ impl Skeleton {
         self.update_world_matrix_parents(i);
         let (_pos, q, _scale) = self.nodes[i].matrix_world.decompose();
         q
+    }
+
+    /// `THREE.Skeleton.calculateInverses()` (`three@0.180`,
+    /// `objects/Skeleton.js`): one `bone.matrixWorld.clone().invert()` per bone,
+    /// taken with the skeleton **in its bind pose and the actor group left at
+    /// the identity**.
+    ///
+    /// This is the half of `THREE.Skeleton` the module header records as
+    /// deliberately unported — "pure skinning state, read only by the unported
+    /// `SkinnedMesh`". Axiom's `RunningApp::submit_skinned_draw` **is** that
+    /// `SkinnedMesh`, so the state has a reader now and belongs here, beside the
+    /// bone hierarchy whose matrices it pairs with.
+    ///
+    /// **Why the group is left at the identity.** `super::geo`'s
+    /// `CharacterGeometry.position` is authored in the rig's own bind space
+    /// (`rig.bind_pos`: feet on `y = 0`, facing `+Z`, no group transform), so an
+    /// inverse taken in that same space is the one those vertices pair with —
+    /// `bone.matrixWorld * inverse` then carries a bind-space vertex all the way
+    /// to world, actor position, yaw and uniform scale included, and the draw
+    /// itself needs no world transform at all. THREE reaches the same place by a
+    /// different route, cancelling the group with the `SkinnedMesh`'s
+    /// `bindMatrix`/`bindMatrixInverse` pair; taking the inverse at the identity
+    /// makes both of those the identity and removes the pair entirely.
+    ///
+    /// The rig is one shared static, so this is one table for every soldier in
+    /// the level — compute it once, at install.
+    #[must_use]
+    pub fn bind_inverses(rig: &Rig) -> Vec<Mat4> {
+        let bind = Skeleton::new(rig, 1.0);
+        (0..rig.count)
+            .map(|i| bind.nodes[node_of(i)].matrix_world.invert())
+            .collect()
     }
 }
 
@@ -1354,6 +1408,33 @@ impl Animator {
     /// dropped.
     pub fn arm_r(&self) -> [usize; 3] {
         self.arm_r
+    }
+
+    /// `THREE.Skeleton.update()` (`objects/Skeleton.js`): this frame's
+    /// **joint-matrix palette** — `bone.matrixWorld * boneInverses[i]` per bone,
+    /// in the rig's bone order, which is the order `super::geo`'s `skin_index`
+    /// addresses.
+    ///
+    /// `inverses` is [`Skeleton::bind_inverses`] for the same rig: one shared
+    /// table, computed once. Passing a table built from a *different* rig
+    /// silently produces a folded, inside-out character rather than an error,
+    /// which is why this takes it as an argument instead of rebuilding it — a
+    /// per-frame rebuild would be 25 matrix inversions per actor for a constant.
+    ///
+    /// Every bone's `matrixWorld` is current when this is called after
+    /// [`Animator::update`]: `update` forces the whole hierarchy
+    /// (`update_matrix_world(node_of(0), true)`) once the pose is written, and
+    /// each IK solver refreshes the subtree it moved. That is the same freshness
+    /// [`Animator::bone_pos`] and the hitbox sync already rely on.
+    #[must_use]
+    pub fn joint_palette(&self, inverses: &[Mat4]) -> Vec<Mat4> {
+        inverses
+            .iter()
+            .enumerate()
+            .map(|(i, inv)| {
+                Mat4::multiply_matrices(&self.bones.nodes[node_of(i)].matrix_world, inv)
+            })
+            .collect()
     }
 }
 

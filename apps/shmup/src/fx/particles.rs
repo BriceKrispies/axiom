@@ -236,6 +236,24 @@ impl ParticleLayer {
         f64::from(self.array[slot * STRIDE + O_MS])
     }
 
+    /// The sprite's roll about the view axis at `now`, in radians —
+    /// `aRot.x + aRot.y * t` (`particles.js`'s `rot0` + `spin * t`, the term
+    /// `PARTICLE_VERT` spins the billboard corners by before projecting them).
+    ///
+    /// Separate from [`integrate`] because roll is the one term whose *use* is
+    /// screen-space: the source rotates the quad's corners in clip space, and a
+    /// renderer built on camera-facing world-space quads applies it as a spin
+    /// about the camera's forward axis instead. Returning the angle rather than
+    /// rotated corners keeps that decision at the renderer, where it belongs.
+    ///
+    /// Meaningless for a slot [`integrate`] returns `None` for; the caller has
+    /// already asked that question by the time it needs this.
+    pub fn roll_at(&self, slot: usize, now: f64) -> f64 {
+        let b = slot * STRIDE;
+        let t = now - f64::from(self.array[b + O_LF]);
+        f64::from(self.array[b + O_RT]) + f64::from(self.array[b + O_RT + 1]) * t
+    }
+
     /// Write one particle. `emit(s, now)`, `particles.js:314-360`.
     pub fn emit(&mut self, s: &ParticleSpawn, now: f64) -> usize {
         let i = self.cursor;

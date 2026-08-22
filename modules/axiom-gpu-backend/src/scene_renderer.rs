@@ -319,6 +319,32 @@ fn camera_eye(camera_view_proj: [f32; 16]) -> [f32; 3] {
         .unwrap_or([0.0; 3])
 }
 
+/// **The frame's sun**: the normalized world-space direction *toward* the first
+/// **directional** light, or the zero vector when the frame has none.
+///
+/// The first directional is the sun by the engine's existing convention rather
+/// than by a new one: `light_view_proj` is "the directional shadow caster's"
+/// matrix ([`axiom_host::FramePacket::light_view_proj`]) and the main pass gives
+/// every directional that caster's `shade`. Naming it here is what lets the
+/// contact shadow's `dot( lightDir, sunDir ) < 0.999` test pick the sun out of
+/// the light loop instead of darkening every light by it.
+///
+/// The zero vector is the honest answer for a frame with no directional light,
+/// and it is also the *useful* one: `dot( anything, 0 )` is `0`, which fails the
+/// test for every light, so the contact term degrades to an exact identity
+/// rather than to a wrong direction. A light whose direction is itself the zero
+/// vector (an app publishing an unset direction) normalizes to the same thing,
+/// which is why the failure is routed through [`axiom_math::Vec3::normalize`]'s
+/// result rather than through a hand-rolled length test.
+fn sun_direction(lights: &[(u32, [f32; 3], [f32; 3], f32)]) -> [f32; 3] {
+    lights
+        .iter()
+        .find(|(kind, ..)| *kind == 0)
+        .map(|(_, direction, ..)| axiom_math::Vec3::new(direction[0], direction[1], direction[2]))
+        .and_then(|v| v.normalize().ok())
+        .map_or([0.0; 3], |n| [n.x, n.y, n.z])
+}
+
 /// Pack a [`axiom_host::FrameSky`] plus the camera's inverse view-projection
 /// into the std140 layout `SkyU` describes.
 ///
@@ -372,6 +398,10 @@ fn pack_sky(sky: &axiom_host::FrameSky, camera_view_proj: [f32; 16]) -> Vec<u8> 
 /// view-projection and the per-instance world matrix; depth-only, no fragment
 /// output. Reads only position (per-vertex) and the world columns (per-instance).
 const SHADOW_WGSL: &str = r#"
+// The main pass's `ShadowU` carries a second `sun` lane (see `crate::scene_wgsl`);
+// this pass declares only the half it reads. A uniform buffer LARGER than the
+// struct bound to it is legal — the reverse is the validation error — so the two
+// declarations may differ here and only here.
 struct ShadowU { light_vp: mat4x4<f32> };
 @group(0) @binding(0) var<uniform> shadow: ShadowU;
 
@@ -648,7 +678,18 @@ const MAX_LIGHTS: usize = 16;
 /// (32 bytes each) —
 /// std140-compatible. Both WGSL `Lights` declarations (the mesh pass and the SDF
 /// pass, which bind the same buffer) must match this layout.
-const LIGHTS_UBO_BYTES: u64 = 96 + (MAX_LIGHTS as u64) * 32;
+const LIGHTS_UBO_BYTES: u64 = 208 + (MAX_LIGHTS as u64) * 32;
+/// The shadow-caster uniform (the main pass's `ShadowU`, group 2 binding 2; the
+/// shadow depth pass's group 0 binding 0): the light view-projection `mat4`
+/// (64 bytes) then the `sun` `vec4` (16) — `xyz` the normalized world direction
+/// toward the sun, `w` the contact-shadow feature bit.
+///
+/// The depth pass's own `ShadowU` declares only the matrix, which is legal
+/// against a larger buffer; the main pass declares both and would be a
+/// validation error against a 64-byte one.
+const SHADOW_LIGHT_UBO_BYTES: u64 = 64 + 16;
+/// Floats in [`SHADOW_LIGHT_UBO_BYTES`].
+const SHADOW_LIGHT_UBO_FLOATS: usize = (SHADOW_LIGHT_UBO_BYTES / 4) as usize;
 /// Maximum SDF primitives uploaded per frame (must match the WGSL
 /// `array<SdfPrim, 16>`). Primitives beyond this are dropped, the same honesty
 /// the lights path uses — see [`pack_sdf`].
@@ -796,6 +837,11 @@ pub(crate) struct SceneRenderer {
     /// the code rather than a hope.
     prepass: Option<(crate::gbuffer::GBufferTargets, crate::gbuffer::GBufferPass)>,
     gtao: Option<crate::gtao::pass::GtaoPass>,
+    /// The screen-space contact shadow built on the same prepass. `Some` exactly
+    /// when `prepass` is, for the same reason `gtao` is: it reads the G-buffer's
+    /// depth and normal, so a device that cannot hold the attachments has no
+    /// chain, binds the 1x1 white neutral, and renders what it always did.
+    contact: Option<crate::contact::pass::ContactPass>,
     /// The prepass's own per-instance stream: `world`, `prev_world`,
     /// `material_id`, `coverage`. A **separate** buffer from the forward pass's,
     /// because the two shaders read different things — the forward pass wants a
@@ -1225,11 +1271,12 @@ impl SceneRenderer {
             }],
         });
 
-        // Light view-projection uniform (one mat4 = 64 bytes), shared by the
-        // shadow depth pass and the main pass's shadow lookup.
+        // The shadow-caster uniform, shared by the shadow depth pass and the main
+        // pass's shadow lookup: one mat4 (64 bytes) plus the SUN lane (16) the
+        // contact shadow's light test reads. See `SHADOW_LIGHT_UBO_BYTES`.
         let light_vp_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("axiom-light-vp-ubo"),
-            size: 64,
+            size: SHADOW_LIGHT_UBO_BYTES,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1320,6 +1367,21 @@ impl SceneRenderer {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    // The resolved contact shadow, beside the occlusion and for
+                    // the same reason: both are screen-space lighting inputs and
+                    // group 2 is where those live. It shares binding 4's sampler
+                    // rather than adding a sixth entry — the fetch is 1:1, where
+                    // linear and nearest are the same sample.
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
                 ],
             });
         // Built before the bind group below, because that group binds one of the
@@ -1405,9 +1467,27 @@ impl SceneRenderer {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
+        // The contact-shadow chain, built from the SAME prepass attachments the
+        // occlusion chain reads and gated identically: `Some` exactly when the
+        // prepass is, so a device that cannot hold a G-buffer has neither and the
+        // main pass binds the white neutral for both.
+        let contact = prepass.as_ref().zip(scene_size).map(|((targets, _), size)| {
+            crate::contact::pass::ContactPass::new(
+                device,
+                size,
+                targets.view(crate::gbuffer::GBufferChannel::Depth),
+                targets.view(crate::gbuffer::GBufferChannel::Normal),
+            )
+        });
         let ao_view = gtao
             .as_ref()
             .map_or(&white_ao_view, crate::gtao::pass::GtaoPass::resolved_view);
+        // The same 1x1 white neutral: `r = 1.0` is "no contact occlusion", so the
+        // sun multiply is exactly one and a device without the chain renders the
+        // bytes it always did.
+        let contact_view = contact
+            .as_ref()
+            .map_or(&white_ao_view, crate::contact::pass::ContactPass::resolved_view);
         let shadow_sample_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("axiom-shadow-sample-bind-group"),
             layout: &shadow_sample_layout,
@@ -1431,6 +1511,10 @@ impl SceneRenderer {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::Sampler(&ao_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(contact_view),
                 },
             ],
         });
@@ -1518,6 +1602,7 @@ impl SceneRenderer {
             skinning,
             prepass,
             gtao,
+            contact,
             prepass_instances,
             // Identity, so the first frame differences against itself and
             // produces a zero velocity — which is the honest answer for a frame
@@ -1672,14 +1757,41 @@ impl SceneRenderer {
                     .depth_fog()
                     .unwrap_or_else(axiom_host::FrameDepthFog::none),
                 caps,
+                // An unauthored fill is every-lane zero, an exact no-op — so a
+                // look with none renders as one from before the fill existed.
+                self.look
+                    .indirect()
+                    .unwrap_or_else(axiom_host::FrameIndirect::none),
                 camera.view_proj(),
                 surface_time,
             ),
         );
+        // **The sun**: the frame's FIRST directional light, normalized, in world
+        // space. That is the same light the shadow map is rendered from — every
+        // directional in the loop already takes `shade` from it — so naming it
+        // here does not invent a convention, it writes the one the pass already
+        // runs on. A frame with no directional light normalizes nothing and packs
+        // the zero vector, which fails the `0.999` test for every light and makes
+        // the contact term an exact identity.
+        //
+        // This is the reconciliation `render/materialpatch.js`'s port notes left
+        // open (§5.2): the light loop now *does* know which light is the sun, so
+        // a second directional receives the cascade but not the sun's contact ray.
+        let sun_dir_world = sun_direction(lights);
+        // The feature bit (`owFeat.y`): the chain ran for THIS frame, which needs
+        // both a built chain and a capability mask that kept the G-buffer. Off,
+        // the main pass reads a stale target — the targets stay allocated once
+        // built — so this cannot be decided at build time.
+        let contact_live = self.contact.is_some()
+            & ((caps & (axiom_host::RenderCapability::GBuffer as u32)) != 0);
+        let mut shadow_uniform = [0.0_f32; SHADOW_LIGHT_UBO_FLOATS];
+        shadow_uniform[..16].copy_from_slice(&light_view_proj);
+        shadow_uniform[16..19].copy_from_slice(&sun_dir_world);
+        shadow_uniform[19] = f32::from(u8::from(contact_live));
         queue.write_buffer(
             &self.light_vp_buffer,
             0,
-            bytemuck::cast_slice(&light_view_proj),
+            bytemuck::cast_slice(&shadow_uniform),
         );
         // The sky this frame actually draws: present only when the look carried
         // one AND the frame's profile attempts the Sky capability. Resolved ONCE
@@ -1859,12 +1971,40 @@ impl SceneRenderer {
 
                 // The AO chain. `projection[5]` is `uP11`, the one element the
                 // source reads to scale a world radius into pixels.
+                //
+                // The projection inverse is computed once and both chains take
+                // it: GTAO turns a linear depth back into a view position with
+                // it, and the contact march does the same before stepping along
+                // the sun. A degenerate projection falls back to the projection
+                // itself, which is wrong but finite — the same posture
+                // `camera_eye` takes, and for the same reason.
+                let projection = axiom_math::Mat4::from_cols_array(camera.projection());
+                let proj_inv = projection
+                    .inverse()
+                    .map_or(camera.projection(), |m| m.as_cols_array());
                 self.gtao.as_ref().map(|gtao| {
-                    let projection = axiom_math::Mat4::from_cols_array(camera.projection());
-                    let proj_inv = projection
-                        .inverse()
-                        .map_or(camera.projection(), |m| m.as_cols_array());
                     gtao.record(queue, &mut encoder, proj_inv, camera.projection()[5]);
+                });
+                // The contact chain, on the same prepass. It marches along the
+                // sun in VIEW space, so the world direction packed into the
+                // shadow uniform above is rotated into view here — the view
+                // matrix is rigid, so the rotated vector is still unit length,
+                // which the march depends on (a non-unit step silently rescales
+                // the ray).
+                self.contact.as_ref().map(|contact| {
+                    let view = axiom_math::Mat4::from_cols_array(camera.view());
+                    let sun_view = view.transform_vector(axiom_math::Vec3::new(
+                        sun_dir_world[0],
+                        sun_dir_world[1],
+                        sun_dir_world[2],
+                    ));
+                    contact.record(
+                        queue,
+                        &mut encoder,
+                        camera.projection(),
+                        proj_inv,
+                        [sun_view.x, sun_view.y, sun_view.z],
+                    );
                 });
             });
 
@@ -2779,6 +2919,8 @@ fn pack_lights(
     ambient: axiom_host::FrameAmbient,
     depth_fog: axiom_host::FrameDepthFog,
     caps: u32,
+    // The frame's two-band indirect fill. Every lane zero is the identity.
+    indirect: axiom_host::FrameIndirect,
     camera_view_proj: [f32; 16],
     // The frame's surface time, packed into the `camera` vec4's fourth lane —
     // an unread pad until now, so a time-varying surface costs this uniform
@@ -2795,6 +2937,20 @@ fn pack_lights(
     let (sky, ground) = (ambient.sky(), ambient.ground());
     let fog = depth_fog.color();
     let eye = camera_eye(camera_view_proj);
+    let (fill_sky, fill_ground, gain) = (
+        indirect.sky_fill(),
+        indirect.ground_fill(),
+        indirect.fill_gain(),
+    );
+    // The unit direction TOWARD the key light. A frame's directional light
+    // carries the direction its light TRAVELS, so the sun sits the other way;
+    // the sun-bounce wrap negates this again to reach the anti-sun hemisphere.
+    // `find` rather than an index: a frame may lead with point lights, and one
+    // with no directional light at all yields a zero the wrap tolerates.
+    let sun_toward = lights
+        .iter()
+        .find(|(kind, _, _, _)| *kind == 0)
+        .map_or([0.0_f32; 3], |(_, v, _, _)| [-v[0], -v[1], -v[2]]);
     [
         sky[0],
         sky[1],
@@ -2819,6 +2975,39 @@ fn pack_lights(
         eye[1],
         eye[2],
         surface_time,
+        // ---- the fill lanes, in `Lights`' declared order ------------------
+        fill_sky[0],
+        fill_sky[1],
+        fill_sky[2],
+        0.0,
+        fill_ground[0],
+        fill_ground[1],
+        fill_ground[2],
+        0.0,
+        gain[0],
+        gain[1],
+        0.0,
+        0.0,
+        indirect.ibl_diffuse(),
+        indirect.interior_floor(),
+        // The live room count. Zero until an app builds interior volumes; the
+        // gate degrades to its AO arm, which is what the source does before the
+        // world appears.
+        0.0,
+        0.0,
+        // The algorithm's own constants, from the ONE place they are defined.
+        crate::indirect_lighting::FILL_DIR[0],
+        crate::indirect_lighting::FILL_DIR[1],
+        crate::indirect_lighting::FILL_DIR[2],
+        crate::indirect_lighting::FILL_DIR[3],
+        crate::indirect_lighting::AO_STRENGTH[0],
+        crate::indirect_lighting::AO_STRENGTH[1],
+        0.0,
+        0.0,
+        sun_toward[0],
+        sun_toward[1],
+        sun_toward[2],
+        0.0,
     ]
     .iter()
     .for_each(|f| bytes.extend_from_slice(&f.to_le_bytes()));

@@ -21,9 +21,13 @@
 //! it is the thing the animator drives — but it lives in
 //! [`super::animator`], as the `Skeleton` arena the [`super::animator::Animator`]
 //! owns, rather than here: there is no `THREE.Object3D` graph in this port to
-//! hand back, and `THREE.Skeleton`'s own contribution (`boneInverses`, the
-//! bone-matrix `Float32Array` texture) is a *skinning* concern that only the
-//! unported `SkinnedMesh` reads. `Rig` below is exactly the shared, immutable
+//! hand back. `THREE.Skeleton`'s own contribution (`boneInverses`) lives there
+//! too, as [`super::animator::Skeleton::bind_inverses`] — it is a pure function
+//! of the bind pose this file authors, but it only ever appears multiplied by a
+//! *posed* bone matrix, and those are the animator's. (The bone-matrix
+//! `Float32Array` texture is not ported at all: the engine owns its own joint
+//! palette behind `RunningApp::submit_skinned_draw`.) `Rig` below is exactly
+//! the shared, immutable
 //! half — `rig.js:117-241` — which is what `RIG` is: one instance for every
 //! soldier.
 //!

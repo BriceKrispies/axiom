@@ -19,8 +19,32 @@
 //! menu                menu.js
 //! markers             markers.js
 //! minimap             minimap.js
-//! (this file)         index.js (`UiSystem`)
+//! system              index.js (`UiSystem`)
 //! ```
+//!
+//! ## The facade lives in [`system`], and there is only one of it
+//!
+//! This file used to carry a second port of `index.js` called `Hud` — the
+//! source's `UiSystem` minus the `Subsystem` impl and the `ctx.get`/`ctx.peek`
+//! reaches, written while no camera/input/weapons/player/ai subsystem had
+//! landed. [`system::UiCore`] is the same file ported again, and a strict
+//! superset: it adds the seven event subscriptions, the effect journal, the
+//! killfeed/banner/objective/match/blip API, the minimap gate, the menu host
+//! and the `wasm32` DOM view, and it closes exactly the `ctx` reaches `Hud`
+//! existed to avoid ([`system::UiCore::set_links`], `set_camera`, `set_input`,
+//! `set_clock`).
+//!
+//! Two ports of one file, sharing [`HudState`], [`Blip`], [`PlayerPull`] and
+//! [`WeaponPull`] but owning **separate copies of all eleven widgets** and
+//! **separate frame drives**, is one HUD too many. `Hud` is deleted;
+//! [`system::UiCore`] is what runs, mounted by
+//! [`crate::scene::wiring::hud::HudRig`].
+//!
+//! What is left here is the shared *vocabulary* — the four value types both
+//! ports named and the facade still traffics in. They stay in this file rather
+//! than moving into [`system`] because [`markers`], [`minimap`] and the
+//! wiring tier all name them, and a vocabulary type that lives inside the
+//! facade it feeds is a cycle waiting to be drawn.
 //!
 //! ## What is deferred, and why
 //!
@@ -42,27 +66,6 @@
 //! same public API purely for screenshot/critic capture
 //! (`UiSystem.debugState('combat')`). It is a test harness, not part of the
 //! HUD itself, and is left for whichever slice ports the capture tooling.
-//!
-//! ## Why this is not yet a [`crate::registry::Subsystem`]
-//!
-//! `index.js`'s `UiSystem` is a real `Subsystem`: it reads `ctx.camera`,
-//! `ctx.canvas`, `ctx.input`, and pulls duck-typed state off
-//! `ctx.peek('weapons')`/`ctx.peek('player')`/`ctx.peek('ai')`. None of
-//! those exist on [`crate::engine::Ctx`] yet — no camera, canvas, input,
-//! weapons, player, or ai subsystem has landed in this port (see the
-//! concurrency note in the port manifest: those are other agents' slices,
-//! running in parallel with this one).
-//!
-//! Rather than block on that or invent placeholder subsystems here (which
-//! would just be a second, throwaway design the real ones would replace),
-//! [`Hud`] is the source's `UiSystem` minus the `Subsystem` impl and the
-//! `ctx.get`/`ctx.peek` reaches: every value the source pulls from another
-//! subsystem is instead an explicit, optional parameter to
-//! [`Hud::late_update`] — the same shape [`markers::ScreenProjector`] and
-//! [`menu::MenuHost`] already use for the camera and the pause menu's
-//! host effects. When the camera/input/weapons/player/ai subsystems land,
-//! wiring `Hud` behind a real `Subsystem` impl that reads `ctx` and calls
-//! `late_update` with the pulled values is a thin adapter, not a redesign.
 
 pub mod ammo;
 pub mod compass;
@@ -79,23 +82,10 @@ pub mod style;
 pub mod system;
 pub mod util;
 
-use ammo::{AmmoFrame, AmmoInput, AmmoPanel};
-use compass::{match_frame, Compass, MatchFrame, MatchInput};
-use crosshair::{Crosshair, CrosshairFrame, CrosshairInput};
-use damage::{ArcFrame, DamageArcs};
-use health::{HealthFrame, HealthFx, HealthInput};
-use hitmarkers::{HitKind, Hitmarkers, MarkerFrame};
-use killfeed::{Killfeed, RowFrame};
-use markers::{Objective, WorldMarkers};
-use menu::{MenuFrame, PauseMenu};
-use prompts::{Banner, BannerFrame, Prompt, PromptFrame, PromptSpec};
-use util::{clamp01, damp};
-
 /// One AI actor's compass/minimap blip — `ui.setBlips`'s element shape
-/// (`index.js:337-348`). `MAX_BLIPS` (48 in the source) has no home yet: the
-/// only consumer of the blip list is the minimap (`minimap.js`'s
-/// `_mmState.blips`), and [`FramePull::blips`] carries the shape forward
-/// uncapped.
+/// (`index.js:337-348`). The facade stores [`system::MAX_BLIPS`] of them and
+/// hands the live prefix out through [`system::UiCore::blips`]; the only
+/// consumer of the list is the minimap (`minimap.js`'s `_mmState.blips`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Blip {
     pub x: f32,
@@ -202,313 +192,9 @@ impl Default for HudState {
     }
 }
 
-/// Movement-derived reticle bloom, for when nothing else supplies `move`
-/// directly — `index.js:456-463`.
-pub fn movement_bloom(current: f64, prev_pos: [f32; 3], pos: [f32; 3], dt: f64, raw_dt: f64) -> f64 {
-    let dx = (pos[0] - prev_pos[0]) as f64;
-    let dz = (pos[2] - prev_pos[2]) as f64;
-    let speed = if dt > 0.0 { dx.hypot(dz) / dt } else { 0.0 };
-    damp(current, clamp01(speed / 6.2), 12.0, raw_dt.max(1e-3))
-}
-
-/// Camera heading in degrees, 0 = north, clockwise — `index.js:497`, from the
-/// camera's world-space forward XZ (already unit-length).
-pub fn camera_heading_deg(forward_x: f64, forward_z: f64) -> f64 {
-    forward_x.atan2(-forward_z).to_degrees()
-}
-
-/// One objective's compass bearing from the player position —
-/// `index.js:567-582`'s `_buildCompassObjectives`.
-pub fn compass_bearing(objective_xz: (f32, f32), player_xz: (f32, f32)) -> f64 {
-    let dx = (objective_xz.0 - player_xz.0) as f64;
-    let dz = (objective_xz.1 - player_xz.1) as f64;
-    dx.atan2(-dz).to_degrees()
-}
-
-/// The camera-space right/forward basis [`Hud::late_update`] needs for the
-/// directional damage arcs and the compass heading — the XZ projection of
-/// `camera.matrixWorld`'s columns 0 and 2, already normalised
-/// (`index.js:486-496`).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CameraBasis {
-    pub right_x: f64,
-    pub right_z: f64,
-    pub forward_x: f64,
-    pub forward_z: f64,
-}
-
-/// Everything [`Hud::late_update`] would otherwise reach through `ctx.peek`
-/// for — every field optional, exactly as the source's duck typing.
-#[derive(Default)]
-pub struct FramePull<'a> {
-    pub weapon: Option<WeaponPull>,
-    pub player: Option<PlayerPull>,
-    pub blips: &'a [Blip],
-    pub objectives: &'a [Objective],
-}
-
-/// `index.js:63-613`'s `UiSystem`, minus its `Subsystem`/`ctx` binding — see
-/// the module docs.
-pub struct Hud {
-    pub state: HudState,
-    pub crosshair: Crosshair,
-    pub hit: Hitmarkers<()>,
-    pub arcs: DamageArcs<()>,
-    pub health: HealthFx,
-    pub ammo: AmmoPanel,
-    pub killfeed: Killfeed<()>,
-    pub compass: Compass,
-    pub markers: WorldMarkers<()>,
-    pub prompt: Prompt,
-    pub banner: Banner,
-    pub menu: PauseMenu,
-
-    pub k: f64,
-    pub vw: f64,
-    pub vh: f64,
-    hud_visible: f64,
-    hud_target: f64,
-    prev_pos: [f32; 3],
-    regen_timer: f64,
-}
-
-impl Hud {
-    pub fn new(rng: crate::rng::Rng) -> Self {
-        Hud {
-            state: HudState::default(),
-            crosshair: Crosshair::new(),
-            hit: Hitmarkers::new((0..10).map(|_| ()).collect()),
-            arcs: DamageArcs::new((0..6).map(|_| ()).collect()),
-            health: HealthFx::new(),
-            ammo: AmmoPanel::new(),
-            killfeed: Killfeed::new((0..6).map(|_| ()).collect()),
-            compass: Compass::new(),
-            markers: WorldMarkers::new((0..6).map(|_| ()).collect(), 4, 16, rng),
-            prompt: Prompt::new(),
-            banner: Banner::new(),
-            menu: PauseMenu::new(),
-            k: 1.0,
-            vw: 1920.0,
-            vh: 1080.0,
-            hud_visible: 1.0,
-            hud_target: 1.0,
-            prev_pos: [0.0; 3],
-            regen_timer: 0.0,
-        }
-    }
-
-    /// `resize(w, h, ctx)` — `index.js:584-592`.
-    pub fn resize(&mut self, w: f64, h: f64) {
-        self.vw = w;
-        self.vh = h;
-        self.k = style::scale_factor(h);
-        self.crosshair.set_scale(self.k);
-        self.compass.set_scale(self.k);
-    }
-
-    pub fn set_hud_visible(&mut self, visible: bool) {
-        self.hud_target = if visible { 1.0 } else { 0.0 };
-    }
-
-    /// `hitmarker(kind)` — `index.js:291-298`. Audio (`sfx(...)`) is the
-    /// source's fire-and-forget call into an optional `audio` subsystem;
-    /// that subsystem is ported (see [`crate::audio`]) but not yet wired to
-    /// a running `Hud`, so it is the caller's job for now — see the returned
-    /// [`HitKind`] echoed back for exactly that purpose.
-    pub fn hitmarker(&mut self, kind: HitKind) -> HitKind {
-        self.hit.spawn(kind);
-        self.crosshair.on_hit();
-        kind
-    }
-
-    pub fn damage_number(&mut self, world_pos: [f32; 3], is_kill: bool) {
-        self.markers.spawn_damage(world_pos, is_kill);
-    }
-
-    /// Incoming damage: arc toward the source, screen flash, reticle flinch
-    /// — `index.js:305-313`.
-    pub fn hurt(&mut self, amount: f64, dir_x: f64, dir_z: f64) {
-        let i = clamp01(amount / 40.0);
-        self.arcs.spawn(dir_x, dir_z, 0.45 + i * 0.55);
-        self.health.on_damage(i);
-        self.crosshair.on_flinch(0.5 + i);
-        self.regen_timer = 0.0;
-        self.state.regen = false;
-    }
-
-    pub fn set_prompt(&mut self, p: &PromptSpec) {
-        self.prompt.set(p);
-    }
-
-    pub fn clear_prompt(&mut self) {
-        self.prompt.clear();
-    }
-
-    pub fn spawn_grenade(&mut self, world_pos: [f32; 3], fuse: f64) {
-        self.markers.spawn_grenade(world_pos, fuse);
-    }
-
-    /// `lateUpdate(dt, ctx)` — `index.js:401-546`, minus the minimap bake
-    /// itself (requested through `UiFrame::minimap_bake_requested`, run by the
-    /// host, answered with `UiCore::set_minimap_bake_done`) and the widgets'
-    /// own DOM writes (a
-    /// `wasm32` [`view::HudView`] applies the returned frames).
-    #[allow(clippy::too_many_arguments)]
-    pub fn late_update(&mut self, dt: f64, raw_dt: f64, camera: CameraBasis, pull: FramePull<'_>) -> HudFrame {
-        let s = &mut self.state;
-        s.time += dt;
-
-        let menu = self.menu.update(raw_dt);
-
-        // ---- external state ---------------------------------------------
-        let ws = (!s.simulate).then_some(pull.weapon).flatten();
-        if let Some(w) = &ws {
-            w.name.as_ref().map(|v| s.weapon_name = v.clone());
-            w.mode.as_ref().map(|v| s.fire_mode = v.clone());
-            w.ammo.map(|v| s.ammo = v);
-            w.reserve.map(|v| s.reserve = v);
-            w.mag_size.map(|v| s.mag_size = v);
-            w.reloading.map(|v| s.reloading = v);
-            w.reload_progress.map(|v| s.reload_progress = v);
-            w.ads.map(|v| s.ads = v);
-            w.spread.map(|v| s.base_spread = 4.0 + v * 40.0);
-            w.lethal_count.map(|v| s.lethal_count = v);
-            w.tactical_count.map(|v| s.tactical_count = v);
-        }
-
-        let ps = (!s.simulate).then_some(pull.player).flatten();
-        if let Some(p) = &ps {
-            p.health.map(|v| s.health = v);
-            p.max_health.map(|v| s.max_health = v);
-            p.armour.map(|v| s.armour = v);
-            p.regen.map(|v| s.regen = v);
-            p.move_amount.map(|v| s.move_amount = v);
-            p.sprint.map(|v| s.sprint = v);
-            p.crouch.map(|v| s.crouch = v);
-            p.ads.map(|v| s.ads = v);
-            p.airborne.map(|v| s.airborne = v);
-        }
-
-        // ---- movement-derived reticle bloom -----------------------------
-        let pos = ps.as_ref().and_then(|p| p.position).unwrap_or(self.prev_pos);
-        if ps.is_none() && !s.simulate {
-            s.move_amount = movement_bloom(s.move_amount, self.prev_pos, pos, dt, raw_dt);
-        }
-        self.prev_pos = pos;
-
-        // ---- health regeneration when nobody else owns health -----------
-        if ps.is_none() && !s.simulate && s.health < s.max_health {
-            self.regen_timer += dt;
-            if self.regen_timer > 4.5 {
-                if !s.regen {
-                    s.regen = true;
-                    self.health.on_regen_start();
-                }
-                s.health = (s.health + dt * 24.0).min(s.max_health);
-            }
-        }
-
-        let heading = camera_heading_deg(camera.forward_x, camera.forward_z);
-
-        // ---- widgets -------------------------------------------------
-        let hud_goal = self.hud_target * if self.menu.open { 0.15 } else { 1.0 };
-        self.hud_visible = damp(self.hud_visible, hud_goal, 10.0, raw_dt);
-
-        let crosshair = self.crosshair.update(
-            dt,
-            CrosshairInput {
-                move_amount: s.move_amount,
-                sprint: s.sprint,
-                crouch: s.crouch,
-                airborne: s.airborne,
-                ads: s.ads,
-                base_spread: Some(s.base_spread),
-                hidden: false,
-            },
-        );
-        let hit = self.hit.update(dt);
-        let arcs = self.arcs.update(dt, camera.right_x, camera.right_z, camera.forward_x, camera.forward_z);
-        let health = self.health.update(
-            dt,
-            HealthInput { health: s.health, max_health: s.max_health, armour: s.armour, max_armour: s.max_armour, regen: s.regen },
-        );
-        let ammo = self.ammo.update(
-            dt,
-            &AmmoInput {
-                ammo: s.ammo,
-                reserve: s.reserve,
-                mag_size: s.mag_size,
-                weapon_name: s.weapon_name.clone(),
-                fire_mode: s.fire_mode.clone(),
-                reloading: s.reloading,
-                reload_progress: s.reload_progress,
-                lethal_count: s.lethal_count,
-                tactical_count: s.tactical_count,
-                time: s.time,
-            },
-        );
-        let killfeed = self.killfeed.update(dt);
-        let match_bar = match_frame(&MatchInput { score_us: s.score_us, score_them: s.score_them, time_left: s.time_left }, &s.mode);
-        let prompt = self.prompt.update(dt);
-        let banner = self.banner.update(dt);
-
-        let player_xz = (pos[0], pos[2]);
-        let compass_objectives: Vec<(f64, String)> =
-            pull.objectives.iter().map(|o| (compass_bearing((o.position[0], o.position[2]), player_xz), o.label.clone())).collect();
-        let strip_x = self.compass.strip_offset(heading);
-        let objective_ticks: Vec<(compass::ObjectiveTick, String)> =
-            compass_objectives.into_iter().map(|(bearing, label)| (self.compass.objective_tick(bearing), label)).collect();
-
-        HudFrame {
-            crosshair,
-            hit,
-            arcs,
-            health,
-            ammo,
-            killfeed,
-            match_bar,
-            prompt,
-            banner,
-            compass_strip_x: strip_x,
-            objective_ticks,
-            hud_visible: self.hud_visible,
-            heading_deg: heading,
-            menu,
-        }
-    }
-}
-
-/// Every widget's computed per-frame render state, bundled — the pure output
-/// of one [`Hud::late_update`] call, which a `wasm32` view paints and a
-/// native test asserts against directly.
-pub struct HudFrame {
-    pub crosshair: CrosshairFrame,
-    pub hit: Vec<(usize, MarkerFrame)>,
-    pub arcs: Vec<(usize, ArcFrame)>,
-    pub health: HealthFrame,
-    pub ammo: AmmoFrame,
-    pub killfeed: Vec<(usize, RowFrame)>,
-    pub match_bar: MatchFrame,
-    pub prompt: PromptFrame,
-    pub banner: BannerFrame,
-    pub compass_strip_x: f64,
-    pub objective_ticks: Vec<(compass::ObjectiveTick, String)>,
-    pub hud_visible: f64,
-    pub heading_deg: f64,
-    pub menu: MenuFrame,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn rng() -> crate::rng::Rng {
-        crate::rng::Rng::new(1)
-    }
-
-    fn basis() -> CameraBasis {
-        CameraBasis { right_x: 1.0, right_z: 0.0, forward_x: 0.0, forward_z: 1.0 }
-    }
 
     #[test]
     fn default_state_matches_the_source_defaults() {
@@ -519,85 +205,20 @@ mod tests {
         assert!(!s.simulate);
     }
 
+    /// The vocabulary types are what the facade and the widgets agree on, so
+    /// the thing worth pinning here is that they still default to the source's
+    /// neutral values — a blip at the origin facing north, and "no state
+    /// published" for both duck-typed pulls.
     #[test]
-    fn movement_bloom_ramps_up_with_speed_and_damps_toward_it() {
-        let prev = [0.0, 0.0, 0.0];
-        let pos = [0.0, 0.0, 3.0]; // 3m in one 1/60s tick = 180 m/s (extreme, saturates)
-        let v = movement_bloom(0.0, prev, pos, 1.0 / 60.0, 1.0 / 60.0);
-        assert!(v > 0.0);
-    }
+    fn the_shared_vocabulary_defaults_to_nothing_published() {
+        let b = Blip::default();
+        assert_eq!((b.x, b.z, b.heading_deg), (0.0, 0.0, 0.0));
+        assert!(!b.friendly);
 
-    #[test]
-    fn camera_heading_matches_known_directions() {
-        assert!((camera_heading_deg(0.0, -1.0) - 0.0).abs() < 1e-9); // facing north (-Z)
-        assert!((camera_heading_deg(1.0, 0.0) - 90.0).abs() < 1e-9); // facing east (+X)
-    }
+        let w = WeaponPull::default();
+        assert!(w.ammo.is_none() && w.name.is_none());
 
-    #[test]
-    fn late_update_without_any_external_pull_drives_regen_after_a_delay() {
-        let mut hud = Hud::new(rng());
-        hud.state.health = 50.0;
-        for _ in 0..(60 * 5) {
-            hud.late_update(1.0 / 60.0, 1.0 / 60.0, basis(), FramePull::default());
-        }
-        assert!(hud.state.health > 50.0, "health should regenerate once the timer clears 4.5s");
-    }
-
-    #[test]
-    fn hitmarker_also_pulses_the_crosshair() {
-        let mut hud = Hud::new(rng());
-        hud.hitmarker(HitKind::Kill);
-        let frame = hud.late_update(1.0 / 600.0, 1.0 / 600.0, basis(), FramePull::default());
-        assert!(frame.crosshair.dot_scale > 1.0);
-    }
-
-    #[test]
-    fn hurt_spawns_a_directional_arc_and_resets_regen() {
-        let mut hud = Hud::new(rng());
-        hud.regen_timer = 10.0;
-        hud.state.regen = true;
-        hud.hurt(20.0, 1.0, 0.0);
-        assert!(!hud.state.regen);
-        assert_eq!(hud.regen_timer, 0.0);
-        let frame = hud.late_update(0.01, 0.01, basis(), FramePull::default());
-        assert_eq!(frame.arcs.len(), 1);
-    }
-
-    #[test]
-    fn weapon_pull_overrides_ammo_state_when_not_simulating() {
-        let mut hud = Hud::new(rng());
-        let pull = FramePull {
-            weapon: Some(WeaponPull { ammo: Some(12), reserve: Some(50), ..WeaponPull::default() }),
-            ..FramePull::default()
-        };
-        hud.late_update(1.0 / 60.0, 1.0 / 60.0, basis(), pull);
-        assert_eq!(hud.state.ammo, 12);
-        assert_eq!(hud.state.reserve, 50);
-    }
-
-    #[test]
-    fn simulate_flag_ignores_external_pulls() {
-        let mut hud = Hud::new(rng());
-        hud.state.simulate = true;
-        let pull = FramePull { weapon: Some(WeaponPull { ammo: Some(1), ..WeaponPull::default() }), ..FramePull::default() };
-        hud.late_update(1.0 / 60.0, 1.0 / 60.0, basis(), pull);
-        assert_eq!(hud.state.ammo, 30); // untouched
-    }
-
-    #[test]
-    fn resize_derives_k_from_viewport_height() {
-        let mut hud = Hud::new(rng());
-        hud.resize(1920.0, 2160.0);
-        assert!((hud.k - 2.0).abs() < 1e-9);
-        assert!((hud.crosshair.k - 2.0).abs() < 1e-9);
-        assert!((hud.compass.k - 2.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn compass_bearing_matches_camera_heading_convention() {
-        // objective due north of the player should read bearing 0, matching
-        // `camera_heading_deg`'s convention (0 = -Z).
-        let b = compass_bearing((0.0, -10.0), (0.0, 0.0));
-        assert!((b - 0.0).abs() < 1e-9);
+        let p = PlayerPull::default();
+        assert!(p.health.is_none() && p.position.is_none());
     }
 }

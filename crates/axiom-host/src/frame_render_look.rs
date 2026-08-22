@@ -44,6 +44,7 @@
 use crate::frame_ambient::FrameAmbient;
 use crate::frame_bloom::FrameBloom;
 use crate::frame_depth_fog::FrameDepthFog;
+use crate::frame_indirect::FrameIndirect;
 use crate::frame_postprocess::FramePostProcess;
 use crate::frame_sky::FrameSky;
 use crate::frame_tonemap::FrameTonemap;
@@ -69,6 +70,7 @@ pub struct FrameRenderLook {
     bloom: Option<FrameBloom>,
     grade: Option<FramePostProcess>,
     tonemap: Option<FrameTonemap>,
+    indirect: Option<FrameIndirect>,
 }
 
 impl FrameRenderLook {
@@ -81,6 +83,7 @@ impl FrameRenderLook {
             bloom: None,
             grade: None,
             tonemap: None,
+            indirect: None,
         }
     }
 
@@ -172,6 +175,23 @@ impl FrameRenderLook {
 
     /// The tone map, or `None` when the app authored none — in which case the
     /// frame is presented through the 8-bit chain exactly as it always was.
+    /// The frame's two-band indirect fill, if it authored one.
+    ///
+    /// `None` and [`FrameIndirect::none`] are the same picture — every lane of
+    /// the fill is an add or a multiply, so an unauthored fill contributes an
+    /// exact zero. The `Option` is kept anyway, for the same reason the other
+    /// five are: a backend can report "this frame asked for nothing" separately
+    /// from "this frame asked for zero", and only the first is free to skip.
+    pub const fn indirect(&self) -> Option<FrameIndirect> {
+        self.indirect
+    }
+
+    /// This look with a two-band indirect fill.
+    pub const fn with_indirect(mut self, indirect: FrameIndirect) -> Self {
+        self.indirect = Some(indirect);
+        self
+    }
+
     pub const fn tonemap(&self) -> Option<FrameTonemap> {
         self.tonemap
     }

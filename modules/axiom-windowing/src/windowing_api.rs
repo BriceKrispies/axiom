@@ -482,6 +482,27 @@ impl WindowingApi {
         self.look.sky()
     }
 
+    /// Set the app-authored **two-band indirect fill** the live backend binds
+    /// with — a cool skylight band and a warm ground bounce, each with its own
+    /// normal gate.
+    ///
+    /// This is the term that stops geometry the key light does not reach from
+    /// collapsing to black. [`Self::set_ambient`]'s hemisphere is one `mix`
+    /// between two colours by the normal's up-component: it cannot say that a
+    /// vertical wall sees half the sky dome, and it has no warm bounce at all.
+    /// Unset (the default) is an every-lane zero, which every term multiplies or
+    /// adds out — so a frame that authors none renders exactly as it did before
+    /// the fill existed.
+    pub fn set_indirect(&mut self, indirect: axiom_host::FrameIndirect) {
+        self.look = self.look.with_indirect(indirect);
+    }
+
+    /// The render-look indirect fill the live backend binds with, if the app
+    /// authored one.
+    pub const fn indirect(&self) -> Option<axiom_host::FrameIndirect> {
+        self.look.indirect()
+    }
+
     /// Set the app-authored **bloom** the live backend binds with — which pixels spill
     /// light into their neighbours, how far, and how the surplus above white rolls off
     /// instead of clipping. Without it a material authored to emit above `1.0` simply

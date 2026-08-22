@@ -65,10 +65,21 @@ const CAP_AERIAL: u32 = 2048;
 const CAP_ALL: u32 =
     CAP_TEXTURES | CAP_ALPHAMASK | CAP_NORMALMAP | CAP_SHADOWS | CAP_SPECULAR | CAP_AERIAL;
 
-/// Bytes in the lighting uniform: a 96-byte header then 16 lights of 32 bytes.
+/// Bytes in the lighting uniform: a 208-byte header then 16 lights of 32 bytes.
 /// The same number `crate::scene_renderer::LIGHTS_UBO_BYTES` computes, restated
 /// here because a test may not reach into a `cfg`-gated private constant.
-const LIGHTS_UBO_BYTES: usize = 96 + 16 * 32;
+///
+/// The header grew from 96 when the two-band indirect fill landed: seven more
+/// `vec4`s — the two band colours, the gains, the budget, the two gates and the
+/// key direction. Restating it is deliberate (an independently-stated
+/// expectation can disagree with the implementation, which is the point), and
+/// the cost of that is exactly this: when the real header moves, this moves
+/// with it or every lighting-parity test fails on a bind-group size mismatch.
+const LIGHTS_UBO_BYTES: usize = 208 + 16 * 32;
+
+/// Where the light array begins: past the 96-byte scalar header and the seven
+/// `vec4`s of the two-band indirect fill.
+const FILL_BLOCK_END: usize = 208;
 
 /// `copy_texture_to_buffer` requires each row aligned to this many bytes.
 const ROW_ALIGN: u32 = 256;
@@ -150,6 +161,16 @@ impl Rig {
             .flat_map(f32::to_le_bytes)
             .collect();
         let mut bytes = header;
+        // The two-band indirect fill's seven `vec4`s sit between the header and
+        // the light array, so the array's offset is 208 and not 96. Zeroing them
+        // is what makes this rig's frames carry NO fill — every lane of the fill
+        // is an add or a multiply, so a zeroed block is the exact identity and
+        // these parity results stay the pre-fill numbers they pin.
+        //
+        // Appending `items` straight onto a 96-byte header instead puts the
+        // lights *in* the fill lanes and leaves the shader reading zeros where
+        // the sun should be — a silently unlit frame rather than an error.
+        bytes.resize(FILL_BLOCK_END, 0);
         bytes.extend(items);
         bytes.resize(LIGHTS_UBO_BYTES, 0);
         bytes
@@ -330,12 +351,23 @@ fn render_lit_uv(
     let vertex_buffer = buffer(gpu, &vertices, wgpu::BufferUsages::VERTEX);
     let instance_buffer = buffer(gpu, &instance, wgpu::BufferUsages::VERTEX);
     let lights = buffer(gpu, &rig.ubo(), wgpu::BufferUsages::UNIFORM);
+    // `ShadowU`: the identity light view-projection, then the `sun` lane. The
+    // sun is the ZERO vector and the feature bit is `0`, so `axiom_contact_shadow`
+    // returns an exact `1.0` for every light in the rig — this module measures the
+    // lighting models, and a screen-space term multiplying into them would make
+    // every documented result depend on a texture fetch instead.
     let shadow_uniform = buffer(
         gpu,
-        &[1.0_f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
-            .iter()
-            .flat_map(|lane| lane.to_le_bytes())
-            .collect::<Vec<u8>>(),
+        &[
+            1.0_f32, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0, //
+            0.0, 0.0, 0.0, 0.0,
+        ]
+        .iter()
+        .flat_map(|lane| lane.to_le_bytes())
+        .collect::<Vec<u8>>(),
         wgpu::BufferUsages::UNIFORM,
     );
     // An opaque white albedo and a flat tangent-space normal: the two textures
@@ -347,6 +379,16 @@ fn render_lit_uv(
     let shadow_view = depth_texture(gpu);
     let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         compare: Some(wgpu::CompareFunction::LessEqual),
+        ..Default::default()
+    });
+    // The unoccluded neutral the AO and contact bindings both take — `r = 1.0`,
+    // so both multiplies are exactly one. The same 1x1 white texture
+    // `crate::scene_renderer` binds on a device that runs neither chain.
+    let neutral = color_texture(gpu, [255, 255, 255, 255]);
+    let neutral_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("axiom-lighting-parity-neutral-sampler"),
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
     let material_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -394,6 +436,32 @@ fn render_lit_uv(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: shadow_uniform.as_entire_binding(),
+            },
+            // The two screen-space lighting inputs the main pass grew after this
+            // rig was written: the resolved ambient occlusion (binding 3) and the
+            // resolved contact shadow (binding 5), sharing one filtering sampler
+            // (binding 4). Both are the WHITE neutral, so both multiply by
+            // exactly one and every documented result below is the lighting model
+            // alone.
+            //
+            // They are not optional: `fs` samples both, so the pipeline layout
+            // derived from the shader demands all three entries and a rig missing
+            // them fails `create_bind_group` outright. That is how this rig came
+            // to be broken by the occlusion wiring and stayed broken — the
+            // `offscreen` feature is off in the default build, the coverage gate
+            // and the dylint gate both run without it, so nothing in CI compiles
+            // this file, let alone runs it.
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&neutral),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Sampler(&neutral_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::TextureView(&neutral),
             },
         ],
     });

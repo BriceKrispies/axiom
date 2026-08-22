@@ -41,6 +41,72 @@ pub trait DecalWorld {
 const MAX_POLY: usize = 24;
 const VERTS_PER_DECAL: usize = 36;
 
+/// Where one decal was placed, kept alongside the clipped vertex soup so a
+/// renderer that cannot upload per-frame geometry can still draw the decal.
+///
+/// **This is not in the source.** The source's decal *is* the clipped triangle
+/// soup: it wraps corners and window reveals, which is the whole reason
+/// [`DecalSystem::add`] exists. Axiom uploads mesh geometry once, at
+/// registration, and has no per-frame geometry update — so the soup can never
+/// reach a pixel in this engine, and a renderer's only option is the
+/// **projector's own face quad**, which is exactly the fallback the source
+/// itself lays down when the BVH has no triangles under the impact
+/// (`decals.js:334-357`, the `wrote == 0` arm).
+///
+/// So this records the frame `add` already computed and threw away — the
+/// orthonormal `(tangent, bitangent, normal)` basis after the roll, the
+/// half-size, and the four life terms `dec` packs per vertex — rather than
+/// making a consumer re-derive a basis that would not match. Nothing in the
+/// port reads it except `crate::scene::wiring::fx_draw`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DecalPlacement {
+    /// Whether this slot holds a decal at all. `false` for a ring slot nothing
+    /// has written yet.
+    pub occupied: bool,
+    /// `o.point` — the impact point the projector box is centred on.
+    pub point: [f64; 3],
+    /// The **normalised** surface normal (`nx, ny, nzz` in `add`).
+    pub normal: [f64; 3],
+    /// The projector's U axis, after `o.roll` (`tx, ty, tz` in `add`).
+    pub tangent: [f64; 3],
+    /// The projector's V axis (`bx, by, bz` in `add`) — `normal x tangent`.
+    pub bitangent: [f64; 3],
+    /// `o.size * 0.5`, the half-extent the quad spans along U and V.
+    pub half_size: f64,
+    /// `o.tile` — the decal-atlas tile index the recipe chose.
+    pub tile: usize,
+    /// `o.now`, the frame it was laid.
+    pub birth: f64,
+    /// The resolved life in seconds (`o.life ?? 30`, floored at `0.2`).
+    pub life: f64,
+    /// `o.fade` — the source's third `dec` lane.
+    pub fade: f64,
+    /// `o.opacity` — the decal's authored peak opacity, the fourth `dec` lane.
+    pub opacity: f64,
+    /// `add`'s own return: whether any geometry was written. A decal that wrote
+    /// nothing is one the source draws nothing for.
+    pub wrote: bool,
+}
+
+impl Default for DecalPlacement {
+    fn default() -> Self {
+        DecalPlacement {
+            occupied: false,
+            point: [0.0; 3],
+            normal: [0.0, 1.0, 0.0],
+            tangent: [1.0, 0.0, 0.0],
+            bitangent: [0.0, 0.0, 1.0],
+            half_size: 0.0,
+            tile: 0,
+            birth: 0.0,
+            life: 1.0,
+            fade: 0.72,
+            opacity: 1.0,
+            wrote: false,
+        }
+    }
+}
+
 /// `DecalSystem.add(o)`'s parameters, `decals.js:154-172`. Every field here
 /// mirrors an already-resolved value — the two-layer default nesting the
 /// source has (`FxSystem.addDecal` resolves its own `??` defaults before
@@ -81,6 +147,11 @@ pub struct DecalSystem {
     dirty_lo: usize,
     dirty_hi: Option<usize>,
     wrapped: bool,
+
+    /// One [`DecalPlacement`] per ring slot — the projector frame `add`
+    /// resolves and the vertex soup does not carry. See that type's doc for why
+    /// this exists and why it is not in the source.
+    placements: Vec<DecalPlacement>,
 }
 
 /// [`DecalSystem::flush`]'s per-frame result — see [`crate::fx::particles::
@@ -115,7 +186,17 @@ impl DecalSystem {
             dirty_lo: usize::MAX,
             dirty_hi: None,
             wrapped: false,
+            placements: vec![DecalPlacement::default(); capacity],
         }
+    }
+
+    /// One entry per ring slot, in slot order — see [`DecalPlacement`].
+    ///
+    /// Slots are recycled by [`DecalSystem::add`]'s wrapping cursor, so an entry
+    /// with `occupied == true` may still be *expired*: the reader decides, from
+    /// `birth`/`life`, exactly as the source's decal shader does per vertex.
+    pub fn placements(&self) -> &[DecalPlacement] {
+        &self.placements
     }
 
     pub fn raw_positions(&self) -> &[f32] {
@@ -374,6 +455,25 @@ impl DecalSystem {
             self.dec[v * 4 + 2] = fade as f32;
             self.dec[v * 4 + 3] = opacity as f32;
         }
+
+        // The projector frame, recorded for a renderer that cannot upload the
+        // soup above. Written from the SAME locals the soup was built from, so
+        // the quad and the clipped triangles can never disagree about where the
+        // decal is or which way it faces. See [`DecalPlacement`].
+        self.placements[slot] = DecalPlacement {
+            occupied: true,
+            point: p,
+            normal: [nx, ny, nzz],
+            tangent: [tx, ty, tz],
+            bitangent: [bx, by, bz],
+            half_size: hs,
+            tile: o.tile,
+            birth,
+            life,
+            fade,
+            opacity,
+            wrote: wrote > 0,
+        };
 
         if slot < self.dirty_lo {
             self.dirty_lo = slot;

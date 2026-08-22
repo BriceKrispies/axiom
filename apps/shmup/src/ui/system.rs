@@ -1330,21 +1330,8 @@ impl UiCore {
                 regen: self.state.regen,
             },
         );
-        let ammo = self.ammo.update(
-            dt,
-            &AmmoInput {
-                ammo: self.state.ammo,
-                reserve: self.state.reserve,
-                mag_size: self.state.mag_size,
-                weapon_name: self.state.weapon_name.clone(),
-                fire_mode: self.state.fire_mode.clone(),
-                reloading: self.state.reloading,
-                reload_progress: self.state.reload_progress,
-                lethal_count: self.state.lethal_count,
-                tactical_count: self.state.tactical_count,
-                time: self.state.time,
-            },
-        );
+        let ammo_input = self.ammo_input();
+        let ammo = self.ammo.update(dt, &ammo_input);
         let killfeed = self.killfeed.update(dt);
         let match_bar = match_frame(
             &MatchInput {
@@ -1490,6 +1477,29 @@ impl UiCore {
                 ))
             })
             .collect()
+    }
+
+    /// The slice of [`HudState`] `ammo.js` reads (`index.js:510`'s `this.ammo
+    /// .update(dt, s)`).
+    ///
+    /// Public because the `wasm32` [`super::ammo::view::AmmoView`] paints the
+    /// four *text* fields the numeric [`AmmoFrame`] does not carry — the round
+    /// counts, the weapon name, the fire mode and the equipment counts — and it
+    /// takes them from exactly this value. One definition, read by the widget
+    /// and by the view, so the two cannot drift.
+    pub fn ammo_input(&self) -> AmmoInput {
+        AmmoInput {
+            ammo: self.state.ammo,
+            reserve: self.state.reserve,
+            mag_size: self.state.mag_size,
+            weapon_name: self.state.weapon_name.clone(),
+            fire_mode: self.state.fire_mode.clone(),
+            reloading: self.state.reloading,
+            reload_progress: self.state.reload_progress,
+            lethal_count: self.state.lethal_count,
+            tactical_count: self.state.tactical_count,
+            time: self.state.time,
+        }
     }
 
     /// `resize(w, h, ctx)` (`index.js:584-592`).
@@ -1696,10 +1706,21 @@ impl UiSystem {
 
     /// The seven `ctx.events.on(...)` calls in `init` (`index.js:152-241`).
     pub fn wire_events(&mut self, ctx: &Ctx<'_>) {
+        self.wire_events_on(ctx.events);
+    }
+
+    /// The same seven subscriptions, against a bare [`EventBus`].
+    ///
+    /// `Ctx` is what a registered [`Subsystem`] is handed; a composition root
+    /// that drives the HUD without a [`crate::registry::Registry`] (see
+    /// `crate::scene::wiring::hud`) has the bus and nothing else. Both entry
+    /// points wire the *same* list, in the same order, because there is only
+    /// one list — `wire_events` delegates here rather than repeating it.
+    pub fn wire_events_on(&mut self, events: &EventBus) {
         macro_rules! on {
             ($name:literal, $payload:ty, $method:ident) => {{
                 let core = Rc::clone(&self.core);
-                let id = ctx.events.on($name, move |p: &dyn Any| {
+                let id = events.on($name, move |p: &dyn Any| {
                     if let Some(p) = p.downcast_ref::<$payload>() {
                         core.borrow_mut().$method(p);
                     }

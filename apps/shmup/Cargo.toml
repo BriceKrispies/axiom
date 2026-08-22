@@ -107,6 +107,11 @@ web-sys = { version = "0.3", features = [
     "SvgElement",
     "SvggElement",
     "Window",
+    # The minimap is the one canvas widget in a DOM HUD: `minimap.js` paints a
+    # canvas2d display list, and `ui::minimap::view` is its realiser.
+    "CanvasGradient",
+    "CanvasRenderingContext2d",
+    "HtmlCanvasElement",
 
     # Input (`input::dom` — the nine listeners `core/input.js`'s `attach()`
     # binds, plus the pointer-lock request and the gamepad poll) and the frame

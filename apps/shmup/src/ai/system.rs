@@ -1267,6 +1267,22 @@ impl AiCore {
         &self.variants[i].1
     }
 
+    /// `this._variants`, in build order — the read-only half of
+    /// [`AiCore::variant`].
+    ///
+    /// It exists because the *mutable* half cannot safely be called from render
+    /// code. [`AiCore::variant`] takes `&mut self` because it builds a variant
+    /// on first ask, and building forks [`AiCore::rng`] (`index.js:377`). A
+    /// drawer asking for a name this level never garrisoned would therefore
+    /// insert a fork into the middle of the frame stream and reshuffle every
+    /// value drawn after it — the exact hazard the "fork once, in order"
+    /// discipline exists to prevent. Anything that only wants to *read* a built
+    /// body's geometry or materials asks here.
+    #[must_use]
+    pub fn built_variants(&self) -> &[(String, SoldierBuild)] {
+        &self.variants
+    }
+
     /// `rigIndex(name)`. `index.js:395-397`.
     #[must_use]
     pub fn rig_index(&self, name: &str) -> usize {

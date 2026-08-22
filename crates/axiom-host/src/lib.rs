@@ -39,6 +39,7 @@ mod draw2d_command;
 mod draw2d_list;
 mod fill2d;
 mod frame_ambient;
+mod frame_indirect;
 mod frame_bloom;
 mod frame_capability;
 mod frame_depth_fog;
@@ -156,6 +157,7 @@ pub use host_surface_handle::HostSurfaceHandle;
 // The single frame-presentation artifact every render backend consumes;
 // derived from a render command list by axiom-render.
 pub use frame_ambient::FrameAmbient;
+pub use frame_indirect::FrameIndirect;
 pub use frame_bloom::luminance;
 pub use frame_bloom::FrameBloom;
 pub use frame_bloom::rolloff_knee;

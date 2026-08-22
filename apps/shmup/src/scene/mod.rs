@@ -8,7 +8,7 @@
 //! | module        | what it composes |
 //! |---------------|------------------|
 //! | [`level`]     | `world/index.js`'s `WorldSystem.init` — the assembler, the ground, the collision BVH, the spawn table |
-//! | [`sky_look`]  | `sky/index.js`'s per-frame key-light and sky terms, from the CPU atmosphere model |
+//! | [`wiring`]    | every ported `<name>/index.js` facade, constructed and stepped |
 //! | [`game`]      | `player/index.js`'s `PlayerSystem` + `core/engine.js`'s frame ordering |
 //! | [`app`]       | `main.js` — the browser bootstrap, on Axiom's engine path |
 //! | [`furniture`] | **not** a port — a labelled placeholder standing in for the unported `dressing.js`, so the prop library is not dead |
@@ -18,6 +18,7 @@
 
 pub mod app;
 pub mod furniture;
+pub mod wiring;
 pub mod game;
 pub mod level;
-pub mod sky_look;
+

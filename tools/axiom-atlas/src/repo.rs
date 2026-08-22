@@ -98,7 +98,27 @@ impl Repo {
             if p.is_absolute() {
                 p.to_path_buf()
             } else {
-                self.root.join(p)
+                // Relative paths resolve against the CWD, like every other
+                // CLI, so `ax owns src/lib.rs` works from inside a crate
+                // rather than silently resolving to <root>/src/lib.rs. That
+                // bug was invisible while everything ran from the repo root
+                // and only surfaced once `ax` was installed on PATH.
+                //
+                // A repo-root-relative path stays valid as a fallback when it
+                // exists and the CWD form does not, because `ax apply`
+                // batches and the Claude Code hooks both speak repo-relative
+                // paths. The CWD wins any tie, and a path that exists in
+                // neither place is reported against the CWD, which is where a
+                // caller creating a new file means to put it.
+                let from_cwd = env::current_dir()
+                    .unwrap_or_else(|_| self.root.clone())
+                    .join(p);
+                let from_root = self.root.join(p);
+                if from_cwd.exists() || !from_root.exists() {
+                    from_cwd
+                } else {
+                    from_root
+                }
             }
         };
 

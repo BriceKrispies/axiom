@@ -11,19 +11,29 @@
 //! | the character       | [`crate::physics::character::Character`] |
 //! | the movement machine | [`crate::player::movement::Movement`] |
 //! | the camera feel      | [`crate::player::camera::CameraRig`] |
-//! | the HUD model        | [`crate::ui::Hud`] |
-//! | the sky's frame terms | [`crate::scene::sky_look`] |
+//! | the HUD              | [`crate::scene::wiring::hud::HudRig`] (`ui/index.js`) |
+//! | the sky's frame terms | [`crate::scene::wiring::look`] (`sky/index.js`) |
 //!
 //! and nothing else: it decides no behaviour of its own beyond the seven lines
 //! the source's `PlayerSystem` decides.
 //!
 //! ## What is honestly not connected
 //!
-//! * **`crate::weapons`** — the geometry kit is built and placed (see
-//!   [`crate::scene::app`]), but there is no viewmodel rig (`rig.js`, unported)
-//!   and no firing: `weapons/index.js`, `viewmodel.js` and `fire.js` are not
-//!   ported, and `ballistics::RaycastWorld::fire_bullet` needs the unported
-//!   penetration solver.
+//! * **`crate::weapons`** — the geometry kit is built and placed, and the
+//!   **viewmodel rig now drives it** (`crate::scene::app::drive_viewmodel`):
+//!   sway, breathing, the lag layer and the ADS transition all run against real
+//!   player state.
+//!
+//!   Still not connected: **firing**. `weapons::system` is a complete port of
+//!   `weapons/index.js:1-843` and nothing constructs it, so `trigger` is always
+//!   false and no recoil, no muzzle flash and no shell ejection reach the frame.
+//!   Per-part animation is also absent for a structural reason rather than a
+//!   missing port — the rifle's buckets are merged **per material**, so there is
+//!   no bolt node to slide.
+//!
+//!   Every claim in this list is a dated one. The line that used to sit here
+//!   said `viewmodel.js` was unported; it had been ported for some time, and
+//!   the rifle lay in the road on the strength of it.
 //! * **`crate::fx`** — [`crate::physics::probe::PhysicsWorld`] implements
 //!   `FxWorld`, so the seam is closed, but `FxSystem`'s output is particle and
 //!   decal *geometry*, which needs the unported render frame graph (instanced,
@@ -53,8 +63,10 @@ use crate::player::springs::{approach, clamp, clamp01, lerp};
 use crate::player::tuning::{CAMERA, MOVE, STAND};
 use crate::rng::Rng;
 use crate::scene::level::{build_level, Level, SpawnPoint};
-use crate::scene::sky_look::{self, SkyLook};
-use crate::ui::{CameraBasis, FramePull, Hud, HudFrame, PlayerPull};
+
+use crate::scene::wiring::hud::{HudPull, HudRig};
+use crate::ui::system::{UiClock, UiFrame};
+use crate::ui::PlayerPull;
 
 /// `MAX_DT` — the frame delta clamp (`config.js`'s `MAX_DT`, applied at
 /// `engine.js`'s step). A tab that was backgrounded must not resolve a
@@ -80,8 +92,20 @@ pub struct Game {
     pub physics: PhysicsWorld,
     pub movement: Movement,
     pub rig: CameraRig,
-    pub hud: Hud,
-    pub sky: SkyLook,
+    /// `ui/index.js` — the whole HUD: eleven widgets, their DOM views, the
+    /// seven event subscriptions and the effect journal. This used to be
+    /// `ui::Hud`, a model-only second port of the same file with no view.
+    pub hud: HudRig,
+    /// `sky/index.js` — the real ephemeris, settable hour, weather and the
+    /// moon key-handover. This replaced `scene::sky_look`, which computed the
+    /// same sun from a FROZEN `HOUR` constant and omitted the aureole exponent,
+    /// the beam floor, the cloud dimmer and the moon. Keeping both would have
+    /// been two suns, one of which could not move.
+    pub sky: crate::scene::wiring::look::SkyDriver,
+    /// `materials/index.js` — the per-key parameter merge. Held for the frame
+    /// rather than dropped, which is why all 46 keys used to share one
+    /// hand-authored surface.
+    pub materials: crate::scene::wiring::look::MaterialLook,
     pub time: Time,
 
     /// The fixed-step accumulator (`engine.js:271`).
@@ -107,6 +131,27 @@ pub struct Game {
     /// The frame's *unscaled* delta. `Time` carries the scaled `dt`; the HUD's
     /// damped channels want the raw one (`index.js`'s `rawDt`).
     raw_dt: f64,
+
+    // ---- the ported subsystem facades ------------------------------------
+    //
+    // Each of these is a complete port of a `<name>/index.js` that, until now,
+    // nothing constructed. Their construction ORDER in `Game::new` is not a
+    // style choice — see `crate::scene::wiring`'s module doc.
+    /// `fx/index.js` + `audio/index.js`.
+    pub fx_audio: crate::scene::wiring::fx_audio::FxAudio,
+    /// Land/step events the source emits on the bus and this port only cleared.
+    pub pulse: crate::scene::wiring::fx_audio::MovementPulse,
+    /// `weapons/index.js` — the firing machine. **It owns the viewmodel**, so
+    /// nothing else may construct one: `scene::app` briefly held a second, which
+    /// rendered a rifle that could not recoil because the recoil lands on the
+    /// core's copy.
+    pub weapons: crate::scene::wiring::weapons::WeaponsRig,
+    /// What the weapons produced this frame, for the HUD and the renderer.
+    pub weapons_frame: crate::scene::wiring::weapons::WeaponsFrame,
+    /// `ai/index.js` — nav, squads, soldiers.
+    pub ai: crate::scene::wiring::ai::AiWiring,
+    /// The AI frustum needs the viewport aspect and nothing else holds it.
+    pub aspect: f64,
 }
 
 impl Game {
@@ -118,6 +163,18 @@ impl Game {
         let config = Config::default();
         let mut root = Rng::new(seed);
 
+        // **The source's init order, from `core/registry.js`'s topological sort:**
+        // `render, materials, sky, physics, world, player, weapons, fx, ai, ui,
+        // audio`. `materials` and `sky` draw nothing; every other slot forks
+        // once. The constructors below sit in that order, because a subsystem
+        // built in the wrong place silently reshuffles every later value in the
+        // level.
+        //
+        // One honesty note: the port's stream cannot match the source's in
+        // ABSOLUTE terms, because `build_level` takes two forks where
+        // `world/index.js:91` takes one — a borrow-checker workaround recorded
+        // at `level.rs:158`. What this ordering buys is that the subsystems stay
+        // consistent with each other and with themselves across runs.
         let level = build_level(&mut root);
         let physics = PhysicsWorld::new(level.world.clone());
 
@@ -149,7 +206,23 @@ impl Game {
         let mut rig = CameraRig::new(config.fov);
         rig.reset(STAND.eye);
 
-        let sky = sky_look::resolve(sky_look::HOUR);
+        // sky (slot 3) and materials (slot 2) draw no RNG, so their position
+        // here is free; they sit before the forking slots to match the source.
+        let sky = crate::scene::wiring::look::SkyDriver::new(
+            config.quality,
+            crate::scene::wiring::look::HOUR,
+        );
+        let materials = crate::scene::wiring::look::MaterialLook::new(config.quality, 0.0);
+
+        // weapons (slot 7) forks before fx.
+        let mut weapons = crate::scene::wiring::weapons::WeaponsRig::new(&mut root);
+        // fx (slot 8), then ai (slot 9), then the HUD (slot 10), then audio
+        // (slot 11, last).
+        let fx = crate::scene::wiring::fx_audio::build_fx(&mut root, &config, &physics);
+        let ai = crate::scene::wiring::ai::AiWiring::new(root.fork(), &config, &level, &physics, feet);
+        let hud = HudRig::new(root.fork());
+        let audio = crate::scene::wiring::fx_audio::build_audio(&mut root, &physics);
+        let fx_audio = crate::scene::wiring::fx_audio::FxAudio::new(fx, audio);
 
         let mut time = Time::default();
         time.fixed = FIXED_DT;
@@ -161,8 +234,15 @@ impl Game {
             physics,
             movement,
             rig,
-            hud: Hud::new(root.fork()),
+            hud,
             sky,
+            materials,
+            weapons,
+            weapons_frame: crate::scene::wiring::weapons::WeaponsFrame::default(),
+            fx_audio,
+            pulse: crate::scene::wiring::fx_audio::MovementPulse::default(),
+            ai,
+            aspect: 1280.0 / 720.0,
             time,
             accumulator: 0.0,
             control_enabled: true,
@@ -187,6 +267,9 @@ impl Game {
             &game.config,
             &game.time,
         );
+        // `WeaponCore::init` needs the bus and the clock, which only exist once
+        // the struct is built.
+        game.weapons.init(game.events.clone(), game.time);
         game
     }
 
@@ -238,11 +321,90 @@ impl Game {
             &self.time,
         );
 
-        self.pose()
+        // The subsystems that read the finished frame: fx + audio off the
+        // movement pulse, then the AI off the camera the rig just settled.
+        // The sky and the material cache, before anything reads their output.
+        let eye = self.rig.eye_position;
+        self.sky.frame(self.time.dt, self.time.elapsed, (eye[0], eye[2]));
+        self.materials.frame(self.time.dt);
+
+        let pose = self.pose();
+        // The weapons before the fx that consume their events.
+        let mut link = crate::scene::wiring::weapons::PlayerLink::new(
+            &mut self.rig,
+            &self.movement,
+            self.ads_requested,
+        );
+        self.weapons_frame = self.weapons.frame(
+            self.time.dt,
+            self.time,
+            &*input,
+            pose,
+            Some(&mut link),
+            None,
+        );
+        let state = crate::scene::wiring::fx_audio::FrameState::of(self);
+        // The weapons' two rich payloads, into the subsystems built to consume
+        // them. `WeaponsFrame` has carried `fire` and `shell` since the weapons
+        // seam landed and NOTHING read either, so fx's only input was footsteps:
+        // no muzzle flash, no tracers, no brass. The comment one call above —
+        // "the weapons before the fx that consume their events" — described an
+        // intent, not a wire.
+        //
+        // `bullet:impact` and `explosion` are deliberately NOT bridged here:
+        // impacts are raised through `RaycastWorld::fire_bullet`, which has no
+        // `WeaponPhysics` impl, so no round hits anything yet. Faking one here
+        // would put sparks and decals on collisions that never happened.
+        let fired = self.weapons_frame.fire;
+        let ejected = self.weapons_frame.shell;
+        let now = self.time.elapsed;
+        if let Some(f) = fired {
+            self.fx_audio.weapon_fire(
+                &state,
+                &crate::fx::system::WeaponFire {
+                    origin: Some((f.origin.x, f.origin.y, f.origin.z)),
+                    dir: Some((f.dir.x, f.dir.y, f.dir.z)),
+                    weapon: f.weapon.map(str::to_owned),
+                    ..Default::default()
+                },
+                &crate::audio::system::WeaponFire {
+                    weapon: f.weapon.map(str::to_owned),
+                    origin: Some([f.origin.x, f.origin.y, f.origin.z]),
+                    ..Default::default()
+                },
+            );
+        }
+        if let Some(sh) = ejected {
+            self.fx_audio.weapon_shell(
+                now,
+                &crate::fx::system::WeaponShell {
+                    position: Some((sh.position.x, sh.position.y, sh.position.z)),
+                    velocity: Some((sh.velocity.x, sh.velocity.y, sh.velocity.z)),
+                },
+            );
+        }
+        let pulse = self.pulse;
+        self.fx_audio.frame(&state, &pulse, true);
+        self.ai.frame(
+            self.time.dt,
+            self.time.frame,
+            self.time.elapsed,
+            pose,
+            self.aspect,
+            &self.sky,
+            self.movement.position,
+            None,
+            None,
+        );
+        pose
     }
 
     /// `fixedUpdate(h, ctx)`. `player/index.js:266-273`.
     fn fixed_update(&mut self, input: &Input) {
+        // The source ticks weapons on the fixed step even while paused
+        // (reload timers and bullet flight do not stop for a menu), so this
+        // sits ahead of the `control_enabled` return below.
+        self.weapons.fixed_step(FIXED_DT, None);
         let look_dt = if self.time.dt > 1e-5 {
             self.time.dt
         } else {
@@ -322,15 +484,23 @@ impl Game {
     /// bob. The event bus emissions (`player:land`, `player:step`) are the
     /// audio/fx arms' inputs and have no listener here — see the module doc.
     fn drain_movement_events(&mut self) {
+        // The source EMITS `player:land` / `player:footstep` here
+        // (`player/index.js:332,351`); this port only cleared the flags, so
+        // footstep and landing audio, and the dust puff, never fired. The pulse
+        // carries them to `fx_audio` for this frame.
+        self.pulse = crate::scene::wiring::fx_audio::MovementPulse::default();
         if self.movement.land_event.pending {
+            self.pulse.land = Some(self.movement.land_event);
             self.movement.land_event.pending = false;
             // The source's `if (mag > 0.35) m._footHold = FOOTSTEP.landHold`
             // is redundant here: `post_move` already sets `foot_hold` to
             // exactly that on the landing frame (`movement.js:865`), so the
             // rig's dip magnitude has nothing left to add.
             self.rig.on_land(self.movement.land_event.speed);
+            self.weapons.on_land(self.movement.land_event.speed);
         }
         if self.movement.step_event.pending {
+            self.pulse.step = Some(self.movement.step_event);
             self.movement.step_event.pending = false;
             self.rig
                 .on_footstep(self.movement.sprinting, self.movement.stance);
@@ -350,6 +520,9 @@ impl Game {
                 },
             );
         }
+        if self.movement.jumped {
+            self.weapons.on_jump();
+        }
         self.movement.jumped = false;
     }
 
@@ -358,14 +531,14 @@ impl Game {
     /// machine from being driven. `ui/menu.js`'s `open`/`close`.
     fn handle_pause(&mut self, input: &Input) {
         if input.action_pressed(Action::Pause) {
-            self.paused = !self.paused;
-            self.control_enabled = !self.paused;
-            if self.paused {
-                self.hud.menu.show(None, &self.events);
-            } else {
-                self.hud.menu.close(None, &self.events);
-            }
+            self.hud.toggle_menu(&self.events);
         }
+        // `PauseMenu` is the single owner of open/closed; these two mirror it,
+        // so the pointer-lock-loss path inside `UiCore::late_update` reaches
+        // them too. `UiInput::pause_pressed` is left false in the wiring for
+        // exactly this reason — the edge arrives here and only here.
+        self.paused = self.hud.menu_open();
+        self.control_enabled = !self.paused;
     }
 
     /// The frame's camera pose — `rig.applyTo(camera)` (`camera.js:346-355`),
@@ -378,31 +551,25 @@ impl Game {
         }
     }
 
-    /// The camera's XZ basis, which the HUD's damage arcs and compass need —
-    /// `index.js:486-496`'s read of `camera.matrixWorld`'s columns 0 and 2.
-    /// Yaw alone determines it: pitch and roll do not change the XZ heading in
-    /// the source either, because both columns are re-normalised after the XZ
-    /// projection.
-    pub fn camera_basis(&self) -> CameraBasis {
-        let yaw = self.movement.yaw;
-        CameraBasis {
-            right_x: yaw.cos(),
-            right_z: -yaw.sin(),
-            forward_x: -yaw.sin(),
-            forward_z: -yaw.cos(),
-        }
-    }
-
-    /// Drive the HUD with this frame's real state — the `FramePull` seam bound
-    /// to the movement machine. `weapon` stays `None`: no weapons subsystem is
-    /// ported, and the HUD's own defaults are what the source shows when
-    /// `ctx.peek('weapons')` is absent.
-    pub fn hud_frame(&mut self) -> HudFrame {
-        let basis = self.camera_basis();
+    /// Drive the HUD with this frame's real state — the seams [`HudPull`]
+    /// names, bound to the movement machine, the weapon rig and the AI. Call it
+    /// after the camera has reached its final transform.
+    pub fn hud_frame(&mut self, input: &Input) -> UiFrame {
+        let pose = self.pose();
         let position = self.movement.render_position;
-        let pull = FramePull {
-            weapon: None,
-            player: Some(PlayerPull {
+        let weapon = self.weapons.hud_pull();
+        let actors = self.ai.actor_poses();
+        let pull = HudPull {
+            dt: self.time.dt,
+            clock: UiClock {
+                raw: self.time.raw,
+                elapsed: self.time.elapsed,
+            },
+            pose,
+            aspect: self.aspect,
+            input,
+            weapon: Some(weapon),
+            player: PlayerPull {
                 health: Some(100.0),
                 max_health: Some(100.0),
                 armour: Some(0.0),
@@ -413,12 +580,11 @@ impl Game {
                 ads: Some(self.ads_requested),
                 airborne: Some(!self.movement.grounded),
                 position: Some([position[0] as f32, position[1] as f32, position[2] as f32]),
-            }),
-            blips: &[],
-            objectives: &[],
+            },
+            player_position: position,
+            actors: &actors,
         };
-        self.hud
-            .late_update(self.time.dt, self.raw_dt, basis, pull)
+        self.hud.frame(pull, &self.events)
     }
 }
 
@@ -688,14 +854,15 @@ mod tests {
         input.key_down("KeyW");
         input.key_down("ShiftLeft");
         run(&mut game, &mut input, 90);
-        let frame = game.hud_frame();
+        let frame = game.hud_frame(&input);
         assert!(game.movement.sprinting, "sprinting with W + Shift held");
-        assert!(game.hud.state.sprint, "and the HUD knows it");
-        assert!(game.hud.state.move_amount > 0.0);
+        assert!(game.hud.core().borrow().state.sprint, "and the HUD knows it");
+        assert!(game.hud.core().borrow().state.move_amount > 0.0);
         assert!(frame.hud_visible > 0.0);
-        // The compass heading follows the camera basis.
-        let basis = game.camera_basis();
-        assert!((basis.forward_x.hypot(basis.forward_z) - 1.0).abs() < 1e-12);
+        // The compass heading follows the camera basis, which `UiCore` now
+        // derives from `camera.matrixWorld` itself rather than from yaw — so
+        // this reads the frame the HUD produced, not a second computation of it.
+        assert!((frame.basis.forward_x.hypot(frame.basis.forward_z) - 1.0).abs() < 1e-12);
     }
 
     #[test]

@@ -540,6 +540,31 @@ impl AudioCore {
         }
     }
 
+    /// Push the audio device's **absolute** clock into the graph —
+    /// `AudioContext.currentTime`, which every scheduled event is dated
+    /// against (`dsp.js` schedules at `ctx.currentTime + delay` throughout).
+    ///
+    /// [`crate::audio::web_audio`]'s module doc says the device clock is
+    /// "pushed the other way through
+    /// [`AudioGraph::set_current_time`](crate::audio::graph::AudioGraph::set_current_time)",
+    /// and until this method existed there was no way to do it: [`AudioCore::
+    /// graph`] hands out a shared reference and [`AudioCore::advance`] can only
+    /// add a delta. A browser caller driving the clock with per-frame deltas
+    /// accumulates the difference between rAF time and the audio device's own
+    /// clock, and once the graph's notion of "now" falls behind the device's,
+    /// every voice is scheduled in the past (Web Audio clamps those to
+    /// immediately, collapsing envelopes into clicks); once it runs ahead, they
+    /// are scheduled late. Neither is recoverable by the synthesis, because the
+    /// synthesis is what read the wrong `currentTime`.
+    ///
+    /// Call once per frame, before [`AudioCore::update`]. A native caller uses
+    /// [`AudioCore::advance`] instead and never calls this.
+    pub fn set_context_time(&mut self, t: f64) {
+        if let Some(live) = self.live.as_mut() {
+            live.graph.set_current_time(t);
+        }
+    }
+
     /* ================================================================ */
     /* frame                                                            */
     /* ================================================================ */

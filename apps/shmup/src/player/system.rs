@@ -1610,24 +1610,44 @@ impl PlayerSystem {
         Rc::clone(&self.core)
     }
 
-    /// `index.js:186-190`'s three subscriptions.
+    /// `index.js:186-190`'s three subscriptions, against the `Ctx` the registry
+    /// hands `init`. The work is [`subscribe`]; this is the `Ctx` front door
+    /// onto it.
     pub fn wire_events(&mut self, ctx: &Ctx<'_>) {
-        macro_rules! on {
-            ($name:literal, $payload:ty, $method:ident) => {{
-                let core = Rc::clone(&self.core);
-                let id = ctx.events.on($name, move |p: &dyn Any| {
-                    if let Some(p) = p.downcast_ref::<$payload>() {
-                        core.borrow_mut().$method(p);
-                    }
-                    Ok(())
-                });
-                self.offs.push(($name, id));
-            }};
-        }
-        on!("damage:dealt", DamageDealtEvent, on_damage_dealt);
-        on!("explosion", ExplosionEvent, on_explosion);
-        on!("bullet:impact", BulletImpactEvent, on_bullet_impact);
+        self.offs.extend(subscribe(&self.core, ctx.events));
     }
+}
+
+/// `index.js:186-190`'s three subscriptions, taking the **bus** rather than a
+/// [`Ctx`].
+///
+/// It was reachable only through `&Ctx<'_>`, and `Ctx` has a private field, so
+/// nothing outside `crate::engine` can build one. Nor can this system reach a
+/// real one: `PlayerSystem::deps()` names `world` and `render`, neither of
+/// which is ported, so `Registry::resolve` rejects the graph the moment
+/// `player` is registered. `ctx.events` was the only field the body ever read,
+/// so the narrower parameter is also the honest one.
+pub fn subscribe(
+    core: &Rc<RefCell<PlayerCore>>,
+    events: &EventBus,
+) -> Vec<(&'static str, SubscriptionId)> {
+    macro_rules! on {
+        ($name:literal, $payload:ty, $method:ident) => {{
+            let core = Rc::clone(core);
+            let id = events.on($name, move |p: &dyn Any| {
+                if let Some(p) = p.downcast_ref::<$payload>() {
+                    core.borrow_mut().$method(p);
+                }
+                Ok(())
+            });
+            ($name, id)
+        }};
+    }
+    vec![
+        on!("damage:dealt", DamageDealtEvent, on_damage_dealt),
+        on!("explosion", ExplosionEvent, on_explosion),
+        on!("bullet:impact", BulletImpactEvent, on_bullet_impact),
+    ]
 }
 
 impl Subsystem for PlayerSystem {
@@ -1684,8 +1704,16 @@ impl Subsystem for PlayerSystem {
             .update(ctx.time.dt, ctx.time, ctx.config, &*input);
     }
 
+    /// `dispose()`. `index.js:740-751`'s `off()` calls: the `offs` list exists
+    /// so the subscriptions can be **cancelled**, and clearing the `Vec` (what
+    /// this used to do) drops the ids and leaves the handlers on the bus —
+    /// each holding an `Rc` to the core it was disposing. The same mistake is
+    /// in `audio`, `ui`, `ai` and `weapons`, which are other slices' files.
     fn dispose(&mut self) {
-        self.offs.clear();
+        let bus = self.core.borrow().events.clone();
+        for (name, id) in self.offs.drain(..) {
+            bus.off(name, id);
+        }
         self.core.borrow_mut().dispose();
     }
 }

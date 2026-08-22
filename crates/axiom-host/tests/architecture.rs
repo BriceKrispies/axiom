@@ -366,6 +366,7 @@ fn lib_exports_are_curated_set() {
         // set must name every export, so it is pinned here like its `FrameAmbient`
         // sibling).
         "pub use frame_depth_fog::FrameDepthFog;",
+        "pub use frame_indirect::FrameIndirect;",
         "pub use frame_packet::FrameCamera;",
         "pub use frame_packet::FrameDrawItem;",
         "pub use frame_packet::FrameFeatureSet;",

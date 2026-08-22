@@ -118,6 +118,7 @@ impl RunningApp {
         // The app's authored sky and bloom ride onto the outcome the same way, for
         // the same reason (captured before the closure borrows `self`).
         let sky = self.sky;
+        let indirect = self.indirect;
         let bloom = self.bloom;
         let rendered = self.render.then(|| {
             let mut frame =
@@ -254,6 +255,7 @@ impl RunningApp {
             .with_depth_fog(depth_fog)
             .with_postprocess(postprocess)
             .with_sky(sky)
+            .with_indirect(indirect)
             .with_bloom(bloom)
         });
         rendered.unwrap_or_else(|| FrameOutcome::simulation_only(tick, self.clear_color))

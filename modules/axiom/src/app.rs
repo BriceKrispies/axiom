@@ -430,6 +430,8 @@ pub struct RunningApp {
     // an app that never sets one is unchanged.
     depth_fog: Option<FrameDepthFog>,
     sky: Option<axiom_host::FrameSky>,
+    /// The frame's two-band indirect fill, authored by the app.
+    indirect: Option<axiom_host::FrameIndirect>,
     bloom: Option<axiom_host::FrameBloom>,
     // The frame's tonemap/colour grade (exposure/white-balance/contrast/
     // saturation), authored by the app and carried onto every `FrameOutcome` so
@@ -574,6 +576,7 @@ impl RunningApp {
             ambient: FrameAmbient::default_hemisphere(),
             depth_fog: None,
             sky: None,
+            indirect: None,
             bloom: None,
             postprocess: None,
             light_direction: authored.light_direction,

@@ -60,21 +60,21 @@ use axiom_math::{Mat4, Quat};
 use crate::physics::bvh::StaticWorld;
 use crate::physics::surfaces::layer;
 use crate::rng::Rng;
-use crate::scene::furniture::place_street_furniture;
-use crate::world::assembler::Assembler;
-use crate::world::buildings::{build_building, collapse_roof, CollapseHole};
 use crate::world::geo::WorldGeo;
-use crate::world::ground::build_ground;
-use crate::world::layout::BUILDINGS;
 use crate::world::palette::{Palette, Surface};
-use crate::world::props::register_props;
+use crate::world::buildings::BuildingInfo;
+use crate::world::system::{WorldLight, WorldSystem};
 
 /// `LEVEL_YAW` / `LEVEL_TX` / `LEVEL_TZ` (`world/index.js:60-62`) — LEVEL space
 /// to WORLD space. The street is authored down -Z; this yaw puts it on the axis
 /// the canonical hero camera looks along.
-pub const LEVEL_YAW: f32 = 0.5877;
-pub const LEVEL_TX: f32 = 0.9;
-pub const LEVEL_TZ: f32 = 1.34;
+///
+/// Re-exported from `world::system` rather than re-declared. This module used
+/// to carry its own `f32` copies of the same three numbers, and they were not
+/// the same numbers: `f64::from(0.5877_f32)` is `0.58770000934600830078125`,
+/// so a spawn yaw computed here disagreed with one computed there in the
+/// twelfth decimal place. The source has one value; so does this port.
+pub use crate::world::system::{LEVEL_TX, LEVEL_TZ, LEVEL_YAW};
 
 /// Spawn points in LEVEL space: `[x, z, yaw]` plus a tag. `SPAWNS`,
 /// `world/index.js:74-83`. They live in `index.js` rather than `layout.js` in
@@ -130,6 +130,21 @@ pub struct Level {
     pub world: Rc<StaticWorld>,
     /// `world.spawnPoints`, already in WORLD space.
     pub spawns: Vec<SpawnPoint>,
+    /// The world's punctual lights — `this.bulbs` then `this.lamps`
+    /// (`_addLights`, `world/index.js:169-196`), in WORLD space.
+    pub practicals: Vec<WorldLight>,
+    /// Every building's resolved spec and anchors.
+    ///
+    /// Carried because the minimap's vector bake reads `world.buildings`
+    /// (`minimap.js:184-201`) through `ui::minimap::LayoutSource`, and this
+    /// struct used to drop the whole `WorldSystem` the moment it had copied the
+    /// geometry out — so nothing reachable from `Game` could answer that
+    /// question and the minimap silently fell through to its procedural plate.
+    ///
+    /// Only the *anchors and specs* are kept, not the system: `BuildingInfo`
+    /// carries no vertex data, so this is metadata, whereas retaining the whole
+    /// `WorldSystem` would pin every merged batch's geometry for the run.
+    pub buildings: Vec<BuildingInfo>,
     /// `A.stats` — reported so a caller can see the level is real, and see what
     /// it costs, without walking the geometry.
     pub static_tris: usize,
@@ -152,78 +167,61 @@ impl Level {
     }
 }
 
-/// Build the level. `root` is the engine's root stream; the world subsystem
-/// forks its own from it (`this.rng = ctx.rng.fork()`, `world/index.js:91`).
+/// Build the level by running [`WorldSystem::init`] — the port of
+/// `WorldSystem.init` (`world/index.js:88-161`) — and translating what it
+/// produces into the renderable, collidable shape the rest of the game wants.
 ///
-/// Two forks, not one: the source hands the *same* `rng` object to
-/// `new Assembler({rng})` and to every content pass, and Rust will not let a
-/// pass borrow `&mut Rng` while it also holds `&mut Assembler` that owns it. So
-/// the Assembler gets its own fork (it only ever uses it for opt-in placement
-/// jitter, which this port never enables) and the content passes share the
-/// second — which is the one that matters, because it is the one whose draw
-/// order the ground, the buildings and the prototypes all depend on.
+/// **This function used to re-implement that build inline**, and the copy had
+/// drifted: it took two `root.fork()`s where the source takes one
+/// (`world/index.js:91`), so every content pass ran off a different stream and
+/// the level was not the level the source describes; and it never called
+/// `_addLights`, so the world had no practicals at all. `WorldSystem` — a
+/// complete, checkpointed port of the same eleven passes — was sitting unused
+/// in `world/system.rs` the whole time, with **zero** references outside its
+/// own file.
+///
+/// That is the fifth hand-inlined duplicate this port has produced, and it is
+/// the reason the lights were missing: the faithful version ran them, and
+/// nothing called the faithful version. Delegating is what keeps the pass
+/// order, the stream discipline and the light registration in ONE place, so
+/// the next pass added to the world cannot be missing from the level.
 pub fn build_level(root: &mut Rng) -> Level {
-    let assembler_rng = root.fork();
-    let mut rng = root.fork();
+    let world_system = WorldSystem::init(root);
 
-    let mut asm = Assembler::new(assembler_rng);
-    asm.set_transform(LEVEL_YAW, LEVEL_TX, LEVEL_TZ);
-
-    // 1. prototypes first: the level references them by id while it builds.
-    //    The returned summaries are kept because `finalize`'s `InstancedDraw`
-    //    names its prototype by id and does *not* carry the geometry — the
-    //    Assembler drains its prototype table into the batches. This is the
-    //    only place that geometry is still reachable.
-    let protos = register_props(&mut asm, &mut rng);
-
-    // 2. ground, then the shells that stand on it.
-    build_ground(&mut asm, &mut rng);
-
-    // 3. the twenty buildings. `collapseRoof`'s hole position is chosen by the
-    //    caller, not by `buildings.js` (`world/index.js:120-125`) — two `rng`
-    //    draws, in that order, only for a spec flagged `collapse`.
-    for spec in BUILDINGS {
-        let info = build_building(&mut asm, &mut rng, spec);
-        if spec.collapse {
-            let hole = CollapseHole {
-                x: spec.x as f32 + rng.range(-2.0, 2.0) as f32,
-                z: spec.z as f32 + rng.range(-2.0, 2.0) as f32,
-            };
-            collapse_roof(&mut asm, &mut rng, spec, &info, hole);
-        }
-    }
-
-    // 4. the placeholder for `dressing.js`. Draws no random numbers, so it
-    //    cannot perturb anything above it — see `crate::scene::furniture`.
-    place_street_furniture(&mut asm);
-
-    // The spawn table is authored in LEVEL space; `A.toWorld` is the same
-    // transform every piece of geometry above went through.
-    let spawns: Vec<SpawnPoint> = SPAWNS
+    // `WorldSystem` states a spawn's position as a `V3`; this module's own
+    // `SpawnPoint` states it as `[f64; 3]`. One value conversion at one seam,
+    // rather than a second type threaded through every consumer.
+    let spawns: Vec<SpawnPoint> = world_system
+        .spawn_points
         .iter()
-        .map(|(x, z, yaw, tag)| {
-            let p = asm.to_world(*x as f32, 0.0, *z as f32);
-            SpawnPoint {
-                position: [f64::from(p.x), f64::from(p.y), f64::from(p.z)],
-                yaw: yaw + f64::from(LEVEL_YAW),
-                tag,
-            }
+        .map(|s| SpawnPoint {
+            position: [s.position.x, s.position.y, s.position.z],
+            yaw: s.yaw,
+            tag: s.tag,
         })
         .collect();
 
-    let result = asm.finalize();
-    asm.release_cache();
+    // `this.bulbs` then `this.lamps` (`world/index.js:170-190`) — the world's
+    // practicals, in the order `_addLights` registers them. Both lists are
+    // carried whole; which of them a frame can actually afford is the
+    // renderer's budget question, answered where the camera is known.
+    let practicals: Vec<WorldLight> = world_system
+        .bulbs
+        .iter()
+        .chain(world_system.lamps.iter())
+        .copied()
+        .collect();
 
     let mut world = StaticWorld::new();
     let mut collide_tris = 0usize;
-    for mesh in &result.collision {
+    for mesh in &world_system.collision {
         let (tris, count) = triangle_soup(&mesh.geo);
         collide_tris += count;
         world.add_triangles(&tris, count, mesh.surface, layer::STATIC, "world");
     }
     world.build();
 
-    let statics = result.statics.iter().map(|s| LevelBatch {
+    let statics = world_system.statics.iter().map(|s| LevelBatch {
         key: s.key.clone(),
         surface: s.surface,
         mesh: to_mesh_data(&s.geo),
@@ -242,16 +240,22 @@ pub fn build_level(root: &mut Rng) -> Level {
     // data carries no per-instance colour, and the material it would tint is
     // the unported one. Every instance of a prototype weathers identically.
     let mut instanced: Vec<LevelBatch> = Vec::new();
-    for b in &result.instanced {
+    for b in &world_system.instanced {
         let placements = b.matrices.iter().map(transform_of);
         match instanced.iter_mut().find(|x| x.key == b.proto_id) {
             Some(existing) => existing.instances.extend(placements),
             None => {
-                let geo = protos
+                // BOTH prototype tables. `register_props` registers the
+                // world's own props and `register_dressing_props` the dressing
+                // pass's; looking in only the first panicked the moment the
+                // dressing was actually called, because every gate, planter and
+                // debris piece it places lives in the second.
+                let geo = world_system
+                    .prototypes
                     .iter()
                     .find(|p| p.id == b.proto_id)
                     .map(|p| &p.geo)
-                    .expect("every placed prototype was registered by register_props");
+                    .expect("every placed prototype was registered by one of the two tables");
                 instanced.push(LevelBatch {
                     // Keyed on the *prototype* id so the merge above is by
                     // prototype; the palette key drives the albedo instead.
@@ -270,10 +274,12 @@ pub fn build_level(root: &mut Rng) -> Level {
         batches,
         world: Rc::new(world),
         spawns,
-        static_tris: result.stats.static_tris,
-        instanced_tris: result.stats.inst_tris,
-        instances: result.stats.instances,
-        draw_calls: result.stats.draw_calls,
+        practicals,
+        buildings: world_system.buildings,
+        static_tris: world_system.stats.static_tris,
+        instanced_tris: world_system.stats.inst_tris,
+        instances: world_system.stats.instances,
+        draw_calls: world_system.stats.draw_calls,
         collide_tris,
     }
 }
@@ -427,6 +433,17 @@ pub fn key_albedo(key: &str) -> Color {
         .find(|(name, _)| *name == key)
         .and_then(|(_, entry)| entry.opts.tint)
         .unwrap_or(0xb0b0b0);
+    hex_to_linear(hex)
+}
+
+/// One packed `0xRRGGBB` as a linear [`Color`].
+///
+/// The source authors every colour — a palette tint, a light, an emissive — as
+/// a hex literal, and three decodes all of them through the sRGB transfer
+/// function (`THREE.ColorManagement`, on by default in r180). Shared so a
+/// second caller cannot quietly grow a third copy of the same six lines: there
+/// were already two.
+pub fn hex_to_linear(hex: u32) -> Color {
     let srgb = |shift: u32| ((hex >> shift) & 0xff) as f32 / 255.0;
     Color::linear_rgb(
         ch(srgb_to_linear(srgb(16))),
@@ -482,14 +499,23 @@ mod tests {
         }
     }
 
+    /// **A player put at any spawn has ground under their feet.**
+    ///
+    /// This used to cast down from six metres above the spawn and require the
+    /// FIRST thing it hit to be the floor, which quietly assumed open sky over
+    /// every spawn point. The west alley has a canopy at 4.89 m, so the old
+    /// ray was measuring the canopy and reporting a missing floor. Casting
+    /// from just above the feet is what the claim was always about, and it
+    /// still catches both failures that matter: no floor at all, and a floor
+    /// at the wrong height.
     #[test]
     fn the_collision_world_has_a_floor_under_every_spawn_point() {
         let level = level();
         assert_eq!(level.spawns.len(), 8);
         for spawn in &level.spawns {
-            let hit = level.world.raycast(
+            let down = level.world.raycast(
                 spawn.position[0],
-                spawn.position[1] + 6.0,
+                spawn.position[1] + 0.5,
                 spawn.position[2],
                 0.0,
                 -1.0,
@@ -498,13 +524,14 @@ mod tests {
                 mask::WORLD,
                 -1,
             );
-            assert!(hit.hit, "{}: nothing to stand on", spawn.tag);
+            assert!(down.hit, "{}: nothing to stand on", spawn.tag);
             assert!(
-                hit.py.abs() < 1.0,
+                down.py.abs() < 1.0,
                 "{}: floor at y = {}, expected near zero",
                 spawn.tag,
-                hit.py
+                down.py
             );
+
         }
     }
 
@@ -523,7 +550,7 @@ mod tests {
         // out of level space, so none of them equals its authored (x, z).
         for (i, spawn) in level.spawns.iter().enumerate() {
             let (x, z, yaw, _) = SPAWNS[i];
-            assert!((spawn.yaw - (yaw + f64::from(LEVEL_YAW))).abs() < 1e-12);
+            assert!((spawn.yaw - (yaw + LEVEL_YAW)).abs() < 1e-12);
             assert!(
                 (spawn.position[0] - x).abs() > 1e-6 || (spawn.position[2] - z).abs() > 1e-6,
                 "spawn {i} was not transformed"

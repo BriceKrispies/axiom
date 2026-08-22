@@ -446,11 +446,25 @@ const SURFACE_TAIL: &str = r#"
 
     // ---- shader.js:620-628 + the OVERRIDES — the channel assignment ---------
     // tint (:621), the roughness remap (:624), then all six fixed channels.
-    // `in.albedo.w` is three's `diffuseColor.a`, the material opacity the
-    // pipeline already resolved; `alpha_mask` folds `owAlbedo.a` into it.
+    // Three's `diffuseColor.a` — the MATERIAL's own opacity — is
+    // `in.vertex_color.w`, not `in.albedo.w`.
+    //
+    // `in.albedo` is the sampled albedo texture ALREADY MULTIPLIED by the
+    // per-vertex and per-instance colour (`scene_wgsl` builds it that way for
+    // the default program, which returns it unchanged). Its `w` is therefore
+    // `map.a * opacity`, not `opacity` — and a bake is entitled to put anything
+    // it likes in `map.a`, because an opaque three material discards it. This
+    // port's own bake puts the HEIGHT FIELD there (`albedo.a = height`, see
+    // `materials/bake.rs`), so reading this lane as the opacity made every
+    // textured surface as see-through as its height map was dark.
+    //
+    // `in.vertex_color` is the same product WITHOUT the texel, which the
+    // template carries for exactly this reason. Taking it here also stops
+    // `alpha_mask` double-counting: `owAlbedo.a` is folded in once, below,
+    // rather than once here and once there.
     var out = axiom_mat_finish(
         vec4<f32>(fold.albedo, alb.a), orm, fold.normal, in.emissive,
-        tint_col, rough_p, in.albedo.w, alpha_mask,
+        tint_col, rough_p, in.vertex_color.w, alpha_mask,
     );
     // The seventh channel. `CLOTH_LIGHT` (:650-666) multiplies the per-light sum
     // by `owClothP.x * clamp( owORM.r, 0, 1 )`; the sum lives in the lighting

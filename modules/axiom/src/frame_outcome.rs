@@ -277,6 +277,7 @@ pub struct FrameOutcome {
     /// behind the scene instead of a flat clear colour. Carried like the ambient;
     /// `None` leaves the frame on its clear colour, exactly as before.
     sky: Option<axiom_host::FrameSky>,
+    indirect: Option<axiom_host::FrameIndirect>,
     /// The frame's bloom — how bright pixels spill into their neighbours and how
     /// the surplus above white rolls off. Carried like the grade; `None` leaves
     /// highlights to clip, exactly as before.
@@ -327,6 +328,7 @@ impl FrameOutcome {
             // with the app's authored look. A frame that sets neither is
             // byte-identical to one rendered before either existed.
             sky: None,
+            indirect: None,
             bloom: None,
             presented,
             recorded,
@@ -380,6 +382,16 @@ impl FrameOutcome {
     }
 
     /// Attach the app's authored sky (or `None`).
+    /// The frame's two-band indirect fill, if the app authored one.
+    pub const fn indirect(&self) -> Option<axiom_host::FrameIndirect> {
+        self.indirect
+    }
+
+    pub(crate) fn with_indirect(mut self, indirect: Option<axiom_host::FrameIndirect>) -> Self {
+        self.indirect = indirect;
+        self
+    }
+
     pub(crate) fn with_sky(mut self, sky: Option<axiom_host::FrameSky>) -> Self {
         self.sky = sky;
         self

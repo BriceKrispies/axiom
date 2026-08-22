@@ -88,6 +88,39 @@ struct Lights {
     // no extra write at all — and a frame whose surfaces read no clock packs an
     // exact zero here, which is the byte the lane always held.
     camera: vec4<f32>,
+    // ---- the two-band indirect fill (`axiom_host::FrameIndirect`) ---------
+    //
+    // The term that stops geometry the key light does not reach from collapsing
+    // to black. `sky`/`ground` above are a hemisphere AMBIENT — one `mix` by the
+    // normal's up-component — which cannot say "a vertical wall sees half the sky
+    // dome" and carries no warm ground bounce at all. These are two separately
+    // gated bands, and they are what a shaded facade is actually lit by.
+    //
+    // Every lane is ZERO for a frame that authors no fill, and every term they
+    // feed is an add or a multiply, so such a frame renders byte-identically to
+    // one from before these lanes existed.
+    //
+    // rgb = the level-folded band colour; w unused.
+    fill_sky: vec4<f32>,
+    fill_ground: vec4<f32>,
+    // x = band gain, y = sun-bounce gain; zw unused.
+    fill_gain: vec4<f32>,
+    // x = the image-based diffuse budget, y = the indirect floor inside an
+    // interior volume, z = the live room count (0 until an app builds volumes,
+    // which degrades the interior gate to its AO arm exactly as the source does
+    // before the world appears); w unused.
+    fill_indirect: vec4<f32>,
+    // The two band gates and the AO strengths. Constants of the algorithm that
+    // the source nonetheless carries as uniforms — `owFillDir` is never written
+    // and `owAoStrength` never after construction — so they ride here rather
+    // than as WGSL literals: `crate::indirect_lighting`'s Rust constants stay
+    // the single definition, and no second copy can drift from them.
+    fill_dir: vec4<f32>,
+    fill_ao_strength: vec4<f32>,
+    // xyz = the unit direction TOWARD the key light, which the sun-bounce wrap
+    // negates to find the anti-sun hemisphere. Zero on a frame with no
+    // directional light, which makes the wrap a constant and harmless.
+    fill_sun_dir: vec4<f32>,
     items: array<Light, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: Lights;
@@ -251,7 +284,19 @@ fn axiom_pbr_brdf_ggx(
 
 @group(2) @binding(0) var shadow_map: texture_depth_2d;
 @group(2) @binding(1) var shadow_samp: sampler_comparison;
-struct ShadowU { light_vp: mat4x4<f32> };
+struct ShadowU {
+    light_vp: mat4x4<f32>,
+    // **The sun.** `xyz` = the normalized direction TOWARD it in world space;
+    // `w` = 1.0 when the contact-shadow chain ran for this frame, 0.0 otherwise
+    // (`materialpatch.js`'s `owFeat.y`).
+    //
+    // It rides the shadow uniform rather than the lights uniform because this
+    // buffer already IS the shadow-casting directional light's — `light_vp` is
+    // that light's view-projection — so "which light is the sun" is answered
+    // beside the matrix that answers "where does the sun see from". The frame's
+    // FIRST directional light is the one packed; see `crate::scene_renderer`.
+    sun: vec4<f32>,
+};
 @group(2) @binding(2) var<uniform> shadow: ShadowU;
 // The resolved screen-space ambient occlusion, half resolution, `.r` = visibility.
 // A 1x1 white texture when the device runs no occlusion chain, so the multiply
@@ -264,6 +309,48 @@ struct ShadowU { light_vp: mat4x4<f32> };
 const AO_MICRO_SHADOW: f32 = 0.35;
 @group(2) @binding(3) var gtao_tex: texture_2d<f32>;
 @group(2) @binding(4) var gtao_samp: sampler;
+// The resolved screen-space CONTACT SHADOW, **full** resolution, `.r` = the
+// multiplier the sun term takes and `.g` the view depth its bilateral needed.
+// The same 1x1 white texture as the occlusion above when the chain did not run,
+// so the multiply is exactly one.
+//
+// Full resolution, not half: a contact shadow is the last few centimetres of
+// occlusion in the seam where a prop meets the floor — a handful of pixels — and
+// half-resolving it removes the only thing it had to say. It shares `gtao_samp`
+// because the fetch lands on texel centres at 1:1, where linear and nearest are
+// the same sample, and a second sampler for an identical result is a binding
+// slot spent on nothing.
+@group(2) @binding(5) var contact_tex: texture_2d<f32>;
+
+// `materialpatch.js`'s `owContactShadow`, transcribed:
+//
+//   float owContactShadow( vec3 lightDirView ) {
+//     if ( owFeat.y < 0.5 ) return 1.0;
+//     if ( dot( lightDirView, owSunDirView ) < 0.999 ) return 1.0;
+//     return texture2D( owContactTex, gl_FragCoord.xy * owScreenTexel ).r;
+//   }
+//
+// **The contact ray runs along ONE direction, so the term is meaningless for any
+// other light.** Dropping the `0.999` test would silently darken every point
+// light and every second directional in the frame by the sun's contact shadow.
+// `crate::contact::contact_shadow_for_light` is the Rust definition of this
+// function and `crate::contact`'s own WGSL a second transcription of it; this is
+// the copy the main pass calls, written as a multiplier so control flow stays
+// uniform for the derivative-dependent work around it.
+//
+// The dot is taken in WORLD space here and in view space in the source. A dot of
+// two unit vectors is invariant under the view rotation, so it is the same test
+// with one fewer transform — and the sun this compares against arrives already
+// normalized (`shadow.sun.xyz`), or exactly zero when the frame has no
+// directional light at all, which fails the test for every light.
+const CONTACT_SUN_DOT_THRESHOLD: f32 = 0.999;
+fn axiom_contact_shadow(enabled: f32, dot_light_sun: f32, sampled: f32) -> f32 {
+    let applies = (enabled >= 0.5) && (dot_light_sun >= CONTACT_SUN_DOT_THRESHOLD);
+    // `select` takes the VALUE, so an applying light gets `sampled` bit for bit —
+    // a `mix( 1.0, sampled, applies )` would return `1 + (sampled - 1)`, which is
+    // a different float.
+    return select(1.0, sampled, applies);
+}
 
 // Skinning: the joint-matrix palette for the skinned pass (group 3). All skinned
 // draws' palettes are concatenated; each draw's per-instance `joint_base` indexes
@@ -529,11 +616,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // flat degrade. `select` evaluates both arms, so the sample stays uniform.
     let sampled = textureSample(albedo_tex, albedo_sampler, in.uv);
     let albedo = select(vec4<f32>(1.0, 1.0, 1.0, 1.0), sampled, (caps & CAP_TEXTURES) != 0u);
-    // Alpha cutout capability: drop fully-transparent texels (foliage leaf-alpha cards)
-    // so they neither shade nor write depth; the soft 0.5..1 rim still alpha-blends.
-    // Gated on the AlphaMask bit; off → the quad renders opaque.
-    let cut = ((caps & CAP_ALPHAMASK) != 0u) && (albedo.a < 0.5);
-    if (cut) { discard; }
+    // The alpha cutout does NOT happen here — see the resolved-alpha block after
+    // the surface program. Testing the raw texel at this point discarded on the
+    // capability alone, which is a backend's "can" being read as a material's
+    // "want": every textured draw in a frame got cut, including the ones whose
+    // map alpha is DATA.
     // The SURFACE PROGRAM. Six appearance channels from the draw's authored
     // material, evaluated in object space; the lighting below is unchanged and
     // consumes them exactly where it used to read the instance lanes.
@@ -569,7 +656,57 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         ),
         surface_params,
     );
-    let base = vec4<f32>(surface.base_color.rgb, surface.opacity);
+    // **An opaque material ignores its albedo map's alpha channel.**
+    //
+    // Three.js computes `diffuseColor.a = opacity * map.a` too, but a material
+    // with `transparent: false` (the DEFAULT) renders with blending disabled, so
+    // that alpha never reaches the blend equation. This pipeline blends
+    // unconditionally, so the map's alpha was silently acting as opacity on every
+    // textured draw.
+    //
+    // That is not hypothetical. A material bake is free to pack DATA into the
+    // alpha channel precisely because an opaque material discards it — the
+    // convention Three.js's own parallax/POM extensions rely on, and the one the
+    // `shmup` port's bake uses (`albedo.a = height`). Honouring it as opacity
+    // turned every textured wall in that app see-through by its own height field.
+    //
+    // So: the MATERIAL decides, and the map does not get a vote. `in.color.w` is
+    // `base_color.w * opacity` (the render layer folds them together), which is
+    // the same quantity `axiom_render::draw_order` calls `translucent` when it is
+    // `< 1`. Deriving it identically here is what keeps a draw's SORTING and its
+    // BLENDING from disagreeing — a draw sorted as opaque but blended as
+    // translucent is a depth-order bug that only appears from some angles.
+    //
+    // An alpha-masked material is the documented exception: it opts into reading
+    // the map's alpha, `discard`s below the cutoff above, and keeps the soft rim
+    // that makes a foliage card's edge look sampled rather than stair-stepped.
+    // **The alpha cutout, on the RESOLVED alpha — the material's own answer.**
+    //
+    // `CAP_ALPHAMASK` is a `BackendCapabilityProfile` bit: it states what the
+    // BACKEND can do, not what a material wants. Gating the discard on it alone
+    // meant a device that *could* alpha-mask alpha-masked EVERYTHING, so every
+    // textured surface in the frame was cut against its own albedo alpha. For a
+    // bake that packs the HEIGHT FIELD there — which this port's does, and which
+    // is only legal because an opaque material discards that channel — the
+    // result is holes through the ground and the walls wherever the height map
+    // reads below the threshold.
+    //
+    // `surface.opacity` is the material's own answer, and it already carries the
+    // per-material intent: the runtime material computes
+    // `material_opacity * mix(1.0, alb.a, alpha_mask)`, so a material that did
+    // NOT ask for masking resolves to its plain opacity and cannot be cut, while
+    // a leaf card that did resolves to the texel's alpha and is. The capability
+    // stays as the gate it is documented to be — a backend that cannot cut
+    // simply does not.
+    let cut = ((caps & CAP_ALPHAMASK) != 0u) && (surface.opacity < 0.5);
+    if (cut) { discard; }
+    // An opaque material ignores its albedo map's alpha channel entirely (see
+    // the note on `SurfaceIn.albedo`). Three.js's `transparent: false` — the
+    // DEFAULT — renders with blending disabled, so the map's alpha never reaches
+    // the blend equation there either.
+    let material_alpha = in.color.w;
+    let opaque = material_alpha >= 1.0;
+    let base = vec4<f32>(surface.base_color.rgb, select(surface.opacity, 1.0, opaque));
     // HOW this surface participates in lighting: `axiom_surface::LightingModel`,
     // stated by the same generated program that supplied the six channels above.
     //
@@ -696,9 +833,66 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // sampler clamps to edge and every texel of a white texture is white.
     let ao_uv = in.clip.xy / (vec2<f32>(textureDimensions(gtao_tex)) * 2.0);
     let ao = textureSample(gtao_tex, gtao_samp, ao_uv).r;
-    let ambient_lit = base.rgb * hemi * ambient_shade * ao;
+    // ---- the two-band indirect fill -------------------------------------
+    //
+    // `hemi` above is a hemisphere AMBIENT: one `mix` between two colours by the
+    // normal's up-component. It cannot express that a vertical wall sees half
+    // the sky dome, and it has no warm ground bounce at all — so every surface
+    // the key light misses was lit by that single mix and collapsed toward
+    // black. This adds the two bands the reference actually fills with: a cool
+    // skylight band from above and a warm street bounce from below, each with
+    // its own normal gate, plus the sun-bounce wrap that lights a shaded wall
+    // from the sunlit one across the street.
+    //
+    // The composition is `crate::indirect_lighting` — the port of
+    // `materialpatch.js`, which has been complete and called by nothing. It is
+    // invoked here rather than re-derived: the module's doc names this exact
+    // site as what would make it live, and its own transcription notes record
+    // the divisions and the Horner nesting that a second derivation would drift
+    // from.
+    //
+    // **`irradiance_in` is zero on purpose.** Passing `hemi` would also route it
+    // through the module's `multi_bounce`, replacing this pipeline's existing
+    // `* ao` on ambient with the source's AO model — a real improvement, and a
+    // separate change. Passing zero asks the module for the FILL ALONE, which is
+    // additive, so a frame authoring no fill is byte-identical to one from
+    // before this existed.
+    var fill_u: AxiomIndirectU;
+    fill_u.ao_strength = lights.fill_ao_strength;
+    fill_u.sky_fill = lights.fill_sky;
+    fill_u.ground_fill = lights.fill_ground;
+    fill_u.fill_gain = lights.fill_gain;
+    fill_u.fill_dir = lights.fill_dir;
+    // y = the interior floor, z = the live room count (zero → the interior gate
+    // degrades to its AO arm, which is the source's own pre-world behaviour).
+    fill_u.indirect = lights.fill_indirect;
+    fill_u.sun_dir_world = lights.fill_sun_dir;
+    let fill = axiom_indirect_apply(
+        fill_u,
+        vec3<f32>(0.0, 0.0, 0.0),
+        vec3<f32>(0.0, 0.0, 0.0),
+        vec3<f32>(0.0, 0.0, 0.0),
+        base.rgb,
+        surface.roughness,
+        in.world_pos,
+        N,
+        ao,
+    );
+    let hemi_filled = hemi + fill.irradiance;
+    let ambient_lit = base.rgb * hemi_filled * ambient_shade * ao;
     // `mix( 1.0, ao, 0.35 )` — see the direct term in the light loop.
     let ao_micro = mix(1.0, ao, AO_MICRO_SHADOW);
+    // **The contact shadow, fetched once and applied to the SUN only** — the
+    // choice of light happens per-light in the loop below, through
+    // `axiom_contact_shadow`; the fetch has to happen out here, in uniform
+    // control flow, so its implicit derivatives stay valid.
+    //
+    // `gl_FragCoord.xy * owScreenTexel` in the source. Full resolution, so the uv
+    // is the fragment's pixel over the contact target's own dimensions — no
+    // doubling, unlike the AO above. On the 1x1 white neutral this uv runs past
+    // one and clamps to a white texel, which is a multiplier of exactly one.
+    let contact_uv = in.clip.xy / vec2<f32>(textureDimensions(contact_tex));
+    let contact = textureSample(contact_tex, gtao_samp, contact_uv).r;
     // An UNLIT surface gathers nothing: its base colour is presented as authored,
     // with no ambient, no sun, no shadow and no highlight. `select` takes the
     // VALUE, so nothing the unused arm computed can reach the result, and both
@@ -767,7 +961,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // physical model as irradiance and takes `BRDF_Lambert`, which is where the
     // `1/PI` the other models lack comes from. `ambient_shade` is the engine's
     // own shadowed-ambient contrast and stays where it is.
-    let phys_indirect_diffuse = (hemi * ambient_shade) * axiom_pbr_brdf_lambert(phys_diffuse_color);
+    let phys_indirect_diffuse = (hemi_filled * ambient_shade) * axiom_pbr_brdf_lambert(phys_diffuse_color);
     // Two accumulators, not one: three keeps `reflectedLight.directDiffuse` and
     // `.directSpecular` apart across every light and sums them only at the end,
     // and float addition is not associative, so folding them per-light would be a
@@ -788,6 +982,17 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             // Directional light: cast shadows from the shadow map.
             atten = shade;
         }
+        // **`directLight.color *= owContactShadow( lightDirView );`** —
+        // `materialpatch.js`'s injection into `lights_fragment_begin`, which
+        // multiplies the LIGHT, so every term this light feeds (Lambert, the
+        // Blinn-Phong highlight and the physical BRDF's irradiance) takes it
+        // together. `atten` is exactly that factor here.
+        //
+        // The gate inside picks the sun out of the loop, so a point light and a
+        // second directional both receive an exact 1.0. Deliberately NOT applied
+        // to `trans_sum` below, for the reason stated there: cloth transmission
+        // gathers the light afresh rather than through the occluded term.
+        atten = atten * axiom_contact_shadow(shadow.sun.w, dot(L, shadow.sun.xyz), contact);
         let diffuse = max(dot(N, L), 0.0) * atten * diffuse_gate;
         // Directional lights only, and deliberately NOT shadowed: the source
         // gathers the light afresh here rather than reusing the

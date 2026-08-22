@@ -194,6 +194,31 @@ impl Q {
         )
     }
 
+    /// `Quaternion.setFromEuler(new Euler(x, y, z, 'YXZ'))` —
+    /// `Quaternion.js`'s `case 'YXZ'` branch, the exact inverse of
+    /// [`Q::to_euler_yxz`] and the order the source's camera is authored in
+    /// (`engine.js:30`: `this.camera.rotation.order = 'YXZ'`).
+    ///
+    /// It differs from [`Q::from_euler_xyz`] in exactly two signs — the `z`
+    /// term's and the `w` term's — which is what makes yaw rotate about world
+    /// up rather than about the already-pitched local axis. Transcribed from
+    /// Three's closed form rather than composed as `qy * qx * qz`, because the
+    /// closed form is what runs in the browser and the port is pinned to the
+    /// source's float ops; the test cross-checks it against that composition.
+    ///
+    /// Arguments are `(pitch, yaw, roll)` — `Euler`'s `(x, y, z)`, the same
+    /// naming [`Q::to_euler_yxz`] returns.
+    pub fn from_euler_yxz(x: f64, y: f64, z: f64) -> Q {
+        let (c1, c2, c3) = ((x * 0.5).cos(), (y * 0.5).cos(), (z * 0.5).cos());
+        let (s1, s2, s3) = ((x * 0.5).sin(), (y * 0.5).sin(), (z * 0.5).sin());
+        Q::new(
+            s1 * c2 * c3 + c1 * s2 * s3,
+            c1 * s2 * c3 - s1 * c2 * s3,
+            c1 * c2 * s3 - s1 * s2 * c3,
+            c1 * c2 * c3 + s1 * s2 * s3,
+        )
+    }
+
     /// `Euler.setFromQuaternion(q, 'YXZ')`, going through
     /// `Matrix4.makeRotationFromQuaternion` + `Euler.setFromRotationMatrix`'s
     /// `case 'YXZ'` branch exactly as the source's call chain does (the

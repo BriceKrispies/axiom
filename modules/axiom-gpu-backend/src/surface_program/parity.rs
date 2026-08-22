@@ -941,7 +941,13 @@ fn the_main_pass_shader_compiles_with_the_default_program_spliced_in() {
     // And the default program is the identity over the lanes `fs` used to read
     // inline, which is the other half of the guarantee.
     assert!(source.contains("out.base_color = in.albedo;"));
-    assert!(source.contains("let base = vec4<f32>(surface.base_color.rgb, surface.opacity);"));
+    // The base colour still comes straight from the program. Its ALPHA does
+    // not: an opaque material discards the albedo map's alpha channel, because
+    // a bake is entitled to pack data there (see the comment at this line in
+    // `scene_wgsl`). Pin the gate rather than the whole expression, so the
+    // property survives a reformatting of the line it lives on.
+    assert!(source.contains("let base = vec4<f32>(surface.base_color.rgb, select(surface.opacity, 1.0, opaque));"));
+    assert!(source.contains("let opaque = material_alpha >= 1.0;"));
     // The emission line now also carries `transmitted` — the cloth layer's
     // fabric term, which is `axiom_cloth_transmitted(..., surface.transmission)`
     // and is an exact zero for the default program, since

@@ -4,7 +4,7 @@
 //! they live together here (a child module of `app`, so they reach `RunningApp`'s
 //! private render fields) to keep `app.rs` focused on lifecycle + stepping.
 
-use axiom_host::{FrameAmbient, FrameBloom, FrameDepthFog, FramePostProcess, FrameSky};
+use axiom_host::{FrameAmbient, FrameBloom, FrameDepthFog, FrameIndirect, FramePostProcess, FrameSky};
 
 use crate::app::RunningApp;
 
@@ -81,6 +81,22 @@ impl RunningApp {
     /// authors none is unchanged. Gated by
     /// [`axiom_host::RenderCapability::Bloom`], so a backend that cannot afford
     /// the extra render targets reports the drop rather than quietly ignoring it.
+    /// Author the frame's **two-band indirect fill** — a cool skylight band and
+    /// a warm ground bounce, each with its own normal gate.
+    ///
+    /// This is what keeps surfaces the key light does not reach from collapsing
+    /// toward black. [`Self::set_ambient`]'s hemisphere is a single `mix`
+    /// between two colours; it cannot express that a vertical wall sees half the
+    /// sky dome, and it carries no warm bounce at all.
+    pub fn set_indirect(&mut self, indirect: FrameIndirect) {
+        self.indirect = Some(indirect);
+    }
+
+    /// The frame's two-band indirect fill, if it authored one.
+    pub const fn indirect(&self) -> Option<FrameIndirect> {
+        self.indirect
+    }
+
     pub fn set_bloom(&mut self, bloom: FrameBloom) {
         self.bloom = Some(bloom);
     }

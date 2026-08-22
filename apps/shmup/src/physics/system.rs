@@ -842,9 +842,16 @@ pub fn add_fallback_ground(world: &mut StaticWorld) -> i32 {
 /// (`index.js:950-951`), and [`StaticWorld`] exposes no object accessor to
 /// count over. Adding `StaticWorld::object_count()` is the right fix and it
 /// belongs in `bvh.rs`, which is another slice's file — see the notes.
+///
+/// It also carries `explicit`, the source's `_explicitStatics`
+/// (`index.js:292`). Every [`StaticRegistry::add_triangles`] is one `addStatic`
+/// call, and `addStatic` is what makes `_ensureStatics` return at its first
+/// line (`index.js:330`) — which is what suppresses both the auto-rescan and
+/// the last-resort ground plane. See [`PhysicsCore::new`].
 pub struct StaticRegistry {
     world: StaticWorld,
     live: usize,
+    explicit: usize,
 }
 
 impl Default for StaticRegistry {
@@ -858,13 +865,23 @@ impl StaticRegistry {
         StaticRegistry {
             world: StaticWorld::new(),
             live: 0,
+            explicit: 0,
         }
     }
 
     /// A world someone else already populated. `live` is how many batches it
     /// holds; pass `0` if it holds none.
+    ///
+    /// A non-zero `live` is an explicit registration by that someone: it is the
+    /// same fact `addStatic` records, arriving pre-baked instead of one call at
+    /// a time. A world handed over with `live == 0` holds nothing, so the
+    /// fallback ground is still the right last resort for it.
     pub fn from_world(world: StaticWorld, live: usize) -> Self {
-        StaticRegistry { world, live }
+        StaticRegistry {
+            world,
+            live,
+            explicit: live,
+        }
     }
 
     /// `staticWorld.addTriangles(...)` — the registration `addStatic` performs
@@ -878,10 +895,16 @@ impl StaticRegistry {
         name: &str,
     ) -> i32 {
         self.live += 1;
+        self.explicit += 1;
         self.world.add_triangles(positions, count, surface, mask, name)
     }
 
     /// `removeStatic(handle)`. `index.js:310-314`.
+    ///
+    /// Does **not** decrement `explicit`, because `removeStatic` does not
+    /// decrement `_explicitStatics`: once a world has registered its own
+    /// geometry it never falls back to the auto-scan, even if every batch is
+    /// later removed.
     pub fn remove_object(&mut self, id: i32) -> bool {
         let removed = self.world.remove_object(id);
         if removed {
@@ -974,23 +997,62 @@ impl PhysicsCore {
     /// `new PhysicsSystem()` plus the parts of `init` that do not need a
     /// `Ctx` (`index.js:180-240`, `:256`).
     ///
-    /// `world` is the level's triangle soup, **not yet built**. The
-    /// fallback-ground arm of `_ensureStatics` runs on it (there is no scene
-    /// to auto-scan, which is exactly the branch the source takes when
-    /// `meshCount === 0`), then it is built and published as the shared
-    /// `Rc<StaticWorld>` every solver holds. See seam 1.
+    /// `world` is the caller's triangle soup, **not yet built**. It is built
+    /// here and published as the shared `Rc<StaticWorld>` every solver holds.
+    /// See seam 1.
+    ///
+    /// **The fallback ground is a last resort, not a default.** `_ensureStatics`
+    /// returns at its first line when `_explicitStatics > 0` (`index.js:330`),
+    /// and even when it runs it only adds the plane if nothing else registered
+    /// geometry (`if (this._autoIds.length === 0 …)`, `index.js:364`). This
+    /// used to add it unconditionally, which is harmless for an empty registry
+    /// and wrong for every populated one: a 600 x 600 m concrete plane at
+    /// y = 0, under the real level, catching bullets, debris and ragdolls
+    /// through the floor and answering `ground_height` where the level has no
+    /// floor at all. A registry that registered anything gets no plane.
     pub fn new(registry: StaticRegistry) -> Self {
         let StaticRegistry {
             mut world,
             live: live_objects,
+            explicit,
         } = registry;
-        // `_ensureStatics(true)`: `_explicitStatics` is 0, the scene holds no
-        // meshes, `_autoIds` is empty and `_fallbackId` is -1, so the only arm
-        // that fires is the last-resort ground plane.
-        let fallback_id = add_fallback_ground(&mut world);
+        let fallback_id = (explicit == 0)
+            .then(|| add_fallback_ground(&mut world))
+            .unwrap_or(-1);
         world.build();
+        // The fallback ground, when it fired, is one more live batch.
+        let live = live_objects + usize::from(fallback_id >= 0);
+        PhysicsCore::over(Rc::new(world), live, explicit, fallback_id)
+    }
 
-        let world = Rc::new(world);
+    /// A world somebody else registered **and already built** — the shared
+    /// `Rc<StaticWorld>` `crate::scene::level` hands out, so the game runs one
+    /// BVH rather than two.
+    ///
+    /// This is the source's `addStatic` case exactly: `_explicitStatics > 0`,
+    /// so `_ensureStatics` returns immediately (no auto-scan, no fallback
+    /// ground), and `staticWorld.dirty` is false, so `fixed_update` never
+    /// rebuilds. Seam 1's immutability contract is unchanged — the world was
+    /// already frozen behind an `Rc` before it got here.
+    ///
+    /// `live_objects` is what `stats.objects` reports: how many batches the
+    /// builder registered. [`StaticWorld`] exposes no object count (see
+    /// [`StaticRegistry`]), so the builder is the only one who knows.
+    pub fn with_static_world(world: Rc<StaticWorld>, live_objects: usize) -> Self {
+        // Only `> 0` is ever observed (`index.js:330`); the exact count of
+        // `addStatic` calls the builder made is not recoverable from an
+        // already-built world, and nothing reads it.
+        PhysicsCore::over(world, live_objects, 1, -1)
+    }
+
+    /// The shared body of both constructors: everything after the static world
+    /// is settled.
+    fn over(
+        world: Rc<StaticWorld>,
+        live_objects: usize,
+        explicit_statics: usize,
+        fallback_id: i32,
+    ) -> Self {
         let rng = Rc::new(RefCell::new(Rng::new(0)));
         let mut ballistics = Ballistics::new();
         ballistics.set_rng(Rc::clone(&rng));
@@ -1009,9 +1071,8 @@ impl PhysicsCore {
             ignore_death_events: false,
             max_ragdolls: 8,
             fallback_id,
-            // The fallback ground is one more live batch.
-            live_objects: live_objects + 1,
-            explicit_statics: 0,
+            live_objects,
+            explicit_statics,
             auto_scan_timer: 0.0,
             debug: Some(PhysicsDebugView::new()),
             stats: PhysicsStats::default(),
@@ -1047,6 +1108,19 @@ impl PhysicsCore {
 
     pub fn rng(&self) -> Rc<RefCell<Rng>> {
         Rc::clone(&self.rng)
+    }
+
+    /// The bus `emit_impact` and `explode` dispatch on — `this.ctx = ctx`
+    /// (`index.js:243`), the half of it this core actually reads.
+    ///
+    /// The counterpart of [`PhysicsCore::set_rng`], and it was missing: the
+    /// field could only be written from inside [`Subsystem::init`], so a caller
+    /// that drives the core without a [`Ctx`] (there is no way to build one
+    /// outside `crate::engine`) got a core that silently emitted nothing.
+    /// [`PlayerCore::init`](crate::player::system::PlayerCore::init) already
+    /// takes its bus as an argument; this is physics saying the same thing.
+    pub fn set_events(&mut self, events: crate::events::EventBus) {
+        self.events = Some(events);
     }
 
     /* ---------------------------------------------------------------- */
@@ -2276,25 +2350,44 @@ impl PhysicsSystem {
         }
     }
 
-    /// `init`'s event wiring (`index.js:248-251`). Only `explosion` is wired;
-    /// `actor:death` is not — see the module doc.
+    /// `init`'s event wiring (`index.js:248-251`), against the `Ctx` the
+    /// registry hands `init`. The work is [`subscribe`]; this is the `Ctx`
+    /// front door onto it.
     pub fn wire_events(&mut self, ctx: &Ctx<'_>) {
-        let core = Rc::clone(&self.core);
-        let id = ctx.events.on("explosion", move |p: &dyn Any| {
-            if let Some(e) = p.downcast_ref::<crate::player::system::ExplosionEvent>() {
-                core.borrow_mut().explode(Explosion {
-                    position: e.position,
-                    radius: e.radius,
-                    // No existing `explosion` fork carries `impulse`; the
-                    // direct `explode()` call is the only way to set it.
-                    impulse: None,
-                    damage: e.damage,
-                });
-            }
-            Ok(())
-        });
-        self.offs.push(("explosion", id));
+        self.offs.extend(subscribe(&self.core, ctx.events));
     }
+}
+
+/// `index.js:248-251`'s one subscription, taking the **bus** rather than a
+/// [`Ctx`].
+///
+/// It was reachable only through `&Ctx<'_>`, and `Ctx` has a private field, so
+/// nothing outside `crate::engine` can build one: any caller driving this core
+/// without the subsystem registry (there is no `world` or `render` subsystem in
+/// this port, so `Registry::resolve` cannot admit `player` at all) could not
+/// subscribe. `ctx.events` was the only field the body ever read, so the
+/// narrower parameter is also the honest one.
+///
+/// Only `explosion` is wired; `actor:death` is not — see the module doc.
+pub fn subscribe(
+    core: &Rc<RefCell<PhysicsCore>>,
+    events: &crate::events::EventBus,
+) -> Vec<(&'static str, SubscriptionId)> {
+    let owned = Rc::clone(core);
+    let id = events.on("explosion", move |p: &dyn Any| {
+        if let Some(e) = p.downcast_ref::<crate::player::system::ExplosionEvent>() {
+            owned.borrow_mut().explode(Explosion {
+                position: e.position,
+                radius: e.radius,
+                // No existing `explosion` fork carries `impulse`; the
+                // direct `explode()` call is the only way to set it.
+                impulse: None,
+                damage: e.damage,
+            });
+        }
+        Ok(())
+    });
+    vec![("explosion", id)]
 }
 
 impl Subsystem for PhysicsSystem {
@@ -2315,7 +2408,7 @@ impl Subsystem for PhysicsSystem {
         {
             let mut core = self.core.borrow_mut();
             core.set_rng(forked);
-            core.events = Some(ctx.events.clone());
+            core.set_events(ctx.events.clone());
         }
         self.wire_events(ctx);
         Ok(())
@@ -2335,8 +2428,19 @@ impl Subsystem for PhysicsSystem {
             .late_update(f64::from(dt.get()), None);
     }
 
+    /// `dispose()`. The `offs` list exists so the subscriptions can be
+    /// **cancelled**; clearing the `Vec` (what this used to do) drops the ids
+    /// and leaves the handlers on the bus — each one holding an `Rc` to the
+    /// core it was disposing, so the core outlived its own `dispose`. The same
+    /// mistake is in `audio`, `ui`, `ai` and `weapons`, which are other slices'
+    /// files.
     fn dispose(&mut self) {
-        self.offs.clear();
+        let bus = self.core.borrow().events.clone();
+        for (name, id) in self.offs.drain(..) {
+            // `None` only when `init` never ran, in which case nothing was
+            // ever subscribed and `offs` is empty anyway.
+            bus.iter().for_each(|b| b.off(name, id));
+        }
         self.core.borrow_mut().dispose();
     }
 }
