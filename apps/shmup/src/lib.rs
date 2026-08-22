@@ -60,6 +60,7 @@ pub mod materials;
 pub mod physics;
 pub mod player;
 pub mod registry;
+pub mod render;
 pub mod rng;
 pub mod scene;
 pub mod sky;
