@@ -41,6 +41,14 @@ pub(crate) const SCENE_WGSL_PREFIX: &str = r#"
 @group(0) @binding(1) var albedo_sampler: sampler;
 @group(0) @binding(2) var normal_tex: texture_2d<f32>;
 @group(0) @binding(3) var normal_sampler: sampler;
+// The runtime material shader's maps (`crate::material_shader`). Linear data,
+// all three, sampled through the samplers above. A material that authors none
+// of them binds a neutral 1x1 (see `scene_renderer`'s `neutral_*` constants), so
+// declaring them here changes no existing pixel — the default surface program
+// never names them.
+@group(0) @binding(4) var material_orm_tex: texture_2d<f32>;
+@group(0) @binding(5) var material_detail_tex: texture_2d<f32>;
+@group(0) @binding(6) var material_macro_tex: texture_2d<f32>;
 
 struct Light {
     // xyz = to-light direction (directional) or world position (point); w = kind (0 dir, 1 point).
@@ -132,10 +140,130 @@ fn fog_factor(ndc_depth: f32, view_distance: f32) -> f32 {
 // is what a low moon on damp asphalt actually looks like.
 const SPECULAR_POWER: f32 = 48.0;
 
+// ---------------------------------------------------------------------------
+// THE PHYSICAL BRDF — `axiom_surface::LightingModel::Physical`.
+//
+// three.js r180's `MeshStandardMaterial` maths, transcribed from the GLSL TEXT
+// of `ShaderChunk/common.glsl.js` (`BRDF_Lambert`, `F_Schlick`, `RECIPROCAL_PI`,
+// `EPSILON`, `saturate`, `pow2`) and
+// `ShaderChunk/lights_physical_pars_fragment.glsl.js` (`V_GGX_SmithCorrelated`,
+// `D_GGX`, `BRDF_GGX`).
+//
+// **The source's grouping is the specification.** Float multiply and add are not
+// associative, so `F * ( V * D )` is a different number from `F * V * D`, and
+// `RECIPROCAL_PI * a2 / pow2( denom )` is a different number from
+// `RECIPROCAL_PI * ( a2 / pow2( denom ) )`. Neither division below is rewritten
+// as a reciprocal-multiply and no multiply chain is re-associated; the
+// parentheses here are the source's own.
+//
+// `saturate`, `clamp` and `mix` are written out rather than called. GLSL pins
+// their factoring (`clamp` is `min(max(x, lo), hi)`, `mix` is `x*(1-a) + y*a`)
+// and WGSL explicitly permits its builtins to factor differently, so calling the
+// builtin would hand the driver a licence the source never gave it. That is the
+// same rule `crate::surface_program::emit` follows for the field algebra.
+//
+// This block costs a non-physical program nothing: `axiom_lighting_model()` is a
+// nullary function returning a literal, so the `select` in `fs` that reaches
+// these is a compile-time constant and the whole physical arm is dead-stripped.
+// ---------------------------------------------------------------------------
+
+// `common.glsl.js`: `#define RECIPROCAL_PI 0.3183098861837907`.
+const AXIOM_PBR_RECIPROCAL_PI: f32 = 0.3183098861837907;
+// `common.glsl.js`: `#define EPSILON 1e-6`.
+const AXIOM_PBR_EPSILON: f32 = 1e-6;
+
+// `float pow2( const in float x ) { return x*x; }`.
+fn axiom_pbr_pow2(x: f32) -> f32 {
+    return x * x;
+}
+
+// `#define saturate( a ) clamp( a, 0.0, 1.0 )`, with GLSL's `clamp` written out.
+fn axiom_pbr_saturate(a: f32) -> f32 {
+    return min(max(a, 0.0), 1.0);
+}
+
+// `vec3 BRDF_Lambert( const in vec3 diffuseColor )`. The `1/PI` that makes the
+// physical model radiometric — and that the other three models do not have.
+fn axiom_pbr_brdf_lambert(diffuse_color: vec3<f32>) -> vec3<f32> {
+    return AXIOM_PBR_RECIPROCAL_PI * diffuse_color;
+}
+
+// `vec3 F_Schlick( const in vec3 f0, const in float f90, const in float dotVH )`.
+//
+// The Epic/SIGGRAPH'13 `exp2` variant, which is the code that RUNS in three; the
+// classic `pow( 1.0 - dotVH, 5.0 )` sits above it commented out and is a
+// different number, so taking it would be a transcription defect.
+fn axiom_pbr_f_schlick(f0: vec3<f32>, f90: f32, dot_vh: f32) -> vec3<f32> {
+    let fresnel = exp2((-5.55473 * dot_vh - 6.98316) * dot_vh);
+    return f0 * (1.0 - fresnel) + (f90 * fresnel);
+}
+
+// `float V_GGX_SmithCorrelated( const in float alpha, const in float dotNL, const in float dotNV )`
+// — Smith height-correlated, Frostbite course notes listing 2.
+//
+// This is **V, not G**: the `1 / (4 dotNL dotNV)` denominator of the
+// Cook-Torrance form is already folded in, which is why `BRDF_GGX` below returns
+// `F * ( V * D )` with no further division. The `EPSILON` floor is the source's
+// and it is what keeps a grazing fragment finite.
+fn axiom_pbr_v_ggx_smith_correlated(alpha: f32, dot_nl: f32, dot_nv: f32) -> f32 {
+    let a2 = axiom_pbr_pow2(alpha);
+    let gv = dot_nl * sqrt(a2 + (1.0 - a2) * axiom_pbr_pow2(dot_nv));
+    let gl = dot_nv * sqrt(a2 + (1.0 - a2) * axiom_pbr_pow2(dot_nl));
+    return 0.5 / max(gv + gl, AXIOM_PBR_EPSILON);
+}
+
+// `float D_GGX( const in float alpha, const in float dotNH )` — Trowbridge-Reitz,
+// "Microfacet Models for Refraction through Rough Surfaces" equation (33).
+//
+// `alpha` is **roughness squared** (Disney's reparameterisation), and the squaring
+// happens in `axiom_pbr_brdf_ggx` exactly where the source does it.
+fn axiom_pbr_d_ggx(alpha: f32, dot_nh: f32) -> f32 {
+    let a2 = axiom_pbr_pow2(alpha);
+    let denom = axiom_pbr_pow2(dot_nh) * (a2 - 1.0) + 1.0;
+    return AXIOM_PBR_RECIPROCAL_PI * a2 / axiom_pbr_pow2(denom);
+}
+
+// `vec3 BRDF_GGX( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, const in PhysicalMaterial material )`.
+//
+// The source reads exactly three fields off `PhysicalMaterial`, so they are
+// passed directly rather than dragging a struct across: this port has no
+// clearcoat, no iridescence, no anisotropy and no sheen, so every `#ifdef` inside
+// the source function takes its `#else` arm and the body below is what remains.
+fn axiom_pbr_brdf_ggx(
+    light_dir: vec3<f32>,
+    view_dir: vec3<f32>,
+    normal: vec3<f32>,
+    f0: vec3<f32>,
+    f90: f32,
+    roughness: f32,
+) -> vec3<f32> {
+    let alpha = axiom_pbr_pow2(roughness); // UE4's roughness
+    let half_dir = normalize(light_dir + view_dir);
+    let dot_nl = axiom_pbr_saturate(dot(normal, light_dir));
+    let dot_nv = axiom_pbr_saturate(dot(normal, view_dir));
+    let dot_nh = axiom_pbr_saturate(dot(normal, half_dir));
+    let dot_vh = axiom_pbr_saturate(dot(view_dir, half_dir));
+    let f = axiom_pbr_f_schlick(f0, f90, dot_vh);
+    let v = axiom_pbr_v_ggx_smith_correlated(alpha, dot_nl, dot_nv);
+    let d = axiom_pbr_d_ggx(alpha, dot_nh);
+    return f * (v * d);
+}
+
 @group(2) @binding(0) var shadow_map: texture_depth_2d;
 @group(2) @binding(1) var shadow_samp: sampler_comparison;
 struct ShadowU { light_vp: mat4x4<f32> };
 @group(2) @binding(2) var<uniform> shadow: ShadowU;
+// The resolved screen-space ambient occlusion, half resolution, `.r` = visibility.
+// A 1x1 white texture when the device runs no occlusion chain, so the multiply
+// below is exactly one and such a frame is byte-identical to one from before this
+// existed. In group 2 with the shadow map because both are screen-space lighting
+// inputs — and because WebGPU's default `maxBindGroups` is four, so 0..3 is the
+// whole budget.
+// How much of the occlusion the DIRECT term takes — `materialpatch.js`'s
+// `owAoStrength.x * 0.35`, with the strength at one.
+const AO_MICRO_SHADOW: f32 = 0.35;
+@group(2) @binding(3) var gtao_tex: texture_2d<f32>;
+@group(2) @binding(4) var gtao_samp: sampler;
 
 // Skinning: the joint-matrix palette for the skinned pass (group 3). All skinned
 // draws' palettes are concatenated; each draw's per-instance `joint_base` indexes
@@ -422,26 +550,49 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // frame whose surfaces read no clock. The DEFAULT program reads neither, so a
     // draw naming no surface is bit-identical whatever this buffer holds.
     let surface = axiom_surface(
-        SurfaceIn(in.object_pos, in.uv, in.object_normal, lights.camera.w, albedo * in.color, in.emissive),
+        SurfaceIn(
+            in.object_pos,
+            in.uv,
+            in.object_normal,
+            lights.camera.w,
+            albedo * in.color,
+            in.emissive,
+            // World space, for a runtime material shader's world-anchored
+            // weathering and triplanar projection. All three are already on
+            // hand — this stage interpolates `world_pos` for the fog and the
+            // specular term, and `lights.camera` for the same — so no vertex
+            // output had to grow.
+            in.world_pos,
+            normalize(in.normal),
+            normalize(lights.camera.xyz - in.world_pos),
+            in.color,
+        ),
         surface_params,
     );
     let base = vec4<f32>(surface.base_color.rgb, surface.opacity);
     // HOW this surface participates in lighting: `axiom_surface::LightingModel`,
     // stated by the same generated program that supplied the six channels above.
     //
-    // All three models are in THIS shader, selected by these two numbers — never
-    // by a second pipeline. That is the same trade the twelve capability bits
-    // already make, and it is what keeps three models times N surfaces at N
-    // programs instead of 3N. Both gates are plain multipliers rather than
-    // branches, so control flow stays uniform for the derivative-dependent
-    // texture work above, exactly as `fog_factor` expresses its capability gate
-    // by zeroing a rate.
+    // All FOUR models are in THIS shader, selected by these two numbers and one
+    // `select` at the end of the light loop — never by a second pipeline. That is
+    // the same trade the twelve capability bits already make, and it is what
+    // keeps four models times N surfaces at N programs instead of 4N. Both gates
+    // below are plain multipliers rather than branches, so control flow stays
+    // uniform for the derivative-dependent texture work above, exactly as
+    // `fog_factor` expresses its capability gate by zeroing a rate.
     //
     // `LambertSpecular` (the default, and what every existing draw carries)
     // makes `diffuse_gate` and `specular_gate` exactly 1.0 and takes the
     // `ambient_lit` arm — an IEEE multiply by one is the identity on every
     // input, so this frame is bit-for-bit the frame this pass drew before the
     // model existed.
+    //
+    // `Physical` sets `specular_gate` to 0 (so the Blinn-Phong term and the
+    // legacy `in.specular` instance lane are both out of the picture for it) and
+    // has its whole result **replaced** by the Cook-Torrance sum at the end of
+    // the light loop, so the diffuse it accumulated here is discarded rather
+    // than added to. That is why the two gates did not have to change shape:
+    // whichever value they produce, the final `select` takes the physical one.
     let model = axiom_lighting_model();
     let gathers = model != AXIOM_LIGHT_UNLIT;
     let diffuse_gate = f32(gathers);
@@ -451,7 +602,25 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // of world position + uv (Mikkelsen). Normal-mapping capability off → a flat
     // (0,0,1) tangent-space normal, so N stays the geometric normal.
     let geo_n = normalize(in.normal);
-    let nmap = select(surface.normal, textureSample(normal_tex, normal_sampler, in.uv).xyz * 2.0 - 1.0, (caps & CAP_NORMALMAP) != 0u);
+    // The two tangent-space normals COMPOSE. They used to `select`, and the
+    // result was that `surface.normal` reached the lighting stage on **no path
+    // at all**: with `CAP_NORMALMAP` set, `nmap` took the texture and the
+    // authored normal was unused; with it clear, `nmap` took the authored normal
+    // and `N` below took `geo_n` anyway. The two `select`s read the same bit and
+    // took opposite arms, so an authored normal was computed and thrown away.
+    // `normal_from_height` was dead on arrival for the same reason.
+    //
+    // Composition is UDN — sum the xy, keep the base z — with the **texture as
+    // the base**. That choice is what keeps every existing frame bit-identical:
+    // a surface that authors no normal carries the default `(0, 0, 1)`, so
+    // `map_n.xy + (0, 0)` is `map_n.xy` and the z is the texture's own, which is
+    // exactly the vector this line produced before.
+    let tex_n = textureSample(normal_tex, normal_sampler, in.uv).xyz * 2.0 - 1.0;
+    // No map bound -> the tangent-space identity, so the composition below is a
+    // no-op rather than a fold against whatever a 1x1 flat texture happened to
+    // decode to.
+    let map_n = select(vec3<f32>(0.0, 0.0, 1.0), tex_n, (caps & CAP_NORMALMAP) != 0u);
+    let nmap = vec3<f32>(map_n.xy + surface.normal.xy, map_n.z);
     let dp1 = dpdx(in.world_pos);
     let dp2 = dpdy(in.world_pos);
     let duv1 = dpdx(in.uv);
@@ -486,7 +655,17 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // cancels itself. `select` keeps control flow uniform so the derivatives above
     // stay valid, and it takes the value rather than the arithmetic, so nothing
     // the unused arm computed can reach the lit result.
-    let N = select(geo_n, mapped, (caps & CAP_NORMALMAP) != 0u);
+    // Gated on whether this fragment has ANY tangent-space tilt, not on the
+    // capability bit — because after the composition above the tilt can come
+    // from the texture, from the authored normal, or from both.
+    //
+    // The property the old capability gate protected is preserved exactly: with
+    // no map and no authored normal, `nmap.xy` is `(0, 0)`, this takes `geo_n`
+    // *itself*, and N is the geometric normal to the bit. It is still chosen
+    // rather than arrived at by hoping a degenerate frame times a zero `nmap.xy`
+    // cancels — which matters, because a quad whose four corners share a uv has
+    // exactly zero uv derivatives.
+    let N = select(geo_n, mapped, any(nmap.xy != vec2<f32>(0.0, 0.0)));
     // Shadow capability off → fully lit (`shadow_factor` is still evaluated in uniform
     // control flow via `select`, so its `textureSampleCompare` derivatives stay valid).
     let shade = select(1.0, shadow_factor(in.world_pos), (caps & CAP_SHADOWS) != 0u);
@@ -498,12 +677,38 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // Shadowed ground receives less SKY ambient too, not just less sun, so the sun's cast
     // shadows read with real contrast instead of being washed flat by full ambient.
     let ambient_shade = mix(SHADOW_AMBIENT, 1.0, shade);
-    let ambient_lit = base.rgb * hemi * ambient_shade;
+    // **Ambient occlusion goes on the INDIRECT term, never on the sun.**
+    //
+    // That is `materialpatch.js`'s central decision and it is not a detail: AO
+    // approximates how much of the *sky* a point can see, so multiplying direct
+    // sunlight by it darkens surfaces the sun demonstrably reaches, and the frame
+    // reads as dirty rather than as occluded. The direct term instead takes a
+    // fractional micro-shadow below, at `AO_MICRO_SHADOW` of full strength.
+    //
+    // Sampled in screen space off the fragment's own position: the chain runs at
+    // half resolution over the whole target, so the uv is the fragment's pixel
+    // over the target's size, not anything the mesh carries.
+    // The target size comes from the AO texture itself — half resolution, so
+    // twice its dimensions — rather than from a uniform. One less thing that can
+    // disagree with the allocation, and it stays right if the downscale changes.
+    //
+    // On the 1x1 white neutral this uv runs past 1, and that is harmless: the
+    // sampler clamps to edge and every texel of a white texture is white.
+    let ao_uv = in.clip.xy / (vec2<f32>(textureDimensions(gtao_tex)) * 2.0);
+    let ao = textureSample(gtao_tex, gtao_samp, ao_uv).r;
+    let ambient_lit = base.rgb * hemi * ambient_shade * ao;
+    // `mix( 1.0, ao, 0.35 )` — see the direct term in the light loop.
+    let ao_micro = mix(1.0, ao, AO_MICRO_SHADOW);
     // An UNLIT surface gathers nothing: its base colour is presented as authored,
     // with no ambient, no sun, no shadow and no highlight. `select` takes the
     // VALUE, so nothing the unused arm computed can reach the result, and both
     // arms are evaluated so control flow stays uniform.
     var lit = select(base.rgb, ambient_lit, gathers);
+    // Fabric transmission, accumulated alongside the light loop.
+    // `crate::material_shader::cloth` ports `OW_CLOTH_LIGHT`, which the source
+    // expands once per directional light. Zero for every surface that does not
+    // author `transmission`, which is every surface today.
+    var trans_sum = vec3<f32>(0.0, 0.0, 0.0);
     // Specular capability off, or a matte material → strength 0, which zeroes the
     // whole term below. Evaluated (not branched around) so control flow stays
     // uniform, exactly as the other capability gates in this shader do.
@@ -514,6 +719,61 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // Toward the eye. Blinn-Phong uses the half-vector between this and the light,
     // which is why the camera position has to reach the fragment stage at all.
     let V = normalize(lights.camera.xyz - in.world_pos);
+    // ---- The PHYSICAL model's material ------------------------------------
+    //
+    // three's `ShaderChunk/lights_physical_fragment.glsl.js`, transcribed. This
+    // is where `SurfaceOut.roughness` and `SurfaceOut.metallic` stop being
+    // decorative: under the three models above, specular strength comes from the
+    // instance-stream `in.specular` lane (derived from the LEGACY
+    // `Material::roughness`) and metalness is read by nothing at all. Under
+    // `AXIOM_LIGHT_PHYSICAL` the instance lane is not consulted — `gloss` is
+    // already zero for this model, because `specular_gate` is `model ==
+    // LAMBERT_SPECULAR` — and the two authored channels drive the BRDF instead.
+    //
+    // `metalnessFactor` is NOT clamped, because the source does not clamp it.
+    // Roughness needs no clamp: `max(., 0.0525)` and `min(., 1.0)` below are the
+    // source's own, and between them they bound it on both sides.
+    let metalness_factor = surface.metallic;
+    let roughness_factor = surface.roughness;
+    // `material.diffuseColor = diffuseColor.rgb * ( 1.0 - metalnessFactor );`
+    let phys_diffuse_color = base.rgb * (1.0 - metalness_factor);
+    // `vec3 dxy = max( abs( dFdx( nonPerturbedNormal ) ), abs( dFdy( nonPerturbedNormal ) ) );`
+    // `float geometryRoughness = max( max( dxy.x, dxy.y ), dxy.z );`
+    //
+    // Specular anti-aliasing: a normal that swings hard across one pixel quad is
+    // a rougher surface at that pixel than the material says, and without this a
+    // glancing edge boils. `nonPerturbedNormal` is the normal BEFORE normal
+    // mapping, which is `geo_n` here. Uniform control flow, so the derivatives
+    // are valid — the same discipline the cotangent frame above keeps.
+    let dxy = max(abs(dpdx(geo_n)), abs(dpdy(geo_n)));
+    let geometry_roughness = max(max(dxy.x, dxy.y), dxy.z);
+    // `material.roughness = max( roughnessFactor, 0.0525 );`  // base mip of a 256 cubemap
+    // `material.roughness += geometryRoughness;`
+    // `material.roughness = min( material.roughness, 1.0 );`
+    let phys_roughness = min(max(roughness_factor, 0.0525) + geometry_roughness, 1.0);
+    // `material.specularColor = mix( vec3( 0.04 ), diffuseColor.rgb, metalnessFactor );`
+    // `material.specularF90 = 1.0;`
+    //
+    // The non-`IOR` arm, which is the arm `MeshStandardMaterial` compiles: it
+    // declares no `ior`, no `specularIntensity` and no `specularColor` uniform.
+    // `mix` written out as GLSL defines it, and note it mixes toward the
+    // PRE-metalness `diffuseColor.rgb`, not toward `material.diffuseColor`.
+    let phys_specular_color =
+        vec3<f32>(0.04, 0.04, 0.04) * (1.0 - metalness_factor) + base.rgb * metalness_factor;
+    let phys_specular_f90 = 1.0;
+    // `RE_IndirectDiffuse_Physical`. The frame's hemisphere ambient IS three's
+    // `getHemisphereLightIrradiance` — `mix( groundColor, skyColor, 0.5 * dotNL +
+    // 0.5 )`, the identical expression `hemi` computes above — so it enters the
+    // physical model as irradiance and takes `BRDF_Lambert`, which is where the
+    // `1/PI` the other models lack comes from. `ambient_shade` is the engine's
+    // own shadowed-ambient contrast and stays where it is.
+    let phys_indirect_diffuse = (hemi * ambient_shade) * axiom_pbr_brdf_lambert(phys_diffuse_color);
+    // Two accumulators, not one: three keeps `reflectedLight.directDiffuse` and
+    // `.directSpecular` apart across every light and sums them only at the end,
+    // and float addition is not associative, so folding them per-light would be a
+    // different number.
+    var phys_direct_diffuse = vec3<f32>(0.0, 0.0, 0.0);
+    var phys_direct_specular = vec3<f32>(0.0, 0.0, 0.0);
     for (var i: u32 = 0u; i < lights.count; i = i + 1u) {
         let lt = lights.items[i];
         var L = normalize(lt.v.xyz);
@@ -529,7 +789,22 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             atten = shade;
         }
         let diffuse = max(dot(N, L), 0.0) * atten * diffuse_gate;
-        lit = lit + base.rgb * lt.col.rgb * lt.col.w * diffuse;
+        // Directional lights only, and deliberately NOT shadowed: the source
+        // gathers the light afresh here rather than reusing the
+        // shadow-attenuated term, because cloth transmits light that reaches its
+        // far side. Occlusion arrives instead through the surface's own
+        // `transmission` channel. `1.0 - step(0.5, lt.v.w)` is the
+        // directional-only gate written as a multiplier rather than a branch, so
+        // a point light contributes an exact zero and control flow stays uniform
+        // for the derivative-dependent work above.
+        let dir_only = 1.0 - step(0.5, lt.v.w);
+        trans_sum = trans_sum + axiom_cloth_light(N, V, L, lt.col.rgb * lt.col.w * dir_only);
+        // The direct term takes only a FRACTION of the occlusion — the source's
+        // `mix( 1.0, owSampleAO(), owAoStrength.x * 0.35 )`. It is a micro-shadow
+        // (contact dirt in a crease the sun still reaches), not occlusion: at
+        // full strength the sun would be darkened by a term that measures sky
+        // visibility, and lit faces would read as grimy.
+        lit = lit + base.rgb * lt.col.rgb * lt.col.w * diffuse * ao_micro;
         // The highlight. NOT multiplied by `base.rgb`: a specular reflection is
         // light bouncing off the surface without being absorbed, so it takes the
         // LIGHT's colour, not the surface's — which is what makes a cool moon
@@ -539,7 +814,67 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         let facing = step(0.0, dot(N, L));
         let spec = pow(max(dot(N, H), 0.0), SPECULAR_POWER) * gloss * atten * facing;
         lit = lit + lt.col.rgb * lt.col.w * spec;
+        // `void RE_Direct_Physical( ... )`, transcribed:
+        //
+        //   float dotNL = saturate( dot( geometryNormal, directLight.direction ) );
+        //   vec3 irradiance = dotNL * directLight.color;
+        //   reflectedLight.directSpecular += irradiance * BRDF_GGX( ... );
+        //   reflectedLight.directDiffuse  += irradiance * BRDF_Lambert( material.diffuseColor );
+        //
+        // In three, `directLight.color` reaches this function with the light's
+        // intensity, its distance attenuation (`getPointLightInfo`) and its
+        // shadow mask (`lights_fragment_begin`) already multiplied in. Here that
+        // is `lt.col.rgb * lt.col.w * atten` — the same three factors, in the
+        // same left-to-right order the two legacy terms above already use, so
+        // the two models see the same light.
+        //
+        // Specular before diffuse, because that is the order the source
+        // accumulates them in.
+        let phys_light_color = lt.col.rgb * lt.col.w * atten;
+        let phys_dot_nl = axiom_pbr_saturate(dot(N, L));
+        let phys_irradiance = phys_dot_nl * phys_light_color;
+        phys_direct_specular = phys_direct_specular
+            + phys_irradiance
+                * axiom_pbr_brdf_ggx(
+                    L,
+                    V,
+                    N,
+                    phys_specular_color,
+                    phys_specular_f90,
+                    phys_roughness,
+                );
+        phys_direct_diffuse =
+            phys_direct_diffuse + phys_irradiance * axiom_pbr_brdf_lambert(phys_diffuse_color);
     }
+    // `meshphysical.glsl.js`'s own combination, in its own order:
+    //
+    //   vec3 totalDiffuse  = reflectedLight.directDiffuse  + reflectedLight.indirectDiffuse;
+    //   vec3 totalSpecular = reflectedLight.directSpecular + reflectedLight.indirectSpecular;
+    //   vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;
+    //
+    // `indirectSpecular` is an **exact zero** here, and it is an exact zero in
+    // three too whenever there is no environment map: without one, `radiance` and
+    // `iblIrradiance` are both `vec3( 0.0 )`, so `RE_IndirectSpecular_Physical`
+    // contributes nothing. This pass has no environment probe, so the term is
+    // omitted rather than approximated — an image-based specular is its own
+    // capability with its own probe, not a line here.
+    let phys_total_diffuse = phys_direct_diffuse + phys_indirect_diffuse;
+    let phys_total_specular = phys_direct_specular;
+    // The fourth model lands the same way the other three do: **one shader, a
+    // `select` on a value, never a second pipeline.** `axiom_lighting_model()`
+    // returns a literal, so this condition is a per-program compile-time
+    // constant — a Lambert program dead-strips the whole physical arm, and a
+    // physical one dead-strips the Blinn-Phong arm. Four models across N surfaces
+    // is still N programs.
+    //
+    // `select` takes the VALUE, so nothing the unused arm computed can reach the
+    // result, and every legacy line above is untouched: a non-physical fragment
+    // is bit-for-bit the fragment this pass drew before the model existed.
+    //
+    // `outgoingLight`'s emissive third term is `surface.emission`, added below
+    // where it always was — it is model-independent, and three adds it in the
+    // same place.
+    lit = select(lit, phys_total_diffuse + phys_total_specular, model == AXIOM_LIGHT_PHYSICAL);
     // Self-illumination, added after every light term and before fog: it is radiance
     // the surface emits, so no N.L, no ambient and no shadow attenuates it — but the
     // air between it and the camera still does. A non-emissive material contributes
@@ -549,7 +884,13 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // RADIATES, and an UNLIT surface radiates the same. With every light term
     // gated to zero above, an unlit fragment is exactly `base_color.rgb +
     // emission` — which is the whole definition of the model.
-    let emitted = lit + surface.emission;
+    // Gated by `diffuse_gate`, not by a new capability bit: an UNLIT surface
+    // gathers nothing, and transmission is a gather. `surface.transmission` is
+    // 0.0 for every program that does not author it, so this is an exact
+    // identity and every existing frame is unchanged to the bit.
+    let transmitted = axiom_cloth_transmitted(trans_sum, base.rgb, surface.transmission)
+        * diffuse_gate;
+    let emitted = lit + transmitted + surface.emission;
     // Atmospheric perspective, last: distance recedes toward the frame's fog colour.
     // This is applied AFTER lighting on purpose — fog replaces the surface's radiance,
     // it does not tint the light — which is also where the Canvas 2D backend's fog

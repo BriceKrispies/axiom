@@ -114,6 +114,11 @@ pub struct LiveGpuBinding {
     /// `initialize`, and because the answer is a bind-time property: nothing about
     /// a frame can change it.
     hdr_targets: bool,
+    /// Whether this device can carry the G-buffer — held for the same reason as
+    /// `hdr_targets`, and derived from the same bind-time facts: the adapter's
+    /// `max_color_attachments` and `max_color_attachment_bytes_per_sample`, plus
+    /// HDR itself (a `Rgba16Float` normal target is an HDR target).
+    gbuffer: bool,
 }
 
 /// Translate a `wgpu` surface acquisition failure into the engine's
@@ -169,6 +174,14 @@ impl LiveGpuBinding {
         shadow_size: u32,
         tier_max_anisotropy: u16,
         look: axiom_host::FrameRenderLook,
+        // The capability profile as the HOST left it, before any device answered.
+        // Needed here — not just after the bind — because the scene target's
+        // FORMAT is decided from it: a host that declined
+        // `RenderCapability::HdrTargets` must not get a float intermediate
+        // allocated behind its back, and the decision has to be made before the
+        // texture exists. `GpuBackendApi::bind_canvas` folds the device's answer
+        // into its own copy after this returns, with the same (idempotent) grant.
+        profile: axiom_host::BackendCapabilityProfile,
         preference: Option<axiom_host::BackendKind>,
     ) -> Result<LiveGpuBinding, JsValue> {
         use axiom_host::BackendKind;
@@ -367,17 +380,82 @@ impl LiveGpuBinding {
         };
         surface.configure(&device, &config);
 
+        // **Can this device hold a value above one between passes?**
+        //
+        // Asked of the adapter, not assumed from the arm. This engine requests
+        // WebGL2 downlevel limits on *both* browser arms to hold them at
+        // capability parity, and half-float render targets are not guaranteed
+        // under those limits — which used to be the end of the argument, and is
+        // why the post chain still tone-maps an 8-bit intermediate. But "not
+        // guaranteed for the class" is not "absent on this device", and the two
+        // were being conflated: an adapter that reports the format perfectly
+        // usable was held to the ceiling of one that does not.
+        //
+        // Both usages are required. Every pass downstream of the scene samples
+        // the previous target, so a render-attachment-only format would let the
+        // scene pass succeed and the chain that consumes it fail — the same rule
+        // `surface_encode::scene_target_format` applies to the sRGB upgrade.
+        let hdr_usages = adapter
+            .get_texture_format_features(wgpu::TextureFormat::Rgba16Float)
+            .allowed_usages;
+        let hdr_targets = crate::hdr_target::device_hdr_targets(
+            hdr_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
+            hdr_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING),
+        );
+        // **Does this frame render in high dynamic range?** Both halves, together:
+        // the app authored a tone map, and the profile — the host's, with this
+        // device's answer folded in by the same grant `bind_canvas` will apply —
+        // carries the attachment. `None` is the 8-bit chain, and it is the answer
+        // for an app that authored nothing *and* for a device that cannot, which
+        // is what makes the degradation a single path rather than two.
+        let tonemap = crate::hdr_target::hdr_scene_tonemap(
+            look.tonemap(),
+            crate::hdr_target::grant_hdr_targets(profile, hdr_targets),
+        );
+
         // The colour format the SCENE renders into. Unlike the swap chain this is
         // our own texture, so it is sRGB whenever the device can render to and
         // sample that format — the scene is then *stored* display-encoded on every
         // arm, which is both what the shading chain assumes and what stops a dark
         // gradient banding under 8-bit linear storage. On a surface that already
         // offers sRGB (the WebGL2 arm) this is the surface format unchanged.
+        //
+        // Unless the tone map is on, in which case it is half-float linear
+        // instead and nothing between the scene and the composite clamps.
+        // Clamp the tier's requested render target to what this device can hold.
+        // A supersampled tier can ask for more than the device's
+        // `max_texture_dimension_2d`, and exceeding it is not a soft failure —
+        // wgpu rejects the texture and the whole backend dies — so the request is
+        // a request, and this is the ceiling. Clamping (rather than refusing)
+        // means a device with less headroom simply supersamples less, which is
+        // the same graceful shape the anisotropy clamp above has. The aspect is
+        // preserved by scaling both axes by the same clamped ratio.
+        let device_max = device.limits().max_texture_dimension_2d.max(1);
+        let requested_longest = render_width.max(render_height).max(1);
+        let held_longest = requested_longest.min(device_max);
+        let hold = |axis: u32| {
+            (((axis as u64) * (held_longest as u64)) / (requested_longest as u64)).max(1) as u32
+        };
+        let render_width = hold(render_width);
+        let render_height = hold(render_height);
+
+        // The G-buffer's own two limits, read from the device this binding got
+        // rather than assumed from the arm. `device_gbuffer` also requires HDR,
+        // because an `Rgba16Float` normal target IS an HDR target — asking twice
+        // in two places is how the two answers drift apart.
+        let device_limits = device.limits();
+        let gbuffer = crate::gbuffer::device_gbuffer(
+            device_limits.max_color_attachments,
+            device_limits.max_color_attachment_bytes_per_sample,
+            hdr_targets,
+        );
+
         let scene_format = crate::surface_encode::scene_target_format(
             format,
             adapter
                 .get_texture_format_features(format.add_srgb_suffix())
                 .allowed_usages,
+            tonemap.is_some(),
         );
 
         let renderer = SceneRenderer::new(
@@ -386,9 +464,12 @@ impl LiveGpuBinding {
             scene_format,
             meshes,
             skinned_meshes,
+            // Albedo AND the four optional maps, all on the one carrier. This
+            // used to be followed by `&[]` for a parallel normal-map slice that
+            // only the off-screen path ever filled — which is exactly why the
+            // live browser arm had no normal maps at all. There is nothing to
+            // forget to pass any more.
             materials,
-            // The live arm has no authored normal maps yet; materials get a flat normal.
-            &[],
             max_instances,
             shadow_size,
             // The app-authored render look — hemisphere ambient, depth fog, sky —
@@ -418,47 +499,14 @@ impl LiveGpuBinding {
                     .contains(wgpu::DownlevelFlags::ANISOTROPIC_FILTERING),
                 tier_max_anisotropy,
             ),
+        // The G-buffer and the half-resolution ambient-occlusion chain, at the
+        // colour target's full allocated size. `Some` only when the device
+        // granted the multiple-render-target and HDR bits `device_gbuffer`
+        // measured above — a downlevel arm renders exactly the frame it did
+        // before, with a 1x1 white AO bound so the shader's multiply is one.
+        [None, Some((render_width, render_height))][usize::from(gbuffer)],
         );
 
-        // Clamp the tier's requested render target to what this device can hold.
-        // A supersampled tier can ask for more than the device's
-        // `max_texture_dimension_2d`, and exceeding it is not a soft failure —
-        // wgpu rejects the texture and the whole backend dies — so the request is
-        // a request, and this is the ceiling. Clamping (rather than refusing)
-        // means a device with less headroom simply supersamples less, which is
-        // the same graceful shape the anisotropy clamp above has. The aspect is
-        // preserved by scaling both axes by the same clamped ratio.
-        let device_max = device.limits().max_texture_dimension_2d.max(1);
-        let requested_longest = render_width.max(render_height).max(1);
-        let held_longest = requested_longest.min(device_max);
-        let hold = |axis: u32| {
-            (((axis as u64) * (held_longest as u64)) / (requested_longest as u64)).max(1) as u32
-        };
-        let render_width = hold(render_width);
-        let render_height = hold(render_height);
-
-        // **Can this device hold a value above one between passes?**
-        //
-        // Asked of the adapter, not assumed from the arm. This engine requests
-        // WebGL2 downlevel limits on *both* browser arms to hold them at
-        // capability parity, and half-float render targets are not guaranteed
-        // under those limits — which used to be the end of the argument, and is
-        // why the post chain still tone-maps an 8-bit intermediate. But "not
-        // guaranteed for the class" is not "absent on this device", and the two
-        // were being conflated: an adapter that reports the format perfectly
-        // usable was held to the ceiling of one that does not.
-        //
-        // Both usages are required. Every pass downstream of the scene samples
-        // the previous target, so a render-attachment-only format would let the
-        // scene pass succeed and the chain that consumes it fail — the same rule
-        // `surface_encode::scene_target_format` applies to the sRGB upgrade.
-        let hdr_usages = adapter
-            .get_texture_format_features(wgpu::TextureFormat::Rgba16Float)
-            .allowed_usages;
-        let hdr_targets = crate::hdr_target::device_hdr_targets(
-            hdr_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
-            hdr_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING),
-        );
 
         // **What this device actually resolved to**, beside the backend line above.
         //
@@ -476,7 +524,7 @@ impl LiveGpuBinding {
         web_sys::console::log_1(&JsValue::from_str(&format!(
             "axiom: surface = {width}x{height}, render target = {render_width}x{render_height} \
              (device max {device_max}), anisotropy = {aniso} (tier cap {tier_max_anisotropy}), \
-             hdr targets = {hdr_targets}",
+             hdr targets = {hdr_targets}, scene target = {scene_format:?}",
             aniso = crate::texture_sampling::device_max_anisotropy(
                 adapter
                     .get_downlevel_capabilities()
@@ -524,16 +572,24 @@ impl LiveGpuBinding {
         // finished frame graded and nothing bloomed would otherwise fall through
         // to the blit and present ungraded, which is precisely the divergence
         // carrying the grade on the look exists to close.
-        let wants_post = look.bloom().is_some() | look.grade().is_some();
+        // A tone map joins bloom and the grade as a reason to build the chain, and
+        // it is a *harder* reason than either: on the HDR arm the scene lives in a
+        // float texture the swap chain cannot present, so the composite is the
+        // only pass that brings it down to display bytes. Falling through to the
+        // plain blit there would present raw radiance.
+        let wants_post =
+            look.bloom().is_some() | look.grade().is_some() | tonemap.is_some();
         let post = wants_post.then(|| {
             crate::post_chain::PostChain::new(
                 &device,
+                &queue,
                 // Present target = the swap chain (which decides whether the
                 // composite encodes); working targets = the scene format.
                 format,
                 scene_format,
                 &intermediate_view,
                 (render_width, render_height),
+                tonemap.as_ref(),
             )
         });
 
@@ -563,6 +619,7 @@ impl LiveGpuBinding {
             device,
             queue,
             config,
+            gbuffer,
             intermediate_view,
             depth_view,
             upscale,
@@ -601,6 +658,13 @@ impl LiveGpuBinding {
     /// capability profile.
     pub fn has_hdr_targets(&self) -> bool {
         self.hdr_targets
+    }
+
+    /// Whether the bound device can carry the G-buffer
+    /// ([`crate::gbuffer`]) — the depth prepass, the oct-encoded view normal,
+    /// the velocity buffer and the linear depth the temporal passes read.
+    pub fn has_gbuffer(&self) -> bool {
+        self.gbuffer
     }
 
     /// The most recent **resolved** per-pass GPU timings, or the reason there
@@ -703,8 +767,9 @@ impl LiveGpuBinding {
         clear: [f32; 4],
         sdf: Option<&axiom_host::SdfScene>,
         caps: u32,
-        // The camera view-projection, read only by the sky pass.
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product. See
+        // `SceneRenderer::record` for which pass reads which half.
+        camera: axiom_host::FrameCamera,
         // The frame's surface time in seconds — explicitly supplied engine time,
         // zero for a frame whose surfaces read no clock.
         surface_time: f32,
@@ -745,7 +810,7 @@ impl LiveGpuBinding {
             clear,
             sdf,
             caps,
-            camera_view_proj,
+            camera,
             surface_time,
             self.clock.as_ref(),
         );

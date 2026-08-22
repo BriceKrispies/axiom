@@ -787,6 +787,25 @@ pub(crate) struct SceneRenderer {
     /// The linear-blend-skinning resources, when the device can support them.
     /// [`None`] on a device without vertex-stage storage buffers — see [`Skinning`].
     skinning: Option<Skinning>,
+    /// The depth/normal/velocity prepass and the ambient occlusion built on it.
+    ///
+    /// `Some` together or `None` together: GTAO reads two G-buffer channels, so
+    /// a device that cannot hold the attachments has neither. The main pass then
+    /// binds a 1x1 white AO and its multiply is exactly one, which is what makes
+    /// "a device without the bit renders the bytes it always did" a property of
+    /// the code rather than a hope.
+    prepass: Option<(crate::gbuffer::GBufferTargets, crate::gbuffer::GBufferPass)>,
+    gtao: Option<crate::gtao::pass::GtaoPass>,
+    /// The prepass's own per-instance stream: `world`, `prev_world`,
+    /// `material_id`, `coverage`. A **separate** buffer from the forward pass's,
+    /// because the two shaders read different things — the forward pass wants a
+    /// premultiplied mvp and a colour, the prepass wants the world pair it
+    /// differences a velocity from. Sharing one would mean packing both layouts
+    /// into every instance for every app, including the ones with no prepass.
+    prepass_instances: Option<wgpu::Buffer>,
+    /// Last frame's unjittered view-projection, for the velocity difference.
+    /// `Cell` because `record` takes `&self`.
+    prev_view_proj: std::cell::Cell<[f32; 16]>,
     /// What every main-pass pipeline is built from, kept so a program compiled at
     /// the preparation barrier gets **the same** layout the default pipeline has.
     layouts: MainPassLayouts,
@@ -989,9 +1008,21 @@ impl SceneRenderer {
     /// Build both pipelines (for the given colour target `format`), the shadow
     /// map, upload every distinct mesh and material, and allocate the per-frame
     /// lighting + light-VP + instance buffers. `meshes` is `(mesh_id, 12-float
-    /// vertices, indices)`; `materials` is `(material_id, width, height, RGBA8)`;
-    /// `normals` is the optional per-material `(material_id, width, height, RGBA8)`
-    /// tangent-space normal maps (materials absent from it get a flat normal).
+    /// vertices, indices)`.
+    ///
+    /// `materials` carries **all five** of a material's textures: the albedo on
+    /// the carrier itself, and the tangent-space normal map, the
+    /// `(occlusion, roughness, metalness, height)` pack, the micro-detail tile and
+    /// the macro variation field as optional maps on it. Any map a material did
+    /// not author binds this function's neutral 1x1 instead (see `flat_normal` and
+    /// friends below), so a material that authors none renders exactly as it did
+    /// before those slots existed.
+    ///
+    /// The normal maps used to arrive in a **second slice parallel to this one**,
+    /// which only the off-screen path ever filled — the live browser arm passed
+    /// `&[]`, so it had no normal maps at all. Folding the maps into the carrier
+    /// deleted that parameter and that whole class of bug: there is now exactly
+    /// one thing to pass, and every arm passes it.
     pub(crate) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -999,11 +1030,21 @@ impl SceneRenderer {
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
         skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
         materials: &[axiom_host::MaterialTexture],
-        normals: &[(u64, u32, u32, Vec<u8>)],
         max_instances: u32,
         shadow_size: u32,
         look: axiom_host::FrameRenderLook,
         device_max_anisotropy: u16,
+        // The colour target's full allocated size, and therefore the size of the
+        // G-buffer and the half-resolution ambient-occlusion chain built beside
+        // it. Not the per-frame viewport: like the colour target, these are
+        // allocated once at tier size and a reduced render scale uses the
+        // lower-left corner, so adapting the scale costs a viewport rather than
+        // four reallocations.
+        //
+        // `None` builds no G-buffer and no AO — the arm every caller that only
+        // wants a lit frame takes, and the arm that renders exactly the bytes it
+        // always did.
+        scene_size: Option<(u32, u32)>,
     ) -> SceneRenderer {
         let max_instances = max_instances.max(1);
         // The shadow-atlas edge length is the device tier's choice
@@ -1053,28 +1094,106 @@ impl SceneRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // The runtime material shader's three extra maps (4, 5, 6). They
+                // share the samplers already bound at 1 and 3 rather than adding
+                // their own: a sampler is a filtering rule, and these want the
+                // same rule the material already asked for.
+                //
+                // All three are LINEAR data, never sRGB — an ORM triple, a
+                // tangent-space normal and a noise field are measurements, not
+                // colours. A material that authors none of them gets a neutral
+                // 1x1 (see `NEUTRAL_ORM_HEIGHT` and friends), which is what keeps
+                // every existing draw pixel-identical now that the bindings exist.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         // The default flat normal (1x1, RGB encodes the +Z tangent-space normal) used for
         // any material without an authored normal map.
         let flat_normal: (u32, u32, Vec<u8>) = (1, 1, vec![128, 128, 255, 255]);
+        // The runtime material shader's three maps, in their NEUTRAL form: what a
+        // material that authors none of them must see so the shader's own
+        // defaults decide the result rather than leftover texture memory.
+        //
+        // These bytes are the compatibility contract. A material can now author
+        // all three (`axiom_host::MaterialTexture`'s optional maps), but the
+        // overwhelming majority author none, and for those the frame must be the
+        // frame it was before the slots existed — so these values do not move
+        // without a byte-identity proof moving with them.
+        //
+        // `ORM+height` is (occlusion, roughness, metalness, height). Occlusion 1
+        // is "unoccluded" and metalness 0 is "not metal" — the values that make
+        // those terms identities. Roughness 1 is the *unscaled* value the
+        // parameter block's `[scale, offset, minimum]` remap then applies, so a
+        // material states its roughness in parameters rather than inheriting a
+        // texture it never authored. Height 0 disables parallax at the texture
+        // as well as at the parameter, which matters because `parallax` and the
+        // height map are two independent ways to switch it off.
+        let neutral_orm_height: (u32, u32, Vec<u8>) = (1, 1, vec![255, 255, 0, 0]);
+        // Detail: binding 5 packs `(normal.x, normal.y, micro_albedo, height)`,
+        // so its identity is 128 in the FIRST THREE lanes — a flat tangent-space
+        // normal in `.rg` and, critically, 0.5 in `.b`. `.b` is the micro-albedo
+        // speckle, which the shader decodes as `(b - 0.5) * 1.25`; the 255 a
+        // "flat normal" instinct would put there decodes to `+0.625` and
+        // brightens every material that supplies no detail map. Same class of
+        // bug as "macro neutral is mid-grey, not zero".
+        //
+        // `.a` (height) stays 0, matching the source: `owMicro = (a - 0.5) * 2`
+        // is then `-1`, which only ever *darkens* through `max(-micro, 0)`, and
+        // `owDetailP.z` (the strength) is 0 for any material with no detail
+        // block, so the whole layer multiplies out to identity regardless.
+        let neutral_detail: (u32, u32, Vec<u8>) = (1, 1, vec![128, 128, 128, 0]);
+        // Macro: mid-grey. The macro layer is a *variation* around a midpoint,
+        // so 0.5 is its identity — zero would darken every surface by the full
+        // macro amplitude, which is the failure a naive "neutral is zero" would
+        // produce.
+        let neutral_macro: (u32, u32, Vec<u8>) = (1, 1, vec![128, 128, 128, 255]);
         let materials: HashMap<u64, wgpu::BindGroup> = materials
             .iter()
             .map(|texture| {
-                let id = texture.material_id();
-                let (nw, nh, nrgba) = normals
-                    .iter()
-                    .find(|(nid, ..)| *nid == id)
-                    .map(|(_, nw, nh, nrgba)| (*nw, *nh, nrgba.as_slice()))
-                    .unwrap_or((flat_normal.0, flat_normal.1, flat_normal.2.as_slice()));
                 (
-                    id,
+                    texture.material_id(),
                     upload_material(
                         device,
                         queue,
                         &material_layout,
                         (texture.width(), texture.height(), texture.pixels()),
-                        (nw, nh, nrgba),
+                        // Each of the four: what the material authored, or this
+                        // function's neutral. `map_or_neutral` is the ONE place
+                        // that fallback is decided, so a slot cannot quietly grow
+                        // a different default from its three siblings.
+                        map_or_neutral(texture.normal(), &flat_normal),
+                        map_or_neutral(texture.orm_height(), &neutral_orm_height),
+                        map_or_neutral(texture.detail(), &neutral_detail),
+                        map_or_neutral(texture.macro_field(), &neutral_macro),
                         texture.sampling(),
                         device_max_anisotropy,
                     ),
@@ -1180,8 +1299,115 @@ impl SceneRenderer {
                         count: None,
                     },
                     uniform_entry(2, wgpu::ShaderStages::FRAGMENT),
+                    // The resolved ambient occlusion, in group 2 with the other
+                    // screen-space lighting inputs rather than in a group 4 of
+                    // its own: WebGPU's default `maxBindGroups` is **four**, so
+                    // 0..3 is the whole budget and a fifth group would refuse to
+                    // create a pipeline on a conforming device.
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
             });
+        // Built before the bind group below, because that group binds one of the
+        // two: the real AO when this device runs the chain, and a 1x1 white
+        // texture when it does not.
+        // `BackendCapabilityProfile::all()` is the honest argument here, not a
+        // shortcut: `GBufferTargets::new`'s profile gate asks whether the
+        // *attachment set* is permitted, and the DEVICE's answer to that is what
+        // `live_gpu_binding::device_gbuffer` already measured before deciding
+        // whether to pass a `scene_size` at all. The per-FRAME mask is a
+        // different question and is honoured where it belongs — `record` simply
+        // does not run these passes for a frame whose `caps` drops the bit.
+        let prepass = scene_size.and_then(|(width, height)| {
+            crate::gbuffer::GBufferTargets::new(
+                device,
+                axiom_host::BackendCapabilityProfile::all(),
+                width,
+                height,
+            )
+            .map(|targets| (targets, crate::gbuffer::GBufferPass::new(device)))
+        });
+        let prepass_instances = prepass.as_ref().map(|_| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("axiom-gbuffer-instances"),
+                size: u64::from(max_instances)
+                    * crate::gbuffer::GBUFFER_INSTANCE_FLOATS as u64
+                    * 4,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        let gtao = prepass.as_ref().zip(scene_size).map(|((targets, _), size)| {
+            crate::gtao::pass::GtaoPass::new(
+                device,
+                size,
+                targets.view(crate::gbuffer::GBufferChannel::Depth),
+                targets.view(crate::gbuffer::GBufferChannel::Normal),
+                targets.view(crate::gbuffer::GBufferChannel::Velocity),
+            )
+        });
+        // The unoccluded neutral. `Rg16Float` to match the real chain's format,
+        // and `1.0` in the visibility lane so `ambient * ao` is `ambient`.
+        let white_ao = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("axiom-ao-neutral"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            white_ao.as_image_copy(),
+            &[255_u8, 255, 255, 255],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let white_ao_view = white_ao.create_view(&wgpu::TextureViewDescriptor::default());
+        let ao_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("axiom-ao-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            // LINEAR, unlike the nearest sampler the GTAO chain reads its
+            // G-buffer with: this fetch upsamples a half-resolution, already
+            // bilaterally blurred signal, so filtering is what stops the
+            // occlusion reading as visible half-res blocks.
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let ao_view = gtao
+            .as_ref()
+            .map_or(&white_ao_view, crate::gtao::pass::GtaoPass::resolved_view);
         let shadow_sample_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("axiom-shadow-sample-bind-group"),
             layout: &shadow_sample_layout,
@@ -1197,6 +1423,14 @@ impl SceneRenderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: light_vp_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(ao_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&ao_sampler),
                 },
             ],
         });
@@ -1282,6 +1516,18 @@ impl SceneRenderer {
                 .map(|sky| SkyPass::new(device, format, sky)),
             look,
             skinning,
+            prepass,
+            gtao,
+            prepass_instances,
+            // Identity, so the first frame differences against itself and
+            // produces a zero velocity — which is the honest answer for a frame
+            // with no predecessor.
+            prev_view_proj: std::cell::Cell::new([
+                1.0, 0.0, 0.0, 0.0, //
+                0.0, 1.0, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0, //
+                0.0, 0.0, 0.0, 1.0,
+            ]),
             // No surface program until an app prepares one at the barrier. Every
             // existing app stays here, paying one shared zero bind group per pass
             // and not one draw call more.
@@ -1385,10 +1631,18 @@ impl SceneRenderer {
         clear: [f32; 4],
         sdf: Option<&SdfScene>,
         caps: u32,
-        // The frame's camera view-projection. Only the sky pass reads it (to
-        // recover each pixel's world ray); the mesh pass gets its transforms
-        // pre-multiplied per instance.
-        camera_view_proj: [f32; 16],
+        // The frame's camera, as the host publishes it: view, projection and
+        // their product, together.
+        //
+        // All three travel because a product cannot be split back into its
+        // factors and the passes below need different halves. The sky pass
+        // inverts the view-projection to recover each pixel's world ray; the
+        // depth/normal prepass works in VIEW space and needs the view; the
+        // ambient occlusion built on that prepass inverts the PROJECTION to turn
+        // a linear depth back into a view-space position, and reads
+        // `projection[5]` to scale a world radius into pixels. The mesh pass
+        // needs none of them — its transforms arrive pre-multiplied per instance.
+        camera: axiom_host::FrameCamera,
         // The frame's SURFACE TIME in seconds — what a time-varying authored
         // surface samples in both the vertex and the fragment stage. Explicitly
         // supplied engine time (`axiom_host::FramePacket::time`), never a wall
@@ -1418,7 +1672,7 @@ impl SceneRenderer {
                     .depth_fog()
                     .unwrap_or_else(axiom_host::FrameDepthFog::none),
                 caps,
-                camera_view_proj,
+                camera.view_proj(),
                 surface_time,
             ),
         );
@@ -1439,7 +1693,7 @@ impl SceneRenderer {
         // Rewritten each frame: the sky's own parameters are fixed at bind, but
         // the camera moves, so the ray reconstruction does not.
         sky.into_iter().for_each(|s| {
-            queue.write_buffer(&s.uniform, 0, &pack_sky(&s.sky, camera_view_proj));
+            queue.write_buffer(&s.uniform, 0, &pack_sky(&s.sky, camera.view_proj()));
         });
         // Upload the SDF uniform on frames that carry a scene (zero-or-one, via the
         // Option iterator — no `if`).
@@ -1538,6 +1792,81 @@ impl SceneRenderer {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("axiom-frame-encoder"),
         });
+
+        // DEPTH / NORMAL / VELOCITY PREPASS, then the ambient occlusion built on
+        // it. Both before the forward pass, because the forward pass SAMPLES the
+        // AO — `FramePass::Prepass(3) < Gtao(4) < ForwardWorld(7)` in the frame
+        // graph's own ordering.
+        //
+        // Skipped for a frame whose capability mask drops the G-buffer even
+        // though the device could hold one: the targets stay allocated (they are
+        // built once) and the main pass reads whatever the last frame left,
+        // which is why the mask is checked here rather than only at build.
+        self.prepass
+            .as_ref()
+            .zip(self.prepass_instances.as_ref())
+            .filter(|_| (caps & (axiom_host::RenderCapability::GBuffer as u32)) != 0)
+            .map(|((targets, pass), instances)| {
+                // The prepass reads `world` and `prev_world`; the forward stream
+                // carries the world matrix at floats 16..32 of each instance.
+                // `prev_world` is the SAME matrix: per-instance motion history
+                // does not exist yet, so an object's own movement contributes no
+                // velocity and only the camera's does. Stated rather than hidden
+                // — a temporal pass fed a zero object velocity smears moving
+                // geometry, and that is the shape of the defect to look for.
+                let packed_prepass: Vec<f32> = (0..packed.len() / INSTANCE_FLOATS)
+                    .flat_map(|i| {
+                        let base = i * INSTANCE_FLOATS;
+                        let world: [f32; 16] = packed[base + 16..base + 32]
+                            .try_into()
+                            .expect("an instance carries 16 world floats");
+                        crate::gbuffer::pack_gbuffer_instance(&world, &world, 0.0, 1.0)
+                    })
+                    .collect();
+                queue.write_buffer(instances, 0, bytemuck::cast_slice(&packed_prepass));
+
+                let view_proj = camera.view_proj();
+                let uniform = crate::gbuffer::pack_gbuffer_uniform(
+                    // No TAA jitter is applied yet, so the rasterised transform
+                    // and the unjittered one are the same matrix. They stay
+                    // separate lanes anyway: collapsing them is the mistake that
+                    // makes a temporal resolve smear, and it would be invisible
+                    // until the jitter lands.
+                    &view_proj,
+                    &view_proj,
+                    &self.prev_view_proj.get(),
+                    &camera.view(),
+                );
+                let draws_gb: Vec<crate::gbuffer::GBufferDraw<'_>> = draws
+                    .iter()
+                    .filter_map(|(mesh_id, _material, byte_offset, count, _program)| {
+                        self.meshes.get(mesh_id).map(|mesh| {
+                            crate::gbuffer::GBufferDraw {
+                                vertices: &mesh.vertex_buffer,
+                                indices: &mesh.index_buffer,
+                                index_count: mesh.index_count,
+                                // The prepass stream has its own stride, so the
+                                // forward pass's byte offset does not transfer.
+                                instance_offset: (byte_offset / INSTANCE_STRIDE)
+                                    * (crate::gbuffer::GBUFFER_INSTANCE_FLOATS as u64 * 4),
+                                instance_count: *count,
+                            }
+                        })
+                    })
+                    .collect();
+                pass.record(queue, &mut encoder, targets, &uniform, instances, &draws_gb);
+                self.prev_view_proj.set(view_proj);
+
+                // The AO chain. `projection[5]` is `uP11`, the one element the
+                // source reads to scale a world radius into pixels.
+                self.gtao.as_ref().map(|gtao| {
+                    let projection = axiom_math::Mat4::from_cols_array(camera.projection());
+                    let proj_inv = projection
+                        .inverse()
+                        .map_or(camera.projection(), |m| m.as_cols_array());
+                    gtao.record(queue, &mut encoder, proj_inv, camera.projection()[5]);
+                });
+            });
 
         // Shadow depth pre-pass: scene depth from the light's POV.
         {
@@ -2206,12 +2535,38 @@ const MESH_VERTEX_FLOATS: usize = 12;
 /// `device_max_anisotropy` is what the adapter reports; together they resolve —
 /// in the pure, tested [`crate::texture_sampling`] — to filters and an anisotropy
 /// clamp that are already valid for this device.
+#[allow(clippy::too_many_arguments)]
+/// One material map as [`upload_material`] wants it — `(width, height, texels)` —
+/// resolving an absent map to the caller's neutral 1x1.
+///
+/// The whole fallback rule for all four non-albedo maps lives here and nowhere
+/// else. That is the point: four slots each writing their own `unwrap_or` is four
+/// chances for one of them to pick a different default, and the difference
+/// between "the material authored nothing" and "the material authored black" is
+/// the difference between an unchanged frame and a frame with the macro layer
+/// subtracted from it.
+fn map_or_neutral<'a>(
+    map: Option<&'a axiom_host::MapPixels>,
+    neutral: &'a (u32, u32, Vec<u8>),
+) -> (u32, u32, &'a [u8]) {
+    map.map_or(
+        (neutral.0, neutral.1, neutral.2.as_slice()),
+        |authored| (authored.width(), authored.height(), authored.pixels()),
+    )
+}
+
 fn upload_material(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     albedo: (u32, u32, &[u8]),
     normal: (u32, u32, &[u8]),
+    // `(occlusion, roughness, metalness, height)`, linear.
+    orm_height: (u32, u32, &[u8]),
+    // The shared micro-detail tile: tangent-space normal in RGB, height in A.
+    detail: (u32, u32, &[u8]),
+    // The macro variation field.
+    macro_field: (u32, u32, &[u8]),
     sampling: axiom_host::TextureSampling,
     device_max_anisotropy: u16,
 ) -> wgpu::BindGroup {
@@ -2231,6 +2586,36 @@ fn upload_material(
         normal.0,
         normal.1,
         normal.2,
+        wgpu::TextureFormat::Rgba8Unorm,
+    );
+    // All three material-shader maps are linear data, never sRGB: an ORM triple
+    // is three measurements, a tangent-space normal is a direction, and the
+    // macro field is a noise amplitude. Uploading any of them as `Rgba8UnormSrgb`
+    // would apply a decode curve to a number that is not a colour — the same
+    // class of mistake as G16 in `01-engine-gaps.md`, where baked field textures
+    // were written linear and bound as sRGB so every baked tile read dark.
+    let orm_height = upload_texture(
+        device,
+        queue,
+        orm_height.0,
+        orm_height.1,
+        orm_height.2,
+        wgpu::TextureFormat::Rgba8Unorm,
+    );
+    let detail = upload_texture(
+        device,
+        queue,
+        detail.0,
+        detail.1,
+        detail.2,
+        wgpu::TextureFormat::Rgba8Unorm,
+    );
+    let macro_field = upload_texture(
+        device,
+        queue,
+        macro_field.0,
+        macro_field.1,
+        macro_field.2,
         wgpu::TextureFormat::Rgba8Unorm,
     );
     // The filters and anisotropy clamp are decided by the pure, tested
@@ -2274,6 +2659,21 @@ fn upload_material(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+            // 4, 5, 6: the runtime material shader's maps. They reuse the
+            // sampler bound at 1 and 3 — one filtering rule per material, which
+            // is what the material asked for.
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&orm_height),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::TextureView(&detail),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(&macro_field),
             },
         ],
     })
@@ -2503,4 +2903,196 @@ pub(crate) fn create_depth_view(
         view_formats: &[],
     });
     texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// The material-map lane, proved on a real adapter.
+///
+/// Native + `offscreen` only: these render a frame and read it back, which is
+/// what `crate::offscreen::render_to_rgba` exists for, and which the wasm arm
+/// cannot do. Same shape as `gbuffer`'s byte-identity proof, and for the same
+/// reason — a contract change that claims to move no pixel has to show it.
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "offscreen"))]
+mod map_tests {
+    use axiom_host::{MapPixels, MaterialTexture};
+
+    /// The captured edge length. 64 px keeps the readback small while leaving the
+    /// quad tens of pixels across.
+    const EDGE: u32 = 64;
+
+    /// Column-major identity.
+    const IDENTITY: [f32; 16] = [
+        1.0, 0.0, 0.0, 0.0, //
+        0.0, 1.0, 0.0, 0.0, //
+        0.0, 0.0, 1.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0,
+    ];
+
+    /// A column-major projection mapping world `(x, y, *)` to clip
+    /// `(x/2, y/2, 0.5, 1)`. Deliberately trivial: what is under test is the
+    /// material bind group, not a perspective divide.
+    const HALF_SCALE_VP: [f32; 16] = [
+        0.5, 0.0, 0.0, 0.0, //
+        0.0, 0.5, 0.0, 0.0, //
+        0.0, 0.0, 0.0, 0.0, //
+        0.0, 0.0, 0.5, 1.0,
+    ];
+
+    /// A quad in the `z = 0` object plane with a `+z` normal and **varying** uv.
+    ///
+    /// The varying uv is load-bearing, not decoration. The main pass builds its
+    /// cotangent frame from screen-space uv derivatives (`scene_wgsl`), so a quad
+    /// whose four corners share one uv has a degenerate frame and the shader
+    /// deliberately falls back to the geometric normal — on which a normal map, by
+    /// design, changes nothing. A test using such a quad would "prove" the lane
+    /// works by proving nothing at all.
+    fn quad() -> (Vec<f32>, Vec<u32>) {
+        let corner =
+            |x: f32, y: f32, u: f32, v: f32| [x, y, 0.0, 0.0, 0.0, 1.0, u, v, 1.0, 1.0, 1.0, 1.0];
+        let vertices = [
+            corner(-1.2, -1.2, 0.0, 0.0),
+            corner(1.2, -1.2, 1.0, 0.0),
+            corner(1.2, 1.2, 1.0, 1.0),
+            corner(-1.2, 1.2, 0.0, 1.0),
+        ]
+        .concat();
+        (vertices, vec![0, 1, 2, 0, 2, 3])
+    }
+
+    /// Render one quad with `material`'s textures and read the frame back, or
+    /// `None` when this machine has no native adapter.
+    fn render(material: MaterialTexture) -> Option<Vec<u8>> {
+        let (vertices, indices) = quad();
+        let translate = {
+            let mut m = IDENTITY;
+            m[14] = -5.0;
+            m
+        };
+        crate::offscreen::render_to_rgba(
+            EDGE,
+            EDGE,
+            &[(1_u64, vertices, indices)],
+            std::slice::from_ref(&material),
+            &[(0, [0.35, -0.5, 0.79], [1.0, 0.95, 0.85], 1.0)],
+            IDENTITY,
+            axiom_host::FrameCamera::IDENTITY,
+            &[(1_u64, 1_u64, [HALF_SCALE_VP, translate].concat(), 1)],
+            &[],
+            &[],
+            [0.05, 0.06, 0.08, 1.0],
+            None,
+            axiom_host::FrameRenderLook::default(),
+            None,
+            axiom_host::BackendCapabilityProfile::all(),
+            None,
+            None,
+            1,
+        )
+        .map(|(pixels, _timing)| pixels)
+    }
+
+    /// A material with a mid-grey albedo and no authored maps — what every app
+    /// that predates the map slots produces.
+    fn unmapped() -> MaterialTexture {
+        MaterialTexture::new(1, 1, 1, vec![170, 170, 170, 255])
+    }
+
+    /// **THE HARD CONSTRAINT.** A material that supplies no extra maps must render
+    /// byte-identical to one that explicitly binds the backend's neutrals.
+    ///
+    /// This is the proof that `map_or_neutral`'s absent arm and its present arm
+    /// agree, which is the whole compatibility claim of the contract change: every
+    /// existing app authors nothing, takes the absent arm, and must land on
+    /// exactly the texels the backend bound before the slots existed. If a neutral
+    /// is ever retuned without its `Option` arm following, this fails.
+    ///
+    /// The neutral bytes are written out here rather than read from
+    /// `super::SceneRenderer` on purpose: an independently-stated expectation is
+    /// the only kind that can disagree with the implementation.
+    #[test]
+    fn a_material_with_no_maps_matches_one_that_binds_the_neutrals_byte_for_byte() {
+        let neutral = |bytes: Vec<u8>| Some(MapPixels::new(1, 1, bytes));
+        let explicit = unmapped()
+            // Flat +Z tangent-space normal.
+            .with_normal(neutral(vec![128, 128, 255, 255]))
+            // (occlusion 1, roughness 1, metalness 0, height 0).
+            .with_orm_height(neutral(vec![255, 255, 0, 0]))
+            // Flat detail normal, zero detail height.
+            .with_detail(neutral(vec![128, 128, 255, 0]))
+            // Mid-grey: the macro layer varies AROUND a midpoint, so zero would
+            // darken every surface by the full macro amplitude.
+            .with_macro_field(neutral(vec![128, 128, 128, 255]));
+
+        let Some(absent) = render(unmapped()) else {
+            // No native adapter on this machine; nothing to prove either way.
+            return;
+        };
+        let present = render(explicit).expect("the same adapter answered once already");
+        assert_eq!(absent.len() as u32, EDGE * EDGE * 4);
+        // Comparing two blank frames would prove nothing.
+        assert!(
+            absent.chunks_exact(4).any(|p| p[0] > 16 || p[1] > 16),
+            "the control frame rendered nothing to compare"
+        );
+        let differing = absent
+            .iter()
+            .zip(present.iter())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(
+            differing, 0,
+            "authoring the neutral maps explicitly moved {differing} of {} bytes; \
+             the absent-map fallback and the neutral constants have diverged",
+            absent.len()
+        );
+    }
+
+    /// **The lane is live.** An authored normal map reaches the GPU and changes
+    /// the shading.
+    ///
+    /// The byte-identity test above passes trivially if the maps are silently
+    /// dropped, which is precisely the defect being fixed — the live browser arm
+    /// passed `&[]` for its normal maps for as long as that lane existed, and
+    /// nothing caught it. This is the assertion that would have.
+    #[test]
+    fn an_authored_normal_map_changes_the_shaded_frame() {
+        let Some(flat) = render(unmapped()) else {
+            return;
+        };
+        // A tangent-space normal tilted hard along +x: `(255, 128, 128)` decodes
+        // to about `(1.0, 0.004, 0.004)`, which the cotangent frame turns into a
+        // large change in `N` and therefore in the Lambert term.
+        let tilted = render(
+            unmapped().with_normal(Some(MapPixels::new(1, 1, vec![255, 128, 128, 255]))),
+        )
+        .expect("the same adapter answered once already");
+        let differing = flat
+            .iter()
+            .zip(tilted.iter())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert!(
+            differing > 0,
+            "an authored normal map moved 0 of {} bytes — the map never reached \
+             the bind group",
+            flat.len()
+        );
+    }
+
+    /// The fallback rule itself, without a GPU: present takes the map's own extent
+    /// and texels, absent takes the neutral's. Both arms, stated once.
+    #[test]
+    fn map_or_neutral_takes_the_authored_map_and_falls_back_to_the_neutral() {
+        let neutral: (u32, u32, Vec<u8>) = (1, 1, vec![128, 128, 255, 255]);
+        assert_eq!(
+            super::map_or_neutral(None, &neutral),
+            (1, 1, [128, 128, 255, 255].as_slice()),
+            "an absent map binds the neutral"
+        );
+        let authored = MapPixels::new(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(
+            super::map_or_neutral(Some(&authored), &neutral),
+            (2, 1, [1, 2, 3, 4, 5, 6, 7, 8].as_slice()),
+            "an authored map binds its own extent and texels"
+        );
+    }
 }

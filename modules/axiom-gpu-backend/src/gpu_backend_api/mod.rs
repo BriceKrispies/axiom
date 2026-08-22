@@ -250,9 +250,13 @@ impl GpuBackendApi {
         clear_color: [f32; 4],
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
-        // The camera view-projection, read only by the sky pass (to recover each
-        // pixel's world ray). Identity on a frame with no sky, where it is unread.
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product, as
+        // `axiom_host` publishes them. All three travel because a product cannot
+        // be split into its factors: the sky pass inverts the view-projection,
+        // the depth/normal prepass works in view space, and the ambient occlusion
+        // built on it inverts the projection. `FrameCamera::default()` on a frame
+        // that reads none of them.
+        camera: axiom_host::FrameCamera,
         batches: &[(u64, u64, Vec<f32>, u32)],
         sdf: Option<&SdfScene>,
     ) -> bool {
@@ -263,7 +267,7 @@ impl GpuBackendApi {
             clear_color,
             lights,
             light_view_proj,
-            camera_view_proj,
+            camera,
             batches,
             // No batch names a surface program, so every one of them draws the
             // default pipeline — this entry's whole behaviour, unchanged.
@@ -289,7 +293,13 @@ impl GpuBackendApi {
         clear_color: [f32; 4],
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product, as
+        // `axiom_host` publishes them. All three travel because a product cannot
+        // be split into its factors: the sky pass inverts the view-projection,
+        // the depth/normal prepass works in view space, and the ambient occlusion
+        // built on it inverts the projection. `FrameCamera::default()` on a frame
+        // that reads none of them.
+        camera: axiom_host::FrameCamera,
         batches: &[(u64, u64, Vec<f32>, u32)],
         // The surface program each batch draws with, in `batches` order. Empty
         // for every caller that names no surface, which draws them all with the
@@ -313,7 +323,7 @@ impl GpuBackendApi {
                         clear_color,
                         sdf,
                         self.capability.bits(),
-                        camera_view_proj,
+                        camera,
                         surface_time,
                     )
                     .is_ok()
@@ -326,7 +336,7 @@ impl GpuBackendApi {
                 clear_color,
                 lights,
                 light_view_proj,
-                camera_view_proj,
+                camera,
                 batches,
                 programs,
                 sdf,
@@ -366,8 +376,13 @@ impl GpuBackendApi {
         clear_color: [f32; 4],
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
-        // The camera view-projection, read only by the sky pass.
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product, as
+        // `axiom_host` publishes them. All three travel because a product cannot
+        // be split into its factors: the sky pass inverts the view-projection,
+        // the depth/normal prepass works in view space, and the ambient occlusion
+        // built on it inverts the projection. `FrameCamera::default()` on a frame
+        // that reads none of them.
+        camera: axiom_host::FrameCamera,
         batches: &[(u64, u64, Vec<f32>, u32)],
         programs: &[u64],
         skinned_draws: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
@@ -404,7 +419,7 @@ impl GpuBackendApi {
                     clear_color,
                     sdf,
                     self.capability.bits(),
-                    camera_view_proj,
+                    camera,
                     surface_time,
                 )
             })
@@ -450,12 +465,15 @@ impl GpuBackendApi {
             packet.clear_color(),
             &lights,
             packet.light_view_proj(),
-            // The packet's camera, for the sky pass. A packet carrying no camera
-            // has no view to build a sky ray from, so the identity stands in —
-            // and the sky pass is only built when a look authored one anyway.
-            packet
-                .camera()
-                .map_or(IDENTITY_MATRIX, |camera| camera.view_proj()),
+            // The packet's camera, whole. It used to be narrowed to its
+            // view-projection here, on the reasoning that only the sky pass read
+            // it — which stopped being true when the depth/normal prepass and the
+            // ambient occlusion above it started needing the view and the
+            // projection separately, and neither is recoverable from the product.
+            // A packet carrying no camera gets the default, whose matrices are
+            // identity; the passes that would read it are not built for such a
+            // frame anyway.
+            packet.camera().unwrap_or(axiom_host::FrameCamera::IDENTITY),
             &batches,
             &programs,
             packet.sdf(),
@@ -535,6 +553,31 @@ impl GpuBackendApi {
         crate::draw2d_offscreen::render_draw2d_to_rgba(width, height, &geometry, &all_textures)
     }
 
+    /// Bake one procedural surface **on the device** into its albedo, ORM and
+    /// tangent-space normal maps.
+    ///
+    /// `library_wgsl` is the caller's whole shader library — its noise helpers
+    /// and one `ow_surface_<name>` entry per surface; `request` names which one
+    /// to run and at what size, plus the per-surface parameters. The backend
+    /// splices the two, renders the surface to a full-screen quad, derives the
+    /// normal from the height channel with a Sobel pass, and reads all three
+    /// maps back.
+    ///
+    /// This exists because the CPU reference is the *semantic* definition, not
+    /// the shipping path: evaluating a surface costs ~15.5 us a texel, so a
+    /// nineteen-surface library at 1024^2 is minutes of CPU and milliseconds of
+    /// GPU. The two must agree, which is what the caller's parity test measures.
+    ///
+    /// `None` when the machine has no adapter — the same contract
+    /// [`Self::render_offscreen_rgba`] has, and for the same reason.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
+    pub fn bake_procedural_texture(
+        library_wgsl: &str,
+        request: &axiom_host::ProceduralBakeRequest,
+    ) -> Option<axiom_host::ProceduralBakeMaps> {
+        crate::texture_bake::bake_offscreen(library_wgsl, request)
+    }
+
     /// Render one frame **off-screen** to `width * height * 4` RGBA8 bytes,
     /// headless, on native — the screenshot path. It builds a throwaway GPU device
     /// and draws `meshes` / `materials` / `lights` / `batches` (the same data
@@ -549,11 +592,21 @@ impl GpuBackendApi {
         width: u32,
         height: u32,
         meshes: &[(u64, Vec<f32>, Vec<u32>)],
+        // `normals` is gone: the four extra maps ride on `MaterialTexture`
+        // itself now, so a caller cannot supply a normal map for a material it
+        // did not also supply. The parallel slice made that mismatch expressible
+        // — and every caller in the repo but one passed `&[]`, which is why the
+        // live browser arm had no normal-map lane at all.
         materials: &[axiom_host::MaterialTexture],
-        normals: &[(u64, u32, u32, Vec<u8>)],
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_view_proj: [f32; 16],
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product, as
+        // `axiom_host` publishes them. All three travel because a product cannot
+        // be split into its factors: the sky pass inverts the view-projection,
+        // the depth/normal prepass works in view space, and the ambient occlusion
+        // built on it inverts the projection. `FrameCamera::default()` on a frame
+        // that reads none of them.
+        camera: axiom_host::FrameCamera,
         batches: &[(u64, u64, Vec<f32>, u32)],
         skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
         skinned_draws: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
@@ -588,10 +641,9 @@ impl GpuBackendApi {
             height,
             meshes,
             materials,
-            normals,
             lights,
             light_view_proj,
-            camera_view_proj,
+            camera,
             batches,
             skinned_mesh_set,
             &skinned,
@@ -659,6 +711,11 @@ impl GpuBackendApi {
             self.shadow_size,
             self.max_anisotropy,
             look,
+            // The profile as this backend holds it *before* the bind — the host's
+            // own restrictions. The binding needs it to decide the scene target's
+            // format (a declined `HdrTargets` must not get a float intermediate),
+            // and it applies the same grant below to reach the same answer.
+            self.capability,
             preference,
         )
         .await?;
@@ -670,6 +727,11 @@ impl GpuBackendApi {
         // capability it has and can never take back one a host declined.
         self.capability =
             crate::hdr_target::grant_hdr_targets(self.capability, binding.has_hdr_targets());
+        // Granted from the same bind, immediately after HDR, because the
+        // G-buffer's own gate requires HDR: granting them apart would let a
+        // device report a G-buffer it cannot allocate.
+        self.capability =
+            crate::gbuffer::grant_gbuffer(self.capability, binding.has_gbuffer());
         self.live = Some(binding);
         Ok(())
     }
@@ -837,17 +899,25 @@ mod tests {
         assert!(!backend
             .capability_profile()
             .contains(axiom_host::RenderCapability::HdrTargets));
+        // The same is true of the second device-resolved bit, for the same
+        // reason: whether a pass may bind three colour attachments at once is a
+        // property of the adapter's limits, and this backend has read none.
+        assert!(!backend
+            .capability_profile()
+            .contains(axiom_host::RenderCapability::GBuffer));
         assert_eq!(
             backend.capability_profile(),
             axiom_host::BackendCapabilityProfile::all()
                 .without(axiom_host::RenderCapability::HdrTargets)
+                .without(axiom_host::RenderCapability::GBuffer)
         );
         assert_ne!(
             backend.capability_profile(),
             axiom_host::BackendCapabilityProfile::all()
         );
         // Bit 12 is set; the word the main-pass WGSL reads is unchanged, because
-        // that shader reads no bit above 2048.
+        // that shader reads no bit above 2048. Both device-resolved bits sit
+        // ABOVE it, so the shader contract is the same word it always was.
         assert_eq!(backend.capability_profile().bits(), 0b1_1111_1111_1111);
         // A host can restrict it; the present path then consults the narrowed profile.
         let restricted = axiom_host::BackendCapabilityProfile::all()
@@ -872,7 +942,7 @@ mod tests {
             [0.1, 0.2, 0.3, 1.0],
             &lights,
             light_vp,
-            IDENTITY_MATRIX,
+            axiom_host::FrameCamera::IDENTITY,
             &batches,
             None
         ));

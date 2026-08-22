@@ -42,14 +42,39 @@
 //! [`axiom_host::HostAttachmentFormat::Rgba8UnormSrgb`], which is exactly the
 //! chain described here.
 //!
-//! **This chain is still that substitute**, and nothing in it changed with the
-//! capability: allocating and threading a float intermediate through the bright
-//! pass, both blurs and the composite is the next piece of work, gated on
-//! [`axiom_host::BackendCapabilityProfile::supports_attachment`] rather than on a
-//! comment. Thresholding the clamped buffer still produces the soft halo that is
-//! the point; it just cannot rank two blown highlights against each other.
+//! **This chain is now one of two.** When the app authors an
+//! [`axiom_host::FrameTonemap`] and the device carries the capability
+//! (`crate::hdr_target::hdr_scene_tonemap` decides, and it needs both), the
+//! scene target and every working target in this chain are allocated in
+//! `crate::surface_encode::HDR_SCENE_FORMAT` instead, and the composite runs
+//! [`crate::agx`] over unclamped radiance. Nothing above is a description of
+//! *that* arm: with a float intermediate the bright pass can rank two blown
+//! highlights against each other, which is the whole thing the 8-bit ceiling
+//! made impossible.
+//!
+//! Without the opt-in the paragraphs above stand exactly as written, down to the
+//! bytes: the shader source, the pipelines, the target formats and the composite
+//! entry point are all the ones they were, because the two arms are chosen at
+//! **build** and share no state. Thresholding the clamped buffer still produces
+//! the soft halo that is the point; it just cannot rank two blown highlights.
 //! [`axiom_host::FrameBloom::tonemap`] still earns its keep on the *composite*,
 //! where source + bloom genuinely exceeds one.
+//!
+//! # Why the two arms are separate pipelines and not a `mix`
+//!
+//! The crate's habit — and the right one for a per-frame *value* — is one
+//! pipeline with a uniform lane and a `mix` whose zero end is the identity, as
+//! `balance.w` does for the sRGB encode. That habit does not apply here, and the
+//! reason is what the flag would be selecting. A tone map is not a value the
+//! frame varies; it is a decision about **what the intermediate target is**, made
+//! once at bind from data (`FrameRenderLook`) that is itself fixed at bind. A
+//! uniform lane would mean compiling AgX into every app's composite and widening
+//! the `Params` every app already runs — spending an exactness guarantee that
+//! costs nothing to keep, to make dynamic a thing that cannot change. So the tone
+//! map's own strength/exposure ride as WGSL constants spliced into the HDR
+//! source, `mix`ed against the LDR shoulder inside that shader (strength `0` is
+//! the shoulder's arithmetic, so the blend has an honest zero), and the LDR arm's
+//! text is untouched.
 //!
 //! # The colour grade rides the composite
 //!
@@ -215,7 +240,16 @@ fn fs_blur(in: VsOut) -> @location(0) vec4<f32> {
 // `grade_pixel`: black-point floor removal, then exposure x white balance, then
 // the contrast S-curve about 0.5, then saturation about Rec.709 luma.
 fn graded(linear: vec3<f32>) -> vec3<f32> {
-    let d = srgb_encode(linear);
+    return graded_display(srgb_encode(linear));
+}
+
+// The grade terms, on an already display-encoded value.
+//
+// Split out of `graded` so the HDR arm can slip the display LUT between the
+// encode and these terms — which is where `composite.js:144` runs it, on raw
+// AgX output with nothing in between. The LDR arm still calls `graded`, so its
+// arithmetic and its bytes are unchanged.
+fn graded_display(d: vec3<f32>) -> vec3<f32> {
     // A floor is a subtract, and `max` is what makes it a floor rather than a
     // sign flip; `1 - black` is floored so a degenerate black point of 1.0
     // cannot divide by zero.
@@ -247,6 +281,101 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// The HDR composite, appended to [`POST_WGSL`] **only** on the float arm.
+///
+/// A separate string rather than a second entry point in [`POST_WGSL`] because it
+/// calls `axiom_agx`, which only exists when [`crate::agx::AGX_WGSL`] has been
+/// spliced in front — and splicing that into every app's composite is exactly
+/// the cost the module docs decline to pay.
+///
+/// It is `composite.js:126-136` in order: bloom is added to the scene **in
+/// linear light**, the sum is scaled by the frame's exposure, and only then does
+/// the curve run. Doing the multiply after the curve would be a different
+/// picture — AgX places mid grey on a log axis, so a scale before it is a stop
+/// and a scale after it is a gain on already-compressed values.
+const POST_HDR_WGSL: &str = r#"
+@fragment
+fn fs_composite_hdr(in: VsOut) -> @location(0) vec4<f32> {
+    let scene = textureSample(src_tex, src_sampler, live_uv(in.uv)).rgb;
+    let glow = textureSample(bloom_tex, bloom_sampler, live_uv(in.uv)).rgb * params.tune.z;
+    // `hdr *= exposure` (composite.js:126), on radiance nothing has clamped.
+    let hdr = (scene + glow) * AXIOM_TONE_EXPOSURE;
+    let mapped = axiom_agx(hdr, AXIOM_TONE_SLOPE, AXIOM_TONE_POWER, AXIOM_TONE_SATURATION);
+    // The LDR chain's reciprocal shoulder over the same radiance: the zero end of
+    // the blend, so a strength sweep is measured against the arithmetic the 8-bit
+    // path already ran rather than against nothing.
+    let rolled = vec3<f32>(rolloff(hdr.r), rolloff(hdr.g), rolloff(hdr.b));
+    let tone = mix(rolled, mapped, AXIOM_TONE_STRENGTH);
+    // The display LUT (`composite.js:144`), display-referred: it takes
+    // sRGB-encoded AgX output, not linear light. Every preset constant is
+    // calibrated to where AgX puts 18% grey, which is why it runs HERE and not
+    // in the bloom chain eleven lines earlier, and not after the grade terms.
+    let display = axiom_lut_apply(srgb_encode(tone), AXIOM_LUT_SIZE, AXIOM_LUT_STRENGTH);
+    // From here the two arms are the same pass: the frame's colour grade, then
+    // the display encode when the swap chain will not do it on store.
+    let out = graded_display(display);
+    return vec4<f32>(mix(out, srgb_encode(out), params.balance.w), 1.0);
+}
+"#;
+
+/// The five constants the HDR composite reads, spliced in front of it.
+///
+/// The three look constants come from [`crate::agx`] rather than being retyped,
+/// so the shipped slope/power/saturation have one definition in the crate; the
+/// two tone constants are the app's authored [`axiom_host::FrameTonemap`].
+/// `{:?}` on an `f32` prints a literal that round-trips to the same bits, and
+/// `axiom_kernel::Ratio` has already guaranteed both are finite, so no
+/// non-finite literal can reach the shader.
+fn tone_constants(tonemap: &axiom_host::FrameTonemap) -> String {
+    format!(
+        "\nconst AXIOM_TONE_STRENGTH: f32 = {strength:?};\nconst AXIOM_TONE_EXPOSURE: f32 = \
+         {exposure:?};\nconst AXIOM_TONE_SLOPE: f32 = {slope:?};\nconst AXIOM_TONE_POWER: f32 = \
+         {power:?};\nconst AXIOM_TONE_SATURATION: f32 = {saturation:?};\nconst AXIOM_LUT_SIZE: \
+         f32 = {lut_size:?};\nconst AXIOM_LUT_STRENGTH: f32 = {lut_strength:?};\n",
+        strength = tonemap.strength().get(),
+        exposure = tonemap.exposure().get(),
+        slope = crate::agx::LOOK_SLOPE,
+        power = crate::agx::LOOK_POWER,
+        saturation = crate::agx::LOOK_SATURATION,
+        // The LUT's own two constants ride in the same block: it is spliced into
+        // the same arm, and a second `format!` would be a second place to forget.
+        lut_size = crate::lut::SIZE as f32,
+        lut_strength = crate::lut::LUT_STRENGTH,
+    )
+}
+
+/// The whole composite shader source for one arm, and the entry point that goes
+/// with it.
+///
+/// The `None` arm returns **exactly** `shader_source(POST_WGSL)` — the same
+/// `String` the chain has always compiled — which is what makes "an app that does
+/// not opt in presents the bytes it always did" a property of the source rather
+/// than a hope about float arithmetic.
+fn composite_source(tonemap: Option<&axiom_host::FrameTonemap>) -> (String, &'static str) {
+    tonemap
+        .map(|t| {
+            (
+                crate::surface_encode::shader_source(
+                    &[
+                        crate::agx::AGX_WGSL,
+                        &tone_constants(t),
+                        crate::lut::GRADE_LUT_WGSL,
+                        POST_WGSL,
+                        POST_HDR_WGSL,
+                    ]
+                    .concat(),
+                ),
+                "fs_composite_hdr",
+            )
+        })
+        .unwrap_or_else(|| {
+            (
+                crate::surface_encode::shader_source(POST_WGSL),
+                "fs_composite",
+            )
+        })
+}
+
 /// How much smaller the bloom working targets are than the scene.
 ///
 /// Half resolution: the blur is a low-frequency effect, so the detail thrown away
@@ -275,6 +404,9 @@ pub(crate) struct PostChain {
     pong_group: wgpu::BindGroup,
     /// The blurred bloom, as the composite's second texture.
     bloom_group: wgpu::BindGroup,
+    /// The display grading LUT, as the composite's third — `Some` only on the
+    /// HDR arm, because that is the only arm whose shader declares group 2.
+    lut_group: Option<wgpu::BindGroup>,
     ping_view: wgpu::TextureView,
     pong_view: wgpu::TextureView,
     bloom_size: (u32, u32),
@@ -297,22 +429,33 @@ impl std::fmt::Debug for PostChain {
 
 impl PostChain {
     /// Build the chain for a scene target of `size` presented to `target_format`.
+    ///
+    /// `tonemap` is the HDR arm's switch — `crate::hdr_target::hdr_scene_tonemap`'s
+    /// verdict, so it is `Some` only when the app authored one **and** the device
+    /// can hold the float attachment. When it is `Some`, `scene_format` must be
+    /// `crate::surface_encode::HDR_SCENE_FORMAT`: the two travel together because
+    /// they are the same decision, and this chain allocates its working targets in
+    /// whatever `scene_format` says.
     pub(crate) fn new(
         device: &wgpu::Device,
+        // The display LUT is a baked table, uploaded once here. It is the only
+        // thing in this chain that needs a queue at build; everything else is
+        // written per-frame in `record`.
+        queue: &wgpu::Queue,
         target_format: wgpu::TextureFormat,
         scene_format: wgpu::TextureFormat,
         scene_view: &wgpu::TextureView,
         size: (u32, u32),
+        tonemap: Option<&axiom_host::FrameTonemap>,
     ) -> PostChain {
         let bloom_size = (
             (size.0 / BLOOM_DOWNSCALE).max(1),
             (size.1 / BLOOM_DOWNSCALE).max(1),
         );
+        let (composite_wgsl, composite_entry) = composite_source(tonemap);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("axiom-post-chain"),
-            source: wgpu::ShaderSource::Wgsl(
-                crate::surface_encode::shader_source(POST_WGSL).into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(composite_wgsl.into()),
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("axiom-post-sampler"),
@@ -418,16 +561,101 @@ impl PostChain {
             ],
         });
 
+        // The display grading LUT: a 33^3 RGBA8 volume, baked on the CPU once at
+        // build. It is a *table*, not a render target — nothing writes it after
+        // this, so it is uploaded here rather than costing a pass.
+        let lut_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("axiom-post-lut-layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let lut_group = tonemap.map(|_| {
+            let edge = crate::lut::SIZE as u32;
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("axiom-grade-lut"),
+                size: wgpu::Extent3d {
+                    width: edge,
+                    height: edge,
+                    depth_or_array_layers: edge,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D3,
+                // Unorm, NOT UnormSrgb: the table is display-referred data the
+                // shader indexes with an already-encoded colour. A hardware sRGB
+                // decode on fetch would apply the curve a second time.
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                texture.as_image_copy(),
+                &crate::lut::grade_lut(crate::lut::SHIPPED_PRESET),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(crate::lut::GRADE_LUT_BYTES_PER_ROW),
+                    rows_per_image: Some(edge),
+                },
+                wgpu::Extent3d {
+                    width: edge,
+                    height: edge,
+                    depth_or_array_layers: edge,
+                },
+            );
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("axiom-post-lut-group"),
+                layout: &lut_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            })
+        });
+
         let one = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("axiom-post-layout"),
             bind_group_layouts: &[&source_layout],
             push_constant_ranges: &[],
         });
-        let two = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        // The composite's layout depends on the arm: the HDR shader declares
+        // group 2 for the LUT and the LDR one does not, and a layout that
+        // declares a group the shader never reads is still a validation error on
+        // some backends.
+        let ldr_composite = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("axiom-post-composite-layout"),
             bind_group_layouts: &[&source_layout, &bloom_layout],
             push_constant_ranges: &[],
         });
+        let hdr_composite = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("axiom-post-composite-lut-layout"),
+            bind_group_layouts: &[&source_layout, &bloom_layout, &lut_layout],
+            push_constant_ranges: &[],
+        });
+        let two = [&ldr_composite, &hdr_composite][usize::from(tonemap.is_some())];
         let pipeline = |layout: &wgpu::PipelineLayout, entry: &str, format: wgpu::TextureFormat| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("axiom-post-pipeline"),
@@ -455,13 +683,14 @@ impl PostChain {
         PostChain {
             bright: pipeline(&one, "fs_bright", scene_format),
             blur: pipeline(&one, "fs_blur", scene_format),
-            composite: pipeline(&two, "fs_composite", target_format),
+            composite: pipeline(&two, composite_entry, target_format),
             // The scene and ping sources carry the horizontal step; the pong
             // source — read only by the vertical blur — carries the vertical one.
             scene_group: source_group(scene_view, "axiom-post-scene", &params_h),
             ping_group: source_group(&ping_view, "axiom-post-ping", &params_h),
             pong_group: source_group(&pong_view, "axiom-post-pong", &params_v),
             bloom_group,
+            lut_group,
             ping_view,
             pong_view,
             bloom_size,
@@ -543,6 +772,7 @@ impl PostChain {
                         group: &wgpu::BindGroup,
                         view: &wgpu::TextureView,
                         second: Option<&wgpu::BindGroup>,
+                        third: Option<&wgpu::BindGroup>,
                         size: (u32, u32),
                         stamps: Option<wgpu::RenderPassTimestampWrites<'_>>| {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -566,6 +796,9 @@ impl PostChain {
             rp.set_pipeline(pipeline);
             rp.set_bind_group(0, group, &[]);
             second.into_iter().for_each(|g| rp.set_bind_group(1, g, &[]));
+            // Group 2 is the display LUT, present only on the HDR arm — and only
+            // on the composite, which is the only pass whose layout declares it.
+            third.into_iter().for_each(|g| rp.set_bind_group(2, g, &[]));
             rp.draw(0..3, 0..1);
         };
 
@@ -600,16 +833,18 @@ impl PostChain {
             &self.scene_group,
             &self.ping_view,
             None,
+            None,
             bloom_live,
             clock.map(|clock| clock.opens(crate::gpu_pass_clock::PASS_POST)),
         );
-        pass(&self.blur, &self.ping_group, &self.pong_view, None, bloom_live, None);
-        pass(&self.blur, &self.pong_group, &self.ping_view, None, bloom_live, None);
+        pass(&self.blur, &self.ping_group, &self.pong_view, None, None, bloom_live, None);
+        pass(&self.blur, &self.pong_group, &self.ping_view, None, None, bloom_live, None);
         pass(
             &self.composite,
             &self.scene_group,
             target,
             Some(&self.bloom_group),
+            self.lut_group.as_ref(),
             present_size,
             clock.map(|clock| clock.closes(crate::gpu_pass_clock::PASS_POST)),
         );
@@ -635,5 +870,89 @@ fn sampler_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
         visibility: wgpu::ShaderStages::FRAGMENT,
         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
         count: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axiom_kernel::Ratio;
+
+    /// **The bit-identity guarantee, at its source.**
+    ///
+    /// An app that authors no tone map compiles the exact `String` this chain has
+    /// always compiled and names the exact entry point it always named. That is a
+    /// stronger claim than "the arithmetic reduces to the identity at strength
+    /// zero", and it is the one the No-Shortcuts rule asks for here: routing a
+    /// frame through a float intermediate moves where values are quantized and
+    /// where the sRGB encode happens, so the only honest way to promise unchanged
+    /// bytes is for the unopted arm not to be routed anywhere new.
+    #[test]
+    fn the_ldr_composite_source_is_exactly_what_it_always_was() {
+        let (source, entry) = composite_source(None);
+        assert_eq!(source, crate::surface_encode::shader_source(POST_WGSL));
+        assert_eq!(entry, "fs_composite");
+        assert!(!source.contains("axiom_agx"), "AgX reached the LDR composite");
+        assert!(!source.contains("AXIOM_TONE_"), "a tone constant reached the LDR composite");
+        assert!(!source.contains("fs_composite_hdr"));
+    }
+
+    /// The opted-in arm is the LDR text **plus** AgX, its constants and the HDR
+    /// entry point — a superset, so every helper the shared passes rely on
+    /// (`live_uv`, `contribution`, `rolloff`, `graded`, `srgb_encode`) is still
+    /// there exactly once and the bright/blur pipelines are unchanged between the
+    /// two arms.
+    #[test]
+    fn the_hdr_composite_source_adds_agx_to_the_same_chain() {
+        let (source, entry) = composite_source(Some(&axiom_host::FrameTonemap::filmic()));
+        assert_eq!(entry, "fs_composite_hdr");
+        assert!(source.contains(POST_WGSL), "the shared passes were not preserved");
+        assert!(source.contains(crate::agx::AGX_WGSL));
+        assert!(source.contains("fn fs_composite_hdr"));
+        // The LDR entry point survives in the text (it is part of POST_WGSL) but
+        // is not what the composite pipeline is built from — that is `entry`.
+        assert_eq!(source.matches("fn fs_composite(").count(), 1);
+        assert_eq!(source.matches("fn srgb_encode").count(), 1);
+        assert_eq!(source.matches("fn rolloff").count(), 1);
+    }
+
+    /// The five constants, and where each number comes from. The look three are
+    /// [`crate::agx`]'s so the crate has one shipped look; the two tone ones are
+    /// the app's, printed as round-tripping literals.
+    #[test]
+    fn the_tone_constants_carry_the_apps_numbers_and_the_crates_look() {
+        let half = axiom_host::FrameTonemap::blended(
+            Ratio::finite_or_zero(0.5),
+            Ratio::finite_or_zero(0.25),
+        );
+        let text = tone_constants(&half);
+        assert!(text.contains("const AXIOM_TONE_STRENGTH: f32 = 0.5;"), "{text}");
+        assert!(text.contains("const AXIOM_TONE_EXPOSURE: f32 = 0.25;"), "{text}");
+        assert!(text.contains("const AXIOM_TONE_SLOPE: f32 = 1.0;"), "{text}");
+        assert!(text.contains("const AXIOM_TONE_POWER: f32 = 1.0;"), "{text}");
+        assert!(text.contains("const AXIOM_TONE_SATURATION: f32 = 1.08;"), "{text}");
+        // The look constants are read from `agx`, not retyped here.
+        assert!(text.contains(&format!("{:?};", crate::agx::LOOK_SATURATION)));
+        // A different tone map produces different text — the constants really are
+        // the app's, not a fixed block.
+        assert_ne!(text, tone_constants(&axiom_host::FrameTonemap::filmic()));
+    }
+
+    /// Every `f32` this prints has to be a legal WGSL float literal, which is why
+    /// `{:?}` is used rather than `{}`: `{}` prints `1` for `1.0_f32`, and `1` is
+    /// an `i32` literal in WGSL — the shader would fail to compile on an app whose
+    /// authored strength happened to land on a whole number, which is the most
+    /// likely value there is.
+    #[test]
+    fn whole_numbers_still_print_as_float_literals() {
+        let text = tone_constants(&axiom_host::FrameTonemap::filmic());
+        assert!(text.contains("= 1.0;"), "{text}");
+        assert!(!text.contains("= 1;"), "{text}");
+        let zero = tone_constants(&axiom_host::FrameTonemap::blended(
+            Ratio::finite_or_zero(0.0),
+            Ratio::finite_or_zero(2.0),
+        ));
+        assert!(zero.contains("const AXIOM_TONE_STRENGTH: f32 = 0.0;"), "{zero}");
+        assert!(zero.contains("const AXIOM_TONE_EXPOSURE: f32 = 2.0;"), "{zero}");
     }
 }

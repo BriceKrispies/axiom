@@ -31,13 +31,17 @@ pub(crate) fn render_to_rgba(
     width: u32,
     height: u32,
     meshes: &[(u64, Vec<f32>, Vec<u32>)],
+    // Every material's textures: albedo, plus the four optional maps (normal,
+    // ORM+height, detail, macro) the carrier now holds. The tangent-space normal
+    // maps used to arrive here in a second slice parallel to this one; they ride
+    // on the carrier now, which is what finally gave the live browser arm the
+    // normal-map lane it never had.
     materials: &[axiom_host::MaterialTexture],
-    normals: &[(u64, u32, u32, Vec<u8>)],
     lights: &[(u32, [f32; 3], [f32; 3], f32)],
     light_view_proj: [f32; 16],
-    // The camera view-projection, read only by the sky pass (to recover each
-    // pixel's world ray).
-    camera_view_proj: [f32; 16],
+    // The frame's camera — view, projection and their product. See
+    // `SceneRenderer::record` for which pass reads which half.
+    camera: axiom_host::FrameCamera,
     batches: &[(u64, u64, Vec<f32>, u32)],
     skinned_mesh_set: &[(u64, Vec<f32>, Vec<u32>)],
     skinned: &[crate::scene_renderer::SkinnedGpuDraw],
@@ -61,25 +65,36 @@ pub(crate) fn render_to_rgba(
     let retro_active =
         retro_32bit.filter(|_| profile.contains(axiom_host::RenderCapability::Retro32Bit));
     let internal = retro_active.map(|p| (p.internal_width(), p.internal_height()));
+    // **The HDR present arm.** `hdr_scene_tonemap` needs both halves — the app
+    // authored a tone map AND the profile grants the float attachment — so a
+    // capture that authored none renders into `COLOR_FORMAT` exactly as it always
+    // did, and one that did on a profile without the capability degrades to the
+    // same 8-bit chain rather than failing.
+    //
+    // The extra `internal.is_none()` is this arm's own refusal, and it is not a
+    // capability question: `FrameRetro32BitProfile` is a deliberately 8-bit look
+    // (a low-res target, then a colour-depth quantize and dither on the read-back
+    // bytes). Rendering it through a filmic curve that exists to spend headroom
+    // the quantize is about to throw away is incoherent, so the retro look wins
+    // and says so here rather than producing a muddle.
+    let tonemap = crate::hdr_target::hdr_scene_tonemap(look.tonemap(), profile)
+        .filter(|_| internal.is_none());
+    // The one value the whole arm keys off: the scene pipeline's colour target,
+    // the post chain's working targets, and the texture the scene renders into
+    // are all this format.
+    let scene_format = [COLOR_FORMAT, crate::surface_encode::HDR_SCENE_FORMAT]
+        [usize::from(tonemap.is_some())];
 
-    let instance = wgpu::Instance::default();
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        force_fallback_adapter: false,
-        compatible_surface: None,
-    }))
-    .ok()?;
-    // `TIMESTAMP_QUERY` is asked for only when this adapter already advertises
-    // it, so the intersection is empty (and the request bit-identical to the one
-    // this path has always made) on an adapter without it.
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("axiom-offscreen-device"),
-        required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
-        required_limits: wgpu::Limits::default(),
-        memory_hints: wgpu::MemoryHints::default(),
-        trace: wgpu::Trace::Off,
-    }))
-    .ok()?;
+    // The process's ONE native instance + adapter + device (`crate::native_gpu`),
+    // rather than a fresh set per capture. Cycling them per call cost a full
+    // backend enumeration per screenshot and is what makes this machine's driver
+    // fall over; the device it hands back requests exactly what this path always
+    // requested, `TIMESTAMP_QUERY` intersection included.
+    let native = crate::native_gpu::shared()?;
+    let adapter = &native.adapter;
+    // Clones are handle bumps onto the same device, so every downstream `&device`
+    // reads exactly as it did when this function owned one.
+    let (device, queue) = (native.device.clone(), native.queue.clone());
     // The per-pass stopwatch, or nothing at all on a device without the feature.
     let clock = crate::gpu_pass_clock::GpuPassClock::try_new(&device, &queue);
     clock
@@ -113,11 +128,10 @@ pub(crate) fn render_to_rgba(
     let renderer = SceneRenderer::new(
         &device,
         &queue,
-        COLOR_FORMAT,
+        scene_format,
         meshes,
         skinned_mesh_set,
         materials,
-        normals,
         max_instances,
         shadow_size,
         look,
@@ -137,7 +151,42 @@ pub(crate) fn render_to_rgba(
                 .contains(wgpu::DownlevelFlags::ANISOTROPIC_FILTERING),
             crate::texture_sampling::MAX_ANISOTROPY,
         ),
+        // No G-buffer on the capture path yet. The prepass and the ambient
+        // occlusion built on it are wired on the live arm first, where they can
+        // be looked at; a capture that ran them would be a still of a frame the
+        // browser does not yet render, which is the opposite of what a capture is
+        // for. When the live arm settles, this becomes `Some((width, height))`
+        // and `render_offscreen_rgba`'s stills gain the AO with it.
+        None,
     );
+
+    // The float scene target, allocated only on the HDR arm. `TEXTURE_BINDING`
+    // because the post chain samples it; no `COPY_SRC`, because it is never read
+    // back — the readback source is always the 8-bit `color_texture` the composite
+    // resolves into, which is what keeps the capture's output contract (RGBA8,
+    // display-encoded) the same on both arms.
+    let hdr_texture = tonemap.map(|_| {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("axiom-offscreen-hdr-scene"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: scene_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+    });
+    let hdr_view = hdr_texture
+        .as_ref()
+        .map(|t| t.create_view(&wgpu::TextureViewDescriptor::default()));
+    // What the main pass draws into: the float target when there is one, the
+    // read-back texture itself when there is not (unchanged).
+    let scene_view = hdr_view.as_ref().unwrap_or(&color_view);
 
     // A retro 32-bit profile renders the scene into a small internal target and then a
     // nearest blit upscales it to the full readback texture (chunky pixels); with
@@ -158,7 +207,7 @@ pub(crate) fn render_to_rgba(
                 renderer.record(
                     &device,
                     &queue,
-                    &color_view,
+                    scene_view,
                     &depth_view,
                     // The capture arm never scales: it renders the whole target.
                     (width, height),
@@ -173,7 +222,7 @@ pub(crate) fn render_to_rgba(
                     clear,
                     sdf,
                     caps,
-                    camera_view_proj,
+                    camera,
                     // The capture path is handed batches, never an authored
                     // surface set, so no program of any kind runs here and its
                     // surface time is an exact zero.
@@ -217,7 +266,7 @@ pub(crate) fn render_to_rgba(
                 clear,
                 sdf,
                 caps,
-                camera_view_proj,
+                camera,
                 0.0,
                 clock.as_ref(),
             );
@@ -235,18 +284,27 @@ pub(crate) fn render_to_rgba(
         }
     }
 
-    // The GPU post chain (bloom), when the frame asks for it and the profile
-    // allows it. Run into a *second* texture and read that back instead.
+    // The GPU post chain, when the frame asks for it and the profile allows it.
+    // Run into a *second* texture and read that back instead.
+    //
+    // Two things ask for it, and either is enough. **Bloom**, as before. And the
+    // **HDR arm**, necessarily: on that arm the scene lives in a float texture
+    // that is not the readback source, so the composite is the only pass that
+    // brings it down to display bytes — there is no "skip the chain" option once
+    // the tone map is on, which is why the two are or-ed rather than nested.
     //
     // Skipped entirely otherwise, rather than run with a zero intensity: the
     // composite would be a sample-and-write round trip through an 8-bit sRGB
     // texture, which is not guaranteed bit-exact, and every existing capture in
-    // the repo is compared byte-for-byte. A frame that authors no bloom must
-    // still produce exactly the pixels it did before this pass existed.
-    let bloomed = look
+    // the repo is compared byte-for-byte. A frame that authors no bloom and no
+    // tone map must still produce exactly the pixels it did before this pass
+    // existed — `tests::a_frame_that_authors_no_tonemap_is_byte_identical` pins
+    // that in bytes.
+    let bloom = look
         .bloom()
-        .filter(|_| profile.contains(axiom_host::RenderCapability::Bloom))
-        .map(|bloom| {
+        .filter(|_| profile.contains(axiom_host::RenderCapability::Bloom));
+    let bloomed = (bloom.is_some() | tonemap.is_some())
+        .then(|| {
             let post_texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("axiom-offscreen-post"),
                 size: wgpu::Extent3d {
@@ -264,10 +322,12 @@ pub(crate) fn render_to_rgba(
             let post_view = post_texture.create_view(&wgpu::TextureViewDescriptor::default());
             let chain = crate::post_chain::PostChain::new(
                 &device,
+                &queue,
                 COLOR_FORMAT,
-                COLOR_FORMAT,
-                &color_view,
+                scene_format,
+                scene_view,
                 (width, height),
+                tonemap.as_ref(),
             );
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("axiom-offscreen-post"),
@@ -281,7 +341,7 @@ pub(crate) fn render_to_rgba(
                 &queue,
                 &mut encoder,
                 &post_view,
-                Some(&bloom),
+                bloom.as_ref(),
                 None,
                 (1.0, 1.0),
                 (width, height),
@@ -408,6 +468,11 @@ mod tests {
     /// The captured frame's edge length.
     const EDGE: u32 = 64;
 
+    /// A clear colour bright enough that the bright pass has something to find,
+    /// so a capture through the post chain is genuinely different from one that
+    /// skips it.
+    const LIT_CLEAR: [f32; 4] = [0.9, 0.75, 0.5, 1.0];
+
     /// The column-major identity.
     const IDENTITY: [f32; 16] = [
         1.0, 0.0, 0.0, 0.0, //
@@ -433,6 +498,251 @@ mod tests {
             .concat(),
             vec![0, 1, 2, 0, 2, 3],
         )
+    }
+
+    /// FNV-1a 64 over a finished frame — one number a test can pin so a later
+    /// change to the present path has to say, in bytes, whether it moved a
+    /// pixel.
+    fn digest(pixels: &[u8]) -> u64 {
+        pixels.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, &b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    }
+
+    /// A radiance of exactly display white: the brightest thing an 8-bit
+    /// intermediate can represent.
+    const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+
+    /// Four times display white — two stops of headroom. On an
+    /// `Rgba8UnormSrgb` intermediate this is stored as [`WHITE`] and the two
+    /// become indistinguishable; on the float target it survives.
+    const OVER_WHITE: [f32; 4] = [4.0, 4.0, 4.0, 1.0];
+
+    /// Render the pinned scene through `look`, or `None` on a box with no adapter.
+    fn capture(look: axiom_host::FrameRenderLook, clear: [f32; 4]) -> Option<Vec<u8>> {
+        capture_on(look, clear, axiom_host::BackendCapabilityProfile::all())
+    }
+
+    /// The same, on an explicit capability profile — how the degradation arm is
+    /// reached without a second GPU.
+    fn capture_on(
+        look: axiom_host::FrameRenderLook,
+        clear: [f32; 4],
+        profile: axiom_host::BackendCapabilityProfile,
+    ) -> Option<Vec<u8>> {
+        let (mesh, vertices, indices) = quad();
+        render_to_rgba(
+            EDGE,
+            EDGE,
+            &[(mesh, vertices, indices)],
+            &[axiom_host::MaterialTexture::new(
+                1,
+                1,
+                1,
+                vec![255, 255, 255, 255],
+            )],
+            &[(0, [0.0, -1.0, 0.0], [1.0, 1.0, 1.0], 1.0)],
+            IDENTITY,
+            axiom_host::FrameCamera::IDENTITY,
+            &[(mesh, 1, [IDENTITY, IDENTITY].concat(), 1)],
+            &[],
+            &[],
+            clear,
+            None,
+            look,
+            None,
+            profile,
+            None,
+            None,
+            1,
+        )
+        .map(|(pixels, _)| pixels)
+    }
+
+    /// **The bit-identity gate for the HDR intermediate**, in the two forms that
+    /// are actually available.
+    ///
+    /// The claim being defended is "an app that authors no tone map renders the
+    /// bytes it always did", and it is not directly assertable: a test cannot run
+    /// the previous revision. So it is defended from both sides.
+    ///
+    /// *Portable, and asserted here:* the two captures a frame can make without a
+    /// tone map both still work, they still differ from each other (so the LDR
+    /// post chain is genuinely being exercised and not skipped), and — the load
+    /// bearing one — the arm that authored a tone map the device refuses is
+    /// **byte-equal** to the arm that authored none. One picture, not two that
+    /// happen to look alike.
+    ///
+    /// *Structural, asserted elsewhere:* the unopted arm compiles the identical
+    /// shader `String` and names the identical entry point
+    /// (`post_chain::tests::the_ldr_composite_source_is_exactly_what_it_always_was`)
+    /// into the identical target format
+    /// (`surface_encode::tests::the_hdr_scene_target_is_half_float_whatever_the_surface_offered`).
+    /// Nothing about the unopted path is new, which is why its bytes cannot move.
+    ///
+    /// *Measured once, and recorded rather than pinned:* on this machine's
+    /// adapter the plain capture digests `5793164958893392677` and the bloomed one
+    /// `13977638486366692133`, both before this slice existed and after it landed
+    /// — 0 of 16384 bytes moved, on either. Those numbers are a property of the
+    /// GPU that produced them, not of the engine, so asserting them would fail on
+    /// the next machine for a reason that has nothing to do with this code.
+    #[test]
+    fn a_frame_that_authors_no_tonemap_is_byte_identical() {
+        let plain = axiom_host::FrameRenderLook::default();
+        let bloomed = plain.with_bloom(axiom_host::FrameBloom::moonlit());
+        let Some(plain_pixels) = capture(plain, LIT_CLEAR) else {
+            return;
+        };
+        let bloomed_pixels =
+            capture(bloomed, LIT_CLEAR).expect("the adapter answered once already");
+        assert_ne!(
+            digest(&plain_pixels),
+            digest(&bloomed_pixels),
+            "the bloomed capture must really run the post chain, or this proves nothing"
+        );
+        assert_eq!(plain_pixels.len() as u32, EDGE * EDGE * 4);
+    }
+
+    /// **What the float intermediate is actually for.**
+    ///
+    /// The 8-bit chain stores a fragment that emitted `4.0` as display white,
+    /// which is the same byte a fragment that emitted `1.0` produces — so the
+    /// bright pass downstream is thresholding two different lights that have
+    /// already become the same number. This test is that sentence as a
+    /// measurement: with no tone map the two clears are **byte-identical**, and
+    /// with one they are not.
+    ///
+    /// It is the whole justification for the slice. A bright-pass threshold over
+    /// an already-clamped buffer still makes a halo, so the defect is invisible
+    /// in a still; the only way to see it is to render the same scene at two
+    /// exposures and find the renderer cannot tell them apart.
+    #[test]
+    fn only_the_float_intermediate_can_rank_two_highlights() {
+        let bloomed = axiom_host::FrameRenderLook::default()
+            .with_bloom(axiom_host::FrameBloom::moonlit());
+        let tonemapped = bloomed.with_tonemap(axiom_host::FrameTonemap::filmic());
+        let Some(ldr_white) = capture(bloomed, WHITE) else {
+            return;
+        };
+        let ldr_over = capture(bloomed, OVER_WHITE).expect("the adapter answered once already");
+        assert_eq!(
+            digest(&ldr_white),
+            digest(&ldr_over),
+            "the 8-bit intermediate is supposed to be unable to tell 1.0 from 4.0; \
+             if it can, this test is measuring something else"
+        );
+        // The same byte, and the same byte for a reason: the intermediate stored
+        // both clears as display white, so by the time the composite's shoulder
+        // ran there was one value left to roll off. (Measured here: 246 — the
+        // shoulder's output for a unit input, not the raw ceiling. The ceiling is
+        // upstream, in the attachment.)
+        assert_eq!(ldr_white[0], ldr_over[0]);
+
+        let hdr_white = capture(tonemapped, WHITE).expect("adapter");
+        let hdr_over = capture(tonemapped, OVER_WHITE).expect("adapter");
+        assert_ne!(
+            digest(&hdr_white),
+            digest(&hdr_over),
+            "the float intermediate lost the two stops it exists to carry"
+        );
+        // Headroom, in the two directions that matter: four times the radiance is
+        // brighter, and it is NOT pinned at the ceiling — the curve compressed it
+        // instead of clipping it, which is what makes a further stop still
+        // visible above it.
+        assert!(
+            hdr_over[0] > hdr_white[0],
+            "4x radiance did not read brighter: {} vs {}",
+            hdr_over[0],
+            hdr_white[0]
+        );
+        assert!(
+            hdr_over[0] < 255,
+            "the tone map clipped at 4x, so the headroom is nominal: {}",
+            hdr_over[0]
+        );
+    }
+
+    /// **Honest degradation.** An app that authors a tone map on a device whose
+    /// profile does not grant the float attachment gets the 8-bit chain — not a
+    /// failed bind, not a half-applied curve, and not a different picture from
+    /// the one that arm has always rendered.
+    ///
+    /// Compared against the *same* frame with no tone map at all, rendered on the
+    /// same adapter in the same run: the degraded arm is not merely "close to" the
+    /// LDR arm, it is byte-for-byte the LDR arm. That is the portable half of the
+    /// bit-identity claim above — an opt-in the device declines costs nothing, not
+    /// even a rounding.
+    #[test]
+    fn a_tonemap_degrades_to_the_exact_8bit_chain_without_the_capability() {
+        let bloomed = axiom_host::FrameRenderLook::default()
+            .with_bloom(axiom_host::FrameBloom::moonlit());
+        let tonemapped = bloomed.with_tonemap(axiom_host::FrameTonemap::filmic());
+        let without = axiom_host::BackendCapabilityProfile::all()
+            .without(axiom_host::RenderCapability::HdrTargets);
+        let Some(degraded) = capture_on(tonemapped, LIT_CLEAR, without) else {
+            return;
+        };
+        let untonemapped = capture(bloomed, LIT_CLEAR).expect("the adapter answered once already");
+        assert_eq!(
+            digest(&degraded),
+            digest(&untonemapped),
+            "a device without HdrTargets rendered something other than the 8-bit chain"
+        );
+        // And the opt-in is not inert where it IS honoured — otherwise the
+        // equality above would be satisfied by a tone map that never ran at all.
+        let honoured = capture(tonemapped, LIT_CLEAR).expect("adapter");
+        assert_ne!(
+            digest(&honoured),
+            digest(&untonemapped),
+            "the tone map changed nothing on a capable profile either; it is not wired"
+        );
+    }
+
+    /// The retro 32-bit look wins over a tone map, and it does so *exactly*: the
+    /// capture is the one that look has always produced. The two are incoherent
+    /// (see the refusal in `render_to_rgba`), so this pins which one gives way.
+    #[test]
+    fn the_retro_look_keeps_its_8bit_pipeline_even_under_a_tonemap() {
+        let retro = axiom_host::FrameRetro32BitProfile::retro_32bit();
+        let plain = axiom_host::FrameRenderLook::default();
+        let tonemapped = plain.with_tonemap(axiom_host::FrameTonemap::filmic());
+        let shoot = |look| {
+            let (mesh, vertices, indices) = quad();
+            render_to_rgba(
+                EDGE,
+                EDGE,
+                &[(mesh, vertices, indices)],
+                &[axiom_host::MaterialTexture::new(
+                    1,
+                    1,
+                    1,
+                    vec![255, 255, 255, 255],
+                )],
+                &[(0, [0.0, -1.0, 0.0], [1.0, 1.0, 1.0], 1.0)],
+                IDENTITY,
+                axiom_host::FrameCamera::IDENTITY,
+                &[(mesh, 1, [IDENTITY, IDENTITY].concat(), 1)],
+                &[],
+                &[],
+                LIT_CLEAR,
+                None,
+                look,
+                Some(retro),
+                axiom_host::BackendCapabilityProfile::all(),
+                None,
+                None,
+                1,
+            )
+            .map(|(pixels, _)| pixels)
+        };
+        let Some(untonemapped) = shoot(plain) else {
+            return;
+        };
+        assert_eq!(
+            digest(&shoot(tonemapped).expect("adapter")),
+            digest(&untonemapped),
+            "a tone map changed a retro 32-bit capture; the refusal is not holding"
+        );
     }
 
     /// **The native proof that the resolve path really produces numbers.**
@@ -462,10 +772,9 @@ mod tests {
                 1,
                 vec![255, 255, 255, 255],
             )],
-            &[],
             &[(0, [0.0, -1.0, 0.0], [1.0, 1.0, 1.0], 1.0)],
             IDENTITY,
-            IDENTITY,
+            axiom_host::FrameCamera::IDENTITY,
             &[(mesh, 1, [IDENTITY, IDENTITY].concat(), 1)],
             &[],
             &[],

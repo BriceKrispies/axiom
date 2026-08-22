@@ -31,7 +31,7 @@
 //! channel the fragment stage wrote, times 255.
 
 use axiom_field::{FieldBuilder, FieldGraph, FieldId, FieldOp, FieldValue};
-use axiom_host::{BackendCapabilityProfile, FrameAmbient, FrameRenderLook, MaterialTexture};
+use axiom_host::{BackendCapabilityProfile, FrameAmbient, FrameCamera, FrameRenderLook, MaterialTexture};
 use axiom_math::{Vec3, Vec4};
 use axiom_recipe::Param;
 use axiom_surface::{LightingModel, Surface, SurfaceBuilder, SurfaceChannel};
@@ -119,7 +119,6 @@ fn capture(gpu: &ParityGpu, surfaces: &[Surface], program: u64, time: f32) -> Ve
         std::slice::from_ref(&quad()),
         &[],
         &[MaterialTexture::new(MATERIAL, 1, 1, vec![255, 255, 255, 255])],
-        &[],
         1,
         64,
         // A WHITE hemisphere ambient, so a fragment the default (LambertSpecular)
@@ -128,6 +127,10 @@ fn capture(gpu: &ParityGpu, surfaces: &[Surface], program: u64, time: f32) -> Ve
         // frame, which is the only way "the surface changed it" means anything.
         FrameRenderLook::lit_by(FrameAmbient::new([1.0; 3], [1.0; 3])),
         1,
+        // No G-buffer: this harness is comparing one surface program's output
+        // against another's, and an ambient-occlusion term would be a second
+        // thing moving between the two captures.
+        None,
     );
     // THE BARRIER. Every shader this frame can possibly run is compiled here,
     // before a single draw is recorded.
@@ -170,7 +173,7 @@ fn capture(gpu: &ParityGpu, surfaces: &[Surface], program: u64, time: f32) -> Ve
         [0.0, 0.0, 0.0, 1.0],
         None,
         BackendCapabilityProfile::all().bits(),
-        [0.0; 16],
+        FrameCamera::IDENTITY,
         time,
         // No GPU pass clock. This rig is about pixels, and an untimed frame is
         // exactly the command stream this backend recorded before timing existed
@@ -509,11 +512,14 @@ fn the_skinned_pass_still_draws_with_the_surface_parameter_group_bound() {
         &[],
         &[(MESH, vertices, indices)],
         &[MaterialTexture::new(MATERIAL, 1, 1, vec![255, 255, 255, 255])],
-        &[],
         1,
         64,
         FrameRenderLook::lit_by(FrameAmbient::new([1.0; 3], [1.0; 3])),
         1,
+        // No G-buffer: this harness is comparing one surface program's output
+        // against another's, and an ambient-occlusion term would be a second
+        // thing moving between the two captures.
+        None,
     );
     renderer.prepare_surfaces(
         &gpu.device,
@@ -557,7 +563,7 @@ fn the_skinned_pass_still_draws_with_the_surface_parameter_group_bound() {
         [0.0, 0.0, 0.0, 1.0],
         None,
         BackendCapabilityProfile::all().bits(),
-        [0.0; 16],
+        FrameCamera::IDENTITY,
         0.0,
         None,
     );
