@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Thin launcher for `ax` (tools/axiom-atlas) — the repo's query-and-change
+# gateway. Execs the prebuilt release binary so an agent never pays `cargo run`
+# overhead; builds it once if it is missing.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+bin="$root/target/release/ax"
+[ -x "$bin" ] || bin="$root/target/release/ax.exe"
+if [ ! -x "$bin" ]; then
+  echo "ax: building tools/axiom-atlas once..." >&2
+  cargo build --release --manifest-path "$root/Cargo.toml" -p axiom-atlas >&2
+fi
+exec "$bin" "$@"

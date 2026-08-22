@@ -99,3 +99,6 @@ scripts/.burnt-rubber-profile/
 tools/axiom-sound/.axiom-cache/
 
 /screenshots
+# axiom-atlas ledger: the append-only NDJSON record of every ax query and edit,
+# plus its compacted Parquet. Local telemetry, never committed.
+.axiom-atlas/

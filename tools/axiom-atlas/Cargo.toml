@@ -1,0 +1,27 @@
+[package]
+name = "axiom-atlas"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Axiom tool: the repo's query-and-change gateway. Every search, read and edit an agent performs is answered here at ripgrep speed and appended to an NDJSON ledger, so the repo can later be asked what agents look for, what they change, and — via zero-result searches — what it is missing. Repo tooling, outside the engine dependency graph and outside the coverage and branchless gates."
+
+[[bin]]
+name = "ax"
+path = "src/main.rs"
+
+[dependencies]
+# ripgrep's own guts: the gitignore-aware parallel walker and the line searcher.
+# Using the libraries (not a subprocess) is what keeps a query in single-digit
+# milliseconds, which is the whole reason an agent will reach for this tool.
+ignore = "0.4"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Reuses the architecture checker's manifest schema rather than re-parsing
+# layer.toml / module.toml / app.toml here. One definition of the graph.
+xtask = { path = "../../crates/xtask" }
+
+[lints.rust]
+unused_crate_dependencies = "warn"

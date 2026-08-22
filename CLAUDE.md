@@ -6,6 +6,218 @@ Axiom is a WebAssembly-first 3D game engine with a strict layered architecture a
 
 You are practical and precise. You care more about architectural correctness than convenience, and you are suspicious of vague abstractions.
 
+## The Atlas Rule — `ax` is the front door to this repo
+
+**`ax` (`tools/axiom-atlas`) is the focal point of this repository. Every
+search you run, every symbol you look up, and every change you make goes
+through it.** Reaching for a raw `grep`/`rg`, or changing a file by some other
+route without recording it, is the one habit this rule forbids.
+
+That primacy is deliberate. It buys three things nothing else does:
+
+* **One scoping rule.** Every path passes a single containment check, so the
+  tool is structurally incapable of touching anything outside this checkout.
+  `../../`, absolute paths and out-pointing symlinks are all resolved *before*
+  the check; `.git/` is never touched.
+* **One account of what happened.** Every invocation appends one NDJSON row to
+  a gitignored ledger. That makes agent behaviour queryable — and, crucially,
+  records the searches that came back **empty**. A search that finds nothing is
+  a question this repo could not answer.
+* **One place to add capability.** New repo tooling that answers a question
+  about the code, or makes a mechanical change to it, belongs as an `ax`
+  subcommand — not as another script in `scripts/`. A capability that lives in
+  `ax` is discoverable, scoped and recorded for free; the same capability in a
+  one-off script is none of those.
+
+It is also faster than the habit it replaces: ~94 ms per query against raw
+ripgrep's ~232 ms on this repo, because it links ripgrep's `ignore` walker and
+`grep-searcher` as libraries and skips `target/`, `node_modules/`, `.git/`.
+
+```sh
+scripts/ax q <regex> [--path RE] [--lang rs|ts|...] [--limit N] [-i] [-F] [--json]
+scripts/ax def <symbol>        # where a symbol is defined (Rust + TS)
+scripts/ax refs <symbol>       # every mention of a symbol
+scripts/ax file <regex>        # find files by path
+scripts/ax read <path> [--range A:B]
+scripts/ax edit <path> --replace <old> --with <new> [--all]
+scripts/ax apply               # batch edits as JSON on stdin — all-or-nothing
+scripts/ax graph [<layer|module|app>]   # deps, dependents, laws in force
+scripts/ax owns <path>         # which package owns a file, and its rules
+scripts/ax friction <what>     # log that ax itself fell short
+scripts/ax resolve <id> --by X # close a friction once its cause is fixed
+scripts/ax miss [--all]        # what the repo, and the tool, could not do
+scripts/ax stats               # what agents look for and change
+scripts/ax sql                 # DuckDB queries over the whole ledger
+```
+
+Use `scripts/ax` (or `scripts/ax.ps1`); it execs the prebuilt release binary and
+builds it once if missing. `target/release/ax` directly is fastest of all.
+Exit codes: `0` found, `1` nothing found (grep convention), `2` usage,
+`3` out-of-repo path refused, `4` failed.
+
+### `ax owns` — ask before you write
+
+Before editing a file, ask which package owns it and therefore **which laws bind
+you there**. This is the difference between writing a branchless `map`/`fold`
+and having the dylint gate reject your `if`:
+
+```console
+$ scripts/ax owns modules/axiom-scene/src/lib.rs
+modules/axiom-scene  [scene]
+  class          Engine module (isolated capability)
+  layers         kernel, runtime, math, frame, ecs
+  depended on by rotating-cube-demo, engine, render-pipeline
+  laws in force
+    - Branchless Law - no if/else, match, for/while/loop, &&/||, ?, if let ...
+    - Coverage Law - 100% regions/lines/functions; new code ships with its tests
+    - Module Law - allowed_modules must be empty; never depend on another module
+```
+
+`ax graph`/`ax owns` read the architecture checker's **own** manifest loaders,
+so what `ax` reports and what `cargo xtask check-architecture` enforces come
+from one definition of the graph.
+
+### `ax apply` — reach for this instead of writing a script
+
+Multi-line, multi-file changes go through `ax apply`, which reads a JSON array
+of edits on stdin. It resolves every anchor against in-memory content *before
+writing a single byte*, so a batch that would half-apply is rejected whole — a
+guarantee no ad-hoc script gives you. It also normalises incoming text to each
+file's existing line endings, so LF text cannot silently corrupt a CRLF file.
+
+```sh
+scripts/ax apply <<'JSON'
+[
+  {"path": "a.rs", "replace": "old", "with": "new", "all": false},
+  {"path": "b.md", "from": "## Section", "to": "## Next", "with": "..."},
+  {"path": "c.rs", "insert_before": "fn main", "text": "..."},
+  {"path": ".gitignore", "append": "build/\n"},
+  {"path": "d.md", "text_file": ".axiom-atlas/staging/payload.md"}
+]
+JSON
+```
+
+When a payload is too large or too quote-heavy to survive the shell, stage it as
+a file and reference it with `text_file` rather than fighting the quoting.
+
+### The two backlogs
+
+`ax miss` answers two different questions, and the distinction matters:
+
+* **Zero-result searches** — what the **repo** could not answer. Something an
+  agent expected to exist and did not find.
+* **Logged friction** — what the **tool** could not do. Something `ax` should
+  have been able to answer and could not.
+
+Both are work-lists. Read them before deciding what to build next.
+
+Friction is closed explicitly, once its cause is fixed:
+
+```sh
+scripts/ax miss                       # each row carries a short id
+scripts/ax resolve <id> --by "<what fixed it>"
+scripts/ax miss --all                 # includes closed rows, marked
+```
+
+The ledger is append-only, so a resolution is *another row naming the id it
+closes*, never an edit to the original. The complaint stays on the record; only
+the backlog shrinks. Zero-result searches need no such mechanism — they close
+themselves the moment the thing exists and the search starts finding it.
+
+### The Atlas Friction Law
+
+> **When `ax` cannot do what you need, stop. Do not route around it.**
+
+Friction with `ax` is never licence to fall back to raw grep, a direct file
+write, or a one-off script. It is a signal that something is mis-shaped, and at
+that moment your task changes: diagnose *which* thing is mis-shaped, fix that,
+and only then resume the work you were doing. This is the No-Shortcuts rule
+applied to the tooling surface, and it carries the same weight.
+
+**1. Log it**, so the decision leaves a trace:
+
+```sh
+scripts/ax friction "<what you tried>" --want "<what you needed>" --verdict tool|repo
+```
+
+**2. Triage it.** The discriminating question is:
+
+> *Would a competent engineer with plain ripgrep and an editor have had the
+> same trouble here?*
+
+* **No — they would have managed fine.** Then the repo is legible and `ax` is
+  simply behind it. **Fix the tool.** This is the answer nearly every time.
+* **Yes — they would have struggled too.** Then the friction is telling you
+  something true about the repo: it is illegible at that point. **Fix the
+  repo.**
+
+**3. Fix it, then close it.** `scripts/ax resolve <id> --by "<what fixed it>"`.
+The original task is not finished until the cause is fixed and the row is closed.
+
+| Symptom | Verdict | The fix |
+|---|---|---|
+| No command or flag for the query you have | `tool` | Add it to `tools/axiom-atlas` |
+| `ax def` misses a real definition form | `tool` | Widen the patterns in `symbols.rs` |
+| Output shape a program cannot consume | `tool` | Extend `--json` |
+| Too slow to prefer over the habit | `tool` | Make it faster; speed is a feature here |
+| You reached for a script to do an edit | `tool` | `ax apply` should have covered it |
+| No unique anchor because the same block is duplicated in six files | **`repo`** | The duplication is the defect — hoist it to the lowest correct layer |
+| A symbol is unsearchable because its name is assembled by `concat!`/`paste!`/string building | **`repo`** | Make the name greppable; an agent cannot find what is not written down |
+| `ax owns` cannot classify a path | **`repo`** | The package is genuinely unclassified — give it a manifest |
+| The only way to change a behaviour is to edit a generated file | **`repo`** | The generator's input is the real source; change it there |
+
+#### Fixing the tool is the default
+
+Expect the verdict to be `tool` almost every time. The repo is large and
+well-structured; `ax` is young. A missing subcommand, a pattern that does not
+cover a definition form, a flag that does not exist yet — these are the normal
+case, and adding them is normal work, not a detour. `tools/` sits outside the
+engine dependency graph and outside the coverage and branchless gates, so
+growing `ax` costs you none of the spine's ceremony.
+
+#### When the repo is genuinely the problem
+
+Sometimes the friction is real evidence that the repo is hard to reason about
+mechanically — and a repo that an agent cannot grep is a repo that an agent
+cannot safely change. Treat that exactly as you would an untestable branch
+under the Coverage Law: **a design signal, not an exception.** A name that
+cannot be searched for, a definition that exists in six copies, a contract that
+is implied rather than written down — these are defects of the same family as a
+layering violation, and they get fixed at the lowest correct layer, at whatever
+size that takes.
+
+#### Forbidden
+
+* Silently using `Grep`/`rg`/`find` after `ax` came up short.
+* Writing a one-off script to do what `ax` should do.
+* "I will add the `ax` command later." There is no later — that is a capability
+  regression wearing a fake mustache.
+* Disabling or bypassing the hook.
+* Editing a file directly to dodge `ax edit`'s ambiguity guard. That guard is
+  protecting you from editing the wrong one of N matches.
+
+#### The escape valve, and why it audits itself
+
+Occasionally neither the tool nor the repo is wrong and the need really was a
+one-off. Log it with `--verdict unknown` and move on. But `ax miss` prints every
+friction row with its verdict, so a growing pile of `unknown` is itself evidence
+that triage is being skipped — which is a finding, not a loophole.
+
+### How it is enforced
+
+`.claude/settings.json` wires two Claude Code hooks: `Grep` is **blocked** and
+redirected to `ax q`, and `Edit`/`Write`/`MultiEdit` are logged through
+`ax record` afterwards. Edits are *recorded* rather than *intercepted* on
+purpose — multi-line edits keep their ergonomics while the ledger stays a
+complete account of what changed. If you change files by some other route (a
+script, an editor, a generator), log it yourself:
+
+```sh
+scripts/ax record <path> --tool <what-did-it>
+```
+
+Full documentation: `tools/axiom-atlas/README.md`.
+
 ## Repository Workflow
 
 This repository is developed by committing and pushing **directly to `main`**.

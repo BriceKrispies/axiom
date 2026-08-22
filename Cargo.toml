@@ -126,6 +126,10 @@ members = [
     # (composition leaf; every FPS concept stays app-local).
     "apps/shmup",
     "crates/xtask",
+    # The repo's query-and-change gateway: gitignore-aware search, symbol
+    # lookup, the layer/module graph, scoped edits, and the NDJSON ledger that
+    # records what agents look for and what they fail to find.
+    "tools/axiom-atlas",
     "tools/axiom-asset-pack",
     "tools/axiom-font-import",
     "tools/axiom-netcode-relay",
