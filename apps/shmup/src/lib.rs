@@ -55,6 +55,7 @@ pub mod error;
 pub mod events;
 pub mod fx;
 pub mod input;
+pub mod jsmath;
 pub mod materials;
 pub mod physics;
 pub mod player;

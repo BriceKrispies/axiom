@@ -491,7 +491,12 @@ impl RigidBodyWorld {
             if d2 > r2 {
                 continue;
             }
-            let d = d2.sqrt().max(1e-4);
+            // `Math.sqrt(d2) || 1e-4` (`rigidbody.js:269`) — a falsy-REPLACE, not a
+            // clamp. `.max(1e-4)` raised every distance under 0.1 mm to 0.1 mm and
+            // so weakened the impulse on a body sitting almost exactly at the
+            // blast centre; `||` keeps the real distance and only substitutes at
+            // an exact zero (or a NaN).
+            let d = crate::jsmath::or(d2.sqrt(), 1e-4);
             let falloff = 1.0 - d / radius;
             let j = strength * falloff * falloff * body.mass;
             body.apply_impulse(
@@ -935,29 +940,18 @@ mod tests {
     }
 }
 
-/// `Math.hypot` — max-scaled, not a raw root of the sum of squares.
+/// `Math.hypot` — max-scaled and Kahan-compensated, not a raw root of the sum
+/// of squares, and not the uncompensated max-scaled form this module used to
+/// define here.
 ///
 /// The source calls `Math.hypot` in three places (`rigidbody.js:85`, `:547`,
 /// `:618`). Transcribing those as `(x*x + y*y + z*z).sqrt()` is a different
-/// function: `hypot` divides through by the largest magnitude first, so it
-/// rounds differently. That is ~1 ULP in isolation, but `:618` normalises the
-/// quaternion every step and the resulting rotation builds the world inertia
-/// tensor, so the error reaches both linear and angular velocity through the
+/// function, and so is dividing through by the largest magnitude *without*
+/// V8's compensated summation — which is what this module did until the
+/// primitive was consolidated into [`crate::jsmath`]. Measured against Node 24
+/// over 4,096 metre-scale triples, that uncompensated form disagrees with V8
+/// on 191 of them by one ULP. It matters here specifically: `:618` renormalises
+/// the quaternion every step, the resulting rotation builds the world inertia
+/// tensor, and the error reaches both linear and angular velocity through the
 /// contact solver and compounds from first contact onward.
-fn hypot3(x: f64, y: f64, z: f64) -> f64 {
-    let m = x.abs().max(y.abs()).max(z.abs());
-    if m == 0.0 {
-        return 0.0;
-    }
-    let (a, b, c) = (x / m, y / m, z / m);
-    m * (a * a + b * b + c * c).sqrt()
-}
-
-fn hypot4(x: f64, y: f64, z: f64, w: f64) -> f64 {
-    let m = x.abs().max(y.abs()).max(z.abs()).max(w.abs());
-    if m == 0.0 {
-        return 0.0;
-    }
-    let (a, b, c, d) = (x / m, y / m, z / m, w / m);
-    m * (a * a + b * b + c * c + d * d).sqrt()
-}
+use crate::jsmath::{hypot3, hypot4};

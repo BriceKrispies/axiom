@@ -25,6 +25,13 @@ allowed_layers = [
     # transform composition and point/normal transforms, reused rather than
     # re-derived. See `apps/shmup/Cargo.toml`.
     "math",
+    # `ProceduralBakeRequest`/`ProceduralBakeMaps` — the neutral bake contract
+    # `materials::gpu_bake` authors so the procedural forge runs on the device
+    # instead of at ~15.5 us a texel-evaluation on the CPU. It lives in a layer
+    # rather than in the backend that executes it because Module Law #8 allows
+    # one facade per module. Also `MapPixels`, the four optional maps a
+    # `MaterialTexture` now carries.
+    "host",
 ]
 
 allowed_modules = [
@@ -43,4 +50,9 @@ allowed_modules = [
     # the engine renders. `apps/burnt-rubber` and `apps/dog` do the same, for
     # the same reason.
     "windowing",
+    # Test-only: `GpuBackendApi::bake_procedural_texture` executes the requests
+    # `materials::gpu_bake` builds, and the CPU<->GPU parity test is the only
+    # thing that proves `materials::wgsl` and `materials::bake` compute the same
+    # function. The shipped bundle reaches the same entry through `windowing`.
+    "gpu-backend",
 ]

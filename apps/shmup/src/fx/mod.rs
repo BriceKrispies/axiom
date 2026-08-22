@@ -1,9 +1,8 @@
 //! **FX** — GPU particles, impacts, decals, muzzle flash, tracers, shells,
 //! explosions, refraction and ambience.
 //!
-//! Ported from Claude-of-Duty `src/fx/` — every file except `ambience.js`
-//! (a separate, not-yet-ported slice; see [`system`]'s module doc for the
-//! resulting gap), `preview.js`/`preview.html`/`shoot.mjs` (the source's own
+//! Ported from Claude-of-Duty `src/fx/` — **every file**, except
+//! `preview.js`/`preview.html`/`shoot.mjs` (the source's own
 //! dev harness, outside the game) and `noise.js`'s consumer split with
 //! [`crate::materials::noise`] (a different noise implementation entirely —
 //! see [`noise`]'s module doc).
@@ -13,6 +12,7 @@
 //! | [`noise`]        | `fx/noise.js`      |
 //! | [`util`]          | `fx/util.js`       |
 //! | [`particles`]     | `fx/particles.js`  |
+//! | [`ambience`]     | `fx/ambience.js`   |
 //! | [`atlas`]          | `fx/atlas.js`      |
 //! | [`decals`]         | `fx/decals.js`     |
 //! | [`shells`]          | `fx/shells.js`     |
@@ -49,6 +49,7 @@
 //! logic.
 
 pub mod atlas;
+pub mod ambience;
 pub mod decals;
 pub mod explosions;
 pub mod haze;

@@ -34,6 +34,7 @@ use axiom_math::Mat4;
 use crate::rng::Rng;
 use crate::world::accum::AccumAddOpts;
 use crate::world::assembler::Assembler;
+use crate::world::dressing::int_loop_continues;
 use crate::world::kit::{box_fine_kit, box_kit, box_thin_kit, chamfer_box, cloth_geometry, cylinder_geometry, ll, patch_geometry, rubble_mound, ClothOpts, RubbleOpts};
 use crate::world::palette::Surface;
 
@@ -68,11 +69,22 @@ pub fn furnish_room(asm: &mut Assembler, rng: &mut Rng, r: RoomRect) {
     // floor dressing everybody gets: dust patches, plaster fall, litter
     let patches = rng.int(2, 4);
     for _ in 0..patches {
-        let g = patch_geometry(rng, rng.range(0.4, 1.1), 8, 0.5, 0.0);
+        // `patchGeometry(rng, rng.range(0.4, 1.1), …)` (`interiors.js:29`):
+        // the radius is drawn BEFORE the call, and `patch_geometry` then
+        // draws again inside. Hoisted so that order is explicit rather than
+        // left to Rust's argument evaluation.
+        let radius = rng.range(0.4, 1.1);
+        let g = patch_geometry(rng, radius, 8, 0.5, 0.0);
         let m = ll(&Mat4::IDENTITY, rng.range(f64::from(r.x0) + 0.3, f64::from(r.x1) - 0.3) as f32, r.y + 0.012, rng.range(f64::from(r.z0) + 0.3, f64::from(r.z1) - 0.3) as f32, rng.float() as f32 * 6.28, 1.0, 1.0, 1.0, 0.0, 0.0);
         asm.add_once("dirt", &g, Some(&m), Some(AccumAddOpts { masks: Some([0.1, 0.8, 0.5]), paint: None }));
     }
-    for _ in 0..rng.int(4, 9) {
+    // `for (let i = 0; i < rng.int(4, 9); i++)` (`interiors.js:37`): a
+    // JS `for` re-evaluates its condition EVERY pass, so `rng.int` is drawn
+    // once per test — including the final failing one. Reading it as "draw a
+    // count, then loop" changes both the iteration count and the number of
+    // values consumed. `int_loop_continues` is how this port spells it.
+    let mut _i = 0i32;
+    while int_loop_continues(rng, _i, 4, 9) {
         asm.put(
             "litter",
             rng.range(f64::from(r.x0) + 0.2, f64::from(r.x1) - 0.2) as f32,
@@ -84,8 +96,15 @@ pub fn furnish_room(asm: &mut Assembler, rng: &mut Rng, r: RoomRect) {
             0.0,
             0.0,
         );
+        _i += 1;
     }
-    for _ in 0..rng.int(2, 5) {
+    // `for (let i = 0; i < rng.int(2, 5); i++)` (`interiors.js:48`): a
+    // JS `for` re-evaluates its condition EVERY pass, so `rng.int` is drawn
+    // once per test — including the final failing one. Reading it as "draw a
+    // count, then loop" changes both the iteration count and the number of
+    // values consumed. `int_loop_continues` is how this port spells it.
+    let mut _i = 0i32;
+    while int_loop_continues(rng, _i, 2, 5) {
         asm.put(
             *rng.pick(&["brick_a", "brick_b", "rock_b"]),
             rng.range(f64::from(r.x0) + 0.25, f64::from(r.x1) - 0.25) as f32,
@@ -97,6 +116,7 @@ pub fn furnish_room(asm: &mut Assembler, rng: &mut Rng, r: RoomRect) {
             0.0,
             0.0,
         );
+        _i += 1;
     }
 
     match r.kind {
@@ -113,7 +133,12 @@ pub fn furnish_room(asm: &mut Assembler, rng: &mut Rng, r: RoomRect) {
 
     // hanging bulb, roughly central, offset so it isn't dead centre
     if r.kind != "ruin" || rng.float() < 0.5 {
-        hanging_bulb(asm, rng, cx + rng.range(-0.8, 0.8) as f32, r.y + r.h - 0.05, cz + rng.range(-0.8, 0.8) as f32);
+        // `hangingBulb(A, rng, cx + rng.range(…), y + h - 0.05, cz +
+        // rng.range(…), rng)` (`interiors.js:86`) — the x offset draws
+        // first, then the z offset, then `hanging_bulb`'s own `drop`.
+        let ox = rng.range(-0.8, 0.8) as f32;
+        let oz = rng.range(-0.8, 0.8) as f32;
+        hanging_bulb(asm, rng, cx + ox, r.y + r.h - 0.05, cz + oz);
     }
 }
 
@@ -222,9 +247,16 @@ fn dress_walls(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect) {
                 let m = ll(&Mat4::IDENTITY, bx, sy - 0.09, bz, s.yaw, 0.03, 0.16, 0.18, 0.0, 0.0);
                 asm.add("metal_dark", &fine, Some(&m), Some(AccumAddOpts { masks: Some([0.6, 0.6, 0.3]), paint: None }));
             }
-            for _ in 0..rng.int(2, 5) {
+            // `for (let i = 0; i < rng.int(2, 5); i++)` (`interiors.js:196`): a
+            // JS `for` re-evaluates its condition EVERY pass, so `rng.int` is drawn
+            // once per test — including the final failing one. Reading it as "draw a
+            // count, then loop" changes both the iteration count and the number of
+            // values consumed. `int_loop_continues` is how this port spells it.
+            let mut _i = 0i32;
+            while int_loop_continues(rng, _i, 2, 5) {
                 let (gx, gz) = at(s, st + rng.range(f64::from(-s_len / 2.0 + 0.12), f64::from(s_len / 2.0 - 0.12)) as f32, rng.range(0.11, 0.2) as f32);
                 asm.put(*rng.pick(&["bottle", "can", "box_card_b", "bucket"]), gx, sy + 0.02, gz, rng.float() as f32 * 6.28, rng.range(0.6, 0.95) as f32, Some([1.0, 1.1, 1.0]), 0.0, 0.0);
+                _i += 1;
             }
         }
 
@@ -268,7 +300,8 @@ fn dress_walls(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect) {
         for i in 0..n_wedge {
             let wt = ((i as f32 + rng.range(0.2, 0.8) as f32) / n_wedge as f32 - 0.5) * s.len;
             let (wx, wz) = at(s, wt, rng.range(0.05, 0.3) as f32);
-            let g = patch_geometry(rng, rng.range(0.3, 0.75), 9, 0.55, 0.0);
+            let radius = rng.range(0.3, 0.75);
+            let g = patch_geometry(rng, radius, 9, 0.55, 0.0);
             let m = ll(&Mat4::IDENTITY, wx, r.y + 0.011, wz, rng.float() as f32 * 6.28, 1.0, 1.0, rng.range(0.35, 0.6) as f32, 0.0, 0.0);
             asm.add_once("dirt", &g, Some(&m), Some(AccumAddOpts { masks: Some([0.1, 0.85, 0.55]), paint: None }));
             if rng.float() < 0.7 {
@@ -356,7 +389,13 @@ pub fn hanging_bulb(asm: &mut Assembler, rng: &mut Rng, x: f32, y_ceil: f32, z: 
 fn furnish_shop(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f32, w: f32, d: f32) {
     let (x0, z0, x1, z1, y) = (r.x0, r.z0, r.x1, r.z1, r.y);
     let front_z: f32 = if r.street == 0 { -1.0 } else if r.street == 2 { 1.0 } else { 0.0 };
-    add_rug(asm, rng, cx + rng.range(-0.5, 0.5) as f32, y, cz + rng.range(-0.5, 0.5) as f32, rng.range(1.6, 2.4) as f32);
+    // `addRug(A, rng, cx + rng.range(…), y, cz + rng.range(…),
+    // rng.range(1.6, 2.4))` (`interiors.js:378`) — three draws, in this
+    // order, all before `add_rug` draws anything of its own.
+    let ox = rng.range(-0.5, 0.5) as f32;
+    let oz = rng.range(-0.5, 0.5) as f32;
+    let size = rng.range(1.6, 2.4) as f32;
+    add_rug(asm, rng, cx + ox, y, cz + oz, size);
 
     let along_z = r.street == 1 || r.street == 3;
     let ccx = if along_z { if r.street == 1 { x1 - 1.3 } else { x0 + 1.3 } } else { cx };
@@ -380,9 +419,7 @@ fn furnish_shop(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f
         let pz = ccz + if along_z { t } else { rng.range(-0.22, 0.22) as f32 };
         if rng.float() < 0.45 {
             asm.put("tray", px, y + 0.94, pz, rng.range(-0.4, 0.4) as f32 + if along_z { std::f32::consts::FRAC_PI_2 } else { 0.0 }, 1.0, Some([1.0, 1.1, 1.0]), 0.0, 0.0);
-            if rng.float() < 0.8 {
-                asm.put("produce", px, y + 0.96, pz, rng.float() as f32 * 6.28, 1.0, Some([1.0, 1.0, 1.0]), 0.0, 0.0);
-            }
+            asm.put("produce", px, y + 0.96, pz, rng.float() as f32 * 6.28, 1.0, Some([1.0, 1.0, 1.0]), 0.0, 0.0);
         } else {
             asm.put(
                 *rng.pick(&["box_card_a", "box_card_b", "crate_b", "bottle", "can", "bucket"]),
@@ -399,7 +436,13 @@ fn furnish_shop(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f
     }
 
     // sacks and trays stacked on the customer side of the counter
-    for i in 0..rng.int(3, 6) {
+    // `for (let i = 0; i < rng.int(3, 6); i++)` (`interiors.js:421`): a
+    // JS `for` re-evaluates its condition EVERY pass, so `rng.int` is drawn
+    // once per test — including the final failing one. Reading it as "draw a
+    // count, then loop" changes both the iteration count and the number of
+    // values consumed. `int_loop_continues` is how this port spells it.
+    let mut i = 0i32;
+    while int_loop_continues(rng, i, 3, 6) {
         let t = rng.range(f64::from(-clen / 2.0), f64::from(clen / 2.0)) as f32;
         let off = rng.range(0.55, 1.05) as f32;
         let px = ccx + if along_z { if r.street == 1 { off } else { -off } } else { t };
@@ -415,6 +458,7 @@ fn furnish_shop(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f
             0.0,
             0.0,
         );
+        i += 1;
     }
 
     // shelving against the side walls, never against the frontage
@@ -448,8 +492,15 @@ fn furnish_shop(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f
         }
     }
 
-    stack_crates(asm, rng, x0 + 0.7, y, z1 - 0.9, rng.int(3, 6) as u32);
-    for i in 0..rng.int(3, 6) {
+    let n = rng.int(3, 6) as u32;
+    stack_crates(asm, rng, x0 + 0.7, y, z1 - 0.9, n);
+    // `for (let i = 0; i < rng.int(3, 6); i++)` (`interiors.js:470`): a
+    // JS `for` re-evaluates its condition EVERY pass, so `rng.int` is drawn
+    // once per test — including the final failing one. Reading it as "draw a
+    // count, then loop" changes both the iteration count and the number of
+    // values consumed. `int_loop_continues` is how this port spells it.
+    let mut i = 0i32;
+    while int_loop_continues(rng, i, 3, 6) {
         asm.put(
             *rng.pick(&["sandbag_a", "sandbag_b", "sandbag_c"]),
             rng.range(f64::from(x0) + 0.4, f64::from(x0) + 1.6) as f32,
@@ -461,6 +512,7 @@ fn furnish_shop(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f
             0.0,
             0.0,
         );
+        i += 1;
     }
     asm.put("barrel_wood", x1 - 0.6, y, z0 + 0.7, rng.float() as f32 * 6.28, 1.0, Some([1.0, 1.2, 1.0]), 0.0, 0.0);
     asm.put("table_small", cx - w * 0.28, y, cz - d * 0.28, rng.range(-0.4, 0.4) as f32, 1.0, Some([1.0, 1.0, 1.0]), 0.0, 0.0);
@@ -472,7 +524,8 @@ fn furnish_shop(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f
 /// `furnishLiving(A, rng, r, cx, cz, w, d, m)` (`interiors.js:488-522`).
 fn furnish_living(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f32, _w: f32, _d: f32) {
     let (x0, z0, x1, z1, y) = (r.x0, r.z0, r.x1, r.z1, r.y);
-    add_rug(asm, rng, cx, y, cz, rng.range(2.0, 2.8) as f32);
+    let size = rng.range(2.0, 2.8) as f32;
+    add_rug(asm, rng, cx, y, cz, size);
     asm.put("mattress", x0 + 1.1, y, z1 - 0.9, rng.range(-0.1, 0.1) as f32, 1.0, Some([1.0, 1.1, 1.0]), 0.0, 0.0);
     asm.collide_box(Surface::Fabric, x0 + 1.1, y + 0.1, z1 - 0.9, 1.9, 0.2, 0.9, 0.0);
     let bl = cloth_geometry(1.5, 0.9, ClothOpts { seg_x: 7, seg_y: 6, sag: 0.05, wrinkle: 0.05, thickness: 0.0032, fray: 0.012, ..ClothOpts::default() }, Some(rng));
@@ -494,7 +547,8 @@ fn furnish_living(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz:
     let wall = cloth_geometry(1.7, 1.1, ClothOpts { seg_x: 8, seg_y: 7, sag: 0.04, wrinkle: 0.05, thickness: 0.0036, fray: 0.02, bow: -1.0, ..ClothOpts::default() }, Some(rng));
     let m = ll(&Mat4::IDENTITY, cx - 0.4, y + 1.65, z0 + 0.09, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0);
     asm.add_once("fabric_red", &wall, Some(&m), Some(AccumAddOpts { masks: Some([0.3, 0.4, 0.2]), paint: None }));
-    stack_crates(asm, rng, x1 - 0.9, y, z0 + 0.8, rng.int(1, 3) as u32);
+    let n = rng.int(1, 3) as u32;
+    stack_crates(asm, rng, x1 - 0.9, y, z0 + 0.8, n);
 }
 
 // ---------------------------------------------------------------- storage --
@@ -507,10 +561,17 @@ fn furnish_storage(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, _cx: f32, _
         let sz = rng.range(f64::from(z0) + 0.6, f64::from(z1) - 0.6) as f32;
         let pick = rng.float();
         if pick < 0.35 {
-            stack_crates(asm, rng, sx, y, sz, rng.int(2, 5) as u32);
+            let n = rng.int(2, 5) as u32;
+            stack_crates(asm, rng, sx, y, sz, n);
         } else if pick < 0.55 {
             asm.put("pallet", sx, y + 0.01, sz, rng.float() as f32 * 6.28, 1.0, Some([1.0, 1.3, 1.0]), 0.0, 0.0);
-            for k in 0..rng.int(1, 4) {
+            // `for (let i = 0; i < rng.int(1, 4); i++)` (`interiors.js:535`): a
+            // JS `for` re-evaluates its condition EVERY pass, so `rng.int` is drawn
+            // once per test — including the final failing one. Reading it as "draw a
+            // count, then loop" changes both the iteration count and the number of
+            // values consumed. `int_loop_continues` is how this port spells it.
+            let mut k = 0i32;
+            while int_loop_continues(rng, k, 1, 4) {
                 asm.put(
                     *rng.pick(&["sandbag_a", "sandbag_b", "box_card_a"]),
                     sx + rng.range(-0.3, 0.3) as f32,
@@ -522,6 +583,7 @@ fn furnish_storage(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, _cx: f32, _
                     0.0,
                     0.0,
                 );
+                k += 1;
             }
             asm.collide_box(Surface::Wood, sx, y + 0.1, sz, 1.2, 0.2, 1.0, 0.0);
         } else if pick < 0.72 {
@@ -538,7 +600,13 @@ fn furnish_storage(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, _cx: f32, _
             asm.put("shelf", sx, y, sz, rng.float() as f32 * 6.28, 1.0, Some([1.0, 1.2, 1.0]), 0.0, 0.0);
         }
     }
-    for _ in 0..rng.int(2, 5) {
+    // `for (let i = 0; i < rng.int(2, 5); i++)` (`interiors.js:563`): a
+    // JS `for` re-evaluates its condition EVERY pass, so `rng.int` is drawn
+    // once per test — including the final failing one. Reading it as "draw a
+    // count, then loop" changes both the iteration count and the number of
+    // values consumed. `int_loop_continues` is how this port spells it.
+    let mut _i = 0i32;
+    while int_loop_continues(rng, _i, 2, 5) {
         asm.put(
             "plank_a",
             rng.range(f64::from(x0) + 0.5, f64::from(x1) - 0.5) as f32,
@@ -550,6 +618,7 @@ fn furnish_storage(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, _cx: f32, _
             0.0,
             0.0,
         );
+        _i += 1;
     }
     asm.put("jerry_can", x1 - 0.5, y, z1 - 0.5, rng.float() as f32 * 6.28, 1.0, Some([1.0, 1.3, 1.0]), 0.0, 0.0);
     asm.put("bucket", x0 + 0.5, y, z1 - 0.6, rng.float() as f32 * 6.28, 1.0, Some([1.0, 1.4, 1.0]), 0.0, 0.0);
@@ -559,8 +628,19 @@ fn furnish_storage(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, _cx: f32, _
 /// `furnishRuin(A, rng, r, cx, cz, w, d, m)` (`interiors.js:573-609`).
 fn furnish_ruin(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f32, _w: f32, _d: f32) {
     let (x0, z0, x1, z1, y) = (r.x0, r.z0, r.x1, r.z1, r.y);
-    rubble_mound(asm, rng, cx + rng.range(-1.0, 1.0) as f32, y, cz + rng.range(-1.0, 1.0) as f32, rng.range(1.4, 2.2) as f32, 22, RubbleOpts { key: "concrete" });
-    for _ in 0..rng.int(3, 6) {
+    // `rubbleMound(A, rng, cx + rng.range(…), y, cz + rng.range(…),
+    // rng.range(1.4, 2.2), 22)` (`interiors.js:575`).
+    let ox = rng.range(-1.0, 1.0) as f32;
+    let oz = rng.range(-1.0, 1.0) as f32;
+    let radius = rng.range(1.4, 2.2) as f32;
+    rubble_mound(asm, rng, cx + ox, y, cz + oz, radius, 22, RubbleOpts { key: "concrete" });
+    // `for (let i = 0; i < rng.int(3, 6); i++)` (`interiors.js:576`): a
+    // JS `for` re-evaluates its condition EVERY pass, so `rng.int` is drawn
+    // once per test — including the final failing one. Reading it as "draw a
+    // count, then loop" changes both the iteration count and the number of
+    // values consumed. `int_loop_continues` is how this port spells it.
+    let mut _i = 0i32;
+    while int_loop_continues(rng, _i, 3, 6) {
         asm.put(
             "slab_shard",
             rng.range(f64::from(x0) + 0.5, f64::from(x1) - 0.5) as f32,
@@ -572,8 +652,15 @@ fn furnish_ruin(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f
             0.0,
             0.0,
         );
+        _i += 1;
     }
-    for _ in 0..rng.int(6, 12) {
+    // `for (let i = 0; i < rng.int(6, 12); i++)` (`interiors.js:581`): a
+    // JS `for` re-evaluates its condition EVERY pass, so `rng.int` is drawn
+    // once per test — including the final failing one. Reading it as "draw a
+    // count, then loop" changes both the iteration count and the number of
+    // values consumed. `int_loop_continues` is how this port spells it.
+    let mut _i = 0i32;
+    while int_loop_continues(rng, _i, 6, 12) {
         asm.put(
             *rng.pick(&["brick_a", "brick_b", "rock_a", "rock_b"]),
             rng.range(f64::from(x0) + 0.3, f64::from(x1) - 0.3) as f32,
@@ -585,6 +672,7 @@ fn furnish_ruin(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f
             0.0,
             0.0,
         );
+        _i += 1;
     }
     asm.put("rebar", cx + rng.range(-1.0, 1.0) as f32, y + 0.06, cz + rng.range(-1.0, 1.0) as f32, rng.float() as f32 * 6.28, 1.0, Some([1.0, 1.4, 1.0]), 0.0, 0.0);
     for _ in 0..3 {

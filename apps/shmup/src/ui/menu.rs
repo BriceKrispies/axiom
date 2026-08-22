@@ -56,12 +56,12 @@ pub const FOV_MAX: f64 = 120.0;
 
 /// `sensitivity` is stored in the config as radians/px; the slider works in
 /// a `0.2..3.0` multiplier of the default `0.0022` (`menu.js:41-45`).
-pub fn sensitivity_multiplier(sensitivity: f32) -> f64 {
-    sensitivity as f64 / 0.0022
+pub fn sensitivity_multiplier(sensitivity: f64) -> f64 {
+    sensitivity / 0.0022
 }
 
-pub fn sensitivity_from_multiplier(multiplier: f64) -> f32 {
-    (0.0022 * multiplier) as f32
+pub fn sensitivity_from_multiplier(multiplier: f64) -> f64 {
+    0.0022 * multiplier
 }
 
 /// One slider's paint fraction, `0..1` — `menu.js:118-122`'s `t`.
@@ -107,10 +107,13 @@ impl PauseMenu {
         events.emit("ui:sensitivity", &(cfg.sensitivity, multiplier));
     }
 
-    pub fn set_fov(&self, cfg: &mut Config, fov: f32, host: Option<&mut dyn MenuHost>, events: &EventBus) {
+    /// The setting is `f64` (the width `config.js` authors it in); the render
+    /// camera behind [`MenuHost::set_camera_fov`] genuinely stores `f32`, so
+    /// **that** call is where the narrowing belongs — not the config field.
+    pub fn set_fov(&self, cfg: &mut Config, fov: f64, host: Option<&mut dyn MenuHost>, events: &EventBus) {
         cfg.fov = fov;
         if let Some(h) = host {
-            h.set_camera_fov(fov);
+            h.set_camera_fov(fov as f32);
         }
         events.emit("ui:fov", &fov);
     }
@@ -318,11 +321,10 @@ mod tests {
 
     #[test]
     fn sensitivity_multiplier_round_trips_through_the_default() {
-        // `sensitivity_from_multiplier` narrows to `f32` (the config field's
-        // type), so a round trip through it only agrees with the `f64` divide
-        // to `f32` precision, not bit-for-bit.
-        assert!((sensitivity_multiplier(0.0022) - 1.0).abs() < 1e-6);
-        assert!((sensitivity_from_multiplier(1.0) - 0.0022).abs() < 1e-6);
+        // Exact now that `Config::sensitivity` is `f64`: nothing on this path
+        // narrows, so the round trip is the identity the source's is.
+        assert_eq!(sensitivity_multiplier(0.0022), 1.0);
+        assert_eq!(sensitivity_from_multiplier(1.0), 0.0022);
     }
 
     #[test]

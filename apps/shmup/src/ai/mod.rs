@@ -50,6 +50,15 @@
 //! `ai/index.js`'s `populate()` does — draw order is part of the contract.
 
 pub mod agent;
+pub mod animator;
+pub mod clips;
+pub mod geo;
 pub mod grounding;
 pub mod nav;
+pub mod parts;
+pub mod rig;
+pub mod soldier;
 pub mod squad;
+pub mod system;
+pub mod textures;
+pub mod weapon;

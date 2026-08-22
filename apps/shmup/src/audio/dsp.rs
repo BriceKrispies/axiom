@@ -369,16 +369,11 @@ pub fn limiter_curve(g: &mut AudioGraph) -> crate::audio::graph::CurveId {
     })
 }
 
-/// `Math.sign` — zero maps to zero, which `f64::signum` does not do.
-fn js_sign(x: f64) -> f64 {
-    if x > 0.0 {
-        1.0
-    } else if x < 0.0 {
-        -1.0
-    } else {
-        x
-    }
-}
+/// `Math.sign` — three-valued, unlike [`f64::signum`]. `dsp.js` calls it
+/// directly; the transcription lives once in [`crate::jsmath`], which is
+/// pinned bit-for-bit against V8 (including `-0` and `NaN`, which the local
+/// copy this replaced flattened to `+0`).
+use crate::jsmath::sign as js_sign;
 
 pub fn shaper(
     g: &mut AudioGraph,

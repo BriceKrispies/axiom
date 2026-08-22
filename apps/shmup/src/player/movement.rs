@@ -422,6 +422,47 @@ impl Movement {
     /// `movement.js:141-149`) is the physics seam's job, not this port's —
     /// `init` takes the already-built controller and does only the
     /// teleport-and-sync the source does with it.
+    /* -------------------------------------------------------------- */
+    /* Doors for the facade                                             */
+    /*                                                                  */
+    /* `player/index.js` reaches into `this.movement`'s private state    */
+    /* directly. These four accessors are those exact reaches, named —   */
+    /* not a widened API. Each cites the source line that writes the     */
+    /* field, so the facade's transcription stays diffable.              */
+    /* -------------------------------------------------------------- */
+
+    /// `this.movement._footHold = FOOTSTEP.landHold` (`player/index.js:338`).
+    pub fn set_foot_hold(&mut self, v: f64) {
+        self.foot_hold = v;
+    }
+
+    /// `this.movement._cmdFrame = -1` (`player/index.js:630`) — a frame number
+    /// no real frame equals, so the next latch always runs.
+    pub fn invalidate_cmd_frame(&mut self) {
+        self.cmd_frame = None;
+    }
+
+    /// `this.movement.latchInput(-2)` (`player/index.js:621`), whose only
+    /// caller has already set `controlEnabled = false`, so it takes the flush
+    /// branch.
+    pub fn flush_latched_input(&mut self) {
+        self.cmd = PlayerCommand::default();
+        self.prev_held = PrevHeld::default();
+        self.cmd_frame = None;
+    }
+
+    /// `m._beginSlide(m.cmd, m._wish.set(...), 1, MOVE.sprintSpeed)`
+    /// (`player/index.js:692`) — `debugState('slide')` reaches into the private
+    /// slide entry, so the facade needs a door.
+    pub fn debug_begin_slide(&mut self, wish: Vec3, wish_len: f64, current_speed: f64) {
+        let Some(mut character) = self.character.take() else {
+            return;
+        };
+        let cmd = self.cmd;
+        self.begin_slide(character.as_mut(), cmd, wish, wish_len, current_speed);
+        self.character = Some(character);
+    }
+
     pub fn init(&mut self, mut character: Box<dyn CharacterController>, spawn: Option<Vec3>) {
         if let Some(spawn) = spawn {
             character.teleport_to(spawn[0], spawn[1], spawn[2]);

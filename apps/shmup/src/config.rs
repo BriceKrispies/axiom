@@ -15,6 +15,35 @@
 //! "0.72" and have to guess whether that is a scale, a distance or a duration.
 //! The raw literals stay visible next to them, in the source's own order and
 //! spelling, so this file diffs against `config.js` by eye.
+//!
+//! ## [`UNITS`] is the exception, and it has to be — storage width is part of
+//! ## the algorithm
+//!
+//! `Meters` and `Ratio` are `f32`-backed. A JavaScript number is an `f64`, and
+//! `config.js`'s `UNITS` block is plain JavaScript numbers that the *whole
+//! simulation then computes with in `f64`*: `UNITS.gravity` is integrated
+//! 120 times a second, `UNITS.playerHeight` sizes the capsule and the eye
+//! height every frame. Typing them as kernel quantities rounded the source
+//! data to `f32` **before** any consumer saw it, and every downstream value
+//! inherited the error:
+//!
+//! ```text
+//! -9.81 * 2.1  in f64  = -20.601000000000003
+//!              via f32 = -20.60099983215332      (2e-8 low)
+//! ```
+//!
+//! One 1/120 s step of that gravity puts the player's feet at
+//! `0.028569375011656017` where the original has `0.028569374999999998` — a
+//! divergence 1e4 times the `1e-12` the goldens are pinned at, growing with
+//! every step. Measured against `tests/player_system/golden.json`; it broke
+//! three separate assertions there.
+//!
+//! So `UNITS` carries `f64` — the width the source authors and computes in —
+//! and anything that genuinely *stores* `f32` (a GPU buffer, a kernel
+//! quantity at an engine boundary) narrows at that boundary, not here.
+//! **Narrow at the carrier, never at the source of truth.** The rest of this
+//! file keeps its kernel quantities: they are settings and quality knobs, read
+//! once per frame rather than integrated.
 
 use axiom_kernel::{Meters, Ratio, Seconds};
 
@@ -38,27 +67,47 @@ pub const FIXED_STEP: Seconds = Seconds::finite_or_zero(1.0 / PHYSICS_HZ as f32)
 pub const MAX_SUBSTEPS: u32 = 8;
 
 /// Real-world units are metres, seconds, kilograms.
+///
+/// `f64` throughout, deliberately — see the module doc comment. These five
+/// numbers are integrated and differenced every fixed step, so narrowing them
+/// to a kernel quantity here would round the source data before any consumer
+/// saw it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Units {
     /// Metres per second squared. Games use exaggerated gravity; CoD-like feel.
-    /// A rate, not a length — so it stays a plain scalar rather than borrowing
-    /// a kernel quantity that would misname it.
-    pub gravity: f32,
-    pub player_height: Meters,
-    pub player_crouch_height: Meters,
-    pub player_radius: Meters,
-    /// Below the top of the capsule.
-    pub eye_offset: Meters,
+    pub gravity: f64,
+    /// Metres, feet to crown.
+    pub player_height: f64,
+    /// Metres.
+    pub player_crouch_height: f64,
+    /// Metres.
+    pub player_radius: f64,
+    /// Metres, below the top of the capsule.
+    pub eye_offset: f64,
 }
 
 /// The source's `UNITS` block, value for value.
 pub const UNITS: Units = Units {
     gravity: -9.81 * 2.1,
-    player_height: Meters::finite_or_zero(1.78),
-    player_crouch_height: Meters::finite_or_zero(1.12),
-    player_radius: Meters::finite_or_zero(0.32),
-    eye_offset: Meters::finite_or_zero(0.12),
+    player_height: 1.78,
+    player_crouch_height: 1.12,
+    player_radius: 0.32,
+    eye_offset: 0.12,
 };
+
+impl Units {
+    /// The capsule height as the dimensioned quantity, for an engine boundary
+    /// that genuinely stores `f32`. This is the *only* sanctioned narrowing of
+    /// a [`Units`] value; never narrow one on the way into a computation.
+    pub fn player_height_meters(self) -> Meters {
+        Meters::finite_or_zero(self.player_height as f32)
+    }
+
+    /// See [`Units::player_height_meters`].
+    pub fn player_radius_meters(self) -> Meters {
+        Meters::finite_or_zero(self.player_radius as f32)
+    }
+}
 
 /// One row of `QUALITY_PRESETS`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -199,6 +248,16 @@ impl Quality {
 }
 
 /// The source's `DEFAULTS`, plus the live `q` preset copy `createConfig` builds.
+///
+/// The five numeric settings are `f64`, for the same reason [`UNITS`] is:
+/// `config.js`'s `DEFAULTS` are plain JavaScript numbers, and the camera reads
+/// `adsFovScale`/`adsSensScale` *inside* a per-frame `lerp` and `approach`.
+/// `Ratio` is `f32`-backed, so typing them as ratios stored `0.72` as
+/// `0.7200000286102295` and put the composed FOV 1.3e-7 degrees out on the
+/// first aim-down-sights frame — measured against
+/// `tests/player_system/golden.json`. Narrow at the carrier that genuinely
+/// stores `f32` (see [`crate::ui::menu::PauseMenu::set_fov`], which hands a
+/// render camera an `f32`), never here.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Config {
     pub quality: Quality,
@@ -207,14 +266,14 @@ pub struct Config {
     /// Degrees, not `Radians`, because that is what the source authors and what
     /// a settings slider shows; the conversion belongs at the camera, which is
     /// the one consumer that needs radians.
-    pub fov: f32,
-    pub ads_fov_scale: Ratio,
+    pub fov: f64,
+    pub ads_fov_scale: f64,
     /// Radians of yaw per pixel of raw pointer movement. A rate with two units,
     /// so no single kernel quantity names it.
-    pub sensitivity: f32,
-    pub ads_sens_scale: Ratio,
+    pub sensitivity: f64,
+    pub ads_sens_scale: f64,
     pub invert_y: bool,
-    pub exposure: Ratio,
+    pub exposure: f64,
     /// Capture mode disables anything nondeterministic so screenshots are
     /// stable.
     pub deterministic: bool,
@@ -230,11 +289,11 @@ impl Default for Config {
         Config {
             quality: Quality::Ultra,
             fov: 80.0,
-            ads_fov_scale: Ratio::finite_or_zero(0.72),
+            ads_fov_scale: 0.72,
             sensitivity: 0.0022,
-            ads_sens_scale: Ratio::finite_or_zero(0.65),
+            ads_sens_scale: 0.65,
             invert_y: false,
-            exposure: Ratio::finite_or_zero(1.0),
+            exposure: 1.0,
             deterministic: false,
             q: Quality::Ultra.preset(),
         }

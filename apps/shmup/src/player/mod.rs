@@ -36,6 +36,9 @@ pub mod mantle;
 pub mod movement;
 pub mod springs;
 pub mod tuning;
+pub mod health;
+pub mod lowhealth;
+pub mod system;
 
 /// A bare `(x, y, z)` triple — the port's stand-in for `THREE.Vector3` at
 /// module boundaries. Not a math type: no operators, no methods. Every

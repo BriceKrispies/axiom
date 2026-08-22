@@ -22,23 +22,25 @@
 //! physics rather than a private constant — per the port recipe, used as-is,
 //! not redefined.
 //!
-//! **Divergence:** `UNITS.gravity` is stored as `f32` in `config.rs` (that
-//! crate's own boundary type), so widening it to `f64` here carries a small
-//! round-trip error the pure-`f64` JavaScript never had — `-9.81 * 2.1`
-//! computed in `f32` and widened is not bit-identical to `-9.81 * 2.1`
-//! computed directly in `f64`. [`JUMP_SPEED`] (a `sqrt` of a `GRAVITY`-derived
-//! quantity) already needs a transcendental tolerance under the port recipe;
-//! `tests/player_port.rs` uses a slightly wider tolerance than the usual
-//! `1e-12` for exactly this reason, documented at the assertion.
+//! **Formerly a divergence, now fixed at the root.** [`crate::config::UNITS`]
+//! used to store these five numbers as `f32`-backed kernel quantities, so
+//! every value here inherited an `f32` rounding the pure-`f64` JavaScript
+//! never had. That is the storage-width trap: `config.js`'s `UNITS` are plain
+//! JavaScript numbers and the simulation integrates them in `f64` 120 times a
+//! second, so narrowing at the *source* rather than at a carrier put the
+//! player's feet 1.2e-11 m out after a single step and grew from there. It
+//! broke three assertions in `tests/player_system_port.rs`. `UNITS` is `f64`
+//! now and there is no cast on this page — see `config.rs`'s module doc
+//! comment for the argument.
 
 use std::sync::LazyLock;
 
 use crate::config::UNITS;
 use crate::player::springs::DEG;
 
-/// `tuning.js:22`. Negative. Widened from [`crate::config::UNITS`]`.gravity`
-/// (`f32`) — see the module doc comment for the resulting divergence.
-pub const GRAVITY: f64 = UNITS.gravity as f64;
+/// `tuning.js:22`. Negative. [`crate::config::UNITS`]`.gravity` as-is — no
+/// cast, because `UNITS` is `f64`. See the module doc comment.
+pub const GRAVITY: f64 = UNITS.gravity;
 
 /// `tuning.js:23`.
 pub const JUMP_APEX: f64 = 0.6;
@@ -71,12 +73,12 @@ pub struct StanceDef {
     pub stride_length: f64,
 }
 
-/// `STANCE.stand`. `height`/`eye` widen [`UNITS`]'s `f32` metres — the same
-/// documented divergence as [`GRAVITY`].
+/// `STANCE.stand`. `height`/`eye` are [`UNITS`]'s metres as-is; see
+/// [`GRAVITY`] for why there is no cast.
 pub const STAND: StanceDef = StanceDef {
     name: "stand",
-    height: UNITS.player_height.get() as f64,
-    eye: UNITS.player_height.get() as f64 - UNITS.eye_offset.get() as f64,
+    height: UNITS.player_height,
+    eye: UNITS.player_height - UNITS.eye_offset,
     speed: 4.57,
     step_height: 0.42,
     stride_length: 1.48,
@@ -85,8 +87,8 @@ pub const STAND: StanceDef = StanceDef {
 /// `STANCE.crouch`.
 pub const CROUCH: StanceDef = StanceDef {
     name: "crouch",
-    height: UNITS.player_crouch_height.get() as f64,
-    eye: UNITS.player_crouch_height.get() as f64 - 0.1,
+    height: UNITS.player_crouch_height,
+    eye: UNITS.player_crouch_height - 0.1,
     speed: 2.44,
     step_height: 0.3,
     stride_length: 1.05,

@@ -26,17 +26,32 @@
 //! for what a real GPU bake would still need on top of this.
 //!
 //! **Not ported, in any of these modules:** the THREE.js-side plumbing each
-//! source file also carries — `SkyDome`/`Volumetrics`' class wiring,
-//! `SkyPass`/render-target/`fullScreenGeometry` (`fullscreen.js` in full),
-//! `skRayFor`'s camera-matrix ray reconstruction, and `skSunVisibility`'s
-//! cascade-shadow-map texture sampling. These are GPU/host-integration
-//! concerns with no portable CPU computation to reference-implement; see
-//! [`dome`]'s and [`volumetrics`]'s module docs for the boundary each draws.
+//! source file also carries — `SkyDome`/`Volumetrics`' render-target and
+//! uniform wiring, and `SkyPass`/`fullScreenGeometry` (`fullscreen.js` in
+//! full). These are GPU object lifetimes with no portable computation. Where a
+//! shader body needs a genuinely GPU-only *input* — a screen-space derivative,
+//! a shadow-map atlas, a history buffer — the port takes it as an explicit
+//! parameter or closure instead; see [`dome`]'s and [`volumetrics`]'s module
+//! docs.
+//!
+//! This paragraph used to also list `skRayFor`'s camera-matrix ray
+//! reconstruction and `skSunVisibility`'s cascade sampling as unported. Both
+//! are ported. The claim was wrong, and it is worth recording *how* it was
+//! wrong, because the shape recurs: each was plain arithmetic with a single
+//! GPU-only input, filed under a "GPU plumbing" justification that legitimately
+//! covered the surrounding class but not the maths inside it. An audit of this
+//! subsystem found the same pattern in `dome` (`DOME_VERT`'s and `ENV_FRAG`'s
+//! `main`, both missing and unmentioned) and in `volumetrics` (three of four
+//! "deliberately not ported" claims). When a module doc says a shader body is
+//! out of scope, check whether the *arithmetic* is out of scope or only the
+//! object lifetime around it.
 pub mod atmosphere;
 pub mod celestial;
 pub mod clouds;
 pub mod dome;
+pub mod fullscreen;
 pub mod luts;
 pub mod noise;
 pub mod stars;
+pub mod system;
 pub mod volumetrics;

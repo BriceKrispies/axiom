@@ -36,8 +36,10 @@ use std::collections::BTreeMap;
 use axiom::prelude::*;
 use axiom_math::Quat;
 
+use crate::materials::upload::{bake_albedo_maps, RUNTIME_BAKE_SIZE};
 use crate::scene::game::{CameraPose, Game};
 use crate::scene::level::LevelBatch;
+use crate::world::palette::Palette;
 use crate::viewer::{bucket_color, ch, to_mesh_data};
 use crate::weapons::geometry::Geo;
 use crate::weapons::models::rifle::build_rifle;
@@ -105,6 +107,10 @@ pub fn build(seed: u32) -> Scene {
                 .with_clear_color(clear_color),
         )
         .add_plugins(DefaultPlugins)
+        // Declared so the preparation barrier compiles the program before the
+        // first frame. Nothing compiles inside a frame in this engine; a program
+        // the barrier never saw renders its fallback and reports the miss.
+        .surfaces(vec![street_material()])
         .setup(move |world, _meshes, _materials| {
             // The key light is the sun, aimed the way it travels — the
             // ephemeris direction points *at* the sun, so the light's direction
@@ -144,12 +150,134 @@ pub fn build(seed: u32) -> Scene {
 /// what lets the engine collapse the whole batch into one `mesh_batches` entry —
 /// one draw. Uploading a mesh per placement instead would turn ~150 props into
 /// ~150 draws.
+/// The street's runtime material — the port of `materials/shader.js`, authored
+/// as an `axiom_surface::Surface`.
+///
+/// The parameters are `DEFAULT_PARAMS`' own, with two departures, both because
+/// this app is not yet uploading the maps the layers sample:
+///
+/// * `parallax: 0.0` — the source's default. Parallax occlusion mapping marches
+///   a height map, and the ORM+height binding is still the neutral 1x1, so a
+///   non-zero depth would march a flat field and cost the loop for nothing.
+/// * `detile: 0.0` — the source's default too, and it keeps this app on ONE
+///   program: de-tiling is a structural permutation
+///   (`axiom_surface::SurfaceKind`), so turning it on here would compile a
+///   second pipeline to de-tile a 1x1 texture.
+///
+/// What *is* on by default and does real work with no maps bound: the macro
+/// variation band, the weathering stack (rain runoff, ground splash, the dust
+/// wedge — all world-anchored and procedural), the cavity and wear masks, and
+/// the tint/roughness remap. Those are the layers that stop a wall reading as
+/// one flat colour.
+///
+/// `ground_y` is the world height the splash term measures up from, so it must
+/// match the level's ground plane rather than being left at the default.
+fn street_material() -> Surface {
+    runtime_material(MaterialParams {
+        // Metres per texture tile — the street is authored at metre scale.
+        scale: 2.0,
+        // World-anchored weathering needs the real ground height.
+        ground_y: 0.0,
+        // No height map bound yet; see the doc comment.
+        parallax: 0.0,
+        detile: 0.0,
+        ..MaterialParams::default()
+    })
+}
+
+/// Bake the palette's surfaces and register one albedo texture per **library
+/// name**, returning `(library name, texture handle)`.
+///
+/// The bake is [`bake_albedo_maps`] at [`RUNTIME_BAKE_SIZE`] — albedo only, and
+/// small. Read that constant's doc before changing either fact: the CPU bake of
+/// the library at its authored 1024² is roughly fifteen minutes of work, the
+/// cause is `owSurface`'s `fract(sin(…))` hashes running scalar instead of
+/// 1024²-wide, and the real fix is the source's own GPU bake. This is the part
+/// that fits in a page load.
+///
+/// Only the albedo is registered because it is the only map the engine can be
+/// handed: `axiom_host::MaterialTexture` carries albedo pixels and nothing
+/// else, and the live GPU arm passes an empty normal-map slice. The normal, the
+/// ORM+height, the shared detail tile and the macro field are all produced by
+/// [`crate::materials::upload::bake_library`] and have nowhere to go until that
+/// contract widens.
+fn install_surface_textures(running: &mut RunningApp) -> BTreeMap<&'static str, u64> {
+    let names: Vec<&'static str> = Palette::ALL
+        .iter()
+        .map(|(_, entry)| entry.name)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    bake_albedo_maps(&names, RUNTIME_BAKE_SIZE)
+        .into_iter()
+        .zip(names)
+        .map(|((_, map), name)| {
+            let handle = running
+                .add_texture_data(map.width, map.height, map.pixels)
+                .expect("a baked map is width * height * 4 bytes");
+            (name, handle.id())
+        })
+        .collect()
+}
+
+/// The library name a palette key's material is baked from, or `None` for a key
+/// the palette does not carry (the emissive glow keys, which have no surface).
+fn key_surface_name(key: &str) -> Option<&'static str> {
+    Palette::ALL
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map(|(_, entry)| entry.name)
+}
+
+/// The base colour a **textured** batch multiplies its baked albedo by.
+///
+/// `LevelBatch::albedo` is `level::key_albedo`: the palette entry's authored
+/// `tint`, or — where the entry has none — a neutral mid grey standing in for
+/// "the material's own generator owns the colour" (`level.rs`'s own words).
+/// Now that the generator's colour is actually uploaded, that stand-in has to
+/// go: multiplying a real baked albedo by a 0.69 grey would darken every
+/// untinted surface by exactly the amount the stand-in was invented to supply.
+/// An untinted key becomes white, which is what the source constructs the
+/// material with (`index.js:199`, `color: 0xffffff`).
+fn textured_base_color(key: &str, batch_albedo: Color) -> Color {
+    Palette::ALL
+        .iter()
+        .find(|(name, _)| *name == key)
+        .and_then(|(_, entry)| entry.opts.tint)
+        .map_or(Color::WHITE, |_| batch_albedo)
+}
+
 fn install_level(running: &mut RunningApp, batches: Vec<LevelBatch>) {
+    let street = street_material();
+    let textures = install_surface_textures(running);
     for batch in batches {
         let mesh = running
             .add_mesh_data(batch.mesh)
             .expect("an assembler batch is valid renderable geometry");
-        let material = running.add_material(Material::lit(batch.albedo));
+        // The batch keeps its own albedo and gains the runtime material's
+        // program. `Material::from_surface` would force white and throw the
+        // palette away — the source's shader *modulates* the diffuse colour, it
+        // does not replace it.
+        //
+        // Every batch names the same surface, so this is one program and one
+        // pipeline across the whole street; only the instance colour differs.
+        //
+        // The baked albedo rides in as the material's custom texture, and the
+        // shader multiplies the two exactly as the source multiplies `mat.map`
+        // by `p.tint`. A batch whose palette key names no surface keeps the
+        // untextured path (a 1x1 white albedo), which is what it had before.
+        let texture = key_surface_name(&batch.key).and_then(|name| textures.get(name).copied());
+        let material = Material::lit(batch.albedo).with_surface(street.clone());
+        let material = running.add_material(
+            texture.map_or(material, |id| {
+                Material::lit(textured_base_color(&batch.key, batch.albedo))
+                    .with_surface(street.clone())
+                    .with_custom_texture(id)
+                    // The street runs from underfoot to the 168 m horizon, which
+                    // is the grazing-angle case anisotropy exists for.
+                    .with_texture_sampling(TextureSampling::Anisotropic)
+            }),
+        );
         for placement in batch.instances {
             running.spawn(Spawn::new(placement, mesh, material));
         }
@@ -265,6 +393,19 @@ pub fn shmup_start() {
         .depth_fog()
         .into_iter()
         .for_each(|fog| windowing.set_depth_fog(fog));
+    // AgX, at full strength.
+    //
+    // The source tonemaps with AgX and meters the scene to an EV100 value; the
+    // reference capture in `docs/work-manifests/shmup-port/reference/` is grey
+    // and filmic where an untonemapped frame is saturated and contrasty, and
+    // that difference is the largest single one between the two images.
+    //
+    // This also switches the scene target to `Rgba16Float`. Until now nothing
+    // did: `RenderCapability::HdrTargets` was granted and `scene_target_format`
+    // still returned 8-bit, so every value above 1.0 was clipped at the scene
+    // pass and the bloom, exposure and AgX ports were all inert. A tone map is
+    // the app-side switch for the whole HDR path.
+    windowing.set_tonemap(FrameTonemap::filmic());
     windowing.set_surfaces(scene.app.surfaces().to_vec());
     windowing.set_material_programs(scene.app.material_surface_programs());
 
@@ -300,7 +441,11 @@ pub fn shmup_start() {
             lights,
             outcome.light_view_proj(),
             outcome.mesh_batches(),
-            outcome.camera_view_proj(),
+            axiom_host::FrameCamera::new(
+                outcome.camera_view(),
+                outcome.camera_projection(),
+                outcome.camera_view_proj(),
+            ),
             outcome.mesh_batch_casters(),
             outcome.sdf_scene().cloned(),
         )

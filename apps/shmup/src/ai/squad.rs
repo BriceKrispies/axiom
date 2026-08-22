@@ -64,13 +64,24 @@ pub struct ContactBroadcast {
 }
 
 /// `class Squad`. `squad.js:15-112`.
+///
+/// One source field is deliberately absent: `this._pending = []`
+/// (`squad.js:28`). It is never read or written anywhere in the source — not
+/// by `squad.js`, not by `agent.js`, not by `ai/index.js` — so it has no
+/// element type to port. The recipe's "dead computation in the source is
+/// still part of the source" is honoured by recording it here rather than by
+/// inventing a `Vec<?>` for it.
 pub struct Squad {
     pub id: u32,
     pub members: Vec<i32>,
     rng: Rng,
     pub peek_tokens: usize,
-    peek_holders: std::collections::HashSet<i32>,
-    peek_timer: f64,
+    /// `this.peekHolders` — public in the source (a plain `Set` field), so
+    /// public here. Only `has`/`size`/`add`/`delete`/`clear` are ever used, so
+    /// the set's iteration order is not part of the contract.
+    pub peek_holders: std::collections::HashSet<i32>,
+    /// `this.peekTimer` — public in the source.
+    pub peek_timer: f64,
     pub grenade_cooldown: f64,
     pub flanker: Option<i32>,
     pub contact: [f64; 3],

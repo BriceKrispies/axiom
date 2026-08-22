@@ -493,11 +493,13 @@ impl SpatialField {
     }
 }
 
-/// `Math.hypot(a, b, c)`.
+/// `Math.hypot(a, b, c)` — [`crate::jsmath::hypot3`].
 ///
-/// The source uses `Math.hypot`, which is overflow-safe; the plain form agrees
-/// with it to within a couple of ULP over the metre-scale distances the game
-/// deals in, and no call site is anywhere near `f64` overflow.
-fn hypot3(a: f64, b: f64, c: f64) -> f64 {
-    (a * a + b * b + c * c).sqrt()
-}
+/// This module used to define the plain root here, on the reasoning that it
+/// "agrees with `Math.hypot` to within a couple of ULP over the metre-scale
+/// distances the game deals in". That reasoning was wrong twice over. It is
+/// measurably false — the plain root disagrees with V8 on 1,538 of 4,096
+/// sampled metre-scale triples (37.5%), per `tests/jsmath/capture.mjs` — and
+/// `ai/geo.rs` went on to cite this module's comment as its own justification
+/// for shipping the same wrong form. See [`crate::jsmath`]'s module doc.
+use crate::jsmath::hypot3;

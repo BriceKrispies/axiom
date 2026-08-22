@@ -106,19 +106,57 @@ impl V3 {
         self.add(o.sub(self).scale(t))
     }
 
+    /// `Vector3.distanceToSquared(v)` — `dx*dx + dy*dy + dz*dz`, in exactly
+    /// that grouping (`Vector3.js`). Not `Math.hypot`: the source never calls
+    /// it in this rig, and hypot scales by the largest magnitude first and so
+    /// rounds differently (see the port recipe's trap list).
+    pub const fn distance_to_squared(self, o: V3) -> f64 {
+        let (dx, dy, dz) = (self.x - o.x, self.y - o.y, self.z - o.z);
+        dx * dx + dy * dy + dz * dz
+    }
+
+    /// `Vector3.applyMatrix4(m)` (`Vector3.js`) — the full perspective
+    /// divide the source performs, **not** an affine short-cut. Every matrix
+    /// this rig builds is affine (bottom row `0,0,0,1`), so `w` is always
+    /// exactly `1` and the three divisions are exact; the divide is kept
+    /// because dropping it would be a re-derivation rather than a port.
+    pub fn apply_matrix4(self, m: M4) -> V3 {
+        let (x, y, z) = (self.x, self.y, self.z);
+        let e = m.e;
+        let w = 1.0 / (e[3] * x + e[7] * y + e[11] * z + e[15]);
+        V3::new(
+            (e[0] * x + e[4] * y + e[8] * z + e[12]) * w,
+            (e[1] * x + e[5] * y + e[9] * z + e[13]) * w,
+            (e[2] * x + e[6] * y + e[10] * z + e[14]) * w,
+        )
+    }
+
     /// `Vector3.applyQuaternion(q)` — `Vector3.js`'s quaternion-rotate
     /// formula (the "sandwich product" expanded, not `q * v * q^-1` computed
     /// directly).
+    ///
+    /// **The grouping of the final three sums is load-bearing.** `three@0.180`
+    /// writes `this.x = vx + qw * tx + qy * tz - qz * ty;`, which JS evaluates
+    /// strictly left to right as `((vx + qw*tx) + qy*tz) - qz*ty`. Writing the
+    /// visually tidier `vx + qw*tx + (qy*tz - qz*ty)` — the shape the comment
+    /// above it (`cross( q.xyz, t )`) suggests — is a *different* sequence of
+    /// roundings and differs in the last bits. That is the port recipe's
+    /// "float arithmetic is not associative — do not tidy an expression" trap,
+    /// and this rig inherits it on every hand solve
+    /// (`hands.js:1038`'s `_up.set(0,1,0).applyQuaternion(targetQuat)` feeds
+    /// the forearm's roll reference). Transcribed verbatim below.
     pub const fn apply_quat(self, q: Q) -> V3 {
         let (vx, vy, vz) = (self.x, self.y, self.z);
         let (qx, qy, qz, qw) = (q.x, q.y, q.z, q.w);
+        // t = 2 * cross( q.xyz, v );
         let tx = 2.0 * (qy * vz - qz * vy);
         let ty = 2.0 * (qz * vx - qx * vz);
         let tz = 2.0 * (qx * vy - qy * vx);
+        // v + q.w * t + cross( q.xyz, t );
         V3::new(
-            vx + qw * tx + (qy * tz - qz * ty),
-            vy + qw * ty + (qz * tx - qx * tz),
-            vz + qw * tz + (qx * ty - qy * tx),
+            vx + qw * tx + qy * tz - qz * ty,
+            vy + qw * ty + qz * tx - qx * tz,
+            vz + qw * tz + qx * ty - qy * tx,
         )
     }
 }
@@ -305,6 +343,186 @@ impl Q {
             let s = 2.0 * (1.0 + m33 - m11 - m22).sqrt();
             Q::new((m13 + m31) / s, (m23 + m32) / s, 0.25 * s, (m21 - m12) / s)
         }
+    }
+}
+
+/// `THREE.Matrix4`, pared to the four operations the arm rig's transform
+/// chain runs (`hands.js:690-969`: `Matrix4.compose` inside
+/// `Object3D.updateMatrix`, `multiplyMatrices` inside
+/// `Object3D.updateWorldMatrix`, `invert` for `_fitInv`, and
+/// `Vector3.applyMatrix4` — see [`V3::apply_matrix4`]).
+///
+/// **Storage order is part of the algorithm.** `Matrix4.elements` is
+/// **column-major**: `e[0..4]` is the *first column*, `e[12..15]` is the
+/// translation. Every formula below is transcribed from `three@0.180`'s
+/// `Matrix4.js` against that layout with its element indices intact, rather
+/// than re-derived against a row-major convention — a quaternion-to-matrix
+/// conversion written row-major where the source is column-major flips every
+/// off-diagonal sign, compiles, and silently corrupts the result (the port
+/// recipe's "matrix storage order" trap, which has already bitten this port
+/// once in the rigid-body inertia tensor).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct M4 {
+    /// `Matrix4.elements`, column-major.
+    pub e: [f64; 16],
+}
+
+impl M4 {
+    /// `new THREE.Matrix4()` — the identity.
+    pub const IDENTITY: M4 = M4 {
+        e: [
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ],
+    };
+
+    /// `Matrix4.compose(position, quaternion, scale)` — what
+    /// `Object3D.updateMatrix` calls to turn a node's local TRS into its
+    /// local matrix (`Object3D.js`). Transcribed element-for-element from
+    /// `Matrix4.js`, including the `x2 = x + x` doubling and the exact
+    /// `( 1 - ( yy + zz ) ) * sx` grouping.
+    pub fn compose(position: V3, quaternion: Q, scale: V3) -> M4 {
+        let (x, y, z, w) = (quaternion.x, quaternion.y, quaternion.z, quaternion.w);
+        let (x2, y2, z2) = (x + x, y + y, z + z);
+        let (xx, xy, xz) = (x * x2, x * y2, x * z2);
+        let (yy, yz, zz) = (y * y2, y * z2, z * z2);
+        let (wx, wy, wz) = (w * x2, w * y2, w * z2);
+        let (sx, sy, sz) = (scale.x, scale.y, scale.z);
+        M4 {
+            e: [
+                (1.0 - (yy + zz)) * sx,
+                (xy + wz) * sx,
+                (xz - wy) * sx,
+                0.0,
+                (xy - wz) * sy,
+                (1.0 - (xx + zz)) * sy,
+                (yz + wx) * sy,
+                0.0,
+                (xz + wy) * sz,
+                (yz - wx) * sz,
+                (1.0 - (xx + yy)) * sz,
+                0.0,
+                position.x,
+                position.y,
+                position.z,
+                1.0,
+            ],
+        }
+    }
+
+    /// `Matrix4.multiplyMatrices(a, b)` — `a * b`, transcribed with
+    /// `Matrix4.js`'s own `aNM`/`bNM` naming so the column-major index map
+    /// (`a12 = ae[4]`, not `ae[1]`) stays visible at the call site.
+    pub fn multiply_matrices(a: M4, b: M4) -> M4 {
+        let (ae, be) = (a.e, b.e);
+        let (a11, a12, a13, a14) = (ae[0], ae[4], ae[8], ae[12]);
+        let (a21, a22, a23, a24) = (ae[1], ae[5], ae[9], ae[13]);
+        let (a31, a32, a33, a34) = (ae[2], ae[6], ae[10], ae[14]);
+        let (a41, a42, a43, a44) = (ae[3], ae[7], ae[11], ae[15]);
+
+        let (b11, b12, b13, b14) = (be[0], be[4], be[8], be[12]);
+        let (b21, b22, b23, b24) = (be[1], be[5], be[9], be[13]);
+        let (b31, b32, b33, b34) = (be[2], be[6], be[10], be[14]);
+        let (b41, b42, b43, b44) = (be[3], be[7], be[11], be[15]);
+
+        let mut e = [0.0f64; 16];
+        e[0] = a11 * b11 + a12 * b21 + a13 * b31 + a14 * b41;
+        e[4] = a11 * b12 + a12 * b22 + a13 * b32 + a14 * b42;
+        e[8] = a11 * b13 + a12 * b23 + a13 * b33 + a14 * b43;
+        e[12] = a11 * b14 + a12 * b24 + a13 * b34 + a14 * b44;
+
+        e[1] = a21 * b11 + a22 * b21 + a23 * b31 + a24 * b41;
+        e[5] = a21 * b12 + a22 * b22 + a23 * b32 + a24 * b42;
+        e[9] = a21 * b13 + a22 * b23 + a23 * b33 + a24 * b43;
+        e[13] = a21 * b14 + a22 * b24 + a23 * b34 + a24 * b44;
+
+        e[2] = a31 * b11 + a32 * b21 + a33 * b31 + a34 * b41;
+        e[6] = a31 * b12 + a32 * b22 + a33 * b32 + a34 * b42;
+        e[10] = a31 * b13 + a32 * b23 + a33 * b33 + a34 * b43;
+        e[14] = a31 * b14 + a32 * b24 + a33 * b34 + a34 * b44;
+
+        e[3] = a41 * b11 + a42 * b21 + a43 * b31 + a44 * b41;
+        e[7] = a41 * b12 + a42 * b22 + a43 * b32 + a44 * b42;
+        e[11] = a41 * b13 + a42 * b23 + a43 * b33 + a44 * b43;
+        e[15] = a41 * b14 + a42 * b24 + a43 * b34 + a44 * b44;
+        M4 { e }
+    }
+
+    /// `Matrix4.invert()` — the euclideanspace.com cofactor expansion
+    /// `Matrix4.js` uses verbatim, **including its singular case**: a zero
+    /// determinant returns the all-zero matrix rather than `None` or a
+    /// panic, exactly as the source's
+    /// `if ( det === 0 ) return this.set( 0, 0, … 0 )` does.
+    pub fn invert(self) -> M4 {
+        let te = self.e;
+        let (n11, n21, n31, n41) = (te[0], te[1], te[2], te[3]);
+        let (n12, n22, n32, n42) = (te[4], te[5], te[6], te[7]);
+        let (n13, n23, n33, n43) = (te[8], te[9], te[10], te[11]);
+        let (n14, n24, n34, n44) = (te[12], te[13], te[14], te[15]);
+
+        let t11 = n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43 - n22 * n34 * n43 - n23 * n32 * n44
+            + n22 * n33 * n44;
+        let t12 = n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43 + n12 * n34 * n43 + n13 * n32 * n44
+            - n12 * n33 * n44;
+        let t13 = n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43 - n12 * n24 * n43 - n13 * n22 * n44
+            + n12 * n23 * n44;
+        let t14 = n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34
+            - n12 * n23 * n34;
+
+        let det = n11 * t11 + n21 * t12 + n31 * t13 + n41 * t14;
+
+        if det == 0.0 {
+            return M4 { e: [0.0; 16] };
+        }
+
+        let det_inv = 1.0 / det;
+        let mut e = [0.0f64; 16];
+        e[0] = t11 * det_inv;
+        e[1] = (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44
+            - n21 * n33 * n44)
+            * det_inv;
+        e[2] = (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44
+            + n21 * n32 * n44)
+            * det_inv;
+        e[3] = (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42 + n21 * n33 * n42 + n22 * n31 * n43
+            - n21 * n32 * n43)
+            * det_inv;
+
+        e[4] = t12 * det_inv;
+        e[5] = (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43 - n11 * n34 * n43 - n13 * n31 * n44
+            + n11 * n33 * n44)
+            * det_inv;
+        e[6] = (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42 + n11 * n34 * n42 + n12 * n31 * n44
+            - n11 * n32 * n44)
+            * det_inv;
+        e[7] = (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42 - n11 * n33 * n42 - n12 * n31 * n43
+            + n11 * n32 * n43)
+            * det_inv;
+
+        e[8] = t13 * det_inv;
+        e[9] = (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43 + n11 * n24 * n43 + n13 * n21 * n44
+            - n11 * n23 * n44)
+            * det_inv;
+        e[10] = (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42 - n11 * n24 * n42 - n12 * n21 * n44
+            + n11 * n22 * n44)
+            * det_inv;
+        e[11] = (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42 + n11 * n23 * n42 + n12 * n21 * n43
+            - n11 * n22 * n43)
+            * det_inv;
+
+        e[12] = t14 * det_inv;
+        e[13] = (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34
+            + n11 * n23 * n34)
+            * det_inv;
+        e[14] = (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34
+            - n11 * n22 * n34)
+            * det_inv;
+        e[15] = (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33
+            + n11 * n22 * n33)
+            * det_inv;
+        M4 { e }
     }
 }
 

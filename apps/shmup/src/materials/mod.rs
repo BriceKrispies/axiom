@@ -15,12 +15,20 @@ pub mod noise;
 /// and the `owSurface` contract every future per-material generator
 /// implements.
 pub mod bake;
+pub mod gpu_bake;
 
 /// The curvature-driven vertex wear/grime/AO bake (`src/materials/masks.js`).
 pub mod masks;
 
 /// Per-material `owSurface` generators (`src/materials/glsl/surfaces-*.js`).
 pub mod surfaces;
+pub mod system;
+pub mod three_color;
+
+/// The bake's **write side**: the `f32` channels [`bake`] produces, quantized
+/// to the RGBA8 maps the engine uploads and the material shader samples.
+pub mod upload;
+pub mod wgsl;
 
 use crate::world::palette::Surface;
 

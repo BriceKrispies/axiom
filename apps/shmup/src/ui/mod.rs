@@ -1,7 +1,7 @@
 //! **HUD / UI subsystem.**
 //!
-//! Ported from `C:/dev/Claude-of-Duty/src/ui/` (all files except `minimap.js`
-//! and `demo.js` — see below).
+//! Ported from `C:/dev/Claude-of-Duty/src/ui/` (all files except `demo.js` —
+//! see below).
 //!
 //! ```text
 //! this crate module   source
@@ -18,16 +18,25 @@
 //! prompts             prompts.js
 //! menu                menu.js
 //! markers             markers.js
+//! minimap             minimap.js
 //! (this file)         index.js (`UiSystem`)
 //! ```
 //!
 //! ## What is deferred, and why
 //!
-//! **`minimap.js` (603 lines) is not ported.** It bakes an orthographic
-//! depth render target of the level once at load and reads it back to draw
-//! a top-down minimap; no render target / depth bake / readback exists
-//! anywhere in this port yet. `style.css.tpl` keeps every `.ow-minimap*`
-//! rule, unreferenced, so a future minimap port needs no CSS changes.
+//! **`minimap.js` (603 lines) is ported**, as [`minimap`]. It was recorded for
+//! months as blocked on an orthographic depth bake plus a Sobel pass; both
+//! halves of that were false. There is no Sobel pass — `minimap.js:10-23`'s
+//! *comment* describes one, the code uses a blurred-coverage rim (`:415`) — and
+//! the depth bake is the **fallback** (`:74-76`), not the primary path. The
+//! primary is `_buildVectorMap`, pure CPU, needing only
+//! `world.{buildings, levelToWorld, isOpen}`, all three already public. So it
+//! ported with no engine capability added and nothing invented.
+//!
+//! That deferral is the fifth this port has found to be a defect, and the first
+//! that was **never true** rather than true-then-expired. A deferral is a claim,
+//! and a claim has to be checked against the code, not against the comment above
+//! it.
 //!
 //! **`demo.js` (198 lines)** drives a scripted combat timeline against this
 //! same public API purely for screenshot/critic capture
@@ -64,8 +73,10 @@ pub mod hitmarkers;
 pub mod killfeed;
 pub mod markers;
 pub mod menu;
+pub mod minimap;
 pub mod prompts;
 pub mod style;
+pub mod system;
 pub mod util;
 
 use ammo::{AmmoFrame, AmmoInput, AmmoPanel};
@@ -83,8 +94,8 @@ use util::{clamp01, damp};
 /// One AI actor's compass/minimap blip — `ui.setBlips`'s element shape
 /// (`index.js:337-348`). `MAX_BLIPS` (48 in the source) has no home yet: the
 /// only consumer of the blip list is the minimap (`minimap.js`'s
-/// `_mmState.blips`), which is deferred along with it — see the module docs.
-/// [`FramePull::blips`] carries the shape forward uncapped for when it does.
+/// `_mmState.blips`), and [`FramePull::blips`] carries the shape forward
+/// uncapped.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Blip {
     pub x: f32,
@@ -338,7 +349,9 @@ impl Hud {
     }
 
     /// `lateUpdate(dt, ctx)` — `index.js:401-546`, minus the minimap bake
-    /// (deferred with `minimap.js`) and the widgets' own DOM writes (a
+    /// itself (requested through `UiFrame::minimap_bake_requested`, run by the
+    /// host, answered with `UiCore::set_minimap_bake_done`) and the widgets'
+    /// own DOM writes (a
     /// `wasm32` [`view::HudView`] applies the returned frames).
     #[allow(clippy::too_many_arguments)]
     pub fn late_update(&mut self, dt: f64, raw_dt: f64, camera: CameraBasis, pull: FramePull<'_>) -> HudFrame {

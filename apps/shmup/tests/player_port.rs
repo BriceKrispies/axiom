@@ -18,11 +18,6 @@
 //! * **Within `1e-12`** — anything a transcendental touches: [`springs::
 //!   hash_noise`], [`springs::Spring::step`]/[`springs::RecoilAxis::step`]
 //!   (`exp`), and [`mantle::MantleMotion`]'s camera-garnish fields (`sin`).
-//! * **Within `1e-6`** — [`tuning::JUMP_SPEED`], which also needs a
-//!   transcendental (`sqrt`) *and* carries the documented `GRAVITY` `f32`
-//!   round-trip divergence (see `tuning.rs`'s module doc comment) — a looser
-//!   bound than the usual `1e-12` because that round-trip error is larger
-//!   than libm cross-implementation drift.
 //!
 //! `movement.rs`/`camera.rs`'s full per-frame integration (`Movement::step`,
 //! `CameraRig::update`) is exercised natively against the physics/input seam
@@ -270,13 +265,15 @@ fn recoil_axis_double_kick_matches_the_javascript_within_tolerance() {
 // =========================================================================
 
 #[test]
-fn jump_speed_matches_the_javascript_within_a_wider_tolerance() {
-    // `sqrt` is involved (needs a tolerance regardless) *and* `GRAVITY`
-    // already carries the documented `f32` round-trip divergence from
-    // `config::UNITS.gravity` — see `tuning.rs`'s module doc comment. `1e-6`
-    // comfortably covers both while still pinning the value to six decimal
-    // places.
-    assert_close(*tuning::JUMP_SPEED, 4.972041834095928, 1e-6, "JUMP_SPEED");
+fn jump_speed_matches_the_javascript_within_the_transcendental_tolerance() {
+    // `1e-12`, not the `1e-6` this used to need. The wider bound existed only
+    // because `config::UNITS.gravity` was stored as `f32` and `GRAVITY`
+    // inherited the round-trip; `UNITS` is `f64` now, so `sqrt` is the sole
+    // remaining source of imprecision. Do NOT widen this back — a tolerance
+    // that swallows an `f32` round trip is a tolerance that hides the exact
+    // storage-width bug this pinned (it broke three assertions in
+    // `tests/player_system_port.rs`).
+    assert_close(*tuning::JUMP_SPEED, 4.972041834095928, TOL, "JUMP_SPEED");
 }
 
 #[test]
@@ -288,15 +285,15 @@ fn lean_roll_is_an_exact_multiply_of_deg() {
 
 #[test]
 fn stance_table_matches_the_javascript() {
-    // `stand`/`crouch` heights and eyes derive from `config::UNITS` (`f32`),
-    // so they carry the same documented round-trip divergence as `GRAVITY` —
-    // see `tuning.rs`'s module doc comment. `f32::EPSILON` as an `f64`
-    // tolerance comfortably covers one `f32` round-trip.
-    let tol = f64::from(f32::EPSILON);
-    assert_close(Stance::Stand.def().height, 1.78, tol, "stand height");
-    assert_close(Stance::Stand.def().eye, 1.6600000000000001, tol, "stand eye");
-    assert_close(Stance::Crouch.def().height, 1.12, tol, "crouch height");
-    assert_close(Stance::Crouch.def().eye, 1.02, tol, "crouch eye");
+    // Exact. These used to need an `f32::EPSILON` tolerance because
+    // `config::UNITS` narrowed them; it is `f64` now, so the stance table is
+    // the source's own arithmetic bit-for-bit. `1.78 - 0.12` and `1.12 - 0.1`
+    // are written as the `f64` results Node prints, not as the decimals they
+    // look like.
+    assert_eq!(Stance::Stand.def().height, 1.78);
+    assert_eq!(Stance::Stand.def().eye, 1.6600000000000001);
+    assert_eq!(Stance::Crouch.def().height, 1.12);
+    assert_eq!(Stance::Crouch.def().eye, 1.02);
     // `prone` is the source's own literal, not derived from `UNITS` — exact.
     assert_eq!(Stance::Prone.def().height, 0.7);
     assert_eq!(Stance::Prone.def().eye, 0.4);

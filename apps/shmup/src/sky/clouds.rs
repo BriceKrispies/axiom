@@ -104,7 +104,9 @@ pub fn smooth_ridge2(p: Vec2, oct: i32) -> f64 {
 /// fingerprint -> brush-strokes, and how an isotropic silhouette gated by an
 /// anisotropic *texture* answers all three); not reproduced here in full, but
 /// the shape survives: silhouette is isotropic (cannot streak), fibre only
-/// *modulates* density 0.35..1.4, bearing/rotation/patch-mask are per-family
+/// *modulates* density by `0.35 + 1.05 * f` (the source's own comment at
+/// `clouds.js:145-147` rounds that range to "0.35 and 1.2"; the code is what
+/// is transcribed), bearing/rotation/patch-mask are per-family
 /// so two families 75 degrees apart (see [`clouds`]) can never share a
 /// vanishing point. `skCirrusBand`, `clouds.js:126-149`.
 #[allow(clippy::too_many_arguments)]
@@ -236,10 +238,14 @@ pub fn clouds(
             let a = (d * params.cirrus_opacity * fade).clamp(0.0, 0.70);
 
             let fwd = hg_phase(cos_sun, 0.74) * 3.2 + 0.60;
+            // `( sunHigh * fwd + moonHigh * (...) ) / SK_PI` — a componentwise
+            // *divide*, not a multiply by `1/pi`. The two differ in the last
+            // bit and float arithmetic is not associative; transcribe the
+            // source's operator.
             let col = sun_high
                 .scale(fwd)
                 .add(moon_high.scale(hg_phase(cos_moon, 0.68) * 2.8 + 0.55))
-                .scale(1.0 / PI)
+                .div(Vec3::splat(PI))
                 .add(ambient.scale(0.85));
             cirrus_rgb = col;
             cirrus_a = a;
@@ -283,9 +289,15 @@ pub fn clouds(
 
                 let mut direct = sun_low.scale(lit * (0.55 + 0.45 * powder) * fwd_s + rim * lit * 0.9);
                 direct = direct.add(moon_low.scale(lit_m * (0.55 + 0.45 * powder) * fwd_m + rim * lit_m * 0.9));
-                let fill =
-                    ambient.scale(gl_mix(0.50, 1.5, (d * 1.6).clamp(0.0, 1.0)) * (0.32 + 0.68 * lit));
-                cumulus_rgb = direct.scale(1.0 / PI).add(fill);
+                // `ambient * mix( 0.50, 1.5, clamp( d * 1.6, 0, 1 ) ) *
+                // ( 0.32 + 0.68 * lit )` — TWO vector-by-scalar multiplies,
+                // left to right, not one multiply by the folded product.
+                let fill = ambient
+                    .scale(gl_mix(0.50, 1.5, (d * 1.6).clamp(0.0, 1.0)))
+                    .scale(0.32 + 0.68 * lit);
+                // `direct / SK_PI + fill` — componentwise divide, see the
+                // matching note in the cirrus branch above.
+                cumulus_rgb = direct.div(Vec3::splat(PI)).add(fill);
                 cumulus_a = a;
             }
         }
@@ -293,9 +305,17 @@ pub fn clouds(
 
     // Cumulus is below cirrus, so it composites on top.
     let out_a = cirrus_a + cumulus_a * (1.0 - cirrus_a);
-    let mut out_c = cirrus_rgb.scale(cirrus_a).add(cumulus_rgb.scale(cumulus_a * (1.0 - cirrus_a)));
+    // `cirrus.rgb * cirrus.a + cumulus.rgb * cumulus.a * ( 1.0 - cirrus.a )`
+    // — the cumulus term is the vector scaled TWICE, left to right, not once
+    // by `cumulus.a * (1 - cirrus.a)`. (`outA` above genuinely is the folded
+    // scalar product, because there the source folds it itself.)
+    let mut out_c = cirrus_rgb
+        .scale(cirrus_a)
+        .add(cumulus_rgb.scale(cumulus_a).scale(1.0 - cirrus_a));
     if out_a > 1e-5 {
-        out_c = out_c.scale(1.0 / out_a);
+        // `outC /= outA` — componentwise divide, see the note in the cirrus
+        // branch above.
+        out_c = out_c.div(Vec3::splat(out_a));
     }
     (out_c, out_a)
 }

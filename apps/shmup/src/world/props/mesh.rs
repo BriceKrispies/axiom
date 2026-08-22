@@ -20,20 +20,11 @@ use crate::world::geo::WorldGeo;
 use crate::world::kit::cylinder_geometry;
 use crate::world::noise::fbm3;
 
-/// `Math.sign(x)` is three-valued (`sign(0) === 0`); `f64::signum`/`f32::signum`
-/// are two-valued (`signum(0.0) == 1.0`). Every call site in this port that
-/// leans on a zero sign contributing nothing needs this instead — see the
-/// port recipe's "Language traps" list, hit here a third time (`sack_geometry`'s
-/// `Math.sign(uy)`, `tyre`'s `Math.sign(y)`).
-pub(crate) fn sign3(x: f64) -> f64 {
-    if x > 0.0 {
-        1.0
-    } else if x < 0.0 {
-        -1.0
-    } else {
-        0.0
-    }
-}
+/// `Math.sign` — three-valued, unlike [`f64::signum`]. `world/props.js` calls it
+/// directly; the transcription lives once in [`crate::jsmath`], which is
+/// pinned bit-for-bit against V8 (including `-0` and `NaN`, which the local
+/// copy this replaced flattened to `+0`).
+pub(crate) use crate::jsmath::sign as sign3;
 
 /// The min/max of one position axis (0=x, 1=y, 2=z) — `computeBoundingBox`'s
 /// per-axis half, needed standalone by both [`auto_edge_wear`] and

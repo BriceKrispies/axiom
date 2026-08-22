@@ -146,7 +146,7 @@ impl Game {
         movement.yaw = spawn.yaw;
         movement.pitch = 0.0;
 
-        let mut rig = CameraRig::new(f64::from(config.fov));
+        let mut rig = CameraRig::new(config.fov);
         rig.reset(STAND.eye);
 
         let sky = sky_look::resolve(sky_look::HOUR);
@@ -270,11 +270,7 @@ impl Game {
             self.movement.yaw_rate = 0.0;
             return;
         }
-        let sens = lerp(
-            1.0,
-            f64::from(self.config.ads_sens_scale.get()),
-            clamp01(self.ads_amount),
-        );
+        let sens = lerp(1.0, self.config.ads_sens_scale, clamp01(self.ads_amount));
 
         let mut d_yaw = -input.look.x * sens;
         let mut d_pitch = -input.look.y * sens;
@@ -665,7 +661,7 @@ mod tests {
         run(&mut game, &mut input, 60);
         assert!(game.ads_requested);
         assert!(game.ads_amount > 0.5, "got {}", game.ads_amount);
-        assert!(game.rig.fov < f64::from(game.config.fov), "the FOV narrowed");
+        assert!(game.rig.fov < game.config.fov, "the FOV narrowed");
         input.mouse_up(2);
         run(&mut game, &mut input, 90);
         assert!(game.ads_amount < 0.1);

@@ -366,9 +366,7 @@ pub fn surface_impact(
 /// away from zero. Every argument in this file is non-negative, where the two
 /// agree; the distinction is spelled out so the next reader does not have to
 /// re-derive it.
-fn js_round(x: f64) -> f64 {
-    (x + 0.5).floor()
-}
+use crate::jsmath::round as js_round;
 
 /* ------------------------------------------------------------------ */
 /* Footsteps                                                          */

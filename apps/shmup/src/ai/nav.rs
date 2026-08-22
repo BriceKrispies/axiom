@@ -38,6 +38,22 @@
 //! explore ties in a different order and could return a different (still
 //! valid, but not byte-identical) path.
 //!
+//! ## `Math.hypot` is not `sqrt(x*x + y*y)`
+//!
+//! Five expressions here are `Math.hypot` in the source (`lineOfWalk`'s
+//! segment length, `pick`'s threat distance, travel distance and squad
+//! spacing, and `physics.lineOfSight`'s ray length). Rust's `f64::hypot` is a
+//! *different* algorithm with the same intent, and `(x*x + y*y).sqrt()` is a
+//! third; all three agree to within a ULP or so, and none of them agree
+//! bit-for-bit with V8. Those last bits reach real decisions here:
+//! `ceil(dist / (cell * 0.65))` picks a step count, `d_t` is compared against
+//! hard 2.5/40 gates and then *divides* into the protection dot product, and
+//! `score > best_score` decides between cover points that are frequently tied
+//! by symmetry. So every `Math.hypot` site goes through
+//! [`crate::jsmath::hypot2`]/[`crate::jsmath::hypot3`], the crate's single
+//! V8 transcription — not a private copy, for the reason that module's doc
+//! comment sets out at length.
+//!
 //! ## Return values, not out-parameters
 //!
 //! As in `physics::math`/`physics::bvh`, [`NavGrid::find_path`] returns its
@@ -49,8 +65,9 @@
 //! [`NavGrid::last_raw_path`] rather than dropping it, because
 //! `tests/ai_nav_port.rs` pins the raw path independently of the pulled one.
 
-use crate::physics::surfaces::mask;
+use crate::jsmath::{hypot2, hypot3};
 use crate::physics::bvh::Aabb;
+use crate::physics::surfaces::mask;
 
 const SQRT2: f64 = std::f64::consts::SQRT_2;
 
@@ -481,7 +498,10 @@ impl NavGrid {
                 if dy.abs() > self.max_step {
                     continue;
                 }
-                let mut cost = if dx != 0 && dz != 0 { SQRT2 } else { 1.0 } * cell;
+                // `(dx && dz ? SQRT2 : 1) * cell`. Parenthesised: an
+                // `if`-expression immediately followed by a binary operator is
+                // a Rust parse hazard worth removing outright.
+                let mut cost = (if dx != 0 && dz != 0 { SQRT2 } else { 1.0 }) * cell;
                 cost += dy.abs() * 2.2; // prefer flat ground
                 if self.flags[ni] == 2 {
                     cost += cell * 1.6; // crouch-only squeeze
@@ -563,7 +583,7 @@ impl NavGrid {
     pub fn line_of_walk(&self, a: [f64; 3], b: [f64; 3]) -> bool {
         let dx = b[0] - a[0];
         let dz = b[2] - a[2];
-        let dist = dx.hypot(dz);
+        let dist = hypot2(dx, dz);
         let steps = 1u32.max((dist / (self.cell * 0.65)).ceil() as u32);
         let mut prev_y = a[1];
         for s in 1..=steps {
@@ -753,11 +773,11 @@ impl CoverMap {
             }
             let to_threat_x = tx - p.x;
             let to_threat_z = tz - p.z;
-            let d_t = to_threat_x.hypot(to_threat_z);
+            let d_t = hypot2(to_threat_x, to_threat_z);
             if d_t < 2.5 || d_t > 40.0 {
                 continue;
             }
-            let travel = (p.x - pos[0]).hypot(p.z - pos[2]);
+            let travel = hypot2(p.x - pos[0], p.z - pos[2]);
             if travel > opts.max_travel {
                 continue;
             }
@@ -785,7 +805,7 @@ impl CoverMap {
                     if other.id == claim_id || !other.alive {
                         continue;
                     }
-                    let d = (other.x - p.x).hypot(other.z - p.z);
+                    let d = hypot2(other.x - p.x, other.z - p.z);
                     if d < 3.2 {
                         score -= (3.2 - d) * 1.4;
                     }
@@ -853,7 +873,9 @@ pub fn line_of_sight(phys: &dyn WorldProbe, from: [f64; 3], to: [f64; 3], mask: 
     let dx = to[0] - from[0];
     let dy = to[1] - from[1];
     let dz = to[2] - from[2];
-    let d = (dx * dx + dy * dy + dz * dz).sqrt();
+    // `Math.hypot(dx, dy, dz)` in the source, not a root of the sum of
+    // squares — see the module doc comment.
+    let d = hypot3(dx, dy, dz);
     if d < 1e-6 {
         return true;
     }

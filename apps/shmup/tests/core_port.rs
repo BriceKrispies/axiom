@@ -1111,13 +1111,17 @@ fn the_fixed_step_constants_match_the_source() {
 #[test]
 fn the_units_block_matches_the_source() {
     // Gravity is deliberately 2.1x real — CoD-like feel, not physical accuracy.
-    assert!((UNITS.gravity - (-9.81 * 2.1)).abs() < 1e-5);
-    assert_eq!(UNITS.player_height.get(), 1.78);
-    assert_eq!(UNITS.player_crouch_height.get(), 1.12);
-    assert_eq!(UNITS.player_radius.get(), 0.32);
-    assert_eq!(UNITS.eye_offset.get(), 0.12);
+    // Exact, not within 1e-5: `UNITS` is `f64`, the width `config.js` authors
+    // and the simulation integrates in. A tolerance here would hide exactly
+    // the `f32` narrowing that broke `tests/player_system_port.rs` — see
+    // `config.rs`'s module doc comment.
+    assert_eq!(UNITS.gravity, -9.81 * 2.1);
+    assert_eq!(UNITS.player_height, 1.78);
+    assert_eq!(UNITS.player_crouch_height, 1.12);
+    assert_eq!(UNITS.player_radius, 0.32);
+    assert_eq!(UNITS.eye_offset, 0.12);
     // The eye sits below the top of the capsule, never above it.
-    assert!(UNITS.eye_offset.get() < UNITS.player_crouch_height.get());
+    assert!(UNITS.eye_offset < UNITS.player_crouch_height);
 }
 
 #[test]
@@ -1161,11 +1165,11 @@ fn the_defaults_match_the_source() {
     let cfg = Config::default();
     assert_eq!(cfg.quality, Quality::Ultra);
     assert_eq!(cfg.fov, 80.0);
-    assert_eq!(cfg.ads_fov_scale.get(), 0.72);
+    assert_eq!(cfg.ads_fov_scale, 0.72);
     assert_eq!(cfg.sensitivity, 0.0022);
-    assert_eq!(cfg.ads_sens_scale.get(), 0.65);
+    assert_eq!(cfg.ads_sens_scale, 0.65);
     assert!(!cfg.invert_y);
-    assert_eq!(cfg.exposure.get(), 1.0);
+    assert_eq!(cfg.exposure, 1.0);
     assert!(!cfg.deterministic);
     assert_eq!(cfg.q, ULTRA);
 }

@@ -124,6 +124,12 @@ pub struct CameraRig {
 }
 
 impl CameraRig {
+
+    /// `rig.bobPhase` — `player/index.js` reads the walk-bob phase off the rig
+    /// directly. The field is private here, so the facade needs a door.
+    pub fn bob_phase(&self) -> f64 {
+        self.bob_phase
+    }
     /// `constructor(ctx)`. `camera.js:31-91`.
     pub fn new(fov: f64) -> Self {
         let c = &CAMERA;
@@ -430,8 +436,8 @@ impl CameraRig {
             1.0
         };
         self.fov_move = approach(self.fov_move, move_target, f.move_tau, dt);
-        self.fov_ads = approach(self.fov_ads, lerp(1.0, f64::from(config.ads_fov_scale.get()), ads), f.ads_tau, dt);
-        self.base_fov = f64::from(config.fov);
+        self.fov_ads = approach(self.fov_ads, lerp(1.0, config.ads_fov_scale, ads), f.ads_tau, dt);
+        self.base_fov = config.fov;
         self.fov = self.base_fov * self.fov_move * self.fov_ads;
 
         // ---- publish the kick channel for the viewmodel ----------------------

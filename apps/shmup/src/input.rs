@@ -114,12 +114,11 @@ pub const DEAD_ZONE: f64 = 0.16;
 /// The look stick's response exponent. `input.js:185` — `Math.abs(v) ** 2.4`.
 pub const LOOK_EXPONENT: f64 = 2.4;
 
-/// `Math.sign`. Rust's `f64::signum` returns ±1 for ±0.0, where JS `Math.sign`
-/// returns the zero itself — the divergence the port recipe names first. Every
-/// `Math.sign` in this file goes through here.
-fn js_sign(v: f64) -> f64 {
-    f64::from(u8::from(v > 0.0)) - f64::from(u8::from(v < 0.0))
-}
+/// `Math.sign` — three-valued, unlike [`f64::signum`]. `core/input.js` calls it
+/// directly; the transcription lives once in [`crate::jsmath`], which is
+/// pinned bit-for-bit against V8 (including `-0` and `NaN`, which the local
+/// copy this replaced flattened to `+0`).
+use crate::jsmath::sign as js_sign;
 
 /// `class Input`. `input.js:29-253`.
 ///
@@ -268,7 +267,7 @@ impl Input {
             }
         }
 
-        let s = f64::from(config.sensitivity);
+        let s = config.sensitivity;
         let invert = if config.invert_y { -1.0 } else { 1.0 };
         self.look.x = if self.frozen { 0.0 } else { self.raw_look.x * s };
         self.look.y = if self.frozen {
@@ -668,7 +667,7 @@ mod tests {
         input.mouse_move(-2.0, 1.0);
         let cfg = config();
         input.begin_frame(&cfg, None);
-        let s = f64::from(cfg.sensitivity);
+        let s = cfg.sensitivity;
         assert_eq!(input.look.x, 8.0 * s);
         assert_eq!(input.look.y, 5.0 * s);
         // The accumulator is consumed, not carried.
@@ -684,7 +683,7 @@ mod tests {
         let mut cfg = config();
         cfg.invert_y = true;
         input.begin_frame(&cfg, None);
-        let s = f64::from(cfg.sensitivity);
+        let s = cfg.sensitivity;
         assert_eq!(input.look.x, 3.0 * s);
         assert_eq!(input.look.y, -7.0 * s);
     }

@@ -52,15 +52,67 @@ struct Thickness {
     backface: bool,
 }
 
+/// The one call [`Ballistics`] makes into the world: a masked ray with an
+/// ignore-object, returning the nearest hit.
+///
+/// A trait rather than a concrete type because the source calls
+/// `phys.raycast(...)` — the **facade**, which queries statics, colliders,
+/// rigid bodies and ragdolls — and this port used to call `StaticWorld`'s
+/// directly. That was justified when it was written ("the static world is the
+/// only collision backend ported so far") and the justification has since
+/// expired: `rigidbody`, `ragdoll` and `physics::system` all exist now.
+///
+/// The consequence while it stood is worth recording, because it is invisible
+/// from the type: **a bullet could only ever hit static geometry.** It could not
+/// hit an enemy, a rigid body or a ragdoll, so `damage:dealt` could never fire
+/// from a shot. Nothing failed; the game just had no hit registration.
+///
+/// This is the narrow-trait shape the port already uses for a seam it cannot yet
+/// bind — `agent::PathSource`, `grounding::FootSource`,
+/// `movement::CharacterController`. `Rc<StaticWorld>` still coerces to
+/// `Rc<dyn RayWorld>`, so every existing caller and test is unchanged.
+pub trait RayWorld {
+    /// `phys.raycast(ox, oy, oz, dx, dy, dz, maxDist, mask)` — plus the
+    /// `ignore_object` this port's `StaticWorld` already takes, which the source
+    /// carries as the facade's own self-hit exclusion.
+    #[allow(clippy::too_many_arguments)]
+    fn raycast(
+        &self,
+        ox: f64,
+        oy: f64,
+        oz: f64,
+        dx: f64,
+        dy: f64,
+        dz: f64,
+        max_dist: f64,
+        mask: u16,
+        ignore_object: i32,
+    ) -> crate::physics::math::HitRecord;
+}
+
+impl RayWorld for StaticWorld {
+    fn raycast(
+        &self,
+        ox: f64,
+        oy: f64,
+        oz: f64,
+        dx: f64,
+        dy: f64,
+        dz: f64,
+        max_dist: f64,
+        mask: u16,
+        ignore_object: i32,
+    ) -> crate::physics::math::HitRecord {
+        StaticWorld::raycast(self, ox, oy, oz, dx, dy, dz, max_dist, mask, ignore_object)
+    }
+}
+
 /// Multi-layer bullet penetration solver.
 ///
-/// Ported from the `Ballistics` class in `penetration.js:27-229`.
-/// The source's `phys` parameter is a `PhysicsSystem` instance; this port
-/// accepts an `Rc<StaticWorld>` directly, since the static world is the only
-/// collision backend ported so far. Dynamic bodies (actors, ragdolls, rigid
-/// bodies) are not yet present in the BVH, so their callbacks are no-ops here.
+/// Ported from the `Ballistics` class in `penetration.js:27-229`. The source's
+/// `phys` parameter is a `PhysicsSystem`; this takes anything that answers the
+/// one query it makes — see [`RayWorld`].
 pub struct Ballistics {
-    world: std::rc::Rc<StaticWorld>,
     rng: Option<std::rc::Rc<std::cell::RefCell<Rng>>>,
     impacts: [Impact; MAX_LAYERS * 2 + 2],
     impact_count: usize,
@@ -68,9 +120,8 @@ pub struct Ballistics {
 
 impl Ballistics {
     /// Create a new penetration solver for the given static world.
-    pub fn new(world: std::rc::Rc<StaticWorld>) -> Self {
+    pub fn new() -> Self {
         Ballistics {
-            world,
             rng: None,
             impacts: [Impact::default(); MAX_LAYERS * 2 + 2],
             impact_count: 0,
@@ -109,6 +160,15 @@ impl Ballistics {
     #[allow(clippy::too_many_arguments)]
     pub fn fire(
         &mut self,
+        // The world to trace against, per call.
+        //
+        // The source holds `this.phys` — a back-reference from `Ballistics` to
+        // the `PhysicsSystem` that constructs it, which JavaScript allows and
+        // Rust does not: the facade owns the solver, so the solver cannot own
+        // the facade. Taking it as a parameter breaks the cycle and is the more
+        // honest shape anyway — a ray needs a world at the moment it is cast,
+        // not at the moment the solver is built.
+        world: &dyn RayWorld,
         origin: [f64; 3],
         dir: [f64; 3],
         max_dist: f64,
@@ -144,7 +204,7 @@ impl Ballistics {
             }
 
             // Raycast for the next hit
-            let hit = self.world.raycast(ox, oy, oz, dx, dy, dz, remaining, mask, -1);
+            let hit = world.raycast(ox, oy, oz, dx, dy, dz, remaining, mask, -1);
             if !hit.hit {
                 break;
             }
@@ -186,7 +246,7 @@ impl Ballistics {
             }
 
             // Measure material thickness via backface probe
-            let thick = self.measure_thickness(&hit, dx, dy, dz, mask, EXIT_PROBE.min(remaining));
+            let thick = self.measure_thickness(world, &hit, dx, dy, dz, mask, EXIT_PROBE.min(remaining));
             if thick.distance > budget {
                 break; // round stops in the material
             }
@@ -271,6 +331,7 @@ impl Ballistics {
     /// Port of `Ballistics._measureThickness` (`penetration.js:175-216`).
     fn measure_thickness(
         &self,
+        world: &dyn RayWorld,
         entry: &HitRecord,
         dx: f64,
         dy: f64,
@@ -283,7 +344,7 @@ impl Ballistics {
         let oy = entry.py + dy * EPS;
         let oz = entry.pz + dz * EPS;
 
-        let h = self.world.raycast(ox, oy, oz, dx, dy, dz, probe, mask, entry.object);
+        let h = world.raycast(ox, oy, oz, dx, dy, dz, probe, mask, entry.object);
 
         let same_solid = h.hit && !h.front_face && h.object == entry.object;
 
@@ -391,12 +452,13 @@ mod tests {
         world.build();
         let world = Rc::new(world);
 
-        let mut bal = Ballistics::new(world);
+        let mut bal = Ballistics::new();
 
         // Plaster pen_depth = 0.7, power = 2.2 (.50 AP) -> budget = 1.54 per layer
         // Single-sided, cos=1 -> thickness = 0.018, easily penetrates
         // Should hit 6-layer cap
         let count = bal.fire(
+            world.as_ref(),
             [0.0, 10.0, 0.0],
             [0.0, -1.0, 0.0],
             20.0,
@@ -424,9 +486,10 @@ mod tests {
         // This test will be superseded by the golden capture test
         // but we keep a basic sanity check here
         let world = test_world();
-        let mut bal = Ballistics::new(world);
+        let mut bal = Ballistics::new();
 
         bal.fire(
+            world.as_ref(),
             [2.0, 5.0, 0.0],
             [0.0, -1.0, 0.0],
             20.0,

@@ -11,3 +11,6 @@ pub mod models;
 pub mod parts;
 pub mod rig_math;
 pub mod viewmodel;
+pub mod materials;
+
+pub mod system;

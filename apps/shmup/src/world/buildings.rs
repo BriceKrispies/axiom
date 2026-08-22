@@ -45,18 +45,27 @@
 //!    original [`Building`] here, exactly as `floorSpec`'s untouched fields
 //!    still are the original spec's in JS.
 //!
-//! ## Interiors: partitions and stairs are ported; furnishing is deferred
+//! ## Interiors: partitions, stairs and furnishing
 //!
-//! `buildInterior` (`buildings.js:635-769`) is ported in full for the
-//! partition walls (`facadeWall` + `doorUnit` per `rooms[f].walls`) and the
-//! stair flights (`kit::stair_run`) — neither depends on anything outside
-//! this file. Its `furnishRoom` calls (`src/world/interiors.js`, a
-//! concurrent, not-yet-landed slice) are the one piece **not** acted on:
-//! [`crate::world::layout::RoomFurnish`] records the same data
-//! `rooms[f].furnish` carries, but [`build_interior`] does not yet call
-//! anything with it. When `interiors.rs` lands, the furnish loop is a
-//! straight port of `buildings.js:723-739`; nothing here needs to change to
-//! support it.
+//! `buildInterior` (`buildings.js:635-769`) is ported in full: the partition
+//! walls (`facadeWall` + `doorUnit` per `rooms[f].walls`), the stair flights
+//! (`kit::stair_run`), and the furnish loop (`buildings.js:723-739`), which
+//! resolves each [`crate::world::layout::RoomFurnish`] from normalised 0..1
+//! room coordinates into a level-space
+//! [`RoomRect`][crate::world::interiors::RoomRect] and hands it to
+//! [`crate::world::interiors::furnish_room`].
+//!
+//! **The furnish loop was deferred for one release and that deferral
+//! expired.** It read "deferred until `interiors.rs` lands" — `interiors.rs`
+//! landed, with its own golden, and the note stayed. What that cost was
+//! measured before it was fixed: the shared `rng` diverged from the source at
+//! `W2`, the first `enterable` building (the source draws 5636 values there
+//! furnishing rooms; this file drew none), and every placement downstream of
+//! it was a different street. `hanging_bulb` is also the only thing that
+//! fills `Assembler::interior_lights`, so the world had **zero** interior
+//! light anchors against the source's fifteen and
+//! `crate::world::system`'s `_addLights` bulb loop ran zero times. Pinned by
+//! `tests/world_system_port.rs`.
 //!
 //! ## Weathering draws from its own stream
 //!
@@ -76,6 +85,7 @@ use crate::world::kit::{
     FacadeSpec, ParapetOpts, RubbleOpts, RunoffStreakOpts, ShopfrontOpts, StairOpts, StairRailing, WallHole, WallTop, WindowOpts,
     WindowState,
 };
+use crate::world::interiors::{furnish_room, RoomRect};
 use crate::world::layout::{Building, RoomPlan, Setback};
 use crate::world::noise::fbm3;
 use crate::world::palette::Surface;
@@ -829,9 +839,37 @@ fn build_interior(asm: &mut Assembler, rng: &mut Rng, spec: &Building, info: &Bu
             asm.collide_box(Surface::Concrete, wp.x, wp.y, wp.z, sw + 0.1, 0.2, 1.1, fl.ry as f32);
         }
 
-        // ---- furnishing: `plan.furnish` — deferred until `interiors.rs`
-        // (`src/world/interiors.js`'s `furnishRoom`) lands; see module doc.
-        let _ = plan.map(|p| p.furnish);
+        // ---- furnishing ----
+        // `if (plan?.furnish) for (const r of plan.furnish) furnishRoom(A, rng, {…})`
+        // (`buildings.js:723-739`). Position in the sequence is the contract:
+        // `furnish_room` draws from the same shared `rng` as the partitions
+        // above and the stairs before it, so it has to run AFTER this floor's
+        // stairs and BEFORE the next floor's partitions, inside the `f` loop.
+        // Anywhere else and every subsequent placement in the level shifts.
+        //
+        // The rect is resolved from the plan's normalised 0..1 room
+        // coordinates into LEVEL space here, exactly as the source does —
+        // `crate::world::interiors`'s `RoomRect` is that resolved shape.
+        if let Some(plan) = plan {
+            for r in plan.furnish {
+                furnish_room(
+                    asm,
+                    rng,
+                    RoomRect {
+                        kind: r.kind,
+                        // so furnishing never stacks a shelf across a
+                        // shopfront opening
+                        street: spec.street_side,
+                        x0: x0 + r.x0 as f32 * iw,
+                        z0: z0 + r.z0 as f32 * id,
+                        x1: x0 + r.x1 as f32 * iw,
+                        z1: z0 + r.z1 as f32 * id,
+                        y: fy,
+                        h: fh,
+                    },
+                );
+            }
+        }
     }
 
     // roof access: a stair penthouse box with an open doorway

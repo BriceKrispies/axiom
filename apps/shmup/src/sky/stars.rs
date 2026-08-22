@@ -1,9 +1,23 @@
-//! Ported from Claude-of-Duty `src/sky/stars.js` — `STARS_GLSL`, the night
-//! sky (a procedural starfield plus a Milky Way band). No JavaScript form
-//! exists anywhere (WebGL2 fragment-shader source only), so every function
-//! here is hand-transcribed the same way `dome`/`clouds`/`volumetrics` are,
-//! pinned against a second, independent hand-transcription in
-//! `tests/sky/capture.mjs`.
+//! Ported from Claude-of-Duty `src/sky/stars.js:21-164` — `STARS_GLSL`, the
+//! night sky (a procedural starfield plus a Milky Way band). No JavaScript
+//! form exists anywhere (WebGL2 fragment-shader source only), so every
+//! function here is hand-transcribed the same way `dome`/`clouds`/
+//! `volumetrics` are, pinned against a second, independent hand-transcription
+//! in `tests/sky_stars/capture.mjs` (read by `tests/sky_stars_port.rs`).
+//!
+//! **That pin cannot catch a mistake both transcriptions share**, which is
+//! not a theoretical caveat: until this module was audited it *and* the
+//! transcription in `tests/sky/capture.mjs` both wrote [`blackbody`]'s
+//! `c / max(1e-4, dot(c, ...))` (`stars.js:54`) as a multiply by a rounded
+//! reciprocal. No golden built from that pair could have found it. The
+//! `sky_stars` transcription was therefore written from the GLSL text alone,
+//! before this file was opened, and the two were diffed afterwards. Keep that
+//! order if you revise either.
+//!
+//! Every `/` in the source is a `/` here, every multiply chain keeps the
+//! source's left-to-right association, and a `vec * scalar * scalar` chain
+//! stays two multiplies unless the source itself parenthesised the scalars
+//! together — which, at `stars.js:95` and `:126`, it does.
 //!
 //! Three ideas the source's own module doc calls out, preserved here:
 //!
@@ -63,7 +77,13 @@ pub fn blackbody(kelvin: f64) -> Vec3 {
         (0.543_206_79 * (t - 10.0).ln() - 1.196_254_09).clamp(0.0, 1.0)
     };
     let c = Vec3::new(r.powf(2.2), g.powf(2.2), b.powf(2.2));
-    c.scale(1.0 / c.dot(Vec3::new(0.2126, 0.7152, 0.0722)).max(1e-4))
+    // `c / max( 1e-4, dot( c, ... ) )` (`stars.js:54`) is a real componentwise
+    // DIVIDE. It was `c.scale(1.0 / ...)` here, and multiplying by a rounded
+    // reciprocal is a different operation — the same last-bit faithfulness
+    // defect the `dome`/`clouds` and `volumetrics` audits found ten of across
+    // this subsystem, and invisible to any golden whose JS transcription was
+    // written by reading this file.
+    c.div(Vec3::splat(c.dot(Vec3::new(0.2126, 0.7152, 0.0722)).max(1e-4)))
 }
 
 /// Kasten-Young relative airmass: 1 overhead, ~38 at the horizon.
@@ -86,6 +106,16 @@ pub fn star_layer(dir: Vec3, n: f64, keep: f64, gain: f64, seed: f64, sigma: f64
     }
 
     let h2 = hash33(cell.add_scalar(91.7));
+    // `stars.js:76` recomputes `floor( dir * N )` here, without the seed;
+    // `cell_floor` is that same value, bit for bit.
+    //
+    // `.normalize()` is `v * (1 / length(v))`, while GLSL's `normalize` is
+    // reference-defined as `v / length(v)`. The two differ in the last bit
+    // (and real hardware, which uses `rsqrt`, agrees with neither). Kept as
+    // the shared `Vec3::normalize` that all five sky modules use rather than
+    // diverging in one of them; `tests/sky_stars/capture.mjs` transcribes the
+    // same convention, and the measured cost is 2.0e-14 on the worst golden
+    // value, four orders under the pin. See the notes file.
     let star_dir = cell_floor
         .add_scalar(0.5)
         .add(h2.sub(Vec3::splat(0.5)).scale(0.94))

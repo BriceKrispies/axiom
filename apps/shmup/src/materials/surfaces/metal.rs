@@ -106,6 +106,16 @@ fn gl_step(edge: f64, x: f64) -> f64 {
 
 /// GLSL `sign(x)`. **Not** `f64::signum` — see the module doc's "`sign(0)`
 /// trap" section.
+/// GLSL `sign` — **not** [`crate::jsmath::sign`], and deliberately not folded
+/// into it.
+///
+/// `surfaces-metal.js` holds GLSL in a string and calls `sign(` there; it never
+/// calls `Math.sign`. The two agree on every finite non-zero input and differ
+/// at the edges: `Math.sign(-0)` is `-0` and `Math.sign(NaN)` is `NaN`, whereas
+/// GLSL's returns `0.0` for any zero and leaves NaN unspecified. Collapsing
+/// them would be the "`Vector3.length()` is not `Math.hypot`" trap run
+/// backwards — two languages' functions that look alike sharing one
+/// implementation because the difference is currently unobservable.
 fn gl_sign(x: f64) -> f64 {
     if x > 0.0 {
         1.0
@@ -120,10 +130,13 @@ fn gl_sign(x: f64) -> f64 {
 /// unpack the sRGB hex triplet to `[0,1]` and decode to linear. See the
 /// module doc's "Tint decode" section.
 pub fn hex_to_linear_tint(hex: u32) -> Vec3 {
-    let r = f64::from((hex >> 16) & 0xff) / 255.0;
-    let g = f64::from((hex >> 8) & 0xff) / 255.0;
-    let b = f64::from(hex & 0xff) / 255.0;
-    ow_srgb(Vec3::new(r, g, b))
+    // This used to call `ow_srgb` — the *GLSL* decode — while documenting
+    // itself as `new THREE.Color(hex)`. The two are algebraically equal and
+    // numerically different on 254 of 256 byte values, and the call site really
+    // is `new THREE.Color(bake.tintA)` (`materials/index.js:145`), so the GLSL
+    // form was wrong here. See `crate::materials::three_color`.
+    let [r, g, b] = crate::materials::three_color::hex_to_linear(hex);
+    Vec3::new(r, g, b)
 }
 
 // ---------------------------------------------------------------------------
@@ -608,16 +621,37 @@ mod tests {
         assert_eq!((-0.0_f64).signum(), -1.0);
     }
 
+    /// `hex_to_linear_tint` is `new THREE.Color(hex)` — three's decode, not the
+    /// GLSL `owSRGB` one.
+    ///
+    /// This test used to assert the opposite, and that is how the defect
+    /// survived: the function's doc comment said `THREE.Color`, its body called
+    /// `ow_srgb`, and this test pinned the body. A test that agrees with the
+    /// code instead of with the source is not coverage.
+    ///
+    /// The real call site is `new THREE.Color(bake.tintA)`
+    /// (`materials/index.js:145`). `materials::system`'s golden — captured from
+    /// the actual `MaterialSystem` — disagreed by ~4e-11 against a `1e-12` pin
+    /// until this was fixed.
     #[test]
-    fn hex_to_linear_tint_matches_ow_srgb_decode_of_the_unpacked_channels() {
+    fn hex_to_linear_tint_is_threes_decode_and_not_the_glsl_one() {
         // metal_painted's real tintA, LIBRARY's 0x4a5340.
         let t = hex_to_linear_tint(0x4a_53_40);
-        let expected = ow_srgb(Vec3::new(
+        let three = crate::materials::three_color::hex_to_linear(0x4a_53_40);
+        assert_eq!((t.x, t.y, t.z), (three[0], three[1], three[2]));
+
+        // And the negative half, which is what makes the positive half mean
+        // something: the GLSL decode really is a different number here.
+        let glsl = ow_srgb(Vec3::new(
             f64::from(0x4a) / 255.0,
             f64::from(0x53) / 255.0,
             f64::from(0x40) / 255.0,
         ));
-        assert_eq!((t.x, t.y, t.z), (expected.x, expected.y, expected.z));
+        assert_ne!(
+            t.x.to_bits(),
+            glsl.x.to_bits(),
+            "if these agree, the two decodes have converged and this              distinction is no longer observable — check why before deleting",
+        );
     }
 
     // ------------------------------------------------------------------

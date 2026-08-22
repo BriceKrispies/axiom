@@ -32,10 +32,14 @@ mod vehicles;
 
 pub use registry::{register_props, RegisteredProto};
 
-// `burnt_car` (`export function burntCar`) and `auto_edge_wear` (`export
-// function autoEdgeWear`) are exported in the source too, but nothing in
-// this port outside their own modules calls them yet (`burntCar` is a
-// `dressing.js` caller, not `registerProps`; `autoEdgeWear` is only ever
-// called from within `props::pb`/`props::cover`/`props::debris`/
-// `props::services`) — no re-export here until a real caller needs one, to
-// avoid an always-unused `pub use`.
+// `burnt_car` (`export function burntCar`) is called by `dressing.js`, not by
+// `registerProps`. This module deferred its re-export until a real caller
+// existed rather than leave an always-unused `pub use`; `world::dressing` is
+// now that caller, so here it is — `pub(crate)`, because the caller is in this
+// crate and the public surface does not need to grow for it.
+pub(crate) use vehicles::burnt_car;
+
+// `auto_edge_wear` (`export function autoEdgeWear`) is still exported in the
+// source but only ever called from within
+// `props::pb`/`props::cover`/`props::debris`/`props::services`, so it stays
+// unexported here on the same rule.

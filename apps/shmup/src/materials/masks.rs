@@ -91,9 +91,7 @@ impl Default for BakeMaskOpts {
 
 /// `Math.round(x)`: ties round toward `+Infinity`, unlike [`f64::round`]'s
 /// ties-away-from-zero. See the module doc.
-fn js_round(x: f64) -> f64 {
-    (x + 0.5).floor()
-}
+use crate::jsmath::round as js_round;
 
 /// `bakeMasks(geometry, opts)` (`masks.js:39-216`). Returns one `[r, g, b]`
 /// triple per vertex of `geo`, index-aligned with `geo.pos`/`geo.normal` —

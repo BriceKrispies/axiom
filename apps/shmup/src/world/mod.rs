@@ -3,9 +3,13 @@ pub mod assembler;
 pub mod buildings;
 pub mod geo;
 pub mod ground;
+pub mod interiors;
 pub mod kit;
 pub mod layout;
 pub mod masks;
 pub mod noise;
 pub mod palette;
 pub mod props;
+pub mod dressing;
+
+pub mod system;
