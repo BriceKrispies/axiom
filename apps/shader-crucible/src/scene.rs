@@ -164,22 +164,34 @@ pub fn shader_crucible_core() -> RunningApp {
 mod tests {
     use super::*;
 
-    /// **Twelve station bodies, a ground, and a caption over each body.**
+    /// **One body per authored surface, plus the baked tile, a ground, and a
+    /// caption over each body.**
     ///
-    /// Asserted on the *draws a frame emits*, not on `RunningApp::renderable_count`
-    /// — which counts only what the `setup` closure authored, and this app authors
-    /// every body after `build()` because two of them need raw mesh and texture
-    /// data that `Assets<Mesh>` cannot carry. That distinction is also why the
-    /// crucible cannot use `App::run`: `run` calls `build()` itself and sizes the
-    /// live instance buffer from `renderable_count()`, so an app that populates
-    /// after `build` would get a zero-capacity buffer. See `crate::web`.
+    /// Asserted on the *draws a frame emits*, and separately on
+    /// `RunningApp::renderable_count`, which must equal it — a caption is a
+    /// spawned node like any other, so it takes an instance slot too. The count
+    /// is
+    /// what `setup` authored **plus every `spawn`** (`App::spawn` increments it),
+    /// and this app authors nothing in `setup` and spawns everything after
+    /// `build()`, because two bodies need raw mesh and texture data
+    /// `Assets<Mesh>` cannot carry.
+    ///
+    /// That ordering is why the crucible cannot use `App::run`: `run` calls
+    /// `build()` and sizes the live instance buffer from `renderable_count()`
+    /// *at that moment* — before this app has spawned anything — so it would get
+    /// a zero-capacity buffer no matter that the count later rises. See
+    /// `crate::web`.
     #[test]
     fn the_scene_stands_up_every_station_body_plus_a_ground() {
         let (mut app, _) = crucible_core();
-        // 12 station bodies (1 + 1 + 1 + 1 + 2 + 3 + 1 + 2) + the ground, then
-        // one caption per body.
-        assert_eq!(app.render(0).draws().len(), 13 + crate::label::COUNT);
-        assert_eq!(app.renderable_count(), 0, "nothing is authored in `setup`");
+        // Every body (one per authored surface, plus the baked tile that carries
+        // none) + the ground, then one caption per body.
+        assert_eq!(app.render(0).draws().len(), 1 + crate::levers::BODY_COUNT + crate::label::COUNT);
+        assert_eq!(
+            app.renderable_count(),
+            1 + crate::levers::BODY_COUNT + crate::label::COUNT,
+            "the instance buffer must be sized for every draw the frame emits"
+        );
     }
 
     /// **Every station body carries its surface's own digest onto its draw.**
@@ -202,18 +214,18 @@ mod tests {
         let surfaced: Vec<u64> = programs.iter().copied().filter(|p| *p != 0).collect();
         assert_eq!(
             surfaced.len(),
-            11,
-            "eleven bodies must name a surface program; got {surfaced:?}"
+            crate::levers::SURFACE_COUNT,
+            "every authored surface must be worn by a body; got {surfaced:?}"
         );
         assert!(
             surfaced.iter().all(|p| authored.contains(p)),
             "a body named a program no station authored"
         );
-        // The ground, the baked tile and the twelve captions deliberately carry
-        // `0`: the built-in fixed-material path, i.e. exactly today's engine.
-        // A caption is furniture, not a subject — giving it an authored surface
-        // would make the barrier compile a twelfth program and quietly turn
-        // "eleven surfaces, eleven stations" into a lie.
+        // The ground, the baked tile and every caption deliberately carry `0`:
+        // the built-in fixed-material path, i.e. exactly today's engine. A
+        // caption is furniture, not a subject — giving it an authored surface
+        // would make the barrier compile one more program and quietly turn
+        // "N surfaces, N stations" into a lie.
         assert_eq!(
             programs.iter().filter(|p| **p == 0).count(),
             2 + crate::label::COUNT
@@ -241,8 +253,8 @@ mod tests {
             captions.iter().all(|mesh| *mesh > highest_body),
             "a caption mesh is not among the last registered: {captions:?} vs {highest_body}"
         );
-        // Each caption is its own mesh — twelve distinct strings cannot share
-        // one, and a shared handle would mean eleven bodies wearing one label.
+        // Each caption is its own mesh — distinct strings cannot share one, and
+        // a shared handle would mean every body wearing one label.
         let distinct: std::collections::BTreeSet<u64> = captions.iter().copied().collect();
         assert_eq!(distinct.len(), crate::label::COUNT);
     }
@@ -286,8 +298,8 @@ mod tests {
     fn the_barrier_ran_before_the_app_was_usable() {
         let (_app, prepared) = crucible_core();
         let product = prepared.borrow().clone().expect("the barrier deposited");
-        assert_eq!(product.program_count, 11);
-        assert_eq!(product.surface_count, 11);
+        assert_eq!(product.program_count as usize, crate::levers::SURFACE_COUNT);
+        assert_eq!(product.surface_count as usize, crate::levers::SURFACE_COUNT);
         assert!(product.degradations.is_empty());
     }
 

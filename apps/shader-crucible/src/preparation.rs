@@ -174,10 +174,11 @@ mod tests {
             "barrier: {} programs from {} surfaces",
             prepared.program_count, prepared.surface_count
         );
-        assert_eq!(prepared.surface_count, 11);
+        assert_eq!(prepared.surface_count as usize, crate::levers::SURFACE_COUNT);
         assert_eq!(
-            prepared.program_count, 11,
-            "eleven distinct materials must compile eleven programs"
+            prepared.program_count as usize,
+            crate::levers::SURFACE_COUNT,
+            "N distinct materials must compile N programs"
         );
     }
 

@@ -213,9 +213,13 @@ pub fn packet_of_plan(
         outcome.tick(),
         FrameViewport::new(width, height),
         outcome.clear_color(),
+        // The real camera, all three matrices. This used to be
+        // `FrameCamera::new(IDENTITY, IDENTITY, outcome.camera_view_proj())` —
+        // the product real and the two halves fabricated, which nothing
+        // downstream could distinguish from a real camera.
         Some(FrameCamera::new(
-            IDENTITY,
-            IDENTITY,
+            outcome.camera_view(),
+            outcome.camera_projection(),
             outcome.camera_view_proj(),
         )),
         draws,
@@ -270,11 +274,11 @@ mod tests {
             .iter()
             .map(|draw| draw.surface_program())
             .collect();
-        assert_eq!(programs.len(), 13 + crate::label::COUNT);
+        assert_eq!(programs.len(), 1 + crate::levers::BODY_COUNT + crate::label::COUNT);
         assert_eq!(
             programs.iter().filter(|p| **p != 0).count(),
-            11,
-            "eleven authored surfaces must reach the packet"
+            crate::levers::SURFACE_COUNT,
+            "every authored surface must reach the packet"
         );
         let authored: std::collections::BTreeSet<u64> = crate::stations::all_surfaces()
             .iter()

@@ -80,7 +80,7 @@ use crate::layout::slot_position;
 /// How many surfaces the crucible authors — the ceiling of the `surfaces`
 /// lever. Pinned against `stations::all_surfaces()` by
 /// `tests::the_surface_ceiling_is_the_authored_set`.
-pub const SURFACE_COUNT: usize = 11;
+pub const SURFACE_COUNT: usize = 12;
 
 /// How many bodies stand on the stand — the range of the `solo` lever.
 pub const BODY_COUNT: usize = CAPTION_COUNT;
@@ -105,6 +105,7 @@ pub const BODY_SURFACE: [Option<usize>; BODY_COUNT] = [
     Some(8),
     Some(9),
     Some(10),
+    Some(11),
 ];
 
 /// The `surfaces` lever's stops, in cycle order. `None` is the whole authored
@@ -409,6 +410,12 @@ pub fn solo_camera(body: usize) -> Transform {
 
 #[cfg(test)]
 mod tests {
+    /// How many draws one crucible frame has: the ground, one per body, one
+    /// caption per body. Derived so growing the stand cannot leave a lever test
+    /// asserting against a frame that no longer exists — which is exactly what
+    /// happened when `LightingModel::Physical` added a thirteenth body.
+    const DRAWS: usize = 1 + BODY_COUNT + CAPTION_COUNT;
+
     use super::*;
 
     /// The lever ceiling is the authored surface set, not a number that can
@@ -473,9 +480,9 @@ mod tests {
     #[test]
     fn an_out_of_range_solo_is_ignored() {
         assert_eq!(Levers::from_query("?solo=0").solo, None);
-        assert_eq!(Levers::from_query("?solo=13").solo, None);
+        assert_eq!(Levers::from_query("?solo=14").solo, None);
         assert_eq!(Levers::from_query("?solo=x").solo, None);
-        assert_eq!(Levers::from_query("?solo=12").solo, Some(11));
+        assert_eq!(Levers::from_query("?solo=13").solo, Some(12));
     }
 
     /// The surfaces cycle visits every stop and returns to "all".
@@ -513,9 +520,9 @@ mod tests {
             ..Levers::SHIPPING
         }
         .plan();
-        let kept: Vec<usize> = (0..25).filter(|index| plan.keeps(*index, 25)).collect();
-        assert_eq!(kept.len(), 13);
-        assert_eq!(kept, (0..13).collect::<Vec<usize>>());
+        let kept: Vec<usize> = (0..DRAWS).filter(|index| plan.keeps(*index, DRAWS)).collect();
+        assert_eq!(kept.len(), 1 + BODY_COUNT);
+        assert_eq!(kept, (0..1 + BODY_COUNT).collect::<Vec<usize>>());
     }
 
     /// **Solo keeps one draw.** No ground, no caption, one body — so the frame's
@@ -528,7 +535,7 @@ mod tests {
                 ..Levers::SHIPPING
             }
             .plan();
-            let kept: Vec<usize> = (0..25).filter(|index| plan.keeps(*index, 25)).collect();
+            let kept: Vec<usize> = (0..DRAWS).filter(|index| plan.keeps(*index, DRAWS)).collect();
             assert_eq!(kept, vec![body + 1], "solo {body} kept the wrong draws");
         });
     }
@@ -538,11 +545,11 @@ mod tests {
     #[test]
     fn the_shipping_plan_keeps_every_draw_and_every_program() {
         assert_eq!(Levers::SHIPPING.plan(), PacketPlan::EVERYTHING);
-        assert!((0..25).all(|index| PacketPlan::EVERYTHING.keeps(index, 25)));
+        assert!((0..DRAWS).all(|index| PacketPlan::EVERYTHING.keeps(index, DRAWS)));
         // Every authored program survives untouched, and the ground and the
         // captions keep the `0` they were authored with.
-        (0..25).for_each(|index| {
-            assert_eq!(PacketPlan::EVERYTHING.program_of(index, 25, 77), 77 * u64::from((1..13).contains(&index) & (index != 3)));
+        (0..DRAWS).for_each(|index| {
+            assert_eq!(PacketPlan::EVERYTHING.program_of(index, DRAWS, 77), 77 * u64::from((1..=BODY_COUNT).contains(&index) & (index != 3)));
         });
     }
 
@@ -560,7 +567,7 @@ mod tests {
             ..Levers::SHIPPING
         }
         .plan();
-        let surfaced: Vec<usize> = (0..25)
+        let surfaced: Vec<usize> = (0..DRAWS)
             .filter(|index| plan.program_of(*index, 25, 99) != 0)
             .collect();
         // Bodies 1, 2 and 4 wear authored surfaces 0, 1 and 2; body 3 is the
@@ -572,7 +579,7 @@ mod tests {
             ..Levers::SHIPPING
         }
         .plan();
-        assert!((0..25).all(|index| none.program_of(index, 25, 99) == 0));
+        assert!((0..DRAWS).all(|index| none.program_of(index, 25, 99) == 0));
     }
 
     /// **Every solo frames its body identically.** The eye is the same offset

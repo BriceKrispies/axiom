@@ -113,7 +113,7 @@ mod tests {
         report
             .iter()
             .for_each(|r| println!("{r:?}"));
-        assert_eq!(report.len(), 11);
+        assert_eq!(report.len(), crate::levers::SURFACE_COUNT);
         assert!(report.iter().all(|r| r.gpu), "a station failed the GPU gate");
         assert!(
             report.iter().all(|r| r.canvas2d),
@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn the_report_lines_name_every_surface() {
         let lines = support_lines(&all_surfaces());
-        assert_eq!(lines.len(), 11);
+        assert_eq!(lines.len(), crate::levers::SURFACE_COUNT);
         assert!(lines.iter().all(|l| l.contains("gpu:") && l.contains("canvas2d:")));
     }
 

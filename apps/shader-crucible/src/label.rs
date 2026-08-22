@@ -57,14 +57,15 @@ pub const LINES: [[&str; 2]; COUNT] = [
     ["7 . UNLIT", "S6 LIGHTING"],
     ["8 . LAMBERT", "S6 LIGHTING"],
     ["9 . LAMBERT S", "S6 LIGHTING"],
-    ["10 . METABALLS", "S7 SCALARFIELD"],
-    ["11 . MARBLE", "S8 SIN AND POW"],
-    ["12 . WOOD", "S8 SIN AND POW"],
+    ["10 . PHYSICAL", "S6 GGX+METALNESS"],
+    ["11 . METABALLS", "S7 SCALARFIELD"],
+    ["12 . MARBLE", "S8 SIN AND POW"],
+    ["13 . WOOD", "S8 SIN AND POW"],
 ];
 
 /// Which station each body belongs to, in slot order — the mapping the page's
 /// legend needs and the only place it is written down.
-pub const STATION_OF_SLOT: [u8; COUNT] = [1, 2, 3, 4, 5, 5, 6, 6, 6, 7, 8, 8];
+pub const STATION_OF_SLOT: [u8; COUNT] = [1, 2, 3, 4, 5, 5, 6, 6, 6, 6, 7, 8, 8];
 
 /// The longest caption line this layout is designed for. A longer one still
 /// renders — it is scaled down to fit — but it renders *smaller*, and past this

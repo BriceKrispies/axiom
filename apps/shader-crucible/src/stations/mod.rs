@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn every_authored_surface_validates() {
         let surfaces = all_surfaces();
-        assert_eq!(surfaces.len(), 11);
+        assert_eq!(surfaces.len(), crate::levers::SURFACE_COUNT);
         surfaces.iter().enumerate().for_each(|(index, surface)| {
             assert_eq!(surface.validate(), Ok(()), "surface {index} is illegal");
             assert!(
@@ -178,13 +178,13 @@ mod tests {
         assert_eq!(digests, crate::COMMITTED_DIGESTS.to_vec());
     }
 
-    /// **Each surface is a distinct program.** Eleven authored surfaces that
-    /// collapsed to fewer digests would mean two stations were secretly the same
-    /// material and the demo was showing one thing twice.
+    /// **Each surface is a distinct program.** Authored surfaces that collapsed
+    /// to fewer digests would mean two stations were secretly the same material
+    /// and the demo was showing one thing twice.
     #[test]
-    fn the_eleven_surfaces_are_eleven_distinct_programs() {
+    fn every_surface_is_a_distinct_program() {
         let distinct: std::collections::BTreeSet<u64> =
             all_surfaces().iter().map(|s| s.digest().raw()).collect();
-        assert_eq!(distinct.len(), 11);
+        assert_eq!(distinct.len(), crate::levers::SURFACE_COUNT);
     }
 }

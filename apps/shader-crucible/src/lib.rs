@@ -98,18 +98,27 @@ pub use scene::{crucible_app, crucible_core, shader_crucible_core};
 /// by accident. `stations::tests::every_station_digest_is_the_committed_value`
 /// fails when one moves; when it does, check that you meant it and then update
 /// the number here.
-pub const COMMITTED_DIGESTS: [&str; 11] = [
-    "19737C182473E77F",
-    "660AB93B0FF5FA89",
-    "2E1A08596E819F86",
-    "9479A9C10E4EF768",
-    "05290AF13BBCB027",
-    "11512E0237589154",
-    "D3E45EF2DAAE46B1",
-    "AE543A817123501E",
-    "8A1F20455CD496C2",
-    "1F782E486116CB01",
-    "61734EE4D23007D1",
+///
+/// **All twelve moved together** when `SurfaceKind` entered the serialised
+/// header (`axiom-surface` schema 1.0 -> 2.0). A surface is now either
+/// field-authored or the hand-written runtime material, and which one it is is
+/// part of its structure — so it is part of its identity, and a field surface's
+/// digest changed even though nothing about the field did. The twelfth entry is
+/// `LightingModel::Physical`, which station 6 picked up by enumerating
+/// `LightingModel::ALL`.
+pub const COMMITTED_DIGESTS: [&str; 12] = [
+    "B8A935F2D24FCDA8",
+    "4B63A1E884B7775A",
+    "9B8773B5D4AD18F5",
+    "BCE8FAFDF14B6723",
+    "DC8C9E791ACC1534",
+    "4354C0701B68B2A3",
+    "4313F63F49795F2E",
+    "D8C2A0C8DB5AA6C1",
+    "A2A7A3642C3526E4",
+    "34AC567FC235C741",
+    "8F4CD11CEFFB5A1A",
+    "849D92227DB4443E",
 ];
 
 /// Browser entry: author the scene, compile every station's program, and drive
