@@ -1,5 +1,7 @@
 //! The authoring surface for a [`Surface`].
 
+use crate::material_params::MaterialParams;
+use crate::surface_kind::SurfaceKind;
 use axiom_field::{FieldGraph, FieldId, FieldOp, FieldType, FieldValue, NodeId, Param, Scalar};
 use axiom_kernel::{Meters, Ratio};
 use axiom_math::Vec3;
@@ -148,6 +150,30 @@ impl SurfaceBuilder {
     pub(crate) fn build_unchecked(self) -> Surface {
         Surface::new(self.bindings, self.lighting, self.layers)
     }
+}
+
+/// The hand-written runtime material shader, as a surface an app can author.
+///
+/// Not a `SurfaceBuilder` method, because there is nothing to build: a runtime
+/// material binds no channels and stacks no layers. Its appearance comes
+/// entirely from [`MaterialParams`] and the textures the material already
+/// carries, so the only thing to say is *which* program and *with what
+/// parameters*.
+///
+/// Every runtime material shares one digest regardless of its parameters — see
+/// [`crate::SurfaceKind`] — so authoring a hundred of them costs one pipeline.
+pub fn runtime_material(params: MaterialParams) -> Surface {
+    // Each channel gets its own default constant, exactly as `SurfaceBuilder::new`
+    // does. The runtime material overwrites every one of them in its own WGSL, so
+    // these values are never read — but a surface with well-formed bindings
+    // validates, inspects and serialises like any other, which is the whole point
+    // of making this a kind of surface rather than a parallel path.
+    Surface::of_kind(
+        SurfaceChannel::ALL.map(|channel| ChannelBinding::constant(channel.default_value())),
+        LightingModel::LambertSpecular,
+        Vec::new(),
+        SurfaceKind::RuntimeMaterial(params),
+    )
 }
 
 impl Default for SurfaceBuilder {

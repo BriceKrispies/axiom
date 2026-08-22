@@ -4,9 +4,14 @@
 ///
 /// This is the **smallest** extensibility point that answers "materials that can
 /// participate differently in lighting without turning every material into
-/// arbitrary raw shader code": a three-variant discriminant, not a programmable
+/// arbitrary raw shader code": a four-variant discriminant, not a programmable
 /// lighting callback. The discriminant **is** the wire code and it indexes
 /// [`LightingModel::ALL`], so this order is the wire order.
+///
+/// **The order is append-only.** The codes are compared in WGSL
+/// (`AXIOM_LIGHT_*` in the GPU backend's shader prelude) and serialized into
+/// [`crate::Surface`]'s canonical bytes, so inserting a variant would silently
+/// relight every surface already authored. A new model goes on the end.
 ///
 /// [`LightingModel::LambertSpecular`] is the [`Default`] because it is what the
 /// engine's one lit shader already computes — so a surface authored without
@@ -25,15 +30,38 @@ pub enum LightingModel {
     Lambert = 1,
     /// Diffuse gathering plus the engine's existing specular term.
     LambertSpecular = 2,
+    /// **The physically-based model**: Cook-Torrance with a GGX
+    /// (Trowbridge-Reitz) distribution, Smith height-correlated visibility and
+    /// a Schlick Fresnel over a Lambert diffuse — three.js r180's
+    /// `MeshStandardMaterial`, transcribed from its own shader chunks.
+    ///
+    /// This is the model that makes [`crate::SurfaceChannel::Roughness`] and
+    /// [`crate::SurfaceChannel::Metallic`] **live**. Under the three models
+    /// above they are carried and read by nothing: specular strength comes from
+    /// the legacy per-instance lane and there is no metal/dielectric split at
+    /// all. Under this one, roughness is remapped to the GGX `alpha` as the
+    /// source does (`alpha = roughness²`, Disney's reparameterisation) and
+    /// metalness picks the surface apart into a diffuse albedo
+    /// (`base * (1 - metalness)`) and a specular `F0`
+    /// (`mix(0.04, base, metalness)`).
+    ///
+    /// **It is radiometrically scaled, and the three above are not.** Every
+    /// term carries the source's `1/PI`, so a physical surface lit by the same
+    /// light as a [`LightingModel::Lambert`] one is ~PI times dimmer. That is
+    /// the source's unit system, not a defect: light intensities ported from a
+    /// three.js scene are already in it. Mixing the models inside one frame
+    /// means mixing two unit systems, and the author owns that choice.
+    Physical = 3,
 }
 
 impl LightingModel {
     /// Every model, in discriminant order. The array **is** the decode table and
     /// its index **is** the model code.
-    pub const ALL: [LightingModel; 3] = [
+    pub const ALL: [LightingModel; 4] = [
         LightingModel::Unlit,
         LightingModel::Lambert,
         LightingModel::LambertSpecular,
+        LightingModel::Physical,
     ];
 
     /// The wire code — the discriminant, which is also the table index.
@@ -64,6 +92,10 @@ mod tests {
         assert_eq!(LightingModel::Unlit as u16, 0);
         assert_eq!(LightingModel::Lambert as u16, 1);
         assert_eq!(LightingModel::LambertSpecular as u16, 2);
+        // Appended, never inserted: the codes are compared in WGSL and
+        // serialized into a surface's canonical bytes, so a reorder would
+        // relight every surface already authored.
+        assert_eq!(LightingModel::Physical as u16, 3);
         LightingModel::ALL
             .iter()
             .enumerate()
@@ -77,7 +109,8 @@ mod tests {
             LightingModel::from_code(2),
             Some(LightingModel::LambertSpecular)
         );
-        assert_eq!(LightingModel::from_code(3), None);
+        assert_eq!(LightingModel::from_code(3), Some(LightingModel::Physical));
+        assert_eq!(LightingModel::from_code(4), None);
         assert_eq!(LightingModel::from_code(u16::MAX), None);
     }
 
@@ -86,5 +119,9 @@ mod tests {
         assert_eq!(LightingModel::default(), LightingModel::LambertSpecular);
         assert!(LightingModel::Unlit < LightingModel::Lambert);
         assert_ne!(LightingModel::Lambert, LightingModel::LambertSpecular);
+        // The default did NOT move when the physical model arrived: a surface
+        // that says nothing about lighting still renders as it always has.
+        assert_ne!(LightingModel::default(), LightingModel::Physical);
+        assert!(LightingModel::LambertSpecular < LightingModel::Physical);
     }
 }

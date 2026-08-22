@@ -87,9 +87,11 @@ mod inspect;
 mod layer;
 mod layer_tree;
 mod lighting_model;
+mod material_params;
 mod requirements;
 mod surface;
 mod surface_builder;
+mod surface_kind;
 mod surface_bytes;
 mod surface_error;
 
@@ -98,7 +100,12 @@ pub use channel::{SurfaceChannel, SURFACE_CHANNEL_COUNT};
 pub use inspect::{supported_by, ChannelInspection, SurfaceInspection};
 pub use layer::{LayerBlend, SurfaceLayer, MAX_LAYERS};
 pub use lighting_model::LightingModel;
+pub use material_params::{
+    hex_to_linear, srgb_to_linear, MaterialParams, UvMode, SLOTS_USED, SLOT_COUNT,
+};
 pub use requirements::{SurfaceInput, SurfaceRequirements};
 pub use surface::{Surface, SURFACE_SCHEMA_VERSION};
+pub use surface_builder::runtime_material;
+pub use surface_kind::SurfaceKind;
 pub use surface_builder::SurfaceBuilder;
 pub use surface_error::{SurfaceError, SurfaceErrorCode, SurfaceResult};

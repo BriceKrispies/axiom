@@ -83,6 +83,16 @@ fn write_all(root: &Surface, write: BindingWriter) -> Vec<u8> {
     let opaque = SurfaceLayer::opaque_mask();
     let mut writer = BinaryWriter::new();
     SURFACE_SCHEMA_VERSION.write_to(&mut writer);
+    // The surface's KIND, in the header rather than per record: it is a property
+    // of the whole surface, not of a layer.
+    //
+    // Only the code is written, never the `MaterialParams` behind it. That is
+    // deliberate and it is what makes every runtime material **one program**:
+    // `digest` is structural and excludes parameter values so that retuning one
+    // cannot force a recompile, and a runtime material obeys the same rule. Its
+    // parameters travel in the parameter buffer, exactly as a field surface's
+    // constants do.
+    writer.write_u16(root.kind().code());
     writer.write_u32(nodes.len() as u32);
     nodes
         .iter()
@@ -138,7 +148,8 @@ pub(crate) fn deserialize(bytes: &[u8]) -> SurfaceResult<Surface> {
 /// root and at most the root plus the layer budget.
 fn read_count(reader: &mut BinaryReader<'_>) -> SurfaceResult<usize> {
     axiom_kernel::SchemaVersion::read_from(reader)
-        .and_then(|_stamp| reader.read_u32())
+        .and_then(|_stamp| reader.read_u16())
+        .and_then(|_kind| reader.read_u32())
         .map_err(|_| MALFORMED_SURFACE)
         .and_then(|count| (count > 0).then_some(count as usize).ok_or(MALFORMED_SURFACE))
         .and_then(|count| {
@@ -253,6 +264,7 @@ fn rebuild(records: Vec<Record>) -> Surface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::surface_kind::SurfaceKind;
     use crate::channel::SurfaceChannel;
     use crate::surface_builder::SurfaceBuilder;
     use axiom_field::{FieldBuilder, FieldId, FieldOp, FieldType, FieldValue, Param, Scalar};
@@ -330,6 +342,7 @@ mod tests {
     fn a_record_count_of_zero_is_malformed() {
         let mut writer = BinaryWriter::new();
         SURFACE_SCHEMA_VERSION.write_to(&mut writer);
+        writer.write_u16(SurfaceKind::Field.code());
         writer.write_u32(0);
         let error = Surface::deserialize(&writer.into_bytes())
             .expect_err("a surface with no records names no root");
@@ -340,6 +353,7 @@ mod tests {
     fn more_records_than_the_budget_are_rejected() {
         let mut writer = BinaryWriter::new();
         SURFACE_SCHEMA_VERSION.write_to(&mut writer);
+        writer.write_u16(SurfaceKind::Field.code());
         writer.write_u32((MAX_LAYERS + 2) as u32);
         let error = Surface::deserialize(&writer.into_bytes())
             .expect_err("six records exceed one root plus four layers");
@@ -350,9 +364,9 @@ mod tests {
     #[test]
     fn an_unknown_blend_code_is_rejected() {
         let mut bytes = sample().serialize();
-        // record 0 begins after the 4-byte stamp and the 4-byte count; its
-        // parent is 4 bytes, then the blend code.
-        bytes[12] = 9;
+        // record 0 begins after the 4-byte stamp, the 2-byte surface-kind code
+        // and the 4-byte count; its parent is 4 bytes, then the blend code.
+        bytes[14] = 9;
         assert_eq!(
             Surface::deserialize(&bytes)
                 .expect_err("blend code 9 names no blend")
@@ -364,7 +378,8 @@ mod tests {
     #[test]
     fn an_unknown_lighting_code_is_rejected() {
         let mut bytes = sample().serialize();
-        bytes[14] = 9;
+        // ...and the lighting code follows the 2-byte blend.
+        bytes[16] = 9;
         assert_eq!(
             Surface::deserialize(&bytes)
                 .expect_err("lighting code 9 names no model")

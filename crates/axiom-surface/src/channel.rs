@@ -15,9 +15,13 @@ pub const SURFACE_CHANNEL_COUNT: usize = 7;
 ///
 /// **Decisions, recorded so they are not relitigated:**
 ///
-/// * **[`SurfaceChannel::Metallic`] is a channel, not a BRDF.** It is carried,
-///   digested and reported; no lighting model reads it yet. `SPEC-11`'s *"Resist
-///   PBR scope creep"* still binds.
+/// * **[`SurfaceChannel::Metallic`] and [`SurfaceChannel::Roughness`] are read
+///   by exactly one lighting model.** [`crate::LightingModel::Physical`] — the
+///   GGX/Smith/Schlick BRDF — consumes both. The other three models have no
+///   Fresnel and no metal/dielectric split, so they read neither, and that is
+///   the honest answer rather than a hidden approximation. `SPEC-11`'s *"Resist
+///   PBR scope creep"* still binds where it matters: the model is **direct**
+///   lighting only, with no environment term and no IBL probe.
 /// * **There is no transmission, subsurface, clear-coat or anisotropy channel.**
 ///   Adding a channel nothing can render is a capability nothing composes, which
 ///   is debt, not capability.
@@ -28,9 +32,13 @@ pub const SURFACE_CHANNEL_COUNT: usize = 7;
 pub enum SurfaceChannel {
     /// Linear RGBA albedo.
     BaseColor = 0,
-    /// Perceptual roughness in `0..=1`.
+    /// Perceptual roughness in `0..=1`. Read by
+    /// [`crate::LightingModel::Physical`], which remaps it to the GGX `alpha` as
+    /// `roughness²`.
     Roughness = 1,
-    /// Metalness in `0..=1`. Carried and available; no shading reads it.
+    /// Metalness in `0..=1`. Read by [`crate::LightingModel::Physical`], which
+    /// splits the surface into a `base * (1 - metallic)` diffuse albedo and a
+    /// `mix(0.04, base, metallic)` specular `F0`.
     Metallic = 2,
     /// A tangent-space normal, `+Z` out of the surface — bound directly, or
     /// derived from a height field by

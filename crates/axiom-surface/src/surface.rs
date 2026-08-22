@@ -1,5 +1,6 @@
 //! The appearance artifact itself.
 
+use crate::surface_kind::SurfaceKind;
 use axiom_field::FieldType;
 use axiom_kernel::{SchemaVersion, StableHash};
 
@@ -16,7 +17,11 @@ use crate::surface_error::{SurfaceError, SurfaceErrorCode, SurfaceResult};
 /// The wire-format version stamped into every serialized surface. Bumping it
 /// deliberately changes the bytes (and therefore every digest and golden), so a
 /// format change can never be silent.
-pub const SURFACE_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1, 0);
+/// Bumped to 2.0 when the canonical bytes gained a surface-kind code in their
+/// header (see [`crate::SurfaceKind`]). The layout changed, so a 1.0 reader
+/// would misparse a 2.0 buffer from the very next field — a major bump, not a
+/// minor one.
+pub const SURFACE_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2, 0);
 
 /// The surface tree holds more layers than the budget allows.
 const LAYER_BUDGET_EXCEEDED: SurfaceError = SurfaceError::at(
@@ -61,6 +66,10 @@ pub struct Surface {
     bindings: [ChannelBinding; SURFACE_CHANNEL_COUNT],
     lighting: LightingModel,
     layers: Vec<SurfaceLayer>,
+    /// Which program this surface names — see [`crate::SurfaceKind`]. `Field`
+    /// for every surface authored from channel bindings, which is the default
+    /// and almost all of them.
+    kind: SurfaceKind,
 }
 
 impl Surface {
@@ -71,11 +80,30 @@ impl Surface {
         lighting: LightingModel,
         layers: Vec<SurfaceLayer>,
     ) -> Self {
+        Surface::of_kind(bindings, lighting, layers, SurfaceKind::Field)
+    }
+
+    /// [`Self::new`], naming the kind explicitly.
+    pub(crate) fn of_kind(
+        bindings: [ChannelBinding; SURFACE_CHANNEL_COUNT],
+        lighting: LightingModel,
+        layers: Vec<SurfaceLayer>,
+        kind: SurfaceKind,
+    ) -> Self {
         Surface {
             bindings,
             lighting,
             layers,
+            kind,
         }
+    }
+
+    /// Which program this surface names.
+    ///
+    /// A backend reads this to decide whether to *generate* WGSL from the
+    /// channel bindings or to splice its hand-written runtime material shader.
+    pub fn kind(&self) -> SurfaceKind {
+        self.kind
     }
 
     /// What one channel is bound to.
@@ -236,7 +264,7 @@ mod tests {
         assert_eq!(surface.lighting(), LightingModel::LambertSpecular);
         assert!(surface.layers().is_empty());
         assert_eq!(surface.validate(), Ok(()));
-        assert_eq!(SURFACE_SCHEMA_VERSION, SchemaVersion::new(1, 0));
+        assert_eq!(SURFACE_SCHEMA_VERSION, SchemaVersion::new(2, 0));
     }
 
     #[test]

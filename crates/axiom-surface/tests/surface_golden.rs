@@ -104,14 +104,24 @@ fn layered() -> Surface {
 
 /// The canonical bytes of `SurfaceBuilder::new().build()`.
 ///
-/// One record: no parent, the `Over` blend and the opaque mask the root
-/// synthesizes, the `LambertSpecular` lighting model, then the seven channel
-/// defaults in channel order. Every binding is `kind=1` (constant), a `u16` type
-/// code, four `f32` lanes, and a zero-length graph payload — a constant carries
-/// no graph bytes at all.
+/// A header — the schema stamp and the surface's **kind** — then one record: no
+/// parent, the `Over` blend and the opaque mask the root synthesizes, the
+/// `LambertSpecular` lighting model, then the seven channel defaults in channel
+/// order. Every binding is `kind=1` (constant), a `u16` type code, four `f32`
+/// lanes, and a zero-length graph payload — a constant carries no graph bytes at
+/// all.
+///
+/// **Re-recorded when the format gained a surface-kind code** (see
+/// [`axiom_surface::SurfaceKind`]). Two bytes entered the header and the schema
+/// stamp went 1.0 -> 2.0, so every byte after offset 4 shifted and the digest
+/// moved with them. Nothing about *this* surface changed: it is still a plain
+/// field surface with seven default channels, and it still decodes to exactly
+/// the surface that produced it, which the test below asserts. The kind code is
+/// `0` — `SurfaceKind::Field`.
 #[rustfmt::skip]
-const PLAIN_BYTES: [u8; 208] = [
-    1, 0, 0, 0,                                          // surface schema 1.0
+const PLAIN_BYTES: [u8; 210] = [
+    2, 0, 0, 0,                                          // surface schema 2.0
+    0, 0,                                                // SurfaceKind::Field
     1, 0, 0, 0,                                          // one record
     255, 255, 255, 255,                                  // record 0 has no parent
     0, 0,                                                // blend Over (synthesized)
@@ -143,12 +153,21 @@ const PLAIN_BYTES: [u8; 208] = [
 ];
 
 /// The structural digest of [`PLAIN_BYTES`]' surface.
-const PLAIN_DIGEST: u64 = 6_852_318_313_184_180_331;
+const PLAIN_DIGEST: u64 = 9_638_930_373_458_452_976;
 
 /// The exact byte length, content hash and structural digest of [`layered`].
-const LAYERED_LEN: usize = 1274;
-const LAYERED_HASH: u64 = 13_223_552_525_189_429_878;
-const LAYERED_DIGEST: u64 = 17_552_574_593_001_653_655;
+///
+/// **All three re-recorded when the format gained a surface-kind code** (see
+/// [`axiom_surface::SurfaceKind`]): two bytes entered the header, so the length
+/// went 1274 -> 1276 and both hashes moved with the bytes. The surface itself is
+/// unchanged — same layers, same blends, same bindings — and it still decodes
+/// back to itself, which the test asserts. A digest that moves because the
+/// *format* moved is the golden doing its job; a digest that moved because the
+/// surface moved would be a defect, and the round-trip assertion is what tells
+/// the two apart.
+const LAYERED_LEN: usize = 1276;
+const LAYERED_HASH: u64 = 2_733_246_799_667_958_281;
+const LAYERED_DIGEST: u64 = 9_267_803_130_087_330_740;
 
 /// The structural digest of [`layered`] once flattened. Flattening is a pure
 /// function, so this is a fact about the blend rules, not about a run.
@@ -162,7 +181,7 @@ const LAYERED_DIGEST: u64 = 17_552_574_593_001_653_655;
 /// evaluates to the bit-identical `f32` it did before, which
 /// [`flattening_the_layered_golden_moves_no_value`] proves against the
 /// hand-written blend expression rather than against a recorded number.
-const FLATTENED_DIGEST: u64 = 1_136_840_360_449_215_726;
+const FLATTENED_DIGEST: u64 = 1_818_877_878_594_399_193;
 
 #[test]
 fn the_plain_golden_bytes_and_digest_are_unchanged() {
