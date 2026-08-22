@@ -322,7 +322,13 @@ fn cmd_read(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
     let raw = args
         .arg(0)
         .ok_or_else(|| Failure::Usage("`read` needs a path".to_owned()))?;
-    let path = resolve(repo, raw)?;
+    // `resolve_read`, not `resolve`: reading may reach a configured reference
+    // root. Every command below this one that WRITES still calls `resolve`, so
+    // the readable set being wider than the writable set is a property of which
+    // function each command calls rather than of a flag someone can forget.
+    let path = repo
+        .resolve_read(raw)
+        .map_err(|e| Failure::Refused(e.to_string()))?;
     rec.query = Some(repo.rel(&path));
     rec.top_paths = vec![repo.rel(&path)];
 

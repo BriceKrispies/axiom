@@ -50,6 +50,13 @@ scripts/ax stats               # what agents look for and change
 scripts/ax sql                 # DuckDB queries over the whole ledger
 ```
 
+Porting from a source tree outside this checkout? Set `AXIOM_ATLAS_REF_ROOTS`
+to it (platform path separator, like `PATH`) and `ax read` can reach it —
+read-only, always: every command that writes resolves against the repo root
+alone, so a reference root can never be modified, and `.git/` stays refused
+inside one. Without it those reads go around `ax` and the ledger never sees the
+files an agent spends most of its time in.
+
 Use `scripts/ax` (or `scripts/ax.ps1`); it execs the prebuilt release binary and
 builds it once if missing. `target/release/ax` directly is fastest of all.
 Exit codes: `0` found, `1` nothing found (grep convention), `2` usage,

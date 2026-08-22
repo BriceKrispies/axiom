@@ -66,7 +66,31 @@ Exit codes: `0` found · `1` nothing found (grep convention) · `2` usage ·
 `3` out-of-repo path refused · `4` failed.
 
 Environment: `AXIOM_ATLAS_AGENT`, `AXIOM_ATLAS_SESSION`,
-`AXIOM_ATLAS_NO_LEDGER`, `AXIOM_ATLAS_ROOT`, `AXIOM_ATLAS_DEBUG`.
+`AXIOM_ATLAS_NO_LEDGER`, `AXIOM_ATLAS_ROOT`, `AXIOM_ATLAS_DEBUG`,
+`AXIOM_ATLAS_REF_ROOTS`.
+
+## Reading a reference tree
+
+`AXIOM_ATLAS_REF_ROOTS` (platform path separator, like `PATH`) names trees
+`ax read` may look into and that **nothing** may ever write to.
+
+It exists for porting: the source being ported lives outside the checkout, so
+without it every source read goes around `ax` — which loses the scoping story
+for the files an agent spends most of its time in, and makes them invisible to
+the ledger. A ledger that cannot see what an agent actually read is answering
+the wrong question.
+
+Read-only is structural rather than a flag. Every mutating command resolves
+through `Repo::resolve`, which consults the repo root alone; only `ax read`
+calls `Repo::resolve_read`. Adding a readable tree therefore cannot widen what
+`ax` can change. `.git/` stays refused inside a reference root too.
+
+```sh
+AXIOM_ATLAS_REF_ROOTS=/dev/Claude-of-Duty ax read /dev/Claude-of-Duty/src/render/probe.js
+```
+
+Paths outside the checkout print with a `ref:` marker, so nothing in the output
+can be mistaken for a file inside it.
 
 ### `ax owns` — the command worth learning first
 
