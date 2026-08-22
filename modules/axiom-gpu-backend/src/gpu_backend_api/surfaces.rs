@@ -549,7 +549,7 @@ mod tests {
     ///
     /// Building that view is what calls `axiom_surface::Surface::flatten` — it
     /// linearises every layer tree and composes every channel graph — and a
-    /// throttled browser profile of `apps/shader-crucible` (11 surfaces) measured
+    /// throttled browser profile of the shader crucible (11 surfaces) measured
     /// it at 5.4 ms of an 8.1 ms frame before this borrow existed.
     #[test]
     fn a_prepared_backend_borrows_its_surface_view_instead_of_rebuilding_it_each_frame() {

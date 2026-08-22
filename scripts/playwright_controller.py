@@ -87,7 +87,7 @@ LOG_FILE = STATE_DIR / "commands.log"
 DAEMON_LOG = STATE_DIR / "daemon.log"
 SCREENSHOT_DIR = STATE_DIR / "screenshots"
 
-# Chromium flags that make WebGPU/WebGL usable (the rotating-cube slice needs a
+# Chromium flags that make WebGPU/WebGL usable (the 3D slices need a
 # real GPU adapter). Harmless on pages that do not use the GPU.
 # Launch the FULL Chromium build, not Playwright's `chromium_headless_shell`.
 #

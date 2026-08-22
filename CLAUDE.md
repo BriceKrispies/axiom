@@ -84,7 +84,7 @@ $ scripts/ax owns modules/axiom-scene/src/lib.rs
 modules/axiom-scene  [scene]
   class          Engine module (isolated capability)
   layers         kernel, runtime, math, frame, ecs
-  depended on by rotating-cube-demo, engine, render-pipeline
+  depended on by engine, render-pipeline
   laws in force
     - Branchless Law - no if/else, match, for/while/loop, &&/||, ?, if let ...
     - Coverage Law - 100% regions/lines/functions; new code ships with its tests
@@ -656,8 +656,8 @@ One manifest lives in each app crate at `apps/<name>/app.toml`:
 
 ```toml
 [app]
-name = "rotating-cube-demo"
-crate_name = "axiom-demo-rotating-cube"
+name = "end-zone"
+crate_name = "axiom-end-zone"
 allowed_layers = ["kernel", "runtime", "math", "host", "frame"]
 allowed_modules = ["scene", "render"]
 ```
@@ -738,7 +738,7 @@ GpuSubmissionReport
 | `RenderInput`             | `axiom-render`       |
 | `RenderCommandList`       | `axiom-render`       |
 | `GpuSubmission` (backend) | `axiom-webgpu`       |
-| translation glue          | `axiom-demo-rotating-cube` (app)  |
+| translation glue          | the composing app    |
 
 ### Module isolation rules (mechanically enforced)
 
@@ -766,9 +766,9 @@ GpuSubmissionReport
    shape; the app translates `RenderCommandList` into it. A future
    decision may allow `axiom-webgpu` to consume `axiom-render` as a
    backend adapter, but that allowance is not granted today.
-7. **The demo app owns the final orchestration.** Every per-frame
+7. **The composing app owns the final orchestration.** Every per-frame
    wiring (snapshot → resources → render input → render commands →
-   GPU submission) lives in `apps/axiom-demo-rotating-cube`.
+   GPU submission) lives in the app, never in a module.
 
 ### Why glue belongs in apps
 
@@ -794,8 +794,7 @@ rewriting the others.
 If actual WebGPU presentation is blocked by missing host capabilities
 (no surface handle, no `web_sys`/`wasm-bindgen` integration in the
 host layer yet), the boundary still validates deterministically and
-the blocker is documented in `modules/axiom-webgpu/ARCHITECTURE.md`
-and `apps/axiom-demo-rotating-cube/VERTICAL_SLICE.md`.
+the blocker is documented in `modules/axiom-webgpu/ARCHITECTURE.md`.
 
 ## Feature Module Rules
 
@@ -1251,16 +1250,15 @@ prerequisites (SDK dist, runtime wasm) once.
 
 ```sh
 # Preferred — detached, named, managed:
-uv run scripts/localhost_servers.py start-app gravix
+uv run scripts/localhost_servers.py start-app burnt-rubber
 uv run scripts/localhost_servers.py start-app three-point --port 9000
 
 # Direct/foreground — only when you need an attached process:
-cargo run -p axiom-serve -- gravix --debug               # --debug skips the slow LTO release profile
-make serve APP=growth                                    # the same, via make
+cargo run -p axiom-serve -- burnt-rubber --debug               # --debug skips the slow LTO release profile
+make serve APP=dog                                       # the same, via make
 ```
 
-The default port is 8080. For the two Vite dev apps (`axiom-game-runtime`,
-`axiom-retro-fps-ts-browser`) the Vite HMR flow (`packages/axiom-vite`) remains
+The default port is 8080. For the Vite dev app (`axiom-game-runtime`) the Vite HMR flow (`packages/axiom-vite`) remains
 the richer alternative.
 
 ## Logging and Telemetry Rules

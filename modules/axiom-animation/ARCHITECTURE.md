@@ -101,7 +101,7 @@ a `ModelPose` out of `AnimationApi` and writes the resulting `Transform`s into
 The reusable *mechanism* stops at skeletons/poses/clips/limits/events/blending.
 The **meaning** — a specific humanoid rig, an authored soccer kick, named kick
 phases, a "kick contact" event — lives in an app that authors it through this
-facade. `apps/axiom-animation-lab` is the reference consumer: it builds an
+facade. `apps/end-zone`'s Animation Lab is the reference consumer: it builds an
 18-bone humanoid and a `kick_right` clip entirely through `AnimationApi`, maps
 opaque event/phase codes back to named concepts, and renders the kick as SVG.
 Nothing in this module knows the word "kick".

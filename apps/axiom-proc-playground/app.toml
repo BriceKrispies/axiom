@@ -1,5 +1,0 @@
-[app]
-name = "proc-playground"
-crate_name = "axiom-proc-playground"
-allowed_layers = ["space", "recipe", "proc-core", "proc-validate"]
-allowed_modules = []

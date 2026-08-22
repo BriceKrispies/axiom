@@ -88,7 +88,7 @@ The project ships a live browser build (`src/web.rs`): it expands the level, the
 drives the engine's `run_web_multi` present loop with `max_instances` set to the
 real generated renderable count. `micro_fps_start` is a **navigable** first-person
 camera — WASD to move, **click the canvas to capture the mouse and look around**
-(pointer-lock mouse-look, cloned from the gallery's `forest_walk` demo;
+(pointer-lock mouse-look, cloned from the gallery's first-person demos;
 arrow-left/right also turn). `micro_fps_overview_start` is a fixed overview.
 Build + serve:
 

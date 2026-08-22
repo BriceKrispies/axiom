@@ -1,6 +1,0 @@
-axis = "vegetation_clumping"
-failed_attempts = []
-inexpressible = true
-smallest_api = "scene.rs Scatter.clusters + cluster_radius_m; scatter.rs site(): when clusters>0, draw that many clump centres and gather trees around a random centre (sqrt-radius disc) instead of uniform placement."
-screenshot_command = "cargo run --features visual-target --bin visual-target -- render manifest.candidate.toml --backend canvas2d --out candidate.png"
-screenshot_proof = "rendered twice byte-identical: cl_a.png == cl_b.png == md5 d38c1fcd09587adcd7e771d21c630487"

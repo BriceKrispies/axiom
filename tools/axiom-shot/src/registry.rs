@@ -12,7 +12,6 @@
 //! `App`/`RunningApp` core has no native pixel path to capture.
 
 use axiom::prelude::*;
-use axiom_animation_lab::scene::LabScene;
 use axiom_end_zone::FieldView;
 
 /// Authoring / GPU render size (also the window size the scenes request).
@@ -24,18 +23,11 @@ fn ch(v: f32) -> Ratio {
     Ratio::new(v).expect("authored colour channel is finite")
 }
 
-/// Per-slice build inputs (each builder reads only what it needs).
-#[derive(Debug, Clone, Default)]
-pub struct BuildParams {
-    /// `--frame N` for the animation-lab posed-figure slice.
-    pub frame: u32,
-}
-
 /// One registered renderable slice: a stable `name` and a builder for its
 /// [`RunningApp`] core.
 pub struct SliceEntry {
     pub name: &'static str,
-    pub build: fn(&BuildParams) -> RunningApp,
+    pub build: fn() -> RunningApp,
 }
 
 impl std::fmt::Debug for SliceEntry {
@@ -52,31 +44,19 @@ pub fn registry() -> Vec<SliceEntry> {
     vec![
         SliceEntry {
             name: "showcase",
-            build: |_| showcase_app().build(),
+            build: || showcase_app().build(),
         },
         SliceEntry {
             name: "nova-roll",
-            build: |_| nova_roll_app().build(),
-        },
-        SliceEntry {
-            name: "rotating-cube",
-            build: |_| axiom_rotating_cube::rotating_cube_core(),
-        },
-        SliceEntry {
-            name: "animation-lab",
-            build: build_posed_figure,
-        },
-        SliceEntry {
-            name: "gravix",
-            build: |_| axiom_gravix::build_gravix(),
+            build: || nova_roll_app().build(),
         },
         SliceEntry {
             name: "end-zone-after-snap",
-            build: |_| axiom_end_zone::build_end_zone_after_snap(),
+            build: || axiom_end_zone::build_end_zone_after_snap(),
         },
         SliceEntry {
             name: "end-zone-pre-snap",
-            build: |_| axiom_end_zone::build_end_zone_pre_snap(),
+            build: || axiom_end_zone::build_end_zone_pre_snap(),
         },
         // The six development-only field-paint inspection cameras. One frozen
         // post-snap frame, six framings: the camera is the only variable, so
@@ -84,98 +64,66 @@ pub fn registry() -> Vec<SliceEntry> {
         // level of detail selected. See `axiom_end_zone::FieldView`.
         SliceEntry {
             name: "end-zone-field-gameplay",
-            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::Gameplay),
+            build: || axiom_end_zone::build_end_zone_field_view(FieldView::Gameplay),
         },
         SliceEntry {
             name: "end-zone-field-low-angle",
-            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::LowAngle),
+            build: || axiom_end_zone::build_end_zone_field_view(FieldView::LowAngle),
         },
         SliceEntry {
             name: "end-zone-field-yaw-left",
-            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::YawLeft),
+            build: || axiom_end_zone::build_end_zone_field_view(FieldView::YawLeft),
         },
         SliceEntry {
             name: "end-zone-field-yaw-right",
-            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::YawRight),
+            build: || axiom_end_zone::build_end_zone_field_view(FieldView::YawRight),
         },
         SliceEntry {
             name: "end-zone-field-far-end-zone",
-            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::FarEndZone),
+            build: || axiom_end_zone::build_end_zone_field_view(FieldView::FarEndZone),
         },
         SliceEntry {
             name: "end-zone-field-major-division",
-            build: |_| axiom_end_zone::build_end_zone_field_view(FieldView::MajorDivision),
+            build: || axiom_end_zone::build_end_zone_field_view(FieldView::MajorDivision),
         },
         // Burnt Rubber: one deterministic frame per thing the game is about —
         // the start line, raw straight-line speed, a corner, a drift, the
         // tunnel, threading traffic, and full boost.
-        // The shader crucible: ten labelled stations demonstrating the
-        // procedural appearance system.
-        //
-        // **Neither arm of this harness carries an authored surface.** The GPU
-        // arm calls `GpuBackendApi::render_offscreen_rgba`, whose argument list
-        // has no surface lane; the Canvas2D arm calls
-        // `render_offscreen_rgba_skinned`, which has none either. So a capture
-        // of this slice shows every station in its CONSTANT FALLBACK — which is
-        // a useful control image, and is exactly what the crucible's frames look
-        // like when the surface lane is dropped. For the pixels the surfaces
-        // actually produce, run the app's own
-        // `cargo run -p axiom-shader-crucible --bin crucible_shot`.
-        SliceEntry {
-            name: "shader-crucible",
-            build: |_| axiom_shader_crucible::shader_crucible_core(),
-        },
-        // The shader crucible: ten labelled stations demonstrating the
-        // procedural appearance system.
-        //
-        // **Neither arm of this harness carries an authored surface.** The GPU
-        // arm calls `GpuBackendApi::render_offscreen_rgba`, whose argument list
-        // has no surface lane; the Canvas2D arm calls
-        // `render_offscreen_rgba_skinned`, which has none either. So a capture
-        // of this slice shows every station in its CONSTANT FALLBACK - which is
-        // a useful control image, and is exactly what the crucible's frames look
-        // like when the surface lane is dropped. For the pixels the surfaces
-        // actually produce, run the app's own
-        // `cargo run -p axiom-shader-crucible --bin crucible_shot`.
-        SliceEntry {
-            name: "shader-crucible",
-            build: |_| axiom_shader_crucible::shader_crucible_core(),
-        },
         SliceEntry {
             name: "burnt-rubber",
-            build: |_| axiom_burnt_rubber::build_burnt_rubber(),
+            build: || axiom_burnt_rubber::build_burnt_rubber(),
         },
         SliceEntry {
             name: "burnt-rubber-start-line",
-            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_start_line(),
+            build: || axiom_burnt_rubber::capture::build_burnt_rubber_start_line(),
         },
         SliceEntry {
             name: "burnt-rubber-straight",
-            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_straight(),
+            build: || axiom_burnt_rubber::capture::build_burnt_rubber_straight(),
         },
         SliceEntry {
             name: "burnt-rubber-sweeping-turn",
-            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_sweeping_turn(),
+            build: || axiom_burnt_rubber::capture::build_burnt_rubber_sweeping_turn(),
         },
         SliceEntry {
             name: "burnt-rubber-drift",
-            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_drift(),
+            build: || axiom_burnt_rubber::capture::build_burnt_rubber_drift(),
         },
         SliceEntry {
             name: "burnt-rubber-tunnel",
-            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_tunnel(),
+            build: || axiom_burnt_rubber::capture::build_burnt_rubber_tunnel(),
         },
         SliceEntry {
             name: "burnt-rubber-traffic",
-            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_traffic(),
+            build: || axiom_burnt_rubber::capture::build_burnt_rubber_traffic(),
         },
         SliceEntry {
             name: "burnt-rubber-boost",
-            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_boost(),
+            build: || axiom_burnt_rubber::capture::build_burnt_rubber_boost(),
         },
         SliceEntry {
             name: "burnt-rubber-ghost",
-            build: |_| axiom_burnt_rubber::capture::build_burnt_rubber_ghost(),
+            build: || axiom_burnt_rubber::capture::build_burnt_rubber_ghost(),
         },
         // The five checkpoints of the Burnt Rubber **golden run** — one
         // continuous race driven grid-to-finish by the real `axiom-agent`
@@ -192,101 +140,38 @@ pub fn registry() -> Vec<SliceEntry> {
         // they are separate entries rather than the default burnt-rubber slice.
         SliceEntry {
             name: "burnt-rubber-golden-grid",
-            build: |_| axiom_burnt_rubber::golden::build_golden_grid(),
+            build: || axiom_burnt_rubber::golden::build_golden_grid(),
         },
         SliceEntry {
             name: "burnt-rubber-golden-opening",
-            build: |_| axiom_burnt_rubber::golden::build_golden_opening(),
+            build: || axiom_burnt_rubber::golden::build_golden_opening(),
         },
         SliceEntry {
             name: "burnt-rubber-golden-esses",
-            build: |_| axiom_burnt_rubber::golden::build_golden_esses(),
+            build: || axiom_burnt_rubber::golden::build_golden_esses(),
         },
         SliceEntry {
             name: "burnt-rubber-golden-canyon",
-            build: |_| axiom_burnt_rubber::golden::build_golden_canyon(),
+            build: || axiom_burnt_rubber::golden::build_golden_canyon(),
         },
         SliceEntry {
             name: "burnt-rubber-golden-finish",
-            build: |_| axiom_burnt_rubber::golden::build_golden_finish(),
-        },
-        SliceEntry {
-            name: "sports-physics-lab",
-            // `--frame 1` photographs the third-person view (the player's body).
-            build: |p| axiom_sports_physics_lab::build_sports_physics_lab_posed(p.frame > 0),
+            build: || axiom_burnt_rubber::golden::build_golden_finish(),
         },
     ]
 }
 
 /// Build the slice registered under `name`, or `None` if unknown.
-pub fn build(name: &str, params: &BuildParams) -> Option<RunningApp> {
+pub fn build(name: &str) -> Option<RunningApp> {
     registry()
         .into_iter()
         .find(|e| e.name == name)
-        .map(|e| (e.build)(params))
+        .map(|e| (e.build)())
 }
 
 /// The names of every registered slice (for `--list` and error messages).
 pub fn names() -> Vec<&'static str> {
     registry().into_iter().map(|e| e.name).collect()
-}
-
-/// L3: the animation-lab posed-figure scene captured as REAL pixels (not SVG).
-/// Loads the sample figure + motion clip bytes, poses the figure at `frame`,
-/// and spawns one box renderable per posed part — the same posed boxes the SVG
-/// scrubber draws, now rendered through a real backend.
-fn build_posed_figure(p: &BuildParams) -> RunningApp {
-    let parts = LabScene::new().view(p.frame).parts;
-    App::new()
-        .window(
-            Window::new(WIDTH, HEIGHT).with_clear_color(Color::linear_rgb(
-                ch(0.06),
-                ch(0.07),
-                ch(0.09),
-            )),
-        )
-        .add_plugins(DefaultPlugins)
-        .setup(move |world, meshes, materials| {
-            let cube = meshes.add(Mesh::cube());
-            let body = materials.add(Material::lit(Color::linear_rgb(
-                ch(0.82),
-                ch(0.78),
-                ch(0.70),
-            )));
-            parts.iter().for_each(|part| {
-                // Box_size is the full box extents; the cube mesh spans two units,
-                // so scale by half the extents.
-                let scale = Vec3::new(
-                    part.box_size.x * 0.5,
-                    part.box_size.y * 0.5,
-                    part.box_size.z * 0.5,
-                );
-                world.spawn((
-                    Transform::combine(part.transform, Transform::from_scale(scale)),
-                    Renderable {
-                        mesh: cube,
-                        material: body,
-                    },
-                ));
-            });
-            world.spawn((
-                Transform::from_translation(Vec3::new(0.0, 0.9, 3.0)),
-                Camera::perspective(PerspectiveProjection {
-                    fov_y: Angle::degrees(55.0),
-                    near: Meters::new(0.1).expect("near plane is finite"),
-                    far: Meters::new(100.0).expect("far plane is finite"),
-                }),
-            ));
-            world.spawn((
-                Transform::IDENTITY,
-                DirectionalLight {
-                    direction: Vec3::new(0.3, -1.0, 0.5),
-                    color: Color::WHITE,
-                    intensity: ch(1.0),
-                },
-            ));
-        })
-        .build()
 }
 
 /// Author the Stage-2/3 textured + lit showcase: three spinning checker cubes, a

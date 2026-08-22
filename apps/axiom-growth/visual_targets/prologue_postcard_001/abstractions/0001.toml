@@ -1,6 +1,0 @@
-axis = "foreground_material_detail"
-failed_attempts = []
-inexpressible = true
-smallest_api = "new [groundcover] manifest block (seed,count,min_spacing_m,slope_limit,height_m,radius_m,palette) + a Tuft value type + scatter::expand_groundcover + a tuft mesh & instanced batch in build.rs; app-local, no backend change"
-screenshot_command = "cargo run --features visual-target --bin visual-target -- render manifest.candidate.toml --backend canvas2d --out candidate.png"
-screenshot_proof = "rendered twice byte-identical: gc_a.png == gc_b.png == md5 bb96d2e986c31cacc34e38210d3a3e8b"

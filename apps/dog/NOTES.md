@@ -132,7 +132,7 @@ The app installs every object through the runtime path
 because `setup` only hands out the built-in `Mesh` catalogue enum and cannot
 register author geometry. `RunningApp::renderable_count()` reports the *authoring*
 count, so it stays at zero; the live arm passes a fixed instance capacity instead,
-exactly as `apps/axiom-gravix` does. Draw count is asserted from the frame
+exactly as `apps/burnt-rubber` does. Draw count is asserted from the frame
 outcome, which is the number that actually matters.
 
 **Verdict:** a known shape of the umbrella's two authoring paths, not a defect

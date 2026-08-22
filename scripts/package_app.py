@@ -105,7 +105,7 @@ SHIPPING = Tuning("release", "-O3", "shipping")
 #: Tunings by CLI name, so `--tuning` stays a single source of truth.
 TUNINGS = {t.label: t for t in (PREVIEW, SHIPPING)}
 
-# An "SDK-hosted" browser app (axiom-game-runtime, axiom-retro-fps-ts-browser) is authored
+# An "SDK-hosted" browser app (axiom-game-runtime) is authored
 # in TypeScript over the `@axiom/game` SDK. Its index.html does NOT wire the wasm glue
 # itself: a compiled harness (web/dist/harness.js) imports the glue from the
 # conventional `/pkg/<snake>.js` path, the SDK from a `/vendor/<name>/` URL declared in

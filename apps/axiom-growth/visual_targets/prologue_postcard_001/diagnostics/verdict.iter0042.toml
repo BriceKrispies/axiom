@@ -1,2 +1,0 @@
-attacked_axis = "artifact_level"
-note = "One config nudge: replace the two noisiest [foliage] palette entries (saturated deep red + dark brown) with in-range warm ambers, keeping a gold->orange->amber gradient. The canopy reads as a cohesive warm mass instead of multi-colour confetti -- reduced high-frequency colour noise. artifact_level 2->3, color_palette 3->4. The leaf SHAPE/structure speckle (no branch scaffolding) is unchanged and is the next, harder mismatch (may justify a branch primitive). Calmer + more readable; nothing worse."

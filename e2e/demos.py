@@ -14,18 +14,12 @@ tested here.
                    With ?backend=canvas2d it must read `… = Canvas2d`.
   * canvas2d_app — a pure 2D-canvas game (no WebGPU); logs `[<id>] ready`.
                    ?backend=canvas2d is a harmless no-op (still loaded to prove it).
-  * growth       — multi-screen; only its entry screen is smoke-tested (status text).
-                   Its canvas is hidden until "Generate", so it gets no canvas check.
 """
 
 # id -> demo spec. `path` is relative to the gallery root (dist/). Every demo is a
 # standalone app packaged into dist/<dir>/ and self-hosts its own <dir>/index.html
 # (there is no shared demo.html shell anymore).
 DEMOS = [
-    {"id": "rotating-cube", "kind": "windowing3d", "path": "rotating-cube/index.html", "canvas": "#axiom-cube-canvas"},
-    {"id": "growth", "kind": "growth", "path": "growth/index.html", "check_canvas": False},
-    {"id": "zanzoban", "kind": "canvas2d_app", "path": "zanzoban/index.html",
-     "canvas": "#axiom-puzzle-canvas", "ready_log": "[zanzoban] ready"},
     {"id": "quintet", "kind": "canvas2d_app", "path": "quintet/index.html",
      "canvas": "#axiom-quintet-canvas", "ready_log": "[quintet] ready"},
 ]

@@ -84,27 +84,11 @@ members = [
     "modules/axiom-tick",
     "modules/axiom-animation",
     "modules/axiom",
-    "apps/axiom-animation-lab",
-    "apps/axiom-demo-rotating-cube",
     # The standalone browser demo apps (the gallery de-merge): every browser
     # demo is its own composition-leaf app with its own wasm bundle and page.
     # apps/axiom-gallery is no longer a crate — only its static web/ showcase
     # (the landing grid that links out to each app's page) remains.
-    "apps/axiom-rotating-cube",
-    "apps/axiom-gravix",
-    "apps/axiom-sports-physics-lab",
-    "apps/axiom-growth",
-    "apps/axiom-zanzoban",
     "apps/axiom-quintet",
-    "apps/axiom-netcode-demo",
-    "apps/axiom-netcode-sim",
-    "apps/axiom-netplay-ffi",
-    "apps/axiom-sim-crucible",
-    "apps/axiom-proc-playground",
-    "apps/axiom-proc-player",
-    "apps/axiom-asset-stream-demo",
-    "apps/axiom-worldgen-demo",
-    "apps/axiom-animation-lab",
     "apps/axiom-game-runtime",
     # End Zone: the arcade-football engine framework + deterministic systems
     # showcase (composition leaf; all football concepts stay app-local).
@@ -112,16 +96,12 @@ members = [
     # Burnt Rubber: the third-person arcade racing framework + demonstration game
     # (composition leaf; every racing concept stays app-local).
     "apps/burnt-rubber",
-    # Bend It: the mobile-first penalty-kick trajectory sculptor (composition
-    # leaf; every soccer concept stays app-local).
-    "apps/bend-it",
     # Dog: a field of walking dachshunds whose every visible shape comes out of
     # axiom-mesh-ops, driven live from a slider panel (composition leaf).
     "apps/dog",
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",
-    "apps/shader-crucible",
     # Claude of Duty: the browser FPS at C:/dev/Claude-of-Duty ported onto Axiom
     # (composition leaf; every FPS concept stays app-local).
     "apps/shmup",
@@ -233,6 +213,16 @@ codegen-units = 16
 # signed-lockstep tests (and the coverage gate) crawl. These are third-party
 # dependencies, not engine spine, so optimizing them does not affect coverage
 # instrumentation of our own crates — it only makes signing/verification fast.
+# `ax` (tools/axiom-atlas) is a CLI that gets reinstalled whenever the tool
+# changes, and its cost is dominated by directory walking and regex rather than
+# by codegen. Fat LTO with a single codegen unit buys it nothing measurable at
+# runtime and costs most of the link time, so this keeps -O3 and drops the rest.
+# Used by `make install-ax`.
+[profile.ax]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 [profile.dev.package.curve25519-dalek]
 opt-level = 3
 [profile.dev.package.ed25519-dalek]

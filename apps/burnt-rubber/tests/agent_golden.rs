@@ -80,7 +80,7 @@ use axiom_kernel::StableHash;
 // `f32` is written as its exact IEEE-754 bit pattern. That is deterministic
 // across runs and platforms for the finite values these records hold, and is the
 // same stance the rest of the repository takes (see
-// `apps/axiom-rotating-cube/tests/render_determinism.rs`).
+// the render-determinism tests the slice contract requires).
 
 fn push_f32(out: &mut Vec<u8>, v: f32) {
     out.extend_from_slice(&v.to_le_bytes());

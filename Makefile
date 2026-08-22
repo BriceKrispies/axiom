@@ -26,28 +26,12 @@ DIST_DIR         := dist
 GALLERY_PORT     ?= 8000
 WORKSPACE_PORT   ?= 8123
 
-# The live 2-browser SERVER-AUTHORITATIVE multiplayer demo lives at dist/netplay/.
-# Its browser networking is the TypeScript @axiom/client SDK (packages/axiom-client),
-# built and vendored into the netplay app's web/vendor/ by netplay-build; the renderer
-# is the netplay app's own wasm bundle (apps/axiom-netplay).
-NETPLAY_VENDOR   := apps/axiom-netplay/web/vendor/axiom-client
-NETPLAY_PORT     ?= 8000
-
 # The shared @axiom/game runtime wasm, which hosts the SDK-hosted TypeScript apps
 # (a separate, app-tier mechanism from the pure-TS @axiom/web-engine path the
 # gallery's TypeScript apps use).
 GAME_RUNTIME_CRATE    := axiom-game-runtime
 GAME_RUNTIME_PKG      := apps/axiom-game-runtime/web/pkg
 GAME_RUNTIME_ARTIFACT := target/$(WASM_TARGET)/release/axiom_game_runtime.wasm
-
-# The runtime asset-streaming demo (its own standalone app — not part of the gallery).
-ASSETSTREAM_DIR      := apps/axiom-asset-stream-demo
-ASSETSTREAM_CRATE    := axiom-asset-stream-demo
-ASSETSTREAM_ARTIFACT := target/$(WASM_TARGET)/release/axiom_asset_stream_demo.wasm
-ASSETSTREAM_WEB      := $(ASSETSTREAM_DIR)/web
-ASSETSTREAM_PKG      := $(ASSETSTREAM_WEB)/pkg
-ASSETSTREAM_FIXTURE  := $(ASSETSTREAM_DIR)/fixture/assets.toml
-ASSETSTREAM_PORT     ?= 8000
 
 # End Zone: the arcade-football engine framework + deterministic showcase
 # (its own standalone app — not part of the gallery).
@@ -61,13 +45,12 @@ ENDZONE_PORT     ?= 8000
 .PHONY: workspace workspace-build \
 	gallery gallery-build gallery-serve gallery-fast gallery-fast-build \
 	gallery-debug-build render-bench \
-	netplay netplay-build netplay-server netplay-dotnet relay retro-fps-hot \
-	agent agent-render agent-bridge growth-agent \
-	asset-stream asset-stream-build asset-stream-pack \
+	netplay-server relay retro-fps-hot \
+	agent agent-render agent-bridge \
 	end-zone end-zone-build \
-	package loader-test e2e e2e-ladder e2e-netplay e2e-matchmaking e2e-scaleout \
+	package loader-test e2e e2e-ladder \
 	hostile-harness \
-	netplay-cluster netplay-load serve ts-gate help \
+	netplay-load serve ts-gate help \
 	sound sound-check sound-build sound-list sound-clean sound-test
 
 help:
@@ -92,17 +75,8 @@ help:
 	@echo "  make workspace-build  Build dist-workspace/ only, no serve"
 	@echo "  (hosts every app inline or opens the multi-screen ones; has the frame scrubber + backend-compare dev tools.)"
 	@echo ""
-	@echo "  Live 2-browser SERVER-AUTHORITATIVE multiplayer demo (dist/netplay/):"
-	@echo "  make netplay-build   Build dist/ (incl. the netplay app bundle) + vendor the @axiom/client SDK + the worker cdylib"
-	@echo "  make netplay-dotnet  Run the .NET 10 server: serves dist/ AND the game at http://localhost:8090 (open /netplay/)"
-	@echo "  (run 'make netplay-build' once, then 'make netplay-dotnet' and open"
-	@echo "   http://localhost:8090/netplay/ in TWO WebGPU browsers — one server does it all.)"
-	@echo ""
-	@echo "  Alternative (Rust server + separate static serve):"
+	@echo "  Server-authoritative multiplayer:"
 	@echo "  make netplay-server Run the Rust authoritative server (ws://127.0.0.1:9002)"
-	@echo "  make netplay        Serve dist/ at http://localhost:$(NETPLAY_PORT) (open /netplay/)"
-	@echo "  (then open http://localhost:$(NETPLAY_PORT)/netplay/?server=ws://127.0.0.1:9002 in two browsers.)"
-	@echo ""
 	@echo "  make netplay-load   Load-test a running node/cluster (ARGS=\"<soak|matchmake|scaleout|resilience> ...\")"
 	@echo ""
 	@echo "  retro FPS live level hot-reload:"
@@ -113,12 +87,7 @@ help:
 	@echo "  make agent          retro FPS headless agent server (JSON over HTTP on :7878)"
 	@echo "  make agent-render   Same, plus an offscreen wgpu render so {\"render\":true} returns a PNG"
 	@echo "  make agent-bridge   Relay HTTP actions to a LIVE browser opened with ?agent=ws://127.0.0.1:7879"
-	@echo "  make growth-agent   Growth headless agent: hold forward up the mountain, reporting height"
 	@echo ""
-	@echo "  Runtime asset-streaming demo (standalone, not in the gallery):"
-	@echo "  make asset-stream-pack  Pack the fixture (manifest.bin + blobs) into web/"
-	@echo "  make asset-stream-build Rebuild the asset-stream wasm bundle into web/pkg"
-	@echo "  make asset-stream       Serve the asset-stream pages at http://localhost:$(ASSETSTREAM_PORT)"
 	@echo ""
 	@echo "  End Zone arcade-football showcase (standalone, not in the gallery):"
 	@echo "  make end-zone-build     Rebuild the End Zone wasm bundle into web/pkg"
@@ -126,7 +95,7 @@ help:
 	@echo ""
 	@echo "  Package ONE single-page app into a self-contained, droppable bundle (wasm + wasm2js fallback):"
 	@echo "  make package APP=game-runtime      Build dist-app/game-runtime/ (an SDK-hosted TypeScript app)"
-	@echo "  make package APP=asset-stream-demo Build a native single-page app"
+	@echo "  make package APP=burnt-rubber      Build a native single-page app"
 	@echo "  (the whole MULTI-PAGE gallery is packaged by 'make gallery-build' into dist/, not 'make package'.)"
 	@echo "  (needs a nightly toolchain with rust-src; first build rebuilds std and is slow.)"
 	@echo "  make loader-test   Prove the loader's wasm→wasm2js fallback (Node-only, seconds)"
@@ -136,7 +105,6 @@ help:
 	@echo "  AXIOM_E2E_REUSE=1 make e2e   Reuse a gallery already serving on :8000 (skip the rebuild)"
 	@echo "  make e2e-ladder    Deny capabilities to the resilient chest game and prove every rung still pays out"
 	@echo "  make hostile-harness  Serve the developer harness for the same ladder at http://localhost:8091/__harness/"
-	@echo "  make e2e-netplay   Build the worker+ .NET server and prove server-authoritative multiplayer in a browser"
 	@echo ""
 	@echo "  TypeScript SDK gate (@axiom/client + @axiom/game static-analysis/branchless/coverage laws):"
 	@echo "  make ts-gate       Run tsgo typecheck + Oxlint + co-location + 100% coverage for both TS packages"
@@ -147,8 +115,7 @@ help:
 # own wasm bundle (the shipping tuning's wasm-opt -O3 fast-path PLUS a Binaryen wasm2js
 # fallback for browsers with no WebAssembly) into dist/<id>/ behind its
 # capability-detecting loader, with the static landing grid laid over it. First it
-# installs the pinned Binaryen toolchain and builds + vendors the @axiom/client SDK the
-# netplay demo needs.
+# installs the pinned Binaryen toolchain and builds the @axiom/client SDK.
 #
 # This is the build half of `make gallery`. Because the app is rebuilt MVP via nightly
 # `-Z build-std` (so the wasm2js fallback is possible), the FIRST run is slow — it
@@ -159,7 +126,6 @@ gallery-build:
 	npm --prefix scripts/packaging install --no-audit --no-fund
 	npm --prefix packages/axiom-client install --no-audit --no-fund
 	npm --prefix packages/axiom-client run build
-	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_VENDOR)'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
 	uv run --no-project python scripts/package_gallery.py
 
 # THE MAIN DRIVER. One command to browse the whole engine surface during
@@ -214,7 +180,7 @@ gallery-debug-build:
 	npm --prefix scripts/packaging install --no-audit --no-fund
 	uv run --no-project python scripts/package_gallery.py --debug
 
-# RENDER BENCHMARK: build+serve the gallery, auto-walk a demo (default growth) with
+# RENDER BENCHMARK: build+serve the gallery, auto-walk a demo (default burnt-rubber) with
 # the agent, and report FPS + phase breakdown from the Canvas2D telemetry. Pass extra
 # flags via ARGS, e.g. `make render-bench ARGS="--backend canvas2d --duration 10 --debug"`.
 render-bench:
@@ -228,40 +194,12 @@ render-bench:
 netplay-server:
 	cargo run -p axiom-netplay-server
 
-# The .NET 10 example server (examples/axiom-netplay-dotnet): an all-in-one host
-# that SERVES the client (the built dist/) AND is the authoritative game server on
-# the same origin (WebSocket at /ws), speaking the axiom-net-protocol wire format
-# via a C# twin of the codec. Run `make netplay-build` first so dist/ + the vendored
-# SDK exist, then open http://localhost:8090/netplay/.
-netplay-dotnet:
-	dotnet run --project examples/axiom-netplay-dotnet
 
 # The dumb lockstep broadcast relay (legacy tooling; the netplay demo no longer
 # uses it, but the tool is kept for lockstep experiments).
 relay:
 	cargo run -p axiom-netcode-relay
 
-# Build the gallery dist/ (which contains the netplay app's renderer bundle + page at
-# dist/netplay/) AND build + vendor the TypeScript @axiom/client SDK the page uses for
-# networking (compiled to ESM into apps/axiom-netplay/web/vendor/axiom-client, which
-# package_gallery copies into dist/netplay/). Also builds the native worker cdylib the
-# .NET server loads.
-netplay-build:
-	npm --prefix scripts/packaging install --no-audit --no-fund
-	npm --prefix packages/axiom-client install --no-audit --no-fund
-	npm --prefix packages/axiom-client run build
-	uv run --no-project python -c "import shutil, pathlib; d = pathlib.Path('$(NETPLAY_VENDOR)'); shutil.rmtree(d, ignore_errors=True); d.parent.mkdir(parents=True, exist_ok=True); shutil.copytree('packages/axiom-client/dist', d)"
-	uv run --no-project python scripts/package_gallery.py --fast
-	cargo build -p axiom-netplay-ffi --release
-
-# Serve the gallery dist/ for the netplay page. The authoritative server (make
-# netplay-server) must already be running, then open /netplay/ in TWO WebGPU browser
-# windows. Run `make netplay-build` first if dist/ is missing.
-netplay:
-	@echo Serving dist/ at http://localhost:$(NETPLAY_PORT) - run make netplay-build first if blank
-	@echo Start the authoritative server in another shell with:  make netplay-server
-	@echo Then open http://localhost:$(NETPLAY_PORT)/netplay/?server=ws://127.0.0.1:9002 in TWO WebGPU browser windows.
-	uv run --no-project python -m http.server $(NETPLAY_PORT) --directory $(DIST_DIR)
 
 # --- retro FPS live level hot-reload ---
 
@@ -291,28 +229,7 @@ agent-render:
 agent-bridge:
 	cargo run -p axiom-retro-fps --features agent --bin retro-fps-agent -- --bridge
 
-# Growth headless agent driver: walk the player up the Everest-scale mountain
-# holding "forward", printing the player's height each tick (the climb mode).
-growth-agent:
-	cargo run -p axiom-growth --features agent --bin growth-agent
 
-# --- Runtime asset-streaming demo (apps/axiom-asset-stream-demo) ---
-
-# Pack the authored fixture (fixture/assets.toml) into the app's web/ dir as
-# manifest.bin + the copied blobs, using the parallel-built packer tool. Run this
-# before asset-stream-build so the served page has a manifest to fetch.
-asset-stream-pack:
-	cargo run -p axiom-asset-pack -- $(ASSETSTREAM_FIXTURE) $(ASSETSTREAM_WEB)
-
-# Rebuild the asset-stream demo wasm bundle (raw cargo + wasm-bindgen flow).
-asset-stream-build:
-	cargo build -p $(ASSETSTREAM_CRATE) --target $(WASM_TARGET) --release
-	wasm-bindgen --target web --out-dir $(ASSETSTREAM_PKG) $(ASSETSTREAM_ARTIFACT)
-
-# Serve the demo page. Run `make asset-stream-pack asset-stream-build` first.
-asset-stream:
-	@echo Serving asset-stream demo at http://localhost:$(ASSETSTREAM_PORT) - run make asset-stream-pack asset-stream-build first
-	uv run --no-project python -m http.server $(ASSETSTREAM_PORT) --directory $(ASSETSTREAM_WEB)
 
 # --- Build + serve any apps/ browser app locally with hot reload ---
 
@@ -386,7 +303,7 @@ end-zone:
 # SDK-hosted TypeScript apps (game-runtime, authored over @axiom/game) package too.
 #
 #   make package APP=game-runtime
-#   make package APP=asset-stream-demo
+#   make package APP=burnt-rubber
 APP ?= game-runtime
 package:
 	npm --prefix scripts/packaging install --no-audit --no-fund
@@ -410,7 +327,7 @@ loader-test:
 E2E_UV := uv run --no-project --with pytest --with pytest-playwright --with pillow
 e2e:
 	$(E2E_UV) python -m playwright install chromium
-	$(E2E_UV) pytest e2e -q --ignore=e2e/test_netplay.py --ignore=e2e/test_matchmaking.py --ignore=e2e/test_scaleout.py --ignore=e2e/test_capability_ladder.py
+	$(E2E_UV) pytest e2e -q --ignore=e2e/test_capability_ladder.py
 
 # Walk the whole capability ladder (webgpu -> webgl2 -> webgl1 -> canvas2d ->
 # css3d -> form) against the REAL resilient chest game, and assert at every rung
@@ -435,37 +352,11 @@ e2e-ladder:
 hostile-harness:
 	node tools/axiom-harness/src/main.ts --port 8091
 
-# Drive the SERVER-AUTHORITATIVE multiplayer demo end-to-end: builds the native
-# worker cdylib + the .NET 10 server, serves the prebuilt client, and proves in a
-# real browser that the server ticks authoritatively, accepts only intents, clamps
-# the player to the field wall, and that client prediction reconciles. Needs the
-# .NET 10 SDK and a prebuilt dist/ — run `make netplay-build` first.
-e2e-netplay:
-	$(E2E_UV) python -m playwright install chromium
-	$(E2E_UV) pytest e2e/test_netplay.py -q
-
-# Prove HTTP matchmaking end-to-end: the /matchmake endpoint fills rooms compactly,
-# and the browser POSTs it on load, joins the assigned room, and plays.
-e2e-matchmaking:
-	$(E2E_UV) python -m playwright install chromium
-	$(E2E_UV) pytest e2e/test_matchmaking.py -q
-
-# Prove horizontal SCALEOUT end-to-end: a director + two game nodes; rooms
-# distribute across both nodes and the browser is redirected to a node and plays.
-e2e-scaleout:
-	$(E2E_UV) python -m playwright install chromium
-	$(E2E_UV) pytest e2e/test_scaleout.py -q
-
-# Run a local scaleout cluster (1 director + 2 nodes) for manual play. Open
-# http://localhost:8100 in two browser windows. Run `make netplay-build` once first.
-netplay-cluster:
-	cargo build -p axiom-netplay-ffi --release
-	uv run --no-project python scripts/netplay_cluster.py
 
 # Headless load generator (tools/axiom-netplay-load): opens many concurrent
 # WebSocket players speaking the real wire protocol to stress a running node or
-# cluster. Start a server first (e.g. `make netplay-dotnet`, or a cluster with
-# `make netplay-cluster`), set AXIOM_LAG_MS=16 to disable the demo's snapshot lag,
+# cluster. Start a server first (e.g. `make netplay-server`), set AXIOM_LAG_MS=16
+# to disable the demo's snapshot lag,
 # then point the tool at it. `make netplay-load` runs a default single-node soak;
 # override the scenario/flags with ARGS, e.g.:
 #   make netplay-load ARGS="matchmake --requests 500"
@@ -484,3 +375,17 @@ netplay-load:
 # first. The SDK is green and this gate is wired into pre-commit + CI as a hard gate.
 ts-gate:
 	bash scripts/ts-gate.sh
+
+# ---------------------------------------------------------------------------
+# ax - the query-and-change gateway for this repo (tools/axiom-atlas).
+#
+# Installs `ax` into ~/.cargo/bin so it can be called from any directory instead
+# of building and invoking target/release/ax.exe. The tool locates its repo by
+# walking up from the cwd, keeps its index and ledger per-repo under
+# .axiom-atlas/, and re-execs its own binary for the background observer, so an
+# installed copy behaves identically to a local build.
+#
+# Reinstall after changing the tool; an installed copy does not track the repo.
+.PHONY: install-ax
+install-ax:
+	cargo install --path tools/axiom-atlas --profile ax --force

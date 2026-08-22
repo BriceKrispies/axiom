@@ -26,7 +26,6 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 // Which app's web/ dir to serve + hot-reload. Defaults to the 2D hot-reload
-// harness; set AXIOM_DEV_APP=axiom-retro-fps-ts-browser for the TS-only 3D retro FPS app.
 // Both are authored purely in TypeScript over @axiom/game and drive the SAME
 // axiom-game-runtime wasm, so /pkg is served from the one canonical build below.
 const APP = process.env.AXIOM_DEV_APP ?? "axiom-game-runtime";

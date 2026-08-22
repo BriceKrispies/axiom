@@ -1,2 +1,0 @@
-attacked_axis = "vegetation_clumping"
-note = "capability iteration: foliage cards target tree representation / vegetation layering. The loose autumn card masses ARE a better canopy form than perfect balls, but the oversized opaque blocky cards + floating foreground boxes + upper-canopy washout REDUCE readability (a significant artifact regression). Per the promote rule (improve without reducing readability), reject and keep the champion; the capability stays for a tuned retry (smaller/more/alpha-cut cards)."

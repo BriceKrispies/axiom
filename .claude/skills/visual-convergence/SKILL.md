@@ -25,7 +25,7 @@ the work is figuring out how to put the target app into a harness.
 ## Inputs
 
 - **A reference image** (the user provides it, or points at a file).
-- **A target app/game** — a name (`retro_fps`, `growth`, `forest_walk`, `soccer-penalty`, …) or a
+- **A target app/game** — a name (`burnt-rubber`, `end-zone`, `shmup`, `dog`, …) or a
   path. If the user only gives a screenshot, ask which app it targets and what framing/moment
   it should represent (camera pose, tick, game state).
 
@@ -50,12 +50,10 @@ Pick the **cheapest capture path that runs the real app**. Decision order:
    backend the reference implies (GPU for lit/textured hero shots; canvas2d for the legible
    flat proxy).
 
-2. **A native capture agent bin.** Some apps expose their own headless render:
-   `growth-agent` (`shots gpu`, `summit gpu`, `run <script.toml> gpu`, `portrait`), the retro FPS
-   agent, etc.:
+2. **A native capture agent bin.** Some apps expose their own headless render behind a
+   feature-gated bin that writes a PNG:
    ```sh
-   cargo run --manifest-path apps/axiom-gallery/Cargo.toml \
-     --bin growth-agent --features growth-agent -- shots gpu
+   cargo run -p <app-crate> --features agent --bin <app>-agent -- shots gpu
    ```
 
 3. **A manifest-driven `visual-target` scene** (static diorama). If the target *is* a
@@ -70,8 +68,7 @@ Pick the **cheapest capture path that runs the real app**. Decision order:
    ```
 
 4. **Playwright — live browser (wasm-only apps).** For apps that only render live via
-   `axiom-windowing` (`forest_walk`, `zanzoban`, `quintet`, `stress_cubes`, `rotating_cube`,
-   live `growth`):
+   `axiom-windowing` (`quintet`, `casino-games`, `arena-forge`, `home-run`):
    ```sh
    make gallery-fast                                             # build + serve at :8000
    uv run scripts/playwright_controller.py goto http://localhost:8000/<demo>/
@@ -88,7 +85,7 @@ Pick the **cheapest capture path that runs the real app**. Decision order:
      `"<name>" => axiom_gallery::<name>::build_<name>()` case to the axiom-shot registry. This
      gives a deterministic native screenshot — the best harness.
    - Or add a capture agent bin (feature-gated, offscreen GPU/canvas2d, PNG out), mirroring
-     `growth/bin/agent.rs`.
+     `apps/burnt-rubber`'s agent bin.
    - Or, if it is fundamentally live/wasm, use Playwright and accept it is not byte-deterministic.
    Match the reference's **camera/framing/moment** (pose, tick, game state) — a convergence is
    meaningless if the two images frame different things.

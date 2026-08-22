@@ -41,7 +41,7 @@ make gallery-build     # package into dist/ only, no serve
 To iterate on ONE demo with hot reload, skip packaging entirely:
 
 ```sh
-cargo run -p axiom-serve -- gravix     # build + serve + auto-reload (see CLAUDE.md)
+cargo run -p axiom-serve -- burnt-rubber   # build + serve + auto-reload (see CLAUDE.md)
 ```
 
 ## Adding an app

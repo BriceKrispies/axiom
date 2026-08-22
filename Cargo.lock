@@ -123,16 +123,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-animation-lab"
-version = "0.1.0"
-dependencies = [
- "axiom-animation",
- "axiom-figure",
- "axiom-kernel",
- "axiom-math",
-]
-
-[[package]]
 name = "axiom-asset-pack"
 version = "0.1.0"
 dependencies = [
@@ -140,19 +130,6 @@ dependencies = [
  "axiom-kernel",
  "serde",
  "toml",
-]
-
-[[package]]
-name = "axiom-asset-stream-demo"
-version = "0.1.0"
-dependencies = [
- "axiom-assets",
- "axiom-kernel",
- "console_error_panic_hook",
- "js-sys",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
@@ -169,9 +146,11 @@ dependencies = [
  "grep-regex",
  "grep-searcher",
  "ignore",
+ "proc-macro2",
  "regex",
  "serde",
  "serde_json",
+ "syn",
  "xtask",
 ]
 
@@ -183,25 +162,6 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "axiom-bend-it"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-agent",
- "axiom-debug-overlay",
- "axiom-figure",
- "axiom-host",
- "axiom-input",
- "axiom-kernel",
- "axiom-math",
- "axiom-runtime",
- "axiom-windowing",
- "console_error_panic_hook",
- "wasm-bindgen",
  "web-sys",
 ]
 
@@ -282,23 +242,6 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "axiom-demo-rotating-cube"
-version = "0.1.0"
-dependencies = [
- "axiom-ecs",
- "axiom-frame",
- "axiom-host",
- "axiom-introspect",
- "axiom-kernel",
- "axiom-math",
- "axiom-render",
- "axiom-resources",
- "axiom-runtime",
- "axiom-scene",
- "axiom-webgpu",
 ]
 
 [[package]]
@@ -491,65 +434,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-gravix"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-debug-overlay",
- "axiom-kernel",
- "axiom-math",
- "axiom-physics",
- "axiom-runtime",
- "axiom-terrain-mesh",
- "axiom-windowing",
- "console_error_panic_hook",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "axiom-grid"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-math",
-]
-
-[[package]]
-name = "axiom-growth"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-agent-harness",
- "axiom-biome",
- "axiom-canvas2d-backend",
- "axiom-debug-overlay",
- "axiom-entropy",
- "axiom-geosphere",
- "axiom-gpu-backend",
- "axiom-host",
- "axiom-interface",
- "axiom-introspect",
- "axiom-kernel",
- "axiom-math",
- "axiom-noise",
- "axiom-perception",
- "axiom-planetgen",
- "axiom-proc-validate",
- "axiom-space",
- "axiom-streaming",
- "axiom-terrain-mesh",
- "axiom-windowing",
- "console_error_panic_hook",
- "js-sys",
- "png",
- "serde",
- "serde_json",
- "tiny_http",
- "toml",
- "tungstenite",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -662,15 +551,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-netcode-demo"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-crypto",
- "axiom-netcode",
-]
-
-[[package]]
 name = "axiom-netcode-relay"
 version = "0.1.0"
 dependencies = [
@@ -678,25 +558,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
-]
-
-[[package]]
-name = "axiom-netcode-sim"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-crypto",
- "axiom-kernel",
- "axiom-netcode",
-]
-
-[[package]]
-name = "axiom-netplay-ffi"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-kernel",
- "axiom-net-protocol",
 ]
 
 [[package]]
@@ -830,27 +691,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-proc-player"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-math",
- "axiom-proc-mesh",
- "axiom-proc-texture",
- "axiom-recipe",
-]
-
-[[package]]
-name = "axiom-proc-playground"
-version = "0.1.0"
-dependencies = [
- "axiom-proc-core",
- "axiom-proc-validate",
- "axiom-recipe",
- "axiom-space",
-]
-
-[[package]]
 name = "axiom-proc-texture"
 version = "0.1.0"
 dependencies = [
@@ -952,19 +792,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-rotating-cube"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-debug-overlay",
- "axiom-windowing",
- "console_error_panic_hook",
- "serde",
- "toml",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "axiom-runtime"
 version = "0.1.0"
 dependencies = [
@@ -1002,31 +829,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-shader-crucible"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-canvas2d-backend",
- "axiom-field",
- "axiom-gpu-backend",
- "axiom-host",
- "axiom-kernel",
- "axiom-math",
- "axiom-mesh",
- "axiom-mesh-ops",
- "axiom-noise",
- "axiom-proc-texture",
- "axiom-recipe",
- "axiom-runtime",
- "axiom-surface",
- "console_error_panic_hook",
- "png",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "axiom-shmup"
 version = "0.1.0"
 dependencies = [
@@ -1047,19 +849,14 @@ name = "axiom-shot"
 version = "0.1.0"
 dependencies = [
  "axiom",
- "axiom-animation-lab",
  "axiom-burnt-rubber",
  "axiom-canvas2d-backend",
  "axiom-end-zone",
  "axiom-gpu-backend",
- "axiom-gravix",
  "axiom-host",
  "axiom-kernel",
  "axiom-math",
  "axiom-render",
- "axiom-rotating-cube",
- "axiom-shader-crucible",
- "axiom-sports-physics-lab",
  "png",
 ]
 
@@ -1072,39 +869,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-sim-crucible"
-version = "0.1.0"
-dependencies = [
- "axiom-ecs",
- "axiom-sim-core",
-]
-
-[[package]]
 name = "axiom-space"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
-]
-
-[[package]]
-name = "axiom-sports-physics-lab"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-debug-overlay",
- "axiom-figure",
- "axiom-fp-controller",
- "axiom-host",
- "axiom-kernel",
- "axiom-math",
- "axiom-physics",
- "axiom-proc-texture",
- "axiom-recipe",
- "axiom-runtime",
- "axiom-windowing",
- "console_error_panic_hook",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -1228,47 +996,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom-worldgen-demo"
-version = "0.1.0"
-dependencies = [
- "axiom-forest",
- "axiom-kernel",
- "axiom-math",
- "axiom-scatter",
- "axiom-streaming",
- "axiom-world",
-]
-
-[[package]]
 name = "axiom-worldsave"
 version = "0.1.0"
 dependencies = [
  "axiom-kernel",
  "axiom-levelgen",
  "axiom-space",
-]
-
-[[package]]
-name = "axiom-zanzoban"
-version = "0.1.0"
-dependencies = [
- "axiom",
- "axiom-agent",
- "axiom-debug-overlay",
- "axiom-host",
- "axiom-input",
- "axiom-interface",
- "axiom-kernel",
- "axiom-layout",
- "axiom-math",
- "axiom-runtime",
- "axiom-state",
- "axiom-windowing",
- "console_error_panic_hook",
- "serde",
- "toml",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]

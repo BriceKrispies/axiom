@@ -1,6 +1,0 @@
-axis = "vegetation_density"
-failed_attempts = []
-inexpressible = true
-smallest_api = "A branch primitive (branch_unit_mesh + tree_branches + orient_y_to + branch_instances) plus branch-aligned dense leaf placement in foliage_instances, and [foliage] branches/leaves_per_branch/branch_thickness manifest knobs. App-tier (build.rs/scene.rs); reuses the existing mesh/instance/material pipeline — no backend/shader change. The floating sub-mass card cloud could not express dense, branch-attached foliage through config alone (density capped, cards floated as debris); this is the smallest generator that yields an attached, layered canopy."
-screenshot_command = "cargo run --features visual-target --bin visual-target -- render apps/axiom-gallery/visual_targets/prologue_postcard_001/manifest.toml --backend gpu --out apps/axiom-gallery/visual_targets/prologue_postcard_001/candidate.gpu.png"
-screenshot_proof = "rendered twice byte-identical GPU output (determinism mean=0, max=0; within GPU tolerance mean<=2/max<=40)"

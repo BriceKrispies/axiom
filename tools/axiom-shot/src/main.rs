@@ -26,14 +26,14 @@
 //! Usage:
 //!   cargo run -p axiom-shot [--features offscreen] -- \
 //!     [--app <name>|list] [--backend gpu|canvas2d] [--tick N] [--out PATH] \
-//!     [--quality 0..3] [--frame N] \
+//!     [--quality 0..3] \
 //!     [--script "ticks:key=val,...;..."]
 
 use std::time::Instant;
 
 use axiom::prelude::*;
 use axiom_shot::capture;
-use axiom_shot::registry::{self, BuildParams, HEIGHT, WIDTH};
+use axiom_shot::registry::{self, HEIGHT, WIDTH};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -57,18 +57,12 @@ fn main() {
         .and_then(|t| t.parse::<u64>().ok())
         .unwrap_or_else(|| controls.len().saturating_sub(1) as u64);
 
-    let params = BuildParams {
-        frame: flag(&args, "--frame")
-            .and_then(|f| f.parse().ok())
-            .unwrap_or(0),
-    };
-
-    let mut running = registry::build(&app, &params).unwrap_or_else(|| {
+    let mut running = registry::build(&app).unwrap_or_else(|| {
         eprintln!(
             "axiom-shot: unknown --app '{app}', falling back to 'showcase'. Registered: {:?}",
             registry::names()
         );
-        registry::build("showcase", &params).expect("showcase is always registered")
+        registry::build("showcase").expect("showcase is always registered")
     });
 
     let meshes = running.mesh_set();
@@ -144,7 +138,7 @@ fn main() {
         let built: Vec<(String, FrameOutcome, Vec<(u64, Vec<f32>, Vec<u32>)>, Vec<(u64, Vec<f32>, Vec<u32>)>, Vec<axiom_host::MaterialTexture>)> = names
             .iter()
             .filter_map(|name| {
-                let mut r = registry::build(name, &params)?;
+                let mut r = registry::build(name)?;
                 let m = r.mesh_set();
                 let sm = r.skinned_mesh_set();
                 let mt = r.material_textures();

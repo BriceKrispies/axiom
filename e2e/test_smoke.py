@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page
 
 from demos import DEMOS, with_backend
 
@@ -56,8 +56,6 @@ def test_demo_loads(demo: dict, backend: str, gallery_base_url: str, page: Page)
             _wait_for_log(page, messages, "render backend = Canvas2d")
     elif kind == "canvas2d_app":
         _wait_for_log(page, messages, demo["ready_log"])
-    elif kind == "growth":
-        expect(page.locator("#status")).to_contain_text("Ready", timeout=READY_TIMEOUT_MS)
 
     page.wait_for_timeout(600)  # let a few frames present before sampling
 

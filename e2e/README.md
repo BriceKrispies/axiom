@@ -7,12 +7,12 @@ Cargo package and is not held to the engine's coverage/branchless/architecture l
 
 ## What it checks
 
-`test_smoke.py` enters **every non-multiplayer demo** (netplay is skipped) twice — once
+`test_smoke.py` enters **every registered smoke demo** twice — once
 normally, once with `?backend=canvas2d` (the engine's runtime backend override, read by
 `force_canvas2d()` in `axiom-windowing`). For each visit it asserts:
 
 - the demo's **ready signal** appears (engine run-loop logs `axiom: render backend = …`;
-  2D games log `[<id>] ready`; growth/harness signal via DOM) — a stall times out → fail;
+  2D games log `[<id>] ready`) — a stall times out → fail;
 - **no uncaught page error and no FATAL console error**. The engine logs
   `axiom: FATAL — no render backend available …` if every backend fails, so a silent
   non-render is caught. Benign noise (WebGPU `Device failed at creation` warnings, retro-fps's

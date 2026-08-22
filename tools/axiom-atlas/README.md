@@ -169,7 +169,7 @@ $ ax owns modules/axiom-scene/src/lib.rs
 modules/axiom-scene  [scene]
   class          Engine module (isolated capability)
   layers         kernel, runtime, math, frame, ecs
-  depended on by rotating-cube-demo, engine, render-pipeline
+  depended on by engine, render-pipeline
   laws in force
     - Branchless Law - no if/else, match, for/while/loop, &&/||, ?, if let ...
     - Coverage Law - 100% regions/lines/functions; new code ships with its tests

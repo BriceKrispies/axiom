@@ -181,7 +181,7 @@ pub fn rock_recipe() -> RecipeGraph {
 ///
 /// The neutral [`MeshBuffer`] and `MeshData` are built on the same `axiom-math`
 /// vector types, so this is a plain move of the four streams — the same
-/// translation `apps/axiom-proc-player` does, and the reason the layer's output
+/// translation an app must do, and the reason the layer's output
 /// is deliberately engine-free.
 pub fn bake_rock() -> Option<MeshData> {
     ProcMeshApi::new()

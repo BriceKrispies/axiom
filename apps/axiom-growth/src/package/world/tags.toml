@@ -1,8 +1,0 @@
-# A tag resolves its position from a symbolic `at` ("spawn" | "summit") or an
-# explicit `x`/`z`; its height `y` (metres) is sampled off the terrain when
-# omitted.
-
-[[tag]]
-name = "basecamp"
-kind = "spawn"
-at = "spawn"

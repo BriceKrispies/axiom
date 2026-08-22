@@ -35,12 +35,6 @@ axiom-render = { path = "../../modules/axiom-render" }
 # exactly the ones its registry renders.
 axiom-burnt-rubber = { path = "../../apps/burnt-rubber" }
 axiom-end-zone = { path = "../../apps/end-zone" }
-axiom-gravix = { path = "../../apps/axiom-gravix" }
-axiom-rotating-cube = { path = "../../apps/axiom-rotating-cube" }
-axiom-shader-crucible = { path = "../../apps/shader-crucible" }
-axiom-sports-physics-lab = { path = "../../apps/axiom-sports-physics-lab" }
-# The animation lab's posed-figure scene — captured as real pixels (L3), not SVG.
-axiom-animation-lab = { path = "../../apps/axiom-animation-lab" }
 png = "0.17"
 
 [features]
