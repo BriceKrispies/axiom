@@ -139,6 +139,40 @@ pub enum RenderCapability {
     /// Appended above every bit the GPU main-pass WGSL reads (that shader reads
     /// nothing above `2048`), so no existing mask moved.
     HdrTargets = 1 << 13,
+    /// **Multiple render targets**: one geometry pass writing several colour
+    /// attachments at once — the device fact a G-buffer rests on.
+    ///
+    /// Deliberately **not** folded into [`Self::HdrTargets`], and the two are
+    /// genuinely independent measurements. `HdrTargets` asks *can one attachment
+    /// hold a value above one*; this asks *can a pass bind three of them
+    /// simultaneously, inside the device's per-sample byte budget*. A device can
+    /// answer yes to the first and no to the second (a downlevel arm whose
+    /// `max_color_attachments` is one), and a device that renders into three
+    /// 8-bit targets answers yes to the second and no to the first. Folding them
+    /// would make a G-buffer's availability unknowable from either bit alone.
+    ///
+    /// Its degradation is a [`CapabilityDegradation::Drop`], not a substitute,
+    /// and that is the honest answer rather than the convenient one. The two
+    /// obvious stand-ins both fail:
+    ///
+    /// - **Three sequential single-target passes.** The geometry is rasterized
+    ///   three times, so the prepass stops being a prepass; and the whole reason
+    ///   the passes downstream of it (ambient occlusion, screen-space
+    ///   reflections, temporal resolve, motion blur) are affordable is that one
+    ///   geometry pass feeds all four.
+    /// - **The same channels at eight bits.** A screen-space velocity is a UV
+    ///   delta whose useful magnitudes start around `1e-3`; in an 8-bit unorm
+    ///   target every one of them quantizes to zero. A temporal filter reading a
+    ///   silently-zero velocity buffer does not degrade — it smears exactly the
+    ///   pixels the buffer exists to fix, and reports success.
+    ///
+    /// So a backend without this bit omits the prepass and *says so*, and every
+    /// consumer that needs the G-buffer is omitted with it.
+    ///
+    /// Appended above [`Self::HdrTargets`] for the same reason that one was
+    /// appended above bit 12: the GPU main-pass WGSL reads no bit above `2048`,
+    /// so the cross-language contract is unchanged by adding it.
+    GBuffer = 1 << 14,
 }
 
 /// How a backend that lacks a [`RenderCapability`] degrades it. A capability is
@@ -195,7 +229,8 @@ const ALL_CAPABILITY_BITS: u32 = RenderCapability::Textures as u32
     | RenderCapability::Bloom as u32
     | RenderCapability::AerialPerspective as u32
     | RenderCapability::ProceduralSurface as u32
-    | RenderCapability::HdrTargets as u32;
+    | RenderCapability::HdrTargets as u32
+    | RenderCapability::GBuffer as u32;
 
 /// The set of render capabilities a backend will attempt. The hardware GPU backends
 /// use [`Self::all`]; the Canvas 2D software backend uses [`Self::canvas2d`]. Restrict
@@ -269,6 +304,12 @@ impl BackendCapabilityProfile {
     /// nowhere to be stored between passes, whatever the device underneath is
     /// capable of. The substitute is the target it already writes,
     /// [`crate::HostAttachmentFormat::Rgba8UnormSrgb`].
+    ///
+    /// And it drops [`RenderCapability::GBuffer`] for the same literal reason,
+    /// one step further: with no render targets there is no such thing as
+    /// *several* of them. This one is a [`CapabilityDegradation::Drop`] rather
+    /// than a substitute — see the capability's own note for why a G-buffer has
+    /// no honest cheaper stand-in.
     pub const fn canvas2d() -> Self {
         Self::all()
             .without(RenderCapability::Textures)
@@ -280,6 +321,7 @@ impl BackendCapabilityProfile {
             .without(RenderCapability::Bloom)
             .without(RenderCapability::AerialPerspective)
             .without(RenderCapability::HdrTargets)
+            .without(RenderCapability::GBuffer)
     }
 
     /// Whether this profile will attempt `cap`.
@@ -329,7 +371,7 @@ impl BackendCapabilityProfile {
 mod tests {
     use super::*;
 
-    const CAPS: [RenderCapability; 14] = [
+    const CAPS: [RenderCapability; 15] = [
         RenderCapability::Textures,
         RenderCapability::AlphaMask,
         RenderCapability::NormalMapping,
@@ -344,6 +386,7 @@ mod tests {
         RenderCapability::AerialPerspective,
         RenderCapability::ProceduralSurface,
         RenderCapability::HdrTargets,
+        RenderCapability::GBuffer,
     ];
 
     #[test]
@@ -356,7 +399,7 @@ mod tests {
         });
         assert_ne!(all, none);
         assert_eq!(none.bits(), 0);
-        assert_eq!(all.bits(), 0b11_1111_1111_1111);
+        assert_eq!(all.bits(), 0b111_1111_1111_1111);
         assert!(format!("{all:?}").contains("BackendCapabilityProfile"));
         assert!(format!("{:?}", RenderCapability::Textures).contains("Textures"));
     }
@@ -407,8 +450,16 @@ mod tests {
             CapabilityDegradation::Substitute
         );
         // And it has no render targets at all — its framebuffer is a byte
-        // vector — so an HDR attachment has nowhere to live between passes.
+        // vector — so an HDR attachment has nowhere to live between passes,
+        // and *several* attachments even less so.
         assert!(!c.contains(RenderCapability::HdrTargets));
+        assert!(!c.contains(RenderCapability::GBuffer));
+        // The two are separate answers on this backend as much as on any other:
+        // one is a Substitute and one is a Drop.
+        assert_eq!(
+            RenderCapability::GBuffer.degradation(),
+            CapabilityDegradation::Drop
+        );
         // It still runs the CPU SDF march and the neutral CPU post effects. In
         // particular the whole-image colour grade survives: `PostProcess` is the
         // grade, not the bloom, which is exactly why they are separate bits.
@@ -477,6 +528,9 @@ mod tests {
         // Appended above every mask the WGSL reads, for the same reason bit 12
         // was: the cross-language contract above is unchanged by adding it.
         assert_eq!(RenderCapability::HdrTargets as u32, 8192);
+        // Bit 14, appended for the same reason again. Nothing below it moved,
+        // which is what keeps every mask the main-pass WGSL hardcodes valid.
+        assert_eq!(RenderCapability::GBuffer as u32, 16384);
         // Every bit is distinct: the OR of all of them has as many set bits as
         // there are capabilities, which a duplicated discriminant would break.
         assert_eq!(
@@ -523,5 +577,47 @@ mod tests {
         // The Canvas 2D software rasterizer is on the refusing side of the line.
         assert!(!BackendCapabilityProfile::canvas2d()
             .supports_attachment(HostAttachmentFormat::Rgba16Float));
+    }
+
+    /// **The two render-target capabilities are orthogonal**, and the gate proves
+    /// it in all four combinations. `supports_attachment` answers only the
+    /// precision question, so a profile that can hold a half-float target still
+    /// says nothing about whether a pass may bind three of them — which is
+    /// exactly why a G-buffer has to consult both bits and not one.
+    #[test]
+    fn the_multi_target_bit_is_independent_of_the_precision_bit() {
+        let all = BackendCapabilityProfile::all();
+        let combos = [
+            (true, true),
+            (true, false),
+            (false, true),
+            (false, false),
+        ];
+        combos.iter().for_each(|&(hdr, mrt)| {
+            let p = [
+                all.without(RenderCapability::HdrTargets),
+                all.with(RenderCapability::HdrTargets),
+            ][usize::from(hdr)];
+            let p = [
+                p.without(RenderCapability::GBuffer),
+                p.with(RenderCapability::GBuffer),
+            ][usize::from(mrt)];
+            // The precision gate follows the precision bit and nothing else.
+            assert_eq!(
+                p.supports_attachment(HostAttachmentFormat::Rgba16Float),
+                hdr,
+                "hdr={hdr} mrt={mrt}"
+            );
+            assert_eq!(p.contains(RenderCapability::GBuffer), mrt);
+            // And the 8-bit target and the depth slot are open in every combo:
+            // neither bit can take away what every arm already has.
+            assert!(p.supports_attachment(HostAttachmentFormat::Rgba8UnormSrgb));
+            assert!(p.supports_attachment(HostAttachmentFormat::Depth32Float));
+        });
+        // Turning MRT off changes exactly one bit — its own.
+        assert_eq!(
+            all.bits() ^ all.without(RenderCapability::GBuffer).bits(),
+            RenderCapability::GBuffer as u32
+        );
     }
 }

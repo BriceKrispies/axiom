@@ -46,6 +46,7 @@ use crate::frame_bloom::FrameBloom;
 use crate::frame_depth_fog::FrameDepthFog;
 use crate::frame_postprocess::FramePostProcess;
 use crate::frame_sky::FrameSky;
+use crate::frame_tonemap::FrameTonemap;
 
 /// The app-authored render look a backend binds with.
 ///
@@ -67,6 +68,7 @@ pub struct FrameRenderLook {
     sky: Option<FrameSky>,
     bloom: Option<FrameBloom>,
     grade: Option<FramePostProcess>,
+    tonemap: Option<FrameTonemap>,
 }
 
 impl FrameRenderLook {
@@ -78,6 +80,7 @@ impl FrameRenderLook {
             sky: None,
             bloom: None,
             grade: None,
+            tonemap: None,
         }
     }
 
@@ -123,6 +126,23 @@ impl FrameRenderLook {
         self
     }
 
+    /// This look with a **tone map** — the curve scene-referred radiance is
+    /// presented through, and the app's opt-in to a high-dynamic-range scene
+    /// target.
+    ///
+    /// Unlike every other part of this look, it changes what the intermediate
+    /// target *is*: a backend that honours it renders the frame into a float
+    /// attachment where a fragment may emit a value above display white, instead
+    /// of the 8-bit intermediate that clamps one. That is why it is an opt-in
+    /// and has no default — see [`FrameTonemap`]. Gated by
+    /// [`crate::RenderCapability::HdrTargets`], so a backend whose device cannot
+    /// hold a float attachment reports the drop and presents the 8-bit chain
+    /// rather than silently rendering a different picture.
+    pub const fn with_tonemap(mut self, tonemap: FrameTonemap) -> Self {
+        self.tonemap = Some(tonemap);
+        self
+    }
+
     /// The hemisphere ambient filling unlit faces. Always present.
     pub const fn ambient(&self) -> FrameAmbient {
         self.ambient
@@ -148,6 +168,12 @@ impl FrameRenderLook {
     /// presented exactly as the raster produced it).
     pub const fn grade(&self) -> Option<FramePostProcess> {
         self.grade
+    }
+
+    /// The tone map, or `None` when the app authored none — in which case the
+    /// frame is presented through the 8-bit chain exactly as it always was.
+    pub const fn tonemap(&self) -> Option<FrameTonemap> {
+        self.tonemap
     }
 }
 
@@ -188,6 +214,10 @@ mod tests {
         assert!(look.sky().is_none());
         assert!(look.bloom().is_none());
         assert!(look.grade().is_none());
+        assert!(
+            look.tonemap().is_none(),
+            "an unauthored look must not opt into the HDR scene target"
+        );
         assert_eq!(
             look,
             FrameRenderLook::lit_by(FrameAmbient::default_hemisphere())
@@ -219,8 +249,19 @@ mod tests {
         assert!(with_grade.sky().is_none());
         assert!(with_grade.depth_fog().is_none());
 
+        let with_tonemap = base.with_tonemap(FrameTonemap::filmic());
+        assert_eq!(with_tonemap.tonemap(), Some(FrameTonemap::filmic()));
+        assert!(with_tonemap.grade().is_none());
+        assert!(with_tonemap.bloom().is_none());
+        assert!(with_tonemap.sky().is_none());
+        assert!(with_tonemap.depth_fog().is_none());
+        // And the reverse: authoring a grade is not authoring a tone map. The two
+        // are different stages on different numbers, and conflating them is what
+        // would silently regrade every app that already authors a grade.
+        assert!(with_grade.tonemap().is_none());
+
         // The ambient survives every addition.
-        [with_fog, with_sky, with_bloom, with_grade]
+        [with_fog, with_sky, with_bloom, with_grade, with_tonemap]
             .iter()
             .for_each(|l| assert_eq!(l.ambient(), FrameAmbient::default_hemisphere()));
     }
@@ -235,12 +276,14 @@ mod tests {
             .with_sky(sky())
             .with_bloom(FrameBloom::moonlit())
             .with_grade(FramePostProcess::low_key())
+            .with_tonemap(FrameTonemap::filmic())
             .with_ambient(night);
         assert_eq!(look.ambient(), night);
         assert_eq!(look.depth_fog(), Some(fog()));
         assert_eq!(look.sky(), Some(sky()));
         assert_eq!(look.bloom(), Some(FrameBloom::moonlit()));
         assert_eq!(look.grade(), Some(FramePostProcess::low_key()));
+        assert_eq!(look.tonemap(), Some(FrameTonemap::filmic()));
     }
 
     #[test]
@@ -250,12 +293,14 @@ mod tests {
             .with_depth_fog(fog())
             .with_sky(sky())
             .with_bloom(FrameBloom::moonlit())
-            .with_grade(FramePostProcess::low_key());
+            .with_grade(FramePostProcess::low_key())
+            .with_tonemap(FrameTonemap::filmic());
         assert_eq!(full.ambient(), night);
         assert_eq!(full.depth_fog(), Some(fog()));
         assert_eq!(full.sky(), Some(sky()));
         assert_eq!(full.bloom(), Some(FrameBloom::moonlit()));
         assert_eq!(full.grade(), Some(FramePostProcess::low_key()));
+        assert_eq!(full.tonemap(), Some(FrameTonemap::filmic()));
 
         assert_eq!(full, full);
         assert_ne!(full, FrameRenderLook::default());
@@ -267,6 +312,7 @@ mod tests {
                 .with_sky(sky())
                 .with_bloom(FrameBloom::highlights())
                 .with_grade(FramePostProcess::low_key())
+                .with_tonemap(FrameTonemap::filmic())
         );
         assert_ne!(
             full,
@@ -275,6 +321,17 @@ mod tests {
                 .with_sky(sky())
                 .with_bloom(FrameBloom::moonlit())
                 .with_grade(FramePostProcess::cinematic())
+                .with_tonemap(FrameTonemap::filmic())
+        );
+        // Dropping only the tone map is a different look too — the field the
+        // whole HDR path keys on cannot be invisible to equality.
+        assert_ne!(
+            full,
+            FrameRenderLook::lit_by(night)
+                .with_depth_fog(fog())
+                .with_sky(sky())
+                .with_bloom(FrameBloom::moonlit())
+                .with_grade(FramePostProcess::low_key())
         );
         assert!(format!("{full:?}").contains("FrameRenderLook"));
     }
@@ -287,8 +344,20 @@ mod tests {
             .with_bloom(FrameBloom::highlights())
             .with_bloom(FrameBloom::moonlit())
             .with_grade(FramePostProcess::cinematic())
-            .with_grade(FramePostProcess::low_key());
+            .with_grade(FramePostProcess::low_key())
+            .with_tonemap(FrameTonemap::filmic())
+            .with_tonemap(FrameTonemap::blended(
+                Ratio::finite_or_zero(0.0),
+                Ratio::finite_or_zero(1.0),
+            ));
         assert_eq!(look.bloom(), Some(FrameBloom::moonlit()));
         assert_eq!(look.grade(), Some(FramePostProcess::low_key()));
+        assert_eq!(
+            look.tonemap(),
+            Some(FrameTonemap::blended(
+                Ratio::finite_or_zero(0.0),
+                Ratio::finite_or_zero(1.0)
+            ))
+        );
     }
 }

@@ -64,6 +64,25 @@ pub struct FrameCamera {
 impl FrameCamera {
     /// A camera from its column-major `view`, `projection`, and precomputed
     /// `view_proj` (`projection * view`) matrices.
+    /// The stand-in for a frame that carries no camera: all three matrices
+    /// identity.
+    ///
+    /// Deliberately not a derived `Default`, which would be all **zeros** — a
+    /// zero projection is singular, and a consumer that inverts it (screen-space
+    /// ambient occlusion does) would get infinities rather than a harmless
+    /// no-op. Identity is the value the backends already substituted when they
+    /// were handed a bare view-projection, so this preserves that behaviour
+    /// under a name instead of at each call site.
+    pub const IDENTITY: FrameCamera = {
+        const I: [f32; 16] = [
+            1.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ];
+        FrameCamera::new(I, I, I)
+    };
+
     pub const fn new(view: [f32; 16], projection: [f32; 16], view_proj: [f32; 16]) -> Self {
         FrameCamera {
             view,

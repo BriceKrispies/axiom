@@ -6,6 +6,10 @@ meaningful_dependency = "Host consumes runtime (`Runtime`, `RuntimeStepRecord`, 
 
 introduced_capabilities = [
     "HostApi",
+    # The neutral procedural-bake contract: an app authors the request, a
+    # backend runs it on its device. It lives here because Module Law #8 will
+    # not let `gpu-backend` publish a second type for the same thing.
+    "ProceduralBakeRequest",
     "HostStepDriver",
     "Pixels",
     "Orientation",

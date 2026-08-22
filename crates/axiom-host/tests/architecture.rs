@@ -316,6 +316,12 @@ fn lib_exports_are_curated_set() {
         "pub use host_orientation::Orientation;",
         "pub use host_result::HostResult;",
         "pub use host_safe_area_insets::HostSafeAreaInsets;",
+        // A request to bake one procedural surface on the GPU. The neutral
+        // contract between the app that authors it and the backend that runs
+        // it — Module Law #8 forbids the backend publishing its own.
+        "pub use procedural_bake::BakeOutput;",
+        "pub use procedural_bake::ProceduralBakeMaps;",
+        "pub use procedural_bake::ProceduralBakeRequest;",
         "pub use pixels::Pixels;",
         "pub use render_scale::RenderScale;",
         "pub use render_scale::RenderScaleController;",
@@ -384,11 +390,22 @@ fn lib_exports_are_curated_set() {
         "pub use frame_retro_32bit::FrameRetro32BitProfile;",
         "pub use frame_volumetrics::apply_frame_volumetrics;",
         "pub use frame_volumetrics::FrameVolumetrics;",
+        // The app's authored tone map. Also the switch for the whole HDR path:
+        // a scene target is only `Rgba16Float` when an app has authored one AND
+        // the device granted `HdrTargets`, so this is what decides whether a
+        // value above 1.0 survives the scene pass at all.
+        "pub use frame_tonemap::FrameTonemap;",
         // A material's albedo pixels plus how they must be filtered. Bind-time
         // resident state rather than frame-packet data, and the one texture
         // property a backend cannot derive from the payload itself.
         "pub use material_texture::MaterialTexture;",
         "pub use material_texture::TextureSampling;",
+        // One non-albedo map's extent + RGBA8 texels — the payload behind each of
+        // the carrier's four optional map slots (normal, ORM+height, detail,
+        // macro). Exported because the producer of those slots lives in another
+        // crate (`axiom`'s `RunningApp::material_textures`) and must be able to
+        // name what it builds.
+        "pub use material_texture::MapPixels;",
         "pub use frame_raster_stats::FrameDepthCueStats;",
         "pub use frame_raster_stats::FrameRasterStats;",
         "pub use frame_submission_report::BackendKind;",

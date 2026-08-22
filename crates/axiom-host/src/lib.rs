@@ -49,6 +49,7 @@ mod frame_render_look;
 mod frame_retro_32bit;
 mod frame_sky;
 mod frame_submission_report;
+mod frame_tonemap;
 mod frame_volumetrics;
 mod handles;
 mod host_adapter_request;
@@ -97,6 +98,7 @@ mod score;
 mod sdf_scene;
 mod sprite_draw2d;
 mod text2d;
+mod procedural_bake;
 
 pub use host_api::HostApi;
 
@@ -114,6 +116,9 @@ pub use host_skip_reason::HostSkipReason;
 pub use host_step_driver::HostStepDriver;
 pub use host_step_plan::HostStepPlan;
 pub use host_viewport::HostViewport;
+pub use procedural_bake::BakeOutput;
+pub use procedural_bake::ProceduralBakeMaps;
+pub use procedural_bake::ProceduralBakeRequest;
 pub use pixels::Pixels;
 pub use render_scale::RenderScale;
 pub use render_scale::RenderScaleController;
@@ -183,11 +188,13 @@ pub use frame_sky::FrameSky;
 pub use frame_submission_report::BackendKind;
 pub use frame_submission_report::FrameFeature;
 pub use frame_submission_report::FrameSubmissionReport;
+pub use frame_tonemap::FrameTonemap;
 pub use frame_volumetrics::apply_frame_volumetrics;
 pub use frame_volumetrics::FrameVolumetrics;
 
 // A material's albedo pixels plus the sampling mode a backend cannot infer from
 // them. Bind-time resident state, not per-frame packet data.
+pub use material_texture::MapPixels;
 pub use material_texture::MaterialTexture;
 pub use material_texture::TextureSampling;
 
