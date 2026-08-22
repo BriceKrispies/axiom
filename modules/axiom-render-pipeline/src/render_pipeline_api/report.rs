@@ -43,6 +43,20 @@ impl RenderPipelineApi {
         report.view_projection
     }
 
+    /// The camera's view matrix — the other half of
+    /// [`Self::report_view_projection`], which cannot be recovered from it.
+    pub fn report_view(&self, report: &RenderReport) -> Mat4 {
+        report.view
+    }
+
+    /// The camera's raw perspective projection, **without** the wgpu depth
+    /// remap. A consumer that inverts it (screen-space AO reconstructing a
+    /// view-space position from a linear depth) wants the projection the depth
+    /// was produced from, not one with a remap folded in.
+    pub fn report_projection(&self, report: &RenderReport) -> Mat4 {
+        report.projection
+    }
+
     pub fn report_draw_count(&self, report: &RenderReport) -> usize {
         report.draws.len()
     }

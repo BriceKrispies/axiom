@@ -166,9 +166,16 @@ impl WindowingApi {
                 Vec<(u32, [f32; 3], [f32; 3], f32)>,
                 [f32; 16],
                 Vec<(u64, u64, Vec<f32>, u32)>,
-                // Camera view-projection + per-instance contact-shadow caster flags
+                // The frame's camera + per-instance contact-shadow caster flags
                 // (batch-expansion order) for the Canvas planar-shadow pass.
-                [f32; 16],
+                //
+                // The whole camera, not just its view-projection: the software
+                // rasterizer reads only the product, but the GPU arm's
+                // depth/normal prepass works in view space and the ambient
+                // occlusion above it inverts the projection, and neither is
+                // recoverable from the product. `FrameOutcome` publishes all
+                // three; an app hands them straight across.
+                axiom_host::FrameCamera,
                 Vec<bool>,
                 // The frame's optional SDF raymarch scene (composited over the
                 // meshes by both live arms). This is the one public live entry that
@@ -228,7 +235,7 @@ impl WindowingApi {
                 Vec<(u32, [f32; 3], [f32; 3], f32)>,
                 [f32; 16],
                 Vec<(u64, u64, Vec<f32>, u32)>,
-                [f32; 16],
+                axiom_host::FrameCamera,
                 Vec<bool>,
                 Option<axiom_host::SdfScene>,
             ) + 'static,
@@ -284,7 +291,7 @@ impl WindowingApi {
                 Vec<(u32, [f32; 3], [f32; 3], f32)>,
                 [f32; 16],
                 Vec<(u64, u64, Vec<f32>, u32)>,
-                [f32; 16],
+                axiom_host::FrameCamera,
                 Vec<bool>,
                 Option<axiom_host::SdfScene>,
             ) + 'static,
@@ -468,7 +475,15 @@ impl WindowingApi {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_vp: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product.
+        //
+        // It used to be only `camera_view_proj`, and the two paths below both
+        // fabricated identity for the missing halves. That was true enough for
+        // the software rasterizer, which reads only the product; it was silently
+        // wrong for the GPU arm the moment a pass needed view space, because a
+        // product cannot be split back into its factors and an identity
+        // projection is not the camera's.
+        camera: axiom_host::FrameCamera,
         casters: &[bool],
         sdf: Option<axiom_host::SdfScene>,
     ) {
@@ -483,7 +498,7 @@ impl WindowingApi {
                     lights,
                     light_vp,
                     batches,
-                    camera_view_proj,
+                    camera,
                     casters,
                     sdf.clone(),
                 );
@@ -599,7 +614,7 @@ impl WindowingApi {
                 // The camera view-projection and the per-instance contact-shadow
                 // caster flags (in batch-expansion order) the Canvas planar-shadow
                 // pass needs; the GPU arm ignores both.
-                [f32; 16],
+                axiom_host::FrameCamera,
                 Vec<bool>,
                 // The frame's optional SDF raymarch scene (composited over the
                 // meshes by both live arms). `None` on frames with no SDF shapes.
@@ -710,9 +725,10 @@ impl WindowingApi {
                     return;
                 }
                 let tick = win.borrow_mut().step();
-                const IDENTITY_VP: [f32; 16] = [
-                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-                ];
+                // A frame with no camera of its own. `FrameCamera::IDENTITY`
+                // rather than a local zero/identity matrix, so "no camera" has
+                // one spelling and an invertible projection.
+                const IDENTITY_VP: axiom_host::FrameCamera = axiom_host::FrameCamera::IDENTITY;
                 // Live: step the app and record this frame. Scrubbing: freeze the
                 // app (don't call its closure) and re-present the recorded frame.
                 // The canvas planar-shadow inputs (camera + casters) are not
@@ -864,7 +880,7 @@ impl WindowingApi {
                 vec![(SINGLE_MESH_ID, DEFAULT_MATERIAL_ID, instances, count)],
                 // Single-mesh apps mark no contact-shadow casters, so the camera
                 // is unused (identity) and the caster list is empty.
-                NO_SHADOW,
+                axiom_host::FrameCamera::IDENTITY,
                 Vec::new(),
                 // The single-mesh entry authors no SDF shapes.
                 None,
@@ -893,7 +909,11 @@ impl WindowingApi {
         // the single-mesh instances plus the camera view-projection and
         // per-instance contact-shadow caster flags (in instance order) the Canvas
         // planar-shadow pass needs.
-        F: FnMut(u64, u32, u32) -> ([f32; 4], Vec<f32>, u32, [f32; 16], Vec<bool>) + 'static,
+        // The camera travels whole here too, for the same reason as the
+        // multi-mesh entry: the GPU arm needs the view and the projection, and
+        // neither can be recovered from their product.
+        F: FnMut(u64, u32, u32) -> ([f32; 4], Vec<f32>, u32, axiom_host::FrameCamera, Vec<bool>)
+            + 'static,
     {
         const SINGLE_MESH_ID: u64 = 0;
         const DEFAULT_MATERIAL_ID: u64 = 0;
@@ -1079,9 +1099,9 @@ impl WindowingApi {
                 // Streaming terrain marks no contact-shadow casters: identity
                 // camera, empty caster list (the Canvas planar-shadow pass is a
                 // no-op for it).
-                const NO_CAMERA: [f32; 16] = [
-                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-                ];
+                // Streaming terrain drives its own camera through the presenter
+                // rather than the packet, so this frame names none.
+                const NO_CAMERA: axiom_host::FrameCamera = axiom_host::FrameCamera::IDENTITY;
                 let _ = be.borrow().present(
                     tick,
                     width,
@@ -1143,7 +1163,7 @@ impl WindowingApi {
                 Vec<(u32, [f32; 3], [f32; 3], f32)>,
                 [f32; 16],
                 Vec<(u64, u64, Vec<f32>, u32)>,
-                [f32; 16],
+                axiom_host::FrameCamera,
                 Vec<bool>,
                 Option<axiom_host::SdfScene>,
                 Option<(Vec<f32>, Vec<u32>)>,
@@ -1436,7 +1456,15 @@ impl LivePresenter {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_vp: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product.
+        //
+        // It used to be only `camera_view_proj`, and the two paths below both
+        // fabricated identity for the missing halves. That was true enough for
+        // the software rasterizer, which reads only the product; it was silently
+        // wrong for the GPU arm the moment a pass needed view space, because a
+        // product cannot be split back into its factors and an identity
+        // projection is not the camera's.
+        camera: axiom_host::FrameCamera,
         casters: &[bool],
         sdf: Option<axiom_host::SdfScene>,
     ) -> (axiom_host::PresentationLedger, bool) {
@@ -1448,7 +1476,7 @@ impl LivePresenter {
             lights,
             light_vp,
             batches,
-            camera_view_proj,
+            camera,
             casters,
             sdf.clone(),
             self.look,
@@ -1470,7 +1498,7 @@ impl LivePresenter {
                 lights,
                 light_vp,
                 batches,
-                camera_view_proj,
+                camera,
                 casters,
                 sdf,
             );
@@ -1679,7 +1707,15 @@ impl LivePresenter {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_vp: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product.
+        //
+        // It used to be only `camera_view_proj`, and the two paths below both
+        // fabricated identity for the missing halves. That was true enough for
+        // the software rasterizer, which reads only the product; it was silently
+        // wrong for the GPU arm the moment a pass needed view space, because a
+        // product cannot be split back into its factors and an identity
+        // projection is not the camera's.
+        camera: axiom_host::FrameCamera,
         casters: &[bool],
         sdf: Option<axiom_host::SdfScene>,
     ) {
@@ -1702,7 +1738,7 @@ impl LivePresenter {
                 batches,
                 &programs,
                 &self.pending_skinned.borrow(),
-                camera_view_proj,
+                camera,
                 casters,
                 sdf,
                 self.look,
@@ -1778,7 +1814,15 @@ impl LivePresenter {
         lights: &[(u32, [f32; 3], [f32; 3], f32)],
         light_vp: [f32; 16],
         batches: &[(u64, u64, Vec<f32>, u32)],
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product.
+        //
+        // It used to be only `camera_view_proj`, and the two paths below both
+        // fabricated identity for the missing halves. That was true enough for
+        // the software rasterizer, which reads only the product; it was silently
+        // wrong for the GPU arm the moment a pass needed view space, because a
+        // product cannot be split back into its factors and an identity
+        // projection is not the camera's.
+        camera: axiom_host::FrameCamera,
         casters: &[bool],
         sdf: Option<axiom_host::SdfScene>,
     ) {
@@ -1789,9 +1833,8 @@ impl LivePresenter {
             .unwrap_or(false);
         // The identity view-projection a re-presented (scrubbed) frame uses — its
         // recorded args carry no camera/casters, matching the run loop's scrub path.
-        const IDENTITY_VP: [f32; 16] = [
-            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-        ];
+        // A replayed frame carries no camera of its own.
+        const IDENTITY_VP: axiom_host::FrameCamera = axiom_host::FrameCamera::IDENTITY;
         match scrubbing {
             true => {
                 // Re-present the selected recorded frame; nothing to present if the
@@ -1825,7 +1868,7 @@ impl LivePresenter {
                     lights,
                     light_vp,
                     batches,
-                    camera_view_proj,
+                    camera,
                     casters,
                     sdf,
                 );
@@ -1903,7 +1946,15 @@ impl LiveBackend {
         // `super::SurfaceBinding::programs_for`.
         programs: &[u64],
         skinned: &[(u64, u64, [f32; 16], [f32; 16], [f32; 4], Vec<[f32; 16]>)],
-        camera_view_proj: [f32; 16],
+        // The frame's camera — view, projection and their product.
+        //
+        // It used to be only `camera_view_proj`, and the two paths below both
+        // fabricated identity for the missing halves. That was true enough for
+        // the software rasterizer, which reads only the product; it was silently
+        // wrong for the GPU arm the moment a pass needed view space, because a
+        // product cannot be split back into its factors and an identity
+        // projection is not the camera's.
+        camera: axiom_host::FrameCamera,
         casters: &[bool],
         sdf: Option<axiom_host::SdfScene>,
         // The app-authored look. The GPU arm bound its sky and bloom at
@@ -1922,7 +1973,7 @@ impl LiveBackend {
                 light_vp,
                 // The camera the GPU sky pass reconstructs each pixel's world ray
                 // from. The Canvas arm gets the same matrix on its packet below.
-                camera_view_proj,
+                camera,
                 batches,
                 programs,
                 skinned,
@@ -1938,7 +1989,7 @@ impl LiveBackend {
                     lights,
                     light_vp,
                     batches,
-                    camera_view_proj,
+                    camera,
                     casters,
                     sdf,
                     look,
@@ -2050,7 +2101,7 @@ fn frame_packet_from_batches(
     lights: &[(u32, [f32; 3], [f32; 3], f32)],
     light_vp: [f32; 16],
     batches: &[(u64, u64, Vec<f32>, u32)],
-    camera_view_proj: [f32; 16],
+    camera: axiom_host::FrameCamera,
     casters: &[bool],
     sdf: Option<axiom_host::SdfScene>,
     // The app-authored render look. The software backend honours none of its sky
@@ -2110,13 +2161,18 @@ fn frame_packet_from_batches(
     let directional = lights.iter().filter(|(kind, ..)| *kind == 0).count() as u32;
     let point = lights.iter().filter(|(kind, ..)| *kind == 1).count() as u32;
     let features = FrameFeatureSet::new(false, directional > 0, directional, point);
-    // The Canvas backend's planar-shadow pass projects caster geometry through the
-    // camera, so the packet carries the real camera (view/projection are unused by
-    // the software path, so identity is fine; only the view-projection is read).
-    let identity = [
-        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0_f32,
-    ];
-    let camera = Some(FrameCamera::new(identity, identity, camera_view_proj));
+    // The Canvas backend's planar-shadow pass projects caster geometry through
+    // the camera, so the packet carries it.
+    //
+    // It used to carry `FrameCamera::new(identity, identity, camera_view_proj)`
+    // — real product, FABRICATED view and projection — on the reasoning that the
+    // software path reads only the product. True of that path, and silently
+    // wrong for every other consumer of the packet: an identity projection is
+    // not the camera's, a product cannot be split back into its factors, and
+    // nothing downstream could tell the difference between a real camera and
+    // that. The GPU depth/normal prepass and the ambient occlusion above it both
+    // need the real halves, and this is where they were being lost.
+    let camera = Some(camera);
     let packet = FramePacket::new(
         tick,
         tick,

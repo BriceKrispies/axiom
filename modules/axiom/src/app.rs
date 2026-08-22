@@ -301,7 +301,11 @@ impl App {
                     outcome.mesh_batches(),
                     // Per-instance caster flags (matching `mesh_batches`' order)
                     // drive the Canvas backend's planar contact shadows.
-                    outcome.camera_view_proj(),
+                    axiom_host::FrameCamera::new(
+                        outcome.camera_view(),
+                        outcome.camera_projection(),
+                        outcome.camera_view_proj(),
+                    ),
                     outcome.mesh_batch_casters(),
                     // The frame's SDF raymarch scene, composited over the meshes
                     // by the live backend.
@@ -358,7 +362,11 @@ impl App {
                     lights,
                     outcome.light_view_proj(),
                     outcome.mesh_batches(),
-                    outcome.camera_view_proj(),
+                    axiom_host::FrameCamera::new(
+                        outcome.camera_view(),
+                        outcome.camera_projection(),
+                        outcome.camera_view_proj(),
+                    ),
                     outcome.mesh_batch_casters(),
                     outcome.sdf_scene().cloned(),
                 )

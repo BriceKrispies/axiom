@@ -250,6 +250,8 @@ pub struct FrameOutcome {
     lights: Vec<LightData>,
     light_view_proj: [f32; 16],
     camera_view_proj: [f32; 16],
+    camera_view: [f32; 16],
+    camera_projection: [f32; 16],
     /// The frame's backend-neutral SDF scene, if it carries any SDF shapes and a
     /// camera — the raymarched primitives a live/canvas backend composites with
     /// the meshes. `None` when the frame has no SDF content.
@@ -293,6 +295,8 @@ impl FrameOutcome {
         lights: Vec<LightData>,
         light_view_proj: [f32; 16],
         camera_view_proj: [f32; 16],
+        camera_view: [f32; 16],
+        camera_projection: [f32; 16],
         sdf: Option<SdfScene>,
         presented: bool,
         recorded: bool,
@@ -306,6 +310,8 @@ impl FrameOutcome {
             lights,
             light_view_proj,
             camera_view_proj,
+            camera_view,
+            camera_projection,
             sdf,
             // Default to the engine hemisphere; `with_ambient` overrides it with
             // the app's authored value. A frame that never sets ambient renders
@@ -418,6 +424,8 @@ impl FrameOutcome {
             Vec::new(),
             Self::IDENTITY_MAT4,
             Self::IDENTITY_MAT4,
+            Self::IDENTITY_MAT4,
+            Self::IDENTITY_MAT4,
             None,
             false,
             false,
@@ -463,6 +471,24 @@ impl FrameOutcome {
     /// ground) projects through this. Identity in a simulation-only frame.
     pub fn camera_view_proj(&self) -> [f32; 16] {
         self.camera_view_proj
+    }
+
+    /// The camera's view matrix, column-major. The other half of
+    /// [`Self::camera_view_proj`] — a product cannot be split into its factors,
+    /// so a backend that works in view space needs this carried, not derived.
+    pub fn camera_view(&self) -> [f32; 16] {
+        self.camera_view
+    }
+
+    /// The camera's raw perspective projection, column-major, **without** the
+    /// wgpu depth remap `camera_view_proj` bakes in.
+    ///
+    /// Screen-space ambient occlusion is what needs it: reconstructing a
+    /// view-space position from the G-buffer's linear depth takes the inverse
+    /// projection, and turning a world-space radius into a pixel radius takes
+    /// `projection[5]`. Both want the projection the depth came from.
+    pub fn camera_projection(&self) -> [f32; 16] {
+        self.camera_projection
     }
 
     /// The frame's backend-neutral SDF scene, if it carries SDF shapes and a
@@ -594,6 +620,8 @@ mod tests {
             Vec::new(),
             [0.0; 16],
             [4.0; 16],
+            [0.0; 16],
+            [0.0; 16],
             None,
             false,
             true,
@@ -641,6 +669,8 @@ mod tests {
             Vec::new(),
             [0.0; 16],
             [0.0; 16],
+            [0.0; 16],
+            [0.0; 16],
             None,
             false,
             false,
@@ -663,6 +693,8 @@ mod tests {
             [0.0; 4],
             Vec::new(),
             Vec::new(),
+            [0.0; 16],
+            [0.0; 16],
             [0.0; 16],
             [0.0; 16],
             None,
@@ -692,6 +724,8 @@ mod tests {
             [0.0; 4],
             Vec::new(),
             Vec::new(),
+            [0.0; 16],
+            [0.0; 16],
             [0.0; 16],
             [0.0; 16],
             None,
@@ -725,6 +759,8 @@ mod tests {
             [0.0; 4],
             Vec::new(),
             Vec::new(),
+            [0.0; 16],
+            [0.0; 16],
             [0.0; 16],
             [0.0; 16],
             Some(scene.clone()),
@@ -765,6 +801,8 @@ mod tests {
                     .with_emissive([0.0, 4.0, 0.0]),
             ],
             Vec::new(),
+            [0.0; 16],
+            [0.0; 16],
             [0.0; 16],
             [0.0; 16],
             None,
@@ -809,6 +847,8 @@ mod tests {
                 LightData::new(1, [2.0, 3.0, -4.0], [1.0, 0.0, 0.0], 2.5),
             ],
             [5.0; 16],
+            [0.0; 16],
+            [0.0; 16],
             [0.0; 16],
             None,
             false,

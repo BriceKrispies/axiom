@@ -25,7 +25,13 @@ pub use axiom_runtime::PreparationTask;
 // carries them (`postMessage`, `window.location.search`) is the app's platform
 // edge, never here.
 pub use axiom_host::{
-    FrameAmbient, FrameBloom, FrameDepthFog, FramePostProcess, FrameSky, HostApi, HostMetrics,
+    // `FrameCamera` is app-facing because presenting a frame now means handing
+    // over the camera whole — view, projection and their product. An app builds
+    // one from the three `FrameOutcome` accessors; it is not something only the
+    // engine names.
+    FrameAmbient, FrameBloom, FrameCamera, FrameDepthFog, FramePostProcess, FrameSky, FrameTonemap,
+    HostApi,
+    HostMetrics,
     HostOutcome, HostOutcomeSet, HostParamValue, HostSessionConfig, HostSessionParams, PlayerId,
     Score,
 };
@@ -34,7 +40,15 @@ pub use axiom_math::{Mat4, Transform, Vec2, Vec3, Vec4};
 // builder that authors one. Re-exported here for the same reason
 // `PreparationTask` is: an app should not Cargo-depend on a layer purely to name
 // the argument of a prelude method.
-pub use axiom_surface::{LightingModel, Surface, SurfaceBuilder, SurfaceChannel};
+pub use axiom_surface::{
+    // `runtime_material` + `MaterialParams` author the hand-written runtime
+    // material shader — the port of Claude-of-Duty's `materials/shader.js`. They
+    // belong in the prelude for the same reason `SurfaceBuilder` does: an app
+    // authors appearance through this vocabulary and should never have to reach
+    // past the engine umbrella to a layer crate to do it.
+    runtime_material, LightingModel, MaterialParams, Surface, SurfaceBuilder, SurfaceChannel,
+    SurfaceKind, UvMode,
+};
 // `Reflect` is the trait an app implements to declare its own dynamic
 // component vocabulary; the rest are the (de)serialization primitives its
 // hand-written impls call.

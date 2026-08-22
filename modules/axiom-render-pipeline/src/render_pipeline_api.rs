@@ -96,6 +96,20 @@ pub struct RenderReport {
     command_count: usize,
     clear_color: [f32; 4],
     view_projection: Mat4,
+    /// The camera's **view** and **projection**, separately.
+    ///
+    /// Not derivable from [`Self::view_projection`]: a product cannot be split
+    /// back into its factors, and a backend that works in *view space* needs
+    /// both halves. Screen-space ambient occlusion is the first consumer — it
+    /// reconstructs a view-space position from a linear depth, which takes the
+    /// inverse projection, and scales a world radius to pixels, which takes
+    /// `projection[5]`. Identity in a camera-less frame, like `view_projection`.
+    ///
+    /// `projection` is the RAW perspective, **without** the `GL_TO_WGPU_DEPTH`
+    /// remap that `view_projection` bakes in — a consumer inverting it wants the
+    /// projection the depth in a G-buffer was actually produced from.
+    view: Mat4,
+    projection: Mat4,
     /// One `(world, colour, emissive, specular, mesh_id, material_id,
     /// surface_program, casts_contact_shadow)` per drawn (visible) object, in
     /// submission order. The caster flag is the scene's per-renderable
@@ -608,6 +622,8 @@ impl RenderPipelineApi {
             command_count,
             clear_color,
             view_projection,
+            view: camera.map_or(Mat4::IDENTITY, |(v, ..)| v),
+            projection: camera.map_or(Mat4::IDENTITY, |(_, p, ..)| p),
             draws,
             lights,
             light_view_proj,

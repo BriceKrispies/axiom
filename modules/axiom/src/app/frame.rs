@@ -243,6 +243,8 @@ impl RunningApp {
                 lights,
                 pipeline.report_light_view_proj(&report),
                 view_projection.as_cols_array(),
+                pipeline.report_view(&report).as_cols_array(),
+                pipeline.report_projection(&report).as_cols_array(),
                 pipeline.report_sdf_scene(&report).cloned(),
                 pipeline.report_presented(&report),
                 pipeline.report_recorded(&report),

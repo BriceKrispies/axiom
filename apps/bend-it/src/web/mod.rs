@@ -113,7 +113,11 @@ pub fn bend_it_start() {
             lights,
             outcome.light_view_proj(),
             outcome.mesh_batches(),
-            outcome.camera_view_proj(),
+            axiom_host::FrameCamera::new(
+                outcome.camera_view(),
+                outcome.camera_projection(),
+                outcome.camera_view_proj(),
+            ),
             outcome.mesh_batch_casters(),
             outcome.sdf_scene().cloned(),
         )

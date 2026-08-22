@@ -512,6 +512,27 @@ impl WindowingApi {
         self.look.grade()
     }
 
+    /// Set the app-authored **tone map** the live backend binds with — and, with
+    /// it, ask for a high-dynamic-range scene target.
+    ///
+    /// This is the one look setter that changes what the renderer *allocates*
+    /// rather than what it computes. Unset (the default) the scene renders into
+    /// an 8-bit intermediate that clamps every fragment at display white, which
+    /// is what every app in this repo was authored against; set, a backend whose
+    /// device carries `axiom_host::RenderCapability::HdrTargets` renders into a
+    /// float target instead and presents it through the curve. A device without
+    /// the capability keeps the 8-bit chain and says so, so authoring one is
+    /// never a way to fail to bind.
+    pub fn set_tonemap(&mut self, tonemap: axiom_host::FrameTonemap) {
+        self.look = self.look.with_tonemap(tonemap);
+    }
+
+    /// The render-look tone map the live backend binds with, if the app authored
+    /// one.
+    pub const fn tonemap(&self) -> Option<axiom_host::FrameTonemap> {
+        self.look.tonemap()
+    }
+
     /// The whole app-authored render look, as one value — what every binder in the
     /// wasm arm threads through to the backend it builds.
     pub const fn render_look(&self) -> axiom_host::FrameRenderLook {
@@ -970,6 +991,17 @@ mod tests {
         w.set_grade(grade);
         assert_eq!(w.grade(), Some(grade));
 
+        // The tone map is the sixth part, and the only one that changes what the
+        // backend allocates rather than what it computes — so the default has to
+        // be absent, and it has to survive riding alongside the other five.
+        assert!(
+            axiom_host::FrameRenderLook::default().tonemap().is_none(),
+            "an app that sets nothing must not be opted into the HDR scene target"
+        );
+        let tonemap = axiom_host::FrameTonemap::filmic();
+        w.set_tonemap(tonemap);
+        assert_eq!(w.tonemap(), Some(tonemap));
+
         // Everything authored above is still there, and `render_look` hands the
         // whole thing over as the one value every binder threads.
         let look = w.render_look();
@@ -978,6 +1010,7 @@ mod tests {
         assert_eq!(look.sky(), Some(sky));
         assert_eq!(look.bloom(), Some(bloom));
         assert_eq!(look.grade(), Some(grade));
+        assert_eq!(look.tonemap(), Some(tonemap));
     }
 
     #[test]

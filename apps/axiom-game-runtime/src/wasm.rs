@@ -339,7 +339,11 @@ impl WasmGame {
             &lights,
             outcome.light_view_proj(),
             &batches,
-            outcome.camera_view_proj(),
+            axiom_host::FrameCamera::new(
+                outcome.camera_view(),
+                outcome.camera_projection(),
+                outcome.camera_view_proj(),
+            ),
             &casters,
             outcome.sdf_scene().cloned(),
         );
