@@ -15,13 +15,19 @@
 
 mod apply;
 mod edit;
+// `proc-macro2` is a dependency for its `span-locations` FEATURE, which is what
+// gives `syn` real file:line for every AST node. Nothing here calls it directly.
+use proc_macro2 as _;
+
 mod graph;
+mod index;
 mod ledger;
+mod observe;
 mod repo;
 mod search;
 mod symbols;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Read as _;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -54,6 +60,14 @@ fn main() -> ExitCode {
         }
     };
 
+    // The detached observer. Runs, records what the worktree did since the last
+    // look, and exits — no ledger row of its own, because it is bookkeeping
+    // rather than something an agent asked for.
+    if cmd == observe::OBSERVE_CMD {
+        observe::observe(&repo);
+        return ExitCode::SUCCESS;
+    }
+
     let args = Args::parse(&argv[1..]);
     let started = Instant::now();
     let mut rec = Record::new(&cmd);
@@ -62,6 +76,8 @@ fn main() -> ExitCode {
         "q" | "search" => cmd_search(&repo, &args, &mut rec, None),
         "def" => cmd_symbol(&repo, &args, &mut rec, true),
         "refs" => cmd_symbol(&repo, &args, &mut rec, false),
+        "impact" => cmd_impact(&repo, &args, &mut rec),
+        "index" => cmd_index(&repo, &mut rec),
         "file" | "files" => cmd_files(&repo, &args, &mut rec),
         "read" => cmd_read(&repo, &args, &mut rec),
         "edit" => cmd_edit(&repo, &args, &mut rec),
@@ -109,6 +125,11 @@ fn main() -> ExitCode {
     };
 
     ledger::append(&repo, &rec);
+    // Writes are OBSERVED, not mediated: this spawns a detached child at most
+    // every few seconds to ask git what the worktree did. It never blocks and
+    // never affects the exit code — see `observe` for why the mandate was
+    // dropped.
+    observe::maybe_spawn(&repo);
     code
 }
 
@@ -234,12 +255,219 @@ fn cmd_symbol(repo: &Repo, args: &Args, rec: &mut Record, definition: bool) -> O
     let sym = args
         .arg(0)
         .ok_or_else(|| Failure::Usage("needs a symbol name".to_owned()))?;
-    let pattern = if definition {
-        symbols::definition_pattern(sym)
-    } else {
-        symbols::reference_pattern(sym)
-    };
-    cmd_search(repo, args, rec, Some(pattern))
+    rec.query = Some(sym.to_owned());
+
+    // The semantic index, not a regex. `--text` falls back to the old pattern
+    // search for the cases the index cannot see — a name inside a macro body, a
+    // TypeScript declaration, a mention in prose you actually want.
+    if args.has("--text") {
+        let pattern = match definition {
+            true => symbols::definition_pattern(sym),
+            false => symbols::reference_pattern(sym),
+        };
+        return cmd_search(repo, args, rec, Some(pattern));
+    }
+
+    let index = index::shard_for(repo, sym).map_err(Failure::Failed)?;
+    let limit = args.limit(60);
+
+    match definition {
+        true => {
+            let defs = index.defs_of(sym);
+            rec.hits = defs.len();
+            rec.files_matched = distinct(defs.iter().map(|d| d.file.as_str()));
+            rec.top_paths = defs.iter().take(10).map(|d| d.file.clone()).collect();
+            emit_defs(args, sym, &defs, limit);
+            Ok(status(defs.len()))
+        }
+        false => {
+            let refs = index.refs_of(sym);
+            rec.hits = refs.len();
+            rec.files_matched = distinct(refs.iter().map(|r| r.file.as_str()));
+            rec.top_paths = refs.iter().take(10).map(|r| r.file.clone()).collect();
+            emit_refs(args, sym, &refs, limit);
+            Ok(status(refs.len()))
+        }
+    }
+}
+
+fn status(n: usize) -> Status {
+    match n {
+        0 => Status::Empty,
+        _ => Status::Found,
+    }
+}
+
+fn distinct<'a>(paths: impl Iterator<Item = &'a str>) -> usize {
+    let mut seen: Vec<&str> = Vec::new();
+    paths.for_each(|p| {
+        if !seen.contains(&p) {
+            seen.push(p);
+        }
+    });
+    seen.len()
+}
+
+fn emit_defs(args: &Args, sym: &str, defs: &[&index::Def], limit: usize) {
+    if args.json() {
+        println!(
+            "{}",
+            serde_json::json!({ "symbol": sym, "count": defs.len(), "defs": defs })
+        );
+        return;
+    }
+    defs.iter().take(limit).for_each(|d| {
+        let q = match d.qualifier.is_empty() {
+            true => String::new(),
+            false => format!("{}::", d.qualifier),
+        };
+        let vis = match d.public {
+            true => "pub ",
+            false => "",
+        };
+        println!("{}:{}: {vis}{} {q}{}", d.file, d.line, d.kind.label(), d.name);
+    });
+    if defs.len() > limit {
+        println!("... {} more (raise --limit)", defs.len() - limit);
+    }
+}
+
+fn emit_refs(args: &Args, sym: &str, refs: &[&index::Ref], limit: usize) {
+    if args.json() {
+        println!(
+            "{}",
+            serde_json::json!({ "symbol": sym, "count": refs.len(), "refs": refs })
+        );
+        return;
+    }
+    refs.iter().take(limit).for_each(|r| {
+        println!("{}:{}: {}", r.file, r.line, r.kind.label());
+    });
+    if refs.len() > limit {
+        println!("... {} more (raise --limit)", refs.len() - limit);
+    }
+}
+
+/// `ax impact <symbol>` — the blast radius of changing it.
+///
+/// Answers the question that decides how a change is scoped, and that this
+/// session got wrong by not asking it: threading `FrameCamera` through the
+/// engine turned out to reach public API consumed by tools and two other apps,
+/// discovered halfway through, by which point the commit boundaries were
+/// already decided.
+///
+/// Groups every reference by the package that owns it, and states each
+/// package's class and the laws in force there — so "this is internal to one
+/// module" and "this crosses into the app tier and is therefore public API" are
+/// distinguishable before the first edit rather than after the first failed
+/// build.
+fn cmd_impact(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
+    let sym = args
+        .arg(0)
+        .ok_or_else(|| Failure::Usage("`impact` needs a symbol name".to_owned()))?;
+    rec.query = Some(sym.to_owned());
+
+    let index = index::shard_for(repo, sym).map_err(Failure::Failed)?;
+    let nodes = graph::load(repo);
+    let defs = index.defs_of(sym);
+    let refs = index.refs_of(sym);
+    rec.hits = refs.len();
+    rec.files_matched = distinct(refs.iter().map(|r| r.file.as_str()));
+
+    // Package -> (references, files touched).
+    let mut by_pkg: BTreeMap<String, (usize, Vec<String>)> = BTreeMap::new();
+    refs.iter().for_each(|r| {
+        let owner = graph::owner(&nodes, &r.file).map(|n| n.name.clone());
+        let key = owner.unwrap_or_else(|| "(unowned)".to_owned());
+        let slot = by_pkg.entry(key).or_insert((0, Vec::new()));
+        slot.0 += 1;
+        if !slot.1.contains(&r.file) {
+            slot.1.push(r.file.clone());
+        }
+    });
+
+    let home: Vec<String> = defs
+        .iter()
+        .filter_map(|d| graph::owner(&nodes, &d.file).map(|n| n.name.clone()))
+        .collect();
+    let crosses: Vec<&String> = by_pkg.keys().filter(|k| !home.contains(k)).collect();
+
+    if args.json() {
+        let pkgs: Vec<_> = by_pkg
+            .iter()
+            .map(|(name, (n, files))| {
+                serde_json::json!({ "package": name, "refs": n, "files": files })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({
+                "symbol": sym,
+                "defined_in": home,
+                "packages": pkgs,
+                "crosses_package_boundary": !crosses.is_empty(),
+            })
+        );
+        return Ok(status(refs.len()));
+    }
+
+    println!("{sym}");
+    defs.iter().for_each(|d| {
+        let owner = graph::owner(&nodes, &d.file)
+            .map(|n| format!("  [{}]", n.name))
+            .unwrap_or_default();
+        println!("  defined  {} {}:{}{owner}", d.kind.label(), d.file, d.line);
+    });
+    println!(
+        "  {} reference(s) across {} file(s) in {} package(s)",
+        refs.len(),
+        rec.files_matched,
+        by_pkg.len()
+    );
+    by_pkg.iter().for_each(|(name, (n, files))| {
+        let node = graph::find(&nodes, name);
+        let class = node
+            .map(|x| x.class.label())
+            .unwrap_or("outside the workspace");
+        println!("\n  {name}  ({class})");
+        println!("    {n} reference(s) in {} file(s)", files.len());
+        node.map(|x| {
+            graph::laws(x.class)
+                .iter()
+                .for_each(|law| println!("    - {law}"));
+        });
+        files.iter().take(6).for_each(|f| println!("      {f}"));
+        if files.len() > 6 {
+            println!("      ... {} more", files.len() - 6);
+        }
+    });
+    if !crosses.is_empty() {
+        println!(
+            "\n  CROSSES A PACKAGE BOUNDARY into: {}",
+            crosses
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!(
+            "  Changing its shape is a change to published API, not an internal edit."
+        );
+    }
+    Ok(status(refs.len()))
+}
+
+/// `ax index` — rebuild the semantic index and say what is in it.
+fn cmd_index(repo: &Repo, rec: &mut Record) -> Outcome {
+    let built = index::build(repo).map_err(Failure::Failed)?;
+    rec.hits = built.defs + built.refs;
+    println!(
+        "indexed {} file(s): {} definitions, {} references",
+        built.file_count,
+        built.defs,
+        built.refs
+    );
+    Ok(Status::Found)
 }
 
 fn cmd_files(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {

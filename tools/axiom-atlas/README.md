@@ -36,8 +36,11 @@ Measured on this repo (3,815 tracked files, ~2,000 Rust sources), warm cache:
 ```text
 Search
   ax q <regex> [--path RE] [--lang L] [--limit N] [-i] [-F] [--json]
-  ax def <symbol>                  where a symbol is defined (Rust + TS)
-  ax refs <symbol>                 every mention of a symbol
+  ax def <symbol>                  where a symbol is defined
+  ax refs <symbol>                 every real reference, with its kind
+  ax impact <symbol>               blast radius: packages, files, laws
+  ax index                         rebuild the semantic index
+  (add --text to def/refs for the old regex search)
   ax file <regex>                  find files by path
 
 Read and change (scoped to this repo, always)
@@ -68,6 +71,69 @@ Exit codes: `0` found · `1` nothing found (grep convention) · `2` usage ·
 Environment: `AXIOM_ATLAS_AGENT`, `AXIOM_ATLAS_SESSION`,
 `AXIOM_ATLAS_NO_LEDGER`, `AXIOM_ATLAS_ROOT`, `AXIOM_ATLAS_DEBUG`,
 `AXIOM_ATLAS_REF_ROOTS`.
+
+## The semantic index
+
+`def`, `refs` and `impact` read a `syn`-parsed index of the whole tree rather
+than a regex. Comments and string literals are not in an AST, so they cannot be
+false positives, and every reference arrives with its role attached — call,
+path, import, macro.
+
+Measured on this repo: a text search for one type returned **123** hits; the
+index returns **105** references. The eighteen were prose, including a comment
+naming an API that no longer exists.
+
+```text
+2,158 files -> 58,307 definitions, ~700,000 references, built in ~5 s
+ax q     89 ms   (text, whole tree)
+ax def  195 ms   (index, semantically correct)
+rg      232 ms   (raw ripgrep, text)
+```
+
+The index is sharded 256 ways on a stable hash of the name, so a query parses
+one small file rather than an 86 MB one — that difference is 580 ms against
+195 ms. It rebuilds itself when any `.rs` mtime moves past the stamp it was
+built at; a stale index is worse than none, because it answers confidently and
+wrongly.
+
+**What it does not do.** It is not type-resolved: two inherent `new` methods on
+different types are one name, distinguished only by the `qualifier` the output
+prints. Resolving that needs `rustc`, which this repo already has a platform for
+in `tools/lints` — that is the next rung. Names assembled by `concat!`/`paste!`
+are invisible, exactly as they are to a human reader; the Atlas Friction Law
+already calls that a *repo* defect.
+
+Pass `--text` to `def`/`refs` for the old regex behaviour — TypeScript
+declarations, macro bodies, or a mention in prose you actually want.
+
+## `ax impact` — the blast radius
+
+Groups every reference by the package that owns it, with that package's class
+and the laws in force there, and says plainly when a symbol crosses a package
+boundary — because then changing its shape is a change to published API, not an
+internal edit.
+
+That is the question that decides how a change is scoped, and it is the one this
+repo learned the hard way: threading `FrameCamera` through the engine turned out
+to reach tools and two other apps, discovered halfway through, by which point
+the commit boundaries were already wrong.
+
+## Observed writes
+
+`ax` does not mediate changes. Every few seconds it spawns a detached child that
+asks git what moved and appends a `change` row per path.
+
+Git already has the writes; what it does not have is which agent and session,
+the ordering inside a session, work overwritten before it was committed, and the
+causal link between the queries an agent ran and the files it then changed.
+Reads and writes share one session id, so "searched X, read Y, changed Z" is
+reconstructable — the question the ledger exists to answer.
+
+Observation beats a mandate on coverage: it sees edits made by any route, by any
+tool, including ones made by a script or another agent in the same checkout, and
+nobody can defect from it. The first observation establishes a baseline and
+records nothing, so an already-dirty checkout is not attributed to whoever
+happened to run `ax` next.
 
 ## Reading a reference tree
 

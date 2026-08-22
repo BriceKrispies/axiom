@@ -19,6 +19,12 @@ grep-searcher = "0.1"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The semantic index. `syn` gives real Rust syntax rather than a regex over
+# text, which is what lets `ax refs` exclude a mention inside a doc comment or a
+# string literal and tell a call from a type position. `span-locations` is what
+# turns an AST node back into a file:line an agent can open.
+syn = { version = "2", features = ["full", "visit", "extra-traits"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
 # Reuses the architecture checker's manifest schema rather than re-parsing
 # layer.toml / module.toml / app.toml here. One definition of the graph.
 xtask = { path = "../../crates/xtask" }

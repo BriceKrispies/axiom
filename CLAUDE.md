@@ -9,9 +9,18 @@ You are practical and precise. You care more about architectural correctness tha
 ## The Atlas Rule — `ax` is the front door to this repo
 
 **`ax` (`tools/axiom-atlas`) is the focal point of this repository. Every
-search you run, every symbol you look up, and every change you make goes
-through it.** Reaching for a raw `grep`/`rg`, or changing a file by some other
-route without recording it, is the one habit this rule forbids.
+search you run and every symbol you look up goes through it.** Reaching for a
+raw `grep`/`rg` is the one habit this rule forbids.
+
+**Writes are observed, not mediated.** Change files however you like — `ax`
+asks git what moved and records it for you. That is deliberate: git already has
+the writes, the mandate could never be complete (an agent fixing `ax` cannot use
+`ax` to do it), and it cost a round-trip per file for a duplicate of data you
+already had. Observation covers every route, needs nothing from you, and no one
+can defect from it.
+
+Queries are the half worth mandating, because they are the half nothing else
+records — above all the ones that come back **empty**.
 
 That primacy is deliberate. It buys three things nothing else does:
 
@@ -35,8 +44,10 @@ ripgrep's ~232 ms on this repo, because it links ripgrep's `ignore` walker and
 
 ```sh
 scripts/ax q <regex> [--path RE] [--lang rs|ts|...] [--limit N] [-i] [-F] [--json]
-scripts/ax def <symbol>        # where a symbol is defined (Rust + TS)
-scripts/ax refs <symbol>       # every mention of a symbol
+scripts/ax def <symbol>        # where a symbol is defined (semantic index)
+scripts/ax refs <symbol>       # every real reference, with its kind
+scripts/ax impact <symbol>     # blast radius: which packages, under which laws
+scripts/ax index               # rebuild the semantic index
 scripts/ax file <regex>        # find files by path
 scripts/ax read <path> [--range A:B]
 scripts/ax edit <path> --replace <old> --with <new> [--all]
@@ -215,13 +226,16 @@ that triage is being skipped — which is a finding, not a loophole.
 `.claude/settings.json` wires two Claude Code hooks: `Grep` is **blocked** and
 redirected to `ax q`, and `Edit`/`Write`/`MultiEdit` are logged through
 `ax record` afterwards. Edits are *recorded* rather than *intercepted* on
-purpose — multi-line edits keep their ergonomics while the ledger stays a
-complete account of what changed. If you change files by some other route (a
-script, an editor, a generator), log it yourself:
+purpose — multi-line edits keep their ergonomics while the ledger stays an
+account of what changed.
 
-```sh
-scripts/ax record <path> --tool <what-did-it>
-```
+Those hooks see the editor tools and nothing else. A change made through Bash —
+a Python script, `sed`, a generator, a heredoc — is invisible to them, and that
+is not a rare case: it is how bulk edits actually get made. So `ax` **observes**
+the worktree as well: every few seconds it spawns a detached child that asks git
+what moved and records it. Total coverage, no cooperation required, nothing to
+forget. `ax record <path> --tool <what>` still exists for adding intent a git
+diff cannot infer.
 
 Full documentation: `tools/axiom-atlas/README.md`.
 
