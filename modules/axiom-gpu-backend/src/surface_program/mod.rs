@@ -605,9 +605,16 @@ mod tests {
                 set.parameter_bytes().len() / SURFACE_PARAM_REGION_BYTES as usize
             })
             .collect();
-        assert_eq!(counts, vec![3, 3, 3], "a lighting model must cost 0 programs");
-        // And mixing all three models in ONE scene is still one program each —
-        // the case a variant-keyed design would have paid three times over.
+        // Written against `ALL`, not against a literal length: the invariant is
+        // "whatever the closed set is, a model costs zero programs", so adding a
+        // fourth must not require editing the expectation — only re-running it.
+        assert_eq!(
+            counts,
+            vec![3; axiom_surface::LightingModel::ALL.len()],
+            "a lighting model must cost 0 programs"
+        );
+        // And mixing EVERY model in ONE scene is still one program each — the
+        // case a variant-keyed design would have paid once per model over.
         let mixed: Vec<axiom_surface::Surface> = axiom_surface::LightingModel::ALL
             .iter()
             .map(|model| {
@@ -618,11 +625,12 @@ mod tests {
                     .expect("legal")
             })
             .collect();
+        let models = axiom_surface::LightingModel::ALL.len();
         let set = SurfaceProgramSet::build(&mixed, gpu_profile());
-        assert_eq!(set.entries.len(), 3);
+        assert_eq!(set.entries.len(), models);
         assert_eq!(
             set.parameter_bytes().len(),
-            3 * SURFACE_PARAM_REGION_BYTES as usize
+            models * SURFACE_PARAM_REGION_BYTES as usize
         );
     }
 

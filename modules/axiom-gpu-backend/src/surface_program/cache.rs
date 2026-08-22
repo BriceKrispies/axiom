@@ -258,6 +258,46 @@ fn generate(
     profile: BackendCapabilityProfile,
     geometry: GeometryPath,
 ) -> Option<SurfaceProgramSource> {
+    // A RUNTIME MATERIAL short-circuits the whole generator. Its WGSL is
+    // hand-written (`crate::material_shader`) because the field algebra cannot
+    // express a loop, a derivative or a texture fetch, and its parameters are
+    // authored values rather than a flattened graph — so there is no plan to
+    // make, no capability to validate against the algebra's vocabulary, and
+    // nothing to flatten.
+    //
+    // Written as an `Option` chain rather than a branch: this is spine code and
+    // the Branchless Law applies. `program_id` still comes from the surface's
+    // own digest, which carries the KIND but not the parameter values — so every
+    // runtime material in a scene is one program and one pipeline, differing
+    // only in the bytes below.
+    surface
+        .kind()
+        .material_params()
+        .zip(displace_function(surface).ok())
+        .map(|(params, vertex)| SurfaceProgramSource {
+            program_id: SurfaceProgramPlan::of(surface).program_id(),
+            // The VERTEX half comes from the same emitter the field path uses,
+            // not from a hard-coded zero: a runtime material binds Displacement
+            // to its channel default, so this emits exactly the zero offset — and
+            // it stays correct on its own if that default ever changes, rather
+            // than agreeing with it by coincidence.
+            vertex,
+            // One call composes both halves: the de-tile gate decides which of the
+            // two program shapes is emitted, and the same parameters pack the
+            // block. Keeping them together is what stops a program being paired
+            // with a block packed from different values.
+            fragment: crate::material_shader::compose::material_program(&params).wgsl,
+            params: crate::material_shader::params::param_bytes(&params),
+        })
+        .or_else(|| generate_field_program(surface, profile, geometry))
+}
+
+/// The original generator: WGSL emitted from a surface's channel bindings.
+fn generate_field_program(
+    surface: &Surface,
+    profile: BackendCapabilityProfile,
+    geometry: GeometryPath,
+) -> Option<SurfaceProgramSource> {
     let plan = SurfaceProgramPlan::of(surface);
     let split = plan.stage_split();
     let wanted = (split.fragment_channels() != 0) | split.has_vertex_stage();

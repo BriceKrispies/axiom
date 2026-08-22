@@ -135,7 +135,9 @@ const DISPLACE_ENTRY: &str = "fn axiom_displace(pos: vec3<f32>, nrm: vec3<f32>, 
      t: f32, params: SurfaceParams) -> vec3<f32> {\n\
      \x20   return axiom_displace_at(\n\
      \x20       SurfaceIn(pos, uv, nrm, t, vec4<f32>(1.0, 1.0, 1.0, 1.0), \
-     vec3<f32>(0.0, 0.0, 0.0)),\n\
+     vec3<f32>(0.0, 0.0, 0.0), \
+     vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), \
+     vec4<f32>(1.0, 1.0, 1.0, 1.0)),\n\
      \x20       params,\n\
      \x20   );\n\
      }\n";
@@ -177,8 +179,18 @@ mod tests {
             "fn axiom_displace(pos: vec3<f32>, nrm: vec3<f32>, uv: vec2<f32>, t: f32, \
              params: SurfaceParams) -> vec3<f32>"
         ));
-        assert!(DISPLACE_ENTRY
-            .contains("SurfaceIn(pos, uv, nrm, t, vec4<f32>(1.0, 1.0, 1.0, 1.0), vec3<f32>(0.0, 0.0, 0.0))"));
+        // The three trailing zero vectors are `world_pos`/`world_normal`/
+        // `view_dir`. The VERTEX stage genuinely has none of them: a
+        // displacement program is written against object space and time, and
+        // there is no fragment, no camera ray and no interpolated world normal
+        // yet. Zero is the honest value rather than a placeholder, and
+        // `parity_vertex` separately pins the vocabulary a displacement graph
+        // is allowed to read.
+        assert!(DISPLACE_ENTRY.contains(
+            "SurfaceIn(pos, uv, nrm, t, vec4<f32>(1.0, 1.0, 1.0, 1.0), vec3<f32>(0.0, 0.0, 0.0), \
+             vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), \
+             vec4<f32>(1.0, 1.0, 1.0, 1.0))"
+        ));
     }
 
     #[test]

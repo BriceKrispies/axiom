@@ -32,7 +32,7 @@
 //! consumes it fail — the same trap `surface_encode::scene_target_format` avoids
 //! by requiring both usages before it upgrades the intermediate to sRGB.
 
-use axiom_host::{BackendCapabilityProfile, RenderCapability};
+use axiom_host::{BackendCapabilityProfile, FrameTonemap, HostAttachmentFormat, RenderCapability};
 
 /// Whether this device genuinely has HDR colour targets: the half-float colour
 /// format must be usable **both** as a render attachment and as a sampled
@@ -62,15 +62,49 @@ pub(crate) fn grant_hdr_targets(
 }
 
 /// The profile a backend holds **before any device has been bound** — the full
-/// set with [`RenderCapability::HdrTargets`] cleared.
+/// set with every *device-resolved* capability cleared.
 ///
-/// A backend that has resolved nothing must not claim the one capability it
-/// cannot know without an adapter; the bit is granted only by
-/// [`grant_hdr_targets`]. It is also the honest answer for the native off-screen
-/// capture path, whose target is an `Rgba8UnormSrgb` texture by construction
-/// rather than by negotiation.
+/// A backend that has resolved nothing must not claim a capability it cannot
+/// know without an adapter. There are two, and they are cleared here together
+/// because they are the same kind of claim: [`RenderCapability::HdrTargets`],
+/// granted by [`grant_hdr_targets`] from the adapter's reported format features,
+/// and [`RenderCapability::GBuffer`], granted by
+/// [`crate::gbuffer::grant_gbuffer`] from the device's colour-attachment limits.
+/// Every other capability in the set is a property of *this source* — the
+/// shaders and evaluators either exist or they do not — and so is knowable
+/// without a device.
+///
+/// It is also the honest answer for the native off-screen capture path, whose
+/// target is a single `Rgba8UnormSrgb` texture by construction rather than by
+/// negotiation.
 pub(crate) fn unresolved_capability_profile() -> BackendCapabilityProfile {
-    BackendCapabilityProfile::all().without(RenderCapability::HdrTargets)
+    BackendCapabilityProfile::all()
+        .without(RenderCapability::HdrTargets)
+        .without(RenderCapability::GBuffer)
+}
+
+/// **The one place the HDR present path is switched on**, and therefore the one
+/// place it degrades.
+///
+/// Two facts have to agree. The app must have *asked* — a
+/// [`FrameTonemap`] on its [`axiom_host::FrameRenderLook`] — because a float
+/// scene target is not a free quality upgrade: nothing above display white is
+/// clamped any more, so every value the 8-bit intermediate used to crush lands
+/// somewhere else, and an app authored against the crush would silently
+/// re-grade. And the device must be *able*, which is the capability the bind
+/// granted.
+///
+/// Returns the tone map the present pass should run, or `None` for the 8-bit
+/// chain — which is both the "app authored nothing" answer and the honest
+/// degradation for a device without the attachment. A caller reads the presence
+/// of a value as "allocate the float target", so the two answers cannot drift
+/// apart into a float target nobody tone maps or a tone map with no headroom to
+/// work in.
+pub(crate) fn hdr_scene_tonemap(
+    authored: Option<FrameTonemap>,
+    profile: BackendCapabilityProfile,
+) -> Option<FrameTonemap> {
+    authored.filter(|_| profile.supports_attachment(HostAttachmentFormat::Rgba16Float))
 }
 
 #[cfg(test)]
@@ -96,9 +130,16 @@ mod tests {
     fn a_bind_grants_the_hdr_bit_and_changes_nothing_else() {
         let unbound = unresolved_capability_profile();
         assert!(!unbound.contains(RenderCapability::HdrTargets));
+        // The other device-resolved bit is cleared too, and this grant does not
+        // touch it: `grant_gbuffer` is a separate answer to a separate question.
+        assert!(!unbound.contains(RenderCapability::GBuffer));
         let capable = grant_hdr_targets(unbound, true);
         let incapable = grant_hdr_targets(unbound, false);
-        assert_eq!(capable, BackendCapabilityProfile::all());
+        assert_eq!(
+            capable,
+            BackendCapabilityProfile::all().without(RenderCapability::GBuffer)
+        );
+        assert!(!capable.contains(RenderCapability::GBuffer));
         assert_eq!(incapable, unbound);
         assert_eq!(
             capable.bits() ^ incapable.bits(),
@@ -128,6 +169,31 @@ mod tests {
         assert_ne!(bound, BackendCapabilityProfile::all());
         // Granting twice is granting once — a rebind cannot drift the profile.
         assert_eq!(grant_hdr_targets(bound, true), bound);
+    }
+
+    /// **The opt-in and the capability, and the four combinations of them.**
+    ///
+    /// The two `None` rows are the ones that matter: an app that authored no
+    /// tone map gets the 8-bit chain even on a device that could hold a float
+    /// target (its pixels must not move), and an app that authored one gets the
+    /// 8-bit chain on a device that cannot (it must not fail to bind).
+    #[test]
+    fn the_hdr_present_needs_both_the_apps_request_and_the_devices_capability() {
+        let capable = grant_hdr_targets(unresolved_capability_profile(), true);
+        let incapable = grant_hdr_targets(unresolved_capability_profile(), false);
+        let filmic = FrameTonemap::filmic();
+        assert_eq!(hdr_scene_tonemap(Some(filmic), capable), Some(filmic));
+        assert_eq!(
+            hdr_scene_tonemap(Some(filmic), incapable),
+            None,
+            "a device without a float attachment presents the 8-bit chain, it does not fail"
+        );
+        assert_eq!(
+            hdr_scene_tonemap(None, capable),
+            None,
+            "capability is not consent: an app that authored no tone map keeps its pixels"
+        );
+        assert_eq!(hdr_scene_tonemap(None, incapable), None);
     }
 
     /// The gate the post chain will consult, end to end: the refusal that used to

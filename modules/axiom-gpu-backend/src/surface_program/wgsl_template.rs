@@ -42,7 +42,7 @@
 /// the interpolated uv, the presentation time, and the two lanes the existing
 /// instance stream already carries so the *default* program can reproduce
 /// today's frame from them alone. `SurfaceParams` is the shared uniform region
-/// [`crate::surface_program::params`] lays out. `SurfaceOut` is the six-channel
+/// [`crate::surface_program::params`] lays out. `SurfaceOut` is the channel
 /// result the fragment stage's lighting maths consumes.
 ///
 /// **The lattice hash.** `axiom_mul32` / `axiom_mul64` / `axiom_fnv_step` are a
@@ -76,6 +76,36 @@ struct SurfaceIn {
     albedo: vec4<f32>,
     // The draw's material emissive, from the instance stream.
     emissive: vec3<f32>,
+    // ---- World space. Added for the runtime material shader. -------------
+    //
+    // The object-space lanes above exist because a world-space pattern swims
+    // when the object moves. These are the deliberate opposite: a runtime
+    // material's weathering is *anchored to the world* on purpose — rain runs
+    // down, ground splash is measured up from a world `groundY`, the dust wedge
+    // sits at the wall/ground junction, and triplanar projects on world axes. A
+    // pattern that rode with the object would be wrong for all four.
+    //
+    // Additive: a generated field-algebra program names the lanes it reads and
+    // simply never names these, so every existing program emits the same WGSL
+    // and renders the same pixels. `surface_program::parity*` proves it.
+    world_pos: vec3<f32>,
+    world_normal: vec3<f32>,
+    // Fragment-to-camera, normalised. Parallax occlusion mapping needs a view
+    // vector and cannot reconstruct one: the surface program runs before the
+    // lighting stage that knows where the camera is.
+    view_dir: vec3<f32>,
+    // The per-vertex colour times the per-instance colour, on its own.
+    //
+    // `albedo` above already has this multiplied in, which is right for a
+    // program that returns it unchanged. It is NOT enough for a program that
+    // re-samples the albedo texture at its own projected uv — a runtime material
+    // projects planar or triplanar in world space, so it must take the sample
+    // itself and would otherwise drop the colour entirely. Recovering it by
+    // dividing `albedo` by the texel is not an option: the texel can be zero.
+    //
+    // A program that ignores this lane is unchanged, so every existing surface
+    // is unaffected.
+    vertex_color: vec4<f32>,
 };
 
 struct SurfaceParams {
@@ -89,6 +119,26 @@ struct SurfaceOut {
     normal: vec3<f32>,
     emission: vec3<f32>,
     opacity: f32,
+    // How much back-incident light this surface re-emits toward the eye —
+    // fabric transmission, from `materials/shader.js`'s `OW_CLOTH_LIGHT`.
+    //
+    // A seventh channel rather than a fourth `LightingModel`, deliberately.
+    // `axiom_lighting_model()` is a nullary constant, so a model cannot carry a
+    // per-surface *amount*; and Unlit -> Lambert -> LambertSpecular is a
+    // monotone ladder of how much standard maths a surface takes, whereas
+    // transmission is orthogonal to it (cloth still wants Lambert plus
+    // specular). A fourth rung would make the closed set 2x3 the moment a
+    // second orthogonal term appeared.
+    //
+    // Emission was the near miss: the slot is exactly right — unshadowed,
+    // post-light, pre-fog — but `axiom_surface` has no light rig, so it would
+    // lose the back-lit direction and render as the painted card the source
+    // wrote this term to avoid.
+    //
+    // 0.0 for every program that does not author it, which multiplies the
+    // transmission term in `fs` to an exact zero and leaves every existing
+    // frame unchanged to the bit.
+    transmission: f32,
 };
 
 // ---------------------------------------------------------------------------
@@ -263,12 +313,12 @@ fn axiom_fbm(
 
 // ---------------------------------------------------------------------------
 // The lighting-model discriminant: `axiom_surface::LightingModel`, mirrored.
-// Its wire code IS its table index there, and these are the same three codes,
+// Its wire code IS its table index there, and these are the same four codes,
 // pinned by `the_wgsl_lighting_codes_are_the_surface_layers_discriminants`.
 //
 // A generated program RETURNS one of these from `axiom_lighting_model`, and the
 // main pass's `fs` spends it on `select`s and multiplies — never on a branch and
-// never on a second module. Three models times N surfaces is N programs.
+// never on a second module. Four models times N surfaces is N programs.
 // ---------------------------------------------------------------------------
 
 // Base colour and emission presented as-is: no ambient, no light, no shadow and
@@ -279,6 +329,11 @@ const AXIOM_LIGHT_LAMBERT: u32 = 1u;
 // Diffuse gathering plus the Blinn-Phong term this pass has always computed.
 // The DEFAULT, so every existing draw is unchanged.
 const AXIOM_LIGHT_LAMBERT_SPECULAR: u32 = 2u;
+// Cook-Torrance: GGX distribution, Smith height-correlated visibility, Schlick
+// Fresnel, Lambert diffuse - three.js r180's `MeshStandardMaterial`. The one
+// model that reads `SurfaceOut.roughness` and `SurfaceOut.metallic`; the maths
+// lives in `crate::scene_wgsl`'s prefix as `axiom_pbr_*`.
+const AXIOM_LIGHT_PHYSICAL: u32 = 3u;
 "#;
 
 /// The program a draw naming `surface_program == 0` runs.
@@ -327,6 +382,7 @@ fn axiom_surface(in: SurfaceIn, params: SurfaceParams) -> SurfaceOut {
     out.normal = vec3<f32>(0.0, 0.0, 1.0);
     out.emission = in.emissive;
     out.opacity = in.albedo.w;
+    out.transmission = 0.0;
     return out;
 }
 "#;
@@ -361,7 +417,28 @@ fn axiom_displace(pos: vec3<f32>, nrm: vec3<f32>, uv: vec2<f32>, t: f32, params:
 /// of one surface land in **one** module keyed by one digest: a displacing
 /// surface must never force a second pipeline for the same material.
 pub(crate) fn scene_shader(prefix: &str, displace: &str, program: &str, suffix: &str) -> String {
-    [SURFACE_PRELUDE_WGSL, displace, prefix, program, suffix].concat()
+    [
+        SURFACE_PRELUDE_WGSL,
+        displace,
+        prefix,
+        // The cloth layer's functions are spliced into EVERY scene shader, not
+        // only into a composed material program, because the *lighting* stage
+        // calls two of them (`axiom_cloth_light` in the light loop and
+        // `axiom_cloth_transmitted` after it) and the lighting stage is part of
+        // `suffix`, which is always present.
+        //
+        // Splicing here rather than from the material composition is what keeps
+        // the two definitions singular: if the composed program also carried
+        // them, a scene using it would declare each twice and fail to compile.
+        // The cost is ~150 lines of WGSL in shaders that never call them, which
+        // the shader compiler dead-strips; the alternative — splitting the layer
+        // so two of its functions live somewhere else — would put one source
+        // section in two files for a benefit the compiler already provides.
+        crate::material_shader::cloth::CLOTH_WGSL,
+        program,
+        suffix,
+    ]
+    .concat()
 }
 
 #[cfg(test)]
@@ -439,15 +516,27 @@ mod tests {
         assert!(prelude_at < displace_at);
         assert!(displace_at < prefix_at);
         assert!(prefix_at < program_at);
+        // Cloth sits between the prefix and the program: the fragment stage's
+        // lighting maths (in the suffix) calls `axiom_cloth_light` and
+        // `axiom_cloth_transmitted`, and WGSL requires declaration before use.
+        let cloth_at = spliced
+            .find("fn axiom_cloth_light(")
+            .expect("the cloth layer must be spliced into every scene shader");
+        assert!(prefix_at < cloth_at);
+        assert!(cloth_at < program_at);
         assert_eq!(
             spliced,
             scene_shader("PREFIX\n", "DISPLACE\n", "PROGRAM\n", "SUFFIX\n")
         );
+        // Length is the whole splice, cloth included. The concatenation must
+        // add nothing of its own — no separator, no trailing newline — because
+        // a byte the splice invents is a byte no one authored and no test pins.
         assert_eq!(
             spliced.len(),
             SURFACE_PRELUDE_WGSL.len()
                 + "DISPLACE\n".len()
                 + "PREFIX\n".len()
+                + crate::material_shader::cloth::CLOTH_WGSL.len()
                 + "PROGRAM\n".len()
                 + "SUFFIX\n".len()
         );

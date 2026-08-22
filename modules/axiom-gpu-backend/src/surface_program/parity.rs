@@ -105,7 +105,19 @@ fn parity_fs(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let b = contexts.items[index * 3u + 1u];
     let c = contexts.items[index * 3u + 2u];
     let result = axiom_surface(
-        SurfaceIn(a.xyz, b.xy, c.xyz, a.w, vec4<f32>(1.0, 1.0, 1.0, 1.0), vec3<f32>(0.0, 0.0, 0.0)),
+        SurfaceIn(
+            a.xyz, b.xy, c.xyz, a.w,
+            vec4<f32>(1.0, 1.0, 1.0, 1.0), vec3<f32>(0.0, 0.0, 0.0),
+            // `world_pos`/`world_normal`/`view_dir`: zero here on purpose. This
+            // harness proves the FIELD ALGEBRA's operators match their CPU
+            // reference, and no algebra operator reads a world lane — the
+            // vocabulary is `object_pos`/`uv`/`object_normal`/`time`/`params`.
+            // A non-zero value would test nothing here and would mask a program
+            // that had started reading one.
+            vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0),
+            // White: the identity, and no algebra operator reads this lane.
+            vec4<f32>(1.0, 1.0, 1.0, 1.0),
+        ),
         parity_params,
     );
     return result.base_color;
@@ -157,27 +169,19 @@ pub(super) struct ParityGpu {
 }
 
 impl ParityGpu {
-    /// Acquire a native adapter, or fail the test loudly.
+    /// This module's handle on the crate's **one** shared adapter + device
+    /// ([`crate::test_gpu`]), which fails the test loudly if the machine has no
+    /// real adapter. Cloning handles rather than opening a device is what keeps
+    /// the twenty-odd GPU tests reachable from here from crashing the driver.
     pub(super) fn acquire() -> ParityGpu {
-        let instance = wgpu::Instance::default();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-        }))
-        .expect("a GPU parity test needs a real adapter; there is no honest fallback");
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("axiom-surface-parity"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::default(),
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("the adapter must yield a device");
+        // The crate's ONE instance + adapter + device (see `crate::test_gpu`):
+        // ~50 tests each opening their own is what crashes the driver.
+        let gpu = crate::test_gpu::TestGpu::shared();
+        let (device, queue) = (gpu.device.clone(), gpu.queue.clone());
         ParityGpu {
             device,
             queue,
-            backend: adapter.get_info().backend,
+            backend: gpu.backend,
         }
     }
 
@@ -189,14 +193,17 @@ impl ParityGpu {
         program_id: u64,
         channels: u16,
     ) -> Result<wgpu::ShaderModule, SurfaceProgramError> {
-        self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let module = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("axiom-surface-parity-shader"),
-                source: wgpu::ShaderSource::Wgsl(source.into()),
-            });
-        pollster::block_on(self.device.pop_error_scope()).map_or(Ok(module), |error| {
+        // The error scope is the SHARED device's, so it is entered exclusively;
+        // see `crate::test_gpu::validating`.
+        let (module, failure) = crate::test_gpu::validating(&self.device, || {
+            self
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("axiom-surface-parity-shader"),
+                    source: wgpu::ShaderSource::Wgsl(source.into()),
+                })
+        });
+        failure.map_or(Ok(module), |error| {
             Err(SurfaceProgramError::new(
                 program_id,
                 channels,
@@ -935,7 +942,14 @@ fn the_main_pass_shader_compiles_with_the_default_program_spliced_in() {
     // inline, which is the other half of the guarantee.
     assert!(source.contains("out.base_color = in.albedo;"));
     assert!(source.contains("let base = vec4<f32>(surface.base_color.rgb, surface.opacity);"));
-    assert!(source.contains("let emitted = lit + surface.emission;"));
+    // The emission line now also carries `transmitted` — the cloth layer's
+    // fabric term, which is `axiom_cloth_transmitted(..., surface.transmission)`
+    // and is an exact zero for the default program, since
+    // `DEFAULT_SURFACE_WGSL` sets `out.transmission = 0.0`. The property being
+    // pinned is unchanged: the default program's contribution to this line is
+    // the identity.
+    assert!(source.contains("let emitted = lit + transmitted + surface.emission;"));
+    assert!(source.contains("out.transmission = 0.0;"));
 }
 
 /// A shader the device rejects is reported as a structured error naming the

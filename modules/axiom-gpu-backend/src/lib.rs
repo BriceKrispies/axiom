@@ -102,10 +102,43 @@ mod scene_wgsl;
 // a frame may render into is impossible to debug from inside a render pass.
 mod hdr_target;
 
+// The G-buffer prepass: one geometry pass writing a view normal, a screen-space
+// velocity and a linear view depth into three colour attachments at once, plus
+// its own depth buffer. The foundation the screen-space passes (ambient
+// occlusion, reflections, temporal resolve, motion blur) share. Its attachment
+// set, its capability gate and its CPU reference for the octahedral packing are
+// pure and compiled everywhere — the rule that decides whether a device can hold
+// a G-buffer at all is impossible to debug from inside a render pass — while the
+// pipeline and targets sit behind the GPU arm's `cfg`.
+mod gbuffer;
+
+// The AgX filmic tone map and the EV100 metering chain that feeds it, ported
+// from the reference's `src/render/glsl.js` and `src/render/exposure.js`. WGSL
+// text plus a CPU reference that is its semantic definition; pure arithmetic, so
+// compiled everywhere and covered natively. Nothing binds them yet — see each
+// module's `nothing_in_the_present_path_compiles_this_yet`.
+mod agx;
+mod exposure;
+
+// The bloom pyramid: `render/bloom.js` as WGSL plus its CPU reference — the
+// Jimenez/COD progressive dual filter (13-tap Karis downsample, 9-tap tent
+// upsample, blended not summed). The arithmetic and the pyramid's shape are pure
+// and compiled everywhere; only the wgpu passes are behind the GPU arms.
+mod bloom_pyramid;
+
 // Which draws can actually reach the directional shadow map. Pure geometry over
 // plain arrays, compiled everywhere (and covered natively) precisely because the
 // rule is impossible to debug from inside a render pass.
 mod shadow_cull;
+
+// Cascaded shadow maps: the split scheme, the per-cascade bounding-sphere ortho
+// fit, the whole-texel snap and the fragment stage's selection/PCSS reference,
+// transcribed from Claude-of-Duty's `render/csm.js` (`4x2048 CSM`).
+//
+// Nothing binds it yet — the frame contract carries ONE `light_view_proj`, so
+// the shipped pass has no four-matrix lane to fill. See
+// `cascade::tests::nothing_in_the_shadow_path_compiles_this_yet`.
+mod cascade;
 
 // Which attachment performs the linear -> sRGB encode, and the crate's single
 // WGSL definition of that curve. Pure format arithmetic: a browser surface may or
@@ -129,5 +162,45 @@ mod live_gpu_binding;
 // The native off-screen renderer. Drives the same `scene_renderer` as the live arm.
 #[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
 mod offscreen;
+
+// The ONE instance + adapter + device the native headless capture paths share,
+// held for the process instead of created and destroyed per capture. Cycling them
+// per call cost a full backend enumeration per screenshot AND is what makes this
+// machine's driver fall over; see the module docs for the measurement.
+#[cfg(all(not(target_arch = "wasm32"), feature = "offscreen"))]
+mod native_gpu;
+
+// The ONE instance + adapter + device every GPU test in this crate shares. Not a
+// convenience: ~50 tests each opening their own is what makes the offscreen suite
+// intermittently crash the driver. Test-only, so it enters no build the engine
+// ships. See the module docs for the measurement.
+#[cfg(all(test, feature = "offscreen"))]
+mod test_gpu;
+pub(crate) mod material_shader;
+
+// ---------------------------------------------------------------------------
+// The render frame graph — `src/render/` of Claude-of-Duty, 18 passes.
+//
+// Declared unconditionally. Every one of these is pure Rust plus WGSL held in
+// `&str` constants; only their *tests* need an adapter, and those carry their
+// own `offscreen` gates. Gating a string on a rendering feature is the mistake
+// `material_shader/compose.rs` already had to undo.
+//
+// `frame_graph` names the others through `FramePass::module_path()` rather than
+// `use`, so the ordering below is alphabetical for readability and carries no
+// dependency meaning — except `contact`, which imports `ssr`.
+// ---------------------------------------------------------------------------
+mod contact;
+mod dof;
+mod env;
+mod frame_graph;
+mod gtao;
+mod indirect_lighting;
+mod lut;
+mod motionblur;
+mod ssr;
+mod taa;
+mod texture_bake;
+
 
 pub use gpu_backend_api::GpuBackendApi;

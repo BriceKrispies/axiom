@@ -41,7 +41,7 @@
 //! it **asserts** a real adapter was acquired rather than skipping.
 
 use axiom_field::FieldValue;
-use axiom_math::Vec4;
+use axiom_math::{Vec3, Vec4};
 use axiom_recipe::Scalar;
 use axiom_surface::{LightingModel, Surface, SurfaceBuilder, SurfaceChannel};
 
@@ -72,6 +72,19 @@ const LIGHTS_UBO_BYTES: usize = 96 + 16 * 32;
 
 /// `copy_texture_to_buffer` requires each row aligned to this many bytes.
 const ROW_ALIGN: u32 = 256;
+
+/// The absolute tolerance the **physical BRDF** is held to against its `f64`
+/// reference — see [`the_physical_brdf_matches_a_transcription_of_the_source_glsl`],
+/// which measures the real worst delta on every run and fails if this constant
+/// has drifted more than ~100x away from it in either direction.
+///
+/// Looser than [`crate::surface_program::parity::TOLERANCE`]'s `1e-4` because the
+/// two sides are not computing the same thing to the same precision: the shader
+/// runs the whole chain in `f32` — an `exp2`, two `sqrt`s, a `normalize` and a
+/// division whose denominator can be small — while the reference runs it in
+/// `f64`, and the results are radiances that can exceed 1 rather than channels
+/// living in `0..=1`.
+const PHYSICAL_PARITY_TOLERANCE: f32 = 1.0e-3;
 
 /// One frame's lighting environment, in the shape the uniform packs.
 struct Rig {
@@ -147,10 +160,36 @@ impl Rig {
 /// `z = 0.5` with an identity MVP and an identity world, so the single fragment
 /// this renders sits at world `(0, 0, 0.5)` with the normal it was given.
 fn geometry(normal: [f32; 3], specular: f32, emissive: [f32; 3]) -> (Vec<u8>, Vec<u8>) {
+    geometry_with_uv(normal, specular, emissive, SHARED_UV)
+}
+
+/// The degenerate uv every lighting test but one uses: all three corners share
+/// it, so the screen-space cotangent frame has zero derivatives. That is the
+/// case the main pass floors so a flat normal map cannot produce a NaN, and
+/// exercising it is deliberate.
+const SHARED_UV: [[f32; 2]; 3] = [[0.25, 0.75], [0.25, 0.75], [0.25, 0.75]];
+
+/// A real uv gradient across the triangle, so the cotangent frame is
+/// non-degenerate and a tangent-space normal can actually tilt the shading.
+///
+/// Needed because [`SHARED_UV`] makes the frame degenerate *by design*: with
+/// zero uv derivatives `tangent` and `bitangent` are the zero vector, so
+/// `mapped` collapses to the geometric normal and **no** tangent-space normal —
+/// authored or textured — can move a pixel. A test of the normal channel run on
+/// that rig measures the rig, not the shader.
+const GRADIENT_UV: [[f32; 2]; 3] = [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+
+fn geometry_with_uv(
+    normal: [f32; 3],
+    specular: f32,
+    emissive: [f32; 3],
+    uv: [[f32; 2]; 3],
+) -> (Vec<u8>, Vec<u8>) {
     let corners = [[-1.0_f32, -3.0, 0.5], [-1.0, 1.0, 0.5], [3.0, 1.0, 0.5]];
     let vertices: Vec<u8> = corners
         .iter()
-        .flat_map(|position| {
+        .zip(uv.iter())
+        .flat_map(|(position, corner_uv)| {
             [
                 position[0],
                 position[1],
@@ -158,11 +197,8 @@ fn geometry(normal: [f32; 3], specular: f32, emissive: [f32; 3]) -> (Vec<u8>, Ve
                 normal[0],
                 normal[1],
                 normal[2],
-                // One shared uv, which also makes the tangent frame degenerate —
-                // the case the main pass floors so a flat normal map cannot
-                // produce a NaN. Exercising it here is deliberate.
-                0.25,
-                0.75,
+                corner_uv[0],
+                corner_uv[1],
                 1.0,
                 1.0,
                 1.0,
@@ -199,6 +235,22 @@ fn render_lit(
     normal: [f32; 3],
     specular: f32,
     emissive: [f32; 3],
+) -> [f32; 4] {
+    render_lit_uv(gpu, suffix, program, rig, normal, specular, emissive, SHARED_UV)
+}
+
+/// [`render_lit`], choosing the triangle's uv — and therefore whether the
+/// cotangent frame is degenerate. See [`GRADIENT_UV`].
+#[allow(clippy::too_many_arguments)]
+fn render_lit_uv(
+    gpu: &ParityGpu,
+    suffix: &str,
+    program: &str,
+    rig: &Rig,
+    normal: [f32; 3],
+    specular: f32,
+    emissive: [f32; 3],
+    uv: [[f32; 2]; 3],
 ) -> [f32; 4] {
     let source = scene_shader(
         crate::scene_wgsl::SCENE_WGSL_PREFIX,
@@ -274,7 +326,7 @@ fn render_lit(
         multiview: None,
         cache: None,
     });
-    let (vertices, instance) = geometry(normal, specular, emissive);
+    let (vertices, instance) = geometry_with_uv(normal, specular, emissive, uv);
     let vertex_buffer = buffer(gpu, &vertices, wgpu::BufferUsages::VERTEX);
     let instance_buffer = buffer(gpu, &instance, wgpu::BufferUsages::VERTEX);
     let lights = buffer(gpu, &rig.ubo(), wgpu::BufferUsages::UNIFORM);
@@ -747,7 +799,13 @@ fn lambert_specular_reproduces_the_pre_model_shader_pixel_for_pixel() {
         assert!(hits > 0, "the control must actually remove `{from}`");
         (text.replace(from, to), edits + hits)
     });
-    assert_eq!(edits, 3, "one gate select and two gate multiplies");
+    // Three gate multiplies now, not two: the cloth transmission term is gated
+    // by `diffuse_gate` as well, because an UNLIT surface gathers nothing and
+    // transmission is a gather. The property this test exists to pin — that
+    // every model gate is a MULTIPLIER, never a branch, so control flow stays
+    // uniform for the derivative-dependent texture work — is unchanged, and the
+    // count moving is the evidence a new gated term was added deliberately.
+    assert_eq!(edits, 4, "one gate select and three gate multiplies");
     assert!(!control.contains("diffuse_gate;"));
     let rig = Rig {
         caps: CAP_ALL,
@@ -798,15 +856,23 @@ fn lambert_specular_reproduces_the_pre_model_shader_pixel_for_pixel() {
     });
 }
 
-/// **`metallic` is reserved and inert.** It is authored, digested, packed and
-/// emitted into `SurfaceOut` — and it moves no pixel, under any model. That is
-/// deliberate (`SPEC-11`: *"Resist PBR scope creep"*), and a channel that looks
-/// wired but is not is worse than one documented dead, so it is pinned here.
+/// **`metallic` is inert under every model but `Physical`.** It is authored,
+/// digested, packed and emitted into `SurfaceOut` under all four — and only the
+/// physical BRDF reads it. Blinn-Phong has no metal/dielectric split, so a
+/// metalness there would have to be invented; `Physical` is where the source
+/// puts it, and `the_physical_model_renders_its_documented_result` is where it
+/// is proved live.
 #[test]
-fn metallic_is_reserved_and_changes_no_pixel() {
+fn metallic_is_inert_under_every_model_but_physical() {
     let gpu = gpu();
     let rig = Rig::unit(CAP_ALL);
-    LightingModel::ALL.iter().for_each(|model| {
+    [
+        LightingModel::Unlit,
+        LightingModel::Lambert,
+        LightingModel::LambertSpecular,
+    ]
+    .iter()
+    .for_each(|model| {
         let pixels: Vec<[f32; 4]> = [0.0_f32, 0.5, 1.0]
             .iter()
             .map(|metallic| {
@@ -843,6 +909,661 @@ fn metallic_is_reserved_and_changes_no_pixel() {
         );
         assert_eq!(pixels[1].map(f32::to_bits), pixels[2].map(f32::to_bits));
     });
+    // ...and under `Physical` the SAME three surfaces are three different
+    // pixels, which is what makes the assertions above a statement about the
+    // models rather than about a channel that never arrives.
+    let physical: Vec<[f32; 4]> = [0.0_f32, 0.5, 1.0]
+        .iter()
+        .map(|metallic| {
+            let program = fragment_program(&physical_surface(0.5, *metallic)).expect("flattens");
+            render_lit(
+                &gpu,
+                crate::scene_wgsl::SCENE_WGSL_SUFFIX,
+                &program,
+                &rig,
+                [0.0, 1.0, 0.0],
+                1.0,
+                [0.0, 0.0, 0.0],
+            )
+        })
+        .collect();
+    assert_ne!(physical[0].map(f32::to_bits), physical[1].map(f32::to_bits));
+    assert_ne!(physical[1].map(f32::to_bits), physical[2].map(f32::to_bits));
+}
+
+// ---------------------------------------------------------------------------
+// `LightingModel::Physical` — the Cook-Torrance BRDF, on a real adapter.
+// ---------------------------------------------------------------------------
+
+/// The base colour every physical test authors. Deliberately not grey: a metal's
+/// highlight takes `F0 = base`, so an uneven colour is what makes "the metal's
+/// highlight is tinted and the dielectric's is not" a visible fact.
+const PHYS_BASE: [f64; 3] = [0.2, 0.4, 0.6];
+
+/// A `Physical` surface with an explicit roughness and metalness.
+fn physical_surface(roughness: f32, metallic: f32) -> Surface {
+    SurfaceBuilder::new()
+        .lighting(LightingModel::Physical)
+        .constant(
+            SurfaceChannel::BaseColor,
+            FieldValue::vec4(Vec4::new(
+                PHYS_BASE[0] as f32,
+                PHYS_BASE[1] as f32,
+                PHYS_BASE[2] as f32,
+                1.0,
+            )),
+        )
+        .constant(
+            SurfaceChannel::Roughness,
+            FieldValue::scalar(Scalar::new(roughness)),
+        )
+        .constant(
+            SurfaceChannel::Metallic,
+            FieldValue::scalar(Scalar::new(metallic)),
+        )
+        .build()
+        .expect("scalar roughness and metalness are legal channels")
+}
+
+/// **The physical model's documented result, derived rather than transcribed.**
+///
+/// [`the_physical_brdf_matches_a_transcription_of_the_source_glsl`] below checks
+/// the shader against a second reading of the same GLSL, which is worth a lot
+/// but shares one risk: one person wrote both, so both can share a misreading.
+/// This function closes that by taking a *different route to the same number* —
+/// the closed forms the source's own algebra collapses to on the unit rig, where
+/// `N`, `L`, `V` and `H` are all `(0, 1, 0)` and every dot product is exactly
+/// one:
+///
+/// * `V_GGX_SmithCorrelated(alpha, 1, 1)` = `0.5 / (1·√(a2 + (1-a2)) + 1·√(…))`
+///   = `0.5 / 2` = **exactly `0.25`**, for every roughness. The visibility term
+///   drops out of the rig entirely.
+/// * `D_GGX(alpha, 1)` = `RECIPROCAL_PI · a2 / ((a2 - 1) + 1)²`
+///   = `RECIPROCAL_PI · a2 / a2²` = **`RECIPROCAL_PI / a2`**, i.e. the highlight
+///   is inversely proportional to `roughness⁴`. That is the roughness remap made
+///   arithmetic: if the shader squared once instead of twice, or remapped
+///   `alpha = roughness` instead of `roughness²`, this number is wrong by a
+///   factor of `roughness²`.
+/// * `F_Schlick(f0, 1, 1)` = `f0·(1 - k) + k` with `k = exp2(-5.55473 - 6.98316)`
+///   — a fixed constant, so at normal incidence the Fresnel is `f0` nudged the
+///   whole way to white by `1.7e-4`.
+///
+/// The geometry-roughness term is an exact zero here: all three vertices carry
+/// the same normal, so `dpdx(geo_n)` and `dpdy(geo_n)` are zero.
+fn unit_rig_physical(roughness: f64, metalness: f64) -> [f64; 3] {
+    let reciprocal_pi = 0.318_309_886_183_790_7_f64;
+    // `max(roughnessFactor, 0.0525) + 0` then `min(., 1.0)`.
+    let material_roughness = roughness.max(0.0525).min(1.0);
+    let alpha = material_roughness * material_roughness;
+    let a2 = alpha * alpha;
+    let d = reciprocal_pi / a2;
+    let v = 0.25;
+    let fresnel = (-5.55473_f64 - 6.98316).exp2();
+    // Direct irradiance is `(1,1,1)`; the hemisphere ambient is `0.1` sky with
+    // the normal straight up and nothing in shadow.
+    let irradiance_total = 1.0 + 0.1;
+    [0, 1, 2].map(|lane| {
+        let base = PHYS_BASE[lane];
+        let diffuse_color = base * (1.0 - metalness);
+        let f0 = 0.04 * (1.0 - metalness) + base * metalness;
+        let f = f0 * (1.0 - fresnel) + fresnel;
+        irradiance_total * (reciprocal_pi * diffuse_color) + f * (v * d)
+    })
+}
+
+/// **The physical model renders its documented result, and roughness and
+/// metalness are what move it.**
+///
+/// Three claims in one rig, because they are one claim: that the BRDF is really
+/// running on the GPU with the authored channels as its inputs.
+///
+/// 1. Every (roughness, metalness) pair matches the closed form
+///    [`unit_rig_physical`] derives from the source's algebra.
+/// 2. Roughening the surface *strictly dims* the highlight — the `1/roughness⁴`
+///    dependence, which no Blinn-Phong term has.
+/// 3. A metal's highlight is *tinted by the base colour* and a dielectric's is
+///    not — the `F0 = mix(0.04, base, metalness)` split, which the engine had no
+///    way to express at all before this model.
+#[test]
+fn the_physical_model_renders_its_documented_result() {
+    let gpu = gpu();
+    let rig = Rig::unit(CAP_SPECULAR);
+    let render = |roughness: f32, metallic: f32| {
+        let program = fragment_program(&physical_surface(roughness, metallic)).expect("flattens");
+        render_lit(
+            &gpu,
+            crate::scene_wgsl::SCENE_WGSL_SUFFIX,
+            &program,
+            &rig,
+            [0.0, 1.0, 0.0],
+            // A unit legacy specular strength, which this model must ignore.
+            1.0,
+            [0.0, 0.0, 0.0],
+        )
+    };
+    let cases = [(0.5_f32, 0.0_f32), (0.5, 1.0), (0.9, 0.0), (0.25, 0.5)];
+    let worst = cases.iter().fold(0.0_f64, |worst, (roughness, metallic)| {
+        let expected = unit_rig_physical(f64::from(*roughness), f64::from(*metallic));
+        let actual = render(*roughness, *metallic);
+        assert_eq!(actual[3], 1.0, "opacity is untouched by the lighting model");
+        (0..3).fold(worst, |worst, lane| {
+            let delta = (expected[lane] - f64::from(actual[lane])).abs();
+            assert!(
+                delta <= f64::from(crate::surface_program::parity::TOLERANCE),
+                "roughness {roughness} metalness {metallic} lane {lane}: \
+                 expected {} got {} (delta {delta:e})",
+                expected[lane],
+                actual[lane]
+            );
+            worst.max(delta)
+        })
+    });
+    // The measurement, asserted so the tolerance's justification cannot rot: the
+    // hardware needs far less than the budget it is given.
+    assert!(
+        worst < 1.0e-6,
+        "the closed form and the GPU agreed to {worst:e}; if that has grown, the \
+         tolerance above is no longer 100x the hardware's error"
+    );
+
+    // (2) Rougher is dimmer, strictly, across the whole authored range.
+    let dimming: Vec<f32> = [0.1_f32, 0.3, 0.5, 0.7, 1.0]
+        .iter()
+        .map(|roughness| render(*roughness, 0.0)[0])
+        .collect();
+    dimming.windows(2).for_each(|pair| {
+        assert!(
+            pair[0] > pair[1],
+            "roughening a surface must dim its highlight: {} then {}",
+            pair[0],
+            pair[1]
+        );
+    });
+    // And by a lot, not by drift: 0.1 -> 1.0 roughness is four orders of `alpha`.
+    assert!(
+        dimming[0] > dimming[4] * 100.0,
+        "0.1 roughness gave {} and 1.0 gave {}; a 1/roughness^4 falloff should \
+         span far more than that",
+        dimming[0],
+        dimming[4]
+    );
+
+    // (3) The metal's highlight is TINTED. A dielectric's `F0` is a colourless
+    // 0.04, so its highlight is the light's own colour and the three lanes'
+    // *specular* parts are equal; a metal's `F0` is the base colour, so they are
+    // not. Measured as the ratio of the blue to the red lane once the diffuse is
+    // gone (metalness 1 leaves specular alone).
+    let metal = render(0.3, 1.0);
+    let dielectric = render(0.3, 0.0);
+    // Subtract the diffuse the closed form says is there, leaving the highlight.
+    let dielectric_spec = [0, 1, 2].map(|lane| {
+        f64::from(dielectric[lane]) - 1.1 * (three_brdf::RECIPROCAL_PI * PHYS_BASE[lane])
+    });
+    assert!(
+        (dielectric_spec[2] - dielectric_spec[0]).abs() < 1.0e-4,
+        "a dielectric's highlight must be colourless: red {} blue {}",
+        dielectric_spec[0],
+        dielectric_spec[2]
+    );
+    assert!(
+        f64::from(metal[2]) > f64::from(metal[0]) * 2.5,
+        "a metal's highlight must carry the base colour's hue: red {} blue {} \
+         (the base is {:?})",
+        metal[0],
+        metal[2],
+        PHYS_BASE
+    );
+}
+
+/// **The legacy instance-stream specular lane is out of the picture under
+/// `Physical`.**
+///
+/// That lane is derived from `Material::roughness` — the *old* per-material
+/// number, packed into the emissive vec4's fourth component — and it is what
+/// drives the Blinn-Phong highlight for the other three models. The physical
+/// model must not consult it: its gloss comes from the authored `Roughness`
+/// channel, which is the whole point of making that channel live. Sweeping the
+/// lane across its full range must move nothing, while sweeping the *channel*
+/// moves a lot.
+#[test]
+fn the_legacy_specular_lane_does_not_reach_the_physical_model() {
+    let gpu = gpu();
+    let rig = Rig::unit(CAP_ALL);
+    let program = fragment_program(&physical_surface(0.4, 0.0)).expect("flattens");
+    let pixels: Vec<[f32; 4]> = [0.0_f32, 0.5, 1.0]
+        .iter()
+        .map(|lane| {
+            render_lit(
+                &gpu,
+                crate::scene_wgsl::SCENE_WGSL_SUFFIX,
+                &program,
+                &rig,
+                [0.0, 1.0, 0.0],
+                *lane,
+                [0.0, 0.0, 0.0],
+            )
+        })
+        .collect();
+    assert_eq!(pixels[0].map(f32::to_bits), pixels[1].map(f32::to_bits));
+    assert_eq!(pixels[1].map(f32::to_bits), pixels[2].map(f32::to_bits));
+    // The same sweep on a `LambertSpecular` surface is three different pixels,
+    // so the lane is genuinely reaching the shader and this is a statement about
+    // the model rather than about a dead vertex attribute.
+    let legacy = fragment_program(&surface_of(LightingModel::LambertSpecular)).expect("flattens");
+    let moved: Vec<[f32; 4]> = [0.0_f32, 0.5, 1.0]
+        .iter()
+        .map(|lane| {
+            render_lit(
+                &gpu,
+                crate::scene_wgsl::SCENE_WGSL_SUFFIX,
+                &legacy,
+                &rig,
+                [0.0, 1.0, 0.0],
+                *lane,
+                [0.0, 0.0, 0.0],
+            )
+        })
+        .collect();
+    assert_ne!(moved[0].map(f32::to_bits), moved[1].map(f32::to_bits));
+    assert_ne!(moved[1].map(f32::to_bits), moved[2].map(f32::to_bits));
+}
+
+/// **A GGX highlight is not a Blinn-Phong one — and the authored roughness is
+/// what makes it not one.**
+///
+/// The engine's Blinn-Phong lobe has a single hard-coded width, `SPECULAR_POWER
+/// = 48.0`; the instance-stream lane it reads scales that lobe and cannot
+/// reshape it. So "is this really a new BRDF or an expensive rename?" has an
+/// exact answer: measure how much of its peak each lobe keeps 30 degrees off the
+/// half-vector, and check that the GGX one **brackets** the Blinn-Phong one —
+/// tighter than `cos^48` at low roughness, broader at high. A rename cannot land
+/// on both sides of a fixed exponent.
+///
+/// Each highlight is isolated before it is measured, because a whole pixel also
+/// carries diffuse and ambient:
+///
+/// * the Blinn-Phong one by subtracting the same frame with `CAP_SPECULAR`
+///   cleared, which `lambert_is_lambert_specular_with_exactly_the_highlight_removed`
+///   establishes removes exactly that term and nothing else;
+/// * the physical one by authoring metalness 1, which zeroes `diffuseColor` and
+///   therefore both of the model's diffuse terms, leaving the pixel *equal* to
+///   its highlight.
+#[test]
+fn a_ggx_lobes_width_is_the_authored_roughness_not_a_fixed_exponent() {
+    let gpu = gpu();
+    let straight = [0.0_f32, 1.0, 0.0];
+    // 30 degrees off. Both `L` and `V` are `(0, 1, 0)` on the unit rig, so the
+    // half-vector is too, and tilting the normal walks `N·H` to `cos 30`.
+    let tilted = [0.5_f32, 0.866_025_4, 0.0];
+    let render = |program: &str, caps: u32, normal: [f32; 3]| {
+        f64::from(
+            render_lit(
+                &gpu,
+                crate::scene_wgsl::SCENE_WGSL_SUFFIX,
+                program,
+                &Rig::unit(caps),
+                normal,
+                1.0,
+                [0.0, 0.0, 0.0],
+            )[0],
+        )
+    };
+    let phong = fragment_program(&surface_of(LightingModel::LambertSpecular)).expect("flattens");
+    let phong_highlight = |normal: [f32; 3]| render(&phong, CAP_SPECULAR, normal) - render(&phong, 0, normal);
+    let phong_falloff = phong_highlight(tilted) / phong_highlight(straight);
+    // `cos^48(cos 30°)` — the fixed lobe, and the number the engine had before.
+    assert!(
+        (phong_falloff - 0.866_025_4_f64.powi(48)).abs() < 1.0e-4,
+        "the control must be the cos^48 lobe itself, and it measured {phong_falloff:e}"
+    );
+    let ggx_falloff = |roughness: f32| {
+        let program = fragment_program(&physical_surface(roughness, 1.0)).expect("flattens");
+        render(&program, CAP_SPECULAR, tilted) / render(&program, CAP_SPECULAR, straight)
+    };
+    let tight = ggx_falloff(0.1);
+    let broad = ggx_falloff(0.6);
+    assert!(
+        tight < phong_falloff * 0.1,
+        "a roughness-0.1 GGX lobe must be far TIGHTER than cos^48: it kept \
+         {tight:e} and cos^48 kept {phong_falloff:e}"
+    );
+    assert!(
+        broad > phong_falloff * 10.0,
+        "a roughness-0.6 GGX lobe must be far BROADER than cos^48: it kept \
+         {broad:e} and cos^48 kept {phong_falloff:e}"
+    );
+}
+
+/// three.js r180's physical BRDF, transcribed a **second** time — from the same
+/// GLSL text, into `f64` Rust — so the WGSL has something to disagree with.
+///
+/// Sources: `ShaderChunk/common.glsl.js` (`BRDF_Lambert`, `F_Schlick`,
+/// `RECIPROCAL_PI`, `EPSILON`, `pow2`, `saturate`) and
+/// `ShaderChunk/lights_physical_pars_fragment.glsl.js`
+/// (`V_GGX_SmithCorrelated`, `D_GGX`, `BRDF_GGX`). The source's grouping is
+/// reproduced: no division is rewritten as a reciprocal-multiply, and
+/// `F * ( V * D )` keeps its parentheses.
+mod three_brdf {
+    pub(super) const RECIPROCAL_PI: f64 = 0.318_309_886_183_790_7;
+    const EPSILON: f64 = 1.0e-6;
+
+    fn pow2(x: f64) -> f64 {
+        x * x
+    }
+
+    /// `#define saturate( a ) clamp( a, 0.0, 1.0 )` — GLSL's `clamp` is
+    /// `min( max( x, minVal ), maxVal )`, written out rather than trusting
+    /// `f64::clamp`'s ordering.
+    fn saturate(a: f64) -> f64 {
+        a.max(0.0).min(1.0)
+    }
+
+    pub(super) fn brdf_lambert(diffuse_color: [f64; 3]) -> [f64; 3] {
+        diffuse_color.map(|lane| RECIPROCAL_PI * lane)
+    }
+
+    fn f_schlick(f0: [f64; 3], f90: f64, dot_vh: f64) -> [f64; 3] {
+        let fresnel = ((-5.55473 * dot_vh - 6.98316) * dot_vh).exp2();
+        f0.map(|lane| lane * (1.0 - fresnel) + (f90 * fresnel))
+    }
+
+    fn v_ggx_smith_correlated(alpha: f64, dot_nl: f64, dot_nv: f64) -> f64 {
+        let a2 = pow2(alpha);
+        let gv = dot_nl * (a2 + (1.0 - a2) * pow2(dot_nv)).sqrt();
+        let gl = dot_nv * (a2 + (1.0 - a2) * pow2(dot_nl)).sqrt();
+        0.5 / (gv + gl).max(EPSILON)
+    }
+
+    fn d_ggx(alpha: f64, dot_nh: f64) -> f64 {
+        let a2 = pow2(alpha);
+        let denom = pow2(dot_nh) * (a2 - 1.0) + 1.0;
+        RECIPROCAL_PI * a2 / pow2(denom)
+    }
+
+    pub(super) fn brdf_ggx(
+        light_dir: [f64; 3],
+        view_dir: [f64; 3],
+        normal: [f64; 3],
+        f0: [f64; 3],
+        f90: f64,
+        roughness: f64,
+    ) -> [f64; 3] {
+        let alpha = pow2(roughness);
+        let half_dir = normalize(add(light_dir, view_dir));
+        let dot_nl = saturate(dot(normal, light_dir));
+        let dot_nv = saturate(dot(normal, view_dir));
+        let dot_nh = saturate(dot(normal, half_dir));
+        let dot_vh = saturate(dot(view_dir, half_dir));
+        let f = f_schlick(f0, f90, dot_vh);
+        let v = v_ggx_smith_correlated(alpha, dot_nl, dot_nv);
+        let d = d_ggx(alpha, dot_nh);
+        f.map(|lane| lane * (v * d))
+    }
+
+    pub(super) fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+        a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    }
+
+    pub(super) fn add(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+        [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+    }
+
+    pub(super) fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+        [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+    }
+
+    pub(super) fn scale(a: [f64; 3], k: f64) -> [f64; 3] {
+        [a[0] * k, a[1] * k, a[2] * k]
+    }
+
+    pub(super) fn normalize(a: [f64; 3]) -> [f64; 3] {
+        scale(a, 1.0 / dot(a, a).sqrt())
+    }
+}
+
+/// **CPU/GPU parity for the physical BRDF, off-axis, on three lights of both
+/// kinds.**
+///
+/// The unit rig above collapses `V` to a constant and every dot product to one,
+/// which is exactly what makes its expectations hand-derivable — and exactly what
+/// leaves `V_GGX_SmithCorrelated`'s two `sqrt` terms, `D_GGX`'s denominator and
+/// `F_Schlick`'s `dotVH` untested as *functions of their arguments*. This rig
+/// gives every one of them a different, awkward value: a tilted normal, an
+/// off-axis eye, two directional lights and one point light with real distance
+/// attenuation.
+///
+/// The reference is [`three_brdf`], read from the source GLSL rather than from
+/// the WGSL, plus the parts of the frame that are the engine's own (hemisphere
+/// ambient, the point attenuation curve).
+#[test]
+fn the_physical_brdf_matches_a_transcription_of_the_source_glsl() {
+    let gpu = gpu();
+    // No shadows and no normal map, so `N` is the geometric normal and `atten`
+    // is the light's own: the terms under test are the only variables left.
+    let rig = Rig {
+        caps: CAP_SPECULAR,
+        sky: [0.35, 0.45, 0.7, 0.0],
+        ground: [0.18, 0.14, 0.1, 0.0],
+        fog_color: [0.6, 0.65, 0.8, 0.0],
+        fog_range: [0.0, 0.0, 0.0, 0.0],
+        camera: [1.5, 3.0, -4.0, 0.0],
+        lights: vec![
+            ([0.2, 0.8, 0.4, 0.0], [1.0, 0.95, 0.85, 3.0]),
+            ([1.0, 0.5, 0.25, 1.0], [0.2, 0.6, 1.0, 6.0]),
+            ([-0.7, 0.3, -0.6, 0.0], [0.9, 0.3, 0.2, 1.5]),
+        ],
+    };
+    // The one fragment this rig rasterizes: the 1x1 target's centre is NDC
+    // (0, 0), and the MVP and world matrices are both the identity.
+    let world_pos = [0.0_f64, 0.0, 0.5];
+    let vertex_normal = [0.3_f32, 0.9, -0.2];
+    let normal = three_brdf::normalize(vertex_normal.map(f64::from));
+    let view_dir = three_brdf::normalize(three_brdf::sub(
+        [rig.camera[0], rig.camera[1], rig.camera[2]].map(f64::from),
+        world_pos,
+    ));
+    let reference = |roughness: f64, metalness: f64| -> [f64; 3] {
+        let base = PHYS_BASE;
+        let diffuse_color = base.map(|lane| lane * (1.0 - metalness));
+        // No geometry roughness: the three vertices share a normal, so both
+        // derivatives of `geo_n` are exactly zero.
+        let material_roughness = roughness.max(0.0525).min(1.0);
+        let f0 = [0, 1, 2].map(|lane| 0.04 * (1.0 - metalness) + base[lane] * metalness);
+        // `RE_IndirectDiffuse_Physical` over the engine's hemisphere ambient,
+        // which is three's `getHemisphereLightIrradiance` term for term. The
+        // frame casts no shadow, so `ambient_shade` is exactly 1.
+        let hemi_weight = (normal[1] * 0.5 + 0.5).clamp(0.0, 1.0);
+        let hemi = [0, 1, 2].map(|lane| {
+            f64::from(rig.ground[lane]) * (1.0 - hemi_weight)
+                + f64::from(rig.sky[lane]) * hemi_weight
+        });
+        let indirect_diffuse = {
+            let lambert = three_brdf::brdf_lambert(diffuse_color);
+            [0, 1, 2].map(|lane| hemi[lane] * lambert[lane])
+        };
+        let (total_diffuse, total_specular) = rig.lights.iter().fold(
+                (indirect_diffuse, [0.0_f64; 3]),
+                |(diffuse_sum, specular_sum), (v, col)| {
+                    let is_point = v[3] > 0.5;
+                    let (light_dir, atten) = [
+                        (three_brdf::normalize([v[0], v[1], v[2]].map(f64::from)), 1.0),
+                        {
+                            let d = three_brdf::sub([v[0], v[1], v[2]].map(f64::from), world_pos);
+                            let dist = three_brdf::dot(d, d).sqrt();
+                            (
+                                three_brdf::scale(d, 1.0 / dist.max(0.0001)),
+                                1.0 / (1.0 + 0.09 * dist + 0.032 * dist * dist),
+                            )
+                        },
+                    ][usize::from(is_point)];
+                    let light_color = [0, 1, 2]
+                        .map(|lane| f64::from(col[lane]) * f64::from(col[3]) * atten);
+                    let dot_nl = three_brdf::dot(normal, light_dir).max(0.0).min(1.0);
+                    let irradiance = three_brdf::scale(light_color, dot_nl);
+                    let ggx = three_brdf::brdf_ggx(
+                        light_dir,
+                        view_dir,
+                        normal,
+                        f0,
+                        1.0,
+                        material_roughness,
+                    );
+                    let lambert = three_brdf::brdf_lambert(diffuse_color);
+                    (
+                        [0, 1, 2].map(|lane| diffuse_sum[lane] + irradiance[lane] * lambert[lane]),
+                        [0, 1, 2]
+                            .map(|lane| specular_sum[lane] + irradiance[lane] * ggx[lane]),
+                    )
+                },
+            );
+        // `outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance`,
+        // three's own combination — with no emission authored here.
+        [0, 1, 2].map(|lane| total_diffuse[lane] + total_specular[lane])
+    };
+    let worst = [
+        (0.15_f64, 0.0_f64),
+        (0.4, 0.0),
+        (0.4, 1.0),
+        (0.75, 0.35),
+        (1.0, 1.0),
+    ]
+    .iter()
+    .fold(0.0_f64, |worst, (roughness, metalness)| {
+        let program = fragment_program(&physical_surface(*roughness as f32, *metalness as f32))
+            .expect("flattens");
+        let actual = render_lit(
+            &gpu,
+            crate::scene_wgsl::SCENE_WGSL_SUFFIX,
+            &program,
+            &rig,
+            vertex_normal,
+            1.0,
+            [0.0, 0.0, 0.0],
+        );
+        // The authored channel is an `f32`, so the reference must be given the
+        // same number the GPU got, not the `f64` literal it was written from.
+        let expected = reference(f64::from(*roughness as f32), f64::from(*metalness as f32));
+        (0..3).fold(worst, |worst, lane| {
+            let delta = (expected[lane] - f64::from(actual[lane])).abs();
+            assert!(
+                delta <= f64::from(PHYSICAL_PARITY_TOLERANCE),
+                "roughness {roughness} metalness {metalness} lane {lane}: \
+                 the source says {} and the GPU said {} (delta {delta:e})",
+                expected[lane],
+                actual[lane]
+            );
+            worst.max(delta)
+        })
+    });
+    // **The measurement the tolerance is derived from, re-taken every run.**
+    // The per-lane assertions above already prove the budget covers the hardware;
+    // this proves the budget is not a number fitted to a miss. A tolerance more
+    // than 10x looser than the hardware needs is itself a failure, so the
+    // declared constant must sit inside one decade of the worst real delta.
+    //
+    // Measured 2.97e-4 on a Vulkan adapter, against a declared 1.0e-3 — 3.4x. The
+    // gap is not the transcription: it is `D_GGX`'s denominator,
+    // `dotNH² · (a2 - 1) + 1`, which is a catastrophic cancellation when `a2` is
+    // small and `dotNH` is near 1, so an `f32` shader and an `f64` reference part
+    // company there by far more than either one's own epsilon. The low-roughness
+    // case in the sweep is deliberately kept for exactly that reason.
+    assert!(
+        worst > 0.0,
+        "an f32 GPU and an f64 reference agreeing to the bit means the reference \
+         is not being evaluated"
+    );
+    assert!(
+        f64::from(PHYSICAL_PARITY_TOLERANCE) <= worst * 10.0,
+        "the worst delta measured {worst:e}, so the declared tolerance of {} is \
+         more than 10x looser than the hardware needs; tighten it",
+        PHYSICAL_PARITY_TOLERANCE
+    );
+}
+
+/// An authored `Normal` channel reaches the lighting stage and changes the lit
+/// result.
+///
+/// **This is the regression test for a defect that shipped precisely because it
+/// had none.** `fs` used to resolve the normal with two `select`s reading the
+/// same `CAP_NORMALMAP` bit and taking *opposite arms*: with the bit set the
+/// tangent-space normal came from the texture and `surface.normal` was unused;
+/// with it clear `surface.normal` was read into `nmap` and then `N` took the
+/// geometric normal anyway. So an authored normal was computed on every path and
+/// used on none, and `SurfaceChannel::NormalFromHeight` was dead on arrival.
+///
+/// Nothing caught it because every test asserted what the normal *map* did.
+/// This one asserts what the **channel** does, which is the thing that was
+/// broken.
+#[test]
+fn an_authored_normal_channel_actually_lights_differently() {
+    let gpu = gpu();
+    // Normal-mapping OFF, so the only tangent-space tilt available is the
+    // authored one. Under the old code this configuration provably could not
+    // move a pixel.
+    let rig = Rig::unit(CAP_ALL & !CAP_NORMALMAP);
+    let lit = |normal: Vec3| -> [f32; 4] {
+        let surface = SurfaceBuilder::new()
+            .lighting(LightingModel::Lambert)
+            .constant(
+                SurfaceChannel::BaseColor,
+                FieldValue::vec4(Vec4::new(0.8, 0.8, 0.8, 1.0)),
+            )
+            .constant(SurfaceChannel::Normal, FieldValue::vec3(normal))
+            .build()
+            .expect("a vec3 normal is legal");
+        let program = fragment_program(&surface).expect("flattens");
+        assert!(program.contains("out.normal = "), "the channel must be carried");
+        // The VALUE must reach the program too, not just the assignment — a
+        // constant that flattened back to the default would make the render
+        // comparison below vacuous.
+        assert!(
+            program.contains(&format!("{:?}", normal.x)) || normal.x == 0.0,
+            "the authored x must appear in the program:
+{program}"
+        );
+        render_lit_uv(
+            &gpu,
+            crate::scene_wgsl::SCENE_WGSL_SUFFIX,
+            &program,
+            &rig,
+            // The vertex normal must AGREE with the triangle's plane. Every
+            // other test here passes `(0, 1, 0)` while the triangle lies at
+            // constant z, which makes `dp2` parallel to `geo_n`, so
+            // `r1 = cross(dp2, geo_n)` is the zero vector and the x-tangent
+            // vanishes. On that rig a tilt along x provably cannot move a
+            // pixel — the first draft of this test used one and reported the
+            // fix as broken. `(0, 0, 1)` gives a frame with both axes real.
+            [0.0, 0.0, 1.0],
+            0.0,
+            [0.0, 0.0, 0.0],
+            // A REAL uv gradient. On the shared-uv rig every other test uses,
+            // the cotangent frame is degenerate and no tangent-space normal can
+            // move a pixel at all.
+            GRADIENT_UV,
+        )
+    };
+
+    // The tangent-space identity must still be the geometric normal, to the bit.
+    // That is the half of the old behaviour worth keeping, and the reason the
+    // gate is now "is there any tilt" rather than "is a map bound".
+    let flat = lit(Vec3::new(0.0, 0.0, 1.0));
+    // A real tilt must light differently, and this one is chosen to be
+    // unmissable: the light is `(0, 1, 0)` and the geometric normal is
+    // `(0, 0, 1)`, so a flat surface takes **zero** diffuse and any tilt toward
+    // the light adds some. The difference is the whole diffuse term, not a
+    // fraction of it.
+    let tilted = lit(Vec3::new(0.0, 0.8, 0.6));
+    assert_ne!(
+        flat.map(f32::to_bits),
+        tilted.map(f32::to_bits),
+        "an authored normal that changes no pixel is the defect this test exists          for: it means `surface.normal` is not reaching the lighting stage",
+    );
+    // And it is a *shading* difference, not noise.
+    let moved = (0..3).map(|i| (flat[i] - tilted[i]).abs()).fold(0.0_f32, f32::max);
+    assert!(
+        moved > 0.01,
+        "the authored tilt moved the lit result by only {moved:e}; that is drift,          not a normal reaching the light",
+    );
 }
 
 /// The WGSL codes are `axiom_surface::LightingModel`'s discriminants — the same
@@ -858,6 +1579,7 @@ fn the_wgsl_lighting_codes_are_the_surface_layers_discriminants() {
             "AXIOM_LIGHT_LAMBERT_SPECULAR",
             LightingModel::LambertSpecular,
         ),
+        ("AXIOM_LIGHT_PHYSICAL", LightingModel::Physical),
     ]
     .iter()
     .for_each(|(name, model)| {
@@ -876,4 +1598,11 @@ fn the_wgsl_lighting_codes_are_the_surface_layers_discriminants() {
     assert_eq!(suffix.matches("@fragment").count(), 1);
     assert!(suffix.contains("let model = axiom_lighting_model();"));
     assert!(suffix.contains("select(base.rgb, ambient_lit, gathers)"));
+    // The fourth model is spent the same way: one more `select` on a VALUE, in
+    // the same entry point. Not a second `@fragment`, not a second module.
+    assert!(suffix.contains("model == AXIOM_LIGHT_PHYSICAL"));
+    assert_eq!(
+        suffix.matches("let model = axiom_lighting_model();").count(),
+        1
+    );
 }

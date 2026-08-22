@@ -106,8 +106,14 @@ fn function_text(flat: &Surface) -> String {
         },
     );
     format!(
+        // `out.transmission = 0.0` is emitted unconditionally. A field-algebra
+        // surface has no way to author transmission yet — there is no
+        // `SurfaceChannel::Transmission` — and leaving the field unwritten
+        // would hand the lighting stage whatever `var out: SurfaceOut` was
+        // initialised to. An explicit zero is an exact identity there.
         "fn axiom_surface(in: SurfaceIn, params: SurfaceParams) -> SurfaceOut {{\n\
-         {body}    var out: SurfaceOut;\n{assignments}    return out;\n}}\n"
+         {body}    var out: SurfaceOut;\n{assignments}    out.transmission = 0.0;\n\
+         \x20   return out;\n}}\n"
     )
 }
 

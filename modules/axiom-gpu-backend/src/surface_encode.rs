@@ -105,17 +105,51 @@ pub(crate) fn present_encode_flag(target: wgpu::TextureFormat) -> f32 {
 /// `Rgba8UnormSrgb` target and has no surface to negotiate with — has no use for
 /// it. The rule is still pure, so it is decided and tested here rather than
 /// written out inside the wasm-only binding where no test can reach it.
+///
+/// # The float arm
+///
+/// `hdr_scene` overrides both answers with [`HDR_SCENE_FORMAT`]. It is *not* a
+/// device fact and it is not read from the surface — it is
+/// [`crate::hdr_target::hdr_scene_tonemap`]'s verdict, which is the app's
+/// authored tone map **and** the granted capability, together. That is the whole
+/// reason this parameter is a plain `bool` arriving from outside rather than
+/// something this function could work out for itself: an intermediate that no
+/// longer clamps at display white is a different picture, not a better one, and
+/// the decision to render it belongs to whoever authored the frame.
+///
+/// Everything downstream keys off the returned format alone — the bloom working
+/// targets are allocated in it (`crate::post_chain`), the scene pipeline's colour
+/// target is it, and the present pass reads it. So this one value is the entire
+/// switch, and an arm that does not opt in gets a format bit-identical to the one
+/// it always got.
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn scene_target_format(
     surface: wgpu::TextureFormat,
     srgb_usages: wgpu::TextureUsages,
+    hdr_scene: bool,
 ) -> wgpu::TextureFormat {
     let needed = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
-    srgb_usages
+    let ldr = srgb_usages
         .contains(needed)
         .then(|| surface.add_srgb_suffix())
-        .unwrap_or(surface)
+        .unwrap_or(surface);
+    [ldr, HDR_SCENE_FORMAT][usize::from(hdr_scene)]
 }
+
+/// The float colour format the scene renders into when the HDR present path is
+/// on: half-float RGBA, the format
+/// [`axiom_host::HostAttachmentFormat::Rgba16Float`] names and the one
+/// [`crate::hdr_target::device_hdr_targets`] asks the adapter about.
+///
+/// Half, not full. `Rgba32Float` doubles the bandwidth of every scene pixel and
+/// every bloom tap to buy exponent range a frame does not have — a half carries
+/// ~5 decimal digits and a range to 65 504, against a sun disc the source
+/// authors at 4 000 and a metering tap clamped at 40. And it is the format both
+/// browser arms can actually report as renderable *and* filterable; `Rgba32Float`
+/// needs a separate feature to be sampled with a linear filter at all, which the
+/// bloom chain requires of every target it touches.
+#[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
+pub(crate) const HDR_SCENE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 #[cfg(test)]
 mod tests {
@@ -171,12 +205,12 @@ mod tests {
     fn scene_target_upgrades_to_srgb_when_the_device_can_hold_it() {
         let both = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
         assert_eq!(
-            scene_target_format(wgpu::TextureFormat::Bgra8Unorm, both),
+            scene_target_format(wgpu::TextureFormat::Bgra8Unorm, both, false),
             wgpu::TextureFormat::Bgra8UnormSrgb,
             "a linear surface still gets an sRGB intermediate, so the darks do not band"
         );
         assert_eq!(
-            scene_target_format(wgpu::TextureFormat::Rgba8UnormSrgb, both),
+            scene_target_format(wgpu::TextureFormat::Rgba8UnormSrgb, both, false),
             wgpu::TextureFormat::Rgba8UnormSrgb,
             "an already-sRGB surface is unchanged — the WebGL2 arm renders exactly as before"
         );
@@ -191,11 +225,44 @@ mod tests {
         ];
         cases.iter().for_each(|&usages| {
             assert_eq!(
-                scene_target_format(wgpu::TextureFormat::Bgra8Unorm, usages),
+                scene_target_format(wgpu::TextureFormat::Bgra8Unorm, usages, false),
                 wgpu::TextureFormat::Bgra8Unorm,
                 "a target the device cannot both draw into and sample is not usable at all"
             );
         });
+    }
+
+    /// The float arm overrides every LDR answer — including the fallback one, so
+    /// a device whose sRGB variant is unusable still gets a *float* intermediate
+    /// rather than being quietly dropped back to 8 bits after the capability was
+    /// already granted. The two questions are independent: "can this surface hold
+    /// an sRGB view" says nothing about "can this device hold a half-float
+    /// attachment", and conflating them would refuse HDR for the wrong reason.
+    #[test]
+    fn the_hdr_scene_target_is_half_float_whatever_the_surface_offered() {
+        let both = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+        [
+            (wgpu::TextureFormat::Bgra8Unorm, both),
+            (wgpu::TextureFormat::Rgba8UnormSrgb, both),
+            (wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureUsages::empty()),
+        ]
+        .iter()
+        .for_each(|&(surface, usages)| {
+            assert_eq!(
+                scene_target_format(surface, usages, true),
+                HDR_SCENE_FORMAT,
+                "{surface:?} did not take the float intermediate"
+            );
+            assert_ne!(
+                scene_target_format(surface, usages, false),
+                HDR_SCENE_FORMAT,
+                "{surface:?} took the float intermediate without being asked"
+            );
+        });
+        assert!(
+            !HDR_SCENE_FORMAT.is_srgb(),
+            "the float target stores linear radiance; an sRGB store would re-clamp it"
+        );
     }
 
     /// The shared curve reaches the shader ahead of the body, so the body may

@@ -4,13 +4,14 @@
 //!
 //! ## The decision: a discriminant the program STATES, not a variant it selects
 //!
-//! [`axiom_surface::LightingModel`] is a closed three-valued set — `Unlit`,
-//! `Lambert`, `LambertSpecular`. All three are compiled into the **one** lit
-//! shader this backend has ([`crate::scene_wgsl`]), and the main pass's `fs`
-//! picks between them with a `select` and two multipliers, exactly the way it
-//! already gates its twelve capability bits. So a lighting model costs **zero
-//! additional pipelines**: three models across N surfaces is N programs, never
-//! 3N. The engine has an explicit, twice-written anti-variant doctrine
+//! [`axiom_surface::LightingModel`] is a closed four-valued set — `Unlit`,
+//! `Lambert`, `LambertSpecular`, `Physical`. All four are compiled into the
+//! **one** lit shader this backend has ([`crate::scene_wgsl`]), and the main
+//! pass's `fs` picks between them with two `select`s and two multipliers,
+//! exactly the way it already gates its twelve capability bits. So a lighting
+//! model costs **zero additional pipelines**: four models across N surfaces is N
+//! programs, never 4N. The engine has an explicit, twice-written anti-variant
+//! doctrine
 //! (`crate::post_chain`, `crate::surface_encode`) — *"so a device cannot stutter
 //! compiling a second variant mid-session"* — and this work does not reverse it.
 //!
@@ -22,23 +23,33 @@
 //! is `Unlit` — a parameter lane would unlight every frame in the engine today.
 //! A value the program states cannot default to zero by accident.
 //!
-//! ## `metallic` is reserved and INERT, on purpose
+//! ## `roughness` and `metallic` are LIVE — under exactly one model
 //!
-//! [`axiom_surface::SurfaceChannel::Metallic`] is authored, digested, packed into
-//! the parameter region and emitted into `SurfaceOut` — and **no lighting model
-//! reads it**. `docs/specs/SPEC-11-3d-scene-surface.md` says *"Resist PBR scope
-//! creep"*, and a metallic term is not one term: it is a Fresnel term plus an
-//! environment term plus a split between diffuse and specular albedo, which is a
-//! different project with its own capability, its own probes and its own budget.
-//! Shipping a channel that *looks* wired but moves no pixel is worse than
-//! shipping one that is documented inert, so this is stated here, at the site,
-//! and proven by `metallic_is_reserved_and_changes_no_pixel` in
+//! Both channels used to be carried, digested, packed into the parameter region,
+//! emitted into `SurfaceOut` — and read by nothing. `metallic` said so here;
+//! `roughness` did not, and three app-side documents called it dead. That is
+//! over: [`axiom_surface::LightingModel::Physical`] reads both, as three.js's
+//! `MeshStandardMaterial` does — `alpha = roughness²` into the GGX distribution,
+//! and `metallic` splitting the surface into a diffuse albedo
+//! `base * (1 - metallic)` and a specular `F0 = mix(0.04, base, metallic)`.
+//!
+//! Under the other three models they are still read by nothing, and that is not
+//! an oversight either: Blinn-Phong has no Fresnel and no metal/dielectric
+//! split, so there is nowhere honest to put them. Specular strength for those
+//! three still comes from the instance-stream lane derived from the **legacy**
+//! `Material::roughness`, which the physical model does not consult at all (its
+//! `specular_gate` is zero, so the lane's whole term is zero before the physical
+//! sum replaces the result).
+//!
+//! `docs/specs/SPEC-11-3d-scene-surface.md`'s *"Resist PBR scope creep"* is
+//! honoured by keeping the scope at **direct** lighting: no environment term, no
+//! IBL probe, no split-sum. Indirect specular is an exact zero — which is what
+//! three's own is with no environment map — so the model added a BRDF, not a
+//! subsystem.
+//!
+//! Pinned on a real adapter by `roughness_and_metalness_drive_the_physical_brdf`
+//! and `metallic_is_inert_under_every_model_but_physical` in
 //! [`crate::surface_program::parity_lighting`].
-//!
-//! (The cautionary precedent is `roughness`, which sat inert long enough that
-//! three app-side documents still call it dead months after it became the
-//! `1.0 - roughness` specular strength. An inert channel must say so where the
-//! reader is.)
 //!
 //! ## `RenderPipelineKind`, finally connected
 //!
@@ -77,9 +88,9 @@ pub(crate) fn pipeline_kind(model: LightingModel) -> u32 {
 /// The WGSL a lighting model lowers to: a nullary function returning its wire
 /// code.
 ///
-/// A per-surface **constant**, so the shader compiler folds it and the three
+/// A per-surface **constant**, so the shader compiler folds it and the four
 /// models' gates collapse to literals inside one program — which is why all
-/// three arms being present costs a compiled program nothing.
+/// four arms being present costs a compiled program nothing.
 pub(crate) fn lighting_model_function(model: LightingModel) -> String {
     format!(
         "fn axiom_lighting_model() -> u32 {{\n    return {}u;\n}}\n",
@@ -174,6 +185,7 @@ mod tests {
         });
         assert_ne!(programs[0], programs[1]);
         assert_ne!(programs[1], programs[2]);
+        assert_ne!(programs[2], programs[3]);
     }
 
     #[test]
@@ -263,6 +275,7 @@ mod tests {
             pipeline_kind(LightingModel::LambertSpecular),
             PIPELINE_BASIC_LIT
         );
+        assert_eq!(pipeline_kind(LightingModel::Physical), PIPELINE_BASIC_LIT);
         // The markers are the render module's numbers, mirrored — 1 and 2.
         assert_eq!(PIPELINE_BASIC_LIT, 1);
         assert_eq!(PIPELINE_UNLIT, 2);
@@ -270,10 +283,10 @@ mod tests {
     }
 
     /// The `metallic` channel is carried through the whole lowering and reaches
-    /// `SurfaceOut` — and no lighting model reads it. This pins the *carried*
-    /// half; `parity_lighting` pins the *inert* half on a real GPU.
+    /// `SurfaceOut`. This pins the *carried* half; `parity_lighting` pins which
+    /// models actually read it, on a real GPU.
     #[test]
-    fn metallic_is_carried_into_the_program_and_read_by_no_model() {
+    fn metallic_is_carried_into_the_program() {
         let metal = SurfaceBuilder::new()
             .constant(
                 SurfaceChannel::Metallic,
@@ -285,6 +298,7 @@ mod tests {
         assert!(text.contains("out.metallic = "));
         // Two surfaces differing only in metallic are two distinct programs —
         // the channel is genuinely carried, not dropped on the floor — and
+        // under the three non-physical models
         // neither of them can move a pixel, because nothing reads the lane.
         let matte = SurfaceBuilder::new()
             .constant(

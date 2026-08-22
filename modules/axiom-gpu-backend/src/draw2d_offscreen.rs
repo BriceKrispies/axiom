@@ -1,5 +1,6 @@
 //! Native **off-screen** 2D raster — `offscreen` feature, non-wasm only.
-//! The 2D peer of [`crate::offscreen`]: it builds a throwaway wgpu device, renders
+//! The 2D peer of [`crate::offscreen`]: it takes the process's one native wgpu
+//! device ([`crate::native_gpu`]), renders
 //! a [`Draw2dGeometry`] through the shared [`crate::draw2d_renderer::Draw2dRenderer`]
 //! into an off-screen colour texture, and reads the pixels back to RGBA8. It is
 //! the headless capture path the screenshot tool (`axiom-shot`) and the SPEC-04
@@ -38,21 +39,15 @@ pub(crate) fn render_draw2d_to_rgba(
     let width = width.max(1);
     let height = height.max(1);
 
-    let instance = wgpu::Instance::default();
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        force_fallback_adapter: false,
-        compatible_surface: None,
-    }))
-    .ok()?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("axiom-draw2d-offscreen-device"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::default(),
-        memory_hints: wgpu::MemoryHints::default(),
-        trace: wgpu::Trace::Off,
-    }))
-    .ok()?;
+    // The same process-wide native device the 3D capture path uses
+    // (`crate::native_gpu`) — see its module docs for why a capture no longer
+    // builds and destroys one of its own. This path asked for no device features
+    // and still needs none; it simply stopped opening a second device to have
+    // none on.
+    let native = crate::native_gpu::shared()?;
+    // Clones are handle bumps onto the same device, so every downstream `&device`
+    // reads exactly as it did when this function owned one.
+    let (device, queue) = (native.device.clone(), native.queue.clone());
 
     let color_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("axiom-draw2d-offscreen-color"),
