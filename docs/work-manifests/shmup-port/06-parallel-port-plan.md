@@ -110,6 +110,60 @@ Each of these has cost hours. Check for them **by name** in every slice.
   instrument.
 - **Dead computation in the source is still part of the source.** Port it with a
   comment rather than dropping it.
+- **`Math.round` is not `f64::round`, and `floor(x + 0.5)` is not `Math.round`
+  either.** JS breaks ties toward `+Infinity`; Rust breaks them away from zero.
+  They differ on **every negative half-integer**, and `Math.round(-0.5)` is
+  `-0`, not `-1`. The obvious fix, `(x + 0.5).floor()`, is *also* wrong: for
+  `x = 0.49999999999999994` adding `0.5` rounds to exactly `1.0`, so it returns
+  `1` where JS returns `+0`. ECMA-262 states the two sub-0.5 clauses before it
+  mentions flooring, precisely to head that off. Six slices independently
+  rediscovered the tie rule and two of them shipped the naive form. It decides
+  real structure, not presentation: in `physics/ragdoll.js` the rounded value
+  decides whether two bone endpoints merge into one particle. Use
+  `crate::jsmath::round`.
+- **Do not write your own copy of a JavaScript builtin — `crate::jsmath` owns
+  them.** `hypot2/3/4`, `sign`, `round`, `or_one`, each transcribed from V8 once
+  and pinned bit-for-bit with no tolerance. Before this module existed the crate
+  held six `hypot3`s across three different algorithms and nine three-valued
+  `sign`s. Two `hypot3`s were wrong; `audio/spatial.rs` shipped the plain root
+  with a comment reasoning the difference was "within a couple of ULP", and
+  `ai/geo.rs` then shipped the same wrong form **citing that comment as its
+  justification**. A duplicated primitive does not merely cost duplication — it
+  lets two copies disagree and hands each one a plausible local excuse.
+  (`Math.hypot`'s disagreement with the plain root was then measured
+  independently by five slices: 25%, 36%, 37.5%, 38%, 41% of inputs. It is not
+  marginal.)
+- **`Vector3.length()`/`distanceTo()` are NOT `Math.hypot`.** They really are
+  `sqrt(x*x + y*y + z*z)`. Converting them to `jsmath::hypot3` is the trap run
+  backwards, and it is easy to do once you have been bitten the other way. Check
+  which function the source actually calls at each site.
+- **A transcription that nothing calls is worse than no transcription.** Both
+  sky slices found `tests/sky/capture.mjs` holding complete hand-transcriptions
+  of `CLOUDS_GLSL`, `SKY_BODY` and every volumetrics shader that were assigned
+  to nothing and asserted on by no test. The harness read as finished; the
+  coverage was zero. Before you trust an existing capture script, check that
+  every function it defines is actually called and every key it writes is
+  actually asserted.
+- **Two transcriptions by the same author share the same misreadings.** Where
+  the source is GLSL in a JS string there is no oracle, so the capture script
+  must hand-transcribe it — but if you write that transcription by reading your
+  own Rust, it will agree with your Rust and prove nothing. Ten real defects
+  were found this way in `sky/` alone (divides written as reciprocal-multiplies,
+  re-associated multiply chains, vector-by-scalar chains folded into one
+  multiply), every one present identically on both sides. **Transcribe from the
+  shader source text alone, before or without reading the Rust**, then diff.
+- **Your harness's stubs are part of the comparator.** An `ai/agent` capture
+  stub returned colliders with no `setSegment`, so the probe *fabricated seven
+  colliders* onto an agent the real constructor gives none — and reported the
+  port as wrong. A `weapons/viewmodel` capture stubbed materials as bare
+  `MeshBasicMaterial`s, which defaulted an opacity to 1 and hid a genuine port
+  error; both sides were wrong and it only surfaced because they were wrong
+  *differently*. Instantiate the real object wherever you can.
+- **`JSON.stringify(NaN)` is `null`,** and so are `Infinity`/`-Infinity`. A
+  golden that pins a non-finite guard case silently round-trips it to null and
+  the test panics on a type error rather than a value mismatch. Write non-finite
+  values as tagged strings — or, better, write every float as its IEEE bit
+  pattern in hex, which also carries `-0` (JSON cannot represent that either).
 
 ## What is done
 
@@ -136,12 +190,23 @@ compile and are wired in, but are **incomplete and have no golden tests**:
 
 | file | source lines | ported lines | |
 |---|---|---|---|
-| `ai/parts.js` | 1073 | 225 | ~21% |
+| `ai/parts.js` | 1073 | **0** | **absent — see below** |
+| `ai/geo.js` | 754 | **0** | **absent — see below** |
 | `weapons/hands.js` | 1163 | 374 | ~32% |
-| `ai/geo.js` | 754 | 231 | ~31% |
 | `sky/volumetrics.js` | 527 | 246 | ~47% |
 | `weapons/viewmodel.js` | 1088 | 604 | ~56% |
 | `ai/agent.js` | 1009 | 745 | ~74% |
+
+**Correction (2026-08-21).** The first two rows were wrong. `apps/shmup/src/ai/parts.rs`
+and `apps/shmup/src/ai/geo.rs` do **not** exist on `main` and never landed — the
+partial work those line counts describe died with the stopped agents. `src/ai/`
+holds exactly `agent.rs`, `grounding.rs`, `nav.rs`, `squad.rs` and `mod.rs`. Both
+files are therefore a from-scratch port, not a completion. The correction matters
+in the other direction too: it means the hazard is *smaller* than stated for those
+two (absent code misleads nobody) and *larger* than stated elsewhere — `ai/nav.rs`
+(861 lines) and `ai/squad.rs` (227) are fully ported, wired in, and have **no test
+of any kind**; there is no `ai_*_port.rs` anywhere. An unpinned port is
+indistinguishable from a wrong one, so they belong on this list.
 
 Also check `sky/dome.rs`, `sky/clouds.rs` and `ai/grounding.rs`, which are
 borderline.
