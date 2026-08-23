@@ -102,9 +102,6 @@ members = [
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",
-    # Claude of Duty: the browser FPS at C:/dev/Claude-of-Duty ported onto Axiom
-    # (composition leaf; every FPS concept stays app-local).
-    "apps/shmup",
     "crates/xtask",
     # The repo's query-and-change gateway: gitignore-aware search, symbol
     # lookup, the layer/module graph, scoped edits, and the NDJSON ledger that
