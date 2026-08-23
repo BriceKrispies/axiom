@@ -87,9 +87,27 @@ impl Record {
         Self {
             ts,
             day,
+            // Identity, best available first.
+            //
+            // These used to be `AXIOM_ATLAS_SESSION` or the PID, and
+            // `AXIOM_ATLAS_AGENT` or "unknown" — which meant attribution was
+            // opt-in, and it was not taken up: of the first 9,036 rows, 7,979
+            // carried agent "unknown" and a PID-shaped session, so the causal
+            // link this ledger exists to record ("searched X, then changed Z")
+            // was unavailable for 88% of it. The PID is the worse half: a
+            // detached invocation gets a fresh one, so one work session
+            // shattered into 1,752 of them.
+            //
+            // The host already publishes both. Reading them costs nothing and
+            // needs no discipline from the agent, which is the only kind of
+            // instrumentation that actually gets collected. The explicit
+            // variables still win, so a script can label a run of its own.
             session: std::env::var("AXIOM_ATLAS_SESSION")
+                .or_else(|_| std::env::var("CLAUDE_CODE_SESSION_ID"))
                 .unwrap_or_else(|_| std::process::id().to_string()),
-            agent: std::env::var("AXIOM_ATLAS_AGENT").unwrap_or_else(|_| "unknown".to_owned()),
+            agent: std::env::var("AXIOM_ATLAS_AGENT")
+                .or_else(|_| std::env::var("AI_AGENT"))
+                .unwrap_or_else(|_| "unknown".to_owned()),
             cmd: cmd.to_owned(),
             id: None,
             query: None,

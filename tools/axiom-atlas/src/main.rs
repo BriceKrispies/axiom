@@ -91,7 +91,7 @@ fn main() -> ExitCode {
         "miss" => cmd_miss(&repo, &args, &mut rec),
         "stats" => cmd_stats(&repo, &args, &mut rec),
         "compact" => cmd_compact(&repo, &mut rec),
-        "sql" => cmd_sql(&repo, &mut rec),
+        "sql" => cmd_sql(&repo, &args, &mut rec),
         other => Err(Failure::Usage(format!("unknown command `{other}`"))),
     };
 
@@ -1131,15 +1131,105 @@ fn compact_sql(raw: &std::path::Path, parquet: &std::path::Path) -> String {
     )
 }
 
-fn cmd_sql(repo: &Repo, _rec: &mut Record) -> Outcome {
-    let raw = ledger::raw_dir(repo).display().to_string().replace('\\', "/");
-    let parquet = ledger::parquet_dir(repo).display().to_string().replace('\\', "/");
+/// A directory as DuckDB will accept it: forward slashes, and without the
+/// Windows extended-length prefix.
+///
+/// `Repo` canonicalises, which on Windows yields a `\?\`-prefixed path. That
+/// prefix is a Win32 API instruction, not part of the name, and DuckD\ub cannot
+/// glob through it — the first real query this command ever ran failed on it.
+fn duck_dir(path: &std::path::Path) -> String {
+    path.display()
+        .to_string()
+        .replace(std::path::MAIN_SEPARATOR, "/")
+        .trim_start_matches("//?/")
+        .to_owned()
+}
 
-    println!("-- Every ledger row, raw and compacted, as one relation.");
-    println!("CREATE OR REPLACE VIEW ledger AS");
-    println!("  SELECT * FROM read_json_auto('{raw}/*.ndjson', union_by_name=true)");
-    println!("  UNION ALL BY NAME");
-    println!("  SELECT * FROM read_parquet('{parquet}/*.parquet');");
+/// `ax sql [query]` — run a query over the whole ledger, or print the cuts
+/// worth starting from.
+///
+/// **It executes.** This used to print a preamble and a few example queries for
+/// a human to paste into a DuckDB somebody else had installed, which meant the
+/// ledger's richest surface was unavailable on any machine that had not been
+/// set up — and on the machine this was written on it simply was not, so the
+/// questions the ledger exists to answer went unasked for as long as it has
+/// existed.
+///
+/// The engine is the `duckdb` CLI on `PATH`, not a compiled-in one. Embedding it
+/// was tried first and is the better ergonomics — a fresh checkout could query
+/// with nothing installed — but `libduckdb-sys`'s `bundled` feature compiles
+/// DuckDB's C++ amalgamation, which is minutes of `cc1plus` and gigabytes of
+/// RAM on every cold target directory. `tools/` is meant to stay cheap to
+/// build, and a 12 MB CLI one `scoop install duckdb` away is the smaller trade.
+/// A machine without it gets the queries printed, exactly as before, so nothing
+/// this command could do yesterday stops working.
+fn cmd_sql(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
+    // The parquet half may hold nothing: `ax compact` may never have run, and a
+    // ledger of raw NDJSON alone is the normal state early on. `read_parquet`
+    // over an empty glob is an error rather than an empty relation, so the view
+    let raw = duck_dir(&ledger::raw_dir(repo));
+    let parquet_dir = ledger::parquet_dir(repo);
+    let has_parquet = std::fs::read_dir(&parquet_dir)
+        .map(|d| {
+            d.flatten()
+                .any(|e| e.path().extension().is_some_and(|x| x == "parquet"))
+        })
+        .unwrap_or(false);
+    let parquet = duck_dir(&parquet_dir);
+    let halves = match has_parquet {
+        true => format!(
+            "SELECT * FROM read_json_auto('{raw}/*.ndjson', union_by_name=true)\n  \
+             UNION ALL BY NAME\n  SELECT * FROM read_parquet('{parquet}/*.parquet')"
+        ),
+        false => format!("SELECT * FROM read_json_auto('{raw}/*.ndjson', union_by_name=true)"),
+    };
+    let view = format!("CREATE OR REPLACE VIEW ledger AS {halves};");
+
+    let Some(sql) = args.arg(0) else {
+        print_sql_starters(&halves);
+        return Ok(Status::Found);
+    };
+    rec.query = Some(sql.to_owned());
+
+    // `-noheader` is deliberately NOT passed: a column name is most of what
+    // makes a result readable, and every other `ax` command labels its output.
+    let out = std::process::Command::new("duckdb")
+        .args(["-box", "-c", &format!("{view}\n{sql}")])
+        .output();
+    let Ok(out) = out else {
+        eprintln!("ax: `duckdb` is not on PATH — install it (scoop install duckdb) to run queries.");
+        eprintln!("ax: the view and the starting cuts, to paste into one you have:");
+        eprintln!();
+        print_sql_starters(&halves);
+        return Err(Failure::Failed("no duckdb on PATH".to_owned()));
+    };
+    print!("{}", String::from_utf8_lossy(&out.stdout));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    stderr.is_empty().then_some(()).map_or_else(
+        || eprint!("{stderr}"),
+        |()| (),
+    );
+    // Rows, not lines: `-box` frames the table, so the payload is what sits
+    // between the header rule and the footer rule.
+    let rows = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| l.starts_with('│'))
+        .count()
+        .saturating_sub(1);
+    rec.hits = rows;
+    Ok(status(rows))
+}
+
+/// The cuts worth starting from, printed when `ax sql` is given no query.
+///
+/// Printed rather than run because which one a caller wants is the whole
+/// question; running all four would bury the answer in the other three.
+fn print_sql_starters(halves: &str) {
+    println!("-- Pass a query to run one:");
+    println!("--   ax sql \"SELECT cmd, count(*) FROM ledger GROUP BY 1 ORDER BY 2 DESC\"");
+    println!("--");
+    println!("-- The `ledger` view is created for you:");
+    println!("CREATE OR REPLACE VIEW ledger AS {halves};");
     println!();
     println!("-- What the repo could not answer, most-wanted first.");
     println!("SELECT query, count(*) AS misses, count(DISTINCT session) AS sessions");
@@ -1155,7 +1245,6 @@ fn cmd_sql(repo: &Repo, _rec: &mut Record) -> Outcome {
     println!("SELECT unnest(top_paths) AS path, count(*) AS touches");
     println!("  FROM ledger WHERE cmd IN ('edit', 'write', 'record') AND ok");
     println!("  GROUP BY 1 ORDER BY 2 DESC LIMIT 40;");
-    Ok(Status::Found)
 }
 
 // ---------------------------------------------------------------------------
@@ -1196,7 +1285,9 @@ fn print_usage() {
     ax miss [--limit N] [--all]       what the repo, and the tool, could not do
     ax stats [--limit N]              what agents look for and change
     ax compact                        roll closed days into Parquet
-    ax sql                            DuckDB queries over the whole ledger
+    ax sql [query]                    run DuckDB over the whole ledger (engine
+                                      is compiled in; no query prints the cuts
+                                      worth starting from)
 
   --lang: rs ts js web toml md py shader json
   Exit: 0 found | 1 nothing found | 2 usage | 3 out-of-repo path | 4 failed
