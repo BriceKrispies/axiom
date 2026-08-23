@@ -160,8 +160,29 @@ impl Game {
     /// `seed` is the engine root seed — [`CAPTURE_SEED`] is the source's own
     /// deterministic value (`engine.js:26`).
     pub fn new(seed: u32) -> Self {
+        Game::new_observed(seed, &mut |_, _| {})
+    }
+
+    /// [`Game::new`] with a per-slot observer: `checkpoint(slot, state)` is
+    /// called with the ROOT stream's four state words immediately after each
+    /// subsystem has finished drawing from it, in construction order.
+    ///
+    /// Not in the source. It exists because the construction order **is the
+    /// level**: `core/registry.js` topologically sorts the subsystems, every one
+    /// of them forks the root stream once at init, and `registry.rs` records
+    /// that the sort's tie-breaking — and so the order of two independent
+    /// systems — falls back to insertion order. A reordering therefore changes
+    /// the world while compiling, running and failing no existing test.
+    ///
+    /// That is the failure mode a move onto [`crate::registry::Registry`] walks
+    /// into, so the order is pinned here BEFORE the move: whatever composition
+    /// root drives these systems, it must reproduce this sequence exactly. The
+    /// same reason `crate::world::system::WorldSystem::init_observed` exists,
+    /// one level up.
+    pub fn new_observed(seed: u32, checkpoint: &mut dyn FnMut(&str, [u32; 4])) -> Self {
         let config = Config::default();
         let mut root = Rng::new(seed);
+        checkpoint("start", root.state());
 
         // **The source's init order, from `core/registry.js`'s topological sort:**
         // `render, materials, sky, physics, world, player, weapons, fx, ai, ui,
@@ -176,6 +197,7 @@ impl Game {
         // at `level.rs:158`. What this ordering buys is that the subsystems stay
         // consistent with each other and with themselves across runs.
         let level = build_level(&mut root);
+        checkpoint("world", root.state());
         let physics = PhysicsWorld::new(level.world.clone());
 
         // `physics.createCharacter({...})` — `movement.js:141-149`'s dimensions.
@@ -216,12 +238,18 @@ impl Game {
 
         // weapons (slot 7) forks before fx.
         let mut weapons = crate::scene::wiring::weapons::WeaponsRig::new(&mut root);
+        checkpoint("weapons", root.state());
         // fx (slot 8), then ai (slot 9), then the HUD (slot 10), then audio
         // (slot 11, last).
         let fx = crate::scene::wiring::fx_audio::build_fx(&mut root, &config, &physics);
+        checkpoint("fx", root.state());
         let ai = crate::scene::wiring::ai::AiWiring::new(root.fork(), &config, &level, &physics, feet);
+        checkpoint("ai", root.state());
         let hud = HudRig::new(root.fork());
+        checkpoint("ui", root.state());
+
         let audio = crate::scene::wiring::fx_audio::build_audio(&mut root, &physics);
+        checkpoint("audio", root.state());
         let fx_audio = crate::scene::wiring::fx_audio::FxAudio::new(fx, audio);
 
         let mut time = Time::default();
@@ -846,6 +874,50 @@ mod tests {
         );
     }
 
+    /// **The construction order IS the level, so it is pinned here.**
+    ///
+    /// Every subsystem forks the root stream once at init, and
+    /// `crate::registry::Registry` records that its topological sort breaks ties
+    /// on insertion order — so two independent systems swapping places changes
+    /// the world. Nothing else would catch it: the build succeeds, the frame
+    /// renders, and the buildings are somewhere else.
+    ///
+    /// This exists so the composition root can be MOVED. Whatever drives these
+    /// systems — the hand-rolled `Game` today, `registry::Registry` after — has
+    /// to reproduce this sequence exactly, and this fails loudly when it does
+    /// not. The order itself is `core/registry.js`'s topological sort, minus
+    /// the slots that draw nothing (`materials`, `sky`).
+    #[test]
+    fn the_root_stream_is_consumed_in_the_registrys_order() {
+        let mut seen: Vec<(String, [u32; 4])> = Vec::new();
+        Game::new_observed(CAPTURE_SEED, &mut |slot, state| {
+            seen.push((slot.to_owned(), state));
+        });
+        let order: Vec<&str> = seen.iter().map(|(s, _)| s.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["start", "world", "weapons", "fx", "ai", "ui", "audio"],
+            "the root stream was consumed in a different order — the level moved"
+        );
+        // The states themselves, not only the order: a subsystem that starts
+        // drawing a different NUMBER of values leaves the sequence intact and
+        // the world different, and the names alone would not see it.
+        let states: Vec<[u32; 4]> = seen.iter().map(|(_, s)| *s).collect();
+        assert_eq!(
+            states,
+            vec![
+                [1408721277, 2042729634, 265063393, 2021161881],
+                [1380879942, 637173310, 3742543516, 3480868877],
+                [224061893, 1774922315, 2379267247, 3188557228],
+                [3667674658, 3913383713, 383697770, 897531582],
+                [111282109, 621017705, 1320994632, 4060937953],
+                [3517776693, 1830632092, 1340740341, 2015643320],
+                [3298066193, 4082772828, 2754750912, 3420528809],
+            ],
+            "a subsystem drew a different number of values from the root stream"
+        );
+    }
+
     #[test]
     fn the_hud_frame_reads_the_real_movement_state() {
         let mut game = game();
@@ -883,6 +955,81 @@ mod tests {
         assert_eq!(a.movement.position, b.movement.position);
     }
 
+
+    /// **What one frame produces, per subsystem — the invariant a composition
+    /// root move has to preserve.**
+    ///
+    /// `the_root_stream_is_consumed_in_the_registrys_order` pins *init*. This
+    /// pins *running*, and the two guard different failures. A subsystem can
+    /// keep its slot in the init order and still do less work per frame, which
+    /// is not hypothetical here: `ai::system::AiSystem::update` — the ported
+    /// `Subsystem` impl, as distinct from the wiring this drives — runs the
+    /// source's `if (!phys)` path, because `Ctx` carries no physics facade and
+    /// so it steps the AI with no gravity and no ballistics. Registering it and
+    /// driving the frame from `registry::Registry` would compile, run, and
+    /// quietly give a different game.
+    ///
+    /// So each subsystem contributes one number that its own work moves. The
+    /// values are recorded from the wiring path as it stands, and a registry
+    /// -driven frame has to reproduce them.
+    ///
+    /// Deliberately NOT a screenshot or a pose hash: those move for a hundred
+    /// reasons and say nothing about which subsystem stopped working. One
+    /// observable per system is what makes a failure name its own cause.
+    #[test]
+    fn one_frame_of_work_per_subsystem_is_pinned() {
+        let mut game = game();
+        let mut input = Input::new();
+        input.pointer_locked = true;
+        input.key_down("KeyW");
+        input.mouse_down(0);
+        for i in 0..90 {
+            input.mouse_move(f64::from(i % 5) - 2.0, 0.5);
+            game.frame(1.0 / 60.0, &mut input);
+            // The HUD is NOT driven by `Game::frame` — `scene::app::frame` calls
+            // it separately, and so must this. That split is itself part of
+            // what the registry move fixes: `ui` is a subsystem with an
+            // `Update` phase, and a registry drives every phase from one list
+            // rather than leaving one system to a caller who has to remember.
+            game.hud_frame(&input);
+        }
+
+        // player / physics — the capsule actually moved and is standing on the
+        // world, not falling through it or stuck at the spawn.
+        let moved = (game.movement.position[0] - game.spawn.position[0]).hypot(
+            game.movement.position[2] - game.spawn.position[2],
+        );
+        assert!(moved > 1.0, "the player did not move: {moved}");
+        assert!(
+            game.movement.position[1] > -1.0 && game.movement.position[1] < 5.0,
+            "the capsule left the world: y = {}",
+            game.movement.position[1]
+        );
+        assert!(game.movement.grounded, "the player is not standing on anything");
+
+        // weapons — the trigger was held, so rounds left the magazine.
+        let mag = game.weapons.core().ammo().mag;
+        assert!(mag < 30, "the magazine never drained: {mag}");
+
+        // ai — the actors exist and are being posed.
+        let actors = game.ai.actor_poses();
+        assert!(!actors.is_empty(), "no AI actors were posed");
+        assert!(
+            actors.iter().all(|a| a.position[1].is_finite()),
+            "an actor pose went non-finite"
+        );
+
+        // fx — the frame produced live particles (muzzle flash, at minimum).
+        let mut points = Vec::new();
+        game.fx_audio.particle_points(game.time.elapsed, &mut points);
+        assert!(!points.is_empty(), "the fx system produced no particles");
+
+        // ui — the HUD read the weapon it is drawing.
+        assert!(
+            game.hud.core().borrow().state.move_amount > 0.0,
+            "the HUD did not see the player move"
+        );
+    }
     #[test]
     fn the_movement_state_machine_is_actually_being_driven() {
         let mut game = game();

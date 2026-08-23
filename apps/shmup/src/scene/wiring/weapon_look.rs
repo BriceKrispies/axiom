@@ -224,10 +224,14 @@ impl WeaponLook {
             .iter()
             .filter_map(|look| look.surface.as_ref())
             .filter_map(|surface| {
-                let digest = surface.digest().raw();
-                let fresh = !seen.contains(&digest);
+                // By PARAMETER REGION, not digest: every runtime material
+                // shares one digest, so deduplicating on it prepared a single
+                // region for the whole weapon table and the rifle's fifteen
+                // materials all shaded as whichever one survived.
+                let key = surface.param_key().raw();
+                let fresh = !seen.contains(&key);
                 fresh.then(|| {
-                    seen.push(digest);
+                    seen.push(key);
                     surface.clone()
                 })
             })
@@ -910,15 +914,31 @@ mod tests {
         assert!(look.bakes.len() <= material_keys().len());
     }
 
+    /// **One pipeline, one parameter region per material.**
+    ///
+    /// This asserted `surfaces().len() == 1` on the reasoning that a runtime
+    /// material's parameters are excluded from its digest, so all fifteen share
+    /// one program. The premise holds; using the digest as the REGION key too
+    /// did not, and its own closing line named the symptom it would then miss —
+    /// "a fallback-shaded gun". Fifteen weapon materials really were shading as
+    /// one.
     #[test]
-    fn the_surfaces_deduplicate_by_digest() {
+    fn the_surfaces_share_one_program_and_keep_a_region_each() {
         let look = look();
         let surfaces = look.surfaces();
         assert!(!surfaces.is_empty());
-        // A runtime material's parameters are excluded from its digest, so all
-        // fifteen share one program. If that ever stops being true this assertion
-        // is the thing that says so, rather than a fallback-shaded gun.
-        assert_eq!(surfaces.len(), 1);
+        let digests: std::collections::BTreeSet<u64> =
+            surfaces.iter().map(|s| s.digest().raw()).collect();
+        assert_eq!(digests.len(), 1, "every runtime material is ONE program");
+        let regions: std::collections::BTreeSet<u64> =
+            surfaces.iter().map(|s| s.param_key().raw()).collect();
+        assert_eq!(
+            regions.len(),
+            surfaces.len(),
+            "two weapon materials share a parameter region — one of them is \
+             shading as the other"
+        );
+        assert!(regions.len() > 3, "the table resolved to {} regions", regions.len());
     }
 
     #[test]

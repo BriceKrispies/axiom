@@ -32,6 +32,13 @@ allowed_layers = [
     # one facade per module. Also `MapPixels`, the four optional maps a
     # `MaterialTexture` now carries.
     "host",
+    # `WorldTag` — a stable name, a kind and a world position per point of
+    # interest. `scene::console` tags every installed level batch with the
+    # palette key it is made of, so the dev console can draw the codebase's own
+    # identifier over the thing on screen. Without it an agent looking at a
+    # screenshot has no route from a pixel back to a symbol, which is the
+    # bottleneck this whole console exists to remove.
+    "introspect",
 ]
 
 allowed_modules = [

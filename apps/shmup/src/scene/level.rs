@@ -110,7 +110,26 @@ pub struct SpawnPoint {
 /// that shader modulates. So the level reads with the right *palette* and no
 /// texture; see the notes file.
 pub struct LevelBatch {
+    /// What this batch MERGES by.
+    ///
+    /// A statics batch merges by palette key; an instanced batch merges by
+    /// prototype id, so that every placement of one prototype becomes a single
+    /// draw. The two are different strings for the instanced case, which is why
+    /// [`Self::palette_key`] exists beside this one.
     pub key: String,
+    /// What this batch is MADE OF — the palette key, for both kinds.
+    ///
+    /// Every material lookup keys off this: the surface program, the emissive,
+    /// the baked albedo/normal/ORM maps and the tint. When an instanced batch
+    /// was re-keyed to its prototype id for merging, the material lookups were
+    /// left reading `key`, and `Palette::ALL` has no entry called `crate_c` —
+    /// so every prop in the level silently took the untextured path and
+    /// rendered as the neutral grey stand-in `key_albedo` falls back to. Flat
+    /// white crates and barrels beside brick buildings is what that looks like.
+    ///
+    /// Merging by one string and shading by another is the whole point of
+    /// carrying both; collapsing them again would restore the bug.
+    pub palette_key: String,
     pub surface: Surface,
     pub mesh: MeshData,
     pub albedo: Color,
@@ -223,6 +242,7 @@ pub fn build_level(root: &mut Rng) -> Level {
 
     let statics = world_system.statics.iter().map(|s| LevelBatch {
         key: s.key.clone(),
+        palette_key: s.key.clone(),
         surface: s.surface,
         mesh: to_mesh_data(&s.geo),
         albedo: key_albedo(&s.key),
@@ -260,6 +280,10 @@ pub fn build_level(root: &mut Rng) -> Level {
                     // Keyed on the *prototype* id so the merge above is by
                     // prototype; the palette key drives the albedo instead.
                     key: b.proto_id.clone(),
+                    // The palette key, kept beside the prototype id: this is
+                    // what the material is, as distinct from what the batch
+                    // merges by.
+                    palette_key: b.key.clone(),
                     surface: b.surface,
                     mesh: to_mesh_data(geo),
                     albedo: key_albedo(&b.key),

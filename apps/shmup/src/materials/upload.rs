@@ -121,6 +121,14 @@ pub struct BakedLibrary {
     pub detail: Rgba8Map,
     /// Binding 6, shared by every material. The four variation bands.
     pub macro_field: Rgba8Map,
+    /// Library **name** to bake **key**, in the order `names` was given.
+    ///
+    /// `surfaces` is keyed by bake key and deduplicated, because that is what a
+    /// bake costs — but a caller holds palette names, and forty-six of them
+    /// collapse onto nineteen keys. Without this the caller has to rebuild a
+    /// `MaterialSystem` purely to re-derive a mapping this function already
+    /// computed and threw away.
+    pub names: Vec<(String, String)>,
 }
 
 impl BakedLibrary {
@@ -282,9 +290,11 @@ pub fn bake_library(quality: Quality, size_cap: u32, names: &[&str]) -> BakedLib
     let opts = MaterialOpts::new();
 
     let mut surfaces: Vec<(String, SurfaceMaps)> = Vec::new();
+    let mut resolved: Vec<(String, String)> = Vec::new();
     for name in names {
         let key = system.texture_set_key(name, &opts);
         let Some(key) = key else { continue };
+        resolved.push(((*name).to_string(), key.clone()));
         if surfaces.iter().any(|(existing, _)| *existing == key) {
             continue;
         }
@@ -304,6 +314,7 @@ pub fn bake_library(quality: Quality, size_cap: u32, names: &[&str]) -> BakedLib
         surfaces,
         detail: detail_map(&detail),
         macro_field: map_of(&macro_set.albedo),
+        names: resolved,
     }
 }
 

@@ -5,3 +5,4 @@
 //! module — a module may not depend on an app.
 
 pub mod probe;
+pub mod system;

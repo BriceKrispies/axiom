@@ -17,6 +17,11 @@
 //! subsystems, and no ported subsystem reads anything here.
 
 pub mod app;
+pub mod boot;
+pub mod composition;
+pub mod console;
+pub mod draw;
+pub mod install;
 pub mod furniture;
 pub mod wiring;
 pub mod game;

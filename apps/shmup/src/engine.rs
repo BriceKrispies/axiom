@@ -40,6 +40,7 @@ use axiom_kernel::Seconds;
 
 use crate::config::{Config, FIXED_DT, FIXED_STEP, MAX_SUBSTEPS};
 use crate::error::CoreError;
+use crate::input::Input;
 use crate::events::{DispatchFailure, EventBus};
 use crate::registry::{Phase, Registry, SystemRef, Subsystem};
 use crate::rng::Rng;
@@ -107,7 +108,52 @@ pub struct Ctx<'a> {
     /// .fork()` once at init and never touches this again — that discipline is
     /// what keeps one system's edits from reshuffling another's sequence.
     pub rng: &'a RefCell<Rng>,
+    /// The frame's input, as `core/engine.js:56` carries it.
+    ///
+    /// The source's `ctx` has always had this; ours did not, and
+    /// `scene::wiring::physics_player` records what that cost: *"`Subsystem`
+    /// phase signatures carry no input, [so] `PlayerSystem::new` wants an
+    /// `Rc<RefCell<Input>>`"* — a back-channel around the context, which is
+    /// one of the three reasons the registry could not be the composition root
+    /// and `scene::game::Game` became one instead.
+    ///
+    /// A `RefCell` for the same reason `rng` is one: a phase may read it while
+    /// the engine still owns it, and the alternative is handing every system a
+    /// clone of the frame's input.
+    pub input: &'a RefCell<Input>,
     registry: &'a Registry,
+}
+
+impl<'a> Ctx<'a> {
+    /// Build a context over an explicit registry.
+    ///
+    /// `registry` is private, which meant no code outside this module could
+    /// construct a `Ctx` — and since every `Subsystem` phase takes one, that
+    /// shut the registry out of any composition root but `Engine`.
+    /// `scene::wiring::physics_player` records the consequence in full: faced
+    /// with a door it could not open, the port built a second composition root
+    /// in `scene::game::Game` and drove the cores by hand. Every hand-inlined
+    /// duplicate this port has found is downstream of that.
+    ///
+    /// The field stays private — a caller supplies a registry, it does not
+    /// reach into one.
+    pub fn over(
+        config: &'a Config,
+        events: &'a EventBus,
+        time: &'a Time,
+        rng: &'a RefCell<Rng>,
+        input: &'a RefCell<Input>,
+        registry: &'a Registry,
+    ) -> Ctx<'a> {
+        Ctx {
+            config,
+            events,
+            time,
+            rng,
+            input,
+            registry,
+        }
+    }
 }
 
 impl Ctx<'_> {
@@ -133,6 +179,8 @@ pub struct Engine {
     registry: Registry,
     events: EventBus,
     rng: RefCell<Rng>,
+    /// The frame's input, as `core/engine.js:56` hands it to every phase.
+    input: RefCell<Input>,
     time: Time,
     /// The fixed-step accumulator.
     ///
@@ -155,6 +203,7 @@ impl Engine {
             registry: Registry::new(),
             events: EventBus::new(),
             rng: RefCell::new(Rng::new(root_seed)),
+            input: RefCell::new(Input::new()),
             time: Time::start(),
             accum: Cell::new(0.0),
             last: 0.0,
@@ -199,6 +248,7 @@ impl Engine {
             events: &self.events,
             time: &self.time,
             rng: &self.rng,
+            input: &self.input,
             registry: &self.registry,
         };
         for system in order {
@@ -218,6 +268,7 @@ impl Engine {
             events: &self.events,
             time: &self.time,
             rng: &self.rng,
+            input: &self.input,
             registry: &self.registry,
         };
         for system in systems {
@@ -265,6 +316,7 @@ impl Engine {
                 events: &self.events,
                 time: &self.time,
                 rng: &self.rng,
+            input: &self.input,
                 registry: &self.registry,
             };
             self.accum.set(self.accum.get() + self.time.dt);
@@ -292,6 +344,7 @@ impl Engine {
                 events: &self.events,
                 time: &self.time,
                 rng: &self.rng,
+            input: &self.input,
                 registry: &self.registry,
             };
             let dt = self.time.dt_seconds();

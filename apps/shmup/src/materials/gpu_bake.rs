@@ -333,6 +333,14 @@ pub fn assemble(
             .collect(),
         detail: detail_map(detail),
         macro_field: rgba8(macro_field.size(), macro_field.albedo().to_vec()),
+        // The GPU plan names its bakes by key already, so name and key are the
+        // same string here; the CPU path is the one where forty-six names
+        // collapse onto nineteen keys.
+        names: plan
+            .surfaces
+            .iter()
+            .map(|request| (request.key().to_string(), request.key().to_string()))
+            .collect(),
     }
 }
 

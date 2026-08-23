@@ -187,6 +187,41 @@ impl Surface {
         surface_bytes::digest(self)
     }
 
+    /// **Which parameter region this surface reads** — the digest, refined by the
+    /// parameter *values* a runtime material carries.
+    ///
+    /// [`Self::digest`] deliberately excludes parameter values so that retuning
+    /// one cannot force a recompile, and that is right for a **program** key. It
+    /// is wrong for a **parameter region** key, and using it for both is a defect
+    /// with a very visible symptom: every runtime material in a scene collapses
+    /// onto one region, so forty-six authored materials — concrete, brick, metal,
+    /// glass, asphalt — all shade as whichever one survived the deduplication.
+    ///
+    /// So the two identities are separated. The digest still says *which program
+    /// to compile*; this says *which parameter block to bind*. A field surface
+    /// carries its constants in the digest already, so for one the two are the
+    /// same number and nothing changes.
+    ///
+    /// Folded from [`MaterialParams::pack`] rather than the struct's fields: the
+    /// packed slots are exactly the bytes the GPU reads, so two materials share a
+    /// region precisely when the GPU could not tell them apart. A field added to
+    /// `MaterialParams` that `pack` does not write is a field the shader cannot
+    /// see, and it correctly does not split the region.
+    pub fn param_key(&self) -> StableHash {
+        let digest = self.digest().raw().to_le_bytes();
+        self.kind().material_params().map_or_else(
+            || self.digest(),
+            |params| {
+                let packed: Vec<u8> = params
+                    .pack()
+                    .iter()
+                    .flat_map(|slot| slot.iter().flat_map(|v| v.to_le_bytes()))
+                    .collect();
+                StableHash::of_bytes(&[digest.as_slice(), packed.as_slice()].concat())
+            },
+        )
+    }
+
     /// Decode and validate a surface produced by [`Self::serialize`].
     ///
     /// Bounds-checked throughout and never panics: a buffer truncated at *any*

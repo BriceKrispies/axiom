@@ -143,6 +143,15 @@ pub struct Input {
     pub wheel: f64,
     pending_wheel: f64,
 
+    /// **Why the last pointer-lock request failed**, or `None`.
+    ///
+    /// The source's comment — *"failing to lock is not a game error"* — is true
+    /// and was implemented as saying nothing at all, which makes a failed lock
+    /// undiagnosable: the pointer is free, the look input silently stops
+    /// accumulating, and every button still works, so the game looks fine and is
+    /// not. Recording the reason costs one `Option` and turns a silent failure
+    /// into one the dev console can report.
+    pub lock_error: Option<String>,
     pub pointer_locked: bool,
     pub enabled: bool,
     /// `this.frozen` — set by capture mode so scripted shots aren't fought by
@@ -227,11 +236,33 @@ impl Input {
     /// `_onLockChange()`. `input.js:141-144`. Losing the lock blurs.
     pub fn set_pointer_locked(&mut self, locked: bool) {
         self.pointer_locked = locked;
+        // A lock that took retires the reason the last one did not.
+        if locked {
+            self.lock_error = None;
+        }
         if !locked {
             self.blur();
         }
     }
 
+    /// Record that the browser refused a pointer-lock request.
+    ///
+    /// Chrome refuses for reasons the page cannot see in advance — most often
+    /// the ~1.25 s cool-down it imposes after the *user* exits a lock with
+    /// Escape. A request inside that window fires `pointerlockerror` and is
+    /// discarded, and because the app only ever asked on `mousedown`, the one
+    /// click the player made to get back into the game was spent on a request
+    /// that could never succeed. That is the whole bug: clicks kept working
+    /// (they are recorded independently) while looking did not.
+    pub fn lock_failed(&mut self, why: &str) {
+        self.lock_error = Some(why.to_owned());
+    }
+
+    /// Clear the recorded failure — a lock that succeeds retires the reason the
+    /// previous one did not.
+    pub fn lock_succeeded(&mut self) {
+        self.lock_error = None;
+    }
     /// `_onBlur()`. `input.js:147-151`. Losing focus must release every held
     /// key, or the player runs forever.
     pub fn blur(&mut self) {
@@ -459,8 +490,24 @@ pub mod dom {
                 if e.repeat() {
                     return;
                 }
-                // Let devtools/refresh through; swallow everything else.
-                if !e.meta_key() && !e.ctrl_key() {
+                // Let the browser's own keys through; swallow everything else.
+                //
+                // The source (`core/input.js:108`) exempts only modifier chords,
+                // which reads as "devtools and refresh still work" and is not
+                // true: F12 and F5 carry no modifier, so they fell into the
+                // swallow branch and the page suppressed Chrome's own devtools
+                // shortcut. A game that cannot be opened in devtools is a game
+                // that cannot be debugged in the one environment it runs in, so
+                // this port does not carry that bug forward.
+                //
+                // The exemption is an allowlist of keys the BROWSER owns, not a
+                // denylist of keys the game wants: the game binds no function
+                // key at all, so nothing here is contested.
+                let browser_key = matches!(
+                    e.code().as_str(),
+                    "F5" | "F11" | "F12" | "F6" | "F3"
+                );
+                if !e.meta_key() && !e.ctrl_key() && !browser_key {
                     e.prevent_default();
                 }
                 i.borrow_mut().key_down(&e.code());
@@ -549,6 +596,49 @@ pub mod dom {
             }) as Box<dyn FnMut(_)>),
         );
 
+        // `pointerlockerror` — the event the port never listened for.
+        //
+        // Chrome fires this and discards the request; nothing else tells the
+        // page. Recording it is what lets `__ax_console("lock")` answer "the
+        // browser refused" instead of the game appearing to work.
+        let i = Rc::clone(input);
+        on(
+            document.as_ref(),
+            "pointerlockerror",
+            Closure::wrap(Box::new(move |_e: web_sys::Event| {
+                i.borrow_mut()
+                    .lock_failed("the browser refused the lock (usually the ~1.25s cool-down after Escape)");
+            }) as Box<dyn FnMut(_)>),
+        );
+
+        // **The retry, and why it is on `click` and not another `mousedown`.**
+        //
+        // Pointer lock needs a transient user activation, so the page cannot
+        // simply re-ask on a timer. `mousedown` was the port's only request
+        // site, which gives a returning player exactly ONE attempt per press —
+        // and the press that brings them back into the game is very often the
+        // one inside Chrome's post-Escape cool-down. That request is refused,
+        // nothing retries, and the player is left in the game unable to look
+        // until they think to click again.
+        //
+        // `click` fires after `mouseup` on the same interaction, so it is a
+        // second, later activation from the one gesture the player already
+        // made. That is enough to clear a cool-down that started when they hit
+        // Escape, and it costs nothing when the first request succeeded —
+        // `wants_pointer_lock` is false by then.
+        let i = Rc::clone(input);
+        let retry_target = canvas.clone();
+        on(
+            window.as_ref(),
+            "click",
+            Closure::wrap(Box::new(move |e: web_sys::Event| {
+                let e: web_sys::MouseEvent = e.unchecked_into();
+                if i.borrow().wants_pointer_lock(e.button().max(0) as u16) {
+                    retry_target.request_pointer_lock();
+                }
+            }) as Box<dyn FnMut(_)>),
+        );
+
         on(
             canvas.as_ref(),
             "contextmenu",
@@ -629,6 +719,36 @@ mod tests {
         assert!(!input.action(Action::Forward));
         assert!(!input.action(Action::Sprint));
         assert!(input.released("KeyW") && input.released("ShiftLeft"));
+    }
+
+    /// **A refused lock is recorded, and a taken lock retires the record.**
+    ///
+    /// The bug this pins: a refused `requestPointerLock` left the game looking
+    /// healthy — every button still worked — while `mouse_move` silently
+    /// discarded every delta. Nothing observed the refusal, so nothing could
+    /// report it. Now `lock_error` carries the reason until a lock succeeds.
+    #[test]
+    fn a_refused_lock_is_recorded_until_one_succeeds() {
+        let mut input = Input::new();
+        assert_eq!(input.lock_error, None);
+        input.lock_failed("cool-down");
+        assert_eq!(input.lock_error.as_deref(), Some("cool-down"));
+        // A failure must not pretend the pointer is locked.
+        assert!(!input.pointer_locked);
+        assert!(input.wants_pointer_lock(0), "a refusal leaves it still asking");
+        input.set_pointer_locked(true);
+        assert_eq!(input.lock_error, None, "a lock that took clears the reason");
+    }
+
+    /// Losing the lock must not resurrect a stale failure reason.
+    #[test]
+    fn releasing_the_lock_leaves_no_phantom_error() {
+        let mut input = Input::new();
+        input.set_pointer_locked(true);
+        input.set_pointer_locked(false);
+        assert_eq!(input.lock_error, None);
+        input.lock_succeeded();
+        assert_eq!(input.lock_error, None);
     }
 
     #[test]

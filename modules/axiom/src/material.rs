@@ -114,7 +114,7 @@ impl Material {
     /// matte, opaque. The catalog builders still apply, so a surface-backed
     /// material can carry a texture and an emissive exactly like any other.
     pub fn from_surface(surface: Surface) -> Self {
-        Material::lit(Color::WHITE).with_surface_program(surface.digest().raw())
+        Material::lit(Color::WHITE).with_surface_program(surface.param_key().raw())
     }
 
     /// This material's own colour and textures, driven by `surface`'s program.
@@ -129,7 +129,7 @@ impl Material {
     /// the same surface with different colours are still one program and one
     /// pipeline; only the instance colour lane differs.
     pub fn with_surface(self, surface: Surface) -> Self {
-        self.with_surface_program(surface.digest().raw())
+        self.with_surface_program(surface.param_key().raw())
     }
 
     /// This material with an explicit appearance program id. Private because the

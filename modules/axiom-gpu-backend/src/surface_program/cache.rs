@@ -92,6 +92,13 @@ pub(crate) const SURFACE_PROGRAM_OVERFLOW: KernelError = KernelError::new(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SurfaceProgramSource {
     program_id: u64,
+    /// Which **program** this region belongs to — the surface's digest.
+    ///
+    /// Separate from `program_id` (the region) so that N materials sharing a
+    /// shape compile ONE pipeline and bind N parameter blocks. That is the
+    /// property `Surface::digest`'s doc promises and this field is what keeps
+    /// it once the region key stopped being the digest.
+    pipeline_key: u64,
     vertex: String,
     fragment: String,
     params: Vec<u8>,
@@ -126,6 +133,11 @@ impl SurfaceProgramSource {
     /// paid for that bug once already.
     pub(crate) fn params(&self) -> &[u8] {
         &self.params
+    }
+
+    /// Which pipeline this region's draws are drawn with — the surface's digest.
+    pub(crate) const fn pipeline_key(&self) -> u64 {
+        self.pipeline_key
     }
 }
 
@@ -174,8 +186,12 @@ impl SurfaceProgramCatalog {
         geometry: GeometryPath,
     ) -> Result<SurfaceProgramCatalog, KernelError> {
         let mut ordered: Vec<&Surface> = surfaces.iter().collect();
-        ordered.sort_by_key(|surface| surface.digest().raw());
-        ordered.dedup_by_key(|surface| surface.digest().raw());
+        // By PARAMETER REGION, not by digest. Two runtime materials with the
+        // same shape and different numbers are one program and TWO regions;
+        // deduplicating them by digest kept one and silently shaded both with
+        // it.
+        ordered.sort_by_key(|surface| surface.param_key().raw());
+        ordered.dedup_by_key(|surface| surface.param_key().raw());
         let prepared: Vec<u64> = ordered
             .iter()
             .map(|surface| surface.digest().raw())
@@ -276,6 +292,7 @@ fn generate(
         .zip(displace_function(surface).ok())
         .map(|(params, vertex)| SurfaceProgramSource {
             program_id: SurfaceProgramPlan::of(surface).program_id(),
+            pipeline_key: surface.digest().raw(),
             // The VERTEX half comes from the same emitter the field path uses,
             // not from a hard-coded zero: a runtime material binds Displacement
             // to its channel default, so this emits exactly the zero offset — and
@@ -308,6 +325,7 @@ fn generate_field_program(
         .zip(surface.flatten().ok())
         .map(|((fragment, vertex), flat)| SurfaceProgramSource {
             program_id: plan.program_id(),
+            pipeline_key: surface.digest().raw(),
             vertex,
             fragment,
             params: pack(plan.param_layout(), &flat),

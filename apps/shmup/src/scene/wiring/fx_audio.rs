@@ -96,6 +96,8 @@ use crate::audio::system::{
     WeaponShell as AudioShell,
 };
 use crate::config::{Config, UNITS};
+use crate::engine::Ctx;
+use crate::registry::{Phase, Subsystem};
 use crate::fx::explosions::ExplosionOpts;
 use crate::fx::particles::{self, ParticleLayer};
 use crate::fx::system::{
@@ -957,5 +959,105 @@ mod tests {
         // Crouching wins over sprinting: you cannot sprint crouched.
         assert_eq!(gait_of(true, true, Stance::Crouch), Gait::Crouch);
         assert_eq!(stance_name(Stance::Prone), "prone");
+    }
+}
+
+/// The registry face of the fx system — `fx/index.js:37`.
+///
+/// Same two-phase shape as [`crate::world::system::WorldSubsystem`]; see that
+/// type for why construction must be empty and the fork must happen in
+/// [`Subsystem::init`].
+///
+/// **This one does fork**, and it is slot 8 in the pinned root sequence
+/// (`world, weapons, fx, ai, ui, audio`). `build_fx` draws from the root and
+/// `build_audio` draws again afterwards, so a registry driving these two has to
+/// call them in that order and no other —
+/// `crate::scene::game::tests::the_root_stream_is_consumed_in_the_registrys_order`
+/// is what fails if it does not.
+///
+/// It needs the physics world at init, which `Ctx` does not carry. That is the
+/// same shortfall `ai::system::AiSystem::update` records, and it is handed in
+/// here explicitly rather than degraded around: a system that cannot see
+/// physics builds no impact decals and no ground splash, and would look like a
+/// working fx system producing almost nothing.
+pub struct FxSubsystem {
+    built: Option<FxSystem>,
+    config: Config,
+    physics: Option<Rc<PhysicsWorld>>,
+}
+
+impl FxSubsystem {
+    /// An unbuilt fx system. `physics` is the world its impact and splash
+    /// queries trace against; without it the system builds, and produces almost
+    /// nothing.
+    pub fn new(config: Config, physics: Option<Rc<PhysicsWorld>>) -> Self {
+        FxSubsystem {
+            built: None,
+            config,
+            physics,
+        }
+    }
+
+    /// The built system, or `None` before the registry has run `init`.
+    pub const fn get(&self) -> Option<&FxSystem> {
+        self.built.as_ref()
+    }
+
+    /// The built system, mutably.
+    pub const fn get_mut(&mut self) -> Option<&mut FxSystem> {
+        self.built.as_mut()
+    }
+}
+
+impl Subsystem for FxSubsystem {
+    fn id(&self) -> &'static str {
+        "fx"
+    }
+
+    /// `static deps = ['render', 'materials']` (`fx/index.js:38`).
+    fn deps(&self) -> &'static [&'static str] {
+        &["render", "materials"]
+    }
+
+    fn phases(&self) -> &'static [Phase] {
+        &[Phase::Update]
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    /// Slot 8: the fork the pinned sequence expects between `weapons` and `ai`.
+    fn init(&mut self, ctx: &Ctx<'_>) -> Result<(), crate::error::CoreError> {
+        let mut root = ctx.rng.borrow_mut();
+        self.built = self
+            .physics
+            .as_ref()
+            .map(|physics| build_fx(&mut root, &self.config, physics));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod fx_subsystem_tests {
+    use super::*;
+
+    #[test]
+    fn it_answers_to_the_id_and_the_sources_deps() {
+        let fx = FxSubsystem::new(Config::default(), None);
+        assert_eq!(fx.id(), "fx");
+        assert_eq!(fx.deps(), &["render", "materials"]);
+        assert!(fx.get().is_none());
+    }
+
+    /// **Construction is free; `init` is where the stream moves.** If this ever
+    /// forks at construction, the fork lands in registration order and the
+    /// registry re-orders init around a draw already spent.
+    #[test]
+    fn construction_draws_nothing_from_the_root_stream() {
+        let rng = crate::rng::Rng::new(11);
+        let before = rng.state();
+        let _fx = FxSubsystem::new(Config::default(), None);
+        assert_eq!(rng.state(), before);
     }
 }

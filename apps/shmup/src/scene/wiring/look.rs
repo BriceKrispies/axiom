@@ -115,7 +115,9 @@ use axiom::prelude::{
 };
 use axiom_kernel::StableHash;
 
-use crate::config::Quality;
+use crate::config::{Config, Quality};
+use crate::engine::Ctx;
+use crate::registry::{Phase, Subsystem};
 use crate::materials::system::{
     MaterialOpts, MaterialSystem, OptValue, RendererCaps, ResolvedParams,
 };
@@ -665,14 +667,23 @@ impl MaterialLook {
     /// is here so that turning de-tiling back on adds the second program to the
     /// barrier instead of rendering a fallback.
     pub fn surfaces(&self) -> Vec<Surface> {
+        // By PARAMETER REGION, not by digest.
+        //
+        // Every runtime material shares one digest by construction — that is what
+        // makes them one program — so deduplicating on it returned exactly ONE
+        // surface for all forty-six palette keys, and the barrier prepared one
+        // region for the whole street. `Surface::param_key` is the identity that
+        // distinguishes concrete from brick from glass; this list is what the
+        // preparation barrier compiles, so a key missing from it is a material
+        // that silently renders as somebody else's.
         let mut seen: Vec<StableHash> = Vec::new();
         self.keys
             .iter()
             .filter_map(|(_, look)| {
-                let digest = look.surface.digest();
-                let fresh = !seen.contains(&digest);
+                let key = look.surface.param_key();
+                let fresh = !seen.contains(&key);
                 fresh.then(|| {
-                    seen.push(digest);
+                    seen.push(key);
                     look.surface.clone()
                 })
             })
@@ -1074,13 +1085,33 @@ mod tests {
         assert!(look.key("no_such_key").is_none());
     }
 
+    /// **One pipeline, many parameter regions.**
+    ///
+    /// This asserted `surfaces().len() == 1` and called it "a runtime material's
+    /// parameters are not in its digest". The premise was right and the
+    /// conclusion was the bug: the digest is the PROGRAM key and correctly
+    /// excludes parameter values, but it was being used for the PARAMETER
+    /// REGION too, so all forty-six palette keys collapsed onto one block and
+    /// concrete, brick, metal, glass and asphalt every one of them shaded as
+    /// whichever survived.
+    ///
+    /// `Surface::param_key` separates the two. Both halves are pinned here,
+    /// because either alone is satisfiable by a regression: many digests would
+    /// mean many pipelines, and one region would mean the original bug.
     #[test]
-    fn the_whole_palette_costs_one_pipeline() {
+    fn the_whole_palette_costs_one_pipeline_and_a_region_per_key() {
         let look = look();
-        assert_eq!(
+        let digests: std::collections::BTreeSet<u64> = look
+            .keys()
+            .iter()
+            .map(|(_, k)| k.surface.digest().raw())
+            .collect();
+        assert_eq!(digests.len(), 1, "every runtime material is ONE program");
+        assert!(
+            look.surfaces().len() > 40,
+            "{} parameter regions for {} palette keys — the regions collapsed",
             look.surfaces().len(),
-            1,
-            "a runtime material's parameters are not in its digest"
+            look.keys().len()
         );
     }
 
@@ -1193,5 +1224,113 @@ mod tests {
         // Below the knee the transfer is the linear segment.
         assert!((srgb_to_linear(0.04) - 0.04 / 12.92).abs() < 1e-12);
         assert!(srgb_to_linear(0.5) < 0.5, "sRGB decoding darkens midtones");
+    }
+}
+
+/// The registry face of [`SkyDriver`] — `sky/index.js:126`.
+///
+/// Same two-phase shape as [`crate::world::system::WorldSubsystem`], and for the
+/// same reason: [`Subsystem::init`] is where a system may touch `ctx.rng`, so
+/// construction has to be cheap and empty. See that type for the full argument.
+///
+/// **This one takes no fork**, and the emptiness is the point rather than an
+/// oversight: `scene::game`'s init-order comment records that `materials` and
+/// `sky` draw nothing from the root stream, which is why the pinned sequence
+/// runs `world, weapons, fx, ai, ui, audio` with no slot between `start` and
+/// `world`. A fork added here moves every subsequent slot and changes the level;
+/// `crate::scene::game::tests::the_root_stream_is_consumed_in_the_registrys_order`
+/// is what says so.
+pub struct SkySubsystem {
+    built: Option<SkyDriver>,
+    quality: Quality,
+    hour: f64,
+}
+
+impl SkySubsystem {
+    /// An unbuilt sky at `quality` and time of day `hour`.
+    pub const fn new(quality: Quality, hour: f64) -> Self {
+        SkySubsystem {
+            built: None,
+            quality,
+            hour,
+        }
+    }
+
+    /// The built driver, or `None` before the registry has run `init`.
+    pub const fn get(&self) -> Option<&SkyDriver> {
+        self.built.as_ref()
+    }
+
+    /// The built driver, mutably.
+    pub const fn get_mut(&mut self) -> Option<&mut SkyDriver> {
+        self.built.as_mut()
+    }
+}
+
+impl Subsystem for SkySubsystem {
+    fn id(&self) -> &'static str {
+        "sky"
+    }
+
+    /// `static deps = ['render', 'materials']` (`sky/index.js:127`).
+    fn deps(&self) -> &'static [&'static str] {
+        &["render", "materials"]
+    }
+
+    fn phases(&self) -> &'static [Phase] {
+        &[Phase::Update]
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    /// No `ctx.rng` here. See the type doc: the sky is one of the two slots the
+    /// source's order includes and this port's root sequence does not.
+    fn init(&mut self, _ctx: &Ctx<'_>) -> Result<(), crate::error::CoreError> {
+        self.built = Some(SkyDriver::new(self.quality, self.hour));
+        Ok(())
+    }
+
+    fn update(&mut self, dt: axiom_kernel::Seconds, _ctx: &Ctx<'_>) {
+        let step = f64::from(dt.get());
+        self.built
+            .as_mut()
+            .map(|sky| sky.frame(step, 0.0, (0.0, 0.0)))
+            .unwrap_or_default();
+    }
+}
+
+#[cfg(test)]
+mod sky_subsystem_tests {
+    use super::*;
+
+    #[test]
+    fn it_answers_to_the_id_and_the_sources_deps() {
+        let sky = SkySubsystem::new(Quality::High, HOUR);
+        assert_eq!(sky.id(), "sky");
+        assert_eq!(sky.deps(), &["render", "materials"]);
+        assert!(sky.get().is_none(), "an uninitialised sky is not built");
+    }
+
+    /// **The sky must not start forking.** The pinned root sequence has no sky
+    /// slot; adding one moves every slot after it and rebuilds the world.
+    #[test]
+    fn construction_and_init_draw_nothing_from_the_root_stream() {
+        let registry = crate::registry::Registry::new();
+        let events = crate::events::EventBus::new();
+        let time = crate::engine::Time::default();
+        let config = Config::default();
+        let rng = std::cell::RefCell::new(crate::rng::Rng::new(7));
+        let input = std::cell::RefCell::new(crate::input::Input::new());
+        let before = rng.borrow().state();
+        let ctx = Ctx::over(&config, &events, &time, &rng, &input, &registry);
+        let mut sky = SkySubsystem::new(Quality::High, HOUR);
+        sky.init(&ctx).expect("the sky needs nothing to initialise");
+        assert_eq!(
+            rng.borrow().state(),
+            before,
+            "the sky drew from the root stream — every later slot just moved"
+        );
     }
 }

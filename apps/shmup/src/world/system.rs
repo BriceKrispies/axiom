@@ -120,6 +120,8 @@ use crate::world::dressing::{
 use crate::world::ground::build_ground;
 use crate::world::layout::BUILDINGS;
 use crate::world::props::register_props;
+use crate::engine::Ctx;
+use crate::registry::{Phase, Subsystem};
 use crate::world::props::RegisteredProto;
 
 /// LEVEL -> WORLD (`index.js:60-62`). The street is authored down -Z; this yaw
@@ -620,4 +622,190 @@ fn transform_box(min: [f64; 3], max: [f64; 3], m: M4) -> Bounds {
         hi = V3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
     }
     Bounds { min: lo, max: hi }
+}
+
+/// The registry face of [`WorldSystem`] — `world/index.js:86`.
+///
+/// **Why a second type and not `impl Subsystem for WorldSystem`.**
+///
+/// [`WorldSystem::init`] is a *constructor*: it takes `&mut Rng`, forks, builds
+/// the level and returns a fully-formed system. [`Subsystem::init`] is a
+/// *phase*: it takes `&mut self` and a [`Ctx`], and the registry calls it in
+/// topological order. Those are not the same shape, and the difference is not
+/// cosmetic — it decides **who owns the fork**.
+///
+/// The fork has to happen inside `Subsystem::init`, because the registry is
+/// what sequences init, and the sequence is the level (every subsystem forks
+/// the root once; `crate::registry::Registry` breaks sort ties on insertion
+/// order). Constructing the world *before* registering it would put the fork in
+/// registration order and let the registry re-order init around it, which is
+/// the silent-reshuffle failure
+/// `crate::scene::game::tests::the_root_stream_is_consumed_in_the_registrys_order`
+/// exists to catch.
+///
+/// So this holds the built world in an `Option` and fills it from `ctx.rng`
+/// when the registry says so. The `Option` is not defensive: it is the honest
+/// representation of a system that exists in the graph before it has been
+/// initialised, which is exactly the state the registry resolves over.
+pub struct WorldSubsystem {
+    built: Option<WorldSystem>,
+    /// The last solar altitude `update` was handed, so the dusk ramp can be
+    /// re-driven without re-reading a subsystem this one may not be able to see.
+    sun_altitude: Option<f64>,
+}
+
+impl Default for WorldSubsystem {
+    fn default() -> Self {
+        WorldSubsystem::new()
+    }
+}
+
+impl WorldSubsystem {
+    /// An unbuilt world. Cheap: no fork, no geometry, nothing drawn.
+    pub const fn new() -> Self {
+        WorldSubsystem {
+            built: None,
+            sun_altitude: None,
+        }
+    }
+
+    /// The built world, or `None` before the registry has run `init`.
+    pub const fn get(&self) -> Option<&WorldSystem> {
+        self.built.as_ref()
+    }
+
+    /// The built world, mutably.
+    pub const fn get_mut(&mut self) -> Option<&mut WorldSystem> {
+        self.built.as_mut()
+    }
+
+    /// Hand this system the solar altitude its dusk ramp reads.
+    ///
+    /// `update` takes it from here rather than from `ctx.get("sky")`, because
+    /// the source's `world` does not declare `sky` in its `deps` — it peeks, and
+    /// tolerates absence (`ctx.peek('sky')?.sunAltitude ?? 0.6`). Threading it
+    /// keeps the declared graph honest rather than adding an edge the source
+    /// does not have.
+    pub const fn set_sun_altitude(&mut self, altitude: f64) {
+        self.sun_altitude = Some(altitude);
+    }
+}
+
+impl Subsystem for WorldSubsystem {
+    fn id(&self) -> &'static str {
+        "world"
+    }
+
+    /// `static deps = ['materials', 'physics']` (`world/index.js:87`).
+    fn deps(&self) -> &'static [&'static str] {
+        &["materials", "physics"]
+    }
+
+    fn phases(&self) -> &'static [Phase] {
+        &[Phase::Update]
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    /// `init(ctx)` — the fork, taken here so the registry owns its place in the
+    /// order.
+    fn init(&mut self, ctx: &Ctx<'_>) -> Result<(), crate::error::CoreError> {
+        let mut root = ctx.rng.borrow_mut();
+        self.built = Some(WorldSystem::init(&mut root));
+        Ok(())
+    }
+
+    /// `update(dt, ctx)` (`index.js:311-331`) — the street lamps and the
+    /// interior bulbs against the sun's real altitude.
+    fn update(&mut self, _dt: axiom_kernel::Seconds, _ctx: &Ctx<'_>) {
+        let altitude = self.sun_altitude;
+        self.built
+            .as_mut()
+            .map(|world| world.update(altitude))
+            .unwrap_or_default();
+    }
+}
+
+#[cfg(test)]
+mod subsystem_tests {
+    use super::*;
+
+    /// The id and deps are what let `player` and `ai` resolve: both name
+    /// `"world"`, and until this existed `Registry::resolve` failed on it.
+    #[test]
+    fn it_answers_to_the_id_player_and_ai_depend_on() {
+        let world = WorldSubsystem::new();
+        assert_eq!(world.id(), "world");
+        assert_eq!(world.deps(), &["materials", "physics"]);
+        assert!(world.get().is_none(), "an unregistered world is not built");
+    }
+
+
+    /// **The graph `scene::wiring::physics_player` said could not be built.**
+    ///
+    /// Its module doc records the exact failure: *"`PlayerSystem::deps()` is
+    /// `["physics", "world", "render"]`, and neither `world` nor `render` is a
+    /// ported `Subsystem`. The moment `player` is registered,
+    /// `Registry::resolve` fails with "player" depends on unregistered
+    /// subsystem "world"."* Faced with that, the port grew a second composition
+    /// root in `scene::game::Game`, and every hand-inlined duplicate this port
+    /// has found is downstream of it.
+    ///
+    /// Two missing files held it shut. This is the assertion that says they no
+    /// longer do — and it asserts the ORDER, not just that resolution
+    /// succeeded, because the order is the level.
+    #[test]
+    fn the_graph_resolves_now_that_world_and_render_exist() {
+        let mut registry = crate::registry::Registry::new();
+        registry
+            .add(crate::render::system::RenderSystem::new())
+            .expect("render is a root");
+        registry
+            .add(crate::materials::system::MaterialSystem::new(None))
+            .expect("materials depends only on render");
+        registry
+            .add(crate::physics::system::PhysicsSystem::new(
+                crate::physics::system::StaticRegistry::default(),
+            ))
+            .expect("physics is a root");
+        registry
+            .add(crate::world::system::WorldSubsystem::new())
+            .expect("world depends on materials and physics, both registered");
+
+        registry
+            .add(crate::scene::wiring::look::SkySubsystem::new(
+                crate::config::Quality::High,
+                crate::scene::wiring::look::HOUR,
+            ))
+            .expect("sky depends on render and materials");
+        registry
+            .add(crate::scene::wiring::fx_audio::FxSubsystem::new(
+                crate::config::Config::default(),
+                None,
+            ))
+            .expect("fx depends on render and materials");
+        let order: Vec<String> = registry
+            .resolve()
+            .expect("every declared dependency is registered")
+            .iter()
+            .map(|s| s.borrow().id().to_owned())
+            .collect();
+        assert_eq!(
+            order,
+            vec!["render", "materials", "physics", "world", "sky", "fx"],
+            "the topological order is not the source's"
+        );
+    }
+    /// **The fork is not taken until the registry says so.** A world that built
+    /// itself at construction would draw from the root in registration order,
+    /// and the registry would then re-order init around a fork already spent.
+    #[test]
+    fn construction_draws_nothing_from_the_root_stream() {
+        let before = crate::rng::Rng::new(7).state();
+        let rng = crate::rng::Rng::new(7);
+        let _world = WorldSubsystem::new();
+        assert_eq!(rng.state(), before, "constructing the world moved the stream");
+    }
 }

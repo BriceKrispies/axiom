@@ -162,14 +162,25 @@ impl SurfaceProgramCache {
         inputs: SurfacePipelineInputs<'_>,
     ) -> SurfaceProgramCache {
         let mut cache = SurfaceProgramCache::empty(device, inputs.surface);
+        // **One pipeline per SHAPE, one parameter region per MATERIAL.**
+        //
+        // The catalog is keyed by parameter region, so forty-six runtime
+        // materials are forty-six entries — but they share one digest and must
+        // therefore share one pipeline, or this would compile forty-six
+        // identical programs and reintroduce the stutter the digest key exists
+        // to prevent. `wgpu::RenderPipeline` is reference-counted, so the clone
+        // is a handle, not a compile.
+        let mut pipelines: HashMap<u64, wgpu::RenderPipeline> = HashMap::new();
         cache.programs = catalog
             .sources()
             .iter()
             .map(|source| {
-                (
-                    source.program_id(),
-                    compile_one(device, queue, source, inputs),
-                )
+                let shared = pipelines.get(&source.pipeline_key()).cloned();
+                let compiled = compile_one(device, queue, source, inputs, shared);
+                pipelines
+                    .entry(source.pipeline_key())
+                    .or_insert_with(|| compiled.pipeline().clone());
+                (source.program_id(), compiled)
             })
             .collect();
         cache
@@ -230,6 +241,9 @@ fn compile_one(
     queue: &wgpu::Queue,
     source: &SurfaceProgramSource,
     inputs: SurfacePipelineInputs<'_>,
+    // The pipeline an earlier region of the SAME shape already built, if any.
+    // Present for every region after the first of its digest.
+    shared: Option<wgpu::RenderPipeline>,
 ) -> CompiledSurfaceProgram {
     let (params_buffer, bind_group) = region(device, inputs.surface);
     // Written ONCE, here, at the barrier. Not per frame, and not per draw: the
@@ -238,7 +252,7 @@ fn compile_one(
     // pipeline (the digest does not move — see `cache`).
     queue.write_buffer(&params_buffer, 0, source.params());
     CompiledSurfaceProgram {
-        pipeline: crate::scene_renderer::build_main_pipeline(
+        pipeline: shared.unwrap_or_else(|| crate::scene_renderer::build_main_pipeline(
             device,
             inputs.format,
             inputs.material,
@@ -251,7 +265,7 @@ fn compile_one(
                 source.fragment(),
                 crate::scene_wgsl::SCENE_WGSL_SUFFIX,
             ),
-        ),
+        )),
         bind_group,
     }
 }

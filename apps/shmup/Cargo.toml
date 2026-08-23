@@ -44,6 +44,9 @@ axiom-math = { path = "../../crates/axiom-math" }
 # one facade — so the contract between the app that authors a bake and the
 # backend that runs it has to sit in a layer both can name.
 axiom-host = { path = "../../crates/axiom-host" }
+# `WorldTag` — the engine's agent-interrogable noun. `scene::console` emits one
+# per installed batch so a screenshot can name what it is showing.
+axiom-introspect = { path = "../../crates/axiom-introspect" }
 
 # The live presentation arm. `scene::app`'s browser entry drives
 # `WindowingApi::run_web_multi` directly, in the exact shape `App::run` does,
@@ -63,6 +66,9 @@ path = "../../modules/axiom-windowing"
 # modules. This is an app — the tier that owns browser bootstrap.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
+# `Reflect::set`, to hang the dev console off `window` where a Playwright
+# `eval` can reach it. wasm-bindgen has no property setter of its own.
+js-sys = "0.3"
 # The browser entries' panic hook, so a wasm panic reaches the console with a
 # Rust backtrace instead of an opaque `unreachable`.
 console_error_panic_hook = "0.1"

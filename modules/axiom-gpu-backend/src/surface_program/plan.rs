@@ -144,7 +144,12 @@ impl SurfaceProgramPlan {
     pub(crate) fn of(surface: &Surface) -> SurfaceProgramPlan {
         let requirements = surface.requirements();
         SurfaceProgramPlan {
-            program_id: surface.digest().raw(),
+            // The PARAMETER-REGION key, not the digest. The digest is the
+            // program's identity and deliberately excludes parameter values;
+            // using it for the region too collapsed every runtime material in a
+            // scene onto one block. `Surface::param_key` says which region;
+            // `pipeline_key` below still says which program.
+            program_id: surface.param_key().raw(),
             stage_split: StageSplit::of(requirements),
             param_layout: ParamLayout::of(requirements.param_count()),
             inputs: requirements.inputs(),
