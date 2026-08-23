@@ -36,6 +36,13 @@ fn gallery_kind(kind: &AppKind) -> Result<&'static str, String> {
              publish it."
                 .to_string(),
         ),
+        AppKind::Vite => Err(
+            "this app brings its own Vite dev server, and the gallery packager has no arm that \
+             runs `vite build` into a static bundle.\n       It runs locally through \
+             `localhost_servers.py start-app <name>`; add a vite arm to \
+             scripts/package_gallery.py to publish it."
+                .to_string(),
+        ),
     }
 }
 

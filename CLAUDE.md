@@ -1248,6 +1248,15 @@ own — Rust wasm cdylib (`cargo build --target wasm32-unknown-unknown` +
 `@axiom/game` app (tsgo + the shared runtime wasm routes) — and builds missing
 prerequisites (SDK dist, runtime wasm) once.
 
+A fourth shape is **self-serving**: an app with its own `vite.config.*` (today
+`apps/shmup`). Vite resolves bare specifiers (`import * as THREE from 'three'`)
+at request time, which a static server cannot do, so axiom-serve installs the
+app's own `node_modules` and then **hands it the port** — no bundle, no socket
+of its own, no injected reload, no watcher, because Vite's HMR already is all
+four. It still runs in the foreground under the same
+`localhost_servers.py start-app <name>`, so nothing above it needs to know which
+shape it started.
+
 ```sh
 # Preferred — detached, named, managed:
 uv run scripts/localhost_servers.py start-app burnt-rubber

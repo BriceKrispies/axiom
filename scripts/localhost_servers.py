@@ -52,6 +52,17 @@ from pathlib import Path
 
 IS_WIN = os.name == "nt"
 
+# A server's log is arbitrary bytes from someone else's program, and this
+# script's job is to show it. On Windows stdout is cp1252, which cannot encode
+# most of what a modern dev server prints — Vite's "➜", a build tool's box
+# drawing, any emoji — and the default `errors="strict"` turns that into a
+# traceback instead of a log line. Replacing unencodable characters keeps
+# `logs` doing its one job; reading is already tolerant (`errors="replace"`),
+# so this closes the other half of the same round trip.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(errors="replace")
+
 # The default set `up` brings online: (app, port). Add your own here.
 DEFAULT_APPS: list[tuple[str, int]] = [("home-run", 8080)]
 

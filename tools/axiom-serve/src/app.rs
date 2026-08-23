@@ -1,8 +1,9 @@
 //! App resolution and shape detection.
 //!
-//! An "app" is a crate directory under `apps/` with a `web/` dir. Its shape
-//! decides how it is built, which extra routes it is served with, what its
-//! pages need injected, and which files are watched:
+//! An "app" is a directory under `apps/` holding either a `web/` dir (a tree
+//! this tool serves) or a `vite.config.*` (an app that serves itself). Its
+//! shape decides how it is built, which extra routes it is served with, what
+//! its pages need injected, and which files are watched:
 //!
 //! - **TsSdkHosted** — TypeScript over the `@axiom/game` SDK. Served with
 //!   `/vendor/axiom-game/*` (the SDK dist) and `/pkg/*` (the shared
@@ -13,14 +14,24 @@
 //! - **TsPlain** — any other TypeScript app (has `web/tsconfig.json`).
 //! - **RustWasm** — a `cdylib` crate built with cargo + `wasm-bindgen` into
 //!   `web/pkg/`.
+//! - **Vite** — an app that ships its own `vite.config.*` and `package.json`.
+//!   This one is different in kind from the other four: **it brings its own
+//!   server.** The others are static trees this tool serves and reloads; a Vite
+//!   app resolves bare specifiers (`import * as THREE from 'three'`) at request
+//!   time, which only its own dev server can do. So axiom-serve installs the
+//!   app's dependencies and then hands the port to `vite`, rather than serving
+//!   the app itself.
 //!
-//! EVERY kind's pages get the full-page SSE reload script injected — none of
-//! them ships a `/events` listener of its own, contrary to what these notes
-//! used to claim.
+//! EVERY *served* kind's pages get the full-page SSE reload script injected —
+//! none of them ships a `/events` listener of its own, contrary to what these
+//! notes used to claim. Vite is the exception, and needs no injection: its own
+//! HMR is already the live-reload channel.
 //!
 //! Detection order matters: the tsconfig is checked **first** because an app
 //! like `apps/axiom-game-runtime` has BOTH a `web/tsconfig.json` and a cdylib
-//! `Cargo.toml` — there the TypeScript harness is the live dev loop.
+//! `Cargo.toml` — there the TypeScript harness is the live dev loop. Vite is
+//! checked **last**, so an app that has a `web/tsconfig.json` *and* a Vite
+//! config keeps the shape it had before this arm existed.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,9 +54,19 @@ pub enum AppKind {
     TsWebEngine,
     /// Plain TypeScript (a `web/tsconfig.json` with neither SDK).
     TsPlain,
+    /// An app with its own `vite.config.*` — it brings its own dev server.
+    Vite,
 }
 
 impl AppKind {
+    /// Whether this shape serves itself. A self-serving app gets the port
+    /// handed to it: axiom-serve builds no bundle, binds no socket, injects no
+    /// reload script and watches no files, because the app's own server does
+    /// all four.
+    pub fn serves_itself(&self) -> bool {
+        matches!(self, AppKind::Vite)
+    }
+
     /// A short human label for the startup banner.
     pub fn label(&self) -> &'static str {
         match self {
@@ -53,15 +74,31 @@ impl AppKind {
             AppKind::TsSdkHosted => "TypeScript over @axiom/game (SDK-hosted)",
             AppKind::TsWebEngine => "TypeScript over @axiom/web-engine",
             AppKind::TsPlain => "plain TypeScript (tsgo)",
+            AppKind::Vite => "Vite (the app brings its own dev server)",
         }
     }
+}
+
+/// The Vite config filenames Vite itself recognises, in its own resolution
+/// order. Presence of any one of them is what makes an app dir a Vite app.
+const VITE_CONFIGS: [&str; 4] = [
+    "vite.config.js",
+    "vite.config.mjs",
+    "vite.config.ts",
+    "vite.config.mts",
+];
+
+/// Whether `dir` holds a Vite config.
+pub fn has_vite_config(dir: &Path) -> bool {
+    VITE_CONFIGS.iter().any(|name| dir.join(name).is_file())
 }
 
 /// Resolve an app identifier to its crate directory, mirroring
 /// `scripts/package_app.py`'s `resolve_app`: try the argument as a path, then
 /// under the repo root, then under `apps/`, then with the `axiom-` prefix. A
-/// candidate qualifies only if it contains a `web/` dir (this tool serves
-/// browser apps). On failure the error lists every candidate tried.
+/// candidate qualifies if it holds a `web/` dir (the tree this tool serves) or
+/// a Vite config (an app that serves itself). On failure the error lists every
+/// candidate tried.
 pub fn resolve_app_dir(root: &Path, arg: &str) -> Result<PathBuf, String> {
     let candidates = [
         PathBuf::from(arg),
@@ -70,7 +107,7 @@ pub fn resolve_app_dir(root: &Path, arg: &str) -> Result<PathBuf, String> {
         root.join("apps").join(format!("axiom-{arg}")),
     ];
     for candidate in &candidates {
-        if candidate.join("web").is_dir() {
+        if candidate.join("web").is_dir() || has_vite_config(candidate) {
             return Ok(candidate.clone());
         }
     }
@@ -80,7 +117,8 @@ pub fn resolve_app_dir(root: &Path, arg: &str) -> Result<PathBuf, String> {
         .collect::<Vec<_>>()
         .join("\n");
     Err(format!(
-        "could not find an app with a web/ dir for '{arg}'. Tried:\n{tried}"
+        "could not find an app with a web/ dir or a vite.config.* for '{arg}'. \
+         Tried:\n{tried}"
     ))
 }
 
@@ -89,13 +127,19 @@ pub fn resolve_app_dir(root: &Path, arg: &str) -> Result<PathBuf, String> {
 pub fn detect_kind(app_dir: &Path) -> Result<AppKind, String> {
     let tsconfig = fs::read_to_string(app_dir.join("web").join("tsconfig.json")).ok();
     let cargo_toml = fs::read_to_string(app_dir.join("Cargo.toml")).ok();
-    detect_kind_from(tsconfig.as_deref(), cargo_toml.as_deref())
+    detect_kind_from(
+        tsconfig.as_deref(),
+        cargo_toml.as_deref(),
+        has_vite_config(app_dir),
+    )
 }
 
-/// The pure detection core: classify from the two manifest texts.
+/// The pure detection core: classify from the two manifest texts plus whether
+/// the app dir holds a Vite config.
 pub fn detect_kind_from(
     tsconfig: Option<&str>,
     cargo_toml: Option<&str>,
+    vite_config: bool,
 ) -> Result<AppKind, String> {
     if let Some(ts) = tsconfig {
         if ts.contains("@axiom/game") {
@@ -114,9 +158,13 @@ pub fn detect_kind_from(
             return Ok(AppKind::RustWasm { crate_name, snake });
         }
     }
+    if vite_config {
+        return Ok(AppKind::Vite);
+    }
     Err("unrecognized app shape. Recognized shapes:\n  \
          - web/tsconfig.json (a TypeScript app: @axiom/game, @axiom/web-engine, or plain tsgo)\n  \
-         - Cargo.toml with a `cdylib` crate-type next to a web/ dir (a Rust wasm app)"
+         - Cargo.toml with a `cdylib` crate-type next to a web/ dir (a Rust wasm app)\n  \
+         - vite.config.* (an app that brings its own dev server)"
         .to_string())
 }
 
@@ -156,6 +204,16 @@ pub fn watch_spec(app_dir: &Path, kind: &AppKind) -> WatchSpec {
             roots: vec![app_dir.join("src"), app_dir.join("Cargo.toml"), web.clone()],
             exclude: vec![web.join("pkg")],
         },
+        // Vite watches its own sources and pushes its own HMR update, so a
+        // second watcher here would rebuild nothing and reload over the top of
+        // it. Empty roots — `watch::run` polls nothing and this never fires.
+        // (In practice unreachable: a self-serving app returns before the
+        // watcher thread is spawned. It is written out so that stops being an
+        // invariant held only by the caller.)
+        AppKind::Vite => WatchSpec {
+            roots: vec![],
+            exclude: vec![],
+        },
         // Watch the whole `web/` tree, exactly as the RustWasm arm does. This
         // used to be just `web/src` + `web/index.html`, which silently meant a
         // stylesheet edit, or an edit to ANY page other than index.html, never
@@ -194,15 +252,15 @@ mod tests {
         let engine = r#"{"paths": {"@axiom/web-engine": ["../x"]}}"#;
         let plain = r#"{"compilerOptions": {}}"#;
         assert_eq!(
-            detect_kind_from(Some(sdk), None).unwrap(),
+            detect_kind_from(Some(sdk), None, false).unwrap(),
             AppKind::TsSdkHosted
         );
         assert_eq!(
-            detect_kind_from(Some(engine), None).unwrap(),
+            detect_kind_from(Some(engine), None, false).unwrap(),
             AppKind::TsWebEngine
         );
         assert_eq!(
-            detect_kind_from(Some(plain), None).unwrap(),
+            detect_kind_from(Some(plain), None, false).unwrap(),
             AppKind::TsPlain
         );
     }
@@ -213,7 +271,7 @@ mod tests {
         let ts = r#"{"paths": {"@axiom/game": ["../x"]}}"#;
         let cargo = "[package]\nname = \"axiom-game-runtime\"\n[lib]\ncrate-type = [\"cdylib\"]\n";
         assert_eq!(
-            detect_kind_from(Some(ts), Some(cargo)).unwrap(),
+            detect_kind_from(Some(ts), Some(cargo), false).unwrap(),
             AppKind::TsSdkHosted
         );
     }
@@ -222,7 +280,7 @@ mod tests {
     fn detects_rust_wasm_with_snake_name() {
         let cargo = "[package]\nname = \"axiom-retro-fps\"\nversion = \"0.1.0\"\n\n[lib]\ncrate-type = [\"cdylib\", \"rlib\"]\n";
         assert_eq!(
-            detect_kind_from(None, Some(cargo)).unwrap(),
+            detect_kind_from(None, Some(cargo), false).unwrap(),
             AppKind::RustWasm {
                 crate_name: "axiom-retro-fps".to_string(),
                 snake: "axiom_retro_fps".to_string(),
@@ -231,13 +289,76 @@ mod tests {
     }
 
     #[test]
+    fn detects_vite_only_when_nothing_else_claims_the_app() {
+        // Nothing else to go on: a Vite config is the whole signal.
+        assert_eq!(detect_kind_from(None, None, true).unwrap(), AppKind::Vite);
+        // A native-only Cargo.toml alongside a Vite config is still Vite —
+        // the crate is not a cdylib, so it was never servable.
+        let native = "[package]\nname = \"axiom-native-only\"\n";
+        assert_eq!(
+            detect_kind_from(None, Some(native), true).unwrap(),
+            AppKind::Vite
+        );
+        // But Vite is checked LAST: an app that has both a web/tsconfig.json
+        // and a Vite config keeps the shape it had before this arm existed.
+        let engine = r#"{"paths": {"@axiom/web-engine": ["../x"]}}"#;
+        assert_eq!(
+            detect_kind_from(Some(engine), None, true).unwrap(),
+            AppKind::TsWebEngine
+        );
+        // Same for a cdylib: the wasm build wins over a stray Vite config.
+        let cargo = "[package]\nname = \"axiom-x\"\n[lib]\ncrate-type = [\"cdylib\"]\n";
+        assert!(matches!(
+            detect_kind_from(None, Some(cargo), true).unwrap(),
+            AppKind::RustWasm { .. }
+        ));
+    }
+
+    #[test]
+    fn a_vite_app_resolves_and_serves_itself_without_a_web_dir() {
+        let dir = scratch("vite");
+        let app = dir.join("apps").join("shmup");
+        fs::create_dir_all(&app).unwrap();
+        // No web/ dir at all — the resolver used to require one.
+        fs::write(app.join("vite.config.js"), "export default {}\n").unwrap();
+        assert_eq!(resolve_app_dir(&dir, "shmup").unwrap(), app);
+        let kind = detect_kind(&app).unwrap();
+        assert_eq!(kind, AppKind::Vite);
+        assert!(kind.serves_itself());
+        // And nothing else claims to serve itself.
+        assert!(!AppKind::TsWebEngine.serves_itself());
+        assert!(!AppKind::TsPlain.serves_itself());
+        assert!(!AppKind::TsSdkHosted.serves_itself());
+        assert!(!AppKind::RustWasm {
+            crate_name: "a".into(),
+            snake: "a".into()
+        }
+        .serves_itself());
+        // Its watch spec is empty: Vite is already watching those files.
+        let spec = watch_spec(&app, &kind);
+        assert!(spec.roots.is_empty() && spec.exclude.is_empty());
+    }
+
+    #[test]
+    fn every_vite_config_name_is_recognized() {
+        let dir = scratch("viteconfigs");
+        assert!(!has_vite_config(&dir));
+        for name in VITE_CONFIGS {
+            let one = dir.join(name.replace('.', "-"));
+            fs::create_dir_all(&one).unwrap();
+            fs::write(one.join(name), "export default {}\n").unwrap();
+            assert!(has_vite_config(&one), "{name} not recognized");
+        }
+    }
+
+    #[test]
     fn rejects_unrecognized_shapes() {
         // No tsconfig, no cdylib: not servable.
         let cargo = "[package]\nname = \"axiom-native-only\"\n";
-        assert!(detect_kind_from(None, Some(cargo))
+        assert!(detect_kind_from(None, Some(cargo), false)
             .unwrap_err()
             .contains("Recognized shapes"));
-        assert!(detect_kind_from(None, None)
+        assert!(detect_kind_from(None, None, false)
             .unwrap_err()
             .contains("Recognized shapes"));
     }

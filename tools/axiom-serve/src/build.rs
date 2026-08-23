@@ -53,11 +53,22 @@ impl BuildPlan {
                 self.ensure_web_engine_dist()
             }
             AppKind::TsPlain => self.ensure_tsgo(),
+            // A Vite app's toolchain is its own devDependencies, not a repo
+            // one: `vite` itself lives in the app's node_modules. Install them
+            // if they are missing, which is also what makes a fresh checkout
+            // (or a fresh worktree) runnable without a documented extra step.
+            AppKind::Vite => self.ensure_app_node_modules(),
         }
     }
 
     /// Build the app once. Called for the initial build and on every change.
     pub fn build(&self) -> Result<(), String> {
+        // A self-serving app has no build step here: Vite transforms modules on
+        // request and re-transforms them on save. Running `vite build` would
+        // produce a `dist/` its own dev server never reads.
+        if self.kind.serves_itself() {
+            return Ok(());
+        }
         match &self.kind {
             AppKind::RustWasm { crate_name, snake } => {
                 let mut cargo = Command::new("cargo");
@@ -108,6 +119,23 @@ impl BuildPlan {
             &self.root.join("packages").join("axiom-game"),
             &["install", "--no-audit", "--no-fund"],
         )
+    }
+
+    /// Install a self-serving app's own dependencies if they are missing.
+    ///
+    /// Keyed on the `vite` binary rather than on `node_modules/` existing: a
+    /// half-finished or interrupted install leaves the directory there with the
+    /// binary absent, and an existence check would then hand the port to a
+    /// command that is not on disk.
+    fn ensure_app_node_modules(&self) -> Result<(), String> {
+        if vite_path(&self.app_dir).is_file() {
+            return Ok(());
+        }
+        println!(
+            "axiom-serve: vite missing — installing {} node_modules (once)",
+            self.app_dir.display()
+        );
+        npm(&self.app_dir, &["install", "--no-audit", "--no-fund"])
     }
 
     /// TsSdkHosted pages import the SDK from `/vendor/axiom-game/` — build its
@@ -263,6 +291,27 @@ fn tsgo_path(root: &Path) -> PathBuf {
         .join("node_modules")
         .join(".bin")
         .join(bin)
+}
+
+/// The `vite` binary inside an app's OWN node_modules. Deliberately not a
+/// PATH lookup and not `npx`: the app pins its Vite version in its
+/// package.json, and a globally-installed Vite of another major would resolve
+/// its config differently.
+fn vite_path(app_dir: &Path) -> PathBuf {
+    let bin = if cfg!(windows) { "vite.cmd" } else { "vite" };
+    app_dir.join("node_modules").join(".bin").join(bin)
+}
+
+/// A `vite` invocation, `.cmd`-shimmed on Windows like [`tsgo_command`].
+pub fn vite_command(app_dir: &Path) -> Command {
+    let vite = vite_path(app_dir);
+    if cfg!(windows) {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg(vite);
+        cmd
+    } else {
+        Command::new(vite)
+    }
 }
 
 /// A `tsgo` invocation. On Windows the binary is a `.cmd` shim, which must be

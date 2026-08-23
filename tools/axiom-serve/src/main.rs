@@ -17,8 +17,9 @@
 //!    `<root>/apps/<arg>`, or `<root>/apps/axiom-<arg>` — whichever holds a
 //!    `web/` dir), mirroring `scripts/package_app.py`'s `resolve_app`.
 //! 2. **Detects its shape** (see [`app::AppKind`]): a TypeScript app over the
-//!    `@axiom/game` SDK, over `@axiom/web-engine`, plain TypeScript, or a Rust
-//!    wasm app built through `wasm-bindgen`.
+//!    `@axiom/game` SDK, over `@axiom/web-engine`, plain TypeScript, a Rust
+//!    wasm app built through `wasm-bindgen`, or a Vite app that brings its own
+//!    dev server.
 //! 3. **Builds it** (`cargo build --target wasm32-unknown-unknown` +
 //!    `wasm-bindgen`, or `tsgo -p web/tsconfig.json`), running any one-time
 //!    prerequisites first (SDK dist builds, the shared game-runtime wasm pkg).
@@ -31,6 +32,12 @@
 //!
 //! An initial build failure still starts the server: fix the error and save,
 //! and the watcher rebuilds and reloads the browser.
+//!
+//! Steps 3–5 are what a **self-serving** app (Vite) replaces: it is given the
+//! port and does its own transforming, serving, watching and HMR. Step 3 there
+//! is only `npm install`, and this process stays in the foreground supervising
+//! the child, so from the outside every shape looks the same to
+//! `scripts/localhost_servers.py`.
 
 mod app;
 mod build;
@@ -80,7 +87,8 @@ fn help() -> String {
      \x20 web/tsconfig.json mentioning @axiom/game        TypeScript over the @axiom/game SDK\n\
      \x20 web/tsconfig.json mentioning @axiom/web-engine  TypeScript over @axiom/web-engine\n\
      \x20 web/tsconfig.json (anything else)               plain TypeScript (tsgo)\n\
-     \x20 Cargo.toml with a cdylib crate-type + web/      Rust wasm via wasm-bindgen"
+     \x20 Cargo.toml with a cdylib crate-type + web/      Rust wasm via wasm-bindgen\n\
+     \x20 vite.config.*                                   Vite — the app serves itself"
         .to_string()
 }
 
@@ -164,6 +172,37 @@ fn open_browser(url: &str) {
     }
 }
 
+/// Hand the port to an app that brings its own dev server, and block until it
+/// exits — so that, from the outside, `axiom-serve <app>` is one foreground
+/// process serving one port for every app shape. That sameness is the point:
+/// `scripts/localhost_servers.py` supervises this process, and it must not
+/// have to know which shape it started.
+///
+/// Vite's own `--strictPort` is passed on purpose. Without it Vite silently
+/// walks to the next free port, and the manager would then hold a registry
+/// entry pointing at a port nothing is listening on.
+fn serve_self(app_dir: &Path, port: u16, open: bool) -> Result<(), String> {
+    let mut vite = build::vite_command(app_dir);
+    vite.arg("--port")
+        .arg(port.to_string())
+        .arg("--strictPort")
+        .current_dir(app_dir);
+    if open {
+        vite.arg("--open");
+    }
+    println!("axiom-serve: handing port {port} to vite (the app serves itself)");
+    println!(
+        "axiom-serve: serving http://localhost:{port}/  (Ctrl+C to stop)"
+    );
+    let status = vite
+        .status()
+        .map_err(|err| format!("could not start vite in {}: {err}", app_dir.display()))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("vite exited with {status}"))
+}
+
 fn run() -> Result<(), String> {
     let args = parse_args(std::env::args().skip(1))?;
     let root = repo_root();
@@ -185,6 +224,13 @@ fn run() -> Result<(), String> {
         debug: args.debug,
     };
     plan.prepare()?;
+
+    // A self-serving app (Vite) owns the port itself. Hand it over before any
+    // socket is bound: two servers on one port is a bind error, and the one
+    // that loses is the one that can actually resolve the app's imports.
+    if kind.serves_itself() {
+        return serve_self(&app_dir, args.port, args.open);
+    }
 
     // A failed build does not stop the server — the previous bundle is still on
     // disk, so the page keeps loading and looks fine. That is exactly why the
