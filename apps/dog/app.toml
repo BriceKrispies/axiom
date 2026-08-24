@@ -2,6 +2,13 @@
 name = "dog"
 crate_name = "axiom-dog"
 
-allowed_layers = ["kernel", "math", "mesh", "mesh-ops"]
+allowed_layers = [
+    "kernel",
+    "math",
+    "mesh",
+    "mesh-ops",
+    # `FrameCamera`, on the wasm presentation arm only — see Cargo.toml.
+    "host",
+]
 
 allowed_modules = ["engine", "windowing"]

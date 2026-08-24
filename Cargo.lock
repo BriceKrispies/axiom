@@ -256,6 +256,7 @@ name = "axiom-dog"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-host",
  "axiom-kernel",
  "axiom-math",
  "axiom-mesh",

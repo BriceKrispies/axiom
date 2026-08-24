@@ -32,6 +32,10 @@ axiom-mesh-ops = { path = "../../crates/axiom-mesh-ops" }
 # view. Confined to wasm32, so native `cargo test` compiles none of it.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 axiom-windowing = { path = "../../modules/axiom-windowing" }
+# `FrameCamera` — the live presentation arm hands the windowing driver the real
+# camera the frame was composed with, rather than one rebuilt from the orbit
+# dials. Only the wasm arm presents, so only the wasm arm needs it.
+axiom-host = { path = "../../crates/axiom-host" }
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 # Window/Location: the query-string read and the resize-settled reload.
