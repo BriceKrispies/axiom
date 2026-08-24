@@ -29,14 +29,25 @@
  *     handful of frames is the only way to reach those.
  */
 
-/** Poses chosen to span the level's lighting and material variety, so the
- *  cascades, interiors and exteriors all get their permutations compiled. */
-const WARM_POSES = [
-  { pos: [12, 1.75, 18], look: [-4, 2.2, -6] }, // main street, long cascades
-  { pos: [-8.5, 1.7, 3.2], look: [2, 1.6, -2] }, // interior, short cascades
-  { pos: [3.2, 1.35, 5.0], look: [1.4, 1.1, 2.2] }, // close material detail
-  { pos: [4, 1.7, 12], look: [-6, 1.7, -4] }, // combat staging
-];
+/**
+ * THERE ARE NO WARM-UP POSES ANY MORE, and the reason is worth keeping.
+ *
+ * This used to walk the camera through four poses spanning the level's lighting
+ * and material variety, compiling at each. It was necessary for one reason
+ * only: the visible LIGHT COUNT is part of three's program cache key, the count
+ * depends on which lights survive the camera's distance cull, and so a pose was
+ * a proxy for a light count. It was never about what the camera could see —
+ * `compileAsync` walks the whole scene graph and ignores the frustum entirely.
+ *
+ * Now that `render.settleLights()` pins the count before anything compiles, the
+ * poses compile nothing the first call did not. Measured: 108 programs with the
+ * four poses, 108 without.
+ *
+ * Deleting them is what lets pre-warm run WHILE THE GAME IS ON SCREEN. A
+ * pre-warm that moves the camera cannot overlap a live frame loop without the
+ * player seeing the level flick through four viewpoints; one that never touches
+ * the camera can. That is the whole progressive-boot path in src/main.js.
+ */
 
 /**
  * Force every shader permutation to compile before gameplay starts.
@@ -54,6 +65,7 @@ const WARM_POSES = [
  *   which is owned by those subsystems, not by core.
  */
 import * as THREE from 'three';
+import { boot } from './profile.js';
 
 /**
  * Subsystems whose `prewarmMaterials()` must NOT be driven from here.
@@ -96,6 +108,149 @@ const SELF_WARMING = new Set(['fx']);
  * characters). The gate outranks the last few programs.
  */
 const RENDER_SHADOW_WARM = false;
+
+/**
+ * PHASE ONE — link the programs the FIRST FRAME will need, in parallel.
+ *
+ * This is the whole cold-boot story, and it is not about compiling early for
+ * its own sake. A GPU driver is free to defer a program link past
+ * `linkProgram` and past `LINK_STATUS`; NVIDIA defers it until something asks
+ * for the program's interface, which is the uniform and attribute reflection
+ * three does the first time it draws with a program. Those queries are
+ * synchronous round trips, so on a driver with an empty shader cache the first
+ * frame pays every link SERIALLY, on the main thread. Measured on a first-ever
+ * visit: 7054 reflection queries, 14 435 ms, 88% of the entire boot.
+ *
+ * `compileAsync` turns that inside out. With KHR_parallel_shader_compile the
+ * links run on the driver's own threads and three polls a completion flag, so
+ * the same work happens off the main thread and in parallel with itself. By the
+ * time the first frame draws, the reflection it does is free — the links are
+ * already finished.
+ *
+ * It is deliberately only the scene compile, not the whole pre-warm: the hooks
+ * (render's post chain, world's depth variants, ai's characters) reach
+ * permutations the first frame never draws, so they stay deferred to
+ * `prewarm()` behind the streaming. This phase is the part the first frame
+ * cannot do without.
+ *
+ * A RENDER TARGET IS BOUND while compiling — three folds the bound target's
+ * colour space and tone mapping into the program cache key, and the world and
+ * viewmodel are both drawn into HDR targets. Compiling against the canvas
+ * produces the `srgb` variants, which the frame loop then never uses.
+ */
+
+/**
+ * `renderer.compileAsync()`, reimplemented so it can report progress.
+ *
+ * Identical in behaviour: compile the scene, then poll each material's program
+ * until every one reports ready. The only addition is that the caller is told
+ * how many are done, which is what lets a loading bar move truthfully through
+ * the longest phase of a cold boot instead of sitting at one number for seven
+ * seconds.
+ *
+ * `onProgress(fraction, done, total)` is also where the phase gets RE-PRICED:
+ * the reference weight for this phase comes from a warm machine, and on a first
+ * visit it is an order of magnitude larger. A few completed links are enough to
+ * measure the real per-program cost, so the bar can re-pace the rest of itself
+ * around the truth rather than reaching 90% and waiting.
+ *
+ * Falls back to the stock call where KHR_parallel_shader_compile is missing:
+ * without it `isReady()` cannot answer without blocking, so there is no
+ * progress to report and no point pretending otherwise.
+ */
+async function compileWithProgress(renderer, scene, camera, onProgress) {
+  const parallel = renderer.getContext().getExtension('KHR_parallel_shader_compile');
+  if (!parallel || !renderer.properties) {
+    await renderer.compileAsync(scene, camera);
+    onProgress?.(1, 0, 0);
+    return;
+  }
+
+  const pending = renderer.compile(scene, camera);
+  const total = pending.size;
+  if (total === 0) {
+    onProgress?.(1, 0, 0);
+    return;
+  }
+
+  const started = performance.now();
+  for (;;) {
+    for (const material of [...pending]) {
+      const program = renderer.properties.get(material)?.currentProgram;
+      // A material with no program cannot be waited on; treat it as done rather
+      // than looping forever on it.
+      if (!program || program.isReady()) pending.delete(material);
+    }
+    const done = total - pending.size;
+    onProgress?.(done / total, done, total, performance.now() - started);
+    if (pending.size === 0) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+export async function prewarmScene(engine, { onProgress = null } = {}) {
+  const t0 = performance.now();
+  const render = engine.ctx.peek('render');
+  const renderer = render?.renderer;
+  if (!renderer) return { ok: false, reason: 'no renderer' };
+
+  // The visible light count is part of every lit program's cache key, so it has
+  // to be final before anything compiles. See `RenderSystem.settleLights()`.
+  const settle = typeof location === 'undefined' ||
+    new URLSearchParams(location.search).get('settle') !== '0';
+  boot.time('prewarmScene:settleLights', () => {
+    settle && render.settleLights?.(engine.ctx);
+    settle && engine.ctx.peek('world')?.settleLights?.(engine.ctx);
+  });
+
+  const scratchRt = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false });
+  const prevRt = renderer.getRenderTarget();
+  const prevFace = renderer.getActiveCubeFace?.() ?? 0;
+  const prevMip = renderer.getActiveMipmapLevel?.() ?? 0;
+  const before = renderer.info.programs?.length ?? 0;
+
+  renderer.setRenderTarget(scratchRt);
+  try {
+    await boot.timeAsync('prewarmScene:compile', async () => {
+      // `compileAsync` would do exactly this, but it resolves once and tells
+      // nobody anything in between — and on a first visit this is a seven-second
+      // phase. So drive the same loop by hand and report as programs land.
+      //
+      // `compile()` hands back the set of materials it kicked off and each
+      // program answers `isReady()`, so this is a COUNT of finished links, not a
+      // timer pretending to be one. It is the only part of boot whose progress
+      // can be known exactly, and it is the part that needs it most.
+      // Split the reported fraction between the two scenes rather than letting
+      // the second run silently: the world is the bulk of the programs, but a
+      // viewmodel compile that reports nothing leaves the bar parked at the
+      // world's last number and then jumping when the phase ends.
+      const WORLD_SHARE = 0.9;
+      await compileWithProgress(renderer, engine.scene, engine.camera, (f, d, t, ms) =>
+        onProgress?.(f * WORLD_SHARE, d, t, ms)
+      );
+      await compileWithProgress(renderer, engine.viewScene, engine.viewCamera, (f) =>
+        onProgress?.(WORLD_SHARE + f * (1 - WORLD_SHARE))
+      );
+    });
+  } catch {
+    // Older three, or a driver without the extension. Falling back to the
+    // synchronous compile is still better than letting the first frame do it.
+    try {
+      renderer.compile(engine.scene, engine.camera);
+      renderer.compile(engine.viewScene, engine.viewCamera);
+    } catch { /* nothing more we can do; boot must still proceed */ }
+  } finally {
+    renderer.setRenderTarget(prevRt, prevFace, prevMip);
+    scratchRt.dispose();
+  }
+
+  return {
+    ok: true,
+    ms: Math.round(performance.now() - t0),
+    compiled: (renderer.info.programs?.length ?? 0) - before,
+    parallel: !!renderer.getContext().getExtension('KHR_parallel_shader_compile'),
+  };
+}
 
 export async function prewarm(engine, { onProgress = () => {}, transients = false, drawFrames = false } = {}) {
   const t0 = performance.now();
@@ -171,17 +326,20 @@ export async function prewarm(engine, { onProgress = () => {}, transients = fals
   const yieldFrame = () => new Promise((r) => requestAnimationFrame(r));
 
   try {
+    // Light settling and the scene compile both happened in `prewarmScene()`,
+    // which runs before the first frame. What is left here is everything the
+    // first frame does NOT need.
     let step = 0;
-    const totalSteps = WARM_POSES.length * 2 + (transients ? transientStages.length : 0) + 1;
+    const totalSteps = 2 + (transients ? transientStages.length : 0) + 1;
     const tick = () => onProgress(Math.min(1, ++step / totalSteps));
 
     // Pass 1: compile the static world from each pose, with the depth/shadow
     // variants reached by drawing a real frame at that pose.
-    for (const p of WARM_POSES) {
-      cam.position.set(...p.pos);
-      cam.lookAt(...p.look);
-      cam.updateMatrixWorld(true);
-      await compile();
+    {
+      // The scene itself is already compiled; re-running it is one cheap
+      // no-op pass that also picks up anything the streamed subsystems added
+      // to the scene graph after prewarmScene() ran.
+      await boot.timeAsync('prewarm:recompile', compile);
       tick();
       // Drawing real frames here would reach the depth/shadow and post-processing
       // variants too, but engine.step() advances every subsystem's internal state
@@ -236,17 +394,32 @@ export async function prewarm(engine, { onProgress = () => {}, transients = fals
       if (SELF_WARMING.has(sys.constructor?.id)) continue;
       if (typeof sys.prewarmMaterials === 'function') hooks.push(sys);
     }
+    // BIND AN HDR TARGET AROUND THE HOOKS, for the same reason `compile()` does.
+    //
+    // three folds the CURRENTLY BOUND target's colour space and tone mapping
+    // into the program cache key. With the canvas bound — which is the default
+    // out here — every program a hook compiles is the `srgb` + tone-mapped
+    // variant, while the world and the viewmodel are both drawn into HDR
+    // targets and want `srgb-linear` + NoToneMapping. The `srgb` copies are then
+    // dead weight and the real programs still compile during the first frames of
+    // play. `compile()` above already learned this the hard way (25 of 47
+    // pre-warmed programs were the wrong variant); the hooks needed the same
+    // treatment, and `outputColorSpace` was still the top permutation axis in
+    // `node tools/bootprofile.mjs --programs` until they got it.
+    renderer.setRenderTarget(scratchRt);
     const hookResults = {};
     for (const sys of hooks) {
       const id = sys.constructor?.id ?? '?';
       try {
         const arg = sys === renderSys ? { post: true, shadow: RENDER_SHADOW_WARM } : engine.ctx;
-        hookResults[id] = (await sys.prewarmMaterials(arg)) ?? { ok: true };
+        hookResults[id] =
+          (await boot.timeAsync(`prewarm:hook:${id}`, () => sys.prewarmMaterials(arg))) ?? { ok: true };
       } catch (err) {
         // An optional hook must never be able to block boot.
         hookResults[id] = { ok: false, reason: String(err?.message ?? err) };
       }
     }
+    renderer.setRenderTarget(prevRt, prevFace, prevMip);
     engine.__prewarmHooks = hookResults;
 
     // Pass 2: spawn each subsystem's transient objects and compile those too.

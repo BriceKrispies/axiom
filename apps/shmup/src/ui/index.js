@@ -64,9 +64,23 @@ export class UiSystem {
   static id = 'ui';
   static deps = ['render'];
 
+  /**
+   * Claim this subsystem's deterministic RNG stream.
+   *
+   * Called by Engine.init() for every subsystem, in dependency order, BEFORE
+   * any init() runs — see the prepare-pass comment in src/core/engine.js for
+   * why the fork's POSITION in ctx.rng's stream is load-bearing. Idempotent,
+   * and init() calls it too, so a preview page that drives this subsystem
+   * without an Engine still gets a seeded stream.
+   */
+  prepare(ctx) {
+    if (this.rng) return;
+    this.rng = ctx.rng.fork();
+  }
+
   async init(ctx) {
     this.ctx = ctx;
-    this.rng = ctx.rng.fork();
+    this.prepare(ctx);
     installStyles();
 
     const host = document.getElementById('ui') ?? document.body;

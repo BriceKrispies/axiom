@@ -4,7 +4,21 @@
  * CONTRACT — every subsystem is a class with:
  *   static id      : string, unique. Other systems fetch it via ctx.get(id).
  *   static deps    : string[] of subsystem ids that must init first.
- *   async init(ctx): build resources. May await asset loads.
+ *   prepare(ctx)   : optional. Runs for EVERY subsystem, in dependency order,
+ *                    before ANY init(). Fork your Rng here and queue pure
+ *                    seed-to-bytes work on ctx.bakery here — nothing else: no
+ *                    GPU, no scene graph, no other subsystem. Make it
+ *                    idempotent and call it from your own init() too, so a
+ *                    preview page without an Engine still works.
+ *                    See ARCHITECTURE.md and src/core/engine.js for why the
+ *                    POSITION of a root-stream fork is load-bearing.
+ *   async init(ctx): build resources. May await asset loads. Build only what
+ *                    frame 1 needs; defer the rest to stream().
+ *   *stream(ctx)   : optional generator. Deferred construction, drained a few
+ *                    ms per frame AFTER the frame loop is live — see
+ *                    ARCHITECTURE.md and src/core/streaming.js. Yield at every
+ *                    point it is safe to stop. The frames before a chunk lands
+ *                    must render correctly without it.
  *   update(dt,ctx) : variable-rate, once per frame, before render.
  *   fixedUpdate(h,ctx): fixed-rate (PHYSICS_HZ), 0..N times per frame. Optional.
  *   lateUpdate(dt,ctx): after all update(), before render. Optional.

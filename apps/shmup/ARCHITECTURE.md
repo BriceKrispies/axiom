@@ -31,7 +31,9 @@ export class MySystem {
   static id = 'mysystem';       // unique; how others reach you
   static deps = ['render'];     // ids that must init before you
 
+  prepare(ctx) {}               // optional, BEFORE any init(); see below
   async init(ctx) {}            // build resources; may await
+  *stream(ctx) {}               // optional, deferred construction; see below
   fixedUpdate(h, ctx) {}        // optional, 120 Hz, deterministic gameplay
   update(dt, ctx) {}            // optional, once per frame
   lateUpdate(dt, ctx) {}        // optional, after all update()
@@ -41,7 +43,75 @@ export class MySystem {
 ```
 
 `ctx` provides: `scene`, `camera`, `viewScene`, `viewCamera`, `canvas`,
-`config`, `events`, `input`, `time`, `rng`, `get(id)`, `peek(id)`, `has(id)`.
+`config`, `events`, `input`, `time`, `rng`, `bakery`, `get(id)`, `peek(id)`,
+`has(id)`.
+
+### `prepare(ctx)` — claim your seed, start your pure work
+
+`Engine.init()` runs `prepare()` on **every** subsystem, in dependency order,
+before it runs **any** `init()`. Exactly two things belong in it:
+
+1. **Fork your RNG.** `this.rng = ctx.rng.fork()`. Every subsystem's seed is
+   decided purely by how many forks of the root stream preceded it, so a fork
+   taken anywhere else — inside a constructor, lazily on first use — makes your
+   seed depend on *when* that code ran. `Viewmodel` used to do exactly that and
+   sat at position 6 only because `weapons` happened to init before `fx`; every
+   subsystem seeded after it was silently downstream of when a viewmodel got
+   built. Keep every root fork here and that whole class of bug is gone.
+   `node tools/rngprobe.mjs --trace` prints the fork order.
+
+2. **Queue pure precomputation on `ctx.bakery`.** A bake is a function from a
+   seed to typed arrays: no THREE, no GPU, no DOM, no shared state. Started
+   here it runs on a worker while every subsystem builds its object graphs on
+   the main thread; started inside your own `init()` there is nothing left to
+   overlap it with. Keep the promise, `await` it in `init()`.
+
+`prepare()` must not touch the GPU, the scene graph, or another subsystem —
+none of them have init'd yet. It should also be idempotent (`if (this.rng)
+return;`) and called from the top of your own `init()`, so a standalone preview
+page that drives your subsystem without an Engine still works.
+
+The recipes live in `src/bakers.js`; the pool is `src/core/bakery.js`. Measured
+with `node tools/bootprofile.mjs`, moving the character and FX texture bakes
+into it took ~3.9 s of value-noise evaluation off the boot critical path.
+
+### `stream(ctx)` — the half that does not block the first frame
+
+`init()` builds what frame 1 genuinely needs. Everything else goes in a
+generator that the engine drains a few milliseconds per frame, **with the game
+already on screen**:
+
+```js
+*stream(ctx) {
+  this._buildWeapon('rifle'); yield 'rifle';   // a yield is a safe stopping point
+  this._buildWeapon('smg');   yield 'smg';
+}
+```
+
+Put work here when the player cannot tell it is missing on frame 1: a weapon
+they are not holding, a navigation grid for enemies that have not engaged, a
+shader they have not drawn yet. Keep work in `init()` when the frame would be
+wrong without it — collision, the level they are standing in, the HUD.
+
+The budget is checked **between** chunks, not inside them, so a generator that
+yields once per 200 ms hitches for 200 ms whatever the budget is.
+`stats.worstChunkMs` names the offender.
+
+Two rules that make this safe rather than merely fast:
+
+- **Tolerate the gap.** The frames before your chunk lands must render
+  correctly without it. `Viewmodel.update()` returns early with no active
+  weapon; `AiSystem.update()` has always carried a retry path for a missing
+  grid. If a subsystem also retries in `update()`, gate that retry so it cannot
+  race `stream()` and do the work twice.
+- **Capture drains it.** `?capture=1` runs every generator to completion before
+  raising `__READY__` (`Engine.drainStream()`), because a screenshot of a
+  half-streamed world is not a regression — it is a different picture, and the
+  pixel gate cannot tell them apart.
+
+`window.__READY__` now means *the first playable frame*; `window.__LOADED__`
+means streaming and pre-warm have finished behind it. A tool measuring steady
+state wants the second.
 
 - `scene` / `camera` — the world. `viewScene` / `viewCamera` — the first-person
   weapon, drawn separately so it can never clip through walls.

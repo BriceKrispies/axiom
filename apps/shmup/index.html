@@ -10,11 +10,199 @@
       html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
       body { font-family: "Inter", "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
       #game { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: none; }
+
+      /* ------------------------------------------------------------------ *
+       * LOADING SCREEN
+       *
+       * Inline, in the document, above the module script — so it is on screen
+       * before the bundle has finished downloading, let alone running. A
+       * loading screen that arrives with the app it is covering for has missed
+       * the part of the wait that felt longest.
+       *
+       * It has two states, and the difference is honesty. While the browser is
+       * fetching the module graph nothing can report real progress — a single
+       * bundle only announces itself once it has landed — so the bar runs an
+       * INDETERMINATE sweep rather than a fake percentage. The moment app code
+       * can speak, it switches to a real fraction driven by measured phase
+       * weights (see src/core/bootprogress.js) and never sweeps again.
+       * ------------------------------------------------------------------ */
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: #07090c;
+        color: #c8ccd2;
+        transition: opacity 420ms ease;
+      }
+      #boot.gone { opacity: 0; pointer-events: none; }
+
+      #boot-title {
+        font: 600 13px/1 "Inter", system-ui, sans-serif;
+        letter-spacing: 0.42em;
+        text-indent: 0.42em;
+        color: #7d858f;
+      }
+
+      #boot-track {
+        position: relative;
+        width: min(340px, 62vw);
+        height: 2px;
+        background: #191d23;
+        overflow: hidden;
+      }
+      #boot-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 0;
+        background: #d8dde3;
+        transition: width 180ms linear;
+      }
+      /* Indeterminate: a sweep that plainly is not a measurement. */
+      #boot-track.sweep #boot-fill {
+        width: 28%;
+        transition: none;
+        animation: boot-sweep 1150ms cubic-bezier(0.45, 0, 0.35, 1) infinite;
+      }
+      @keyframes boot-sweep {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(360%); }
+      }
+
+      #boot-line {
+        display: flex;
+        justify-content: space-between;
+        width: min(340px, 62vw);
+        font: 400 10px/1 ui-monospace, "SF Mono", Menlo, monospace;
+        letter-spacing: 0.08em;
+        color: #5c646e;
+      }
+      #boot-pct { font-variant-numeric: tabular-nums; }
+
+      /* The unobtrusive half: the game is playable and the rest streams in
+         behind it, so this replaces the overlay rather than holding it up. */
+      #boot-tail {
+        /* Bottom CENTRE. The HUD owns all four corners — minimap top-left,
+           killfeed top-right, health bottom-left, ammo bottom-right — and the
+           first placement here sat on top of the health bar. */
+        position: fixed;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 22px;
+        z-index: 90;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        pointer-events: none;
+        font: 400 10px/1 ui-monospace, "SF Mono", Menlo, monospace;
+        letter-spacing: 0.08em;
+        color: #7a828c;
+        text-shadow: 0 1px 3px #000;
+        transition: opacity 500ms ease;
+      }
+      #boot-tail.on { display: flex; }
+      #boot-tail.gone { opacity: 0; }
+      #boot-tail i {
+        width: 5px; height: 5px; border-radius: 50%;
+        background: #9aa2ac;
+        animation: boot-pulse 1100ms ease-in-out infinite;
+      }
+      @keyframes boot-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot-track.sweep #boot-fill { animation: none; width: 100%; opacity: 0.35; }
+        #boot-tail i { animation: none; }
+      }
     </style>
   </head>
   <body>
     <canvas id="game"></canvas>
     <div id="ui"></div>
+
+    <div id="boot">
+      <div id="boot-title">OVERWATCH</div>
+      <div id="boot-track" class="sweep"><div id="boot-fill"></div></div>
+      <div id="boot-line"><span id="boot-pct"></span><span id="boot-label">downloading</span></div>
+    </div>
+    <div id="boot-tail"><i></i><span id="boot-tail-label"></span></div>
+
+    <script>
+      // The loading screen's whole API, deliberately tiny and dependency-free:
+      // it has to work before any module has been parsed.
+      (function () {
+        var el = {
+          root: document.getElementById('boot'),
+          track: document.getElementById('boot-track'),
+          fill: document.getElementById('boot-fill'),
+          pct: document.getElementById('boot-pct'),
+          label: document.getElementById('boot-label'),
+          tail: document.getElementById('boot-tail'),
+          tailLabel: document.getElementById('boot-tail-label'),
+        };
+        var done = false;
+        window.__BOOT_UI__ = {
+          /** Determinate progress. `frac` 0..1. */
+          set: function (frac, label) {
+            if (done) return;
+            el.track.classList.remove('sweep');
+            var pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+            el.fill.style.width = pct + '%';
+            el.pct.textContent = pct + '%';
+            if (label) el.label.textContent = label;
+          },
+          /** The game is on screen: hand over to the corner indicator. */
+          done: function (tailLabel) {
+            if (done) return;
+            done = true;
+            el.fill.style.width = '100%';
+            el.pct.textContent = '100%';
+            el.root.classList.add('gone');
+            setTimeout(function () { el.root.style.display = 'none'; }, 450);
+            if (tailLabel) {
+              el.tailLabel.textContent = tailLabel;
+              el.tail.classList.add('on');
+            }
+          },
+          /** Streaming status after the overlay is gone. */
+          tail: function (label) {
+            if (!label) return;
+            el.tailLabel.textContent = label;
+            el.tail.classList.add('on');
+          },
+          /** Everything, including the deferred half, has finished. */
+          loaded: function () {
+            el.tail.classList.add('gone');
+            setTimeout(function () { el.tail.classList.remove('on'); }, 600);
+          },
+          /**
+           * Remove the overlay with no transition.
+           *
+           * For the capture harness: it screenshots the moment __READY__ goes
+           * up, and a 420 ms fade would put a translucent black sheet over
+           * every reference image. A gate whose baseline is half a loading
+           * screen is worse than no gate.
+           */
+          hideNow: function () {
+            done = true;
+            el.root.style.transition = 'none';
+            el.root.style.display = 'none';
+            el.tail.style.display = 'none';
+          },
+
+          /** Boot threw. Stop pretending to make progress. */
+          fail: function (msg) {
+            done = true;
+            el.track.classList.remove('sweep');
+            el.fill.style.background = '#c0504a';
+            el.label.textContent = msg || 'boot failed';
+          },
+        };
+      })();
+    </script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

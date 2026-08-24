@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BOX, BOX_SOFT, IDENT, LL } from './kit.js';
 import { fbm3, patchGeometry, paintMasks } from './util.js';
 import { Rng } from '../core/rng.js';
-import { STREET, ALLEYS } from './layout.js';
+import { STREET, roadY, ALLEYS } from './layout.js';
 
 /**
  * WORLD — ground plane, road, kerbs and the stuff wind piles against them.
@@ -12,6 +12,16 @@ import { STREET, ALLEYS } from './layout.js';
  * the alleys are dirt. Collision is a handful of flat boxes rather than the
  * visual triangles, which keeps the BVH tiny and the character controller smooth.
  */
+/**
+ * How far a flat decal sits above the surface it is painted on.
+ *
+ * Two millimetres: enough to beat depth precision at this scale, little enough
+ * that the decal reads as painted on rather than laid over. The old values here
+ * were 42-50 mm, which is a hand's width of air under a dust patch — invisible
+ * when the road was covered in rubble, and a floating disc once it was not.
+ */
+const DECAL_LIFT = 0.002;
+
 export function buildGround(A, rng) {
   const { halfWidth: HW, kerb: KB, walkH: WH, zMin, zMax } = STREET;
 
@@ -47,7 +57,7 @@ export function buildGround(A, rng) {
   for (let i = 0; i < rp.count; i++) {
     const x = rp.getX(i);
     const z = rp.getZ(i);
-    const camber = (1 - (x / HW) ** 2) * 0.055;
+    const camber = roadY(x);
     const wear = (fbm3(x * 0.55 + 3, 2.2, z * 0.35, 3) - 0.5) * 0.07;
     // shallow ruts where wheels have polished the surface
     const rut = -Math.exp(-((Math.abs(x) - 1.6) ** 2) / 0.5) * 0.022;
@@ -71,7 +81,7 @@ export function buildGround(A, rng) {
     const x = rut ? (rng.float() < 0.5 ? -1 : 1) * rng.range(1.2, 2.1) : rng.range(-HW + 0.5, HW - 0.5);
     const z = rng.range(zMin + 2, zMax - 2);
     // sit just above the local camber, and run along Z where camber is constant
-    const camber = (1 - (x / HW) ** 2) * 0.055 + 0.042;
+    const camber = roadY(x, DECAL_LIFT);
     const g = patchGeometry(rng, rng.range(0.45, 1.1), { lobes: 11, wobble: 0.5 });
     A.addOnce(
       'asphalt',
@@ -241,7 +251,7 @@ export function buildGround(A, rng) {
     const y = againstWall
       ? WH + 0.012
       : Math.abs(x) < HW
-        ? (1 - (x / HW) ** 2) * 0.055 + 0.05
+        ? roadY(x, DECAL_LIFT)
         : WH + 0.01;
     const g = patchGeometry(rng, rng.range(0.35, 1.5), { lobes: 9, wobble: 0.5 });
     A.addOnce('sand', g, LL(IDENT, x, y, z, rng.float() * 6.28, 1, 1, rng.range(0.5, 1.0)), {
@@ -254,7 +264,7 @@ export function buildGround(A, rng) {
     A.addOnce(
       'dirt',
       g,
-      LL(IDENT, px, (1 - (px / HW) ** 2) * 0.055 + 0.048, rng.range(zMin + 3, zMax - 3), rng.float() * 6.28, 1, 1, rng.range(0.4, 0.9)),
+      LL(IDENT, px, roadY(px, DECAL_LIFT), rng.range(zMin + 3, zMax - 3), rng.float() * 6.28, 1, 1, rng.range(0.4, 0.9)),
       { masks: [0.1, 0.85, 0.5] }
     );
   }
@@ -270,7 +280,10 @@ export function buildGround(A, rng) {
       });
       return g;
     });
-    A.add('metal_dark', ring, LL(IDENT, x, 0.035 + (1 - (x / HW) ** 2) * 0.05, z, rng.float() * 6.28, 1, 1, 1));
+    // Seated, not sitting on top: the cylinder is 4 cm thick and centred, so
+    // placing its CENTRE 1.2 cm below the surface leaves 8 mm of rim proud and
+    // buries the rest. It used to be centred 3.5 cm ABOVE the road.
+    A.add('metal_dark', ring, LL(IDENT, x, roadY(x, -0.012), z, rng.float() * 6.28, 1, 1, 1));
   }
   for (const side of [-1, 1]) {
     for (let i = 0; i < 5; i++) {

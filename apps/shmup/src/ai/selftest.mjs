@@ -14,7 +14,7 @@ import { CharacterBuilder, Noise, vcount } from './geo.js';
 import * as P from './parts.js';
 import { buildWeapon } from './weapon.js';
 import { VARIANTS, buildSoldier } from './soldier.js';
-import { CAMO, CLOTH_TILE, TileNoise, makeCamoSampler, CLOTH_BUDGET, budgetFor, KIT_CAL } from './textures.js';
+import { CAMO, CLOTH_TILE, TileNoise, makeCamoSampler, CLOTH_BUDGET, budgetFor, KIT_CAL } from './bake.js';
 
 const rng = new Rng(1234);
 const nz = new Noise(rng.fork());

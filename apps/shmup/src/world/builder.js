@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { isSuppressed, auditClutter } from './clutter.js';
 import { Accum, trs } from './util.js';
 import { PALETTE } from './palette.js';
 
@@ -76,6 +77,8 @@ export class Assembler {
      * not on the ground, and a dust ring floating at 60 cm is worse than none.
      */
     this.skirts = true;
+    /** While true every emitter is a no-op. See muted(). */
+    this.mute = false;
     this.stats = { staticTris: 0, instTris: 0, instances: 0, drawCalls: 0, collideTris: 0 };
   }
 
@@ -130,6 +133,7 @@ export class Assembler {
   // --------------------------------------------------------- static batch --
   /** Merge a transformed geometry into the batch for `key`. */
   add(key, geo, matrix = null, opts = null) {
+    if (this.mute) return this;
     let a = this._static.get(key);
     if (!a) {
       a = new Accum(`world:${key}`);
@@ -160,6 +164,7 @@ export class Assembler {
 
   /** Merge a one-off geometry and free it immediately. */
   addOnce(key, geo, matrix = null, opts = null) {
+    if (this.mute) return this;
     this.add(key, geo, matrix, opts);
     geo.dispose();
     return this;
@@ -215,7 +220,41 @@ export class Assembler {
   }
 
   /** Add an instance. `masks` scales the geometry's [wear, grime, ao]. */
+  /**
+   * Swallow everything emitted while `fn` runs, then restore.
+   *
+   * For removing a whole SET-PIECE rather than a prop. A market stall is a
+   * suppressible `stall` prototype plus a striped canopy, a valance, a side
+   * drape and a collision box, all raw geometry with no id — so suppressing the
+   * prototype alone left four cloth panels hanging in mid-air over nothing.
+   *
+   * Muting rather than not calling the builder is the whole point: the builder
+   * still runs, so it still draws exactly the random numbers it always drew,
+   * and every set-piece after it lands where it always did. Skipping the call
+   * instead would shift the shared stream and rebuild the street into a
+   * different street.
+   */
+  muted(fn) {
+    const prev = this.mute;
+    this.mute = true;
+    try {
+      fn();
+    } finally {
+      this.mute = prev;
+    }
+    return this;
+  }
+
   place(id, matrix, masks = null) {
+    // THE ONE PLACE the arena-shooter floor policy is applied. Every prototype
+    // placement goes through here, so suppression cannot be half-applied, and
+    // the placement decision above it still ran — which means it still drew the
+    // same random numbers and the level's architecture is unchanged. See
+    // src/world/clutter.js.
+    if (this.mute || isSuppressed(id)) {
+      this.stats.suppressed = (this.stats.suppressed ?? 0) + 1;
+      return this;
+    }
     const p = this._protos.get(id);
     if (!p) {
       console.warn(`[world] no prop prototype "${id}"`);
@@ -273,6 +312,7 @@ export class Assembler {
   // ------------------------------------------------------------ collision --
   /** Axis-aligned (or Y-rotated) box collision proxy. */
   box(surface, cx, cy, cz, sx, sy, sz, ry = 0) {
+    if (this.mute) return this;
     let a = this._collide.get(surface);
     if (!a) {
       a = new Accum(`collide:${surface}`);
@@ -308,6 +348,7 @@ export class Assembler {
 
   /** Register a punctual light. Position is in LEVEL space. */
   light(light, opts) {
+    if (this.mute) return light;
     if (!this._identity) light.position.applyMatrix4(this.xform);
     this.lights.push({ light, opts });
     return this;
@@ -316,6 +357,7 @@ export class Assembler {
   // ------------------------------------------------------------- finalize --
   /** Build the meshes, add them to `root`, register collision with physics. */
   finalize(root, physics) {
+    auditClutter(new Set(this._protos.keys()));
     // --- merged static geometry ---
     for (const [key, acc] of this._static) {
       if (acc.empty) continue;

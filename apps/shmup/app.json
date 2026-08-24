@@ -1,0 +1,11 @@
+{
+  "title": "Overwatch",
+  "blurb": "A first-person tactical shooter in a procedurally built desert town — every texture, mesh and sound generated at load time, with no image or audio files anywhere in the project.",
+  "description": "An original first-person shooter whose entire world is generated, not authored: there is not one image, model or audio file in the project. The level is a deterministic desert town — building shells, interiors, stairs, awnings, parapets and drainpipes assembled from a modular kit, with a collision BVH built from the same geometry — dressed for an arena rather than a campaign, so the floor is a surface you fight across and the architecture is the cover. Surfaces are baked on the GPU from GLSL noise into tiling PBR sets (albedo, tangent normal, packed AO/roughness/metalness); the enemy characters' camouflage, webbing, plate and skin are baked on worker threads from tileable value noise; the particle and decal atlases are painted the same way. Rendering is a deferred-lit forward pass with four-cascade shadows, a depth/velocity prepass, GTAO, screen-space reflections, TAA, motion blur, ADS depth of field, bloom and a physically scaled atmosphere with volumetric light. Weapons carry learnable recoil patterns, real ballistics and an animated viewmodel; the enemies navigate a 221x221 walkability grid with cover selection. Boot is progressive: the level, HUD and weapon are on screen in a couple of seconds while navigation, the remaining viewmodels and the shader pre-warm stream in behind the running game — the loading bar is paced by measured phase weights and, during shader compilation, by a live count of linked GPU programs. Controls: WASD move, mouse look, left mouse fire, right mouse aim, Shift sprint, Ctrl crouch, Space jump, R reload, 1-3 or Q switch weapon, F inspect. (WebGL2.)",
+  "kind": "self-built",
+  "tags": [
+    "game",
+    "shooter",
+    "procedural"
+  ]
+}

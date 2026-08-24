@@ -14,3 +14,6 @@ demo/
 .tmp-demo/
 .tmp-rend/
 revcrops/
+
+# Boot profiler: throwaway browser profile for `--warm` runs.
+.bootprofile-profile/

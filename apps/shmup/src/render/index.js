@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { probeGl } from '../core/glprobe.js';
+import { boot } from '../core/profile.js';
 
 import { hdrTarget, blit } from './pass.js';
 import { CascadedShadowMaps } from './csm.js';
@@ -125,13 +127,27 @@ export class RenderSystem {
   static id = 'render';
   static deps = [];
 
+  /**
+   * Claim this subsystem's deterministic RNG stream.
+   *
+   * Called by Engine.init() for every subsystem, in dependency order, BEFORE
+   * any init() runs — see the prepare-pass comment in src/core/engine.js for
+   * why the fork's POSITION in ctx.rng's stream is load-bearing. Idempotent,
+   * and init() calls it too, so a preview page that drives this subsystem
+   * without an Engine still gets a seeded stream.
+   */
+  prepare(ctx) {
+    if (this.rng) return;
+    this.rng = ctx.rng.fork();
+  }
+
   async init(ctx) {
     this.ctx = ctx;
     const cfg = ctx.config;
     const q = cfg.q;
     this.q = q;
     this.qLevel = QUALITY_LEVEL[cfg.quality] ?? 3;
-    this.rng = ctx.rng.fork();
+    this.prepare(ctx);
     this.frame = 0;
 
     // ---- renderer -------------------------------------------------------
@@ -160,6 +176,12 @@ export class RenderSystem {
     renderer.shadowMap.autoUpdate = true;
     renderer.setClearColor(0x000000, 1);
     this.renderer = renderer;
+
+    // Boot profiling: attribute every shader compile, program link, texture
+    // upload and sync stall to the span that caused it. Installed here because
+    // this is the moment the context exists, and BEFORE anything has been
+    // compiled or uploaded, so no GPU work escapes the accounting.
+    probeGl(renderer.getContext());
 
     // ---- make every pre-compile see the FINAL program -----------------------
     // MEASURED: 26 of 144 live programs were unpatched duplicates of a lit
@@ -1235,6 +1257,62 @@ export class RenderSystem {
     });
     ctx.scene.add(g);
     this.probeActive = true;
+  }
+
+  /**
+   * Apply the distance cull to every registered punctual light, once, outside a
+   * frame — so the VISIBLE light count is settled before anything compiles.
+   *
+   * three folds `numPointLights` / `numDirLights` straight into the program
+   * cache key, so a lit material gets one program per distinct visible-light
+   * count it is ever drawn with. Measured on this level: the counts seen during
+   * boot were 20, 21 and 32 point lights and 2 or 3 directional, i.e. a 6x
+   * permutation multiplier on every lit material in the game, and five of those
+   * six were counts the steady-state frame loop never asks for again.
+   *
+   * The steady state is settled by this cull plus `world.settleLights()`, and
+   * both used to run for the first time INSIDE frame 1 — after pre-warm had
+   * already compiled everything against whatever counts happened to be current.
+   * Running them before pre-warm is what makes those compiles the real ones.
+   *
+   * Pixel-neutral by construction: it performs exactly the cull `render()` does
+   * on its first line, one frame earlier, and changes no other state.
+   */
+  settleLights(ctx) {
+    const camera = ctx?.camera ?? this.ctx.camera;
+    camera.updateMatrixWorld();
+    // Same three steps `render()` opens with, in the same order: find the
+    // lights, decide which directional is acting as the sun (which hides the
+    // fallback one and is worth a whole directional slot in the cache key), and
+    // distance-cull the punctual lights.
+    this._collect(ctx?.scene ?? this.ctx.scene);
+    this._syncSun(camera);
+    camera.getWorldPosition(this._camPos);
+
+    // TAKE THE VISIBILITY, GIVE BACK THE INTENSITY.
+    //
+    // `_cullLights` keeps adaptive bookkeeping: if it finds an intensity it did
+    // not write itself, it adopts that value as the light's new base, so a lamp
+    // whose owner animates it is followed rather than fought. That rule is
+    // correct once per frame and wrong here, because this call happens BEFORE
+    // any subsystem's first `update()`. Leaving `applied` set would make frame
+    // 1 mistake world's first solar-altitude write for an owner animating a
+    // lamp and re-base every practical off it — measured as a ~2/255 shift
+    // across 97% of every shot, which is exactly the kind of "invisible" change
+    // that is still a change.
+    //
+    // Only `visible` is kept, which is all the program cache key reads.
+    const saved = this.lights.map((e) => ({
+      applied: e.applied,
+      base: e.baseIntensity,
+      intensity: e.light.intensity,
+    }));
+    this._cullLights(this._camPos);
+    this.lights.forEach((e, i) => {
+      e.applied = saved[i].applied;
+      e.baseIntensity = saved[i].base;
+      e.light.intensity = saved[i].intensity;
+    });
   }
 
   _cullLights(camPos) {

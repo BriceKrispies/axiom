@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { boot } from '../core/profile.js';
 import { Rng } from '../core/rng.js';
 import { WeaponMaterials, ENV_OCCLUSION } from './materials.js';
 import { Viewmodel } from './viewmodel.js';
@@ -58,6 +59,9 @@ import { clamp, clamp01, lerp, damp, DEG } from './mathx.js';
  * Anything else (ammo counts, fire mode, the current weapon) is a getter on
  * this object rather than an event, so no new event types are introduced.
  */
+/** Weapon build + switch order. One list, so init and stream agree. */
+const WEAPON_ORDER = ['rifle', 'smg', 'pistol'];
+
 export class WeaponSystem {
   static id = 'weapons';
   static deps = ['materials', 'physics'];
@@ -129,12 +133,37 @@ export class WeaponSystem {
   /*  init                                                                  */
   /* ====================================================================== */
 
+  /**
+   * Claim this subsystem's deterministic RNG stream.
+   *
+   * Called by Engine.init() for every subsystem, in dependency order, BEFORE
+   * any init() runs — see the prepare-pass comment in src/core/engine.js for
+   * why the fork's POSITION in ctx.rng's stream is load-bearing. Idempotent,
+   * and init() calls it too, so a preview page that drives this subsystem
+   * without an Engine still gets a seeded stream.
+   */
+  prepare(ctx) {
+    if (this.rng) return;
+    this.rng = ctx.rng.fork();
+    // A SECOND claim off the root stream, deliberately.
+    //
+    // `Viewmodel`'s constructor used to fork ctx.rng itself, part-way through
+    // this system's init. That worked only because init order happened to put
+    // it between `weapons` and `fx`: every subsystem seeded after weapons —
+    // fx, ai, ui, audio — was silently downstream of when a viewmodel got
+    // built. Claiming it here keeps that draw in exactly the same position in
+    // the root sequence (immediately after this system's own fork) while making
+    // the dependency explicit instead of incidental. Moving or removing this
+    // line reseeds half the game; the capture gate will tell you loudly.
+    this.viewmodelRng = ctx.rng.fork();
+  }
+
   async init(ctx) {
     this.ctx = ctx;
-    this.rng = ctx.rng.fork();
+    this.prepare(ctx);
     this.mats = new WeaponMaterials(ctx);
     this.sim = new ProjectileSim(ctx);
-    this.viewmodel = new Viewmodel(ctx, this.mats);
+    this.viewmodel = new Viewmodel(ctx, this.mats, this.viewmodelRng);
     // three only honours `material.envMapIntensity` when the material carries its
     // OWN `envMap`; for a material lit by `scene.environment` the renderer
     // overwrites that uniform with `scene.environmentIntensity` every frame
@@ -145,15 +174,17 @@ export class WeaponSystem {
     ctx.viewScene.environmentIntensity = ENV_OCCLUSION;
     this.viewmodel.onClipEvent = (name, clip) => this._onClipEvent(name, clip);
 
-    const t0 = performance.now();
-    const builders = { rifle: buildRifle, smg: buildSmg, pistol: buildPistol };
-    let tris = 0;
-    for (const id of ['rifle', 'smg', 'pistol']) {
+    // Ammo, recoil patterns and definitions now; MESHES later.
+    //
+    // Building the three viewmodels is ~1.1 s and two of the three are weapons
+    // the player is not holding. The state below is what the rest of the system
+    // reads — `state`, `ammo`, `weaponIds` all work from the first frame — while
+    // `stream()` builds the geometry across the frames after it. Recoil patterns
+    // are seeded from `def.recoil.patternSeed`, not from this system's stream,
+    // so where they are built does not move any randomness.
+    for (const id of WEAPON_ORDER) {
       const def = { ...WEAPON_DEFS[id] };
       def.cycleTime = 60 / def.rpm;
-      const model = builders[id]();
-      const entry = this.viewmodel.addWeapon(model, def);
-      tris += entry.tris;
       this.states.set(id, {
         def,
         pattern: buildRecoilPattern(def, Rng),
@@ -164,8 +195,6 @@ export class WeaponSystem {
         modeIndex: 0,
       });
     }
-    this.viewmodel.setActive(this.activeId);
-    this.viewmodel.play('draw');
 
     // Player hooks (all optional: the viewmodel works standalone).
     this.player = ctx.peek('player');
@@ -177,10 +206,45 @@ export class WeaponSystem {
     );
     this._off.push(ctx.events.on('player:jump', () => this.viewmodel.jump()));
 
-    this.stats = { tris, drawCalls: 0, live: 0, fired: 0 };
+    this.stats = { tris: 0, drawCalls: 0, live: 0, fired: 0 };
+  }
+
+  /**
+   * DEFERRED CONSTRUCTION — see src/core/streaming.js.
+   *
+   * The viewmodel meshes, one weapon per chunk. The active weapon goes first and
+   * is made active the moment it exists, so the gun appears a frame or two into
+   * play instead of holding the whole level off the screen for a second; the
+   * other two are built behind it, long before a switch can reach them.
+   *
+   * `Viewmodel.update()` and `setActive()` both already return early on a
+   * viewmodel with no active weapon, so the frames before the first chunk lands
+   * are a state the code was written to handle, not a new one.
+   */
+  *stream() {
+    const t0 = performance.now();
+    const builders = { rifle: buildRifle, smg: buildSmg, pistol: buildPistol };
+    // Active weapon first — everything else is invisible until a switch.
+    const order = [this.activeId, ...WEAPON_ORDER.filter((id) => id !== this.activeId)];
+
+    for (const id of order) {
+      const def = this.states.get(id)?.def;
+      if (!def) continue;
+      const model = builders[id]();
+      yield `${id}:model`;
+
+      const entry = this.viewmodel.addWeapon(model, def);
+      this.stats.tris += entry.tris;
+      if (id === this.activeId) {
+        this.viewmodel.setActive(this.activeId);
+        this.viewmodel.play('draw');
+      }
+      yield `${id}:add`;
+    }
+
     console.info(
-      `[weapons] ${this.states.size} weapons · ${(tris / 1000).toFixed(1)}k tris viewmodel · ` +
-        `built in ${(performance.now() - t0).toFixed(0)}ms`
+      `[weapons] ${this.states.size} weapons · ${(this.stats.tris / 1000).toFixed(1)}k tris ` +
+        `viewmodel · streamed in ${(performance.now() - t0).toFixed(0)}ms`
     );
   }
 

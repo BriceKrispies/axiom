@@ -137,6 +137,11 @@ void owSurface(vec2 uv, out vec3 alb, out float h, out float rough, out float me
 }
 `;
 
+/** Flat values an unpainted surface is cleared to; see TextureForge.allocate(). */
+const _PRIME_ALBEDO = new THREE.Color(0.30, 0.29, 0.27);
+const _PRIME_ORM = new THREE.Color(1.0, 0.7, 0.0);
+const _PRIME_NORMAL = new THREE.Color(0.5, 0.5, 1.0);
+
 export class TextureForge {
   /**
    * @param {THREE.WebGLRenderer} renderer
@@ -257,11 +262,71 @@ export class TextureForge {
    * Baking the outputs nobody reads cost a 1K RGBA8 mip chain (5.6 MB), two
    * 256px ones, and four full-screen evaluations of the noise stack at boot.
    */
-  build(def) {
+  /**
+   * Allocate a surface's render targets and prime them to a plausible flat
+   * value, WITHOUT baking anything into them yet.
+   *
+   * This is the half of `build()` that has to happen before a material can be
+   * created, and it is the cheap half: three `WebGLRenderTarget`s and a clear.
+   * The expensive half — compiling the surface's noise shader and running four
+   * full-screen passes at 1K — is `paint()`, and it can happen several frames
+   * later because THE TEXTURE OBJECTS DO NOT CHANGE. A material binds
+   * `albedoRT.texture` now and keeps binding the same object after it is
+   * painted, so nothing needs updating, no program is invalidated, and no
+   * material has to be told.
+   *
+   * Priming matters: an unpainted target is black, and a black street reads as
+   * a hole rather than as an untextured street. Cleared to the surface's own
+   * base tint (and to flat-normal / mid-roughness for the other two maps) it
+   * reads as the right material without its detail, which is what a player
+   * should see for the fraction of a second before the bake lands.
+   */
+  allocate(def) {
     const r = this.renderer;
     const size = def.size;
     const wantOrm = def.orm !== false;
     const wantNormal = def.normal !== false;
+    const albedoRT = this._target(size, { srgb: def.linearAlbedo !== true });
+    const ormRT = wantOrm ? this._target(size) : null;
+    const normalRT = wantNormal ? this._target(size) : null;
+
+    const prevTarget = r.getRenderTarget();
+    const prevClear = r.getClearColor(new THREE.Color());
+    const prevAlpha = r.getClearAlpha();
+    const prime = (rt, color) => {
+      if (!rt) return;
+      r.setRenderTarget(rt);
+      r.setClearColor(color, 1);
+      r.clear(true, false, false);
+    };
+    prime(albedoRT, def.tintA ?? _PRIME_ALBEDO);
+    // ORM is (ao, roughness, metalness): fully unoccluded, fairly rough, not
+    // metal — the same defaults the per-texel bakers start from.
+    prime(ormRT, _PRIME_ORM);
+    // Tangent-space flat.
+    prime(normalRT, _PRIME_NORMAL);
+    r.setRenderTarget(prevTarget);
+    r.setClearColor(prevClear, prevAlpha);
+
+    return {
+      rts: { albedoRT, ormRT, normalRT },
+      set: {
+        albedo: albedoRT.texture,
+        orm: ormRT?.texture ?? null,
+        normal: normalRT?.texture ?? null,
+        size,
+        worldSize: def.worldSize ?? 2,
+        relief: def.relief ?? 0.02,
+      },
+    };
+  }
+
+  /** Bake a surface into targets `allocate()` already handed out. */
+  paint(def, rts) {
+    const r = this.renderer;
+    const size = def.size;
+    const { albedoRT, ormRT, normalRT } = rts;
+    const wantNormal = normalRT !== null;
     const prevTarget = r.getRenderTarget();
     const prevAutoClear = r.autoClear;
     r.autoClear = false;
@@ -272,10 +337,6 @@ export class TextureForge {
     if (def.tintB) mat.uniforms.uTintB.value.copy(def.tintB);
     if (def.param) mat.uniforms.uParam.value.copy(def.param);
     this._mesh.material = mat;
-
-    const albedoRT = this._target(size, { srgb: def.linearAlbedo !== true });
-    const ormRT = wantOrm ? this._target(size) : null;
-    const normalRT = wantNormal ? this._target(size) : null;
 
     // The height pass exists only to feed the Sobel, so it is skipped with it.
     let heightRT = null;
@@ -309,15 +370,13 @@ export class TextureForge {
 
     r.setRenderTarget(prevTarget);
     r.autoClear = prevAutoClear;
+  }
 
-    return {
-      albedo: albedoRT.texture,
-      orm: ormRT?.texture ?? null,
-      normal: normalRT?.texture ?? null,
-      size,
-      worldSize: def.worldSize ?? 2,
-      relief: def.relief ?? 0.02,
-    };
+  /** Allocate and paint in one go — the synchronous path. */
+  build(def) {
+    const a = this.allocate(def);
+    this.paint(def, a.rts);
+    return a.set;
   }
 
   /**

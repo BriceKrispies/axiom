@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { boot } from '../core/profile.js';
 import { Assembler } from './builder.js';
 import { BUILDINGS, STREET, SET_PIECES, GATE } from './layout.js';
 import { buildGround } from './ground.js';
@@ -86,9 +87,23 @@ export class WorldSystem {
   static id = 'world';
   static deps = ['materials', 'physics'];
 
+  /**
+   * Claim this subsystem's deterministic RNG stream.
+   *
+   * Called by Engine.init() for every subsystem, in dependency order, BEFORE
+   * any init() runs — see the prepare-pass comment in src/core/engine.js for
+   * why the fork's POSITION in ctx.rng's stream is load-bearing. Idempotent,
+   * and init() calls it too, so a preview page that drives this subsystem
+   * without an Engine still gets a seeded stream.
+   */
+  prepare(ctx) {
+    if (this.rng) return;
+    this.rng = ctx.rng.fork();
+  }
+
   async init(ctx) {
     this.ctx = ctx;
-    this.rng = ctx.rng.fork();
+    this.prepare(ctx);
     const rng = this.rng;
     const materials = ctx.get('materials');
     const physics = ctx.peek('physics');
@@ -108,35 +123,49 @@ export class WorldSystem {
     A.setTransform(LEVEL_YAW, LEVEL_TX, LEVEL_TZ);
 
     // 1. prototypes first: the level references them by id while it builds
-    registerProps(A, rng);
-    registerDressingProps(A, rng);
+    boot.time('world:registerProps', () => {
+      registerProps(A, rng);
+      registerDressingProps(A, rng);
+    });
 
     // 2. ground, then the shells, then what people put in and on them
-    buildGround(A, rng);
+    boot.time('world:ground', () => buildGround(A, rng));
 
-    const infos = [];
-    for (const spec of BUILDINGS) {
-      const info = buildBuilding(A, rng, spec);
-      infos.push(info);
-      if (spec.collapse) {
-        collapseRoof(A, rng, spec, info, {
-          x: spec.x + rng.range(-2, 2),
-          z: spec.z + rng.range(-2, 2),
-        });
-      }
-    }
+    // One span PER BUILDING, not one for the lot. This is the longest single
+    // stretch of boot (~600 ms) and the loading bar can only move on a span
+    // boundary — undivided, it is the one place the bar visibly stops. Eight
+    // spans cost nothing and turn a stall into eight steps.
+    const infos = boot.time('world:buildings', () =>
+      BUILDINGS.map((spec, i) =>
+        boot.time(`world:building${i}`, () => {
+          const info = buildBuilding(A, rng, spec);
+          if (spec.collapse) {
+            collapseRoof(A, rng, spec, info, {
+              x: spec.x + rng.range(-2, 2),
+              z: spec.z + rng.range(-2, 2),
+            });
+          }
+          return info;
+        })
+      )
+    );
     this.buildings = infos;
 
-    buildGate(A, rng);
-    buildPerimeter(A, rng);
-    dressStreet(A, rng);
-    dressBuildings(A, rng, infos);
-    scatterDebris(A, rng);
+    boot.time('world:gate', () => buildGate(A, rng));
+    boot.time('world:perimeter', () => buildPerimeter(A, rng));
+    boot.time('world:dressStreet', () => dressStreet(A, rng));
+    boot.time('world:dressBuildings', () => dressBuildings(A, rng, infos));
+    boot.time('world:debris', () => scatterDebris(A, rng));
 
-    this._addLights(A);
+    boot.time('world:lights', () => this._addLights(A));
 
-    A.finalize(this.root, physics);
-    A.releaseCache();
+    boot.time('world:finalize', () => {
+      A.finalize(this.root, physics);
+      A.releaseCache();
+      boot.note('staticTris', A.stats.staticTris);
+      boot.note('instances', A.stats.instances);
+      boot.note('drawCalls', A.stats.drawCalls);
+    });
 
     // -------------------------------------------------------------- queries --
     this._v = new THREE.Vector3();
@@ -263,6 +292,20 @@ export class WorldSystem {
    * prediction wrong can only cost a permutation, never a pixel: the ballast
    * lights are black, and a black light is a no-op however many are lit.
    */
+  /**
+   * Top the ballast up once, outside a frame, so the point-light count is at its
+   * steady-state value before any shader compiles. See
+   * `RenderSystem.settleLights()` for why the count is worth this much care.
+   *
+   * Must run AFTER render's cull, since the prediction below mirrors it.
+   */
+  settleLights(ctx) {
+    // The periodic rescan is frame-gated; force it, because on the frame this
+    // runs no frame has happened yet and the light list is still empty.
+    this._pointLightsFrame = -1e9;
+    this._stabiliseLightCount(ctx);
+  }
+
   _stabiliseLightCount(ctx) {
     const list = this._pointLights;
     if (!list) return;

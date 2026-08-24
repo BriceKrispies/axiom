@@ -50,14 +50,19 @@ if (!(await portOpen(PORT))) {
   if (!up) { server.kill(); throw new Error('vite failed to start'); }
 }
 
+// ANGLE backend. `metal` is macOS-only and silently falls back elsewhere —
+// on Windows that fallback is SwiftShader, which renders DIFFERENT PIXELS from
+// a real GPU. A gate whose reference was captured on a software rasterizer
+// compares nothing, so the backend is explicit and reported.
+const ANGLE = String(args.angle ?? (process.platform === 'darwin' ? 'metal' : 'gl'));
 const browser = await chromium.launch({
   headless: true,
-  args: ['--use-angle=metal', '--ignore-gpu-blocklist', '--force-color-profile=srgb',
+  args: [`--use-angle=${ANGLE}`, '--ignore-gpu-blocklist', '--force-color-profile=srgb',
          '--force-device-scale-factor=1', '--hide-scrollbars', '--mute-audio', '--disable-frame-rate-limit'],
 });
 
 mkdirSync(OUTDIR, { recursive: true });
-const report = { ok: true, outDir: OUTDIR, size: `${W}x${H}`, isolated: true, settle: SETTLE, shots: [], errors: [] };
+const report = { ok: true, outDir: OUTDIR, size: `${W}x${H}`, angle: ANGLE, isolated: true, settle: SETTLE, shots: [], errors: [] };
 
 // Discover the shot list from a throwaway page.
 const probe = await browser.newPage({ viewport: { width: W, height: H } });

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { isSuppressed, suppresses } from './clutter.js';
 import { Rng } from '../core/rng.js';
 import {
   BOX,
@@ -27,7 +28,7 @@ import {
   tubeY,
   fbm3,
 } from './util.js';
-import { STREET, ALLEYS, BUILDINGS, SET_PIECES, GATE } from './layout.js';
+import { STREET, roadY, ALLEYS, BUILDINGS, SET_PIECES, GATE } from './layout.js';
 
 /**
  * WORLD — set dressing.
@@ -77,7 +78,7 @@ export function isOpen(x, z, m = 0.3) {
 export function groundY(x, z) {
   // The road is cambered; props placed at y=0 sink into the crown by 5 cm.
   if (Math.abs(x) < STREET.halfWidth)
-    return (1 - (x / STREET.halfWidth) ** 2) * 0.055 + 0.004;
+    return roadY(x, 0.004);
   if (Math.abs(x) < STREET.kerb && z > STREET.zMin && z < STREET.zMax) return STREET.walkH;
   return 0.03;
 }
@@ -90,7 +91,19 @@ export function groundY(x, z) {
  * pebbles that got kicked out. Without this every crate, drum and barrier reads
  * as a decal pasted onto the deck — the single cheapest grounding cue there is.
  */
+/**
+ * Dust and swept grit at the foot of a prop.
+ *
+ * Muted by the arena floor policy: with the props gone these are stains with no
+ * object. Muted rather than skipped so every random draw below still happens
+ * and nothing downstream of it moves — see src/world/clutter.js.
+ */
 export function groundSkirt(A, rng, x, y, z, radius, opts = {}) {
+  if (suppresses('skirts')) return A.muted(() => _groundSkirt(A, rng, x, y, z, radius, opts));
+  return _groundSkirt(A, rng, x, y, z, radius, opts);
+}
+
+function _groundSkirt(A, rng, x, y, z, radius, opts = {}) {
   const r = radius * rng.range(1.15, 1.55);
   const g = patchGeometry(rng, r, { lobes: 11, wobble: 0.5 });
   A.addOnce(
@@ -332,17 +345,30 @@ export function dressStreet(A, rng) {
   // shift every subsequent position in the level and walk props into the shot
   // cameras' keepout zones.
   A.jitter = jitterRig();
-  marketStalls(A, rng);
-  barriers(A, rng);
-  sandbagEmplacements(A, rng);
-  wrecks(A, rng);
-  palms(A, rng);
+
+  // WHOLE SET-PIECES THE ARENA DRESSING REMOVES.
+  //
+  // Each of these builds a composite: a suppressible prototype plus raw
+  // geometry that has no id — a stall's canopy and valance, a wreck's body
+  // slab, a rubble pile's mound. Suppressing only the prototype left the raw
+  // half behind, floating where its support used to be. `A.muted()` runs the
+  // builder and swallows everything it emits, so the set-piece disappears
+  // whole AND the shared RNG stream advances exactly as it always did — which
+  // is what keeps every other set-piece in the same place. See
+  // src/world/clutter.js.
+  const drop = (fn) => A.muted(() => fn(A, rng));
+
+  drop(marketStalls);
+  drop(barriers);
+  drop(sandbagEmplacements);
+  drop(wrecks);
+  drop(palms);
   streetLamps(A, rng);
   overheadLines(A, rng);
   facadeHangings(A, rng);
-  rubblePiles(A, rng);
-  tyreStacks(A, rng);
-  coverClusters(A, rng);
+  drop(rubblePiles);
+  drop(tyreStacks);
+  drop(coverClusters);
   streetFloor(A, rng);
   A.jitter = null;
 }
@@ -491,14 +517,19 @@ function streetFloor(A, rng) {
   }
 
   // ---- 3. tyre tracks polished into the dust along the driving line ----
+  // Muted by the arena floor policy, along with the turning scuffs below: no
+  // vehicles, and the decal lift that made them invisible under rubble makes
+  // them hover over a clean road. See src/world/clutter.js.
+  const roadMarks = (fn) => (suppresses('vehicleMarks') ? A.muted(fn) : fn());
   // Two ruts, laid as long overlapping strips so the line wanders instead of
   // ruling a straight edge down the middle of the frame.
+  roadMarks(() => {
   for (const side of [-1, 1]) {
     let z = zMin + 2;
     while (z < zMax - 3) {
       const len = rng.range(5.0, 13.0);
       const x = side * rng.range(1.25, 1.95);
-      const camber = (1 - (x / HW) ** 2) * 0.055 + 0.038;
+      const camber = roadY(x, 0.002);
       const g = patchGeometry(rng, 0.34, { lobes: 13, wobble: 0.28 });
       A.addOnce(
         'road_rut',
@@ -526,7 +557,9 @@ function streetFloor(A, rng) {
       z += len + rng.range(0.5, 4.0);
     }
   }
+  });
   // a couple of turning scuffs where vehicles have swung across the road
+  roadMarks(() => {
   for (let i = 0; i < 8; i++) {
     const z = rng.range(zMin + 5, zMax - 5);
     const g = patchGeometry(rng, rng.range(0.5, 1.1), { lobes: 12, wobble: 0.5 });
@@ -534,10 +567,11 @@ function streetFloor(A, rng) {
     A.addOnce(
       'asphalt',
       g,
-      LL(IDENT, x, (1 - (x / HW) ** 2) * 0.055 + 0.04, z, rng.float() * 3.14, 1, 1, rng.range(1.4, 2.6)),
+      LL(IDENT, x, roadY(x, 0.002), z, rng.float() * 3.14, 1, 1, rng.range(1.4, 2.6)),
       { masks: [0.45, 0.4, 0.15] }
     );
   }
+  });
 
   // ---- 4. masonry spill: chunks that fell off the buildings onto the kerb ----
   for (let i = 0; i < 120; i++) {
@@ -584,12 +618,18 @@ function streetFloor(A, rng) {
   if (camClear(car[0], car[1], 2.6)) {
     const y = groundY(car[0], car[1]);
     A.put('wreck', car[0], y + 0.02, car[1], car[2], 1, [1, 0.85, 1]);
-    A.box('metal', car[0], y + 0.75, car[1], 1.85, 1.5, 4.4, car[2]);
-    // it has been sitting long enough to gather its own drift and shed a wheel
-    const dg = driftBerm(rng, 4.2, 0.7, 0.13, { nz: 3 });
-    A.addOnce('sand', dg, LL(IDENT, car[0] - 1.0, y + 0.005, car[1], car[2] + Math.PI / 2, 1, 1, 1), {
-      masks: [0.15, 0.6, 0.5],
-    });
+    // The car's body slab and the sand drifted against it are raw geometry, not
+    // prototypes, so they have no id for `Assembler.place()` to suppress and
+    // have to be gated here. Without this the wreck vanishes and leaves a
+    // floating metal box sitting in a dune. See src/world/clutter.js.
+    if (!isSuppressed('wreck')) {
+      A.box('metal', car[0], y + 0.75, car[1], 1.85, 1.5, 4.4, car[2]);
+      // it has been sitting long enough to gather its own drift and shed a wheel
+      const dg = driftBerm(rng, 4.2, 0.7, 0.13, { nz: 3 });
+      A.addOnce('sand', dg, LL(IDENT, car[0] - 1.0, y + 0.005, car[1], car[2] + Math.PI / 2, 1, 1, 1), {
+        masks: [0.15, 0.6, 0.5],
+      });
+    }
     A.skirts = false;
     A.put('tyre', car[0] + 1.5, y + 0.1, car[1] - 1.8, 1.1, 1, [1, 1.4, 1], 1.5, 0.2);
     A.skirts = true;

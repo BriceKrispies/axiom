@@ -1,6 +1,8 @@
 import * as THREE from 'three';
+import { boot } from '../core/profile.js';
 import { UNITS } from '../core/config.js';
-import { buildParticleAtlas, buildDecalAtlas, P, D } from './atlas.js';
+import { buildParticleAtlasFromPixels, buildDecalAtlasFromPixels, P, D } from './atlas.js';
+import { paintParticleAtlas, paintDecalAtlas } from './atlasbake.js';
 import { ParticleLayer, resetSpawn, disposeQuadSource } from './particles.js';
 import { DecalSystem } from './decals.js';
 import { HazeSystem } from './haze.js';
@@ -37,9 +39,51 @@ export class FxSystem {
   static id = 'fx';
   static deps = ['render', 'materials'];
 
+  /**
+   * Claim this subsystem's deterministic RNG stream.
+   *
+   * Called by Engine.init() for every subsystem, in dependency order, BEFORE
+   * any init() runs — see the prepare-pass comment in src/core/engine.js for
+   * why the fork's POSITION in ctx.rng's stream is load-bearing. Idempotent,
+   * and init() calls it too, so a preview page that drives this subsystem
+   * without an Engine still gets a seeded stream.
+   */
+  prepare(ctx) {
+    if (this.rng) return;
+    this.rng = ctx.rng.fork();
+
+    // Queue the two atlas bakes NOW, not in init(). They are ~1.1 s of pure
+    // value-noise evaluation over their own buffers, and starting them here
+    // puts them on a worker while `render`, `world` and `weapons` build their
+    // object graphs on the main thread. By the time init() awaits, the pixels
+    // are usually already back.
+    //
+    // A SEED, NOT A FORK: `rng.fork()` was already exactly one `u32()` draw, so
+    // taking the number instead leaves this system's private stream advancing
+    // precisely as before — which is what keeps the capture gate valid — and
+    // makes the job structured-cloneable into a worker.
+    const size = (ctx.config?.q?.particleBudget ?? 6000) >= 10000 ? 1024 : 512;
+    this._atlasSize = size;
+    const particleSeed = this.rng.u32();
+    const decalSeed = this.rng.u32();
+    const jobs = [
+      { kind: 'fx:particle-atlas', payload: { seed: particleSeed, size } },
+      { kind: 'fx:decal-atlas', payload: { seed: decalSeed, size } },
+    ];
+    // `ctx.bakery` is absent on the standalone preview page (src/fx/preview.js),
+    // which builds its own minimal ctx. Painting inline is the same call the
+    // worker would make, so the preview keeps working and keeps matching.
+    this._atlasPixels = ctx.bakery
+      ? ctx.bakery.bakeAll(jobs)
+      : Promise.resolve([
+          paintParticleAtlas(jobs[0].payload),
+          paintDecalAtlas(jobs[1].payload),
+        ]);
+  }
+
   async init(ctx) {
     this.ctx = ctx;
-    this.rng = ctx.rng.fork();
+    this.prepare(ctx);
     this.render = ctx.peek('render');
     this._physics = ctx.peek('physics');
     this._audio = ctx.peek('audio');
@@ -51,9 +95,16 @@ export class FxSystem {
     const big = budget >= 10000;
 
     const t0 = performance.now();
-    const atlasSize = big ? 1024 : 512;
-    const particleAtlas = buildParticleAtlas(this.rng.fork(), atlasSize);
-    const decalAtlas = buildDecalAtlas(this.rng.fork(), atlasSize);
+    const atlasSize = this._atlasSize;
+    // Started back in prepare(); this usually resolves immediately.
+    const [particlePixels, decalPixels] = await boot.timeAsync('fx:atlases.await',
+      () => this._atlasPixels);
+    const particleAtlas = boot.time('fx:particleAtlas.upload', () =>
+      buildParticleAtlasFromPixels(particlePixels)
+    );
+    const decalAtlas = boot.time('fx:decalAtlas.upload', () =>
+      buildDecalAtlasFromPixels(decalPixels)
+    );
     this._atlas = particleAtlas;
     this._decalAtlas = decalAtlas;
     const bakeMs = performance.now() - t0;

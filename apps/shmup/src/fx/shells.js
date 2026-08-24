@@ -49,7 +49,10 @@ export class ShellSystem {
     geo.computeVertexNormals();
     this.geometry = geo;
 
-    const tex = buildBrassTextures(fx.rng.fork(), 128);
+    // A seed, not a fork: `fork()` was already one `u32()` draw, so passing the
+    // number instead advances fx's stream identically while making the painter
+    // worker-safe. See src/fx/atlasbake.js.
+    const tex = buildBrassTextures(fx.rng.u32(), 128);
     this.textures = tex;
     const mat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(0.78, 0.62, 0.31), // brass F0

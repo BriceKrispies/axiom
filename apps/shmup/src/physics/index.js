@@ -67,6 +67,7 @@
  */
 
 import * as THREE from 'three';
+import { boot } from '../core/profile.js';
 import { UNITS } from '../core/config.js';
 import { StaticWorld } from './bvh.js';
 import { CharacterController } from './character.js';
@@ -239,9 +240,23 @@ export class PhysicsSystem {
     this._rayCount = 0;
   }
 
+  /**
+   * Claim this subsystem's deterministic RNG stream.
+   *
+   * Called by Engine.init() for every subsystem, in dependency order, BEFORE
+   * any init() runs — see the prepare-pass comment in src/core/engine.js for
+   * why the fork's POSITION in ctx.rng's stream is load-bearing. Idempotent,
+   * and init() calls it too, so a preview page that drives this subsystem
+   * without an Engine still gets a seeded stream.
+   */
+  prepare(ctx) {
+    if (this.rng) return;
+    this.rng = ctx.rng.fork();
+  }
+
   async init(ctx) {
     this.ctx = ctx;
-    this.rng = ctx.rng.fork();
+    this.prepare(ctx);
     this.ballistics.rng = this.rng;
     this.debug = new PhysicsDebugView(ctx.scene);
 
@@ -253,7 +268,7 @@ export class PhysicsSystem {
     // The level may not exist yet — `world` builds during its own init and can
     // stream more in later. We rescan until something shows up; any explicit
     // addStatic() call takes over completely.
-    this._ensureStatics(true);
+    boot.time('physics:statics+bvh', () => this._ensureStatics(true));
 
     // Dev escape hatch: ?physdebug=1 turns the collision wireframe on from the
     // URL, and ?physdemo=1 also drops a ragdoll and some debris. Neither is

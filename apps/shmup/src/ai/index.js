@@ -38,7 +38,11 @@
  */
 
 import * as THREE from 'three';
+import { boot } from '../core/profile.js';
+import { WAIT } from '../core/streaming.js';
 import { SoldierMaterials } from './textures.js';
+import { bakeSoldierSets, SOLDIER_SHARDS } from './bake.js';
+import { Rng } from '../core/rng.js';
 import { buildSoldier, resolveMaterials, MATERIAL_SLOTS, VARIANTS } from './soldier.js';
 import { RIG } from './rig.js';
 import { NavGrid, CoverMap } from './nav.js';
@@ -50,19 +54,78 @@ export class AiSystem {
   static id = 'ai';
   static deps = ['physics', 'world'];
 
+  /**
+   * Claim this subsystem's deterministic RNG stream.
+   *
+   * Called by Engine.init() for every subsystem, in dependency order, BEFORE
+   * any init() runs — see the prepare-pass comment in src/core/engine.js for
+   * why the fork's POSITION in ctx.rng's stream is load-bearing. Idempotent,
+   * and init() calls it too, so a preview page that drives this subsystem
+   * without an Engine still gets a seeded stream.
+   */
+  prepare(ctx) {
+    if (this.rng) return;
+    this.rng = ctx.rng.fork();
+
+    // THE BIGGEST SINGLE BLOCK OF BOOT JAVASCRIPT — ~2.5 s of tileable value
+    // noise for the camouflage, nylon, plate, skin, polymer, steel and rubber
+    // sets. It reads nothing but its own seed, so it goes to a worker HERE,
+    // before any subsystem starts building object graphs, and by the time init()
+    // asks for it the bytes are usually already back. `ai` is second-to-last in
+    // dependency order, so queueing this inside init() instead would leave
+    // nothing to overlap it with. Measured with tools/bootprofile.mjs.
+    //
+    // THE SEED IS DERIVED EXACTLY AS IT WAS. The old code did
+    // `new SoldierMaterials(this.rng.fork(), ...)` and, inside, seeded the noise
+    // from `rng.fork()` again — two derivations, so reproducing them takes two:
+    // one `u32()` off this system's stream (what the outer fork drew) and one
+    // off an Rng seeded with it (what the inner fork drew). Same draws, same
+    // count, same order, therefore the same pixels; that equality is what the
+    // capture gate checks.
+    const nzSeed = new Rng(this.rng.u32()).u32();
+    const base = { nzSeed, size: 512, camo: ['arid', 'woodland', 'urban'] };
+
+    // FANNED ACROSS THE POOL, not handed to one worker. Every set reads the
+    // same seeded noise and draws no randomness of its own, so the bake shards
+    // cleanly and three workers finish in about a third of the time — proven
+    // byte-identical against the unsharded bake. It matters because once the
+    // rest of boot got fast enough, a single 2.7 s worker bake became the thing
+    // `ai` sat waiting for.
+    //
+    // `ctx.bakery` is absent on the standalone preview page (src/ai/preview.js),
+    // which builds its own minimal ctx.
+    const jobs = SOLDIER_SHARDS.map((only) => ({ ...base, only }));
+    this._soldierBake = Promise.all(
+      jobs.map((payload) =>
+        ctx.bakery
+          ? ctx.bakery.bake('ai:soldier-sets', payload)
+          : Promise.resolve(bakeSoldierSets(payload))
+      )
+    ).then((shards) => {
+      const merged = { sets: {}, details: {}, camoStats: {}, size: base.size, bakeMs: 0 };
+      for (const sh of shards) {
+        Object.assign(merged.sets, sh.sets);
+        Object.assign(merged.details, sh.details);
+        Object.assign(merged.camoStats, sh.camoStats);
+        merged.bakeMs = Math.max(merged.bakeMs, sh.bakeMs ?? 0);
+      }
+      return merged;
+    });
+    // A flag rather than an await: stream() polls it, because a generator
+    // cannot block. See src/core/streaming.js.
+    this._soldierBake.then((m) => { this._soldierBaked = m; });
+  }
+
   async init(ctx) {
     this.ctx = ctx;
-    this.rng = ctx.rng.fork();
+    this.prepare(ctx);
     this.root = new THREE.Group();
     this.root.name = 'ai';
     ctx.scene.add(this.root);
 
-    const t0 = performance.now();
-    this.materials = new SoldierMaterials(this.rng.fork(), {
-      size: 512,
-      anisotropy: ctx.config.q.anisotropy ?? 8,
-      camo: ['arid', 'woodland', 'urban'],
-    });
+    // The character materials are NOT awaited here — see stream(). Nothing on
+    // frame 1 needs them: no soldier exists until the garrison is populated,
+    // which is itself streamed.
     // Contact occlusion under every actor. Without it the cast shadow alone
     // leaves them hovering: see grounding.js.
     this.ground = new GroundShadows(this.root, 16);
@@ -76,6 +139,8 @@ export class AiSystem {
     /** dev: force the garrison to spawn even in deterministic capture runs */
     this.forcePopulate = false;
     this._navPending = true;
+    /** True until `stream()` has attempted navigation; see update(). */
+    this._navStreamPending = true;
     this.stats = { agents: 0, alive: 0, navMs: 0, coverPts: 0, walkable: 0 };
 
     /* scratch */
@@ -120,20 +185,6 @@ export class AiSystem {
     this._lodStats = { irrelevant: 0 };
 
     this._wireEvents(ctx);
-    console.info(
-      `[ai] materials ${(performance.now() - t0).toFixed(0)}ms ` +
-        `(${this.materials.bakeMs.toFixed(0)}ms texture bake)`
-    );
-    // The albedo budget is only real if it is measured. Print what every camo
-    // bake actually landed on, so a drift out of 0.09-0.32 is visible in the
-    // capture log instead of only in the critic's histogram.
-    for (const k in this.materials.camoStats ?? {}) {
-      const s = this.materials.camoStats[k];
-      console.info(
-        `[ai] camo ${k}: map mean ${s.mean.toFixed(3)} (was ${s.was.toFixed(3)}) ` +
-          `range ${s.min.toFixed(3)}-${s.max.toFixed(3)} sd ${s.sd.toFixed(3)}`
-      );
-    }
 
     // Navigation, the garrison and every character shader, DURING BOOT.
     //
@@ -150,22 +201,92 @@ export class AiSystem {
     // which is what decides how every soldier is stitched together — is
     // unchanged. `update()` keeps the same code as a fallback for the case where
     // the collision world is not registered yet.
-    this._bootNav(ctx);
-    await this.prewarmMaterials();
+
+    // The character shaders are NOT compiled here any more — `src/core/prewarm.js`
+    // drives `prewarmMaterials()` as a hook instead, and it is the only caller
+    // that can compile the RIGHT programs. Two things it sets up that this
+    // point in init cannot:
+    //
+    //   - the visible light count is settled (render.settleLights +
+    //     world.settleLights). three folds `numPointLights`/`numDirLights` into
+    //     the program cache key, and at this point in init the count is still
+    //     transient — measured 23 point / 3 directional here against a steady
+    //     state of 20 / 2.
+    //   - an HDR render target is bound, so the programs are the
+    //     `srgb-linear` + NoToneMapping variants the frame loop actually draws
+    //     with, not the `srgb` canvas variants.
+    //
+    // Compiling here produced one dead duplicate of every character program on
+    // both counts, and the real ones still had to compile later. `?prewarm=0`
+    // means "do not pre-compile anything", so it correctly leaves these to the
+    // first frames that need them.
+    //
+    // `prewarmMaterials()` stays idempotent and public: a caller that wants the
+    // characters warm without the rest of pre-warm can still ask.
   }
 
   /**
-   * Build navigation and garrison the level at boot. Never throws: if physics
-   * has no level yet, `_navPending` stays set and `update()` retries.
+   * DEFERRED CONSTRUCTION — see src/core/streaming.js.
+   *
+   * The 221x221 walkability grid, the cover map and the garrison are ~0.6 s and
+   * nothing the player can see on frame 1: no enemy has engaged yet, and the
+   * first pathfinding request is several seconds away at the earliest. Building
+   * them here means the level is on screen while they build.
+   *
+   * Split into three yields rather than one, because a single 0.6 s chunk would
+   * be a visible hitch however small the frame budget is — the budget is checked
+   * between chunks, not inside them.
+   *
+   * This is a move, not a rewrite: `update()` already carries the same calls as
+   * a fallback for the case where physics has no level yet, so a frame that
+   * lands before the grid exists was always a supported state.
    */
-  _bootNav(ctx) {
+  *stream(ctx) {
+    // 1. The character materials, once the worker shards are all back. Polling
+    //    with WAIT rather than blocking: a generator cannot await, and a busy
+    //    spin would eat the whole frame budget saying "not yet".
+    while (!this._soldierBaked) yield WAIT;
+    this.materials = boot.time('ai:materials.upload', () =>
+      new SoldierMaterials(this._soldierBaked, { anisotropy: ctx.config.q.anisotropy ?? 8 })
+    );
+    // The albedo budget is only real if it is measured. Print what every camo
+    // bake actually landed on, so a drift out of 0.09-0.32 is visible in the
+    // capture log instead of only in the critic's histogram.
+    for (const k in this.materials.camoStats ?? {}) {
+      const c = this.materials.camoStats[k];
+      console.info(
+        `[ai] camo ${k}: map mean ${c.mean.toFixed(3)} (was ${c.was.toFixed(3)}) ` +
+          `range ${c.min.toFixed(3)}-${c.max.toFixed(3)} sd ${c.sd.toFixed(3)}`
+      );
+    }
+    yield 'materials';
+
+    // 2. Navigation.
     try {
       this._buildNav();
-      if (!this._navPending && (!ctx.config.deterministic || this.forcePopulate)) this.populate();
     } catch (err) {
+      // Never throw out of boot: leave _navPending set and let update()
+      // retry, which is the contract update() has always implemented.
       this._navPending = true;
-      console.warn('[ai] boot nav deferred to the first frame:', err?.message ?? err);
+      console.warn('[ai] nav deferred to a later frame:', err?.message ?? err);
     }
+    // Hand the retry path back to update() now that this one has run.
+    this._navStreamPending = false;
+    yield 'nav';
+
+    // 3. The garrison.
+
+    // Deterministic captures do not populate; `forcePopulate` is the dev
+    // override. Same condition update()'s fallback path uses.
+    const wanted = !this._navPending && (!ctx.config.deterministic || this.forcePopulate);
+    if (wanted) {
+      try {
+        this.populate();
+      } catch (err) {
+        console.warn('[ai] garrison deferred:', err?.message ?? err);
+      }
+    }
+    yield 'garrison';
   }
 
   /**
@@ -721,7 +842,13 @@ export class AiSystem {
   /* ================================================================== */
 
   update(dt, ctx) {
-    if (this._navPending) {
+    // The retry path, for the case `stream()` is written to tolerate: physics
+    // had no level when navigation was built. It must NOT fire before stream()
+    // has had its turn, or the grid and the garrison are built twice — measured
+    // as 12 enemies in 4 squads and a duplicated 0.6 s grid build, because
+    // update() runs on frame 1 and the streamer does not get its first chunk
+    // until the end of that same frame.
+    if (this._navPending && !this._navStreamPending) {
       this._buildNav();
       // Populate the level for normal play. Capture runs stay empty unless a
       // shot asks for a tableau, so nobody's screenshot gets a stray patrol

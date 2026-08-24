@@ -19,13 +19,25 @@ shape::
       "title": "Axiom Arcade",
       "blurb": "One line for the card.",
       "description": "The long-form paragraph.",
-      "kind": "ts-web-engine",          // or "rust-wasm"
+      "kind": "ts-web-engine",          // or "rust-wasm", or "self-built"
       "tags": ["game", "arcade"]
     }
 
 Everything else is derived here: the id (directory name, minus any ``axiom-``
 prefix), the entry page, the engine version, and the build timestamp. Those land in
 ``dist/manifest.json``, which the landing grid fetches at runtime.
+
+**Self-built apps.** A ``self-built`` app runs its own bundler and hands over a
+directory. It declares how in ``app.json``::
+
+      "kind": "self-built",
+      "build": ["npm", "run", "build"],   // run in the app directory
+      "dist": "dist"                      // what to copy into dist/<id>/
+
+It gets no import map and no shared engine — it already carries whatever it
+depends on. This exists because an app that vendors its own renderer is a
+legitimate shape (``apps/shmup`` bundles three.js), and the alternative was
+either to leave it out of the gallery or to teach this script its build.
 
 **One engine, many apps.** The pure-TypeScript engine is built ONCE into
 ``dist/engine/web-engine/<version>/`` and every TypeScript app resolves the bare
@@ -76,7 +88,15 @@ TSGO_PREFIX = REPO_ROOT / "packages" / "axiom-game"
 
 KIND_RUST = "rust-wasm"
 KIND_TS = "ts-web-engine"
-KINDS = (KIND_RUST, KIND_TS)
+# An app that owns its whole toolchain: its own package.json, its own bundler
+# config, its own dependencies. It is handed a build command and a directory to
+# copy, and this script does not need to understand anything else about it —
+# which is the point. `apps/shmup` bundles three.js itself and shares nothing
+# with the engine, so neither the shared-engine import map nor the wasm pipeline
+# describes it. `axiom-serve` already treats this shape the same way in dev: it
+# hands the app the port and gets out of the way.
+KIND_SELF = "self-built"
+KINDS = (KIND_RUST, KIND_TS, KIND_SELF)
 
 
 @dataclass
@@ -93,6 +113,21 @@ class AppSpec:
     # Static files a TS app loads at RUNTIME (so the page never references them and
     # they cannot be discovered from it). Paths are relative to the app's `web/`.
     assets: list[str] = field(default_factory=list)
+    # `self-built` only: the command that builds it, and the directory that
+    # appears afterwards. Both have sensible npm defaults, so an app using the
+    # ordinary `npm run build` -> `dist` convention declares neither.
+    build: list[str] = field(default_factory=list)
+    dist_dir: str = ""
+
+    @property
+    def source_page(self) -> Path:
+        """Where this app's entry page lives BEFORE packaging.
+
+        A `self-built` app is a self-contained project with its page at its root,
+        the way its own bundler expects; the other kinds keep theirs under
+        `web/`, which is what axiom-serve serves in dev.
+        """
+        return self.dir / ("index.html" if self.kind == KIND_SELF else "web/index.html")
 
     @property
     def page(self) -> str:
@@ -144,8 +179,9 @@ def discover_apps() -> list[AppSpec]:
         kind = data["kind"]
         if kind not in KINDS:
             sys.exit(f"error: {manifest} has kind {kind!r} — expected one of {', '.join(KINDS)}")
-        if not (app_dir / "web" / "index.html").is_file():
-            sys.exit(f"error: {app_dir}/web/index.html not found — {manifest} registers an app with no page.")
+        page = app_dir / ("index.html" if kind == KIND_SELF else "web/index.html")
+        if not page.is_file():
+            sys.exit(f"error: {page} not found — {manifest} registers an app with no page.")
 
         specs.append(
             AppSpec(
@@ -157,6 +193,8 @@ def discover_apps() -> list[AppSpec]:
                 kind=kind,
                 tags=list(data.get("tags", [])),
                 assets=list(data.get("assets", [])),
+                build=list(data.get("build", [])),
+                dist_dir=data.get("dist", ""),
             )
         )
 
@@ -498,6 +536,46 @@ def build_rust_apps(
             finish(app_id, app_dir)
 
 
+def build_self_built_app(spec: AppSpec, dist: Path) -> None:
+    """Run an app's own build and copy the result into ``dist/<id>/``.
+
+    Deliberately incurious about what happens in between. The app owns its
+    toolchain; this knows only the command to run and the directory that appears
+    afterwards, so a self-built app can change bundler, dependencies or output
+    shape without touching the packager.
+
+    Dependencies are installed if `node_modules` is absent — the same thing
+    `axiom-serve` does for this shape in dev — so a fresh checkout can build the
+    gallery without a separate setup step.
+    """
+    build_cmd = spec.build or ["npm", "run", "build"]
+    dist_name = spec.dist_dir or "dist"
+
+    if not (spec.dir / "node_modules").exists():
+        print(f"[{spec.id}] installing dependencies", flush=True)
+        _run(["npm", "install", "--no-audit", "--no-fund"], cwd=spec.dir)
+
+    print(f"[{spec.id}] {' '.join(build_cmd)}", flush=True)
+    _run(build_cmd, cwd=spec.dir)
+
+    produced = spec.dir / dist_name
+    if not produced.is_dir():
+        sys.exit(
+            f"error: [{spec.id}] build finished but {produced} does not exist "
+            f"— check the \"dist\" field in {spec.dir / 'app.json'}"
+        )
+
+    out = dist / spec.id
+    if out.exists():
+        shutil.rmtree(out)
+    shutil.copytree(produced, out)
+    # Source maps are for developing the app, not for shipping the gallery; they
+    # are several times the size of the code they describe.
+    for stale in out.rglob("*.map"):
+        stale.unlink()
+    print(f"[{spec.id}] {_dir_size_mb(out):.1f} MB", flush=True)
+
+
 def build_apps(
     dist: Path,
     *,
@@ -519,11 +597,15 @@ def build_apps(
 
     ts_specs = [s for s in specs if s.kind == KIND_TS]
     rust_specs = [s for s in specs if s.kind == KIND_RUST]
+    self_specs = [s for s in specs if s.kind == KIND_SELF]
 
     if ts_specs:
         version = build_shared_engine(dist)
         for spec in ts_specs:
             build_ts_app(spec, dist, version)
+
+    for spec in self_specs:
+        build_self_built_app(spec, dist)
 
     build_rust_apps(rust_specs, dist, fast=fast, target_dir=target_dir, debug=debug, tuning=tuning)
     return specs

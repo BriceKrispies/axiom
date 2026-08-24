@@ -48,6 +48,8 @@ The interesting part of this repo is arguably the harness, not the game.
 | `tools/imagediff.mjs` | Per-pixel gate. Exits non-zero if any pixel moved |
 | `tools/profile.mjs` | Gameplay profiler at real device pixel ratio. Frame-time *distribution* and hitch attribution via per-frame WebGL program counts |
 | `tools/playtest.mjs` | Scripted movement/fire smoke test |
+| `tools/bootprofile.mjs` | **Boot** profiler. Span tree of everything before the first frame, crossed with V8's CPU profiler and a WebGL call probe, so each phase reports JS vs blocked-in-WebGL vs idle. `--programs` explains the shader permutation population |
+| `tools/rngprobe.mjs` | Per-subsystem RNG stream gate. Catches a reseed in under a minute, where the pixel gate takes six and only says "everything changed". `--trace` names the line that moved a fork |
 
 Two findings worth recording, because both invalidated earlier measurements:
 
@@ -56,6 +58,89 @@ Two findings worth recording, because both invalidated earlier measurements:
 not 2.07) ran 12–17 fps with **728–1236 ms stalls** caused by 34+ WebGL programs
 compiling lazily mid-frame. `profile.mjs` reports p50/p95/p99 and attributes each
 hitch, which is what surfaced it.
+
+**Boot is two unrelated problems, and one of them is not slow code.** `bootprofile.mjs`
+splits every phase into JS / blocked-in-WebGL / idle main thread, which separates them:
+
+* ~9 s of genuine main-thread CPU work — procedural texture bakes (`ai/textures.js`
+  alone is 2.6 s), mesh building, the nav grid. Optimisable, cacheable, or movable
+  to a worker.
+* ~1–30 s of **idle**. The pre-warm is 95 % a parked main thread polling
+  `KHR_parallel_shader_compile` every 10 ms while the GPU driver links ~220
+  programs in the background. No code in that window is slow; the app simply
+  declines to start the frame loop while it waits.
+
+The spread on the second number is not noise, it is **which shader cache was hot**,
+and the one that matters is not the browser's. Measured on the same machine:
+driver cache emptied 54 s · fresh browser profile 11 s · full reload 10 s. The GPU
+driver's on-disk program cache is per *machine* and keyed on shader source, so
+editing a shader evicts exactly what you touched — which is why a slow boot is
+reproducible for whoever is editing shaders and for nobody else. `--icy` empties it
+so a first-visit boot can actually be measured.
+
+**The first frame and the finished load are two different numbers.** Boot used
+to build everything, pre-warm every shader, and only then start the loop. Now
+`init()` builds what frame 1 needs and each subsystem declares the rest as a
+`stream()` generator that the engine drains a few ms per frame with the game
+already on screen — the weapons the player is not holding, the navigation grid
+for enemies that have not engaged, the shader pre-warm. Measured on a production
+build: first painted frame 2.9 s on a reload, fully loaded 5.4 s. `?capture=1`
+drains it all before `__READY__`, so the pixel gate still compares finished
+worlds.
+
+Two things had to be true first, and both were found by measuring:
+
+* **Pre-warm had to stop moving the camera.** Its four warm-up poses existed
+  only because the visible light count is part of three's program cache key and
+  the count depends on the camera's distance cull. Pinning the count before
+  anything compiles made the poses dead weight — 108 programs with them, 108
+  without — and a pre-warm that never touches the camera is one that can run
+  while the game is being played.
+* **A subsystem that retries in `update()` must not race its own `stream()`.**
+  `ai` did, and built the grid and the garrison twice: 12 enemies in 4 squads.
+
+**The loading bar is generated from the profiler.** Most loading bars count
+steps, which is a lie whenever the steps differ in cost — here they differ by two
+orders of magnitude (`world:gate` is 18 ms, `world:buildings` 562 ms). This one
+weights every phase by measured time, and the table is emitted by the same
+instrument that measures the boot:
+
+```sh
+node tools/bootprofile.mjs --emit-weights   # writes src/core/bootweights.js
+```
+
+It rides on the profiler's spans rather than a second set of hand-placed calls,
+so a weight table generated from those spans cannot drift out of sync with them.
+Four things make it accurate rather than merely weighted: sub-phase motion
+through the long phases (one span per building, or the bar stops for 562 ms);
+EXACT progress where it exists — the shader link is a count of finished programs
+via `isReady()`, not a timer; calibration to the machine as phases complete; and
+a monotonic clamp, so re-pricing shows up as the bar slowing rather than
+retreating. The one phase that varies by an order of magnitude between a first
+visit and a reload re-prices itself from its own first few completions.
+
+The overlay is inline in `index.html`, above the module script, so it is on
+screen before the bundle has downloaded — and it comes down at the FIRST PAINTED
+FRAME, not at "fully loaded", because the game is playable while the rest streams
+in. What is left goes to a corner indicator. `?capture=1` removes it outright:
+an overlay in a reference image would make the pixel gate meaningless.
+
+**A cold GPU driver, not the code, is what makes a first visit slow.** With an
+empty driver shader cache the first frame took 15.5 s, and `bootprofile.mjs`
+attributed 14 435 ms of it to 7054 calls to `getUniformLocation` /
+`getActiveUniform`. The driver defers each program link past `linkProgram` and
+past `LINK_STATUS`, until something asks for the program's interface — which is
+the reflection three does the first time it draws with a program. So the first
+frame paid all 109 links serially, on the main thread, and every instrument that
+only watched `linkProgram` reported 1 ms.
+
+`compileAsync` before the first draw inverts that: the links run on the driver's
+own threads and three polls a completion flag, so the same work happens off the
+main thread and in parallel with itself — 14 435 ms of blocking reflection
+becomes 2001 ms, and cold first paint drops to 10.3 s. What is left is 6.8 s of
+a 95%-idle main thread waiting on the driver, which is irreducible in WebGL2:
+there is no program-binary API, so nothing can be cached between visits. Below
+that the only lever is fewer or smaller programs.
 
 **Captures were not reproducible.** `shotset.mjs` reuses one page across all 11
 shots, so particle age, decal buffers and exposure state leak forward — two identical

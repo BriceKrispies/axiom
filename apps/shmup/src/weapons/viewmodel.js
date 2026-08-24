@@ -98,10 +98,19 @@ function handBasis(out, finger, back) {
 }
 
 export class Viewmodel {
-  constructor(ctx, mats) {
+  /**
+   * @param rng  this viewmodel's own deterministic stream. Claimed by
+   *   `WeaponSystem.prepare()` rather than forked off `ctx.rng` here: a fork of
+   *   the ROOT stream taken in the middle of a subsystem's init makes every
+   *   later subsystem's seed depend on exactly when that constructor ran, which
+   *   is precisely the coupling the engine's prepare pass exists to remove.
+   *   Omit it and one is forked here, so the standalone preview page still
+   *   works.
+   */
+  constructor(ctx, mats, rng = ctx.rng.fork()) {
     this.ctx = ctx;
     this.mats = mats;
-    this.rng = ctx.rng.fork();
+    this.rng = rng;
 
     this.anchor = new THREE.Object3D();
     this.anchor.name = 'ow-viewmodel-anchor';

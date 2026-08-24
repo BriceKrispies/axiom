@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { boot } from '../core/profile.js';
 import { TextureForge } from './generator.js';
 import { LIBRARY, resolveName } from './library.js';
 import { extendMaterial, DEFAULT_PARAMS } from './shader.js';
@@ -46,6 +47,10 @@ export class MaterialSystem {
     /** seconds since the last bake, for the scratch-target release below */
     this._idle = 0;
     this._scratchFreed = false;
+    /** Surfaces allocated but not yet painted; drained by stream(). */
+    this._pendingBakes = [];
+    /** Set once stream() has finished: later requests bake synchronously. */
+    this._streamClosed = false;
   }
 
   async init(ctx) {
@@ -79,8 +84,8 @@ export class MaterialSystem {
     this._forge = new TextureForge(renderer, { anisotropy: this._anisotropy });
     // 1K, not 512: the micro tooth is 1.6-4 mm over a 0.25 m tile, which needs
     // ~6 texels per grain to survive mip 1 instead of averaging to flat grey.
-    const detail = this._forge.buildDetail(this._size(1024));
-    const macro = this._forge.buildMacro(256);
+    const detail = boot.time('mat:sharedDetail', () => this._forge.buildDetail(this._size(1024)));
+    const macro = boot.time('mat:sharedMacro', () => this._forge.buildMacro(256));
     this._shared = {
       detailNormal: detail.normal,
       detailAlbedo: detail.albedo,
@@ -135,7 +140,8 @@ export class MaterialSystem {
     const t0 = performance.now();
     this._idle = 0;
     this._scratchFreed = false;
-    set = this._forge.build({
+
+    const forgeDef = {
       key,
       glsl: def.glsl,
       size: bake.size,
@@ -145,12 +151,64 @@ export class MaterialSystem {
       tintA: bake.tintA !== undefined ? new THREE.Color(bake.tintA) : undefined,
       tintB: bake.tintB !== undefined ? new THREE.Color(bake.tintB) : undefined,
       param: bake.param ? new THREE.Vector4().fromArray(bake.param) : undefined,
-    });
+    };
+
+    // ALLOCATE NOW, PAINT LATER.
+    //
+    // The level asks for its sixteen surfaces while it is being assembled, and
+    // baking them there costs ~0.6 s of the boot's critical path — a shader
+    // compile and four 1K full-screen passes each. None of it has to happen
+    // before the first frame: `allocate()` hands back the real texture objects,
+    // primed to the surface's flat base colour, and `stream()` paints them over
+    // the frames after the game is already on screen. Nothing rebinds, because
+    // the texture objects never change.
+    //
+    // Measured with `node tools/bootprofile.mjs --samples`; the bakes show up
+    // as `mat:bake:*` under `world:finalize`.
+    const alloc = boot.time(`mat:alloc:${key}@${bake.size}`, () => this._forge.allocate(forgeDef));
+    set = alloc.set;
     set.name = key;
+    set.painted = false;
     this._sets.set(cacheKey, set);
+
+    if (this._streamClosed) {
+      // A surface requested after boot finished streaming (a late prop, a dev
+      // reload). Nothing is going to drain the queue, so bake it here.
+      this._paint(forgeDef, alloc, key, bake.size);
+    } else {
+      this._pendingBakes.push({ def: forgeDef, alloc, key, size: bake.size, set });
+    }
+
     const ms = performance.now() - t0;
-    if (ms > 40) console.info(`[materials] bake ${key} ${bake.size}px ${ms.toFixed(0)}ms`);
+    if (ms > 40) console.info(`[materials] alloc ${key} ${bake.size}px ${ms.toFixed(0)}ms`);
     return set;
+  }
+
+  /** Run one queued bake into the targets `getTextureSet()` already handed out. */
+  _paint(def, alloc, key, size) {
+    boot.time(`mat:bake:${key}@${size}`, () => this._forge.paint(def, alloc.rts));
+    alloc.set.painted = true;
+  }
+
+  /**
+   * DEFERRED CONSTRUCTION — see src/core/streaming.js.
+   *
+   * One surface bake per yield. Ordering is request order, which is roughly
+   * the order the level assembler needed them, so the ground and the walls the
+   * player is looking at are painted before the dressing.
+   *
+   * `materials` is early in dependency order, so this generator is drained
+   * first — the level gains its texture detail before the weapons and the
+   * garrison stream in behind it.
+   */
+  *stream() {
+    while (this._pendingBakes.length) {
+      const job = this._pendingBakes.shift();
+      this._paint(job.def, job.alloc, job.key, job.size);
+      yield job.key;
+    }
+    // From here on there is nobody left to drain the queue.
+    this._streamClosed = true;
   }
 
   /**
