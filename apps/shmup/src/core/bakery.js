@@ -43,11 +43,16 @@
 /** How many workers to spin up. */
 function poolSize(requested) {
   const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
-  // One per core minus the main thread, capped: past ~4 the jobs are larger
-  // than the remaining parallelism and each extra worker is only a module-parse
-  // cost. Floor of 1, so even a single-core machine gets the work off the main
-  // thread — where it can at least overlap with the GPU waits boot is full of.
-  return Math.max(1, Math.min(requested ?? 4, cores - 1));
+  // One per core minus the main thread, capped at 8.
+  //
+  // The cap was 4, chosen when there were three chunky jobs and more workers
+  // would only have added module-parse cost. Once the bakes were split to one
+  // per texture set there are eleven, and the wall time of the pool is the
+  // largest shard plus whatever queues behind it — so workers past the third
+  // stopped being idle and started being the difference between one round and
+  // two. Eight because the returns flatten there for this job mix, and because
+  // a browser spawning a worker per core on a 32-thread machine is antisocial.
+  return Math.max(1, Math.min(requested ?? 8, cores - 1));
 }
 
 export class Bakery {

@@ -95,6 +95,102 @@ export function newTrs(x, y, z, ry = 0, sx = 1, sy = sx, sz = sx, rx = 0, rz = 0
   return trs(new THREE.Matrix4(), x, y, z, ry, sx, sy, sz, rx, rz);
 }
 
+// ------------------------------------------------------------ growable buf --
+/**
+ * A Float32Array that grows, so the accumulator can write vertices straight
+ * into their final storage.
+ *
+ * The level merges ~600 k triangles, and the accumulator used to collect them
+ * in plain `Array`s — `this.pos.push(x, y, z)` — then hand the whole thing to
+ * `Float32BufferAttribute`, which converted it to a Float32Array. That is two
+ * costs nobody needed: every value spends its life as a boxed double in a
+ * growing generic array, and then the entire set is converted element by
+ * element at the end. Measured at ~260 ms in `Accum.add` alone.
+ *
+ * Writing into a typed array from the start makes the growth a `set()` memcpy
+ * and the final step a straight copy. The rounding is unchanged: a value was
+ * always going to be rounded to f32 exactly once, and it still is — just at
+ * write time rather than at build time.
+ */
+class GrowBuf {
+  constructor(initial = 1 << 14) {
+    this.a = new Float32Array(initial);
+    this.n = 0;
+  }
+
+  _room(k) {
+    if (this.n + k <= this.a.length) return;
+    let cap = this.a.length || 1;
+    while (cap < this.n + k) cap *= 2;
+    const next = new Float32Array(cap);
+    next.set(this.a.subarray(0, this.n));
+    this.a = next;
+  }
+
+  push2(x, y) {
+    this._room(2);
+    this.a[this.n++] = x;
+    this.a[this.n++] = y;
+  }
+
+  push3(x, y, z) {
+    this._room(3);
+    this.a[this.n++] = x;
+    this.a[this.n++] = y;
+    this.a[this.n++] = z;
+  }
+
+  /** The filled prefix. Callers copy it; nothing keeps the oversized buffer. */
+  view() {
+    return this.a.subarray(0, this.n);
+  }
+}
+
+/** The same, for indices. Narrowed to Uint16 at build when the mesh allows. */
+class IndexBuf {
+  constructor(initial = 1 << 14) {
+    this.a = new Uint32Array(initial);
+    this.n = 0;
+  }
+
+  _room(k) {
+    if (this.n + k <= this.a.length) return;
+    let cap = this.a.length || 1;
+    while (cap < this.n + k) cap *= 2;
+    const next = new Uint32Array(cap);
+    next.set(this.a.subarray(0, this.n));
+    this.a = next;
+  }
+
+  push(v) {
+    this._room(1);
+    this.a[this.n++] = v;
+  }
+
+  view() {
+    return this.a.subarray(0, this.n);
+  }
+}
+
+/**
+ * The raw backing array of a buffer attribute, when it can be read directly.
+ *
+ * `Vector3.fromBufferAttribute(attr, i)` costs three method calls per component
+ * set, and the accumulator does it twice per vertex plus five more accessor
+ * calls for uv and colour — eleven calls per vertex, ~6.6 M for this level.
+ * Indexing the backing array instead is one bounds check.
+ *
+ * Returns null for the cases where that shortcut would be WRONG rather than
+ * merely different: an interleaved attribute has a stride this does not know,
+ * and a normalized one stores integers the accessor would scale. Those fall
+ * back to the accessor path, which is still correct, just slower.
+ */
+function directArray(attr) {
+  if (!attr) return null;
+  if (attr.isInterleavedBufferAttribute || attr.normalized) return null;
+  return attr.array instanceof Float32Array ? attr.array : null;
+}
+
 // ------------------------------------------------------------ accumulator --
 /**
  * Merges transformed geometries into one indexed BufferGeometry.
@@ -103,11 +199,11 @@ export function newTrs(x, y, z, ry = 0, sx = 1, sy = sx, sz = sx, rx = 0, rz = 0
 export class Accum {
   constructor(name = 'merged') {
     this.name = name;
-    this.pos = [];
-    this.nrm = [];
-    this.uv = [];
-    this.col = [];
-    this.idx = [];
+    this.pos = new GrowBuf();
+    this.nrm = new GrowBuf();
+    this.uv = new GrowBuf();
+    this.col = new GrowBuf();
+    this.idx = new IndexBuf();
     this.verts = 0;
     this.tris = 0;
   }
@@ -139,18 +235,33 @@ export class Accum {
 
     if (matrix) _nm.getNormalMatrix(matrix);
 
-    for (let i = 0; i < pa.count; i++) {
-      _v0.fromBufferAttribute(pa, i);
-      if (matrix) _v0.applyMatrix4(matrix);
-      _n.fromBufferAttribute(na, i);
-      if (matrix) _n.applyMatrix3(_nm).normalize();
-      this.pos.push(_v0.x, _v0.y, _v0.z);
-      this.nrm.push(_n.x, _n.y, _n.z);
-      this.uv.push(ua ? ua.getX(i) : 0, ua ? ua.getY(i) : 0);
+    // Read straight from the backing arrays where that is safe; see
+    // directArray(). Null means "use the accessor", which every branch below
+    // falls back to.
+    const pd = directArray(pa);
+    const nd = directArray(na);
+    const ud = directArray(ua);
+    const cd = directArray(ca);
 
-      let r = ca ? ca.getX(i) : 0;
-      let g = ca ? ca.getY(i) : 0;
-      let b = ca ? ca.getZ(i) : 0;
+    for (let i = 0; i < pa.count; i++) {
+      const i3 = i * 3;
+      if (pd) _v0.set(pd[i3], pd[i3 + 1], pd[i3 + 2]);
+      else _v0.fromBufferAttribute(pa, i);
+      if (matrix) _v0.applyMatrix4(matrix);
+      if (nd) _n.set(nd[i3], nd[i3 + 1], nd[i3 + 2]);
+      else _n.fromBufferAttribute(na, i);
+      if (matrix) _n.applyMatrix3(_nm).normalize();
+      this.pos.push3(_v0.x, _v0.y, _v0.z);
+      this.nrm.push3(_n.x, _n.y, _n.z);
+      const i2 = i * 2;
+      this.uv.push2(
+        ud ? ud[i2] : ua ? ua.getX(i) : 0,
+        ud ? ud[i2 + 1] : ua ? ua.getY(i) : 0
+      );
+
+      let r = cd ? cd[i3] : ca ? ca.getX(i) : 0;
+      let g = cd ? cd[i3 + 1] : ca ? ca.getY(i) : 0;
+      let b = cd ? cd[i3 + 2] : ca ? ca.getZ(i) : 0;
       if (masks) {
         r = Math.max(r, masks[0]);
         g = Math.max(g, masks[1]);
@@ -165,16 +276,24 @@ export class Accum {
         g = out[1];
         b = out[2];
       }
-      this.col.push(r, g, b);
+      this.col.push3(r, g, b);
       this.verts++;
     }
 
     if (index) {
       const a = index.array;
-      for (let i = 0; i < a.length; i++) this.idx.push(base + a[i]);
+      this.idx._room(a.length);
+      const dst = this.idx.a;
+      let n = this.idx.n;
+      for (let i = 0; i < a.length; i++) dst[n++] = base + a[i];
+      this.idx.n = n;
       this.tris += a.length / 3;
     } else {
-      for (let i = 0; i < pa.count; i++) this.idx.push(base + i);
+      this.idx._room(pa.count);
+      const dst = this.idx.a;
+      let n = this.idx.n;
+      for (let i = 0; i < pa.count; i++) dst[n++] = base + i;
+      this.idx.n = n;
       this.tris += pa.count / 3;
     }
     return this;
@@ -183,14 +302,18 @@ export class Accum {
   build() {
     const g = new THREE.BufferGeometry();
     g.name = this.name;
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    // `Float32BufferAttribute` copies whatever it is given; handing it a typed
+    // view makes that a memcpy instead of an element-by-element conversion, and
+    // detaches the result from the oversized growth buffer.
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos.view(), 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm.view(), 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv.view(), 2));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col.view(), 3));
+    const idx = this.idx.view();
     g.setIndex(
       this.verts > 65535
-        ? new THREE.Uint32BufferAttribute(this.idx, 1)
-        : new THREE.Uint16BufferAttribute(this.idx, 1)
+        ? new THREE.Uint32BufferAttribute(idx, 1)
+        : new THREE.Uint16BufferAttribute(idx, 1)
     );
     g.computeBoundingSphere();
     g.computeBoundingBox();

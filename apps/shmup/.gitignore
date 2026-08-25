@@ -17,3 +17,7 @@ revcrops/
 
 # Boot profiler: throwaway browser profile for `--warm` runs.
 .bootprofile-profile/
+
+# Rust experiment build output (see bake-rs/src/lib.rs — kept as evidence, not built).
+bake-rs/target/
+.bakeprof/

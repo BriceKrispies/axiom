@@ -1,0 +1,24 @@
+# Deliberately its own workspace, not a member of the repo's.
+#
+# `apps/shmup` is a self-serving app that vendors its whole toolchain (see the
+# app shape note in CLAUDE.md); this crate is part of that app, not part of the
+# engine. Joining the root workspace would put it in front of the architecture
+# checker, which classifies every workspace package as a layer, module, app or
+# tool — and a texture baker for one app is none of those. An empty
+# `[workspace]` table detaches it, so `cargo metadata` at the repo root never
+# sees it and the Module Law is not asked a question it has no answer to.
+[workspace]
+
+[package]
+name = "shmup-bake"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

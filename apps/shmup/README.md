@@ -99,6 +99,23 @@ Two things had to be true first, and both were found by measuring:
 * **A subsystem that retries in `update()` must not race its own `stream()`.**
   `ai` did, and built the grid and the garrison twice: 12 enemies in 4 squads.
 
+**Rust/wasm for the bakes was tried and rejected — 1.18-1.44x.** Worth recording
+because the case looked strong and someone will propose it again. `bakeprofile.mjs`
+put 54% of the ~4 s of worker bake CPU in `fbm`/`ridge`, pure f64 arithmetic
+behind a `seed -> typed arrays` interface crossed once per bake, with no
+transcendentals in the hot path. The port (`bake-rs/`, ~200 lines) came out
+**bit-identical** to the JavaScript and barely faster, because the noise is
+gather-bound rather than ALU-bound: each `n2()` does four random-access lookups
+into a 4096-entry table and `fbm` does sixteen, so the limit is memory latency,
+which wasm does not change and SIMD cannot help with (wasm128 has no gather).
+`node tools/wasmbench.mjs` reproduces it in seconds. The crate is kept as
+evidence and is not in the build.
+
+What worked instead, for a fraction of the effort: the wall time of a parallel
+bake is its LARGEST SHARD, and the shards were far too coarse — three groups of
+~950 ms each. Split to one per texture set (eleven jobs) with a wider pool, the
+wait disappeared: `fx:atlases.await` went from ~390 ms to below measurement.
+
 **The loading bar is generated from the profiler.** Most loading bars count
 steps, which is a lie whenever the steps differ in cost — here they differ by two
 orders of magnitude (`world:gate` is 18 ms, `world:buildings` 562 ms). This one

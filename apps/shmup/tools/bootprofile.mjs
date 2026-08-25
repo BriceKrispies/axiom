@@ -62,10 +62,15 @@
  *   --port=5173 --w --h --dpr        where and how big
  *   --q=low|medium|high|ultra        quality preset (?q=)
  *   --query=a=1&b=2                  extra URL params
- *   --samples [--interval=200]       V8 CPU profiler, µs sampling interval
+ *   --no-glprobe                     skip the WebGL call probe. It costs ~600 ms
+                                    of the boot it measures, so this is how you
+                                    see the boot a player actually gets.
+   --samples [--interval=200]       V8 CPU profiler, µs sampling interval
  *   --selfprofile                    in-page sampler instead (see above)
  *   --icy | --warm                   shader-cache regime (see above)
- *   --repeat=N                       report the median of N runs
+ *   --repeat=N                       report the median of N runs, per phase —
+                                    the only reliable way to A/B a change here
+   --sub                            include sub-phases in the median table
  *   --min=15                         hide spans under N ms in the tree
  *   --headed                         visible browser
  *   --angle=gl|d3d11|metal           force an ANGLE backend. Needed when a
@@ -310,6 +315,9 @@ async function runOnce(index) {
   const query = new URLSearchParams();
   if (args.query) for (const [k, v] of new URLSearchParams(String(args.query))) query.set(k, v);
   if (args.q) query.set('q', String(args.q));
+  // The WebGL probe distorts the boot badly enough that it does not install
+  // itself; ask for it explicitly. See src/core/glprobe.js.
+  if (!args['no-glprobe']) query.set('profile', '1');
   if (SAMPLES) query.set('jsprofile', '1');
   if (args.jsinterval) query.set('jsinterval', String(args.jsinterval));
   const url = `http://127.0.0.1:${PORT}/${query.size ? `?${query}` : ''}`;
@@ -1023,8 +1031,24 @@ function summarise(runs) {
   for (const r of runs) {
     for (const c of r.profile.tree.children ?? []) (phases[c.name] ??= []).push(c.ms);
   }
+  // Sub-phases too, so `init:world` can be compared without re-reading a tree.
+  const sub = {};
+  for (const r of runs) {
+    const walk = (n) => {
+      for (const c of n.children ?? []) {
+        if (c.ms >= 20) (sub[c.name] ??= []).push(c.ms);
+        walk(c);
+      }
+    };
+    for (const c of r.profile.tree.children ?? []) walk(c);
+  }
+  const firstFrames = runs.map((r) => (r.profile.milestones?.['first-frame'] ?? 0) + r.profile.origin)
+    .filter((x) => x > 0);
+
   return {
     runs: runs.length,
+    firstFrameMs: firstFrames.length ? med(firstFrames) : null,
+    subPhases: Object.fromEntries(Object.entries(sub).map(([k, v]) => [k, med(v)])),
     originMs: med(runs.map((r) => r.profile.origin)),
     appMs: med(runs.map((r) => r.profile.totalMs)),
     totalMs: med(runs.map((r) => r.profile.origin + r.profile.totalMs)),
@@ -1162,7 +1186,21 @@ if (args.json) {
   report(runs[runs.length - 1]);
   if (REPEAT > 1) {
     const s = summarise(runs);
-    console.log(C.b(`MEDIAN OF ${REPEAT} RUNS`) + `  total ${s.totalMs.toFixed(0)}ms (module graph ${s.originMs.toFixed(0)}ms, app ${s.appMs.toFixed(0)}ms)`);
+    console.log(
+      C.b(`MEDIAN OF ${REPEAT} RUNS`) +
+        `  first frame ${s.firstFrameMs ? s.firstFrameMs.toFixed(0) : '?'}ms · ` +
+        `playable ${s.totalMs.toFixed(0)}ms  ` +
+        C.dim(`(module graph ${s.originMs.toFixed(0)}ms)`)
+    );
+    // PER-PHASE medians, because that is what an A/B needs. One run on this
+    // machine varies by more than most changes are worth, so a single tree
+    // cannot tell you whether a phase got faster — only a median of the phase
+    // itself can.
+    const shown = { ...s.phases, ...(args.sub ? s.subPhases : {}) };
+    for (const [name, ms] of Object.entries(shown).sort((a, b) => b[1] - a[1])) {
+      if (ms < 20) continue;
+      console.log(`  ${ms.toFixed(0).padStart(6)}ms  ${name}`);
+    }
     console.log('');
   }
   if (args.out) {

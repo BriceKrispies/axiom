@@ -26,6 +26,17 @@
  * Draw calls ARE timed here, which is the opposite of the usual advice — see
  * the comment above the draw wrappers for why boot is the one case where a
  * draw call's duration means something.
+ *
+ * OPT-IN, AND THAT WAS LEARNED THE HARD WAY. This used to install itself on
+ * every boot. Once the rest of the boot got fast enough, the probe became the
+ * single largest JavaScript hotspot in the boot it was measuring: 608 ms, 10%
+ * of the total, and it was shipping to players. Nearly all of it is one call —
+ * `getProgramParameter`, which the parallel-compile poll asks tens of thousands
+ * of times, each answer wrapped in two `performance.now()` calls.
+ *
+ * An instrument that changes the thing it measures by 10% is not measuring it.
+ * `?profile=1` turns it on; `tools/bootprofile.mjs` passes that automatically,
+ * and a normal load pays nothing.
  */
 
 import { boot } from './profile.js';
@@ -55,6 +66,11 @@ const texBytes = (width, height, format, type, gl) => {
  */
 export function probeGl(gl) {
   if (!gl || gl.__bootProbed) return false;
+  // See the header: the probe is heavy enough to distort the boot, so it only
+  // installs when something asked to be measured.
+  const wanted = typeof location === 'undefined' ||
+    new URLSearchParams(location.search).get('profile') === '1';
+  if (!wanted) return false;
   gl.__bootProbed = true;
 
   const c = boot.counters;

@@ -510,18 +510,29 @@ export const RIM = { strength: 0.62, edge: 0.42, power: 1.9 };
 /**
  * How the soldier bake is split across the worker pool.
  *
- * Three shards of roughly equal cost, so three workers finish together instead
- * of one worker taking three times as long. The camouflage bakes are the
- * expensive ones (they run the two-scale sampler), so they are spread one per
- * shard rather than grouped.
+ * ONE SET PER SHARD, because the wall time of a parallel bake is the largest
+ * shard, not the average one. Grouping three or four sets together made each
+ * shard ~950 ms and left the pool with nothing to balance; split to the natural
+ * unit, the slowest shard is the slowest single SET and the scheduler can fill
+ * every worker. The two detail tiles are small enough to share one.
+ *
+ * Rebuilding the shared noise table costs ~1 ms per shard — nothing against the
+ * hundreds of milliseconds a set takes, which is what makes this split free.
  *
  * Every name here must appear in exactly one shard, or a set is baked twice or
  * not at all — `SOLDIER_SET_NAMES` is the checklist.
  */
 export const SOLDIER_SHARDS = [
-  ['camo_arid', 'nylon', 'steel'],
-  ['camo_woodland', 'plate', 'rubber', 'detail_cloth'],
-  ['camo_urban', 'skin', 'polymer', 'detail_nylon'],
+  ['camo_arid'],
+  ['camo_woodland'],
+  ['camo_urban'],
+  ['nylon'],
+  ['plate'],
+  ['skin'],
+  ['polymer'],
+  ['steel'],
+  ['rubber'],
+  ['detail_cloth', 'detail_nylon'],
 ];
 
 /** Every set the soldier bake produces, flattened. */
