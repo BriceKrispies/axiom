@@ -5,6 +5,31 @@ import { BUILDINGS, STREET, SET_PIECES, GATE } from './layout.js';
 import { buildGround } from './ground.js';
 import { buildBuilding, collapseRoof } from './buildings.js';
 import { registerProps } from './props.js';
+
+/**
+ * Profiling knob: cap simultaneously-visible point lights (`?maxlights=N`).
+ *
+ * `numPointLights` is in every lit program's cache key and three unrolls that
+ * many copies of the point-light loop into each shader, so on a serially-
+ * compiling driver the count multiplies the cost of every program the pre-warm
+ * waits on. This exists to measure that relationship instead of assuming it.
+ *
+ * It lives here rather than in the renderer because this is the only place that
+ * enumerates EVERY point light in the scene — the renderer's list holds only
+ * the ones registered for distance culling, which on this level is 4 of 14, and
+ * capping a subset measures nothing.
+ *
+ * A measurement tool, not a quality setting: it changes the lighting, so it
+ * defaults to no cap.
+ */
+const LIGHT_CAP = (() => {
+  const raw = typeof location === 'undefined'
+    ? null
+    : new URLSearchParams(location.search).get('maxlights');
+  const n = Number(raw);
+  return raw !== null && Number.isFinite(n) && n >= 0 ? n : Infinity;
+})();
+
 import {
   registerDressingProps,
   dressStreet,
@@ -348,6 +373,17 @@ export class WorldSystem {
       const v = i < want;
       if (pool[i].visible !== v) pool[i].visible = v;
     }
+    LIGHT_CAP === Infinity || this._applyLightCap(ctx);
+  }
+
+  /** Hide every point light past `?maxlights=N`. See LIGHT_CAP. */
+  _applyLightCap(ctx) {
+    let n = 0;
+    ctx.scene.traverse((o) => {
+      if (o.isPointLight !== true || o.visible !== true) return;
+      n++;
+      if (n > LIGHT_CAP) o.visible = false;
+    });
   }
 
   // ---------------------------------------------------------------- runtime --

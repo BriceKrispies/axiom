@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import { blit, hdrTarget } from './fullscreen.js';
+import { blit, hdrTarget, warmBlit } from './fullscreen.js';
 import {
   ATMO,
   SCENE_LUX,
@@ -128,6 +128,9 @@ export class SkySystem {
 
   async init(ctx) {
     this.ctx = ctx;
+    // Progressive boot: hold the IBL bake. Nothing on screen samples it until
+    // the fidelity ramp releases. See holdEnv().
+    this._envHeld = !!(ctx.config?.holdSky ?? ctx.config?.progressiveBoot);
     const r = ctx.get('render');
     this.render = r;
     this.renderer = r.renderer;
@@ -286,8 +289,13 @@ export class SkySystem {
     };
 
     // ---- LUTs -------------------------------------------------------------
+    // Held under progressive boot along with the IBL: the only things that read
+    // these tables are the dome (which the fidelity ramp has replaced with a
+    // stand-in) and the volumetric pass (which the render system has gated out
+    // of the frame). The published ambient colour is a CPU stand-in with no GPU
+    // readback, so nothing on screen or in gameplay is waiting on them.
     this.luts = new SkyLuts(this.renderer, this.shared);
-    this.luts.bakeStatic();
+    if (!this._envHeld) this.luts.bakeStatic();
 
     // ---- visible sky ------------------------------------------------------
     this.dome = new SkyDome(this.shared);
@@ -828,12 +836,62 @@ export class SkySystem {
   }
 
   _bakeSky() {
+    // Held during boot — see holdEnv(). The dirty flag stays set, so the first
+    // update after release bakes it.
+    if (this._envHeld) {
+      this._skyDirty = true;
+      return;
+    }
     this.luts.bakeSkyView();
     this._skyDirty = false;
     this.renderer.setRenderTarget(null);
   }
 
+  /**
+   * HOLD THE IBL BAKE OFF THE CRITICAL PATH.
+   *
+   * The equirect bake draws the whole sky shader — atmosphere, clouds, stars,
+   * 43 KB of it — into a texture PMREM then convolves. Cold, creating that one
+   * program is 1 747 ms, which was the single most expensive thing between
+   * navigation and a level on screen, and it buys an image-based lighting term
+   * that NOTHING samples during the fidelity ramp: the ramp's stand-ins are
+   * MeshBasicMaterial, which has no environment input at all. The render system
+   * publishes a fallback environment at init, so holding this costs the first
+   * frames nothing they could have used.
+   *
+   * Released in the app's lighting tier, alongside the real materials that are
+   * the first things able to sample it. See main.js.
+   */
+  holdEnv(on) {
+    this._envHeld = !!on;
+  }
+
+  /**
+   * Link every deferred sky program, then bake all of it. Never blocks the
+   * frame loop: each stage is handed to the driver and waited on before it is
+   * drawn, so the draws themselves are free.
+   *
+   * Order matters — the LUTs are the tables the equirect bake samples, so they
+   * have to exist before the IBL is baked from them, or the first IBL of the
+   * session is convolved from an empty sky.
+   */
+  async releaseEnv() {
+    this._envHeld = false;
+    await this.luts.warm();
+    this.luts.bakeStatic();
+    this._bakeSky();
+    await warmBlit(this.renderer, this.dome.envMaterial, this.envEquirect);
+    this.renderer.setRenderTarget(null);
+    this._bakeEnv();
+  }
+
   _bakeEnv() {
+    // Held during boot — see holdEnv(). The dirty flag stays set, so the first
+    // update after release bakes it even if nobody calls releaseEnv().
+    if (this._envHeld) {
+      this._envDirty = true;
+      return;
+    }
     // One equirect draw of the same sky shader, then PMREM. The first call
     // allocates; every later call reuses the target so nothing churns.
     blit(this.renderer, this.dome.envMaterial, this.envEquirect);

@@ -35,6 +35,40 @@ export function disposeFullScreen() {
   _geometry.dispose();
 }
 
+/**
+ * Hand a full-screen material's program to the driver WITHOUT drawing it.
+ *
+ * The point is the asymmetry between the two halves of creating a program.
+ * `compile()` issues the link and returns immediately; the driver then works
+ * through its queue on its own thread and blocks nobody. The expensive half is
+ * the REFLECTION the renderer does the first time it draws with the program —
+ * `getUniformLocation` and friends — which blocks the main thread until the
+ * driver has finished not just this program but everything queued ahead of it.
+ * Measured cold on this app: 6 023 ms charged to a pass whose own program costs
+ * 108 ms.
+ *
+ * So warming is not an optimisation of the pass, it is what lets the frame loop
+ * draw the pass without ever paying that. Warm early, check `materialReady`,
+ * and only put the pass in the frame when the answer is yes.
+ *
+ * It must be compiled against the SAME full-screen scene `blit()` draws with,
+ * or three's program cache key differs and the warm compiles a program nothing
+ * will ever use.
+ */
+export function warmFullScreen(renderer, material) {
+  _mesh.material = material;
+  renderer.compile(_scene, _camera);
+}
+
+/** Is this material's program linked and safe to draw without blocking? */
+export function materialReady(renderer, material) {
+  const program = renderer.properties?.get(material)?.currentProgram;
+  // No program yet means nothing has been issued for it — not ready. A driver
+  // without KHR_parallel_shader_compile has no isReady(), and on that driver a
+  // linked program genuinely is ready.
+  return !!program && (typeof program.isReady !== 'function' || program.isReady());
+}
+
 /** A post-processing pass: a ShaderMaterial plus the uniforms it owns. */
 export class Pass {
   constructor(name, fragmentShader, uniforms, opts = {}) {

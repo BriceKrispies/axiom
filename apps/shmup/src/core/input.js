@@ -4,7 +4,15 @@
  *
  * Edge queries (`pressed`, `released`) are valid only during the frame in which
  * the transition happened — read them in update(), not fixedUpdate().
+ *
+ * IT ALSO OWNS TWO BOOT MILESTONES, because it is the only place that knows
+ * them: `input-live` (the first frame that consumed input — before this, a held
+ * key moves nothing) and `input-first-press` (the first real press this game
+ * accepted). "Time to first player input" is the second one, and no other
+ * instrument in this app could see it.
  */
+
+import { boot } from './profile.js';
 
 export const ACTIONS = {
   forward: ['KeyW', 'ArrowUp'],
@@ -103,6 +111,7 @@ export class Input {
 
   _onKeyDown(e) {
     if (!this.enabled) return;
+    boot.milestone('input-first-press');
     if (e.repeat) return;
     // Let devtools/refresh through; swallow everything else the game binds.
     if (!e.metaKey && !e.ctrlKey) e.preventDefault();
@@ -116,6 +125,7 @@ export class Input {
 
   _onMouseDown(e) {
     if (!this.enabled) return;
+    boot.milestone('input-first-press');
     if (!this.pointerLocked && e.button === 0) this.requestPointerLock();
     this._pendingDown.add(`Mouse${e.button}`);
   }
@@ -150,6 +160,13 @@ export class Input {
   }
 
   beginFrame() {
+    // The first frame that polls input is the first frame a held key can move
+    // the player. Everything before it is a screen the player cannot act on,
+    // however much of the world is already drawn on it.
+    if (!this._live) {
+      this._live = true;
+      boot.milestone('input-live');
+    }
     this._pressed.clear();
     this._released.clear();
 

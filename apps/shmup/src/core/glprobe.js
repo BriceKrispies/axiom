@@ -91,7 +91,25 @@ export function probeGl(gl) {
   };
 
   timed('compileShader', 'shaderCompiles', 'shaderCompileMs');
-  timed('linkProgram', 'programLinks', 'programLinkMs');
+
+  // THE LINK SITE, WHICH IS NOT THE REFLECTION SITE. `compileAsync` calls
+  // linkProgram inside the pre-warm and the driver finishes on its own threads;
+  // the reflection that reads the result happens on a later frame, often after
+  // the boot tree has closed. Charging placement at first REFLECTION therefore
+  // credits the wrong phase — it reports a program as free-and-late when the
+  // phase that waited for it is the one on the critical path. Record where the
+  // link was ASKED FOR, separately from where its cost was paid.
+  {
+    const orig = gl.linkProgram;
+    gl.linkProgram = function (program) {
+      const t = now();
+      const r = orig.call(this, program);
+      c.programLinkMs += now() - t;
+      c.programLinks++;
+      boot.programLinkSite?.set(program, boot.stack.map((sp) => sp.name).slice(1).join(' > ') || 'root');
+      return r;
+    };
+  }
   timed('readPixels', 'readPixels', 'readPixelsMs');
   timed('finish', 'finishes', 'finishMs');
   timed('clientWaitSync', 'fenceWaits', 'fenceWaitMs');
@@ -166,6 +184,10 @@ export function probeGl(gl) {
     if (blocking) {
       c.linkStatusMs += ms;
       c.linkStatusWaits++;
+      // Same program, different phase of the same link. Charging both to one
+      // bucket is what makes the ranking honest on a driver that splits the
+      // work between the status wait and the reflection.
+      chargeProgram(program, ms);
     } else {
       c.completionMs += ms;
       c.completionPolls++;
@@ -222,11 +244,67 @@ export function probeGl(gl) {
   // program's interface, which is the uniform and attribute queries three makes
   // when it first uses a program. Those are synchronous round trips to the GPU
   // process, so the cost lands here and nowhere else.
+  //
+  // PER-PROGRAM ATTRIBUTION. The total alone says "linking is the boot" and
+  // stops there. Every one of these calls takes the program as its first
+  // argument, so the same wrapper can also charge the time to that program —
+  // turning one number into a ranked list of which of the ~113 programs is
+  // expensive. That is the difference between "cut permutations" and "cut THESE
+  // permutations". `boot.programCost` is a Map from the raw WebGLProgram to
+  // accumulated milliseconds; the reporter joins it against three's own program
+  // list to recover a name.
+  const perProgram = new Map();
+  boot.programCost = perProgram;
+  // ORDER MATTERS AS MUCH AS SIZE, and confusing the two is the easiest way to
+  // read this ranking wrong. A GPU driver does a large amount of one-time work
+  // on the first program it is ever asked to link — loading the shader
+  // compiler, building its caches — and that cost lands on whichever program
+  // happened to be first. Without an ordinal you cannot tell "this shader is
+  // expensive" from "this shader went first", and those have opposite fixes.
+  const order = new Map();
+  boot.programOrder = order;
+  // WHERE a program gets linked decides whether it can be deferred, and the
+  // cost ranking alone does not say. The span stack at first charge is the
+  // answer: a program first touched inside `prewarm.scene` is on the critical
+  // path to first paint, one first touched in `boot-frames` already is not.
+  const site = new Map();
+  boot.programSite = site;
+  boot.programLinkSite = new Map();
+  // WHEN, not just where. The span stack cannot answer this on its own: work
+  // done inside a DETACHED span (the fidelity ramp's real-material compile runs
+  // alongside the frame loop, not inside it) is charged to whatever sequential
+  // span happens to be open, so every program the ramp creates reads as
+  // `boot-frames` and the one that actually froze the game is indistinguishable
+  // from the ones that did not. A timestamp is unambiguous: bucket it against
+  // the first-frame milestone and the question answers itself.
+  const at = new Map();
+  const endAt = new Map();
+  boot.programAt = at;
+  boot.programEndAt = endAt;
+  const chargeProgram = (program, ms) => {
+    perProgram.set(program, (perProgram.get(program) ?? 0) + ms);
+    endAt.set(program, now());
+    if (order.has(program)) return;
+    at.set(program, now() - ms);
+    order.set(program, order.size);
+    site.set(program, boot.stack.map((sp) => sp.name).slice(1).join(' > ') || 'root');
+  };
+
   for (const name of [
     'getUniformLocation', 'getActiveUniform', 'getActiveAttrib',
     'getAttribLocation', 'getProgramInfoLog', 'validateProgram',
   ]) {
-    timed(name, 'programQueries', 'programQueryMs');
+    const orig = gl[name];
+    if (typeof orig !== 'function') continue;
+    gl[name] = function (program, ...rest) {
+      const t = now();
+      const r = orig.call(this, program, ...rest);
+      const ms = now() - t;
+      c.programQueryMs += ms;
+      c.programQueries++;
+      chargeProgram(program, ms);
+      return r;
+    };
   }
 
   // ...and for the two other classic hidden stalls: a shader-compile status

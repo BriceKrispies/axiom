@@ -162,6 +162,7 @@ export class TextureForge {
     this._scene.add(this._mesh);
 
     this._sobelMat = new THREE.ShaderMaterial({
+      name: 'mat:sobel',
       vertexShader: VERT,
       fragmentShader: SOBEL,
       uniforms: {
@@ -176,6 +177,8 @@ export class TextureForge {
     /** scratch height targets keyed by size */
     this._heightRTs = new Map();
     this._owned = [];
+    /** Bakes allocated but not yet painted; see build(def, { defer }). */
+    this._deferred = [];
     this._programs = new Map();
   }
 
@@ -224,9 +227,21 @@ export class TextureForge {
   _material(key, glsl) {
     let mat = this._programs.get(key);
     if (!mat) {
+      // NAMED, and that is not cosmetic. three copies `material.name` onto the
+      // WebGLProgram, and the boot profiler's per-program link ranking reports
+      // that name. Unnamed, this whole family — one program per texture recipe,
+      // each ~19 KB of noise GLSL, each linked once and used once — showed up
+      // as a wall of "(unnamed)" entries at the top of the cost list, which is
+      // the least useful possible form for the most expensive thing in boot.
+      // Scan the assembled source, not just the surface body: HEADER, the
+      // rust helpers and FOOTER are free to call the fbm family too, and a
+      // bound derived from a fragment of the shader would be a bound derived
+      // from the wrong thing.
+      const frag = HEADER + NOISE_GLSL + RUST_HELPERS + glsl + FOOTER;
       mat = new THREE.ShaderMaterial({
+        name: `mat:${key}`,
         vertexShader: VERT,
-        fragmentShader: HEADER + NOISE_GLSL + RUST_HELPERS + glsl + FOOTER,
+        fragmentShader: frag,
         uniforms: {
           uSeed: { value: 0 },
           uOutput: { value: 0 },
@@ -321,6 +336,34 @@ export class TextureForge {
     };
   }
 
+  /**
+   * Hand a surface's program to the driver without baking it, and say when the
+   * driver has finished linking it.
+   *
+   * These are the most expensive shaders in the app — 14.2 s of cold compile
+   * across the set, one 19 KB procedural program per surface, each used for
+   * exactly four full-screen draws and then never again. Painted the obvious
+   * way, that compile happens inside the first draw, SYNCHRONOUSLY, on the main
+   * thread: measured at up to 3.5 s for a single surface. That is a stutter the
+   * player feels, and worse, it stops anything else on the main thread from
+   * noticing that ITS work finished — the fidelity ramp's poll cannot run, so
+   * the level stayed flat for 35 s waiting on bakes it did not depend on.
+   *
+   * Issued and waited on instead, the driver does the same work on its own
+   * thread and the paint that follows is free.
+   */
+  issueProgram(def) {
+    this._mesh.material = this._material(def.key, def.glsl);
+    this.renderer.compile(this._scene, this._camera);
+  }
+
+  /** Is this surface's program linked and safe to draw without blocking? */
+  programReady(def) {
+    const mat = this._material(def.key, def.glsl);
+    const program = this.renderer.properties?.get(mat)?.currentProgram;
+    return !!program && (typeof program.isReady !== 'function' || program.isReady());
+  }
+
   /** Bake a surface into targets `allocate()` already handed out. */
   paint(def, rts) {
     const r = this.renderer;
@@ -373,10 +416,31 @@ export class TextureForge {
   }
 
   /** Allocate and paint in one go — the synchronous path. */
-  build(def) {
+  /**
+   * Allocate and paint in one call — or, with `defer`, allocate now and paint
+   * when `paintDeferred()` is called.
+   *
+   * Deferring is safe because `allocate()` hands back the REAL texture objects,
+   * primed to a flat value; painting later fills the same objects in place, so
+   * nothing rebinds and no material has to be rebuilt. It is the same trick the
+   * per-surface bakes already use, extended to the shared maps — which are the
+   * two most expensive single bakes in boot (a 1K detail map and its Sobel is
+   * 228 ms of cold shader compile, macro another 190 ms) and are sampled only
+   * by the real lit materials, which the fidelity ramp has replaced anyway.
+   */
+  build(def, { defer = false } = {}) {
     const a = this.allocate(def);
-    this.paint(def, a.rts);
+    if (defer) this._deferred.push({ def, rts: a.rts });
+    else this.paint(def, a.rts);
     return a.set;
+  }
+
+  /** Paint everything `build(def, { defer: true })` put off, in request order. */
+  paintDeferred() {
+    const jobs = this._deferred;
+    this._deferred = [];
+    jobs.forEach((j) => this.paint(j.def, j.rts));
+    return jobs.length;
   }
 
   /**
@@ -401,7 +465,7 @@ export class TextureForge {
   }
 
   /** Shared micro-detail normal + a matching micro albedo/roughness. */
-  buildDetail(size = 1024, seed = 1) {
+  buildDetail(size = 1024, seed = 1, opts) {
     return this.build({
       key: '__detail',
       glsl: DETAIL_SRC,
@@ -418,11 +482,11 @@ export class TextureForge {
       // Only the albedo (micro albedo/roughness in rgb, height in a) and the
       // derived normal are sampled; the ORM output was never bound anywhere.
       orm: false,
-    });
+    }, opts);
   }
 
   /** Shared 4-band low-frequency variation map. */
-  buildMacro(size = 256, seed = 2) {
+  buildMacro(size = 256, seed = 2, opts) {
     // Macro is data, not colour — it must be stored and sampled linearly.
     return this.build({
       key: '__macro',
@@ -436,7 +500,7 @@ export class TextureForge {
       // ORM and macro normal were baked and then never sampled.
       orm: false,
       normal: false,
-    });
+    }, opts);
   }
 
   dispose() {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { boot } from '../core/profile.js';
+import { WAIT } from '../core/streaming.js';
 import { TextureForge } from './generator.js';
 import { LIBRARY, resolveName } from './library.js';
 import { extendMaterial, DEFAULT_PARAMS } from './shader.js';
@@ -51,10 +52,31 @@ export class MaterialSystem {
     this._pendingBakes = [];
     /** Set once stream() has finished: later requests bake synchronously. */
     this._streamClosed = false;
+    /** While true, stream() paints nothing — see the note on stream(). */
+    this._holdBakes = false;
+    /** Set from ctx.config.progressiveBoot in init(). */
+  }
+
+  /**
+   * Hold or release the queued surface bakes.
+   *
+   * The composing app owns this, because it is the only place that knows what
+   * else is competing for the driver's one shader-compile thread.
+   */
+  holdBakes(on) {
+    this._holdBakes = !!on;
+    // The shared maps first and synchronously: every surface bake's material
+    // samples them, and unlike the per-surface sets they are not primed to
+    // anything a lit material can use.
+    if (!on) boot.time('mat:sharedDeferred', () => this._forge?.paintDeferred());
+    if (!on) this._idle = 0;
   }
 
   async init(ctx) {
     this.ctx = ctx;
+    // Progressive boot: the surface bakes are the most expensive shader work in
+    // the app and the least urgent. See the note on stream().
+    this._holdBakes = !!(ctx?.config?.holdBakes ?? ctx?.config?.progressiveBoot);
     const q = ctx?.config?.q;
     this._anisotropy = q?.anisotropy ?? 8;
     // Texture budget scales with the quality preset; 1K is the reference.
@@ -84,8 +106,15 @@ export class MaterialSystem {
     this._forge = new TextureForge(renderer, { anisotropy: this._anisotropy });
     // 1K, not 512: the micro tooth is 1.6-4 mm over a 0.25 m tile, which needs
     // ~6 texels per grain to survive mip 1 instead of averaging to flat grey.
-    const detail = boot.time('mat:sharedDetail', () => this._forge.buildDetail(this._size(1024)));
-    const macro = boot.time('mat:sharedMacro', () => this._forge.buildMacro(256));
+    // Deferred under progressive boot along with the surface bakes: these two
+    // are 418 ms of cold shader compile between the player and a level they
+    // could be walking through, and the only thing that samples them is a lit
+    // material — which the fidelity ramp has replaced with a stand-in that has
+    // no detail input at all. The texture objects are real either way, so
+    // nothing rebinds when they are painted later.
+    const defer = { defer: this._holdBakes };
+    const detail = boot.time('mat:sharedDetail', () => this._forge.buildDetail(this._size(1024), 1, defer));
+    const macro = boot.time('mat:sharedMacro', () => this._forge.buildMacro(256, 2, defer));
     this._shared = {
       detailNormal: detail.normal,
       detailAlbedo: detail.albedo,
@@ -202,8 +231,40 @@ export class MaterialSystem {
    * garrison stream in behind it.
    */
   *stream() {
+    // TEXTURE DETAIL YIELDS TO LIGHTING.
+    //
+    // The GPU driver compiles shaders on ONE serial thread, and four different
+    // parts of this app hand it work with no idea the others exist: the post
+    // chain, the fidelity ramp's real materials, these bakes, and whatever the
+    // streamer builds next. Whoever submits first wins, and each of these bake
+    // shaders is 0.3-3.5 s of cold compile — MEASURED at 14.2 s for the set,
+    // against 1.4 s for every lit material in the level put together.
+    //
+    // Submitted first, as they were, they put a level that is merely flat ahead
+    // of a level that is lit: the ramp's release moved from 13.5 s to 36.6 s
+    // cold once the frame loop stopped blocking and the bakes could run freely.
+    // So they wait until the lighting has been handed to the driver. It costs
+    // the surface detail a few frames and it is the whole of that difference.
+    while (this._holdBakes) yield WAIT;
     while (this._pendingBakes.length) {
-      const job = this._pendingBakes.shift();
+      const job = this._pendingBakes[0];
+      // ISSUE, WAIT, THEN PAINT. Painting straight away compiles the surface's
+      // program inside the first draw and blocks the main thread for as long as
+      // that takes — up to 3.5 s for one surface, and 14.2 s across the set. See
+      // TextureForge.issueProgram().
+      if (!this._forge.programReady(job.def)) {
+        // Issued once, then only polled. Re-issuing every frame asks three to
+        // re-walk and re-validate the material for a link the driver is already
+        // working on, which is pure overhead on the one thread this is trying
+        // to keep free.
+        if (!job.issued) {
+          job.issued = true;
+          this._forge.issueProgram(job.def);
+        }
+        yield WAIT;
+        continue;
+      }
+      this._pendingBakes.shift();
       this._paint(job.def, job.alloc, job.key, job.size);
       yield job.key;
     }

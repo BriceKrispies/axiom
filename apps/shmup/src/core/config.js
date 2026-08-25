@@ -82,7 +82,7 @@ export const QUALITY_PRESETS = {
 };
 
 export const DEFAULTS = {
-  quality: 'ultra',
+  quality: 'low',
   fov: 80, // horizontal-ish vertical FOV, CoD default feel
   adsFovScale: 0.72,
   sensitivity: 0.0022,
@@ -91,6 +91,36 @@ export const DEFAULTS = {
   exposure: 1.0,
   /** Capture mode disables anything nondeterministic so screenshots are stable. */
   deterministic: false,
+  /**
+   * PROGRESSIVE BOOT — the game goes on screen before it is finished.
+   *
+   * Subsystems read this in their own `init()` and hold back whatever is
+   * expensive and not needed to put a playable level in front of the player:
+   * the render system leaves the post chain out of the frame, the sky holds its
+   * IBL bake, materials hold their surface bakes. The app releases them in
+   * priority order once there is a first frame — see main.js.
+   *
+   * It is a config flag rather than a call from the app because the holds have
+   * to be in place BEFORE `init()` runs — that is where the expensive work is
+   * kicked off — and because each subsystem is the only thing that knows what
+   * of its own work is deferrable.
+   *
+   * Off for capture: a screenshot of a half-arrived frame is a different
+   * picture, and the pixel gate cannot tell that from a regression.
+   */
+  progressiveBoot: false,
+  /**
+   * The three holds progressive boot is made of, individually switchable.
+   *
+   * Each defaults to `progressiveBoot`; `?hold-post=0`, `?hold-sky=0` and
+   * `?hold-bakes=0` turn one off without turning the others off. They exist
+   * because "the progressive path renders wrong" is otherwise a single
+   * un-bisectable symptom with three suspects, and one build that can answer
+   * which is worth more than three builds that each answer one.
+   */
+  holdPost: null,
+  holdSky: null,
+  holdBakes: null,
 };
 
 export function createConfig(overrides = {}) {

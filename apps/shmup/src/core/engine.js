@@ -168,6 +168,10 @@ export class Engine {
 
     boot.time('engine.attach', () => {
       this.input.attach();
+      // Keys pressed from here on are BUFFERED even though no frame has run yet
+      // (see Input.beginFrame), so this is where the game stops discarding the
+      // player's input — distinct from, and earlier than, when it acts on it.
+      boot.milestone('input-armed');
       addEventListener('resize', this._onResize);
       this.resize();
     });

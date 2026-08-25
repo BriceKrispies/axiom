@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { probeGl } from '../core/glprobe.js';
 import { boot } from '../core/profile.js';
 
-import { hdrTarget, blit } from './pass.js';
+import { hdrTarget, blit, warmFullScreen, materialReady } from './pass.js';
 import { CascadedShadowMaps } from './csm.js';
 import { MaterialPatcher } from './materialpatch.js';
 import { GBuffer } from './prepass.js';
@@ -18,6 +18,8 @@ import { createGradeLut } from './lut.js';
 import { createComposite, createFxaa, createDebug, createViewComposite } from './composite.js';
 import { buildFallbackEnvironment } from './env.js';
 import { RenderProbeScene } from './probe.js';
+
+
 
 const QUALITY_LEVEL = { low: 0, medium: 1, high: 2, ultra: 3 };
 
@@ -245,6 +247,18 @@ export class RenderSystem {
     // Always on: depthTexture/velocityTexture are part of the public contract
     // (soft particles, SSR, motion blur) even when our own effects are off.
     this.needsPrepass = true;
+
+    /**
+     * IS THE POST CHAIN IN THE FRAME YET?
+     *
+     * Default true, because every path that is not a cold boot wants the whole
+     * pipeline from frame one. `setPostChainEnabled(false)` is for the boot
+     * path: on a first visit the eleven post programs are 933 ms of driver
+     * compile that the player cannot act during, and none of them are needed to
+     * put a level on screen and let them walk. See warmPostChain().
+     */
+    this._postChain = !(ctx.config?.holdPost ?? ctx.config?.progressiveBoot);
+    this._postWarming = null;
 
     this.hdrRt = null;
     this.viewRt = null;
@@ -508,6 +522,124 @@ export class RenderSystem {
   // ==========================================================================
   //  public API (see ARCHITECTURE.md "Render integration")
   // ==========================================================================
+
+  /**
+   * TURN THE POST CHAIN OFF FOR THE FIRST FRAMES, AND ON WHEN IT IS READY.
+   *
+   * On a cold first visit the post chain is 933 ms of serial driver shader
+   * compile — prepass, GTAO, contact shadows, SSR, TAA, motion blur, bloom and
+   * the registered passes — and every millisecond of it sits between the player
+   * and a level they could already be walking through. None of it is needed to
+   * show them that level. So boot draws the scene straight through the
+   * composite, and the chain arrives as one visible step once the driver has
+   * linked all of it.
+   *
+   * The composite, the viewmodel composite and the metering are NOT gated: the
+   * composite is how an HDR buffer reaches the canvas at all, and the three of
+   * them together are ~97 ms.
+   */
+  setPostChainEnabled(on) {
+    const arriving = !!on && !this._postChain;
+    this._postChain = !!on;
+    if (!arriving) return;
+
+    // THE CHAIN ARRIVING IS A FIRST FRAME, AND HAS TO BE TREATED AS ONE.
+    //
+    // Every temporal stage reads a history buffer, and until it has rendered
+    // once that buffer is not black — it is whatever the driver last had in
+    // that VRAM. The pipeline already knows this: `_firstFrame` makes SSR sit
+    // out a frame and re-seeds the reprojection matrices, and TAA resets on
+    // construction and on resize, which are the only two ways its history could
+    // previously be undefined.
+    //
+    // Gating the chain invented a third, and it cost an afternoon: SSR read
+    // TAA's never-written history, found somebody else's texture atlas in it,
+    // and the materials mixed that into their specular term — a burlap weave
+    // laid over the whole frame, sky included. Declaring this a first frame is
+    // not a patch over that, it is the same contract the real first frame has.
+    this._firstFrame = true;
+    this.taa?.reset();
+    this.passes.forEach((p) => p.reset?.());
+  }
+
+  /**
+   * Hand every gated stage's program to the driver, and resolve once they are
+   * all linked.
+   *
+   * Warming is deliberately separate from enabling. Issuing the links costs
+   * nothing and blocks nobody; it is DRAWING with a program the driver has not
+   * finished that blocks the main thread, and for as long as the driver's whole
+   * queue takes. So: issue everything here, poll a non-blocking readiness flag,
+   * and let the caller enable the chain only when the answer is yes for all of
+   * it.
+   *
+   * Warmed against a linear half-float scratch target because that is what every
+   * gated pass actually renders into. Warm against the canvas instead and
+   * three's cache key picks up the sRGB output encoding, so the program that
+   * gets linked is not the program the frame loop will ask for.
+   */
+  warmPostChain() {
+    this._postWarming ??= boot.timeAsync('render.warmPost', async () => {
+      const renderer = this.renderer;
+      const materials = this._gatedMaterials();
+      const scratch = new THREE.WebGLRenderTarget(1, 1, {
+        type: THREE.HalfFloatType,
+        depthBuffer: false,
+        stencilBuffer: false,
+      });
+      const prev = renderer.getRenderTarget();
+      renderer.setRenderTarget(scratch);
+      try {
+        materials.forEach((m) => warmFullScreen(renderer, m));
+      } finally {
+        renderer.setRenderTarget(prev);
+      }
+      boot.note('postPrograms', materials.length);
+
+      // Poll, never block. `materialReady` reads the driver's completion flag,
+      // which is the one program query that does not wait on the queue.
+      const started = performance.now();
+      for (;;) {
+        const pending = materials.filter((m) => !materialReady(renderer, m));
+        if (pending.length === 0) break;
+        // A driver that never reports ready must not strand the post chain
+        // forever; after this the frame loop pays the reflection itself, which
+        // is the behaviour we had before any of this existed.
+        if (performance.now() - started > 60000) break;
+        await new Promise((r) => setTimeout(r, 16));
+      }
+      scratch.dispose();
+      return { materials: materials.length, ms: Math.round(performance.now() - started) };
+    });
+    return this._postWarming;
+  }
+
+  /**
+   * Every ShaderMaterial owned by a stage the frame graph gates.
+   *
+   * Walked rather than listed, because the alternative is a hand-maintained
+   * roster that silently goes stale the first time a stage gains a pass — and a
+   * stage whose second pass was forgotten is a stage that blocks the frame loop
+   * on exactly the frame the chain switches on. One level deep covers it: every
+   * stage holds its passes as direct fields.
+   */
+  _gatedMaterials() {
+    const seen = new Set();
+    const take = (obj) => {
+      const m = obj?.material;
+      m?.isMaterial && seen.add(m);
+    };
+    const stages = [
+      this.gbuffer, this.gtao, this.contact, this.ssr, this.taa,
+      this.motionBlur, this.dof, this.bloom, ...this.passes,
+    ];
+    stages.forEach((stage) => {
+      if (!stage || typeof stage !== 'object') return;
+      take(stage);
+      Object.values(stage).forEach((v) => (v && typeof v === 'object') && take(v));
+    });
+    return [...seen];
+  }
 
   /**
    * Insert a custom post pass.
@@ -1352,6 +1484,14 @@ export class RenderSystem {
     camera.updateMatrixWorld();
     viewCamera.updateMatrixWorld();
 
+    // ONE GATE, READ ONCE. Every optional stage below is skipped together and
+    // arrives together: nine separate fade-ins would be nine visible changes,
+    // and the pipeline's stages are not independent anyway — TAA needs the
+    // velocity buffer, SSR needs TAA's history, the composite's sharpen is a
+    // TAA correction. One transition is both cheaper and more honest.
+    const post = this._postChain;
+    const prepass = post && this.needsPrepass;
+
     this._collect(scene);
     this._ensureProbe(ctx);
     this._syncSun(camera);
@@ -1384,10 +1524,27 @@ export class RenderSystem {
     if (this._firstFrame) this._prevVP.copy(this._currVP);
 
     // ---- 2. cascaded shadow maps -----------------------------------------
+    //
+    // Gated with the post chain, for the same reason: the cascade depth program
+    // is 326 ms cold, and during the fidelity ramp nothing samples the result —
+    // the stand-ins are MeshBasicMaterial, which has no shadow term at all. The
+    // atlas is undrawn while gated, so the strength uniform is forced to zero,
+    // which is the shader's own early-out (`owCsmParams.x <= 0.0` in csm.js).
+    // Anything real that streams in early therefore reads 1.0 — unshadowed —
+    // rather than sampling a texture nobody has rendered into.
     const bg = scene.background;
-    if (this.csm.enabled) {
+    const csmParams = this.csm.uniforms.owCsmParams.value;
+    if (!post && this.csm.enabled) {
+      if (this._csmStrengthHeld === undefined) this._csmStrengthHeld = csmParams.x;
+      csmParams.x = 0;
+    }
+    if (post && this._csmStrengthHeld !== undefined) {
+      csmParams.x = this._csmStrengthHeld;
+      this._csmStrengthHeld = undefined;
+    }
+    if (post && this.csm.enabled) {
       this.csm.update(camera, this.sunDir, this.settings.sunSoftness);
-      this.csm.setJitter(this.taa ? this.frame % 8 : 0);
+      this.csm.setJitter(post && this.taa ? this.frame % 8 : 0);
       scene.background = null;
       this._hideList(this._hide, this._nHide);
       this._hideList(this._noShadow, this._nNoShadow);
@@ -1401,11 +1558,11 @@ export class RenderSystem {
     // World camera only. The viewmodel is not temporally resolved any more, so
     // jittering its projection would just make it shimmer with nothing to
     // accumulate the offsets back out.
-    if (this.taa) this._applyJitter(camera);
+    if (post && this.taa) this._applyJitter(camera);
 
     // ---- 4. prepass -------------------------------------------------------
     const gb = this.gbuffer;
-    if (this.needsPrepass) {
+    if (prepass) {
       scene.background = null;
       this._hideList(this._hide, this._nHide);
       gb.render(renderer, scene, camera, this._currVP, this._prevVP, true);
@@ -1417,7 +1574,7 @@ export class RenderSystem {
     feat.set(0, 0, 0, 1);
 
     // ---- 5/6/7. AO, contact shadows, reflections --------------------------
-    if (this.gtao && this.needsPrepass) {
+    if (post && this.gtao && prepass) {
       this.patcher.uniforms.owAoTex.value = this.gtao.render(
         renderer,
         gb,
@@ -1428,7 +1585,7 @@ export class RenderSystem {
       this.aoTexture = this.patcher.uniforms.owAoTex.value;
       feat.x = 1;
     }
-    if (this.contact && this.needsPrepass) {
+    if (post && this.contact && prepass) {
       this.patcher.uniforms.owContactTex.value = this.contact.render(
         renderer,
         gb,
@@ -1438,7 +1595,7 @@ export class RenderSystem {
       );
       feat.y = 1;
     }
-    if (this.ssr && this.needsPrepass && !this._firstFrame) {
+    if (post && this.ssr && prepass && !this._firstFrame) {
       // Previous frame's resolved colour. Without TAA the HDR target still
       // holds last frame at this point in the schedule, which is exactly what
       // we want to reflect.
@@ -1507,16 +1664,16 @@ export class RenderSystem {
       this.patcher.uniforms.owIndirect.value.z = roomN;
     }
 
-    if (this.taa) this._removeJitter(camera);
+    if (post && this.taa) this._removeJitter(camera);
 
     // ---- 10. TAA ----------------------------------------------------------
     let color = this.hdrRt.texture;
-    if (this.taa) {
+    if (post && this.taa) {
       color = this.taa.render(renderer, color, gb, this._invVP, this._prevVP);
     }
 
     // ---- 11. motion blur --------------------------------------------------
-    if (this.motionBlur) {
+    if (post && this.motionBlur) {
       const shutter = this.settings.shutter * (1 / 60 / dt);
       color = this.motionBlur.render(renderer, color, gb, this.frame, shutter);
     }
@@ -1525,7 +1682,7 @@ export class RenderSystem {
     // World only, and only while the sights are actually up. The viewmodel is
     // composited afterwards, so the optic body and the reticle stay sharp by
     // construction rather than by masking.
-    if (this.dof && this._adsT > 0.01 && this.needsPrepass) {
+    if (post && this.dof && this._adsT > 0.01 && prepass) {
       const dofOut = this.pingRt[this._pingIndex];
       color = this.dof.render(
         renderer,
@@ -1540,7 +1697,7 @@ export class RenderSystem {
     }
 
     // ---- 13. registered passes -------------------------------------------
-    for (let i = 0; i < this.passes.length; i++) {
+    for (let i = 0; post && i < this.passes.length; i++) {
       const p = this.passes[i];
       if (p.enabled === false) continue;
       const out = this.pingRt[this._pingIndex];
@@ -1579,13 +1736,13 @@ export class RenderSystem {
       // lit by. See SkySystem.exposureBias.
       s.exposureBias + this._skyExposureBias,
       s.exposureKey,
-      this.needsPrepass ? this.depthTexture : null
+      prepass ? this.depthTexture : null
     );
     this.exposureTexture = exposureTex;
 
     // ---- 16. bloom --------------------------------------------------------
     let bloomTex = null;
-    if (this.bloom) {
+    if (post && this.bloom) {
       bloomTex = this.bloom.render(
         renderer,
         color,
@@ -1601,7 +1758,7 @@ export class RenderSystem {
     cu.tBloom.value = bloomTex ?? color;
     cu.tExposure.value = exposureTex;
     cu.uGrade.value.x = bloomTex ? s.bloomStrength : 0;
-    cu.uGrade.value.z = this.taa ? s.sharpen : 0;
+    cu.uGrade.value.z = post && this.taa ? s.sharpen : 0;
     // Vignette closes in with the sight picture.
     cu.uLens.value.y = s.vignette + (s.adsVignette - s.vignette) * this._adsT;
     cu.uLens.value.w = ctx.time.elapsed;
@@ -1609,7 +1766,7 @@ export class RenderSystem {
 
     if (this.debugView) {
       this._renderDebug(renderer, color);
-    } else if (this.fxaa) {
+    } else if (post && this.fxaa) {
       this.composite.render(renderer, this.ldrRt);
       this.fxaa.uniforms.tColor.value = this.ldrRt.texture;
       this.fxaa.render(renderer, null);

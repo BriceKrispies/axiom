@@ -67,6 +67,9 @@
                                     see the boot a player actually gets.
    --samples [--interval=200]       V8 CPU profiler, µs sampling interval
  *   --selfprofile                    in-page sampler instead (see above)
+ *   --input                          hold W from navigation and measure when the
+ *                                    player actually MOVES — time to first player
+ *                                    input, verified from outside the app
  *   --icy | --warm                   shader-cache regime (see above)
  *   --repeat=N                       report the median of N runs, per phase —
                                     the only reliable way to A/B a change here
@@ -83,7 +86,7 @@
  *   --compare=FILE                   diff phase times against a saved run
  */
 import { chromium } from 'playwright';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -108,7 +111,12 @@ function clearDriverCaches() {
     if (!existsSync(dir)) continue;
     try {
       rmSync(dir, { recursive: true, force: true });
-      cleared.push(dir);
+      // rmSync does not throw when it only PARTIALLY succeeds — a file held
+      // open by a GPU process that has not exited yet survives silently. Check.
+      const left = existsSync(dir) ? readdirSync(dir).length : 0;
+      left === 0
+        ? cleared.push(dir)
+        : console.error(`  ! ${dir} still has ${left} entries after delete — this run is NOT cold`);
     } catch (err) {
       // A cache in use by another process is normal; report and carry on
       // rather than pretending the run was icy when it was not.
@@ -131,8 +139,15 @@ const H = Number(args.h ?? 720);
 const DPR = Number(args.dpr ?? 1);
 const REPEAT = Number(args.repeat ?? 1);
 const WARM = !!args.warm;
+/** What Chrome uses on this platform when nobody forces it. */
+const DEFAULT_ANGLE = { win32: 'd3d11', darwin: 'metal' }[process.platform] ?? 'gl';
+const ANGLE = String(args.angle ?? DEFAULT_ANGLE);
 const SAMPLES = !!args.samples;
 const TIMEOUT = Number(args.timeout ?? 300000);
+// Hold a movement key from navigation and measure when the player actually
+// moves. Opt-in, because it is the one probe that CHANGES the boot it measures:
+// the player walks off the spawn point for the rest of the run.
+const INPUT = !!args.input;
 /** Persistent profile dir for --warm, so run 2 sees run 1's shader cache. */
 const WARM_DIR = join(process.cwd(), '.bootprofile-profile');
 
@@ -252,6 +267,132 @@ function analyseProgram(keys) {
 }
 
 // -------------------------------------------------------------------- capture --
+// ------------------------------------------------------------ input probe --
+/**
+ * TIME TO FIRST PLAYER INPUT — the number a stopwatch on the loading bar
+ * cannot give you.
+ *
+ * "First painted frame" is when the player SEES the game. It is not when they
+ * can PLAY it, and the two are not the same instant: input listeners attach at
+ * the end of engine.init (before any frame has run), the first frame that polls
+ * them comes later, and the loading overlay is a full-screen div that keeps
+ * eating clicks until it is dismissed a frame after that. Three different
+ * answers, and the app publishes all three as milestones — but a milestone is
+ * the app's own claim about itself.
+ *
+ * So this verifies it from outside, end to end, exactly as a player would:
+ * hold W down from the moment navigation commits and watch for the player's
+ * feet to actually move.
+ *
+ *   - Real CDP key events, not synthetic DOM ones. They travel the browser's
+ *     whole input pipeline and QUEUE when the renderer's main thread is blocked
+ *     — which is the honest behaviour, because that queueing is precisely the
+ *     latency being measured.
+ *   - keyDown ONLY, re-sent every PRESS_MS, no keyUp. A single hold at t=0 is
+ *     worthless: keydown fires once, and it fires long before the game attaches
+ *     a listener, so the game never sees it. Re-sending means the first press
+ *     the game can hear is at most PRESS_MS after it starts listening.
+ *   - `autoRepeat: false` on every one of them, because Input._onKeyDown drops
+ *     repeats — Playwright's own keyboard.down() would set that flag on the
+ *     second press and the probe would measure nothing.
+ *
+ * The observer is a rAF loop installed before any app code, so it samples at
+ * frame granularity — which is the only granularity input has anyway.
+ */
+const PRESS_MS = 50;
+
+const installInputProbe = (page) =>
+  page.addInitScript(() => {
+    const P = {
+      engineAt: null,
+      basePos: null,
+      movedAt: null,
+      movedDist: null,
+      acceptedAt: null,
+      overlayGoneAt: null,
+      lockAt: null,
+      frames: 0,
+      framesBeforeMove: 0,
+      /**
+       * A bounded per-frame trace, so "it has not moved yet" can say WHY.
+       * A held key that produces no motion has exactly three causes and this
+       * separates them: no frames are running (engine frame count flat), the
+       * clock is stopped (time.scale 0 — the pause menu does this), or the key
+       * never arrived (down empty). Guessing between them from the outside is
+       * how you spend an afternoon optimising the wrong phase.
+       */
+      trace: [],
+    };
+    window.__INPUTPROBE__ = P;
+    const t = () => +performance.now().toFixed(1);
+    const tick = () => {
+      requestAnimationFrame(tick);
+      P.frames++;
+      const e = window.__ENGINE__;
+      if (e) {
+        if (P.engineAt === null) P.engineAt = t();
+        const pos = e.ctx?.peek?.('player')?.position;
+        if (pos) {
+          if (P.basePos === null) P.basePos = [pos.x, pos.y, pos.z];
+          else if (P.movedAt === null) {
+            const d = Math.hypot(pos.x - P.basePos[0], pos.z - P.basePos[2]);
+            if (d > 0.05) {
+              P.movedAt = t();
+              P.movedDist = +d.toFixed(3);
+            } else {
+              P.framesBeforeMove = P.frames;
+            }
+          }
+        }
+        if (P.acceptedAt === null && e.input?.down?.size > 0) P.acceptedAt = t();
+        const pl = e.ctx?.peek?.('player');
+        if (P.movedAt === null && P.trace.length < 400) {
+          P.trace.push({
+            t: t(),
+            f: e.time?.frame ?? null,
+            scale: e.time?.scale ?? null,
+            dt: +(e.time?.dt ?? 0).toFixed(4),
+            down: [...(e.input?.down ?? [])].join('+') || null,
+            x: pos ? +pos.x.toFixed(3) : null,
+            z: pos ? +pos.z.toFixed(3) : null,
+            state: pl?.state ?? null,
+            spd: pl ? +(pl.horizontalSpeed ?? 0).toFixed(2) : null,
+            ctrl: pl?.controlEnabled ?? null,
+          });
+        }
+      }
+      const b = document.getElementById('boot');
+      if (P.overlayGoneAt === null && b && (b.classList.contains('gone') || b.style.display === 'none')) {
+        P.overlayGoneAt = t();
+      }
+      if (P.lockAt === null && document.pointerLockElement) P.lockAt = t();
+    };
+    requestAnimationFrame(tick);
+  });
+
+/** Hold W by re-sending a non-repeat keyDown until told to stop. */
+function startHoldingW(cdp) {
+  const state = { stop: false, sent: 0 };
+  const send = () => {
+    if (state.stop) return;
+    state.sent++;
+    cdp
+      .send('Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        windowsVirtualKeyCode: 87,
+        nativeVirtualKeyCode: 87,
+        code: 'KeyW',
+        key: 'w',
+        text: 'w',
+        autoRepeat: false,
+      })
+      .catch(() => {});
+    setTimeout(send, PRESS_MS);
+  };
+  send();
+  return state;
+}
+
 async function runOnce(index) {
   const userDataDir = WARM ? WARM_DIR : mkdtempSync(join(tmpdir(), 'shmup-boot-'));
   if (WARM) mkdirSync(WARM_DIR, { recursive: true });
@@ -276,14 +417,21 @@ async function runOnce(index) {
       // Long-task + self-profiling need a real, non-throttled main thread.
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
-      // ANGLE backend. Default (unset) lets Chrome choose — which is what a
-      // player gets. `--angle=gl` is the escape hatch for a headless run that
-      // would otherwise land on SwiftShader.
-      ...(args.angle ? [`--use-angle=${args.angle}`] : []),
+      // ANGLE backend, defaulted to THE ONE A PLAYER ACTUALLY GETS.
+      //
+      // Leaving it unset is not that: a headless browser with no flag falls
+      // back to SwiftShader here, which is why this was being forced. But it
+      // was forced to `gl`, and Chrome on Windows uses D3D11 — a different
+      // shader translator (GLSL -> HLSL -> D3D bytecode) with roughly twice the
+      // link cost. Measured on this level, cold: 6.3 s of program linking on
+      // GL, 12.1 s on D3D11. Reporting the GL number as "the boot" understated
+      // a first visit by seven seconds.
+      `--use-angle=${ANGLE}`,
       ...(args.gpuargs ? String(args.gpuargs).split(',') : []),
     ],
   });
   const page = await ctx.newPage();
+  if (INPUT) await installInputProbe(page);
 
   const consoleLines = [];
   const errors = [];
@@ -324,6 +472,10 @@ async function runOnce(index) {
 
   const t0 = Date.now();
   await page.goto(url, { waitUntil: 'commit', timeout: TIMEOUT });
+  // Start holding W the instant the navigation commits — BEFORE waiting for
+  // __READY__, which is the whole point: the question is how much of that wait
+  // the player spends unable to do anything.
+  const holding = INPUT ? startHoldingW(cdp ?? (await ctx.newCDPSession(page))) : null;
   await page.waitForFunction('window.__READY__ === true', null, { timeout: TIMEOUT });
   const wallMs = Date.now() - t0;
 
@@ -334,6 +486,19 @@ async function runOnce(index) {
   await page
     .waitForFunction('window.__LOADED__ === true', null, { timeout: 60000 })
     .catch(() => {});
+  // Give the held key a few frames past __READY__ to show up as motion, then
+  // stop holding — a run that ends mid-press leaves the key stuck down and any
+  // later measurement on this page is measuring a player who is still walking.
+  let inputProbe = null;
+  if (holding) {
+    await page
+      .waitForFunction('window.__INPUTPROBE__?.movedAt !== null', null, { timeout: 30000 })
+      .catch(() => {});
+    holding.stop = true;
+    inputProbe = await page.evaluate(() => ({ ...window.__INPUTPROBE__ }));
+    inputProbe.pressesSent = holding.sent;
+  }
+
   const profile = await page.evaluate(() => window.__BOOTPROFILE__ ?? null);
   if (!profile) {
     await ctx.close();
@@ -394,18 +559,53 @@ async function runOnce(index) {
       geometries: r?.renderer?.info?.memory?.geometries ?? null,
       textures: r?.renderer?.info?.memory?.textures ?? null,
       prewarm: window.__PREWARM__ ?? null,
+      compileCurve: window.__BOOT__?.compileCurve ?? null,
       bakery: e?.bakery ? { workers: e.bakery.size, ...e.bakery.stats } : null,
       heapMb: performance.memory ? performance.memory.usedJSHeapSize >> 20 : null,
+      counters: window.__BOOT__?.counters ? { ...window.__BOOT__.counters } : null,
     };
   });
 
   const programs = args.programs
     ? await page.evaluate(() => {
         const r = window.__ENGINE__?.ctx?.peek?.('render')?.renderer;
+        // Join three's program list against the probe's per-program cost map.
+        // three's WebGLProgram wrapper holds the raw GL program in `.program`,
+        // which is exactly the key the probe charges time to, so the two sides
+        // meet without either knowing about the other.
+        const cost = window.__BOOT__?.programCost ?? null;
+        const order = window.__BOOT__?.programOrder ?? null;
+        const site = window.__BOOT__?.programSite ?? null;
+        const linkSite = window.__BOOT__?.programLinkSite ?? null;
+        const bound = window.__BOOT__?.programsBound ?? null;
+        const at = window.__BOOT__?.programAt ?? null;
+        const endAt = window.__BOOT__?.programEndAt ?? null;
         return (r?.info?.programs ?? []).map((p) => ({
           name: p.name || '(unnamed)',
           key: p.cacheKey,
           used: p.usedTimes,
+          ms: cost?.get?.(p.program) ?? null,
+          nth: order?.get?.(p.program) ?? null,
+          /** Page-time ms at which this program's first blocking charge began,
+           *  and at which its last one ended. The window it occupied. */
+          at: at?.get?.(p.program) ?? null,
+          endAt: endAt?.get?.(p.program) ?? null,
+          site: site?.get?.(p.program) ?? null,
+          linkSite: linkSite?.get?.(p.program) ?? null,
+          bound: bound ? bound.has(p.program) : null,
+          // Shader source size, the one static predictor of link cost that is
+          // free to collect. It turns the ranking into something actionable: a
+          // program that is expensive BECAUSE it is large is a shader problem,
+          // one that is expensive at ordinary size is a permutation problem.
+          // three keeps the GL shader objects on the wrapper, and the driver
+          // still has their source.
+          chars: (() => {
+            const gl = r?.getContext?.();
+            const len = (sh) => { try { return gl.getShaderSource(sh)?.length ?? 0; } catch { return 0; } };
+            return gl && p.vertexShader && p.fragmentShader
+              ? len(p.vertexShader) + len(p.fragmentShader)
+              : null;
+          })(),
         }));
       })
     : null;
@@ -426,7 +626,7 @@ async function runOnce(index) {
   }
 
   await ctx.close();
-  return { index, wallMs, profile, net, runtime, samples, cpuProfile, programs, errors, consoleLines,
+  return { index, wallMs, profile, net, runtime, samples, cpuProfile, programs, inputProbe, errors, consoleLines,
            regime: args.icy ? 'icy' : WARM ? 'warm' : 'cold-browser', clearedCaches };
 }
 
@@ -665,6 +865,43 @@ function report(run) {
       C.dim(`
 ${REGIME[1]}`)
   );
+  // WAS THIS RUN ACTUALLY COLD? The `--icy` label says what the tool TRIED to
+  // do; this says what happened. Deleting the driver's cache directory is
+  // best-effort — a file still held open by the previous run's GPU process
+  // survives, and the next run then measures a warm driver while printing
+  // "a first ever visit" in red at the top.
+  //
+  // That is not a cosmetic problem. Two interleaved A/B runs measured 9.4 s and
+  // 30.2 s for the SAME build, because one of them was silently warm; a
+  // comparison across them is worse than no measurement, since it looks like
+  // evidence. So classify from the data: shader work per program is three
+  // orders of magnitude apart between a cold driver (~270 ms) and a warm one
+  // (single-digit ms), which is not a threshold anyone has to tune.
+  const cGl = runtime.counters ?? null;
+  const shaderMs = cGl ? (cGl.programQueryMs ?? 0) + (cGl.linkStatusMs ?? 0) + (cGl.shaderCompileMs ?? 0) : null;
+  const perProgram = shaderMs !== null && runtime.programs ? shaderMs / runtime.programs : null;
+  // WITHOUT THE PROBE THERE IS NOTHING TO CLASSIFY FROM. `--no-glprobe` leaves
+  // every counter at zero, which reads as "0ms of shader work per program" and
+  // fired this warning on runs that were perfectly cold. A detector that cannot
+  // see must say so, not guess the alarming answer.
+  const canClassify = !args['no-glprobe'] && perProgram !== null;
+  const looksCold = canClassify && perProgram > 40;
+  if (run.regime === 'icy' && !canClassify) {
+    console.log(
+      C.y('  ?? COLDNESS UNVERIFIED') +
+        C.dim(' — --no-glprobe collects no shader counters, so this run cannot be')
+    );
+    console.log(C.dim('     confirmed cold. Re-run without it to check, once.'));
+  }
+  if (canClassify && run.regime === 'icy' && !looksCold) {
+    console.log(
+      C.r('  !! THIS RUN WAS NOT COLD') +
+        C.dim(` — ${perProgram.toFixed(0)}ms of shader work per program says the driver cache ` +
+          `survived the delete. Do not compare it with a cold run.`)
+    );
+    console.log(C.dim('     Close every Chrome instance and re-run; the GPU process holds the cache open.'));
+  }
+
   const soft = /swiftshader|llvmpipe|software|basic render/i.test(String(runtime.renderer ?? ''));
   console.log(
     C.dim(`GL: ${runtime.renderer ?? '?'}`) +
@@ -685,26 +922,47 @@ ${REGIME[1]}`)
     );
   }
   console.log(C.dim('─'.repeat(96)));
+  // ---- when can the player act? -----------------------------------------
+  //
+  // "Boot" is not one instant and never was. The app publishes the four it
+  // knows about as milestones, and --input adds the two only an outside
+  // observer can establish. Printed on ONE timeline, in navigation-relative
+  // ms, because the whole point is which of them comes first.
   const ms0 = profile.milestones ?? {};
-  const firstFrame = ms0['first-frame'] !== undefined ? pre + ms0['first-frame'] : null;
-  const loaded = ms0.loaded !== undefined ? pre + ms0.loaded : null;
+  const at = (k) => (ms0[k] !== undefined ? pre + ms0[k] : null);
+  const firstFrame = at('first-frame');
+  const loaded = at('loaded');
+  const probe = run.inputProbe ?? null;
 
-  if (firstFrame !== null) {
-    // The number progressive boot exists to move. Everything after it happens
-    // with the game already on screen, so it is a different kind of cost.
+  const rows = [
+    ['input armed', at('input-armed'), 'listeners attached — presses are buffered from here', C.dim],
+    ['first painted frame', firstFrame, 'the player can SEE the game', C.g],
+    ['input live', at('input-live'), 'first frame that polls input — a held key moves the player now', C.g],
+    ['overlay dismissed', at('pointer-ready'), 'the loading div stops covering the canvas', C.dim],
+    ['first press accepted', at('input-first-press'), 'MEASURED — a real key event the game acted on', C.c],
+    probe?.movedAt != null
+      ? ['PLAYER MOVED', probe.movedAt, `MEASURED end-to-end — feet left spawn by ${probe.movedDist}m`, C.c]
+      : null,
+    ['playable (__READY__)', total, `3 warm frames after the first (harness stopwatch ${wallMs}ms)`, C.b],
+    ['lighting queued', at('lighting-issued'), 'the real materials handed to the driver', C.dim],
+    ['level fully lit', at('lit'), 'the fidelity ramp released — real materials in', C.dim],
+    ['fully loaded', loaded, 'streaming and pre-warm finished behind the game', C.dim],
+  ].filter((r) => r && r[1] !== null);
+  rows.sort((a, b) => a[1] - b[1]);
+
+  console.log(C.b('WHEN CAN THE PLAYER ACT?') + C.dim('  ms from navigation start'));
+  for (const [label, v, note, colour] of rows) {
+    console.log(`  ${colour(`${v.toFixed(0)}ms`.padStart(8))}  ${label.padEnd(21)}${C.dim(note)}`);
+  }
+  if (INPUT && !probe?.movedAt) {
     console.log(
-      `${C.b('first painted frame')}   ${C.b(C.g(`${firstFrame.toFixed(0)}ms`))}` +
-        C.dim('   the player can see and move')
+      C.r('  !! the probe held W for the whole boot and the player never moved.') +
+        C.dim(' Either input is not reaching the game, or the player is against a wall.')
     );
   }
-  console.log(
-    `${C.b('playable (__READY__)')}  ${C.b(`${total.toFixed(0)}ms`)}` +
-      C.dim(`   (harness stopwatch ${wallMs}ms — includes browser navigation)`)
-  );
-  if (loaded !== null) {
+  if (!INPUT) {
     console.log(
-      `${C.b('fully loaded')}          ${loaded.toFixed(0)}ms` +
-        C.dim(`   +${(loaded - (firstFrame ?? total)).toFixed(0)}ms of streaming and pre-warm behind the game`)
+      C.dim('  (--input to verify the last two from outside, by holding W from navigation)')
     );
   }
   console.log('');
@@ -945,6 +1203,199 @@ ${REGIME[1]}`)
       console.log(C.b('  permutation axes, by how many programs they touch:'));
       for (const [name, count] of ranked) console.log(`    ${String(count).padStart(4)}  ${name}`);
     }
+
+    // ---- measured cost, per program --------------------------------------
+    //
+    // The count is a proxy; this is the thing itself. Every program's link is
+    // charged to it by the probe, so "cut the permutation count" becomes "cut
+    // the ones that cost", which is a different and much shorter list. The
+    // NEVER-BOUND column is the sharpest of the three: a program that boot paid
+    // to link and the game never drew with is time spent on nothing at all.
+    const timed = run.programs.filter((p) => p.ms != null && p.ms > 0);
+    if (timed.length) {
+      const totalMs = timed.reduce((a, p) => a + p.ms, 0);
+      const shown = [...timed].sort((a, b) => b.ms - a.ms).slice(0, 12);
+      console.log(
+        C.b('  PROGRAM LINK COST') +
+          C.dim(`  ${totalMs.toFixed(0)}ms measured across ${timed.length} programs` +
+            ` (${((totalMs / total) * 100).toFixed(0)}% of boot)`)
+      );
+      for (const p of shown) {
+        const label = p.name.length > 34 ? `${p.name.slice(0, 34)}…` : p.name;
+        console.log(
+          `  ${heat(p.ms, total)(ms(p.ms))}  ${label.padEnd(35)}` +
+            C.dim(`${p.chars ? `${(p.chars / 1024).toFixed(0)}KB src` : ''.padEnd(8)}`.padEnd(10)) +
+            C.dim(`#${String(p.nth ?? '?').padStart(3)}`) +
+            C.dim(p.bound === false ? C.y('  never bound') : `  ${p.used}x used`)
+        );
+      }
+      // Roll the same numbers up by shader identity: one entry costing 40ms
+      // twelve times over is a permutation problem, one entry costing 400ms
+      // once is a shader problem, and the per-program list alone cannot tell
+      // them apart.
+      const byShader = new Map();
+      for (const p of timed) {
+        const t = p.key.split(',');
+        const id = p.name === '(unnamed)' ? `shaderID:${t[0]}/${t[1]}` : p.name;
+        const e = byShader.get(id) ?? { n: 0, ms: 0 };
+        byShader.set(id, { n: e.n + 1, ms: e.ms + p.ms });
+      }
+      const rollN = Number(args.programs === true ? 8 : args.programs);
+      const roll = [...byShader.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, rollN);
+      console.log(C.b('  rolled up by shader — total cost, and cost per permutation:'));
+      for (const [name, e] of roll) {
+        console.log(
+          `  ${ms(e.ms).padStart(9)}  ${String(e.n).padStart(3)}x  ` +
+            C.dim(`${(e.ms / e.n).toFixed(0)}ms each  `) +
+            (name.length > 40 ? `${name.slice(0, 40)}…` : name)
+        );
+      }
+      // WHICH PHASE PAYS. Roll the same costs up by the span that first touched
+      // each program: that, not the ranking, is what says whether a cost can be
+      // moved off the critical path or has to be made smaller.
+      const bySite = new Map();
+      for (const p of timed) {
+        const k = p.site ?? '(unknown)';
+        const e = bySite.get(k) ?? { n: 0, ms: 0 };
+        bySite.set(k, { n: e.n + 1, ms: e.ms + p.ms });
+      }
+      if (bySite.size > 1) {
+        console.log(C.b('  where each link is paid for (first reflection):'));
+        for (const [k, e] of [...bySite.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, 8)) {
+          console.log(`  ${ms(e.ms).padStart(9)}  ${String(e.n).padStart(3)} programs  ` +
+            (k.length > 52 ? `…${k.slice(-52)}` : k));
+        }
+      }
+
+      // THE CRITICAL SET, ANALYSED ON ITS OWN. The population above counts every
+      // program the app ever builds, most of which link after first paint and
+      // cost the player nothing. The ones that decide first paint are the ones
+      // the pre-warm waits on, and on a driver that serialises compiles each is
+      // worth its full link time. A permutation here is worth removing; the
+      // same permutation in the post-paint tail is not.
+      const crit = run.programs.filter((p) => /prewarmScene/.test(p.linkSite ?? ''));
+      if (crit.length) {
+        const g = new Map();
+        for (const p of crit) {
+          const t = p.key.split(',');
+          const id = p.name === '(unnamed)' ? `shaderID:${t[0]}/${t[1]}` : p.name;
+          if (!g.has(id)) g.set(id, []);
+          g.get(id).push(p);
+        }
+        const dupes = [...g.entries()].filter(([, ps]) => ps.length > 1);
+        const extra = dupes.reduce((a, [, ps]) => a + ps.length - 1, 0);
+        console.log(
+          C.b('  ON THE CRITICAL PATH') +
+            C.dim(`  ${crit.length} programs the pre-warm waits on, ${g.size} distinct shaders, ` +
+              `${extra} redundant permutations`)
+        );
+        const cAxes = new Map();
+        for (const [, ps] of dupes) {
+          for (const v of analyseProgram(ps.map((p) => p.key)).varying) {
+            cAxes.set(v.name, (cAxes.get(v.name) ?? 0) + ps.length);
+          }
+        }
+        for (const [name, n] of [...cAxes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)) {
+          console.log(C.dim(`    ${String(n).padStart(3)} programs vary on ${name}`));
+        }
+        for (const [name, ps] of dupes.sort((a, b) => b[1].length - a[1].length).slice(0, 6)) {
+          console.log(`    ${ps.length}x  ${name.length > 44 ? `${name.slice(0, 44)}…` : name}`);
+        }
+      }
+
+      // ...and where it was ASKED FOR. With compileAsync these differ by design:
+      // the phase that calls linkProgram is the one that WAITS, and it is the
+      // one on the critical path even though the cost is charged later.
+      const byLink = new Map();
+      for (const p of run.programs) {
+        const k = p.linkSite ?? '(unknown)';
+        const e = byLink.get(k) ?? { n: 0, ms: 0 };
+        byLink.set(k, { n: e.n + 1, ms: e.ms + (p.ms ?? 0) });
+      }
+      if (byLink.size > 1) {
+        console.log(C.b('  where each link is REQUESTED (the phase that waits):'));
+        for (const [k, e] of [...byLink.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 8)) {
+          console.log(`  ${String(e.n).padStart(4)} programs  ${ms(e.ms).padStart(9)} of measured cost  ` +
+            (k.length > 44 ? `…${k.slice(-44)}` : k));
+        }
+      }
+
+      // Is cost explained by ORDER or by SIZE? Spearman rank correlation
+      // against each, on the same set, so the answer is a number rather than an
+      // impression. A strong negative correlation with order means the ranking
+      // is mostly measuring the driver's one-time warm-up and the top entries
+      // are innocent; a strong positive correlation with source size means the
+      // shaders really are the cost.
+      const spearman = (xs, ys) => {
+        const rank = (v) => {
+          const idx = v.map((x, i) => [x, i]).sort((a, b) => a[0] - b[0]);
+          const r = new Array(v.length);
+          idx.forEach(([, i], k) => { r[i] = k; });
+          return r;
+        };
+        const a = rank(xs), b = rank(ys), n = xs.length;
+        const d2 = a.reduce((s2, x, i) => s2 + (x - b[i]) ** 2, 0);
+        return 1 - (6 * d2) / (n * (n * n - 1));
+      };
+      const withOrd = timed.filter((p) => p.nth != null);
+      const withSrc = timed.filter((p) => p.chars);
+      const rhoOrder = withOrd.length > 4
+        ? spearman(withOrd.map((p) => p.nth), withOrd.map((p) => p.ms)) : null;
+      const rhoSize = withSrc.length > 4
+        ? spearman(withSrc.map((p) => p.chars), withSrc.map((p) => p.ms)) : null;
+      if (rhoOrder != null || rhoSize != null) {
+        const verdict =
+          rhoOrder != null && rhoOrder < -0.4
+            ? C.y('cost tracks ORDER — the top entries are paying for the driver one-time warm-up, not their own size')
+            : rhoSize != null && rhoSize > 0.4
+              ? 'cost tracks SIZE — these shaders really are the expensive ones'
+              : C.dim('neither order nor size explains it — the cost is per-shader and idiosyncratic');
+        console.log(
+          C.b('  what explains the cost?  ') +
+            C.dim(`rho(order) = ${rhoOrder?.toFixed(2) ?? 'n/a'}   rho(source size) = ${rhoSize?.toFixed(2) ?? 'n/a'}`)
+        );
+        console.log(`    ${verdict}`);
+      }
+
+      const wasted = timed.filter((p) => p.bound === false);
+      if (wasted.length) {
+        const wMs = wasted.reduce((a, p) => a + p.ms, 0);
+        console.log(
+          C.y(`  ${wasted.length} programs were linked and never drawn with — ${ms(wMs)} of pure waste`)
+        );
+      }
+    }
+    console.log('');
+  }
+
+  // ---- shader compile parallelism ----------------------------------------
+  //
+  // Whether the driver is compiling in parallel or feeding one thread decides
+  // which lever is even available: bursty completions mean the wall time is
+  // already near the slowest program and only fewer/cheaper programs help;
+  // evenly spaced completions mean the work is being serialised and there is
+  // parallelism left on the table.
+  const curve = runtime.compileCurve ?? null;
+  if (curve && curve.length > 2) {
+    const span = curve[curve.length - 1].ms;
+    const n = curve[curve.length - 1].done;
+    // Gaps between successive completions, in ms per program.
+    const gaps = curve.slice(1).map((c, i) => (c.ms - curve[i].ms) / Math.max(1, c.done - curve[i].done));
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const med = sorted[sorted.length >> 1] ?? 0;
+    // Time to half the programs, as a fraction of the whole phase. Near 0.5 is
+    // an even (serial-ish) trickle; well under it is a burst.
+    const half = curve.find((c) => c.done >= n / 2)?.ms ?? span;
+    console.log(
+      C.b('SHADER COMPILE PARALLELISM') +
+        C.dim(`  ${n} programs over ${span}ms — median ${med.toFixed(0)}ms between completions`)
+    );
+    console.log(
+      `  half done at +${half}ms (${((half / Math.max(1, span)) * 100).toFixed(0)}% of the phase)  ` +
+        (half / Math.max(1, span) > 0.4
+          ? C.y('an even trickle — the driver is serialising these, wall time is a sum')
+          : C.dim('front-loaded — the driver is overlapping them'))
+    );
     console.log('');
   }
 
@@ -1044,10 +1495,17 @@ function summarise(runs) {
   }
   const firstFrames = runs.map((r) => (r.profile.milestones?.['first-frame'] ?? 0) + r.profile.origin)
     .filter((x) => x > 0);
+  const moved = runs.map((r) => r.inputProbe?.movedAt ?? 0).filter((x) => x > 0);
+  const pressed = runs
+    .map((r) => (r.profile.milestones?.['input-first-press'] ?? 0) + r.profile.origin)
+    .filter((x) => x > 0);
 
   return {
     runs: runs.length,
     firstFrameMs: firstFrames.length ? med(firstFrames) : null,
+    /** The headline for `--input`: navigation to the player's feet moving. */
+    inputMovedMs: moved.length ? med(moved) : null,
+    firstPressMs: pressed.length ? med(pressed) : null,
     subPhases: Object.fromEntries(Object.entries(sub).map(([k, v]) => [k, med(v)])),
     originMs: med(runs.map((r) => r.profile.origin)),
     appMs: med(runs.map((r) => r.profile.totalMs)),
@@ -1189,6 +1647,7 @@ if (args.json) {
     console.log(
       C.b(`MEDIAN OF ${REPEAT} RUNS`) +
         `  first frame ${s.firstFrameMs ? s.firstFrameMs.toFixed(0) : '?'}ms · ` +
+        (s.inputMovedMs ? `player moved ${s.inputMovedMs.toFixed(0)}ms · ` : '') +
         `playable ${s.totalMs.toFixed(0)}ms  ` +
         C.dim(`(module graph ${s.originMs.toFixed(0)}ms)`)
     );

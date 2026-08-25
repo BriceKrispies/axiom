@@ -48,6 +48,55 @@ export function blit(renderer, material, target) {
   renderer.render(_scene, _camera);
 }
 
+/**
+ * Hand `material`'s program to the driver without drawing it, then resolve once
+ * the driver has linked it.
+ *
+ * Issuing a link costs nothing and blocks nobody; DRAWING with a program the
+ * driver has not finished blocks the main thread until its whole queue drains.
+ * The sky's equirect bake is the extreme case here — one 43 KB shader measured
+ * at 1 747 ms cold, which is 1.7 s of frozen game if it is drawn the moment it
+ * is asked for. Warm it, wait, then blit, and the blit is free.
+ *
+ * Compiled through the SAME scene `blit()` draws with, or three's program cache
+ * key differs and the warm links a program nothing will use.
+ */
+export function issueBlit(renderer, material, target) {
+  _mesh.material = material;
+  const prev = renderer.getRenderTarget();
+  renderer.setRenderTarget(target);
+  try {
+    renderer.compile(_scene, _camera);
+  } finally {
+    renderer.setRenderTarget(prev);
+  }
+}
+
+/**
+ * Resolve once the driver has linked every one of `materials`.
+ *
+ * Issued together and waited on together, never one at a time: the driver
+ * compiles serially but it can only do that if it has been GIVEN the whole set.
+ * Warming four LUT passes in sequence would idle the driver between each.
+ */
+export async function whenReady(renderer, materials) {
+  const ready = (m) => {
+    const p = renderer.properties?.get(m)?.currentProgram;
+    return !!p && (typeof p.isReady !== 'function' || p.isReady());
+  };
+  const started = performance.now();
+  // Bounded: a driver that never reports ready must not strand the caller. Past
+  // the cap the draw pays the reflection itself, exactly as it used to.
+  while (!materials.every(ready) && performance.now() - started < 60000) {
+    await new Promise((r) => setTimeout(r, 16));
+  }
+}
+
+export async function warmBlit(renderer, material, target) {
+  issueBlit(renderer, material, target);
+  await whenReady(renderer, [material]);
+}
+
 /** A full-screen shader step. Uniform objects may be shared between passes. */
 export class SkyPass {
   constructor(name, fragmentShader, uniforms, defines = {}) {

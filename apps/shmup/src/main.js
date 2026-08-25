@@ -28,7 +28,8 @@ import { UiSystem } from './ui/index.js';
 import { AudioSystem } from './audio/index.js';
 
 import { installShotApi } from './dev/shots.js';
-import { prewarm, prewarmScene } from './core/prewarm.js';
+import { prewarm, prewarmScene, prewarmRealScene } from './core/prewarm.js';
+import { FidelityRamp } from './core/fidelityramp.js';
 
 const params = new URLSearchParams(location.search);
 const capture = params.get('capture') === '1';
@@ -38,9 +39,35 @@ const capture = params.get('capture') === '1';
 // free-run. See the long comment in src/dev/shots.js.
 const lockstep = capture && params.get('lockstep') === '1';
 
+/**
+ * PROGRESSIVE BOOT. Computed here, before the engine exists, because every
+ * subsystem's `init()` needs to know it — see `progressiveBoot` in config.js.
+ *
+ * `?ramp=0` opts out; so does `?prewarm=0`, which opts out of every kind of
+ * pre-compilation; and capture mode never uses it.
+ */
+const useRamp = !capture && params.get('prewarm') !== '0' && params.get('ramp') !== '0';
+
+/**
+ * When the surface bakes are allowed to start: as soon as the lighting has been
+ * ISSUED to the driver (default), or not until it is READY.
+ *
+ * The difference is which of two numbers you would rather have: `issued` lets
+ * the bakes overlap the lighting, so the level gains detail sooner and its
+ * lighting lands later; `ready` gives the driver to the lighting alone.
+ */
+const bakeRelease = params.get('bakes') === 'ready' ? 'ready' : 'issued';
+
+/** One of progressive boot's three holds, on unless `?hold-<name>=0`. */
+const holdOf = (name) => useRamp && params.get(`hold-${name}`) !== '0';
+
 const config = createConfig({
   quality: params.get('q') ?? 'ultra',
   deterministic: capture,
+  progressiveBoot: useRamp,
+  holdPost: holdOf('post'),
+  holdSky: holdOf('sky'),
+  holdBakes: holdOf('bakes'),
 });
 
 /**
@@ -163,6 +190,27 @@ const startPrewarm = () =>
 // off this thread, and the first frame's reflection is free.
 //
 // `?prewarm=0` opts out of every kind of pre-compilation, this included.
+//
+// THE RAMP. `?ramp=0` opts out; capture mode never uses it (a screenshot of a
+// flat-lit level is a different picture, and the pixel gate cannot tell that
+// from a regression). See src/core/fidelityramp.js for the measurement that
+// motivates it — the driver compiles serially, so the 27 scene programs are a
+// 10.4 s sum that no scheduling can shrink.
+//
+// With the ramp on, this phase compiles a handful of unlit stand-ins instead,
+// the frame loop starts, and the real programs are linked behind a level the
+// player can already see and move through.
+/** Resolve once the engine has drawn `n` more frames. */
+const afterFrames = (n) =>
+  new Promise((resolve) => {
+    const target = engine.time.frame + n;
+    const tick = () => (engine.time.frame >= target ? resolve() : requestAnimationFrame(tick));
+    requestAnimationFrame(tick);
+  });
+const ramp = useRamp ? new FidelityRamp() : null;
+const rampPrograms = ramp ? boot.time('prewarm.ramp:engage', () => ramp.engage(engine.scene, engine.viewScene)) : 0;
+if (ramp) console.info(`[boot] fidelity ramp: ${rampPrograms} stand-in programs`);
+
 const sceneWarm =
   params.get('prewarm') === '0'
     ? { ok: false, reason: 'disabled by ?prewarm=0' }
@@ -184,6 +232,131 @@ const sceneWarm =
       );
 console.info('[boot] prewarm.scene', sceneWarm);
 window.__PREWARM_SCENE__ = sceneWarm;
+
+// THE REAL MATERIALS, COMPILED BEHIND THE GAME.
+//
+// Detached on purpose: this is not a phase the sequential boot spine contains,
+// it runs alongside the frame loop. The poll inside compileWithProgress yields
+// to the event loop between checks, so the driver grinds through the 27
+// programs on its own thread while the player is moving around a level that is
+// already on screen. When they land, the real materials go back in one swap —
+// no per-frame popping, one visible transition from flat to lit.
+//
+// AFTER THE FIRST PAINTED FRAME, AND NOT ONE MOMENT EARLIER.
+//
+// `renderer.compile()` is synchronous: it assembles and issues every link in
+// one call, and the driver then works through them serially. Started before the
+// frame loop, that is 69 links queued in front of the first frame, and the
+// first measurement of exactly that mistake was 25.4 s to first paint — WORSE
+// than the 16.2 s it was meant to fix, because the ramp had bought a cheap
+// first frame and then put the whole expensive compile back in front of it.
+//
+// So it waits for the `first-frame` milestone. By then the level is on screen,
+// the loading screen is down, and the driver can take as long as it likes.
+const startRampCompile = () =>
+  boot.timeAsync('prewarm.ramp:real', async () => {
+    // Say what is happening. The loading screen came down on the first painted
+    // frame, so without this the player watches a flat-lit level for several
+    // seconds with nothing to say it is still arriving — which reads as the
+    // final image, and a broken one.
+    // ---- 1. the post chain ------------------------------------------------
+    //
+    // First, because it is what the FRAME LOOP needs. Everything else here only
+    // makes the picture better; until the chain is in, the loop is drawing a
+    // pipeline with holes in it.
+    //
+    // It also has to be completely finished — issued, linked, AND drawn once —
+    // before the next tier is handed over. Drawing a program is where the
+    // renderer reflects it, reflection blocks until the driver's whole queue
+    // drains, and the next tier is exactly what would be in that queue. Sending
+    // both at once is the 6 023 ms stall this boot used to have.
+    ui?.tail('effects');
+    const render = engine.ctx.peek('render');
+    const post = await render.warmPostChain();
+    render.setPostChainEnabled(true);
+    await afterFrames(2);
+    boot.milestone('post-chain');
+    console.info('[boot] post chain in', post);
+
+    // ---- 2. the lighting --------------------------------------------------
+    ui?.tail('lighting');
+    // The IBL first: the real materials sample it, and it is one 43 KB shader —
+    // 1 747 ms cold — that would otherwise be drawn for the first time on the
+    // frame after the swap, freezing a game the player is already playing.
+    await engine.ctx.peek('sky')?.releaseEnv();
+
+    // ---- 3. the surface detail --------------------------------------------
+    //
+    // Released the moment the lighting has been ISSUED, not when it is ready.
+    // The driver compiles in submission order, so that is already enough to put
+    // 14.2 s of bake shaders behind 1.4 s of lit materials — and holding them
+    // any longer than that is actively harmful: the level renders from unpainted
+    // textures for as long as the hold lasts, and at 16 s of it the result does
+    // not read as "less detail", it reads as broken.
+    const real = await prewarmRealScene(engine, ramp, {
+      mode: params.get('lighting') === 'block' ? 'block' : 'poll',
+      onIssued: () => {
+        // The instant the lighting is in the driver's queue. `lit` minus this is
+        // how long the driver actually took for it — which is the only way to
+        // tell "the lighting is slow" from "the lighting is queued behind
+        // something else".
+        boot.milestone('lighting-issued');
+        bakeRelease === 'issued' && engine.ctx.peek('materials')?.holdBakes(false);
+      },
+    });
+    bakeRelease === 'ready' && engine.ctx.peek('materials')?.holdBakes(false);
+    const restored = ramp.release();
+    // WHEN THE LEVEL STOPS BEING FLAT. Recorded as a milestone rather than left
+    // to the span tree, because the span tree is closed by then: __READY__ now
+    // lands before this phase begins, and `begin()` after `finish()` hands back
+    // an orphan on purpose. Milestones outlive finish() for exactly this case.
+    boot.milestone('lit');
+    console.info(`[boot] fidelity ramp released: ${restored} meshes`, real);
+    ui?.tail(engine.streamer.done ? null : 'streaming');
+    return real;
+  }, { detached: true });
+
+/**
+ * HOW MANY FRAMES TO LET RUN BEFORE QUEUEING THE REAL MATERIALS.
+ *
+ * One is not enough, and the reason is the single most expensive thing in this
+ * app's cold boot. `renderer.compile()` hands the driver a batch of links and
+ * returns; the driver then works through them SERIALLY on its own thread, which
+ * is fine — nothing is blocked while it does. But the moment anything on the
+ * main thread asks the driver for a program's interface
+ * (`getUniformLocation`), that call blocks until the driver has drained the
+ * whole queue. It is charged to whichever program happened to ask.
+ *
+ * The frame loop does exactly that on frame 2, because SSR is skipped on frame
+ * 1 (it reprojects through the previous frame, and there is not one yet) and so
+ * its program is created one frame late — straight into the queue this compile
+ * just filled. MEASURED: `ow-ssr` billed 6 023 ms that way. Its true cost, asked
+ * for with an empty queue, is 108 ms. At `?q=medium`, where SSR is off, the same
+ * 5 205 ms landed on `csm-depth` instead, at the same instant — it was never
+ * about which shader, only about who asked first.
+ *
+ * THE FIX IS NOT TO GUESS A FRAME NUMBER. An earlier version of this waited
+ * five frames, on the reasoning that SSR was the last pass to create a program;
+ * it worked, and it was a guess that any new pass could invalidate silently.
+ * The real answer is that the frame loop must not be creating programs at all
+ * while a batch is in flight — which is what gating the post chain achieves.
+ * With the chain out of the frame, frames 2..N create nothing, so the handover
+ * can happen as soon as there is a first frame to hand over from, and each tier
+ * below waits for the one above to be not just linked but DRAWN.
+ */
+const rampDone = ramp
+  ? new Promise((resolve) => {
+      const afterFirstFrame = () => {
+        if (boot.milestones['first-frame'] === undefined) {
+          requestAnimationFrame(afterFirstFrame);
+          return;
+        }
+        resolve(startRampCompile());
+      };
+      requestAnimationFrame(afterFirstFrame);
+    })
+  : Promise.resolve(null);
+window.__RAMP__ = rampDone;
 
 if (capture) {
   // No loading screen in a capture: the harness photographs the canvas the
@@ -245,6 +418,11 @@ if (!capture) {
     }
     progress.finish();
     ui?.done(engine.streamer.done ? null : 'streaming');
+    // The overlay is a full-screen div with default pointer-events until `.gone`,
+    // so until this line a click cannot reach the canvas and mouse look cannot
+    // be acquired. Keyboard was live earlier (window listeners); the mouse was
+    // not, and a shooter you cannot aim is not one you can play.
+    boot.milestone('pointer-ready');
   };
   requestAnimationFrame(handOver);
 }

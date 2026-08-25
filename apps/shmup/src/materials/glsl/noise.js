@@ -9,7 +9,38 @@
  * Hashes are sin-free (Dave Hoskins style) — sin() based hashes band badly on
  * Apple GPUs at high lattice coordinates.
  */
+/**
+ * The trip count of every fbm-family loop below. Was 10; no call site in
+ * `surfaces-*.js` passes more than 5, so the upper half was provably dead.
+ *
+ * TWO MEASURED NEGATIVE RESULTS, recorded so nobody repeats them. On Windows
+ * the `mat:*` bake programs are 56% of a cold boot's shader-link time
+ * (~12.8 s of 22.8 s), and link cost tracks how much noise a surface asks for:
+ * `plaster` calls owFbm01 fifteen times and links in 2654 ms, `glass` calls it
+ * three times and links in 140 ms. Both attempts assumed the HLSL compiler was
+ * unrolling these loops and that the fix was to stop it.
+ *
+ *   1. Lower the literal bound, 10 -> 5. Total link 22.8 s -> 23.3 s, inside
+ *      run-to-run noise. fxc constant-folds `i >= oct` once the literal is
+ *      inlined, so the dead half was never compiled.
+ *   2. Make the bound a uniform, so the trip count is not compile-time known
+ *      and the loop cannot be unrolled at all. WORSE: 22.8 s -> 24.9 s, with
+ *      `plaster` alone going 2654 ms -> 3809 ms.
+ *
+ * The loop was never the unit of cost. A surface with fifteen owFbm01 CALL
+ * SITES inlines fifteen separate copies of the body whatever the loop does, and
+ * that count is what the compile time follows. Reducing it means asking for
+ * less noise, which changes how the textures look — so the lever is not in this
+ * file. It is that these one-shot bake programs are compiled at all, on every
+ * player's machine, on every cold visit.
+ *
+ * Measure with `tools/bootprofile.mjs --programs`, which ranks link cost by
+ * program name.
+ */
+const MAX_OCTAVES = 5;
+
 export const NOISE_GLSL = /* glsl */ `
+
 
 // ---------------------------------------------------------------- hashes ----
 float owHash11(float p){
@@ -71,7 +102,7 @@ float owValue(vec2 p, vec2 per){
 // ------------------------------------------------------------------ fbm ----
 float owFbm(vec2 p, vec2 per, int oct, float gain){
   float s = 0.0, a = 0.5, n = 0.0;
-  for (int i = 0; i < 10; i++){
+  for (int i = 0; i < ${MAX_OCTAVES}; i++){
     if (i >= oct) break;
     s += a * owNoise(p, per);
     n += a;
@@ -84,7 +115,7 @@ float owFbm01(vec2 p, vec2 per, int oct, float gain){ return owFbm(p, per, oct, 
 /** Ridged fbm — sharp creases, good for cracks / rock. Returns [0,1]. */
 float owRidged(vec2 p, vec2 per, int oct, float gain){
   float s = 0.0, a = 0.5, n = 0.0;
-  for (int i = 0; i < 10; i++){
+  for (int i = 0; i < ${MAX_OCTAVES}; i++){
     if (i >= oct) break;
     float v = 1.0 - abs(owNoise(p, per));
     s += a * v * v;
@@ -97,7 +128,7 @@ float owRidged(vec2 p, vec2 per, int oct, float gain){
 /** Billowy fbm — puffy clumps, good for rust blooms and clay. */
 float owBillow(vec2 p, vec2 per, int oct, float gain){
   float s = 0.0, a = 0.5, n = 0.0;
-  for (int i = 0; i < 10; i++){
+  for (int i = 0; i < ${MAX_OCTAVES}; i++){
     if (i >= oct) break;
     s += a * abs(owNoise(p, per));
     n += a;

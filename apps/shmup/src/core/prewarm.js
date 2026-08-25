@@ -158,20 +158,41 @@ const RENDER_SHADOW_WARM = false;
  * without it `isReady()` cannot answer without blocking, so there is no
  * progress to report and no point pretending otherwise.
  */
-async function compileWithProgress(renderer, scene, camera, onProgress) {
+async function compileWithProgress(renderer, scenes, onProgress) {
   const parallel = renderer.getContext().getExtension('KHR_parallel_shader_compile');
   if (!parallel || !renderer.properties) {
-    await renderer.compileAsync(scene, camera);
+    // eslint-disable-next-line no-restricted-syntax -- fallback path, see catch below
+    for (const { scene, camera } of scenes) await renderer.compileAsync(scene, camera);
     onProgress?.(1, 0, 0);
     return;
   }
 
-  const pending = renderer.compile(scene, camera);
+  // ISSUE EVERY LINK BEFORE WAITING ON ANY OF THEM.
+  //
+  // This used to be called once per scene and awaited in sequence, so the
+  // viewmodel's programs were not handed to the driver until the last world
+  // program had finished linking. That is the one thing a parallel-compile path
+  // must not do: the driver has idle threads for the whole world phase and
+  // nothing queued for them. `compile()` is synchronous and only creates and
+  // links, so calling it for both scenes first costs nothing and lets the whole
+  // set overlap.
+  const pending = new Set();
+  scenes.forEach(({ scene, camera }) => {
+    renderer.compile(scene, camera).forEach((m) => pending.add(m));
+  });
   const total = pending.size;
   if (total === 0) {
     onProgress?.(1, 0, 0);
     return;
   }
+
+  // THE COMPLETION CURVE. `done/total` over time says whether the driver is
+  // really compiling in parallel or feeding one thread: links that land in a
+  // burst mean parallelism, links spaced evenly across the phase mean the wall
+  // time is a sum and the only lever is fewer or cheaper programs. Recorded
+  // rather than reasoned about — 27 programs in 11 s could be either.
+  const curve = [];
+  boot.compileCurve = curve;
 
   const started = performance.now();
   for (;;) {
@@ -182,10 +203,102 @@ async function compileWithProgress(renderer, scene, camera, onProgress) {
       if (!program || program.isReady()) pending.delete(material);
     }
     const done = total - pending.size;
-    onProgress?.(done / total, done, total, performance.now() - started);
+    const at = performance.now() - started;
+    curve.length && curve[curve.length - 1].done === done ? null : curve.push({ ms: Math.round(at), done });
+    onProgress?.(done / total, done, total, at);
     if (pending.size === 0) return;
     await new Promise((r) => setTimeout(r, 10));
   }
+}
+
+/**
+ * Link the real scene programs while the FIDELITY RAMP is holding the screen.
+ *
+ * The ramp has replaced every scene material with an unlit stand-in so the
+ * first frames could be drawn cheaply (see core/fidelityramp.js). The real
+ * materials are therefore NOT in the scene, and `renderer.compile()` compiles
+ * what it finds — so this hands them back for exactly the duration of the
+ * `compile()` call, inside one synchronous window, and takes them away again
+ * before the next frame renders.
+ *
+ * From then on it is the ordinary poll: the driver grinds through the links on
+ * its own thread while the game runs at full rate in front of it. Only when
+ * every program answers `isReady()` does the caller swap the real materials in
+ * for good, so the frame that shows them never waits on a link.
+ *
+ * @param {*} engine
+ * @param {{withRealMaterials: (fn: () => any) => any}} ramp
+ */
+/**
+ * @param opts.onIssued Called the instant the real materials' links have been
+ *   HANDED to the driver, which is long before they are ready. That distinction
+ *   is the whole point of the hook: the driver compiles serially in submission
+ *   order, so anything released here queues BEHIND the lighting without having
+ *   to wait for it. Waiting for readiness instead left the surface bakes held
+ *   for the full 16 s the lighting took, and a level rendering that long from
+ *   unpainted textures does not look like a level with less detail — it looks
+ *   broken.
+ */
+export async function prewarmRealScene(engine, ramp, { onIssued = null, mode = 'poll' } = {}) {
+  const render = engine.ctx.peek('render');
+  const renderer = render?.renderer;
+  if (!renderer?.properties) return { ok: false, reason: 'no renderer' };
+
+  const t0 = performance.now();
+  const before = renderer.info.programs?.length ?? 0;
+  const scratchRt = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false });
+  const prevRt = renderer.getRenderTarget();
+  renderer.setRenderTarget(scratchRt);
+
+  // The one synchronous window. Nothing may await inside it.
+  const pending = new Set();
+  try {
+    ramp.withRealMaterials(() => {
+      [
+        { scene: engine.scene, camera: engine.camera },
+        { scene: engine.viewScene, camera: engine.viewCamera },
+      ].forEach(({ scene, camera }) => {
+        renderer.compile(scene, camera).forEach((m) => pending.add(m));
+      });
+    });
+  } finally {
+    renderer.setRenderTarget(prevRt);
+    scratchRt.dispose();
+  }
+  onIssued?.();
+
+  // FORCE THE DRIVER TO FINISH NOW, at the cost of freezing the frame loop.
+  //
+  // Asking a program for its uniform locations blocks the main thread until the
+  // driver has drained its queue — which is exactly the stall progressive boot
+  // exists to avoid, and also, measurably, the only thing that makes the driver
+  // treat this work as urgent. Polling `isReady()` instead lets it dawdle: the
+  // same material set is ~7 s of wall time when something is blocked on it and
+  // ~15 s when nothing is. `?lighting=block` is here to keep that measurable
+  // rather than asserted.
+  if (mode === 'block') {
+    pending.forEach((material) => {
+      renderer.properties.get(material)?.currentProgram?.getUniforms?.();
+    });
+    pending.clear();
+  }
+
+  const total = pending.size;
+  for (;;) {
+    for (const material of [...pending]) {
+      const program = renderer.properties.get(material)?.currentProgram;
+      if (!program || program.isReady()) pending.delete(material);
+    }
+    if (pending.size === 0) break;
+    await new Promise((r) => setTimeout(r, 16));
+  }
+
+  return {
+    ok: true,
+    ms: Math.round(performance.now() - t0),
+    materials: total,
+    compiled: (renderer.info.programs?.length ?? 0) - before,
+  };
 }
 
 export async function prewarmScene(engine, { onProgress = null } = {}) {
@@ -224,12 +337,16 @@ export async function prewarmScene(engine, { onProgress = null } = {}) {
       // the second run silently: the world is the bulk of the programs, but a
       // viewmodel compile that reports nothing leaves the bar parked at the
       // world's last number and then jumping when the phase ends.
-      const WORLD_SHARE = 0.9;
-      await compileWithProgress(renderer, engine.scene, engine.camera, (f, d, t, ms) =>
-        onProgress?.(f * WORLD_SHARE, d, t, ms)
-      );
-      await compileWithProgress(renderer, engine.viewScene, engine.viewCamera, (f) =>
-        onProgress?.(WORLD_SHARE + f * (1 - WORLD_SHARE))
+      // Both scenes go in together — see compileWithProgress. The old split
+      // reported a 0.9/0.1 world/viewmodel share because the two phases ran one
+      // after the other; now there is one phase and one honest fraction.
+      await compileWithProgress(
+        renderer,
+        [
+          { scene: engine.scene, camera: engine.camera },
+          { scene: engine.viewScene, camera: engine.viewCamera },
+        ],
+        (f, d, t, ms) => onProgress?.(f, d, t, ms)
       );
     });
   } catch {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SkyPass, hdrTarget, floatTarget } from './fullscreen.js';
+import { SkyPass, hdrTarget, floatTarget, issueBlit, whenReady } from './fullscreen.js';
 import {
   ATMO,
   ATMOSPHERE_GLSL,
@@ -282,6 +282,27 @@ export class SkyLuts {
       uSkyViewLut: shared.uSkyViewLut,
       uSunAltitude: shared.uSunAltitude,
     });
+  }
+
+  /**
+   * Link all four LUT programs before any of them is drawn.
+   *
+   * Cold, the four are 390 ms of driver compile, and every millisecond of it
+   * lands on the main thread the moment the first bake draws — before the first
+   * frame, in the boot this was measured in. Issued together and awaited
+   * together, the driver does the same work on its own thread while the game is
+   * already on screen. See warmBlit in fullscreen.js.
+   */
+  async warm() {
+    const jobs = [
+      [this.transmittancePass, this.transmittanceRt],
+      [this.multiScatterPass, this.multiScatterRt],
+      [this.skyViewPass, this.skyViewRt],
+      [this.ambientPass, this.ambientRt],
+    ];
+    jobs.forEach(([pass, rt]) => issueBlit(this.renderer, pass.material, rt));
+    await whenReady(this.renderer, jobs.map(([pass]) => pass.material));
+    this.renderer.setRenderTarget(null);
   }
 
   /** Altitude/aerosol dependent only — baked at boot, and if turbidity changes. */
