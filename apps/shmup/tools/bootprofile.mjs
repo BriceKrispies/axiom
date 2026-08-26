@@ -148,6 +148,11 @@ const TIMEOUT = Number(args.timeout ?? 300000);
 // moves. Opt-in, because it is the one probe that CHANGES the boot it measures:
 // the player walks off the spawn point for the rest of the run.
 const INPUT = !!args.input;
+// Sample frame stalls for the whole run. The span tree closes at __READY__ and
+// on this app almost everything that hurts happens after that, so without this
+// the profiler cannot see the thing a player actually complains about.
+const STALLS = !!args.stalls;
+const STALL_MS = Number(args['stall-ms'] ?? 200);
 /** Persistent profile dir for --warm, so run 2 sees run 1's shader cache. */
 const WARM_DIR = join(process.cwd(), '.bootprofile-profile');
 
@@ -393,7 +398,7 @@ function startHoldingW(cdp) {
   return state;
 }
 
-async function runOnce(index) {
+async function runOnce(index, queryOverride) {
   const userDataDir = WARM ? WARM_DIR : mkdtempSync(join(tmpdir(), 'shmup-boot-'));
   if (WARM) mkdirSync(WARM_DIR, { recursive: true });
   const clearedCaches = args.icy ? clearDriverCaches() : [];
@@ -432,6 +437,41 @@ async function runOnce(index) {
   });
   const page = await ctx.newPage();
   if (INPUT) await installInputProbe(page);
+  if (STALLS) {
+    // Installed before any app code so the very first frames are covered, and
+    // driven by rAF because a stall is precisely a frame that did not happen.
+    await page.addInitScript((threshold) => {
+      window.__STALLS__ = [];
+      const tick = (prev) =>
+        requestAnimationFrame((now) => {
+          const delta = now - prev;
+          if (delta > threshold) {
+            window.__STALLS__.push({ at: Math.round(now), ms: Math.round(delta) });
+          }
+          tick(now);
+        });
+      tick(performance.now());
+
+      // A SECOND CLOCK, ON A TIMER RATHER THAN ON FRAMES.
+      //
+      // A gap in rAF has two completely different causes with opposite fixes:
+      // the main thread is BLOCKED (JavaScript, or a synchronous GL call), or
+      // the main thread is fine and the compositor is not producing frames
+      // because the GPU is saturated. A timer keeps firing in the second case
+      // and not in the first, so comparing the two gap sets says which it is
+      // without having to guess.
+      window.__TIMER_STALLS__ = [];
+      let last = performance.now();
+      setInterval(() => {
+        const now = performance.now();
+        const delta = now - last;
+        last = now;
+        if (delta > threshold) {
+          window.__TIMER_STALLS__.push({ at: Math.round(now), ms: Math.round(delta) });
+        }
+      }, 16);
+    }, STALL_MS);
+  }
 
   const consoleLines = [];
   const errors = [];
@@ -461,7 +501,8 @@ async function runOnce(index) {
   }
 
   const query = new URLSearchParams();
-  if (args.query) for (const [k, v] of new URLSearchParams(String(args.query))) query.set(k, v);
+  const baseQuery = queryOverride !== undefined ? queryOverride : args.query;
+  if (baseQuery) for (const [k, v] of new URLSearchParams(String(baseQuery))) query.set(k, v);
   if (args.q) query.set('q', String(args.q));
   // The WebGL probe distorts the boot badly enough that it does not install
   // itself; ask for it explicitly. See src/core/glprobe.js.
@@ -483,8 +524,13 @@ async function runOnce(index) {
   // pre-warm finish behind it. Wait for __LOADED__ too, so the report can show
   // both — but never block on it forever, since ?prewarm=0 and older builds
   // never raise it.
+  // 60 s was not enough, and worse, a run that hit it reported `loaded` as
+  // "60001ms" — a timeout dressed as a measurement, which is how a number that
+  // was never measured ended up quoted in a commit message. If this expires the
+  // milestone is simply absent, which the report shows as a missing row.
+  const loadedDeadline = Number(args['loaded-timeout'] ?? 240000);
   await page
-    .waitForFunction('window.__LOADED__ === true', null, { timeout: 60000 })
+    .waitForFunction('window.__LOADED__ === true', null, { timeout: loadedDeadline })
     .catch(() => {});
   // Give the held key a few frames past __READY__ to show up as motion, then
   // stop holding — a run that ends mid-press leaves the key stuck down and any
@@ -498,6 +544,23 @@ async function runOnce(index) {
     inputProbe = await page.evaluate(() => ({ ...window.__INPUTPROBE__ }));
     inputProbe.pressesSent = holding.sent;
   }
+
+  // SETTLED is the later of "nothing is still arriving" and "the stutters have
+  // stopped", so the sampler has to keep running past __LOADED__ — a stall that
+  // begins after the last asset lands is still part of the boot a player sits
+  // through. Two extra seconds of quiet is enough to say it has stopped.
+  const stalls = STALLS
+    ? await page.evaluate(async (quiet) => {
+        const idle = async () => {
+          const before = window.__STALLS__.length;
+          await new Promise((r) => setTimeout(r, quiet));
+          return before === window.__STALLS__.length;
+        };
+        // Bounded, so a permanently stuttering build still returns a result.
+        for (let i = 0; i < 15 && !(await idle()); i++);
+        return { frames: window.__STALLS__, timers: window.__TIMER_STALLS__ };
+      }, 2000)
+    : null;
 
   const profile = await page.evaluate(() => window.__BOOTPROFILE__ ?? null);
   if (!profile) {
@@ -560,6 +623,13 @@ async function runOnce(index) {
       textures: r?.renderer?.info?.memory?.textures ?? null,
       prewarm: window.__PREWARM__ ?? null,
       compileCurve: window.__BOOT__?.compileCurve ?? null,
+      /** Per-program completion curve for the fidelity ramp's real materials —
+       *  the only per-program DRIVER time this app can see. See prewarm.js. */
+      rampCurve: window.__RAMPCURVE__ ?? null,
+      /** Per-chunk synchronous cost of the ramp's real-material compile. */
+      rampChunks: window.__RAMPCHUNKS__ ?? null,
+      /** Per-program driver completion times — see src/dev/programcurve.js. */
+      progCurve: window.__PROGCURVE__ ? window.__PROGCURVE__() : null,
       bakery: e?.bakery ? { workers: e.bakery.size, ...e.bakery.stats } : null,
       heapMb: performance.memory ? performance.memory.usedJSHeapSize >> 20 : null,
       counters: window.__BOOT__?.counters ? { ...window.__BOOT__.counters } : null,
@@ -626,7 +696,21 @@ async function runOnce(index) {
   }
 
   await ctx.close();
-  return { index, wallMs, profile, net, runtime, samples, cpuProfile, programs, inputProbe, errors, consoleLines,
+  // THE THROWAWAY PROFILE IS ACTUALLY THROWN AWAY.
+  //
+  // Every cold run makes a fresh Chrome profile directory so the browser cache
+  // cannot leak between runs. Without this line they accumulate: 178 of them
+  // built up over one session, and the boot being measured drifted from ~39 s
+  // to ~54 s for an unchanged configuration as they did. A profiler whose own
+  // litter degrades the thing it measures reports the litter, not the app.
+  if (!WARM) {
+    try {
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3 });
+    } catch {
+      // A file the GPU process still holds is not worth failing a run over.
+    }
+  }
+  return { index, wallMs, profile, net, runtime, samples, cpuProfile, programs, inputProbe, stalls, errors, consoleLines,
            regime: args.icy ? 'icy' : WARM ? 'warm' : 'cold-browser', clearedCaches };
 }
 
@@ -947,6 +1031,17 @@ ${REGIME[1]}`)
     ['lighting queued', at('lighting-issued'), 'the real materials handed to the driver', C.dim],
     ['level fully lit', at('lit'), 'the fidelity ramp released — real materials in', C.dim],
     ['fully loaded', loaded, 'streaming and pre-warm finished behind the game', C.dim],
+    run.stalls?.frames?.length
+      ? [
+          'SETTLED',
+          // `at` is the timestamp of the frame that ENDED the gap, so it is
+          // already the moment things went quiet — adding the gap length again
+          // pushes settled into the future by the size of the last stall.
+          run.stalls.frames[run.stalls.frames.length - 1].at,
+          `the picture stopped changing by itself — ${run.stalls.frames.length} stalls over ${STALL_MS}ms, worst ${Math.max(...run.stalls.frames.map((s) => s.ms))}ms`,
+          C.r,
+        ]
+      : null,
   ].filter((r) => r && r[1] !== null);
   rows.sort((a, b) => a[1] - b[1]);
 
@@ -1455,6 +1550,55 @@ ${REGIME[1]}`)
   }
 }
 
+/**
+ * Paired A/B report. `settled` is the headline (see CLAUDE.md); `loaded` and
+ * `first-frame` are shown because a change that helps one and hurts another is
+ * the normal case here, not the exception.
+ */
+function reportAb(all) {
+  const median = (xs) => {
+    const s = xs.filter((v) => v != null).sort((x, y) => x - y);
+    return s.length ? s[Math.floor(s.length / 2)] : null;
+  };
+  const settledOf = (r) => {
+    const f = r.stalls?.frames;
+    return f?.length ? f[f.length - 1].at : null;
+  };
+  const milestoneOf = (r, k) =>
+    r.profile.milestones[k] != null ? Math.round(r.profile.milestones[k] + r.profile.origin) : null;
+  const metrics = [
+    ['settled', settledOf],
+    ['loaded', (r) => milestoneOf(r, 'loaded')],
+    ['lit', (r) => milestoneOf(r, 'lit')],
+    ['first frame', (r) => milestoneOf(r, 'first-frame')],
+  ];
+  const A = all.filter((r) => r.side === 'A');
+  const B = all.filter((r) => r.side === 'B');
+  const pairs = Math.min(A.length, B.length);
+
+  console.log('');
+  console.log(C.b(`A/B — ${pairs} interleaved pairs`) + C.dim(`   B = "${AB}"`));
+  console.log(C.dim('  paired deltas, not a difference of medians — see the note in the source'));
+  for (const [name, get] of metrics) {
+    const deltas = [];
+    for (let i = 0; i < pairs; i++) {
+      const a = get(A[i]);
+      const b = get(B[i]);
+      if (a != null && b != null) deltas.push(b - a);
+    }
+    const d = median(deltas);
+    if (d === null) continue;
+    const colour = d < -200 ? C.g : d > 200 ? C.r : C.dim;
+    console.log(
+      `  ${name.padEnd(12)} A ${String(median(A.map(get))).padStart(6)}ms   ` +
+        `B ${String(median(B.map(get))).padStart(6)}ms   ` +
+        colour(`${d > 0 ? '+' : ''}${d}ms`) +
+        C.dim(`   pairs: ${deltas.join(', ')}`)
+    );
+  }
+  console.log('');
+}
+
 function compare(runs, baseline) {
   const cur = summarise(runs);
   const base = summarise(baseline.runs ?? [baseline]);
@@ -1622,11 +1766,36 @@ function emitWeights(run) {
 }
 
 // ---------------------------------------------------------------------- main --
+/**
+ * INTERLEAVED A/B — the only comparison this machine can be trusted to make.
+ *
+ * Every configuration comparison in this app has been batch-against-batch: run
+ * three of A, then three of B, then subtract. That is only valid if the machine
+ * is the same machine for both batches, and measurably it is not — two runs of
+ * an IDENTICAL configuration taken an hour apart differed by 22 s. Thermals,
+ * background load, accumulated GPU-process state and driver cache size all drift
+ * over a session, and a boot dominated by shader compilation notices all of it.
+ *
+ * Interleaving A,B,A,B,... puts both sides through the same drift, so the PAIRED
+ * difference stays meaningful even when the absolute numbers wander. Report the
+ * median of the per-pair deltas, never the difference of the medians.
+ */
+const AB = args.ab !== undefined ? String(args.ab) : null;
 const runs = [];
 for (let i = 0; i < REPEAT; i++) {
-  if (REPEAT > 1) process.stderr.write(C.dim(`run ${i + 1}/${REPEAT}...\n`));
-  runs.push(await runOnce(i));
+  if (REPEAT > 1 || AB !== null) console.error(C.dim(`run ${i + 1}/${REPEAT}${AB !== null ? ' [A]' : ''}...`));
+  const a = await runOnce(i);
+  a.side = 'A';
+  runs.push(a);
+  if (AB !== null) {
+    console.error(C.dim(`run ${i + 1}/${REPEAT} [B]...`));
+    const b = await runOnce(i, AB);
+    b.side = 'B';
+    runs.push(b);
+  }
 }
+
+if (AB !== null) reportAb(runs);
 
 if (args['emit-weights']) emitWeights(runs[runs.length - 1]);
 

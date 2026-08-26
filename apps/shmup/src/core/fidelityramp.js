@@ -127,8 +127,21 @@ export class FidelityRamp {
    * program is still linking. Everything after that — the polling, the waiting
    * — happens with the stand-ins safely back in place.
    */
-  withRealMaterials(fn) {
-    const saved = new Map(this._saved);
+  /** Every mesh the ramp is currently standing in for, in engage() order. */
+  get meshes() {
+    return [...this._saved.keys()];
+  }
+
+  withRealMaterials(fn, objects = null) {
+    const saved = new Map();
+    // A SUBSET, when one is given. Restoring all 169 meshes and compiling them
+    // in a single call is 7.3 s of synchronous work, which is a 7.3 s freeze in
+    // a game the player is already playing. Handing back a few meshes at a time
+    // lets the caller put a frame between each batch. See prewarmRealScene.
+    for (const obj of objects ?? this._saved.keys()) {
+      const mat = this._saved.get(obj);
+      mat && saved.set(obj, mat);
+    }
     saved.forEach((mat, obj) => { obj.material = mat; });
     try {
       return fn();

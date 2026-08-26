@@ -110,6 +110,25 @@ export const DEFAULTS = {
    */
   progressiveBoot: false,
   /**
+   * 'lean' (default) or 'full' — how much shader this build compiles. A
+   * different axis from `quality`; see core/fidelity.js, which is the source of
+   * truth. Mirrored here so subsystems that already take config can branch on
+   * it without importing another module.
+   */
+  fidelity: 'lean',
+  /**
+   * Cap on simultaneously VISIBLE point lights (`?lights=N`, null = uncapped).
+   *
+   * This is a cold-boot knob, not a frame-rate one. three folds the visible
+   * light count into every lit material's program cache key AND unrolls the
+   * light loop, so each light is inlined shading code in every one of ~40 lit
+   * programs. Fewer lights therefore shrinks the whole population at once,
+   * which is the only kind of change that has moved this app's cold boot.
+   */
+  lightCap: null,
+  /** Shadow cascade override (`?cascades=N`, 0 disables the sun shadow). */
+  cascades: null,
+  /**
    * The three holds progressive boot is made of, individually switchable.
    *
    * Each defaults to `progressiveBoot`; `?hold-post=0`, `?hold-sky=0` and
@@ -121,6 +140,19 @@ export const DEFAULTS = {
   holdPost: null,
   holdSky: null,
   holdBakes: null,
+  /** Measurement only — see MaterialSystem.stream(). `?bakes=skip`. */
+  skipBakes: false,
+  /**
+   * Use the pre-baked surface textures if this build has them (`?baked=0` to
+   * force the procedural forge). Absence is not an error — see materials/baked.js.
+   */
+  bakedTextures: true,
+  /**
+   * Warm each surface bake's program before drawing with it (`?bakewarm=1`).
+   * OFF: measured as a ~25 s cold regression, because the streamer is
+   * sequential and every wait costs a frame for everything behind it.
+   */
+  bakeWarm: false,
 };
 
 export function createConfig(overrides = {}) {

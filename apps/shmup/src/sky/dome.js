@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LEAN_SKY } from '../core/fidelity.js';
 import {
   ATMOSPHERE_GLSL,
   TRANSMITTANCE_LOOKUP_GLSL,
@@ -299,6 +300,35 @@ void main() {
 }
 `;
 
+/**
+ * `?sky=flat` — a two-colour gradient in place of the 43 KB atmosphere.
+ *
+ * MEASUREMENT ONLY. `sky-dome` is the single most expensive program in the
+ * session at ~8 s of cold driver compile, and it is 43 KB of atmosphere,
+ * volumetric cloud and star field. This exists to price what removing it would
+ * buy BEFORE building the cubemap bake that would remove it honestly — the
+ * horizon and zenith colours are pulled from the same uniforms the real dome
+ * uses, so the gradient at least lands in the right part of the palette.
+ */
+const DOME_FLAT_FRAG = /* glsl */ `
+precision highp float;
+uniform vec3 uSunDir;
+in vec3 vRay;
+layout(location = 0) out vec4 fragColor;
+void main() {
+  vec3 d = normalize( vRay );
+  float up = clamp( d.y * 0.5 + 0.5, 0.0, 1.0 );
+  vec3 horizon = vec3( 0.62, 0.68, 0.78 );
+  vec3 zenith  = vec3( 0.16, 0.33, 0.62 );
+  vec3 col = mix( horizon, zenith, pow( up, 0.65 ) );
+  // A cheap sun so the key light has something to come from.
+  col += vec3( 1.0, 0.85, 0.6 ) * pow( max( dot( d, normalize( uSunDir ) ), 0.0 ), 320.0 ) * 6.0;
+  fragColor = vec4( col, 1.0 );
+}
+`;
+
+
+
 /** Equirectangular bake for PMREM. Matches three's `equirectUv` exactly. */
 const ENV_FRAG = /* glsl */ `
 precision highp float;
@@ -329,7 +359,7 @@ export class SkyDome {
       name: 'sky-dome',
       uniforms: this.uniforms,
       vertexShader: DOME_VERT,
-      fragmentShader: DOME_FRAG,
+      fragmentShader: LEAN_SKY ? DOME_FLAT_FRAG : DOME_FRAG,
       glslVersion: THREE.GLSL3,
       side: THREE.DoubleSide,
       depthTest: false,

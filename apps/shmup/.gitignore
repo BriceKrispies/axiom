@@ -21,3 +21,9 @@ revcrops/
 # Rust experiment build output (see bake-rs/src/lib.rs — kept as evidence, not built).
 bake-rs/target/
 .bakeprof/
+
+# Pre-baked surface textures — 22 MB, generated. Regenerate with
+# `node tools/bake-textures.mjs --quality=1 --q=low` against a running server.
+# Absence is not an error: the app falls back to the procedural forge, which is
+# still the source of truth (src/materials/baked.js).
+public/baked/

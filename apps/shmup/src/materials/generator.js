@@ -352,16 +352,115 @@ export class TextureForge {
    * Issued and waited on instead, the driver does the same work on its own
    * thread and the paint that follows is free.
    */
-  issueProgram(def) {
-    this._mesh.material = this._material(def.key, def.glsl);
-    this.renderer.compile(this._scene, this._camera);
+  issueProgram(def, rts) {
+    const mat = this._material(def.key, def.glsl);
+    this._mesh.material = mat;
+    const prev = this.renderer.getRenderTarget();
+    // AGAINST THE SAME TARGETS `paint()` WILL DRAW INTO, and that is not a
+    // detail. three folds the BOUND RENDER TARGET's colour space into the
+    // program cache key, so a program warmed with the canvas bound (sRGB, which
+    // is what the frame loop leaves bound) is a different program from the one
+    // the bake asks for with a linear target bound. Warmed that way the driver
+    // links a program nothing ever draws, `programReady` reports success for
+    // it, and the real one still compiles synchronously inside the first draw —
+    // so the phase costs twice what it did and the wait bought nothing.
+    //
+    // The forge draws each surface into targets of BOTH colour spaces (the
+    // albedo is sRGB-encoded by the hardware, height and ORM are linear), so
+    // there is genuinely more than one program per surface and all of them have
+    // to be warmed. See warmPostChain in render/index.js, which had this right.
+    try {
+      this._issueTargets(def, rts).forEach((rt) => {
+        this.renderer.setRenderTarget(rt);
+        this.renderer.compile(this._scene, this._camera);
+      });
+    } finally {
+      this.renderer.setRenderTarget(prev);
+    }
   }
 
-  /** Is this surface's program linked and safe to draw without blocking? */
+  /** The distinct targets a bake of `def` will bind, in paint() order. */
+  _issueTargets(def, rts) {
+    const wantNormal = rts?.normalRT != null;
+    return [
+      wantNormal ? this._heightRT(def.size) : null,
+      rts?.albedoRT ?? null,
+      rts?.ormRT ?? null,
+      rts?.normalRT ?? null,
+    ].filter(Boolean);
+  }
+
+  /**
+   * Is every program this surface's bake will use linked and safe to draw?
+   *
+   * EVERY program, not `currentProgram`. A material compiled against two colour
+   * spaces has two, and `currentProgram` is only whichever was made last — the
+   * exact blind spot that made the warm look like it was working.
+   */
   programReady(def) {
     const mat = this._material(def.key, def.glsl);
-    const program = this.renderer.properties?.get(mat)?.currentProgram;
-    return !!program && (typeof program.isReady !== 'function' || program.isReady());
+    const props = this.renderer.properties?.get(mat);
+    const programs = props?.programs;
+    const all = programs ? [...programs.values()] : [props?.currentProgram].filter(Boolean);
+    return all.length > 0 &&
+      all.every((p) => typeof p.isReady !== 'function' || p.isReady());
+  }
+
+  /**
+   * Fill targets `allocate()` handed out from PRE-BAKED IMAGES instead of
+   * running the surface's shader.
+   *
+   * This is the whole point of baking at build time: the nineteen surface
+   * programs are ~14 s of cold driver compile, and a texture that was computed
+   * once does not need them. One trivial copy program serves every surface.
+   *
+   * The images are drawn into the SAME render targets, not swapped in as new
+   * textures, because materials bound those texture objects when the level was
+   * assembled and re-pointing every one of them is a second bookkeeping problem
+   * with nothing to recommend it.
+   */
+  paintFromImages(rts, images) {
+    const r = this.renderer;
+    const prevTarget = r.getRenderTarget();
+    const prevAutoClear = r.autoClear;
+    r.autoClear = false;
+    const copy = this._copyMaterial();
+    this._mesh.material = copy;
+    [
+      [rts.albedoRT, images.albedo],
+      [rts.ormRT, images.orm],
+      [rts.normalRT, images.normal],
+    ].forEach(([rt, texture]) => {
+      if (!rt || !texture) return;
+      copy.uniforms.uSrc.value = texture;
+      r.setRenderTarget(rt);
+      r.render(this._scene, this._camera);
+    });
+    r.setRenderTarget(prevTarget);
+    r.autoClear = prevAutoClear;
+  }
+
+  /**
+   * The copy program. Raw passthrough: the bytes read back off these targets are
+   * the bytes written to the file, so the copy must not re-encode them. Marking
+   * the source `NoColorSpace` and writing with no output transform makes the
+   * round trip an identity whatever the destination target's colour space is.
+   */
+  _copyMaterial() {
+    this._copyMat ??= new THREE.ShaderMaterial({
+      name: 'mat:copy',
+      uniforms: { uSrc: { value: null } },
+      vertexShader: VERT,
+      fragmentShader: `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uSrc;
+void main(){ gl_FragColor = texture2D( uSrc, vUv ); }
+`,
+      depthTest: false,
+      depthWrite: false,
+    });
+    return this._copyMat;
   }
 
   /** Bake a surface into targets `allocate()` already handed out. */

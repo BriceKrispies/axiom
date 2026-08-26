@@ -208,8 +208,9 @@ export class RenderSystem {
     );
 
     // ---- subsystems of the pipeline --------------------------------------
+    this._lightCap = ctx.config?.lightCap ?? null;
     this.csm = new CascadedShadowMaps(renderer, {
-      cascades: q.cascades,
+      cascades: ctx.config?.cascades ?? q.cascades,
       mapSize: q.shadowMapSize,
       maxDistance: q.shadowDistance,
     });
@@ -587,12 +588,27 @@ export class RenderSystem {
         depthBuffer: false,
         stencilBuffer: false,
       });
-      const prev = renderer.getRenderTarget();
-      renderer.setRenderTarget(scratch);
-      try {
-        materials.forEach((m) => warmFullScreen(renderer, m));
-      } finally {
-        renderer.setRenderTarget(prev);
+      // A FEW PER FRAME, NOT ALL TWENTY AT ONCE.
+      //
+      // `renderer.compile()` is synchronous, and twenty post materials in one
+      // loop is a 3.6 s hole in the frame record — MEASURED, and measured with
+      // a timer heartbeat confirming the main thread is genuinely blocked
+      // rather than merely starved of frames. The player has had control since
+      // ~3 s by then, so that is not a loading pause, it is the game freezing
+      // while they hold the controls.
+      //
+      // Chunking does not make the work smaller; it makes it interruptible. The
+      // same rule the fidelity ramp's compile follows — see prewarmRealScene.
+      const CHUNK = 3;
+      for (let i = 0; i < materials.length; i += CHUNK) {
+        const prev = renderer.getRenderTarget();
+        renderer.setRenderTarget(scratch);
+        try {
+          materials.slice(i, i + CHUNK).forEach((m) => warmFullScreen(renderer, m));
+        } finally {
+          renderer.setRenderTarget(prev);
+        }
+        await new Promise((r) => requestAnimationFrame(r));
       }
       boot.note('postPrograms', materials.length);
 
@@ -1420,6 +1436,10 @@ export class RenderSystem {
     this._collect(ctx?.scene ?? this.ctx.scene);
     this._syncSun(camera);
     camera.getWorldPosition(this._camPos);
+    // Before the cull, and therefore before the count is pinned: the cap is a
+    // decision about the SHADERS, and it has to be made once.
+    const retired = this._applyLightCap();
+    retired && console.info(`[render] light cap ${this._lightCap}: retired ${retired} lights`);
 
     // TAKE THE VISIBILITY, GIVE BACK THE INTENSITY.
     //
@@ -1468,6 +1488,47 @@ export class RenderSystem {
       e.light.intensity = e.applied;
       e.light.visible = fade > 0.002;
     }
+
+    // Lights the cap retired stay retired — see _applyLightCap(). Re-deciding
+    // per frame is what made the first version of this a 15 s REGRESSION: the
+    // visible count is in every lit material's program cache key, so a count
+    // that moves with the camera recompiles the entire material population
+    // every time the player walks past a lamp.
+    if (this._lightCap !== null) {
+      for (const e of this.lights) {
+        if (e.cappedOut) {
+          e.light.visible = false;
+          e.light.intensity = 0;
+          e.applied = 0;
+        }
+      }
+    }
+  }
+
+  /**
+   * Retire all but the nearest N point lights, ONCE, before the light count is
+   * pinned.
+   *
+   * The count three sees is a compile-time property: it is folded into every
+   * lit material's cache key and it unrolls the light loop, so each light is
+   * inlined shading code in every one of ~40 programs. Cutting it therefore
+   * shrinks the whole population at once — but only if the cut is permanent.
+   * Deciding it per frame changes the key whenever the player moves, and the
+   * driver recompiles everything; measured at +15 s cold.
+   */
+  _applyLightCap() {
+    if (this._lightCap === null) return 0;
+    const ranked = this.lights
+      .filter((e) => e.light.isPointLight || e.light.isSpotLight)
+      .sort(
+        (a, b) =>
+          a.light.position.distanceToSquared(this._camPos) -
+          b.light.position.distanceToSquared(this._camPos)
+      );
+    ranked.forEach((e, i) => {
+      e.cappedOut = i >= this._lightCap;
+    });
+    return Math.max(0, ranked.length - this._lightCap);
   }
 
   // ==========================================================================

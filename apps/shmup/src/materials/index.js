@@ -5,6 +5,7 @@ import { TextureForge } from './generator.js';
 import { LIBRARY, resolveName } from './library.js';
 import { extendMaterial, DEFAULT_PARAMS } from './shader.js';
 import { bakeMasks, setMask } from './masks.js';
+import { loadBakedManifest, loadBakedSet } from './baked.js';
 
 /**
  * Procedural PBR texture generation and the shared material library.
@@ -65,10 +66,6 @@ export class MaterialSystem {
    */
   holdBakes(on) {
     this._holdBakes = !!on;
-    // The shared maps first and synchronously: every surface bake's material
-    // samples them, and unlike the per-surface sets they are not primed to
-    // anything a lit material can use.
-    if (!on) boot.time('mat:sharedDeferred', () => this._forge?.paintDeferred());
     if (!on) this._idle = 0;
   }
 
@@ -77,6 +74,19 @@ export class MaterialSystem {
     // Progressive boot: the surface bakes are the most expensive shader work in
     // the app and the least urgent. See the note on stream().
     this._holdBakes = !!(ctx?.config?.holdBakes ?? ctx?.config?.progressiveBoot);
+    this._skipBakes = !!ctx?.config?.skipBakes;
+    this._bakeWarm = !!ctx?.config?.bakeWarm;
+    // PRE-BAKED TEXTURES, if this build has them. Started here and never
+    // awaited on the critical path: the level is assembled from primed
+    // textures either way, and stream() is what needs the answer.
+    // `?baked=0` forces the procedural path — the comparison that says what
+    // shipping them is worth, and the fallback if an asset is ever wrong.
+    this._bakedManifest = undefined;
+    const wanted = ctx?.config?.bakedTextures !== false;
+    (wanted ? loadBakedManifest() : Promise.resolve(null)).then((m) => {
+      this._bakedManifest = m ?? null;
+      m && console.info(`[materials] pre-baked textures: ${Object.keys(m.sets).length} surfaces`);
+    });
     const q = ctx?.config?.q;
     this._anisotropy = q?.anisotropy ?? 8;
     // Texture budget scales with the quality preset; 1K is the reference.
@@ -148,6 +158,22 @@ export class MaterialSystem {
     return 'concrete';
   }
 
+  /**
+   * WHAT A BAKED SURFACE IS, INDEPENDENT OF HOW BIG IT WAS BAKED.
+   *
+   * `_bakeKey` embeds the size, because two resolutions of the same surface are
+   * genuinely different texture sets at runtime. A shipped asset is not: it is
+   * the recipe, and the runtime blits it into whatever target it allocated, so a
+   * 512 bake can serve a 1024 request at the cost of some sharpness. Keying the
+   * manifest on the size would mean a smaller bake produced files the game never
+   * asks for — which it did, and the level rendered from half-loaded sets.
+   */
+  _bakeIdentity(name, bake) {
+    return `${name}|${bake.seed}|${bake.tintA ?? ''}|${bake.tintB ?? ''}|${(
+      bake.param ?? []
+    ).join('_')}`;
+  }
+
   _bakeKey(name, bake) {
     return `${name}|${bake.size}|${bake.seed}|${bake.tintA ?? ''}|${bake.tintB ?? ''}|${(
       bake.param ?? []
@@ -198,6 +224,9 @@ export class MaterialSystem {
     set = alloc.set;
     set.name = key;
     set.painted = false;
+    // Carried on the set so the build-time dump can name the asset the same way
+    // the loader looks it up. See _bakeIdentity().
+    set.bakedId = this._bakeIdentity(key, bake);
     this._sets.set(cacheKey, set);
 
     if (this._streamClosed) {
@@ -205,12 +234,34 @@ export class MaterialSystem {
       // reload). Nothing is going to drain the queue, so bake it here.
       this._paint(forgeDef, alloc, key, bake.size);
     } else {
-      this._pendingBakes.push({ def: forgeDef, alloc, key, size: bake.size, set });
+      this._pendingBakes.push({
+        def: forgeDef, alloc, key, cacheKey, bakedId: set.bakedId, size: bake.size, set,
+      });
     }
 
     const ms = performance.now() - t0;
     if (ms > 40) console.info(`[materials] alloc ${key} ${bake.size}px ${ms.toFixed(0)}ms`);
     return set;
+  }
+
+  /**
+   * Paint the deferred SHARED maps (detail, macro) — the ones every lit
+   * material samples.
+   *
+   * Deliberately not part of `holdBakes(false)`. That is called the instant the
+   * lighting's links are handed to the driver, and painting here means drawing
+   * with a program the driver has not reached yet, which blocks the main thread
+   * until it has drained the ENTIRE queue behind it. Doing that turned the
+   * "poll, never block" path into a blocking one without saying so, and it is
+   * why forcing `?lighting=block` appeared to change nothing: it was already
+   * blocking.
+   *
+   * The caller paints these once the lighting is READY instead — the queue is
+   * empty by then, and the first frame that shows a real material is the first
+   * frame that needs them.
+   */
+  paintShared() {
+    return boot.time('mat:sharedDeferred', () => this._forge?.paintDeferred() ?? 0);
   }
 
   /** Run one queued bake into the targets `getTextureSet()` already handed out. */
@@ -246,20 +297,65 @@ export class MaterialSystem {
     // So they wait until the lighting has been handed to the driver. It costs
     // the surface detail a few frames and it is the whole of that difference.
     while (this._holdBakes) yield WAIT;
+    // MEASUREMENT MODE. Drops every surface bake on the floor, leaving each set
+    // on the flat colour `allocate()` primed it to, and lets the stream finish
+    // normally so `loaded` still fires. This is how the question "what would
+    // baking these at build time actually buy?" gets a number instead of an
+    // argument — the 19 bake shaders are the largest single block of driver
+    // compile in the session. Not a shipping mode: the level renders untextured.
+    if (this._skipBakes) {
+      this._pendingBakes.length = 0;
+      this._streamClosed = true;
+      return;
+    }
+    // The manifest is one small fetch started back in init(); nothing here can
+    // be decided until it lands, and it lands long before the first surface
+    // would have finished baking.
+    while (this._bakedManifest === undefined) yield WAIT;
     while (this._pendingBakes.length) {
       const job = this._pendingBakes[0];
+      // ---- pre-baked path ------------------------------------------------
+      const entry = this._bakedManifest?.sets?.[job.bakedId] ?? null;
+      if (entry) {
+        if (!job.images) {
+          job.images = null;
+          loadBakedSet(entry).then((images) => { job.images = images; });
+          job.requested = true;
+          yield WAIT;
+          continue;
+        }
+        this._pendingBakes.shift();
+        boot.time(`mat:load:${job.key}@${job.size}`, () =>
+          this._forge.paintFromImages(job.alloc.rts, job.images));
+        job.alloc.set.painted = true;
+        yield job.key;
+        continue;
+      }
       // ISSUE, WAIT, THEN PAINT. Painting straight away compiles the surface's
       // program inside the first draw and blocks the main thread for as long as
       // that takes — up to 3.5 s for one surface, and 14.2 s across the set. See
       // TextureForge.issueProgram().
-      if (!this._forge.programReady(job.def)) {
+      // ISSUE-WAIT-PAINT WAS A COLD REGRESSION, and a large one.
+      //
+      // The intent was sound — compiling a 19 KB procedural shader inside its
+      // first draw blocks the main thread for up to 3.5 s — but the streamer is
+      // STRICTLY SEQUENTIAL, so every `yield WAIT` here costs a whole frame and
+      // stops every generator queued behind this one. Across nineteen surfaces
+      // that is ~25 s of cold wall time: `loaded` went from 44.5 s to 69.4 s,
+      // both medians of three, and it stayed hidden because the pre-baked
+      // textures take a different path and were masking it.
+      //
+      // `?bakewarm=1` restores it for comparison. The real fix is not to make
+      // the wait cheaper but to stop the queue being one-at-a-time — and that
+      // has its own cold cost, measured and rejected (see CLAUDE.md).
+      if (this._bakeWarm && !this._forge.programReady(job.def)) {
         // Issued once, then only polled. Re-issuing every frame asks three to
         // re-walk and re-validate the material for a link the driver is already
         // working on, which is pure overhead on the one thread this is trying
         // to keep free.
         if (!job.issued) {
           job.issued = true;
-          this._forge.issueProgram(job.def);
+          this._forge.issueProgram(job.def, job.alloc.rts);
         }
         yield WAIT;
         continue;

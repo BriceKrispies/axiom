@@ -14,6 +14,7 @@ import { BAKERS } from './bakers.js';
 // note in src/core/bakery.js for the production build this silently broke.
 import BakeryWorker from './bakers.worker.js?worker';
 import { createConfig } from './core/config.js';
+import { FIDELITY } from './core/fidelity.js';
 
 import { RenderSystem } from './render/index.js';
 import { MaterialSystem } from './materials/index.js';
@@ -28,6 +29,8 @@ import { UiSystem } from './ui/index.js';
 import { AudioSystem } from './audio/index.js';
 
 import { installShotApi } from './dev/shots.js';
+import { installBakeDump } from './dev/bakedump.js';
+import { installProgramCurve } from './dev/programcurve.js';
 import { prewarm, prewarmScene, prewarmRealScene } from './core/prewarm.js';
 import { FidelityRamp } from './core/fidelityramp.js';
 
@@ -56,7 +59,9 @@ const useRamp = !capture && params.get('prewarm') !== '0' && params.get('ramp') 
  * the bakes overlap the lighting, so the level gains detail sooner and its
  * lighting lands later; `ready` gives the driver to the lighting alone.
  */
-const bakeRelease = params.get('bakes') === 'ready' ? 'ready' : 'issued';
+const bakeRelease = ['ready', 'never'].includes(params.get('bakes'))
+  ? params.get('bakes')
+  : 'issued';
 
 /** One of progressive boot's three holds, on unless `?hold-<name>=0`. */
 const holdOf = (name) => useRamp && params.get(`hold-${name}`) !== '0';
@@ -68,6 +73,15 @@ const config = createConfig({
   holdPost: holdOf('post'),
   holdSky: holdOf('sky'),
   holdBakes: holdOf('bakes'),
+  skipBakes: params.get('bakes') === 'skip',
+  bakedTextures: params.get('baked') !== '0',
+  bakeWarm: params.get('bakewarm') === '1',
+  // Read from core/fidelity.js rather than the query string again: the shader
+  // builder and the sky dome already committed to a value at module load, and a
+  // second reading that could disagree with theirs is a bug waiting to happen.
+  fidelity: FIDELITY,
+  lightCap: params.has('lights') ? Number(params.get('lights')) : null,
+  cascades: params.has('cascades') ? Number(params.get('cascades')) : null,
 });
 
 /**
@@ -147,6 +161,12 @@ BOOT FAILURE\n\n${err.stack ?? err.message}</pre>`
 }
 
 const shotApi = installShotApi(engine, { capture, lockstep });
+// Build-time texture baking reads the forge's output back through here. Behind
+// a flag because it is a tool surface, not a game one. See dev/bakedump.js.
+if (params.get('bakedump') === '1') installBakeDump(engine);
+// Per-program DRIVER time for every program in the session — the measured cut
+// list for the app's largest cold cost. See dev/programcurve.js.
+if (params.get('progcurve') === '1') installProgramCurve(engine);
 
 /**
  * PROGRESSIVE BOOT — the frame loop starts before boot has finished.
@@ -295,6 +315,18 @@ const startRampCompile = () =>
     // not read as "less detail", it reads as broken.
     const real = await prewarmRealScene(engine, ramp, {
       mode: params.get('lighting') === 'block' ? 'block' : 'poll',
+      // Meshes per synchronous compile window. `?rampchunk=N` to tune it, or 0
+      // for the old single-shot compile that froze the game for 6.7 s.
+      // Meshes per synchronous compile window. `?rampchunk=N`, 0 for the old
+      // single-shot compile that froze the game for 6.7 s.
+      //
+      // 48 is measured, not reasoned: the cost of a window is NOT proportional
+      // to its size — 6 meshes gave a 35 ms worst window, 20 gave 6391 ms, 48
+      // gave 44 ms. What a window costs depends on what the driver happens to
+      // be busy with when it runs, so smaller is not reliably safer, and
+      // smaller also queues the lighting later (one rAF per window). Re-measure
+      // before changing it; do not infer.
+      chunk: Number(params.get('rampchunk') ?? 48) || 1e9,
       onIssued: () => {
         // The instant the lighting is in the driver's queue. `lit` minus this is
         // how long the driver actually took for it — which is the only way to
@@ -304,7 +336,14 @@ const startRampCompile = () =>
         bakeRelease === 'issued' && engine.ctx.peek('materials')?.holdBakes(false);
       },
     });
+    // `never` leaves every surface on its primed flat colour for the whole
+    // session. Not a shipping mode — it is how the ceiling gets measured: what
+    // the boot looks like with the 19 procedural bake shaders gone entirely,
+    // which is what baking them at build time would buy.
     bakeRelease === 'ready' && engine.ctx.peek('materials')?.holdBakes(false);
+    // The shared detail/macro maps, now that the driver's queue is empty. See
+    // MaterialSystem.paintShared() for why this is not done at release time.
+    engine.ctx.peek('materials')?.paintShared();
     const restored = ramp.release();
     // WHEN THE LEVEL STOPS BEING FLAT. Recorded as a milestone rather than left
     // to the span tree, because the span tree is closed by then: __READY__ now

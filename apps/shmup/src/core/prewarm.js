@@ -239,7 +239,7 @@ async function compileWithProgress(renderer, scenes, onProgress) {
  *   unpainted textures does not look like a level with less detail — it looks
  *   broken.
  */
-export async function prewarmRealScene(engine, ramp, { onIssued = null, mode = 'poll' } = {}) {
+export async function prewarmRealScene(engine, ramp, { onIssued = null, mode = 'poll', chunk = 6 } = {}) {
   const render = engine.ctx.peek('render');
   const renderer = render?.renderer;
   if (!renderer?.properties) return { ok: false, reason: 'no renderer' };
@@ -247,24 +247,58 @@ export async function prewarmRealScene(engine, ramp, { onIssued = null, mode = '
   const t0 = performance.now();
   const before = renderer.info.programs?.length ?? 0;
   const scratchRt = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false });
-  const prevRt = renderer.getRenderTarget();
-  renderer.setRenderTarget(scratchRt);
 
-  // The one synchronous window. Nothing may await inside it.
+  /**
+   * A FEW MESHES AT A TIME, WITH A FRAME BETWEEN EACH.
+   *
+   * `renderer.compile()` is synchronous, and over all 169 meshes at once it is
+   * 7256 ms of it — MEASURED, and measured as a 6720 ms hole in the frame
+   * record at the moment it runs. The player has had control since 2.7 s by
+   * then, so that is not a loading pause, it is the game freezing mid-play.
+   *
+   * Chunking does not make the work smaller. It makes it interruptible: the
+   * same translation and linking happens, spread over as many frames as there
+   * are chunks, and the loop keeps drawing between them.
+   *
+   * Each chunk is still ONE synchronous window — restore, compile, stand back
+   * in — because a frame that renders with a real material whose program is not
+   * linked is the stall this whole path exists to avoid. The await is strictly
+   * between chunks.
+   */
+  const meshes = ramp.meshes ?? [];
+  const chunkSize = Math.max(1, chunk);
   const pending = new Set();
-  try {
-    ramp.withRealMaterials(() => {
-      [
-        { scene: engine.scene, camera: engine.camera },
-        { scene: engine.viewScene, camera: engine.viewCamera },
-      ].forEach(({ scene, camera }) => {
-        renderer.compile(scene, camera).forEach((m) => pending.add(m));
-      });
-    });
-  } finally {
-    renderer.setRenderTarget(prevRt);
-    scratchRt.dispose();
+  const compileChunk = (subset) => {
+    const prevRt = renderer.getRenderTarget();
+    renderer.setRenderTarget(scratchRt);
+    try {
+      ramp.withRealMaterials(() => {
+        [
+          { scene: engine.scene, camera: engine.camera },
+          { scene: engine.viewScene, camera: engine.viewCamera },
+        ].forEach(({ scene, camera }) => {
+          renderer.compile(scene, camera).forEach((m) => pending.add(m));
+        });
+      }, subset);
+    } finally {
+      renderer.setRenderTarget(prevRt);
+    }
+  };
+
+  const chunkMs = [];
+  for (let i = 0; i < meshes.length; i += chunkSize) {
+    const at = performance.now();
+    compileChunk(meshes.slice(i, i + chunkSize));
+    chunkMs.push(Math.round(performance.now() - at));
+    // Let the game have a frame. rAF rather than setTimeout so this paces off
+    // presentation rather than off a timer the compile has already blown past.
+    await new Promise((r) => requestAnimationFrame(r));
   }
+  // The viewmodel scene has meshes the ramp never engaged; one final pass with
+  // no subset picks up anything left, and costs nothing if there is nothing.
+  compileChunk([]);
+  scratchRt.dispose();
+  try { window.__RAMPCHUNKS__ = chunkMs; } catch { /* non-browser */ }
   onIssued?.();
 
   // FORCE THE DRIVER TO FINISH NOW, at the cost of freezing the frame loop.
@@ -284,14 +318,46 @@ export async function prewarmRealScene(engine, ramp, { onIssued = null, mode = '
   }
 
   const total = pending.size;
+
+  /**
+   * PER-PROGRAM DRIVER TIME, which is the one thing the WebGL probe cannot see.
+   *
+   * `glprobe` charges a program the time something spent BLOCKED on it, and this
+   * phase blocks on nothing — the driver links on its own thread while this loop
+   * polls a non-blocking flag. So the probe reports these programs as nearly
+   * free while the phase as a whole is the most expensive thing in the session
+   * (measured: 26 programs, 14 245 ms). Without per-program times, "cut the
+   * expensive permutations" has no way to say WHICH.
+   *
+   * Recording when each material's program first reports ready gives the
+   * completion curve, and the gaps in that curve are the per-program costs — the
+   * driver compiles serially, so a material that lands 900 ms after the one
+   * before it cost 900 ms.
+   */
+  const curve = [];
+  const started = performance.now();
   for (;;) {
     for (const material of [...pending]) {
       const program = renderer.properties.get(material)?.currentProgram;
-      if (!program || program.isReady()) pending.delete(material);
+      if (!program || program.isReady()) {
+        pending.delete(material);
+        curve.push({
+          at: Math.round(performance.now() - started),
+          name: material.name || '(unnamed)',
+          // three's own cache key, so a permutation can be identified rather
+          // than guessed at from the material name.
+          key: String(program?.cacheKey ?? ''),
+          // A material with no program at all was never really compiled; it is
+          // deleted from `pending` so the loop can finish, and this says so
+          // instead of letting it look like a free program.
+          noProgram: !program,
+        });
+      }
     }
     if (pending.size === 0) break;
     await new Promise((r) => setTimeout(r, 16));
   }
+  try { window.__RAMPCURVE__ = curve; } catch { /* non-browser */ }
 
   return {
     ok: true,

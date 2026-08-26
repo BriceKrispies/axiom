@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LEAN } from '../core/fidelity.js';
 
 /**
  * onBeforeCompile extension for MeshStandardMaterial / MeshPhysicalMaterial.
@@ -845,17 +846,48 @@ export function extendMaterial(material, p, shared) {
   };
 
   const defines = {};
+  // AUSTERITY MODE — `?flat=1`. Leaves `defines` empty, so every #ifdef'd
+  // feature block below compiles out and every lit material in the level
+  // collapses to ONE program.
+  //
+  // Original note:
+  //
+  // Every one of the flags below is a compile-time define, so every distinct
+  // combination of them is a separate GPU program, and on a cold driver each
+  // costs on the order of half a second to link. MEASURED: the level's lit
+  // materials are 26 programs and ~27 s of the ~35 s it takes the game to
+  // settle. This collapses them to one permutation so the cost of that whole
+  // axis can be measured rather than argued about.
+  //
+  // It is a real fidelity cut, not an optimisation: no parallax, no triplanar
+  // projection, no weathering, no vertex-colour wear, no patches, no cloth.
+  // The surfaces keep their albedo, roughness/metalness and normal maps.
+  // PROJECTION AND MASKING ARE NOT OPTIONAL, even at lean fidelity.
+  //
+  // These three decide WHERE a surface samples its texture and which mask
+  // channel it reads, not how ornate the result is. Dropping them does not
+  // simplify the material, it makes it sample the wrong thing: the first
+  // attempt removed OW_TRIPLANAR along with everything else and the ground and
+  // road lost their projection entirely — the level rendered grey. Fast, and
+  // not a picture anyone would ship.
   if (p.uvMode === 'triplanar') defines.OW_TRIPLANAR = '';
   else if (p.uvMode === 'mesh') defines.OW_MESH_UV = '';
   if (p.localSpace) defines.OW_OBJECT_SPACE = '';
-  if (p.parallax > 0 && p.uvMode !== 'triplanar') defines.OW_PARALLAX = '';
-  if (p.detile > 0 && p.uvMode !== 'triplanar') defines.OW_DETILE = '';
-  if (p.weather[0] > 0 || p.weather[1] > 0 || p.weather[2] > 0) defines.OW_WEATHER = '';
-  if ((p.patch?.[0] ?? 0) > 0) defines.OW_PATCH = '';
-  if ((p.cloth?.[0] ?? 0) > 0 || (p.cloth?.[1] ?? 1) < 1) defines.OW_CLOTH = '';
-  if ((p.macroRelief ?? 0) > 0) defines.OW_MACRO_RELIEF = '';
   if (p.vertexMasks) defines.OW_VCOL_MASKS = '';
   if (p.alphaMask) defines.OW_ALPHA_MASK = '';
+
+  // The ornament, which lean fidelity drops. Each is a per-pixel feature that costs
+  // shader text and therefore cold compile time: a 48-iteration parallax march,
+  // procedural weathering, patch/cloth/detile/macro layers. The surface keeps
+  // its albedo, roughness, metalness, normal map and tint without them.
+  if (!LEAN) {
+    if (p.parallax > 0 && p.uvMode !== 'triplanar') defines.OW_PARALLAX = '';
+    if (p.detile > 0 && p.uvMode !== 'triplanar') defines.OW_DETILE = '';
+    if (p.weather[0] > 0 || p.weather[1] > 0 || p.weather[2] > 0) defines.OW_WEATHER = '';
+    if ((p.patch?.[0] ?? 0) > 0) defines.OW_PATCH = '';
+    if ((p.cloth?.[0] ?? 0) > 0 || (p.cloth?.[1] ?? 1) < 1) defines.OW_CLOTH = '';
+    if ((p.macroRelief ?? 0) > 0) defines.OW_MACRO_RELIEF = '';
+  }
   if (p.noGrad) defines.OW_NOGRAD = '';
 
   Object.assign(material.defines ?? (material.defines = {}), defines);
