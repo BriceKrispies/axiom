@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { probeGl } from '../core/glprobe.js';
 import { boot } from '../core/profile.js';
+import { LEAN } from '../core/fidelity.js';
 
 import { hdrTarget, blit, warmFullScreen, materialReady } from './pass.js';
 import { CascadedShadowMaps } from './csm.js';
@@ -219,15 +220,28 @@ export class RenderSystem {
       quality: this.qLevel,
     });
 
+    // LEAN DROPS THE POST CHAIN ENTIRELY, not just during boot.
+    //
+    // Eight programs and ~319 KB of translated HLSL — the second largest family
+    // in the app after the lit materials themselves. Cold boot is shader volume
+    // divided by translator throughput (see core/fidelity.js), so this is a
+    // direct, proportional cut rather than a scheduling one.
+    //
+    // What goes: screen-space reflections, ground-truth AO, contact shadows,
+    // temporal AA, motion blur and the ADS depth of field. What stays: the
+    // forward pass, the viewmodel composite, metering, bloom and the grade — so
+    // the image is still exposed and tone-mapped, just without the screen-space
+    // layers on top. FXAA takes over from TAA because it is one small program.
+    const post = !LEAN;
     this.gbuffer = new GBuffer();
-    this.gtao = q.gtao ? new Gtao() : null;
-    this.contact = this.qLevel >= 1 ? new ContactShadows() : null;
-    this.ssr = q.ssr ? new Ssr() : null;
-    this.taa = q.taa ? new Taa() : null;
-    this.motionBlur = q.motionBlur ? new MotionBlur() : null;
+    this.gtao = post && q.gtao ? new Gtao() : null;
+    this.contact = post && this.qLevel >= 1 ? new ContactShadows() : null;
+    this.ssr = post && q.ssr ? new Ssr() : null;
+    this.taa = post && q.taa ? new Taa() : null;
+    this.motionBlur = post && q.motionBlur ? new MotionBlur() : null;
     // ADS depth of field. Cheap (half-res gather, 32 taps) and only ever runs
     // while the sights are actually up, so it costs nothing in hipfire.
-    this.dof = this.qLevel >= 1 ? new DepthOfField() : null;
+    this.dof = post && this.qLevel >= 1 ? new DepthOfField() : null;
     this.bloom = q.bloom ? new Bloom(this.qLevel >= 2 ? 6 : 5) : null;
     this.exposure = new AutoExposure();
     // Headroom for a physically-scaled sky (sunlit scenes reach ~5000 cd/m2).

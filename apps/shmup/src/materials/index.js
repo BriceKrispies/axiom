@@ -3,6 +3,34 @@ import { boot } from '../core/profile.js';
 import { WAIT } from '../core/streaming.js';
 import { TextureForge } from './generator.js';
 import { LIBRARY, resolveName } from './library.js';
+import { LEAN } from '../core/fidelity.js';
+
+/**
+ * The lean surface map: every library surface folded onto one of four
+ * survivors — a wall, a ground, a metal and a glass. Anything absent keeps its
+ * own identity (foliage and fabric read as broken if they become concrete).
+ */
+const LEAN_SURFACE = {
+  concrete: 'concrete',
+  concrete_floor: 'concrete',
+  brick: 'concrete',
+  plaster: 'concrete',
+  tile: 'concrete',
+  wood: 'concrete',
+  asphalt: 'asphalt',
+  sand: 'asphalt',
+  dirt: 'asphalt',
+  gravel: 'asphalt',
+  metal_rust: 'metal_painted',
+  metal_painted: 'metal_painted',
+  metal_brushed: 'metal_painted',
+  corrugated: 'metal_painted',
+  rubber: 'metal_painted',
+  burlap: 'fabric',
+  fabric: 'fabric',
+  glass: 'glass',
+  foliage: 'foliage',
+};
 import { extendMaterial, DEFAULT_PARAMS } from './shader.js';
 import { bakeMasks, setMask } from './masks.js';
 import { loadBakedManifest, loadBakedSet } from './baked.js';
@@ -149,6 +177,20 @@ export class MaterialSystem {
    */
   _resolve(name) {
     const key = resolveName(name);
+    // LEAN: NINETEEN SURFACES BECOME FOUR.
+    //
+    // Cold boot is (number of lit materials) x (~100 KB of translated HLSL
+    // each), and the second factor is not movable — it is three's PBR core plus
+    // the surface composition that makes these materials work at all. The count
+    // is. Every surface the level stops using is a whole program the driver
+    // never has to translate.
+    //
+    // This is the largest single reduction available and also the most visible
+    // one: brick, plaster and tile all become concrete; sand, dirt and gravel
+    // all become asphalt; every metal becomes one metal. The level keeps its
+    // shapes, its lighting and its tints — the per-surface texture identity is
+    // what goes.
+    if (LEAN) return LEAN_SURFACE[key] ?? (LIBRARY[key] ? key : 'concrete');
     if (LIBRARY[key]) return key;
     if (!this._missing) this._missing = new Set();
     if (!this._missing.has(name)) {

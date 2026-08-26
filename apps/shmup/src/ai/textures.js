@@ -1,4 +1,12 @@
 import * as THREE from 'three';
+import { LEAN } from '../core/fidelity.js';
+
+/**
+ * The one detail configuration every character surface uses at lean fidelity.
+ * `nylon` because it is the set most of the body already uses; the cloth
+ * surfaces lose their distinct weave, which is the trade.
+ */
+const LEAN_DETAIL = { set: 'nylon', scale: 0.45 };
 
 import { bakeSoldierSets, RIM } from './bake.js';
 
@@ -90,7 +98,23 @@ export class SoldierMaterials {
    * the detail-blended program to the skin material, which shares every define.
    */
   get(setName, opts = {}) {
-    const d = opts.detail;
+    // LEAN: ONE DETAIL CONFIG FOR EVERY CHARACTER SURFACE.
+    //
+    // The program cache tag below is built from `d.set`, `d.scale` and the rim
+    // strength — a texture and two uniform VALUES, none of which change a line
+    // of generated code. Measured: three of these came out byte-identical in
+    // translated HLSL and still cost three separate ~100 KB programs. Four
+    // detail configs (cloth/nylon x 0.45/0.5) is what turns one soldier shader
+    // into a quarter of the app's entire shader volume.
+    //
+    // Canonicalising the VALUES rather than just the key matters: three runs
+    // `onBeforeCompile` once per PROGRAM, so materials sharing a program share
+    // the first one's uniforms. Collapsing the key alone would give every
+    // character the first material's detail texture. Collapsing the values makes
+    // that sharing correct by construction.
+    const d = LEAN
+      ? (opts.detail ? { ...opts.detail, ...LEAN_DETAIL } : null)
+      : opts.detail;
     const key = `${setName}|${opts.key ?? ''}|${(opts.tint ?? []).join(',')}|${opts.rough ?? ''}|${
       opts.metal ?? ''
     }|${d ? `${d.set},${d.scale},${d.normal},${d.rough}` : ''}`;
@@ -114,7 +138,7 @@ export class SoldierMaterials {
     m.normalScale.set(opts.normalScale ?? 1, opts.normalScale ?? 1);
     m.aoMapIntensity = opts.ao ?? 0.85;
     m.name = `ai_${setName}`;
-    this._attachShader(m, d && this.details[d.set] ? d : null, opts.rim);
+    this._attachShader(m, d && this.details[d.set] ? d : null, LEAN ? 1 : opts.rim);
     this.materials.set(key, m);
     return m;
   }

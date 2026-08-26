@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import { blit, hdrTarget, warmBlit } from './fullscreen.js';
+import { LEAN } from '../core/fidelity.js';
 import {
   ATMO,
   SCENE_LUX,
@@ -341,7 +342,9 @@ export class SkySystem {
       steps: Math.max(8, steps),
       scale: 0.5,
     });
-    this._unregisterPass = r.registerPass(this.volumetrics);
+    // The volumetric march is 32 KB of shader for god-rays and height fog. Lean
+    // trades it for the analytic fog the dome already provides.
+    this._unregisterPass = LEAN ? null : r.registerPass(this.volumetrics);
 
     // ---- bookkeeping ------------------------------------------------------
     this.ambientColor = new THREE.Color(0, 0, 0);
