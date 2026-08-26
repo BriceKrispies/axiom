@@ -25,6 +25,9 @@
  * program is three's shared lighting and shadow plumbing, not anything this app
  * chose. The first factor is freely reducible, and reducing it works: 101 -> 83
  * programs measured -16% time, 83 -> 60 measured -18%, 60 -> 53 measured -15%.
+ * The rule holds only for programs the frame DRAWS with: 53 -> 43 was ten
+ * programs that were compiled and never drawn, and it moved `loaded` -3.8 s but
+ * `settled` only -0.7 s.
  *
  * So `lean` is a programs budget, and everything in it is one decision about
  * what the game stops having:
@@ -57,7 +60,7 @@
  * game's identity in a way the sparks around it are not.
  *
  *   MEASURED, cold, "settled" (see CLAUDE.md), 60 live programs against 101:
- *     lean    15 583 ms      median of three, 53 programs
+ *     lean    14 835 ms      median of three, 43 programs
  *     full    ~26 000 ms     paired A/B, four pairs, all agreeing in sign
  *
  * `?fidelity=full` restores the original look. Capture mode forces it, because

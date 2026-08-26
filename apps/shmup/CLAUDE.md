@@ -181,12 +181,16 @@ The per-program factor is immovable — fewer lights bought 4%, fewer cascades
 bulk of a program is three's shared lighting and shadow plumbing rather than
 anything this app picked. **The program COUNT is the only lever that has ever
 worked**, and it works reliably: 101 -> 83 measured -16%, 83 -> 60 measured
--18%, 60 -> 53 measured -15%.
+-18%, 60 -> 53 measured -15%. The last step, 53 -> 43, moved `settled` only
+-0.7 s but `loaded` -3.8 s, and that gap is the useful part: those ten programs
+were compiled and never drawn, so they were costing the pre-warm rather than
+the path to a settled picture. Program count predicts boot time only while the
+programs are ones the frame actually uses.
 
 | cold, settled | programs | |
 |---|---|---|
-| `full` | 101 | ~26 000 ms |
-| **`lean` (default)** | **53** | **15 583 ms** |
+| `full` | 90 | ~26 000 ms |
+| **`lean` (default)** | **43** | **14 835 ms** |
 
 What `lean` gives up, each of them a deliberate decision: surface ornament
 (parallax, weathering, patch/cloth/detile/macro); surface variety (19 library

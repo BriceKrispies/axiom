@@ -905,6 +905,19 @@ export class WeaponMaterials {
     } else {
       m = this._fallback(key);
     }
+    // PATCH AT CREATION, NOT AT FIRST DRAW.
+    //
+    // The render patcher wraps `customProgramCacheKey`, so a patched material
+    // and an unpatched one are two different programs for the same surface.
+    // Patching normally happens when a mesh is collected out of the view scene,
+    // which means a material belonging to a weapon that is BUILT at boot but
+    // not currently equipped gets compiled unpatched by the pre-warm, and then
+    // compiled a second time the moment the player switches to that weapon —
+    // a wasted program at boot and a stall on the switch.
+    //
+    // `patch()` is idempotent (it holds a WeakSet), so doing it here simply
+    // moves it earlier than whichever collection would otherwise have caught it.
+    this.ctx?.peek?.('render')?.patcher?.patch(m);
     this.cache.set(key, m);
     return m;
   }

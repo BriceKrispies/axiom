@@ -142,6 +142,26 @@ const RENDER_SHADOW_WARM = false;
 /**
  * `renderer.compileAsync()`, reimplemented so it can report progress.
  *
+ * rebindEachCompile: THE BOUND RENDER TARGET DOES NOT SURVIVE AN `await`.
+ *
+ * three folds the bound target's colour space into the program cache key — a
+ * draw into a render target is `srgb-linear`, a draw into the canvas is `srgb`,
+ * and those are two different programs for the same material. Warming binds a
+ * scratch target so the programs it compiles are the ones the real draws will
+ * use. But an `await` between two compiles hands control back to the frame
+ * loop, which runs a whole frame and ends it with the canvas bound; the next
+ * compile then builds a set of `srgb` programs that nothing will ever draw
+ * with, and every one of those materials compiles a SECOND time on its first
+ * real draw.
+ *
+ * Measured: it was doubling the viewmodel's programs, and the doubles are
+ * invisible in the steady state because nothing draws them — a probe on
+ * `renderBufferDirect` finds zero canvas draws once the game is running.
+ *
+ * So the target is re-bound immediately before every compile call rather than
+ * once before the batch. The synchronous batch below needs no such care, which
+ * is exactly why it is the preferred path.
+ *
  * Identical in behaviour: compile the scene, then poll each material's program
  * until every one reports ready. The only addition is that the caller is told
  * how many are done, which is what lets a loading bar move truthfully through
@@ -160,9 +180,14 @@ const RENDER_SHADOW_WARM = false;
  */
 async function compileWithProgress(renderer, scenes, onProgress) {
   const parallel = renderer.getContext().getExtension('KHR_parallel_shader_compile');
+  // THE RENDER TARGET DOES NOT SURVIVE AN AWAIT. See rebindEachCompile().
+  const into = renderer.getRenderTarget();
   if (!parallel || !renderer.properties) {
     // eslint-disable-next-line no-restricted-syntax -- fallback path, see catch below
-    for (const { scene, camera } of scenes) await renderer.compileAsync(scene, camera);
+    for (const { scene, camera } of scenes) {
+      renderer.setRenderTarget(into);
+      await renderer.compileAsync(scene, camera);
+    }
     onProgress?.(1, 0, 0);
     return;
   }
@@ -494,6 +519,9 @@ export async function prewarm(engine, { onProgress = () => {}, transients = fals
     renderer.setRenderTarget(scratchRt);
     try {
       await renderer.compileAsync(engine.scene, engine.camera);
+      // Re-bind: the await above yielded, a frame ran, and the frame ends with
+      // the canvas bound. See rebindEachCompile().
+      renderer.setRenderTarget(scratchRt);
       await renderer.compileAsync(engine.viewScene, engine.viewCamera);
     } catch {
       // Older three or a driver without the extension — fall back to sync.
