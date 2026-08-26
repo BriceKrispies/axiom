@@ -1172,6 +1172,62 @@ ${REGIME[1]}`)
   // A profile from an older build may predate a counter; default them all so
   // the report degrades instead of throwing.
   const c = { ...Object.fromEntries(Object.keys(GL_LABEL_DEFAULTS).map((k) => [k, 0])), ...profile.counters };
+  // ---- what the stalls after __READY__ were doing -------------------------
+  //
+  // THE SPAN TREE CLOSES AT __READY__, AND ON THIS APP THAT IS THE FIRST FIFTH
+  // OF THE BOOT. Everything between the player getting control and the picture
+  // settling — the majority of `settled`, which is the number that matters —
+  // happens after the last span has closed, so "WHAT THE MAIN THREAD WAS DOING"
+  // above cannot see any of it and the stall list says only how long, never
+  // what.
+  //
+  // The CPU profile does run to the end of the page's life, so the samples are
+  // there; they simply have no span to be attributed to. Bucket them by the
+  // stall window instead. A stall's window is [at - ms, at]: `at` is the
+  // timestamp of the frame that ENDED the gap.
+  if (sampleList?.length && run.stalls?.frames?.length) {
+    const ready = profile.origin + (total ?? 0);
+    const late = run.stalls.frames.filter((s) => s.at > (total ?? 0) + 1);
+    if (late.length) {
+      console.log(
+        C.b('WHAT THE STALLS AFTER __READY__ WERE DOING') +
+          C.dim(`  ${late.length} stalls over ${STALL_MS}ms, past the last span`)
+      );
+      console.log(
+        C.dim('  Self time by function inside each stall window. `(program)` is the V8 engine')
+      );
+      console.log(
+        C.dim('  itself — parse, compile, and NATIVE CALLS, which is where a deferred GPU')
+      );
+      console.log(C.dim('  shader link is charged. A stall that is nearly all `(program)` is the driver.'));
+      for (const stall of late) {
+        const from = profile.origin + stall.at - stall.ms;
+        const to = profile.origin + stall.at;
+        const self = new Map();
+        let sampled = 0;
+        for (const s of sampleList) {
+          if (s.tMs < from || s.tMs > to) continue;
+          const f = s.frames[0];
+          const label = `${f?.name ?? '(anonymous)'}  ${f?.file ?? ''}`;
+          self.set(label, (self.get(label) ?? 0) + (s.dtMs || 0));
+          sampled += s.dtMs || 0;
+        }
+        const rows = [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+        console.log(
+          `  ${C.r(`${stall.ms.toFixed(0)}ms`.padStart(8))} at ${(stall.at - stall.ms).toFixed(0)}ms` +
+            C.dim(`  ${sampled.toFixed(0)}ms sampled`)
+        );
+        for (const [label, ms] of rows) {
+          const pct = sampled > 0 ? ((ms / sampled) * 100).toFixed(0) : '0';
+          console.log(`      ${`${ms.toFixed(0)}ms`.padStart(7)} ${String(pct).padStart(3)}%  ${label}`);
+        }
+        rows.length || console.log(C.dim('        (no samples — the profiler was not running here)'));
+      }
+      console.log('');
+      void ready;
+    }
+  }
+
   console.log(C.b('GPU WORK DURING BOOT'));
   console.log(
     `  shaders compiled  ${String(c.shaderCompiles).padStart(6)}   ` +
