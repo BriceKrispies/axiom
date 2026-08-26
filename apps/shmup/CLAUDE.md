@@ -180,13 +180,13 @@ The per-program factor is immovable — fewer lights bought 4%, fewer cascades
 13%, and swapping the material class to Lambert rendered nothing, because the
 bulk of a program is three's shared lighting and shadow plumbing rather than
 anything this app picked. **The program COUNT is the only lever that has ever
-worked**, and it works reliably: 101 -> 83 programs measured -16%, 83 -> 60
-measured -18%.
+worked**, and it works reliably: 101 -> 83 measured -16%, 83 -> 60 measured
+-18%, 60 -> 53 measured -15%.
 
 | cold, settled | programs | |
 |---|---|---|
 | `full` | 101 | ~26 000 ms |
-| **`lean` (default)** | **60** | **18 323 ms** |
+| **`lean` (default)** | **53** | **15 583 ms** |
 
 What `lean` gives up, each of them a deliberate decision: surface ornament
 (parallax, weathering, patch/cloth/detile/macro); surface variety (19 library

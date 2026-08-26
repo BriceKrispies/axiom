@@ -10,6 +10,59 @@ import { LEAN } from '../core/fidelity.js';
  * survivors — a wall, a ground, a metal and a glass. Anything absent keeps its
  * own identity (foliage and fabric read as broken if they become concrete).
  */
+/**
+ * THREE MATERIAL PROPERTIES THAT COST A WHOLE PROGRAM, dropped under `lean`.
+ *
+ * Folding nineteen library surfaces onto four (LEAN_SURFACE, below) cut the
+ * VARIETY but not the program count: measured after that fold, the world
+ * surfaces were still nineteen distinct programs out of sixty. The custom cache
+ * key here is already canonical — it is the sorted OW defines and nothing else
+ * (see shader.js) — so the duplication was coming from three's OWN key.
+ *
+ * Every name below flips a `USE_*` define or changes the material class, and so
+ * forces three to build a separate program even when two surfaces are otherwise
+ * identical:
+ *
+ *   physical                          MeshPhysicalMaterial, a different shader
+ *   sheen*                            USE_SHEEN
+ *   anisotropy*                       USE_ANISOTROPY
+ *   specularIntensity/Color           USE_SPECULAR
+ *   clearcoat*                        USE_CLEARCOAT
+ *   iridescence*                      USE_IRIDESCENCE
+ *   transmission/thickness/attenu*    USE_TRANSMISSION
+ *   toneMapped                        adds or drops the tone-mapping chunk
+ *   flatShading                       FLAT_SHADED
+ *   alphaTest                         USE_ALPHATEST
+ *
+ * What is NOT here matters as much: colour, tint, opacity, transparency, side,
+ * emissive, emissive intensity and envMapIntensity are all uniforms or blend
+ * state. They cost nothing at compile time, so a lean surface keeps every one of
+ * them and can still be any colour, glow, or be see-through. What it loses is
+ * the sheen on the fabric and the anisotropic streak on the brushed metal.
+ */
+const LEAN_STRIP = [
+  'physical',
+  'sheen',
+  'sheenRoughness',
+  'sheenColor',
+  'anisotropy',
+  'anisotropyRotation',
+  'specularIntensity',
+  'specularColor',
+  'clearcoat',
+  'clearcoatRoughness',
+  'iridescence',
+  'iridescenceIOR',
+  'iridescenceThicknessRange',
+  'transmission',
+  'thickness',
+  'attenuationDistance',
+  'attenuationColor',
+  'toneMapped',
+  'flatShading',
+  'alphaTest',
+];
+
 const LEAN_SURFACE = {
   concrete: 'concrete',
   concrete_floor: 'concrete',
@@ -448,6 +501,7 @@ export class MaterialSystem {
     p.groundY = opts.groundY ?? this._groundY;
 
     const threeProps = { ...(def.three ?? {}), ...(opts.three ?? {}) };
+    LEAN && LEAN_STRIP.forEach((k) => delete threeProps[k]);
     const usePhysical = threeProps.physical === true;
     delete threeProps.physical;
 

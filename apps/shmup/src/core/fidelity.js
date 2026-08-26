@@ -24,7 +24,7 @@
  * bought 4%, 13% and "renders nothing" respectively, because the bulk of a
  * program is three's shared lighting and shadow plumbing, not anything this app
  * chose. The first factor is freely reducible, and reducing it works: 101 -> 83
- * programs measured -16% time, 83 -> 60 measured -18%.
+ * programs measured -16% time, 83 -> 60 measured -18%, 60 -> 53 measured -15%.
  *
  * So `lean` is a programs budget, and everything in it is one decision about
  * what the game stops having:
@@ -57,7 +57,7 @@
  * game's identity in a way the sparks around it are not.
  *
  *   MEASURED, cold, "settled" (see CLAUDE.md), 60 live programs against 101:
- *     lean    18 323 ms      median of three
+ *     lean    15 583 ms      median of three, 53 programs
  *     full    ~26 000 ms     paired A/B, four pairs, all agreeing in sign
  *
  * `?fidelity=full` restores the original look. Capture mode forces it, because
