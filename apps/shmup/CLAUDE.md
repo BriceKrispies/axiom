@@ -170,29 +170,51 @@ They are independent because the costs are independent. Measured: dropping
 `ultra` to `low` barely moved the cold boot and compiled MORE programs, because
 the presets never touch the material shaders, which is where the text is.
 
-`lean` removes the per-pixel ornament from surface materials — parallax
-occlusion, procedural weathering, patch/cloth/detile/macro layers — and keeps
-everything that decides what a surface IS: projection, albedo, tint, roughness,
-metalness, normal map, vertex masks.
+**`lean` is a programs budget.** The governing arithmetic is linear and dull:
 
-| cold, median of 3, settled | |
-|---|---|
-| `full` | 34 754 ms |
-| **`lean` (default)** | **26 550 ms** |
+```
+cold boot  ~=  (number of lit programs)  x  (~100 KB of translated HLSL each)
+```
 
-Two things to know before changing it:
+The per-program factor is immovable — fewer lights bought 4%, fewer cascades
+13%, and swapping the material class to Lambert rendered nothing, because the
+bulk of a program is three's shared lighting and shadow plumbing rather than
+anything this app picked. **The program COUNT is the only lever that has ever
+worked**, and it works reliably: 101 -> 83 programs measured -16%, 83 -> 60
+measured -18%.
+
+| cold, settled | programs | |
+|---|---|---|
+| `full` | 101 | ~26 000 ms |
+| **`lean` (default)** | **60** | **18 323 ms** |
+
+What `lean` gives up, each of them a deliberate decision: surface ornament
+(parallax, weathering, patch/cloth/detile/macro); surface variety (19 library
+surfaces folded onto 4); AI character variants; the whole post chain (SSR, GTAO,
+contact shadows, TAA, motion blur, ADS DOF, bloom, FXAA); the sky (dome,
+volumetrics, LUTs, IBL — nine programs, replaced by a flat colour); and fx
+(particles, tracers, muzzle flash, impacts, decals, shells, explosions).
+
+**The weapon is deliberately not on that list.** The gun in your hands is this
+game's identity in a way the sparks around it are not — that is an art call, and
+it outranks the arithmetic.
+
+Three things to know before changing it:
 
 * **Projection is not ornament.** The first attempt dropped `OW_TRIPLANAR` with
   everything else; the ground and road lost their projection and the level
   rendered grey. It measured 6 s faster than the correct version, which is how
   a broken picture gets mistaken for a trade. Look at the frame, not just the
   number.
-* **The sky dome is not in `lean` yet.** It is the largest single shader (43 KB)
-  but removing it measured only -2.1 s, because the driver pipelines and the
-  cost moves to whichever program is next. The honest lean sky is a cubemap
-  baked from this same shader at build time — the level runs at a fixed 16:30
-  with `timeRate = 0`, so only cloud drift would be lost. `?sky=flat` is a
-  measurement switch, not a shipping option.
+* **A flat background colour is not free of plumbing.** The renderer holds
+  `autoClearColor = false` because it owns its own clears. three sees
+  `scene.background.isColor`, sets the clear colour and raises its own
+  forceClear — but the clear it then issues passes `autoClearColor` and so
+  paints nothing. The sky came out black with the colour correctly set on the
+  renderer. `render/index.js` clears to it by hand in the forward pass.
+* **Canonicalise VALUES, not cache keys.** `onBeforeCompile` runs once per
+  PROGRAM, not per material, so two materials collapse into one program only if
+  they agree on the numbers they feed it.
 
 **Capture mode forces `full`**, because the pixel gate's references are of the
 full renderer. That is a deferred decision, not a settled one: the gate now

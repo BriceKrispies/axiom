@@ -52,6 +52,18 @@ const SUN_KEY_GAIN = 1.55;
  */
 const SKY_AMBIENT_FRACTION = 0.15;
 
+/**
+ * Radiance of the flat `lean` sky, as a fraction of the beam. See the tint block
+ * in _updateSun.
+ *
+ * Calibrated against the real dome at the level's fixed 16:30, by screenshot.
+ * It is low because the sky fills the top third of the frame and the auto
+ * exposure meters on it: 0.5 of the beam clips the blue channel to a white haze
+ * AND drags the whole image a stop over, washing the walls out. 0.07 lands on
+ * the dome's horizon blue and lets the sunlit ground keep its warmth.
+ */
+const LEAN_SKY_RADIANCE = 0.07;
+
 /** Cool night hue for the published ambient — moonlight after the Purkinje shift. */
 const NIGHT_AMBIENT_HUE = [0.35, 0.5, 1.0];
 
@@ -295,15 +307,30 @@ export class SkySystem {
     // stand-in) and the volumetric pass (which the render system has gated out
     // of the frame). The published ambient colour is a CPU stand-in with no GPU
     // readback, so nothing on screen or in gameplay is waiting on them.
-    this.luts = new SkyLuts(this.renderer, this.shared);
-    if (!this._envHeld) this.luts.bakeStatic();
+    // LEAN HAS NO SKY SHADER AT ALL.
+    //
+    // The dome is 43 KB of atmosphere, cloud and star field; the volumetric
+    // march another 32 KB; the four LUT bakes and the equirect IBL bake more
+    // again — nine programs for a background that never changes, since the level
+    // runs at a fixed 16:30 with `timeRate = 0`. Lean paints a flat colour
+    // instead and keeps the CPU-side sun and ambient, which are what actually
+    // light the level.
+    this.luts = LEAN ? null : new SkyLuts(this.renderer, this.shared);
+    if (this.luts && !this._envHeld) this.luts.bakeStatic();
 
     // ---- visible sky ------------------------------------------------------
-    this.dome = new SkyDome(this.shared);
-    ctx.scene.add(this.dome.mesh);
+    this.dome = LEAN ? null : new SkyDome(this.shared);
+    if (this.dome) ctx.scene.add(this.dome.mesh);
     // We paint the sky ourselves; drop the renderer's fallback background so it
     // is not drawn underneath us every frame for nothing.
-    ctx.scene.background = null;
+    //
+    // Unless there is no dome, in which case the background IS the sky and
+    // leaving it null renders deep space over a desert town at half past four.
+    // The colour is not a constant: it is driven every tick from the same CPU
+    // atmosphere the ambient uses (see the tint block in _updateSun), so the
+    // flat sky and the light falling on the level cannot disagree.
+    this.flatSky = LEAN ? new THREE.Color(0, 0, 0) : null;
+    ctx.scene.background = this.flatSky;
 
     // ---- lights -----------------------------------------------------------
     // The renderer takes over shadowing for whichever directional light is
@@ -720,6 +747,18 @@ export class SkySystem {
     const aLevel = SKY_AMBIENT_FRACTION * this._baseSunIntensity + 0.9 * moonI;
     this.ambientColor.setRGB(ar * aLevel, ag * aLevel, ab * aLevel);
 
+    // The flat lean sky, from the same (ar, ag, ab) hue. It is scaled off the
+    // BEAM rather than off `aLevel`, because `aLevel` is a diffuse-irradiance
+    // proxy at 15% of the beam and the sky's own radiance is roughly the beam's
+    // order — paint the ambient level directly and you get a sky darker than the
+    // walls it is lighting. LEAN_SKY_RADIANCE is calibrated against the dome, by
+    // eye, at the level's fixed 16:30.
+    this.flatSky?.setRGB(
+      ar * LEAN_SKY_RADIANCE * this._baseSunIntensity,
+      ag * LEAN_SKY_RADIANCE * this._baseSunIntensity,
+      ab * LEAN_SKY_RADIANCE * this._baseSunIntensity
+    );
+
     // ---- indirect budget, published for the renderer ------------------------
     // The other half of the beam floor. A low sun does not just redden: the whole
     // western sky lights up, and the PMREM integrates that into an irradiance
@@ -839,6 +878,7 @@ export class SkySystem {
   }
 
   _bakeSky() {
+    if (!this.luts) return;
     // Held during boot — see holdEnv(). The dirty flag stays set, so the first
     // update after release bakes it.
     if (this._envHeld) {
@@ -880,6 +920,7 @@ export class SkySystem {
    */
   async releaseEnv() {
     this._envHeld = false;
+    if (!this.luts || !this.dome) return;
     await this.luts.warm();
     this.luts.bakeStatic();
     this._bakeSky();
@@ -889,6 +930,9 @@ export class SkySystem {
   }
 
   _bakeEnv() {
+    // No dome means no sky to convolve; the render system's fallback
+    // environment stays in place as the ambient source.
+    if (!this.dome) return;
     // Held during boot — see holdEnv(). The dirty flag stays set, so the first
     // update after release bakes it even if nobody calls releaseEnv().
     if (this._envHeld) {

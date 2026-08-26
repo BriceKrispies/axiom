@@ -13,18 +13,52 @@
  * MORE programs, not fewer — because the presets never touched the material
  * shaders, which are where the text is.
  *
- * WHY LEAN IS THE DEFAULT. A cold first visit is ~35 s to settle, and the great
- * majority of that is the driver linking ~110 programs, several of them 130-145
- * KB of generated GLSL. No amount of scheduling moves it; the app spent a long
- * time proving that. The only lever that works is having less shader. `lean`
- * takes the per-pixel ornament out of the surface materials — parallax
- * occlusion, procedural weathering, patch/cloth/detile/macro layers — and keeps
- * everything that decides WHAT a surface is: its projection, albedo, tint,
- * roughness, metalness, normal map and vertex masks.
+ * WHY LEAN IS THE DEFAULT. A cold first visit is dominated by the GPU driver
+ * linking programs — serially, one at a time, with the GPU otherwise idle. The
+ * governing arithmetic is boringly linear:
  *
- *   MEASURED, cold, median of three runs, "settled" (see CLAUDE.md):
- *     full    34 754 ms
- *     lean    26 550 ms      -8.2 s
+ *     cold boot  ~=  (number of lit programs)  x  (~100 KB of translated HLSL each)
+ *
+ * The second factor is immovable. Three separate attempts to shrink it — fewer
+ * lights, fewer shadow cascades, swapping the material class to Lambert —
+ * bought 4%, 13% and "renders nothing" respectively, because the bulk of a
+ * program is three's shared lighting and shadow plumbing, not anything this app
+ * chose. The first factor is freely reducible, and reducing it works: 101 -> 83
+ * programs measured -16% time, 83 -> 60 measured -18%.
+ *
+ * So `lean` is a programs budget, and everything in it is one decision about
+ * what the game stops having:
+ *
+ *   surface ornament   parallax occlusion, procedural weathering, patch, cloth,
+ *                      detile and macro-relief layers come out of the material
+ *                      shader. What decides WHAT a surface is — projection,
+ *                      albedo, tint, roughness, metalness, normal map, vertex
+ *                      masks — all stays.
+ *   surface variety    nineteen library surfaces fold onto four (LEAN_SURFACE
+ *                      in materials/index.js). Walls stop differing from walls.
+ *   character variants one detail set and a fixed rim for every AI soldier,
+ *                      canonicalised by VALUE — `onBeforeCompile` runs once per
+ *                      PROGRAM, so two materials must agree on the numbers, not
+ *                      merely on the cache key.
+ *   the post chain     SSR, GTAO, contact shadows, TAA, motion blur, ADS depth
+ *                      of field, bloom and FXAA. The composite still tone-maps
+ *                      and grades.
+ *   the sky            the dome, the volumetric march, four LUT bakes and the
+ *                      equirect IBL — nine programs. Replaced by a flat colour
+ *                      driven from the same CPU atmosphere that drives the
+ *                      ambient, so the sky and the light on the level agree.
+ *                      The level runs at a fixed 16:30 with `timeRate = 0`, so
+ *                      only cloud drift is actually lost.
+ *   fx                 particles, tracers, muzzle flash, impacts, decals,
+ *                      shells, explosions, haze, ambience. The system is not
+ *                      registered at all (see main.js).
+ *
+ * The weapon is deliberately NOT on that list. The gun in your hands is this
+ * game's identity in a way the sparks around it are not.
+ *
+ *   MEASURED, cold, "settled" (see CLAUDE.md), 60 live programs against 101:
+ *     lean    18 323 ms      median of three
+ *     full    ~26 000 ms     paired A/B, four pairs, all agreeing in sign
  *
  * `?fidelity=full` restores the original look. Capture mode forces it, because
  * the pixel gate's reference images are of the full renderer — see the note in
@@ -73,17 +107,3 @@ export const FIDELITY = params.get('capture') === '1'
 
 /** True when the expensive per-pixel material features are compiled out. */
 export const LEAN = FIDELITY !== 'full';
-
-/**
- * The sky dome is NOT part of `lean` yet, and that is deliberate.
- *
- * It is the largest single shader in the app (43 KB of atmosphere, volumetric
- * cloud and star field) and removing it was measured at only -2.1 s — far less
- * than its apparent share, because the driver pipelines and the cost simply
- * moved to the next program. The honest lean sky is a cubemap baked from this
- * exact shader at build time, which keeps the image and loses only the cloud
- * drift; the level runs at a fixed 16:30 with `timeRate = 0`, so nothing else
- * about it is animated. Until that exists, `?sky=flat` is a measurement switch
- * that renders a two-colour gradient and is not a shipping option.
- */
-export const LEAN_SKY = params.get('sky') === 'flat';

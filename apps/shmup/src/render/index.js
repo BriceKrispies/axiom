@@ -242,7 +242,10 @@ export class RenderSystem {
     // ADS depth of field. Cheap (half-res gather, 32 taps) and only ever runs
     // while the sights are actually up, so it costs nothing in hipfire.
     this.dof = post && this.qLevel >= 1 ? new DepthOfField() : null;
-    this.bloom = q.bloom ? new Bloom(this.qLevel >= 2 ? 6 : 5) : null;
+    // Bloom and FXAA are small programs, but at lean everything that is not
+    // needed to get a lit frame on the canvas goes. The composite still tone-maps
+    // and grades; it just has no glow to add and no edge pass after it.
+    this.bloom = post && q.bloom ? new Bloom(this.qLevel >= 2 ? 6 : 5) : null;
     this.exposure = new AutoExposure();
     // Headroom for a physically-scaled sky (sunlit scenes reach ~5000 cd/m2).
     // The lower limit is the night exposure lock: a moonlit street meters at
@@ -253,7 +256,7 @@ export class RenderSystem {
     this.lut = createGradeLut('default');
     this.composite = createComposite(this.lut);
     this.viewComposite = createViewComposite();
-    this.fxaa = q.taa ? null : createFxaa();
+    this.fxaa = post && !q.taa ? createFxaa() : null;
     // MSAA on the viewmodel target only. It is the one buffer whose geometric
     // edges no longer get a temporal filter, and 4x on a single small pass is
     // far cheaper than any spatial substitute at the same quality.
@@ -1682,7 +1685,19 @@ export class RenderSystem {
     // ---- 8. forward world pass -------------------------------------------
     this.csm.uniforms.owSunDirView.value.copy(this.sunDirView);
     renderer.setRenderTarget(this.hdrRt);
+    // A FLAT COLOUR BACKGROUND HAS TO BE CLEARED TO BY HAND HERE.
+    //
+    // three's background pass sees `scene.background.isColor`, calls
+    // `setClearColor` and raises its own forceClear — but the clear it then
+    // issues is `renderer.clear(autoClearColor, autoClearDepth, ...)`, and this
+    // renderer holds all three of those false because it owns its own clears.
+    // So the colour lands on the renderer and is never painted, and the sky
+    // comes out the target's clear black. Textures and cubemaps are unaffected;
+    // they are drawn as geometry.
+    const flat = scene.background?.isColor ? scene.background : null;
+    if (flat) renderer.setClearColor(flat, 1);
     renderer.clear(true, true, false);
+    if (flat) renderer.setClearColor(0x000000, 1);
     renderer.render(scene, camera);
 
     // ---- 9. viewmodel into its OWN colour+depth target --------------------

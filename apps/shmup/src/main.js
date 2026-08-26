@@ -14,7 +14,7 @@ import { BAKERS } from './bakers.js';
 // note in src/core/bakery.js for the production build this silently broke.
 import BakeryWorker from './bakers.worker.js?worker';
 import { createConfig } from './core/config.js';
-import { FIDELITY } from './core/fidelity.js';
+import { FIDELITY, LEAN } from './core/fidelity.js';
 
 import { RenderSystem } from './render/index.js';
 import { MaterialSystem } from './materials/index.js';
@@ -140,8 +140,28 @@ engine
   .add(WorldSystem)
   .add(PhysicsSystem)
   .add(PlayerSystem)
-  .add(WeaponSystem)
-  .add(FxSystem)
+  .add(WeaponSystem);
+
+// FX IS A LEAN CASUALTY, and the largest single one.
+//
+// Particles, tracers, muzzle flash, impacts, decals, shells, explosions, haze
+// and ambience between them carry the sprite atlas bake and several of the
+// heaviest remaining programs. The system is driven ENTIRELY by events
+// ('bullet:impact', 'weapon:fire', 'explosion', ...) and nothing calls into it,
+// so leaving it unregistered drops it whole: every emitter keeps firing into a
+// bus with no listener, and no caller needs a guard.
+//
+// What this costs is visible and worth stating plainly — shooting has no muzzle
+// flash, no tracer, no impact spark and leaves no decal. The weapon itself
+// stays, because the gun in your hands is this game's identity in a way the
+// sparks around it are not.
+//
+// The chain is split rather than filtered so that under `full` the system order
+// is byte-for-byte what it was: fx initialises and updates between weapons and
+// AI, exactly where it always has.
+if (!LEAN) engine.add(FxSystem);
+
+engine
   .add(AiSystem)
   .add(UiSystem)
   .add(AudioSystem);
