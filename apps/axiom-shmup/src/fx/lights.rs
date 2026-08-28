@@ -9,12 +9,37 @@
 //! lands exactly on zero at `duration`.
 //!
 //! What is dropped: `constructor(scene, count)`'s `THREE.PointLight`
-//! construction and `register(render)`'s `render.addLight` call
-//! (`lights.js:16-33`) — there is no live light to register with a renderer
-//! yet. [`LightPool`] tracks the same per-slot state
+//! construction (`lights.js:17-36`) and `register(render)`'s
+//! `render.addLight` call (`lights.js:39-45`) — there is no live light to
+//! register with a renderer
+//! yet. The four authored numbers those two calls carry that no per-slot
+//! field holds are recorded as [`POINT_LIGHT_DECAY`], [`REGISTER_RANGE`] and
+//! [`REGISTER_PRIORITY`] rather than dropped. [`LightPool`] tracks the same
+//! per-slot state
 //! (`peak`/`age`/`duration`/`rise`/`decay`/`priority`) and the same
 //! selection/decay logic; a future presentation layer reads
 //! [`LightPool::slots`] to drive real lights.
+
+/// `new THREE.PointLight( 0xffffff, 0, 14, 2 )`'s fourth argument
+/// (`lights.js:19`) — THREE's **physical falloff exponent**, i.e. `1/d^2`.
+///
+/// Not to be confused with [`LightSlot::decay`], which is the source's own
+/// per-entry `decay: 3` (`lights.js:25`), the exponential *intensity* decay
+/// rate in 1/seconds. Two different quantities that the source spells the same
+/// way; recorded here because the port dropped this one entirely and a
+/// presentation layer needs it to reproduce the falloff.
+pub const POINT_LIGHT_DECAY: f64 = 2.0;
+
+/// `render.addLight?.( e.light, { range: 90, priority: 3 } )`
+/// (`lights.js:41`). The source's comment says why: "A generous range keeps
+/// the renderer's distance fade at 1 for anything in front of the player, so
+/// we control intensity ourselves." Dropped along with the `register` call,
+/// and recorded here so the intent survives — a renderer that culls these at
+/// [`LightSlot::distance`] (14) instead would fade them out at arm's length.
+pub const REGISTER_RANGE: f64 = 90.0;
+
+/// The renderer priority the same `addLight` call passes (`lights.js:41`).
+pub const REGISTER_PRIORITY: f64 = 3.0;
 
 /// One pooled light's state — the source's per-entry object,
 /// `lights.js:18-27`.

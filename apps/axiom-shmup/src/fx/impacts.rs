@@ -21,6 +21,7 @@ use crate::fx::atlas::{d, p};
 use crate::fx::particles::reset_spawn;
 use crate::fx::system::FxSystem;
 use crate::fx::util::{blackbody, clamp_cone, cone, disc_on, reflect, toward_hemi, COS55};
+use crate::physics::surfaces::mask;
 use crate::world::palette::Surface;
 
 const TWO_PI: f64 = std::f64::consts::PI * 2.0;
@@ -93,7 +94,17 @@ fn spark(fx: &mut FxSystem, x: f64, y: f64, z: f64, dx: f64, dy: f64, dz: f64, s
     rdy /= l;
     rdz /= l;
     let reach = (speed * 0.22).min(3.2);
-    let Some(hit) = world.raycast((x, y, z), (rdx, rdy, rdz), reach, 0xffff) else {
+    // `ph.raycast(RAY_O, RAY_D, reach, ph.MASK?.WORLD ?? 0xffff)`
+    // (`impacts.js:83`). `ph.MASK` is assigned unconditionally in the physics
+    // constructor (`physics/index.js:190`), so the `?? 0xffff` arm is the
+    // no-physics fallback and never runs with a world bound — and we only get
+    // here at all because `fx.world` resolved. An earlier draft took the dead
+    // arm, so ricochets bounced off actors, ragdolls, clip brushes, triggers
+    // and foliage as well as the static world. `MASK.WORLD` is
+    // `STATIC | PROP` (`physics/surfaces.js:132`) = 3. This is the same
+    // mistake `FxSystem::add_decal` already names and fixes for the decal
+    // projection mask.
+    let Some(hit) = world.raycast((x, y, z), (rdx, rdy, rdz), reach, mask::WORLD) else {
         return;
     };
     let t = (hit.distance / speed.max(1.0)).max(0.02);
@@ -598,7 +609,14 @@ fn metal(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f6
     s.size_curve = 0.38;
     s.life = 0.07;
     s.drag = 8.0;
-    s.rot = crate::fx::muzzle::screen_angle(None, rx, ry, rz) + fx.rng.signed() * 0.2;
+    // `s.rot = screenAngle( fx, false, rx, ry, rz ) + rng.signed() * 0.2`
+    // (`impacts.js:437`). `FLASH_LOBE` is rooted at its -X edge, so the tongue
+    // only points along the reflected ray if it is rolled to that ray's
+    // *screen* angle. An earlier draft passed `None` here, which is the
+    // source's no-camera arm and returns 0.0 — so every metal ricochet's
+    // brightest sprite pointed screen-right whatever direction the round came
+    // from. `fx.camera_basis` is `ctx.camera`, which the source has here.
+    s.rot = crate::fx::muzzle::screen_angle(fx.camera_basis, rx, ry, rz) + fx.rng.signed() * 0.2;
     s.r0 = 1.0;
     s.g0 = 0.6;
     s.b0 = 0.26;

@@ -273,9 +273,15 @@ impl Default for Emitter {
 /// `Object3D.getWorldDirection` is `set(e[8], e[9], e[10]).normalize()` — the
 /// **+Z column** of the column-major world matrix — and `Camera` overrides it
 /// to `super.getWorldDirection(target).negate()` (`Camera.js:100-103`). The
-/// negate happens **after** the normalize, which is what this reproduces:
-/// normalising first and negating second is not the same rounding as
-/// negating a vector and normalising that, and the source does the former.
+/// negate happens **after** the normalize, and this reproduces that order.
+///
+/// It does *not* matter numerically, and an earlier version of this comment
+/// claimed it did ("normalising first and negating second is not the same
+/// rounding as negating a vector and normalising that"). IEEE-754 negation is
+/// exact — it flips a sign bit — so the two orders are bit-identical. The
+/// order is kept because it is the source's, not because reversing it would
+/// drift. Left as a warning: the code is right, and the old justification
+/// invited someone to "fix" it on a premise that was never true.
 ///
 /// `normalize()` is `divideScalar(length() || 1)` — [`V3::normalize`] already
 /// carries the `|| 1`.

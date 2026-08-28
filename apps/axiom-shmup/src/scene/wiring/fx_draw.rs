@@ -225,10 +225,23 @@ const PARTICLE_TILE_CLASS: [usize; 16] = [
 /// doc).
 pub const PARTICLE_ALPHAS: [f64; 4] = [0.16, 0.38, 0.64, 0.94];
 
-/// A sprite fainter than this is not drawn at all. Half the lowest tier: below
-/// it, quantising *up* to `PARTICLE_ALPHAS[0]` would make a dying particle
-/// brighter than it is, and quantising down is zero anyway.
-const PARTICLE_ALPHA_FLOOR: f64 = 0.08;
+/// A sprite fainter than this is not drawn at all.
+///
+/// This is the source's *only* alpha cull — `if ( a < 0.0035 ) discard`
+/// (`particles.js:191`) — which this port already carries as
+/// [`particles::DISCARD_ALPHA`] and which [`crate::scene::wiring::fx_audio`]
+/// already applies. An earlier draft of this file invented `0.08` instead, 23x
+/// higher, and applied it to `vCol.a` where the source applies its threshold to
+/// `tex.a * vCol.a` (so the source's effective `vCol.a` cull is *at most* this
+/// loose, and usually looser still). Every sprite popped off mid-fade.
+///
+/// The tier quantisation below is a **separate and still-open** approximation,
+/// and the old constant's rationale confused the two: the faintest material
+/// this pool owns is `PARTICLE_ALPHAS[0]`, so a sprite between this floor and
+/// that tier draws brighter than it should. That is an argument for a lower
+/// *tier*, not a higher *floor* — raising the floor does not remove the step,
+/// it only moves it earlier and shortens every particle's life.
+const PARTICLE_ALPHA_FLOOR: f64 = particles::DISCARD_ALPHA;
 
 /// One drawn decal appearance. Same shape as [`ParticleClass`]; decals are
 /// never emissive, so there is no flag.
@@ -278,8 +291,12 @@ const DECAL_TILE_CLASS: [usize; 16] = [
 /// the very end, so the tiers are doing less work.
 pub const DECAL_ALPHAS: [f64; 3] = [0.30, 0.62, 0.92];
 
-/// A decal fainter than this is not drawn.
-const DECAL_ALPHA_FLOOR: f64 = 0.15;
+/// A decal fainter than this is not drawn. The source culls a decal texel at
+/// `alphaTest: 0.004` (`decals.js:83`) and again, on the faded alpha, at
+/// `if ( diffuseColor.a < 0.004 ) discard` in its patched fragment shader
+/// (`decals.js:108`). An earlier draft invented `0.15` here — 37x higher —
+/// which cut every bullet hole off partway through its fade-out.
+const DECAL_ALPHA_FLOOR: f64 = 0.004;
 
 /// The three fixed intensities a pooled flash light can take, in **engine**
 /// units (see [`fit_point_intensity`]).
@@ -414,7 +431,34 @@ pub struct FxAtlasTiles {
     particle: Vec<(u32, Vec<u8>)>,
     /// `(side, rgba8)` per [`DECAL_CLASSES`] entry, in order.
     decal: Vec<(u32, Vec<u8>)>,
+    /// The Sobel-derived tangent-space normal plane of the same decal tiles —
+    /// `decals.js:69`'s `normalMap: o.normal`. Baked by
+    /// [`crate::fx::atlas::bake_decal_atlas`] since the atlas port landed, and
+    /// bound to nothing until now: bullet holes had no relief at all.
+    decal_normal: Vec<(u32, Vec<u8>)>,
+    /// The packed ORM plane of the same decal tiles. The source binds one
+    /// texture to three slots — `roughnessMap`/`metalnessMap`/`aoMap`, all
+    /// `o.orm` (`decals.js:70-72`) — and THREE reads `.g`/`.b`/`.r` out of it
+    /// respectively. The bake packs exactly that (`r`=ao, `g`=roughness,
+    /// `b`=metalness, `atlas.rs`'s module doc), and Axiom's own ORM lane is
+    /// `(occlusion, roughness, metalness, height)`, the same channel order, so
+    /// this is one `with_orm_texture` rather than three bindings.
+    decal_orm: Vec<(u32, Vec<u8>)>,
+    /// `(side, rgba8)` for the casing's normal and ORM maps —
+    /// `buildBrassTextures(fx.rng.u32(), 128)` (`shells.js:55`), bound by the
+    /// source's brass material as `normalMap` / `roughnessMap` + `aoMap`
+    /// (`shells.js:61-63`). Baked since the shells port landed and, like the
+    /// decal planes, bound to nothing: the casings were flat gold cylinders.
+    /// Not cut from an atlas — these are whole 128px textures.
+    brass_normal: (u32, Vec<u8>),
+    brass_orm: (u32, Vec<u8>),
 }
+
+/// The side of the brass maps, `buildBrassTextures(fx.rng.u32(), 128)`
+/// (`shells.js:55`); `crate::fx::shells::ShellSystem::new` bakes at the same
+/// size. [`crate::fx::atlas::BrassTextures`] carries the bytes without a
+/// dimension, so the two have to agree here.
+const BRASS_MAP_SIDE: u32 = 128;
 
 impl FxAtlasTiles {
     /// Cut the tiles out of a constructed [`FxSystem`]'s baked atlases. Call
@@ -436,6 +480,30 @@ impl FxAtlasTiles {
                     )
                 })
                 .collect(),
+            decal_normal: DECAL_CLASSES
+                .iter()
+                .map(|c| {
+                    cut_tile(
+                        &fx.decal_atlas.normal,
+                        fx.decal_atlas.size,
+                        fx.decal_atlas.cols,
+                        c.tile,
+                    )
+                })
+                .collect(),
+            decal_orm: DECAL_CLASSES
+                .iter()
+                .map(|c| {
+                    cut_tile(
+                        &fx.decal_atlas.orm,
+                        fx.decal_atlas.size,
+                        fx.decal_atlas.cols,
+                        c.tile,
+                    )
+                })
+                .collect(),
+            brass_normal: (BRASS_MAP_SIDE, fx.shells.brass.normal.clone()),
+            brass_orm: (BRASS_MAP_SIDE, fx.shells.brass.orm.clone()),
         }
     }
 }
@@ -493,9 +561,21 @@ impl FxDraw {
         let mut decals = Vec::with_capacity(DECAL_CLASSES.len() * DECAL_ALPHAS.len());
         for (index, class) in DECAL_CLASSES.into_iter().enumerate() {
             let texture = upload_tile(app, &tiles.decal[index]);
+            // `decals.js:69-76`. The three map bindings the source makes onto
+            // one ORM texture collapse into Axiom's single ORM lane (see
+            // `FxAtlasTiles::decal_orm`), and `roughness: 1` / `metalness: 1`
+            // are the multipliers THREE applies on top of that map — the same
+            // role `with_roughness`/`with_metallic` play here, so the map is
+            // passed through rather than scaled down.
+            let normal = upload_tile(app, &tiles.decal_normal[index]);
+            let orm = upload_tile(app, &tiles.decal_orm[index]);
             for alpha in DECAL_ALPHAS {
                 let material = Material::lit(tint_color(class.tint))
                     .with_custom_texture(texture)
+                    .with_normal_texture(normal)
+                    .with_orm_texture(orm)
+                    .with_roughness(Ratio::finite_or_zero(1.0))
+                    .with_metallic(Ratio::finite_or_zero(1.0))
                     .with_texture_sampling(TextureSampling::Anisotropic)
                     .with_opacity(Ratio::finite_or_zero(alpha as f32));
                 let handle = app.add_material(material);
@@ -508,9 +588,19 @@ impl FxDraw {
         // own primitive; the case profile (`shells.js:26-40`'s lathe) is GPU
         // presentation the port explicitly did not bring over, and inventing a
         // lathe here would be porting, not wiring.
+        // `shells.js:57-66`. `roughness: 1` / `metalness: 1` are multipliers on
+        // the ORM map's `g`/`b`, so the map has to be bound for them to read as
+        // anything but flat gold — it was baked (`shells.js:55`) and dropped on
+        // the floor until now. The base colour here is NOT the source's
+        // `new THREE.Color(0.78, 0.62, 0.31)` and was not part of the audited
+        // set; left as-is deliberately rather than changed unverified.
+        let brass_normal = upload_tile(app, &tiles.brass_normal);
+        let brass_orm = upload_tile(app, &tiles.brass_orm);
         let brass = app.add_material(
             Material::lit(tint_color([0.62, 0.44, 0.16]))
-                .with_roughness(Ratio::finite_or_zero(0.35))
+                .with_normal_texture(brass_normal)
+                .with_orm_texture(brass_orm)
+                .with_roughness(Ratio::finite_or_zero(1.0))
                 .with_metallic(Ratio::finite_or_zero(1.0)),
         );
         let casing = app.add_mesh(Mesh::cylinder());
@@ -649,10 +739,27 @@ impl FxDraw {
                 // has no degenerate case when a particle passes through the eye.
                 let roll = Quat::from_axis_angle(Vec3::UNIT_Z, layer.roll_at(slot, now) as f32)
                     .unwrap_or(Quat::IDENTITY);
-                // `uPScale`: the quality preset's sprite scale (`index.js:66`).
-                // `size` is the sprite's half-extent, and the quad is a unit
-                // square, so the scale is twice it.
-                let extent = (sample.size * fx.pscale * 2.0) as f32;
+                // `PARTICLE_VERT` offsets the corner by `off = vec2(...) * size`
+                // where `c = position.xy` comes off a
+                // `new THREE.PlaneGeometry(1, 1, 1, 1)` — corners at +/-0.5
+                // (`particles.js:130, 143, 241`). So the sprite spans `size`,
+                // not twice it, and `unit_quad` below is that same +/-0.5 quad:
+                // the node scale IS `size`.
+                //
+                // And there is no `uPScale` uniform in `particles.js` at all.
+                // `fx.pScale` is a particle *count* multiplier — every one of
+                // its uses has the shape `Math.round(N * fx.pScale)`
+                // (`impacts.js:158`, `muzzle.js:287`, `explosions.js:22`,
+                // `index.js:713`, ...) and none of them touches `size0`/`size1`.
+                // This port already applies it as a count at the matching sites
+                // (`impacts.rs`, `muzzle.rs`, `system.rs`), so multiplying it in
+                // here was a second application of the same factor in the wrong
+                // dimension.
+                //
+                // The two invented factors happened to cancel at the 6000
+                // budget (`pScale = 0.5`, so `pscale * 2.0 == 1.0`), which is
+                // the `medium` preset — the reason this survived review.
+                let extent = sample.size as f32;
                 app.set(
                     node,
                     Transform::new(
@@ -683,15 +790,7 @@ impl FxDraw {
             if !(0.0..1.0).contains(&age) {
                 continue;
             }
-            // The source's decal fade lives in a GLSL string the port did not
-            // bring over; what it DID bring over is the four lanes the shader
-            // reads — `birth, 1/life, fade, opacity`. The reading here is the
-            // only one those four names admit: hold `opacity` until the
-            // normalised age reaches `fade`, then ramp linearly to zero at the
-            // end of life. If the shader turns out to curve that ramp, this is
-            // the one line that changes.
-            let hold = placement.fade.clamp(0.0, 0.999);
-            let alpha = placement.opacity * ((1.0 - age) / (1.0 - hold)).min(1.0).max(0.0);
+            let alpha = decal_fade(age, placement.fade, placement.opacity);
             if alpha < DECAL_ALPHA_FLOOR {
                 continue;
             }
@@ -747,7 +846,15 @@ impl FxDraw {
                 *node,
                 Transform::new(
                     Vec3::new(slot.pos.0 as f32, slot.pos.1 as f32, slot.pos.2 as f32),
-                    slot.quat,
+                    // `ShellSlot::quat` is `rig_math::Q` — THREE's `'XYZ'`
+                    // Euler order, integrated in `f64` like the source. See
+                    // that module's doc for why it is not `axiom_math::Quat`.
+                    Quat::new(
+                        slot.quat.x as f32,
+                        slot.quat.y as f32,
+                        slot.quat.z as f32,
+                        slot.quat.w as f32,
+                    ),
                     Vec3::new(girth, length, girth),
                 ),
             );
@@ -819,6 +926,26 @@ fn unit_quad() -> MeshData {
         ],
         vec![0, 1, 2, 0, 2, 3],
     )
+}
+
+/// A decal's alpha at normalised age `age`.
+///
+/// `float f = vDecal.w * ( 1.0 - smoothstep( vDecal.z, 1.0, n ) );`
+/// (`decals.js:106`), where `vDecal = (birth, 1/life, fade, opacity)` and `n`
+/// is the normalised age. An earlier version of this computation lived inline
+/// and carried a comment claiming the fade "lives in a GLSL string the port did
+/// not bring over"; the string is in the repo at that line, and the ramp is a
+/// smoothstep, not the linear one that was guessed. They diverge by up to 0.096
+/// of full opacity (at `t = 0.25` and `t = 0.75`).
+///
+/// GLSL `smoothstep(e0, e1, x)` is `t * t * (3 - 2t)` over
+/// `t = clamp((x - e0) / (e1 - e0), 0, 1)`. `e0 == e1` is *undefined* in GLSL,
+/// so `fade` is held off 1.0 here — the clamp only bites inside the region the
+/// source does not define.
+fn decal_fade(age: f64, fade: f64, opacity: f64) -> f64 {
+    let hold = fade.clamp(0.0, 0.999);
+    let t = ((age - hold) / (1.0 - hold)).clamp(0.0, 1.0);
+    opacity * (1.0 - t * t * (3.0 - 2.0 * t))
 }
 
 /// Cut one `side x side` tile out of a baked `cols x cols` atlas.
@@ -989,6 +1116,41 @@ mod tests {
         for (index, class) in DECAL_CLASSES.iter().enumerate() {
             assert_eq!(DECAL_TILE_CLASS[class.tile], index);
         }
+    }
+
+    /// The alpha floors are the source's discards, not invented ones. The
+    /// source culls a particle at `if ( a < 0.0035 ) discard`
+    /// (`particles.js:191`) and a decal at `alphaTest: 0.004` /
+    /// `if ( diffuseColor.a < 0.004 ) discard` (`decals.js:83, 108`). Earlier
+    /// drafts used 0.08 and 0.15 — 23x and 37x higher — and every sprite
+    /// popped off mid-fade.
+    #[test]
+    fn the_alpha_floors_are_the_sources_discards() {
+        assert_eq!(PARTICLE_ALPHA_FLOOR, particles::DISCARD_ALPHA);
+        assert_eq!(PARTICLE_ALPHA_FLOOR, 0.0035);
+        assert_eq!(DECAL_ALPHA_FLOOR, 0.004);
+    }
+
+    /// `decals.js:106` is a smoothstep, and the linear ramp it replaced is
+    /// wrong by up to 0.096 of full opacity. Pinned at the two points of
+    /// maximum divergence and at both ends.
+    #[test]
+    fn the_decal_fade_is_the_sources_smoothstep() {
+        // Held at full opacity until `fade`, and exactly zero at end of life.
+        assert_eq!(decal_fade(0.0, 0.72, 1.0), 1.0);
+        assert_eq!(decal_fade(0.72, 0.72, 1.0), 1.0);
+        assert_eq!(decal_fade(1.0, 0.72, 1.0), 0.0);
+
+        // `1 - smoothstep` at the quarter points of the ramp. The linear ramp
+        // the port used to compute reads 0.75 and 0.25 here.
+        let quarter = decal_fade(0.72 + 0.28 * 0.25, 0.72, 1.0);
+        let three_q = decal_fade(0.72 + 0.28 * 0.75, 0.72, 1.0);
+        assert!((quarter - 0.84375).abs() < 1e-12, "{quarter}");
+        assert!((three_q - 0.15625).abs() < 1e-12, "{three_q}");
+        assert!((quarter - 0.75).abs() > 0.09 && (three_q - 0.25).abs() > 0.09);
+
+        // Opacity is a plain multiplier on the curve.
+        assert_eq!(decal_fade(0.9, 0.72, 0.5), decal_fade(0.9, 0.72, 1.0) * 0.5);
     }
 
     /// No alpha tier may be exactly `1.0`: an opaque material ignores its

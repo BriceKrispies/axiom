@@ -523,7 +523,14 @@ pub struct FxSystem {
     pub rng: Rng,
     pub now: f64,
     pub gravity: f64,
-    /// `this.pScale`, `index.js:66`.
+    /// `this.pScale = clamp( budget / 12000, 0.4, 1.25 )`, `index.js:121`.
+    ///
+    /// A particle **count** multiplier, and only that: every use in the source
+    /// has the shape `Math.round( N * fx.pScale )` (`impacts.js:158, 334`,
+    /// `muzzle.js:287, 326, 389`, `explosions.js:22`, `index.js:713, 768`) and
+    /// none of them scales `size0`/`size1`. There is no `uPScale` uniform in
+    /// `particles.js`. The four presets give 0.4 / 0.5 / 1.0 / 1.25
+    /// (`config.js:34, 49, 64, 79`).
     pub pscale: f64,
 
     pub lit: ParticleLayer,
@@ -548,6 +555,18 @@ pub struct FxSystem {
     /// reproduces every `if (physics) { ... }`/`physics?.` guard in the
     /// source.
     pub world: Option<Box<dyn FxWorld>>,
+
+    /// The right/up rows of `ctx.camera.matrixWorldInverse` — the only thing
+    /// `screenAngle` reads off the camera (`muzzle.js:43-51`, `m[0], m[4],
+    /// m[8]` and `m[1], m[5], m[9]`).
+    ///
+    /// Held on the system rather than passed per call because the source holds
+    /// it the same way: `screenAngle` reaches for `fx.ctx.camera`, a live
+    /// reference the FX system has owned since construction, and its callers
+    /// (`impacts.js`'s per-surface recipes) take no camera argument. Refreshed
+    /// once per [`FxSystem::update`]; `None` is the source's
+    /// `if (!cam) return 0`.
+    pub camera_basis: Option<([f64; 3], [f64; 3])>,
 
     /// `this.ambience` (`index.js:121`) — the drifting motes, shimmer and the
     /// smoke-column/source emitters.
@@ -682,6 +701,7 @@ impl FxSystem {
             decal_atlas,
             stats: FxStats::default(),
             world: None,
+            camera_basis: None,
             sun_world: (0.0, 1.0, 0.0),
             suppress_decals: false,
             // `index.js:127-133`.
@@ -917,7 +937,14 @@ impl FxSystem {
             fade: opts.fade.or(Some(0.72)),
             opacity: opts.opacity.or(Some(1.0)),
             max_angle: opts.max_angle.or(Some(62.0)),
-            depth: opts.depth,
+            // `o.depth = opts.depth ?? Math.max( 0.04, o.size * 0.32 )`
+            // (`index.js:578`), against the *resolved* size. This was the one
+            // decal option without its `??`, so an unset `depth` fell through
+            // to `DecalSystem::add`'s own default — `max( 0.045, size * 0.35 )`
+            // (`decals.js:191`), the arm the source only reaches when a caller
+            // bypasses this facade. That made the projector box 9.4% thicker
+            // (0.35 / 0.32) on every decal type that leaves `depth` unset.
+            depth: opts.depth.or(Some(0.04f64.max(opts.size * 0.32))),
             flip,
             // `o.mask = ph?.MASK?.WORLD ?? 0xffff` (`index.js:532`). An
             // earlier draft hardcoded `0xffff` unconditionally, which is the
@@ -1182,6 +1209,10 @@ impl FxSystem {
     /// the one value the source hands it.
     pub fn update(&mut self, dt: f64, now: f64, frame: &FxFrame<'_>) {
         self.now = now;
+        // `fx.ctx.camera` is live for the whole frame in the source; this is
+        // the one place that fact enters the port. See `camera_basis`.
+        let m = &frame.camera.matrix_world_inverse.e;
+        self.camera_basis = Some(([m[0], m[4], m[8]], [m[1], m[5], m[9]]));
         self.sync_lighting(frame);
         self.lights.update(dt);
         if let Some(pool) = self.view_lights.as_mut() {
@@ -2021,6 +2052,48 @@ mod tests {
             },
         );
         assert!(!ok);
+    }
+
+    /// `o.depth = opts.depth ?? Math.max( 0.04, o.size * 0.32 )`
+    /// (`index.js:578`). `depth` was the one decal option this facade forwarded
+    /// without its `??`, so an unset depth fell through to `DecalSystem::add`'s
+    /// own `Math.max( 0.045, size * 0.35 )` (`decals.js:191`) — the arm the
+    /// source only reaches when a caller bypasses the facade — and every
+    /// projector came out 9.4% thicker.
+    #[test]
+    fn an_unset_decal_depth_takes_the_facades_default_not_the_systems() {
+        for size in [0.05, 0.15, 0.5, 1.2] {
+            let mut fx = FxSystem::test_instance(11);
+            assert!(fx.add_decal(
+                (0.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                DecalOpts { tile: 0, size, ..Default::default() },
+            ));
+            let placed = fx.decals.placements().iter().find(|p| p.occupied).unwrap();
+            let facade = 0.04f64.max(size * 0.32);
+            let bypassed = 0.045f64.max(size * 0.35);
+            assert!(
+                (placed.half_depth - facade).abs() < 1e-12,
+                "size {size}: {} != {facade}",
+                placed.half_depth
+            );
+            // And the two really do differ at every size in play, so this test
+            // would have caught the original defect.
+            assert!((facade - bypassed).abs() > 1e-12, "size {size}");
+        }
+    }
+
+    /// An explicit depth still wins, exactly as `opts.depth ?? ...` does.
+    #[test]
+    fn an_explicit_decal_depth_is_forwarded_untouched() {
+        let mut fx = FxSystem::test_instance(12);
+        assert!(fx.add_decal(
+            (0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            DecalOpts { tile: 0, size: 0.15, depth: Some(0.9), ..Default::default() },
+        ));
+        let placed = fx.decals.placements().iter().find(|p| p.occupied).unwrap();
+        assert!((placed.half_depth - 0.9).abs() < 1e-12);
     }
 
     #[test]

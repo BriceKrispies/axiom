@@ -20,13 +20,35 @@
 //! `THREE.InstancedMesh`/material/texture construction are GPU presentation
 //! and are not ported here either.
 //!
-//! Rotation uses `axiom_math::Quat` (already a dependency of this crate for
-//! the weapon geometry port) rather than a hand-rolled quaternion: its
-//! [`axiom_math::Quat::from_euler_xyz`] composes `Rz · Ry · Rx` — apply X,
-//! then Y, then Z — matching `THREE.Quaternion.setFromEuler` under its
-//! default `'XYZ'` order, which is what `shells.js:141, 220` uses.
+//! ## Rotation, and the Euler order that was wrong here
+//!
+//! `shells.js:133` and `:214` both build a rotation with
+//! `setFromEuler(this._e)` on a `new THREE.Euler()` (`shells.js:102`) — no
+//! order argument, so THREE's default **`'XYZ'`**, which expands to
+//! `qx * qy * qz`.
+//!
+//! An earlier draft of this module used [`axiom_math::Quat::from_euler_xyz`]
+//! and asserted in this doc comment that it matched. **It does not.** That
+//! function composes `qz.multiply(qy).multiply(qx)` = `Rz * Ry * Rx`
+//! (`crates/axiom-math/src/quat.rs:70-76`), which is THREE's **`'ZYX'`** — the
+//! opposite order. The name refers to the order the axes are *applied* in, not
+//! to THREE's order string, and reading it as the latter cost this module both
+//! its spawn orientation and its tumble: measured divergence is 30.4 degrees
+//! per 60 Hz tumble step at the default spin `(38, 26, 38)` rad/s, and 170.4
+//! degrees on a spawn orientation of `(2.7, 5.1, 1.3)`.
+//!
+//! So rotation goes through [`crate::weapons::rig_math::Q`] instead, which
+//! already exists for exactly this reason: its
+//! [`Q::from_euler_xyz`](crate::weapons::rig_math::Q::from_euler_xyz) is a
+//! literal transcription of `Quaternion.js`'s `case 'XYZ'` branch, and its
+//! [`Q::multiply`](crate::weapons::rig_math::Q::multiply) is
+//! `Quaternion.multiply` (`this = this * q`), matching
+//! `slot.quat.multiply(this._q)` at `shells.js:220`. It is also `f64`
+//! throughout, matching the source — `THREE.Quaternion` stores plain JS
+//! numbers, and the previous code rounded each angle to `f32` before taking
+//! its sine.
 
-use axiom_math::Quat;
+use crate::weapons::rig_math::Q;
 
 use crate::rng::Rng;
 
@@ -50,7 +72,7 @@ pub struct ShellSlot {
     pub age: f64,
     pub pos: (f64, f64, f64),
     pub vel: (f64, f64, f64),
-    pub quat: Quat,
+    pub quat: Q,
     /// Angular velocity, radians/second per axis.
     pub spin: (f64, f64, f64),
     pub scale: f64,
@@ -64,7 +86,7 @@ impl Default for ShellSlot {
             age: 0.0,
             pos: (0.0, 0.0, 0.0),
             vel: (0.0, 0.0, 0.0),
-            quat: Quat::IDENTITY,
+            quat: Q::IDENTITY,
             spin: (0.0, 0.0, 0.0),
             scale: 1.0,
             base_scale: 1.0,
@@ -145,7 +167,8 @@ impl ShellSystem {
             slot.spin = (rng.range(-38.0, 38.0), rng.range(-26.0, 26.0), rng.range(-38.0, 38.0));
         }
         let e = (rng.float() * 6.28, rng.float() * 6.28, rng.float() * 6.28);
-        slot.quat = Quat::from_euler_xyz(e.0 as f32, e.1 as f32, e.2 as f32);
+        // `slot.quat.setFromEuler(this._e)` (`shells.js:133`), THREE `'XYZ'`.
+        slot.quat = Q::from_euler_xyz(e.0, e.1, e.2);
         idx
     }
 
@@ -169,11 +192,8 @@ impl ShellSystem {
                 slot.pos.1 + slot.vel.1 * dt,
                 slot.pos.2 + slot.vel.2 * dt,
             );
-            let step = Quat::from_euler_xyz(
-                (slot.spin.0 * dt) as f32,
-                (slot.spin.1 * dt) as f32,
-                (slot.spin.2 * dt) as f32,
-            );
+            // `this._q.setFromEuler(this._e)` (`shells.js:214`), THREE `'XYZ'`.
+            let step = Q::from_euler_xyz(slot.spin.0 * dt, slot.spin.1 * dt, slot.spin.2 * dt);
             slot.quat = slot.quat.multiply(step);
 
             let fade_at = LIFETIME - FADE;
@@ -197,6 +217,62 @@ impl ShellSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tumble step is THREE's `'XYZ'` (`qx * qy * qz`), which is what
+    /// `new THREE.Euler()` defaults to at `shells.js:102` and what
+    /// `shells.js:214` therefore builds. `axiom_math::Quat::from_euler_xyz`
+    /// composes the other way (`qz * qy * qx`, THREE's `'ZYX'`); this module
+    /// used it and documented the swap as a match. At the default spin the two
+    /// disagree by ~30 degrees per 60 Hz step.
+    #[test]
+    fn the_tumble_step_uses_threes_xyz_euler_order() {
+        let (x, y, z) = (38.0 / 60.0, 26.0 / 60.0, 38.0 / 60.0);
+        let three_xyz = Q::from_euler_xyz(x, y, z);
+
+        // The composition `from_euler_xyz` names, spelled out.
+        let qx = Q::from_euler_xyz(x, 0.0, 0.0);
+        let qy = Q::from_euler_xyz(0.0, y, 0.0);
+        let qz = Q::from_euler_xyz(0.0, 0.0, z);
+        let composed = qx.multiply(qy).multiply(qz);
+        for (a, b) in [
+            (three_xyz.x, composed.x),
+            (three_xyz.y, composed.y),
+            (three_xyz.z, composed.z),
+            (three_xyz.w, composed.w),
+        ] {
+            assert!((a - b).abs() < 1e-15, "{a} vs {b}");
+        }
+
+        // And it is genuinely NOT the reverse order, so this test would have
+        // caught the original defect.
+        let reversed = qz.multiply(qy).multiply(qx);
+        let dot = three_xyz.x * reversed.x
+            + three_xyz.y * reversed.y
+            + three_xyz.z * reversed.z
+            + three_xyz.w * reversed.w;
+        let angle = 2.0 * dot.abs().min(1.0).acos();
+        assert!(angle > 0.5, "orders differ by {} rad", angle);
+    }
+
+    /// A spawned casing's orientation comes from the same conversion.
+    #[test]
+    fn spawn_orientation_uses_threes_xyz_euler_order() {
+        let mut rng = Rng::new(7);
+        let mut sys = ShellSystem::new(&mut rng);
+        let mut probe = Rng::new(7);
+        // Replay the constructor's fork and the spawn's draws in source order.
+        let _ = probe.fork();
+        let _ = probe.range(-38.0, 38.0);
+        let _ = probe.range(-26.0, 26.0);
+        let _ = probe.range(-38.0, 38.0);
+        let e = (
+            probe.float() * 6.28,
+            probe.float() * 6.28,
+            probe.float() * 6.28,
+        );
+        let idx = sys.spawn(&mut rng, (0.0, 0.0, 0.0), None, ShellSpawnOpts::default());
+        assert_eq!(sys.slots[idx].quat, Q::from_euler_xyz(e.0, e.1, e.2));
+    }
 
     #[test]
     fn spawn_places_the_ring_cursor_deterministically() {

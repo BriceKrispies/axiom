@@ -37,8 +37,25 @@ pub fn basis(nx: f64, ny: f64, nz: f64) -> (f64, f64, f64, f64, f64, f64) {
     let mut tx = ay * nz - az * ny;
     let mut ty = az * nx - ax * nz;
     let mut tz = ax * ny - ay * nx;
-    // `Math.hypot(tx, ty, tz) || 1` — a single 3-argument hypot, not two
-    // chained 2-argument ones (which would round twice instead of once).
+    // `Math.hypot(tx, ty, tz) || 1`.
+    //
+    // TWO KNOWN DIVERGENCES, both recorded here because an earlier comment on
+    // this line defended the wrong invariant ("a single 3-argument hypot, not
+    // two chained 2-argument ones, which would round twice"). Chaining was
+    // never the hazard:
+    //
+    // 1. V8's `Math.hypot` is **Kahan-compensated** and scales by the largest
+    //    magnitude to avoid overflow; the naive `sqrt(x*x + y*y + z*z)` below
+    //    is neither. They agree to within an ULP or so on the unit-ish vectors
+    //    this function is fed, and disagree by more as the inputs spread.
+    // 2. `|| 1` in JS catches **NaN as well as 0**. `h == 0.0` catches only 0,
+    //    so a NaN component propagates here where the source would have
+    //    divided by 1. Every port site that transcribes this idiom has the
+    //    same gap.
+    //
+    // Neither is fixed in place: both change numbers this port has not
+    // re-verified against a capture, so they are a finding for the integrator,
+    // not a drive-by edit.
     let l = {
         let h = (tx * tx + ty * ty + tz * tz).sqrt();
         if h == 0.0 {

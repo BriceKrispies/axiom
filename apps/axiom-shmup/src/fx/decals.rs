@@ -73,6 +73,15 @@ pub struct DecalPlacement {
     pub bitangent: [f64; 3],
     /// `o.size * 0.5`, the half-extent the quad spans along U and V.
     pub half_size: f64,
+    /// The projector's **third** half-extent — `hd` in `add`, the resolved
+    /// `o.depth` — which is what depth-clips the projection. Recorded for the
+    /// same reason `half_size` is: the box has three half-extents and a
+    /// placement that names two of them is not a complete description of the
+    /// projector. It is also the only way to observe which of the source's
+    /// **two** depth defaults applied — `Math.max( 0.04, size * 0.32 )` at the
+    /// facade (`index.js:578`) or `Math.max( 0.045, size * 0.35 )` here
+    /// (`decals.js:191`), the arm only a caller bypassing the facade reaches.
+    pub half_depth: f64,
     /// `o.tile` — the decal-atlas tile index the recipe chose.
     pub tile: usize,
     /// `o.now`, the frame it was laid.
@@ -97,6 +106,7 @@ impl Default for DecalPlacement {
             tangent: [1.0, 0.0, 0.0],
             bitangent: [0.0, 0.0, 1.0],
             half_size: 0.0,
+            half_depth: 0.0,
             tile: 0,
             birth: 0.0,
             life: 1.0,
@@ -467,6 +477,7 @@ impl DecalSystem {
             tangent: [tx, ty, tz],
             bitangent: [bx, by, bz],
             half_size: hs,
+            half_depth: hd,
             tile: o.tile,
             birth,
             life,
