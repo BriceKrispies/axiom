@@ -114,7 +114,14 @@ pub fn shmup_start() {
     // `retarget` clamps to at most `SLOWEST_BUDGET_NANOS` (16.667 ms), so a
     // budget can only ever be made tighter than 60, never looser.
     const FRAME_BUDGET_NANOS: u64 = 8_000_000;
-    let mut render_scale = axiom_host::RenderScaleController::new(FRAME_BUDGET_NANOS);
+    // `holding_floor`, not `new`: the optimistic constructors start at full scale
+    // and walk DOWN, and that descent costs ~4 x (DROP_RUN + CHANGE_COOLDOWN)
+    // frames. Measured here, a fresh load with a 60 s settle still read 16.80 ms
+    // while a long-running session read 7.5 ms — about a minute of play spent
+    // under the target, which no budget value can fix because the cost is in the
+    // starting position. Starting at the coarsest rung makes frame one already
+    // safe; quality climbs back on evidence.
+    let mut render_scale = axiom_host::RenderScaleController::holding_floor(FRAME_BUDGET_NANOS);
     let set_render_scale = windowing.render_scale_control();
     windowing.set_ambient(scene.app.ambient());
     scene

@@ -73,6 +73,11 @@ const RAISE_BELOW_PCT: u64 = 62;
 
 /// How many frames after any rung change before another may be considered.
 ///
+/// Note the consequence for a cold start, which [`RenderScaleController::holding_floor`]
+/// exists to answer: crossing the ladder costs roughly
+/// `(LADDER.len() - 1) x (DROP_RUN + CHANGE_COOLDOWN)` frames, so a controller
+/// that starts at full scale cannot defend a floor during its own descent.
+///
 /// A scale change is not free: it reallocates the scene colour target, its depth
 /// buffer and the bloom chain, which on a mobile GPU is tens of milliseconds —
 /// a visible hitch. The dead band above makes an oscillation impossible in
@@ -221,6 +226,39 @@ impl RenderScaleController {
     /// only one of them is a frame budget.
     pub fn for_display() -> RenderScaleController {
         RenderScaleController::new(SLOWEST_BUDGET_NANOS)
+    }
+
+    /// A controller that starts at the **coarsest** rung and climbs only once the
+    /// device has proved it has headroom.
+    ///
+    /// [`Self::new`] and [`Self::for_display`] start at full scale and descend,
+    /// which is right when the goal is "look as good as this device allows": a
+    /// capable machine never pays for a probe it did not need, and a slow one
+    /// gives up a little quality after a moment.
+    ///
+    /// It is the wrong shape when the goal is a FLOOR the frame rate may never go
+    /// under, because the descent is not free. Each step waits [`DROP_RUN`]
+    /// consecutive slow frames and then [`CHANGE_COOLDOWN`] before the next may be
+    /// considered, so crossing the whole ladder takes on the order of
+    /// `4 x (DROP_RUN + CHANGE_COOLDOWN)` frames. Measured on a fill-bound app
+    /// that needs the bottom rung, that was **about a minute of play spent under
+    /// the target** — and no budget value can fix it, because the cost is in the
+    /// starting position rather than in the threshold.
+    ///
+    /// This inverts the risk. The first frame is already at the rung a struggling
+    /// device would have taken a minute to reach, and quality is recovered
+    /// upward on evidence: [`RAISE_RUN`] comfortable frames per step, which is an
+    /// order of magnitude longer than a drop precisely because climbing is
+    /// speculative. A device with headroom still reaches full scale; it simply
+    /// arrives from below.
+    ///
+    /// Use this when a minimum frame rate is a requirement rather than a
+    /// preference. Use [`Self::for_display`] otherwise — starting coarse on a
+    /// capable device spends image quality it never needed to spend.
+    pub fn holding_floor(frame_budget_nanos: u64) -> RenderScaleController {
+        let mut c = RenderScaleController::new(frame_budget_nanos);
+        c.rung = 0;
+        c
     }
 
     /// Point the thresholds at a new budget.
@@ -372,6 +410,54 @@ mod tests {
         // The floor holds — the rung cannot underflow.
         feed(&mut c, slow, PER_CHANGE * 2);
         assert_eq!(c.scale().ratio().get(), LADDER[0]);
+    }
+
+    #[test]
+    fn holding_floor_starts_at_the_coarsest_rung_so_frame_one_is_already_safe() {
+        let c = RenderScaleController::holding_floor(BUDGET);
+        assert_eq!(
+            c.scale().ratio().get(),
+            LADDER[0],
+            "a floor-holding controller must not spend its descent under the target"
+        );
+        // The distinction that matters: the optimistic constructors start at the
+        // top, which is what costs a slow device its first seconds of play.
+        assert_eq!(RenderScaleController::new(BUDGET).scale(), RenderScale::FULL);
+        assert_eq!(RenderScaleController::for_display().scale(), RenderScale::FULL);
+    }
+
+    #[test]
+    fn holding_floor_still_climbs_when_the_device_proves_it_has_headroom() {
+        let mut c = RenderScaleController::holding_floor(BUDGET);
+        assert_eq!(c.scale().ratio().get(), LADDER[0]);
+        // `FASTEST_BUDGET_NANOS / 4`, not `BUDGET / 4`, for the reason
+        // `sustained_headroom_climbs_to_the_ceiling_and_stops_there` already
+        // records: frames merely fast against the CURRENT budget make the loop
+        // retarget itself to a higher refresh, after which they are no longer
+        // comfortable and the climb stalls part-way. Written with `BUDGET / 4`
+        // first, this test stopped at rung 0.62 for exactly that reason.
+        feed(&mut c, FASTEST_BUDGET_NANOS / 4, PER_CHANGE * LADDER.len() as u32);
+        assert_eq!(
+            c.scale(),
+            RenderScale::FULL,
+            "a capable device still reaches full scale; it just arrives from below"
+        );
+    }
+
+    #[test]
+    fn holding_floor_and_new_agree_on_everything_except_where_they_start() {
+        // The pessimistic start must not smuggle in a different budget or a
+        // different set of thresholds — only a different opening rung.
+        let floor = RenderScaleController::holding_floor(BUDGET);
+        let optimistic = RenderScaleController::new(BUDGET);
+        assert_eq!(floor.budget_nanos(), optimistic.budget_nanos());
+        // Fed identical slow frames, the pessimistic one is already where the
+        // optimistic one is heading.
+        let mut a = RenderScaleController::holding_floor(BUDGET);
+        let mut b = RenderScaleController::new(BUDGET);
+        feed(&mut a, BUDGET * 4, PER_CHANGE * LADDER.len() as u32);
+        feed(&mut b, BUDGET * 4, PER_CHANGE * LADDER.len() as u32);
+        assert_eq!(a.scale(), b.scale(), "they converge on the same rung");
     }
 
     #[test]
