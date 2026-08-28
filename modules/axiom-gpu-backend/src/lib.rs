@@ -132,12 +132,18 @@ mod bloom_pyramid;
 mod shadow_cull;
 
 // Cascaded shadow maps: the split scheme, the per-cascade bounding-sphere ortho
-// fit, the whole-texel snap and the fragment stage's selection/PCSS reference,
-// transcribed from Claude-of-Duty's `render/csm.js` (`4x2048 CSM`).
+// fit, the whole-texel snap, the fragment stage's selection/PCSS reference and
+// the WGSL that stage compiles to — transcribed from Claude-of-Duty's
+// `render/csm.js` (`4x2048 CSM`).
 //
-// Nothing binds it yet — the frame contract carries ONE `light_view_proj`, so
-// the shipped pass has no four-matrix lane to fill. See
-// `cascade::tests::nothing_in_the_shadow_path_compiles_this_yet`.
+// BOUND. `scene_renderer` fits four cascades per frame from the camera
+// intrinsics the packet carries (`axiom_host::FrameCameraLens`), renders each
+// into its own layer of an `R32Float` array atlas, and `scene_wgsl` selects the
+// cascade term beside the single-volume one on `CAP_CSM`. The frame contract
+// never grew a four-matrix lane: the fit's INPUT travels instead of its output,
+// so every matrix, split plane and texel lane stays inside this module. See
+// `cascade::tests::the_single_volume_shadow_path_survives_the_cascade_wiring_intact`
+// for what that wiring is not allowed to disturb.
 mod cascade;
 
 // Which attachment performs the linear -> sRGB encode, and the crate's single

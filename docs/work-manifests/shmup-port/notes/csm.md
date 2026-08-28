@@ -19,11 +19,27 @@ touched** —
 `cascade::tests::nothing_in_the_shadow_path_compiles_this_yet` is the source
 scan that keeps them that way until the wiring is deliberate.
 
-> **Since written:** `scene_wgsl.rs` and `shadow_view.rs` have both changed, for
-> a reason unrelated to the cascade wiring — the single-cascade path's depth bias
-> was a constant in normalized device depth and its penumbra table was published
-> for one aspect only (see §6b). The source scan above still holds: neither file
-> names `cascade::` or `CascadeSet`, so nothing here is bound yet.
+> **Since written — THIS IS NOW BOUND.** Everything §6 asked the orchestrator
+> for has landed; read that section as a record of what was done, not as a
+> to-do. The wiring is three commits: the frame states the camera's intrinsics
+> (`axiom_host::FrameCameraLens`), the backend fits and renders its own four
+> cascades, and `frame_packet.rs` was split so the camera and its lens have
+> their own file. What changed relative to the plan below:
+>
+> - **The shader text moved out of `adapter_proof.rs`** into `cascade/wgsl.rs`,
+>   which both the proof and `scene_wgsl` now splice. When the text lived only
+>   in the proof, the "bit-exact" adapter run was comparing `shading.rs` against
+>   a transcription nothing else compiled.
+> - **The binding numbers are Rust constants** (`wgsl::CSM_GROUP`,
+>   `CSM_UNIFORM_BINDING`, `CSM_ATLAS_BINDING`, `CSM_SAMPLER_BINDING`), read by
+>   both the bind group layout and the emitted WGSL — §6a's group 2 bindings
+>   3/4/5 were already taken by the ambient occlusion and the contact shadow, so
+>   they are 6/7/8.
+> - **No pipeline variant.** §6a recommended one; the chunk is spliced
+>   unconditionally instead and the trade is written down at the splice site.
+> - **`view_depth` needed neither of §6a's two options.** See §6a below.
+> - **`quality_tier` is still unbound.** The chunk is fixed at four cascades and
+>   the source's top tap tier; see `wgsl::CSM_CONSTANTS_WGSL` for why.
 
 ## 1. The split scheme, as the source writes it
 
@@ -233,6 +249,13 @@ is byte-identical:
   variant suffix.
 - `view_depth` is `-view_pos.z`; the fragment stage does not carry it today, so
   either add an interstage lane or reconstruct it from `camera_view_proj`.
+
+  **Resolved, and neither was needed.** The engine's projection has the standard
+  perspective fourth row `(0, 0, -1, 0)`, and `GL_TO_WGPU_DEPTH` touches only
+  `z` -- so a clip position's `w` IS `-view_z`, the view depth in metres. WGSL's
+  fragment `@builtin(position)` holds `1 / clip.w` in its own `w` after the
+  perspective divide, so `let view_depth = 1.0 / in.clip.w;` recovers it exactly:
+  no interstage lane, no uniform, no matrix inverse.
 
 Three WGSL deltas from the GLSL, all stated in the file header:
 `texture(...)` → `textureSampleLevel(..., 0.0)` (explicit LOD is what makes the
