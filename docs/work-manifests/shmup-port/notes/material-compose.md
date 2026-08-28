@@ -469,3 +469,46 @@ the test lies in the safe direction.
   and `axiom_surface` (already a dependency, and now the home of
   `MaterialParams`).
 * No `println!` anywhere, tests included.
+
+
+---
+
+## 10. Addendum — the ornament gate (superseding §4's "two programs")
+
+Landed later, in the same file. This note's §4 says *"the permutation is
+currently **two** programs"* and §1's table gives
+`material_surface_wgsl(detile: bool)`. Both are superseded: there is a second
+structural gate, and the signature is
+`material_surface_wgsl(detile: bool, ornament: Ornament)`.
+
+**Why.** The composition put all twelve layers in every fragment
+unconditionally, and the app that pays for it is fill-rate bound — at render
+scale 1.0 the frame costs 29.2 ms, and cutting the backbuffer 1280x720 → 640x360
+cut it 4.2x, almost exactly proportional to pixel count, with draws, instances
+and triangles identical across seven camera views.
+
+**The split is the source's.** `apps/shmup/src/core/fidelity.js`'s lean tier
+drops exactly `OW_PARALLAX`, `OW_DETILE`, `OW_WEATHER`, `OW_PATCH`, `OW_CLOTH`
+and `OW_MACRO_RELIEF` (`shader.js:883`), and deliberately leaves the projection,
+masking and channel defines outside that `if (!LEAN)` — dropping *those* "does
+not simplify the material, it makes it sample the wrong thing."
+
+**One global switch, not per material.** `Ornament::of` reads
+`axiom_host::RenderCapability::SurfaceOrnament` off the profile that prepares the
+catalog, before any program is generated, so it never reaches a surface digest
+and `SurfaceKind::code` stays structural. A per-material gate would cut more per
+fragment but multiply permutations, and the same `fidelity.js` measures cold boot
+as `(lit programs) x (~100 KB of translated shader each)` — 101 programs at ~26 s
+against lean's 43 at ~14.8 s.
+
+**The permutation count is three, not four.** De-tiling is one of the six layers
+lean drops, so `material_surface_wgsl` multiplies the two gates together and the
+`(lean, de-tiled)` combination is unrepresentable rather than merely unused. The
+emitted shapes are `{full·detile-off, full·detile-on, lean}` — a `+1` on §4's
+two, pinned by `the_ornament_gate_adds_one_program_shape_not_a_second_axis`.
+
+**How the reduction is visible.** `SurfaceProgramSource::ornament_reduced` is a
+fact about the text, kept beside it; `SurfaceProgramCatalog::degradations` raises
+`axiom_host::FrameFeature::SurfaceOrnament` only for a frame that actually draws
+one of those programs — keyed on the frame exactly as the miss report is, because
+a standing per-backend flag would fire on every frame in the engine.
