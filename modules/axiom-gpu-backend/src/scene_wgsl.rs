@@ -583,7 +583,43 @@ fn shadow_factor(world_pos: vec3<f32>) -> f32 {
     let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
     let dim = vec2<f32>(textureDimensions(shadow_map));
     let texel = 1.0 / dim;
-    let bias = 0.0015;
+    // The depth bias, DERIVED from the fitted shadow volume rather than fixed.
+    //
+    // `ndc.z` is normalized light depth, so a constant here is a constant in
+    // NDC, and the WORLD offset it buys is `bias * (far - near)` of whatever
+    // ortho box the pipeline fitted this frame. That is the wrong dependency
+    // twice over. What governs shadow acne is the depth quantisation across ONE
+    // TEXEL of the map, and an NDC constant cannot see the texel at all: the
+    // shipped `0.0015` was 1.80 texels on the baseline 1024 atlas and 3.60 on
+    // the extended tier's 2048 one, so a device that paid for twice the shadow
+    // resolution got twice the peter-panning measured in the unit that matters.
+    // It also silently tracked the depth range, which is a property of the
+    // volume, not of the surface: 20 cm on a portrait frame, 34 cm on a 16:9 one
+    // (`shadow_view.rs`'s penumbra table), and it would be 30 texels on a
+    // cascade fitted with `cascade.rs`'s 140 m back-distance.
+    //
+    // So the bias is stated in TEXELS and converted into NDC by the volume's own
+    // depth range, and both quantities are recovered from `light_vp` itself
+    // rather than through a new uniform. The matrix is
+    // `depth_fix * orthographic * look_at` with `look_at` rigid, so each row's
+    // directional part is that row's ortho scale times a unit rotation row:
+    //   row 0 magnitude = 1 / radius        (the ortho half-extent)
+    //   row 2 magnitude = 1 / (far - near)  (depth_fix's 0.5 cancelling the
+    //                                        orthographic's 2 / (far - near))
+    // `axiom-render-pipeline`'s `shadow_view.rs` builds that matrix and asserts
+    // this exact recovery in
+    // `the_light_view_proj_rows_recover_the_fitted_extent_and_depth_range`, so
+    // the contract the two files share is written down on both sides.
+    //
+    // `max` guards a degenerate matrix (a frame with no directional light binds
+    // identity; the lighting parity harness binds zero) against a divide by zero
+    // — a value select, not a branch, so control flow stays uniform.
+    let lvp = shadow.light_vp;
+    let inv_extent = max(length(vec3<f32>(lvp[0][0], lvp[1][0], lvp[2][0])), 1.0e-12);
+    let inv_range = max(length(vec3<f32>(lvp[0][2], lvp[1][2], lvp[2][2])), 1.0e-12);
+    let world_texel = 2.0 * texel.x / inv_extent;
+    let depth_range = 1.0 / inv_range;
+    let bias = SHADOW_BIAS_TEXELS * world_texel / depth_range;
     // 5x5 PCF with a slight kernel spread for a softer penumbra than a 3x3 tap.
     let spread = 1.25;
     var sum = 0.0;
@@ -596,6 +632,15 @@ fn shadow_factor(world_pos: vec3<f32>) -> f32 {
     let outside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0;
     return select(sum / 25.0, 1.0, outside);
 }
+
+// The main pass's shadow depth bias, in SHADOW TEXELS (see `shadow_factor`,
+// which converts it into normalized light depth using the fitted volume's own
+// extent and depth range). This is the shipped tuning re-expressed in the unit
+// that governs it, not a retune: the constant `0.0015` NDC bias it replaces
+// measured 1.80 texels on the portrait 80 deg / 0.563 camera and 1.69 on a 16:9
+// one, both at 1024, so 1.75 moves neither shipped camera shape by 4% while
+// making the bias correctly halve when the device tier doubles the atlas.
+const SHADOW_BIAS_TEXELS: f32 = 1.75;
 
 // Fraction of hemisphere ambient a fully-shadowed fragment keeps. 1.0 = the shadow removes
 // only the sun's diffuse (shadows wash out under full sky fill); <1.0 also dims the sky

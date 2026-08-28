@@ -19,6 +19,12 @@ touched** —
 `cascade::tests::nothing_in_the_shadow_path_compiles_this_yet` is the source
 scan that keeps them that way until the wiring is deliberate.
 
+> **Since written:** `scene_wgsl.rs` and `shadow_view.rs` have both changed, for
+> a reason unrelated to the cascade wiring — the single-cascade path's depth bias
+> was a constant in normalized device depth and its penumbra table was published
+> for one aspect only (see §6b). The source scan above still holds: neither file
+> names `cascade::` or `CascadeSet`, so nothing here is bound yet.
+
 ## 1. The split scheme, as the source writes it
 
 `update()`, `lambda = 0.86`, `maxDistance = 140`:
@@ -235,19 +241,80 @@ flipped `v` (wgpu clip + framebuffer convention, the same two the existing
 `shadow_factor` applies); `smoothstep` written out (WGSL leaves `low >= high`
 indeterminate and the fade-out calls it that way).
 
-### 6b. The frame contract has to widen — this is the real blocker
+### 6b. The frame contract has to widen — but NOT in the direction stated above
 
-`SceneRenderer::record` takes `light_view_proj: [f32; 16]`; the cascades need
-four matrices plus four `vec4` lanes. That threads back through
-`axiom-gpu-backend::gpu_backend_api`, `offscreen.rs`, `live_gpu_binding.rs`,
-`axiom::FrameOutcome`, and `axiom-render-pipeline`'s `shadow_view.rs` (which is
-where the *fit* would move to — it already owns the camera and the sun, which
-`cascade::fit` needs and the backend does not have). Recovering the fov/aspect
-out of `camera_view_proj` inside the backend would work and is exactly the kind
-of shortcut this repo forbids.
+The original note said the fit should move to `axiom-render-pipeline`'s
+`shadow_view.rs`, "which already owns the camera and the sun". **That move is
+illegal, and the Module Law says so mechanically** — checked, not guessed:
 
-That is a multi-slice contract change and I did not make it. The maths is done
-and pinned; the plumbing is a decision for whoever owns the frame contract.
+```console
+$ scripts/ax owns modules/axiom-render-pipeline/src/shadow_view.rs
+  class    Feature module (composition tier)
+  modules  scene, render, webgpu
+$ scripts/ax owns modules/axiom-gpu-backend/src/cascade.rs
+  class    Engine module (isolated capability)
+  laws     Module Law - allowed_modules must be empty
+```
+
+`cascade` lives in `axiom-gpu-backend`, an **engine** module: `allowed_modules =
+[]`, one public facade (`pub use gpu_backend_api::GpuBackendApi` — the whole of
+`lib.rs`'s public surface). `axiom-render-pipeline` is a **feature** module whose
+`allowed_modules` is `["scene", "render", "webgpu"]`. There is no edge from the
+second to the first and there cannot be one without either widening the
+composition tier to swallow the backend, or hoisting the fit into a layer both
+can see (their common layers are `kernel`, `math`, `host`). Either is a tier
+decision far larger than this slice, and neither should be made to dodge a
+plumbing problem.
+
+**The plumbing problem inverts instead.** Do not push the cascade *output* down
+the contract — four matrices plus four `vec4` lanes threaded through
+`axiom-render`'s packet builder, `axiom-host::FramePacket`, `axiom::FrameOutcome`,
+`RenderReport`, `gpu_backend_api`, `offscreen.rs` and `live_gpu_binding.rs`, with
+every app call site of `FrameOutcome::light_view_proj` (5 outside tests:
+`axiom::app` x2, `axiom-shot::capture` x2, `generated_micro_fps::web`) forced to
+grow lanes it has no opinion about. Push the cascade *input* up instead:
+
+> The frame packet should carry the **camera intrinsics** — `fovy`, `aspect`,
+> `near`, `far` and the camera's world matrix — and the backend should do its own
+> fit.
+
+That is not the forbidden shortcut the note warned about. The shortcut was
+*recovering* fov/aspect by inverting `camera_view_proj` inside the backend; the
+fix is to make the frame state the intrinsics as first-class facts, which they
+are. They are not derivable from what the packet carries today without inverting
+a product, they are the same facts several backends legitimately want, and the
+frame already carries the other half of what `cascade::fit` needs — the sun, as
+the directional light's to-sun vector in the `lights` lane.
+
+With intrinsics in the packet, **every cascade matrix, split lane, texel lane and
+depth range stays inside `axiom-gpu-backend`**, where the code that computes them
+already lives. `FrameOutcome`, `RenderReport` and every app are untouched, and
+`light_view_proj` stays exactly what it is for the single-cascade path §5 requires
+be preserved.
+
+Two more things are already ported and already unbound, which makes the remaining
+step smaller than this note assumed:
+
+- **`frame_graph` plans the atlas.** `frame_graph::quality::CsmConfig` is the
+  per-tier cascade count and map size (3 at Low, 4 at Ultra, clamped to 2048),
+  and `frame_graph::schedule::plan` already emits a `FramePass::Cascades` step
+  targeting a `StepTarget::ShadowAtlas` of `layers: csm.cascades`. Like
+  `cascade`, `frame_graph` is declared in `lib.rs` and referenced by nothing in
+  `scene_renderer` / `live_gpu_binding` / `offscreen` / `gpu_backend_api`.
+- **The depth bias no longer has to be re-derived.** `scene_wgsl.rs`'s bias was a
+  constant in *normalized device depth*, which is a unit error the cascade port
+  would have inherited badly: at `cascade.rs`'s 140 m `BACK_DISTANCE`, cascade 0's
+  depth range is ~156 m against a 7.8 mm texel, so the old `0.0015` would have
+  been **30 texels** of peter-panning on the sharpest cascade. It is now stated in
+  texels and converted through the volume's own extent and depth range, both
+  recovered from `light_vp`'s row magnitudes (asserted in `shadow_view.rs`'s
+  `the_light_view_proj_rows_recover_the_fitted_extent_and_depth_range`). The
+  cascade path can use the same conversion per cascade.
+
+So the remaining work is: intrinsics into the packet; `cascade::fit` called in the
+backend; the array atlas + `CsmU` bind group of §6a; `RenderCapability::Csm` so a
+device that cannot hold the array degrades to one cascade as a declared
+Substitute; and the per-cascade caster loop of §6c.
 
 ### 6c. The caster pass needs four draws
 
