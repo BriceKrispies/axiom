@@ -917,8 +917,16 @@ mod tests {
         );
         // Bit 12 is set; the word the main-pass WGSL reads is unchanged, because
         // that shader reads no bit above 2048. Both device-resolved bits sit
-        // ABOVE it, so the shader contract is the same word it always was.
-        assert_eq!(backend.capability_profile().bits(), 0b1_1111_1111_1111);
+        // ABOVE it, so the shader contract is the same word it always was — and
+        // so does bit 15 (`SurfaceOrnament`), which is read on the CPU when the
+        // material shader is composed and never by the shader itself.
+        assert_eq!(backend.capability_profile().bits(), 0b1001_1111_1111_1111);
+        // It DOES claim surface ornament by default: the full material shader is
+        // what this source composes unless a host trades it away, and that trade
+        // is the app's to make, not this backend's.
+        assert!(backend
+            .capability_profile()
+            .contains(axiom_host::RenderCapability::SurfaceOrnament));
         // A host can restrict it; the present path then consults the narrowed profile.
         let restricted = axiom_host::BackendCapabilityProfile::all()
             .without(axiom_host::RenderCapability::Shadows);
@@ -927,6 +935,21 @@ mod tests {
         assert!(!backend
             .capability_profile()
             .contains(axiom_host::RenderCapability::Shadows));
+        // **The app-facing lever for the fill-rate trade**, and the whole point
+        // of routing it through the capability profile: an app asks for the lean
+        // material shader by declaring the degradation, on the same surface every
+        // other declared degradation uses.
+        let lean = axiom_host::BackendCapabilityProfile::all()
+            .without(axiom_host::RenderCapability::SurfaceOrnament);
+        backend.set_capability_profile(lean);
+        assert!(!backend
+            .capability_profile()
+            .contains(axiom_host::RenderCapability::SurfaceOrnament));
+        // And nothing else moved: exactly one bit separates it from the full set.
+        assert_eq!(
+            lean.bits() ^ axiom_host::BackendCapabilityProfile::all().bits(),
+            axiom_host::RenderCapability::SurfaceOrnament as u32
+        );
     }
 
 

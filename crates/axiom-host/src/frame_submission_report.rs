@@ -62,6 +62,21 @@ pub enum FrameFeature {
     /// instead of per fragment reports nothing, because it honoured them (see
     /// [`RenderCapability::ProceduralSurface`](crate::RenderCapability)).
     ProceduralSurface,
+    /// The per-fragment **ornament** of a runtime material surface — parallax
+    /// occlusion, de-tiling, procedural weathering, repair patches, cloth and
+    /// macro relief — traded away for fill rate.
+    ///
+    /// Distinct from [`Self::ProceduralSurface`], and the two are different
+    /// facts: that one says the backend could not honour the authored surface at
+    /// all and rendered a fallback; this one says it honoured it, at the
+    /// *identity* fidelity the source's own lean tier defines — projection,
+    /// albedo, tint, roughness, metalness, normal map, micro detail, macro bands
+    /// and the vertex-mask lane, with the decoration stacked on top of them
+    /// omitted. See [`RenderCapability::SurfaceOrnament`](crate::RenderCapability).
+    ///
+    /// Raised only by a frame that actually draws with a program composed that
+    /// way, never as a standing property of the backend.
+    SurfaceOrnament,
 }
 
 /// The uniform result of presenting one frame through any backend: which backend
@@ -201,7 +216,15 @@ mod tests {
             FrameFeature::Bloom,
             FrameFeature::AerialPerspective,
             FrameFeature::ProceduralSurface,
+            FrameFeature::SurfaceOrnament,
         ];
+        // "The surface could not be honoured at all" and "the surface was
+        // honoured without its ornament" are different facts, so they are
+        // different features — the same reason Bloom is not PostProcessing.
+        assert_ne!(
+            FrameFeature::SurfaceOrnament,
+            FrameFeature::ProceduralSurface
+        );
         // Bloom is its own feature, not a spelling of PostProcessing: a backend
         // that grades but cannot bloom must be able to report exactly that.
         assert_ne!(FrameFeature::Bloom, FrameFeature::PostProcessing);

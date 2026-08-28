@@ -173,6 +173,48 @@ pub enum RenderCapability {
     /// appended above bit 12: the GPU main-pass WGSL reads no bit above `2048`,
     /// so the cross-language contract is unchanged by adding it.
     GBuffer = 1 << 14,
+    /// **Surface ornament**: the per-fragment *decoration* layers of a runtime
+    /// material — parallax occlusion, de-tiling, procedural weathering, repair
+    /// patches, cloth and macro relief.
+    ///
+    /// A backend without this bit still composes the material shader and still
+    /// renders every surface. What it composes is the shader's **identity** half:
+    /// the projection (planar / mesh / object-space), the albedo, ORM and normal
+    /// fetches, the micro-detail lane, the macro variation bands, the
+    /// vertex-colour masks, the tint and the roughness remap. What it drops is
+    /// the ornament stacked on top of that — which is why the declared
+    /// degradation is a [`CapabilityDegradation::Substitute`]: the same surface,
+    /// less ornate, not a missing one.
+    ///
+    /// **The split is not invented here.** It is the one the source this shader
+    /// is a port of already made and already measured: `apps/shmup`'s
+    /// `src/core/fidelity.js` lean tier, whose `applyOwMaterial` gate drops
+    /// exactly `OW_PARALLAX`, `OW_DETILE`, `OW_WEATHER`, `OW_PATCH`, `OW_CLOTH`
+    /// and `OW_MACRO_RELIEF` and keeps the projection, masking and channel
+    /// defines because *"dropping them does not simplify the material, it makes
+    /// it sample the wrong thing"*.
+    ///
+    /// **Why one global bit and not a per-material decision.** A per-material
+    /// gate would cut more per fragment, but each distinct gate combination is a
+    /// new program permutation, and program count is the *other* measured cost on
+    /// this content: the same file records cold boot as roughly
+    /// `(lit programs) x (~100 KB of translated shader each)`, with 101 programs
+    /// costing ~26 s against lean's 43 at ~14.8 s. Trading frame time for boot
+    /// time is not a win. A single backend-wide bit adds one program shape, and
+    /// it is read *before* any program is generated, so a catalog is wholly lean
+    /// or wholly full and no digest has to learn about it — which is what keeps
+    /// `axiom_surface::SurfaceKind::code` structural and keeps retuning a
+    /// parameter free of recompiles.
+    ///
+    /// The reportable peer is [`crate::FrameFeature::SurfaceOrnament`], raised
+    /// only by a frame that actually draws with a program composed lean — never
+    /// unconditionally, which is the trap [`Self::HdrTargets`]'s own note
+    /// describes.
+    ///
+    /// Appended above [`Self::GBuffer`] for the same reason every bit since 12
+    /// was: the GPU main-pass WGSL hardcodes no mask above `2048`, so nothing
+    /// below it moves and the cross-language contract is unchanged.
+    SurfaceOrnament = 1 << 15,
 }
 
 /// How a backend that lacks a [`RenderCapability`] degrades it. A capability is
@@ -193,14 +235,16 @@ pub enum CapabilityDegradation {
 /// directional [`RenderCapability::Shadows`] (a planar contact shadow),
 /// [`RenderCapability::AerialPerspective`] (the normalized-depth fog ramp),
 /// [`RenderCapability::ProceduralSurface`] (the surface's channels evaluated per
-/// triangle rather than per fragment) and [`RenderCapability::HdrTargets`] (the
-/// same passes rendered into [`crate::HostAttachmentFormat::Rgba8UnormSrgb`]). A
-/// mask rather than a chain of comparisons, so the set grows without the test
-/// growing a branch.
+/// triangle rather than per fragment), [`RenderCapability::HdrTargets`] (the
+/// same passes rendered into [`crate::HostAttachmentFormat::Rgba8UnormSrgb`])
+/// and [`RenderCapability::SurfaceOrnament`] (the same material shader without
+/// its decoration layers). A mask rather than a chain of comparisons, so the set
+/// grows without the test growing a branch.
 const SUBSTITUTED_CAPABILITY_BITS: u32 = RenderCapability::Shadows as u32
     | RenderCapability::AerialPerspective as u32
     | RenderCapability::ProceduralSurface as u32
-    | RenderCapability::HdrTargets as u32;
+    | RenderCapability::HdrTargets as u32
+    | RenderCapability::SurfaceOrnament as u32;
 
 impl RenderCapability {
     /// The declared degradation for a backend that lacks this capability. The
@@ -230,7 +274,8 @@ const ALL_CAPABILITY_BITS: u32 = RenderCapability::Textures as u32
     | RenderCapability::AerialPerspective as u32
     | RenderCapability::ProceduralSurface as u32
     | RenderCapability::HdrTargets as u32
-    | RenderCapability::GBuffer as u32;
+    | RenderCapability::GBuffer as u32
+    | RenderCapability::SurfaceOrnament as u32;
 
 /// The set of render capabilities a backend will attempt. The hardware GPU backends
 /// use [`Self::all`]; the Canvas 2D software backend uses [`Self::canvas2d`]. Restrict
@@ -310,6 +355,16 @@ impl BackendCapabilityProfile {
     /// *several* of them. This one is a [`CapabilityDegradation::Drop`] rather
     /// than a substitute — see the capability's own note for why a G-buffer has
     /// no honest cheaper stand-in.
+    ///
+    /// It **keeps** [`RenderCapability::SurfaceOrnament`], and that is not an
+    /// oversight. A bit says what a backend will *attempt*, and the software
+    /// rasterizer never reaches a material-shader program at all — it evaluates a
+    /// surface's field expressions on the CPU. Clearing a bit it does not consult
+    /// would manufacture a degradation no frame could observe and no author could
+    /// act on, which is exactly the unconditional report
+    /// [`RenderCapability::HdrTargets`]'s note warns against. The bit is cleared
+    /// by whichever backend is *composing* that shader and has been asked to
+    /// trade its ornament for fill rate.
     pub const fn canvas2d() -> Self {
         Self::all()
             .without(RenderCapability::Textures)
@@ -371,7 +426,7 @@ impl BackendCapabilityProfile {
 mod tests {
     use super::*;
 
-    const CAPS: [RenderCapability; 15] = [
+    const CAPS: [RenderCapability; 16] = [
         RenderCapability::Textures,
         RenderCapability::AlphaMask,
         RenderCapability::NormalMapping,
@@ -387,6 +442,7 @@ mod tests {
         RenderCapability::ProceduralSurface,
         RenderCapability::HdrTargets,
         RenderCapability::GBuffer,
+        RenderCapability::SurfaceOrnament,
     ];
 
     #[test]
@@ -399,7 +455,7 @@ mod tests {
         });
         assert_ne!(all, none);
         assert_eq!(none.bits(), 0);
-        assert_eq!(all.bits(), 0b111_1111_1111_1111);
+        assert_eq!(all.bits(), 0b1111_1111_1111_1111);
         assert!(format!("{all:?}").contains("BackendCapabilityProfile"));
         assert!(format!("{:?}", RenderCapability::Textures).contains("Textures"));
     }
@@ -454,6 +510,10 @@ mod tests {
         // and *several* attachments even less so.
         assert!(!c.contains(RenderCapability::HdrTargets));
         assert!(!c.contains(RenderCapability::GBuffer));
+        // It KEEPS surface ornament — it never composes the material shader that
+        // bit governs, so clearing it would report a degradation nothing here
+        // performs. See the note on `canvas2d`.
+        assert!(c.contains(RenderCapability::SurfaceOrnament));
         // The two are separate answers on this backend as much as on any other:
         // one is a Substitute and one is a Drop.
         assert_eq!(
@@ -496,6 +556,12 @@ mod tests {
             RenderCapability::HdrTargets.degradation(),
             CapabilityDegradation::Substitute
         );
+        // A material shader without its ornament degrades to the same shader's
+        // identity half — the same surface, less ornate, never a missing one.
+        assert_eq!(
+            RenderCapability::SurfaceOrnament.degradation(),
+            CapabilityDegradation::Substitute
+        );
         // Every other capability degrades to an explicit, reported drop.
         CAPS.iter()
             .filter(|&&c| (c as u32) & SUBSTITUTED_CAPABILITY_BITS == 0)
@@ -531,6 +597,10 @@ mod tests {
         // Bit 14, appended for the same reason again. Nothing below it moved,
         // which is what keeps every mask the main-pass WGSL hardcodes valid.
         assert_eq!(RenderCapability::GBuffer as u32, 16384);
+        // Bit 15, appended for the same reason again. It gates which layers the
+        // runtime material shader is COMPOSED from, which happens on the CPU at
+        // the preparation barrier — the main-pass WGSL never reads it.
+        assert_eq!(RenderCapability::SurfaceOrnament as u32, 32768);
         // Every bit is distinct: the OR of all of them has as many set bits as
         // there are capabilities, which a duplicated discriminant would break.
         assert_eq!(

@@ -102,6 +102,18 @@ pub(crate) struct SurfaceProgramSource {
     vertex: String,
     fragment: String,
     params: Vec<u8>,
+    /// Whether this program's fragment half was composed **without** its
+    /// ornament layers — `axiom_host::RenderCapability::SurfaceOrnament` cleared
+    /// on the profile that prepared it.
+    ///
+    /// A fact about the text, kept next to the text, because that is the only
+    /// place it can be checked against. It is what lets a frame drawing this
+    /// program report `axiom_host::FrameFeature::SurfaceOrnament` and no other
+    /// frame report it — a standing per-backend flag would fire on every frame in
+    /// the engine, including the ones that draw no runtime material at all.
+    /// Always `false` for a field-generated program: the field algebra has no
+    /// ornament to reduce.
+    ornament_reduced: bool,
 }
 
 impl SurfaceProgramSource {
@@ -139,6 +151,11 @@ impl SurfaceProgramSource {
     pub(crate) const fn pipeline_key(&self) -> u64 {
         self.pipeline_key
     }
+
+    /// Whether this program's ornament layers were composed out of it.
+    pub(crate) const fn ornament_reduced(&self) -> bool {
+        self.ornament_reduced
+    }
 }
 
 /// Every surface one preparation saw, and the program each of them compiles to.
@@ -157,6 +174,12 @@ pub(crate) struct SurfaceProgramCatalog {
     /// separates "prepared, needed no program" from "never prepared", and only
     /// the second is a degraded frame.
     prepared: Vec<u64>,
+    /// The program ids composed without their ornament layers, ascending.
+    ///
+    /// Empty on every full-ornament backend, which is the default, so the
+    /// per-frame query below costs one `is_empty` on the path every app is on
+    /// today. Sorted because [`Self::degradations`] binary-searches it.
+    ornament_reduced: Vec<u64>,
 }
 
 impl SurfaceProgramCatalog {
@@ -200,8 +223,26 @@ impl SurfaceProgramCatalog {
             .iter()
             .filter_map(|surface| generate(surface, profile, geometry))
             .collect();
+        // Keyed on `pipeline_key` — the surface **digest** — and not on
+        // `program_id`, because [`Self::degradations`] is answering about the
+        // same numbers [`Self::is_prepared`] is, and that one matches against
+        // `prepared`, which is digests. A runtime material's `program_id` is its
+        // *parameter region* (`Surface::param_key`), a different identity for a
+        // different job; mixing the two would make this report answer about a key
+        // its caller never passes.
+        let mut ornament_reduced: Vec<u64> = programs
+            .iter()
+            .filter(|source| source.ornament_reduced())
+            .map(SurfaceProgramSource::pipeline_key)
+            .collect();
+        ornament_reduced.sort_unstable();
+        ornament_reduced.dedup();
         (programs.len() <= MAX_SURFACE_PROGRAMS)
-            .then_some(SurfaceProgramCatalog { programs, prepared })
+            .then_some(SurfaceProgramCatalog {
+                programs,
+                prepared,
+                ornament_reduced,
+            })
             .ok_or(SURFACE_PROGRAM_OVERFLOW)
     }
 
@@ -248,13 +289,27 @@ impl SurfaceProgramCatalog {
     /// `axiom_host::FrameSubmissionReport::degraded_features`. Deduplicated to a
     /// single entry however many draws missed, because the report enumerates
     /// *features*, not occurrences.
+    ///
+    /// The second entry is the ornament reduction, and it is **keyed on the
+    /// frame** exactly as the first is: it appears only when a draw in this frame
+    /// names a program the barrier composed lean. A backend-wide flag would fire
+    /// on every frame the engine renders, including frames with no runtime
+    /// material in them at all — the failure mode
+    /// `axiom_host::RenderCapability::HdrTargets`'s own note forbids.
+    ///
+    /// The miss comes first, and that order is meaningful rather than
+    /// incidental: a program that is *absent* is not also a program that was
+    /// *reduced*, so a reader takes the entries in severity order.
     pub(crate) fn degradations(&self, program_ids: &[u64]) -> Vec<FrameFeature> {
-        program_ids
+        let missed = program_ids
             .iter()
             .find(|program_id| !self.is_prepared(**program_id))
-            .map(|_| FrameFeature::ProceduralSurface)
-            .into_iter()
-            .collect()
+            .map(|_| FrameFeature::ProceduralSurface);
+        let leaned = program_ids
+            .iter()
+            .find(|program_id| self.ornament_reduced.binary_search(program_id).is_ok())
+            .map(|_| FrameFeature::SurfaceOrnament);
+        missed.into_iter().chain(leaned).collect()
     }
 }
 
@@ -286,6 +341,7 @@ fn generate(
     // own digest, which carries the KIND but not the parameter values — so every
     // runtime material in a scene is one program and one pipeline, differing
     // only in the bytes below.
+    let ornament = crate::material_shader::compose::Ornament::of(profile);
     surface
         .kind()
         .material_params()
@@ -303,8 +359,12 @@ fn generate(
             // two program shapes is emitted, and the same parameters pack the
             // block. Keeping them together is what stops a program being paired
             // with a block packed from different values.
-            fragment: crate::material_shader::compose::material_program(&params).wgsl,
+            fragment: crate::material_shader::compose::material_program(&params, ornament).wgsl,
             params: crate::material_shader::params::param_bytes(&params),
+            // The one place a program learns it is lean. Derived from the same
+            // `ornament` the text was composed with, so the flag and the WGSL
+            // cannot disagree about which of them the frame is drawing.
+            ornament_reduced: ornament == crate::material_shader::compose::Ornament::Lean,
         })
         .or_else(|| generate_field_program(surface, profile, geometry))
 }
@@ -329,6 +389,9 @@ fn generate_field_program(
             vertex,
             fragment,
             params: pack(plan.param_layout(), &flat),
+            // A field-generated program has no ornament layers to reduce: the
+            // algebra emits exactly the channels the surface bound.
+            ornament_reduced: false,
         })
 }
 
@@ -625,6 +688,126 @@ mod tests {
         });
     }
 
+
+    /// The profile an app asks for when it trades surface ornament for fill
+    /// rate: the GPU profile with one bit cleared, on the same declared-
+    /// degradation surface every other capability uses.
+    fn lean_profile() -> BackendCapabilityProfile {
+        gpu_profile().without(axiom_host::RenderCapability::SurfaceOrnament)
+    }
+
+    /// A runtime material with every ornament layer switched on, so a lean
+    /// composition has something to actually take away.
+    fn ornate_material() -> Surface {
+        axiom_surface::runtime_material(axiom_surface::MaterialParams {
+            parallax: 0.05,
+            detile: 0.6,
+            macro_relief: 0.5,
+            patch: [0.5, 2.6, 0.12, -0.08],
+            cloth: [0.4, 0.7, 0.5, 0.0],
+            ..axiom_surface::MaterialParams::default()
+        })
+    }
+
+    /// **The whole point of the bit**, at the seam a backend actually uses: one
+    /// profile, one catalog, one shorter program.
+    #[test]
+    fn a_profile_without_surface_ornament_composes_the_lean_material_shader() {
+        let surface = ornate_material();
+        let full = SurfaceProgramCatalog::prepare(std::slice::from_ref(&surface), gpu_profile())
+            .expect("fits");
+        let lean = SurfaceProgramCatalog::prepare(std::slice::from_ref(&surface), lean_profile())
+            .expect("fits");
+        // Same surface, same program count, same ids: the switch is read before a
+        // program is generated and never reaches a digest, so it cannot move the
+        // catalog's shape — only the text inside it.
+        assert_eq!(full.program_count(), 1);
+        assert_eq!(lean.program_count(), full.program_count());
+        assert_eq!(lean.prepared_count(), full.prepared_count());
+        let full_source = full.sources().first().expect("one program");
+        let lean_source = lean.sources().first().expect("one program");
+        assert_eq!(lean_source.program_id(), full_source.program_id());
+        assert_eq!(lean_source.pipeline_key(), full_source.pipeline_key());
+        // The parameter block is untouched: a lean program reads the same slots
+        // from the same bytes, which is what lets an app flip the bit without
+        // re-authoring a single material.
+        assert_eq!(lean_source.params(), full_source.params());
+        // And the text is the reduced one.
+        assert!(full_source.ornament_reduced() == false);
+        assert!(lean_source.ornament_reduced());
+        ["axiom_pom(", "ow_weather_stack(", "axiom_patch_apply(", "axiom_cloth_fold("]
+            .iter()
+            .for_each(|call| {
+                assert!(full_source.fragment().contains(call), "full keeps {call}");
+                assert!(!lean_source.fragment().contains(call), "lean drops {call}");
+            });
+        // What decides WHAT the surface is stays in both.
+        ["axiom_uv_projection_pos(", "axiom_macro_variation(", "axiom_masks_apply(",
+         "axiom_mat_finish("]
+            .iter()
+            .for_each(|call| assert!(lean_source.fragment().contains(call), "lean keeps {call}"));
+    }
+
+    /// **The reduction is reported, and only by the frames it applies to.**
+    ///
+    /// A standing per-backend flag would fire on every frame the engine renders,
+    /// including frames with no runtime material in them — the failure mode the
+    /// `HdrTargets` capability's own note forbids. So the report is keyed on the
+    /// programs a frame actually draws with, exactly as the miss report is.
+    #[test]
+    fn the_ornament_reduction_is_reported_by_the_frames_that_draw_it_and_no_others() {
+        let ornate = ornament_and_field();
+        let lean = SurfaceProgramCatalog::prepare(&ornate, lean_profile()).expect("fits");
+        // The digests — the same identity `is_prepared` answers about, and
+        // therefore the same one `degradations` is asked about.
+        let material_id = ornate[0].digest().raw();
+        let field_id = ornate[1].digest().raw();
+        assert_ne!(material_id, field_id);
+        assert!(lean.is_prepared(material_id) & lean.is_prepared(field_id));
+        // A frame that draws the lean material says so.
+        assert_eq!(
+            lean.degradations(&[material_id]),
+            vec![FrameFeature::SurfaceOrnament]
+        );
+        // A frame that draws only the field surface says nothing: the field
+        // algebra has no ornament to reduce, and reporting it here would be the
+        // unconditional report this design exists to avoid.
+        assert!(lean.degradations(&[field_id]).is_empty());
+        assert!(lean.degradations(&[]).is_empty());
+        assert!(lean.degradations(&[0]).is_empty());
+        // Once, however many draws name it.
+        assert_eq!(
+            lean.degradations(&[material_id, field_id, material_id]),
+            vec![FrameFeature::SurfaceOrnament]
+        );
+        // A miss and a reduction are different facts and both are reported, miss
+        // first — a program that is ABSENT is not also a program that was
+        // REDUCED, so a reader takes them in severity order.
+        assert_eq!(
+            lean.degradations(&[0xDEAD, material_id]),
+            vec![FrameFeature::ProceduralSurface, FrameFeature::SurfaceOrnament]
+        );
+        // And the full-ornament catalog reports neither for the same frame.
+        let full = SurfaceProgramCatalog::prepare(&ornate, gpu_profile()).expect("fits");
+        assert!(full.degradations(&[material_id, field_id]).is_empty());
+        assert_eq!(
+            full.degradations(&[0xDEAD]),
+            vec![FrameFeature::ProceduralSurface]
+        );
+    }
+
+    /// A runtime material and a field surface, in that order — the pair the
+    /// report test needs to prove the reduction is keyed on the program and not
+    /// on the backend.
+    fn ornament_and_field() -> Vec<Surface> {
+        vec![
+            ornate_material(),
+            SurfaceBuilder::new()
+                .field(SurfaceChannel::BaseColor, uv_color())
+                .build()
+                .expect("legal"),
+        ]
+    }
     /// **A frame naming an unprepared program is reported, once, and renders the
     /// fallback.** It does not compile, and it does not panic.
     #[test]

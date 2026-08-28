@@ -32,6 +32,33 @@
 //! | 620-628 | `tint_wear` | tint, roughness remap, the channel assignment |
 //! | 650-666 | `cloth` | the transmission channel |
 //!
+//! ## Ornament is the second structural gate, and it is ONE global switch
+//!
+//! [`Ornament`] decides whether the six *decoration* layers are in the emitted
+//! text at all: parallax occlusion, de-tiling, weathering, patches, cloth and
+//! macro relief. Everything that decides **what a surface is** — the projection,
+//! the albedo/ORM/normal fetches, micro detail, the macro bands, the
+//! vertex-colour masks, the tint and the roughness remap — is never gated.
+//!
+//! That split is the source's, measured against the same art:
+//! `apps/shmup/src/core/fidelity.js`'s lean tier, whose `applyOwMaterial` gate
+//! (`shader.js:883`) drops exactly `OW_PARALLAX`, `OW_DETILE`, `OW_WEATHER`,
+//! `OW_PATCH`, `OW_CLOTH` and `OW_MACRO_RELIEF` while leaving `OW_TRIPLANAR` /
+//! `OW_MESH_UV` / `OW_OBJECT_SPACE` / `OW_VCOL_MASKS` / `OW_ALPHA_MASK` outside
+//! the `if (!LEAN)` — because *"dropping them does not simplify the material, it
+//! makes it sample the wrong thing"*.
+//!
+//! It is **one backend-wide switch, not a per-material decision**, and that is a
+//! design constraint rather than a convenience. A per-material gate would cut
+//! more per fragment, but each distinct gate combination is a program
+//! permutation, and the same file measures program count as the other real cost:
+//! cold boot is roughly `(lit programs) x (~100 KB of translated shader each)`.
+//! One switch adds one shape. It is read from
+//! [`axiom_host::RenderCapability::SurfaceOrnament`] before any program is
+//! generated, so it never reaches a surface digest — which is what keeps
+//! `axiom_surface::SurfaceKind::code` structural and keeps retuning a parameter
+//! free of recompiles.
+//!
 //! ## `CLOTH_WGSL` is **not** concatenated here
 //!
 //! [`crate::surface_program::wgsl_template::scene_shader`] splices it into
@@ -121,6 +148,7 @@ use super::pom::POM_WGSL;
 use super::tint_wear::TINT_WEAR_WGSL;
 use super::uv_mode::UV_MODE_WGSL;
 use super::weathering::WEATHERING_WGSL;
+use axiom_host::{BackendCapabilityProfile, RenderCapability};
 
 /// `owDist`, as this composition can supply it.
 ///
@@ -131,23 +159,74 @@ use super::weathering::WEATHERING_WGSL;
 /// — a silent `0.0` in the middle of a 200-line shader is not findable.
 pub(crate) const OW_DIST: &str = "0.0";
 
-/// The layers' WGSL, in dependency order.
+/// **How much of the material shader this program is willing to be.**
+///
+/// One backend-wide answer, read from
+/// [`axiom_host::RenderCapability::SurfaceOrnament`] before any program is
+/// generated — never a per-material decision. See the capability's own note for
+/// why: a per-material gate would cut more per fragment, but every distinct gate
+/// combination is a program permutation, and program count is the other measured
+/// cost on this content. One bit adds one shape.
+///
+/// The split between the two is the source's, not one invented here.
+/// `apps/shmup/src/core/fidelity.js`'s lean tier drops "parallax occlusion,
+/// procedural weathering, patch, cloth, detile and macro-relief layers" and
+/// keeps "what decides WHAT a surface is — projection, albedo, tint, roughness,
+/// metalness, normal map, vertex masks".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ornament {
+    /// Every layer, as the source's `?fidelity=full` compiles it.
+    Full,
+    /// The six ornament layers gated out of the emitted text.
+    Lean,
+}
+
+impl Ornament {
+    /// The backend-wide answer, from the profile that will prepare the catalog.
+    pub(crate) fn of(profile: BackendCapabilityProfile) -> Ornament {
+        [Ornament::Lean, Ornament::Full]
+            [usize::from(profile.contains(RenderCapability::SurfaceOrnament))]
+    }
+
+    /// The index into every `[full, lean]` pair in this file. `Full` is 0 so the
+    /// arrays read in the order a reader expects: the full text first, the
+    /// reduction second. Pinned by `the_ornament_index_is_the_pair_order`,
+    /// because an enum used as a table index is order-dependent.
+    const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// The layers' WGSL that **every** program carries, in dependency order.
 ///
 /// `frames` and `uv_mode` first because they build the projection the rest
 /// sample through; `tint_wear` last because it names `SurfaceOut`. `cloth` is
-/// **absent** — see this module's header.
-const LAYERS: [&str; 10] = [
+/// **absent** — see this module's header — and so are the four ornament layers,
+/// which [`ORNAMENT_LAYERS`] adds back at [`Ornament::Full`].
+const LAYERS: [&str; 6] = [
     FRAMES_WGSL,
     UV_MODE_WGSL,
-    POM_WGSL,
-    DETILE_WGSL,
     DETAIL_WGSL,
     MACRO_VARIATION_WGSL,
-    PATCHES_WGSL,
-    WEATHERING_WGSL,
     MASKS_WGSL,
     TINT_WEAR_WGSL,
 ];
+
+/// The four ornament layers whose **definitions** leave the text at
+/// [`Ornament::Lean`], spliced ahead of [`LAYERS`] at [`Ornament::Full`] so the
+/// dependency order above is unchanged.
+///
+/// Dropping the definitions and not merely the calls is deliberate here, and it
+/// is the opposite of what the de-tiling gate does inside a full program (there,
+/// `DETILE_WGSL` stays and only the calls go, so the two programs differ in one
+/// thing). The reason is the *other* cost `fidelity.js` measures: cold boot is
+/// roughly `(lit programs) x (translated shader text each)`, and these four are
+/// 6300 of the module's 16 900 lines. A lean program that still carried them
+/// would cut fill rate and pay the compile anyway.
+///
+/// Nothing in [`LAYERS`] references a symbol defined here — pinned by
+/// `the_kept_layers_never_reference_a_dropped_layers_symbol`.
+const ORNAMENT_LAYERS: [&str; 4] = [POM_WGSL, DETILE_WGSL, PATCHES_WGSL, WEATHERING_WGSL];
 
 /// The composition, from the signature down to the first `#ifdef OW_DETILE`.
 const SURFACE_HEAD: &str = r#"
@@ -256,6 +335,18 @@ fn axiom_surface(in: SurfaceIn, params: SurfaceParams) -> SurfaceOut {
     // ---- shader.js:338-351 — derivatives, then the parallax march -----------
     let ddx = dpdx(f_uv);
     let ddy = dpdy(f_uv);
+"#;
+
+/// `#ifdef OW_PARALLAX` — the parallax occlusion march (`shader.js:338-351`).
+///
+/// Emitted only at [`Ornament::Full`]. The march is a bounded loop with a linear
+/// refine — up to 48 **dependent** `textureSampleGrad`s on one fragment — and it
+/// is the single most expensive thing in this composition, which is why the lean
+/// arm replaces the whole block with [`POM_SKIPPED`] instead of driving `depth`
+/// to a runtime zero. `POM_WGSL` is not concatenated in that arm at all, so
+/// `axiom_pom_view_tangent` is out of scope there and this text cannot survive
+/// by accident.
+const POM_MARCH: &str = r#"
     let vt = axiom_pom_view_tangent(in.view_dir, f_t, f_b, f_n);
     // `owPOM` returns `uv` unchanged for `depth <= 0.0`, which IS the source's
     // `#ifdef OW_PARALLAX` gate (`p.parallax > 0`) — an exact identity, not an
@@ -265,7 +356,23 @@ fn axiom_surface(in: SurfaceIn, params: SurfaceParams) -> SurfaceOut {
         axiom_pom_fade(ow_dist, p_off.z, p_off.w),
         p_misc.x, albedo_tex, albedo_sampler,
     );
+"#;
 
+/// [`POM_MARCH`] at [`Ornament::Lean`] — the source's `if (!LEAN)` around
+/// `defines.OW_PARALLAX` (`shader.js:884`).
+///
+/// The surface samples at the projected uv the frame built, which is exactly
+/// what a zero-depth surface already does; what is gone is the march that would
+/// have offset it.
+const POM_SKIPPED: &str = r#"
+    // LEAN: no parallax occlusion. `fidelity.js`: "parallax occlusion ... come
+    // out of the material shader". The projection is untouched — the fragment
+    // samples the uv the frame built for it.
+    let uv = f_uv;
+"#;
+
+/// From the base fetches to the first `#ifdef OW_DETILE` — `shader.js:353-356`.
+const SURFACE_BASE_FETCH: &str = r#"
     // ---- shader.js:353-356 — the three base fetches -------------------------
     // `OW_TEX` is `textureGrad` unless OW_NOGRAD; slot 13's `no_grad` selects the
     // implicit-derivative fallback, which this composition does not carry (it
@@ -349,8 +456,9 @@ const DETILE_BLEND: &str = r#"
     );
 "#;
 
-/// Everything after the second `#ifdef OW_DETILE` — `shader.js:385-628`.
-const SURFACE_TAIL: &str = r#"
+/// From the second `#ifdef OW_DETILE` to the macro-variation call's relief
+/// argument — `shader.js:385-449`.
+const SURFACE_DETAIL: &str = r#"
     // ---- shader.js:385-393 — micro albedo, cavity roughness, owHeightS ------
     // The same packed texel, unpacked into the logical `owDetailTex` the source
     // samples: `.b` is the micro-albedo lane `dTex.r` and `.a` is the height.
@@ -377,13 +485,44 @@ const SURFACE_TAIL: &str = r#"
         // `mat3( viewMatrix )` — the identity, because the normal above is
         // already in the space the relief tilt is built in.
         mat3x3<f32>(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
-        micro, det_fade, macro_p, macro_big, p_misc.z,
+        micro, det_fade, macro_p, macro_big,"#;
+
+/// `owMacroRelief`, the macro-variation call's relief amplitude — the one
+/// argument the ornament gate moves.
+///
+/// A gated **argument** rather than two copies of a fifteen-line call, because a
+/// duplicated call is one more place for the source's argument order to drift
+/// apart, and the order *is* the specification here.
+///
+/// It is not a cosmetic zero. `macro_variation`'s WGSL gates the block on
+/// `macro_relief > 0.0` exactly as the source gates `#ifdef OW_MACRO_RELIEF` on
+/// `macroRelief > 0`, so passing zero is that `#ifdef` spelled as the value the
+/// layer already reads: two `owMacroTex` fetches and a shading-normal tilt gone,
+/// on every up-facing fragment. The bands, the hue term and the roughness
+/// variation above it stay — they are what makes a 12 m facade break up, and
+/// `fidelity.js` names only the *relief* layer, not macro variation itself.
+const MACRO_RELIEF: [&str; 2] = [
+    "\n        p_misc.z,",
+    "\n        0.0, // LEAN: macroRelief off — fidelity.js drops OW_MACRO_RELIEF",
+];
+
+/// The rest of the macro-variation call and its channel assignments —
+/// `shader.js:396-449`.
+const SURFACE_MACRO: &str = r#"
         material_macro_tex, albedo_sampler,
     );
     alb = vec4<f32>(mv.albedo, alb.a);
     orm.g = mv.roughness;
     var n_shade = mv.shade_normal;
+"#;
 
+/// `#ifdef OW_PATCH` — repair patches (`shader.js:451-490`).
+///
+/// Emitted only at [`Ornament::Full`]. The source makes this a compile-time
+/// `#ifdef` too, and `fidelity.js` drops it by name; the lean arm emits nothing
+/// at all in its place, because every one of its three outputs (`alb`, `orm.g`,
+/// `height_s`) is already carrying the value this block would have modified.
+const PATCHES_APPLY: &str = r#"
     // ---- shader.js:451-490 — repair patches ---------------------------------
     // `#ifdef OW_PATCH` is `patch[0] > 0`, and coverage 0 makes `has` an exact
     // `step(1.0, r0)` with `r0 = fract(...) < 1`, i.e. an exact zero mask and an
@@ -402,7 +541,15 @@ const SURFACE_TAIL: &str = r#"
     alb = vec4<f32>(patched.albedo, alb.a);
     orm.g = patched.roughness;
     height_s = patched.height;
+"#;
 
+/// `#ifdef OW_WEATHER` — dust, rain runoff, ground splash and the wedge
+/// (`shader.js:492-565`).
+///
+/// Emitted only at [`Ornament::Full`]. The largest layer in the module (2148
+/// lines of Rust, four stacked stages and its own `owMacroTex` fetches), gated
+/// by the source on `p.weather[0..2]` and dropped by name at lean fidelity.
+const WEATHER_APPLY: &str = r#"
     // ---- shader.js:492-565 — weathering -------------------------------------
     // `n_flat` is `normalize( owP2V * owNp )`; in world space that is `owNp`.
     let weathered = ow_weather_stack(
@@ -415,7 +562,16 @@ const SURFACE_TAIL: &str = r#"
     alb = vec4<f32>(weathered.albedo, alb.a);
     orm = weathered.orm;
     n_shade = weathered.n_shade;
+"#;
 
+/// Cavity grime and the vertex-colour masks — `shader.js:567-596`.
+///
+/// **Never gated.** `fidelity.js` is explicit that the vertex-mask lane is part
+/// of what decides *what a surface is*: the source keeps `OW_VCOL_MASKS` outside
+/// its `if (!LEAN)` block for the same reason it keeps the projection defines
+/// there — dropping them "does not simplify the material, it makes it sample the
+/// wrong thing".
+const SURFACE_MASKS: &str = r#"
     // ---- shader.js:567-596 — cavity grime + the vertex-colour masks ---------
     // `height_s` is taken AFTER the repair patches raised it (shader.js:487).
     let masked = axiom_masks_apply(
@@ -425,7 +581,20 @@ const SURFACE_TAIL: &str = r#"
     );
     alb = vec4<f32>(masked.albedo, alb.a);
     orm = masked.orm;
+"#;
 
+/// `#ifdef OW_CLOTH` — the underside term, the fold, and the seventh channel
+/// (`shader.js:598-618` + `:650-666`).
+///
+/// Emitted only at [`Ornament::Full`]. `CLOTH_WGSL` is spliced into every scene
+/// shader by `scene_shader` regardless, because the lighting stage calls
+/// `axiom_cloth_light` — so this gate removes *calls*, not definitions, and the
+/// three `textureSample`s the fold takes are the cost it removes. The
+/// composition's note above stands: the source guards those fetches with
+/// `if ( owClothP.z > 0 )` to skip them, and this port traded that guard for
+/// uniform control flow around an implicit-LOD sample. The lean arm is where
+/// that trade is finally paid back.
+const CLOTH_APPLY: &str = r#"
     // ---- shader.js:598-618 — cloth ------------------------------------------
     // `CLOTH_WGSL` is spliced into every scene shader by `scene_shader`, so its
     // functions are in scope and must NOT be concatenated again here.
@@ -443,7 +612,39 @@ const SURFACE_TAIL: &str = r#"
         textureSample(material_macro_tex, albedo_sampler, fold_uv + AXIOM_CLOTH_FOLD_DX).b,
         textureSample(material_macro_tex, albedo_sampler, fold_uv + AXIOM_CLOTH_FOLD_DY).b,
     );
+    // The three values the channel assignment below consumes, named rather than
+    // read off `fold` at the use site. That is what lets the lean arm bind the
+    // same three names from the un-clothed surface without a second copy of the
+    // assignment — the assignment is `tint_wear`'s contract and must exist once.
+    let surface_albedo = fold.albedo;
+    let surface_normal = fold.normal;
+    // The seventh channel. `CLOTH_LIGHT` (:650-666) multiplies the per-light sum
+    // by `owClothP.x * clamp( owORM.r, 0, 1 )`; the sum lives in the lighting
+    // stage, this scalar is the surface's half of it. It is also the ONLY
+    // consumer of `orm.r` — `SurfaceOut` has no AO lane.
+    let surface_transmission = axiom_cloth_transmission(cloth_p, orm.r);
+"#;
 
+/// [`CLOTH_APPLY`] at [`Ornament::Lean`].
+///
+/// The three names the channel assignment reads, bound from the surface as the
+/// masks stage left it. `transmission` is an explicit `0.0` rather than a
+/// neutral-parameter evaluation: with no cloth term in the shader there is no
+/// transmitted light, and saying so costs nothing and hides nothing.
+const CLOTH_SKIPPED: &str = r#"
+    // LEAN: no cloth. `fidelity.js` drops the cloth layer — here that is the
+    // underside darkening, the three-fetch fold, and the transmission channel.
+    let surface_albedo = alb.rgb;
+    let surface_normal = n_shade;
+    let surface_transmission = 0.0;
+"#;
+
+/// The channel assignment — `shader.js:620-628` and the OVERRIDES.
+///
+/// **Never gated.** Tint, the roughness remap and the six fixed channels are
+/// `tint_wear`'s contract with `SurfaceOut`, and every one of them is on
+/// `fidelity.js`'s keep list.
+const SURFACE_FINISH: &str = r#"
     // ---- shader.js:620-628 + the OVERRIDES — the channel assignment ---------
     // tint (:621), the roughness remap (:624), then all six fixed channels.
     // Three's `diffuseColor.a` — the MATERIAL's own opacity — is
@@ -463,37 +664,52 @@ const SURFACE_TAIL: &str = r#"
     // `alpha_mask` double-counting: `owAlbedo.a` is folded in once, below,
     // rather than once here and once there.
     var out = axiom_mat_finish(
-        vec4<f32>(fold.albedo, alb.a), orm, fold.normal, in.emissive,
+        vec4<f32>(surface_albedo, alb.a), orm, surface_normal, in.emissive,
         tint_col, rough_p, in.vertex_color.w, alpha_mask,
     );
-    // The seventh channel. `CLOTH_LIGHT` (:650-666) multiplies the per-light sum
-    // by `owClothP.x * clamp( owORM.r, 0, 1 )`; the sum lives in the lighting
-    // stage, this scalar is the surface's half of it. It is also the ONLY
-    // consumer of `orm.r` — `SurfaceOut` has no AO lane.
-    out.transmission = axiom_cloth_transmission(cloth_p, orm.r);
+    out.transmission = surface_transmission;
     return out;
 }
 "#;
 
-/// The composed program: the ten concatenated layer constants, then the
+/// The composed program: the concatenated layer constants, then the
 /// hand-written `axiom_lighting_model` + `axiom_surface`.
 ///
-/// A **function** and not the `&str` constant it would rather be, because
-/// de-tiling is gated structurally (see this module's header) and one constant
-/// cannot hold two shapes. Splicing the two `#ifdef OW_DETILE` chunks into a
-/// shared body is what keeps the other ~200 lines singular; the alternative was
-/// two copies of the whole composition, which is two places for the source's
-/// order to drift apart.
-pub(crate) fn material_surface_wgsl(detile: bool) -> String {
-    let gate = usize::from(detile);
+/// A **function** and not the `&str` constant it would rather be, because two
+/// things are gated structurally (see this module's header) and one constant
+/// cannot hold four shapes. Splicing the gated chunks into a shared body is what
+/// keeps the other ~200 lines singular; the alternative was a copy of the whole
+/// composition per arm, which is that many places for the source's order to
+/// drift apart.
+///
+/// The two gates are **not** independent knobs. De-tiling is one of the six
+/// layers [`Ornament::Lean`] drops, so the conjunction below makes the fourth
+/// combination unrepresentable rather than merely unused: no caller, here or in
+/// a future one, can ask for a lean program with the de-tiling chunks in it. That
+/// is what keeps this a `+1` on the permutation count rather than a doubling —
+/// the emitted shapes are `{full·detile-off, full·detile-on, lean}`, three, where
+/// before there were two.
+pub(crate) fn material_surface_wgsl(detile: bool, ornament: Ornament) -> String {
+    let orn = ornament.index();
+    let gate = usize::from(detile) * usize::from(orn == Ornament::Full.index());
     [
+        [ORNAMENT_LAYERS.as_slice(), &[]][orn],
         LAYERS.as_slice(),
         &[
             SURFACE_HEAD,
+            [POM_MARCH, POM_SKIPPED][orn],
+            SURFACE_BASE_FETCH,
             ["", DETILE_SAMPLE][gate],
             SURFACE_MID,
             ["", DETILE_BLEND][gate],
-            SURFACE_TAIL,
+            SURFACE_DETAIL,
+            MACRO_RELIEF[orn],
+            SURFACE_MACRO,
+            [PATCHES_APPLY, ""][orn],
+            [WEATHER_APPLY, ""][orn],
+            SURFACE_MASKS,
+            [CLOTH_APPLY, CLOTH_SKIPPED][orn],
+            SURFACE_FINISH,
         ],
     ]
     .concat()
@@ -516,12 +732,14 @@ pub(crate) struct MaterialProgram {
 
 /// Compose one material into its program and its parameter block.
 ///
-/// The gate is the source's, exactly: `p.detile > 0 && p.uvMode !== 'triplanar'`
-/// (`extendMaterial:851`), which is what [`detile_enabled`] ports.
-pub(crate) fn material_program(material: &MaterialParams) -> MaterialProgram {
+/// The de-tiling gate is the source's, exactly: `p.detile > 0 && p.uvMode !==
+/// 'triplanar'` (`extendMaterial:851`), which is what [`detile_enabled`] ports.
+/// The source's own `if (!LEAN)` wrapped around that line is
+/// [`material_surface_wgsl`]'s conjunction, not a second decision taken here.
+pub(crate) fn material_program(material: &MaterialParams, ornament: Ornament) -> MaterialProgram {
     let detile = detile_enabled(material.detile, material.uv_mode == UvMode::Triplanar);
     MaterialProgram {
-        wgsl: material_surface_wgsl(detile),
+        wgsl: material_surface_wgsl(detile, ornament),
         // Bit patterns, not floats: a program identity is compared and hashed,
         // and `f32` is neither `Eq` nor `Hash`. The packing is `params.rs`'s.
         params: material.pack().map(|slot| slot.map(f32::to_bits)),
@@ -600,7 +818,7 @@ mod tests {
 
     #[test]
     fn the_program_declares_both_halves_of_a_surface_program() {
-        let program = material_surface_wgsl(false);
+        let program = material_surface_wgsl(false, Ornament::Full);
         assert!(program.contains("fn axiom_lighting_model() -> u32 {"));
         assert!(program
             .contains("fn axiom_surface(in: SurfaceIn, params: SurfaceParams) -> SurfaceOut"));
@@ -609,7 +827,7 @@ mod tests {
     /// The layers land in dependency order, each exactly once.
     #[test]
     fn every_layer_is_concatenated_once_and_before_the_composition() {
-        let program = material_surface_wgsl(true);
+        let program = material_surface_wgsl(true, Ornament::Full);
         let composition_at = program
             .find("fn axiom_surface(")
             .expect("the composition must exist");
@@ -634,7 +852,7 @@ mod tests {
     /// The failure mode this whole file exists to prevent.
     #[test]
     fn every_layer_entry_point_is_called_from_the_composition() {
-        let program = material_surface_wgsl(true);
+        let program = material_surface_wgsl(true, Ornament::Full);
         let composition = body(&program);
         REACHED.iter().for_each(|(layer, entry)| {
             let call = format!("{entry}(");
@@ -656,8 +874,8 @@ mod tests {
     /// on 17.2% of operands, so an "off" program must not contain the block.
     #[test]
     fn de_tiling_is_absent_from_the_text_when_it_is_off() {
-        let off = material_surface_wgsl(false);
-        let on = material_surface_wgsl(true);
+        let off = material_surface_wgsl(false, Ornament::Full);
+        let on = material_surface_wgsl(true, Ornament::Full);
         REACHED_WHEN_DETILING.iter().for_each(|entry| {
             let call = format!("{entry}(");
             assert!(
@@ -685,7 +903,7 @@ mod tests {
     #[test]
     fn the_cloth_layer_is_called_but_never_redefined() {
         use crate::scene_wgsl::{SCENE_WGSL_PREFIX, SCENE_WGSL_SUFFIX};
-        let program = material_surface_wgsl(true);
+        let program = material_surface_wgsl(true, Ornament::Full);
         ["fn axiom_cloth_light(", "fn axiom_cloth_underside(", "fn axiom_cloth_fold("]
             .iter()
             .for_each(|definition| {
@@ -711,7 +929,7 @@ mod tests {
     /// `axiom_mat_channels`; `transmission` is the composition's own.
     #[test]
     fn all_seven_surface_out_channels_are_written() {
-        let program = material_surface_wgsl(false);
+        let program = material_surface_wgsl(false, Ornament::Full);
         [
             "out.base_color",
             "out.roughness",
@@ -725,16 +943,36 @@ mod tests {
             assert!(program.contains(channel), "tint_wear must write {channel}");
         });
         assert!(
-            body(&program).contains("out.transmission = axiom_cloth_transmission("),
+            body(&program).contains("out.transmission = surface_transmission;"),
             "the seventh channel is the composition's own"
         );
+        // And at full ornament it is genuinely the cloth layer's, not a constant:
+        // the ornament gate is what may replace it, nothing else.
+        assert!(body(&program)
+            .contains("let surface_transmission = axiom_cloth_transmission(cloth_p, orm.r);"));
+        // The lean arm writes all seven too — a channel silently unwritten is
+        // exactly what this test exists to catch, and the reduction must not open
+        // that door.
+        let lean = material_surface_wgsl(false, Ornament::Lean);
+        [
+            "out.base_color",
+            "out.roughness",
+            "out.metallic",
+            "out.normal",
+            "out.emission",
+            "out.opacity",
+        ]
+        .iter()
+        .for_each(|channel| assert!(lean.contains(channel), "lean must write {channel}"));
+        assert!(body(&lean).contains("out.transmission = surface_transmission;"));
+        assert!(body(&lean).contains("let surface_transmission = 0.0;"));
     }
 
     /// A slot that moves silently re-reads someone else's parameter, so the
     /// composition's reads are pinned against the map in `params.rs`.
     #[test]
     fn the_composition_reads_only_the_slots_the_map_defines() {
-        let composition = material_surface_wgsl(true);
+        let composition = material_surface_wgsl(true, Ornament::Full);
         let composition = body(&composition);
         // Slot 13 (`no_grad`) is deliberately unread — see the OW_NOGRAD note.
         let read: Vec<usize> = (0..SLOT_COUNT)
@@ -752,7 +990,7 @@ mod tests {
     /// two different lanes of it, so the rebuild is load-bearing.
     #[test]
     fn the_rough_vector_is_rebuilt_because_it_is_not_slot_eleven() {
-        let composition = material_surface_wgsl(true);
+        let composition = material_surface_wgsl(true, Ornament::Full);
         assert!(body(&composition)
             .contains("let rough_p = vec4<f32>(p_rough.x, p_rough.y, p_misc.w, p_rough.z);"));
     }
@@ -761,7 +999,7 @@ mod tests {
     /// is one line when `SurfaceIn` grows the lane.
     #[test]
     fn the_missing_view_distance_is_bound_where_a_reader_can_find_it() {
-        let composition = material_surface_wgsl(false);
+        let composition = material_surface_wgsl(false, Ornament::Full);
         assert!(body(&composition).contains(&format!("let ow_dist = {OW_DIST};")));
         // Both fades read it, and nothing else does.
         assert_eq!(body(&composition).matches("ow_dist").count(), 3);
@@ -770,16 +1008,22 @@ mod tests {
     /// The gate comes from the material, not from a second decision.
     #[test]
     fn the_program_takes_its_de_tiling_gate_from_the_material() {
-        let default = material_program(&MaterialParams::default());
+        let default = material_program(&MaterialParams::default(), Ornament::Full);
         assert!(!body(&default.wgsl).contains("axiom_detile_second_sample("));
-        let detiled = material_program(&MaterialParams { detile: 0.6, ..MaterialParams::default() });
+        let detiled = material_program(
+            &MaterialParams { detile: 0.6, ..MaterialParams::default() },
+            Ornament::Full,
+        );
         assert!(body(&detiled.wgsl).contains("axiom_detile_second_sample("));
         // `p.detile > 0 && p.uvMode !== 'triplanar'` — triplanar disables it.
-        let triplanar = material_program(&MaterialParams {
-            detile: 0.6,
-            uv_mode: UvMode::Triplanar,
-            ..MaterialParams::default()
-        });
+        let triplanar = material_program(
+            &MaterialParams {
+                detile: 0.6,
+                uv_mode: UvMode::Triplanar,
+                ..MaterialParams::default()
+            },
+            Ornament::Full,
+        );
         assert!(!body(&triplanar.wgsl).contains("axiom_detile_second_sample("));
     }
 
@@ -787,7 +1031,7 @@ mod tests {
     #[test]
     fn the_program_carries_the_packed_parameter_block() {
         let material = loaded();
-        let program = material_program(&material);
+        let program = material_program(&material, Ornament::Full);
         let packed = material.pack().map(|slot| slot.map(f32::to_bits));
         assert_eq!(program.params, packed);
         assert_eq!(program.params.len(), SLOT_COUNT);
@@ -795,7 +1039,7 @@ mod tests {
         // needs: two materials that pack the same numbers and emit the same text
         // are the same pipeline, and a mismatch has to be reportable.
         assert_eq!(program.clone(), program);
-        assert_ne!(program, material_program(&MaterialParams::default()));
+        assert_ne!(program, material_program(&MaterialParams::default(), Ornament::Full));
         let rendered = format!("{program:?}");
         assert!(rendered.starts_with("MaterialProgram"), "{rendered:.32}");
     }
@@ -804,7 +1048,7 @@ mod tests {
     /// no binding index of its own.
     #[test]
     fn the_composition_names_the_bound_maps_and_declares_no_binding() {
-        let composition = material_surface_wgsl(true);
+        let composition = material_surface_wgsl(true, Ornament::Full);
         let composition = body(&composition);
         ["albedo_tex", "albedo_sampler", "normal_tex", "normal_sampler",
          "material_orm_tex", "material_detail_tex", "material_macro_tex"]
@@ -815,11 +1059,293 @@ mod tests {
         assert!(!composition.contains("@group("), "bindings belong to scene_wgsl.rs");
     }
 
+
+    // ======================================================================
+    // The ornament gate — `fidelity.js`'s lean tier, as this composition.
+    // ======================================================================
+
+    /// The six layers `apps/shmup/src/core/fidelity.js` names, and one entry
+    /// point each whose CALL disappearing from `axiom_surface` proves the layer
+    /// is out of the fragment.
+    ///
+    /// The macro layer is the odd one: only its *relief* block is dropped, so
+    /// its entry point stays and the amplitude argument is what moves —
+    /// `the_lean_arm_forces_the_macro_relief_amplitude_to_zero` covers that.
+    const ORNAMENT_CALLS: [(&str, &str); 5] = [
+        ("pom / OW_PARALLAX", "axiom_pom("),
+        ("detile / OW_DETILE", "axiom_detile_second_sample("),
+        ("weathering / OW_WEATHER", "ow_weather_stack("),
+        ("patches / OW_PATCH", "axiom_patch_apply("),
+        ("cloth / OW_CLOTH", "axiom_cloth_fold("),
+    ];
+
+    /// What lean keeps, in `fidelity.js`'s own words: *"what decides WHAT a
+    /// surface is — projection, albedo, tint, roughness, metalness, normal map,
+    /// vertex masks"*. Every one of these must still be CALLED.
+    ///
+    /// This half of the pair is the one that matters. A gate that drops too much
+    /// still compiles and still renders — the source's own first attempt at this
+    /// cut the projection with the ornament and "the level rendered grey. Fast,
+    /// and not a picture anyone would ship."
+    const LEAN_KEEPS: [(&str, &str); 10] = [
+        ("the projection frame", "axiom_uv_projection_pos("),
+        ("the projection normal", "axiom_uv_projection_normal("),
+        ("the tiling", "axiom_uv_tile("),
+        ("the axis frame", "owAxisFrame("),
+        ("the micro detail normal", "axiom_detail_blend_normal("),
+        ("the micro albedo", "axiom_detail_albedo("),
+        ("the macro variation bands", "axiom_macro_variation("),
+        ("the vertex-colour masks", "axiom_masks_apply("),
+        ("the normal-map strength", "axiom_mat_normal_strength("),
+        ("tint + the roughness remap", "axiom_mat_finish("),
+    ];
+
+    /// The pair index is what every `[full, lean]` table in this file is read
+    /// with, and an enum used as a table index is order-dependent.
+    #[test]
+    fn the_ornament_index_is_the_pair_order() {
+        assert_eq!(Ornament::Full.index(), 0);
+        assert_eq!(Ornament::Lean.index(), 1);
+        assert_ne!(Ornament::Full, Ornament::Lean);
+        assert_eq!(Ornament::Full.clone(), Ornament::Full);
+        assert!(format!("{:?}", Ornament::Lean).contains("Lean"));
+    }
+
+    /// The switch is the capability, read from the profile that prepares the
+    /// catalog — never a per-material decision, and never a second answer.
+    #[test]
+    fn the_ornament_switch_is_the_capability_bit_and_nothing_else() {
+        let full = BackendCapabilityProfile::all();
+        assert_eq!(Ornament::of(full), Ornament::Full);
+        assert_eq!(
+            Ornament::of(full.without(RenderCapability::SurfaceOrnament)),
+            Ornament::Lean
+        );
+        // Clearing any OTHER capability leaves the material shader whole: this
+        // gate answers to one bit, so an app narrowing shadows or bloom does not
+        // silently lose its surface ornament as well.
+        assert_eq!(
+            Ornament::of(full.without(RenderCapability::Shadows)),
+            Ornament::Full
+        );
+        assert_eq!(
+            Ornament::of(BackendCapabilityProfile::none().with(RenderCapability::SurfaceOrnament)),
+            Ornament::Full
+        );
+    }
+
+    /// The split itself: the six ornament layers leave the body, and every
+    /// identity layer stays in it.
+    #[test]
+    fn lean_drops_the_six_ornament_layers_and_keeps_every_identity_layer() {
+        let lean = material_surface_wgsl(true, Ornament::Lean);
+        let lean_body = body(&lean);
+        let full = material_surface_wgsl(true, Ornament::Full);
+        let full_body = body(&full);
+        ORNAMENT_CALLS.iter().for_each(|(layer, call)| {
+            assert!(
+                full_body.contains(call),
+                "{layer} must be called at full ornament"
+            );
+            assert!(
+                !lean_body.contains(call),
+                "{layer} must not be called at lean ornament"
+            );
+        });
+        LEAN_KEEPS.iter().for_each(|(what, call)| {
+            assert!(lean_body.contains(call), "lean must keep {what}");
+            assert!(full_body.contains(call), "full must keep {what}");
+        });
+    }
+
+    /// The lean arm drops the four ornament layers' **definitions**, not merely
+    /// their calls — which is the opposite of what the de-tiling gate does inside
+    /// a full program, and deliberately so: cold boot is
+    /// `(programs) x (text each)`, and these four are the bulk of the text.
+    #[test]
+    fn lean_drops_the_ornament_layers_definitions_and_therefore_most_of_the_text() {
+        let lean = material_surface_wgsl(true, Ornament::Lean);
+        let full = material_surface_wgsl(true, Ornament::Full);
+        ORNAMENT_LAYERS.iter().for_each(|layer| {
+            assert_eq!(full.matches(layer).count(), 1, "full carries every layer once");
+            assert_eq!(lean.matches(layer).count(), 0, "lean carries none of them");
+        });
+        LAYERS.iter().for_each(|layer| {
+            assert_eq!(lean.matches(layer).count(), 1, "lean keeps every identity layer");
+        });
+        assert!(
+            (full.len() - lean.len()) * 4 > full.len(),
+            "lean {} vs full {}: the ornament layers are a quarter of the program text \
+             and that is the cold-boot half of this trade",
+            lean.len(),
+            full.len()
+        );
+    }
+
+    /// The property [`ORNAMENT_LAYERS`]'s doc claims, checked rather than
+    /// asserted in prose: nothing the lean program keeps can name a symbol only
+    /// the dropped text defines, or the lean program would not compile.
+    #[test]
+    fn the_kept_layers_never_reference_a_dropped_layers_symbol() {
+        let dropped: Vec<String> = ORNAMENT_LAYERS
+            .iter()
+            .flat_map(|layer| module_scope_symbols(layer))
+            .collect();
+        assert!(
+            dropped.len() > 20,
+            "the parser found almost nothing, so this test proves nothing: {dropped:?}"
+        );
+        assert!(dropped.iter().any(|name| name == "axiom_pom"));
+        assert!(dropped.iter().any(|name| name == "ow_weather_stack"));
+        LAYERS.iter().for_each(|kept| {
+            dropped.iter().for_each(|name| {
+                assert!(
+                    !kept.contains(name.as_str()),
+                    "a kept layer names `{name}`, which only a dropped layer defines"
+                );
+            });
+        });
+    }
+
+    /// Every module-scope `fn`/`struct` a layer constant declares. The WGSL in
+    /// this module is written with those at column zero, which is what makes the
+    /// test above mechanical rather than a hand-maintained list.
+    fn module_scope_symbols(wgsl: &str) -> Vec<String> {
+        wgsl.lines()
+            .filter(|line| line.starts_with("fn ") | line.starts_with("struct "))
+            .map(|line| {
+                line.trim_start_matches("fn ")
+                    .trim_start_matches("struct ")
+                    .split(['(', ' ', '<'])
+                    .next()
+                    .expect("a split yields at least one piece")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// Only the relief block leaves the macro layer. The bands, the hue term and
+    /// the roughness variation are what make a facade break up at 12 m, and
+    /// `fidelity.js` names the *relief* layer, not macro variation itself.
+    #[test]
+    fn the_lean_arm_forces_the_macro_relief_amplitude_to_zero() {
+        let full = material_surface_wgsl(false, Ornament::Full);
+        let lean = material_surface_wgsl(false, Ornament::Lean);
+        // `p_misc.z` is `macroRelief`, and it reaches the layer nowhere else.
+        assert_eq!(body(&full).matches("p_misc.z").count(), 1);
+        assert_eq!(body(&lean).matches("p_misc.z").count(), 0);
+        // The call itself is one call in both arms — a gated argument, not a
+        // duplicated fifteen-line call site.
+        assert_eq!(body(&full).matches("axiom_macro_variation(").count(), 1);
+        assert_eq!(body(&lean).matches("axiom_macro_variation(").count(), 1);
+        // And the bands the relief sat on top of are still read.
+        assert!(body(&lean).contains("macro_p, macro_big,"));
+    }
+
+    /// De-tiling is one of the six, so a lean program never carries it however
+    /// the material is authored. Without this the two gates would multiply and
+    /// the permutation count would double instead of growing by one.
+    #[test]
+    fn a_lean_program_is_never_emitted_with_de_tiling_however_the_material_asks() {
+        let detiled = MaterialParams { detile: 0.6, ..MaterialParams::default() };
+        assert!(detiled.detile_enabled(), "the material really does ask for it");
+        let lean = material_program(&detiled, Ornament::Lean);
+        REACHED_WHEN_DETILING.iter().for_each(|entry| {
+            assert!(
+                !lean.wgsl.contains(&format!("{entry}(")),
+                "`{entry}` reached a lean program"
+            );
+        });
+        // Not just the calls: the whole layer is out of the text.
+        assert!(!lean.wgsl.contains("fn axiom_detile_second_sample("));
+        // And asking for it at full ornament still works, so this is the gate
+        // and not a regression in `detile_enabled`.
+        assert!(material_program(&detiled, Ornament::Full)
+            .wgsl
+            .contains("axiom_detile_second_sample("));
+    }
+
+    /// **The permutation count.** One global switch adds ONE program shape.
+    ///
+    /// The emitted texts are `{full·detile-off, full·detile-on, lean}` — three,
+    /// where before the ornament gate there were two. Four would mean the two
+    /// gates multiplied, which is exactly what the capability's design forbids
+    /// and what `material_program` forcing `detile` off at lean prevents.
+    #[test]
+    fn the_ornament_gate_adds_one_program_shape_not_a_second_axis() {
+        let shapes: Vec<String> = [
+            (false, Ornament::Full),
+            (true, Ornament::Full),
+            (false, Ornament::Lean),
+            (true, Ornament::Lean),
+        ]
+        .iter()
+        .map(|(detile, ornament)| material_surface_wgsl(*detile, *ornament))
+        .collect();
+        let mut distinct = shapes.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(
+            distinct.len(),
+            3,
+            "the fourth (lean, de-tiled) combination is not a shape — the composer \
+             makes it unrepresentable rather than merely unused"
+        );
+        assert_eq!(shapes[2], shapes[3], "both lean asks give the same lean text");
+        // And that is true through the seam a caller actually uses, too.
+        let reachable: Vec<String> = [
+            (MaterialParams::default(), Ornament::Full),
+            (MaterialParams { detile: 0.6, ..MaterialParams::default() }, Ornament::Full),
+            (MaterialParams::default(), Ornament::Lean),
+            (MaterialParams { detile: 0.6, ..MaterialParams::default() }, Ornament::Lean),
+        ]
+        .iter()
+        .map(|(material, ornament)| material_program(material, *ornament).wgsl)
+        .collect();
+        let mut reachable_distinct = reachable;
+        reachable_distinct.sort_unstable();
+        reachable_distinct.dedup();
+        assert_eq!(
+            reachable_distinct.len(),
+            3,
+            "two shapes before the gate, three after — a +1, not a doubling"
+        );
+    }
+
+    /// The reduction must not leave a name unbound or a value unread: every
+    /// local the lean arm's channel assignment consumes is bound by the lean arm
+    /// itself, and the slot map is read identically either way.
+    #[test]
+    fn the_lean_arm_binds_every_name_the_channel_assignment_reads() {
+        let lean = material_surface_wgsl(false, Ornament::Lean);
+        let lean_body = body(&lean);
+        ["surface_albedo", "surface_normal", "surface_transmission"]
+            .iter()
+            .for_each(|name| {
+                assert!(
+                    lean_body.contains(&format!("let {name} = ")),
+                    "`{name}` is read by the assignment and must be bound"
+                );
+            });
+        // The slot map is the composition's contract with `params.rs` and the
+        // ornament gate does not touch it: the same slots are read, so a lean
+        // program and a full one can never disagree about which lane is which.
+        let read: Vec<usize> = (0..SLOT_COUNT)
+            .filter(|index| lean_body.contains(&format!("params.slots[{index}]")))
+            .collect();
+        assert_eq!(read, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18]);
+        // The view distance still has exactly one binding and one reader: POM's
+        // fade is gone, the detail fade is not.
+        assert!(lean_body.contains(&format!("let ow_dist = {OW_DIST};")));
+        assert_eq!(lean_body.matches("ow_dist").count(), 2);
+        // The projected uv is the frame's own, unmarched.
+        assert!(lean_body.contains("let uv = f_uv;"));
+    }
     /// The vertex-colour lane does not exist yet, and the composition must be
     /// honest about that rather than passing something that looks authored.
     #[test]
     fn the_absent_vertex_colour_lane_is_an_explicit_zero() {
-        let composition = material_surface_wgsl(false);
+        let composition = material_surface_wgsl(false, Ornament::Full);
         assert!(body(&composition).contains("let vertex_color = vec3<f32>(0.0, 0.0, 0.0);"));
     }
 }
@@ -835,7 +1361,7 @@ mod tests {
 #[cfg(all(test, feature = "offscreen", not(target_arch = "wasm32")))]
 mod gpu {
     use super::tests::loaded;
-    use super::{material_program, material_surface_wgsl};
+    use super::{material_program, material_surface_wgsl, Ornament};
     use crate::material_shader::cloth::CLOTH_WGSL;
     use crate::material_shader::params::{MaterialParams, UvMode};
     use crate::scene_wgsl::{SCENE_WGSL_PREFIX, SCENE_WGSL_SUFFIX};
@@ -1233,12 +1759,12 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
     /// The harness module: the fixed prelude, the cloth layer (which
     /// `scene_shader` would otherwise supply), the bindings, the composed
     /// program, and the entry points.
-    fn harness(detile: bool) -> String {
+    fn harness(detile: bool, ornament: Ornament) -> String {
         [
             SURFACE_PRELUDE_WGSL,
             CLOTH_WGSL,
             HARNESS_WGSL,
-            &material_surface_wgsl(detile),
+            &material_surface_wgsl(detile, ornament),
             HARNESS_ENTRY_WGSL,
         ]
         .concat()
@@ -1271,7 +1797,7 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
             let scene = scene_shader(
                 SCENE_WGSL_PREFIX,
                 DEFAULT_DISPLACE_WGSL,
-                &material_surface_wgsl(*detile),
+                &material_surface_wgsl(*detile, Ornament::Full),
                 SCENE_WGSL_SUFFIX,
             );
             let outcome = gpu.compile(&scene);
@@ -1289,7 +1815,7 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
     #[test]
     fn the_harness_module_compiles() {
         let gpu = Gpu::acquire();
-        let outcome = gpu.compile(&harness(true));
+        let outcome = gpu.compile(&harness(true, Ornament::Full));
         assert!(
             outcome.is_ok(),
             "the harness must compile: {}",
@@ -1305,9 +1831,9 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
     #[test]
     fn the_composed_surface_renders_a_non_constant_image() {
         let gpu = Gpu::acquire();
-        let program = material_program(&loaded());
+        let program = material_program(&loaded(), Ornament::Full);
         let module = gpu
-            .compile(&harness(true))
+            .compile(&harness(true, Ornament::Full))
             .expect("the harness compiles — see the_harness_module_compiles");
         let scalars = gpu.render(&module, "compose_scalars_fs", &program.params);
         assert!(all_finite(&scalars), "every scalar channel must be finite: {scalars:?}");
@@ -1352,7 +1878,7 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
     fn switching_any_one_layer_on_changes_what_is_rendered() {
         let gpu = Gpu::acquire();
         let module = gpu
-            .compile(&harness(false))
+            .compile(&harness(false, Ornament::Full))
             .expect("the harness compiles — see the_harness_module_compiles");
         // The baseline: every optional layer off. The three that are never off —
         // the base fetch, `masks`' cavity term and `tint_wear`'s remap — have
@@ -1368,8 +1894,8 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
             cloth: [0.0, 1.0, 0.0, 0.0],
             ..MaterialParams::default()
         };
-        let reference = gpu.render(&module, "compose_scalars_fs", &material_program(&base).params);
-        let normals = gpu.render(&module, "compose_vectors_fs", &material_program(&base).params);
+        let reference = gpu.render(&module, "compose_scalars_fs", &material_program(&base, Ornament::Full).params);
+        let normals = gpu.render(&module, "compose_vectors_fs", &material_program(&base, Ornament::Full).params);
         assert!(all_finite(&reference) && all_finite(&normals));
 
         let cases: [(&str, MaterialParams); 8] = [
@@ -1400,7 +1926,7 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
             let rendered = gpu.render(
                 &module,
                 "compose_scalars_fs",
-                &material_program(material).params,
+                &material_program(material, Ornament::Full).params,
             );
             assert!(all_finite(&rendered), "{layer} rendered a non-finite channel");
             let moved = reference
@@ -1422,7 +1948,7 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
         // `cloth` writes the normal and the transmission channel, so it is
         // checked against the vector target as well as the scalar one.
         let clothed = MaterialParams { cloth: [0.4, 0.7, 0.5, 0.0], ..base };
-        let params = material_program(&clothed).params;
+        let params = material_program(&clothed, Ornament::Full).params;
         let scalars = gpu.render(&module, "compose_scalars_fs", &params);
         let vectors = gpu.render(&module, "compose_vectors_fs", &params);
         assert!(all_finite(&scalars) && all_finite(&vectors));
@@ -1452,12 +1978,12 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
     fn the_de_tiling_permutation_changes_what_is_rendered() {
         let gpu = Gpu::acquire();
         let material = MaterialParams { detile: 0.7, ..loaded() };
-        let params = material_program(&material).params;
+        let params = material_program(&material, Ornament::Full).params;
         let off = gpu
-            .compile(&harness(false))
+            .compile(&harness(false, Ornament::Full))
             .expect("the harness compiles — see the_harness_module_compiles");
         let on = gpu
-            .compile(&harness(true))
+            .compile(&harness(true, Ornament::Full))
             .expect("the harness compiles — see the_harness_module_compiles");
         let a = gpu.render(&off, "compose_scalars_fs", &params);
         let b = gpu.render(&on, "compose_scalars_fs", &params);
@@ -1474,19 +2000,105 @@ fn compose_vectors_fs(@builtin(position) position: vec4<f32>) -> @location(0) ve
         );
     }
 
+
+    /// **The lean program compiles on a real adapter, and still renders a
+    /// picture.**
+    ///
+    /// This is the test the whole ornament gate rests on. A composition that
+    /// drops four layer definitions and five call sites either type-checks or it
+    /// does not, and *no* string assertion can tell the difference: a name left
+    /// dangling by the reduction, a local bound in a chunk that is no longer
+    /// emitted, a `var` whose only writer went away — every one of them is a
+    /// validation error a `contains()` sails past.
+    ///
+    /// And compiling is only half of it. The point of the reduction is a cheaper
+    /// fragment, not a blank one, so the lean surface must still *vary* across
+    /// the sample walk: albedo, roughness and the shading normal all still come
+    /// from the layers `fidelity.js` keeps.
+    #[test]
+    fn the_lean_program_compiles_and_still_renders_a_varying_surface() {
+        let gpu = Gpu::acquire();
+        let module = gpu
+            .compile(&harness(false, Ornament::Lean))
+            .expect("the lean composition must be valid WGSL");
+        let params = material_program(&loaded(), Ornament::Lean).params;
+        let scalars = gpu.render(&module, "compose_scalars_fs", &params);
+        let vectors = gpu.render(&module, "compose_vectors_fs", &params);
+        assert!(all_finite(&scalars) && all_finite(&vectors));
+        // Albedo and roughness still move: the projection, the base fetches, the
+        // micro detail and the macro bands are all still in the fragment.
+        assert!(
+            spread(&scalars, 0) > 1e-3,
+            "the lean surface's albedo is constant — the identity layers are not \
+             reaching SurfaceOut"
+        );
+        assert!(spread(&scalars, 1) > 1e-3, "the lean surface's roughness is constant");
+        // The shading normal still varies, which is the normal map and the micro
+        // detail lane surviving the cut.
+        assert!(
+            [0_usize, 1, 2].iter().any(|lane| spread(&vectors, *lane) > 1e-3),
+            "the lean surface's shading normal is constant — the normal map lane is gone"
+        );
+        // And the seventh channel is the honest zero, not a leftover.
+        assert!(scalars.iter().all(|texel| texel[3] == 0.0));
+    }
+
+    /// **The reduction is real on the GPU, not merely in the text.**
+    ///
+    /// Rendering the *same* ornate material through both programs must differ on
+    /// most of the walk. If it did not, the six layers were contributing nothing
+    /// at these parameters and the whole trade would be measuring noise — which
+    /// is exactly the null result this change has to be able to detect.
+    #[test]
+    fn dropping_the_ornament_changes_what_is_rendered() {
+        let gpu = Gpu::acquire();
+        let material = loaded();
+        let full_module = gpu
+            .compile(&harness(true, Ornament::Full))
+            .expect("the harness compiles — see the_harness_module_compiles");
+        let lean_module = gpu
+            .compile(&harness(false, Ornament::Lean))
+            .expect("the lean composition must be valid WGSL");
+        let full = gpu.render(
+            &full_module,
+            "compose_scalars_fs",
+            &material_program(&material, Ornament::Full).params,
+        );
+        let lean = gpu.render(
+            &lean_module,
+            "compose_scalars_fs",
+            &material_program(&material, Ornament::Lean).params,
+        );
+        assert!(all_finite(&full) && all_finite(&lean));
+        let moved = full
+            .iter()
+            .zip(lean.iter())
+            .filter(|(a, b)| (a[0] - b[0]).abs() > 1e-5)
+            .count();
+        assert!(
+            moved > SAMPLES / 2,
+            "the ornament layers moved only {moved} of {SAMPLES} samples' albedo; \
+             either they contribute nothing at these parameters or the gate dropped \
+             text that was already inert"
+        );
+        // The transmission channel is the clearest single witness: full cloth
+        // transmits, lean does not.
+        assert!(full.iter().any(|texel| texel[3] > 1e-5));
+        assert!(lean.iter().all(|texel| texel[3] == 0.0));
+    }
     /// The three uv modes are not interchangeable, and the two that share one
     /// program must actually differ in the frame they build.
     #[test]
     fn the_mesh_uv_mode_renders_differently_from_the_planar_one() {
         let gpu = Gpu::acquire();
         let module = gpu
-            .compile(&harness(false))
+            .compile(&harness(false, Ornament::Full))
             .expect("the harness compiles — see the_harness_module_compiles");
-        let planar = material_program(&MaterialParams::default());
-        let mesh = material_program(&MaterialParams {
-            uv_mode: UvMode::Mesh,
-            ..MaterialParams::default()
-        });
+        let planar = material_program(&MaterialParams::default(), Ornament::Full);
+        let mesh = material_program(
+            &MaterialParams { uv_mode: UvMode::Mesh, ..MaterialParams::default() },
+            Ornament::Full,
+        );
         let a = gpu.render(&module, "compose_scalars_fs", &planar.params);
         let b = gpu.render(&module, "compose_scalars_fs", &mesh.params);
         assert!(all_finite(&a) && all_finite(&b));
