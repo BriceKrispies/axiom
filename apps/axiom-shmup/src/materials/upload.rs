@@ -278,6 +278,56 @@ pub fn surface_maps(set: &BakedSet) -> SurfaceMaps {
     }
 }
 
+/// The two **independent** size caps a library bake takes.
+///
+/// These used to be one `u32` applied to both, and the conflation cost the
+/// detail tile the one property its source states as a derivation rather than a
+/// preference. They are different budgets in every way that matters:
+///
+/// | | bakes | `owSurface` evals per texel | measured at 256² |
+/// |---|---|---|---|
+/// | [`Self::surfaces`] | nineteen | 3 + a Sobel | see [`RUNTIME_BAKE_SIZE`] |
+/// | [`Self::shared`] | **two** | 2 (detail) / 1 (macro) | 1146 ms |
+///
+/// A `u32` still converts (`impl From<u32>`), meaning "one cap, both budgets" —
+/// which is what a CPU/GPU parity comparison wants, since
+/// [`crate::materials::gpu_bake::plan`] must plan the identical library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BakeCaps {
+    /// **Budget A** — the cap on each of the nineteen per-surface bakes.
+    /// Quadratic in this number, nineteen times over. See [`RUNTIME_BAKE_SIZE`].
+    pub surfaces: u32,
+    /// **Budget B** — the cap on the two shared bakes (`build_detail`,
+    /// `build_macro`). Quadratic in this number, twice. See
+    /// [`SHARED_BAKE_SIZE`].
+    pub shared: u32,
+}
+
+impl BakeCaps {
+    /// One cap for both budgets — the historical meaning, and what a parity
+    /// test wants when it needs the CPU bake and the GPU plan to be the same
+    /// library.
+    pub const fn uniform(size: u32) -> Self {
+        Self {
+            surfaces: size,
+            shared: size,
+        }
+    }
+
+    /// What the app actually installs at boot: [`RUNTIME_BAKE_SIZE`] on the
+    /// nineteen, [`SHARED_BAKE_SIZE`] on the two.
+    pub const RUNTIME: Self = Self {
+        surfaces: RUNTIME_BAKE_SIZE,
+        shared: SHARED_BAKE_SIZE,
+    };
+}
+
+impl From<u32> for BakeCaps {
+    fn from(size: u32) -> Self {
+        Self::uniform(size)
+    }
+}
+
 /// Bake `names` through the real [`MaterialSystem`] cache and quantize the
 /// result — the whole street's texture library, in one call.
 ///
@@ -288,12 +338,16 @@ pub fn surface_maps(set: &BakedSet) -> SurfaceMaps {
 /// skipped without re-baking, exactly as `_sets` does.
 ///
 /// `quality` scales every size through `MaterialSystem::size_of` — the source's
-/// own texture budget knob. `size_cap` clamps the result on top of it;
-/// `u32::MAX` means "whatever the library authored", which is the faithful
-/// bake and, at 1024², **minutes** of CPU work (see [`RUNTIME_BAKE_SIZE`]).
+/// own texture budget knob. [`BakeCaps`] clamps the result on top of it, with a
+/// **separate cap per budget**: `surfaces` for the nineteen per-surface bakes,
+/// `shared` for the two shared ones. A bare `u32` converts, meaning "one cap,
+/// both budgets". `u32::MAX` means "whatever the library authored", which is the
+/// faithful bake and, at 1024², **minutes** of CPU work (see
+/// [`RUNTIME_BAKE_SIZE`] and [`SHARED_BAKE_SIZE`]).
 /// The anisotropy value is the engine's own concern (`TextureSampling`), so it
 /// is passed as the source's default 8 and read by nothing here.
-pub fn bake_library(quality: Quality, size_cap: u32, names: &[&str]) -> BakedLibrary {
+pub fn bake_library(quality: Quality, caps: impl Into<BakeCaps>, names: &[&str]) -> BakedLibrary {
+    let caps = caps.into();
     let mut system = MaterialSystem::new(Some(RendererCaps {
         max_anisotropy: Some(8.0),
     }));
@@ -312,36 +366,26 @@ pub fn bake_library(quality: Quality, size_cap: u32, names: &[&str]) -> BakedLib
         let Some(set) = system.texture_set(&key) else {
             continue;
         };
-        let size = set.size.min(size_cap);
+        let size = set.size.min(caps.surfaces);
         surfaces.push((key, surface_maps(&set.bake_at(size, true, true))));
     }
 
     let shared = system
         .shared()
         .expect("configure with a renderer builds the shared maps (index.js:68-93)");
-    // TWO BUDGETS, ONE KNOB — and they are not the same budget.
-    //
-    // `size_cap` exists because nineteen per-surface bakes are quadratically
-    // expensive (see `RUNTIME_BAKE_SIZE`). These two are **one bake each**, and
-    // clamping them by the same number costs the detail tile the one property
-    // its own source comment says it must have:
+    // TWO BUDGETS, TWO CAPS. `caps.shared` rather than `caps.surfaces`, because
+    // these are **one bake each** and the nineteen per-surface bakes are not.
+    // Clamping them by the surface cap used to cost the detail tile the one
+    // property its own source states as a derivation:
     //
     //   "1K, not 512: the micro tooth is 1.6-4 mm over a 0.25 m tile, which
     //    needs ~6 texels per grain to survive mip 1 instead of averaging to
-    //    flat grey."  -- index.js:198-199
+    //    flat grey."  -- index.js:198-199, verified at HEAD
     //
-    // At `size_cap = 64` the 0.25 m tile is 3.9 mm per texel: roughly ONE texel
-    // per 1.6 mm grain, sixteen times below the floor the source states, so the
-    // micro tooth mips to flat grey exactly as that comment predicts. The macro
-    // field is authored at 256 (not 1024) and is world-anchored at 32 m, so 64
-    // hurts it far less — 0.5 m per texel against the source's 0.125 m.
-    //
-    // The correct shape is a separate cap for the shared pair, since raising it
-    // costs two bakes rather than nineteen. Not done here because it changes
-    // `bake_library`'s signature and therefore its callers; recorded so the next
-    // change starts from the measurement rather than the guess.
-    let detail = super::bake::build_detail(shared.detail_size.min(size_cap), 1.0);
-    let macro_set = super::bake::build_macro(shared.macro_size.min(size_cap), 2.0);
+    // See `SHARED_BAKE_SIZE` for the measured aliasing that conflation caused
+    // and the measured cost of undoing it.
+    let detail = super::bake::build_detail(shared.detail_size.min(caps.shared), 1.0);
+    let macro_set = super::bake::build_macro(shared.macro_size.min(caps.shared), 2.0);
     BakedLibrary {
         surfaces,
         detail: detail_map(&detail),
@@ -369,63 +413,164 @@ pub fn bake_library(quality: Quality, size_cap: u32, names: &[&str]) -> BakedLib
 /// ```
 ///
 /// ~15.5 µs per `owSurface` evaluation, and the library's own resolutions need
-/// 57 million of them. The cause is structural, not a missing optimisation:
-/// `ow_hash22` is the classic `fract(sin(dot(…)))` GLSL hash, which is one
-/// instruction on a GPU and a `f64::sin` on a CPU, and a single surface
-/// evaluation makes hundreds of them. No CPU rewrite closes a 100x gap that is
-/// really 1024²-way parallelism.
+/// 57 million of them. The cause is structural, not a missing optimisation.
+/// (The attribution in this doc used to name `ow_hash22` as "the classic
+/// `fract(sin(dot(…)))` GLSL hash". That is wrong and
+/// [`crate::materials::gpu_bake`] corrects it: `noise.js:11` says *"hashes are
+/// sin-free (Dave Hoskins style)"*. The transcendentals are in `owGrad2` — a
+/// `cos` and a `sin` per lattice corner, four corners per `owNoise`, four
+/// octaves per fbm, so 32 per four-octave fbm. The measurements and the
+/// conclusion stand; only the attribution was wrong.) No CPU rewrite closes a
+/// 100x gap that is really 1024²-way parallelism.
 ///
-/// So the boot-time bake runs **albedo only** (one evaluation per texel instead
-/// of three) at this cap. 64² over a 2 m tile is 3 cm per texel: coarse, but it
-/// is the real generator's colour field, and the material shader's macro,
-/// weathering and cavity layers — which are per-pixel and cost nothing here —
-/// carry the high frequencies on top of it.
+/// So the boot-time bake runs at this cap. 64² over a 2 m tile is 3 cm per
+/// texel: coarse, but it is the real generator's colour field, and the material
+/// shader's macro, weathering and cavity layers — which are per-pixel and cost
+/// nothing here — carry the high frequencies on top of it.
 ///
 /// **The fix is the source's own**: bake on the GPU. `bake.rs`'s module doc
 /// already spells out what that needs (WGSL emission of `owSurface`, a
 /// half-float scratch height target, the Sobel as a fragment shader), and
 /// `sobel` is written to be line-for-line portable to it. Until then this
-/// constant is the honest ceiling, and raising it costs boot time quadratically.
+/// constant is the honest ceiling, and raising it costs boot time
+/// quadratically.
 ///
-/// ## What governs the number, and what to measure before moving it
+/// ## The MEASURED cost curve
 ///
-/// One `bake_library` call at cap `N` costs, per distinct bake key:
+/// One `bake_library` call at `caps.surfaces = N` costs, per distinct bake key,
 /// `bake_at(N, want_orm: true, want_normal: true)` = **three** `owSurface`
-/// evaluations per texel (the height pass, the albedo pass, the ORM pass) plus
-/// one Sobel pass. Nineteen distinct keys, quadratic in `N`. Scaling the table
-/// above (all nineteen at 512² = 232 s native, `--release`):
+/// evaluations per texel (height, albedo, ORM) plus one Sobel. Nineteen
+/// distinct keys, quadratic in `N`.
+///
+/// This table used to be an **extrapolation** from a single 512² measurement.
+/// It is now MEASURED by `probe::measure_bake_cost_curve`, native, `--release`,
+/// `stable-x86_64-pc-windows-msvc`, with the two shared bakes timed separately
+/// and subtracted out so this is Budget A alone:
 ///
 /// ```text
-/// N     nineteen surfaces, native, extrapolated from the 512 measurement
-/// 64      3.6 s      <- today
-/// 96      8.2 s
-/// 128    14.5 s
-/// 192    32.6 s
-/// 256    58   s
+/// N     surfaces_ms   per_key_ms     the old extrapolation said
+/// 64          6172          325                          3600
+/// 96         16320          859                          8200
+/// 128        19524         1028                         14500
+/// 192        39874         2099                         32600
 /// ```
 ///
-/// Those are **extrapolations, not measurements**, and they are native. The
-/// number that decides this is the **wasm** page boot, which is the only place
-/// the cost is actually paid, and it is not a fixed multiple of native. So:
+/// **The extrapolation was optimistic at every point**, by 1.2x to 2.0x —
+/// exactly the direction its own caveat warned about. Two honest qualifications
+/// on the new numbers: other agents' `rustc` processes were resident during the
+/// run, so these are contended upper bounds; and the `96` point is visibly
+/// noisy against `128` (0.84x the time for 0.56x the area), which is that
+/// contention showing. The `64` figure — **~6.2 s** — is the one that matters,
+/// and it is the cost this app pays at every boot today.
 ///
-/// 1. `RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc cargo test -p axiom-shmup
-///    --lib --release` with a timing probe around `bake_library(Quality::Ultra,
-///    N, &names)` for `N` in 64/96/128/192 gives the native curve and confirms
-///    or corrects the extrapolation above.
-/// 2. The page's own boot is what matters: serve the app and time from
-///    navigation to the first painted frame at each `N`. The build log's compile
-///    time is not this number and must not be substituted for it.
+/// ## Why this stays at 64 while [`SHARED_BAKE_SIZE`] moved
 ///
-/// **Do not raise this on the strength of the table alone.** The extrapolation
-/// assumes the 512² measurement was pure surface evaluation; if any per-bake
-/// fixed cost dominates at small `N`, the low end of the curve is wrong in the
-/// optimistic direction.
+/// The two budgets were measured against the defect, not just against the
+/// clock. `scripts/parity_metrics.py --region ground` (the street surface,
+/// rows 55-88%) reports the port's **gradient energy at 1.025x** the
+/// original's — the per-surface maps are already carrying very nearly the right
+/// amount of surface detail. Raising `N` to 128 buys an unproven improvement on
+/// that for a measured **+13.3 s** of boot. The shared detail tile, by
+/// contrast, was measurably *aliased* rather than merely coarse
+/// (see [`SHARED_BAKE_SIZE`]), and fixing it cost **+1.1 s**.
 ///
-/// Note also that this one number caps **two unrelated budgets** — see the
-/// comment at the shared-map bake in [`bake_library`], where the detail tile is
-/// clamped sixteen times below the resolution the source's own comment calls the
-/// minimum, for a cost of one bake rather than nineteen.
+/// That is the whole argument for splitting the knob: at 64 the nineteen
+/// surface bakes were **99%** of the bake budget (6172 ms against 64 ms) while
+/// the two shared bakes — the ones that needed the resolution — got the same
+/// cap for 1% of the cost.
+///
+/// **Both constants should be deleted, not tuned, once the wasm GPU-bake lane
+/// lands.** The source pays ~1.3 s for all nineteen and 418 ms for the shared
+/// pair, on the GPU, at the *full authored* resolutions. See
+/// [`crate::materials::gpu_bake`] for the lane and what it still needs.
 pub const RUNTIME_BAKE_SIZE: u32 = 64;
+
+/// **Budget B**: the cap on the two *shared* bakes — `build_detail` and
+/// `build_macro`. Split out of [`RUNTIME_BAKE_SIZE`], which used to cap both
+/// budgets through one number.
+///
+/// ## The source's authored sizes, and their derivation
+///
+/// `index.js:198-199` (verified at HEAD) does not merely state a number, it
+/// derives one:
+///
+/// > *"1K, not 512: the micro tooth is 1.6-4 mm over a 0.25 m tile, which needs
+/// > ~6 texels per grain to survive mip 1 instead of averaging to flat grey."*
+///
+/// So the authored pair is **detail 1024²**, **macro 256²**
+/// (`this._size(1024)` and a literal `256`). The derivation checks out exactly:
+/// over a 0.25 m tile, texels per 1.6 mm grain is `N / 156.25`, and `N = 1024`
+/// gives **6.55** — the "~6" is that arithmetic, not a preference.
+///
+/// ```text
+/// N      mm/texel   texels per 1.6 mm grain
+/// 64      3.906      0.41      <- 5x below Nyquist
+/// 128     1.953      0.82
+/// 256     0.977      1.64
+/// 512     0.488      3.28      <- first size above Nyquist
+/// 1024    0.244      6.55      <- the source's authored size
+/// ```
+///
+/// ## Why the old cap of 64 was not "coarse", it was **aliased**
+///
+/// `bake` evaluates the surface at exactly one point per texel — no
+/// supersampling. Below Nyquist that does not produce a coarse average of the
+/// field, it produces fold-back: full-amplitude noise uncorrelated with the
+/// signal. MEASURED by `probe::measure_detail_bake_aliasing`, against a 512²
+/// bake box-averaged down to the same size (the band-limited answer):
+///
+/// ```text
+/// N     height channel: sd(direct)/sd(band-limited)    rms error / sd
+/// 64                 2.615                                 2.292
+/// 128                1.664                                 1.150
+/// 256                1.232                                 0.615
+/// ```
+///
+/// At 64 the tile carried **2.6x the variance it should**, with an error
+/// **2.3x the signal's own spread** — more fold-back than field. That is a
+/// broadband high-frequency injector, and it is worse than a low resolution,
+/// not better: at 3.9 mm/texel over a 0.25 m tile the map is *magnified* on the
+/// near ground (~1 texel per 1.4 px), so it is sampled at mip 0 where no
+/// filtering exists to remove it. Raising the cap both cuts the fold-back at
+/// bake time and pushes the tile into *minification*, where the mip chain
+/// `scene_renderer::upload_texture` builds does band-limit it.
+///
+/// ## What this port can afford
+///
+/// MEASURED by `probe::measure_shared_bake_cost`, native, `--release`,
+/// `stable-x86_64-pc-windows-msvc` (the two bakes, wall clock):
+///
+/// ```text
+/// N      detail_ms    macro_ms      sum_ms
+/// 64          43.6        20.2        63.8
+/// 128        199.3       112.0       311.3
+/// 256        801.0       345.2      1146.2
+/// 512       2969.1       371.9      3341.0
+/// 1024     10305.6       332.7     10638.3
+/// ```
+///
+/// (`macro` is authored at 256, so from `N = 256` up it is uncapped and flat.)
+///
+/// **256 is the value here, and it is MEASURED, not chosen for looking right:**
+///
+/// * it is the macro field's **full authored size**, so for one of the two maps
+///   the cap is retired entirely and the port is at source parity;
+/// * it is **one quarter** of the detail tile's authored 1024 in each axis, and
+///   it cuts that tile's measured aliasing excess from 2.6x to 1.2x;
+/// * it costs **+1082 ms** native over the old 64 (1146 against 64), against
+///   **+3277 ms** for 512 and **+10574 ms** for the authored 1024.
+///
+/// The remaining gap to 1024 is bought entirely by CPU time, and the source
+/// pays none of it: on the GPU the same two bakes cost it **418 ms** of cold
+/// shader compile (`index.js:200-202`), which is why it can afford the full
+/// resolution and this port cannot. **The gap closes completely when the wasm
+/// GPU-bake lane lands** — see [`crate::materials::gpu_bake`], which already
+/// stages the request shapes and holds the CPU/GPU parity test. At that point
+/// this constant and [`RUNTIME_BAKE_SIZE`] should both be deleted rather than
+/// raised: the correct value is "whatever the library authored", and only the
+/// CPU cost is stopping it.
+pub const SHARED_BAKE_SIZE: u32 = 256;
+
 
 /// Bake the **albedo** map for each of `names`, capped at `size_cap` — the only
 /// part of the bake the app can afford at boot *and* the only part the engine
@@ -470,6 +615,270 @@ pub fn bake_albedo_maps(names: &[&str], size_cap: u32) -> Vec<(String, Rgba8Map)
         out.push(((*name).to_string(), map));
     }
     out
+}
+
+
+// ---------------------------------------------------------------------------
+// PROBES — the measured cost curve and sampling error behind the two caps.
+// ---------------------------------------------------------------------------
+
+/// Measurements, not assertions.
+///
+/// Every test here is `#[ignore]`d and prints a table: they exist so the
+/// numbers in [`RUNTIME_BAKE_SIZE`]'s and [`SHARED_BAKE_SIZE`]'s docs are
+/// *measured* rather than extrapolated, and so the next agent to move either
+/// constant can re-measure instead of re-deriving. Run them one at a time:
+///
+/// ```sh
+/// RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc cargo test -p axiom-shmup \
+///     --lib --release probe:: -- --ignored --nocapture --test-threads=1
+/// ```
+#[cfg(test)]
+mod probe {
+    use super::*;
+    use crate::materials::bake::{build_detail, build_macro, Texture};
+    use crate::world::palette::Palette;
+    use std::time::Instant;
+
+    /// The exact name list `scene::install` bakes — so the probe measures the
+    /// real library, not a sample of it.
+    fn street_names() -> Vec<&'static str> {
+        Palette::ALL
+            .iter()
+            .map(|(_, entry)| entry.name)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    fn ms(d: std::time::Duration) -> f64 {
+        d.as_secs_f64() * 1e3
+    }
+
+    /// **Budget A and Budget B, separated.** One `bake_library` call at each
+    /// candidate cap, with the two shared bakes timed on their own so the
+    /// nineteen-surface cost can be read apart from them.
+    #[test]
+    #[ignore = "measurement: minutes of CPU"]
+    fn measure_bake_cost_curve() {
+        let names = street_names();
+        let mut system = MaterialSystem::new(Some(RendererCaps {
+            max_anisotropy: Some(8.0),
+        }));
+        system.configure(Quality::Ultra, 8);
+        let shared = system.shared().expect("configure builds the shared maps");
+        println!(
+            "names={} authored detail_size={} macro_size={}",
+            names.len(),
+            shared.detail_size,
+            shared.macro_size
+        );
+        println!("  N   keys      total_ms    detail_ms     macro_ms  surfaces_ms   per_key_ms");
+        for n in [64u32, 96, 128, 192] {
+            let t = Instant::now();
+            let lib = bake_library(Quality::Ultra, n, &names);
+            let total = ms(t.elapsed());
+
+            let t = Instant::now();
+            let _ = build_detail(shared.detail_size.min(n), 1.0);
+            let detail = ms(t.elapsed());
+
+            let t = Instant::now();
+            let _ = build_macro(shared.macro_size.min(n), 2.0);
+            let macro_ = ms(t.elapsed());
+
+            let surfaces = total - detail - macro_;
+            println!(
+                "{:4}  {:4}  {:12.1} {:12.1} {:12.1} {:12.1} {:12.1}",
+                n,
+                lib.surfaces.len(),
+                total,
+                detail,
+                macro_,
+                surfaces,
+                surfaces / lib.surfaces.len() as f64
+            );
+        }
+    }
+
+    /// **Budget B alone**, across the range the shared cap could take. Two
+    /// bakes, so this is the curve that decides [`SHARED_BAKE_SIZE`].
+    #[test]
+    #[ignore = "measurement: minutes of CPU"]
+    fn measure_shared_bake_cost() {
+        println!("  N     detail_ms     macro_ms       sum_ms");
+        for n in [64u32, 128, 256, 512, 1024] {
+            let t = Instant::now();
+            let _ = build_detail(n, 1.0);
+            let detail = ms(t.elapsed());
+
+            let t = Instant::now();
+            let _ = build_macro(n.min(256), 2.0);
+            let macro_ = ms(t.elapsed());
+
+            println!(
+                "{:4}  {:12.1} {:12.1} {:12.1}",
+                n,
+                detail,
+                macro_,
+                detail + macro_
+            );
+        }
+    }
+
+    /// Box-average `src` down to `to` texels a side — the band-limited answer a
+    /// correctly-sampled bake at `to` would have produced.
+    fn downsample(src: &Texture, to: u32) -> Vec<[f32; 4]> {
+        let f = src.size / to;
+        let n = f64::from(f * f);
+        (0..to)
+            .flat_map(|y| (0..to).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                let mut acc = [0f64; 4];
+                for j in 0..f {
+                    for i in 0..f {
+                        let p = src.get(x * f + i, y * f + j);
+                        for c in 0..4 {
+                            acc[c] += f64::from(p[c]);
+                        }
+                    }
+                }
+                [
+                    (acc[0] / n) as f32,
+                    (acc[1] / n) as f32,
+                    (acc[2] / n) as f32,
+                    (acc[3] / n) as f32,
+                ]
+            })
+            .collect()
+    }
+
+    fn channel(texels: &[[f32; 4]], c: usize) -> Vec<f64> {
+        texels.iter().map(|t| f64::from(t[c])).collect()
+    }
+
+    fn std_dev(v: &[f64]) -> f64 {
+        let mean = v.iter().sum::<f64>() / v.len() as f64;
+        (v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+    }
+
+    fn rms_diff(a: &[f64], b: &[f64]) -> f64 {
+        (a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).powi(2))
+            .sum::<f64>()
+            / a.len() as f64)
+            .sqrt()
+    }
+
+    /// **Is the detail tile aliased at bake time, or merely coarse?**
+    ///
+    /// `build_detail` evaluates `detail_surface` at ONE point per texel — no
+    /// supersampling — over a 0.25 m tile carrying a 1.6 mm grain. At 64 texels
+    /// the sample spacing is 3.9 mm, so the grain sits well inside the fold-back
+    /// region and what lands in the texture is not a coarse average of the field
+    /// but an aliased draw from it.
+    ///
+    /// This measures the difference. `reference` is a 512² bake box-averaged
+    /// down to `n` — the band-limited answer. `direct` is the bake this port
+    /// actually ships at `n`. Two numbers matter per channel:
+    ///
+    /// * **`rms/sd`** — the sampling error as a fraction of the channel's own
+    ///   spread. Near 0 means "coarse but correct"; near or past 1 means most of
+    ///   what is in the tile at that resolution is fold-back.
+    /// * **`sd_ratio`** — the direct bake's standard deviation over the
+    ///   band-limited one's. A correctly band-limited downsample *loses*
+    ///   variance; an undersampled one *keeps* it. A ratio well above 1 is
+    ///   aliasing showing up as exactly the excess high-frequency energy the
+    ///   parity metric measures.
+    #[test]
+    #[ignore = "measurement: minutes of CPU"]
+    fn measure_detail_bake_aliasing() {
+        let reference = build_detail(512, 1.0);
+        let ref_normal = reference
+            .normal
+            .as_ref()
+            .expect("build_detail bakes a normal");
+        println!("  N  channel               sd_direct   sd_bandlim    sd_ratio     rms   rms/sd");
+        for n in [64u32, 128, 256] {
+            let direct = build_detail(n, 1.0);
+            let direct_normal = direct.normal.as_ref().expect("normal");
+            // albedo.a is the height field; albedo.r is the micro albedo.
+            let rows: [(&str, &Texture, &Texture, usize); 3] = [
+                ("height (albedo.a)", &reference.albedo, &direct.albedo, 3),
+                ("albedo  (albedo.r)", &reference.albedo, &direct.albedo, 0),
+                ("normal  (normal.r)", ref_normal, direct_normal, 0),
+            ];
+            for (label, reference_tex, direct_tex, c) in rows {
+                let band = channel(&downsample(reference_tex, n), c);
+                let dir = channel(&direct_tex.texels, c);
+                let (sd_d, sd_b) = (std_dev(&dir), std_dev(&band));
+                let rms = rms_diff(&dir, &band);
+                println!(
+                    "{:4}  {:20} {:9.5} {:12.5} {:11.3} {:9.5} {:8.3}",
+                    n,
+                    label,
+                    sd_d,
+                    sd_b,
+                    sd_d / sd_b,
+                    rms,
+                    rms / sd_b
+                );
+            }
+        }
+    }
+}
+/// **Where does the road's sand cast come from?**
+///
+/// The parity capture reads the original's road as neutral grey `[104,102,94]`
+/// (1.00 : 0.98 : 0.90) and the port's as sand `[104,71,45]`
+/// (1.00 : 0.68 : 0.43). Those are *rendered* pixels — albedo times tint times
+/// the weathering/dust layer times lighting times grade — so the triple alone
+/// cannot say which stage introduced the warmth.
+///
+/// This isolates the first stage: the mean sRGB-encoded texel of each ground
+/// surface's baked albedo, in 0-255. A neutral mean here clears
+/// `materials/surfaces/` and moves the question downstream to the palette tint,
+/// the shader's weathering/dust layer, or the grade.
+#[cfg(test)]
+mod probe_colour {
+    use super::*;
+
+    #[test]
+    #[ignore = "measurement"]
+    fn measure_baked_surface_colour() {
+        let mut system = MaterialSystem::new(Some(RendererCaps {
+            max_anisotropy: Some(8.0),
+        }));
+        system.configure(Quality::Ultra, 8);
+        let opts = MaterialOpts::new();
+        println!("surface        mean_r mean_g mean_b     R:G:B (normalised to R)");
+        for name in ["asphalt", "sand", "concrete", "dirt", "gravel"] {
+            let Some(key) = system.texture_set_key(name, &opts) else {
+                println!("{name:14} <unresolved>");
+                continue;
+            };
+            let set = system.texture_set(&key).expect("just inserted");
+            let baked = set.bake_at(128, false, false);
+            let n = baked.albedo.texels.len() as f64;
+            let mut acc = [0f64; 3];
+            for t in &baked.albedo.texels {
+                for c in 0..3 {
+                    acc[c] += f64::from(t[c]);
+                }
+            }
+            let m = [acc[0] / n, acc[1] / n, acc[2] / n];
+            println!(
+                "{:14} {:6.1} {:6.1} {:6.1}     1.000 : {:.3} : {:.3}   [key {key}]",
+                name,
+                m[0] * 255.0,
+                m[1] * 255.0,
+                m[2] * 255.0,
+                m[1] / m[0].max(1e-9),
+                m[2] / m[0].max(1e-9),
+            );
+        }
+    }
 }
 
 #[cfg(test)]

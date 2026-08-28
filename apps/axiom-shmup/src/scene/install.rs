@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use axiom::prelude::*;
 
 use crate::config::Quality;
-use crate::materials::upload::{bake_library, Rgba8Map, RUNTIME_BAKE_SIZE};
+use crate::materials::upload::{bake_library, BakeCaps, Rgba8Map};
 use crate::scene::level::{key_albedo, LevelBatch};
 use crate::viewer::to_mesh_data;
 use crate::world::palette::Palette;
@@ -99,7 +99,9 @@ fn install_surface_textures(running: &mut RunningApp) -> BTreeMap<&'static str, 
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    let library = bake_library(Quality::Ultra, RUNTIME_BAKE_SIZE, &names);
+    // TWO caps, not one: the nineteen per-surface bakes and the two shared ones
+    // are different budgets and were never the same number. See `BakeCaps`.
+    let library = bake_library(Quality::Ultra, BakeCaps::RUNTIME, &names);
     // One upload per distinct BAKE KEY, then every name that resolved to it
     // points at the same three handles. Forty-six palette entries collapse onto
     // nineteen bakes, and uploading per name would pay for the duplicates.

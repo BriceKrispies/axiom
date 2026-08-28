@@ -201,7 +201,12 @@ fn macro_request(size: u32) -> ProceduralBakeRequest {
 /// produces the same nineteen bakes the source produces. This is the exact walk
 /// [`crate::materials::upload::bake_library`] performs — the two must plan the
 /// same bakes, which is what makes a GPU/CPU comparison meaningful.
-pub fn plan(quality: Quality, size_cap: u32, names: &[&str]) -> GpuBakePlan {
+pub fn plan(
+    quality: Quality,
+    caps: impl Into<crate::materials::upload::BakeCaps>,
+    names: &[&str],
+) -> GpuBakePlan {
+    let caps = caps.into();
     let mut system = MaterialSystem::new(Some(RendererCaps {
         max_anisotropy: Some(8.0),
     }));
@@ -219,15 +224,15 @@ pub fn plan(quality: Quality, size_cap: u32, names: &[&str]) -> GpuBakePlan {
         let set = system
             .texture_set(&key)
             .expect("texture_set_key just inserted this key");
-        surfaces.push(surface_request(set, &key, size_cap));
+        surfaces.push(surface_request(set, &key, caps.surfaces));
     }
 
     let shared = system
         .shared()
         .expect("configure with a renderer builds the shared maps (index.js:68-93)");
     GpuBakePlan {
-        detail: detail_request(shared.detail_size.min(size_cap)),
-        macro_field: macro_request(shared.macro_size.min(size_cap)),
+        detail: detail_request(shared.detail_size.min(caps.shared)),
+        macro_field: macro_request(shared.macro_size.min(caps.shared)),
         surfaces,
     }
 }

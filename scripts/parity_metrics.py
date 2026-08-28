@@ -278,8 +278,18 @@ def texture(a: np.ndarray, b: np.ndarray, m: np.ndarray) -> dict:
     # A 64-square bake upsampled over a 2 m tile loses the HIGH band while
     # keeping the low one, so this separates "wrong texture" from "no texture".
     def radial(img):
+        # Mask-aware: the region argument MUST reach the spectrum, or every
+        # region reports the same whole-frame number. It did not, and an agent
+        # caught it quoting an identical `high_freq_fraction` for sky, ground and
+        # world. Outside the mask is filled with the in-mask mean so the boundary
+        # contributes no step edge of its own, and the whole field is Hann
+        # windowed for the same reason.
         l = luma(img)
-        l = l - l.mean()
+        fill = l[m].mean()
+        l = np.where(m, l, fill)
+        l = l - l[m].mean()
+        hh, ww = l.shape
+        l = l * np.hanning(hh)[:, None] * np.hanning(ww)[None, :]
         f = np.abs(np.fft.fftshift(np.fft.fft2(l))) ** 2
         h, w = f.shape
         cy, cx = h // 2, w // 2
