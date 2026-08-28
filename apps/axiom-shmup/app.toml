@@ -39,6 +39,10 @@ allowed_layers = [
     # screenshot has no route from a pixel back to a symbol, which is the
     # bottleneck this whole console exists to remove.
     "introspect",
+    # Test-only: `RuntimeStep`, the deterministic step identity `AgentApi::step`
+    # takes. `tests/player_feel.rs` drives the player through the agent
+    # substrate, and one decision needs one step.
+    "runtime",
 ]
 
 allowed_modules = [
@@ -62,4 +66,12 @@ allowed_modules = [
     # thing that proves `materials::wgsl` and `materials::bake` compute the same
     # function. The shipped bundle reaches the same entry through `windowing`.
     "gpu-backend",
+    # Test-only: the deterministic agent substrate. `tests/player_feel.rs` is the
+    # player-feel bench, and it drives the controller through `AgentApi::step`
+    # -> `ActionQueue::combined_control_code` -> `Input` rather than by setting
+    # keys by hand. That is the contract the agent module states for itself:
+    # apps translate the emitted `ActionIntent`s back into concrete input.
+    # Honouring it is what makes the bench script reusable by a real agent,
+    # instead of a second private way to drive the player.
+    "agent",
 ]

@@ -152,3 +152,11 @@ axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend", features = ["off
 # value the JavaScript printed. Without it the whole-graph comparisons would
 # need a tolerance they do not deserve.
 serde_json = { version = "1", features = ["arbitrary_precision"] }
+
+# The deterministic agent substrate, and the runtime step that drives one
+# decision. Dev-only: `tests/player_feel.rs` is a review bench, not shipped
+# code, and it drives the movement controller the way an agent would rather
+# than by poking `Input` — see that file's header for why that distinction is
+# the point rather than ceremony.
+axiom-agent = { path = "../../modules/axiom-agent" }
+axiom-runtime = { path = "../../crates/axiom-runtime" }
