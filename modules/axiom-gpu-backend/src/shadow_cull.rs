@@ -184,6 +184,61 @@ mod tests {
         assert_eq!(b.extents(), Vec3::ZERO);
     }
 
+    /// The margin keeps a caster whose SHADOW reaches into the box even though
+    /// the caster itself does not.
+    ///
+    /// This is not a nicety. The fragment stage samples outside a receiver's own
+    /// projected point by up to the sum of the whole-texel snap, the normal
+    /// offset, the PCSS blocker search and the PCF disc — so an undilated test
+    /// drops exactly the casters whose shadows the filter was about to reach for,
+    /// and a dropped caster is a shadow that disappears. `cascade::CascadeSet`
+    /// supplies the number (32 shadow texels, the source's measured figure).
+    #[test]
+    fn the_margin_keeps_a_caster_the_filter_would_still_reach_for() {
+        let light = light_at(Vec3::ZERO, 20.0);
+        let unit = local_bounds(&stream(&[(-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)]), 12).unwrap();
+        // A unit cube whose near face sits 2 m outside the 20 m half-extent.
+        let just_outside = translation(22.5, 0.0, 0.0);
+        assert!(
+            !casts_into_with_margin(&unit, &just_outside, &light, 0.0),
+            "undilated, this caster is outside the box"
+        );
+        assert!(
+            casts_into_with_margin(&unit, &just_outside, &light, 3.0),
+            "a 3 m margin reaches it, which is the shadow that would have vanished"
+        );
+        // The margin is world units on the WORLD extents, so it survives scale:
+        // growing the bounds by hand and growing them through the margin agree.
+        assert!(
+            !casts_into_with_margin(&unit, &translation(40.0, 0.0, 0.0), &light, 3.0),
+            "the margin is slack, not an escape from the test"
+        );
+    }
+
+    /// A zero margin is the identity, to the bit: `casts_into` is defined as
+    /// `casts_into_with_margin(.., 0.0)`, and adding an exact `0.0` to an IEEE
+    /// float changes nothing. That is what lets the single-volume shadow pass
+    /// keep its culling decision unchanged while the cascade passes dilate.
+    #[test]
+    fn a_zero_margin_is_exactly_the_undilated_test() {
+        let light = light_at(Vec3::ZERO, 20.0);
+        let unit = local_bounds(&stream(&[(-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)]), 12).unwrap();
+        [
+            translation(0.0, 0.0, 0.0),
+            translation(19.9, 0.0, 0.0),
+            translation(22.5, 0.0, 0.0),
+            translation(0.0, 0.0, 1_600.0),
+        ]
+        .iter()
+        .for_each(|world| {
+            assert_eq!(
+                casts_into(&unit, world, &light),
+                casts_into_with_margin(&unit, world, &light, 0.0),
+                "a zero margin must not change the answer"
+            );
+        });
+    }
+
     /// The case the whole module exists for: an object far down the course is not
     /// submitted to a shadow box that is following the camera.
     #[test]

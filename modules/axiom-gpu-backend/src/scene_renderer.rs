@@ -2477,17 +2477,28 @@ impl SceneRenderer {
                         &atlas.caster_bind_group,
                         &[(i as u64 * CSM_CASTER_SLOT_BYTES) as u32],
                     );
-                    for (mesh_id, _material_id, byte_offset, count, _program) in &casters {
-                        if let Some(mesh) = self.meshes.get(mesh_id) {
+                    // Combinators rather than the `for`/`if let` the
+                    // single-volume pass above still uses. This file is exempt
+                    // from the `engine_no_branching` gate only by accident of its
+                    // `cfg` — it is spine code, and the Branchless Law's baseline
+                    // is zero — so new work here does not add to a debt the gate
+                    // happens not to see today.
+                    casters
+                        .iter()
+                        .filter_map(|(mesh_id, _material, byte_offset, count, _program)| {
+                            self.meshes
+                                .get(mesh_id)
+                                .map(|mesh| (mesh, *byte_offset, *count))
+                        })
+                        .for_each(|(mesh, byte_offset, count)| {
                             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                            pass.set_vertex_buffer(1, self.instance_buffer.slice(*byte_offset..));
+                            pass.set_vertex_buffer(1, self.instance_buffer.slice(byte_offset..));
                             pass.set_index_buffer(
                                 mesh.index_buffer.slice(..),
                                 wgpu::IndexFormat::Uint32,
                             );
-                            pass.draw_indexed(0..mesh.index_count, 0, 0..*count);
-                        }
-                    }
+                            pass.draw_indexed(0..mesh.index_count, 0, 0..count);
+                        });
                 });
             });
 

@@ -25,6 +25,7 @@
 //!   indeterminate when `low >= high`, and the far fade-out calls it that way on
 //!   purpose (a descending ramp).
 
+#[cfg(test)]
 use crate::cascade::MAX_CASCADES;
 
 /// The bind group the main pass puts the cascade trio in, and the three

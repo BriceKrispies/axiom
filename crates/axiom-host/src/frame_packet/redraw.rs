@@ -324,9 +324,8 @@ impl PresentationLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frame_packet::{
-        FrameCamera, FrameDrawItem, FrameFeatureSet, FrameLight, FrameViewport,
-    };
+    use crate::frame_camera::FrameCamera;
+    use crate::frame_packet::{FrameDrawItem, FrameFeatureSet, FrameLight, FrameViewport};
     use axiom_kernel::{Ratio, Seconds};
 
     fn mat(seed: f32) -> [f32; 16] {

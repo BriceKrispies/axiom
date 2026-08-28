@@ -176,7 +176,8 @@ pub fn apply_frame_volumetrics(rgba: &mut [u8], w: u32, h: u32, packet: &FramePa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frame_packet::{FrameCamera, FrameFeatureSet, FrameLight, FrameViewport};
+    use crate::frame_camera::FrameCamera;
+    use crate::frame_packet::{FrameFeatureSet, FrameLight, FrameViewport};
 
     /// `m[11] = 1` toy view_proj: a `+z` to-light projects in front at screen centre.
     const FRONT_VP: [f32; 16] = [

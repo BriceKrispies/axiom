@@ -943,6 +943,44 @@ mod tests {
         assert_eq!(device_cascades(false), 0);
     }
 
+    /// What a bind does to the profile: exactly one bit, in one direction — the
+    /// same contract `hdr_target::grant_hdr_targets` holds, asserted here
+    /// separately because a copy of a rule is not the rule.
+    ///
+    /// The direction is the whole point. A device can add a capability it
+    /// genuinely has and can never take back one a host declined, so a profile
+    /// narrowed before the bind keeps every restriction it set — recomputing it
+    /// from scratch on bind would silently undo an fps lever the moment the
+    /// surface came up.
+    #[test]
+    fn a_bind_grants_the_cascade_bit_and_never_takes_one_away() {
+        let unbound = crate::hdr_target::unresolved_capability_profile();
+        assert!(!unbound.contains(axiom_host::RenderCapability::CascadedShadows));
+
+        let capable = grant_cascaded_shadows(unbound, true);
+        let incapable = grant_cascaded_shadows(unbound, false);
+        assert!(capable.contains(axiom_host::RenderCapability::CascadedShadows));
+        assert_eq!(incapable, unbound, "a device without it changes nothing");
+        assert_eq!(
+            capable.bits() ^ incapable.bits(),
+            axiom_host::RenderCapability::CascadedShadows as u32,
+            "exactly one bit moves"
+        );
+        // Granting twice is granting once.
+        assert_eq!(grant_cascaded_shadows(capable, true), capable);
+        // It does not touch the other two device-resolved bits.
+        assert!(!capable.contains(axiom_host::RenderCapability::HdrTargets));
+        assert!(!capable.contains(axiom_host::RenderCapability::GBuffer));
+
+        // A host that switched the whole directional shadow off keeps it off
+        // even on a device that could hold the atlas: the frame then renders no
+        // cast shadow at all, which is the restriction the host asked for.
+        let restricted = unbound.without(axiom_host::RenderCapability::Shadows);
+        let bound = grant_cascaded_shadows(restricted, true);
+        assert!(!bound.contains(axiom_host::RenderCapability::Shadows));
+        assert!(bound.contains(axiom_host::RenderCapability::CascadedShadows));
+    }
+
     /// The uniform is the WGSL struct, lane for lane. Every lane is checked
     /// against the value it is supposed to carry rather than against a golden
     /// blob, because a golden blob cannot say WHICH lane moved.
