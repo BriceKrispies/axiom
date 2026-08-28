@@ -152,12 +152,29 @@ fn key_surface_name(key: &str) -> Option<&'static str> {
 /// untinted surface by exactly the amount the stand-in was invented to supply.
 /// An untinted key becomes white, which is what the source constructs the
 /// material with (`index.js:199`, `color: 0xffffff`).
-fn textured_base_color(key: &str, batch_albedo: Color) -> Color {
-    Palette::ALL
-        .iter()
-        .find(|(name, _)| *name == key)
-        .and_then(|(_, entry)| entry.opts.tint)
-        .map_or(Color::WHITE, |_| batch_albedo)
+fn textured_base_color(_key: &str, _batch_albedo: Color) -> Color {
+    // WHITE, unconditionally. This used to return the palette entry's `tint` for
+    // any key that had one, and white only for keys that did not -- which
+    // applied the tint TWICE.
+    //
+    // `MaterialParams.tint` already carries it (`wiring::look::engine_params`,
+    // `tint: p.tint`) and `material_shader`'s tint/wear layer applies it inside
+    // the surface program. Multiplying the base colour by the same tint on the
+    // way in squares it: a 0.7 warm tint becomes 0.49, and every hue pulls
+    // further from neutral than the palette authored.
+    //
+    // Measured on the `hero` shot against the original, before this fix: the
+    // port ran 1.87x warmer (R/B on the luma-normalised triple) and 2.46x more
+    // saturated, with shadow chromaticity inverted -- 1.66 warm where the
+    // original is 0.84 cool. Squaring a warm tint does exactly that, because it
+    // moves saturation superlinearly while a single application does not.
+    //
+    // The old doc had the source's own answer quoted in it and drew the wrong
+    // conclusion from it: `materials/index.js:199` constructs the material with
+    // `color: 0xffffff`. That is white for EVERY key, not just untinted ones --
+    // the generator and the shader own the colour, and the material contributes
+    // an identity multiply.
+    Color::WHITE
 }
 
 pub fn install_level(
